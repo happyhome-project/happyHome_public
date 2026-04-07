@@ -1,0 +1,5 @@
+{
+  "name": "happyhome",
+  "private": true,
+  "workspaces": ["miniprogram", "admin-web", "cloud"]
+}

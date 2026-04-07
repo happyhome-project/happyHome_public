@@ -1,7 +1,12 @@
 node_modules/
 dist/
 .env
+*.local
 
 # logs
 *.log
 chat_history*
+
+# OS / editor
+.DS_Store
+*.Zone.Identifier
