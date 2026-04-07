@@ -6,3 +6,6 @@ declare module '*.vue' {
   const component: DefineComponent<{}, {}, any>
   export default component
 }
+
+// WeChat Mini Program global wx object (minimal ambient declaration)
+declare const wx: Record<string, any>
