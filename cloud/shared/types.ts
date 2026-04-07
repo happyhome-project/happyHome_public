@@ -40,12 +40,18 @@ export interface User {
   createdAt: string
 }
 
+export interface GeoLocation {
+  address: string
+  lat: number
+  lng: number
+}
+
 export interface Community {
   _id: string
   name: string
   description: string
   coverImage: string
-  location: { address: string; lat: number; lng: number }
+  location: GeoLocation
   joinType: JoinType
   creatorId: string       // 仅记录创建者，不代表当前权限
   status: CommunityStatus
@@ -61,6 +67,7 @@ export interface CommunityMember {
   status: MemberStatus
   appliedAt: string
   joinedAt?: string
+  rejectedAt?: string
   leftAt?: string
 }
 
@@ -77,7 +84,9 @@ export interface Section {
 }
 
 // post.content 的 key 是 widgetId（UUID），不是 fieldKey
-export type PostContent = Record<string, string | number | string[]>
+// value 涵盖所有控件类型：文字/数字/图片数组/地图位置
+export type PostContentValue = string | number | string[] | GeoLocation
+export type PostContent = Record<string, PostContentValue>
 
 export interface Post {
   _id: string
