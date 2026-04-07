@@ -1,23 +1,9 @@
 import cloud from 'wx-server-sdk'
 import * as db from '../../lib/db'
-import type { Community, User } from '../../shared/types'
+import { assertSuperAdmin } from '../../lib/auth'
+import type { Community } from '../../shared/types'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
-
-async function assertSuperAdmin(openId: string): Promise<void> {
-  let user: User | null = null
-  try {
-    user = await db.getById('users', openId) as User
-  } catch (err: any) {
-    const isNotFound =
-      err?.errCode === -502001 ||
-      (err?.message &&
-        (err.message.includes('not found') || err.message.includes('does not exist')))
-    if (isNotFound) throw new Error('权限不足')
-    throw err
-  }
-  if (!user || user.role !== 'superAdmin') throw new Error('权限不足')
-}
 
 export async function handleCreate(params: {
   name: string
@@ -71,12 +57,7 @@ export async function handleReject(params: { communityId: string }) {
 }
 
 export async function handleList(params: { includeAll?: boolean }) {
-  const where = params.includeAll
-    ? { status: db.query !== undefined ? { $in: ['active', 'pending'] } : 'active' }
-    : { status: 'active' }
-
-  // wx-server-sdk doesn't support $in directly in where object for query helper
-  // We need to handle includeAll differently
+  // wx-server-sdk 不支持 $in 操作符，includeAll 时分两次查询
   if (params.includeAll) {
     const [active, pending] = await Promise.all([
       db.query('communities', { status: 'active' }, { orderBy: ['createdAt', 'desc'] }),

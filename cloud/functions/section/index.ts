@@ -1,20 +1,11 @@
 import cloud from 'wx-server-sdk'
 import { v4 as uuidv4 } from 'uuid'
 import * as db from '../../lib/db'
+import { assertCommunityAdmin } from '../../lib/auth'
 import type { Widget } from '../../shared/types'
 import { LIST_DISPLAYABLE_TYPES } from '../../shared/types'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
-
-async function assertCommunityAdmin(openId: string, communityId: string): Promise<void> {
-  const members = await db.query('community_members', {
-    communityId,
-    userId: openId,
-    role: 'admin',
-    status: 'active',
-  })
-  if (!members || members.length === 0) throw new Error('权限不足')
-}
 
 export async function handleCreate(params: {
   communityId: string

@@ -1,18 +1,9 @@
 import cloud from 'wx-server-sdk'
 import * as db from '../../lib/db'
-import type { Community, CommunityMember } from '../../shared/types'
+import { assertCommunityAdmin } from '../../lib/auth'
+import type { Community } from '../../shared/types'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
-
-async function assertCommunityAdmin(openId: string, communityId: string): Promise<void> {
-  const members = await db.query('community_members', {
-    communityId,
-    userId: openId,
-    role: 'admin',
-    status: 'active',
-  })
-  if (!members || members.length === 0) throw new Error('权限不足')
-}
 
 export async function handleApply(params: { communityId: string }) {
   const { OPENID } = cloud.getWXContext()
@@ -63,6 +54,8 @@ export async function handleLeave(params: { communityId: string }) {
   })
   if (!members || members.length === 0) throw new Error('不是社区成员')
 
+  // 注意：管理员也可以退出，退出后其帖子保留。
+  // 若社区只剩该管理员，退出后社区将无管理员，需在产品层面处理（当前版本不限制）。
   const memberId = members[0]._id
   await db.updateById('community_members', memberId, {
     status: 'left',
@@ -98,6 +91,10 @@ export async function handleMemberReject(params: { communityId: string; memberId
 }
 
 export async function handlePendingList(params: { communityId: string }) {
+  const { OPENID } = cloud.getWXContext()
+  if (!OPENID) throw new Error('Missing OPENID')
+  await assertCommunityAdmin(OPENID, params.communityId)
+
   const members = await db.query('community_members', {
     communityId: params.communityId,
     status: 'pending',

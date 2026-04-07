@@ -71,7 +71,8 @@ export async function handleList(params: {
 }
 
 export async function handleGet(params: { postId: string }) {
-  const post = await db.getById('posts', params.postId)
+  const post = await db.getById('posts', params.postId) as { status: string }
+  if (post.status === 'deleted') throw new Error('帖子不存在')
   return { post }
 }
 
@@ -80,6 +81,7 @@ export async function handleDelete(params: { postId: string }) {
   if (!OPENID) throw new Error('Missing OPENID')
 
   const post = await db.getById('posts', params.postId) as { authorId: string; status: string }
+  if (post.status === 'deleted') throw new Error('帖子已删除')
   if (post.authorId !== OPENID) throw new Error('无权删除')
 
   await db.softDelete('posts', params.postId)
