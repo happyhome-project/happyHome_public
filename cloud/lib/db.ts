@@ -7,9 +7,8 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
 
-export { _ }
-
-export function collection(name: string) {
+// _ 和 collection 仅在适配层内部使用，不对外导出，保持迁移边界清晰
+function collection(name: string) {
   return db.collection(name)
 }
 
@@ -54,8 +53,8 @@ export async function query(
 ) {
   let q = collection(collectionName).where(where)
   if (options.orderBy) q = q.orderBy(options.orderBy[0], options.orderBy[1])
-  if (options.skip) q = q.skip(options.skip)
-  if (options.limit) q = q.limit(options.limit)
+  if (options.skip !== undefined) q = q.skip(options.skip)
+  if (options.limit !== undefined) q = q.limit(options.limit)
   const res = await q.get()
   return res.data
 }

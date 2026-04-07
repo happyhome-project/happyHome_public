@@ -17,5 +17,5 @@ export async function deleteFile(fileIDs: string[]): Promise<void> {
 
 export function getTempUrl(fileID: string): Promise<string> {
   return cloud.getTempFileURL({ fileList: [fileID] })
-    .then(res => res.fileList[0].tempFileURL)
+    .then((res: { fileList: Array<{ tempFileURL: string }> }) => res.fileList[0].tempFileURL)
 }
