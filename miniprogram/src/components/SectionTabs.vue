@@ -15,9 +15,9 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-defineProps<{ sections: any[]; currentIndex: number }>()
+const props = defineProps<{ sections: any[]; currentIndex: number }>()
 defineEmits(['change'])
-const activeTabId = computed(() => `tab-${0}`)
+const activeTabId = computed(() => `tab-${props.currentIndex}`)
 </script>
 
 <style scoped>

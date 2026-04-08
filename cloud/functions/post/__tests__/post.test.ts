@@ -12,7 +12,7 @@ jest.mock('../../../lib/db', () => ({
   softDelete: jest.fn(),
 }))
 
-import { handleCreate, handleList, handleGet, handleDelete, main } from '../index'
+import { handleCreate, handleList, handleGet, handleDelete, handleUpdate, main } from '../index'
 import * as db from '../../../lib/db'
 import type { Section } from '../../../shared/types'
 
@@ -128,6 +128,61 @@ test('删帖：发帖人可以软删除', async () => {
   await handleDelete({ postId: 'post-1' })
 
   expect(db.softDelete).toHaveBeenCalledWith('posts', 'post-1')
+})
+
+test('改帖：只有发帖人可以修改', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'post-1',
+    sectionId: 'section-1',
+    authorId: 'another-user',
+    status: 'active',
+  })
+
+  await expect(handleUpdate({
+    postId: 'post-1',
+    content: { 'widget-uuid-1': '新标题' },
+  })).rejects.toThrow('无权修改')
+  expect(db.updateById).not.toHaveBeenCalled()
+})
+
+test('改帖：required 控件为空时失败', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({
+      _id: 'post-1',
+      sectionId: 'section-1',
+      authorId: 'test-openid',
+      status: 'active',
+    })
+    .mockResolvedValueOnce(mockSection)
+
+  await expect(handleUpdate({
+    postId: 'post-1',
+    content: {},
+  })).rejects.toThrow('必填项未填写：标题')
+  expect(db.updateById).not.toHaveBeenCalled()
+})
+
+test('改帖：作者可修改，更新 content 与 updatedAt', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({
+      _id: 'post-1',
+      sectionId: 'section-1',
+      authorId: 'test-openid',
+      status: 'active',
+    })
+    .mockResolvedValueOnce(mockSection)
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  const result = await handleUpdate({
+    postId: 'post-1',
+    content: { 'widget-uuid-1': '修改后的标题' },
+  })
+
+  expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({
+    content: { 'widget-uuid-1': '修改后的标题' },
+  }))
+  expect(result.success).toBe(true)
+  expect(result.updatedAt).toBeTruthy()
 })
 
 test('list：按 createdAt desc 分页查询', async () => {

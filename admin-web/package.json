@@ -10,13 +10,17 @@
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
+    "@types/uuid": "^11.0.0",
     "axios": "^1.14.0",
     "element-plus": "^2.13.6",
     "pinia": "^3.0.4",
+    "uuid": "^13.0.0",
     "vue": "^3.5.12",
-    "vue-router": "^4.6.4"
+    "vue-router": "^4.6.4",
+    "vuedraggable": "^4.1.0"
   },
   "devDependencies": {
+    "@rollup/rollup-win32-x64-msvc": "^4.60.1",
     "@vitejs/plugin-vue": "^5.1.4",
     "typescript": "~5.6.2",
     "vite": "^5.4.10",

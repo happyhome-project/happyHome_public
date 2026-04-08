@@ -5,7 +5,7 @@ export async function callCloud<T = any>(
   return new Promise((resolve, reject) => {
     wx.cloud.callFunction({
       name,
-      data: { action, params },
+      data: { action, ...params },
       success: (res: any) => resolve(res.result),
       fail: reject
     })
@@ -42,6 +42,8 @@ export const memberApi = {
 export const sectionApi = {
   list: (communityId: string) =>
     callCloud<{ sections: any[] }>('section', 'list', { communityId }),
+  get: (sectionId: string) =>
+    callCloud<{ section: any }>('section', 'get', { sectionId }),
 }
 
 export const postApi = {
@@ -51,6 +53,8 @@ export const postApi = {
     callCloud<{ post: any }>('post', 'get', { postId }),
   create: (params: object) =>
     callCloud('post', 'create', params),
+  update: (postId: string, content: Record<string, any>) =>
+    callCloud('post', 'update', { postId, content }),
   delete: (postId: string) =>
     callCloud('post', 'delete', { postId }),
 }

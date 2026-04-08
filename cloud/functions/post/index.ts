@@ -88,11 +88,47 @@ export async function handleDelete(params: { postId: string }) {
   return { success: true }
 }
 
+export async function handleUpdate(params: { postId: string; content: PostContent }) {
+  const { OPENID } = cloud.getWXContext()
+  if (!OPENID) throw new Error('Missing OPENID')
+
+  const post = await db.getById('posts', params.postId) as {
+    sectionId: string
+    authorId: string
+    status: string
+  }
+  if (post.status === 'deleted') throw new Error('帖子已删除')
+  if (post.authorId !== OPENID) throw new Error('无权修改')
+
+  const section = await db.getById('sections', post.sectionId) as Section
+
+  for (const widget of section.widgets) {
+    if (!widget.required) continue
+    const value = params.content[widget.widgetId]
+    const isEmpty =
+      value === undefined ||
+      value === null ||
+      value === '' ||
+      (Array.isArray(value) && value.length === 0)
+    if (isEmpty) {
+      throw new Error(`必填项未填写：${widget.label}`)
+    }
+  }
+
+  const updatedAt = new Date().toISOString()
+  await db.updateById('posts', params.postId, {
+    content: params.content,
+    updatedAt,
+  })
+  return { success: true, updatedAt }
+}
+
 export const main = async (event: { action: string; params?: any }) => {
   const { action, params = {} } = event
   if (action === 'create') return handleCreate(params)
   if (action === 'list') return handleList(params)
   if (action === 'get') return handleGet(params)
   if (action === 'delete') return handleDelete(params)
+  if (action === 'update') return handleUpdate(params)
   throw new Error(`Unknown action: ${action}`)
 }

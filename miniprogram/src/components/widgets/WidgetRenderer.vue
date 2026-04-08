@@ -20,8 +20,14 @@
         v-else-if="widget.type === 'rich_text'"
         :nodes="rawValue as string"
       />
+      <view
+        v-else-if="widget.type === 'location'"
+        class="location-value"
+        @tap="openLocation"
+      >
+        <text>{{ locationText }}</text>
+      </view>
       <text v-else class="empty-value">-</text>
-      <text v-if="!hasValue" class="empty-value">-</text>
     </view>
   </view>
 </template>
@@ -38,6 +44,11 @@ const hasValue = computed(() => {
   return v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0)
 })
 const displayValue = computed(() => formatWidgetValue(rawValue.value, props.widget.type))
+const locationText = computed(() => {
+  const loc = parseLocation(rawValue.value)
+  if (!loc) return '-'
+  return loc.address || `${loc.lat}, ${loc.lng}`
+})
 
 function formatDatetime(val: any): string {
   if (!val) return '-'
@@ -52,6 +63,30 @@ function previewImage(index: number) {
     urls: rawValue.value as string[],
   })
 }
+
+function parseLocation(value: any): { address: string; lat: number; lng: number } | null {
+  if (!value || typeof value !== 'object') return null
+  const lat = Number(value.lat)
+  const lng = Number(value.lng)
+  if (Number.isNaN(lat) || Number.isNaN(lng)) return null
+  return {
+    address: String(value.address || ''),
+    lat,
+    lng,
+  }
+}
+
+function openLocation() {
+  const loc = parseLocation(rawValue.value)
+  if (!loc) return
+  wx.openLocation({
+    latitude: loc.lat,
+    longitude: loc.lng,
+    address: loc.address,
+    name: props.widget.label || '位置',
+    scale: 16,
+  })
+}
 </script>
 
 <style scoped>
@@ -60,5 +95,9 @@ function previewImage(index: number) {
 .value { font-size: 30rpx; color: #333; }
 .images { display: flex; flex-wrap: wrap; gap: 12rpx; }
 .thumb { width: 160rpx; height: 160rpx; border-radius: 8rpx; }
+.location-value {
+  color: #1976d2;
+  text-decoration: underline;
+}
 .empty-value { color: #ccc; }
 </style>

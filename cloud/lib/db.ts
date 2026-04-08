@@ -3,7 +3,7 @@
 
 import cloud from 'wx-server-sdk'
 
-cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
+cloud.init({ env: process.env.TCB_ENV || cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
 
@@ -40,6 +40,18 @@ export async function updateById(
   data: object
 ) {
   return collection(collectionName).doc(id).update({ data })
+}
+
+export async function updateWhere(
+  collectionName: string,
+  where: object,
+  data: object
+) {
+  return collection(collectionName).where(where).update({ data })
+}
+
+export async function removeById(collectionName: string, id: string) {
+  return collection(collectionName).doc(id).remove()
 }
 
 export async function softDelete(collectionName: string, id: string) {

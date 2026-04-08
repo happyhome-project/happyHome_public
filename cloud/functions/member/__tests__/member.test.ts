@@ -7,6 +7,7 @@ jest.mock('../../../lib/db', () => ({
   getById: jest.fn(),
   create: jest.fn(),
   updateById: jest.fn(),
+  updateWhere: jest.fn(),
   query: jest.fn(),
   increment: jest.fn(),
   softDelete: jest.fn(),
@@ -84,12 +85,16 @@ test('退出社区：不是成员时抛出错误', async () => {
 test('管理员审批通过：memberCount 原子递增', async () => {
   // assertCommunityAdmin
   ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'admin-member', role: 'admin', status: 'active' }])
-  ;(db.updateById as jest.Mock).mockResolvedValue({})
+  ;(db.updateWhere as jest.Mock).mockResolvedValue({ stats: { updated: 1 } })
   ;(db.increment as jest.Mock).mockResolvedValue({})
 
   await handleMemberApprove({ communityId: 'c1', memberId: 'applicant-member' })
 
-  expect(db.updateById).toHaveBeenCalledWith('community_members', 'applicant-member', expect.objectContaining({
+  expect(db.updateWhere).toHaveBeenCalledWith('community_members', expect.objectContaining({
+    _id: 'applicant-member',
+    communityId: 'c1',
+    status: 'pending',
+  }), expect.objectContaining({
     status: 'active',
     joinedAt: expect.any(String),
   }))
@@ -105,14 +110,28 @@ test('管理员审批通过：非管理员无权操作', async () => {
 
 test('管理员拒绝申请：status 变为 rejected，设置 rejectedAt', async () => {
   ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'admin-member', role: 'admin', status: 'active' }])
-  ;(db.updateById as jest.Mock).mockResolvedValue({})
+  ;(db.updateWhere as jest.Mock).mockResolvedValue({ stats: { updated: 1 } })
 
   await handleMemberReject({ communityId: 'c1', memberId: 'applicant-member' })
 
-  expect(db.updateById).toHaveBeenCalledWith('community_members', 'applicant-member', expect.objectContaining({
+  expect(db.updateWhere).toHaveBeenCalledWith('community_members', expect.objectContaining({
+    _id: 'applicant-member',
+    communityId: 'c1',
+    status: 'pending',
+  }), expect.objectContaining({
     status: 'rejected',
     rejectedAt: expect.any(String),
   }))
+})
+
+test('管理员审批通过：已非 pending 时不重复递增', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'admin-member', role: 'admin', status: 'active' }])
+  ;(db.updateWhere as jest.Mock).mockResolvedValue({ stats: { updated: 0 } })
+
+  const result = await handleMemberApprove({ communityId: 'c1', memberId: 'applicant-member' })
+
+  expect(db.increment).not.toHaveBeenCalled()
+  expect(result.changed).toBe(false)
 })
 
 test('pendingList：返回社区所有待审批成员', async () => {

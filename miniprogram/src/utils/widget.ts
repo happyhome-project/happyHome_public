@@ -16,6 +16,12 @@ export function getListPreview(
 
 export function formatWidgetValue(value: any, type: string): string {
   if (value === undefined || value === null || value === '') return ''
+  if (type === 'location') {
+    if (typeof value === 'object' && value !== null) {
+      return String(value.address || '')
+    }
+    return ''
+  }
   if (type === 'datetime') {
     const d = new Date(value as string)
     if (isNaN(d.getTime())) return String(value)

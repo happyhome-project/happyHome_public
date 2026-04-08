@@ -41,7 +41,7 @@ const communities = ref<any[]>([])
 const communityStore = useCommunityStore()
 
 onMounted(async () => {
-  const res = await communityApi.list(true)
+  const res = await communityApi.list(false)
   communities.value = res.communities
 })
 

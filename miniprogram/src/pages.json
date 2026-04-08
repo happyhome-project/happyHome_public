@@ -19,6 +19,10 @@
     {
       "path": "pages/onboarding/index",
       "style": { "navigationBarTitleText": "加入社区" }
+    },
+    {
+      "path": "pages/createCommunity/index",
+      "style": { "navigationBarTitleText": "创建社区" }
     }
   ],
   "tabBar": {

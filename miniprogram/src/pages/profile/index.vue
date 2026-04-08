@@ -100,8 +100,9 @@ onMounted(async () => {
   for (const c of communityStore.myCommunities) {
     try {
       const res = await memberApi.pendingList(c._id)
+      // pendingList succeeds = user is admin of this community
+      adminCommunityIds.value.push(c._id)
       if (res.members.length > 0) {
-        adminCommunityIds.value.push(c._id)
         pendingMembers.value.push(...res.members.map((m: any) => ({ ...m, communityId: c._id })))
       }
     } catch {

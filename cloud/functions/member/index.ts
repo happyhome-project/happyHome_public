@@ -9,13 +9,20 @@ export async function handleApply(params: { communityId: string }) {
   const { OPENID } = cloud.getWXContext()
   if (!OPENID) throw new Error('Missing OPENID')
 
-  // Check if already an active member
-  const existing = await db.query('community_members', {
+  // Check if already an active or pending member (prevent duplicate records)
+  const existingActive = await db.query('community_members', {
     communityId: params.communityId,
     userId: OPENID,
     status: 'active',
   })
-  if (existing && existing.length > 0) throw new Error('已是社区成员')
+  if (existingActive && existingActive.length > 0) throw new Error('已是社区成员')
+
+  const existingPending = await db.query('community_members', {
+    communityId: params.communityId,
+    userId: OPENID,
+    status: 'pending',
+  })
+  if (existingPending && existingPending.length > 0) throw new Error('已有待审批的申请')
 
   const community = await db.getById('communities', params.communityId) as Community
   const now = new Date().toISOString()
@@ -70,12 +77,18 @@ export async function handleMemberApprove(params: { communityId: string; memberI
   if (!OPENID) throw new Error('Missing OPENID')
   await assertCommunityAdmin(OPENID, params.communityId)
 
-  await db.updateById('community_members', params.memberId, {
+  const updateRes = await db.updateWhere('community_members', {
+    _id: params.memberId,
+    communityId: params.communityId,
+    status: 'pending',
+  }, {
     status: 'active',
     joinedAt: new Date().toISOString(),
   })
-  await db.increment('communities', params.communityId, 'memberCount', 1)
-  return { success: true }
+  if ((updateRes as any)?.stats?.updated > 0) {
+    await db.increment('communities', params.communityId, 'memberCount', 1)
+  }
+  return { success: true, changed: (updateRes as any)?.stats?.updated > 0 }
 }
 
 export async function handleMemberReject(params: { communityId: string; memberId: string }) {
@@ -83,11 +96,15 @@ export async function handleMemberReject(params: { communityId: string; memberId
   if (!OPENID) throw new Error('Missing OPENID')
   await assertCommunityAdmin(OPENID, params.communityId)
 
-  await db.updateById('community_members', params.memberId, {
+  const updateRes = await db.updateWhere('community_members', {
+    _id: params.memberId,
+    communityId: params.communityId,
+    status: 'pending',
+  }, {
     status: 'rejected',
     rejectedAt: new Date().toISOString(),
   })
-  return { success: true }
+  return { success: true, changed: (updateRes as any)?.stats?.updated > 0 }
 }
 
 export async function handlePendingList(params: { communityId: string }) {

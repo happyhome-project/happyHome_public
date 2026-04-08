@@ -55,6 +55,23 @@ function selectSection(section: any) {
   Object.keys(formData).forEach((k) => delete formData[k])
 }
 
+// Upload temp images to cloud storage, return cloud file IDs
+async function uploadImages(tempPaths: string[]): Promise<string[]> {
+  return Promise.all(tempPaths.map((path) => {
+    if (path.startsWith('cloud://')) return Promise.resolve(path)
+    const ext = path.split('.').pop() ?? 'jpg'
+    const cloudPath = `posts/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
+    return new Promise<string>((resolve, reject) => {
+      wx.cloud.uploadFile({
+        cloudPath,
+        filePath: path,
+        success: (res: any) => resolve(res.fileID),
+        fail: reject,
+      })
+    })
+  }))
+}
+
 async function handleSubmit() {
   if (!userStore.isLoggedIn) {
     uni.showModal({ title: '提示', content: '请先登录' })
@@ -66,10 +83,18 @@ async function handleSubmit() {
   }
   submitting.value = true
   try {
+    // Upload images in image_group widgets before submitting
+    const content = { ...formData }
+    for (const widget of selectedSection.value.widgets) {
+      if (widget.type === 'image_group' && Array.isArray(content[widget.widgetId])) {
+        content[widget.widgetId] = await uploadImages(content[widget.widgetId])
+      }
+    }
+
     await postApi.create({
       communityId: communityStore.currentCommunityId,
       sectionId: selectedSection.value._id,
-      content: { ...formData },
+      content,
     })
     uni.showToast({ title: '发布成功', icon: 'success' })
     selectedSection.value = null

@@ -1,5 +1,20 @@
 {
   "name": "happyhome",
   "private": true,
-  "workspaces": ["miniprogram", "admin-web", "cloud"]
+  "workspaces": [
+    "miniprogram",
+    "admin-web",
+    "cloud"
+  ],
+  "dependencies": {
+    "miniprogram-automator": "^0.12.1",
+    "miniprogram-ci": "^2.1.31"
+  },
+  "scripts": {
+    "deploy:cloud": "node scripts/deploy.mjs cloud",
+    "deploy:mp": "node scripts/deploy.mjs miniprogram",
+    "deploy": "node scripts/deploy.mjs all",
+    "test:mp": "node scripts/test-mp.mjs",
+    "set:superadmin": "node scripts/set-super-admin.mjs"
+  }
 }

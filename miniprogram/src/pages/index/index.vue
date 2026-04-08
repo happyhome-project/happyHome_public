@@ -79,6 +79,8 @@ async function loadPosts(reset = false) {
     const newPosts = res.posts
     posts.value = reset ? newPosts : [...posts.value, ...newPosts]
     hasMore.value = newPosts.length === 20
+  } catch (e) {
+    uni.showToast({ title: '加载失败，请重试', icon: 'none' })
   } finally {
     loading.value = false
   }

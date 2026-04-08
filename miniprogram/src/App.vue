@@ -4,10 +4,13 @@ import { useCommunityStore } from './store/community'
 import { useUserStore } from './store/user'
 
 onLaunch(async () => {
-  wx.cloud.init({ env: 'YOUR_CLOUD_ENV_ID', traceUser: true })
+  wx.cloud.init({ env: 'cloudbase-3gh862acb1505ff3', traceUser: true })
 
   const userStore = useUserStore()
   const communityStore = useCommunityStore()
+
+  userStore.loadFromStorage()
+  communityStore.loadFromStorage()
 
   if (userStore.isLoggedIn) {
     try {
@@ -23,5 +26,5 @@ onLaunch(async () => {
 </script>
 
 <template>
-  <router-view />
+  <view />
 </template>

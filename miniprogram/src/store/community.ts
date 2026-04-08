@@ -1,31 +1,56 @@
 import { defineStore } from 'pinia'
+import type { Community, Section } from '../../../cloud/shared/types'
 import { communityApi, sectionApi } from '../api/cloud'
+
+const STORAGE_KEY = 'community_store'
 
 export const useCommunityStore = defineStore('community', {
   state: () => ({
     currentCommunityId: '' as string,
-    myCommunities: [] as any[],
-    currentSections: [] as any[],
+    myCommunities: [] as Community[],
+    currentSections: [] as Section[],
     currentSectionIndex: 0,
   }),
   getters: {
-    currentCommunity: (state) =>
-      state.myCommunities.find((c: any) => c._id === state.currentCommunityId),
-    currentSection: (state) =>
+    currentCommunity: (state): Community | undefined =>
+      state.myCommunities.find(c => c._id === state.currentCommunityId),
+    currentSection: (state): Section | undefined =>
       state.currentSections[state.currentSectionIndex],
   },
   actions: {
+    loadFromStorage() {
+      try {
+        const saved = wx.getStorageSync(STORAGE_KEY)
+        if (saved) {
+          this.currentCommunityId = saved.currentCommunityId || ''
+          this.currentSectionIndex = saved.currentSectionIndex || 0
+        }
+      } catch {}
+    },
+    saveToStorage() {
+      try {
+        wx.setStorageSync(STORAGE_KEY, {
+          currentCommunityId: this.currentCommunityId,
+          currentSectionIndex: this.currentSectionIndex,
+        })
+      } catch {}
+    },
     async switchCommunity(communityId: string) {
       this.currentCommunityId = communityId
       this.currentSectionIndex = 0
       const res = await sectionApi.list(communityId)
-      this.currentSections = res.sections
+      this.currentSections = res.sections as Section[]
+      this.saveToStorage()
     },
     async loadMyCommunities() {
       const res = await communityApi.list(false)
-      this.myCommunities = res.communities
-      if (this.myCommunities.length > 0 && !this.currentCommunityId) {
-        await this.switchCommunity(this.myCommunities[0]._id)
+      this.myCommunities = res.communities as Community[]
+      if (this.myCommunities.length > 0) {
+        const targetId = this.currentCommunityId &&
+          this.myCommunities.some(c => c._id === this.currentCommunityId)
+          ? this.currentCommunityId
+          : this.myCommunities[0]._id
+        await this.switchCommunity(targetId)
       }
     },
   },
