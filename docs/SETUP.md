@@ -1,5 +1,7 @@
 # HappyHome 项目搭建指南
 
+> 测试策略参考：`docs/TESTING.md`
+
 ## 项目结构
 
 ```

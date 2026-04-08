@@ -2,6 +2,10 @@ node_modules/
 dist/
 .env
 *.local
+.claude/
+private.*.key
+project.private.config.json
+miniprogram/project.private.config.json
 
 # logs
 *.log
@@ -10,3 +14,4 @@ chat_history*
 # OS / editor
 .DS_Store
 *.Zone.Identifier
+*Zone.Identifier
