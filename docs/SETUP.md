@@ -140,7 +140,7 @@ npm run set:superadmin -- o1234567890abcdef https://<env-id>-<uin>.ap-shanghai.a
 ### 1. admin 云函数 HTTP 调用崩溃
 - **现象**: `FUNCTION_INVOCATION_FAILED`
 - **原因**: CloudBase HTTP 访问服务的运行环境不含 `wx-server-sdk`（通过微信 SDK 调用的环境才有）
-- **解决**: admin 函数部署时必须 `remoteNpmInstall: true`（deploy.mjs 已处理）
+- **解决**: 所有云函数部署时都必须 `remoteNpmInstall: true`（`scripts/deploy.mjs` 已统一处理）
 - **环境差异**: HTTP 访问用 Node 16，微信 SDK 调用用 Node 18
 
 ### 2. cloud.DYNAMIC_CURRENT_ENV 在 HTTP 上下文失效

@@ -1,9 +1,10 @@
 /**
- * 一键部署脚本
- * 用法：
- *   node scripts/deploy.mjs cloud        # 只上传云函数
- *   node scripts/deploy.mjs miniprogram  # 只上传小程序（预览二维码）
- *   node scripts/deploy.mjs all          # 全部上传
+ * One-click deployment script.
+ *
+ * Usage:
+ *   node scripts/deploy.mjs cloud        # upload cloud functions only
+ *   node scripts/deploy.mjs miniprogram  # upload mini program only (preview QR)
+ *   node scripts/deploy.mjs all          # upload both
  */
 import ci from 'miniprogram-ci'
 import { resolve, dirname } from 'path'
@@ -18,6 +19,7 @@ const KEY_PATH = resolve(ROOT, `private.${APPID}.key`)
 const MP_DIST = resolve(ROOT, 'miniprogram/dist/build/mp-weixin')
 const CLOUD_DIST = resolve(ROOT, 'cloud/dist')
 const CLOUD_ENV = 'cloudbase-3gh862acb1505ff3'
+const CLOUD_FUNCTIONS = ['user', 'community', 'member', 'section', 'post', 'admin']
 
 const project = new ci.Project({
   appid: APPID,
@@ -28,39 +30,38 @@ const project = new ci.Project({
 })
 
 async function deployCloud() {
-  console.log('\n📦 Building cloud functions...')
+  console.log('\nBuilding cloud functions...')
   execSync('node build.mjs', { cwd: resolve(ROOT, 'cloud'), stdio: 'inherit' })
 
-  const fns = ['user', 'community', 'member', 'section', 'post', 'admin']
-  for (const fn of fns) {
-    console.log(`☁️  Uploading cloud function: ${fn}`)
-    // admin 函数通过 HTTP 访问服务调用，运行环境没有预装 wx-server-sdk，需要远程安装
-    const needsRemoteInstall = fn === 'admin'
+  for (const fn of CLOUD_FUNCTIONS) {
+    console.log(`Uploading cloud function: ${fn}`)
+    // Node16 cloud runtime may not have wx-server-sdk preinstalled for the function
+    // sandbox. Enforce cloud-side dependency install for every function.
     await ci.cloud.uploadFunction({
       project,
       name: fn,
       path: resolve(CLOUD_DIST, fn),
       env: CLOUD_ENV,
-      remoteNpmInstall: needsRemoteInstall,
+      remoteNpmInstall: true,
     })
-    console.log(`   ✓ ${fn}`)
+    console.log(`  OK: ${fn}`)
   }
-  console.log('✅ Cloud functions deployed!')
+  console.log('Cloud functions deployed!')
 }
 
 async function deployMiniprogram() {
-  console.log('\n🔨 Building miniprogram...')
+  console.log('\nBuilding miniprogram...')
   execSync('npm run build:mp-weixin', { cwd: resolve(ROOT, 'miniprogram'), stdio: 'inherit' })
 
-  console.log('📱 Generating preview QR code...')
-  const result = await ci.preview({
+  console.log('Generating preview QR code...')
+  await ci.preview({
     project,
     desc: 'auto preview',
     setting: { es6: true, minified: false },
     qrcodeFormat: 'terminal',
     qrcodeOutputDest: resolve(ROOT, 'preview-qr.jpg'),
   })
-  console.log('✅ Miniprogram preview ready! Scan QR code in preview-qr.jpg')
+  console.log('Miniprogram preview ready! Scan preview-qr.jpg')
 }
 
 const target = process.argv[2] || 'all'

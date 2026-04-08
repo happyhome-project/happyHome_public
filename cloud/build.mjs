@@ -24,7 +24,9 @@ for (const fnName of functions) {
     platform: 'node',
     target: 'node16',
     outfile: join(outDir, 'index.js'),
-    external: ['wx-server-sdk'],  // wx-server-sdk is provided by the cloud runtime
+    // Keep SDK external and install it during function deployment.
+    // This avoids bundling issues and stays aligned with cloud runtime behavior.
+    external: ['wx-server-sdk'],
     format: 'cjs',
   })
 
