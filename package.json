@@ -15,6 +15,7 @@
     "deploy:mp": "node scripts/deploy.mjs miniprogram",
     "deploy": "node scripts/deploy.mjs all",
     "test:mp": "node scripts/test-mp.mjs",
+    "test:mp:replay": "node scripts/test-mp-replay.mjs",
     "test:real:admin": "node scripts/test-admin-http.mjs",
     "test:real": "node scripts/test-real.mjs",
     "set:superadmin": "node scripts/set-super-admin.mjs"

@@ -89,6 +89,11 @@ $env:RUN_MP_AUTOMATOR="1"
 npm run test:real
 ```
 
+说明：
+
+1. `test:real` 在小程序阶段会先尝试 `scripts/test-mp.mjs`（`miniprogram-automator`）。
+2. 若当前 DevTools 版本与 `miniprogram-automator` 协议不兼容，会自动回退到 `scripts/test-mp-replay.mjs`（`cli auto-replay`）。
+
 ## 落地清单
 
 1. 新增 `cloud/lib/db.local.ts`（与 `db.ts` 同签名）
