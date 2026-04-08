@@ -4,6 +4,8 @@
 const mockUpdate = jest.fn().mockResolvedValue({ stats: { updated: 1 } })
 const mockGet = jest.fn()
 const mockAdd = jest.fn().mockResolvedValue({ _id: 'new-id' })
+const mockRemove = jest.fn().mockResolvedValue({ stats: { removed: 1 } })
+const mockWhereUpdate = jest.fn().mockResolvedValue({ stats: { updated: 1 } })
 
 jest.mock('wx-server-sdk', () => ({
   init: jest.fn(),
@@ -12,9 +14,16 @@ jest.mock('wx-server-sdk', () => ({
       doc: (id: string) => ({
         update: mockUpdate,
         get: mockGet.mockResolvedValue({ data: { _id: id, name: 'test' } }),
+        remove: mockRemove,
       }),
       add: mockAdd,
-      where: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnValue({
+        update: mockWhereUpdate,
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        get: jest.fn().mockResolvedValue({ data: [] }),
+      }),
       orderBy: jest.fn().mockReturnThis(),
       skip: jest.fn().mockReturnThis(),
       limit: jest.fn().mockReturnThis(),
@@ -66,6 +75,20 @@ test('softDelete sets status to deleted', async () => {
   mockUpdate.mockClear()
   await softDelete('posts', 'post-1')
   expect(mockUpdate).toHaveBeenCalledWith({ data: { status: 'deleted' } })
+})
+
+import { updateWhere, removeById } from '../db'
+
+test('updateWhere calls where().update with data', async () => {
+  mockWhereUpdate.mockClear()
+  await updateWhere('community_members', { communityId: 'c1', status: 'pending' }, { status: 'active' })
+  expect(mockWhereUpdate).toHaveBeenCalledWith({ data: { status: 'active' } })
+})
+
+test('removeById calls doc().remove', async () => {
+  mockRemove.mockClear()
+  await removeById('posts', 'post-1')
+  expect(mockRemove).toHaveBeenCalled()
 })
 
 test('query applies where/orderBy/skip/limit', async () => {

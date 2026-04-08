@@ -31,6 +31,18 @@ describe('formatWidgetValue', () => {
   test('数组类型（image_group）返回空字符串', () => {
     expect(formatWidgetValue(['img1.png', 'img2.png'], 'image_group')).toBe('')
   })
+
+  test('location 对象返回 address 字段', () => {
+    expect(formatWidgetValue({ address: '北京市海淀区', lat: 39.9, lng: 116.3 }, 'location')).toBe('北京市海淀区')
+  })
+
+  test('location 对象无 address 时返回空', () => {
+    expect(formatWidgetValue({ lat: 39.9, lng: 116.3 }, 'location')).toBe('')
+  })
+
+  test('location 非对象值返回空', () => {
+    expect(formatWidgetValue('some string', 'location')).toBe('')
+  })
 })
 
 describe('getListPreview', () => {
