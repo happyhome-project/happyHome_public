@@ -163,6 +163,70 @@ test('updateWidgets：showInList 恰好 3 个时成功', async () => {
   expect(result.widgets).toHaveLength(3)
 })
 
+// --- handleUpdate 测试 ---
+
+test('update：管理员可以更新板块名称', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ role: 'admin', status: 'active' }])
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  const result = await handleUpdate({
+    sectionId: 's1',
+    communityId: 'c1',
+    name: '新名称',
+  })
+
+  expect(db.updateById).toHaveBeenCalledWith('sections', 's1', { name: '新名称' })
+  expect(result.success).toBe(true)
+})
+
+test('update：非管理员无权更新', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([])
+
+  await expect(handleUpdate({
+    sectionId: 's1',
+    communityId: 'c1',
+    name: '新名称',
+  })).rejects.toThrow('权限不足')
+})
+
+test('update：不会把 sectionId/communityId 写入更新数据', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ role: 'admin', status: 'active' }])
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  await handleUpdate({
+    sectionId: 's1',
+    communityId: 'c1',
+    icon: 'star',
+    enableComment: false,
+  })
+
+  const updateData = (db.updateById as jest.Mock).mock.calls[0][2]
+  expect(updateData).not.toHaveProperty('sectionId')
+  expect(updateData).not.toHaveProperty('communityId')
+  expect(updateData).toEqual({ icon: 'star', enableComment: false })
+})
+
+test('update：缺少 OPENID 时抛出错误', async () => {
+  const cloud = require('wx-server-sdk')
+  ;(cloud.getWXContext as jest.Mock).mockReturnValueOnce({ OPENID: '' })
+
+  await expect(handleUpdate({
+    sectionId: 's1',
+    communityId: 'c1',
+    name: '新名称',
+  })).rejects.toThrow('Missing OPENID')
+})
+
+// --- main() 路由测试 ---
+
+test('main(): action=update 正确路由', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ role: 'admin', status: 'active' }])
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  const result = await main({ action: 'update', params: { sectionId: 's1', communityId: 'c1', name: 'test' } })
+  expect(result).toEqual({ success: true })
+})
+
 test('main(): 未知 action 抛出错误', async () => {
   await expect(main({ action: 'unknown' })).rejects.toThrow('Unknown action: unknown')
 })

@@ -210,6 +210,71 @@ test('get：返回单个帖子', async () => {
   expect(result.post).toHaveProperty('_id', 'post-1')
 })
 
+test('get：已删除帖子抛出错误', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'post-1', status: 'deleted' })
+
+  await expect(handleGet({ postId: 'post-1' })).rejects.toThrow('帖子不存在')
+})
+
+test('删帖：帖子已删除时抛出错误', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'post-1',
+    authorId: 'test-openid',
+    status: 'deleted',
+  })
+
+  await expect(handleDelete({ postId: 'post-1' })).rejects.toThrow('帖子已删除')
+  expect(db.softDelete).not.toHaveBeenCalled()
+})
+
+test('发帖：required 字段值为 null 时校验失败', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValue(mockSection)
+
+  await expect(handleCreate({
+    communityId: 'c1',
+    sectionId: 'section-1',
+    content: { 'widget-uuid-1': null as any },
+  })).rejects.toThrow('必填项未填写：标题')
+})
+
+test('发帖：required 字段值为空数组时校验失败', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValue(mockSection)
+
+  await expect(handleCreate({
+    communityId: 'c1',
+    sectionId: 'section-1',
+    content: { 'widget-uuid-1': [] as any },
+  })).rejects.toThrow('必填项未填写：标题')
+})
+
+test('发帖：非 required 字段留空时正常创建', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValue(mockSection)
+  ;(db.create as jest.Mock).mockResolvedValue('post-2')
+
+  // widget-uuid-2 is not required, so omitting it is fine
+  const result = await handleCreate({
+    communityId: 'c1',
+    sectionId: 'section-1',
+    content: { 'widget-uuid-1': '标题' },
+  })
+  expect(result.postId).toBe('post-2')
+})
+
+test('list：默认 skip=0, limit=20', async () => {
+  ;(db.query as jest.Mock).mockResolvedValue([])
+
+  await handleList({ sectionId: 'section-1' })
+
+  expect(db.query).toHaveBeenCalledWith('posts', { sectionId: 'section-1', status: 'active' }, {
+    orderBy: ['createdAt', 'desc'],
+    skip: 0,
+    limit: 20,
+  })
+})
+
 test('main(): 未知 action 抛出错误', async () => {
   await expect(main({ action: 'unknown' })).rejects.toThrow('Unknown action: unknown')
 })
