@@ -14,16 +14,22 @@
 //   // in template: @tap="approve.run(member)"
 //   // approve.isBusy(member._id) → true only for that row
 
-import { ref, reactive, readonly } from 'vue'
+import { ref, reactive, type Ref } from 'vue'
 
 export interface BusyLock<Args extends any[], R> {
-  busy: Readonly<{ value: boolean }>
+  busy: Ref<boolean>
   run: (...args: Args) => Promise<R | undefined>
 }
 
 /**
  * Wrap an async action so concurrent calls are suppressed.
  * If called while busy, the second call resolves to undefined immediately.
+ *
+ * Note: returned `busy` is a plain (non-readonly) ref. We intentionally skip
+ * readonly() because uni-app's miniprogram renderer mis-handles the readonly
+ * proxy in some WeChat runtime versions, causing the page to render blank.
+ * Callers should read but not mutate `busy.value` — a code-review rule, not
+ * a runtime guarantee.
  */
 export function useBusyLock<Args extends any[], R>(
   action: (...args: Args) => Promise<R>,
@@ -38,7 +44,7 @@ export function useBusyLock<Args extends any[], R>(
       busy.value = false
     }
   }
-  return { busy: readonly(busy) as any, run }
+  return { busy, run }
 }
 
 export interface KeyedBusyLock<Args extends any[], R> {

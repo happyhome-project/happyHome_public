@@ -199,7 +199,9 @@ onMounted(async () => {
 .dev-btn { background: #f90; color: #fff; font-size: 24rpx; }
 
 .dev-modal-mask {
-  position: fixed; inset: 0;
+  /* 微信小程序对 CSS `inset` shorthand 支持不稳定，用显式四边 */
+  position: fixed;
+  top: 0; right: 0; bottom: 0; left: 0;
   background: rgba(0,0,0,0.4);
   display: flex; align-items: center; justify-content: center;
   z-index: 1000;
