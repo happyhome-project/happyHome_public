@@ -10,6 +10,9 @@
     "miniprogram-automator": "^0.12.1",
     "miniprogram-ci": "^2.1.31"
   },
+  "devDependencies": {
+    "@cloudbase/manager-node": "^4.0.0"
+  },
   "scripts": {
     "deploy:cloud": "node scripts/deploy.mjs cloud",
     "deploy:mp": "node scripts/deploy.mjs miniprogram",
@@ -18,6 +21,7 @@
     "test:mp:replay": "node scripts/test-mp-replay.mjs",
     "test:real:admin": "node scripts/test-admin-http.mjs",
     "test:real": "node scripts/test-real.mjs",
-    "set:superadmin": "node scripts/set-super-admin.mjs"
+    "set:superadmin": "node scripts/set-super-admin.mjs",
+    "ensure:indexes": "node scripts/ensure-indexes.mjs"
   }
 }
