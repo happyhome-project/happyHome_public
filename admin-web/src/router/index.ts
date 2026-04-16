@@ -12,6 +12,7 @@ const router = createRouter({
       children: [
         { path: 'approval', component: () => import('../views/SuperAdmin/CommunityApproval.vue') },
         { path: 'communities', component: () => import('../views/CommunityAdmin/CommunityList.vue') },
+        { path: 'disabled-communities', component: () => import('../views/SuperAdmin/DisabledCommunityList.vue') },
         { path: 'sections/:communityId', component: () => import('../views/CommunityAdmin/SectionList.vue') },
         { path: 'widgets/:sectionId', component: () => import('../views/CommunityAdmin/WidgetEditor.vue') },
         { path: 'members/:communityId', component: () => import('../views/CommunityAdmin/MemberApproval.vue') },

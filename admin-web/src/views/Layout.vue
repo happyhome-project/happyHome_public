@@ -5,6 +5,7 @@
       <el-menu router background-color="#304156" text-color="#bfcbd9" active-text-color="#409EFF">
         <el-menu-item index="/approval">社区审批</el-menu-item>
         <el-menu-item index="/communities">社区管理</el-menu-item>
+        <el-menu-item index="/disabled-communities">已禁用社区</el-menu-item>
       </el-menu>
     </el-aside>
     <el-main>

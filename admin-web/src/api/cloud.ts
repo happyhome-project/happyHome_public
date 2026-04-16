@@ -16,8 +16,12 @@ export const callCloud = callAdmin
 
 export const communityApi = {
   list: () => callAdmin('community.list'),
+  listDisabled: () => callAdmin('community.listDisabled'),
   approve: (communityId: string) => callAdmin('community.approve', { communityId }),
   reject: (communityId: string) => callAdmin('community.reject', { communityId }),
+  disable: (communityId: string) => callAdmin('community.disable', { communityId }),
+  restore: (communityId: string) => callAdmin('community.restore', { communityId }),
+  hardDelete: (communityId: string) => callAdmin('community.hardDelete', { communityId }),
 }
 
 export const sectionApi = {
