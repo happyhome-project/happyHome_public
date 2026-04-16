@@ -19,7 +19,7 @@ test('新用户首次登录：创建 user 记录', async () => {
   ;(db.getById as jest.Mock).mockRejectedValue(notFoundErr)
   ;(db.create as jest.Mock).mockResolvedValue('test-openid')
 
-  const result = await handleLogin({ nickName: '张三', avatarUrl: 'https://...' })
+  const result = await handleLogin({ nickName: '张三', avatarUrl: 'https://...' }, 'test-openid')
 
   expect(db.create).toHaveBeenCalledWith('users', expect.objectContaining({
     _id: 'test-openid',
@@ -35,7 +35,7 @@ test('老用户登录：更新 nickName 和 avatarUrl', async () => {
   })
   ;(db.updateById as jest.Mock).mockResolvedValue({})
 
-  const result = await handleLogin({ nickName: '新名', avatarUrl: 'https://new' })
+  const result = await handleLogin({ nickName: '新名', avatarUrl: 'https://new' }, 'test-openid')
 
   expect(db.updateById).toHaveBeenCalledWith('users', 'test-openid', {
     nickName: '新名', avatarUrl: 'https://new'
@@ -47,7 +47,7 @@ test('数据库网络错误应向上抛出，不被当作新用户', async () =>
   const networkErr = Object.assign(new Error('network timeout'), { errCode: -505001 })
   ;(db.getById as jest.Mock).mockRejectedValue(networkErr)
 
-  await expect(handleLogin({ nickName: '张三', avatarUrl: 'https://...' }))
+  await expect(handleLogin({ nickName: '张三', avatarUrl: 'https://...' }, 'test-openid'))
     .rejects.toThrow('network timeout')
 })
 
@@ -55,9 +55,33 @@ test('老用户 updateById 失败应向上抛出，不进入新建逻辑', async
   ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'test-openid', role: 'user' })
   ;(db.updateById as jest.Mock).mockRejectedValue(new Error('update failed'))
 
-  await expect(handleLogin({ nickName: '新名', avatarUrl: '' }))
+  await expect(handleLogin({ nickName: '新名', avatarUrl: '' }, 'test-openid'))
     .rejects.toThrow('update failed')
   expect(db.create).not.toHaveBeenCalled()
+})
+
+test('缺失 OPENID 时 handleLogin 直接抛错', async () => {
+  await expect(handleLogin({ nickName: 'x', avatarUrl: '' }, ''))
+    .rejects.toThrow('Missing OPENID')
+})
+
+test('_testOpenid 仅在 ALLOW_TEST_OPENID=true 时生效', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'test-openid', role: 'user' })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  // 默认 env 未设置 → 回退到 wxContext 的 'test-openid'
+  const res1 = await main({ action: 'login', nickName: '甲', avatarUrl: '', _testOpenid: 'injected-id' } as any)
+  expect(db.updateById).toHaveBeenCalledWith('users', 'test-openid', expect.anything())
+  expect(res1.isNew).toBe(false)
+
+  // 开启 env → _testOpenid 覆盖
+  process.env.ALLOW_TEST_OPENID = 'true'
+  jest.clearAllMocks()
+  ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'injected-id', role: 'user' })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+  await main({ action: 'login', nickName: '乙', avatarUrl: '', _testOpenid: 'injected-id' } as any)
+  expect(db.updateById).toHaveBeenCalledWith('users', 'injected-id', expect.anything())
+  delete process.env.ALLOW_TEST_OPENID
 })
 
 test('main(): action=login 正确路由', async () => {

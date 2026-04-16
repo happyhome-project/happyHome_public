@@ -19,7 +19,7 @@ const KEY_PATH = resolve(ROOT, `private.${APPID}.key`)
 const MP_DIST = resolve(ROOT, 'miniprogram/dist/build/mp-weixin')
 const CLOUD_DIST = resolve(ROOT, 'cloud/dist')
 const CLOUD_ENV = 'cloudbase-3gh862acb1505ff3'
-const CLOUD_FUNCTIONS = ['user', 'community', 'member', 'section', 'post', 'admin']
+const CLOUD_FUNCTIONS = ['user', 'community', 'member', 'section', 'post', 'admin', 'http-gateway']
 
 const project = new ci.Project({
   appid: APPID,

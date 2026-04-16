@@ -50,7 +50,7 @@ test('创建板块：管理员可以创建，widgets 初始为空', async () => 
     name: '日记',
     icon: 'book',
     order: 1,
-  })
+  }, 'test-openid')
 
   expect(db.create).toHaveBeenCalledWith('sections', expect.objectContaining({
     widgets: [],
@@ -62,7 +62,7 @@ test('创建板块：管理员可以创建，widgets 初始为空', async () => 
 test('创建板块：非管理员无权创建', async () => {
   ;(db.query as jest.Mock).mockResolvedValueOnce([])
 
-  await expect(handleCreate({ communityId: 'c1', name: '日记', icon: 'book', order: 1 }))
+  await expect(handleCreate({ communityId: 'c1', name: '日记', icon: 'book', order: 1 }, 'test-openid'))
     .rejects.toThrow('权限不足')
 })
 
@@ -97,7 +97,7 @@ test('updateWidgets：showInList 超过 3 个时抛出错误', async () => {
     makeWidget({ widgetId: 'w4', showInList: true }),
   ]
 
-  await expect(handleUpdateWidgets({ communityId: 'c1', sectionId: 's1', widgets }))
+  await expect(handleUpdateWidgets({ communityId: 'c1', sectionId: 's1', widgets }, 'test-openid'))
     .rejects.toThrow('showInList 最多只能有 3 个控件')
 })
 
@@ -108,7 +108,7 @@ test('updateWidgets：image_group 不能设为 showInList', async () => {
     makeWidget({ widgetId: 'w1', type: 'image_group', showInList: true }),
   ]
 
-  await expect(handleUpdateWidgets({ communityId: 'c1', sectionId: 's1', widgets }))
+  await expect(handleUpdateWidgets({ communityId: 'c1', sectionId: 's1', widgets }, 'test-openid'))
     .rejects.toThrow('不支持在列表展示')
 })
 
@@ -119,7 +119,7 @@ test('updateWidgets：rich_text 不能设为 showInList', async () => {
     makeWidget({ widgetId: 'w1', type: 'rich_text', showInList: true }),
   ]
 
-  await expect(handleUpdateWidgets({ communityId: 'c1', sectionId: 's1', widgets }))
+  await expect(handleUpdateWidgets({ communityId: 'c1', sectionId: 's1', widgets }, 'test-openid'))
     .rejects.toThrow('不支持在列表展示')
 })
 
@@ -131,7 +131,7 @@ test('updateWidgets：新控件自动分配 UUID', async () => {
     makeWidget({ widgetId: '', label: '新控件' }), // empty widgetId
   ]
 
-  const result = await handleUpdateWidgets({ communityId: 'c1', sectionId: 's1', widgets })
+  const result = await handleUpdateWidgets({ communityId: 'c1', sectionId: 's1', widgets }, 'test-openid')
 
   expect(result.widgets[0].widgetId).toBe('mocked-uuid')
 })
@@ -144,7 +144,7 @@ test('updateWidgets：已有 widgetId 的控件不被重新分配', async () => 
     makeWidget({ widgetId: 'existing-uuid-123', label: '已有控件' }),
   ]
 
-  const result = await handleUpdateWidgets({ communityId: 'c1', sectionId: 's1', widgets })
+  const result = await handleUpdateWidgets({ communityId: 'c1', sectionId: 's1', widgets }, 'test-openid')
 
   expect(result.widgets[0].widgetId).toBe('existing-uuid-123')
 })
@@ -159,7 +159,7 @@ test('updateWidgets：showInList 恰好 3 个时成功', async () => {
     makeWidget({ widgetId: 'w3', showInList: true }),
   ]
 
-  const result = await handleUpdateWidgets({ communityId: 'c1', sectionId: 's1', widgets })
+  const result = await handleUpdateWidgets({ communityId: 'c1', sectionId: 's1', widgets }, 'test-openid')
   expect(result.widgets).toHaveLength(3)
 })
 
@@ -173,7 +173,7 @@ test('update：管理员可以更新板块名称', async () => {
     sectionId: 's1',
     communityId: 'c1',
     name: '新名称',
-  })
+  }, 'test-openid')
 
   expect(db.updateById).toHaveBeenCalledWith('sections', 's1', { name: '新名称' })
   expect(result.success).toBe(true)
@@ -186,7 +186,7 @@ test('update：非管理员无权更新', async () => {
     sectionId: 's1',
     communityId: 'c1',
     name: '新名称',
-  })).rejects.toThrow('权限不足')
+  }, 'test-openid')).rejects.toThrow('权限不足')
 })
 
 test('update：不会把 sectionId/communityId 写入更新数据', async () => {
@@ -198,7 +198,7 @@ test('update：不会把 sectionId/communityId 写入更新数据', async () => 
     communityId: 'c1',
     icon: 'star',
     enableComment: false,
-  })
+  }, 'test-openid')
 
   const updateData = (db.updateById as jest.Mock).mock.calls[0][2]
   expect(updateData).not.toHaveProperty('sectionId')
@@ -207,14 +207,11 @@ test('update：不会把 sectionId/communityId 写入更新数据', async () => 
 })
 
 test('update：缺少 OPENID 时抛出错误', async () => {
-  const cloud = require('wx-server-sdk')
-  ;(cloud.getWXContext as jest.Mock).mockReturnValueOnce({ OPENID: '' })
-
   await expect(handleUpdate({
     sectionId: 's1',
     communityId: 'c1',
     name: '新名称',
-  })).rejects.toThrow('Missing OPENID')
+  }, '')).rejects.toThrow('Missing OPENID')
 })
 
 // --- main() 路由测试 ---
@@ -223,7 +220,7 @@ test('main(): action=update 正确路由', async () => {
   ;(db.query as jest.Mock).mockResolvedValueOnce([{ role: 'admin', status: 'active' }])
   ;(db.updateById as jest.Mock).mockResolvedValue({})
 
-  const result = await main({ action: 'update', params: { sectionId: 's1', communityId: 'c1', name: 'test' } })
+  const result = await main({ action: 'update', sectionId: 's1', communityId: 'c1', name: 'test' })
   expect(result).toEqual({ success: true })
 })
 

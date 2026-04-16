@@ -1,23 +1,26 @@
 import cloud from 'wx-server-sdk'
 import { v4 as uuidv4 } from 'uuid'
 import * as db from '../../lib/db'
+import { resolveOpenId } from '../../lib/ctx'
 import { assertCommunityAdmin } from '../../lib/auth'
 import type { Widget } from '../../shared/types'
 import { LIST_DISPLAYABLE_TYPES } from '../../shared/types'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
-export async function handleCreate(params: {
-  communityId: string
-  name: string
-  icon: string
-  order: number
-  enableComment?: boolean
-  enableLike?: boolean
-}) {
-  const { OPENID } = cloud.getWXContext()
-  if (!OPENID) throw new Error('Missing OPENID')
-  await assertCommunityAdmin(OPENID, params.communityId)
+export async function handleCreate(
+  params: {
+    communityId: string
+    name: string
+    icon: string
+    order: number
+    enableComment?: boolean
+    enableLike?: boolean
+  },
+  openid: string,
+) {
+  if (!openid) throw new Error('Missing OPENID')
+  await assertCommunityAdmin(openid, params.communityId)
 
   const sectionId = await db.create('sections', {
     communityId: params.communityId,
@@ -45,14 +48,12 @@ export async function handleList(params: { communityId: string }) {
   return { sections }
 }
 
-export async function handleUpdateWidgets(params: {
-  communityId: string
-  sectionId: string
-  widgets: Widget[]
-}) {
-  const { OPENID } = cloud.getWXContext()
-  if (!OPENID) throw new Error('Missing OPENID')
-  await assertCommunityAdmin(OPENID, params.communityId)
+export async function handleUpdateWidgets(
+  params: { communityId: string; sectionId: string; widgets: Widget[] },
+  openid: string,
+) {
+  if (!openid) throw new Error('Missing OPENID')
+  await assertCommunityAdmin(openid, params.communityId)
 
   const widgets = params.widgets
 
@@ -77,30 +78,33 @@ export async function handleUpdateWidgets(params: {
   return { widgets: updatedWidgets }
 }
 
-export async function handleUpdate(params: {
-  sectionId: string
-  communityId: string
-  name?: string
-  icon?: string
-  order?: number
-  enableComment?: boolean
-  enableLike?: boolean
-}) {
-  const { OPENID } = cloud.getWXContext()
-  if (!OPENID) throw new Error('Missing OPENID')
-  await assertCommunityAdmin(OPENID, params.communityId)
+export async function handleUpdate(
+  params: {
+    sectionId: string
+    communityId: string
+    name?: string
+    icon?: string
+    order?: number
+    enableComment?: boolean
+    enableLike?: boolean
+  },
+  openid: string,
+) {
+  if (!openid) throw new Error('Missing OPENID')
+  await assertCommunityAdmin(openid, params.communityId)
 
   const { sectionId, communityId, ...updates } = params
   await db.updateById('sections', sectionId, updates)
   return { success: true }
 }
 
-export const main = async (event: { action: string; params?: any }) => {
-  const { action, params = {} } = event
-  if (action === 'create') return handleCreate(params)
+export const main = async (event: any) => {
+  const openid = resolveOpenId(event)
+  const { action, _testOpenid, ...params } = event
+  if (action === 'create') return handleCreate(params, openid)
   if (action === 'get') return handleGet(params)
   if (action === 'list') return handleList(params)
-  if (action === 'updateWidgets') return handleUpdateWidgets(params)
-  if (action === 'update') return handleUpdate(params)
+  if (action === 'updateWidgets') return handleUpdateWidgets(params, openid)
+  if (action === 'update') return handleUpdate(params, openid)
   throw new Error(`Unknown action: ${action}`)
 }

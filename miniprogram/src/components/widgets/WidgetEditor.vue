@@ -141,7 +141,17 @@ function clearLocation() {
 .widget-editor { margin-bottom: 32rpx; }
 .label { font-size: 28rpx; color: #333; margin-bottom: 12rpx; display: block; }
 .required { color: #ff4444; margin-left: 4rpx; }
-.input { background: #f8f8f8; border-radius: 12rpx; padding: 20rpx 24rpx; font-size: 28rpx; width: 100%; box-sizing: border-box; }
+.input {
+  background: #f8f8f8;
+  border-radius: 12rpx;
+  padding: 20rpx 24rpx;
+  font-size: 28rpx;
+  /* 微信小程序 input 组件不完全支持 box-sizing: border-box，
+     用 width:auto + display:block 让它自然撑满父容器而不溢出 */
+  display: block;
+  width: auto;
+  box-sizing: border-box;
+}
 .picker-display { background: #f8f8f8; border-radius: 12rpx; padding: 20rpx 24rpx; font-size: 28rpx; color: #666; }
 .image-uploader { display: flex; flex-wrap: wrap; gap: 16rpx; }
 .thumb-wrap { position: relative; width: 160rpx; height: 160rpx; }

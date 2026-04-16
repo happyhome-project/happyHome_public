@@ -1,25 +1,25 @@
 import cloud from 'wx-server-sdk'
 import * as db from '../../lib/db'
+import { resolveOpenId } from '../../lib/ctx'
 import { assertCommunityAdmin } from '../../lib/auth'
 import type { Community } from '../../shared/types'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
-export async function handleApply(params: { communityId: string }) {
-  const { OPENID } = cloud.getWXContext()
-  if (!OPENID) throw new Error('Missing OPENID')
+export async function handleApply(params: { communityId: string }, openid: string) {
+  if (!openid) throw new Error('Missing OPENID')
 
   // Check if already an active or pending member (prevent duplicate records)
   const existingActive = await db.query('community_members', {
     communityId: params.communityId,
-    userId: OPENID,
+    userId: openid,
     status: 'active',
   })
   if (existingActive && existingActive.length > 0) throw new Error('已是社区成员')
 
   const existingPending = await db.query('community_members', {
     communityId: params.communityId,
-    userId: OPENID,
+    userId: openid,
     status: 'pending',
   })
   if (existingPending && existingPending.length > 0) throw new Error('已有待审批的申请')
@@ -30,7 +30,7 @@ export async function handleApply(params: { communityId: string }) {
   if (community.joinType === 'open') {
     await db.create('community_members', {
       communityId: params.communityId,
-      userId: OPENID,
+      userId: openid,
       role: 'member',
       status: 'active',
       appliedAt: now,
@@ -41,7 +41,7 @@ export async function handleApply(params: { communityId: string }) {
   } else {
     await db.create('community_members', {
       communityId: params.communityId,
-      userId: OPENID,
+      userId: openid,
       role: 'member',
       status: 'pending',
       appliedAt: now,
@@ -50,13 +50,12 @@ export async function handleApply(params: { communityId: string }) {
   }
 }
 
-export async function handleLeave(params: { communityId: string }) {
-  const { OPENID } = cloud.getWXContext()
-  if (!OPENID) throw new Error('Missing OPENID')
+export async function handleLeave(params: { communityId: string }, openid: string) {
+  if (!openid) throw new Error('Missing OPENID')
 
   const members = await db.query('community_members', {
     communityId: params.communityId,
-    userId: OPENID,
+    userId: openid,
     status: 'active',
   })
   if (!members || members.length === 0) throw new Error('不是社区成员')
@@ -72,10 +71,12 @@ export async function handleLeave(params: { communityId: string }) {
   return { success: true }
 }
 
-export async function handleMemberApprove(params: { communityId: string; memberId: string }) {
-  const { OPENID } = cloud.getWXContext()
-  if (!OPENID) throw new Error('Missing OPENID')
-  await assertCommunityAdmin(OPENID, params.communityId)
+export async function handleMemberApprove(
+  params: { communityId: string; memberId: string },
+  openid: string,
+) {
+  if (!openid) throw new Error('Missing OPENID')
+  await assertCommunityAdmin(openid, params.communityId)
 
   const updateRes = await db.updateWhere('community_members', {
     _id: params.memberId,
@@ -91,10 +92,12 @@ export async function handleMemberApprove(params: { communityId: string; memberI
   return { success: true, changed: (updateRes as any)?.stats?.updated > 0 }
 }
 
-export async function handleMemberReject(params: { communityId: string; memberId: string }) {
-  const { OPENID } = cloud.getWXContext()
-  if (!OPENID) throw new Error('Missing OPENID')
-  await assertCommunityAdmin(OPENID, params.communityId)
+export async function handleMemberReject(
+  params: { communityId: string; memberId: string },
+  openid: string,
+) {
+  if (!openid) throw new Error('Missing OPENID')
+  await assertCommunityAdmin(openid, params.communityId)
 
   const updateRes = await db.updateWhere('community_members', {
     _id: params.memberId,
@@ -107,10 +110,9 @@ export async function handleMemberReject(params: { communityId: string; memberId
   return { success: true, changed: (updateRes as any)?.stats?.updated > 0 }
 }
 
-export async function handlePendingList(params: { communityId: string }) {
-  const { OPENID } = cloud.getWXContext()
-  if (!OPENID) throw new Error('Missing OPENID')
-  await assertCommunityAdmin(OPENID, params.communityId)
+export async function handlePendingList(params: { communityId: string }, openid: string) {
+  if (!openid) throw new Error('Missing OPENID')
+  await assertCommunityAdmin(openid, params.communityId)
 
   const members = await db.query('community_members', {
     communityId: params.communityId,
@@ -119,12 +121,26 @@ export async function handlePendingList(params: { communityId: string }) {
   return { members }
 }
 
-export const main = async (event: { action: string; params?: any }) => {
-  const { action, params = {} } = event
-  if (action === 'apply') return handleApply(params)
-  if (action === 'leave') return handleLeave(params)
-  if (action === 'memberApprove') return handleMemberApprove(params)
-  if (action === 'memberReject') return handleMemberReject(params)
-  if (action === 'pendingList') return handlePendingList(params)
+// 查询当前用户在指定社区的成员状态（给前端判断是否需要引导加入）
+export async function handleMyStatus(params: { communityId: string }, openid: string) {
+  if (!openid) return { isMember: false, status: null }
+  const records = await db.query('community_members', {
+    communityId: params.communityId,
+    userId: openid,
+  })
+  if (!records || records.length === 0) return { isMember: false, status: null }
+  const latest = records[0] as { status: string }
+  return { isMember: latest.status === 'active', status: latest.status }
+}
+
+export const main = async (event: any) => {
+  const openid = resolveOpenId(event)
+  const { action, _testOpenid, ...params } = event
+  if (action === 'apply') return handleApply(params, openid)
+  if (action === 'leave') return handleLeave(params, openid)
+  if (action === 'memberApprove') return handleMemberApprove(params, openid)
+  if (action === 'memberReject') return handleMemberReject(params, openid)
+  if (action === 'pendingList') return handlePendingList(params, openid)
+  if (action === 'myStatus') return handleMyStatus(params, openid)
   throw new Error(`Unknown action: ${action}`)
 }

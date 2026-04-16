@@ -9,7 +9,8 @@
         v-for="community in communities"
         :key="community._id"
         class="community-card"
-        @tap="handleApply(community)"
+        :class="{ disabled: applyLock.isBusy(community._id) }"
+        @tap="applyLock.run(community)"
       >
         <image
           :src="community.coverImage || '/static/default-community.png'"
@@ -36,6 +37,7 @@
 import { ref, onMounted } from 'vue'
 import { communityApi, memberApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
+import { useKeyedBusyLock } from '../../utils/useBusyLock'
 
 const communities = ref<any[]>([])
 const communityStore = useCommunityStore()
@@ -45,20 +47,24 @@ onMounted(async () => {
   communities.value = res.communities
 })
 
-async function handleApply(community: any) {
-  try {
-    await memberApi.apply(community._id)
-    if (community.joinType === 'open') {
-      uni.showToast({ title: '加入成功！', icon: 'success' })
-      await communityStore.loadMyCommunities()
-      uni.reLaunch({ url: '/pages/index/index' })
-    } else {
-      uni.showToast({ title: '申请已提交', icon: 'none' })
+// Per-community lock — clicking on card A doesn't block card B.
+const applyLock = useKeyedBusyLock(
+  async (community: any) => {
+    try {
+      await memberApi.apply(community._id)
+      if (community.joinType === 'open') {
+        uni.showToast({ title: '加入成功！', icon: 'success' })
+        await communityStore.loadMyCommunities()
+        uni.reLaunch({ url: '/pages/index/index' })
+      } else {
+        uni.showToast({ title: '申请已提交', icon: 'none' })
+      }
+    } catch (e: any) {
+      uni.showToast({ title: e?.message || '操作失败', icon: 'none' })
     }
-  } catch (e: any) {
-    uni.showToast({ title: e?.message || '操作失败', icon: 'none' })
-  }
-}
+  },
+  (community) => community._id,
+)
 
 function handleCreate() {
   uni.navigateTo({ url: '/pages/createCommunity/index' })
@@ -74,7 +80,9 @@ function handleCreate() {
   display: flex; align-items: center; padding: 24rpx;
   background: #fff; border-radius: 16rpx; margin-bottom: 20rpx;
   box-shadow: 0 2rpx 12rpx rgba(0,0,0,0.06);
+  transition: opacity 0.2s;
 }
+.community-card.disabled { opacity: 0.5; pointer-events: none; }
 .cover { width: 100rpx; height: 100rpx; border-radius: 12rpx; flex-shrink: 0; }
 .info { flex: 1; margin: 0 20rpx; }
 .name { font-size: 32rpx; font-weight: 600; display: block; }

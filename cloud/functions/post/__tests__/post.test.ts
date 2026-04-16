@@ -57,7 +57,7 @@ test('发帖：校验 required 控件必须填写（空内容）', async () => {
     communityId: 'c1',
     sectionId: 'section-1',
     content: {}, // required widget not filled
-  })).rejects.toThrow('必填项未填写：标题')
+  }, 'test-openid')).rejects.toThrow('必填项未填写：标题')
 })
 
 test('发帖：required 控件有值时正常创建', async () => {
@@ -69,7 +69,7 @@ test('发帖：required 控件有值时正常创建', async () => {
     communityId: 'c1',
     sectionId: 'section-1',
     content: { 'widget-uuid-1': '我的日记标题' },
-  })
+  }, 'test-openid')
 
   expect(db.create).toHaveBeenCalledWith('posts', expect.objectContaining({
     authorId: 'test-openid',
@@ -86,7 +86,7 @@ test('发帖：非社区成员不能发帖', async () => {
     communityId: 'c1',
     sectionId: 'section-1',
     content: { 'widget-uuid-1': '标题' },
-  })).rejects.toThrow('非社区成员，无法发帖')
+  }, 'test-openid')).rejects.toThrow('非社区成员，无法发帖')
 
   expect(db.getById).not.toHaveBeenCalled()
   expect(db.create).not.toHaveBeenCalled()
@@ -103,7 +103,7 @@ test('发帖：content key 使用 widgetId 而非 fieldKey', async () => {
     communityId: 'c1',
     sectionId: 'section-1',
     content: { 'title': '标题内容' }, // wrong key (fieldKey instead of widgetId)
-  })).rejects.toThrow('必填项未填写：标题')
+  }, 'test-openid')).rejects.toThrow('必填项未填写：标题')
 })
 
 test('删帖：只有发帖人可以删', async () => {
@@ -113,7 +113,7 @@ test('删帖：只有发帖人可以删', async () => {
     status: 'active',
   })
 
-  await expect(handleDelete({ postId: 'post-1' })).rejects.toThrow('无权删除')
+  await expect(handleDelete({ postId: 'post-1' }, 'test-openid')).rejects.toThrow('无权删除')
   expect(db.softDelete).not.toHaveBeenCalled()
 })
 
@@ -125,7 +125,7 @@ test('删帖：发帖人可以软删除', async () => {
   })
   ;(db.softDelete as jest.Mock).mockResolvedValue({})
 
-  await handleDelete({ postId: 'post-1' })
+  await handleDelete({ postId: 'post-1' }, 'test-openid')
 
   expect(db.softDelete).toHaveBeenCalledWith('posts', 'post-1')
 })
@@ -141,7 +141,7 @@ test('改帖：只有发帖人可以修改', async () => {
   await expect(handleUpdate({
     postId: 'post-1',
     content: { 'widget-uuid-1': '新标题' },
-  })).rejects.toThrow('无权修改')
+  }, 'test-openid')).rejects.toThrow('无权修改')
   expect(db.updateById).not.toHaveBeenCalled()
 })
 
@@ -158,7 +158,7 @@ test('改帖：required 控件为空时失败', async () => {
   await expect(handleUpdate({
     postId: 'post-1',
     content: {},
-  })).rejects.toThrow('必填项未填写：标题')
+  }, 'test-openid')).rejects.toThrow('必填项未填写：标题')
   expect(db.updateById).not.toHaveBeenCalled()
 })
 
@@ -176,7 +176,7 @@ test('改帖：作者可修改，更新 content 与 updatedAt', async () => {
   const result = await handleUpdate({
     postId: 'post-1',
     content: { 'widget-uuid-1': '修改后的标题' },
-  })
+  }, 'test-openid')
 
   expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({
     content: { 'widget-uuid-1': '修改后的标题' },
@@ -223,7 +223,7 @@ test('删帖：帖子已删除时抛出错误', async () => {
     status: 'deleted',
   })
 
-  await expect(handleDelete({ postId: 'post-1' })).rejects.toThrow('帖子已删除')
+  await expect(handleDelete({ postId: 'post-1' }, 'test-openid')).rejects.toThrow('帖子已删除')
   expect(db.softDelete).not.toHaveBeenCalled()
 })
 
@@ -235,7 +235,7 @@ test('发帖：required 字段值为 null 时校验失败', async () => {
     communityId: 'c1',
     sectionId: 'section-1',
     content: { 'widget-uuid-1': null as any },
-  })).rejects.toThrow('必填项未填写：标题')
+  }, 'test-openid')).rejects.toThrow('必填项未填写：标题')
 })
 
 test('发帖：required 字段值为空数组时校验失败', async () => {
@@ -246,7 +246,7 @@ test('发帖：required 字段值为空数组时校验失败', async () => {
     communityId: 'c1',
     sectionId: 'section-1',
     content: { 'widget-uuid-1': [] as any },
-  })).rejects.toThrow('必填项未填写：标题')
+  }, 'test-openid')).rejects.toThrow('必填项未填写：标题')
 })
 
 test('发帖：非 required 字段留空时正常创建', async () => {
@@ -259,7 +259,7 @@ test('发帖：非 required 字段留空时正常创建', async () => {
     communityId: 'c1',
     sectionId: 'section-1',
     content: { 'widget-uuid-1': '标题' },
-  })
+  }, 'test-openid')
   expect(result.postId).toBe('post-2')
 })
 

@@ -31,7 +31,7 @@ test('申请加入开放社区：直接创建 active 记录并递增 memberCount
   ;(db.create as jest.Mock).mockResolvedValue('member-1')
   ;(db.increment as jest.Mock).mockResolvedValue({})
 
-  const result = await handleApply({ communityId: 'c1' })
+  const result = await handleApply({ communityId: 'c1' }, 'test-openid')
 
   expect(db.create).toHaveBeenCalledWith('community_members', expect.objectContaining({
     status: 'active',
@@ -46,7 +46,7 @@ test('申请加入审批社区：创建 pending 记录，不递增 memberCount',
   ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'c1', joinType: 'approval' })
   ;(db.create as jest.Mock).mockResolvedValue('member-1')
 
-  const result = await handleApply({ communityId: 'c1' })
+  const result = await handleApply({ communityId: 'c1' }, 'test-openid')
 
   expect(db.create).toHaveBeenCalledWith('community_members', expect.objectContaining({
     status: 'pending',
@@ -58,7 +58,7 @@ test('申请加入审批社区：创建 pending 记录，不递增 memberCount',
 test('申请加入：已是成员时抛出错误', async () => {
   ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
 
-  await expect(handleApply({ communityId: 'c1' })).rejects.toThrow('已是社区成员')
+  await expect(handleApply({ communityId: 'c1' }, 'test-openid')).rejects.toThrow('已是社区成员')
   expect(db.create).not.toHaveBeenCalled()
 })
 
@@ -67,7 +67,7 @@ test('退出社区：status 变为 left，memberCount 原子递减', async () =>
   ;(db.updateById as jest.Mock).mockResolvedValue({})
   ;(db.increment as jest.Mock).mockResolvedValue({})
 
-  await handleLeave({ communityId: 'c1' })
+  await handleLeave({ communityId: 'c1' }, 'test-openid')
 
   expect(db.updateById).toHaveBeenCalledWith('community_members', 'member-1', expect.objectContaining({
     status: 'left',
@@ -79,7 +79,7 @@ test('退出社区：status 变为 left，memberCount 原子递减', async () =>
 test('退出社区：不是成员时抛出错误', async () => {
   ;(db.query as jest.Mock).mockResolvedValueOnce([])
 
-  await expect(handleLeave({ communityId: 'c1' })).rejects.toThrow('不是社区成员')
+  await expect(handleLeave({ communityId: 'c1' }, 'test-openid')).rejects.toThrow('不是社区成员')
 })
 
 test('管理员审批通过：memberCount 原子递增', async () => {
@@ -88,7 +88,7 @@ test('管理员审批通过：memberCount 原子递增', async () => {
   ;(db.updateWhere as jest.Mock).mockResolvedValue({ stats: { updated: 1 } })
   ;(db.increment as jest.Mock).mockResolvedValue({})
 
-  await handleMemberApprove({ communityId: 'c1', memberId: 'applicant-member' })
+  await handleMemberApprove({ communityId: 'c1', memberId: 'applicant-member' }, 'test-openid')
 
   expect(db.updateWhere).toHaveBeenCalledWith('community_members', expect.objectContaining({
     _id: 'applicant-member',
@@ -104,7 +104,7 @@ test('管理员审批通过：memberCount 原子递增', async () => {
 test('管理员审批通过：非管理员无权操作', async () => {
   ;(db.query as jest.Mock).mockResolvedValueOnce([]) // not admin
 
-  await expect(handleMemberApprove({ communityId: 'c1', memberId: 'applicant-member' }))
+  await expect(handleMemberApprove({ communityId: 'c1', memberId: 'applicant-member' }, 'test-openid'))
     .rejects.toThrow('权限不足')
 })
 
@@ -112,7 +112,7 @@ test('管理员拒绝申请：status 变为 rejected，设置 rejectedAt', async
   ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'admin-member', role: 'admin', status: 'active' }])
   ;(db.updateWhere as jest.Mock).mockResolvedValue({ stats: { updated: 1 } })
 
-  await handleMemberReject({ communityId: 'c1', memberId: 'applicant-member' })
+  await handleMemberReject({ communityId: 'c1', memberId: 'applicant-member' }, 'test-openid')
 
   expect(db.updateWhere).toHaveBeenCalledWith('community_members', expect.objectContaining({
     _id: 'applicant-member',
@@ -128,7 +128,7 @@ test('管理员审批通过：已非 pending 时不重复递增', async () => {
   ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'admin-member', role: 'admin', status: 'active' }])
   ;(db.updateWhere as jest.Mock).mockResolvedValue({ stats: { updated: 0 } })
 
-  const result = await handleMemberApprove({ communityId: 'c1', memberId: 'applicant-member' })
+  const result = await handleMemberApprove({ communityId: 'c1', memberId: 'applicant-member' }, 'test-openid')
 
   expect(db.increment).not.toHaveBeenCalled()
   expect(result.changed).toBe(false)
@@ -140,7 +140,7 @@ test('pendingList：返回社区所有待审批成员', async () => {
     { _id: 'm2', status: 'pending' },
   ])
 
-  const result = await handlePendingList({ communityId: 'c1' })
+  const result = await handlePendingList({ communityId: 'c1' }, 'test-openid')
 
   expect(db.query).toHaveBeenCalledWith('community_members', { communityId: 'c1', status: 'pending' })
   expect(result.members).toHaveLength(2)

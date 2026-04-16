@@ -21,7 +21,12 @@
         <text class="time">发布于 {{ formatDate(post.createdAt) }}</text>
         <view v-if="isAuthor" class="actions">
           <text v-if="!editing" class="edit-btn" @tap="startEdit">编辑</text>
-          <text v-if="!editing" class="delete-btn" @tap="handleDelete">删除</text>
+          <text
+            v-if="!editing"
+            class="delete-btn"
+            :class="{ disabled: deleteLock.busy.value }"
+            @tap="deleteLock.run()"
+          >{{ deleteLock.busy.value ? '删除中...' : '删除' }}</text>
           <text v-if="editing" class="cancel-btn" @tap="cancelEdit">取消</text>
           <text v-if="editing" class="save-btn" @tap="handleSaveEdit">
             {{ savingEdit ? '保存中...' : '保存' }}
@@ -41,6 +46,7 @@ import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import WidgetRenderer from '../../components/widgets/WidgetRenderer.vue'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
+import { useBusyLock } from '../../utils/useBusyLock'
 
 const post = ref<any>(null)
 const section = ref<any>(null)
@@ -77,7 +83,7 @@ onLoad(async (options: any) => {
   }
 })
 
-async function handleDelete() {
+const deleteLock = useBusyLock(async () => {
   const confirmed = await new Promise<boolean>((resolve) => {
     uni.showModal({
       title: '确认删除',
@@ -93,7 +99,7 @@ async function handleDelete() {
   } catch (e: any) {
     uni.showToast({ title: e?.message || '删除失败', icon: 'none' })
   }
-}
+})
 
 function resetEditContent(content: Record<string, any>) {
   Object.keys(editContent).forEach((k) => delete editContent[k])
@@ -181,6 +187,7 @@ function formatDate(iso: string): string {
 .actions { display: flex; align-items: center; gap: 24rpx; }
 .edit-btn { font-size: 26rpx; color: #1976d2; padding: 8rpx 20rpx; }
 .delete-btn { font-size: 26rpx; color: #ff4444; padding: 8rpx 20rpx; }
+.delete-btn.disabled { color: #ccc; pointer-events: none; }
 .cancel-btn { font-size: 26rpx; color: #999; padding: 8rpx 20rpx; }
 .save-btn { font-size: 26rpx; color: #2e7d32; padding: 8rpx 20rpx; }
 </style>

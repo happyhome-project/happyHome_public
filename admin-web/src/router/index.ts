@@ -16,7 +16,9 @@ const router = createRouter({
         { path: 'widgets/:sectionId', component: () => import('../views/CommunityAdmin/WidgetEditor.vue') },
         { path: 'members/:communityId', component: () => import('../views/CommunityAdmin/MemberApproval.vue') },
       ]
-    }
+    },
+    // Fallback to avoid rendering a blank page on unknown URLs.
+    { path: '/:pathMatch(.*)*', redirect: '/' },
   ]
 })
 

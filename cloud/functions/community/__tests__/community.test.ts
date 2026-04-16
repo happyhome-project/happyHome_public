@@ -26,7 +26,7 @@ test('创建社区：status 默认为 pending，creatorId 为 OPENID', async () 
     coverImage: 'https://cover.jpg',
     location: { address: '北京', lat: 39.9, lng: 116.3 },
     joinType: 'open',
-  })
+  }, 'test-openid')
 
   expect(db.create).toHaveBeenCalledWith('communities', expect.objectContaining({
     status: 'pending',
@@ -45,7 +45,7 @@ test('创建社区：同时为创建者创建 admin 成员记录', async () => {
     coverImage: '',
     location: { address: '北京', lat: 39.9, lng: 116.3 },
     joinType: 'open',
-  })
+  }, 'test-openid')
 
   expect(db.create).toHaveBeenCalledTimes(2)
   expect(db.create).toHaveBeenCalledWith('community_members', expect.objectContaining({
@@ -59,7 +59,7 @@ test('创建社区：同时为创建者创建 admin 成员记录', async () => {
 test('审批社区：只有 superAdmin 可以操作', async () => {
   ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'test-openid', role: 'user' })
 
-  await expect(handleApprove({ communityId: 'community-123' }))
+  await expect(handleApprove({ communityId: 'community-123' }, 'test-openid'))
     .rejects.toThrow('权限不足')
   expect(db.updateById).not.toHaveBeenCalled()
 })
@@ -68,7 +68,7 @@ test('审批通过：社区 status 变为 active', async () => {
   ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'test-openid', role: 'superAdmin' })
   ;(db.updateById as jest.Mock).mockResolvedValue({})
 
-  await handleApprove({ communityId: 'community-123' })
+  await handleApprove({ communityId: 'community-123' }, 'test-openid')
 
   expect(db.updateById).toHaveBeenCalledWith('communities', 'community-123', { status: 'active' })
 })
@@ -77,7 +77,7 @@ test('审批拒绝：社区 status 变为 disabled', async () => {
   ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'test-openid', role: 'superAdmin' })
   ;(db.updateById as jest.Mock).mockResolvedValue({})
 
-  await handleReject({ communityId: 'community-123' })
+  await handleReject({ communityId: 'community-123' }, 'test-openid')
 
   expect(db.updateById).toHaveBeenCalledWith('communities', 'community-123', { status: 'disabled' })
 })

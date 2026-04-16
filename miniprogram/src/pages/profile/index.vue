@@ -38,8 +38,17 @@
       <view v-for="member in pendingMembers" :key="member._id" class="approval-item">
         <text class="member-id">{{ member.userId.slice(0, 8) }}...</text>
         <view class="approval-actions">
-          <button size="mini" @tap="approve(member)" style="background:#1976d2;color:#fff;">通过</button>
-          <button size="mini" @tap="reject(member)">拒绝</button>
+          <button
+            size="mini"
+            :disabled="approveLock.isBusy(member._id) || rejectLock.isBusy(member._id)"
+            @tap="approveLock.run(member)"
+            style="background:#1976d2;color:#fff;"
+          >通过</button>
+          <button
+            size="mini"
+            :disabled="approveLock.isBusy(member._id) || rejectLock.isBusy(member._id)"
+            @tap="rejectLock.run(member)"
+          >拒绝</button>
         </view>
       </view>
     </view>
@@ -51,6 +60,7 @@ import { ref, onMounted } from 'vue'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi } from '../../api/cloud'
+import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -65,34 +75,41 @@ function isAdminOf(communityId: string) {
   return adminCommunityIds.value.includes(communityId)
 }
 
-async function handleLogin() {
+const loginLock = useBusyLock(async () => {
   try {
     await userStore.login()
     await communityStore.loadMyCommunities()
   } catch (e) {
     uni.showToast({ title: '登录失败', icon: 'none' })
   }
-}
+})
+const handleLogin = loginLock.run
 
-async function approve(member: any) {
-  try {
-    await memberApi.memberApprove(member.communityId, member._id)
-    pendingMembers.value = pendingMembers.value.filter((m) => m._id !== member._id)
-    uni.showToast({ title: '已通过', icon: 'success' })
-  } catch (e: any) {
-    uni.showToast({ title: e?.message || '操作失败', icon: 'none' })
-  }
-}
-
-async function reject(member: any) {
-  try {
-    await memberApi.memberReject(member.communityId, member._id)
-    pendingMembers.value = pendingMembers.value.filter((m) => m._id !== member._id)
-    uni.showToast({ title: '已拒绝', icon: 'none' })
-  } catch (e: any) {
-    uni.showToast({ title: e?.message || '操作失败', icon: 'none' })
-  }
-}
+// Per-member locks: approving different members can happen in parallel.
+const approveLock = useKeyedBusyLock(
+  async (member: any) => {
+    try {
+      await memberApi.memberApprove(member.communityId, member._id)
+      pendingMembers.value = pendingMembers.value.filter((m) => m._id !== member._id)
+      uni.showToast({ title: '已通过', icon: 'success' })
+    } catch (e: any) {
+      uni.showToast({ title: e?.message || '操作失败', icon: 'none' })
+    }
+  },
+  (member) => member._id,
+)
+const rejectLock = useKeyedBusyLock(
+  async (member: any) => {
+    try {
+      await memberApi.memberReject(member.communityId, member._id)
+      pendingMembers.value = pendingMembers.value.filter((m) => m._id !== member._id)
+      uni.showToast({ title: '已拒绝', icon: 'none' })
+    } catch (e: any) {
+      uni.showToast({ title: e?.message || '操作失败', icon: 'none' })
+    }
+  },
+  (member) => member._id,
+)
 
 onMounted(async () => {
   if (!userStore.isLoggedIn) return
