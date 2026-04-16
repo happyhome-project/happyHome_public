@@ -1,5 +1,7 @@
 # HappyHome 测试策略（本地 + 云端）
 
+> **相关文档**：测试原则和方法论见 [`TESTING-PRINCIPLES.md`](./TESTING-PRINCIPLES.md)（何时测什么、前端守卫 + 后端兜底、连击并发等）。本文只讲分层架构和实操命令。
+
 ## 背景
 
 当前后端是微信云函数，直接在本地完整复现云环境成本高。  
@@ -21,25 +23,29 @@
 - 方式：Jest + mock `wx-server-sdk` + mock `lib/db`
 - 目标：函数内分支、参数校验、权限判断
 - 特点：最快，定位问题最细
+- 运行：`cd cloud && npm run test:unit`
 
-### L2：本地集成测试（推荐新增）
+### L2：本地集成测试
 
-- 方式：新增 `cloud/lib/db.local.ts`，实现与 `cloud/lib/db.ts` 相同接口
-- 存储：内存 `Map`
-- 切换：
-  - 方案 A：Jest `moduleNameMapper` 将 `../../lib/db` 映射到 `../../lib/db.local`
-  - 方案 B：通过环境变量在统一入口选择 `db` 实现
+- 方式：`cloud/lib/db.local.ts` 内存适配器替代 `db.ts`
+- 切换：Jest `moduleNameMapper` 在 `jest.integration.config.js` 中将 `lib/db` 映射到 `lib/db.local`
+- `wx-server-sdk` 的 `getWXContext` 通过 `setup.ts` mock，支持运行时切换用户身份
 - 目标：真正跑通业务流
-  - 创建社区 -> 加入社区 -> 发帖 -> 改帖 -> 删帖
+  - 创建社区 -> SuperAdmin 审批 -> 加入社区 -> 创建板块 -> 发帖 -> 改帖 -> 删帖
   - 管理员审批与计数变更一致性
+  - 权限校验（非成员/非管理员/非作者）
+- 运行：`cd cloud && npm run test:integration`
 
-### L3：云端验收测试（推荐保留）
+### L3：云端验收测试
 
-- 方式：部署到独立 CloudBase 测试环境后执行
+- 方式：通过 HTTP 调用部署在 CloudBase 上的 admin 云函数
 - 覆盖：
-  - Admin HTTP 调用链路（鉴权 + action 路由）
-  - 小程序 `wx.cloud.callFunction` 实链路
-- 目标：验证真实平台行为与部署配置正确
+  - Admin HTTP 鉴权（Bearer token）
+  - action 路由正确性
+  - 板块 CRUD（创建、查询、更新 widgets、删除）
+  - 成员审批查询
+- 运行：`cd cloud && CLOUD_API_URL=https://xxx.app.tcloudbase.com ADMIN_TOKEN=xxx npm run test:cloud`
+- 可选：`TEST_COMMUNITY_ID=xxx` 启用板块/成员 CRUD 测试
 
 ## 为什么必须 L2 + L3 组合
 
@@ -53,59 +59,60 @@
 1. 反馈慢，开发迭代效率低
 2. 问题定位成本高（难快速收敛到具体逻辑）
 
+## 命令速查
+
+```bash
+cd cloud
+
+# L1 单元测试（mock 一切，最快）
+npm run test:unit
+
+# L2 本地集成测试（内存 db，真实业务流）
+npm run test:integration
+
+# L1 + L2 一起跑（默认 npm test）
+npm test
+
+# L3 云端验收（需要配置环境变量）
+CLOUD_API_URL=https://<env>.ap-shanghai.app.tcloudbase.com \
+ADMIN_TOKEN=your_token \
+TEST_COMMUNITY_ID=xxx \
+npm run test:cloud
+```
+
+## 文件结构
+
+```
+cloud/
+├── lib/
+│   ├── db.ts                          # 云端实现（wx-server-sdk）
+│   ├── db.local.ts                    # 内存实现（L2 测试用）
+│   ├── auth.ts                        # 权限校验
+│   └── __tests__/
+│       ├── db.test.ts                 # L1: db 单元测试
+│       ├── db.contract.test.ts        # 契约测试: 验证两个 db 实现签名一致
+│       ├── auth.test.ts               # L1: auth 单元测试
+│       └── storage.test.ts            # L1: storage 单元测试
+├── functions/
+│   └── */__tests__/*.test.ts          # L1: 各函数单元测试
+├── __tests__/
+│   ├── integration/
+│   │   ├── setup.ts                   # 集成测试公共设置（mock getWXContext）
+│   │   └── full-flow.integration.test.ts  # L2: 完整业务流测试
+│   └── cloud/
+│       ├── helpers.ts                 # 云端测试辅助（HTTP 调用封装）
+│       └── admin-api.cloud.test.ts    # L3: Admin API 验收测试
+├── jest.config.js                     # L1 配置
+├── jest.integration.config.js         # L2 配置（moduleNameMapper → db.local）
+└── jest.cloud.config.js               # L3 配置
+```
+
 ## 建议执行节奏
 
 1. 开发中：`L1 + L2`
 2. 提交前：至少跑一次 `L2`
 3. 合并前/发布前：跑 `L3`
 4. 线上事故复盘：先补 `L1/L2` 用例，再补 `L3` 回归场景
-
-## 当前可直接执行的真实测试命令
-
-### 1) 仅验证云端 Admin HTTP 链路
-
-```bash
-# PowerShell
-$env:CLOUD_API_URL="https://<env-id>-<uin>.ap-shanghai.app.tcloudbase.com"
-$env:ADMIN_TOKEN="your_admin_token"
-npm run test:real:admin
-```
-
-可选：
-
-```bash
-$env:TEST_COMMUNITY_ID="<communityId>"
-npm run test:real:admin
-```
-
-### 2) 统一入口（可选串行跑小程序真测）
-
-```bash
-# 仅跑 Admin HTTP 真测
-npm run test:real
-
-# 同时跑小程序自动化真测（需微信开发者工具开启服务端口）
-$env:RUN_MP_AUTOMATOR="1"
-npm run test:real
-```
-
-说明：
-
-1. `test:real` 在小程序阶段会先尝试 `scripts/test-mp.mjs`（`miniprogram-automator`）。
-2. 若当前 DevTools 版本与 `miniprogram-automator` 协议不兼容，会自动回退到 `scripts/test-mp-replay.mjs`（`cli auto-replay`）。
-
-## 落地清单
-
-1. 新增 `cloud/lib/db.local.ts`（与 `db.ts` 同签名）
-2. 新增 `cloud/lib/db.contract.test.ts`（校验两实现行为一致）
-3. 新增 `cloud/functions/**/__tests__/*.integration.test.ts`（业务流用例）
-4. 增加 npm scripts：
-   - `test:unit`（L1）
-   - `test:integration:local`（L2）
-   - `test:integration:cloud`（L3）
-5. 在 CI 中设置分层门禁：
-   - PR 必跑 `L1 + L2`
-   - release 分支或手动任务跑 `L3`
 
 ## 验收标准
 
@@ -115,3 +122,9 @@ npm run test:real
 2. 能稳定复现核心链路（创建社区 -> 加入 -> 发帖 -> 删帖）
 3. 云端验收在独立测试环境可一键执行并给出明确失败点
 4. 同一类缺陷不再重复线上出现（有对应回归用例）
+
+## L3 云端测试前置条件
+
+1. admin 函数已部署为 HTTP 类型（参考 `docs/cloudbase-http-access.md`）
+2. 函数环境变量 `ADMIN_TOKEN` 已设置
+3. 至少有一个 active 状态的社区（用于 `TEST_COMMUNITY_ID`）

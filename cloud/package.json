@@ -7,7 +7,10 @@
     "lib": "lib"
   },
   "scripts": {
-    "test": "jest",
+    "test": "jest --config jest.config.js && jest --config jest.integration.config.js",
+    "test:unit": "jest --config jest.config.js",
+    "test:integration": "jest --config jest.integration.config.js",
+    "test:cloud": "jest --config jest.cloud.config.js",
     "build": "node build.mjs"
   },
   "keywords": [],
