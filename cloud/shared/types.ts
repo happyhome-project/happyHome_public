@@ -2,7 +2,7 @@
 
 export type UserRole = 'user' | 'superAdmin'
 export type JoinType = 'open' | 'approval'
-export type CommunityStatus = 'pending' | 'active' | 'disabled'
+export type CommunityStatus = 'pending' | 'active' | 'rejected' | 'disabled'
 export type MemberRole = 'admin' | 'member'
 export type MemberStatus = 'pending' | 'active' | 'rejected' | 'left'
 export type PostStatus = 'active' | 'deleted'

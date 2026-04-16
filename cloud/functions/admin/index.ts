@@ -1,5 +1,7 @@
 import cloud from 'wx-server-sdk'
 import * as db from '../../lib/db'
+import * as storage from '../../lib/storage'
+import type { Community } from '../../shared/types'
 
 cloud.init({ env: process.env.TCB_ENV || cloud.DYNAMIC_CURRENT_ENV })
 
@@ -46,7 +48,38 @@ async function route(action: string, params: Record<string, any>) {
     return { success: true }
   }
   if (action === 'community.reject') {
+    await db.updateById('communities', params.communityId, { status: 'rejected' })
+    return { success: true }
+  }
+  if (action === 'community.disable') {
+    const c = await db.getById('communities', params.communityId) as Community | null
+    if (!c) throw new Error('community not found')
+    if (c.status !== 'active') throw new Error('only active community can be disabled')
     await db.updateById('communities', params.communityId, { status: 'disabled' })
+    return { success: true }
+  }
+  if (action === 'community.restore') {
+    const c = await db.getById('communities', params.communityId) as Community | null
+    if (!c) throw new Error('community not found')
+    if (c.status !== 'disabled') throw new Error('only disabled community can be restored')
+    await db.updateById('communities', params.communityId, { status: 'active' })
+    return { success: true }
+  }
+  if (action === 'community.listDisabled') {
+    const communities = await db.query(
+      'communities',
+      { status: 'disabled' },
+      { orderBy: ['createdAt', 'desc'] }
+    )
+    return { communities }
+  }
+  if (action === 'community.hardDelete') {
+    const c = await db.getById('communities', params.communityId) as Community | null
+    if (!c) throw new Error('community not found')
+    if (c.status !== 'disabled') {
+      throw new Error('only disabled community can be hard-deleted. disable it first.')
+    }
+    await hardDeleteCommunity(params.communityId, c)
     return { success: true }
   }
 
@@ -132,6 +165,58 @@ async function route(action: string, params: Record<string, any>) {
   }
 
   throw new Error(`Unknown action: ${action}`)
+}
+
+/**
+ * 硬删社区 —— 真删文档 + 级联删子资源 + 清理 COS 文件
+ * 前置：调用方已经校验 community 存在且 status === 'disabled'
+ *
+ * 顺序：
+ *   1) 收集所有 COS fileID（封面 + 所有 post 的 image_group 图片）
+ *   2) 批量 remove 数据文档（posts → sections → community_members → community 本体）
+ *   3) 清 COS（失败不阻塞，最多留孤儿文件）
+ */
+async function hardDeleteCommunity(communityId: string, community: Community) {
+  // 1) 收集 fileID
+  const fileIDs: string[] = []
+  if (community.coverImage) fileIDs.push(community.coverImage)
+
+  const posts = await db.query('posts', { communityId })  // 不过滤 status，deleted 的也要扫
+  for (const post of posts) {
+    const content = (post as any).content || {}
+    for (const val of Object.values(content)) {
+      if (Array.isArray(val)) {
+        for (const item of val) {
+          if (typeof item === 'string' && item.startsWith('cloud://')) {
+            fileIDs.push(item)
+          }
+        }
+      }
+    }
+  }
+
+  // 2) 删文档（CloudBase 无批量 remove，循环调用）
+  for (const post of posts) {
+    await db.removeById('posts', (post as any)._id)
+  }
+  const sections = await db.query('sections', { communityId })
+  for (const section of sections) {
+    await db.removeById('sections', (section as any)._id)
+  }
+  const members = await db.query('community_members', { communityId })
+  for (const member of members) {
+    await db.removeById('community_members', (member as any)._id)
+  }
+  await db.removeById('communities', communityId)
+
+  // 3) 清 COS（失败不阻塞）
+  if (fileIDs.length > 0) {
+    try {
+      await storage.deleteFile(fileIDs)
+    } catch (e) {
+      console.error('[hardDelete] COS cleanup failed, orphan files:', fileIDs, e)
+    }
+  }
 }
 
 export const main = async (event: any) => {

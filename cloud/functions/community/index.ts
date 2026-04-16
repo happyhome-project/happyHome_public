@@ -53,7 +53,7 @@ export async function handleApprove(params: { communityId: string }, openid: str
 export async function handleReject(params: { communityId: string }, openid: string) {
   if (!openid) throw new Error('Missing OPENID')
   await assertSuperAdmin(openid)
-  await db.updateById('communities', params.communityId, { status: 'disabled' })
+  await db.updateById('communities', params.communityId, { status: 'rejected' })
   return { success: true }
 }
 
