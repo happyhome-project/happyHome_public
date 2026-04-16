@@ -1,6 +1,10 @@
 import { createSSRApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
+import { installSafeNav } from './utils/safe-nav'
+
+// 全局保护：让重复点击的导航调用不再抛出 unhandledRejection
+installSafeNav()
 
 export function createApp() {
   const app = createSSRApp(App)

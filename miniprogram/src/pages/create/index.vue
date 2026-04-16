@@ -135,7 +135,7 @@ async function handleJoin() {
 }
 
 function goLogin() {
-  uni.switchTab({ url: '/pages/me/index' })
+  uni.switchTab({ url: '/pages/profile/index' })
 }
 
 function goOnboarding() {
