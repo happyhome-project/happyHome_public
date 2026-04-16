@@ -3,12 +3,16 @@
     <view class="form">
       <view class="field">
         <text class="label">社区名称 <text class="required">*</text></text>
-        <input v-model="form.name" placeholder="如：阳光小区、星河村" class="input" maxlength="20" />
+        <view class="input-wrap">
+          <input v-model="form.name" placeholder="如：阳光小区、星河村" placeholder-class="input-placeholder" class="input" maxlength="20" />
+        </view>
       </view>
 
       <view class="field">
         <text class="label">社区简介 <text class="required">*</text></text>
-        <textarea v-model="form.description" placeholder="介绍一下你的社区..." class="textarea" maxlength="200" />
+        <view class="input-wrap">
+          <textarea v-model="form.description" placeholder="介绍一下你的社区..." placeholder-class="input-placeholder" class="textarea" maxlength="200" />
+        </view>
       </view>
 
       <view class="field">
@@ -86,8 +90,11 @@ async function handleSubmit() {
 .field:last-child { margin-bottom: 0; }
 .label { font-size: 28rpx; color: #333; display: block; margin-bottom: 16rpx; font-weight: 500; }
 .required { color: #ff4444; }
-.input { background: #f8f8f8; border-radius: 12rpx; padding: 20rpx 24rpx; font-size: 28rpx; width: 100%; box-sizing: border-box; }
-.textarea { background: #f8f8f8; border-radius: 12rpx; padding: 20rpx 24rpx; font-size: 28rpx; width: 100%; min-height: 160rpx; box-sizing: border-box; }
+/* padding 放在外层 view，input/textarea 本身不带 padding，避免微信原生组件 placeholder 截断 */
+.input-wrap { background: #f8f8f8; border-radius: 12rpx; padding: 20rpx 24rpx; }
+.input { font-size: 28rpx; width: 100%; min-height: 40rpx; background: transparent; }
+.textarea { font-size: 28rpx; width: 100%; min-height: 160rpx; background: transparent; }
+.input-placeholder { color: #bbb; font-size: 28rpx; }
 .radio-group { display: flex; gap: 40rpx; }
 .radio-item { display: flex; align-items: center; gap: 12rpx; font-size: 28rpx; color: #333; }
 .radio { width: 36rpx; height: 36rpx; border-radius: 50%; border: 2rpx solid #ccc; }

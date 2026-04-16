@@ -5,7 +5,31 @@
       <image :src="userStore.avatarUrl || '/static/default-avatar.png'" class="avatar" />
       <view class="user-info">
         <text class="name">{{ userStore.nickName || '未登录' }}</text>
-        <button v-if="!userStore.isLoggedIn" size="mini" @tap="handleLogin">登录</button>
+        <view v-if="!userStore.isLoggedIn" class="login-actions">
+          <button size="mini" @tap="handleLogin">微信登录</button>
+          <button size="mini" @tap="showDevLogin = true" class="dev-btn">DEV 登录</button>
+        </view>
+        <button v-else size="mini" @tap="handleLogout">登出</button>
+      </view>
+    </view>
+
+    <!-- DEV login modal -->
+    <view v-if="showDevLogin" class="dev-modal-mask" @tap="showDevLogin = false">
+      <view class="dev-modal" @tap.stop>
+        <text class="dev-title">DEV 模式登录</text>
+        <text class="dev-desc">绕过微信登录，用指定 openid 登录（测试用，不要在正式环境使用）</text>
+        <view class="input-wrap">
+          <input v-model="devOpenid" placeholder="openid（留空则自动生成）" placeholder-class="input-placeholder" class="input" />
+        </view>
+        <view class="input-wrap">
+          <input v-model="devNickname" placeholder="昵称" placeholder-class="input-placeholder" class="input" />
+        </view>
+        <view class="dev-actions">
+          <button size="mini" @tap="showDevLogin = false">取消</button>
+          <button size="mini" :disabled="devLoginLock.busy.value" @tap="devLoginLock.run()" style="background:#333;color:#fff;">
+            {{ devLoginLock.busy.value ? '登录中...' : '登录' }}
+          </button>
+        </view>
       </view>
     </view>
 
@@ -66,6 +90,29 @@ const communityStore = useCommunityStore()
 const userStore = useUserStore()
 const pendingMembers = ref<any[]>([])
 const adminCommunityIds = ref<string[]>([])
+
+// DEV login modal state
+const showDevLogin = ref(false)
+const devOpenid = ref('')
+const devNickname = ref('')
+const devLoginLock = useBusyLock(async () => {
+  try {
+    await userStore.devLogin(devOpenid.value, devNickname.value)
+    await communityStore.loadMyCommunities()
+    showDevLogin.value = false
+    devOpenid.value = ''
+    devNickname.value = ''
+    uni.showToast({ title: '登录成功', icon: 'success' })
+  } catch (e: any) {
+    uni.showModal({ title: '登录失败', content: e?.message || '请检查 openid 格式', showCancel: false })
+  }
+})
+
+function handleLogout() {
+  userStore.logout()
+  communityStore.$patch({ myCommunities: [], currentCommunityId: '', currentSections: [] })
+  uni.showToast({ title: '已登出', icon: 'none' })
+}
 
 function goOnboarding() {
   uni.reLaunch({ url: '/pages/onboarding/index' })
@@ -147,4 +194,27 @@ onMounted(async () => {
 .approval-item { display: flex; justify-content: space-between; align-items: center; padding: 20rpx 0; border-bottom: 1rpx solid #f5f5f5; }
 .member-id { font-size: 26rpx; color: #666; font-family: monospace; }
 .approval-actions { display: flex; gap: 12rpx; }
+
+.login-actions { display: flex; gap: 12rpx; }
+.dev-btn { background: #f90; color: #fff; font-size: 24rpx; }
+
+.dev-modal-mask {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+.dev-modal {
+  background: #fff; border-radius: 16rpx;
+  padding: 40rpx 32rpx; width: 84%; max-width: 600rpx;
+  display: flex; flex-direction: column; gap: 20rpx;
+}
+.dev-title { font-size: 32rpx; font-weight: 600; text-align: center; }
+.dev-desc { font-size: 24rpx; color: #999; line-height: 1.5; }
+.dev-actions { display: flex; gap: 16rpx; margin-top: 8rpx; }
+.dev-actions button { flex: 1; }
+
+.input-wrap { background: #f8f8f8; border-radius: 12rpx; padding: 20rpx 24rpx; }
+.input { font-size: 28rpx; width: 100%; min-height: 40rpx; background: transparent; }
+.input-placeholder { color: #bbb; font-size: 28rpx; }
 </style>

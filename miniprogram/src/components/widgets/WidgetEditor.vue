@@ -5,13 +5,18 @@
       <text v-if="widget.required" class="required">*</text>
     </text>
 
-    <input
+    <view
       v-if="['short_text', 'summary'].includes(widget.type)"
-      :value="modelValue as string"
-      :placeholder="`请输入${widget.label}`"
-      class="input"
-      @input="emit('update:modelValue', ($event as any).detail.value)"
-    />
+      class="input-wrap"
+    >
+      <input
+        :value="modelValue as string"
+        :placeholder="`请输入${widget.label}`"
+        placeholder-class="input-placeholder"
+        class="input"
+        @input="emit('update:modelValue', ($event as any).detail.value)"
+      />
+    </view>
 
     <picker
       v-else-if="widget.type === 'datetime'"
@@ -24,14 +29,16 @@
       </view>
     </picker>
 
-    <input
-      v-else-if="widget.type === 'number'"
-      type="number"
-      :value="String(modelValue ?? '')"
-      :placeholder="`请输入${widget.label}`"
-      class="input"
-      @input="emit('update:modelValue', Number(($event as any).detail.value))"
-    />
+    <view v-else-if="widget.type === 'number'" class="input-wrap">
+      <input
+        type="number"
+        :value="String(modelValue ?? '')"
+        :placeholder="`请输入${widget.label}`"
+        placeholder-class="input-placeholder"
+        class="input"
+        @input="emit('update:modelValue', Number(($event as any).detail.value))"
+      />
+    </view>
 
     <view v-else-if="widget.type === 'image_group'" class="image-uploader">
       <view
@@ -65,13 +72,15 @@
       </view>
     </view>
 
-    <textarea
-      v-else-if="widget.type === 'rich_text'"
-      :value="modelValue as string"
-      :placeholder="`请输入${widget.label}`"
-      class="textarea"
-      @input="emit('update:modelValue', ($event as any).detail.value)"
-    />
+    <view v-else-if="widget.type === 'rich_text'" class="textarea-wrap">
+      <textarea
+        :value="modelValue as string"
+        :placeholder="`请输入${widget.label}`"
+        placeholder-class="input-placeholder"
+        class="textarea"
+        @input="emit('update:modelValue', ($event as any).detail.value)"
+      />
+    </view>
   </view>
 </template>
 
@@ -141,16 +150,29 @@ function clearLocation() {
 .widget-editor { margin-bottom: 32rpx; }
 .label { font-size: 28rpx; color: #333; margin-bottom: 12rpx; display: block; }
 .required { color: #ff4444; margin-left: 4rpx; }
-.input {
+/* 微信小程序 <input> 原生组件对 CSS padding 的渲染有自己的 hack，直接
+   在 input 上加 padding + 设宽度会让 placeholder 显示区被截断（"请输入标题"
+   变 "请㈩入标题"）。终极解法：把 padding 放在外层容器，input 本身不带
+   padding、自适应宽度。再用 placeholder-class 保证占位样式稳定。*/
+.input-wrap {
   background: #f8f8f8;
   border-radius: 12rpx;
   padding: 20rpx 24rpx;
+}
+.input {
   font-size: 28rpx;
-  /* 微信小程序 input 组件不完全支持 box-sizing: border-box，
-     用 width:auto + display:block 让它自然撑满父容器而不溢出 */
-  display: block;
-  width: auto;
-  box-sizing: border-box;
+  width: 100%;
+  min-height: 40rpx;
+  background: transparent;
+}
+.textarea-wrap {
+  background: #f8f8f8;
+  border-radius: 12rpx;
+  padding: 20rpx 24rpx;
+}
+.input-placeholder {
+  color: #bbb;
+  font-size: 28rpx;
 }
 .picker-display { background: #f8f8f8; border-radius: 12rpx; padding: 20rpx 24rpx; font-size: 28rpx; color: #666; }
 .image-uploader { display: flex; flex-wrap: wrap; gap: 16rpx; }
@@ -166,5 +188,5 @@ function clearLocation() {
 .location-actions { display: flex; gap: 16rpx; }
 .loc-btn { margin: 0; background: #333; color: #fff; font-size: 24rpx; line-height: 1.8; }
 .loc-btn.clear { background: #999; }
-.textarea { background: #f8f8f8; border-radius: 12rpx; padding: 20rpx 24rpx; font-size: 28rpx; width: 100%; min-height: 200rpx; box-sizing: border-box; }
+.textarea { font-size: 28rpx; width: 100%; min-height: 200rpx; background: transparent; }
 </style>

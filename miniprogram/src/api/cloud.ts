@@ -1,6 +1,11 @@
 // Wraps wx.cloud.callFunction with unified error handling.
-// In H5 preview mode, transparently routes calls through the http-gateway
-// cloud function so developers can drive full-stack flows from the browser.
+// Three modes:
+//   1. Production miniprogram: wx.cloud.callFunction (default when wx.cloud available)
+//   2. H5 preview: always routes through http-gateway with injected test openid
+//   3. DEV mode in miniprogram: user opts in via "DEV 模式登录" on profile page
+//      → sets localStorage 'dev-gateway=1' and 'test-openid=<id>' → callCloud
+//      routes through http-gateway just like H5, bypassing real wx.login.
+//      Use case: preview/test builds where real WeChat login is unavailable.
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — wx is injected by the miniprogram runtime; absent in H5 build
@@ -15,30 +20,67 @@ const H5_GATEWAY_URL: string =
 const H5_GATEWAY_TOKEN: string =
   viteEnv.VITE_H5_GATEWAY_TOKEN || 'happyhome-admin-2024'
 
-function getTestOpenid(): string {
-  // Allow swapping test identities via devtools: localStorage.setItem('test-openid', 'xyz')
+/** Read a key from whichever storage is available (localStorage in H5, wx.getStorageSync in mp). */
+function readStorage(key: string): string | null {
   try {
-    const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('test-openid') : null
-    if (stored) return stored
+    if (typeof localStorage !== 'undefined') {
+      const v = localStorage.getItem(key)
+      if (v) return v
+    }
   } catch { /* ignore */ }
-  return 'h5-test-user-001'
+  try {
+    if (typeof uni !== 'undefined' && uni.getStorageSync) {
+      const v = uni.getStorageSync(key)
+      if (v) return String(v)
+    }
+  } catch { /* ignore */ }
+  return null
+}
+
+function getTestOpenid(): string {
+  return readStorage('test-openid') || 'h5-test-user-001'
+}
+
+/** Should this call go through http-gateway instead of wx.cloud? */
+function shouldUseGateway(): boolean {
+  if (IS_H5) return true
+  // Miniprogram runtime but user opted into DEV gateway mode
+  return readStorage('dev-gateway') === '1'
 }
 
 async function callViaHttpGateway<T>(name: string, action: string, params: object): Promise<T> {
-  const res = await fetch(H5_GATEWAY_URL, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${H5_GATEWAY_TOKEN}`,
-      'x-test-openid': getTestOpenid(),
-    },
-    body: JSON.stringify({ _fn: name, action, ...params }),
-  })
-  const text = await res.text()
-  let data: any
-  try { data = text ? JSON.parse(text) : {} } catch { data = { raw: text } }
-  if (!res.ok) {
-    const msg = data?.error || `HTTP ${res.status}`
+  // Use fetch in H5; uni.request in miniprogram (fetch is not guaranteed in all mp runtimes)
+  const body = { _fn: name, action, ...params }
+  const headers = {
+    'content-type': 'application/json',
+    authorization: `Bearer ${H5_GATEWAY_TOKEN}`,
+    'x-test-openid': getTestOpenid(),
+  }
+
+  let data: any, statusCode = 0
+  if (typeof fetch !== 'undefined' && IS_H5) {
+    const res = await fetch(H5_GATEWAY_URL, { method: 'POST', headers, body: JSON.stringify(body) })
+    statusCode = res.status
+    const text = await res.text()
+    try { data = text ? JSON.parse(text) : {} } catch { data = { raw: text } }
+  } else {
+    // miniprogram: use uni.request
+    const res: any = await new Promise((resolve, reject) => {
+      uni.request({
+        url: H5_GATEWAY_URL,
+        method: 'POST',
+        header: headers,
+        data: body,
+        success: resolve,
+        fail: reject,
+      })
+    })
+    statusCode = res.statusCode
+    data = res.data
+  }
+
+  if (statusCode !== 200) {
+    const msg = data?.error || `HTTP ${statusCode}`
     throw new Error(`[http-gateway] ${name}/${action} failed: ${msg}`)
   }
   if (data?.error) throw new Error(`[http-gateway] ${name}/${action}: ${data.error}`)
@@ -48,7 +90,7 @@ async function callViaHttpGateway<T>(name: string, action: string, params: objec
 export async function callCloud<T = any>(
   name: string, action: string, params: object = {}
 ): Promise<T> {
-  if (IS_H5) return callViaHttpGateway<T>(name, action, params)
+  if (shouldUseGateway()) return callViaHttpGateway<T>(name, action, params)
 
   return new Promise((resolve, reject) => {
     _wx.cloud.callFunction({
