@@ -4,18 +4,19 @@
     <view v-if="!userStore.isLoggedIn" class="guard-state">
       <text class="guard-title">请先登录</text>
       <text class="guard-desc">登录后才能发布内容</text>
-      <button class="guard-btn" size="mini" @tap="goLogin">去登录</button>
+      <wd-button size="small" plain type="primary" @click="goLogin">去登录</wd-button>
     </view>
 
     <!-- Guard: no community selected -->
     <view v-else-if="!communityStore.currentCommunityId" class="guard-state">
       <text class="guard-title">还没有加入社区</text>
       <text class="guard-desc">加入社区后才能发帖</text>
-      <button class="guard-btn" size="mini" @tap="goOnboarding">去加入</button>
+      <wd-button size="small" plain type="primary" @click="goOnboarding">去加入</wd-button>
     </view>
 
     <!-- Guard: checking membership -->
     <view v-else-if="membershipChecking" class="guard-state">
+      <wd-loading color="#E07A5F" />
       <text class="guard-desc">检查社区成员身份...</text>
     </view>
 
@@ -23,15 +24,16 @@
     <view v-else-if="!isMember" class="guard-state">
       <text class="guard-title">你还不是「{{ communityStore.currentCommunity?.name }}」的成员</text>
       <text class="guard-desc">{{ memberStatus === 'pending' ? '你的加入申请正在审批中，请耐心等待' : '加入社区后才能发帖' }}</text>
-      <button
+      <wd-button
         v-if="memberStatus !== 'pending'"
-        class="guard-btn"
-        size="mini"
-        :disabled="joining"
-        @tap="handleJoin"
+        size="small"
+        plain
+        type="primary"
+        :loading="joining"
+        @click="handleJoin"
       >
-        {{ joining ? '加入中...' : '加入社区' }}
-      </button>
+        加入社区
+      </wd-button>
     </view>
 
     <!-- Normal flow: member of current community -->
@@ -39,15 +41,14 @@
       <!-- Step 1: Select section -->
       <view v-if="!selectedSection" class="section-picker">
         <text class="title">选择板块</text>
-        <view
+        <wd-cell
           v-for="section in communityStore.currentSections"
           :key="section._id"
-          class="section-option"
-          @tap="selectSection(section)"
-        >
-          <text class="section-name">{{ section.name }}</text>
-          <text class="arrow">›</text>
-        </view>
+          :title="section.name"
+          is-link
+          class="section-cell"
+          @click="selectSection(section)"
+        />
       </view>
 
       <!-- Step 2: Fill form -->
@@ -61,13 +62,15 @@
           :widget="widget"
           v-model="formData[widget.widgetId]"
         />
-        <button
-          class="submit-btn"
+        <wd-button
+          type="primary"
+          block
+          :loading="submitting"
           :disabled="submitting"
-          @tap="handleSubmit"
+          @click="handleSubmit"
         >
-          {{ submitting ? '发布中...' : '发布' }}
-        </button>
+          发布
+        </wd-button>
       </view>
     </template>
   </view>
@@ -190,29 +193,58 @@ async function handleSubmit() {
 }
 </script>
 
-<style scoped>
-.create-page { padding: 32rpx; background: #fff; min-height: 100vh; }
-.title { font-size: 36rpx; font-weight: bold; display: block; margin-bottom: 32rpx; }
-.section-option {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 32rpx; border-radius: 16rpx; background: #f8f8f8; margin-bottom: 16rpx;
+<style lang="scss" scoped>
+.create-page {
+  padding: $hh-space-lg;
+  background: $hh-color-bg;
+  min-height: 100vh;
 }
-.section-name { font-size: 30rpx; color: #333; }
-.arrow { font-size: 32rpx; color: #bbb; }
-.form-header { margin-bottom: 32rpx; }
-.section-tag { font-size: 28rpx; color: #666; }
-.submit-btn {
-  margin-top: 48rpx; background: #333; color: #fff; border-radius: 12rpx;
-  font-size: 32rpx; padding: 24rpx;
-}
-.submit-btn[disabled] { background: #ccc; }
 
-/* Guard states */
-.guard-state {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  min-height: 60vh; gap: 24rpx;
+.title {
+  font-size: $hh-font-h2;
+  font-weight: $hh-font-weight-medium;
+  color: $hh-color-text;
+  display: block;
+  margin-bottom: $hh-space-lg;
 }
-.guard-title { font-size: 34rpx; font-weight: bold; color: #333; text-align: center; }
-.guard-desc { font-size: 28rpx; color: #999; text-align: center; }
-.guard-btn { margin-top: 16rpx; background: #333; color: #fff; border-radius: 8rpx; }
+
+/* ── Section picker (Step 1) ── */
+.section-cell {
+  margin-bottom: $hh-space-sm;
+  border-radius: $hh-radius-md;
+  overflow: hidden;
+}
+
+/* ── Form (Step 2) ── */
+.form-header {
+  margin-bottom: $hh-space-lg;
+}
+
+.section-tag {
+  font-size: $hh-font-body;
+  color: $hh-color-primary-text;
+}
+
+/* ── Guard states (empty / no-permission) ── */
+.guard-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  gap: $hh-space-md;
+}
+
+.guard-title {
+  font-size: $hh-font-h3;
+  font-weight: $hh-font-weight-medium;
+  color: $hh-color-text;
+  text-align: center;
+}
+
+.guard-desc {
+  font-size: $hh-font-body;
+  color: $hh-color-text-mute;
+  text-align: center;
+}
 </style>

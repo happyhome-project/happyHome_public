@@ -74,3 +74,89 @@ $uni-color-subtitle: #555; // 二级标题颜色
 $uni-font-size-subtitle: 18px;
 $uni-color-paragraph: #3f536e; // 文章段落颜色
 $uni-font-size-paragraph: 15px;
+
+// ═══════════════════════════════════════════════════════════════
+// ▼ happyHome / 美好 Home · Design Tokens
+// ▼ 命名空间: $hh-* （happyHome）
+// ▼ 与上方 $uni-* 变量并行存在，互不干扰。
+// ▼ 使用示例: @import 后直接用 color: $hh-color-primary;
+// ▼ 调性锚点: 小红书语感（温暖/圆润）+ 木质书架气质（沉淀/有重量）
+// ▼ 详见: docs/VISUAL-TONE.md · docs/DESIGN-TOKENS.md
+// ═══════════════════════════════════════════════════════════════
+
+// ─────────── Brand Colors ───────────
+$hh-color-primary:        #E07A5F;  // 木色橙 · 主色
+$hh-color-primary-light:  #F5B9A8;  // 浅木色 · hover / Tag 底
+$hh-color-primary-dark:   #C25D43;  // 深木色 · active / 强调
+
+// ─────────── Semantic Colors ───────────
+$hh-color-success:        #52C41A;  // 成功绿
+$hh-color-warning:        #FAAD14;  // 警告黄
+$hh-color-danger:         #C0392B;  // 危险红 · 暖红但明确读作"红"，与 primary 橙有清晰色相差
+$hh-color-info:           #6E8CA0;  // 温暖蓝灰
+
+// ─────────── Neutrals (Warm-tinted) ───────────
+$hh-color-bg:             #FFFFFF;  // 主背景（页面白）
+$hh-color-bg-sub:         #F7F6F3;  // 次级背景（卡片之间的底色，微暖）
+$hh-color-surface:        #FFFFFF;  // 卡片 / 面板表面
+$hh-color-border:         #EBE3D8;  // 暖灰边框
+$hh-color-divider:        #F2EFE9;  // 暖灰分割线
+$hh-color-text:           #2C2416;  // 暖黑 · 主文字
+$hh-color-text-sub:       #595550;  // 次文字 · 副标题/说明
+$hh-color-text-mute:      #766F65;  // 弱文字 · 时间戳/placeholder (4.96:1 on white, AA pass)
+$hh-color-text-inverse:   #FFFFFF;  // 反色文字（深色底上用）
+$hh-color-primary-text:   $hh-color-primary-dark; // 正文链接 / 小字强调 · 4.25:1 on white
+$hh-color-mask:           rgba(0, 0, 0, 0.4);   // 遮罩
+$hh-color-hover:          rgba($hh-color-primary, 0.06); // 主色 6% · hover 底（跟 primary 联动）
+$hh-opacity-disabled:     0.4;   // 禁用态透明度（按钮/输入框）
+
+// ─────────── Typography ───────────
+$hh-font-h1:         44rpx;  // 页面大标题
+$hh-font-h2:         36rpx;  // 区块标题 / 卡片主标
+$hh-font-h3:         32rpx;  // 小节标题
+$hh-font-body-lg:    30rpx;  // 正文大号 · 动态内容
+$hh-font-body:       28rpx;  // 正文标准
+$hh-font-caption:    24rpx;  // 辅助说明 / 表单 label
+$hh-font-tag:        22rpx;  // 标签 / 角标 / 时间戳
+
+$hh-font-weight-regular: 400;
+$hh-font-weight-medium:  500;
+$hh-font-weight-bold:    600;
+
+$hh-line-height-tight:   1.3;   // 标题行高
+$hh-line-height-base:    1.5;   // 正文行高
+$hh-line-height-relaxed: 1.7;   // 长段落行高
+
+// ─────────── Spacing (8-based) ───────────
+$hh-space-xs:   8rpx;   // 极小间距（图标与文字间）
+$hh-space-sm:   16rpx;  // 小间距（字段内）
+$hh-space-md:   24rpx;  // 中间距（卡片内边距、字段之间）
+$hh-space-lg:   32rpx;  // 大间距（卡片与卡片之间、页面左右 padding）
+$hh-space-xl:   48rpx;  // 特大间距（板块之间）
+$hh-space-xxl:  64rpx;  // 巨大间距（页面顶部、底部 safe area）
+
+// ─────────── Radius ───────────
+$hh-radius-sm:    8rpx;     // 标签 / 小按钮 / 输入框
+$hh-radius-md:    16rpx;    // 卡片 / 主按钮（温度感核心）
+$hh-radius-lg:    24rpx;    // 大面板 / 底部抽屉
+$hh-radius-full:  9999rpx;  // 头像 / pill 按钮
+
+// ─────────── Shadow ───────────
+$hh-shadow-card:   0 2rpx 12rpx rgba(44, 36, 22, 0.04);   // 卡片微阴影
+$hh-shadow-float:  0 8rpx 24rpx rgba(44, 36, 22, 0.08);   // 浮层 / 弹窗
+$hh-shadow-modal:  0 16rpx 48rpx rgba(44, 36, 22, 0.16);  // 模态 / 重弹层
+
+// ─────────── Z-index ───────────
+$hh-z-normal:  1;
+$hh-z-sticky:  10;     // 吸顶吸底元素
+$hh-z-overlay: 100;    // 遮罩层
+$hh-z-modal:   1000;   // 模态弹窗
+$hh-z-toast:   2000;   // Toast / 全屏提示
+
+// ─────────── Motion ───────────
+$hh-duration-fast: 0.15s;  // 按钮按下 / 小元素切换
+$hh-duration-base: 0.25s;  // 标准切换
+$hh-duration-slow: 0.4s;   // 面板滑入 / 大区域切换
+$hh-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+$hh-ease-in:       cubic-bezier(0.4, 0, 1, 1);
+$hh-ease-out:      cubic-bezier(0, 0, 0.2, 1);
