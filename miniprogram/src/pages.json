@@ -60,9 +60,6 @@
     "navigationBarTextStyle": "black",
     "navigationBarTitleText": "HappyHome",
     "navigationBarBackgroundColor": "#fff",
-    "backgroundColor": "#F7F6F3",
-    "mp-weixin": {
-      "styleIsolation": "shared"
-    }
+    "backgroundColor": "#F7F6F3"
   }
 }

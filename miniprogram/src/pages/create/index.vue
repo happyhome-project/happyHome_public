@@ -4,19 +4,18 @@
     <view v-if="!userStore.isLoggedIn" class="guard-state">
       <text class="guard-title">请先登录</text>
       <text class="guard-desc">登录后才能发布内容</text>
-      <wd-button size="small" plain type="primary" @click="goLogin">去登录</wd-button>
+      <button class="btn-primary-plain" size="mini" @tap="goLogin">去登录</button>
     </view>
 
     <!-- Guard: no community selected -->
     <view v-else-if="!communityStore.currentCommunityId" class="guard-state">
       <text class="guard-title">还没有加入社区</text>
       <text class="guard-desc">加入社区后才能发帖</text>
-      <wd-button size="small" plain type="primary" @click="goOnboarding">去加入</wd-button>
+      <button class="btn-primary-plain" size="mini" @tap="goOnboarding">去加入</button>
     </view>
 
     <!-- Guard: checking membership -->
     <view v-else-if="membershipChecking" class="guard-state">
-      <wd-loading color="#E07A5F" />
       <text class="guard-desc">检查社区成员身份...</text>
     </view>
 
@@ -24,16 +23,15 @@
     <view v-else-if="!isMember" class="guard-state">
       <text class="guard-title">你还不是「{{ communityStore.currentCommunity?.name }}」的成员</text>
       <text class="guard-desc">{{ memberStatus === 'pending' ? '你的加入申请正在审批中，请耐心等待' : '加入社区后才能发帖' }}</text>
-      <wd-button
+      <button
         v-if="memberStatus !== 'pending'"
-        size="small"
-        plain
-        type="primary"
-        :loading="joining"
-        @click="handleJoin"
+        class="btn-primary-plain"
+        size="mini"
+        :disabled="joining"
+        @tap="handleJoin"
       >
-        加入社区
-      </wd-button>
+        {{ joining ? '加入中...' : '加入社区' }}
+      </button>
     </view>
 
     <!-- Normal flow: member of current community -->
@@ -41,14 +39,18 @@
       <!-- Step 1: Select section -->
       <view v-if="!selectedSection" class="section-picker">
         <text class="title">选择板块</text>
-        <wd-cell
+        <view
           v-for="section in communityStore.currentSections"
           :key="section._id"
-          :title="section.name"
-          is-link
-          class="section-cell"
-          @click="selectSection(section)"
-        />
+          class="section-option"
+          @tap="selectSection(section)"
+        >
+          <text class="section-name">{{ section.name }}</text>
+          <text class="arrow">›</text>
+        </view>
+        <view v-if="communityStore.currentSections.length === 0" class="empty-hint">
+          <text class="guard-desc">该社区还没有板块</text>
+        </view>
       </view>
 
       <!-- Step 2: Fill form -->
@@ -62,15 +64,13 @@
           :widget="widget"
           v-model="formData[widget.widgetId]"
         />
-        <wd-button
-          type="primary"
-          block
-          :loading="submitting"
+        <button
+          class="btn-primary"
           :disabled="submitting"
-          @click="handleSubmit"
+          @tap="handleSubmit"
         >
-          发布
-        </wd-button>
+          {{ submitting ? '发布中...' : '发布' }}
+        </button>
       </view>
     </template>
   </view>
@@ -209,20 +209,62 @@ async function handleSubmit() {
 }
 
 /* ── Section picker (Step 1) ── */
-.section-cell {
-  margin-bottom: $hh-space-sm;
+.section-option {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: $hh-space-lg;
   border-radius: $hh-radius-md;
-  overflow: hidden;
+  background: $hh-color-bg-sub;
+  margin-bottom: $hh-space-sm;
+}
+.section-name {
+  font-size: $hh-font-body-lg;
+  color: $hh-color-text;
+}
+.arrow {
+  font-size: $hh-font-h3;
+  color: $hh-color-text-mute;
+}
+
+.empty-hint {
+  padding: $hh-space-xl 0;
+  text-align: center;
 }
 
 /* ── Form (Step 2) ── */
 .form-header {
   margin-bottom: $hh-space-lg;
 }
-
 .section-tag {
   font-size: $hh-font-body;
   color: $hh-color-primary-text;
+}
+
+/* ── Buttons (tokens-only, no wd-button) ── */
+.btn-primary {
+  margin-top: $hh-space-xl;
+  background: $hh-color-primary;
+  color: $hh-color-text-inverse;
+  border-radius: $hh-radius-md;
+  font-size: $hh-font-h3;
+  padding: $hh-space-md;
+  border: none;
+}
+.btn-primary[disabled] {
+  opacity: $hh-opacity-disabled;
+}
+
+.btn-primary-plain {
+  margin-top: $hh-space-sm;
+  background: $hh-color-bg;
+  color: $hh-color-primary;
+  border: 2rpx solid $hh-color-primary;
+  border-radius: $hh-radius-sm;
+  font-size: $hh-font-body;
+}
+.btn-primary-plain[disabled] {
+  opacity: $hh-opacity-disabled;
 }
 
 /* ── Guard states (empty / no-permission) ── */
@@ -234,14 +276,12 @@ async function handleSubmit() {
   min-height: 60vh;
   gap: $hh-space-md;
 }
-
 .guard-title {
   font-size: $hh-font-h3;
   font-weight: $hh-font-weight-medium;
   color: $hh-color-text;
   text-align: center;
 }
-
 .guard-desc {
   font-size: $hh-font-body;
   color: $hh-color-text-mute;
