@@ -26,7 +26,7 @@
         </view>
         <view class="dev-actions">
           <button size="mini" @tap="showDevLogin = false">取消</button>
-          <button size="mini" :disabled="devLoginLock.busy.value" @tap="devLoginLock.run()" style="background:#333;color:#fff;">
+          <button size="mini" :disabled="devLoginLock.busy.value" @tap="devLoginLock.run()" class="dev-login-btn">
             {{ devLoginLock.busy.value ? '登录中...' : '登录' }}
           </button>
         </view>
@@ -66,7 +66,7 @@
             size="mini"
             :disabled="approveLock.isBusy(member._id) || rejectLock.isBusy(member._id)"
             @tap="approveLock.run(member)"
-            style="background:#1976d2;color:#fff;"
+            class="approve-btn"
           >通过</button>
           <button
             size="mini"
@@ -219,4 +219,6 @@ onMounted(async () => {
 .input-wrap { background: $hh-color-bg-sub; border-radius: $hh-radius-sm; padding: $hh-space-md; }
 .input { font-size: $hh-font-body; width: 100%; min-height: 40rpx; background: transparent; color: $hh-color-text; }
 .input-placeholder { color: $hh-color-text-mute; font-size: $hh-font-body; }
+.dev-login-btn { background: $hh-color-text; color: $hh-color-text-inverse; }
+.approve-btn { background: $hh-color-info; color: $hh-color-text-inverse; }
 </style>
