@@ -34,7 +34,8 @@
     "build:quickapp-webview": "uni build -p quickapp-webview",
     "build:quickapp-webview-huawei": "uni build -p quickapp-webview-huawei",
     "build:quickapp-webview-union": "uni build -p quickapp-webview-union",
-    "type-check": "vue-tsc --noEmit"
+    "type-check": "vue-tsc --noEmit",
+    "postinstall": "node -e \"const f=require('fs'),s='../node_modules/wot-design-uni',t='node_modules/wot-design-uni';if(!f.existsSync(t)&&f.existsSync(s)){f.mkdirSync('node_modules',{recursive:true});f.cpSync(s,t,{recursive:true});console.log('wot-design-uni: copied to local node_modules (workspace hoist fix)')}\""
   },
   "dependencies": {
     "@dcloudio/uni-app": "3.0.0-4080420251103001",
