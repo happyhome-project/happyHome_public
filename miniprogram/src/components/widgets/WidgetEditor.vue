@@ -146,47 +146,47 @@ function clearLocation() {
 }
 </script>
 
-<style scoped>
-.widget-editor { margin-bottom: 32rpx; }
-.label { font-size: 28rpx; color: #333; margin-bottom: 12rpx; display: block; }
-.required { color: #ff4444; margin-left: 4rpx; }
+<style lang="scss" scoped>
+.widget-editor { margin-bottom: $hh-space-lg; }
+.label { font-size: $hh-font-body; color: $hh-color-text; margin-bottom: $hh-space-sm; display: block; }
+.required { color: $hh-color-danger; margin-left: 4rpx; }
 /* 微信小程序 <input> 原生组件对 CSS padding 的渲染有自己的 hack，直接
-   在 input 上加 padding + 设宽度会让 placeholder 显示区被截断（"请输入标题"
-   变 "请㈩入标题"）。终极解法：把 padding 放在外层容器，input 本身不带
-   padding、自适应宽度。再用 placeholder-class 保证占位样式稳定。*/
+   在 input 上加 padding + 设宽度会让 placeholder 显示区被截断。
+   终极解法：把 padding 放在外层容器，input 本身不带 padding、自适应宽度。*/
 .input-wrap {
-  background: #f8f8f8;
-  border-radius: 12rpx;
-  padding: 20rpx 24rpx;
+  background: $hh-color-bg-sub;
+  border-radius: $hh-radius-sm;
+  padding: $hh-space-md;
 }
 .input {
-  font-size: 28rpx;
+  font-size: $hh-font-body;
   width: 100%;
   min-height: 40rpx;
   background: transparent;
+  color: $hh-color-text;
 }
 .textarea-wrap {
-  background: #f8f8f8;
-  border-radius: 12rpx;
-  padding: 20rpx 24rpx;
+  background: $hh-color-bg-sub;
+  border-radius: $hh-radius-sm;
+  padding: $hh-space-md;
 }
 .input-placeholder {
-  color: #bbb;
-  font-size: 28rpx;
+  color: $hh-color-text-mute;
+  font-size: $hh-font-body;
 }
-.picker-display { background: #f8f8f8; border-radius: 12rpx; padding: 20rpx 24rpx; font-size: 28rpx; color: #666; }
-.image-uploader { display: flex; flex-wrap: wrap; gap: 16rpx; }
+.picker-display { background: $hh-color-bg-sub; border-radius: $hh-radius-sm; padding: $hh-space-md; font-size: $hh-font-body; color: $hh-color-text-sub; }
+.image-uploader { display: flex; flex-wrap: wrap; gap: $hh-space-sm; }
 .thumb-wrap { position: relative; width: 160rpx; height: 160rpx; }
-.thumb { width: 160rpx; height: 160rpx; border-radius: 12rpx; }
-.thumb-del { position: absolute; top: -10rpx; right: -10rpx; width: 36rpx; height: 36rpx; background: rgba(0,0,0,0.5); color: #fff; border-radius: 50%; font-size: 28rpx; line-height: 36rpx; text-align: center; }
-.add-btn { width: 160rpx; height: 160rpx; background: #f8f8f8; border-radius: 12rpx; display: flex; align-items: center; justify-content: center; }
-.add-icon { font-size: 60rpx; color: #ccc; }
-.location-picker { background: #f8f8f8; border-radius: 12rpx; padding: 20rpx 24rpx; }
-.location-value { margin-bottom: 16rpx; }
-.address { display: block; font-size: 28rpx; color: #333; }
-.coord { display: block; font-size: 24rpx; color: #999; margin-top: 6rpx; }
-.location-actions { display: flex; gap: 16rpx; }
-.loc-btn { margin: 0; background: #333; color: #fff; font-size: 24rpx; line-height: 1.8; }
-.loc-btn.clear { background: #999; }
-.textarea { font-size: 28rpx; width: 100%; min-height: 200rpx; background: transparent; }
+.thumb { width: 160rpx; height: 160rpx; border-radius: $hh-radius-sm; }
+.thumb-del { position: absolute; top: -10rpx; right: -10rpx; width: 36rpx; height: 36rpx; background: $hh-color-mask; color: $hh-color-text-inverse; border-radius: $hh-radius-full; font-size: $hh-font-body; line-height: 36rpx; text-align: center; }
+.add-btn { width: 160rpx; height: 160rpx; background: $hh-color-bg-sub; border-radius: $hh-radius-sm; display: flex; align-items: center; justify-content: center; }
+.add-icon { font-size: 60rpx; color: $hh-color-text-mute; }
+.location-picker { background: $hh-color-bg-sub; border-radius: $hh-radius-sm; padding: $hh-space-md; }
+.location-value { margin-bottom: $hh-space-sm; }
+.address { display: block; font-size: $hh-font-body; color: $hh-color-text; }
+.coord { display: block; font-size: $hh-font-caption; color: $hh-color-text-mute; margin-top: $hh-space-xs; }
+.location-actions { display: flex; gap: $hh-space-sm; }
+.loc-btn { margin: 0; background: $hh-color-primary; color: $hh-color-text-inverse; font-size: $hh-font-caption; line-height: 1.8; border: none; }
+.loc-btn.clear { background: $hh-color-text-mute; }
+.textarea { font-size: $hh-font-body; width: 100%; min-height: 200rpx; background: transparent; color: $hh-color-text; }
 </style>

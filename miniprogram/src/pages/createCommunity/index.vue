@@ -83,23 +83,23 @@ async function handleSubmit() {
 }
 </script>
 
-<style scoped>
-.page { padding: 32rpx; min-height: 100vh; background: #f5f5f5; }
-.form { background: #fff; border-radius: 16rpx; padding: 32rpx; margin-bottom: 32rpx; }
-.field { margin-bottom: 40rpx; }
+<style lang="scss" scoped>
+.page { padding: $hh-space-lg; min-height: 100vh; background: $hh-color-bg-sub; }
+.form { background: $hh-color-surface; border-radius: $hh-radius-md; padding: $hh-space-lg; margin-bottom: $hh-space-lg; }
+.field { margin-bottom: $hh-space-xl; }
 .field:last-child { margin-bottom: 0; }
-.label { font-size: 28rpx; color: #333; display: block; margin-bottom: 16rpx; font-weight: 500; }
-.required { color: #ff4444; }
+.label { font-size: $hh-font-body; color: $hh-color-text; display: block; margin-bottom: $hh-space-sm; font-weight: $hh-font-weight-medium; }
+.required { color: $hh-color-danger; }
 /* padding 放在外层 view，input/textarea 本身不带 padding，避免微信原生组件 placeholder 截断 */
-.input-wrap { background: #f8f8f8; border-radius: 12rpx; padding: 20rpx 24rpx; }
-.input { font-size: 28rpx; width: 100%; min-height: 40rpx; background: transparent; }
-.textarea { font-size: 28rpx; width: 100%; min-height: 160rpx; background: transparent; }
-.input-placeholder { color: #bbb; font-size: 28rpx; }
-.radio-group { display: flex; gap: 40rpx; }
-.radio-item { display: flex; align-items: center; gap: 12rpx; font-size: 28rpx; color: #333; }
-.radio { width: 36rpx; height: 36rpx; border-radius: 50%; border: 2rpx solid #ccc; }
-.radio.checked { border-color: #333; background: #333; box-shadow: inset 0 0 0 6rpx #fff; }
-.submit-btn { background: #333; color: #fff; border-radius: 12rpx; font-size: 32rpx; padding: 24rpx; width: 100%; }
-.submit-btn[disabled] { opacity: 0.5; }
-.tip { display: block; text-align: center; font-size: 24rpx; color: #aaa; margin-top: 24rpx; }
+.input-wrap { background: $hh-color-bg-sub; border-radius: $hh-radius-sm; padding: $hh-space-md; }
+.input { font-size: $hh-font-body; width: 100%; min-height: 40rpx; background: transparent; color: $hh-color-text; }
+.textarea { font-size: $hh-font-body; width: 100%; min-height: 160rpx; background: transparent; color: $hh-color-text; }
+.input-placeholder { color: $hh-color-text-mute; font-size: $hh-font-body; }
+.radio-group { display: flex; gap: $hh-space-xl; }
+.radio-item { display: flex; align-items: center; gap: $hh-space-sm; font-size: $hh-font-body; color: $hh-color-text; }
+.radio { width: 36rpx; height: 36rpx; border-radius: 50%; border: 2rpx solid $hh-color-border; }
+.radio.checked { border-color: $hh-color-primary; background: $hh-color-primary; box-shadow: inset 0 0 0 6rpx $hh-color-surface; }
+.submit-btn { background: $hh-color-primary; color: $hh-color-text-inverse; border-radius: $hh-radius-md; font-size: $hh-font-h3; padding: $hh-space-md; width: 100%; border: none; }
+.submit-btn[disabled] { opacity: $hh-opacity-disabled; }
+.tip { display: block; text-align: center; font-size: $hh-font-caption; color: $hh-color-text-mute; margin-top: $hh-space-md; }
 </style>

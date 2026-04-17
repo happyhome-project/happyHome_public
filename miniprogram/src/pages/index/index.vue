@@ -125,23 +125,24 @@ onMounted(async () => {
 watch(() => communityStore.currentSectionIndex, () => loadPosts(true))
 </script>
 
-<style scoped>
-.page { height: 100vh; display: flex; flex-direction: column; background: #f5f5f5; }
-.top-bar { padding: 24rpx 32rpx; background: #fff; border-bottom: 1rpx solid #eee; }
-.community-name { font-size: 34rpx; font-weight: 600; }
-.arrow { font-size: 24rpx; color: #999; }
-.feed { flex: 1; padding: 16rpx; }
-.empty-state { text-align: center; padding: 80rpx 0; color: #999; font-size: 28rpx; }
-.loading { text-align: center; padding: 20rpx; color: #ccc; font-size: 26rpx; }
+<style lang="scss" scoped>
+.page { height: 100vh; display: flex; flex-direction: column; background: $hh-color-bg-sub; }
+.top-bar { padding: $hh-space-md $hh-space-lg; background: $hh-color-surface; border-bottom: 1rpx solid $hh-color-divider; }
+.community-name { font-size: $hh-font-h3; font-weight: $hh-font-weight-bold; color: $hh-color-text; }
+.arrow { font-size: $hh-font-caption; color: $hh-color-text-mute; }
+.feed { flex: 1; padding: $hh-space-sm; }
+.empty-state { text-align: center; padding: $hh-space-xxl 0; color: $hh-color-text-mute; font-size: $hh-font-body; }
+.loading { text-align: center; padding: $hh-space-md; color: $hh-color-text-mute; font-size: $hh-font-caption; }
 .switcher-mask {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.4); z-index: 100;
+  background: $hh-color-mask; z-index: $hh-z-overlay;
   display: flex; align-items: flex-start; justify-content: flex-start;
 }
 .switcher-panel {
-  background: #fff; margin: 120rpx 0 0 0; width: 300rpx;
-  border-radius: 0 16rpx 16rpx 0; overflow: hidden;
+  background: $hh-color-surface; margin: 120rpx 0 0 0; width: 300rpx;
+  border-radius: 0 $hh-radius-md $hh-radius-md 0; overflow: hidden;
+  box-shadow: $hh-shadow-float;
 }
-.switcher-item { padding: 32rpx; font-size: 30rpx; border-bottom: 1rpx solid #f0f0f0; }
-.switcher-item.active { color: #333; font-weight: 600; background: #f8f8f8; }
+.switcher-item { padding: $hh-space-lg; font-size: $hh-font-body-lg; color: $hh-color-text-sub; border-bottom: 1rpx solid $hh-color-divider; }
+.switcher-item.active { color: $hh-color-text; font-weight: $hh-font-weight-bold; background: $hh-color-bg-sub; }
 </style>

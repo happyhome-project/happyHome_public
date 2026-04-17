@@ -71,26 +71,26 @@ function handleCreate() {
 }
 </script>
 
-<style scoped>
-.onboarding { padding: 32rpx; }
-.header { margin-bottom: 40rpx; }
-.title { font-size: 48rpx; font-weight: bold; display: block; }
-.subtitle { font-size: 28rpx; color: #666; margin-top: 8rpx; display: block; }
+<style lang="scss" scoped>
+.onboarding { padding: $hh-space-lg; }
+.header { margin-bottom: $hh-space-xl; }
+.title { font-size: $hh-font-h1; font-weight: $hh-font-weight-bold; display: block; color: $hh-color-text; }
+.subtitle { font-size: $hh-font-body; color: $hh-color-text-sub; margin-top: $hh-space-xs; display: block; }
 .community-card {
-  display: flex; align-items: center; padding: 24rpx;
-  background: #fff; border-radius: 16rpx; margin-bottom: 20rpx;
-  box-shadow: 0 2rpx 12rpx rgba(0,0,0,0.06);
-  transition: opacity 0.2s;
+  display: flex; align-items: center; padding: $hh-space-md;
+  background: $hh-color-surface; border-radius: $hh-radius-md; margin-bottom: $hh-space-md;
+  box-shadow: $hh-shadow-card;
+  transition: opacity $hh-duration-base $hh-ease-standard;
 }
-.community-card.disabled { opacity: 0.5; pointer-events: none; }
-.cover { width: 100rpx; height: 100rpx; border-radius: 12rpx; flex-shrink: 0; }
-.info { flex: 1; margin: 0 20rpx; }
-.name { font-size: 32rpx; font-weight: 600; display: block; }
-.desc { font-size: 26rpx; color: #888; margin-top: 4rpx; display: block; }
-.meta { font-size: 24rpx; color: #aaa; margin-top: 4rpx; display: block; }
-.badge { font-size: 24rpx; padding: 8rpx 16rpx; border-radius: 20rpx; white-space: nowrap; }
+.community-card.disabled { opacity: $hh-opacity-disabled; pointer-events: none; }
+.cover { width: 100rpx; height: 100rpx; border-radius: $hh-radius-sm; flex-shrink: 0; }
+.info { flex: 1; margin: 0 $hh-space-md; }
+.name { font-size: $hh-font-h3; font-weight: $hh-font-weight-bold; display: block; color: $hh-color-text; }
+.desc { font-size: $hh-font-caption; color: $hh-color-text-sub; margin-top: 4rpx; display: block; }
+.meta { font-size: $hh-font-caption; color: $hh-color-text-mute; margin-top: 4rpx; display: block; }
+.badge { font-size: $hh-font-caption; padding: $hh-space-xs $hh-space-sm; border-radius: $hh-radius-lg; white-space: nowrap; }
 .badge.open { background: #e8f5e9; color: #2e7d32; }
 .badge.approval { background: #fff3e0; color: #e65100; }
-.footer { margin-top: 40rpx; }
-.create-btn { background: #f5f5f5; color: #333; border-radius: 12rpx; }
+.footer { margin-top: $hh-space-xl; }
+.create-btn { background: $hh-color-bg-sub; color: $hh-color-text; border-radius: $hh-radius-md; }
 </style>

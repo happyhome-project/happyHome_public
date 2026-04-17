@@ -89,15 +89,15 @@ function openLocation() {
 }
 </script>
 
-<style scoped>
-.widget-item { padding: 20rpx 0; border-bottom: 1rpx solid #f5f5f5; }
-.label { font-size: 26rpx; color: #999; display: block; margin-bottom: 8rpx; }
-.value { font-size: 30rpx; color: #333; }
-.images { display: flex; flex-wrap: wrap; gap: 12rpx; }
-.thumb { width: 160rpx; height: 160rpx; border-radius: 8rpx; }
+<style lang="scss" scoped>
+.widget-item { padding: $hh-space-md 0; border-bottom: 1rpx solid $hh-color-divider; }
+.label { font-size: $hh-font-caption; color: $hh-color-text-mute; display: block; margin-bottom: $hh-space-xs; }
+.value { font-size: $hh-font-body-lg; color: $hh-color-text; }
+.images { display: flex; flex-wrap: wrap; gap: $hh-space-sm; }
+.thumb { width: 160rpx; height: 160rpx; border-radius: $hh-radius-sm; }
 .location-value {
-  color: #1976d2;
+  color: $hh-color-info;
   text-decoration: underline;
 }
-.empty-value { color: #ccc; }
+.empty-value { color: $hh-color-text-mute; }
 </style>

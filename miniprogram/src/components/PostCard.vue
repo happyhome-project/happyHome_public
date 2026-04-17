@@ -32,14 +32,14 @@ const formattedTime = computed(() => {
 })
 </script>
 
-<style scoped>
+<style lang="scss" scoped>
 .post-card {
-  background: #fff; border-radius: 16rpx; padding: 28rpx 32rpx;
-  margin-bottom: 16rpx; box-shadow: 0 2rpx 12rpx rgba(0,0,0,0.04);
+  background: $hh-color-surface; border-radius: $hh-radius-md; padding: $hh-space-md $hh-space-lg;
+  margin-bottom: $hh-space-sm; box-shadow: $hh-shadow-card;
 }
-.field { display: flex; align-items: center; margin-bottom: 8rpx; }
-.field-label { font-size: 24rpx; color: #999; margin-right: 12rpx; flex-shrink: 0; }
-.field-value { font-size: 28rpx; color: #333; }
-.time { font-size: 24rpx; color: #bbb; display: block; margin-top: 16rpx; text-align: right; }
-.empty-preview { color: #ccc; font-size: 26rpx; }
+.field { display: flex; align-items: center; margin-bottom: $hh-space-xs; }
+.field-label { font-size: $hh-font-caption; color: $hh-color-text-mute; margin-right: $hh-space-sm; flex-shrink: 0; }
+.field-value { font-size: $hh-font-body; color: $hh-color-text; }
+.time { font-size: $hh-font-caption; color: $hh-color-text-mute; display: block; margin-top: $hh-space-sm; text-align: right; }
+.empty-preview { color: $hh-color-text-mute; font-size: $hh-font-caption; }
 </style>

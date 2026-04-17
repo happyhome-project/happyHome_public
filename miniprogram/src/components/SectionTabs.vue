@@ -20,8 +20,8 @@ defineEmits(['change'])
 const activeTabId = computed(() => `tab-${props.currentIndex}`)
 </script>
 
-<style scoped>
-.tabs { display: flex; white-space: nowrap; background: #fff; padding: 0 16rpx; border-bottom: 1rpx solid #eee; }
-.tab { display: inline-block; padding: 24rpx 28rpx; font-size: 28rpx; color: #666; flex-shrink: 0; }
-.tab.active { color: #333; font-weight: 600; border-bottom: 4rpx solid #333; }
+<style lang="scss" scoped>
+.tabs { display: flex; white-space: nowrap; background: $hh-color-surface; padding: 0 $hh-space-sm; border-bottom: 1rpx solid $hh-color-divider; }
+.tab { display: inline-block; padding: $hh-space-md $hh-space-md; font-size: $hh-font-body; color: $hh-color-text-sub; flex-shrink: 0; }
+.tab.active { color: $hh-color-primary; font-weight: $hh-font-weight-bold; border-bottom: 4rpx solid $hh-color-primary; }
 </style>

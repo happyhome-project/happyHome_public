@@ -179,15 +179,15 @@ function formatDate(iso: string): string {
 }
 </script>
 
-<style scoped>
-.detail-page { padding: 32rpx; background: #fff; min-height: 100vh; }
-.loading { text-align: center; padding: 80rpx; color: #999; }
-.meta { margin-top: 40rpx; padding-top: 20rpx; border-top: 1rpx solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
-.time { font-size: 24rpx; color: #bbb; }
-.actions { display: flex; align-items: center; gap: 24rpx; }
-.edit-btn { font-size: 26rpx; color: #1976d2; padding: 8rpx 20rpx; }
-.delete-btn { font-size: 26rpx; color: #ff4444; padding: 8rpx 20rpx; }
-.delete-btn.disabled { color: #ccc; pointer-events: none; }
-.cancel-btn { font-size: 26rpx; color: #999; padding: 8rpx 20rpx; }
-.save-btn { font-size: 26rpx; color: #2e7d32; padding: 8rpx 20rpx; }
+<style lang="scss" scoped>
+.detail-page { padding: $hh-space-lg; background: $hh-color-bg; min-height: 100vh; }
+.loading { text-align: center; padding: $hh-space-xxl; color: $hh-color-text-mute; }
+.meta { margin-top: $hh-space-xl; padding-top: $hh-space-md; border-top: 1rpx solid $hh-color-divider; display: flex; justify-content: space-between; align-items: center; }
+.time { font-size: $hh-font-caption; color: $hh-color-text-mute; }
+.actions { display: flex; align-items: center; gap: $hh-space-md; }
+.edit-btn { font-size: $hh-font-caption; color: $hh-color-info; padding: $hh-space-xs $hh-space-md; }
+.delete-btn { font-size: $hh-font-caption; color: $hh-color-danger; padding: $hh-space-xs $hh-space-md; }
+.delete-btn.disabled { color: $hh-color-text-mute; pointer-events: none; }
+.cancel-btn { font-size: $hh-font-caption; color: $hh-color-text-mute; padding: $hh-space-xs $hh-space-md; }
+.save-btn { font-size: $hh-font-caption; color: $hh-color-success; padding: $hh-space-xs $hh-space-md; }
 </style>
