@@ -1,4 +1,15 @@
-# 美好 Home · 视觉调性锚点
+# 美好 Home · 视觉调性锚点 ⚠️ 已废弃
+
+> ⚠️ **本文档描述 v1 木色橙方向，已于 2026-04-20 废弃。**
+> 当前方向：**Classical Dossier 经典卷宗**（墨绿 accent + 宋体 + 暖灰白纸底）。
+> 权威文档：[docs/SESSION-HANDOFF.md](./SESSION-HANDOFF.md)
+> 设计原稿：`_claude-design-drop/happyhome/project/design_handoff_happyhome/README.md`
+> 代码里 `miniprogram/src/uni.scss` 的 `$hh-*` tokens 已更新为 v2。
+> **不要按这里说的做。** 下文保留仅作历史参考。
+
+---
+
+## 历史内容（v1 木色橙 · 已废弃）
 
 > 这是美好 Home 小程序的**视觉与调性宪法**。所有 UI 决策（配色、字号、圆角、文案语气、组件风格）都应回到这份文档对齐。
 > 上游：无。下游：[docs/DESIGN-TOKENS.md](./DESIGN-TOKENS.md) / [docs/UX-PRINCIPLES.md](./UX-PRINCIPLES.md)（后续补齐） / [docs/UI-LIBRARY.md](./UI-LIBRARY.md)（后续补齐）。
