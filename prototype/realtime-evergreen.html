@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>美好 Home · 实时+沉淀双类板块</title>
+<style>
+:root{
+  --p:#E07A5F;--pl:#F5B9A8;--pd:#C25D43;--pbg:rgba(224,122,95,0.06);--pbg2:rgba(224,122,95,0.1);
+  --s:#52C41A;--sbg:rgba(82,196,26,0.08);--w:#FAAD14;--wbg:rgba(250,173,20,0.08);
+  --i:#6E8CA0;--ibg:rgba(110,140,160,0.08);--d:#C0392B;
+  --t1:rgba(0,0,0,0.88);--t2:rgba(0,0,0,0.65);--t3:rgba(0,0,0,0.45);--t4:rgba(0,0,0,0.25);
+  --bg:#FFF;--bgp:#F7F6F3;--bd:rgba(0,0,0,0.06);--dv:rgba(0,0,0,0.04);
+  --s1:0 1px 4px rgba(0,0,0,0.03);--s2:0 4px 12px rgba(0,0,0,0.05);
+  --rs:6px;--rm:10px;--rl:14px;--rf:9999px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,"PingFang SC",sans-serif;background:#d5d1cc;padding:24px;-webkit-font-smoothing:antialiased}
+h1{text-align:center;font-size:20px;color:var(--t1);margin-bottom:4px}
+h1 span{color:var(--p)}
+.sub{text-align:center;font-size:13px;color:var(--t3);margin-bottom:4px;line-height:1.5}
+.rule{text-align:center;font-size:11px;color:var(--t4);margin-bottom:24px;max-width:780px;margin-left:auto;margin-right:auto;line-height:1.7}
+.rule b{color:var(--p)} .rule em{color:var(--i);font-style:normal}
+
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px}
+@media(max-width:1600px){.grid{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:1200px){.grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:700px){.grid{grid-template-columns:1fr}}
+
+.w{display:flex;flex-direction:column;align-items:center}
+.scn{font-size:12px;font-weight:700;color:var(--p);margin-bottom:2px;letter-spacing:1px;text-align:center}
+.tag-n{display:inline-block;background:var(--pbg);color:var(--p);padding:2px 8px;border-radius:var(--rf);font-size:10px;font-weight:600;margin-bottom:4px}
+.scn-d{font-size:11px;color:var(--t3);margin-bottom:8px;text-align:center;line-height:1.4;max-width:300px}
+
+.ph{width:320px;height:720px;background:var(--bgp);border-radius:28px;overflow:hidden;
+  box-shadow:0 16px 48px rgba(0,0,0,0.16),0 0 0 1px rgba(0,0,0,0.05);
+  display:flex;flex-direction:column;position:relative}
+.nv{height:40px;background:var(--bg);display:flex;align-items:center;justify-content:center;
+  font-size:15px;font-weight:600;color:var(--t1);flex-shrink:0}
+.bo{flex:1;overflow-y:auto} .bo::-webkit-scrollbar{display:none}
+.tb{height:46px;background:var(--bg);display:flex;align-items:center;justify-content:space-around;
+  flex-shrink:0;border-top:1px solid var(--bd)}
+.tbi{font-size:9px;color:var(--t4);display:flex;flex-direction:column;align-items:center;gap:1px;position:relative}
+.tbi.on{color:var(--p)} .tbi em{font-size:17px;font-style:normal}
+.tbi-d{width:4px;height:4px;border-radius:50%;background:var(--p);position:absolute;bottom:-4px;opacity:0}
+.tbi.on .tbi-d{opacity:1}
+
+.fab{position:absolute;bottom:56px;right:12px;width:44px;height:44px;border-radius:50%;
+  background:linear-gradient(135deg,var(--p),var(--pd));color:white;font-size:22px;
+  display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(224,122,95,0.35);z-index:5}
+
+/* Topbar */
+.tp{padding:10px 14px;background:var(--bg);display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--bd)}
+.tp .nm{font-size:15px;font-weight:600;color:var(--t1)}
+.tp .ar{color:var(--t4);font-size:11px;margin-left:4px}
+.tp .meta{font-size:10px;color:var(--t3);margin-top:1px}
+.tp-info{display:flex;flex-direction:column}
+
+/* ══ Realtime Pinned Zone ══ */
+.rtz{background:linear-gradient(180deg,var(--pbg2) 0%,var(--pbg) 100%);padding:10px 12px 12px;border-bottom:1px solid var(--bd);position:relative}
+.rtz::before{content:"";position:absolute;top:0;left:0;width:3px;height:100%;background:linear-gradient(180deg,var(--p),var(--pd))}
+.rtz-head{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+.rtz-pulse{width:7px;height:7px;border-radius:50%;background:var(--p);position:relative;animation:pulse 1.5s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(224,122,95,0.6)}50%{box-shadow:0 0 0 5px rgba(224,122,95,0)}}
+.rtz-title{font-size:12px;font-weight:600;color:var(--p);letter-spacing:0.5px}
+.rtz-more{margin-left:auto;font-size:10px;color:var(--t3)}
+
+.rt-c{background:var(--bg);border-radius:var(--rm);padding:10px 12px;margin-bottom:6px;box-shadow:var(--s1);position:relative}
+.rt-c:last-child{margin-bottom:0}
+.rt-sec{font-size:10px;color:var(--p);font-weight:600;display:flex;align-items:center;gap:4px;margin-bottom:4px}
+.rt-sec em{font-size:11px;font-style:normal}
+.rt-t{font-size:13px;color:var(--t1);font-weight:500;line-height:1.4}
+.rt-meta{display:flex;gap:4px;margin-top:5px;flex-wrap:wrap}
+.rt-chip{font-size:10px;color:var(--t2);background:var(--bgp);padding:2px 7px;border-radius:var(--rf)}
+.rt-chip.hot{background:var(--sbg);color:var(--s)}
+.rt-foot{display:flex;align-items:center;justify-content:space-between;margin-top:8px}
+.rt-user{font-size:10px;color:var(--t3)}
+.rt-btn{font-size:10px;color:var(--p);background:var(--pbg);border:none;padding:3px 10px;border-radius:var(--rf);font-weight:500}
+
+/* Route inline (carpool) */
+.rt-route{display:flex;align-items:center;gap:4px;margin:4px 0}
+.rd{width:6px;height:6px;border-radius:50%;border:1.5px solid var(--p)}
+.rd.f{background:var(--p)}
+.rl{flex:1;border-top:1px dashed var(--bd)}
+.rname{font-size:12px;color:var(--t1);font-weight:500}
+
+/* ══ Evergreen Group ══ */
+.gs-head{padding:12px 14px 6px;display:flex;align-items:center;justify-content:space-between}
+.gs-left{display:flex;align-items:center;gap:6px}
+.gs-ico{font-size:15px}
+.gs-t{font-size:13px;font-weight:600;color:var(--t1)}
+.gs-n{font-size:10px;color:var(--t4)}
+.gs-more{font-size:10px;color:var(--t3)}
+
+.gs{margin:0 12px 10px;background:var(--bg);border-radius:var(--rm);box-shadow:var(--s1);overflow:hidden}
+.gs-c{padding:8px 12px;border-bottom:1px solid var(--dv);cursor:pointer}
+.gs-c:last-child{border-bottom:none}
+.gs-c-row{display:flex;gap:8px;align-items:center}
+.gs-thu{width:48px;height:48px;border-radius:var(--rs);flex-shrink:0;background-size:cover}
+.gs-ct{flex:1;min-width:0}
+.gs-title{font-size:12px;font-weight:500;color:var(--t1);line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.gs-desc{font-size:11px;color:var(--t3);margin-top:2px;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.gs-px{font-size:14px;font-weight:600;color:var(--p);margin-top:2px;display:block}
+.gs-px::before{content:'\00A5';font-size:10px}
+.gs-meta{display:flex;align-items:center;gap:4px;margin-top:3px}
+.gs-chip{font-size:9px;color:var(--t3);background:var(--bgp);padding:1px 5px;border-radius:var(--rf)}
+
+/* Pinned marker */
+.pin{position:absolute;top:6px;right:6px;font-size:9px;color:var(--p);font-weight:500}
+
+/* ══ Dormant Section ══ */
+.dorm{margin:16px 12px 0;padding:10px 12px;background:var(--bg);border-radius:var(--rm);box-shadow:var(--s1);cursor:pointer;border:1px dashed var(--bd)}
+.dorm-h{display:flex;align-items:center;gap:6px}
+.dorm-t{font-size:12px;color:var(--t3);font-weight:500}
+.dorm-arr{margin-left:auto;color:var(--t4);font-size:11px}
+.dorm-list{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+.dorm-tag{font-size:10px;color:var(--t3);background:var(--bgp);padding:3px 8px;border-radius:var(--rf)}
+
+/* Empty state */
+.empty{padding:40px 20px;text-align:center}
+.empty em{font-size:40px;display:block;margin-bottom:8px;opacity:0.4;font-style:normal}
+.empty-t{font-size:13px;color:var(--t2);font-weight:500;margin-bottom:4px}
+.empty-d{font-size:11px;color:var(--t4);line-height:1.5}
+
+/* Section count badge */
+.cnt{position:absolute;top:10px;right:10px;background:var(--pd);color:white;padding:3px 8px;border-radius:var(--rf);font-size:10px;font-weight:600;z-index:10;line-height:1.2}
+.cnt small{display:block;font-size:8px;opacity:0.8;font-weight:400;margin-top:1px}
+
+/* Spacer */
+.sp{height:12px}
+
+/* Note below */
+.note{margin-top:10px;font-size:10px;color:var(--t4);max-width:300px;text-align:center;line-height:1.5;font-style:italic}
+</style>
+</head>
+<body>
+
+<h1>实时协作 + 沉淀展示 · <span>4 种内容量场景</span></h1>
+<p class="sub">实时板块置顶区（红色脉冲点）+ 沉淀板块分组卡 + 休眠板块折叠区</p>
+<p class="rule">
+<b>实时协作类</b>（如拼车、活动报名）= 置顶脉冲点显眼区域　｜　<b>沉淀展示类</b>（如好店、课件）= 分组卡片展示 top 2-3　｜　<em>休眠板块</em> = 底部折叠提示
+</p>
+
+<div class="grid">
+
+<!-- ══════════ 场景 1：内容极少 ══════════ -->
+<div class="w">
+<div class="scn">① 新社区</div>
+<div class="tag-n">内容少 · 3 沉淀板块 · 无实时</div>
+<div class="scn-d">刚创建 1 周的社区，板块有了但帖子不多</div>
+<div class="ph">
+  <div class="cnt">3 沉淀<small>0 实时</small></div>
+  <div class="nv">社区</div>
+  <div class="bo">
+    <div class="tp">
+      <div class="tp-info">
+        <span><span class="nm">亲子绘本群</span><span class="ar"> ▾</span></span>
+        <span class="meta">12 位成员</span>
+      </div>
+    </div>
+    <div class="sp"></div>
+    <!-- 没有实时板块，直接进沉淀 -->
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">📚</span><span class="gs-t">书单推荐</span><span class="gs-n">· 5 条</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs">
+      <div class="gs-c"><div class="gs-c-row"><div class="gs-thu" style="background:linear-gradient(135deg,#fce4ec,#f8bbd0)"></div><div class="gs-ct"><div class="gs-title">《活了 100 万次的猫》</div><div class="gs-desc">适合 3-6 岁，关于爱与自我</div></div></div></div>
+      <div class="gs-c"><div class="gs-c-row"><div class="gs-thu" style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9)"></div><div class="gs-ct"><div class="gs-title">《大卫不可以》系列</div><div class="gs-desc">处理孩子哭闹的神器</div></div></div></div>
+    </div>
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">🏪</span><span class="gs-t">机构推荐</span><span class="gs-n">· 2 条</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs">
+      <div class="gs-c"><div class="gs-ct"><div class="gs-title">蓝天绘本馆</div><div class="gs-desc">老师耐心，离小区开车 10 分钟</div></div></div>
+      <div class="gs-c"><div class="gs-ct"><div class="gs-title">小橡树亲子游泳</div><div class="gs-desc">水温适中，有更衣室</div></div></div>
+    </div>
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">💬</span><span class="gs-t">育儿讨论</span><span class="gs-n">· 1 条</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs">
+      <div class="gs-c"><div class="gs-ct"><div class="gs-title">一岁宝宝不肯吃饭怎么办？</div><div class="gs-desc">今天来分享下我家的经验…</div><div class="gs-meta"><span class="gs-chip">3 条回复</span></div></div></div>
+    </div>
+  </div>
+  <div class="fab">+</div>
+  <div class="tb"><div class="tbi on"><em>🏠</em>首页<div class="tbi-d"></div></div><div class="tbi"><em>👤</em>我的<div class="tbi-d"></div></div></div>
+</div>
+<div class="note">内容少时首页短，不堆砌。沉淀板块即使只有 1-2 条也露出</div>
+</div>
+
+<!-- ══════════ 场景 2：中等内容（平常状态） ══════════ -->
+<div class="w">
+<div class="scn">② 稳定运营</div>
+<div class="tag-n">内容中等 · 3 沉淀 · 1 实时激活</div>
+<div class="scn-d">日常运营中，有一个长期实时板块（互助）激活</div>
+<div class="ph">
+  <div class="cnt">3 沉淀<small>1 实时</small></div>
+  <div class="nv">社区</div>
+  <div class="bo">
+    <div class="tp">
+      <div class="tp-info">
+        <span><span class="nm">阳光花园社区</span><span class="ar"> ▾</span></span>
+        <span class="meta">32 位成员 · 今日 2 条新</span>
+      </div>
+    </div>
+
+    <!-- 实时置顶区：邻里互助 -->
+    <div class="rtz">
+      <div class="rtz-head">
+        <div class="rtz-pulse"></div>
+        <span class="rtz-title">正在进行 · 邻里互助</span>
+        <span class="rtz-more">全部 ›</span>
+      </div>
+      <div class="rt-c">
+        <div class="rt-sec"><em>🔧</em>互助求助</div>
+        <div class="rt-t">有没有靠谱的下水道师傅？</div>
+        <div class="rt-meta"><span class="rt-chip">3 条回复</span><span class="rt-chip">2小时前</span></div>
+        <div class="rt-foot"><span class="rt-user">张先生</span><button class="rt-btn">我能帮忙</button></div>
+      </div>
+      <div class="rt-c">
+        <div class="rt-sec"><em>🔧</em>互助求助</div>
+        <div class="rt-t">寻物：小区里捡到蓝色雨伞</div>
+        <div class="rt-foot"><span class="rt-user">李阿姨 · 昨天</span><button class="rt-btn">联系</button></div>
+      </div>
+    </div>
+
+    <!-- 沉淀板块 -->
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">🏷</span><span class="gs-t">闲置交易</span><span class="gs-n">· 42 条</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs">
+      <div class="gs-c"><div class="gs-c-row"><div class="gs-thu" style="background:linear-gradient(135deg,#f5e6d3,#e0c9b0)"></div><div class="gs-ct"><div class="gs-title">宜家落地灯 · 九成新</div><span class="gs-px">80</span></div></div></div>
+      <div class="gs-c"><div class="gs-c-row"><div class="gs-thu" style="background:linear-gradient(135deg,#d4e6f1,#c5dbe8)"></div><div class="gs-ct"><div class="gs-title">婴儿推车 · 可躺可坐</div><span class="gs-px">200</span></div></div></div>
+    </div>
+
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">🏪</span><span class="gs-t">好店推荐</span><span class="gs-n">· 28 条</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs">
+      <div class="gs-c"><div class="gs-ct"><div class="gs-title">小区北门水果店 · 老板人好价实惠</div></div></div>
+      <div class="gs-c"><div class="gs-ct"><div class="gs-title">张师傅家政 · 保洁钟点工</div><div class="gs-desc">35元/小时，口碑不错</div></div></div>
+    </div>
+
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">📢</span><span class="gs-t">小区公告</span><span class="gs-n">· 8 条</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs">
+      <div class="gs-c"><div class="gs-ct"><div class="gs-title">本周五物业停水通知 10:00-15:00</div></div></div>
+    </div>
+
+    <!-- 休眠板块提示 -->
+    <div class="dorm">
+      <div class="dorm-h">
+        <span style="font-size:13px">🌙</span>
+        <span class="dorm-t">其他板块（暂未启用）</span>
+        <span class="dorm-arr">›</span>
+      </div>
+      <div class="dorm-list">
+        <span class="dorm-tag">拼车出行</span>
+        <span class="dorm-tag">读书会</span>
+      </div>
+    </div>
+    <div class="sp"></div>
+  </div>
+  <div class="fab">+</div>
+  <div class="tb"><div class="tbi on"><em>🏠</em>首页<div class="tbi-d"></div></div><div class="tbi"><em>👤</em>我的<div class="tbi-d"></div></div></div>
+</div>
+<div class="note">实时置顶+沉淀分组+休眠折叠，三层结构清晰</div>
+</div>
+
+<!-- ══════════ 场景 3：活动期间（实时高峰） ══════════ -->
+<div class="w">
+<div class="scn">③ 活动当天</div>
+<div class="tag-n">内容多 · 3 沉淀 · 2 实时激活</div>
+<div class="scn-d">月度读书会当天，拼车+签到同时激活，都置顶</div>
+<div class="ph">
+  <div class="cnt">3 沉淀<small>2 实时</small></div>
+  <div class="nv">社区</div>
+  <div class="bo">
+    <div class="tp">
+      <div class="tp-info">
+        <span><span class="nm">阳光花园社区</span><span class="ar"> ▾</span></span>
+        <span class="meta">32 位成员 · 今日 12 条新 🔥</span>
+      </div>
+    </div>
+
+    <!-- 实时置顶：2 个板块都在激活 -->
+    <div class="rtz">
+      <div class="rtz-head">
+        <div class="rtz-pulse"></div>
+        <span class="rtz-title">正在进行 · 今日活动</span>
+        <span class="rtz-more">全部 ›</span>
+      </div>
+      <!-- 实时板块 A: 拼车 -->
+      <div class="rt-c">
+        <div class="rt-sec"><em>🚗</em>拼车出行</div>
+        <div class="rt-route"><div class="rd f"></div><span class="rname">阳光花园</span><div class="rl"></div><span class="rname">万达广场</span><div class="rd"></div></div>
+        <div class="rt-meta"><span class="rt-chip hot">剩 2 座</span><span class="rt-chip">🕐 14:30</span><span class="rt-chip">💰 15元</span></div>
+        <div class="rt-foot"><span class="rt-user">张师傅 · 已验证</span><button class="rt-btn">拼车</button></div>
+      </div>
+      <div class="rt-c">
+        <div class="rt-sec"><em>🚗</em>拼车出行</div>
+        <div class="rt-route"><div class="rd f"></div><span class="rname">阳光花园</span><div class="rl"></div><span class="rname">图书馆</span><div class="rd"></div></div>
+        <div class="rt-meta"><span class="rt-chip">🕐 15:00</span><span class="rt-chip">💰 10元</span></div>
+        <div class="rt-foot"><span class="rt-user">李阿姨</span><button class="rt-btn">拼车</button></div>
+      </div>
+      <!-- 实时板块 B: 签到 -->
+      <div class="rt-c">
+        <div class="rt-sec"><em>✍️</em>活动签到</div>
+        <div class="rt-t">4月读书会 · 《活着》主题讨论</div>
+        <div class="rt-meta"><span class="rt-chip hot">已签到 8/15</span><span class="rt-chip">📍 社区活动室</span></div>
+        <div class="rt-foot"><span class="rt-user">王老师 发起</span><button class="rt-btn">我要签到</button></div>
+      </div>
+    </div>
+
+    <!-- 沉淀板块 -->
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">🏷</span><span class="gs-t">闲置交易</span><span class="gs-n">· 42 条</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs">
+      <div class="gs-c"><div class="gs-c-row"><div class="gs-thu" style="background:linear-gradient(135deg,#f5e6d3,#e0c9b0)"></div><div class="gs-ct"><div class="gs-title">宜家落地灯 · 九成新</div><span class="gs-px">80</span></div></div></div>
+    </div>
+
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">🏪</span><span class="gs-t">好店推荐</span><span class="gs-n">· 28 条</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs">
+      <div class="gs-c"><div class="gs-ct"><div class="gs-title">小区北门水果店</div></div></div>
+    </div>
+
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">📢</span><span class="gs-t">小区公告</span><span class="gs-n">· 8 条</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs">
+      <div class="gs-c"><div class="gs-ct"><div class="gs-title">周五物业停水 10:00-15:00</div></div></div>
+    </div>
+    <div class="sp"></div>
+  </div>
+  <div class="fab">+</div>
+  <div class="tb"><div class="tbi on"><em>🏠</em>首页<div class="tbi-d"></div></div><div class="tbi"><em>👤</em>我的<div class="tbi-d"></div></div></div>
+</div>
+<div class="note">多个实时板块都置顶，用板块小标签（🚗拼车/✍️签到）区分</div>
+</div>
+
+<!-- ══════════ 场景 4：课程班高密度 ══════════ -->
+<div class="w">
+<div class="scn">④ 课程班高密度</div>
+<div class="tag-n">内容多 · 5 沉淀 · 2 实时 · 1 归档</div>
+<div class="scn-d">期中课程，课件/作业持续沉淀，考试周签到激活</div>
+<div class="ph">
+  <div class="cnt">5 沉淀<small>2 实时</small></div>
+  <div class="nv">社区</div>
+  <div class="bo">
+    <div class="tp">
+      <div class="tp-info">
+        <span><span class="nm">少儿绘画 · 周末班</span><span class="ar"> ▾</span></span>
+        <span class="meta">陈老师 · 15 位学员</span>
+      </div>
+    </div>
+
+    <div class="rtz">
+      <div class="rtz-head">
+        <div class="rtz-pulse"></div>
+        <span class="rtz-title">本周进行中</span>
+        <span class="rtz-more">全部 ›</span>
+      </div>
+      <div class="rt-c">
+        <div class="rt-sec"><em>✍️</em>课堂签到</div>
+        <div class="rt-t">第 6 课 · 光影与透视</div>
+        <div class="rt-meta"><span class="rt-chip hot">已到 12/15</span><span class="rt-chip">本周六 9:00</span></div>
+        <div class="rt-foot"><span class="rt-user">陈老师</span><button class="rt-btn">签到</button></div>
+      </div>
+      <div class="rt-c">
+        <div class="rt-sec"><em>📝</em>作业提交</div>
+        <div class="rt-t">第 5 课 · 静物素描作业</div>
+        <div class="rt-meta"><span class="rt-chip">已提交 8/15</span><span class="rt-chip hot">截止明晚</span></div>
+        <div class="rt-foot"><span class="rt-user">陈老师</span><button class="rt-btn">提交</button></div>
+      </div>
+    </div>
+
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">📚</span><span class="gs-t">课件归档</span><span class="gs-n">· 6 课</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs">
+      <div class="gs-c"><div class="gs-ct"><div class="gs-title">【第 5 课】静物素描基础</div><div class="gs-meta"><span class="gs-chip">视频 32min</span><span class="gs-chip">2 份课件</span></div></div></div>
+      <div class="gs-c"><div class="gs-ct"><div class="gs-title">【第 4 课】线条练习</div><div class="gs-meta"><span class="gs-chip">视频 28min</span></div></div></div>
+    </div>
+
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">🎨</span><span class="gs-t">学员作品</span><span class="gs-n">· 34 张</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs">
+      <div class="gs-c"><div class="gs-c-row"><div class="gs-thu" style="background:linear-gradient(135deg,#fff3e0,#ffe0b2)"></div><div class="gs-ct"><div class="gs-title">小明 · 苹果写生</div><div class="gs-desc">第 5 课作业 · 获得"进步奖"</div></div></div></div>
+      <div class="gs-c"><div class="gs-c-row"><div class="gs-thu" style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9)"></div><div class="gs-ct"><div class="gs-title">小红 · 水果静物</div><div class="gs-desc">构图稳定，光影表现好</div></div></div></div>
+    </div>
+
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">💡</span><span class="gs-t">学员答疑</span><span class="gs-n">· 12 条</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs">
+      <div class="gs-c"><div class="gs-ct"><div class="gs-title">铅笔削得多尖合适？</div><div class="gs-meta"><span class="gs-chip">4 条回复</span></div></div></div>
+    </div>
+
+    <!-- 休眠板块（可能包括归档） -->
+    <div class="dorm">
+      <div class="dorm-h">
+        <span style="font-size:13px">🌙</span>
+        <span class="dorm-t">暂未启用 · 点开查看</span>
+        <span class="dorm-arr">›</span>
+      </div>
+      <div class="dorm-list">
+        <span class="dorm-tag">期末评分</span>
+        <span class="dorm-tag">报名新期（已归档）</span>
+      </div>
+    </div>
+    <div class="sp"></div>
+  </div>
+  <div class="fab">+</div>
+  <div class="tb"><div class="tbi on"><em>🏠</em>首页<div class="tbi-d"></div></div><div class="tbi"><em>👤</em>我的<div class="tbi-d"></div></div></div>
+</div>
+<div class="note">教育场景：课件/作品沉淀 + 本周签到作业置顶 + 归档板块在休眠区</div>
+</div>
+
+</div><!-- grid -->
+
+<!-- ═══════════════ 对比：同一社区不同时刻 ═══════════════ -->
+<h1 style="margin-top:48px">对比 · <span>同一社区 活动前后</span></h1>
+<p class="sub">admin 手动切换实时板块的激活状态，首页对比</p>
+
+<div class="grid">
+
+<!-- 活动前一周 -->
+<div class="w">
+<div class="scn">⑤ 活动前一周</div>
+<div class="tag-n">拼车板块：休眠</div>
+<div class="scn-d">离月度活动还早，admin 暂未激活拼车</div>
+<div class="ph">
+  <div class="nv">社区</div>
+  <div class="bo">
+    <div class="tp"><div class="tp-info"><span><span class="nm">阳光花园社区</span><span class="ar"> ▾</span></span><span class="meta">32 位成员</span></div></div>
+    <div class="sp"></div>
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">🏷</span><span class="gs-t">闲置交易</span><span class="gs-n">· 42 条</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs"><div class="gs-c"><div class="gs-c-row"><div class="gs-thu" style="background:linear-gradient(135deg,#f5e6d3,#e0c9b0)"></div><div class="gs-ct"><div class="gs-title">宜家落地灯</div><span class="gs-px">80</span></div></div></div></div>
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">🏪</span><span class="gs-t">好店推荐</span><span class="gs-n">· 28 条</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs"><div class="gs-c"><div class="gs-ct"><div class="gs-title">小区北门水果店</div></div></div></div>
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">📢</span><span class="gs-t">小区公告</span><span class="gs-n">· 8 条</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs"><div class="gs-c"><div class="gs-ct"><div class="gs-title">周五停水通知</div></div></div></div>
+    <div class="dorm">
+      <div class="dorm-h"><span style="font-size:13px">🌙</span><span class="dorm-t">其他板块（暂未启用）</span><span class="dorm-arr">›</span></div>
+      <div class="dorm-list"><span class="dorm-tag">拼车出行</span><span class="dorm-tag">读书会签到</span></div>
+    </div>
+  </div>
+  <div class="fab">+</div>
+  <div class="tb"><div class="tbi on"><em>🏠</em>首页<div class="tbi-d"></div></div><div class="tbi"><em>👤</em>我的<div class="tbi-d"></div></div></div>
+</div>
+<div class="note">平常状态：无实时置顶区，沉淀板块主导</div>
+</div>
+
+<!-- 活动当天 -->
+<div class="w">
+<div class="scn">⑥ 活动当天</div>
+<div class="tag-n">拼车+签到：激活</div>
+<div class="scn-d">admin 早上切了两个板块为激活，立刻置顶</div>
+<div class="ph">
+  <div class="nv">社区</div>
+  <div class="bo">
+    <div class="tp"><div class="tp-info"><span><span class="nm">阳光花园社区</span><span class="ar"> ▾</span></span><span class="meta">32 位成员 · 今日 12 条 🔥</span></div></div>
+    <div class="rtz">
+      <div class="rtz-head"><div class="rtz-pulse"></div><span class="rtz-title">正在进行 · 今日活动</span><span class="rtz-more">全部 ›</span></div>
+      <div class="rt-c">
+        <div class="rt-sec"><em>🚗</em>拼车出行</div>
+        <div class="rt-route"><div class="rd f"></div><span class="rname">阳光花园</span><div class="rl"></div><span class="rname">图书馆</span><div class="rd"></div></div>
+        <div class="rt-meta"><span class="rt-chip hot">剩 2 座</span><span class="rt-chip">14:30</span></div>
+        <div class="rt-foot"><span class="rt-user">张师傅</span><button class="rt-btn">拼车</button></div>
+      </div>
+      <div class="rt-c">
+        <div class="rt-sec"><em>✍️</em>活动签到</div>
+        <div class="rt-t">4月读书会签到</div>
+        <div class="rt-meta"><span class="rt-chip hot">8/15</span></div>
+        <div class="rt-foot"><span class="rt-user">王老师</span><button class="rt-btn">签到</button></div>
+      </div>
+    </div>
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">🏷</span><span class="gs-t">闲置交易</span><span class="gs-n">· 42 条</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs"><div class="gs-c"><div class="gs-c-row"><div class="gs-thu" style="background:linear-gradient(135deg,#f5e6d3,#e0c9b0)"></div><div class="gs-ct"><div class="gs-title">宜家落地灯</div><span class="gs-px">80</span></div></div></div></div>
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">🏪</span><span class="gs-t">好店推荐</span><span class="gs-n">· 28 条</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs"><div class="gs-c"><div class="gs-ct"><div class="gs-title">小区北门水果店</div></div></div></div>
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">📢</span><span class="gs-t">小区公告</span><span class="gs-n">· 8 条</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs"><div class="gs-c"><div class="gs-ct"><div class="gs-title">周五停水通知</div></div></div></div>
+  </div>
+  <div class="fab">+</div>
+  <div class="tb"><div class="tbi on"><em>🏠</em>首页<div class="tbi-d"></div></div><div class="tbi"><em>👤</em>我的<div class="tbi-d"></div></div></div>
+</div>
+<div class="note">admin 一键激活 → 实时区立刻占顶，脉冲点吸引眼球</div>
+</div>
+
+<!-- 活动次日 -->
+<div class="w">
+<div class="scn">⑦ 活动次日</div>
+<div class="tag-n">拼车回休眠</div>
+<div class="scn-d">活动结束，admin 把拼车切回休眠；签到板块作为活动总结继续激活 1-2 天</div>
+<div class="ph">
+  <div class="nv">社区</div>
+  <div class="bo">
+    <div class="tp"><div class="tp-info"><span><span class="nm">阳光花园社区</span><span class="ar"> ▾</span></span><span class="meta">32 位成员</span></div></div>
+    <div class="rtz">
+      <div class="rtz-head"><div class="rtz-pulse"></div><span class="rtz-title">活动回顾</span><span class="rtz-more">全部 ›</span></div>
+      <div class="rt-c">
+        <div class="rt-sec"><em>✍️</em>活动签到</div>
+        <div class="rt-t">4月读书会 · 已圆满结束</div>
+        <div class="rt-meta"><span class="rt-chip">13 人参加</span><span class="rt-chip">🖼 照片 8 张</span></div>
+        <div class="rt-foot"><span class="rt-user">王老师</span><button class="rt-btn">看总结</button></div>
+      </div>
+    </div>
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">🏷</span><span class="gs-t">闲置交易</span><span class="gs-n">· 42 条</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs"><div class="gs-c"><div class="gs-c-row"><div class="gs-thu" style="background:linear-gradient(135deg,#f5e6d3,#e0c9b0)"></div><div class="gs-ct"><div class="gs-title">宜家落地灯</div><span class="gs-px">80</span></div></div></div></div>
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">🏪</span><span class="gs-t">好店推荐</span><span class="gs-n">· 28 条</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs"><div class="gs-c"><div class="gs-ct"><div class="gs-title">小区北门水果店</div></div></div></div>
+    <div class="gs-head"><div class="gs-left"><span class="gs-ico">📢</span><span class="gs-t">小区公告</span><span class="gs-n">· 8 条</span></div><span class="gs-more">全部 ›</span></div>
+    <div class="gs"><div class="gs-c"><div class="gs-ct"><div class="gs-title">周五停水通知</div></div></div></div>
+    <div class="dorm">
+      <div class="dorm-h"><span style="font-size:13px">🌙</span><span class="dorm-t">其他板块（暂未启用）</span><span class="dorm-arr">›</span></div>
+      <div class="dorm-list"><span class="dorm-tag">拼车出行</span><span class="dorm-tag">读书会签到</span></div>
+    </div>
+    <div class="sp"></div>
+  </div>
+  <div class="fab">+</div>
+  <div class="tb"><div class="tbi on"><em>🏠</em>首页<div class="tbi-d"></div></div><div class="tbi"><em>👤</em>我的<div class="tbi-d"></div></div></div>
+</div>
+<div class="note">活动尾声：拼车先休眠，签到保留 1-2 天发总结</div>
+</div>
+
+<!-- Admin 后台管理 -->
+<div class="w">
+<div class="scn">⑧ Admin 后台</div>
+<div class="tag-n">板块状态管理（示意）</div>
+<div class="scn-d">admin 就是在这里一键切换激活/休眠/归档</div>
+<div class="ph" style="background:#f5f5f0">
+  <div class="nv" style="background:#f0ede8">板块管理</div>
+  <div class="bo" style="padding:12px">
+    <div style="background:white;border-radius:10px;padding:14px;margin-bottom:10px;box-shadow:var(--s1)">
+      <div style="font-size:11px;color:var(--t4);font-weight:600;letter-spacing:1px;margin-bottom:8px">实时协作类 · 2 个</div>
+      <div style="padding:10px 0;border-bottom:1px solid var(--dv);display:flex;align-items:center;gap:8px">
+        <span style="font-size:18px">🚗</span>
+        <div style="flex:1"><div style="font-size:13px;color:var(--t1);font-weight:500">拼车出行</div><div style="font-size:10px;color:var(--t3)">42 条帖子 · 上次活跃 3 天前</div></div>
+        <div style="display:flex;gap:2px;background:var(--bgp);border-radius:var(--rf);padding:2px">
+          <span style="padding:3px 8px;font-size:10px;border-radius:var(--rf);background:var(--p);color:white;font-weight:500">激活</span>
+          <span style="padding:3px 8px;font-size:10px;color:var(--t3)">休眠</span>
+          <span style="padding:3px 8px;font-size:10px;color:var(--t3)">归档</span>
+        </div>
+      </div>
+      <div style="padding:10px 0;display:flex;align-items:center;gap:8px">
+        <span style="font-size:18px">✍️</span>
+        <div style="flex:1"><div style="font-size:13px;color:var(--t1);font-weight:500">活动签到</div><div style="font-size:10px;color:var(--t3)">16 条帖子 · 今日活跃</div></div>
+        <div style="display:flex;gap:2px;background:var(--bgp);border-radius:var(--rf);padding:2px">
+          <span style="padding:3px 8px;font-size:10px;border-radius:var(--rf);background:var(--p);color:white;font-weight:500">激活</span>
+          <span style="padding:3px 8px;font-size:10px;color:var(--t3)">休眠</span>
+          <span style="padding:3px 8px;font-size:10px;color:var(--t3)">归档</span>
+        </div>
+      </div>
+    </div>
+    <div style="background:white;border-radius:10px;padding:14px;margin-bottom:10px;box-shadow:var(--s1)">
+      <div style="font-size:11px;color:var(--t4);font-weight:600;letter-spacing:1px;margin-bottom:8px">沉淀展示类 · 3 个</div>
+      <div style="padding:10px 0;border-bottom:1px solid var(--dv);display:flex;align-items:center;gap:8px">
+        <span style="font-size:18px">🏷</span>
+        <div style="flex:1"><div style="font-size:13px;color:var(--t1);font-weight:500">闲置交易</div><div style="font-size:10px;color:var(--t3)">42 条</div></div>
+        <span style="padding:3px 10px;font-size:10px;border-radius:var(--rf);background:var(--sbg);color:var(--s);font-weight:500">常驻显示</span>
+      </div>
+      <div style="padding:10px 0;border-bottom:1px solid var(--dv);display:flex;align-items:center;gap:8px">
+        <span style="font-size:18px">🏪</span>
+        <div style="flex:1"><div style="font-size:13px;color:var(--t1);font-weight:500">好店推荐</div><div style="font-size:10px;color:var(--t3)">28 条</div></div>
+        <span style="padding:3px 10px;font-size:10px;border-radius:var(--rf);background:var(--sbg);color:var(--s);font-weight:500">常驻显示</span>
+      </div>
+      <div style="padding:10px 0;display:flex;align-items:center;gap:8px">
+        <span style="font-size:18px">📢</span>
+        <div style="flex:1"><div style="font-size:13px;color:var(--t1);font-weight:500">小区公告</div><div style="font-size:10px;color:var(--t3)">8 条</div></div>
+        <span style="padding:3px 10px;font-size:10px;border-radius:var(--rf);background:var(--sbg);color:var(--s);font-weight:500">常驻显示</span>
+      </div>
+    </div>
+    <button style="width:100%;padding:10px;font-size:12px;color:var(--p);background:var(--pbg);border:1px dashed var(--p);border-radius:var(--rm)">+ 创建新板块</button>
+  </div>
+</div>
+<div class="note">沉淀类永远常驻，实时类三态切换 · 这是 admin-web 后台页</div>
+</div>
+
+</div><!-- grid -->
+
+<!-- ═══════════════ 规则总结 ═══════════════ -->
+<div style="max-width:800px;margin:48px auto 0;background:rgba(255,255,255,0.5);border-radius:16px;padding:24px">
+<h2 style="font-size:16px;color:var(--t1);margin-bottom:16px">规则总结</h2>
+<table style="width:100%;border-collapse:collapse;font-size:13px">
+<thead>
+<tr style="background:var(--pbg)">
+<th style="text-align:left;padding:10px;color:var(--p)">板块类型</th>
+<th style="text-align:left;padding:10px;color:var(--p)">状态</th>
+<th style="text-align:left;padding:10px;color:var(--p)">首页显示</th>
+<th style="text-align:left;padding:10px;color:var(--p)">举例</th>
+</tr>
+</thead>
+<tbody>
+<tr><td style="padding:10px;border-bottom:1px solid var(--dv)" rowspan="3"><b style="color:var(--p)">实时协作类</b></td><td style="padding:10px;border-bottom:1px solid var(--dv)"><span style="color:var(--p)">● 激活</span></td><td style="padding:10px;border-bottom:1px solid var(--dv)">置顶脉冲区，多个板块全部置顶</td><td style="padding:10px;border-bottom:1px solid var(--dv);color:var(--t3)">拼车、签到、活动报名</td></tr>
+<tr><td style="padding:10px;border-bottom:1px solid var(--dv)"><span style="color:var(--t3)">○ 休眠</span></td><td style="padding:10px;border-bottom:1px solid var(--dv)">折叠到"暂未启用"区</td><td style="padding:10px;border-bottom:1px solid var(--dv);color:var(--t3)">非活动期的拼车</td></tr>
+<tr><td style="padding:10px;border-bottom:1px solid var(--dv)"><span style="color:var(--t4)">— 归档</span></td><td style="padding:10px;border-bottom:1px solid var(--dv)">首页不显示，可进"历史板块"</td><td style="padding:10px;border-bottom:1px solid var(--dv);color:var(--t3)">上学期签到、已完结活动</td></tr>
+<tr><td style="padding:10px"><b style="color:var(--s)">沉淀展示类</b></td><td style="padding:10px">常驻</td><td style="padding:10px">永远作为分组卡显示 top 2-3</td><td style="padding:10px;color:var(--t3)">好店推荐、课件、作品集</td></tr>
+</tbody>
+</table>
+<div style="margin-top:12px;font-size:12px;color:var(--t3);line-height:1.6">
+<b style="color:var(--p)">核心规则：</b>实时协作类的所有"激活"状态板块都会在首页顶部的置顶脉冲区展示，用小标签（🚗 拼车 / ✍️ 签到）区分。无激活时，置顶区自动消失，首页直接从沉淀板块开始。
+</div>
+</div>
+
+</body>
+</html>

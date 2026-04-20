@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>美好 Home · 10种布局方案对比</title>
+<style>
+:root{
+  --p:#E07A5F;--pl:#F5B9A8;--pd:#C25D43;--pbg:rgba(224,122,95,0.06);
+  --s:#52C41A;--sbg:rgba(82,196,26,0.08);--w:#FAAD14;--wbg:rgba(250,173,20,0.08);
+  --i:#6E8CA0;--ibg:rgba(110,140,160,0.08);--d:#C0392B;
+  --t1:rgba(0,0,0,0.88);--t2:rgba(0,0,0,0.65);--t3:rgba(0,0,0,0.45);--t4:rgba(0,0,0,0.25);
+  --bg:#FFF;--bgp:#F7F6F3;--sf:#FFF;--bd:rgba(0,0,0,0.06);--dv:rgba(0,0,0,0.04);
+  --s1:0 1px 4px rgba(0,0,0,0.03);--s2:0 4px 12px rgba(0,0,0,0.05);
+  --rs:6px;--rm:10px;--rl:14px;--rf:9999px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,"PingFang SC",sans-serif;background:#d5d1cc;
+  padding:16px;-webkit-font-smoothing:antialiased}
+h1{text-align:center;font-size:18px;color:var(--t1);margin-bottom:4px}
+h1 span{color:var(--p)}
+.sub{text-align:center;font-size:12px;color:var(--t3);margin-bottom:20px}
+.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:16px}
+@media(max-width:1800px){.grid{grid-template-columns:repeat(4,1fr)}}
+@media(max-width:1400px){.grid{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:1000px){.grid{grid-template-columns:repeat(2,1fr)}}
+
+.w{display:flex;flex-direction:column;align-items:center}
+.lb{font-size:11px;font-weight:700;color:var(--p);margin-bottom:2px;letter-spacing:0.5px}
+.desc{font-size:10px;color:var(--t3);margin-bottom:6px;text-align:center;line-height:1.35;max-width:280px}
+.ph{width:280px;height:520px;background:var(--bgp);border-radius:24px;overflow:hidden;
+  box-shadow:0 12px 40px rgba(0,0,0,0.15),0 0 0 1px rgba(0,0,0,0.05);
+  display:flex;flex-direction:column}
+.nv{height:36px;background:var(--bg);display:flex;align-items:center;justify-content:center;
+  font-size:14px;font-weight:600;color:var(--t1);flex-shrink:0}
+.bo{flex:1;overflow-y:auto} .bo::-webkit-scrollbar{display:none}
+.tb{height:42px;background:var(--bg);display:flex;align-items:center;justify-content:space-around;
+  flex-shrink:0;border-top:1px solid var(--bd)}
+.tbi{font-size:9px;color:var(--t4);display:flex;flex-direction:column;align-items:center;gap:1px}
+.tbi.on{color:var(--p)} .tbi em{font-size:16px;font-style:normal}
+
+/* ── shared card ── */
+.c{background:var(--bg);border-radius:var(--rm);margin:0 10px 8px;box-shadow:var(--s1);overflow:hidden}
+.c.bl{border-left:3px solid var(--p)} .c.bli{border-left:3px solid var(--i)}
+.c.bls{border-left:3px solid var(--s)} .c.blw{border-left:3px solid var(--w)}
+.ci{padding:10px 12px}
+.ct{font-size:13px;font-weight:500;color:var(--t1);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.cd{font-size:11px;color:var(--t3);margin-top:3px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.cp{font-size:16px;font-weight:600;color:var(--p);margin-top:4px}.cp::before{content:'\00A5';font-size:11px}
+.cf{display:flex;align-items:center;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px solid var(--dv)}
+.ca{display:flex;align-items:center;gap:4px}
+.aa{width:18px;height:18px;border-radius:50%;font-size:9px;display:flex;align-items:center;justify-content:center;font-weight:600;background:var(--pbg);color:var(--p)}
+.an{font-size:10px;color:var(--t3)}
+.cb{font-size:10px;color:var(--p);background:var(--pbg);border:none;padding:3px 8px;border-radius:var(--rf);font-weight:500}
+.tg{font-size:9px;padding:1px 5px;font-weight:500;border-radius:4px 1px 4px 1px;display:inline-block;margin-top:4px;margin-right:3px}
+.tg.tp{background:var(--pbg);color:var(--p)} .tg.ts{background:var(--sbg);color:var(--s)}
+.tg.tw{background:var(--wbg);color:var(--w)} .tg.ti{background:var(--ibg);color:var(--i)}
+.cm{display:flex;gap:8px}.cm .cb2{flex:1;min-width:0}.cm .thu{width:64px;height:64px;border-radius:var(--rs);flex-shrink:0;background-size:cover}
+.chips{display:flex;gap:4px;margin-top:4px;flex-wrap:wrap}
+.ch{font-size:10px;color:var(--t2);background:var(--bgp);padding:2px 7px;border-radius:var(--rf)}
+.route{display:flex;align-items:center;gap:4px;margin:3px 0}
+.rd{width:6px;height:6px;border-radius:50%;border:2px solid var(--i)}.rd.f{background:var(--i)}
+.rl{flex:1;border-top:1px dashed var(--bd)} .rt{font-size:12px;color:var(--t1);font-weight:500}
+
+/* ── Hero styles ── */
+.hero{background:linear-gradient(135deg,var(--p),var(--pd));padding:14px 14px 22px;position:relative;overflow:hidden}
+.hero::after{content:"";position:absolute;bottom:0;left:0;right:0;height:14px;background:var(--bgp);border-radius:14px 14px 0 0}
+.hero::before{content:"";position:absolute;inset:0;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Ccircle cx='30' cy='30' r='22' fill='none' stroke='white' stroke-width='0.5' opacity='0.07'/%3E%3C/svg%3E")}
+.hn{font-size:16px;font-weight:600;color:white;position:relative;z-index:1}
+.hm{font-size:10px;color:rgba(255,255,255,0.55);margin-top:2px;position:relative;z-index:1}
+.hb{background:rgba(255,255,255,0.16);color:white;border:1px solid rgba(255,255,255,0.15);padding:3px 10px;border-radius:var(--rf);font-size:10px;position:relative;z-index:1}
+.htop{display:flex;justify-content:space-between;align-items:center}
+
+/* ── Tabs horizontal ── */
+.st{display:flex;background:var(--bg);padding:0 8px;border-bottom:1px solid var(--bd);overflow-x:auto}
+.st::-webkit-scrollbar{display:none}
+.si{padding:8px 10px;font-size:11px;color:var(--t3);white-space:nowrap;border-bottom:2px solid transparent}
+.si.on{color:var(--p);font-weight:600;border-bottom-color:var(--p)}
+
+/* ── Pills ── */
+.pills{display:flex;gap:5px;padding:8px 10px;overflow-x:auto;background:var(--bg)}
+.pills::-webkit-scrollbar{display:none}
+.pl{padding:4px 10px;font-size:11px;color:var(--t2);background:var(--bgp);border-radius:var(--rf);white-space:nowrap;border:1px solid transparent;flex-shrink:0}
+.pl.on{background:var(--pbg);color:var(--p);border-color:var(--p);font-weight:500}
+
+/* ── Segments ── */
+.segs{display:flex;gap:5px;margin:0 10px;position:relative;z-index:2}
+.seg{flex:1;background:var(--bg);border-radius:var(--rm);padding:8px 4px;text-align:center;box-shadow:var(--s1);border:1.5px solid transparent}
+.seg.on{border-color:var(--p);box-shadow:var(--s2)}
+.seg em{font-size:15px;font-style:normal;display:block} .seg span{font-size:9px;color:var(--t2);display:block;margin-top:2px}
+.seg.on span{color:var(--p);font-weight:600}
+
+/* ── Topbar compact ── */
+.tp2{padding:8px 12px;background:var(--bg);display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--bd)}
+.tp2 .nm{font-size:15px;font-weight:600;color:var(--t1)}
+.tp2 .ar{color:var(--t4);font-size:10px}
+
+/* ── Topbar with avatar ── */
+.tp3{padding:8px 12px;background:var(--bg);display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--bd)}
+.tp3-av{width:28px;height:28px;border-radius:var(--rm);background:var(--pbg);display:flex;align-items:center;justify-content:center;font-size:12px}
+.tp3-nm{font-size:14px;font-weight:600;color:var(--t1);flex:1}
+.tp3-ar{color:var(--t4);font-size:10px}
+.tp3-ic{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer}
+.tp3-ic.search{background:var(--bgp);color:var(--t3)}
+.tp3-ic.add{background:var(--p);color:white;font-size:15px}
+
+/* ── FAB ── */
+.fab{position:absolute;bottom:50px;right:12px;width:40px;height:40px;border-radius:50%;
+  background:linear-gradient(135deg,var(--p),var(--pd));color:white;font-size:20px;
+  display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(224,122,95,0.3);z-index:5}
+
+/* ── Stats ── */
+.stats{display:flex;gap:6px;margin:8px 10px}
+.stat{flex:1;background:var(--bg);border-radius:var(--rm);padding:8px 4px;text-align:center;box-shadow:var(--s1)}
+.stat b{font-size:16px;color:var(--p);display:block} .stat small{font-size:9px;color:var(--t3)}
+
+/* ── Search bar ── */
+.sbar{margin:8px 10px;background:var(--bgp);border-radius:var(--rf);padding:8px 14px;display:flex;align-items:center;gap:6px;color:var(--t4);font-size:12px}
+
+/* ── Section header ── */
+.sh{padding:10px 12px 4px;display:flex;justify-content:space-between;align-items:center}
+.sht{font-size:13px;font-weight:600;color:var(--t1)} .shm{font-size:10px;color:var(--t4)}
+
+/* ── Waterfall 2-col ── */
+.wf{display:flex;gap:6px;padding:8px 10px}
+.wf-col{flex:1;display:flex;flex-direction:column;gap:6px}
+.wf-card{background:var(--bg);border-radius:var(--rm);overflow:hidden;box-shadow:var(--s1)}
+.wf-img{width:100%;background-size:cover;background-position:center}
+.wf-body{padding:8px 10px}
+.wf-t{font-size:12px;font-weight:500;color:var(--t1);line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.wf-ft{display:flex;align-items:center;gap:4px;margin-top:6px}
+.wf-av{width:16px;height:16px;border-radius:50%;background:var(--pbg);font-size:8px;display:flex;align-items:center;justify-content:center;color:var(--p);font-weight:600}
+.wf-n{font-size:9px;color:var(--t3);flex:1}
+.wf-p{font-size:13px;font-weight:600;color:var(--p)}.wf-p::before{content:'\00A5';font-size:9px}
+
+/* ── Timeline ── */
+.tl{padding:8px 10px 8px 24px}
+.tl-date{font-size:11px;font-weight:600;color:var(--t2);margin:8px 0 6px;position:relative}
+.tl-date::before{content:"";position:absolute;left:-14px;top:4px;width:8px;height:8px;border-radius:50%;background:var(--p)}
+.tl-date::after{content:"";position:absolute;left:-11px;top:14px;width:2px;height:calc(100% + 20px);background:var(--dv)}
+.tl .c{margin-left:0;margin-right:0}
+
+/* ── Announcement ── */
+.ann{margin:8px 10px;background:linear-gradient(135deg,rgba(224,122,95,0.08),rgba(224,122,95,0.02));
+  border:1px solid rgba(224,122,95,0.12);border-radius:var(--rm);padding:10px 12px;display:flex;align-items:center;gap:8px}
+.ann em{font-size:16px;font-style:normal} .ann span{font-size:11px;color:var(--t2);flex:1}
+
+/* ── Tab with icon ── */
+.it{display:flex;background:var(--bg);border-bottom:1px solid var(--bd);overflow-x:auto}
+.it::-webkit-scrollbar{display:none}
+.ii{padding:8px 12px;display:flex;flex-direction:column;align-items:center;gap:2px;border-bottom:2px solid transparent;flex-shrink:0}
+.ii.on{border-bottom-color:var(--p)} .ii em{font-size:16px;font-style:normal}
+.ii span{font-size:10px;color:var(--t3)} .ii.on span{color:var(--p);font-weight:600}
+
+/* ── Compact list ── */
+.cl{margin:0 10px}
+.cli{display:flex;align-items:center;padding:10px 0;border-bottom:1px solid var(--dv)}
+.cli:last-child{border-bottom:none}
+.cli-dot{width:6px;height:6px;border-radius:50%;margin-right:8px;flex-shrink:0}
+.cli-t{font-size:13px;color:var(--t1);flex:1;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.cli-m{font-size:10px;color:var(--t4);margin-left:8px}
+
+/* ── Grouped section ── */
+.gs{background:var(--bg);border-radius:var(--rl);margin:8px 10px;box-shadow:var(--s1);overflow:hidden}
+.gs-h{padding:10px 12px;background:var(--bgp);display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--t1)}
+.gs-h em{font-size:14px;font-style:normal}
+.gs .c{margin:0;border-radius:0;box-shadow:none;border-bottom:1px solid var(--dv)}
+.gs .c:last-child{border-bottom:none}
+</style>
+</head>
+<body>
+
+<h1>美好 Home · <span>10种首页布局</span>对比</h1>
+<p class="sub">双击打开此文件，横向滚动或缩放浏览器查看全部方案</p>
+
+<div class="grid">
+
+<!-- ═══ 1. 紧凑Tab ═══ -->
+<div class="w">
+<div class="lb">① 紧凑横滑 Tab</div>
+<div class="desc">社区名+板块 tab 两行占 80px，首屏即帖子。即刻风。</div>
+<div class="ph">
+  <div class="nv">社区</div>
+  <div class="bo">
+    <div class="tp2"><span><span class="nm">阳光花园社区</span><span class="ar"> ▾</span></span></div>
+    <div class="st"><div class="si on">全部</div><div class="si">闲置交易</div><div class="si">拼车出行</div><div class="si">活动公告</div><div class="si">邻里互助</div></div>
+    <div style="padding:8px 0">
+      <div class="c bl"><div class="ci cm"><div class="cb2"><div class="ct">宜家落地灯 · 九成新</div><div class="cd">搬家出掉，原价399</div><span class="tg tp">闲置</span><div class="cp">80</div></div><div class="thu" style="background:linear-gradient(135deg,#f5e6d3,#e0c9b0)"></div></div></div>
+      <div class="c bli"><div class="ci"><span class="tg ti">拼车</span><span class="tg ts">剩2座</span><div class="route"><div class="rd f"></div><div class="rt">阳光花园</div><div class="rl"></div><div class="rt">万达</div><div class="rd"></div></div><div class="cf"><div class="ca"><div class="aa" style="background:var(--ibg);color:var(--i)">张</div><span class="an">张师傅</span></div><button class="cb">拼车</button></div></div></div>
+      <div class="c bls"><div class="ci"><div class="ct">周末亲子绘本阅读会</div><div class="cd">本周六下午2点，社区活动室</div><div class="chips"><div class="ch">📅 周六</div><div class="ch">👦 8/15</div></div></div></div>
+      <div class="c blw"><div class="ci"><div class="ct">有靠谱的下水道师傅吗？</div><span class="tg tw">求助</span><span class="tg ti">3回复</span></div></div>
+    </div>
+  </div>
+  <div class="tb"><div class="tbi on"><em>🏠</em>首页</div><div class="tbi"><em>✏️</em>发帖</div><div class="tbi"><em>👤</em>我的</div></div>
+</div></div>
+
+<!-- ═══ 2. Hero + 卡片切换 ═══ -->
+<div class="w">
+<div class="lb">② Hero + 板块卡片</div>
+<div class="desc">渐变 Hero 突出社区感，板块用带帖数的卡片切换。品牌氛围。</div>
+<div class="ph">
+  <div class="nv">社区</div>
+  <div class="bo">
+    <div class="hero"><div class="htop"><div><div class="hn">阳光花园社区</div><div class="hm">32位成员 · 今日3条</div></div><button class="hb">切换▾</button></div></div>
+    <div class="segs" style="margin-top:-8px">
+      <div class="seg on"><em>🏷</em><span>闲置 42</span></div>
+      <div class="seg"><em>🚗</em><span>拼车 18</span></div>
+      <div class="seg"><em>📢</em><span>活动 12</span></div>
+      <div class="seg"><em>🔧</em><span>互助 56</span></div>
+    </div>
+    <div style="padding:10px 0 0">
+      <div class="c bl"><div class="ci cm"><div class="cb2"><div class="ct">宜家落地灯 · 九成新</div><div class="cd">搬家出掉</div><div class="cp">80</div></div><div class="thu" style="background:linear-gradient(135deg,#f5e6d3,#e0c9b0)"></div></div></div>
+      <div class="c bl"><div class="ci"><div class="ct">婴儿推车 · 可躺可坐</div><div class="cd">二胎不用了</div><div class="cp">200</div></div></div>
+      <div class="c bl"><div class="ci"><div class="ct">实木书桌 + 椅子</div><div class="cp">280</div></div></div>
+    </div>
+  </div>
+  <div class="tb"><div class="tbi on"><em>🏠</em>首页</div><div class="tbi"><em>✏️</em>发帖</div><div class="tbi"><em>👤</em>我的</div></div>
+</div></div>
+
+<!-- ═══ 3. 胶囊+FAB ═══ -->
+<div class="w">
+<div class="lb">③ 头像顶栏 + 胶囊 + FAB</div>
+<div class="desc">社区头像+名字左上，搜索右上。板块用胶囊筛选，发帖用 FAB。小红书感。</div>
+<div class="ph" style="position:relative">
+  <div class="nv">社区</div>
+  <div class="bo">
+    <div class="tp3">
+      <div class="tp3-av">🏡</div><span class="tp3-nm">阳光花园</span><span class="tp3-ar">▾</span>
+      <div class="tp3-ic search">🔍</div>
+    </div>
+    <div class="pills"><div class="pl on">全部</div><div class="pl">🏷 闲置</div><div class="pl">🚗 拼车</div><div class="pl">📢 活动</div><div class="pl">🔧 互助</div></div>
+    <div style="padding:6px 0">
+      <div class="c bl"><div class="ci cm"><div class="cb2"><div class="ct">宜家落地灯 · 九成新</div><div class="cd">搬家出掉，原价399</div><span class="tg tp">闲置</span><div class="cp">80</div></div><div class="thu" style="background:linear-gradient(135deg,#f5e6d3,#e0c9b0)"></div></div><div class="ci" style="padding-top:0"><div class="cf"><div class="ca"><div class="aa">李</div><span class="an">李阿姨</span></div><button class="cb">私聊</button></div></div></div>
+      <div class="c bli"><div class="ci"><span class="tg ti">拼车</span><span class="tg ts">剩2座</span><div class="route"><div class="rd f"></div><div class="rt">阳光花园</div><div class="rl"></div><div class="rt">万达</div><div class="rd"></div></div><div class="cf"><div class="ca"><div class="aa" style="background:var(--ibg);color:var(--i)">张</div><span class="an">张师傅</span></div><button class="cb">拼车</button></div></div></div>
+      <div class="c bls"><div class="ci"><div class="ct">周末亲子绘本阅读会</div><div class="cd">本周六下午2点</div><div class="chips"><div class="ch">📅 周六14:00</div><div class="ch">👦 8/15</div></div></div></div>
+    </div>
+    <div class="fab">+</div>
+  </div>
+  <div class="tb"><div class="tbi on"><em>🏠</em>首页</div><div class="tbi"><em>👤</em>我的</div></div>
+</div></div>
+
+<!-- ═══ 4. 双列瀑布流 ═══ -->
+<div class="w">
+<div class="lb">④ 双列瀑布流</div>
+<div class="desc">小红书/Pinterest 式双列，适合带图内容多的场景。信息密度高。</div>
+<div class="ph" style="position:relative">
+  <div class="nv">社区</div>
+  <div class="bo">
+    <div class="tp3">
+      <div class="tp3-av">🏡</div><span class="tp3-nm">阳光花园</span><span class="tp3-ar">▾</span>
+      <div class="tp3-ic search">🔍</div>
+    </div>
+    <div class="pills"><div class="pl on">全部</div><div class="pl">闲置</div><div class="pl">拼车</div><div class="pl">活动</div></div>
+    <div class="wf">
+      <div class="wf-col">
+        <div class="wf-card"><div class="wf-img" style="height:100px;background:linear-gradient(135deg,#f5e6d3,#e0c9b0)"></div><div class="wf-body"><div class="wf-t">宜家落地灯九成新</div><div class="wf-p">80</div><div class="wf-ft"><div class="wf-av">李</div><span class="wf-n">李阿姨</span></div></div></div>
+        <div class="wf-card"><div class="wf-img" style="height:80px;background:linear-gradient(135deg,#e8f5e9,#c8e6c9)"></div><div class="wf-body"><div class="wf-t">周末绘本阅读会</div><div class="wf-ft"><div class="wf-av" style="background:var(--sbg);color:var(--s)">王</div><span class="wf-n">8/15人</span></div></div></div>
+        <div class="wf-card"><div class="wf-body"><div class="wf-t">推荐培训机构</div><div style="font-size:10px;color:var(--t3);margin-top:3px">带娃试了三家选的这个</div></div></div>
+      </div>
+      <div class="wf-col">
+        <div class="wf-card"><div class="wf-img" style="height:70px;background:linear-gradient(135deg,#d4e6f1,#c5dbe8)"></div><div class="wf-body"><div class="wf-t">婴儿推车可躺可坐</div><div class="wf-p">200</div><div class="wf-ft"><div class="wf-av">赵</div><span class="wf-n">赵先生</span></div></div></div>
+        <div class="wf-card"><div class="wf-body"><div class="wf-t" style="color:var(--i)">阳光花园→万达 14:30</div><div style="font-size:10px;color:var(--t3);margin-top:3px">剩2座 · 15元/人</div></div></div>
+        <div class="wf-card"><div class="wf-img" style="height:90px;background:linear-gradient(135deg,#fff3e0,#ffe0b2)"></div><div class="wf-body"><div class="wf-t">实木书桌+椅子</div><div class="wf-p">280</div></div></div>
+      </div>
+    </div>
+    <div class="fab">+</div>
+  </div>
+  <div class="tb"><div class="tbi on"><em>🏠</em>首页</div><div class="tbi"><em>👤</em>我的</div></div>
+</div></div>
+
+<!-- ═══ 5. 搜索优先 ═══ -->
+<div class="w">
+<div class="lb">⑤ 搜索优先 + 分区</div>
+<div class="desc">顶部大搜索框，强调"找回内容"。板块分区展示。知识库感。</div>
+<div class="ph">
+  <div class="nv">社区</div>
+  <div class="bo">
+    <div class="tp2"><span class="nm">阳光花园社区</span></div>
+    <div class="sbar">🔍 搜索社区内容...</div>
+    <div class="ann"><em>📢</em><span>周末绘本阅读会正在报名中，点击查看详情</span></div>
+    <div class="sh"><span class="sht">🏷 闲置交易</span><span class="shm">42条 ›</span></div>
+    <div class="c bl"><div class="ci cm"><div class="cb2"><div class="ct">宜家落地灯</div><div class="cp">80</div></div><div class="thu" style="background:linear-gradient(135deg,#f5e6d3,#e0c9b0)"></div></div></div>
+    <div class="c bl"><div class="ci"><div class="ct">婴儿推车</div><div class="cp">200</div></div></div>
+    <div class="sh"><span class="sht">🚗 拼车出行</span><span class="shm">18条 ›</span></div>
+    <div class="c bli"><div class="ci"><div class="ct" style="color:var(--i)">阳光花园 → 万达 14:30</div><div class="chips"><div class="ch">剩2座</div><div class="ch">15元/人</div></div></div></div>
+  </div>
+  <div class="tb"><div class="tbi on"><em>🏠</em>首页</div><div class="tbi"><em>✏️</em>发帖</div><div class="tbi"><em>👤</em>我的</div></div>
+</div></div>
+
+<!-- ═══ 6. 时间线 ═══ -->
+<div class="w">
+<div class="lb">⑥ 时间线布局</div>
+<div class="desc">按日期分组+左侧时间轴。强调"沉淀"的日记感。适合回顾。</div>
+<div class="ph">
+  <div class="nv">社区</div>
+  <div class="bo">
+    <div class="tp2"><span><span class="nm">阳光花园社区</span><span class="ar"> ▾</span></span></div>
+    <div class="st"><div class="si on">全部</div><div class="si">闲置</div><div class="si">拼车</div><div class="si">活动</div></div>
+    <div class="tl">
+      <div class="tl-date">今天 · 4月17日</div>
+      <div class="c bl"><div class="ci"><div class="ct">宜家落地灯 · 九成新</div><div class="cd">搬家出掉</div><div class="cp">80</div></div></div>
+      <div class="c bli"><div class="ci"><span class="tg ti">拼车</span><div class="ct" style="margin-top:4px">阳光花园→万达 14:30</div></div></div>
+      <div class="tl-date">昨天 · 4月16日</div>
+      <div class="c bls"><div class="ci"><div class="ct">周末亲子绘本阅读会</div><div class="chips"><div class="ch">📅 周六</div><div class="ch">👦 8/15</div></div></div></div>
+      <div class="c blw"><div class="ci"><div class="ct">有靠谱的下水道师傅吗？</div><span class="tg tw">求助</span></div></div>
+    </div>
+  </div>
+  <div class="tb"><div class="tbi on"><em>🏠</em>首页</div><div class="tbi"><em>✏️</em>发帖</div><div class="tbi"><em>👤</em>我的</div></div>
+</div></div>
+
+<!-- ═══ 7. 仪表盘 ═══ -->
+<div class="w">
+<div class="lb">⑦ 仪表盘 + 紧凑列表</div>
+<div class="desc">顶部数据统计，下方紧凑列表。管理员视角，效率导向。</div>
+<div class="ph">
+  <div class="nv">社区</div>
+  <div class="bo">
+    <div class="hero"><div class="htop"><div><div class="hn">阳光花园社区</div><div class="hm">管理员视角</div></div><button class="hb">切换▾</button></div></div>
+    <div class="stats" style="margin-top:-6px;position:relative;z-index:2">
+      <div class="stat"><b>128</b><small>动态</small></div><div class="stat"><b>32</b><small>成员</small></div><div class="stat"><b>3</b><small>今日新</small></div>
+    </div>
+    <div class="sh"><span class="sht">最新动态</span><span class="shm">全部 ›</span></div>
+    <div class="cl">
+      <div class="cli"><div class="cli-dot" style="background:var(--p)"></div><div class="cli-t">宜家落地灯 · 九成新</div><div class="cli-m">¥80 · 4/15</div></div>
+      <div class="cli"><div class="cli-dot" style="background:var(--i)"></div><div class="cli-t">阳光花园→万达 14:30</div><div class="cli-m">剩2座</div></div>
+      <div class="cli"><div class="cli-dot" style="background:var(--s)"></div><div class="cli-t">周末亲子绘本阅读会</div><div class="cli-m">8/15人</div></div>
+      <div class="cli"><div class="cli-dot" style="background:var(--w)"></div><div class="cli-t">有靠谱的下水道师傅吗？</div><div class="cli-m">3回复</div></div>
+      <div class="cli"><div class="cli-dot" style="background:var(--p)"></div><div class="cli-t">婴儿推车 · 可躺可坐</div><div class="cli-m">¥200</div></div>
+      <div class="cli"><div class="cli-dot" style="background:var(--i)"></div><div class="cli-t">【第3课】光影与透视</div><div class="cli-m">课件</div></div>
+    </div>
+  </div>
+  <div class="tb"><div class="tbi on"><em>🏠</em>首页</div><div class="tbi"><em>✏️</em>发帖</div><div class="tbi"><em>👤</em>我的</div></div>
+</div></div>
+
+<!-- ═══ 8. 图标Tab + 公告 ═══ -->
+<div class="w">
+<div class="lb">⑧ 图标 Tab + 置顶公告</div>
+<div class="desc">板块用 emoji+文字 Tab，顶部有公告栏。功能分区明确。</div>
+<div class="ph">
+  <div class="nv">社区</div>
+  <div class="bo">
+    <div class="tp2"><span><span class="nm">阳光花园社区</span><span class="ar"> ▾</span></span></div>
+    <div class="it">
+      <div class="ii on"><em>🏷</em><span>闲置</span></div>
+      <div class="ii"><em>🚗</em><span>拼车</span></div>
+      <div class="ii"><em>📢</em><span>活动</span></div>
+      <div class="ii"><em>🔧</em><span>互助</span></div>
+      <div class="ii"><em>📚</em><span>课件</span></div>
+    </div>
+    <div class="ann"><em>📌</em><span>置顶：小区停车位调整通知</span></div>
+    <div style="padding:6px 0">
+      <div class="c bl"><div class="ci cm"><div class="cb2"><div class="ct">宜家落地灯 · 九成新</div><div class="cd">搬家出掉</div><div class="cp">80</div></div><div class="thu" style="background:linear-gradient(135deg,#f5e6d3,#e0c9b0)"></div></div></div>
+      <div class="c bl"><div class="ci"><div class="ct">婴儿推车 · 可躺可坐</div><div class="cp">200</div><div class="cf"><div class="ca"><div class="aa">赵</div><span class="an">赵先生</span></div><button class="cb">私聊</button></div></div></div>
+      <div class="c bl"><div class="ci"><div class="ct">全新空气净化器</div><div class="cd">滤芯还在塑封</div><div class="cp">450</div></div></div>
+    </div>
+  </div>
+  <div class="tb"><div class="tbi on"><em>🏠</em>首页</div><div class="tbi"><em>✏️</em>发帖</div><div class="tbi"><em>👤</em>我的</div></div>
+</div></div>
+
+<!-- ═══ 9. 板块分组卡 ═══ -->
+<div class="w">
+<div class="lb">⑨ 板块分组展示</div>
+<div class="desc">每个板块是一个卡片组，内含最新 2-3 条。一屏看到所有板块概览。</div>
+<div class="ph">
+  <div class="nv">社区</div>
+  <div class="bo">
+    <div class="tp2"><span><span class="nm">阳光花园社区</span><span class="ar"> ▾</span></span></div>
+    <div style="padding:8px 0">
+      <div class="gs">
+        <div class="gs-h"><em>🏷</em> 闲置交易 <span style="flex:1"></span><span style="font-size:10px;color:var(--t4);font-weight:400">42条 ›</span></div>
+        <div class="c"><div class="ci cm"><div class="cb2"><div class="ct">宜家落地灯</div><div class="cp">80</div></div><div class="thu" style="background:linear-gradient(135deg,#f5e6d3,#e0c9b0)"></div></div></div>
+        <div class="c"><div class="ci"><div class="ct">婴儿推车</div><div class="cp">200</div></div></div>
+      </div>
+      <div class="gs">
+        <div class="gs-h"><em>🚗</em> 拼车出行 <span style="flex:1"></span><span style="font-size:10px;color:var(--t4);font-weight:400">18条 ›</span></div>
+        <div class="c"><div class="ci"><div class="ct" style="color:var(--i)">阳光花园→万达 14:30</div><div class="chips"><div class="ch">剩2座</div><div class="ch">15元/人</div></div></div></div>
+      </div>
+      <div class="gs">
+        <div class="gs-h"><em>📢</em> 活动公告 <span style="flex:1"></span><span style="font-size:10px;color:var(--t4);font-weight:400">12条 ›</span></div>
+        <div class="c"><div class="ci"><div class="ct">周末亲子绘本阅读会</div><div class="chips"><div class="ch">📅 周六</div><div class="ch">👦 8/15</div></div></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="tb"><div class="tbi on"><em>🏠</em>首页</div><div class="tbi"><em>✏️</em>发帖</div><div class="tbi"><em>👤</em>我的</div></div>
+</div></div>
+
+<!-- ═══ 10. Hero+胶囊混合 ═══ -->
+<div class="w">
+<div class="lb">⑩ Hero + 胶囊 + 公告</div>
+<div class="desc">②的品牌感 + ③的胶囊灵活 + ⑧的公告栏。综合型。</div>
+<div class="ph" style="position:relative">
+  <div class="nv">社区</div>
+  <div class="bo">
+    <div class="hero"><div class="htop"><div><div class="hn">阳光花园社区</div><div class="hm">32位成员 · 今日3条</div></div><button class="hb">切换▾</button></div></div>
+    <div class="pills" style="margin-top:-6px;position:relative;z-index:2;background:transparent"><div class="pl on" style="background:white">全部</div><div class="pl" style="background:rgba(255,255,255,0.85)">🏷 闲置</div><div class="pl" style="background:rgba(255,255,255,0.85)">🚗 拼车</div><div class="pl" style="background:rgba(255,255,255,0.85)">📢 活动</div><div class="pl" style="background:rgba(255,255,255,0.85)">🔧 互助</div></div>
+    <div class="ann"><em>📌</em><span>小区停车位调整通知，点击查看</span></div>
+    <div style="padding:4px 0">
+      <div class="c bl"><div class="ci cm"><div class="cb2"><div class="ct">宜家落地灯 · 九成新</div><div class="cd">搬家出掉，原价399</div><span class="tg tp">闲置</span><div class="cp">80</div></div><div class="thu" style="background:linear-gradient(135deg,#f5e6d3,#e0c9b0)"></div></div><div class="ci" style="padding-top:0"><div class="cf"><div class="ca"><div class="aa">李</div><span class="an">李阿姨</span></div><button class="cb">私聊</button></div></div></div>
+      <div class="c bli"><div class="ci"><span class="tg ti">拼车</span><span class="tg ts">剩2座</span><div class="route"><div class="rd f"></div><div class="rt">阳光花园</div><div class="rl"></div><div class="rt">万达</div><div class="rd"></div></div><div class="cf"><div class="ca"><div class="aa" style="background:var(--ibg);color:var(--i)">张</div><span class="an">张师傅</span></div><button class="cb">拼车</button></div></div></div>
+      <div class="c bls"><div class="ci"><div class="ct">周末亲子绘本阅读会</div><div class="cd">本周六下午2点</div><div class="chips"><div class="ch">📅 周六14:00</div><div class="ch">👦 8/15</div></div></div></div>
+    </div>
+    <div class="fab">+</div>
+  </div>
+  <div class="tb"><div class="tbi on"><em>🏠</em>首页</div><div class="tbi"><em>👤</em>我的</div></div>
+</div></div>
+
+</div><!-- grid -->
+</body>
+</html>

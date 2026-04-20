@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>美好 Home · UI 原型 v3</title>
+<style>
+  :root {
+    --primary: #E07A5F;
+    --primary-light: #F5B9A8;
+    --primary-dark: #C25D43;
+    --primary-bg: rgba(224,122,95,0.06);
+    --success: #52C41A;
+    --success-bg: rgba(82,196,26,0.08);
+    --warning: #FAAD14;
+    --warning-bg: rgba(250,173,20,0.08);
+    --danger: #C0392B;
+    --info: #6E8CA0;
+    --info-bg: rgba(110,140,160,0.08);
+
+    /* ── wot-style rgba text colors ── */
+    --text-1: rgba(0,0,0,0.88);      /* 标题 */
+    --text-2: rgba(0,0,0,0.65);      /* 正文 */
+    --text-3: rgba(0,0,0,0.45);      /* 辅助 */
+    --text-4: rgba(0,0,0,0.25);      /* 占位/箭头 */
+
+    --bg: #FFFFFF;
+    --bg-page: #F7F6F3;
+    --surface: #FFFFFF;
+    --border: rgba(0,0,0,0.06);
+    --divider: rgba(0,0,0,0.04);
+    --active: rgba(0,0,0,0.04);      /* 点击态 */
+
+    --shadow-1: 0 1px 4px rgba(0,0,0,0.03);
+    --shadow-2: 0 4px 12px rgba(0,0,0,0.05);
+    --shadow-3: 0 8px 24px rgba(0,0,0,0.08);
+
+    --r-xs: 4px; --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-xl: 18px; --r-full: 9999px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+    background: #ddd9d3; display:flex; justify-content:center;
+    flex-wrap:wrap; gap:28px; padding:28px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ══ Phone ══ */
+  .wrap { display:flex; flex-direction:column; align-items:center; }
+  .label { font-size:12px; color:var(--text-3); margin-bottom:8px; font-weight:500; letter-spacing:1px; text-transform:uppercase; }
+  .phone {
+    width:375px; height:780px; background:var(--bg-page);
+    border-radius:32px; overflow:hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.05);
+    display:flex; flex-direction:column;
+  }
+  .nav { height:44px; background:var(--bg); display:flex; align-items:center; justify-content:center;
+    font-size:17px; font-weight:600; color:var(--text-1); flex-shrink:0; }
+  .body { flex:1; overflow-y:auto; }
+  .body::-webkit-scrollbar { display:none; }
+
+  /* ══ Tab Bar (wot style) ══ */
+  .tabs {
+    height:50px; background:var(--bg); display:flex; align-items:center; justify-content:space-around;
+    flex-shrink:0; position:relative;
+    border-top:1px solid var(--border);
+  }
+  .ti { display:flex; flex-direction:column; align-items:center; gap:1px;
+    font-size:10px; color:var(--text-4); cursor:pointer; transition:color 0.2s; position:relative; }
+  .ti.on { color:var(--primary); }
+  .ti-icon { font-size:19px; height:22px; line-height:22px; }
+  .ti-dot { width:4px; height:4px; border-radius:50%; background:var(--primary);
+    position:absolute; bottom:-6px; opacity:0; transition:opacity 0.2s; }
+  .ti.on .ti-dot { opacity:1; }
+
+  /* ══ Hero ══ */
+  .hero {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+    padding: 22px 20px 32px; position:relative; overflow:hidden;
+  }
+  .hero::before {
+    content:""; position:absolute; inset:0;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Ccircle cx='40' cy='40' r='30' fill='none' stroke='white' stroke-width='0.5' opacity='0.1'/%3E%3C/svg%3E");
+  }
+  .hero::after {
+    content:""; position:absolute; bottom:0; left:0; right:0; height:20px;
+    background:var(--bg-page); border-radius:20px 20px 0 0;
+  }
+  .hero-top { display:flex; justify-content:space-between; align-items:flex-start; position:relative; z-index:1; }
+  .hero-name { font-size:19px; font-weight:600; color:white; }
+  .hero-meta { font-size:12px; color:rgba(255,255,255,0.6); margin-top:3px; }
+  .hero-btn {
+    background:rgba(255,255,255,0.18); color:white; border:none; padding:5px 14px;
+    border-radius:var(--r-full); font-size:12px; cursor:pointer; backdrop-filter:blur(4px);
+    border:1px solid rgba(255,255,255,0.15);
+  }
+
+  /* ══ Modules Grid ══ */
+  .mods {
+    display:grid; grid-template-columns:repeat(4,1fr);
+    background:var(--bg); margin:0 16px; border-radius:var(--r-lg);
+    box-shadow:var(--shadow-2); position:relative; z-index:2; margin-top:-10px;
+  }
+  .mod {
+    display:flex; flex-direction:column; align-items:center; gap:6px;
+    padding:16px 4px; cursor:pointer; transition:background 0.15s; border-radius:var(--r-md);
+  }
+  .mod:active { background:var(--active); }
+  .mod-icon {
+    width:38px; height:38px; border-radius:var(--r-md);
+    display:flex; align-items:center; justify-content:center; font-size:18px;
+  }
+  .mod-name { font-size:11px; color:var(--text-2); }
+
+  /* ══ Section ══ */
+  .sec { padding:16px 16px 8px; display:flex; justify-content:space-between; align-items:center; }
+  .sec-title { font-size:15px; font-weight:600; color:var(--text-1); }
+  .sec-more { font-size:12px; color:var(--text-4); cursor:pointer; }
+
+  /* ══ Stats ══ */
+  .stats { display:flex; gap:8px; margin:10px 16px 4px; }
+  .stat {
+    flex:1; background:var(--bg); border-radius:var(--r-md);
+    padding:12px 8px; text-align:center; box-shadow:var(--shadow-1);
+  }
+  .stat-n { font-size:18px; font-weight:600; color:var(--primary); }
+  .stat-l { font-size:10px; color:var(--text-3); margin-top:2px; }
+
+  /* ══ Feed ══ */
+  .feed { padding:6px 16px 16px; }
+
+  /* ══ Card (core) ══ */
+  .c {
+    background:var(--bg); border-radius:var(--r-lg);
+    margin-bottom:10px; box-shadow:var(--shadow-1);
+    overflow:hidden; cursor:pointer;
+    transition:transform 0.2s, box-shadow 0.2s;
+  }
+  .c:active { transform:translateY(-1px); box-shadow:var(--shadow-2); }
+  .ci { padding:14px 16px; }
+
+  /* Card: accent bar */
+  .c.bar { border-left:3px solid var(--primary); }
+  .c.bar-info { border-left:3px solid var(--info); }
+  .c.bar-warn { border-left:3px solid var(--warning); }
+  .c.bar-success { border-left:3px solid var(--success); }
+
+  /* Card: header */
+  .c-top { display:flex; justify-content:space-between; align-items:flex-start; }
+  .c-title { font-size:15px; font-weight:500; color:var(--text-1); line-height:1.45; flex:1;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .c-time { font-size:11px; color:var(--text-4); flex-shrink:0; margin-left:12px; margin-top:2px; }
+
+  /* Card: desc */
+  .c-desc { font-size:13px; color:var(--text-3); line-height:1.55; margin-top:5px;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+
+  /* Card: price */
+  .c-price { font-size:19px; font-weight:600; color:var(--primary); margin-top:8px; letter-spacing:-0.5px; }
+  .c-price::before { content:'\00A5'; font-size:13px; font-weight:400; margin-right:1px; }
+
+  /* Card: media layout */
+  .c-media { display:flex; gap:12px; }
+  .c-media .c-body { flex:1; min-width:0; }
+  .c-thumb {
+    width:84px; height:84px; border-radius:var(--r-sm); flex-shrink:0;
+    background-size:cover; background-position:center;
+  }
+
+  /* Card: image strip */
+  .c-imgs { display:flex; gap:3px; margin-top:10px; border-radius:var(--r-sm); overflow:hidden; }
+  .c-imgs .im { flex:1; height:76px; background-size:cover; background-position:center; }
+
+  /* Card: tags (wot mark style) */
+  .c-tags { display:flex; gap:5px; margin-top:8px; flex-wrap:wrap; }
+  .tg {
+    font-size:11px; padding:2px 7px; font-weight:500;
+    border-radius: 6px 2px 6px 2px; /* wot mark 非对称圆角 */
+  }
+  .tg.pri { background:var(--primary-bg); color:var(--primary); }
+  .tg.suc { background:var(--success-bg); color:var(--success); }
+  .tg.war { background:var(--warning-bg); color:var(--warning); }
+  .tg.inf { background:var(--info-bg); color:var(--info); }
+
+  /* Card: chips */
+  .c-chips { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
+  .chip {
+    display:inline-flex; align-items:center; gap:3px;
+    font-size:12px; color:var(--text-2);
+    background:var(--bg-page); padding:4px 10px; border-radius:var(--r-full);
+  }
+
+  /* Card: footer */
+  .c-ft {
+    display:flex; align-items:center; justify-content:space-between;
+    margin-top:10px; padding-top:10px; border-top:1px solid var(--divider);
+  }
+  .c-author { display:flex; align-items:center; gap:6px; }
+  .av {
+    width:22px; height:22px; border-radius:var(--r-full);
+    font-size:11px; display:flex; align-items:center; justify-content:center; font-weight:600;
+    color:var(--primary); background:var(--primary-bg);
+  }
+  .av.green { color:var(--success); background:var(--success-bg); }
+  .av.blue { color:var(--info); background:var(--info-bg); }
+  .a-name { font-size:12px; color:var(--text-3); }
+  .c-btn {
+    font-size:12px; color:var(--primary); background:var(--primary-bg);
+    border:none; padding:4px 12px; border-radius:var(--r-full); cursor:pointer;
+    font-weight:500; transition:background 0.15s;
+  }
+  .c-btn:active { background:var(--primary-light); color:white; }
+
+  /* Card: route (carpool) */
+  .route { display:flex; align-items:center; gap:6px; margin:4px 0 6px; }
+  .r-dot { width:8px; height:8px; border-radius:50%; border:2px solid var(--info); flex-shrink:0; }
+  .r-dot.fill { background:var(--info); }
+  .r-line { flex:1; height:0; border-top:1.5px dashed var(--border); }
+  .r-text { font-size:14px; color:var(--text-1); font-weight:500; }
+
+  /* Card: progress (activity) */
+  .c-progress { margin-top:8px; }
+  .prog-bar { height:4px; background:var(--divider); border-radius:2px; overflow:hidden; }
+  .prog-fill { height:100%; border-radius:2px; background:linear-gradient(90deg, var(--primary-light), var(--primary)); }
+  .prog-text { font-size:11px; color:var(--text-3); margin-top:3px; text-align:right; }
+
+  /* ══ Create Page ══ */
+  .create { padding:16px; background:var(--bg); min-height:100%; }
+  .back { font-size:14px; color:var(--primary-dark); margin-bottom:20px; display:inline-block; cursor:pointer; font-weight:500; }
+  .fg { margin-bottom:22px; }
+  .fl { font-size:14px; color:var(--text-1); font-weight:500; margin-bottom:8px; display:block; }
+  .fl .req { color:var(--primary); font-weight:400; }
+  .fi {
+    width:100%; padding:12px 14px; font-size:14px;
+    background:var(--bg-page); border:1.5px solid transparent;
+    border-radius:var(--r-md); color:var(--text-1); outline:none;
+    transition:border-color 0.2s, box-shadow 0.2s;
+  }
+  .fi::placeholder { color:var(--text-4); }
+  .fi:focus { border-color:var(--primary-light); box-shadow:0 0 0 3px var(--primary-bg); background:var(--bg); }
+  .fi-lg { font-size:20px; font-weight:600; color:var(--primary); }
+  .fi-area { min-height:100px; resize:vertical; font-family:inherit; line-height:1.6; }
+  .photos { display:flex; gap:8px; margin-top:4px; }
+  .photo { width:76px; height:76px; border-radius:var(--r-md); background-size:cover; }
+  .photo-add {
+    width:76px; height:76px; border-radius:var(--r-md); background:var(--bg-page);
+    border:1.5px dashed var(--border); display:flex; align-items:center; justify-content:center;
+    color:var(--text-4); font-size:24px; cursor:pointer; transition:border-color 0.15s;
+  }
+  .photo-add:active { border-color:var(--primary-light); color:var(--primary); }
+  .submit {
+    width:100%; padding:14px; font-size:16px; font-weight:500;
+    background:linear-gradient(135deg, var(--primary), var(--primary-dark));
+    color:white; border:none; border-radius:var(--r-md); cursor:pointer;
+    box-shadow:0 4px 16px rgba(224,122,95,0.25); transition:opacity 0.15s;
+  }
+  .submit:active { opacity:0.85; }
+
+  /* ══ Profile ══ */
+  .profile { padding:0 16px 16px; min-height:100%; }
+  .p-hero {
+    background:linear-gradient(135deg, var(--primary), var(--primary-dark));
+    border-radius:0 0 var(--r-xl) var(--r-xl);
+    padding:24px 20px 28px; margin:0 -16px 16px;
+    display:flex; align-items:center; gap:14px; position:relative; overflow:hidden;
+  }
+  .p-hero::before {
+    content:""; position:absolute; top:-20px; right:-20px; width:100px; height:100px;
+    background:rgba(255,255,255,0.06); border-radius:50%;
+  }
+  .p-hero::after {
+    content:""; position:absolute; bottom:-30px; left:40%; width:140px; height:140px;
+    background:rgba(255,255,255,0.03); border-radius:50%;
+  }
+  .p-av {
+    width:52px; height:52px; border-radius:var(--r-full);
+    background:rgba(255,255,255,0.18); border:2px solid rgba(255,255,255,0.3);
+    display:flex; align-items:center; justify-content:center;
+    font-size:22px; color:white; flex-shrink:0; position:relative; z-index:1;
+  }
+  .p-info { flex:1; position:relative; z-index:1; }
+  .p-name { font-size:17px; font-weight:600; color:white; }
+  .p-sub { font-size:11px; color:rgba(255,255,255,0.55); margin-top:2px; }
+  .p-logout {
+    font-size:11px; color:rgba(255,255,255,0.7); background:rgba(255,255,255,0.12);
+    border:1px solid rgba(255,255,255,0.15); padding:4px 14px; border-radius:var(--r-full); cursor:pointer;
+    position:relative; z-index:1;
+  }
+
+  .p-sec {
+    background:var(--bg); border-radius:var(--r-lg);
+    padding:14px 16px; margin-bottom:10px; box-shadow:var(--shadow-1);
+  }
+  .p-sec-t { font-size:12px; color:var(--text-3); font-weight:500; margin-bottom:10px; letter-spacing:0.5px; }
+  .p-row {
+    display:flex; align-items:center; padding:11px 0;
+    border-bottom:1px solid var(--divider); cursor:pointer;
+    transition:background 0.1s;
+  }
+  .p-row:last-of-type { border-bottom:none; }
+  .p-row:active { background:var(--active); margin:0 -16px; padding-left:16px; padding-right:16px; }
+  .p-icon {
+    width:34px; height:34px; border-radius:var(--r-md);
+    display:flex; align-items:center; justify-content:center; font-size:15px;
+    flex-shrink:0; margin-right:10px;
+  }
+  .p-row-name { font-size:15px; color:var(--text-1); flex:1; }
+  .p-row-val { font-size:13px; color:var(--text-4); margin-right:4px; }
+  .p-arrow { color:var(--text-4); font-size:13px; }
+  .p-badges { display:flex; gap:4px; margin-right:6px; }
+  .pb { font-size:10px; padding:1px 6px; border-radius:var(--r-full); font-weight:500; }
+  .pb.cur { background:var(--primary-bg); color:var(--primary); }
+  .pb.adm { background:var(--info-bg); color:var(--info); }
+  .p-add {
+    width:100%; padding:10px; font-size:13px; color:var(--text-3);
+    background:none; border:1.5px dashed var(--border);
+    border-radius:var(--r-md); cursor:pointer; margin-top:6px;
+    transition:color 0.15s, border-color 0.15s;
+  }
+  .p-add:active { color:var(--primary); border-color:var(--primary-light); }
+
+  /* ══ Animations ══ */
+  @keyframes up { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+  .feed .c { animation:up 0.35s ease both; }
+  .feed .c:nth-child(1){animation-delay:0s} .feed .c:nth-child(2){animation-delay:0.04s}
+  .feed .c:nth-child(3){animation-delay:0.08s} .feed .c:nth-child(4){animation-delay:0.12s}
+  .feed .c:nth-child(5){animation-delay:0.16s} .feed .c:nth-child(6){animation-delay:0.2s}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ FEED ═══════════════ -->
+<div class="wrap">
+<div class="label">首页 · 社区动态</div>
+<div class="phone">
+  <div class="nav">社区</div>
+  <div class="body">
+    <div class="hero">
+      <div class="hero-top">
+        <div>
+          <div class="hero-name">阳光花园社区</div>
+          <div class="hero-meta">32位成员 · 今日 3 条新动态</div>
+        </div>
+        <button class="hero-btn">切换 ▾</button>
+      </div>
+    </div>
+    <div class="mods">
+      <div class="mod"><div class="mod-icon" style="background:var(--primary-bg)">🏷</div><div class="mod-name">闲置交易</div></div>
+      <div class="mod"><div class="mod-icon" style="background:var(--info-bg)">🚗</div><div class="mod-name">拼车出行</div></div>
+      <div class="mod"><div class="mod-icon" style="background:var(--success-bg)">📢</div><div class="mod-name">活动公告</div></div>
+      <div class="mod"><div class="mod-icon" style="background:var(--warning-bg)">🔧</div><div class="mod-name">邻里互助</div></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-n">128</div><div class="stat-l">条动态</div></div>
+      <div class="stat"><div class="stat-n">32</div><div class="stat-l">位成员</div></div>
+      <div class="stat"><div class="stat-n">4</div><div class="stat-l">个板块</div></div>
+    </div>
+    <div class="sec"><span class="sec-title">最新动态</span><span class="sec-more">全部 ›</span></div>
+    <div class="feed">
+      <!-- 闲置：图文+价格 -->
+      <div class="c bar">
+        <div class="ci c-media">
+          <div class="c-body">
+            <div class="c-top"><div class="c-title">宜家落地灯 · 九成新</div></div>
+            <div class="c-desc">搬家出掉，原价399，灯泡完好</div>
+            <div class="c-tags"><span class="tg pri">闲置交易</span></div>
+            <div class="c-price">80</div>
+          </div>
+          <div class="c-thumb" style="background:linear-gradient(135deg,#f5e6d3,#e0c9b0);"></div>
+        </div>
+        <div class="ci" style="padding-top:0">
+          <div class="c-ft">
+            <div class="c-author"><div class="av">李</div><span class="a-name">李阿姨 · 4/15</span></div>
+            <button class="c-btn">私聊</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 拼车：路线+芯片 -->
+      <div class="c bar-info">
+        <div class="ci">
+          <div class="c-tags" style="margin:0 0 6px"><span class="tg inf">拼车出行</span><span class="tg suc">剩2座</span></div>
+          <div class="route">
+            <div class="r-dot fill"></div>
+            <div class="r-text">阳光花园</div>
+            <div class="r-line"></div>
+            <div class="r-text">万达广场</div>
+            <div class="r-dot"></div>
+          </div>
+          <div class="c-chips">
+            <div class="chip">🕐 今天 14:30</div>
+            <div class="chip">🚗 5座轿车</div>
+            <div class="chip">💰 每人15元</div>
+          </div>
+          <div class="c-ft">
+            <div class="c-author"><div class="av blue">张</div><span class="a-name">张师傅 · 已验证</span></div>
+            <button class="c-btn">立即拼车</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 活动：三图+报名进度 -->
+      <div class="c bar-success">
+        <div class="ci">
+          <div class="c-top"><div class="c-title">周末亲子绘本阅读会</div><div class="c-time">4/16</div></div>
+          <div class="c-desc">本周六下午2点，社区活动室，适合3-8岁小朋友</div>
+          <div class="c-imgs">
+            <div class="im" style="background:linear-gradient(135deg,#fce4ec,#f8bbd0);"></div>
+            <div class="im" style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);"></div>
+            <div class="im" style="background:linear-gradient(135deg,#fff3e0,#ffe0b2);"></div>
+          </div>
+          <div class="c-chips">
+            <div class="chip">📅 本周六 14:00</div>
+            <div class="chip">📍 活动室</div>
+          </div>
+          <div class="c-progress">
+            <div class="prog-bar"><div class="prog-fill" style="width:53%"></div></div>
+            <div class="prog-text">已报名 8/15 人</div>
+          </div>
+          <div class="c-ft">
+            <div class="c-author"><div class="av green">王</div><span class="a-name">王老师 · 管理员</span></div>
+            <button class="c-btn">我要报名</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 推荐：纯文字 -->
+      <div class="c">
+        <div class="ci">
+          <div class="c-top"><div class="c-title">推荐一个超好的培训机构</div><div class="c-time">4/15</div></div>
+          <div class="c-desc">带娃试了三家最后选的这个，老师很耐心，课程设置合理，离小区开车10分钟</div>
+          <div class="c-tags"><span class="tg war">推荐</span></div>
+          <div class="c-ft">
+            <div class="c-author"><div class="av">赵</div><span class="a-name">赵妈妈 · 4/15</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 求助 -->
+      <div class="c bar-warn">
+        <div class="ci">
+          <div class="c-top"><div class="c-title">有没有靠谱的疏通下水道师傅？</div><div class="c-time">4/14</div></div>
+          <div class="c-desc">厨房下水道堵了两天了，物业说要自己找人</div>
+          <div class="c-tags"><span class="tg war">求助</span><span class="tg inf">3条回复</span></div>
+        </div>
+      </div>
+
+      <!-- 课件分享 -->
+      <div class="c bar-info">
+        <div class="ci">
+          <div class="c-top"><div class="c-title">【第3课】绘画基础：光影与透视</div><div class="c-time">4/13</div></div>
+          <div class="c-desc">本节课件已上传，包含视频回放链接和课后练习</div>
+          <div class="c-tags"><span class="tg inf">课件</span><span class="tg suc">已上传</span></div>
+          <div class="c-ft">
+            <div class="c-author"><div class="av blue">陈</div><span class="a-name">陈老师</span></div>
+            <button class="c-btn">查看课件</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="tabs">
+    <div class="ti on"><div class="ti-icon">🏠</div><span>首页</span><div class="ti-dot"></div></div>
+    <div class="ti"><div class="ti-icon">✏️</div><span>发帖</span><div class="ti-dot"></div></div>
+    <div class="ti"><div class="ti-icon">👤</div><span>我的</span><div class="ti-dot"></div></div>
+  </div>
+</div>
+</div>
+
+<!-- ═══════════════ CREATE ═══════════════ -->
+<div class="wrap">
+<div class="label">发帖 · 闲置交易</div>
+<div class="phone">
+  <div class="nav">发帖</div>
+  <div class="body">
+    <div class="create">
+      <div class="back">‹ 闲置交易</div>
+      <div class="fg">
+        <label class="fl">标题 <span class="req">*</span></label>
+        <input class="fi" placeholder="给你的闲置起个名字" value="九成新落地灯">
+      </div>
+      <div class="fg">
+        <label class="fl">描述 <span class="req">*</span></label>
+        <textarea class="fi fi-area" placeholder="描述一下物品状况、购买时间等">搬家出掉，原价399元，买了不到半年。灯泡完好，成色很新。自取最好，也可以小区内送。</textarea>
+      </div>
+      <div class="fg">
+        <label class="fl">价格 <span class="req">*</span></label>
+        <input class="fi fi-lg" placeholder="0" value="80">
+      </div>
+      <div class="fg">
+        <label class="fl">照片</label>
+        <div class="photos">
+          <div class="photo" style="background:linear-gradient(135deg,#f5e6d3,#e0c9b0);"></div>
+          <div class="photo-add">+</div>
+        </div>
+      </div>
+      <button class="submit">发布</button>
+    </div>
+  </div>
+  <div class="tabs">
+    <div class="ti"><div class="ti-icon">🏠</div><span>首页</span><div class="ti-dot"></div></div>
+    <div class="ti on"><div class="ti-icon">✏️</div><span>发帖</span><div class="ti-dot"></div></div>
+    <div class="ti"><div class="ti-icon">👤</div><span>我的</span><div class="ti-dot"></div></div>
+  </div>
+</div>
+</div>
+
+<!-- ═══════════════ PROFILE ═══════════════ -->
+<div class="wrap">
+<div class="label">我的 · 个人中心</div>
+<div class="phone">
+  <div class="nav">我的</div>
+  <div class="body">
+    <div class="profile">
+      <div class="p-hero">
+        <div class="p-av">👤</div>
+        <div class="p-info">
+          <div class="p-name">微信用户</div>
+          <div class="p-sub">已加入 3 个社区 · 发布 12 条动态</div>
+        </div>
+        <button class="p-logout">登出</button>
+      </div>
+      <div class="p-sec">
+        <div class="p-sec-t">我的社区</div>
+        <div class="p-row">
+          <div class="p-icon" style="background:var(--primary-bg)">🏡</div>
+          <span class="p-row-name">阳光花园社区</span>
+          <div class="p-badges"><span class="pb cur">当前</span><span class="pb adm">管理员</span></div>
+          <span class="p-arrow">›</span>
+        </div>
+        <div class="p-row">
+          <div class="p-icon" style="background:var(--success-bg)">📖</div>
+          <span class="p-row-name">亲子读书会</span>
+          <span class="p-arrow">›</span>
+        </div>
+        <div class="p-row">
+          <div class="p-icon" style="background:var(--info-bg)">🚴</div>
+          <span class="p-row-name">周末骑行群</span>
+          <div class="p-badges"><span class="pb adm">管理员</span></div>
+          <span class="p-arrow">›</span>
+        </div>
+        <button class="p-add">+ 加入或创建社区</button>
+      </div>
+      <div class="p-sec">
+        <div class="p-sec-t">常用功能</div>
+        <div class="p-row">
+          <div class="p-icon" style="background:var(--warning-bg)">📝</div>
+          <span class="p-row-name">我的发布</span>
+          <span class="p-row-val">12条</span>
+          <span class="p-arrow">›</span>
+        </div>
+        <div class="p-row">
+          <div class="p-icon" style="background:var(--primary-bg)">⭐</div>
+          <span class="p-row-name">我的收藏</span>
+          <span class="p-arrow">›</span>
+        </div>
+        <div class="p-row">
+          <div class="p-icon" style="background:var(--info-bg)">⚙️</div>
+          <span class="p-row-name">设置</span>
+          <span class="p-arrow">›</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="tabs">
+    <div class="ti"><div class="ti-icon">🏠</div><span>首页</span><div class="ti-dot"></div></div>
+    <div class="ti"><div class="ti-icon">✏️</div><span>发帖</span><div class="ti-dot"></div></div>
+    <div class="ti on"><div class="ti-icon">👤</div><span>我的</span><div class="ti-dot"></div></div>
+  </div>
+</div>
+</div>
+
+</body>
+</html>
