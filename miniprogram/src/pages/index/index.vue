@@ -180,53 +180,80 @@ const avatarLetter = computed(() => {
 const kind = computed(() => '邻里')
 const kindEn = computed(() => 'NEIGHBORHOOD')
 
-// ── 群训引文（community.quote 字段暂未实现，先给默认） ──
-const quote = computed(() => '远亲不如近邻，近邻不如对门。')
-const quoteCite = computed(() => '民谚')
+// ── 群训引文：读 community.motto / mottoCite ──
+const quote = computed(() => communityStore.currentCommunity?.motto || '')
+const quoteCite = computed(() => communityStore.currentCommunity?.mottoCite || '')
 
-// ── 实时协作区（TODO：当 section.type === 'realtime' && status === 'active' 时纳入） ──
-// 暂时使用 mock 数据示意，数据模型升级后替换
-interface LiveItem { ic: string; t: string; m: string[]; cta: string }
+// 辅助：归一化 section 的 type/status（应对老数据）
+function secType(s: any): 'realtime' | 'evergreen' {
+  return s?.type === 'realtime' ? 'realtime' : 'evergreen'
+}
+function secStatus(s: any): 'active' | 'dormant' | 'archived' {
+  return s?.status === 'dormant' || s?.status === 'archived' ? s.status : 'active'
+}
+
+// ── 实时协作区：type='realtime' && status='active' 的板块，每个板块取 1 条最新帖子作为脉冲 ──
+interface LiveItem { ic: string; t: string; m: string[]; cta: string; sectionId: string; postId?: string }
 const liveItems = computed<LiveItem[]>(() => {
-  // MOCK: 将来从 realtime sections 的最新帖子聚合
-  return []
+  const sections = communityStore.currentSections ?? []
+  const items: LiveItem[] = []
+  for (const section of sections) {
+    if (secType(section) !== 'realtime' || secStatus(section) !== 'active') continue
+    const posts = postsBySection.value[section._id] ?? []
+    const latest = posts[0]
+    if (!latest) continue
+    const meta: string[] = []
+    if (latest.authorNickname) meta.push(latest.authorNickname)
+    meta.push(formatTime(latest.createdAt))
+    if (posts.length > 1) meta.push(`${posts.length} 人参与`)
+    items.push({
+      ic: section.icon || '·',
+      t: getPostTitle(latest, section) || section.name,
+      m: meta,
+      cta: '进入',
+      sectionId: section._id,
+      postId: latest._id,
+    })
+  }
+  return items
 })
 
-// ── 近期日程（TODO：从有 datetime widget 的 sections 抽取未来事件） ──
+// ── 近期日程（datetime widget 聚合，后续实现；先返回空） ──
 interface ScheduleItem { date: string; day: string; t: string; m: string; kind: string; highlight?: boolean }
-const scheduleItems = computed<ScheduleItem[]>(() => {
-  // MOCK: 将来从 sections 里过滤出时间 widget 的未来帖子
-  return []
-})
+const scheduleItems = computed<ScheduleItem[]>(() => [])
 
-// ── 沉淀板块分组 ──
+// ── 沉淀板块分组：只展示 type='evergreen' 的板块 ──
 interface ArchiveItem { k: string; t: string; who: string; meta?: string; hot?: boolean; when: string; postId?: string }
 interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[] }
 
 const archiveGroups = computed<ArchiveGroup[]>(() => {
-  return (communityStore.currentSections ?? []).map((section) => {
-    const posts = postsBySection.value[section._id] ?? []
-    return {
-      id: section._id,
-      name: section.name,
-      count: posts.length, // TODO: 从 section.postCount 读取
-      items: posts.slice(0, 3).map((p) => ({
-        k: getPostKind(p),
-        t: getPostTitle(p, section),
-        who: p.authorNickname || '匿名',
-        meta: p.stats?.reaction ? `${p.stats.reaction} 赞` : '',
-        hot: isPostHot(p),
-        when: formatTime(p.createdAt),
-        postId: p._id,
-      })),
-    }
-  }).filter((g) => g.items.length > 0)
+  return (communityStore.currentSections ?? [])
+    .filter((section) => secType(section) === 'evergreen' && secStatus(section) !== 'archived')
+    .map((section) => {
+      const posts = postsBySection.value[section._id] ?? []
+      return {
+        id: section._id,
+        name: section.name,
+        count: posts.length,
+        items: posts.slice(0, 3).map((p) => ({
+          k: getPostKind(p),
+          t: getPostTitle(p, section),
+          who: p.authorNickname || '匿名',
+          meta: p.stats?.reaction ? `${p.stats.reaction} 赞` : '',
+          hot: isPostHot(p),
+          when: formatTime(p.createdAt),
+          postId: p._id,
+        })),
+      }
+    })
+    .filter((g) => g.items.length > 0)
 })
 
-// ── 休眠板块（TODO：section.status === 'dormant' 的名字列表） ──
+// ── 休眠板块：type='realtime' && status='dormant' 的板块名字 ──
 const dormantNames = computed(() => {
-  // MOCK: 将来从 status === 'dormant' 的 sections 取
-  return []
+  return (communityStore.currentSections ?? [])
+    .filter((s) => secType(s) === 'realtime' && secStatus(s) === 'dormant')
+    .map((s) => s.name)
 })
 
 // ── Helpers ──
@@ -266,8 +293,10 @@ function formatTime(iso?: string): string {
 }
 
 // ── Actions ──
-function onLiveTap(_item: LiveItem) {
-  // TODO: 根据 item 类型跳到对应页面
+function onLiveTap(item: LiveItem) {
+  if (item.postId) {
+    uni.navigateTo({ url: `/pages/detail/index?postId=${item.postId}` })
+  }
 }
 
 function onGroupHeaderTap(_g: ArchiveGroup) {

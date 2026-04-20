@@ -58,6 +58,11 @@ export async function softDelete(collectionName: string, id: string) {
   return updateById(collectionName, id, { status: 'deleted' })
 }
 
+export async function count(collectionName: string, where: object): Promise<number> {
+  const res = await collection(collectionName).where(where).count()
+  return (res as any).total as number
+}
+
 export async function query(
   collectionName: string,
   where: object,

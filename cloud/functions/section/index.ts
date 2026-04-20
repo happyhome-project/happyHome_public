@@ -3,8 +3,18 @@ import { v4 as uuidv4 } from 'uuid'
 import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
 import { assertCommunityAdmin } from '../../lib/auth'
-import type { Widget } from '../../shared/types'
+import type { Widget, Section, SectionType, SectionStatus } from '../../shared/types'
 import { LIST_DISPLAYABLE_TYPES } from '../../shared/types'
+
+// 老数据没有 type/status 字段时的默认值（避免一次性 migration）
+// evergreen + active 表示"沉淀常驻"，对老数据语义最安全
+function normalizeSection(s: any): Section {
+  return {
+    ...s,
+    type: (s.type as SectionType) || 'evergreen',
+    status: (s.status as SectionStatus) || 'active',
+  }
+}
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
@@ -16,6 +26,8 @@ export async function handleCreate(
     order: number
     enableComment?: boolean
     enableLike?: boolean
+    type?: SectionType
+    accentColor?: string
   },
   openid: string,
 ) {
@@ -31,20 +43,36 @@ export async function handleCreate(
     enableLike: params.enableLike ?? true,
     widgets: [],
     createdAt: new Date().toISOString(),
+    type: params.type ?? 'evergreen',
+    status: 'active',
+    ...(params.accentColor ? { accentColor: params.accentColor } : {}),
   })
 
   return { sectionId }
 }
 
 export async function handleGet(params: { sectionId: string }) {
-  const section = await db.getById('sections', params.sectionId)
-  return { section }
+  const raw = await db.getById('sections', params.sectionId)
+  return { section: raw ? normalizeSection(raw) : null }
 }
 
-export async function handleList(params: { communityId: string }) {
-  const sections = await db.query('sections', { communityId: params.communityId }, {
+export async function handleList(params: { communityId: string; withPostCount?: boolean }) {
+  const raw = await db.query('sections', { communityId: params.communityId }, {
     orderBy: ['order', 'asc'],
   })
+  const sections = raw.map(normalizeSection)
+
+  // 首页需要每个 section 的活跃帖子数（N+1 查询；单社区 section 数量不大，可接受）
+  if (params.withPostCount) {
+    const withCount = await Promise.all(
+      sections.map(async (s) => ({
+        ...s,
+        postCount: await db.count('posts', { sectionId: s._id, status: 'active' }),
+      }))
+    )
+    return { sections: withCount }
+  }
+
   return { sections }
 }
 
@@ -87,6 +115,9 @@ export async function handleUpdate(
     order?: number
     enableComment?: boolean
     enableLike?: boolean
+    type?: SectionType
+    status?: SectionStatus
+    accentColor?: string
   },
   openid: string,
 ) {
@@ -94,6 +125,8 @@ export async function handleUpdate(
   await assertCommunityAdmin(openid, params.communityId)
 
   const { sectionId, communityId, ...updates } = params
+  // evergreen 类型的 status 强制为 active（语义：永远常驻）
+  if (updates.type === 'evergreen') updates.status = 'active'
   await db.updateById('sections', sectionId, updates)
   return { success: true }
 }

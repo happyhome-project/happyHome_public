@@ -73,6 +73,18 @@ async function route(action: string, params: Record<string, any>) {
     )
     return { communities }
   }
+  if (action === 'community.updateMeta') {
+    const communityId = String(params.communityId || '').trim()
+    if (!communityId) throw new Error('communityId 不能为空')
+    const updates: Record<string, any> = {}
+    if (typeof params.name === 'string') updates.name = params.name
+    if (typeof params.description === 'string') updates.description = params.description
+    if (typeof params.motto === 'string') updates.motto = params.motto
+    if (typeof params.mottoCite === 'string') updates.mottoCite = params.mottoCite
+    if (Object.keys(updates).length === 0) throw new Error('无可更新字段')
+    await db.updateById('communities', communityId, updates)
+    return { success: true }
+  }
   if (action === 'community.hardDelete') {
     const c = await db.getById('communities', params.communityId) as Community | null
     if (!c) throw new Error('community not found')
@@ -85,10 +97,17 @@ async function route(action: string, params: Record<string, any>) {
 
   // ---- 板块管理 ----
   if (action === 'section.list') {
-    const sections = await db.query('sections', { communityId: params.communityId }, { orderBy: ['order', 'asc'] })
+    const raw = await db.query('sections', { communityId: params.communityId }, { orderBy: ['order', 'asc'] })
+    // 对老数据注入默认 type='evergreen'、status='active'
+    const sections = raw.map((s: any) => ({
+      ...s,
+      type: s.type || 'evergreen',
+      status: s.status || 'active',
+    }))
     return { sections }
   }
   if (action === 'section.create') {
+    const type = params.type === 'realtime' ? 'realtime' : 'evergreen'
     const sectionId = await db.create('sections', {
       communityId: params.communityId,
       name: params.name,
@@ -98,12 +117,49 @@ async function route(action: string, params: Record<string, any>) {
       enableLike: true,
       widgets: [],
       createdAt: new Date().toISOString(),
+      type,
+      status: 'active',
+      ...(params.accentColor ? { accentColor: String(params.accentColor) } : {}),
     })
     return { sectionId }
   }
   if (action === 'section.get') {
-    const section = await db.getById('sections', params.sectionId)
+    const s: any = await db.getById('sections', params.sectionId)
+    const section = s ? { ...s, type: s.type || 'evergreen', status: s.status || 'active' } : null
     return { section }
+  }
+  if (action === 'section.updateMeta') {
+    const sectionId = String(params.sectionId || '').trim()
+    if (!sectionId) throw new Error('sectionId 不能为空')
+    const updates: Record<string, any> = {}
+    if (typeof params.name === 'string') updates.name = params.name
+    if (typeof params.icon === 'string') updates.icon = params.icon
+    if (typeof params.order === 'number') updates.order = params.order
+    if (params.type === 'realtime' || params.type === 'evergreen') updates.type = params.type
+    if (params.status === 'active' || params.status === 'dormant' || params.status === 'archived') {
+      updates.status = params.status
+    }
+    if (typeof params.accentColor === 'string') updates.accentColor = params.accentColor
+    // evergreen 强制 active
+    if (updates.type === 'evergreen') updates.status = 'active'
+    if (Object.keys(updates).length === 0) throw new Error('无可更新字段')
+    await db.updateById('sections', sectionId, updates)
+    return { success: true }
+  }
+  if (action === 'section.updateStatus') {
+    const sectionId = String(params.sectionId || '').trim()
+    if (!sectionId) throw new Error('sectionId 不能为空')
+    if (params.status !== 'active' && params.status !== 'dormant' && params.status !== 'archived') {
+      throw new Error('status 必须是 active/dormant/archived 之一')
+    }
+    const s: any = await db.getById('sections', sectionId)
+    if (!s) throw new Error('板块不存在')
+    const currentType = s.type || 'evergreen'
+    if (currentType === 'evergreen' && params.status !== 'active') {
+      throw new Error('沉淀展示类板块（evergreen）只能保持 active 状态')
+    }
+    await db.updateById('sections', sectionId, { status: params.status })
+    return { success: true }
   }
   if (action === 'section.updateWidgets') {
     const { v4: uuidv4 } = await import('uuid')
