@@ -1,47 +1,147 @@
 <template>
-  <view class="page">
-    <view class="top-bar">
-      <view class="community-name" @tap="showSwitcher = true">
-        <text>{{ communityStore.currentCommunity?.name ?? '选择社区' }}</text>
-        <text class="arrow"> ▾</text>
+  <view class="phone-inner">
+    <!-- Masthead：社群封面卡 -->
+    <view class="s1-top">
+      <view class="top-body">
+        <text class="eyebrow">{{ kindEn }}</text>
+        <view class="title-wrap">
+          <text class="title">{{ communityName }}</text>
+        </view>
+        <text v-if="communityMeta" class="sub">{{ communityMeta }}</text>
+      </view>
+      <view class="avatar" @tap="showSwitcher = true">
+        <text>{{ avatarLetter }}</text>
       </view>
     </view>
 
-    <SectionTabs
-      v-if="communityStore.currentSections.length > 0"
-      :sections="communityStore.currentSections"
-      :current-index="communityStore.currentSectionIndex"
-      @change="handleSectionChange"
-    />
+    <!-- Quote · 群训引文（可选） -->
+    <view v-if="quote" class="s1-quote">
+      <text class="q-text">{{ quote }}</text>
+      <text v-if="quoteCite" class="cite">— {{ quoteCite }}</text>
+    </view>
 
-    <scroll-view
-      scroll-y
-      class="feed"
-      refresher-enabled
-      :refresher-triggered="refreshing"
-      @refresherrefresh="refresh"
-      @scrolltolower="loadMore"
-    >
-      <view v-if="communityStore.myCommunities.length === 0" class="empty-state">
-        <text>还没有加入社区</text>
-        <button size="mini" @tap="goOnboarding">去加入</button>
+    <!-- Live strip · 实时脉冲区：有激活的实时协作板块时显示 -->
+    <view v-if="liveItems.length > 0" class="s1-live">
+      <view class="live-h">
+        <view class="live-h-l">
+          <view class="ping"></view>
+          <text>正在进行</text>
+        </view>
+        <text class="live-h-n">{{ liveItems.length }} 件</text>
       </view>
-      <view v-else-if="posts.length === 0 && !loading" class="empty-state">
-        <text>暂无内容，来发第一帖吧</text>
+      <view
+        v-for="(item, i) in liveItems"
+        :key="i"
+        class="live-row"
+        @tap="onLiveTap(item)"
+      >
+        <view class="live-ic">
+          <text>{{ item.ic }}</text>
+        </view>
+        <view class="live-body">
+          <text class="live-t">{{ item.t }}</text>
+          <view class="live-m">
+            <text v-for="(m, j) in item.m" :key="j" class="live-m-item">{{ m }}</text>
+          </view>
+        </view>
+        <view class="live-cta">
+          <text>{{ item.cta }}</text>
+        </view>
       </view>
-      <PostCard
-        v-for="post in posts"
-        :key="post._id"
-        :post="post"
-        :section="communityStore.currentSection"
-        @tap="goDetail(post._id)"
-      />
-      <view v-if="loading" class="loading"><text>加载中...</text></view>
-    </scroll-view>
+    </view>
+
+    <!-- Schedule strip · 近期日程 -->
+    <template v-if="scheduleItems.length > 0">
+      <view class="sch-head">
+        <text class="sch-head-t"><text class="sch-head-b">近期日程</text><text>· 活动 · 课程 · 通知</text></text>
+        <text class="sch-head-more">日历 ›</text>
+      </view>
+      <scroll-view scroll-x class="sch-strip">
+        <view class="sch-inner">
+          <view
+            v-for="(s, i) in scheduleItems"
+            :key="i"
+            class="sch-card"
+            :class="{ hot: s.highlight }"
+          >
+            <view class="sch-date">
+              <text class="sch-d">{{ s.date }}</text>
+              <text class="sch-w">{{ s.day }}</text>
+            </view>
+            <text class="sch-kind">{{ s.kind }}</text>
+            <text class="sch-tt">{{ s.t }}</text>
+            <text class="sch-mm">{{ s.m }}</text>
+          </view>
+        </view>
+      </scroll-view>
+    </template>
+
+    <!-- Section Head · 沉淀板块标题 -->
+    <view class="sec-head">
+      <text class="sec-head-t"><text class="sec-head-b">沉淀板块</text><text>· 长期有用</text></text>
+      <text class="sec-head-more">管理 ›</text>
+    </view>
+
+    <!-- Archive cards · 沉淀板块分组卡 -->
+    <view class="arc-group">
+      <view
+        v-for="(g, gi) in archiveGroups"
+        :key="g.id"
+        class="arc-card"
+        :data-index="gi"
+        @tap="onGroupHeaderTap(g)"
+      >
+        <view class="arc-bh">
+          <view class="arc-bh-l">
+            <text class="arc-nm">{{ g.name }}</text>
+            <text class="arc-cnt">· {{ g.count }} 条</text>
+          </view>
+          <text class="arc-arrow">›</text>
+        </view>
+        <view
+          v-for="(item, i) in g.items"
+          :key="i"
+          class="arc-item"
+          @tap.stop="onPostTap(item)"
+        >
+          <text class="arc-k">{{ item.k }}</text>
+          <view class="arc-tl">
+            <text class="arc-title">{{ item.t }}</text>
+            <view class="arc-mm">
+              <text class="arc-who">{{ item.who }}</text>
+              <text v-if="item.meta" class="arc-meta" :class="{ hot: item.hot }">{{ item.meta }}</text>
+            </view>
+          </view>
+          <text class="arc-when">{{ item.when }}</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- Dormant section · 休眠板块 -->
+    <view v-if="dormantNames.length > 0" class="dormant" @tap="expandDormant">
+      <text class="dormant-h">休眠板块 · 本月无新内容</text>
+      <view class="dormant-list">
+        <text
+          v-for="(d, i) in dormantNames"
+          :key="i"
+          class="dormant-name"
+        >{{ d }}<text v-if="i < dormantNames.length - 1" class="dormant-sep">·</text></text>
+      </view>
+      <text class="dormant-open">展开 ⌄</text>
+    </view>
+
+    <!-- Foot -->
+    <text class="s1-foot">— {{ kind }} · 记忆在这里 —</text>
+
+    <!-- FAB · 发布按钮 -->
+    <view class="fab" @tap="goCreate">
+      <text class="fab-plus">+</text>
+    </view>
 
     <!-- Community switcher modal -->
     <view v-if="showSwitcher" class="switcher-mask" @tap="showSwitcher = false">
       <view class="switcher-panel" @tap.stop>
+        <text class="switcher-title">切换社区</text>
         <view
           v-for="c in communityStore.myCommunities"
           :key="c._id"
@@ -57,92 +157,694 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useCommunityStore } from '../../store/community'
 import { postApi } from '../../api/cloud'
-import SectionTabs from '../../components/SectionTabs.vue'
-import PostCard from '../../components/PostCard.vue'
 
 const communityStore = useCommunityStore()
-const posts = ref<any[]>([])
-const loading = ref(false)
-const refreshing = ref(false)
-const hasMore = ref(true)
 const showSwitcher = ref(false)
+const postsBySection = ref<Record<string, any[]>>({})
 
-async function loadPosts(reset = false) {
-  if (!communityStore.currentSection || loading.value) return
-  loading.value = true
-  try {
-    const skip = reset ? 0 : posts.value.length
-    const res = await postApi.list(communityStore.currentSection._id, skip)
-    const newPosts = res.posts
-    posts.value = reset ? newPosts : [...posts.value, ...newPosts]
-    hasMore.value = newPosts.length === 20
-  } catch (e) {
-    uni.showToast({ title: '加载失败，请重试', icon: 'none' })
-  } finally {
-    loading.value = false
+// ── Computed: masthead ──
+const communityName = computed(() => communityStore.currentCommunity?.name ?? '选择社区')
+const communityMeta = computed(() => {
+  const count = communityStore.currentSections?.length ?? 0
+  return count > 0 ? `${count} 个板块` : ''
+})
+const avatarLetter = computed(() => {
+  const name = communityStore.currentCommunity?.name ?? ''
+  return name.charAt(0) || '?'
+})
+
+// 场景类型（暂时固定为邻里，将来由 community.type 决定）
+const kind = computed(() => '邻里')
+const kindEn = computed(() => 'NEIGHBORHOOD')
+
+// ── 群训引文（community.quote 字段暂未实现，先给默认） ──
+const quote = computed(() => '远亲不如近邻，近邻不如对门。')
+const quoteCite = computed(() => '民谚')
+
+// ── 实时协作区（TODO：当 section.type === 'realtime' && status === 'active' 时纳入） ──
+// 暂时使用 mock 数据示意，数据模型升级后替换
+interface LiveItem { ic: string; t: string; m: string[]; cta: string }
+const liveItems = computed<LiveItem[]>(() => {
+  // MOCK: 将来从 realtime sections 的最新帖子聚合
+  return []
+})
+
+// ── 近期日程（TODO：从有 datetime widget 的 sections 抽取未来事件） ──
+interface ScheduleItem { date: string; day: string; t: string; m: string; kind: string; highlight?: boolean }
+const scheduleItems = computed<ScheduleItem[]>(() => {
+  // MOCK: 将来从 sections 里过滤出时间 widget 的未来帖子
+  return []
+})
+
+// ── 沉淀板块分组 ──
+interface ArchiveItem { k: string; t: string; who: string; meta?: string; hot?: boolean; when: string; postId?: string }
+interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[] }
+
+const archiveGroups = computed<ArchiveGroup[]>(() => {
+  return (communityStore.currentSections ?? []).map((section) => {
+    const posts = postsBySection.value[section._id] ?? []
+    return {
+      id: section._id,
+      name: section.name,
+      count: posts.length, // TODO: 从 section.postCount 读取
+      items: posts.slice(0, 3).map((p) => ({
+        k: getPostKind(p),
+        t: getPostTitle(p, section),
+        who: p.authorNickname || '匿名',
+        meta: p.stats?.reaction ? `${p.stats.reaction} 赞` : '',
+        hot: isPostHot(p),
+        when: formatTime(p.createdAt),
+        postId: p._id,
+      })),
+    }
+  }).filter((g) => g.items.length > 0)
+})
+
+// ── 休眠板块（TODO：section.status === 'dormant' 的名字列表） ──
+const dormantNames = computed(() => {
+  // MOCK: 将来从 status === 'dormant' 的 sections 取
+  return []
+})
+
+// ── Helpers ──
+function getPostKind(post: any): string {
+  // TODO: 根据 post 的特征（是否有标签、类型、时间）决定 kicker
+  // 暂用时间判断
+  const ageMs = Date.now() - new Date(post.createdAt).getTime()
+  const h = ageMs / 3600000
+  if (h < 24) return 'NEW'
+  return 'FYI'
+}
+
+function getPostTitle(post: any, section: any): string {
+  // 优先拿第一个 widget 的值作为标题
+  if (!post.content) return '无标题'
+  const w = section.widgets?.find((x: any) => ['short_text', 'summary'].includes(x.type))
+  if (w && post.content[w.widgetId]) return String(post.content[w.widgetId])
+  // fallback
+  const firstKey = Object.keys(post.content)[0]
+  return firstKey ? String(post.content[firstKey]) : '无标题'
+}
+
+function isPostHot(post: any): boolean {
+  return (post.stats?.reaction ?? 0) > 10
+}
+
+function formatTime(iso?: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const now = new Date()
+  const diffMs = now.getTime() - d.getTime()
+  const diffH = diffMs / 3600000
+  if (diffH < 1) return '刚刚'
+  if (diffH < 24) return `${Math.floor(diffH)}h`
+  const sameYear = d.getFullYear() === now.getFullYear()
+  return sameYear ? `${d.getMonth() + 1}/${d.getDate()}` : `${d.getFullYear()}/${d.getMonth() + 1}`
+}
+
+// ── Actions ──
+function onLiveTap(_item: LiveItem) {
+  // TODO: 根据 item 类型跳到对应页面
+}
+
+function onGroupHeaderTap(_g: ArchiveGroup) {
+  // TODO: 跳到该板块的完整列表（当前代码没有独立 section 页，落地时再加）
+}
+
+function onPostTap(item: ArchiveItem) {
+  if (item.postId) {
+    uni.navigateTo({ url: `/pages/detail/index?postId=${item.postId}` })
   }
 }
 
-async function handleSectionChange(index: number) {
-  communityStore.currentSectionIndex = index
-  await loadPosts(true)
+function expandDormant() {
+  // TODO: 展开所有休眠板块
 }
 
-async function refresh() {
-  refreshing.value = true
-  await loadPosts(true)
-  refreshing.value = false
-}
-
-function loadMore() {
-  if (hasMore.value && !loading.value) loadPosts()
-}
-
-function goDetail(postId: string) {
-  uni.navigateTo({ url: `/pages/detail/index?postId=${postId}` })
+function goCreate() {
+  uni.switchTab({ url: '/pages/create/index' })
 }
 
 async function switchCommunity(communityId: string) {
   showSwitcher.value = false
   await communityStore.switchCommunity(communityId)
-  await loadPosts(true)
+  await loadAllSectionPosts()
 }
 
-function goOnboarding() {
-  uni.reLaunch({ url: '/pages/onboarding/index' })
+async function loadAllSectionPosts() {
+  const sections = communityStore.currentSections ?? []
+  const results: Record<string, any[]> = {}
+  await Promise.all(
+    sections.map(async (section) => {
+      try {
+        const res = await postApi.list(section._id, 0)
+        results[section._id] = res.posts ?? []
+      } catch {
+        results[section._id] = []
+      }
+    })
+  )
+  postsBySection.value = results
 }
 
 onMounted(async () => {
   if (communityStore.myCommunities.length === 0) {
     await communityStore.loadMyCommunities()
   }
-  await loadPosts(true)
+  await loadAllSectionPosts()
 })
-
-watch(() => communityStore.currentSectionIndex, () => loadPosts(true))
 </script>
 
 <style lang="scss" scoped>
-.page { height: 100vh; display: flex; flex-direction: column; background: $hh-color-bg-sub; }
-.top-bar { padding: $hh-space-md $hh-space-lg; background: $hh-color-surface; border-bottom: 1rpx solid $hh-color-divider; }
-.community-name { font-size: $hh-font-h3; font-weight: $hh-font-weight-bold; color: $hh-color-text; }
-.arrow { font-size: $hh-font-caption; color: $hh-color-text-mute; }
-.feed { flex: 1; padding: $hh-space-sm; }
-.empty-state { text-align: center; padding: $hh-space-xxl 0; color: $hh-color-text-mute; font-size: $hh-font-body; }
-.loading { text-align: center; padding: $hh-space-md; color: $hh-color-text-mute; font-size: $hh-font-caption; }
+.phone-inner {
+  padding: 16rpx 0 160rpx;
+  background: $hh-surface-0;
+  min-height: 100vh;
+  position: relative;
+}
+
+/* ═══ Masthead ═══ */
+.s1-top {
+  padding: 16rpx 48rpx 28rpx;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.top-body {
+  flex: 1;
+  min-width: 0;
+}
+.eyebrow {
+  font-family: $hh-font-mono;
+  font-size: 20rpx;
+  letter-spacing: $hh-tracking-mono;
+  color: $hh-ink-3;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 12rpx;
+}
+.title-wrap { display: block; }
+.title {
+  font-family: $hh-font-serif;
+  font-size: 56rpx;
+  font-weight: $hh-font-weight-bold;
+  letter-spacing: $hh-tracking-serif;
+  color: $hh-ink-1;
+  line-height: 1.05;
+  display: block;
+}
+.sub {
+  display: block;
+  font-family: $hh-font-sans;
+  font-size: 24rpx;
+  font-weight: $hh-font-weight-regular;
+  color: $hh-ink-3;
+  margin-top: 16rpx;
+}
+.avatar {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: $hh-radius-full;
+  background: $hh-surface-2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-left: 24rpx;
+}
+.avatar text {
+  font-size: 26rpx;
+  font-weight: $hh-font-weight-heavy;
+  color: $hh-ink-2;
+}
+
+/* ═══ Quote ═══ */
+.s1-quote {
+  margin: 8rpx 48rpx 28rpx;
+  padding: 20rpx 0 24rpx;
+  border-top: 1rpx solid $hh-ink-line-2;
+  border-bottom: 1rpx solid $hh-ink-line-2;
+  position: relative;
+}
+.q-text {
+  font-family: $hh-font-serif;
+  font-size: 26rpx;
+  font-style: italic;
+  color: $hh-ink-2;
+  line-height: 1.55;
+  letter-spacing: 0.01em;
+  display: block;
+}
+.cite {
+  display: block;
+  margin-top: 8rpx;
+  font-family: $hh-font-mono;
+  font-size: 20rpx;
+  letter-spacing: $hh-tracking-mono-sm;
+  color: $hh-ink-3;
+  text-align: right;
+  text-transform: uppercase;
+}
+
+/* ═══ Live strip ═══ */
+.s1-live {
+  margin: 0 32rpx 40rpx;
+  border: 1rpx solid $hh-ink-line;
+  border-left: 6rpx solid $hh-live;
+  border-radius: 24rpx;
+  background: $hh-surface-1;
+  overflow: hidden;
+}
+.live-h {
+  padding: 20rpx 28rpx 14rpx;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1rpx solid $hh-ink-line-2;
+}
+.live-h-l {
+  font-family: $hh-font-mono;
+  font-size: 20rpx;
+  letter-spacing: $hh-tracking-mono-sm;
+  color: $hh-live;
+  font-weight: $hh-font-weight-heavy;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+.ping {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  background: $hh-live;
+  animation: ring 1.6s infinite;
+}
+@keyframes ring {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(207, 64, 64, 0.5); }
+  50% { box-shadow: 0 0 0 10rpx rgba(207, 64, 64, 0); }
+}
+.live-h-n {
+  font-family: $hh-font-mono;
+  font-size: 20rpx;
+  color: $hh-ink-3;
+  letter-spacing: 0.1em;
+}
+.live-row {
+  padding: 22rpx 28rpx;
+  display: flex;
+  gap: 24rpx;
+  align-items: center;
+  border-bottom: 1rpx solid $hh-ink-line-2;
+}
+.live-row:last-child { border-bottom: none; }
+.live-ic {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 16rpx;
+  background: $hh-surface-2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.live-ic text { font-size: 30rpx; }
+.live-body { flex: 1; min-width: 0; }
+.live-t {
+  font-size: 28rpx;
+  font-weight: $hh-font-weight-bold;
+  color: $hh-ink-1;
+  letter-spacing: $hh-tracking-serif-sm;
+  display: block;
+}
+.live-m {
+  font-family: $hh-font-num;
+  font-size: 23rpx;
+  color: $hh-ink-3;
+  margin-top: 4rpx;
+  display: flex;
+  gap: 20rpx;
+}
+.live-m-item {
+  font-family: inherit;
+}
+.live-cta {
+  flex-shrink: 0;
+  font-family: $hh-font-mono;
+  font-size: 20rpx;
+  font-weight: $hh-font-weight-heavy;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 12rpx 22rpx;
+  border-radius: $hh-radius-full;
+  background: $hh-ink-1;
+}
+.live-cta text { color: $hh-surface-1; }
+
+/* ═══ Schedule strip ═══ */
+.sch-head {
+  padding: 28rpx 48rpx 16rpx;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.sch-head-t {
+  font-family: $hh-font-mono;
+  font-size: 21rpx;
+  letter-spacing: $hh-tracking-mono;
+  text-transform: uppercase;
+  color: $hh-ink-3;
+}
+.sch-head-b {
+  color: $hh-ink-1;
+  font-weight: $hh-font-weight-heavy;
+  margin-right: 12rpx;
+}
+.sch-head-more {
+  font-family: $hh-font-mono;
+  font-size: 20rpx;
+  color: $hh-ink-3;
+  letter-spacing: $hh-tracking-mono-sm;
+  text-transform: uppercase;
+}
+.sch-strip {
+  margin-bottom: 24rpx;
+  padding: 0 48rpx 12rpx;
+  white-space: nowrap;
+}
+.sch-inner { display: inline-flex; gap: 16rpx; }
+.sch-card {
+  flex-shrink: 0;
+  width: 316rpx;
+  background: $hh-surface-1;
+  border: 1rpx solid $hh-ink-line;
+  border-radius: $hh-radius-md;
+  padding: 20rpx 24rpx 22rpx;
+  display: inline-flex;
+  flex-direction: column;
+  position: relative;
+  white-space: normal;
+}
+.sch-card.hot {
+  background: $hh-accent-wash;
+  border-color: $hh-accent-line;
+}
+.sch-date {
+  display: flex;
+  align-items: baseline;
+  gap: 12rpx;
+  font-family: $hh-font-num;
+  color: $hh-ink-1;
+  margin-bottom: 12rpx;
+}
+.sch-d {
+  font-size: 34rpx;
+  font-weight: $hh-font-weight-heavy;
+  letter-spacing: -0.02em;
+}
+.sch-w {
+  font-family: $hh-font-mono;
+  font-size: 19rpx;
+  color: $hh-ink-3;
+  letter-spacing: $hh-tracking-mono-sm;
+  text-transform: uppercase;
+  margin-left: auto;
+}
+.sch-kind {
+  font-family: $hh-font-mono;
+  font-size: 17rpx;
+  font-weight: $hh-font-weight-heavy;
+  letter-spacing: $hh-tracking-mono-sm;
+  text-transform: uppercase;
+  color: $hh-ink-3;
+  margin-bottom: 8rpx;
+  display: block;
+}
+.sch-card.hot .sch-kind { color: $hh-accent-ink; }
+.sch-tt {
+  font-size: 26rpx;
+  font-weight: $hh-font-weight-bold;
+  color: $hh-ink-1;
+  line-height: 1.3;
+  letter-spacing: $hh-tracking-serif-sm;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.sch-mm {
+  margin-top: 8rpx;
+  font-family: $hh-font-num;
+  font-size: 21rpx;
+  color: $hh-ink-3;
+  display: block;
+}
+
+/* ═══ Section head ═══ */
+.sec-head {
+  padding: 20rpx 48rpx 16rpx;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.sec-head-t {
+  font-family: $hh-font-mono;
+  font-size: 21rpx;
+  letter-spacing: $hh-tracking-mono;
+  text-transform: uppercase;
+  color: $hh-ink-3;
+}
+.sec-head-b {
+  color: $hh-ink-1;
+  font-weight: $hh-font-weight-heavy;
+  margin-right: 12rpx;
+}
+.sec-head-more {
+  font-family: $hh-font-mono;
+  font-size: 20rpx;
+  color: $hh-ink-3;
+  letter-spacing: $hh-tracking-mono-sm;
+  text-transform: uppercase;
+}
+
+/* ═══ Archive cards ═══ */
+.arc-group { margin: 0 32rpx 28rpx; }
+.arc-card {
+  background: $hh-surface-1;
+  border: 1rpx solid $hh-ink-line;
+  border-radius: $hh-radius-lg;
+  overflow: hidden;
+  margin-bottom: 20rpx;
+  position: relative;
+}
+.arc-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6rpx;
+  background: $hh-accent;
+  opacity: 0.7;
+}
+.arc-card[data-index="1"]::before { background: $hh-accent-ochre; }
+.arc-card[data-index="2"]::before { background: $hh-accent-blue; }
+.arc-card[data-index="3"]::before { background: $hh-accent; opacity: 0.5; }
+.arc-card[data-index="4"]::before { background: $hh-accent-ochre; opacity: 0.5; }
+.arc-card[data-index="5"]::before { background: $hh-accent-blue; opacity: 0.5; }
+
+.arc-bh {
+  padding: 24rpx 28rpx 16rpx 32rpx;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 1rpx dashed $hh-ink-line-2;
+}
+.arc-bh-l { display: flex; align-items: baseline; }
+.arc-nm {
+  font-family: $hh-font-serif;
+  font-size: 32rpx;
+  font-weight: $hh-font-weight-bold;
+  color: $hh-ink-1;
+  letter-spacing: $hh-tracking-serif-sm;
+}
+.arc-cnt {
+  font-family: $hh-font-mono;
+  font-size: 20rpx;
+  color: $hh-ink-3;
+  letter-spacing: 0.1em;
+  margin-left: 16rpx;
+  font-weight: $hh-font-weight-medium;
+}
+.arc-arrow {
+  font-size: 28rpx;
+  color: $hh-ink-3;
+}
+.arc-item {
+  padding: 20rpx 28rpx 20rpx 32rpx;
+  display: flex;
+  gap: 20rpx;
+  border-bottom: 1rpx solid $hh-ink-line-2;
+  align-items: flex-start;
+}
+.arc-item:last-child { border-bottom: none; }
+.arc-k {
+  font-family: $hh-font-mono;
+  font-size: 18rpx;
+  color: $hh-ink-3;
+  letter-spacing: $hh-tracking-mono-sm;
+  text-transform: uppercase;
+  width: 72rpx;
+  flex-shrink: 0;
+  padding-top: 4rpx;
+  font-weight: $hh-font-weight-heavy;
+}
+.arc-tl { flex: 1; min-width: 0; }
+.arc-title {
+  font-size: 27rpx;
+  color: $hh-ink-1;
+  line-height: 1.35;
+  font-weight: $hh-font-weight-medium;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.arc-mm {
+  font-family: $hh-font-num;
+  font-size: 22rpx;
+  color: $hh-ink-3;
+  margin-top: 4rpx;
+  display: flex;
+  gap: 16rpx;
+}
+.arc-who { font-family: inherit; }
+.arc-meta { font-family: inherit; }
+.arc-meta.hot {
+  color: $hh-accent-ink;
+  font-weight: $hh-font-weight-bold;
+}
+.arc-when {
+  font-family: $hh-font-num;
+  font-size: 21rpx;
+  color: $hh-ink-3;
+  flex-shrink: 0;
+  padding-top: 2rpx;
+}
+
+/* ═══ Dormant ═══ */
+.dormant {
+  margin: 36rpx 32rpx 0;
+  padding: 28rpx;
+  border: 1rpx dashed $hh-ink-line;
+  border-radius: $hh-radius-lg;
+  text-align: center;
+}
+.dormant-h {
+  font-family: $hh-font-mono;
+  font-size: 20rpx;
+  color: $hh-ink-3;
+  letter-spacing: $hh-tracking-mono-sm;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 16rpx;
+}
+.dormant-list {
+  font-size: 26rpx;
+  color: $hh-ink-2;
+  display: block;
+}
+.dormant-name { opacity: 0.75; }
+.dormant-sep {
+  margin: 0 12rpx;
+  opacity: 0.5;
+}
+.dormant-open {
+  font-family: $hh-font-mono;
+  font-size: 20rpx;
+  color: $hh-ink-3;
+  margin-top: 16rpx;
+  letter-spacing: $hh-tracking-mono-sm;
+  text-transform: uppercase;
+  display: block;
+}
+
+/* ═══ Foot ═══ */
+.s1-foot {
+  padding: 44rpx 0 20rpx;
+  text-align: center;
+  font-family: $hh-font-mono;
+  font-size: 19rpx;
+  letter-spacing: $hh-tracking-mono;
+  text-transform: uppercase;
+  color: $hh-ink-4;
+  display: block;
+}
+
+/* ═══ FAB ═══ */
+.fab {
+  position: fixed;
+  right: 40rpx;
+  bottom: 180rpx;
+  width: 104rpx;
+  height: 104rpx;
+  border-radius: $hh-radius-full;
+  background: $hh-ink-1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: $hh-shadow-fab;
+  z-index: 5;
+}
+.fab-plus {
+  color: $hh-surface-1;
+  font-size: 48rpx;
+  font-weight: $hh-font-weight-regular;
+  line-height: 1;
+}
+
+/* ═══ Switcher ═══ */
 .switcher-mask {
-  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: $hh-color-mask; z-index: $hh-z-overlay;
-  display: flex; align-items: flex-start; justify-content: flex-start;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
 }
 .switcher-panel {
-  background: $hh-color-surface; margin: 120rpx 0 0 0; width: 300rpx;
-  border-radius: 0 $hh-radius-md $hh-radius-md 0; overflow: hidden;
-  box-shadow: $hh-shadow-float;
+  width: 100%;
+  background: $hh-surface-1;
+  border-radius: 28rpx 28rpx 0 0;
+  padding: 36rpx 32rpx 60rpx;
+  max-height: 70vh;
+  overflow-y: auto;
+  border-top: 1rpx solid $hh-ink-line;
 }
-.switcher-item { padding: $hh-space-lg; font-size: $hh-font-body-lg; color: $hh-color-text-sub; border-bottom: 1rpx solid $hh-color-divider; }
-.switcher-item.active { color: $hh-color-text; font-weight: $hh-font-weight-bold; background: $hh-color-bg-sub; }
+.switcher-title {
+  display: block;
+  font-family: $hh-font-mono;
+  font-size: 20rpx;
+  letter-spacing: $hh-tracking-mono;
+  text-transform: uppercase;
+  color: $hh-ink-3;
+  margin-bottom: 20rpx;
+  text-align: center;
+}
+.switcher-item {
+  padding: 28rpx 24rpx;
+  font-family: $hh-font-serif;
+  font-size: 30rpx;
+  color: $hh-ink-1;
+  border-bottom: 1rpx solid $hh-ink-line-2;
+}
+.switcher-item.active {
+  color: $hh-accent;
+  font-weight: $hh-font-weight-bold;
+}
+.switcher-item:last-child { border-bottom: none; }
 </style>

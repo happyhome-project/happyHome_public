@@ -37,39 +37,39 @@ onLaunch(async () => {
 </template>
 
 <style lang="scss">
-/* ═════════════��═════════════════════════════════════════════
- * wot-design-uni 主题覆盖
- * 把 --wot-* CSS 变量对齐 $hh-* design tokens
- * 详见: docs/DESIGN-TOKENS.md · docs/VISUAL-TONE.md
- * ═════════════��════════════════════════════════��════════════ */
+/* ═══════════════════════════════════════════════════════════════
+ * Classical Dossier · 全局样式
+ * 暖灰白纸底 · 墨色文字 · 三字体分工（Serif/Sans/Mono）
+ * 详见: design_handoff_happyhome/README.md
+ * ═══════════════════════════════════════════════════════════════ */
 page {
-  /* ── 核心色 ── */
-  --wot-color-theme: #{$hh-color-primary};
-  --wot-color-success: #{$hh-color-success};
-  --wot-color-warning: #{$hh-color-warning};
-  --wot-color-danger: #{$hh-color-danger};
+  background: $hh-surface-0;
+  color: $hh-ink-1;
+  font-family: $hh-font-sans;
+  font-size: 28rpx;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
 
-  /* ── 灰阶 → 暖灰 ── */
-  --wot-color-gray-1: #{$hh-color-bg-sub};     /* f7f8fa → F7F6F3 */
-  --wot-color-gray-2: #{$hh-color-divider};     /* f2f3f5 → F2EFE9 */
-  --wot-color-gray-3: #{$hh-color-border};      /* ebedf0 → EBE3D8 */
-  --wot-color-gray-6: #{$hh-color-text-mute};   /* 969799 → 766F65 */
-  --wot-color-gray-7: #{$hh-color-text-sub};    /* 646566 → 595550 */
-  --wot-color-gray-8: #{$hh-color-text};        /* 323233 → 2C2416 */
-
-  /* ── 文字色 ── */
-  --wot-color-content: #{$hh-color-text};
-  --wot-color-secondary: #{$hh-color-text-sub};
-  --wot-color-aid: #{$hh-color-text-mute};
-
-  /* ── 边框/背景 ── */
-  --wot-color-border: #{$hh-color-border};
-  --wot-color-border-light: #{$hh-color-divider};
-  --wot-color-bg: #{$hh-color-bg-sub};
-
-  /* ── 按钮圆角 → 温度感 ── */
-  --wot-button-small-radius: #{$hh-radius-sm};
-  --wot-button-medium-radius: #{$hh-radius-md};
-  --wot-button-large-radius: #{$hh-radius-md};
+  /* CSS 变量，方便页面直接用 var() */
+  --surface-0: #{$hh-surface-0};
+  --surface-1: #{$hh-surface-1};
+  --surface-2: #{$hh-surface-2};
+  --surface-3: #{$hh-surface-3};
+  --ink-1: #{$hh-ink-1};
+  --ink-2: #{$hh-ink-2};
+  --ink-3: #{$hh-ink-3};
+  --ink-4: #{$hh-ink-4};
+  --ink-line: #{$hh-ink-line};
+  --ink-line-2: #{$hh-ink-line-2};
+  --accent: #{$hh-accent};
+  --accent-ink: #{$hh-accent-ink};
+  --accent-wash: #{$hh-accent-wash};
+  --accent-line: #{$hh-accent-line};
+  --live: #{$hh-live};
+  --live-wash: #{$hh-live-wash};
+  --amber-wash: #{$hh-amber-wash};
+  --blue-wash: #{$hh-blue-wash};
+  --accent-ochre: #{$hh-accent-ochre};
+  --accent-blue: #{$hh-accent-blue};
 }
 </style>

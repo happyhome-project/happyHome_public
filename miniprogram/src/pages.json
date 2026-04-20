@@ -52,14 +52,14 @@
         "selectedIconPath": "static/tab-profile-active.png"
       }
     ],
-    "color": "#666",
-    "selectedColor": "#E07A5F",
-    "backgroundColor": "#fff"
+    "color": "#847F7B",
+    "selectedColor": "#1E1A16",
+    "backgroundColor": "#FDFBF8"
   },
   "globalStyle": {
     "navigationBarTextStyle": "black",
     "navigationBarTitleText": "HappyHome",
-    "navigationBarBackgroundColor": "#fff",
-    "backgroundColor": "#F7F6F3"
+    "navigationBarBackgroundColor": "#FDFBF8",
+    "backgroundColor": "#F5F3F0"
   }
 }

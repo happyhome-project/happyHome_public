@@ -76,75 +76,124 @@ $uni-color-paragraph: #3f536e; // 文章段落颜色
 $uni-font-size-paragraph: 15px;
 
 // ═══════════════════════════════════════════════════════════════
-// ▼ happyHome / 美好 Home · Design Tokens
+// ▼ happyHome / 美好 Home · Design Tokens v2
+// ▼ Classical Dossier · 经典卷宗风格
 // ▼ 命名空间: $hh-* （happyHome）
 // ▼ 与上方 $uni-* 变量并行存在，互不干扰。
-// ▼ 使用示例: @import 后直接用 color: $hh-color-primary;
-// ▼ 调性锚点: 小红书语感（温暖/圆润）+ 木质书架气质（沉淀/有重量）
-// ▼ 详见: docs/VISUAL-TONE.md · docs/DESIGN-TOKENS.md
+// ▼ 调性锚点: 反算法邻里 App - "是一本合订的册子，不是信息流"
+// ▼ 主色：墨绿 accent · 暖灰白纸底 · 三字体分工（Serif/Sans/Mono）
+// ▼ 详见: docs/VISUAL-TONE.md · design_handoff/tokens-v2.css
+// ▼ 历史：v1 木色橙方向已弃用（2026-04-20 Classical Dossier 取代）
 // ═══════════════════════════════════════════════════════════════
 
-// ─────────── Brand Colors ───────────
-$hh-color-primary:        #E07A5F;  // 木色橙 · 主色
-$hh-color-primary-light:  #F5B9A8;  // 浅木色 · hover / Tag 底
-$hh-color-primary-dark:   #C25D43;  // 深木色 · active / 强调
+// ─────────── Surface（暖灰白纸底） ───────────
+$hh-surface-0:     #F5F3F0;  // 主底色（页面背景）
+$hh-surface-1:     #FDFBF8;  // 卡片底
+$hh-surface-2:     #ECE9E5;  // hover / 次级块
+$hh-surface-3:     #E3DFDA;  // 更深的次级
 
-// ─────────── Semantic Colors ───────────
-$hh-color-success:        #52C41A;  // 成功绿
-$hh-color-warning:        #FAAD14;  // 警告黄
-$hh-color-danger:         #C0392B;  // 危险红 · 暖红但明确读作"红"，与 primary 橙有清晰色相差
-$hh-color-info:           #6E8CA0;  // 温暖蓝灰
+// ─────────── Ink（墨色） ───────────
+$hh-ink-1:         #1E1A16;  // 主文字（暖黑）
+$hh-ink-2:         #514C48;  // 次文字
+$hh-ink-3:         #847F7B;  // 辅助 / mono 标签
+$hh-ink-4:         #B1ADAA;  // 禁用 / 更弱
+$hh-ink-line:      #DAD7D4;  // 分隔线
+$hh-ink-line-2:    #EAE7E5;  // 更浅的分隔
 
-// ─────────── Neutrals (Warm-tinted) ───────────
-$hh-color-bg:             #FFFFFF;  // 主背景（页面白）
-$hh-color-bg-sub:         #F7F6F3;  // 次级背景（卡片之间的底色，微暖）
-$hh-color-surface:        #FFFFFF;  // 卡片 / 面板表面
-$hh-color-border:         #EBE3D8;  // 暖灰边框
-$hh-color-divider:        #F2EFE9;  // 暖灰分割线
-$hh-color-text:           #2C2416;  // 暖黑 · 主文字
-$hh-color-text-sub:       #595550;  // 次文字 · 副标题/说明
-$hh-color-text-mute:      #766F65;  // 弱文字 · 时间戳/placeholder (4.96:1 on white, AA pass)
-$hh-color-text-inverse:   #FFFFFF;  // 反色文字（深色底上用）
-$hh-color-primary-text:   $hh-color-primary-dark; // 正文链接 / 小字强调 · 4.25:1 on white
-$hh-color-mask:           rgba(0, 0, 0, 0.4);   // 遮罩
-$hh-color-hover:          rgba($hh-color-primary, 0.06); // 主色 6% · hover 底（跟 primary 联动）
-$hh-opacity-disabled:     0.4;   // 禁用态透明度（按钮/输入框）
+// ─────────── Accent（单一墨绿） ───────────
+$hh-accent:        #3A6A45;  // 主强调色：此刻发生、精选、已选中
+$hh-accent-ink:    #1D4E2B;  // 强调色暗版 · 文字强调
+$hh-accent-wash:   #DEF1E1;  // 强调背景（浅）
+$hh-accent-line:   #AECEB3;  // 强调边框
+
+// ─────────── Semantic ───────────
+$hh-live:          #CF4040;  // 实时/举报/驳回 砖红
+$hh-live-wash:     #FFDDD6;  // 实时背景
+$hh-amber-wash:    #FBE8CE;  // 系统提示背景（黄）
+$hh-blue-wash:     #D7EBFA;  // 新人申请背景（蓝）
+
+// ─────────── 辅助彩条色（仅用于卡片左彩条区分板块） ───────────
+$hh-accent-ochre:  #B7752B;  // 赭石
+$hh-accent-blue:   #537ABB;  // 群青
+
+// ─────────── 向后兼容别名（逐步迁移用） ───────────
+// 让未改的页面仍能工作，后续逐页迁移
+$hh-color-primary:       $hh-accent;
+$hh-color-primary-light: $hh-accent-line;
+$hh-color-primary-dark:  $hh-accent-ink;
+$hh-color-primary-text:  $hh-accent-ink;
+$hh-color-success:       $hh-accent;      // 卷宗里成功也用墨绿
+$hh-color-warning:       $hh-accent-ochre;
+$hh-color-danger:        $hh-live;
+$hh-color-info:          $hh-ink-3;
+$hh-color-bg:            $hh-surface-0;
+$hh-color-bg-sub:        $hh-surface-0;
+$hh-color-surface:       $hh-surface-1;
+$hh-color-border:        $hh-ink-line;
+$hh-color-divider:       $hh-ink-line-2;
+$hh-color-text:          $hh-ink-1;
+$hh-color-text-sub:      $hh-ink-2;
+$hh-color-text-mute:     $hh-ink-3;
+$hh-color-text-inverse:  $hh-surface-1;
+$hh-color-mask:          rgba(0, 0, 0, 0.4);
+$hh-color-hover:         rgba($hh-ink-1, 0.04);
+$hh-opacity-disabled:    0.4;
+
+// ─────────── Font Families · 三体分工 ───────────
+$hh-font-serif: "Songti SC", "STSong", "Source Han Serif SC", Georgia, serif;
+$hh-font-sans:  -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Segoe UI", sans-serif;
+$hh-font-mono:  "SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace;
+$hh-font-num:   "SF Pro Display", ui-sans-serif, $hh-font-sans;
 
 // ─────────── Typography ───────────
-$hh-font-h1:         44rpx;  // 页面大标题
-$hh-font-h2:         36rpx;  // 区块标题 / 卡片主标
+// 保留字号，但添加 serif/mono 专用尺寸（对应设计稿的 28/22/24 px）
+$hh-font-h1:         44rpx;  // 页面大标题（serif）
+$hh-font-h2:         36rpx;  // 区块标题（serif）
 $hh-font-h3:         32rpx;  // 小节标题
-$hh-font-body-lg:    30rpx;  // 正文大号 · 动态内容
-$hh-font-body:       28rpx;  // 正文标准
-$hh-font-caption:    24rpx;  // 辅助说明 / 表单 label
-$hh-font-tag:        22rpx;  // 标签 / 角标 / 时间戳
+$hh-font-body-lg:    30rpx;  // 正文大号
+$hh-font-body:       28rpx;  // 正文标准（sans）
+$hh-font-caption:    24rpx;  // 辅助说明
+$hh-font-tag:        22rpx;  // 标签 / 角标
+$hh-font-mono-sm:    20rpx;  // mono 元数据小
+$hh-font-mono-xs:    18rpx;  // mono 极小标签（uppercase）
 
 $hh-font-weight-regular: 400;
 $hh-font-weight-medium:  500;
 $hh-font-weight-bold:    600;
+$hh-font-weight-heavy:   700;   // mono kicker 专用
 
-$hh-line-height-tight:   1.3;   // 标题行高
-$hh-line-height-base:    1.5;   // 正文行高
-$hh-line-height-relaxed: 1.7;   // 长段落行高
+$hh-line-height-tight:   1.05;  // Serif 大标题收紧
+$hh-line-height-base:    1.45;  // 正文
+$hh-line-height-relaxed: 1.75;  // 长段落（正文 text-body）
 
-// ─────────── Spacing (8-based) ───────────
-$hh-space-xs:   8rpx;   // 极小间距（图标与文字间）
-$hh-space-sm:   16rpx;  // 小间距（字段内）
-$hh-space-md:   24rpx;  // 中间距（卡片内边距、字段之间）
-$hh-space-lg:   32rpx;  // 大间距（卡片与卡片之间、页面左右 padding）
-$hh-space-xl:   48rpx;  // 特大间距（板块之间）
-$hh-space-xxl:  64rpx;  // 巨大间距（页面顶部、底部 safe area）
+// Letter spacing（设计稿关键细节）
+$hh-tracking-mono:       0.18em;  // mono uppercase 标签
+$hh-tracking-mono-sm:    0.14em;  // mono 小标签
+$hh-tracking-serif:      -0.02em; // serif 大标题收紧
+$hh-tracking-serif-sm:   -0.005em;// serif 小标题
+$hh-tracking-sans:       0.005em; // sans 正文
 
-// ─────────── Radius ───────────
-$hh-radius-sm:    8rpx;     // 标签 / 小按钮 / 输入框
-$hh-radius-md:    16rpx;    // 卡片 / 主按钮（温度感核心）
-$hh-radius-lg:    24rpx;    // 大面板 / 底部抽屉
-$hh-radius-full:  9999rpx;  // 头像 / pill 按钮
+// ─────────── Spacing ───────────
+$hh-space-xs:   8rpx;
+$hh-space-sm:   16rpx;
+$hh-space-md:   24rpx;
+$hh-space-lg:   32rpx;
+$hh-space-xl:   48rpx;
+$hh-space-xxl:  64rpx;
 
-// ─────────── Shadow ───────────
-$hh-shadow-card:   0 2rpx 12rpx rgba(44, 36, 22, 0.04);   // 卡片微阴影
-$hh-shadow-float:  0 8rpx 24rpx rgba(44, 36, 22, 0.08);   // 浮层 / 弹窗
-$hh-shadow-modal:  0 16rpx 48rpx rgba(44, 36, 22, 0.16);  // 模态 / 重弹层
+// ─────────── Radius · 克制的梯度 ───────────
+$hh-radius-xs:    6rpx;    // 内层小圆角
+$hh-radius-sm:    8rpx;    // 小元素
+$hh-radius-md:    10rpx;   // 标签卡片
+$hh-radius-lg:    14rpx;   // 主卡片
+$hh-radius-xl:    18rpx;   // 大面板
+$hh-radius-full:  9999rpx; // 胶囊 / 圆点
+
+// ─────────── Shadow · 极度克制（卷宗感不用阴影） ───────────
+$hh-shadow-card:   none;                             // 卡片不用阴影，用 1px 边
+$hh-shadow-float:  0 8rpx 24rpx rgba(0, 0, 0, 0.08); // 浮层用轻阴影
+$hh-shadow-modal:  0 16rpx 48rpx rgba(0, 0, 0, 0.16);// 模态
+$hh-shadow-fab:    0 20rpx 48rpx rgba(0, 0, 0, 0.18);// FAB 唯一例外
 
 // ─────────── Z-index ───────────
 $hh-z-normal:  1;
