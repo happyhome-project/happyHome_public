@@ -63,10 +63,7 @@ export async function handleLeave(params: { communityId: string }, openid: strin
   // 注意：管理员也可以退出，退出后其帖子保留。
   // 若社区只剩该管理员，退出后社区将无管理员，需在产品层面处理（当前版本不限制）。
   const memberId = members[0]._id
-  await db.updateById('community_members', memberId, {
-    status: 'left',
-    leftAt: new Date().toISOString(),
-  })
+  await db.removeById('community_members', memberId)
   await db.increment('communities', params.communityId, 'memberCount', -1)
   return { success: true }
 }

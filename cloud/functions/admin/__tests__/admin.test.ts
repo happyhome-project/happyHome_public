@@ -37,18 +37,31 @@ test('member.kick：只能移出 active 普通成员', async () => {
       role: 'member',
       status: 'active',
     })
-  ;(db.updateById as jest.Mock).mockResolvedValue({})
+  ;(db.removeById as jest.Mock).mockResolvedValue({})
   ;(db.increment as jest.Mock).mockResolvedValue({})
 
   const result = await main({ action: 'member.kick', communityId: 'community-1', memberId: 'member-1' })
 
-  expect(db.updateById).toHaveBeenCalledWith(
-    'community_members',
-    'member-1',
-    expect.objectContaining({ status: 'left', leftAt: expect.any(String) })
-  )
+  expect(db.removeById).toHaveBeenCalledWith('community_members', 'member-1')
   expect(db.increment).toHaveBeenCalledWith('communities', 'community-1', 'memberCount', -1)
   expect(result).toEqual({ success: true })
+})
+
+test('member.list：会物理清理历史 left 记录并且不返回', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({ _id: 'community-1', creatorId: 'creator-1' })
+    .mockResolvedValueOnce({ _id: 'u-active', nickName: 'Active User', avatarUrl: '' })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([
+    { _id: 'member-left-1', communityId: 'community-1', userId: 'u-left', role: 'member', status: 'left' },
+    { _id: 'member-active-1', communityId: 'community-1', userId: 'u-active', role: 'member', status: 'active' },
+  ])
+  ;(db.removeById as jest.Mock).mockResolvedValue({})
+
+  const result: any = await main({ action: 'member.list', communityId: 'community-1', status: 'all' })
+
+  expect(db.removeById).toHaveBeenCalledWith('community_members', 'member-left-1')
+  expect(result.members).toHaveLength(1)
+  expect(result.members[0]._id).toBe('member-active-1')
 })
 
 test('member.kick：不能移出社区创建者', async () => {

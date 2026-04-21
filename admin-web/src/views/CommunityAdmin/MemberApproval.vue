@@ -18,7 +18,6 @@
         <el-option label="待审批" value="pending" />
         <el-option label="已加入" value="active" />
         <el-option label="已拒绝" value="rejected" />
-        <el-option label="已退出" value="left" />
       </el-select>
       <el-button @click="loadMembers">查询</el-button>
     </div>
@@ -93,7 +92,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { memberApi } from '../../api/cloud'
 import { ElMessage } from 'element-plus'
 
-type MemberStatus = 'pending' | 'active' | 'rejected' | 'left'
+type MemberStatus = 'pending' | 'active' | 'rejected'
 interface MemberRow {
   _id: string
   communityId: string
@@ -185,8 +184,7 @@ function canKick(row: MemberRow) {
 function statusLabel(status: MemberStatus) {
   if (status === 'active') return '已加入'
   if (status === 'pending') return '待审批'
-  if (status === 'rejected') return '已拒绝'
-  return '已退出'
+  return '已拒绝'
 }
 
 function statusTagType(status: MemberStatus): 'success' | 'warning' | 'danger' | 'info' {

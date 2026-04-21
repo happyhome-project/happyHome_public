@@ -46,8 +46,8 @@
       </el-table-column>
       <el-table-column label="操作" min-width="360">
         <template #default="{ row }">
-          <el-button data-testid="section-widgets-button" :data-section-id="row._id" size="small" @click="goWidgetEditor(row._id)">控件</el-button>
-          <el-button data-testid="section-edit-button" :data-section-id="row._id" size="small" @click="openEdit(row)">编辑</el-button>
+          <el-button data-testid="section-widgets-button" :data-section-id="getSectionId(row)" size="small" @click="goWidgetEditor(getSectionId(row))">控件</el-button>
+          <el-button data-testid="section-edit-button" :data-section-id="getSectionId(row)" size="small" @click="openEdit(row)">编辑</el-button>
           <el-dropdown
             data-testid="section-status-dropdown"
             v-if="row.type === 'realtime'"
@@ -73,11 +73,11 @@
           </el-dropdown>
           <el-button
             data-testid="section-delete-button"
-            :data-section-id="row._id"
+            :data-section-id="getSectionId(row)"
             type="danger"
             size="small"
             @click="deleteSection(row)"
-            :loading="deletingId === row._id"
+            :loading="deletingId === getSectionId(row)"
             style="margin-left: 8px;"
           >
             删除
@@ -142,6 +142,7 @@ type SectionStatus = 'active' | 'dormant' | 'archived'
 
 interface SectionRow {
   _id: string
+  id?: string
   name: string
   icon: string
   order: number
@@ -204,12 +205,19 @@ async function loadSections() {
   loading.value = true
   try {
     const res = await sectionApi.list(communityId.value) as any
-    sections.value = (res.sections ?? []) as SectionRow[]
+    sections.value = (res.sections ?? []).map((section: any) => ({
+      ...section,
+      _id: String(section?._id || section?.id || ''),
+    })) as SectionRow[]
   } catch (e: any) {
     ElMessage.error(e.message || '加载失败')
   } finally {
     loading.value = false
   }
+}
+
+function getSectionId(row: any): string {
+  return String(row?._id || row?.id || '')
 }
 
 function openCreate() {
@@ -228,7 +236,12 @@ function openCreate() {
 }
 
 function openEdit(row: SectionRow) {
-  editingId.value = row._id
+  const sectionId = getSectionId(row)
+  if (!sectionId) {
+    ElMessage.error('板块 ID 缺失，无法编辑')
+    return
+  }
+  editingId.value = sectionId
   form.value = {
     name: row.name,
     icon: row.icon || '',
@@ -284,11 +297,24 @@ async function submit() {
   }
 }
 
-function goWidgetEditor(sectionId: string) {
-  router.push({ name: 'widgets', params: { sectionId }, query: { communityId: communityId.value } })
+async function goWidgetEditor(sectionId: string) {
+  if (!sectionId) {
+    ElMessage.error('板块 ID 缺失，无法进入控件配置')
+    return
+  }
+  if (!communityId.value) {
+    ElMessage.error('社区 ID 缺失，无法进入控件配置')
+    return
+  }
+  await router.push({ name: 'widgets', params: { sectionId }, query: { communityId: communityId.value } })
 }
 
 async function deleteSection(row: SectionRow) {
+  const sectionId = getSectionId(row)
+  if (!sectionId) {
+    ElMessage.error('板块 ID 缺失，无法删除')
+    return
+  }
   try {
     await ElMessageBox.confirm(
       `确认删除板块「${row.name}」吗？`,
@@ -299,9 +325,9 @@ async function deleteSection(row: SectionRow) {
     return
   }
 
-  deletingId.value = row._id
+  deletingId.value = sectionId
   try {
-    await sectionApi.delete(row._id)
+    await sectionApi.delete(sectionId)
     ElMessage.success('删除成功')
     await loadSections()
   } catch (e: any) {
@@ -312,9 +338,14 @@ async function deleteSection(row: SectionRow) {
 }
 
 async function onChangeStatus(row: SectionRow, status: SectionStatus) {
+  const sectionId = getSectionId(row)
+  if (!sectionId) {
+    ElMessage.error('板块 ID 缺失，无法切换状态')
+    return
+  }
   if (row.status === status) return
   try {
-    await sectionApi.updateStatus(row._id, status)
+    await sectionApi.updateStatus(sectionId, status)
     ElMessage.success(`已切换为 ${statusLabel(status)}`)
     await loadSections()
   } catch (e: any) {

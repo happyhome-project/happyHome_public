@@ -154,28 +154,28 @@ function getCommunityId(row: any): string {
   return String(row?._id || row?.id || '')
 }
 
-function goSections(communityId: string) {
+async function goSections(communityId: string) {
   if (!communityId) {
     ElMessage.error('社区 ID 缺失，无法进入板块管理')
     return
   }
-  router.push({ name: 'sections', params: { communityId } })
+  await router.push({ name: 'sections', params: { communityId } })
 }
 
-function goMembers(communityId: string) {
+async function goMembers(communityId: string) {
   if (!communityId) {
     ElMessage.error('社区 ID 缺失，无法进入成员管理')
     return
   }
-  router.push({ name: 'members', params: { communityId } })
+  await router.push({ name: 'members', params: { communityId } })
 }
 
-function goPosts(communityId: string) {
+async function goPosts(communityId: string) {
   if (!communityId) {
     ElMessage.error('社区 ID 缺失，无法进入帖子管理')
     return
   }
-  router.push({ name: 'posts', params: { communityId } })
+  await router.push({ name: 'posts', params: { communityId } })
 }
 
 function openMotto(row: any) {

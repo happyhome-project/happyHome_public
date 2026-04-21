@@ -8,6 +8,7 @@ jest.mock('../../../lib/db', () => ({
   create: jest.fn(),
   updateById: jest.fn(),
   updateWhere: jest.fn(),
+  removeById: jest.fn(),
   query: jest.fn(),
   increment: jest.fn(),
   softDelete: jest.fn(),
@@ -62,17 +63,14 @@ test('申请加入：已是成员时抛出错误', async () => {
   expect(db.create).not.toHaveBeenCalled()
 })
 
-test('退出社区：status 变为 left，memberCount 原子递减', async () => {
+test('退出社区：物理删除成员记录，memberCount 原子递减', async () => {
   ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
-  ;(db.updateById as jest.Mock).mockResolvedValue({})
+  ;(db.removeById as jest.Mock).mockResolvedValue({})
   ;(db.increment as jest.Mock).mockResolvedValue({})
 
   await handleLeave({ communityId: 'c1' }, 'test-openid')
 
-  expect(db.updateById).toHaveBeenCalledWith('community_members', 'member-1', expect.objectContaining({
-    status: 'left',
-    leftAt: expect.any(String),
-  }))
+  expect(db.removeById).toHaveBeenCalledWith('community_members', 'member-1')
   expect(db.increment).toHaveBeenCalledWith('communities', 'c1', 'memberCount', -1)
 })
 

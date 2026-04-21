@@ -292,20 +292,32 @@ async function route(action: string, params: Record<string, any>) {
     if (!communityId) throw new Error('communityId 不能为空')
     const keyword = normalizeKeyword(params.q)
     const statusFilter = String(params.status || 'all').trim()
+    const visibleStatuses = new Set(['pending', 'active', 'rejected'])
     const community = await db.getById('communities', communityId) as Community
     const members = await db.query(
       'community_members',
       { communityId },
       { orderBy: ['appliedAt', 'desc'] }
     )
-    const usersById = await getUsersByIds(members.map((m: any) => String(m.userId || '')))
+    const legacyLeftMembers = members.filter((member: any) => String(member.status || '').trim() === 'left')
+    if (legacyLeftMembers.length > 0) {
+      await Promise.all(
+        legacyLeftMembers
+          .map((member: any) => String(member._id || '').trim())
+          .filter(Boolean)
+          .map((memberId: string) => db.removeById('community_members', memberId))
+      )
+    }
+    const activeMembers = members.filter((member: any) => String(member.status || '').trim() !== 'left')
+    const usersById = await getUsersByIds(activeMembers.map((m: any) => String(m.userId || '')))
 
-    const list = members.map((m: any) => ({
+    const list = activeMembers.map((m: any) => ({
       ...m,
       nickName: usersById[m.userId]?.nickName || '',
       avatarUrl: usersById[m.userId]?.avatarUrl || '',
       isCreator: m.userId === community.creatorId,
     })).filter((member: any) => {
+      if (!visibleStatuses.has(String(member.status || '').trim())) return false
       if (statusFilter !== 'all' && member.status !== statusFilter) return false
       return includesKeyword(member.userId, member.nickName)(keyword)
     })
@@ -324,10 +336,7 @@ async function route(action: string, params: Record<string, any>) {
     if (member.userId === community.creatorId) throw new Error('不能移出社区创建者')
     if (member.role !== 'member') throw new Error('不能移出管理员')
 
-    await db.updateById('community_members', memberId, {
-      status: 'left',
-      leftAt: new Date().toISOString(),
-    })
+    await db.removeById('community_members', memberId)
     await db.increment('communities', communityId, 'memberCount', -1)
     return { success: true }
   }
