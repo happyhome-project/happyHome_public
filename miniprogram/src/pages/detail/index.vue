@@ -18,7 +18,13 @@
         />
       </view>
       <view class="meta">
-        <text class="time">发布于 {{ formatDate(post.createdAt) }}</text>
+        <view>
+          <text class="time">发布于 {{ formatDate(post.createdAt) }}</text>
+          <view v-if="section" class="section-flags">
+            <text class="flag">{{ section.enableComment !== false ? '评论开启' : '评论关闭' }}</text>
+            <text class="flag">{{ section.enableLike !== false ? '点赞开启' : '点赞关闭' }}</text>
+          </view>
+        </view>
         <view v-if="isAuthor" class="actions">
           <text v-if="!editing" class="edit-btn" @tap="startEdit">编辑</text>
           <text
@@ -104,7 +110,12 @@ const deleteLock = useBusyLock(async () => {
 function resetEditContent(content: Record<string, any>) {
   Object.keys(editContent).forEach((k) => delete editContent[k])
   const cloned = JSON.parse(JSON.stringify(content || {}))
-  Object.assign(editContent, cloned)
+  const validWidgetIds = new Set((section.value?.widgets || []).map((widget: any) => widget.widgetId))
+  Object.entries(cloned).forEach(([key, value]) => {
+    if (validWidgetIds.has(key)) {
+      editContent[key] = value
+    }
+  })
 }
 
 function startEdit() {
@@ -159,9 +170,13 @@ async function handleSaveEdit() {
     }
 
     const res = await postApi.update(post.value._id, content) as any
+    const validWidgetIds = new Set((section.value.widgets || []).map((widget: any) => widget.widgetId))
+    const sanitizedContent = Object.fromEntries(
+      Object.entries(content).filter(([key]) => validWidgetIds.has(key))
+    )
     post.value = {
       ...post.value,
-      content,
+      content: sanitizedContent,
       updatedAt: res.updatedAt || new Date().toISOString(),
     }
     editing.value = false
@@ -184,6 +199,14 @@ function formatDate(iso: string): string {
 .loading { text-align: center; padding: $hh-space-xxl; color: $hh-color-text-mute; }
 .meta { margin-top: $hh-space-xl; padding-top: $hh-space-md; border-top: 1rpx solid $hh-color-divider; display: flex; justify-content: space-between; align-items: center; }
 .time { font-size: $hh-font-caption; color: $hh-color-text-mute; }
+.section-flags { display: flex; gap: $hh-space-sm; margin-top: $hh-space-xs; }
+.flag {
+  font-size: $hh-font-caption;
+  color: $hh-color-text-mute;
+  background: $hh-color-bg-sub;
+  padding: 4rpx 12rpx;
+  border-radius: $hh-radius-full;
+}
 .actions { display: flex; align-items: center; gap: $hh-space-md; }
 .edit-btn { font-size: $hh-font-caption; color: $hh-color-info; padding: $hh-space-xs $hh-space-md; }
 .delete-btn { font-size: $hh-font-caption; color: $hh-color-danger; padding: $hh-space-xs $hh-space-md; }

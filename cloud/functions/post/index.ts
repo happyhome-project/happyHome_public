@@ -5,6 +5,13 @@ import type { Section, PostContent } from '../../shared/types'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
+function sanitizeContent(content: PostContent, section: Section): PostContent {
+  const allowedIds = new Set((section.widgets || []).map((widget) => widget.widgetId))
+  return Object.fromEntries(
+    Object.entries(content || {}).filter(([key]) => allowedIds.has(key))
+  ) as PostContent
+}
+
 export async function handleCreate(
   params: { communityId: string; sectionId: string; content: PostContent },
   openid: string,
@@ -21,11 +28,12 @@ export async function handleCreate(
 
   // Get section to validate required widgets
   const section = await db.getById('sections', params.sectionId) as Section
+  const sanitizedContent = sanitizeContent(params.content, section)
 
   // Validate all required widgets are filled in content
   for (const widget of section.widgets) {
     if (widget.required) {
-      const value = params.content[widget.widgetId]
+      const value = sanitizedContent[widget.widgetId]
       const isEmpty =
         value === undefined ||
         value === null ||
@@ -43,7 +51,7 @@ export async function handleCreate(
     sectionId: params.sectionId,
     authorId: openid,
     status: 'active',
-    content: params.content,
+    content: sanitizedContent,
     commentCount: 0,
     likeCount: 0,
     createdAt: now,
@@ -101,10 +109,11 @@ export async function handleUpdate(
   if (post.authorId !== openid) throw new Error('无权修改')
 
   const section = await db.getById('sections', post.sectionId) as Section
+  const sanitizedContent = sanitizeContent(params.content, section)
 
   for (const widget of section.widgets) {
     if (!widget.required) continue
-    const value = params.content[widget.widgetId]
+    const value = sanitizedContent[widget.widgetId]
     const isEmpty =
       value === undefined ||
       value === null ||
@@ -117,7 +126,7 @@ export async function handleUpdate(
 
   const updatedAt = new Date().toISOString()
   await db.updateById('posts', params.postId, {
-    content: params.content,
+    content: sanitizedContent,
     updatedAt,
   })
   return { success: true, updatedAt }

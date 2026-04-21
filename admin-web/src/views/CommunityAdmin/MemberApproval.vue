@@ -1,60 +1,202 @@
 <template>
-  <div>
-    <h3>成员审批</h3>
-    <el-table :data="pendingMembers" v-loading="loading">
-      <el-table-column prop="userId" label="用户 ID" />
-      <el-table-column prop="appliedAt" label="申请时间" width="180" />
-      <el-table-column label="操作" width="160">
-        <template #default="{ row }">
-          <el-button type="primary" size="small" @click="approve(row)">通过</el-button>
-          <el-button type="danger" size="small" @click="reject(row)">拒绝</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-    <el-empty v-if="!loading && pendingMembers.length === 0" description="暂无待审批成员" />
+  <div data-testid="member-approval-page">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <h3 style="margin: 0;">成员管理</h3>
+      <el-button data-testid="member-refresh-button" @click="loadMembers" :loading="loading">刷新</el-button>
+    </div>
+
+    <div style="display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">
+      <el-input
+        v-model="keyword"
+        clearable
+        placeholder="搜索昵称或用户 ID"
+        style="width: 280px;"
+        @keyup.enter="loadMembers"
+      />
+      <el-select v-model="statusFilter" style="width: 180px;" @change="loadMembers">
+        <el-option label="全部状态" value="all" />
+        <el-option label="待审批" value="pending" />
+        <el-option label="已加入" value="active" />
+        <el-option label="已拒绝" value="rejected" />
+        <el-option label="已退出" value="left" />
+      </el-select>
+      <el-button @click="loadMembers">查询</el-button>
+    </div>
+
+    <el-tabs data-testid="member-tabs" v-model="activeTab">
+      <el-tab-pane :label="`待审批（${pendingMembers.length}）`" name="pending">
+        <el-table data-testid="member-pending-table" :data="pendingMembers" v-loading="loading">
+          <el-table-column label="昵称" min-width="140">
+            <template #default="{ row }">
+              <span>{{ row.nickName || '未设置' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="userId" label="用户 ID" min-width="220" show-overflow-tooltip />
+          <el-table-column prop="appliedAt" label="申请时间" width="180" />
+          <el-table-column label="操作" width="180">
+            <template #default="{ row }">
+              <el-button data-testid="member-approve-button" :data-member-id="row._id" type="primary" size="small" @click="approve(row)">通过</el-button>
+              <el-button data-testid="member-reject-button" :data-member-id="row._id" type="danger" size="small" @click="reject(row)">拒绝</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-if="!loading && pendingMembers.length === 0" description="暂无待审批成员" />
+      </el-tab-pane>
+
+      <el-tab-pane :label="`成员列表（${allMembers.length}）`" name="all">
+        <el-table data-testid="member-all-table" :data="allMembers" v-loading="loading">
+          <el-table-column label="昵称" min-width="140">
+            <template #default="{ row }">
+              <span>{{ row.nickName || '未设置' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="userId" label="用户 ID" min-width="220" show-overflow-tooltip />
+          <el-table-column label="角色" width="100">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.role === 'admin' ? 'danger' : 'info'">
+                {{ row.role === 'admin' ? '管理员' : '成员' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="110">
+            <template #default="{ row }">
+              <el-tag size="small" :type="statusTagType(row.status)">
+                {{ statusLabel(row.status) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="appliedAt" label="申请时间" width="180" />
+          <el-table-column prop="joinedAt" label="加入时间" width="180" />
+          <el-table-column label="操作" width="180">
+            <template #default="{ row }">
+              <el-button
+                size="small"
+                type="danger"
+                :disabled="!canKick(row)"
+                @click="kick(row)"
+              >
+                移出
+              </el-button>
+              <span v-if="row.isCreator" style="margin-left: 8px; color: #909399; font-size: 12px;">创建者</span>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-if="!loading && allMembers.length === 0" description="暂无成员记录" />
+      </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, ref, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { memberApi } from '../../api/cloud'
 import { ElMessage } from 'element-plus'
 
+type MemberStatus = 'pending' | 'active' | 'rejected' | 'left'
+interface MemberRow {
+  _id: string
+  communityId: string
+  userId: string
+  role: 'admin' | 'member'
+  status: MemberStatus
+  appliedAt: string
+  joinedAt?: string
+  nickName?: string
+  isCreator?: boolean
+}
+
 const route = useRoute()
-const communityId = route.params.communityId as string
-const pendingMembers = ref<any[]>([])
+const router = useRouter()
+const communityId = ref(String(route.params.communityId || ''))
+const allMembers = ref<MemberRow[]>([])
+const pendingMembers = computed(() => allMembers.value.filter(m => m.status === 'pending'))
+const activeTab = ref<'pending' | 'all'>('pending')
 const loading = ref(false)
+const keyword = ref('')
+const statusFilter = ref<'all' | MemberStatus>('all')
 
 onMounted(async () => {
+  if (!communityId.value) {
+    ElMessage.error('缺少 communityId，无法加载成员列表')
+    router.push({ name: 'communities' })
+    return
+  }
+  await loadMembers()
+})
+
+async function loadMembers() {
   loading.value = true
   try {
-    const res = await memberApi.pendingList(communityId) as any
-    pendingMembers.value = res.members ?? []
+    const res = await memberApi.list({
+      communityId: communityId.value,
+      q: keyword.value,
+      status: statusFilter.value,
+    }) as any
+    allMembers.value = (res.members ?? []) as MemberRow[]
   } catch (e: any) {
-    ElMessage.error(e.message || '加载失败')
+    const message = getErrorMessage(e)
+    if (message.includes('Unknown action: member.list')) {
+      const fallback = await memberApi.pendingList(communityId.value) as any
+      allMembers.value = (fallback.members ?? []) as MemberRow[]
+      ElMessage.warning('后端暂未部署 member.list，当前仅展示待审批成员')
+    } else {
+      ElMessage.error(message || '加载失败')
+    }
   } finally {
     loading.value = false
   }
-})
+}
 
-async function approve(row: any) {
+async function approve(row: MemberRow) {
   try {
-    await memberApi.memberApprove(communityId, row._id)
-    pendingMembers.value = pendingMembers.value.filter(m => m._id !== row._id)
+    await memberApi.memberApprove(communityId.value, row._id)
     ElMessage.success('已通过')
+    await loadMembers()
   } catch (e: any) {
     ElMessage.error(e.message || '操作失败')
   }
 }
 
-async function reject(row: any) {
+async function reject(row: MemberRow) {
   try {
-    await memberApi.memberReject(communityId, row._id)
-    pendingMembers.value = pendingMembers.value.filter(m => m._id !== row._id)
+    await memberApi.memberReject(communityId.value, row._id)
     ElMessage.info('已拒绝')
+    await loadMembers()
   } catch (e: any) {
     ElMessage.error(e.message || '操作失败')
   }
+}
+
+async function kick(row: MemberRow) {
+  try {
+    await memberApi.kick(communityId.value, row._id)
+    ElMessage.success('已移出成员')
+    await loadMembers()
+  } catch (e: any) {
+    ElMessage.error(getErrorMessage(e) || '操作失败')
+  }
+}
+
+function canKick(row: MemberRow) {
+  return row.status === 'active' && row.role === 'member' && !row.isCreator
+}
+
+function statusLabel(status: MemberStatus) {
+  if (status === 'active') return '已加入'
+  if (status === 'pending') return '待审批'
+  if (status === 'rejected') return '已拒绝'
+  return '已退出'
+}
+
+function statusTagType(status: MemberStatus): 'success' | 'warning' | 'danger' | 'info' {
+  if (status === 'active') return 'success'
+  if (status === 'pending') return 'warning'
+  if (status === 'rejected') return 'danger'
+  return 'info'
+}
+
+function getErrorMessage(error: any): string {
+  return String(error?.response?.data?.error || error?.message || '')
 }
 </script>

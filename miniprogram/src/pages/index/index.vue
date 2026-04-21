@@ -239,7 +239,7 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
           k: getPostKind(p),
           t: getPostTitle(p, section),
           who: p.authorNickname || '匿名',
-          meta: p.stats?.reaction ? `${p.stats.reaction} 赞` : '',
+          meta: getArchiveMeta(p, section),
           hot: isPostHot(p),
           when: formatTime(p.createdAt),
           postId: p._id,
@@ -277,7 +277,26 @@ function getPostTitle(post: any, section: any): string {
 }
 
 function isPostHot(post: any): boolean {
-  return (post.stats?.reaction ?? 0) > 10
+  return Number(post?.likeCount || 0) > 10
+}
+
+function getArchiveMeta(post: any, section: any): string {
+  if (section?.enableLike !== false && Number(post?.likeCount || 0) > 0) {
+    return `${post.likeCount} 赞`
+  }
+  if (section?.enableComment !== false && Number(post?.commentCount || 0) > 0) {
+    return `${post.commentCount} 评论`
+  }
+  if (section?.enableLike === false && section?.enableComment === false) {
+    return '互动关闭'
+  }
+  if (section?.enableLike === false) {
+    return '点赞关闭'
+  }
+  if (section?.enableComment === false) {
+    return '评论关闭'
+  }
+  return ''
 }
 
 function formatTime(iso?: string): string {

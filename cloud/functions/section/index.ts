@@ -13,6 +13,8 @@ function normalizeSection(s: any): Section {
     ...s,
     type: (s.type as SectionType) || 'evergreen',
     status: (s.status as SectionStatus) || 'active',
+    enableComment: s.enableComment !== false,
+    enableLike: s.enableLike !== false,
   }
 }
 
@@ -65,7 +67,7 @@ export async function handleList(params: { communityId: string; withPostCount?: 
   // 首页需要每个 section 的活跃帖子数（N+1 查询；单社区 section 数量不大，可接受）
   if (params.withPostCount) {
     const withCount = await Promise.all(
-      sections.map(async (s) => ({
+      sections.map(async (s: Section) => ({
         ...s,
         postCount: await db.count('posts', { sectionId: s._id, status: 'active' }),
       }))

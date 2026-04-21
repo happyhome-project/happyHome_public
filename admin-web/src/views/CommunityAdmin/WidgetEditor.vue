@@ -14,6 +14,13 @@
       type="error"
       style="margin-bottom: 16px;"
     />
+    <el-alert
+      type="warning"
+      :closable="false"
+      style="margin-bottom: 16px;"
+      title="结构变更说明"
+      description="若板块内已有帖子，删除控件或修改控件结构会影响历史帖子展示；旧数据会暂时保留，但下次编辑旧帖子时会按最新控件结构清理。"
+    />
 
     <draggable v-model="widgets" item-key="widgetId" handle=".drag-handle">
       <template #item="{ element: widget }">
@@ -66,7 +73,7 @@ import draggable from 'vuedraggable'
 import { sectionApi } from '../../api/cloud'
 import { LIST_DISPLAYABLE_TYPES } from '../../../../cloud/shared/types'
 import { v4 as uuidv4 } from 'uuid'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
 const sectionId = route.params.sectionId as string
@@ -107,15 +114,39 @@ function removeWidget(widget: any) {
 }
 
 async function save() {
+  if (!sectionId) {
+    ElMessage.error('缺少 sectionId，无法保存')
+    return
+  }
   if (listCount.value > 3) {
     ElMessage.error('列表显示字段不能超过3个')
     return
   }
   saving.value = true
   try {
-    // Strip internal _isNew flag before sending
     const orderedWidgets = widgets.value.map(({ _isNew, ...w }, i) => ({ ...w, order: i }))
-    await sectionApi.updateWidgets({ sectionId, communityId, widgets: orderedWidgets })
+    const preview = await sectionApi.updateWidgets({
+      sectionId,
+      communityId,
+      widgets: orderedWidgets,
+      preview: true,
+    }) as any
+
+    if (preview.requireConfirmation) {
+      const removedLabels = preview.structuralChanges?.removedLabels?.join('、') || '已删除控件'
+      await ElMessageBox.confirm(
+        `该板块已有 ${preview.activePostCount} 条帖子，本次将移除控件：${removedLabels}。历史帖子中的旧数据会被隐藏，并在用户下次编辑帖子时自动清理。确认继续吗？`,
+        '确认结构变更',
+        { type: 'warning', confirmButtonText: '继续保存', cancelButtonText: '取消' }
+      )
+    }
+
+    await sectionApi.updateWidgets({
+      sectionId,
+      communityId,
+      widgets: orderedWidgets,
+      confirmStructureChange: true,
+    })
     ElMessage.success('保存成功')
   } catch (e: any) {
     ElMessage.error(e.message || '保存失败')

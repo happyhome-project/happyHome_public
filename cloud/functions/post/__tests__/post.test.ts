@@ -27,6 +27,8 @@ const mockSection: Section = {
   enableComment: true,
   enableLike: true,
   createdAt: '2024-01-01T00:00:00.000Z',
+  type: 'evergreen',
+  status: 'active',
   widgets: [
     {
       widgetId: 'widget-uuid-1',
@@ -183,6 +185,30 @@ test('改帖：作者可修改，更新 content 与 updatedAt', async () => {
   }))
   expect(result.success).toBe(true)
   expect(result.updatedAt).toBeTruthy()
+})
+
+test('改帖：保存时会清理已失效控件字段', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({
+      _id: 'post-1',
+      sectionId: 'section-1',
+      authorId: 'test-openid',
+      status: 'active',
+    })
+    .mockResolvedValueOnce(mockSection)
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  await handleUpdate({
+    postId: 'post-1',
+    content: {
+      'widget-uuid-1': '修改后的标题',
+      'legacy-widget': '旧字段值',
+    } as any,
+  }, 'test-openid')
+
+  expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({
+    content: { 'widget-uuid-1': '修改后的标题' },
+  }))
 })
 
 test('list：按 createdAt desc 分页查询', async () => {
