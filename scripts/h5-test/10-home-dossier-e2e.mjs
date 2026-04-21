@@ -3,7 +3,7 @@
 //
 // 用法：node scripts/h5-test/10-home-dossier-e2e.mjs
 
-import { callAdmin, callAs, createAsserter, makeRunId } from './_shared.mjs'
+import { callAdmin, callAs, createAsserter, makeRunId, trackCommunity } from './_shared.mjs'
 
 async function main() {
   const { assert, expectReject, finish } = createAsserter('dossier-home-e2e')
@@ -19,6 +19,7 @@ async function main() {
     location: { province: 'P', city: 'C', district: 'D', address: 'A' },
     joinType: 'open',
   })
+  trackCommunity(communityId)
   await callAdmin('community.approve', { communityId })
   console.log(`[seed] communityId=${communityId}`)
 
@@ -124,7 +125,7 @@ async function main() {
   assert(typeof counted.postCount === 'number', 'postCount 是数字')
   assert(counted.postCount === 0, 'postCount 初始 0（无帖子）')
 
-  finish()
+  await finish()
 }
 
 main().catch(err => {

@@ -103,7 +103,7 @@ async function main() {
     t.assert(true, `posts unreachable (section gone): ${String(err.message).slice(0, 60)}`)
   }
 
-  t.finish()
+  await t.finish()
 }
 
 main().catch(err => {

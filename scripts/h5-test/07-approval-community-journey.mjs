@@ -9,7 +9,7 @@
  *   - User can now post
  */
 
-import { callAs, callAdmin, createAsserter, makeRunId } from './_shared.mjs'
+import { callAs, callAdmin, createAsserter, makeRunId, trackCommunity } from './_shared.mjs'
 
 const { assert, expectReject, finish } = createAsserter('approval-journey')
 const runId = makeRunId()
@@ -29,6 +29,7 @@ const { communityId } = await callAs(owner, 'community', 'create', {
   location: { province: 'P', city: 'C', district: 'D', address: 'A' },
   joinType: 'approval',
 })
+trackCommunity(communityId)
 await callAdmin('community.approve', { communityId })
 const { sectionId } = await callAdmin('section.create', {
   communityId, name: '板块', icon: '📋', order: 0,
@@ -85,4 +86,4 @@ const postRes = await callAs(applicant, 'post', 'create', {
 })
 assert(!!postRes.postId, `post created: ${postRes.postId}`)
 
-finish()
+await finish()

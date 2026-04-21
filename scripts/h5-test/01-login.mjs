@@ -20,4 +20,4 @@ assert(second.isNew === false, 'second call recognizes existing user')
 assert(second.user.nickName === 'LoginTestRenamed', 'nickName updated')
 assert(second.user.avatarUrl === 'https://x/a.png', 'avatarUrl updated')
 
-finish()
+await finish()

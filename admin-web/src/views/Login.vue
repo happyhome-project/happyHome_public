@@ -1,15 +1,21 @@
 <template>
-  <div class="login-page">
-    <div class="login-box">
+  <div class="login-page" data-testid="login-page">
+    <div class="login-box" data-testid="login-box">
       <h2>HappyHome 管理后台</h2>
-      <el-form @submit.prevent="handleLogin">
+      <el-form data-testid="login-form" @submit.prevent="handleLogin">
         <el-form-item>
-          <el-input v-model="username" placeholder="用户名" />
+          <div data-testid="login-username-field">
+            <el-input v-model="username" placeholder="用户名" />
+          </div>
         </el-form-item>
         <el-form-item>
-          <el-input v-model="password" type="password" placeholder="密码" show-password />
+          <div data-testid="login-password-field">
+            <el-input v-model="password" type="password" placeholder="密码" show-password />
+          </div>
         </el-form-item>
-        <el-button type="primary" native-type="submit" :loading="loading" style="width:100%">登录</el-button>
+        <el-button data-testid="login-submit" type="primary" native-type="submit" :loading="loading" style="width: 100%;">
+          登录
+        </el-button>
       </el-form>
     </div>
   </div>

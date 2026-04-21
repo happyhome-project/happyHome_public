@@ -11,12 +11,16 @@
     "miniprogram-ci": "^2.1.31"
   },
   "devDependencies": {
+    "@playwright/test": "^1.52.0",
     "@cloudbase/manager-node": "^4.0.0"
   },
   "scripts": {
     "deploy:cloud": "node scripts/deploy.mjs cloud",
     "deploy:mp": "node scripts/deploy.mjs miniprogram",
     "deploy": "node scripts/deploy.mjs all",
+    "test:nightly": "node scripts/nightly-full.mjs",
+    "test:admin:api": "node scripts/test-admin-api.mjs",
+    "test:admin:ui": "node scripts/test-admin-ui.mjs",
     "test:mp": "node scripts/test-mp.mjs",
     "test:mp:replay": "node scripts/test-mp-replay.mjs",
     "test:real:admin": "node scripts/test-admin-http.mjs",

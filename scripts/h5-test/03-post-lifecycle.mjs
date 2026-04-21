@@ -44,4 +44,4 @@ await expectReject(
   'post.get on soft-deleted throws',
 )
 
-finish()
+await finish()

@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=375, initial-scale=1">
+<title>档案馆 · 样式 1 · 经典卷宗</title>
+<link rel="stylesheet" href="tokens-v2.css">
+<style>
+/* Style 1 · 经典卷宗 */
+
+/* Quote */
+.s1-quote {
+  margin: 4px 24px 14px;
+  padding: 10px 0 12px;
+  border-top: 1px solid var(--ink-line-2);
+  border-bottom: 1px solid var(--ink-line-2);
+  font-family: var(--font-serif);
+  font-size: 13px;
+  font-style: italic;
+  color: var(--ink-2);
+  line-height: 1.55;
+  letter-spacing: 0.01em;
+  position: relative;
+}
+.s1-quote::before {
+  content: "\201C";
+  position: absolute;
+  left: -10px; top: 2px;
+  font-size: 28px;
+  color: var(--accent);
+  font-style: normal;
+  line-height: 1;
+}
+.s1-quote .cite {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-style: normal;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  text-align: right;
+}
+
+/* Schedule strip */
+.s1-sch-head {
+  padding: 14px 24px 8px;
+  display: flex; align-items: baseline; justify-content: space-between;
+}
+.s1-sch-head .t {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+.s1-sch-head .t b { color: var(--ink-1); font-weight: 700; margin-right: 6px; }
+.s1-sch-head .more {
+  font-family: var(--font-mono);
+  font-size: 10px; color: var(--ink-3);
+  letter-spacing: 0.12em; text-transform: uppercase;
+}
+.s1-sch {
+  margin: 0 0 12px;
+  padding: 0 24px 6px;
+  display: flex; gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.s1-sch::-webkit-scrollbar { display: none; }
+.sch-card {
+  flex-shrink: 0;
+  width: 158px;
+  background: var(--surface-1);
+  border: 1px solid var(--ink-line);
+  border-radius: 10px;
+  padding: 10px 12px 11px;
+  display: flex; flex-direction: column;
+  position: relative;
+}
+.sch-card.hot {
+  background: var(--accent-wash);
+  border-color: var(--accent-line);
+}
+.sch-card .date {
+  display: flex; align-items: baseline; gap: 6px;
+  font-family: var(--font-num);
+  color: var(--ink-1);
+  margin-bottom: 6px;
+}
+.sch-card .date .d {
+  font-size: 17px; font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.sch-card .date .w {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--ink-3);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-left: auto;
+}
+.sch-card .kind {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 4px;
+}
+.sch-card.hot .kind { color: var(--accent-ink); }
+.sch-card .tt {
+  font-size: 13px; font-weight: 600;
+  color: var(--ink-1);
+  line-height: 1.3;
+  letter-spacing: -0.005em;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.sch-card .mm {
+  margin-top: 4px;
+  font-family: var(--font-num);
+  font-size: 10.5px;
+  color: var(--ink-3);
+  display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+/* Style 1 · 经典卷宗
+ * Serif 标题 + 细边卡片 + 左彩条 · 档案卷宗质感 */
+
+.s1-top {
+  padding: 8px 24px 14px;
+  display: flex; align-items: flex-start; justify-content: space-between;
+}
+.s1-top .eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 6px;
+}
+.s1-top h1 {
+  font-family: var(--font-serif);
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ink-1);
+  line-height: 1.05;
+}
+.s1-top h1 .sub {
+  display: block;
+  font-family: var(--font-sans);
+  font-size: 12px; font-weight: 400;
+  color: var(--ink-3);
+  margin-top: 8px;
+}
+.s1-top .avatar {
+  width: 36px; height: 36px; border-radius: 99px;
+  background: var(--surface-2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700;
+  color: var(--ink-2);
+  flex-shrink: 0;
+  margin-left: 12px;
+}
+
+.s1-stats {
+  margin: 0 24px 18px;
+  padding: 10px 0;
+  border-top: 1px solid var(--ink-line);
+  border-bottom: 1px solid var(--ink-line);
+  display: flex; gap: 0;
+}
+.s1-stats .cell {
+  flex: 1;
+  padding: 0 12px;
+  border-right: 1px solid var(--ink-line-2);
+}
+.s1-stats .cell:first-child { padding-left: 0; }
+.s1-stats .cell:last-child { border-right: none; padding-right: 0; }
+.s1-stats .k {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.s1-stats .v {
+  font-family: var(--font-num);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ink-1);
+  margin-top: 2px;
+  letter-spacing: -0.02em;
+}
+
+/* live tray */
+.s1-live {
+  margin: 0 16px 20px;
+  border: 1px solid var(--ink-line);
+  border-left: 3px solid var(--live);
+  border-radius: 12px;
+  background: var(--surface-1);
+  overflow: hidden;
+}
+.s1-live .h {
+  padding: 10px 14px 7px;
+  display: flex; justify-content: space-between;
+  border-bottom: 1px solid var(--ink-line-2);
+}
+.s1-live .h .l {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--live);
+  font-weight: 700;
+  display: flex; align-items: center; gap: 6px;
+}
+.s1-live .h .l .ping {
+  width: 6px; height: 6px; border-radius: 99px; background: var(--live);
+  animation: ring 1.6s infinite;
+}
+@keyframes ring {
+  0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--live) 50%, transparent); }
+  50% { box-shadow: 0 0 0 5px transparent; }
+}
+.s1-live .h .n { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); letter-spacing: 0.1em; }
+.s1-live .row {
+  padding: 11px 14px;
+  display: flex; gap: 12px; align-items: center;
+  border-bottom: 1px solid var(--ink-line-2);
+}
+.s1-live .row:last-child { border-bottom: none; }
+.s1-live .row .ic {
+  width: 28px; height: 28px; border-radius: 8px;
+  background: var(--surface-2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; flex-shrink: 0;
+}
+.s1-live .row .body { flex: 1; min-width: 0; }
+.s1-live .row .t { font-size: 14px; font-weight: 600; color: var(--ink-1); letter-spacing: -0.005em; }
+.s1-live .row .m {
+  font-family: var(--font-num);
+  font-size: 11.5px; color: var(--ink-3);
+  margin-top: 2px;
+  display: flex; gap: 10px;
+}
+.s1-live .row .cta {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: var(--ink-1); color: var(--surface-1);
+}
+
+/* section head */
+.sec-head {
+  padding: 10px 24px 8px;
+  display: flex; align-items: baseline; justify-content: space-between;
+}
+.sec-head .t {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+.sec-head .t b { color: var(--ink-1); font-weight: 700; margin-right: 6px; }
+.sec-head .more {
+  font-family: var(--font-mono);
+  font-size: 10px; color: var(--ink-3);
+  letter-spacing: 0.12em; text-transform: uppercase;
+}
+
+/* archive cards */
+.arc-group { margin: 0 16px 14px; }
+.arc-card {
+  background: var(--surface-1);
+  border: 1px solid var(--ink-line);
+  border-radius: 14px;
+  overflow: hidden;
+  margin-bottom: 10px;
+  position: relative;
+}
+.arc-card::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--accent);
+  opacity: 0.7;
+}
+.arc-card:nth-child(2)::before { background: oklch(0.62 0.12 65); }
+.arc-card:nth-child(3)::before { background: oklch(0.58 0.11 260); }
+.arc-card .bh {
+  padding: 12px 14px 8px 16px;
+  display: flex; align-items: baseline; justify-content: space-between;
+  border-bottom: 1px dashed var(--ink-line-2);
+}
+.arc-card .bh .nm {
+  font-family: var(--font-serif);
+  font-size: 16px; font-weight: 600;
+  color: var(--ink-1);
+  letter-spacing: -0.01em;
+}
+.arc-card .bh .nm .cnt {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.1em;
+  margin-left: 8px;
+  font-weight: 500;
+}
+.arc-card .bh .arrow { font-size: 14px; color: var(--ink-3); }
+.arc-item {
+  padding: 10px 14px 10px 16px;
+  display: flex; gap: 10px;
+  border-bottom: 1px solid var(--ink-line-2);
+  align-items: flex-start;
+}
+.arc-item:last-child { border-bottom: none; }
+.arc-item .k {
+  font-family: var(--font-mono);
+  font-size: 9px; color: var(--ink-3);
+  letter-spacing: 0.14em; text-transform: uppercase;
+  width: 36px; flex-shrink: 0; padding-top: 2px;
+  font-weight: 600;
+}
+.arc-item .tl { flex: 1; min-width: 0; }
+.arc-item .tl .title {
+  font-size: 13.5px; color: var(--ink-1);
+  line-height: 1.35; font-weight: 500;
+  display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
+}
+.arc-item .tl .mm {
+  font-family: var(--font-num);
+  font-size: 11px; color: var(--ink-3);
+  margin-top: 2px;
+  display: flex; gap: 8px;
+}
+.arc-item .tl .mm .hot { color: var(--accent-ink); font-weight: 600; }
+.arc-item .when {
+  font-family: var(--font-num);
+  font-size: 10.5px; color: var(--ink-3);
+  flex-shrink: 0; padding-top: 1px;
+}
+
+/* dormant */
+.dormant {
+  margin: 18px 16px 0;
+  padding: 14px;
+  border: 1px dashed var(--ink-line);
+  border-radius: 12px;
+  text-align: center;
+}
+.dormant .h {
+  font-family: var(--font-mono);
+  font-size: 10px; color: var(--ink-3);
+  letter-spacing: 0.16em; text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.dormant .list {
+  font-size: 13px; color: var(--ink-2);
+}
+.dormant .list span { margin: 0 6px; opacity: 0.7; }
+.dormant .open {
+  font-family: var(--font-mono);
+  font-size: 10px; color: var(--ink-3);
+  margin-top: 8px;
+  letter-spacing: 0.14em; text-transform: uppercase;
+}
+
+.s1-foot {
+  padding: 22px 0 10px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--ink-4);
+}
+
+/* scene switcher */
+.scene-switcher {
+  position: absolute;
+  top: 52px; right: 16px;
+  display: flex; gap: 4px;
+  background: var(--surface-1);
+  border: 1px solid var(--ink-line);
+  border-radius: 99px;
+  padding: 3px;
+  z-index: 20;
+}
+.scene-switcher button {
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  border-radius: 99px;
+}
+.scene-switcher button.on {
+  background: var(--ink-1);
+  color: var(--surface-1);
+  font-weight: 700;
+}
+</style>
+</head>
+<body>
+
+<div class="phone" data-screen-label="Style 1 经典卷宗">
+  <div class="phone-inner">
+
+    <div class="status-bar">
+      <span class="num">9:41</span>
+      <span class="sb-icons">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="none"><path d="M1 9h2v2H1V9zm4-2h2v4H5V7zm4-3h2v7H9V4zm4-3h2v10h-2V1z" fill="currentColor"/></svg>
+        <svg width="24" height="11" viewBox="0 0 24 11" fill="none"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" stroke="currentColor" opacity="0.4"/><rect x="2" y="2" width="16" height="7" rx="1" fill="currentColor"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.5" fill="currentColor" opacity="0.4"/></svg>
+      </span>
+    </div>
+
+    <div class="scene-switcher">
+      <button data-scene="neighbor" class="on">邻里</button>
+      <button data-scene="class">学习</button>
+      <button data-scene="hobby">兴趣</button>
+    </div>
+
+    <div class="app-body" id="app"></div>
+
+    <button class="fab" aria-label="发布">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+
+    <div class="tabbar">
+      <div class="tab on">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+        <span>首页</span>
+        <div class="dot"></div>
+      </div>
+      <div class="tab">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span>消息</span>
+        <div class="dot"></div>
+      </div>
+      <div class="tab">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+        <span>我的</span>
+        <div class="dot"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../shared/scenes.js"></script>
+<script>
+function render(scene) {
+  const s = window.SCENES[scene];
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="s1-top">
+      <div>
+        <div class="eyebrow">${s.kindEn}</div>
+        <h1>${s.name}</h1>
+      </div>
+      <div class="avatar">${s.avatar}</div>
+    </div>
+    ${s.quote?`<div class="s1-quote">${s.quote.split(' —— ')[0]}<span class="cite">— ${s.quote.split(' —— ')[1]||''}</span></div>`:''}
+    <div class="s1-live">
+      <div class="h">
+        <div class="l"><span class="ping"></span>正在进行</div>
+        <div class="n">${s.live.length} 件</div>
+      </div>
+      ${s.live.map(r=>`
+        <div class="row">
+          <div class="ic">${r.ic}</div>
+          <div class="body">
+            <div class="t">${r.t}</div>
+            <div class="m">${r.m.map(x=>`<span>${x}</span>`).join('')}</div>
+          </div>
+          <button class="cta">${r.cta}</button>
+        </div>`).join('')}
+    </div>
+    ${s.schedule?.length?`
+    <div class="s1-sch-head">
+      <div class="t"><b>近期日程</b>· 活动 · 课程 · 通知</div>
+      <div class="more">日历 ›</div>
+    </div>
+    <div class="s1-sch">
+      ${s.schedule.map(e=>`
+        <div class="sch-card ${e.highlight?'hot':''}">
+          <div class="date"><span class="d">${e.date}</span><span class="w">${e.day}</span></div>
+          <div class="kind">${e.kind}</div>
+          <div class="tt">${e.t}</div>
+          <div class="mm">${e.m}</div>
+        </div>`).join('')}
+    </div>`:''}
+    <div class="sec-head">
+      <div class="t"><b>沉淀板块</b>· 长期有用</div>
+      <div class="more">管理 ›</div>
+    </div>
+    <div class="arc-group">
+      ${s.groups.map(g=>`
+        <div class="arc-card">
+          <div class="bh">
+            <div class="nm">${g.name}<span class="cnt">· ${g.count} 条</span></div>
+            <div class="arrow">›</div>
+          </div>
+          ${g.items.map(i=>`
+            <div class="arc-item">
+              <div class="k">${i.k}</div>
+              <div class="tl">
+                <div class="title">${i.t}</div>
+                <div class="mm">
+                  <span>${i.who}</span>
+                  ${i.meta?`<span class="${i.hot?'hot':''}">${i.meta}</span>`:''}
+                </div>
+              </div>
+              <div class="when">${i.when}</div>
+            </div>`).join('')}
+        </div>`).join('')}
+    </div>
+    <div class="dormant">
+      <div class="h">休眠板块 · 本月无新内容</div>
+      <div class="list">${s.dormant.map(x=>`<span>${x}</span>`).join('·')}</div>
+      <div class="open">展开 ⌄</div>
+    </div>
+    <div class="s1-foot">— ${s.kind} · 记忆在这里 —</div>
+  `;
+}
+const initial = localStorage.getItem('hh_scene') || 'neighbor';
+document.querySelectorAll('.scene-switcher button').forEach(b=>{
+  b.classList.toggle('on', b.dataset.scene===initial);
+  b.onclick = () => {
+    document.querySelectorAll('.scene-switcher button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    localStorage.setItem('hh_scene', b.dataset.scene);
+    render(b.dataset.scene);
+  };
+});
+render(initial);
+</script>
+
+</body>
+</html>

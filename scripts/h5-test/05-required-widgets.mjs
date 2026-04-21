@@ -45,4 +45,4 @@ const ok = await callAs(author, 'post', 'create', {
 })
 assert(!!ok.postId, 'post created when all required fields filled')
 
-finish()
+await finish()

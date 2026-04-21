@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1440, initial-scale=1">
+<title>Admin · 群主工作台</title>
+<link rel="stylesheet" href="tokens-v2.css">
+<style>
+/* Admin workstation · 1440x900 · desktop */
+
+html, body { height: 100%; background: var(--surface-2); }
+body {
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+
+.workstation {
+  width: 1440px; height: 900px;
+  background: var(--surface-1);
+  display: grid;
+  grid-template-columns: 240px 360px 1fr 320px;
+  grid-template-rows: 44px 1fr;
+  overflow: hidden;
+  box-shadow: 0 40px 100px rgba(0,0,0,0.2), 0 0 0 1px var(--ink-line-2);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+/* TOP BAR ==================================== */
+.topbar {
+  grid-column: 1 / -1;
+  display: flex; align-items: center;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--ink-line-2);
+  background: var(--surface-1);
+  gap: 18px;
+}
+.topbar .brand {
+  display: flex; align-items: center; gap: 10px;
+  padding-right: 16px;
+  border-right: 1px solid var(--ink-line-2);
+  height: 100%;
+  min-width: 224px;
+}
+.topbar .brand .logo {
+  width: 22px; height: 22px; border-radius: 5px;
+  background: var(--ink-1);
+  color: var(--surface-1);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-serif);
+  font-weight: 700;
+  font-size: 13px;
+}
+.topbar .brand .txt {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--ink-1);
+}
+.topbar .brand .txt span {
+  color: var(--ink-3);
+  font-weight: 500;
+  margin-left: 6px;
+}
+.topbar .crumbs {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+  text-transform: uppercase;
+}
+.topbar .crumbs b { color: var(--ink-1); font-weight: 700; }
+.topbar .crumbs .sep { color: var(--ink-4); }
+
+.topbar .spacer { flex: 1; }
+
+.topbar .search {
+  width: 280px;
+  height: 28px;
+  background: var(--surface-2);
+  border-radius: 6px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 10px;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.topbar .search .kbd {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  background: var(--surface-1);
+  border: 1px solid var(--ink-line);
+  border-radius: 3px;
+  padding: 1px 5px;
+  letter-spacing: 0.08em;
+}
+
+.topbar .live {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--ink-2);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.topbar .live .d {
+  width: 6px; height: 6px; border-radius: 99px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.topbar .avatar {
+  width: 28px; height: 28px; border-radius: 99px;
+  background: linear-gradient(135deg, oklch(0.7 0.1 30), oklch(0.5 0.12 20));
+  color: #fff;
+  font-family: var(--font-serif);
+  font-weight: 600;
+  font-size: 12px;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* LEFT NAV ==================================== */
+.nav {
+  border-right: 1px solid var(--ink-line-2);
+  padding: 16px 0;
+  overflow-y: auto;
+  background: var(--surface-1);
+}
+.nav .sect-t {
+  padding: 8px 20px 4px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.nav .sect-t:first-child { padding-top: 0; }
+.nav .item {
+  padding: 7px 20px;
+  display: flex; align-items: center; gap: 10px;
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  line-height: 1.3;
+}
+.nav .item:hover { background: var(--surface-2); }
+.nav .item.on {
+  background: var(--surface-2);
+  color: var(--ink-1);
+  font-weight: 600;
+  border-left-color: var(--ink-1);
+}
+.nav .item .ic {
+  width: 14px; height: 14px; color: var(--ink-3);
+  flex-shrink: 0;
+}
+.nav .item.on .ic { color: var(--ink-1); }
+.nav .item .count {
+  margin-left: auto;
+  font-family: var(--font-num);
+  font-size: 11px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.nav .item.on .count { color: var(--ink-1); font-weight: 700; }
+.nav .item.urgent .count {
+  background: var(--live);
+  color: #fff;
+  border-radius: 99px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.nav .board-row {
+  padding: 7px 20px;
+  display: flex; align-items: center; gap: 10px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.nav .board-row .sw {
+  width: 3px; height: 12px; border-radius: 99px;
+  background: var(--accent);
+}
+.nav .board-row .sw.amber { background: oklch(0.7 0.14 70); }
+.nav .board-row .sw.blue { background: oklch(0.55 0.1 230); }
+.nav .board-row .sw.mute { background: var(--ink-line); }
+.nav .board-row .m { margin-left: auto; color: var(--ink-4); font-family: var(--font-mono); font-size: 10px; }
+
+/* QUEUE (middle-left) ==================================== */
+.queue {
+  border-right: 1px solid var(--ink-line-2);
+  background: var(--surface-0);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.queue .q-head {
+  padding: 14px 20px 10px;
+  border-bottom: 1px solid var(--ink-line-2);
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--surface-1);
+}
+.queue .q-head .t {
+  font-family: var(--font-serif);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ink-1);
+  display: flex; align-items: baseline; gap: 10px;
+}
+.queue .q-head .t .n {
+  font-family: var(--font-num);
+  font-size: 13px;
+  color: var(--ink-3);
+  font-weight: 500;
+}
+.queue .q-head .filters {
+  display: flex; gap: 4px;
+  margin-top: 4px;
+}
+.queue .q-head .f {
+  padding: 4px 10px;
+  border-radius: 99px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 600;
+}
+.queue .q-head .f.on {
+  background: var(--ink-1);
+  color: var(--surface-1);
+}
+
+.q-list {
+  flex: 1;
+  overflow-y: auto;
+}
+.q-item {
+  padding: 12px 20px 14px;
+  border-bottom: 1px solid var(--ink-line-2);
+  display: flex; flex-direction: column; gap: 6px;
+  cursor: pointer;
+  position: relative;
+}
+.q-item:hover { background: var(--surface-1); }
+.q-item.sel {
+  background: var(--surface-1);
+}
+.q-item.sel::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--ink-1);
+}
+.q-item .row1 {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.q-item .tag {
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 700;
+}
+.q-item .tag.new { background: var(--accent-wash); color: var(--accent-ink); }
+.q-item .tag.report { background: var(--live-wash); color: var(--live); }
+.q-item .tag.kw { background: var(--amber-wash); color: oklch(0.45 0.1 70); }
+.q-item .tag.join { background: var(--blue-wash); color: oklch(0.42 0.12 250); }
+
+.q-item .tm { margin-left: auto; color: var(--ink-4); font-weight: 500; }
+
+.q-item .ttl {
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--ink-1);
+  letter-spacing: -0.005em;
+  line-height: 1.35;
+}
+.q-item .meta {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  display: flex; gap: 8px; align-items: center;
+}
+.q-item .meta b { color: var(--ink-2); font-weight: 600; }
+.q-item .meta .dot { color: var(--ink-line); }
+.q-item.reviewed .ttl { color: var(--ink-3); }
+
+/* MAIN ==================================== */
+.main {
+  background: var(--surface-1);
+  overflow-y: auto;
+  display: flex; flex-direction: column;
+}
+.main-head {
+  padding: 20px 32px 16px;
+  border-bottom: 1px solid var(--ink-line-2);
+  background: var(--surface-1);
+}
+.main-head .crumbs {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 8px;
+}
+.main-head .crumbs b { color: var(--ink-1); font-weight: 700; }
+.main-head h1 {
+  font-family: var(--font-serif);
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--ink-1);
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  margin-bottom: 10px;
+}
+.main-head .by {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+.main-head .by .av {
+  width: 22px; height: 22px; border-radius: 99px;
+  background: linear-gradient(135deg, oklch(0.65 0.1 260), oklch(0.5 0.12 250));
+  color: #fff;
+  font-family: var(--font-serif);
+  font-size: 10px;
+  font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.main-head .by b { color: var(--ink-1); font-weight: 600; }
+.main-head .by .dot { color: var(--ink-line); }
+.main-head .by .badge {
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  font-size: 10px;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+/* Actions row */
+.action-bar {
+  padding: 12px 32px;
+  display: flex; align-items: center; gap: 8px;
+  border-bottom: 1px solid var(--ink-line-2);
+  background: var(--surface-0);
+}
+.action-bar .primary {
+  height: 32px;
+  padding: 0 18px;
+  background: var(--ink-1);
+  color: var(--surface-1);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.action-bar .primary .k {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  border: 1px solid oklch(0.5 0.01 60);
+  border-radius: 3px;
+  padding: 1px 4px;
+  color: oklch(0.75 0.006 60);
+}
+.action-bar .sec {
+  height: 32px;
+  padding: 0 14px;
+  background: var(--surface-1);
+  border: 1px solid var(--ink-line);
+  color: var(--ink-2);
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.action-bar .sec .k {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--ink-4);
+  letter-spacing: 0.08em;
+}
+.action-bar .danger {
+  color: var(--live);
+  border-color: color-mix(in srgb, var(--live) 30%, var(--ink-line));
+}
+.action-bar .spc { flex: 1; }
+.action-bar .ghost {
+  color: var(--ink-3);
+  font-size: 12px;
+  padding: 0 10px;
+  height: 32px;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+
+/* Post preview */
+.post-preview {
+  padding: 28px 32px;
+  flex: 1;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--ink-1);
+}
+.post-preview p { margin-bottom: 1em; }
+.post-preview p:last-child { margin-bottom: 0; }
+.post-preview .lede {
+  font-family: var(--font-serif);
+  font-size: 17px;
+  line-height: 1.65;
+  color: var(--ink-1);
+  margin-bottom: 1.1em;
+}
+.post-preview .imgs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 16px 0 24px;
+}
+.post-preview .imgs .ph {
+  aspect-ratio: 4/3;
+  border-radius: 6px;
+  background: linear-gradient(135deg, oklch(0.78 0.08 40), oklch(0.65 0.12 30));
+}
+.post-preview .imgs .ph:nth-child(2) {
+  background: linear-gradient(135deg, oklch(0.8 0.06 130), oklch(0.65 0.1 150));
+}
+.post-preview .imgs .ph:nth-child(3) {
+  background: linear-gradient(135deg, oklch(0.82 0.05 70), oklch(0.7 0.08 50));
+}
+.post-preview .tags {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  padding-top: 14px;
+  border-top: 1px solid var(--ink-line-2);
+  margin-top: 20px;
+}
+.post-preview .tags .t {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.post-preview .tags .t::before { content: "#"; color: var(--ink-4); }
+
+/* Admin notes panel (inline below) */
+.admin-notes {
+  margin: 8px 32px 24px;
+  padding: 14px 16px;
+  background: var(--amber-wash);
+  border-left: 3px solid oklch(0.65 0.14 70);
+  border-radius: 4px;
+  font-size: 12.5px;
+  color: oklch(0.35 0.06 70);
+  line-height: 1.6;
+}
+.admin-notes .h {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  font-weight: 700;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  color: oklch(0.4 0.08 70);
+  display: flex; align-items: center; gap: 6px;
+}
+.admin-notes ul { margin: 4px 0 0 16px; }
+.admin-notes li { margin: 2px 0; }
+
+/* RIGHT PANEL ==================================== */
+.side {
+  border-left: 1px solid var(--ink-line-2);
+  background: var(--surface-0);
+  overflow-y: auto;
+}
+.side .sec {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--ink-line-2);
+}
+.side .sec .h {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 700;
+  margin-bottom: 12px;
+  display: flex; align-items: center; gap: 8px;
+}
+.side .sec .h .sep { flex: 1; height: 1px; background: var(--ink-line-2); }
+
+/* Author card */
+.author-card {
+  display: flex; gap: 12px;
+  align-items: flex-start;
+}
+.author-card .av {
+  width: 40px; height: 40px; border-radius: 99px;
+  background: linear-gradient(135deg, oklch(0.65 0.1 260), oklch(0.5 0.12 250));
+  color: #fff;
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.author-card .info { flex: 1; min-width: 0; }
+.author-card .name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink-1);
+  margin-bottom: 2px;
+  display: flex; align-items: center; gap: 6px;
+}
+.author-card .name .v {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 700;
+}
+.author-card .t {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  line-height: 1.45;
+}
+
+.author-stats {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 4px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--ink-line);
+}
+.author-stats .s .n {
+  font-family: var(--font-num);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink-1);
+  font-variant-numeric: tabular-nums;
+}
+.author-stats .s .l {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  margin-top: 1px;
+}
+
+/* checks */
+.checks .row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12.5px;
+  padding: 6px 0;
+  color: var(--ink-1);
+}
+.checks .row .ic {
+  width: 16px; height: 16px; border-radius: 3px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.checks .row.ok .ic { background: var(--accent-wash); color: var(--accent-ink); }
+.checks .row.warn .ic { background: var(--amber-wash); color: oklch(0.45 0.1 70); }
+.checks .row.bad .ic { background: var(--live-wash); color: var(--live); }
+.checks .row .l { flex: 1; }
+.checks .row .v { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-3); letter-spacing: 0.06em; }
+
+/* Similar */
+.similar .row {
+  display: flex; gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--ink-line-2);
+  font-size: 12px;
+}
+.similar .row:first-of-type { border-top: none; padding-top: 4px; }
+.similar .row .th {
+  width: 36px; height: 36px; border-radius: 4px;
+  background: var(--surface-2);
+  flex-shrink: 0;
+  background: linear-gradient(135deg, oklch(0.85 0.04 40), oklch(0.72 0.06 30));
+}
+.similar .row .th.g { background: linear-gradient(135deg, oklch(0.84 0.04 130), oklch(0.7 0.06 150)); }
+.similar .row .c .t {
+  color: var(--ink-1); font-weight: 500;
+  line-height: 1.35;
+  margin-bottom: 2px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.similar .row .c .m {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.06em;
+}
+.similar .row .c .m b { color: var(--ink-2); font-weight: 600; }
+
+/* keyboard hint footer */
+.kbd-hint {
+  padding: 10px 20px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.06em;
+  display: flex; gap: 10px; flex-wrap: wrap;
+}
+.kbd-hint .k {
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.kbd-hint .k kbd {
+  background: var(--surface-2);
+  border: 1px solid var(--ink-line);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-1);
+}
+</style>
+</head>
+<body>
+
+<div class="workstation" data-screen-label="Admin · 群主工作台">
+
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <div class="brand">
+      <div class="logo">合</div>
+      <div class="txt">HAPPYHOME<span>· ADMIN</span></div>
+    </div>
+    <div class="crumbs">
+      <span>锦绣小区 · 2号楼</span>
+      <span class="sep">/</span>
+      <b>待处理队列</b>
+    </div>
+    <div class="spacer"></div>
+    <div class="search">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <span>搜帖子、成员、关键词</span>
+      <span class="kbd">⌘K</span>
+    </div>
+    <div class="live"><span class="d"></span>本周 · 第 38 周</div>
+    <div class="avatar">陈</div>
+  </div>
+
+  <!-- LEFT NAV -->
+  <div class="nav">
+    <div class="sect-t">日常</div>
+    <div class="item on urgent">
+      <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+      <span>待处理</span>
+      <span class="count">12</span>
+    </div>
+    <div class="item">
+      <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      <span>精选候选</span>
+      <span class="count">7</span>
+    </div>
+    <div class="item">
+      <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 13V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v7"/><path d="M2 13h20"/><path d="M6 21h12"/></svg>
+      <span>新人申请</span>
+      <span class="count">3</span>
+    </div>
+    <div class="item">
+      <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01M15 9h.01"/></svg>
+      <span>已处理</span>
+      <span class="count">286</span>
+    </div>
+
+    <div class="sect-t">板块</div>
+    <div class="board-row"><span class="sw"></span>周边好店<span class="m">86</span></div>
+    <div class="board-row"><span class="sw amber"></span>失物招领<span class="m">12</span></div>
+    <div class="board-row"><span class="sw blue"></span>社区议事<span class="m">44</span></div>
+    <div class="board-row"><span class="sw mute"></span>闲置流转<span class="m">31</span></div>
+    <div class="board-row"><span class="sw mute"></span>手艺互助<span class="m">19</span></div>
+
+    <div class="sect-t">管理</div>
+    <div class="item">
+      <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <span>成员</span>
+      <span class="count">2,184</span>
+    </div>
+    <div class="item">
+      <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v18H3z"/><path d="M3 9h18M9 21V9"/></svg>
+      <span>板块 · 栏目</span>
+    </div>
+    <div class="item">
+      <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+      <span>健康度</span>
+    </div>
+    <div class="item">
+      <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0A1.65 1.65 0 0 0 9 3.09V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 14 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span>社区公约</span>
+    </div>
+
+    <div class="kbd-hint">
+      <span class="k"><kbd>J</kbd>/<kbd>K</kbd> 翻条</span>
+      <span class="k"><kbd>E</kbd> 通过</span>
+      <span class="k"><kbd>X</kbd> 驳回</span>
+      <span class="k"><kbd>⌘K</kbd> 搜索</span>
+    </div>
+  </div>
+
+  <!-- QUEUE -->
+  <div class="queue">
+    <div class="q-head">
+      <div class="t">待处理<span class="n">12 条 · 平均等候 38 分钟</span></div>
+      <div class="filters">
+        <button class="f on">全部</button>
+        <button class="f">新帖</button>
+        <button class="f">举报</button>
+        <button class="f">关键词</button>
+        <button class="f">新人</button>
+      </div>
+    </div>
+
+    <div class="q-list">
+      <div class="q-item sel">
+        <div class="row1">
+          <span class="tag new">新帖</span>
+          <span>周边好店</span>
+          <span class="tm">12 分前</span>
+        </div>
+        <div class="ttl">东门新开的云南米线 · 带娃去试了三次</div>
+        <div class="meta">
+          <b>陈薇</b>
+          <span class="dot">·</span>
+          <span>正文 412 字 · 3 图</span>
+          <span class="dot">·</span>
+          <span>2 标签</span>
+        </div>
+      </div>
+
+      <div class="q-item">
+        <div class="row1">
+          <span class="tag report">举报 ×3</span>
+          <span>社区议事</span>
+          <span class="tm">1 小时前</span>
+        </div>
+        <div class="ttl">3 号楼电梯又坏了，物业这次打算怎么修？</div>
+        <div class="meta">
+          <b>匿名邻居</b>
+          <span class="dot">·</span>
+          <span>47 回复</span>
+          <span class="dot">·</span>
+          <span style="color: var(--live)">含疑似谩骂</span>
+        </div>
+      </div>
+
+      <div class="q-item">
+        <div class="row1">
+          <span class="tag kw">关键词 · 广告</span>
+          <span>周边好店</span>
+          <span class="tm">1 小时前</span>
+        </div>
+        <div class="ttl">【限时】小区门口新开的茶饮店，第二杯半价 · 扫码进群</div>
+        <div class="meta">
+          <b>王师傅</b>
+          <span class="dot">·</span>
+          <span>含二维码</span>
+        </div>
+      </div>
+
+      <div class="q-item">
+        <div class="row1">
+          <span class="tag join">新人申请</span>
+          <span>锦绣 2 号楼</span>
+          <span class="tm">2 小时前</span>
+        </div>
+        <div class="ttl">申请加入 · 1502 住户 · 自称房东</div>
+        <div class="meta">
+          <b>刘女士</b>
+          <span class="dot">·</span>
+          <span>未上传门禁凭证</span>
+        </div>
+      </div>
+
+      <div class="q-item">
+        <div class="row1">
+          <span class="tag new">新帖</span>
+          <span>闲置流转</span>
+          <span class="tm">3 小时前</span>
+        </div>
+        <div class="ttl">宝宝餐椅九成新 · 搬家带不走想送人</div>
+        <div class="meta">
+          <b>林姐</b>
+          <span class="dot">·</span>
+          <span>正文 88 字 · 2 图</span>
+        </div>
+      </div>
+
+      <div class="q-item reviewed">
+        <div class="row1">
+          <span class="tag new">新帖</span>
+          <span>手艺互助</span>
+          <span class="tm">3 小时前</span>
+        </div>
+        <div class="ttl">会换空调滤网的邻居，请问该怎么拆卡扣？</div>
+        <div class="meta">
+          <b>老周</b>
+          <span class="dot">·</span>
+          <span>正文 156 字</span>
+        </div>
+      </div>
+
+      <div class="q-item reviewed">
+        <div class="row1">
+          <span class="tag report">举报 ×1</span>
+          <span>周边好店</span>
+          <span class="tm">5 小时前</span>
+        </div>
+        <div class="ttl">西门那家超市的酸奶过期了两周还在卖……</div>
+        <div class="meta">
+          <b>张阿姨</b>
+          <span class="dot">·</span>
+          <span>1 图 · 疑似维权</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+    <div class="main-head">
+      <div class="crumbs">
+        <b>周边好店</b>
+        <span> / 新帖待审 / </span>
+        <span style="color: var(--ink-2)">#1847</span>
+      </div>
+      <h1>东门新开的云南米线 · 带娃去试了三次</h1>
+      <div class="by">
+        <div class="av">陈</div>
+        <b>陈薇</b>
+        <span class="badge">住户 · 5-1203</span>
+        <span class="dot">·</span>
+        <span>发布于 12 分钟前</span>
+        <span class="dot">·</span>
+        <span>来自 iOS</span>
+      </div>
+    </div>
+
+    <div class="action-bar">
+      <button class="primary">
+        通过并发布
+        <span class="k">E</span>
+      </button>
+      <button class="sec">打精选 <span class="k">S</span></button>
+      <button class="sec">置顶 7 天</button>
+      <button class="sec">改板块</button>
+      <button class="sec">给作者留言</button>
+      <div class="spc"></div>
+      <button class="sec danger">驳回 <span class="k">X</span></button>
+      <button class="ghost">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        暂缓 24 小时
+      </button>
+    </div>
+
+    <div class="post-preview">
+      <p class="lede">上周三路过东门新开了一家小店，招牌写着「老云南过桥米线」，门脸不大，但进门那股酸笋和肉汤混合的香气，一下子把我拉回大学时期昆明的巷子里。</p>
+
+      <p>我带着娃三天去了三次。先说结论：<b>值得专门来一次</b>，但避开饭点。</p>
+
+      <div class="imgs">
+        <div class="ph"></div>
+        <div class="ph"></div>
+        <div class="ph"></div>
+      </div>
+
+      <p>他家汤底是真熬的，骨头味浓但不腻。小碗 18 块，大碗 22 块，加料随意。老板夫妻俩都是云南人，男的说他家配方是外婆传的，不信你问他，他能给你讲一个小时。</p>
+
+      <p>娃最爱他家的小锅米线，不辣，老板会额外切两片火腿丢进去。第二次去的时候老板已经认出我们了，直接从锅底捞了一大勺腰花给孩子——<b>这种事在连锁店你遇不到</b>。</p>
+
+      <p>几个小提醒：店里只有 8 张桌，周末 11:30 之后要等位；只收现金和微信，不支持大众点评核销；洗手间在隔壁烘焙店借用。</p>
+
+      <div class="tags">
+        <span class="t">米线</span>
+        <span class="t">带娃友好</span>
+        <span class="t">东门商圈</span>
+        <span class="t">云南菜</span>
+        <span class="t">实测</span>
+      </div>
+    </div>
+
+    <div class="admin-notes">
+      <div class="h">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2L2 22h20L12 2z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        系统提示 · 1 条待决定
+      </div>
+      <ul>
+        <li>正文末段提到"微信"，可能被新规系统判为"引流"—— 建议通过但注意下周该词将默认标黄</li>
+        <li>作者本月已发 4 篇「周边好店」，占板块新贴 18%，可考虑纳入"本月邻居笔友"候选</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- RIGHT SIDE -->
+  <div class="side">
+    <div class="sec">
+      <div class="h">作者</div>
+      <div class="author-card">
+        <div class="av">陈</div>
+        <div class="info">
+          <div class="name">陈薇 <span class="v">V · 认证住户</span></div>
+          <div class="t">5-1203 · 入住 3 年 · 孩子 4 岁 · 常在「周边好店」「亲子」出现</div>
+        </div>
+      </div>
+      <div class="author-stats">
+        <div class="s"><div class="n">42</div><div class="l">发帖</div></div>
+        <div class="s"><div class="n">7</div><div class="l">精选</div></div>
+        <div class="s"><div class="n">0</div><div class="l">违规</div></div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="h">自动核查</div>
+      <div class="checks">
+        <div class="row ok">
+          <div class="ic">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+          <span class="l">敏感词</span>
+          <span class="v">0 命中</span>
+        </div>
+        <div class="row ok">
+          <div class="ic">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+          <span class="l">图片内容</span>
+          <span class="v">3 张 · 食品</span>
+        </div>
+        <div class="row warn">
+          <div class="ic">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          </div>
+          <span class="l">可能的引流词</span>
+          <span class="v">"微信" ×1</span>
+        </div>
+        <div class="row ok">
+          <div class="ic">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+          <span class="l">疑似广告</span>
+          <span class="v">否</span>
+        </div>
+        <div class="row ok">
+          <div class="ic">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+          <span class="l">与近期重复</span>
+          <span class="v">相似度 11%</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="h">近似历史帖</div>
+      <div class="similar">
+        <div class="row">
+          <div class="th"></div>
+          <div class="c">
+            <div class="t">北门那家兰州拉面搬走了，替代店推荐？</div>
+            <div class="m"><b>周边好店</b> · 2 个月前 · <b>精选</b></div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="th g"></div>
+          <div class="c">
+            <div class="t">小区西门酸菜鱼试吃 · 陪娃的一次失败选择</div>
+            <div class="m"><b>周边好店</b> · 3 周前 · <b>陈薇</b></div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="th"></div>
+          <div class="c">
+            <div class="t">东门商业街年底开业清单汇总（邻居整理版）</div>
+            <div class="m"><b>周边好店</b> · 置顶中 · <b>管理员</b></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="h">板块健康 · 周边好店</div>
+      <div class="author-stats" style="border: none; padding: 0; margin-top: 0;">
+        <div class="s"><div class="n">86</div><div class="l">本月贴</div></div>
+        <div class="s"><div class="n">63%</div><div class="l">7日沉淀</div></div>
+        <div class="s"><div class="n">4.2</div><div class="l">均互动</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

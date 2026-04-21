@@ -40,4 +40,4 @@ await expectReject(
   'non-admin cannot approve members',
 )
 
-finish()
+await finish()

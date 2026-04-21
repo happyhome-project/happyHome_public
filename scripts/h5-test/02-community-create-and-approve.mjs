@@ -1,6 +1,6 @@
 // Scenario 2: community creation + admin approval lifecycle.
 
-import { callAs, callAdmin, createAsserter, makeRunId } from './_shared.mjs'
+import { callAs, callAdmin, createAsserter, makeRunId, trackCommunity } from './_shared.mjs'
 
 const { assert, finish } = createAsserter('community-create')
 const runId = makeRunId()
@@ -18,6 +18,7 @@ const { communityId } = await callAs(owner, 'community', 'create', {
   joinType: 'approval',
 })
 assert(!!communityId, `community created: ${communityId}`)
+trackCommunity(communityId)
 
 // Fresh community is pending — not visible in default public list
 const publicList = await callAs(owner, 'community', 'list', {})
@@ -40,4 +41,4 @@ assert(
   'approved community is in public list',
 )
 
-finish()
+await finish()

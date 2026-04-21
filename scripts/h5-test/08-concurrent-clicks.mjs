@@ -75,4 +75,4 @@ assert(delSuccess.length >= 1, 'at least one delete succeeds')
 // Note: soft-delete is idempotent in that subsequent calls don't corrupt state, but may throw "帖子已删除"
 console.log(`  delete: ${delSuccess.length} success, ${delFail.length} fail (idempotent soft-delete)`)
 
-finish()
+await finish()
