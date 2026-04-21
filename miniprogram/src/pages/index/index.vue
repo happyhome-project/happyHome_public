@@ -1,15 +1,25 @@
 <template>
   <view class="phone-inner">
-    <!-- Masthead：社群封面卡 -->
-    <view class="s1-top">
+    <!-- Masthead：社群封面卡（整块可点切换社区） -->
+    <view
+      class="s1-top"
+      :class="{ 'is-tappable': hasMultipleCommunities }"
+      @tap="onMastheadTap"
+    >
       <view class="top-body">
         <text class="eyebrow">{{ kindEn }}</text>
         <view class="title-wrap">
           <text class="title">{{ communityName }}</text>
+          <text v-if="hasMultipleCommunities" class="title-chev">⌄</text>
         </view>
-        <text v-if="communityMeta" class="sub">{{ communityMeta }}</text>
+        <view v-if="communityMeta || hasMultipleCommunities" class="sub-row">
+          <text v-if="communityMeta" class="sub">{{ communityMeta }}</text>
+          <text v-if="hasMultipleCommunities" class="sub-switch">
+            <text v-if="communityMeta" class="sub-dot">·</text>切换社区 ›
+          </text>
+        </view>
       </view>
-      <view class="avatar" @tap="showSwitcher = true">
+      <view class="avatar">
         <text>{{ avatarLetter }}</text>
       </view>
     </view>
@@ -175,6 +185,14 @@ const avatarLetter = computed(() => {
   const name = communityStore.currentCommunity?.name ?? ''
   return name.charAt(0) || '?'
 })
+const hasMultipleCommunities = computed(() => (communityStore.myCommunities?.length ?? 0) > 1)
+
+function onMastheadTap() {
+  // 仅当用户有多个社区时才打开切换器；否则 tap 不做任何事（避免空切换器困扰）
+  if (hasMultipleCommunities.value) {
+    showSwitcher.value = true
+  }
+}
 
 // 场景类型（暂时固定为邻里，将来由 community.type 决定）
 const kind = computed(() => '邻里')
@@ -381,6 +399,13 @@ onMounted(async () => {
   align-items: flex-start;
   justify-content: space-between;
 }
+.s1-top.is-tappable {
+  /* 多社区时整块可点切换，用极弱的 hover/active 指示可交互 */
+  cursor: pointer;
+}
+.s1-top.is-tappable:active {
+  background: $hh-surface-1;
+}
 .top-body {
   flex: 1;
   min-width: 0;
@@ -394,7 +419,11 @@ onMounted(async () => {
   display: block;
   margin-bottom: 12rpx;
 }
-.title-wrap { display: block; }
+.title-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 14rpx;
+}
 .title {
   font-family: $hh-font-serif;
   font-size: 56rpx;
@@ -402,15 +431,42 @@ onMounted(async () => {
   letter-spacing: $hh-tracking-serif;
   color: $hh-ink-1;
   line-height: 1.05;
-  display: block;
+}
+.title-chev {
+  font-size: 36rpx;
+  color: $hh-ink-3;
+  line-height: 1;
+  font-weight: $hh-font-weight-regular;
+  margin-left: 4rpx;
+  /* 把 chevron 稍稍下沉，与 baseline 对齐更协调 */
+  transform: translateY(-6rpx);
+}
+.sub-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0;
+  margin-top: 16rpx;
 }
 .sub {
-  display: block;
   font-family: $hh-font-sans;
   font-size: 24rpx;
   font-weight: $hh-font-weight-regular;
   color: $hh-ink-3;
-  margin-top: 16rpx;
+}
+.sub-switch {
+  font-family: $hh-font-mono;
+  font-size: 22rpx;
+  font-weight: $hh-font-weight-heavy;
+  letter-spacing: $hh-tracking-mono-sm;
+  color: $hh-accent;
+  text-transform: none;
+}
+.sub-dot {
+  margin: 0 12rpx;
+  color: $hh-ink-3;
+  font-family: $hh-font-sans;
+  font-weight: $hh-font-weight-regular;
 }
 .avatar {
   width: 72rpx;
