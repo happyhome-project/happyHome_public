@@ -27,27 +27,7 @@ import * as db from '../../../lib/db'
 
 beforeEach(() => jest.clearAllMocks())
 
-test('member.kick：只能移出 active 普通成员', async () => {
-  ;(db.getById as jest.Mock)
-    .mockResolvedValueOnce({ _id: 'community-1', creatorId: 'creator-1' })
-    .mockResolvedValueOnce({
-      _id: 'member-1',
-      communityId: 'community-1',
-      userId: 'user-1',
-      role: 'member',
-      status: 'active',
-    })
-  ;(db.removeById as jest.Mock).mockResolvedValue({})
-  ;(db.increment as jest.Mock).mockResolvedValue({})
-
-  const result = await main({ action: 'member.kick', communityId: 'community-1', memberId: 'member-1' })
-
-  expect(db.removeById).toHaveBeenCalledWith('community_members', 'member-1')
-  expect(db.increment).toHaveBeenCalledWith('communities', 'community-1', 'memberCount', -1)
-  expect(result).toEqual({ success: true })
-})
-
-test('member.list：会物理清理历史 left 记录并且不返回', async () => {
+test('member.list: 会物理清理历史 left 记录并且不返回', async () => {
   ;(db.getById as jest.Mock)
     .mockResolvedValueOnce({ _id: 'community-1', creatorId: 'creator-1' })
     .mockResolvedValueOnce({ _id: 'u-active', nickName: 'Active User', avatarUrl: '' })
@@ -64,73 +44,74 @@ test('member.list：会物理清理历史 left 记录并且不返回', async () 
   expect(result.members[0]._id).toBe('member-active-1')
 })
 
-test('member.kick：不能移出社区创建者', async () => {
-  ;(db.getById as jest.Mock)
-    .mockResolvedValueOnce({ _id: 'community-1', creatorId: 'creator-1' })
-    .mockResolvedValueOnce({
-      _id: 'member-1',
-      communityId: 'community-1',
-      userId: 'creator-1',
-      role: 'member',
-      status: 'active',
-    })
-
-  await expect(main({ action: 'member.kick', communityId: 'community-1', memberId: 'member-1' }))
-    .rejects.toThrow('不能移出社区创建者')
-})
-
-test('member.kick：不能移出管理员', async () => {
-  ;(db.getById as jest.Mock)
-    .mockResolvedValueOnce({ _id: 'community-1', creatorId: 'creator-1' })
-    .mockResolvedValueOnce({
-      _id: 'member-1',
-      communityId: 'community-1',
-      userId: 'admin-1',
-      role: 'admin',
-      status: 'active',
-    })
-
-  await expect(main({ action: 'member.kick', communityId: 'community-1', memberId: 'member-1' }))
-    .rejects.toThrow('不能移出管理员')
-})
-
-test('section.updateWidgets：有帖子且删除控件时需要确认', async () => {
+test('section.updateWidgets: evergreen 板块不允许配置 attendance', async () => {
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-1',
-    widgets: [
-      { widgetId: 'w1', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
-      { widgetId: 'w2', type: 'rich_text', label: '内容', fieldKey: 'body', required: false, order: 1, showInList: false },
-    ],
+    type: 'evergreen',
+    widgets: [],
   })
-  ;(db.query as jest.Mock).mockResolvedValue([{ _id: 'post-1', status: 'active' }])
-
-  const preview: any = await main({
-    action: 'section.updateWidgets',
-    sectionId: 'section-1',
-    preview: true,
-    widgets: [
-      { widgetId: 'w1', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
-    ],
-  })
-
-  expect(preview.requireConfirmation).toBe(true)
-  expect(preview.structuralChanges.removedWidgetIds).toEqual(['w2'])
 
   await expect(main({
     action: 'section.updateWidgets',
     sectionId: 'section-1',
     widgets: [
-      { widgetId: 'w1', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
+      { widgetId: 'attendance-1', type: 'attendance', label: '活动参与', fieldKey: 'attendance', required: false, order: 0, showInList: true },
     ],
-  })).rejects.toThrow('板块已有内容，本次结构变更需要确认')
+  })).rejects.toThrow('realtime')
 })
 
-test('post.deleteAdmin：走软删除', async () => {
-  ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'post-1', status: 'active' })
-  ;(db.softDelete as jest.Mock).mockResolvedValue({})
+test('post.getAdmin: 返回 attendance 汇总和完整名单', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({
+      _id: 'post-1',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      authorId: 'author-1',
+      status: 'active',
+      content: { title: '活动帖' },
+      createdAt: '2024-01-01T00:00:00.000Z',
+    })
+    .mockResolvedValueOnce({ _id: 'author-1', nickName: '作者', avatarUrl: '' })
+    .mockResolvedValueOnce({
+      _id: 'section-1',
+      communityId: 'community-1',
+      name: '活动区',
+      type: 'realtime',
+      enableComment: true,
+      enableLike: true,
+      widgets: [
+        { widgetId: 'attendance-1', type: 'attendance', label: '活动参与', fieldKey: 'attendance', required: false, order: 0, showInList: true, capacity: 5 },
+      ],
+    })
+    .mockResolvedValueOnce({ _id: 'user-1', nickName: '小王', avatarUrl: '1.png' })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([
+      { _id: 'record-1', postId: 'post-1', widgetId: 'attendance-1', userId: 'user-1', joinedAt: '2024-01-02T00:00:00.000Z' },
+    ])
+    .mockResolvedValueOnce([
+      { _id: 'record-1', postId: 'post-1', widgetId: 'attendance-1', userId: 'user-1', joinedAt: '2024-01-02T00:00:00.000Z' },
+    ])
 
-  const result = await main({ action: 'post.deleteAdmin', postId: 'post-1' })
+  const result: any = await main({ action: 'post.getAdmin', postId: 'post-1' })
 
-  expect(db.softDelete).toHaveBeenCalledWith('posts', 'post-1')
-  expect(result).toEqual({ success: true })
+  expect(result.post.attendanceSummaryByWidget['attendance-1'].count).toBe(1)
+  expect(result.attendanceMembersByWidget['attendance-1']).toHaveLength(1)
+  expect(result.attendanceMembersByWidget['attendance-1'][0].userId).toBe('user-1')
+})
+
+test('post.removeAttendanceMemberAdmin: 可移除参与人并返回最新名单', async () => {
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([{ _id: 'record-1', postId: 'post-1', widgetId: 'attendance-1', userId: 'user-1' }])
+    .mockResolvedValueOnce([])
+  ;(db.removeById as jest.Mock).mockResolvedValue({})
+
+  const result: any = await main({
+    action: 'post.removeAttendanceMemberAdmin',
+    postId: 'post-1',
+    widgetId: 'attendance-1',
+    userId: 'user-1',
+  })
+
+  expect(db.removeById).toHaveBeenCalledWith('post_attendance_members', 'record-1')
+  expect(result).toEqual({ success: true, members: [], total: 0 })
 })

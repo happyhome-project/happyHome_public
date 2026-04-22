@@ -123,9 +123,57 @@ const INDEXES = [
       { Name: 'communityId', Direction: '1' },
     ],
   },
+  // post_attendance_members: 帖子参与名单按 postId + widgetId + joinedAt 读取
+  {
+    coll: 'post_attendance_members',
+    name: 'idx_post_widget_joinedAt',
+    keys: [
+      { Name: 'postId', Direction: '1' },
+      { Name: 'widgetId', Direction: '1' },
+      { Name: 'joinedAt', Direction: '-1' },
+    ],
+  },
+  // post_attendance_members: 参与去重 / 删除参与人按 postId + widgetId + userId 查询
+  {
+    coll: 'post_attendance_members',
+    name: 'idx_post_widget_user',
+    keys: [
+      { Name: 'postId', Direction: '1' },
+      { Name: 'widgetId', Direction: '1' },
+      { Name: 'userId', Direction: '1' },
+    ],
+  },
+  // post_attendance_members: community.hardDelete 级联删除时按 communityId 扫描
+  {
+    coll: 'post_attendance_members',
+    name: 'idx_communityId',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+    ],
+  },
+]
+
+const REQUIRED_COLLECTIONS = [
+  'post_attendance_members',
 ]
 
 let hadError = false
+
+for (const coll of REQUIRED_COLLECTIONS) {
+  try {
+    const existRes = await db.checkCollectionExists(coll)
+    if (existRes?.Exists) {
+      console.log(`= collection ${coll} (already exists)`)
+      continue
+    }
+    await db.createCollection(coll)
+    console.log(`✓ collection ${coll} created`)
+  } catch (e) {
+    const msg = String(e?.message || e)
+    console.error(`✗ collection ${coll}`, msg)
+    hadError = true
+  }
+}
 
 for (const idx of INDEXES) {
   try {

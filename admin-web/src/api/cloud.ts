@@ -87,4 +87,6 @@ export const postAdminApi = {
   }) => callAdmin('post.listAdmin', params),
   get: (postId: string) => callAdmin('post.getAdmin', { postId }),
   delete: (postId: string) => callAdmin('post.deleteAdmin', { postId }),
+  removeAttendanceMember: (params: { postId: string; widgetId: string; userId: string }) =>
+    callAdmin('post.removeAttendanceMemberAdmin', params),
 }

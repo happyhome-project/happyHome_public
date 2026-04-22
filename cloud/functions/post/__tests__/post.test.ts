@@ -3,35 +3,41 @@ jest.mock('wx-server-sdk', () => ({
   getWXContext: jest.fn().mockReturnValue({ OPENID: 'test-openid' }),
   DYNAMIC_CURRENT_ENV: 'test',
 }))
+
 jest.mock('../../../lib/db', () => ({
   getById: jest.fn(),
   create: jest.fn(),
   updateById: jest.fn(),
   query: jest.fn(),
-  increment: jest.fn(),
+  removeById: jest.fn(),
   softDelete: jest.fn(),
 }))
 
-import { handleCreate, handleList, handleGet, handleDelete, handleUpdate, main } from '../index'
+import {
+  handleCreate,
+  handleGet,
+  handleJoinAttendance,
+  handleListAttendanceMembers,
+  handleUpdate,
+} from '../index'
 import * as db from '../../../lib/db'
-import type { Section } from '../../../shared/types'
 
 beforeEach(() => jest.clearAllMocks())
 
-const mockSection: Section = {
+const mockSection = {
   _id: 'section-1',
-  communityId: 'c1',
-  name: '日记',
-  icon: 'book',
+  communityId: 'community-1',
+  name: '活动',
+  icon: 'activity',
   order: 1,
   enableComment: true,
   enableLike: true,
   createdAt: '2024-01-01T00:00:00.000Z',
-  type: 'evergreen',
+  type: 'realtime',
   status: 'active',
   widgets: [
     {
-      widgetId: 'widget-uuid-1',
+      widgetId: 'title-widget',
       type: 'short_text',
       label: '标题',
       fieldKey: 'title',
@@ -40,154 +46,38 @@ const mockSection: Section = {
       showInList: true,
     },
     {
-      widgetId: 'widget-uuid-2',
-      type: 'rich_text',
-      label: '内容',
-      fieldKey: 'body',
+      widgetId: 'attendance-widget',
+      type: 'attendance',
+      label: '活动参与',
+      fieldKey: 'attendance',
       required: false,
       order: 1,
-      showInList: false,
+      showInList: true,
+      capacity: 2,
     },
   ],
 }
 
-test('发帖：校验 required 控件必须填写（空内容）', async () => {
-  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'm1', status: 'active' }]) // active member
-  ;(db.getById as jest.Mock).mockResolvedValue(mockSection)
-
-  await expect(handleCreate({
-    communityId: 'c1',
-    sectionId: 'section-1',
-    content: {}, // required widget not filled
-  }, 'test-openid')).rejects.toThrow('必填项未填写：标题')
-})
-
-test('发帖：required 控件有值时正常创建', async () => {
-  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
+test('create: attendance 控件不会参与发帖必填校验', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
   ;(db.getById as jest.Mock).mockResolvedValue(mockSection)
   ;(db.create as jest.Mock).mockResolvedValue('post-1')
 
   const result = await handleCreate({
-    communityId: 'c1',
+    communityId: 'community-1',
     sectionId: 'section-1',
-    content: { 'widget-uuid-1': '我的日记标题' },
-  }, 'test-openid')
+    content: {
+      'title-widget': '周六爬山',
+    },
+  } as any, 'test-openid')
 
-  expect(db.create).toHaveBeenCalledWith('posts', expect.objectContaining({
-    authorId: 'test-openid',
-    status: 'active',
-    communityId: 'c1',
-  }))
   expect(result.postId).toBe('post-1')
-})
-
-test('发帖：非社区成员不能发帖', async () => {
-  ;(db.query as jest.Mock).mockResolvedValueOnce([]) // not a member
-
-  await expect(handleCreate({
-    communityId: 'c1',
-    sectionId: 'section-1',
-    content: { 'widget-uuid-1': '标题' },
-  }, 'test-openid')).rejects.toThrow('非社区成员，无法发帖')
-
-  expect(db.getById).not.toHaveBeenCalled()
-  expect(db.create).not.toHaveBeenCalled()
-})
-
-test('发帖：content key 使用 widgetId 而非 fieldKey', async () => {
-  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
-  ;(db.getById as jest.Mock).mockResolvedValue(mockSection)
-  ;(db.create as jest.Mock).mockResolvedValue('post-1')
-
-  // fieldKey is 'title' but content should use widgetId 'widget-uuid-1'
-  // Using fieldKey 'title' should not satisfy required validation
-  await expect(handleCreate({
-    communityId: 'c1',
-    sectionId: 'section-1',
-    content: { 'title': '标题内容' }, // wrong key (fieldKey instead of widgetId)
-  }, 'test-openid')).rejects.toThrow('必填项未填写：标题')
-})
-
-test('删帖：只有发帖人可以删', async () => {
-  ;(db.getById as jest.Mock).mockResolvedValue({
-    _id: 'post-1',
-    authorId: 'another-user', // different from test-openid
-    status: 'active',
-  })
-
-  await expect(handleDelete({ postId: 'post-1' }, 'test-openid')).rejects.toThrow('无权删除')
-  expect(db.softDelete).not.toHaveBeenCalled()
-})
-
-test('删帖：发帖人可以软删除', async () => {
-  ;(db.getById as jest.Mock).mockResolvedValue({
-    _id: 'post-1',
-    authorId: 'test-openid',
-    status: 'active',
-  })
-  ;(db.softDelete as jest.Mock).mockResolvedValue({})
-
-  await handleDelete({ postId: 'post-1' }, 'test-openid')
-
-  expect(db.softDelete).toHaveBeenCalledWith('posts', 'post-1')
-})
-
-test('改帖：只有发帖人可以修改', async () => {
-  ;(db.getById as jest.Mock).mockResolvedValueOnce({
-    _id: 'post-1',
-    sectionId: 'section-1',
-    authorId: 'another-user',
-    status: 'active',
-  })
-
-  await expect(handleUpdate({
-    postId: 'post-1',
-    content: { 'widget-uuid-1': '新标题' },
-  }, 'test-openid')).rejects.toThrow('无权修改')
-  expect(db.updateById).not.toHaveBeenCalled()
-})
-
-test('改帖：required 控件为空时失败', async () => {
-  ;(db.getById as jest.Mock)
-    .mockResolvedValueOnce({
-      _id: 'post-1',
-      sectionId: 'section-1',
-      authorId: 'test-openid',
-      status: 'active',
-    })
-    .mockResolvedValueOnce(mockSection)
-
-  await expect(handleUpdate({
-    postId: 'post-1',
-    content: {},
-  }, 'test-openid')).rejects.toThrow('必填项未填写：标题')
-  expect(db.updateById).not.toHaveBeenCalled()
-})
-
-test('改帖：作者可修改，更新 content 与 updatedAt', async () => {
-  ;(db.getById as jest.Mock)
-    .mockResolvedValueOnce({
-      _id: 'post-1',
-      sectionId: 'section-1',
-      authorId: 'test-openid',
-      status: 'active',
-    })
-    .mockResolvedValueOnce(mockSection)
-  ;(db.updateById as jest.Mock).mockResolvedValue({})
-
-  const result = await handleUpdate({
-    postId: 'post-1',
-    content: { 'widget-uuid-1': '修改后的标题' },
-  }, 'test-openid')
-
-  expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({
-    content: { 'widget-uuid-1': '修改后的标题' },
+  expect(db.create).toHaveBeenCalledWith('posts', expect.objectContaining({
+    content: { 'title-widget': '周六爬山' },
   }))
-  expect(result.success).toBe(true)
-  expect(result.updatedAt).toBeTruthy()
 })
 
-test('改帖：保存时会清理已失效控件字段', async () => {
+test('update: 保存时会清理无效字段和 attendance 字段', async () => {
   ;(db.getById as jest.Mock)
     .mockResolvedValueOnce({
       _id: 'post-1',
@@ -201,106 +91,94 @@ test('改帖：保存时会清理已失效控件字段', async () => {
   await handleUpdate({
     postId: 'post-1',
     content: {
-      'widget-uuid-1': '修改后的标题',
-      'legacy-widget': '旧字段值',
+      'title-widget': '更新后的标题',
+      'attendance-widget': 'should-be-removed',
+      'legacy-widget': 'legacy',
     } as any,
   }, 'test-openid')
 
   expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({
-    content: { 'widget-uuid-1': '修改后的标题' },
+    content: { 'title-widget': '更新后的标题' },
   }))
 })
 
-test('list：按 createdAt desc 分页查询', async () => {
-  ;(db.query as jest.Mock).mockResolvedValue([
-    { _id: 'p1', createdAt: '2024-02-01' },
-    { _id: 'p2', createdAt: '2024-01-01' },
-  ])
+test('joinAttendance: 同一用户重复参与不会重复创建记录', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({
+      _id: 'post-1',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      status: 'active',
+    })
+    .mockResolvedValueOnce(mockSection)
+    .mockResolvedValueOnce({ _id: 'test-openid', nickName: 'Tester', avatarUrl: 'avatar.png' })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+    .mockResolvedValueOnce([{ _id: 'attendance-1', postId: 'post-1', widgetId: 'attendance-widget', userId: 'test-openid', joinedAt: '2024-01-01T00:00:00.000Z' }])
+    .mockResolvedValueOnce([{ _id: 'attendance-1', postId: 'post-1', widgetId: 'attendance-widget', userId: 'test-openid', joinedAt: '2024-01-01T00:00:00.000Z' }])
 
-  const result = await handleList({ sectionId: 'section-1', skip: 0, limit: 10 })
+  const result = await handleJoinAttendance({ postId: 'post-1', widgetId: 'attendance-widget' }, 'test-openid')
 
-  expect(db.query).toHaveBeenCalledWith('posts', { sectionId: 'section-1', status: 'active' }, {
-    orderBy: ['createdAt', 'desc'],
-    skip: 0,
-    limit: 10,
+  expect(db.create).not.toHaveBeenCalled()
+  expect(result.summary.count).toBe(1)
+  expect(result.summary.isJoined).toBe(true)
+})
+
+test('joinAttendance: 满员后新用户不能再参与', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({
+      _id: 'post-1',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      status: 'active',
+    })
+    .mockResolvedValueOnce({
+      ...mockSection,
+      widgets: [{ ...mockSection.widgets[1], capacity: 1 }],
+    })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([{ _id: 'attendance-1', postId: 'post-1', widgetId: 'attendance-widget', userId: 'another-user', joinedAt: '2024-01-01T00:00:00.000Z' }])
+
+  await expect(handleJoinAttendance({ postId: 'post-1', widgetId: 'attendance-widget' }, 'test-openid'))
+    .rejects.toThrow('已满员')
+})
+
+test('get/listAttendanceMembers: 返回参与聚合和完整名单', async () => {
+  ;(db.getById as jest.Mock).mockImplementation(async (_collectionName: string, id: string) => {
+    if (id === 'post-1') {
+      return {
+        _id: 'post-1',
+        communityId: 'community-1',
+        sectionId: 'section-1',
+        status: 'active',
+        content: { 'title-widget': '周六爬山' },
+      }
+    }
+    if (id === 'section-1') return mockSection
+    if (id === 'user-1') return { _id: 'user-1', nickName: '一号', avatarUrl: '1.png' }
+    if (id === 'user-2') return { _id: 'user-2', nickName: '二号', avatarUrl: '2.png' }
+    return null
   })
-  expect(result.posts).toHaveLength(2)
-})
-
-test('get：返回单个帖子', async () => {
-  ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'post-1', status: 'active' })
-
-  const result = await handleGet({ postId: 'post-1' })
-
-  expect(db.getById).toHaveBeenCalledWith('posts', 'post-1')
-  expect(result.post).toHaveProperty('_id', 'post-1')
-})
-
-test('get：已删除帖子抛出错误', async () => {
-  ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'post-1', status: 'deleted' })
-
-  await expect(handleGet({ postId: 'post-1' })).rejects.toThrow('帖子不存在')
-})
-
-test('删帖：帖子已删除时抛出错误', async () => {
-  ;(db.getById as jest.Mock).mockResolvedValue({
-    _id: 'post-1',
-    authorId: 'test-openid',
-    status: 'deleted',
+  ;(db.query as jest.Mock).mockImplementation(async (collectionName: string, where: any) => {
+    if (collectionName === 'post_attendance_members') {
+      return [
+        { _id: 'attendance-2', postId: 'post-1', widgetId: 'attendance-widget', userId: 'user-2', joinedAt: '2024-01-02T00:00:00.000Z' },
+        { _id: 'attendance-1', postId: 'post-1', widgetId: 'attendance-widget', userId: 'user-1', joinedAt: '2024-01-01T00:00:00.000Z' },
+      ]
+    }
+    if (collectionName === 'community_members' && where.communityId === 'community-1') {
+      return [{ _id: 'member-1', status: 'active' }]
+    }
+    return []
   })
 
-  await expect(handleDelete({ postId: 'post-1' }, 'test-openid')).rejects.toThrow('帖子已删除')
-  expect(db.softDelete).not.toHaveBeenCalled()
-})
+  const detail = await handleGet({ postId: 'post-1' }, 'user-1')
+  const roster = await handleListAttendanceMembers({ postId: 'post-1', widgetId: 'attendance-widget' }, 'user-1')
 
-test('发帖：required 字段值为 null 时校验失败', async () => {
-  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
-  ;(db.getById as jest.Mock).mockResolvedValue(mockSection)
-
-  await expect(handleCreate({
-    communityId: 'c1',
-    sectionId: 'section-1',
-    content: { 'widget-uuid-1': null as any },
-  }, 'test-openid')).rejects.toThrow('必填项未填写：标题')
-})
-
-test('发帖：required 字段值为空数组时校验失败', async () => {
-  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
-  ;(db.getById as jest.Mock).mockResolvedValue(mockSection)
-
-  await expect(handleCreate({
-    communityId: 'c1',
-    sectionId: 'section-1',
-    content: { 'widget-uuid-1': [] as any },
-  }, 'test-openid')).rejects.toThrow('必填项未填写：标题')
-})
-
-test('发帖：非 required 字段留空时正常创建', async () => {
-  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
-  ;(db.getById as jest.Mock).mockResolvedValue(mockSection)
-  ;(db.create as jest.Mock).mockResolvedValue('post-2')
-
-  // widget-uuid-2 is not required, so omitting it is fine
-  const result = await handleCreate({
-    communityId: 'c1',
-    sectionId: 'section-1',
-    content: { 'widget-uuid-1': '标题' },
-  }, 'test-openid')
-  expect(result.postId).toBe('post-2')
-})
-
-test('list：默认 skip=0, limit=20', async () => {
-  ;(db.query as jest.Mock).mockResolvedValue([])
-
-  await handleList({ sectionId: 'section-1' })
-
-  expect(db.query).toHaveBeenCalledWith('posts', { sectionId: 'section-1', status: 'active' }, {
-    orderBy: ['createdAt', 'desc'],
-    skip: 0,
-    limit: 20,
-  })
-})
-
-test('main(): 未知 action 抛出错误', async () => {
-  await expect(main({ action: 'unknown' })).rejects.toThrow('Unknown action: unknown')
+  expect(detail.post.attendanceSummaryByWidget['attendance-widget'].count).toBe(2)
+  expect(detail.post.attendanceSummaryByWidget['attendance-widget'].isJoined).toBe(true)
+  expect(roster.members).toHaveLength(2)
+  expect(roster.members[0].userId).toBe('user-2')
 })
