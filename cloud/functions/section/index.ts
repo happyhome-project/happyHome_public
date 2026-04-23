@@ -33,6 +33,11 @@ function normalizeWidget(widget: Widget): Widget {
   return normalized
 }
 
+function isInvalidWidgetLabel(label: unknown) {
+  const text = String(label || '').trim().toLowerCase()
+  return !text || text === '新控件' || text === 'new widget'
+}
+
 function validateWidgets(sectionType: SectionType, widgets: Widget[]) {
   const showInListCount = widgets.filter((widget) => widget.showInList).length
   if (showInListCount > 3) throw new Error('showInList 最多只能有 3 个控件')
@@ -44,6 +49,9 @@ function validateWidgets(sectionType: SectionType, widgets: Widget[]) {
   }
 
   for (const widget of widgets) {
+    if (isInvalidWidgetLabel(widget.label)) {
+      throw new Error('控件标签名不能为空或占位文案')
+    }
     if (widget.showInList && !LIST_DISPLAYABLE_TYPES.includes(widget.type)) {
       throw new Error(`控件类型 ${widget.type} 不支持在列表展示`)
     }

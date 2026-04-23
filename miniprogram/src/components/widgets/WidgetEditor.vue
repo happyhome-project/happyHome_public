@@ -1,7 +1,7 @@
 <template>
   <view class="widget-editor">
     <text class="label">
-      {{ widget.label }}
+      {{ displayLabel }}
       <text v-if="widget.required" class="required">*</text>
     </text>
 
@@ -11,29 +11,27 @@
     >
       <input
         :value="modelValue as string"
-        :placeholder="`请输入${widget.label}`"
+        :placeholder="`请输入${displayLabel}`"
         placeholder-class="input-placeholder"
         class="input"
         @input="emit('update:modelValue', ($event as any).detail.value)"
       />
     </view>
 
-    <picker
-      v-else-if="widget.type === 'datetime'"
-      mode="dateTime"
-      :value="modelValue as string"
-      @change="emit('update:modelValue', ($event as any).detail.value)"
-    >
-      <view class="picker-display">
-        {{ modelValue || `选择${widget.label}` }}
-      </view>
-    </picker>
+    <view v-else-if="widget.type === 'datetime'" class="datetime-picker">
+      <picker mode="date" :value="datePart" @change="onDateChange">
+        <view class="picker-display">{{ datePart || `选择${displayLabel}日期` }}</view>
+      </picker>
+      <picker mode="time" :value="timePart" @change="onTimeChange">
+        <view class="picker-display">{{ timePart || `选择${displayLabel}时间` }}</view>
+      </picker>
+    </view>
 
     <view v-else-if="widget.type === 'number'" class="input-wrap">
       <input
         type="number"
         :value="String(modelValue ?? '')"
-        :placeholder="`请输入${widget.label}`"
+        :placeholder="`请输入${displayLabel}`"
         placeholder-class="input-placeholder"
         class="input"
         @input="emit('update:modelValue', Number(($event as any).detail.value))"
@@ -75,7 +73,7 @@
     <view v-else-if="widget.type === 'rich_text'" class="textarea-wrap">
       <textarea
         :value="modelValue as string"
-        :placeholder="`请输入${widget.label}`"
+        :placeholder="`请输入${displayLabel}`"
         placeholder-class="input-placeholder"
         class="textarea"
         @input="emit('update:modelValue', ($event as any).detail.value)"
@@ -86,6 +84,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { buildDateTimeValue, resolveWidgetLabel, splitDateTimeValue } from '../../utils/widget-form'
 
 const props = defineProps<{ widget: any; modelValue: any }>()
 const emit = defineEmits(['update:modelValue'])
@@ -95,6 +94,11 @@ interface GeoLocationValue {
   lat: number
   lng: number
 }
+
+const displayLabel = computed(() => resolveWidgetLabel(props.widget))
+const dateTimeParts = computed(() => splitDateTimeValue(props.modelValue))
+const datePart = computed(() => dateTimeParts.value.date)
+const timePart = computed(() => dateTimeParts.value.time)
 
 const locationValue = computed<GeoLocationValue | null>(() => {
   const val = props.modelValue
@@ -124,6 +128,25 @@ function removeImage(index: number) {
   emit('update:modelValue', current)
 }
 
+function onDateChange(event: any) {
+  const nextDate = String(event?.detail?.value || '')
+  const nextTime = timePart.value || '00:00'
+  emit('update:modelValue', buildDateTimeValue(nextDate, nextTime))
+}
+
+function onTimeChange(event: any) {
+  const nextTime = String(event?.detail?.value || '')
+  const nextDate = datePart.value || todayDate()
+  emit('update:modelValue', buildDateTimeValue(nextDate, nextTime))
+}
+
+function todayDate(): string {
+  const d = new Date()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${mm}-${dd}`
+}
+
 function chooseLocation() {
   wx.chooseLocation({
     success: (res: any) => {
@@ -150,9 +173,6 @@ function clearLocation() {
 .widget-editor { margin-bottom: $hh-space-lg; }
 .label { font-size: $hh-font-body; color: $hh-color-text; margin-bottom: $hh-space-sm; display: block; }
 .required { color: $hh-color-danger; margin-left: 4rpx; }
-/* 微信小程序 <input> 原生组件对 CSS padding 的渲染有自己的 hack，直接
-   在 input 上加 padding + 设宽度会让 placeholder 显示区被截断。
-   终极解法：把 padding 放在外层容器，input 本身不带 padding、自适应宽度。*/
 .input-wrap {
   background: $hh-color-bg-sub;
   border-radius: $hh-radius-sm;
@@ -173,6 +193,11 @@ function clearLocation() {
 .input-placeholder {
   color: $hh-color-text-mute;
   font-size: $hh-font-body;
+}
+.datetime-picker {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: $hh-space-sm;
 }
 .picker-display { background: $hh-color-bg-sub; border-radius: $hh-radius-sm; padding: $hh-space-md; font-size: $hh-font-body; color: $hh-color-text-sub; }
 .image-uploader { display: flex; flex-wrap: wrap; gap: $hh-space-sm; }

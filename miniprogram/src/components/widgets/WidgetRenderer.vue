@@ -1,6 +1,6 @@
 <template>
   <view class="widget-item" v-if="hasValue || widget.required">
-    <text class="label">{{ widget.label }}</text>
+    <text class="label">{{ displayLabel }}</text>
     <view class="value">
       <text v-if="['short_text', 'summary', 'number'].includes(widget.type)">
         {{ displayValue }}{{ widget.type === 'number' && widget.unit ? ' ' + widget.unit : '' }}
@@ -35,9 +35,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { formatWidgetValue } from '../../utils/widget'
+import { resolveWidgetLabel } from '../../utils/widget-form'
 
 const props = defineProps<{ widget: any; content: Record<string, any> }>()
 
+const displayLabel = computed(() => resolveWidgetLabel(props.widget))
 const rawValue = computed(() => props.content[props.widget.widgetId])
 const hasValue = computed(() => {
   const v = rawValue.value
@@ -53,8 +55,8 @@ const locationText = computed(() => {
 function formatDatetime(val: any): string {
   if (!val) return '-'
   const d = new Date(val)
-  if (isNaN(d.getTime())) return String(val)
-  return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`
+  if (Number.isNaN(d.getTime())) return String(val)
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 function previewImage(index: number) {
@@ -83,7 +85,7 @@ function openLocation() {
     latitude: loc.lat,
     longitude: loc.lng,
     address: loc.address,
-    name: props.widget.label || '位置',
+    name: displayLabel.value || '位置',
     scale: 16,
   })
 }
