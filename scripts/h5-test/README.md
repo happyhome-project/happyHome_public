@@ -21,12 +21,15 @@ node scripts/h5-test/05-required-widgets.mjs
 node scripts/h5-test/06-cold-start-user-journey.mjs
 node scripts/h5-test/07-approval-community-journey.mjs
 node scripts/h5-test/08-concurrent-clicks.mjs
+node scripts/h5-test/09-community-lifecycle.mjs
+node scripts/h5-test/10-home-dossier-e2e.mjs
+node scripts/h5-test/11-post-create-flow.mjs
 ```
 
 Or all at once (any failure → exit 1):
 
 ```bash
-for f in scripts/h5-test/0*.mjs; do node "$f" || exit 1; done
+for f in scripts/h5-test/[0-9]*.mjs; do node "$f" || exit 1; done
 ```
 
 ## Environment

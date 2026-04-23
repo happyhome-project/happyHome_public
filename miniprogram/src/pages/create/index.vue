@@ -52,21 +52,32 @@
           <text class="section-tag" @tap="selectedSection = null">← {{ selectedSection.name }}</text>
         </view>
 
-        <WidgetEditor
-          v-for="widget in editableWidgets"
-          :key="widget.widgetId"
-          :widget="widget"
-          v-model="formData[widget.widgetId]"
-        />
-
-        <view v-for="widget in attendanceWidgets" :key="widget.widgetId" class="attendance-hint">
-          <text class="attendance-label">{{ widget.label }}</text>
-          <text class="attendance-desc">发布后成员可点击参与，人数和头像会自动统计。</text>
+        <!-- 未配置控件的板块：提示并禁用发布，避免空帖 -->
+        <view
+          v-if="editableWidgets.length === 0 && attendanceWidgets.length === 0"
+          class="empty-widgets-hint"
+        >
+          <text class="empty-widgets-title">该板块尚未配置内容模板</text>
+          <text class="empty-widgets-desc">请联系社区管理员在"控件"里添加需要填写的字段后再来发布。</text>
         </view>
 
-        <button class="btn-primary" :disabled="submitting" @tap="handleSubmit">
-          {{ submitting ? '发布中...' : '发布' }}
-        </button>
+        <template v-else>
+          <WidgetEditor
+            v-for="widget in editableWidgets"
+            :key="widget.widgetId"
+            :widget="widget"
+            v-model="formData[widget.widgetId]"
+          />
+
+          <view v-for="widget in attendanceWidgets" :key="widget.widgetId" class="attendance-hint">
+            <text class="attendance-label">{{ widget.label }}</text>
+            <text class="attendance-desc">发布后成员可点击参与，人数和头像会自动统计。</text>
+          </view>
+
+          <button class="btn-primary" :disabled="submitting" @tap="handleSubmit">
+            {{ submitting ? '发布中...' : '发布' }}
+          </button>
+        </template>
       </view>
     </template>
   </view>
@@ -286,6 +297,28 @@ async function handleSubmit() {
 .section-tag {
   font-size: $hh-font-body;
   color: $hh-color-primary-text;
+}
+
+.empty-widgets-hint {
+  margin-top: $hh-space-xl;
+  padding: $hh-space-lg;
+  border: 1rpx dashed $hh-color-border;
+  border-radius: $hh-radius-md;
+  background: $hh-color-bg-sub;
+  text-align: center;
+}
+.empty-widgets-title {
+  display: block;
+  font-size: $hh-font-body-lg;
+  color: $hh-color-text;
+  margin-bottom: $hh-space-sm;
+  font-weight: $hh-font-weight-medium;
+}
+.empty-widgets-desc {
+  display: block;
+  font-size: $hh-font-caption;
+  color: $hh-color-text-mute;
+  line-height: 1.6;
 }
 
 .attendance-hint {

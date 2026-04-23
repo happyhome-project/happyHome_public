@@ -185,6 +185,10 @@ export async function handleCreate(
   await ensureActiveCommunityMember(params.communityId, openid)
 
   const section = await db.getById('sections', params.sectionId) as Section
+  // 板块尚未配置控件时，禁止发帖（否则会产生无任何字段的空 post）
+  if (!section || !Array.isArray(section.widgets) || section.widgets.length === 0) {
+    throw new Error('该板块尚未配置内容模板，请联系管理员完善板块设置后再发布')
+  }
   const sanitizedContent = sanitizeContent(params.content, section)
   validateRequiredWidgets(section, sanitizedContent)
 
@@ -256,6 +260,9 @@ export async function handleUpdate(
   if (post.authorId !== openid) throw new Error('无权修改')
 
   const section = await db.getById('sections', post.sectionId) as Section
+  if (!section || !Array.isArray(section.widgets) || section.widgets.length === 0) {
+    throw new Error('该板块尚未配置内容模板，无法编辑')
+  }
   const sanitizedContent = sanitizeContent(params.content, section)
   validateRequiredWidgets(section, sanitizedContent)
 
