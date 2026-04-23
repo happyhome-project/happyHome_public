@@ -12,7 +12,7 @@
       <button class="btn-primary-plain" size="mini" @tap="goOnboarding">去加入</button>
     </view>
 
-    <view v-else-if="membershipChecking" class="guard-state">
+    <view v-else-if="!membershipReady && membershipChecking" class="guard-state">
       <text class="guard-desc">检查社区成员身份中...</text>
     </view>
 
@@ -74,7 +74,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi, postApi } from '../../api/cloud'
@@ -86,9 +86,11 @@ const selectedSection = ref<any>(null)
 const formData = reactive<Record<string, any>>({})
 const submitting = ref(false)
 const membershipChecking = ref(false)
+const membershipReady = ref(false)
 const isMember = ref(false)
 const memberStatus = ref<string | null>(null)
 const joining = ref(false)
+let checkSeq = 0
 
 const editableWidgets = computed(() =>
   (selectedSection.value?.widgets || []).filter((widget: any) => widget.type !== 'attendance')
@@ -98,26 +100,68 @@ const attendanceWidgets = computed(() =>
   (selectedSection.value?.widgets || []).filter((widget: any) => widget.type === 'attendance')
 )
 
-async function checkMembership() {
-  if (!communityStore.currentCommunityId || !userStore.isLoggedIn) {
-    isMember.value = false
-    return
-  }
-  membershipChecking.value = true
-  try {
-    const res = await memberApi.myStatus(communityStore.currentCommunityId)
-    isMember.value = res.isMember
-    memberStatus.value = res.status
-  } catch {
+onLoad(async () => {
+  await checkMembership({ silent: false })
+})
+
+onShow(() => {
+  // 返回页面（例如地图选择返回）时静默刷新，不再打断表单操作。
+  void checkMembership({ silent: true })
+})
+
+watch(() => communityStore.currentCommunityId, async () => {
+  selectedSection.value = null
+  membershipReady.value = false
+  await checkMembership({ silent: false, forceRefresh: true })
+})
+
+async function checkMembership(options: { silent: boolean; forceRefresh?: boolean }) {
+  const { silent, forceRefresh = false } = options
+  const communityId = String(communityStore.currentCommunityId || '')
+  const seq = ++checkSeq
+
+  if (!communityId || !userStore.isLoggedIn) {
     isMember.value = false
     memberStatus.value = null
+    membershipReady.value = true
+    return
+  }
+
+  const cached = communityStore.getMembershipStatus(communityId)
+  if (cached && !forceRefresh) {
+    isMember.value = cached.isMember
+    memberStatus.value = cached.status
+    membershipReady.value = true
+    if (silent) return
+  }
+
+  if (!silent && !membershipReady.value) {
+    membershipChecking.value = true
+  }
+
+  try {
+    await communityStore.refreshMembershipStatus(communityId)
+    const latest = communityStore.getMembershipStatus(communityId)
+    if (seq !== checkSeq) return
+    isMember.value = !!latest?.isMember
+    memberStatus.value = latest?.status ?? null
+  } catch {
+    if (seq !== checkSeq) return
+    // 兜底到直接请求，避免 store 未更新时页面卡住。
+    try {
+      const res = await memberApi.myStatus(communityId)
+      isMember.value = !!res.isMember
+      memberStatus.value = res.status
+    } catch {
+      isMember.value = false
+      memberStatus.value = null
+    }
   } finally {
+    if (seq !== checkSeq) return
+    membershipReady.value = true
     membershipChecking.value = false
   }
 }
-
-onShow(() => { checkMembership() })
-watch(() => communityStore.currentCommunityId, () => { checkMembership() })
 
 async function handleJoin() {
   joining.value = true
@@ -131,6 +175,7 @@ async function handleJoin() {
       memberStatus.value = 'pending'
       uni.showToast({ title: '申请已提交，等待审批', icon: 'none' })
     }
+    await checkMembership({ silent: true, forceRefresh: true })
   } catch (error: any) {
     uni.showModal({ title: '加入失败', content: error?.message ?? '请重试' })
   } finally {

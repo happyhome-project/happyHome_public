@@ -60,6 +60,22 @@ test('section.updateWidgets: evergreen 板块不允许配置 attendance', async 
   })).rejects.toThrow('realtime')
 })
 
+test('section.updateWidgets: 占位标签名不允许保存', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-1',
+    type: 'realtime',
+    widgets: [],
+  })
+
+  await expect(main({
+    action: 'section.updateWidgets',
+    sectionId: 'section-1',
+    widgets: [
+      { widgetId: 'w1', type: 'short_text', label: '新控件', fieldKey: 'f1', required: false, order: 0, showInList: false },
+    ],
+  })).rejects.toThrow('占位文案')
+})
+
 test('post.getAdmin: 返回 attendance 汇总和完整名单', async () => {
   ;(db.getById as jest.Mock)
     .mockResolvedValueOnce({

@@ -123,12 +123,23 @@ test('updateWidgets：rich_text 不能设为 showInList', async () => {
     .rejects.toThrow('不支持在列表展示')
 })
 
+test('updateWidgets：控件标签为占位文案时应报错', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ role: 'admin', status: 'active' }])
+
+  const widgets: Widget[] = [
+    makeWidget({ widgetId: 'w1', label: '新控件' }),
+  ]
+
+  await expect(handleUpdateWidgets({ communityId: 'c1', sectionId: 's1', widgets }, 'test-openid'))
+    .rejects.toThrow('控件标签名不能为空或占位文案')
+})
+
 test('updateWidgets：新控件自动分配 UUID', async () => {
   ;(db.query as jest.Mock).mockResolvedValueOnce([{ role: 'admin', status: 'active' }])
   ;(db.updateById as jest.Mock).mockResolvedValue({})
 
   const widgets: Widget[] = [
-    makeWidget({ widgetId: '', label: '新控件' }), // empty widgetId
+    makeWidget({ widgetId: '', label: '拼车说明' }), // empty widgetId
   ]
 
   const result = await handleUpdateWidgets({ communityId: 'c1', sectionId: 's1', widgets }, 'test-openid')

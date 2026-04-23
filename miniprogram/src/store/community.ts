@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import type { Community, Section } from '../../../cloud/shared/types'
-import { communityApi, sectionApi } from '../api/cloud'
+import { communityApi, memberApi, sectionApi } from '../api/cloud'
 
 const STORAGE_KEY = 'community_store'
 
@@ -10,6 +10,7 @@ export const useCommunityStore = defineStore('community', {
     myCommunities: [] as Community[],
     currentSections: [] as Section[],
     currentSectionIndex: 0,
+    membershipByCommunity: {} as Record<string, { isMember: boolean; status: string | null; checkedAt: number }>,
   }),
   getters: {
     currentCommunity: (state): Community | undefined =>
@@ -40,7 +41,29 @@ export const useCommunityStore = defineStore('community', {
       this.currentSectionIndex = 0
       const res = await sectionApi.list(communityId)
       this.currentSections = res.sections as Section[]
+      this.refreshMembershipStatus(communityId).catch(() => {})
       this.saveToStorage()
+    },
+    async refreshMembershipStatus(communityId: string) {
+      const id = String(communityId || '').trim()
+      if (!id) return
+      try {
+        const res = await memberApi.myStatus(id)
+        this.membershipByCommunity[id] = {
+          isMember: !!res.isMember,
+          status: res.status,
+          checkedAt: Date.now(),
+        }
+      } catch {
+        this.membershipByCommunity[id] = {
+          isMember: false,
+          status: null,
+          checkedAt: Date.now(),
+        }
+      }
+    },
+    getMembershipStatus(communityId: string) {
+      return this.membershipByCommunity[String(communityId || '').trim()] || null
     },
     async loadMyCommunities() {
       const res = await communityApi.list(false)

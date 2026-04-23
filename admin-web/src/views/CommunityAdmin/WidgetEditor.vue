@@ -118,11 +118,30 @@ const saving = ref(false)
 const communityName = ref('')
 const sectionName = ref('')
 const sectionType = ref<'realtime' | 'evergreen'>('evergreen')
+const DEFAULT_LABELS: Record<string, string> = {
+  short_text: '短文字',
+  summary: '一句话简介',
+  datetime: '日期时间',
+  number: '数字',
+  image_group: '图片组',
+  rich_text: '正文',
+  location: '位置',
+  attendance: '活动参与',
+}
 
 const listCount = computed(() => widgets.value.filter((widget) => widget.showInList).length)
 
 function isListDisplayable(type: string) {
   return LIST_DISPLAYABLE_TYPES.includes(type as any)
+}
+
+function defaultLabel(type: string) {
+  return DEFAULT_LABELS[type] || '内容'
+}
+
+function isPlaceholderLabel(label: unknown) {
+  const text = String(label || '').trim().toLowerCase()
+  return !text || text === '新控件' || text === 'new widget'
 }
 
 onMounted(async () => {
@@ -133,6 +152,7 @@ onMounted(async () => {
     sectionType.value = res.section?.type === 'realtime' ? 'realtime' : 'evergreen'
     widgets.value = (res.section?.widgets ?? []).map((widget: any, index: number) => ({
       ...widget,
+      label: isPlaceholderLabel(widget?.label) ? defaultLabel(widget?.type) : widget.label,
       fieldKey: resolveFieldKey(widget, index),
       _isNew: false,
     }))
@@ -142,13 +162,11 @@ onMounted(async () => {
 })
 
 function addWidget() {
-  const nextType = sectionType.value === 'realtime' && !widgets.value.some((widget) => widget.type === 'attendance')
-    ? 'short_text'
-    : 'short_text'
+  const nextType = 'short_text'
   widgets.value.push({
     widgetId: uuidv4(),
     type: nextType,
-    label: '新控件',
+    label: defaultLabel(nextType),
     fieldKey: `field_${Date.now()}`,
     required: false,
     order: widgets.value.length,
@@ -185,11 +203,11 @@ function handleTypeChange(widget: any) {
     widget.required = false
     widget.capacity = typeof widget.capacity === 'number' ? widget.capacity : undefined
     widget.showInList = true
-    if (!widget.label || widget.label === '新控件') {
-      widget.label = '活动参与'
-    }
   } else {
     widget.capacity = undefined
+  }
+  if (isPlaceholderLabel(widget.label)) {
+    widget.label = defaultLabel(widget.type)
   }
 }
 
@@ -204,6 +222,11 @@ async function save() {
   }
   if (listCount.value > 3) {
     ElMessage.error('帖子列表卡片展示项不能超过 3 个')
+    return
+  }
+  const invalidWidget = widgets.value.find((widget) => isPlaceholderLabel(widget.label))
+  if (invalidWidget) {
+    ElMessage.error(`请给控件设置明确标签名（建议：${defaultLabel(invalidWidget.type)}）`)
     return
   }
 
