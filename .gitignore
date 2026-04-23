@@ -6,6 +6,9 @@ dist/
 private.*.key
 project.private.config.json
 miniprogram/project.private.config.json
+artifacts/
+playwright-report/
+test-results/
 
 # logs
 *.log

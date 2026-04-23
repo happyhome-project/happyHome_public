@@ -73,13 +73,13 @@ test('审批通过：社区 status 变为 active', async () => {
   expect(db.updateById).toHaveBeenCalledWith('communities', 'community-123', { status: 'active' })
 })
 
-test('审批拒绝：社区 status 变为 disabled', async () => {
+test('审批拒绝：社区 status 变为 rejected', async () => {
   ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'test-openid', role: 'superAdmin' })
   ;(db.updateById as jest.Mock).mockResolvedValue({})
 
   await handleReject({ communityId: 'community-123' }, 'test-openid')
 
-  expect(db.updateById).toHaveBeenCalledWith('communities', 'community-123', { status: 'disabled' })
+  expect(db.updateById).toHaveBeenCalledWith('communities', 'community-123', { status: 'rejected' })
 })
 
 test('list：默认只返回 active 社区', async () => {

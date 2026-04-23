@@ -78,4 +78,4 @@ await expectReject(
   'duplicate join correctly rejected',
 )
 
-finish()
+await finish()

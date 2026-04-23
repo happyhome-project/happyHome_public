@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=375, initial-scale=1">
+<title>详情 · 东门新开的云南米线 · 亲测</title>
+<link rel="stylesheet" href="tokens-v2.css">
+<style>
+/* Detail page · 延续 S1 视觉 */
+
+/* Nav bar */
+.nav-bar {
+  padding: 8px 16px 12px;
+  display: flex; align-items: center; gap: 10px;
+  position: sticky; top: 44px;
+  background: color-mix(in srgb, var(--surface-0) 92%, transparent);
+  backdrop-filter: blur(8px);
+  z-index: 9;
+  border-bottom: 1px solid transparent;
+  transition: border-color .2s;
+}
+.nav-bar.stuck { border-bottom-color: var(--ink-line-2); }
+.nav-bar .back {
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink-1);
+}
+.nav-bar .crumb {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  flex: 1;
+  line-height: 1.3;
+}
+.nav-bar .crumb b { color: var(--ink-1); font-weight: 700; }
+.nav-bar .act {
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink-2);
+}
+
+/* article */
+.art {
+  padding: 6px 24px 20px;
+}
+.art .kicker {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--ink-line-2);
+}
+.art .kicker .cat {
+  color: var(--ink-1);
+  font-weight: 700;
+  padding-right: 8px;
+  border-right: 1px solid var(--ink-line-2);
+}
+.art .kicker .tag {
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 2px;
+  letter-spacing: 0.14em;
+}
+.art h1 {
+  font-family: var(--font-serif);
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  color: var(--ink-1);
+  margin-bottom: 14px;
+}
+.art .byline {
+  display: flex; align-items: center; gap: 10px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--ink-line-2);
+}
+.art .byline .av {
+  width: 34px; height: 34px; border-radius: 99px;
+  background: oklch(0.8 0.05 40);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700;
+  color: var(--ink-1);
+  flex-shrink: 0;
+}
+.art .byline .who {
+  flex: 1;
+}
+.art .byline .who .nm {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink-1);
+  display: flex; align-items: center; gap: 6px;
+}
+.art .byline .who .nm .badge {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.14em;
+  padding: 1px 4px;
+  background: var(--surface-2);
+  color: var(--ink-3);
+  border-radius: 2px;
+  font-weight: 600;
+}
+.art .byline .who .mt {
+  font-family: var(--font-num);
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-top: 1px;
+}
+.art .byline .follow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  border: 1px solid var(--ink-1);
+  border-radius: 99px;
+  color: var(--ink-1);
+}
+
+/* cover */
+.art-cover {
+  margin: 18px 0 20px;
+  aspect-ratio: 4/3;
+  background:
+    linear-gradient(135deg, oklch(0.78 0.08 40) 0%, oklch(0.65 0.12 30) 100%);
+  border-radius: 12px;
+  position: relative;
+  overflow: hidden;
+  display: flex; align-items: flex-end;
+  padding: 14px;
+  color: oklch(0.97 0.01 40);
+}
+.art-cover::before {
+  content: "";
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(circle at 25% 30%, rgba(255,255,255,0.25) 0, transparent 40%),
+    radial-gradient(circle at 75% 70%, rgba(0,0,0,0.15) 0, transparent 50%);
+}
+.art-cover::after {
+  content: "🍜";
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 64px;
+  opacity: 0.5;
+}
+.art-cover .cap {
+  position: relative;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.9;
+}
+.art-cover .meta-count {
+  position: absolute;
+  top: 12px; right: 12px;
+  background: rgba(0,0,0,0.35);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  padding: 4px 8px;
+  border-radius: 99px;
+  backdrop-filter: blur(4px);
+}
+
+/* body */
+.art-body {
+  font-family: var(--font-sans);
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: var(--ink-1);
+  letter-spacing: 0.005em;
+}
+.art-body p { margin-bottom: 14px; text-wrap: pretty; }
+.art-body .lead {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  color: var(--ink-1);
+  line-height: 1.55;
+  letter-spacing: -0.005em;
+}
+.art-body .lead::first-letter {
+  font-size: 34px;
+  font-weight: 700;
+  float: left;
+  line-height: 1;
+  padding: 4px 8px 0 0;
+  color: var(--accent-ink);
+  font-family: var(--font-serif);
+}
+.art-body h3 {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  font-weight: 600;
+  margin: 20px 0 8px;
+  color: var(--ink-1);
+  letter-spacing: -0.005em;
+  position: relative;
+  padding-left: 12px;
+}
+.art-body h3::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 6px; bottom: 6px;
+  width: 3px;
+  background: var(--accent);
+  opacity: 0.8;
+}
+.art-body .pull {
+  margin: 18px 0;
+  padding: 14px 16px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-wash);
+  border-radius: 0 8px 8px 0;
+  font-size: 13.5px;
+  color: var(--ink-1);
+  font-weight: 500;
+  line-height: 1.6;
+}
+.art-body .pull .cite {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--ink-3);
+  margin-top: 6px;
+  text-transform: uppercase;
+}
+.art-body .info-grid {
+  margin: 18px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--ink-line);
+  border-radius: 10px;
+  background: var(--surface-1);
+  font-size: 13px;
+}
+.art-body .info-grid .ig-h {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+.art-body .info-grid .row {
+  display: grid;
+  grid-template-columns: 54px 1fr;
+  gap: 8px 12px;
+  padding: 4px 0;
+  align-items: baseline;
+}
+.art-body .info-grid .row .k {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+  text-transform: uppercase;
+}
+.art-body .info-grid .row .v {
+  color: var(--ink-1);
+  font-size: 13px;
+}
+.art-body .info-grid .row .v b { font-weight: 600; }
+
+/* tags */
+.art-tags {
+  margin: 18px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--ink-line-2);
+  display: flex; gap: 6px; flex-wrap: wrap;
+}
+.art-tags .tg {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border-radius: 99px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+.art-tags .tg::before { content: "#"; color: var(--ink-4); margin-right: 2px; }
+
+/* stats bar */
+.stats-bar {
+  margin: 18px 0 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--ink-line-2);
+  border-bottom: 1px solid var(--ink-line-2);
+  display: flex; justify-content: space-around;
+  font-family: var(--font-num);
+}
+.stats-bar .c {
+  text-align: center;
+  color: var(--ink-3);
+}
+.stats-bar .c .n {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink-1);
+  letter-spacing: -0.015em;
+}
+.stats-bar .c .l {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+/* comments */
+.cmts-h {
+  padding: 18px 24px 10px;
+  display: flex; justify-content: space-between; align-items: baseline;
+}
+.cmts-h .t {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.cmts-h .t b { color: var(--ink-1); font-weight: 700; margin-right: 6px; }
+.cmts-h .sort {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.1em;
+}
+
+.cmts {
+  padding: 0 24px 100px;
+}
+.cmt {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--ink-line-2);
+  display: flex; gap: 10px;
+  align-items: flex-start;
+}
+.cmt:last-child { border-bottom: none; }
+.cmt .av {
+  width: 30px; height: 30px; border-radius: 99px;
+  background: var(--surface-2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 600;
+  color: var(--ink-2);
+  flex-shrink: 0;
+}
+.cmt .body { flex: 1; min-width: 0; }
+.cmt .top-row {
+  display: flex; align-items: baseline; gap: 8px;
+  margin-bottom: 4px;
+}
+.cmt .nm {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-1);
+}
+.cmt .nm .author-badge {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.14em;
+  color: var(--accent-ink);
+  font-weight: 700;
+  margin-left: 4px;
+}
+.cmt .when {
+  font-family: var(--font-num);
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+.cmt .txt {
+  font-size: 13px;
+  color: var(--ink-1);
+  line-height: 1.55;
+}
+.cmt .reply {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  border-left: 2px solid var(--ink-line);
+  line-height: 1.5;
+}
+.cmt .reply .rp-who {
+  font-weight: 600; color: var(--ink-1); margin-right: 4px;
+}
+.cmt .foot {
+  margin-top: 6px;
+  display: flex; gap: 14px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.1em;
+}
+.cmt .foot .like.on { color: var(--live); font-weight: 700; }
+
+/* action bar bottom */
+.action-bar {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  padding: 12px 16px 22px;
+  background: color-mix(in srgb, var(--surface-1) 95%, transparent);
+  backdrop-filter: blur(14px);
+  border-top: 1px solid var(--ink-line-2);
+  display: flex; gap: 8px; align-items: center;
+  z-index: 4;
+}
+.action-bar .cmt-input {
+  flex: 1;
+  height: 40px;
+  padding: 0 14px;
+  background: var(--surface-2);
+  border-radius: 99px;
+  display: flex; align-items: center;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.action-bar .ib {
+  width: 40px; height: 40px;
+  border-radius: 99px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink-2);
+  position: relative;
+}
+.action-bar .ib.on { color: var(--live); }
+.action-bar .ib .cnt {
+  position: absolute;
+  top: -2px; right: -4px;
+  font-family: var(--font-num);
+  font-size: 10px;
+  background: var(--ink-1);
+  color: var(--surface-1);
+  border-radius: 99px;
+  padding: 1px 5px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.action-bar .primary {
+  height: 40px;
+  padding: 0 16px;
+  background: var(--ink-1);
+  color: var(--surface-1);
+  border-radius: 99px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* override phone-inner padding-bottom for this page since action-bar is different height */
+.phone-inner { padding-bottom: 78px; }
+</style>
+</head>
+<body>
+
+<div class="phone" data-screen-label="详情 · 好店">
+  <div class="phone-inner">
+    <div class="status-bar">
+      <span class="num">9:41</span>
+      <span class="sb-icons">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="none"><path d="M1 9h2v2H1V9zm4-2h2v4H5V7zm4-3h2v7H9V4zm4-3h2v10h-2V1z" fill="currentColor"/></svg>
+        <svg width="24" height="11" viewBox="0 0 24 11" fill="none"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" stroke="currentColor" opacity="0.4"/><rect x="2" y="2" width="16" height="7" rx="1" fill="currentColor"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.5" fill="currentColor" opacity="0.4"/></svg>
+      </span>
+    </div>
+
+    <div class="nav-bar" id="nav">
+      <button class="back" aria-label="返回">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="crumb">
+        <b>周边好店</b> · 阳光花园 3 号楼
+      </div>
+      <button class="act" aria-label="更多">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+      </button>
+    </div>
+
+    <article class="art">
+      <div class="kicker">
+        <span class="cat">好店 · 亲测</span>
+        <span class="tag">NEW</span>
+        <span>4月15日 · 14:32</span>
+      </div>
+
+      <h1>东门新开的云南米线 · 带娃去试了三次</h1>
+
+      <div class="byline">
+        <div class="av">李</div>
+        <div class="who">
+          <div class="nm">李姐 <span class="badge">住 7 号楼</span></div>
+          <div class="mt">发过 12 条 · 被感谢 48 次</div>
+        </div>
+        <button class="follow">关注</button>
+      </div>
+
+      <div class="art-cover">
+        <div class="meta-count">1 / 4</div>
+        <div class="cap">东门商业街 · 老云南</div>
+      </div>
+
+      <div class="art-body">
+        <p class="lead">上周三路过东门新开了一家小店，招牌写着「老云南过桥米线」，门脸不大，但进门那股酸笋和肉汤混合的香气，一下子把我拉回大学时期昆明的巷子里。</p>
+
+        <p>我带着娃三天去了三次。先说结论：<b>值得专门来一次</b>。他家汤底是真熬的，不是浓缩粉兑的，尝得出来。</p>
+
+        <h3>几样推荐</h3>
+        <p>招牌小锅米线 28，肉片给得足；凉拌木瓜丝 12，比我在云南吃的还地道；豆花米线 18，适合小孩，不辣不麻。不推荐他家的卤蛋，偏咸。</p>
+
+        <div class="pull">
+          带娃去最友好的一点是老板娘主动问要不要少辣、能不能分餐，桌上还有婴儿椅。
+          <span class="cite">— 李姐 · 三次实测</span>
+        </div>
+
+        <h3>门店信息</h3>
+        <div class="info-grid">
+          <div class="ig-h">EASTGATE · NEW OPENED</div>
+          <div class="row"><span class="k">地址</span><span class="v">东门商业街 A 区 12 号（麦当劳斜对面）</span></div>
+          <div class="row"><span class="k">营业</span><span class="v">10:00 – 21:30 · 周一闭店</span></div>
+          <div class="row"><span class="k">人均</span><span class="v"><b>¥28</b> · 现金 / 扫码</span></div>
+          <div class="row"><span class="k">步行</span><span class="v">小区东门出去 6 分钟</span></div>
+        </div>
+
+        <p>走之前问老板，他说是从昆明搬来的，夫妻店，老公掌勺老婆收银。这种店我希望它能一直开下去。</p>
+
+        <div class="art-tags">
+          <span class="tg">米线</span>
+          <span class="tg">带娃友好</span>
+          <span class="tg">东门商圈</span>
+          <span class="tg">云南菜</span>
+        </div>
+      </div>
+
+      <div class="stats-bar">
+        <div class="c"><div class="n">23</div><div class="l">Likes</div></div>
+        <div class="c"><div class="n">12</div><div class="l">Saved</div></div>
+        <div class="c"><div class="n">8</div><div class="l">Comments</div></div>
+        <div class="c"><div class="n">186</div><div class="l">Views</div></div>
+      </div>
+    </article>
+
+    <div class="cmts-h">
+      <div class="t"><b>邻里说</b>· 8 条</div>
+      <div class="sort">最热 ›</div>
+    </div>
+
+    <div class="cmts">
+      <div class="cmt">
+        <div class="av" style="background:oklch(0.82 0.05 180);color:var(--ink-1)">王</div>
+        <div class="body">
+          <div class="top-row">
+            <div class="nm">王阿姨</div>
+            <div class="when">2 小时前</div>
+          </div>
+          <div class="txt">昨天也去了！小锅米线确实好喝，我点的是菌菇的。老板娘人挺热情，跟我说以后周三下午 2-5 点打 8 折。</div>
+          <div class="foot">
+            <span class="like on">♥ 8</span>
+            <span>回复</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="cmt">
+        <div class="av" style="background:oklch(0.82 0.06 70);color:var(--ink-1)">陈</div>
+        <div class="body">
+          <div class="top-row">
+            <div class="nm">陈老师</div>
+            <div class="when">4 小时前</div>
+          </div>
+          <div class="txt">问一下，店里能微信支付吗？带娃不想拿现金。</div>
+          <div class="reply">
+            <span class="rp-who">李姐 回复：</span>可以的，最上方「人均」那里写了扫码。我三次都是扫码。
+          </div>
+          <div class="foot">
+            <span class="like">♡ 2</span>
+            <span>回复</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="cmt">
+        <div class="av" style="background:oklch(0.82 0.04 40);color:var(--ink-1)">赵</div>
+        <div class="body">
+          <div class="top-row">
+            <div class="nm">赵奶奶 <span class="author-badge">老住户</span></div>
+            <div class="when">昨天</div>
+          </div>
+          <div class="txt">以前那个位置开过三家店都没撑过半年。希望这家能留住。</div>
+          <div class="foot">
+            <span class="like on">♥ 14</span>
+            <span>回复 · 2</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="cmt">
+        <div class="av" style="background:oklch(0.82 0.05 220);color:var(--ink-1)">小</div>
+        <div class="body">
+          <div class="top-row">
+            <div class="nm">小吴</div>
+            <div class="when">昨天</div>
+          </div>
+          <div class="txt">收藏了，下周带对象去。</div>
+          <div class="foot">
+            <span class="like">♡ 1</span>
+            <span>回复</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="action-bar">
+      <div class="cmt-input">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="margin-right:8px;color:var(--ink-3)"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span>写点什么…</span>
+      </div>
+      <button class="ib on" aria-label="已赞">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-7-4.35-9.5-8.5A5.5 5.5 0 0 1 12 6a5.5 5.5 0 0 1 9.5 6.5C19 16.65 12 21 12 21z"/></svg>
+      </button>
+      <button class="ib" aria-label="收藏">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+// sticky nav shadow
+const pi = document.querySelector('.phone-inner');
+const nav = document.getElementById('nav');
+pi.addEventListener('scroll', () => {
+  nav.classList.toggle('stuck', pi.scrollTop > 4);
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,53 @@
+name: nightly-full
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 18 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: happyhome-nightly
+  cancel-in-progress: false
+
+jobs:
+  nightly:
+    runs-on: [self-hosted, Windows, X64]
+    environment: nightly
+    defaults:
+      run:
+        shell: powershell
+    env:
+      CLOUD_API_URL: ${{ secrets.CLOUD_API_URL }}
+      ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+      TEST_COMMUNITY_ID: ${{ secrets.TEST_COMMUNITY_ID }}
+      VITE_CLOUD_API_URL: ${{ secrets.VITE_CLOUD_API_URL }}
+      VITE_ADMIN_USERNAME: ${{ secrets.VITE_ADMIN_USERNAME }}
+      VITE_ADMIN_PASSWORD: ${{ secrets.VITE_ADMIN_PASSWORD }}
+      VITE_ADMIN_TOKEN: ${{ secrets.VITE_ADMIN_TOKEN }}
+      WECHAT_DEVTOOLS_PORT: ${{ secrets.WECHAT_DEVTOOLS_PORT }}
+      WECHAT_DEVTOOLS_CLI_PATH: ${{ secrets.WECHAT_DEVTOOLS_CLI_PATH }}
+      WECHAT_DEVTOOLS_PROJECT_PATH: ${{ secrets.WECHAT_DEVTOOLS_PROJECT_PATH }}
+      WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+
+      - name: Run nightly orchestration
+        run: npm.cmd run test:nightly
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-full-artifacts
+          path: artifacts
+          if-no-files-found: warn

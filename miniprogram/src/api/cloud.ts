@@ -149,4 +149,14 @@ export const postApi = {
     callCloud('post', 'update', { postId, content }),
   delete: (postId: string) =>
     callCloud('post', 'delete', { postId }),
+  joinAttendance: (postId: string, widgetId: string) =>
+    callCloud<{ widgetId: string; summary: any }>('post', 'joinAttendance', { postId, widgetId }),
+  leaveAttendance: (postId: string, widgetId: string) =>
+    callCloud<{ widgetId: string; summary: any }>('post', 'leaveAttendance', { postId, widgetId }),
+  listAttendanceMembers: (postId: string, widgetId: string) =>
+    callCloud<{ widgetId: string; members: any[]; total: number; capacity?: number; isFull: boolean }>(
+      'post',
+      'listAttendanceMembers',
+      { postId, widgetId }
+    ),
 }

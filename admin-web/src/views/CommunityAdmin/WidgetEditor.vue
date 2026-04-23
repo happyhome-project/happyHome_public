@@ -1,28 +1,47 @@
 <template>
   <div class="widget-editor">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-      <h3>控件配置</h3>
+    <div class="page-header">
+      <div>
+        <el-breadcrumb separator="/">
+          <el-breadcrumb-item :to="{ name: 'communities' }">社区管理</el-breadcrumb-item>
+          <el-breadcrumb-item :to="{ name: 'sections', params: { communityId } }">{{ communityName || '当前社区' }}</el-breadcrumb-item>
+          <el-breadcrumb-item :to="{ name: 'sections', params: { communityId } }">板块管理</el-breadcrumb-item>
+          <el-breadcrumb-item>控件配置</el-breadcrumb-item>
+        </el-breadcrumb>
+        <div class="title-row">
+          <h3>控件配置</h3>
+          <el-tag size="small" effect="plain" type="info">当前社区：{{ communityName || communityId }}</el-tag>
+          <el-tag v-if="sectionName" size="small" effect="plain">当前板块：{{ sectionName }}</el-tag>
+        </div>
+      </div>
       <div>
         <el-button @click="addWidget">+ 添加控件</el-button>
-        <el-button type="primary" @click="save" :loading="saving" :disabled="listCount > 3" style="margin-left: 8px;">保存</el-button>
+        <el-button type="primary" @click="save" :loading="saving" :disabled="listCount > 3">保存</el-button>
       </div>
     </div>
 
     <el-alert
       v-if="listCount > 3"
-      title="列表显示字段不能超过3个"
+      title="帖子列表卡片展示项不能超过 3 个"
       type="error"
       style="margin-bottom: 16px;"
+    />
+    <el-alert
+      type="warning"
+      :closable="false"
+      style="margin-bottom: 16px;"
+      title="结构变更说明"
+      description="如果板块内已有帖子，删除控件或修改控件类型会影响历史帖子展示；旧数据不会立刻丢失，但用户下次编辑旧帖子时会按最新控件结构自动清理。"
     />
 
     <draggable v-model="widgets" item-key="widgetId" handle=".drag-handle">
       <template #item="{ element: widget }">
-        <el-card class="widget-card" style="margin-bottom: 12px;">
-          <div style="display: flex; align-items: flex-start; gap: 12px;">
-            <div class="drag-handle" style="cursor: grab; font-size: 20px; color: #ccc; padding-top: 4px;">⠿</div>
-            <el-form label-width="120px" style="flex: 1;">
+        <el-card class="widget-card">
+          <div class="widget-row">
+            <div class="drag-handle">⋮⋮</div>
+            <el-form label-width="138px" class="widget-form">
               <el-form-item label="控件类型">
-                <el-select v-model="widget.type" :disabled="!widget._isNew" style="width: 200px;">
+                <el-select v-model="widget.type" :disabled="!widget._isNew" style="width: 260px;" @change="handleTypeChange(widget)">
                   <el-option label="短文字" value="short_text" />
                   <el-option label="一句话简介" value="summary" />
                   <el-option label="日期时间" value="datetime" />
@@ -30,51 +49,77 @@
                   <el-option label="图片组" value="image_group" />
                   <el-option label="富文本" value="rich_text" />
                   <el-option label="地图位置" value="location" />
+                  <el-option label="活动参与" value="attendance" :disabled="sectionType !== 'realtime'" />
                 </el-select>
+                <span v-if="sectionType !== 'realtime'" class="muted-tip">活动参与控件仅支持 realtime 板块</span>
               </el-form-item>
+
               <el-form-item label="标签名">
-                <el-input v-model="widget.label" style="width: 200px;" />
+                <el-input v-model="widget.label" style="width: 260px;" />
               </el-form-item>
-              <el-form-item label="fieldKey">
-                <el-input v-model="widget.fieldKey" style="width: 200px;" placeholder="可读标识" />
+
+              <el-form-item v-if="widget.type === 'attendance'" label="人数上限">
+                <el-input-number
+                  v-model="widget.capacity"
+                  :min="1"
+                  :step="1"
+                  :precision="0"
+                  placeholder="不填表示不限"
+                />
+                <span class="muted-tip">留空表示不限人数</span>
               </el-form-item>
-              <el-form-item label="必填">
+
+              <el-form-item v-else label="必填">
                 <el-switch v-model="widget.required" />
               </el-form-item>
-              <el-form-item label="在列表显示">
-                <el-switch
-                  v-model="widget.showInList"
-                  :disabled="!isListDisplayable(widget.type)"
-                />
-                <span v-if="!isListDisplayable(widget.type)" style="margin-left: 8px; color: #999; font-size: 12px;">该类型不支持列表展示</span>
+
+              <el-form-item>
+                <template #label>
+                  <span>显示在帖子列表卡片</span>
+                  <el-tooltip
+                    placement="top"
+                    effect="dark"
+                    content="开启：会显示在帖子列表卡片摘要（最多 3 个）；关闭：只在帖子详情里展示。"
+                  >
+                    <el-icon class="help-icon"><WarningFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-switch v-model="widget.showInList" :disabled="!isListDisplayable(widget.type)" />
+                <span class="muted-tip" v-if="widget.type === 'attendance'">开启后会显示“参与人数 + 头像预览”</span>
+                <span class="muted-tip" v-else-if="!isListDisplayable(widget.type)">该类型不支持列表展示</span>
+                <span class="muted-tip" v-else>关闭后仅在帖子详情页展示</span>
               </el-form-item>
             </el-form>
-            <el-button type="danger" size="small" @click="removeWidget(widget)" style="margin-top: 4px;">删除</el-button>
+            <el-button type="danger" size="small" @click="removeWidget(widget)">删除</el-button>
           </div>
         </el-card>
       </template>
     </draggable>
 
-    <el-empty v-if="widgets.length === 0" description="暂无控件，点击「添加控件」开始配置" />
+    <el-empty v-if="widgets.length === 0" description="暂无控件，点击“添加控件”开始配置" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import draggable from 'vuedraggable'
-import { sectionApi } from '../../api/cloud'
-import { LIST_DISPLAYABLE_TYPES } from '../../../../cloud/shared/types'
 import { v4 as uuidv4 } from 'uuid'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { WarningFilled } from '@element-plus/icons-vue'
+import { communityApi, sectionApi } from '../../api/cloud'
+import { LIST_DISPLAYABLE_TYPES } from '../../../../cloud/shared/types'
 
 const route = useRoute()
-const sectionId = route.params.sectionId as string
-const communityId = route.query.communityId as string
+const sectionId = String(route.params.sectionId || '')
+const communityId = String(route.query.communityId || '')
 const widgets = ref<any[]>([])
 const saving = ref(false)
+const communityName = ref('')
+const sectionName = ref('')
+const sectionType = ref<'realtime' | 'evergreen'>('evergreen')
 
-const listCount = computed(() => widgets.value.filter(w => w.showInList).length)
+const listCount = computed(() => widgets.value.filter((widget) => widget.showInList).length)
 
 function isListDisplayable(type: string) {
   return LIST_DISPLAYABLE_TYPES.includes(type as any)
@@ -82,43 +127,121 @@ function isListDisplayable(type: string) {
 
 onMounted(async () => {
   try {
+    await loadCommunityContext()
     const res = await sectionApi.get(sectionId) as any
-    widgets.value = (res.section?.widgets ?? []).map((w: any) => ({ ...w, _isNew: false }))
-  } catch (e: any) {
-    ElMessage.error(e.message || '加载失败')
+    sectionName.value = String(res.section?.name || '')
+    sectionType.value = res.section?.type === 'realtime' ? 'realtime' : 'evergreen'
+    widgets.value = (res.section?.widgets ?? []).map((widget: any, index: number) => ({
+      ...widget,
+      fieldKey: resolveFieldKey(widget, index),
+      _isNew: false,
+    }))
+  } catch (error: any) {
+    ElMessage.error(error.message || '加载失败')
   }
 })
 
 function addWidget() {
+  const nextType = sectionType.value === 'realtime' && !widgets.value.some((widget) => widget.type === 'attendance')
+    ? 'short_text'
+    : 'short_text'
   widgets.value.push({
     widgetId: uuidv4(),
-    type: 'short_text',
+    type: nextType,
     label: '新控件',
     fieldKey: `field_${Date.now()}`,
     required: false,
     order: widgets.value.length,
     showInList: false,
+    capacity: undefined,
     _isNew: true,
   })
 }
 
+async function loadCommunityContext() {
+  if (!communityId) {
+    communityName.value = ''
+    return
+  }
+  try {
+    const res = await communityApi.list() as any
+    const current = (res.communities ?? []).find((community: any) => String(community?._id || community?.id || '') === communityId)
+    communityName.value = String(current?.name || '')
+  } catch {
+    communityName.value = ''
+  }
+}
+
+function resolveFieldKey(widget: any, index: number) {
+  const raw = String(widget?.fieldKey || '').trim()
+  if (raw) return raw
+  const widgetId = String(widget?.widgetId || '').replace(/[^a-zA-Z0-9_]/g, '')
+  if (widgetId) return `field_${widgetId.slice(0, 12)}`
+  return `field_${index + 1}`
+}
+
+function handleTypeChange(widget: any) {
+  if (widget.type === 'attendance') {
+    widget.required = false
+    widget.capacity = typeof widget.capacity === 'number' ? widget.capacity : undefined
+    widget.showInList = true
+    if (!widget.label || widget.label === '新控件') {
+      widget.label = '活动参与'
+    }
+  } else {
+    widget.capacity = undefined
+  }
+}
+
 function removeWidget(widget: any) {
-  widgets.value = widgets.value.filter(w => w.widgetId !== widget.widgetId)
+  widgets.value = widgets.value.filter((item) => item.widgetId !== widget.widgetId)
 }
 
 async function save() {
-  if (listCount.value > 3) {
-    ElMessage.error('列表显示字段不能超过3个')
+  if (!sectionId) {
+    ElMessage.error('缺少 sectionId，无法保存')
     return
   }
+  if (listCount.value > 3) {
+    ElMessage.error('帖子列表卡片展示项不能超过 3 个')
+    return
+  }
+
   saving.value = true
   try {
-    // Strip internal _isNew flag before sending
-    const orderedWidgets = widgets.value.map(({ _isNew, ...w }, i) => ({ ...w, order: i }))
-    await sectionApi.updateWidgets({ sectionId, communityId, widgets: orderedWidgets })
+    const orderedWidgets = widgets.value.map(({ _isNew, ...widget }, index) => ({
+      ...widget,
+      fieldKey: resolveFieldKey(widget, index),
+      required: widget.type === 'attendance' ? false : !!widget.required,
+      capacity: widget.type === 'attendance' && widget.capacity ? Number(widget.capacity) : undefined,
+      order: index,
+    }))
+
+    const preview = await sectionApi.updateWidgets({
+      sectionId,
+      communityId,
+      widgets: orderedWidgets,
+      preview: true,
+    }) as any
+
+    if (preview.requireConfirmation) {
+      const removedLabels = preview.structuralChanges?.removedLabels?.join('、') || '已删除控件'
+      await ElMessageBox.confirm(
+        `该板块已有 ${preview.activePostCount} 条帖子，本次将移除控件：${removedLabels}。历史帖子中的旧数据不会立刻删除，但会从当前展示结构中消失，并在用户下次编辑时自动清理。确认继续吗？`,
+        '确认结构变更',
+        { type: 'warning', confirmButtonText: '继续保存', cancelButtonText: '取消' }
+      )
+    }
+
+    await sectionApi.updateWidgets({
+      sectionId,
+      communityId,
+      widgets: orderedWidgets,
+      confirmStructureChange: true,
+    })
     ElMessage.success('保存成功')
-  } catch (e: any) {
-    ElMessage.error(e.message || '保存失败')
+  } catch (error: any) {
+    ElMessage.error(error.message || '保存失败')
   } finally {
     saving.value = false
   }
@@ -126,5 +249,74 @@ async function save() {
 </script>
 
 <style scoped>
-.widget-editor { padding: 0; }
+.widget-editor {
+  padding: 0;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.title-row h3 {
+  margin: 0;
+}
+
+.widget-card {
+  margin-bottom: 12px;
+}
+
+.widget-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.widget-form {
+  flex: 1;
+}
+
+.drag-handle {
+  cursor: grab;
+  font-size: 20px;
+  color: #c0c4cc;
+  padding-top: 6px;
+  user-select: none;
+}
+
+.help-icon {
+  margin-left: 6px;
+  font-size: 14px;
+  color: #909399;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.muted-tip {
+  margin-left: 8px;
+  color: #909399;
+  font-size: 12px;
+}
+
+@media (max-width: 768px) {
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .widget-row {
+    flex-direction: column;
+  }
+}
 </style>

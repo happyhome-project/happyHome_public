@@ -1,14 +1,14 @@
 <template>
-  <div>
+  <div data-testid="community-approval-page">
     <h3>社区审批</h3>
-    <el-table :data="pendingCommunities" v-loading="loading" style="width: 100%">
+    <el-table data-testid="community-approval-table" :data="pendingCommunities" v-loading="loading" style="width: 100%">
       <el-table-column prop="name" label="社区名称" />
       <el-table-column prop="description" label="描述" show-overflow-tooltip />
       <el-table-column prop="createdAt" label="申请时间" width="180" />
       <el-table-column label="操作" width="160">
         <template #default="{ row }">
-          <el-button type="primary" size="small" @click="approve(row)">通过</el-button>
-          <el-button type="danger" size="small" @click="reject(row)">拒绝</el-button>
+          <el-button data-testid="community-approve-button" :data-community-id="row._id" type="primary" size="small" @click="approve(row)">通过</el-button>
+          <el-button data-testid="community-reject-button" :data-community-id="row._id" type="danger" size="small" @click="reject(row)">拒绝</el-button>
         </template>
       </el-table-column>
     </el-table>

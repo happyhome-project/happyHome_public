@@ -1,15 +1,25 @@
 <template>
   <view class="phone-inner">
-    <!-- Masthead：社群封面卡 -->
-    <view class="s1-top">
+    <!-- Masthead：社群封面卡（整块可点切换社区） -->
+    <view
+      class="s1-top"
+      :class="{ 'is-tappable': hasMultipleCommunities }"
+      @tap="onMastheadTap"
+    >
       <view class="top-body">
         <text class="eyebrow">{{ kindEn }}</text>
         <view class="title-wrap">
           <text class="title">{{ communityName }}</text>
+          <text v-if="hasMultipleCommunities" class="title-chev">⌄</text>
         </view>
-        <text v-if="communityMeta" class="sub">{{ communityMeta }}</text>
+        <view v-if="communityMeta || hasMultipleCommunities" class="sub-row">
+          <text v-if="communityMeta" class="sub">{{ communityMeta }}</text>
+          <text v-if="hasMultipleCommunities" class="sub-switch">
+            <text v-if="communityMeta" class="sub-dot">·</text>切换社区 ›
+          </text>
+        </view>
       </view>
-      <view class="avatar" @tap="showSwitcher = true">
+      <view class="avatar">
         <text>{{ avatarLetter }}</text>
       </view>
     </view>
@@ -89,6 +99,7 @@
         :key="g.id"
         class="arc-card"
         :data-index="gi"
+        :style="getArchiveCardStyle(g, gi)"
         @tap="onGroupHeaderTap(g)"
       >
         <view class="arc-bh">
@@ -175,6 +186,14 @@ const avatarLetter = computed(() => {
   const name = communityStore.currentCommunity?.name ?? ''
   return name.charAt(0) || '?'
 })
+const hasMultipleCommunities = computed(() => (communityStore.myCommunities?.length ?? 0) > 1)
+
+function onMastheadTap() {
+  // 仅当用户有多个社区时才打开切换器；否则 tap 不做任何事（避免空切换器困扰）
+  if (hasMultipleCommunities.value) {
+    showSwitcher.value = true
+  }
+}
 
 // 场景类型（暂时固定为邻里，将来由 community.type 决定）
 const kind = computed(() => '邻里')
@@ -224,7 +243,7 @@ const scheduleItems = computed<ScheduleItem[]>(() => [])
 
 // ── 沉淀板块分组：只展示 type='evergreen' 的板块 ──
 interface ArchiveItem { k: string; t: string; who: string; meta?: string; hot?: boolean; when: string; postId?: string }
-interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[] }
+interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[]; accentColor?: string }
 
 const archiveGroups = computed<ArchiveGroup[]>(() => {
   return (communityStore.currentSections ?? [])
@@ -235,11 +254,12 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
         id: section._id,
         name: section.name,
         count: posts.length,
+        accentColor: section.accentColor || '',
         items: posts.slice(0, 3).map((p) => ({
           k: getPostKind(p),
           t: getPostTitle(p, section),
           who: p.authorNickname || '匿名',
-          meta: p.stats?.reaction ? `${p.stats.reaction} 赞` : '',
+          meta: getArchiveMeta(p, section),
           hot: isPostHot(p),
           when: formatTime(p.createdAt),
           postId: p._id,
@@ -277,7 +297,33 @@ function getPostTitle(post: any, section: any): string {
 }
 
 function isPostHot(post: any): boolean {
-  return (post.stats?.reaction ?? 0) > 10
+  return Number(post?.likeCount || 0) > 10
+}
+
+function getArchiveMeta(post: any, section: any): string {
+  if (section?.enableLike !== false && Number(post?.likeCount || 0) > 0) {
+    return `${post.likeCount} 赞`
+  }
+  if (section?.enableComment !== false && Number(post?.commentCount || 0) > 0) {
+    return `${post.commentCount} 评论`
+  }
+  if (section?.enableLike === false && section?.enableComment === false) {
+    return '互动关闭'
+  }
+  if (section?.enableLike === false) {
+    return '点赞关闭'
+  }
+  if (section?.enableComment === false) {
+    return '评论关闭'
+  }
+  return ''
+}
+
+function getArchiveCardStyle(group: ArchiveGroup, index: number) {
+  const fallbackPalette = ['#C8703E', '#4F6D8A', '#6C8A4E', '#A5668B', '#8C7A45', '#5E7F76']
+  return {
+    '--arc-accent': group.accentColor || fallbackPalette[index % fallbackPalette.length],
+  }
 }
 
 function formatTime(iso?: string): string {
@@ -362,6 +408,13 @@ onMounted(async () => {
   align-items: flex-start;
   justify-content: space-between;
 }
+.s1-top.is-tappable {
+  /* 多社区时整块可点切换，用极弱的 hover/active 指示可交互 */
+  cursor: pointer;
+}
+.s1-top.is-tappable:active {
+  background: $hh-surface-1;
+}
 .top-body {
   flex: 1;
   min-width: 0;
@@ -375,7 +428,11 @@ onMounted(async () => {
   display: block;
   margin-bottom: 12rpx;
 }
-.title-wrap { display: block; }
+.title-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 14rpx;
+}
 .title {
   font-family: $hh-font-serif;
   font-size: 56rpx;
@@ -383,15 +440,42 @@ onMounted(async () => {
   letter-spacing: $hh-tracking-serif;
   color: $hh-ink-1;
   line-height: 1.05;
-  display: block;
+}
+.title-chev {
+  font-size: 36rpx;
+  color: $hh-ink-3;
+  line-height: 1;
+  font-weight: $hh-font-weight-regular;
+  margin-left: 4rpx;
+  /* 把 chevron 稍稍下沉，与 baseline 对齐更协调 */
+  transform: translateY(-6rpx);
+}
+.sub-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0;
+  margin-top: 16rpx;
 }
 .sub {
-  display: block;
   font-family: $hh-font-sans;
   font-size: 24rpx;
   font-weight: $hh-font-weight-regular;
   color: $hh-ink-3;
-  margin-top: 16rpx;
+}
+.sub-switch {
+  font-family: $hh-font-mono;
+  font-size: 22rpx;
+  font-weight: $hh-font-weight-heavy;
+  letter-spacing: $hh-tracking-mono-sm;
+  color: $hh-accent;
+  text-transform: none;
+}
+.sub-dot {
+  margin: 0 12rpx;
+  color: $hh-ink-3;
+  font-family: $hh-font-sans;
+  font-weight: $hh-font-weight-regular;
 }
 .avatar {
   width: 72rpx;
@@ -676,14 +760,9 @@ onMounted(async () => {
   top: 0;
   bottom: 0;
   width: 6rpx;
-  background: $hh-accent;
+  background: var(--arc-accent, #{$hh-accent});
   opacity: 0.7;
 }
-.arc-card[data-index="1"]::before { background: $hh-accent-ochre; }
-.arc-card[data-index="2"]::before { background: $hh-accent-blue; }
-.arc-card[data-index="3"]::before { background: $hh-accent; opacity: 0.5; }
-.arc-card[data-index="4"]::before { background: $hh-accent-ochre; opacity: 0.5; }
-.arc-card[data-index="5"]::before { background: $hh-accent-blue; opacity: 0.5; }
 
 .arc-bh {
   padding: 24rpx 28rpx 16rpx 32rpx;

@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=375, initial-scale=1">
+<title>发帖 · 写点什么</title>
+<link rel="stylesheet" href="tokens-v2.css">
+<style>
+/* Compose · 延续 S1 视觉 */
+
+/* nav */
+.nav-c {
+  padding: 8px 16px 10px;
+  display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid var(--ink-line-2);
+}
+.nav-c .cancel {
+  font-size: 14px;
+  color: var(--ink-2);
+  padding: 6px 0;
+}
+.nav-c .title {
+  flex: 1;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 700;
+}
+.nav-c .draft {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--ink-3);
+  padding: 6px 10px;
+  border: 1px solid var(--ink-line);
+  border-radius: 99px;
+  text-transform: uppercase;
+}
+
+/* board chooser */
+.board-chooser {
+  padding: 14px 24px 12px;
+  display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid var(--ink-line-2);
+  background: var(--surface-1);
+  cursor: pointer;
+}
+.board-chooser .tone {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.board-chooser .pick {
+  flex: 1;
+  display: flex; align-items: center; gap: 8px;
+}
+.board-chooser .swatch {
+  width: 4px; height: 18px;
+  background: var(--accent);
+  border-radius: 99px;
+}
+.board-chooser .name {
+  font-family: var(--font-serif);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ink-1);
+  letter-spacing: -0.005em;
+}
+.board-chooser .meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.08em;
+  margin-left: 8px;
+  font-weight: 500;
+}
+.board-chooser .chev {
+  color: var(--ink-3);
+  font-size: 14px;
+}
+
+/* editor */
+.editor {
+  padding: 20px 24px 12px;
+}
+.editor .title-input {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--ink-1);
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 0;
+  margin-bottom: 14px;
+  resize: none;
+  display: block;
+}
+.editor .title-input::placeholder { color: var(--ink-4); }
+
+.editor .body-input {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  color: var(--ink-1);
+  line-height: 1.65;
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 0;
+  resize: none;
+  display: block;
+  min-height: 140px;
+  letter-spacing: 0.005em;
+  overflow: hidden;
+}
+.editor .body-input::placeholder { color: var(--ink-4); }
+
+.caret {
+  display: inline-block;
+  width: 2px; height: 18px;
+  background: var(--accent);
+  vertical-align: text-bottom;
+  margin-left: 1px;
+  animation: blink 1s step-end infinite;
+  transform: translateY(3px);
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* inline format hint */
+.hint {
+  margin: 16px 0 8px;
+  padding: 8px 12px;
+  border: 1px dashed var(--ink-line);
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  display: flex; gap: 10px; align-items: center;
+  background: var(--surface-1);
+}
+.hint b { color: var(--ink-1); font-weight: 700; font-family: var(--font-mono); }
+.hint .sep { color: var(--ink-line); }
+
+/* inserts block */
+.inserts {
+  padding: 14px 24px 20px;
+  border-top: 1px solid var(--ink-line-2);
+  margin-top: 16px;
+}
+.inserts .h {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 10px;
+}
+.inserts .h b { color: var(--ink-1); font-weight: 700; }
+
+/* photo strip */
+.photo-strip {
+  display: flex; gap: 8px; overflow-x: auto;
+  margin-bottom: 14px;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+.photo-strip::-webkit-scrollbar { display: none; }
+.photo-strip .ph {
+  flex-shrink: 0;
+  width: 88px; height: 88px;
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, oklch(0.78 0.08 40) 0%, oklch(0.65 0.12 30) 100%);
+  position: relative;
+  overflow: hidden;
+}
+.photo-strip .ph:nth-child(2) {
+  background: linear-gradient(135deg, oklch(0.8 0.06 130) 0%, oklch(0.65 0.1 150) 100%);
+}
+.photo-strip .ph:nth-child(3) {
+  background: linear-gradient(135deg, oklch(0.82 0.05 70) 0%, oklch(0.7 0.08 50) 100%);
+}
+.photo-strip .ph .num {
+  position: absolute;
+  top: 4px; right: 4px;
+  background: rgba(0,0,0,0.35);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 99px;
+  letter-spacing: 0.08em;
+}
+.photo-strip .ph .del {
+  position: absolute;
+  top: 4px; left: 4px;
+  width: 18px; height: 18px;
+  border-radius: 99px;
+  background: rgba(0,0,0,0.5);
+  color: #fff;
+  font-size: 11px;
+  display: flex; align-items: center; justify-content: center;
+}
+.photo-strip .add {
+  flex-shrink: 0;
+  width: 88px; height: 88px;
+  border: 1px dashed var(--ink-line);
+  border-radius: 10px;
+  background: var(--surface-1);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 4px;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.photo-strip .add svg { color: var(--ink-3); }
+
+/* chips */
+.chip-row {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.chip-row .chip {
+  padding: 6px 12px;
+  border: 1px solid var(--ink-line);
+  border-radius: 99px;
+  font-size: 12px;
+  color: var(--ink-2);
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--surface-1);
+}
+.chip-row .chip.on {
+  background: var(--ink-1);
+  color: var(--surface-1);
+  border-color: var(--ink-1);
+  font-weight: 600;
+}
+.chip-row .chip.on svg { color: var(--surface-1); }
+.chip-row .chip.add {
+  border-style: dashed;
+  color: var(--ink-3);
+}
+
+/* tag suggest */
+.tag-sugg {
+  padding: 10px 0;
+  border-top: 1px solid var(--ink-line-2);
+  margin-top: 4px;
+}
+.tag-sugg .h {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 8px;
+}
+.tag-sugg .h b { color: var(--ink-1); font-weight: 700; }
+.tag-sugg .sugg {
+  display: flex; gap: 6px; flex-wrap: wrap;
+}
+.tag-sugg .tg {
+  padding: 5px 10px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  border-radius: 99px;
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+}
+.tag-sugg .tg::before { content: "#"; color: var(--ink-4); margin-right: 2px; }
+.tag-sugg .tg.picked {
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+.tag-sugg .tg.picked::before { color: var(--accent-ink); }
+
+/* settings list */
+.settings {
+  margin-top: 4px;
+  border-top: 1px solid var(--ink-line-2);
+}
+.settings .row {
+  padding: 12px 24px;
+  display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid var(--ink-line-2);
+  background: var(--surface-1);
+}
+.settings .row:last-child { border-bottom: none; }
+.settings .row .ic {
+  width: 28px; height: 28px; border-radius: 7px;
+  background: var(--surface-2);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink-2);
+  flex-shrink: 0;
+}
+.settings .row .lbl {
+  font-size: 13.5px;
+  color: var(--ink-1);
+  font-weight: 500;
+  flex: 1;
+}
+.settings .row .val {
+  font-family: var(--font-num);
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+.settings .row .val.on { color: var(--accent-ink); font-weight: 600; }
+.settings .row .chev {
+  color: var(--ink-4);
+  font-size: 14px;
+  margin-left: 4px;
+}
+
+/* keyboard + toolbar */
+.kb-tools {
+  position: absolute;
+  left: 0; right: 0; bottom: 216px;
+  height: 44px;
+  padding: 0 8px;
+  background: var(--surface-1);
+  border-top: 1px solid var(--ink-line-2);
+  border-bottom: 1px solid var(--ink-line);
+  display: flex; align-items: center;
+  gap: 4px;
+  z-index: 5;
+}
+.kb-tools .t {
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink-2);
+  border-radius: 6px;
+}
+.kb-tools .t:hover { background: var(--surface-2); }
+.kb-tools .t.active { background: var(--surface-2); color: var(--ink-1); }
+.kb-tools .divider {
+  width: 1px; height: 18px; background: var(--ink-line-2);
+  margin: 0 4px;
+}
+.kb-tools .spacer { flex: 1; }
+.kb-tools .count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.1em;
+  padding: 0 8px;
+}
+.kb-tools .count b { color: var(--ink-1); font-weight: 700; font-family: var(--font-num); font-size: 12px; }
+.kb-tools .publish {
+  height: 32px;
+  padding: 0 16px;
+  background: var(--ink-1);
+  color: var(--surface-1);
+  border-radius: 99px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* fake keyboard */
+.kb {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 216px;
+  background: oklch(0.82 0.006 60);
+  border-top: 1px solid oklch(0.72 0.008 60);
+  padding: 8px 4px 20px;
+  display: flex; flex-direction: column;
+  gap: 8px;
+  z-index: 4;
+}
+.kb .row {
+  display: flex; gap: 5px; justify-content: center;
+  padding: 0 3px;
+}
+.kb .key {
+  flex: 1;
+  height: 38px;
+  background: var(--surface-1);
+  border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px;
+  color: var(--ink-1);
+  font-weight: 400;
+  box-shadow: 0 1px 0 oklch(0.65 0.008 60);
+  max-width: 32px;
+}
+.kb .key.wide { max-width: none; flex: 1.5; }
+.kb .key.sys {
+  background: oklch(0.72 0.006 60);
+  color: var(--ink-1);
+  font-size: 12px;
+  font-weight: 500;
+}
+.kb .key.space { max-width: none; flex: 5; font-size: 12px; color: var(--ink-3); }
+.kb .ind {
+  height: 4px;
+  width: 130px;
+  background: var(--ink-1);
+  border-radius: 2px;
+  margin: 4px auto 0;
+}
+
+/* override phone-inner so content is above kb+toolbar */
+.phone-inner { padding-bottom: 268px; }
+</style>
+</head>
+<body>
+
+<div class="phone" data-screen-label="发帖 · 写作状态">
+  <div class="phone-inner">
+    <div class="status-bar">
+      <span class="num">9:41</span>
+      <span class="sb-icons">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="none"><path d="M1 9h2v2H1V9zm4-2h2v4H5V7zm4-3h2v7H9V4zm4-3h2v10h-2V1z" fill="currentColor"/></svg>
+        <svg width="24" height="11" viewBox="0 0 24 11" fill="none"><rect x="0.5" y="0.5" width="21" height="10" rx="2.5" stroke="currentColor" opacity="0.4"/><rect x="2" y="2" width="16" height="7" rx="1" fill="currentColor"/><rect x="22" y="3.5" width="1.5" height="4" rx="0.5" fill="currentColor" opacity="0.4"/></svg>
+      </span>
+    </div>
+
+    <div class="nav-c">
+      <button class="cancel">取消</button>
+      <div class="title">NEW POST</div>
+      <button class="draft">存草稿</button>
+    </div>
+
+    <div class="board-chooser">
+      <span class="tone">发布到 →</span>
+      <div class="pick">
+        <div class="swatch"></div>
+        <div>
+          <span class="name">周边好店</span>
+          <span class="meta">· 沉淀 · 86 条</span>
+        </div>
+      </div>
+      <span class="chev">⌄</span>
+    </div>
+
+    <div class="editor">
+      <textarea class="title-input" rows="2" placeholder="标题 · 一句话说清楚">东门新开的云南米线 · 带娃去试了三次</textarea>
+      <textarea class="body-input" rows="6" placeholder="慢慢写，这里是给邻居的一封信。支持 ** 加粗 **、&gt; 引用、## 小标题">上周三路过东门新开了一家小店，招牌写着「老云南过桥米线」，门脸不大，但进门那股酸笋和肉汤混合的香气，一下子把我拉回大学时期昆明的巷子里。
+
+我带着娃三天去了三次。先说结论：**值得专门来一次**。他家汤底是真熬的</textarea><span class="caret"></span>
+
+      <div class="hint">
+        <b>**</b>加粗<span class="sep">·</span>
+        <b>##</b>小标<span class="sep">·</span>
+        <b>&gt;</b>引语<span class="sep">·</span>
+        <b>—</b>分隔
+      </div>
+    </div>
+
+    <div class="inserts">
+      <div class="h"><b>配图</b>· 3 / 9</div>
+      <div class="photo-strip">
+        <div class="ph"><span class="del">×</span><span class="num">1</span></div>
+        <div class="ph"><span class="del">×</span><span class="num">2</span></div>
+        <div class="ph"><span class="del">×</span><span class="num">3</span></div>
+        <div class="add">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg>
+          <span>相册</span>
+        </div>
+      </div>
+
+      <div class="h"><b>标签</b>· 帮助邻居找到</div>
+      <div class="tag-sugg">
+        <div class="sugg">
+          <span class="tg picked">米线</span>
+          <span class="tg picked">带娃友好</span>
+          <span class="tg">东门商圈</span>
+          <span class="tg">云南菜</span>
+          <span class="tg">新开</span>
+          <span class="tg">实测</span>
+          <span class="tg">+</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings">
+      <div class="row">
+        <div class="ic">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        </div>
+        <div class="lbl">添加位置</div>
+        <div class="val">东门商业街 A 区</div>
+        <span class="chev">›</span>
+      </div>
+      <div class="row">
+        <div class="ic">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        </div>
+        <div class="lbl">定时发布</div>
+        <div class="val">立即 ·</div>
+        <span class="chev">›</span>
+      </div>
+      <div class="row">
+        <div class="ic">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        </div>
+        <div class="lbl">同步到群主精选候选</div>
+        <div class="val on">已开启</div>
+      </div>
+    </div>
+
+    <!-- /.phone-inner end → keyboard + toolbar sit as siblings so they stay fixed to .phone bottom -->
+  </div>
+
+  <!-- Keyboard toolbar (fixed to phone bottom, outside scroll) -->
+  <div class="kb-tools">
+    <button class="t" aria-label="加粗"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 4h8a4 4 0 0 1 0 8H6z"/><path d="M6 12h9a4 4 0 0 1 0 8H6z"/></svg></button>
+    <button class="t" aria-label="斜体"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg></button>
+    <button class="t" aria-label="H"><span style="font-family:var(--font-serif);font-weight:700;font-size:14px">H</span></button>
+    <div class="divider"></div>
+    <button class="t" aria-label="列表"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg></button>
+    <button class="t" aria-label="引语"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h4v6H7a3 3 0 0 1 3-3V7a6 6 0 0 0-6 6v3h6v-6zm8 6h-4V7h4a3 3 0 0 1 3 3h-3v3h6a6 6 0 0 0-6-6v6z" opacity=".9"/></svg></button>
+    <button class="t" aria-label="图片"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg></button>
+    <button class="t" aria-label="链接"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.72-1.71"/></svg></button>
+    <div class="spacer"></div>
+    <span class="count"><b>132</b>/2000</span>
+    <button class="publish">发布</button>
+  </div>
+
+  <!-- Fake keyboard (fixed to phone bottom) -->
+  <div class="kb">
+    <div class="row">
+      <div class="key">q</div><div class="key">w</div><div class="key">e</div><div class="key">r</div><div class="key">t</div><div class="key">y</div><div class="key">u</div><div class="key">i</div><div class="key">o</div><div class="key">p</div>
+    </div>
+    <div class="row" style="padding: 0 18px">
+      <div class="key">a</div><div class="key">s</div><div class="key">d</div><div class="key">f</div><div class="key">g</div><div class="key">h</div><div class="key">j</div><div class="key">k</div><div class="key">l</div>
+    </div>
+    <div class="row">
+      <div class="key sys wide">⇧</div><div class="key">z</div><div class="key">x</div><div class="key">c</div><div class="key">v</div><div class="key">b</div><div class="key">n</div><div class="key">m</div><div class="key sys wide">⌫</div>
+    </div>
+    <div class="row">
+      <div class="key sys wide">123</div><div class="key sys">🌐</div><div class="key space">space</div><div class="key sys wide">return</div>
+    </div>
+    <div class="ind"></div>
+  </div>
+</div>
+
+<script>
+// auto-grow textareas
+document.querySelectorAll('textarea').forEach(t => {
+  const grow = () => { t.style.height = 'auto'; t.style.height = (t.scrollHeight) + 'px'; };
+  t.addEventListener('input', grow);
+  grow();
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,122 @@
+/* HappyHome · Home V4 · Restrained Archive */
+:root {
+  --surface-0: oklch(0.965 0.005 75);
+  --surface-1: oklch(0.988 0.004 75);
+  --surface-2: oklch(0.935 0.006 75);
+  --surface-3: oklch(0.905 0.008 75);
+
+  --ink-1: oklch(0.22 0.01 60);
+  --ink-2: oklch(0.42 0.01 60);
+  --ink-3: oklch(0.60 0.008 60);
+  --ink-4: oklch(0.75 0.006 60);
+
+  --ink-line:   oklch(0.88 0.006 60);
+  --ink-line-2: oklch(0.93 0.005 60);
+
+  --accent:      oklch(0.48 0.08 150);
+  --accent-ink:  oklch(0.38 0.08 150);
+  --accent-wash: oklch(0.94 0.03 150);
+  --accent-line: oklch(0.82 0.05 150);
+
+  --live:      oklch(0.58 0.18 25);
+  --live-wash: oklch(0.93 0.045 30);
+
+  --amber-wash: oklch(0.94 0.04 75);
+  --blue-wash:  oklch(0.93 0.03 240);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Segoe UI", sans-serif;
+  --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace;
+  --font-serif: "Songti SC", "STSong", "Source Han Serif SC", Georgia, serif;
+  --font-num: "SF Pro Display", ui-sans-serif, var(--font-sans);
+}
+
+* { box-sizing: border-box; -webkit-font-smoothing: antialiased; margin: 0; padding: 0; }
+body {
+  font-family: var(--font-sans);
+  color: var(--ink-1);
+  background: var(--surface-0);
+  font-size: 14px;
+  line-height: 1.45;
+}
+button { font: inherit; border: 0; background: none; color: inherit; cursor: pointer; padding: 0; }
+a { color: inherit; text-decoration: none; }
+
+/* Phone frame */
+.phone {
+  width: 375px;
+  height: 812px;
+  margin: 0 auto;
+  background: var(--surface-0);
+  overflow: hidden;
+  position: relative;
+  border-radius: 0;
+}
+.phone-inner {
+  width: 100%; height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  position: relative;
+  padding-bottom: 92px;
+}
+.phone-inner::-webkit-scrollbar { display: none; }
+
+.status-bar {
+  height: 44px;
+  padding: 0 24px;
+  display: flex; justify-content: space-between; align-items: center;
+  font-family: var(--font-num);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-1);
+  position: sticky; top: 0;
+  background: var(--surface-0);
+  z-index: 10;
+}
+.status-bar .sb-icons { display: inline-flex; gap: 5px; color: var(--ink-1); }
+.status-bar .num { font-variant-numeric: tabular-nums; }
+
+.app-body { padding-top: 4px; }
+
+/* FAB */
+.fab {
+  position: absolute;
+  right: 20px; bottom: 96px;
+  width: 52px; height: 52px;
+  border-radius: 99px;
+  background: var(--ink-1);
+  color: var(--surface-1);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.18);
+  z-index: 5;
+}
+
+/* Tabbar */
+.tabbar {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 78px;
+  padding: 8px 20px 20px;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  background: color-mix(in srgb, var(--surface-1) 92%, transparent);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid var(--ink-line-2);
+  z-index: 4;
+}
+.tabbar .tab {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  color: var(--ink-3);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  position: relative;
+  padding: 0 6px;
+}
+.tabbar .tab.on { color: var(--ink-1); font-weight: 600; }
+.tabbar .tab .dot {
+  width: 3px; height: 3px; border-radius: 99px;
+  background: transparent;
+}
+.tabbar .tab.on .dot { background: var(--accent); }
+</content>

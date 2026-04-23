@@ -6,17 +6,52 @@ import { assertCommunityAdmin } from '../../lib/auth'
 import type { Widget, Section, SectionType, SectionStatus } from '../../shared/types'
 import { LIST_DISPLAYABLE_TYPES } from '../../shared/types'
 
-// 老数据没有 type/status 字段时的默认值（避免一次性 migration）
-// evergreen + active 表示"沉淀常驻"，对老数据语义最安全
 function normalizeSection(s: any): Section {
   return {
     ...s,
     type: (s.type as SectionType) || 'evergreen',
     status: (s.status as SectionStatus) || 'active',
+    enableComment: s.enableComment !== false,
+    enableLike: s.enableLike !== false,
   }
 }
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
+
+function normalizeWidget(widget: Widget): Widget {
+  const normalized: Widget = {
+    ...widget,
+    required: widget.type === 'attendance' ? false : widget.required,
+  }
+  if (normalized.type !== 'attendance') {
+    delete normalized.capacity
+  } else if (typeof normalized.capacity === 'number') {
+    normalized.capacity = Number.isFinite(normalized.capacity) && normalized.capacity > 0
+      ? Math.floor(normalized.capacity)
+      : undefined
+  }
+  return normalized
+}
+
+function validateWidgets(sectionType: SectionType, widgets: Widget[]) {
+  const showInListCount = widgets.filter((widget) => widget.showInList).length
+  if (showInListCount > 3) throw new Error('showInList 最多只能有 3 个控件')
+
+  const attendanceWidgets = widgets.filter((widget) => widget.type === 'attendance')
+  if (attendanceWidgets.length > 1) throw new Error('每个板块最多只能配置 1 个活动参与控件')
+  if (attendanceWidgets.length > 0 && sectionType !== 'realtime') {
+    throw new Error('活动参与控件只能用于 realtime 板块')
+  }
+
+  for (const widget of widgets) {
+    if (widget.showInList && !LIST_DISPLAYABLE_TYPES.includes(widget.type)) {
+      throw new Error(`控件类型 ${widget.type} 不支持在列表展示`)
+    }
+    if (widget.type === 'attendance' && widget.required) {
+      throw new Error('活动参与控件不支持设为必填')
+    }
+  }
+}
 
 export async function handleCreate(
   params: {
@@ -62,12 +97,11 @@ export async function handleList(params: { communityId: string; withPostCount?: 
   })
   const sections = raw.map(normalizeSection)
 
-  // 首页需要每个 section 的活跃帖子数（N+1 查询；单社区 section 数量不大，可接受）
   if (params.withPostCount) {
     const withCount = await Promise.all(
-      sections.map(async (s) => ({
-        ...s,
-        postCount: await db.count('posts', { sectionId: s._id, status: 'active' }),
+      sections.map(async (section: Section) => ({
+        ...section,
+        postCount: await db.count('posts', { sectionId: section._id, status: 'active' }),
       }))
     )
     return { sections: withCount }
@@ -83,24 +117,12 @@ export async function handleUpdateWidgets(
   if (!openid) throw new Error('Missing OPENID')
   await assertCommunityAdmin(openid, params.communityId)
 
-  const widgets = params.widgets
-
-  // Validate showInList count <= 3
-  const showInListCount = widgets.filter(w => w.showInList).length
-  if (showInListCount > 3) throw new Error('showInList 最多只能有 3 个控件')
-
-  // Validate showInList only allowed for LIST_DISPLAYABLE_TYPES
-  for (const widget of widgets) {
-    if (widget.showInList && !LIST_DISPLAYABLE_TYPES.includes(widget.type)) {
-      throw new Error(`控件类型 ${widget.type} 不支持在列表展示`)
-    }
-  }
-
-  // Assign UUID to new widgets (widgetId empty/missing)
-  const updatedWidgets = widgets.map(w => ({
-    ...w,
-    widgetId: w.widgetId ? w.widgetId : uuidv4(),
+  const section = normalizeSection(await db.getById('sections', params.sectionId))
+  const updatedWidgets = params.widgets.map((widget) => normalizeWidget({
+    ...widget,
+    widgetId: widget.widgetId ? widget.widgetId : uuidv4(),
   }))
+  validateWidgets(section.type, updatedWidgets)
 
   await db.updateById('sections', params.sectionId, { widgets: updatedWidgets })
   return { widgets: updatedWidgets }
@@ -125,7 +147,6 @@ export async function handleUpdate(
   await assertCommunityAdmin(openid, params.communityId)
 
   const { sectionId, communityId, ...updates } = params
-  // evergreen 类型的 status 强制为 active（语义：永远常驻）
   if (updates.type === 'evergreen') updates.status = 'active'
   await db.updateById('sections', sectionId, updates)
   return { success: true }
