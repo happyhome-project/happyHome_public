@@ -2,13 +2,29 @@ import axios from 'axios'
 
 const BASE_URL = import.meta.env.VITE_CLOUD_API_URL
 
+// Guard against a stuck redirect loop when the login page itself fails to auth.
+let redirectedToLogin = false
+
 async function callAdmin(action: string, params: Record<string, any> = {}) {
-  const res = await axios.post(
-    `${BASE_URL}/admin`,
-    { action, ...params },
-    { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
-  )
-  return res.data
+  try {
+    const res = await axios.post(
+      `${BASE_URL}/admin`,
+      { action, ...params },
+      { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+    )
+    return res.data
+  } catch (err: any) {
+    const status = err?.response?.status
+    // Token invalid / missing → force re-login. Otherwise the admin just sees "403"
+    // error toasts with no hint about how to recover.
+    if ((status === 401 || status === 403) && !redirectedToLogin && location.pathname !== '/login') {
+      redirectedToLogin = true
+      localStorage.removeItem('token')
+      // Hard redirect preserves this error semantic without coupling the api layer to vue-router.
+      location.replace('/login')
+    }
+    throw err
+  }
 }
 
 // Keep for backward compat with WidgetEditor.vue which imports callCloud
