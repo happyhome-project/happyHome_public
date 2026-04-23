@@ -100,7 +100,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { communityApi, memberApi } from '../../api/cloud'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 type MemberStatus = 'pending' | 'active' | 'rejected'
 interface MemberRow {
@@ -191,6 +191,17 @@ async function reject(row: MemberRow) {
 }
 
 async function kick(row: MemberRow) {
+  // 二次确认：移出成员是不可逆的危险操作，跟 disable / hardDelete 等保持一致的确认流
+  const label = row.nickName || row.userId || '该成员'
+  try {
+    await ElMessageBox.confirm(
+      `确认将成员「${label}」移出社区吗？该用户之后需重新申请才能加入。`,
+      '移出确认',
+      { confirmButtonText: '移出', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return // 用户取消
+  }
   try {
     await memberApi.kick(communityId.value, row._id)
     ElMessage.success('已移出成员')
