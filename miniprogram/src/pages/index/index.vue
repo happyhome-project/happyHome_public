@@ -169,6 +169,7 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { postApi } from '../../api/cloud'
 
@@ -390,6 +391,13 @@ onMounted(async () => {
     await communityStore.loadMyCommunities()
   }
   await loadAllSectionPosts()
+})
+
+// tabBar 页面切回首页时（如发帖后 switchTab 返回）不会重新 mount，只触发 onShow。
+// 这里 onShow 统一刷新帖子数据，确保新发/新删的内容能实时反映。
+// 首次 onShow 发生在 onMounted 之后，会二次拉取（可接受：代价低、换取数据新鲜度）。
+onShow(() => {
+  void loadAllSectionPosts()
 })
 </script>
 
