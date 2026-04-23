@@ -1,7 +1,17 @@
 <template>
   <div data-testid="member-approval-page">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-      <h3 style="margin: 0;">成员管理</h3>
+    <div class="page-header">
+      <div>
+        <el-breadcrumb separator="/">
+          <el-breadcrumb-item :to="{ name: 'communities' }">社区管理</el-breadcrumb-item>
+          <el-breadcrumb-item>{{ communityName || '当前社区' }}</el-breadcrumb-item>
+          <el-breadcrumb-item>成员管理</el-breadcrumb-item>
+        </el-breadcrumb>
+        <div class="title-row">
+          <h3 style="margin: 0;">成员管理</h3>
+          <el-tag size="small" effect="plain" type="info">当前社区：{{ communityName || communityId }}</el-tag>
+        </div>
+      </div>
       <el-button data-testid="member-refresh-button" @click="loadMembers" :loading="loading">刷新</el-button>
     </div>
 
@@ -89,7 +99,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { memberApi } from '../../api/cloud'
+import { communityApi, memberApi } from '../../api/cloud'
 import { ElMessage } from 'element-plus'
 
 type MemberStatus = 'pending' | 'active' | 'rejected'
@@ -114,6 +124,7 @@ const activeTab = ref<'pending' | 'all'>('pending')
 const loading = ref(false)
 const keyword = ref('')
 const statusFilter = ref<'all' | MemberStatus>('all')
+const communityName = ref('')
 
 onMounted(async () => {
   if (!communityId.value) {
@@ -121,8 +132,20 @@ onMounted(async () => {
     router.push({ name: 'communities' })
     return
   }
+  await loadCommunityContext()
   await loadMembers()
 })
+
+async function loadCommunityContext() {
+  try {
+    const res = await communityApi.list() as any
+    const communities = res.communities ?? []
+    const current = communities.find((community: any) => String(community?._id || community?.id || '') === communityId.value)
+    communityName.value = String(current?.name || '')
+  } catch {
+    communityName.value = ''
+  }
+}
 
 async function loadMembers() {
   loading.value = true
@@ -198,3 +221,28 @@ function getErrorMessage(error: any): string {
   return String(error?.response?.data?.error || error?.message || '')
 }
 </script>
+
+<style scoped>
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+</style>

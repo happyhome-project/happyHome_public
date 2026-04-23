@@ -99,6 +99,7 @@
         :key="g.id"
         class="arc-card"
         :data-index="gi"
+        :style="getArchiveCardStyle(g, gi)"
         @tap="onGroupHeaderTap(g)"
       >
         <view class="arc-bh">
@@ -242,7 +243,7 @@ const scheduleItems = computed<ScheduleItem[]>(() => [])
 
 // ── 沉淀板块分组：只展示 type='evergreen' 的板块 ──
 interface ArchiveItem { k: string; t: string; who: string; meta?: string; hot?: boolean; when: string; postId?: string }
-interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[] }
+interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[]; accentColor?: string }
 
 const archiveGroups = computed<ArchiveGroup[]>(() => {
   return (communityStore.currentSections ?? [])
@@ -253,6 +254,7 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
         id: section._id,
         name: section.name,
         count: posts.length,
+        accentColor: section.accentColor || '',
         items: posts.slice(0, 3).map((p) => ({
           k: getPostKind(p),
           t: getPostTitle(p, section),
@@ -315,6 +317,13 @@ function getArchiveMeta(post: any, section: any): string {
     return '评论关闭'
   }
   return ''
+}
+
+function getArchiveCardStyle(group: ArchiveGroup, index: number) {
+  const fallbackPalette = ['#C8703E', '#4F6D8A', '#6C8A4E', '#A5668B', '#8C7A45', '#5E7F76']
+  return {
+    '--arc-accent': group.accentColor || fallbackPalette[index % fallbackPalette.length],
+  }
 }
 
 function formatTime(iso?: string): string {
@@ -751,14 +760,9 @@ onMounted(async () => {
   top: 0;
   bottom: 0;
   width: 6rpx;
-  background: $hh-accent;
+  background: var(--arc-accent, #{$hh-accent});
   opacity: 0.7;
 }
-.arc-card[data-index="1"]::before { background: $hh-accent-ochre; }
-.arc-card[data-index="2"]::before { background: $hh-accent-blue; }
-.arc-card[data-index="3"]::before { background: $hh-accent; opacity: 0.5; }
-.arc-card[data-index="4"]::before { background: $hh-accent-ochre; opacity: 0.5; }
-.arc-card[data-index="5"]::before { background: $hh-accent-blue; opacity: 0.5; }
 
 .arc-bh {
   padding: 24rpx 28rpx 16rpx 32rpx;

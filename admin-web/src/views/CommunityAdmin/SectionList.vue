@@ -1,7 +1,17 @@
 <template>
   <div data-testid="section-list-page">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-      <h3>板块管理</h3>
+    <div class="page-header">
+      <div>
+        <el-breadcrumb separator="/">
+          <el-breadcrumb-item :to="{ name: 'communities' }">社区管理</el-breadcrumb-item>
+          <el-breadcrumb-item>{{ communityName || '当前社区' }}</el-breadcrumb-item>
+          <el-breadcrumb-item>板块管理</el-breadcrumb-item>
+        </el-breadcrumb>
+        <div class="title-row">
+          <h3>板块管理</h3>
+          <el-tag size="small" effect="plain" type="info">当前社区：{{ communityName || communityId }}</el-tag>
+        </div>
+      </div>
       <el-button data-testid="section-create-button" type="primary" @click="openCreate">新建板块</el-button>
     </div>
 
@@ -32,7 +42,11 @@
           </template>
         </template>
       </el-table-column>
-      <el-table-column prop="icon" label="图标" width="80" />
+      <el-table-column label="入口图标" width="110">
+        <template #default="{ row }">
+          <span>{{ row.icon || '默认' }}</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="order" label="排序" width="70" />
       <el-table-column label="互动" width="160">
         <template #default="{ row }">
@@ -99,14 +113,63 @@
             <el-radio value="realtime">实时协作</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item label="图标">
-          <el-input v-model="form.icon" placeholder="可选，例如：child / car / book" />
+        <el-form-item>
+          <template #label>
+            <span>首页入口图标（可选）</span>
+            <el-tooltip
+              placement="top"
+              effect="dark"
+              content="显示在小程序首页这个板块入口前的小图标。留空也可以，系统会用默认样式展示。"
+            >
+              <el-icon class="help-icon"><WarningFilled /></el-icon>
+            </el-tooltip>
+          </template>
+          <div class="preset-grid">
+            <button
+              v-for="option in iconOptions"
+              :key="option.value || 'default'"
+              type="button"
+              class="preset-button icon-preset"
+              :class="{ active: form.icon === option.value }"
+              @click="form.icon = option.value"
+            >
+              <span class="icon-glyph">{{ option.glyph }}</span>
+              <span class="preset-label">{{ option.label }}</span>
+            </button>
+          </div>
+          <div class="field-hint">不需要手输。直接点一个图标；不选则使用系统默认样式。</div>
         </el-form-item>
         <el-form-item label="排序">
           <el-input-number v-model="form.order" :min="0" :step="1" style="width: 180px;" />
         </el-form-item>
-        <el-form-item label="左侧色条">
-          <el-input v-model="form.accentColor" placeholder="可选，例如：#3A6A45" />
+        <el-form-item>
+          <template #label>
+            <span>首页强调色（可选）</span>
+            <el-tooltip
+              placement="top"
+              effect="dark"
+              content="用于小程序首页里这个板块卡片的强调色。留空时系统会自动分配，不影响正常使用。"
+            >
+              <el-icon class="help-icon"><WarningFilled /></el-icon>
+            </el-tooltip>
+          </template>
+          <div class="preset-grid color-grid">
+            <button
+              v-for="option in colorOptions"
+              :key="option.value || 'default'"
+              type="button"
+              class="preset-button color-preset"
+              :class="{ active: form.accentColor === option.value }"
+              @click="form.accentColor = option.value"
+            >
+              <span
+                class="color-swatch"
+                :style="{ background: option.preview }"
+              />
+              <span class="preset-label">{{ option.label }}</span>
+            </button>
+          </div>
+          <div class="field-hint">不需要手写色号。直接点选一种颜色；不选则由系统自动分配。</div>
         </el-form-item>
         <el-form-item label="允许评论">
           <el-switch v-model="form.enableComment" />
@@ -133,9 +196,9 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { sectionApi } from '../../api/cloud'
+import { communityApi, sectionApi } from '../../api/cloud'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown } from '@element-plus/icons-vue'
+import { ArrowDown, WarningFilled } from '@element-plus/icons-vue'
 
 type SectionType = 'realtime' | 'evergreen'
 type SectionStatus = 'active' | 'dormant' | 'archived'
@@ -161,6 +224,30 @@ const saving = ref(false)
 const deletingId = ref('')
 const showDialog = ref(false)
 const editingId = ref('')
+const communityName = ref('')
+const iconOptions = [
+  { value: '', glyph: '·', label: '系统默认' },
+  { value: '📣', glyph: '📣', label: '通知' },
+  { value: '🚗', glyph: '🚗', label: '出行' },
+  { value: '🍲', glyph: '🍲', label: '美食' },
+  { value: '🛍️', glyph: '🛍️', label: '闲置' },
+  { value: '📚', glyph: '📚', label: '学习' },
+  { value: '🏃', glyph: '🏃', label: '活动' },
+  { value: '🐾', glyph: '🐾', label: '宠物' },
+  { value: '👨‍👩‍👧', glyph: '👨‍👩‍👧', label: '亲子' },
+  { value: '💬', glyph: '💬', label: '交流' },
+] as const
+const colorOptions = [
+  { value: '', label: '系统默认', preview: 'linear-gradient(135deg, #e5e7eb, #cbd5e1)' },
+  { value: '#3A6A45', label: '松林绿', preview: '#3A6A45' },
+  { value: '#2F5D8C', label: '湖水蓝', preview: '#2F5D8C' },
+  { value: '#A65A3A', label: '陶土橙', preview: '#A65A3A' },
+  { value: '#7A4E8A', label: '梅子紫', preview: '#7A4E8A' },
+  { value: '#B8860B', label: '暖金色', preview: '#B8860B' },
+  { value: '#B94B6B', label: '玫瑰红', preview: '#B94B6B' },
+  { value: '#4C7A5A', label: '鼠尾草', preview: '#4C7A5A' },
+  { value: '#5B6C8F', label: '雾霭蓝', preview: '#5B6C8F' },
+] as const
 const form = ref<{
   name: string
   icon: string
@@ -188,6 +275,7 @@ onMounted(async () => {
     router.push({ name: 'communities' })
     return
   }
+  await loadCommunityContext()
   await loadSections()
 })
 
@@ -196,10 +284,22 @@ watch(
   async (next) => {
     communityId.value = String(next || '')
     if (communityId.value) {
+      await loadCommunityContext()
       await loadSections()
     }
   }
 )
+
+async function loadCommunityContext() {
+  try {
+    const res = await communityApi.list() as any
+    const communities = res.communities ?? []
+    const current = communities.find((community: any) => String(community?._id || community?.id || '') === communityId.value)
+    communityName.value = String(current?.name || '')
+  } catch {
+    communityName.value = ''
+  }
+}
 
 async function loadSections() {
   loading.value = true
@@ -361,3 +461,109 @@ function statusTagType(s: SectionStatus): 'success' | 'info' | 'warning' {
   return s === 'active' ? 'success' : s === 'dormant' ? 'warning' : 'info'
 }
 </script>
+
+<style scoped>
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.title-row h3 {
+  margin: 0;
+}
+
+.help-icon {
+  margin-left: 6px;
+  font-size: 14px;
+  color: #909399;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.preset-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+
+.preset-button {
+  border: 1px solid #dcdfe6;
+  background: #fff;
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.preset-button:hover {
+  border-color: #409eff;
+}
+
+.preset-button.active {
+  border-color: #409eff;
+  background: #ecf5ff;
+  box-shadow: 0 0 0 1px rgba(64, 158, 255, 0.15) inset;
+}
+
+.icon-preset {
+  min-width: 92px;
+}
+
+.icon-glyph {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.preset-label {
+  font-size: 13px;
+  color: #303133;
+}
+
+.color-grid {
+  gap: 10px;
+}
+
+.color-preset {
+  min-width: 110px;
+}
+
+.color-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  flex: none;
+}
+
+.field-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+}
+
+@media (max-width: 768px) {
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .title-row {
+    flex-wrap: wrap;
+  }
+}
+</style>
