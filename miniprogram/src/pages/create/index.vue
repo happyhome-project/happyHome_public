@@ -34,7 +34,7 @@
       <view v-if="!selectedSection" class="section-picker">
         <text class="title">选择板块</text>
         <view
-          v-for="section in communityStore.currentSections"
+          v-for="section in activeSections"
           :key="section._id"
           class="section-option"
           @tap="selectSection(section)"
@@ -42,8 +42,8 @@
           <text class="section-name">{{ section.name }}</text>
           <text class="arrow">→</text>
         </view>
-        <view v-if="communityStore.currentSections.length === 0" class="empty-hint">
-          <text class="guard-desc">该社区还没有板块</text>
+        <view v-if="activeSections.length === 0" class="empty-hint">
+          <text class="guard-desc">该社区还没有可发布的板块</text>
         </view>
       </view>
 
@@ -102,6 +102,11 @@ const isMember = ref(false)
 const memberStatus = ref<string | null>(null)
 const joining = ref(false)
 let checkSeq = 0
+
+// 只允许在 active 板块发帖。dormant / archived 板块既无法发帖也无处展示（首页已过滤）。
+const activeSections = computed(() =>
+  (communityStore.currentSections ?? []).filter((section: any) => (section?.status ?? 'active') === 'active')
+)
 
 const editableWidgets = computed(() =>
   (selectedSection.value?.widgets || []).filter((widget: any) => widget.type !== 'attendance')
