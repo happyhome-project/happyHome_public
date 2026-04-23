@@ -81,6 +81,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi } from '../../api/cloud'
@@ -158,8 +159,11 @@ const rejectLock = useKeyedBusyLock(
   (member) => member._id,
 )
 
-onMounted(async () => {
+async function loadPendingMembers() {
   if (!userStore.isLoggedIn) return
+  // Reset so repeated calls (onMounted + onShow) don't duplicate entries
+  pendingMembers.value = []
+  adminCommunityIds.value = []
   // Load pending members for each admin community
   for (const c of communityStore.myCommunities) {
     try {
@@ -173,7 +177,12 @@ onMounted(async () => {
       // Not admin of this community, skip
     }
   }
-})
+}
+
+onMounted(() => { void loadPendingMembers() })
+// tabBar 切回 Profile 只触发 onShow，不会重新 mount。新申请者 / 被审批后的状态
+// 需要在 onShow 重新拉取，否则 admin 在本 tab 看不到实时变动。
+onShow(() => { void loadPendingMembers() })
 </script>
 
 <style lang="scss" scoped>
