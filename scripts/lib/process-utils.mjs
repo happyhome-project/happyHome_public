@@ -43,8 +43,12 @@ export async function runLoggedCommand({
 }) {
   if (logPath) await ensureDir(dirname(logPath))
 
+  const isWindowsBatch = process.platform === 'win32' && /\.(cmd|bat)$/i.test(command)
+  const spawnCommand = isWindowsBatch ? 'cmd.exe' : command
+  const spawnArgs = isWindowsBatch ? ['/d', '/s', '/c', command, ...args] : args
+
   return new Promise((resolvePromise) => {
-    const child = spawn(command, args, {
+    const child = spawn(spawnCommand, spawnArgs, {
       cwd,
       env,
       shell: false,
