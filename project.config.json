@@ -19,6 +19,7 @@
     "condition": false,
     "swc": false,
     "disableSWC": true,
+    "ignoreDevUnusedFiles": false,
     "babelSetting": {
       "ignore": [],
       "disablePlugins": [],
@@ -31,7 +32,16 @@
   "simulatorPluginLibVersion": {},
   "packOptions": {
     "ignore": [],
-    "include": []
+    "include": [
+      {
+        "type": "file",
+        "value": "utils/widget-form.js"
+      },
+      {
+        "type": "file",
+        "value": "miniprogram/dist/build/mp-weixin/utils/widget-form.js"
+      }
+    ]
   },
   "editorSetting": {},
   "cloudfunctionTemplateRoot": "cloudfunctionTemplate/",
