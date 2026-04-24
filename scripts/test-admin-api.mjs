@@ -102,6 +102,39 @@ async function main() {
 
   const pendingRes = await callAdmin('member.pendingList', { communityId })
   assert(pendingRes.members.some((m) => m.userId === applicant), 'member.pendingList includes the applicant')
+
+  console.log('\n7) Reject applicant and verify rejected member can be kicked')
+  const pendingMember = pendingRes.members.find((m) => m.userId === applicant)
+  assert(!!pendingMember?._id, 'pending member record exists for reject/kick flow')
+
+  if (pendingMember?._id) {
+    const rejectRes = await callAdmin('member.reject', {
+      communityId,
+      memberId: pendingMember._id,
+    })
+    assert(rejectRes.success === true, 'member.reject returns success')
+
+    const rejectedRes = await callAdmin('member.list', {
+      communityId,
+      status: 'rejected',
+    })
+    assert(rejectedRes.members.some((m) => m._id === pendingMember._id), 'member.list rejected includes applicant')
+
+    const kickRejectedRes = await callAdmin('member.kick', {
+      communityId,
+      memberId: pendingMember._id,
+    })
+    assert(kickRejectedRes.success === true, 'member.kick removes rejected member record')
+
+    const rejectedAfterKickRes = await callAdmin('member.list', {
+      communityId,
+      status: 'rejected',
+    })
+    assert(
+      rejectedAfterKickRes.members.every((m) => m._id !== pendingMember._id),
+      'kicked rejected member no longer appears in rejected list',
+    )
+  }
 }
 
 main()

@@ -96,7 +96,7 @@
                 :disabled="!canKick(row)"
                 @click="kick(row)"
               >
-                {{ row.status === 'rejected' ? '移除记录' : '移出' }}
+                移出
               </el-button>
               <span v-if="row.isCreator" style="margin-left: 8px; color: #909399; font-size: 12px;">创建者</span>
             </template>
