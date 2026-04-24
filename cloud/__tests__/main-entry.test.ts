@@ -185,7 +185,6 @@ describe('OPENID requirement contract', () => {
     ['member.memberApprove', memberMain, 'memberApprove', { communityId: 'c1', memberId: 'm1' }],
     ['member.memberReject', memberMain, 'memberReject', { communityId: 'c1', memberId: 'm1' }],
     ['member.pendingList', memberMain, 'pendingList', { communityId: 'c1' }],
-    ['member.myCommunities', memberMain, 'myCommunities', {}],
     ['section.create', sectionMain, 'create', { communityId: 'c1', name: 'x', icon: '', order: 0 }],
     ['section.updateWidgets', sectionMain, 'updateWidgets', { communityId: 'c1', sectionId: 's1', widgets: [] }],
     ['section.update', sectionMain, 'update', { sectionId: 's1', communityId: 'c1' }],
@@ -199,6 +198,12 @@ describe('OPENID requirement contract', () => {
     cloud.getWXContext.mockReturnValueOnce({ OPENID: '' })
     await expect(main(fe(action, params))).rejects.toThrow(/Missing OPENID|无权|已删除|帖子已删除/)
   })
+})
+
+test('member.myCommunities without OPENID returns empty list as backend fallback', async () => {
+  const cloud = require('wx-server-sdk')
+  cloud.getWXContext.mockReturnValueOnce({ OPENID: '' })
+  await expect(memberMain(fe('myCommunities'))).resolves.toEqual({ communities: [] })
 })
 
 // ============================================================
