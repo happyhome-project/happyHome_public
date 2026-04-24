@@ -1,6 +1,11 @@
 <template>
   <view class="page">
-    <view class="form">
+    <LoginGuard
+      v-if="!userStore.isLoggedIn"
+      title="请先登录"
+      desc="登录后才能创建社区"
+    />
+    <view v-else class="form">
       <view class="field">
         <text class="label">社区名称 <text class="required">*</text></text>
         <view class="input-wrap">
@@ -42,6 +47,10 @@
 import { reactive, ref } from 'vue'
 import { communityApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
+import { useUserStore } from '../../store/user'
+import LoginGuard from '../../components/LoginGuard.vue'
+
+const userStore = useUserStore()
 
 const communityStore = useCommunityStore()
 const submitting = ref(false)

@@ -14,17 +14,13 @@
         </view>
       </template>
 
-      <!-- 未登录 or 编辑态：显示采集表单 -->
-      <template v-else>
+      <!-- 编辑态：头像 + 昵称表单（chooseAvatar 明显可见） -->
+      <template v-else-if="isEditingProfile">
         <view class="login-form">
-          <text class="form-title">
-            {{ isEditingProfile ? '编辑资料' : '登录' }}
-          </text>
-          <text class="form-hint">
-            {{ isEditingProfile ? '修改头像和昵称后点击保存' : '点击头像选择、输入昵称后登录' }}
-          </text>
+          <text class="form-title">编辑资料</text>
+          <text class="form-hint">修改头像和昵称后点击保存</text>
 
-          <!-- 头像按钮：微信原生 chooseAvatar，弹出系统选择器 -->
+          <!-- 头像按钮：微信原生 chooseAvatar，右下角相机徽标提示可点 -->
           <view class="avatar-row">
             <button
               v-if="supportsChooseAvatar"
@@ -32,10 +28,13 @@
               class="avatar-picker-btn"
               @chooseavatar="onChooseAvatar"
             >
-              <image
-                :src="formAvatarDisplay || '/static/default-avatar.png'"
-                class="avatar-preview"
-              />
+              <view class="avatar-edit-wrap">
+                <image
+                  :src="formAvatarDisplay || '/static/default-avatar.png'"
+                  class="avatar-preview"
+                />
+                <view class="avatar-edit-badge">📷</view>
+              </view>
             </button>
             <image
               v-else
@@ -43,11 +42,71 @@
               class="avatar-preview"
             />
             <text class="avatar-hint">
-              {{ supportsChooseAvatar ? '点击选择头像' : '当前环境不支持选头像' }}
+              {{ supportsChooseAvatar ? '点击更换头像' : '当前基础库暂不支持修改头像' }}
             </text>
           </view>
 
-          <!-- 昵称输入：type="nickname" 触发微信真实昵称候选 -->
+          <!-- 昵称输入 -->
+          <view class="input-wrap">
+            <input
+              type="nickname"
+              :value="formNickName"
+              placeholder="请输入昵称"
+              placeholder-class="input-placeholder"
+              maxlength="20"
+              class="input"
+              @input="onNickInput"
+              @blur="onNickBlur"
+            />
+          </view>
+
+          <view class="form-actions">
+            <button size="mini" @tap="cancelEditProfile">取消</button>
+            <button
+              size="mini"
+              :disabled="!canSubmitForm || submitFormLock.busy.value"
+              class="primary-btn"
+              @tap="submitFormLock.run()"
+            >
+              {{ submitFormLock.busy.value ? '保存中...' : '保存' }}
+            </button>
+          </view>
+        </view>
+      </template>
+
+      <!-- 未登录态：支持 chooseAvatar 时走"一按钮登录"，否则 fallback 旧表单 -->
+      <template v-else-if="supportsChooseAvatar">
+        <view class="login-form">
+          <text class="form-title">登录</text>
+          <text class="form-hint">点击下方按钮，选择你的头像和昵称</text>
+
+          <button
+            open-type="chooseAvatar"
+            class="login-hero-btn"
+            @chooseavatar="onLoginChooseAvatar"
+          >微信登录</button>
+
+          <view class="login-alt-row">
+            <text class="login-alt-hint">使用其他账号？</text>
+            <text class="login-alt-link" @tap="showDevLogin = true">DEV 登录</text>
+          </view>
+        </view>
+      </template>
+
+      <!-- Fallback：H5 / 老基础库，旧三步表单 -->
+      <template v-else>
+        <view class="login-form">
+          <text class="form-title">登录</text>
+          <text class="form-hint">当前环境不支持微信原生登录，请手动填写</text>
+
+          <view class="avatar-row">
+            <image
+              :src="formAvatarDisplay || '/static/default-avatar.png'"
+              class="avatar-preview"
+            />
+            <text class="avatar-hint">默认头像</text>
+          </view>
+
           <view class="input-wrap">
             <input
               type="nickname"
@@ -63,20 +122,14 @@
 
           <view class="form-actions">
             <button
-              v-if="isEditingProfile"
-              size="mini"
-              @tap="cancelEditProfile"
-            >取消</button>
-            <button
               size="mini"
               :disabled="!canSubmitForm || submitFormLock.busy.value"
               class="primary-btn"
               @tap="submitFormLock.run()"
             >
-              {{ submitFormLock.busy.value ? (isEditingProfile ? '保存中...' : '登录中...') : (isEditingProfile ? '保存' : '确认登录') }}
+              {{ submitFormLock.busy.value ? '登录中...' : '确认登录' }}
             </button>
             <button
-              v-if="!isEditingProfile"
               size="mini"
               class="dev-btn"
               @tap="showDevLogin = true"
@@ -84,6 +137,41 @@
           </view>
         </view>
       </template>
+    </view>
+
+    <!-- 昵称确认浮层：chooseAvatar 回调后自动弹出 -->
+    <view v-if="showNickConfirm" class="nick-modal-mask" @tap="cancelNickConfirm">
+      <view class="nick-modal" @tap.stop>
+        <image
+          :src="formAvatarDisplay || '/static/default-avatar.png'"
+          class="nick-modal-avatar"
+        />
+        <text class="nick-modal-title">请确认你的昵称</text>
+        <text class="nick-modal-hint">点击下方输入框可使用微信昵称</text>
+        <view class="input-wrap">
+          <input
+            type="nickname"
+            :value="formNickName"
+            placeholder="请输入昵称"
+            placeholder-class="input-placeholder"
+            maxlength="20"
+            class="input"
+            @input="onNickInput"
+            @blur="onNickBlur"
+          />
+        </view>
+        <view class="nick-modal-actions">
+          <button size="mini" @tap="cancelNickConfirm">取消</button>
+          <button
+            size="mini"
+            :disabled="!canSubmitForm || submitFormLock.busy.value"
+            class="primary-btn"
+            @tap="submitFormLock.run()"
+          >
+            {{ submitFormLock.busy.value ? '登录中...' : '确认登录' }}
+          </button>
+        </view>
+      </view>
     </view>
 
     <!-- DEV login modal -->
@@ -178,6 +266,7 @@ const adminCommunityIds = ref<string[]>([])
 
 // ── 登录 / 编辑资料表单状态 ──
 const isEditingProfile = ref(false)
+const showNickConfirm = ref(false)    // 登录流程：chooseAvatar 后弹出昵称确认浮层
 const formNickName = ref('')
 const formAvatarCloudUrl = ref('')    // 已上传到 COS 的 cloud://… URL（持久）
 const formAvatarTempPath = ref('')    // chooseAvatar 回传的临时路径（本次提交时上传 COS）
@@ -207,6 +296,22 @@ function onChooseAvatar(e: any) {
   if (tempPath) {
     formAvatarTempPath.value = tempPath
   }
+}
+
+// 登录态点"微信登录"大按钮 → 微信弹 chooseAvatar → 回调后自动弹昵称确认浮层。
+// 和编辑态的 onChooseAvatar 区分：编辑态只换头像，不弹浮层。
+function onLoginChooseAvatar(e: any) {
+  const tempPath = e?.detail?.avatarUrl || ''
+  if (!tempPath) return
+  formAvatarTempPath.value = tempPath
+  formNickName.value = ''
+  showNickConfirm.value = true
+}
+
+function cancelNickConfirm() {
+  showNickConfirm.value = false
+  formAvatarTempPath.value = ''
+  formNickName.value = ''
 }
 
 function onNickInput(e: any) {
@@ -268,6 +373,7 @@ const submitFormLock = useBusyLock(async () => {
       await communityStore.loadMyCommunities()
     }
     isEditingProfile.value = false
+    showNickConfirm.value = false
     formAvatarTempPath.value = ''
     formAvatarCloudUrl.value = ''
     uni.showToast({ title: '已保存', icon: 'success' })
@@ -443,15 +549,64 @@ onShow(() => { void loadPendingMembers() })
   line-height: 1;
 }
 .avatar-picker-btn::after { border: none; }
+.avatar-edit-wrap {
+  position: relative;
+  width: 140rpx;
+  height: 140rpx;
+}
 .avatar-preview {
   width: 140rpx;
   height: 140rpx;
   border-radius: $hh-radius-full;
   background: $hh-color-bg-sub;
 }
+.avatar-edit-badge {
+  position: absolute;
+  right: -4rpx;
+  bottom: -4rpx;
+  width: 44rpx;
+  height: 44rpx;
+  border-radius: $hh-radius-full;
+  background: $hh-accent;
+  color: #fff;
+  font-size: 24rpx;
+  line-height: 44rpx;
+  text-align: center;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.15);
+}
 .avatar-hint {
   font-size: $hh-font-caption;
   color: $hh-color-text-mute;
+}
+
+/* ── 登录 Hero 按钮 + DEV 小字链接 ── */
+.login-hero-btn {
+  width: 100%;
+  background: $hh-accent;
+  color: #fff;
+  font-size: $hh-font-body-lg;
+  font-weight: $hh-font-weight-bold;
+  padding: 24rpx 0;
+  border-radius: $hh-radius-md;
+  margin-top: $hh-space-xs;
+}
+.login-hero-btn::after { border: none; }
+.login-hero-btn[disabled] { opacity: $hh-opacity-disabled; }
+.login-alt-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: $hh-space-xs;
+  margin-top: $hh-space-sm;
+}
+.login-alt-hint {
+  font-size: $hh-font-caption;
+  color: $hh-color-text-mute;
+}
+.login-alt-link {
+  font-size: $hh-font-caption;
+  color: $hh-accent;
+  text-decoration: underline;
 }
 .form-actions {
   display: flex;
@@ -507,6 +662,48 @@ onShow(() => { void loadPendingMembers() })
 .dev-desc { font-size: $hh-font-caption; color: $hh-color-text-mute; line-height: $hh-line-height-base; }
 .dev-actions { display: flex; gap: $hh-space-sm; margin-top: $hh-space-xs; }
 .dev-actions button { flex: 1; }
+
+/* ── 昵称确认浮层（登录流程） ── */
+.nick-modal-mask {
+  position: fixed;
+  top: 0; right: 0; bottom: 0; left: 0;
+  background: $hh-color-mask;
+  display: flex; align-items: center; justify-content: center;
+  z-index: $hh-z-modal;
+}
+.nick-modal {
+  background: $hh-color-surface; border-radius: $hh-radius-md;
+  padding: 40rpx $hh-space-lg; width: 84%; max-width: 600rpx;
+  display: flex; flex-direction: column; align-items: center;
+  gap: $hh-space-md;
+  box-shadow: $hh-shadow-modal;
+}
+.nick-modal-avatar {
+  width: 160rpx;
+  height: 160rpx;
+  border-radius: $hh-radius-full;
+  background: $hh-color-bg-sub;
+}
+.nick-modal-title {
+  font-size: $hh-font-h3;
+  font-weight: $hh-font-weight-bold;
+  color: $hh-color-text;
+}
+.nick-modal-hint {
+  font-size: $hh-font-caption;
+  color: $hh-color-text-mute;
+  text-align: center;
+}
+.nick-modal .input-wrap {
+  width: 100%;
+  box-sizing: border-box;
+}
+.nick-modal-actions {
+  display: flex;
+  gap: $hh-space-sm;
+  width: 100%;
+}
+.nick-modal-actions button { flex: 1; }
 
 .input-wrap { background: $hh-color-bg-sub; border-radius: $hh-radius-sm; padding: $hh-space-md; }
 .input { font-size: $hh-font-body; width: 100%; min-height: 40rpx; background: transparent; color: $hh-color-text; }

@@ -1,5 +1,13 @@
 <template>
   <view class="phone-inner">
+    <!-- 未登录：引导卡片（占满首页，挡住任何数据渲染） -->
+    <LoginGuard
+      v-if="!userStore.isLoggedIn"
+      title="欢迎来到 happyHome"
+      desc="登录后查看你的社区和近况"
+    />
+
+    <template v-else>
     <!-- Masthead：社群封面卡（整块可点切换社区） -->
     <view
       class="s1-top"
@@ -165,6 +173,7 @@
         </view>
       </view>
     </view>
+    </template>
   </view>
 </template>
 
@@ -172,9 +181,12 @@
 import { computed, ref, onMounted } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
+import { useUserStore } from '../../store/user'
 import { postApi } from '../../api/cloud'
+import LoginGuard from '../../components/LoginGuard.vue'
 
 const communityStore = useCommunityStore()
+const userStore = useUserStore()
 const showSwitcher = ref(false)
 const postsBySection = ref<Record<string, any[]>>({})
 
@@ -392,6 +404,13 @@ async function loadAllSectionPosts() {
 }
 
 onMounted(async () => {
+  // 未登录：清干净 store，不再拉任何社区/帖子数据（模板里已由 LoginGuard 挡住渲染）
+  if (!userStore.isLoggedIn) {
+    communityStore.clearCommunityState()
+    communityStore.myCommunities = []
+    postsBySection.value = {}
+    return
+  }
   if (communityStore.myCommunities.length === 0) {
     await communityStore.loadMyCommunities()
   }
@@ -402,6 +421,7 @@ onMounted(async () => {
 // 这里 onShow 统一刷新帖子数据，确保新发/新删的内容能实时反映。
 // 首次 onShow 发生在 onMounted 之后，会二次拉取（可接受：代价低、换取数据新鲜度）。
 onShow(() => {
+  if (!userStore.isLoggedIn) return
   void loadAllSectionPosts()
 })
 </script>

@@ -1,6 +1,11 @@
 <template>
   <view class="detail-page">
-    <view v-if="post && section" class="content">
+    <LoginGuard
+      v-if="!userStore.isLoggedIn"
+      title="请先登录"
+      desc="登录后才能查看帖子详情"
+    />
+    <view v-else-if="post && section" class="content">
       <view v-if="!editing">
         <WidgetRenderer
           v-for="widget in regularWidgets"
@@ -90,7 +95,7 @@
       </view>
     </view>
 
-    <view v-else class="loading"><text>加载中...</text></view>
+    <view v-else-if="userStore.isLoggedIn" class="loading"><text>加载中...</text></view>
 
     <view v-if="showRoster" class="roster-mask" @tap="closeRoster">
       <view class="roster-panel" @tap.stop>
@@ -136,6 +141,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import { postApi, sectionApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
+import LoginGuard from '../../components/LoginGuard.vue'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
 import WidgetRenderer from '../../components/widgets/WidgetRenderer.vue'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
@@ -176,6 +182,8 @@ onLoad(async (options: any) => {
   const postId = String(options?.postId || '')
   if (!postId) return
   currentPostId.value = postId
+  // 未登录：LoginGuard 已挡住渲染，不发起请求
+  if (!userStore.isLoggedIn) return
   await loadPost(postId)
 })
 
