@@ -90,7 +90,10 @@ async function deployCloudViaDevtoolsCli(fns) {
     'cloud', 'functions', 'deploy',
     '--env', CLOUD_ENV,
     '--paths', ...paths,
-    '--project', MP_DIST,
+    // --project 指向仓库根，读 /project.config.json 里的 miniprogramRoot +
+    // cloudfunctionRoot + packOptions.include 等完整配置。**不要**指向 dist
+    // 子目录，否则会开第二个 DevTools 窗口且读到缺配置的简化版 dist config。
+    '--project', ROOT,
     '--remote-npm-install',
   ]
 
