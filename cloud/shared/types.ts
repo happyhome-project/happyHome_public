@@ -42,13 +42,16 @@ export interface AttendancePreviewUser {
   userId: string
   nickName: string
   avatarUrl: string
+  seatCount?: number
 }
 
 export interface AttendanceSummary {
   count: number
+  occupiedSeats: number
   capacity?: number
   isFull: boolean
   isJoined: boolean
+  mySeatCount?: number
   previewUsers: AttendancePreviewUser[]
 }
 
@@ -124,6 +127,7 @@ export interface PostAttendanceMember {
   communityId: string
   sectionId: string
   userId: string
+  seatCount?: number
   joinedAt: string
 }
 
