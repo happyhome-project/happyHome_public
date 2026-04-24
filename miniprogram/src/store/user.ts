@@ -36,35 +36,31 @@ export const useUserStore = defineStore('user', {
         isLoggedIn: this.isLoggedIn,
       })
     },
-    async login() {
-      // Real WeChat login path — uses wx.getUserProfile + wx.login (implicit via cloud)
-      return new Promise<void>((resolve, reject) => {
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        if (typeof wx === 'undefined' || !wx.getUserProfile) {
-          reject(new Error('当前环境不支持微信登录，请使用 DEV 模式登录'))
-          return
-        }
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        wx.getUserProfile({
-          desc: '用于展示用户头像和昵称',
-          success: async (profileRes: any) => {
-            try {
-              const { nickName, avatarUrl } = profileRes.userInfo
-              const result = await userApi.login({ nickName, avatarUrl })
-              this.openId = result.user._id
-              this.nickName = nickName
-              this.avatarUrl = avatarUrl
-              this.role = result.user.role
-              this.isLoggedIn = true
-              this.saveToStorage()
-              resolve()
-            } catch (err) { reject(err) }
-          },
-          fail: reject,
-        })
-      })
+    /**
+     * 微信登录（新方案，2022-10 后策略变更）。
+     *
+     * 由于 wx.getUserProfile 在真机上会强制返回 "微信用户" + 默认头像，官方唯一
+     * 合规的方案是让用户通过 <button open-type="chooseAvatar"> + <input type="nickname">
+     * 主动采集。由 profile 页的表单采集后把 { nickName, avatarUrl } 传给这个方法。
+     *
+     * avatarUrl 可以是：
+     *  - cloud:// ...（已上传到 COS 的永久路径，推荐）
+     *  - 空串（后端/前端自己用默认灰头像兜底）
+     *  - 临时路径 wxfile:// / http://tmp/...（不推荐，会失效，应先上传 COS 再传入）
+     *
+     * 这个方法也用于"编辑资料"（user.login 云函数是 upsert 语义），登录态下再调
+     * 一次会覆盖 nickName + avatarUrl。
+     */
+    async login({ nickName, avatarUrl }: { nickName: string; avatarUrl: string }) {
+      const name = (nickName || '').trim()
+      if (!name) throw new Error('请填写昵称')
+      const result = await userApi.login({ nickName: name, avatarUrl: avatarUrl || '' })
+      this.openId = result.user._id
+      this.nickName = name
+      this.avatarUrl = avatarUrl || ''
+      this.role = result.user.role
+      this.isLoggedIn = true
+      this.saveToStorage()
     },
     /**
      * DEV 模式登录：绕过 wx.login，直接用指定 openid 通过 http-gateway 调
