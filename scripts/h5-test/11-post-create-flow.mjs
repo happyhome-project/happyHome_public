@@ -147,6 +147,20 @@ async function main() {
   assert(gotPost.content[mixByLabel['标题']] === '周日爬山', 'get 返回标题正确')
   assert(gotPost.content[mixByLabel['活动时间']] === '2026-05-03 08:30', 'get 返回活动时间正确')
 
+  // post.get 附带作者昵称（Bug "匿名" 修复 2026-04-23：JOIN users 表取 nickName）
+  assert(
+    gotPost.authorNickname === `Member-${runId}`,
+    `post.get 返回 authorNickname="${gotPost.authorNickname}"（应为 Member-${runId}）`
+  )
+
+  // post.list 也附带作者昵称（首页/板块页都靠它显示而不再 fallback 到"匿名"）
+  const { posts: listedPosts } = await callAs(member, 'post', 'list', { sectionId: mixedId })
+  const listedMix = listedPosts.find(p => p._id === mixPostId)
+  assert(
+    listedMix?.authorNickname === `Member-${runId}`,
+    `post.list 返回 authorNickname="${listedMix?.authorNickname}"（应为 Member-${runId}）`
+  )
+
   // update（带新字段）
   await callAs(member, 'post', 'update', {
     postId: mixPostId,

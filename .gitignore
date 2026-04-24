@@ -13,6 +13,7 @@ test-results/
 # logs
 *.log
 chat_history*
+log.txt
 
 # OS / editor
 .DS_Store
