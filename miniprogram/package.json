@@ -36,7 +36,7 @@
     "build:quickapp-webview-union": "uni build -p quickapp-webview-union",
     "type-check": "vue-tsc --noEmit",
     "test:unit": "vitest run",
-    "postinstall": "node -e \"const f=require('fs'),s='../node_modules/wot-design-uni',t='node_modules/wot-design-uni';if(!f.existsSync(t)&&f.existsSync(s)){f.mkdirSync('node_modules',{recursive:true});f.cpSync(s,t,{recursive:true});console.log('wot-design-uni: copied to local node_modules (workspace hoist fix)')}\""
+    "postinstall": "node -e \"const f=require('fs'),p=require('path');for(const n of ['wot-design-uni','@dcloudio/uni-ui']){const s='../node_modules/'+n,t='node_modules/'+n;if(!f.existsSync(t)&&f.existsSync(s)){f.mkdirSync(p.dirname(t),{recursive:true});f.cpSync(s,t,{recursive:true});console.log(n+': copied to local node_modules (workspace hoist fix)')}}\""
   },
   "dependencies": {
     "@dcloudio/uni-app": "3.0.0-4080420251103001",
@@ -55,6 +55,7 @@
     "@dcloudio/uni-mp-weixin": "3.0.0-4080420251103001",
     "@dcloudio/uni-mp-xhs": "3.0.0-4080420251103001",
     "@dcloudio/uni-quickapp-webview": "3.0.0-4080420251103001",
+    "@dcloudio/uni-ui": "^1.5.12",
     "pinia": "^3.0.4",
     "vue": "^3.4.21",
     "vue-i18n": "^9.1.9",
