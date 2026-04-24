@@ -10,11 +10,12 @@
 
 ---
 
-## 新会话开场 3 件事（必做）
+## 新会话开场 4 件事（必做）
 
 1. **读 [docs/SESSION-HANDOFF.md](docs/SESSION-HANDOFF.md)** —— 当前进度、近期改动、正在走的迁移
-2. **扫 `memory/MEMORY.md` 索引**（系统自动加载到 context）—— 过往踩坑提示
-3. **对齐用户需求再开工** —— "有 95% 把握理解需求后再开始"（CLAUDE.md 全局原则）
+2. **扫 [TASKS.md](TASKS.md)** —— 跨 session 的 TODO / 待决策项
+3. **扫 `memory/MEMORY.md` 索引**（系统自动加载到 context）—— 过往踩坑提示
+4. **对齐用户需求再开工** —— "有 95% 把握理解需求后再开始"（CLAUDE.md 全局原则）
 
 ---
 
