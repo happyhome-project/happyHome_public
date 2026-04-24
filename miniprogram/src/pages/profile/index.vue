@@ -1,16 +1,89 @@
 <template>
   <view class="profile-page">
-    <!-- User info -->
+    <!-- User info / login form -->
     <view class="user-card">
-      <image :src="userStore.avatarUrl || '/static/default-avatar.png'" class="avatar" />
-      <view class="user-info">
-        <text class="name">{{ userStore.nickName || '未登录' }}</text>
-        <view v-if="!userStore.isLoggedIn" class="login-actions">
-          <button size="mini" @tap="handleLogin">微信登录</button>
-          <button size="mini" @tap="showDevLogin = true" class="dev-btn">DEV 登录</button>
+      <!-- 已登录且非编辑态：显示头像+昵称+登出/编辑按钮 -->
+      <template v-if="userStore.isLoggedIn && !isEditingProfile">
+        <image :src="userStore.avatarUrl || '/static/default-avatar.png'" class="avatar" />
+        <view class="user-info">
+          <text class="name">{{ userStore.nickName || '未登录' }}</text>
+          <view class="action-row">
+            <button size="mini" @tap="openEditProfile">编辑资料</button>
+            <button size="mini" @tap="handleLogout">登出</button>
+          </view>
         </view>
-        <button v-else size="mini" @tap="handleLogout">登出</button>
-      </view>
+      </template>
+
+      <!-- 未登录 or 编辑态：显示采集表单 -->
+      <template v-else>
+        <view class="login-form">
+          <text class="form-title">
+            {{ isEditingProfile ? '编辑资料' : '登录' }}
+          </text>
+          <text class="form-hint">
+            {{ isEditingProfile ? '修改头像和昵称后点击保存' : '点击头像选择、输入昵称后登录' }}
+          </text>
+
+          <!-- 头像按钮：微信原生 chooseAvatar，弹出系统选择器 -->
+          <view class="avatar-row">
+            <button
+              v-if="supportsChooseAvatar"
+              open-type="chooseAvatar"
+              class="avatar-picker-btn"
+              @chooseavatar="onChooseAvatar"
+            >
+              <image
+                :src="formAvatarDisplay || '/static/default-avatar.png'"
+                class="avatar-preview"
+              />
+            </button>
+            <image
+              v-else
+              :src="formAvatarDisplay || '/static/default-avatar.png'"
+              class="avatar-preview"
+            />
+            <text class="avatar-hint">
+              {{ supportsChooseAvatar ? '点击选择头像' : '当前环境不支持选头像' }}
+            </text>
+          </view>
+
+          <!-- 昵称输入：type="nickname" 触发微信真实昵称候选 -->
+          <view class="input-wrap">
+            <input
+              type="nickname"
+              :value="formNickName"
+              placeholder="请输入昵称"
+              placeholder-class="input-placeholder"
+              maxlength="20"
+              class="input"
+              @input="onNickInput"
+              @blur="onNickBlur"
+            />
+          </view>
+
+          <view class="form-actions">
+            <button
+              v-if="isEditingProfile"
+              size="mini"
+              @tap="cancelEditProfile"
+            >取消</button>
+            <button
+              size="mini"
+              :disabled="!canSubmitForm || submitFormLock.busy.value"
+              class="primary-btn"
+              @tap="submitFormLock.run()"
+            >
+              {{ submitFormLock.busy.value ? (isEditingProfile ? '保存中...' : '登录中...') : (isEditingProfile ? '保存' : '确认登录') }}
+            </button>
+            <button
+              v-if="!isEditingProfile"
+              size="mini"
+              class="dev-btn"
+              @tap="showDevLogin = true"
+            >DEV 登录</button>
+          </view>
+        </view>
+      </template>
     </view>
 
     <!-- DEV login modal -->
@@ -80,7 +153,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
@@ -91,6 +164,110 @@ const communityStore = useCommunityStore()
 const userStore = useUserStore()
 const pendingMembers = ref<any[]>([])
 const adminCommunityIds = ref<string[]>([])
+
+// ── 登录 / 编辑资料表单状态 ──
+const isEditingProfile = ref(false)
+const formNickName = ref('')
+const formAvatarCloudUrl = ref('')    // 已上传到 COS 的 cloud://… URL（持久）
+const formAvatarTempPath = ref('')    // chooseAvatar 回传的临时路径（本次提交时上传 COS）
+
+// 同时显示临时路径（用户刚选完、还没点提交）或已确认的 cloud URL
+const formAvatarDisplay = computed(() => formAvatarTempPath.value || formAvatarCloudUrl.value)
+
+// 是否支持 <button open-type="chooseAvatar">：需要基础库 ≥ 2.21.2，mp-weixin 环境
+const supportsChooseAvatar = computed(() => {
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
+  if (typeof wx === 'undefined' || !wx?.canIUse) return false
+  try {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    return !!wx.canIUse('button.open-type.chooseAvatar')
+  } catch {
+    return false
+  }
+})
+
+// 表单是否可提交：至少要有昵称
+const canSubmitForm = computed(() => formNickName.value.trim().length > 0)
+
+function onChooseAvatar(e: any) {
+  const tempPath = e?.detail?.avatarUrl || ''
+  if (tempPath) {
+    formAvatarTempPath.value = tempPath
+  }
+}
+
+function onNickInput(e: any) {
+  formNickName.value = String(e?.detail?.value || '')
+}
+function onNickBlur(e: any) {
+  // type="nickname" 的 blur 触发时，系统已经把候选昵称写入 value
+  formNickName.value = String(e?.detail?.value || '').trim()
+}
+
+/**
+ * 上传临时头像到 COS。失败时返回空串（调用方用默认灰头像兜底）。
+ */
+async function uploadAvatarIfAny(): Promise<string> {
+  if (!formAvatarTempPath.value) return formAvatarCloudUrl.value || ''
+  try {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    if (typeof wx === 'undefined' || !wx.cloud?.uploadFile) return ''
+    const ext = formAvatarTempPath.value.split('.').pop()?.split('?')[0] || 'jpg'
+    const cloudPath = `avatars/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
+    const res: any = await new Promise((resolve, reject) => {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      wx.cloud.uploadFile({
+        cloudPath,
+        filePath: formAvatarTempPath.value,
+        success: resolve,
+        fail: reject,
+      })
+    })
+    return String(res?.fileID || '')
+  } catch (err) {
+    console.warn('[profile] 头像上传失败，使用默认头像兜底', err)
+    return ''
+  }
+}
+
+function openEditProfile() {
+  isEditingProfile.value = true
+  formNickName.value = userStore.nickName || ''
+  formAvatarCloudUrl.value = userStore.avatarUrl || ''
+  formAvatarTempPath.value = ''
+}
+
+function cancelEditProfile() {
+  isEditingProfile.value = false
+  formNickName.value = ''
+  formAvatarCloudUrl.value = ''
+  formAvatarTempPath.value = ''
+}
+
+const submitFormLock = useBusyLock(async () => {
+  try {
+    const avatarUrl = await uploadAvatarIfAny()
+    await userStore.login({ nickName: formNickName.value, avatarUrl })
+    if (!isEditingProfile.value) {
+      // 首次登录：加载我的社区
+      await communityStore.loadMyCommunities()
+    }
+    isEditingProfile.value = false
+    formAvatarTempPath.value = ''
+    formAvatarCloudUrl.value = ''
+    uni.showToast({ title: '已保存', icon: 'success' })
+  } catch (e: any) {
+    uni.showModal({
+      title: isEditingProfile.value ? '保存失败' : '登录失败',
+      content: e?.message || '请重试',
+      showCancel: false,
+    })
+  }
+})
 
 // DEV login modal state
 const showDevLogin = ref(false)
@@ -122,16 +299,6 @@ function goOnboarding() {
 function isAdminOf(communityId: string) {
   return adminCommunityIds.value.includes(communityId)
 }
-
-const loginLock = useBusyLock(async () => {
-  try {
-    await userStore.login()
-    await communityStore.loadMyCommunities()
-  } catch (e) {
-    uni.showToast({ title: '登录失败', icon: 'none' })
-  }
-})
-const handleLogin = loginLock.run
 
 // Per-member locks: approving different members can happen in parallel.
 const approveLock = useKeyedBusyLock(
@@ -190,6 +357,61 @@ onShow(() => { void loadPendingMembers() })
 .user-card { background: $hh-color-surface; border-radius: $hh-radius-md; padding: $hh-space-lg; display: flex; align-items: center; margin-bottom: $hh-space-md; }
 .avatar { width: 100rpx; height: 100rpx; border-radius: $hh-radius-full; margin-right: $hh-space-md; }
 .name { font-size: $hh-font-h3; font-weight: $hh-font-weight-bold; color: $hh-color-text; display: block; }
+.user-info { flex: 1; min-width: 0; }
+.action-row { display: flex; gap: $hh-space-sm; margin-top: $hh-space-xs; }
+
+/* ── 登录 / 编辑资料表单 ── */
+.login-form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: $hh-space-md;
+}
+.form-title {
+  font-size: $hh-font-h3;
+  font-weight: $hh-font-weight-bold;
+  color: $hh-color-text;
+  display: block;
+}
+.form-hint {
+  font-size: $hh-font-caption;
+  color: $hh-color-text-mute;
+  display: block;
+  line-height: 1.5;
+}
+.avatar-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: $hh-space-xs;
+  padding: $hh-space-md 0;
+}
+.avatar-picker-btn {
+  padding: 0;
+  background: transparent;
+  border: none;
+  line-height: 1;
+}
+.avatar-picker-btn::after { border: none; }
+.avatar-preview {
+  width: 140rpx;
+  height: 140rpx;
+  border-radius: $hh-radius-full;
+  background: $hh-color-bg-sub;
+}
+.avatar-hint {
+  font-size: $hh-font-caption;
+  color: $hh-color-text-mute;
+}
+.form-actions {
+  display: flex;
+  gap: $hh-space-sm;
+  flex-wrap: wrap;
+  margin-top: $hh-space-xs;
+}
+.form-actions button { flex: 1; min-width: 160rpx; }
+.primary-btn { background: $hh-color-primary; color: $hh-color-text-inverse; }
+.primary-btn[disabled] { opacity: $hh-opacity-disabled; }
 .section { background: $hh-color-surface; border-radius: $hh-radius-md; padding: $hh-space-md $hh-space-lg; margin-bottom: $hh-space-md; }
 .section-title { font-size: $hh-font-body; color: $hh-color-text-mute; display: block; margin-bottom: $hh-space-md; }
 .list-item { display: flex; justify-content: space-between; align-items: center; padding: $hh-space-md 0; border-bottom: 1rpx solid $hh-color-divider; }
