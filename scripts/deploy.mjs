@@ -70,13 +70,21 @@ function findDevtoolsCli() {
   return DEVTOOLS_CLI_CANDIDATES.find((p) => existsSync(p)) || null
 }
 
-const project = new ci.Project({
-  appid: APPID,
-  type: 'miniProgram',
-  projectPath: MP_DIST,
-  privateKeyPath: KEY_PATH,
-  ignores: ['node_modules/**/*'],
-})
+// Lazy: miniprogram-ci 的 Project 构造会 eager 读 private key；DevTools CLI
+// 主路径完全不需要 key。key 只在主仓（不进 worktree/CI 环境），所以延迟到真
+// 正要走 miniprogram-ci fallback 时再构造——避免 worktree 里 import 期即崩。
+let _project
+function getCiProject() {
+  if (_project) return _project
+  _project = new ci.Project({
+    appid: APPID,
+    type: 'miniProgram',
+    projectPath: MP_DIST,
+    privateKeyPath: KEY_PATH,
+    ignores: ['node_modules/**/*'],
+  })
+  return _project
+}
 
 // ── Primary deploy path: WeChat DevTools CLI ──
 // Uses the IDE's own network stack, which bypasses local transparent proxies
@@ -90,10 +98,12 @@ async function deployCloudViaDevtoolsCli(fns) {
     'cloud', 'functions', 'deploy',
     '--env', CLOUD_ENV,
     '--paths', ...paths,
-    // --project 指向仓库根，读 /project.config.json 里的 miniprogramRoot +
-    // cloudfunctionRoot + packOptions.include 等完整配置。**不要**指向 dist
-    // 子目录，否则会开第二个 DevTools 窗口且读到缺配置的简化版 dist config。
-    '--project', ROOT,
+    // ⚠️ --project 必须指向 MP_DIST 而不是仓库根！
+    // 2026-04-24 实测：`cli.bat auto --project <ROOT>` 会让 DevTools 把根目录
+    // 当成独立小程序项目，**把 project.config.json 覆写成只剩 {"appid":...}**
+    // 的单行版（丢掉 miniprogramRoot/cloudfunctionRoot/packOptions.include 等）。
+    // 详见 memory/feedback_devtools_automator_usage.md 坑 #6
+    '--project', MP_DIST,
     '--remote-npm-install',
   ]
 
@@ -118,7 +128,7 @@ async function deployCloudViaMiniprogramCi(fns) {
   for (const fn of fns) {
     console.log(`[miniprogram-ci] Uploading: ${fn}`)
     await ci.cloud.uploadFunction({
-      project,
+      project: getCiProject(),
       name: fn,
       path: resolve(CLOUD_DIST, fn),
       env: CLOUD_ENV,
@@ -158,19 +168,70 @@ async function deployCloud() {
   console.log('[✓] Cloud functions deployed via miniprogram-ci')
 }
 
-async function deployMiniprogram() {
-  console.log('\nBuilding miniprogram...')
-  execSync('npm run build:mp-weixin', { cwd: resolve(ROOT, 'miniprogram'), stdio: 'inherit' })
+// ── Primary preview path: WeChat DevTools CLI `preview` ──
+// 跟 deployCloudViaDevtoolsCli 同源：走 IDE 内部网络栈，绕开 miniprogram-ci 撞
+// IPv6 / 透明代理 / WeChat CI 白名单的一切老坑（2026-04-24 血泪教训：那天
+// `ci.preview()` 在本机再次被 `-10008 invalid ip: 2409:...` 拦下）。
+// 详见 memory/feedback_deploy_force_ipv4.md。
+async function deployMiniprogramViaDevtoolsCli() {
+  const cli = findDevtoolsCli()
+  if (!cli) return { ok: false, reason: 'DevTools CLI not found at known paths (set WX_DEVTOOLS_CLI env to override)' }
 
-  console.log('Generating preview QR code...')
+  const qrPath = resolve(ROOT, 'preview-qr.png')
+  const infoPath = resolve(ROOT, 'preview-info.json')
+  const args = [
+    'preview',
+    '--project', MP_DIST,
+    '--qr-format', 'terminal',
+    '--qr-output', qrPath,
+    '--info-output', infoPath,
+  ]
+
+  const quote = (s) => (/[ \t&|<>()]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s)
+  const commandLine = [cli, ...args].map(quote).join(' ')
+  console.log(`[DevTools CLI] ${commandLine}`)
+
+  return await new Promise((res) => {
+    const proc = spawn(commandLine, { stdio: 'inherit', shell: true })
+    proc.on('exit', (code) => res({ ok: code === 0, reason: code === 0 ? 'ok' : `exit code ${code}` }))
+    proc.on('error', (err) => res({ ok: false, reason: String(err?.message || err) }))
+  })
+}
+
+// ── Fallback preview path: miniprogram-ci ──
+// 撞 IPv6/透明代理/WeChat CI 白名单的概率跟 cloud.uploadFunction 一样高。
+async function deployMiniprogramViaMiniprogramCi() {
+  console.log('Generating preview QR code via miniprogram-ci...')
   await ci.preview({
-    project,
+    project: getCiProject(),
     desc: 'auto preview',
     setting: { es6: true, minified: false },
     qrcodeFormat: 'terminal',
     qrcodeOutputDest: resolve(ROOT, 'preview-qr.jpg'),
   })
   console.log('Miniprogram preview ready! Scan preview-qr.jpg')
+}
+
+async function deployMiniprogram() {
+  console.log('\nBuilding miniprogram...')
+  execSync('npm run build:mp-weixin', { cwd: resolve(ROOT, 'miniprogram'), stdio: 'inherit' })
+
+  const forceCi = process.argv.includes('--use-ci')
+
+  if (!forceCi) {
+    console.log('\n[primary] Generating preview via WeChat DevTools CLI...')
+    const result = await deployMiniprogramViaDevtoolsCli()
+    if (result.ok) {
+      console.log('[✓] Miniprogram preview ready via DevTools CLI (preview-qr.png + preview-info.json)')
+      return
+    }
+    console.log(`[!] DevTools CLI failed (${result.reason}) — falling back to miniprogram-ci`)
+  } else {
+    console.log('\n[--use-ci] Skipping DevTools CLI, using miniprogram-ci directly')
+  }
+
+  await deployMiniprogramViaMiniprogramCi()
+  console.log('[✓] Miniprogram preview ready via miniprogram-ci')
 }
 
 const target = process.argv[2] || 'all'

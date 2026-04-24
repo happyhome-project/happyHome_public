@@ -125,6 +125,7 @@ test('listDiscoverable：pending/rejected 会回填状态，active 成员被排�
       { _id: 'c2', name: '绿水村', status: 'active' },
       { _id: 'c3', name: '花海村', status: 'active' },
     ])
+    .mockResolvedValueOnce([]) // creator-pending communities
     .mockResolvedValueOnce([{ status: 'pending', appliedAt: '2026-04-24T10:00:00.000Z' }])
     .mockResolvedValueOnce([{ status: 'rejected', appliedAt: '2026-04-24T09:00:00.000Z' }])
     .mockResolvedValueOnce([{ status: 'active', appliedAt: '2026-04-24T08:00:00.000Z' }])

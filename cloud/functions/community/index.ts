@@ -91,12 +91,22 @@ export async function handleGet(params: { communityId: string }) {
 }
 
 export async function handleListDiscoverable(openid: string) {
-  const communities = await db.query('communities', { status: 'active' }, {
-    orderBy: ['createdAt', 'desc'],
-  })
+  // active 社区（所有人可见，用于发现和申请加入）
+  // 以及 viewer 自己创建的还在审核的社区（让创建者能看到"我的申请还在审核"）
+  const [activeList, myPendingCreations] = await Promise.all([
+    db.query('communities', { status: 'active' }, { orderBy: ['createdAt', 'desc'] }),
+    openid
+      ? db.query('communities', { status: 'pending', creatorId: openid }, { orderBy: ['createdAt', 'desc'] })
+      : Promise.resolve([]),
+  ])
 
   const result = []
-  for (const community of communities) {
+  // 先塞自己创建的 pending（放最上面，让创建者一眼看到状态）
+  for (const community of myPendingCreations) {
+    result.push({ ...community, viewerStatus: 'creator-pending' })
+  }
+  // 再塞 active 社区，过滤掉已经是成员的（不再出现在"发现"列表）
+  for (const community of activeList) {
     const viewerStatus = await getLatestViewerStatus(community._id, openid)
     if (viewerStatus === 'active') continue
     result.push({ ...community, viewerStatus })

@@ -9,6 +9,8 @@ miniprogram/project.private.config.json
 artifacts/
 playwright-report/
 test-results/
+preview-qr.*
+preview-info.json
 
 # logs
 *.log
