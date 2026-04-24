@@ -53,9 +53,25 @@ async function main() {
     process.exit(browserInstall.code)
   }
 
+  const buildResult = await runLoggedCommand({
+    command: 'npm.cmd',
+    args: ['run', 'build'],
+    cwd: adminWebDir,
+    env: process.env,
+    logPath: join(reportDir, 'admin-build.log'),
+  })
+  if (buildResult.code !== 0) {
+    process.exit(buildResult.code)
+  }
+
+  const previewServerCommand = process.platform === 'win32' ? 'cmd.exe' : 'npm.cmd'
+  const previewServerArgs = process.platform === 'win32'
+    ? ['/d', '/s', '/c', 'npm.cmd', 'run', 'preview', '--', '--host', host, '--port', port]
+    : ['run', 'preview', '--', '--host', host, '--port', port]
+
   const previewServer = spawn(
-    'npm.cmd',
-    ['run', 'preview', '--', '--host', host, '--port', port],
+    previewServerCommand,
+    previewServerArgs,
     {
       cwd: adminWebDir,
       env: process.env,
