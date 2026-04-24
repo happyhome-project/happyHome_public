@@ -19,7 +19,7 @@
       <el-input
         v-model="keyword"
         clearable
-        placeholder="搜索昵称或用户 ID"
+        placeholder="搜索昵称或内部ID"
         style="width: 280px;"
         @keyup.enter="loadMembers"
       />
@@ -40,7 +40,13 @@
               <span>{{ row.nickName || '未设置' }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="userId" label="用户 ID" min-width="220" show-overflow-tooltip />
+          <el-table-column label="内部ID" min-width="220">
+            <template #default="{ row }">
+              <el-tooltip :content="row.userId" placement="top">
+                <span>{{ formatUserId(row.userId) }}</span>
+              </el-tooltip>
+            </template>
+          </el-table-column>
           <el-table-column prop="appliedAt" label="申请时间" width="180" />
           <el-table-column label="操作" width="180">
             <template #default="{ row }">
@@ -59,7 +65,13 @@
               <span>{{ row.nickName || '未设置' }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="userId" label="用户 ID" min-width="220" show-overflow-tooltip />
+          <el-table-column label="内部ID" min-width="220">
+            <template #default="{ row }">
+              <el-tooltip :content="row.userId" placement="top">
+                <span>{{ formatUserId(row.userId) }}</span>
+              </el-tooltip>
+            </template>
+          </el-table-column>
           <el-table-column label="角色" width="100">
             <template #default="{ row }">
               <el-tag size="small" :type="row.role === 'admin' ? 'danger' : 'info'">
@@ -84,7 +96,7 @@
                 :disabled="!canKick(row)"
                 @click="kick(row)"
               >
-                移出
+                {{ row.status === 'rejected' ? '移除记录' : '移出' }}
               </el-button>
               <span v-if="row.isCreator" style="margin-left: 8px; color: #909399; font-size: 12px;">创建者</span>
             </template>
@@ -201,7 +213,7 @@ async function kick(row: MemberRow) {
 }
 
 function canKick(row: MemberRow) {
-  return row.status === 'active' && row.role === 'member' && !row.isCreator
+  return (row.status === 'active' || row.status === 'rejected') && row.role === 'member' && !row.isCreator
 }
 
 function statusLabel(status: MemberStatus) {
@@ -219,6 +231,12 @@ function statusTagType(status: MemberStatus): 'success' | 'warning' | 'danger' |
 
 function getErrorMessage(error: any): string {
   return String(error?.response?.data?.error || error?.message || '')
+}
+
+function formatUserId(userId: string) {
+  const text = String(userId || '')
+  if (text.length <= 18) return text
+  return `${text.slice(0, 8)}...${text.slice(-6)}`
 }
 </script>
 

@@ -169,7 +169,13 @@ async function loadPost(postId: string) {
       uni.showToast({ title: '板块信息加载失败', icon: 'none' })
       uni.navigateBack()
     }
-  } catch {
+  } catch (error: any) {
+    if (error?.message?.includes('需要先加入社区后查看内容')) {
+      communityStore.clearCommunityState()
+      uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
+      uni.reLaunch({ url: '/pages/onboarding/index' })
+      return
+    }
     uni.showToast({ title: '帖子不存在', icon: 'none' })
     uni.navigateBack()
   }

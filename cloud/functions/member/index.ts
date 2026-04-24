@@ -6,6 +6,17 @@ import type { Community } from '../../shared/types'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
+async function getLatestMembershipRecord(communityId: string, openid: string) {
+  const records = await db.query('community_members', {
+    communityId,
+    userId: openid,
+  }, {
+    orderBy: ['appliedAt', 'desc'],
+    limit: 1,
+  })
+  return records[0] || null
+}
+
 export async function handleApply(params: { communityId: string }, openid: string) {
   if (!openid) throw new Error('Missing OPENID')
 
@@ -121,13 +132,30 @@ export async function handlePendingList(params: { communityId: string }, openid:
 // 查询当前用户在指定社区的成员状态（给前端判断是否需要引导加入）
 export async function handleMyStatus(params: { communityId: string }, openid: string) {
   if (!openid) return { isMember: false, status: null }
-  const records = await db.query('community_members', {
-    communityId: params.communityId,
-    userId: openid,
-  })
-  if (!records || records.length === 0) return { isMember: false, status: null }
-  const latest = records[0] as { status: string }
+  const latest = await getLatestMembershipRecord(params.communityId, openid) as { status: string } | null
+  if (!latest) return { isMember: false, status: null }
   return { isMember: latest.status === 'active', status: latest.status }
+}
+
+export async function handleMyCommunities(openid: string) {
+  if (!openid) throw new Error('Missing OPENID')
+
+  const memberships = await db.query('community_members', {
+    userId: openid,
+    status: 'active',
+  }, {
+    orderBy: ['joinedAt', 'desc'],
+  })
+
+  const communities = []
+  for (const membership of memberships) {
+    const community = await db.getById('communities', membership.communityId) as Community | null
+    if (community && community.status === 'active') {
+      communities.push(community)
+    }
+  }
+
+  return { communities }
 }
 
 export const main = async (event: any) => {
@@ -139,5 +167,6 @@ export const main = async (event: any) => {
   if (action === 'memberReject') return handleMemberReject(params, openid)
   if (action === 'pendingList') return handlePendingList(params, openid)
   if (action === 'myStatus') return handleMyStatus(params, openid)
+  if (action === 'myCommunities') return handleMyCommunities(openid)
   throw new Error(`Unknown action: ${action}`)
 }

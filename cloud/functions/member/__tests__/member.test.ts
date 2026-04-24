@@ -18,6 +18,8 @@ import {
   handleApply,
   handleLeave,
   handleMemberApprove,
+  handleMyCommunities,
+  handleMyStatus,
   handleMemberReject,
   handlePendingList,
   main,
@@ -142,6 +144,37 @@ test('pendingList：返回社区所有待审批成员', async () => {
 
   expect(db.query).toHaveBeenCalledWith('community_members', { communityId: 'c1', status: 'pending' })
   expect(result.members).toHaveLength(2)
+})
+
+test('myStatus：按最新 appliedAt 返回状态', async () => {
+  ;(db.query as jest.Mock).mockResolvedValue([
+    { _id: 'm2', status: 'pending', appliedAt: '2026-04-24T10:00:00.000Z' },
+  ])
+
+  const result = await handleMyStatus({ communityId: 'c1' }, 'test-openid')
+
+  expect(db.query).toHaveBeenCalledWith('community_members', {
+    communityId: 'c1',
+    userId: 'test-openid',
+  }, {
+    orderBy: ['appliedAt', 'desc'],
+    limit: 1,
+  })
+  expect(result).toEqual({ isMember: false, status: 'pending' })
+})
+
+test('myCommunities：只返回 active 成员且社区状态为 active 的社区', async () => {
+  ;(db.query as jest.Mock).mockResolvedValue([
+    { communityId: 'c1', status: 'active', joinedAt: '2026-04-24T10:00:00.000Z' },
+    { communityId: 'c2', status: 'active', joinedAt: '2026-04-23T10:00:00.000Z' },
+  ])
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({ _id: 'c1', name: '青山村', status: 'active' })
+    .mockResolvedValueOnce({ _id: 'c2', name: '旧社区', status: 'disabled' })
+
+  const result = await handleMyCommunities('test-openid')
+
+  expect(result.communities).toEqual([{ _id: 'c1', name: '青山村', status: 'active' }])
 })
 
 test('main(): 未知 action 抛出错误', async () => {

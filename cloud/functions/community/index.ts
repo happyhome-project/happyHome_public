@@ -6,6 +6,18 @@ import type { Community } from '../../shared/types'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
+async function getLatestViewerStatus(communityId: string, openid: string) {
+  if (!openid) return null
+  const records = await db.query('community_members', {
+    communityId,
+    userId: openid,
+  }, {
+    orderBy: ['appliedAt', 'desc'],
+    limit: 1,
+  })
+  return records[0]?.status || null
+}
+
 export async function handleCreate(
   params: {
     name: string
@@ -78,6 +90,21 @@ export async function handleGet(params: { communityId: string }) {
   return { community }
 }
 
+export async function handleListDiscoverable(openid: string) {
+  const communities = await db.query('communities', { status: 'active' }, {
+    orderBy: ['createdAt', 'desc'],
+  })
+
+  const result = []
+  for (const community of communities) {
+    const viewerStatus = await getLatestViewerStatus(community._id, openid)
+    if (viewerStatus === 'active') continue
+    result.push({ ...community, viewerStatus })
+  }
+
+  return { communities: result }
+}
+
 export const main = async (event: any) => {
   const openid = resolveOpenId(event)
   const { action, _testOpenid, ...params } = event
@@ -86,5 +113,6 @@ export const main = async (event: any) => {
   if (action === 'reject') return handleReject(params, openid)
   if (action === 'list') return handleList(params)
   if (action === 'get') return handleGet(params)
+  if (action === 'listDiscoverable') return handleListDiscoverable(openid)
   throw new Error(`Unknown action: ${action}`)
 }

@@ -18,6 +18,7 @@ import {
   handleGet,
   handleJoinAttendance,
   handleListAttendanceMembers,
+  handleList,
   handleUpdate,
 } from '../index'
 import * as db from '../../../lib/db'
@@ -181,4 +182,23 @@ test('get/listAttendanceMembers: 返回参与聚合和完整名单', async () =>
   expect(detail.post.attendanceSummaryByWidget['attendance-widget'].isJoined).toBe(true)
   expect(roster.members).toHaveLength(2)
   expect(roster.members[0].userId).toBe('user-2')
+})
+
+test('list：非 active 成员不可查看帖子', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce(mockSection)
+  ;(db.query as jest.Mock).mockResolvedValueOnce([])
+
+  await expect(handleList({ sectionId: 'section-1' }, '')).rejects.toThrow('需要先加入社区后查看内容')
+})
+
+test('get：非 active 成员不可查看帖子详情', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'post-1',
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    status: 'active',
+  })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([])
+
+  await expect(handleGet({ postId: 'post-1' }, '')).rejects.toThrow('需要先加入社区后查看内容')
 })

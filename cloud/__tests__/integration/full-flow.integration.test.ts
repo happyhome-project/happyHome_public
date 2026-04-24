@@ -193,7 +193,7 @@ describe('核心业务全链路', () => {
     expect(postId).toBeTruthy()
 
     // 6. 查帖
-    const { post } = await getPost({ postId }) as { post: any }
+    const { post } = await getPost({ postId }, _getOpenId()) as { post: any }
     expect(post.content[titleWidgetId]).toBe('我的第一篇帖子')
     expect(post.authorId).toBe(NORMAL_USER)
 
@@ -207,19 +207,19 @@ describe('核心业务全链路', () => {
     }, _getOpenId())
     expect(updateResult.success).toBe(true)
 
-    const { post: updated } = await getPost({ postId }) as { post: any }
+    const { post: updated } = await getPost({ postId }, _getOpenId()) as { post: any }
     expect(updated.content[titleWidgetId]).toBe('修改后的标题')
 
     // 8. 列表查询
-    const { posts } = await listPosts({ sectionId })
+    const { posts } = await listPosts({ sectionId }, _getOpenId())
     expect(posts).toHaveLength(1)
 
     // 9. 删帖
     await deletePost({ postId }, _getOpenId())
-    await expect(getPost({ postId })).rejects.toThrow('帖子不存在')
+    await expect(getPost({ postId }, _getOpenId())).rejects.toThrow('帖子不存在')
 
     // 列表不再显示已删除帖子
-    const { posts: afterDelete } = await listPosts({ sectionId })
+    const { posts: afterDelete } = await listPosts({ sectionId }, _getOpenId())
     expect(afterDelete).toHaveLength(0)
   })
 
@@ -300,7 +300,7 @@ describe('核心业务全链路', () => {
       communityId,
       sectionId,
       content: { 'any-id': '标题' },
-    }, _getOpenId())).rejects.toThrow('非社区成员')
+    }, _getOpenId())).rejects.toThrow('需要先加入社区后查看内容')
   })
 
   test('权限校验：非管理员不能创建板块', async () => {

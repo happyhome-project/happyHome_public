@@ -37,6 +37,24 @@ function includesKeyword(...parts: Array<unknown>) {
   return (keyword: string) => !keyword || haystack.includes(keyword)
 }
 
+function isTestAccountId(userId: string) {
+  const normalized = String(userId || '').trim().toLowerCase()
+  return (
+    normalized.startsWith('dev-') ||
+    normalized.startsWith('h5-') ||
+    normalized.startsWith('test-') ||
+    normalized.startsWith('mock-') ||
+    normalized.startsWith('qa-')
+  )
+}
+
+function normalizeMemberNickName(userId: string, nickName: unknown) {
+  const raw = String(nickName || '').trim()
+  if (raw && raw !== '未设置') return raw
+  if (isTestAccountId(userId)) return `测试账号(${String(userId || '').slice(0, 12)})`
+  return '微信用户'
+}
+
 function normalizeCapacity(value: unknown) {
   const num = Number(value)
   if (!Number.isFinite(num) || num <= 0) return undefined
@@ -385,7 +403,7 @@ async function route(action: string, params: Record<string, any>) {
     const list = activeMembers
       .map((member: any) => ({
         ...member,
-        nickName: usersById[member.userId]?.nickName || '',
+        nickName: normalizeMemberNickName(member.userId, usersById[member.userId]?.nickName),
         avatarUrl: usersById[member.userId]?.avatarUrl || '',
         isCreator: member.userId === community.creatorId,
       }))
@@ -406,12 +424,18 @@ async function route(action: string, params: Record<string, any>) {
     const community = await db.getById('communities', communityId) as Community
     const member = await db.getById('community_members', memberId) as any
     if (!member || member.communityId !== communityId) throw new Error('member not found')
-    if (member.status !== 'active') throw new Error('只能移出 active 成员')
     if (member.userId === community.creatorId) throw new Error('不能移出社区创建者')
     if (member.role !== 'member') throw new Error('不能移出管理员')
 
+    const status = String(member.status || '').trim()
+    if (!['active', 'rejected', 'pending'].includes(status)) {
+      throw new Error('当前状态不支持移除')
+    }
+
     await db.removeById('community_members', memberId)
-    await db.increment('communities', communityId, 'memberCount', -1)
+    if (status === 'active') {
+      await db.increment('communities', communityId, 'memberCount', -1)
+    }
     return { success: true }
   }
   if (action === 'member.approve') {

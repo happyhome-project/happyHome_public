@@ -377,7 +377,13 @@ async function loadAllSectionPosts() {
       try {
         const res = await postApi.list(section._id, 0)
         results[section._id] = res.posts ?? []
-      } catch {
+      } catch (error: any) {
+        if (error?.message?.includes('需要先加入社区后查看内容')) {
+          communityStore.clearCommunityState()
+          uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
+          uni.reLaunch({ url: '/pages/onboarding/index' })
+          return
+        }
         results[section._id] = []
       }
     })

@@ -110,6 +110,8 @@ export const userApi = {
 export const communityApi = {
   list: (includeAll = false) =>
     callCloud<{ communities: any[] }>('community', 'list', { includeAll }),
+  listDiscoverable: () =>
+    callCloud<{ communities: any[] }>('community', 'listDiscoverable', {}),
   get: (communityId: string) =>
     callCloud<{ community: any }>('community', 'get', { communityId }),
   create: (params: object) =>
@@ -129,6 +131,8 @@ export const memberApi = {
     callCloud('member', 'memberReject', { communityId, memberId }),
   pendingList: (communityId: string) =>
     callCloud<{ members: any[] }>('member', 'pendingList', { communityId }),
+  myCommunities: () =>
+    callCloud<{ communities: any[] }>('member', 'myCommunities', {}),
 }
 
 export const sectionApi = {

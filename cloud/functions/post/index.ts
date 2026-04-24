@@ -15,6 +15,7 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
 const ATTENDANCE_COLLECTION = 'post_attendance_members'
 const ATTENDANCE_PREVIEW_LIMIT = 5
+const COMMUNITY_READ_ERROR = '需要先加入社区后查看内容'
 
 function getEditableWidgetIds(section: Section) {
   return new Set(
@@ -51,12 +52,13 @@ function normalizeCapacity(widget: Widget): number | undefined {
 }
 
 async function ensureActiveCommunityMember(communityId: string, userId: string) {
+  if (!userId) throw new Error(COMMUNITY_READ_ERROR)
   const members = await db.query('community_members', {
     communityId,
     userId,
     status: 'active',
   })
-  if (!members || members.length === 0) throw new Error('非社区成员，无法操作')
+  if (!members || members.length === 0) throw new Error(COMMUNITY_READ_ERROR)
 }
 
 async function getUsersByIds(userIds: string[]) {
@@ -209,6 +211,8 @@ export async function handleList(params: {
   skip?: number
   limit?: number
 }, openid?: string) {
+  const section = await db.getById('sections', params.sectionId) as Section
+  await ensureActiveCommunityMember(section.communityId, openid || '')
   const posts = await db.query('posts', {
     sectionId: params.sectionId,
     status: 'active',
@@ -217,7 +221,6 @@ export async function handleList(params: {
     skip: params.skip ?? 0,
     limit: params.limit ?? 20,
   })
-  const section = await db.getById('sections', params.sectionId) as Section
   const enrichedPosts = await enrichPostsWithAttendance(posts as any[], { [params.sectionId]: section }, openid)
   return { posts: enrichedPosts }
 }
@@ -225,6 +228,7 @@ export async function handleList(params: {
 export async function handleGet(params: { postId: string }, openid?: string) {
   const post = await db.getById('posts', params.postId) as any
   if (post.status === 'deleted') throw new Error('帖子不存在')
+  await ensureActiveCommunityMember(post.communityId, openid || '')
   const section = await db.getById('sections', post.sectionId) as Section
   const attendanceSummaryByWidget = await buildAttendanceSummaryByWidget(post._id, section, openid)
   return { post: { ...post, attendanceSummaryByWidget } }

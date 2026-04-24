@@ -9,8 +9,8 @@
         v-for="community in communities"
         :key="community._id"
         class="community-card"
-        :class="{ disabled: applyLock.isBusy(community._id) }"
-        @tap="applyLock.run(community)"
+        :class="{ disabled: isCardDisabled(community) || applyLock.isBusy(community._id) }"
+        @tap="handleCommunityTap(community)"
       >
         <image
           :src="community.coverImage || '/static/default-community.png'"
@@ -23,7 +23,7 @@
           <text class="meta">{{ community.memberCount }} 位成员</text>
         </view>
         <view class="badge" :class="community.joinType">
-          {{ community.joinType === 'open' ? '直接加入' : '申请加入' }}
+          {{ getBadgeText(community) }}
         </view>
       </view>
     </view>
@@ -43,9 +43,13 @@ const communities = ref<any[]>([])
 const communityStore = useCommunityStore()
 
 onMounted(async () => {
-  const res = await communityApi.list(false)
-  communities.value = res.communities
+  await loadCommunities()
 })
+
+async function loadCommunities() {
+  const res = await communityApi.listDiscoverable()
+  communities.value = res.communities
+}
 
 // Per-community lock — clicking on card A doesn't block card B.
 const applyLock = useKeyedBusyLock(
@@ -58,6 +62,7 @@ const applyLock = useKeyedBusyLock(
         uni.reLaunch({ url: '/pages/index/index' })
       } else {
         uni.showToast({ title: '申请已提交', icon: 'none' })
+        await loadCommunities()
       }
     } catch (e: any) {
       uni.showToast({ title: e?.message || '操作失败', icon: 'none' })
@@ -65,6 +70,21 @@ const applyLock = useKeyedBusyLock(
   },
   (community) => community._id,
 )
+
+function isCardDisabled(community: any) {
+  return community.viewerStatus === 'pending'
+}
+
+function getBadgeText(community: any) {
+  if (community.viewerStatus === 'pending') return '审核中'
+  if (community.viewerStatus === 'rejected') return '重新申请'
+  return community.joinType === 'open' ? '直接加入' : '申请加入'
+}
+
+function handleCommunityTap(community: any) {
+  if (isCardDisabled(community) || applyLock.isBusy(community._id)) return
+  applyLock.run(community)
+}
 
 function handleCreate() {
   uni.navigateTo({ url: '/pages/createCommunity/index' })

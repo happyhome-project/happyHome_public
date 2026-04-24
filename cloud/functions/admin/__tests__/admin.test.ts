@@ -44,6 +44,63 @@ test('member.list: 会物理清理历史 left 记录并且不返回', async () =
   expect(result.members[0]._id).toBe('member-active-1')
 })
 
+test('member.list: 昵称优先显示真实昵称，测试账号缺失昵称时显示测试账号名', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({ _id: 'community-1', creatorId: 'creator-1' })
+    .mockResolvedValueOnce({ _id: 'u-real', nickName: '张三', avatarUrl: '' })
+    .mockRejectedValueOnce(new Error('not found'))
+  ;(db.query as jest.Mock).mockResolvedValueOnce([
+    { _id: 'member-real-1', communityId: 'community-1', userId: 'u-real', role: 'member', status: 'active' },
+    { _id: 'member-test-1', communityId: 'community-1', userId: 'h5-reject-candidate-001', role: 'member', status: 'rejected' },
+  ])
+
+  const result: any = await main({ action: 'member.list', communityId: 'community-1', status: 'all' })
+
+  const real = result.members.find((m: any) => m._id === 'member-real-1')
+  const test = result.members.find((m: any) => m._id === 'member-test-1')
+  expect(real.nickName).toBe('张三')
+  expect(test.nickName).toContain('测试账号(')
+})
+
+test('member.kick: rejected 记录可移除，且不递减 memberCount', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({ _id: 'community-1', creatorId: 'creator-1' })
+    .mockResolvedValueOnce({
+      _id: 'member-1',
+      communityId: 'community-1',
+      userId: 'h5-reject-candidate-001',
+      role: 'member',
+      status: 'rejected',
+    })
+  ;(db.removeById as jest.Mock).mockResolvedValue({})
+
+  const result: any = await main({ action: 'member.kick', communityId: 'community-1', memberId: 'member-1' })
+
+  expect(db.removeById).toHaveBeenCalledWith('community_members', 'member-1')
+  expect(db.increment).not.toHaveBeenCalled()
+  expect(result.success).toBe(true)
+})
+
+test('member.kick: active 成员移除后递减 memberCount', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({ _id: 'community-1', creatorId: 'creator-1' })
+    .mockResolvedValueOnce({
+      _id: 'member-2',
+      communityId: 'community-1',
+      userId: 'u-active',
+      role: 'member',
+      status: 'active',
+    })
+  ;(db.removeById as jest.Mock).mockResolvedValue({})
+  ;(db.increment as jest.Mock).mockResolvedValue({})
+
+  const result: any = await main({ action: 'member.kick', communityId: 'community-1', memberId: 'member-2' })
+
+  expect(db.removeById).toHaveBeenCalledWith('community_members', 'member-2')
+  expect(db.increment).toHaveBeenCalledWith('communities', 'community-1', 'memberCount', -1)
+  expect(result.success).toBe(true)
+})
+
 test('section.updateWidgets: evergreen 板块不允许配置 attendance', async () => {
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-1',

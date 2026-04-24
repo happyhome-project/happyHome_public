@@ -67,23 +67,26 @@ test('创建板块：非管理员无权创建', async () => {
 })
 
 test('get：返回板块信息', async () => {
-  ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'section-1', name: '日记' })
+  ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'section-1', communityId: 'c1', name: '日记' })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
 
-  const result = await handleGet({ sectionId: 'section-1' })
+  const result = await handleGet({ sectionId: 'section-1' }, 'test-openid')
 
   expect(db.getById).toHaveBeenCalledWith('sections', 'section-1')
   expect(result.section).toHaveProperty('_id', 'section-1')
 })
 
 test('list：按 order asc 返回社区所有板块', async () => {
-  ;(db.query as jest.Mock).mockResolvedValue([
-    { _id: 's1', order: 1 },
-    { _id: 's2', order: 2 },
-  ])
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
+    .mockResolvedValueOnce([
+      { _id: 's1', order: 1 },
+      { _id: 's2', order: 2 },
+    ])
 
-  const result = await handleList({ communityId: 'c1' })
+  const result = await handleList({ communityId: 'c1' }, 'test-openid')
 
-  expect(db.query).toHaveBeenCalledWith('sections', { communityId: 'c1' }, { orderBy: ['order', 'asc'] })
+  expect((db.query as jest.Mock).mock.calls[1]).toEqual(['sections', { communityId: 'c1' }, { orderBy: ['order', 'asc'] }])
   expect(result.sections).toHaveLength(2)
 })
 
@@ -233,6 +236,21 @@ test('main(): action=update 正确路由', async () => {
 
   const result = await main({ action: 'update', sectionId: 's1', communityId: 'c1', name: 'test' })
   expect(result).toEqual({ success: true })
+})
+
+test('list：非 active 成员不可查看板块内容', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([])
+
+  await expect(main({ action: 'list', communityId: 'c1' })).rejects.toThrow('需要先加入社区后查看内容')
+})
+
+test('get：active 成员可查看板块详情', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({ _id: 's1', communityId: 'c1', name: '拼车' })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
+
+  const result: any = await main({ action: 'get', sectionId: 's1' })
+
+  expect(result.section._id).toBe('s1')
 })
 
 test('main(): 未知 action 抛出错误', async () => {
