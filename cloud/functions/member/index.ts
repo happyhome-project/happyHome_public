@@ -71,8 +71,9 @@ export async function handleLeave(params: { communityId: string }, openid: strin
   })
   if (!members || members.length === 0) throw new Error('不是社区成员')
 
-  // 注意：管理员也可以退出，退出后其帖子保留。
-  // 若社区只剩该管理员，退出后社区将无管理员，需在产品层面处理（当前版本不限制）。
+  const community = await db.getById('communities', params.communityId) as Community | null
+  if (community?.creatorId === openid) throw new Error('社区创建者不能退出社区')
+
   const memberId = members[0]._id
   await db.removeById('community_members', memberId)
   await db.increment('communities', params.communityId, 'memberCount', -1)

@@ -116,9 +116,20 @@
         @tap="communityStore.switchCommunity(c._id)"
       >
         <text class="item-name">{{ c.name }}</text>
-        <view class="badges">
-          <text v-if="isAdminOf(c._id)" class="badge admin">管理员</text>
-          <text v-if="c._id === communityStore.currentCommunityId" class="badge current">当前</text>
+        <view class="community-actions" @tap.stop>
+          <view class="badges">
+            <text v-if="isAdminOf(c._id)" class="badge admin">管理员</text>
+            <text v-if="c._id === communityStore.currentCommunityId" class="badge current">当前</text>
+          </view>
+          <button
+            v-if="canLeaveCommunity(c)"
+            size="mini"
+            class="leave-community-btn"
+            :disabled="leaveCommunityLock.isBusy(c._id)"
+            @tap.stop="leaveCommunityLock.run(c)"
+          >
+            {{ leaveCommunityLock.isBusy(c._id) ? '退出中...' : '退出' }}
+          </button>
         </view>
       </view>
       <view v-if="communityStore.myCommunities.length === 0" class="empty">
@@ -300,6 +311,45 @@ function isAdminOf(communityId: string) {
   return adminCommunityIds.value.includes(communityId)
 }
 
+function canLeaveCommunity(community: any) {
+  return String(community?.creatorId || '') !== String(userStore.openId || '')
+}
+
+const leaveCommunityLock = useKeyedBusyLock(
+  async (community: any) => {
+    const communityId = String(community?._id || '')
+    if (!communityId) return
+    if (!canLeaveCommunity(community)) {
+      uni.showToast({ title: '创建者不能退出社区', icon: 'none' })
+      return
+    }
+
+    const confirmed = await new Promise<boolean>((resolve) => {
+      uni.showModal({
+        title: '退出社区',
+        content: '退出后将无法查看该社区内容，需要重新加入后才能访问。',
+        confirmText: '退出',
+        confirmColor: '#d93026',
+        success: (res) => resolve(!!res.confirm),
+        fail: () => resolve(false),
+      })
+    })
+    if (!confirmed) return
+
+    try {
+      await memberApi.leave(communityId)
+      uni.showToast({ title: '已退出社区', icon: 'success' })
+      await communityStore.loadMyCommunities()
+      if (communityStore.myCommunities.length === 0) {
+        uni.reLaunch({ url: '/pages/onboarding/index' })
+      }
+    } catch (e: any) {
+      uni.showToast({ title: e?.message || '退出失败', icon: 'none' })
+    }
+  },
+  (community) => String(community?._id || ''),
+)
+
 // Per-member locks: approving different members can happen in parallel.
 const approveLock = useKeyedBusyLock(
   async (member: any) => {
@@ -416,10 +466,21 @@ onShow(() => { void loadPendingMembers() })
 .section-title { font-size: $hh-font-body; color: $hh-color-text-mute; display: block; margin-bottom: $hh-space-md; }
 .list-item { display: flex; justify-content: space-between; align-items: center; padding: $hh-space-md 0; border-bottom: 1rpx solid $hh-color-divider; }
 .item-name { font-size: $hh-font-body-lg; color: $hh-color-text; }
+.community-actions { display: flex; align-items: center; gap: $hh-space-sm; }
 .badges { display: flex; gap: $hh-space-xs; }
 .badge { font-size: $hh-font-tag; padding: 4rpx 12rpx; border-radius: $hh-radius-lg; }
 .badge.admin { background: #e3f2fd; color: #1565c0; }
 .badge.current { background: #e8f5e9; color: #2e7d32; }
+.leave-community-btn {
+  margin: 0;
+  padding: 0 18rpx;
+  line-height: 48rpx;
+  font-size: $hh-font-caption;
+  color: #d93026;
+  background: #fff5f5;
+  border: 1rpx solid #ffd6d6;
+}
+.leave-community-btn::after { border: none; }
 .empty { color: $hh-color-text-mute; font-size: $hh-font-body; padding: $hh-space-md 0; }
 .join-btn { margin-top: $hh-space-md; }
 .approval-item { display: flex; justify-content: space-between; align-items: center; padding: $hh-space-md 0; border-bottom: 1rpx solid $hh-color-divider; }

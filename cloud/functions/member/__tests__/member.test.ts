@@ -67,6 +67,7 @@ test('申请加入：已是成员时抛出错误', async () => {
 
 test('退出社区：物理删除成员记录，memberCount 原子递减', async () => {
   ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'c1', creatorId: 'creator-openid' })
   ;(db.removeById as jest.Mock).mockResolvedValue({})
   ;(db.increment as jest.Mock).mockResolvedValue({})
 
@@ -74,6 +75,15 @@ test('退出社区：物理删除成员记录，memberCount 原子递减', async
 
   expect(db.removeById).toHaveBeenCalledWith('community_members', 'member-1')
   expect(db.increment).toHaveBeenCalledWith('communities', 'c1', 'memberCount', -1)
+})
+
+test('退出社区：社区创建者不能退出', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-creator', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'c1', creatorId: 'test-openid' })
+
+  await expect(handleLeave({ communityId: 'c1' }, 'test-openid')).rejects.toThrow('社区创建者不能退出社区')
+  expect(db.removeById).not.toHaveBeenCalled()
+  expect(db.increment).not.toHaveBeenCalled()
 })
 
 test('退出社区：不是成员时抛出错误', async () => {
