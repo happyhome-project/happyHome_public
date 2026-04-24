@@ -89,7 +89,7 @@ async function main() {
   const widgetRes = await callAdmin('section.updateWidgets', {
     sectionId,
     communityId,
-    widgets: [{ type: 'text', label: '内容', required: true, showInList: true, widgetId: '' }],
+    widgets: [{ type: 'short_text', label: '内容', fieldKey: 'title', required: true, showInList: true, widgetId: '' }],
   })
   assert(Array.isArray(widgetRes.widgets) && widgetRes.widgets.length === 1, 'section.updateWidgets returns widgets')
 

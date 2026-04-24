@@ -67,7 +67,11 @@
           {{ getPostSummary(row) }}
         </template>
       </el-table-column>
-      <el-table-column prop="createdAt" label="发布时间" width="180" />
+      <el-table-column label="发布时间" width="180">
+        <template #default="{ row }">
+          <span>{{ formatAdminDateTime(row.createdAt) }}</span>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="180">
         <template #default="{ row }">
           <el-button size="small" @click="openDetail(row)">详情</el-button>
@@ -90,7 +94,7 @@
         <div class="detail-meta">
           <div>板块：{{ detailSection?.name || detailPost.sectionName || '未知板块' }}</div>
           <div>作者：{{ detailPost.authorNickname || '未设置昵称' }} / {{ detailPost.authorId }}</div>
-          <div>时间：{{ detailPost.createdAt }}</div>
+          <div>时间：{{ formatAdminDateTime(detailPost.createdAt) }}</div>
         </div>
 
         <el-descriptions :column="1" border>
@@ -127,7 +131,11 @@
                 </div>
               </template>
             </el-table-column>
-            <el-table-column prop="joinedAt" label="参与时间" width="180" />
+            <el-table-column label="参与时间" width="180">
+              <template #default="{ row }">
+                <span>{{ formatAdminDateTime(row.joinedAt) }}</span>
+              </template>
+            </el-table-column>
             <el-table-column label="操作" width="110">
               <template #default="{ row }">
                 <el-button size="small" type="danger" @click="removeAttendanceMember(block.widgetId, row)">移除</el-button>
@@ -146,6 +154,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { communityApi, postAdminApi, sectionApi } from '../../api/cloud'
+import { formatAdminDateTime } from '../../utils/datetime'
 
 const route = useRoute()
 const router = useRouter()
