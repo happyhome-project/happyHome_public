@@ -90,10 +90,12 @@ async function deployCloudViaDevtoolsCli(fns) {
     'cloud', 'functions', 'deploy',
     '--env', CLOUD_ENV,
     '--paths', ...paths,
-    // --project 指向仓库根，读 /project.config.json 里的 miniprogramRoot +
-    // cloudfunctionRoot + packOptions.include 等完整配置。**不要**指向 dist
-    // 子目录，否则会开第二个 DevTools 窗口且读到缺配置的简化版 dist config。
-    '--project', ROOT,
+    // ⚠️ --project 必须指向 MP_DIST 而不是仓库根！
+    // 2026-04-24 实测：`cli.bat auto --project <ROOT>` 会让 DevTools 把根目录
+    // 当成独立小程序项目，**把 project.config.json 覆写成只剩 {"appid":...}**
+    // 的单行版（丢掉 miniprogramRoot/cloudfunctionRoot/packOptions.include 等）。
+    // 详见 memory/feedback_devtools_automator_usage.md 坑 #6
+    '--project', MP_DIST,
     '--remote-npm-install',
   ]
 

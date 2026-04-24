@@ -22,7 +22,7 @@
           <text class="desc">{{ community.description }}</text>
           <text class="meta">{{ community.memberCount }} 位成员</text>
         </view>
-        <view class="badge" :class="community.joinType">
+        <view class="badge" :class="[community.joinType, `status-${community.viewerStatus || 'none'}`]">
           {{ getBadgeText(community) }}
         </view>
       </view>
@@ -72,10 +72,13 @@ const applyLock = useKeyedBusyLock(
 )
 
 function isCardDisabled(community: any) {
+  // pending 申请中的社区：不能重复申请 → 点击无反应
+  // creator-pending 自己创建的等超管审批：可点但走 toast 分支（下方 handleCommunityTap 处理）
   return community.viewerStatus === 'pending'
 }
 
 function getBadgeText(community: any) {
+  if (community.viewerStatus === 'creator-pending') return '审核中 · 你创建的'
   if (community.viewerStatus === 'pending') return '审核中'
   if (community.viewerStatus === 'rejected') return '重新申请'
   return community.joinType === 'open' ? '直接加入' : '申请加入'
@@ -83,6 +86,15 @@ function getBadgeText(community: any) {
 
 function handleCommunityTap(community: any) {
   if (isCardDisabled(community) || applyLock.isBusy(community._id)) return
+  // 自己创建的待审批社区：点击只弹 toast 说明状态，不触发 apply 流程
+  if (community.viewerStatus === 'creator-pending') {
+    uni.showToast({
+      title: '等待超管审批中，通过后会自动加入',
+      icon: 'none',
+      duration: 2500,
+    })
+    return
+  }
   applyLock.run(community)
 }
 
@@ -111,6 +123,14 @@ function handleCreate() {
 .badge { font-size: $hh-font-caption; padding: $hh-space-xs $hh-space-sm; border-radius: $hh-radius-lg; white-space: nowrap; }
 .badge.open { background: #e8f5e9; color: #2e7d32; }
 .badge.approval { background: #fff3e0; color: #e65100; }
+/* creator-pending 用墨绿色调，与普通"审核中"区分开（你创建的 vs 你申请加入的别人的） */
+.badge.status-creator-pending {
+  background: $hh-accent-wash;
+  color: $hh-accent-ink;
+  font-weight: $hh-font-weight-bold;
+}
+.badge.status-pending { background: #f5f5f5; color: #757575; }
+.badge.status-rejected { background: #ffebee; color: #c62828; }
 .footer { margin-top: $hh-space-xl; }
 .create-btn { background: $hh-color-bg-sub; color: $hh-color-text; border-radius: $hh-radius-md; }
 </style>
