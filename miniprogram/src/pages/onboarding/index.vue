@@ -1,5 +1,11 @@
 <template>
   <view class="onboarding">
+    <LoginGuard
+      v-if="!userStore.isLoggedIn"
+      title="请先登录"
+      desc="登录后再来发现和加入社区"
+    />
+    <template v-else>
     <view class="header">
       <text class="title">选择你的社区</text>
       <text class="subtitle">加入后即可浏览和发帖</text>
@@ -30,6 +36,7 @@
     <view class="footer">
       <button class="create-btn" @tap="handleCreate">创建新社区</button>
     </view>
+    </template>
   </view>
 </template>
 
@@ -37,12 +44,16 @@
 import { ref, onMounted } from 'vue'
 import { communityApi, memberApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
+import { useUserStore } from '../../store/user'
 import { useKeyedBusyLock } from '../../utils/useBusyLock'
+import LoginGuard from '../../components/LoginGuard.vue'
 
 const communities = ref<any[]>([])
 const communityStore = useCommunityStore()
+const userStore = useUserStore()
 
 onMounted(async () => {
+  if (!userStore.isLoggedIn) return
   await loadCommunities()
 })
 

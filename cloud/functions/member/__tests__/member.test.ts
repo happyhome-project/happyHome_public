@@ -187,6 +187,13 @@ test('myCommunities：只返回 active 成员且社区状态为 active 的社区
   expect(result.communities).toEqual([{ _id: 'c1', name: '青山村', status: 'active' }])
 })
 
+test('myCommunities：未登录（openid 空）时返回空列表，不抛错（后端兜底）', async () => {
+  const result = await handleMyCommunities('')
+  expect(result).toEqual({ communities: [] })
+  // 未登录时不应该触发任何数据库查询
+  expect(db.query).not.toHaveBeenCalled()
+})
+
 test('main(): 未知 action 抛出错误', async () => {
   await expect(main({ action: 'unknown' })).rejects.toThrow('Unknown action: unknown')
 })
