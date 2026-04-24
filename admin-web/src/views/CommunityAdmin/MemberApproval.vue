@@ -37,7 +37,12 @@
         <el-table data-testid="member-pending-table" :data="pendingMembers" v-loading="loading">
           <el-table-column label="昵称" min-width="140">
             <template #default="{ row }">
-              <span>{{ row.nickName || '未设置' }}</span>
+              <div class="member-identity">
+                <el-avatar :src="row.avatarUrl" :size="28">
+                  {{ (row.nickName || row.userId || '?').slice(0, 1) }}
+                </el-avatar>
+                <span>{{ row.nickName || '未设置' }}</span>
+              </div>
             </template>
           </el-table-column>
           <el-table-column label="内部ID" min-width="220">
@@ -47,7 +52,11 @@
               </el-tooltip>
             </template>
           </el-table-column>
-          <el-table-column prop="appliedAt" label="申请时间" width="180" />
+          <el-table-column label="申请时间" width="180">
+            <template #default="{ row }">
+              <span>{{ formatDateTime(row.appliedAt) }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="操作" width="180">
             <template #default="{ row }">
               <el-button data-testid="member-approve-button" :data-member-id="row._id" type="primary" size="small" @click="approve(row)">通过</el-button>
@@ -62,7 +71,12 @@
         <el-table data-testid="member-all-table" :data="allMembers" v-loading="loading">
           <el-table-column label="昵称" min-width="140">
             <template #default="{ row }">
-              <span>{{ row.nickName || '未设置' }}</span>
+              <div class="member-identity">
+                <el-avatar :src="row.avatarUrl" :size="28">
+                  {{ (row.nickName || row.userId || '?').slice(0, 1) }}
+                </el-avatar>
+                <span>{{ row.nickName || '未设置' }}</span>
+              </div>
             </template>
           </el-table-column>
           <el-table-column label="内部ID" min-width="220">
@@ -86,8 +100,16 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="appliedAt" label="申请时间" width="180" />
-          <el-table-column prop="joinedAt" label="加入时间" width="180" />
+          <el-table-column label="申请时间" width="180">
+            <template #default="{ row }">
+              <span>{{ formatDateTime(row.appliedAt) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="加入时间" width="180">
+            <template #default="{ row }">
+              <span>{{ formatDateTime(row.joinedAt) }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="操作" width="180">
             <template #default="{ row }">
               <el-button
@@ -119,6 +141,7 @@ interface MemberRow {
   _id: string
   communityId: string
   userId: string
+  avatarUrl?: string
   role: 'admin' | 'member'
   status: MemberStatus
   appliedAt: string
@@ -249,6 +272,21 @@ function formatUserId(userId: string) {
   if (text.length <= 18) return text
   return `${text.slice(0, 8)}...${text.slice(-6)}`
 }
+
+function formatDateTime(value?: string) {
+  const text = String(value || '').trim()
+  if (!text) return '-'
+  const date = new Date(text)
+  if (Number.isNaN(date.getTime())) return text
+
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+
+  return `${year}-${month}-${day} ${hours}:${minutes}`
+}
 </script>
 
 <style scoped>
@@ -258,6 +296,18 @@ function formatUserId(userId: string) {
   align-items: flex-start;
   gap: 16px;
   margin-bottom: 16px;
+}
+
+.member-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.member-identity span {
+  min-width: 0;
+  word-break: break-all;
 }
 
 .title-row {
