@@ -73,6 +73,20 @@ async function getUsersByIds(userIds: string[]) {
   return usersById
 }
 
+/**
+ * 给 posts 附上作者昵称/头像。post 表只存 authorId（openid），展示时 JOIN users 取最新昵称。
+ * 这样用户改昵称后所有历史帖子同步显示新昵称（不走发帖时快照）。
+ */
+async function enrichPostsWithAuthor<T extends { authorId?: string }>(posts: T[]): Promise<Array<T & { authorNickname?: string; authorAvatarUrl?: string }>> {
+  if (!posts.length) return posts as any
+  const usersById = await getUsersByIds(posts.map((p) => p.authorId).filter(Boolean) as string[])
+  return posts.map((p) => ({
+    ...p,
+    authorNickname: usersById[p.authorId || '']?.nickName || '',
+    authorAvatarUrl: usersById[p.authorId || '']?.avatarUrl || '',
+  }))
+}
+
 async function getAttendanceRecords(postId: string, widgetId: string) {
   const rows = await db.query(
     ATTENDANCE_COLLECTION,
@@ -187,6 +201,10 @@ export async function handleCreate(
   await ensureActiveCommunityMember(params.communityId, openid)
 
   const section = await db.getById('sections', params.sectionId) as Section
+  // 板块尚未配置控件时，禁止发帖（否则会产生无任何字段的空 post）
+  if (!section || !Array.isArray(section.widgets) || section.widgets.length === 0) {
+    throw new Error('该板块尚未配置内容模板，请联系管理员完善板块设置后再发布')
+  }
   const sanitizedContent = sanitizeContent(params.content, section)
   validateRequiredWidgets(section, sanitizedContent)
 
@@ -221,7 +239,8 @@ export async function handleList(params: {
     skip: params.skip ?? 0,
     limit: params.limit ?? 20,
   })
-  const enrichedPosts = await enrichPostsWithAttendance(posts as any[], { [params.sectionId]: section }, openid)
+  const withAttendance = await enrichPostsWithAttendance(posts as any[], { [params.sectionId]: section }, openid)
+  const enrichedPosts = await enrichPostsWithAuthor(withAttendance)
   return { posts: enrichedPosts }
 }
 
@@ -231,7 +250,8 @@ export async function handleGet(params: { postId: string }, openid?: string) {
   await ensureActiveCommunityMember(post.communityId, openid || '')
   const section = await db.getById('sections', post.sectionId) as Section
   const attendanceSummaryByWidget = await buildAttendanceSummaryByWidget(post._id, section, openid)
-  return { post: { ...post, attendanceSummaryByWidget } }
+  const [enrichedPost] = await enrichPostsWithAuthor([{ ...post, attendanceSummaryByWidget }])
+  return { post: enrichedPost }
 }
 
 export async function handleDelete(params: { postId: string }, openid: string) {
@@ -260,6 +280,9 @@ export async function handleUpdate(
   if (post.authorId !== openid) throw new Error('无权修改')
 
   const section = await db.getById('sections', post.sectionId) as Section
+  if (!section || !Array.isArray(section.widgets) || section.widgets.length === 0) {
+    throw new Error('该板块尚未配置内容模板，无法编辑')
+  }
   const sanitizedContent = sanitizeContent(params.content, section)
   validateRequiredWidgets(section, sanitizedContent)
 
