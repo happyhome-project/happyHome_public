@@ -35,20 +35,41 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { communityApi, memberApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
+import { useUserStore } from '../../store/user'
 import { useKeyedBusyLock } from '../../utils/useBusyLock'
 
 const communities = ref<any[]>([])
 const communityStore = useCommunityStore()
+const userStore = useUserStore()
+let refreshingOnboarding = false
 
 onMounted(async () => {
-  await loadCommunities()
+  await refreshOnboardingData()
 })
 
 async function loadCommunities() {
   const res = await communityApi.listDiscoverable()
   communities.value = res.communities
+}
+
+async function refreshOnboardingData() {
+  if (refreshingOnboarding) return
+  refreshingOnboarding = true
+  try {
+    if (userStore.isLoggedIn) {
+      await communityStore.loadMyCommunities()
+      if (communityStore.myCommunities.length > 0) {
+        uni.reLaunch({ url: '/pages/index/index' })
+        return
+      }
+    }
+    await loadCommunities()
+  } finally {
+    refreshingOnboarding = false
+  }
 }
 
 // Per-community lock — clicking on card A doesn't block card B.
@@ -101,6 +122,10 @@ function handleCommunityTap(community: any) {
 function handleCreate() {
   uni.navigateTo({ url: '/pages/createCommunity/index' })
 }
+
+onShow(() => {
+  void refreshOnboardingData()
+})
 </script>
 
 <style lang="scss" scoped>

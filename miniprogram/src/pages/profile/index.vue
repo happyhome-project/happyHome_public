@@ -175,6 +175,7 @@ const communityStore = useCommunityStore()
 const userStore = useUserStore()
 const pendingMembers = ref<any[]>([])
 const adminCommunityIds = ref<string[]>([])
+let refreshingProfile = false
 
 // ── 登录 / 编辑资料表单状态 ──
 const isEditingProfile = ref(false)
@@ -396,10 +397,21 @@ async function loadPendingMembers() {
   }
 }
 
-onMounted(() => { void loadPendingMembers() })
+async function refreshProfileData() {
+  if (refreshingProfile || !userStore.isLoggedIn) return
+  refreshingProfile = true
+  try {
+    await communityStore.loadMyCommunities()
+    await loadPendingMembers()
+  } finally {
+    refreshingProfile = false
+  }
+}
+
+onMounted(() => { void refreshProfileData() })
 // tabBar 切回 Profile 只触发 onShow，不会重新 mount。新申请者 / 被审批后的状态
 // 需要在 onShow 重新拉取，否则 admin 在本 tab 看不到实时变动。
-onShow(() => { void loadPendingMembers() })
+onShow(() => { void refreshProfileData() })
 </script>
 
 <style lang="scss" scoped>
