@@ -5,6 +5,7 @@
  *   node scripts/deploy.mjs cloud                # upload all cloud functions
  *   node scripts/deploy.mjs cloud --only=post    # upload only post (comma-separated ok)
  *   node scripts/deploy.mjs miniprogram          # upload mini program (preview QR)
+ *   node scripts/deploy.mjs admin-web            # upload admin-web dist to CloudBase static hosting
  *   node scripts/deploy.mjs all                  # cloud + miniprogram
  *
  * Flags:
@@ -52,7 +53,10 @@ const APPID = 'wx673b17363cd6b4a6'
 const KEY_PATH = resolve(ROOT, `private.${APPID}.key`)
 const MP_DIST = resolve(ROOT, 'miniprogram/dist/build/mp-weixin')
 const CLOUD_DIST = resolve(ROOT, 'cloud/dist')
+const ADMIN_WEB_DIR = resolve(ROOT, 'admin-web')
+const ADMIN_WEB_DIST = resolve(ROOT, 'admin-web/dist')
 const CLOUD_ENV = 'cloudbase-3gh862acb1505ff3'
+const ADMIN_WEB_DEFAULT_API_URL = 'https://cloudbase-3gh862acb1505ff3-1307183045.ap-shanghai.app.tcloudbase.com'
 const CLOUD_FUNCTIONS = ['user', 'community', 'member', 'section', 'post', 'admin', 'http-gateway']
 
 // Common DevTools install locations on Windows
@@ -68,6 +72,22 @@ function findDevtoolsCli() {
   const envOverride = process.env.WX_DEVTOOLS_CLI
   if (envOverride && existsSync(envOverride)) return envOverride
   return DEVTOOLS_CLI_CANDIDATES.find((p) => existsSync(p)) || null
+}
+
+const quote = (s) => (/[ \t&|<>()]/.test(String(s)) ? `"${String(s).replace(/"/g, '\\"')}"` : String(s))
+
+function runShell(commandLine, options = {}) {
+  console.log(commandLine)
+  return new Promise((res) => {
+    const proc = spawn(commandLine, {
+      cwd: options.cwd || ROOT,
+      env: options.env || process.env,
+      stdio: 'inherit',
+      shell: true,
+    })
+    proc.on('exit', (code) => res({ ok: code === 0, reason: code === 0 ? 'ok' : `exit code ${code}` }))
+    proc.on('error', (err) => res({ ok: false, reason: String(err?.message || err) }))
+  })
 }
 
 // Lazy: miniprogram-ci 的 Project 构造会 eager 读 private key；DevTools CLI
@@ -110,7 +130,6 @@ async function deployCloudViaDevtoolsCli(fns) {
   // Windows + Node spawn + .bat + shell:true 组合下，带空格的路径必须手动加引号，
   // 否则 cmd.exe 会把 "X:/Program Files (x86)/..." 劈成两段。
   // 做法：把整条命令字符串自己拼好、并对每个含空格的段加双引号，然后当作一条命令传给 shell。
-  const quote = (s) => (/[ \t&|<>()]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s)
   const commandLine = [cli, ...args].map(quote).join(' ')
   console.log(`[DevTools CLI] ${commandLine}`)
 
@@ -187,7 +206,6 @@ async function deployMiniprogramViaDevtoolsCli() {
     '--info-output', infoPath,
   ]
 
-  const quote = (s) => (/[ \t&|<>()]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s)
   const commandLine = [cli, ...args].map(quote).join(' ')
   console.log(`[DevTools CLI] ${commandLine}`)
 
@@ -234,6 +252,42 @@ async function deployMiniprogram() {
   console.log('[✓] Miniprogram preview ready via miniprogram-ci')
 }
 
+async function deployAdminWeb() {
+  console.log('\nBuilding admin-web...')
+  const env = {
+    ...process.env,
+    VITE_CLOUD_API_URL: process.env.VITE_CLOUD_API_URL || ADMIN_WEB_DEFAULT_API_URL,
+    VITE_ROUTER_MODE: process.env.VITE_ROUTER_MODE || 'hash',
+  }
+  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+  execSync(`${npm} run build`, { cwd: ADMIN_WEB_DIR, stdio: 'inherit', env })
+
+  const cloudPath = process.env.ADMIN_WEB_CLOUD_PATH || '/'
+  const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
+  const args = [
+    npx,
+    '--yes',
+    '--package',
+    '@cloudbase/cli',
+    'cloudbase',
+    'hosting',
+    'deploy',
+    ADMIN_WEB_DIST,
+  ]
+  if (cloudPath && cloudPath !== '/') args.push(cloudPath)
+  args.push('-e', CLOUD_ENV)
+
+  console.log('\nDeploying admin-web dist to CloudBase static hosting...')
+  console.log(`Using VITE_CLOUD_API_URL=${env.VITE_CLOUD_API_URL}`)
+  const result = await runShell(args.map(quote).join(' '))
+  if (!result.ok) {
+    throw new Error(`Admin web deploy failed: ${result.reason}. Ensure CloudBase CLI is logged in and static hosting is enabled for ${CLOUD_ENV}.`)
+  }
+  console.log('[OK] Admin web deployed to CloudBase static hosting')
+  console.log('Reminder: configure static hosting fallback/error page to index.html for Vue history routes.')
+}
+
 const target = process.argv[2] || 'all'
 if (target === 'cloud' || target === 'all') await deployCloud()
 if (target === 'miniprogram' || target === 'all') await deployMiniprogram()
+if (target === 'admin-web') await deployAdminWeb()
