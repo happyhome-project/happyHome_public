@@ -49,7 +49,7 @@ async function main() {
 
   console.log('1) Unauthorized admin request is rejected')
   const unauthorized = await callAdminRaw('__invalid_token__', 'community.list')
-  assert(unauthorized.statusCode === 403, `community.list unauthorized returns 403 (got ${unauthorized.statusCode})`)
+  assert(unauthorized.statusCode === 401, `community.list unauthorized returns 401 (got ${unauthorized.statusCode})`)
 
   console.log('\n2) Authorized admin request returns communities')
   const listRes = await callAdmin('community.list')
