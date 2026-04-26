@@ -189,6 +189,7 @@ const communityStore = useCommunityStore()
 const userStore = useUserStore()
 const showSwitcher = ref(false)
 const postsBySection = ref<Record<string, any[]>>({})
+let refreshingHome = false
 
 // ── Computed: masthead ──
 const communityName = computed(() => communityStore.currentCommunity?.name ?? '选择社区')
@@ -403,26 +404,37 @@ async function loadAllSectionPosts() {
   postsBySection.value = results
 }
 
-onMounted(async () => {
-  // 未登录：清干净 store，不再拉任何社区/帖子数据（模板里已由 LoginGuard 挡住渲染）
+async function refreshHomeData() {
+  if (refreshingHome) return
   if (!userStore.isLoggedIn) {
     communityStore.clearCommunityState()
     communityStore.myCommunities = []
     postsBySection.value = {}
     return
   }
-  if (communityStore.myCommunities.length === 0) {
+  refreshingHome = true
+  try {
     await communityStore.loadMyCommunities()
+    if (communityStore.myCommunities.length === 0) {
+      postsBySection.value = {}
+      uni.reLaunch({ url: '/pages/onboarding/index' })
+      return
+    }
+    await loadAllSectionPosts()
+  } finally {
+    refreshingHome = false
   }
-  await loadAllSectionPosts()
+}
+
+onMounted(async () => {
+  await refreshHomeData()
 })
 
 // tabBar 页面切回首页时（如发帖后 switchTab 返回）不会重新 mount，只触发 onShow。
 // 这里 onShow 统一刷新帖子数据，确保新发/新删的内容能实时反映。
 // 首次 onShow 发生在 onMounted 之后，会二次拉取（可接受：代价低、换取数据新鲜度）。
 onShow(() => {
-  if (!userStore.isLoggedIn) return
-  void loadAllSectionPosts()
+  void refreshHomeData()
 })
 </script>
 

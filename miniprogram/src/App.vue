@@ -1,7 +1,18 @@
 <script setup lang="ts">
-import { onLaunch } from '@dcloudio/uni-app'
+import { onLaunch, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from './store/community'
 import { useUserStore } from './store/user'
+
+async function refreshMyCommunitiesSilently() {
+  const userStore = useUserStore()
+  if (!userStore.isLoggedIn) return
+
+  try {
+    await useCommunityStore().loadMyCommunities()
+  } catch (e) {
+    console.error('Failed to refresh communities:', e)
+  }
+}
 
 onLaunch(async () => {
   // H5 环境没有 wx.cloud，跳过初始化（H5 通过 http-gateway 访问云函数）
@@ -44,6 +55,13 @@ onLaunch(async () => {
       console.error('Failed to load communities:', e)
     }
   }
+})
+
+onShow(() => {
+  // The app may stay alive while an admin approves a membership in the backend.
+  // Refresh active communities when returning to the foreground so users do not
+  // need to kill and reopen the mini-program to see newly approved communities.
+  void refreshMyCommunitiesSilently()
 })
 </script>
 
