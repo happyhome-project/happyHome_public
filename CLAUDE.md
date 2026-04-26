@@ -31,6 +31,7 @@
 | 建索引 | `npm run ensure:indexes` | 用 @cloudbase/manager-node + CAM 密钥 |
 | admin 首登 | 用 `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD` 直接登 admin-web | admin_accounts 为空时自动 seed superAdmin，**不需要跑 cli seed** |
 | admin 种子（备用）| `SEED_ADMIN_USERNAME=xxx SEED_ADMIN_PASSWORD=yyy npm run seed:admin` | 幂等；CI 环境或 bootstrap 用不了时再跑 |
+| admin env 同步 | `node scripts/update-admin-env.mjs` | 一次性把本地 BOOTSTRAP/SESSION 变量推到 CloudBase admin 函数 env，免去手工去控制台填 |
 
 ---
 
@@ -162,6 +163,7 @@
 | 设计系统 | `docs/VISUAL-TONE.md` / `DESIGN-TOKENS.md` / `UI-LIBRARY.md` / `UX-PRINCIPLES.md` | 做 UI |
 | 本地环境 | `docs/SETUP.md` | 首次 clone |
 | 运维 | `docs/cloudbase-http-access.md` | http-gateway 相关 |
+| Admin Web 部署 | `docs/admin-web-deploy.md` | 把 admin-web 静态站点部署到 CloudBase 静态托管 |
 | UI 回归 | `docs/ui-click-regression-checklist.md` | 改 UI 交互 |
 
 ---
