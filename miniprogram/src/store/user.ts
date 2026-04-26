@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { userApi } from '../api/cloud'
+import { useCommunityStore } from './community'
 
 const STORAGE_KEY = 'user_store'
 
@@ -94,6 +95,17 @@ export const useUserStore = defineStore('user', {
       // Also clear DEV mode flags so next login path is clean
       storageRemove('dev-gateway')
       storageRemove('test-openid')
+      // 连带清掉社区 store —— 否则登出后其他页面可能读到旧的
+      // currentCommunityId / myCommunities 而继续对后端发请求
+      try {
+        const cs = useCommunityStore()
+        cs.clearCommunityState()
+        cs.myCommunities = []
+        cs.membershipByCommunity = {}
+      } catch {
+        /* Pinia root 还未初始化时 useCommunityStore() 会 throw，
+         * 这种情况下本来就没数据需要清，直接忽略 */
+      }
     },
   },
 })
