@@ -17,6 +17,15 @@
           登录
         </el-button>
       </el-form>
+      <el-divider>或</el-divider>
+      <el-button
+        data-testid="login-wx-scan"
+        style="width: 100%;"
+        disabled
+        title="扫码登录即将支持"
+      >
+        微信扫码登录（即将支持）
+      </el-button>
     </div>
   </div>
 </template>
@@ -25,27 +34,28 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
+const authStore = useAuthStore()
 const username = ref('')
 const password = ref('')
 const loading = ref(false)
 
-const ADMIN_USERNAME = import.meta.env.VITE_ADMIN_USERNAME || 'admin'
-const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || 'happyhome2024'
-const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN || 'happyhome-admin-2024'
-
-function handleLogin() {
+async function handleLogin() {
+  if (loading.value) return
   loading.value = true
-  setTimeout(() => {
-    if (username.value === ADMIN_USERNAME && password.value === ADMIN_PASSWORD) {
-      localStorage.setItem('token', ADMIN_TOKEN)
-      router.push('/')
-    } else {
-      ElMessage.error('用户名或密码错误')
-    }
+  try {
+    const res = await authStore.login(username.value.trim(), password.value)
+    ElMessage.success('登录成功')
+    const redirect = res.role === 'superAdmin' ? '/approval' : '/communities'
+    router.push(redirect)
+  } catch (err: any) {
+    const msg = err?.response?.data?.error || err?.message || '登录失败'
+    ElMessage.error(msg)
+  } finally {
     loading.value = false
-  }, 300)
+  }
 }
 </script>
 

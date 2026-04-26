@@ -1,8 +1,11 @@
 <template>
   <div data-testid="community-list-page">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-      <h3>社区管理</h3>
-      <el-button data-testid="community-list-refresh" @click="loadCommunities" :loading="loading">刷新</el-button>
+      <h3>{{ authStore.isSuperAdmin ? '社区管理' : '我的社区' }}</h3>
+      <div style="display: flex; gap: 8px;">
+        <el-button data-testid="community-create-entry" type="primary" @click="goCreate">创建社区</el-button>
+        <el-button data-testid="community-list-refresh" @click="loadCommunities" :loading="loading">刷新</el-button>
+      </div>
     </div>
 
     <div style="display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">
@@ -15,6 +18,7 @@
       <el-select v-model="statusFilter" style="width: 180px;">
         <el-option label="全部状态" value="all" />
         <el-option label="已启用" value="active" />
+        <el-option label="待审批" value="pending" />
         <el-option label="已拒绝" value="rejected" />
       </el-select>
     </div>
@@ -49,6 +53,7 @@
             <el-button size="small" @click="goPosts(getCommunityId(row))">帖子管理</el-button>
             <el-button data-testid="community-motto-button" :data-community-id="getCommunityId(row)" size="small" @click="openMotto(row)">格言</el-button>
             <el-button
+              v-if="authStore.isSuperAdmin"
               data-testid="community-disable-button"
               :data-community-id="getCommunityId(row)"
               size="small"
@@ -59,6 +64,7 @@
               禁用
             </el-button>
           </template>
+          <span v-else-if="row.status === 'pending'" style="color: #909399;">等待超级管理员审批</span>
           <span v-else style="color: #909399;">已拒绝，仅读历史记录</span>
         </template>
       </el-table-column>
@@ -107,15 +113,17 @@ import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { communityApi } from '../../api/cloud'
+import { useAuthStore } from '../../stores/auth'
 
 const router = useRouter()
+const authStore = useAuthStore()
 const loading = ref(false)
 const communities = ref<any[]>([])
 const disablingId = ref('')
 const showMottoDialog = ref(false)
 const savingMotto = ref(false)
 const keyword = ref('')
-const statusFilter = ref<'all' | 'active' | 'rejected'>('all')
+const statusFilter = ref<'all' | 'active' | 'pending' | 'rejected'>('all')
 const mottoForm = ref<{ communityId: string; motto: string; mottoCite: string }>({
   communityId: '',
   motto: '',
@@ -142,7 +150,7 @@ async function loadCommunities() {
     const res = await communityApi.list() as any
     communities.value = (res.communities ?? [])
       .map((c: any) => ({ ...c, _id: c._id || c.id || '' }))
-      .filter((c: any) => c.status === 'active' || c.status === 'rejected')
+      .filter((c: any) => ['active', 'pending', 'rejected'].includes(c.status))
   } catch (e: any) {
     ElMessage.error(e.message || '加载失败')
   } finally {
@@ -152,6 +160,10 @@ async function loadCommunities() {
 
 function getCommunityId(row: any): string {
   return String(row?._id || row?.id || '')
+}
+
+async function goCreate() {
+  await router.push({ name: 'community-create' })
 }
 
 async function goSections(communityId: string) {

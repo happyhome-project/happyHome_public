@@ -2,17 +2,57 @@ import axios from 'axios'
 
 const BASE_URL = import.meta.env.VITE_CLOUD_API_URL
 
+// Interceptor needs to reach the auth store lazily to avoid circular import
+let unauthorizedHandler: (() => void) | null = null
+export function registerUnauthorizedHandler(handler: () => void) {
+  unauthorizedHandler = handler
+}
+
+const http = axios.create({ baseURL: BASE_URL })
+
+http.interceptors.response.use(
+  (r) => r,
+  (error) => {
+    const status = error?.response?.status
+    if (status === 401 || status === 403) {
+      if (unauthorizedHandler) {
+        try { unauthorizedHandler() } catch { /* noop */ }
+      }
+    }
+    return Promise.reject(error)
+  }
+)
+
 async function callAdmin(action: string, params: Record<string, any> = {}) {
-  const res = await axios.post(
-    `${BASE_URL}/admin`,
+  const token = localStorage.getItem('token') || ''
+  const res = await http.post(
+    `/admin`,
     { action, ...params },
-    { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+    { headers: token ? { Authorization: `Bearer ${token}` } : {} }
   )
   return res.data
 }
 
 // Keep for backward compat with WidgetEditor.vue which imports callCloud
 export const callCloud = callAdmin
+
+export const authApi = {
+  login: (username: string, password: string) => callAdmin('auth.login', { username, password }),
+  logout: () => callAdmin('auth.logout'),
+  me: () => callAdmin('auth.me'),
+  wxLogin: (code: string) => callAdmin('auth.wxLogin', { code }),
+}
+
+export const adminAccountApi = {
+  list: () => callAdmin('admin.listAccounts'),
+  create: (params: { username: string; password: string; role: 'superAdmin' | 'communityAdmin'; userId?: string }) =>
+    callAdmin('admin.createAccount', params),
+  resetPassword: (accountId: string, password: string) =>
+    callAdmin('admin.resetPassword', { accountId, password }),
+  disable: (accountId: string) => callAdmin('admin.disableAccount', { accountId }),
+  enable: (accountId: string) => callAdmin('admin.enableAccount', { accountId }),
+  bindWechat: (accountId: string, openId: string) => callAdmin('admin.bindWechat', { accountId, openId }),
+}
 
 export const communityApi = {
   list: () => callAdmin('community.list'),
@@ -24,6 +64,13 @@ export const communityApi = {
   hardDelete: (communityId: string) => callAdmin('community.hardDelete', { communityId }),
   updateMeta: (params: { communityId: string; name?: string; description?: string; motto?: string; mottoCite?: string }) =>
     callAdmin('community.updateMeta', params),
+  createAdmin: (params: {
+    name: string
+    description: string
+    coverImage: string
+    location: { address: string; lat: number; lng: number }
+    joinType: 'open' | 'approval'
+  }) => callAdmin('community.createAdmin', params),
 }
 
 export const sectionApi = {

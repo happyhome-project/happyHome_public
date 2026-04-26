@@ -1,4 +1,6 @@
 export type UserRole = 'user' | 'superAdmin'
+export type AdminRole = 'superAdmin' | 'communityAdmin'
+export type AdminAccountStatus = 'active' | 'disabled'
 export type JoinType = 'open' | 'approval'
 export type CommunityStatus = 'pending' | 'active' | 'rejected' | 'disabled'
 export type MemberRole = 'admin' | 'member'
@@ -139,4 +141,33 @@ export interface Post {
   createdAt: string
   updatedAt: string
   attendanceSummaryByWidget?: AttendanceSummaryByWidget
+}
+
+export interface AdminAccount {
+  _id: string
+  username: string
+  passwordHash: string
+  passwordSalt: string
+  userId: string
+  role: AdminRole
+  status: AdminAccountStatus
+  createdAt: string
+  createdBy: string
+}
+
+export interface AdminSession {
+  _id: string
+  accountId: string
+  role: AdminRole
+  userId: string
+  username: string
+  createdAt: string
+  expiresAt: string
+}
+
+export interface AdminCtx {
+  accountId: string
+  role: AdminRole
+  userId: string
+  username: string
 }
