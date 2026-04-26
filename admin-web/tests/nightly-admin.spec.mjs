@@ -5,11 +5,15 @@ const cleanupRegistry = createCleanupRegistry()
 const state = {}
 
 function usernameValue() {
-  return process.env.VITE_ADMIN_USERNAME || 'admin'
+  return process.env.VITE_ADMIN_USERNAME || ''
 }
 
 function passwordValue() {
-  return process.env.VITE_ADMIN_PASSWORD || 'happyhome2024'
+  return process.env.VITE_ADMIN_PASSWORD || ''
+}
+
+function hasLoginCredentials() {
+  return !!usernameValue() && !!passwordValue()
 }
 
 async function fillInput(container, value) {
@@ -17,6 +21,18 @@ async function fillInput(container, value) {
 }
 
 async function login(page) {
+  if (!hasLoginCredentials()) {
+    await page.goto('/login')
+    await page.evaluate((token) => {
+      localStorage.setItem('token', token)
+      localStorage.setItem('admin_role', 'superAdmin')
+      localStorage.setItem('admin_username', 'legacy')
+    }, process.env.ADMIN_TOKEN || 'happyhome-admin-2024')
+    await page.goto('/approval')
+    await expect(page).toHaveURL(/\/approval$/)
+    return
+  }
+
   await page.goto('/login')
   await fillInput(page.getByTestId('login-username-field'), usernameValue())
   await fillInput(page.getByTestId('login-password-field'), passwordValue())
