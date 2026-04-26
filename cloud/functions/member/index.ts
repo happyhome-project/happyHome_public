@@ -6,6 +6,17 @@ import type { Community } from '../../shared/types'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
+async function getLatestMembershipRecord(communityId: string, openid: string) {
+  const records = await db.query('community_members', {
+    communityId,
+    userId: openid,
+  }, {
+    orderBy: ['appliedAt', 'desc'],
+    limit: 1,
+  })
+  return records[0] || null
+}
+
 export async function handleApply(params: { communityId: string }, openid: string) {
   if (!openid) throw new Error('Missing OPENID')
 
@@ -60,8 +71,9 @@ export async function handleLeave(params: { communityId: string }, openid: strin
   })
   if (!members || members.length === 0) throw new Error('不是社区成员')
 
-  // 注意：管理员也可以退出，退出后其帖子保留。
-  // 若社区只剩该管理员，退出后社区将无管理员，需在产品层面处理（当前版本不限制）。
+  const community = await db.getById('communities', params.communityId) as Community | null
+  if (community?.creatorId === openid) throw new Error('社区创建者不能退出社区')
+
   const memberId = members[0]._id
   await db.removeById('community_members', memberId)
   await db.increment('communities', params.communityId, 'memberCount', -1)
@@ -121,13 +133,33 @@ export async function handlePendingList(params: { communityId: string }, openid:
 // 查询当前用户在指定社区的成员状态（给前端判断是否需要引导加入）
 export async function handleMyStatus(params: { communityId: string }, openid: string) {
   if (!openid) return { isMember: false, status: null }
-  const records = await db.query('community_members', {
-    communityId: params.communityId,
-    userId: openid,
-  })
-  if (!records || records.length === 0) return { isMember: false, status: null }
-  const latest = records[0] as { status: string }
+  const latest = await getLatestMembershipRecord(params.communityId, openid) as { status: string } | null
+  if (!latest) return { isMember: false, status: null }
   return { isMember: latest.status === 'active', status: latest.status }
+}
+
+export async function handleMyCommunities(openid: string) {
+  // 未登录时返回空列表，而不是抛错。前端应该用 isLoggedIn 前置守门，
+  // 这里做后端兜底——万一前端忘守（或新页面接入）不至于让用户看到 "Missing OPENID" 原始错误。
+  // 语义：没有 openid = 没有身份 = 没有社区归属，return [] 符合 user mental model。
+  if (!openid) return { communities: [] }
+
+  const memberships = await db.query('community_members', {
+    userId: openid,
+    status: 'active',
+  }, {
+    orderBy: ['joinedAt', 'desc'],
+  })
+
+  const communities = []
+  for (const membership of memberships) {
+    const community = await db.getById('communities', membership.communityId) as Community | null
+    if (community && community.status === 'active') {
+      communities.push(community)
+    }
+  }
+
+  return { communities }
 }
 
 export const main = async (event: any) => {
@@ -139,5 +171,6 @@ export const main = async (event: any) => {
   if (action === 'memberReject') return handleMemberReject(params, openid)
   if (action === 'pendingList') return handlePendingList(params, openid)
   if (action === 'myStatus') return handleMyStatus(params, openid)
+  if (action === 'myCommunities') return handleMyCommunities(openid)
   throw new Error(`Unknown action: ${action}`)
 }

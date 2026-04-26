@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import type { Community, Section } from '../../../cloud/shared/types'
-import { communityApi, memberApi, sectionApi } from '../api/cloud'
+import { memberApi, sectionApi } from '../api/cloud'
 
 const STORAGE_KEY = 'community_store'
 
@@ -19,6 +19,12 @@ export const useCommunityStore = defineStore('community', {
       state.currentSections[state.currentSectionIndex],
   },
   actions: {
+    clearCommunityState() {
+      this.currentCommunityId = ''
+      this.currentSections = []
+      this.currentSectionIndex = 0
+      this.saveToStorage()
+    },
     loadFromStorage() {
       try {
         const saved = wx.getStorageSync(STORAGE_KEY)
@@ -66,15 +72,17 @@ export const useCommunityStore = defineStore('community', {
       return this.membershipByCommunity[String(communityId || '').trim()] || null
     },
     async loadMyCommunities() {
-      const res = await communityApi.list(false)
+      const res = await memberApi.myCommunities()
       this.myCommunities = res.communities as Community[]
-      if (this.myCommunities.length > 0) {
-        const targetId = this.currentCommunityId &&
-          this.myCommunities.some(c => c._id === this.currentCommunityId)
-          ? this.currentCommunityId
-          : this.myCommunities[0]._id
-        await this.switchCommunity(targetId)
+      if (this.myCommunities.length === 0) {
+        this.clearCommunityState()
+        return
       }
+      const targetId = this.currentCommunityId &&
+        this.myCommunities.some(c => c._id === this.currentCommunityId)
+        ? this.currentCommunityId
+        : this.myCommunities[0]._id
+      await this.switchCommunity(targetId)
     },
   },
 })

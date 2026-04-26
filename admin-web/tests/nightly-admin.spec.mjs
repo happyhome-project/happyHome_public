@@ -21,6 +21,7 @@ async function login(page) {
   await fillInput(page.getByTestId('login-username-field'), usernameValue())
   await fillInput(page.getByTestId('login-password-field'), passwordValue())
   await page.getByTestId('login-submit').click()
+  await expect(page).toHaveURL(/\/approval$/)
 }
 
 test.beforeAll(async () => {
@@ -54,7 +55,7 @@ test.beforeAll(async () => {
   await callAdmin('section.updateWidgets', {
     sectionId,
     communityId,
-    widgets: [{ type: 'text', label: '内容', required: true, showInList: true, widgetId: '' }],
+    widgets: [{ type: 'short_text', label: '内容', fieldKey: 'title', required: true, showInList: true, widgetId: '' }],
   })
 
   await callAs(state.applicant, 'member', 'apply', { communityId })
@@ -111,5 +112,5 @@ test('community list can navigate to members page and show pending member', asyn
   await expect(page).toHaveURL(new RegExp(`/members/${state.communityId}`))
   await expect(page.getByTestId('member-approval-page')).toBeVisible()
   await expect(page.getByTestId('member-pending-table')).toBeVisible()
-  await expect(page.locator(`text=${state.applicant}`)).toBeVisible()
+  await expect(page.getByTestId('member-pending-table').locator('text=AdminUiApplicant').first()).toBeVisible()
 })

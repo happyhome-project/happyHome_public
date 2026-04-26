@@ -15,6 +15,7 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
 const ATTENDANCE_COLLECTION = 'post_attendance_members'
 const ATTENDANCE_PREVIEW_LIMIT = 5
+const COMMUNITY_READ_ERROR = '需要先加入社区后查看内容'
 
 function getEditableWidgetIds(section: Section) {
   return new Set(
@@ -51,12 +52,13 @@ function normalizeCapacity(widget: Widget): number | undefined {
 }
 
 async function ensureActiveCommunityMember(communityId: string, userId: string) {
+  if (!userId) throw new Error(COMMUNITY_READ_ERROR)
   const members = await db.query('community_members', {
     communityId,
     userId,
     status: 'active',
   })
-  if (!members || members.length === 0) throw new Error('非社区成员，无法操作')
+  if (!members || members.length === 0) throw new Error(COMMUNITY_READ_ERROR)
 }
 
 async function getUsersByIds(userIds: string[]) {
@@ -71,6 +73,20 @@ async function getUsersByIds(userIds: string[]) {
   return usersById
 }
 
+/**
+ * 给 posts 附上作者昵称/头像。post 表只存 authorId（openid），展示时 JOIN users 取最新昵称。
+ * 这样用户改昵称后所有历史帖子同步显示新昵称（不走发帖时快照）。
+ */
+async function enrichPostsWithAuthor<T extends { authorId?: string }>(posts: T[]): Promise<Array<T & { authorNickname?: string; authorAvatarUrl?: string }>> {
+  if (!posts.length) return posts as any
+  const usersById = await getUsersByIds(posts.map((p) => p.authorId).filter(Boolean) as string[])
+  return posts.map((p) => ({
+    ...p,
+    authorNickname: usersById[p.authorId || '']?.nickName || '',
+    authorAvatarUrl: usersById[p.authorId || '']?.avatarUrl || '',
+  }))
+}
+
 async function getAttendanceRecords(postId: string, widgetId: string) {
   const rows = await db.query(
     ATTENDANCE_COLLECTION,
@@ -78,6 +94,16 @@ async function getAttendanceRecords(postId: string, widgetId: string) {
     { orderBy: ['joinedAt', 'desc'] }
   )
   return rows as PostAttendanceMember[]
+}
+
+function normalizeSeatCount(value: unknown): number {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < 1) return 1
+  return Math.floor(n)
+}
+
+function sumOccupiedSeats(records: Pick<PostAttendanceMember, 'seatCount'>[]): number {
+  return records.reduce((sum, r) => sum + normalizeSeatCount(r.seatCount), 0)
 }
 
 async function buildAttendanceSummary(
@@ -91,14 +117,19 @@ async function buildAttendanceSummary(
     userId: record.userId,
     nickName: usersById[record.userId]?.nickName || '',
     avatarUrl: usersById[record.userId]?.avatarUrl || '',
+    seatCount: normalizeSeatCount(record.seatCount),
   }))
   const count = records.length
+  const occupiedSeats = sumOccupiedSeats(records)
   const capacity = normalizeCapacity(widget)
+  const myRecord = viewerId ? records.find((record) => record.userId === viewerId) : undefined
   return {
     count,
+    occupiedSeats,
     ...(capacity ? { capacity } : {}),
-    isFull: capacity ? count >= capacity : false,
-    isJoined: viewerId ? records.some((record) => record.userId === viewerId) : false,
+    isFull: capacity ? occupiedSeats >= capacity : false,
+    isJoined: Boolean(myRecord),
+    ...(myRecord ? { mySeatCount: normalizeSeatCount(myRecord.seatCount) } : {}),
     previewUsers,
   }
 }
@@ -154,15 +185,18 @@ async function listAttendanceMembersInternal(postId: string, widgetId?: string) 
     userId: record.userId,
     nickName: usersById[record.userId]?.nickName || '',
     avatarUrl: usersById[record.userId]?.avatarUrl || '',
+    seatCount: normalizeSeatCount(record.seatCount),
     joinedAt: record.joinedAt,
   }))
+  const occupiedSeats = sumOccupiedSeats(records)
   const capacity = normalizeCapacity(widget)
   return {
     widgetId: widget.widgetId,
     members,
     total: members.length,
+    occupiedSeats,
     ...(capacity ? { capacity } : {}),
-    isFull: capacity ? members.length >= capacity : false,
+    isFull: capacity ? occupiedSeats >= capacity : false,
     post,
   }
 }
@@ -185,6 +219,10 @@ export async function handleCreate(
   await ensureActiveCommunityMember(params.communityId, openid)
 
   const section = await db.getById('sections', params.sectionId) as Section
+  // 板块尚未配置控件时，禁止发帖（否则会产生无任何字段的空 post）
+  if (!section || !Array.isArray(section.widgets) || section.widgets.length === 0) {
+    throw new Error('该板块尚未配置内容模板，请联系管理员完善板块设置后再发布')
+  }
   const sanitizedContent = sanitizeContent(params.content, section)
   validateRequiredWidgets(section, sanitizedContent)
 
@@ -209,6 +247,8 @@ export async function handleList(params: {
   skip?: number
   limit?: number
 }, openid?: string) {
+  const section = await db.getById('sections', params.sectionId) as Section
+  await ensureActiveCommunityMember(section.communityId, openid || '')
   const posts = await db.query('posts', {
     sectionId: params.sectionId,
     status: 'active',
@@ -217,17 +257,19 @@ export async function handleList(params: {
     skip: params.skip ?? 0,
     limit: params.limit ?? 20,
   })
-  const section = await db.getById('sections', params.sectionId) as Section
-  const enrichedPosts = await enrichPostsWithAttendance(posts as any[], { [params.sectionId]: section }, openid)
+  const withAttendance = await enrichPostsWithAttendance(posts as any[], { [params.sectionId]: section }, openid)
+  const enrichedPosts = await enrichPostsWithAuthor(withAttendance)
   return { posts: enrichedPosts }
 }
 
 export async function handleGet(params: { postId: string }, openid?: string) {
   const post = await db.getById('posts', params.postId) as any
   if (post.status === 'deleted') throw new Error('帖子不存在')
+  await ensureActiveCommunityMember(post.communityId, openid || '')
   const section = await db.getById('sections', post.sectionId) as Section
   const attendanceSummaryByWidget = await buildAttendanceSummaryByWidget(post._id, section, openid)
-  return { post: { ...post, attendanceSummaryByWidget } }
+  const [enrichedPost] = await enrichPostsWithAuthor([{ ...post, attendanceSummaryByWidget }])
+  return { post: enrichedPost }
 }
 
 export async function handleDelete(params: { postId: string }, openid: string) {
@@ -256,6 +298,9 @@ export async function handleUpdate(
   if (post.authorId !== openid) throw new Error('无权修改')
 
   const section = await db.getById('sections', post.sectionId) as Section
+  if (!section || !Array.isArray(section.widgets) || section.widgets.length === 0) {
+    throw new Error('该板块尚未配置内容模板，无法编辑')
+  }
   const sanitizedContent = sanitizeContent(params.content, section)
   validateRequiredWidgets(section, sanitizedContent)
 
@@ -268,10 +313,11 @@ export async function handleUpdate(
 }
 
 export async function handleJoinAttendance(
-  params: { postId: string; widgetId?: string },
+  params: { postId: string; widgetId?: string; seatCount?: number },
   openid: string,
 ) {
   if (!openid) throw new Error('Missing OPENID')
+  const seatCount = normalizeSeatCount(params.seatCount)
   const { post, widget } = await getAttendanceWidgetForPost(params.postId, params.widgetId)
   await ensureActiveCommunityMember(post.communityId, openid)
 
@@ -283,17 +329,33 @@ export async function handleJoinAttendance(
   if (existing.length === 0) {
     const current = await getAttendanceRecords(post._id, widget.widgetId)
     const capacity = normalizeCapacity(widget)
-    if (capacity && current.length >= capacity) {
-      throw new Error('已满员，暂时无法参与')
+    const occupied = sumOccupiedSeats(current)
+    if (capacity && occupied + seatCount > capacity) {
+      const remaining = Math.max(0, capacity - occupied)
+      throw new Error(
+        seatCount === 1
+          ? '已满员，暂时无法参与'
+          : `剩余 ${remaining} 座，无法容纳 ${seatCount} 位`
+      )
     }
-    await db.create(ATTENDANCE_COLLECTION, {
+    const newId = await db.create(ATTENDANCE_COLLECTION, {
       postId: post._id,
       widgetId: widget.widgetId,
       communityId: post.communityId,
       sectionId: post.sectionId,
       userId: openid,
+      seatCount,
       joinedAt: new Date().toISOString(),
     })
+    // 并发防御：写入后重新校验总席位，若超容则回滚（防止两个请求同时看见"还有剩余"导致超卖）
+    if (capacity) {
+      const after = await getAttendanceRecords(post._id, widget.widgetId)
+      const occupiedAfter = sumOccupiedSeats(after)
+      if (occupiedAfter > capacity && typeof newId === 'string') {
+        await db.removeById(ATTENDANCE_COLLECTION, newId)
+        throw new Error('已满员，暂时无法参与')
+      }
+    }
   }
 
   const summary = await buildAttendanceSummary(post._id, widget, openid)
@@ -332,6 +394,7 @@ export async function handleListAttendanceMembers(
     widgetId: result.widgetId,
     members: result.members,
     total: result.total,
+    occupiedSeats: result.occupiedSeats,
     ...(typeof result.capacity === 'number' ? { capacity: result.capacity } : {}),
     isFull: result.isFull,
   }

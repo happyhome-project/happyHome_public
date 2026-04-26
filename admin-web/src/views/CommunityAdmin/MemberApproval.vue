@@ -19,7 +19,7 @@
       <el-input
         v-model="keyword"
         clearable
-        placeholder="搜索昵称或用户 ID"
+        placeholder="搜索昵称或内部ID"
         style="width: 280px;"
         @keyup.enter="loadMembers"
       />
@@ -37,11 +37,26 @@
         <el-table data-testid="member-pending-table" :data="pendingMembers" v-loading="loading">
           <el-table-column label="昵称" min-width="140">
             <template #default="{ row }">
-              <span>{{ row.nickName || '未设置' }}</span>
+              <div class="member-identity">
+                <el-avatar :src="row.avatarUrl" :size="28">
+                  {{ (row.nickName || row.userId || '?').slice(0, 1) }}
+                </el-avatar>
+                <span>{{ row.nickName || '未设置' }}</span>
+              </div>
             </template>
           </el-table-column>
-          <el-table-column prop="userId" label="用户 ID" min-width="220" show-overflow-tooltip />
-          <el-table-column prop="appliedAt" label="申请时间" width="180" />
+          <el-table-column label="内部ID" min-width="220">
+            <template #default="{ row }">
+              <el-tooltip :content="row.userId" placement="top">
+                <span>{{ formatUserId(row.userId) }}</span>
+              </el-tooltip>
+            </template>
+          </el-table-column>
+          <el-table-column label="申请时间" width="180">
+            <template #default="{ row }">
+              <span>{{ formatAdminDateTime(row.appliedAt) }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="操作" width="180">
             <template #default="{ row }">
               <el-button data-testid="member-approve-button" :data-member-id="row._id" type="primary" size="small" @click="approve(row)">通过</el-button>
@@ -56,10 +71,21 @@
         <el-table data-testid="member-all-table" :data="allMembers" v-loading="loading">
           <el-table-column label="昵称" min-width="140">
             <template #default="{ row }">
-              <span>{{ row.nickName || '未设置' }}</span>
+              <div class="member-identity">
+                <el-avatar :src="row.avatarUrl" :size="28">
+                  {{ (row.nickName || row.userId || '?').slice(0, 1) }}
+                </el-avatar>
+                <span>{{ row.nickName || '未设置' }}</span>
+              </div>
             </template>
           </el-table-column>
-          <el-table-column prop="userId" label="用户 ID" min-width="220" show-overflow-tooltip />
+          <el-table-column label="内部ID" min-width="220">
+            <template #default="{ row }">
+              <el-tooltip :content="row.userId" placement="top">
+                <span>{{ formatUserId(row.userId) }}</span>
+              </el-tooltip>
+            </template>
+          </el-table-column>
           <el-table-column label="角色" width="100">
             <template #default="{ row }">
               <el-tag size="small" :type="row.role === 'admin' ? 'danger' : 'info'">
@@ -74,8 +100,16 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="appliedAt" label="申请时间" width="180" />
-          <el-table-column prop="joinedAt" label="加入时间" width="180" />
+          <el-table-column label="申请时间" width="180">
+            <template #default="{ row }">
+              <span>{{ formatAdminDateTime(row.appliedAt) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="加入时间" width="180">
+            <template #default="{ row }">
+              <span>{{ formatAdminDateTime(row.joinedAt) }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="操作" width="180">
             <template #default="{ row }">
               <el-button
@@ -100,13 +134,15 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { communityApi, memberApi } from '../../api/cloud'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { formatAdminDateTime } from '../../utils/datetime'
 
 type MemberStatus = 'pending' | 'active' | 'rejected'
 interface MemberRow {
   _id: string
   communityId: string
   userId: string
+  avatarUrl?: string
   role: 'admin' | 'member'
   status: MemberStatus
   appliedAt: string
@@ -191,6 +227,17 @@ async function reject(row: MemberRow) {
 }
 
 async function kick(row: MemberRow) {
+  // 二次确认：移出成员是不可逆的危险操作，跟 disable / hardDelete 等保持一致的确认流
+  const label = row.nickName || row.userId || '该成员'
+  try {
+    await ElMessageBox.confirm(
+      `确认将成员「${label}」移出社区吗？该用户之后需重新申请才能加入。`,
+      '移出确认',
+      { confirmButtonText: '移出', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return // 用户取消
+  }
   try {
     await memberApi.kick(communityId.value, row._id)
     ElMessage.success('已移出成员')
@@ -201,7 +248,7 @@ async function kick(row: MemberRow) {
 }
 
 function canKick(row: MemberRow) {
-  return row.status === 'active' && row.role === 'member' && !row.isCreator
+  return (row.status === 'active' || row.status === 'rejected') && row.role === 'member' && !row.isCreator
 }
 
 function statusLabel(status: MemberStatus) {
@@ -220,6 +267,13 @@ function statusTagType(status: MemberStatus): 'success' | 'warning' | 'danger' |
 function getErrorMessage(error: any): string {
   return String(error?.response?.data?.error || error?.message || '')
 }
+
+function formatUserId(userId: string) {
+  const text = String(userId || '')
+  if (text.length <= 18) return text
+  return `${text.slice(0, 8)}...${text.slice(-6)}`
+}
+
 </script>
 
 <style scoped>
@@ -229,6 +283,18 @@ function getErrorMessage(error: any): string {
   align-items: flex-start;
   gap: 16px;
   margin-bottom: 16px;
+}
+
+.member-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.member-identity span {
+  min-width: 0;
+  word-break: break-all;
 }
 
 .title-row {

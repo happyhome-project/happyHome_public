@@ -6,6 +6,8 @@ import { assertCommunityAdmin } from '../../lib/auth'
 import type { Widget, Section, SectionType, SectionStatus } from '../../shared/types'
 import { LIST_DISPLAYABLE_TYPES } from '../../shared/types'
 
+const COMMUNITY_READ_ERROR = '需要先加入社区后查看内容'
+
 function normalizeSection(s: any): Section {
   return {
     ...s,
@@ -17,6 +19,16 @@ function normalizeSection(s: any): Section {
 }
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
+
+async function ensureActiveCommunityMember(communityId: string, openid: string) {
+  if (!openid) throw new Error(COMMUNITY_READ_ERROR)
+  const members = await db.query('community_members', {
+    communityId,
+    userId: openid,
+    status: 'active',
+  }, { limit: 1 })
+  if (!members || members.length === 0) throw new Error(COMMUNITY_READ_ERROR)
+}
 
 function normalizeWidget(widget: Widget): Widget {
   const normalized: Widget = {
@@ -94,12 +106,16 @@ export async function handleCreate(
   return { sectionId }
 }
 
-export async function handleGet(params: { sectionId: string }) {
+export async function handleGet(params: { sectionId: string }, openid: string) {
   const raw = await db.getById('sections', params.sectionId)
+  if (raw?.communityId) {
+    await ensureActiveCommunityMember(raw.communityId, openid)
+  }
   return { section: raw ? normalizeSection(raw) : null }
 }
 
-export async function handleList(params: { communityId: string; withPostCount?: boolean }) {
+export async function handleList(params: { communityId: string; withPostCount?: boolean }, openid: string) {
+  await ensureActiveCommunityMember(params.communityId, openid)
   const raw = await db.query('sections', { communityId: params.communityId }, {
     orderBy: ['order', 'asc'],
   })
@@ -164,8 +180,8 @@ export const main = async (event: any) => {
   const openid = resolveOpenId(event)
   const { action, _testOpenid, ...params } = event
   if (action === 'create') return handleCreate(params, openid)
-  if (action === 'get') return handleGet(params)
-  if (action === 'list') return handleList(params)
+  if (action === 'get') return handleGet(params, openid)
+  if (action === 'list') return handleList(params, openid)
   if (action === 'updateWidgets') return handleUpdateWidgets(params, openid)
   if (action === 'update') return handleUpdate(params, openid)
   throw new Error(`Unknown action: ${action}`)

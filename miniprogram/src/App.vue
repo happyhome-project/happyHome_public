@@ -1,7 +1,18 @@
 <script setup lang="ts">
-import { onLaunch } from '@dcloudio/uni-app'
+import { onLaunch, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from './store/community'
 import { useUserStore } from './store/user'
+
+async function refreshMyCommunitiesSilently() {
+  const userStore = useUserStore()
+  if (!userStore.isLoggedIn) return
+
+  try {
+    await useCommunityStore().loadMyCommunities()
+  } catch (e) {
+    console.error('Failed to refresh communities:', e)
+  }
+}
 
 onLaunch(async () => {
   // H5 环境没有 wx.cloud，跳过初始化（H5 通过 http-gateway 访问云函数）
@@ -19,6 +30,21 @@ onLaunch(async () => {
   userStore.loadFromStorage()
   communityStore.loadFromStorage()
 
+  // 2022-10 微信策略变更后，真机上 wx.getUserProfile 强制返回 "微信用户"；
+  // 老版本采集的用户昵称是这个假名 → 清掉让他们走新登录流程（选头像 + 输昵称）。
+  if (userStore.isLoggedIn && userStore.nickName === '微信用户') {
+    userStore.logout()
+    // 延迟弹提示，等首页 mount 完再显示 toast，避免被生命周期覆盖
+    setTimeout(() => {
+      uni.showToast({
+        title: '请重新登录以完善资料',
+        icon: 'none',
+        duration: 3000,
+      })
+    }, 500)
+    return
+  }
+
   if (userStore.isLoggedIn) {
     try {
       await communityStore.loadMyCommunities()
@@ -29,6 +55,13 @@ onLaunch(async () => {
       console.error('Failed to load communities:', e)
     }
   }
+})
+
+onShow(() => {
+  // The app may stay alive while an admin approves a membership in the backend.
+  // Refresh active communities when returning to the foreground so users do not
+  // need to kill and reopen the mini-program to see newly approved communities.
+  void refreshMyCommunitiesSilently()
 })
 </script>
 

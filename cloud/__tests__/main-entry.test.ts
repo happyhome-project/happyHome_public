@@ -75,17 +75,22 @@ describe('Event shape: flat destructuring (regression for event mismatch bug)', 
   })
 
   test('post.list reads sectionId from flat event', async () => {
-    ;(db.query as jest.Mock).mockResolvedValue([])
+    ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 's1', communityId: 'c1', status: 'active' })
+    ;(db.query as jest.Mock)
+      .mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
+      .mockResolvedValueOnce([])
     await postMain(fe('list', { sectionId: 's1' }))
-    const [collection, where] = (db.query as jest.Mock).mock.calls[0]
+    const [collection, where] = (db.query as jest.Mock).mock.calls[1]
     expect(collection).toBe('posts')
     expect(where).toEqual(expect.objectContaining({ sectionId: 's1' }))
   })
 
   test('section.list reads communityId from flat event', async () => {
-    ;(db.query as jest.Mock).mockResolvedValue([])
+    ;(db.query as jest.Mock)
+      .mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
+      .mockResolvedValueOnce([])
     await sectionMain(fe('list', { communityId: 'c1' }))
-    const [collection, where] = (db.query as jest.Mock).mock.calls[0]
+    const [collection, where] = (db.query as jest.Mock).mock.calls[1]
     expect(collection).toBe('sections')
     expect(where).toEqual({ communityId: 'c1' })
   })
@@ -195,10 +200,16 @@ describe('OPENID requirement contract', () => {
   })
 })
 
+test('member.myCommunities without OPENID returns empty list as backend fallback', async () => {
+  const cloud = require('wx-server-sdk')
+  cloud.getWXContext.mockReturnValueOnce({ OPENID: '' })
+  await expect(memberMain(fe('myCommunities'))).resolves.toEqual({ communities: [] })
+})
+
 // ============================================================
-// 5. Public (no-OPENID) reads still work without OPENID
+// 5. Community content reads require active membership
 // ============================================================
-describe('Public read actions do not require OPENID', () => {
+describe('Community content reads require membership', () => {
   test('community.list works without wxContext OPENID', async () => {
     const cloud = require('wx-server-sdk')
     cloud.getWXContext.mockReturnValueOnce({ OPENID: '' })
@@ -207,19 +218,16 @@ describe('Public read actions do not require OPENID', () => {
     expect(res).toHaveProperty('communities')
   })
 
-  test('section.list works without OPENID', async () => {
+  test('section.list without OPENID is rejected', async () => {
     const cloud = require('wx-server-sdk')
     cloud.getWXContext.mockReturnValueOnce({ OPENID: '' })
-    ;(db.query as jest.Mock).mockResolvedValue([])
-    const res = await sectionMain(fe('list', { communityId: 'c1' }))
-    expect(res).toHaveProperty('sections')
+    await expect(sectionMain(fe('list', { communityId: 'c1' }))).rejects.toThrow('需要先加入社区后查看内容')
   })
 
-  test('post.list works without OPENID', async () => {
+  test('post.list without OPENID is rejected', async () => {
     const cloud = require('wx-server-sdk')
     cloud.getWXContext.mockReturnValueOnce({ OPENID: '' })
-    ;(db.query as jest.Mock).mockResolvedValue([])
-    const res = await postMain(fe('list', { sectionId: 's1' }))
-    expect(res).toHaveProperty('posts')
+    ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 's1', communityId: 'c1', status: 'active' })
+    await expect(postMain(fe('list', { sectionId: 's1' }))).rejects.toThrow('需要先加入社区后查看内容')
   })
 })

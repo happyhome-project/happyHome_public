@@ -4,7 +4,11 @@
     <el-table data-testid="community-approval-table" :data="pendingCommunities" v-loading="loading" style="width: 100%">
       <el-table-column prop="name" label="社区名称" />
       <el-table-column prop="description" label="描述" show-overflow-tooltip />
-      <el-table-column prop="createdAt" label="申请时间" width="180" />
+      <el-table-column label="申请时间" width="180">
+        <template #default="{ row }">
+          <span>{{ formatAdminDateTime(row.createdAt) }}</span>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="160">
         <template #default="{ row }">
           <el-button data-testid="community-approve-button" :data-community-id="row._id" type="primary" size="small" @click="approve(row)">通过</el-button>
@@ -48,6 +52,7 @@
 import { ref, onMounted } from 'vue'
 import { communityApi } from '../../api/cloud'
 import { ElMessage } from 'element-plus'
+import { formatAdminDateTime } from '../../utils/datetime'
 
 const pendingCommunities = ref<any[]>([])
 const loading = ref(false)

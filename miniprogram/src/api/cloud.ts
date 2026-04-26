@@ -110,6 +110,8 @@ export const userApi = {
 export const communityApi = {
   list: (includeAll = false) =>
     callCloud<{ communities: any[] }>('community', 'list', { includeAll }),
+  listDiscoverable: () =>
+    callCloud<{ communities: any[] }>('community', 'listDiscoverable', {}),
   get: (communityId: string) =>
     callCloud<{ community: any }>('community', 'get', { communityId }),
   create: (params: object) =>
@@ -129,6 +131,8 @@ export const memberApi = {
     callCloud('member', 'memberReject', { communityId, memberId }),
   pendingList: (communityId: string) =>
     callCloud<{ members: any[] }>('member', 'pendingList', { communityId }),
+  myCommunities: () =>
+    callCloud<{ communities: any[] }>('member', 'myCommunities', {}),
 }
 
 export const sectionApi = {
@@ -149,12 +153,12 @@ export const postApi = {
     callCloud('post', 'update', { postId, content }),
   delete: (postId: string) =>
     callCloud('post', 'delete', { postId }),
-  joinAttendance: (postId: string, widgetId: string) =>
-    callCloud<{ widgetId: string; summary: any }>('post', 'joinAttendance', { postId, widgetId }),
+  joinAttendance: (postId: string, widgetId: string, seatCount?: number) =>
+    callCloud<{ widgetId: string; summary: any }>('post', 'joinAttendance', { postId, widgetId, seatCount }),
   leaveAttendance: (postId: string, widgetId: string) =>
     callCloud<{ widgetId: string; summary: any }>('post', 'leaveAttendance', { postId, widgetId }),
   listAttendanceMembers: (postId: string, widgetId: string) =>
-    callCloud<{ widgetId: string; members: any[]; total: number; capacity?: number; isFull: boolean }>(
+    callCloud<{ widgetId: string; members: any[]; total: number; occupiedSeats: number; capacity?: number; isFull: boolean }>(
       'post',
       'listAttendanceMembers',
       { postId, widgetId }

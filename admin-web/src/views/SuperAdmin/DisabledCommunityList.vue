@@ -8,7 +8,11 @@
     <el-table :data="communities" v-loading="loading" style="width: 100%">
       <el-table-column prop="name" label="社区名称" min-width="180" />
       <el-table-column prop="description" label="描述" min-width="220" show-overflow-tooltip />
-      <el-table-column prop="createdAt" label="创建时间" width="200" />
+      <el-table-column label="创建时间" width="200">
+        <template #default="{ row }">
+          <span>{{ formatAdminDateTime(row.createdAt) }}</span>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="240">
         <template #default="{ row }">
           <el-button
@@ -39,6 +43,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { communityApi } from '../../api/cloud'
+import { formatAdminDateTime } from '../../utils/datetime'
 
 const loading = ref(false)
 const communities = ref<any[]>([])

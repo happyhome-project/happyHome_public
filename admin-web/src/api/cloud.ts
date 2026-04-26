@@ -2,8 +2,11 @@ import axios from 'axios'
 
 const BASE_URL = import.meta.env.VITE_CLOUD_API_URL
 
-// Interceptor needs to reach the auth store lazily to avoid circular import
+// Interceptor needs to reach the auth store lazily to avoid circular import.
+// Registered from main.ts after pinia is set up; falls back to hard redirect to /login
+// if no handler installed yet (e.g. early bootstrap requests).
 let unauthorizedHandler: (() => void) | null = null
+let redirectedToLogin = false
 export function registerUnauthorizedHandler(handler: () => void) {
   unauthorizedHandler = handler
 }
@@ -17,6 +20,11 @@ http.interceptors.response.use(
     if (status === 401 || status === 403) {
       if (unauthorizedHandler) {
         try { unauthorizedHandler() } catch { /* noop */ }
+      } else if (!redirectedToLogin && location.pathname !== '/login') {
+        // Bootstrap fallback: handler not registered yet → hard redirect
+        redirectedToLogin = true
+        localStorage.removeItem('token')
+        location.replace('/login')
       }
     }
     return Promise.reject(error)

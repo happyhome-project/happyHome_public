@@ -1,5 +1,13 @@
 <template>
   <view class="phone-inner">
+    <!-- 未登录：引导卡片（占满首页，挡住任何数据渲染） -->
+    <LoginGuard
+      v-if="!userStore.isLoggedIn"
+      title="欢迎来到 happyHome"
+      desc="登录后查看你的社区和近况"
+    />
+
+    <template v-else>
     <!-- Masthead：社群封面卡（整块可点切换社区） -->
     <view
       class="s1-top"
@@ -115,7 +123,8 @@
           class="arc-item"
           @tap.stop="onPostTap(item)"
         >
-          <text class="arc-k">{{ item.k }}</text>
+          <!-- kicker 小标：当前装饰版固定 01/02/03；未来接真实档案号时仍走 item.k -->
+          <text v-if="item.k" class="arc-k">{{ item.k }}</text>
           <view class="arc-tl">
             <text class="arc-title">{{ item.t }}</text>
             <view class="arc-mm">
@@ -164,17 +173,23 @@
         </view>
       </view>
     </view>
+    </template>
   </view>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
+import { useUserStore } from '../../store/user'
 import { postApi } from '../../api/cloud'
+import LoginGuard from '../../components/LoginGuard.vue'
 
 const communityStore = useCommunityStore()
+const userStore = useUserStore()
 const showSwitcher = ref(false)
 const postsBySection = ref<Record<string, any[]>>({})
+let refreshingHome = false
 
 // ── Computed: masthead ──
 const communityName = computed(() => communityStore.currentCommunity?.name ?? '选择社区')
@@ -255,8 +270,8 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
         name: section.name,
         count: posts.length,
         accentColor: section.accentColor || '',
-        items: posts.slice(0, 3).map((p) => ({
-          k: getPostKind(p),
+        items: posts.slice(0, 3).map((p, idx) => ({
+          k: formatArchiveKicker(idx),
           t: getPostTitle(p, section),
           who: p.authorNickname || '匿名',
           meta: getArchiveMeta(p, section),
@@ -277,13 +292,11 @@ const dormantNames = computed(() => {
 })
 
 // ── Helpers ──
-function getPostKind(post: any): string {
-  // TODO: 根据 post 的特征（是否有标签、类型、时间）决定 kicker
-  // 暂用时间判断
-  const ageMs = Date.now() - new Date(post.createdAt).getTime()
-  const h = ageMs / 3600000
-  if (h < 24) return 'NEW'
-  return 'FYI'
+// kicker（档案左栏小标）— 当前用「装饰版」：前 3 条固定 01 / 02 / 03。
+// 未来如果接入真实档案号（#27/#26/… 按板块累计），换成 post 自带的 seqInSection 字段即可。
+// 详见 memory/feedback_kicker_design_decision.md
+function formatArchiveKicker(index: number): string {
+  return String(index + 1).padStart(2, '0')
 }
 
 function getPostTitle(post: any, section: any): string {
@@ -377,7 +390,13 @@ async function loadAllSectionPosts() {
       try {
         const res = await postApi.list(section._id, 0)
         results[section._id] = res.posts ?? []
-      } catch {
+      } catch (error: any) {
+        if (error?.message?.includes('需要先加入社区后查看内容')) {
+          communityStore.clearCommunityState()
+          uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
+          uni.reLaunch({ url: '/pages/onboarding/index' })
+          return
+        }
         results[section._id] = []
       }
     })
@@ -385,11 +404,37 @@ async function loadAllSectionPosts() {
   postsBySection.value = results
 }
 
-onMounted(async () => {
-  if (communityStore.myCommunities.length === 0) {
-    await communityStore.loadMyCommunities()
+async function refreshHomeData() {
+  if (refreshingHome) return
+  if (!userStore.isLoggedIn) {
+    communityStore.clearCommunityState()
+    communityStore.myCommunities = []
+    postsBySection.value = {}
+    return
   }
-  await loadAllSectionPosts()
+  refreshingHome = true
+  try {
+    await communityStore.loadMyCommunities()
+    if (communityStore.myCommunities.length === 0) {
+      postsBySection.value = {}
+      uni.reLaunch({ url: '/pages/onboarding/index' })
+      return
+    }
+    await loadAllSectionPosts()
+  } finally {
+    refreshingHome = false
+  }
+}
+
+onMounted(async () => {
+  await refreshHomeData()
+})
+
+// tabBar 页面切回首页时（如发帖后 switchTab 返回）不会重新 mount，只触发 onShow。
+// 这里 onShow 统一刷新帖子数据，确保新发/新删的内容能实时反映。
+// 首次 onShow 发生在 onMounted 之后，会二次拉取（可接受：代价低、换取数据新鲜度）。
+onShow(() => {
+  void refreshHomeData()
 })
 </script>
 

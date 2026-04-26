@@ -19,12 +19,16 @@
     </view>
 
     <view v-else-if="widget.type === 'datetime'" class="datetime-picker">
-      <picker mode="date" :value="datePart" @change="onDateChange">
-        <view class="picker-display">{{ datePart || `选择${displayLabel}日期` }}</view>
-      </picker>
-      <picker mode="time" :value="timePart" @change="onTimeChange">
-        <view class="picker-display">{{ timePart || `选择${displayLabel}时间` }}</view>
-      </picker>
+      <!-- 一次 popup 同时选 年/月/日/时/分；不能选过去、只能在当前年内（年列固定 1 项）-->
+      <uni-datetime-picker
+        type="datetime"
+        :value="datetimePickerValue"
+        :start="datetimeRangeStart"
+        :end="datetimeRangeEnd"
+        :placeholder="`选择${displayLabel}`"
+        return-type="string"
+        @change="onDatetimeChange"
+      />
     </view>
 
     <view v-else-if="widget.type === 'number'" class="input-wrap">
@@ -84,7 +88,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { buildDateTimeValue, resolveWidgetLabel, splitDateTimeValue } from '../../utils/widget-form'
+import { resolveWidgetLabel } from '../../utils/widget-form'
 
 const props = defineProps<{ widget: any; modelValue: any }>()
 const emit = defineEmits(['update:modelValue'])
@@ -96,9 +100,37 @@ interface GeoLocationValue {
 }
 
 const displayLabel = computed(() => resolveWidgetLabel(props.widget))
-const dateTimeParts = computed(() => splitDateTimeValue(props.modelValue))
-const datePart = computed(() => dateTimeParts.value.date)
-const timePart = computed(() => dateTimeParts.value.time)
+
+// datetime 控件：用 uni-datetime-picker 统一一次点开 5 列（年/月/日/时/分）
+// 存储格式保持 ISO-like "YYYY-MM-DDTHH:mm:00"（后端 validateRequiredWidgets 兼容）
+// 选择器内部用 "YYYY-MM-DD HH:mm:ss" 空格分隔，进出要转换。
+function pad2(n: number) { return String(n).padStart(2, '0') }
+
+// 存储值 → 选择器显示值（T → 空格）
+const datetimePickerValue = computed(() => {
+  const v = props.modelValue
+  if (!v || typeof v !== 'string') return ''
+  return v.replace('T', ' ').slice(0, 19)
+})
+
+// 范围：从"现在"起到今年底，年列只剩 1 个选项即视觉上锁定为今年
+const datetimeRangeStart = computed(() => {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:00`
+})
+const datetimeRangeEnd = computed(() => `${new Date().getFullYear()}-12-31 23:59:59`)
+
+function onDatetimeChange(value: any) {
+  // uni-datetime-picker 在 return-type="string" 时 @change 直接传 "YYYY-MM-DD HH:mm:ss"
+  const v = typeof value === 'string' ? value : String(value?.detail?.value || value?.value || '')
+  if (!v) {
+    emit('update:modelValue', '')
+    return
+  }
+  // 空格 → T，截到分钟精度 + ":00" 秒
+  const normalized = v.trim().replace(' ', 'T').slice(0, 16) + ':00'
+  emit('update:modelValue', normalized)
+}
 
 const locationValue = computed<GeoLocationValue | null>(() => {
   const val = props.modelValue
@@ -126,25 +158,6 @@ function removeImage(index: number) {
   const current = [...((props.modelValue as string[]) ?? [])]
   current.splice(index, 1)
   emit('update:modelValue', current)
-}
-
-function onDateChange(event: any) {
-  const nextDate = String(event?.detail?.value || '')
-  const nextTime = timePart.value || '00:00'
-  emit('update:modelValue', buildDateTimeValue(nextDate, nextTime))
-}
-
-function onTimeChange(event: any) {
-  const nextTime = String(event?.detail?.value || '')
-  const nextDate = datePart.value || todayDate()
-  emit('update:modelValue', buildDateTimeValue(nextDate, nextTime))
-}
-
-function todayDate(): string {
-  const d = new Date()
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const dd = String(d.getDate()).padStart(2, '0')
-  return `${d.getFullYear()}-${mm}-${dd}`
 }
 
 function chooseLocation() {
@@ -195,11 +208,9 @@ function clearLocation() {
   font-size: $hh-font-body;
 }
 .datetime-picker {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: $hh-space-sm;
+  /* uni-datetime-picker 自带外观，容器用全宽块级即可 */
+  display: block;
 }
-.picker-display { background: $hh-color-bg-sub; border-radius: $hh-radius-sm; padding: $hh-space-md; font-size: $hh-font-body; color: $hh-color-text-sub; }
 .image-uploader { display: flex; flex-wrap: wrap; gap: $hh-space-sm; }
 .thumb-wrap { position: relative; width: 160rpx; height: 160rpx; }
 .thumb { width: 160rpx; height: 160rpx; border-radius: $hh-radius-sm; }

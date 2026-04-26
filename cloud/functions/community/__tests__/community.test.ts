@@ -12,7 +12,7 @@ jest.mock('../../../lib/db', () => ({
   softDelete: jest.fn(),
 }))
 
-import { handleCreate, handleApprove, handleReject, handleList, handleGet, main } from '../index'
+import { handleCreate, handleApprove, handleReject, handleList, handleGet, handleListDiscoverable, main } from '../index'
 import * as db from '../../../lib/db'
 
 beforeEach(() => jest.clearAllMocks())
@@ -108,6 +108,34 @@ test('get：返回单个社区', async () => {
 
   expect(db.getById).toHaveBeenCalledWith('communities', 'community-123')
   expect(result.community).toHaveProperty('_id', 'community-123')
+})
+
+test('listDiscoverable：未加入用户可见 active 社区且 viewerStatus 为 null', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'c1', name: '青山村', status: 'active' }])
+
+  const result = await handleListDiscoverable('')
+
+  expect(result.communities).toEqual([{ _id: 'c1', name: '青山村', status: 'active', viewerStatus: null }])
+})
+
+test('listDiscoverable：pending/rejected 会回填状态，active 成员被排除', async () => {
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([
+      { _id: 'c1', name: '青山村', status: 'active' },
+      { _id: 'c2', name: '绿水村', status: 'active' },
+      { _id: 'c3', name: '花海村', status: 'active' },
+    ])
+    .mockResolvedValueOnce([]) // creator-pending communities
+    .mockResolvedValueOnce([{ status: 'pending', appliedAt: '2026-04-24T10:00:00.000Z' }])
+    .mockResolvedValueOnce([{ status: 'rejected', appliedAt: '2026-04-24T09:00:00.000Z' }])
+    .mockResolvedValueOnce([{ status: 'active', appliedAt: '2026-04-24T08:00:00.000Z' }])
+
+  const result = await handleListDiscoverable('test-openid')
+
+  expect(result.communities).toEqual([
+    { _id: 'c1', name: '青山村', status: 'active', viewerStatus: 'pending' },
+    { _id: 'c2', name: '绿水村', status: 'active', viewerStatus: 'rejected' },
+  ])
 })
 
 test('main(): 未知 action 抛出错误', async () => {

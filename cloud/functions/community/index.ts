@@ -6,6 +6,18 @@ import type { Community } from '../../shared/types'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
+async function getLatestViewerStatus(communityId: string, openid: string) {
+  if (!openid) return null
+  const records = await db.query('community_members', {
+    communityId,
+    userId: openid,
+  }, {
+    orderBy: ['appliedAt', 'desc'],
+    limit: 1,
+  })
+  return records[0]?.status || null
+}
+
 export async function handleCreate(
   params: {
     name: string
@@ -78,6 +90,31 @@ export async function handleGet(params: { communityId: string }) {
   return { community }
 }
 
+export async function handleListDiscoverable(openid: string) {
+  // active 社区（所有人可见，用于发现和申请加入）
+  // 以及 viewer 自己创建的还在审核的社区（让创建者能看到"我的申请还在审核"）
+  const [activeList, myPendingCreations] = await Promise.all([
+    db.query('communities', { status: 'active' }, { orderBy: ['createdAt', 'desc'] }),
+    openid
+      ? db.query('communities', { status: 'pending', creatorId: openid }, { orderBy: ['createdAt', 'desc'] })
+      : Promise.resolve([]),
+  ])
+
+  const result = []
+  // 先塞自己创建的 pending（放最上面，让创建者一眼看到状态）
+  for (const community of myPendingCreations) {
+    result.push({ ...community, viewerStatus: 'creator-pending' })
+  }
+  // 再塞 active 社区，过滤掉已经是成员的（不再出现在"发现"列表）
+  for (const community of activeList) {
+    const viewerStatus = await getLatestViewerStatus(community._id, openid)
+    if (viewerStatus === 'active') continue
+    result.push({ ...community, viewerStatus })
+  }
+
+  return { communities: result }
+}
+
 export const main = async (event: any) => {
   const openid = resolveOpenId(event)
   const { action, _testOpenid, ...params } = event
@@ -86,5 +123,6 @@ export const main = async (event: any) => {
   if (action === 'reject') return handleReject(params, openid)
   if (action === 'list') return handleList(params)
   if (action === 'get') return handleGet(params)
+  if (action === 'listDiscoverable') return handleListDiscoverable(openid)
   throw new Error(`Unknown action: ${action}`)
 }
