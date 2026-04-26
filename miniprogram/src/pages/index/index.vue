@@ -153,11 +153,6 @@
     <!-- Foot -->
     <text class="s1-foot">— {{ kind }} · 记忆在这里 —</text>
 
-    <!-- FAB · 发布按钮 -->
-    <view class="fab" @tap="goCreate">
-      <text class="fab-plus">+</text>
-    </view>
-
     <!-- Community switcher modal -->
     <view v-if="showSwitcher" class="switcher-mask" @tap="showSwitcher = false">
       <view class="switcher-panel" @tap.stop>
@@ -370,10 +365,6 @@ function onPostTap(item: ArchiveItem) {
 
 function expandDormant() {
   // TODO: 展开所有休眠板块
-}
-
-function goCreate() {
-  uni.switchTab({ url: '/pages/create/index' })
 }
 
 async function switchCommunity(communityId: string) {
@@ -935,28 +926,6 @@ onShow(() => {
   text-transform: uppercase;
   color: $hh-ink-4;
   display: block;
-}
-
-/* ═══ FAB ═══ */
-.fab {
-  position: fixed;
-  right: 40rpx;
-  bottom: 180rpx;
-  width: 104rpx;
-  height: 104rpx;
-  border-radius: $hh-radius-full;
-  background: $hh-ink-1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: $hh-shadow-fab;
-  z-index: 5;
-}
-.fab-plus {
-  color: $hh-surface-1;
-  font-size: 48rpx;
-  font-weight: $hh-font-weight-regular;
-  line-height: 1;
 }
 
 /* ═══ Switcher ═══ */
