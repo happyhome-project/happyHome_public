@@ -46,10 +46,11 @@
             </text>
           </view>
 
-          <!-- 昵称输入 -->
+          <!-- 昵称输入：进入编辑态自动 focus，键盘弹起即显示微信昵称候选 -->
           <view class="input-wrap">
             <input
               type="nickname"
+              :focus="true"
               :value="formNickName"
               placeholder="请输入昵称"
               placeholder-class="input-placeholder"
@@ -151,6 +152,7 @@
         <view class="input-wrap">
           <input
             type="nickname"
+            :focus="true"
             :value="formNickName"
             placeholder="请输入昵称"
             placeholder-class="input-placeholder"
