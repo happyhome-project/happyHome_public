@@ -44,7 +44,9 @@
         v-for="(notice, i) in sectionNotices"
         :key="notice.id"
         class="notice-card"
+        :class="{ 'is-long': notice.isLong }"
         :style="getNoticeCardStyle(notice, i)"
+        @tap="notice.isLong && openNotice(notice)"
       >
         <view class="notice-head">
           <view class="notice-mark">
@@ -55,7 +57,11 @@
             <text class="notice-label">{{ notice.label }}</text>
           </view>
         </view>
-        <text class="notice-content">{{ notice.content }}</text>
+        <text class="notice-content">{{ notice.preview }}</text>
+        <view v-if="notice.isLong" class="notice-foot">
+          <text>查看全文</text>
+          <text class="notice-arrow">›</text>
+        </view>
       </view>
     </view>
 
@@ -206,6 +212,7 @@ const userStore = useUserStore()
 const showSwitcher = ref(false)
 const postsBySection = ref<Record<string, any[]>>({})
 let refreshingHome = false
+const NOTICE_PREVIEW_LIMIT = 90
 
 // ── Computed: masthead ──
 const communityName = computed(() => communityStore.currentCommunity?.name ?? '选择社区')
@@ -244,9 +251,13 @@ function secStatus(s: any): 'active' | 'dormant' | 'archived' {
 
 interface SectionNotice {
   id: string
+  sectionId: string
+  widgetId: string
   sectionName: string
   label: string
   content: string
+  preview: string
+  isLong: boolean
   icon: string
   accentColor?: string
 }
@@ -259,11 +270,16 @@ const sectionNotices = computed<SectionNotice[]>(() => {
       if (widget.type !== 'admin_notice') continue
       const content = String(widget.noticeContent || '').trim()
       if (!content) continue
+      const preview = makeNoticePreview(content)
       notices.push({
         id: `${section._id}_${widget.widgetId}`,
+        sectionId: section._id,
+        widgetId: widget.widgetId,
         sectionName: section.name,
         label: widget.label || '公告',
         content,
+        preview,
+        isLong: Array.from(content).length > NOTICE_PREVIEW_LIMIT,
         icon: section.icon || '告',
         accentColor: section.accentColor || '',
       })
@@ -392,6 +408,12 @@ function getNoticeCardStyle(notice: SectionNotice, index: number) {
   }
 }
 
+function makeNoticePreview(content: string) {
+  const chars = Array.from(content.trim())
+  if (chars.length <= NOTICE_PREVIEW_LIMIT) return content.trim()
+  return `${chars.slice(0, NOTICE_PREVIEW_LIMIT).join('').trimEnd()}…`
+}
+
 function formatTime(iso?: string): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -419,6 +441,12 @@ function onPostTap(item: ArchiveItem) {
   if (item.postId) {
     uni.navigateTo({ url: `/pages/detail/index?postId=${item.postId}` })
   }
+}
+
+function openNotice(notice: SectionNotice) {
+  uni.navigateTo({
+    url: `/pages/notice/index?sectionId=${encodeURIComponent(notice.sectionId)}&widgetId=${encodeURIComponent(notice.widgetId)}`,
+  })
 }
 
 function expandDormant() {
@@ -630,6 +658,11 @@ onShow(() => {
   border-radius: 24rpx;
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(251, 247, 238, 0.9));
   box-shadow: $hh-shadow-card;
+  position: relative;
+}
+.notice-card.is-long:active {
+  transform: translateY(1rpx);
+  opacity: 0.9;
 }
 .notice-head {
   display: flex;
@@ -676,6 +709,24 @@ onShow(() => {
   line-height: 1.72;
   color: $hh-ink-2;
   white-space: pre-wrap;
+}
+.notice-foot {
+  margin-top: 18rpx;
+  padding-top: 16rpx;
+  border-top: 1rpx dashed $hh-ink-line-2;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8rpx;
+  font-family: $hh-font-mono;
+  font-size: 21rpx;
+  font-weight: $hh-font-weight-heavy;
+  letter-spacing: $hh-tracking-mono-sm;
+  color: var(--notice-accent);
+}
+.notice-arrow {
+  font-size: 28rpx;
+  line-height: 1;
 }
 
 /* ═══ Live strip ═══ */

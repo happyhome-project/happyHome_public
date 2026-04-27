@@ -24,6 +24,10 @@
       "style": { "navigationBarTitleText": "详情" }
     },
     {
+      "path": "pages/notice/index",
+      "style": { "navigationBarTitleText": "公告详情" }
+    },
+    {
       "path": "pages/onboarding/index",
       "style": { "navigationBarTitleText": "加入社区" }
     },
