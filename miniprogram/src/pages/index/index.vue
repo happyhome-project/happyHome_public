@@ -212,7 +212,10 @@ const userStore = useUserStore()
 const showSwitcher = ref(false)
 const postsBySection = ref<Record<string, any[]>>({})
 let refreshingHome = false
+let queuedForcedHomeRefresh = false
 const NOTICE_PREVIEW_LIMIT = 90
+const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
+const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
 
 // ── Computed: masthead ──
 const communityName = computed(() => communityStore.currentCommunity?.name ?? '选择社区')
@@ -481,8 +484,33 @@ async function loadAllSectionPosts() {
   postsBySection.value = results
 }
 
-async function refreshHomeData() {
-  if (refreshingHome) return
+function getPendingHomeRefreshMarker() {
+  try {
+    const marker = uni.getStorageSync(HOME_REFRESH_AFTER_POST_KEY)
+    if (!marker || typeof marker !== 'object') return null
+    const createdAt = Number(marker.createdAt || 0)
+    if (!createdAt || Date.now() - createdAt > HOME_REFRESH_MARKER_TTL) {
+      uni.removeStorageSync(HOME_REFRESH_AFTER_POST_KEY)
+      return null
+    }
+    return marker as { communityId?: string; sectionId?: string; postId?: string; createdAt: number }
+  } catch {
+    return null
+  }
+}
+
+function clearHomeRefreshMarker() {
+  try {
+    uni.removeStorageSync(HOME_REFRESH_AFTER_POST_KEY)
+  } catch {}
+}
+
+async function refreshHomeData(options: { force?: boolean } = {}) {
+  const force = options.force === true
+  if (refreshingHome) {
+    if (force) queuedForcedHomeRefresh = true
+    return
+  }
   if (!userStore.isLoggedIn) {
     communityStore.clearCommunityState()
     communityStore.myCommunities = []
@@ -498,8 +526,13 @@ async function refreshHomeData() {
       return
     }
     await loadAllSectionPosts()
+    if (force) clearHomeRefreshMarker()
   } finally {
     refreshingHome = false
+  }
+  if (queuedForcedHomeRefresh) {
+    queuedForcedHomeRefresh = false
+    await refreshHomeData({ force: true })
   }
 }
 
@@ -511,7 +544,7 @@ onMounted(async () => {
 // 这里 onShow 统一刷新帖子数据，确保新发/新删的内容能实时反映。
 // 首次 onShow 发生在 onMounted 之后，会二次拉取（可接受：代价低、换取数据新鲜度）。
 onShow(() => {
-  void refreshHomeData()
+  void refreshHomeData({ force: !!getPendingHomeRefreshMarker() })
 })
 </script>
 
