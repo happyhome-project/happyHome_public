@@ -204,7 +204,7 @@ function goLogin() {
 }
 
 function goOnboarding() {
-  uni.navigateTo({ url: '/pages/onboarding/index' })
+  uni.navigateTo({ url: '/pages/onboarding/index?mode=discover' })
 }
 
 function selectSection(section: any) {
