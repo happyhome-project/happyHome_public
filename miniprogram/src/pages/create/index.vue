@@ -235,6 +235,11 @@ async function handleSubmit() {
   try {
     const content = { ...formData }
     for (const widget of editableWidgets.value) {
+      // video_group 由 admin 后台维护，普通用户发帖不携带该字段
+      if (widget.type === 'video_group') {
+        delete content[widget.widgetId]
+        continue
+      }
       if (widget.type === 'image_group' && Array.isArray(content[widget.widgetId])) {
         content[widget.widgetId] = await uploadImages(content[widget.widgetId])
       }

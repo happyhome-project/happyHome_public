@@ -1,6 +1,8 @@
 import cloud from 'wx-server-sdk'
 import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
+import { getTempUrl } from '../../lib/storage'
+import { sanitizeContent, validateRequiredWidgets } from '../../lib/post-validate'
 import type {
   AttendancePreviewUser,
   AttendanceSummary,
@@ -16,30 +18,6 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const ATTENDANCE_COLLECTION = 'post_attendance_members'
 const ATTENDANCE_PREVIEW_LIMIT = 5
 const COMMUNITY_READ_ERROR = '需要先加入社区后查看内容'
-
-function getEditableWidgetIds(section: Section) {
-  return new Set(
-    (section.widgets || [])
-      .filter((widget) => widget.type !== 'attendance')
-      .map((widget) => widget.widgetId)
-  )
-}
-
-function sanitizeContent(content: PostContent, section: Section): PostContent {
-  const allowedIds = getEditableWidgetIds(section)
-  return Object.fromEntries(
-    Object.entries(content || {}).filter(([key]) => allowedIds.has(key))
-  ) as PostContent
-}
-
-function isEmptyValue(value: unknown) {
-  return (
-    value === undefined ||
-    value === null ||
-    value === '' ||
-    (Array.isArray(value) && value.length === 0)
-  )
-}
 
 function getAttendanceWidgets(section: Section): Widget[] {
   return (section.widgets || []).filter((widget) => widget.type === 'attendance')
@@ -198,16 +176,6 @@ async function listAttendanceMembersInternal(postId: string, widgetId?: string) 
     ...(capacity ? { capacity } : {}),
     isFull: capacity ? occupiedSeats >= capacity : false,
     post,
-  }
-}
-
-function validateRequiredWidgets(section: Section, content: PostContent) {
-  for (const widget of section.widgets || []) {
-    if (widget.type === 'attendance' || !widget.required) continue
-    const value = content[widget.widgetId]
-    if (isEmptyValue(value)) {
-      throw new Error(`必填项未填写：${widget.label}`)
-    }
   }
 }
 
@@ -400,6 +368,13 @@ export async function handleListAttendanceMembers(
   }
 }
 
+export async function handleGetMediaUrl(params: { fileID?: string }) {
+  const fileID = String(params?.fileID || '')
+  if (!fileID.startsWith('cloud://')) throw new Error('invalid fileID')
+  const url = await getTempUrl(fileID)
+  return { url }
+}
+
 export const main = async (event: any) => {
   const openid = resolveOpenId(event)
   const { action, _testOpenid, ...params } = event
@@ -411,5 +386,6 @@ export const main = async (event: any) => {
   if (action === 'joinAttendance') return handleJoinAttendance(params, openid)
   if (action === 'leaveAttendance') return handleLeaveAttendance(params, openid)
   if (action === 'listAttendanceMembers') return handleListAttendanceMembers(params, openid)
+  if (action === 'getMediaUrl') return handleGetMediaUrl(params)
   throw new Error(`Unknown action: ${action}`)
 }

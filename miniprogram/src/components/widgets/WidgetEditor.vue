@@ -83,6 +83,10 @@
         @input="emit('update:modelValue', ($event as any).detail.value)"
       />
     </view>
+
+    <view v-else-if="widget.type === 'video_group'" class="video-readonly">
+      <text class="readonly-hint">该控件由管理员维护，无需在此填写</text>
+    </view>
   </view>
 </template>
 
@@ -225,4 +229,6 @@ function clearLocation() {
 .loc-btn { margin: 0; background: $hh-color-primary; color: $hh-color-text-inverse; font-size: $hh-font-caption; line-height: 1.8; border: none; }
 .loc-btn.clear { background: $hh-color-text-mute; }
 .textarea { font-size: $hh-font-body; width: 100%; min-height: 200rpx; background: transparent; color: $hh-color-text; }
+.video-readonly { background: $hh-color-bg-sub; border-radius: $hh-radius-sm; padding: $hh-space-md; }
+.readonly-hint { font-size: $hh-font-caption; color: $hh-color-text-mute; }
 </style>

@@ -47,6 +47,7 @@
                   <el-option label="日期时间" value="datetime" />
                   <el-option label="数字" value="number" />
                   <el-option label="图片组" value="image_group" />
+                  <el-option label="视频组" value="video_group" />
                   <el-option label="富文本" value="rich_text" />
                   <el-option label="地图位置" value="location" />
                   <el-option label="活动参与" value="attendance" :disabled="sectionType !== 'realtime'" />
@@ -124,6 +125,7 @@ const DEFAULT_LABELS: Record<string, string> = {
   datetime: '日期时间',
   number: '数字',
   image_group: '图片组',
+  video_group: '视频列表',
   rich_text: '正文',
   location: '位置',
   attendance: '活动参与',

@@ -144,4 +144,20 @@ export const postAdminApi = {
   delete: (postId: string) => callAdmin('post.deleteAdmin', { postId }),
   removeAttendanceMember: (params: { postId: string; widgetId: string; userId: string }) =>
     callAdmin('post.removeAttendanceMemberAdmin', params),
+  createAdmin: (params: { communityId: string; sectionId: string; content: Record<string, any> }) =>
+    callAdmin('post.createAdmin', params),
+}
+
+export interface VideoUploadMetadata {
+  cloudPath: string
+  fileId: string
+  url: string
+  token: string
+  authorization: string
+  cosFileId: string
+}
+
+export const videoApi = {
+  requestUpload: (params: { fileName: string }) =>
+    callAdmin('video.requestUpload', params) as Promise<VideoUploadMetadata>,
 }
