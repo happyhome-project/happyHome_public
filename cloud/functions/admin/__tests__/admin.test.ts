@@ -173,6 +173,36 @@ test('section.updateWidgets: 公告控件由管理员维护且不进入帖子列
   })
 })
 
+test('section.updateWidgets: 公告正文按 emoji 安全字符数截断', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-1',
+    type: 'evergreen',
+    widgets: [],
+  })
+  ;(db.query as jest.Mock).mockResolvedValue([])
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  const result: any = await main({
+    action: 'section.updateWidgets',
+    sectionId: 'section-1',
+    widgets: [
+      {
+        widgetId: 'notice-emoji',
+        type: 'admin_notice',
+        label: '近期课程',
+        fieldKey: 'notice',
+        required: false,
+        order: 0,
+        showInList: false,
+        noticeContent: ` ${'😀'.repeat(501)} `,
+      },
+    ],
+  })
+
+  expect(Array.from(result.widgets[0].noticeContent)).toHaveLength(500)
+  expect(result.widgets[0].noticeContent).toBe('😀'.repeat(500))
+})
+
 test('post.getAdmin: 返回 attendance 汇总和完整名单', async () => {
   ;(db.getById as jest.Mock)
     .mockResolvedValueOnce({

@@ -133,7 +133,7 @@ function normalizeCapacity(value: unknown) {
 }
 
 function normalizeNoticeContent(value: unknown) {
-  return String(value || '').trim().slice(0, 500)
+  return Array.from(String(value || '').trim()).slice(0, 500).join('')
 }
 
 function normalizeWidgetForSave(widget: any): Widget {

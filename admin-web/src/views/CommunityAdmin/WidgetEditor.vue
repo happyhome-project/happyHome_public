@@ -61,16 +61,18 @@
               </el-form-item>
 
               <el-form-item v-if="widget.type === 'admin_notice'" label="公告正文">
-                <el-input
-                  v-model="widget.noticeContent"
-                  type="textarea"
-                  :rows="4"
-                  maxlength="500"
-                  show-word-limit
-                  style="width: 520px; max-width: 100%;"
-                  placeholder="例如：近期课程安排、报名说明、固定提醒等。"
-                />
-                <span class="notice-tip">仅管理员在这里维护，普通成员不能通过发帖修改。</span>
+                <div class="notice-editor">
+                  <el-input
+                    v-model="widget.noticeContent"
+                    type="textarea"
+                    :rows="4"
+                    maxlength="500"
+                    show-word-limit
+                    style="width: 520px; max-width: 100%;"
+                    placeholder="例如：近期课程安排、报名说明、固定提醒等。"
+                  />
+                  <span class="notice-tip">仅管理员在这里维护，普通成员不能通过发帖修改。支持 emoji 表情；内容较长时，小程序首页只展示摘要，可点击查看全文。</span>
+                </div>
               </el-form-item>
 
               <el-form-item v-if="widget.type === 'attendance'" label="人数上限">
@@ -368,6 +370,11 @@ async function save() {
   margin-left: 8px;
   color: #909399;
   font-size: 12px;
+}
+
+.notice-editor {
+  width: 520px;
+  max-width: 100%;
 }
 
 .notice-tip {
