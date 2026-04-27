@@ -413,7 +413,7 @@ function handleLogout() {
 }
 
 function goOnboarding() {
-  uni.reLaunch({ url: '/pages/onboarding/index' })
+  uni.reLaunch({ url: '/pages/onboarding/index?mode=discover' })
 }
 
 function isAdminOf(communityId: string) {

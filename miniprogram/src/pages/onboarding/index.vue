@@ -42,7 +42,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import { communityApi, memberApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
@@ -52,7 +52,12 @@ import LoginGuard from '../../components/LoginGuard.vue'
 const communities = ref<any[]>([])
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
+const entryMode = ref<'auto' | 'discover'>('auto')
 let refreshingOnboarding = false
+
+onLoad((query?: Record<string, any>) => {
+  entryMode.value = query?.mode === 'discover' ? 'discover' : 'auto'
+})
 
 onMounted(async () => {
   await refreshOnboardingData()
@@ -72,7 +77,7 @@ async function refreshOnboardingData() {
       return
     }
     await communityStore.loadMyCommunities()
-    if (communityStore.myCommunities.length > 0) {
+    if (entryMode.value !== 'discover' && communityStore.myCommunities.length > 0) {
       uni.reLaunch({ url: '/pages/index/index' })
       return
     }
