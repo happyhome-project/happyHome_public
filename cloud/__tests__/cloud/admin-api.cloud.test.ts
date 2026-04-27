@@ -1,34 +1,29 @@
 // L3 云端验收测试：通过 HTTP 调用真实 admin 云函数
-// 运行前需设置环境变量：CLOUD_API_URL, ADMIN_TOKEN
+//
+// 运行前需设置环境变量：CLOUD_API_URL + 以下任一组凭证
+//   - TEST_ADMIN_USERNAME + TEST_ADMIN_PASSWORD（推荐，会自动 auth.login）
+//   - TEST_ADMIN_SESSION_TOKEN（已有 session token 时直接用）
+//   - ADMIN_TOKEN（仅当云函数 env ADMIN_LEGACY_TOKEN_FALLBACK=1 时可用）
 //
 // 用法：
-//   CLOUD_API_URL=https://xxx.app.tcloudbase.com ADMIN_TOKEN=xxx npm run test:cloud
+//   CLOUD_API_URL=https://xxx.app.tcloudbase.com \
+//   TEST_ADMIN_USERNAME=xxx TEST_ADMIN_PASSWORD=yyy npm run test:cloud
 
-import { isCloudAvailable, callAdmin, testId, cleanupSection } from './helpers'
+import { isCloudAvailable, callAdmin, rawFetch, testId, cleanupSection } from './helpers'
 
 const describeCloud = isCloudAvailable ? describe : describe.skip
 
 describeCloud('L3 云端验收：Admin HTTP API', () => {
   // ---- 鉴权 ----
-  test('无 token 调用返回 403', async () => {
-    const res = await fetch(`${process.env.CLOUD_API_URL}/admin`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'community.list' }),
-    })
-    expect(res.status).toBe(403)
+  // 2026-04-23：admin 改为 session 鉴权后，401=未认证/session 无效，403=已认证但无权
+  test('无 token 调用返回 401', async () => {
+    const res = await rawFetch('community.list')
+    expect(res.status).toBe(401)
   })
 
-  test('错误 token 返回 403', async () => {
-    const res = await fetch(`${process.env.CLOUD_API_URL}/admin`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer wrong-token',
-      },
-      body: JSON.stringify({ action: 'community.list' }),
-    })
-    expect(res.status).toBe(403)
+  test('错误 token 返回 401', async () => {
+    const res = await rawFetch('community.list', {}, 'wrong-token')
+    expect(res.status).toBe(401)
   })
 
   // ---- 社区管理 ----
@@ -106,16 +101,6 @@ describeCloud('L3 云端验收：Admin HTTP API', () => {
 
   // ---- 未知 action ----
   test('未知 action 返回 500', async () => {
-    const res = await fetch(`${process.env.CLOUD_API_URL}/admin`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.ADMIN_TOKEN || 'happyhome-admin-2024'}`,
-      },
-      body: JSON.stringify({ action: 'nonexistent.action' }),
-    })
-    expect(res.status).toBe(500)
-    const body = await res.json()
-    expect(body.error).toContain('Unknown action')
+    await expect(callAdmin('nonexistent.action')).rejects.toThrow(/Unknown action|500/)
   })
 })

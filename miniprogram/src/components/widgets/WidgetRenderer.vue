@@ -16,6 +16,13 @@
           @tap="previewImage(i)"
         />
       </view>
+      <view v-else-if="widget.type === 'video_group'" class="videos">
+        <VideoPlayerCard
+          v-for="item in (rawValue as any[])"
+          :key="item.itemId"
+          :item="item"
+        />
+      </view>
       <rich-text
         v-else-if="widget.type === 'rich_text'"
         :nodes="rawValue as string"
@@ -36,6 +43,7 @@
 import { computed } from 'vue'
 import { formatWidgetValue } from '../../utils/widget'
 import { resolveWidgetLabel } from '../../utils/widget-form'
+import VideoPlayerCard from './VideoPlayerCard.vue'
 
 const props = defineProps<{ widget: any; content: Record<string, any> }>()
 
@@ -97,6 +105,7 @@ function openLocation() {
 .value { font-size: $hh-font-body-lg; color: $hh-color-text; }
 .images { display: flex; flex-wrap: wrap; gap: $hh-space-sm; }
 .thumb { width: 160rpx; height: 160rpx; border-radius: $hh-radius-sm; }
+.videos { display: block; }
 .location-value {
   color: $hh-color-info;
   text-decoration: underline;

@@ -54,7 +54,7 @@
           </el-table-column>
           <el-table-column label="申请时间" width="180">
             <template #default="{ row }">
-              <span>{{ formatDateTime(row.appliedAt) }}</span>
+              <span>{{ formatAdminDateTime(row.appliedAt) }}</span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="180">
@@ -102,12 +102,12 @@
           </el-table-column>
           <el-table-column label="申请时间" width="180">
             <template #default="{ row }">
-              <span>{{ formatDateTime(row.appliedAt) }}</span>
+              <span>{{ formatAdminDateTime(row.appliedAt) }}</span>
             </template>
           </el-table-column>
           <el-table-column label="加入时间" width="180">
             <template #default="{ row }">
-              <span>{{ formatDateTime(row.joinedAt) }}</span>
+              <span>{{ formatAdminDateTime(row.joinedAt) }}</span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="180">
@@ -135,6 +135,7 @@ import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { communityApi, memberApi } from '../../api/cloud'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { formatAdminDateTime } from '../../utils/datetime'
 
 type MemberStatus = 'pending' | 'active' | 'rejected'
 interface MemberRow {
@@ -273,20 +274,6 @@ function formatUserId(userId: string) {
   return `${text.slice(0, 8)}...${text.slice(-6)}`
 }
 
-function formatDateTime(value?: string) {
-  const text = String(value || '').trim()
-  if (!text) return '-'
-  const date = new Date(text)
-  if (Number.isNaN(date.getTime())) return text
-
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  const hours = String(date.getHours()).padStart(2, '0')
-  const minutes = String(date.getMinutes()).padStart(2, '0')
-
-  return `${year}-${month}-${day} ${hours}:${minutes}`
-}
 </script>
 
 <style scoped>

@@ -1,5 +1,13 @@
 <template>
   <view class="phone-inner">
+    <!-- 未登录：引导卡片（占满首页，挡住任何数据渲染） -->
+    <LoginGuard
+      v-if="!userStore.isLoggedIn"
+      title="欢迎来到 happyHome"
+      desc="登录后查看你的社区和近况"
+    />
+
+    <template v-else>
     <!-- Masthead：社群封面卡（整块可点切换社区） -->
     <view
       class="s1-top"
@@ -28,6 +36,27 @@
     <view v-if="quote" class="s1-quote">
       <text class="q-text">{{ quote }}</text>
       <text v-if="quoteCite" class="cite">— {{ quoteCite }}</text>
+    </view>
+
+    <!-- Admin notice · 管理员维护的固定公告 -->
+    <view v-if="sectionNotices.length > 0" class="notice-list">
+      <view
+        v-for="(notice, i) in sectionNotices"
+        :key="notice.id"
+        class="notice-card"
+        :style="getNoticeCardStyle(notice, i)"
+      >
+        <view class="notice-head">
+          <view class="notice-mark">
+            <text>{{ notice.icon }}</text>
+          </view>
+          <view class="notice-title-wrap">
+            <text class="notice-section">{{ notice.sectionName }}</text>
+            <text class="notice-label">{{ notice.label }}</text>
+          </view>
+        </view>
+        <text class="notice-content">{{ notice.content }}</text>
+      </view>
     </view>
 
     <!-- Live strip · 实时脉冲区：有激活的实时协作板块时显示 -->
@@ -145,11 +174,6 @@
     <!-- Foot -->
     <text class="s1-foot">— {{ kind }} · 记忆在这里 —</text>
 
-    <!-- FAB · 发布按钮 -->
-    <view class="fab" @tap="goCreate">
-      <text class="fab-plus">+</text>
-    </view>
-
     <!-- Community switcher modal -->
     <view v-if="showSwitcher" class="switcher-mask" @tap="showSwitcher = false">
       <view class="switcher-panel" @tap.stop>
@@ -165,6 +189,7 @@
         </view>
       </view>
     </view>
+    </template>
   </view>
 </template>
 
@@ -172,9 +197,12 @@
 import { computed, ref, onMounted } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
+import { useUserStore } from '../../store/user'
 import { postApi } from '../../api/cloud'
+import LoginGuard from '../../components/LoginGuard.vue'
 
 const communityStore = useCommunityStore()
+const userStore = useUserStore()
 const showSwitcher = ref(false)
 const postsBySection = ref<Record<string, any[]>>({})
 let refreshingHome = false
@@ -213,6 +241,36 @@ function secType(s: any): 'realtime' | 'evergreen' {
 function secStatus(s: any): 'active' | 'dormant' | 'archived' {
   return s?.status === 'dormant' || s?.status === 'archived' ? s.status : 'active'
 }
+
+interface SectionNotice {
+  id: string
+  sectionName: string
+  label: string
+  content: string
+  icon: string
+  accentColor?: string
+}
+
+const sectionNotices = computed<SectionNotice[]>(() => {
+  const notices: SectionNotice[] = []
+  for (const section of communityStore.currentSections ?? []) {
+    if (secStatus(section) !== 'active') continue
+    for (const widget of section.widgets || []) {
+      if (widget.type !== 'admin_notice') continue
+      const content = String(widget.noticeContent || '').trim()
+      if (!content) continue
+      notices.push({
+        id: `${section._id}_${widget.widgetId}`,
+        sectionName: section.name,
+        label: widget.label || '公告',
+        content,
+        icon: section.icon || '告',
+        accentColor: section.accentColor || '',
+      })
+    }
+  }
+  return notices
+})
 
 // ── 实时协作区：type='realtime' && status='active' 的板块，每个板块取 1 条最新帖子作为脉冲 ──
 interface LiveItem { ic: string; t: string; m: string[]; cta: string; sectionId: string; postId?: string }
@@ -327,6 +385,13 @@ function getArchiveCardStyle(group: ArchiveGroup, index: number) {
   }
 }
 
+function getNoticeCardStyle(notice: SectionNotice, index: number) {
+  const fallbackPalette = ['#B35C3B', '#4F6D8A', '#6C8A4E', '#8C6A4E', '#5E7F76']
+  return {
+    '--notice-accent': notice.accentColor || fallbackPalette[index % fallbackPalette.length],
+  }
+}
+
 function formatTime(iso?: string): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -360,10 +425,6 @@ function expandDormant() {
   // TODO: 展开所有休眠板块
 }
 
-function goCreate() {
-  uni.switchTab({ url: '/pages/create/index' })
-}
-
 async function switchCommunity(communityId: string) {
   showSwitcher.value = false
   await communityStore.switchCommunity(communityId)
@@ -394,6 +455,12 @@ async function loadAllSectionPosts() {
 
 async function refreshHomeData() {
   if (refreshingHome) return
+  if (!userStore.isLoggedIn) {
+    communityStore.clearCommunityState()
+    communityStore.myCommunities = []
+    postsBySection.value = {}
+    return
+  }
   refreshingHome = true
   try {
     await communityStore.loadMyCommunities()
@@ -547,6 +614,68 @@ onShow(() => {
   color: $hh-ink-3;
   text-align: right;
   text-transform: uppercase;
+}
+
+/* ═══ Admin notices ═══ */
+.notice-list {
+  margin: 0 32rpx 36rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+}
+.notice-card {
+  padding: 26rpx 28rpx 28rpx;
+  border: 1rpx solid $hh-ink-line;
+  border-left: 8rpx solid var(--notice-accent);
+  border-radius: 24rpx;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(251, 247, 238, 0.9));
+  box-shadow: $hh-shadow-card;
+}
+.notice-head {
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  margin-bottom: 16rpx;
+}
+.notice-mark {
+  width: 52rpx;
+  height: 52rpx;
+  border-radius: 16rpx;
+  background: var(--notice-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.notice-mark text {
+  color: $hh-surface-1;
+  font-size: 24rpx;
+  font-weight: $hh-font-weight-heavy;
+}
+.notice-title-wrap {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.notice-section {
+  font-size: 27rpx;
+  font-weight: $hh-font-weight-bold;
+  color: $hh-ink-1;
+  line-height: 1.25;
+}
+.notice-label {
+  margin-top: 4rpx;
+  font-family: $hh-font-mono;
+  font-size: 20rpx;
+  letter-spacing: $hh-tracking-mono-sm;
+  color: $hh-ink-3;
+}
+.notice-content {
+  display: block;
+  font-size: 28rpx;
+  line-height: 1.72;
+  color: $hh-ink-2;
+  white-space: pre-wrap;
 }
 
 /* ═══ Live strip ═══ */
@@ -917,28 +1046,6 @@ onShow(() => {
   text-transform: uppercase;
   color: $hh-ink-4;
   display: block;
-}
-
-/* ═══ FAB ═══ */
-.fab {
-  position: fixed;
-  right: 40rpx;
-  bottom: 180rpx;
-  width: 104rpx;
-  height: 104rpx;
-  border-radius: $hh-radius-full;
-  background: $hh-ink-1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: $hh-shadow-fab;
-  z-index: 5;
-}
-.fab-plus {
-  color: $hh-surface-1;
-  font-size: 48rpx;
-  font-weight: $hh-font-weight-regular;
-  line-height: 1;
 }
 
 /* ═══ Switcher ═══ */

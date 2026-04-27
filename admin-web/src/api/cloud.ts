@@ -2,33 +2,65 @@ import axios from 'axios'
 
 const BASE_URL = import.meta.env.VITE_CLOUD_API_URL
 
-// Guard against a stuck redirect loop when the login page itself fails to auth.
+// Interceptor needs to reach the auth store lazily to avoid circular import.
+// Registered from main.ts after pinia is set up; falls back to hard redirect to /login
+// if no handler installed yet (e.g. early bootstrap requests).
+let unauthorizedHandler: (() => void) | null = null
 let redirectedToLogin = false
+export function registerUnauthorizedHandler(handler: () => void) {
+  unauthorizedHandler = handler
+}
+
+const http = axios.create({ baseURL: BASE_URL })
+
+http.interceptors.response.use(
+  (r) => r,
+  (error) => {
+    const status = error?.response?.status
+    if (status === 401 || status === 403) {
+      if (unauthorizedHandler) {
+        try { unauthorizedHandler() } catch { /* noop */ }
+      } else if (!redirectedToLogin && location.pathname !== '/login') {
+        // Bootstrap fallback: handler not registered yet → hard redirect
+        redirectedToLogin = true
+        localStorage.removeItem('token')
+        location.replace('/login')
+      }
+    }
+    return Promise.reject(error)
+  }
+)
 
 async function callAdmin(action: string, params: Record<string, any> = {}) {
-  try {
-    const res = await axios.post(
-      `${BASE_URL}/admin`,
-      { action, ...params },
-      { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
-    )
-    return res.data
-  } catch (err: any) {
-    const status = err?.response?.status
-    // Token invalid / missing → force re-login. Otherwise the admin just sees "403"
-    // error toasts with no hint about how to recover.
-    if ((status === 401 || status === 403) && !redirectedToLogin && location.pathname !== '/login') {
-      redirectedToLogin = true
-      localStorage.removeItem('token')
-      // Hard redirect preserves this error semantic without coupling the api layer to vue-router.
-      location.replace('/login')
-    }
-    throw err
-  }
+  const token = localStorage.getItem('token') || ''
+  const res = await http.post(
+    `/admin`,
+    { action, ...params },
+    { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+  )
+  return res.data
 }
 
 // Keep for backward compat with WidgetEditor.vue which imports callCloud
 export const callCloud = callAdmin
+
+export const authApi = {
+  login: (username: string, password: string) => callAdmin('auth.login', { username, password }),
+  logout: () => callAdmin('auth.logout'),
+  me: () => callAdmin('auth.me'),
+  wxLogin: (code: string) => callAdmin('auth.wxLogin', { code }),
+}
+
+export const adminAccountApi = {
+  list: () => callAdmin('admin.listAccounts'),
+  create: (params: { username: string; password: string; role: 'superAdmin' | 'communityAdmin'; userId?: string }) =>
+    callAdmin('admin.createAccount', params),
+  resetPassword: (accountId: string, password: string) =>
+    callAdmin('admin.resetPassword', { accountId, password }),
+  disable: (accountId: string) => callAdmin('admin.disableAccount', { accountId }),
+  enable: (accountId: string) => callAdmin('admin.enableAccount', { accountId }),
+  bindWechat: (accountId: string, openId: string) => callAdmin('admin.bindWechat', { accountId, openId }),
+}
 
 export const communityApi = {
   list: () => callAdmin('community.list'),
@@ -40,6 +72,13 @@ export const communityApi = {
   hardDelete: (communityId: string) => callAdmin('community.hardDelete', { communityId }),
   updateMeta: (params: { communityId: string; name?: string; description?: string; motto?: string; mottoCite?: string }) =>
     callAdmin('community.updateMeta', params),
+  createAdmin: (params: {
+    name: string
+    description: string
+    coverImage: string
+    location: { address: string; lat: number; lng: number }
+    joinType: 'open' | 'approval'
+  }) => callAdmin('community.createAdmin', params),
 }
 
 export const sectionApi = {
@@ -105,4 +144,20 @@ export const postAdminApi = {
   delete: (postId: string) => callAdmin('post.deleteAdmin', { postId }),
   removeAttendanceMember: (params: { postId: string; widgetId: string; userId: string }) =>
     callAdmin('post.removeAttendanceMemberAdmin', params),
+  createAdmin: (params: { communityId: string; sectionId: string; content: Record<string, any> }) =>
+    callAdmin('post.createAdmin', params),
+}
+
+export interface VideoUploadMetadata {
+  cloudPath: string
+  fileId: string
+  url: string
+  token: string
+  authorization: string
+  cosFileId: string
+}
+
+export const videoApi = {
+  requestUpload: (params: { fileName: string }) =>
+    callAdmin('video.requestUpload', params) as Promise<VideoUploadMetadata>,
 }

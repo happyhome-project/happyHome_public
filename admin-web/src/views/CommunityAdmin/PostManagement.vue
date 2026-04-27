@@ -12,7 +12,19 @@
           <el-tag size="small" effect="plain" type="info">当前社区：{{ communityName || communityId }}</el-tag>
         </div>
       </div>
-      <el-button @click="loadPosts" :loading="loading">刷新</el-button>
+      <div class="header-actions">
+        <el-button @click="loadPosts" :loading="loading">刷新</el-button>
+        <el-button
+          type="primary"
+          @click="$router.push({
+            name: 'post-create-admin',
+            params: { communityId },
+            query: filters.sectionId ? { sectionId: filters.sectionId } : {}
+          })"
+        >
+          + 新建帖子
+        </el-button>
+      </div>
     </div>
 
     <div class="filters">
@@ -67,7 +79,11 @@
           {{ getPostSummary(row) }}
         </template>
       </el-table-column>
-      <el-table-column prop="createdAt" label="发布时间" width="180" />
+      <el-table-column label="发布时间" width="180">
+        <template #default="{ row }">
+          <span>{{ formatAdminDateTime(row.createdAt) }}</span>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="180">
         <template #default="{ row }">
           <el-button size="small" @click="openDetail(row)">详情</el-button>
@@ -90,7 +106,7 @@
         <div class="detail-meta">
           <div>板块：{{ detailSection?.name || detailPost.sectionName || '未知板块' }}</div>
           <div>作者：{{ detailPost.authorNickname || '未设置昵称' }} / {{ detailPost.authorId }}</div>
-          <div>时间：{{ detailPost.createdAt }}</div>
+          <div>时间：{{ formatAdminDateTime(detailPost.createdAt) }}</div>
         </div>
 
         <el-descriptions :column="1" border>
@@ -127,7 +143,11 @@
                 </div>
               </template>
             </el-table-column>
-            <el-table-column prop="joinedAt" label="参与时间" width="180" />
+            <el-table-column label="参与时间" width="180">
+              <template #default="{ row }">
+                <span>{{ formatAdminDateTime(row.joinedAt) }}</span>
+              </template>
+            </el-table-column>
             <el-table-column label="操作" width="110">
               <template #default="{ row }">
                 <el-button size="small" type="danger" @click="removeAttendanceMember(block.widgetId, row)">移除</el-button>
@@ -146,6 +166,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { communityApi, postAdminApi, sectionApi } from '../../api/cloud'
+import { formatAdminDateTime } from '../../utils/datetime'
 
 const route = useRoute()
 const router = useRouter()
@@ -168,7 +189,7 @@ const filters = ref({
 const detailFields = computed(() => {
   if (!detailPost.value || !detailSection.value) return []
   return (detailSection.value.widgets || [])
-    .filter((widget: any) => widget.type !== 'attendance')
+    .filter((widget: any) => !['attendance', 'admin_notice'].includes(widget.type))
     .map((widget: any) => ({
       label: widget.label,
       value: formatValue(detailPost.value.content?.[widget.widgetId]),

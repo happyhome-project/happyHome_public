@@ -1,9 +1,17 @@
-# 美好 Home · UI 组件库使用速查
+# 美好 Home · UI 组件库使用速查 ⚠️ 已废弃（描述 wot-design-uni 时代）
 
-> 本项目使用 [wot-design-uni](https://wot-ui.cn) v1.14.0 作为基础 UI 组件库。
-> 上游依赖：[docs/VISUAL-TONE.md](./VISUAL-TONE.md)（调性） / [docs/DESIGN-TOKENS.md](./DESIGN-TOKENS.md)（tokens）
+> ⚠️ **本文档描述基于 wot-design-uni 的旧组件方案，已于 2026-04 全面回退到原生 button/view + tokens-only 方案。**
+>
+> 回退原因：wot-design-uni 真机小程序兼容性差（wd-button/wd-cell click 不响应、styleIsolation:shared 污染其他页面）。
+> 回退记录：参考 commit `c6cefe / 4750ff` 系列 + `memory/feedback_wot_mp_weixin_issues.md`。
+>
+> **当前真相**：所有页面都用 `<button class="btn-primary">` / `<view class="card">` 等原生标签 + `miniprogram/src/uni.scss` 的 `$hh-*` tokens。
+> **代码权威源**：直接搜代码 `class="btn-` / `class="card"` 等，无 `wd-*` 残留。
+> **当前主色**：墨绿 `#3A6A45`（v2 Classical Dossier，**不是**下文提到的 v1 "木色橙"），见 [docs/DESIGN-TOKENS.md](./DESIGN-TOKENS.md) 顶部说明。
 
 ---
+
+## 历史内容（已废弃 · 保留作迁移参考）
 
 ## 1. 技术架构
 

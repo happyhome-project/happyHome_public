@@ -17,6 +17,7 @@
   "scripts": {
     "deploy:cloud": "node scripts/deploy.mjs cloud",
     "deploy:mp": "node scripts/deploy.mjs miniprogram",
+    "deploy:admin-web": "node scripts/deploy.mjs admin-web",
     "deploy": "node scripts/deploy.mjs all",
     "test:nightly": "node scripts/nightly-full.mjs",
     "test:admin:api": "node scripts/test-admin-api.mjs",
@@ -26,6 +27,8 @@
     "test:real:admin": "node scripts/test-admin-http.mjs",
     "test:real": "node scripts/test-real.mjs",
     "set:superadmin": "node scripts/set-super-admin.mjs",
-    "ensure:indexes": "node scripts/ensure-indexes.mjs"
+    "ensure:indexes": "node scripts/ensure-indexes.mjs",
+    "seed:admin": "node scripts/seed-admin-accounts.mjs",
+    "verify:community-creator": "node scripts/verify-community-creator.mjs"
   }
 }

@@ -153,12 +153,12 @@ export const postApi = {
     callCloud('post', 'update', { postId, content }),
   delete: (postId: string) =>
     callCloud('post', 'delete', { postId }),
-  joinAttendance: (postId: string, widgetId: string) =>
-    callCloud<{ widgetId: string; summary: any }>('post', 'joinAttendance', { postId, widgetId }),
+  joinAttendance: (postId: string, widgetId: string, seatCount?: number) =>
+    callCloud<{ widgetId: string; summary: any }>('post', 'joinAttendance', { postId, widgetId, seatCount }),
   leaveAttendance: (postId: string, widgetId: string) =>
     callCloud<{ widgetId: string; summary: any }>('post', 'leaveAttendance', { postId, widgetId }),
   listAttendanceMembers: (postId: string, widgetId: string) =>
-    callCloud<{ widgetId: string; members: any[]; total: number; capacity?: number; isFull: boolean }>(
+    callCloud<{ widgetId: string; members: any[]; total: number; occupiedSeats: number; capacity?: number; isFull: boolean }>(
       'post',
       'listAttendanceMembers',
       { postId, widgetId }

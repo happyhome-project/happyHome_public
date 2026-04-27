@@ -56,10 +56,20 @@ const mockSection = {
       showInList: true,
       capacity: 2,
     },
+    {
+      widgetId: 'notice-widget',
+      type: 'admin_notice',
+      label: '近期课程',
+      fieldKey: 'notice',
+      required: true,
+      order: 2,
+      showInList: false,
+      noticeContent: '周三晚 7 点开课',
+    },
   ],
 }
 
-test('create: attendance 控件不会参与发帖必填校验', async () => {
+test('create: attendance 和公告控件不会参与发帖必填校验', async () => {
   ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
   ;(db.getById as jest.Mock).mockResolvedValue(mockSection)
   ;(db.create as jest.Mock).mockResolvedValue('post-1')
@@ -69,6 +79,7 @@ test('create: attendance 控件不会参与发帖必填校验', async () => {
     sectionId: 'section-1',
     content: {
       'title-widget': '周六爬山',
+      'notice-widget': '用户不应能写公告',
     },
   } as any, 'test-openid')
 
@@ -78,7 +89,7 @@ test('create: attendance 控件不会参与发帖必填校验', async () => {
   }))
 })
 
-test('update: 保存时会清理无效字段和 attendance 字段', async () => {
+test('update: 保存时会清理无效字段、attendance 字段和公告字段', async () => {
   ;(db.getById as jest.Mock)
     .mockResolvedValueOnce({
       _id: 'post-1',
@@ -94,6 +105,7 @@ test('update: 保存时会清理无效字段和 attendance 字段', async () => 
     content: {
       'title-widget': '更新后的标题',
       'attendance-widget': 'should-be-removed',
+      'notice-widget': 'should-also-be-removed',
       'legacy-widget': 'legacy',
     } as any,
   }, 'test-openid')
@@ -179,9 +191,174 @@ test('get/listAttendanceMembers: 返回参与聚合和完整名单', async () =>
   const roster = await handleListAttendanceMembers({ postId: 'post-1', widgetId: 'attendance-widget' }, 'user-1')
 
   expect(detail.post.attendanceSummaryByWidget['attendance-widget'].count).toBe(2)
+  expect(detail.post.attendanceSummaryByWidget['attendance-widget'].occupiedSeats).toBe(2)
   expect(detail.post.attendanceSummaryByWidget['attendance-widget'].isJoined).toBe(true)
   expect(roster.members).toHaveLength(2)
   expect(roster.members[0].userId).toBe('user-2')
+  expect(roster.members[0].seatCount).toBe(1)
+  expect(roster.occupiedSeats).toBe(2)
+})
+
+test('joinAttendance: 带 seatCount=3 时写入数据库字段正确', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({
+      _id: 'post-1',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      status: 'active',
+    })
+    .mockResolvedValueOnce({
+      ...mockSection,
+      widgets: [{ ...mockSection.widgets[1], capacity: 5 }],
+    })
+    .mockResolvedValueOnce({ _id: 'test-openid', nickName: 'Tester', avatarUrl: 'avatar.png' })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }]) // community_members
+    .mockResolvedValueOnce([])                                       // existing by userId
+    .mockResolvedValueOnce([])                                       // capacity pre-check
+    .mockResolvedValueOnce([                                         // re-check after insert
+      { _id: 'new-id', postId: 'post-1', widgetId: 'attendance-widget', userId: 'test-openid', seatCount: 3, joinedAt: 'now' },
+    ])
+    .mockResolvedValueOnce([                                         // final summary
+      { _id: 'new-id', postId: 'post-1', widgetId: 'attendance-widget', userId: 'test-openid', seatCount: 3, joinedAt: 'now' },
+    ])
+  ;(db.create as jest.Mock).mockResolvedValue('new-id')
+
+  const result = await handleJoinAttendance({
+    postId: 'post-1',
+    widgetId: 'attendance-widget',
+    seatCount: 3,
+  } as any, 'test-openid')
+
+  expect(db.create).toHaveBeenCalledWith('post_attendance_members', expect.objectContaining({
+    userId: 'test-openid',
+    seatCount: 3,
+  }))
+  expect(result.summary.occupiedSeats).toBe(3)
+  expect(result.summary.mySeatCount).toBe(3)
+  expect(result.summary.count).toBe(1)
+})
+
+test('joinAttendance: seatCount 累加超容时抛含剩余座位数的明确错误', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({
+      _id: 'post-1',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      status: 'active',
+    })
+    .mockResolvedValueOnce({
+      ...mockSection,
+      widgets: [{ ...mockSection.widgets[1], capacity: 5 }],
+    })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([
+      { _id: 'a1', userId: 'u1', seatCount: 2, joinedAt: 't1' },
+    ])
+
+  await expect(handleJoinAttendance({
+    postId: 'post-1',
+    widgetId: 'attendance-widget',
+    seatCount: 4,
+  } as any, 'test-openid')).rejects.toThrow('剩余 3 座，无法容纳 4 位')
+  expect(db.create).not.toHaveBeenCalled()
+})
+
+test('joinAttendance: 存量记录无 seatCount 字段时按 1 座累加（向后兼容）', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({
+      _id: 'post-1',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      status: 'active',
+    })
+    .mockResolvedValueOnce({
+      ...mockSection,
+      widgets: [{ ...mockSection.widgets[1], capacity: 3 }],
+    })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([
+      { _id: 'a1', userId: 'u1', joinedAt: 't1' },   // 无 seatCount
+      { _id: 'a2', userId: 'u2', joinedAt: 't2' },   // 无 seatCount
+    ])
+
+  // capacity=3, occupied=2（按 1 座兜底），seatCount=2 → 2+2>3 → 应抛错
+  await expect(handleJoinAttendance({
+    postId: 'post-1',
+    widgetId: 'attendance-widget',
+    seatCount: 2,
+  } as any, 'test-openid')).rejects.toThrow('剩余 1 座，无法容纳 2 位')
+})
+
+test('joinAttendance: 非法 seatCount (0 / 负数 / 小数) 规范化为 ≥1 整数', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({
+      _id: 'post-1',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      status: 'active',
+    })
+    .mockResolvedValueOnce({
+      ...mockSection,
+      widgets: [{ ...mockSection.widgets[1], capacity: 5 }],
+    })
+    .mockResolvedValueOnce({ _id: 'test-openid', nickName: 'Tester', avatarUrl: 'avatar.png' })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([
+      { _id: 'new-id', userId: 'test-openid', seatCount: 1, joinedAt: 'now' },
+    ])
+    .mockResolvedValueOnce([
+      { _id: 'new-id', userId: 'test-openid', seatCount: 1, joinedAt: 'now' },
+    ])
+  ;(db.create as jest.Mock).mockResolvedValue('new-id')
+
+  await handleJoinAttendance({
+    postId: 'post-1',
+    widgetId: 'attendance-widget',
+    seatCount: 0,
+  } as any, 'test-openid')
+
+  expect(db.create).toHaveBeenCalledWith('post_attendance_members', expect.objectContaining({
+    seatCount: 1,
+  }))
+})
+
+test('joinAttendance: 并发超卖时回滚刚写入的记录', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({
+      _id: 'post-1',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      status: 'active',
+    })
+    .mockResolvedValueOnce({
+      ...mockSection,
+      widgets: [{ ...mockSection.widgets[1], capacity: 3 }],
+    })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([{ _id: 'a1', userId: 'u1', seatCount: 1, joinedAt: 't1' }])  // pre-check 看到 1 座
+    .mockResolvedValueOnce([                                                              // re-check 发现另一并发请求已写入超容
+      { _id: 'a1', userId: 'u1', seatCount: 1, joinedAt: 't1' },
+      { _id: 'race', userId: 'u2', seatCount: 2, joinedAt: 't2' },
+      { _id: 'new-id', userId: 'test-openid', seatCount: 2, joinedAt: 'now' },
+    ])
+  ;(db.create as jest.Mock).mockResolvedValue('new-id')
+
+  await expect(handleJoinAttendance({
+    postId: 'post-1',
+    widgetId: 'attendance-widget',
+    seatCount: 2,
+  } as any, 'test-openid')).rejects.toThrow('已满员')
+  expect(db.removeById).toHaveBeenCalledWith('post_attendance_members', 'new-id')
 })
 
 test('list：非 active 成员不可查看帖子', async () => {

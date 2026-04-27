@@ -139,7 +139,10 @@ export async function handleMyStatus(params: { communityId: string }, openid: st
 }
 
 export async function handleMyCommunities(openid: string) {
-  if (!openid) throw new Error('Missing OPENID')
+  // 未登录时返回空列表，而不是抛错。前端应该用 isLoggedIn 前置守门，
+  // 这里做后端兜底——万一前端忘守（或新页面接入）不至于让用户看到 "Missing OPENID" 原始错误。
+  // 语义：没有 openid = 没有身份 = 没有社区归属，return [] 符合 user mental model。
+  if (!openid) return { communities: [] }
 
   const memberships = await db.query('community_members', {
     userId: openid,

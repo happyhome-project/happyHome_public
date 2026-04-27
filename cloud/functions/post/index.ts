@@ -1,6 +1,8 @@
 import cloud from 'wx-server-sdk'
 import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
+import { getTempUrl } from '../../lib/storage'
+import { sanitizeContent, validateRequiredWidgets } from '../../lib/post-validate'
 import type {
   AttendancePreviewUser,
   AttendanceSummary,
@@ -16,30 +18,6 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const ATTENDANCE_COLLECTION = 'post_attendance_members'
 const ATTENDANCE_PREVIEW_LIMIT = 5
 const COMMUNITY_READ_ERROR = '需要先加入社区后查看内容'
-
-function getEditableWidgetIds(section: Section) {
-  return new Set(
-    (section.widgets || [])
-      .filter((widget) => widget.type !== 'attendance')
-      .map((widget) => widget.widgetId)
-  )
-}
-
-function sanitizeContent(content: PostContent, section: Section): PostContent {
-  const allowedIds = getEditableWidgetIds(section)
-  return Object.fromEntries(
-    Object.entries(content || {}).filter(([key]) => allowedIds.has(key))
-  ) as PostContent
-}
-
-function isEmptyValue(value: unknown) {
-  return (
-    value === undefined ||
-    value === null ||
-    value === '' ||
-    (Array.isArray(value) && value.length === 0)
-  )
-}
 
 function getAttendanceWidgets(section: Section): Widget[] {
   return (section.widgets || []).filter((widget) => widget.type === 'attendance')
@@ -96,6 +74,16 @@ async function getAttendanceRecords(postId: string, widgetId: string) {
   return rows as PostAttendanceMember[]
 }
 
+function normalizeSeatCount(value: unknown): number {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < 1) return 1
+  return Math.floor(n)
+}
+
+function sumOccupiedSeats(records: Pick<PostAttendanceMember, 'seatCount'>[]): number {
+  return records.reduce((sum, r) => sum + normalizeSeatCount(r.seatCount), 0)
+}
+
 async function buildAttendanceSummary(
   postId: string,
   widget: Widget,
@@ -107,14 +95,19 @@ async function buildAttendanceSummary(
     userId: record.userId,
     nickName: usersById[record.userId]?.nickName || '',
     avatarUrl: usersById[record.userId]?.avatarUrl || '',
+    seatCount: normalizeSeatCount(record.seatCount),
   }))
   const count = records.length
+  const occupiedSeats = sumOccupiedSeats(records)
   const capacity = normalizeCapacity(widget)
+  const myRecord = viewerId ? records.find((record) => record.userId === viewerId) : undefined
   return {
     count,
+    occupiedSeats,
     ...(capacity ? { capacity } : {}),
-    isFull: capacity ? count >= capacity : false,
-    isJoined: viewerId ? records.some((record) => record.userId === viewerId) : false,
+    isFull: capacity ? occupiedSeats >= capacity : false,
+    isJoined: Boolean(myRecord),
+    ...(myRecord ? { mySeatCount: normalizeSeatCount(myRecord.seatCount) } : {}),
     previewUsers,
   }
 }
@@ -170,26 +163,19 @@ async function listAttendanceMembersInternal(postId: string, widgetId?: string) 
     userId: record.userId,
     nickName: usersById[record.userId]?.nickName || '',
     avatarUrl: usersById[record.userId]?.avatarUrl || '',
+    seatCount: normalizeSeatCount(record.seatCount),
     joinedAt: record.joinedAt,
   }))
+  const occupiedSeats = sumOccupiedSeats(records)
   const capacity = normalizeCapacity(widget)
   return {
     widgetId: widget.widgetId,
     members,
     total: members.length,
+    occupiedSeats,
     ...(capacity ? { capacity } : {}),
-    isFull: capacity ? members.length >= capacity : false,
+    isFull: capacity ? occupiedSeats >= capacity : false,
     post,
-  }
-}
-
-function validateRequiredWidgets(section: Section, content: PostContent) {
-  for (const widget of section.widgets || []) {
-    if (widget.type === 'attendance' || !widget.required) continue
-    const value = content[widget.widgetId]
-    if (isEmptyValue(value)) {
-      throw new Error(`必填项未填写：${widget.label}`)
-    }
   }
 }
 
@@ -295,10 +281,11 @@ export async function handleUpdate(
 }
 
 export async function handleJoinAttendance(
-  params: { postId: string; widgetId?: string },
+  params: { postId: string; widgetId?: string; seatCount?: number },
   openid: string,
 ) {
   if (!openid) throw new Error('Missing OPENID')
+  const seatCount = normalizeSeatCount(params.seatCount)
   const { post, widget } = await getAttendanceWidgetForPost(params.postId, params.widgetId)
   await ensureActiveCommunityMember(post.communityId, openid)
 
@@ -310,17 +297,33 @@ export async function handleJoinAttendance(
   if (existing.length === 0) {
     const current = await getAttendanceRecords(post._id, widget.widgetId)
     const capacity = normalizeCapacity(widget)
-    if (capacity && current.length >= capacity) {
-      throw new Error('已满员，暂时无法参与')
+    const occupied = sumOccupiedSeats(current)
+    if (capacity && occupied + seatCount > capacity) {
+      const remaining = Math.max(0, capacity - occupied)
+      throw new Error(
+        seatCount === 1
+          ? '已满员，暂时无法参与'
+          : `剩余 ${remaining} 座，无法容纳 ${seatCount} 位`
+      )
     }
-    await db.create(ATTENDANCE_COLLECTION, {
+    const newId = await db.create(ATTENDANCE_COLLECTION, {
       postId: post._id,
       widgetId: widget.widgetId,
       communityId: post.communityId,
       sectionId: post.sectionId,
       userId: openid,
+      seatCount,
       joinedAt: new Date().toISOString(),
     })
+    // 并发防御：写入后重新校验总席位，若超容则回滚（防止两个请求同时看见"还有剩余"导致超卖）
+    if (capacity) {
+      const after = await getAttendanceRecords(post._id, widget.widgetId)
+      const occupiedAfter = sumOccupiedSeats(after)
+      if (occupiedAfter > capacity && typeof newId === 'string') {
+        await db.removeById(ATTENDANCE_COLLECTION, newId)
+        throw new Error('已满员，暂时无法参与')
+      }
+    }
   }
 
   const summary = await buildAttendanceSummary(post._id, widget, openid)
@@ -359,9 +362,17 @@ export async function handleListAttendanceMembers(
     widgetId: result.widgetId,
     members: result.members,
     total: result.total,
+    occupiedSeats: result.occupiedSeats,
     ...(typeof result.capacity === 'number' ? { capacity: result.capacity } : {}),
     isFull: result.isFull,
   }
+}
+
+export async function handleGetMediaUrl(params: { fileID?: string }) {
+  const fileID = String(params?.fileID || '')
+  if (!fileID.startsWith('cloud://')) throw new Error('invalid fileID')
+  const url = await getTempUrl(fileID)
+  return { url }
 }
 
 export const main = async (event: any) => {
@@ -375,5 +386,6 @@ export const main = async (event: any) => {
   if (action === 'joinAttendance') return handleJoinAttendance(params, openid)
   if (action === 'leaveAttendance') return handleLeaveAttendance(params, openid)
   if (action === 'listAttendanceMembers') return handleListAttendanceMembers(params, openid)
+  if (action === 'getMediaUrl') return handleGetMediaUrl(params)
   throw new Error(`Unknown action: ${action}`)
 }

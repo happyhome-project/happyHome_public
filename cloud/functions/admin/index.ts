@@ -1,13 +1,84 @@
 import cloud from 'wx-server-sdk'
 import * as db from '../../lib/db'
 import * as storage from '../../lib/storage'
-import type { Community, SectionType, Widget } from '../../shared/types'
+import { extractCloudFileIDsFromContent } from '../../lib/extract-file-ids'
+import { sanitizeContent, validateRequiredWidgets } from '../../lib/post-validate'
+import {
+  assertOwnCommunityOrSuper,
+  generateSalt,
+  generateSessionToken,
+  hashPassword,
+  listOwnedCommunityIds,
+  verifyPassword,
+} from '../../lib/auth'
+import { handleCreate as handleCommunityCreate } from '../community'
+import type {
+  AdminAccount,
+  AdminCtx,
+  AdminRole,
+  AdminSession,
+  Community,
+  Section,
+  SectionType,
+  Widget,
+} from '../../shared/types'
 
 cloud.init({ env: process.env.TCB_ENV || cloud.DYNAMIC_CURRENT_ENV })
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'happyhome-admin-2024'
+const ADMIN_LEGACY_TOKEN_FALLBACK = process.env.ADMIN_LEGACY_TOKEN_FALLBACK === '1'
+// Bootstrap 登录：当 admin_accounts 为空时，命中这两个环境变量的用户名/密码可一键
+// 创建首个 superAdmin。和老的 VITE_ADMIN_USERNAME/PASSWORD 共用一组凭据即可。
+const BOOTSTRAP_ADMIN_USERNAME = process.env.BOOTSTRAP_ADMIN_USERNAME || 'admin'
+const BOOTSTRAP_ADMIN_PASSWORD = process.env.BOOTSTRAP_ADMIN_PASSWORD || 'happyhome2024'
 const ATTENDANCE_COLLECTION = 'post_attendance_members'
 const ATTENDANCE_PREVIEW_LIMIT = 5
+const ADMIN_ACCOUNTS = 'admin_accounts'
+const ADMIN_SESSIONS = 'admin_sessions'
+const SESSION_TTL_MS = Math.max(
+  1,
+  Number(process.env.ADMIN_SESSION_TTL_DAYS || 7)
+) * 24 * 60 * 60 * 1000
+
+const PUBLIC_ACTIONS = new Set(['auth.login', 'auth.wxLogin'])
+const SUPER_ADMIN_ONLY: Array<string | RegExp> = [
+  'community.approve',
+  'community.reject',
+  'community.disable',
+  'community.restore',
+  'community.hardDelete',
+  'community.listDisabled',
+  'user.setSuperAdmin',
+  /^admin\./,
+]
+// 这些 action 需要校验对 communityId 的归属（superAdmin 自动放行）
+const COMMUNITY_SCOPED_ACTIONS = new Set([
+  'community.updateMeta',
+  'section.list',
+  'section.create',
+  'member.pendingList',
+  'member.list',
+  'member.approve',
+  'member.reject',
+  'member.kick',
+  'post.listAdmin',
+  'post.createAdmin',
+])
+// 这些 action 只给了实体 id，需要先查出 communityId 再校验
+const ENTITY_TO_COMMUNITY_ACTIONS: Record<string, { collection: string; idParam: string }> = {
+  'section.get': { collection: 'sections', idParam: 'sectionId' },
+  'section.updateMeta': { collection: 'sections', idParam: 'sectionId' },
+  'section.updateStatus': { collection: 'sections', idParam: 'sectionId' },
+  'section.updateWidgets': { collection: 'sections', idParam: 'sectionId' },
+  'section.delete': { collection: 'sections', idParam: 'sectionId' },
+  'post.getAdmin': { collection: 'posts', idParam: 'postId' },
+  'post.deleteAdmin': { collection: 'posts', idParam: 'postId' },
+  'post.removeAttendanceMemberAdmin': { collection: 'posts', idParam: 'postId' },
+}
+
+function matchesAction(action: string, rules: Array<string | RegExp>): boolean {
+  return rules.some((rule) => (typeof rule === 'string' ? rule === action : rule.test(action)))
+}
 
 function normalizeSection(section: any) {
   return {
@@ -61,15 +132,25 @@ function normalizeCapacity(value: unknown) {
   return Math.floor(num)
 }
 
+function normalizeNoticeContent(value: unknown) {
+  return String(value || '').trim().slice(0, 500)
+}
+
 function normalizeWidgetForSave(widget: any): Widget {
   const normalized: Widget = {
     ...widget,
-    required: widget?.type === 'attendance' ? false : widget?.required === true,
+    required: ['attendance', 'admin_notice'].includes(widget?.type) ? false : widget?.required === true,
+    showInList: widget?.type === 'admin_notice' ? false : widget?.showInList === true,
   }
   if (normalized.type === 'attendance') {
     normalized.capacity = normalizeCapacity(normalized.capacity)
   } else {
     delete normalized.capacity
+  }
+  if (normalized.type === 'admin_notice') {
+    normalized.noticeContent = normalizeNoticeContent(widget?.noticeContent)
+  } else {
+    delete normalized.noticeContent
   }
   return normalized
 }
@@ -96,8 +177,8 @@ function validateSectionWidgets(sectionType: SectionType, widgets: any[]) {
     if (widget.showInList && !['short_text', 'summary', 'datetime', 'number', 'attendance'].includes(widget.type)) {
       throw new Error(`控件类型 ${widget.type} 不支持在列表展示`)
     }
-    if (widget.type === 'attendance' && widget.required) {
-      throw new Error('活动参与控件不能设为必填')
+    if (['attendance', 'admin_notice'].includes(widget.type) && widget.required) {
+      throw new Error('活动参与/公告控件不能设为必填')
     }
   }
 }
@@ -174,7 +255,195 @@ async function listAttendanceMembersForAdmin(postId: string, widgetId: string) {
   }))
 }
 
-async function route(action: string, params: Record<string, any>) {
+// ============================================================
+// 身份解析 / Session
+// ============================================================
+
+function extractBearer(authHeader: string): string {
+  const m = String(authHeader || '').match(/^Bearer\s+(.+)$/i)
+  return m ? m[1].trim() : ''
+}
+
+async function resolveSession(authHeader: string): Promise<AdminCtx | null> {
+  const token = extractBearer(authHeader)
+  if (!token) return null
+
+  // 迁移期 fallback：旧共享 token 认作虚拟 superAdmin
+  if (ADMIN_LEGACY_TOKEN_FALLBACK && token === ADMIN_TOKEN) {
+    return {
+      accountId: 'legacy',
+      role: 'superAdmin',
+      userId: '',
+      username: 'legacy',
+    }
+  }
+
+  let session: AdminSession | null
+  try {
+    session = (await db.getById(ADMIN_SESSIONS, token)) as AdminSession
+  } catch {
+    return null
+  }
+  if (!session) return null
+  if (session.expiresAt && Date.parse(session.expiresAt) < Date.now()) {
+    try { await db.removeById(ADMIN_SESSIONS, token) } catch { /* best effort */ }
+    return null
+  }
+  return {
+    accountId: session.accountId,
+    role: session.role,
+    userId: session.userId,
+    username: session.username,
+  }
+}
+
+async function findAccountByUsername(username: string): Promise<AdminAccount | null> {
+  const matches = (await db.query(ADMIN_ACCOUNTS, { username }, { limit: 1 })) as AdminAccount[]
+  return matches[0] || null
+}
+
+async function findAccountByUserId(userId: string): Promise<AdminAccount | null> {
+  if (!userId) return null
+  const matches = (await db.query(ADMIN_ACCOUNTS, { userId }, { limit: 1 })) as AdminAccount[]
+  return matches[0] || null
+}
+
+async function createSessionForAccount(account: AdminAccount): Promise<{ token: string; expiresAt: string }> {
+  const token = generateSessionToken()
+  const now = Date.now()
+  const expiresAt = new Date(now + SESSION_TTL_MS).toISOString()
+  await db.create(ADMIN_SESSIONS, {
+    _id: token,
+    accountId: account._id,
+    role: account.role,
+    userId: account.userId || '',
+    username: account.username,
+    createdAt: new Date(now).toISOString(),
+    expiresAt,
+  })
+  return { token, expiresAt }
+}
+
+// ============================================================
+// Public（不需要 session）路由
+// ============================================================
+
+async function publicRoute(action: string, params: Record<string, any>) {
+  if (action === 'auth.login') {
+    const username = String(params.username || '').trim()
+    const password = String(params.password || '')
+    if (!username || !password) throw new Error('用户名和密码不能为空')
+
+    let account = await findAccountByUsername(username)
+
+    // ---- Bootstrap：admin_accounts 为空 + 命中 env 凭据时自动 seed 首个 superAdmin ----
+    if (!account
+      && username === BOOTSTRAP_ADMIN_USERNAME
+      && password === BOOTSTRAP_ADMIN_PASSWORD) {
+      const total = (await db.query(ADMIN_ACCOUNTS, {}, { limit: 1 })) as any[]
+      if (total.length === 0) {
+        const salt = generateSalt()
+        const hash = hashPassword(password, salt)
+        const accountId = await db.create(ADMIN_ACCOUNTS, {
+          username,
+          passwordHash: hash,
+          passwordSalt: salt,
+          userId: '',
+          role: 'superAdmin',
+          status: 'active',
+          createdAt: new Date().toISOString(),
+          createdBy: 'bootstrap',
+        })
+        account = {
+          _id: accountId,
+          username,
+          passwordHash: hash,
+          passwordSalt: salt,
+          userId: '',
+          role: 'superAdmin',
+          status: 'active',
+          createdAt: new Date().toISOString(),
+          createdBy: 'bootstrap',
+        }
+      }
+    }
+
+    if (!account) throw new Error('用户名或密码错误')
+    if (account.status !== 'active') throw new Error('账号已停用')
+    if (!verifyPassword(password, account.passwordSalt, account.passwordHash)) {
+      throw new Error('用户名或密码错误')
+    }
+
+    const { token, expiresAt } = await createSessionForAccount(account)
+    return {
+      token,
+      expiresAt,
+      role: account.role,
+      userId: account.userId || '',
+      username: account.username,
+    }
+  }
+
+  if (action === 'auth.wxLogin') {
+    // 扩展位：目前暂未实现。未来流程：
+    //   1. 用 cloud.getWXContext() 或 CloudBase 自定义登录 解出 openId
+    //   2. 按 userId === openId 查 admin_accounts
+    //   3. 命中则 createSessionForAccount，否则返回 account_not_bound
+    throw new Error('wechat login not configured yet')
+  }
+
+  throw new Error(`Unknown public action: ${action}`)
+}
+
+// ============================================================
+// 权限守卫（在 route 分发前执行）
+// ============================================================
+
+async function resolveScopedCommunityId(action: string, params: Record<string, any>): Promise<string> {
+  const entityMap = ENTITY_TO_COMMUNITY_ACTIONS[action]
+  if (!entityMap) return String(params.communityId || '').trim()
+
+  const entityId = String(params[entityMap.idParam] || '').trim()
+  if (!entityId) throw new Error(`${entityMap.idParam} 不能为空`)
+  try {
+    const entity = (await db.getById(entityMap.collection, entityId)) as any
+    return String(entity?.communityId || '').trim()
+  } catch {
+    throw new Error(`${entityMap.idParam} 不存在`)
+  }
+}
+
+async function enforceActionAccess(action: string, params: Record<string, any>, ctx: AdminCtx): Promise<void> {
+  if (matchesAction(action, SUPER_ADMIN_ONLY)) {
+    if (ctx.role !== 'superAdmin') throw new Error('权限不足')
+    return
+  }
+  if (COMMUNITY_SCOPED_ACTIONS.has(action) || ENTITY_TO_COMMUNITY_ACTIONS[action]) {
+    if (ctx.role === 'superAdmin') return
+    const communityId = await resolveScopedCommunityId(action, params)
+    await assertOwnCommunityOrSuper(ctx, communityId)
+  }
+}
+
+async function route(action: string, params: Record<string, any>, ctx: AdminCtx) {
+  await enforceActionAccess(action, params, ctx)
+
+  // ---- auth.me / auth.logout 放在守卫后（只需有 session 即可） ----
+  if (action === 'auth.me') {
+    return {
+      role: ctx.role,
+      userId: ctx.userId,
+      username: ctx.username,
+      accountId: ctx.accountId,
+    }
+  }
+  if (action === 'auth.logout') {
+    if (ctx.accountId !== 'legacy') {
+      try { await db.removeById(ADMIN_SESSIONS, params.__token__ || '') } catch { /* best effort */ }
+    }
+    return { success: true }
+  }
+
   if (action === 'user.setSuperAdmin') {
     const openId = String(params.openId || '').trim()
     if (!openId) throw new Error('openId 不能为空')
@@ -201,17 +470,81 @@ async function route(action: string, params: Record<string, any>) {
   }
 
   if (action === 'community.list') {
-    const [active, pending, rejected, disabled] = await Promise.all([
-      db.query('communities', { status: 'active' }, { orderBy: ['createdAt', 'desc'] }),
-      db.query('communities', { status: 'pending' }, { orderBy: ['createdAt', 'desc'] }),
-      db.query('communities', { status: 'rejected' }, { orderBy: ['createdAt', 'desc'] }),
-      db.query('communities', { status: 'disabled' }, { orderBy: ['createdAt', 'desc'] }),
-    ])
-    return { communities: [...active, ...pending, ...rejected, ...disabled] }
+    if (ctx.role === 'superAdmin') {
+      const [active, pending, rejected, disabled] = await Promise.all([
+        db.query('communities', { status: 'active' }, { orderBy: ['createdAt', 'desc'] }),
+        db.query('communities', { status: 'pending' }, { orderBy: ['createdAt', 'desc'] }),
+        db.query('communities', { status: 'rejected' }, { orderBy: ['createdAt', 'desc'] }),
+        db.query('communities', { status: 'disabled' }, { orderBy: ['createdAt', 'desc'] }),
+      ])
+      return { communities: [...active, ...pending, ...rejected, ...disabled] }
+    }
+    const ownedIds = await listOwnedCommunityIds(ctx.userId)
+    if (ownedIds.length === 0) return { communities: [] }
+    const docs = await Promise.all(
+      ownedIds.map((id) => db.getById('communities', id).catch(() => null))
+    )
+    const communities = (docs.filter(Boolean) as Community[])
+      .filter((c) => c.status !== 'disabled' || ctx.role === 'superAdmin')
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+    return { communities }
+  }
+  if (action === 'community.createAdmin') {
+    if (!ctx.userId) throw new Error('当前账号未绑定用户身份，暂不能创建社区')
+    const result = await handleCommunityCreate({
+      name: String(params.name || '').trim(),
+      description: String(params.description || ''),
+      coverImage: String(params.coverImage || ''),
+      location: params.location,
+      joinType: params.joinType === 'approval' ? 'approval' : 'open',
+    }, ctx.userId)
+    // superAdmin 创建的社区可直接 active
+    if (ctx.role === 'superAdmin') {
+      await db.updateById('communities', result.communityId, { status: 'active' })
+    }
+    return result
   }
   if (action === 'community.approve') {
-    await db.updateById('communities', params.communityId, { status: 'active' })
-    return { success: true }
+    const communityId = String(params.communityId || '').trim()
+    if (!communityId) throw new Error('communityId 不能为空')
+    await db.updateById('communities', communityId, { status: 'active' })
+
+    // ---- 自动给社区创建者发一个 communityAdmin 账号（按 userId=openId 去重）----
+    // openId 在微信侧 per-app 永久稳定，重复"注册"不会变。同一个 creator 的多个社区
+    // 共用同一个 admin 账号——这里幂等：已存在就只回返既有信息，不重置密码。
+    const community = await db.getById('communities', communityId) as Community | null
+    let adminAccount: { username: string; password?: string; alreadyExisted: boolean } | null = null
+
+    if (community?.creatorId) {
+      const existing = await findAccountByUserId(community.creatorId)
+      if (existing) {
+        adminAccount = { username: existing.username, alreadyExisted: true }
+      } else {
+        // 用户名 = `c-${openId 后8位}`，可读且不易撞；密码 12 位随机
+        const suffix = community.creatorId.slice(-8) || Date.now().toString(36).slice(-8)
+        let username = `c-${suffix}`
+        // 极小概率撞名时加一位
+        if (await findAccountByUsername(username)) {
+          username = `c-${suffix}-${Math.random().toString(36).slice(2, 4)}`
+        }
+        const password = generateSessionToken().slice(0, 12)
+        const salt = generateSalt()
+        const hash = hashPassword(password, salt)
+        await db.create(ADMIN_ACCOUNTS, {
+          username,
+          passwordHash: hash,
+          passwordSalt: salt,
+          userId: community.creatorId,
+          role: 'communityAdmin',
+          status: 'active',
+          createdAt: new Date().toISOString(),
+          createdBy: ctx.accountId,
+        })
+        adminAccount = { username, password, alreadyExisted: false }
+      }
+    }
+
+    return { success: true, adminAccount }
   }
   if (action === 'community.reject') {
     await db.updateById('communities', params.communityId, { status: 'rejected' })
@@ -555,6 +888,133 @@ async function route(action: string, params: Record<string, any>) {
     return { success: true, members, total: members.length }
   }
 
+  if (action === 'admin.listAccounts') {
+    const accounts = (await db.query(ADMIN_ACCOUNTS, {}, { orderBy: ['createdAt', 'desc'] })) as AdminAccount[]
+    return {
+      accounts: accounts.map((a) => ({
+        _id: a._id,
+        username: a.username,
+        role: a.role,
+        status: a.status,
+        userId: a.userId || '',
+        createdAt: a.createdAt,
+        createdBy: a.createdBy || '',
+      })),
+    }
+  }
+  if (action === 'admin.createAccount') {
+    const username = String(params.username || '').trim()
+    const password = String(params.password || '')
+    const role: AdminRole = params.role === 'superAdmin' ? 'superAdmin' : 'communityAdmin'
+    const userId = String(params.userId || '').trim()
+    if (!username) throw new Error('username 不能为空')
+    if (password.length < 6) throw new Error('密码至少 6 位')
+
+    const existing = await findAccountByUsername(username)
+    if (existing) throw new Error('用户名已存在')
+
+    const salt = generateSalt()
+    const hash = hashPassword(password, salt)
+    const now = new Date().toISOString()
+    const accountId = await db.create(ADMIN_ACCOUNTS, {
+      username,
+      passwordHash: hash,
+      passwordSalt: salt,
+      userId,
+      role,
+      status: 'active',
+      createdAt: now,
+      createdBy: ctx.accountId,
+    })
+    return { accountId }
+  }
+  if (action === 'admin.resetPassword') {
+    const accountId = String(params.accountId || '').trim()
+    const password = String(params.password || '')
+    if (!accountId) throw new Error('accountId 不能为空')
+    if (password.length < 6) throw new Error('密码至少 6 位')
+    const salt = generateSalt()
+    const hash = hashPassword(password, salt)
+    await db.updateById(ADMIN_ACCOUNTS, accountId, { passwordHash: hash, passwordSalt: salt })
+    // 重置密码后踢下线所有已有 session
+    const sessions = (await db.query(ADMIN_SESSIONS, { accountId })) as AdminSession[]
+    await Promise.all(sessions.map((s) => db.removeById(ADMIN_SESSIONS, s._id).catch(() => null)))
+    return { success: true, revokedSessions: sessions.length }
+  }
+  if (action === 'admin.disableAccount') {
+    const accountId = String(params.accountId || '').trim()
+    if (!accountId) throw new Error('accountId 不能为空')
+    if (accountId === ctx.accountId) throw new Error('不能停用自己的账号')
+    await db.updateById(ADMIN_ACCOUNTS, accountId, { status: 'disabled' })
+    const sessions = (await db.query(ADMIN_SESSIONS, { accountId })) as AdminSession[]
+    await Promise.all(sessions.map((s) => db.removeById(ADMIN_SESSIONS, s._id).catch(() => null)))
+    return { success: true, revokedSessions: sessions.length }
+  }
+  if (action === 'admin.enableAccount') {
+    const accountId = String(params.accountId || '').trim()
+    if (!accountId) throw new Error('accountId 不能为空')
+    await db.updateById(ADMIN_ACCOUNTS, accountId, { status: 'active' })
+    return { success: true }
+  }
+  if (action === 'admin.bindWechat') {
+    const accountId = String(params.accountId || '').trim()
+    const openId = String(params.openId || '').trim()
+    if (!accountId || !openId) throw new Error('accountId 和 openId 不能为空')
+    const existing = await findAccountByUserId(openId)
+    if (existing && existing._id !== accountId) {
+      throw new Error('该微信身份已绑定到其他账号')
+    }
+    await db.updateById(ADMIN_ACCOUNTS, accountId, { userId: openId })
+    return { success: true }
+  }
+
+  if (action === 'video.requestUpload') {
+    const fileName = String(params.fileName || '').trim()
+    if (!fileName) throw new Error('fileName 不能为空')
+    const match = fileName.match(/\.([a-zA-Z0-9]+)$/)
+    const ext = match ? match[1].toLowerCase() : ''
+    const VIDEO_EXTS = new Set(['mp4', 'mov', 'm4v', 'webm'])
+    const COVER_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp'])
+    let sub: 'videos' | 'covers'
+    if (VIDEO_EXTS.has(ext)) sub = 'videos'
+    else if (COVER_EXTS.has(ext)) sub = 'covers'
+    else throw new Error('不支持的文件类型')
+    const rand = Math.random().toString(36).slice(2, 8)
+    const cloudPath = `posts/${sub}/${Date.now()}_${rand}.${ext}`
+    return await storage.requestUploadMetadata(cloudPath)
+  }
+
+  if (action === 'post.createAdmin') {
+    const communityId = String(params.communityId || '').trim()
+    const sectionId = String(params.sectionId || '').trim()
+    if (!communityId) throw new Error('communityId 不能为空')
+    if (!sectionId) throw new Error('sectionId 不能为空')
+    if (!ctx.userId) {
+      throw new Error('当前管理员未绑定微信身份，请先在账号管理中绑定 openId')
+    }
+    const section = await db.getById('sections', sectionId) as Section | null
+    if (!section) throw new Error('板块不存在')
+    if (section.communityId !== communityId) throw new Error('板块不属于当前社区')
+    if (!Array.isArray(section.widgets) || section.widgets.length === 0) {
+      throw new Error('该板块尚未配置内容模板')
+    }
+    const sanitized = sanitizeContent(params.content || {}, section, { allowAdminOnly: true })
+    validateRequiredWidgets(section, sanitized, { allowAdminOnly: true })
+    const now = new Date().toISOString()
+    const postId = await db.create('posts', {
+      communityId,
+      sectionId,
+      authorId: ctx.userId,
+      status: 'active',
+      content: sanitized,
+      commentCount: 0,
+      likeCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    })
+    return { postId }
+  }
+
   throw new Error(`Unknown action: ${action}`)
 }
 
@@ -564,16 +1024,7 @@ async function hardDeleteCommunity(communityId: string, community: Community) {
 
   const posts = await db.query('posts', { communityId })
   for (const post of posts) {
-    const content = (post as any).content || {}
-    for (const value of Object.values(content)) {
-      if (Array.isArray(value)) {
-        for (const item of value) {
-          if (typeof item === 'string' && item.startsWith('cloud://')) {
-            fileIDs.push(item)
-          }
-        }
-      }
-    }
+    fileIDs.push(...extractCloudFileIDsFromContent((post as any).content))
   }
 
   for (const post of posts) {
@@ -626,11 +1077,6 @@ export const main = async (event: any) => {
         }
       }
 
-      const auth = String(event.headers?.authorization || event.headers?.Authorization || '')
-      if (auth !== `Bearer ${ADMIN_TOKEN}`) {
-        return { statusCode: 403, headers, body: JSON.stringify({ error: 'Unauthorized' }) }
-      }
-
       let body: any = {}
       try {
         body = JSON.parse(event.body || '{}')
@@ -638,18 +1084,45 @@ export const main = async (event: any) => {
         body = {}
       }
       const { action, ...params } = body
-      const result = await route(action, params)
+      const authHeader = String(event.headers?.authorization || event.headers?.Authorization || '')
+
+      if (PUBLIC_ACTIONS.has(action)) {
+        const result = await publicRoute(action, params)
+        return { statusCode: 200, headers, body: JSON.stringify(result) }
+      }
+
+      const ctx = await resolveSession(authHeader)
+      if (!ctx) {
+        return { statusCode: 401, headers, body: JSON.stringify({ error: 'Unauthorized' }) }
+      }
+      // auth.logout 需要原始 token 才能删对应 session
+      if (action === 'auth.logout') {
+        params.__token__ = extractBearer(authHeader)
+      }
+      const result = await route(action, params, ctx)
       return { statusCode: 200, headers, body: JSON.stringify(result) }
     }
 
-    const { action, ...params } = event
-    return route(action, params)
+    // 非 HTTP 触发（内部云函数 / 测试直调）：视为 superAdmin，允许注入 ctx
+    const { action, _actAs, ...params } = event
+    if (PUBLIC_ACTIONS.has(action)) return publicRoute(action, params)
+    const ctx: AdminCtx = _actAs || {
+      accountId: 'internal',
+      role: 'superAdmin',
+      userId: '',
+      username: 'internal',
+    }
+    return route(action, params, ctx)
   } catch (error: any) {
     if (event.httpMethod) {
+      const msg = String(error?.message || 'internal error')
+      const status = /^(用户名或密码错误|权限不足|账号已停用|Unauthorized)$/.test(msg)
+        ? (msg === '权限不足' ? 403 : 401)
+        : 500
       return {
-        statusCode: 500,
+        statusCode: status,
         headers,
-        body: JSON.stringify({ error: error.message, stack: error.stack }),
+        body: JSON.stringify({ error: msg, stack: error.stack }),
       }
     }
     throw error

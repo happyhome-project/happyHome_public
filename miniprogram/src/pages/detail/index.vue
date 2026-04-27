@@ -1,6 +1,11 @@
 <template>
   <view class="detail-page">
-    <view v-if="post && section" class="content">
+    <LoginGuard
+      v-if="!userStore.isLoggedIn"
+      title="请先登录"
+      desc="登录后才能查看帖子详情"
+    />
+    <view v-else-if="post && section" class="content">
       <view v-if="!editing">
         <WidgetRenderer
           v-for="widget in regularWidgets"
@@ -9,47 +14,48 @@
           :content="post.content"
         />
 
-        <view v-for="widget in attendanceWidgets" :key="widget.widgetId" class="attendance-card">
+        <view
+          v-for="widget in attendanceWidgets"
+          :key="widget.widgetId"
+          class="attendance-card"
+          :class="attendanceCardClass(widget)"
+          @tap="openRoster(widget)"
+        >
           <view class="attendance-head">
-            <text class="attendance-label">{{ widget.label }}</text>
-            <text class="attendance-count">
-              {{ getAttendanceSummary(widget).count }}人参与
-              <text v-if="getAttendanceSummary(widget).capacity"> / {{ getAttendanceSummary(widget).capacity }}人</text>
-            </text>
+            <view class="attendance-title">
+              <text class="attendance-count">{{ getAttendanceSummary(widget).occupiedSeats || 0 }}<text v-if="getAttendanceSummary(widget).capacity">/{{ getAttendanceSummary(widget).capacity }}</text></text>
+              <text class="attendance-sep"> · </text>
+              <text class="attendance-label">{{ widget.label }}</text>
+            </view>
+            <text
+              class="attendance-tag"
+              :class="attendanceTagClass(widget)"
+              @tap.stop="handleAttendanceAction(widget)"
+            >{{ attendanceTagText(widget) }} ›</text>
           </view>
 
-          <button
-            class="attendance-btn"
-            :class="{
-              joined: getAttendanceSummary(widget).isJoined,
-              full: getAttendanceSummary(widget).isFull && !getAttendanceSummary(widget).isJoined,
-            }"
-            :disabled="joiningWidgetId === widget.widgetId || (getAttendanceSummary(widget).isFull && !getAttendanceSummary(widget).isJoined)"
-            @tap="toggleAttendance(widget)"
-          >
-            {{
-              joiningWidgetId === widget.widgetId
-                ? '处理中...'
-                : getAttendanceSummary(widget).isJoined
-                  ? '已参与，可取消'
-                  : getAttendanceSummary(widget).isFull
-                    ? '已满员'
-                    : '参与'
-            }}
-          </button>
-
-          <view class="attendance-preview" @tap="openRoster(widget)">
-            <view class="attendance-avatars">
+          <view class="hh-avatar-stack">
+            <view
+              v-for="user in getAttendanceSummary(widget).previewUsers"
+              :key="user.userId"
+              class="hh-avatar-slot"
+              :class="{ 'is-self': user.userId === userStore.openId }"
+            >
               <image
-                v-for="user in getAttendanceSummary(widget).previewUsers"
-                :key="user.userId"
-                :src="user.avatarUrl || fallbackAvatar"
-                class="avatar"
+                :src="user.userId === userStore.openId ? (userStore.avatarUrl || user.avatarUrl || fallbackAvatar) : (user.avatarUrl || fallbackAvatar)"
+                class="hh-avatar-img"
                 mode="aspectFill"
               />
-              <view v-if="getAttendanceSummary(widget).previewUsers.length === 0" class="empty-avatar">暂无</view>
+              <text v-if="(user.seatCount || 1) >= 2" class="hh-avatar-badge">{{ user.seatCount }}</text>
             </view>
-            <text class="attendance-roster-link">查看参与名单</text>
+            <view
+              v-for="n in emptySlotCount(widget)"
+              :key="'empty-' + widget.widgetId + '-' + n"
+              class="hh-avatar-slot hh-avatar-slot--empty"
+            >
+              <text class="hh-avatar-empty-mark">＋</text>
+            </view>
+            <view v-if="!getAttendanceSummary(widget).previewUsers.length && !emptySlotCount(widget)" class="hh-avatar-empty-text">暂无</view>
           </view>
         </view>
       </view>
@@ -89,7 +95,7 @@
       </view>
     </view>
 
-    <view v-else class="loading"><text>加载中...</text></view>
+    <view v-else-if="userStore.isLoggedIn" class="loading"><text>加载中...</text></view>
 
     <view v-if="showRoster" class="roster-mask" @tap="closeRoster">
       <view class="roster-panel" @tap.stop>
@@ -97,17 +103,28 @@
           <view>
             <text class="roster-title">{{ rosterTitle }}</text>
             <text class="roster-subtitle">
-              {{ rosterMeta.total }}人参与
-              <text v-if="rosterMeta.capacity"> / {{ rosterMeta.capacity }}人</text>
+              {{ rosterMeta.occupiedSeats }}<text v-if="rosterMeta.capacity">/{{ rosterMeta.capacity }}</text> 席
+              <text v-if="rosterMeta.total !== rosterMeta.occupiedSeats"> · 共 {{ rosterMeta.total }} 组</text>
             </text>
           </view>
-          <text class="roster-close" @tap="closeRoster">关闭</text>
+          <view class="roster-actions">
+            <text
+              v-if="rosterSelfJoined"
+              class="roster-cancel"
+              :class="{ disabled: cancelBusy }"
+              @tap="handleCancelInSheet"
+            >{{ cancelBusy ? '取消中...' : '取消参与' }}</text>
+            <text class="roster-close" @tap="closeRoster">关闭</text>
+          </view>
         </view>
         <scroll-view scroll-y class="roster-list">
           <view v-for="member in rosterMembers" :key="`${member.userId}-${member.joinedAt}`" class="roster-item">
             <image :src="member.avatarUrl || fallbackAvatar" class="roster-avatar" mode="aspectFill" />
             <view class="roster-info">
-              <text class="roster-name">{{ member.nickName || member.userId }}</text>
+              <text class="roster-name">
+                {{ member.nickName || member.userId }}
+                <text v-if="(member.seatCount || 1) >= 2" class="roster-companion">（+{{ (member.seatCount || 1) - 1 }} 位同伴）</text>
+              </text>
               <text class="roster-time">{{ formatDateTime(member.joinedAt) }}</text>
             </view>
           </view>
@@ -124,33 +141,51 @@ import { onLoad } from '@dcloudio/uni-app'
 import { postApi, sectionApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
+import LoginGuard from '../../components/LoginGuard.vue'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
 import WidgetRenderer from '../../components/widgets/WidgetRenderer.vue'
-import { useBusyLock } from '../../utils/useBusyLock'
+import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 
 const fallbackAvatar = '/static/default-avatar.png'
+const ATTENDANCE_SLOT_DISPLAY_MAX = 6
+
 const post = ref<any>(null)
 const section = ref<any>(null)
 const editing = ref(false)
 const savingEdit = ref(false)
-const joiningWidgetId = ref('')
 const currentPostId = ref('')
 const editContent = reactive<Record<string, any>>({})
 const showRoster = ref(false)
 const rosterMembers = ref<any[]>([])
 const rosterTitle = ref('')
-const rosterMeta = reactive({ total: 0, capacity: undefined as number | undefined })
+const rosterWidgetId = ref('')
+const rosterMeta = reactive({
+  total: 0,
+  occupiedSeats: 0,
+  capacity: undefined as number | undefined,
+})
+const cancelBusy = ref(false)
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
 
+const rosterSelfJoined = computed(() => {
+  if (!rosterWidgetId.value) return false
+  const summary = post.value?.attendanceSummaryByWidget?.[rosterWidgetId.value]
+  return Boolean(summary?.isJoined)
+})
+
 const isAuthor = computed(() => post.value?.authorId === userStore.openId)
-const regularWidgets = computed(() => (section.value?.widgets || []).filter((widget: any) => widget.type !== 'attendance'))
+const regularWidgets = computed(() =>
+  (section.value?.widgets || []).filter((widget: any) => !['attendance', 'admin_notice'].includes(widget.type))
+)
 const attendanceWidgets = computed(() => (section.value?.widgets || []).filter((widget: any) => widget.type === 'attendance'))
 
 onLoad(async (options: any) => {
   const postId = String(options?.postId || '')
   if (!postId) return
   currentPostId.value = postId
+  // 未登录：LoginGuard 已挡住渲染，不发起请求
+  if (!userStore.isLoggedIn) return
   await loadPost(postId)
 })
 
@@ -222,27 +257,97 @@ function cancelEdit() {
 function getAttendanceSummary(widget: any) {
   return post.value?.attendanceSummaryByWidget?.[widget.widgetId] || {
     count: 0,
+    occupiedSeats: 0,
     isFull: false,
     isJoined: false,
     previewUsers: [],
   }
 }
 
-async function toggleAttendance(widget: any) {
-  if (!post.value || joiningWidgetId.value) return
-  joiningWidgetId.value = widget.widgetId
-  try {
-    const summary = getAttendanceSummary(widget)
-    if (summary.isJoined) {
-      await postApi.leaveAttendance(post.value._id, widget.widgetId)
-    } else {
-      await postApi.joinAttendance(post.value._id, widget.widgetId)
+function attendanceCardClass(widget: any) {
+  const s = getAttendanceSummary(widget)
+  return {
+    'is-joined': s.isJoined,
+    'is-full': s.isFull && !s.isJoined,
+  }
+}
+
+function attendanceTagClass(widget: any) {
+  const s = getAttendanceSummary(widget)
+  if (s.isJoined) return 'is-joined'
+  if (s.isFull) return 'is-full'
+  return 'is-join'
+}
+
+function attendanceTagText(widget: any) {
+  const s = getAttendanceSummary(widget)
+  if (s.isJoined) return '已参与'
+  if (s.isFull) return '已满座'
+  return '去报名'
+}
+
+function emptySlotCount(widget: any) {
+  const s = getAttendanceSummary(widget)
+  const cap = Number(s.capacity || 0)
+  if (!cap) return 0
+  const filled = Array.isArray(s.previewUsers) ? s.previewUsers.length : 0
+  const remainingSeats = Math.max(0, cap - (s.occupiedSeats || 0))
+  const remainingVisible = Math.max(0, ATTENDANCE_SLOT_DISPLAY_MAX - filled)
+  return Math.min(remainingSeats, remainingVisible)
+}
+
+// 按 widgetId 锁：同一 widget 的并发点击被抑制，不同 widget 并发允许
+const attendanceLock = useKeyedBusyLock(
+  async (widget: any, seatCount: number) => {
+    try {
+      await postApi.joinAttendance(post.value._id, widget.widgetId, seatCount)
+      await loadPost(currentPostId.value)
+    } catch (error: any) {
+      uni.showToast({ title: error?.message || '报名失败', icon: 'none' })
     }
-    await loadPost(currentPostId.value)
-  } catch (error: any) {
-    uni.showToast({ title: error?.message || '操作失败', icon: 'none' })
-  } finally {
-    joiningWidgetId.value = ''
+  },
+  (widget: any) => String(widget.widgetId),
+)
+
+async function handleAttendanceAction(widget: any) {
+  if (!post.value) return
+  const summary = getAttendanceSummary(widget)
+
+  // 已参与 → 直接打开名单（取消动作在 sheet 里）
+  if (summary.isJoined) {
+    await openRoster(widget)
+    return
+  }
+  // 已满座且未参与 → 只能看名单
+  if (summary.isFull) {
+    uni.showToast({ title: '已满座，可查看名单', icon: 'none' })
+    await openRoster(widget)
+    return
+  }
+
+  // 未参与 → 选人数后报名
+  const capacity = Number(summary.capacity || 0)
+  const occupied = Number(summary.occupiedSeats || 0)
+  const remaining = capacity ? Math.max(1, capacity - occupied) : 6
+  const maxChoices = Math.min(remaining, 6) // uni.showActionSheet 微信上限 6 项
+  const itemList = Array.from({ length: maxChoices }, (_, i) => {
+    const n = i + 1
+    return n === 1 ? '仅我 1 人' : `我 + ${n - 1} 人（共 ${n} 座）`
+  })
+
+  try {
+    const res: any = await new Promise((resolve, reject) => {
+      uni.showActionSheet({
+        itemList,
+        success: (r) => resolve(r),
+        fail: (e) => reject(e),
+      })
+    })
+    const seatCount = Number(res?.tapIndex ?? -1) + 1
+    if (seatCount < 1) return
+    await attendanceLock.run(widget, seatCount)
+  } catch (_) {
+    // 用户取消 ActionSheet，不提示
   }
 }
 
@@ -252,7 +357,9 @@ async function openRoster(widget: any) {
     const res = await postApi.listAttendanceMembers(post.value._id, widget.widgetId)
     rosterMembers.value = res.members || []
     rosterTitle.value = widget.label || '参与名单'
+    rosterWidgetId.value = widget.widgetId
     rosterMeta.total = Number(res.total || 0)
+    rosterMeta.occupiedSeats = Number(res.occupiedSeats || 0)
     rosterMeta.capacity = res.capacity
     showRoster.value = true
   } catch (error: any) {
@@ -260,8 +367,41 @@ async function openRoster(widget: any) {
   }
 }
 
+async function handleCancelInSheet() {
+  if (!post.value || !rosterWidgetId.value || cancelBusy.value) return
+  const confirmed = await new Promise<boolean>((resolve) => {
+    uni.showModal({
+      title: '取消参与',
+      content: '确定要取消这次报名吗？',
+      success: (res) => resolve(res.confirm),
+      fail: () => resolve(false),
+    })
+  })
+  if (!confirmed) return
+  cancelBusy.value = true
+  try {
+    await postApi.leaveAttendance(post.value._id, rosterWidgetId.value)
+    await loadPost(currentPostId.value)
+    // 刷新 sheet 内容，保持打开状态
+    const widget = attendanceWidgets.value.find((w: any) => w.widgetId === rosterWidgetId.value)
+    if (widget) {
+      const res = await postApi.listAttendanceMembers(post.value._id, widget.widgetId)
+      rosterMembers.value = res.members || []
+      rosterMeta.total = Number(res.total || 0)
+      rosterMeta.occupiedSeats = Number(res.occupiedSeats || 0)
+      rosterMeta.capacity = res.capacity
+    }
+    uni.showToast({ title: '已取消参与', icon: 'success' })
+  } catch (error: any) {
+    uni.showToast({ title: error?.message || '取消失败', icon: 'none' })
+  } finally {
+    cancelBusy.value = false
+  }
+}
+
 function closeRoster() {
   showRoster.value = false
+  rosterWidgetId.value = ''
 }
 
 async function uploadImages(tempPaths: string[]): Promise<string[]> {
@@ -350,12 +490,14 @@ function formatDateTime(iso: string): string {
   color: $hh-color-text-mute;
 }
 
+/* Classical Dossier · 参与条 */
 .attendance-card {
+  position: relative;
   margin-top: $hh-space-lg;
-  padding: $hh-space-lg;
-  border-radius: $hh-radius-md;
-  background: linear-gradient(180deg, #f4f9ff 0%, #ffffff 100%);
-  box-shadow: $hh-shadow-card;
+  padding: $hh-space-lg $hh-space-lg $hh-space-md;
+  border: 1rpx solid $hh-ink-line;
+  border-radius: $hh-radius-lg;
+  background: $hh-surface-1;
 }
 
 .attendance-head {
@@ -365,70 +507,132 @@ function formatDateTime(iso: string): string {
   gap: $hh-space-md;
 }
 
-.attendance-label {
-  font-size: $hh-font-body-lg;
-  color: $hh-color-text;
-  font-weight: $hh-font-weight-medium;
+.attendance-title {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  font-family: $hh-font-serif;
+  font-size: 34rpx;
+  color: $hh-ink-1;
+  letter-spacing: $hh-tracking-serif-sm;
 }
 
 .attendance-count {
-  font-size: $hh-font-caption;
-  color: $hh-color-text-mute;
+  font-family: $hh-font-num;
+  font-weight: $hh-font-weight-bold;
+  color: $hh-ink-1;
 }
 
-.attendance-btn {
-  margin-top: $hh-space-md;
-  width: 100%;
-  background: #2f80ed;
-  color: #fff;
-  border-radius: 999rpx;
-  border: none;
-  font-size: $hh-font-body;
+.attendance-sep {
+  color: $hh-ink-3;
+  margin: 0 4rpx;
 }
 
-.attendance-btn.joined {
-  background: #12b886;
+.attendance-label {
+  font-weight: $hh-font-weight-bold;
+  color: $hh-ink-1;
 }
 
-.attendance-btn.full {
-  background: #c8d1dc;
+.attendance-tag {
+  flex-shrink: 0;
+  font-family: $hh-font-sans;
+  font-size: 24rpx;
+  font-weight: $hh-font-weight-medium;
+  padding: 10rpx 18rpx;
+  border-radius: $hh-radius-sm;
+  letter-spacing: 0.04em;
+
+  &.is-join {
+    background: $hh-accent;
+    color: #fff;
+    border: 1rpx solid $hh-accent;
+  }
+  &.is-joined {
+    background: $hh-surface-1;
+    color: $hh-accent-ink;
+    border: 1rpx solid $hh-accent-line;
+  }
+  &.is-full {
+    background: $hh-surface-2;
+    color: $hh-ink-3;
+    border: 1rpx solid $hh-ink-line;
+  }
 }
 
-.attendance-preview {
+/* 头像堆叠 */
+.hh-avatar-stack {
   margin-top: $hh-space-md;
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: $hh-space-md;
+  min-height: 68rpx;
+  padding-left: 6rpx;
 }
 
-.attendance-avatars {
-  display: flex;
-  align-items: center;
-  min-height: 56rpx;
-}
-
-.avatar {
-  width: 56rpx;
-  height: 56rpx;
-  border-radius: 50%;
-  border: 2rpx solid #fff;
+.hh-avatar-slot {
+  position: relative;
+  width: 64rpx;
+  height: 64rpx;
   margin-left: -12rpx;
-  background: #edf2f7;
+  border-radius: 50%;
+  background: $hh-surface-2;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &:first-child {
+    margin-left: 0;
+  }
+
+  &.is-self {
+    box-shadow: 0 0 0 3rpx $hh-accent, 0 0 0 5rpx $hh-surface-1;
+    z-index: 2;
+  }
 }
 
-.avatar:first-child {
-  margin-left: 0;
+.hh-avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 2rpx solid $hh-surface-1;
+  background: $hh-surface-2;
 }
 
-.empty-avatar {
-  font-size: $hh-font-caption;
-  color: $hh-color-text-mute;
+.hh-avatar-slot--empty {
+  border: 2rpx dashed $hh-ink-line;
+  background: transparent;
 }
 
-.attendance-roster-link {
-  font-size: $hh-font-caption;
-  color: #2f80ed;
+.hh-avatar-empty-mark {
+  font-size: 28rpx;
+  color: $hh-ink-3;
+  line-height: 1;
+}
+
+.hh-avatar-empty-text {
+  font-size: 24rpx;
+  color: $hh-ink-3;
+  padding-left: $hh-space-xs;
+}
+
+.hh-avatar-badge {
+  position: absolute;
+  top: -4rpx;
+  right: -4rpx;
+  min-width: 28rpx;
+  height: 28rpx;
+  padding: 0 6rpx;
+  border-radius: 14rpx;
+  background: $hh-accent;
+  color: #fff;
+  font-family: $hh-font-num;
+  font-size: 20rpx;
+  font-weight: $hh-font-weight-bold;
+  line-height: 28rpx;
+  text-align: center;
+  border: 2rpx solid $hh-surface-1;
+  box-sizing: content-box;
 }
 
 .attendance-hint {
@@ -547,9 +751,33 @@ function formatDateTime(iso: string): string {
   color: $hh-color-text-mute;
 }
 
+.roster-actions {
+  display: flex;
+  align-items: center;
+  gap: $hh-space-md;
+}
+
+.roster-cancel {
+  font-size: $hh-font-caption;
+  color: $hh-color-danger;
+  padding: $hh-space-xs $hh-space-sm;
+
+  &.disabled {
+    color: $hh-ink-3;
+    pointer-events: none;
+  }
+}
+
 .roster-close {
   font-size: $hh-font-caption;
-  color: #2f80ed;
+  color: $hh-ink-3;
+  padding: $hh-space-xs $hh-space-sm;
+}
+
+.roster-companion {
+  font-size: $hh-font-caption;
+  color: $hh-accent-ink;
+  margin-left: 8rpx;
 }
 
 .roster-list {

@@ -151,10 +151,45 @@ const INDEXES = [
       { Name: 'communityId', Direction: '1' },
     ],
   },
+  // admin_accounts: auth.login 按 username 查，且需要唯一约束
+  {
+    coll: 'admin_accounts',
+    name: 'idx_username_unique',
+    keys: [
+      { Name: 'username', Direction: '1' },
+    ],
+    unique: true,
+  },
+  // admin_accounts: admin.bindWechat / wxLogin 按 userId 反查
+  {
+    coll: 'admin_accounts',
+    name: 'idx_userId',
+    keys: [
+      { Name: 'userId', Direction: '1' },
+    ],
+  },
+  // admin_sessions: 查询 accountId 的所有 session（重置密码/停用账号时批量清理）
+  {
+    coll: 'admin_sessions',
+    name: 'idx_accountId',
+    keys: [
+      { Name: 'accountId', Direction: '1' },
+    ],
+  },
+  // admin_sessions: 过期清理（未来可能加定期 job）
+  {
+    coll: 'admin_sessions',
+    name: 'idx_expiresAt',
+    keys: [
+      { Name: 'expiresAt', Direction: '1' },
+    ],
+  },
 ]
 
 const REQUIRED_COLLECTIONS = [
   'post_attendance_members',
+  'admin_accounts',
+  'admin_sessions',
 ]
 
 let hadError = false
@@ -190,7 +225,7 @@ for (const idx of INDEXES) {
           IndexName: idx.name,
           MgoKeySchema: {
             MgoIndexKeys: idx.keys,
-            MgoIsUnique: false,
+            MgoIsUnique: Boolean(idx.unique),
           },
         },
       ],

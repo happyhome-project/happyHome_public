@@ -5,6 +5,7 @@
  *   node scripts/deploy.mjs cloud                # upload all cloud functions
  *   node scripts/deploy.mjs cloud --only=post    # upload only post (comma-separated ok)
  *   node scripts/deploy.mjs miniprogram          # upload mini program (preview QR)
+ *   node scripts/deploy.mjs admin-web            # upload admin-web dist to Aliyun Nginx production host
  *   node scripts/deploy.mjs all                  # cloud + miniprogram
  *
  * Flags:
@@ -40,10 +41,11 @@ dns.lookup = function forcedIPv4Lookup(hostname, options, callback) {
 }
 
 import ci from 'miniprogram-ci'
-import { resolve, dirname } from 'path'
+import { resolve, dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import { execSync, spawn } from 'child_process'
-import { existsSync } from 'fs'
+import { existsSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
@@ -52,7 +54,12 @@ const APPID = 'wx673b17363cd6b4a6'
 const KEY_PATH = resolve(ROOT, `private.${APPID}.key`)
 const MP_DIST = resolve(ROOT, 'miniprogram/dist/build/mp-weixin')
 const CLOUD_DIST = resolve(ROOT, 'cloud/dist')
+const ADMIN_WEB_DIR = resolve(ROOT, 'admin-web')
+const ADMIN_WEB_DIST = resolve(ROOT, 'admin-web/dist')
 const CLOUD_ENV = 'cloudbase-3gh862acb1505ff3'
+const ADMIN_WEB_DEFAULT_API_URL = 'https://cloudbase-3gh862acb1505ff3-1307183045.ap-shanghai.app.tcloudbase.com'
+const ADMIN_WEB_ALIYUN_HOST = process.env.ADMIN_WEB_SSH_HOST || 'aliyun'
+const ADMIN_WEB_ALIYUN_ROOT = process.env.ADMIN_WEB_REMOTE_ROOT || '/var/www/happyhome-admin'
 const CLOUD_FUNCTIONS = ['user', 'community', 'member', 'section', 'post', 'admin', 'http-gateway']
 
 // Common DevTools install locations on Windows
@@ -70,13 +77,37 @@ function findDevtoolsCli() {
   return DEVTOOLS_CLI_CANDIDATES.find((p) => existsSync(p)) || null
 }
 
-const project = new ci.Project({
-  appid: APPID,
-  type: 'miniProgram',
-  projectPath: MP_DIST,
-  privateKeyPath: KEY_PATH,
-  ignores: ['node_modules/**/*'],
-})
+const quote = (s) => (/[ \t&|<>()]/.test(String(s)) ? `"${String(s).replace(/"/g, '\\"')}"` : String(s))
+
+function runShell(commandLine, options = {}) {
+  console.log(commandLine)
+  return new Promise((res) => {
+    const proc = spawn(commandLine, {
+      cwd: options.cwd || ROOT,
+      env: options.env || process.env,
+      stdio: 'inherit',
+      shell: true,
+    })
+    proc.on('exit', (code) => res({ ok: code === 0, reason: code === 0 ? 'ok' : `exit code ${code}` }))
+    proc.on('error', (err) => res({ ok: false, reason: String(err?.message || err) }))
+  })
+}
+
+// Lazy: miniprogram-ci 的 Project 构造会 eager 读 private key；DevTools CLI
+// 主路径完全不需要 key。key 只在主仓（不进 worktree/CI 环境），所以延迟到真
+// 正要走 miniprogram-ci fallback 时再构造——避免 worktree 里 import 期即崩。
+let _project
+function getCiProject() {
+  if (_project) return _project
+  _project = new ci.Project({
+    appid: APPID,
+    type: 'miniProgram',
+    projectPath: MP_DIST,
+    privateKeyPath: KEY_PATH,
+    ignores: ['node_modules/**/*'],
+  })
+  return _project
+}
 
 // ── Primary deploy path: WeChat DevTools CLI ──
 // Uses the IDE's own network stack, which bypasses local transparent proxies
@@ -102,7 +133,6 @@ async function deployCloudViaDevtoolsCli(fns) {
   // Windows + Node spawn + .bat + shell:true 组合下，带空格的路径必须手动加引号，
   // 否则 cmd.exe 会把 "X:/Program Files (x86)/..." 劈成两段。
   // 做法：把整条命令字符串自己拼好、并对每个含空格的段加双引号，然后当作一条命令传给 shell。
-  const quote = (s) => (/[ \t&|<>()]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s)
   const commandLine = [cli, ...args].map(quote).join(' ')
   console.log(`[DevTools CLI] ${commandLine}`)
 
@@ -120,7 +150,7 @@ async function deployCloudViaMiniprogramCi(fns) {
   for (const fn of fns) {
     console.log(`[miniprogram-ci] Uploading: ${fn}`)
     await ci.cloud.uploadFunction({
-      project,
+      project: getCiProject(),
       name: fn,
       path: resolve(CLOUD_DIST, fn),
       env: CLOUD_ENV,
@@ -160,13 +190,41 @@ async function deployCloud() {
   console.log('[✓] Cloud functions deployed via miniprogram-ci')
 }
 
-async function deployMiniprogram() {
-  console.log('\nBuilding miniprogram...')
-  execSync('npm run build:mp-weixin', { cwd: resolve(ROOT, 'miniprogram'), stdio: 'inherit' })
+// ── Primary preview path: WeChat DevTools CLI `preview` ──
+// 跟 deployCloudViaDevtoolsCli 同源：走 IDE 内部网络栈，绕开 miniprogram-ci 撞
+// IPv6 / 透明代理 / WeChat CI 白名单的一切老坑（2026-04-24 血泪教训：那天
+// `ci.preview()` 在本机再次被 `-10008 invalid ip: 2409:...` 拦下）。
+// 详见 memory/feedback_deploy_force_ipv4.md。
+async function deployMiniprogramViaDevtoolsCli() {
+  const cli = findDevtoolsCli()
+  if (!cli) return { ok: false, reason: 'DevTools CLI not found at known paths (set WX_DEVTOOLS_CLI env to override)' }
 
-  console.log('Generating preview QR code...')
+  const qrPath = resolve(ROOT, 'preview-qr.png')
+  const infoPath = resolve(ROOT, 'preview-info.json')
+  const args = [
+    'preview',
+    '--project', MP_DIST,
+    '--qr-format', 'terminal',
+    '--qr-output', qrPath,
+    '--info-output', infoPath,
+  ]
+
+  const commandLine = [cli, ...args].map(quote).join(' ')
+  console.log(`[DevTools CLI] ${commandLine}`)
+
+  return await new Promise((res) => {
+    const proc = spawn(commandLine, { stdio: 'inherit', shell: true })
+    proc.on('exit', (code) => res({ ok: code === 0, reason: code === 0 ? 'ok' : `exit code ${code}` }))
+    proc.on('error', (err) => res({ ok: false, reason: String(err?.message || err) }))
+  })
+}
+
+// ── Fallback preview path: miniprogram-ci ──
+// 撞 IPv6/透明代理/WeChat CI 白名单的概率跟 cloud.uploadFunction 一样高。
+async function deployMiniprogramViaMiniprogramCi() {
+  console.log('Generating preview QR code via miniprogram-ci...')
   await ci.preview({
-    project,
+    project: getCiProject(),
     desc: 'auto preview',
     setting: { es6: true, minified: false },
     qrcodeFormat: 'terminal',
@@ -175,6 +233,118 @@ async function deployMiniprogram() {
   console.log('Miniprogram preview ready! Scan preview-qr.jpg')
 }
 
+async function deployMiniprogram() {
+  console.log('\nBuilding miniprogram...')
+  execSync('npm run build:mp-weixin', { cwd: resolve(ROOT, 'miniprogram'), stdio: 'inherit' })
+
+  const forceCi = process.argv.includes('--use-ci')
+
+  if (!forceCi) {
+    console.log('\n[primary] Generating preview via WeChat DevTools CLI...')
+    const result = await deployMiniprogramViaDevtoolsCli()
+    if (result.ok) {
+      console.log('[✓] Miniprogram preview ready via DevTools CLI (preview-qr.png + preview-info.json)')
+      return
+    }
+    console.log(`[!] DevTools CLI failed (${result.reason}) — falling back to miniprogram-ci`)
+  } else {
+    console.log('\n[--use-ci] Skipping DevTools CLI, using miniprogram-ci directly')
+  }
+
+  await deployMiniprogramViaMiniprogramCi()
+  console.log('[✓] Miniprogram preview ready via miniprogram-ci')
+}
+
+function buildAdminWeb(defaultRouterMode) {
+  console.log('\nBuilding admin-web...')
+  const env = {
+    ...process.env,
+    VITE_CLOUD_API_URL: process.env.VITE_CLOUD_API_URL || ADMIN_WEB_DEFAULT_API_URL,
+    VITE_ROUTER_MODE: process.env.VITE_ROUTER_MODE || defaultRouterMode,
+  }
+  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+  execSync(`${npm} run build`, { cwd: ADMIN_WEB_DIR, stdio: 'inherit', env })
+  return env
+}
+
+async function deployAdminWebToCloudBase() {
+  const env = buildAdminWeb('hash')
+  const cloudPath = process.env.ADMIN_WEB_CLOUD_PATH || '/'
+  const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
+  const args = [
+    npx,
+    '--yes',
+    '--package',
+    '@cloudbase/cli',
+    'cloudbase',
+    'hosting',
+    'deploy',
+    ADMIN_WEB_DIST,
+  ]
+  if (cloudPath && cloudPath !== '/') args.push(cloudPath)
+  args.push('-e', CLOUD_ENV)
+
+  console.log('\nDeploying admin-web dist to CloudBase static hosting...')
+  console.log(`Using VITE_CLOUD_API_URL=${env.VITE_CLOUD_API_URL}`)
+  const result = await runShell(args.map(quote).join(' '))
+  if (!result.ok) {
+    throw new Error(`Admin web deploy failed: ${result.reason}. Ensure CloudBase CLI is logged in and static hosting is enabled for ${CLOUD_ENV}.`)
+  }
+  console.log('[OK] Admin web deployed to CloudBase static hosting')
+  console.log('Reminder: configure static hosting fallback/error page to index.html for Vue history routes.')
+}
+
+async function deployAdminWebToAliyun() {
+  const env = buildAdminWeb('history')
+  const stamp = Date.now()
+  const archivePath = join(tmpdir(), `happyhome-admin-web-${stamp}.tgz`)
+  const remoteArchivePath = `/tmp/happyhome-admin-web-${stamp}.tgz`
+  const remoteScriptPath = `/tmp/deploy-happyhome-admin-${stamp}.sh`
+  const localScriptPath = join(tmpdir(), `deploy-happyhome-admin-${stamp}.sh`)
+
+  console.log('\nPacking admin-web dist...')
+  execSync(`tar -czf ${quote(archivePath)} -C ${quote(ADMIN_WEB_DIST)} .`, { cwd: ROOT, stdio: 'inherit' })
+
+  const remoteScript = `#!/usr/bin/env bash
+set -euo pipefail
+root=${JSON.stringify(ADMIN_WEB_ALIYUN_ROOT)}
+archive=${JSON.stringify(remoteArchivePath)}
+release="$root/releases/$(date +%Y%m%d%H%M%S)"
+sudo mkdir -p "$release"
+sudo tar -xzf "$archive" -C "$release"
+sudo chown -R root:root "$release"
+sudo find "$release" -type d -exec chmod 755 {} \\;
+sudo find "$release" -type f -exec chmod 644 {} \\;
+sudo ln -sfn "$release" "$root/current"
+sudo nginx -t
+sudo systemctl reload nginx
+rm -f "$archive" ${JSON.stringify(remoteScriptPath)}
+echo "[OK] Admin web deployed to $release"
+readlink -f "$root/current"
+`
+  writeFileSync(localScriptPath, remoteScript, 'utf8')
+
+  console.log('\nDeploying admin-web dist to Aliyun Nginx host...')
+  console.log(`Using VITE_CLOUD_API_URL=${env.VITE_CLOUD_API_URL}`)
+  console.log(`Using VITE_ROUTER_MODE=${env.VITE_ROUTER_MODE}`)
+  console.log(`Using ADMIN_WEB_SSH_HOST=${ADMIN_WEB_ALIYUN_HOST}`)
+  const uploadArchive = await runShell(`scp ${quote(archivePath)} ${quote(`${ADMIN_WEB_ALIYUN_HOST}:${remoteArchivePath}`)}`)
+  if (!uploadArchive.ok) throw new Error(`Admin web archive upload failed: ${uploadArchive.reason}`)
+  const uploadScript = await runShell(`scp ${quote(localScriptPath)} ${quote(`${ADMIN_WEB_ALIYUN_HOST}:${remoteScriptPath}`)}`)
+  if (!uploadScript.ok) throw new Error(`Admin web deploy script upload failed: ${uploadScript.reason}`)
+  const deploy = await runShell(`ssh ${quote(ADMIN_WEB_ALIYUN_HOST)} ${quote(`bash ${remoteScriptPath}`)}`)
+  if (!deploy.ok) throw new Error(`Admin web Aliyun deploy failed: ${deploy.reason}`)
+  console.log('[OK] Admin web deployed to Aliyun Nginx host')
+}
+
+async function deployAdminWeb() {
+  const target = (process.env.ADMIN_WEB_TARGET || 'aliyun').toLowerCase()
+  if (target === 'cloudbase') return deployAdminWebToCloudBase()
+  if (target === 'aliyun') return deployAdminWebToAliyun()
+  throw new Error(`Unknown ADMIN_WEB_TARGET=${target}. Expected aliyun or cloudbase.`)
+}
+
 const target = process.argv[2] || 'all'
 if (target === 'cloud' || target === 'all') await deployCloud()
 if (target === 'miniprogram' || target === 'all') await deployMiniprogram()
+if (target === 'admin-web') await deployAdminWeb()

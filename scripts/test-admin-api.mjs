@@ -49,7 +49,7 @@ async function main() {
 
   console.log('1) Unauthorized admin request is rejected')
   const unauthorized = await callAdminRaw('__invalid_token__', 'community.list')
-  assert(unauthorized.statusCode === 403, `community.list unauthorized returns 403 (got ${unauthorized.statusCode})`)
+  assert(unauthorized.statusCode === 401, `community.list unauthorized returns 401 (got ${unauthorized.statusCode})`)
 
   console.log('\n2) Authorized admin request returns communities')
   const listRes = await callAdmin('community.list')
@@ -89,7 +89,7 @@ async function main() {
   const widgetRes = await callAdmin('section.updateWidgets', {
     sectionId,
     communityId,
-    widgets: [{ type: 'text', label: '内容', required: true, showInList: true, widgetId: '' }],
+    widgets: [{ type: 'short_text', label: '内容', fieldKey: 'title', required: true, showInList: true, widgetId: '' }],
   })
   assert(Array.isArray(widgetRes.widgets) && widgetRes.widgets.length === 1, 'section.updateWidgets returns widgets')
 

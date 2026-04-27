@@ -1,4 +1,6 @@
 export type UserRole = 'user' | 'superAdmin'
+export type AdminRole = 'superAdmin' | 'communityAdmin'
+export type AdminAccountStatus = 'active' | 'disabled'
 export type JoinType = 'open' | 'approval'
 export type CommunityStatus = 'pending' | 'active' | 'rejected' | 'disabled'
 export type MemberRole = 'admin' | 'member'
@@ -17,6 +19,8 @@ export type WidgetType =
   | 'rich_text'
   | 'location'
   | 'attendance'
+  | 'video_group'
+  | 'admin_notice'
 
 export const LIST_DISPLAYABLE_TYPES: WidgetType[] = [
   'short_text',
@@ -25,6 +29,68 @@ export const LIST_DISPLAYABLE_TYPES: WidgetType[] = [
   'number',
   'attendance',
 ]
+
+export type VideoSource =
+  | 'cos'
+  | 'channels_feed'
+  | 'channels_live'
+  | 'miniprogram'
+  | 'h5'
+  | 'app_link'
+
+export interface VideoItemBase {
+  itemId: string
+  title: string
+  cover?: string
+  duration?: number
+  description?: string
+}
+
+export interface VideoItemCos extends VideoItemBase {
+  source: 'cos'
+  fileID: string
+  allowDownload?: boolean
+  allowShare?: boolean
+}
+
+export interface VideoItemChannelsFeed extends VideoItemBase {
+  source: 'channels_feed'
+  finderUserName: string
+  feedId: string
+  nonceId?: string
+}
+
+export interface VideoItemChannelsLive extends VideoItemBase {
+  source: 'channels_live'
+  finderUserName: string
+  nonceId: string
+}
+
+export interface VideoItemMiniprogram extends VideoItemBase {
+  source: 'miniprogram'
+  appId: string
+  path?: string
+  envVersion?: 'release' | 'trial' | 'develop'
+}
+
+export interface VideoItemH5 extends VideoItemBase {
+  source: 'h5'
+  url: string
+}
+
+export interface VideoItemAppLink extends VideoItemBase {
+  source: 'app_link'
+  url: string
+  hint?: string
+}
+
+export type VideoItem =
+  | VideoItemCos
+  | VideoItemChannelsFeed
+  | VideoItemChannelsLive
+  | VideoItemMiniprogram
+  | VideoItemH5
+  | VideoItemAppLink
 
 export interface Widget {
   widgetId: string
@@ -36,19 +102,23 @@ export interface Widget {
   showInList: boolean
   unit?: string
   capacity?: number
+  noticeContent?: string
 }
 
 export interface AttendancePreviewUser {
   userId: string
   nickName: string
   avatarUrl: string
+  seatCount?: number
 }
 
 export interface AttendanceSummary {
   count: number
+  occupiedSeats: number
   capacity?: number
   isFull: boolean
   isJoined: boolean
+  mySeatCount?: number
   previewUsers: AttendancePreviewUser[]
 }
 
@@ -114,7 +184,7 @@ export interface SectionWithPostCount extends Section {
   postCount: number
 }
 
-export type PostContentValue = string | number | string[] | GeoLocation
+export type PostContentValue = string | number | string[] | GeoLocation | VideoItem[]
 export type PostContent = Record<string, PostContentValue>
 
 export interface PostAttendanceMember {
@@ -124,6 +194,7 @@ export interface PostAttendanceMember {
   communityId: string
   sectionId: string
   userId: string
+  seatCount?: number
   joinedAt: string
 }
 
@@ -139,4 +210,33 @@ export interface Post {
   createdAt: string
   updatedAt: string
   attendanceSummaryByWidget?: AttendanceSummaryByWidget
+}
+
+export interface AdminAccount {
+  _id: string
+  username: string
+  passwordHash: string
+  passwordSalt: string
+  userId: string
+  role: AdminRole
+  status: AdminAccountStatus
+  createdAt: string
+  createdBy: string
+}
+
+export interface AdminSession {
+  _id: string
+  accountId: string
+  role: AdminRole
+  userId: string
+  username: string
+  createdAt: string
+  expiresAt: string
+}
+
+export interface AdminCtx {
+  accountId: string
+  role: AdminRole
+  userId: string
+  username: string
 }

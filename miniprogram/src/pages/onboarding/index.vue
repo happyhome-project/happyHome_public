@@ -1,5 +1,11 @@
 <template>
   <view class="onboarding">
+    <LoginGuard
+      v-if="!userStore.isLoggedIn"
+      title="请先登录"
+      desc="登录后再来发现和加入社区"
+    />
+    <template v-else>
     <view class="header">
       <text class="title">选择你的社区</text>
       <text class="subtitle">加入后即可浏览和发帖</text>
@@ -30,21 +36,39 @@
     <view class="footer">
       <button class="create-btn" @tap="handleCreate">创建新社区</button>
     </view>
+    </template>
   </view>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import { communityApi, memberApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { useKeyedBusyLock } from '../../utils/useBusyLock'
+import {
+  DISCOVER_ENTRY_STORAGE_KEY,
+  resolveOnboardingEntryMode,
+  shouldRedirectJoinedUserFromOnboarding,
+  type OnboardingEntryMode,
+} from '../../utils/onboarding-flow'
+import LoginGuard from '../../components/LoginGuard.vue'
 
 const communities = ref<any[]>([])
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
+const entryMode = ref<OnboardingEntryMode>('auto')
 let refreshingOnboarding = false
+
+onLoad((query?: Record<string, any>) => {
+  entryMode.value = resolveEntryMode(query)
+  if (entryMode.value === 'discover') {
+    try {
+      uni.removeStorageSync(DISCOVER_ENTRY_STORAGE_KEY)
+    } catch {}
+  }
+})
 
 onMounted(async () => {
   await refreshOnboardingData()
@@ -59,17 +83,40 @@ async function refreshOnboardingData() {
   if (refreshingOnboarding) return
   refreshingOnboarding = true
   try {
-    if (userStore.isLoggedIn) {
-      await communityStore.loadMyCommunities()
-      if (communityStore.myCommunities.length > 0) {
-        uni.reLaunch({ url: '/pages/index/index' })
-        return
-      }
+    if (!userStore.isLoggedIn) {
+      communities.value = []
+      return
+    }
+    await communityStore.loadMyCommunities()
+    if (shouldRedirectJoinedUserFromOnboarding(resolveEntryMode(), communityStore.myCommunities.length)) {
+      uni.reLaunch({ url: '/pages/index/index' })
+      return
     }
     await loadCommunities()
   } finally {
     refreshingOnboarding = false
   }
+}
+
+function resolveEntryMode(query?: Record<string, any>): 'auto' | 'discover' {
+  let currentPageMode: unknown
+  try {
+    const pages = getCurrentPages()
+    const current = pages[pages.length - 1] as any
+    currentPageMode = current?.options?.mode
+  } catch {}
+
+  let storedMode: unknown
+  try {
+    storedMode = uni.getStorageSync(DISCOVER_ENTRY_STORAGE_KEY)
+  } catch {}
+
+  return resolveOnboardingEntryMode({
+    queryMode: query?.mode,
+    currentPageMode,
+    storedMode,
+    currentMode: entryMode.value,
+  })
 }
 
 // Per-community lock — clicking on card A doesn't block card B.
