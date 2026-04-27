@@ -413,6 +413,7 @@ function handleLogout() {
 }
 
 function goOnboarding() {
+  uni.setStorageSync('onboarding_entry_mode', 'discover')
   uni.reLaunch({ url: '/pages/onboarding/index?mode=discover' })
 }
 

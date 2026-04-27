@@ -12,7 +12,19 @@
           <el-tag size="small" effect="plain" type="info">当前社区：{{ communityName || communityId }}</el-tag>
         </div>
       </div>
-      <el-button @click="loadPosts" :loading="loading">刷新</el-button>
+      <div class="header-actions">
+        <el-button @click="loadPosts" :loading="loading">刷新</el-button>
+        <el-button
+          type="primary"
+          @click="$router.push({
+            name: 'post-create-admin',
+            params: { communityId },
+            query: filters.sectionId ? { sectionId: filters.sectionId } : {}
+          })"
+        >
+          + 新建帖子
+        </el-button>
+      </div>
     </div>
 
     <div class="filters">

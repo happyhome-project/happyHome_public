@@ -1,6 +1,8 @@
 import cloud from 'wx-server-sdk'
 import * as db from '../../lib/db'
 import * as storage from '../../lib/storage'
+import { extractCloudFileIDsFromContent } from '../../lib/extract-file-ids'
+import { sanitizeContent, validateRequiredWidgets } from '../../lib/post-validate'
 import {
   assertOwnCommunityOrSuper,
   generateSalt,
@@ -16,6 +18,7 @@ import type {
   AdminRole,
   AdminSession,
   Community,
+  Section,
   SectionType,
   Widget,
 } from '../../shared/types'
@@ -59,6 +62,7 @@ const COMMUNITY_SCOPED_ACTIONS = new Set([
   'member.reject',
   'member.kick',
   'post.listAdmin',
+  'post.createAdmin',
 ])
 // 这些 action 只给了实体 id，需要先查出 communityId 再校验
 const ENTITY_TO_COMMUNITY_ACTIONS: Record<string, { collection: string; idParam: string }> = {
@@ -964,6 +968,53 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     return { success: true }
   }
 
+  if (action === 'video.requestUpload') {
+    const fileName = String(params.fileName || '').trim()
+    if (!fileName) throw new Error('fileName 不能为空')
+    const match = fileName.match(/\.([a-zA-Z0-9]+)$/)
+    const ext = match ? match[1].toLowerCase() : ''
+    const VIDEO_EXTS = new Set(['mp4', 'mov', 'm4v', 'webm'])
+    const COVER_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp'])
+    let sub: 'videos' | 'covers'
+    if (VIDEO_EXTS.has(ext)) sub = 'videos'
+    else if (COVER_EXTS.has(ext)) sub = 'covers'
+    else throw new Error('不支持的文件类型')
+    const rand = Math.random().toString(36).slice(2, 8)
+    const cloudPath = `posts/${sub}/${Date.now()}_${rand}.${ext}`
+    return await storage.requestUploadMetadata(cloudPath)
+  }
+
+  if (action === 'post.createAdmin') {
+    const communityId = String(params.communityId || '').trim()
+    const sectionId = String(params.sectionId || '').trim()
+    if (!communityId) throw new Error('communityId 不能为空')
+    if (!sectionId) throw new Error('sectionId 不能为空')
+    if (!ctx.userId) {
+      throw new Error('当前管理员未绑定微信身份，请先在账号管理中绑定 openId')
+    }
+    const section = await db.getById('sections', sectionId) as Section | null
+    if (!section) throw new Error('板块不存在')
+    if (section.communityId !== communityId) throw new Error('板块不属于当前社区')
+    if (!Array.isArray(section.widgets) || section.widgets.length === 0) {
+      throw new Error('该板块尚未配置内容模板')
+    }
+    const sanitized = sanitizeContent(params.content || {}, section, { allowAdminOnly: true })
+    validateRequiredWidgets(section, sanitized, { allowAdminOnly: true })
+    const now = new Date().toISOString()
+    const postId = await db.create('posts', {
+      communityId,
+      sectionId,
+      authorId: ctx.userId,
+      status: 'active',
+      content: sanitized,
+      commentCount: 0,
+      likeCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    })
+    return { postId }
+  }
+
   throw new Error(`Unknown action: ${action}`)
 }
 
@@ -973,16 +1024,7 @@ async function hardDeleteCommunity(communityId: string, community: Community) {
 
   const posts = await db.query('posts', { communityId })
   for (const post of posts) {
-    const content = (post as any).content || {}
-    for (const value of Object.values(content)) {
-      if (Array.isArray(value)) {
-        for (const item of value) {
-          if (typeof item === 'string' && item.startsWith('cloud://')) {
-            fileIDs.push(item)
-          }
-        }
-      }
-    }
+    fileIDs.push(...extractCloudFileIDsFromContent((post as any).content))
   }
 
   for (const post of posts) {

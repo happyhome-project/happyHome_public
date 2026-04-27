@@ -21,6 +21,7 @@ const router = createRouter({
         { path: 'widgets/:sectionId', name: 'widgets', component: () => import('../views/CommunityAdmin/WidgetEditor.vue') },
         { path: 'members/:communityId', name: 'members', component: () => import('../views/CommunityAdmin/MemberApproval.vue') },
         { path: 'posts/:communityId', name: 'posts', component: () => import('../views/CommunityAdmin/PostManagement.vue') },
+        { path: 'posts/:communityId/new', name: 'post-create-admin', component: () => import('../views/CommunityAdmin/PostCreateAdmin.vue') },
       ]
     },
     // Fallback to avoid rendering a blank page on unknown URLs.

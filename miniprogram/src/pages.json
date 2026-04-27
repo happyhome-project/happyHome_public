@@ -34,6 +34,10 @@
     {
       "path": "pages/createCommunity/index",
       "style": { "navigationBarTitleText": "创建社区" }
+    },
+    {
+      "path": "pages/web-view/index",
+      "style": { "navigationBarTitleText": "外部链接" }
     }
   ],
   "tabBar": {

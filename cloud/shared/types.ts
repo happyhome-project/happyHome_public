@@ -19,6 +19,7 @@ export type WidgetType =
   | 'rich_text'
   | 'location'
   | 'attendance'
+  | 'video_group'
   | 'admin_notice'
 
 export const LIST_DISPLAYABLE_TYPES: WidgetType[] = [
@@ -28,6 +29,68 @@ export const LIST_DISPLAYABLE_TYPES: WidgetType[] = [
   'number',
   'attendance',
 ]
+
+export type VideoSource =
+  | 'cos'
+  | 'channels_feed'
+  | 'channels_live'
+  | 'miniprogram'
+  | 'h5'
+  | 'app_link'
+
+export interface VideoItemBase {
+  itemId: string
+  title: string
+  cover?: string
+  duration?: number
+  description?: string
+}
+
+export interface VideoItemCos extends VideoItemBase {
+  source: 'cos'
+  fileID: string
+  allowDownload?: boolean
+  allowShare?: boolean
+}
+
+export interface VideoItemChannelsFeed extends VideoItemBase {
+  source: 'channels_feed'
+  finderUserName: string
+  feedId: string
+  nonceId?: string
+}
+
+export interface VideoItemChannelsLive extends VideoItemBase {
+  source: 'channels_live'
+  finderUserName: string
+  nonceId: string
+}
+
+export interface VideoItemMiniprogram extends VideoItemBase {
+  source: 'miniprogram'
+  appId: string
+  path?: string
+  envVersion?: 'release' | 'trial' | 'develop'
+}
+
+export interface VideoItemH5 extends VideoItemBase {
+  source: 'h5'
+  url: string
+}
+
+export interface VideoItemAppLink extends VideoItemBase {
+  source: 'app_link'
+  url: string
+  hint?: string
+}
+
+export type VideoItem =
+  | VideoItemCos
+  | VideoItemChannelsFeed
+  | VideoItemChannelsLive
+  | VideoItemMiniprogram
+  | VideoItemH5
+  | VideoItemAppLink
 
 export interface Widget {
   widgetId: string
@@ -121,7 +184,7 @@ export interface SectionWithPostCount extends Section {
   postCount: number
 }
 
-export type PostContentValue = string | number | string[] | GeoLocation
+export type PostContentValue = string | number | string[] | GeoLocation | VideoItem[]
 export type PostContent = Record<string, PostContentValue>
 
 export interface PostAttendanceMember {

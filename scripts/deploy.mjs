@@ -5,7 +5,7 @@
  *   node scripts/deploy.mjs cloud                # upload all cloud functions
  *   node scripts/deploy.mjs cloud --only=post    # upload only post (comma-separated ok)
  *   node scripts/deploy.mjs miniprogram          # upload mini program (preview QR)
- *   node scripts/deploy.mjs admin-web            # upload admin-web dist to CloudBase static hosting
+ *   node scripts/deploy.mjs admin-web            # upload admin-web dist to Aliyun Nginx production host
  *   node scripts/deploy.mjs all                  # cloud + miniprogram
  *
  * Flags:
@@ -41,10 +41,11 @@ dns.lookup = function forcedIPv4Lookup(hostname, options, callback) {
 }
 
 import ci from 'miniprogram-ci'
-import { resolve, dirname } from 'path'
+import { resolve, dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import { execSync, spawn } from 'child_process'
-import { existsSync } from 'fs'
+import { existsSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
@@ -57,6 +58,8 @@ const ADMIN_WEB_DIR = resolve(ROOT, 'admin-web')
 const ADMIN_WEB_DIST = resolve(ROOT, 'admin-web/dist')
 const CLOUD_ENV = 'cloudbase-3gh862acb1505ff3'
 const ADMIN_WEB_DEFAULT_API_URL = 'https://cloudbase-3gh862acb1505ff3-1307183045.ap-shanghai.app.tcloudbase.com'
+const ADMIN_WEB_ALIYUN_HOST = process.env.ADMIN_WEB_SSH_HOST || 'aliyun'
+const ADMIN_WEB_ALIYUN_ROOT = process.env.ADMIN_WEB_REMOTE_ROOT || '/var/www/happyhome-admin'
 const CLOUD_FUNCTIONS = ['user', 'community', 'member', 'section', 'post', 'admin', 'http-gateway']
 
 // Common DevTools install locations on Windows
@@ -252,16 +255,20 @@ async function deployMiniprogram() {
   console.log('[✓] Miniprogram preview ready via miniprogram-ci')
 }
 
-async function deployAdminWeb() {
+function buildAdminWeb(defaultRouterMode) {
   console.log('\nBuilding admin-web...')
   const env = {
     ...process.env,
     VITE_CLOUD_API_URL: process.env.VITE_CLOUD_API_URL || ADMIN_WEB_DEFAULT_API_URL,
-    VITE_ROUTER_MODE: process.env.VITE_ROUTER_MODE || 'hash',
+    VITE_ROUTER_MODE: process.env.VITE_ROUTER_MODE || defaultRouterMode,
   }
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
   execSync(`${npm} run build`, { cwd: ADMIN_WEB_DIR, stdio: 'inherit', env })
+  return env
+}
 
+async function deployAdminWebToCloudBase() {
+  const env = buildAdminWeb('hash')
   const cloudPath = process.env.ADMIN_WEB_CLOUD_PATH || '/'
   const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
   const args = [
@@ -285,6 +292,56 @@ async function deployAdminWeb() {
   }
   console.log('[OK] Admin web deployed to CloudBase static hosting')
   console.log('Reminder: configure static hosting fallback/error page to index.html for Vue history routes.')
+}
+
+async function deployAdminWebToAliyun() {
+  const env = buildAdminWeb('history')
+  const stamp = Date.now()
+  const archivePath = join(tmpdir(), `happyhome-admin-web-${stamp}.tgz`)
+  const remoteArchivePath = `/tmp/happyhome-admin-web-${stamp}.tgz`
+  const remoteScriptPath = `/tmp/deploy-happyhome-admin-${stamp}.sh`
+  const localScriptPath = join(tmpdir(), `deploy-happyhome-admin-${stamp}.sh`)
+
+  console.log('\nPacking admin-web dist...')
+  execSync(`tar -czf ${quote(archivePath)} -C ${quote(ADMIN_WEB_DIST)} .`, { cwd: ROOT, stdio: 'inherit' })
+
+  const remoteScript = `#!/usr/bin/env bash
+set -euo pipefail
+root=${JSON.stringify(ADMIN_WEB_ALIYUN_ROOT)}
+archive=${JSON.stringify(remoteArchivePath)}
+release="$root/releases/$(date +%Y%m%d%H%M%S)"
+sudo mkdir -p "$release"
+sudo tar -xzf "$archive" -C "$release"
+sudo chown -R root:root "$release"
+sudo find "$release" -type d -exec chmod 755 {} \\;
+sudo find "$release" -type f -exec chmod 644 {} \\;
+sudo ln -sfn "$release" "$root/current"
+sudo nginx -t
+sudo systemctl reload nginx
+rm -f "$archive" ${JSON.stringify(remoteScriptPath)}
+echo "[OK] Admin web deployed to $release"
+readlink -f "$root/current"
+`
+  writeFileSync(localScriptPath, remoteScript, 'utf8')
+
+  console.log('\nDeploying admin-web dist to Aliyun Nginx host...')
+  console.log(`Using VITE_CLOUD_API_URL=${env.VITE_CLOUD_API_URL}`)
+  console.log(`Using VITE_ROUTER_MODE=${env.VITE_ROUTER_MODE}`)
+  console.log(`Using ADMIN_WEB_SSH_HOST=${ADMIN_WEB_ALIYUN_HOST}`)
+  const uploadArchive = await runShell(`scp ${quote(archivePath)} ${quote(`${ADMIN_WEB_ALIYUN_HOST}:${remoteArchivePath}`)}`)
+  if (!uploadArchive.ok) throw new Error(`Admin web archive upload failed: ${uploadArchive.reason}`)
+  const uploadScript = await runShell(`scp ${quote(localScriptPath)} ${quote(`${ADMIN_WEB_ALIYUN_HOST}:${remoteScriptPath}`)}`)
+  if (!uploadScript.ok) throw new Error(`Admin web deploy script upload failed: ${uploadScript.reason}`)
+  const deploy = await runShell(`ssh ${quote(ADMIN_WEB_ALIYUN_HOST)} ${quote(`bash ${remoteScriptPath}`)}`)
+  if (!deploy.ok) throw new Error(`Admin web Aliyun deploy failed: ${deploy.reason}`)
+  console.log('[OK] Admin web deployed to Aliyun Nginx host')
+}
+
+async function deployAdminWeb() {
+  const target = (process.env.ADMIN_WEB_TARGET || 'aliyun').toLowerCase()
+  if (target === 'cloudbase') return deployAdminWebToCloudBase()
+  if (target === 'aliyun') return deployAdminWebToAliyun()
+  throw new Error(`Unknown ADMIN_WEB_TARGET=${target}. Expected aliyun or cloudbase.`)
 }
 
 const target = process.argv[2] || 'all'
