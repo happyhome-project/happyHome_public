@@ -47,16 +47,27 @@ import { communityApi, memberApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { useKeyedBusyLock } from '../../utils/useBusyLock'
+import {
+  DISCOVER_ENTRY_STORAGE_KEY,
+  resolveOnboardingEntryMode,
+  shouldRedirectJoinedUserFromOnboarding,
+  type OnboardingEntryMode,
+} from '../../utils/onboarding-flow'
 import LoginGuard from '../../components/LoginGuard.vue'
 
 const communities = ref<any[]>([])
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
-const entryMode = ref<'auto' | 'discover'>('auto')
+const entryMode = ref<OnboardingEntryMode>('auto')
 let refreshingOnboarding = false
 
 onLoad((query?: Record<string, any>) => {
-  entryMode.value = query?.mode === 'discover' ? 'discover' : 'auto'
+  entryMode.value = resolveEntryMode(query)
+  if (entryMode.value === 'discover') {
+    try {
+      uni.removeStorageSync(DISCOVER_ENTRY_STORAGE_KEY)
+    } catch {}
+  }
 })
 
 onMounted(async () => {
@@ -77,7 +88,7 @@ async function refreshOnboardingData() {
       return
     }
     await communityStore.loadMyCommunities()
-    if (entryMode.value !== 'discover' && communityStore.myCommunities.length > 0) {
+    if (shouldRedirectJoinedUserFromOnboarding(resolveEntryMode(), communityStore.myCommunities.length)) {
       uni.reLaunch({ url: '/pages/index/index' })
       return
     }
@@ -85,6 +96,27 @@ async function refreshOnboardingData() {
   } finally {
     refreshingOnboarding = false
   }
+}
+
+function resolveEntryMode(query?: Record<string, any>): 'auto' | 'discover' {
+  let currentPageMode: unknown
+  try {
+    const pages = getCurrentPages()
+    const current = pages[pages.length - 1] as any
+    currentPageMode = current?.options?.mode
+  } catch {}
+
+  let storedMode: unknown
+  try {
+    storedMode = uni.getStorageSync(DISCOVER_ENTRY_STORAGE_KEY)
+  } catch {}
+
+  return resolveOnboardingEntryMode({
+    queryMode: query?.mode,
+    currentPageMode,
+    storedMode,
+    currentMode: entryMode.value,
+  })
 }
 
 // Per-community lock — clicking on card A doesn't block card B.

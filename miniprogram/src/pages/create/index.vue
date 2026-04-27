@@ -204,6 +204,7 @@ function goLogin() {
 }
 
 function goOnboarding() {
+  uni.setStorageSync('onboarding_entry_mode', 'discover')
   uni.navigateTo({ url: '/pages/onboarding/index?mode=discover' })
 }
 
