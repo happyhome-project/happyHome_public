@@ -7,6 +7,8 @@ export const DEFAULT_WIDGET_LABELS: Record<string, string> = {
   rich_text: '正文',
   location: '位置',
   attendance: '活动参与',
+  admin_notice: '公告',
+  video_group: '视频列表',
 }
 
 export function isPlaceholderWidgetLabel(label: unknown): boolean {

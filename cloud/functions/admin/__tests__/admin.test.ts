@@ -133,6 +133,46 @@ test('section.updateWidgets: 占位标签名不允许保存', async () => {
   })).rejects.toThrow('占位文案')
 })
 
+test('section.updateWidgets: 公告控件由管理员维护且不进入帖子列表展示', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-1',
+    type: 'evergreen',
+    widgets: [],
+  })
+  ;(db.query as jest.Mock).mockResolvedValue([])
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  const result: any = await main({
+    action: 'section.updateWidgets',
+    sectionId: 'section-1',
+    widgets: [
+      {
+        widgetId: 'notice-1',
+        type: 'admin_notice',
+        label: '近期课程',
+        fieldKey: 'notice',
+        required: true,
+        order: 0,
+        showInList: true,
+        noticeContent: '  周三晚 7 点开课  ',
+      },
+    ],
+  })
+
+  expect(result.widgets[0]).toEqual(expect.objectContaining({
+    type: 'admin_notice',
+    label: '近期课程',
+    required: false,
+    showInList: false,
+    noticeContent: '周三晚 7 点开课',
+  }))
+  expect(db.updateById).toHaveBeenCalledWith('sections', 'section-1', {
+    widgets: expect.arrayContaining([
+      expect.objectContaining({ type: 'admin_notice', noticeContent: '周三晚 7 点开课' }),
+    ]),
+  })
+})
+
 test('post.getAdmin: 返回 attendance 汇总和完整名单', async () => {
   ;(db.getById as jest.Mock)
     .mockResolvedValueOnce({
