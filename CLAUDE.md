@@ -139,6 +139,7 @@
 | 设计系统 | `docs/VISUAL-TONE.md` / `DESIGN-TOKENS.md` / `UI-LIBRARY.md` / `UX-PRINCIPLES.md` | 做 UI |
 | 本地环境 | `docs/SETUP.md` | 首次 clone |
 | 运维 | `docs/cloudbase-http-access.md` | http-gateway 相关 |
+| Admin Web 生产入口与部署 | `docs/admin-web-deploy.md` | 处理 `admin.tinghai.xin`、Nginx、HTTPS、阿里云服务器代理时必读 |
 | UI 回归 | `docs/ui-click-regression-checklist.md` | 改 UI 交互 |
 
 ---
