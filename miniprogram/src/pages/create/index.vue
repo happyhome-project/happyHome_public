@@ -57,8 +57,10 @@
           v-if="editableWidgets.length === 0 && attendanceWidgets.length === 0"
           class="empty-widgets-hint"
         >
-          <text class="empty-widgets-title">该板块尚未配置内容模板</text>
-          <text class="empty-widgets-desc">请联系社区管理员在"控件"里添加需要填写的字段后再来发布。</text>
+          <text class="empty-widgets-title">{{ adminNoticeWidgets.length > 0 ? '该板块由管理员维护' : '该板块尚未配置内容模板' }}</text>
+          <text class="empty-widgets-desc">
+            {{ adminNoticeWidgets.length > 0 ? '这里展示的是固定公告内容，成员无需发布帖子。' : '请联系社区管理员在"控件"里添加需要填写的字段后再来发布。' }}
+          </text>
         </view>
 
         <template v-else>
@@ -109,11 +111,15 @@ const activeSections = computed(() =>
 )
 
 const editableWidgets = computed(() =>
-  (selectedSection.value?.widgets || []).filter((widget: any) => widget.type !== 'attendance')
+  (selectedSection.value?.widgets || []).filter((widget: any) => !['attendance', 'admin_notice'].includes(widget.type))
 )
 
 const attendanceWidgets = computed(() =>
   (selectedSection.value?.widgets || []).filter((widget: any) => widget.type === 'attendance')
+)
+
+const adminNoticeWidgets = computed(() =>
+  (selectedSection.value?.widgets || []).filter((widget: any) => widget.type === 'admin_notice')
 )
 
 onLoad(async () => {

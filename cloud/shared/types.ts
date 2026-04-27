@@ -19,6 +19,7 @@ export type WidgetType =
   | 'rich_text'
   | 'location'
   | 'attendance'
+  | 'admin_notice'
 
 export const LIST_DISPLAYABLE_TYPES: WidgetType[] = [
   'short_text',
@@ -38,6 +39,7 @@ export interface Widget {
   showInList: boolean
   unit?: string
   capacity?: number
+  noticeContent?: string
 }
 
 export interface AttendancePreviewUser {

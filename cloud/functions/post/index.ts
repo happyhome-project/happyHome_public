@@ -16,11 +16,12 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const ATTENDANCE_COLLECTION = 'post_attendance_members'
 const ATTENDANCE_PREVIEW_LIMIT = 5
 const COMMUNITY_READ_ERROR = '需要先加入社区后查看内容'
+const NON_POST_WIDGET_TYPES = new Set(['attendance', 'admin_notice'])
 
 function getEditableWidgetIds(section: Section) {
   return new Set(
     (section.widgets || [])
-      .filter((widget) => widget.type !== 'attendance')
+      .filter((widget) => !NON_POST_WIDGET_TYPES.has(widget.type))
       .map((widget) => widget.widgetId)
   )
 }
@@ -203,7 +204,7 @@ async function listAttendanceMembersInternal(postId: string, widgetId?: string) 
 
 function validateRequiredWidgets(section: Section, content: PostContent) {
   for (const widget of section.widgets || []) {
-    if (widget.type === 'attendance' || !widget.required) continue
+    if (NON_POST_WIDGET_TYPES.has(widget.type) || !widget.required) continue
     const value = content[widget.widgetId]
     if (isEmptyValue(value)) {
       throw new Error(`必填项未填写：${widget.label}`)

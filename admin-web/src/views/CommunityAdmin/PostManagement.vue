@@ -177,7 +177,7 @@ const filters = ref({
 const detailFields = computed(() => {
   if (!detailPost.value || !detailSection.value) return []
   return (detailSection.value.widgets || [])
-    .filter((widget: any) => widget.type !== 'attendance')
+    .filter((widget: any) => !['attendance', 'admin_notice'].includes(widget.type))
     .map((widget: any) => ({
       label: widget.label,
       value: formatValue(detailPost.value.content?.[widget.widgetId]),

@@ -175,7 +175,9 @@ const rosterSelfJoined = computed(() => {
 })
 
 const isAuthor = computed(() => post.value?.authorId === userStore.openId)
-const regularWidgets = computed(() => (section.value?.widgets || []).filter((widget: any) => widget.type !== 'attendance'))
+const regularWidgets = computed(() =>
+  (section.value?.widgets || []).filter((widget: any) => !['attendance', 'admin_notice'].includes(widget.type))
+)
 const attendanceWidgets = computed(() => (section.value?.widgets || []).filter((widget: any) => widget.type === 'attendance'))
 
 onLoad(async (options: any) => {

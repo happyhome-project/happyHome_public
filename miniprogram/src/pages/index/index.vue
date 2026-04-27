@@ -38,6 +38,27 @@
       <text v-if="quoteCite" class="cite">— {{ quoteCite }}</text>
     </view>
 
+    <!-- Admin notice · 管理员维护的固定公告 -->
+    <view v-if="sectionNotices.length > 0" class="notice-list">
+      <view
+        v-for="(notice, i) in sectionNotices"
+        :key="notice.id"
+        class="notice-card"
+        :style="getNoticeCardStyle(notice, i)"
+      >
+        <view class="notice-head">
+          <view class="notice-mark">
+            <text>{{ notice.icon }}</text>
+          </view>
+          <view class="notice-title-wrap">
+            <text class="notice-section">{{ notice.sectionName }}</text>
+            <text class="notice-label">{{ notice.label }}</text>
+          </view>
+        </view>
+        <text class="notice-content">{{ notice.content }}</text>
+      </view>
+    </view>
+
     <!-- Live strip · 实时脉冲区：有激活的实时协作板块时显示 -->
     <view v-if="liveItems.length > 0" class="s1-live">
       <view class="live-h">
@@ -221,6 +242,36 @@ function secStatus(s: any): 'active' | 'dormant' | 'archived' {
   return s?.status === 'dormant' || s?.status === 'archived' ? s.status : 'active'
 }
 
+interface SectionNotice {
+  id: string
+  sectionName: string
+  label: string
+  content: string
+  icon: string
+  accentColor?: string
+}
+
+const sectionNotices = computed<SectionNotice[]>(() => {
+  const notices: SectionNotice[] = []
+  for (const section of communityStore.currentSections ?? []) {
+    if (secStatus(section) !== 'active') continue
+    for (const widget of section.widgets || []) {
+      if (widget.type !== 'admin_notice') continue
+      const content = String(widget.noticeContent || '').trim()
+      if (!content) continue
+      notices.push({
+        id: `${section._id}_${widget.widgetId}`,
+        sectionName: section.name,
+        label: widget.label || '公告',
+        content,
+        icon: section.icon || '告',
+        accentColor: section.accentColor || '',
+      })
+    }
+  }
+  return notices
+})
+
 // ── 实时协作区：type='realtime' && status='active' 的板块，每个板块取 1 条最新帖子作为脉冲 ──
 interface LiveItem { ic: string; t: string; m: string[]; cta: string; sectionId: string; postId?: string }
 const liveItems = computed<LiveItem[]>(() => {
@@ -331,6 +382,13 @@ function getArchiveCardStyle(group: ArchiveGroup, index: number) {
   const fallbackPalette = ['#C8703E', '#4F6D8A', '#6C8A4E', '#A5668B', '#8C7A45', '#5E7F76']
   return {
     '--arc-accent': group.accentColor || fallbackPalette[index % fallbackPalette.length],
+  }
+}
+
+function getNoticeCardStyle(notice: SectionNotice, index: number) {
+  const fallbackPalette = ['#B35C3B', '#4F6D8A', '#6C8A4E', '#8C6A4E', '#5E7F76']
+  return {
+    '--notice-accent': notice.accentColor || fallbackPalette[index % fallbackPalette.length],
   }
 }
 
@@ -556,6 +614,68 @@ onShow(() => {
   color: $hh-ink-3;
   text-align: right;
   text-transform: uppercase;
+}
+
+/* ═══ Admin notices ═══ */
+.notice-list {
+  margin: 0 32rpx 36rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+}
+.notice-card {
+  padding: 26rpx 28rpx 28rpx;
+  border: 1rpx solid $hh-ink-line;
+  border-left: 8rpx solid var(--notice-accent);
+  border-radius: 24rpx;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(251, 247, 238, 0.9));
+  box-shadow: $hh-shadow-card;
+}
+.notice-head {
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  margin-bottom: 16rpx;
+}
+.notice-mark {
+  width: 52rpx;
+  height: 52rpx;
+  border-radius: 16rpx;
+  background: var(--notice-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.notice-mark text {
+  color: $hh-surface-1;
+  font-size: 24rpx;
+  font-weight: $hh-font-weight-heavy;
+}
+.notice-title-wrap {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.notice-section {
+  font-size: 27rpx;
+  font-weight: $hh-font-weight-bold;
+  color: $hh-ink-1;
+  line-height: 1.25;
+}
+.notice-label {
+  margin-top: 4rpx;
+  font-family: $hh-font-mono;
+  font-size: 20rpx;
+  letter-spacing: $hh-tracking-mono-sm;
+  color: $hh-ink-3;
+}
+.notice-content {
+  display: block;
+  font-size: 28rpx;
+  line-height: 1.72;
+  color: $hh-ink-2;
+  white-space: pre-wrap;
 }
 
 /* ═══ Live strip ═══ */
