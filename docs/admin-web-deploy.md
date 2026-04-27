@@ -2,6 +2,93 @@
 
 Admin 控制台是 Vite + Vue 纯静态前端，构建产物位于 `admin-web/dist`。当前推荐部署到腾讯云 CloudBase 静态网站托管，不需要额外租 CVM 或轻量服务器。
 
+## 当前生产入口
+
+当前可直接访问的 Admin 生产入口：
+
+```text
+https://admin.tinghai.xin/login
+```
+
+这套入口部署在阿里云香港服务器上，域名与 HTTPS 已经打通：
+
+- 域名：`admin.tinghai.xin`
+- DNS：阿里云云解析，`admin` A 记录指向 `47.243.8.96`
+- 服务器：阿里云香港，公网 IP `47.243.8.96`
+- Web 服务：Nginx
+- 静态目录：`/var/www/happyhome-admin/current`
+- Nginx 站点配置：`/etc/nginx/sites-enabled/happyhome-admin`
+- HTTPS：Let's Encrypt / Certbot，证书名 `admin.tinghai.xin`
+- 证书路径：`/etc/letsencrypt/live/admin.tinghai.xin/fullchain.pem`
+- 私钥路径：`/etc/letsencrypt/live/admin.tinghai.xin/privkey.pem`
+
+常用只读核对命令：
+
+```bash
+curl -I https://admin.tinghai.xin/login
+sudo nginx -t
+sudo certbot certificates
+systemctl status nginx --no-pager -l
+```
+
+证书自动续期由 `certbot.timer` 管理。上线后已验证过：
+
+```bash
+sudo certbot renew --dry-run --no-random-sleep-on-renew
+```
+
+如果未来 HTTPS 异常，优先检查：
+
+1. `admin.tinghai.xin` 是否仍解析到 `47.243.8.96`
+2. `sudo nginx -t` 是否通过
+3. `sudo certbot certificates` 中 `admin.tinghai.xin` 是否存在且未过期
+4. `curl -I http://admin.tinghai.xin` 是否 301 到 HTTPS
+5. `curl -I https://admin.tinghai.xin/login` 是否 200
+
+## 阿里云服务器代理注意事项
+
+服务器上安装了 `mihomo.service`，用于本机显式代理。当前稳态配置是：
+
+- `mihomo.service` 开机自启，进程命令：`/usr/local/bin/mihomo -d /etc/mihomo`
+- 配置目录：`/etc/mihomo`
+- 配置文件：`/etc/mihomo/config.yaml`
+- 本机代理端口：`127.0.0.1:7890`
+- 控制端口：`127.0.0.1:9090`
+- `mode: rule`
+- `tun.enable: false`
+- 最后一条规则：`MATCH,默认节点`
+
+不要随手开启 TUN。之前 TUN 模式会创建 `Meta` 网卡并接管 DNS，把系统解析导到 `198.18.0.2` / fake-ip，导致 `apt`、`certbot`、规则更新等系统任务超时。当前方案是业务服务器稳定优先：系统默认直连；只有明确需要外网代理的命令才显式使用 `127.0.0.1:7890`。
+
+显式代理示例：
+
+```bash
+curl -x http://127.0.0.1:7890 -I https://www.google.com
+curl -x http://127.0.0.1:7890 -I https://github.com
+```
+
+如果有人改动了 `mihomo`，改完后至少验证：
+
+```bash
+sudo /usr/local/bin/mihomo -t -d /etc/mihomo
+sudo systemctl restart mihomo.service
+systemctl status mihomo.service --no-pager -l
+ip link show Meta || true
+resolvectl status
+apt-get update -qq
+sudo certbot renew --dry-run --no-random-sleep-on-renew
+curl -I https://admin.tinghai.xin/login
+curl -x http://127.0.0.1:7890 -I https://github.com
+```
+
+预期状态：
+
+- `Meta` 网卡不存在
+- 默认路由只走 `eth0`
+- `resolvectl status` 中 DNS 主要来自阿里云内网 DNS，例如 `100.100.2.136` / `100.100.2.138`
+- `127.0.0.1:7890` 仍可用于显式代理
+- `apt` 与 `certbot renew --dry-run` 不依赖代理也能通过
+
 ## 当前上线方式
 
 ```powershell
