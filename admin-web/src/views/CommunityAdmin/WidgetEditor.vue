@@ -169,6 +169,25 @@ function isPlaceholderLabel(label: unknown) {
   return !text || text === '新控件' || text === 'new widget'
 }
 
+function isDefaultWidgetLabel(label: unknown) {
+  const text = String(label || '').trim()
+  return Object.values(DEFAULT_LABELS).includes(text)
+}
+
+function shouldClearAttendanceLabel(label: unknown) {
+  return isPlaceholderLabel(label) || isDefaultWidgetLabel(label)
+}
+
+function isInvalidWidgetLabel(widget: any) {
+  if (isPlaceholderLabel(widget?.label)) return true
+  return widget?.type === 'attendance' && isDefaultWidgetLabel(widget?.label)
+}
+
+function labelSuggestion(type: string) {
+  if (type === 'attendance') return '拼车报名'
+  return defaultLabel(type)
+}
+
 onMounted(async () => {
   try {
     await loadCommunityContext()
@@ -177,7 +196,9 @@ onMounted(async () => {
     sectionType.value = res.section?.type === 'realtime' ? 'realtime' : 'evergreen'
     widgets.value = (res.section?.widgets ?? []).map((widget: any, index: number) => ({
       ...widget,
-      label: isPlaceholderLabel(widget?.label) ? defaultLabel(widget?.type) : widget.label,
+      label: widget?.type === 'attendance' && shouldClearAttendanceLabel(widget?.label)
+        ? ''
+        : (isPlaceholderLabel(widget?.label) ? defaultLabel(widget?.type) : widget.label),
       fieldKey: resolveFieldKey(widget, index),
       required: ['attendance', 'admin_notice'].includes(widget?.type) ? false : !!widget.required,
       showInList: widget?.type === 'admin_notice' ? false : !!widget.showInList,
@@ -233,6 +254,9 @@ function handleTypeChange(widget: any) {
     widget.capacity = typeof widget.capacity === 'number' ? widget.capacity : undefined
     widget.showInList = true
     widget.noticeContent = undefined
+    if (shouldClearAttendanceLabel(widget.label)) {
+      widget.label = ''
+    }
   } else if (widget.type === 'admin_notice') {
     widget.required = false
     widget.showInList = false
@@ -242,7 +266,7 @@ function handleTypeChange(widget: any) {
     widget.capacity = undefined
     widget.noticeContent = undefined
   }
-  if (isPlaceholderLabel(widget.label)) {
+  if (widget.type !== 'attendance' && isPlaceholderLabel(widget.label)) {
     widget.label = defaultLabel(widget.type)
   }
 }
@@ -260,9 +284,9 @@ async function save() {
     ElMessage.error('帖子列表卡片展示项不能超过 3 个')
     return
   }
-  const invalidWidget = widgets.value.find((widget) => isPlaceholderLabel(widget.label))
+  const invalidWidget = widgets.value.find((widget) => isInvalidWidgetLabel(widget))
   if (invalidWidget) {
-    ElMessage.error(`请给控件设置明确标签名（建议：${defaultLabel(invalidWidget.type)}）`)
+    ElMessage.error(`请给控件设置明确标签名（建议：${labelSuggestion(invalidWidget.type)}）`)
     return
   }
 

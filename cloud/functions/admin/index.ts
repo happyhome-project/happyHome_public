@@ -160,6 +160,22 @@ function isInvalidWidgetLabel(label: unknown) {
   return !text || text === '新控件' || text === 'new widget'
 }
 
+function isGenericWidgetLabel(label: unknown) {
+  const text = String(label || '').trim()
+  return [
+    '短文字',
+    '一句话简介',
+    '日期时间',
+    '数字',
+    '图片组',
+    '视频列表',
+    '正文',
+    '位置',
+    '活动参与',
+    '公告',
+  ].includes(text)
+}
+
 function validateSectionWidgets(sectionType: SectionType, widgets: any[]) {
   const showInListCount = widgets.filter((widget: any) => widget.showInList).length
   if (showInListCount > 3) throw new Error('showInList 最多只能有 3 个控件')
@@ -173,6 +189,9 @@ function validateSectionWidgets(sectionType: SectionType, widgets: any[]) {
   for (const widget of widgets) {
     if (isInvalidWidgetLabel(widget.label)) {
       throw new Error('控件标签名不能为空或占位文案')
+    }
+    if (widget.type === 'attendance' && isGenericWidgetLabel(widget.label)) {
+      throw new Error('活动参与控件需要设置明确标签名')
     }
     if (widget.showInList && !['short_text', 'summary', 'datetime', 'number', 'attendance'].includes(widget.type)) {
       throw new Error(`控件类型 ${widget.type} 不支持在列表展示`)

@@ -24,8 +24,10 @@
           <view class="attendance-head">
             <view class="attendance-title">
               <text class="attendance-count">{{ getAttendanceSummary(widget).occupiedSeats || 0 }}<text v-if="getAttendanceSummary(widget).capacity">/{{ getAttendanceSummary(widget).capacity }}</text></text>
-              <text class="attendance-sep"> · </text>
-              <text class="attendance-label">{{ widget.label }}</text>
+              <template v-if="resolveAttendanceWidgetLabel(widget)">
+                <text class="attendance-sep"> · </text>
+                <text class="attendance-label">{{ resolveAttendanceWidgetLabel(widget) }}</text>
+              </template>
             </view>
             <text
               class="attendance-tag"
@@ -68,7 +70,7 @@
           v-model="editContent[widget.widgetId]"
         />
         <view v-for="widget in attendanceWidgets" :key="widget.widgetId" class="attendance-hint">
-          <text class="attendance-label">{{ widget.label }}</text>
+          <text v-if="resolveAttendanceWidgetLabel(widget)" class="attendance-label">{{ resolveAttendanceWidgetLabel(widget) }}</text>
           <text class="attendance-hint-text">活动参与人数由成员在帖子详情中点击参与后自动统计。</text>
         </view>
       </view>
@@ -145,6 +147,7 @@ import LoginGuard from '../../components/LoginGuard.vue'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
 import WidgetRenderer from '../../components/widgets/WidgetRenderer.vue'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
+import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 
 const fallbackAvatar = '/static/default-avatar.png'
 const ATTENDANCE_SLOT_DISPLAY_MAX = 6
@@ -356,7 +359,7 @@ async function openRoster(widget: any) {
   try {
     const res = await postApi.listAttendanceMembers(post.value._id, widget.widgetId)
     rosterMembers.value = res.members || []
-    rosterTitle.value = widget.label || '参与名单'
+    rosterTitle.value = resolveAttendanceWidgetLabel(widget) || '参与名单'
     rosterWidgetId.value = widget.widgetId
     rosterMeta.total = Number(res.total || 0)
     rosterMeta.occupiedSeats = Number(res.occupiedSeats || 0)

@@ -133,6 +133,22 @@ test('section.updateWidgets: 占位标签名不允许保存', async () => {
   })).rejects.toThrow('占位文案')
 })
 
+test('section.updateWidgets: attendance 不允许保存通用控件名作为标签', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-1',
+    type: 'realtime',
+    widgets: [],
+  })
+
+  await expect(main({
+    action: 'section.updateWidgets',
+    sectionId: 'section-1',
+    widgets: [
+      { widgetId: 'attendance-1', type: 'attendance', label: '短文字', fieldKey: 'attendance', required: false, order: 0, showInList: true },
+    ],
+  })).rejects.toThrow('明确标签名')
+})
+
 test('section.updateWidgets: 公告控件由管理员维护且不进入帖子列表展示', async () => {
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-1',

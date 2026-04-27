@@ -72,7 +72,7 @@
           />
 
           <view v-for="widget in attendanceWidgets" :key="widget.widgetId" class="attendance-hint">
-            <text class="attendance-label">{{ widget.label }}</text>
+            <text v-if="resolveAttendanceWidgetLabel(widget)" class="attendance-label">{{ resolveAttendanceWidgetLabel(widget) }}</text>
             <text class="attendance-desc">发布后成员可点击参与，人数和头像会自动统计。</text>
           </view>
 
@@ -92,6 +92,7 @@ import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi, postApi } from '../../api/cloud'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
+import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
