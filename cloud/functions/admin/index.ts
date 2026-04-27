@@ -128,15 +128,25 @@ function normalizeCapacity(value: unknown) {
   return Math.floor(num)
 }
 
+function normalizeNoticeContent(value: unknown) {
+  return String(value || '').trim().slice(0, 500)
+}
+
 function normalizeWidgetForSave(widget: any): Widget {
   const normalized: Widget = {
     ...widget,
-    required: widget?.type === 'attendance' ? false : widget?.required === true,
+    required: ['attendance', 'admin_notice'].includes(widget?.type) ? false : widget?.required === true,
+    showInList: widget?.type === 'admin_notice' ? false : widget?.showInList === true,
   }
   if (normalized.type === 'attendance') {
     normalized.capacity = normalizeCapacity(normalized.capacity)
   } else {
     delete normalized.capacity
+  }
+  if (normalized.type === 'admin_notice') {
+    normalized.noticeContent = normalizeNoticeContent(widget?.noticeContent)
+  } else {
+    delete normalized.noticeContent
   }
   return normalized
 }
@@ -163,8 +173,8 @@ function validateSectionWidgets(sectionType: SectionType, widgets: any[]) {
     if (widget.showInList && !['short_text', 'summary', 'datetime', 'number', 'attendance'].includes(widget.type)) {
       throw new Error(`控件类型 ${widget.type} 不支持在列表展示`)
     }
-    if (widget.type === 'attendance' && widget.required) {
-      throw new Error('活动参与控件不能设为必填')
+    if (['attendance', 'admin_notice'].includes(widget.type) && widget.required) {
+      throw new Error('活动参与/公告控件不能设为必填')
     }
   }
 }

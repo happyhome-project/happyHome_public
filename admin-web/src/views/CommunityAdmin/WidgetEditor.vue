@@ -50,12 +50,26 @@
                   <el-option label="富文本" value="rich_text" />
                   <el-option label="地图位置" value="location" />
                   <el-option label="活动参与" value="attendance" :disabled="sectionType !== 'realtime'" />
+                  <el-option label="公告内容" value="admin_notice" />
                 </el-select>
                 <span v-if="sectionType !== 'realtime'" class="muted-tip">活动参与控件仅支持 realtime 板块</span>
               </el-form-item>
 
               <el-form-item label="标签名">
                 <el-input v-model="widget.label" style="width: 260px;" />
+              </el-form-item>
+
+              <el-form-item v-if="widget.type === 'admin_notice'" label="公告正文">
+                <el-input
+                  v-model="widget.noticeContent"
+                  type="textarea"
+                  :rows="4"
+                  maxlength="500"
+                  show-word-limit
+                  style="width: 520px; max-width: 100%;"
+                  placeholder="例如：近期课程安排、报名说明、固定提醒等。"
+                />
+                <span class="notice-tip">仅管理员在这里维护，普通成员不能通过发帖修改。</span>
               </el-form-item>
 
               <el-form-item v-if="widget.type === 'attendance'" label="人数上限">
@@ -67,6 +81,10 @@
                   placeholder="不填表示不限"
                 />
                 <span class="muted-tip">留空表示不限人数</span>
+              </el-form-item>
+
+              <el-form-item v-else-if="widget.type === 'admin_notice'" label="发布方式">
+                <el-tag type="info" effect="plain">管理员维护，不开放发帖</el-tag>
               </el-form-item>
 
               <el-form-item v-else label="必填">
@@ -84,8 +102,12 @@
                     <el-icon class="help-icon"><WarningFilled /></el-icon>
                   </el-tooltip>
                 </template>
-                <el-switch v-model="widget.showInList" :disabled="!isListDisplayable(widget.type)" />
+                <el-switch
+                  v-model="widget.showInList"
+                  :disabled="widget.type === 'admin_notice' || !isListDisplayable(widget.type)"
+                />
                 <span class="muted-tip" v-if="widget.type === 'attendance'">开启后会显示“参与人数 + 头像预览”</span>
+                <span class="muted-tip" v-else-if="widget.type === 'admin_notice'">公告会直接展示在小程序首页板块区域，不进入帖子列表摘要</span>
                 <span class="muted-tip" v-else-if="!isListDisplayable(widget.type)">该类型不支持列表展示</span>
                 <span class="muted-tip" v-else>关闭后仅在帖子详情页展示</span>
               </el-form-item>
@@ -127,6 +149,7 @@ const DEFAULT_LABELS: Record<string, string> = {
   rich_text: '正文',
   location: '位置',
   attendance: '活动参与',
+  admin_notice: '公告',
 }
 
 const listCount = computed(() => widgets.value.filter((widget) => widget.showInList).length)
@@ -154,6 +177,9 @@ onMounted(async () => {
       ...widget,
       label: isPlaceholderLabel(widget?.label) ? defaultLabel(widget?.type) : widget.label,
       fieldKey: resolveFieldKey(widget, index),
+      required: ['attendance', 'admin_notice'].includes(widget?.type) ? false : !!widget.required,
+      showInList: widget?.type === 'admin_notice' ? false : !!widget.showInList,
+      noticeContent: widget?.type === 'admin_notice' ? String(widget.noticeContent || '') : undefined,
       _isNew: false,
     }))
   } catch (error: any) {
@@ -172,6 +198,7 @@ function addWidget() {
     order: widgets.value.length,
     showInList: false,
     capacity: undefined,
+    noticeContent: '',
     _isNew: true,
   })
 }
@@ -203,8 +230,15 @@ function handleTypeChange(widget: any) {
     widget.required = false
     widget.capacity = typeof widget.capacity === 'number' ? widget.capacity : undefined
     widget.showInList = true
+    widget.noticeContent = undefined
+  } else if (widget.type === 'admin_notice') {
+    widget.required = false
+    widget.showInList = false
+    widget.capacity = undefined
+    widget.noticeContent = typeof widget.noticeContent === 'string' ? widget.noticeContent : ''
   } else {
     widget.capacity = undefined
+    widget.noticeContent = undefined
   }
   if (isPlaceholderLabel(widget.label)) {
     widget.label = defaultLabel(widget.type)
@@ -235,8 +269,10 @@ async function save() {
     const orderedWidgets = widgets.value.map(({ _isNew, ...widget }, index) => ({
       ...widget,
       fieldKey: resolveFieldKey(widget, index),
-      required: widget.type === 'attendance' ? false : !!widget.required,
+      required: ['attendance', 'admin_notice'].includes(widget.type) ? false : !!widget.required,
+      showInList: widget.type === 'admin_notice' ? false : !!widget.showInList,
       capacity: widget.type === 'attendance' && widget.capacity ? Number(widget.capacity) : undefined,
+      noticeContent: widget.type === 'admin_notice' ? String(widget.noticeContent || '').trim() : undefined,
       order: index,
     }))
 
@@ -328,6 +364,13 @@ async function save() {
 
 .muted-tip {
   margin-left: 8px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.notice-tip {
+  display: block;
+  margin-top: 6px;
   color: #909399;
   font-size: 12px;
 }

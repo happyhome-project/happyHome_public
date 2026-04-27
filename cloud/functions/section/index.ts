@@ -8,6 +8,10 @@ import { LIST_DISPLAYABLE_TYPES } from '../../shared/types'
 
 const COMMUNITY_READ_ERROR = '需要先加入社区后查看内容'
 
+function normalizeNoticeContent(value: unknown) {
+  return String(value || '').trim().slice(0, 500)
+}
+
 function normalizeSection(s: any): Section {
   return {
     ...s,
@@ -33,7 +37,8 @@ async function ensureActiveCommunityMember(communityId: string, openid: string) 
 function normalizeWidget(widget: Widget): Widget {
   const normalized: Widget = {
     ...widget,
-    required: widget.type === 'attendance' ? false : widget.required,
+    required: ['attendance', 'admin_notice'].includes(widget.type) ? false : widget.required,
+    showInList: widget.type === 'admin_notice' ? false : widget.showInList,
   }
   if (normalized.type !== 'attendance') {
     delete normalized.capacity
@@ -41,6 +46,11 @@ function normalizeWidget(widget: Widget): Widget {
     normalized.capacity = Number.isFinite(normalized.capacity) && normalized.capacity > 0
       ? Math.floor(normalized.capacity)
       : undefined
+  }
+  if (normalized.type === 'admin_notice') {
+    normalized.noticeContent = normalizeNoticeContent(widget.noticeContent)
+  } else {
+    delete normalized.noticeContent
   }
   return normalized
 }
@@ -67,8 +77,8 @@ function validateWidgets(sectionType: SectionType, widgets: Widget[]) {
     if (widget.showInList && !LIST_DISPLAYABLE_TYPES.includes(widget.type)) {
       throw new Error(`控件类型 ${widget.type} 不支持在列表展示`)
     }
-    if (widget.type === 'attendance' && widget.required) {
-      throw new Error('活动参与控件不支持设为必填')
+    if (['attendance', 'admin_notice'].includes(widget.type) && widget.required) {
+      throw new Error('活动参与/公告控件不支持设为必填')
     }
   }
 }
