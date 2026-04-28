@@ -2,42 +2,94 @@
   <div class="login-page" data-testid="login-page">
     <div class="login-box" data-testid="login-box">
       <h2>HappyHome 管理后台</h2>
-      <el-form class="login-form" data-testid="login-form" @submit.prevent="handleLogin">
-        <el-form-item>
-          <div class="login-field" data-testid="login-username-field">
-            <el-input class="login-input" v-model="username" placeholder="用户名" />
+
+      <!-- 扫码模式 -->
+      <template v-if="mode === 'qr'">
+        <div class="qr-area" data-testid="login-qr-area">
+          <div v-if="qrState === 'loading'" class="qr-state">
+            <el-icon class="is-loading" :size="32"><Loading /></el-icon>
+            <p class="qr-hint">生成二维码中...</p>
           </div>
-        </el-form-item>
-        <el-form-item>
-          <div class="login-field" data-testid="login-password-field">
-            <el-input class="login-input" v-model="password" type="password" placeholder="密码" show-password />
+
+          <div v-else-if="qrState === 'pending'" class="qr-state">
+            <img :src="qrCodeBase64" alt="微信扫码登录" class="qr-img" data-testid="login-qr-img" />
+            <p class="qr-hint">用微信扫码 → 在小程序里点「确认登录」</p>
+            <p class="qr-sub">{{ countdownText }}</p>
           </div>
-        </el-form-item>
-        <el-button class="login-submit" data-testid="login-submit" type="primary" native-type="submit" :loading="loading">
-          登录
+
+          <div v-else-if="qrState === 'success'" class="qr-state success">
+            <el-icon :size="48" color="#3A6A45"><Select /></el-icon>
+            <p class="qr-hint">扫码成功，正在跳转...</p>
+          </div>
+
+          <div v-else-if="qrState === 'no_account'" class="qr-state error">
+            <el-icon :size="40" color="#CF4040"><CircleClose /></el-icon>
+            <p class="qr-hint">该微信未绑定管理员账号</p>
+            <p class="qr-sub">请联系超管开通后再扫，或先用账号密码登录</p>
+            <el-button @click="restart" type="primary" plain>重新生成二维码</el-button>
+          </div>
+
+          <div v-else-if="qrState === 'expired' || qrState === 'denied'" class="qr-state error">
+            <el-icon :size="40" color="#CF4040"><Warning /></el-icon>
+            <p class="qr-hint">二维码已过期</p>
+            <el-button @click="restart" type="primary" plain>刷新</el-button>
+          </div>
+
+          <div v-else-if="qrState === 'error'" class="qr-state error">
+            <el-icon :size="40" color="#CF4040"><Warning /></el-icon>
+            <p class="qr-hint">{{ errorMsg || '生成二维码失败' }}</p>
+            <el-button @click="restart" type="primary" plain>重试</el-button>
+          </div>
+        </div>
+
+        <el-divider>或</el-divider>
+        <el-button data-testid="login-switch-password" link @click="mode = 'password'">
+          使用账号密码登录
         </el-button>
-      </el-form>
-      <el-divider>或</el-divider>
-      <el-button
-        data-testid="login-wx-scan"
-        style="width: 100%;"
-        disabled
-        title="扫码登录即将支持"
-      >
-        微信扫码登录（即将支持）
-      </el-button>
+      </template>
+
+      <!-- 密码模式 -->
+      <template v-else>
+        <el-form class="login-form" data-testid="login-form" @submit.prevent="handleLogin">
+          <el-form-item>
+            <div class="login-field" data-testid="login-username-field">
+              <el-input class="login-input" v-model="username" placeholder="用户名" />
+            </div>
+          </el-form-item>
+          <el-form-item>
+            <div class="login-field" data-testid="login-password-field">
+              <el-input class="login-input" v-model="password" type="password" placeholder="密码" show-password />
+            </div>
+          </el-form-item>
+          <el-button class="login-submit" data-testid="login-submit" type="primary" native-type="submit" :loading="loading">
+            登录
+          </el-button>
+        </el-form>
+
+        <el-divider>或</el-divider>
+        <el-button data-testid="login-switch-qr" link @click="switchToQr">
+          使用微信扫码登录
+        </el-button>
+      </template>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Loading, Select, CircleClose, Warning } from '@element-plus/icons-vue'
 import { useAuthStore } from '../stores/auth'
+import { authApi, type WxLoginStatus } from '../api/cloud'
 
 const router = useRouter()
 const authStore = useAuthStore()
+
+// 模式：默认扫码，密码作为 fallback
+const mode = ref<'qr' | 'password'>('qr')
+
+// ─── 密码登录 ───
 const username = ref('')
 const password = ref('')
 const loading = ref(false)
@@ -57,6 +109,99 @@ async function handleLogin() {
     loading.value = false
   }
 }
+
+// ─── 扫码登录 ───
+type QrState = 'loading' | 'pending' | WxLoginStatus | 'error'
+const qrState = ref<QrState>('loading')
+const ticket = ref('')
+const qrCodeBase64 = ref('')
+const expiresAt = ref('')
+const errorMsg = ref('')
+const now = ref(Date.now())
+let pollTimer: ReturnType<typeof setInterval> | undefined
+let countdownTimer: ReturnType<typeof setInterval> | undefined
+
+const countdownText = computed(() => {
+  if (!expiresAt.value) return ''
+  const remain = Math.max(0, Math.floor((Date.parse(expiresAt.value) - now.value) / 1000))
+  if (remain <= 0) return '已过期'
+  const m = Math.floor(remain / 60)
+  const s = remain % 60
+  return `剩余 ${m}:${String(s).padStart(2, '0')} 内有效`
+})
+
+function stopPoll() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = undefined }
+  if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = undefined }
+}
+
+async function startScanMode() {
+  stopPoll()
+  qrState.value = 'loading'
+  errorMsg.value = ''
+  try {
+    const res = await authApi.wxLoginStart()
+    ticket.value = res.ticket
+    qrCodeBase64.value = res.qrCodeBase64
+    expiresAt.value = res.expiresAt
+    qrState.value = 'pending'
+    now.value = Date.now()
+    countdownTimer = setInterval(() => { now.value = Date.now() }, 1000)
+    pollTimer = setInterval(poll, 2000)
+  } catch (err: any) {
+    qrState.value = 'error'
+    errorMsg.value = err?.response?.data?.error || err?.message || '生成二维码失败'
+  }
+}
+
+async function poll() {
+  if (Date.now() > Date.parse(expiresAt.value)) {
+    stopPoll()
+    qrState.value = 'expired'
+    return
+  }
+  try {
+    const res = await authApi.wxLoginPoll(ticket.value)
+    if (res.status === 'success' && res.token && res.role) {
+      stopPoll()
+      qrState.value = 'success'
+      authStore.setSession({
+        token: res.token,
+        role: res.role,
+        userId: res.userId,
+        username: res.username,
+      })
+      ElMessage.success('扫码登录成功')
+      const redirect = res.role === 'superAdmin' ? '/approval' : '/communities'
+      // 留 0.4 秒展示成功状态再跳
+      setTimeout(() => router.push(redirect), 400)
+    } else if (res.status === 'no_account') {
+      stopPoll()
+      qrState.value = 'no_account'
+    } else if (res.status === 'expired' || res.status === 'denied') {
+      stopPoll()
+      qrState.value = res.status
+    }
+    // 'pending' 时继续轮询
+  } catch {
+    // 网络抖动忽略，下次再试
+  }
+}
+
+function restart() {
+  startScanMode()
+}
+
+function switchToQr() {
+  mode.value = 'qr'
+  startScanMode()
+}
+
+onMounted(() => {
+  if (mode.value === 'qr') startScanMode()
+})
+
+onUnmounted(stopPoll)
 </script>
 
 <style scoped>
@@ -84,6 +229,48 @@ h2 {
   font-weight: 700;
   letter-spacing: 0;
   text-align: center;
+}
+
+.qr-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 320px;
+  justify-content: center;
+}
+
+.qr-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.qr-img {
+  width: 240px;
+  height: 240px;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.qr-hint {
+  margin: 0;
+  text-align: center;
+  color: #303133;
+  font-size: 14px;
+}
+
+.qr-sub {
+  margin: 0;
+  text-align: center;
+  color: #909399;
+  font-size: 12px;
+}
+
+.qr-state.error .qr-hint {
+  color: #f56c6c;
 }
 
 .login-form {

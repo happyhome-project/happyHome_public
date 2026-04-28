@@ -44,11 +44,29 @@ async function callAdmin(action: string, params: Record<string, any> = {}) {
 // Keep for backward compat with WidgetEditor.vue which imports callCloud
 export const callCloud = callAdmin
 
+export type WxLoginStatus = 'pending' | 'success' | 'no_account' | 'expired' | 'denied'
+
+export interface WxLoginStartRes {
+  ticket: string
+  qrCodeBase64: string  // data:image/png;base64,...
+  expiresAt: string
+}
+
+export interface WxLoginPollRes {
+  status: WxLoginStatus
+  token?: string
+  role?: 'superAdmin' | 'communityAdmin'
+  userId?: string
+  username?: string
+}
+
 export const authApi = {
   login: (username: string, password: string) => callAdmin('auth.login', { username, password }),
   logout: () => callAdmin('auth.logout'),
   me: () => callAdmin('auth.me'),
-  wxLogin: (code: string) => callAdmin('auth.wxLogin', { code }),
+  wxLoginStart: () => callAdmin('auth.wxLoginStart') as Promise<WxLoginStartRes>,
+  wxLoginPoll: (ticket: string) =>
+    callAdmin('auth.wxLoginPoll', { ticket }) as Promise<WxLoginPollRes>,
 }
 
 export const adminAccountApi = {
