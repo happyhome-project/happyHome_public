@@ -9,7 +9,7 @@ import { LIST_DISPLAYABLE_TYPES } from '../../shared/types'
 const COMMUNITY_READ_ERROR = '需要先加入社区后查看内容'
 
 function normalizeNoticeContent(value: unknown) {
-  return String(value || '').trim().slice(0, 500)
+  return Array.from(String(value || '').trim()).slice(0, 500).join('')
 }
 
 function normalizeSection(s: any): Section {

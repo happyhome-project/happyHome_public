@@ -177,6 +177,32 @@ test('updateWidgets：showInList 恰好 3 个时成功', async () => {
   expect(result.widgets).toHaveLength(3)
 })
 
+test('updateWidgets：公告正文支持 emoji 且不会截断半个表情', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ role: 'admin', status: 'active' }])
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  const widgets: Widget[] = [
+    makeWidget({
+      widgetId: 'notice-1',
+      type: 'admin_notice',
+      label: '近期课程',
+      fieldKey: 'notice',
+      required: true,
+      showInList: true,
+      noticeContent: ` ${'😀'.repeat(501)} `,
+    }),
+  ]
+
+  const result = await handleUpdateWidgets({ communityId: 'c1', sectionId: 's1', widgets }, 'test-openid')
+
+  expect(result.widgets[0]).toEqual(expect.objectContaining({
+    required: false,
+    showInList: false,
+  }))
+  expect(Array.from(result.widgets[0].noticeContent || '')).toHaveLength(500)
+  expect(result.widgets[0].noticeContent).toBe('😀'.repeat(500))
+})
+
 // --- handleUpdate 测试 ---
 
 test('update：管理员可以更新板块名称', async () => {

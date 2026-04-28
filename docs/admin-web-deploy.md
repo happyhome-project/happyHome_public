@@ -1,6 +1,6 @@
 # Admin Web 云端部署
 
-Admin 控制台是 Vite + Vue 纯静态前端，构建产物位于 `admin-web/dist`。当前推荐部署到腾讯云 CloudBase 静态网站托管，不需要额外租 CVM 或轻量服务器。
+Admin 控制台是 Vite + Vue 纯静态前端，构建产物位于 `admin-web/dist`。当前正式入口 `admin.tinghai.xin` 由阿里云香港服务器上的 Nginx 提供静态文件；腾讯云 CloudBase 静态网站托管只保留为备用入口。
 
 ## 当前生产入口
 
@@ -89,7 +89,7 @@ curl -x http://127.0.0.1:7890 -I https://github.com
 - `127.0.0.1:7890` 仍可用于显式代理
 - `apt` 与 `certbot renew --dry-run` 不依赖代理也能通过
 
-## 当前上线方式
+## 当前上线方式（正式入口）
 
 ```powershell
 npm.cmd run deploy:admin-web
@@ -98,8 +98,42 @@ npm.cmd run deploy:admin-web
 该命令会执行：
 
 1. 构建 `admin-web`
+2. 将 `admin-web/dist` 打包上传到 `ADMIN_WEB_SSH_HOST`，默认 SSH Host 为 `aliyun`
+3. 在服务器 `/var/www/happyhome-admin/releases/<timestamp>` 创建新 release
+4. 原子切换 `/var/www/happyhome-admin/current` symlink
+5. 执行 `nginx -t` 并 reload Nginx
+6. 默认使用 history 路由构建，入口为 `https://admin.tinghai.xin/login`
+
+默认 SSH / Nginx 参数：
+
+```text
+ADMIN_WEB_SSH_HOST=aliyun
+ADMIN_WEB_REMOTE_ROOT=/var/www/happyhome-admin
+```
+
+如果本机没有 `aliyun` SSH Host，可以在 `~/.ssh/config` 中配置，或临时覆盖：
+
+```powershell
+$env:ADMIN_WEB_SSH_HOST="user@47.243.8.96"
+npm.cmd run deploy:admin-web
+```
+
+> 2026-04-27 踩坑：只上传到 CloudBase 静态托管不会更新 `https://admin.tinghai.xin/`。如果线上后台看不到新菜单/新控件，先核对 `/var/www/happyhome-admin/current` 是否指向最新 release。
+
+## CloudBase 静态托管备用入口
+
+如需部署备用 CloudBase 静态托管入口，必须显式指定：
+
+```powershell
+$env:ADMIN_WEB_TARGET="cloudbase"
+npm.cmd run deploy:admin-web
+```
+
+CloudBase 部署会执行：
+
+1. 构建 `admin-web`
 2. 将 `admin-web/dist` 上传到 CloudBase 静态网站托管根目录
-3. 默认使用 hash 路由构建线上临时后台，入口形如 `/#/login`
+3. 默认使用 hash 路由构建备用后台，入口形如 `/#/login`
 
 默认 CloudBase 环境：
 
@@ -113,7 +147,7 @@ cloudbase-3gh862acb1505ff3
 https://cloudbase-3gh862acb1505ff3-1307183045.ap-shanghai.app.tcloudbase.com
 ```
 
-如需覆盖 API 地址：
+无论部署到阿里云还是 CloudBase，如需覆盖 API 地址：
 
 ```powershell
 $env:VITE_CLOUD_API_URL="https://your-cloudbase-http-domain"
@@ -136,8 +170,9 @@ npm.cmd run deploy:admin-web
 
 ## 前置条件
 
-- 腾讯云 CloudBase 环境已开通静态网站托管。
-- 本机 CloudBase CLI 已登录腾讯云账号；脚本通过 `npx.cmd --yes @cloudbase/cli ...` 调用 CLI。
+- 正式入口：本机 SSH 可登录 `ADMIN_WEB_SSH_HOST`，且该用户可 `sudo mkdir/tar/ln/nginx/systemctl`。
+- 备用 CloudBase 入口：腾讯云 CloudBase 环境已开通静态网站托管。
+- 备用 CloudBase 入口：本机 CloudBase CLI 已登录腾讯云账号；脚本通过 `npx.cmd --yes @cloudbase/cli ...` 调用 CLI。
 - `admin` 云函数已开启 HTTP 访问服务，并且 `VITE_CLOUD_API_URL/admin` 可访问。
 - `admin` 云函数环境变量中的 `ADMIN_TOKEN` 与前端构建时的 `VITE_ADMIN_TOKEN` 一致。
 

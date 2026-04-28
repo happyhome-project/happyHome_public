@@ -72,7 +72,7 @@
           />
 
           <view v-for="widget in attendanceWidgets" :key="widget.widgetId" class="attendance-hint">
-            <text class="attendance-label">{{ widget.label }}</text>
+            <text v-if="resolveAttendanceWidgetLabel(widget)" class="attendance-label">{{ resolveAttendanceWidgetLabel(widget) }}</text>
             <text class="attendance-desc">发布后成员可点击参与，人数和头像会自动统计。</text>
           </view>
 
@@ -92,6 +92,7 @@ import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi, postApi } from '../../api/cloud'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
+import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -104,6 +105,7 @@ const isMember = ref(false)
 const memberStatus = ref<string | null>(null)
 const joining = ref(false)
 let checkSeq = 0
+const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 
 // 只允许在 active 板块发帖。dormant / archived 板块既无法发帖也无处展示（首页已过滤）。
 const activeSections = computed(() =>
@@ -239,6 +241,7 @@ async function handleSubmit() {
   if (!selectedSection.value || submitting.value) return
   submitting.value = true
   try {
+    const sectionId = selectedSection.value._id
     const content = { ...formData }
     for (const widget of editableWidgets.value) {
       // video_group 由 admin 后台维护，普通用户发帖不携带该字段
@@ -251,11 +254,19 @@ async function handleSubmit() {
       }
     }
 
-    await postApi.create({
+    const result: any = await postApi.create({
       communityId: communityStore.currentCommunityId,
-      sectionId: selectedSection.value._id,
+      sectionId,
       content,
     })
+    try {
+      uni.setStorageSync(HOME_REFRESH_AFTER_POST_KEY, {
+        communityId: communityStore.currentCommunityId,
+        sectionId,
+        postId: result?.postId || '',
+        createdAt: Date.now(),
+      })
+    } catch {}
     uni.showToast({ title: '发布成功', icon: 'success' })
     selectedSection.value = null
     uni.switchTab({ url: '/pages/index/index' })
