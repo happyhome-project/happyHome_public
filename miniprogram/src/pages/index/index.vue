@@ -291,7 +291,7 @@ const sectionNotices = computed<SectionNotice[]>(() => {
   return notices
 })
 
-// ── 实时协作区：type='realtime' && status='active' 的板块，每个板块取 1 条最新帖子作为脉冲 ──
+// ── 实时协作区：type='realtime' && status='active' 的板块，按帖子逐条展示 ──
 interface LiveItem { ic: string; t: string; m: string[]; cta: string; sectionId: string; postId?: string }
 const liveItems = computed<LiveItem[]>(() => {
   const sections = communityStore.currentSections ?? []
@@ -299,20 +299,16 @@ const liveItems = computed<LiveItem[]>(() => {
   for (const section of sections) {
     if (secType(section) !== 'realtime' || secStatus(section) !== 'active') continue
     const posts = postsBySection.value[section._id] ?? []
-    const latest = posts[0]
-    if (!latest) continue
-    const meta: string[] = []
-    if (latest.authorNickname) meta.push(latest.authorNickname)
-    meta.push(formatTime(latest.createdAt))
-    if (posts.length > 1) meta.push(`${posts.length} 人参与`)
-    items.push({
-      ic: section.icon || '·',
-      t: getPostTitle(latest, section) || section.name,
-      m: meta,
-      cta: '进入',
-      sectionId: section._id,
-      postId: latest._id,
-    })
+    for (const post of posts) {
+      items.push({
+        ic: section.icon || '·',
+        t: getPostTitle(post, section) || section.name,
+        m: getLivePostMeta(post),
+        cta: '进入',
+        sectionId: section._id,
+        postId: post._id,
+      })
+    }
   }
   return items
 })
@@ -395,6 +391,23 @@ function getArchiveMeta(post: any, section: any): string {
     return '评论关闭'
   }
   return ''
+}
+
+function getLivePostMeta(post: any): string[] {
+  const meta: string[] = []
+  if (post.authorNickname) meta.push(post.authorNickname)
+  meta.push(formatTime(post.createdAt))
+  const attendanceText = getAttendanceMeta(post)
+  if (attendanceText) meta.push(attendanceText)
+  return meta
+}
+
+function getAttendanceMeta(post: any): string {
+  const summaries = Object.values(post?.attendanceSummaryByWidget || {}) as any[]
+  const summary = summaries.find((item) => Number(item?.occupiedSeats ?? item?.count ?? 0) > 0)
+  if (!summary) return ''
+  const occupiedSeats = Number(summary.occupiedSeats ?? summary.count ?? 0)
+  return occupiedSeats > 0 ? `${occupiedSeats}人参与` : ''
 }
 
 function getArchiveCardStyle(group: ArchiveGroup, index: number) {
