@@ -184,12 +184,22 @@ const INDEXES = [
       { Name: 'expiresAt', Direction: '1' },
     ],
   },
+  // admin_login_tickets: 扫码登录 ticket 过期懒清理
+  {
+    coll: 'admin_login_tickets',
+    name: 'idx_expiresAt',
+    keys: [
+      { Name: 'expiresAt', Direction: '1' },
+    ],
+  },
 ]
 
 const REQUIRED_COLLECTIONS = [
   'post_attendance_members',
   'admin_accounts',
   'admin_sessions',
+  'admin_login_tickets',  // 扫码登录会话（_id=ticket，主键查询，索引仅 expiresAt 用）
+  'admin_runtime',        // 运行时缓存（wx access_token 等单文档，无需额外索引）
 ]
 
 let hadError = false
