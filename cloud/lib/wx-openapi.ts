@@ -11,7 +11,12 @@
 //
 // access_token 缓存：admin_runtime collection，_id='wx_access_token'
 //   微信全局唯一 token，有效期 7200s，提前 5 分钟续期
+//
+// 使用 Node 内置 https 模块，不依赖 fetch（CloudBase 函数运行时可能是
+// Node 16，没有全局 fetch；用 https 模块兼容所有 Node 版本）。
 
+import https from 'https'
+import { URL } from 'url'
 import * as db from './db'
 
 const RUNTIME_COLLECTION = 'admin_runtime'
@@ -25,12 +30,50 @@ interface AccessTokenDoc {
   fetchedAt: string
 }
 
+interface HttpResponse {
+  statusCode: number
+  contentType: string
+  body: Buffer
+}
+
+function httpsRequest(method: 'GET' | 'POST', urlStr: string, body?: string): Promise<HttpResponse> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(urlStr)
+    const headers: Record<string, string | number> = {}
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json'
+      headers['Content-Length'] = Buffer.byteLength(body)
+    }
+    const req = https.request({
+      hostname: u.hostname,
+      port: u.port || 443,
+      path: u.pathname + u.search,
+      method,
+      headers,
+    }, (res) => {
+      const chunks: Buffer[] = []
+      res.on('data', (c: any) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)))
+      res.on('end', () => resolve({
+        statusCode: res.statusCode || 0,
+        contentType: String(res.headers['content-type'] || ''),
+        body: Buffer.concat(chunks),
+      }))
+    })
+    req.on('error', reject)
+    if (body !== undefined) req.write(body)
+    req.end()
+  })
+}
+
 async function fetchFreshAccessToken(appid: string, secret: string): Promise<{ token: string; expiresIn: number }> {
   const url = `https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=${encodeURIComponent(appid)}&secret=${encodeURIComponent(secret)}`
-  const res = await fetch(url, { method: 'GET' })
-  const json: any = await res.json()
+  const res = await httpsRequest('GET', url)
+  let json: any = {}
+  try { json = JSON.parse(res.body.toString('utf-8')) } catch { /* not JSON */ }
   if (!json?.access_token) {
-    throw new Error(`fetch wx access_token failed: errcode=${json?.errcode} errmsg=${json?.errmsg}`)
+    // 微信 errmsg 在 errcode=40164 时会自带"invalid ip <IP>, not in whitelist"，
+    // 把 errmsg 原样透出，运维看到错误信息就知道把哪个 IP 加到白名单。
+    throw new Error(`fetch wx access_token failed: errcode=${json?.errcode} errmsg=${json?.errmsg || res.body.toString('utf-8').slice(0, 200)}`)
   }
   return { token: String(json.access_token), expiresIn: Number(json.expires_in) || 7200 }
 }
@@ -111,19 +154,14 @@ export async function getWxacodeUnlimited(params: WxacodeUnlimitedParams): Promi
     width: params.width || 280,
     check_path: params.checkPath !== false,
   })
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body,
-  })
-  const contentType = res.headers.get('content-type') || ''
-  if (contentType.includes('image')) {
-    return Buffer.from(await res.arrayBuffer())
+  const res = await httpsRequest('POST', url, body)
+  if (res.contentType.includes('image')) {
+    return res.body
   }
   // 微信返回 JSON 错误
   let errPayload: any = {}
-  try { errPayload = await res.json() } catch { /* not JSON */ }
+  try { errPayload = JSON.parse(res.body.toString('utf-8')) } catch { /* not JSON */ }
   throw new Error(
-    `wxacode.getUnlimited HTTP failed: errcode=${errPayload?.errcode} errmsg=${errPayload?.errmsg || 'unknown'}`
+    `wxacode.getUnlimited HTTP failed: errcode=${errPayload?.errcode} errmsg=${errPayload?.errmsg || res.body.toString('utf-8').slice(0, 200)}`
   )
 }
