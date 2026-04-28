@@ -117,36 +117,73 @@ test('section.updateWidgets: evergreen 板块不允许配置 attendance', async 
   })).rejects.toThrow('realtime')
 })
 
-test('section.updateWidgets: 占位标签名不允许保存', async () => {
+test('section.updateWidgets: 普通控件允许空标签或占位标签保存', async () => {
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-1',
     type: 'realtime',
     widgets: [],
   })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
 
-  await expect(main({
+  const result: any = await main({
     action: 'section.updateWidgets',
     sectionId: 'section-1',
     widgets: [
       { widgetId: 'w1', type: 'short_text', label: '新控件', fieldKey: 'f1', required: false, order: 0, showInList: false },
+      { widgetId: 'w2', type: 'number', label: '', fieldKey: 'f2', required: false, order: 1, showInList: false },
     ],
-  })).rejects.toThrow('占位文案')
+  })
+
+  expect(result.widgets).toEqual(expect.arrayContaining([
+    expect.objectContaining({ widgetId: 'w1', label: '新控件' }),
+    expect.objectContaining({ widgetId: 'w2', label: '' }),
+  ]))
 })
 
-test('section.updateWidgets: attendance 不允许保存通用控件名作为标签', async () => {
+test('section.updateWidgets: attendance 空标签或通用标签会按无标题保存', async () => {
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-1',
     type: 'realtime',
     widgets: [],
   })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
 
-  await expect(main({
+  const result: any = await main({
     action: 'section.updateWidgets',
     sectionId: 'section-1',
     widgets: [
       { widgetId: 'attendance-1', type: 'attendance', label: '短文字', fieldKey: 'attendance', required: false, order: 0, showInList: true },
     ],
-  })).rejects.toThrow('明确标签名')
+  })
+
+  expect(result.widgets[0].label).toBe('')
+  expect(db.updateById).toHaveBeenCalledWith('sections', 'section-1', {
+    widgets: expect.arrayContaining([
+      expect.objectContaining({ widgetId: 'attendance-1', type: 'attendance', label: '' }),
+    ]),
+  })
+})
+
+test('section.updateWidgets: 新增控件不查询历史帖子影响', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-1',
+    type: 'realtime',
+    widgets: [
+      { widgetId: 'title-1', type: 'short_text', label: '标题', fieldKey: 'title', required: false, order: 0, showInList: false },
+    ],
+  })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  await main({
+    action: 'section.updateWidgets',
+    sectionId: 'section-1',
+    widgets: [
+      { widgetId: 'title-1', type: 'short_text', label: '标题', fieldKey: 'title', required: false, order: 0, showInList: false },
+      { widgetId: 'image-1', type: 'image_group', label: '照片', fieldKey: 'images', required: false, order: 1, showInList: false },
+    ],
+  })
+
+  expect(db.query).not.toHaveBeenCalledWith('posts', { sectionId: 'section-1', status: 'active' })
 })
 
 test('section.updateWidgets: 公告控件由管理员维护且不进入帖子列表展示', async () => {
