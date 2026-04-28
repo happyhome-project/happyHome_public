@@ -117,20 +117,27 @@ test('section.updateWidgets: evergreen 板块不允许配置 attendance', async 
   })).rejects.toThrow('realtime')
 })
 
-test('section.updateWidgets: 占位标签名不允许保存', async () => {
+test('section.updateWidgets: 普通控件允许空标签或占位标签保存', async () => {
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-1',
     type: 'realtime',
     widgets: [],
   })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
 
-  await expect(main({
+  const result: any = await main({
     action: 'section.updateWidgets',
     sectionId: 'section-1',
     widgets: [
       { widgetId: 'w1', type: 'short_text', label: '新控件', fieldKey: 'f1', required: false, order: 0, showInList: false },
+      { widgetId: 'w2', type: 'number', label: '', fieldKey: 'f2', required: false, order: 1, showInList: false },
     ],
-  })).rejects.toThrow('占位文案')
+  })
+
+  expect(result.widgets).toEqual(expect.arrayContaining([
+    expect.objectContaining({ widgetId: 'w1', label: '新控件' }),
+    expect.objectContaining({ widgetId: 'w2', label: '' }),
+  ]))
 })
 
 test('section.updateWidgets: attendance 空标签或通用标签会按无标题保存', async () => {

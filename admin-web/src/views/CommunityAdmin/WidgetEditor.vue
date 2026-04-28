@@ -181,17 +181,6 @@ function shouldClearAttendanceLabel(label: unknown) {
   return isPlaceholderLabel(label) || isDefaultWidgetLabel(label)
 }
 
-function isInvalidWidgetLabel(widget: any) {
-  if (widget?.type === 'attendance') return false
-  if (isPlaceholderLabel(widget?.label)) return true
-  return false
-}
-
-function labelSuggestion(type: string) {
-  if (type === 'attendance') return '拼车报名'
-  return defaultLabel(type)
-}
-
 onMounted(async () => {
   try {
     await loadCommunityContext()
@@ -202,7 +191,7 @@ onMounted(async () => {
       ...widget,
       label: widget?.type === 'attendance' && shouldClearAttendanceLabel(widget?.label)
         ? ''
-        : (isPlaceholderLabel(widget?.label) ? defaultLabel(widget?.type) : widget.label),
+        : String(widget?.label || ''),
       fieldKey: resolveFieldKey(widget, index),
       required: ['attendance', 'admin_notice'].includes(widget?.type) ? false : !!widget.required,
       showInList: widget?.type === 'admin_notice' ? false : !!widget.showInList,
@@ -274,9 +263,6 @@ function handleTypeChange(widget: any) {
     widget.capacity = undefined
     widget.noticeContent = undefined
   }
-  if (widget.type !== 'attendance' && isPlaceholderLabel(widget.label)) {
-    widget.label = defaultLabel(widget.type)
-  }
 }
 
 function removeWidget(widget: any) {
@@ -305,12 +291,6 @@ async function save() {
     ElMessage.error('帖子列表卡片展示项不能超过 3 个')
     return
   }
-  const invalidWidget = widgets.value.find((widget) => isInvalidWidgetLabel(widget))
-  if (invalidWidget) {
-    ElMessage.error(`请给控件设置明确标签名（建议：${labelSuggestion(invalidWidget.type)}）`)
-    return
-  }
-
   saving.value = true
   try {
     const orderedWidgets = widgets.value.map(({ _isNew, ...widget }, index) => ({

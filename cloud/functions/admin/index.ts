@@ -168,7 +168,8 @@ function normalizeWidgetForSave(widget: any): Widget {
   }
   if (normalized.type === 'attendance') {
     normalized.capacity = normalizeCapacity(normalized.capacity)
-    if (isInvalidWidgetLabel(normalized.label) || isGenericWidgetLabel(normalized.label)) {
+    const label = String(normalized.label || '').trim().toLowerCase()
+    if (!label || label === '新控件' || label === 'new widget' || isGenericWidgetLabel(normalized.label)) {
       normalized.label = ''
     }
   } else {
@@ -180,11 +181,6 @@ function normalizeWidgetForSave(widget: any): Widget {
     delete normalized.noticeContent
   }
   return normalized
-}
-
-function isInvalidWidgetLabel(label: unknown) {
-  const text = String(label || '').trim().toLowerCase()
-  return !text || text === '新控件' || text === 'new widget'
 }
 
 function isGenericWidgetLabel(label: unknown) {
@@ -214,9 +210,6 @@ function validateSectionWidgets(sectionType: SectionType, widgets: any[]) {
   }
 
   for (const widget of widgets) {
-    if (widget.type !== 'attendance' && isInvalidWidgetLabel(widget.label)) {
-      throw new Error('控件标签名不能为空或占位文案')
-    }
     if (widget.showInList && !['short_text', 'summary', 'datetime', 'number', 'attendance'].includes(widget.type)) {
       throw new Error(`控件类型 ${widget.type} 不支持在列表展示`)
     }
