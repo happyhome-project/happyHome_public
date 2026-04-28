@@ -53,6 +53,15 @@ export const useAuthStore = defineStore('auth', () => {
     return res
   }
 
+  // 用扫码登录拿到的 session 直接写 store（绕过 username/password 路径）
+  function setSession(payload: { token: string; role: AdminRole; userId?: string; username?: string }) {
+    token.value = payload.token
+    role.value = payload.role
+    userId.value = payload.userId || ''
+    username.value = payload.username || ''
+    persist()
+  }
+
   async function logout() {
     try {
       if (token.value) await authApi.logout()
@@ -78,6 +87,6 @@ export const useAuthStore = defineStore('auth', () => {
   return {
     token, role, userId, username,
     isAuthenticated, isSuperAdmin, isCommunityAdmin,
-    login, logout, fetchMe, clear,
+    login, logout, fetchMe, clear, setSession,
   }
 })
