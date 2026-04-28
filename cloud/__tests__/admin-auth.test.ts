@@ -90,10 +90,10 @@ describe('admin auth: public actions', () => {
     expect(JSON.parse(res.body).error).toMatch(/停用/)
   })
 
-  test('auth.wxLogin is stubbed (not yet implemented)', async () => {
+  test('legacy auth.wxLogin is removed (replaced by 3 sub-actions)', async () => {
+    // 旧 stub action 已删除；现在落到 session 守卫，无 token → 401
     const res = await adminMain(httpEvent('auth.wxLogin', { code: 'c' }))
-    expect(res.statusCode).toBeGreaterThanOrEqual(400)
-    expect(JSON.parse(res.body).error).toMatch(/wechat login/)
+    expect(res.statusCode).toBe(401)
   })
 })
 

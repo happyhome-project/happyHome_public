@@ -38,6 +38,10 @@
     {
       "path": "pages/web-view/index",
       "style": { "navigationBarTitleText": "外部链接" }
+    },
+    {
+      "path": "pages/admin-login/index",
+      "style": { "navigationBarTitleText": "管理后台登录" }
     }
   ],
   "tabBar": {

@@ -22,6 +22,15 @@ export function resolveWidgetLabel(widget: { type?: string; label?: string }): s
   return DEFAULT_WIDGET_LABELS[String(widget?.type || '')] || '内容'
 }
 
+export function resolveAttendanceWidgetLabel(widget: { type?: string; label?: string }): string {
+  const raw = String(widget?.label || '').trim()
+  if (isPlaceholderWidgetLabel(raw)) return ''
+
+  const genericWidgetLabels = Object.values(DEFAULT_WIDGET_LABELS)
+
+  return genericWidgetLabels.includes(raw) ? '' : raw
+}
+
 export function splitDateTimeValue(value: unknown): { date: string; time: string } {
   const raw = String(value || '').trim()
   if (!raw) return { date: '', time: '' }

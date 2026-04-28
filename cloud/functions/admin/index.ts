@@ -1,4 +1,5 @@
 import cloud from 'wx-server-sdk'
+import crypto from 'crypto'
 import * as db from '../../lib/db'
 import * as storage from '../../lib/storage'
 import { extractCloudFileIDsFromContent } from '../../lib/extract-file-ids'
@@ -35,12 +36,35 @@ const ATTENDANCE_COLLECTION = 'post_attendance_members'
 const ATTENDANCE_PREVIEW_LIMIT = 5
 const ADMIN_ACCOUNTS = 'admin_accounts'
 const ADMIN_SESSIONS = 'admin_sessions'
+const ADMIN_LOGIN_TICKETS = 'admin_login_tickets'
 const SESSION_TTL_MS = Math.max(
   1,
   Number(process.env.ADMIN_SESSION_TTL_DAYS || 7)
 ) * 24 * 60 * 60 * 1000
+const WX_LOGIN_TICKET_TTL_MS = 5 * 60 * 1000  // 5 分钟，扫码登录 ticket 有效期
+const WXACODE_PAGE = 'pages/admin-login/index'
+const WXACODE_ENV_VERSION = (process.env.WXACODE_ENV_VERSION || 'release') as 'release' | 'trial' | 'develop'
 
-const PUBLIC_ACTIONS = new Set(['auth.login', 'auth.wxLogin'])
+type WxLoginStatus = 'pending' | 'success' | 'no_account' | 'expired' | 'denied'
+
+interface LoginTicket {
+  _id: string                  // ticket = 32 hex chars
+  status: WxLoginStatus
+  accountId?: string
+  token?: string
+  role?: AdminRole
+  userId?: string
+  username?: string
+  createdAt: string
+  expiresAt: string
+}
+
+const PUBLIC_ACTIONS = new Set([
+  'auth.login',
+  'auth.wxLoginStart',
+  'auth.wxLoginPoll',
+  'auth.wxLoginConfirm',
+])
 const SUPER_ADMIN_ONLY: Array<string | RegExp> = [
   'community.approve',
   'community.reject',
@@ -160,6 +184,22 @@ function isInvalidWidgetLabel(label: unknown) {
   return !text || text === '新控件' || text === 'new widget'
 }
 
+function isGenericWidgetLabel(label: unknown) {
+  const text = String(label || '').trim()
+  return [
+    '短文字',
+    '一句话简介',
+    '日期时间',
+    '数字',
+    '图片组',
+    '视频列表',
+    '正文',
+    '位置',
+    '活动参与',
+    '公告',
+  ].includes(text)
+}
+
 function validateSectionWidgets(sectionType: SectionType, widgets: any[]) {
   const showInListCount = widgets.filter((widget: any) => widget.showInList).length
   if (showInListCount > 3) throw new Error('showInList 最多只能有 3 个控件')
@@ -173,6 +213,9 @@ function validateSectionWidgets(sectionType: SectionType, widgets: any[]) {
   for (const widget of widgets) {
     if (isInvalidWidgetLabel(widget.label)) {
       throw new Error('控件标签名不能为空或占位文案')
+    }
+    if (widget.type === 'attendance' && isGenericWidgetLabel(widget.label)) {
+      throw new Error('活动参与控件需要设置明确标签名')
     }
     if (widget.showInList && !['short_text', 'summary', 'datetime', 'number', 'attendance'].includes(widget.type)) {
       throw new Error(`控件类型 ${widget.type} 不支持在列表展示`)
@@ -328,7 +371,7 @@ async function createSessionForAccount(account: AdminAccount): Promise<{ token: 
 // Public（不需要 session）路由
 // ============================================================
 
-async function publicRoute(action: string, params: Record<string, any>) {
+async function publicRoute(action: string, params: Record<string, any>, openid = '') {
   if (action === 'auth.login') {
     const username = String(params.username || '').trim()
     const password = String(params.password || '')
@@ -384,12 +427,127 @@ async function publicRoute(action: string, params: Record<string, any>) {
     }
   }
 
-  if (action === 'auth.wxLogin') {
-    // 扩展位：目前暂未实现。未来流程：
-    //   1. 用 cloud.getWXContext() 或 CloudBase 自定义登录 解出 openId
-    //   2. 按 userId === openId 查 admin_accounts
-    //   3. 命中则 createSessionForAccount，否则返回 account_not_bound
-    throw new Error('wechat login not configured yet')
+  // ─────────────────────────────────────────────────────────
+  // 微信扫码登录（三段：admin-web start/poll + 小程序 confirm）
+  //   start   ← admin-web HTTP    → 生成 ticket + 小程序码 PNG
+  //   poll    ← admin-web HTTP    → 轮询 ticket 状态拿 token
+  //   confirm ← 小程序 wx.cloud   → admin 在小程序内点确认绑定
+  // 三个 action 都注册到 PUBLIC_ACTIONS，不需要 session。
+  // ─────────────────────────────────────────────────────────
+
+  if (action === 'auth.wxLoginStart') {
+    const ticket = crypto.randomBytes(16).toString('hex')  // 32 hex chars
+    const now = Date.now()
+    const expiresAt = new Date(now + WX_LOGIN_TICKET_TTL_MS).toISOString()
+
+    // 调微信开放接口生成无限带参小程序码
+    // 风险点：cloud.openapi.wxacode.getUnlimited 在 CloudBase 函数里能否调通
+    // 取决于 env 是否绑定了小程序 appid + 是否开启 openapi 链路。
+    // 实测不通时降级到 access_token + HTTP 直调（fallback 见 plan §8）
+    let qrCodeBase64: string
+    try {
+      const result: any = await (cloud as any).openapi.wxacode.getUnlimited({
+        scene: ticket,
+        page: WXACODE_PAGE,
+        width: 280,
+        env_version: WXACODE_ENV_VERSION,
+        check_path: false,  // 开发期 page 还没发布时关掉路径校验
+      })
+      const buffer: Buffer = result?.buffer
+      if (!buffer) throw new Error('wxacode: no buffer returned')
+      qrCodeBase64 = `data:image/png;base64,${buffer.toString('base64')}`
+    } catch (err: any) {
+      // 不写 ticket，直接报错让调用方知道 — 否则前端会显示空二维码轮询到过期
+      throw new Error(`生成小程序码失败：${err?.errMsg || err?.message || 'unknown'}`)
+    }
+
+    await db.create(ADMIN_LOGIN_TICKETS, {
+      _id: ticket,
+      status: 'pending' as WxLoginStatus,
+      createdAt: new Date(now).toISOString(),
+      expiresAt,
+    })
+    return { ticket, qrCodeBase64, expiresAt }
+  }
+
+  if (action === 'auth.wxLoginPoll') {
+    const ticket = String(params.ticket || '').trim()
+    if (!ticket) throw new Error('ticket 不能为空')
+    let row: LoginTicket | null = null
+    try {
+      row = await db.getById(ADMIN_LOGIN_TICKETS, ticket) as LoginTicket
+    } catch {
+      return { status: 'expired' as WxLoginStatus }
+    }
+    if (!row) return { status: 'expired' as WxLoginStatus }
+    // 懒过期：超时则更新状态再返回
+    if (row.status === 'pending' && Date.parse(row.expiresAt) < Date.now()) {
+      try { await db.updateById(ADMIN_LOGIN_TICKETS, ticket, { status: 'expired' }) }
+      catch { /* best effort */ }
+      return { status: 'expired' as WxLoginStatus }
+    }
+    if (row.status !== 'success') {
+      return { status: row.status, userId: row.userId || '' }
+    }
+    // success：返回完整 session 信息，并主动 invalidate ticket（防重放）
+    const payload = {
+      status: 'success' as WxLoginStatus,
+      token: row.token || '',
+      role: row.role || ('communityAdmin' as AdminRole),
+      userId: row.userId || '',
+      username: row.username || '',
+    }
+    try { await db.removeById(ADMIN_LOGIN_TICKETS, ticket) } catch { /* best effort */ }
+    return payload
+  }
+
+  if (action === 'auth.wxLoginConfirm') {
+    const ticket = String(params.ticket || '').trim()
+    if (!ticket) throw new Error('ticket 不能为空')
+    if (!openid) throw new Error('Missing OPENID（必须从微信小程序内调用）')
+
+    let row: LoginTicket | null = null
+    try {
+      row = await db.getById(ADMIN_LOGIN_TICKETS, ticket) as LoginTicket
+    } catch {
+      throw new Error('登录会话不存在或已过期')
+    }
+    if (!row) throw new Error('登录会话不存在或已过期')
+    if (row.status !== 'pending') throw new Error('登录会话已被使用或已过期')
+    if (Date.parse(row.expiresAt) < Date.now()) {
+      try { await db.updateById(ADMIN_LOGIN_TICKETS, ticket, { status: 'expired' }) }
+      catch { /* best effort */ }
+      throw new Error('登录会话已过期，请刷新后重新扫码')
+    }
+
+    const account = await findAccountByUserId(openid)
+    if (!account) {
+      await db.updateById(ADMIN_LOGIN_TICKETS, ticket, {
+        status: 'no_account' as WxLoginStatus,
+        userId: openid,
+      })
+      return {
+        success: false,
+        reason: 'no_account' as const,
+        message: '该微信未绑定管理员账号，请联系超管在 admin-web 添加',
+      }
+    }
+    if (account.status !== 'active') throw new Error('该管理员账号已停用')
+
+    const { token } = await createSessionForAccount(account)
+    await db.updateById(ADMIN_LOGIN_TICKETS, ticket, {
+      status: 'success' as WxLoginStatus,
+      accountId: account._id,
+      token,
+      role: account.role,
+      userId: openid,
+      username: account.username,
+    })
+    return {
+      success: true,
+      role: account.role,
+      username: account.username,
+    }
   }
 
   throw new Error(`Unknown public action: ${action}`)
@@ -1087,7 +1245,9 @@ export const main = async (event: any) => {
       const authHeader = String(event.headers?.authorization || event.headers?.Authorization || '')
 
       if (PUBLIC_ACTIONS.has(action)) {
-        const result = await publicRoute(action, params)
+        // HTTP 触发不可能携带小程序 OPENID（cloud.getWXContext 在 HTTP 下为空）
+        // wxLoginConfirm 必须从小程序内调用 → publicRoute 内会拒绝
+        const result = await publicRoute(action, params, '')
         return { statusCode: 200, headers, body: JSON.stringify(result) }
       }
 
@@ -1103,9 +1263,21 @@ export const main = async (event: any) => {
       return { statusCode: 200, headers, body: JSON.stringify(result) }
     }
 
-    // 非 HTTP 触发（内部云函数 / 测试直调）：视为 superAdmin，允许注入 ctx
-    const { action, _actAs, ...params } = event
-    if (PUBLIC_ACTIONS.has(action)) return publicRoute(action, params)
+    // 非 HTTP 触发（小程序 wx.cloud.callFunction / 内部云函数 / 测试直调）
+    // 小程序路径下 cloud.getWXContext().OPENID 自动有值 → 传给 publicRoute 给 wxLoginConfirm 用
+    const { action, _actAs, _testOpenid, ...params } = event
+    if (PUBLIC_ACTIONS.has(action)) {
+      let openid = ''
+      try {
+        const ctxFromWx: any = (cloud as any).getWXContext?.() || {}
+        openid = String(ctxFromWx.OPENID || '')
+      } catch { /* CloudBase HTTP-only env 时可能不可用，留空即可 */ }
+      // 测试直调允许注入 _testOpenid（同 user/post 函数的约定）
+      if (!openid && process.env.ALLOW_TEST_OPENID === 'true' && _testOpenid) {
+        openid = String(_testOpenid)
+      }
+      return publicRoute(action, params, openid)
+    }
     const ctx: AdminCtx = _actAs || {
       accountId: 'internal',
       role: 'superAdmin',
