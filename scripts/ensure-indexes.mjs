@@ -168,7 +168,7 @@ const INDEXES = [
       { Name: 'userId', Direction: '1' },
     ],
   },
-  // admin_sessions: 查询 accountId 的所有 session（重置密码/停用账号时批量清理）
+  // admin_sessions: 查询 accountId 的所有 session（重置密码/删除账号时批量清理）
   {
     coll: 'admin_sessions',
     name: 'idx_accountId',
