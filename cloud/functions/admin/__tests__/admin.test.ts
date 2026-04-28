@@ -311,3 +311,97 @@ test('post.removeAttendanceMemberAdmin: 可移除参与人并返回最新名单'
   expect(db.removeById).toHaveBeenCalledWith('post_attendance_members', 'record-1')
   expect(result).toEqual({ success: true, members: [], total: 0 })
 })
+
+test('admin.listAccounts: 标记未删除社区的创建者管理员账号', async () => {
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([
+      {
+        _id: 'account-creator',
+        username: 'creator-admin',
+        role: 'communityAdmin',
+        status: 'active',
+        userId: 'creator-openid',
+        createdAt: '2026-04-28T00:00:00.000Z',
+        createdBy: 'boss',
+      },
+      {
+        _id: 'account-free',
+        username: 'free-admin',
+        role: 'communityAdmin',
+        status: 'active',
+        userId: 'free-openid',
+        createdAt: '2026-04-28T00:00:00.000Z',
+        createdBy: 'boss',
+      },
+    ])
+    .mockResolvedValueOnce([{ _id: 'community-1', name: '青山村', creatorId: 'creator-openid' }])
+    .mockResolvedValueOnce([])
+
+  const result: any = await main({ action: 'admin.listAccounts' })
+
+  expect(result.accounts[0]).toEqual(expect.objectContaining({
+    _id: 'account-creator',
+    creatorCommunityCount: 1,
+    creatorCommunityNames: ['青山村'],
+  }))
+  expect(result.accounts[1]).toEqual(expect.objectContaining({
+    _id: 'account-free',
+    creatorCommunityCount: 0,
+  }))
+})
+
+test('admin.deleteAccount: 不能删除未删除社区的创建者管理员账号', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'account-creator',
+    userId: 'creator-openid',
+    username: 'creator-admin',
+    role: 'communityAdmin',
+    status: 'active',
+  })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([
+    { _id: 'community-1', name: '青山村', creatorId: 'creator-openid' },
+  ])
+
+  await expect(main({
+    action: 'admin.deleteAccount',
+    accountId: 'account-creator',
+    _actAs: { accountId: 'super-1', role: 'superAdmin', userId: 'boss', username: 'boss' },
+  })).rejects.toThrow('创建者管理员账号')
+  expect(db.removeById).not.toHaveBeenCalledWith('admin_accounts', 'account-creator')
+})
+
+test('admin.deleteAccount: 删除普通管理员账号并清理 session', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'account-free',
+    userId: 'free-openid',
+    username: 'free-admin',
+    role: 'communityAdmin',
+    status: 'active',
+  })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([
+      { _id: 'session-1', accountId: 'account-free' },
+      { _id: 'session-2', accountId: 'account-free' },
+    ])
+  ;(db.removeById as jest.Mock).mockResolvedValue({})
+
+  const result: any = await main({
+    action: 'admin.deleteAccount',
+    accountId: 'account-free',
+    _actAs: { accountId: 'super-1', role: 'superAdmin', userId: 'boss', username: 'boss' },
+  })
+
+  expect(db.removeById).toHaveBeenCalledWith('admin_sessions', 'session-1')
+  expect(db.removeById).toHaveBeenCalledWith('admin_sessions', 'session-2')
+  expect(db.removeById).toHaveBeenCalledWith('admin_accounts', 'account-free')
+  expect(result).toEqual({ success: true, revokedSessions: 2 })
+})
+
+test('admin.deleteAccount: 不能删除自己的账号', async () => {
+  await expect(main({
+    action: 'admin.deleteAccount',
+    accountId: 'super-1',
+    _actAs: { accountId: 'super-1', role: 'superAdmin', userId: 'boss', username: 'boss' },
+  })).rejects.toThrow('不能删除自己的账号')
+})

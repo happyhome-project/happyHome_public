@@ -75,8 +75,7 @@ export const adminAccountApi = {
     callAdmin('admin.createAccount', params),
   resetPassword: (accountId: string, password: string) =>
     callAdmin('admin.resetPassword', { accountId, password }),
-  disable: (accountId: string) => callAdmin('admin.disableAccount', { accountId }),
-  enable: (accountId: string) => callAdmin('admin.enableAccount', { accountId }),
+  delete: (accountId: string) => callAdmin('admin.deleteAccount', { accountId }),
   bindWechat: (accountId: string, openId: string) => callAdmin('admin.bindWechat', { accountId, openId }),
 }
 

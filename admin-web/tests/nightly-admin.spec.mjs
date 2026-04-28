@@ -20,6 +20,14 @@ async function fillInput(container, value) {
   await container.locator('input').fill(value)
 }
 
+async function switchToPasswordLogin(page) {
+  const switchButton = page.getByTestId('login-switch-password')
+  if (await switchButton.isVisible().catch(() => false)) {
+    await switchButton.click()
+  }
+  await expect(page.getByTestId('login-form')).toBeVisible()
+}
+
 async function login(page) {
   if (!hasLoginCredentials()) {
     await page.goto('/login')
@@ -34,6 +42,7 @@ async function login(page) {
   }
 
   await page.goto('/login')
+  await switchToPasswordLogin(page)
   await fillInput(page.getByTestId('login-username-field'), usernameValue())
   await fillInput(page.getByTestId('login-password-field'), passwordValue())
   await page.getByTestId('login-submit').click()
@@ -86,6 +95,7 @@ test.afterAll(async () => {
 
 test('invalid login stays on login page', async ({ page }) => {
   await page.goto('/login')
+  await switchToPasswordLogin(page)
   await fillInput(page.getByTestId('login-username-field'), 'wrong-user')
   await fillInput(page.getByTestId('login-password-field'), 'wrong-password')
   await page.getByTestId('login-submit').click()

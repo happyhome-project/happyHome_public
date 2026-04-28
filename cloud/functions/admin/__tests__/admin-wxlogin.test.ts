@@ -1,24 +1,24 @@
 // 微信扫码登录 — auth.wxLoginStart / wxLoginPoll / wxLoginConfirm 三段
 //
 // 关键 mock：
-//   wx-server-sdk.openapi.wxacode.getUnlimited → 返回 fake PNG buffer
+//   wx-openapi.getWxacodeUnlimited → 返回 fake PNG buffer（HTTP fallback）
 //   wx-server-sdk.getWXContext → 返回 { OPENID: 'mock-openid-x' }
 //   db: 模拟 admin_login_tickets / admin_accounts / admin_sessions
 //
 // 注意：测试通过 main(event) 入口（参考 feedback_test_through_main.md）
 
-const mockGetUnlimited = jest.fn()
+const mockGetWxacodeUnlimited = jest.fn()
 const mockGetWXContext = jest.fn(() => ({ OPENID: '' }))
 
 jest.mock('wx-server-sdk', () => ({
   init: jest.fn(),
   DYNAMIC_CURRENT_ENV: 'test',
   getWXContext: mockGetWXContext,
-  openapi: {
-    wxacode: {
-      getUnlimited: mockGetUnlimited,
-    },
-  },
+}))
+
+jest.mock('../../../lib/wx-openapi', () => ({
+  getWxacodeUnlimited: mockGetWxacodeUnlimited,
+  getAccessToken: jest.fn(),
 }))
 
 jest.mock('../../../lib/db', () => ({
@@ -55,7 +55,7 @@ beforeEach(() => {
 
 describe('auth.wxLoginStart', () => {
   test('生成 32 hex chars ticket + base64 PNG，写入 admin_login_tickets', async () => {
-    mockGetUnlimited.mockResolvedValue({ buffer: Buffer.from('FAKE_PNG_BYTES') })
+    mockGetWxacodeUnlimited.mockResolvedValue(Buffer.from('FAKE_PNG_BYTES'))
 
     const result: any = await main({ action: 'auth.wxLoginStart', httpMethod: 'POST', body: JSON.stringify({ action: 'auth.wxLoginStart' }) })
     const payload = JSON.parse(result.body)
@@ -64,8 +64,8 @@ describe('auth.wxLoginStart', () => {
     expect(payload.qrCodeBase64).toMatch(/^data:image\/png;base64,/)
     expect(payload.expiresAt).toEqual(expect.any(String))
 
-    // wxacode.getUnlimited 调用参数
-    expect(mockGetUnlimited).toHaveBeenCalledWith(expect.objectContaining({
+    // getWxacodeUnlimited 调用参数（HTTP fallback 实现的入参形状）
+    expect(mockGetWxacodeUnlimited).toHaveBeenCalledWith(expect.objectContaining({
       scene: payload.ticket,
       page: 'pages/admin-login/index',
       width: 280,
@@ -81,8 +81,8 @@ describe('auth.wxLoginStart', () => {
     })
   })
 
-  test('wxacode.getUnlimited 抛错 → 整个 start 失败，不写 ticket', async () => {
-    mockGetUnlimited.mockRejectedValue(new Error('openapi not available'))
+  test('getWxacodeUnlimited 抛错 → 整个 start 失败，不写 ticket', async () => {
+    mockGetWxacodeUnlimited.mockRejectedValue(new Error('WX_APPID 未配置'))
 
     const result: any = await main({ action: 'auth.wxLoginStart', httpMethod: 'POST', body: JSON.stringify({ action: 'auth.wxLoginStart' }) })
     expect(result.statusCode).toBe(500)

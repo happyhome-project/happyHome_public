@@ -29,18 +29,33 @@
           <el-tag v-else type="info">停用</el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="保护原因" min-width="180">
+        <template #default="{ row }">
+          <el-tag v-if="row.creatorCommunityCount > 0" type="warning" effect="plain">
+            社区创建者账号
+          </el-tag>
+          <span v-else style="color: #c0c4cc;">-</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="createdAt" label="创建时间" width="200" />
       <el-table-column label="操作" width="360">
         <template #default="{ row }">
           <el-button size="small" @click="openReset(row)">重置密码</el-button>
           <el-button size="small" @click="openBind(row)">绑定微信</el-button>
-          <el-button
-            v-if="row.status === 'active'"
-            size="small"
-            type="danger"
-            @click="disable(row)"
-          >停用</el-button>
-          <el-button v-else size="small" type="success" @click="enable(row)">启用</el-button>
+          <el-tooltip
+            :disabled="canDelete(row)"
+            content="该账号是未删除社区的创建者账号，需先永久删除对应社区后才能删除账号"
+            placement="top"
+          >
+            <span>
+              <el-button
+                size="small"
+                type="danger"
+                :disabled="!canDelete(row)"
+                @click="deleteAccount(row)"
+              >删除</el-button>
+            </span>
+          </el-tooltip>
         </template>
       </el-table-column>
     </el-table>
@@ -190,26 +205,28 @@ async function submitBind() {
   }
 }
 
-async function disable(row: any) {
-  try {
-    await ElMessageBox.confirm(`确认停用账号「${row.username}」？该账号所有 session 将被踢下线。`, '停用确认', { type: 'warning' })
-  } catch { return }
-  try {
-    await adminAccountApi.disable(row._id)
-    ElMessage.success('已停用')
-    await load()
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.error || e?.message || '停用失败')
-  }
+function canDelete(row: any) {
+  return Number(row.creatorCommunityCount || 0) === 0
 }
 
-async function enable(row: any) {
+async function deleteAccount(row: any) {
+  if (!canDelete(row)) {
+    ElMessage.warning('该账号是未删除社区的创建者账号，不能删除')
+    return
+  }
   try {
-    await adminAccountApi.enable(row._id)
-    ElMessage.success('已启用')
+    await ElMessageBox.confirm(
+      `确认删除账号「${row.username}」？该账号所有 session 将被踢下线，此操作不可恢复。`,
+      '删除确认',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch { return }
+  try {
+    await adminAccountApi.delete(row._id)
+    ElMessage.success('已删除')
     await load()
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.error || e?.message || '启用失败')
+    ElMessage.error(e?.response?.data?.error || e?.message || '删除失败')
   }
 }
 </script>
