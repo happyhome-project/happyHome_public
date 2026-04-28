@@ -345,6 +345,11 @@ async function findAccountByUserId(userId: string): Promise<AdminAccount | null>
   return matches[0] || null
 }
 
+async function listCreatorCommunities(userId: string): Promise<Community[]> {
+  if (!userId) return []
+  return (await db.query('communities', { creatorId: userId })) as Community[]
+}
+
 async function createSessionForAccount(account: AdminAccount): Promise<{ token: string; expiresAt: string }> {
   const token = generateSessionToken()
   const now = Date.now()
@@ -1040,8 +1045,9 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
 
   if (action === 'admin.listAccounts') {
     const accounts = (await db.query(ADMIN_ACCOUNTS, {}, { orderBy: ['createdAt', 'desc'] })) as AdminAccount[]
-    return {
-      accounts: accounts.map((a) => ({
+    const enriched = await Promise.all(accounts.map(async (a) => {
+      const creatorCommunities = await listCreatorCommunities(a.userId || '')
+      return {
         _id: a._id,
         username: a.username,
         role: a.role,
@@ -1049,7 +1055,12 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
         userId: a.userId || '',
         createdAt: a.createdAt,
         createdBy: a.createdBy || '',
-      })),
+        creatorCommunityCount: creatorCommunities.length,
+        creatorCommunityNames: creatorCommunities.map((c: any) => c.name || c._id).filter(Boolean),
+      }
+    }))
+    return {
+      accounts: enriched,
     }
   }
   if (action === 'admin.createAccount') {
@@ -1091,20 +1102,20 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     await Promise.all(sessions.map((s) => db.removeById(ADMIN_SESSIONS, s._id).catch(() => null)))
     return { success: true, revokedSessions: sessions.length }
   }
-  if (action === 'admin.disableAccount') {
+  if (action === 'admin.deleteAccount') {
     const accountId = String(params.accountId || '').trim()
     if (!accountId) throw new Error('accountId 不能为空')
-    if (accountId === ctx.accountId) throw new Error('不能停用自己的账号')
-    await db.updateById(ADMIN_ACCOUNTS, accountId, { status: 'disabled' })
+    if (accountId === ctx.accountId) throw new Error('不能删除自己的账号')
+    const account = (await db.getById(ADMIN_ACCOUNTS, accountId)) as AdminAccount
+    const creatorCommunities = await listCreatorCommunities(account.userId || '')
+    if (creatorCommunities.length > 0) {
+      const names = creatorCommunities.map((c: any) => c.name || c._id).filter(Boolean).join('、')
+      throw new Error(`该账号是未删除社区的创建者管理员账号，不能删除${names ? `：${names}` : ''}`)
+    }
     const sessions = (await db.query(ADMIN_SESSIONS, { accountId })) as AdminSession[]
     await Promise.all(sessions.map((s) => db.removeById(ADMIN_SESSIONS, s._id).catch(() => null)))
+    await db.removeById(ADMIN_ACCOUNTS, accountId)
     return { success: true, revokedSessions: sessions.length }
-  }
-  if (action === 'admin.enableAccount') {
-    const accountId = String(params.accountId || '').trim()
-    if (!accountId) throw new Error('accountId 不能为空')
-    await db.updateById(ADMIN_ACCOUNTS, accountId, { status: 'active' })
-    return { success: true }
   }
   if (action === 'admin.bindWechat') {
     const accountId = String(params.accountId || '').trim()
