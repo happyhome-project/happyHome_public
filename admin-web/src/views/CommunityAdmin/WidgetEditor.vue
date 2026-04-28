@@ -139,6 +139,7 @@ const route = useRoute()
 const sectionId = String(route.params.sectionId || '')
 const communityId = String(route.query.communityId || '')
 const widgets = ref<any[]>([])
+const originalWidgets = ref<any[]>([])
 const saving = ref(false)
 const communityName = ref('')
 const sectionName = ref('')
@@ -181,8 +182,9 @@ function shouldClearAttendanceLabel(label: unknown) {
 }
 
 function isInvalidWidgetLabel(widget: any) {
+  if (widget?.type === 'attendance') return false
   if (isPlaceholderLabel(widget?.label)) return true
-  return widget?.type === 'attendance' && isDefaultWidgetLabel(widget?.label)
+  return false
 }
 
 function labelSuggestion(type: string) {
@@ -206,6 +208,10 @@ onMounted(async () => {
       showInList: widget?.type === 'admin_notice' ? false : !!widget.showInList,
       noticeContent: widget?.type === 'admin_notice' ? String(widget.noticeContent || '') : undefined,
       _isNew: false,
+    }))
+    originalWidgets.value = widgets.value.map((widget) => ({
+      widgetId: String(widget.widgetId || ''),
+      type: widget.type,
     }))
   } catch (error: any) {
     ElMessage.error(error.message || '加载失败')
@@ -277,6 +283,19 @@ function removeWidget(widget: any) {
   widgets.value = widgets.value.filter((item) => item.widgetId !== widget.widgetId)
 }
 
+function hasStructuralWidgetChanges(nextWidgets: any[]) {
+  const nextIds = new Set(nextWidgets.map((widget) => String(widget.widgetId || '')))
+  if (originalWidgets.value.some((widget) => !nextIds.has(String(widget.widgetId || '')))) {
+    return true
+  }
+
+  const originalById = new Map(originalWidgets.value.map((widget) => [String(widget.widgetId || ''), widget]))
+  return nextWidgets.some((widget) => {
+    const original = originalById.get(String(widget.widgetId || ''))
+    return original && original.type !== widget.type
+  })
+}
+
 async function save() {
   if (!sectionId) {
     ElMessage.error('缺少 sectionId，无法保存')
@@ -296,6 +315,7 @@ async function save() {
   try {
     const orderedWidgets = widgets.value.map(({ _isNew, ...widget }, index) => ({
       ...widget,
+      label: widget.type === 'attendance' && shouldClearAttendanceLabel(widget.label) ? '' : widget.label,
       fieldKey: resolveFieldKey(widget, index),
       required: ['attendance', 'admin_notice'].includes(widget.type) ? false : !!widget.required,
       showInList: widget.type === 'admin_notice' ? false : !!widget.showInList,
@@ -303,21 +323,24 @@ async function save() {
       noticeContent: widget.type === 'admin_notice' ? String(widget.noticeContent || '').trim() : undefined,
       order: index,
     }))
+    const needsImpactPreview = hasStructuralWidgetChanges(orderedWidgets)
 
-    const preview = await sectionApi.updateWidgets({
-      sectionId,
-      communityId,
-      widgets: orderedWidgets,
-      preview: true,
-    }) as any
+    if (needsImpactPreview) {
+      const preview = await sectionApi.updateWidgets({
+        sectionId,
+        communityId,
+        widgets: orderedWidgets,
+        preview: true,
+      }) as any
 
-    if (preview.requireConfirmation) {
-      const removedLabels = preview.structuralChanges?.removedLabels?.join('、') || '已删除控件'
-      await ElMessageBox.confirm(
-        `该板块已有 ${preview.activePostCount} 条帖子，本次将移除控件：${removedLabels}。历史帖子中的旧数据不会立刻删除，但会从当前展示结构中消失，并在用户下次编辑时自动清理。确认继续吗？`,
-        '确认结构变更',
-        { type: 'warning', confirmButtonText: '继续保存', cancelButtonText: '取消' }
-      )
+      if (preview.requireConfirmation) {
+        const removedLabels = preview.structuralChanges?.removedLabels?.join('、') || '已删除控件'
+        await ElMessageBox.confirm(
+          `该板块已有 ${preview.activePostCount} 条帖子，本次将移除控件：${removedLabels}。历史帖子中的旧数据不会立刻删除，但会从当前展示结构中消失，并在用户下次编辑时自动清理。确认继续吗？`,
+          '确认结构变更',
+          { type: 'warning', confirmButtonText: '继续保存', cancelButtonText: '取消' }
+        )
+      }
     }
 
     await sectionApi.updateWidgets({
@@ -326,6 +349,15 @@ async function save() {
       widgets: orderedWidgets,
       confirmStructureChange: true,
     })
+    widgets.value = widgets.value.map((widget, index) => ({
+      ...widget,
+      ...orderedWidgets[index],
+      _isNew: false,
+    }))
+    originalWidgets.value = orderedWidgets.map((widget) => ({
+      widgetId: String(widget.widgetId || ''),
+      type: widget.type,
+    }))
     ElMessage.success('保存成功')
   } catch (error: any) {
     ElMessage.error(error.message || '保存失败')

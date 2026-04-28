@@ -168,6 +168,9 @@ function normalizeWidgetForSave(widget: any): Widget {
   }
   if (normalized.type === 'attendance') {
     normalized.capacity = normalizeCapacity(normalized.capacity)
+    if (isInvalidWidgetLabel(normalized.label) || isGenericWidgetLabel(normalized.label)) {
+      normalized.label = ''
+    }
   } else {
     delete normalized.capacity
   }
@@ -211,11 +214,8 @@ function validateSectionWidgets(sectionType: SectionType, widgets: any[]) {
   }
 
   for (const widget of widgets) {
-    if (isInvalidWidgetLabel(widget.label)) {
+    if (widget.type !== 'attendance' && isInvalidWidgetLabel(widget.label)) {
       throw new Error('控件标签名不能为空或占位文案')
-    }
-    if (widget.type === 'attendance' && isGenericWidgetLabel(widget.label)) {
-      throw new Error('活动参与控件需要设置明确标签名')
     }
     if (widget.showInList && !['short_text', 'summary', 'datetime', 'number', 'attendance'].includes(widget.type)) {
       throw new Error(`控件类型 ${widget.type} 不支持在列表展示`)
@@ -824,7 +824,10 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       const current = currentById.get(String(widget.widgetId || ''))
       return current && current.type !== widget.type
     })
-    const activePosts = await db.query('posts', { sectionId, status: 'active' })
+    const hasStructuralChanges =
+      removedWidgets.length > 0 ||
+      changedTypeWidgets.length > 0
+    const activePosts = hasStructuralChanges ? await db.query('posts', { sectionId, status: 'active' }) : []
     const hasActivePosts = activePosts.length > 0
     const impact = {
       hasActivePosts,
@@ -836,9 +839,6 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
         changedTypeLabels: changedTypeWidgets.map((widget: any) => widget.label || widget.fieldKey || widget.widgetId),
       },
     }
-    const hasStructuralChanges =
-      impact.structuralChanges.removedWidgetIds.length > 0 ||
-      impact.structuralChanges.changedTypeWidgetIds.length > 0
 
     if (params.preview) {
       return { widgets, ...impact, requireConfirmation: hasActivePosts && hasStructuralChanges }
