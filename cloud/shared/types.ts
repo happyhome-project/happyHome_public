@@ -20,6 +20,7 @@ export type WidgetType =
   | 'location'
   | 'attendance'
   | 'video_group'
+  | 'audio_group'
   | 'admin_notice'
 
 export const LIST_DISPLAYABLE_TYPES: WidgetType[] = [
@@ -91,6 +92,18 @@ export type VideoItem =
   | VideoItemMiniprogram
   | VideoItemH5
   | VideoItemAppLink
+
+export type AudioExt = 'mp3' | 'm4a' | 'aac' | 'wav'
+export const AUDIO_ALLOWED_EXTS: AudioExt[] = ['mp3', 'm4a', 'aac', 'wav']
+export const AUDIO_MAX_SIZE_BYTES = 50 * 1024 * 1024
+
+export interface AudioTrack {
+  fileID: string
+  title: string
+  duration: number
+  size: number
+  ext: AudioExt
+}
 
 export interface Widget {
   widgetId: string
@@ -184,7 +197,7 @@ export interface SectionWithPostCount extends Section {
   postCount: number
 }
 
-export type PostContentValue = string | number | string[] | GeoLocation | VideoItem[]
+export type PostContentValue = string | number | string[] | GeoLocation | VideoItem[] | AudioTrack[]
 export type PostContent = Record<string, PostContentValue>
 
 export interface PostAttendanceMember {

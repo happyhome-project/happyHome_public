@@ -24,6 +24,7 @@ import type {
   SectionType,
   Widget,
 } from '../../shared/types'
+import { AUDIO_ALLOWED_EXTS } from '../../shared/types'
 
 cloud.init({ env: process.env.TCB_ENV || cloud.DYNAMIC_CURRENT_ENV })
 
@@ -1142,6 +1143,17 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     else throw new Error('不支持的文件类型')
     const rand = Math.random().toString(36).slice(2, 8)
     const cloudPath = `posts/${sub}/${Date.now()}_${rand}.${ext}`
+    return await storage.requestUploadMetadata(cloudPath)
+  }
+
+  if (action === 'audio.requestUpload') {
+    const fileName = String(params.fileName || '').trim()
+    if (!fileName) throw new Error('fileName 不能为空')
+    const match = fileName.match(/\.([a-zA-Z0-9]+)$/)
+    const ext = match ? match[1].toLowerCase() : ''
+    if (!AUDIO_ALLOWED_EXTS.includes(ext as any)) throw new Error('不支持的文件类型')
+    const rand = Math.random().toString(36).slice(2, 8)
+    const cloudPath = `posts/audios/${Date.now()}_${rand}.${ext}`
     return await storage.requestUploadMetadata(cloudPath)
   }
 

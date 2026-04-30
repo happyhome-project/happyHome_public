@@ -196,6 +196,7 @@
       </view>
     </view>
     </template>
+    <FloatingPlayer />
   </view>
 </template>
 
@@ -205,6 +206,7 @@ import { onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { postApi } from '../../api/cloud'
+import FloatingPlayer from '../../components/FloatingPlayer/FloatingPlayer.vue'
 import LoginGuard from '../../components/LoginGuard.vue'
 
 const communityStore = useCommunityStore()

@@ -40,6 +40,7 @@
     </button>
 
     <text class="tip">创建后需等待平台审核通过，才能对外展示</text>
+    <FloatingPlayer />
   </view>
 </template>
 
@@ -48,6 +49,7 @@ import { reactive, ref } from 'vue'
 import { communityApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
+import FloatingPlayer from '../../components/FloatingPlayer/FloatingPlayer.vue'
 import LoginGuard from '../../components/LoginGuard.vue'
 
 const userStore = useUserStore()

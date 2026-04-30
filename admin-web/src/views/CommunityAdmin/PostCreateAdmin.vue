@@ -55,6 +55,10 @@
               <el-button @click="addVideoItem(widget.widgetId)" :icon="Plus">添加视频条目</el-button>
             </template>
 
+            <template v-else-if="widget.type === 'audio_group'">
+              <AudioGroupEditor v-model="formData[widget.widgetId] as any" />
+            </template>
+
             <el-input
               v-else-if="widget.type === 'short_text' || widget.type === 'summary'"
               v-model="formData[widget.widgetId] as any"
@@ -115,6 +119,7 @@ import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { communityApi, sectionApi, postAdminApi } from '../../api/cloud'
 import { useAuthStore } from '../../stores/auth'
+import AudioGroupEditor from '../../components/AudioGroupEditor.vue'
 import VideoItemEditor from '../../components/VideoItemEditor.vue'
 
 const route = useRoute()
@@ -132,7 +137,9 @@ const submitting = ref(false)
 const loadingSection = ref(false)
 const communityName = ref('')
 const authReady = computed(() => Boolean(auth.userId))
-const ADMIN_CREATABLE_WIDGET_TYPES = new Set(['short_text', 'summary', 'number', 'datetime', 'rich_text', 'video_group'])
+const ADMIN_CREATABLE_WIDGET_TYPES = new Set(['short_text', 'summary', 'number', 'datetime', 'rich_text', 'video_group', 'audio_group'])
+const AUDIO_EXTS = new Set(['mp3', 'm4a', 'aac', 'wav'])
+const AUDIO_MAX_BYTES = 50 * 1024 * 1024
 
 const editableWidgets = computed(() =>
   ((section.value?.widgets || []) as any[]).filter((w) => ADMIN_CREATABLE_WIDGET_TYPES.has(String(w.type || '')))
@@ -140,6 +147,7 @@ const editableWidgets = computed(() =>
 
 function widgetHint(type: string) {
   if (type === 'video_group') return '由管理员上传 / 配置视频列表'
+  if (type === 'audio_group') return '由管理员上传 / 配置音频列表'
   if (type === 'attendance') return '（活动参与控件，由用户参与产生数据，不在此填写）'
   return ''
 }
@@ -180,7 +188,7 @@ async function loadSection(id: string) {
     section.value = res.section || null
     Object.keys(formData).forEach((k) => delete formData[k])
     for (const w of editableWidgets.value) {
-      if (w.type === 'video_group') formData[w.widgetId] = []
+      if (w.type === 'video_group' || w.type === 'audio_group') formData[w.widgetId] = []
       else if (w.type === 'number') formData[w.widgetId] = 0
       else formData[w.widgetId] = ''
     }
@@ -221,34 +229,8 @@ async function submit() {
   }
 
   for (const w of editableWidgets.value) {
-    if (w.type !== 'video_group') continue
-    const list = (formData[w.widgetId] as any[]) || []
-    for (const [i, item] of list.entries()) {
-      if (!item.title) {
-        ElMessage.error(`「${w.label}」第 ${i + 1} 条视频的标题为空`)
-        return
-      }
-      if (item.source === 'cos' && !item.fileID) {
-        ElMessage.error(`「${w.label}」第 ${i + 1} 条视频未上传文件`)
-        return
-      }
-      if (item.source === 'channels_feed' && (!item.finderUserName || !item.feedId)) {
-        ElMessage.error(`「${w.label}」第 ${i + 1} 条视频号 feed 信息不全`)
-        return
-      }
-      if (item.source === 'channels_live' && (!item.finderUserName || !item.nonceId)) {
-        ElMessage.error(`「${w.label}」第 ${i + 1} 条视频号直播信息不全`)
-        return
-      }
-      if (item.source === 'miniprogram' && !item.appId) {
-        ElMessage.error(`「${w.label}」第 ${i + 1} 条小程序 appId 为空`)
-        return
-      }
-      if ((item.source === 'h5' || item.source === 'app_link') && !item.url) {
-        ElMessage.error(`「${w.label}」第 ${i + 1} 条 URL 为空`)
-        return
-      }
-    }
+    if (w.type === 'video_group' && !validateVideoItems(w)) return
+    if (w.type === 'audio_group' && !validateAudioItems(w)) return
   }
 
   submitting.value = true
@@ -265,6 +247,68 @@ async function submit() {
   } finally {
     submitting.value = false
   }
+}
+
+function validateVideoItems(w: any) {
+  const list = (formData[w.widgetId] as any[]) || []
+  for (const [i, item] of list.entries()) {
+    if (!item.title) {
+      ElMessage.error(`「${w.label}」第 ${i + 1} 条视频的标题为空`)
+      return false
+    }
+    if (item.source === 'cos' && !item.fileID) {
+      ElMessage.error(`「${w.label}」第 ${i + 1} 条视频未上传文件`)
+      return false
+    }
+    if (item.source === 'channels_feed' && (!item.finderUserName || !item.feedId)) {
+      ElMessage.error(`「${w.label}」第 ${i + 1} 条视频号 feed 信息不全`)
+      return false
+    }
+    if (item.source === 'channels_live' && (!item.finderUserName || !item.nonceId)) {
+      ElMessage.error(`「${w.label}」第 ${i + 1} 条视频号直播信息不全`)
+      return false
+    }
+    if (item.source === 'miniprogram' && !item.appId) {
+      ElMessage.error(`「${w.label}」第 ${i + 1} 条小程序 appId 为空`)
+      return false
+    }
+    if ((item.source === 'h5' || item.source === 'app_link') && !item.url) {
+      ElMessage.error(`「${w.label}」第 ${i + 1} 条 URL 为空`)
+      return false
+    }
+  }
+  return true
+}
+
+function validateAudioItems(w: any) {
+  const list = (formData[w.widgetId] as any[]) || []
+  for (const [i, item] of list.entries()) {
+    if (!item.title) {
+      ElMessage.error(`「${w.label}」第 ${i + 1} 条音频的标题为空`)
+      return false
+    }
+    if (!item.fileID) {
+      ElMessage.error(`「${w.label}」第 ${i + 1} 条音频未上传文件`)
+      return false
+    }
+    if (!String(item.fileID).startsWith('cloud://')) {
+      ElMessage.error(`「${w.label}」第 ${i + 1} 条音频文件格式不正确`)
+      return false
+    }
+    if (!AUDIO_EXTS.has(String(item.ext || '').toLowerCase())) {
+      ElMessage.error(`「${w.label}」第 ${i + 1} 条音频格式不支持`)
+      return false
+    }
+    if (!Number.isFinite(Number(item.duration)) || Number(item.duration) <= 0) {
+      ElMessage.error(`「${w.label}」第 ${i + 1} 条音频时长不正确`)
+      return false
+    }
+    if (!Number.isFinite(Number(item.size)) || Number(item.size) <= 0 || Number(item.size) > AUDIO_MAX_BYTES) {
+      ElMessage.error(`「${w.label}」第 ${i + 1} 条音频大小不正确`)
+      return false
+    }
+  }
+  return true
 }
 </script>
 

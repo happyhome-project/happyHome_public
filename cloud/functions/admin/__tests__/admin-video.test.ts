@@ -67,6 +67,31 @@ describe('video.requestUpload', () => {
   })
 })
 
+describe('audio.requestUpload', () => {
+  test('校验 fileName 不能为空', async () => {
+    await expect(main({ action: 'audio.requestUpload', _actAs: SUPER_CTX, fileName: '' }))
+      .rejects.toThrow('fileName 不能为空')
+  })
+
+  test('拒绝非法扩展名', async () => {
+    await expect(main({ action: 'audio.requestUpload', _actAs: SUPER_CTX, fileName: 'voice.flac' }))
+      .rejects.toThrow('不支持的文件类型')
+  })
+
+  test('音频扩展名走 posts/audios/ 路径', async () => {
+    ;(storage.requestUploadMetadata as jest.Mock).mockResolvedValue({
+      cloudPath: 'posts/audios/x.mp3',
+      fileId: 'cloud://env/posts/audios/x.mp3',
+      url: 'https://cos/upload',
+      token: 'tk', authorization: 'auth', cosFileId: 'cosId',
+    })
+    await main({ action: 'audio.requestUpload', _actAs: SUPER_CTX, fileName: 'episode.M4A' })
+    const path = (storage.requestUploadMetadata as jest.Mock).mock.calls[0][0]
+    expect(path).toMatch(/^posts\/audios\/\d+_[a-z0-9]+\.m4a$/)
+  })
+
+})
+
 describe('post.createAdmin', () => {
   test('communityId 缺失抛错', async () => {
     await expect(main({
@@ -221,5 +246,71 @@ describe('post.createAdmin', () => {
       sectionId: 's-1',
       content: { 'w-2': [{ itemId: 'i1', source: 'h5', title: 'Lesson 1' }] },
     })).rejects.toThrow('链接不能为空')
+  })
+
+  test('audio_group 接受合法音频条目', async () => {
+    ;(db.getById as jest.Mock).mockResolvedValueOnce({
+      _id: 's-1', communityId: 'c-1', widgets: [
+        { widgetId: 'w-audio', type: 'audio_group', label: '音频', required: false, fieldKey: 'audio', order: 0, showInList: false },
+      ],
+    })
+    ;(db.create as jest.Mock).mockResolvedValueOnce('post-AUDIO')
+
+    await main({
+      action: 'post.createAdmin',
+      _actAs: SUPER_CTX,
+      communityId: 'c-1',
+      sectionId: 's-1',
+      content: {
+        'w-audio': [{ title: '第一讲', fileID: 'cloud://env/audios/1.mp3', duration: 120, size: 1024, ext: 'mp3' }],
+      },
+    })
+
+    const [, payload] = (db.create as jest.Mock).mock.calls[0]
+    expect(payload.content['w-audio']).toEqual([
+      { title: '第一讲', fileID: 'cloud://env/audios/1.mp3', duration: 120, size: 1024, ext: 'mp3' },
+    ])
+  })
+
+  test('audio_group 必须是数组', async () => {
+    ;(db.getById as jest.Mock).mockResolvedValueOnce({
+      _id: 's-1', communityId: 'c-1', widgets: [
+        { widgetId: 'w-audio', type: 'audio_group', label: '音频', required: false, fieldKey: 'audio', order: 0, showInList: false },
+      ],
+    })
+
+    await expect(main({
+      action: 'post.createAdmin',
+      _actAs: SUPER_CTX,
+      communityId: 'c-1',
+      sectionId: 's-1',
+      content: { 'w-audio': { title: '第一讲' } },
+    })).rejects.toThrow('必须是音频条目数组')
+  })
+
+  test('audio_group 校验标题、文件、格式、时长和大小', async () => {
+    const widgets = [
+      { widgetId: 'w-audio', type: 'audio_group', label: '音频', required: false, fieldKey: 'audio', order: 0, showInList: false },
+    ]
+
+    for (const item of [
+      { fileID: 'cloud://env/audios/1.mp3', duration: 120, size: 1024, ext: 'mp3' },
+      { title: '第一讲', duration: 120, size: 1024, ext: 'mp3' },
+      { title: '第一讲', fileID: 'https://cdn/1.mp3', duration: 120, size: 1024, ext: 'mp3' },
+      { title: '第一讲', fileID: 'cloud://env/audios/1.flac', duration: 120, size: 1024, ext: 'flac' },
+      { title: '第一讲', fileID: 'cloud://env/audios/1.mp3', duration: 0, size: 1024, ext: 'mp3' },
+      { title: '第一讲', fileID: 'cloud://env/audios/1.mp3', duration: 120, size: 51 * 1024 * 1024, ext: 'mp3' },
+    ]) {
+      ;(db.getById as jest.Mock).mockResolvedValueOnce({
+        _id: 's-1', communityId: 'c-1', widgets,
+      })
+      await expect(main({
+        action: 'post.createAdmin',
+        _actAs: SUPER_CTX,
+        communityId: 'c-1',
+        sectionId: 's-1',
+        content: { 'w-audio': [item] },
+      })).rejects.toThrow()
+    }
   })
 })

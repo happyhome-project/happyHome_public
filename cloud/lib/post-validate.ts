@@ -1,3 +1,4 @@
+import { AUDIO_ALLOWED_EXTS, AUDIO_MAX_SIZE_BYTES } from '../shared/types'
 import type { PostContent, Section, Widget, WidgetType } from '../shared/types'
 
 // 永远不进 post.content 的控件类型（无论 user 还是 admin 路径）：
@@ -9,9 +10,10 @@ export const NEVER_IN_POST_CONTENT: Set<WidgetType> = new Set([
 ])
 
 // 普通用户不能编辑、但 admin 代发帖时允许的控件类型：
-//   video_group: admin 在 admin-web 上传视频后代发帖
+//   video_group/audio_group: admin 在 admin-web 维护媒体内容后代发帖
 export const ADMIN_ONLY_WIDGET_TYPES: Set<WidgetType> = new Set([
   'video_group',
+  'audio_group',
 ])
 
 export function getEditableWidgetIds(section: Section, allowAdminOnly = false): Set<string> {
@@ -72,6 +74,8 @@ const VIDEO_SOURCES = new Set([
   'app_link',
 ])
 
+const AUDIO_EXTS = new Set<string>(AUDIO_ALLOWED_EXTS)
+
 function requireText(value: unknown, message: string): void {
   if (typeof value !== 'string' || value.trim() === '') {
     throw new Error(message)
@@ -106,6 +110,37 @@ function validateVideoItem(item: unknown, widgetLabel: string, index: number): v
   }
 }
 
+function validatePositiveNumber(value: unknown, message: string): void {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    throw new Error(message)
+  }
+}
+
+function validateAudioTrack(item: unknown, widgetLabel: string, index: number): void {
+  const prefix = `音频控件「${widgetLabel || '未命名'}」第 ${index + 1} 条`
+  if (!item || typeof item !== 'object' || Array.isArray(item)) {
+    throw new Error(`${prefix}数据格式不正确`)
+  }
+
+  const audio = item as Record<string, unknown>
+  requireText(audio.title, `${prefix}标题不能为空`)
+  requireText(audio.fileID, `${prefix}音频文件不能为空`)
+  if (!String(audio.fileID).startsWith('cloud://')) {
+    throw new Error(`${prefix}音频文件必须是 cloud:// 文件`)
+  }
+
+  const ext = String(audio.ext || '').toLowerCase()
+  if (!AUDIO_EXTS.has(ext)) {
+    throw new Error(`${prefix}格式不支持`)
+  }
+
+  validatePositiveNumber(audio.duration, `${prefix}时长不正确`)
+  validatePositiveNumber(audio.size, `${prefix}文件大小不正确`)
+  if (Number(audio.size) > AUDIO_MAX_SIZE_BYTES) {
+    throw new Error(`${prefix}文件不能超过 50MB`)
+  }
+}
+
 export function validateContentValues(
   section: Section,
   content: PostContent,
@@ -113,14 +148,23 @@ export function validateContentValues(
 ): void {
   const allowAdminOnly = options.allowAdminOnly === true
   for (const widget of (section.widgets || []) as Widget[]) {
-    if (widget.type !== 'video_group') continue
     if (!allowAdminOnly) continue
 
     const value = content[widget.widgetId]
     if (value === undefined || value === null || value === '') continue
-    if (!Array.isArray(value)) {
-      throw new Error(`视频控件「${widget.label || '未命名'}」必须是视频条目数组`)
+
+    if (widget.type === 'video_group') {
+      if (!Array.isArray(value)) {
+        throw new Error(`视频控件「${widget.label || '未命名'}」必须是视频条目数组`)
+      }
+      value.forEach((item, index) => validateVideoItem(item, widget.label, index))
     }
-    value.forEach((item, index) => validateVideoItem(item, widget.label, index))
+
+    if (widget.type === 'audio_group') {
+      if (!Array.isArray(value)) {
+        throw new Error(`音频控件「${widget.label || '未命名'}」必须是音频条目数组`)
+      }
+      value.forEach((item, index) => validateAudioTrack(item, widget.label, index))
+    }
   }
 }

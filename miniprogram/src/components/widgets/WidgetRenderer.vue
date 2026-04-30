@@ -23,6 +23,23 @@
           :item="item"
         />
       </view>
+      <view v-else-if="widget.type === 'audio_group'" class="audio-list">
+        <view
+          v-for="(item, index) in audioTracks"
+          :key="item.fileID || index"
+          class="audio-card"
+          :class="{ active: isCurrentAudio(index), playing: isCurrentAudio(index) && audioStore.isPlaying }"
+          @tap="playAudio(index)"
+        >
+          <view class="audio-play">
+            <text>{{ isCurrentAudio(index) && audioStore.isPlaying ? 'Ⅱ' : '▶' }}</text>
+          </view>
+          <view class="audio-main">
+            <text class="audio-title">{{ item.title || `音频 ${index + 1}` }}</text>
+            <text class="audio-meta">{{ formatAudioDuration(item.duration) }}</text>
+          </view>
+        </view>
+      </view>
       <rich-text
         v-else-if="widget.type === 'rich_text'"
         :nodes="rawValue as string"
@@ -43,12 +60,29 @@
 import { computed } from 'vue'
 import { formatWidgetValue } from '../../utils/widget'
 import { resolveWidgetLabel } from '../../utils/widget-form'
+import { useAudioStore } from '../../store/audio'
 import VideoPlayerCard from './VideoPlayerCard.vue'
 
-const props = defineProps<{ widget: any; content: Record<string, any> }>()
+const props = defineProps<{
+  widget: any
+  content: Record<string, any>
+  postMeta?: { postId?: string; postTitle?: string; sectionId?: string; communityId?: string }
+}>()
 
+const audioStore = useAudioStore()
 const displayLabel = computed(() => resolveWidgetLabel(props.widget))
 const rawValue = computed(() => props.content[props.widget.widgetId])
+const audioTracks = computed(() =>
+  Array.isArray(rawValue.value)
+    ? rawValue.value
+        .filter((item: any) => item && typeof item === 'object' && item.fileID)
+        .map((item: any) => ({
+          fileID: String(item.fileID || ''),
+          title: String(item.title || ''),
+          duration: Number(item.duration || 0),
+        }))
+    : []
+)
 const hasValue = computed(() => {
   const v = rawValue.value
   return v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0)
@@ -97,6 +131,33 @@ function openLocation() {
     scale: 16,
   })
 }
+
+function isCurrentAudio(index: number) {
+  const track = audioTracks.value[index]
+  return Boolean(
+    track &&
+    audioStore.currentMeta?.postId === props.postMeta?.postId &&
+    audioStore.currentPlaylist[audioStore.currentIndex]?.fileID === track.fileID,
+  )
+}
+
+async function playAudio(index: number) {
+  if (audioTracks.value.length === 0) return
+  await audioStore.playPlaylist(audioTracks.value, index, {
+    postId: String(props.postMeta?.postId || ''),
+    postTitle: String(props.postMeta?.postTitle || ''),
+    sectionId: String(props.postMeta?.sectionId || ''),
+    communityId: String(props.postMeta?.communityId || ''),
+  })
+}
+
+function formatAudioDuration(value: unknown): string {
+  const total = Math.max(0, Math.round(Number(value || 0)))
+  if (!total) return '--:--'
+  const minutes = Math.floor(total / 60)
+  const seconds = total % 60
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
 </script>
 
 <style lang="scss" scoped>
@@ -106,6 +167,42 @@ function openLocation() {
 .images { display: flex; flex-wrap: wrap; gap: $hh-space-sm; }
 .thumb { width: 160rpx; height: 160rpx; border-radius: $hh-radius-sm; }
 .videos { display: block; }
+.audio-list { display: grid; gap: $hh-space-sm; }
+.audio-card {
+  display: flex;
+  align-items: center;
+  gap: $hh-space-sm;
+  padding: $hh-space-md;
+  background: $hh-color-bg-sub;
+  border: 1rpx solid $hh-color-divider;
+  border-radius: $hh-radius-md;
+}
+.audio-card.active {
+  border-color: $hh-accent;
+  background: $hh-accent-wash;
+}
+.audio-play {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 50%;
+  background: $hh-accent;
+  color: $hh-surface-1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24rpx;
+  font-weight: $hh-font-weight-bold;
+  flex: 0 0 auto;
+}
+.audio-main { min-width: 0; display: flex; flex-direction: column; gap: 4rpx; }
+.audio-title {
+  font-size: $hh-font-body;
+  color: $hh-color-text;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.audio-meta { font-size: $hh-font-caption; color: $hh-color-text-mute; }
 .location-value {
   color: $hh-color-info;
   text-decoration: underline;

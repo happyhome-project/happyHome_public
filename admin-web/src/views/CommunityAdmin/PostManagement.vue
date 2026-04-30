@@ -142,6 +142,20 @@
               </div>
               <span v-if="videoItems(field.rawValue).length === 0">空</span>
             </div>
+            <div v-else-if="field.type === 'audio_group'" class="audio-detail-list">
+              <div
+                v-for="(item, index) in audioItems(field.rawValue)"
+                :key="item.fileID || index"
+                class="audio-detail-item"
+              >
+                <div class="audio-title">{{ item.title || `未命名音频 #${index + 1}` }}</div>
+                <div class="sub-text">格式：{{ String(item.ext || '').toUpperCase() || '未知' }}</div>
+                <div class="sub-text">时长：{{ formatAudioDuration(item.duration) }}</div>
+                <div class="sub-text">大小：{{ formatBytes(item.size) }}</div>
+                <div class="sub-text video-link" :title="item.fileID">{{ item.fileID }}</div>
+              </div>
+              <span v-if="audioItems(field.rawValue).length === 0">空</span>
+            </div>
             <span v-else>{{ field.value }}</span>
           </el-descriptions-item>
         </el-descriptions>
@@ -366,7 +380,7 @@ function getPostSummary(row: any) {
   const firstAttendance = attendanceSummaries.find((item) => Number(item?.count || 0) > 0)
   if (firstAttendance) return `${firstAttendance.count}人参与`
   const content = row?.content || {}
-  const firstValue = Object.values(content)[0]
+  const firstValue = Object.values(content).find((value) => !Array.isArray(value) && !(value && typeof value === 'object'))
   return formatValue(firstValue)
 }
 
@@ -390,6 +404,26 @@ function videoSourceLabel(source: string) {
 
 function videoItems(value: unknown) {
   return Array.isArray(value) ? value.filter((item) => item && typeof item === 'object') : []
+}
+
+function audioItems(value: unknown) {
+  return Array.isArray(value) ? value.filter((item) => item && typeof item === 'object') : []
+}
+
+function formatBytes(value: unknown) {
+  const bytes = Number(value || 0)
+  if (!Number.isFinite(bytes) || bytes <= 0) return '-'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function formatAudioDuration(value: unknown) {
+  const total = Math.max(0, Math.round(Number(value || 0)))
+  if (!total) return '-'
+  const minutes = Math.floor(total / 60)
+  const seconds = total % 60
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
 }
 
 function videoPrimaryText(item: any) {
@@ -466,7 +500,8 @@ function videoPrimaryText(item: any) {
   gap: 10px;
 }
 
-.video-detail-list {
+.video-detail-list,
+.audio-detail-list {
   display: grid;
   gap: 12px;
 }
@@ -508,6 +543,19 @@ function videoPrimaryText(item: any) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.audio-detail-item {
+  padding: 10px 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.audio-title {
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 4px;
 }
 
 @media (max-width: 768px) {

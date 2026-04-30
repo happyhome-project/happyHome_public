@@ -84,7 +84,7 @@
       />
     </view>
 
-    <view v-else-if="widget.type === 'video_group'" class="video-readonly">
+    <view v-else-if="widget.type === 'video_group' || widget.type === 'audio_group'" class="video-readonly">
       <text class="readonly-hint">该控件由管理员维护，无需在此填写</text>
     </view>
   </view>

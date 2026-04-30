@@ -9,7 +9,7 @@ export interface ListPreviewItem {
 
 export function getListPreview(post: Post, section: Section): ListPreviewItem[] {
   return section.widgets
-    .filter((widget) => widget.showInList && widget.type !== 'admin_notice' && widget.type !== 'video_group')
+    .filter((widget) => widget.showInList && !['admin_notice', 'video_group', 'audio_group'].includes(widget.type))
     .sort((a, b) => a.order - b.order)
     .map((widget) => {
       if (widget.type === 'attendance') {
