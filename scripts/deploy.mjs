@@ -305,7 +305,10 @@ async function deployAdminWebToAliyun() {
   console.log('\nPacking admin-web dist...')
   // --force-local: 在 Windows + Git Bash 下，tar 会把 "X:\..." 当成 remote host:path 解析失败。
   // 这个 flag 强制把带冒号的路径当本地路径处理。
-  execSync(`tar --force-local -czf ${quote(archivePath)} -C ${quote(ADMIN_WEB_DIST)} .`, { cwd: ROOT, stdio: 'inherit' })
+  const tarHelp = execSync('tar --help', { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+  const forceLocalFlag = tarHelp.includes('--force-local') ? '--force-local ' : ''
+  // Git Bash tar needs --force-local for Windows drive-letter paths; Windows tar rejects it.
+  execSync(`tar ${forceLocalFlag}-czf ${quote(archivePath)} -C ${quote(ADMIN_WEB_DIST)} .`, { cwd: ROOT, stdio: 'inherit' })
 
   const remoteScript = `#!/usr/bin/env bash
 set -euo pipefail

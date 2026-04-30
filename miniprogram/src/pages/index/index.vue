@@ -213,7 +213,7 @@ const showSwitcher = ref(false)
 const postsBySection = ref<Record<string, any[]>>({})
 let refreshingHome = false
 let queuedForcedHomeRefresh = false
-const NOTICE_PREVIEW_LIMIT = 90
+const NOTICE_PREVIEW_LIMIT = 68
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
 
@@ -291,7 +291,7 @@ const sectionNotices = computed<SectionNotice[]>(() => {
   return notices
 })
 
-// ── 实时协作区：type='realtime' && status='active' 的板块，每个板块取 1 条最新帖子作为脉冲 ──
+// ── 实时协作区：type='realtime' && status='active' 的板块，按帖子逐条展示 ──
 interface LiveItem { ic: string; t: string; m: string[]; cta: string; sectionId: string; postId?: string }
 const liveItems = computed<LiveItem[]>(() => {
   const sections = communityStore.currentSections ?? []
@@ -299,20 +299,16 @@ const liveItems = computed<LiveItem[]>(() => {
   for (const section of sections) {
     if (secType(section) !== 'realtime' || secStatus(section) !== 'active') continue
     const posts = postsBySection.value[section._id] ?? []
-    const latest = posts[0]
-    if (!latest) continue
-    const meta: string[] = []
-    if (latest.authorNickname) meta.push(latest.authorNickname)
-    meta.push(formatTime(latest.createdAt))
-    if (posts.length > 1) meta.push(`${posts.length} 人参与`)
-    items.push({
-      ic: section.icon || '·',
-      t: getPostTitle(latest, section) || section.name,
-      m: meta,
-      cta: '进入',
-      sectionId: section._id,
-      postId: latest._id,
-    })
+    for (const post of posts) {
+      items.push({
+        ic: section.icon || '·',
+        t: getPostTitle(post, section) || section.name,
+        m: getLivePostMeta(post),
+        cta: '进入',
+        sectionId: section._id,
+        postId: post._id,
+      })
+    }
   }
   return items
 })
@@ -385,16 +381,24 @@ function getArchiveMeta(post: any, section: any): string {
   if (section?.enableComment !== false && Number(post?.commentCount || 0) > 0) {
     return `${post.commentCount} 评论`
   }
-  if (section?.enableLike === false && section?.enableComment === false) {
-    return '互动关闭'
-  }
-  if (section?.enableLike === false) {
-    return '点赞关闭'
-  }
-  if (section?.enableComment === false) {
-    return '评论关闭'
-  }
   return ''
+}
+
+function getLivePostMeta(post: any): string[] {
+  const meta: string[] = []
+  if (post.authorNickname) meta.push(post.authorNickname)
+  meta.push(formatTime(post.createdAt))
+  const attendanceText = getAttendanceMeta(post)
+  if (attendanceText) meta.push(attendanceText)
+  return meta
+}
+
+function getAttendanceMeta(post: any): string {
+  const summaries = Object.values(post?.attendanceSummaryByWidget || {}) as any[]
+  const summary = summaries.find((item) => Number(item?.occupiedSeats ?? item?.count ?? 0) > 0)
+  if (!summary) return ''
+  const occupiedSeats = Number(summary.occupiedSeats ?? summary.count ?? 0)
+  return occupiedSeats > 0 ? `${occupiedSeats}人参与` : ''
 }
 
 function getArchiveCardStyle(group: ArchiveGroup, index: number) {
@@ -412,8 +416,9 @@ function getNoticeCardStyle(notice: SectionNotice, index: number) {
 }
 
 function makeNoticePreview(content: string) {
-  const chars = Array.from(content.trim())
-  if (chars.length <= NOTICE_PREVIEW_LIMIT) return content.trim()
+  const normalized = content.trim().replace(/\n{2,}/g, '\n')
+  const chars = Array.from(normalized)
+  if (chars.length <= NOTICE_PREVIEW_LIMIT) return normalized
   return `${chars.slice(0, NOTICE_PREVIEW_LIMIT).join('').trimEnd()}…`
 }
 
@@ -679,13 +684,13 @@ onShow(() => {
 
 /* ═══ Admin notices ═══ */
 .notice-list {
-  margin: 0 32rpx 36rpx;
+  margin: 0 32rpx 30rpx;
   display: flex;
   flex-direction: column;
-  gap: 18rpx;
+  gap: 14rpx;
 }
 .notice-card {
-  padding: 26rpx 28rpx 28rpx;
+  padding: 22rpx 26rpx 20rpx;
   border: 1rpx solid $hh-ink-line;
   border-left: 8rpx solid var(--notice-accent);
   border-radius: 24rpx;
@@ -700,13 +705,13 @@ onShow(() => {
 .notice-head {
   display: flex;
   align-items: center;
-  gap: 18rpx;
-  margin-bottom: 16rpx;
+  gap: 14rpx;
+  margin-bottom: 12rpx;
 }
 .notice-mark {
-  width: 52rpx;
-  height: 52rpx;
-  border-radius: 16rpx;
+  width: 46rpx;
+  height: 46rpx;
+  border-radius: 14rpx;
   background: var(--notice-accent);
   display: flex;
   align-items: center;
@@ -715,7 +720,7 @@ onShow(() => {
 }
 .notice-mark text {
   color: $hh-surface-1;
-  font-size: 24rpx;
+  font-size: 22rpx;
   font-weight: $hh-font-weight-heavy;
 }
 .notice-title-wrap {
@@ -724,13 +729,13 @@ onShow(() => {
   min-width: 0;
 }
 .notice-section {
-  font-size: 27rpx;
+  font-size: 26rpx;
   font-weight: $hh-font-weight-bold;
   color: $hh-ink-1;
   line-height: 1.25;
 }
 .notice-label {
-  margin-top: 4rpx;
+  margin-top: 2rpx;
   font-family: $hh-font-mono;
   font-size: 20rpx;
   letter-spacing: $hh-tracking-mono-sm;
@@ -738,14 +743,14 @@ onShow(() => {
 }
 .notice-content {
   display: block;
-  font-size: 28rpx;
-  line-height: 1.72;
+  font-size: 27rpx;
+  line-height: 1.52;
   color: $hh-ink-2;
   white-space: pre-wrap;
 }
 .notice-foot {
-  margin-top: 18rpx;
-  padding-top: 16rpx;
+  margin-top: 10rpx;
+  padding-top: 10rpx;
   border-top: 1rpx dashed $hh-ink-line-2;
   display: flex;
   align-items: center;

@@ -78,10 +78,6 @@
       <view class="meta">
         <view>
           <text class="time">发布于 {{ formatDate(post.createdAt) }}</text>
-          <view class="section-flags">
-            <text class="flag">{{ section.enableComment !== false ? '评论开启' : '评论关闭' }}</text>
-            <text class="flag">{{ section.enableLike !== false ? '点赞开启' : '点赞关闭' }}</text>
-          </view>
         </view>
         <view v-if="isAuthor" class="actions">
           <text v-if="!editing" class="edit-btn" @tap="startEdit">编辑</text>
@@ -664,20 +660,6 @@ function formatDateTime(iso: string): string {
 .time {
   font-size: $hh-font-caption;
   color: $hh-color-text-mute;
-}
-
-.section-flags {
-  display: flex;
-  gap: $hh-space-sm;
-  margin-top: $hh-space-xs;
-}
-
-.flag {
-  font-size: $hh-font-caption;
-  color: $hh-color-text-mute;
-  background: $hh-color-bg-sub;
-  padding: 4rpx 12rpx;
-  border-radius: $hh-radius-full;
 }
 
 .actions {

@@ -4,6 +4,7 @@ import * as db from '../../lib/db'
 import * as storage from '../../lib/storage'
 import { extractCloudFileIDsFromContent } from '../../lib/extract-file-ids'
 import { sanitizeContent, validateRequiredWidgets } from '../../lib/post-validate'
+import { getWxacodeUnlimited } from '../../lib/wx-openapi'
 import {
   assertOwnCommunityOrSuper,
   generateSalt,
@@ -438,21 +439,19 @@ async function publicRoute(action: string, params: Record<string, any>, openid =
     const now = Date.now()
     const expiresAt = new Date(now + WX_LOGIN_TICKET_TTL_MS).toISOString()
 
-    // 调微信开放接口生成无限带参小程序码
-    // 风险点：cloud.openapi.wxacode.getUnlimited 在 CloudBase 函数里能否调通
-    // 取决于 env 是否绑定了小程序 appid + 是否开启 openapi 链路。
-    // 实测不通时降级到 access_token + HTTP 直调（fallback 见 plan §8）
+    // 调微信开放接口生成无限带参小程序码。
+    // CloudBase 函数环境跟「微信小程序云开发」是不同产品，cloud.openapi 不通
+    // （实测 errMsg=invalid wx openapi access_token），所以直接走 HTTP +
+    // 自管 access_token。详见 cloud/lib/wx-openapi.ts。
     let qrCodeBase64: string
     try {
-      const result: any = await (cloud as any).openapi.wxacode.getUnlimited({
+      const buffer = await getWxacodeUnlimited({
         scene: ticket,
         page: WXACODE_PAGE,
         width: 280,
-        env_version: WXACODE_ENV_VERSION,
-        check_path: false,  // 开发期 page 还没发布时关掉路径校验
+        envVersion: WXACODE_ENV_VERSION,
+        checkPath: false,  // 开发期 page 还没发布时关掉路径校验
       })
-      const buffer: Buffer = result?.buffer
-      if (!buffer) throw new Error('wxacode: no buffer returned')
       qrCodeBase64 = `data:image/png;base64,${buffer.toString('base64')}`
     } catch (err: any) {
       // 不写 ticket，直接报错让调用方知道 — 否则前端会显示空二维码轮询到过期
