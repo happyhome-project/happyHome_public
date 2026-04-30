@@ -213,7 +213,7 @@ const showSwitcher = ref(false)
 const postsBySection = ref<Record<string, any[]>>({})
 let refreshingHome = false
 let queuedForcedHomeRefresh = false
-const NOTICE_PREVIEW_LIMIT = 90
+const NOTICE_PREVIEW_LIMIT = 68
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
 
@@ -416,8 +416,9 @@ function getNoticeCardStyle(notice: SectionNotice, index: number) {
 }
 
 function makeNoticePreview(content: string) {
-  const chars = Array.from(content.trim())
-  if (chars.length <= NOTICE_PREVIEW_LIMIT) return content.trim()
+  const normalized = content.trim().replace(/\n{2,}/g, '\n')
+  const chars = Array.from(normalized)
+  if (chars.length <= NOTICE_PREVIEW_LIMIT) return normalized
   return `${chars.slice(0, NOTICE_PREVIEW_LIMIT).join('').trimEnd()}…`
 }
 
@@ -683,13 +684,13 @@ onShow(() => {
 
 /* ═══ Admin notices ═══ */
 .notice-list {
-  margin: 0 32rpx 36rpx;
+  margin: 0 32rpx 30rpx;
   display: flex;
   flex-direction: column;
-  gap: 18rpx;
+  gap: 14rpx;
 }
 .notice-card {
-  padding: 26rpx 28rpx 28rpx;
+  padding: 22rpx 26rpx 20rpx;
   border: 1rpx solid $hh-ink-line;
   border-left: 8rpx solid var(--notice-accent);
   border-radius: 24rpx;
@@ -704,13 +705,13 @@ onShow(() => {
 .notice-head {
   display: flex;
   align-items: center;
-  gap: 18rpx;
-  margin-bottom: 16rpx;
+  gap: 14rpx;
+  margin-bottom: 12rpx;
 }
 .notice-mark {
-  width: 52rpx;
-  height: 52rpx;
-  border-radius: 16rpx;
+  width: 46rpx;
+  height: 46rpx;
+  border-radius: 14rpx;
   background: var(--notice-accent);
   display: flex;
   align-items: center;
@@ -719,7 +720,7 @@ onShow(() => {
 }
 .notice-mark text {
   color: $hh-surface-1;
-  font-size: 24rpx;
+  font-size: 22rpx;
   font-weight: $hh-font-weight-heavy;
 }
 .notice-title-wrap {
@@ -728,13 +729,13 @@ onShow(() => {
   min-width: 0;
 }
 .notice-section {
-  font-size: 27rpx;
+  font-size: 26rpx;
   font-weight: $hh-font-weight-bold;
   color: $hh-ink-1;
   line-height: 1.25;
 }
 .notice-label {
-  margin-top: 4rpx;
+  margin-top: 2rpx;
   font-family: $hh-font-mono;
   font-size: 20rpx;
   letter-spacing: $hh-tracking-mono-sm;
@@ -742,14 +743,14 @@ onShow(() => {
 }
 .notice-content {
   display: block;
-  font-size: 28rpx;
-  line-height: 1.72;
+  font-size: 27rpx;
+  line-height: 1.52;
   color: $hh-ink-2;
   white-space: pre-wrap;
 }
 .notice-foot {
-  margin-top: 18rpx;
-  padding-top: 16rpx;
+  margin-top: 10rpx;
+  padding-top: 10rpx;
   border-top: 1rpx dashed $hh-ink-line-2;
   display: flex;
   align-items: center;
