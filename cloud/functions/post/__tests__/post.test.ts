@@ -66,10 +66,19 @@ const mockSection = {
       showInList: false,
       noticeContent: '周三晚 7 点开课',
     },
+    {
+      widgetId: 'audio-widget',
+      type: 'audio_group',
+      label: '音频',
+      fieldKey: 'audio',
+      required: false,
+      order: 3,
+      showInList: false,
+    },
   ],
 }
 
-test('create: attendance 和公告控件不会参与发帖必填校验', async () => {
+test('create: attendance、公告和音频控件不会参与普通用户发帖', async () => {
   ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
   ;(db.getById as jest.Mock).mockResolvedValue(mockSection)
   ;(db.create as jest.Mock).mockResolvedValue('post-1')
@@ -80,6 +89,7 @@ test('create: attendance 和公告控件不会参与发帖必填校验', async (
     content: {
       'title-widget': '周六爬山',
       'notice-widget': '用户不应能写公告',
+      'audio-widget': [{ title: '用户伪造音频', fileID: 'cloud://env/a.mp3', duration: 10, size: 100, ext: 'mp3' }],
     },
   } as any, 'test-openid')
 
@@ -89,7 +99,7 @@ test('create: attendance 和公告控件不会参与发帖必填校验', async (
   }))
 })
 
-test('update: 保存时会清理无效字段、attendance 字段和公告字段', async () => {
+test('update: 保存时会清理无效字段、attendance、公告和音频字段', async () => {
   ;(db.getById as jest.Mock)
     .mockResolvedValueOnce({
       _id: 'post-1',
@@ -106,6 +116,7 @@ test('update: 保存时会清理无效字段、attendance 字段和公告字段'
       'title-widget': '更新后的标题',
       'attendance-widget': 'should-be-removed',
       'notice-widget': 'should-also-be-removed',
+      'audio-widget': [{ title: 'should-be-removed', fileID: 'cloud://env/a.mp3', duration: 10, size: 100, ext: 'mp3' }],
       'legacy-widget': 'legacy',
     } as any,
   }, 'test-openid')

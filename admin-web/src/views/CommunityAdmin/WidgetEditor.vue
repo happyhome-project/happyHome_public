@@ -48,6 +48,7 @@
                   <el-option label="数字" value="number" />
                   <el-option label="图片组" value="image_group" />
                   <el-option label="视频组" value="video_group" />
+                  <el-option label="音频组" value="audio_group" />
                   <el-option label="富文本" value="rich_text" />
                   <el-option label="地图位置" value="location" />
                   <el-option label="活动参与" value="attendance" :disabled="sectionType !== 'realtime'" />
@@ -111,6 +112,7 @@
                 />
                 <span class="muted-tip" v-if="widget.type === 'attendance'">开启后会显示“参与人数 + 头像预览”</span>
                 <span class="muted-tip" v-else-if="widget.type === 'admin_notice'">公告会直接展示在小程序首页板块区域，不进入帖子列表摘要</span>
+                <span class="muted-tip" v-else-if="widget.type === 'audio_group'">音频只在帖子详情页播放，不进入列表摘要</span>
                 <span class="muted-tip" v-else-if="!isListDisplayable(widget.type)">该类型不支持列表展示</span>
                 <span class="muted-tip" v-else>关闭后仅在帖子详情页展示</span>
               </el-form-item>
@@ -151,6 +153,7 @@ const DEFAULT_LABELS: Record<string, string> = {
   number: '数字',
   image_group: '图片组',
   video_group: '视频列表',
+  audio_group: '音频列表',
   rich_text: '正文',
   location: '位置',
   attendance: '活动参与',
@@ -194,7 +197,7 @@ onMounted(async () => {
         : String(widget?.label || ''),
       fieldKey: resolveFieldKey(widget, index),
       required: ['attendance', 'admin_notice'].includes(widget?.type) ? false : !!widget.required,
-      showInList: widget?.type === 'admin_notice' ? false : !!widget.showInList,
+      showInList: isListDisplayable(widget?.type) ? !!widget.showInList : false,
       noticeContent: widget?.type === 'admin_notice' ? String(widget.noticeContent || '') : undefined,
       _isNew: false,
     }))
@@ -262,6 +265,7 @@ function handleTypeChange(widget: any) {
   } else {
     widget.capacity = undefined
     widget.noticeContent = undefined
+    if (!isListDisplayable(widget.type)) widget.showInList = false
   }
 }
 
@@ -298,7 +302,7 @@ async function save() {
       label: widget.type === 'attendance' && shouldClearAttendanceLabel(widget.label) ? '' : widget.label,
       fieldKey: resolveFieldKey(widget, index),
       required: ['attendance', 'admin_notice'].includes(widget.type) ? false : !!widget.required,
-      showInList: widget.type === 'admin_notice' ? false : !!widget.showInList,
+      showInList: isListDisplayable(widget.type) ? !!widget.showInList : false,
       capacity: widget.type === 'attendance' && widget.capacity ? Number(widget.capacity) : undefined,
       noticeContent: widget.type === 'admin_notice' ? String(widget.noticeContent || '').trim() : undefined,
       order: index,

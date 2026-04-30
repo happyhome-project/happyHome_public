@@ -82,6 +82,7 @@
         </template>
       </view>
     </template>
+    <FloatingPlayer />
   </view>
 </template>
 
@@ -91,6 +92,7 @@ import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi, postApi } from '../../api/cloud'
+import FloatingPlayer from '../../components/FloatingPlayer/FloatingPlayer.vue'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 
@@ -244,8 +246,8 @@ async function handleSubmit() {
     const sectionId = selectedSection.value._id
     const content = { ...formData }
     for (const widget of editableWidgets.value) {
-      // video_group 由 admin 后台维护，普通用户发帖不携带该字段
-      if (widget.type === 'video_group') {
+      // 媒体组由 admin 后台维护，普通用户发帖不携带该字段
+      if (widget.type === 'video_group' || widget.type === 'audio_group') {
         delete content[widget.widgetId]
         continue
       }

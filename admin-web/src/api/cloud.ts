@@ -165,7 +165,7 @@ export const postAdminApi = {
     callAdmin('post.createAdmin', params),
 }
 
-export interface VideoUploadMetadata {
+export interface UploadMetadata {
   cloudPath: string
   fileId: string
   url: string
@@ -174,7 +174,14 @@ export interface VideoUploadMetadata {
   cosFileId: string
 }
 
+export type VideoUploadMetadata = UploadMetadata
+
 export const videoApi = {
   requestUpload: (params: { fileName: string }) =>
-    callAdmin('video.requestUpload', params) as Promise<VideoUploadMetadata>,
+    callAdmin('video.requestUpload', params) as Promise<UploadMetadata>,
+}
+
+export const audioApi = {
+  requestUpload: (params: { fileName: string }) =>
+    callAdmin('audio.requestUpload', params) as Promise<UploadMetadata>,
 }

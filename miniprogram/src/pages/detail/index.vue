@@ -12,6 +12,7 @@
           :key="widget.widgetId"
           :widget="widget"
           :content="post.content"
+          :post-meta="postMeta"
         />
 
         <view
@@ -130,6 +131,7 @@
         </scroll-view>
       </view>
     </view>
+    <FloatingPlayer />
   </view>
 </template>
 
@@ -140,6 +142,7 @@ import { postApi, sectionApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import LoginGuard from '../../components/LoginGuard.vue'
+import FloatingPlayer from '../../components/FloatingPlayer/FloatingPlayer.vue'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
 import WidgetRenderer from '../../components/widgets/WidgetRenderer.vue'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
@@ -174,6 +177,13 @@ const rosterSelfJoined = computed(() => {
 })
 
 const isAuthor = computed(() => post.value?.authorId === userStore.openId)
+const postMeta = computed(() => ({
+  postId: String(post.value?._id || currentPostId.value || ''),
+  postTitle: String(post.value?.content?.[regularWidgets.value[0]?.widgetId] || detailSectionTitle.value || '帖子'),
+  sectionId: String(post.value?.sectionId || section.value?._id || ''),
+  communityId: String(post.value?.communityId || section.value?.communityId || ''),
+}))
+const detailSectionTitle = computed(() => section.value?.name || '')
 const regularWidgets = computed(() =>
   (section.value?.widgets || []).filter((widget: any) => !['attendance', 'admin_notice'].includes(widget.type))
 )

@@ -51,6 +51,9 @@
     /* 小程序特有相关 */
     "mp-weixin" : {
         "appid" : "wx673b17363cd6b4a6",
+        "requiredBackgroundModes" : [
+            "audio"
+        ],
         "setting" : {
             "urlCheck" : false
         },

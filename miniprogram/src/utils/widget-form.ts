@@ -9,6 +9,7 @@ export const DEFAULT_WIDGET_LABELS: Record<string, string> = {
   attendance: '活动参与',
   admin_notice: '公告',
   video_group: '视频列表',
+  audio_group: '音频列表',
 }
 
 export function isPlaceholderWidgetLabel(label: unknown): boolean {
