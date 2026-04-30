@@ -62,3 +62,65 @@ export function validateRequiredWidgets(
     }
   }
 }
+
+const VIDEO_SOURCES = new Set([
+  'cos',
+  'channels_feed',
+  'channels_live',
+  'miniprogram',
+  'h5',
+  'app_link',
+])
+
+function requireText(value: unknown, message: string): void {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(message)
+  }
+}
+
+function validateVideoItem(item: unknown, widgetLabel: string, index: number): void {
+  const prefix = `视频控件「${widgetLabel || '未命名'}」第 ${index + 1} 条`
+  if (!item || typeof item !== 'object' || Array.isArray(item)) {
+    throw new Error(`${prefix}数据格式不正确`)
+  }
+
+  const video = item as Record<string, unknown>
+  requireText(video.title, `${prefix}标题不能为空`)
+  requireText(video.source, `${prefix}来源不能为空`)
+  if (!VIDEO_SOURCES.has(String(video.source))) {
+    throw new Error(`${prefix}来源不支持`)
+  }
+
+  if (video.source === 'cos') {
+    requireText(video.fileID, `${prefix}视频文件不能为空`)
+  } else if (video.source === 'channels_feed') {
+    requireText(video.finderUserName, `${prefix}视频号 ID 不能为空`)
+    requireText(video.feedId, `${prefix}视频 ID 不能为空`)
+  } else if (video.source === 'channels_live') {
+    requireText(video.finderUserName, `${prefix}视频号 ID 不能为空`)
+    requireText(video.nonceId, `${prefix}直播 nonceId 不能为空`)
+  } else if (video.source === 'miniprogram') {
+    requireText(video.appId, `${prefix}小程序 appId 不能为空`)
+  } else if (video.source === 'h5' || video.source === 'app_link') {
+    requireText(video.url, `${prefix}链接不能为空`)
+  }
+}
+
+export function validateContentValues(
+  section: Section,
+  content: PostContent,
+  options: { allowAdminOnly?: boolean } = {}
+): void {
+  const allowAdminOnly = options.allowAdminOnly === true
+  for (const widget of (section.widgets || []) as Widget[]) {
+    if (widget.type !== 'video_group') continue
+    if (!allowAdminOnly) continue
+
+    const value = content[widget.widgetId]
+    if (value === undefined || value === null || value === '') continue
+    if (!Array.isArray(value)) {
+      throw new Error(`视频控件「${widget.label || '未命名'}」必须是视频条目数组`)
+    }
+    value.forEach((item, index) => validateVideoItem(item, widget.label, index))
+  }
+}

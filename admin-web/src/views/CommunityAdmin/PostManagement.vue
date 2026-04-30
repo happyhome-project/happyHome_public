@@ -115,7 +115,34 @@
             :key="field.label"
             :label="field.label"
           >
-            {{ field.value }}
+            <div v-if="field.type === 'video_group'" class="video-detail-list">
+              <div
+                v-for="(item, index) in videoItems(field.rawValue)"
+                :key="item.itemId || index"
+                class="video-detail-item"
+              >
+                <el-image
+                  v-if="item.cover"
+                  :src="item.cover"
+                  class="video-cover"
+                  fit="cover"
+                  :preview-src-list="[item.cover]"
+                  preview-teleported
+                />
+                <div v-else class="video-cover video-cover-empty">视频</div>
+                <div class="video-detail-main">
+                  <div class="video-title">{{ item.title || `未命名视频 #${index + 1}` }}</div>
+                  <div class="sub-text">来源：{{ videoSourceLabel(item.source) }}</div>
+                  <div v-if="item.description" class="sub-text">简介：{{ item.description }}</div>
+                  <div v-if="item.duration" class="sub-text">时长：{{ item.duration }} 秒</div>
+                  <div class="sub-text video-link" :title="videoPrimaryText(item)">
+                    {{ videoPrimaryText(item) }}
+                  </div>
+                </div>
+              </div>
+              <span v-if="videoItems(field.rawValue).length === 0">空</span>
+            </div>
+            <span v-else>{{ field.value }}</span>
           </el-descriptions-item>
         </el-descriptions>
 
@@ -192,6 +219,8 @@ const detailFields = computed(() => {
     .filter((widget: any) => !['attendance', 'admin_notice'].includes(widget.type))
     .map((widget: any) => ({
       label: widget.label,
+      type: widget.type,
+      rawValue: detailPost.value.content?.[widget.widgetId],
       value: formatValue(detailPost.value.content?.[widget.widgetId]),
     }))
 })
@@ -346,6 +375,32 @@ function formatValue(value: unknown) {
   if (value && typeof value === 'object') return JSON.stringify(value)
   return String(value || '空')
 }
+
+function videoSourceLabel(source: string) {
+  const labels: Record<string, string> = {
+    cos: '自托管视频',
+    channels_feed: '视频号 Feed',
+    channels_live: '视频号直播',
+    miniprogram: '小程序',
+    h5: 'H5 链接',
+    app_link: 'App 链接',
+  }
+  return labels[source] || source || '未知'
+}
+
+function videoItems(value: unknown) {
+  return Array.isArray(value) ? value.filter((item) => item && typeof item === 'object') : []
+}
+
+function videoPrimaryText(item: any) {
+  if (!item || typeof item !== 'object') return ''
+  if (item.source === 'cos') return item.fileID || ''
+  if (item.source === 'channels_feed') return [item.finderUserName, item.feedId].filter(Boolean).join(' / ')
+  if (item.source === 'channels_live') return [item.finderUserName, item.nonceId].filter(Boolean).join(' / ')
+  if (item.source === 'miniprogram') return [item.appId, item.path].filter(Boolean).join(' / ')
+  if (item.source === 'h5' || item.source === 'app_link') return item.url || ''
+  return ''
+}
 </script>
 
 <style scoped>
@@ -409,6 +464,50 @@ function formatValue(value: unknown) {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.video-detail-list {
+  display: grid;
+  gap: 12px;
+}
+
+.video-detail-item {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.video-cover {
+  width: 96px;
+  height: 54px;
+  border-radius: 6px;
+  flex: 0 0 auto;
+  background: #f5f7fa;
+}
+
+.video-cover-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #909399;
+  font-size: 12px;
+}
+
+.video-detail-main {
+  min-width: 0;
+}
+
+.video-title {
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 4px;
+}
+
+.video-link {
+  max-width: 520px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 768px) {

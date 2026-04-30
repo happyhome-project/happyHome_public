@@ -3,7 +3,7 @@ import crypto from 'crypto'
 import * as db from '../../lib/db'
 import * as storage from '../../lib/storage'
 import { extractCloudFileIDsFromContent } from '../../lib/extract-file-ids'
-import { sanitizeContent, validateRequiredWidgets } from '../../lib/post-validate'
+import { sanitizeContent, validateContentValues, validateRequiredWidgets } from '../../lib/post-validate'
 import { getWxacodeUnlimited } from '../../lib/wx-openapi'
 import {
   assertOwnCommunityOrSuper,
@@ -1161,6 +1161,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     }
     const sanitized = sanitizeContent(params.content || {}, section, { allowAdminOnly: true })
     validateRequiredWidgets(section, sanitized, { allowAdminOnly: true })
+    validateContentValues(section, sanitized, { allowAdminOnly: true })
     const now = new Date().toISOString()
     const postId = await db.create('posts', {
       communityId,

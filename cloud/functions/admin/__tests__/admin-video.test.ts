@@ -158,4 +158,68 @@ describe('post.createAdmin', () => {
     expect(payload.content['w-2']).toHaveLength(1)
     expect(payload.content['w-att']).toBeUndefined()
   })
+
+  test('video_group 必须是数组', async () => {
+    ;(db.getById as jest.Mock).mockResolvedValueOnce({
+      _id: 's-1', communityId: 'c-1', widgets: [
+        { widgetId: 'w-2', type: 'video_group', label: '视频', required: false, fieldKey: 'f2', order: 0, showInList: false },
+      ],
+    })
+
+    await expect(main({
+      action: 'post.createAdmin',
+      _actAs: SUPER_CTX,
+      communityId: 'c-1',
+      sectionId: 's-1',
+      content: { 'w-2': { source: 'cos', title: 'Lesson 1', fileID: 'cloud://x.mp4' } },
+    })).rejects.toThrow('必须是视频条目数组')
+  })
+
+  test('video_group 拒绝未知来源', async () => {
+    ;(db.getById as jest.Mock).mockResolvedValueOnce({
+      _id: 's-1', communityId: 'c-1', widgets: [
+        { widgetId: 'w-2', type: 'video_group', label: '视频', required: false, fieldKey: 'f2', order: 0, showInList: false },
+      ],
+    })
+
+    await expect(main({
+      action: 'post.createAdmin',
+      _actAs: SUPER_CTX,
+      communityId: 'c-1',
+      sectionId: 's-1',
+      content: { 'w-2': [{ itemId: 'i1', source: 'unknown', title: 'Lesson 1' }] },
+    })).rejects.toThrow('来源不支持')
+  })
+
+  test('video_group 校验 cos 视频文件', async () => {
+    ;(db.getById as jest.Mock).mockResolvedValueOnce({
+      _id: 's-1', communityId: 'c-1', widgets: [
+        { widgetId: 'w-2', type: 'video_group', label: '视频', required: false, fieldKey: 'f2', order: 0, showInList: false },
+      ],
+    })
+
+    await expect(main({
+      action: 'post.createAdmin',
+      _actAs: SUPER_CTX,
+      communityId: 'c-1',
+      sectionId: 's-1',
+      content: { 'w-2': [{ itemId: 'i1', source: 'cos', title: 'Lesson 1' }] },
+    })).rejects.toThrow('视频文件不能为空')
+  })
+
+  test('video_group 校验外部链接', async () => {
+    ;(db.getById as jest.Mock).mockResolvedValueOnce({
+      _id: 's-1', communityId: 'c-1', widgets: [
+        { widgetId: 'w-2', type: 'video_group', label: '视频', required: false, fieldKey: 'f2', order: 0, showInList: false },
+      ],
+    })
+
+    await expect(main({
+      action: 'post.createAdmin',
+      _actAs: SUPER_CTX,
+      communityId: 'c-1',
+      sectionId: 's-1',
+      content: { 'w-2': [{ itemId: 'i1', source: 'h5', title: 'Lesson 1' }] },
+    })).rejects.toThrow('链接不能为空')
+  })
 })

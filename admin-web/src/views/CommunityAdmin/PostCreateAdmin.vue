@@ -132,9 +132,10 @@ const submitting = ref(false)
 const loadingSection = ref(false)
 const communityName = ref('')
 const authReady = computed(() => Boolean(auth.userId))
+const ADMIN_CREATABLE_WIDGET_TYPES = new Set(['short_text', 'summary', 'number', 'datetime', 'rich_text', 'video_group'])
 
 const editableWidgets = computed(() =>
-  ((section.value?.widgets || []) as any[]).filter((w) => w.type !== 'attendance')
+  ((section.value?.widgets || []) as any[]).filter((w) => ADMIN_CREATABLE_WIDGET_TYPES.has(String(w.type || '')))
 )
 
 function widgetHint(type: string) {
@@ -179,7 +180,7 @@ async function loadSection(id: string) {
     section.value = res.section || null
     Object.keys(formData).forEach((k) => delete formData[k])
     for (const w of editableWidgets.value) {
-      if (w.type === 'video_group' || w.type === 'image_group') formData[w.widgetId] = []
+      if (w.type === 'video_group') formData[w.widgetId] = []
       else if (w.type === 'number') formData[w.widgetId] = 0
       else formData[w.widgetId] = ''
     }
