@@ -25,7 +25,7 @@
           <div v-else-if="qrState === 'no_account'" class="qr-state error">
             <el-icon :size="40" color="#CF4040"><CircleClose /></el-icon>
             <p class="qr-hint">该微信未绑定管理员账号</p>
-            <p class="qr-sub">请联系超管开通后再扫，或先用账号密码登录</p>
+            <p class="qr-sub">微信扫码登录尚未开发完毕，请先使用账号密码登录。</p>
             <el-button @click="restart" type="primary" plain>重新生成二维码</el-button>
           </div>
 
@@ -68,8 +68,9 @@
 
         <el-divider>或</el-divider>
         <el-button data-testid="login-switch-qr" link @click="switchToQr">
-          使用微信扫码登录
+          微信扫码登录（未开发完毕）
         </el-button>
+        <p class="qr-sub qr-beta-hint">当前请优先使用账号密码登录；扫码能力仅作为后续辅助入口保留。</p>
       </template>
     </div>
   </div>
@@ -86,8 +87,8 @@ import { authApi, type WxLoginStatus } from '../api/cloud'
 const router = useRouter()
 const authStore = useAuthStore()
 
-// 模式：默认扫码，密码作为 fallback
-const mode = ref<'qr' | 'password'>('qr')
+// 账号密码是当前稳定主入口；扫码登录仍在打磨中，仅作为辅助入口保留。
+const mode = ref<'qr' | 'password'>('password')
 
 // ─── 密码登录 ───
 const username = ref('')
@@ -267,6 +268,11 @@ h2 {
   text-align: center;
   color: #909399;
   font-size: 12px;
+}
+
+.qr-beta-hint {
+  margin-top: 8px;
+  line-height: 1.5;
 }
 
 .qr-state.error .qr-hint {
