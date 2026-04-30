@@ -381,15 +381,6 @@ function getArchiveMeta(post: any, section: any): string {
   if (section?.enableComment !== false && Number(post?.commentCount || 0) > 0) {
     return `${post.commentCount} 评论`
   }
-  if (section?.enableLike === false && section?.enableComment === false) {
-    return '互动关闭'
-  }
-  if (section?.enableLike === false) {
-    return '点赞关闭'
-  }
-  if (section?.enableComment === false) {
-    return '评论关闭'
-  }
   return ''
 }
 
