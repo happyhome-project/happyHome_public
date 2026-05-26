@@ -1,7 +1,9 @@
 // cloud/lib/storage.ts
 import cloud from 'wx-server-sdk'
+import tcb from '@cloudbase/node-sdk'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
+const tcbApp = tcb.init({ env: tcb.SYMBOL_CURRENT_ENV })
 
 export async function uploadFile(
   cloudPath: string,
@@ -30,13 +32,14 @@ export interface UploadMetadata {
 }
 
 export async function requestUploadMetadata(cloudPath: string): Promise<UploadMetadata> {
-  const res: any = await (cloud as any).getUploadMetadata({ cloudPath })
+  const res: any = await tcbApp.getUploadMetadata({ cloudPath })
+  const data = res?.data ?? res
   return {
     cloudPath,
-    fileId: res.fileId ?? res.fileID,
-    url: res.url,
-    token: res.token,
-    authorization: res.authorization,
-    cosFileId: res.cosFileId,
+    fileId: data.fileId ?? data.fileID,
+    url: data.url,
+    token: data.token,
+    authorization: data.authorization,
+    cosFileId: data.cosFileId,
   }
 }

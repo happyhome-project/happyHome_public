@@ -1,6 +1,7 @@
 const mockUploadFile = jest.fn()
 const mockDeleteFile = jest.fn()
 const mockGetTempFileURL = jest.fn()
+const mockGetUploadMetadata = jest.fn()
 
 jest.mock('wx-server-sdk', () => ({
   init: jest.fn(),
@@ -10,7 +11,17 @@ jest.mock('wx-server-sdk', () => ({
   getTempFileURL: (...args: any[]) => mockGetTempFileURL(...args),
 }))
 
-import { uploadFile, deleteFile, getTempUrl } from '../storage'
+jest.mock('@cloudbase/node-sdk', () => ({
+  __esModule: true,
+  default: {
+    SYMBOL_CURRENT_ENV: Symbol.for('SYMBOL_CURRENT_ENV'),
+    init: jest.fn(() => ({
+      getUploadMetadata: (...args: any[]) => mockGetUploadMetadata(...args),
+    })),
+  },
+}))
+
+import { uploadFile, deleteFile, getTempUrl, requestUploadMetadata } from '../storage'
 
 beforeEach(() => jest.clearAllMocks())
 
@@ -53,5 +64,31 @@ describe('getTempUrl', () => {
 
     expect(mockGetTempFileURL).toHaveBeenCalledWith({ fileList: ['cloud://env/file.png'] })
     expect(url).toBe('https://tmp.wx.com/file.png')
+  })
+})
+
+describe('requestUploadMetadata', () => {
+  test('通过 CloudBase Node SDK 申请浏览器直传参数', async () => {
+    mockGetUploadMetadata.mockResolvedValue({
+      data: {
+        fileId: 'cloud://env/posts/videos/a.mp4',
+        url: 'https://cos/upload',
+        token: 'session-token',
+        authorization: 'signature',
+        cosFileId: 'cos-file-id',
+      },
+    })
+
+    const result = await requestUploadMetadata('posts/videos/a.mp4')
+
+    expect(mockGetUploadMetadata).toHaveBeenCalledWith({ cloudPath: 'posts/videos/a.mp4' })
+    expect(result).toEqual({
+      cloudPath: 'posts/videos/a.mp4',
+      fileId: 'cloud://env/posts/videos/a.mp4',
+      url: 'https://cos/upload',
+      token: 'session-token',
+      authorization: 'signature',
+      cosFileId: 'cos-file-id',
+    })
   })
 })
