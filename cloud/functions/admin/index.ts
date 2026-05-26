@@ -327,6 +327,17 @@ async function resolveSession(authHeader: string): Promise<AdminCtx | null> {
     try { await db.removeById(ADMIN_SESSIONS, token) } catch { /* best effort */ }
     return null
   }
+  if (!session.userId && session.accountId) {
+    try {
+      const account = (await db.getById(ADMIN_ACCOUNTS, session.accountId)) as AdminAccount | null
+      if (account?.userId) {
+        session.userId = account.userId
+        await db.updateById(ADMIN_SESSIONS, token, { userId: account.userId })
+      }
+    } catch {
+      // Best effort: old sessions without userId should not break auth if account lookup fails.
+    }
+  }
   return {
     accountId: session.accountId,
     role: session.role,
