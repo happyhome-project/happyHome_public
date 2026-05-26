@@ -1,16 +1,13 @@
 #!/usr/bin/env node
 /**
- * scripts/ensure-cos-cors.mjs
+ * Ensure the default CloudBase COS bucket allows browser uploads from admin-web.
  *
- * 一次性脚本：给 CloudBase 默认 COS Bucket 配置 CORS，允许 admin-web（admin.tinghai.xin）
- * 浏览器直传视频文件。幂等：已有匹配 origin 的规则就跳过；否则追加（保留其他规则）。
+ * Usage:
+ *   node scripts/ensure-cos-cors.mjs
+ *   node scripts/ensure-cos-cors.mjs --dry-run
  *
- * 用法：
- *   node scripts/ensure-cos-cors.mjs            # apply
- *   node scripts/ensure-cos-cors.mjs --dry-run  # 仅打印
- *
- * 凭据：从 ~/.happyhome/cam.env 加载 TENCENTCLOUD_SECRETID/SECRETKEY，
- *      或环境变量覆盖。同 ensure-indexes.mjs 风格。
+ * Credentials are loaded from ~/.happyhome/cam.env, or from environment variables:
+ *   TENCENTCLOUD_SECRETID / TENCENTCLOUD_SECRETKEY / TCB_ENV
  */
 import CloudBase from '@cloudbase/manager-node'
 import COS from 'cos-nodejs-sdk-v5'
@@ -43,7 +40,9 @@ const SECRET_KEY = process.env.TENCENTCLOUD_SECRETKEY || fileEnv.TENCENTCLOUD_SE
 
 const ALLOWED_ORIGINS = [
   'https://admin.tinghai.xin',
-  'http://localhost:5173',  // admin-web 本地 dev 服务器（vite 默认）
+  'http://localhost:5180',
+  'http://127.0.0.1:5180',
+  'http://localhost:5173',
   'http://127.0.0.1:5173',
 ]
 
@@ -60,13 +59,13 @@ const app = CloudBase.init({
   envId: ENV_ID,
 })
 
-// 触发 lazy env config 加载（manager-node 会去 CloudBase API 拿 Storages 配置）
 const envInfo = await app.env.getEnvInfo()
 const storageConf = envInfo?.EnvInfo?.Storages?.[0]
 if (!storageConf) {
-  console.error('[ensure-cos-cors] 无法从 CloudBase 取到 Storages 配置')
+  console.error('[ensure-cos-cors] Cannot read CloudBase storage config')
   process.exit(1)
 }
+
 const bucket = storageConf.Bucket
 const region = storageConf.Region
 
@@ -80,7 +79,6 @@ function getBucketCors() {
   return new Promise((resolve, reject) => {
     cos.getBucketCors({ Bucket: bucket, Region: region }, (err, data) => {
       if (err) {
-        // NoSuchCORSConfiguration 视为空规则
         if (err.statusCode === 404 || /NoSuchCORSConfiguration/i.test(String(err.code || err.error || ''))) {
           return resolve({ CORSRules: [] })
         }
@@ -103,19 +101,23 @@ function putBucketCors(rules) {
 
 const existing = await getBucketCors()
 const existingRules = Array.isArray(existing.CORSRules) ? existing.CORSRules : []
-console.log(`[ensure-cos-cors] 当前已有 ${existingRules.length} 条 CORS 规则`)
+console.log(`[ensure-cos-cors] existing CORS rules: ${existingRules.length}`)
 
-const wantedOrigin = ALLOWED_ORIGINS[0]  // 主域名
-const alreadyCovered = existingRules.some((rule) => {
-  const origins = rule.AllowedOrigins || rule.AllowedOrigin || []
-  const list = Array.isArray(origins) ? origins : [origins]
-  return list.includes(wantedOrigin) || list.includes('*')
-})
+function originCovered(origin) {
+  return existingRules.some((rule) => {
+    const origins = rule.AllowedOrigins || rule.AllowedOrigin || []
+    const list = Array.isArray(origins) ? origins : [origins]
+    return list.includes(origin) || list.includes('*')
+  })
+}
 
-if (alreadyCovered) {
-  console.log(`[ensure-cos-cors] ✓ ${wantedOrigin} 已被现有规则覆盖，无需修改`)
+const missingOrigins = ALLOWED_ORIGINS.filter((origin) => !originCovered(origin))
+if (missingOrigins.length === 0) {
+  console.log('[ensure-cos-cors] required origins are already covered')
   process.exit(0)
 }
+
+console.log('[ensure-cos-cors] missing origins:', missingOrigins.join(', '))
 
 const newRule = {
   AllowedOrigins: ALLOWED_ORIGINS,
@@ -127,14 +129,14 @@ const newRule = {
 
 const merged = [...existingRules, newRule]
 
-console.log('[ensure-cos-cors] 即将追加新规则：')
+console.log('[ensure-cos-cors] appending rule:')
 console.log(JSON.stringify(newRule, null, 2))
-console.log(`[ensure-cos-cors] 合并后 CORS 规则总数：${merged.length}`)
+console.log(`[ensure-cos-cors] merged CORS rules: ${merged.length}`)
 
 if (DRY_RUN) {
-  console.log('[ensure-cos-cors] --dry-run 模式，未实际写入')
+  console.log('[ensure-cos-cors] dry run; not writing')
   process.exit(0)
 }
 
 await putBucketCors(merged)
-console.log('[ensure-cos-cors] ✓ CORS 规则已应用')
+console.log('[ensure-cos-cors] CORS rule applied')
