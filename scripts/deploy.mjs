@@ -10,14 +10,18 @@
  *
  * Flags:
  *   --only=a,b,c   filter cloud functions by name
- *   --use-ci       skip DevTools CLI primary path, go straight to miniprogram-ci
+ *   --use-tcb      force CloudBase CLI deploy path for cloud functions
+ *   --use-ci       skip DevTools/CloudBase CLI paths, go straight to miniprogram-ci
  *                  (useful when DevTools is not installed on the machine)
  *
  * Deploy path resolution:
  *   Primary   = WeChat DevTools CLI `cloud functions deploy`
- *     - Uses the IDE's own network stack, sidesteps透明代理/IPv6 whitelist issues
- *     - Requires WeChat DevTools installed AND IDE logged in as admin (扫码过)
- *   Fallback  = miniprogram-ci `cloud.uploadFunction`
+ *     - Uses the IDE's own network stack, sidesteps transparent proxy/IPv6 whitelist issues
+ *     - Requires WeChat DevTools installed and IDE login/signing state to be valid
+ *     - Parses output because DevTools can exit 0 while cloud deploy rows fail
+ *   Diagnostic fallback = CloudBase CLI `fn deploy`
+ *     - Official CloudBase path; on this machine auth works, but COS upload can time out
+ *   Last resort = miniprogram-ci `cloud.uploadFunction`
  *     - Applies dns.setDefaultResultOrder('ipv4first') + dns.lookup monkey-patch
  *       to force IPv4, still subject to WeChat CI IP 白名单
  *
@@ -46,6 +50,7 @@ import { fileURLToPath } from 'url'
 import { execSync, spawn } from 'child_process'
 import { existsSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
+import { analyzeDevtoolsCloudDeployOutput } from './lib/deploy-output.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
@@ -93,6 +98,36 @@ function runShell(commandLine, options = {}) {
   })
 }
 
+function runShellCapture(commandLine, options = {}) {
+  console.log(options.displayCommandLine || commandLine)
+  return new Promise((res) => {
+    const proc = spawn(commandLine, {
+      cwd: options.cwd || ROOT,
+      env: options.env || process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: true,
+    })
+
+    let stdout = ''
+    let stderr = ''
+    proc.stdout?.on('data', (chunk) => {
+      const text = String(chunk)
+      stdout += text
+      process.stdout.write(text)
+    })
+    proc.stderr?.on('data', (chunk) => {
+      const text = String(chunk)
+      stderr += text
+      process.stderr.write(text)
+    })
+    proc.on('exit', (code) => {
+      const output = `${stdout}${stderr}`
+      res({ ok: code === 0, reason: code === 0 ? 'ok' : `exit code ${code}`, output })
+    })
+    proc.on('error', (err) => res({ ok: false, reason: String(err?.message || err), output: `${stdout}${stderr}` }))
+  })
+}
+
 // Lazy: miniprogram-ci 的 Project 构造会 eager 读 private key；DevTools CLI
 // 主路径完全不需要 key。key 只在主仓（不进 worktree/CI 环境），所以延迟到真
 // 正要走 miniprogram-ci fallback 时再构造——避免 worktree 里 import 期即崩。
@@ -136,11 +171,45 @@ async function deployCloudViaDevtoolsCli(fns) {
   const commandLine = [cli, ...args].map(quote).join(' ')
   console.log(`[DevTools CLI] ${commandLine}`)
 
-  return await new Promise((res) => {
-    const proc = spawn(commandLine, { stdio: 'inherit', shell: true })
-    proc.on('exit', (code) => res({ ok: code === 0, reason: code === 0 ? 'ok' : `exit code ${code}` }))
-    proc.on('error', (err) => res({ ok: false, reason: String(err?.message || err) }))
-  })
+  const result = await runShellCapture(commandLine)
+  if (!result.ok) return result
+
+  const semantic = analyzeDevtoolsCloudDeployOutput(result.output)
+  if (!semantic.ok) {
+    const loginHint = semantic.reason.includes('signed-header')
+      ? '; open WeChat DevTools, log in again, then retry deploy'
+      : ''
+    return { ok: false, reason: `${semantic.reason}${loginHint}` }
+  }
+
+  return { ok: true, reason: 'ok' }
+}
+
+async function deployCloudViaCloudBaseCli(fns) {
+  const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
+  const tcb = (...args) => [npx, '--yes', '--package', '@cloudbase/cli', 'cloudbase', ...args].map(quote).join(' ')
+
+  const authProbe = await runShellCapture(
+    tcb('fn', 'list', '--env-id', CLOUD_ENV, '--json'),
+    { displayCommandLine: `cloudbase fn list --env-id ${CLOUD_ENV} --json` }
+  )
+  if (!authProbe.ok) {
+    return {
+      ok: false,
+      reason: `CloudBase CLI auth/env probe failed: ${authProbe.reason}. Run "cloudbase login" or "cloudbase login --apiKeyId <id> --apiKey <key>" and retry.`,
+    }
+  }
+
+  for (const fn of fns) {
+    const fnDir = resolve(CLOUD_DIST, fn)
+    const result = await runShellCapture(
+      tcb('fn', 'deploy', fn, '--dir', fnDir, '--force', '--yes', '--env-id', CLOUD_ENV, '--json'),
+      { displayCommandLine: `cloudbase fn deploy ${fn} --dir ${fnDir} --force --yes --env-id ${CLOUD_ENV} --json` }
+    )
+    if (!result.ok) return { ok: false, reason: `CloudBase CLI deploy ${fn} failed: ${result.reason}` }
+  }
+
+  return { ok: true, reason: 'ok' }
 }
 
 // ── Fallback deploy path: miniprogram-ci ──
@@ -172,22 +241,46 @@ async function deployCloud() {
   if (onlyList) console.log(`Filtering to: ${fns.join(', ')}`)
 
   const forceCi = process.argv.includes('--use-ci')
+  const forceTcb = process.argv.includes('--use-tcb')
+
+  if (forceTcb) {
+    console.log('\n[--use-tcb] Attempting deploy via CloudBase CLI...')
+    const tcbResult = await deployCloudViaCloudBaseCli(fns)
+    if (tcbResult.ok) {
+      console.log('[OK] Cloud functions deployed via CloudBase CLI')
+      return
+    }
+    const nextPath = forceCi ? 'falling back to miniprogram-ci' : 'trying WeChat DevTools CLI'
+    console.log(`[!] CloudBase CLI failed (${tcbResult.reason}) - ${nextPath}`)
+  }
 
   if (!forceCi) {
     console.log('\n[primary] Attempting deploy via WeChat DevTools CLI...')
     const result = await deployCloudViaDevtoolsCli(fns)
     if (result.ok) {
-      console.log('[✓] Cloud functions deployed via DevTools CLI')
+      console.log('[OK] Cloud functions deployed via DevTools CLI')
       return
     }
-    console.log(`[!] DevTools CLI failed (${result.reason}) — falling back to miniprogram-ci`)
+    if (!forceTcb) {
+      console.log(`[!] DevTools CLI failed (${result.reason}) - trying CloudBase CLI`)
+
+      console.log('\n[fallback] Attempting deploy via CloudBase CLI...')
+      const tcbResult = await deployCloudViaCloudBaseCli(fns)
+      if (tcbResult.ok) {
+        console.log('[OK] Cloud functions deployed via CloudBase CLI')
+        return
+      }
+      console.log(`[!] CloudBase CLI failed (${tcbResult.reason}) - falling back to miniprogram-ci`)
+    } else {
+      console.log(`[!] DevTools CLI failed (${result.reason}) - falling back to miniprogram-ci`)
+    }
   } else {
-    console.log('\n[--use-ci] Skipping DevTools CLI, using miniprogram-ci directly')
+    console.log('\n[--use-ci] Skipping DevTools CLI and CloudBase CLI, using miniprogram-ci directly')
   }
 
   console.log('\n[fallback] Deploying via miniprogram-ci...')
   await deployCloudViaMiniprogramCi(fns)
-  console.log('[✓] Cloud functions deployed via miniprogram-ci')
+  console.log('[OK] Cloud functions deployed via miniprogram-ci')
 }
 
 // ── Primary preview path: WeChat DevTools CLI `preview` ──

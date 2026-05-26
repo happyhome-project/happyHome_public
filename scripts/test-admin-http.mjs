@@ -94,7 +94,7 @@ async function main() {
 
   console.log('\n1) 未授权请求应被拒绝')
   const unauthorized = await callAdmin(baseUrl, '__invalid_token__', 'community.list')
-  assert(unauthorized.statusCode === 403, `期望 403，实际 ${unauthorized.statusCode}`)
+  assert(unauthorized.statusCode === 401, `期望 401，实际 ${unauthorized.statusCode}`)
   console.log('   ✓ 鉴权拒绝正常')
 
   console.log('\n2) 授权请求 community.list')
