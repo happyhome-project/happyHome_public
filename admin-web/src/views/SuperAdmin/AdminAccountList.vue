@@ -114,10 +114,12 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminAccountApi } from '../../api/cloud'
+import { useAuthStore } from '../../stores/auth'
 
 const accounts = ref<any[]>([])
 const loading = ref(false)
 const submitting = ref(false)
+const auth = useAuthStore()
 
 const showCreate = ref(false)
 const showReset = ref(false)
@@ -197,6 +199,7 @@ async function submitBind() {
     await adminAccountApi.bindWechat(bindForm.value.accountId, bindForm.value.openId.trim())
     ElMessage.success('已保存')
     showBind.value = false
+    await auth.fetchMe()
     await load()
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.error || e?.message || '保存失败')

@@ -175,6 +175,30 @@ describe('admin auth: session middleware', () => {
     expect(body.userId).toBe('u-super')
     expect(body.username).toBe('boss')
   })
+
+  test('admin.bindWechat syncs existing sessions so binding takes effect immediately', async () => {
+    ;(db.getById as jest.Mock).mockResolvedValue({
+      _id: 'session-token',
+      accountId: 'acc-admin',
+      role: 'superAdmin',
+      userId: '',
+      username: 'admin',
+      expiresAt: new Date(Date.now() + 1e9).toISOString(),
+    })
+    ;(db.query as jest.Mock).mockResolvedValueOnce([])
+    ;(db.updateById as jest.Mock).mockResolvedValue({})
+    ;(db.updateWhere as jest.Mock).mockResolvedValue({})
+
+    const res = await adminMain(httpEvent(
+      'admin.bindWechat',
+      { accountId: 'acc-admin', openId: 'openid-year' },
+      'session-token',
+    ))
+
+    expect(res.statusCode).toBe(200)
+    expect(db.updateById).toHaveBeenCalledWith('admin_accounts', 'acc-admin', { userId: 'openid-year' })
+    expect(db.updateWhere).toHaveBeenCalledWith('admin_sessions', { accountId: 'acc-admin' }, { userId: 'openid-year' })
+  })
 })
 
 describe('admin auth: legacy fallback', () => {

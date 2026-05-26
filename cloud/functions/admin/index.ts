@@ -1127,6 +1127,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       throw new Error('该微信身份已绑定到其他账号')
     }
     await db.updateById(ADMIN_ACCOUNTS, accountId, { userId: openId })
+    await db.updateWhere(ADMIN_SESSIONS, { accountId }, { userId: openId })
     return { success: true }
   }
 
