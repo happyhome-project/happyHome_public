@@ -16,15 +16,16 @@
       <text v-if="durationLabel" class="duration-tag">{{ durationLabel }}</text>
       <text v-if="sourceTag" class="source-tag">{{ sourceTag }}</text>
     </view>
-    <video
-      v-else
-      :src="playingSrc"
-      :controls="true"
-      :autoplay="true"
-      class="player"
-      object-fit="contain"
-      :show-fullscreen-btn="true"
-    />
+    <view v-else class="player-wrap">
+      <video
+        :src="playingSrc"
+        :controls="true"
+        :autoplay="true"
+        class="player"
+        object-fit="contain"
+        :show-fullscreen-btn="true"
+      />
+    </view>
 
     <view class="meta">
       <text class="title">{{ item.title || '未命名视频' }}</text>
@@ -214,10 +215,18 @@ async function onOpenExternal() {
   border-radius: 6rpx;
   font-size: $hh-font-caption;
 }
-.player {
+.player-wrap {
+  position: relative;
   width: 100%;
   height: 0;
   padding-bottom: 56.25%;
+  background: #000;
+}
+.player {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   background: #000;
 }
 .meta {
