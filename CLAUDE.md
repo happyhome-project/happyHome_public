@@ -23,7 +23,7 @@
 
 | 动作 | 命令 | 备注 |
 |---|---|---|
-| 云函数部署 | `npm run deploy:cloud [-- --only=post,admin]` | DevTools CLI 主路径；`--use-ci` 强制走 miniprogram-ci fallback |
+| 云函数部署 | `npm run deploy:cloud [-- --only=post,admin]` | DevTools CLI 主路径；`--use-tcb` 强制走 CloudBase CLI 诊断路径；`--use-ci` 强制走 miniprogram-ci fallback |
 | 小程序预览 | `npm run deploy:mp` | 同上；生成 `preview-qr.png` + `preview-info.json` |
 | 云函数单测 | `cd cloud && npm run test:unit` | 通过 `main(event)` 入口，不直接 call handler |
 | H5 本地 | `npm --prefix miniprogram run dev:h5` | 配合 `?dev-gateway=1` 走 http-gateway 调真云函数 |
@@ -37,21 +37,23 @@
 
 ## 部署铁律
 
-> **优先级**：DevTools CLI > miniprogram-ci。**永远先试 `cli.bat`**——它走 IDE 自己的网络栈，绕开本机 IPv6 / 透明代理 / WeChat CI 白名单 / CloudBase 白名单全部坑。`miniprogram-ci` 只做"DevTools 装不上"的 CI 服务器 fallback。
+> **优先级**：DevTools CLI > CloudBase CLI 诊断路径 > miniprogram-ci。**永远先试 `cli.bat`**——它走 IDE 自己的网络栈，绕开本机 IPv6 / 透明代理 / WeChat CI 白名单 / CloudBase 白名单全部坑。CloudBase CLI 是腾讯云官方通道，但 2026-05-26 本机实测 `fn deploy` 会在 COS 上传阶段超时；`miniprogram-ci` 只做"DevTools 装不上"的 CI 服务器 fallback。
 
 1. **微信 / CloudBase 上传类操作**（云函数 deploy / 小程序 preview / 提审 upload / packNpm）**一律优先走 DevTools CLI**：
    - `scripts/deploy.mjs` 已默认走 `cli.bat`，主路径在 `deployCloudViaDevtoolsCli` / `deployMiniprogramViaDevtoolsCli`
-   - `--use-ci` 强制跳过主路径直接走 miniprogram-ci（仅用于无 DevTools 的 CI 服务器）
+   - `--use-tcb` 强制先走 CloudBase CLI `fn deploy`（用于核验官方通道/诊断，不是默认路径）
+   - `--use-ci` 强制跳过 DevTools CLI / CloudBase CLI 直接走 miniprogram-ci（仅用于无 DevTools 的 CI 服务器）
    - `WX_DEVTOOLS_CLI=<path>` 可覆盖 cli.bat 路径，否则脚本自己在 `C:/D:/E:/X:` 下搜
    - 直接命令模板（无 `npm` 时备用）：
      ```bash
      "X:\Program Files (x86)\Tencent\微信web开发者工具\cli.bat" cloud functions deploy ^
        --env cloudbase-3gh862acb1505ff3 ^
        --paths "C:\Project\Claude\happyHome\cloud\dist\admin" ^
-       --project "C:\Project\Claude\happyHome" ^
+       --project "C:\Project\Claude\happyHome\miniprogram\dist\build\mp-weixin" ^
        --remote-npm-install
      ```
-   - **`--project` 必须指向仓库根**（`C:\Project\Claude\happyHome`），不是 `dist/build/mp-weixin`——否则 DevTools 把根当独立小程序项目、覆写 `project.config.json`（commit f393449 修过）
+   - **`--project` 必须指向 `miniprogram/dist/build/mp-weixin`**，不是仓库根。2026-05-26 实测该路径可全量部署 7 个云函数；历史上 `cli.bat auto --project <ROOT>` 曾把根目录当独立小程序项目并覆写 `project.config.json`。
+   - DevTools CLI 可能出现"输出表格全是 `success=false`、报 `getCloudAPISignedHeader failed`，但进程 exit code 仍为 0"。这通常指向 IDE 登录/签名态问题；**必须提示用户先打开微信开发者工具重新登录/扫码，再重跑部署**。`scripts/deploy.mjs` 已解析输出表格，不能只信 exit code。
 
 2. **云函数 env 变量必须逐函数手工配**——`cli.bat cloud functions deploy` 不会同步 env。新增/改 env 后要去 CloudBase 控制台 → 云函数 → 函数配置里逐个填。常见踩坑：admin 函数加了 `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD` / `ADMIN_SESSION_TTL_DAYS` 后忘了在控制台填 → bootstrap 登录走默认值 admin/happyhome2024，不安全也不一致
 
@@ -59,8 +61,9 @@
 
 4. **部署失败排查顺序**：
    - 先看错误里 IP——如果是 IPv6（`2409:...`）→ 主路径就该走 DevTools CLI 而不是 ci，检查 `scripts/deploy.mjs` 是不是被 `--use-ci` 强制 fallback
-   - 再看 DevTools 是否登录态有效——cli.bat 报"未登录"就开 IDE 重新扫码
-   - 最后查 CloudBase 白名单——只在前两步都排除后才考虑
+   - 再看 DevTools 是否登录/签名态有效——即使 `cli.bat islogin` 看起来正常，`getCloudAPISignedHeader failed` 也要先提示用户打开微信开发者工具重新登录/扫码
+   - CloudBase CLI 可用 `npx.cmd --yes --package @cloudbase/cli cloudbase fn list --env-id cloudbase-3gh862acb1505ff3 --json` 验证 CAM/CloudBase 登录；能 list 说明不是腾讯云长期未登录导致的 CLI 认证过期
+   - 最后查 CloudBase 白名单 / COS 上传链路——只在前两步都排除后才考虑
 
 5. **详情与历史**：[memory/feedback_deploy_devtools_cli.md](memory/feedback_deploy_devtools_cli.md)（2026-04-26 由 `feedback_deploy_force_ipv4.md` 改名——核心结论从"强制 IPv4"已升级到"走 DevTools CLI"）
 

@@ -82,7 +82,18 @@ cd cloud && node build.mjs
 ```bash
 node scripts/deploy.mjs cloud
 ```
-需要 `private.wx673b17363cd6b4a6.key` 在项目根目录。
+默认走微信开发者工具 CLI。开始前确认 IDE 已登录；如果部署输出里出现 `getCloudAPISignedHeader failed` / `success=false`，**先打开微信开发者工具重新登录/扫码，再重跑部署**。
+
+可选诊断命令：
+```bash
+# 查看 CloudBase CLI / CAM 登录是否仍有效
+npx.cmd --yes --package @cloudbase/cli cloudbase fn list --env-id cloudbase-3gh862acb1505ff3 --json
+
+# 强制走官方 CloudBase CLI 部署路径（2026-05-26 本机实测可能 COS 上传超时）
+node scripts/deploy.mjs cloud --use-tcb
+```
+
+DevTools CLI 云函数部署的 `--project` 使用 `miniprogram/dist/build/mp-weixin`，不要手动改成仓库根。
 
 **方式二：微信开发者工具手动部署**
 在 cloudfunctions 目录右键各函数 → 上传并部署（云端安装依赖）。
