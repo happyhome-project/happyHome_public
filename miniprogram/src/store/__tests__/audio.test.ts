@@ -49,6 +49,12 @@ const META = {
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  _setAudioStoreDepsForTesting({
+    backend: makeMockBackend().backend,
+    storage: makeStorage().storage,
+    getTempFileURL: async (fileIDs: string[]) =>
+      fileIDs.map((fileID) => ({ fileID, tempFileURL: fileID })),
+  })
 })
 
 describe('audio store', () => {
@@ -88,6 +94,22 @@ describe('audio store', () => {
     expect(store.currentTrack?.title).toBe('第一讲')
   })
 
+  test('ended event automatically advances to next track', async () => {
+    const mock = makeMockBackend()
+    _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
+    const store = useAudioStore()
+    await store.playPlaylist(TRACKS, 0, META)
+
+    mock.handlers.onEnded?.()
+    await vi.waitFor(() => {
+      expect(mock.calls.setSrc.at(-1)).toEqual({ url: 'cloud://audio/2.mp3', title: '第二讲' })
+    })
+
+    expect(store.currentIndex).toBe(1)
+    expect(store.currentTrack?.title).toBe('第二讲')
+    expect(mock.calls.play).toBe(2)
+  })
+
   test('togglePlay pauses and resumes', async () => {
     const mock = makeMockBackend()
     _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
@@ -101,6 +123,44 @@ describe('audio store', () => {
     await store.togglePlay()
     expect(store.isPlaying).toBe(true)
     expect(mock.calls.play).toBe(2)
+  })
+
+  test('reuses cached temporary URL while resuming current track', async () => {
+    const mock = makeMockBackend()
+    const getTempFileURL = vi.fn(async (fileIDs: string[]) =>
+      fileIDs.map((fileID) => ({ fileID, tempFileURL: `https://cdn/${fileID}` })),
+    )
+    _setAudioStoreDepsForTesting({
+      backend: mock.backend,
+      storage: makeStorage().storage,
+      getTempFileURL,
+    })
+    const store = useAudioStore()
+    await store.playPlaylist(TRACKS, 0, META)
+
+    await store.togglePlay()
+    await store.togglePlay()
+
+    // playPlaylist 已预取两个 URL，恢复当前曲目不应再次请求临时 URL。
+    expect(getTempFileURL).toHaveBeenCalledTimes(1)
+    expect(mock.calls.setSrc.at(-1)).toEqual({ url: 'https://cdn/cloud://audio/1.mp3', title: '第一讲' })
+  })
+
+  test('close stops backend and clears floating player state', async () => {
+    const mock = makeMockBackend()
+    _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
+    const store = useAudioStore()
+    await store.playPlaylist(TRACKS, 0, META)
+
+    store.close()
+
+    expect(mock.calls.stop).toBe(1)
+    expect(store.isVisible).toBe(false)
+    expect(store.isPlaying).toBe(false)
+    expect(store.currentPlaylist).toEqual([])
+    expect(store.currentMeta).toBeNull()
+    expect(store.currentIndex).toBe(0)
+    expect(store.currentTime).toBe(0)
   })
 
   test('float position persists', () => {

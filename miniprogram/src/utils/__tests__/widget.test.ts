@@ -112,4 +112,44 @@ describe('getListPreview', () => {
     expect(result).toHaveLength(1)
     expect(result[0].label).toBe('标题')
   })
+
+  test('audio_group 不进入列表摘要', () => {
+    const sectionWithAudio: Section = {
+      ...section,
+      widgets: [
+        ...section.widgets,
+        {
+          widgetId: 'w-audio',
+          type: 'audio_group',
+          label: '音频',
+          fieldKey: 'audio',
+          required: false,
+          order: 3,
+          showInList: true,
+        },
+      ],
+    }
+    const post: Post = {
+      _id: 'p1',
+      communityId: 'c1',
+      sectionId: 's1',
+      authorId: 'u1',
+      status: 'active',
+      content: {
+        w1: '课程通知',
+        'w-audio': [
+          { title: '第一讲', fileID: 'cloud://env/audios/1.mp3', duration: 120, size: 1024, ext: 'mp3' },
+        ],
+      },
+      commentCount: 0,
+      likeCount: 0,
+      createdAt: '',
+      updatedAt: '',
+    }
+
+    const result = getListPreview(post, sectionWithAudio)
+
+    expect(result.some((item) => item.label === '音频')).toBe(false)
+    expect(result).toEqual([{ label: '标题', value: '课程通知', type: 'text' }])
+  })
 })
