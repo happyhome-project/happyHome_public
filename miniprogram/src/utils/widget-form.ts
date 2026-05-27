@@ -4,6 +4,7 @@ export const DEFAULT_WIDGET_LABELS: Record<string, string> = {
   datetime: '日期时间',
   number: '数字',
   image_group: '图片组',
+  note_blocks: '图文笔记',
   rich_text: '正文',
   location: '位置',
   attendance: '活动参与',

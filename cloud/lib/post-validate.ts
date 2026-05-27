@@ -141,6 +141,30 @@ function validateAudioTrack(item: unknown, widgetLabel: string, index: number): 
   }
 }
 
+function validateNoteBlock(item: unknown, widgetLabel: string, index: number): void {
+  const prefix = `图文笔记控件「${widgetLabel || '未命名'}」第 ${index + 1} 块`
+  if (!item || typeof item !== 'object' || Array.isArray(item)) {
+    throw new Error(`${prefix}数据格式不正确`)
+  }
+
+  const block = item as Record<string, unknown>
+  requireText(block.blockId, `${prefix} blockId 不能为空`)
+  if (block.type === 'text') {
+    if (typeof block.text !== 'string') {
+      throw new Error(`${prefix}文字内容必须是字符串`)
+    }
+    return
+  }
+  if (block.type === 'image') {
+    requireText(block.fileID, `${prefix}图片不能为空`)
+    if (!String(block.fileID).startsWith('cloud://')) {
+      throw new Error(`${prefix}图片必须是 cloud:// 文件`)
+    }
+    return
+  }
+  throw new Error(`${prefix}类型不支持`)
+}
+
 export function validateContentValues(
   section: Section,
   content: PostContent,
@@ -148,10 +172,18 @@ export function validateContentValues(
 ): void {
   const allowAdminOnly = options.allowAdminOnly === true
   for (const widget of (section.widgets || []) as Widget[]) {
-    if (!allowAdminOnly) continue
-
     const value = content[widget.widgetId]
     if (value === undefined || value === null || value === '') continue
+
+    if (widget.type === 'note_blocks') {
+      if (!Array.isArray(value)) {
+        throw new Error(`图文笔记控件「${widget.label || '未命名'}」必须是内容块数组`)
+      }
+      value.forEach((item, index) => validateNoteBlock(item, widget.label, index))
+      continue
+    }
+
+    if (!allowAdminOnly) continue
 
     if (widget.type === 'video_group') {
       if (!Array.isArray(value)) {

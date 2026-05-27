@@ -48,10 +48,10 @@ async function main() {
   const inDisabled = (disabledList.communities || []).some(c => c._id === communityId)
   t.assert(inDisabled, 'community appears in community.listDisabled')
 
-  // 6) community.list 不应再返回它
+  // 6) superAdmin community.list 是全状态总列表，禁用后仍可出现，但状态必须是 disabled。
   const activeAfterDisable = await callAdmin('community.list')
-  const stillInActive = (activeAfterDisable.communities || []).some(c => c._id === communityId)
-  t.assert(!stillInActive, 'community no longer in community.list after disable')
+  const afterDisableCommunity = (activeAfterDisable.communities || []).find(c => c._id === communityId)
+  t.assert(afterDisableCommunity?.status === 'disabled', 'community.list shows disabled status after disable')
 
   // 7) restore（disabled → active）
   console.log('\nStep 6: restore')

@@ -17,6 +17,7 @@ export type WidgetType =
   | 'number'
   | 'image_group'
   | 'rich_text'
+  | 'note_blocks'
   | 'location'
   | 'attendance'
   | 'video_group'
@@ -104,6 +105,20 @@ export interface AudioTrack {
   size: number
   ext: AudioExt
 }
+
+export interface NoteTextBlock {
+  blockId: string
+  type: 'text'
+  text: string
+}
+
+export interface NoteImageBlock {
+  blockId: string
+  type: 'image'
+  fileID: string
+}
+
+export type NoteBlock = NoteTextBlock | NoteImageBlock
 
 export interface Widget {
   widgetId: string
@@ -197,7 +212,7 @@ export interface SectionWithPostCount extends Section {
   postCount: number
 }
 
-export type PostContentValue = string | number | string[] | GeoLocation | VideoItem[] | AudioTrack[]
+export type PostContentValue = string | number | string[] | GeoLocation | VideoItem[] | AudioTrack[] | NoteBlock[]
 export type PostContent = Record<string, PostContentValue>
 
 export interface PostAttendanceMember {
