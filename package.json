@@ -22,6 +22,7 @@
     "test:nightly": "node scripts/nightly-full.mjs",
     "test:admin:api": "node scripts/test-admin-api.mjs",
     "test:admin:ui": "node scripts/test-admin-ui.mjs",
+    "test:admin:video-upload-ui": "node scripts/test-admin-video-upload-ui.mjs",
     "test:mp": "node scripts/test-mp.mjs",
     "test:mp:replay": "node scripts/test-mp-replay.mjs",
     "test:deploy-output": "node --test scripts/lib/deploy-output.test.mjs",

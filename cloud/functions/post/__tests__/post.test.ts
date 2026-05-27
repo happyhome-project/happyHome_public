@@ -390,3 +390,119 @@ test('get：非 active 成员不可查看帖子详情', async () => {
 
   await expect(handleGet({ postId: 'post-1' }, '')).rejects.toThrow('需要先加入社区后查看内容')
 })
+
+test('create: note_blocks can be submitted by regular members', async () => {
+  ;(db.query as jest.Mock).mockReset()
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.create as jest.Mock).mockReset()
+  const sectionWithNoteBlocks = {
+    ...mockSection,
+    widgets: [
+      ...mockSection.widgets,
+      {
+        widgetId: 'note-widget',
+        type: 'note_blocks',
+        label: '图文笔记',
+        fieldKey: 'note',
+        required: false,
+        order: 4,
+        showInList: false,
+      },
+    ],
+  }
+  const blocks = [
+    { blockId: 'b1', type: 'text', text: '第50期作业：\n1. 诵读《大学》10遍 😊' },
+    { blockId: 'b2', type: 'image', fileID: 'cloud://env/posts/note-1.jpg' },
+  ]
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValue(sectionWithNoteBlocks)
+  ;(db.create as jest.Mock).mockResolvedValue('post-1')
+
+  const result = await handleCreate({
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    content: {
+      'title-widget': '课程笔记',
+      'note-widget': blocks,
+    },
+  } as any, 'test-openid')
+
+  expect(result.postId).toBe('post-1')
+  expect(db.create).toHaveBeenCalledWith('posts', expect.objectContaining({
+    content: {
+      'title-widget': '课程笔记',
+      'note-widget': blocks,
+    },
+  }))
+})
+
+test('create: note_blocks rejects invalid image fileID', async () => {
+  ;(db.query as jest.Mock).mockReset()
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.create as jest.Mock).mockReset()
+  const sectionWithNoteBlocks = {
+    ...mockSection,
+    widgets: [
+      ...mockSection.widgets,
+      {
+        widgetId: 'note-widget',
+        type: 'note_blocks',
+        label: '图文笔记',
+        fieldKey: 'note',
+        required: false,
+        order: 4,
+        showInList: false,
+      },
+    ],
+  }
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValue(sectionWithNoteBlocks)
+
+  await expect(handleCreate({
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    content: {
+      'title-widget': '课程笔记',
+      'note-widget': [
+        { blockId: 'b1', type: 'image', fileID: 'https://cdn.example.com/note-1.jpg' },
+      ],
+    },
+  } as any, 'test-openid')).rejects.toThrow('cloud://')
+  expect(db.create).not.toHaveBeenCalled()
+})
+
+test.each([
+  ['empty blockId', { blockId: '', type: 'text', text: 'hello' }],
+  ['unknown block type', { blockId: 'b1', type: 'link', url: 'https://example.com' }],
+])('create: note_blocks rejects %s', async (_caseName, invalidBlock) => {
+  ;(db.query as jest.Mock).mockReset()
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.create as jest.Mock).mockReset()
+  const sectionWithNoteBlocks = {
+    ...mockSection,
+    widgets: [
+      ...mockSection.widgets,
+      {
+        widgetId: 'note-widget',
+        type: 'note_blocks',
+        label: '图文笔记',
+        fieldKey: 'note',
+        required: false,
+        order: 4,
+        showInList: false,
+      },
+    ],
+  }
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValue(sectionWithNoteBlocks)
+
+  await expect(handleCreate({
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    content: {
+      'title-widget': '课程笔记',
+      'note-widget': [invalidBlock],
+    },
+  } as any, 'test-openid')).rejects.toThrow()
+  expect(db.create).not.toHaveBeenCalled()
+})

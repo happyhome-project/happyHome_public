@@ -10,8 +10,8 @@ const { communityId, sectionId, widgetId } = await seedApprovedCommunity(runId)
 const widgetsRes = await callAdmin('section.updateWidgets', {
   sectionId,
   widgets: [
-    { type: 'text', label: '内容', required: true, showInList: true, widgetId },
-    { type: 'text', label: '价格', required: true, showInList: false, widgetId: '' },
+    { type: 'short_text', label: '内容', required: true, showInList: true, widgetId },
+    { type: 'short_text', label: '价格', required: true, showInList: false, widgetId: '' },
   ],
 })
 const priceWidgetId = widgetsRes.widgets.find((w) => w.label === '价格').widgetId

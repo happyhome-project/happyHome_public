@@ -176,6 +176,33 @@ describe('admin auth: session middleware', () => {
     expect(body.username).toBe('boss')
   })
 
+  test('session without userId refreshes binding from admin account', async () => {
+    ;(db.getById as jest.Mock)
+      .mockResolvedValueOnce({
+        _id: 't',
+        accountId: 'acc-admin',
+        role: 'superAdmin',
+        userId: '',
+        username: 'admin',
+        expiresAt: new Date(Date.now() + 1e9).toISOString(),
+      })
+      .mockResolvedValueOnce({
+        _id: 'acc-admin',
+        role: 'superAdmin',
+        userId: 'openid-year',
+        username: 'admin',
+        status: 'active',
+      })
+    ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+    const res = await adminMain(httpEvent('auth.me', {}, 't'))
+
+    expect(res.statusCode).toBe(200)
+    const body = JSON.parse(res.body)
+    expect(body.userId).toBe('openid-year')
+    expect(db.updateById).toHaveBeenCalledWith('admin_sessions', 't', { userId: 'openid-year' })
+  })
+
   test('admin.bindWechat syncs existing sessions so binding takes effect immediately', async () => {
     ;(db.getById as jest.Mock).mockResolvedValue({
       _id: 'session-token',

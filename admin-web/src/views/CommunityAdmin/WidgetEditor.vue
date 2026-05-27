@@ -47,6 +47,7 @@
                   <el-option label="日期时间" value="datetime" />
                   <el-option label="数字" value="number" />
                   <el-option label="图片组" value="image_group" />
+                  <el-option label="图文笔记" value="note_blocks" />
                   <el-option label="视频组" value="video_group" />
                   <el-option label="音频组" value="audio_group" />
                   <el-option label="富文本" value="rich_text" />
@@ -152,6 +153,7 @@ const DEFAULT_LABELS: Record<string, string> = {
   datetime: '日期时间',
   number: '数字',
   image_group: '图片组',
+  note_blocks: '图文笔记',
   video_group: '视频列表',
   audio_group: '音频列表',
   rich_text: '正文',
