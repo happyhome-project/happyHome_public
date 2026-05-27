@@ -1,0 +1,13 @@
+{
+  "name": "happyhome-wechat-ops",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "list": "node src/cli.mjs list",
+    "fetch": "node src/cli.mjs fetch",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
