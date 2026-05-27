@@ -92,6 +92,30 @@ describe('audio.requestUpload', () => {
 
 })
 
+describe('image.requestUpload', () => {
+  test('校验 fileName 不能为空', async () => {
+    await expect(main({ action: 'image.requestUpload', _actAs: SUPER_CTX, fileName: '' }))
+      .rejects.toThrow('fileName 不能为空')
+  })
+
+  test('拒绝非图片扩展名', async () => {
+    await expect(main({ action: 'image.requestUpload', _actAs: SUPER_CTX, fileName: 'doc.pdf' }))
+      .rejects.toThrow('不支持的文件类型')
+  })
+
+  test('图片扩展名走 posts/images/ 路径', async () => {
+    ;(storage.requestUploadMetadata as jest.Mock).mockResolvedValue({
+      cloudPath: 'posts/images/x.png',
+      fileId: 'cloud://env/posts/images/x.png',
+      url: 'https://cos/upload',
+      token: 'tk', authorization: 'auth', cosFileId: 'cosId',
+    })
+    await main({ action: 'image.requestUpload', _actAs: SUPER_CTX, fileName: 'note.PNG' })
+    const path = (storage.requestUploadMetadata as jest.Mock).mock.calls[0][0]
+    expect(path).toMatch(/^posts\/images\/\d+_[a-z0-9]+\.png$/)
+  })
+})
+
 describe('post.createAdmin', () => {
   test('communityId 缺失抛错', async () => {
     await expect(main({

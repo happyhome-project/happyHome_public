@@ -59,6 +59,10 @@
               <AudioGroupEditor v-model="formData[widget.widgetId] as any" />
             </template>
 
+            <template v-else-if="widget.type === 'note_blocks'">
+              <NoteBlocksAdminEditor v-model="formData[widget.widgetId] as any" />
+            </template>
+
             <el-input
               v-else-if="widget.type === 'short_text' || widget.type === 'summary'"
               v-model="formData[widget.widgetId] as any"
@@ -120,6 +124,7 @@ import { Plus } from '@element-plus/icons-vue'
 import { communityApi, sectionApi, postAdminApi } from '../../api/cloud'
 import { useAuthStore } from '../../stores/auth'
 import AudioGroupEditor from '../../components/AudioGroupEditor.vue'
+import NoteBlocksAdminEditor from '../../components/NoteBlocksAdminEditor.vue'
 import VideoItemEditor from '../../components/VideoItemEditor.vue'
 
 const route = useRoute()
@@ -137,7 +142,7 @@ const submitting = ref(false)
 const loadingSection = ref(false)
 const communityName = ref('')
 const authReady = computed(() => Boolean(auth.userId))
-const ADMIN_CREATABLE_WIDGET_TYPES = new Set(['short_text', 'summary', 'number', 'datetime', 'rich_text', 'video_group', 'audio_group'])
+const ADMIN_CREATABLE_WIDGET_TYPES = new Set(['short_text', 'summary', 'number', 'datetime', 'rich_text', 'note_blocks', 'video_group', 'audio_group'])
 const AUDIO_EXTS = new Set(['mp3', 'm4a', 'aac', 'wav'])
 const AUDIO_MAX_BYTES = 50 * 1024 * 1024
 
@@ -148,6 +153,7 @@ const editableWidgets = computed(() =>
 function widgetHint(type: string) {
   if (type === 'video_group') return '由管理员上传 / 配置视频列表'
   if (type === 'audio_group') return '由管理员上传 / 配置音频列表'
+  if (type === 'note_blocks') return '按顺序添加文字和图片，适合家书、笔记、课程材料'
   if (type === 'attendance') return '（活动参与控件，由用户参与产生数据，不在此填写）'
   return ''
 }
@@ -188,7 +194,7 @@ async function loadSection(id: string) {
     section.value = res.section || null
     Object.keys(formData).forEach((k) => delete formData[k])
     for (const w of editableWidgets.value) {
-      if (w.type === 'video_group' || w.type === 'audio_group') formData[w.widgetId] = []
+      if (w.type === 'video_group' || w.type === 'audio_group' || w.type === 'note_blocks') formData[w.widgetId] = []
       else if (w.type === 'number') formData[w.widgetId] = 0
       else formData[w.widgetId] = ''
     }
@@ -231,6 +237,7 @@ async function submit() {
   for (const w of editableWidgets.value) {
     if (w.type === 'video_group' && !validateVideoItems(w)) return
     if (w.type === 'audio_group' && !validateAudioItems(w)) return
+    if (w.type === 'note_blocks' && !validateNoteBlocks(w)) return
   }
 
   submitting.value = true
@@ -307,6 +314,33 @@ function validateAudioItems(w: any) {
       ElMessage.error(`「${w.label}」第 ${i + 1} 条音频大小不正确`)
       return false
     }
+  }
+  return true
+}
+
+function validateNoteBlocks(w: any) {
+  const list = (formData[w.widgetId] as any[]) || []
+  for (const [i, item] of list.entries()) {
+    if (!item?.blockId) {
+      ElMessage.error(`《${w.label}》第 ${i + 1} 块缺少 blockId`)
+      return false
+    }
+    if (item.type === 'text') {
+      if (typeof item.text !== 'string') {
+        ElMessage.error(`《${w.label}》第 ${i + 1} 块文字内容不正确`)
+        return false
+      }
+      continue
+    }
+    if (item.type === 'image') {
+      if (!String(item.fileID || '').startsWith('cloud://')) {
+        ElMessage.error(`《${w.label}》第 ${i + 1} 块图片未上传成功`)
+        return false
+      }
+      continue
+    }
+    ElMessage.error(`《${w.label}》第 ${i + 1} 块类型不支持`)
+    return false
   }
   return true
 }
