@@ -20,3 +20,17 @@ describe('extractCloudFileIDsFromContent', () => {
     ])
   })
 })
+
+describe('note_blocks media extraction', () => {
+  test('extracts cloud images from ordered note blocks', () => {
+    const result = extractCloudFileIDsFromContent({
+      note: [
+        { blockId: 'b1', type: 'text', text: 'hello' },
+        { blockId: 'b2', type: 'image', fileID: 'cloud://env/posts/note-1.jpg' },
+        { blockId: 'b3', type: 'image', fileID: 'https://cdn.example.com/note-2.jpg' },
+      ],
+    } as any)
+
+    expect(result).toEqual(['cloud://env/posts/note-1.jpg'])
+  })
+})

@@ -44,6 +44,10 @@
         v-else-if="widget.type === 'rich_text'"
         :nodes="rawValue as string"
       />
+      <NoteBlocksRenderer
+        v-else-if="widget.type === 'note_blocks'"
+        :blocks="rawValue"
+      />
       <view
         v-else-if="widget.type === 'location'"
         class="location-value"
@@ -62,6 +66,7 @@ import { formatWidgetValue } from '../../utils/widget'
 import { resolveWidgetLabel } from '../../utils/widget-form'
 import { useAudioStore } from '../../store/audio'
 import VideoPlayerCard from './VideoPlayerCard.vue'
+import NoteBlocksRenderer from './NoteBlocksRenderer.vue'
 
 const props = defineProps<{
   widget: any

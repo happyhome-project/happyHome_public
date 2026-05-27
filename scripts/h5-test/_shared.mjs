@@ -83,7 +83,7 @@ export async function seedApprovedCommunity(runId) {
   })
   const { widgets } = await callAdmin('section.updateWidgets', {
     sectionId,
-    widgets: [{ type: 'text', label: '鍐呭', required: true, showInList: true, widgetId: '' }],
+    widgets: [{ type: 'short_text', label: '鍐呭', required: true, showInList: true, widgetId: '' }],
   })
   return { ownerOpenid: owner, communityId, sectionId, widgetId: widgets[0].widgetId }
 }

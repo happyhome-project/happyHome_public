@@ -2,7 +2,7 @@ import cloud from 'wx-server-sdk'
 import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
 import { getTempUrl } from '../../lib/storage'
-import { sanitizeContent, validateRequiredWidgets } from '../../lib/post-validate'
+import { sanitizeContent, validateContentValues, validateRequiredWidgets } from '../../lib/post-validate'
 import type {
   AttendancePreviewUser,
   AttendanceSummary,
@@ -193,6 +193,7 @@ export async function handleCreate(
   }
   const sanitizedContent = sanitizeContent(params.content, section)
   validateRequiredWidgets(section, sanitizedContent)
+  validateContentValues(section, sanitizedContent)
 
   const now = new Date().toISOString()
   const postId = await db.create('posts', {
@@ -271,6 +272,7 @@ export async function handleUpdate(
   }
   const sanitizedContent = sanitizeContent(params.content, section)
   validateRequiredWidgets(section, sanitizedContent)
+  validateContentValues(section, sanitizedContent)
 
   const updatedAt = new Date().toISOString()
   await db.updateById('posts', params.postId, {

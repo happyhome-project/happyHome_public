@@ -239,6 +239,14 @@ async function uploadImages(tempPaths: string[]): Promise<string[]> {
   }))
 }
 
+async function uploadNoteBlockImages(blocks: any[]): Promise<any[]> {
+  return Promise.all((blocks || []).map(async (block) => {
+    if (!block || block.type !== 'image') return block
+    const [fileID] = await uploadImages([String(block.fileID || '')])
+    return { ...block, fileID }
+  }))
+}
+
 async function handleSubmit() {
   if (!selectedSection.value || submitting.value) return
   submitting.value = true
@@ -253,6 +261,9 @@ async function handleSubmit() {
       }
       if (widget.type === 'image_group' && Array.isArray(content[widget.widgetId])) {
         content[widget.widgetId] = await uploadImages(content[widget.widgetId])
+      }
+      if (widget.type === 'note_blocks' && Array.isArray(content[widget.widgetId])) {
+        content[widget.widgetId] = await uploadNoteBlockImages(content[widget.widgetId])
       }
     }
 
