@@ -10,7 +10,9 @@
     </button>
 
     <button class="fab-btn" aria-label="发布" @tap="go('create')">
-      <text class="fab-plus">+</text>
+      <view class="fab-pill">
+        <text class="fab-plus">+</text>
+      </view>
     </button>
 
     <button
@@ -111,21 +113,29 @@ button::after {
 
 .fab-btn {
   width: 112rpx;
-  height: 50rpx;
+  height: 78rpx;
   margin: 0 auto;
   justify-self: center;
-  border-radius: 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fab-pill {
+  width: 96rpx;
+  height: 46rpx;
+  border-radius: 16rpx;
   background: $hh-accent;
   color: $hh-surface-1;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 14rpx 30rpx rgba(58, 106, 69, 0.24);
+  box-shadow: 0 8rpx 18rpx rgba(58, 106, 69, 0.16);
 }
 
 .fab-plus {
-  font-size: 48rpx;
-  line-height: 46rpx;
+  font-size: 42rpx;
+  line-height: 42rpx;
   font-weight: $hh-font-weight-regular;
 }
 </style>
