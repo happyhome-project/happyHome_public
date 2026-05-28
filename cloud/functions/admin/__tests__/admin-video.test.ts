@@ -286,13 +286,13 @@ describe('post.createAdmin', () => {
       communityId: 'c-1',
       sectionId: 's-1',
       content: {
-        'w-audio': [{ title: '第一讲', fileID: 'cloud://env/audios/1.mp3', duration: 120, size: 1024, ext: 'mp3' }],
+        'w-audio': [{ title: '第一讲', fileID: 'cloud://env/audios/1.mp3', cover: 'cloud://env/covers/1.jpg', duration: 120, size: 1024, ext: 'mp3' }],
       },
     })
 
     const [, payload] = (db.create as jest.Mock).mock.calls[0]
     expect(payload.content['w-audio']).toEqual([
-      { title: '第一讲', fileID: 'cloud://env/audios/1.mp3', duration: 120, size: 1024, ext: 'mp3' },
+      { title: '第一讲', fileID: 'cloud://env/audios/1.mp3', cover: 'cloud://env/covers/1.jpg', duration: 120, size: 1024, ext: 'mp3' },
     ])
   })
 
@@ -321,6 +321,7 @@ describe('post.createAdmin', () => {
       { fileID: 'cloud://env/audios/1.mp3', duration: 120, size: 1024, ext: 'mp3' },
       { title: '第一讲', duration: 120, size: 1024, ext: 'mp3' },
       { title: '第一讲', fileID: 'https://cdn/1.mp3', duration: 120, size: 1024, ext: 'mp3' },
+      { title: '第一讲', fileID: 'cloud://env/audios/1.mp3', cover: 'https://cdn/cover.jpg', duration: 120, size: 1024, ext: 'mp3' },
       { title: '第一讲', fileID: 'cloud://env/audios/1.flac', duration: 120, size: 1024, ext: 'flac' },
       { title: '第一讲', fileID: 'cloud://env/audios/1.mp3', duration: 0, size: 1024, ext: 'mp3' },
       { title: '第一讲', fileID: 'cloud://env/audios/1.mp3', duration: 120, size: 51 * 1024 * 1024, ext: 'mp3' },

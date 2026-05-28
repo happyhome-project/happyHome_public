@@ -250,7 +250,6 @@
         </view>
       </view>
     </view>
-    <FloatingPlayer />
   </view>
 </template>
 
@@ -260,7 +259,6 @@ import { onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi } from '../../api/cloud'
-import FloatingPlayer from '../../components/FloatingPlayer/FloatingPlayer.vue'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 
 const communityStore = useCommunityStore()

@@ -302,6 +302,10 @@ function validateAudioItems(w: any) {
       ElMessage.error(`「${w.label}」第 ${i + 1} 条音频文件格式不正确`)
       return false
     }
+    if (item.cover && !String(item.cover).startsWith('cloud://')) {
+      ElMessage.error(`《${w.label}》第 ${i + 1} 条系统播放卡片图片格式不正确`)
+      return false
+    }
     if (!AUDIO_EXTS.has(String(item.ext || '').toLowerCase())) {
       ElMessage.error(`「${w.label}」第 ${i + 1} 条音频格式不支持`)
       return false

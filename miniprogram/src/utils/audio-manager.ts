@@ -5,8 +5,14 @@ export type AudioBackendEvent =
   | 'onError'
   | 'onTimeUpdate'
 
+export interface AudioBackendMeta {
+  coverImgUrl?: string
+  epname?: string
+  singer?: string
+}
+
 export interface AudioBackend {
-  setSrc(url: string, title: string): void
+  setSrc(url: string, title: string, meta?: AudioBackendMeta): void
   play(): void
   pause(): void
   stop(): void
@@ -53,11 +59,11 @@ class WxBackgroundAudioBackend implements AudioBackend {
     this.bgm = (wx as any).getBackgroundAudioManager()
   }
 
-  setSrc(url: string, title: string) {
+  setSrc(url: string, title: string, meta: AudioBackendMeta = {}) {
     this.bgm.title = title || '音频'
-    this.bgm.epname = ''
-    this.bgm.singer = ''
-    this.bgm.coverImgUrl = ''
+    this.bgm.epname = meta.epname || ''
+    this.bgm.singer = meta.singer || ''
+    this.bgm.coverImgUrl = meta.coverImgUrl || ''
     this.bgm.src = url
   }
 
@@ -115,7 +121,7 @@ class HtmlAudioBackend implements AudioBackend {
     return this.audio
   }
 
-  setSrc(url: string, _title: string) {
+  setSrc(url: string, _title: string, _meta?: AudioBackendMeta) {
     const audio = this.getAudio()
     if (audio.src !== url) audio.src = url
   }
