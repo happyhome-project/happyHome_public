@@ -5,7 +5,7 @@
       :class="{ active: props.current === 'home' }"
       @tap="go('home')"
     >
-      <text>首页</text>
+      <text>首 页</text>
       <view class="active-dot"></view>
     </button>
 
@@ -18,7 +18,7 @@
       :class="{ active: props.current === 'profile' }"
       @tap="go('profile')"
     >
-      <text>我的</text>
+      <text>我 的</text>
       <view class="active-dot"></view>
     </button>
   </view>
@@ -53,9 +53,9 @@ void APP_TABS
   bottom: 0;
   z-index: $hh-z-sticky;
   height: calc(86rpx + env(safe-area-inset-bottom));
-  padding: 0 58rpx env(safe-area-inset-bottom);
+  padding: 0 72rpx env(safe-area-inset-bottom);
   display: grid;
-  grid-template-columns: 1fr 96rpx 1fr;
+  grid-template-columns: 1fr 128rpx 1fr;
   align-items: center;
   background: rgba(253, 251, 248, 0.95);
   border-top: 1rpx solid $hh-ink-line-2;
@@ -105,10 +105,10 @@ button::after {
 }
 
 .fab-btn {
-  width: 70rpx;
-  height: 58rpx;
+  width: 76rpx;
+  height: 50rpx;
   margin: 0 auto;
-  border-radius: 20rpx;
+  border-radius: 18rpx;
   background: $hh-accent;
   color: $hh-surface-1;
   display: flex;
@@ -118,8 +118,8 @@ button::after {
 }
 
 .fab-plus {
-  font-size: 52rpx;
-  line-height: 50rpx;
+  font-size: 48rpx;
+  line-height: 46rpx;
   font-weight: $hh-font-weight-regular;
 }
 </style>
