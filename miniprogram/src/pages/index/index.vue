@@ -3,8 +3,8 @@
     <!-- 未登录：引导卡片（占满首页，挡住任何数据渲染） -->
     <LoginGuard
       v-if="!userStore.isLoggedIn"
-      title="欢迎来到 happyHome"
-      desc="登录后查看你的社区和近况"
+      title="欢迎来到 社群助手"
+      desc="登录后查看你的社群和近况"
     />
 
     <template v-else>
@@ -123,8 +123,7 @@
 
     <!-- Section Head · 沉淀板块标题 -->
     <view class="sec-head">
-      <text class="sec-head-t"><text class="sec-head-b">沉淀板块</text><text>· 长期有用</text></text>
-      <text class="sec-head-more">管理 ›</text>
+      <text class="sec-head-t"><text class="sec-head-b">时光胶囊</text><text>· 沉淀精华</text></text>
     </view>
 
     <!-- Archive cards · 沉淀板块分组卡 -->
@@ -222,10 +221,7 @@ const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
 
 // ── Computed: masthead ──
 const communityName = computed(() => communityStore.currentCommunity?.name ?? '选择社区')
-const communityMeta = computed(() => {
-  const count = communityStore.currentSections?.length ?? 0
-  return count > 0 ? `${count} 个板块` : ''
-})
+const communityMeta = computed(() => '')
 const avatarLetter = computed(() => {
   const name = communityStore.currentCommunity?.name ?? ''
   return name.charAt(0) || '?'
@@ -239,9 +235,9 @@ function onMastheadTap() {
   }
 }
 
-// 场景类型（暂时固定为邻里，将来由 community.type 决定）
-const kind = computed(() => '邻里')
-const kindEn = computed(() => 'NEIGHBORHOOD')
+// 场景类型（暂时固定为社群，将来由 community.type 决定）
+const kind = computed(() => '社群')
+const kindEn = computed(() => 'Welcome : )')
 
 // ── 群训引文：读 community.motto / mottoCite ──
 const quote = computed(() => communityStore.currentCommunity?.motto || '')

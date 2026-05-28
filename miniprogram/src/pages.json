@@ -9,7 +9,7 @@
   "pages": [
     {
       "path": "pages/index/index",
-      "style": { "navigationBarTitleText": "社区" }
+      "style": { "navigationBarTitleText": "社群助手" }
     },
     {
       "path": "pages/create/index",
@@ -71,7 +71,7 @@
   },
   "globalStyle": {
     "navigationBarTextStyle": "black",
-    "navigationBarTitleText": "HappyHome",
+    "navigationBarTitleText": "社群助手",
     "navigationBarBackgroundColor": "#FDFBF8",
     "backgroundColor": "#F5F3F0"
   }

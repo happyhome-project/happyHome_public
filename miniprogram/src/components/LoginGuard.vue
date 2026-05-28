@@ -12,8 +12,8 @@ withDefaults(defineProps<{
   desc?: string
   actionText?: string
 }>(), {
-  title: '欢迎来到 happyHome',
-  desc: '登录后查看你的社区和近况',
+  title: '欢迎来到 社群助手',
+  desc: '登录后查看你的社群和近况',
   actionText: '去登录',
 })
 

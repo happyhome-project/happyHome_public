@@ -83,7 +83,17 @@ async function callViaHttpGateway<T>(name: string, action: string, params: objec
     const msg = data?.error || `HTTP ${statusCode}`
     throw new Error(`[http-gateway] ${name}/${action} failed: ${msg}`)
   }
-  if (data?.error) throw new Error(`[http-gateway] ${name}/${action}: ${data.error}`)
+  return normalizeCloudResult<T>(data, name, action, 'http-gateway')
+}
+
+function normalizeCloudResult<T>(data: any, name: string, action: string, source: string): T {
+  if (data?.error) {
+    throw new Error(`[${source}] ${name}/${action}: ${data.error}`)
+  }
+  if (data?.success === false) {
+    const msg = data?.message || data?.errMsg || 'request failed'
+    throw new Error(`[${source}] ${name}/${action}: ${msg}`)
+  }
   return data as T
 }
 
@@ -96,8 +106,14 @@ export async function callCloud<T = any>(
     _wx.cloud.callFunction({
       name,
       data: { action, ...params },
-      success: (res: any) => resolve(res.result),
-      fail: reject
+      success: (res: any) => {
+        try {
+          resolve(normalizeCloudResult<T>(res.result, name, action, 'wx.cloud'))
+        } catch (error) {
+          reject(error)
+        }
+      },
+      fail: (error: any) => reject(new Error(error?.errMsg || error?.message || String(error)))
     })
   })
 }
