@@ -785,6 +785,8 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (typeof params.description === 'string') updates.description = params.description
     if (typeof params.motto === 'string') updates.motto = params.motto
     if (typeof params.mottoCite === 'string') updates.mottoCite = params.mottoCite
+    if (params.joinType === 'open' || params.joinType === 'approval') updates.joinType = params.joinType
+    else if (typeof params.joinType !== 'undefined') throw new Error('joinType must be open or approval')
     if (Object.keys(updates).length === 0) throw new Error('没有可更新字段')
     await db.updateById('communities', communityId, updates)
     return { success: true }
