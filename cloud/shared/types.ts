@@ -238,6 +238,9 @@ export interface Post {
   likeCount: number
   createdAt: string
   updatedAt: string
+  adminEditedAt?: string
+  adminEditedByAccountId?: string
+  adminEditedByUsername?: string
   attendanceSummaryByWidget?: AttendanceSummaryByWidget
 }
 

@@ -3,7 +3,7 @@ import crypto from 'crypto'
 import * as db from '../../lib/db'
 import * as storage from '../../lib/storage'
 import { extractCloudFileIDsFromContent } from '../../lib/extract-file-ids'
-import { sanitizeContent, validateContentValues, validateRequiredWidgets } from '../../lib/post-validate'
+import { getEditableWidgetIds, sanitizeContent, validateContentValues, validateRequiredWidgets } from '../../lib/post-validate'
 import { getWxacodeUnlimited } from '../../lib/wx-openapi'
 import {
   assertOwnCommunityOrSuper,
@@ -99,8 +99,20 @@ const ENTITY_TO_COMMUNITY_ACTIONS: Record<string, { collection: string; idParam:
   'section.delete': { collection: 'sections', idParam: 'sectionId' },
   'post.getAdmin': { collection: 'posts', idParam: 'postId' },
   'post.deleteAdmin': { collection: 'posts', idParam: 'postId' },
+  'post.updateAdmin': { collection: 'posts', idParam: 'postId' },
   'post.removeAttendanceMemberAdmin': { collection: 'posts', idParam: 'postId' },
 }
+
+const ADMIN_POST_EDITABLE_WIDGET_TYPES = new Set([
+  'short_text',
+  'summary',
+  'number',
+  'datetime',
+  'rich_text',
+  'note_blocks',
+  'video_group',
+  'audio_group',
+])
 
 function matchesAction(action: string, rules: Array<string | RegExp>): boolean {
   return rules.some((rule) => (typeof rule === 'string' ? rule === action : rule.test(action)))
@@ -132,6 +144,35 @@ function parseDateBoundary(value: string, endOfDay = false) {
 function includesKeyword(...parts: Array<unknown>) {
   const haystack = parts.map((part) => String(part || '').toLowerCase()).join(' ')
   return (keyword: string) => !keyword || haystack.includes(keyword)
+}
+
+function getAdminPostEditableWidgetIds(section: Section): Set<string> {
+  return new Set(
+    (section.widgets || [])
+      .filter((widget: any) => ADMIN_POST_EDITABLE_WIDGET_TYPES.has(String(widget.type || '')))
+      .map((widget: any) => String(widget.widgetId || ''))
+      .filter(Boolean)
+  )
+}
+
+function mergeAdminPostContent(existingContent: any, incomingContent: any, section: Section) {
+  const currentPostContentIds = getEditableWidgetIds(section, true)
+  const adminEditableIds = getAdminPostEditableWidgetIds(section)
+  const merged: Record<string, any> = {}
+
+  for (const [key, value] of Object.entries(existingContent || {})) {
+    if (currentPostContentIds.has(key) && !adminEditableIds.has(key)) {
+      merged[key] = value
+    }
+  }
+
+  for (const [key, value] of Object.entries(incomingContent || {})) {
+    if (adminEditableIds.has(key)) {
+      merged[key] = value
+    }
+  }
+
+  return merged
 }
 
 function isTestAccountId(userId: string) {
@@ -1041,6 +1082,37 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     }
     await db.softDelete('posts', postId)
     return { success: true }
+  }
+  if (action === 'post.updateAdmin') {
+    const postId = String(params.postId || '').trim()
+    if (!postId) throw new Error('postId 不能为空')
+    const post = await db.getById('posts', postId) as any
+    if (!post) throw new Error('post not found')
+    if (post.status === 'deleted') throw new Error('post is deleted')
+
+    const section = await db.getById('sections', post.sectionId) as Section | null
+    if (!section || !Array.isArray(section.widgets) || section.widgets.length === 0) {
+      throw new Error('该板块尚未配置内容模板，无法编辑')
+    }
+
+    const merged = mergeAdminPostContent(post.content || {}, params.content || {}, section)
+    const adminEditableIds = getAdminPostEditableWidgetIds(section)
+    const adminValidationSection = {
+      ...section,
+      widgets: (section.widgets || []).filter((widget: any) => adminEditableIds.has(String(widget.widgetId || ''))),
+    } as Section
+    validateRequiredWidgets(adminValidationSection, merged, { allowAdminOnly: true })
+    validateContentValues(section, merged, { allowAdminOnly: true })
+
+    const updatedAt = new Date().toISOString()
+    await db.updateById('posts', postId, {
+      content: merged,
+      updatedAt,
+      adminEditedAt: updatedAt,
+      adminEditedByAccountId: ctx.accountId,
+      adminEditedByUsername: ctx.username,
+    })
+    return { success: true, updatedAt, adminEditedAt: updatedAt }
   }
   if (action === 'post.removeAttendanceMemberAdmin') {
     const postId = String(params.postId || '').trim()

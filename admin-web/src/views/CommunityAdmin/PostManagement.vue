@@ -84,9 +84,18 @@
           <span>{{ formatAdminDateTime(row.createdAt) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="180">
+      <el-table-column label="操作" width="240">
         <template #default="{ row }">
           <el-button size="small" @click="openDetail(row)">详情</el-button>
+          <el-button
+            size="small"
+            type="primary"
+            plain
+            :disabled="row.status === 'deleted'"
+            @click="editPost(row)"
+          >
+            编辑
+          </el-button>
           <el-button
             size="small"
             type="danger"
@@ -107,6 +116,21 @@
           <div>板块：{{ detailSection?.name || detailPost.sectionName || '未知板块' }}</div>
           <div>作者：{{ detailPost.authorNickname || '未设置昵称' }} / {{ detailPost.authorId }}</div>
           <div>时间：{{ formatAdminDateTime(detailPost.createdAt) }}</div>
+          <div v-if="detailPost.adminEditedAt">
+            最后编辑：{{ detailPost.adminEditedByUsername || detailPost.adminEditedByAccountId || '管理员' }} /
+            {{ formatAdminDateTime(detailPost.adminEditedAt) }}
+          </div>
+          <div>
+            <el-button
+              size="small"
+              type="primary"
+              plain
+              :disabled="detailPost.status === 'deleted'"
+              @click="editPost(detailPost)"
+            >
+              编辑帖子
+            </el-button>
+          </div>
         </div>
 
         <el-descriptions :column="1" border>
@@ -306,6 +330,12 @@ async function openDetail(row: any) {
   } catch (error: any) {
     ElMessage.error(error.message || '加载详情失败')
   }
+}
+
+function editPost(row: any) {
+  const postId = String(row?._id || '')
+  if (!postId || row?.status === 'deleted') return
+  router.push({ name: 'post-edit-admin', params: { communityId: communityId.value, postId } })
 }
 
 async function deletePost(row: any) {
