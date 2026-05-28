@@ -208,6 +208,7 @@ import { postApi } from '../../api/cloud'
 import AppTabBar from '../../components/AppTabBar.vue'
 import LoginGuard from '../../components/LoginGuard.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
+import { getCarpoolListSummary, getCarpoolLiveMeta } from '../../utils/widget'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -302,7 +303,7 @@ const liveItems = computed<LiveItem[]>(() => {
       items.push({
         ic: section.icon || '·',
         t: getPostTitle(post, section) || section.name,
-        m: getLivePostMeta(post),
+        m: getLivePostMeta(post, section),
         cta: '进入',
         sectionId: section._id,
         postId: post._id,
@@ -360,6 +361,9 @@ function formatArchiveKicker(index: number): string {
 }
 
 function getPostTitle(post: any, section: any): string {
+  const carpoolSummary = getCarpoolListSummary(post, section)
+  if (carpoolSummary?.route) return carpoolSummary.route
+
   // 优先拿第一个 widget 的值作为标题
   if (!post.content) return '无标题'
   const w = section.widgets?.find((x: any) => ['short_text', 'summary'].includes(x.type))
@@ -383,8 +387,16 @@ function getArchiveMeta(post: any, section: any): string {
   return ''
 }
 
-function getLivePostMeta(post: any): string[] {
+function getLivePostMeta(post: any, section: any): string[] {
   const meta: string[] = []
+  const carpoolSummary = getCarpoolListSummary(post, section)
+  if (carpoolSummary) {
+    meta.push(...(getCarpoolLiveMeta(post, section) || []))
+    const attendanceText = getAttendanceMeta(post)
+    if (attendanceText) meta.push(attendanceText)
+    return meta
+  }
+
   if (post.authorNickname) meta.push(post.authorNickname)
   meta.push(formatTime(post.createdAt))
   const attendanceText = getAttendanceMeta(post)

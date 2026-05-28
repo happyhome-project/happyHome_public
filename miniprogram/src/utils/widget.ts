@@ -7,6 +7,17 @@ export interface ListPreviewItem {
   previewUsers?: AttendancePreviewUser[]
 }
 
+export interface CarpoolListSummary {
+  route: string
+  departureTime: string
+}
+
+export function getCarpoolLiveMeta(post: Post, section: Section): string[] | null {
+  const summary = getCarpoolListSummary(post, section)
+  if (!summary) return null
+  return [`出发时间：${summary.departureTime}`]
+}
+
 export function getListPreview(post: Post, section: Section): ListPreviewItem[] {
   return section.widgets
     .filter((widget) => widget.showInList && !['admin_notice', 'video_group', 'audio_group', 'note_blocks', 'rich_note'].includes(widget.type))
@@ -31,6 +42,20 @@ export function getListPreview(post: Post, section: Section): ListPreviewItem[] 
     .filter((item) => item.value !== '')
 }
 
+export function getCarpoolListSummary(post: Post, section: Section): CarpoolListSummary | null {
+  if (!isCarpoolSection(section)) return null
+
+  const originWidget = findWidgetByLabel(section, ['出发地', '起点'])
+  const destinationWidget = findWidgetByLabel(section, ['目的地', '终点'])
+  const timeWidget = findWidgetByLabel(section, ['出发时间', '时间'])
+  const origin = originWidget ? getWidgetValue(post, originWidget) : ''
+  const destination = destinationWidget ? getWidgetValue(post, destinationWidget) : ''
+  const departureTime = timeWidget ? getWidgetValue(post, timeWidget) : ''
+
+  if (!origin || !destination || !departureTime) return null
+  return { route: `${origin} -- ${destination}`, departureTime }
+}
+
 export function formatWidgetValue(value: any, type: string): string {
   if (value === undefined || value === null || value === '') return ''
   if (type === 'location') {
@@ -46,4 +71,22 @@ export function formatWidgetValue(value: any, type: string): string {
   }
   if (Array.isArray(value)) return ''
   return String(value)
+}
+
+function isCarpoolSection(section: Section): boolean {
+  if (String(section.name || '').includes('拼车')) return true
+  return Boolean(findWidgetByLabel(section, ['出发地', '起点']) && findWidgetByLabel(section, ['目的地', '终点']))
+}
+
+function findWidgetByLabel(section: Section, labels: string[]) {
+  return [...(section.widgets || [])]
+    .sort((a, b) => a.order - b.order)
+    .find((widget) => {
+      const label = String(widget.label || '').replace(/\s/g, '')
+      return labels.some((item) => label.includes(item))
+    })
+}
+
+function getWidgetValue(post: Post, widget: Section['widgets'][number]): string {
+  return formatWidgetValue(post.content?.[widget.widgetId], widget.type).trim()
 }
