@@ -51,7 +51,7 @@ export function markdownToHtml(markdown: string): string {
 
   const flushParagraph = () => {
     if (paragraph.length > 0) {
-      blocks.push(`<p>${renderInline(paragraph.join(' '))}</p>`)
+      blocks.push(`<p>${paragraph.map((line) => renderInline(line)).join('<br>')}</p>`)
       paragraph = []
     }
   }
@@ -227,7 +227,7 @@ export function applyMarkdownToolbarAction(
     return insertMarkdownBlock(source, start, end, formatSelectedLines(selected, '引用内容', (line) => `> ${line.replace(/^>\s+/, '')}`))
   }
   if (action === 'line-break') {
-    return replaceSelection(source, start, end, selected ? `${selected}\n\n` : '\n\n')
+    return replaceSelection(source, start, end, selected ? `${selected}\n` : '\n')
   }
   if (action === 'link') {
     const text = selected || payload.text || '链接文字'

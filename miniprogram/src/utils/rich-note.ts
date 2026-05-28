@@ -128,7 +128,7 @@ export function markdownToHtml(markdown: string): string {
 
   const flushParagraph = () => {
     if (paragraphBuffer.length === 0) return
-    blocks.push(`<p>${renderInline(paragraphBuffer.join(' '))}</p>`)
+    blocks.push(`<p>${paragraphBuffer.map((line) => renderInline(line)).join('<br>')}</p>`)
     paragraphBuffer = []
   }
   const flushList = () => {
@@ -311,7 +311,7 @@ export function applyMarkdownToolbarAction(
     return insertMarkdownBlock(source, start, end, formatSelectedLines(selected, '引用内容', (line) => `> ${line.replace(/^>\s+/, '')}`))
   }
   if (action === 'line-break') {
-    return replaceSelection(source, start, end, selected ? `${selected}\n\n` : '\n\n')
+    return replaceSelection(source, start, end, selected ? `${selected}\n` : '\n')
   }
   if (action === 'link') {
     const text = selected || payload.text || '链接文字'
