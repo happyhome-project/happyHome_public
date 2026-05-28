@@ -5,11 +5,15 @@
  *   node scripts/deploy.mjs cloud                # upload all cloud functions
  *   node scripts/deploy.mjs cloud --only=post    # upload only post (comma-separated ok)
  *   node scripts/deploy.mjs miniprogram          # upload mini program (preview QR)
+ *   node scripts/deploy.mjs miniprogram-upload   # upload mini program as a dev/trial build, no QR
  *   node scripts/deploy.mjs admin-web            # upload admin-web dist to Aliyun Nginx production host
  *   node scripts/deploy.mjs all                  # cloud + miniprogram
+ *   node scripts/deploy.mjs release              # cloud + admin-web + miniprogram-upload
  *
  * Flags:
  *   --only=a,b,c   filter cloud functions by name
+ *   --version=x    version for miniprogram-upload (default: 1.0.YYMMDDHHmm)
+ *   --desc=x       description for miniprogram-upload
  *   --use-tcb      force CloudBase CLI deploy path for cloud functions
  *   --use-ci       skip DevTools/CloudBase CLI paths, go straight to miniprogram-ci
  *                  (useful when DevTools is not installed on the machine)
@@ -83,6 +87,37 @@ function findDevtoolsCli() {
 }
 
 const quote = (s) => (/[ \t&|<>()]/.test(String(s)) ? `"${String(s).replace(/"/g, '\\"')}"` : String(s))
+
+function getFlagValue(name) {
+  const equalsArg = process.argv.find((a) => a.startsWith(`--${name}=`))
+  if (equalsArg) return equalsArg.slice(name.length + 3)
+  const index = process.argv.indexOf(`--${name}`)
+  if (index >= 0 && process.argv[index + 1] && !process.argv[index + 1].startsWith('--')) {
+    return process.argv[index + 1]
+  }
+  return ''
+}
+
+function getShortGitSha() {
+  try {
+    return execSync('git rev-parse --short HEAD', { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+  } catch {
+    return 'unknown'
+  }
+}
+
+function getLocalTimestamp() {
+  const now = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  return {
+    yy: String(now.getFullYear()).slice(-2),
+    yyyy: String(now.getFullYear()),
+    MM: pad(now.getMonth() + 1),
+    dd: pad(now.getDate()),
+    hh: pad(now.getHours()),
+    mm: pad(now.getMinutes()),
+  }
+}
 
 function runShell(commandLine, options = {}) {
   console.log(commandLine)
@@ -312,6 +347,45 @@ async function deployMiniprogramViaDevtoolsCli() {
   })
 }
 
+async function uploadMiniprogramViaDevtoolsCli(version, desc) {
+  const cli = findDevtoolsCli()
+  if (!cli) return { ok: false, reason: 'DevTools CLI not found at known paths (set WX_DEVTOOLS_CLI env to override)' }
+
+  const infoPath = resolve(ROOT, 'mp-upload-info.json')
+  const args = [
+    'upload',
+    '--project', MP_DIST,
+    '--version', version,
+    '--desc', desc,
+    '--info-output', infoPath,
+  ]
+
+  const commandLine = [cli, ...args].map(quote).join(' ')
+  console.log(`[DevTools CLI] ${commandLine}`)
+  const result = await runShellCapture(commandLine)
+  if (!result.ok) return result
+
+  const output = result.output || ''
+  if (/getCloudAPISignedHeader failed|success=false|not logged in|not login|未登录|登录失败/i.test(output)) {
+    return {
+      ok: false,
+      reason: 'DevTools CLI upload reported an IDE login/signing problem; open WeChat DevTools, log in again, then retry upload',
+    }
+  }
+  return { ok: true, reason: `ok; info-output=${infoPath}` }
+}
+
+async function uploadMiniprogramViaMiniprogramCi(version, desc) {
+  console.log('Uploading miniprogram via miniprogram-ci...')
+  await ci.upload({
+    project: getCiProject(),
+    version,
+    desc,
+    setting: { es6: true, minified: false },
+  })
+  console.log('Miniprogram upload finished via miniprogram-ci')
+}
+
 // ── Fallback preview path: miniprogram-ci ──
 // 撞 IPv6/透明代理/WeChat CI 白名单的概率跟 cloud.uploadFunction 一样高。
 async function deployMiniprogramViaMiniprogramCi() {
@@ -346,6 +420,35 @@ async function deployMiniprogram() {
 
   await deployMiniprogramViaMiniprogramCi()
   console.log('[✓] Miniprogram preview ready via miniprogram-ci')
+}
+
+async function uploadMiniprogram() {
+  console.log('\nBuilding miniprogram...')
+  execSync('npm run build:mp-weixin', { cwd: resolve(ROOT, 'miniprogram'), stdio: 'inherit' })
+
+  const stamp = getLocalTimestamp()
+  const shortSha = getShortGitSha()
+  const version = getFlagValue('version') || `1.0.${stamp.yy}${stamp.MM}${stamp.dd}${stamp.hh}${stamp.mm}`
+  const desc = getFlagValue('desc') || `trial ${stamp.yyyy}-${stamp.MM}-${stamp.dd} ${stamp.hh}:${stamp.mm} ${shortSha}`
+  const forceCi = process.argv.includes('--use-ci')
+
+  console.log(`\nMiniprogram upload version: ${version}`)
+  console.log(`Miniprogram upload desc: ${desc}`)
+
+  if (!forceCi) {
+    console.log('\n[primary] Uploading via WeChat DevTools CLI...')
+    const result = await uploadMiniprogramViaDevtoolsCli(version, desc)
+    if (result.ok) {
+      console.log('[OK] Miniprogram uploaded via DevTools CLI (no preview QR generated)')
+      return
+    }
+    console.log(`[!] DevTools CLI upload failed (${result.reason}) - falling back to miniprogram-ci`)
+  } else {
+    console.log('\n[--use-ci] Skipping DevTools CLI, using miniprogram-ci directly')
+  }
+
+  await uploadMiniprogramViaMiniprogramCi(version, desc)
+  console.log('[OK] Miniprogram uploaded via miniprogram-ci')
 }
 
 function buildAdminWeb(defaultRouterMode) {
@@ -443,6 +546,13 @@ async function deployAdminWeb() {
 }
 
 const target = process.argv[2] || 'all'
-if (target === 'cloud' || target === 'all') await deployCloud()
-if (target === 'miniprogram' || target === 'all') await deployMiniprogram()
-if (target === 'admin-web') await deployAdminWeb()
+if (target === 'release') {
+  await deployCloud()
+  await deployAdminWeb()
+  await uploadMiniprogram()
+} else {
+  if (target === 'cloud' || target === 'all') await deployCloud()
+  if (target === 'miniprogram' || target === 'all') await deployMiniprogram()
+  if (target === 'miniprogram-upload') await uploadMiniprogram()
+  if (target === 'admin-web') await deployAdminWeb()
+}

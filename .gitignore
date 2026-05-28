@@ -11,6 +11,7 @@ playwright-report/
 test-results/
 preview-qr.*
 preview-info.json
+mp-upload-info.json
 
 # logs
 *.log
