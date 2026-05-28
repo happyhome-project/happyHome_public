@@ -4,7 +4,9 @@
       <el-breadcrumb separator="/">
         <el-breadcrumb-item :to="{ name: 'communities' }">社区管理</el-breadcrumb-item>
         <el-breadcrumb-item>
-          <a class="breadcrumb-link" :href="postsPath">{{ communityName || '当前社区' }}</a>
+          <span class="breadcrumb-link" role="link" tabindex="0" @click="goToPosts" @keydown.enter="goToPosts">
+            {{ communityName || '当前社区' }}
+          </span>
         </el-breadcrumb-item>
         <el-breadcrumb-item>新建帖子</el-breadcrumb-item>
       </el-breadcrumb>
@@ -237,7 +239,7 @@ function goToPosts() {
 .widget-label { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-weight: 600; }
 .widget-label .req { color: #f56c6c; }
 .muted-tip { color: #909399; font-size: 12px; font-weight: normal; }
-.breadcrumb-link { color: inherit; text-decoration: none; }
+.breadcrumb-link { color: inherit; cursor: pointer; }
 .breadcrumb-link:hover { color: #409eff; }
 .actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px; padding-top: 16px; border-top: 1px solid #ebeef5; }
 </style>
