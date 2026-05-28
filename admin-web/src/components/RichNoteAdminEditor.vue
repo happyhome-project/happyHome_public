@@ -15,7 +15,7 @@
       <el-button size="small" @click="runAction('ordered-list')">有序</el-button>
       <el-button size="small" @click="runAction('unordered-list')">列表</el-button>
       <el-button size="small" @click="runAction('quote')">引用</el-button>
-      <el-button size="small" @mousedown.prevent @click="runAction('line-break')">换行</el-button>
+      <el-button size="small" @mousedown.prevent="runAction('line-break')">换行</el-button>
       <el-button size="small" @click="insertLink">链接</el-button>
       <el-button size="small" :loading="uploading" @click="pickImage">插入图片</el-button>
     </div>
@@ -28,7 +28,9 @@
         placeholder="输入正文，可用上方按钮插入加粗、标题、列表、链接和图片"
         @input="emitMarkdown"
         @click="rememberSelection"
+        @focus="rememberSelection"
         @keyup="rememberSelection"
+        @mouseup="rememberSelection"
         @select="rememberSelection"
         @blur="rememberSelection"
       />
