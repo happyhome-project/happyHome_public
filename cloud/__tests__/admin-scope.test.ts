@@ -200,3 +200,23 @@ describe('community.createAdmin', () => {
     expect(db.updateById).toHaveBeenCalledWith('communities', 'c-new', { status: 'active' })
   })
 })
+
+describe('community.updateMeta joinType', () => {
+  test('updates joinType to open', async () => {
+    ;(db.updateById as jest.Mock).mockResolvedValue(undefined)
+
+    await internalCall('community.updateMeta', {
+      communityId: 'c1',
+      joinType: 'open',
+    }, ADMIN_CTX_SUPER)
+
+    expect(db.updateById).toHaveBeenCalledWith('communities', 'c1', { joinType: 'open' })
+  })
+
+  test('rejects invalid joinType', async () => {
+    await expect(internalCall('community.updateMeta', {
+      communityId: 'c1',
+      joinType: 'wxid',
+    }, ADMIN_CTX_SUPER)).rejects.toThrow('joinType must be open or approval')
+  })
+})

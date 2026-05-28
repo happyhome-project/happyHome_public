@@ -87,7 +87,7 @@ export const communityApi = {
   disable: (communityId: string) => callAdmin('community.disable', { communityId }),
   restore: (communityId: string) => callAdmin('community.restore', { communityId }),
   hardDelete: (communityId: string) => callAdmin('community.hardDelete', { communityId }),
-  updateMeta: (params: { communityId: string; name?: string; description?: string; motto?: string; mottoCite?: string }) =>
+  updateMeta: (params: { communityId: string; name?: string; description?: string; motto?: string; mottoCite?: string; joinType?: 'open' | 'approval' }) =>
     callAdmin('community.updateMeta', params),
   createAdmin: (params: {
     name: string

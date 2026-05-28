@@ -44,14 +44,30 @@
           <el-tag v-else type="info">{{ row.status }}</el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="加入方式" width="120">
+        <template #default="{ row }">
+          <el-tag :type="normalizeJoinType(row.joinType) === 'open' ? 'success' : 'warning'">
+            {{ formatJoinType(row.joinType) }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="memberCount" label="成员数" width="100" />
-      <el-table-column label="操作" width="420">
+      <el-table-column label="操作" width="520">
         <template #default="{ row }">
           <template v-if="row.status === 'active'">
             <el-button data-testid="community-sections-button" :data-community-id="getCommunityId(row)" size="small" @click="goSections(getCommunityId(row))">板块管理</el-button>
             <el-button data-testid="community-members-button" :data-community-id="getCommunityId(row)" size="small" @click="goMembers(getCommunityId(row))">成员管理</el-button>
             <el-button size="small" @click="goPosts(getCommunityId(row))">帖子管理</el-button>
             <el-button data-testid="community-motto-button" :data-community-id="getCommunityId(row)" size="small" @click="openMotto(row)">格言</el-button>
+            <el-button
+              data-testid="community-join-type-toggle"
+              :data-community-id="getCommunityId(row)"
+              size="small"
+              :loading="updatingJoinTypeId === getCommunityId(row)"
+              @click="toggleJoinType(row)"
+            >
+              {{ normalizeJoinType(row.joinType) === 'open' ? '改为申请加入' : '改为直接加入' }}
+            </el-button>
             <el-button
               v-if="authStore.isSuperAdmin"
               data-testid="community-disable-button"
@@ -120,10 +136,12 @@ const authStore = useAuthStore()
 const loading = ref(false)
 const communities = ref<any[]>([])
 const disablingId = ref('')
+const updatingJoinTypeId = ref('')
 const showMottoDialog = ref(false)
 const savingMotto = ref(false)
 const keyword = ref('')
 const statusFilter = ref<'all' | 'active' | 'pending' | 'rejected'>('all')
+type JoinType = 'open' | 'approval'
 const mottoForm = ref<{ communityId: string; motto: string; mottoCite: string }>({
   communityId: '',
   motto: '',
@@ -160,6 +178,14 @@ async function loadCommunities() {
 
 function getCommunityId(row: any): string {
   return String(row?._id || row?.id || '')
+}
+
+function normalizeJoinType(joinType: unknown): JoinType {
+  return joinType === 'approval' ? 'approval' : 'open'
+}
+
+function formatJoinType(joinType: unknown): string {
+  return normalizeJoinType(joinType) === 'open' ? '直接加入' : '申请加入'
 }
 
 async function goCreate() {
@@ -224,6 +250,38 @@ async function saveMotto() {
     ElMessage.error(e.message || '保存失败')
   } finally {
     savingMotto.value = false
+  }
+}
+
+async function toggleJoinType(row: any) {
+  const communityId = getCommunityId(row)
+  if (!communityId) {
+    ElMessage.error('社区 ID 缺失，无法切换加入方式')
+    return
+  }
+
+  const current = normalizeJoinType(row.joinType)
+  const next: JoinType = current === 'open' ? 'approval' : 'open'
+  const nextLabel = formatJoinType(next)
+  try {
+    await ElMessageBox.confirm(
+      `确认将社区“${row.name || communityId}”改为“${nextLabel}”吗？改动会立即影响新用户加入流程。`,
+      '切换加入方式',
+      { type: 'warning', confirmButtonText: '确认切换', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+
+  updatingJoinTypeId.value = communityId
+  try {
+    await communityApi.updateMeta({ communityId, joinType: next })
+    row.joinType = next
+    ElMessage.success(`已改为${nextLabel}`)
+  } catch (e: any) {
+    ElMessage.error(e.message || '切换加入方式失败')
+  } finally {
+    updatingJoinTypeId.value = ''
   }
 }
 
