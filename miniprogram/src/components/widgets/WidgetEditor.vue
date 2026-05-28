@@ -90,6 +90,12 @@
       @update:model-value="emit('update:modelValue', $event)"
     />
 
+    <RichNoteEditor
+      v-else-if="widget.type === 'rich_note'"
+      :model-value="modelValue"
+      @update:model-value="emit('update:modelValue', $event)"
+    />
+
     <view v-else-if="widget.type === 'video_group' || widget.type === 'audio_group'" class="video-readonly">
       <text class="readonly-hint">该控件由管理员维护，无需在此填写</text>
     </view>
@@ -100,6 +106,7 @@
 import { computed } from 'vue'
 import { resolveWidgetLabel } from '../../utils/widget-form'
 import NoteBlocksEditor from './NoteBlocksEditor.vue'
+import RichNoteEditor from './RichNoteEditor.vue'
 
 const props = defineProps<{ widget: any; modelValue: any }>()
 const emit = defineEmits(['update:modelValue'])

@@ -18,6 +18,7 @@ export type WidgetType =
   | 'image_group'
   | 'rich_text'
   | 'note_blocks'
+  | 'rich_note'
   | 'location'
   | 'attendance'
   | 'video_group'
@@ -120,6 +121,15 @@ export interface NoteImageBlock {
 
 export type NoteBlock = NoteTextBlock | NoteImageBlock
 
+export interface RichNoteContent {
+  format: 'markdown'
+  markdown: string
+  html: string
+  text: string
+  imageFileIDs: string[]
+  schemaVersion: 1
+}
+
 export interface Widget {
   widgetId: string
   type: WidgetType
@@ -212,7 +222,7 @@ export interface SectionWithPostCount extends Section {
   postCount: number
 }
 
-export type PostContentValue = string | number | string[] | GeoLocation | VideoItem[] | AudioTrack[] | NoteBlock[]
+export type PostContentValue = string | number | string[] | GeoLocation | VideoItem[] | AudioTrack[] | NoteBlock[] | RichNoteContent
 export type PostContent = Record<string, PostContentValue>
 
 export interface PostAttendanceMember {

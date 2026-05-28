@@ -3,7 +3,29 @@ import type { PostContent } from '../shared/types'
 const CLOUD_PROTOCOL = 'cloud://'
 
 function pushIfCloud(target: string[], value: unknown) {
-  if (typeof value === 'string' && value.startsWith(CLOUD_PROTOCOL)) target.push(value)
+  if (typeof value === 'string' && value.startsWith(CLOUD_PROTOCOL) && !target.includes(value)) {
+    target.push(value)
+  }
+}
+
+function extractImageSrcs(html: string): string[] {
+  const srcs: string[] = []
+  const imgPattern = /<img\b[^>]*\bsrc\s*=\s*(['"])(.*?)\1[^>]*>/gi
+  let match: RegExpExecArray | null
+  while ((match = imgPattern.exec(html))) {
+    srcs.push(match[2])
+  }
+  return srcs
+}
+
+function extractMarkdownImageSrcs(markdown: string): string[] {
+  const srcs: string[] = []
+  const imgPattern = /!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
+  let match: RegExpExecArray | null
+  while ((match = imgPattern.exec(markdown))) {
+    srcs.push(String(match[1] || '').trim())
+  }
+  return srcs
 }
 
 /**
@@ -27,6 +49,17 @@ export function extractCloudFileIDsFromContent(content: PostContent | undefined 
           pushIfCloud(fileIDs, (item as any).cover)
           pushIfCloud(fileIDs, (item as any).fileID)
         }
+      }
+    } else if (value && typeof value === 'object') {
+      const richNote = value as any
+      if (Array.isArray(richNote.imageFileIDs)) {
+        for (const fileID of richNote.imageFileIDs) pushIfCloud(fileIDs, fileID)
+      }
+      if (typeof richNote.html === 'string') {
+        for (const src of extractImageSrcs(richNote.html)) pushIfCloud(fileIDs, src)
+      }
+      if (typeof richNote.markdown === 'string') {
+        for (const src of extractMarkdownImageSrcs(richNote.markdown)) pushIfCloud(fileIDs, src)
       }
     }
   }

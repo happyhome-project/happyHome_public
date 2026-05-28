@@ -506,3 +506,126 @@ test.each([
   } as any, 'test-openid')).rejects.toThrow()
   expect(db.create).not.toHaveBeenCalled()
 })
+
+test('create: rich_note can be submitted by regular members', async () => {
+  ;(db.query as jest.Mock).mockReset()
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.create as jest.Mock).mockReset()
+  const sectionWithRichNote = {
+    ...mockSection,
+    widgets: [
+      ...mockSection.widgets,
+      {
+        widgetId: 'rich-note-widget',
+        type: 'rich_note',
+        label: '富图文',
+        fieldKey: 'richNote',
+        required: false,
+        order: 4,
+        showInList: false,
+      },
+    ],
+  }
+  const richNote = {
+    format: 'markdown',
+    markdown: '**Hello 😊**\n\n![图片](cloud://env/posts/rich-1.jpg)',
+    html: '<p><strong>Hello 😊</strong></p><p><img src="cloud://env/posts/rich-1.jpg"></p>',
+    text: 'Hello 😊',
+    imageFileIDs: ['cloud://env/posts/rich-1.jpg'],
+    schemaVersion: 1,
+  }
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValue(sectionWithRichNote)
+  ;(db.create as jest.Mock).mockResolvedValue('post-rich-note')
+
+  const result = await handleCreate({
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    content: {
+      'title-widget': '课程笔记',
+      'rich-note-widget': richNote,
+    },
+  } as any, 'test-openid')
+
+  expect(result.postId).toBe('post-rich-note')
+  expect(db.create).toHaveBeenCalledWith('posts', expect.objectContaining({
+    content: {
+      'title-widget': '课程笔记',
+      'rich-note-widget': richNote,
+    },
+  }))
+})
+
+test.each([
+  ['non-object value', 'plain text'],
+  ['missing format', { markdown: 'bad', html: '<p>bad</p>', text: 'bad', imageFileIDs: [], schemaVersion: 1 }],
+  ['script tag', { format: 'markdown', markdown: '<script>alert(1)</script>', html: '<p>bad</p>', text: 'bad', imageFileIDs: [], schemaVersion: 1 }],
+  ['event handler attribute', { format: 'markdown', markdown: 'bad', html: '<p onclick="alert(1)">bad</p>', text: 'bad', imageFileIDs: [], schemaVersion: 1 }],
+  ['iframe tag', { format: 'markdown', markdown: 'bad', html: '<iframe src="https://example.com"></iframe>', text: 'bad', imageFileIDs: [], schemaVersion: 1 }],
+  ['external image fileID', { format: 'markdown', markdown: 'bad', html: '<p>bad</p>', text: 'bad', imageFileIDs: ['https://cdn.example.com/bad.jpg'], schemaVersion: 1 }],
+  ['external markdown image', { format: 'markdown', markdown: '![x](https://cdn.example.com/bad.jpg)', html: '<p>bad</p>', text: 'bad', imageFileIDs: [], schemaVersion: 1 }],
+])('create: rich_note rejects %s', async (_caseName, invalidRichNote) => {
+  ;(db.query as jest.Mock).mockReset()
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.create as jest.Mock).mockReset()
+  const sectionWithRichNote = {
+    ...mockSection,
+    widgets: [
+      ...mockSection.widgets,
+      {
+        widgetId: 'rich-note-widget',
+        type: 'rich_note',
+        label: '富图文',
+        fieldKey: 'richNote',
+        required: false,
+        order: 4,
+        showInList: false,
+      },
+    ],
+  }
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValue(sectionWithRichNote)
+
+  await expect(handleCreate({
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    content: {
+      'title-widget': '课程笔记',
+      'rich-note-widget': invalidRichNote,
+    },
+  } as any, 'test-openid')).rejects.toThrow()
+  expect(db.create).not.toHaveBeenCalled()
+})
+
+test('create: required rich_note rejects empty editor content', async () => {
+  ;(db.query as jest.Mock).mockReset()
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.create as jest.Mock).mockReset()
+  const sectionWithRequiredRichNote = {
+    ...mockSection,
+    widgets: [
+      ...mockSection.widgets,
+      {
+        widgetId: 'rich-note-widget',
+        type: 'rich_note',
+        label: '富图文',
+        fieldKey: 'richNote',
+        required: true,
+        order: 4,
+        showInList: false,
+      },
+    ],
+  }
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValue(sectionWithRequiredRichNote)
+
+  await expect(handleCreate({
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    content: {
+      'title-widget': '课程笔记',
+      'rich-note-widget': { format: 'markdown', markdown: '', html: '<p><br></p>', text: '', imageFileIDs: [], schemaVersion: 1 },
+    },
+  } as any, 'test-openid')).rejects.toThrow()
+  expect(db.create).not.toHaveBeenCalled()
+})

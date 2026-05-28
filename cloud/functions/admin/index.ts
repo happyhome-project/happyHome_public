@@ -1169,6 +1169,32 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     return await storage.requestUploadMetadata(cloudPath)
   }
 
+  if (action === 'image.requestUpload') {
+    const fileName = String(params.fileName || '').trim()
+    if (!fileName) throw new Error('fileName 不能为空')
+    const match = fileName.match(/\.([a-zA-Z0-9]+)$/)
+    const ext = match ? match[1].toLowerCase() : ''
+    const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp'])
+    if (!IMAGE_EXTS.has(ext)) throw new Error('不支持的文件类型')
+    const rand = Math.random().toString(36).slice(2, 8)
+    const cloudPath = `posts/images/${Date.now()}_${rand}.${ext}`
+    return await storage.requestUploadMetadata(cloudPath)
+  }
+
+  if (action === 'media.getUrls') {
+    const fileIDs = Array.isArray(params.fileIDs)
+      ? Array.from(new Set(params.fileIDs.map((item: unknown) => String(item || '').trim()).filter((item: string) => item.startsWith('cloud://'))))
+      : []
+    const entries = await Promise.all(fileIDs.map(async (fileID) => {
+      try {
+        return [fileID, await storage.getTempUrl(fileID)] as const
+      } catch {
+        return [fileID, ''] as const
+      }
+    }))
+    return { urls: Object.fromEntries(entries) }
+  }
+
   if (action === 'post.createAdmin') {
     const communityId = String(params.communityId || '').trim()
     const sectionId = String(params.sectionId || '').trim()

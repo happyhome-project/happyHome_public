@@ -185,3 +185,13 @@ export const audioApi = {
   requestUpload: (params: { fileName: string }) =>
     callAdmin('audio.requestUpload', params) as Promise<UploadMetadata>,
 }
+
+export const imageApi = {
+  requestUpload: (params: { fileName: string }) =>
+    callAdmin('image.requestUpload', params) as Promise<UploadMetadata>,
+}
+
+export const mediaApi = {
+  getUrls: (fileIDs: string[]) =>
+    callAdmin('media.getUrls', { fileIDs }) as Promise<{ urls: Record<string, string> }>,
+}

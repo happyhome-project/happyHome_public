@@ -59,6 +59,10 @@
               <AudioGroupEditor v-model="formData[widget.widgetId] as any" />
             </template>
 
+            <template v-else-if="widget.type === 'rich_note'">
+              <RichNoteAdminEditor v-model="formData[widget.widgetId] as any" />
+            </template>
+
             <el-input
               v-else-if="widget.type === 'short_text' || widget.type === 'summary'"
               v-model="formData[widget.widgetId] as any"
@@ -120,7 +124,9 @@ import { Plus } from '@element-plus/icons-vue'
 import { communityApi, sectionApi, postAdminApi } from '../../api/cloud'
 import { useAuthStore } from '../../stores/auth'
 import AudioGroupEditor from '../../components/AudioGroupEditor.vue'
+import RichNoteAdminEditor from '../../components/RichNoteAdminEditor.vue'
 import VideoItemEditor from '../../components/VideoItemEditor.vue'
+import { emptyRichNoteContent, isRichNoteEmpty } from '../../utils/rich-note'
 
 const route = useRoute()
 const router = useRouter()
@@ -137,7 +143,7 @@ const submitting = ref(false)
 const loadingSection = ref(false)
 const communityName = ref('')
 const authReady = computed(() => Boolean(auth.userId))
-const ADMIN_CREATABLE_WIDGET_TYPES = new Set(['short_text', 'summary', 'number', 'datetime', 'rich_text', 'video_group', 'audio_group'])
+const ADMIN_CREATABLE_WIDGET_TYPES = new Set(['short_text', 'summary', 'number', 'datetime', 'rich_text', 'rich_note', 'video_group', 'audio_group'])
 const AUDIO_EXTS = new Set(['mp3', 'm4a', 'aac', 'wav'])
 const AUDIO_MAX_BYTES = 50 * 1024 * 1024
 
@@ -146,6 +152,7 @@ const editableWidgets = computed(() =>
 )
 
 function widgetHint(type: string) {
+  if (type === 'rich_note') return '支持基础排版和图片混排'
   if (type === 'video_group') return '由管理员上传 / 配置视频列表'
   if (type === 'audio_group') return '由管理员上传 / 配置音频列表'
   if (type === 'attendance') return '（活动参与控件，由用户参与产生数据，不在此填写）'
@@ -189,6 +196,7 @@ async function loadSection(id: string) {
     Object.keys(formData).forEach((k) => delete formData[k])
     for (const w of editableWidgets.value) {
       if (w.type === 'video_group' || w.type === 'audio_group') formData[w.widgetId] = []
+      else if (w.type === 'rich_note') formData[w.widgetId] = emptyRichNoteContent()
       else if (w.type === 'number') formData[w.widgetId] = 0
       else formData[w.widgetId] = ''
     }
@@ -231,6 +239,10 @@ async function submit() {
   for (const w of editableWidgets.value) {
     if (w.type === 'video_group' && !validateVideoItems(w)) return
     if (w.type === 'audio_group' && !validateAudioItems(w)) return
+    if (w.type === 'rich_note' && w.required && isRichNoteEmpty(formData[w.widgetId])) {
+      ElMessage.error(`请填写「${w.label}」`)
+      return
+    }
   }
 
   submitting.value = true

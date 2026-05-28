@@ -156,6 +156,10 @@
               </div>
               <span v-if="audioItems(field.rawValue).length === 0">空</span>
             </div>
+            <div v-else-if="field.type === 'rich_note'" class="rich-note-detail">
+              <RichNoteAdminPreview v-if="richNoteText(field.rawValue)" :value="field.rawValue" />
+              <span v-else>空</span>
+            </div>
             <span v-else>{{ field.value }}</span>
           </el-descriptions-item>
         </el-descriptions>
@@ -208,6 +212,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { communityApi, postAdminApi, sectionApi } from '../../api/cloud'
 import { formatAdminDateTime } from '../../utils/datetime'
+import RichNoteAdminPreview from '../../components/RichNoteAdminPreview.vue'
+import { normalizeRichNoteContent } from '../../utils/rich-note'
 
 const route = useRoute()
 const router = useRouter()
@@ -235,7 +241,7 @@ const detailFields = computed(() => {
       label: widget.label,
       type: widget.type,
       rawValue: detailPost.value.content?.[widget.widgetId],
-      value: formatValue(detailPost.value.content?.[widget.widgetId]),
+      value: formatValue(detailPost.value.content?.[widget.widgetId], widget.type),
     }))
 })
 
@@ -380,14 +386,21 @@ function getPostSummary(row: any) {
   const firstAttendance = attendanceSummaries.find((item) => Number(item?.count || 0) > 0)
   if (firstAttendance) return `${firstAttendance.count}人参与`
   const content = row?.content || {}
+  const firstRichNote = Object.values(content).find((value) => richNoteText(value))
+  if (firstRichNote) return richNoteText(firstRichNote)
   const firstValue = Object.values(content).find((value) => !Array.isArray(value) && !(value && typeof value === 'object'))
   return formatValue(firstValue)
 }
 
-function formatValue(value: unknown) {
+function formatValue(value: unknown, type?: string) {
+  if (type === 'rich_note') return richNoteText(value) || '空'
   if (Array.isArray(value)) return value.length > 0 ? `共 ${value.length} 项` : '空'
   if (value && typeof value === 'object') return JSON.stringify(value)
   return String(value || '空')
+}
+
+function richNoteText(value: unknown) {
+  return normalizeRichNoteContent(value).text.trim()
 }
 
 function videoSourceLabel(source: string) {
@@ -501,9 +514,21 @@ function videoPrimaryText(item: any) {
 }
 
 .video-detail-list,
-.audio-detail-list {
+.audio-detail-list,
+.rich-note-detail {
   display: grid;
   gap: 12px;
+}
+
+.rich-note-detail {
+  max-width: 100%;
+  line-height: 1.8;
+  color: #303133;
+}
+
+.rich-note-detail :deep(img) {
+  max-width: 100%;
+  border-radius: 8px;
 }
 
 .video-detail-item {

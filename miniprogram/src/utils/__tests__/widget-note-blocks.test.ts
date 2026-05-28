@@ -45,3 +45,51 @@ describe('note_blocks list preview', () => {
     ])
   })
 })
+
+describe('rich_note list preview', () => {
+  test('does not render rich note content in list preview even when showInList is true', () => {
+    const section: Section = {
+      _id: 's-rich-note',
+      communityId: 'c-rich-note',
+      name: 'Rich notes',
+      icon: 'book',
+      order: 1,
+      enableComment: true,
+      enableLike: true,
+      createdAt: '2026-01-01',
+      type: 'evergreen',
+      status: 'active',
+      widgets: [
+        { widgetId: 'w-title', type: 'short_text', label: 'Title', fieldKey: 'title', required: true, order: 0, showInList: true },
+        { widgetId: 'w-rich-note', type: 'rich_note', label: 'Rich note', fieldKey: 'richNote', required: false, order: 1, showInList: true },
+      ],
+    }
+
+    const post: Post = {
+      _id: 'p-rich-note',
+      communityId: 'c-rich-note',
+      sectionId: 's-rich-note',
+      authorId: 'u-rich-note',
+      status: 'active',
+      content: {
+        'w-title': 'weekly reading',
+        'w-rich-note': {
+          format: 'markdown',
+          markdown: '**hello**',
+          html: '<p><strong>hello</strong></p>',
+          text: 'hello',
+          imageFileIDs: [],
+          schemaVersion: 1,
+        },
+      },
+      commentCount: 0,
+      likeCount: 0,
+      createdAt: '',
+      updatedAt: '',
+    }
+
+    expect(getListPreview(post, section)).toEqual([
+      { label: 'Title', value: 'weekly reading', type: 'text' },
+    ])
+  })
+})

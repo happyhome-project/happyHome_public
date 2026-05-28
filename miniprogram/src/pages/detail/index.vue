@@ -147,6 +147,7 @@ import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
 import WidgetRenderer from '../../components/widgets/WidgetRenderer.vue'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
+import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
 
 const fallbackAvatar = '/static/default-avatar.png'
 const ATTENDANCE_SLOT_DISPLAY_MAX = 6
@@ -448,7 +449,8 @@ async function handleSaveEdit() {
       value === undefined ||
       value === null ||
       value === '' ||
-      (Array.isArray(value) && value.length === 0)
+      (Array.isArray(value) && value.length === 0) ||
+      (widget.type === 'rich_note' && isRichNoteEmpty(value))
     if (isEmpty) {
       uni.showToast({ title: `请填写${widget.label}`, icon: 'none' })
       return
@@ -463,6 +465,12 @@ async function handleSaveEdit() {
       }
       if (widget.type === 'note_blocks' && Array.isArray(content[widget.widgetId])) {
         content[widget.widgetId] = await uploadNoteBlockImages(content[widget.widgetId])
+      }
+      if (widget.type === 'rich_note') {
+        content[widget.widgetId] = await uploadRichNoteImages(content[widget.widgetId], async (path) => {
+          const [fileID] = await uploadImages([path])
+          return fileID
+        })
       }
     }
 
