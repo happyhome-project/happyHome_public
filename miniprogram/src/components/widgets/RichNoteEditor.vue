@@ -7,6 +7,7 @@
       <button class="tool-btn" size="mini" @tap="applyAction('ordered-list')">有序</button>
       <button class="tool-btn" size="mini" @tap="applyAction('unordered-list')">列表</button>
       <button class="tool-btn" size="mini" @tap="applyAction('quote')">引用</button>
+      <button class="tool-btn" size="mini" @tap="applyAction('line-break')">换行</button>
       <button class="tool-btn" size="mini" @tap="insertLink">链接</button>
       <button class="tool-btn" size="mini" @tap="insertImage">图片</button>
     </view>

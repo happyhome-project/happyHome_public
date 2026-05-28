@@ -15,6 +15,7 @@
       <el-button size="small" @click="runAction('ordered-list')">有序</el-button>
       <el-button size="small" @click="runAction('unordered-list')">列表</el-button>
       <el-button size="small" @click="runAction('quote')">引用</el-button>
+      <el-button size="small" @click="runAction('line-break')">换行</el-button>
       <el-button size="small" @click="insertLink">链接</el-button>
       <el-button size="small" :loading="uploading" @click="pickImage">插入图片</el-button>
     </div>
