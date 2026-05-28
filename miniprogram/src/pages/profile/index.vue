@@ -605,13 +605,18 @@ onShow(() => {
 
 /* ── 登录 Hero 按钮 + DEV 小字链接 ── */
 .login-hero-btn {
-  width: 100%;
-  background: $hh-accent;
-  color: #fff;
-  font-size: $hh-font-body-lg;
+  width: 78%;
+  height: 76rpx;
+  align-self: center;
+  background: $hh-surface-1;
+  color: $hh-accent-ink;
+  border: 2rpx solid $hh-accent-line;
+  box-shadow: 0 8rpx 20rpx rgba(58, 106, 69, 0.08);
+  font-size: $hh-font-body;
   font-weight: $hh-font-weight-bold;
-  padding: 24rpx 0;
-  border-radius: $hh-radius-md;
+  line-height: 76rpx;
+  padding: 0;
+  border-radius: $hh-radius-full;
   margin-top: $hh-space-xs;
 }
 .login-hero-btn::after { border: none; }
