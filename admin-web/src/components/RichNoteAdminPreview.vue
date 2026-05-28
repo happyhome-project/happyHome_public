@@ -2,13 +2,16 @@
   <div class="rich-note-admin-preview">
     <template v-for="(block, index) in blocks" :key="`${block.type}-${index}`">
       <el-image
-        v-if="block.type === 'image'"
+        v-if="block.type === 'image' && canRenderImage(block.src)"
         :src="resolvedUrl(block.src)"
         class="rich-note-image"
         fit="contain"
         :preview-src-list="[resolvedUrl(block.src)]"
         preview-teleported
       />
+      <div v-else-if="block.type === 'image'" class="rich-note-image-placeholder">
+        图片加载中...
+      </div>
       <div v-else class="rich-note-html" v-html="block.html" />
     </template>
   </div>
@@ -64,6 +67,10 @@ watch(
 function resolvedUrl(src: string) {
   return urlMap.value[src] || src
 }
+
+function canRenderImage(src: string) {
+  return !src.startsWith('cloud://') || Boolean(urlMap.value[src])
+}
 </script>
 
 <style scoped>
@@ -81,5 +88,15 @@ function resolvedUrl(src: string) {
   max-width: 360px;
   border-radius: 8px;
   background: #f5f7fa;
+}
+
+.rich-note-image-placeholder {
+  width: 240px;
+  padding: 24px;
+  border: 1px dashed #dcdfe6;
+  border-radius: 8px;
+  background: #f5f7fa;
+  color: #909399;
+  text-align: center;
 }
 </style>
