@@ -30,9 +30,14 @@ describe('rich_note markdown contract', () => {
     expect(markdownToHtml(markdown)).toContain('<h2>标题</h2>')
     expect(markdownToHtml(markdown)).toContain('<strong>加粗</strong>')
     expect(markdownToHtml(markdown)).toContain('<img src="cloud://env/posts/a.jpg" alt="图">')
-    expect(markdownToHtml('第一行\n第二行')).toBe('<p>第一行<br>第二行</p>')
     expect(markdownToText(markdown)).toBe('标题 加粗 和 斜体 第一项 第二项')
     expect(extractRichNoteImageFileIDs(markdown)).toEqual(['cloud://env/posts/a.jpg'])
+  })
+
+  test('preserves intentional line breaks inside plain text', () => {
+    expect(markdownToHtml('第一行\n第二行')).toBe('<p>第一行<br>第二行</p>')
+    expect(markdownToHtml('第一行\n\n\n第二行')).toBe('<p>第一行<br><br><br>第二行</p>')
+    expect(markdownToHtml('第一行\n\n\n')).toBe('<p>第一行<br><br><br></p>')
   })
 
   test('escapes raw html in markdown output', () => {

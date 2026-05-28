@@ -119,6 +119,24 @@ function renderInline(markdown: string): string {
   return html
 }
 
+function isMarkdownBlockStart(line: string): boolean {
+  return (
+    /^(#{1,3})\s+/.test(line) ||
+    /^!\[([^\]]*)]\(([^)\s]+)(?:\s+"[^"]*")?\)$/.test(line) ||
+    /^[-*]\s+/.test(line) ||
+    /^\d+[.)]\s+/.test(line) ||
+    /^>\s+/.test(line)
+  )
+}
+
+function nextContentLine(lines: string[], index: number): string {
+  for (let i = index + 1; i < lines.length; i += 1) {
+    const line = lines[i].trim()
+    if (line) return line
+  }
+  return ''
+}
+
 export function markdownToHtml(markdown: string): string {
   const lines = String(markdown || '').replace(/\r\n/g, '\n').split('\n')
   const blocks: string[] = []
@@ -142,11 +160,16 @@ export function markdownToHtml(markdown: string): string {
     }
   }
 
-  for (const rawLine of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const rawLine = lines[index]
     const line = rawLine.trim()
     if (!line) {
-      flushParagraph()
       flushList()
+      if (paragraphBuffer.length > 0) {
+        const nextLine = nextContentLine(lines, index)
+        if (!nextLine || !isMarkdownBlockStart(nextLine)) paragraphBuffer.push('')
+        else flushParagraph()
+      }
       continue
     }
 
