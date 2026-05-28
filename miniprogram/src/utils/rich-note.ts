@@ -119,6 +119,18 @@ function renderInline(markdown: string): string {
   return html
 }
 
+function preserveConsecutiveSpaces(html: string): string {
+  return html
+    .split(/(<[^>]+>)/g)
+    .map((part) => part.startsWith('<') ? part : part.replace(/ {2,}/g, (spaces) => '&nbsp;'.repeat(spaces.length)))
+    .join('')
+}
+
+function renderParagraphLine(line: string): string {
+  if (line === '') return '&nbsp;'
+  return preserveConsecutiveSpaces(renderInline(line))
+}
+
 function isMarkdownBlockStart(line: string): boolean {
   return (
     /^(#{1,3})\s+/.test(line) ||
@@ -146,7 +158,7 @@ export function markdownToHtml(markdown: string): string {
 
   const flushParagraph = () => {
     if (paragraphBuffer.length === 0) return
-    blocks.push(`<p>${paragraphBuffer.map((line) => renderInline(line)).join('<br>')}</p>`)
+    blocks.push(`<p>${paragraphBuffer.map((line) => renderParagraphLine(line)).join('<br>')}</p>`)
     paragraphBuffer = []
   }
   const flushList = () => {
@@ -213,7 +225,7 @@ export function markdownToHtml(markdown: string): string {
       continue
     }
 
-    paragraphBuffer.push(line)
+    paragraphBuffer.push(rawLine)
   }
 
   flushParagraph()

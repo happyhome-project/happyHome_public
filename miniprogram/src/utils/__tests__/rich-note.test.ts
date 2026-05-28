@@ -36,8 +36,13 @@ describe('rich_note markdown contract', () => {
 
   test('preserves intentional line breaks inside plain text', () => {
     expect(markdownToHtml('第一行\n第二行')).toBe('<p>第一行<br>第二行</p>')
-    expect(markdownToHtml('第一行\n\n\n第二行')).toBe('<p>第一行<br><br><br>第二行</p>')
-    expect(markdownToHtml('第一行\n\n\n')).toBe('<p>第一行<br><br><br></p>')
+    expect(markdownToHtml('第一行\n\n\n第二行')).toBe('<p>第一行<br>&nbsp;<br>&nbsp;<br>第二行</p>')
+    expect(markdownToHtml('第一行\n\n\n')).toBe('<p>第一行<br>&nbsp;<br>&nbsp;<br>&nbsp;</p>')
+  })
+
+  test('preserves consecutive spaces inside plain text', () => {
+    expect(markdownToHtml('甲  乙   丙')).toBe('<p>甲&nbsp;&nbsp;乙&nbsp;&nbsp;&nbsp;丙</p>')
+    expect(markdownToHtml('**甲  乙**')).toBe('<p><strong>甲&nbsp;&nbsp;乙</strong></p>')
   })
 
   test('escapes raw html in markdown output', () => {

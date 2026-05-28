@@ -42,6 +42,18 @@ function renderInline(markdown: string): string {
   return html
 }
 
+function preserveConsecutiveSpaces(html: string): string {
+  return html
+    .split(/(<[^>]+>)/g)
+    .map((part) => part.startsWith('<') ? part : part.replace(/ {2,}/g, (spaces) => '&nbsp;'.repeat(spaces.length)))
+    .join('')
+}
+
+function renderParagraphLine(line: string): string {
+  if (line === '') return '&nbsp;'
+  return preserveConsecutiveSpaces(renderInline(line))
+}
+
 function isMarkdownBlockStart(line: string): boolean {
   return (
     /^(#{1,3})\s+/.test(line) ||
@@ -69,7 +81,7 @@ export function markdownToHtml(markdown: string): string {
 
   const flushParagraph = () => {
     if (paragraph.length > 0) {
-      blocks.push(`<p>${paragraph.map((line) => renderInline(line)).join('<br>')}</p>`)
+      blocks.push(`<p>${paragraph.map((line) => renderParagraphLine(line)).join('<br>')}</p>`)
       paragraph = []
     }
   }
@@ -131,7 +143,7 @@ export function markdownToHtml(markdown: string): string {
       blocks.push(`<blockquote>${renderInline(quote[1])}</blockquote>`)
       continue
     }
-    paragraph.push(line)
+    paragraph.push(raw)
   }
   flushParagraph()
   flushList()

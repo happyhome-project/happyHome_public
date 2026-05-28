@@ -31,7 +31,7 @@ const blocks = computed<RenderBlock[]>(() => {
   const result: RenderBlock[] = []
   const textBuffer: string[] = []
   const flushText = () => {
-    const text = textBuffer.join('\n').trim()
+    const text = textBuffer.join('\n')
     if (text) result.push({ type: 'html', html: markdownToHtml(text) })
     textBuffer.length = 0
   }
