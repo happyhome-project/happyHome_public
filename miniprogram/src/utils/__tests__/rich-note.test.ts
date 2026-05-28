@@ -30,6 +30,7 @@ describe('rich_note markdown contract', () => {
     expect(markdownToHtml(markdown)).toContain('<h2>标题</h2>')
     expect(markdownToHtml(markdown)).toContain('<strong>加粗</strong>')
     expect(markdownToHtml(markdown)).toContain('<img src="cloud://env/posts/a.jpg" alt="图">')
+    expect(markdownToHtml('第一行\n第二行')).toBe('<p>第一行<br>第二行</p>')
     expect(markdownToText(markdown)).toBe('标题 加粗 和 斜体 第一项 第二项')
     expect(extractRichNoteImageFileIDs(markdown)).toEqual(['cloud://env/posts/a.jpg'])
   })
@@ -45,8 +46,8 @@ describe('rich_note markdown contract', () => {
     expect(applyMarkdownToolbarAction('准时上车', 'bold', 0, 2).markdown).toBe('**准时**上车')
     expect(applyMarkdownToolbarAction('第一项', 'unordered-list', 0, 3).markdown).toBe('- 第一项')
     expect(applyMarkdownToolbarAction('注意安全', 'quote', 0, 4).markdown).toBe('> 注意安全')
-    expect(applyMarkdownToolbarAction('第一段第二段', 'line-break', 3, 3).markdown).toBe('第一段\n\n第二段')
-    expect(buildRichNoteContentFromMarkdown('第一段\n\n').markdown).toBe('第一段\n\n')
+    expect(applyMarkdownToolbarAction('第一段第二段', 'line-break', 3, 3).markdown).toBe('第一段\n第二段')
+    expect(buildRichNoteContentFromMarkdown('第一段\n').markdown).toBe('第一段\n')
   })
 
   test('toolbar inserts image markdown in place for later upload replacement', () => {
