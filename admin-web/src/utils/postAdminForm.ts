@@ -46,8 +46,8 @@ export function createDefaultVideoItem(itemId: string) {
     description: '',
     cover: '',
     fileID: '',
-    allowDownload: true,
-    allowShare: true,
+    allowDownload: false,
+    allowShare: false,
   }
 }
 
