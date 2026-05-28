@@ -17,7 +17,7 @@
 
     <div class="toolbar">
       <el-button :icon="Upload" :loading="uploading" @click="pick">上传音频</el-button>
-      <span class="muted">支持 mp3 / m4a / aac / wav，单个不超过 50MB</span>
+      <span class="muted">支持 mp3 / m4a / aac / wav，单个不超过 50MB；上传后可为每首音频添加系统播放卡片图片</span>
     </div>
 
     <div v-if="uploading" class="progress-row">
@@ -25,7 +25,13 @@
       <span class="muted">{{ formatBytes(uploadedBytes) }} / {{ formatBytes(totalBytes) }}</span>
     </div>
 
-    <el-empty v-if="tracks.length === 0 && !uploading" description="还没有音频" />
+    <div v-if="tracks.length === 0 && !uploading" class="empty-audio-guide">
+      <el-empty description="还没有音频" />
+      <div class="cover-guide">
+        <strong>歌曲封面图在哪里？</strong>
+        <span>先上传音频，生成音频条目后，就能为每首音频上传“系统播放卡片图片”。这张图片会用于微信系统播放卡片。</span>
+      </div>
+    </div>
 
     <div v-for="(track, index) in tracks" :key="track.fileID || index" class="track-card">
       <div class="track-head">
@@ -343,6 +349,26 @@ function moveTrack(index: number, direction: -1 | 1) {
 .muted {
   color: #909399;
   font-size: 12px;
+}
+
+.empty-audio-guide {
+  border: 1px dashed #dcdfe6;
+  border-radius: 8px;
+  padding: 8px 12px 14px;
+  background: #fafafa;
+}
+
+.cover-guide {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #606266;
+  font-size: 13px;
+}
+
+.cover-guide strong {
+  color: #303133;
 }
 
 .track-card {
