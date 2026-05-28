@@ -196,6 +196,7 @@
       </view>
     </view>
     </template>
+    <AppTabBar current="home" />
   </view>
 </template>
 
@@ -205,7 +206,9 @@ import { onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { postApi } from '../../api/cloud'
+import AppTabBar from '../../components/AppTabBar.vue'
 import LoginGuard from '../../components/LoginGuard.vue'
+import { hideNativeTabBar } from '../../utils/app-tabbar'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -542,6 +545,7 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
 }
 
 onMounted(async () => {
+  hideNativeTabBar()
   await refreshHomeData()
 })
 
@@ -549,6 +553,7 @@ onMounted(async () => {
 // 这里 onShow 统一刷新帖子数据，确保新发/新删的内容能实时反映。
 // 首次 onShow 发生在 onMounted 之后，会二次拉取（可接受：代价低、换取数据新鲜度）。
 onShow(() => {
+  hideNativeTabBar()
   void refreshHomeData({ force: !!getPendingHomeRefreshMarker() })
 })
 </script>
