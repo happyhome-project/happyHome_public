@@ -52,11 +52,11 @@ void APP_TABS
   right: 0;
   bottom: 0;
   z-index: $hh-z-sticky;
-  height: calc(96rpx + env(safe-area-inset-bottom));
-  padding: 12rpx 64rpx calc(16rpx + env(safe-area-inset-bottom));
+  height: calc(86rpx + env(safe-area-inset-bottom));
+  padding: 0 58rpx env(safe-area-inset-bottom);
   display: grid;
-  grid-template-columns: 1fr 104rpx 1fr;
-  align-items: end;
+  grid-template-columns: 1fr 96rpx 1fr;
+  align-items: center;
   background: rgba(253, 251, 248, 0.95);
   border-top: 1rpx solid $hh-ink-line-2;
   backdrop-filter: blur(28rpx);
@@ -77,12 +77,12 @@ button::after {
 
 .tab-btn {
   min-width: 96rpx;
-  height: 58rpx;
+  height: 78rpx;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-end;
-  gap: 8rpx;
+  justify-content: center;
+  gap: 6rpx;
   color: $hh-ink-3;
   font-size: 28rpx;
   font-weight: $hh-font-weight-medium;
@@ -105,10 +105,10 @@ button::after {
 }
 
 .fab-btn {
-  width: 64rpx;
-  height: 52rpx;
-  margin: 0 auto 12rpx;
-  border-radius: 18rpx;
+  width: 70rpx;
+  height: 58rpx;
+  margin: 0 auto;
+  border-radius: 20rpx;
   background: $hh-accent;
   color: $hh-surface-1;
   display: flex;
@@ -118,8 +118,8 @@ button::after {
 }
 
 .fab-plus {
-  font-size: 48rpx;
-  line-height: 44rpx;
+  font-size: 52rpx;
+  line-height: 50rpx;
   font-weight: $hh-font-weight-regular;
 }
 </style>

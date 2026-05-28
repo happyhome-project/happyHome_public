@@ -3,8 +3,8 @@
     <!-- 未登录：引导卡片（占满首页，挡住任何数据渲染） -->
     <LoginGuard
       v-if="!userStore.isLoggedIn"
-      title="欢迎来到 happyHome"
-      desc="登录后查看你的社区和近况"
+      title="欢迎来到 社群助手"
+      desc="登录后查看你的社群和近况"
     />
 
     <template v-else>
