@@ -5,7 +5,7 @@
       :class="{ active: props.current === 'home' }"
       @tap="go('home')"
     >
-      <text>首 页</text>
+      <text>首&nbsp;&nbsp;页</text>
       <view class="active-dot"></view>
     </button>
 
@@ -18,7 +18,7 @@
       :class="{ active: props.current === 'profile' }"
       @tap="go('profile')"
     >
-      <text>我 的</text>
+      <text>我&nbsp;&nbsp;的</text>
       <view class="active-dot"></view>
     </button>
   </view>
@@ -55,7 +55,7 @@ void APP_TABS
   height: calc(86rpx + env(safe-area-inset-bottom));
   padding: 0 72rpx env(safe-area-inset-bottom);
   display: grid;
-  grid-template-columns: 1fr 128rpx 1fr;
+  grid-template-columns: 1fr 304rpx 1fr;
   align-items: center;
   background: rgba(253, 251, 248, 0.95);
   border-top: 1rpx solid $hh-ink-line-2;
@@ -76,8 +76,9 @@ button::after {
 }
 
 .tab-btn {
-  min-width: 96rpx;
+  width: 112rpx;
   height: 78rpx;
+  justify-self: center;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -86,6 +87,10 @@ button::after {
   color: $hh-ink-3;
   font-size: 28rpx;
   font-weight: $hh-font-weight-medium;
+}
+
+.tab-btn text {
+  white-space: pre;
 }
 
 .tab-btn.active {
@@ -105,9 +110,10 @@ button::after {
 }
 
 .fab-btn {
-  width: 76rpx;
+  width: 112rpx;
   height: 50rpx;
   margin: 0 auto;
+  justify-self: center;
   border-radius: 18rpx;
   background: $hh-accent;
   color: $hh-surface-1;
