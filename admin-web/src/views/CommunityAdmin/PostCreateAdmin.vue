@@ -3,7 +3,9 @@
     <div class="page-header">
       <el-breadcrumb separator="/">
         <el-breadcrumb-item :to="{ name: 'communities' }">社区管理</el-breadcrumb-item>
-        <el-breadcrumb-item :to="{ name: 'posts', params: { communityId } }">{{ communityName || '当前社区' }}</el-breadcrumb-item>
+        <el-breadcrumb-item>
+          <a class="breadcrumb-link" :href="postsPath">{{ communityName || '当前社区' }}</a>
+        </el-breadcrumb-item>
         <el-breadcrumb-item>新建帖子</el-breadcrumb-item>
       </el-breadcrumb>
       <h3>代发帖子</h3>
@@ -109,7 +111,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { v4 as uuidv4 } from 'uuid'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
@@ -128,7 +130,6 @@ import {
 } from '../../utils/postAdminForm'
 
 const route = useRoute()
-const router = useRouter()
 const auth = useAuthStore()
 
 const communityId = String(route.params.communityId || '')
@@ -142,6 +143,7 @@ const submitting = ref(false)
 const loadingSection = ref(false)
 const communityName = ref('')
 const authReady = computed(() => Boolean(auth.userId))
+const postsPath = `/posts/${encodeURIComponent(communityId)}`
 
 const editableWidgets = computed(() => editableWidgetsFor(section.value))
 
@@ -214,12 +216,16 @@ async function submit() {
       content: { ...formData },
     })
     ElMessage.success('发布成功')
-    router.push({ name: 'posts', params: { communityId } })
+    goToPosts()
   } catch (err: any) {
     ElMessage.error(err?.response?.data?.error || err?.message || '发布失败')
   } finally {
     submitting.value = false
   }
+}
+
+function goToPosts() {
+  window.location.assign(postsPath)
 }
 </script>
 
@@ -231,5 +237,7 @@ async function submit() {
 .widget-label { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-weight: 600; }
 .widget-label .req { color: #f56c6c; }
 .muted-tip { color: #909399; font-size: 12px; font-weight: normal; }
+.breadcrumb-link { color: inherit; text-decoration: none; }
+.breadcrumb-link:hover { color: #409eff; }
 .actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px; padding-top: 16px; border-top: 1px solid #ebeef5; }
 </style>
