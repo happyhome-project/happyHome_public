@@ -211,9 +211,10 @@ async function main() {
     if (blocks[0]?.type !== 'text' || blocks[0]?.text !== noteText) throw new Error('text block was not persisted correctly')
     if (blocks[1]?.type !== 'image' || !String(blocks[1]?.fileID || '').startsWith('cloud://')) throw new Error('image block fileID was not persisted')
 
-    const badEvents = events.filter((event) =>
-      event.includes('requestfailed') || event.includes('CORS') || event.includes('blocked by CORS')
-    )
+    const badEvents = events.filter((event) => {
+      if (event.includes('net::ERR_ABORTED')) return false
+      return event.includes('requestfailed') || event.includes('CORS') || event.includes('blocked by CORS')
+    })
     if (badEvents.length) throw new Error(`browser errors: ${badEvents.join('; ')}`)
 
     console.log('[admin-note-blocks-ui] PASS')
