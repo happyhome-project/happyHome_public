@@ -30,6 +30,25 @@ const router = createRouter({
   ]
 })
 
+router.onError((error) => {
+  const message = String(error?.message || error || '')
+  const isChunkLoadFailure =
+    message.includes('Failed to fetch dynamically imported module') ||
+    message.includes('Importing a module script failed') ||
+    message.includes('error loading dynamically imported module') ||
+    message.includes('Unable to preload CSS')
+  if (!isChunkLoadFailure) return
+
+  const reloadKey = `happyhome-admin-reloaded:${location.pathname}${location.search}`
+  if (sessionStorage.getItem(reloadKey)) {
+    ElMessage.error('后台页面资源已更新，请手动刷新后重试')
+    return
+  }
+  sessionStorage.setItem(reloadKey, '1')
+  ElMessage.info('后台已更新，正在刷新页面...')
+  location.reload()
+})
+
 router.beforeEach((to) => {
   const auth = useAuthStore()
   if (to.meta.requiresAuth && !auth.isAuthenticated) return '/login'
