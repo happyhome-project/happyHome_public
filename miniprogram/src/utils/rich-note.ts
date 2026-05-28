@@ -220,6 +220,7 @@ export type MarkdownToolbarAction =
   | 'unordered-list'
   | 'ordered-list'
   | 'quote'
+  | 'line-break'
   | 'link'
   | 'image'
 
@@ -309,6 +310,9 @@ export function applyMarkdownToolbarAction(
   if (action === 'quote') {
     return insertMarkdownBlock(source, start, end, formatSelectedLines(selected, '引用内容', (line) => `> ${line.replace(/^>\s+/, '')}`))
   }
+  if (action === 'line-break') {
+    return replaceSelection(source, start, end, selected ? `${selected}\n\n` : '\n\n')
+  }
   if (action === 'link') {
     const text = selected || payload.text || '链接文字'
     const url = payload.url || 'https://'
@@ -376,7 +380,7 @@ export function htmlToMarkdown(html: string): string {
 }
 
 export function buildRichNoteContentFromMarkdown(markdown: string): RichNoteContent {
-  const normalizedMarkdown = String(markdown || '').trim()
+  const normalizedMarkdown = String(markdown || '').replace(/\r\n/g, '\n')
   return {
     format: 'markdown',
     markdown: normalizedMarkdown,

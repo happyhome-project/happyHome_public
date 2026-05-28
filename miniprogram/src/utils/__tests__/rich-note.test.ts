@@ -45,6 +45,8 @@ describe('rich_note markdown contract', () => {
     expect(applyMarkdownToolbarAction('准时上车', 'bold', 0, 2).markdown).toBe('**准时**上车')
     expect(applyMarkdownToolbarAction('第一项', 'unordered-list', 0, 3).markdown).toBe('- 第一项')
     expect(applyMarkdownToolbarAction('注意安全', 'quote', 0, 4).markdown).toBe('> 注意安全')
+    expect(applyMarkdownToolbarAction('第一段第二段', 'line-break', 3, 3).markdown).toBe('第一段\n\n第二段')
+    expect(buildRichNoteContentFromMarkdown('第一段\n\n').markdown).toBe('第一段\n\n')
   })
 
   test('toolbar inserts image markdown in place for later upload replacement', () => {
