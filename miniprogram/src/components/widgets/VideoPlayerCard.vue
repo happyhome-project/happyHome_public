@@ -34,18 +34,6 @@
 
     <view v-if="hasActions" class="actions">
       <button
-        v-if="canDownload"
-        size="mini"
-        class="action-btn"
-        @tap.stop="onDownload"
-      >下载到相册</button>
-      <button
-        v-if="canShare"
-        size="mini"
-        class="action-btn"
-        @tap.stop="onShare"
-      >分享给好友</button>
-      <button
         v-if="canOpenExternal"
         size="mini"
         class="action-btn primary"
@@ -61,8 +49,6 @@ import {
   resolvePlayUrl,
   playInline,
   openExternal,
-  downloadToAlbum,
-  shareToWeChat,
 } from '../../utils/video-actions'
 import type { VideoItem } from '../../../../cloud/shared/types'
 
@@ -93,16 +79,10 @@ const externalLabel = computed(() => {
   }
 })
 
-const canDownload = computed(() =>
-  props.item.source === 'cos' && (props.item as any).allowDownload !== false
-)
-const canShare = computed(() =>
-  props.item.source === 'cos' && (props.item as any).allowShare !== false
-)
 const canOpenExternal = computed(() =>
   props.item.source !== 'cos' && props.item.source !== 'h5'
 )
-const hasActions = computed(() => canDownload.value || canShare.value || canOpenExternal.value)
+const hasActions = computed(() => canOpenExternal.value)
 
 const durationLabel = computed(() => {
   const s = props.item.duration
@@ -128,14 +108,6 @@ async function onTapPlay() {
   } else {
     await openExternal(props.item)
   }
-}
-
-async function onDownload() {
-  await downloadToAlbum(props.item)
-}
-
-async function onShare() {
-  await shareToWeChat(props.item)
 }
 
 async function onOpenExternal() {

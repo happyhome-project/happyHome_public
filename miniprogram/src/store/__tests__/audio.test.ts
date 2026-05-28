@@ -1,19 +1,19 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { _setAudioStoreDepsForTesting, useAudioStore } from '../audio'
-import type { AudioBackend, AudioBackendEvent } from '../../utils/audio-manager'
+import type { AudioBackend, AudioBackendEvent, AudioBackendMeta } from '../../utils/audio-manager'
 
 function makeMockBackend() {
   const handlers: Partial<Record<AudioBackendEvent, (...args: any[]) => void>> = {}
   const calls = {
-    setSrc: [] as Array<{ url: string; title: string }>,
+    setSrc: [] as Array<{ url: string; title: string; meta?: AudioBackendMeta }>,
     play: 0,
     pause: 0,
     stop: 0,
     seek: [] as number[],
   }
   const backend: AudioBackend = {
-    setSrc(url, title) { calls.setSrc.push({ url, title }) },
+    setSrc(url, title, meta) { calls.setSrc.push({ url, title, meta }) },
     play() { calls.play += 1; handlers.onPlay?.() },
     pause() { calls.pause += 1; handlers.onPause?.() },
     stop() { calls.stop += 1 },
@@ -36,13 +36,13 @@ function makeStorage() {
 }
 
 const TRACKS = [
-  { fileID: 'cloud://audio/1.mp3', title: '第一讲', duration: 100 },
-  { fileID: 'cloud://audio/2.mp3', title: '第二讲', duration: 120 },
+  { fileID: 'cloud://audio/1.mp3', title: 'Lesson 1', duration: 100, cover: 'cloud://covers/1.png' },
+  { fileID: 'cloud://audio/2.mp3', title: 'Lesson 2', duration: 120 },
 ]
 
 const META = {
   postId: 'post-1',
-  postTitle: '课程',
+  postTitle: 'Course',
   sectionId: 'section-1',
   communityId: 'community-1',
 }
@@ -58,7 +58,7 @@ beforeEach(() => {
 })
 
 describe('audio store', () => {
-  test('playPlaylist sets playlist, resolves URL and starts backend', async () => {
+  test('playPlaylist starts backend without showing the custom floating card', async () => {
     const mock = makeMockBackend()
     const getTempFileURL = vi.fn(async (fileIDs: string[]) =>
       fileIDs.map((fileID) => ({ fileID, tempFileURL: `https://cdn/${fileID}` })),
@@ -72,10 +72,18 @@ describe('audio store', () => {
 
     await store.playPlaylist(TRACKS, 0, META)
 
-    expect(store.isVisible).toBe(true)
+    expect(store.isVisible).toBe(false)
     expect(store.isPlaying).toBe(true)
-    expect(store.currentTrack?.title).toBe('第一讲')
-    expect(mock.calls.setSrc[0]).toEqual({ url: 'https://cdn/cloud://audio/1.mp3', title: '第一讲' })
+    expect(store.currentTrack?.title).toBe('Lesson 1')
+    expect(mock.calls.setSrc[0]).toEqual({
+      url: 'https://cdn/cloud://audio/1.mp3',
+      title: 'Lesson 1',
+      meta: {
+        coverImgUrl: 'https://cdn/cloud://covers/1.png',
+        epname: 'Course',
+        singer: '',
+      },
+    })
     expect(mock.calls.play).toBe(1)
   })
 
@@ -87,11 +95,11 @@ describe('audio store', () => {
 
     await store.next()
     expect(store.currentIndex).toBe(1)
-    expect(store.currentTrack?.title).toBe('第二讲')
+    expect(store.currentTrack?.title).toBe('Lesson 2')
 
     await store.prev()
     expect(store.currentIndex).toBe(0)
-    expect(store.currentTrack?.title).toBe('第一讲')
+    expect(store.currentTrack?.title).toBe('Lesson 1')
   })
 
   test('ended event automatically advances to next track', async () => {
@@ -102,11 +110,15 @@ describe('audio store', () => {
 
     mock.handlers.onEnded?.()
     await vi.waitFor(() => {
-      expect(mock.calls.setSrc.at(-1)).toEqual({ url: 'cloud://audio/2.mp3', title: '第二讲' })
+      expect(mock.calls.setSrc.at(-1)).toEqual({
+        url: 'cloud://audio/2.mp3',
+        title: 'Lesson 2',
+        meta: { coverImgUrl: '', epname: 'Course', singer: '' },
+      })
     })
 
     expect(store.currentIndex).toBe(1)
-    expect(store.currentTrack?.title).toBe('第二讲')
+    expect(store.currentTrack?.title).toBe('Lesson 2')
     expect(mock.calls.play).toBe(2)
   })
 
@@ -141,12 +153,19 @@ describe('audio store', () => {
     await store.togglePlay()
     await store.togglePlay()
 
-    // playPlaylist 已预取两个 URL，恢复当前曲目不应再次请求临时 URL。
     expect(getTempFileURL).toHaveBeenCalledTimes(1)
-    expect(mock.calls.setSrc.at(-1)).toEqual({ url: 'https://cdn/cloud://audio/1.mp3', title: '第一讲' })
+    expect(mock.calls.setSrc.at(-1)).toEqual({
+      url: 'https://cdn/cloud://audio/1.mp3',
+      title: 'Lesson 1',
+      meta: {
+        coverImgUrl: 'https://cdn/cloud://covers/1.png',
+        epname: 'Course',
+        singer: '',
+      },
+    })
   })
 
-  test('close stops backend and clears floating player state', async () => {
+  test('close stops backend and clears audio state', async () => {
     const mock = makeMockBackend()
     _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
     const store = useAudioStore()
@@ -163,7 +182,7 @@ describe('audio store', () => {
     expect(store.currentTime).toBe(0)
   })
 
-  test('float position persists', () => {
+  test('float position persists for backward compatibility', () => {
     const storage = makeStorage()
     _setAudioStoreDepsForTesting({ backend: makeMockBackend().backend, storage: storage.storage })
     const store = useAudioStore()

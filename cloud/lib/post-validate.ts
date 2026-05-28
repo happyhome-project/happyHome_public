@@ -135,6 +135,12 @@ function validateAudioTrack(item: unknown, widgetLabel: string, index: number): 
     throw new Error(`${prefix}音频文件必须是 cloud:// 文件`)
   }
 
+  if (audio.cover !== undefined && audio.cover !== '') {
+    if (typeof audio.cover !== 'string' || !String(audio.cover).startsWith('cloud://')) {
+      throw new Error(`${prefix}cover must be a cloud:// file`)
+    }
+  }
+
   const ext = String(audio.ext || '').toLowerCase()
   if (!AUDIO_EXTS.has(ext)) {
     throw new Error(`${prefix}格式不支持`)

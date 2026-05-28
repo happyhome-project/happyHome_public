@@ -82,7 +82,7 @@
         </template>
       </view>
     </template>
-    <FloatingPlayer />
+    <AppTabBar current="create" />
   </view>
 </template>
 
@@ -92,8 +92,9 @@ import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi, postApi } from '../../api/cloud'
-import FloatingPlayer from '../../components/FloatingPlayer/FloatingPlayer.vue'
+import AppTabBar from '../../components/AppTabBar.vue'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
+import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
 
@@ -128,10 +129,12 @@ const adminNoticeWidgets = computed(() =>
 )
 
 onLoad(async () => {
+  hideNativeTabBar()
   await checkMembership({ silent: false })
 })
 
 onShow(() => {
+  hideNativeTabBar()
   // 返回页面（例如地图选择返回）时静默刷新，不再打断表单操作。
   void checkMembership({ silent: true })
 })
@@ -311,7 +314,7 @@ async function handleSubmit() {
 
 <style lang="scss" scoped>
 .create-page {
-  padding: $hh-space-lg;
+  padding: $hh-space-lg $hh-space-lg calc(132rpx + env(safe-area-inset-bottom));
   background: $hh-color-bg;
   min-height: 100vh;
 }

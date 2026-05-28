@@ -37,7 +37,6 @@
       <button class="create-btn" @tap="handleCreate">创建新社区</button>
     </view>
     </template>
-    <FloatingPlayer />
   </view>
 </template>
 
@@ -54,7 +53,6 @@ import {
   shouldRedirectJoinedUserFromOnboarding,
   type OnboardingEntryMode,
 } from '../../utils/onboarding-flow'
-import FloatingPlayer from '../../components/FloatingPlayer/FloatingPlayer.vue'
 import LoginGuard from '../../components/LoginGuard.vue'
 
 const communities = ref<any[]>([])

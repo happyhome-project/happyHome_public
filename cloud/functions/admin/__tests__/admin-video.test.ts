@@ -94,19 +94,24 @@ describe('audio.requestUpload', () => {
 })
 
 describe('image.requestUpload', () => {
-  test('rejects unsupported image extension', async () => {
-    await expect(main({ action: 'image.requestUpload', _actAs: SUPER_CTX, fileName: 'note.gif' }))
+  test('校验 fileName 不能为空', async () => {
+    await expect(main({ action: 'image.requestUpload', _actAs: SUPER_CTX, fileName: '' }))
+      .rejects.toThrow('fileName 不能为空')
+  })
+
+  test('拒绝非图片扩展名', async () => {
+    await expect(main({ action: 'image.requestUpload', _actAs: SUPER_CTX, fileName: 'doc.pdf' }))
       .rejects.toThrow('不支持的文件类型')
   })
 
-  test('image extensions use posts/images/ path', async () => {
+  test('图片扩展名走 posts/images/ 路径', async () => {
     ;(storage.requestUploadMetadata as jest.Mock).mockResolvedValue({
       cloudPath: 'posts/images/x.png',
       fileId: 'cloud://env/posts/images/x.png',
       url: 'https://cos/upload',
       token: 'tk', authorization: 'auth', cosFileId: 'cosId',
     })
-    await main({ action: 'image.requestUpload', _actAs: SUPER_CTX, fileName: 'rich-note.PNG' })
+    await main({ action: 'image.requestUpload', _actAs: SUPER_CTX, fileName: 'note.PNG' })
     const path = (storage.requestUploadMetadata as jest.Mock).mock.calls[0][0]
     expect(path).toMatch(/^posts\/images\/\d+_[a-z0-9]+\.png$/)
   })
@@ -299,13 +304,13 @@ describe('post.createAdmin', () => {
       communityId: 'c-1',
       sectionId: 's-1',
       content: {
-        'w-audio': [{ title: '第一讲', fileID: 'cloud://env/audios/1.mp3', duration: 120, size: 1024, ext: 'mp3' }],
+        'w-audio': [{ title: '第一讲', fileID: 'cloud://env/audios/1.mp3', cover: 'cloud://env/covers/1.jpg', duration: 120, size: 1024, ext: 'mp3' }],
       },
     })
 
     const [, payload] = (db.create as jest.Mock).mock.calls[0]
     expect(payload.content['w-audio']).toEqual([
-      { title: '第一讲', fileID: 'cloud://env/audios/1.mp3', duration: 120, size: 1024, ext: 'mp3' },
+      { title: '第一讲', fileID: 'cloud://env/audios/1.mp3', cover: 'cloud://env/covers/1.jpg', duration: 120, size: 1024, ext: 'mp3' },
     ])
   })
 
@@ -334,6 +339,7 @@ describe('post.createAdmin', () => {
       { fileID: 'cloud://env/audios/1.mp3', duration: 120, size: 1024, ext: 'mp3' },
       { title: '第一讲', duration: 120, size: 1024, ext: 'mp3' },
       { title: '第一讲', fileID: 'https://cdn/1.mp3', duration: 120, size: 1024, ext: 'mp3' },
+      { title: '第一讲', fileID: 'cloud://env/audios/1.mp3', cover: 'https://cdn/cover.jpg', duration: 120, size: 1024, ext: 'mp3' },
       { title: '第一讲', fileID: 'cloud://env/audios/1.flac', duration: 120, size: 1024, ext: 'flac' },
       { title: '第一讲', fileID: 'cloud://env/audios/1.mp3', duration: 0, size: 1024, ext: 'mp3' },
       { title: '第一讲', fileID: 'cloud://env/audios/1.mp3', duration: 120, size: 51 * 1024 * 1024, ext: 'mp3' },
@@ -405,5 +411,153 @@ describe('post.createAdmin', () => {
       },
     })).rejects.toThrow('unsafe html attribute')
     expect(db.create).not.toHaveBeenCalled()
+  })
+})
+
+describe('post.updateAdmin', () => {
+  const COMMUNITY_ADMIN_CTX = {
+    accountId: 'community-admin-1',
+    role: 'communityAdmin',
+    userId: 'community-admin-openid',
+    username: 'community-admin',
+  }
+
+  test('updates supported fields, preserves current unsupported fields, and records admin editor', async () => {
+    const existingLocation = { address: 'old address', lat: 1, lng: 2 }
+    const existingPost = {
+      _id: 'post-1',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      authorId: 'author-openid',
+      status: 'active',
+      commentCount: 3,
+      likeCount: 4,
+      createdAt: '2026-05-01T00:00:00.000Z',
+      updatedAt: '2026-05-01T00:00:00.000Z',
+      content: {
+        title: 'old title',
+        location: existingLocation,
+        audio: [{ title: 'old audio', fileID: 'cloud://env/audios/old.mp3', duration: 60, size: 1000, ext: 'mp3' }],
+        legacyRemovedWidget: 'should be cleaned',
+      },
+    }
+    const section = {
+      _id: 'section-1',
+      communityId: 'community-1',
+      widgets: [
+        { widgetId: 'title', type: 'short_text', label: 'Title', required: true, fieldKey: 'title', order: 0, showInList: true },
+        { widgetId: 'location', type: 'location', label: 'Location', required: false, fieldKey: 'location', order: 1, showInList: false },
+        { widgetId: 'audio', type: 'audio_group', label: 'Audio', required: false, fieldKey: 'audio', order: 2, showInList: false },
+      ],
+    }
+    ;(db.getById as jest.Mock)
+      .mockResolvedValueOnce(existingPost)
+      .mockResolvedValueOnce(section)
+    ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+    const result: any = await main({
+      action: 'post.updateAdmin',
+      _actAs: SUPER_CTX,
+      postId: 'post-1',
+      content: {
+        title: 'new title',
+        location: { address: 'malicious overwrite', lat: 9, lng: 9 },
+        audio: [{ title: 'new audio', fileID: 'cloud://env/audios/new.mp3', cover: 'cloud://env/covers/new.jpg', duration: 120, size: 2048, ext: 'mp3' }],
+      },
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.updatedAt).toBeTruthy()
+    expect(result.adminEditedAt).toBe(result.updatedAt)
+    expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({
+      content: {
+        title: 'new title',
+        location: existingLocation,
+        audio: [{ title: 'new audio', fileID: 'cloud://env/audios/new.mp3', cover: 'cloud://env/covers/new.jpg', duration: 120, size: 2048, ext: 'mp3' }],
+      },
+      updatedAt: expect.any(String),
+      adminEditedAt: expect.any(String),
+      adminEditedByAccountId: 'admin-1',
+      adminEditedByUsername: 'super',
+    }))
+    const [, , patch] = (db.updateById as jest.Mock).mock.calls[0]
+    expect(patch.authorId).toBeUndefined()
+    expect(patch.sectionId).toBeUndefined()
+    expect(patch.commentCount).toBeUndefined()
+    expect(patch.likeCount).toBeUndefined()
+    expect(patch.content.legacyRemovedWidget).toBeUndefined()
+  })
+
+  test('rejects deleted posts', async () => {
+    ;(db.getById as jest.Mock).mockResolvedValueOnce({
+      _id: 'post-1',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      authorId: 'author-openid',
+      status: 'deleted',
+      content: {},
+    })
+
+    await expect(main({
+      action: 'post.updateAdmin',
+      _actAs: SUPER_CTX,
+      postId: 'post-1',
+      content: {},
+    })).rejects.toThrow('deleted')
+    expect(db.updateById).not.toHaveBeenCalled()
+  })
+
+  test('community admin can edit posts in owned community', async () => {
+    ;(db.getById as jest.Mock)
+      .mockResolvedValueOnce({ _id: 'post-1', communityId: 'community-1' })
+      .mockResolvedValueOnce({ _id: 'community-1', creatorId: 'someone-else' })
+      .mockResolvedValueOnce({
+        _id: 'post-1',
+        communityId: 'community-1',
+        sectionId: 'section-1',
+        authorId: 'author-openid',
+        status: 'active',
+        content: { title: 'old title' },
+      })
+      .mockResolvedValueOnce({
+        _id: 'section-1',
+        communityId: 'community-1',
+        widgets: [
+          { widgetId: 'title', type: 'short_text', label: 'Title', required: true, fieldKey: 'title', order: 0, showInList: true },
+        ],
+      })
+    ;(db.query as jest.Mock).mockResolvedValueOnce([
+      { _id: 'member-admin', communityId: 'community-1', userId: 'community-admin-openid', role: 'admin', status: 'active' },
+    ])
+    ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+    const result: any = await main({
+      action: 'post.updateAdmin',
+      _actAs: COMMUNITY_ADMIN_CTX,
+      postId: 'post-1',
+      content: { title: 'new title' },
+    })
+
+    expect(result.success).toBe(true)
+    expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({
+      content: { title: 'new title' },
+      adminEditedByAccountId: 'community-admin-1',
+      adminEditedByUsername: 'community-admin',
+    }))
+  })
+
+  test('community admin cannot edit posts in another community', async () => {
+    ;(db.getById as jest.Mock)
+      .mockResolvedValueOnce({ _id: 'post-1', communityId: 'community-other' })
+      .mockResolvedValueOnce({ _id: 'community-other', creatorId: 'someone-else' })
+    ;(db.query as jest.Mock).mockResolvedValueOnce([])
+
+    await expect(main({
+      action: 'post.updateAdmin',
+      _actAs: COMMUNITY_ADMIN_CTX,
+      postId: 'post-1',
+      content: { title: 'new title' },
+    })).rejects.toThrow()
+    expect(db.updateById).not.toHaveBeenCalled()
   })
 })

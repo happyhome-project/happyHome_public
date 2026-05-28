@@ -250,7 +250,7 @@
         </view>
       </view>
     </view>
-    <FloatingPlayer />
+    <AppTabBar current="profile" />
   </view>
 </template>
 
@@ -260,7 +260,8 @@ import { onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi } from '../../api/cloud'
-import FloatingPlayer from '../../components/FloatingPlayer/FloatingPlayer.vue'
+import AppTabBar from '../../components/AppTabBar.vue'
+import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 
 const communityStore = useCommunityStore()
@@ -519,14 +520,20 @@ async function refreshProfileData() {
   }
 }
 
-onMounted(() => { void refreshProfileData() })
+onMounted(() => {
+  hideNativeTabBar()
+  void refreshProfileData()
+})
 // tabBar 切回 Profile 只触发 onShow，不会重新 mount。新申请者 / 被审批后的状态
 // 需要在 onShow 重新拉取，否则 admin 在本 tab 看不到实时变动。
-onShow(() => { void refreshProfileData() })
+onShow(() => {
+  hideNativeTabBar()
+  void refreshProfileData()
+})
 </script>
 
 <style lang="scss" scoped>
-.profile-page { padding: $hh-space-lg; background: $hh-color-bg-sub; min-height: 100vh; }
+.profile-page { padding: $hh-space-lg $hh-space-lg calc(132rpx + env(safe-area-inset-bottom)); background: $hh-color-bg-sub; min-height: 100vh; }
 .user-card { background: $hh-color-surface; border-radius: $hh-radius-md; padding: $hh-space-lg; display: flex; align-items: center; margin-bottom: $hh-space-md; }
 .avatar { width: 100rpx; height: 100rpx; border-radius: $hh-radius-full; margin-right: $hh-space-md; }
 .name { font-size: $hh-font-h3; font-weight: $hh-font-weight-bold; color: $hh-color-text; display: block; }

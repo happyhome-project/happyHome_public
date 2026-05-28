@@ -105,6 +105,7 @@ export interface AudioTrack {
   duration: number
   size: number
   ext: AudioExt
+  cover?: string
 }
 
 export interface NoteTextBlock {
@@ -247,6 +248,9 @@ export interface Post {
   likeCount: number
   createdAt: string
   updatedAt: string
+  adminEditedAt?: string
+  adminEditedByAccountId?: string
+  adminEditedByUsername?: string
   attendanceSummaryByWidget?: AttendanceSummaryByWidget
 }
 

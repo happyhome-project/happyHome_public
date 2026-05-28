@@ -3,12 +3,14 @@ import {
   ensureAudioBackend,
   type AudioBackend,
   type AudioBackendEvent,
+  type AudioBackendMeta,
 } from '../utils/audio-manager'
 
 export interface AudioTrackLite {
   fileID: string
   title: string
   duration: number
+  cover?: string
 }
 
 export interface PlaylistMeta {
@@ -100,8 +102,8 @@ export const useAudioStore = defineStore('audio', {
       this.currentMeta = meta
       this.currentIndex = safeIdx
       this.currentTime = 0
-      this.isVisible = true
-      await this._preloadUrls(list.map((item) => item.fileID))
+      this.isVisible = false
+      await this._preloadUrls(list.flatMap((item) => [item.fileID, item.cover || '']).filter(Boolean))
       await this._playCurrent()
     },
     async togglePlay() {
@@ -114,7 +116,7 @@ export const useAudioStore = defineStore('audio', {
       if (!this.currentTrack) return
       const url = await this._urlFor(this.currentTrack.fileID)
       if (!url) return
-      backend.setSrc(url, this.currentTrack.title)
+      backend.setSrc(url, this.currentTrack.title, await this._currentBackendMeta())
       backend.play()
     },
     async next() {
@@ -162,8 +164,17 @@ export const useAudioStore = defineStore('audio', {
       const url = await this._urlFor(this.currentTrack.fileID)
       if (!url) return
       const backend = this._backend()
-      backend.setSrc(url, this.currentTrack.title)
+      backend.setSrc(url, this.currentTrack.title, await this._currentBackendMeta())
       backend.play()
+    },
+    async _currentBackendMeta(): Promise<AudioBackendMeta> {
+      const track = this.currentTrack
+      const coverImgUrl = track?.cover ? await this._urlFor(track.cover) : ''
+      return {
+        coverImgUrl,
+        epname: this.currentMeta?.postTitle || '',
+        singer: '',
+      }
     },
     async _preloadUrls(fileIDs: string[]) {
       const fetchFn = deps.getTempFileURL
