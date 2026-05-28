@@ -94,6 +94,15 @@
       </view>
     </view>
 
+    <view v-else-if="loadError" class="detail-state detail-error">
+      <text class="detail-state-title">详情加载失败</text>
+      <text class="detail-state-desc">{{ loadError }}</text>
+      <view class="detail-state-actions">
+        <button class="detail-state-btn primary" size="mini" @tap="retryLoad">重试</button>
+        <button class="detail-state-btn" size="mini" @tap="goBack">返回</button>
+      </view>
+    </view>
+
     <view v-else-if="userStore.isLoggedIn" class="loading"><text>加载中...</text></view>
 
     <view v-if="showRoster" class="roster-mask" @tap="closeRoster">
@@ -135,8 +144,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { computed, reactive, ref, watch } from 'vue'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import { postApi, sectionApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
@@ -155,6 +164,8 @@ const section = ref<any>(null)
 const editing = ref(false)
 const savingEdit = ref(false)
 const currentPostId = ref('')
+const loading = ref(false)
+const loadError = ref('')
 const editContent = reactive<Record<string, any>>({})
 const showRoster = ref(false)
 const rosterMembers = ref<any[]>([])
@@ -190,16 +201,40 @@ const attendanceWidgets = computed(() => (section.value?.widgets || []).filter((
 
 onLoad(async (options: any) => {
   const postId = String(options?.postId || '')
-  if (!postId) return
+  if (!postId) {
+    loadError.value = '缺少帖子参数，请从首页重新进入'
+    return
+  }
   currentPostId.value = postId
-  // 未登录：LoginGuard 已挡住渲染，不发起请求
-  if (!userStore.isLoggedIn) return
-  await loadPost(postId)
+  await ensurePostLoaded()
 })
 
+onShow(() => {
+  void ensurePostLoaded()
+})
+
+watch(
+  () => userStore.isLoggedIn,
+  (isLoggedIn) => {
+    if (isLoggedIn) void ensurePostLoaded()
+  },
+)
+
+async function ensurePostLoaded() {
+  if (!currentPostId.value || !userStore.isLoggedIn) return
+  if (post.value?._id === currentPostId.value && section.value) return
+  await loadPost(currentPostId.value)
+}
+
 async function loadPost(postId: string) {
+  if (loading.value) return
+  loading.value = true
+  loadError.value = ''
   try {
     const res = await postApi.get(postId)
+    if (!res?.post) {
+      throw new Error('帖子数据为空，请稍后重试')
+    }
     post.value = res.post
     section.value = communityStore.currentSections.find((item: any) => item._id === post.value?.sectionId) ?? null
 
@@ -209,8 +244,7 @@ async function loadPost(postId: string) {
     }
 
     if (!section.value) {
-      uni.showToast({ title: '板块信息加载失败', icon: 'none' })
-      uni.navigateBack()
+      throw new Error('板块信息加载失败，请稍后重试')
     }
   } catch (error: any) {
     if (error?.message?.includes('需要先加入社区后查看内容')) {
@@ -219,9 +253,37 @@ async function loadPost(postId: string) {
       uni.reLaunch({ url: '/pages/onboarding/index' })
       return
     }
-    uni.showToast({ title: '帖子不存在', icon: 'none' })
-    uni.navigateBack()
+    loadError.value = friendlyLoadError(error)
+    uni.showToast({ title: loadError.value, icon: 'none' })
+  } finally {
+    loading.value = false
   }
+}
+
+function friendlyLoadError(error: any) {
+  const message = String(error?.message || '')
+  if (message.includes('缺少帖子参数')) return message
+  if (message.includes('帖子数据为空')) return message
+  if (message.includes('板块信息加载失败')) return message
+  if (message.includes('not found') || message.includes('does not exist') || message.includes('帖子不存在')) {
+    return '帖子不存在或已被删除'
+  }
+  if (message.includes('Missing OPENID')) return '登录状态已过期，请重新登录后再试'
+  if (message.includes('cloud') || message.includes('request') || message.includes('HTTP')) {
+    return '网络开小差了，请稍后重试'
+  }
+  return message || '帖子加载失败，请稍后重试'
+}
+
+function retryLoad() {
+  if (!currentPostId.value) return
+  void loadPost(currentPostId.value)
+}
+
+function goBack() {
+  uni.navigateBack({
+    fail: () => uni.switchTab({ url: '/pages/index/index' }),
+  })
 }
 
 const deleteLock = useBusyLock(async () => {
@@ -514,6 +576,52 @@ function formatDateTime(iso: string): string {
   text-align: center;
   padding: $hh-space-xxl;
   color: $hh-color-text-mute;
+}
+
+.detail-state {
+  min-height: 56vh;
+  padding: $hh-space-xxl $hh-space-lg;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: $hh-space-md;
+  text-align: center;
+}
+
+.detail-state-title {
+  font-family: $hh-font-serif;
+  font-size: 34rpx;
+  font-weight: $hh-font-weight-bold;
+  color: $hh-ink-1;
+}
+
+.detail-state-desc {
+  max-width: 560rpx;
+  font-size: 26rpx;
+  color: $hh-ink-3;
+  line-height: 1.6;
+}
+
+.detail-state-actions {
+  display: flex;
+  align-items: center;
+  gap: $hh-space-sm;
+}
+
+.detail-state-btn {
+  margin: 0;
+  min-width: 132rpx;
+  background: $hh-surface-1;
+  color: $hh-ink-2;
+  border: 1rpx solid $hh-ink-line-2;
+  border-radius: $hh-radius-sm;
+  font-size: 26rpx;
+}
+
+.detail-state-btn.primary {
+  color: $hh-accent-ink;
+  border-color: $hh-accent-line;
 }
 
 /* Classical Dossier · 参与条 */
