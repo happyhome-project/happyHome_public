@@ -48,6 +48,10 @@
         v-else-if="widget.type === 'note_blocks'"
         :blocks="rawValue"
       />
+      <RichNoteRenderer
+        v-else-if="widget.type === 'rich_note'"
+        :value="rawValue"
+      />
       <view
         v-else-if="widget.type === 'location'"
         class="location-value"
@@ -67,6 +71,8 @@ import { resolveWidgetLabel } from '../../utils/widget-form'
 import { useAudioStore } from '../../store/audio'
 import VideoPlayerCard from './VideoPlayerCard.vue'
 import NoteBlocksRenderer from './NoteBlocksRenderer.vue'
+import RichNoteRenderer from './RichNoteRenderer.vue'
+import { isRichNoteEmpty } from '../../utils/rich-note'
 
 const props = defineProps<{
   widget: any
@@ -91,6 +97,7 @@ const audioTracks = computed(() =>
 )
 const hasValue = computed(() => {
   const v = rawValue.value
+  if (props.widget.type === 'rich_note') return !isRichNoteEmpty(v)
   return v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0)
 })
 const displayValue = computed(() => formatWidgetValue(rawValue.value, props.widget.type))

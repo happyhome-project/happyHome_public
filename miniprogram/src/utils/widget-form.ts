@@ -1,4 +1,5 @@
 export const DEFAULT_WIDGET_LABELS: Record<string, string> = {
+  rich_note: '富图文',
   short_text: '短文字',
   summary: '简介',
   datetime: '日期时间',

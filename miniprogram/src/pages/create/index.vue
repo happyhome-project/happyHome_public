@@ -96,6 +96,7 @@ import AppTabBar from '../../components/AppTabBar.vue'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
+import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -257,6 +258,17 @@ async function handleSubmit() {
     const sectionId = selectedSection.value._id
     const content = { ...formData }
     for (const widget of editableWidgets.value) {
+      const value = content[widget.widgetId]
+      const isEmpty =
+        value === undefined ||
+        value === null ||
+        value === '' ||
+        (Array.isArray(value) && value.length === 0) ||
+        (widget.type === 'rich_note' && isRichNoteEmpty(value))
+      if (widget.required && isEmpty) {
+        uni.showToast({ title: `请填写${widget.label}`, icon: 'none' })
+        return
+      }
       // 媒体组由 admin 后台维护，普通用户发帖不携带该字段
       if (widget.type === 'video_group' || widget.type === 'audio_group') {
         delete content[widget.widgetId]
@@ -267,6 +279,12 @@ async function handleSubmit() {
       }
       if (widget.type === 'note_blocks' && Array.isArray(content[widget.widgetId])) {
         content[widget.widgetId] = await uploadNoteBlockImages(content[widget.widgetId])
+      }
+      if (widget.type === 'rich_note') {
+        content[widget.widgetId] = await uploadRichNoteImages(content[widget.widgetId], async (path) => {
+          const [fileID] = await uploadImages([path])
+          return fileID
+        })
       }
     }
 

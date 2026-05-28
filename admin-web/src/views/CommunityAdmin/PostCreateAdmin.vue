@@ -57,6 +57,7 @@
 
             <AudioGroupEditor v-else-if="widget.type === 'audio_group'" v-model="formData[widget.widgetId] as any" />
             <NoteBlocksAdminEditor v-else-if="widget.type === 'note_blocks'" v-model="formData[widget.widgetId] as any" />
+            <RichNoteAdminEditor v-else-if="widget.type === 'rich_note'" v-model="formData[widget.widgetId] as any" />
 
             <el-input
               v-else-if="widget.type === 'short_text' || widget.type === 'summary'"
@@ -116,6 +117,7 @@ import { communityApi, postAdminApi, sectionApi } from '../../api/cloud'
 import { useAuthStore } from '../../stores/auth'
 import AudioGroupEditor from '../../components/AudioGroupEditor.vue'
 import NoteBlocksAdminEditor from '../../components/NoteBlocksAdminEditor.vue'
+import RichNoteAdminEditor from '../../components/RichNoteAdminEditor.vue'
 import VideoItemEditor from '../../components/VideoItemEditor.vue'
 import {
   createDefaultVideoItem,

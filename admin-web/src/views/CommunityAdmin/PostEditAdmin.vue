@@ -58,6 +58,7 @@
 
           <AudioGroupEditor v-else-if="widget.type === 'audio_group'" v-model="formData[widget.widgetId] as any" />
           <NoteBlocksAdminEditor v-else-if="widget.type === 'note_blocks'" v-model="formData[widget.widgetId] as any" />
+          <RichNoteAdminEditor v-else-if="widget.type === 'rich_note'" v-model="formData[widget.widgetId] as any" />
 
           <el-input
             v-else-if="widget.type === 'short_text' || widget.type === 'summary'"
@@ -120,6 +121,7 @@ import { Plus } from '@element-plus/icons-vue'
 import { communityApi, postAdminApi } from '../../api/cloud'
 import AudioGroupEditor from '../../components/AudioGroupEditor.vue'
 import NoteBlocksAdminEditor from '../../components/NoteBlocksAdminEditor.vue'
+import RichNoteAdminEditor from '../../components/RichNoteAdminEditor.vue'
 import VideoItemEditor from '../../components/VideoItemEditor.vue'
 import { formatAdminDateTime } from '../../utils/datetime'
 import {

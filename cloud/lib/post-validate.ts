@@ -34,8 +34,14 @@ export function sanitizeContent(
   options: { allowAdminOnly?: boolean } = {}
 ): PostContent {
   const allowedIds = getEditableWidgetIds(section, options.allowAdminOnly === true)
+  const widgetById = new Map((section.widgets || []).map((widget) => [widget.widgetId, widget]))
   return Object.fromEntries(
-    Object.entries(content || {}).filter(([key]) => allowedIds.has(key))
+    Object.entries(content || {}).filter(([key, value]) => {
+      if (!allowedIds.has(key)) return false
+      const widget = widgetById.get(key)
+      if (widget?.type === 'rich_note' && isEmptyRichNoteContent(value)) return false
+      return true
+    })
   ) as PostContent
 }
 
@@ -59,7 +65,7 @@ export function validateRequiredWidgets(
     if (!allowAdminOnly && ADMIN_ONLY_WIDGET_TYPES.has(widget.type)) continue
     if (!widget.required) continue
     const value = content[widget.widgetId]
-    if (isEmptyValue(value)) {
+    if (isEmptyValue(value) || (widget.type === 'rich_note' && isEmptyRichNoteContent(value))) {
       throw new Error(`必填项未填写：${widget.label}`)
     }
   }
@@ -171,6 +177,100 @@ function validateNoteBlock(item: unknown, widgetLabel: string, index: number): v
   throw new Error(`${prefix}类型不支持`)
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function stripHtmlNoise(html: string): string {
+  return html
+    .replace(/<img\b[^>]*>/gi, '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, '')
+    .trim()
+}
+
+function isEmptyRichNoteContent(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  const markdown = typeof value.markdown === 'string' ? value.markdown.trim() : ''
+  const text = typeof value.text === 'string' ? value.text.trim() : ''
+  const html = typeof value.html === 'string' ? stripHtmlNoise(value.html) : ''
+  const imageFileIDs = Array.isArray(value.imageFileIDs) ? value.imageFileIDs.filter(Boolean) : []
+  return markdown === '' && text === '' && html === '' && imageFileIDs.length === 0
+}
+
+function extractImageSrcs(html: string): string[] {
+  const srcs: string[] = []
+  const imgPattern = /<img\b[^>]*\bsrc\s*=\s*(['"])(.*?)\1[^>]*>/gi
+  let match: RegExpExecArray | null
+  while ((match = imgPattern.exec(html))) {
+    srcs.push(match[2])
+  }
+  return srcs
+}
+
+function extractMarkdownImageSrcs(markdown: string): string[] {
+  const srcs: string[] = []
+  const imgPattern = /!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
+  let match: RegExpExecArray | null
+  while ((match = imgPattern.exec(markdown))) {
+    srcs.push(String(match[1] || '').trim())
+  }
+  return srcs
+}
+
+function validateRichNoteContent(value: unknown, widgetLabel: string): void {
+  const prefix = `rich_note widget "${widgetLabel || 'untitled'}": `
+  if (!isRecord(value)) {
+    throw new Error(`${prefix}content must be an object`)
+  }
+  if (isEmptyRichNoteContent(value)) return
+
+  if (value.format !== 'markdown') {
+    throw new Error(`${prefix}format must be markdown`)
+  }
+  if (value.schemaVersion !== 1) {
+    throw new Error(`${prefix}schemaVersion must be 1`)
+  }
+  if (typeof value.markdown !== 'string') {
+    throw new Error(`${prefix}markdown must be a string`)
+  }
+  if (typeof value.html !== 'string') {
+    throw new Error(`${prefix}html must be a string`)
+  }
+  if (typeof value.text !== 'string') {
+    throw new Error(`${prefix}text must be a string`)
+  }
+  if (!Array.isArray(value.imageFileIDs)) {
+    throw new Error(`${prefix}imageFileIDs must be an array`)
+  }
+
+  const html = value.html
+  const markdown = value.markdown
+  if (/<\s*(script|iframe|object|embed)\b/i.test(html) || /<\s*(script|iframe|object|embed)\b/i.test(markdown)) {
+    throw new Error(`${prefix}unsafe html tag`)
+  }
+  if (/\son[a-z]+\s*=/i.test(html) || /javascript\s*:/i.test(html) || /\son[a-z]+\s*=/i.test(markdown) || /javascript\s*:/i.test(markdown)) {
+    throw new Error(`${prefix}unsafe html attribute`)
+  }
+
+  const imageFileIDs = value.imageFileIDs.map((fileID) => String(fileID || '').trim())
+  for (const fileID of imageFileIDs) {
+    if (!fileID.startsWith('cloud://')) {
+      throw new Error(`${prefix}images must be cloud:// files`)
+    }
+  }
+
+  const imageSet = new Set(imageFileIDs)
+  for (const src of [...extractImageSrcs(html), ...extractMarkdownImageSrcs(markdown)]) {
+    if (!src.startsWith('cloud://')) {
+      throw new Error(`${prefix}images must be cloud:// files`)
+    }
+    if (!imageSet.has(src)) {
+      throw new Error(`${prefix}images must be listed in imageFileIDs`)
+    }
+  }
+}
+
 export function validateContentValues(
   section: Section,
   content: PostContent,
@@ -186,6 +286,11 @@ export function validateContentValues(
         throw new Error(`图文笔记控件「${widget.label || '未命名'}」必须是内容块数组`)
       }
       value.forEach((item, index) => validateNoteBlock(item, widget.label, index))
+      continue
+    }
+
+    if (widget.type === 'rich_note') {
+      validateRichNoteContent(value, widget.label)
       continue
     }
 

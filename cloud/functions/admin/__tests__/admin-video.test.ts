@@ -16,6 +16,7 @@ jest.mock('../../../lib/db', () => ({
 
 jest.mock('../../../lib/storage', () => ({
   deleteFile: jest.fn(),
+  getTempUrl: jest.fn(),
   requestUploadMetadata: jest.fn(),
 }))
 
@@ -113,6 +114,23 @@ describe('image.requestUpload', () => {
     await main({ action: 'image.requestUpload', _actAs: SUPER_CTX, fileName: 'note.PNG' })
     const path = (storage.requestUploadMetadata as jest.Mock).mock.calls[0][0]
     expect(path).toMatch(/^posts\/images\/\d+_[a-z0-9]+\.png$/)
+  })
+})
+
+describe('media.getUrls', () => {
+  test('returns temporary urls for cloud fileIDs only', async () => {
+    ;(storage.getTempUrl as jest.Mock).mockImplementation(async (fileID: string) => `https://tmp.example/${encodeURIComponent(fileID)}`)
+
+    const res = await main({
+      action: 'media.getUrls',
+      _actAs: SUPER_CTX,
+      fileIDs: ['cloud://env/posts/a.jpg', 'https://cdn/b.jpg', 'cloud://env/posts/a.jpg'],
+    }) as any
+
+    expect(storage.getTempUrl).toHaveBeenCalledTimes(1)
+    expect(res.urls).toEqual({
+      'cloud://env/posts/a.jpg': 'https://tmp.example/cloud%3A%2F%2Fenv%2Fposts%2Fa.jpg',
+    })
   })
 })
 
@@ -337,6 +355,62 @@ describe('post.createAdmin', () => {
         content: { 'w-audio': [item] },
       })).rejects.toThrow()
     }
+  })
+
+  test('rich_note accepts valid admin-created content', async () => {
+    ;(db.getById as jest.Mock).mockResolvedValueOnce({
+      _id: 's-1', communityId: 'c-1', widgets: [
+        { widgetId: 'w-rich-note', type: 'rich_note', label: '富图文', required: false, fieldKey: 'richNote', order: 0, showInList: false },
+      ],
+    })
+    ;(db.create as jest.Mock).mockResolvedValueOnce('post-RICH')
+
+    await main({
+      action: 'post.createAdmin',
+      _actAs: SUPER_CTX,
+      communityId: 'c-1',
+      sectionId: 's-1',
+      content: {
+        'w-rich-note': {
+          format: 'markdown',
+          markdown: '**Hello**\n\n![图片](cloud://env/posts/rich-1.jpg)',
+          html: '<p><strong>Hello</strong></p><p><img src="cloud://env/posts/rich-1.jpg"></p>',
+          text: 'Hello',
+          imageFileIDs: ['cloud://env/posts/rich-1.jpg'],
+          schemaVersion: 1,
+        },
+      },
+    })
+
+    const [, payload] = (db.create as jest.Mock).mock.calls[0]
+    expect(payload.content['w-rich-note'].text).toBe('Hello')
+    expect(payload.content['w-rich-note'].imageFileIDs).toEqual(['cloud://env/posts/rich-1.jpg'])
+  })
+
+  test('rich_note rejects unsafe admin-created content', async () => {
+    ;(db.getById as jest.Mock).mockResolvedValueOnce({
+      _id: 's-1', communityId: 'c-1', widgets: [
+        { widgetId: 'w-rich-note', type: 'rich_note', label: '富图文', required: false, fieldKey: 'richNote', order: 0, showInList: false },
+      ],
+    })
+
+    await expect(main({
+      action: 'post.createAdmin',
+      _actAs: SUPER_CTX,
+      communityId: 'c-1',
+      sectionId: 's-1',
+      content: {
+        'w-rich-note': {
+          format: 'markdown',
+          markdown: 'bad',
+          html: '<p onclick="alert(1)">bad</p>',
+          text: 'bad',
+          imageFileIDs: [],
+          schemaVersion: 1,
+        },
+      },
+    })).rejects.toThrow('unsafe html attribute')
+    expect(db.create).not.toHaveBeenCalled()
   })
 })
 

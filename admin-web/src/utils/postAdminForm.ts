@@ -1,4 +1,5 @@
 import { ElMessage } from 'element-plus'
+import { emptyRichNoteContent, isRichNoteEmpty } from './rich-note'
 
 export const ADMIN_POST_EDITABLE_WIDGET_TYPES = new Set([
   'short_text',
@@ -7,6 +8,7 @@ export const ADMIN_POST_EDITABLE_WIDGET_TYPES = new Set([
   'datetime',
   'rich_text',
   'note_blocks',
+  'rich_note',
   'video_group',
   'audio_group',
 ])
@@ -33,6 +35,7 @@ export function widgetHint(type: string) {
   if (type === 'video_group') return '由管理员上传 / 配置视频列表'
   if (type === 'audio_group') return '由管理员上传 / 配置音频列表'
   if (type === 'note_blocks') return '按顺序添加文字和图片，适合家书、笔记、课程材料'
+  if (type === 'rich_note') return '支持基础排版和图片混排'
   if (type === 'attendance') return '活动参与控件由成员点击参与产生数据，不在帖子内容中填写'
   return ''
 }
@@ -59,6 +62,8 @@ export function hydrateAdminPostFormData(formData: Record<string, any>, widgets:
       formData[widget.widgetId] = JSON.parse(JSON.stringify(existing))
     } else if (widget.type === 'video_group' || widget.type === 'audio_group' || widget.type === 'note_blocks') {
       formData[widget.widgetId] = []
+    } else if (widget.type === 'rich_note') {
+      formData[widget.widgetId] = emptyRichNoteContent()
     } else if (widget.type === 'number') {
       formData[widget.widgetId] = 0
     } else {
@@ -76,6 +81,10 @@ export function validateAdminPostForm(widgets: any[], formData: Record<string, a
     if (widget.type === 'video_group' && !validateVideoItems(widget, formData)) return false
     if (widget.type === 'audio_group' && !validateAudioItems(widget, formData)) return false
     if (widget.type === 'note_blocks' && !validateNoteBlocks(widget, formData)) return false
+    if (widget.type === 'rich_note' && widget.required && isRichNoteEmpty(formData[widget.widgetId])) {
+      ElMessage.error(`请填写「${widget.label}」`)
+      return false
+    }
   }
   return true
 }

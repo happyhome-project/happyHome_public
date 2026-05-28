@@ -35,3 +35,23 @@ describe('note_blocks media extraction', () => {
     expect(result).toEqual(['cloud://env/posts/note-1.jpg'])
   })
 })
+
+describe('rich_note media extraction', () => {
+  test('extracts cloud images from rich note imageFileIDs', () => {
+    const result = extractCloudFileIDsFromContent({
+      richNote: {
+        format: 'markdown',
+        markdown: 'Hello\n\n![one](cloud://env/posts/rich-1.jpg)\n\n![two](cloud://env/posts/rich-3.jpg)',
+        html: '<p>Hello</p>',
+        text: 'Hello',
+        imageFileIDs: [
+          'cloud://env/posts/rich-1.jpg',
+          'https://cdn.example.com/rich-2.jpg',
+        ],
+        schemaVersion: 1,
+      },
+    } as any)
+
+    expect(result).toEqual(['cloud://env/posts/rich-1.jpg', 'cloud://env/posts/rich-3.jpg'])
+  })
+})

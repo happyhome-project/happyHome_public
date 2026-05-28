@@ -47,10 +47,11 @@
                   <el-option label="日期时间" value="datetime" />
                   <el-option label="数字" value="number" />
                   <el-option label="图片组" value="image_group" />
-                  <el-option label="图文笔记" value="note_blocks" />
+                  <el-option label="富图文" value="rich_note" />
+                  <el-option v-if="widget.type === 'note_blocks'" label="图文笔记（旧）" value="note_blocks" />
                   <el-option label="视频组" value="video_group" />
                   <el-option label="音频组" value="audio_group" />
-                  <el-option label="富文本" value="rich_text" />
+                  <el-option v-if="widget.type === 'rich_text'" label="富文本（旧）" value="rich_text" />
                   <el-option label="地图位置" value="location" />
                   <el-option label="活动参与" value="attendance" :disabled="sectionType !== 'realtime'" />
                   <el-option label="公告内容" value="admin_notice" />
@@ -148,6 +149,7 @@ const communityName = ref('')
 const sectionName = ref('')
 const sectionType = ref<'realtime' | 'evergreen'>('evergreen')
 const DEFAULT_LABELS: Record<string, string> = {
+  rich_note: '富图文',
   short_text: '短文字',
   summary: '一句话简介',
   datetime: '日期时间',

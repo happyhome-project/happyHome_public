@@ -1253,6 +1253,20 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     return await storage.requestUploadMetadata(cloudPath)
   }
 
+  if (action === 'media.getUrls') {
+    const fileIDs = Array.isArray(params.fileIDs)
+      ? Array.from(new Set(params.fileIDs.map((item: unknown) => String(item || '').trim()).filter((item: string) => item.startsWith('cloud://'))))
+      : []
+    const entries = await Promise.all(fileIDs.map(async (fileID) => {
+      try {
+        return [fileID, await storage.getTempUrl(fileID)] as const
+      } catch {
+        return [fileID, ''] as const
+      }
+    }))
+    return { urls: Object.fromEntries(entries) }
+  }
+
   if (action === 'post.createAdmin') {
     const communityId = String(params.communityId || '').trim()
     const sectionId = String(params.sectionId || '').trim()
