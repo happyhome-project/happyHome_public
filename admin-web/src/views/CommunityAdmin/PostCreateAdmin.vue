@@ -216,8 +216,8 @@ function addVideoItem(widgetId: string) {
     description: '',
     cover: '',
     fileID: '',
-    allowDownload: true,
-    allowShare: true,
+    allowDownload: false,
+    allowShare: false,
   })
   formData[widgetId] = list
 }
