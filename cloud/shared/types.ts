@@ -104,6 +104,7 @@ export interface AudioTrack {
   duration: number
   size: number
   ext: AudioExt
+  cover?: string
 }
 
 export interface NoteTextBlock {

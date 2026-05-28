@@ -131,7 +131,6 @@
         </scroll-view>
       </view>
     </view>
-    <FloatingPlayer />
   </view>
 </template>
 
@@ -142,7 +141,6 @@ import { postApi, sectionApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import LoginGuard from '../../components/LoginGuard.vue'
-import FloatingPlayer from '../../components/FloatingPlayer/FloatingPlayer.vue'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
 import WidgetRenderer from '../../components/widgets/WidgetRenderer.vue'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'

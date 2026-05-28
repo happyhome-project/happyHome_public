@@ -82,7 +82,6 @@
         </template>
       </view>
     </template>
-    <FloatingPlayer />
   </view>
 </template>
 
@@ -92,7 +91,6 @@ import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi, postApi } from '../../api/cloud'
-import FloatingPlayer from '../../components/FloatingPlayer/FloatingPlayer.vue'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 

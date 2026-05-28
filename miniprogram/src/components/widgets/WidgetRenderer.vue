@@ -85,6 +85,7 @@ const audioTracks = computed(() =>
           fileID: String(item.fileID || ''),
           title: String(item.title || ''),
           duration: Number(item.duration || 0),
+          cover: String(item.cover || ''),
         }))
     : []
 )

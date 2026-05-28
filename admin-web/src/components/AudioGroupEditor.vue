@@ -7,6 +7,13 @@
       style="display: none;"
       @change="onPick"
     />
+    <input
+      ref="coverInput"
+      type="file"
+      accept="image/jpeg,image/png,image/webp,image/gif"
+      style="display: none;"
+      @change="onPickCover"
+    />
 
     <div class="toolbar">
       <el-button :icon="Upload" :loading="uploading" @click="pick">上传音频</el-button>
@@ -54,6 +61,15 @@
       <div class="file-id" :title="track.fileID">
         {{ track.fileID }}
       </div>
+
+      <div class="cover-row">
+        <el-button size="small" :icon="Upload" :loading="coverUploadingIndex === index" @click="pickCover(index)">
+          {{ track.cover ? '更换系统播放卡片图片' : '上传系统播放卡片图片' }}
+        </el-button>
+        <el-button v-if="track.cover" link size="small" type="danger" @click="clearCover(index)">清除图片</el-button>
+        <span v-if="track.cover" class="file-id cover-file-id" :title="track.cover">{{ track.cover }}</span>
+        <span v-else class="muted">可选；上传后会显示在微信系统播放卡片里</span>
+      </div>
     </div>
   </div>
 </template>
@@ -62,7 +78,7 @@
 import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Bottom, Delete, Top, Upload } from '@element-plus/icons-vue'
-import { audioApi } from '../api/cloud'
+import { audioApi, imageApi } from '../api/cloud'
 
 interface AudioTrack {
   fileID: string
@@ -70,6 +86,7 @@ interface AudioTrack {
   duration: number
   size: number
   ext: 'mp3' | 'm4a' | 'aac' | 'wav'
+  cover?: string
 }
 
 const props = defineProps<{ modelValue: AudioTrack[] }>()
@@ -78,11 +95,16 @@ const emit = defineEmits<{
 }>()
 
 const AUDIO_EXTS = new Set(['mp3', 'm4a', 'aac', 'wav'])
+const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif'])
 const MAX_BYTES = 50 * 1024 * 1024
+const COVER_MAX_BYTES = 10 * 1024 * 1024
 
 const fileInput = ref<HTMLInputElement>()
+const coverInput = ref<HTMLInputElement>()
 const tracks = ref<AudioTrack[]>([])
 const uploading = ref(false)
+const coverUploadingIndex = ref(-1)
+const selectedCoverIndex = ref(-1)
 const percent = ref(0)
 const uploadedBytes = ref(0)
 const totalBytes = ref(0)
@@ -99,6 +121,11 @@ function pick() {
   fileInput.value?.click()
 }
 
+function pickCover(index: number) {
+  selectedCoverIndex.value = index
+  coverInput.value?.click()
+}
+
 function emitTracks() {
   emit('update:modelValue', tracks.value.map((item) => ({ ...item })))
 }
@@ -113,6 +140,11 @@ function formatBytes(bytes: number) {
 function getExt(fileName: string): AudioTrack['ext'] | '' {
   const ext = String(fileName || '').split('.').pop()?.toLowerCase() || ''
   return AUDIO_EXTS.has(ext) ? ext as AudioTrack['ext'] : ''
+}
+
+function getImageExt(fileName: string): string {
+  const ext = String(fileName || '').split('.').pop()?.toLowerCase() || ''
+  return IMAGE_EXTS.has(ext) ? ext : ''
 }
 
 function titleFromFileName(fileName: string) {
@@ -155,6 +187,30 @@ async function uploadToCos(file: File) {
       uploadedBytes.value = ev.loaded
       percent.value = Math.round((ev.loaded / ev.total) * 100)
     }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve()
+      else reject(new Error(`COS upload failed: ${xhr.status} ${xhr.responseText || ''}`))
+    }
+    xhr.onerror = () => reject(new Error('网络错误，上传失败'))
+    xhr.send(fd)
+  })
+
+  return meta.fileId
+}
+
+async function uploadCoverToCos(file: File) {
+  const meta = await imageApi.requestUpload({ fileName: file.name })
+
+  const fd = new FormData()
+  fd.append('key', meta.cloudPath)
+  fd.append('Signature', meta.authorization)
+  fd.append('x-cos-security-token', meta.token)
+  fd.append('x-cos-meta-fileid', meta.cosFileId)
+  fd.append('file', file)
+
+  await new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', meta.url)
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) resolve()
       else reject(new Error(`COS upload failed: ${xhr.status} ${xhr.responseText || ''}`))
@@ -212,6 +268,47 @@ async function onPick(event: Event) {
 
 function removeTrack(index: number) {
   tracks.value.splice(index, 1)
+  emitTracks()
+}
+
+async function onPickCover(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  const index = selectedCoverIndex.value
+  if (!file || index < 0 || index >= tracks.value.length) return
+
+  const ext = getImageExt(file.name)
+  if (!ext) {
+    ElMessage.error('仅支持 jpg / png / webp / gif')
+    input.value = ''
+    return
+  }
+  if (file.size > COVER_MAX_BYTES) {
+    ElMessage.error(`图片过大，限制 ${formatBytes(COVER_MAX_BYTES)}`)
+    input.value = ''
+    return
+  }
+
+  coverUploadingIndex.value = index
+  try {
+    tracks.value[index] = {
+      ...tracks.value[index],
+      cover: await uploadCoverToCos(file),
+    }
+    emitTracks()
+    ElMessage.success('图片上传成功')
+  } catch (err: any) {
+    ElMessage.error(err?.message || '图片上传失败')
+  } finally {
+    coverUploadingIndex.value = -1
+    selectedCoverIndex.value = -1
+    if (coverInput.value) coverInput.value.value = ''
+  }
+}
+
+function clearCover(index: number) {
+  if (!tracks.value[index]) return
+  tracks.value[index] = { ...tracks.value[index], cover: '' }
   emitTracks()
 }
 
@@ -283,6 +380,14 @@ function moveTrack(index: number, direction: -1 | 1) {
   font-size: 13px;
 }
 
+.cover-row {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .file-id {
   margin-top: 8px;
   color: #909399;
@@ -291,5 +396,10 @@ function moveTrack(index: number, direction: -1 | 1) {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.cover-file-id {
+  margin-top: 0;
+  max-width: 460px;
 }
 </style>
