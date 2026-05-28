@@ -5,7 +5,7 @@
  *   node scripts/deploy.mjs cloud                # upload all cloud functions
  *   node scripts/deploy.mjs cloud --only=post    # upload only post (comma-separated ok)
  *   node scripts/deploy.mjs miniprogram          # upload mini program (preview QR)
- *   node scripts/deploy.mjs miniprogram-upload   # upload mini program as a dev/trial build, no QR
+ *   node scripts/deploy.mjs miniprogram-upload   # upload mini program as a dev build for trial selection, no QR
  *   node scripts/deploy.mjs admin-web            # upload admin-web dist to Aliyun Nginx production host
  *   node scripts/deploy.mjs all                  # cloud + miniprogram
  *   node scripts/deploy.mjs release              # cloud + admin-web + miniprogram-upload

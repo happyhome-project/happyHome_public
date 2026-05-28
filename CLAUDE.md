@@ -25,8 +25,8 @@
 |---|---|---|
 | 云函数部署 | `npm run deploy:cloud [-- --only=post,admin]` | DevTools CLI 主路径；`--use-tcb` 强制走 CloudBase CLI 诊断路径；`--use-ci` 强制走 miniprogram-ci fallback |
 | 小程序预览 | `npm run deploy:mp` | 同上；生成 `preview-qr.png` + `preview-info.json` |
-| 小程序体验版上传 | `npm run deploy:mp:upload -- --version=1.0.x --desc="trial ..."` | DevTools CLI `upload` 主路径；不生成二维码，默认自动生成版本号和描述 |
-| 正式发布流程 | `npm run deploy:release` | 云函数 + admin-web + 小程序 upload；不生成二维码 |
+| 小程序开发版上传 | `npm run deploy:mp:upload -- --version=1.0.x --desc="trial ..."` | DevTools CLI `upload` 主路径；不生成二维码，默认自动生成版本号和描述；上传后到微信后台把该开发版本选为体验版 |
+| 正式发布流程 | `npm run deploy:release` | 云函数 + admin-web + 小程序 upload；不生成二维码；体验版切换需在微信后台确认 |
 | 云函数单测 | `cd cloud && npm run test:unit` | 通过 `main(event)` 入口，不直接 call handler |
 | H5 本地 | `npm --prefix miniprogram run dev:h5` | 配合 `?dev-gateway=1` 走 http-gateway 调真云函数 |
 | mp-weixin 构建 | `npm --prefix miniprogram run build:mp-weixin` | 产物 → `miniprogram/dist/build/mp-weixin/` |
@@ -56,7 +56,8 @@
      ```
    - **`--project` 必须指向 `miniprogram/dist/build/mp-weixin`**，不是仓库根。2026-05-26 实测该路径可全量部署 7 个云函数；历史上 `cli.bat auto --project <ROOT>` 曾把根目录当独立小程序项目并覆写 `project.config.json`。
    - DevTools CLI 可能出现"输出表格全是 `success=false`、报 `getCloudAPISignedHeader failed`，但进程 exit code 仍为 0"。这通常指向 IDE 登录/签名态问题；**必须提示用户先打开微信开发者工具重新登录/扫码，再重跑部署**。`scripts/deploy.mjs` 已解析输出表格，不能只信 exit code。
-   - 日常真机测试上传走 `npm run deploy:mp:upload` 或 `npm run deploy:release`；不要为了上传体验版额外跑 `deploy:mp`，避免生成预览二维码。
+   - 日常真机测试上传走 `npm run deploy:mp:upload` 或 `npm run deploy:release`；不要为了真机测试额外跑 `deploy:mp`，避免生成预览二维码。
+   - DevTools CLI `upload` 上传的是微信后台“开发版本”。要让体验成员看到它，需要在微信小程序后台的版本管理里把刚上传的开发版本“选为体验版”。
 
 2. **云函数 env 变量必须逐函数手工配**——`cli.bat cloud functions deploy` 不会同步 env。新增/改 env 后要去 CloudBase 控制台 → 云函数 → 函数配置里逐个填。常见踩坑：admin 函数加了 `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD` / `ADMIN_SESSION_TTL_DAYS` 后忘了在控制台填 → bootstrap 登录走默认值 admin/happyhome2024，不安全也不一致
 
