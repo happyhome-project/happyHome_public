@@ -4,7 +4,7 @@
       <el-breadcrumb separator="/">
         <el-breadcrumb-item :to="{ name: 'communities' }">社区管理</el-breadcrumb-item>
         <el-breadcrumb-item>
-          <span class="breadcrumb-link" role="link" tabindex="0" @click="goToPosts" @keydown.enter="goToPosts">
+          <span class="breadcrumb-link" tabindex="0" @click="goToPosts" @keydown.enter="goToPosts">
             {{ communityName || '当前社区' }}
           </span>
         </el-breadcrumb-item>
