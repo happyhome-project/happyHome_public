@@ -110,6 +110,7 @@ const ADMIN_POST_EDITABLE_WIDGET_TYPES = new Set([
   'datetime',
   'rich_text',
   'note_blocks',
+  'rich_note',
   'video_group',
   'audio_group',
 ])

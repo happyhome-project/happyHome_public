@@ -488,6 +488,57 @@ describe('post.updateAdmin', () => {
     expect(patch.content.legacyRemovedWidget).toBeUndefined()
   })
 
+  test('updates rich_note content instead of preserving the old value', async () => {
+    const existingPost = {
+      _id: 'post-rich',
+      communityId: 'community-1',
+      sectionId: 'section-rich',
+      authorId: 'author-openid',
+      status: 'active',
+      content: {
+        rich: {
+          format: 'markdown',
+          markdown: 'old text',
+          html: '<p>old text</p>',
+          text: 'old text',
+          imageFileIDs: [],
+          schemaVersion: 1,
+        },
+      },
+    }
+    const section = {
+      _id: 'section-rich',
+      communityId: 'community-1',
+      widgets: [
+        { widgetId: 'rich', type: 'rich_note', label: 'Rich note', required: true, fieldKey: 'rich', order: 0, showInList: false },
+      ],
+    }
+    const nextRichNote = {
+      format: 'markdown',
+      markdown: 'old text\n\nnew admin edit\n\n![image](cloud://env/posts/images/new.png)',
+      html: '<p>old text</p><p>new admin edit</p><p><img src="cloud://env/posts/images/new.png"></p>',
+      text: 'old text new admin edit',
+      imageFileIDs: ['cloud://env/posts/images/new.png'],
+      schemaVersion: 1,
+    }
+    ;(db.getById as jest.Mock)
+      .mockResolvedValueOnce(existingPost)
+      .mockResolvedValueOnce(section)
+    ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+    const result: any = await main({
+      action: 'post.updateAdmin',
+      _actAs: SUPER_CTX,
+      postId: 'post-rich',
+      content: { rich: nextRichNote },
+    })
+
+    expect(result.success).toBe(true)
+    expect(db.updateById).toHaveBeenCalledWith('posts', 'post-rich', expect.objectContaining({
+      content: { rich: nextRichNote },
+    }))
+  })
+
   test('rejects deleted posts', async () => {
     ;(db.getById as jest.Mock).mockResolvedValueOnce({
       _id: 'post-1',
