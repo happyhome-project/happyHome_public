@@ -159,6 +159,8 @@ export const postAdminApi = {
   }) => callAdmin('post.listAdmin', params),
   get: (postId: string) => callAdmin('post.getAdmin', { postId }),
   delete: (postId: string) => callAdmin('post.deleteAdmin', { postId }),
+  update: (postId: string, content: Record<string, any>) =>
+    callAdmin('post.updateAdmin', { postId, content }),
   removeAttendanceMember: (params: { postId: string; widgetId: string; userId: string }) =>
     callAdmin('post.removeAttendanceMemberAdmin', params),
   createAdmin: (params: { communityId: string; sectionId: string; content: Record<string, any> }) =>

@@ -13,7 +13,7 @@
         :closable="false"
         show-icon
         title="当前管理员账号未绑定微信身份"
-        description="代发帖前需要先在『管理员账号』里给本账号 bindWechat（绑定 openId），否则发布会失败。绑定后，发出的帖子将以您的微信身份作为作者展示。"
+        description="代发帖子前需要先在管理员账号里绑定微信 openId，否则发布会失败。绑定后，发出的帖子会以该微信身份作为作者展示。"
       />
     </div>
 
@@ -22,10 +22,10 @@
         <el-form-item label="选择板块" required>
           <el-select v-model="sectionId" placeholder="请选择板块" style="width: 320px;" @change="onSectionChange">
             <el-option
-              v-for="s in sections"
-              :key="s._id"
-              :label="`${s.name}${s.type === 'realtime' ? ' (实时)' : ''}`"
-              :value="s._id"
+              v-for="sectionItem in sections"
+              :key="sectionItem._id"
+              :label="`${sectionItem.name}${sectionItem.type === 'realtime' ? ' (实时)' : ''}`"
+              :value="sectionItem._id"
             />
           </el-select>
         </el-form-item>
@@ -46,22 +46,17 @@
 
             <template v-if="widget.type === 'video_group'">
               <VideoItemEditor
-                v-for="(item, i) in (formData[widget.widgetId] as any[])"
+                v-for="(item, index) in (formData[widget.widgetId] as any[])"
                 :key="item.itemId"
-                :index="i"
-                v-model="(formData[widget.widgetId] as any[])[i]"
-                @remove="removeVideoItem(widget.widgetId, i)"
+                :index="index"
+                v-model="(formData[widget.widgetId] as any[])[index]"
+                @remove="removeVideoItem(widget.widgetId, index)"
               />
-              <el-button @click="addVideoItem(widget.widgetId)" :icon="Plus">添加视频条目</el-button>
+              <el-button :icon="Plus" @click="addVideoItem(widget.widgetId)">添加视频条目</el-button>
             </template>
 
-            <template v-else-if="widget.type === 'audio_group'">
-              <AudioGroupEditor v-model="formData[widget.widgetId] as any" />
-            </template>
-
-            <template v-else-if="widget.type === 'note_blocks'">
-              <NoteBlocksAdminEditor v-model="formData[widget.widgetId] as any" />
-            </template>
+            <AudioGroupEditor v-else-if="widget.type === 'audio_group'" v-model="formData[widget.widgetId] as any" />
+            <NoteBlocksAdminEditor v-else-if="widget.type === 'note_blocks'" v-model="formData[widget.widgetId] as any" />
 
             <el-input
               v-else-if="widget.type === 'short_text' || widget.type === 'summary'"
@@ -92,10 +87,6 @@
               :rows="6"
               placeholder="支持纯文本，HTML 标签会被原样展示"
             />
-
-            <div v-else class="muted-tip">
-              该控件类型（{{ widget.type }}）暂不支持后台代发，请使用小程序发帖。
-            </div>
           </div>
 
           <div class="actions">
@@ -121,11 +112,18 @@ import { useRoute, useRouter } from 'vue-router'
 import { v4 as uuidv4 } from 'uuid'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import { communityApi, sectionApi, postAdminApi } from '../../api/cloud'
+import { communityApi, postAdminApi, sectionApi } from '../../api/cloud'
 import { useAuthStore } from '../../stores/auth'
 import AudioGroupEditor from '../../components/AudioGroupEditor.vue'
 import NoteBlocksAdminEditor from '../../components/NoteBlocksAdminEditor.vue'
 import VideoItemEditor from '../../components/VideoItemEditor.vue'
+import {
+  createDefaultVideoItem,
+  editableWidgetsFor,
+  hydrateAdminPostFormData,
+  validateAdminPostForm,
+  widgetHint,
+} from '../../utils/postAdminForm'
 
 const route = useRoute()
 const router = useRouter()
@@ -142,21 +140,8 @@ const submitting = ref(false)
 const loadingSection = ref(false)
 const communityName = ref('')
 const authReady = computed(() => Boolean(auth.userId))
-const ADMIN_CREATABLE_WIDGET_TYPES = new Set(['short_text', 'summary', 'number', 'datetime', 'rich_text', 'note_blocks', 'video_group', 'audio_group'])
-const AUDIO_EXTS = new Set(['mp3', 'm4a', 'aac', 'wav'])
-const AUDIO_MAX_BYTES = 50 * 1024 * 1024
 
-const editableWidgets = computed(() =>
-  ((section.value?.widgets || []) as any[]).filter((w) => ADMIN_CREATABLE_WIDGET_TYPES.has(String(w.type || '')))
-)
-
-function widgetHint(type: string) {
-  if (type === 'video_group') return '由管理员上传 / 配置视频列表'
-  if (type === 'audio_group') return '由管理员上传 / 配置音频列表'
-  if (type === 'note_blocks') return '按顺序添加文字和图片，适合家书、笔记、课程材料'
-  if (type === 'attendance') return '（活动参与控件，由用户参与产生数据，不在此填写）'
-  return ''
-}
+const editableWidgets = computed(() => editableWidgetsFor(section.value))
 
 onMounted(async () => {
   await Promise.all([loadCommunityName(), loadSections()])
@@ -166,7 +151,7 @@ onMounted(async () => {
 async function loadCommunityName() {
   try {
     const res = await communityApi.list() as any
-    const current = (res.communities || []).find((c: any) => String(c?._id || c?.id || '') === communityId)
+    const current = (res.communities || []).find((community: any) => String(community?._id || community?.id || '') === communityId)
     communityName.value = String(current?.name || '')
   } catch {
     communityName.value = ''
@@ -192,12 +177,7 @@ async function loadSection(id: string) {
   try {
     const res = await sectionApi.get(id) as any
     section.value = res.section || null
-    Object.keys(formData).forEach((k) => delete formData[k])
-    for (const w of editableWidgets.value) {
-      if (w.type === 'video_group' || w.type === 'audio_group' || w.type === 'note_blocks') formData[w.widgetId] = []
-      else if (w.type === 'number') formData[w.widgetId] = 0
-      else formData[w.widgetId] = ''
-    }
+    hydrateAdminPostFormData(formData, editableWidgets.value)
   } catch (err: any) {
     ElMessage.error(err?.message || '加载板块失败')
     section.value = null
@@ -208,24 +188,13 @@ async function loadSection(id: string) {
 
 function addVideoItem(widgetId: string) {
   const list = (formData[widgetId] as any[]) || []
-  list.push({
-    itemId: uuidv4(),
-    source: 'cos',
-    title: '',
-    duration: undefined,
-    description: '',
-    cover: '',
-    fileID: '',
-    allowDownload: true,
-    allowShare: true,
-  })
-  formData[widgetId] = list
+  formData[widgetId] = [...list, createDefaultVideoItem(uuidv4())]
 }
 
 function removeVideoItem(widgetId: string, index: number) {
-  const list = (formData[widgetId] as any[]) || []
+  const list = [...((formData[widgetId] as any[]) || [])]
   list.splice(index, 1)
-  formData[widgetId] = [...list]
+  formData[widgetId] = list
 }
 
 async function submit() {
@@ -233,12 +202,7 @@ async function submit() {
     ElMessage.warning('请先选择板块')
     return
   }
-
-  for (const w of editableWidgets.value) {
-    if (w.type === 'video_group' && !validateVideoItems(w)) return
-    if (w.type === 'audio_group' && !validateAudioItems(w)) return
-    if (w.type === 'note_blocks' && !validateNoteBlocks(w)) return
-  }
+  if (!validateAdminPostForm(editableWidgets.value, formData)) return
 
   submitting.value = true
   try {
@@ -254,99 +218,6 @@ async function submit() {
   } finally {
     submitting.value = false
   }
-}
-
-function validateVideoItems(w: any) {
-  const list = (formData[w.widgetId] as any[]) || []
-  for (const [i, item] of list.entries()) {
-    if (!item.title) {
-      ElMessage.error(`「${w.label}」第 ${i + 1} 条视频的标题为空`)
-      return false
-    }
-    if (item.source === 'cos' && !item.fileID) {
-      ElMessage.error(`「${w.label}」第 ${i + 1} 条视频未上传文件`)
-      return false
-    }
-    if (item.source === 'channels_feed' && (!item.finderUserName || !item.feedId)) {
-      ElMessage.error(`「${w.label}」第 ${i + 1} 条视频号 feed 信息不全`)
-      return false
-    }
-    if (item.source === 'channels_live' && (!item.finderUserName || !item.nonceId)) {
-      ElMessage.error(`「${w.label}」第 ${i + 1} 条视频号直播信息不全`)
-      return false
-    }
-    if (item.source === 'miniprogram' && !item.appId) {
-      ElMessage.error(`「${w.label}」第 ${i + 1} 条小程序 appId 为空`)
-      return false
-    }
-    if ((item.source === 'h5' || item.source === 'app_link') && !item.url) {
-      ElMessage.error(`「${w.label}」第 ${i + 1} 条 URL 为空`)
-      return false
-    }
-  }
-  return true
-}
-
-function validateAudioItems(w: any) {
-  const list = (formData[w.widgetId] as any[]) || []
-  for (const [i, item] of list.entries()) {
-    if (!item.title) {
-      ElMessage.error(`「${w.label}」第 ${i + 1} 条音频的标题为空`)
-      return false
-    }
-    if (!item.fileID) {
-      ElMessage.error(`「${w.label}」第 ${i + 1} 条音频未上传文件`)
-      return false
-    }
-    if (!String(item.fileID).startsWith('cloud://')) {
-      ElMessage.error(`「${w.label}」第 ${i + 1} 条音频文件格式不正确`)
-      return false
-    }
-    if (item.cover && !String(item.cover).startsWith('cloud://')) {
-      ElMessage.error(`《${w.label}》第 ${i + 1} 条系统播放卡片图片格式不正确`)
-      return false
-    }
-    if (!AUDIO_EXTS.has(String(item.ext || '').toLowerCase())) {
-      ElMessage.error(`「${w.label}」第 ${i + 1} 条音频格式不支持`)
-      return false
-    }
-    if (!Number.isFinite(Number(item.duration)) || Number(item.duration) <= 0) {
-      ElMessage.error(`「${w.label}」第 ${i + 1} 条音频时长不正确`)
-      return false
-    }
-    if (!Number.isFinite(Number(item.size)) || Number(item.size) <= 0 || Number(item.size) > AUDIO_MAX_BYTES) {
-      ElMessage.error(`「${w.label}」第 ${i + 1} 条音频大小不正确`)
-      return false
-    }
-  }
-  return true
-}
-
-function validateNoteBlocks(w: any) {
-  const list = (formData[w.widgetId] as any[]) || []
-  for (const [i, item] of list.entries()) {
-    if (!item?.blockId) {
-      ElMessage.error(`《${w.label}》第 ${i + 1} 块缺少 blockId`)
-      return false
-    }
-    if (item.type === 'text') {
-      if (typeof item.text !== 'string') {
-        ElMessage.error(`《${w.label}》第 ${i + 1} 块文字内容不正确`)
-        return false
-      }
-      continue
-    }
-    if (item.type === 'image') {
-      if (!String(item.fileID || '').startsWith('cloud://')) {
-        ElMessage.error(`《${w.label}》第 ${i + 1} 块图片未上传成功`)
-        return false
-      }
-      continue
-    }
-    ElMessage.error(`《${w.label}》第 ${i + 1} 块类型不支持`)
-    return false
-  }
-  return true
 }
 </script>
 
