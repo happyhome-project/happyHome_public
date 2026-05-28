@@ -36,12 +36,6 @@
         <el-form-item label="视频文件" required>
           <VideoUploader v-model="local.fileID" kind="video" />
         </el-form-item>
-        <el-form-item label="允许下载到相册">
-          <el-switch v-model="local.allowDownload" />
-        </el-form-item>
-        <el-form-item label="允许分享给好友">
-          <el-switch v-model="local.allowShare" />
-        </el-form-item>
       </template>
 
       <template v-else-if="local.source === 'channels_feed'">
@@ -130,15 +124,27 @@ const local = reactive<Record<string, any>>({ ...(props.modelValue || {}) })
 
 const COMMON_KEYS = ['itemId', 'source', 'title', 'cover', 'duration', 'description']
 
-watch(local, () => emit('update:modelValue', { ...local }), { deep: true })
+if (local.source === 'cos') {
+  local.allowDownload = false
+  local.allowShare = false
+}
+
+watch(local, () => {
+  const next = { ...local }
+  if (next.source === 'cos') {
+    next.allowDownload = false
+    next.allowShare = false
+  }
+  emit('update:modelValue', next)
+}, { deep: true })
 
 function onSourceChange() {
   for (const key of Object.keys(local)) {
     if (!COMMON_KEYS.includes(key)) delete local[key]
   }
   if (local.source === 'cos') {
-    local.allowDownload = true
-    local.allowShare = true
+    local.allowDownload = false
+    local.allowShare = false
     local.fileID = ''
   } else if (local.source === 'miniprogram') {
     local.envVersion = 'release'
