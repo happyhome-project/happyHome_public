@@ -4,21 +4,24 @@ import process from 'node:process'
 
 const projectRoot = process.cwd()
 const distRoot = path.join(projectRoot, 'miniprogram', 'dist', 'build', 'mp-weixin')
+const detailConfig = path.join(distRoot, 'pages', 'detail', 'index.json')
 const detailDependencyChunks = [
   'pages/detail/index.js',
+  'api/cloud.js',
   'components/LoginGuard.js',
-  'components/widgets/WidgetEditor.js',
   'components/widgets/WidgetRenderer.js',
   'components/widgets/RichNoteRenderer.js',
-  'components/widgets/RichNoteEditor.js',
   'components/widgets/NoteBlocksRenderer.js',
-  'components/widgets/NoteBlocksEditor.js',
   'components/widgets/VideoPlayerCard.js',
+  'store/community.js',
+  'store/user.js',
   'utils/rich-note.js',
   'utils/widget-form.js',
   'utils/widget.js',
   'utils/cloud-file-url.js',
   'utils/useBusyLock.js',
+  'utils/video-actions.js',
+  'utils/audio-manager.js',
   'store/audio.js',
 ]
 
@@ -58,6 +61,22 @@ const rules = [
 ]
 
 const findings = []
+
+if (!fs.existsSync(detailConfig)) {
+  console.error(`Missing mp-weixin detail page config: ${detailConfig}`)
+  console.error('Run npm.cmd --workspace miniprogram run build:mp-weixin first.')
+  process.exit(1)
+}
+
+const detailJson = JSON.parse(fs.readFileSync(detailConfig, 'utf8'))
+if (detailJson.usingComponents?.['widget-editor']) {
+  findings.push({
+    file: 'pages/detail/index.json',
+    rule: 'read-only detail must not statically load WidgetEditor',
+    offset: 0,
+    snippet: JSON.stringify(detailJson.usingComponents),
+  })
+}
 
 for (const relativePath of detailDependencyChunks) {
   const chunkPath = path.join(distRoot, relativePath)

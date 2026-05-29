@@ -6,7 +6,7 @@
       desc="登录后才能查看帖子详情"
     />
     <view v-else-if="post && section" class="content">
-      <view v-if="!editing">
+      <view>
         <WidgetRenderer
           v-for="widget in regularWidgets"
           :key="widget.widgetId"
@@ -63,33 +63,16 @@
         </view>
       </view>
 
-      <view v-else>
-        <WidgetEditor
-          v-for="widget in regularWidgets"
-          :key="widget.widgetId"
-          :widget="widget"
-          v-model="editContent[widget.widgetId]"
-        />
-        <view v-for="widget in attendanceWidgets" :key="widget.widgetId" class="attendance-hint">
-          <text v-if="resolveAttendanceWidgetLabel(widget)" class="attendance-label">{{ resolveAttendanceWidgetLabel(widget) }}</text>
-          <text class="attendance-hint-text">活动参与人数由成员在帖子详情中点击参与后自动统计。</text>
-        </view>
-      </view>
-
       <view class="meta">
         <view>
           <text class="time">发布于 {{ formatDate(post.createdAt) }}</text>
         </view>
         <view v-if="isAuthor" class="actions">
-          <text v-if="!editing" class="edit-btn" @tap="startEdit">编辑</text>
           <text
-            v-if="!editing"
             class="delete-btn"
             :class="{ disabled: deleteLock.busy.value }"
             @tap="deleteLock.run()"
           >{{ deleteLock.busy.value ? '删除中...' : '删除' }}</text>
-          <text v-if="editing" class="cancel-btn" @tap="cancelEdit">取消</text>
-          <text v-if="editing" class="save-btn" @tap="handleSaveEdit">{{ savingEdit ? '保存中...' : '保存' }}</text>
         </view>
       </view>
     </view>
@@ -150,11 +133,9 @@ import { postApi, sectionApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import LoginGuard from '../../components/LoginGuard.vue'
-import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
 import WidgetRenderer from '../../components/widgets/WidgetRenderer.vue'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
-import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
 import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
 
 const fallbackAvatar = '/static/default-avatar.png'
@@ -162,12 +143,9 @@ const ATTENDANCE_SLOT_DISPLAY_MAX = 6
 
 const post = ref<any>(null)
 const section = ref<any>(null)
-const editing = ref(false)
-const savingEdit = ref(false)
 const currentPostId = ref('')
 const loading = ref(false)
 const loadError = ref('')
-const editContent = reactive<Record<string, any>>({})
 const showRoster = ref(false)
 const rosterMembers = ref<any[]>([])
 const rosterTitle = ref('')
@@ -306,26 +284,6 @@ const deleteLock = useBusyLock(async () => {
     uni.showToast({ title: error?.message || '删除失败', icon: 'none' })
   }
 })
-
-function resetEditContent(content: Record<string, any>) {
-  Object.keys(editContent).forEach((key) => delete editContent[key])
-  const cloned = JSON.parse(JSON.stringify(content || {}))
-  const validWidgetIds = new Set(regularWidgets.value.map((widget: any) => widget.widgetId))
-  Object.keys(cloned).forEach((key) => {
-    if (validWidgetIds.has(key)) {
-      editContent[key] = cloned[key]
-    }
-  })
-}
-
-function startEdit() {
-  resetEditContent(post.value?.content || {})
-  editing.value = true
-}
-
-function cancelEdit() {
-  editing.value = false
-}
 
 function getAttendanceSummary(widget: any) {
   return post.value?.attendanceSummaryByWidget?.[widget.widgetId] || {
@@ -519,86 +477,6 @@ async function handleCancelInSheet() {
 function closeRoster() {
   showRoster.value = false
   rosterWidgetId.value = ''
-}
-
-async function uploadImages(tempPaths: string[]): Promise<string[]> {
-  return Promise.all(tempPaths.map((path) => {
-    if (path.startsWith('cloud://')) return Promise.resolve(path)
-    const ext = path.split('.').pop() || 'jpg'
-    const cloudPath = `posts/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
-    return new Promise<string>((resolve, reject) => {
-      wx.cloud.uploadFile({
-        cloudPath,
-        filePath: path,
-        success: (res: any) => resolve(res.fileID),
-        fail: reject,
-      })
-    })
-  }))
-}
-
-async function uploadNoteBlockImages(blocks: any[]): Promise<any[]> {
-  return Promise.all((blocks || []).map(async (block) => {
-    if (!block || block.type !== 'image') return block
-    const uploaded = await uploadImages([String(block.fileID || '')])
-    return Object.assign({}, block, { fileID: uploaded[0] })
-  }))
-}
-
-async function handleSaveEdit() {
-  if (!post.value || !section.value || savingEdit.value) return
-
-  const content = JSON.parse(JSON.stringify(editContent || {}))
-  for (const widget of regularWidgets.value) {
-    if (!widget.required) continue
-    const value = content[widget.widgetId]
-    const isEmpty =
-      value === undefined ||
-      value === null ||
-      value === '' ||
-      (Array.isArray(value) && value.length === 0) ||
-      (widget.type === 'rich_note' && isRichNoteEmpty(value))
-    if (isEmpty) {
-      uni.showToast({ title: `请填写${widget.label}`, icon: 'none' })
-      return
-    }
-  }
-
-  savingEdit.value = true
-  try {
-    for (const widget of regularWidgets.value) {
-      if (widget.type === 'image_group' && Array.isArray(content[widget.widgetId])) {
-        content[widget.widgetId] = await uploadImages(content[widget.widgetId])
-      }
-      if (widget.type === 'note_blocks' && Array.isArray(content[widget.widgetId])) {
-        content[widget.widgetId] = await uploadNoteBlockImages(content[widget.widgetId])
-      }
-      if (widget.type === 'rich_note') {
-        content[widget.widgetId] = await uploadRichNoteImages(content[widget.widgetId], async (path) => {
-          const uploaded = await uploadImages([path])
-          return uploaded[0]
-        })
-      }
-    }
-
-    const res = await postApi.update(post.value._id, content) as any
-    const validWidgetIds = new Set(regularWidgets.value.map((widget: any) => widget.widgetId))
-    const sanitizedContent: Record<string, any> = {}
-    Object.keys(content).forEach((key) => {
-      if (validWidgetIds.has(key)) sanitizedContent[key] = content[key]
-    })
-    post.value = Object.assign({}, post.value, {
-      content: sanitizedContent,
-      updatedAt: res.updatedAt || new Date().toISOString(),
-    })
-    editing.value = false
-    uni.showToast({ title: '保存成功', icon: 'success' })
-    await loadPost(currentPostId.value)
-  } catch (error: any) {
-    uni.showToast({ title: error?.message || '保存失败', icon: 'none' })
-  } finally {
-    savingEdit.value = false
-  }
 }
 
 function formatDate(iso: string): string {
