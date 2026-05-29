@@ -45,7 +45,7 @@
               :class="{ 'is-self': user.userId === userStore.openId }"
             >
               <image
-                :src="user.userId === userStore.openId ? (userStore.avatarUrl || user.avatarUrl || fallbackAvatar) : (user.avatarUrl || fallbackAvatar)"
+                :src="attendanceAvatarSrc(user)"
                 class="hh-avatar-img"
                 mode="aspectFill"
               />
@@ -127,7 +127,7 @@
         </view>
         <scroll-view scroll-y class="roster-list">
           <view v-for="member in rosterMembers" :key="`${member.userId}-${member.joinedAt}`" class="roster-item">
-            <image :src="member.avatarUrl || fallbackAvatar" class="roster-avatar" mode="aspectFill" />
+            <image :src="resolvedAvatarUrl(member.avatarUrl)" class="roster-avatar" mode="aspectFill" />
             <view class="roster-info">
               <text class="roster-name">
                 {{ member.nickName || member.userId }}
@@ -155,6 +155,7 @@ import WidgetRenderer from '../../components/widgets/WidgetRenderer.vue'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
+import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
 
 const fallbackAvatar = '/static/default-avatar.png'
 const ATTENDANCE_SLOT_DISPLAY_MAX = 6
@@ -176,6 +177,7 @@ const rosterMeta = reactive({
   occupiedSeats: 0,
   capacity: undefined as number | undefined,
 })
+const resolvedAvatarUrls = reactive<Record<string, string>>({})
 const cancelBusy = ref(false)
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -246,6 +248,7 @@ async function loadPost(postId: string) {
     if (!section.value) {
       throw new Error('板块信息加载失败，请稍后重试')
     }
+    await resolveAttendanceAvatarUrls()
   } catch (error: any) {
     if (error?.message?.includes('需要先加入社区后查看内容')) {
       communityStore.clearCommunityState()
@@ -331,6 +334,44 @@ function getAttendanceSummary(widget: any) {
     isFull: false,
     isJoined: false,
     previewUsers: [],
+  }
+}
+
+function resolvedAvatarUrl(rawUrl: unknown) {
+  const url = String(rawUrl || '').trim()
+  if (!url) return fallbackAvatar
+  return resolvedAvatarUrls[url] || url
+}
+
+function attendanceAvatarSrc(user: any) {
+  const rawUrl = user?.userId === userStore.openId
+    ? (userStore.avatarUrl || user?.avatarUrl || '')
+    : (user?.avatarUrl || '')
+  return resolvedAvatarUrl(rawUrl)
+}
+
+function collectAttendanceAvatarUrls() {
+  const urls: string[] = []
+  if (userStore.avatarUrl) urls.push(userStore.avatarUrl)
+  for (const summary of Object.values(post.value?.attendanceSummaryByWidget || {}) as any[]) {
+    for (const user of summary?.previewUsers || []) {
+      if (user?.avatarUrl) urls.push(String(user.avatarUrl))
+    }
+  }
+  for (const member of rosterMembers.value || []) {
+    if (member?.avatarUrl) urls.push(String(member.avatarUrl))
+  }
+  return urls
+}
+
+async function resolveAttendanceAvatarUrls() {
+  const urls = collectAttendanceAvatarUrls()
+  if (urls.length === 0) return
+  try {
+    const resolved = await resolveCloudFileUrls(urls)
+    Object.assign(resolvedAvatarUrls, resolved)
+  } catch {
+    // Keep the original URL/fallback when temp URL resolution is unavailable.
   }
 }
 
@@ -431,6 +472,7 @@ async function openRoster(widget: any) {
     rosterMeta.total = Number(res.total || 0)
     rosterMeta.occupiedSeats = Number(res.occupiedSeats || 0)
     rosterMeta.capacity = res.capacity
+    await resolveAttendanceAvatarUrls()
     showRoster.value = true
   } catch (error: any) {
     uni.showToast({ title: error?.message || '加载名单失败', icon: 'none' })
@@ -460,6 +502,7 @@ async function handleCancelInSheet() {
       rosterMeta.total = Number(res.total || 0)
       rosterMeta.occupiedSeats = Number(res.occupiedSeats || 0)
       rosterMeta.capacity = res.capacity
+      await resolveAttendanceAvatarUrls()
     }
     uni.showToast({ title: '已取消参与', icon: 'success' })
   } catch (error: any) {

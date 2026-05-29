@@ -11,7 +11,7 @@
             <image
               v-for="user in field.previewUsers || []"
               :key="user.userId"
-              :src="user.avatarUrl || fallbackAvatar"
+              :src="avatarSrc(user.avatarUrl)"
               class="avatar"
               mode="aspectFill"
             />
@@ -31,18 +31,46 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { getListPreview } from '../utils/widget'
+import { resolveCloudFileUrls } from '../utils/cloud-file-url'
 
 const props = defineProps<{ post: any; section: any }>()
 defineEmits(['tap'])
 
 const fallbackAvatar = '/static/avatar-default.png'
+const resolvedAvatarUrls = ref<Record<string, string>>({})
 
 const preview = computed(() => {
   if (!props.post || !props.section) return []
   return getListPreview(props.post, props.section)
 })
+
+function avatarSrc(rawUrl: unknown) {
+  const url = String(rawUrl || '').trim()
+  if (!url) return fallbackAvatar
+  return resolvedAvatarUrls.value[url] || url
+}
+
+watch(
+  preview,
+  async (fields) => {
+    const urls = fields
+      .flatMap((field: any) => field.type === 'attendance' ? (field.previewUsers || []) : [])
+      .map((user: any) => String(user?.avatarUrl || '').trim())
+      .filter(Boolean)
+    if (urls.length === 0) return
+    try {
+      resolvedAvatarUrls.value = {
+        ...resolvedAvatarUrls.value,
+        ...(await resolveCloudFileUrls(urls)),
+      }
+    } catch {
+      // Keep original URLs when temp URL resolution is unavailable.
+    }
+  },
+  { immediate: true, deep: true },
+)
 
 const formattedTime = computed(() => {
   if (!props.post?.createdAt) return ''
