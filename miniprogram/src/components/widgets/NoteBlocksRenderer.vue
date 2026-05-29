@@ -14,7 +14,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, watch } from 'vue'
+import { clientLog } from '../../utils/client-log'
 
 type NoteTextBlock = { blockId: string; type: 'text'; text: string }
 type NoteImageBlock = { blockId: string; type: 'image'; fileID: string }
@@ -43,6 +44,20 @@ function previewImage(current: string) {
   if (urls.length === 0) return
   uni.previewImage({ current, urls })
 }
+
+function logNoteBlocks(stage: string) {
+  clientLog('debug', 'noteBlocks.render.' + stage, {
+    blockCount: displayBlocks.value.length,
+  })
+}
+
+onMounted(() => {
+  logNoteBlocks('mounted')
+})
+
+watch(displayBlocks, () => {
+  logNoteBlocks('changed')
+})
 </script>
 
 <style lang="scss" scoped>

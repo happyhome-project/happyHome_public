@@ -178,6 +178,7 @@
 
     <!-- Foot -->
     <text class="s1-foot">— {{ kind }} · 记忆在这里 —</text>
+    <text class="build-debug">{{ debugBuildText }}</text>
 
     <!-- Community switcher modal -->
     <view v-if="showSwitcher" class="switcher-mask" @tap="showSwitcher = false">
@@ -209,6 +210,7 @@ import AppTabBar from '../../components/AppTabBar.vue'
 import LoginGuard from '../../components/LoginGuard.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary } from '../../utils/widget'
+import { clientLog, debugBuildLabel } from '../../utils/client-log'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -219,6 +221,7 @@ let queuedForcedHomeRefresh = false
 const NOTICE_PREVIEW_LIMIT = 68
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
+const debugBuildText = computed(() => debugBuildLabel())
 
 // ── Computed: masthead ──
 const communityName = computed(() => communityStore.currentCommunity?.name ?? '选择社区')
@@ -441,7 +444,17 @@ function formatTime(iso?: string): string {
 // ── Actions ──
 function onLiveTap(item: LiveItem) {
   if (item.postId) {
-    uni.navigateTo({ url: `/pages/detail/index?postId=${item.postId}` })
+    const url = `/pages/detail/index?postId=${item.postId}`
+    clientLog('info', 'home.live.tap', {
+      postId: item.postId,
+      sectionId: item.sectionId,
+      url,
+    })
+    uni.navigateTo({
+      url,
+      success: () => clientLog('info', 'home.live.navigate.success', { postId: item.postId, url }),
+      fail: (error) => clientLog('error', 'home.live.navigate.fail', { postId: item.postId, url, error }),
+    })
   }
 }
 
@@ -451,13 +464,30 @@ function onGroupHeaderTap(_g: ArchiveGroup) {
 
 function onPostTap(item: ArchiveItem) {
   if (item.postId) {
-    uni.navigateTo({ url: `/pages/detail/index?postId=${item.postId}` })
+    const url = `/pages/detail/index?postId=${item.postId}`
+    clientLog('info', 'home.archive.tap', {
+      postId: item.postId,
+      title: item.t,
+      url,
+    })
+    uni.navigateTo({
+      url,
+      success: () => clientLog('info', 'home.archive.navigate.success', { postId: item.postId, url }),
+      fail: (error) => clientLog('error', 'home.archive.navigate.fail', { postId: item.postId, url, error }),
+    })
   }
 }
 
 function openNotice(notice: SectionNotice) {
+  const url = `/pages/notice/index?sectionId=${encodeURIComponent(notice.sectionId)}&widgetId=${encodeURIComponent(notice.widgetId)}`
+  clientLog('info', 'home.notice.tap', {
+    sectionId: notice.sectionId,
+    widgetId: notice.widgetId,
+    url,
+  })
   uni.navigateTo({
-    url: `/pages/notice/index?sectionId=${encodeURIComponent(notice.sectionId)}&widgetId=${encodeURIComponent(notice.widgetId)}`,
+    url,
+    fail: (error) => clientLog('error', 'home.notice.navigate.fail', { sectionId: notice.sectionId, widgetId: notice.widgetId, error }),
   })
 }
 
@@ -474,12 +504,32 @@ async function switchCommunity(communityId: string) {
 async function loadAllSectionPosts() {
   const sections = communityStore.currentSections ?? []
   const results: Record<string, any[]> = {}
+  clientLog('info', 'home.sections.posts.load.start', {
+    sectionCount: sections.length,
+    communityId: communityStore.currentCommunityId || '',
+  })
   await Promise.all(
     sections.map(async (section) => {
       try {
+        clientLog('debug', 'home.section.posts.load.start', {
+          sectionId: section._id,
+          sectionName: section.name,
+          sectionType: section.type || '',
+          sectionStatus: section.status || '',
+        })
         const res = await postApi.list(section._id, 0)
         results[section._id] = res.posts ?? []
+        clientLog('debug', 'home.section.posts.load.success', {
+          sectionId: section._id,
+          postCount: results[section._id].length,
+          firstPostId: results[section._id][0]?._id || '',
+        })
       } catch (error: any) {
+        clientLog('error', 'home.section.posts.load.fail', {
+          sectionId: section._id,
+          sectionName: section.name,
+          error,
+        })
         if (error?.message?.includes('需要先加入社区后查看内容')) {
           communityStore.clearCommunityState()
           uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
@@ -491,6 +541,11 @@ async function loadAllSectionPosts() {
     })
   )
   postsBySection.value = results
+  clientLog('info', 'home.sections.posts.load.done', {
+    sectionCount: sections.length,
+    resultSectionCount: Object.keys(results).length,
+    totalPosts: Object.keys(results).reduce((sum, key) => sum + (results[key]?.length || 0), 0),
+  })
 }
 
 function getPendingHomeRefreshMarker() {
@@ -516,26 +571,48 @@ function clearHomeRefreshMarker() {
 
 async function refreshHomeData(options: { force?: boolean } = {}) {
   const force = options.force === true
+  clientLog('info', 'home.refresh.start', {
+    force,
+    loggedIn: userStore.isLoggedIn,
+    currentCommunityId: communityStore.currentCommunityId || '',
+  })
   if (refreshingHome) {
     if (force) queuedForcedHomeRefresh = true
+    clientLog('warn', 'home.refresh.skip.busy', {
+      force,
+      queuedForcedHomeRefresh,
+    })
     return
   }
   if (!userStore.isLoggedIn) {
     communityStore.clearCommunityState()
     communityStore.myCommunities = []
     postsBySection.value = {}
+    clientLog('warn', 'home.refresh.skip.loggedOut', {})
     return
   }
   refreshingHome = true
   try {
     await communityStore.loadMyCommunities()
+    clientLog('info', 'home.communities.load.success', {
+      communityCount: communityStore.myCommunities.length,
+      currentCommunityId: communityStore.currentCommunityId || '',
+    })
     if (communityStore.myCommunities.length === 0) {
       postsBySection.value = {}
+      clientLog('warn', 'home.communities.empty.relaunchOnboarding', {})
       uni.reLaunch({ url: '/pages/onboarding/index' })
       return
     }
     await loadAllSectionPosts()
     if (force) clearHomeRefreshMarker()
+    clientLog('info', 'home.refresh.success', {
+      force,
+      currentCommunityId: communityStore.currentCommunityId || '',
+    })
+  } catch (error) {
+    clientLog('error', 'home.refresh.fail', { force, error })
+    throw error
   } finally {
     refreshingHome = false
   }
@@ -547,6 +624,7 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
 
 onMounted(async () => {
   hideNativeTabBar()
+  clientLog('info', 'home.mounted', {})
   await refreshHomeData()
 })
 
@@ -555,7 +633,12 @@ onMounted(async () => {
 // 首次 onShow 发生在 onMounted 之后，会二次拉取（可接受：代价低、换取数据新鲜度）。
 onShow(() => {
   hideNativeTabBar()
-  void refreshHomeData({ force: !!getPendingHomeRefreshMarker() })
+  const marker = getPendingHomeRefreshMarker()
+  clientLog('info', 'home.show', {
+    hasPendingRefreshMarker: !!marker,
+    marker,
+  })
+  void refreshHomeData({ force: !!marker })
 })
 </script>
 
@@ -1141,6 +1224,17 @@ onShow(() => {
   text-transform: uppercase;
   color: $hh-ink-4;
   display: block;
+}
+
+.build-debug {
+  display: block;
+  padding: 0 32rpx 36rpx;
+  text-align: center;
+  font-family: $hh-font-mono;
+  font-size: 18rpx;
+  color: $hh-ink-4;
+  opacity: 0.7;
+  word-break: break-all;
 }
 
 /* ═══ Switcher ═══ */

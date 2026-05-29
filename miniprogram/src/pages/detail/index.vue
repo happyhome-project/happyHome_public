@@ -1,5 +1,9 @@
 <template>
   <view class="detail-page">
+    <view class="detail-debug">
+      <text>{{ debugBuildText }}</text>
+      <text v-if="currentPostId">post {{ currentPostId }}</text>
+    </view>
     <LoginGuard
       v-if="!userStore.isLoggedIn"
       title="请先登录"
@@ -127,7 +131,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onErrorCaptured, reactive, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { postApi, sectionApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
@@ -137,6 +141,7 @@ import WidgetRenderer from '../../components/widgets/WidgetRenderer.vue'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
+import { clientLog, debugBuildLabel } from '../../utils/client-log'
 
 const fallbackAvatar = '/static/default-avatar.png'
 const ATTENDANCE_SLOT_DISPLAY_MAX = 6
@@ -159,6 +164,9 @@ const resolvedAvatarUrls = reactive<Record<string, string>>({})
 const cancelBusy = ref(false)
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
+const debugBuildText = computed(() => debugBuildLabel())
+
+clientLog('info', 'detail.setup', {})
 
 const rosterSelfJoined = computed(() => {
   if (!rosterWidgetId.value) return false
@@ -179,9 +187,27 @@ const regularWidgets = computed(() =>
 )
 const attendanceWidgets = computed(() => (section.value?.widgets || []).filter((widget: any) => widget.type === 'attendance'))
 
+onErrorCaptured((error, _instance, info) => {
+  clientLog('error', 'detail.errorCaptured', {
+    info,
+    error,
+    postId: currentPostId.value,
+    hasPost: !!post.value,
+    hasSection: !!section.value,
+  })
+  loadError.value = '详情渲染失败，请把页面版本和时间发给开发者'
+  return false
+})
+
 onLoad(async (options: any) => {
   const postId = String(options?.postId || '')
+  clientLog('info', 'detail.onLoad', {
+    rawOptions: options || {},
+    postId,
+    loggedIn: userStore.isLoggedIn,
+  })
   if (!postId) {
+    clientLog('error', 'detail.onLoad.missingPostId', { rawOptions: options || {} })
     loadError.value = '缺少帖子参数，请从首页重新进入'
     return
   }
@@ -190,6 +216,12 @@ onLoad(async (options: any) => {
 })
 
 onShow(() => {
+  clientLog('info', 'detail.onShow', {
+    postId: currentPostId.value,
+    loggedIn: userStore.isLoggedIn,
+    hasPost: !!post.value,
+    hasSection: !!section.value,
+  })
   void ensurePostLoaded()
 })
 
@@ -201,33 +233,87 @@ watch(
 )
 
 async function ensurePostLoaded() {
-  if (!currentPostId.value || !userStore.isLoggedIn) return
-  if (post.value?._id === currentPostId.value && section.value) return
+  if (!currentPostId.value) {
+    clientLog('warn', 'detail.ensure.skip.noPostId', {})
+    return
+  }
+  if (!userStore.isLoggedIn) {
+    clientLog('warn', 'detail.ensure.skip.loggedOut', { postId: currentPostId.value })
+    return
+  }
+  if (post.value?._id === currentPostId.value && section.value) {
+    clientLog('debug', 'detail.ensure.skip.alreadyLoaded', {
+      postId: currentPostId.value,
+      sectionId: section.value?._id || '',
+    })
+    return
+  }
   await loadPost(currentPostId.value)
 }
 
 async function loadPost(postId: string) {
-  if (loading.value) return
+  if (loading.value) {
+    clientLog('warn', 'detail.load.skip.busy', { postId })
+    return
+  }
   loading.value = true
   loadError.value = ''
+  clientLog('info', 'detail.load.start', {
+    postId,
+    cachedSectionCount: communityStore.currentSections.length,
+    loggedIn: userStore.isLoggedIn,
+  })
   try {
     const res = await postApi.get(postId)
+    clientLog('info', 'detail.post.get.success', {
+      postId,
+      hasPost: !!res?.post,
+      sectionId: res?.post?.sectionId || '',
+      communityId: res?.post?.communityId || '',
+      contentKeys: res?.post?.content ? Object.keys(res.post.content) : [],
+    })
     if (!res?.post) {
       throw new Error('帖子数据为空，请稍后重试')
     }
     post.value = res.post
     section.value = communityStore.currentSections.find((item: any) => item._id === post.value?.sectionId) || null
+    clientLog('debug', 'detail.section.cache.lookup', {
+      postId,
+      sectionId: post.value?.sectionId || '',
+      found: !!section.value,
+      cachedSectionCount: communityStore.currentSections.length,
+    })
 
     if (!section.value && post.value?.sectionId) {
+      clientLog('info', 'detail.section.get.start', {
+        sectionId: post.value.sectionId,
+      })
       const sectionRes = await sectionApi.get(post.value.sectionId)
       section.value = sectionRes.section || null
+      clientLog('info', 'detail.section.get.success', {
+        sectionId: post.value.sectionId,
+        found: !!section.value,
+        widgetCount: section.value?.widgets?.length || 0,
+      })
     }
 
     if (!section.value) {
       throw new Error('板块信息加载失败，请稍后重试')
     }
     await resolveAttendanceAvatarUrls()
+    clientLog('info', 'detail.load.success', {
+      postId,
+      sectionId: section.value?._id || '',
+      regularWidgetCount: regularWidgets.value.length,
+      attendanceWidgetCount: attendanceWidgets.value.length,
+    })
   } catch (error: any) {
+    clientLog('error', 'detail.load.fail', {
+      postId,
+      error,
+      hasPost: !!post.value,
+      hasSection: !!section.value,
+    })
     if (error?.message?.includes('需要先加入社区后查看内容')) {
       communityStore.clearCommunityState()
       uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
@@ -238,6 +324,12 @@ async function loadPost(postId: string) {
     uni.showToast({ title: loadError.value, icon: 'none' })
   } finally {
     loading.value = false
+    clientLog('debug', 'detail.load.finally', {
+      postId,
+      hasPost: !!post.value,
+      hasSection: !!section.value,
+      loadError: loadError.value,
+    })
   }
 }
 
@@ -258,10 +350,12 @@ function friendlyLoadError(error: any) {
 
 function retryLoad() {
   if (!currentPostId.value) return
+  clientLog('info', 'detail.retry.tap', { postId: currentPostId.value })
   void loadPost(currentPostId.value)
 }
 
 function goBack() {
+  clientLog('info', 'detail.goBack.tap', { postId: currentPostId.value })
   uni.navigateBack({
     fail: () => uni.switchTab({ url: '/pages/index/index' }),
   })
@@ -326,11 +420,23 @@ function collectAttendanceAvatarUrls() {
 
 async function resolveAttendanceAvatarUrls() {
   const urls = collectAttendanceAvatarUrls()
+  clientLog('debug', 'detail.avatar.resolve.start', {
+    postId: currentPostId.value,
+    urlCount: urls.length,
+  })
   if (urls.length === 0) return
   try {
     const resolved = await resolveCloudFileUrls(urls)
     Object.assign(resolvedAvatarUrls, resolved)
+    clientLog('debug', 'detail.avatar.resolve.success', {
+      postId: currentPostId.value,
+      resolvedCount: Object.keys(resolved).length,
+    })
   } catch {
+    clientLog('warn', 'detail.avatar.resolve.fail', {
+      postId: currentPostId.value,
+      urlCount: urls.length,
+    })
     // Keep the original URL/fallback when temp URL resolution is unavailable.
   }
 }
@@ -495,6 +601,18 @@ function formatDateTime(iso: string): string {
   padding: $hh-space-lg;
   background: $hh-color-bg;
   min-height: 100vh;
+}
+
+.detail-debug {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+  margin-bottom: $hh-space-sm;
+  font-family: $hh-font-mono;
+  font-size: 18rpx;
+  color: $hh-ink-4;
+  opacity: 0.72;
+  word-break: break-all;
 }
 
 .loading {

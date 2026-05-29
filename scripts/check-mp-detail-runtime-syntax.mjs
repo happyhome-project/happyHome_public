@@ -13,8 +13,10 @@ const detailDependencyChunks = [
   'components/widgets/RichNoteRenderer.js',
   'components/widgets/NoteBlocksRenderer.js',
   'components/widgets/VideoPlayerCard.js',
+  'generated/build-info.js',
   'store/community.js',
   'store/user.js',
+  'utils/client-log.js',
   'utils/rich-note.js',
   'utils/widget-form.js',
   'utils/widget.js',
@@ -56,7 +58,7 @@ const rules = [
   },
   {
     name: 'collection spread',
-    pattern: /[\[{]\s*\.{3}/g,
+    pattern: /[\[,{]\s*\.{3}/g,
   },
 ]
 

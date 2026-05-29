@@ -52,7 +52,7 @@ import ci from 'miniprogram-ci'
 import { resolve, dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import { execSync, spawn } from 'child_process'
-import { existsSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { analyzeDevtoolsCloudDeployOutput } from './lib/deploy-output.mjs'
 
@@ -117,6 +117,27 @@ function getLocalTimestamp() {
     hh: pad(now.getHours()),
     mm: pad(now.getMinutes()),
   }
+}
+
+function writeMiniprogramBuildInfo(version, desc) {
+  const buildInfoPath = resolve(ROOT, 'miniprogram/src/generated/build-info.ts')
+  const buildId = `mp-${version}`
+  const content = [
+    'export const BUILD_INFO = {',
+    `  version: ${JSON.stringify(version)},`,
+    `  desc: ${JSON.stringify(desc)},`,
+    `  buildId: ${JSON.stringify(buildId)},`,
+    '}',
+    '',
+  ].join('\n')
+
+  mkdirSync(dirname(buildInfoPath), { recursive: true })
+  if (existsSync(buildInfoPath) && readFileSync(buildInfoPath, 'utf8') === content) {
+    console.log(`[build-info] unchanged ${version}`)
+    return
+  }
+  writeFileSync(buildInfoPath, content)
+  console.log(`[build-info] wrote ${buildInfoPath}`)
 }
 
 function runShell(commandLine, options = {}) {
@@ -423,14 +444,16 @@ async function deployMiniprogram() {
 }
 
 async function uploadMiniprogram() {
-  console.log('\nBuilding miniprogram...')
-  execSync('npm run build:mp-weixin', { cwd: resolve(ROOT, 'miniprogram'), stdio: 'inherit' })
-
   const stamp = getLocalTimestamp()
   const shortSha = getShortGitSha()
   const version = getFlagValue('version') || `1.0.${stamp.yy}${stamp.MM}${stamp.dd}${stamp.hh}${stamp.mm}`
   const desc = getFlagValue('desc') || `trial ${stamp.yyyy}-${stamp.MM}-${stamp.dd} ${stamp.hh}:${stamp.mm} ${shortSha}`
   const forceCi = process.argv.includes('--use-ci')
+
+  writeMiniprogramBuildInfo(version, desc)
+
+  console.log('\nBuilding miniprogram...')
+  execSync('npm run build:mp-weixin', { cwd: resolve(ROOT, 'miniprogram'), stdio: 'inherit' })
 
   console.log(`\nMiniprogram upload version: ${version}`)
   console.log(`Miniprogram upload desc: ${desc}`)

@@ -59,15 +59,16 @@ export async function openExternal(item: VideoItem): Promise<void> {
   }
 
   if (item.source === 'channels_feed') {
-    _wx.openChannelsActivity({
+    const options: any = {
       finderUserName: item.finderUserName,
       feedId: item.feedId,
-      ...(item.nonceId ? { nonceId: item.nonceId } : {}),
       fail: (err: any) => uni.showToast({
         title: `打开视频号失败：${err?.errMsg || '未知错误'}`,
         icon: 'none',
       }),
-    })
+    }
+    if (item.nonceId) options.nonceId = item.nonceId
+    _wx.openChannelsActivity(options)
     return
   }
 
@@ -84,9 +85,8 @@ export async function openExternal(item: VideoItem): Promise<void> {
   }
 
   if (item.source === 'miniprogram') {
-    _wx.navigateToMiniProgram({
+    const options: any = {
       appId: item.appId,
-      ...(item.path ? { path: item.path } : {}),
       envVersion: item.envVersion || 'release',
       fail: (err: any) => {
         const msg = String(err?.errMsg || '')
@@ -96,7 +96,9 @@ export async function openExternal(item: VideoItem): Promise<void> {
           uni.showToast({ title: `跳转失败：${msg || '未知错误'}`, icon: 'none' })
         }
       },
-    })
+    }
+    if (item.path) options.path = item.path
+    _wx.navigateToMiniProgram(options)
     return
   }
 
