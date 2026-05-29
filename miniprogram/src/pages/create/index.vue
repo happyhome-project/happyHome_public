@@ -404,12 +404,25 @@ async function handleSubmit() {
 }
 
 .btn-primary {
-  margin-top: $hh-space-xl;
+  width: 560rpx;
+  height: 86rpx;
+  margin: 56rpx auto 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
   background: $hh-color-primary;
   color: $hh-color-text-inverse;
-  border-radius: $hh-radius-md;
-  font-size: $hh-font-h3;
-  padding: $hh-space-md;
+  border: none;
+  border-radius: 22rpx;
+  font-size: $hh-font-body-lg;
+  font-weight: $hh-font-weight-bold;
+  line-height: 86rpx;
+  box-shadow: 0 8rpx 18rpx rgba(58, 106, 69, 0.14);
+}
+
+.btn-primary::after {
   border: none;
 }
 
