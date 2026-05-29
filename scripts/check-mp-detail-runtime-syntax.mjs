@@ -3,7 +3,24 @@ import path from 'node:path'
 import process from 'node:process'
 
 const projectRoot = process.cwd()
-const detailChunk = path.join(projectRoot, 'miniprogram', 'dist', 'build', 'mp-weixin', 'pages', 'detail', 'index.js')
+const distRoot = path.join(projectRoot, 'miniprogram', 'dist', 'build', 'mp-weixin')
+const detailDependencyChunks = [
+  'pages/detail/index.js',
+  'components/LoginGuard.js',
+  'components/widgets/WidgetEditor.js',
+  'components/widgets/WidgetRenderer.js',
+  'components/widgets/RichNoteRenderer.js',
+  'components/widgets/RichNoteEditor.js',
+  'components/widgets/NoteBlocksRenderer.js',
+  'components/widgets/NoteBlocksEditor.js',
+  'components/widgets/VideoPlayerCard.js',
+  'utils/rich-note.js',
+  'utils/widget-form.js',
+  'utils/widget.js',
+  'utils/cloud-file-url.js',
+  'utils/useBusyLock.js',
+  'store/audio.js',
+]
 
 const rules = [
   {
@@ -23,38 +40,54 @@ const rules = [
     pattern: /Object\.fromEntries\s*\(/g,
   },
   {
+    name: 'Object.values',
+    pattern: /Object\.values\s*\(/g,
+  },
+  {
+    name: 'Array.from',
+    pattern: /Array\.from\s*\(/g,
+  },
+  {
     name: 'nullish coalescing',
     pattern: /\?\?/g,
   },
+  {
+    name: 'collection spread',
+    pattern: /[\[{]\s*\.{3}/g,
+  },
 ]
 
-if (!fs.existsSync(detailChunk)) {
-  console.error(`Missing mp-weixin detail chunk: ${detailChunk}`)
-  console.error('Run npm.cmd --workspace miniprogram run build:mp-weixin first.')
-  process.exit(1)
-}
-
-const source = fs.readFileSync(detailChunk, 'utf8')
 const findings = []
 
-for (const rule of rules) {
-  for (const match of source.matchAll(rule.pattern)) {
-    const start = Math.max(0, match.index - 80)
-    const end = Math.min(source.length, match.index + 120)
-    findings.push({
-      rule: rule.name,
-      offset: match.index,
-      snippet: source.slice(start, end).replace(/\s+/g, ' '),
-    })
+for (const relativePath of detailDependencyChunks) {
+  const chunkPath = path.join(distRoot, relativePath)
+  if (!fs.existsSync(chunkPath)) {
+    console.error(`Missing mp-weixin detail dependency chunk: ${chunkPath}`)
+    console.error('Run npm.cmd --workspace miniprogram run build:mp-weixin first.')
+    process.exit(1)
+  }
+
+  const source = fs.readFileSync(chunkPath, 'utf8')
+  for (const rule of rules) {
+    for (const match of source.matchAll(rule.pattern)) {
+      const start = Math.max(0, match.index - 80)
+      const end = Math.min(source.length, match.index + 120)
+      findings.push({
+        file: relativePath,
+        rule: rule.name,
+        offset: match.index,
+        snippet: source.slice(start, end).replace(/\s+/g, ' '),
+      })
+    }
   }
 }
 
 if (findings.length > 0) {
-  console.error('mp-weixin detail chunk contains syntax that has caused blank detail pages in WeChat runtime:')
+  console.error('mp-weixin detail dependency chunks contain syntax/runtime APIs that have caused blank detail pages in WeChat trial runtime:')
   for (const finding of findings) {
-    console.error(`- ${finding.rule} at ${finding.offset}: ${finding.snippet}`)
+    console.error(`- ${finding.file}: ${finding.rule} at ${finding.offset}: ${finding.snippet}`)
   }
   process.exit(1)
 }
 
-console.log('mp-weixin detail runtime syntax check passed')
+console.log('mp-weixin detail dependency runtime syntax check passed')

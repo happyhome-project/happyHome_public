@@ -66,7 +66,7 @@ function commit(next: NoteBlock[]) {
 }
 
 function addTextBlock(text = '') {
-  commit([...blocks.value, { blockId: newBlockId(), type: 'text', text }])
+  commit(blocks.value.concat([{ blockId: newBlockId(), type: 'text', text }]))
 }
 
 function pasteTextBlock() {
@@ -101,13 +101,13 @@ function addImageBlocks() {
         .map((file: any) => String(file?.tempFilePath || ''))
         .filter(Boolean)
         .map((fileID: string) => ({ blockId: newBlockId(), type: 'image' as const, fileID }))
-      if (imageBlocks.length > 0) commit([...blocks.value, ...imageBlocks])
+      if (imageBlocks.length > 0) commit(blocks.value.concat(imageBlocks))
     },
   })
 }
 
 function removeBlock(index: number) {
-  const next = [...blocks.value]
+  const next = blocks.value.slice()
   next.splice(index, 1)
   commit(next)
 }
@@ -115,17 +115,19 @@ function removeBlock(index: number) {
 function moveBlock(index: number, delta: number) {
   const target = index + delta
   if (target < 0 || target >= blocks.value.length) return
-  const next = [...blocks.value]
-  const [item] = next.splice(index, 1)
+  const next = blocks.value.slice()
+  const removed = next.splice(index, 1)
+  const item = removed[0]
+  if (!item) return
   next.splice(target, 0, item)
   commit(next)
 }
 
 function updateText(index: number, text: string) {
-  const next = [...blocks.value]
+  const next = blocks.value.slice()
   const current = next[index]
   if (!current || current.type !== 'text') return
-  next[index] = { ...current, text }
+  next[index] = Object.assign({}, current, { text })
   commit(next)
 }
 
