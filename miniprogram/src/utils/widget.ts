@@ -12,6 +12,11 @@ export interface CarpoolListSummary {
   departureTime: string
 }
 
+export interface FamilyLetterListSummary {
+  title: string
+  author: string
+}
+
 export function getCarpoolLiveMeta(post: Post, section: Section): string[] | null {
   const summary = getCarpoolListSummary(post, section)
   if (!summary) return null
@@ -56,6 +61,18 @@ export function getCarpoolListSummary(post: Post, section: Section): CarpoolList
   return { route: `${origin} -- ${destination}`, departureTime }
 }
 
+export function getFamilyLetterListSummary(post: Post, section: Section): FamilyLetterListSummary | null {
+  if (!isFamilyLetterSection(section)) return null
+
+  const titleWidget = findWidgetByLabel(section, ['家书名称', '家书标题', '家书名', '标题'])
+  const authorWidget = findWidgetByLabel(section, ['家书作者', '作者'])
+
+  return {
+    title: titleWidget ? getWidgetValue(post, titleWidget) : '',
+    author: authorWidget ? getWidgetValue(post, authorWidget) : '',
+  }
+}
+
 export function formatWidgetValue(value: any, type: string): string {
   if (value === undefined || value === null || value === '') return ''
   if (type === 'location') {
@@ -76,6 +93,11 @@ export function formatWidgetValue(value: any, type: string): string {
 function isCarpoolSection(section: Section): boolean {
   if (String(section.name || '').includes('拼车')) return true
   return Boolean(findWidgetByLabel(section, ['出发地', '起点']) && findWidgetByLabel(section, ['目的地', '终点']))
+}
+
+function isFamilyLetterSection(section: Section): boolean {
+  if (String(section.name || '').includes('家书')) return true
+  return Boolean(findWidgetByLabel(section, ['家书名称', '家书标题', '家书名']) && findWidgetByLabel(section, ['家书作者']))
 }
 
 function findWidgetByLabel(section: Section, labels: string[]) {

@@ -208,7 +208,7 @@ import { postApi } from '../../api/cloud'
 import AppTabBar from '../../components/AppTabBar.vue'
 import LoginGuard from '../../components/LoginGuard.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
-import { getCarpoolListSummary, getCarpoolLiveMeta } from '../../utils/widget'
+import { getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary } from '../../utils/widget'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -331,15 +331,18 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
         name: section.name,
         count: posts.length,
         accentColor: section.accentColor || '',
-        items: posts.slice(0, 3).map((p, idx) => ({
-          k: formatArchiveKicker(idx),
-          t: getPostTitle(p, section),
-          who: p.authorNickname || '匿名',
-          meta: getArchiveMeta(p, section),
-          hot: isPostHot(p),
-          when: formatTime(p.createdAt),
-          postId: p._id,
-        })),
+        items: posts.slice(0, 3).map((p, idx) => {
+          const familyLetterSummary = getFamilyLetterListSummary(p, section)
+          return {
+            k: formatArchiveKicker(idx),
+            t: familyLetterSummary ? familyLetterSummary.title : getPostTitle(p, section),
+            who: familyLetterSummary ? familyLetterSummary.author : p.authorNickname || '匿名',
+            meta: getArchiveMeta(p, section),
+            hot: isPostHot(p),
+            when: formatTime(p.createdAt),
+            postId: p._id,
+          }
+        }),
       }
     })
     .filter((g) => g.items.length > 0)
