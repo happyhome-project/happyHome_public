@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { formatWidgetValue, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getListPreview } from '../widget'
+import { formatWidgetValue, getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getListPreview } from '../widget'
 import type { Section, Post } from '../../../../cloud/shared/types'
 
 describe('formatWidgetValue', () => {
@@ -151,6 +151,53 @@ describe('getListPreview', () => {
 
     expect(result.some((item) => item.label === '音频')).toBe(false)
     expect(result).toEqual([{ label: '标题', value: '课程通知', type: 'text' }])
+  })
+})
+
+describe('getArchiveHomeMeta', () => {
+  test('evergreen home meta does not expose system author nickname', () => {
+    const section: Section = {
+      _id: 's-archive',
+      communityId: 'c1',
+      name: '家书',
+      icon: 'book',
+      order: 1,
+      enableComment: true,
+      enableLike: true,
+      createdAt: '2024-01-01',
+      type: 'evergreen',
+      status: 'active',
+      widgets: [],
+    }
+    const post: Post = {
+      _id: 'p-archive',
+      communityId: 'c1',
+      sectionId: 's-archive',
+      authorId: 'u1',
+      authorNickname: '东阳',
+      status: 'active',
+      content: {},
+      commentCount: 0,
+      likeCount: 0,
+      createdAt: '',
+      updatedAt: '',
+    }
+
+    expect(getArchiveHomeMeta(post, section)).toBe('')
+  })
+
+  test('evergreen home meta can still show engagement signals', () => {
+    const section = {
+      enableLike: true,
+      enableComment: true,
+    } as Section
+    expect(getArchiveHomeMeta({ likeCount: 2, commentCount: 4 } as Post, section)).toBe('2 赞')
+
+    const noLikeSection = {
+      enableLike: false,
+      enableComment: true,
+    } as Section
+    expect(getArchiveHomeMeta({ likeCount: 2, commentCount: 4 } as Post, noLikeSection)).toBe('4 评论')
   })
 })
 

@@ -47,6 +47,16 @@ export function getListPreview(post: Post, section: Section): ListPreviewItem[] 
     .filter((item) => item.value !== '')
 }
 
+export function getArchiveHomeMeta(post: Post, section: Section): string {
+  if (section?.enableLike !== false && Number(post?.likeCount || 0) > 0) {
+    return `${post.likeCount} 赞`
+  }
+  if (section?.enableComment !== false && Number(post?.commentCount || 0) > 0) {
+    return `${post.commentCount} 评论`
+  }
+  return ''
+}
+
 export function getCarpoolListSummary(post: Post, section: Section): CarpoolListSummary | null {
   if (!isCarpoolSection(section)) return null
 
