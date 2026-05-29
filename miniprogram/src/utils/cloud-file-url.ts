@@ -52,7 +52,13 @@ export async function resolveCloudFileUrls(
 ): Promise<Record<string, string>> {
   const result: Record<string, string> = {}
   const now = Date.now()
-  const cloudFileIDs = Array.from(new Set(values.map((item) => String(item || '').trim()).filter(isCloudFileID)))
+  const cloudFileIDs: string[] = []
+  values.forEach((item) => {
+    const fileID = String(item || '').trim()
+    if (isCloudFileID(fileID) && !cloudFileIDs.includes(fileID)) {
+      cloudFileIDs.push(fileID)
+    }
+  })
   const missing = cloudFileIDs.filter((fileID) => {
     const cached = cache.get(fileID)
     if (cached && cached.expiresAt > now) {

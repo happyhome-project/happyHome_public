@@ -22,6 +22,10 @@ const rules = [
     name: 'Object.fromEntries',
     pattern: /Object\.fromEntries\s*\(/g,
   },
+  {
+    name: 'nullish coalescing',
+    pattern: /\?\?/g,
+  },
 ]
 
 if (!fs.existsSync(detailChunk)) {

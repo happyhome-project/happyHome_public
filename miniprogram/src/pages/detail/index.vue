@@ -238,11 +238,11 @@ async function loadPost(postId: string) {
       throw new Error('帖子数据为空，请稍后重试')
     }
     post.value = res.post
-    section.value = communityStore.currentSections.find((item: any) => item._id === post.value?.sectionId) ?? null
+    section.value = communityStore.currentSections.find((item: any) => item._id === post.value?.sectionId) || null
 
     if (!section.value && post.value?.sectionId) {
       const sectionRes = await sectionApi.get(post.value.sectionId)
-      section.value = sectionRes.section ?? null
+      section.value = sectionRes.section || null
     }
 
     if (!section.value) {
@@ -353,14 +353,16 @@ function attendanceAvatarSrc(user: any) {
 function collectAttendanceAvatarUrls() {
   const urls: string[] = []
   if (userStore.avatarUrl) urls.push(userStore.avatarUrl)
-  for (const summary of Object.values(post.value?.attendanceSummaryByWidget || {}) as any[]) {
-    for (const user of summary?.previewUsers || []) {
+  const summaries = post.value?.attendanceSummaryByWidget || {}
+  Object.keys(summaries).forEach((key) => {
+    const summary = summaries[key] || {}
+    ;(summary.previewUsers || []).forEach((user: any) => {
       if (user?.avatarUrl) urls.push(String(user.avatarUrl))
-    }
-  }
-  for (const member of rosterMembers.value || []) {
+    })
+  })
+  ;(rosterMembers.value || []).forEach((member: any) => {
     if (member?.avatarUrl) urls.push(String(member.avatarUrl))
-  }
+  })
   return urls
 }
 
@@ -441,10 +443,11 @@ async function handleAttendanceAction(widget: any) {
   const occupied = Number(summary.occupiedSeats || 0)
   const remaining = capacity ? Math.max(1, capacity - occupied) : 6
   const maxChoices = Math.min(remaining, 6) // uni.showActionSheet 微信上限 6 项
-  const itemList = Array.from({ length: maxChoices }, (_, i) => {
+  const itemList: string[] = []
+  for (let i = 0; i < maxChoices; i += 1) {
     const n = i + 1
-    return n === 1 ? '仅我 1 人' : `我 + ${n - 1} 人（共 ${n} 座）`
-  })
+    itemList.push(n === 1 ? '仅我 1 人' : `我 + ${n - 1} 人（共 ${n} 座）`)
+  }
 
   try {
     const res: any = await new Promise((resolve, reject) => {
@@ -454,7 +457,8 @@ async function handleAttendanceAction(widget: any) {
         fail: (e) => reject(e),
       })
     })
-    const seatCount = Number(res?.tapIndex ?? -1) + 1
+    const tapIndex = res?.tapIndex === undefined || res?.tapIndex === null ? -1 : res.tapIndex
+    const seatCount = Number(tapIndex) + 1
     if (seatCount < 1) return
     await attendanceLock.run(widget, seatCount)
   } catch (_) {
@@ -520,7 +524,7 @@ function closeRoster() {
 async function uploadImages(tempPaths: string[]): Promise<string[]> {
   return Promise.all(tempPaths.map((path) => {
     if (path.startsWith('cloud://')) return Promise.resolve(path)
-    const ext = path.split('.').pop() ?? 'jpg'
+    const ext = path.split('.').pop() || 'jpg'
     const cloudPath = `posts/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
     return new Promise<string>((resolve, reject) => {
       wx.cloud.uploadFile({
