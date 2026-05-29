@@ -311,9 +311,9 @@ function resetEditContent(content: Record<string, any>) {
   Object.keys(editContent).forEach((key) => delete editContent[key])
   const cloned = JSON.parse(JSON.stringify(content || {}))
   const validWidgetIds = new Set(regularWidgets.value.map((widget: any) => widget.widgetId))
-  Object.entries(cloned).forEach(([key, value]) => {
+  Object.keys(cloned).forEach((key) => {
     if (validWidgetIds.has(key)) {
-      editContent[key] = value
+      editContent[key] = cloned[key]
     }
   })
 }
@@ -536,8 +536,8 @@ async function uploadImages(tempPaths: string[]): Promise<string[]> {
 async function uploadNoteBlockImages(blocks: any[]): Promise<any[]> {
   return Promise.all((blocks || []).map(async (block) => {
     if (!block || block.type !== 'image') return block
-    const [fileID] = await uploadImages([String(block.fileID || '')])
-    return { ...block, fileID }
+    const uploaded = await uploadImages([String(block.fileID || '')])
+    return Object.assign({}, block, { fileID: uploaded[0] })
   }))
 }
 
@@ -571,22 +571,22 @@ async function handleSaveEdit() {
       }
       if (widget.type === 'rich_note') {
         content[widget.widgetId] = await uploadRichNoteImages(content[widget.widgetId], async (path) => {
-          const [fileID] = await uploadImages([path])
-          return fileID
+          const uploaded = await uploadImages([path])
+          return uploaded[0]
         })
       }
     }
 
     const res = await postApi.update(post.value._id, content) as any
     const validWidgetIds = new Set(regularWidgets.value.map((widget: any) => widget.widgetId))
-    const sanitizedContent = Object.fromEntries(
-      Object.entries(content).filter(([key]) => validWidgetIds.has(key))
-    )
-    post.value = {
-      ...post.value,
+    const sanitizedContent: Record<string, any> = {}
+    Object.keys(content).forEach((key) => {
+      if (validWidgetIds.has(key)) sanitizedContent[key] = content[key]
+    })
+    post.value = Object.assign({}, post.value, {
       content: sanitizedContent,
       updatedAt: res.updatedAt || new Date().toISOString(),
-    }
+    })
     editing.value = false
     uni.showToast({ title: '保存成功', icon: 'success' })
     await loadPost(currentPostId.value)

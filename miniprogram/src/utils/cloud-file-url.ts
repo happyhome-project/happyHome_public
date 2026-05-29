@@ -37,7 +37,8 @@ export async function resolveCloudFileUrl(value: string, deps: CloudFileUrlDeps 
   if (cached && cached.expiresAt > Date.now()) return cached.url
 
   const fetchTempUrls = deps.getTempFileURL || defaultGetTempFileURL
-  const [entry] = await fetchTempUrls([raw])
+  const entries = await fetchTempUrls([raw])
+  const entry = entries[0]
   const url = String(entry?.tempFileURL || '')
   if (!url) return raw
 
