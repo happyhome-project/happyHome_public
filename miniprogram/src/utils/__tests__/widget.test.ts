@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { formatWidgetValue, getCarpoolListSummary, getCarpoolLiveMeta, getListPreview } from '../widget'
+import { formatWidgetValue, getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getListPreview } from '../widget'
 import type { Section, Post } from '../../../../cloud/shared/types'
 
 describe('formatWidgetValue', () => {
@@ -154,6 +154,53 @@ describe('getListPreview', () => {
   })
 })
 
+describe('getArchiveHomeMeta', () => {
+  test('evergreen home meta does not expose system author nickname', () => {
+    const section: Section = {
+      _id: 's-archive',
+      communityId: 'c1',
+      name: '家书',
+      icon: 'book',
+      order: 1,
+      enableComment: true,
+      enableLike: true,
+      createdAt: '2024-01-01',
+      type: 'evergreen',
+      status: 'active',
+      widgets: [],
+    }
+    const post: Post = {
+      _id: 'p-archive',
+      communityId: 'c1',
+      sectionId: 's-archive',
+      authorId: 'u1',
+      authorNickname: '东阳',
+      status: 'active',
+      content: {},
+      commentCount: 0,
+      likeCount: 0,
+      createdAt: '',
+      updatedAt: '',
+    }
+
+    expect(getArchiveHomeMeta(post, section)).toBe('')
+  })
+
+  test('evergreen home meta can still show engagement signals', () => {
+    const section = {
+      enableLike: true,
+      enableComment: true,
+    } as Section
+    expect(getArchiveHomeMeta({ likeCount: 2, commentCount: 4 } as Post, section)).toBe('2 赞')
+
+    const noLikeSection = {
+      enableLike: false,
+      enableComment: true,
+    } as Section
+    expect(getArchiveHomeMeta({ likeCount: 2, commentCount: 4 } as Post, noLikeSection)).toBe('4 评论')
+  })
+})
+
 describe('getCarpoolListSummary', () => {
   test('拼车板块优先生成路线和出发时间摘要', () => {
     const section: Section = {
@@ -283,5 +330,45 @@ describe('getCarpoolListSummary', () => {
     }
 
     expect(getCarpoolListSummary(post, section)).toBeNull()
+  })
+
+  test('家书板块列表摘要展示家书标题和作者', () => {
+    const section: Section = {
+      _id: 's-family-letter',
+      communityId: 'c1',
+      name: '家书十年传',
+      icon: 'letter',
+      order: 1,
+      enableComment: true,
+      enableLike: true,
+      createdAt: '2024-01-01',
+      type: 'evergreen',
+      status: 'active',
+      widgets: [
+        { widgetId: 'author', type: 'short_text', label: '家书作者', fieldKey: 'author', required: true, order: 0, showInList: true },
+        { widgetId: 'title', type: 'summary', label: '家书名', fieldKey: 'title', required: true, order: 1, showInList: true },
+      ],
+    }
+    const post: Post = {
+      _id: 'p-family-letter',
+      communityId: 'c1',
+      sectionId: 's-family-letter',
+      authorId: 'u1',
+      authorNickname: '东阳',
+      status: 'active',
+      content: {
+        author: '王东阳',
+        title: '写给十年后的家书',
+      },
+      commentCount: 0,
+      likeCount: 0,
+      createdAt: '',
+      updatedAt: '',
+    }
+
+    expect(getFamilyLetterListSummary(post, section)).toEqual({
+      title: '写给十年后的家书',
+      author: '王东阳',
+    })
   })
 })

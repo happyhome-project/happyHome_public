@@ -154,7 +154,7 @@
           <view class="arc-tl">
             <text class="arc-title">{{ item.t }}</text>
             <view class="arc-mm">
-              <text class="arc-who">{{ item.who }}</text>
+              <text v-if="item.contentAuthor" class="arc-content-author">{{ item.contentAuthor }}</text>
               <text v-if="item.meta" class="arc-meta" :class="{ hot: item.hot }">{{ item.meta }}</text>
             </view>
           </view>
@@ -208,7 +208,7 @@ import { postApi } from '../../api/cloud'
 import AppTabBar from '../../components/AppTabBar.vue'
 import LoginGuard from '../../components/LoginGuard.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
-import { getCarpoolListSummary, getCarpoolLiveMeta } from '../../utils/widget'
+import { getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary } from '../../utils/widget'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -318,7 +318,7 @@ interface ScheduleItem { date: string; day: string; t: string; m: string; kind: 
 const scheduleItems = computed<ScheduleItem[]>(() => [])
 
 // ── 沉淀板块分组：只展示 type='evergreen' 的板块 ──
-interface ArchiveItem { k: string; t: string; who: string; meta?: string; hot?: boolean; when: string; postId?: string }
+interface ArchiveItem { k: string; t: string; contentAuthor?: string; meta?: string; hot?: boolean; when: string; postId?: string }
 interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[]; accentColor?: string }
 
 const archiveGroups = computed<ArchiveGroup[]>(() => {
@@ -331,15 +331,18 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
         name: section.name,
         count: posts.length,
         accentColor: section.accentColor || '',
-        items: posts.slice(0, 3).map((p, idx) => ({
-          k: formatArchiveKicker(idx),
-          t: getPostTitle(p, section),
-          who: p.authorNickname || '匿名',
-          meta: getArchiveMeta(p, section),
-          hot: isPostHot(p),
-          when: formatTime(p.createdAt),
-          postId: p._id,
-        })),
+        items: posts.slice(0, 3).map((p, idx) => {
+          const familyLetterSummary = getFamilyLetterListSummary(p, section)
+          return {
+            k: formatArchiveKicker(idx),
+            t: familyLetterSummary ? familyLetterSummary.title : getPostTitle(p, section),
+            contentAuthor: familyLetterSummary?.author || '',
+            meta: getArchiveHomeMeta(p, section),
+            hot: isPostHot(p),
+            when: formatTime(p.createdAt),
+            postId: p._id,
+          }
+        }),
       }
     })
     .filter((g) => g.items.length > 0)
@@ -375,16 +378,6 @@ function getPostTitle(post: any, section: any): string {
 
 function isPostHot(post: any): boolean {
   return Number(post?.likeCount || 0) > 10
-}
-
-function getArchiveMeta(post: any, section: any): string {
-  if (section?.enableLike !== false && Number(post?.likeCount || 0) > 0) {
-    return `${post.likeCount} 赞`
-  }
-  if (section?.enableComment !== false && Number(post?.commentCount || 0) > 0) {
-    return `${post.commentCount} 评论`
-  }
-  return ''
 }
 
 function getLivePostMeta(post: any, section: any): string[] {
@@ -1087,7 +1080,7 @@ onShow(() => {
   display: flex;
   gap: 16rpx;
 }
-.arc-who { font-family: inherit; }
+.arc-content-author { font-family: inherit; }
 .arc-meta { font-family: inherit; }
 .arc-meta.hot {
   color: $hh-accent-ink;
