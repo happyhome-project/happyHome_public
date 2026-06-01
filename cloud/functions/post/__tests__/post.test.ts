@@ -15,6 +15,7 @@ jest.mock('../../../lib/db', () => ({
 
 import {
   handleCreate,
+  handleClientLog,
   handleGet,
   handleJoinAttendance,
   handleListAttendanceMembers,
@@ -24,6 +25,24 @@ import {
 import * as db from '../../../lib/db'
 
 beforeEach(() => jest.clearAllMocks())
+
+test('clientLog: accepts diagnostic payload without touching data collections', async () => {
+  const result = await handleClientLog({
+    level: 'info',
+    event: 'detail.load.start',
+    sessionId: 'session-1',
+    route: 'pages/detail/index',
+    build: { version: '1.0.test' },
+    details: {
+      postId: 'post-1',
+      token: 'should-not-be-logged',
+    },
+  }, 'openid-123456')
+
+  expect(result.success).toBe(true)
+  expect(db.create).not.toHaveBeenCalled()
+  expect(db.updateById).not.toHaveBeenCalled()
+})
 
 const mockSection = {
   _id: 'section-1',

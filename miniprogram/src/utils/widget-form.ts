@@ -29,7 +29,7 @@ export function resolveAttendanceWidgetLabel(widget: { type?: string; label?: st
   const raw = String(widget?.label || '').trim()
   if (isPlaceholderWidgetLabel(raw)) return ''
 
-  const genericWidgetLabels = Object.values(DEFAULT_WIDGET_LABELS)
+  const genericWidgetLabels = Object.keys(DEFAULT_WIDGET_LABELS).map((key) => DEFAULT_WIDGET_LABELS[key])
 
   return genericWidgetLabels.includes(raw) ? '' : raw
 }

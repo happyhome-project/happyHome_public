@@ -2,14 +2,18 @@
 import { onLaunch, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from './store/community'
 import { useUserStore } from './store/user'
+import { clientLog, installRuntimeLogHooks } from './utils/client-log'
 
 async function refreshMyCommunitiesSilently() {
   const userStore = useUserStore()
   if (!userStore.isLoggedIn) return
 
   try {
+    clientLog('debug', 'app.communities.refresh.start', {})
     await useCommunityStore().loadMyCommunities()
+    clientLog('debug', 'app.communities.refresh.success', {})
   } catch (e) {
+    clientLog('error', 'app.communities.refresh.fail', { error: e })
     console.error('Failed to refresh communities:', e)
   }
 }
@@ -23,17 +27,26 @@ onLaunch(async () => {
     // @ts-ignore
     wx.cloud.init({ env: 'cloudbase-3gh862acb1505ff3', traceUser: true })
   }
+  installRuntimeLogHooks()
+  clientLog('info', 'app.launch.start', {})
 
   const userStore = useUserStore()
   const communityStore = useCommunityStore()
 
   userStore.loadFromStorage()
   communityStore.loadFromStorage()
+  clientLog('info', 'app.storage.loaded', {
+    loggedIn: userStore.isLoggedIn,
+    openIdTail: userStore.openId ? String(userStore.openId).slice(-6) : '',
+    currentCommunityId: communityStore.currentCommunityId || '',
+    communityCount: communityStore.myCommunities.length,
+  })
 
   // 2022-10 微信策略变更后，真机上 wx.getUserProfile 强制返回 "微信用户"；
   // 老版本采集的用户昵称是这个假名 → 清掉让他们走新登录流程（选头像 + 输昵称）。
   if (userStore.isLoggedIn && userStore.nickName === '微信用户') {
     userStore.logout()
+    clientLog('warn', 'app.legacyWechatUser.logout', {})
     // 延迟弹提示，等首页 mount 完再显示 toast，避免被生命周期覆盖
     setTimeout(() => {
       uni.showToast({
@@ -47,17 +60,25 @@ onLaunch(async () => {
 
   if (userStore.isLoggedIn) {
     try {
+      clientLog('info', 'app.communities.load.start', {})
       await communityStore.loadMyCommunities()
+      clientLog('info', 'app.communities.load.success', {
+        communityCount: communityStore.myCommunities.length,
+        currentCommunityId: communityStore.currentCommunityId || '',
+      })
       if (communityStore.myCommunities.length === 0) {
+        clientLog('warn', 'app.communities.empty.relaunchOnboarding', {})
         uni.reLaunch({ url: '/pages/onboarding/index' })
       }
     } catch (e) {
+      clientLog('error', 'app.communities.load.fail', { error: e })
       console.error('Failed to load communities:', e)
     }
   }
 })
 
 onShow(() => {
+  clientLog('info', 'app.show', {})
   // The app may stay alive while an admin approves a membership in the backend.
   // Refresh active communities when returning to the foreground so users do not
   // need to kill and reopen the mini-program to see newly approved communities.

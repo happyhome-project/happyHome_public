@@ -6,6 +6,7 @@
 //      → sets localStorage 'dev-gateway=1' and 'test-openid=<id>' → callCloud
 //      routes through http-gateway just like H5, bypassing real wx.login.
 //      Use case: preview/test builds where real WeChat login is unavailable.
+import { clientLog } from '../utils/client-log'
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — wx is injected by the miniprogram runtime; absent in H5 build
@@ -48,9 +49,17 @@ function shouldUseGateway(): boolean {
   return readStorage('dev-gateway') === '1'
 }
 
+function copyParams(target: Record<string, any>, params: object) {
+  const source: any = params || {}
+  Object.keys(source).forEach((key) => {
+    target[key] = source[key]
+  })
+  return target
+}
+
 async function callViaHttpGateway<T>(name: string, action: string, params: object): Promise<T> {
   // Use fetch in H5; uni.request in miniprogram (fetch is not guaranteed in all mp runtimes)
-  const body = { _fn: name, action, ...params }
+  const body = copyParams({ _fn: name, action }, params)
   const headers = {
     'content-type': 'application/json',
     authorization: `Bearer ${H5_GATEWAY_TOKEN}`,
@@ -97,23 +106,97 @@ function normalizeCloudResult<T>(data: any, name: string, action: string, source
   return data as T
 }
 
+function summarizeParams(params: any) {
+  const summary: Record<string, any> = {}
+  if (!params || typeof params !== 'object') return summary
+  const allowed = [
+    'communityId',
+    'sectionId',
+    'postId',
+    'widgetId',
+    'skip',
+    'limit',
+    'includeAll',
+    'seatCount',
+  ]
+  for (const key of allowed) {
+    if (params[key] !== undefined) summary[key] = params[key]
+  }
+  if (params.content && typeof params.content === 'object') {
+    summary.contentKeys = Object.keys(params.content)
+  }
+  return summary
+}
+
 export async function callCloud<T = any>(
   name: string, action: string, params: object = {}
 ): Promise<T> {
-  if (shouldUseGateway()) return callViaHttpGateway<T>(name, action, params)
+  const startedAt = Date.now()
+  const source = shouldUseGateway() ? 'http-gateway' : 'wx.cloud'
+  clientLog('debug', 'cloud.call.start', {
+    name,
+    action,
+    source,
+    params: summarizeParams(params),
+  })
+  if (shouldUseGateway()) {
+    try {
+      const result = await callViaHttpGateway<T>(name, action, params)
+      clientLog('debug', 'cloud.call.success', {
+        name,
+        action,
+        source,
+        durationMs: Date.now() - startedAt,
+      })
+      return result
+    } catch (error) {
+      clientLog('error', 'cloud.call.fail', {
+        name,
+        action,
+        source,
+        durationMs: Date.now() - startedAt,
+        error,
+      })
+      throw error
+    }
+  }
 
   return new Promise((resolve, reject) => {
     _wx.cloud.callFunction({
       name,
-      data: { action, ...params },
+      data: copyParams({ action }, params),
       success: (res: any) => {
         try {
-          resolve(normalizeCloudResult<T>(res.result, name, action, 'wx.cloud'))
+          const result = normalizeCloudResult<T>(res.result, name, action, 'wx.cloud')
+          clientLog('debug', 'cloud.call.success', {
+            name,
+            action,
+            source,
+            durationMs: Date.now() - startedAt,
+          })
+          resolve(result)
         } catch (error) {
+          clientLog('error', 'cloud.call.fail', {
+            name,
+            action,
+            source,
+            durationMs: Date.now() - startedAt,
+            error,
+          })
           reject(error)
         }
       },
-      fail: (error: any) => reject(new Error(error?.errMsg || error?.message || String(error)))
+      fail: (error: any) => {
+        const wrapped = new Error(error?.errMsg || error?.message || String(error))
+        clientLog('error', 'cloud.call.fail', {
+          name,
+          action,
+          source,
+          durationMs: Date.now() - startedAt,
+          error: wrapped,
+        })
+        reject(wrapped)
+      }
     })
   })
 }

@@ -65,7 +65,7 @@ let deps: AudioStoreDeps = {
 }
 
 export function _setAudioStoreDepsForTesting(overrides: Partial<AudioStoreDeps>) {
-  deps = { ...deps, ...overrides }
+  deps = Object.assign({}, deps, overrides)
 }
 
 export const useAudioStore = defineStore('audio', {
@@ -146,7 +146,7 @@ export const useAudioStore = defineStore('audio', {
       this.currentTime = 0
     },
     _backend(): AudioBackend {
-      const backend = deps.backend ?? ensureAudioBackend()
+      const backend = deps.backend || ensureAudioBackend()
       backend.bind({
         onPlay: () => { this.isPlaying = true },
         onPause: () => { this.isPlaying = false },
@@ -188,7 +188,7 @@ export const useAudioStore = defineStore('audio', {
       try {
         const results = await fetchFn(stale)
         const expiresAt = now + TEMP_URL_TTL_MS
-        const next = { ...this.httpsUrlCache }
+        const next = Object.assign({}, this.httpsUrlCache)
         for (const result of results) {
           next[result.fileID] = { url: result.tempFileURL, expiresAt }
         }
@@ -203,19 +203,19 @@ export const useAudioStore = defineStore('audio', {
       const cached = this.httpsUrlCache[fileID]
       if (cached && cached.expiresAt - now > URL_REFRESH_BUFFER_MS) return cached.url
       const fetchFn = deps.getTempFileURL
-      if (!fetchFn) return cached?.url || ''
+      if (!fetchFn) return cached ? cached.url : ''
       try {
         const results = await fetchFn([fileID])
         const expiresAt = now + TEMP_URL_TTL_MS
-        const next = { ...this.httpsUrlCache }
+        const next = Object.assign({}, this.httpsUrlCache)
         for (const result of results) {
           next[result.fileID] = { url: result.tempFileURL, expiresAt }
         }
         this.httpsUrlCache = next
-        return next[fileID]?.url || ''
+        return next[fileID] ? next[fileID].url : ''
       } catch (error) {
         console.warn('[audio] url failed', error)
-        return cached?.url || ''
+        return cached ? cached.url : ''
       }
     },
   },

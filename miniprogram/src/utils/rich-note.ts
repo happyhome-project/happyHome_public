@@ -94,18 +94,24 @@ function extractMarkdownImageSources(markdown: string): string[] {
   return ids
 }
 
+function pushUnique(target: string[], items: string[]) {
+  items.forEach((item) => {
+    if (item && !target.includes(item)) target.push(item)
+  })
+}
+
 export function extractRichNoteImageFileIDs(value: string): string[] {
-  return Array.from(new Set([
-    ...extractMarkdownImageFileIDs(value),
-    ...extractHtmlImageFileIDs(value),
-  ]))
+  const ids: string[] = []
+  pushUnique(ids, extractMarkdownImageFileIDs(value))
+  pushUnique(ids, extractHtmlImageFileIDs(value))
+  return ids
 }
 
 export function extractRichNoteImageSources(value: string): string[] {
-  return Array.from(new Set([
-    ...extractMarkdownImageSources(value),
-    ...extractHtmlImageSources(value),
-  ]))
+  const sources: string[] = []
+  pushUnique(sources, extractMarkdownImageSources(value))
+  pushUnique(sources, extractHtmlImageSources(value))
+  return sources
 }
 
 function renderInline(markdown: string): string {
@@ -274,8 +280,10 @@ export interface MarkdownToolbarResult {
 
 function normalizeSelection(markdown: string, start?: number, end?: number) {
   const length = markdown.length
-  const safeStart = Math.max(0, Math.min(Number(start ?? length), length))
-  const safeEnd = Math.max(safeStart, Math.min(Number(end ?? safeStart), length))
+  const rawStart = start === undefined || start === null ? length : start
+  const safeStart = Math.max(0, Math.min(Number(rawStart), length))
+  const rawEnd = end === undefined || end === null ? safeStart : end
+  const safeEnd = Math.max(safeStart, Math.min(Number(rawEnd), length))
   return { start: safeStart, end: safeEnd }
 }
 
@@ -445,10 +453,9 @@ export async function uploadRichNoteImages(
   }
 
   let markdown = normalized.markdown
-  for (const [src, fileID] of replacements) {
-    if (!fileID) continue
-    markdown = markdown.split(src).join(fileID)
-  }
+  replacements.forEach((fileID, src) => {
+    if (fileID) markdown = markdown.split(src).join(fileID)
+  })
   return buildRichNoteContentFromMarkdown(markdown)
 }
 
@@ -467,12 +474,16 @@ export function normalizeRichNoteContent(value: unknown): RichNoteContent {
   const fromList = Array.isArray(value.imageFileIDs)
     ? value.imageFileIDs.map((item) => String(item || '').trim()).filter((item) => item.startsWith('cloud://'))
     : []
+  const imageFileIDs: string[] = []
+  pushUnique(imageFileIDs, fromList)
+  pushUnique(imageFileIDs, extractRichNoteImageFileIDs(content.markdown))
+  pushUnique(imageFileIDs, extractRichNoteImageFileIDs(html))
   return {
     format: 'markdown',
     markdown: content.markdown,
     html,
     text,
-    imageFileIDs: Array.from(new Set([...fromList, ...extractRichNoteImageFileIDs(content.markdown), ...extractRichNoteImageFileIDs(html)])),
+    imageFileIDs,
     schemaVersion: SCHEMA_VERSION,
   }
 }

@@ -51,6 +51,7 @@ import {
   openExternal,
 } from '../../utils/video-actions'
 import type { VideoItem } from '../../../../cloud/shared/types'
+import { clientLog } from '../../utils/client-log'
 
 const props = defineProps<{ item: VideoItem }>()
 
@@ -93,16 +94,34 @@ const durationLabel = computed(() => {
 })
 
 onMounted(async () => {
+  clientLog('debug', 'videoCard.mounted', {
+    itemId: props.item.itemId || '',
+    source: props.item.source || '',
+    hasFileID: !!(props.item as any).fileID,
+    hasUrl: !!(props.item as any).url,
+    hasCover: !!props.item.cover,
+  })
   if (props.item.cover) {
-    try { coverUrl.value = await resolvePlayUrl(props.item.cover) } catch { /* noop */ }
+    try {
+      coverUrl.value = await resolvePlayUrl(props.item.cover)
+      clientLog('debug', 'videoCard.cover.resolve.success', { itemId: props.item.itemId || '' })
+    } catch (error) {
+      clientLog('warn', 'videoCard.cover.resolve.fail', { itemId: props.item.itemId || '', error })
+    }
   }
 })
 
 async function onTapPlay() {
+  clientLog('info', 'videoCard.play.tap', {
+    itemId: props.item.itemId || '',
+    source: props.item.source || '',
+  })
   if (props.item.source === 'cos' || props.item.source === 'h5') {
     try {
       await playInline(props.item, { setSrc: (s: string) => (playingSrc.value = s) })
+      clientLog('info', 'videoCard.play.inline.success', { itemId: props.item.itemId || '' })
     } catch (err: any) {
+      clientLog('error', 'videoCard.play.inline.fail', { itemId: props.item.itemId || '', error: err })
       uni.showToast({ title: String(err?.message || '播放失败'), icon: 'none' })
     }
   } else {
@@ -111,6 +130,10 @@ async function onTapPlay() {
 }
 
 async function onOpenExternal() {
+  clientLog('info', 'videoCard.openExternal.tap', {
+    itemId: props.item.itemId || '',
+    source: props.item.source || '',
+  })
   await openExternal(props.item)
 }
 </script>

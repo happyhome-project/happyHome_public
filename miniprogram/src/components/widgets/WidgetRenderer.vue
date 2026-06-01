@@ -65,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { formatWidgetValue } from '../../utils/widget'
 import { resolveWidgetLabel } from '../../utils/widget-form'
 import { useAudioStore } from '../../store/audio'
@@ -73,6 +73,7 @@ import VideoPlayerCard from './VideoPlayerCard.vue'
 import NoteBlocksRenderer from './NoteBlocksRenderer.vue'
 import RichNoteRenderer from './RichNoteRenderer.vue'
 import { isRichNoteEmpty } from '../../utils/rich-note'
+import { clientLog } from '../../utils/client-log'
 
 const props = defineProps<{
   widget: any
@@ -171,6 +172,27 @@ function formatAudioDuration(value: unknown): string {
   const seconds = total % 60
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
+
+function logWidget(stage: string) {
+  clientLog('debug', 'widget.render.' + stage, {
+    widgetId: props.widget?.widgetId || '',
+    widgetType: props.widget?.type || '',
+    label: displayLabel.value,
+    hasValue: hasValue.value,
+    valueIsArray: Array.isArray(rawValue.value),
+    valueType: rawValue.value === null ? 'null' : typeof rawValue.value,
+    postId: props.postMeta?.postId || '',
+    sectionId: props.postMeta?.sectionId || '',
+  })
+}
+
+onMounted(() => {
+  logWidget('mounted')
+})
+
+watch(hasValue, () => {
+  logWidget('hasValueChanged')
+})
 </script>
 
 <style lang="scss" scoped>
