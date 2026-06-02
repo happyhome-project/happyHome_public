@@ -297,7 +297,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi, notificationApi, type ApprovalNotificationEventType } from '../../api/cloud'
@@ -644,6 +644,16 @@ onMounted(() => {
 onShow(() => {
   hideNativeTabBar()
   void refreshProfileData()
+})
+
+onPullDownRefresh(async () => {
+  try {
+    await refreshProfileData()
+  } catch {
+    uni.showToast({ title: '刷新失败，请重试', icon: 'none' })
+  } finally {
+    uni.stopPullDownRefresh()
+  }
 })
 </script>
 

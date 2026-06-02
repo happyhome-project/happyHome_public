@@ -42,7 +42,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { onLoad, onShow } from '@dcloudio/uni-app'
+import { onLoad, onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { communityApi, memberApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
@@ -172,6 +172,16 @@ function handleCreate() {
 
 onShow(() => {
   void refreshOnboardingData()
+})
+
+onPullDownRefresh(async () => {
+  try {
+    await refreshOnboardingData()
+  } catch {
+    uni.showToast({ title: '刷新失败，请重试', icon: 'none' })
+  } finally {
+    uni.stopPullDownRefresh()
+  }
 })
 </script>
 
