@@ -32,6 +32,8 @@
     "test:mp": "node scripts/test-mp.mjs",
     "test:mp:replay": "node scripts/test-mp-replay.mjs",
     "test:mp:devtools": "node scripts/check-devtools-automation.mjs",
+    "test:mp:release-gate": "node scripts/miniprogram-release-gate.mjs",
+    "test:h5:detail-smoke": "node scripts/test-h5-detail-smoke.mjs",
     "test:h5:profile-smoke": "node scripts/test-h5-profile-smoke.mjs",
     "test:deploy-output": "node --test scripts/lib/deploy-output.test.mjs",
     "test:real:admin": "node scripts/test-admin-http.mjs",

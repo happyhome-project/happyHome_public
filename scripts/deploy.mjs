@@ -463,6 +463,9 @@ async function uploadMiniprogram() {
   console.log('\nBuilding miniprogram...')
   execSync('npm run build:mp-weixin', { cwd: resolve(ROOT, 'miniprogram'), stdio: 'inherit' })
 
+  console.log('\nRunning miniprogram release gate...')
+  execSync('npm run test:mp:release-gate -- --skip-mp-build', { cwd: ROOT, stdio: 'inherit' })
+
   console.log(`\nMiniprogram upload version: ${version}`)
   console.log(`Miniprogram upload desc: ${desc}`)
 
