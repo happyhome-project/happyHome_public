@@ -317,13 +317,6 @@ import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { BUILD_INFO } from '../../generated/build-info'
 import { clientLog } from '../../utils/client-log'
-import { loadAdminPendingState } from '../../utils/profile-admin-tools'
-import {
-  getNotificationSubscribeButtonText,
-  getApplicationNotificationStatusText,
-  mergeNotificationSubscribeResult,
-  type ProfileNotificationSubscription,
-} from '../../utils/profile-notifications'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -342,6 +335,12 @@ type NotificationTemplateView = {
   templateId: string
 }
 
+type ProfileNotificationSubscription = {
+  eventType: ApprovalNotificationEventType
+  templateId: string
+  status: string
+}
+
 const notificationTemplates = ref<NotificationTemplateView[]>([
   {
     eventType: 'member_join_pending' as ApprovalNotificationEventType,
@@ -355,6 +354,89 @@ const notificationTemplates = ref<NotificationTemplateView[]>([
 const configuredNotificationTemplates = computed(() => notificationTemplates.value.filter(item => item.templateId))
 const hasAdminTools = computed(() => userStore.role === 'superAdmin' || adminCommunityIds.value.length > 0)
 
+function notificationSubscriptionKey(eventType: ApprovalNotificationEventType, templateId: string) {
+  return eventType + '::' + templateId
+}
+
+function notificationStatusLabel(
+  subscriptions: ProfileNotificationSubscription[],
+  eventType: ApprovalNotificationEventType,
+  templateId: string,
+) {
+  const item = subscriptions.find((sub) => sub.eventType === eventType && sub.templateId === templateId)
+  if (!item) return '未开启'
+  if (item.status === 'accept') return '已开启'
+  return '未授权'
+}
+
+function hasAnyNotificationTemplateAccepted(
+  templates: NotificationTemplateView[],
+  subscriptions: ProfileNotificationSubscription[],
+) {
+  return templates.some(
+    (item) => notificationStatusLabel(subscriptions, item.eventType, item.templateId) === '已开启',
+  )
+}
+
+function getProfileNotificationStatusText(
+  templates: NotificationTemplateView[],
+  subscriptions: ProfileNotificationSubscription[],
+) {
+  if (hasAnyNotificationTemplateAccepted(templates, subscriptions)) return '已开启'
+  const hasAnySavedStatus = templates.some(
+    (item) => subscriptions.some((sub) => sub.eventType === item.eventType && sub.templateId === item.templateId),
+  )
+  return hasAnySavedStatus ? '未授权' : '未开启'
+}
+
+function getProfileNotificationButtonText(
+  isBusy: boolean,
+  templates: NotificationTemplateView[],
+  subscriptions: ProfileNotificationSubscription[],
+) {
+  if (isBusy) return '开启中...'
+  if (hasAnyNotificationTemplateAccepted(templates, subscriptions)) return '申请通知已开启'
+  return '接收申请通知'
+}
+
+function mergeProfileNotificationSubscribeResult(
+  existing: ProfileNotificationSubscription[],
+  templates: NotificationTemplateView[],
+  requestResult: Record<string, string>,
+) {
+  const merged: ProfileNotificationSubscription[] = []
+  const upsert = (item: ProfileNotificationSubscription) => {
+    const key = notificationSubscriptionKey(item.eventType, item.templateId)
+    const existingIndex = merged.findIndex(
+      (sub) => notificationSubscriptionKey(sub.eventType, sub.templateId) === key,
+    )
+    const normalized = {
+      eventType: item.eventType,
+      templateId: item.templateId,
+      status: item.status,
+    }
+    if (existingIndex >= 0) {
+      merged[existingIndex] = normalized
+    } else {
+      merged.push(normalized)
+    }
+  }
+
+  for (const item of existing) {
+    if (!item.eventType || !item.templateId) continue
+    upsert(item)
+  }
+  for (const item of templates) {
+    if (!item.templateId) continue
+    upsert({
+      eventType: item.eventType,
+      templateId: item.templateId,
+      status: requestResult[item.templateId] === 'accept' ? 'accept' : 'reject',
+    })
+  }
+  return merged
+}
+
 // ── 登录 / 编辑资料表单状态 ──
 const isEditingProfile = ref(false)
 const showNickConfirm = ref(false)    // 登录流程：chooseAvatar 后弹出昵称确认浮层
@@ -367,6 +449,10 @@ const formAvatarDisplay = computed(() => formAvatarTempPath.value || formAvatarC
 
 // 是否支持 <button open-type="chooseAvatar">：需要基础库 ≥ 2.21.2，mp-weixin 环境
 const supportsChooseAvatar = computed(() => {
+  // H5 smoke uses this hook to exercise the real-phone chooseAvatar branch.
+  if (typeof globalThis !== 'undefined' && (globalThis as any).__HH_TEST_CHOOSE_AVATAR__ === true) {
+    return true
+  }
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore
   if (typeof wx === 'undefined' || !wx?.canIUse) return false
@@ -647,31 +733,48 @@ const notificationSubscribeLock = useBusyLock(async () => {
       status: rawStatus,
     })
   }
-  notificationSubscriptions.value = mergeNotificationSubscribeResult(notificationSubscriptions.value, templates, result)
+  notificationSubscriptions.value = mergeProfileNotificationSubscribeResult(notificationSubscriptions.value, templates, result)
   await loadNotificationSubscriptions({ preserveOnFailure: true })
-  notificationSubscriptions.value = mergeNotificationSubscribeResult(notificationSubscriptions.value, templates, result)
+  notificationSubscriptions.value = mergeProfileNotificationSubscribeResult(notificationSubscriptions.value, templates, result)
   uni.showToast({ title: '提醒设置已保存', icon: 'success' })
 })
 
-const notificationSubscribeButtonText = computed(() => getNotificationSubscribeButtonText(
+const notificationSubscribeButtonText = computed(() => getProfileNotificationButtonText(
   notificationSubscribeLock.busy.value,
   configuredNotificationTemplates.value,
   notificationSubscriptions.value,
 ))
 
-const applicationNotificationStatusText = computed(() => getApplicationNotificationStatusText(
+const applicationNotificationStatusText = computed(() => getProfileNotificationStatusText(
   configuredNotificationTemplates.value,
   notificationSubscriptions.value,
 ))
 
 async function loadPendingMembers() {
   if (!userStore.isLoggedIn) return
-  const next = await loadAdminPendingState(
-    communityStore.myCommunities,
-    (communityId) => memberApi.pendingList(communityId),
-  )
-  pendingMembers.value = next.pendingMembers
-  adminCommunityIds.value = next.adminCommunityIds
+  const nextPendingMembers: any[] = []
+  const nextAdminCommunityIds: string[] = []
+
+  for (const community of communityStore.myCommunities) {
+    const communityId = String(community?._id || '')
+    if (!communityId) continue
+    try {
+      const res = await memberApi.pendingList(communityId)
+      nextAdminCommunityIds.push(communityId)
+      if (Array.isArray(res.members) && res.members.length > 0) {
+        for (const member of res.members) {
+          const normalized = Object.assign({}, member)
+          normalized.communityId = communityId
+          nextPendingMembers.push(normalized)
+        }
+      }
+    } catch (_error) {
+      // pendingList only succeeds for communities this user can administer.
+    }
+  }
+
+  pendingMembers.value = nextPendingMembers
+  adminCommunityIds.value = nextAdminCommunityIds
 }
 
 async function loadNotificationSubscriptions(options: { preserveOnFailure?: boolean } = {}) {

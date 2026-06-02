@@ -28,6 +28,7 @@
     "test:admin:note-blocks-ui": "node scripts/test-admin-note-blocks-ui.mjs",
     "test:admin:video-upload-ui": "node scripts/test-admin-video-upload-ui.mjs",
     "test:mp:detail-runtime-syntax": "node scripts/check-mp-detail-runtime-syntax.mjs",
+    "test:mp:profile-critical-path": "node scripts/check-mp-profile-critical-path.mjs",
     "test:mp": "node scripts/test-mp.mjs",
     "test:mp:replay": "node scripts/test-mp-replay.mjs",
     "test:h5:profile-smoke": "node scripts/test-h5-profile-smoke.mjs",

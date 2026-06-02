@@ -36,8 +36,6 @@ const profileDependencyChunks = [
   'store/user.js',
   'utils/app-tabbar.js',
   'utils/client-log.js',
-  'utils/profile-admin-tools.js',
-  'utils/profile-notifications.js',
   'utils/useBusyLock.js',
 ]
 

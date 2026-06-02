@@ -40,6 +40,30 @@ const server = createServer((req, res) => {
 server.listen(0, '127.0.0.1', async () => {
   const port = server.address().port
   const browser = await chromium.launch({ headless: true })
+
+  try {
+    await runProfileCase(browser, port, {
+      label: 'fallback-login',
+      setup: null,
+      expectedTexts: ['确认登录', 'DEV 登录'],
+    })
+    await runProfileCase(browser, port, {
+      label: 'choose-avatar-login',
+      setup: async (page) => {
+        await page.addInitScript(() => {
+          window.__HH_TEST_CHOOSE_AVATAR__ = true
+        })
+      },
+      expectedTexts: ['微信登录', 'DEV 登录'],
+    })
+    console.log('H5 profile smoke passed')
+  } finally {
+    await browser.close()
+    server.close()
+  }
+})
+
+async function runProfileCase(browser, port, options) {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
   const errors = []
 
@@ -49,28 +73,31 @@ server.listen(0, '127.0.0.1', async () => {
   })
 
   try {
+    if (options.setup) await options.setup(page)
     await page.goto(`http://127.0.0.1:${port}/#/pages/profile/index`, { waitUntil: 'networkidle' })
     await page.waitForTimeout(1200)
     const text = normalize(await page.locator('body').innerText())
 
-    console.log(text)
+    console.log(`[${options.label}] ${text}`)
 
     if (!text.includes(`ver: ${expectedVersion}`)) {
-      throw new Error(`profile version missing: expected ver: ${expectedVersion}`)
+      throw new Error(`${options.label}: profile version missing: expected ver: ${expectedVersion}`)
     }
     if (!text.includes('state:logged-out login:0')) {
-      throw new Error('profile debug state missing')
+      throw new Error(`${options.label}: profile debug state missing`)
+    }
+    for (const expectedText of options.expectedTexts) {
+      if (!text.includes(expectedText)) {
+        throw new Error(`${options.label}: expected text missing: ${expectedText}`)
+      }
     }
     if (text.length < 80) {
-      throw new Error('profile content is too short; possible blank page')
+      throw new Error(`${options.label}: profile content is too short; possible blank page`)
     }
     if (errors.length > 0) {
       throw new Error(errors.join('\n'))
     }
-
-    console.log('H5 profile smoke passed')
   } finally {
-    await browser.close()
-    server.close()
+    await page.close()
   }
-})
+}
