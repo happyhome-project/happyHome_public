@@ -100,6 +100,10 @@ const ENTITY_TO_COMMUNITY_ACTIONS: Record<string, { collection: string; idParam:
   'post.getAdmin': { collection: 'posts', idParam: 'postId' },
   'post.deleteAdmin': { collection: 'posts', idParam: 'postId' },
   'post.updateAdmin': { collection: 'posts', idParam: 'postId' },
+  'post.pinAdmin': { collection: 'posts', idParam: 'postId' },
+  'post.unpinAdmin': { collection: 'posts', idParam: 'postId' },
+  'post.featureAdmin': { collection: 'posts', idParam: 'postId' },
+  'post.unfeatureAdmin': { collection: 'posts', idParam: 'postId' },
   'post.removeAttendanceMemberAdmin': { collection: 'posts', idParam: 'postId' },
 }
 
@@ -140,6 +144,12 @@ function parseDateBoundary(value: string, endOfDay = false) {
   }
   const timestamp = Date.parse(value)
   return Number.isNaN(timestamp) ? null : timestamp
+}
+
+function parseOptionalBoolean(value: unknown): boolean | null {
+  if (value === true || value === 'true' || value === 1 || value === '1') return true
+  if (value === false || value === 'false' || value === 0 || value === '0') return false
+  return null
 }
 
 function includesKeyword(...parts: Array<unknown>) {
@@ -1014,12 +1024,16 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const sectionId = String(params.sectionId || '').trim()
     const authorKeyword = normalizeKeyword(params.authorQuery)
     const statusFilter = String(params.status || 'active').trim()
+    const pinnedFilter = parseOptionalBoolean(params.pinned)
+    const featuredFilter = parseOptionalBoolean(params.featured)
     const fromTimestamp = parseDateBoundary(String(params.dateFrom || '').trim())
     const toTimestamp = parseDateBoundary(String(params.dateTo || '').trim(), true)
 
     let posts = await db.query('posts', { communityId }, { orderBy: ['createdAt', 'desc'] })
     if (sectionId) posts = posts.filter((post: any) => post.sectionId === sectionId)
     if (statusFilter !== 'all') posts = posts.filter((post: any) => post.status === statusFilter)
+    if (pinnedFilter !== null) posts = posts.filter((post: any) => Boolean(post.isPinned) === pinnedFilter)
+    if (featuredFilter !== null) posts = posts.filter((post: any) => Boolean(post.isFeatured) === featuredFilter)
     if (fromTimestamp !== null) {
       posts = posts.filter((post: any) => Date.parse(String(post.createdAt || '')) >= fromTimestamp)
     }
@@ -1083,8 +1097,55 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (post.status === 'deleted') {
       return { success: true, alreadyDeleted: true }
     }
-    await db.softDelete('posts', postId)
+    await db.updateById('posts', postId, {
+      status: 'deleted',
+      isPinned: false,
+      pinnedAt: '',
+      pinnedByAccountId: '',
+      isFeatured: false,
+      featuredAt: '',
+      featuredByAccountId: '',
+    })
     return { success: true }
+  }
+  if (action === 'post.pinAdmin' || action === 'post.unpinAdmin' || action === 'post.featureAdmin' || action === 'post.unfeatureAdmin') {
+    const postId = String(params.postId || '').trim()
+    if (!postId) throw new Error('postId 不能为空')
+    const post = await db.getById('posts', postId) as any
+    if (!post) throw new Error('post not found')
+    if (post.status === 'deleted') throw new Error('已删除帖子不能置顶或加精')
+
+    const now = new Date().toISOString()
+    if (action === 'post.pinAdmin') {
+      await db.updateById('posts', postId, {
+        isPinned: true,
+        pinnedAt: now,
+        pinnedByAccountId: ctx.accountId,
+      })
+      return { success: true, isPinned: true, pinnedAt: now }
+    }
+    if (action === 'post.unpinAdmin') {
+      await db.updateById('posts', postId, {
+        isPinned: false,
+        pinnedAt: '',
+        pinnedByAccountId: '',
+      })
+      return { success: true, isPinned: false }
+    }
+    if (action === 'post.featureAdmin') {
+      await db.updateById('posts', postId, {
+        isFeatured: true,
+        featuredAt: now,
+        featuredByAccountId: ctx.accountId,
+      })
+      return { success: true, isFeatured: true, featuredAt: now }
+    }
+    await db.updateById('posts', postId, {
+      isFeatured: false,
+      featuredAt: '',
+      featuredByAccountId: '',
+    })
+    return { success: true, isFeatured: false }
   }
   if (action === 'post.updateAdmin') {
     const postId = String(params.postId || '').trim()
@@ -1296,6 +1357,8 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       content: sanitized,
       commentCount: 0,
       likeCount: 0,
+      isPinned: false,
+      isFeatured: false,
       createdAt: now,
       updatedAt: now,
     })

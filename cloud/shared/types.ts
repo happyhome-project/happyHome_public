@@ -248,6 +248,12 @@ export interface Post {
   likeCount: number
   createdAt: string
   updatedAt: string
+  isPinned?: boolean
+  pinnedAt?: string
+  pinnedByAccountId?: string
+  isFeatured?: boolean
+  featuredAt?: string
+  featuredByAccountId?: string
   adminEditedAt?: string
   adminEditedByAccountId?: string
   adminEditedByUsername?: string

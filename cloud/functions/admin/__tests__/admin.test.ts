@@ -409,3 +409,168 @@ test('admin.deleteAccount: 不能删除自己的账号', async () => {
     _actAs: { accountId: 'super-1', role: 'superAdmin', userId: 'boss', username: 'boss' },
   })).rejects.toThrow('不能删除自己的账号')
 })
+
+test('post.pinAdmin: active 帖子可置顶并记录操作人', async () => {
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.updateById as jest.Mock).mockReset()
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'post-1',
+    communityId: 'community-1',
+    status: 'active',
+  })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  const result: any = await main({
+    action: 'post.pinAdmin',
+    postId: 'post-1',
+    _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
+  })
+
+  expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({
+    isPinned: true,
+    pinnedAt: expect.any(String),
+    pinnedByAccountId: 'admin-1',
+  }))
+  expect(result.success).toBe(true)
+})
+
+test('post.featureAdmin: active 帖子可加精并记录操作人', async () => {
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.updateById as jest.Mock).mockReset()
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'post-1',
+    communityId: 'community-1',
+    status: 'active',
+  })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  const result: any = await main({
+    action: 'post.featureAdmin',
+    postId: 'post-1',
+    _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
+  })
+
+  expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({
+    isFeatured: true,
+    featuredAt: expect.any(String),
+    featuredByAccountId: 'admin-1',
+  }))
+  expect(result.success).toBe(true)
+})
+
+test('post.listAdmin: filters pinned and featured posts', async () => {
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.query as jest.Mock).mockReset()
+  ;(db.query as jest.Mock).mockResolvedValueOnce([
+    {
+      _id: 'post-featured-pinned',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      authorId: 'user-1',
+      status: 'active',
+      isPinned: true,
+      isFeatured: true,
+      createdAt: '2026-04-22T10:00:00.000Z',
+      content: {},
+    },
+    {
+      _id: 'post-normal',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      authorId: 'user-1',
+      status: 'active',
+      isPinned: false,
+      isFeatured: false,
+      createdAt: '2026-04-22T11:00:00.000Z',
+      content: {},
+    },
+  ])
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'users' && id === 'user-1') return { _id: 'user-1', nickName: '一年' }
+    if (collectionName === 'sections' && id === 'section-1') {
+      return {
+        _id: 'section-1',
+        communityId: 'community-1',
+        name: '拼车出行',
+        type: 'realtime',
+        status: 'active',
+        widgets: [],
+      }
+    }
+    return null
+  })
+
+  const result: any = await main({
+    action: 'post.listAdmin',
+    communityId: 'community-1',
+    pinned: true,
+    featured: true,
+    _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
+  })
+
+  expect(result.posts.map((post: any) => post._id)).toEqual(['post-featured-pinned'])
+  expect(result.total).toBe(1)
+})
+
+test('post.pinAdmin/post.featureAdmin: deleted 帖子不可置顶或加精', async () => {
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.updateById as jest.Mock).mockReset()
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({
+      _id: 'post-deleted',
+      communityId: 'community-1',
+      status: 'deleted',
+    })
+    .mockResolvedValueOnce({
+      _id: 'post-deleted',
+      communityId: 'community-1',
+      status: 'deleted',
+    })
+
+  await expect(main({
+    action: 'post.pinAdmin',
+    postId: 'post-deleted',
+    _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
+  })).rejects.toThrow('已删除帖子不能置顶或加精')
+
+  await expect(main({
+    action: 'post.featureAdmin',
+    postId: 'post-deleted',
+    _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
+  })).rejects.toThrow('已删除帖子不能置顶或加精')
+  expect(db.updateById).not.toHaveBeenCalled()
+})
+
+test('post.deleteAdmin: clears pin and featured flags', async () => {
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.updateById as jest.Mock).mockReset()
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'post-flagged',
+    communityId: 'community-1',
+    status: 'active',
+    isPinned: true,
+    pinnedAt: '2026-04-20T10:00:00.000Z',
+    pinnedByAccountId: 'admin-old',
+    isFeatured: true,
+    featuredAt: '2026-04-20T11:00:00.000Z',
+    featuredByAccountId: 'admin-old',
+  })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  const result: any = await main({
+    action: 'post.deleteAdmin',
+    postId: 'post-flagged',
+    _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
+  })
+
+  expect(db.updateById).toHaveBeenCalledWith('posts', 'post-flagged', {
+    status: 'deleted',
+    isPinned: false,
+    pinnedAt: '',
+    pinnedByAccountId: '',
+    isFeatured: false,
+    featuredAt: '',
+    featuredByAccountId: '',
+  })
+  expect(result).toEqual({ success: true })
+})
