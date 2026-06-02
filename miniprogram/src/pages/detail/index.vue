@@ -1,12 +1,20 @@
 <template>
   <view class="detail-page">
+    <view class="detail-debug">
+      <text>{{ debugBuildText }}</text>
+      <text v-if="currentPostId">post {{ currentPostId }}</text>
+    </view>
     <LoginGuard
       v-if="!userStore.isLoggedIn"
       title="请先登录"
       desc="登录后才能查看帖子详情"
     />
     <view v-else-if="post && section" class="content">
-      <view v-if="!editing">
+      <view v-if="post.isPinned || post.isFeatured" class="post-flag-row">
+        <text v-if="post.isPinned" class="post-flag pin">置顶</text>
+        <text v-if="post.isFeatured" class="post-flag feature">精华</text>
+      </view>
+      <view>
         <WidgetRenderer
           v-for="widget in regularWidgets"
           :key="widget.widgetId"
@@ -45,7 +53,7 @@
               :class="{ 'is-self': user.userId === userStore.openId }"
             >
               <image
-                :src="user.userId === userStore.openId ? (userStore.avatarUrl || user.avatarUrl || fallbackAvatar) : (user.avatarUrl || fallbackAvatar)"
+                :src="attendanceAvatarSrc(user)"
                 class="hh-avatar-img"
                 mode="aspectFill"
               />
@@ -63,33 +71,16 @@
         </view>
       </view>
 
-      <view v-else>
-        <WidgetEditor
-          v-for="widget in regularWidgets"
-          :key="widget.widgetId"
-          :widget="widget"
-          v-model="editContent[widget.widgetId]"
-        />
-        <view v-for="widget in attendanceWidgets" :key="widget.widgetId" class="attendance-hint">
-          <text v-if="resolveAttendanceWidgetLabel(widget)" class="attendance-label">{{ resolveAttendanceWidgetLabel(widget) }}</text>
-          <text class="attendance-hint-text">活动参与人数由成员在帖子详情中点击参与后自动统计。</text>
-        </view>
-      </view>
-
       <view class="meta">
         <view>
           <text class="time">发布于 {{ formatDate(post.createdAt) }}</text>
         </view>
         <view v-if="isAuthor" class="actions">
-          <text v-if="!editing" class="edit-btn" @tap="startEdit">编辑</text>
           <text
-            v-if="!editing"
             class="delete-btn"
             :class="{ disabled: deleteLock.busy.value }"
             @tap="deleteLock.run()"
           >{{ deleteLock.busy.value ? '删除中...' : '删除' }}</text>
-          <text v-if="editing" class="cancel-btn" @tap="cancelEdit">取消</text>
-          <text v-if="editing" class="save-btn" @tap="handleSaveEdit">{{ savingEdit ? '保存中...' : '保存' }}</text>
         </view>
       </view>
     </view>
@@ -127,7 +118,7 @@
         </view>
         <scroll-view scroll-y class="roster-list">
           <view v-for="member in rosterMembers" :key="`${member.userId}-${member.joinedAt}`" class="roster-item">
-            <image :src="member.avatarUrl || fallbackAvatar" class="roster-avatar" mode="aspectFill" />
+            <image :src="resolvedAvatarUrl(member.avatarUrl)" class="roster-avatar" mode="aspectFill" />
             <view class="roster-info">
               <text class="roster-name">
                 {{ member.nickName || member.userId }}
@@ -144,29 +135,26 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onErrorCaptured, reactive, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { postApi, sectionApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import LoginGuard from '../../components/LoginGuard.vue'
-import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
 import WidgetRenderer from '../../components/widgets/WidgetRenderer.vue'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
-import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
+import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
+import { clientLog, debugBuildLabel } from '../../utils/client-log'
 
 const fallbackAvatar = '/static/default-avatar.png'
 const ATTENDANCE_SLOT_DISPLAY_MAX = 6
 
 const post = ref<any>(null)
 const section = ref<any>(null)
-const editing = ref(false)
-const savingEdit = ref(false)
 const currentPostId = ref('')
 const loading = ref(false)
 const loadError = ref('')
-const editContent = reactive<Record<string, any>>({})
 const showRoster = ref(false)
 const rosterMembers = ref<any[]>([])
 const rosterTitle = ref('')
@@ -176,9 +164,13 @@ const rosterMeta = reactive({
   occupiedSeats: 0,
   capacity: undefined as number | undefined,
 })
+const resolvedAvatarUrls = reactive<Record<string, string>>({})
 const cancelBusy = ref(false)
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
+const debugBuildText = computed(() => debugBuildLabel())
+
+clientLog('info', 'detail.setup', {})
 
 const rosterSelfJoined = computed(() => {
   if (!rosterWidgetId.value) return false
@@ -199,9 +191,27 @@ const regularWidgets = computed(() =>
 )
 const attendanceWidgets = computed(() => (section.value?.widgets || []).filter((widget: any) => widget.type === 'attendance'))
 
+onErrorCaptured((error, _instance, info) => {
+  clientLog('error', 'detail.errorCaptured', {
+    info,
+    error,
+    postId: currentPostId.value,
+    hasPost: !!post.value,
+    hasSection: !!section.value,
+  })
+  loadError.value = '详情渲染失败，请把页面版本和时间发给开发者'
+  return false
+})
+
 onLoad(async (options: any) => {
   const postId = String(options?.postId || '')
+  clientLog('info', 'detail.onLoad', {
+    rawOptions: options || {},
+    postId,
+    loggedIn: userStore.isLoggedIn,
+  })
   if (!postId) {
+    clientLog('error', 'detail.onLoad.missingPostId', { rawOptions: options || {} })
     loadError.value = '缺少帖子参数，请从首页重新进入'
     return
   }
@@ -210,6 +220,12 @@ onLoad(async (options: any) => {
 })
 
 onShow(() => {
+  clientLog('info', 'detail.onShow', {
+    postId: currentPostId.value,
+    loggedIn: userStore.isLoggedIn,
+    hasPost: !!post.value,
+    hasSection: !!section.value,
+  })
   void ensurePostLoaded()
 })
 
@@ -221,32 +237,87 @@ watch(
 )
 
 async function ensurePostLoaded() {
-  if (!currentPostId.value || !userStore.isLoggedIn) return
-  if (post.value?._id === currentPostId.value && section.value) return
+  if (!currentPostId.value) {
+    clientLog('warn', 'detail.ensure.skip.noPostId', {})
+    return
+  }
+  if (!userStore.isLoggedIn) {
+    clientLog('warn', 'detail.ensure.skip.loggedOut', { postId: currentPostId.value })
+    return
+  }
+  if (post.value?._id === currentPostId.value && section.value) {
+    clientLog('debug', 'detail.ensure.skip.alreadyLoaded', {
+      postId: currentPostId.value,
+      sectionId: section.value?._id || '',
+    })
+    return
+  }
   await loadPost(currentPostId.value)
 }
 
 async function loadPost(postId: string) {
-  if (loading.value) return
+  if (loading.value) {
+    clientLog('warn', 'detail.load.skip.busy', { postId })
+    return
+  }
   loading.value = true
   loadError.value = ''
+  clientLog('info', 'detail.load.start', {
+    postId,
+    cachedSectionCount: communityStore.currentSections.length,
+    loggedIn: userStore.isLoggedIn,
+  })
   try {
     const res = await postApi.get(postId)
+    clientLog('info', 'detail.post.get.success', {
+      postId,
+      hasPost: !!res?.post,
+      sectionId: res?.post?.sectionId || '',
+      communityId: res?.post?.communityId || '',
+      contentKeys: res?.post?.content ? Object.keys(res.post.content) : [],
+    })
     if (!res?.post) {
       throw new Error('帖子数据为空，请稍后重试')
     }
     post.value = res.post
-    section.value = communityStore.currentSections.find((item: any) => item._id === post.value?.sectionId) ?? null
+    section.value = communityStore.currentSections.find((item: any) => item._id === post.value?.sectionId) || null
+    clientLog('debug', 'detail.section.cache.lookup', {
+      postId,
+      sectionId: post.value?.sectionId || '',
+      found: !!section.value,
+      cachedSectionCount: communityStore.currentSections.length,
+    })
 
     if (!section.value && post.value?.sectionId) {
+      clientLog('info', 'detail.section.get.start', {
+        sectionId: post.value.sectionId,
+      })
       const sectionRes = await sectionApi.get(post.value.sectionId)
-      section.value = sectionRes.section ?? null
+      section.value = sectionRes.section || null
+      clientLog('info', 'detail.section.get.success', {
+        sectionId: post.value.sectionId,
+        found: !!section.value,
+        widgetCount: section.value?.widgets?.length || 0,
+      })
     }
 
     if (!section.value) {
       throw new Error('板块信息加载失败，请稍后重试')
     }
+    await resolveAttendanceAvatarUrls()
+    clientLog('info', 'detail.load.success', {
+      postId,
+      sectionId: section.value?._id || '',
+      regularWidgetCount: regularWidgets.value.length,
+      attendanceWidgetCount: attendanceWidgets.value.length,
+    })
   } catch (error: any) {
+    clientLog('error', 'detail.load.fail', {
+      postId,
+      error,
+      hasPost: !!post.value,
+      hasSection: !!section.value,
+    })
     if (error?.message?.includes('需要先加入社区后查看内容')) {
       communityStore.clearCommunityState()
       uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
@@ -257,6 +328,12 @@ async function loadPost(postId: string) {
     uni.showToast({ title: loadError.value, icon: 'none' })
   } finally {
     loading.value = false
+    clientLog('debug', 'detail.load.finally', {
+      postId,
+      hasPost: !!post.value,
+      hasSection: !!section.value,
+      loadError: loadError.value,
+    })
   }
 }
 
@@ -277,10 +354,12 @@ function friendlyLoadError(error: any) {
 
 function retryLoad() {
   if (!currentPostId.value) return
+  clientLog('info', 'detail.retry.tap', { postId: currentPostId.value })
   void loadPost(currentPostId.value)
 }
 
 function goBack() {
+  clientLog('info', 'detail.goBack.tap', { postId: currentPostId.value })
   uni.navigateBack({
     fail: () => uni.switchTab({ url: '/pages/index/index' }),
   })
@@ -304,26 +383,6 @@ const deleteLock = useBusyLock(async () => {
   }
 })
 
-function resetEditContent(content: Record<string, any>) {
-  Object.keys(editContent).forEach((key) => delete editContent[key])
-  const cloned = JSON.parse(JSON.stringify(content || {}))
-  const validWidgetIds = new Set(regularWidgets.value.map((widget: any) => widget.widgetId))
-  Object.entries(cloned).forEach(([key, value]) => {
-    if (validWidgetIds.has(key)) {
-      editContent[key] = value
-    }
-  })
-}
-
-function startEdit() {
-  resetEditContent(post.value?.content || {})
-  editing.value = true
-}
-
-function cancelEdit() {
-  editing.value = false
-}
-
 function getAttendanceSummary(widget: any) {
   return post.value?.attendanceSummaryByWidget?.[widget.widgetId] || {
     count: 0,
@@ -331,6 +390,58 @@ function getAttendanceSummary(widget: any) {
     isFull: false,
     isJoined: false,
     previewUsers: [],
+  }
+}
+
+function resolvedAvatarUrl(rawUrl: unknown) {
+  const url = String(rawUrl || '').trim()
+  if (!url) return fallbackAvatar
+  return resolvedAvatarUrls[url] || url
+}
+
+function attendanceAvatarSrc(user: any) {
+  const rawUrl = user?.userId === userStore.openId
+    ? (userStore.avatarUrl || user?.avatarUrl || '')
+    : (user?.avatarUrl || '')
+  return resolvedAvatarUrl(rawUrl)
+}
+
+function collectAttendanceAvatarUrls() {
+  const urls: string[] = []
+  if (userStore.avatarUrl) urls.push(userStore.avatarUrl)
+  const summaries = post.value?.attendanceSummaryByWidget || {}
+  Object.keys(summaries).forEach((key) => {
+    const summary = summaries[key] || {}
+    ;(summary.previewUsers || []).forEach((user: any) => {
+      if (user?.avatarUrl) urls.push(String(user.avatarUrl))
+    })
+  })
+  ;(rosterMembers.value || []).forEach((member: any) => {
+    if (member?.avatarUrl) urls.push(String(member.avatarUrl))
+  })
+  return urls
+}
+
+async function resolveAttendanceAvatarUrls() {
+  const urls = collectAttendanceAvatarUrls()
+  clientLog('debug', 'detail.avatar.resolve.start', {
+    postId: currentPostId.value,
+    urlCount: urls.length,
+  })
+  if (urls.length === 0) return
+  try {
+    const resolved = await resolveCloudFileUrls(urls)
+    Object.assign(resolvedAvatarUrls, resolved)
+    clientLog('debug', 'detail.avatar.resolve.success', {
+      postId: currentPostId.value,
+      resolvedCount: Object.keys(resolved).length,
+    })
+  } catch {
+    clientLog('warn', 'detail.avatar.resolve.fail', {
+      postId: currentPostId.value,
+      urlCount: urls.length,
+    })
+    // Keep the original URL/fallback when temp URL resolution is unavailable.
   }
 }
 
@@ -400,10 +511,11 @@ async function handleAttendanceAction(widget: any) {
   const occupied = Number(summary.occupiedSeats || 0)
   const remaining = capacity ? Math.max(1, capacity - occupied) : 6
   const maxChoices = Math.min(remaining, 6) // uni.showActionSheet 微信上限 6 项
-  const itemList = Array.from({ length: maxChoices }, (_, i) => {
+  const itemList: string[] = []
+  for (let i = 0; i < maxChoices; i += 1) {
     const n = i + 1
-    return n === 1 ? '仅我 1 人' : `我 + ${n - 1} 人（共 ${n} 座）`
-  })
+    itemList.push(n === 1 ? '仅我 1 人' : `我 + ${n - 1} 人（共 ${n} 座）`)
+  }
 
   try {
     const res: any = await new Promise((resolve, reject) => {
@@ -413,7 +525,8 @@ async function handleAttendanceAction(widget: any) {
         fail: (e) => reject(e),
       })
     })
-    const seatCount = Number(res?.tapIndex ?? -1) + 1
+    const tapIndex = res?.tapIndex === undefined || res?.tapIndex === null ? -1 : res.tapIndex
+    const seatCount = Number(tapIndex) + 1
     if (seatCount < 1) return
     await attendanceLock.run(widget, seatCount)
   } catch (_) {
@@ -431,6 +544,7 @@ async function openRoster(widget: any) {
     rosterMeta.total = Number(res.total || 0)
     rosterMeta.occupiedSeats = Number(res.occupiedSeats || 0)
     rosterMeta.capacity = res.capacity
+    await resolveAttendanceAvatarUrls()
     showRoster.value = true
   } catch (error: any) {
     uni.showToast({ title: error?.message || '加载名单失败', icon: 'none' })
@@ -460,6 +574,7 @@ async function handleCancelInSheet() {
       rosterMeta.total = Number(res.total || 0)
       rosterMeta.occupiedSeats = Number(res.occupiedSeats || 0)
       rosterMeta.capacity = res.capacity
+      await resolveAttendanceAvatarUrls()
     }
     uni.showToast({ title: '已取消参与', icon: 'success' })
   } catch (error: any) {
@@ -472,86 +587,6 @@ async function handleCancelInSheet() {
 function closeRoster() {
   showRoster.value = false
   rosterWidgetId.value = ''
-}
-
-async function uploadImages(tempPaths: string[]): Promise<string[]> {
-  return Promise.all(tempPaths.map((path) => {
-    if (path.startsWith('cloud://')) return Promise.resolve(path)
-    const ext = path.split('.').pop() ?? 'jpg'
-    const cloudPath = `posts/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
-    return new Promise<string>((resolve, reject) => {
-      wx.cloud.uploadFile({
-        cloudPath,
-        filePath: path,
-        success: (res: any) => resolve(res.fileID),
-        fail: reject,
-      })
-    })
-  }))
-}
-
-async function uploadNoteBlockImages(blocks: any[]): Promise<any[]> {
-  return Promise.all((blocks || []).map(async (block) => {
-    if (!block || block.type !== 'image') return block
-    const [fileID] = await uploadImages([String(block.fileID || '')])
-    return { ...block, fileID }
-  }))
-}
-
-async function handleSaveEdit() {
-  if (!post.value || !section.value || savingEdit.value) return
-
-  const content = JSON.parse(JSON.stringify(editContent || {}))
-  for (const widget of regularWidgets.value) {
-    if (!widget.required) continue
-    const value = content[widget.widgetId]
-    const isEmpty =
-      value === undefined ||
-      value === null ||
-      value === '' ||
-      (Array.isArray(value) && value.length === 0) ||
-      (widget.type === 'rich_note' && isRichNoteEmpty(value))
-    if (isEmpty) {
-      uni.showToast({ title: `请填写${widget.label}`, icon: 'none' })
-      return
-    }
-  }
-
-  savingEdit.value = true
-  try {
-    for (const widget of regularWidgets.value) {
-      if (widget.type === 'image_group' && Array.isArray(content[widget.widgetId])) {
-        content[widget.widgetId] = await uploadImages(content[widget.widgetId])
-      }
-      if (widget.type === 'note_blocks' && Array.isArray(content[widget.widgetId])) {
-        content[widget.widgetId] = await uploadNoteBlockImages(content[widget.widgetId])
-      }
-      if (widget.type === 'rich_note') {
-        content[widget.widgetId] = await uploadRichNoteImages(content[widget.widgetId], async (path) => {
-          const [fileID] = await uploadImages([path])
-          return fileID
-        })
-      }
-    }
-
-    const res = await postApi.update(post.value._id, content) as any
-    const validWidgetIds = new Set(regularWidgets.value.map((widget: any) => widget.widgetId))
-    const sanitizedContent = Object.fromEntries(
-      Object.entries(content).filter(([key]) => validWidgetIds.has(key))
-    )
-    post.value = {
-      ...post.value,
-      content: sanitizedContent,
-      updatedAt: res.updatedAt || new Date().toISOString(),
-    }
-    editing.value = false
-    uni.showToast({ title: '保存成功', icon: 'success' })
-    await loadPost(currentPostId.value)
-  } catch (error: any) {
-    uni.showToast({ title: error?.message || '保存失败', icon: 'none' })
-  } finally {
-    savingEdit.value = false
-  }
 }
 
 function formatDate(iso: string): string {
@@ -570,6 +605,18 @@ function formatDateTime(iso: string): string {
   padding: $hh-space-lg;
   background: $hh-color-bg;
   min-height: 100vh;
+}
+
+.detail-debug {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+  margin-bottom: $hh-space-sm;
+  font-family: $hh-font-mono;
+  font-size: 18rpx;
+  color: $hh-ink-4;
+  opacity: 0.72;
+  word-break: break-all;
 }
 
 .loading {
@@ -781,6 +828,37 @@ function formatDateTime(iso: string): string {
   margin-top: $hh-space-xs;
   font-size: $hh-font-caption;
   color: $hh-color-text-mute;
+}
+
+.post-flag-row {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  flex-wrap: wrap;
+  margin-bottom: $hh-space-md;
+}
+
+.post-flag {
+  font-family: $hh-font-mono;
+  font-size: 20rpx;
+  line-height: 1;
+  padding: 7rpx 12rpx;
+  border-radius: $hh-radius-full;
+  border: 1rpx solid $hh-ink-line;
+  color: $hh-ink-3;
+  background: $hh-surface-1;
+}
+
+.post-flag.pin {
+  color: #8a5a00;
+  border-color: #ead3a2;
+  background: #fff6dc;
+}
+
+.post-flag.feature {
+  color: #9a3a2f;
+  border-color: #e8b7af;
+  background: #fff1ee;
 }
 
 .meta {

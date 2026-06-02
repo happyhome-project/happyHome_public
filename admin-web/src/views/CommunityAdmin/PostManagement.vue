@@ -48,6 +48,16 @@
         <el-option label="已删除" value="deleted" />
         <el-option label="全部状态" value="all" />
       </el-select>
+      <el-select v-model="filters.pinnedStatus" style="width: 140px;">
+        <el-option label="全部置顶" value="all" />
+        <el-option label="仅置顶" value="true" />
+        <el-option label="未置顶" value="false" />
+      </el-select>
+      <el-select v-model="filters.featuredStatus" style="width: 140px;">
+        <el-option label="全部精华" value="all" />
+        <el-option label="仅精华" value="true" />
+        <el-option label="非精华" value="false" />
+      </el-select>
       <el-date-picker
         v-model="dateRange"
         type="daterange"
@@ -74,6 +84,15 @@
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="运营标记" width="130">
+        <template #default="{ row }">
+          <div class="post-flags">
+            <el-tag v-if="row.isPinned" size="small" type="warning">置顶</el-tag>
+            <el-tag v-if="row.isFeatured" size="small" type="danger">精华</el-tag>
+            <span v-if="!row.isPinned && !row.isFeatured" class="sub-text">无</span>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column label="摘要" min-width="320" show-overflow-tooltip>
         <template #default="{ row }">
           {{ getPostSummary(row) }}
@@ -84,9 +103,27 @@
           <span>{{ formatAdminDateTime(row.createdAt) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="240">
+      <el-table-column label="操作" width="420">
         <template #default="{ row }">
           <el-button size="small" @click="openDetail(row)">详情</el-button>
+          <el-button
+            size="small"
+            :type="row.isPinned ? 'warning' : 'default'"
+            plain
+            :disabled="row.status === 'deleted'"
+            @click="togglePin(row)"
+          >
+            {{ row.isPinned ? '取消置顶' : '置顶' }}
+          </el-button>
+          <el-button
+            size="small"
+            :type="row.isFeatured ? 'danger' : 'default'"
+            plain
+            :disabled="row.status === 'deleted'"
+            @click="toggleFeature(row)"
+          >
+            {{ row.isFeatured ? '取消精华' : '加精' }}
+          </el-button>
           <el-button
             size="small"
             type="primary"
@@ -116,11 +153,35 @@
           <div>板块：{{ detailSection?.name || detailPost.sectionName || '未知板块' }}</div>
           <div>作者：{{ detailPost.authorNickname || '未设置昵称' }} / {{ detailPost.authorId }}</div>
           <div>时间：{{ formatAdminDateTime(detailPost.createdAt) }}</div>
+          <div class="post-flags">
+            <span>运营标记：</span>
+            <el-tag v-if="detailPost.isPinned" size="small" type="warning">置顶</el-tag>
+            <el-tag v-if="detailPost.isFeatured" size="small" type="danger">精华</el-tag>
+            <span v-if="!detailPost.isPinned && !detailPost.isFeatured" class="sub-text">无</span>
+          </div>
           <div v-if="detailPost.adminEditedAt">
             最后编辑：{{ detailPost.adminEditedByUsername || detailPost.adminEditedByAccountId || '管理员' }} /
             {{ formatAdminDateTime(detailPost.adminEditedAt) }}
           </div>
-          <div>
+          <div class="detail-actions">
+            <el-button
+              size="small"
+              :type="detailPost.isPinned ? 'warning' : 'default'"
+              plain
+              :disabled="detailPost.status === 'deleted'"
+              @click="togglePin(detailPost)"
+            >
+              {{ detailPost.isPinned ? '取消置顶' : '置顶' }}
+            </el-button>
+            <el-button
+              size="small"
+              :type="detailPost.isFeatured ? 'danger' : 'default'"
+              plain
+              :disabled="detailPost.status === 'deleted'"
+              @click="toggleFeature(detailPost)"
+            >
+              {{ detailPost.isFeatured ? '取消精华' : '加精' }}
+            </el-button>
             <el-button
               size="small"
               type="primary"
@@ -255,6 +316,8 @@ const filters = ref({
   sectionId: '',
   authorQuery: '',
   status: 'active' as 'active' | 'deleted' | 'all',
+  pinnedStatus: 'all' as 'all' | 'true' | 'false',
+  featuredStatus: 'all' as 'all' | 'true' | 'false',
 })
 
 const detailFields = computed(() => {
@@ -315,6 +378,8 @@ async function loadPosts() {
       sectionId: filters.value.sectionId || undefined,
       authorQuery: filters.value.authorQuery || undefined,
       status: filters.value.status,
+      pinned: parseFlagFilter(filters.value.pinnedStatus),
+      featured: parseFlagFilter(filters.value.featuredStatus),
       dateFrom: dateRange.value?.[0] || undefined,
       dateTo: dateRange.value?.[1] || undefined,
     }) as any
@@ -324,6 +389,12 @@ async function loadPosts() {
   } finally {
     loading.value = false
   }
+}
+
+function parseFlagFilter(value: 'all' | 'true' | 'false') {
+  if (value === 'true') return true
+  if (value === 'false') return false
+  return undefined
 }
 
 async function openDetail(row: any) {
@@ -364,6 +435,54 @@ async function deletePost(row: any) {
     }
   } catch (error: any) {
     ElMessage.error(error.message || '删除失败')
+  }
+}
+
+async function refreshDetailIfOpen(postId: string) {
+  if (detailPost.value?._id !== postId) return
+  try {
+    const res = await postAdminApi.get(postId) as any
+    detailPost.value = res.post ?? null
+    detailSection.value = res.section ?? null
+    attendanceMembersByWidget.value = res.attendanceMembersByWidget ?? {}
+  } catch {
+    // The list has already refreshed; keep the existing dialog if detail refresh fails.
+  }
+}
+
+async function togglePin(row: any) {
+  const postId = String(row?._id || '')
+  if (!postId || row?.status === 'deleted') return
+  try {
+    if (row.isPinned) {
+      await postAdminApi.unpin(postId)
+      ElMessage.success('已取消置顶')
+    } else {
+      await postAdminApi.pin(postId)
+      ElMessage.success('已置顶')
+    }
+    await loadPosts()
+    await refreshDetailIfOpen(postId)
+  } catch (error: any) {
+    ElMessage.error(error.message || '操作失败')
+  }
+}
+
+async function toggleFeature(row: any) {
+  const postId = String(row?._id || '')
+  if (!postId || row?.status === 'deleted') return
+  try {
+    if (row.isFeatured) {
+      await postAdminApi.unfeature(postId)
+      ElMessage.success('已取消精华')
+    } else {
+      await postAdminApi.feature(postId)
+      ElMessage.success('已加精')
+    }
+    await loadPosts()
+    await refreshDetailIfOpen(postId)
+  } catch (error: any) {
+    ElMessage.error(error.message || '操作失败')
   }
 }
 
@@ -541,6 +660,20 @@ function videoPrimaryText(item: any) {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.post-flags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .video-detail-list,

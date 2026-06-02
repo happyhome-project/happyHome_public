@@ -34,7 +34,7 @@
     <view v-else-if="widget.type === 'number'" class="input-wrap">
       <input
         type="number"
-        :value="String(modelValue ?? '')"
+        :value="numberInputValue"
         :placeholder="`请输入${displayLabel}`"
         placeholder-class="input-placeholder"
         class="input"
@@ -44,7 +44,7 @@
 
     <view v-else-if="widget.type === 'image_group'" class="image-uploader">
       <view
-        v-for="(img, i) in ((modelValue as string[]) ?? [])"
+        v-for="(img, i) in imageModelValue"
         :key="i"
         class="thumb-wrap"
       >
@@ -118,6 +118,13 @@ interface GeoLocationValue {
 }
 
 const displayLabel = computed(() => resolveWidgetLabel(props.widget))
+const numberInputValue = computed(() => {
+  const value = props.modelValue
+  return String(value === undefined || value === null ? '' : value)
+})
+const imageModelValue = computed<string[]>(() => (
+  Array.isArray(props.modelValue) ? props.modelValue as string[] : []
+))
 
 // datetime 控件：用 uni-datetime-picker 统一一次点开 5 列（年/月/日/时/分）
 // 存储格式保持 ISO-like "YYYY-MM-DDTHH:mm:00"（后端 validateRequiredWidgets 兼容）
@@ -166,14 +173,15 @@ function addImage() {
     count: 9,
     mediaType: ['image'],
     success: (res: any) => {
-      const current = (props.modelValue as string[]) ?? []
-      emit('update:modelValue', [...current, ...res.tempFiles.map((f: any) => f.tempFilePath)])
+      const current = Array.isArray(props.modelValue) ? props.modelValue as string[] : []
+      const files = Array.isArray(res.tempFiles) ? res.tempFiles : []
+      emit('update:modelValue', current.concat(files.map((f: any) => f.tempFilePath)))
     },
   })
 }
 
 function removeImage(index: number) {
-  const current = [...((props.modelValue as string[]) ?? [])]
+  const current = Array.isArray(props.modelValue) ? (props.modelValue as string[]).slice() : []
   current.splice(index, 1)
   emit('update:modelValue', current)
 }

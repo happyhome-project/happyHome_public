@@ -15,6 +15,8 @@ jest.mock('../../../lib/db', () => ({
 
 import {
   handleCreate,
+  handleClientLog,
+  handleDelete,
   handleGet,
   handleJoinAttendance,
   handleListAttendanceMembers,
@@ -24,6 +26,24 @@ import {
 import * as db from '../../../lib/db'
 
 beforeEach(() => jest.clearAllMocks())
+
+test('clientLog: accepts diagnostic payload without touching data collections', async () => {
+  const result = await handleClientLog({
+    level: 'info',
+    event: 'detail.load.start',
+    sessionId: 'session-1',
+    route: 'pages/detail/index',
+    build: { version: '1.0.test' },
+    details: {
+      postId: 'post-1',
+      token: 'should-not-be-logged',
+    },
+  }, 'openid-123456')
+
+  expect(result.success).toBe(true)
+  expect(db.create).not.toHaveBeenCalled()
+  expect(db.updateById).not.toHaveBeenCalled()
+})
 
 const mockSection = {
   _id: 'section-1',
@@ -377,6 +397,97 @@ test('list：非 active 成员不可查看帖子', async () => {
   ;(db.query as jest.Mock).mockResolvedValueOnce([])
 
   await expect(handleList({ sectionId: 'section-1' }, '')).rejects.toThrow('需要先加入社区后查看内容')
+})
+
+test('list：板块内置顶帖优先，其余按发布时间倒序', async () => {
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.query as jest.Mock).mockReset()
+  const sectionWithoutAttendance = {
+    ...mockSection,
+    widgets: mockSection.widgets.filter((widget) => widget.type !== 'attendance'),
+  }
+  ;(db.getById as jest.Mock).mockImplementation(async (_collectionName: string, id: string) => {
+    if (id === 'section-1') return sectionWithoutAttendance
+    if (id === 'author-1') return { _id: 'author-1', nickName: 'Author', avatarUrl: '' }
+    return null
+  })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+    .mockResolvedValueOnce([
+      {
+        _id: 'normal-new',
+        sectionId: 'section-1',
+        communityId: 'community-1',
+        authorId: 'author-1',
+        status: 'active',
+        createdAt: '2026-05-03T00:00:00.000Z',
+        content: { 'title-widget': '普通新帖' },
+      },
+      {
+        _id: 'pinned-old',
+        sectionId: 'section-1',
+        communityId: 'community-1',
+        authorId: 'author-1',
+        status: 'active',
+        isPinned: true,
+        pinnedAt: '2026-05-01T00:00:00.000Z',
+        createdAt: '2026-05-01T00:00:00.000Z',
+        content: { 'title-widget': '较早置顶帖' },
+      },
+      {
+        _id: 'pinned-new',
+        sectionId: 'section-1',
+        communityId: 'community-1',
+        authorId: 'author-1',
+        status: 'active',
+        isPinned: true,
+        pinnedAt: '2026-05-02T00:00:00.000Z',
+        createdAt: '2026-05-02T00:00:00.000Z',
+        content: { 'title-widget': '较新置顶帖' },
+      },
+      {
+        _id: 'normal-old',
+        sectionId: 'section-1',
+        communityId: 'community-1',
+        authorId: 'author-1',
+        status: 'active',
+        createdAt: '2026-05-01T00:00:00.000Z',
+        content: { 'title-widget': '普通旧帖' },
+      },
+    ])
+
+  const result = await handleList({ sectionId: 'section-1' }, 'member-openid')
+
+  expect(result.posts.map((post: any) => post._id)).toEqual([
+    'pinned-new',
+    'pinned-old',
+    'normal-new',
+    'normal-old',
+  ])
+})
+
+test('delete: clears pin and featured flags', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'post-flagged',
+    authorId: 'test-openid',
+    status: 'active',
+    isPinned: true,
+    isFeatured: true,
+  })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  const result = await handleDelete({ postId: 'post-flagged' }, 'test-openid')
+
+  expect(db.updateById).toHaveBeenCalledWith('posts', 'post-flagged', {
+    status: 'deleted',
+    isPinned: false,
+    pinnedAt: '',
+    pinnedByAccountId: '',
+    isFeatured: false,
+    featuredAt: '',
+    featuredByAccountId: '',
+  })
+  expect(result).toEqual({ success: true })
 })
 
 test('get：非 active 成员不可查看帖子详情', async () => {

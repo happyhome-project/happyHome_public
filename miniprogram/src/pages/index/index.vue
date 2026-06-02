@@ -85,6 +85,10 @@
         </view>
         <view class="live-body">
           <text class="live-t">{{ item.t }}</text>
+          <view v-if="item.isPinned || item.isFeatured" class="post-badges">
+            <text v-if="item.isPinned" class="post-badge pin">置顶</text>
+            <text v-if="item.isFeatured" class="post-badge feature">精华</text>
+          </view>
           <view class="live-m">
             <text v-for="(m, j) in item.m" :key="j" class="live-m-item">{{ m }}</text>
           </view>
@@ -153,6 +157,10 @@
           <text v-if="item.k" class="arc-k">{{ item.k }}</text>
           <view class="arc-tl">
             <text class="arc-title">{{ item.t }}</text>
+            <view v-if="item.isPinned || item.isFeatured" class="post-badges">
+              <text v-if="item.isPinned" class="post-badge pin">置顶</text>
+              <text v-if="item.isFeatured" class="post-badge feature">精华</text>
+            </view>
             <view class="arc-mm">
               <text v-if="item.contentAuthor" class="arc-content-author">{{ item.contentAuthor }}</text>
               <text v-if="item.meta" class="arc-meta" :class="{ hot: item.hot }">{{ item.meta }}</text>
@@ -178,6 +186,7 @@
 
     <!-- Foot -->
     <text class="s1-foot">— {{ kind }} · 记忆在这里 —</text>
+    <text class="build-debug">{{ debugBuildText }}</text>
 
     <!-- Community switcher modal -->
     <view v-if="showSwitcher" class="switcher-mask" @tap="showSwitcher = false">
@@ -209,6 +218,7 @@ import AppTabBar from '../../components/AppTabBar.vue'
 import LoginGuard from '../../components/LoginGuard.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary } from '../../utils/widget'
+import { clientLog, debugBuildLabel } from '../../utils/client-log'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -219,6 +229,7 @@ let queuedForcedHomeRefresh = false
 const NOTICE_PREVIEW_LIMIT = 68
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
+const debugBuildText = computed(() => debugBuildLabel())
 
 // ── Computed: masthead ──
 const communityName = computed(() => communityStore.currentCommunity?.name ?? '选择社区')
@@ -292,7 +303,16 @@ const sectionNotices = computed<SectionNotice[]>(() => {
 })
 
 // ── 实时协作区：type='realtime' && status='active' 的板块，按帖子逐条展示 ──
-interface LiveItem { ic: string; t: string; m: string[]; cta: string; sectionId: string; postId?: string }
+interface LiveItem {
+  ic: string
+  t: string
+  m: string[]
+  cta: string
+  sectionId: string
+  postId?: string
+  isPinned?: boolean
+  isFeatured?: boolean
+}
 const liveItems = computed<LiveItem[]>(() => {
   const sections = communityStore.currentSections ?? []
   const items: LiveItem[] = []
@@ -307,6 +327,8 @@ const liveItems = computed<LiveItem[]>(() => {
         cta: '进入',
         sectionId: section._id,
         postId: post._id,
+        isPinned: Boolean(post.isPinned),
+        isFeatured: Boolean(post.isFeatured),
       })
     }
   }
@@ -318,7 +340,17 @@ interface ScheduleItem { date: string; day: string; t: string; m: string; kind: 
 const scheduleItems = computed<ScheduleItem[]>(() => [])
 
 // ── 沉淀板块分组：只展示 type='evergreen' 的板块 ──
-interface ArchiveItem { k: string; t: string; contentAuthor?: string; meta?: string; hot?: boolean; when: string; postId?: string }
+interface ArchiveItem {
+  k: string
+  t: string
+  contentAuthor?: string
+  meta?: string
+  hot?: boolean
+  when: string
+  postId?: string
+  isPinned?: boolean
+  isFeatured?: boolean
+}
 interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[]; accentColor?: string }
 
 const archiveGroups = computed<ArchiveGroup[]>(() => {
@@ -341,6 +373,8 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
             hot: isPostHot(p),
             when: formatTime(p.createdAt),
             postId: p._id,
+            isPinned: Boolean(p.isPinned),
+            isFeatured: Boolean(p.isFeatured),
           }
         }),
       }
@@ -441,7 +475,17 @@ function formatTime(iso?: string): string {
 // ── Actions ──
 function onLiveTap(item: LiveItem) {
   if (item.postId) {
-    uni.navigateTo({ url: `/pages/detail/index?postId=${item.postId}` })
+    const url = `/pages/detail/index?postId=${item.postId}`
+    clientLog('info', 'home.live.tap', {
+      postId: item.postId,
+      sectionId: item.sectionId,
+      url,
+    })
+    uni.navigateTo({
+      url,
+      success: () => clientLog('info', 'home.live.navigate.success', { postId: item.postId, url }),
+      fail: (error) => clientLog('error', 'home.live.navigate.fail', { postId: item.postId, url, error }),
+    })
   }
 }
 
@@ -451,13 +495,30 @@ function onGroupHeaderTap(_g: ArchiveGroup) {
 
 function onPostTap(item: ArchiveItem) {
   if (item.postId) {
-    uni.navigateTo({ url: `/pages/detail/index?postId=${item.postId}` })
+    const url = `/pages/detail/index?postId=${item.postId}`
+    clientLog('info', 'home.archive.tap', {
+      postId: item.postId,
+      title: item.t,
+      url,
+    })
+    uni.navigateTo({
+      url,
+      success: () => clientLog('info', 'home.archive.navigate.success', { postId: item.postId, url }),
+      fail: (error) => clientLog('error', 'home.archive.navigate.fail', { postId: item.postId, url, error }),
+    })
   }
 }
 
 function openNotice(notice: SectionNotice) {
+  const url = `/pages/notice/index?sectionId=${encodeURIComponent(notice.sectionId)}&widgetId=${encodeURIComponent(notice.widgetId)}`
+  clientLog('info', 'home.notice.tap', {
+    sectionId: notice.sectionId,
+    widgetId: notice.widgetId,
+    url,
+  })
   uni.navigateTo({
-    url: `/pages/notice/index?sectionId=${encodeURIComponent(notice.sectionId)}&widgetId=${encodeURIComponent(notice.widgetId)}`,
+    url,
+    fail: (error) => clientLog('error', 'home.notice.navigate.fail', { sectionId: notice.sectionId, widgetId: notice.widgetId, error }),
   })
 }
 
@@ -474,12 +535,32 @@ async function switchCommunity(communityId: string) {
 async function loadAllSectionPosts() {
   const sections = communityStore.currentSections ?? []
   const results: Record<string, any[]> = {}
+  clientLog('info', 'home.sections.posts.load.start', {
+    sectionCount: sections.length,
+    communityId: communityStore.currentCommunityId || '',
+  })
   await Promise.all(
     sections.map(async (section) => {
       try {
+        clientLog('debug', 'home.section.posts.load.start', {
+          sectionId: section._id,
+          sectionName: section.name,
+          sectionType: section.type || '',
+          sectionStatus: section.status || '',
+        })
         const res = await postApi.list(section._id, 0)
         results[section._id] = res.posts ?? []
+        clientLog('debug', 'home.section.posts.load.success', {
+          sectionId: section._id,
+          postCount: results[section._id].length,
+          firstPostId: results[section._id][0]?._id || '',
+        })
       } catch (error: any) {
+        clientLog('error', 'home.section.posts.load.fail', {
+          sectionId: section._id,
+          sectionName: section.name,
+          error,
+        })
         if (error?.message?.includes('需要先加入社区后查看内容')) {
           communityStore.clearCommunityState()
           uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
@@ -491,6 +572,11 @@ async function loadAllSectionPosts() {
     })
   )
   postsBySection.value = results
+  clientLog('info', 'home.sections.posts.load.done', {
+    sectionCount: sections.length,
+    resultSectionCount: Object.keys(results).length,
+    totalPosts: Object.keys(results).reduce((sum, key) => sum + (results[key]?.length || 0), 0),
+  })
 }
 
 function getPendingHomeRefreshMarker() {
@@ -516,26 +602,48 @@ function clearHomeRefreshMarker() {
 
 async function refreshHomeData(options: { force?: boolean } = {}) {
   const force = options.force === true
+  clientLog('info', 'home.refresh.start', {
+    force,
+    loggedIn: userStore.isLoggedIn,
+    currentCommunityId: communityStore.currentCommunityId || '',
+  })
   if (refreshingHome) {
     if (force) queuedForcedHomeRefresh = true
+    clientLog('warn', 'home.refresh.skip.busy', {
+      force,
+      queuedForcedHomeRefresh,
+    })
     return
   }
   if (!userStore.isLoggedIn) {
     communityStore.clearCommunityState()
     communityStore.myCommunities = []
     postsBySection.value = {}
+    clientLog('warn', 'home.refresh.skip.loggedOut', {})
     return
   }
   refreshingHome = true
   try {
     await communityStore.loadMyCommunities()
+    clientLog('info', 'home.communities.load.success', {
+      communityCount: communityStore.myCommunities.length,
+      currentCommunityId: communityStore.currentCommunityId || '',
+    })
     if (communityStore.myCommunities.length === 0) {
       postsBySection.value = {}
+      clientLog('warn', 'home.communities.empty.relaunchOnboarding', {})
       uni.reLaunch({ url: '/pages/onboarding/index' })
       return
     }
     await loadAllSectionPosts()
     if (force) clearHomeRefreshMarker()
+    clientLog('info', 'home.refresh.success', {
+      force,
+      currentCommunityId: communityStore.currentCommunityId || '',
+    })
+  } catch (error) {
+    clientLog('error', 'home.refresh.fail', { force, error })
+    throw error
   } finally {
     refreshingHome = false
   }
@@ -547,6 +655,7 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
 
 onMounted(async () => {
   hideNativeTabBar()
+  clientLog('info', 'home.mounted', {})
   await refreshHomeData()
 })
 
@@ -555,7 +664,12 @@ onMounted(async () => {
 // 首次 onShow 发生在 onMounted 之后，会二次拉取（可接受：代价低、换取数据新鲜度）。
 onShow(() => {
   hideNativeTabBar()
-  void refreshHomeData({ force: !!getPendingHomeRefreshMarker() })
+  const marker = getPendingHomeRefreshMarker()
+  clientLog('info', 'home.show', {
+    hasPendingRefreshMarker: !!marker,
+    marker,
+  })
+  void refreshHomeData({ force: !!marker })
 })
 </script>
 
@@ -855,6 +969,33 @@ onShow(() => {
 .live-m-item {
   font-family: inherit;
 }
+.post-badges {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  flex-wrap: wrap;
+  margin-top: 6rpx;
+}
+.post-badge {
+  font-family: $hh-font-mono;
+  font-size: 18rpx;
+  line-height: 1;
+  padding: 5rpx 8rpx;
+  border-radius: $hh-radius-full;
+  border: 1rpx solid $hh-ink-line;
+  color: $hh-ink-3;
+  background: $hh-surface-1;
+}
+.post-badge.pin {
+  color: #8a5a00;
+  border-color: #ead3a2;
+  background: #fff6dc;
+}
+.post-badge.feature {
+  color: #9a3a2f;
+  border-color: #e8b7af;
+  background: #fff1ee;
+}
 .live-cta {
   flex-shrink: 0;
   font-family: $hh-font-mono;
@@ -1141,6 +1282,17 @@ onShow(() => {
   text-transform: uppercase;
   color: $hh-ink-4;
   display: block;
+}
+
+.build-debug {
+  display: block;
+  padding: 0 32rpx 36rpx;
+  text-align: center;
+  font-family: $hh-font-mono;
+  font-size: 18rpx;
+  color: $hh-ink-4;
+  opacity: 0.7;
+  word-break: break-all;
 }
 
 /* ═══ Switcher ═══ */

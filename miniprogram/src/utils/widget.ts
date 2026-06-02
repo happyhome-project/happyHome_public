@@ -111,7 +111,7 @@ function isFamilyLetterSection(section: Section): boolean {
 }
 
 function findWidgetByLabel(section: Section, labels: string[]) {
-  return [...(section.widgets || [])]
+  return (section.widgets || []).slice()
     .sort((a, b) => a.order - b.order)
     .find((widget) => {
       const label = String(widget.label || '').replace(/\s/g, '')

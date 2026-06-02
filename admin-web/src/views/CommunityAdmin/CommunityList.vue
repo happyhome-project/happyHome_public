@@ -23,19 +23,58 @@
       </el-select>
     </div>
 
-    <el-table data-testid="community-table" :data="filteredCommunities" v-loading="loading" style="width: 100%">
-      <el-table-column prop="name" label="社区名称" min-width="180" />
-      <el-table-column prop="description" label="描述" min-width="220" show-overflow-tooltip />
-      <el-table-column label="格言" min-width="220" show-overflow-tooltip>
+    <el-table
+      data-testid="community-table"
+      :data="filteredCommunities"
+      v-loading="loading"
+      border
+      style="width: 100%"
+      @header-dragend="handleColumnDragEnd"
+    >
+      <el-table-column
+        prop="name"
+        column-key="name"
+        label="社区名称"
+        :width="columnWidths.name"
+        min-width="180"
+        :resizable="true"
+      />
+      <el-table-column
+        prop="description"
+        column-key="description"
+        label="描述"
+        :width="columnWidths.description"
+        min-width="220"
+        :resizable="true"
+      >
         <template #default="{ row }">
-          <span v-if="row.motto">
-            "{{ row.motto }}"
-            <span v-if="row.mottoCite" style="color: #909399; margin-left: 6px;">- {{ row.mottoCite }}</span>
-          </span>
-          <span v-else style="color: #c0c4cc;">未设置</span>
+          <div data-testid="community-description-cell" class="wrapping-table-cell">
+            {{ row.description || '未设置' }}
+          </div>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="120">
+      <el-table-column
+        column-key="motto"
+        label="格言"
+        :width="columnWidths.motto"
+        min-width="220"
+        :resizable="true"
+      >
+        <template #default="{ row }">
+          <div v-if="row.motto" data-testid="community-motto-cell" class="wrapping-table-cell">
+            "{{ row.motto }}"
+            <span v-if="row.mottoCite" style="color: #909399; margin-left: 6px;">- {{ row.mottoCite }}</span>
+          </div>
+          <div v-else data-testid="community-motto-cell" class="wrapping-table-cell muted-table-cell">未设置</div>
+        </template>
+      </el-table-column>
+      <el-table-column
+        column-key="status"
+        label="状态"
+        :width="columnWidths.status"
+        min-width="110"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <el-tag v-if="row.status === 'active'" type="success">已启用</el-tag>
           <el-tag v-else-if="row.status === 'pending'" type="warning">待审批</el-tag>
@@ -44,15 +83,34 @@
           <el-tag v-else type="info">{{ row.status }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="加入方式" width="120">
+      <el-table-column
+        column-key="joinType"
+        label="加入方式"
+        :width="columnWidths.joinType"
+        min-width="120"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <el-tag :type="normalizeJoinType(row.joinType) === 'open' ? 'success' : 'warning'">
             {{ formatJoinType(row.joinType) }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="memberCount" label="成员数" width="100" />
-      <el-table-column label="待审批成员" width="120">
+      <el-table-column
+        prop="memberCount"
+        column-key="memberCount"
+        label="成员数"
+        :width="columnWidths.memberCount"
+        min-width="100"
+        :resizable="true"
+      />
+      <el-table-column
+        column-key="pendingMemberCount"
+        label="待审批成员"
+        :width="columnWidths.pendingMemberCount"
+        min-width="120"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <el-button
             v-if="getPendingMemberCount(row) > 0"
@@ -65,7 +123,13 @@
           <span v-else style="color: #c0c4cc;">0</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="520">
+      <el-table-column
+        column-key="actions"
+        label="操作"
+        :width="columnWidths.actions"
+        min-width="520"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <template v-if="row.status === 'active'">
             <el-button data-testid="community-sections-button" :data-community-id="getCommunityId(row)" size="small" @click="goSections(getCommunityId(row))">板块管理</el-button>
@@ -156,6 +220,39 @@ const keyword = ref('')
 const statusFilter = ref<'all' | 'active' | 'pending' | 'rejected'>('all')
 const pendingMemberCountByCommunity = ref<Record<string, number>>({})
 type JoinType = 'open' | 'approval'
+type CommunityTableColumnKey =
+  | 'name'
+  | 'description'
+  | 'motto'
+  | 'status'
+  | 'joinType'
+  | 'memberCount'
+  | 'pendingMemberCount'
+  | 'actions'
+
+const COMMUNITY_TABLE_COLUMN_WIDTHS_KEY = 'happyhome.admin.communityTable.columnWidths.v1'
+const COMMUNITY_TABLE_DEFAULT_COLUMN_WIDTHS: Record<CommunityTableColumnKey, number> = {
+  name: 180,
+  description: 260,
+  motto: 260,
+  status: 120,
+  joinType: 120,
+  memberCount: 100,
+  pendingMemberCount: 120,
+  actions: 520,
+}
+const COMMUNITY_TABLE_MIN_COLUMN_WIDTHS: Record<CommunityTableColumnKey, number> = {
+  name: 160,
+  description: 220,
+  motto: 220,
+  status: 110,
+  joinType: 120,
+  memberCount: 100,
+  pendingMemberCount: 120,
+  actions: 520,
+}
+
+const columnWidths = ref<Record<CommunityTableColumnKey, number>>(loadCommunityColumnWidths())
 const mottoForm = ref<{ communityId: string; motto: string; mottoCite: string }>({
   communityId: '',
   motto: '',
@@ -175,6 +272,50 @@ const filteredCommunities = computed(() => {
 onMounted(() => {
   loadCommunities()
 })
+
+function isCommunityTableColumnKey(value: unknown): value is CommunityTableColumnKey {
+  return typeof value === 'string' && value in COMMUNITY_TABLE_DEFAULT_COLUMN_WIDTHS
+}
+
+function normalizeCommunityColumnWidths(value: unknown): Record<CommunityTableColumnKey, number> {
+  const result = { ...COMMUNITY_TABLE_DEFAULT_COLUMN_WIDTHS }
+  if (!value || typeof value !== 'object') return result
+
+  for (const key of Object.keys(COMMUNITY_TABLE_DEFAULT_COLUMN_WIDTHS) as CommunityTableColumnKey[]) {
+    const rawWidth = Number((value as Record<string, unknown>)[key])
+    if (Number.isFinite(rawWidth)) {
+      result[key] = Math.max(COMMUNITY_TABLE_MIN_COLUMN_WIDTHS[key], Math.round(rawWidth))
+    }
+  }
+  return result
+}
+
+function loadCommunityColumnWidths(): Record<CommunityTableColumnKey, number> {
+  if (typeof window === 'undefined') return { ...COMMUNITY_TABLE_DEFAULT_COLUMN_WIDTHS }
+  try {
+    return normalizeCommunityColumnWidths(
+      JSON.parse(window.localStorage.getItem(COMMUNITY_TABLE_COLUMN_WIDTHS_KEY) || '{}')
+    )
+  } catch {
+    return { ...COMMUNITY_TABLE_DEFAULT_COLUMN_WIDTHS }
+  }
+}
+
+function saveCommunityColumnWidths(widths: Record<CommunityTableColumnKey, number>) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(COMMUNITY_TABLE_COLUMN_WIDTHS_KEY, JSON.stringify(widths))
+}
+
+function handleColumnDragEnd(newWidth: number, _oldWidth: number, column: any) {
+  const key = column?.columnKey || column?.property
+  if (!isCommunityTableColumnKey(key) || !Number.isFinite(Number(newWidth))) return
+  const next = {
+    ...columnWidths.value,
+    [key]: Math.max(COMMUNITY_TABLE_MIN_COLUMN_WIDTHS[key], Math.round(Number(newWidth))),
+  }
+  columnWidths.value = next
+  saveCommunityColumnWidths(next)
+}
 
 async function loadCommunities() {
   loading.value = true
@@ -346,3 +487,17 @@ async function disableCommunity(row: any) {
   }
 }
 </script>
+
+<style scoped>
+.wrapping-table-cell {
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+  padding: 2px 0;
+}
+
+.muted-table-cell {
+  color: #c0c4cc;
+}
+</style>

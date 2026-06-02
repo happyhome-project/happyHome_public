@@ -39,6 +39,21 @@ async function ensureActiveCommunityMember(communityId: string, userId: string) 
   if (!members || members.length === 0) throw new Error(COMMUNITY_READ_ERROR)
 }
 
+function timeValue(value: unknown): number {
+  const timestamp = Date.parse(String(value || ''))
+  return Number.isNaN(timestamp) ? 0 : timestamp
+}
+
+function comparePostListOrder(a: any, b: any): number {
+  const pinnedDiff = Number(Boolean(b?.isPinned)) - Number(Boolean(a?.isPinned))
+  if (pinnedDiff !== 0) return pinnedDiff
+  if (a?.isPinned && b?.isPinned) {
+    const pinnedTimeDiff = timeValue(b?.pinnedAt || b?.createdAt) - timeValue(a?.pinnedAt || a?.createdAt)
+    if (pinnedTimeDiff !== 0) return pinnedTimeDiff
+  }
+  return timeValue(b?.createdAt) - timeValue(a?.createdAt)
+}
+
 async function getUsersByIds(userIds: string[]) {
   const usersById: Record<string, any> = {}
   for (const userId of Array.from(new Set(userIds.filter(Boolean)))) {
@@ -204,6 +219,8 @@ export async function handleCreate(
     content: sanitizedContent,
     commentCount: 0,
     likeCount: 0,
+    isPinned: false,
+    isFeatured: false,
     createdAt: now,
     updatedAt: now,
   })
@@ -223,10 +240,10 @@ export async function handleList(params: {
     status: 'active',
   }, {
     orderBy: ['createdAt', 'desc'],
-    skip: params.skip ?? 0,
-    limit: params.limit ?? 20,
   })
-  const withAttendance = await enrichPostsWithAttendance(posts as any[], { [params.sectionId]: section }, openid)
+  const orderedPosts = (posts as any[]).slice().sort(comparePostListOrder)
+  const slicedPosts = orderedPosts.slice(params.skip ?? 0, (params.skip ?? 0) + (params.limit ?? 20))
+  const withAttendance = await enrichPostsWithAttendance(slicedPosts, { [params.sectionId]: section }, openid)
   const enrichedPosts = await enrichPostsWithAuthor(withAttendance)
   return { posts: enrichedPosts }
 }
@@ -248,7 +265,15 @@ export async function handleDelete(params: { postId: string }, openid: string) {
   if (post.status === 'deleted') throw new Error('帖子已删除')
   if (post.authorId !== openid) throw new Error('无权删除')
 
-  await db.softDelete('posts', params.postId)
+  await db.updateById('posts', params.postId, {
+    status: 'deleted',
+    isPinned: false,
+    pinnedAt: '',
+    pinnedByAccountId: '',
+    isFeatured: false,
+    featuredAt: '',
+    featuredByAccountId: '',
+  })
   return { success: true }
 }
 
@@ -377,9 +402,45 @@ export async function handleGetMediaUrl(params: { fileID?: string }) {
   return { url }
 }
 
+function sanitizeClientLogValue(value: any, depth = 0): any {
+  if (value === null || value === undefined) return value
+  const valueType = typeof value
+  if (valueType === 'string') return value.length > 700 ? `${value.slice(0, 700)}...` : value
+  if (valueType === 'number' || valueType === 'boolean') return value
+  if (valueType === 'function') return '[function]'
+  if (depth >= 4) return '[max-depth]'
+  if (Array.isArray(value)) return value.slice(0, 20).map((item) => sanitizeClientLogValue(item, depth + 1))
+  if (valueType === 'object') {
+    const output: Record<string, any> = {}
+    for (const key of Object.keys(value).slice(0, 40)) {
+      output[key] = /token|secret|password|authorization|cookie/i.test(key)
+        ? '[redacted]'
+        : sanitizeClientLogValue(value[key], depth + 1)
+    }
+    return output
+  }
+  return String(value)
+}
+
+export async function handleClientLog(params: any, openid?: string) {
+  const payload = sanitizeClientLogValue({
+    openidTail: openid ? String(openid).slice(-6) : '',
+    level: params.level || 'info',
+    event: params.event || '',
+    sessionId: params.sessionId || '',
+    route: params.route || '',
+    clientTime: params.clientTime || '',
+    build: params.build || {},
+    details: params.details || {},
+  })
+  console.log('[clientLog]', JSON.stringify(payload))
+  return { success: true, receivedAt: new Date().toISOString() }
+}
+
 export const main = async (event: any) => {
   const openid = resolveOpenId(event)
   const { action, _testOpenid, ...params } = event
+  if (action === 'clientLog') return handleClientLog(params, openid)
   if (action === 'create') return handleCreate(params, openid)
   if (action === 'list') return handleList(params, openid)
   if (action === 'get') return handleGet(params, openid)

@@ -14,8 +14,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { isRichNoteEmpty, markdownToHtml, normalizeRichNoteContent } from '../../utils/rich-note'
+import { clientLog } from '../../utils/client-log'
 
 type RenderBlock =
   | { type: 'html'; html: string }
@@ -57,6 +58,22 @@ function previewImage(current: string) {
   if (urls.length === 0) return
   uni.previewImage({ current, urls })
 }
+
+function logRichNote(stage: string) {
+  clientLog('debug', 'richNote.render.' + stage, {
+    hasContent: hasContent.value,
+    blockCount: blocks.value.length,
+    markdownLength: content.value.markdown ? content.value.markdown.length : 0,
+  })
+}
+
+onMounted(() => {
+  logRichNote('mounted')
+})
+
+watch(hasContent, () => {
+  logRichNote('hasContentChanged')
+})
 </script>
 
 <style lang="scss" scoped>
