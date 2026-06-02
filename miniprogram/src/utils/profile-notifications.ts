@@ -57,12 +57,32 @@ export function areAllNotificationTemplatesAccepted(
   )
 }
 
+export function hasAnyNotificationTemplateAccepted(
+  templates: ProfileNotificationTemplate[],
+  subscriptions: ProfileNotificationSubscription[],
+) {
+  return templates.some(
+    (item) => subscriptionStatusLabel(subscriptions, item.eventType, item.templateId) === '已开启',
+  )
+}
+
+export function getApplicationNotificationStatusText(
+  templates: ProfileNotificationTemplate[],
+  subscriptions: ProfileNotificationSubscription[],
+) {
+  if (hasAnyNotificationTemplateAccepted(templates, subscriptions)) return '已开启'
+  const hasAnySavedStatus = templates.some(
+    (item) => subscriptions.some((sub) => sub.eventType === item.eventType && sub.templateId === item.templateId),
+  )
+  return hasAnySavedStatus ? '未授权' : '未开启'
+}
+
 export function getNotificationSubscribeButtonText(
   isBusy: boolean,
   templates: ProfileNotificationTemplate[],
   subscriptions: ProfileNotificationSubscription[],
 ) {
   if (isBusy) return '开启中...'
-  if (areAllNotificationTemplatesAccepted(templates, subscriptions)) return '审批提醒已开启'
-  return '接收审批提醒'
+  if (hasAnyNotificationTemplateAccepted(templates, subscriptions)) return '申请通知已开启'
+  return '接收申请通知'
 }

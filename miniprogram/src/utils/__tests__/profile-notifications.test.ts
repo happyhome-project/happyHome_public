@@ -1,14 +1,15 @@
 import { describe, expect, test } from 'vitest'
 import {
   areAllNotificationTemplatesAccepted,
+  getApplicationNotificationStatusText,
   getNotificationSubscribeButtonText,
   mergeNotificationSubscribeResult,
   subscriptionStatusLabel,
 } from '../profile-notifications'
 
 const templates = [
-  { eventType: 'member_join_pending' as const, label: '成员加入申请', templateId: 'tmpl-member' },
-  { eventType: 'community_create_pending' as const, label: '社区创建申请', templateId: 'tmpl-community' },
+  { eventType: 'member_join_pending' as const, templateId: 'tmpl-member' },
+  { eventType: 'community_create_pending' as const, templateId: 'tmpl-community' },
 ]
 
 describe('profile notification helpers', () => {
@@ -32,24 +33,33 @@ describe('profile notification helpers', () => {
     ])
   })
 
-  test('changes button text once every configured template is accepted', () => {
+  test('shows one application notification status without exposing individual template names', () => {
     const accepted = mergeNotificationSubscribeResult([], templates, {
-      'tmpl-member': 'accept',
-      'tmpl-community': 'accept',
-    })
-
-    expect(areAllNotificationTemplatesAccepted(templates, accepted)).toBe(true)
-    expect(getNotificationSubscribeButtonText(false, templates, accepted)).toBe('审批提醒已开启')
-  })
-
-  test('keeps pending button text while any template is missing or rejected', () => {
-    const partial = mergeNotificationSubscribeResult([], templates, {
       'tmpl-member': 'accept',
       'tmpl-community': 'reject',
     })
 
+    expect(getApplicationNotificationStatusText(templates, accepted)).toBe('已开启')
+  })
+
+  test('changes button text once any configured application notification template is accepted', () => {
+    const accepted = mergeNotificationSubscribeResult([], templates, {
+      'tmpl-member': 'accept',
+      'tmpl-community': 'reject',
+    })
+
+    expect(areAllNotificationTemplatesAccepted(templates, accepted)).toBe(false)
+    expect(getNotificationSubscribeButtonText(false, templates, accepted)).toBe('申请通知已开启')
+  })
+
+  test('keeps pending button text while any template is missing or rejected', () => {
+    const partial = mergeNotificationSubscribeResult([], templates, {
+      'tmpl-member': 'reject',
+      'tmpl-community': 'reject',
+    })
+
     expect(areAllNotificationTemplatesAccepted(templates, partial)).toBe(false)
-    expect(getNotificationSubscribeButtonText(false, templates, partial)).toBe('接收审批提醒')
+    expect(getNotificationSubscribeButtonText(false, templates, partial)).toBe('接收申请通知')
     expect(getNotificationSubscribeButtonText(true, templates, partial)).toBe('开启中...')
   })
 })
