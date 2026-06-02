@@ -36,6 +36,12 @@ List Mini Program customer-service accounts:
 npm --prefix wechat-ops run kf:list
 ```
 
+List currently online Mini Program customer-service accounts:
+
+```bash
+npm --prefix wechat-ops run kf:online
+```
+
 Add a Mini Program customer-service account:
 
 ```bash

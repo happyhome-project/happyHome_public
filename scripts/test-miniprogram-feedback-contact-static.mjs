@@ -21,7 +21,7 @@ assert(
   'feedback contact should send a message card for context',
 )
 assert(
-  source.includes('send-message-title="HappyHome \u4f7f\u7528\u53cd\u9988"'),
+  source.includes('send-message-title="HappyHome 使用反馈"'),
   'feedback contact should use a clear message card title',
 )
 assert(
@@ -29,7 +29,7 @@ assert(
   'feedback contact message card should point back to the profile page',
 )
 assert(
-  source.includes('\u7559\u8a00\u53cd\u9988'),
+  source.includes('留言反馈'),
   'feedback contact button should use the agreed user-facing label',
 )
 

@@ -1,6 +1,11 @@
 jest.mock('wx-server-sdk', () => ({
   init: jest.fn(),
   getWXContext: jest.fn().mockReturnValue({ OPENID: 'test-openid' }),
+  openapi: {
+    subscribeMessage: {
+      send: jest.fn(),
+    },
+  },
   DYNAMIC_CURRENT_ENV: 'test',
 }))
 jest.mock('../../../lib/db', () => ({
@@ -25,8 +30,14 @@ import {
   main,
 } from '../index'
 import * as db from '../../../lib/db'
+import cloud from 'wx-server-sdk'
 
-beforeEach(() => jest.clearAllMocks())
+beforeEach(() => {
+  jest.resetAllMocks()
+  ;(cloud.getWXContext as jest.Mock).mockReturnValue({ OPENID: 'test-openid' })
+  delete process.env.APPROVAL_MEMBER_JOIN_TEMPLATE_ID
+  delete process.env.APPROVAL_MEMBER_JOIN_TEMPLATE_FIELDS
+})
 
 test('申请加入开放社区：直接创建 active 记录并递增 memberCount', async () => {
   ;(db.query as jest.Mock).mockResolvedValueOnce([]) // no existing active member
@@ -56,6 +67,91 @@ test('申请加入审批社区：创建 pending 记录，不递增 memberCount',
   }))
   expect(db.increment).not.toHaveBeenCalled()
   expect(result.status).toBe('pending')
+})
+
+test('申请加入审批社区：创建成员审批通知记录，不因通知未配置而阻断申请', async () => {
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([]) // no existing active member
+    .mockResolvedValueOnce([]) // no existing pending member
+    .mockResolvedValueOnce([{ userId: 'community-admin', role: 'admin', status: 'active' }])
+    .mockResolvedValueOnce([{ userId: 'super-admin', role: 'superAdmin', status: 'active' }])
+    .mockResolvedValue([]) // subscription lookups
+  ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'c1', name: '青山村', joinType: 'approval' })
+  ;(db.create as jest.Mock).mockResolvedValue('member-1')
+
+  const result = await handleApply({ communityId: 'c1' }, 'applicant-openid')
+
+  expect(result.status).toBe('pending')
+  expect(db.create).toHaveBeenCalledWith('admin_notifications', expect.objectContaining({
+    eventType: 'member_join_pending',
+    communityId: 'c1',
+    recipientUserId: 'community-admin',
+    status: 'skipped',
+  }))
+  expect(db.create).toHaveBeenCalledWith('admin_notifications', expect.objectContaining({
+    eventType: 'member_join_pending',
+    communityId: 'c1',
+    recipientUserId: 'super-admin',
+    status: 'skipped',
+  }))
+})
+
+test('通知订阅：保存当前管理员的审批提醒订阅状态', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([])
+  ;(db.create as jest.Mock).mockResolvedValue('sub-1')
+
+  const result = await main({
+    action: 'saveNotificationSubscription',
+    eventType: 'member_join_pending',
+    templateId: 'tmpl-member',
+    status: 'accept',
+  })
+
+  expect(db.create).toHaveBeenCalledWith('admin_notification_subscriptions', expect.objectContaining({
+    userId: 'test-openid',
+    eventType: 'member_join_pending',
+    templateId: 'tmpl-member',
+    status: 'accept',
+  }))
+  expect(result).toEqual({ success: true })
+})
+
+test('成员申请通知：按 env 字段映射发送订阅消息', async () => {
+  process.env.APPROVAL_MEMBER_JOIN_TEMPLATE_ID = 'tmpl-member'
+  process.env.APPROVAL_MEMBER_JOIN_TEMPLATE_FIELDS = JSON.stringify({
+    communityName: 'thing5',
+    action: 'thing6',
+    time: 'time7',
+    status: 'phrase8',
+  })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([]) // no existing active member
+    .mockResolvedValueOnce([]) // no existing pending member
+    .mockResolvedValueOnce([{ userId: 'community-admin', role: 'admin', status: 'active' }])
+    .mockResolvedValueOnce([]) // no super admins
+    .mockResolvedValueOnce([{ _id: 'sub-1', status: 'accept' }])
+  ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'c1', name: '青山村', joinType: 'approval' })
+  ;(db.create as jest.Mock).mockResolvedValue('member-1')
+  ;((cloud as any).openapi.subscribeMessage.send as jest.Mock).mockResolvedValue({})
+
+  const result = await handleApply({ communityId: 'c1' }, 'applicant-openid')
+
+  expect(result.status).toBe('pending')
+  expect((cloud as any).openapi.subscribeMessage.send).toHaveBeenCalledWith(expect.objectContaining({
+    touser: 'community-admin',
+    templateId: 'tmpl-member',
+    data: expect.objectContaining({
+      thing5: { value: '青山村' },
+      thing6: { value: '成员加入申请' },
+      time7: expect.objectContaining({ value: expect.any(String) }),
+      phrase8: { value: '待审批' },
+    }),
+  }))
+  expect(db.create).toHaveBeenCalledWith('admin_notifications', expect.objectContaining({
+    eventType: 'member_join_pending',
+    status: 'sent',
+    templateId: 'tmpl-member',
+  }))
 })
 
 test('申请加入：已是成员时抛出错误', async () => {

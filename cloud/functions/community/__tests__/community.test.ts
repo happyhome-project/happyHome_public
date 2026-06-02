@@ -14,8 +14,12 @@ jest.mock('../../../lib/db', () => ({
 
 import { handleCreate, handleApprove, handleReject, handleList, handleGet, handleListDiscoverable, main } from '../index'
 import * as db from '../../../lib/db'
+import cloud from 'wx-server-sdk'
 
-beforeEach(() => jest.clearAllMocks())
+beforeEach(() => {
+  jest.resetAllMocks()
+  ;(cloud.getWXContext as jest.Mock).mockReturnValue({ OPENID: 'test-openid' })
+})
 
 test('创建社区：status 默认为 pending，creatorId 为 OPENID', async () => {
   ;(db.create as jest.Mock).mockResolvedValue('community-123')
@@ -53,6 +57,29 @@ test('创建社区：同时为创建者创建 admin 成员记录', async () => {
     userId: 'test-openid',
     role: 'admin',
     status: 'active',
+  }))
+})
+
+test('创建社区：创建社区审批通知记录给 superAdmin，不因通知未配置而阻断创建', async () => {
+  ;(db.create as jest.Mock).mockResolvedValue('community-123')
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([{ userId: 'super-admin', role: 'superAdmin', status: 'active' }])
+    .mockResolvedValue([]) // subscription lookups
+
+  const result = await handleCreate({
+    name: '测试社区',
+    description: '描述',
+    coverImage: '',
+    location: { address: '北京', lat: 39.9, lng: 116.3 },
+    joinType: 'open',
+  }, 'creator-openid')
+
+  expect(result.communityId).toBe('community-123')
+  expect(db.create).toHaveBeenCalledWith('admin_notifications', expect.objectContaining({
+    eventType: 'community_create_pending',
+    communityId: 'community-123',
+    recipientUserId: 'super-admin',
+    status: 'skipped',
   }))
 })
 

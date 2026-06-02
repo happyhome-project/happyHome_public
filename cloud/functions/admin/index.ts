@@ -75,7 +75,7 @@ const SUPER_ADMIN_ONLY: Array<string | RegExp> = [
   'community.hardDelete',
   'community.listDisabled',
   'user.setSuperAdmin',
-  /^admin\./,
+  /^admin\.(?!approvalSummary$)/,
 ]
 // 这些 action 需要校验对 communityId 的归属（superAdmin 自动放行）
 const COMMUNITY_SCOPED_ACTIONS = new Set([
@@ -414,6 +414,47 @@ async function listCreatorCommunities(userId: string): Promise<Community[]> {
   return (await db.query('communities', { creatorId: userId })) as Community[]
 }
 
+async function listApprovalSummaryCommunities(ctx: AdminCtx): Promise<Community[]> {
+  if (ctx.role === 'superAdmin') {
+    return (await db.query('communities', { status: 'active' }, { orderBy: ['createdAt', 'desc'] })) as Community[]
+  }
+  const ownedIds = await listOwnedCommunityIds(ctx.userId)
+  if (ownedIds.length === 0) return []
+  const docs = await Promise.all(ownedIds.map((id) => db.getById('communities', id).catch(() => null)))
+  return (docs.filter(Boolean) as Community[]).filter((community) => community.status === 'active')
+}
+
+async function buildApprovalSummary(ctx: AdminCtx) {
+  const [pendingCommunities, manageableCommunities] = await Promise.all([
+    ctx.role === 'superAdmin'
+      ? db.query('communities', { status: 'pending' }, { orderBy: ['createdAt', 'desc'] }) as Promise<Community[]>
+      : Promise.resolve([]),
+    listApprovalSummaryCommunities(ctx),
+  ])
+
+  const communities = []
+  let pendingMemberCount = 0
+  for (const community of manageableCommunities) {
+    const members = (await db.query('community_members', {
+      communityId: community._id,
+      status: 'pending',
+    })) as any[]
+    if (!Array.isArray(members) || members.length === 0) continue
+    pendingMemberCount += members.length
+    communities.push({
+      communityId: community._id,
+      communityName: community.name,
+      pendingMemberCount: members.length,
+    })
+  }
+
+  return {
+    pendingCommunityCount: pendingCommunities.length,
+    pendingMemberCount,
+    communities,
+  }
+}
+
 async function createSessionForAccount(account: AdminAccount): Promise<{ token: string; expiresAt: string }> {
   const token = generateSessionToken()
   const now = Date.now()
@@ -662,6 +703,9 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     }
     return { success: true }
   }
+  if (action === 'admin.approvalSummary') {
+    return buildApprovalSummary(ctx)
+  }
 
   if (action === 'user.setSuperAdmin') {
     const openId = String(params.openId || '').trim()
@@ -716,6 +760,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       coverImage: String(params.coverImage || ''),
       location: params.location,
       joinType: params.joinType === 'approval' ? 'approval' : 'open',
+      suppressNotification: ctx.role === 'superAdmin',
     }, ctx.userId)
     // superAdmin 创建的社区可直接 active
     if (ctx.role === 'superAdmin') {

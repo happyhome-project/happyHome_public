@@ -25,7 +25,56 @@ jest.mock('uuid', () => ({
 import { main } from '../index'
 import * as db from '../../../lib/db'
 
-beforeEach(() => jest.clearAllMocks())
+beforeEach(() => jest.resetAllMocks())
+
+test('admin.approvalSummary: superAdmin 返回社区创建和成员加入待办数', async () => {
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([
+      { _id: 'pending-community-1', name: '待审社区', status: 'pending' },
+    ])
+    .mockResolvedValueOnce([
+      { _id: 'community-1', name: '青山村', status: 'active' },
+      { _id: 'community-2', name: '明士班', status: 'active' },
+    ])
+    .mockResolvedValueOnce([
+      { _id: 'member-1', status: 'pending' },
+      { _id: 'member-2', status: 'pending' },
+    ])
+    .mockResolvedValueOnce([])
+
+  const result: any = await main({
+    action: 'admin.approvalSummary',
+    _actAs: { accountId: 'super-1', role: 'superAdmin', userId: 'boss-openid', username: 'boss' },
+  })
+
+  expect(result.pendingCommunityCount).toBe(1)
+  expect(result.pendingMemberCount).toBe(2)
+  expect(result.communities).toEqual([
+    { communityId: 'community-1', communityName: '青山村', pendingMemberCount: 2 },
+  ])
+})
+
+test('admin.approvalSummary: communityAdmin 只返回自己可管理社区的成员待办', async () => {
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([{ _id: 'community-1' }]) // listOwnedCommunityIds: created
+    .mockResolvedValueOnce([{ communityId: 'community-2' }]) // listOwnedCommunityIds: as admin
+    .mockResolvedValueOnce([{ _id: 'member-1', status: 'pending' }])
+    .mockResolvedValueOnce([])
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({ _id: 'community-1', name: '青山村', status: 'active' })
+    .mockResolvedValueOnce({ _id: 'community-2', name: '明士班', status: 'active' })
+
+  const result: any = await main({
+    action: 'admin.approvalSummary',
+    _actAs: { accountId: 'ca-1', role: 'communityAdmin', userId: 'admin-openid', username: 'ca' },
+  })
+
+  expect(result.pendingCommunityCount).toBe(0)
+  expect(result.pendingMemberCount).toBe(1)
+  expect(result.communities).toEqual([
+    { communityId: 'community-1', communityName: '青山村', pendingMemberCount: 1 },
+  ])
+})
 
 test('member.list: 会物理清理历史 left 记录并且不返回', async () => {
   ;(db.getById as jest.Mock)
