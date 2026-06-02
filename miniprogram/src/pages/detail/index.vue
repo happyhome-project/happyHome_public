@@ -5,7 +5,7 @@
       title="请先登录"
       desc="登录后才能查看帖子详情"
     />
-    <view v-else-if="post && section" class="content">
+    <view v-else-if="post && section" class="content" :class="{ 'guide-note-detail': isGuideNoteDetail }">
       <view v-if="post.isPinned || post.isFeatured" class="post-flag-row">
         <text v-if="post.isPinned" class="post-flag pin">置顶</text>
         <text v-if="post.isFeatured" class="post-flag feature">精华</text>
@@ -17,6 +17,7 @@
           :widget="widget"
           :content="post.content"
           :post-meta="postMeta"
+          :variant="isGuideNoteDetail ? 'guide_note' : 'default'"
         />
 
         <view
@@ -180,6 +181,7 @@ const postMeta = computed(() => ({
   communityId: String(post.value?.communityId || section.value?.communityId || ''),
 }))
 const detailSectionTitle = computed(() => section.value?.name || '')
+const isGuideNoteDetail = computed(() => section.value?.displayTemplate === 'guide_note')
 const regularWidgets = computed(() =>
   (section.value?.widgets || []).filter((widget: any) => !['attendance', 'admin_notice'].includes(widget.type))
 )

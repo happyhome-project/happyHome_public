@@ -147,27 +147,60 @@
           </view>
           <text class="arc-arrow">›</text>
         </view>
-        <view
-          v-for="(item, i) in g.items"
-          :key="i"
-          class="arc-item"
-          @tap.stop="onPostTap(item)"
-        >
-          <!-- kicker 小标：当前装饰版固定 01/02/03；未来接真实档案号时仍走 item.k -->
-          <text v-if="item.k" class="arc-k">{{ item.k }}</text>
-          <view class="arc-tl">
-            <text class="arc-title">{{ item.t }}</text>
-            <view v-if="item.isPinned || item.isFeatured" class="post-badges">
-              <text v-if="item.isPinned" class="post-badge pin">置顶</text>
-              <text v-if="item.isFeatured" class="post-badge feature">精华</text>
+        <template v-if="g.displayTemplate === 'guide_note'">
+          <view
+            v-for="(item, i) in g.items"
+            :key="i"
+            class="guide-card"
+            @tap.stop="onPostTap(item)"
+          >
+            <image
+              v-if="item.coverImage"
+              :src="item.coverImage"
+              mode="aspectFill"
+              class="guide-cover"
+            />
+            <view v-else class="guide-cover guide-cover-empty">
+              <text>{{ g.name.slice(0, 2) }}</text>
             </view>
-            <view class="arc-mm">
-              <text v-if="item.contentAuthor" class="arc-content-author">{{ item.contentAuthor }}</text>
-              <text v-if="item.meta" class="arc-meta" :class="{ hot: item.hot }">{{ item.meta }}</text>
+            <view class="guide-main">
+              <text class="guide-title">{{ item.t }}</text>
+              <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
+              <view v-if="item.isPinned || item.isFeatured" class="post-badges guide-badges">
+                <text v-if="item.isPinned" class="post-badge pin">置顶</text>
+                <text v-if="item.isFeatured" class="post-badge feature">精华</text>
+              </view>
+              <view class="guide-meta">
+                <text v-if="item.location">{{ item.location }}</text>
+                <text v-if="item.when">{{ item.when }}</text>
+                <text v-if="item.contentAuthor">{{ item.contentAuthor }}</text>
+              </view>
             </view>
           </view>
-          <text class="arc-when">{{ item.when }}</text>
-        </view>
+        </template>
+        <template v-else>
+          <view
+            v-for="(item, i) in g.items"
+            :key="i"
+            class="arc-item"
+            @tap.stop="onPostTap(item)"
+          >
+            <!-- kicker 小标：当前装饰版固定 01/02/03；未来接真实档案号时仍走 item.k -->
+            <text v-if="item.k" class="arc-k">{{ item.k }}</text>
+            <view class="arc-tl">
+              <text class="arc-title">{{ item.t }}</text>
+              <view v-if="item.isPinned || item.isFeatured" class="post-badges">
+                <text v-if="item.isPinned" class="post-badge pin">置顶</text>
+                <text v-if="item.isFeatured" class="post-badge feature">精华</text>
+              </view>
+              <view class="arc-mm">
+                <text v-if="item.contentAuthor" class="arc-content-author">{{ item.contentAuthor }}</text>
+                <text v-if="item.meta" class="arc-meta" :class="{ hot: item.hot }">{{ item.meta }}</text>
+              </view>
+            </view>
+            <text class="arc-when">{{ item.when }}</text>
+          </view>
+        </template>
       </view>
     </view>
 
@@ -215,7 +248,7 @@ import { postApi } from '../../api/cloud'
 import AppTabBar from '../../components/AppTabBar.vue'
 import LoginGuard from '../../components/LoginGuard.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
-import { getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary } from '../../utils/widget'
+import { getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard } from '../../utils/widget'
 import { clientLog } from '../../utils/client-log'
 
 const communityStore = useCommunityStore()
@@ -341,25 +374,47 @@ interface ArchiveItem {
   t: string
   contentAuthor?: string
   meta?: string
+  excerpt?: string
+  coverImage?: string
+  location?: string
   hot?: boolean
   when: string
   postId?: string
   isPinned?: boolean
   isFeatured?: boolean
 }
-interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[]; accentColor?: string }
+interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[]; accentColor?: string; displayTemplate: 'default' | 'guide_note' }
 
 const archiveGroups = computed<ArchiveGroup[]>(() => {
   return (communityStore.currentSections ?? [])
     .filter((section) => secType(section) === 'evergreen' && secStatus(section) !== 'archived')
     .map((section) => {
       const posts = postsBySection.value[section._id] ?? []
+      const displayTemplate: ArchiveGroup['displayTemplate'] = section.displayTemplate === 'guide_note' ? 'guide_note' : 'default'
       return {
         id: section._id,
         name: section.name,
         count: posts.length,
         accentColor: section.accentColor || '',
+        displayTemplate,
         items: posts.slice(0, 3).map((p, idx) => {
+          if (displayTemplate === 'guide_note') {
+            const guide = getGuideNoteCard(p, section)
+            return {
+              k: '',
+              t: guide.title,
+              contentAuthor: guide.author,
+              meta: '',
+              excerpt: guide.excerpt,
+              coverImage: guide.coverImage,
+              location: guide.location,
+              hot: false,
+              when: guide.when,
+              postId: p._id,
+              isPinned: Boolean(p.isPinned),
+              isFeatured: Boolean(p.isFeatured),
+            }
+          }
           const familyLetterSummary = getFamilyLetterListSummary(p, section)
           return {
             k: formatArchiveKicker(idx),
@@ -1229,6 +1284,76 @@ onShow(() => {
   color: $hh-ink-3;
   flex-shrink: 0;
   padding-top: 2rpx;
+}
+
+.guide-card {
+  padding: 20rpx 24rpx;
+  display: grid;
+  grid-template-columns: 180rpx 1fr;
+  gap: 22rpx;
+  border-bottom: 1rpx solid $hh-ink-line-2;
+}
+.guide-card:last-child { border-bottom: none; }
+.guide-cover {
+  width: 180rpx;
+  height: 196rpx;
+  border-radius: $hh-radius-md;
+  background: $hh-surface-2;
+  border: 1rpx solid $hh-ink-line-2;
+  overflow: hidden;
+}
+.guide-cover-empty {
+  display: flex;
+  align-items: flex-end;
+  padding: 18rpx;
+  color: $hh-accent-ink;
+  background:
+    radial-gradient(circle at 26% 24%, rgba(255, 255, 255, 0.48), transparent 30%),
+    linear-gradient(135deg, $hh-accent-wash 0%, $hh-surface-1 58%, $hh-surface-2 100%);
+}
+.guide-cover-empty text {
+  font-family: $hh-font-serif;
+  font-size: 32rpx;
+  color: $hh-accent-ink;
+}
+.guide-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.guide-title {
+  font-family: $hh-font-serif;
+  font-size: 30rpx;
+  line-height: 1.34;
+  color: $hh-ink-1;
+  font-weight: $hh-font-weight-bold;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.guide-excerpt {
+  margin-top: 10rpx;
+  font-size: 23rpx;
+  line-height: 1.58;
+  color: $hh-ink-2;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.guide-badges {
+  margin-top: 10rpx;
+}
+.guide-meta {
+  margin-top: auto;
+  padding-top: 12rpx;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx 16rpx;
+  font-family: $hh-font-num;
+  font-size: 21rpx;
+  color: $hh-ink-3;
 }
 
 /* ═══ Dormant ═══ */

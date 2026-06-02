@@ -1,5 +1,9 @@
 <template>
-  <view class="widget-item" v-if="hasValue || widget.required">
+  <view
+    v-if="hasValue || widget.required"
+    class="widget-item"
+    :class="[`widget-${widget.type}`, { 'is-guide-note': variant === 'guide_note' }]"
+  >
     <text class="label">{{ displayLabel }}</text>
     <view class="value">
       <text v-if="['short_text', 'summary', 'number'].includes(widget.type)">
@@ -79,6 +83,7 @@ const props = defineProps<{
   widget: any
   content: Record<string, any>
   postMeta?: { postId?: string; postTitle?: string; sectionId?: string; communityId?: string }
+  variant?: 'default' | 'guide_note'
 }>()
 
 const audioStore = useAudioStore()
@@ -243,4 +248,63 @@ watch(hasValue, () => {
   text-decoration: underline;
 }
 .empty-value { color: $hh-color-text-mute; }
+
+.widget-item.is-guide-note {
+  padding: 16rpx 0;
+  border-bottom: none;
+}
+
+.widget-item.is-guide-note.widget-short_text {
+  padding-top: 4rpx;
+  padding-bottom: 20rpx;
+}
+
+.widget-item.is-guide-note.widget-short_text .label,
+.widget-item.is-guide-note.widget-summary .label,
+.widget-item.is-guide-note.widget-image_group .label,
+.widget-item.is-guide-note.widget-rich_text .label,
+.widget-item.is-guide-note.widget-rich_note .label {
+  display: none;
+}
+
+.widget-item.is-guide-note.widget-short_text .value,
+.widget-item.is-guide-note.widget-summary .value {
+  font-family: $hh-font-serif;
+  font-size: 42rpx;
+  line-height: 1.36;
+  color: $hh-ink-1;
+  font-weight: $hh-font-weight-bold;
+}
+
+.widget-item.is-guide-note.widget-image_group .images {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18rpx;
+}
+
+.widget-item.is-guide-note.widget-image_group .thumb {
+  width: 100%;
+  height: 420rpx;
+  border-radius: $hh-radius-md;
+  background: $hh-surface-2;
+}
+
+.widget-item.is-guide-note.widget-rich_text .value,
+.widget-item.is-guide-note.widget-rich_note .value {
+  font-size: 30rpx;
+  line-height: 1.78;
+  color: $hh-ink-1;
+}
+
+.widget-item.is-guide-note.widget-location {
+  margin-top: 12rpx;
+  padding: 18rpx 22rpx;
+  border: 1rpx solid $hh-ink-line-2;
+  border-radius: $hh-radius-md;
+  background: $hh-surface-1;
+}
+
+.widget-item.is-guide-note.widget-location .label {
+  margin-bottom: 4rpx;
+}
 </style>

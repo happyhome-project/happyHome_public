@@ -9,6 +9,7 @@ export type PostStatus = 'active' | 'deleted'
 
 export type SectionType = 'realtime' | 'evergreen'
 export type SectionStatus = 'active' | 'dormant' | 'archived'
+export type SectionDisplayTemplate = 'default' | 'guide_note'
 
 export type WidgetType =
   | 'short_text'
@@ -216,6 +217,7 @@ export interface Section {
   createdAt: string
   type: SectionType
   status: SectionStatus
+  displayTemplate?: SectionDisplayTemplate
   accentColor?: string
 }
 
