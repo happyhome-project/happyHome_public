@@ -30,7 +30,8 @@ happyHome/
 ├── cloudfunctions/       # 微信开发者工具用的云函数目录（deploy 时自动同步）
 ├── scripts/
 │   ├── deploy.mjs        # 一键部署（miniprogram-ci）
-│   ├── test-mp.mjs       # 小程序自动化测试（miniprogram-automator）
+│   ├── test-mp.mjs       # 旧版小程序自动化测试（miniprogram-automator，需要 DevTools 支持 --auto-port）
+│   ├── check-devtools-automation.mjs # 当前 DevTools 自动化能力检查 + auto-replay
 │   └── set-super-admin.mjs # 初始化 superAdmin
 ├── private.wx673b17363cd6b4a6.key  # 小程序私钥（不提交 git）
 ├── project.config.json   # 微信开发者工具项目配置
@@ -226,9 +227,11 @@ npm run set:superadmin -- o1234567890abcdef https://<env-id>-<uin>.ap-shanghai.a
 2. `private.*.key` 文件需要一起迁移（不在 git 中）
 3. `.env.local` 文件需要一起迁移（不在 git 中）
 4. 微信开发者工具自动化在 Windows + 原生环境下运行；当前新版 DevTools 的 `auto-replay` 使用 IDE HTTP 服务端口。
-   - `scripts/test-mp-replay.mjs` 会优先自动识别已运行的 DevTools IDE 端口（例如 `21929`）：当存在多个 `wechatdevtools` 监听端口时，必须探测 `http://127.0.0.1:<port>/open`，只有返回 `/v2/open` 重定向的端口才算 IDE HTTP 服务端口，不能简单取第一个端口。
-   - 如识别失败，再设置 `WECHAT_DEVTOOLS_PORT=<实际端口>` 执行 `npm run test:mp:replay`。
-   - 旧 `miniprogram-automator` 仍依赖 WebSocket 根路径，遇到新版 DevTools `ws://127.0.0.1:<port>/` 返回 404 时，不得把 automator 失败当作通过。
+   - 发布前优先执行 `npm.cmd run test:mp:devtools`。它会同时检查：DevTools CLI 路径、当前工具版本、IDE HTTP 服务端口、`cli auto --help` 是否支持 `--auto-port`、`cli auto-replay --help` 是否支持 `--replay-all`，最后实际运行 `auto-replay` 并要求出现 `auto-replay finish`。
+   - `scripts/test-mp-replay.mjs` / `scripts/check-devtools-automation.mjs` 会优先自动识别已运行的 DevTools IDE 端口（例如 `21929`）：当存在多个 `wechatdevtools` 监听端口时，必须探测 `http://127.0.0.1:<port>/open`，只有返回 `/v2/open` 重定向的端口才算 IDE HTTP 服务端口，不能简单取第一个端口。
+   - 如识别失败，再设置 `WECHAT_DEVTOOLS_PORT=<实际端口>` 执行 `npm.cmd run test:mp:devtools` 或 `npm.cmd run test:mp:replay`。
+   - 旧 `miniprogram-automator` 仍依赖 WebSocket 自动化端口。官方 CLI 文档仍写有 `cli auto --project <path> --auto-port <port>`，但本机 DevTools Stable v2.01.2510290 的 `cli auto --help` 已没有 `--auto-port`，只有 `--test-ticket` / `--ticket`。因此遇到新版 DevTools `ws://127.0.0.1:<IDE_HTTP_PORT>/` 返回 404 时，结论是“旧 WebSocket automator 入口不可用”，不得把 automator 失败当作通过，也不得把 IDE HTTP 端口当作 WebSocket 端口。
+   - 官方依据：命令行/HTTP 文档要求 CLI/HTTP 服务端口在“设置 -> 安全设置”中开启，HTTP V2 路径需使用 `/v2` 前缀；小程序自动化 SDK 文档的旧 WebSocket 用法依赖 `--auto-port`；录制回放 CLI 文档支持 `cli auto-replay --project <path> --replay-all` 和 `--replay-config-path`。
 5. 小程序发布前必须单独覆盖 `我的` 页，不得只用首页或通用 replay 代替。
    - 先执行 `npm.cmd --workspace miniprogram run build:h5`，再执行 `npm.cmd run test:h5:profile-smoke`，确认 `#/pages/profile/index` 首屏包含 `ver:`、`state:logged-out login:0` 和实际页面内容。
    - `test:h5:profile-smoke` 必须同时覆盖 H5 fallback 登录分支和模拟真机 `wx.canIUse('button.open-type.chooseAvatar')` 分支；不能只看 fallback 分支就认为真机登录页安全。

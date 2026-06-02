@@ -2,7 +2,7 @@
  * 真实测试统一入口
  *
  * 默认只跑云端 Admin HTTP 真测。
- * 如需同时跑小程序端真测，设置 RUN_MP_AUTOMATOR=1。
+ * 如需同时跑小程序端 DevTools 验证，设置 RUN_MP_AUTOMATOR=1。
  *
  * 用法：
  *   node scripts/test-real.mjs
@@ -32,15 +32,11 @@ function main() {
   run(process.execPath, ['scripts/test-admin-http.mjs'])
 
   if (runMpAutomator) {
-    console.log('\n=== Real Test: MiniProgram Automator ===')
-    const mpRes = run(process.execPath, ['scripts/test-mp.mjs'], { allowFailure: true })
-    if (mpRes.status !== 0) {
-      console.log('\n=== Fallback: DevTools CLI Auto Replay ===')
-      run(process.execPath, ['scripts/test-mp-replay.mjs'])
-    }
+    console.log('\n=== Real Test: MiniProgram DevTools Automation ===')
+    run(process.execPath, ['scripts/check-devtools-automation.mjs'])
   } else {
     console.log('\n=== Skip MiniProgram Automator ===')
-    console.log('Set RUN_MP_AUTOMATOR=1 to enable test:mp in this pipeline.')
+    console.log('Set RUN_MP_AUTOMATOR=1 to enable DevTools automation checks in this pipeline.')
   }
 
   console.log('\n✅ Real test pipeline finished.')

@@ -10,7 +10,7 @@
 1. **评论/点赞** — 数据结构预留了，代码未实现
 
 ### 低优先级
-2. **miniprogram-automator 测试** — 脚本已写好，Windows 环境下应可直接使用
+2. **miniprogram-automator 测试** — 旧 SDK 只在 DevTools CLI 支持 `--auto-port` 时可用；当前 Windows 稳定版主路径改为 `npm.cmd run test:mp:devtools`（能力检查 + `auto-replay`），不得把 WebSocket 404 计为通过。
 
 ---
 
