@@ -186,8 +186,6 @@
 
     <!-- Foot -->
     <text class="s1-foot">— {{ kind }} · 记忆在这里 —</text>
-    <text class="build-debug">{{ debugBuildText }}</text>
-
     <!-- Community switcher modal -->
     <view v-if="showSwitcher" class="switcher-mask" @tap="showSwitcher = false">
       <view class="switcher-panel" @tap.stop>
@@ -218,7 +216,7 @@ import AppTabBar from '../../components/AppTabBar.vue'
 import LoginGuard from '../../components/LoginGuard.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary } from '../../utils/widget'
-import { clientLog, debugBuildLabel } from '../../utils/client-log'
+import { clientLog } from '../../utils/client-log'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -229,8 +227,6 @@ let queuedForcedHomeRefresh = false
 const NOTICE_PREVIEW_LIMIT = 68
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
-const debugBuildText = computed(() => debugBuildLabel())
-
 // ── Computed: masthead ──
 const communityName = computed(() => communityStore.currentCommunity?.name ?? '选择社区')
 const communityMeta = computed(() => '')
@@ -1282,17 +1278,6 @@ onShow(() => {
   text-transform: uppercase;
   color: $hh-ink-4;
   display: block;
-}
-
-.build-debug {
-  display: block;
-  padding: 0 32rpx 36rpx;
-  text-align: center;
-  font-family: $hh-font-mono;
-  font-size: 18rpx;
-  color: $hh-ink-4;
-  opacity: 0.7;
-  word-break: break-all;
 }
 
 /* ═══ Switcher ═══ */
