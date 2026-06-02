@@ -1,6 +1,9 @@
 import { defineConfig } from "vite";
 import uni from "@dcloudio/vite-plugin-uni";
 import path from "path";
+import { readFileSync } from "fs";
+
+const uniScssTokens = readFileSync(path.resolve(__dirname, "src/uni.scss"), "utf8");
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -8,7 +11,8 @@ export default defineConfig({
   css: {
     preprocessorOptions: {
       scss: {
-        additionalData: `@import "${path.resolve(__dirname, "src/uni.scss").replace(/\\/g, "/")}";\n`,
+        additionalData: `${uniScssTokens}\n`,
+        silenceDeprecations: ["legacy-js-api", "import", "global-builtin", "color-functions"],
       },
     },
   },

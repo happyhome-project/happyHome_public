@@ -1,4 +1,4 @@
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import { emptyRichNoteContent, isRichNoteEmpty } from './rich-note'
 
 export const ADMIN_POST_EDITABLE_WIDGET_TYPES = new Set([

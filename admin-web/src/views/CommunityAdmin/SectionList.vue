@@ -204,7 +204,8 @@
 import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { communityApi, sectionApi } from '../../api/cloud'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ArrowDown, WarningFilled } from '@element-plus/icons-vue'
 
 type SectionType = 'realtime' | 'evergreen'

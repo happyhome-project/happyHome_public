@@ -82,7 +82,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import { Bottom, Delete, Top, Upload } from '@element-plus/icons-vue'
 import { audioApi, imageApi } from '../api/cloud'
 

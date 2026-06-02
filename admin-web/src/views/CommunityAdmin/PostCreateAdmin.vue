@@ -115,7 +115,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { v4 as uuidv4 } from 'uuid'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import { Plus } from '@element-plus/icons-vue'
 import { communityApi, postAdminApi, sectionApi } from '../../api/cloud'
 import { useAuthStore } from '../../stores/auth'
