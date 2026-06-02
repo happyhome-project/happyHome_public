@@ -225,7 +225,8 @@ npm run set:superadmin -- o1234567890abcdef https://<env-id>-<uin>.ap-shanghai.a
 1. 所有路径使用 `/` 或 `path.join()`，代码中无硬编码 Linux 路径
 2. `private.*.key` 文件需要一起迁移（不在 git 中）
 3. `.env.local` 文件需要一起迁移（不在 git 中）
-4. `miniprogram-automator` 测试在 Windows + 微信开发者工具原生环境下应能直接运行（WSL 有 WebSocket 跨系统限制）
-   - `scripts/test-mp.mjs` 默认连接 `ws://localhost:9420`
-   - 如开发者工具端口不是 `9420`，请先设置 `WECHAT_DEVTOOLS_PORT=<实际端口>` 再执行 `npm run test:mp`
+4. 微信开发者工具自动化在 Windows + 原生环境下运行；当前新版 DevTools 的 `auto-replay` 使用 IDE HTTP 服务端口。
+   - `scripts/test-mp-replay.mjs` 会优先自动识别已运行的 DevTools 端口（例如 `21929`），识别不到才使用默认端口。
+   - 如识别失败，再设置 `WECHAT_DEVTOOLS_PORT=<实际端口>` 执行 `npm run test:mp:replay`。
+   - 旧 `miniprogram-automator` 仍依赖 WebSocket 根路径，遇到新版 DevTools `ws://127.0.0.1:<port>/` 返回 404 时，不得把 automator 失败当作通过。
 5. `scripts/deploy.mjs` 中的路径用 `path.resolve()` 构建，跨平台兼容
