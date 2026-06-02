@@ -4,7 +4,11 @@ import { extname, join } from 'node:path'
 import { chromium } from 'playwright'
 
 const root = join(process.cwd(), 'miniprogram', 'dist', 'build', 'h5')
-const expectedVersion = process.env.EXPECTED_PROFILE_VERSION || '0.7.2606022204'
+const buildInfoPath = join(process.cwd(), 'miniprogram', 'src', 'generated', 'build-info.ts')
+const buildInfoText = existsSync(buildInfoPath) ? readFileSync(buildInfoPath, 'utf8') : ''
+const buildInfoVersion = buildInfoText.match(/version:\s*["']([^"']+)["']/)?.[1] || ''
+const expectedVersion = process.env.EXPECTED_PROFILE_VERSION ||
+  buildInfoVersion.replace(/^1\.0\./, '0.7.')
 
 const contentTypes = {
   '.html': 'text/html; charset=utf-8',
