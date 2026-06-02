@@ -305,6 +305,55 @@ test('section.updateWidgets: 公告正文按 emoji 安全字符数截断', async
   expect(result.widgets[0].noticeContent).toBe('😀'.repeat(500))
 })
 
+test('section.create: 图文攻略展示模板可保存到板块', async () => {
+  ;(db.create as jest.Mock).mockResolvedValue('section-guide')
+
+  const result: any = await main({
+    action: 'section.create',
+    communityId: 'community-1',
+    name: '亲子出游',
+    type: 'evergreen',
+    displayTemplate: 'guide_note',
+  })
+
+  expect(result.sectionId).toBe('section-guide')
+  expect(db.create).toHaveBeenCalledWith('sections', expect.objectContaining({
+    name: '亲子出游',
+    type: 'evergreen',
+    displayTemplate: 'guide_note',
+    widgets: [
+      expect.objectContaining({ type: 'short_text', label: '标题', required: true, showInList: true }),
+      expect.objectContaining({ type: 'image_group', label: '封面/图片', required: false, showInList: false }),
+      expect.objectContaining({ type: 'rich_note', label: '正文', required: false, showInList: false }),
+      expect.objectContaining({ type: 'location', label: '地点', required: false, showInList: false }),
+    ],
+  }))
+})
+
+test('section.updateMeta: 展示模板只接受默认和图文攻略', async () => {
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  await main({
+    action: 'section.updateMeta',
+    sectionId: 'section-1',
+    displayTemplate: 'guide_note',
+  })
+
+  expect(db.updateById).toHaveBeenLastCalledWith('sections', 'section-1', {
+    displayTemplate: 'guide_note',
+  })
+
+  await main({
+    action: 'section.updateMeta',
+    sectionId: 'section-1',
+    displayTemplate: 'unexpected-template',
+  })
+
+  expect(db.updateById).toHaveBeenLastCalledWith('sections', 'section-1', {
+    displayTemplate: 'default',
+  })
+})
+
 test('post.getAdmin: 返回 attendance 汇总和完整名单', async () => {
   ;(db.getById as jest.Mock)
     .mockResolvedValueOnce({

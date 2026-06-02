@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { formatWidgetValue, getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getListPreview } from '../widget'
+import { formatWidgetValue, getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard, getListPreview } from '../widget'
 import type { Section, Post } from '../../../../cloud/shared/types'
 
 describe('formatWidgetValue', () => {
@@ -198,6 +198,83 @@ describe('getArchiveHomeMeta', () => {
       enableComment: true,
     } as Section
     expect(getArchiveHomeMeta({ likeCount: 2, commentCount: 4 } as Post, noLikeSection)).toBe('4 评论')
+  })
+})
+
+describe('getGuideNoteCard', () => {
+  const section: Section = {
+    _id: 's-guide',
+    communityId: 'c1',
+    name: '亲子出游',
+    icon: 'walk',
+    order: 1,
+    enableComment: true,
+    enableLike: true,
+    createdAt: '2026-01-01',
+    type: 'evergreen',
+    status: 'active',
+    displayTemplate: 'guide_note',
+    widgets: [
+      { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
+      { widgetId: 'images', type: 'image_group', label: '图片', fieldKey: 'images', required: false, order: 1, showInList: false },
+      { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false },
+      { widgetId: 'location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false },
+    ],
+  }
+
+  test('从图文攻略控件中提取封面、标题、摘要、地点和作者', () => {
+    const post: Post = {
+      _id: 'p-guide',
+      communityId: 'c1',
+      sectionId: 's-guide',
+      authorId: 'u1',
+      authorNickname: '小雨妈妈',
+      status: 'active',
+      content: {
+        title: '5 岁也能走完的溪边路线',
+        images: ['cloud://env/images/cover.jpg', 'cloud://env/images/second.jpg'],
+        body: {
+          format: 'markdown',
+          markdown: '从村口小桥出发，沿溪边慢慢走。\n\n孩子可以捡石头、看小鱼。',
+          html: '<p>从村口小桥出发，沿溪边慢慢走。</p>',
+          text: '从村口小桥出发，沿溪边慢慢走。孩子可以捡石头、看小鱼。',
+          imageFileIDs: [],
+          schemaVersion: 1,
+        },
+        location: { address: '青山村溪边', lat: 29.1, lng: 120.2 },
+      },
+      commentCount: 0,
+      likeCount: 0,
+      createdAt: '2026-06-02T08:00:00.000Z',
+      updatedAt: '2026-06-02T08:00:00.000Z',
+    }
+
+    expect(getGuideNoteCard(post, section)).toEqual({
+      title: '5 岁也能走完的溪边路线',
+      coverImage: 'cloud://env/images/cover.jpg',
+      excerpt: '从村口小桥出发，沿溪边慢慢走。孩子可以捡石头、看小鱼。',
+      location: '青山村溪边',
+      author: '小雨妈妈',
+      when: '6/2',
+      hasCover: true,
+    })
+  })
+
+  test('缺少图片和地点时返回安静占位所需的空值，不暴露表单空态文案', () => {
+    const post = {
+      content: { title: '油菜花田旁的小路' },
+      createdAt: '2026-05-26T08:00:00.000Z',
+    } as Post
+
+    expect(getGuideNoteCard(post, section)).toEqual({
+      title: '油菜花田旁的小路',
+      coverImage: '',
+      excerpt: '',
+      location: '',
+      author: '',
+      when: '5/26',
+      hasCover: false,
+    })
   })
 })
 

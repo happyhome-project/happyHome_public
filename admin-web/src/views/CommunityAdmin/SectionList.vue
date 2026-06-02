@@ -113,6 +113,13 @@
             <el-radio value="realtime">实时协作</el-radio>
           </el-radio-group>
         </el-form-item>
+        <el-form-item v-if="form.type === 'evergreen'" label="展示模板">
+          <el-radio-group v-model="form.displayTemplate">
+            <el-radio value="default">默认列表</el-radio>
+            <el-radio value="guide_note">图文攻略</el-radio>
+          </el-radio-group>
+          <div class="field-hint">图文攻略适合亲子出游、村游路线等轻图文沉淀板块；不会启用标签归类。</div>
+        </el-form-item>
         <el-form-item>
           <template #label>
             <span>首页入口图标（可选）</span>
@@ -202,6 +209,7 @@ import { ArrowDown, WarningFilled } from '@element-plus/icons-vue'
 
 type SectionType = 'realtime' | 'evergreen'
 type SectionStatus = 'active' | 'dormant' | 'archived'
+type SectionDisplayTemplate = 'default' | 'guide_note'
 
 interface SectionRow {
   _id: string
@@ -211,6 +219,7 @@ interface SectionRow {
   order: number
   type: SectionType
   status: SectionStatus
+  displayTemplate?: SectionDisplayTemplate
   accentColor?: string
   enableComment: boolean
   enableLike: boolean
@@ -254,6 +263,7 @@ const form = ref<{
   order: number
   type: SectionType
   status: SectionStatus
+  displayTemplate: SectionDisplayTemplate
   accentColor: string
   enableComment: boolean
   enableLike: boolean
@@ -263,6 +273,7 @@ const form = ref<{
   order: 0,
   type: 'evergreen',
   status: 'active',
+  displayTemplate: 'default',
   accentColor: '',
   enableComment: true,
   enableLike: true,
@@ -308,6 +319,7 @@ async function loadSections() {
     sections.value = (res.sections ?? []).map((section: any) => ({
       ...section,
       _id: String(section?._id || section?.id || ''),
+      displayTemplate: section?.displayTemplate === 'guide_note' ? 'guide_note' : 'default',
     })) as SectionRow[]
   } catch (e: any) {
     ElMessage.error(e.message || '加载失败')
@@ -328,6 +340,7 @@ function openCreate() {
     order: sections.value.length,
     type: 'evergreen',
     status: 'active',
+    displayTemplate: 'default',
     accentColor: '',
     enableComment: true,
     enableLike: true,
@@ -348,6 +361,7 @@ function openEdit(row: SectionRow) {
     order: row.order ?? 0,
     type: row.type || 'evergreen',
     status: row.status || 'active',
+    displayTemplate: row.displayTemplate === 'guide_note' ? 'guide_note' : 'default',
     accentColor: row.accentColor || '',
     enableComment: row.enableComment !== false,
     enableLike: row.enableLike !== false,
@@ -370,6 +384,7 @@ async function submit() {
         order: form.value.order,
         type: form.value.type,
         status: form.value.type === 'realtime' ? form.value.status : 'active',
+        displayTemplate: form.value.type === 'evergreen' ? form.value.displayTemplate : 'default',
         accentColor: form.value.accentColor,
         enableComment: form.value.enableComment,
         enableLike: form.value.enableLike,
@@ -382,6 +397,7 @@ async function submit() {
         icon: form.value.icon,
         order: form.value.order,
         type: form.value.type,
+        displayTemplate: form.value.type === 'evergreen' ? form.value.displayTemplate : 'default',
         enableComment: form.value.enableComment,
         enableLike: form.value.enableLike,
         ...(form.value.accentColor ? { accentColor: form.value.accentColor } : {}),
