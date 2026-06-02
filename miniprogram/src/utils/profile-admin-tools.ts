@@ -26,7 +26,7 @@ export async function loadAdminPendingState(
           pendingMembers.push(normalized)
         }
       }
-    } catch {
+    } catch (_error) {
       // pendingList only succeeds for communities this user can administer.
     }
   }

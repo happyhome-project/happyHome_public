@@ -74,6 +74,10 @@ const rules = [
     name: 'collection spread',
     pattern: /[\[,{]\s*\.{3}/g,
   },
+  {
+    name: 'optional catch binding',
+    pattern: /catch\s*\{/g,
+  },
 ]
 
 const findings = []

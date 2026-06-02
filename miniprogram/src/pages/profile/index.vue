@@ -91,6 +91,9 @@
             <text class="login-alt-hint">使用其他账号？</text>
             <text class="login-alt-link" @tap="showDevLogin = true">DEV 登录</text>
           </view>
+          <view class="login-version">
+            <text>ver: {{ appVersion }}</text>
+          </view>
         </view>
       </template>
 
@@ -135,6 +138,9 @@
               class="dev-btn"
               @tap="showDevLogin = true"
             >DEV 登录</button>
+          </view>
+          <view class="login-version">
+            <text>ver: {{ appVersion }}</text>
           </view>
         </view>
       </template>
@@ -359,7 +365,7 @@ const supportsChooseAvatar = computed(() => {
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore
     return !!wx.canIUse('button.open-type.chooseAvatar')
-  } catch {
+  } catch (_error) {
     return false
   }
 })
@@ -631,7 +637,7 @@ async function loadNotificationSubscriptions(options: { preserveOnFailure?: bool
   try {
     const res = await notificationApi.mySubscriptions()
     notificationSubscriptions.value = Array.isArray(res.subscriptions) ? res.subscriptions : []
-  } catch {
+  } catch (_error) {
     if (!options.preserveOnFailure) notificationSubscriptions.value = []
   }
 }
@@ -648,7 +654,7 @@ async function loadNotificationConfig() {
         templateId: remote?.templateId || item.templateId,
       }
     })
-  } catch {
+  } catch (_error) {
     // Keep build-time fallback if runtime config is unavailable.
   }
 }
@@ -827,6 +833,14 @@ onShow(() => {
   font-size: $hh-font-caption;
   color: $hh-accent;
   text-decoration: underline;
+}
+.login-version {
+  margin-top: $hh-space-sm;
+  text-align: center;
+  font-family: $hh-font-mono;
+  font-size: 18rpx;
+  color: $hh-color-text-mute;
+  opacity: 0.7;
 }
 .form-actions {
   display: flex;

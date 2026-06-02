@@ -432,7 +432,7 @@ async function resolveAttendanceAvatarUrls() {
       postId: currentPostId.value,
       resolvedCount: Object.keys(resolved).length,
     })
-  } catch {
+  } catch (_error) {
     clientLog('warn', 'detail.avatar.resolve.fail', {
       postId: currentPostId.value,
       urlCount: urls.length,

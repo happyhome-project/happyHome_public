@@ -25,7 +25,7 @@ let instance: AudioBackend | null = null
 
 export function _resetAudioBackendForTesting() {
   if (instance) {
-    try { instance.destroy() } catch {}
+    try { instance.destroy() } catch (_error) {}
   }
   instance = null
 }
@@ -138,7 +138,7 @@ class HtmlAudioBackend implements AudioBackend {
   }
 
   pause() {
-    try { this.audio?.pause() } catch {}
+    try { this.audio?.pause() } catch (_error) {}
   }
 
   stop() {
@@ -147,13 +147,13 @@ class HtmlAudioBackend implements AudioBackend {
         this.audio.pause()
         this.audio.currentTime = 0
       }
-    } catch {}
+    } catch (_error) {}
   }
 
   seek(seconds: number) {
     try {
       this.getAudio().currentTime = seconds
-    } catch {}
+    } catch (_error) {}
   }
 
   destroy() {
@@ -161,7 +161,7 @@ class HtmlAudioBackend implements AudioBackend {
       try {
         this.audio.pause()
         this.audio.src = ''
-      } catch {}
+      } catch (_error) {}
     }
     this.audio = null
     this.handlers = {}
