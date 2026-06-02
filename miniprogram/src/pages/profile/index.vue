@@ -196,22 +196,6 @@
       </view>
     </view>
 
-    <view data-testid="profile-feedback-contact-card" class="feedback-contact-card">
-      <view class="feedback-copy">
-        <text class="feedback-title">联系与反馈</text>
-        <text class="feedback-desc">使用中遇到问题，或有建议想告诉我，可以直接留言。</text>
-      </view>
-      <button
-        class="feedback-contact-btn"
-        open-type="contact"
-        show-message-card
-        send-message-title="HappyHome 使用反馈"
-        send-message-path="/pages/profile/index"
-      >
-        留言反馈
-      </button>
-    </view>
-
     <!-- My Communities -->
     <view class="section">
       <text class="section-title">我的社区</text>
@@ -243,6 +227,22 @@
       </view>
       <button size="mini" class="join-btn" @tap="goOnboarding">
         加入或创建社区
+      </button>
+    </view>
+
+    <view data-testid="profile-feedback-contact-card" class="feedback-contact-card">
+      <view class="feedback-copy">
+        <text class="feedback-title">联系与反馈</text>
+        <text class="feedback-desc">使用中遇到问题，或有建议想告诉我，可以直接留言。</text>
+      </view>
+      <button
+        class="feedback-contact-btn"
+        open-type="contact"
+        show-message-card
+        send-message-title="HappyHome 使用反馈"
+        send-message-path="/pages/profile/index"
+      >
+        留言反馈
       </button>
     </view>
 
