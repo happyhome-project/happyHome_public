@@ -34,6 +34,8 @@
 | admin 首登 | 用 `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD` 直接登 admin-web | admin_accounts 为空时自动 seed superAdmin，**不需要跑 cli seed** |
 | admin 种子（备用）| `SEED_ADMIN_USERNAME=xxx SEED_ADMIN_PASSWORD=yyy npm run seed:admin` | 幂等；CI 环境或 bootstrap 用不了时再跑 |
 | admin env 同步 | `node scripts/update-admin-env.mjs` | 一次性把本地 BOOTSTRAP/SESSION 变量推到 CloudBase admin 函数 env，免去手工去控制台填 |
+| 审批提醒 env 同步 | `npm run update:approval-env` | 把小程序订阅消息模板 ID / 字段映射同步到 `member`、`community` 云函数 |
+| 审批模板 API 配置 | `npm run configure:approval-templates -- discover` | 通过微信订阅消息 API 发现/添加模板；用 `admin` 云函数 env 里的 `WX_APPID/WX_APPSECRET` |
 
 ---
 
@@ -171,6 +173,7 @@
 | 本地环境 | `docs/SETUP.md` | 首次 clone |
 | 运维 | `docs/cloudbase-http-access.md` | http-gateway 相关 |
 | Admin Web 生产入口与部署 | `docs/admin-web-deploy.md` | 处理 `admin.tinghai.xin`、Nginx、HTTPS、阿里云服务器代理时必读 |
+| 审批提醒配置 | `docs/approval-notifications.md` | 配微信小程序订阅消息模板、同步云函数 env |
 | UI 回归 | `docs/ui-click-regression-checklist.md` | 改 UI 交互 |
 
 ---

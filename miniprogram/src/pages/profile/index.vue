@@ -230,6 +230,28 @@
       </button>
     </view>
 
+    <!-- Admin notification subscription -->
+    <view v-if="hasAdminTools" class="section">
+      <text class="section-title">管理员提醒</text>
+      <text class="hint-text">开启后，有新的社区创建申请或成员加入申请时，微信会尽量发送服务通知。</text>
+      <button
+        size="mini"
+        class="notify-btn"
+        :disabled="notificationSubscribeLock.busy.value || configuredNotificationTemplates.length === 0"
+        @tap="notificationSubscribeLock.run()"
+      >
+        {{ notificationSubscribeLock.busy.value ? '开启中...' : '接收审批提醒' }}
+      </button>
+      <text v-if="configuredNotificationTemplates.length === 0" class="hint-text warn">
+        订阅消息模板尚未配置，暂时只能在后台查看待办。
+      </text>
+      <view v-else class="notification-status">
+        <text v-for="item in configuredNotificationTemplates" :key="item.eventType" class="status-pill">
+          {{ item.label }}：{{ subscriptionStatusLabel(item.eventType, item.templateId) }}
+        </text>
+      </view>
+    </view>
+
     <!-- Pending approvals (admin only) -->
     <view v-if="pendingMembers.length > 0" class="section">
       <text class="section-title">待审批成员</text>
@@ -259,7 +281,7 @@ import { ref, computed, onMounted } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
-import { memberApi } from '../../api/cloud'
+import { memberApi, notificationApi, type ApprovalNotificationEventType } from '../../api/cloud'
 import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
@@ -268,7 +290,23 @@ const communityStore = useCommunityStore()
 const userStore = useUserStore()
 const pendingMembers = ref<any[]>([])
 const adminCommunityIds = ref<string[]>([])
+const notificationSubscriptions = ref<Array<{ eventType: ApprovalNotificationEventType; templateId: string; status: string }>>([])
 let refreshingProfile = false
+
+const notificationTemplates = [
+  {
+    eventType: 'member_join_pending' as ApprovalNotificationEventType,
+    label: '成员加入申请',
+    templateId: String((import.meta as any).env?.VITE_APPROVAL_MEMBER_JOIN_TEMPLATE_ID || ''),
+  },
+  {
+    eventType: 'community_create_pending' as ApprovalNotificationEventType,
+    label: '社区创建申请',
+    templateId: String((import.meta as any).env?.VITE_APPROVAL_COMMUNITY_CREATE_TEMPLATE_ID || ''),
+  },
+]
+const configuredNotificationTemplates = computed(() => notificationTemplates.filter(item => item.templateId))
+const hasAdminTools = computed(() => userStore.role === 'superAdmin' || adminCommunityIds.value.length > 0)
 
 // ── 登录 / 编辑资料表单状态 ──
 const isEditingProfile = ref(false)
@@ -489,6 +527,41 @@ const rejectLock = useKeyedBusyLock(
   (member) => member._id,
 )
 
+const notificationSubscribeLock = useBusyLock(async () => {
+  const templates = configuredNotificationTemplates.value
+  if (templates.length === 0) {
+    uni.showToast({ title: '订阅模板尚未配置', icon: 'none' })
+    return
+  }
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
+  if (typeof wx === 'undefined' || typeof wx.requestSubscribeMessage !== 'function') {
+    uni.showToast({ title: '请在微信小程序中开启提醒', icon: 'none' })
+    return
+  }
+
+  const result: Record<string, string> = await new Promise((resolve, reject) => {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    wx.requestSubscribeMessage({
+      tmplIds: templates.map(item => item.templateId),
+      success: resolve,
+      fail: reject,
+    })
+  })
+
+  for (const item of templates) {
+    const rawStatus = result[item.templateId] === 'accept' ? 'accept' : 'reject'
+    await notificationApi.saveSubscription({
+      eventType: item.eventType,
+      templateId: item.templateId,
+      status: rawStatus,
+    })
+  }
+  await loadNotificationSubscriptions()
+  uni.showToast({ title: '提醒设置已保存', icon: 'success' })
+})
+
 async function loadPendingMembers() {
   if (!userStore.isLoggedIn) return
   // Reset so repeated calls (onMounted + onShow) don't duplicate entries
@@ -509,12 +582,30 @@ async function loadPendingMembers() {
   }
 }
 
+async function loadNotificationSubscriptions() {
+  if (!userStore.isLoggedIn) return
+  try {
+    const res = await notificationApi.mySubscriptions()
+    notificationSubscriptions.value = Array.isArray(res.subscriptions) ? res.subscriptions : []
+  } catch {
+    notificationSubscriptions.value = []
+  }
+}
+
+function subscriptionStatusLabel(eventType: ApprovalNotificationEventType, templateId: string) {
+  const item = notificationSubscriptions.value.find((sub) => sub.eventType === eventType && sub.templateId === templateId)
+  if (!item) return '未开启'
+  if (item.status === 'accept') return '已开启'
+  return '未授权'
+}
+
 async function refreshProfileData() {
   if (refreshingProfile || !userStore.isLoggedIn) return
   refreshingProfile = true
   try {
     await communityStore.loadMyCommunities()
     await loadPendingMembers()
+    if (hasAdminTools.value) await loadNotificationSubscriptions()
   } finally {
     refreshingProfile = false
   }
@@ -670,6 +761,11 @@ onShow(() => {
 .approval-item { display: flex; justify-content: space-between; align-items: center; padding: $hh-space-md 0; border-bottom: 1rpx solid $hh-color-divider; }
 .member-id { font-size: $hh-font-caption; color: $hh-color-text-sub; font-family: monospace; }
 .approval-actions { display: flex; gap: $hh-space-sm; }
+.hint-text { display: block; margin-top: $hh-space-sm; color: $hh-color-text-sub; font-size: $hh-font-caption; line-height: $hh-line-height-base; }
+.hint-text.warn { color: #b7791f; }
+.notify-btn { margin-top: $hh-space-md; background: $hh-color-primary; color: $hh-color-text-inverse; }
+.notification-status { display: flex; flex-wrap: wrap; gap: $hh-space-sm; margin-top: $hh-space-md; }
+.status-pill { padding: 6rpx 14rpx; border-radius: $hh-radius-full; background: #f3f6f4; color: $hh-color-text-sub; font-size: $hh-font-caption; }
 
 .login-actions { display: flex; gap: $hh-space-sm; }
 .dev-btn { background: $hh-color-warning; color: $hh-color-text-inverse; font-size: $hh-font-caption; }

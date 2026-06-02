@@ -35,6 +35,8 @@
     "set:superadmin": "node scripts/set-super-admin.mjs",
     "ensure:indexes": "node scripts/ensure-indexes.mjs",
     "seed:admin": "node scripts/seed-admin-accounts.mjs",
-    "verify:community-creator": "node scripts/verify-community-creator.mjs"
+    "verify:community-creator": "node scripts/verify-community-creator.mjs",
+    "update:approval-env": "node scripts/update-approval-notification-env.mjs",
+    "configure:approval-templates": "node scripts/configure-approval-templates.mjs"
   }
 }

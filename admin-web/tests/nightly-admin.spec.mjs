@@ -108,8 +108,7 @@ test('successful login lands on approval page', async ({ page }) => {
   await login(page)
   await expect(page).toHaveURL(/\/approval$/)
   await expect(page.getByTestId('layout-shell')).toBeVisible()
-  await expect(page.getByTestId('community-approval-page')).toBeVisible()
-  await expect(page.getByTestId('community-approval-table')).toBeVisible()
+  await expect(page.getByTestId('approval-center-page')).toBeVisible()
 })
 
 test('community list can navigate to section page', async ({ page }) => {

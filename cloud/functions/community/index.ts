@@ -2,6 +2,7 @@ import cloud from 'wx-server-sdk'
 import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
 import { assertSuperAdmin } from '../../lib/auth'
+import { notifyCommunityCreatePending } from '../../lib/approval-notifications'
 import type { Community } from '../../shared/types'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
@@ -25,6 +26,7 @@ export async function handleCreate(
     coverImage: string
     location: Community['location']
     joinType: Community['joinType']
+    suppressNotification?: boolean
   },
   openid: string,
 ) {
@@ -51,6 +53,19 @@ export async function handleCreate(
     appliedAt: now,
     joinedAt: now,
   })
+
+  if (!params.suppressNotification) {
+    try {
+      await notifyCommunityCreatePending({
+        communityId,
+        communityName: params.name,
+        creatorUserId: openid,
+        createdAt: now,
+      })
+    } catch (error) {
+      console.warn('[community.create] approval notification failed', error)
+    }
+  }
 
   return { communityId }
 }

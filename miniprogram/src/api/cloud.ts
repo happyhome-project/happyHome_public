@@ -1,11 +1,8 @@
-// Wraps wx.cloud.callFunction with unified error handling.
-// Three modes:
-//   1. Production miniprogram: wx.cloud.callFunction (default when wx.cloud available)
-//   2. H5 preview: always routes through http-gateway with injected test openid
-//   3. DEV mode in miniprogram: user opts in via "DEV 模式登录" on profile page
-//      → sets localStorage 'dev-gateway=1' and 'test-openid=<id>' → callCloud
-//      routes through http-gateway just like H5, bypassing real wx.login.
-//      Use case: preview/test builds where real WeChat login is unavailable.
+// Wraps cloud calls with unified error handling.
+// Runtime routing:
+//   1. Mini-program: always use wx.cloud.callFunction so WeChat injects real OPENID.
+//   2. H5 preview: use http-gateway with injected test openid.
+// Do not let stale DEV gateway flags affect real mini-program users.
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — wx is injected by the miniprogram runtime; absent in H5 build
@@ -43,9 +40,8 @@ function getTestOpenid(): string {
 
 /** Should this call go through http-gateway instead of wx.cloud? */
 function shouldUseGateway(): boolean {
-  if (IS_H5) return true
-  // Miniprogram runtime but user opted into DEV gateway mode
-  return readStorage('dev-gateway') === '1'
+  // In the real mini-program runtime, stale DEV flags must not bypass wx.cloud.
+  return IS_H5
 }
 
 async function callViaHttpGateway<T>(name: string, action: string, params: object): Promise<T> {
@@ -149,6 +145,23 @@ export const memberApi = {
     callCloud<{ members: any[] }>('member', 'pendingList', { communityId }),
   myCommunities: () =>
     callCloud<{ communities: any[] }>('member', 'myCommunities', {}),
+}
+
+export type ApprovalNotificationEventType = 'member_join_pending' | 'community_create_pending'
+
+export const notificationApi = {
+  saveSubscription: (params: {
+    eventType: ApprovalNotificationEventType
+    templateId: string
+    status: 'accept' | 'reject'
+  }) =>
+    callCloud<{ success: true }>('member', 'saveNotificationSubscription', params),
+  mySubscriptions: () =>
+    callCloud<{ subscriptions: Array<{ eventType: ApprovalNotificationEventType; templateId: string; status: string }> }>(
+      'member',
+      'notificationSubscriptions',
+      {},
+    ),
 }
 
 export const sectionApi = {

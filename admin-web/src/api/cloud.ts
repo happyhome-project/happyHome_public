@@ -148,6 +148,14 @@ export const memberApi = {
     callAdmin('member.kick', { communityId, memberId }),
 }
 
+export const approvalApi = {
+  summary: () => callAdmin('admin.approvalSummary') as Promise<{
+    pendingCommunityCount: number
+    pendingMemberCount: number
+    communities: Array<{ communityId: string; communityName: string; pendingMemberCount: number }>
+  }>,
+}
+
 export const postAdminApi = {
   list: (params: {
     communityId: string

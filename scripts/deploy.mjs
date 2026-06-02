@@ -60,7 +60,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
 
 const APPID = 'wx673b17363cd6b4a6'
-const KEY_PATH = resolve(ROOT, `private.${APPID}.key`)
+const KEY_PATH = process.env.MP_PRIVATE_KEY_PATH || resolve(ROOT, `private.${APPID}.key`)
 const MP_DIST = resolve(ROOT, 'miniprogram/dist/build/mp-weixin')
 const CLOUD_DIST = resolve(ROOT, 'cloud/dist')
 const ADMIN_WEB_DIR = resolve(ROOT, 'admin-web')
@@ -265,15 +265,19 @@ async function deployCloudViaMiniprogramCi(fns) {
 }
 
 async function deployCloud() {
-  console.log('\nBuilding cloud functions...')
-  execSync('node build.mjs', { cwd: resolve(ROOT, 'cloud'), stdio: 'inherit' })
-
   const onlyArg = process.argv.find((a) => a.startsWith('--only='))
   const onlyList = onlyArg ? onlyArg.slice(7).split(',').map((s) => s.trim()).filter(Boolean) : null
   const fns = onlyList && onlyList.length
     ? CLOUD_FUNCTIONS.filter((f) => onlyList.includes(f))
     : CLOUD_FUNCTIONS
   if (onlyList) console.log(`Filtering to: ${fns.join(', ')}`)
+
+  console.log('\nBuilding cloud functions...')
+  execSync('node build.mjs', {
+    cwd: resolve(ROOT, 'cloud'),
+    stdio: 'inherit',
+    env: { ...process.env, HH_CLOUD_BUILD_ONLY: onlyList ? fns.join(',') : '' },
+  })
 
   const forceCi = process.argv.includes('--use-ci')
   const forceTcb = process.argv.includes('--use-tcb')
