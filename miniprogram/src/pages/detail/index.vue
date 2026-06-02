@@ -1,9 +1,5 @@
 <template>
   <view class="detail-page">
-    <view class="detail-debug">
-      <text>{{ debugBuildText }}</text>
-      <text v-if="currentPostId">post {{ currentPostId }}</text>
-    </view>
     <LoginGuard
       v-if="!userStore.isLoggedIn"
       title="请先登录"
@@ -145,7 +141,7 @@ import WidgetRenderer from '../../components/widgets/WidgetRenderer.vue'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
-import { clientLog, debugBuildLabel } from '../../utils/client-log'
+import { clientLog } from '../../utils/client-log'
 
 const fallbackAvatar = '/static/default-avatar.png'
 const ATTENDANCE_SLOT_DISPLAY_MAX = 6
@@ -168,8 +164,6 @@ const resolvedAvatarUrls = reactive<Record<string, string>>({})
 const cancelBusy = ref(false)
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
-const debugBuildText = computed(() => debugBuildLabel())
-
 clientLog('info', 'detail.setup', {})
 
 const rosterSelfJoined = computed(() => {
@@ -605,18 +599,6 @@ function formatDateTime(iso: string): string {
   padding: $hh-space-lg;
   background: $hh-color-bg;
   min-height: 100vh;
-}
-
-.detail-debug {
-  display: flex;
-  flex-direction: column;
-  gap: 4rpx;
-  margin-bottom: $hh-space-sm;
-  font-family: $hh-font-mono;
-  font-size: 18rpx;
-  color: $hh-ink-4;
-  opacity: 0.72;
-  word-break: break-all;
 }
 
 .loading {
