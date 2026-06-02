@@ -233,8 +233,12 @@ npm run set:superadmin -- o1234567890abcdef https://<env-id>-<uin>.ap-shanghai.a
    - 旧 `miniprogram-automator` 仍依赖 WebSocket 自动化端口。官方 CLI 文档仍写有 `cli auto --project <path> --auto-port <port>`，但本机 DevTools Stable v2.01.2510290 的 `cli auto --help` 已没有 `--auto-port`，只有 `--test-ticket` / `--ticket`。因此遇到新版 DevTools `ws://127.0.0.1:<IDE_HTTP_PORT>/` 返回 404 时，结论是“旧 WebSocket automator 入口不可用”，不得把 automator 失败当作通过，也不得把 IDE HTTP 端口当作 WebSocket 端口。
    - 官方依据：命令行/HTTP 文档要求 CLI/HTTP 服务端口在“设置 -> 安全设置”中开启，HTTP V2 路径需使用 `/v2` 前缀；小程序自动化 SDK 文档的旧 WebSocket 用法依赖 `--auto-port`；录制回放 CLI 文档支持 `cli auto-replay --project <path> --replay-all` 和 `--replay-config-path`。
 5. 小程序发布前必须单独覆盖 `我的` 页，不得只用首页或通用 replay 代替。
+   - `node scripts/deploy.mjs miniprogram-upload` 和 `node scripts/deploy.mjs release` 会在上传前自动执行 `npm.cmd run test:mp:release-gate -- --skip-mp-build`；这一步不生成二维码，失败时必须先修复，不能继续上传体验版。
+   - 手动发布前也可以单独跑 `npm.cmd run test:mp:release-gate`。该 gate 会覆盖：`build:mp-weixin`、详情/我的 compiled runtime syntax guard、profile critical path guard、H5 profile smoke、H5 detail smoke、DevTools automation capability。
    - 先执行 `npm.cmd --workspace miniprogram run build:h5`，再执行 `npm.cmd run test:h5:profile-smoke`，确认 `#/pages/profile/index` 首屏包含 `ver:`、`state:logged-out login:0` 和实际页面内容。
+   - `npm.cmd run test:h5:detail-smoke` 必须能在未登录详情路径渲染 `.hh-login-guard` 和 `ver:`，确保详情页至少不会首屏完全空白；已登录、真实帖子点击仍需要 DevTools 录制回放或真机验证。
    - `test:h5:profile-smoke` 必须同时覆盖 H5 fallback 登录分支和模拟真机 `wx.canIUse('button.open-type.chooseAvatar')` 分支；不能只看 fallback 分支就认为真机登录页安全。
    - `npm.cmd run test:mp:profile-critical-path` 必须在 `build:mp-weixin` 之后通过，确保 `pages/profile/index.js` 首屏不会静态拉入登录后/管理员专用 helper。真机体验版一旦出现 `我的` 页空白，优先检查 profile 首屏静态依赖是否又变重。
    - `pages/profile/index` 保留顶部 `ver/state/login/cc` 诊断条，以及 `profile.mounted/profile.show/profile.render.tick/profile.refresh.*` clientLog；真机反馈空白时，先用 CloudBase 日志确认这些事件和 build 号。
+   - 结论边界：当前新版 DevTools CLI 可以在发布环节验证工具链、编译产物、回放窗口和已录制用例，但不能凭空断言“任意帖子点击详情在真机一定不空白”。要机器证明这个点击路径，必须先在微信开发者工具里录制覆盖“首页点击帖子 -> 详情有内容”和“进入我的页 -> 有版本/登录内容”的回放用例；没有录制用例时，发布 gate 只能阻止已知空白根因，最终体验版仍需真机点测。
 6. `scripts/deploy.mjs` 中的路径用 `path.resolve()` 构建，跨平台兼容
