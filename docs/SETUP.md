@@ -226,7 +226,10 @@ npm run set:superadmin -- o1234567890abcdef https://<env-id>-<uin>.ap-shanghai.a
 2. `private.*.key` 文件需要一起迁移（不在 git 中）
 3. `.env.local` 文件需要一起迁移（不在 git 中）
 4. 微信开发者工具自动化在 Windows + 原生环境下运行；当前新版 DevTools 的 `auto-replay` 使用 IDE HTTP 服务端口。
-   - `scripts/test-mp-replay.mjs` 会优先自动识别已运行的 DevTools 端口（例如 `21929`），识别不到才使用默认端口。
+   - `scripts/test-mp-replay.mjs` 会优先自动识别已运行的 DevTools IDE 端口（例如 `21929`）：当存在多个 `wechatdevtools` 监听端口时，必须探测 `http://127.0.0.1:<port>/open`，只有返回 `/v2/open` 重定向的端口才算 IDE HTTP 服务端口，不能简单取第一个端口。
    - 如识别失败，再设置 `WECHAT_DEVTOOLS_PORT=<实际端口>` 执行 `npm run test:mp:replay`。
    - 旧 `miniprogram-automator` 仍依赖 WebSocket 根路径，遇到新版 DevTools `ws://127.0.0.1:<port>/` 返回 404 时，不得把 automator 失败当作通过。
-5. `scripts/deploy.mjs` 中的路径用 `path.resolve()` 构建，跨平台兼容
+5. 小程序发布前必须单独覆盖 `我的` 页，不得只用首页或通用 replay 代替。
+   - 先执行 `npm.cmd --workspace miniprogram run build:h5`，再执行 `npm.cmd run test:h5:profile-smoke`，确认 `#/pages/profile/index` 首屏包含 `ver:`、`state:logged-out login:0` 和实际页面内容。
+   - `pages/profile/index` 保留顶部 `ver/state/login/cc` 诊断条，以及 `profile.mounted/profile.show/profile.render.tick/profile.refresh.*` clientLog；真机反馈空白时，先用 CloudBase 日志确认这些事件和 build 号。
+6. `scripts/deploy.mjs` 中的路径用 `path.resolve()` 构建，跨平台兼容

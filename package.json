@@ -30,6 +30,7 @@
     "test:mp:detail-runtime-syntax": "node scripts/check-mp-detail-runtime-syntax.mjs",
     "test:mp": "node scripts/test-mp.mjs",
     "test:mp:replay": "node scripts/test-mp-replay.mjs",
+    "test:h5:profile-smoke": "node scripts/test-h5-profile-smoke.mjs",
     "test:deploy-output": "node --test scripts/lib/deploy-output.test.mjs",
     "test:real:admin": "node scripts/test-admin-http.mjs",
     "test:real": "node scripts/test-real.mjs",

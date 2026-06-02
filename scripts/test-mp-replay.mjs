@@ -56,11 +56,28 @@ function detectRunningDevtoolsPort() {
     '$conns = Get-NetTCPConnection -State Listen | Where-Object { $_.LocalAddress -in @("127.0.0.1","::1","0.0.0.0","::") }',
     '$items = foreach ($c in $conns) {',
     '  $p = Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue',
-    '  if ($p -and (($p.ProcessName -like "*wechatdevtools*") -or ($p.Path -like "*微信web开发者工具*"))) {',
-    '    [pscustomobject]@{ port = $c.LocalPort; process = $p.ProcessName }',
+    '  if ($p -and ($p.ProcessName -like "*wechatdevtools*")) {',
+    '    $status = 0',
+    '    $location = ""',
+    '    try {',
+    '      $req = [System.Net.WebRequest]::Create("http://127.0.0.1:$($c.LocalPort)/open")',
+    '      $req.AllowAutoRedirect = $false',
+    '      $req.Timeout = 1000',
+    '      $res = $req.GetResponse()',
+    '      $status = [int]$res.StatusCode',
+    '      $location = [string]$res.Headers["Location"]',
+    '      $res.Close()',
+    '    } catch {',
+    '      if ($_.Exception.Response) {',
+    '        $status = [int]$_.Exception.Response.StatusCode',
+    '        $location = [string]$_.Exception.Response.Headers["Location"]',
+    '        $_.Exception.Response.Close()',
+    '      }',
+    '    }',
+    '    [pscustomobject]@{ port = $c.LocalPort; process = $p.ProcessName; status = $status; location = $location; isIde = ($status -ge 300 -and $status -lt 400 -and $location -like "/v2/*") }',
     '  }',
     '}',
-    '$items | Sort-Object port -Unique | ConvertTo-Json -Compress',
+    '$items | Sort-Object @{ Expression = { if ($_.isIde) { 0 } else { 1 } } }, port -Unique | ConvertTo-Json -Compress',
   ].join('; ')
 
   const result = spawnSync(
@@ -73,7 +90,8 @@ function detectRunningDevtoolsPort() {
   try {
     const parsed = JSON.parse(text)
     const rows = Array.isArray(parsed) ? parsed : [parsed]
-    const row = rows.find((item) => Number(item?.port) > 0)
+    const row = rows.find((item) => item?.isIde && Number(item?.port) > 0) ||
+      rows.find((item) => Number(item?.port) > 0)
     return Number(row?.port || 0)
   } catch (_error) {
     return 0

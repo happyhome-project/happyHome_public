@@ -59,6 +59,10 @@ const rules = [
     pattern: /Object\.fromEntries\s*\(/g,
   },
   {
+    name: 'compiled object spread helper',
+    pattern: /Object\.(?:getOwnPropertySymbols|getOwnPropertyDescriptor)|propertyIsEnumerable/g,
+  },
+  {
     name: 'Object.values',
     pattern: /Object\.values\s*\(/g,
   },
