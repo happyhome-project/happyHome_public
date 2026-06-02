@@ -5,6 +5,10 @@
   "scripts": {
     "list": "node src/cli.mjs list",
     "fetch": "node src/cli.mjs fetch",
+    "kf:add": "node src/cli.mjs kf:add",
+    "kf:invite": "node src/cli.mjs kf:invite",
+    "kf:list": "node src/cli.mjs kf:list",
+    "kf:online": "node src/cli.mjs kf:online",
     "test": "node --test test/*.test.mjs"
   },
   "engines": {

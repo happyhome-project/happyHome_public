@@ -37,6 +37,55 @@ export async function postDatacube({ endpoint, dateRange, accessToken, fetchImpl
   });
 }
 
+export async function getJsonWithAccessToken({ path, accessToken, query = {}, fetchImpl = fetch }) {
+  return requestJsonWithAccessToken({
+    method: "GET",
+    path,
+    accessToken,
+    query,
+    fetchImpl
+  });
+}
+
+export async function postJsonWithAccessToken({ path, accessToken, body = {}, query = {}, fetchImpl = fetch }) {
+  return requestJsonWithAccessToken({
+    method: "POST",
+    path,
+    accessToken,
+    query,
+    body,
+    fetchImpl
+  });
+}
+
+async function requestJsonWithAccessToken({ method, path, accessToken, query = {}, body, fetchImpl }) {
+  if (!path) {
+    throw new Error("path is required");
+  }
+  if (!accessToken) {
+    throw new Error("accessToken is required");
+  }
+
+  const url = new URL(path, API_BASE);
+  url.searchParams.set("access_token", accessToken);
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== null && value !== "") {
+      url.searchParams.set(key, value);
+    }
+  }
+
+  return fetchJson(url, {
+    fetchImpl,
+    method,
+    ...(body === undefined
+      ? {}
+      : {
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body)
+        })
+  });
+}
+
 async function fetchJson(url, { fetchImpl, ...init } = {}) {
   const response = await fetchImpl(url, init);
   const text = await response.text();
