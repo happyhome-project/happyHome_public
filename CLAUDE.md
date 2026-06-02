@@ -80,8 +80,9 @@
 1. **集成测试走 `main(event)` 入口**，不直接 call handler —— 否则会漏掉事件解构不匹配的问题
 2. **前端异步写按钮必须用 `useBusyLock` / `useKeyedBusyLock`** —— 后端不保证去重（5 次并发发帖 = 5 条重复帖），前端是唯一防线
 3. **覆盖用户视角**，不只测"系统能不能做到"—— 测前端守卫 + 后端兜底双层；冷启动路径必测
-4. **改完代码必须自己自测** —— 有 H5 / preview / automator 环境，别把验证甩给用户
-5. 四层金字塔和必过 checklist 统一入口：[docs/TESTING-PRINCIPLES.md](docs/TESTING-PRINCIPLES.md)
+4. **体验版关键入口必须扫 mp-weixin 编译产物** —— 详情页和登录所在的 `profile` 页都可能在真机解析阶段先炸。发布前必须跑 `npm run test:mp:detail-runtime-syntax`，它会扫描 detail/profile 关键依赖中的高风险语法/API（如 `Object.fromEntries`、`Object.values`、`Array.from`、`Map/Set` 转换链、对象/数组展开、数组解构回调、`catch {}` optional catch binding）以及 detail 是否误引入 `widget-editor`。`miniprogram/vite.config.ts` 的 `build.target` 必须保持可兼容微信基础库的低目标（当前 `es2017`）；不要只看 H5 正常就上传体验版。
+5. **改完代码必须自己自测** —— 有 H5 / preview / automator 环境，别把验证甩给用户
+6. 四层金字塔和必过 checklist 统一入口：[docs/TESTING-PRINCIPLES.md](docs/TESTING-PRINCIPLES.md)
 
 ---
 

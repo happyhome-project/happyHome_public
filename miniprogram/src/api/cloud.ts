@@ -25,13 +25,13 @@ function readStorage(key: string): string | null {
       const v = localStorage.getItem(key)
       if (v) return v
     }
-  } catch { /* ignore */ }
+  } catch (_error) { /* ignore */ }
   try {
     if (typeof uni !== 'undefined' && uni.getStorageSync) {
       const v = uni.getStorageSync(key)
       if (v) return String(v)
     }
-  } catch { /* ignore */ }
+  } catch (_error) { /* ignore */ }
   return null
 }
 
@@ -67,7 +67,7 @@ async function callViaHttpGateway<T>(name: string, action: string, params: objec
     const res = await fetch(H5_GATEWAY_URL, { method: 'POST', headers, body: JSON.stringify(body) })
     statusCode = res.status
     const text = await res.text()
-    try { data = text ? JSON.parse(text) : {} } catch { data = { raw: text } }
+    try { data = text ? JSON.parse(text) : {} } catch (_error) { data = { raw: text } }
   } else {
     // miniprogram: use uni.request
     const res: any = await new Promise((resolve, reject) => {

@@ -3,10 +3,14 @@
     <text class="hh-login-guard-title">{{ title }}</text>
     <text class="hh-login-guard-desc">{{ desc }}</text>
     <button class="hh-login-guard-btn" size="mini" @tap="handleGoLogin">{{ actionText }}</button>
+    <text class="hh-login-guard-version">ver: {{ appVersion }}</text>
   </view>
 </template>
 
 <script setup lang="ts">
+import { BUILD_INFO } from '../generated/build-info'
+import { clientLog } from '../utils/client-log'
+
 withDefaults(defineProps<{
   title?: string
   desc?: string
@@ -17,8 +21,23 @@ withDefaults(defineProps<{
   actionText: '去登录',
 })
 
+const appVersion = String(BUILD_INFO.version || BUILD_INFO.buildId || 'unknown').replace(/^1\.0\./, '0.7.')
+
 function handleGoLogin() {
-  uni.switchTab({ url: '/pages/profile/index' })
+  const url = '/pages/profile/index'
+  clientLog('info', 'loginGuard.profile.tap', { url })
+  uni.switchTab({
+    url,
+    success: () => clientLog('info', 'loginGuard.profile.switchTab.success', { url }),
+    fail: (error) => {
+      clientLog('error', 'loginGuard.profile.switchTab.fail', { url, error })
+      uni.reLaunch({
+        url,
+        success: () => clientLog('info', 'loginGuard.profile.reLaunch.success', { url }),
+        fail: (fallbackError) => clientLog('error', 'loginGuard.profile.reLaunch.fail', { url, error: fallbackError }),
+      })
+    },
+  })
 }
 </script>
 
@@ -57,5 +76,13 @@ function handleGoLogin() {
   border-radius: $hh-radius-sm;
   font-size: 26rpx;
   padding: 0 $hh-space-lg;
+}
+
+.hh-login-guard-version {
+  margin-top: $hh-space-xs;
+  font-family: $hh-font-mono;
+  font-size: $hh-font-mono-xs;
+  color: $hh-color-text-mute;
+  opacity: 0.75;
 }
 </style>

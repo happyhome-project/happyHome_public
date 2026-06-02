@@ -8,6 +8,9 @@ const uniScssTokens = readFileSync(path.resolve(__dirname, "src/uni.scss"), "utf
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [uni()],
+  build: {
+    target: "es2017",
+  },
   css: {
     preprocessorOptions: {
       scss: {

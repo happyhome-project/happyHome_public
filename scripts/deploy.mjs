@@ -54,7 +54,7 @@ import { fileURLToPath } from 'url'
 import { execSync, spawn } from 'child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { analyzeDevtoolsCloudDeployOutput } from './lib/deploy-output.mjs'
+import { analyzeDevtoolsCloudDeployOutput, analyzeDevtoolsUploadOutput } from './lib/deploy-output.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
@@ -391,10 +391,14 @@ async function uploadMiniprogramViaDevtoolsCli(version, desc) {
   if (!result.ok) return result
 
   const output = result.output || ''
-  if (/getCloudAPISignedHeader failed|success=false|not logged in|not login|未登录|登录失败/i.test(output)) {
+  const semantic = analyzeDevtoolsUploadOutput(output)
+  if (!semantic.ok) {
+    const loginHint = semantic.reason.includes('IDE login/signing problem')
+      ? '; open WeChat DevTools, log in again, then retry upload'
+      : ''
     return {
       ok: false,
-      reason: 'DevTools CLI upload reported an IDE login/signing problem; open WeChat DevTools, log in again, then retry upload',
+      reason: `DevTools CLI upload failed: ${semantic.reason}${loginHint}`,
     }
   }
   return { ok: true, reason: `ok; info-output=${infoPath}` }
