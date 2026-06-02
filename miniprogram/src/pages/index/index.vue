@@ -242,7 +242,7 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { postApi } from '../../api/cloud'
@@ -725,6 +725,18 @@ onShow(() => {
     marker,
   })
   void refreshHomeData({ force: !!marker })
+})
+
+onPullDownRefresh(async () => {
+  clientLog('info', 'home.pullDownRefresh', {})
+  try {
+    await refreshHomeData({ force: true })
+  } catch (error) {
+    clientLog('error', 'home.pullDownRefresh.fail', { error })
+    uni.showToast({ title: '刷新失败，请重试', icon: 'none' })
+  } finally {
+    uni.stopPullDownRefresh()
+  }
 })
 </script>
 

@@ -9,7 +9,7 @@
   "pages": [
     {
       "path": "pages/index/index",
-      "style": { "navigationBarTitleText": "社群助手" }
+      "style": { "navigationBarTitleText": "社群助手", "enablePullDownRefresh": true }
     },
     {
       "path": "pages/create/index",
@@ -17,7 +17,7 @@
     },
     {
       "path": "pages/profile/index",
-      "style": { "navigationBarTitleText": "我的" }
+      "style": { "navigationBarTitleText": "我的", "enablePullDownRefresh": true }
     },
     {
       "path": "pages/detail/index",
@@ -29,7 +29,7 @@
     },
     {
       "path": "pages/onboarding/index",
-      "style": { "navigationBarTitleText": "加入社区" }
+      "style": { "navigationBarTitleText": "加入社区", "enablePullDownRefresh": true }
     },
     {
       "path": "pages/createCommunity/index",

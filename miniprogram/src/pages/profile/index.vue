@@ -308,7 +308,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi, notificationApi, type ApprovalNotificationEventType } from '../../api/cloud'
@@ -860,6 +860,16 @@ onShow(() => {
   logProfile('info', 'profile.show', {})
   void nextTick(() => logProfile('info', 'profile.render.tick', { reason: 'show' }))
   void refreshProfileData('show')
+})
+
+onPullDownRefresh(async () => {
+  try {
+    await refreshProfileData('pullDown')
+  } catch {
+    uni.showToast({ title: '刷新失败，请重试', icon: 'none' })
+  } finally {
+    uni.stopPullDownRefresh()
+  }
 })
 </script>
 
