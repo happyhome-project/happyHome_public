@@ -154,11 +154,17 @@ export const postAdminApi = {
     sectionId?: string
     authorQuery?: string
     status?: 'active' | 'deleted' | 'all'
+    pinned?: boolean
+    featured?: boolean
     dateFrom?: string
     dateTo?: string
   }) => callAdmin('post.listAdmin', params),
   get: (postId: string) => callAdmin('post.getAdmin', { postId }),
   delete: (postId: string) => callAdmin('post.deleteAdmin', { postId }),
+  pin: (postId: string) => callAdmin('post.pinAdmin', { postId }),
+  unpin: (postId: string) => callAdmin('post.unpinAdmin', { postId }),
+  feature: (postId: string) => callAdmin('post.featureAdmin', { postId }),
+  unfeature: (postId: string) => callAdmin('post.unfeatureAdmin', { postId }),
   update: (postId: string, content: Record<string, any>) =>
     callAdmin('post.updateAdmin', { postId, content }),
   removeAttendanceMember: (params: { postId: string; widgetId: string; userId: string }) =>

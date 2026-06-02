@@ -85,6 +85,10 @@
         </view>
         <view class="live-body">
           <text class="live-t">{{ item.t }}</text>
+          <view v-if="item.isPinned || item.isFeatured" class="post-badges">
+            <text v-if="item.isPinned" class="post-badge pin">置顶</text>
+            <text v-if="item.isFeatured" class="post-badge feature">精华</text>
+          </view>
           <view class="live-m">
             <text v-for="(m, j) in item.m" :key="j" class="live-m-item">{{ m }}</text>
           </view>
@@ -153,6 +157,10 @@
           <text v-if="item.k" class="arc-k">{{ item.k }}</text>
           <view class="arc-tl">
             <text class="arc-title">{{ item.t }}</text>
+            <view v-if="item.isPinned || item.isFeatured" class="post-badges">
+              <text v-if="item.isPinned" class="post-badge pin">置顶</text>
+              <text v-if="item.isFeatured" class="post-badge feature">精华</text>
+            </view>
             <view class="arc-mm">
               <text v-if="item.contentAuthor" class="arc-content-author">{{ item.contentAuthor }}</text>
               <text v-if="item.meta" class="arc-meta" :class="{ hot: item.hot }">{{ item.meta }}</text>
@@ -295,7 +303,16 @@ const sectionNotices = computed<SectionNotice[]>(() => {
 })
 
 // ── 实时协作区：type='realtime' && status='active' 的板块，按帖子逐条展示 ──
-interface LiveItem { ic: string; t: string; m: string[]; cta: string; sectionId: string; postId?: string }
+interface LiveItem {
+  ic: string
+  t: string
+  m: string[]
+  cta: string
+  sectionId: string
+  postId?: string
+  isPinned?: boolean
+  isFeatured?: boolean
+}
 const liveItems = computed<LiveItem[]>(() => {
   const sections = communityStore.currentSections ?? []
   const items: LiveItem[] = []
@@ -310,6 +327,8 @@ const liveItems = computed<LiveItem[]>(() => {
         cta: '进入',
         sectionId: section._id,
         postId: post._id,
+        isPinned: Boolean(post.isPinned),
+        isFeatured: Boolean(post.isFeatured),
       })
     }
   }
@@ -321,7 +340,17 @@ interface ScheduleItem { date: string; day: string; t: string; m: string; kind: 
 const scheduleItems = computed<ScheduleItem[]>(() => [])
 
 // ── 沉淀板块分组：只展示 type='evergreen' 的板块 ──
-interface ArchiveItem { k: string; t: string; contentAuthor?: string; meta?: string; hot?: boolean; when: string; postId?: string }
+interface ArchiveItem {
+  k: string
+  t: string
+  contentAuthor?: string
+  meta?: string
+  hot?: boolean
+  when: string
+  postId?: string
+  isPinned?: boolean
+  isFeatured?: boolean
+}
 interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[]; accentColor?: string }
 
 const archiveGroups = computed<ArchiveGroup[]>(() => {
@@ -344,6 +373,8 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
             hot: isPostHot(p),
             when: formatTime(p.createdAt),
             postId: p._id,
+            isPinned: Boolean(p.isPinned),
+            isFeatured: Boolean(p.isFeatured),
           }
         }),
       }
@@ -937,6 +968,33 @@ onShow(() => {
 }
 .live-m-item {
   font-family: inherit;
+}
+.post-badges {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  flex-wrap: wrap;
+  margin-top: 6rpx;
+}
+.post-badge {
+  font-family: $hh-font-mono;
+  font-size: 18rpx;
+  line-height: 1;
+  padding: 5rpx 8rpx;
+  border-radius: $hh-radius-full;
+  border: 1rpx solid $hh-ink-line;
+  color: $hh-ink-3;
+  background: $hh-surface-1;
+}
+.post-badge.pin {
+  color: #8a5a00;
+  border-color: #ead3a2;
+  background: #fff6dc;
+}
+.post-badge.feature {
+  color: #9a3a2f;
+  border-color: #e8b7af;
+  background: #fff1ee;
 }
 .live-cta {
   flex-shrink: 0;

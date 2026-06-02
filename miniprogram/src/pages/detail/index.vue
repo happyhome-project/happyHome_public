@@ -10,6 +10,10 @@
       desc="登录后才能查看帖子详情"
     />
     <view v-else-if="post && section" class="content">
+      <view v-if="post.isPinned || post.isFeatured" class="post-flag-row">
+        <text v-if="post.isPinned" class="post-flag pin">置顶</text>
+        <text v-if="post.isFeatured" class="post-flag feature">精华</text>
+      </view>
       <view>
         <WidgetRenderer
           v-for="widget in regularWidgets"
@@ -824,6 +828,37 @@ function formatDateTime(iso: string): string {
   margin-top: $hh-space-xs;
   font-size: $hh-font-caption;
   color: $hh-color-text-mute;
+}
+
+.post-flag-row {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  flex-wrap: wrap;
+  margin-bottom: $hh-space-md;
+}
+
+.post-flag {
+  font-family: $hh-font-mono;
+  font-size: 20rpx;
+  line-height: 1;
+  padding: 7rpx 12rpx;
+  border-radius: $hh-radius-full;
+  border: 1rpx solid $hh-ink-line;
+  color: $hh-ink-3;
+  background: $hh-surface-1;
+}
+
+.post-flag.pin {
+  color: #8a5a00;
+  border-color: #ead3a2;
+  background: #fff6dc;
+}
+
+.post-flag.feature {
+  color: #9a3a2f;
+  border-color: #e8b7af;
+  background: #fff1ee;
 }
 
 .meta {
