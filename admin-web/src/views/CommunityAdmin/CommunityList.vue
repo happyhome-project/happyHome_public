@@ -105,10 +105,29 @@
         :resizable="true"
       />
       <el-table-column
+        column-key="pendingMemberCount"
+        label="待审批成员"
+        :width="columnWidths.pendingMemberCount"
+        min-width="120"
+        :resizable="true"
+      >
+        <template #default="{ row }">
+          <el-button
+            v-if="getPendingMemberCount(row) > 0"
+            type="danger"
+            link
+            @click="goMembers(getCommunityId(row), 'pending')"
+          >
+            {{ getPendingMemberCount(row) }}
+          </el-button>
+          <span v-else style="color: #c0c4cc;">0</span>
+        </template>
+      </el-table-column>
+      <el-table-column
         column-key="actions"
         label="操作"
         :width="columnWidths.actions"
-        min-width="420"
+        min-width="520"
         :resizable="true"
       >
         <template #default="{ row }">
@@ -186,7 +205,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { communityApi } from '../../api/cloud'
+import { approvalApi, communityApi } from '../../api/cloud'
 import { useAuthStore } from '../../stores/auth'
 
 const router = useRouter()
@@ -199,6 +218,7 @@ const showMottoDialog = ref(false)
 const savingMotto = ref(false)
 const keyword = ref('')
 const statusFilter = ref<'all' | 'active' | 'pending' | 'rejected'>('all')
+const pendingMemberCountByCommunity = ref<Record<string, number>>({})
 type JoinType = 'open' | 'approval'
 type CommunityTableColumnKey =
   | 'name'
@@ -207,6 +227,7 @@ type CommunityTableColumnKey =
   | 'status'
   | 'joinType'
   | 'memberCount'
+  | 'pendingMemberCount'
   | 'actions'
 
 const COMMUNITY_TABLE_COLUMN_WIDTHS_KEY = 'happyhome.admin.communityTable.columnWidths.v1'
@@ -217,6 +238,7 @@ const COMMUNITY_TABLE_DEFAULT_COLUMN_WIDTHS: Record<CommunityTableColumnKey, num
   status: 120,
   joinType: 120,
   memberCount: 100,
+  pendingMemberCount: 120,
   actions: 520,
 }
 const COMMUNITY_TABLE_MIN_COLUMN_WIDTHS: Record<CommunityTableColumnKey, number> = {
@@ -226,7 +248,8 @@ const COMMUNITY_TABLE_MIN_COLUMN_WIDTHS: Record<CommunityTableColumnKey, number>
   status: 110,
   joinType: 120,
   memberCount: 100,
-  actions: 420,
+  pendingMemberCount: 120,
+  actions: 520,
 }
 
 const columnWidths = ref<Record<CommunityTableColumnKey, number>>(loadCommunityColumnWidths())
@@ -301,11 +324,29 @@ async function loadCommunities() {
     communities.value = (res.communities ?? [])
       .map((c: any) => ({ ...c, _id: c._id || c.id || '' }))
       .filter((c: any) => ['active', 'pending', 'rejected'].includes(c.status))
+    await loadApprovalSummary()
   } catch (e: any) {
     ElMessage.error(e.message || '加载失败')
   } finally {
     loading.value = false
   }
+}
+
+async function loadApprovalSummary() {
+  try {
+    const res = await approvalApi.summary()
+    const next: Record<string, number> = {}
+    for (const item of res.communities || []) {
+      next[String(item.communityId || '')] = Number(item.pendingMemberCount || 0)
+    }
+    pendingMemberCountByCommunity.value = next
+  } catch {
+    pendingMemberCountByCommunity.value = {}
+  }
+}
+
+function getPendingMemberCount(row: any): number {
+  return pendingMemberCountByCommunity.value[getCommunityId(row)] || 0
 }
 
 function getCommunityId(row: any): string {
@@ -332,12 +373,12 @@ async function goSections(communityId: string) {
   await router.push({ name: 'sections', params: { communityId } })
 }
 
-async function goMembers(communityId: string) {
+async function goMembers(communityId: string, tab?: 'pending') {
   if (!communityId) {
     ElMessage.error('社区 ID 缺失，无法进入成员管理')
     return
   }
-  await router.push({ name: 'members', params: { communityId } })
+  await router.push({ name: 'members', params: { communityId }, query: tab ? { tab } : {} })
 }
 
 async function goPosts(communityId: string) {

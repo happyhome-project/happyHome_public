@@ -1,34 +1,93 @@
 // Build script: bundle each cloud function into a standalone index.js
 // Output goes to cloud/dist/<fnName>/index.js with its own package.json
 import { build } from '../node_modules/esbuild/lib/main.js'
-import { mkdirSync, writeFileSync, readdirSync, statSync } from 'fs'
+import ts from 'typescript'
+import { mkdirSync, writeFileSync, readdirSync, statSync, readFileSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const FUNCTIONS_DIR = join(__dirname, 'functions')
 const DIST_DIR = join(__dirname, 'dist')
+const LIB_DIR = join(__dirname, 'lib')
 
-const functions = readdirSync(FUNCTIONS_DIR).filter(
+function transpileTsFile(sourcePath, outPath, transform) {
+  const source = readFileSync(sourcePath, 'utf8')
+  let output = ts.transpileModule(source, {
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2021,
+      module: ts.ModuleKind.CommonJS,
+      esModuleInterop: true,
+    },
+    fileName: sourcePath,
+  }).outputText
+  if (transform) output = transform(output)
+  writeFileSync(outPath, output)
+}
+
+function buildFallback(fnName, outDir) {
+  const libOutDir = join(outDir, 'lib')
+  mkdirSync(libOutDir, { recursive: true })
+
+  transpileTsFile(
+    join(FUNCTIONS_DIR, fnName, 'index.ts'),
+    join(outDir, 'index.js'),
+    (output) => output.replace(/require\(["']\.\.\/\.\.\/lib\//g, 'require("./lib/')
+  )
+
+  for (const fileName of readdirSync(LIB_DIR)) {
+    if (!fileName.endsWith('.ts')) continue
+    transpileTsFile(join(LIB_DIR, fileName), join(libOutDir, fileName.replace(/\.ts$/, '.js')))
+  }
+}
+
+const requestedFunctions = (process.env.HH_CLOUD_BUILD_ONLY || process.argv.find((arg) => arg.startsWith('--only='))?.slice(7) || '')
+  .split(',')
+  .map((name) => name.trim())
+  .filter(Boolean)
+
+const allFunctions = readdirSync(FUNCTIONS_DIR).filter(
   (f) => statSync(join(FUNCTIONS_DIR, f)).isDirectory()
 )
+
+const functions = requestedFunctions.length
+  ? allFunctions.filter((fnName) => requestedFunctions.includes(fnName))
+  : allFunctions
+
+const missingFunctions = requestedFunctions.filter((fnName) => !allFunctions.includes(fnName))
+if (missingFunctions.length) {
+  throw new Error(`Unknown cloud functions: ${missingFunctions.join(', ')}`)
+}
 
 for (const fnName of functions) {
   const entry = join(FUNCTIONS_DIR, fnName, 'index.ts')
   const outDir = join(DIST_DIR, fnName)
   mkdirSync(outDir, { recursive: true })
 
-  await build({
-    entryPoints: [entry],
-    bundle: true,
-    platform: 'node',
-    target: 'node16',
-    outfile: join(outDir, 'index.js'),
-    // Keep SDK external and install it during function deployment.
-    // This avoids bundling issues and stays aligned with cloud runtime behavior.
-    external: ['wx-server-sdk'],
-    format: 'cjs',
-  })
+  try {
+    await build({
+      entryPoints: [entry],
+      bundle: true,
+      platform: 'node',
+      target: 'node16',
+      outfile: join(outDir, 'index.js'),
+      // Keep SDK external and install it during function deployment.
+      // This avoids bundling issues and stays aligned with cloud runtime behavior.
+      external: ['wx-server-sdk'],
+      format: 'cjs',
+      tsconfigRaw: {
+        compilerOptions: {
+          target: 'ES2021',
+          moduleResolution: 'node',
+          esModuleInterop: true,
+          skipLibCheck: true,
+        },
+      },
+    })
+  } catch (error) {
+    console.warn(`esbuild failed for ${fnName}; falling back to TypeScript transpile.`)
+    buildFallback(fnName, outDir)
+  }
 
   // Each cloud function needs its own package.json listing wx-server-sdk
   writeFileSync(

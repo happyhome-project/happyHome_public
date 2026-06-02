@@ -2,6 +2,13 @@ import cloud from 'wx-server-sdk'
 import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
 import { assertCommunityAdmin } from '../../lib/auth'
+import {
+  getNotificationSubscriptions,
+  notifyMemberJoinPending,
+  saveNotificationSubscription,
+  type ApprovalNotificationEventType,
+  type SubscriptionStatus,
+} from '../../lib/approval-notifications'
 import type { Community } from '../../shared/types'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
@@ -50,13 +57,24 @@ export async function handleApply(params: { communityId: string }, openid: strin
     await db.increment('communities', params.communityId, 'memberCount', 1)
     return { status: 'active' }
   } else {
-    await db.create('community_members', {
+    const memberId = await db.create('community_members', {
       communityId: params.communityId,
       userId: openid,
       role: 'member',
       status: 'pending',
       appliedAt: now,
     })
+    try {
+      await notifyMemberJoinPending({
+        communityId: params.communityId,
+        communityName: community.name,
+        memberId,
+        applicantUserId: openid,
+        appliedAt: now,
+      })
+    } catch (error) {
+      console.warn('[member.apply] approval notification failed', error)
+    }
     return { status: 'pending' }
   }
 }
@@ -172,5 +190,14 @@ export const main = async (event: any) => {
   if (action === 'pendingList') return handlePendingList(params, openid)
   if (action === 'myStatus') return handleMyStatus(params, openid)
   if (action === 'myCommunities') return handleMyCommunities(openid)
+  if (action === 'saveNotificationSubscription') {
+    return saveNotificationSubscription(
+      openid,
+      String(params.eventType || '') as ApprovalNotificationEventType,
+      String(params.templateId || ''),
+      String(params.status || '') as SubscriptionStatus,
+    )
+  }
+  if (action === 'notificationSubscriptions') return getNotificationSubscriptions(openid)
   throw new Error(`Unknown action: ${action}`)
 }

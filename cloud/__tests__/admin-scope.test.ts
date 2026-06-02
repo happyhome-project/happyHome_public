@@ -198,6 +198,7 @@ describe('community.createAdmin', () => {
     }, ADMIN_CTX_SUPER)
 
     expect(db.updateById).toHaveBeenCalledWith('communities', 'c-new', { status: 'active' })
+    expect(db.create).not.toHaveBeenCalledWith('admin_notifications', expect.anything())
   })
 })
 

@@ -10,11 +10,15 @@
         text-color="#bfcbd9"
         active-text-color="#409EFF"
       >
-        <el-menu-item
-          v-if="authStore.isSuperAdmin"
-          data-testid="menu-approval"
-          index="/approval"
-        >社区审批</el-menu-item>
+        <el-menu-item data-testid="menu-approval" index="/approval">
+          <span>审批中心</span>
+          <el-badge
+            v-if="approvalTotal > 0"
+            :value="approvalTotal"
+            type="danger"
+            class="menu-badge"
+          />
+        </el-menu-item>
         <el-menu-item data-testid="menu-communities" index="/communities">
           {{ authStore.isSuperAdmin ? '社区管理' : '我的社区' }}
         </el-menu-item>
@@ -49,17 +53,38 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { approvalApi } from '../api/cloud'
 
 const authStore = useAuthStore()
 const router = useRouter()
+const pendingCommunityCount = ref(0)
+const pendingMemberCount = ref(0)
+const approvalTotal = computed(() => pendingCommunityCount.value + pendingMemberCount.value)
 
 onMounted(() => {
   // 页面刷新后若有 token 但 role 缺失，尝试向后端拉身份回填
   if (authStore.token && !authStore.role) authStore.fetchMe()
+  void loadApprovalSummary()
 })
+
+watch(() => router.currentRoute.value.fullPath, () => {
+  void loadApprovalSummary()
+})
+
+async function loadApprovalSummary() {
+  if (!authStore.isAuthenticated) return
+  try {
+    const res = await approvalApi.summary()
+    pendingCommunityCount.value = Number(res.pendingCommunityCount || 0)
+    pendingMemberCount.value = Number(res.pendingMemberCount || 0)
+  } catch {
+    pendingCommunityCount.value = 0
+    pendingMemberCount.value = 0
+  }
+}
 
 async function handleLogout() {
   await authStore.logout()
@@ -79,4 +104,5 @@ async function handleLogout() {
 }
 .user-info { display: flex; align-items: center; gap: 8px; }
 .user-name { font-size: 14px; color: #606266; }
+.menu-badge { margin-left: 8px; }
 </style>

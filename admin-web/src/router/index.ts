@@ -12,7 +12,8 @@ const router = createRouter({
       meta: { requiresAuth: true },
       redirect: '/communities',
       children: [
-        { path: 'approval', name: 'approval', component: () => import('../views/SuperAdmin/CommunityApproval.vue'), meta: { requiresRole: 'superAdmin' } },
+        { path: 'approval', name: 'approval', component: () => import('../views/SuperAdmin/ApprovalCenter.vue') },
+        { path: 'community-approval', name: 'community-approval', component: () => import('../views/SuperAdmin/CommunityApproval.vue'), meta: { requiresRole: 'superAdmin' } },
         { path: 'disabled-communities', name: 'disabled-communities', component: () => import('../views/SuperAdmin/DisabledCommunityList.vue'), meta: { requiresRole: 'superAdmin' } },
         { path: 'admin-accounts', name: 'admin-accounts', component: () => import('../views/SuperAdmin/AdminAccountList.vue'), meta: { requiresRole: 'superAdmin' } },
         { path: 'communities', name: 'communities', component: () => import('../views/CommunityAdmin/CommunityList.vue') },
