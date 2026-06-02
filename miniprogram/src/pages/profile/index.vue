@@ -256,7 +256,7 @@
         :disabled="notificationSubscribeLock.busy.value || configuredNotificationTemplates.length === 0"
         @tap="notificationSubscribeLock.run()"
       >
-        {{ notificationSubscribeLock.busy.value ? '开启中...' : '接收审批提醒' }}
+        {{ notificationSubscribeButtonText }}
       </button>
       <text v-if="configuredNotificationTemplates.length === 0" class="hint-text warn">
         订阅消息模板尚未配置，暂时只能在后台查看待办。
@@ -305,12 +305,19 @@ import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { BUILD_INFO } from '../../generated/build-info'
+import { loadAdminPendingState } from '../../utils/profile-admin-tools'
+import {
+  getNotificationSubscribeButtonText,
+  mergeNotificationSubscribeResult,
+  subscriptionStatusLabel as formatSubscriptionStatusLabel,
+  type ProfileNotificationSubscription,
+} from '../../utils/profile-notifications'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
 const pendingMembers = ref<any[]>([])
 const adminCommunityIds = ref<string[]>([])
-const notificationSubscriptions = ref<Array<{ eventType: ApprovalNotificationEventType; templateId: string; status: string }>>([])
+const notificationSubscriptions = ref<ProfileNotificationSubscription[]>([])
 let refreshingProfile = false
 const appVersion = computed(() => {
   const rawVersion = String(BUILD_INFO.version || BUILD_INFO.buildId || 'unknown')
@@ -480,6 +487,9 @@ const devLoginLock = useBusyLock(async () => {
 function handleLogout() {
   userStore.logout()
   communityStore.$patch({ myCommunities: [], currentCommunityId: '', currentSections: [] })
+  pendingMembers.value = []
+  adminCommunityIds.value = []
+  notificationSubscriptions.value = []
   uni.showToast({ title: '已登出', icon: 'none' })
 }
 
@@ -589,37 +599,35 @@ const notificationSubscribeLock = useBusyLock(async () => {
       status: rawStatus,
     })
   }
-  await loadNotificationSubscriptions()
+  notificationSubscriptions.value = mergeNotificationSubscribeResult(notificationSubscriptions.value, templates, result)
+  await loadNotificationSubscriptions({ preserveOnFailure: true })
+  notificationSubscriptions.value = mergeNotificationSubscribeResult(notificationSubscriptions.value, templates, result)
   uni.showToast({ title: '提醒设置已保存', icon: 'success' })
 })
 
+const notificationSubscribeButtonText = computed(() => getNotificationSubscribeButtonText(
+  notificationSubscribeLock.busy.value,
+  configuredNotificationTemplates.value,
+  notificationSubscriptions.value,
+))
+
 async function loadPendingMembers() {
   if (!userStore.isLoggedIn) return
-  // Reset so repeated calls (onMounted + onShow) don't duplicate entries
-  pendingMembers.value = []
-  adminCommunityIds.value = []
-  // Load pending members for each admin community
-  for (const c of communityStore.myCommunities) {
-    try {
-      const res = await memberApi.pendingList(c._id)
-      // pendingList succeeds = user is admin of this community
-      adminCommunityIds.value.push(c._id)
-      if (res.members.length > 0) {
-        pendingMembers.value.push(...res.members.map((m: any) => ({ ...m, communityId: c._id })))
-      }
-    } catch {
-      // Not admin of this community, skip
-    }
-  }
+  const next = await loadAdminPendingState(
+    communityStore.myCommunities,
+    (communityId) => memberApi.pendingList(communityId),
+  )
+  pendingMembers.value = next.pendingMembers
+  adminCommunityIds.value = next.adminCommunityIds
 }
 
-async function loadNotificationSubscriptions() {
+async function loadNotificationSubscriptions(options: { preserveOnFailure?: boolean } = {}) {
   if (!userStore.isLoggedIn) return
   try {
     const res = await notificationApi.mySubscriptions()
     notificationSubscriptions.value = Array.isArray(res.subscriptions) ? res.subscriptions : []
   } catch {
-    notificationSubscriptions.value = []
+    if (!options.preserveOnFailure) notificationSubscriptions.value = []
   }
 }
 
@@ -638,10 +646,7 @@ async function loadNotificationConfig() {
 }
 
 function subscriptionStatusLabel(eventType: ApprovalNotificationEventType, templateId: string) {
-  const item = notificationSubscriptions.value.find((sub) => sub.eventType === eventType && sub.templateId === templateId)
-  if (!item) return '未开启'
-  if (item.status === 'accept') return '已开启'
-  return '未授权'
+  return formatSubscriptionStatusLabel(notificationSubscriptions.value, eventType, templateId)
 }
 
 async function refreshProfileData() {
