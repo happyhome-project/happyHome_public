@@ -25,3 +25,31 @@ export function analyzeDevtoolsCloudDeployOutput(output) {
     reason: [...new Set(reasons)].join('; '),
   }
 }
+
+export function analyzeDevtoolsUploadOutput(output) {
+  const text = String(output || '')
+  const reasons = []
+
+  if (/(?:^|\n)\s*(?:×|x)\s+(?:compile_start|upload)/i.test(text)) {
+    reasons.push('DevTools CLI failure marker')
+  }
+
+  if (/\[error\]/i.test(text)) {
+    reasons.push('DevTools CLI error line')
+  }
+
+  if (/ENOENT|no such file or directory/i.test(text)) {
+    reasons.push('missing file during upload compile')
+  }
+
+  if (/getCloudAPISignedHeader failed|success=false|not logged in|not login|未登录|登录失败/i.test(text)) {
+    reasons.push('IDE login/signing problem')
+  }
+
+  if (reasons.length === 0) return { ok: true, reason: 'ok' }
+
+  return {
+    ok: false,
+    reason: [...new Set(reasons)].join('; '),
+  }
+}
