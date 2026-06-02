@@ -231,8 +231,14 @@ export const memberApi = {
 }
 
 export type ApprovalNotificationEventType = 'member_join_pending' | 'community_create_pending'
+export type ApprovalNotificationTemplateConfig = {
+  eventType: ApprovalNotificationEventType
+  templateId: string
+}
 
 export const notificationApi = {
+  config: () =>
+    callCloud<{ templates: ApprovalNotificationTemplateConfig[] }>('member', 'notificationConfig', {}),
   saveSubscription: (params: {
     eventType: ApprovalNotificationEventType
     templateId: string

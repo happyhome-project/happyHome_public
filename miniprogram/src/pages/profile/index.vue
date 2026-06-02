@@ -309,7 +309,13 @@ const adminCommunityIds = ref<string[]>([])
 const notificationSubscriptions = ref<Array<{ eventType: ApprovalNotificationEventType; templateId: string; status: string }>>([])
 let refreshingProfile = false
 
-const notificationTemplates = [
+type NotificationTemplateView = {
+  eventType: ApprovalNotificationEventType
+  label: string
+  templateId: string
+}
+
+const notificationTemplates = ref<NotificationTemplateView[]>([
   {
     eventType: 'member_join_pending' as ApprovalNotificationEventType,
     label: '成员加入申请',
@@ -320,8 +326,8 @@ const notificationTemplates = [
     label: '社区创建申请',
     templateId: String((import.meta as any).env?.VITE_APPROVAL_COMMUNITY_CREATE_TEMPLATE_ID || ''),
   },
-]
-const configuredNotificationTemplates = computed(() => notificationTemplates.filter(item => item.templateId))
+])
+const configuredNotificationTemplates = computed(() => notificationTemplates.value.filter(item => item.templateId))
 const hasAdminTools = computed(() => userStore.role === 'superAdmin' || adminCommunityIds.value.length > 0)
 
 // ── 登录 / 编辑资料表单状态 ──
@@ -556,11 +562,12 @@ const notificationSubscribeLock = useBusyLock(async () => {
     return
   }
 
+  const templateIds = Array.from(new Set(templates.map(item => item.templateId).filter(Boolean)))
   const result: Record<string, string> = await new Promise((resolve, reject) => {
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore
     wx.requestSubscribeMessage({
-      tmplIds: templates.map(item => item.templateId),
+      tmplIds: templateIds,
       success: resolve,
       fail: reject,
     })
@@ -608,6 +615,20 @@ async function loadNotificationSubscriptions() {
   }
 }
 
+async function loadNotificationConfig() {
+  if (!userStore.isLoggedIn) return
+  try {
+    const res = await notificationApi.config()
+    const byEvent = new Map((res.templates || []).map((item) => [item.eventType, item.templateId]))
+    notificationTemplates.value = notificationTemplates.value.map((item) => ({
+      ...item,
+      templateId: byEvent.get(item.eventType) || item.templateId,
+    }))
+  } catch {
+    // Keep build-time fallback if runtime config is unavailable.
+  }
+}
+
 function subscriptionStatusLabel(eventType: ApprovalNotificationEventType, templateId: string) {
   const item = notificationSubscriptions.value.find((sub) => sub.eventType === eventType && sub.templateId === templateId)
   if (!item) return '未开启'
@@ -621,7 +642,10 @@ async function refreshProfileData() {
   try {
     await communityStore.loadMyCommunities()
     await loadPendingMembers()
-    if (hasAdminTools.value) await loadNotificationSubscriptions()
+    if (hasAdminTools.value) {
+      await loadNotificationConfig()
+      await loadNotificationSubscriptions()
+    }
   } finally {
     refreshingProfile = false
   }

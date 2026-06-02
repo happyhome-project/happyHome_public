@@ -213,6 +213,18 @@ export async function getNotificationSubscriptions(userId: string) {
   return { subscriptions }
 }
 
+export function getNotificationTemplateConfig(userId: string) {
+  if (!userId) throw new Error('Missing OPENID')
+  return {
+    templates: (Object.keys(TEMPLATE_ENV_BY_EVENT) as ApprovalNotificationEventType[])
+      .map((eventType) => ({
+        eventType,
+        templateId: templateIdFor(eventType),
+      }))
+      .filter((item) => item.templateId),
+  }
+}
+
 export async function notifyMemberJoinPending(params: {
   communityId: string
   communityName?: string
