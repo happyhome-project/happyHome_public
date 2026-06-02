@@ -3,8 +3,15 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { loadConfig } from "./config.mjs";
 import { assertDateRange, compactDate } from "./date.mjs";
-import { fetchAccessToken, postDatacube } from "./wechat-client.mjs";
+import { fetchAccessToken, getJsonWithAccessToken, postDatacube, postJsonWithAccessToken } from "./wechat-client.mjs";
 import { getEndpoint, listEndpoints } from "./endpoints.mjs";
+
+const KF_ENDPOINTS = {
+  add: "/customservice/kfaccount/add",
+  invite: "/customservice/kfaccount/inviteworker",
+  list: "/cgi-bin/customservice/getkflist",
+  online: "/cgi-bin/customservice/getonlinekflist"
+};
 
 async function main(argv) {
   const [command, ...args] = argv;
@@ -23,6 +30,26 @@ async function main(argv) {
 
   if (command === "fetch") {
     await fetchCommand(args);
+    return;
+  }
+
+  if (command === "kf:list") {
+    await kfListCommand(args);
+    return;
+  }
+
+  if (command === "kf:online") {
+    await kfOnlineCommand(args);
+    return;
+  }
+
+  if (command === "kf:add") {
+    await kfAddCommand(args);
+    return;
+  }
+
+  if (command === "kf:invite") {
+    await kfInviteCommand(args);
     return;
   }
 
@@ -68,6 +95,97 @@ async function fetchCommand(args) {
   console.log(outputPath);
 }
 
+async function kfListCommand(args) {
+  const { options } = parseArgs(args);
+  await kfReadCommand({
+    path: KF_ENDPOINTS.list,
+    businessId: options["business-id"],
+    dryRun: Boolean(options["dry-run"])
+  });
+}
+
+async function kfOnlineCommand(args) {
+  const { options } = parseArgs(args);
+  await kfReadCommand({
+    path: KF_ENDPOINTS.online,
+    businessId: options["business-id"],
+    dryRun: Boolean(options["dry-run"])
+  });
+}
+
+async function kfReadCommand({ path, businessId, dryRun }) {
+  const query = businessId ? { business_id: businessId } : {};
+  if (dryRun) {
+    console.log(JSON.stringify({ method: "GET", path, query }, null, 2));
+    return;
+  }
+
+  const accessToken = await resolveAccessToken();
+  const data = await getJsonWithAccessToken({ path, query, accessToken });
+  console.log(JSON.stringify(data, null, 2));
+}
+
+async function kfAddCommand(args) {
+  const { options } = parseArgs(args);
+  const kfAccount = String(options.account || "").trim();
+  const nickname = String(options.nickname || "").trim();
+  const businessId = String(options["business-id"] || "").trim();
+
+  if (!kfAccount) {
+    throw new Error("Missing --account. Example: --account feedback@your_account_suffix");
+  }
+  if (!nickname) {
+    throw new Error("Missing --nickname. Example: --nickname HappyHome客服");
+  }
+
+  const body = {
+    kf_account: kfAccount,
+    nickname,
+    ...(businessId ? { business_id: businessId } : {})
+  };
+
+  if (options["dry-run"]) {
+    console.log(JSON.stringify({ method: "POST", path: KF_ENDPOINTS.add, body }, null, 2));
+    return;
+  }
+
+  const accessToken = await resolveAccessToken();
+  const data = await postJsonWithAccessToken({ path: KF_ENDPOINTS.add, body, accessToken });
+  console.log(JSON.stringify(data, null, 2));
+}
+
+async function kfInviteCommand(args) {
+  const { options } = parseArgs(args);
+  const kfAccount = String(options.account || "").trim();
+  const inviteWx = String(options["invite-wx"] || "").trim();
+
+  if (!kfAccount) {
+    throw new Error("Missing --account. Example: --account feedback@your_account_suffix");
+  }
+  if (!inviteWx) {
+    throw new Error("Missing --invite-wx. Example: --invite-wx wx123456");
+  }
+
+  const body = {
+    kf_account: kfAccount,
+    invite_wx: inviteWx
+  };
+
+  if (options["dry-run"]) {
+    console.log(JSON.stringify({ method: "POST", path: KF_ENDPOINTS.invite, body }, null, 2));
+    return;
+  }
+
+  const accessToken = await resolveAccessToken();
+  const data = await postJsonWithAccessToken({ path: KF_ENDPOINTS.invite, body, accessToken });
+  console.log(JSON.stringify(data, null, 2));
+}
+
+async function resolveAccessToken() {
+  const config = loadConfig();
+  return config.accessToken || await fetchAccessToken(config);
+}
+
 function parseArgs(args) {
   const positionals = [];
   const options = {};
@@ -96,7 +214,11 @@ function parseArgs(args) {
 function printHelp() {
   console.log(`Usage:
   node src/cli.mjs list
-  node src/cli.mjs fetch <endpoint> --begin YYYY-MM-DD --end YYYY-MM-DD [--out reports] [--dry-run]`);
+  node src/cli.mjs fetch <endpoint> --begin YYYY-MM-DD --end YYYY-MM-DD [--out reports] [--dry-run]
+  node src/cli.mjs kf:list [--business-id ID] [--dry-run]
+  node src/cli.mjs kf:online [--business-id ID] [--dry-run]
+  node src/cli.mjs kf:add --account ACCOUNT --nickname NAME [--business-id ID] [--dry-run]
+  node src/cli.mjs kf:invite --account ACCOUNT --invite-wx WECHAT_ID [--dry-run]`);
 }
 
 main(process.argv.slice(2)).catch(error => {

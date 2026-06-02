@@ -196,6 +196,22 @@
       </view>
     </view>
 
+    <view data-testid="profile-feedback-contact-card" class="feedback-contact-card">
+      <view class="feedback-copy">
+        <text class="feedback-title">联系与反馈</text>
+        <text class="feedback-desc">使用中遇到问题，或有建议想告诉我，可以直接留言。</text>
+      </view>
+      <button
+        class="feedback-contact-btn"
+        open-type="contact"
+        show-message-card
+        send-message-title="HappyHome 使用反馈"
+        send-message-path="/pages/profile/index"
+      >
+        留言反馈
+      </button>
+    </view>
+
     <!-- My Communities -->
     <view class="section">
       <text class="section-title">我的社区</text>
@@ -630,6 +646,49 @@ onShow(() => {
 .name { font-size: $hh-font-h3; font-weight: $hh-font-weight-bold; color: $hh-color-text; display: block; }
 .user-info { flex: 1; min-width: 0; }
 .action-row { display: flex; gap: $hh-space-sm; margin-top: $hh-space-xs; }
+
+.feedback-contact-card {
+  background: $hh-color-surface;
+  border: 1rpx solid $hh-color-border;
+  border-radius: $hh-radius-md;
+  padding: $hh-space-md $hh-space-lg;
+  margin-bottom: $hh-space-md;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $hh-space-md;
+  box-shadow: 0 8rpx 20rpx rgba(58, 106, 69, 0.06);
+}
+.feedback-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+.feedback-title {
+  font-size: $hh-font-body-lg;
+  font-weight: $hh-font-weight-bold;
+  color: $hh-color-text;
+}
+.feedback-desc {
+  font-size: $hh-font-caption;
+  color: $hh-color-text-mute;
+  line-height: 1.5;
+}
+.feedback-contact-btn {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0 26rpx;
+  height: 60rpx;
+  line-height: 60rpx;
+  border-radius: $hh-radius-full;
+  background: $hh-color-primary;
+  color: $hh-color-surface;
+  font-size: $hh-font-caption;
+  font-weight: $hh-font-weight-bold;
+}
+.feedback-contact-btn::after { border: none; }
 
 /* ── 登录 / 编辑资料表单 ── */
 .login-form {
