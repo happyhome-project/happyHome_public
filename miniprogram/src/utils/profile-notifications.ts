@@ -32,20 +32,35 @@ export function mergeNotificationSubscribeResult(
   templates: ProfileNotificationTemplate[],
   requestResult: Record<string, string>,
 ) {
-  const byKey = new Map<string, ProfileNotificationSubscription>()
+  const merged: ProfileNotificationSubscription[] = []
+  const upsert = (item: ProfileNotificationSubscription) => {
+    const key = subscriptionKey(item.eventType, item.templateId)
+    const existingIndex = merged.findIndex((sub) => subscriptionKey(sub.eventType, sub.templateId) === key)
+    const normalized = {
+      eventType: item.eventType,
+      templateId: item.templateId,
+      status: item.status,
+    }
+    if (existingIndex >= 0) {
+      merged[existingIndex] = normalized
+    } else {
+      merged.push(normalized)
+    }
+  }
+
   for (const item of existing) {
     if (!item.eventType || !item.templateId) continue
-    byKey.set(subscriptionKey(item.eventType, item.templateId), { ...item })
+    upsert(item)
   }
   for (const item of templates) {
     if (!item.templateId) continue
-    byKey.set(subscriptionKey(item.eventType, item.templateId), {
+    upsert({
       eventType: item.eventType,
       templateId: item.templateId,
       status: requestResult[item.templateId] === 'accept' ? 'accept' : 'reject',
     })
   }
-  return Array.from(byKey.values())
+  return merged
 }
 
 export function areAllNotificationTemplatesAccepted(

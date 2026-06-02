@@ -20,7 +20,11 @@ export async function loadAdminPendingState(
       const res = await pendingList(communityId)
       adminCommunityIds.push(communityId)
       if (Array.isArray(res.members) && res.members.length > 0) {
-        pendingMembers.push(...res.members.map((member: any) => ({ ...member, communityId })))
+        for (const member of res.members) {
+          const normalized = Object.assign({}, member)
+          normalized.communityId = communityId
+          pendingMembers.push(normalized)
+        }
       }
     } catch {
       // pendingList only succeeds for communities this user can administer.

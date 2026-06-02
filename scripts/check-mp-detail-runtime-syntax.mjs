@@ -27,6 +27,20 @@ const detailDependencyChunks = [
   'store/audio.js',
 ]
 
+const profileDependencyChunks = [
+  'pages/profile/index.js',
+  'api/cloud.js',
+  'components/AppTabBar.js',
+  'generated/build-info.js',
+  'store/community.js',
+  'store/user.js',
+  'utils/app-tabbar.js',
+  'utils/client-log.js',
+  'utils/profile-admin-tools.js',
+  'utils/profile-notifications.js',
+  'utils/useBusyLock.js',
+]
+
 const rules = [
   {
     name: 'array destructuring arrow parameter',
@@ -80,10 +94,15 @@ if (detailJson.usingComponents?.['widget-editor']) {
   })
 }
 
-for (const relativePath of detailDependencyChunks) {
+const dependencyChunks = Array.from(new Set([
+  ...detailDependencyChunks,
+  ...profileDependencyChunks,
+]))
+
+for (const relativePath of dependencyChunks) {
   const chunkPath = path.join(distRoot, relativePath)
   if (!fs.existsSync(chunkPath)) {
-    console.error(`Missing mp-weixin detail dependency chunk: ${chunkPath}`)
+    console.error(`Missing mp-weixin critical dependency chunk: ${chunkPath}`)
     console.error('Run npm.cmd --workspace miniprogram run build:mp-weixin first.')
     process.exit(1)
   }
@@ -104,11 +123,11 @@ for (const relativePath of detailDependencyChunks) {
 }
 
 if (findings.length > 0) {
-  console.error('mp-weixin detail dependency chunks contain syntax/runtime APIs that have caused blank detail pages in WeChat trial runtime:')
+  console.error('mp-weixin critical dependency chunks contain syntax/runtime APIs that have caused blank pages in WeChat trial runtime:')
   for (const finding of findings) {
     console.error(`- ${finding.file}: ${finding.rule} at ${finding.offset}: ${finding.snippet}`)
   }
   process.exit(1)
 }
 
-console.log('mp-weixin detail dependency runtime syntax check passed')
+console.log('mp-weixin detail/profile dependency runtime syntax check passed')

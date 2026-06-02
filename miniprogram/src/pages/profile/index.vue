@@ -575,7 +575,12 @@ const notificationSubscribeLock = useBusyLock(async () => {
     return
   }
 
-  const templateIds = Array.from(new Set(templates.map(item => item.templateId).filter(Boolean)))
+  const templateIds: string[] = []
+  for (const item of templates) {
+    if (item.templateId && !templateIds.includes(item.templateId)) {
+      templateIds.push(item.templateId)
+    }
+  }
   const result: Record<string, string> = await new Promise((resolve, reject) => {
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore
@@ -635,11 +640,14 @@ async function loadNotificationConfig() {
   if (!userStore.isLoggedIn) return
   try {
     const res = await notificationApi.config()
-    const byEvent = new Map((res.templates || []).map((item) => [item.eventType, item.templateId]))
-    notificationTemplates.value = notificationTemplates.value.map((item) => ({
-      ...item,
-      templateId: byEvent.get(item.eventType) || item.templateId,
-    }))
+    const templates = res.templates || []
+    notificationTemplates.value = notificationTemplates.value.map((item) => {
+      const remote = templates.find((template) => template.eventType === item.eventType)
+      return {
+        eventType: item.eventType,
+        templateId: remote?.templateId || item.templateId,
+      }
+    })
   } catch {
     // Keep build-time fallback if runtime config is unavailable.
   }

@@ -7,6 +7,8 @@
 </template>
 
 <script setup lang="ts">
+import { clientLog } from '../utils/client-log'
+
 withDefaults(defineProps<{
   title?: string
   desc?: string
@@ -18,7 +20,20 @@ withDefaults(defineProps<{
 })
 
 function handleGoLogin() {
-  uni.switchTab({ url: '/pages/profile/index' })
+  const url = '/pages/profile/index'
+  clientLog('info', 'loginGuard.profile.tap', { url })
+  uni.switchTab({
+    url,
+    success: () => clientLog('info', 'loginGuard.profile.switchTab.success', { url }),
+    fail: (error) => {
+      clientLog('error', 'loginGuard.profile.switchTab.fail', { url, error })
+      uni.reLaunch({
+        url,
+        success: () => clientLog('info', 'loginGuard.profile.reLaunch.success', { url }),
+        fail: (fallbackError) => clientLog('error', 'loginGuard.profile.reLaunch.fail', { url, error: fallbackError }),
+      })
+    },
+  })
 }
 </script>
 
