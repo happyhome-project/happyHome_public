@@ -120,10 +120,6 @@ export function clientLog(level: LogLevel, event: string, details: Record<string
   }
 }
 
-export function debugBuildLabel() {
-  return 'mp ' + BUILD_INFO.version + ' ' + BUILD_INFO.buildId
-}
-
 export function installRuntimeLogHooks() {
   if (hooksInstalled) return
   hooksInstalled = true

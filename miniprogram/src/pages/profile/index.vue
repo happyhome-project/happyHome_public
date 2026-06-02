@@ -288,6 +288,9 @@
         </view>
       </view>
     </view>
+    <view class="profile-version">
+      <text>ver: {{ appVersion }}</text>
+    </view>
     <AppTabBar current="profile" />
   </view>
 </template>
@@ -301,6 +304,7 @@ import { memberApi, notificationApi, type ApprovalNotificationEventType } from '
 import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
+import { BUILD_INFO } from '../../generated/build-info'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -308,6 +312,10 @@ const pendingMembers = ref<any[]>([])
 const adminCommunityIds = ref<string[]>([])
 const notificationSubscriptions = ref<Array<{ eventType: ApprovalNotificationEventType; templateId: string; status: string }>>([])
 let refreshingProfile = false
+const appVersion = computed(() => {
+  const rawVersion = String(BUILD_INFO.version || BUILD_INFO.buildId || 'unknown')
+  return rawVersion.replace(/^1\.0\./, '0.7.')
+})
 
 const notificationTemplates = [
   {
@@ -825,6 +833,17 @@ onShow(() => {
 .notify-btn { margin-top: $hh-space-md; background: $hh-color-primary; color: $hh-color-text-inverse; }
 .notification-status { display: flex; flex-wrap: wrap; gap: $hh-space-sm; margin-top: $hh-space-md; }
 .status-pill { padding: 6rpx 14rpx; border-radius: $hh-radius-full; background: #f3f6f4; color: $hh-color-text-sub; font-size: $hh-font-caption; }
+.profile-version {
+  padding: 20rpx 0 10rpx;
+  text-align: center;
+  font-family: $hh-font-mono;
+  font-size: 18rpx;
+  color: $hh-color-text-mute;
+  opacity: 0.58;
+}
+.profile-version text {
+  user-select: text;
+}
 
 .login-actions { display: flex; gap: $hh-space-sm; }
 .dev-btn { background: $hh-color-warning; color: $hh-color-text-inverse; font-size: $hh-font-caption; }
