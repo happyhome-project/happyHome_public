@@ -12,12 +12,7 @@
       >
         <el-menu-item data-testid="menu-approval" index="/approval">
           <span>审批中心</span>
-          <el-badge
-            v-if="approvalTotal > 0"
-            :value="approvalTotal"
-            type="danger"
-            class="menu-badge"
-          />
+          <span v-if="approvalTotal > 0" class="menu-badge">{{ approvalTotal }}</span>
         </el-menu-item>
         <el-menu-item data-testid="menu-communities" index="/communities">
           {{ authStore.isSuperAdmin ? '社区管理' : '我的社区' }}
@@ -104,5 +99,24 @@ async function handleLogout() {
 }
 .user-info { display: flex; align-items: center; gap: 8px; }
 .user-name { font-size: 14px; color: #606266; }
-.menu-badge { margin-left: 8px; }
+:deep(.el-menu-item[data-testid="menu-approval"]) {
+  display: flex;
+  align-items: center;
+}
+.menu-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 8px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #f56c6c;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  box-sizing: border-box;
+}
 </style>
