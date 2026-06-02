@@ -252,6 +252,7 @@ import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard } from '../../utils/widget'
 import { clientLog } from '../../utils/client-log'
 import { BUILD_INFO } from '../../generated/build-info'
+import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -618,7 +619,7 @@ async function loadAllSectionPosts() {
         if (error?.message?.includes('需要先加入社区后查看内容')) {
           communityStore.clearCommunityState()
           uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
-          uni.reLaunch({ url: '/pages/onboarding/index' })
+          openOnboardingPreservingStack()
           return
         }
         results[section._id] = []
@@ -685,8 +686,8 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
     })
     if (communityStore.myCommunities.length === 0) {
       postsBySection.value = {}
-      clientLog('warn', 'home.communities.empty.relaunchOnboarding', {})
-      uni.reLaunch({ url: '/pages/onboarding/index' })
+      clientLog('warn', 'home.communities.empty.openOnboarding', {})
+      openOnboardingPreservingStack()
       return
     }
     await loadAllSectionPosts()

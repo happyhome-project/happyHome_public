@@ -317,6 +317,7 @@ import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { BUILD_INFO } from '../../generated/build-info'
 import { clientLog } from '../../utils/client-log'
+import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -623,8 +624,7 @@ function handleLogout() {
 }
 
 function goOnboarding() {
-  uni.setStorageSync('onboarding_entry_mode', 'discover')
-  uni.reLaunch({ url: '/pages/onboarding/index?mode=discover' })
+  openOnboardingPreservingStack({ mode: 'discover' })
 }
 
 function isAdminOf(communityId: string) {
@@ -661,7 +661,7 @@ const leaveCommunityLock = useKeyedBusyLock(
       uni.showToast({ title: '已退出社区', icon: 'success' })
       await communityStore.loadMyCommunities()
       if (communityStore.myCommunities.length === 0) {
-        uni.reLaunch({ url: '/pages/onboarding/index' })
+        openOnboardingPreservingStack()
       }
     } catch (e: any) {
       uni.showToast({ title: e?.message || '退出失败', icon: 'none' })

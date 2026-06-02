@@ -3,6 +3,7 @@ import { onLaunch, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from './store/community'
 import { useUserStore } from './store/user'
 import { clientLog, installRuntimeLogHooks } from './utils/client-log'
+import { openOnboardingPreservingStack } from './utils/onboarding-nav'
 
 async function refreshMyCommunitiesSilently() {
   const userStore = useUserStore()
@@ -67,8 +68,8 @@ onLaunch(async () => {
         currentCommunityId: communityStore.currentCommunityId || '',
       })
       if (communityStore.myCommunities.length === 0) {
-        clientLog('warn', 'app.communities.empty.relaunchOnboarding', {})
-        uni.reLaunch({ url: '/pages/onboarding/index' })
+        clientLog('warn', 'app.communities.empty.openOnboarding', {})
+        openOnboardingPreservingStack()
       }
     } catch (e) {
       clientLog('error', 'app.communities.load.fail', { error: e })

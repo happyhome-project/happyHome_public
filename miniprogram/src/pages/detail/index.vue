@@ -143,6 +143,7 @@ import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { clientLog } from '../../utils/client-log'
+import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 
 const fallbackAvatar = '/static/default-avatar.png'
 const ATTENDANCE_SLOT_DISPLAY_MAX = 6
@@ -317,7 +318,7 @@ async function loadPost(postId: string) {
     if (error?.message?.includes('需要先加入社区后查看内容')) {
       communityStore.clearCommunityState()
       uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
-      uni.reLaunch({ url: '/pages/onboarding/index' })
+      openOnboardingPreservingStack({ replaceCurrent: true })
       return
     }
     loadError.value = friendlyLoadError(error)
