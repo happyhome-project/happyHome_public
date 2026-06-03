@@ -42,7 +42,7 @@ export async function playInline(item: VideoItem, ctx: PlayContext): Promise<voi
   }
   if (item.source === 'h5') {
     if (IS_H5) {
-      try { (window as any).open?.(item.url, '_blank') } catch { /* noop */ }
+      try { (window as any).open?.(item.url, '_blank') } catch (_error) { /* noop */ }
       return
     }
     uni.navigateTo({ url: `/pages/web-view/index?url=${encodeURIComponent(item.url)}` })

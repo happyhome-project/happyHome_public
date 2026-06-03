@@ -63,7 +63,7 @@
 
 <script setup lang="ts">
 import { reactive, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import { Bottom, Delete, Plus, Top, Upload } from '@element-plus/icons-vue'
 import { imageApi } from '../api/cloud'
 

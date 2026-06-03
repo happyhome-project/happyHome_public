@@ -1,5 +1,12 @@
 <template>
   <view class="profile-page">
+    <view class="profile-debug-banner">
+      <text>ver: {{ appVersion }}</text>
+      <text>{{ profileDebugText }}</text>
+    </view>
+    <view v-if="profileError" class="profile-error">
+      <text>{{ profileError }}</text>
+    </view>
     <!-- User info / login form -->
     <view class="user-card">
       <!-- 已登录且非编辑态：显示头像+昵称+登出/编辑按钮 -->
@@ -91,6 +98,9 @@
             <text class="login-alt-hint">使用其他账号？</text>
             <text class="login-alt-link" @tap="showDevLogin = true">DEV 登录</text>
           </view>
+          <view class="login-version">
+            <text>ver: {{ appVersion }}</text>
+          </view>
         </view>
       </template>
 
@@ -135,6 +145,9 @@
               class="dev-btn"
               @tap="showDevLogin = true"
             >DEV 登录</button>
+          </view>
+          <view class="login-version">
+            <text>ver: {{ appVersion }}</text>
           </view>
         </view>
       </template>
@@ -292,7 +305,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
@@ -301,6 +314,8 @@ import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { BUILD_INFO } from '../../generated/build-info'
+import { clientLog } from '../../utils/client-log'
+import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import {
   buildApprovalReminderState,
   buildSubscriptionSaves,
@@ -316,6 +331,7 @@ const adminCommunityIds = ref<string[]>([])
 const notificationTemplates = ref<ApprovalNotificationTemplate[]>([])
 const notificationSubscriptions = ref<Array<{ eventType: ApprovalNotificationEventType; templateId: string; status: string }>>([])
 const notificationNeedsAuthorization = ref(false)
+const profileError = ref('')
 let refreshingProfile = false
 const appVersion = computed(() => {
   const rawVersion = String(BUILD_INFO.version || BUILD_INFO.buildId || 'unknown')
@@ -350,6 +366,10 @@ const formAvatarDisplay = computed(() => formAvatarTempPath.value || formAvatarC
 
 // 是否支持 <button open-type="chooseAvatar">：需要基础库 ≥ 2.21.2，mp-weixin 环境
 const supportsChooseAvatar = computed(() => {
+  // H5 smoke uses this hook to exercise the real-phone chooseAvatar branch.
+  if (typeof globalThis !== 'undefined' && (globalThis as any).__HH_TEST_CHOOSE_AVATAR__ === true) {
+    return true
+  }
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore
   if (typeof wx === 'undefined' || !wx?.canIUse) return false
@@ -357,13 +377,46 @@ const supportsChooseAvatar = computed(() => {
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore
     return !!wx.canIUse('button.open-type.chooseAvatar')
-  } catch {
+  } catch (_error) {
     return false
   }
 })
 
 // 表单是否可提交：至少要有昵称
 const canSubmitForm = computed(() => formNickName.value.trim().length > 0)
+const profileShellState = computed(() => {
+  if (isEditingProfile.value) return 'editing'
+  return userStore.isLoggedIn ? 'logged-in' : 'logged-out'
+})
+const profileDebugText = computed(() => [
+  `state:${profileShellState.value}`,
+  `login:${userStore.isLoggedIn ? '1' : '0'}`,
+  `cc:${communityStore.myCommunities.length}`,
+].join(' '))
+
+function getProfileLogDetails(extra: Record<string, any> = {}) {
+  const details: Record<string, any> = {
+    shellState: profileShellState.value,
+    loggedIn: userStore.isLoggedIn,
+    openIdTail: userStore.openId ? String(userStore.openId).slice(-6) : '',
+    nickName: userStore.nickName || '',
+    communityCount: communityStore.myCommunities.length,
+    currentCommunityId: communityStore.currentCommunityId || '',
+    hasAdminTools: hasAdminTools.value,
+    pendingMemberCount: pendingMembers.value.length,
+    adminCommunityCount: adminCommunityIds.value.length,
+    refreshingProfile,
+    profileError: profileError.value || '',
+  }
+  Object.keys(extra).forEach((key) => {
+    details[key] = extra[key]
+  })
+  return details
+}
+
+function logProfile(level: 'debug' | 'info' | 'warn' | 'error', event: string, details: Record<string, any> = {}) {
+  clientLog(level, event, getProfileLogDetails(details))
+}
 
 function onChooseAvatar(e: any) {
   const tempPath = e?.detail?.avatarUrl || ''
@@ -480,12 +533,14 @@ const devLoginLock = useBusyLock(async () => {
 function handleLogout() {
   userStore.logout()
   communityStore.$patch({ myCommunities: [], currentCommunityId: '', currentSections: [] })
+  pendingMembers.value = []
+  adminCommunityIds.value = []
+  notificationSubscriptions.value = []
   uni.showToast({ title: '已登出', icon: 'none' })
 }
 
 function goOnboarding() {
-  uni.setStorageSync('onboarding_entry_mode', 'discover')
-  uni.reLaunch({ url: '/pages/onboarding/index?mode=discover' })
+  openOnboardingPreservingStack({ mode: 'discover' })
 }
 
 function isAdminOf(communityId: string) {
@@ -522,7 +577,7 @@ const leaveCommunityLock = useKeyedBusyLock(
       uni.showToast({ title: '已退出社区', icon: 'success' })
       await communityStore.loadMyCommunities()
       if (communityStore.myCommunities.length === 0) {
-        uni.reLaunch({ url: '/pages/onboarding/index' })
+        openOnboardingPreservingStack()
       }
     } catch (e: any) {
       uni.showToast({ title: e?.message || '退出失败', icon: 'none' })
@@ -598,21 +653,45 @@ async function loadPendingMembers() {
   if (!userStore.isLoggedIn) return
   const nextPendingMembers: any[] = []
   const nextAdminCommunityIds: string[] = []
-  // Load pending members for each admin community
-  for (const c of communityStore.myCommunities) {
+
+  for (const community of communityStore.myCommunities) {
+    const communityId = String(community?._id || '')
+    if (!communityId) continue
     try {
-      const res = await memberApi.pendingList(c._id)
-      // pendingList succeeds = user is admin of this community
-      nextAdminCommunityIds.push(c._id)
-      if (res.members.length > 0) {
-        nextPendingMembers.push(...res.members.map((m: any) => ({ ...m, communityId: c._id })))
+      const res = await memberApi.pendingList(communityId)
+      nextAdminCommunityIds.push(communityId)
+      if (Array.isArray(res.members) && res.members.length > 0) {
+        for (const member of res.members) {
+          const normalized = Object.assign({}, member)
+          normalized.communityId = communityId
+          nextPendingMembers.push(normalized)
+        }
       }
-    } catch {
-      // Not admin of this community, skip
+    } catch (_error) {
+      // pendingList only succeeds for communities this user can administer.
     }
   }
-  adminCommunityIds.value = nextAdminCommunityIds
+
   pendingMembers.value = nextPendingMembers
+  adminCommunityIds.value = nextAdminCommunityIds
+}
+
+async function loadNotificationSubscriptions(options: { preserveOnFailure?: boolean } = {}) {
+  if (!userStore.isLoggedIn) return
+  try {
+    const res = await notificationApi.status()
+    notificationSubscriptions.value = Array.isArray(res.subscriptions) ? res.subscriptions : []
+    notificationNeedsAuthorization.value = !!res.needsAuthorization
+  } catch (_error) {
+    if (!options.preserveOnFailure) {
+      notificationSubscriptions.value = []
+      notificationNeedsAuthorization.value = false
+    }
+  }
+}
+
+async function loadNotificationStatus() {
+  return loadNotificationSubscriptions()
 }
 
 async function loadNotificationConfig() {
@@ -620,50 +699,72 @@ async function loadNotificationConfig() {
   try {
     const res = await notificationApi.config()
     notificationTemplates.value = Array.isArray(res.templates) ? res.templates : []
-  } catch {
+  } catch (_error) {
     notificationTemplates.value = []
   }
 }
 
-async function loadNotificationStatus() {
-  if (!userStore.isLoggedIn) return
-  try {
-    const res = await notificationApi.status()
-    notificationSubscriptions.value = Array.isArray(res.subscriptions) ? res.subscriptions : []
-    notificationNeedsAuthorization.value = !!res.needsAuthorization
-  } catch {
-    notificationSubscriptions.value = []
-    notificationNeedsAuthorization.value = false
+async function refreshProfileData(reason = 'manual') {
+  if (refreshingProfile) {
+    logProfile('warn', 'profile.refresh.skip.busy', { reason })
+    return
   }
-}
-
-async function refreshProfileData() {
-  if (refreshingProfile || !userStore.isLoggedIn) return
+  if (!userStore.isLoggedIn) {
+    profileError.value = ''
+    logProfile('warn', 'profile.refresh.skip.loggedOut', { reason })
+    return
+  }
   refreshingProfile = true
+  profileError.value = ''
+  logProfile('info', 'profile.refresh.start', { reason })
   try {
     await communityStore.loadMyCommunities()
-    await loadNotificationConfig()
+    logProfile('info', 'profile.communities.load.success', {
+      reason,
+      loadedCommunityCount: communityStore.myCommunities.length,
+    })
     await loadPendingMembers()
-    if (hasAdminTools.value) await loadNotificationStatus()
+    logProfile('info', 'profile.pending.load.success', {
+      reason,
+      pendingMemberCount: pendingMembers.value.length,
+      adminCommunityCount: adminCommunityIds.value.length,
+    })
+    if (hasAdminTools.value) {
+      await loadNotificationConfig()
+      await loadNotificationSubscriptions()
+      logProfile('info', 'profile.notifications.load.success', {
+        reason,
+        templateCount: configuredNotificationTemplates.value.length,
+        subscriptionCount: notificationSubscriptions.value.length,
+      })
+    }
+  } catch (error: any) {
+    profileError.value = error?.message || 'profile refresh failed'
+    logProfile('error', 'profile.refresh.fail', { reason, error })
   } finally {
     refreshingProfile = false
+    logProfile('info', 'profile.refresh.done', { reason })
   }
 }
 
 onMounted(() => {
   hideNativeTabBar()
-  void refreshProfileData()
+  logProfile('info', 'profile.mounted', {})
+  void nextTick(() => logProfile('info', 'profile.render.tick', { reason: 'mounted' }))
+  void refreshProfileData('mounted')
 })
 // tabBar 切回 Profile 只触发 onShow，不会重新 mount。新申请者 / 被审批后的状态
 // 需要在 onShow 重新拉取，否则 admin 在本 tab 看不到实时变动。
 onShow(() => {
   hideNativeTabBar()
-  void refreshProfileData()
+  logProfile('info', 'profile.show', {})
+  void nextTick(() => logProfile('info', 'profile.render.tick', { reason: 'show' }))
+  void refreshProfileData('show')
 })
 
 onPullDownRefresh(async () => {
   try {
-    await refreshProfileData()
+    await refreshProfileData('pullDown')
   } catch {
     uni.showToast({ title: '刷新失败，请重试', icon: 'none' })
   } finally {
@@ -674,6 +775,28 @@ onPullDownRefresh(async () => {
 
 <style lang="scss" scoped>
 .profile-page { padding: $hh-space-lg $hh-space-lg calc(132rpx + env(safe-area-inset-bottom)); background: $hh-color-bg-sub; min-height: 100vh; }
+.profile-debug-banner {
+  margin-bottom: $hh-space-sm;
+  padding: 10rpx 16rpx;
+  border: 1rpx solid $hh-color-border;
+  border-radius: $hh-radius-sm;
+  background: $hh-color-surface;
+  display: flex;
+  justify-content: space-between;
+  gap: $hh-space-sm;
+  font-family: $hh-font-mono;
+  font-size: 18rpx;
+  color: $hh-color-text-mute;
+}
+.profile-error {
+  margin-bottom: $hh-space-sm;
+  padding: 12rpx 16rpx;
+  border-radius: $hh-radius-sm;
+  background: #fff5f5;
+  color: #d93026;
+  font-size: $hh-font-caption;
+  line-height: 1.5;
+}
 .user-card { background: $hh-color-surface; border-radius: $hh-radius-md; padding: $hh-space-lg; display: flex; align-items: center; margin-bottom: $hh-space-md; }
 .avatar { width: 100rpx; height: 100rpx; border-radius: $hh-radius-full; margin-right: $hh-space-md; }
 .name { font-size: $hh-font-h3; font-weight: $hh-font-weight-bold; color: $hh-color-text; display: block; }
@@ -819,6 +942,14 @@ onPullDownRefresh(async () => {
   font-size: $hh-font-caption;
   color: $hh-accent;
   text-decoration: underline;
+}
+.login-version {
+  margin-top: $hh-space-sm;
+  text-align: center;
+  font-family: $hh-font-mono;
+  font-size: 18rpx;
+  color: $hh-color-text-mute;
+  opacity: 0.7;
 }
 .form-actions {
   display: flex;

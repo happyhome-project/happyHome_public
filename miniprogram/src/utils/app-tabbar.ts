@@ -18,7 +18,7 @@ export function getTabByKey(key: AppTabKey): AppTabItem | undefined {
 export function hideNativeTabBar() {
   try {
     uni.hideTabBar({ animation: false })
-  } catch {
+  } catch (_error) {
     // Some non-mini-program runtimes do not expose the native tabBar bridge.
   }
 }

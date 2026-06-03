@@ -5,7 +5,7 @@
       title="请先登录"
       desc="登录后才能查看帖子详情"
     />
-    <view v-else-if="post && section" class="content">
+    <view v-else-if="post && section" class="content" :class="{ 'guide-note-detail': isGuideNoteDetail }">
       <view v-if="post.isPinned || post.isFeatured" class="post-flag-row">
         <text v-if="post.isPinned" class="post-flag pin">置顶</text>
         <text v-if="post.isFeatured" class="post-flag feature">精华</text>
@@ -17,6 +17,7 @@
           :widget="widget"
           :content="post.content"
           :post-meta="postMeta"
+          :variant="isGuideNoteDetail ? 'guide_note' : 'default'"
         />
 
         <view
@@ -142,6 +143,7 @@ import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { clientLog } from '../../utils/client-log'
+import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 
 const fallbackAvatar = '/static/default-avatar.png'
 const ATTENDANCE_SLOT_DISPLAY_MAX = 6
@@ -180,6 +182,7 @@ const postMeta = computed(() => ({
   communityId: String(post.value?.communityId || section.value?.communityId || ''),
 }))
 const detailSectionTitle = computed(() => section.value?.name || '')
+const isGuideNoteDetail = computed(() => section.value?.displayTemplate === 'guide_note')
 const regularWidgets = computed(() =>
   (section.value?.widgets || []).filter((widget: any) => !['attendance', 'admin_notice'].includes(widget.type))
 )
@@ -315,7 +318,7 @@ async function loadPost(postId: string) {
     if (error?.message?.includes('需要先加入社区后查看内容')) {
       communityStore.clearCommunityState()
       uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
-      uni.reLaunch({ url: '/pages/onboarding/index' })
+      openOnboardingPreservingStack({ replaceCurrent: true })
       return
     }
     loadError.value = friendlyLoadError(error)
@@ -430,7 +433,7 @@ async function resolveAttendanceAvatarUrls() {
       postId: currentPostId.value,
       resolvedCount: Object.keys(resolved).length,
     })
-  } catch {
+  } catch (_error) {
     clientLog('warn', 'detail.avatar.resolve.fail', {
       postId: currentPostId.value,
       urlCount: urls.length,

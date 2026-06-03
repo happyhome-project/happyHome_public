@@ -46,10 +46,10 @@ const TEMP_URL_TTL_MS = 2 * 60 * 60 * 1000
 let deps: AudioStoreDeps = {
   storage: {
     get: (key) => {
-      try { return uni.getStorageSync(key) } catch { return null }
+      try { return uni.getStorageSync(key) } catch (_error) { return null }
     },
     set: (key, value) => {
-      try { uni.setStorageSync(key, value) } catch {}
+      try { uni.setStorageSync(key, value) } catch (_error) {}
     },
   },
   getTempFileURL: async (fileIDs) => {
@@ -137,7 +137,7 @@ export const useAudioStore = defineStore('audio', {
       this._backend().seek(seconds)
     },
     close() {
-      try { this._backend().stop() } catch {}
+      try { this._backend().stop() } catch (_error) {}
       this.isPlaying = false
       this.isVisible = false
       this.currentPlaylist = []

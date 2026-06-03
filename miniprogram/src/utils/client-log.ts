@@ -73,7 +73,7 @@ function currentRoute() {
     const pages = getCurrentPages()
     const page = pages && pages.length ? pages[pages.length - 1] : null
     return page && page.route ? String(page.route) : ''
-  } catch {
+  } catch (_error) {
     return ''
   }
 }
@@ -82,7 +82,7 @@ function emitConsole(level: LogLevel, event: string, payload: Record<string, any
   const method = level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log'
   try {
     console[method]('[client-log]', event, payload)
-  } catch {
+  } catch (_error) {
     // Never let diagnostics affect product behavior.
   }
 }

@@ -36,8 +36,9 @@ beforeEach(() => {
   jest.resetAllMocks()
   ;(cloud.getWXContext as jest.Mock).mockReturnValue({ OPENID: 'test-openid' })
   delete process.env.APPROVAL_MEMBER_JOIN_TEMPLATE_ID
-  delete process.env.APPROVAL_COMMUNITY_CREATE_TEMPLATE_ID
   delete process.env.APPROVAL_MEMBER_JOIN_TEMPLATE_FIELDS
+  delete process.env.APPROVAL_COMMUNITY_CREATE_TEMPLATE_ID
+  delete process.env.APPROVAL_COMMUNITY_CREATE_TEMPLATE_FIELDS
 })
 
 test('申请加入开放社区：直接创建 active 记录并递增 memberCount', async () => {
@@ -117,16 +118,16 @@ test('通知订阅：保存当前管理员的审批提醒订阅状态', async ()
   expect(result).toEqual({ success: true })
 })
 
-test('通知配置：从云端运行时环境返回审批提醒模板 ID', async () => {
-  process.env.APPROVAL_MEMBER_JOIN_TEMPLATE_ID = 'tmpl-shared'
-  process.env.APPROVAL_COMMUNITY_CREATE_TEMPLATE_ID = 'tmpl-shared'
+test('通知配置：从云函数 env 返回小程序订阅模板 ID', async () => {
+  process.env.APPROVAL_MEMBER_JOIN_TEMPLATE_ID = 'tmpl-member'
+  process.env.APPROVAL_COMMUNITY_CREATE_TEMPLATE_ID = 'tmpl-community'
 
   const result = await main({ action: 'notificationConfig' })
 
   expect(result).toEqual({
     templates: [
-      { eventType: 'member_join_pending', templateId: 'tmpl-shared' },
-      { eventType: 'community_create_pending', templateId: 'tmpl-shared' },
+      { eventType: 'member_join_pending', templateId: 'tmpl-member' },
+      { eventType: 'community_create_pending', templateId: 'tmpl-community' },
     ],
   })
 })

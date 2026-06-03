@@ -208,16 +208,7 @@ async function main() {
     skipOnFailure: ['install', 'admin-build'],
   })
   await runStage({ key: 'mp-build', name: 'miniprogram build', command: 'npm.cmd', args: ['run', 'build:mp-weixin', '--workspace', 'miniprogram'], skipOnFailure: ['install'] })
-  const mpMain = await runStage({ key: 'mp-main', name: 'miniprogram UI automation', command: 'npm.cmd', args: ['run', 'test:mp'], skipOnFailure: ['install', 'mp-build'] })
-
-  let mpReplay = null
-  if (mpMain.status === 'failed') {
-    mpReplay = await runStage({ key: 'mp-replay', name: 'miniprogram replay fallback', command: 'npm.cmd', args: ['run', 'test:mp:replay'], skipOnFailure: ['install', 'mp-build'] })
-    if (mpReplay.status === 'passed') {
-      mpReplay.status = 'recovered_flaky'
-      stageStatus.set('mp-replay', mpReplay.status)
-    }
-  }
+  await runStage({ key: 'mp-devtools', name: 'miniprogram DevTools automation capability', command: 'npm.cmd', args: ['run', 'test:mp:devtools'], skipOnFailure: ['install', 'mp-build'] })
 
   const cleanupIssues = await collectCleanupIssues(reportDir)
   const hasFailures = stages.some((stage) => stage.status === 'failed' || stage.status === 'recovered_flaky')

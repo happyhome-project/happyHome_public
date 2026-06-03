@@ -48,11 +48,6 @@ function templateIdFor(eventType: ApprovalNotificationEventType) {
   return String(process.env[TEMPLATE_ENV_BY_EVENT[eventType]] || '').trim()
 }
 
-function notificationTemplates() {
-  return (Object.keys(TEMPLATE_ENV_BY_EVENT) as ApprovalNotificationEventType[])
-    .map((eventType) => ({ eventType, templateId: templateIdFor(eventType) }))
-}
-
 function templateFieldsFor(eventType: ApprovalNotificationEventType) {
   const raw = String(process.env[TEMPLATE_FIELDS_ENV_BY_EVENT[eventType]] || '').trim()
   if (!raw) return DEFAULT_TEMPLATE_FIELDS
@@ -218,8 +213,16 @@ export async function getNotificationSubscriptions(userId: string) {
   return { subscriptions }
 }
 
-export async function getNotificationConfig() {
-  return { templates: notificationTemplates() }
+export function getNotificationTemplateConfig(userId: string) {
+  if (!userId) throw new Error('Missing OPENID')
+  return {
+    templates: (Object.keys(TEMPLATE_ENV_BY_EVENT) as ApprovalNotificationEventType[])
+      .map((eventType) => ({
+        eventType,
+        templateId: templateIdFor(eventType),
+      }))
+      .filter((item) => item.templateId),
+  }
 }
 
 export async function getNotificationStatus(userId: string) {
@@ -229,7 +232,7 @@ export async function getNotificationStatus(userId: string) {
     orderBy: ['createdAt', 'desc'],
     limit: 10,
   })
-  const configuredTemplates = notificationTemplates().filter((item) => item.templateId)
+  const configuredTemplates = getNotificationTemplateConfig(userId).templates
   const hasAcceptedAllConfigured = configuredTemplates.length > 0 && configuredTemplates.every((template) =>
     subscriptions.some((sub: any) =>
       sub.eventType === template.eventType
@@ -251,7 +254,7 @@ export async function getNotificationStatus(userId: string) {
 
   return {
     subscriptions,
-    templates: notificationTemplates(),
+    templates: configuredTemplates,
     needsAuthorization: !hasAcceptedAllConfigured || !!blockingNotification,
     lastBlockingReason: blockingNotification?.reason || '',
     lastBlockingAt: blockingNotification?.createdAt || '',

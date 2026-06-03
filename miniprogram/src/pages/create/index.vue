@@ -97,6 +97,7 @@ import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
+import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -218,8 +219,7 @@ function goLogin() {
 }
 
 function goOnboarding() {
-  uni.setStorageSync('onboarding_entry_mode', 'discover')
-  uni.navigateTo({ url: '/pages/onboarding/index?mode=discover' })
+  openOnboardingPreservingStack({ mode: 'discover' })
 }
 
 function selectSection(section: any) {

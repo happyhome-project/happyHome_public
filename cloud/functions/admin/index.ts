@@ -21,6 +21,7 @@ import type {
   AdminSession,
   Community,
   Section,
+  SectionDisplayTemplate,
   SectionType,
   Widget,
 } from '../../shared/types'
@@ -128,9 +129,23 @@ function normalizeSection(section: any) {
     ...section,
     type: section?.type || 'evergreen',
     status: section?.status || 'active',
+    displayTemplate: normalizeSectionDisplayTemplate(section?.displayTemplate),
     enableComment: section?.enableComment !== false,
     enableLike: section?.enableLike !== false,
   }
+}
+
+function normalizeSectionDisplayTemplate(value: unknown): SectionDisplayTemplate {
+  return value === 'guide_note' ? 'guide_note' : 'default'
+}
+
+function buildDefaultGuideNoteWidgets(): Widget[] {
+  return [
+    { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
+    { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: false, order: 1, showInList: false },
+    { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false },
+    { widgetId: 'guide_location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false },
+  ]
 }
 
 function normalizeKeyword(value: unknown) {
@@ -862,6 +877,9 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
   }
   if (action === 'section.create') {
     const type = params.type === 'realtime' ? 'realtime' : 'evergreen'
+    const displayTemplate = type === 'evergreen'
+      ? normalizeSectionDisplayTemplate(params.displayTemplate)
+      : 'default'
     const sectionId = await db.create('sections', {
       communityId: params.communityId,
       name: params.name,
@@ -869,10 +887,11 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       order: params.order ?? 0,
       enableComment: params.enableComment !== false,
       enableLike: params.enableLike !== false,
-      widgets: [],
+      widgets: displayTemplate === 'guide_note' ? buildDefaultGuideNoteWidgets() : [],
       createdAt: new Date().toISOString(),
       type,
       status: 'active',
+      displayTemplate,
       ...(params.accentColor ? { accentColor: String(params.accentColor) } : {}),
     })
     return { sectionId }
@@ -890,6 +909,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (typeof params.order === 'number') updates.order = params.order
     if (params.type === 'realtime' || params.type === 'evergreen') updates.type = params.type
     if (params.status === 'active' || params.status === 'dormant' || params.status === 'archived') updates.status = params.status
+    if (typeof params.displayTemplate !== 'undefined') updates.displayTemplate = normalizeSectionDisplayTemplate(params.displayTemplate)
     if (typeof params.accentColor === 'string') updates.accentColor = params.accentColor
     if (typeof params.enableComment === 'boolean') updates.enableComment = params.enableComment
     if (typeof params.enableLike === 'boolean') updates.enableLike = params.enableLike

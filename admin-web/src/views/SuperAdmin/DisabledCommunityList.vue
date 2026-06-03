@@ -41,7 +41,8 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { communityApi } from '../../api/cloud'
 import { formatAdminDateTime } from '../../utils/datetime'
 

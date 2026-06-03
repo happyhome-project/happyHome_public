@@ -17,6 +17,16 @@ export interface FamilyLetterListSummary {
   author: string
 }
 
+export interface GuideNoteCard {
+  title: string
+  coverImage: string
+  excerpt: string
+  location: string
+  author: string
+  when: string
+  hasCover: boolean
+}
+
 export function getCarpoolLiveMeta(post: Post, section: Section): string[] | null {
   const summary = getCarpoolListSummary(post, section)
   if (!summary) return null
@@ -55,6 +65,31 @@ export function getArchiveHomeMeta(post: Post, section: Section): string {
     return `${post.commentCount} 评论`
   }
   return ''
+}
+
+export function getGuideNoteCard(post: Post, section: Section): GuideNoteCard {
+  const titleWidget = findWidgetByLabel(section, ['标题', '名称', '名字'])
+    || findFirstWidgetByTypes(section, ['short_text', 'summary'])
+  const imageWidget = findFirstWidgetByTypes(section, ['image_group'])
+  const bodyWidget = findFirstWidgetByTypes(section, ['rich_note', 'rich_text', 'summary'])
+  const locationWidget = findFirstWidgetByTypes(section, ['location'])
+
+  const coverImage = imageWidget ? firstImageValue(post.content?.[imageWidget.widgetId]) : ''
+  const title = (titleWidget ? getWidgetValue(post, titleWidget) : '').trim() || '无标题'
+  const excerpt = bodyWidget && bodyWidget.widgetId !== titleWidget?.widgetId
+    ? getTextExcerpt(post.content?.[bodyWidget.widgetId])
+    : ''
+  const location = locationWidget ? getWidgetValue(post, locationWidget) : ''
+
+  return {
+    title,
+    coverImage,
+    excerpt,
+    location,
+    author: String((post as any)?.authorNickname || '').trim(),
+    when: formatShortDate(post.createdAt),
+    hasCover: coverImage !== '',
+  }
 }
 
 export function getCarpoolListSummary(post: Post, section: Section): CarpoolListSummary | null {
@@ -119,6 +154,40 @@ function findWidgetByLabel(section: Section, labels: string[]) {
     })
 }
 
+function findFirstWidgetByTypes(section: Section, types: string[]) {
+  return (section.widgets || []).slice()
+    .sort((a, b) => a.order - b.order)
+    .find((widget) => types.includes(widget.type))
+}
+
 function getWidgetValue(post: Post, widget: Section['widgets'][number]): string {
   return formatWidgetValue(post.content?.[widget.widgetId], widget.type).trim()
+}
+
+function firstImageValue(value: unknown): string {
+  if (!Array.isArray(value)) return ''
+  const first = value.find((item) => String(item || '').trim())
+  return first ? String(first).trim() : ''
+}
+
+function getTextExcerpt(value: unknown): string {
+  let text = ''
+  if (typeof value === 'string') {
+    text = value
+  } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+    text = String((value as any).text || (value as any).markdown || '')
+  }
+  return text
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/[#>*_`~\-[\]()]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 72)
+}
+
+function formatShortDate(value: unknown): string {
+  if (!value) return ''
+  const d = new Date(String(value))
+  if (Number.isNaN(d.getTime())) return ''
+  return `${d.getMonth() + 1}/${d.getDate()}`
 }

@@ -32,7 +32,7 @@ export const useCommunityStore = defineStore('community', {
           this.currentCommunityId = saved.currentCommunityId || ''
           this.currentSectionIndex = saved.currentSectionIndex || 0
         }
-      } catch {}
+      } catch (_error) {}
     },
     saveToStorage() {
       try {
@@ -40,7 +40,7 @@ export const useCommunityStore = defineStore('community', {
           currentCommunityId: this.currentCommunityId,
           currentSectionIndex: this.currentSectionIndex,
         })
-      } catch {}
+      } catch (_error) {}
     },
     async switchCommunity(communityId: string) {
       this.currentCommunityId = communityId
@@ -60,7 +60,7 @@ export const useCommunityStore = defineStore('community', {
           status: res.status,
           checkedAt: Date.now(),
         }
-      } catch {
+      } catch (_error) {
         this.membershipByCommunity[id] = {
           isMember: false,
           status: null,
