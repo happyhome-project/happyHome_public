@@ -13,14 +13,18 @@ node X:\Users\<user>\.codex\skills\happyhome-release\scripts\happyhome-release-g
 node X:\Users\<user>\.codex\skills\happyhome-release\scripts\happyhome-release-guard.mjs gate
 ```
 
-`gate` requires release evidence. The release agent must actively create or refresh that evidence when it is missing; it must not stop merely because another session did not provide it. Set `HH_MP_REPLAY_CONFIG_PATH` to the generated or verified replay file/directory before running the upload gate.
+`gate` requires DevTools release UI evidence. The release agent must actively create or refresh that evidence when it is missing; it must not stop merely because another session did not provide it.
 
-The replay file or directory must contain both labels:
+The default evidence path is `npm.cmd run test:mp:release-ui`. It opens the built `mp-weixin` package through WeChat DevTools automator and must output both labels:
 
 - `HH_RELEASE_HOME_DETAIL_NONEMPTY`: home feed tap opens a non-empty detail page.
 - `HH_RELEASE_LOGIN_VERSION`: login page renders and shows the build version.
 
-Without those recorded replay labels, the gate must fail and the mini-program must not be uploaded. If WeChat DevTools has no usable way to create or run the evidence, report that as a DevTools capability blocker instead of publishing.
+The script writes machine-readable evidence under `.codex-local/release-evidence/`. It first uses the current DevTools app state; if that has no tappable posts, it injects the release test fixture (`HH_RELEASE_TEST_OPENID` / `HH_RELEASE_TEST_COMMUNITY_ID`, defaulting to the existing QingShan test fixture), refreshes the Pinia stores, and retries.
+
+`auto-replay` is optional. If `HH_REQUIRE_RELEASE_REPLAY=1` or `HH_MP_REPLAY_CONFIG_PATH` is set, the gate also runs the recorded replay check. Replay is no longer the default proof because the DevTools CLI can directly expose an automator websocket with hidden `--auto-port`.
+
+Without the two release UI labels, the gate must fail and the mini-program must not be uploaded. If WeChat DevTools has no usable way to create or run the evidence, report that as a DevTools capability blocker instead of publishing.
 
 ## Upload Policy
 
