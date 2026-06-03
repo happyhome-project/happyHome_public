@@ -13,12 +13,14 @@ node X:\Users\<user>\.codex\skills\happyhome-release\scripts\happyhome-release-g
 node X:\Users\<user>\.codex\skills\happyhome-release\scripts\happyhome-release-guard.mjs gate
 ```
 
-`gate` requires `HH_MP_REPLAY_CONFIG_PATH`. The replay file or directory must contain both labels:
+`gate` requires release evidence. The release agent must actively create or refresh that evidence when it is missing; it must not stop merely because another session did not provide it. Set `HH_MP_REPLAY_CONFIG_PATH` to the generated or verified replay file/directory before running the upload gate.
+
+The replay file or directory must contain both labels:
 
 - `HH_RELEASE_HOME_DETAIL_NONEMPTY`: home feed tap opens a non-empty detail page.
 - `HH_RELEASE_LOGIN_VERSION`: login page renders and shows the build version.
 
-Without those recorded replay labels, the gate must fail and the mini-program must not be uploaded.
+Without those recorded replay labels, the gate must fail and the mini-program must not be uploaded. If WeChat DevTools has no usable way to create or run the evidence, report that as a DevTools capability blocker instead of publishing.
 
 ## Upload Policy
 
