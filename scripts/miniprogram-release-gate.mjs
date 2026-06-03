@@ -51,6 +51,7 @@ function main() {
   run('build H5 for smoke tests', npmCmd, ['run', 'build:h5', '--workspace', 'miniprogram'])
   run('H5 profile blank-page smoke', npmCmd, ['run', 'test:h5:profile-smoke'])
   run('H5 detail blank-page smoke', npmCmd, ['run', 'test:h5:detail-smoke'])
+  run('H5 section blank-page smoke', npmCmd, ['run', 'test:h5:section-smoke'])
 
   if (!skipDevtools) {
     run('WeChat DevTools automation capability', npmCmd, ['run', 'test:mp:devtools'])
