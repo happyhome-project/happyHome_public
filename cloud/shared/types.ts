@@ -143,6 +143,7 @@ export interface Widget {
   unit?: string
   capacity?: number
   noticeContent?: string
+  locked?: boolean
 }
 
 export interface AttendancePreviewUser {
