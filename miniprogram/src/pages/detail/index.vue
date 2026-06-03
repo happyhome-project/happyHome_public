@@ -610,7 +610,7 @@ function formatDateTime(iso: string): string {
 }
 
 .detail-debug {
-  display: flex;
+  display: none;
   flex-direction: column;
   gap: 4rpx;
   margin-bottom: $hh-space-sm;

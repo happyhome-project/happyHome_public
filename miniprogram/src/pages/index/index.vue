@@ -544,8 +544,19 @@ function onLiveTap(item: LiveItem) {
   }
 }
 
-function onGroupHeaderTap(_g: ArchiveGroup) {
-  // TODO: 跳到该板块的完整列表（当前代码没有独立 section 页，落地时再加）
+function onGroupHeaderTap(g: ArchiveGroup) {
+  if (!g.id) return
+  const url = `/pages/section/index?sectionId=${encodeURIComponent(g.id)}`
+  clientLog('info', 'home.archive.group.tap', {
+    sectionId: g.id,
+    name: g.name,
+    count: g.count,
+    url,
+  })
+  uni.navigateTo({
+    url,
+    fail: (error) => clientLog('error', 'home.archive.group.navigate.fail', { sectionId: g.id, url, error }),
+  })
 }
 
 function onPostTap(item: ArchiveItem) {
@@ -1291,16 +1302,16 @@ onShow(() => {
 }
 
 .guide-card {
-  padding: 20rpx 24rpx;
+  padding: 22rpx 24rpx;
   display: grid;
-  grid-template-columns: 180rpx 1fr;
+  grid-template-columns: 190rpx 1fr;
   gap: 22rpx;
   border-bottom: 1rpx solid $hh-ink-line-2;
 }
 .guide-card:last-child { border-bottom: none; }
 .guide-cover {
-  width: 180rpx;
-  height: 196rpx;
+  width: 190rpx;
+  height: 206rpx;
   border-radius: $hh-radius-md;
   background: $hh-surface-2;
   border: 1rpx solid $hh-ink-line-2;
@@ -1327,7 +1338,7 @@ onShow(() => {
 }
 .guide-title {
   font-family: $hh-font-serif;
-  font-size: 30rpx;
+  font-size: 31rpx;
   line-height: 1.34;
   color: $hh-ink-1;
   font-weight: $hh-font-weight-bold;
@@ -1338,7 +1349,7 @@ onShow(() => {
 }
 .guide-excerpt {
   margin-top: 10rpx;
-  font-size: 23rpx;
+  font-size: 24rpx;
   line-height: 1.58;
   color: $hh-ink-2;
   display: -webkit-box;
