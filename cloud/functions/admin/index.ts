@@ -139,13 +139,46 @@ function normalizeSectionDisplayTemplate(value: unknown): SectionDisplayTemplate
   return value === 'guide_note' ? 'guide_note' : 'default'
 }
 
+const GUIDE_NOTE_LOCKED_WIDGETS: Widget[] = [
+  { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true, locked: true },
+  { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false, locked: true },
+  { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false, locked: true },
+  { widgetId: 'guide_location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false, locked: true },
+]
+
+const GUIDE_NOTE_LOCKED_BY_ID = new Map(GUIDE_NOTE_LOCKED_WIDGETS.map((widget) => [widget.widgetId, widget]))
+
 function buildDefaultGuideNoteWidgets(): Widget[] {
-  return [
-    { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
-    { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: false, order: 1, showInList: false },
-    { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false },
-    { widgetId: 'guide_location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false },
-  ]
+  return GUIDE_NOTE_LOCKED_WIDGETS.map((widget) => ({ ...widget }))
+}
+
+function isGuideNoteSection(section: Section) {
+  return normalizeSectionDisplayTemplate(section?.displayTemplate) === 'guide_note'
+}
+
+function assertGuideNoteLockedWidgets(section: Section, widgets: Widget[]) {
+  if (!isGuideNoteSection(section)) return
+
+  for (const lockedWidget of GUIDE_NOTE_LOCKED_WIDGETS) {
+    const incoming = widgets.find((widget) => widget.widgetId === lockedWidget.widgetId)
+    if (!incoming) {
+      throw new Error(`图文攻略固定控件「${lockedWidget.label}」不能删除`)
+    }
+
+    const immutableFields: Array<keyof Widget> = ['type', 'label', 'fieldKey', 'required', 'order', 'showInList']
+    const changedField = immutableFields.find((field) => incoming[field] !== lockedWidget[field])
+    if (changedField) {
+      throw new Error(`图文攻略固定控件「${lockedWidget.label}」不能修改`)
+    }
+  }
+}
+
+function applyGuideNoteLockedFlags(section: Section, widgets: Widget[]) {
+  if (!isGuideNoteSection(section)) return widgets
+  return widgets.map((widget) => {
+    const lockedWidget = GUIDE_NOTE_LOCKED_BY_ID.get(widget.widgetId)
+    return lockedWidget ? { ...lockedWidget } : { ...widget, locked: false }
+  })
 }
 
 function normalizeKeyword(value: unknown) {
@@ -938,10 +971,12 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (!sectionId) throw new Error('sectionId 不能为空')
 
     const currentSection = normalizeSection(await db.getById('sections', sectionId))
-    const widgets = (params.widgets || []).map((widget: any) => normalizeWidgetForSave({
+    let widgets = (params.widgets || []).map((widget: any) => normalizeWidgetForSave({
       ...widget,
       widgetId: widget.widgetId || uuidv4(),
     }))
+    assertGuideNoteLockedWidgets(currentSection, widgets)
+    widgets = applyGuideNoteLockedFlags(currentSection, widgets)
     validateSectionWidgets(currentSection.type, widgets)
 
     const currentWidgets = currentSection.widgets || []
