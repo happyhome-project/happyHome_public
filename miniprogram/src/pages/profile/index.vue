@@ -259,29 +259,27 @@
       </button>
     </view>
 
-    <!-- Admin notification subscription -->
-    <view v-if="hasAdminTools" class="section">
-      <text class="section-title">管理员提醒</text>
-      <text class="hint-text">开启后，有新的申请需要处理时，微信会尽量发送服务通知。</text>
-      <button
-        size="mini"
-        class="notify-btn"
-        :disabled="notificationSubscribeLock.busy.value || configuredNotificationTemplates.length === 0"
-        @tap="notificationSubscribeLock.run()"
-      >
-        {{ notificationSubscribeButtonText }}
-      </button>
-      <text v-if="configuredNotificationTemplates.length === 0" class="hint-text warn">
-        订阅消息模板尚未配置，暂时只能在后台查看待办。
-      </text>
-      <view v-else class="notification-status">
-        <text class="status-pill">申请通知：{{ applicationNotificationStatusText }}</text>
-      </view>
-    </view>
-
     <!-- Pending approvals (admin only) -->
     <view v-if="pendingMembers.length > 0" class="section">
       <text class="section-title">待审批成员</text>
+      <view
+        v-if="approvalReminderState.kind !== 'hidden'"
+        class="approval-reminder-card"
+      >
+        <view class="approval-reminder-copy">
+          <text class="approval-reminder-title">{{ approvalReminderState.title }}</text>
+          <text class="approval-reminder-desc">{{ approvalReminderState.message }}</text>
+        </view>
+        <button
+          v-if="approvalReminderState.kind === 'prompt'"
+          size="mini"
+          class="approval-reminder-btn"
+          :disabled="notificationSubscribeLock.busy.value"
+          @tap="notificationSubscribeLock.run()"
+        >
+          {{ notificationSubscribeLock.busy.value ? '开启中...' : '开启' }}
+        </button>
+      </view>
       <view v-for="member in pendingMembers" :key="member._id" class="approval-item">
         <text class="member-id">{{ member.userId.slice(0, 8) }}...</text>
         <view class="approval-actions">
@@ -318,12 +316,21 @@ import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { BUILD_INFO } from '../../generated/build-info'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
+import {
+  buildApprovalReminderState,
+  buildSubscriptionSaves,
+  configuredApprovalTemplates,
+  uniqueTemplateIds,
+  type ApprovalNotificationTemplate,
+} from '../../utils/approval-notification'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
 const pendingMembers = ref<any[]>([])
 const adminCommunityIds = ref<string[]>([])
-const notificationSubscriptions = ref<ProfileNotificationSubscription[]>([])
+const notificationTemplates = ref<ApprovalNotificationTemplate[]>([])
+const notificationSubscriptions = ref<Array<{ eventType: ApprovalNotificationEventType; templateId: string; status: string }>>([])
+const notificationNeedsAuthorization = ref(false)
 const profileError = ref('')
 let refreshingProfile = false
 const appVersion = computed(() => {
@@ -331,112 +338,21 @@ const appVersion = computed(() => {
   return rawVersion.replace(/^1\.0\./, '0.7.')
 })
 
-type NotificationTemplateView = {
-  eventType: ApprovalNotificationEventType
-  templateId: string
-}
-
-type ProfileNotificationSubscription = {
-  eventType: ApprovalNotificationEventType
-  templateId: string
-  status: string
-}
-
-const notificationTemplates = ref<NotificationTemplateView[]>([
-  {
-    eventType: 'member_join_pending' as ApprovalNotificationEventType,
-    templateId: String((import.meta as any).env?.VITE_APPROVAL_MEMBER_JOIN_TEMPLATE_ID || ''),
-  },
-  {
-    eventType: 'community_create_pending' as ApprovalNotificationEventType,
-    templateId: String((import.meta as any).env?.VITE_APPROVAL_COMMUNITY_CREATE_TEMPLATE_ID || ''),
-  },
-])
-const configuredNotificationTemplates = computed(() => notificationTemplates.value.filter(item => item.templateId))
+const configuredNotificationTemplates = computed(() => configuredApprovalTemplates(notificationTemplates.value))
 const hasAdminTools = computed(() => userStore.role === 'superAdmin' || adminCommunityIds.value.length > 0)
-
-function notificationSubscriptionKey(eventType: ApprovalNotificationEventType, templateId: string) {
-  return eventType + '::' + templateId
-}
-
-function notificationStatusLabel(
-  subscriptions: ProfileNotificationSubscription[],
-  eventType: ApprovalNotificationEventType,
-  templateId: string,
-) {
-  const item = subscriptions.find((sub) => sub.eventType === eventType && sub.templateId === templateId)
-  if (!item) return '未开启'
-  if (item.status === 'accept') return '已开启'
-  return '未授权'
-}
-
-function hasAnyNotificationTemplateAccepted(
-  templates: NotificationTemplateView[],
-  subscriptions: ProfileNotificationSubscription[],
-) {
-  return templates.some(
-    (item) => notificationStatusLabel(subscriptions, item.eventType, item.templateId) === '已开启',
-  )
-}
-
-function getProfileNotificationStatusText(
-  templates: NotificationTemplateView[],
-  subscriptions: ProfileNotificationSubscription[],
-) {
-  if (hasAnyNotificationTemplateAccepted(templates, subscriptions)) return '已开启'
-  const hasAnySavedStatus = templates.some(
-    (item) => subscriptions.some((sub) => sub.eventType === item.eventType && sub.templateId === item.templateId),
-  )
-  return hasAnySavedStatus ? '未授权' : '未开启'
-}
-
-function getProfileNotificationButtonText(
-  isBusy: boolean,
-  templates: NotificationTemplateView[],
-  subscriptions: ProfileNotificationSubscription[],
-) {
-  if (isBusy) return '开启中...'
-  if (hasAnyNotificationTemplateAccepted(templates, subscriptions)) return '申请通知已开启'
-  return '接收申请通知'
-}
-
-function mergeProfileNotificationSubscribeResult(
-  existing: ProfileNotificationSubscription[],
-  templates: NotificationTemplateView[],
-  requestResult: Record<string, string>,
-) {
-  const merged: ProfileNotificationSubscription[] = []
-  const upsert = (item: ProfileNotificationSubscription) => {
-    const key = notificationSubscriptionKey(item.eventType, item.templateId)
-    const existingIndex = merged.findIndex(
-      (sub) => notificationSubscriptionKey(sub.eventType, sub.templateId) === key,
-    )
-    const normalized = {
-      eventType: item.eventType,
-      templateId: item.templateId,
-      status: item.status,
-    }
-    if (existingIndex >= 0) {
-      merged[existingIndex] = normalized
-    } else {
-      merged.push(normalized)
-    }
-  }
-
-  for (const item of existing) {
-    if (!item.eventType || !item.templateId) continue
-    upsert(item)
-  }
-  for (const item of templates) {
-    if (!item.templateId) continue
-    upsert({
-      eventType: item.eventType,
-      templateId: item.templateId,
-      status: requestResult[item.templateId] === 'accept' ? 'accept' : 'reject',
-    })
-  }
-  return merged
-}
+const supportsSubscribeMessage = computed(() => {
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
+  return typeof wx !== 'undefined' && typeof wx.requestSubscribeMessage === 'function'
+})
+const approvalReminderState = computed(() => buildApprovalReminderState({
+  hasAdminTools: hasAdminTools.value,
+  pendingApprovalCount: pendingMembers.value.length,
+  templates: notificationTemplates.value,
+  subscriptions: notificationSubscriptions.value,
+  supportsSubscribeMessage: supportsSubscribeMessage.value,
+  backendNeedsAuthorization: notificationNeedsAuthorization.value,
+}))
 
 // ── 登录 / 编辑资料表单状态 ──
 const isEditingProfile = ref(false)
@@ -699,56 +615,39 @@ const rejectLock = useKeyedBusyLock(
 const notificationSubscribeLock = useBusyLock(async () => {
   const templates = configuredNotificationTemplates.value
   if (templates.length === 0) {
-    uni.showToast({ title: '订阅模板尚未配置', icon: 'none' })
+    uni.showToast({ title: '提醒模板尚未配置', icon: 'none' })
     return
   }
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore
-  if (typeof wx === 'undefined' || typeof wx.requestSubscribeMessage !== 'function') {
-    uni.showToast({ title: '请在微信小程序中开启提醒', icon: 'none' })
+  if (!supportsSubscribeMessage.value) {
+    uni.showToast({ title: '请在真机微信中开启提醒', icon: 'none' })
     return
   }
 
-  const templateIds: string[] = []
-  for (const item of templates) {
-    if (item.templateId && !templateIds.includes(item.templateId)) {
-      templateIds.push(item.templateId)
+  try {
+    const result: Record<string, string> = await new Promise((resolve, reject) => {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      wx.requestSubscribeMessage({
+        tmplIds: uniqueTemplateIds(templates),
+        success: resolve,
+        fail: reject,
+      })
+    })
+
+    const saves = buildSubscriptionSaves(templates, result)
+    for (const item of saves) {
+      await notificationApi.saveSubscription(item)
     }
-  }
-  const result: Record<string, string> = await new Promise((resolve, reject) => {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore
-    wx.requestSubscribeMessage({
-      tmplIds: templateIds,
-      success: resolve,
-      fail: reject,
+    await loadNotificationStatus()
+    const accepted = saves.some((item) => item.status === 'accept')
+    uni.showToast({
+      title: accepted ? '审批提醒已开启' : '未开启提醒，可稍后再试',
+      icon: accepted ? 'success' : 'none',
     })
-  })
-
-  for (const item of templates) {
-    const rawStatus = result[item.templateId] === 'accept' ? 'accept' : 'reject'
-    await notificationApi.saveSubscription({
-      eventType: item.eventType,
-      templateId: item.templateId,
-      status: rawStatus,
-    })
+  } catch (e: any) {
+    uni.showToast({ title: e?.errMsg || e?.message || '开启提醒失败', icon: 'none' })
   }
-  notificationSubscriptions.value = mergeProfileNotificationSubscribeResult(notificationSubscriptions.value, templates, result)
-  await loadNotificationSubscriptions({ preserveOnFailure: true })
-  notificationSubscriptions.value = mergeProfileNotificationSubscribeResult(notificationSubscriptions.value, templates, result)
-  uni.showToast({ title: '提醒设置已保存', icon: 'success' })
 })
-
-const notificationSubscribeButtonText = computed(() => getProfileNotificationButtonText(
-  notificationSubscribeLock.busy.value,
-  configuredNotificationTemplates.value,
-  notificationSubscriptions.value,
-))
-
-const applicationNotificationStatusText = computed(() => getProfileNotificationStatusText(
-  configuredNotificationTemplates.value,
-  notificationSubscriptions.value,
-))
 
 async function loadPendingMembers() {
   if (!userStore.isLoggedIn) return
@@ -780,27 +679,28 @@ async function loadPendingMembers() {
 async function loadNotificationSubscriptions(options: { preserveOnFailure?: boolean } = {}) {
   if (!userStore.isLoggedIn) return
   try {
-    const res = await notificationApi.mySubscriptions()
+    const res = await notificationApi.status()
     notificationSubscriptions.value = Array.isArray(res.subscriptions) ? res.subscriptions : []
+    notificationNeedsAuthorization.value = !!res.needsAuthorization
   } catch (_error) {
-    if (!options.preserveOnFailure) notificationSubscriptions.value = []
+    if (!options.preserveOnFailure) {
+      notificationSubscriptions.value = []
+      notificationNeedsAuthorization.value = false
+    }
   }
+}
+
+async function loadNotificationStatus() {
+  return loadNotificationSubscriptions()
 }
 
 async function loadNotificationConfig() {
   if (!userStore.isLoggedIn) return
   try {
     const res = await notificationApi.config()
-    const templates = res.templates || []
-    notificationTemplates.value = notificationTemplates.value.map((item) => {
-      const remote = templates.find((template) => template.eventType === item.eventType)
-      return {
-        eventType: item.eventType,
-        templateId: remote?.templateId || item.templateId,
-      }
-    })
+    notificationTemplates.value = Array.isArray(res.templates) ? res.templates : []
   } catch (_error) {
-    // Keep build-time fallback if runtime config is unavailable.
+    notificationTemplates.value = []
   }
 }
 
@@ -1084,11 +984,48 @@ onPullDownRefresh(async () => {
 .approval-item { display: flex; justify-content: space-between; align-items: center; padding: $hh-space-md 0; border-bottom: 1rpx solid $hh-color-divider; }
 .member-id { font-size: $hh-font-caption; color: $hh-color-text-sub; font-family: monospace; }
 .approval-actions { display: flex; gap: $hh-space-sm; }
+.approval-reminder-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $hh-space-md;
+  margin-bottom: $hh-space-sm;
+  padding: $hh-space-sm $hh-space-md;
+  border-radius: $hh-radius-sm;
+  background: #f4f8f5;
+  border: 1rpx solid #dcebdd;
+}
+.approval-reminder-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+.approval-reminder-title {
+  color: $hh-color-text;
+  font-size: $hh-font-body;
+  font-weight: $hh-font-weight-bold;
+}
+.approval-reminder-desc {
+  color: $hh-color-text-mute;
+  font-size: $hh-font-caption;
+  line-height: 1.45;
+}
+.approval-reminder-btn {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0 22rpx;
+  height: 52rpx;
+  line-height: 52rpx;
+  border-radius: $hh-radius-full;
+  background: $hh-color-primary;
+  color: $hh-color-text-inverse;
+  font-size: $hh-font-caption;
+}
+.approval-reminder-btn::after { border: none; }
 .hint-text { display: block; margin-top: $hh-space-sm; color: $hh-color-text-sub; font-size: $hh-font-caption; line-height: $hh-line-height-base; }
 .hint-text.warn { color: #b7791f; }
-.notify-btn { margin-top: $hh-space-md; background: $hh-color-primary; color: $hh-color-text-inverse; }
-.notification-status { display: flex; flex-wrap: wrap; gap: $hh-space-sm; margin-top: $hh-space-md; }
-.status-pill { padding: 6rpx 14rpx; border-radius: $hh-radius-full; background: #f3f6f4; color: $hh-color-text-sub; font-size: $hh-font-caption; }
 .profile-version {
   padding: 20rpx 0 10rpx;
   text-align: center;

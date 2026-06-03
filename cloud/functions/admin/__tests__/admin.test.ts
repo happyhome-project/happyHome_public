@@ -322,11 +322,77 @@ test('section.create: 图文攻略展示模板可保存到板块', async () => {
     type: 'evergreen',
     displayTemplate: 'guide_note',
     widgets: [
-      expect.objectContaining({ type: 'short_text', label: '标题', required: true, showInList: true }),
-      expect.objectContaining({ type: 'image_group', label: '封面/图片', required: false, showInList: false }),
-      expect.objectContaining({ type: 'rich_note', label: '正文', required: false, showInList: false }),
-      expect.objectContaining({ type: 'location', label: '地点', required: false, showInList: false }),
+      expect.objectContaining({ widgetId: 'guide_title', type: 'short_text', label: '标题', required: true, showInList: true, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_images', type: 'image_group', label: '封面/图片', required: true, showInList: false, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_body', type: 'rich_note', label: '正文', required: false, showInList: false, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_location', type: 'location', label: '地点', required: false, showInList: false, locked: true }),
     ],
+  }))
+})
+
+test('section.updateWidgets: 图文攻略固定控件不能删除或修改', async () => {
+  const guideWidgets = [
+    { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true, locked: true },
+    { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false, locked: true },
+    { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false, locked: true },
+    { widgetId: 'guide_location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false, locked: true },
+  ]
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-guide',
+    type: 'evergreen',
+    displayTemplate: 'guide_note',
+    widgets: guideWidgets,
+  })
+
+  await expect(main({
+    action: 'section.updateWidgets',
+    sectionId: 'section-guide',
+    widgets: guideWidgets.filter((widget) => widget.widgetId !== 'guide_images'),
+  })).rejects.toThrow('固定控件')
+
+  await expect(main({
+    action: 'section.updateWidgets',
+    sectionId: 'section-guide',
+    widgets: guideWidgets.map((widget) => (
+      widget.widgetId === 'guide_title'
+        ? { ...widget, type: 'summary' }
+        : widget
+    )),
+  })).rejects.toThrow('固定控件')
+})
+
+test('section.updateWidgets: 图文攻略允许在固定控件后追加小控件', async () => {
+  const guideWidgets = [
+    { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true, locked: true },
+    { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false, locked: true },
+    { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false, locked: true },
+    { widgetId: 'guide_location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false, locked: true },
+  ]
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-guide',
+    type: 'evergreen',
+    displayTemplate: 'guide_note',
+    widgets: guideWidgets,
+  })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+  ;(db.query as jest.Mock).mockResolvedValue([])
+
+  const result: any = await main({
+    action: 'section.updateWidgets',
+    sectionId: 'section-guide',
+    widgets: [
+      ...guideWidgets,
+      { widgetId: 'guide_age', type: 'short_text', label: '适合年龄', fieldKey: 'age', required: false, order: 4, showInList: false },
+    ],
+  })
+
+  expect(result.widgets.slice(0, 4).every((widget: any) => widget.locked === true)).toBe(true)
+  expect(result.widgets[4]).toEqual(expect.objectContaining({ widgetId: 'guide_age', locked: false }))
+  expect(db.updateById).toHaveBeenCalledWith('sections', 'section-guide', expect.objectContaining({
+    widgets: expect.arrayContaining([
+      expect.objectContaining({ widgetId: 'guide_images', required: true, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_age', locked: false }),
+    ]),
   }))
 })
 

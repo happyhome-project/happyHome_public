@@ -239,6 +239,13 @@ export type ApprovalNotificationTemplateConfig = {
 export const notificationApi = {
   config: () =>
     callCloud<{ templates: ApprovalNotificationTemplateConfig[] }>('member', 'notificationConfig', {}),
+  status: () =>
+    callCloud<{
+      subscriptions: Array<{ eventType: ApprovalNotificationEventType; templateId: string; status: string }>
+      needsAuthorization: boolean
+      lastBlockingReason?: string
+      lastBlockingAt?: string
+    }>('member', 'notificationStatus', {}),
   saveSubscription: (params: {
     eventType: ApprovalNotificationEventType
     templateId: string

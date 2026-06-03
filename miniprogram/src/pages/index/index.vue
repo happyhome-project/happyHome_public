@@ -219,7 +219,6 @@
 
     <!-- Foot -->
     <text class="s1-foot">— {{ kind }} · 记忆在这里 —</text>
-    <text class="s1-version">ver: {{ appVersion }}</text>
     <!-- Community switcher modal -->
     <view v-if="showSwitcher" class="switcher-mask" @tap="showSwitcher = false">
       <view class="switcher-panel" @tap.stop>
@@ -251,7 +250,6 @@ import LoginGuard from '../../components/LoginGuard.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard } from '../../utils/widget'
 import { clientLog } from '../../utils/client-log'
-import { BUILD_INFO } from '../../generated/build-info'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 
 const communityStore = useCommunityStore()
@@ -282,7 +280,6 @@ function onMastheadTap() {
 // 场景类型（暂时固定为社群，将来由 community.type 决定）
 const kind = computed(() => '社群')
 const kindEn = computed(() => 'Welcome : )')
-const appVersion = computed(() => String(BUILD_INFO.version || BUILD_INFO.buildId || 'unknown').replace(/^1\.0\./, '0.7.'))
 
 // ── 群训引文：读 community.motto / mottoCite ──
 const quote = computed(() => communityStore.currentCommunity?.motto || '')
@@ -544,8 +541,19 @@ function onLiveTap(item: LiveItem) {
   }
 }
 
-function onGroupHeaderTap(_g: ArchiveGroup) {
-  // TODO: 跳到该板块的完整列表（当前代码没有独立 section 页，落地时再加）
+function onGroupHeaderTap(g: ArchiveGroup) {
+  if (!g.id) return
+  const url = `/pages/section/index?sectionId=${encodeURIComponent(g.id)}`
+  clientLog('info', 'home.archive.group.tap', {
+    sectionId: g.id,
+    name: g.name,
+    count: g.count,
+    url,
+  })
+  uni.navigateTo({
+    url,
+    fail: (error) => clientLog('error', 'home.archive.group.navigate.fail', { sectionId: g.id, url, error }),
+  })
 }
 
 function onPostTap(item: ArchiveItem) {
@@ -1303,16 +1311,16 @@ onPullDownRefresh(async () => {
 }
 
 .guide-card {
-  padding: 20rpx 24rpx;
+  padding: 22rpx 24rpx;
   display: grid;
-  grid-template-columns: 180rpx 1fr;
+  grid-template-columns: 190rpx 1fr;
   gap: 22rpx;
   border-bottom: 1rpx solid $hh-ink-line-2;
 }
 .guide-card:last-child { border-bottom: none; }
 .guide-cover {
-  width: 180rpx;
-  height: 196rpx;
+  width: 190rpx;
+  height: 206rpx;
   border-radius: $hh-radius-md;
   background: $hh-surface-2;
   border: 1rpx solid $hh-ink-line-2;
@@ -1339,7 +1347,7 @@ onPullDownRefresh(async () => {
 }
 .guide-title {
   font-family: $hh-font-serif;
-  font-size: 30rpx;
+  font-size: 31rpx;
   line-height: 1.34;
   color: $hh-ink-1;
   font-weight: $hh-font-weight-bold;
@@ -1350,7 +1358,7 @@ onPullDownRefresh(async () => {
 }
 .guide-excerpt {
   margin-top: 10rpx;
-  font-size: 23rpx;
+  font-size: 24rpx;
   line-height: 1.58;
   color: $hh-ink-2;
   display: -webkit-box;
@@ -1420,15 +1428,6 @@ onPullDownRefresh(async () => {
   color: $hh-ink-4;
   display: block;
 }
-.s1-version {
-  padding-bottom: 120rpx;
-  text-align: center;
-  font-family: $hh-font-mono;
-  font-size: 18rpx;
-  color: $hh-ink-4;
-  display: block;
-}
-
 /* ═══ Switcher ═══ */
 .switcher-mask {
   position: fixed;

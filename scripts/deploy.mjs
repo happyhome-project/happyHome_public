@@ -55,6 +55,7 @@ import { execSync, spawn } from 'child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { analyzeDevtoolsCloudDeployOutput, analyzeDevtoolsUploadOutput } from './lib/deploy-output.mjs'
+import { shouldFallbackAfterDevtoolsFailure } from './lib/release-policy.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
@@ -321,6 +322,9 @@ async function deployCloud() {
       console.log('[OK] Cloud functions deployed via DevTools CLI')
       return
     }
+    if (!shouldFallbackAfterDevtoolsFailure({ target: 'cloud', reason: result.reason, forceCi })) {
+      throw new Error(`DevTools CLI cloud deploy failed (${result.reason}). Open WeChat DevTools, log in again, then retry deploy.`)
+    }
     if (!forceTcb) {
       console.log(`[!] DevTools CLI failed (${result.reason}) - trying CloudBase CLI`)
 
@@ -415,6 +419,49 @@ async function uploadMiniprogramViaMiniprogramCi(version, desc) {
   console.log('Miniprogram upload finished via miniprogram-ci')
 }
 
+function resolveMiniprogramUploadMetadata() {
+  const stamp = getLocalTimestamp()
+  const shortSha = getShortGitSha()
+  return {
+    version: getFlagValue('version') || `1.0.${stamp.yy}${stamp.MM}${stamp.dd}${stamp.hh}${stamp.mm}`,
+    desc: getFlagValue('desc') || `trial ${stamp.yyyy}-${stamp.MM}-${stamp.dd} ${stamp.hh}:${stamp.mm} ${shortSha}`,
+    forceCi: process.argv.includes('--use-ci'),
+  }
+}
+
+function buildAndGateMiniprogramUpload({ version, desc }) {
+  writeMiniprogramBuildInfo(version, desc)
+
+  console.log('\nBuilding miniprogram...')
+  execSync('npm run build:mp-weixin', { cwd: resolve(ROOT, 'miniprogram'), stdio: 'inherit' })
+
+  console.log('\nRunning miniprogram release gate...')
+  execSync('npm run test:mp:release-gate -- --skip-mp-build', { cwd: ROOT, stdio: 'inherit' })
+}
+
+async function uploadBuiltMiniprogram({ version, desc, forceCi }) {
+  console.log(`\nMiniprogram upload version: ${version}`)
+  console.log(`Miniprogram upload desc: ${desc}`)
+
+  if (!forceCi) {
+    console.log('\n[primary] Uploading via WeChat DevTools CLI...')
+    const result = await uploadMiniprogramViaDevtoolsCli(version, desc)
+    if (result.ok) {
+      console.log('[OK] Miniprogram uploaded via DevTools CLI (no preview QR generated)')
+      return
+    }
+    if (!shouldFallbackAfterDevtoolsFailure({ target: 'miniprogram-upload', reason: result.reason, forceCi })) {
+      throw new Error(`DevTools CLI upload failed (${result.reason}). Open WeChat DevTools, log in again if needed, then retry upload. miniprogram-ci fallback is only allowed with --use-ci.`)
+    }
+    console.log(`[!] DevTools CLI upload failed (${result.reason}) - falling back to miniprogram-ci`)
+  } else {
+    console.log('\n[--use-ci] Skipping DevTools CLI, using miniprogram-ci directly')
+  }
+
+  await uploadMiniprogramViaMiniprogramCi(version, desc)
+  console.log('[OK] Miniprogram uploaded via miniprogram-ci')
+}
+
 // ── Fallback preview path: miniprogram-ci ──
 // 撞 IPv6/透明代理/WeChat CI 白名单的概率跟 cloud.uploadFunction 一样高。
 async function deployMiniprogramViaMiniprogramCi() {
@@ -452,37 +499,9 @@ async function deployMiniprogram() {
 }
 
 async function uploadMiniprogram() {
-  const stamp = getLocalTimestamp()
-  const shortSha = getShortGitSha()
-  const version = getFlagValue('version') || `1.0.${stamp.yy}${stamp.MM}${stamp.dd}${stamp.hh}${stamp.mm}`
-  const desc = getFlagValue('desc') || `trial ${stamp.yyyy}-${stamp.MM}-${stamp.dd} ${stamp.hh}:${stamp.mm} ${shortSha}`
-  const forceCi = process.argv.includes('--use-ci')
-
-  writeMiniprogramBuildInfo(version, desc)
-
-  console.log('\nBuilding miniprogram...')
-  execSync('npm run build:mp-weixin', { cwd: resolve(ROOT, 'miniprogram'), stdio: 'inherit' })
-
-  console.log('\nRunning miniprogram release gate...')
-  execSync('npm run test:mp:release-gate -- --skip-mp-build', { cwd: ROOT, stdio: 'inherit' })
-
-  console.log(`\nMiniprogram upload version: ${version}`)
-  console.log(`Miniprogram upload desc: ${desc}`)
-
-  if (!forceCi) {
-    console.log('\n[primary] Uploading via WeChat DevTools CLI...')
-    const result = await uploadMiniprogramViaDevtoolsCli(version, desc)
-    if (result.ok) {
-      console.log('[OK] Miniprogram uploaded via DevTools CLI (no preview QR generated)')
-      return
-    }
-    console.log(`[!] DevTools CLI upload failed (${result.reason}) - falling back to miniprogram-ci`)
-  } else {
-    console.log('\n[--use-ci] Skipping DevTools CLI, using miniprogram-ci directly')
-  }
-
-  await uploadMiniprogramViaMiniprogramCi(version, desc)
-  console.log('[OK] Miniprogram uploaded via miniprogram-ci')
+  const upload = resolveMiniprogramUploadMetadata()
+  buildAndGateMiniprogramUpload(upload)
+  await uploadBuiltMiniprogram(upload)
 }
 
 function buildAdminWeb(defaultRouterMode) {
@@ -581,9 +600,11 @@ async function deployAdminWeb() {
 
 const target = process.argv[2] || 'all'
 if (target === 'release') {
+  const miniprogramUpload = resolveMiniprogramUploadMetadata()
+  buildAndGateMiniprogramUpload(miniprogramUpload)
   await deployCloud()
   await deployAdminWeb()
-  await uploadMiniprogram()
+  await uploadBuiltMiniprogram(miniprogramUpload)
 } else {
   if (target === 'cloud' || target === 'all') await deployCloud()
   if (target === 'miniprogram' || target === 'all') await deployMiniprogram()
