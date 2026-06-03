@@ -64,7 +64,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import { approvalApi } from '../../api/cloud'
 import { useAuthStore } from '../../stores/auth'
 

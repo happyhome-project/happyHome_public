@@ -145,6 +145,7 @@ const GUIDE_NOTE_LOCKED_WIDGETS: Widget[] = [
   { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false, locked: true },
   { widgetId: 'guide_location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false, locked: true },
 ]
+
 const GUIDE_NOTE_LOCKED_BY_ID = new Map(GUIDE_NOTE_LOCKED_WIDGETS.map((widget) => [widget.widgetId, widget]))
 
 function buildDefaultGuideNoteWidgets(): Widget[] {
@@ -157,27 +158,26 @@ function isGuideNoteSection(section: Section) {
 
 function assertGuideNoteLockedWidgets(section: Section, widgets: Widget[]) {
   if (!isGuideNoteSection(section)) return
-  const nextById = new Map(widgets.map((widget) => [String(widget.widgetId || ''), widget]))
 
-  for (const locked of GUIDE_NOTE_LOCKED_WIDGETS) {
-    const next = nextById.get(locked.widgetId)
-    if (!next) {
-      throw new Error(`图文攻略固定控件「${locked.label}」不能删除`)
+  for (const lockedWidget of GUIDE_NOTE_LOCKED_WIDGETS) {
+    const incoming = widgets.find((widget) => widget.widgetId === lockedWidget.widgetId)
+    if (!incoming) {
+      throw new Error(`图文攻略固定控件「${lockedWidget.label}」不能删除`)
     }
+
     const immutableFields: Array<keyof Widget> = ['type', 'label', 'fieldKey', 'required', 'order', 'showInList']
-    for (const field of immutableFields) {
-      if (next[field] !== locked[field]) {
-        throw new Error(`图文攻略固定控件「${locked.label}」不能修改`)
-      }
+    const changedField = immutableFields.find((field) => incoming[field] !== lockedWidget[field])
+    if (changedField) {
+      throw new Error(`图文攻略固定控件「${lockedWidget.label}」不能修改`)
     }
   }
 }
 
 function applyGuideNoteLockedFlags(section: Section, widgets: Widget[]) {
-  if (!isGuideNoteSection(section)) return widgets.map((widget) => ({ ...widget, locked: false }))
+  if (!isGuideNoteSection(section)) return widgets
   return widgets.map((widget) => {
-    const locked = GUIDE_NOTE_LOCKED_BY_ID.get(String(widget.widgetId || ''))
-    return locked ? { ...widget, locked: true } : { ...widget, locked: false }
+    const lockedWidget = GUIDE_NOTE_LOCKED_BY_ID.get(widget.widgetId)
+    return lockedWidget ? { ...lockedWidget } : { ...widget, locked: false }
   })
 }
 

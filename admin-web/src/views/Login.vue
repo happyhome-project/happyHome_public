@@ -79,7 +79,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import { Loading, Select, CircleClose, Warning } from '@element-plus/icons-vue'
 import { useAuthStore } from '../stores/auth'
 import { authApi, type WxLoginStatus } from '../api/cloud'

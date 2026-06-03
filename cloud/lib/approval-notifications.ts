@@ -213,6 +213,54 @@ export async function getNotificationSubscriptions(userId: string) {
   return { subscriptions }
 }
 
+export function getNotificationTemplateConfig(userId: string) {
+  if (!userId) throw new Error('Missing OPENID')
+  return {
+    templates: (Object.keys(TEMPLATE_ENV_BY_EVENT) as ApprovalNotificationEventType[])
+      .map((eventType) => ({
+        eventType,
+        templateId: templateIdFor(eventType),
+      }))
+      .filter((item) => item.templateId),
+  }
+}
+
+export async function getNotificationStatus(userId: string) {
+  if (!userId) throw new Error('Missing OPENID')
+  const subscriptions = await querySafe(SUBSCRIPTIONS, { userId })
+  const recentNotifications = await querySafe(NOTIFICATIONS, { recipientUserId: userId }, {
+    orderBy: ['createdAt', 'desc'],
+    limit: 10,
+  })
+  const configuredTemplates = getNotificationTemplateConfig(userId).templates
+  const hasAcceptedAllConfigured = configuredTemplates.length > 0 && configuredTemplates.every((template) =>
+    subscriptions.some((sub: any) =>
+      sub.eventType === template.eventType
+      && sub.templateId === template.templateId
+      && sub.status === 'accept'
+    )
+  )
+  const latestAcceptedAt = Math.max(0, ...subscriptions
+    .filter((sub: any) => sub.status === 'accept')
+    .map((sub: any) => Date.parse(String(sub.updatedAt || sub.createdAt || '')) || 0)
+  )
+  const blockingNotification = recentNotifications.find((item: any) =>
+    (
+      ['not_subscribed', 'template_not_configured', 'subscribe_api_unavailable'].includes(String(item.reason || ''))
+      || String(item.status || '') === 'failed'
+    )
+    && (!hasAcceptedAllConfigured || (Date.parse(String(item.createdAt || '')) || 0) > latestAcceptedAt)
+  ) as any
+
+  return {
+    subscriptions,
+    templates: configuredTemplates,
+    needsAuthorization: !hasAcceptedAllConfigured || !!blockingNotification,
+    lastBlockingReason: blockingNotification?.reason || '',
+    lastBlockingAt: blockingNotification?.createdAt || '',
+  }
+}
+
 export async function notifyMemberJoinPending(params: {
   communityId: string
   communityName?: string

@@ -25,13 +25,13 @@ function readStorage(key: string): string | null {
       const v = localStorage.getItem(key)
       if (v) return v
     }
-  } catch { /* ignore */ }
+  } catch (_error) { /* ignore */ }
   try {
     if (typeof uni !== 'undefined' && uni.getStorageSync) {
       const v = uni.getStorageSync(key)
       if (v) return String(v)
     }
-  } catch { /* ignore */ }
+  } catch (_error) { /* ignore */ }
   return null
 }
 
@@ -67,7 +67,7 @@ async function callViaHttpGateway<T>(name: string, action: string, params: objec
     const res = await fetch(H5_GATEWAY_URL, { method: 'POST', headers, body: JSON.stringify(body) })
     statusCode = res.status
     const text = await res.text()
-    try { data = text ? JSON.parse(text) : {} } catch { data = { raw: text } }
+    try { data = text ? JSON.parse(text) : {} } catch (_error) { data = { raw: text } }
   } else {
     // miniprogram: use uni.request
     const res: any = await new Promise((resolve, reject) => {
@@ -231,8 +231,21 @@ export const memberApi = {
 }
 
 export type ApprovalNotificationEventType = 'member_join_pending' | 'community_create_pending'
+export type ApprovalNotificationTemplateConfig = {
+  eventType: ApprovalNotificationEventType
+  templateId: string
+}
 
 export const notificationApi = {
+  config: () =>
+    callCloud<{ templates: ApprovalNotificationTemplateConfig[] }>('member', 'notificationConfig', {}),
+  status: () =>
+    callCloud<{
+      subscriptions: Array<{ eventType: ApprovalNotificationEventType; templateId: string; status: string }>
+      needsAuthorization: boolean
+      lastBlockingReason?: string
+      lastBlockingAt?: string
+    }>('member', 'notificationStatus', {}),
   saveSubscription: (params: {
     eventType: ApprovalNotificationEventType
     templateId: string

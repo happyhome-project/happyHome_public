@@ -51,7 +51,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { communityApi } from '../../api/cloud'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import { formatAdminDateTime } from '../../utils/datetime'
 
 const pendingCommunities = ref<any[]>([])

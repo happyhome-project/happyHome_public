@@ -6,13 +6,13 @@ const STORAGE_KEY = 'user_store'
 
 // uni-app exposes uni.getStorageSync in both H5 and miniprogram — safer than wx.*
 function storageGet(k: string): any {
-  try { return uni.getStorageSync(k) } catch { return null }
+  try { return uni.getStorageSync(k) } catch (_error) { return null }
 }
 function storageSet(k: string, v: any): void {
-  try { uni.setStorageSync(k, v) } catch {}
+  try { uni.setStorageSync(k, v) } catch (_error) {}
 }
 function storageRemove(k: string): void {
-  try { uni.removeStorageSync(k) } catch {}
+  try { uni.removeStorageSync(k) } catch (_error) {}
 }
 
 export const useUserStore = defineStore('user', {
@@ -102,7 +102,7 @@ export const useUserStore = defineStore('user', {
         cs.clearCommunityState()
         cs.myCommunities = []
         cs.membershipByCommunity = {}
-      } catch {
+      } catch (_error) {
         /* Pinia root 还未初始化时 useCommunityStore() 会 throw，
          * 这种情况下本来就没数据需要清，直接忽略 */
       }

@@ -332,10 +332,10 @@ test('section.create: 图文攻略展示模板可保存到板块', async () => {
 
 test('section.updateWidgets: 图文攻略固定控件不能删除或修改', async () => {
   const guideWidgets = [
-    { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
-    { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false },
-    { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false },
-    { widgetId: 'guide_location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false },
+    { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true, locked: true },
+    { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false, locked: true },
+    { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false, locked: true },
+    { widgetId: 'guide_location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false, locked: true },
   ]
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-guide',
@@ -353,16 +353,20 @@ test('section.updateWidgets: 图文攻略固定控件不能删除或修改', asy
   await expect(main({
     action: 'section.updateWidgets',
     sectionId: 'section-guide',
-    widgets: guideWidgets.map((widget) => widget.widgetId === 'guide_title' ? { ...widget, type: 'summary' } : widget),
+    widgets: guideWidgets.map((widget) => (
+      widget.widgetId === 'guide_title'
+        ? { ...widget, type: 'summary' }
+        : widget
+    )),
   })).rejects.toThrow('固定控件')
 })
 
 test('section.updateWidgets: 图文攻略允许在固定控件后追加小控件', async () => {
   const guideWidgets = [
-    { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
-    { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false },
-    { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false },
-    { widgetId: 'guide_location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false },
+    { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true, locked: true },
+    { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false, locked: true },
+    { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false, locked: true },
+    { widgetId: 'guide_location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false, locked: true },
   ]
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-guide',
@@ -371,6 +375,7 @@ test('section.updateWidgets: 图文攻略允许在固定控件后追加小控件
     widgets: guideWidgets,
   })
   ;(db.updateById as jest.Mock).mockResolvedValue({})
+  ;(db.query as jest.Mock).mockResolvedValue([])
 
   const result: any = await main({
     action: 'section.updateWidgets',
@@ -381,13 +386,14 @@ test('section.updateWidgets: 图文攻略允许在固定控件后追加小控件
     ],
   })
 
-  expect(result.widgets.slice(0, 4)).toEqual([
-    expect.objectContaining({ widgetId: 'guide_title', locked: true }),
-    expect.objectContaining({ widgetId: 'guide_images', locked: true }),
-    expect.objectContaining({ widgetId: 'guide_body', locked: true }),
-    expect.objectContaining({ widgetId: 'guide_location', locked: true }),
-  ])
+  expect(result.widgets.slice(0, 4).every((widget: any) => widget.locked === true)).toBe(true)
   expect(result.widgets[4]).toEqual(expect.objectContaining({ widgetId: 'guide_age', locked: false }))
+  expect(db.updateById).toHaveBeenCalledWith('sections', 'section-guide', expect.objectContaining({
+    widgets: expect.arrayContaining([
+      expect.objectContaining({ widgetId: 'guide_images', required: true, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_age', locked: false }),
+    ]),
+  }))
 })
 
 test('section.updateMeta: 展示模板只接受默认和图文攻略', async () => {

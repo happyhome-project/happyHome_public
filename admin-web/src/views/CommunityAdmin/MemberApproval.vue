@@ -134,7 +134,8 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { communityApi, memberApi } from '../../api/cloud'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { formatAdminDateTime } from '../../utils/datetime'
 
 type MemberStatus = 'pending' | 'active' | 'rejected'

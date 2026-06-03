@@ -3,6 +3,8 @@ import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
 import { assertCommunityAdmin } from '../../lib/auth'
 import {
+  getNotificationTemplateConfig,
+  getNotificationStatus,
   getNotificationSubscriptions,
   notifyMemberJoinPending,
   saveNotificationSubscription,
@@ -199,5 +201,7 @@ export const main = async (event: any) => {
     )
   }
   if (action === 'notificationSubscriptions') return getNotificationSubscriptions(openid)
+  if (action === 'notificationConfig') return getNotificationTemplateConfig(openid)
+  if (action === 'notificationStatus') return getNotificationStatus(openid)
   throw new Error(`Unknown action: ${action}`)
 }

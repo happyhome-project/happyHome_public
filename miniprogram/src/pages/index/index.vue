@@ -219,8 +219,6 @@
 
     <!-- Foot -->
     <text class="s1-foot">— {{ kind }} · 记忆在这里 —</text>
-    <text class="build-debug">{{ debugBuildText }}</text>
-
     <!-- Community switcher modal -->
     <view v-if="showSwitcher" class="switcher-mask" @tap="showSwitcher = false">
       <view class="switcher-panel" @tap.stop>
@@ -243,7 +241,7 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { postApi } from '../../api/cloud'
@@ -251,7 +249,8 @@ import AppTabBar from '../../components/AppTabBar.vue'
 import LoginGuard from '../../components/LoginGuard.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard } from '../../utils/widget'
-import { clientLog, debugBuildLabel } from '../../utils/client-log'
+import { clientLog } from '../../utils/client-log'
+import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -262,8 +261,6 @@ let queuedForcedHomeRefresh = false
 const NOTICE_PREVIEW_LIMIT = 68
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
-const debugBuildText = computed(() => debugBuildLabel())
-
 // ── Computed: masthead ──
 const communityName = computed(() => communityStore.currentCommunity?.name ?? '选择社区')
 const communityMeta = computed(() => '')
@@ -630,7 +627,7 @@ async function loadAllSectionPosts() {
         if (error?.message?.includes('需要先加入社区后查看内容')) {
           communityStore.clearCommunityState()
           uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
-          uni.reLaunch({ url: '/pages/onboarding/index' })
+          openOnboardingPreservingStack()
           return
         }
         results[section._id] = []
@@ -697,8 +694,8 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
     })
     if (communityStore.myCommunities.length === 0) {
       postsBySection.value = {}
-      clientLog('warn', 'home.communities.empty.relaunchOnboarding', {})
-      uni.reLaunch({ url: '/pages/onboarding/index' })
+      clientLog('warn', 'home.communities.empty.openOnboarding', {})
+      openOnboardingPreservingStack()
       return
     }
     await loadAllSectionPosts()
@@ -736,6 +733,18 @@ onShow(() => {
     marker,
   })
   void refreshHomeData({ force: !!marker })
+})
+
+onPullDownRefresh(async () => {
+  clientLog('info', 'home.pullDownRefresh', {})
+  try {
+    await refreshHomeData({ force: true })
+  } catch (error) {
+    clientLog('error', 'home.pullDownRefresh.fail', { error })
+    uni.showToast({ title: '刷新失败，请重试', icon: 'none' })
+  } finally {
+    uni.stopPullDownRefresh()
+  }
 })
 </script>
 
@@ -1419,18 +1428,6 @@ onShow(() => {
   color: $hh-ink-4;
   display: block;
 }
-
-.build-debug {
-  display: block;
-  padding: 0 32rpx 36rpx;
-  text-align: center;
-  font-family: $hh-font-mono;
-  font-size: 18rpx;
-  color: $hh-ink-4;
-  opacity: 0.7;
-  word-break: break-all;
-}
-
 /* ═══ Switcher ═══ */
 .switcher-mask {
   position: fixed;
