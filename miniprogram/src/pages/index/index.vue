@@ -219,7 +219,6 @@
 
     <!-- Foot -->
     <text class="s1-foot">— {{ kind }} · 记忆在这里 —</text>
-    <text class="s1-version">ver: {{ appVersion }}</text>
     <!-- Community switcher modal -->
     <view v-if="showSwitcher" class="switcher-mask" @tap="showSwitcher = false">
       <view class="switcher-panel" @tap.stop>
@@ -251,7 +250,6 @@ import LoginGuard from '../../components/LoginGuard.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard } from '../../utils/widget'
 import { clientLog } from '../../utils/client-log'
-import { BUILD_INFO } from '../../generated/build-info'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 
 const communityStore = useCommunityStore()
@@ -282,7 +280,6 @@ function onMastheadTap() {
 // 场景类型（暂时固定为社群，将来由 community.type 决定）
 const kind = computed(() => '社群')
 const kindEn = computed(() => 'Welcome : )')
-const appVersion = computed(() => String(BUILD_INFO.version || BUILD_INFO.buildId || 'unknown').replace(/^1\.0\./, '0.7.'))
 
 // ── 群训引文：读 community.motto / mottoCite ──
 const quote = computed(() => communityStore.currentCommunity?.motto || '')
@@ -1420,15 +1417,6 @@ onPullDownRefresh(async () => {
   color: $hh-ink-4;
   display: block;
 }
-.s1-version {
-  padding-bottom: 120rpx;
-  text-align: center;
-  font-family: $hh-font-mono;
-  font-size: 18rpx;
-  color: $hh-ink-4;
-  display: block;
-}
-
 /* ═══ Switcher ═══ */
 .switcher-mask {
   position: fixed;
