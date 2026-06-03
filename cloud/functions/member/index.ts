@@ -4,6 +4,8 @@ import { resolveOpenId } from '../../lib/ctx'
 import { assertCommunityAdmin } from '../../lib/auth'
 import {
   getNotificationSubscriptions,
+  getNotificationConfig,
+  getNotificationStatus,
   notifyMemberJoinPending,
   saveNotificationSubscription,
   type ApprovalNotificationEventType,
@@ -199,5 +201,7 @@ export const main = async (event: any) => {
     )
   }
   if (action === 'notificationSubscriptions') return getNotificationSubscriptions(openid)
+  if (action === 'notificationConfig') return getNotificationConfig()
+  if (action === 'notificationStatus') return getNotificationStatus(openid)
   throw new Error(`Unknown action: ${action}`)
 }

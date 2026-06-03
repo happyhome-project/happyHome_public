@@ -64,4 +64,33 @@ describe('callCloud', () => {
 
     await expect(callCloud('post', 'get', { postId: 'p1' })).rejects.toThrow('Missing OPENID')
   })
+
+  test('loads approval reminder config and status from member cloud function at runtime', async () => {
+    const callFunction = vi.fn(({ data, success }: { data: any; success: (value: any) => void }) => {
+      if (data.action === 'notificationConfig') {
+        success({ result: { templates: [{ eventType: 'member_join_pending', templateId: 'tmpl-1' }] } })
+        return
+      }
+      success({ result: { needsAuthorization: false, subscriptions: [] } })
+    })
+    vi.stubGlobal('wx', { cloud: { callFunction } })
+
+    const { notificationApi } = await import('../cloud')
+
+    await expect(notificationApi.config()).resolves.toEqual({
+      templates: [{ eventType: 'member_join_pending', templateId: 'tmpl-1' }],
+    })
+    await expect(notificationApi.status()).resolves.toEqual({
+      needsAuthorization: false,
+      subscriptions: [],
+    })
+    expect(callFunction).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'member',
+      data: { action: 'notificationConfig' },
+    }))
+    expect(callFunction).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'member',
+      data: { action: 'notificationStatus' },
+    }))
+  })
 })

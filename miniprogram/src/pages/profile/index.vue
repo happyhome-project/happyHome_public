@@ -246,31 +246,27 @@
       </button>
     </view>
 
-    <!-- Admin notification subscription -->
-    <view v-if="hasAdminTools" class="section">
-      <text class="section-title">管理员提醒</text>
-      <text class="hint-text">开启后，有新的社区创建申请或成员加入申请时，微信会尽量发送服务通知。</text>
-      <button
-        size="mini"
-        class="notify-btn"
-        :disabled="notificationSubscribeLock.busy.value || configuredNotificationTemplates.length === 0"
-        @tap="notificationSubscribeLock.run()"
-      >
-        {{ notificationSubscribeLock.busy.value ? '开启中...' : '接收审批提醒' }}
-      </button>
-      <text v-if="configuredNotificationTemplates.length === 0" class="hint-text warn">
-        订阅消息模板尚未配置，暂时只能在后台查看待办。
-      </text>
-      <view v-else class="notification-status">
-        <text v-for="item in configuredNotificationTemplates" :key="item.eventType" class="status-pill">
-          {{ item.label }}：{{ subscriptionStatusLabel(item.eventType, item.templateId) }}
-        </text>
-      </view>
-    </view>
-
     <!-- Pending approvals (admin only) -->
     <view v-if="pendingMembers.length > 0" class="section">
       <text class="section-title">待审批成员</text>
+      <view
+        v-if="approvalReminderState.kind !== 'hidden'"
+        class="approval-reminder-card"
+      >
+        <view class="approval-reminder-copy">
+          <text class="approval-reminder-title">{{ approvalReminderState.title }}</text>
+          <text class="approval-reminder-desc">{{ approvalReminderState.message }}</text>
+        </view>
+        <button
+          v-if="approvalReminderState.kind === 'prompt'"
+          size="mini"
+          class="approval-reminder-btn"
+          :disabled="notificationSubscribeLock.busy.value"
+          @tap="notificationSubscribeLock.run()"
+        >
+          {{ notificationSubscribeLock.busy.value ? '开启中...' : '开启' }}
+        </button>
+      </view>
       <view v-for="member in pendingMembers" :key="member._id" class="approval-item">
         <text class="member-id">{{ member.userId.slice(0, 8) }}...</text>
         <view class="approval-actions">
@@ -305,32 +301,42 @@ import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { BUILD_INFO } from '../../generated/build-info'
+import {
+  buildApprovalReminderState,
+  buildSubscriptionSaves,
+  configuredApprovalTemplates,
+  uniqueTemplateIds,
+  type ApprovalNotificationTemplate,
+} from '../../utils/approval-notification'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
 const pendingMembers = ref<any[]>([])
 const adminCommunityIds = ref<string[]>([])
+const notificationTemplates = ref<ApprovalNotificationTemplate[]>([])
 const notificationSubscriptions = ref<Array<{ eventType: ApprovalNotificationEventType; templateId: string; status: string }>>([])
+const notificationNeedsAuthorization = ref(false)
 let refreshingProfile = false
 const appVersion = computed(() => {
   const rawVersion = String(BUILD_INFO.version || BUILD_INFO.buildId || 'unknown')
   return rawVersion.replace(/^1\.0\./, '0.7.')
 })
 
-const notificationTemplates = [
-  {
-    eventType: 'member_join_pending' as ApprovalNotificationEventType,
-    label: '成员加入申请',
-    templateId: String((import.meta as any).env?.VITE_APPROVAL_MEMBER_JOIN_TEMPLATE_ID || ''),
-  },
-  {
-    eventType: 'community_create_pending' as ApprovalNotificationEventType,
-    label: '社区创建申请',
-    templateId: String((import.meta as any).env?.VITE_APPROVAL_COMMUNITY_CREATE_TEMPLATE_ID || ''),
-  },
-]
-const configuredNotificationTemplates = computed(() => notificationTemplates.filter(item => item.templateId))
+const configuredNotificationTemplates = computed(() => configuredApprovalTemplates(notificationTemplates.value))
 const hasAdminTools = computed(() => userStore.role === 'superAdmin' || adminCommunityIds.value.length > 0)
+const supportsSubscribeMessage = computed(() => {
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
+  return typeof wx !== 'undefined' && typeof wx.requestSubscribeMessage === 'function'
+})
+const approvalReminderState = computed(() => buildApprovalReminderState({
+  hasAdminTools: hasAdminTools.value,
+  pendingApprovalCount: pendingMembers.value.length,
+  templates: notificationTemplates.value,
+  subscriptions: notificationSubscriptions.value,
+  supportsSubscribeMessage: supportsSubscribeMessage.value,
+  backendNeedsAuthorization: notificationNeedsAuthorization.value,
+}))
 
 // ── 登录 / 编辑资料表单状态 ──
 const isEditingProfile = ref(false)
@@ -554,73 +560,81 @@ const rejectLock = useKeyedBusyLock(
 const notificationSubscribeLock = useBusyLock(async () => {
   const templates = configuredNotificationTemplates.value
   if (templates.length === 0) {
-    uni.showToast({ title: '订阅模板尚未配置', icon: 'none' })
+    uni.showToast({ title: '提醒模板尚未配置', icon: 'none' })
     return
   }
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore
-  if (typeof wx === 'undefined' || typeof wx.requestSubscribeMessage !== 'function') {
-    uni.showToast({ title: '请在微信小程序中开启提醒', icon: 'none' })
+  if (!supportsSubscribeMessage.value) {
+    uni.showToast({ title: '请在真机微信中开启提醒', icon: 'none' })
     return
   }
 
-  const result: Record<string, string> = await new Promise((resolve, reject) => {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore
-    wx.requestSubscribeMessage({
-      tmplIds: templates.map(item => item.templateId),
-      success: resolve,
-      fail: reject,
+  try {
+    const result: Record<string, string> = await new Promise((resolve, reject) => {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      wx.requestSubscribeMessage({
+        tmplIds: uniqueTemplateIds(templates),
+        success: resolve,
+        fail: reject,
+      })
     })
-  })
 
-  for (const item of templates) {
-    const rawStatus = result[item.templateId] === 'accept' ? 'accept' : 'reject'
-    await notificationApi.saveSubscription({
-      eventType: item.eventType,
-      templateId: item.templateId,
-      status: rawStatus,
+    const saves = buildSubscriptionSaves(templates, result)
+    for (const item of saves) {
+      await notificationApi.saveSubscription(item)
+    }
+    await loadNotificationStatus()
+    const accepted = saves.some((item) => item.status === 'accept')
+    uni.showToast({
+      title: accepted ? '审批提醒已开启' : '未开启提醒，可稍后再试',
+      icon: accepted ? 'success' : 'none',
     })
+  } catch (e: any) {
+    uni.showToast({ title: e?.errMsg || e?.message || '开启提醒失败', icon: 'none' })
   }
-  await loadNotificationSubscriptions()
-  uni.showToast({ title: '提醒设置已保存', icon: 'success' })
 })
 
 async function loadPendingMembers() {
   if (!userStore.isLoggedIn) return
-  // Reset so repeated calls (onMounted + onShow) don't duplicate entries
-  pendingMembers.value = []
-  adminCommunityIds.value = []
+  const nextPendingMembers: any[] = []
+  const nextAdminCommunityIds: string[] = []
   // Load pending members for each admin community
   for (const c of communityStore.myCommunities) {
     try {
       const res = await memberApi.pendingList(c._id)
       // pendingList succeeds = user is admin of this community
-      adminCommunityIds.value.push(c._id)
+      nextAdminCommunityIds.push(c._id)
       if (res.members.length > 0) {
-        pendingMembers.value.push(...res.members.map((m: any) => ({ ...m, communityId: c._id })))
+        nextPendingMembers.push(...res.members.map((m: any) => ({ ...m, communityId: c._id })))
       }
     } catch {
       // Not admin of this community, skip
     }
   }
+  adminCommunityIds.value = nextAdminCommunityIds
+  pendingMembers.value = nextPendingMembers
 }
 
-async function loadNotificationSubscriptions() {
+async function loadNotificationConfig() {
   if (!userStore.isLoggedIn) return
   try {
-    const res = await notificationApi.mySubscriptions()
-    notificationSubscriptions.value = Array.isArray(res.subscriptions) ? res.subscriptions : []
+    const res = await notificationApi.config()
+    notificationTemplates.value = Array.isArray(res.templates) ? res.templates : []
   } catch {
-    notificationSubscriptions.value = []
+    notificationTemplates.value = []
   }
 }
 
-function subscriptionStatusLabel(eventType: ApprovalNotificationEventType, templateId: string) {
-  const item = notificationSubscriptions.value.find((sub) => sub.eventType === eventType && sub.templateId === templateId)
-  if (!item) return '未开启'
-  if (item.status === 'accept') return '已开启'
-  return '未授权'
+async function loadNotificationStatus() {
+  if (!userStore.isLoggedIn) return
+  try {
+    const res = await notificationApi.status()
+    notificationSubscriptions.value = Array.isArray(res.subscriptions) ? res.subscriptions : []
+    notificationNeedsAuthorization.value = !!res.needsAuthorization
+  } catch {
+    notificationSubscriptions.value = []
+    notificationNeedsAuthorization.value = false
+  }
 }
 
 async function refreshProfileData() {
@@ -628,8 +642,9 @@ async function refreshProfileData() {
   refreshingProfile = true
   try {
     await communityStore.loadMyCommunities()
+    await loadNotificationConfig()
     await loadPendingMembers()
-    if (hasAdminTools.value) await loadNotificationSubscriptions()
+    if (hasAdminTools.value) await loadNotificationStatus()
   } finally {
     refreshingProfile = false
   }
@@ -838,11 +853,48 @@ onPullDownRefresh(async () => {
 .approval-item { display: flex; justify-content: space-between; align-items: center; padding: $hh-space-md 0; border-bottom: 1rpx solid $hh-color-divider; }
 .member-id { font-size: $hh-font-caption; color: $hh-color-text-sub; font-family: monospace; }
 .approval-actions { display: flex; gap: $hh-space-sm; }
+.approval-reminder-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $hh-space-md;
+  margin-bottom: $hh-space-sm;
+  padding: $hh-space-sm $hh-space-md;
+  border-radius: $hh-radius-sm;
+  background: #f4f8f5;
+  border: 1rpx solid #dcebdd;
+}
+.approval-reminder-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+.approval-reminder-title {
+  color: $hh-color-text;
+  font-size: $hh-font-body;
+  font-weight: $hh-font-weight-bold;
+}
+.approval-reminder-desc {
+  color: $hh-color-text-mute;
+  font-size: $hh-font-caption;
+  line-height: 1.45;
+}
+.approval-reminder-btn {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0 22rpx;
+  height: 52rpx;
+  line-height: 52rpx;
+  border-radius: $hh-radius-full;
+  background: $hh-color-primary;
+  color: $hh-color-text-inverse;
+  font-size: $hh-font-caption;
+}
+.approval-reminder-btn::after { border: none; }
 .hint-text { display: block; margin-top: $hh-space-sm; color: $hh-color-text-sub; font-size: $hh-font-caption; line-height: $hh-line-height-base; }
 .hint-text.warn { color: #b7791f; }
-.notify-btn { margin-top: $hh-space-md; background: $hh-color-primary; color: $hh-color-text-inverse; }
-.notification-status { display: flex; flex-wrap: wrap; gap: $hh-space-sm; margin-top: $hh-space-md; }
-.status-pill { padding: 6rpx 14rpx; border-radius: $hh-radius-full; background: #f3f6f4; color: $hh-color-text-sub; font-size: $hh-font-caption; }
 .profile-version {
   padding: 20rpx 0 10rpx;
   text-align: center;

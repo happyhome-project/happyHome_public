@@ -36,6 +36,7 @@ beforeEach(() => {
   jest.resetAllMocks()
   ;(cloud.getWXContext as jest.Mock).mockReturnValue({ OPENID: 'test-openid' })
   delete process.env.APPROVAL_MEMBER_JOIN_TEMPLATE_ID
+  delete process.env.APPROVAL_COMMUNITY_CREATE_TEMPLATE_ID
   delete process.env.APPROVAL_MEMBER_JOIN_TEMPLATE_FIELDS
 })
 
@@ -114,6 +115,88 @@ test('通知订阅：保存当前管理员的审批提醒订阅状态', async ()
     status: 'accept',
   }))
   expect(result).toEqual({ success: true })
+})
+
+test('通知配置：从云端运行时环境返回审批提醒模板 ID', async () => {
+  process.env.APPROVAL_MEMBER_JOIN_TEMPLATE_ID = 'tmpl-shared'
+  process.env.APPROVAL_COMMUNITY_CREATE_TEMPLATE_ID = 'tmpl-shared'
+
+  const result = await main({ action: 'notificationConfig' })
+
+  expect(result).toEqual({
+    templates: [
+      { eventType: 'member_join_pending', templateId: 'tmpl-shared' },
+      { eventType: 'community_create_pending', templateId: 'tmpl-shared' },
+    ],
+  })
+})
+
+test('通知状态：返回最近一次需要重新授权的审批提醒原因', async () => {
+  process.env.APPROVAL_MEMBER_JOIN_TEMPLATE_ID = 'tmpl-member'
+  process.env.APPROVAL_COMMUNITY_CREATE_TEMPLATE_ID = 'tmpl-community'
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([
+      { eventType: 'member_join_pending', templateId: 'tmpl-member', status: 'accept' },
+    ])
+    .mockResolvedValueOnce([
+      {
+        eventType: 'community_create_pending',
+        status: 'skipped',
+        reason: 'not_subscribed',
+        createdAt: '2026-06-03T01:00:00.000Z',
+      },
+    ])
+
+  const result = await main({ action: 'notificationStatus' })
+
+  expect(db.query).toHaveBeenCalledWith('admin_notifications', {
+    recipientUserId: 'test-openid',
+  }, {
+    orderBy: ['createdAt', 'desc'],
+    limit: 10,
+  })
+  expect(result).toEqual(expect.objectContaining({
+    needsAuthorization: true,
+    lastBlockingReason: 'not_subscribed',
+    subscriptions: [
+      { eventType: 'member_join_pending', templateId: 'tmpl-member', status: 'accept' },
+    ],
+  }))
+})
+
+test('通知状态：用户重新授权后不再被旧的未订阅记录误判为需要授权', async () => {
+  process.env.APPROVAL_MEMBER_JOIN_TEMPLATE_ID = 'tmpl-shared'
+  process.env.APPROVAL_COMMUNITY_CREATE_TEMPLATE_ID = 'tmpl-shared'
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([
+      {
+        eventType: 'member_join_pending',
+        templateId: 'tmpl-shared',
+        status: 'accept',
+        updatedAt: '2026-06-03T02:00:00.000Z',
+      },
+      {
+        eventType: 'community_create_pending',
+        templateId: 'tmpl-shared',
+        status: 'accept',
+        updatedAt: '2026-06-03T02:00:00.000Z',
+      },
+    ])
+    .mockResolvedValueOnce([
+      {
+        eventType: 'member_join_pending',
+        status: 'skipped',
+        reason: 'not_subscribed',
+        createdAt: '2026-06-03T01:00:00.000Z',
+      },
+    ])
+
+  const result = await main({ action: 'notificationStatus' })
+
+  expect(result).toEqual(expect.objectContaining({
+    needsAuthorization: false,
+    lastBlockingReason: '',
+  }))
 })
 
 test('成员申请通知：按 env 字段映射发送订阅消息', async () => {
