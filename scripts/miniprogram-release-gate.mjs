@@ -54,8 +54,10 @@ function main() {
 
   if (!skipDevtools) {
     run('WeChat DevTools automation capability', npmCmd, ['run', 'test:mp:devtools'])
+    run('WeChat DevTools recorded release replay', npmCmd, ['run', 'test:mp:replay', '--', '--require-release-replay'])
   } else {
     console.log('[release-gate] DevTools automation capability skipped by --skip-devtools')
+    console.log('[release-gate] recorded release replay skipped by --skip-devtools')
   }
 
   console.log('\n[release-gate] Mini-program blank-page release gate passed.')

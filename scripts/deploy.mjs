@@ -55,6 +55,7 @@ import { execSync, spawn } from 'child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { analyzeDevtoolsCloudDeployOutput, analyzeDevtoolsUploadOutput } from './lib/deploy-output.mjs'
+import { shouldFallbackAfterDevtoolsFailure } from './lib/release-policy.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
@@ -321,6 +322,9 @@ async function deployCloud() {
       console.log('[OK] Cloud functions deployed via DevTools CLI')
       return
     }
+    if (!shouldFallbackAfterDevtoolsFailure({ target: 'cloud', reason: result.reason, forceCi })) {
+      throw new Error(`DevTools CLI cloud deploy failed (${result.reason}). Open WeChat DevTools, log in again, then retry deploy.`)
+    }
     if (!forceTcb) {
       console.log(`[!] DevTools CLI failed (${result.reason}) - trying CloudBase CLI`)
 
@@ -445,6 +449,9 @@ async function uploadBuiltMiniprogram({ version, desc, forceCi }) {
     if (result.ok) {
       console.log('[OK] Miniprogram uploaded via DevTools CLI (no preview QR generated)')
       return
+    }
+    if (!shouldFallbackAfterDevtoolsFailure({ target: 'miniprogram-upload', reason: result.reason, forceCi })) {
+      throw new Error(`DevTools CLI upload failed (${result.reason}). Open WeChat DevTools, log in again if needed, then retry upload. miniprogram-ci fallback is only allowed with --use-ci.`)
     }
     console.log(`[!] DevTools CLI upload failed (${result.reason}) - falling back to miniprogram-ci`)
   } else {

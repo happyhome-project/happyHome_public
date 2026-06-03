@@ -1,18 +1,25 @@
 /**
- * 小程序真实测试（DevTools CLI auto-replay）
+ * WeChat DevTools auto-replay runner.
  *
- * 适用于新版微信开发者工具在 miniprogram-automator 协议不兼容时的回退方案。
+ * Strict release mode:
+ *   HH_REQUIRE_RELEASE_REPLAY=1 npm.cmd run test:mp:replay -- --replay-config-path <file-or-dir>
  *
- * 可选环境变量：
- *   WECHAT_DEVTOOLS_CLI_PATH
- *   WECHAT_DEVTOOLS_PROJECT_PATH
- *   WECHAT_DEVTOOLS_PORT
+ * The replay config/file tree must contain these labels so the release gate can
+ * prove it is not merely checking that DevTools can start:
+ *   HH_RELEASE_HOME_DETAIL_NONEMPTY
+ *   HH_RELEASE_LOGIN_VERSION
  */
-
 import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
+import {
+  assertAutoReplayFinished,
+  assertReleaseReplayCoverage,
+  buildAutoReplayArgs,
+  resolveReplayConfigPath,
+  shouldRequireReleaseReplay,
+} from './lib/mp-replay-policy.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
@@ -38,7 +45,11 @@ function runCli(cliPath, args, options = {}) {
 }
 
 function resolveCliPath() {
-  const cliPath = String(process.env.WECHAT_DEVTOOLS_CLI_PATH || DEFAULT_CLI_PATH).trim()
+  const cliPath = String(
+    process.env.WECHAT_DEVTOOLS_CLI_PATH ||
+    process.env.WX_DEVTOOLS_CLI ||
+    DEFAULT_CLI_PATH
+  ).trim()
   if (!cliPath || !existsSync(cliPath)) return ''
   return cliPath
 }
@@ -93,7 +104,7 @@ function detectRunningDevtoolsPort() {
     const row = rows.find((item) => item?.isIde && Number(item?.port) > 0) ||
       rows.find((item) => Number(item?.port) > 0)
     return Number(row?.port || 0)
-  } catch (_error) {
+  } catch {
     return 0
   }
 }
@@ -104,53 +115,53 @@ function resolveDevtoolsPort() {
   return detectRunningDevtoolsPort() || DEFAULT_DEVTOOLS_PORT
 }
 
+function fail(message) {
+  console.error(`[FAIL] ${message}`)
+  process.exit(1)
+}
+
 function main() {
+  const replayConfigPath = resolveReplayConfigPath({ cwd: ROOT })
+  const requireReleaseReplay = shouldRequireReleaseReplay()
+
+  if (requireReleaseReplay) {
+    try {
+      assertReleaseReplayCoverage(replayConfigPath)
+    } catch (error) {
+      fail(`${error?.message || error}\nRecord/label DevTools replay cases with HH_RELEASE_HOME_DETAIL_NONEMPTY and HH_RELEASE_LOGIN_VERSION before release upload.`)
+    }
+  }
+
   const cliPath = resolveCliPath()
   const projectPath = resolveProjectPath()
   const devtoolsPort = resolveDevtoolsPort()
 
-  if (!Number.isFinite(devtoolsPort) || devtoolsPort <= 0) {
-    console.error('❌ Invalid WECHAT_DEVTOOLS_PORT. It must be a positive number.')
-    process.exit(1)
-  }
-  if (!cliPath) {
-    console.error('❌ WECHAT_DEVTOOLS_CLI_PATH is invalid or not found.')
-    process.exit(1)
-  }
-  if (!projectPath) {
-    console.error('❌ WECHAT_DEVTOOLS_PROJECT_PATH is invalid or not found.')
-    process.exit(1)
-  }
+  if (!Number.isFinite(devtoolsPort) || devtoolsPort <= 0) fail('Invalid WECHAT_DEVTOOLS_PORT. It must be a positive number.')
+  if (!cliPath) fail('WECHAT_DEVTOOLS_CLI_PATH is invalid or not found.')
+  if (!projectPath) fail('WECHAT_DEVTOOLS_PROJECT_PATH is invalid or not found.')
 
-  console.log('🎬 Running DevTools auto-replay...')
-  console.log(`   cliPath: ${cliPath}`)
-  console.log(`   projectPath: ${projectPath}`)
-  console.log(`   port: ${devtoolsPort}`)
+  console.log('[DevTools auto-replay]')
+  console.log(`cliPath: ${cliPath}`)
+  console.log(`projectPath: ${projectPath}`)
+  console.log(`port: ${devtoolsPort}`)
+  if (replayConfigPath) console.log(`replayConfigPath: ${replayConfigPath}`)
+  if (requireReleaseReplay) console.log('releaseReplay: required')
 
-  const args = [
-    'auto-replay',
-    '--project', projectPath,
-    '--port', String(devtoolsPort),
-    '--replay-all',
-    '--trust-project',
-  ]
-
+  const args = buildAutoReplayArgs({ projectPath, port: devtoolsPort, replayConfigPath })
   const result = runCli(cliPath, args, { timeout: 300000 })
 
   const output = `${result.stdout || ''}${result.stderr || ''}`
   process.stdout.write(result.stdout || '')
   process.stderr.write(result.stderr || '')
 
-  if (result.status !== 0) {
-    console.error(`❌ auto-replay exited with status ${result.status}`)
-    process.exit(result.status || 1)
-  }
-  if (!output.includes('auto-replay finish')) {
-    console.error('❌ auto-replay did not report finish marker.')
-    process.exit(1)
+  if (result.status !== 0) fail(`auto-replay exited with status ${result.status}`)
+  try {
+    assertAutoReplayFinished(output)
+  } catch (error) {
+    fail(error?.message || error)
   }
 
-  console.log('✅ DevTools auto-replay completed.')
+  console.log('[OK] DevTools auto-replay completed.')
 }
 
 main()

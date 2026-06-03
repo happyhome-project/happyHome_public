@@ -35,6 +35,7 @@
     "test:mp:release-gate": "node scripts/miniprogram-release-gate.mjs",
     "test:h5:detail-smoke": "node scripts/test-h5-detail-smoke.mjs",
     "test:h5:profile-smoke": "node scripts/test-h5-profile-smoke.mjs",
+    "test:mp:replay-policy": "node --test scripts/lib/mp-replay-policy.test.mjs scripts/lib/release-policy.test.mjs",
     "test:deploy-output": "node --test scripts/lib/deploy-output.test.mjs",
     "test:real:admin": "node scripts/test-admin-http.mjs",
     "test:real": "node scripts/test-real.mjs",
