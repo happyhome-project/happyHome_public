@@ -118,7 +118,7 @@
             <el-radio value="default">默认列表</el-radio>
             <el-radio value="guide_note">图文攻略</el-radio>
           </el-radio-group>
-          <div class="field-hint">图文攻略适合亲子出游、村游路线等轻图文沉淀板块；不会启用标签归类。</div>
+          <div class="field-hint">图文攻略适合亲子出游、村游路线等沉淀板块；会固定路线数据、顶部图片和富图文正文，不启用标签归类。</div>
         </el-form-item>
         <el-form-item>
           <template #label>

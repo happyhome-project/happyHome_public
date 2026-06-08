@@ -125,13 +125,17 @@ function matchesAction(action: string, rules: Array<string | RegExp>): boolean {
 }
 
 function normalizeSection(section: any) {
-  return {
+  const normalized = {
     ...section,
     type: section?.type || 'evergreen',
     status: section?.status || 'active',
     displayTemplate: normalizeSectionDisplayTemplate(section?.displayTemplate),
     enableComment: section?.enableComment !== false,
     enableLike: section?.enableLike !== false,
+  }
+  return {
+    ...normalized,
+    widgets: normalizeGuideNoteWidgets(normalized),
   }
 }
 
@@ -142,8 +146,12 @@ function normalizeSectionDisplayTemplate(value: unknown): SectionDisplayTemplate
 const GUIDE_NOTE_LOCKED_WIDGETS: Widget[] = [
   { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true, locked: true },
   { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false, locked: true },
-  { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false, locked: true },
-  { widgetId: 'guide_location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false, locked: true },
+  { widgetId: 'guide_distance', type: 'short_text', label: '距离', fieldKey: 'distance', required: false, order: 2, showInList: false, locked: true },
+  { widgetId: 'guide_highest_altitude', type: 'short_text', label: '最高海拔', fieldKey: 'highestAltitude', required: false, order: 3, showInList: false, locked: true },
+  { widgetId: 'guide_total_climb', type: 'short_text', label: '累计爬升', fieldKey: 'totalClimb', required: false, order: 4, showInList: false, locked: true },
+  { widgetId: 'guide_reference_duration', type: 'short_text', label: '参考用时', fieldKey: 'referenceDuration', required: false, order: 5, showInList: false, locked: true },
+  { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 6, showInList: false, locked: true },
+  { widgetId: 'guide_location', type: 'location', label: '线路轨迹/地点', fieldKey: 'location', required: false, order: 7, showInList: false, locked: true },
 ]
 
 const GUIDE_NOTE_LOCKED_BY_ID = new Map(GUIDE_NOTE_LOCKED_WIDGETS.map((widget) => [widget.widgetId, widget]))
@@ -154,6 +162,27 @@ function buildDefaultGuideNoteWidgets(): Widget[] {
 
 function isGuideNoteSection(section: Section) {
   return normalizeSectionDisplayTemplate(section?.displayTemplate) === 'guide_note'
+}
+
+function normalizeGuideNoteWidgets(section: any) {
+  const widgets = Array.isArray(section?.widgets) ? section.widgets : []
+  if (normalizeSectionDisplayTemplate(section?.displayTemplate) !== 'guide_note') return widgets
+
+  const lockedIds = new Set(GUIDE_NOTE_LOCKED_WIDGETS.map((widget) => widget.widgetId))
+  const customWidgets = widgets
+    .filter((widget: any) => !lockedIds.has(String(widget?.widgetId || '')))
+    .slice()
+    .sort((a: any, b: any) => Number(a?.order || 0) - Number(b?.order || 0))
+    .map((widget: any, index: number) => ({
+      ...widget,
+      order: GUIDE_NOTE_LOCKED_WIDGETS.length + index,
+      locked: false,
+    }))
+
+  return [
+    ...buildDefaultGuideNoteWidgets(),
+    ...customWidgets,
+  ]
 }
 
 function assertGuideNoteLockedWidgets(section: Section, widgets: Widget[]) {

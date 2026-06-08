@@ -166,6 +166,13 @@
             <view class="guide-main">
               <text class="guide-title">{{ item.t }}</text>
               <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
+              <view v-if="item.routeStats?.length" class="guide-stats">
+                <text
+                  v-for="stat in item.routeStats"
+                  :key="stat.label"
+                  class="guide-stat"
+                >{{ stat.value }} {{ stat.label }}</text>
+              </view>
               <view v-if="item.isPinned || item.isFeatured" class="post-badges guide-badges">
                 <text v-if="item.isPinned" class="post-badge pin">置顶</text>
                 <text v-if="item.isFeatured" class="post-badge feature">精华</text>
@@ -378,6 +385,7 @@ interface ArchiveItem {
   excerpt?: string
   coverImage?: string
   location?: string
+  routeStats?: Array<{ label: string; value: string }>
   hot?: boolean
   when: string
   postId?: string
@@ -409,6 +417,7 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
               excerpt: guide.excerpt,
               coverImage: guide.coverImage,
               location: guide.location,
+              routeStats: guide.routeStats,
               hot: false,
               when: guide.when,
               postId: p._id,
@@ -1368,6 +1377,21 @@ onPullDownRefresh(async () => {
 }
 .guide-badges {
   margin-top: 10rpx;
+}
+.guide-stats {
+  margin-top: 10rpx;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8rpx;
+}
+.guide-stat {
+  padding: 5rpx 10rpx;
+  border-radius: 999rpx;
+  background: #eef5ea;
+  color: #365d42;
+  font-size: 20rpx;
+  line-height: 1.25;
+  font-weight: $hh-font-weight-medium;
 }
 .guide-meta {
   margin-top: auto;

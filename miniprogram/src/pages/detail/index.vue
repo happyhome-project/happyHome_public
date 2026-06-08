@@ -10,14 +10,18 @@
         <text v-if="post.isPinned" class="post-flag pin">置顶</text>
         <text v-if="post.isFeatured" class="post-flag feature">精华</text>
       </view>
-      <view>
+      <GuideRouteDetailView
+        v-if="isGuideNoteDetail && guideRouteDetail"
+        :detail="guideRouteDetail"
+      />
+
+      <view v-else>
         <WidgetRenderer
           v-for="widget in regularWidgets"
           :key="widget.widgetId"
           :widget="widget"
           :content="post.content"
           :post-meta="postMeta"
-          :variant="isGuideNoteDetail ? 'guide_note' : 'default'"
         />
 
         <view
@@ -138,12 +142,14 @@ import { postApi, sectionApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import LoginGuard from '../../components/LoginGuard.vue'
+import GuideRouteDetailView from '../../components/GuideRouteDetailView.vue'
 import WidgetRenderer from '../../components/widgets/WidgetRenderer.vue'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
+import { buildGuideRouteDetail } from '../../utils/guide-detail'
 
 const fallbackAvatar = '/static/default-avatar.png'
 const ATTENDANCE_SLOT_DISPLAY_MAX = 6
@@ -183,6 +189,10 @@ const postMeta = computed(() => ({
 }))
 const detailSectionTitle = computed(() => section.value?.name || '')
 const isGuideNoteDetail = computed(() => section.value?.displayTemplate === 'guide_note')
+const guideRouteDetail = computed(() => {
+  if (!post.value || !section.value || !isGuideNoteDetail.value) return null
+  return buildGuideRouteDetail(post.value, section.value)
+})
 const regularWidgets = computed(() =>
   (section.value?.widgets || []).filter((widget: any) => !['attendance', 'admin_notice'].includes(widget.type))
 )

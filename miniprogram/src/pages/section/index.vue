@@ -47,12 +47,19 @@
           <view v-else class="guide-cover guide-cover-empty">
             <text>{{ sectionName.slice(0, 2) }}</text>
           </view>
-          <view class="guide-body">
-            <text class="guide-title">{{ item.title }}</text>
-            <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
-            <view class="guide-meta">
-              <text v-if="item.location" class="guide-location">{{ item.location }}</text>
-              <text v-if="item.when" class="guide-chip">{{ item.when }}</text>
+            <view class="guide-body">
+              <text class="guide-title">{{ item.title }}</text>
+              <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
+              <view v-if="item.routeStats.length" class="guide-stats">
+                <text
+                  v-for="stat in item.routeStats"
+                  :key="stat.label"
+                  class="guide-stat"
+                >{{ stat.value }} {{ stat.label }}</text>
+              </view>
+              <view class="guide-meta">
+                <text v-if="item.location" class="guide-location">{{ item.location }}</text>
+                <text v-if="item.when" class="guide-chip">{{ item.when }}</text>
               <text v-if="item.author" class="guide-chip">{{ item.author }}</text>
             </view>
           </view>
@@ -344,6 +351,23 @@ function formatShortDate(value: unknown): string {
   color: $hh-ink-3;
   font-size: 23rpx;
   line-height: 1.34;
+}
+
+.guide-stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+
+.guide-stat {
+  padding: 7rpx 12rpx;
+  border-radius: 999rpx;
+  background: #eef5ea;
+  color: #365d42;
+  font-size: 23rpx;
+  line-height: 1.3;
+  font-weight: $hh-font-weight-medium;
 }
 
 .guide-location {
