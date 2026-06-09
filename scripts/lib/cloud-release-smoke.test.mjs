@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 
 import {
   buildTcbCommand,
+  defaultRunner,
   parseArgs,
   parseFirstJson,
   redactSensitive,
@@ -28,8 +29,8 @@ function commandPart(args, offset) {
 
 function createMockRunner(options = {}) {
   const calls = []
-  const runner = async (command, args) => {
-    calls.push({ command, args })
+  const runner = async (command, args, runnerOptions = {}) => {
+    calls.push({ command, args, options: runnerOptions })
     const kind = commandPart(args, 1)
     const action = commandPart(args, 2)
     const fn = commandPart(args, 3)
@@ -37,6 +38,8 @@ function createMockRunner(options = {}) {
     if (kind !== 'fn') return { status: 2, stdout: '', stderr: 'unexpected command' }
 
     if (action === 'log') {
+      const sequence = options.logResponses?.[fn]
+      if (sequence?.length) return sequence.shift()
       if (options.logFailures?.includes(fn)) {
         return { status: 1, stdout: JSON.stringify({ error: { code: 'InternalError', message: 'log failed' } }), stderr: '' }
       }
@@ -86,6 +89,7 @@ test('parseArgs supports env, only, log controls, no-fixture, and evidence-dir',
     '--only=user,post,missing',
     '--log-limit=7',
     '--log-wait-ms=0',
+    '--command-timeout-ms=1234',
     '--no-fixture',
     '--evidence-dir', 'evidence-x',
     '--run-id', 'run-x',
@@ -95,6 +99,7 @@ test('parseArgs supports env, only, log controls, no-fixture, and evidence-dir',
   assert.deepEqual(args.only, ['user', 'post'])
   assert.equal(args.logLimit, 7)
   assert.equal(args.logWaitMs, 0)
+  assert.equal(args.commandTimeoutMs, 1234)
   assert.equal(args.noFixture, true)
   assert.equal(args.evidenceDir, 'evidence-x')
   assert.equal(args.runId, 'run-x')
@@ -114,6 +119,15 @@ test('buildTcbCommand and redaction keep command evidence safe', () => {
 test('parseFirstJson skips CLI banners', () => {
   const parsed = parseFirstJson('CloudBase CLI 3.5.6\ntry tcb ai\n{"ok":true,"value":1}\n')
   assert.deepEqual(parsed, { ok: true, value: 1 })
+})
+
+test('default runner stops commands that exceed the smoke command timeout', async () => {
+  const result = await defaultRunner(process.execPath, ['-e', 'setTimeout(() => {}, 1000)'], {
+    timeoutMs: 10,
+  })
+
+  assert.equal(result.status, 1)
+  assert.match(result.error, /timed out/)
 })
 
 test('cloud release smoke passes with generated invoke, log, fixture, and cleanup evidence', async () => {
@@ -162,6 +176,53 @@ test('post smoke fails when recent logs do not include the runId', async () => {
   }
 })
 
+test('required post log capture retries with a smaller limit after transient CLS timeout', async () => {
+  const evidenceDir = await tempEvidenceDir()
+  try {
+    const runId = 'unit-run'
+    const runner = createMockRunner({
+      runId,
+      logResponses: {
+        post: [
+          {
+            status: 1,
+            stdout: JSON.stringify({
+              error: {
+                code: 'ResourceUnavailable',
+                message: 'ClientError.NetworkError context deadline exceeded',
+              },
+            }),
+            stderr: '',
+          },
+          { status: 0, stdout: JSON.stringify({ logs: [{ fn: 'post', log: `recent log for post ${runId}` }] }), stderr: '' },
+        ],
+      },
+    })
+    const summary = await runCloudReleaseSmoke({
+      envId: 'env-x',
+      only: ['post'],
+      logLimit: 30,
+      logWaitMs: 0,
+      noFixture: true,
+      evidenceDir,
+      runId,
+    }, runner)
+
+    assert.equal(summary.status, 'passed')
+    assert(summary.labels.includes('HH_CLOUD_LOG_CAPTURE_POST'))
+    const logCalls = runner.calls.filter((call) => commandPart(call.args, 2) === 'log' && commandPart(call.args, 3) === 'post')
+    assert.equal(logCalls.length, 2)
+    assert.deepEqual(logCalls.map((call) => call.args[call.args.indexOf('--limit') + 1]), ['30', '5'])
+
+    const finalRecord = JSON.parse(await readFile(join(evidenceDir, 'log-post.json'), 'utf8'))
+    assert.equal(finalRecord.ok, true)
+    assert.equal(finalRecord.attempts.length, 2)
+    assert.match(finalRecord.attempts[0].parsed.error.message, /context deadline exceeded/)
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true })
+  }
+})
+
 test('admin fixture smoke fails when cleanup fails', async () => {
   const evidenceDir = await tempEvidenceDir()
   try {
@@ -198,6 +259,30 @@ test('optional non-post log failures are warnings, not hard blockers', async () 
 
     assert.equal(summary.status, 'passed')
     assert(summary.warnings.some((warning) => /section log capture failed/.test(warning.message)))
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true })
+  }
+})
+
+test('optional non-post log capture uses a small limit and command timeout', async () => {
+  const evidenceDir = await tempEvidenceDir()
+  try {
+    const runner = createMockRunner({ runId: 'unit-run' })
+    const summary = await runCloudReleaseSmoke({
+      envId: 'env-x',
+      only: ['admin'],
+      logLimit: 30,
+      logWaitMs: 0,
+      commandTimeoutMs: 6789,
+      noFixture: true,
+      evidenceDir,
+      runId: 'unit-run',
+    }, runner)
+
+    assert.equal(summary.status, 'passed')
+    const logCall = runner.calls.find((call) => commandPart(call.args, 2) === 'log' && commandPart(call.args, 3) === 'admin')
+    assert.equal(logCall.args[logCall.args.indexOf('--limit') + 1], '5')
+    assert.equal(logCall.options.timeoutMs, 6789)
   } finally {
     await rm(evidenceDir, { recursive: true, force: true })
   }
