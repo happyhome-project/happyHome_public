@@ -84,6 +84,15 @@ export async function handleReject(params: { communityId: string }, openid: stri
   return { success: true }
 }
 
+export async function handlePendingList(openid: string) {
+  if (!openid) throw new Error('Missing OPENID')
+  await assertSuperAdmin(openid)
+  const communities = await db.query('communities', { status: 'pending' }, {
+    orderBy: ['createdAt', 'desc'],
+  })
+  return { communities }
+}
+
 export async function handleList(params: { includeAll?: boolean }) {
   // wx-server-sdk 不支持 $in 操作符，includeAll 时分两次查询
   if (params.includeAll) {
@@ -136,6 +145,7 @@ export const main = async (event: any) => {
   if (action === 'create') return handleCreate(params, openid)
   if (action === 'approve') return handleApprove(params, openid)
   if (action === 'reject') return handleReject(params, openid)
+  if (action === 'pendingList') return handlePendingList(openid)
   if (action === 'list') return handleList(params)
   if (action === 'get') return handleGet(params)
   if (action === 'listDiscoverable') return handleListDiscoverable(openid)

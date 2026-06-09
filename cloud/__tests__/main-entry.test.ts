@@ -180,6 +180,7 @@ describe('OPENID requirement contract', () => {
     ['community.create', communityMain, 'create', { name: 'x', description: '', coverImage: '', location: {}, joinType: 'open' }],
     ['community.approve', communityMain, 'approve', { communityId: 'c1' }],
     ['community.reject', communityMain, 'reject', { communityId: 'c1' }],
+    ['community.pendingList', communityMain, 'pendingList', {}],
     ['member.apply', memberMain, 'apply', { communityId: 'c1' }],
     ['member.leave', memberMain, 'leave', { communityId: 'c1' }],
     ['member.memberApprove', memberMain, 'memberApprove', { communityId: 'c1', memberId: 'm1' }],
