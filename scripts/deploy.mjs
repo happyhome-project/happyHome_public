@@ -244,11 +244,11 @@ async function deployCloudViaDevtoolsCli(fns) {
 
 async function deployCloudViaCloudBaseCli(fns) {
   const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
-  const tcb = (...args) => [npx, '--yes', '--package', '@cloudbase/cli', 'cloudbase', ...args].map(quote).join(' ')
+  const tcb = (...args) => [npx, '--yes', '--package', '@cloudbase/cli', 'tcb', ...args].map(quote).join(' ')
 
   const authProbe = await runShellCapture(
     tcb('fn', 'list', '--env-id', CLOUD_ENV, '--json'),
-    { displayCommandLine: `cloudbase fn list --env-id ${CLOUD_ENV} --json` }
+    { displayCommandLine: `tcb fn list --env-id ${CLOUD_ENV} --json` }
   )
   if (!authProbe.ok) {
     return {
@@ -260,10 +260,19 @@ async function deployCloudViaCloudBaseCli(fns) {
   for (const fn of fns) {
     const fnDir = resolve(CLOUD_DIST, fn)
     const result = await runShellCapture(
-      tcb('fn', 'deploy', fn, '--dir', fnDir, '--force', '--yes', '--env-id', CLOUD_ENV, '--json'),
-      { displayCommandLine: `cloudbase fn deploy ${fn} --dir ${fnDir} --force --yes --env-id ${CLOUD_ENV} --json` }
+      tcb('fn', 'deploy', fn, '--force', '--yes', '--env-id', CLOUD_ENV, '--deployMode', 'cos', '--json'),
+      {
+        cwd: fnDir,
+        displayCommandLine: `cd ${fnDir} && tcb fn deploy ${fn} --force --yes --env-id ${CLOUD_ENV} --deployMode cos --json`,
+      }
     )
     if (!result.ok) return { ok: false, reason: `CloudBase CLI deploy ${fn} failed: ${result.reason}` }
+
+    const detail = await runShellCapture(
+      tcb('fn', 'detail', fn, '--env-id', CLOUD_ENV, '--json'),
+      { displayCommandLine: `tcb fn detail ${fn} --env-id ${CLOUD_ENV} --json` }
+    )
+    if (!detail.ok) return { ok: false, reason: `CloudBase CLI detail ${fn} failed after deploy: ${detail.reason}` }
   }
 
   return { ok: true, reason: 'ok' }

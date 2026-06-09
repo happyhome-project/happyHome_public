@@ -16,6 +16,7 @@
   },
   "scripts": {
     "deploy:cloud": "node scripts/deploy.mjs cloud",
+    "deploy:cloud:tcb": "node scripts/deploy.mjs cloud --use-tcb",
     "deploy:mp": "node scripts/deploy.mjs miniprogram",
     "deploy:mp:upload": "node scripts/deploy.mjs miniprogram-upload",
     "deploy:admin-web": "node scripts/deploy.mjs admin-web",

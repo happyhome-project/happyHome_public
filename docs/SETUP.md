@@ -79,20 +79,78 @@ cd cloud && node build.mjs
 
 ### 5. 部署云函数
 
-**方式一：一键部署**
+**方式一：CloudBase CLI / COS 直传（2026-06-09 本机已验证可用）**
+
+推荐脚本入口：
+
+```bash
+npm.cmd run deploy:cloud:tcb -- --only=user
+```
+
+多个函数可用逗号分隔：`--only=user,post`。不传 `--only` 会按部署脚本内的云函数列表部署全部函数。
+
+该入口会构建云函数、切到 `cloud/dist/<fn>`、用 CloudBase CLI 的 COS 上传模式部署，并在每个函数部署后运行 `tcb fn detail <fn> ... --json` 做只读校验。
+
+手动等价命令，以 `user` 云函数为例：
+
+```bash
+cd cloud && node build.mjs
+cd C:\Project\Claude\happyHome\cloud\dist\user
+npx.cmd --yes --package @cloudbase/cli tcb fn deploy user --force --yes --env-id cloudbase-3gh862acb1505ff3 --deployMode cos --json
+```
+
+成功输出应包含：
+
+```text
+[user] 部署方式: COS 上传
+[user] 云函数部署成功
+```
+
+只读校验：
+
+```bash
+npx.cmd --yes --package @cloudbase/cli tcb fn detail user --env-id cloudbase-3gh862acb1505ff3 --json
+```
+
+确认 `Status: Active`、`AvailableStatus: Available`，以及新的 `ModTime`。
+
+> PowerShell 下使用 `npx.cmd`，不要直接用 `npx`，否则可能被 `npx.ps1` 执行策略拦截。
+
+**旧方式：一键部署脚本 / DevTools CLI**
+
 ```bash
 node scripts/deploy.mjs cloud
 ```
-默认走微信开发者工具 CLI。开始前确认 IDE 已登录；如果部署输出里出现 `getCloudAPISignedHeader failed` / `success=false`，**先打开微信开发者工具重新登录/扫码，再重跑部署**。
+
+该路径默认走微信开发者工具 CLI。2026-06-09 复测：即使账号已登录、项目已打开，云函数上传阶段仍可能 `success=false` 并报 `getCloudAPISignedHeader failed` / `ret=41002`。因此这条旧路径当前不可作为云函数部署成功路径，只保留为历史/诊断说明。
 
 可选诊断命令：
 ```bash
 # 查看 CloudBase CLI / CAM 登录是否仍有效
 npx.cmd --yes --package @cloudbase/cli cloudbase fn list --env-id cloudbase-3gh862acb1505ff3 --json
 
-# 强制走官方 CloudBase CLI 部署路径（2026-05-26 本机实测可能 COS 上传超时）
+# CloudBase CLI / COS 部署脚本入口
 node scripts/deploy.mjs cloud --use-tcb
 ```
+
+可继续自动化的 CloudBase CLI 命令：
+
+```bash
+# 部署后确认函数状态 / ModTime / Handler / env
+npx.cmd --yes --package @cloudbase/cli tcb fn detail user --env-id cloudbase-3gh862acb1505ff3 --json
+
+# 事件函数烟测，后续可为每个函数补不会污染业务数据的安全 fixture payload
+npx.cmd --yes --package @cloudbase/cli tcb fn invoke user -d "<safe-json-payload>" --env-id cloudbase-3gh862acb1505ff3 --json
+
+# 失败时抓最近日志
+npx.cmd --yes --package @cloudbase/cli tcb fn log user --limit 20 --order desc --env-id cloudbase-3gh862acb1505ff3 --json
+
+# CI/无人值守登录方向：使用腾讯云永久密钥或 CloudBase API Key，不把密钥写入仓库
+npx.cmd --yes --package @cloudbase/cli tcb login --apiKeyId %TCB_SECRET_ID% --apiKey %TCB_SECRET_KEY% --json
+npx.cmd --yes --package @cloudbase/cli tcb login --cloudbase-api-key %TCB_API_KEY% --env-id cloudbase-3gh862acb1505ff3 --json
+```
+
+官方 CLI 还支持 `cloudbaserc.json` + `tcb fn deploy --all --yes` 批量部署，以及 `tcb config diff/update fn` 管理函数配置。当前项目暂不启用配置文件批量覆盖，因为云函数 env 里有线上手工配置；要自动化 env，先用 `tcb config diff fn` 对齐差异，再用 `tcb config update fn --env-mode merge --yes` 做增量更新。
 
 DevTools CLI 云函数部署的 `--project` 使用 `miniprogram/dist/build/mp-weixin`，不要手动改成仓库根。
 
