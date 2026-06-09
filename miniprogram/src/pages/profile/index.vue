@@ -1,7 +1,6 @@
 <template>
   <view class="profile-page">
     <view class="profile-debug-banner">
-      <text>ver: {{ appVersion }}</text>
       <text>{{ profileDebugText }}</text>
     </view>
     <view v-if="profileError" class="profile-error">
@@ -98,9 +97,6 @@
             <text class="login-alt-hint">使用其他账号？</text>
             <text class="login-alt-link" @tap="showDevLogin = true">DEV 登录</text>
           </view>
-          <view class="login-version">
-            <text>ver: {{ appVersion }}</text>
-          </view>
         </view>
       </template>
 
@@ -145,9 +141,6 @@
               class="dev-btn"
               @tap="showDevLogin = true"
             >DEV 登录</button>
-          </view>
-          <view class="login-version">
-            <text>ver: {{ appVersion }}</text>
           </view>
         </view>
       </template>
@@ -330,9 +323,6 @@
         </view>
       </view>
     </view>
-    <view class="profile-version">
-      <text>ver: {{ appVersion }}</text>
-    </view>
     <AppTabBar current="profile" />
   </view>
 </template>
@@ -346,7 +336,6 @@ import { communityApi, memberApi, notificationApi, type ApprovalNotificationEven
 import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
-import { BUILD_INFO } from '../../generated/build-info'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import {
@@ -367,10 +356,6 @@ const notificationSubscriptions = ref<Array<{ eventType: ApprovalNotificationEve
 const notificationNeedsAuthorization = ref(false)
 const profileError = ref('')
 let refreshingProfile = false
-const appVersion = computed(() => {
-  const rawVersion = String(BUILD_INFO.version || BUILD_INFO.buildId || 'unknown')
-  return rawVersion.replace(/^1\.0\./, '0.7.')
-})
 
 const configuredNotificationTemplates = computed(() => configuredApprovalTemplates(notificationTemplates.value))
 const hasAdminTools = computed(() => userStore.role === 'superAdmin' || adminCommunityIds.value.length > 0)
@@ -1049,14 +1034,6 @@ onPullDownRefresh(async () => {
   color: $hh-accent;
   text-decoration: underline;
 }
-.login-version {
-  margin-top: $hh-space-sm;
-  text-align: center;
-  font-family: $hh-font-mono;
-  font-size: 18rpx;
-  color: $hh-color-text-mute;
-  opacity: 0.7;
-}
 .form-actions {
   display: flex;
   gap: $hh-space-sm;
@@ -1178,18 +1155,6 @@ onPullDownRefresh(async () => {
 .approval-reminder-btn::after { border: none; }
 .hint-text { display: block; margin-top: $hh-space-sm; color: $hh-color-text-sub; font-size: $hh-font-caption; line-height: $hh-line-height-base; }
 .hint-text.warn { color: #b7791f; }
-.profile-version {
-  padding: 20rpx 0 10rpx;
-  text-align: center;
-  font-family: $hh-font-mono;
-  font-size: 18rpx;
-  color: $hh-color-text-mute;
-  opacity: 0.58;
-}
-.profile-version text {
-  user-select: text;
-}
-
 .login-actions { display: flex; gap: $hh-space-sm; }
 .dev-btn { background: $hh-color-warning; color: $hh-color-text-inverse; font-size: $hh-font-caption; }
 
