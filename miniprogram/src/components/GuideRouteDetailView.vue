@@ -71,6 +71,13 @@
       <view class="guide-section-heading">
         <text>线路轨迹</text>
       </view>
+      <!-- #ifdef H5 -->
+      <view class="guide-map-fallback" @tap="openLocation">
+        <text class="guide-map-fallback-title">{{ detail.location.address || '线路轨迹' }}</text>
+        <text class="guide-map-fallback-sub">纬度 {{ detail.location.lat }} · 经度 {{ detail.location.lng }}</text>
+      </view>
+      <!-- #endif -->
+      <!-- #ifndef H5 -->
       <view class="guide-map-card" @tap="openLocation">
         <map
           class="guide-map"
@@ -87,6 +94,7 @@
           <text>{{ detail.location.address }}</text>
         </view>
       </view>
+      <!-- #endif -->
     </view>
   </view>
 </template>
@@ -362,5 +370,30 @@ function openLocation() {
   font-size: 26rpx;
   line-height: 1.5;
   border-top: 1rpx solid $hh-ink-line-2;
+}
+
+.guide-map-fallback {
+  min-height: 220rpx;
+  padding: 28rpx;
+  border: 1rpx solid $hh-ink-line-2;
+  border-radius: $hh-radius-md;
+  background: linear-gradient(135deg, #eef4e8, #f8f5ec);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 10rpx;
+}
+
+.guide-map-fallback-title {
+  color: $hh-ink-1;
+  font-size: 30rpx;
+  line-height: 1.4;
+  font-weight: $hh-font-weight-bold;
+}
+
+.guide-map-fallback-sub {
+  color: $hh-ink-3;
+  font-size: 24rpx;
+  line-height: 1.4;
 }
 </style>

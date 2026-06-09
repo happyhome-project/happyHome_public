@@ -39,7 +39,7 @@
       :closable="false"
       style="margin-bottom: 16px;"
       title="图文攻略固定控件"
-      description="标题、封面/图片、距离、最高海拔、累计爬升、参考用时、正文、线路轨迹/地点为固定结构；正文使用富图文，允许图文混排。固定控件不能删除、改类型或调整顺序。"
+      description="标题、封面/图片、距离、最高海拔、累计爬升、参考用时、正文、线路轨迹/地点为固定结构；图片统一放在封面/图片中，正文只写线路概述和线路行程。固定控件不能删除、改类型或调整顺序。"
     />
 
     <draggable v-model="widgets" item-key="widgetId" handle=".drag-handle" :move="canMoveWidget">

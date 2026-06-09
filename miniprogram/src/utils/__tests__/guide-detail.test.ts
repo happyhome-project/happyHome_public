@@ -64,7 +64,7 @@ describe('buildGuideRouteDetail', () => {
     ])
   })
 
-  test('封面图片用于顶部，正文图文混排里的图片保留在正文块中', () => {
+  test('封面图片用于顶部，正文只保留文字段落', () => {
     const section = baseSection([
       { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
       { widgetId: 'images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false },
@@ -88,15 +88,9 @@ describe('buildGuideRouteDetail', () => {
     expect(detail.images).toEqual(['cloud://env/cover.jpg'])
     expect(detail.bodySections).toEqual([
       {
-        title: '线路概述',
+        title: '正文',
         blocks: [
           { type: 'paragraph', text: '线路概述：经过桂溪公园、中和湿地公园，寻找网红白房子' },
-          { type: 'image', src: 'cloud://env/body.jpg' },
-        ],
-      },
-      {
-        title: '线路行程',
-        blocks: [
           { type: 'paragraph', text: '线路行程：11+公里' },
         ],
       },

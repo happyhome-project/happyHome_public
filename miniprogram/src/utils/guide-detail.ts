@@ -124,7 +124,7 @@ function collectBodySections(post: Post, bodyWidgets: SectionWidget[]): GuideRou
     const text = widgetTextValue(post, widget)
     if (text) blocks.push({ type: 'paragraph', text })
   })
-  return groupBodyBlocks(blocks)
+  return blocks.length ? [{ title: '正文', blocks }] : []
 }
 
 function collectLocation(post: Post, section: Section): GuideRouteLocation | null {
@@ -208,23 +208,12 @@ function splitParagraphs(value: string): string[] {
     .filter(Boolean)
 }
 
-function extractHtmlImageSources(value: string): string[] {
-  const sources: string[] = []
-  const pattern = /<img\b[^>]*\bsrc\s*=\s*(['"])(.*?)\1[^>]*>/gi
-  let match: RegExpExecArray | null
-  while ((match = pattern.exec(value))) {
-    const src = String(match[2] || '').trim()
-    if (src && !sources.includes(src)) sources.push(src)
-  }
-  return sources
-}
-
 function markdownToBodyBlocks(value: string): GuideRouteBodyBlock[] {
   const blocks: GuideRouteBodyBlock[] = []
   splitParagraphs(value).forEach((paragraph) => {
     const image = /^!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)$/.exec(paragraph)
     if (image) {
-      blocks.push({ type: 'image', src: image[1] })
+      return
     } else {
       blocks.push({ type: 'paragraph', text: paragraph })
     }
@@ -233,42 +222,10 @@ function markdownToBodyBlocks(value: string): GuideRouteBodyBlock[] {
 }
 
 function htmlToBodyBlocks(value: string): GuideRouteBodyBlock[] {
-  const imageSources = extractHtmlImageSources(value)
   const text = String(value || '')
     .replace(/<img\b[^>]*>/gi, '\n')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/p>/gi, '\n')
     .replace(/<[^>]+>/g, '')
-  const blocks: GuideRouteBodyBlock[] = splitParagraphs(text).map((paragraph) => ({ type: 'paragraph', text: paragraph }))
-  imageSources.forEach((src) => blocks.push({ type: 'image', src }))
-  return blocks
-}
-
-function groupBodyBlocks(blocks: GuideRouteBodyBlock[]): GuideRouteBodySection[] {
-  const sections: GuideRouteBodySection[] = []
-  let current: GuideRouteBodySection | null = null
-
-  const ensureSection = (title: string) => {
-    if (!current || current.title !== title) {
-      current = { title, blocks: [] }
-      sections.push(current)
-    }
-    return current
-  }
-
-  blocks.forEach((block) => {
-    if (block.type === 'paragraph') {
-      if (/^线路行程[:：]?/.test(block.text) || /^行程[:：]/.test(block.text)) {
-        ensureSection('线路行程').blocks.push(block)
-        return
-      }
-      if (/^线路概述[:：]?/.test(block.text) || /^线路亮点[:：]/.test(block.text) || /^适用人群[:：]/.test(block.text) || /^注意事项[:：]/.test(block.text)) {
-        ensureSection('线路概述').blocks.push(block)
-        return
-      }
-    }
-    ensureSection(current?.title || '正文').blocks.push(block)
-  })
-
-  return sections
+  return splitParagraphs(text).map((paragraph) => ({ type: 'paragraph', text: paragraph }))
 }
