@@ -21,21 +21,21 @@ test('builds DevTools auto args with hidden automator websocket port', () => {
   ])
 })
 
-test('requires home detail and login version release UI evidence', () => {
+test('requires home detail and login page release UI evidence', () => {
   assert.throws(() => assertReleaseUiEvidence({
     homeDetailNonEmpty: true,
-    loginVersionVisible: false,
-  }), /HH_RELEASE_LOGIN_VERSION/)
+    loginPageReady: false,
+  }), /HH_RELEASE_LOGIN_READY/)
 
   assert.doesNotThrow(() => assertReleaseUiEvidence({
     homeDetailNonEmpty: true,
-    loginVersionVisible: true,
+    loginPageReady: true,
   }))
 })
 
 test('documents the release UI evidence markers used by the gate', () => {
   assert.deepEqual(REQUIRED_RELEASE_UI_MARKERS.map((item) => item.marker), [
     'HH_RELEASE_HOME_DETAIL_NONEMPTY',
-    'HH_RELEASE_LOGIN_VERSION',
+    'HH_RELEASE_LOGIN_READY',
   ])
 })
