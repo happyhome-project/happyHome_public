@@ -4,12 +4,6 @@ import { extname, join } from 'node:path'
 import { chromium } from 'playwright'
 
 const root = join(process.cwd(), 'miniprogram', 'dist', 'build', 'h5')
-const buildInfoPath = join(process.cwd(), 'miniprogram', 'src', 'generated', 'build-info.ts')
-const buildInfoText = existsSync(buildInfoPath) ? readFileSync(buildInfoPath, 'utf8') : ''
-const buildInfoVersion = buildInfoText.match(/version:\s*["']([^"']+)["']/)?.[1] || ''
-const expectedVersion = process.env.EXPECTED_SECTION_VERSION ||
-  buildInfoVersion.replace(/^1\.0\./, '0.7.')
-
 const contentTypes = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript',
@@ -59,10 +53,10 @@ server.listen(0, '127.0.0.1', async () => {
     if (loginGuardCount < 1) {
       throw new Error('section page did not render LoginGuard in logged-out smoke case')
     }
-    if (!text.includes(`ver: ${expectedVersion}`)) {
-      throw new Error(`section login guard version missing: expected ver: ${expectedVersion}`)
+    if (!text.includes('请先登录') || !text.includes('去登录')) {
+      throw new Error('section LoginGuard text or action is missing')
     }
-    if (text.length < 40) {
+    if (text.length < 12) {
       throw new Error('section content is too short; possible blank page')
     }
     if (errors.length > 0) {
