@@ -164,6 +164,7 @@ export const postAdminApi = {
     sectionId?: string
     authorQuery?: string
     status?: 'active' | 'deleted' | 'all'
+    auditStatus?: 'pending' | 'pass' | 'review' | 'rejected' | 'all'
     pinned?: boolean
     featured?: boolean
     dateFrom?: string
@@ -181,6 +182,15 @@ export const postAdminApi = {
     callAdmin('post.removeAttendanceMemberAdmin', params),
   createAdmin: (params: { communityId: string; sectionId: string; content: Record<string, any> }) =>
     callAdmin('post.createAdmin', params),
+}
+
+export const auditApi = {
+  list: (params: { auditStatus?: 'pending' | 'pass' | 'review' | 'rejected' | 'all' | 'actionable'; communityId?: string } = {}) =>
+    callAdmin('audit.listAdmin', params),
+  get: (postId: string) => callAdmin('audit.getAdmin', { postId }),
+  approve: (postId: string) => callAdmin('audit.approveAdmin', { postId }),
+  reject: (postId: string, reason: string) => callAdmin('audit.rejectAdmin', { postId, reason }),
+  retry: (postId: string) => callAdmin('audit.retryAdmin', { postId }),
 }
 
 export interface UploadMetadata {

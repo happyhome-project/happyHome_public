@@ -3,6 +3,14 @@ import crypto from 'crypto'
 import * as db from '../../lib/db'
 import * as storage from '../../lib/storage'
 import { extractCloudFileIDsFromContent } from '../../lib/extract-file-ids'
+import {
+  AUDIT_TASKS,
+  auditAndApply,
+  approvePostAudit,
+  handleAuditCallback,
+  isPostVisibleToMembers,
+  rejectPostAudit,
+} from '../../lib/content-audit'
 import { getEditableWidgetIds, sanitizeContent, validateContentValues, validateRequiredWidgets } from '../../lib/post-validate'
 import { getWxacodeUnlimited } from '../../lib/wx-openapi'
 import {
@@ -67,6 +75,7 @@ const PUBLIC_ACTIONS = new Set([
   'auth.wxLoginStart',
   'auth.wxLoginPoll',
   'auth.wxLoginConfirm',
+  'audit.callback',
 ])
 const SUPER_ADMIN_ONLY: Array<string | RegExp> = [
   'community.approve',
@@ -76,6 +85,7 @@ const SUPER_ADMIN_ONLY: Array<string | RegExp> = [
   'community.hardDelete',
   'community.listDisabled',
   'user.setSuperAdmin',
+  /^audit\./,
   /^admin\.(?!approvalSummary$)/,
 ]
 // 这些 action 需要校验对 communityId 的归属（superAdmin 自动放行）
@@ -376,11 +386,12 @@ async function getSectionsByIds(sectionIds: string[]) {
 }
 
 async function getAttendanceRecords(postId: string, widgetId: string) {
-  return db.query(
+  const records = await db.query(
     ATTENDANCE_COLLECTION,
     { postId, widgetId },
     { orderBy: ['joinedAt', 'desc'] }
   )
+  return Array.isArray(records) ? records : []
 }
 
 async function buildAttendanceSummaryByWidget(post: any, section: any) {
@@ -553,6 +564,10 @@ async function createSessionForAccount(account: AdminAccount): Promise<{ token: 
 // ============================================================
 
 async function publicRoute(action: string, params: Record<string, any>, openid = '') {
+  if (action === 'audit.callback') {
+    return handleAuditCallback(params)
+  }
+
   if (action === 'auth.login') {
     const username = String(params.username || '').trim()
     const password = String(params.password || '')
@@ -1153,6 +1168,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const sectionId = String(params.sectionId || '').trim()
     const authorKeyword = normalizeKeyword(params.authorQuery)
     const statusFilter = String(params.status || 'active').trim()
+    const auditStatusFilter = String(params.auditStatus || 'all').trim()
     const pinnedFilter = parseOptionalBoolean(params.pinned)
     const featuredFilter = parseOptionalBoolean(params.featured)
     const fromTimestamp = parseDateBoundary(String(params.dateFrom || '').trim())
@@ -1161,6 +1177,9 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     let posts = await db.query('posts', { communityId }, { orderBy: ['createdAt', 'desc'] })
     if (sectionId) posts = posts.filter((post: any) => post.sectionId === sectionId)
     if (statusFilter !== 'all') posts = posts.filter((post: any) => post.status === statusFilter)
+    if (auditStatusFilter !== 'all') {
+      posts = posts.filter((post: any) => (post.auditStatus || 'pass') === auditStatusFilter || post.pendingAuditStatus === auditStatusFilter)
+    }
     if (pinnedFilter !== null) posts = posts.filter((post: any) => Boolean(post.isPinned) === pinnedFilter)
     if (featuredFilter !== null) posts = posts.filter((post: any) => Boolean(post.isFeatured) === featuredFilter)
     if (fromTimestamp !== null) {
@@ -1181,6 +1200,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
         authorNickname: author?.nickName || '',
         sectionName: section?.name || '',
         sectionType: section?.type || '',
+        isVisibleToMembers: isPostVisibleToMembers(post),
         attendanceSummaryByWidget: section ? await buildAttendanceSummaryByWidget(post, section) : {},
       }
     }))
@@ -1197,6 +1217,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       post.sectionId ? db.getById('sections', post.sectionId).catch(() => null) : null,
     ])
     const normalizedSection = section ? normalizeSection(section) : null
+    const auditTasks = postId ? await db.query(AUDIT_TASKS, { postId }, { orderBy: ['createdAt', 'desc'] }).catch(() => []) : []
     const attendanceSummaryByWidget = normalizedSection ? await buildAttendanceSummaryByWidget(post, normalizedSection) : {}
     const attendanceMembersByWidget = normalizedSection
       ? Object.fromEntries(
@@ -1216,6 +1237,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       },
       section: normalizedSection,
       attendanceMembersByWidget,
+      auditTasks,
     }
   }
   if (action === 'post.deleteAdmin') {
@@ -1298,14 +1320,51 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     validateContentValues(section, merged, { allowAdminOnly: true })
 
     const updatedAt = new Date().toISOString()
+    if (post.auditStatus === 'pass' || !post.auditStatus) {
+      await db.updateById('posts', postId, {
+        pendingContent: merged,
+        pendingAuditStatus: 'pending',
+        pendingAuditReason: 'content audit pending',
+        pendingSubmittedAt: updatedAt,
+        updatedAt,
+        adminEditedAt: updatedAt,
+        adminEditedByAccountId: ctx.accountId,
+        adminEditedByUsername: ctx.username,
+      })
+      const audit = await auditAndApply({
+        postId,
+        communityId: post.communityId,
+        sectionId: post.sectionId,
+        section,
+        content: merged,
+        authorId: ctx.userId,
+        source: 'admin',
+        contentSlot: 'pendingContent',
+      })
+      return { success: true, updatedAt, adminEditedAt: updatedAt, auditStatus: audit.status, auditReason: audit.reason }
+    }
+
     await db.updateById('posts', postId, {
       content: merged,
+      auditStatus: 'pending',
+      auditReason: 'content audit pending',
+      auditUpdatedAt: updatedAt,
       updatedAt,
       adminEditedAt: updatedAt,
       adminEditedByAccountId: ctx.accountId,
       adminEditedByUsername: ctx.username,
     })
-    return { success: true, updatedAt, adminEditedAt: updatedAt }
+    const audit = await auditAndApply({
+      postId,
+      communityId: post.communityId,
+      sectionId: post.sectionId,
+      section,
+      content: merged,
+      authorId: ctx.userId,
+      source: 'admin',
+      contentSlot: 'content',
+    })
+    return { success: true, updatedAt, adminEditedAt: updatedAt, auditStatus: audit.status, auditReason: audit.reason }
   }
   if (action === 'post.removeAttendanceMemberAdmin') {
     const postId = String(params.postId || '').trim()
@@ -1318,6 +1377,82 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     }
     const members = await listAttendanceMembersForAdmin(postId, widgetId)
     return { success: true, members, total: members.length }
+  }
+
+  if (action === 'audit.listAdmin') {
+    const auditStatus = String(params.auditStatus || 'actionable').trim()
+    const communityId = String(params.communityId || '').trim()
+    let posts = await db.query('posts', communityId ? { communityId } : {}, { orderBy: ['updatedAt', 'desc'] }) as any[]
+    if (auditStatus === 'actionable') {
+      posts = posts.filter((post: any) =>
+        ['pending', 'review'].includes(String(post.auditStatus || '')) ||
+        ['pending', 'review'].includes(String(post.pendingAuditStatus || ''))
+      )
+    } else if (auditStatus !== 'all') {
+      posts = posts.filter((post: any) => (post.auditStatus || 'pass') === auditStatus || post.pendingAuditStatus === auditStatus)
+    }
+    const usersById = await getUsersByIds(posts.map((post: any) => String(post.authorId || '')))
+    const sectionsById = await getSectionsByIds(posts.map((post: any) => String(post.sectionId || '')))
+    const rows = posts.map((post: any) => ({
+      ...post,
+      authorNickname: usersById[post.authorId]?.nickName || '',
+      sectionName: sectionsById[post.sectionId]?.name || '',
+      sectionType: sectionsById[post.sectionId]?.type || '',
+      isVisibleToMembers: isPostVisibleToMembers(post),
+    }))
+    return { posts: rows, total: rows.length }
+  }
+
+  if (action === 'audit.getAdmin') {
+    const postId = String(params.postId || '').trim()
+    if (!postId) throw new Error('postId cannot be empty')
+    const post = await db.getById('posts', postId) as any
+    if (!post) throw new Error('post not found')
+    const [author, section, auditTasks] = await Promise.all([
+      post.authorId ? db.getById('users', post.authorId).catch(() => null) : null,
+      post.sectionId ? db.getById('sections', post.sectionId).catch(() => null) : null,
+      db.query(AUDIT_TASKS, { postId }, { orderBy: ['createdAt', 'desc'] }).catch(() => []),
+    ])
+    return {
+      post: { ...post, authorNickname: (author as any)?.nickName || '', isVisibleToMembers: isPostVisibleToMembers(post) },
+      section: section ? normalizeSection(section) : null,
+      auditTasks,
+    }
+  }
+
+  if (action === 'audit.approveAdmin') {
+    const postId = String(params.postId || '').trim()
+    if (!postId) throw new Error('postId cannot be empty')
+    return approvePostAudit(postId)
+  }
+
+  if (action === 'audit.rejectAdmin') {
+    const postId = String(params.postId || '').trim()
+    if (!postId) throw new Error('postId cannot be empty')
+    return rejectPostAudit(postId, String(params.reason || '').trim())
+  }
+
+  if (action === 'audit.retryAdmin') {
+    const postId = String(params.postId || '').trim()
+    if (!postId) throw new Error('postId cannot be empty')
+    const post = await db.getById('posts', postId) as any
+    if (!post) throw new Error('post not found')
+    const section = await db.getById('sections', post.sectionId) as Section
+    if (!section) throw new Error('section not found')
+    const slot = post.pendingContent ? 'pendingContent' : 'content'
+    const oldTasks = await db.query(AUDIT_TASKS, { postId, contentSlot: slot }).catch(() => []) as any[]
+    await Promise.all(oldTasks.map((task) => task._id ? db.removeById(AUDIT_TASKS, task._id).catch(() => null) : null))
+    const audit = await auditAndApply({
+      postId,
+      communityId: post.communityId,
+      sectionId: post.sectionId,
+      section,
+      content: slot === 'pendingContent' ? post.pendingContent : post.content,
+      authorId: post.authorId,
+      source: post.adminEditedByAccountId ? 'admin' : 'user',
+      contentSlot: slot,
+    })
+    return { success: true, auditStatus: audit.status, auditReason: audit.reason }
   }
 
   if (action === 'admin.listAccounts') {
@@ -1483,6 +1618,9 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       sectionId,
       authorId: ctx.userId,
       status: 'active',
+      auditStatus: 'pending',
+      auditReason: 'content audit pending',
+      auditUpdatedAt: now,
       content: sanitized,
       commentCount: 0,
       likeCount: 0,
@@ -1491,7 +1629,17 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       createdAt: now,
       updatedAt: now,
     })
-    return { postId }
+    const audit = await auditAndApply({
+      postId,
+      communityId,
+      sectionId,
+      section,
+      content: sanitized,
+      authorId: ctx.userId,
+      source: 'admin',
+      contentSlot: 'content',
+    })
+    return { postId, auditStatus: audit.status, auditReason: audit.reason }
   }
 
   throw new Error(`Unknown action: ${action}`)
@@ -1504,6 +1652,7 @@ async function hardDeleteCommunity(communityId: string, community: Community) {
   const posts = await db.query('posts', { communityId })
   for (const post of posts) {
     fileIDs.push(...extractCloudFileIDsFromContent((post as any).content))
+    fileIDs.push(...extractCloudFileIDsFromContent((post as any).pendingContent))
   }
 
   for (const post of posts) {

@@ -6,6 +6,9 @@ export type CommunityStatus = 'pending' | 'active' | 'rejected' | 'disabled'
 export type MemberRole = 'admin' | 'member'
 export type MemberStatus = 'pending' | 'active' | 'rejected' | 'left'
 export type PostStatus = 'active' | 'deleted'
+export type PostAuditStatus = 'pending' | 'pass' | 'review' | 'rejected'
+export type AuditProvider = 'wechat' | 'tencent_ci' | 'manual'
+export type AuditTargetType = 'text' | 'image' | 'audio' | 'video'
 
 export type SectionType = 'realtime' | 'evergreen'
 export type SectionStatus = 'active' | 'dormant' | 'archived'
@@ -246,6 +249,13 @@ export interface Post {
   sectionId: string
   authorId: string
   status: PostStatus
+  auditStatus?: PostAuditStatus
+  auditReason?: string
+  auditUpdatedAt?: string
+  pendingContent?: PostContent | null
+  pendingAuditStatus?: PostAuditStatus
+  pendingAuditReason?: string
+  pendingSubmittedAt?: string
   content: PostContent
   commentCount: number
   likeCount: number
@@ -261,6 +271,28 @@ export interface Post {
   adminEditedByAccountId?: string
   adminEditedByUsername?: string
   attendanceSummaryByWidget?: AttendanceSummaryByWidget
+}
+
+export interface ContentAuditTask {
+  _id: string
+  postId: string
+  communityId: string
+  sectionId: string
+  widgetId?: string
+  contentSlot: 'content' | 'pendingContent'
+  targetType: AuditTargetType
+  provider: AuditProvider
+  status: PostAuditStatus
+  targetLabel: string
+  targetRef?: string
+  traceId?: string
+  jobId?: string
+  suggest?: string
+  label?: string | number
+  reason?: string
+  raw?: any
+  createdAt: string
+  updatedAt: string
 }
 
 export interface AdminAccount {

@@ -213,8 +213,15 @@ async function submit() {
 
   submitting.value = true
   try {
-    await postAdminApi.update(post.value._id, { ...formData })
-    ElMessage.success('保存成功')
+    const result = await postAdminApi.update(post.value._id, { ...formData }) as any
+    const auditStatus = String(result?.auditStatus || 'pass')
+    if (auditStatus === 'pass') {
+      ElMessage.success('保存成功')
+    } else if (auditStatus === 'rejected') {
+      ElMessage.error(result?.auditReason || '修改未通过审核，原内容已保留')
+    } else {
+      ElMessage.warning(auditStatus === 'review' ? '修改已提交人工复核，通过后生效' : '修改已提交审核，通过后生效')
+    }
     await loadPost()
   } catch (err: any) {
     ElMessage.error(err?.response?.data?.error || err?.message || '保存失败')
