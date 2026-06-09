@@ -133,6 +133,27 @@ npx.cmd --yes --package @cloudbase/cli cloudbase fn list --env-id cloudbase-3gh8
 node scripts/deploy.mjs cloud --use-tcb
 ```
 
+Release cloud smoke and log gate:
+
+```bash
+# Full cloud release smoke: invokes safe cloud paths, creates/cleans HH_RELEASE_SMOKE_* fixture,
+# captures logs, and writes evidence under .codex-local/release-evidence/<run>/cloud-smoke/.
+npm.cmd run test:cloud:release-smoke -- --env-id cloudbase-3gh862acb1505ff3
+
+# Deploy selected cloud functions through CloudBase CLI/COS and then run the same smoke gate.
+npm.cmd run deploy:cloud:tcb -- --only=user,post --smoke
+
+# Formal release path. Cloud smoke runs after cloud deploy and before admin-web/mp upload.
+npm.cmd run deploy:release -- --use-tcb
+```
+
+Notes:
+
+- `tcb fn invoke` on Windows should use `-d @payload.json`; inline JSON can return `ClientContext parameter error` even when the CLI exits 0.
+- The release gate parses CloudBase `RetMsg`/`ErrMsg`, so CLI exit code 0 alone is not enough.
+- `HH_CLOUD_LOG_CAPTURE_POST` plus the `post.clientLog` runId is a hard log gate. Non-critical `fn log` failures such as CloudBase `GetFunctionLogDetail InternalError` for `member`/`section` are recorded as warnings in `summary.json`.
+- Do not enable production `ALLOW_TEST_OPENID`; `user` and `section` direct invokes record runtime guard evidence, while real OPENID flows stay covered by mini-program release UI evidence.
+
 可继续自动化的 CloudBase CLI 命令：
 
 ```bash

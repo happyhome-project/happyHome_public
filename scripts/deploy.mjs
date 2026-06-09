@@ -8,13 +8,15 @@
  *   node scripts/deploy.mjs miniprogram-upload   # upload mini program as a dev build for trial selection, no QR
  *   node scripts/deploy.mjs admin-web            # upload admin-web dist to Aliyun Nginx production host
  *   node scripts/deploy.mjs all                  # cloud + miniprogram
- *   node scripts/deploy.mjs release              # cloud + admin-web + miniprogram-upload
+ *   node scripts/deploy.mjs release --use-tcb    # CloudBase CLI/COS cloud + cloud smoke + admin-web + miniprogram-upload
  *
  * Flags:
  *   --only=a,b,c   filter cloud functions by name
  *   --version=x    version for miniprogram-upload (default: 1.0.YYMMDDHHmm)
  *   --desc=x       description for miniprogram-upload
  *   --use-tcb      force CloudBase CLI deploy path for cloud functions
+ *   --smoke        after cloud deploy, run release cloud invoke smoke and log capture
+ *   --env-id=x     CloudBase env id for deploy and smoke (default: cloudbase-3gh862acb1505ff3)
  *   --use-ci       skip DevTools/CloudBase CLI paths, go straight to miniprogram-ci
  *                  (useful when DevTools is not installed on the machine)
  *
@@ -23,8 +25,9 @@
  *     - Uses the IDE's own network stack, sidesteps transparent proxy/IPv6 whitelist issues
  *     - Requires WeChat DevTools installed and IDE login/signing state to be valid
  *     - Parses output because DevTools can exit 0 while cloud deploy rows fail
- *   Diagnostic fallback = CloudBase CLI `fn deploy`
- *     - Official CloudBase path; on this machine auth works, but COS upload can time out
+ *   Formal release / fallback = CloudBase CLI `fn deploy`
+ *     - Official CloudBase path; deploys by COS from each built function package directory
+ *     - Formal release requires this path plus cloud smoke/log evidence before upload
  *   Last resort = miniprogram-ci `cloud.uploadFunction`
  *     - Applies dns.setDefaultResultOrder('ipv4first') + dns.lookup monkey-patch
  *       to force IPv4, still subject to WeChat CI IP 白名单
@@ -54,6 +57,7 @@ import { fileURLToPath } from 'url'
 import { execSync, spawn } from 'child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
+import { parseArgs as parseCloudSmokeArgs, runCloudReleaseSmoke } from './cloud-release-smoke.mjs'
 import { analyzeDevtoolsCloudDeployOutput, analyzeDevtoolsUploadOutput } from './lib/deploy-output.mjs'
 import { shouldFallbackAfterDevtoolsFailure } from './lib/release-policy.mjs'
 
@@ -66,7 +70,8 @@ const MP_DIST = resolve(ROOT, 'miniprogram/dist/build/mp-weixin')
 const CLOUD_DIST = resolve(ROOT, 'cloud/dist')
 const ADMIN_WEB_DIR = resolve(ROOT, 'admin-web')
 const ADMIN_WEB_DIST = resolve(ROOT, 'admin-web/dist')
-const CLOUD_ENV = 'cloudbase-3gh862acb1505ff3'
+const DEFAULT_CLOUD_ENV = 'cloudbase-3gh862acb1505ff3'
+const CLOUD_ENV = process.env.TCB_ENV || DEFAULT_CLOUD_ENV
 const ADMIN_WEB_DEFAULT_API_URL = 'https://cloudbase-3gh862acb1505ff3-1307183045.ap-shanghai.app.tcloudbase.com'
 const ADMIN_WEB_ALIYUN_HOST = process.env.ADMIN_WEB_SSH_HOST || 'aliyun'
 const ADMIN_WEB_ALIYUN_ROOT = process.env.ADMIN_WEB_REMOTE_ROOT || '/var/www/happyhome-admin'
@@ -97,6 +102,10 @@ function getFlagValue(name) {
     return process.argv[index + 1]
   }
   return ''
+}
+
+function getCloudEnvId() {
+  return getFlagValue('env-id') || CLOUD_ENV
 }
 
 function getShortGitSha() {
@@ -207,11 +216,12 @@ function getCiProject() {
 async function deployCloudViaDevtoolsCli(fns) {
   const cli = findDevtoolsCli()
   if (!cli) return { ok: false, reason: 'DevTools CLI not found at known paths (set WX_DEVTOOLS_CLI env to override)' }
+  const envId = getCloudEnvId()
 
   const paths = fns.map((fn) => resolve(CLOUD_DIST, fn))
   const args = [
     'cloud', 'functions', 'deploy',
-    '--env', CLOUD_ENV,
+    '--env', envId,
     '--paths', ...paths,
     // ⚠️ --project 必须指向 MP_DIST 而不是仓库根！
     // 2026-04-24 实测：`cli.bat auto --project <ROOT>` 会让 DevTools 把根目录
@@ -245,10 +255,11 @@ async function deployCloudViaDevtoolsCli(fns) {
 async function deployCloudViaCloudBaseCli(fns) {
   const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
   const tcb = (...args) => [npx, '--yes', '--package', '@cloudbase/cli', 'tcb', ...args].map(quote).join(' ')
+  const envId = getCloudEnvId()
 
   const authProbe = await runShellCapture(
-    tcb('fn', 'list', '--env-id', CLOUD_ENV, '--json'),
-    { displayCommandLine: `tcb fn list --env-id ${CLOUD_ENV} --json` }
+    tcb('fn', 'list', '--env-id', envId, '--json'),
+    { displayCommandLine: `tcb fn list --env-id ${envId} --json` }
   )
   if (!authProbe.ok) {
     return {
@@ -260,17 +271,17 @@ async function deployCloudViaCloudBaseCli(fns) {
   for (const fn of fns) {
     const fnDir = resolve(CLOUD_DIST, fn)
     const result = await runShellCapture(
-      tcb('fn', 'deploy', fn, '--force', '--yes', '--env-id', CLOUD_ENV, '--deployMode', 'cos', '--json'),
+      tcb('fn', 'deploy', fn, '--force', '--yes', '--env-id', envId, '--deployMode', 'cos', '--json'),
       {
         cwd: fnDir,
-        displayCommandLine: `cd ${fnDir} && tcb fn deploy ${fn} --force --yes --env-id ${CLOUD_ENV} --deployMode cos --json`,
+        displayCommandLine: `cd ${fnDir} && tcb fn deploy ${fn} --force --yes --env-id ${envId} --deployMode cos --json`,
       }
     )
     if (!result.ok) return { ok: false, reason: `CloudBase CLI deploy ${fn} failed: ${result.reason}` }
 
     const detail = await runShellCapture(
-      tcb('fn', 'detail', fn, '--env-id', CLOUD_ENV, '--json'),
-      { displayCommandLine: `tcb fn detail ${fn} --env-id ${CLOUD_ENV} --json` }
+      tcb('fn', 'detail', fn, '--env-id', envId, '--json'),
+      { displayCommandLine: `tcb fn detail ${fn} --env-id ${envId} --json` }
     )
     if (!detail.ok) return { ok: false, reason: `CloudBase CLI detail ${fn} failed after deploy: ${detail.reason}` }
   }
@@ -282,13 +293,14 @@ async function deployCloudViaCloudBaseCli(fns) {
 // Subject to WeChat CI IP 白名单 (mp.weixin.qq.com → 开发管理 → 代码上传)
 // Prone to IPv6/transparent-proxy issues despite DNS patching.
 async function deployCloudViaMiniprogramCi(fns) {
+  const envId = getCloudEnvId()
   for (const fn of fns) {
     console.log(`[miniprogram-ci] Uploading: ${fn}`)
     await ci.cloud.uploadFunction({
       project: getCiProject(),
       name: fn,
       path: resolve(CLOUD_DIST, fn),
-      env: CLOUD_ENV,
+      env: envId,
       remoteNpmInstall: true,
     })
     console.log(`  OK: ${fn}`)
@@ -318,7 +330,7 @@ async function deployCloud() {
     const tcbResult = await deployCloudViaCloudBaseCli(fns)
     if (tcbResult.ok) {
       console.log('[OK] Cloud functions deployed via CloudBase CLI')
-      return
+      return { fns, path: 'cloudbase-cli' }
     }
     const nextPath = forceCi ? 'falling back to miniprogram-ci' : 'trying WeChat DevTools CLI'
     console.log(`[!] CloudBase CLI failed (${tcbResult.reason}) - ${nextPath}`)
@@ -329,7 +341,7 @@ async function deployCloud() {
     const result = await deployCloudViaDevtoolsCli(fns)
     if (result.ok) {
       console.log('[OK] Cloud functions deployed via DevTools CLI')
-      return
+      return { fns, path: 'devtools-cli' }
     }
     if (!shouldFallbackAfterDevtoolsFailure({ target: 'cloud', reason: result.reason, forceCi })) {
       throw new Error(`DevTools CLI cloud deploy failed (${result.reason}). Open WeChat DevTools, log in again, then retry deploy.`)
@@ -341,7 +353,7 @@ async function deployCloud() {
       const tcbResult = await deployCloudViaCloudBaseCli(fns)
       if (tcbResult.ok) {
         console.log('[OK] Cloud functions deployed via CloudBase CLI')
-        return
+        return { fns, path: 'cloudbase-cli' }
       }
       console.log(`[!] CloudBase CLI failed (${tcbResult.reason}) - falling back to miniprogram-ci`)
     } else {
@@ -354,6 +366,21 @@ async function deployCloud() {
   console.log('\n[fallback] Deploying via miniprogram-ci...')
   await deployCloudViaMiniprogramCi(fns)
   console.log('[OK] Cloud functions deployed via miniprogram-ci')
+  return { fns, path: 'miniprogram-ci' }
+}
+
+async function runCloudSmoke(fns) {
+  const smokeOptions = {
+    ...parseCloudSmokeArgs(process.argv.slice(3)),
+    envId: getCloudEnvId(),
+    only: fns,
+  }
+  console.log('\nRunning cloud release smoke and log capture...')
+  const summary = await runCloudReleaseSmoke(smokeOptions)
+  if (summary.status !== 'passed') {
+    throw new Error(`Cloud release smoke failed. See ${summary.evidenceDir}`)
+  }
+  console.log(`[OK] Cloud release smoke passed: ${summary.evidenceDir}`)
 }
 
 // ── Primary preview path: WeChat DevTools CLI `preview` ──
@@ -528,6 +555,7 @@ function buildAdminWeb(defaultRouterMode) {
 async function deployAdminWebToCloudBase() {
   const env = buildAdminWeb('hash')
   const cloudPath = process.env.ADMIN_WEB_CLOUD_PATH || '/'
+  const envId = getCloudEnvId()
   const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
   const args = [
     npx,
@@ -540,13 +568,13 @@ async function deployAdminWebToCloudBase() {
     ADMIN_WEB_DIST,
   ]
   if (cloudPath && cloudPath !== '/') args.push(cloudPath)
-  args.push('-e', CLOUD_ENV)
+  args.push('-e', envId)
 
   console.log('\nDeploying admin-web dist to CloudBase static hosting...')
   console.log(`Using VITE_CLOUD_API_URL=${env.VITE_CLOUD_API_URL}`)
   const result = await runShell(args.map(quote).join(' '))
   if (!result.ok) {
-    throw new Error(`Admin web deploy failed: ${result.reason}. Ensure CloudBase CLI is logged in and static hosting is enabled for ${CLOUD_ENV}.`)
+    throw new Error(`Admin web deploy failed: ${result.reason}. Ensure CloudBase CLI is logged in and static hosting is enabled for ${envId}.`)
   }
   console.log('[OK] Admin web deployed to CloudBase static hosting')
   console.log('Reminder: configure static hosting fallback/error page to index.html for Vue history routes.')
@@ -611,11 +639,18 @@ const target = process.argv[2] || 'all'
 if (target === 'release') {
   const miniprogramUpload = resolveMiniprogramUploadMetadata()
   buildAndGateMiniprogramUpload(miniprogramUpload)
-  await deployCloud()
+  const cloudDeploy = await deployCloud()
+  if (cloudDeploy.path !== 'cloudbase-cli') {
+    throw new Error(`Formal release cloud deploy must use CloudBase CLI/COS before smoke; got ${cloudDeploy.path}. Rerun with --use-tcb.`)
+  }
+  await runCloudSmoke(cloudDeploy.fns)
   await deployAdminWeb()
   await uploadBuiltMiniprogram(miniprogramUpload)
 } else {
-  if (target === 'cloud' || target === 'all') await deployCloud()
+  if (target === 'cloud' || target === 'all') {
+    const cloudDeploy = await deployCloud()
+    if (process.argv.includes('--smoke')) await runCloudSmoke(cloudDeploy.fns)
+  }
   if (target === 'miniprogram' || target === 'all') await deployMiniprogram()
   if (target === 'miniprogram-upload') await uploadMiniprogram()
   if (target === 'admin-web') await deployAdminWeb()
