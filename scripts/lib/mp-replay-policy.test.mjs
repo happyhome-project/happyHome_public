@@ -19,7 +19,7 @@ test('requires an explicit release replay config path', () => {
 test('requires both release replay coverage markers', () => {
   const dir = makeTempDir()
   writeFileSync(join(dir, 'release-replay.json'), 'HH_RELEASE_HOME_DETAIL_NONEMPTY', 'utf8')
-  assert.throws(() => assertReleaseReplayCoverage(dir), /HH_RELEASE_LOGIN_READY/)
+  assert.throws(() => assertReleaseReplayCoverage(dir), /HH_RELEASE_LOGIN_VERSION/)
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -27,7 +27,7 @@ test('accepts release replay coverage markers in a file or directory', () => {
   const dir = makeTempDir()
   writeFileSync(join(dir, 'release-replay.json'), [
     'case: HH_RELEASE_HOME_DETAIL_NONEMPTY',
-    'case: HH_RELEASE_LOGIN_READY',
+    'case: HH_RELEASE_LOGIN_VERSION',
   ].join('\n'), 'utf8')
   assert.doesNotThrow(() => assertReleaseReplayCoverage(dir))
   rmSync(dir, { recursive: true, force: true })

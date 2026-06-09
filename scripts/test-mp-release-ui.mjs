@@ -4,7 +4,7 @@
  * This script opens the built mp-weixin package through the DevTools automator
  * websocket and proves the two release-critical paths:
  *   - HH_RELEASE_HOME_DETAIL_NONEMPTY
- *   - HH_RELEASE_LOGIN_READY
+ *   - HH_RELEASE_LOGIN_VERSION
  *
  * It does not upload, does not generate QR codes, and does not require an
  * auto-replay recording.
@@ -263,7 +263,7 @@ async function verifyHomeDetail(mp) {
   }
 }
 
-async function verifyLoginPageReady(mp) {
+async function verifyLoginVersion(mp) {
   console.log('[release-ui] force logged-out state')
   const logoutResult = await forceLogout(mp)
   console.log(`[release-ui] logout result: ${JSON.stringify(logoutResult)}`)
@@ -278,15 +278,15 @@ async function verifyLoginPageReady(mp) {
   await sleep(4000)
   const text = await pageText(page)
   const loginFormCount = (await page.$$('.login-form').catch(() => [])).length
-  const hasLoginText = /微信登录|DEV 登录|确认登录|登录/.test(text)
+  const versionVisible = /ver:\s*0\.7\.|0\.7\./.test(text)
   return {
-    passed: text.trim().length >= 20 && loginFormCount > 0 && hasLoginText,
+    passed: text.trim().length >= 20 && loginFormCount > 0 && versionVisible,
     logoutResult,
     path: page.path || '',
     textLength: text.length,
     textSample: text.slice(0, 300),
     loginFormCount,
-    hasLoginText,
+    versionVisible,
   }
 }
 
@@ -347,16 +347,16 @@ async function main() {
       console.log('HH_RELEASE_HOME_DETAIL_NONEMPTY')
     }
 
-    const loginPage = await verifyLoginPageReady(mp)
-    evidence.loginPage = loginPage
-    if (loginPage.passed) {
-      evidence.markers.push('HH_RELEASE_LOGIN_READY')
-      console.log('HH_RELEASE_LOGIN_READY')
+    const loginVersion = await verifyLoginVersion(mp)
+    evidence.loginVersion = loginVersion
+    if (loginVersion.passed) {
+      evidence.markers.push('HH_RELEASE_LOGIN_VERSION')
+      console.log('HH_RELEASE_LOGIN_VERSION')
     }
 
     assertReleaseUiEvidence({
       homeDetailNonEmpty: homeDetail.passed,
-      loginPageReady: loginPage.passed,
+      loginVersionVisible: loginVersion.passed,
     })
 
     const jsonPath = await writeEvidence({ mp, evidenceDir, evidence })
