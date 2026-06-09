@@ -24,6 +24,10 @@
       "style": { "navigationBarTitleText": "详情" }
     },
     {
+      "path": "pages/section/index",
+      "style": { "navigationBarTitleText": "板块" }
+    },
+    {
       "path": "pages/notice/index",
       "style": { "navigationBarTitleText": "公告详情" }
     },

@@ -140,6 +140,7 @@ export interface Widget {
   required: boolean
   order: number
   showInList: boolean
+  locked?: boolean
   unit?: string
   capacity?: number
   noticeContent?: string

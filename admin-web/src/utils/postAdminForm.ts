@@ -9,6 +9,8 @@ export const ADMIN_POST_EDITABLE_WIDGET_TYPES = new Set([
   'rich_text',
   'note_blocks',
   'rich_note',
+  'image_group',
+  'location',
   'video_group',
   'audio_group',
 ])
@@ -36,6 +38,8 @@ export function widgetHint(type: string) {
   if (type === 'audio_group') return '由管理员上传 / 配置音频列表'
   if (type === 'note_blocks') return '按顺序添加文字和图片，适合家书、笔记、课程材料'
   if (type === 'rich_note') return '支持基础排版和图片混排'
+  if (type === 'image_group') return '支持上传多张图片，第一张会作为列表封面'
+  if (type === 'location') return '填写真实目的地或线路轨迹位置'
   if (type === 'attendance') return '活动参与控件由成员点击参与产生数据，不在帖子内容中填写'
   return ''
 }
@@ -60,8 +64,10 @@ export function hydrateAdminPostFormData(formData: Record<string, any>, widgets:
     const existing = content?.[widget.widgetId]
     if (existing !== undefined) {
       formData[widget.widgetId] = JSON.parse(JSON.stringify(existing))
-    } else if (widget.type === 'video_group' || widget.type === 'audio_group' || widget.type === 'note_blocks') {
+    } else if (widget.type === 'video_group' || widget.type === 'audio_group' || widget.type === 'note_blocks' || widget.type === 'image_group') {
       formData[widget.widgetId] = []
+    } else if (widget.type === 'location') {
+      formData[widget.widgetId] = { address: '', lat: 0, lng: 0 }
     } else if (widget.type === 'rich_note') {
       formData[widget.widgetId] = emptyRichNoteContent()
     } else if (widget.type === 'number') {
@@ -81,6 +87,8 @@ export function validateAdminPostForm(widgets: any[], formData: Record<string, a
     if (widget.type === 'video_group' && !validateVideoItems(widget, formData)) return false
     if (widget.type === 'audio_group' && !validateAudioItems(widget, formData)) return false
     if (widget.type === 'note_blocks' && !validateNoteBlocks(widget, formData)) return false
+    if (widget.type === 'image_group' && !validateImageGroup(widget, formData)) return false
+    if (widget.type === 'location' && !validateLocation(widget, formData)) return false
     if (widget.type === 'rich_note' && widget.required && isRichNoteEmpty(formData[widget.widgetId])) {
       ElMessage.error(`请填写「${widget.label}」`)
       return false
@@ -139,6 +147,37 @@ function validateNoteBlocks(widget: any, formData: Record<string, any>) {
       continue
     }
     return fail(widget, index, '内容块类型不支持')
+  }
+  return true
+}
+
+function validateImageGroup(widget: any, formData: Record<string, any>) {
+  const list = (formData[widget.widgetId] as any[]) || []
+  const invalidIndex = list.findIndex((item) => {
+    const value = String(item || '').trim()
+    return !value || (!value.startsWith('cloud://') && !/^https?:\/\//.test(value))
+  })
+  if (invalidIndex >= 0) return fail(widget, invalidIndex, '图片地址不正确')
+  return true
+}
+
+function validateLocation(widget: any, formData: Record<string, any>) {
+  const value = formData[widget.widgetId]
+  if (!value || typeof value !== 'object') {
+    ElMessage.error(`请填写「${widget.label}」`)
+    return false
+  }
+  const address = String(value.address || '').trim()
+  const lat = Number(value.lat)
+  const lng = Number(value.lng)
+  if (!address && widget.required) {
+    ElMessage.error(`请填写「${widget.label}」地址`)
+    return false
+  }
+  const hasCoordinate = value.lat !== '' && value.lng !== '' && value.lat !== undefined && value.lng !== undefined
+  if (hasCoordinate && (Number.isNaN(lat) || Number.isNaN(lng))) {
+    ElMessage.error(`「${widget.label}」经纬度不正确`)
+    return false
   }
   return true
 }

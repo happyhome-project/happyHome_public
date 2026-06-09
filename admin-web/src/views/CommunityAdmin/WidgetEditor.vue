@@ -33,15 +33,23 @@
       title="结构变更说明"
       description="如果板块内已有帖子，删除控件或修改控件类型会影响历史帖子展示；旧数据不会立刻丢失，但用户下次编辑旧帖子时会按最新控件结构自动清理。"
     />
+    <el-alert
+      v-if="isGuideNoteTemplate"
+      type="info"
+      :closable="false"
+      style="margin-bottom: 16px;"
+      title="图文攻略固定控件"
+      description="标题、封面/图片、距离、最高海拔、累计爬升、参考用时、正文、线路轨迹/地点为固定结构；图片统一放在封面/图片中，正文只写线路概述和线路行程。固定控件不能删除、改类型或调整顺序。"
+    />
 
-    <draggable v-model="widgets" item-key="widgetId" handle=".drag-handle">
+    <draggable v-model="widgets" item-key="widgetId" handle=".drag-handle" :move="canMoveWidget">
       <template #item="{ element: widget }">
-        <el-card class="widget-card">
+        <el-card class="widget-card" :class="{ 'is-locked': isLockedWidget(widget) }">
           <div class="widget-row">
-            <div class="drag-handle">⋮⋮</div>
+            <div class="drag-handle" :class="{ disabled: isLockedWidget(widget) }">⋮⋮</div>
             <el-form label-width="138px" class="widget-form">
               <el-form-item label="控件类型">
-                <el-select v-model="widget.type" :disabled="!widget._isNew" style="width: 260px;" @change="handleTypeChange(widget)">
+                <el-select v-model="widget.type" :disabled="isLockedWidget(widget) || !widget._isNew" style="width: 260px;" @change="handleTypeChange(widget)">
                   <el-option label="短文字" value="short_text" />
                   <el-option label="一句话简介" value="summary" />
                   <el-option label="日期时间" value="datetime" />
@@ -60,7 +68,8 @@
               </el-form-item>
 
               <el-form-item label="标签名">
-                <el-input v-model="widget.label" style="width: 260px;" />
+                <el-input v-model="widget.label" :disabled="isLockedWidget(widget)" style="width: 260px;" />
+                <el-tag v-if="isLockedWidget(widget)" size="small" type="info" effect="plain" style="margin-left: 8px;">固定</el-tag>
               </el-form-item>
 
               <el-form-item v-if="widget.type === 'admin_notice'" label="公告正文">
@@ -94,7 +103,7 @@
               </el-form-item>
 
               <el-form-item v-else label="必填">
-                <el-switch v-model="widget.required" />
+                <el-switch v-model="widget.required" :disabled="isLockedWidget(widget)" />
               </el-form-item>
 
               <el-form-item>
@@ -110,7 +119,7 @@
                 </template>
                 <el-switch
                   v-model="widget.showInList"
-                  :disabled="widget.type === 'admin_notice' || !isListDisplayable(widget.type)"
+                  :disabled="isLockedWidget(widget) || widget.type === 'admin_notice' || !isListDisplayable(widget.type)"
                 />
                 <span class="muted-tip" v-if="widget.type === 'attendance'">开启后会显示“参与人数 + 头像预览”</span>
                 <span class="muted-tip" v-else-if="widget.type === 'admin_notice'">公告会直接展示在小程序首页板块区域，不进入帖子列表摘要</span>
@@ -119,7 +128,7 @@
                 <span class="muted-tip" v-else>关闭后仅在帖子详情页展示</span>
               </el-form-item>
             </el-form>
-            <el-button type="danger" size="small" @click="removeWidget(widget)">删除</el-button>
+            <el-button type="danger" size="small" :disabled="isLockedWidget(widget)" @click="removeWidget(widget)">删除</el-button>
           </div>
         </el-card>
       </template>
@@ -149,6 +158,17 @@ const saving = ref(false)
 const communityName = ref('')
 const sectionName = ref('')
 const sectionType = ref<'realtime' | 'evergreen'>('evergreen')
+const sectionDisplayTemplate = ref<'default' | 'guide_note'>('default')
+const GUIDE_NOTE_LOCKED_WIDGET_IDS = new Set([
+  'guide_title',
+  'guide_images',
+  'guide_distance',
+  'guide_highest_altitude',
+  'guide_total_climb',
+  'guide_reference_duration',
+  'guide_body',
+  'guide_location',
+])
 const DEFAULT_LABELS: Record<string, string> = {
   rich_note: '富图文',
   short_text: '短文字',
@@ -166,6 +186,7 @@ const DEFAULT_LABELS: Record<string, string> = {
 }
 
 const listCount = computed(() => widgets.value.filter((widget) => widget.showInList).length)
+const isGuideNoteTemplate = computed(() => sectionDisplayTemplate.value === 'guide_note')
 
 function isListDisplayable(type: string) {
   return LIST_DISPLAYABLE_TYPES.includes(type as any)
@@ -189,12 +210,24 @@ function shouldClearAttendanceLabel(label: unknown) {
   return isPlaceholderLabel(label) || isDefaultWidgetLabel(label)
 }
 
+function isLockedWidget(widget: any) {
+  return isGuideNoteTemplate.value && (
+    widget?.locked === true ||
+    GUIDE_NOTE_LOCKED_WIDGET_IDS.has(String(widget?.widgetId || ''))
+  )
+}
+
+function canMoveWidget(event: any) {
+  return !isLockedWidget(event?.draggedContext?.element) && !isLockedWidget(event?.relatedContext?.element)
+}
+
 onMounted(async () => {
   try {
     await loadCommunityContext()
     const res = await sectionApi.get(sectionId) as any
     sectionName.value = String(res.section?.name || '')
     sectionType.value = res.section?.type === 'realtime' ? 'realtime' : 'evergreen'
+    sectionDisplayTemplate.value = res.section?.displayTemplate === 'guide_note' ? 'guide_note' : 'default'
     widgets.value = (res.section?.widgets ?? []).map((widget: any, index: number) => ({
       ...widget,
       label: widget?.type === 'attendance' && shouldClearAttendanceLabel(widget?.label)
@@ -204,6 +237,7 @@ onMounted(async () => {
       required: ['attendance', 'admin_notice'].includes(widget?.type) ? false : !!widget.required,
       showInList: isListDisplayable(widget?.type) ? !!widget.showInList : false,
       noticeContent: widget?.type === 'admin_notice' ? String(widget.noticeContent || '') : undefined,
+      locked: !!widget.locked,
       _isNew: false,
     }))
     originalWidgets.value = widgets.value.map((widget) => ({
@@ -227,6 +261,7 @@ function addWidget() {
     showInList: false,
     capacity: undefined,
     noticeContent: '',
+    locked: false,
     _isNew: true,
   })
 }
@@ -275,6 +310,10 @@ function handleTypeChange(widget: any) {
 }
 
 function removeWidget(widget: any) {
+  if (isLockedWidget(widget)) {
+    ElMessage.warning('图文攻略固定控件不能删除')
+    return
+  }
   widgets.value = widgets.value.filter((item) => item.widgetId !== widget.widgetId)
 }
 
@@ -385,6 +424,11 @@ async function save() {
   margin-bottom: 12px;
 }
 
+.widget-card.is-locked {
+  border-color: #d8e2d0;
+  background: #fbfdf9;
+}
+
 .widget-row {
   display: flex;
   align-items: flex-start;
@@ -401,6 +445,11 @@ async function save() {
   color: #c0c4cc;
   padding-top: 6px;
   user-select: none;
+}
+
+.drag-handle.disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
 }
 
 .help-icon {

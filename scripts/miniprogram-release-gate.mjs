@@ -51,12 +51,17 @@ function main() {
   run('build H5 for smoke tests', npmCmd, ['run', 'build:h5', '--workspace', 'miniprogram'])
   run('H5 profile blank-page smoke', npmCmd, ['run', 'test:h5:profile-smoke'])
   run('H5 detail blank-page smoke', npmCmd, ['run', 'test:h5:detail-smoke'])
+  run('H5 section blank-page smoke', npmCmd, ['run', 'test:h5:section-smoke'])
 
   if (!skipDevtools) {
-    run('WeChat DevTools automation capability', npmCmd, ['run', 'test:mp:devtools'])
-    run('WeChat DevTools recorded release replay', npmCmd, ['run', 'test:mp:replay', '--', '--require-release-replay'])
+    run('WeChat DevTools release UI evidence', npmCmd, ['run', 'test:mp:release-ui'])
+    if (process.env.HH_REQUIRE_RELEASE_REPLAY === '1' || process.env.HH_MP_REPLAY_CONFIG_PATH) {
+      run('WeChat DevTools recorded release replay', npmCmd, ['run', 'test:mp:replay', '--', '--require-release-replay'])
+    } else {
+      console.log('[release-gate] recorded release replay skipped; release UI evidence is the default DevTools gate')
+    }
   } else {
-    console.log('[release-gate] DevTools automation capability skipped by --skip-devtools')
+    console.log('[release-gate] DevTools release UI evidence skipped by --skip-devtools')
     console.log('[release-gate] recorded release replay skipped by --skip-devtools')
   }
 

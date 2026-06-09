@@ -25,6 +25,7 @@ export interface GuideNoteCard {
   author: string
   when: string
   hasCover: boolean
+  routeStats: Array<{ label: string; value: string }>
 }
 
 export function getCarpoolLiveMeta(post: Post, section: Section): string[] | null {
@@ -73,6 +74,7 @@ export function getGuideNoteCard(post: Post, section: Section): GuideNoteCard {
   const imageWidget = findFirstWidgetByTypes(section, ['image_group'])
   const bodyWidget = findFirstWidgetByTypes(section, ['rich_note', 'rich_text', 'summary'])
   const locationWidget = findFirstWidgetByTypes(section, ['location'])
+  const routeStats = getGuideRouteStats(post, section)
 
   const coverImage = imageWidget ? firstImageValue(post.content?.[imageWidget.widgetId]) : ''
   const title = (titleWidget ? getWidgetValue(post, titleWidget) : '').trim() || '无标题'
@@ -89,7 +91,25 @@ export function getGuideNoteCard(post: Post, section: Section): GuideNoteCard {
     author: String((post as any)?.authorNickname || '').trim(),
     when: formatShortDate(post.createdAt),
     hasCover: coverImage !== '',
+    routeStats,
   }
+}
+
+function getGuideRouteStats(post: Post, section: Section): Array<{ label: string; value: string }> {
+  return [
+    { label: '距离', fieldKeys: ['distance', 'routeDistance', 'totalDistance', 'mileage'], labels: ['距离', '总公里', '总里程'] },
+    { label: '最高海拔', fieldKeys: ['highestAltitude', 'altitude', 'maxAltitude'], labels: ['最高海拔'] },
+    { label: '累计爬升', fieldKeys: ['totalClimb', 'climb', 'ascent'], labels: ['累计爬升', '爬升'] },
+    { label: '参考用时', fieldKeys: ['referenceDuration', 'duration', 'timeCost'], labels: ['参考用时', '参考耗时', '耗时'] },
+  ]
+    .map((item) => {
+      const widget = findWidgetByFieldOrLabel(section, item.fieldKeys, item.labels)
+      return {
+        label: item.label,
+        value: widget ? getWidgetValue(post, widget) : '',
+      }
+    })
+    .filter((item) => item.value)
 }
 
 export function getCarpoolListSummary(post: Post, section: Section): CarpoolListSummary | null {
@@ -151,6 +171,18 @@ function findWidgetByLabel(section: Section, labels: string[]) {
     .find((widget) => {
       const label = String(widget.label || '').replace(/\s/g, '')
       return labels.some((item) => label.includes(item))
+    })
+}
+
+function findWidgetByFieldOrLabel(section: Section, fieldKeys: string[], labels: string[]) {
+  const normalizedFieldKeys = fieldKeys.map((item) => item.toLowerCase())
+  const normalizedLabels = labels.map((item) => item.replace(/\s/g, ''))
+  return (section.widgets || []).slice()
+    .sort((a, b) => a.order - b.order)
+    .find((widget) => {
+      const fieldKey = String(widget.fieldKey || '').trim().toLowerCase()
+      const label = String(widget.label || '').replace(/\s/g, '')
+      return normalizedFieldKeys.includes(fieldKey) || normalizedLabels.some((item) => label.includes(item))
     })
 }
 

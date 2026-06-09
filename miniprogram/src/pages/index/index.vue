@@ -166,6 +166,13 @@
             <view class="guide-main">
               <text class="guide-title">{{ item.t }}</text>
               <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
+              <view v-if="item.routeStats?.length" class="guide-stats">
+                <text
+                  v-for="stat in item.routeStats"
+                  :key="stat.label"
+                  class="guide-stat"
+                >{{ stat.value }} {{ stat.label }}</text>
+              </view>
               <view v-if="item.isPinned || item.isFeatured" class="post-badges guide-badges">
                 <text v-if="item.isPinned" class="post-badge pin">置顶</text>
                 <text v-if="item.isFeatured" class="post-badge feature">精华</text>
@@ -378,6 +385,7 @@ interface ArchiveItem {
   excerpt?: string
   coverImage?: string
   location?: string
+  routeStats?: Array<{ label: string; value: string }>
   hot?: boolean
   when: string
   postId?: string
@@ -409,6 +417,7 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
               excerpt: guide.excerpt,
               coverImage: guide.coverImage,
               location: guide.location,
+              routeStats: guide.routeStats,
               hot: false,
               when: guide.when,
               postId: p._id,
@@ -541,8 +550,19 @@ function onLiveTap(item: LiveItem) {
   }
 }
 
-function onGroupHeaderTap(_g: ArchiveGroup) {
-  // TODO: 跳到该板块的完整列表（当前代码没有独立 section 页，落地时再加）
+function onGroupHeaderTap(g: ArchiveGroup) {
+  if (!g.id) return
+  const url = `/pages/section/index?sectionId=${encodeURIComponent(g.id)}`
+  clientLog('info', 'home.archive.group.tap', {
+    sectionId: g.id,
+    name: g.name,
+    count: g.count,
+    url,
+  })
+  uni.navigateTo({
+    url,
+    fail: (error) => clientLog('error', 'home.archive.group.navigate.fail', { sectionId: g.id, url, error }),
+  })
 }
 
 function onPostTap(item: ArchiveItem) {
@@ -1300,16 +1320,16 @@ onPullDownRefresh(async () => {
 }
 
 .guide-card {
-  padding: 20rpx 24rpx;
+  padding: 22rpx 24rpx;
   display: grid;
-  grid-template-columns: 180rpx 1fr;
+  grid-template-columns: 190rpx 1fr;
   gap: 22rpx;
   border-bottom: 1rpx solid $hh-ink-line-2;
 }
 .guide-card:last-child { border-bottom: none; }
 .guide-cover {
-  width: 180rpx;
-  height: 196rpx;
+  width: 190rpx;
+  height: 206rpx;
   border-radius: $hh-radius-md;
   background: $hh-surface-2;
   border: 1rpx solid $hh-ink-line-2;
@@ -1336,7 +1356,7 @@ onPullDownRefresh(async () => {
 }
 .guide-title {
   font-family: $hh-font-serif;
-  font-size: 30rpx;
+  font-size: 31rpx;
   line-height: 1.34;
   color: $hh-ink-1;
   font-weight: $hh-font-weight-bold;
@@ -1347,7 +1367,7 @@ onPullDownRefresh(async () => {
 }
 .guide-excerpt {
   margin-top: 10rpx;
-  font-size: 23rpx;
+  font-size: 24rpx;
   line-height: 1.58;
   color: $hh-ink-2;
   display: -webkit-box;
@@ -1357,6 +1377,21 @@ onPullDownRefresh(async () => {
 }
 .guide-badges {
   margin-top: 10rpx;
+}
+.guide-stats {
+  margin-top: 10rpx;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8rpx;
+}
+.guide-stat {
+  padding: 5rpx 10rpx;
+  border-radius: 999rpx;
+  background: #eef5ea;
+  color: #365d42;
+  font-size: 20rpx;
+  line-height: 1.25;
+  font-weight: $hh-font-weight-medium;
 }
 .guide-meta {
   margin-top: auto;

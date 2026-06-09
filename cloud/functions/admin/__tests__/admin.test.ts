@@ -322,11 +322,126 @@ test('section.create: 图文攻略展示模板可保存到板块', async () => {
     type: 'evergreen',
     displayTemplate: 'guide_note',
     widgets: [
-      expect.objectContaining({ type: 'short_text', label: '标题', required: true, showInList: true }),
-      expect.objectContaining({ type: 'image_group', label: '封面/图片', required: false, showInList: false }),
-      expect.objectContaining({ type: 'rich_note', label: '正文', required: false, showInList: false }),
-      expect.objectContaining({ type: 'location', label: '地点', required: false, showInList: false }),
+      expect.objectContaining({ widgetId: 'guide_title', type: 'short_text', label: '标题', required: true, showInList: true, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_images', type: 'image_group', label: '封面/图片', required: true, showInList: false, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_distance', type: 'short_text', label: '距离', required: false, showInList: false, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_highest_altitude', type: 'short_text', label: '最高海拔', required: false, showInList: false, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_total_climb', type: 'short_text', label: '累计爬升', required: false, showInList: false, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_reference_duration', type: 'short_text', label: '参考用时', required: false, showInList: false, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_body', type: 'rich_note', label: '正文', required: false, showInList: false, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_location', type: 'location', label: '线路轨迹/地点', required: false, showInList: false, locked: true }),
     ],
+  }))
+})
+
+test('section.updateWidgets: 图文攻略固定控件不能删除或修改', async () => {
+  const guideWidgets = [
+    { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true, locked: true },
+    { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false, locked: true },
+    { widgetId: 'guide_distance', type: 'short_text', label: '距离', fieldKey: 'distance', required: false, order: 2, showInList: false, locked: true },
+    { widgetId: 'guide_highest_altitude', type: 'short_text', label: '最高海拔', fieldKey: 'highestAltitude', required: false, order: 3, showInList: false, locked: true },
+    { widgetId: 'guide_total_climb', type: 'short_text', label: '累计爬升', fieldKey: 'totalClimb', required: false, order: 4, showInList: false, locked: true },
+    { widgetId: 'guide_reference_duration', type: 'short_text', label: '参考用时', fieldKey: 'referenceDuration', required: false, order: 5, showInList: false, locked: true },
+    { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 6, showInList: false, locked: true },
+    { widgetId: 'guide_location', type: 'location', label: '线路轨迹/地点', fieldKey: 'location', required: false, order: 7, showInList: false, locked: true },
+  ]
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-guide',
+    type: 'evergreen',
+    displayTemplate: 'guide_note',
+    widgets: guideWidgets,
+  })
+
+  await expect(main({
+    action: 'section.updateWidgets',
+    sectionId: 'section-guide',
+    widgets: guideWidgets.filter((widget) => widget.widgetId !== 'guide_images'),
+  })).rejects.toThrow('固定控件')
+
+  await expect(main({
+    action: 'section.updateWidgets',
+    sectionId: 'section-guide',
+    widgets: guideWidgets.map((widget) => (
+      widget.widgetId === 'guide_title'
+        ? { ...widget, type: 'summary' }
+        : widget
+    )),
+  })).rejects.toThrow('固定控件')
+})
+
+test('section.updateWidgets: 图文攻略允许在固定控件后追加小控件', async () => {
+  const guideWidgets = [
+    { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true, locked: true },
+    { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false, locked: true },
+    { widgetId: 'guide_distance', type: 'short_text', label: '距离', fieldKey: 'distance', required: false, order: 2, showInList: false, locked: true },
+    { widgetId: 'guide_highest_altitude', type: 'short_text', label: '最高海拔', fieldKey: 'highestAltitude', required: false, order: 3, showInList: false, locked: true },
+    { widgetId: 'guide_total_climb', type: 'short_text', label: '累计爬升', fieldKey: 'totalClimb', required: false, order: 4, showInList: false, locked: true },
+    { widgetId: 'guide_reference_duration', type: 'short_text', label: '参考用时', fieldKey: 'referenceDuration', required: false, order: 5, showInList: false, locked: true },
+    { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 6, showInList: false, locked: true },
+    { widgetId: 'guide_location', type: 'location', label: '线路轨迹/地点', fieldKey: 'location', required: false, order: 7, showInList: false, locked: true },
+  ]
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-guide',
+    type: 'evergreen',
+    displayTemplate: 'guide_note',
+    widgets: guideWidgets,
+  })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+  ;(db.query as jest.Mock).mockResolvedValue([])
+
+  const result: any = await main({
+    action: 'section.updateWidgets',
+    sectionId: 'section-guide',
+    widgets: [
+      ...guideWidgets,
+      { widgetId: 'guide_age', type: 'short_text', label: '适合年龄', fieldKey: 'age', required: false, order: 8, showInList: false },
+    ],
+  })
+
+  expect(result.widgets.slice(0, 8).every((widget: any) => widget.locked === true)).toBe(true)
+  expect(result.widgets[8]).toEqual(expect.objectContaining({ widgetId: 'guide_age', locked: false }))
+  expect(db.updateById).toHaveBeenCalledWith('sections', 'section-guide', expect.objectContaining({
+    widgets: expect.arrayContaining([
+      expect.objectContaining({ widgetId: 'guide_images', required: true, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_distance', locked: true }),
+      expect.objectContaining({ widgetId: 'guide_age', locked: false }),
+    ]),
+  }))
+})
+
+test('section.get: 旧图文攻略板块会补齐路线攻略固定控件', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-guide',
+    type: 'evergreen',
+    displayTemplate: 'guide_note',
+    widgets: [
+      { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true, locked: true },
+      { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false, locked: true },
+      { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false, locked: true },
+      { widgetId: 'guide_location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false, locked: true },
+    ],
+  })
+
+  const result: any = await main({
+    action: 'section.get',
+    sectionId: 'section-guide',
+  })
+
+  expect(result.section.widgets.map((widget: any) => widget.widgetId).slice(0, 8)).toEqual([
+    'guide_title',
+    'guide_images',
+    'guide_distance',
+    'guide_highest_altitude',
+    'guide_total_climb',
+    'guide_reference_duration',
+    'guide_body',
+    'guide_location',
+  ])
+  expect(result.section.widgets[7]).toEqual(expect.objectContaining({
+    widgetId: 'guide_location',
+    label: '线路轨迹/地点',
+    order: 7,
+    locked: true,
   }))
 })
 

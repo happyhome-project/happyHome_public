@@ -61,7 +61,13 @@
 
             <AudioGroupEditor v-else-if="widget.type === 'audio_group'" v-model="formData[widget.widgetId] as any" />
             <NoteBlocksAdminEditor v-else-if="widget.type === 'note_blocks'" v-model="formData[widget.widgetId] as any" />
-            <RichNoteAdminEditor v-else-if="widget.type === 'rich_note'" v-model="formData[widget.widgetId] as any" />
+            <RichNoteAdminEditor
+              v-else-if="widget.type === 'rich_note'"
+              v-model="formData[widget.widgetId] as any"
+              :allow-images="!isGuideNoteTemplate"
+            />
+            <ImageGroupAdminEditor v-else-if="widget.type === 'image_group'" v-model="formData[widget.widgetId] as any" />
+            <LocationAdminEditor v-else-if="widget.type === 'location'" v-model="formData[widget.widgetId] as any" />
 
             <el-input
               v-else-if="widget.type === 'short_text' || widget.type === 'summary'"
@@ -120,6 +126,8 @@ import { Plus } from '@element-plus/icons-vue'
 import { communityApi, postAdminApi, sectionApi } from '../../api/cloud'
 import { useAuthStore } from '../../stores/auth'
 import AudioGroupEditor from '../../components/AudioGroupEditor.vue'
+import ImageGroupAdminEditor from '../../components/ImageGroupAdminEditor.vue'
+import LocationAdminEditor from '../../components/LocationAdminEditor.vue'
 import NoteBlocksAdminEditor from '../../components/NoteBlocksAdminEditor.vue'
 import RichNoteAdminEditor from '../../components/RichNoteAdminEditor.vue'
 import VideoItemEditor from '../../components/VideoItemEditor.vue'
@@ -148,6 +156,7 @@ const authReady = computed(() => Boolean(auth.userId))
 const postsPath = `/posts/${encodeURIComponent(communityId)}`
 
 const editableWidgets = computed(() => editableWidgetsFor(section.value))
+const isGuideNoteTemplate = computed(() => section.value?.displayTemplate === 'guide_note')
 
 onMounted(async () => {
   await Promise.all([loadCommunityName(), loadSections()])

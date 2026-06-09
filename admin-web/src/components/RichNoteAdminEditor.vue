@@ -1,6 +1,7 @@
 <template>
   <div class="rich-note-admin-editor">
     <input
+      v-if="allowImages"
       ref="fileInput"
       type="file"
       accept="image/*"
@@ -17,7 +18,7 @@
       <el-button size="small" @click="runAction('quote')">引用</el-button>
       <el-button size="small" @mousedown.prevent="runAction('line-break')">换行</el-button>
       <el-button size="small" @click="insertLink">链接</el-button>
-      <el-button size="small" :loading="uploading" @click="pickImage">插入图片</el-button>
+      <el-button v-if="allowImages" size="small" :loading="uploading" @click="pickImage">插入图片</el-button>
     </div>
 
     <div class="editor-grid">
@@ -25,7 +26,7 @@
         ref="textareaRef"
         v-model="markdown"
         class="markdown-textarea"
-        placeholder="输入正文，可用上方按钮插入加粗、标题、列表、链接和图片"
+        :placeholder="allowImages ? '输入正文，可用上方按钮插入加粗、标题、列表、链接和图片' : '输入正文，可用上方按钮插入加粗、标题、列表和链接'"
         @input="emitMarkdown"
         @click="rememberSelection"
         @focus="rememberSelection"
@@ -46,7 +47,10 @@
       <el-progress :percentage="percent" :stroke-width="12" />
     </div>
     <div class="muted-tip">
-      内容以 Markdown 兼容结构保存。运营人员可以只用按钮排版；如果能看懂 Markdown，也可以直接微调。
+      {{ allowImages
+        ? '内容以 Markdown 兼容结构保存。运营人员可以只用按钮排版；如果能看懂 Markdown，也可以直接微调。'
+        : '内容以 Markdown 兼容结构保存。图片请统一上传到“封面/图片”，正文只写线路概述和线路行程。'
+      }}
     </div>
   </div>
 </template>
@@ -65,7 +69,9 @@ import {
 } from '../utils/rich-note'
 import RichNoteAdminPreview from './RichNoteAdminPreview.vue'
 
-const props = defineProps<{ modelValue: RichNoteContent | unknown }>()
+const props = withDefaults(defineProps<{ modelValue: RichNoteContent | unknown; allowImages?: boolean }>(), {
+  allowImages: true,
+})
 const emit = defineEmits<{
   (e: 'update:modelValue', value: RichNoteContent): void
 }>()
