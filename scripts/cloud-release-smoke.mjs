@@ -54,6 +54,7 @@ export function parseArgs(argv = process.argv.slice(2), env = process.env) {
   const envId = getFlag('env-id', env.TCB_ENV || DEFAULT_ENV_ID)
   const logLimit = Number(getFlag('log-limit', env.HH_CLOUD_SMOKE_LOG_LIMIT || '30'))
   const logWaitMs = Number(getFlag('log-wait-ms', env.HH_CLOUD_SMOKE_LOG_WAIT_MS || '3000'))
+  const commandTimeoutMs = Number(getFlag('command-timeout-ms', env.HH_CLOUD_SMOKE_COMMAND_TIMEOUT_MS || '60000'))
   const runId = getFlag('run-id', env.HH_RELEASE_CLOUD_SMOKE_RUN_ID || makeRunId())
   const evidenceDir = getFlag(
     'evidence-dir',
@@ -65,6 +66,7 @@ export function parseArgs(argv = process.argv.slice(2), env = process.env) {
     only: DEFAULT_FUNCTIONS.filter((fn) => only.includes(fn)),
     logLimit: Number.isFinite(logLimit) && logLimit > 0 ? Math.floor(logLimit) : 30,
     logWaitMs: Number.isFinite(logWaitMs) && logWaitMs >= 0 ? Math.floor(logWaitMs) : 3000,
+    commandTimeoutMs: Number.isFinite(commandTimeoutMs) && commandTimeoutMs > 0 ? Math.floor(commandTimeoutMs) : 60000,
     noFixture: argv.includes('--no-fixture'),
     evidenceDir,
     runId,
@@ -176,28 +178,48 @@ function normalizeStdout(value) {
   return redactSensitive(String(value || ''))
 }
 
-async function defaultRunner(command, args, options = {}) {
+export async function defaultRunner(command, args, options = {}) {
   const spawnCommand = process.platform === 'win32' && command.endsWith('.cmd') ? 'cmd.exe' : command
   const spawnArgs = process.platform === 'win32' && command.endsWith('.cmd')
     ? ['/d', '/s', '/c', formatCommand(command, args)]
     : args
 
   return await new Promise((resolveResult) => {
+    let settled = false
+    let timer = null
     const child = spawn(spawnCommand, spawnArgs, {
       cwd: options.cwd || ROOT,
       env: options.env || process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
     })
+    const timeoutMs = Number(options.timeoutMs || 0)
     let stdout = ''
     let stderr = ''
+    const finish = (result) => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      resolveResult(result)
+    }
+    timer = timeoutMs > 0
+      ? setTimeout(() => {
+          child.kill('SIGKILL')
+          finish({
+            status: 1,
+            stdout,
+            stderr,
+            error: `command timed out after ${timeoutMs}ms`,
+          })
+        }, timeoutMs)
+      : null
     child.stdout?.on('data', (chunk) => { stdout += String(chunk) })
     child.stderr?.on('data', (chunk) => { stderr += String(chunk) })
     child.on('error', (error) => {
-      resolveResult({ status: 1, stdout, stderr, error: String(error?.message || error) })
+      finish({ status: 1, stdout, stderr, error: String(error?.message || error) })
     })
     child.on('exit', (code) => {
-      resolveResult({ status: code ?? 1, stdout, stderr })
+      finish({ status: code ?? 1, stdout, stderr })
     })
   })
 }
@@ -210,6 +232,18 @@ async function writeJson(filePath, data) {
 
 function statusOk(result) {
   return result.status === 0
+}
+
+function includesRequiredText(record, text) {
+  if (!text) return true
+  const haystack = `${record.stdout}\n${record.stderr}\n${JSON.stringify(record.parsed || {})}`
+  return haystack.includes(text)
+}
+
+function logAttemptLimits(logLimit) {
+  return [logLimit, Math.min(logLimit, 5), 1]
+    .filter((limit) => Number.isFinite(limit) && limit > 0)
+    .filter((limit, index, values) => values.indexOf(limit) === index)
 }
 
 function tcbArgs(actionArgs, envId, json = true) {
@@ -252,7 +286,11 @@ export class CloudSmokeRun {
     const built = buildTcbCommand(tcbArgs(args, this.options.envId))
     const commandLine = formatCommand(built.command, built.args)
     console.log(`[cloud-smoke] ${stage}: ${commandLine}`)
-    const result = await this.runner(built.command, built.args, { cwd: ROOT, env: process.env })
+    const result = await this.runner(built.command, built.args, {
+      cwd: ROOT,
+      env: process.env,
+      timeoutMs: this.options.commandTimeoutMs,
+    })
     const output = `${result.stdout || ''}${result.stderr || ''}`
     const parsed = parseFirstJson(output)
     const cloudInvoke = analyzeCloudInvoke(parsed)
@@ -288,13 +326,42 @@ export class CloudSmokeRun {
 
   async log(fn, opts = {}) {
     const stage = `log-${fn}${opts.errorOnly ? '-error' : ''}`
-    const args = ['fn', 'log', fn, '--limit', String(this.options.logLimit), '--order', 'desc']
-    if (opts.errorOnly) args.push('--error')
-    const record = await this.runTcb(stage, args)
-    if (record.ok && opts.label) this.addLabel(opts.label)
-    if (!record.ok && opts.required !== false) this.fail(`${fn} log capture failed`, { stage, status: record.status })
-    if (!record.ok && opts.required === false) this.warn(`${fn} log capture failed`, { stage, status: record.status })
-    return record
+    const required = opts.required !== false
+    const limits = required ? logAttemptLimits(this.options.logLimit) : [Math.min(this.options.logLimit, 5)]
+    const attempts = []
+    let selected = null
+
+    for (let index = 0; index < limits.length; index += 1) {
+      if (index > 0 && this.options.logWaitMs > 0) {
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, Math.min(this.options.logWaitMs, 5000)))
+      }
+      const attemptStage = limits.length === 1 ? stage : `${stage}-attempt-${index + 1}`
+      const args = ['fn', 'log', fn, '--limit', String(limits[index]), '--order', 'desc']
+      if (opts.errorOnly) args.push('--error')
+      const record = await this.runTcb(attemptStage, args)
+      attempts.push(record)
+      selected = record
+      if (record.ok && includesRequiredText(record, opts.contains)) break
+    }
+
+    const ok = Boolean(selected?.ok && includesRequiredText(selected, opts.contains))
+    const aggregate = {
+      ...(selected || {}),
+      stage,
+      ok,
+      attempts,
+      finishedAt: new Date().toISOString(),
+    }
+    await writeJson(resolve(this.options.evidenceDir, `${stage}.json`), aggregate)
+
+    if (ok && opts.label) this.addLabel(opts.label)
+    if (!ok && required) {
+      if (!selected?.ok) this.fail(`${fn} log capture failed`, { stage, status: selected?.status ?? 1 })
+      else if (opts.contains) this.fail('post.clientLog runId was not found in recent logs', { runId: opts.contains })
+      else this.fail(`${fn} log capture failed`, { stage, status: selected.status })
+    }
+    if (!ok && !required) this.warn(`${fn} log capture failed`, { stage, status: selected?.status ?? 1 })
+    return aggregate
   }
 
   async smokeBasicFunctions() {
@@ -454,13 +521,8 @@ export class CloudSmokeRun {
       const record = await this.log(fn, {
         required: fn === 'post',
         label: `HH_CLOUD_LOG_CAPTURE_${fn.toUpperCase().replace(/-/g, '_')}`,
+        contains: fn === 'post' ? this.options.runId : '',
       })
-      if (fn === 'post') {
-        const haystack = `${record.stdout}\n${record.stderr}\n${JSON.stringify(record.parsed || {})}`
-        if (!haystack.includes(this.options.runId)) {
-          this.fail('post.clientLog runId was not found in recent logs', { runId: this.options.runId })
-        }
-      }
     }
   }
 
