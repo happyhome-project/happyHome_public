@@ -291,6 +291,20 @@ test('管理员审批通过：memberCount 原子递增', async () => {
   expect(db.increment).toHaveBeenCalledWith('communities', 'c1', 'memberCount', 1)
 })
 
+test('superAdmin 可在小程序端审批任意社区成员申请', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'test-openid', role: 'superAdmin' })
+  ;(db.updateWhere as jest.Mock).mockResolvedValue({ stats: { updated: 1 } })
+  ;(db.increment as jest.Mock).mockResolvedValue({})
+
+  await handleMemberApprove({ communityId: 'c1', memberId: 'applicant-member' }, 'test-openid')
+
+  expect(db.query).not.toHaveBeenCalledWith('community_members', expect.objectContaining({
+    userId: 'test-openid',
+    role: 'admin',
+  }))
+  expect(db.increment).toHaveBeenCalledWith('communities', 'c1', 'memberCount', 1)
+})
+
 test('管理员审批通过：非管理员无权操作', async () => {
   ;(db.query as jest.Mock).mockResolvedValueOnce([]) // not admin
 
@@ -334,6 +348,19 @@ test('pendingList：返回社区所有待审批成员', async () => {
 
   expect(db.query).toHaveBeenCalledWith('community_members', { communityId: 'c1', status: 'pending' })
   expect(result.members).toHaveLength(2)
+})
+
+test('pendingList：superAdmin 可查看任意社区待审批成员', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'test-openid', role: 'superAdmin' })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([
+    { _id: 'm1', status: 'pending' },
+  ])
+
+  const result = await handlePendingList({ communityId: 'c1' }, 'test-openid')
+
+  expect(db.query).toHaveBeenCalledTimes(1)
+  expect(db.query).toHaveBeenCalledWith('community_members', { communityId: 'c1', status: 'pending' })
+  expect(result.members).toHaveLength(1)
 })
 
 test('myStatus：按最新 appliedAt 返回状态', async () => {

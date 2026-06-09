@@ -12,7 +12,16 @@ jest.mock('../../../lib/db', () => ({
   softDelete: jest.fn(),
 }))
 
-import { handleCreate, handleApprove, handleReject, handleList, handleGet, handleListDiscoverable, main } from '../index'
+import {
+  handleCreate,
+  handleApprove,
+  handleReject,
+  handlePendingList,
+  handleList,
+  handleGet,
+  handleListDiscoverable,
+  main,
+} from '../index'
 import * as db from '../../../lib/db'
 import cloud from 'wx-server-sdk'
 
@@ -107,6 +116,25 @@ test('审批拒绝：社区 status 变为 rejected', async () => {
   await handleReject({ communityId: 'community-123' }, 'test-openid')
 
   expect(db.updateById).toHaveBeenCalledWith('communities', 'community-123', { status: 'rejected' })
+})
+
+test('待审批社区列表：只有 superAdmin 可以查看', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'test-openid', role: 'user' })
+
+  await expect(handlePendingList('test-openid')).rejects.toThrow('权限不足')
+  expect(db.query).not.toHaveBeenCalledWith('communities', { status: 'pending' }, expect.any(Object))
+})
+
+test('待审批社区列表：superAdmin 按创建时间倒序返回 pending 社区', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'test-openid', role: 'superAdmin' })
+  ;(db.query as jest.Mock).mockResolvedValue([{ _id: 'c1', status: 'pending' }])
+
+  const result = await handlePendingList('test-openid')
+
+  expect(db.query).toHaveBeenCalledWith('communities', { status: 'pending' }, {
+    orderBy: ['createdAt', 'desc'],
+  })
+  expect(result.communities).toEqual([{ _id: 'c1', status: 'pending' }])
 })
 
 test('list：默认只返回 active 社区', async () => {
