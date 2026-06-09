@@ -58,7 +58,13 @@
 
           <AudioGroupEditor v-else-if="widget.type === 'audio_group'" v-model="formData[widget.widgetId] as any" />
           <NoteBlocksAdminEditor v-else-if="widget.type === 'note_blocks'" v-model="formData[widget.widgetId] as any" />
-          <RichNoteAdminEditor v-else-if="widget.type === 'rich_note'" v-model="formData[widget.widgetId] as any" />
+          <RichNoteAdminEditor
+            v-else-if="widget.type === 'rich_note'"
+            v-model="formData[widget.widgetId] as any"
+            :allow-images="!isGuideNoteTemplate"
+          />
+          <ImageGroupAdminEditor v-else-if="widget.type === 'image_group'" v-model="formData[widget.widgetId] as any" />
+          <LocationAdminEditor v-else-if="widget.type === 'location'" v-model="formData[widget.widgetId] as any" />
 
           <el-input
             v-else-if="widget.type === 'short_text' || widget.type === 'summary'"
@@ -120,6 +126,8 @@ import { ElMessage } from 'element-plus/es/components/message/index'
 import { Plus } from '@element-plus/icons-vue'
 import { communityApi, postAdminApi } from '../../api/cloud'
 import AudioGroupEditor from '../../components/AudioGroupEditor.vue'
+import ImageGroupAdminEditor from '../../components/ImageGroupAdminEditor.vue'
+import LocationAdminEditor from '../../components/LocationAdminEditor.vue'
 import NoteBlocksAdminEditor from '../../components/NoteBlocksAdminEditor.vue'
 import RichNoteAdminEditor from '../../components/RichNoteAdminEditor.vue'
 import VideoItemEditor from '../../components/VideoItemEditor.vue'
@@ -147,6 +155,7 @@ const communityName = ref('')
 const formData = reactive<Record<string, any>>({})
 
 const editableWidgets = computed(() => editableWidgetsFor(section.value))
+const isGuideNoteTemplate = computed(() => section.value?.displayTemplate === 'guide_note')
 const unsupportedWidgets = computed(() =>
   unsupportedContentWidgetsFor(section.value).filter((widget) => post.value?.content?.[widget.widgetId] !== undefined)
 )

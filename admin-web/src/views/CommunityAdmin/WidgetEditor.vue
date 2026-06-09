@@ -39,7 +39,7 @@
       :closable="false"
       style="margin-bottom: 16px;"
       title="图文攻略固定控件"
-      description="标题、封面/图片、正文、地点为固定结构，不能删除、改类型或调整顺序；可以在后面追加年龄、费用、路线提示等小控件。"
+      description="标题、封面/图片、距离、最高海拔、累计爬升、参考用时、正文、线路轨迹/地点为固定结构；图片统一放在封面/图片中，正文只写线路概述和线路行程。固定控件不能删除、改类型或调整顺序。"
     />
 
     <draggable v-model="widgets" item-key="widgetId" handle=".drag-handle" :move="canMoveWidget">
@@ -159,7 +159,16 @@ const communityName = ref('')
 const sectionName = ref('')
 const sectionType = ref<'realtime' | 'evergreen'>('evergreen')
 const sectionDisplayTemplate = ref<'default' | 'guide_note'>('default')
-const GUIDE_NOTE_LOCKED_WIDGET_IDS = new Set(['guide_title', 'guide_images', 'guide_body', 'guide_location'])
+const GUIDE_NOTE_LOCKED_WIDGET_IDS = new Set([
+  'guide_title',
+  'guide_images',
+  'guide_distance',
+  'guide_highest_altitude',
+  'guide_total_climb',
+  'guide_reference_duration',
+  'guide_body',
+  'guide_location',
+])
 const DEFAULT_LABELS: Record<string, string> = {
   rich_note: '富图文',
   short_text: '短文字',

@@ -260,8 +260,11 @@
     </view>
 
     <!-- Pending approvals (admin only) -->
-    <view v-if="pendingMembers.length > 0" class="section">
-      <text class="section-title">待审批成员</text>
+    <view v-if="pendingApprovalCount > 0" class="section approval-section">
+      <view class="section-title-row">
+        <text class="section-title">审批中心</text>
+        <text class="section-count">{{ pendingApprovalCount }} 项待处理</text>
+      </view>
       <view
         v-if="approvalReminderState.kind !== 'hidden'"
         class="approval-reminder-card"
@@ -280,20 +283,50 @@
           {{ notificationSubscribeLock.busy.value ? '开启中...' : '开启' }}
         </button>
       </view>
-      <view v-for="member in pendingMembers" :key="member._id" class="approval-item">
-        <text class="member-id">{{ member.userId.slice(0, 8) }}...</text>
-        <view class="approval-actions">
-          <button
-            size="mini"
-            :disabled="approveLock.isBusy(member._id) || rejectLock.isBusy(member._id)"
-            @tap="approveLock.run(member)"
-            class="approve-btn"
-          >通过</button>
-          <button
-            size="mini"
-            :disabled="approveLock.isBusy(member._id) || rejectLock.isBusy(member._id)"
-            @tap="rejectLock.run(member)"
-          >拒绝</button>
+
+      <view v-if="pendingCommunities.length > 0" class="approval-group">
+        <text class="approval-group-title">新建社区</text>
+        <view v-for="community in pendingCommunities" :key="community._id" class="approval-item">
+          <view class="approval-main">
+            <text class="approval-name">{{ community.name || '未命名社区' }}</text>
+            <text class="approval-meta">创建者 {{ shortId(community.creatorId) }} · {{ formatDate(community.createdAt) }}</text>
+          </view>
+          <view class="approval-actions">
+            <button
+              size="mini"
+              :disabled="approveCommunityLock.isBusy(community._id) || rejectCommunityLock.isBusy(community._id)"
+              @tap="approveCommunityLock.run(community)"
+              class="approve-btn"
+            >通过</button>
+            <button
+              size="mini"
+              :disabled="approveCommunityLock.isBusy(community._id) || rejectCommunityLock.isBusy(community._id)"
+              @tap="rejectCommunityLock.run(community)"
+            >拒绝</button>
+          </view>
+        </view>
+      </view>
+
+      <view v-if="pendingMembers.length > 0" class="approval-group">
+        <text class="approval-group-title">成员加入</text>
+        <view v-for="member in pendingMembers" :key="member._id" class="approval-item">
+          <view class="approval-main">
+            <text class="approval-name">{{ member.communityName || '社区成员申请' }}</text>
+            <text class="approval-meta">用户 {{ shortId(member.userId) }} · {{ formatDate(member.appliedAt) }}</text>
+          </view>
+          <view class="approval-actions">
+            <button
+              size="mini"
+              :disabled="approveLock.isBusy(member._id) || rejectLock.isBusy(member._id)"
+              @tap="approveLock.run(member)"
+              class="approve-btn"
+            >通过</button>
+            <button
+              size="mini"
+              :disabled="approveLock.isBusy(member._id) || rejectLock.isBusy(member._id)"
+              @tap="rejectLock.run(member)"
+            >拒绝</button>
+          </view>
         </view>
       </view>
     </view>
@@ -309,7 +342,7 @@ import { ref, computed, onMounted, nextTick } from 'vue'
 import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
-import { memberApi, notificationApi, type ApprovalNotificationEventType } from '../../api/cloud'
+import { communityApi, memberApi, notificationApi, type ApprovalNotificationEventType } from '../../api/cloud'
 import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
@@ -326,6 +359,7 @@ import {
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
+const pendingCommunities = ref<any[]>([])
 const pendingMembers = ref<any[]>([])
 const adminCommunityIds = ref<string[]>([])
 const notificationTemplates = ref<ApprovalNotificationTemplate[]>([])
@@ -340,6 +374,7 @@ const appVersion = computed(() => {
 
 const configuredNotificationTemplates = computed(() => configuredApprovalTemplates(notificationTemplates.value))
 const hasAdminTools = computed(() => userStore.role === 'superAdmin' || adminCommunityIds.value.length > 0)
+const pendingApprovalCount = computed(() => pendingCommunities.value.length + pendingMembers.value.length)
 const supportsSubscribeMessage = computed(() => {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore
@@ -347,7 +382,7 @@ const supportsSubscribeMessage = computed(() => {
 })
 const approvalReminderState = computed(() => buildApprovalReminderState({
   hasAdminTools: hasAdminTools.value,
-  pendingApprovalCount: pendingMembers.value.length,
+  pendingApprovalCount: pendingApprovalCount.value,
   templates: notificationTemplates.value,
   subscriptions: notificationSubscriptions.value,
   supportsSubscribeMessage: supportsSubscribeMessage.value,
@@ -404,6 +439,8 @@ function getProfileLogDetails(extra: Record<string, any> = {}) {
     currentCommunityId: communityStore.currentCommunityId || '',
     hasAdminTools: hasAdminTools.value,
     pendingMemberCount: pendingMembers.value.length,
+    pendingCommunityCount: pendingCommunities.value.length,
+    pendingApprovalCount: pendingApprovalCount.value,
     adminCommunityCount: adminCommunityIds.value.length,
     refreshingProfile,
     profileError: profileError.value || '',
@@ -533,6 +570,7 @@ const devLoginLock = useBusyLock(async () => {
 function handleLogout() {
   userStore.logout()
   communityStore.$patch({ myCommunities: [], currentCommunityId: '', currentSections: [] })
+  pendingCommunities.value = []
   pendingMembers.value = []
   adminCommunityIds.value = []
   notificationSubscriptions.value = []
@@ -549,6 +587,21 @@ function isAdminOf(communityId: string) {
 
 function canLeaveCommunity(community: any) {
   return String(community?.creatorId || '') !== String(userStore.openId || '')
+}
+
+function shortId(value: unknown) {
+  const text = String(value || '').trim()
+  if (!text) return '未知'
+  if (text.length <= 8) return text
+  return `${text.slice(0, 8)}...`
+}
+
+function formatDate(value: unknown) {
+  const timestamp = Date.parse(String(value || ''))
+  if (Number.isNaN(timestamp)) return '时间未知'
+  const date = new Date(timestamp)
+  const pad = (num: number) => String(num).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 const leaveCommunityLock = useKeyedBusyLock(
@@ -581,6 +634,32 @@ const leaveCommunityLock = useKeyedBusyLock(
       }
     } catch (e: any) {
       uni.showToast({ title: e?.message || '退出失败', icon: 'none' })
+    }
+  },
+  (community) => String(community?._id || ''),
+)
+
+const approveCommunityLock = useKeyedBusyLock(
+  async (community: any) => {
+    try {
+      await communityApi.approve(String(community._id || ''))
+      pendingCommunities.value = pendingCommunities.value.filter((item) => item._id !== community._id)
+      uni.showToast({ title: '社区已通过', icon: 'success' })
+    } catch (e: any) {
+      uni.showToast({ title: e?.message || '操作失败', icon: 'none' })
+    }
+  },
+  (community) => String(community?._id || ''),
+)
+
+const rejectCommunityLock = useKeyedBusyLock(
+  async (community: any) => {
+    try {
+      await communityApi.reject(String(community._id || ''))
+      pendingCommunities.value = pendingCommunities.value.filter((item) => item._id !== community._id)
+      uni.showToast({ title: '社区已拒绝', icon: 'none' })
+    } catch (e: any) {
+      uni.showToast({ title: e?.message || '操作失败', icon: 'none' })
     }
   },
   (community) => String(community?._id || ''),
@@ -653,8 +732,18 @@ async function loadPendingMembers() {
   if (!userStore.isLoggedIn) return
   const nextPendingMembers: any[] = []
   const nextAdminCommunityIds: string[] = []
+  let communitiesToCheck = communityStore.myCommunities
 
-  for (const community of communityStore.myCommunities) {
+  if (userStore.role === 'superAdmin') {
+    try {
+      const res = await communityApi.list(false)
+      communitiesToCheck = Array.isArray(res.communities) ? res.communities : []
+    } catch (_error) {
+      communitiesToCheck = communityStore.myCommunities
+    }
+  }
+
+  for (const community of communitiesToCheck) {
     const communityId = String(community?._id || '')
     if (!communityId) continue
     try {
@@ -664,6 +753,7 @@ async function loadPendingMembers() {
         for (const member of res.members) {
           const normalized = Object.assign({}, member)
           normalized.communityId = communityId
+          normalized.communityName = community?.name || ''
           nextPendingMembers.push(normalized)
         }
       }
@@ -674,6 +764,19 @@ async function loadPendingMembers() {
 
   pendingMembers.value = nextPendingMembers
   adminCommunityIds.value = nextAdminCommunityIds
+}
+
+async function loadPendingCommunities() {
+  if (!userStore.isLoggedIn || userStore.role !== 'superAdmin') {
+    pendingCommunities.value = []
+    return
+  }
+  try {
+    const res = await communityApi.pendingList()
+    pendingCommunities.value = Array.isArray(res.communities) ? res.communities : []
+  } catch (_error) {
+    pendingCommunities.value = []
+  }
 }
 
 async function loadNotificationSubscriptions(options: { preserveOnFailure?: boolean } = {}) {
@@ -723,10 +826,13 @@ async function refreshProfileData(reason = 'manual') {
       reason,
       loadedCommunityCount: communityStore.myCommunities.length,
     })
+    await loadPendingCommunities()
     await loadPendingMembers()
     logProfile('info', 'profile.pending.load.success', {
       reason,
+      pendingCommunityCount: pendingCommunities.value.length,
       pendingMemberCount: pendingMembers.value.length,
+      pendingApprovalCount: pendingApprovalCount.value,
       adminCommunityCount: adminCommunityIds.value.length,
     })
     if (hasAdminTools.value) {
@@ -981,9 +1087,55 @@ onPullDownRefresh(async () => {
 .leave-community-btn::after { border: none; }
 .empty { color: $hh-color-text-mute; font-size: $hh-font-body; padding: $hh-space-md 0; }
 .join-btn { margin-top: $hh-space-md; }
-.approval-item { display: flex; justify-content: space-between; align-items: center; padding: $hh-space-md 0; border-bottom: 1rpx solid $hh-color-divider; }
-.member-id { font-size: $hh-font-caption; color: $hh-color-text-sub; font-family: monospace; }
-.approval-actions { display: flex; gap: $hh-space-sm; }
+.approval-section { border: 1rpx solid rgba(217, 48, 38, 0.12); }
+.section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $hh-space-sm;
+  margin-bottom: $hh-space-md;
+}
+.section-count {
+  font-size: $hh-font-caption;
+  color: #d93026;
+  background: #fff5f5;
+  border-radius: $hh-radius-full;
+  padding: 6rpx 14rpx;
+}
+.approval-group { margin-top: $hh-space-sm; }
+.approval-group-title {
+  display: block;
+  margin: $hh-space-md 0 $hh-space-xs;
+  color: $hh-color-text-sub;
+  font-size: $hh-font-caption;
+  font-weight: $hh-font-weight-bold;
+}
+.approval-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: $hh-space-md;
+  padding: $hh-space-md 0;
+  border-bottom: 1rpx solid $hh-color-divider;
+}
+.approval-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+.approval-name {
+  color: $hh-color-text;
+  font-size: $hh-font-body;
+  font-weight: $hh-font-weight-bold;
+}
+.approval-meta {
+  color: $hh-color-text-mute;
+  font-size: $hh-font-caption;
+  line-height: 1.45;
+}
+.approval-actions { display: flex; flex-shrink: 0; gap: $hh-space-sm; }
 .approval-reminder-card {
   display: flex;
   align-items: center;

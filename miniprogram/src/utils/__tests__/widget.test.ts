@@ -217,8 +217,11 @@ describe('getGuideNoteCard', () => {
     widgets: [
       { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
       { widgetId: 'images', type: 'image_group', label: '图片', fieldKey: 'images', required: false, order: 1, showInList: false },
-      { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false },
-      { widgetId: 'location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false },
+      { widgetId: 'distance', type: 'short_text', label: '距离', fieldKey: 'distance', required: false, order: 2, showInList: false },
+      { widgetId: 'totalClimb', type: 'short_text', label: '累计爬升', fieldKey: 'totalClimb', required: false, order: 3, showInList: false },
+      { widgetId: 'referenceDuration', type: 'short_text', label: '参考用时', fieldKey: 'referenceDuration', required: false, order: 4, showInList: false },
+      { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 5, showInList: false },
+      { widgetId: 'location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 6, showInList: false },
     ],
   }
 
@@ -233,6 +236,9 @@ describe('getGuideNoteCard', () => {
       content: {
         title: '5 岁也能走完的溪边路线',
         images: ['cloud://env/images/cover.jpg', 'cloud://env/images/second.jpg'],
+        distance: '4.2km',
+        totalClimb: '128m',
+        referenceDuration: '1h50m',
         body: {
           format: 'markdown',
           markdown: '从村口小桥出发，沿溪边慢慢走。\n\n孩子可以捡石头、看小鱼。',
@@ -257,6 +263,11 @@ describe('getGuideNoteCard', () => {
       author: '小雨妈妈',
       when: '6/2',
       hasCover: true,
+      routeStats: [
+        { label: '距离', value: '4.2km' },
+        { label: '累计爬升', value: '128m' },
+        { label: '参考用时', value: '1h50m' },
+      ],
     })
   })
 
@@ -274,6 +285,7 @@ describe('getGuideNoteCard', () => {
       author: '',
       when: '5/26',
       hasCover: false,
+      routeStats: [],
     })
   })
 })
