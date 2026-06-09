@@ -470,11 +470,12 @@ describe('post.updateAdmin', () => {
     expect(result.updatedAt).toBeTruthy()
     expect(result.adminEditedAt).toBe(result.updatedAt)
     expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({
-      content: {
+      pendingContent: {
         title: 'new title',
         location: existingLocation,
         audio: [{ title: 'new audio', fileID: 'cloud://env/audios/new.mp3', cover: 'cloud://env/covers/new.jpg', duration: 120, size: 2048, ext: 'mp3' }],
       },
+      pendingAuditStatus: 'pending',
       updatedAt: expect.any(String),
       adminEditedAt: expect.any(String),
       adminEditedByAccountId: 'admin-1',
@@ -485,7 +486,7 @@ describe('post.updateAdmin', () => {
     expect(patch.sectionId).toBeUndefined()
     expect(patch.commentCount).toBeUndefined()
     expect(patch.likeCount).toBeUndefined()
-    expect(patch.content.legacyRemovedWidget).toBeUndefined()
+    expect(patch.pendingContent.legacyRemovedWidget).toBeUndefined()
   })
 
   test('updates rich_note content instead of preserving the old value', async () => {
@@ -535,7 +536,8 @@ describe('post.updateAdmin', () => {
 
     expect(result.success).toBe(true)
     expect(db.updateById).toHaveBeenCalledWith('posts', 'post-rich', expect.objectContaining({
-      content: { rich: nextRichNote },
+      pendingContent: { rich: nextRichNote },
+      pendingAuditStatus: 'pending',
     }))
   })
 
@@ -591,7 +593,8 @@ describe('post.updateAdmin', () => {
 
     expect(result.success).toBe(true)
     expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({
-      content: { title: 'new title' },
+      pendingContent: { title: 'new title' },
+      pendingAuditStatus: 'pending',
       adminEditedByAccountId: 'community-admin-1',
       adminEditedByUsername: 'community-admin',
     }))

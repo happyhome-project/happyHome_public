@@ -30,6 +30,11 @@
           data-testid="menu-admin-accounts"
           index="/admin-accounts"
         >管理员管理</el-menu-item>
+        <el-menu-item
+          v-if="authStore.isSuperAdmin"
+          data-testid="menu-content-audit"
+          index="/content-audit"
+        >内容审核</el-menu-item>
       </el-menu>
     </el-aside>
     <el-main data-testid="layout-main">

@@ -8,6 +8,7 @@
  * 现有 env 会保留并合并；同名 key 会被覆盖。
  */
 import CloudBase from '@cloudbase/manager-node'
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -57,12 +58,43 @@ const existing = {}
 const envItems = detail?.Environment?.Variables || []
 for (const v of envItems) existing[v.Key] = v.Value
 
+const envInfo = await app.env.getEnvInfo()
+const storageConf = envInfo?.EnvInfo?.Storages?.[0]
+const auditCallbackToken =
+  process.env.AUDIT_CALLBACK_TOKEN ||
+  fileEnv.AUDIT_CALLBACK_TOKEN ||
+  existing.AUDIT_CALLBACK_TOKEN ||
+  crypto.randomBytes(24).toString('hex')
+
+const AUDIT_ENVS = {
+  TENCENT_SECRET_ID: process.env.TENCENT_SECRET_ID || fileEnv.TENCENT_SECRET_ID || SECRET_ID,
+  TENCENT_SECRET_KEY: process.env.TENCENT_SECRET_KEY || fileEnv.TENCENT_SECRET_KEY || SECRET_KEY,
+  TENCENT_CI_BUCKET: process.env.TENCENT_CI_BUCKET || fileEnv.TENCENT_CI_BUCKET || storageConf?.Bucket || existing.TENCENT_CI_BUCKET || '',
+  TENCENT_CI_REGION: process.env.TENCENT_CI_REGION || fileEnv.TENCENT_CI_REGION || storageConf?.Region || existing.TENCENT_CI_REGION || '',
+  AUDIT_CALLBACK_TOKEN: auditCallbackToken,
+}
+
+for (const key of ['TENCENT_SECRET_ID', 'TENCENT_SECRET_KEY', 'TENCENT_CI_BUCKET', 'TENCENT_CI_REGION']) {
+  if (!AUDIT_ENVS[key]) {
+    console.error(`[update-env] Missing ${key}; cannot configure content audit env`)
+    process.exit(1)
+  }
+}
+
 const merged = { ...existing, ...TARGET_ENVS }
+for (const [key, value] of Object.entries(AUDIT_ENVS)) merged[key] = value
+
+function redactEnvRows(rows) {
+  return rows.map(({ Key, Value }) => ({
+    Key,
+    Value: /SECRET|TOKEN|PASSWORD/i.test(Key) ? '[redacted]' : Value,
+  }))
+}
 
 console.log('[update-env] admin 函数现有 env:')
-console.table(envItems)
+console.table(redactEnvRows(envItems))
 console.log('[update-env] 目标 env (合并后):')
-console.table(Object.entries(merged).map(([Key, Value]) => ({ Key, Value })))
+console.table(redactEnvRows(Object.entries(merged).map(([Key, Value]) => ({ Key, Value }))))
 
 await app.functions.updateFunctionConfig({
   name: 'admin',

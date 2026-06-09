@@ -48,6 +48,13 @@
         <el-option label="已删除" value="deleted" />
         <el-option label="全部状态" value="all" />
       </el-select>
+      <el-select v-model="filters.auditStatus" style="width: 150px;">
+        <el-option label="全部审核" value="all" />
+        <el-option label="审核中" value="pending" />
+        <el-option label="需复核" value="review" />
+        <el-option label="已通过" value="pass" />
+        <el-option label="已拒绝" value="rejected" />
+      </el-select>
       <el-select v-model="filters.pinnedStatus" style="width: 140px;">
         <el-option label="全部置顶" value="all" />
         <el-option label="仅置顶" value="true" />
@@ -81,6 +88,13 @@
         <template #default="{ row }">
           <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">
             {{ row.status === 'active' ? '已发布' : '已删除' }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="审核" width="120">
+        <template #default="{ row }">
+          <el-tag :type="auditTag(row.pendingContent ? row.pendingAuditStatus : row.auditStatus)" size="small">
+            {{ auditText(row.pendingContent ? row.pendingAuditStatus : row.auditStatus) }}
           </el-tag>
         </template>
       </el-table-column>
@@ -317,6 +331,7 @@ const filters = ref({
   sectionId: '',
   authorQuery: '',
   status: 'active' as 'active' | 'deleted' | 'all',
+  auditStatus: 'all' as 'pending' | 'pass' | 'review' | 'rejected' | 'all',
   pinnedStatus: 'all' as 'all' | 'true' | 'false',
   featuredStatus: 'all' as 'all' | 'true' | 'false',
 })
@@ -379,6 +394,7 @@ async function loadPosts() {
       sectionId: filters.value.sectionId || undefined,
       authorQuery: filters.value.authorQuery || undefined,
       status: filters.value.status,
+      auditStatus: filters.value.auditStatus,
       pinned: parseFlagFilter(filters.value.pinnedStatus),
       featured: parseFlagFilter(filters.value.featuredStatus),
       dateFrom: dateRange.value?.[0] || undefined,
@@ -396,6 +412,20 @@ function parseFlagFilter(value: 'all' | 'true' | 'false') {
   if (value === 'true') return true
   if (value === 'false') return false
   return undefined
+}
+
+function auditText(status?: string) {
+  if (status === 'pending') return '审核中'
+  if (status === 'review') return '需复核'
+  if (status === 'rejected') return '已拒绝'
+  return '已通过'
+}
+
+function auditTag(status?: string) {
+  if (status === 'pending') return 'info'
+  if (status === 'review') return 'warning'
+  if (status === 'rejected') return 'danger'
+  return 'success'
 }
 
 async function openDetail(row: any) {

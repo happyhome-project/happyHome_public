@@ -251,6 +251,52 @@ async function uploadNoteBlockImages(blocks: any[]): Promise<any[]> {
   }))
 }
 
+function showModalAsync(options: { title: string; content: string }) {
+  return new Promise<void>((resolve) => {
+    uni.showModal({
+      title: options.title,
+      content: options.content,
+      showCancel: false,
+      success: () => resolve(),
+      fail: () => resolve(),
+    })
+  })
+}
+
+async function handleAuditSubmitResult(result: any) {
+  const auditStatus = String(result?.auditStatus || 'pass')
+  const auditReason = String(result?.auditReason || '')
+  if (auditStatus === 'rejected') {
+    await showModalAsync({
+      title: '发布未通过',
+      content: auditReason || '内容未通过审核，请修改后再提交。',
+    })
+    return
+  }
+
+  if (auditStatus === 'pending' || auditStatus === 'review') {
+    await showModalAsync({
+      title: '已提交审核',
+      content: auditStatus === 'review'
+        ? '内容需要人工复核，通过后会展示在社区里。'
+        : '内容正在审核，通过后会展示在社区里。',
+    })
+  } else {
+    try {
+      uni.setStorageSync(HOME_REFRESH_AFTER_POST_KEY, {
+        communityId: communityStore.currentCommunityId,
+        sectionId: selectedSection.value?._id || '',
+        postId: result?.postId || '',
+        createdAt: Date.now(),
+      })
+    } catch {}
+    uni.showToast({ title: '发布成功', icon: 'success' })
+  }
+
+  selectedSection.value = null
+  uni.switchTab({ url: '/pages/index/index' })
+}
+
 async function handleSubmit() {
   if (!selectedSection.value || submitting.value) return
   submitting.value = true
@@ -293,17 +339,7 @@ async function handleSubmit() {
       sectionId,
       content,
     })
-    try {
-      uni.setStorageSync(HOME_REFRESH_AFTER_POST_KEY, {
-        communityId: communityStore.currentCommunityId,
-        sectionId,
-        postId: result?.postId || '',
-        createdAt: Date.now(),
-      })
-    } catch {}
-    uni.showToast({ title: '发布成功', icon: 'success' })
-    selectedSection.value = null
-    uni.switchTab({ url: '/pages/index/index' })
+    await handleAuditSubmitResult(result)
   } catch (error: any) {
     uni.showModal({ title: '发布失败', content: error?.message ?? '请重试' })
   } finally {
