@@ -94,6 +94,9 @@
             <text class="login-alt-hint">使用其他账号？</text>
             <text class="login-alt-link" @tap="showDevLogin = true">DEV 登录</text>
           </view>
+          <view class="release-build-version">
+            <text>版本 {{ appVersion }}</text>
+          </view>
         </view>
       </template>
 
@@ -138,6 +141,9 @@
               class="dev-btn"
               @tap="showDevLogin = true"
             >DEV 登录</button>
+          </view>
+          <view class="release-build-version">
+            <text>版本 {{ appVersion }}</text>
           </view>
         </view>
       </template>
@@ -333,6 +339,7 @@ import { communityApi, memberApi, notificationApi, type ApprovalNotificationEven
 import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
+import { BUILD_INFO } from '../../generated/build-info'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import {
@@ -353,6 +360,7 @@ const notificationSubscriptions = ref<Array<{ eventType: ApprovalNotificationEve
 const notificationNeedsAuthorization = ref(false)
 const profileError = ref('')
 let refreshingProfile = false
+const appVersion = computed(() => String(BUILD_INFO.version || BUILD_INFO.buildId || 'unknown'))
 
 const configuredNotificationTemplates = computed(() => configuredApprovalTemplates(notificationTemplates.value))
 const hasAdminTools = computed(() => userStore.role === 'superAdmin' || adminCommunityIds.value.length > 0)
@@ -1135,6 +1143,13 @@ onPullDownRefresh(async () => {
 .hint-text { display: block; margin-top: $hh-space-sm; color: $hh-color-text-sub; font-size: $hh-font-caption; line-height: $hh-line-height-base; }
 .hint-text.warn { color: #b7791f; }
 .login-actions { display: flex; gap: $hh-space-sm; }
+.release-build-version {
+  margin-top: $hh-space-sm;
+  text-align: center;
+  font-size: 18rpx;
+  color: $hh-color-text-mute;
+  opacity: 0.72;
+}
 .dev-btn { background: $hh-color-warning; color: $hh-color-text-inverse; font-size: $hh-font-caption; }
 
 .dev-modal-mask {

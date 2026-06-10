@@ -10,7 +10,7 @@ function readSource(relativePath: string) {
 }
 
 describe('profile page visible debug output', () => {
-  test('does not render internal state or version labels on the profile page', () => {
+  test('does not render internal state labels or debug version prefixes on the profile page', () => {
     const code = readSource('pages/profile/index.vue')
 
     expect(code).not.toContain('profile-debug-banner')
@@ -21,5 +21,13 @@ describe('profile page visible debug output', () => {
     expect(code).not.toContain('state:')
     expect(code).not.toContain('login:')
     expect(code).not.toContain('cc:')
+  })
+
+  test('keeps official build version text for the release UI gate', () => {
+    const code = readSource('pages/profile/index.vue')
+
+    expect(code).toContain('release-build-version')
+    expect(code).toContain('BUILD_INFO')
+    expect(code).toContain('appVersion')
   })
 })
