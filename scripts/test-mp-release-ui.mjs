@@ -4,7 +4,7 @@
  * This script opens the built mp-weixin package through the DevTools automator
  * websocket and proves the two release-critical paths:
  *   - HH_RELEASE_HOME_DETAIL_NONEMPTY
- *   - HH_RELEASE_LOGIN_VERSION
+ *   - HH_RELEASE_PROFILE_LOGIN_CLEAN
  *
  * It does not upload, does not generate QR codes, and does not require an
  * auto-replay recording.
@@ -263,7 +263,7 @@ async function verifyHomeDetail(mp) {
   }
 }
 
-async function verifyLoginVersion(mp) {
+async function verifyProfileLoginClean(mp) {
   console.log('[release-ui] force logged-out state')
   const logoutResult = await forceLogout(mp)
   console.log(`[release-ui] logout result: ${JSON.stringify(logoutResult)}`)
@@ -278,15 +278,15 @@ async function verifyLoginVersion(mp) {
   await sleep(4000)
   const text = await pageText(page)
   const loginFormCount = (await page.$$('.login-form').catch(() => [])).length
-  const versionVisible = /ver:\s*0\.7\.|0\.7\./.test(text)
+  const debugLeakVisible = /ver:\s|state:logged|login:[01]|cc:/.test(text)
   return {
-    passed: text.trim().length >= 20 && loginFormCount > 0 && versionVisible,
+    passed: text.trim().length >= 20 && loginFormCount > 0 && !debugLeakVisible,
     logoutResult,
     path: page.path || '',
     textLength: text.length,
     textSample: text.slice(0, 300),
     loginFormCount,
-    versionVisible,
+    debugLeakVisible,
   }
 }
 
@@ -347,16 +347,16 @@ async function main() {
       console.log('HH_RELEASE_HOME_DETAIL_NONEMPTY')
     }
 
-    const loginVersion = await verifyLoginVersion(mp)
-    evidence.loginVersion = loginVersion
-    if (loginVersion.passed) {
-      evidence.markers.push('HH_RELEASE_LOGIN_VERSION')
-      console.log('HH_RELEASE_LOGIN_VERSION')
+    const profileLoginClean = await verifyProfileLoginClean(mp)
+    evidence.profileLoginClean = profileLoginClean
+    if (profileLoginClean.passed) {
+      evidence.markers.push('HH_RELEASE_PROFILE_LOGIN_CLEAN')
+      console.log('HH_RELEASE_PROFILE_LOGIN_CLEAN')
     }
 
     assertReleaseUiEvidence({
       homeDetailNonEmpty: homeDetail.passed,
-      loginVersionVisible: loginVersion.passed,
+      profileLoginClean: profileLoginClean.passed,
     })
 
     const jsonPath = await writeEvidence({ mp, evidenceDir, evidence })
