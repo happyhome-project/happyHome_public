@@ -484,7 +484,8 @@ async function refreshPostAuditFromTasks(postId: string, slot: 'content' | 'pend
 export async function handleAuditCallback(params: any) {
   const expectedToken = String(process.env.AUDIT_CALLBACK_TOKEN || '').trim()
   const token = String(params.callbackToken || params.token || '').trim()
-  if (expectedToken && token !== expectedToken) throw new Error('invalid audit callback token')
+  if (!expectedToken) throw new Error('audit callback token is not configured')
+  if (token !== expectedToken) throw new Error('invalid audit callback token')
 
   const traceId = String(params.traceId || params.trace_id || '').trim()
   const jobId = String(params.jobId || params.JobId || '').trim()

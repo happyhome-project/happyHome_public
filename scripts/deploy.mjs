@@ -375,6 +375,12 @@ async function runCloudSmoke(fns) {
     envId: getCloudEnvId(),
     only: fns,
   }
+  console.log('\nEnsuring release database collections and indexes...')
+  execSync('npm.cmd run ensure:indexes', {
+    cwd: ROOT,
+    stdio: 'inherit',
+    env: { ...process.env, TCB_ENV: smokeOptions.envId },
+  })
   console.log('\nRunning cloud release smoke and log capture...')
   const summary = await runCloudReleaseSmoke(smokeOptions)
   if (summary.status !== 'passed') {

@@ -16,12 +16,16 @@ jest.mock('../wx-openapi', () => ({
 import {
   approvePostAudit,
   extractAuditTargets,
+  handleAuditCallback,
   isPostVisibleToMembers,
   rejectPostAudit,
 } from '../content-audit'
 import * as db from '../db'
 
-beforeEach(() => jest.clearAllMocks())
+beforeEach(() => {
+  jest.clearAllMocks()
+  delete process.env.AUDIT_CALLBACK_TOKEN
+})
 
 test('extractAuditTargets collects text, rich-note images and manual video targets', () => {
   const section: any = {
@@ -91,4 +95,15 @@ test('rejectPostAudit rejects pending edits without replacing current content', 
     pendingAuditReason: 'manual reject',
   }))
   expect((db.updateById as jest.Mock).mock.calls[0][2].content).toBeUndefined()
+})
+
+test('handleAuditCallback rejects public callback when callback token is not configured', async () => {
+  await expect(handleAuditCallback({
+    traceId: 'trace-1',
+    suggest: 'pass',
+    callbackToken: 'any-token',
+  })).rejects.toThrow('audit callback token is not configured')
+
+  expect(db.query).not.toHaveBeenCalled()
+  expect(db.updateById).not.toHaveBeenCalled()
 })
