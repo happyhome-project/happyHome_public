@@ -1,5 +1,5 @@
 export const BUILD_INFO = {
-  version: "1.0.2606102105",
-  desc: "keep profile bottom version",
-  buildId: "mp-1.0.2606102105",
+  version: "1.0.2606102117",
+  desc: "trial 2026-06-10 21:17 cdb37cd",
+  buildId: "mp-1.0.2606102117",
 }
