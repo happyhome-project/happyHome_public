@@ -288,7 +288,7 @@ async function verifyProfileLoginClean(mp) {
   await sleep(4000)
   const text = await pageText(page)
   const loginFormCount = (await page.$$('.login-form').catch(() => [])).length
-  const debugLeakVisible = /ver:\s|state:logged|login:[01]|cc:/.test(text)
+  const debugLeakVisible = /state:logged|login:[01]|cc:/.test(text)
   const expectedVersion = expectedBuildVersion()
   const versionVisible = Boolean(expectedVersion && text.includes(expectedVersion))
   return {

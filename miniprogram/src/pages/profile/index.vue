@@ -94,9 +94,6 @@
             <text class="login-alt-hint">使用其他账号？</text>
             <text class="login-alt-link" @tap="showDevLogin = true">DEV 登录</text>
           </view>
-          <view class="release-build-version">
-            <text>版本 {{ appVersion }}</text>
-          </view>
         </view>
       </template>
 
@@ -141,9 +138,6 @@
               class="dev-btn"
               @tap="showDevLogin = true"
             >DEV 登录</button>
-          </view>
-          <view class="release-build-version">
-            <text>版本 {{ appVersion }}</text>
           </view>
         </view>
       </template>
@@ -325,6 +319,9 @@
           </view>
         </view>
       </view>
+    </view>
+    <view class="profile-version">
+      <text>ver: {{ appVersion }}</text>
     </view>
     <AppTabBar current="profile" />
   </view>
@@ -1143,12 +1140,16 @@ onPullDownRefresh(async () => {
 .hint-text { display: block; margin-top: $hh-space-sm; color: $hh-color-text-sub; font-size: $hh-font-caption; line-height: $hh-line-height-base; }
 .hint-text.warn { color: #b7791f; }
 .login-actions { display: flex; gap: $hh-space-sm; }
-.release-build-version {
-  margin-top: $hh-space-sm;
+.profile-version {
+  padding: 20rpx 0 10rpx;
   text-align: center;
+  font-family: $hh-font-mono;
   font-size: 18rpx;
   color: $hh-color-text-mute;
-  opacity: 0.72;
+  opacity: 0.58;
+}
+.profile-version text {
+  user-select: text;
 }
 .dev-btn { background: $hh-color-warning; color: $hh-color-text-inverse; font-size: $hh-font-caption; }
 
