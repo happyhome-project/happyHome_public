@@ -4,6 +4,9 @@ import { extname, join } from 'node:path'
 import { chromium } from 'playwright'
 
 const root = join(process.cwd(), 'miniprogram', 'dist', 'build', 'h5')
+const buildInfoPath = join(process.cwd(), 'miniprogram', 'src', 'generated', 'build-info.ts')
+const buildInfoText = existsSync(buildInfoPath) ? readFileSync(buildInfoPath, 'utf8') : ''
+const expectedVersion = buildInfoText.match(/version:\s*["']([^"']+)["']/)?.[1] || ''
 
 const contentTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -75,8 +78,11 @@ async function runProfileCase(browser, port, options) {
 
     console.log(`[${options.label}] ${text}`)
 
-    if (/ver:\s|state:logged|login:[01]|cc:/.test(text)) {
-      throw new Error(`${options.label}: profile debug/version label leaked`)
+    if (!expectedVersion || !text.includes(expectedVersion)) {
+      throw new Error(`${options.label}: profile version missing: expected ${expectedVersion || '(unknown)'}`)
+    }
+    if (/state:logged|login:[01]|cc:/.test(text)) {
+      throw new Error(`${options.label}: profile internal debug label leaked`)
     }
     for (const expectedText of options.expectedTexts) {
       if (!text.includes(expectedText)) {
