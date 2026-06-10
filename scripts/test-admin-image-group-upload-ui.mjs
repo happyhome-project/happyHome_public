@@ -92,11 +92,28 @@ function stopProcessTree(child) {
   })
 }
 
+function quoteCmdArg(value) {
+  const text = String(value)
+  if (!/[\s"&|<>^]/.test(text)) return text
+  return `"${text.replace(/"/g, '\\"')}"`
+}
+
+function spawnNpm(args, options) {
+  if (process.platform === 'win32') {
+    return spawn(
+      process.env.ComSpec || 'cmd.exe',
+      ['/d', '/s', '/c', ['npm.cmd', ...args.map(quoteCmdArg)].join(' ')],
+      options,
+    )
+  }
+  return spawn('npm', args, options)
+}
+
 async function ensureAdminWebServer() {
   if (await waitForHttp(`${BASE_URL}/login`, 3000)) return null
   const url = new URL(BASE_URL)
   const port = url.port || '5180'
-  const child = spawn('npm.cmd', [
+  const child = spawnNpm([
     'run',
     'dev',
     '--workspace',
@@ -206,8 +223,8 @@ async function main() {
     await page.locator('input.el-input__inner:not([readonly])').first().fill(title)
     await page.locator('input[type="file"]').first().setInputFiles([img1, img2])
     await page.waitForFunction(
-      () => document.querySelectorAll('.image-card').length >= 2 &&
-        !document.querySelector('.upload-tile')?.hasAttribute('disabled'),
+      () => document.querySelectorAll('.image-item').length >= 2 &&
+        !document.querySelector('.progress-row'),
       null,
       { timeout: 30000 },
     )

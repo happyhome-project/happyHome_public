@@ -192,6 +192,30 @@ const INDEXES = [
       { Name: 'expiresAt', Direction: '1' },
     ],
   },
+  // content_audit_tasks: audit detail pages and callback reconciliation by post/slot/trace/job
+  {
+    coll: 'content_audit_tasks',
+    name: 'idx_postId_contentSlot_createdAt',
+    keys: [
+      { Name: 'postId', Direction: '1' },
+      { Name: 'contentSlot', Direction: '1' },
+      { Name: 'createdAt', Direction: '-1' },
+    ],
+  },
+  {
+    coll: 'content_audit_tasks',
+    name: 'idx_traceId',
+    keys: [
+      { Name: 'traceId', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'content_audit_tasks',
+    name: 'idx_jobId',
+    keys: [
+      { Name: 'jobId', Direction: '1' },
+    ],
+  },
 ]
 
 const REQUIRED_COLLECTIONS = [
@@ -200,6 +224,7 @@ const REQUIRED_COLLECTIONS = [
   'admin_sessions',
   'admin_login_tickets',  // 扫码登录会话（_id=ticket，主键查询，索引仅 expiresAt 用）
   'admin_runtime',        // 运行时缓存（wx access_token 等单文档，无需额外索引）
+  'content_audit_tasks',  // 内容审核任务与回调对账
 ]
 
 let hadError = false

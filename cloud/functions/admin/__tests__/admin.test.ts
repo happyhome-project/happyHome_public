@@ -24,6 +24,7 @@ jest.mock('uuid', () => ({
 
 import { main } from '../index'
 import * as db from '../../../lib/db'
+import * as storage from '../../../lib/storage'
 
 beforeEach(() => jest.resetAllMocks())
 
@@ -496,6 +497,7 @@ test('post.getAdmin: 返回 attendance 汇总和完整名单', async () => {
     })
     .mockResolvedValueOnce({ _id: 'user-1', nickName: '小王', avatarUrl: '1.png' })
   ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([])
     .mockResolvedValueOnce([
       { _id: 'record-1', postId: 'post-1', widgetId: 'attendance-1', userId: 'user-1', joinedAt: '2024-01-02T00:00:00.000Z' },
     ])
@@ -527,6 +529,35 @@ test('post.removeAttendanceMemberAdmin: 可移除参与人并返回最新名单'
 
   expect(db.removeById).toHaveBeenCalledWith('post_attendance_members', 'record-1')
   expect(result).toEqual({ success: true, members: [], total: 0 })
+})
+
+test('community.hardDelete: cleans cloud files from current and pending post content', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'community-1',
+    status: 'disabled',
+    coverImage: 'cloud://env/community-cover.jpg',
+  })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([
+      {
+        _id: 'post-1',
+        content: { images: ['cloud://env/current.jpg'] },
+        pendingContent: { rich: { imageFileIDs: ['cloud://env/pending.jpg'] } },
+      },
+    ])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([])
+  ;(db.removeById as jest.Mock).mockResolvedValue({})
+  ;(storage.deleteFile as jest.Mock).mockResolvedValue({})
+
+  await main({ action: 'community.hardDelete', communityId: 'community-1' })
+
+  expect(storage.deleteFile).toHaveBeenCalledWith([
+    'cloud://env/community-cover.jpg',
+    'cloud://env/current.jpg',
+    'cloud://env/pending.jpg',
+  ])
 })
 
 test('admin.listAccounts: 标记未删除社区的创建者管理员账号', async () => {

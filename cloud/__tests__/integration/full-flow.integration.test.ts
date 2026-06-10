@@ -50,6 +50,7 @@ import {
   handleUpdate as updatePost,
   handleDelete as deletePost,
 } from '../../functions/post/index'
+import { approvePostAudit } from '../../lib/content-audit'
 
 beforeEach(() => {
   _resetAll()
@@ -191,6 +192,7 @@ describe('核心业务全链路', () => {
       content: { [titleWidgetId]: '我的第一篇帖子' },
     }, _getOpenId())
     expect(postId).toBeTruthy()
+    await approvePostAudit(postId)
 
     // 6. 查帖
     const { post } = await getPost({ postId }, _getOpenId()) as { post: any }
@@ -206,6 +208,7 @@ describe('核心业务全链路', () => {
       },
     }, _getOpenId())
     expect(updateResult.success).toBe(true)
+    await approvePostAudit(postId)
 
     const { post: updated } = await getPost({ postId }, _getOpenId()) as { post: any }
     expect(updated.content[titleWidgetId]).toBe('修改后的标题')

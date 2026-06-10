@@ -26,6 +26,21 @@ async function getLatestMembershipRecord(communityId: string, openid: string) {
   return records[0] || null
 }
 
+async function isSuperAdmin(openid: string) {
+  try {
+    const user = await db.getById('users', openid) as { role?: string } | null
+    return user?.role === 'superAdmin'
+  } catch {
+    return false
+  }
+}
+
+async function assertCommunityApprover(openid: string, communityId: string) {
+  if (!communityId) throw new Error('communityId 不能为空')
+  if (await isSuperAdmin(openid)) return
+  await assertCommunityAdmin(openid, communityId)
+}
+
 export async function handleApply(params: { communityId: string }, openid: string) {
   if (!openid) throw new Error('Missing OPENID')
 
@@ -105,7 +120,7 @@ export async function handleMemberApprove(
   openid: string,
 ) {
   if (!openid) throw new Error('Missing OPENID')
-  await assertCommunityAdmin(openid, params.communityId)
+  await assertCommunityApprover(openid, params.communityId)
 
   const updateRes = await db.updateWhere('community_members', {
     _id: params.memberId,
@@ -126,7 +141,7 @@ export async function handleMemberReject(
   openid: string,
 ) {
   if (!openid) throw new Error('Missing OPENID')
-  await assertCommunityAdmin(openid, params.communityId)
+  await assertCommunityApprover(openid, params.communityId)
 
   const updateRes = await db.updateWhere('community_members', {
     _id: params.memberId,
@@ -141,7 +156,7 @@ export async function handleMemberReject(
 
 export async function handlePendingList(params: { communityId: string }, openid: string) {
   if (!openid) throw new Error('Missing OPENID')
-  await assertCommunityAdmin(openid, params.communityId)
+  await assertCommunityApprover(openid, params.communityId)
 
   const members = await db.query('community_members', {
     communityId: params.communityId,
