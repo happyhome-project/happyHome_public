@@ -2,14 +2,15 @@
  * WeChat DevTools release UI gate.
  *
  * This script opens the built mp-weixin package through the DevTools automator
- * websocket and proves the two release-critical paths:
+ * websocket and proves the release-critical paths:
  *   - HH_RELEASE_HOME_DETAIL_NONEMPTY
+ *   - HH_RELEASE_LOGIN_VERSION
  *   - HH_RELEASE_PROFILE_LOGIN_CLEAN
  *
  * It does not upload, does not generate QR codes, and does not require an
  * auto-replay recording.
  */
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -30,6 +31,15 @@ const DEFAULT_RELEASE_OPENID = 'h5-qa-user-001'
 const DEFAULT_RELEASE_COMMUNITY_ID = '6ded7a7769e789c1000879305ec314da'
 const HOME_POST_SELECTORS = ['.live-row', '.guide-card', '.arc-item', '.post-card']
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
+
+function expectedBuildVersion() {
+  try {
+    const source = readFileSync(resolve(ROOT, 'miniprogram', 'src', 'generated', 'build-info.ts'), 'utf8')
+    return source.match(/version:\s*["']([^"']+)["']/)?.[1] || ''
+  } catch {
+    return ''
+  }
+}
 
 function quoteForPowerShell(arg) {
   const str = String(arg)
@@ -279,14 +289,19 @@ async function verifyProfileLoginClean(mp) {
   const text = await pageText(page)
   const loginFormCount = (await page.$$('.login-form').catch(() => [])).length
   const debugLeakVisible = /ver:\s|state:logged|login:[01]|cc:/.test(text)
+  const expectedVersion = expectedBuildVersion()
+  const versionVisible = Boolean(expectedVersion && text.includes(expectedVersion))
   return {
-    passed: text.trim().length >= 20 && loginFormCount > 0 && !debugLeakVisible,
+    cleanPassed: text.trim().length >= 20 && loginFormCount > 0 && !debugLeakVisible,
+    versionPassed: text.trim().length >= 20 && loginFormCount > 0 && versionVisible,
     logoutResult,
     path: page.path || '',
     textLength: text.length,
     textSample: text.slice(0, 300),
     loginFormCount,
     debugLeakVisible,
+    expectedVersion,
+    versionVisible,
   }
 }
 
@@ -349,14 +364,19 @@ async function main() {
 
     const profileLoginClean = await verifyProfileLoginClean(mp)
     evidence.profileLoginClean = profileLoginClean
-    if (profileLoginClean.passed) {
+    if (profileLoginClean.versionPassed) {
+      evidence.markers.push('HH_RELEASE_LOGIN_VERSION')
+      console.log('HH_RELEASE_LOGIN_VERSION')
+    }
+    if (profileLoginClean.cleanPassed) {
       evidence.markers.push('HH_RELEASE_PROFILE_LOGIN_CLEAN')
       console.log('HH_RELEASE_PROFILE_LOGIN_CLEAN')
     }
 
     assertReleaseUiEvidence({
       homeDetailNonEmpty: homeDetail.passed,
-      profileLoginClean: profileLoginClean.passed,
+      loginVersionVisible: profileLoginClean.versionPassed,
+      profileLoginClean: profileLoginClean.cleanPassed,
     })
 
     const jsonPath = await writeEvidence({ mp, evidenceDir, evidence })
