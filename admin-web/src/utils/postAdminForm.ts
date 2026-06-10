@@ -6,6 +6,7 @@ export const ADMIN_POST_EDITABLE_WIDGET_TYPES = new Set([
   'summary',
   'number',
   'datetime',
+  'image_group',
   'rich_text',
   'note_blocks',
   'rich_note',
@@ -60,7 +61,7 @@ export function hydrateAdminPostFormData(formData: Record<string, any>, widgets:
     const existing = content?.[widget.widgetId]
     if (existing !== undefined) {
       formData[widget.widgetId] = JSON.parse(JSON.stringify(existing))
-    } else if (widget.type === 'video_group' || widget.type === 'audio_group' || widget.type === 'note_blocks') {
+    } else if (widget.type === 'video_group' || widget.type === 'audio_group' || widget.type === 'note_blocks' || widget.type === 'image_group') {
       formData[widget.widgetId] = []
     } else if (widget.type === 'rich_note') {
       formData[widget.widgetId] = emptyRichNoteContent()
@@ -80,6 +81,7 @@ export function validateAdminPostForm(widgets: any[], formData: Record<string, a
     }
     if (widget.type === 'video_group' && !validateVideoItems(widget, formData)) return false
     if (widget.type === 'audio_group' && !validateAudioItems(widget, formData)) return false
+    if (widget.type === 'image_group' && !validateImageGroup(widget, formData)) return false
     if (widget.type === 'note_blocks' && !validateNoteBlocks(widget, formData)) return false
     if (widget.type === 'rich_note' && widget.required && isRichNoteEmpty(formData[widget.widgetId])) {
       ElMessage.error(`请填写「${widget.label}」`)
@@ -97,6 +99,14 @@ export function formatReadonlyContentValue(value: unknown) {
 
 function isEmptyValue(value: unknown) {
   return value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)
+}
+
+function validateImageGroup(widget: any, formData: Record<string, any>) {
+  const list = (formData[widget.widgetId] as any[]) || []
+  for (const [index, fileID] of list.entries()) {
+    if (!String(fileID || '').startsWith('cloud://')) return fail(widget, index, '图片未上传成功')
+  }
+  return true
 }
 
 function validateVideoItems(widget: any, formData: Record<string, any>) {
