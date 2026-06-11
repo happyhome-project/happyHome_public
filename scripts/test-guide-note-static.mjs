@@ -7,6 +7,7 @@ const adminApi = fs.readFileSync(path.join(root, 'admin-web', 'src', 'api', 'clo
 const homePage = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'pages', 'index', 'index.vue'), 'utf8')
 const createPage = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'pages', 'create', 'index.vue'), 'utf8')
 const detailPage = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'pages', 'detail', 'index.vue'), 'utf8')
+const guideRouteDetail = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'components', 'GuideRouteDetailView.vue'), 'utf8')
 const widgetEditor = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'components', 'widgets', 'WidgetEditor.vue'), 'utf8')
 const widgetRenderer = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'components', 'widgets', 'WidgetRenderer.vue'), 'utf8')
 
@@ -35,11 +36,37 @@ assert(
 )
 
 assert(
-  fs.readFileSync(path.join(root, 'miniprogram', 'src', 'components', 'GuideRouteDetailView.vue'), 'utf8')
-    .includes('<scroll-view scroll-x') &&
-    fs.readFileSync(path.join(root, 'miniprogram', 'src', 'components', 'GuideRouteDetailView.vue'), 'utf8')
-      .includes('detail.images'),
-  'guide route detail must render top images in a horizontal carousel.'
+  guideRouteDetail.includes('<swiper') &&
+    guideRouteDetail.includes('<swiper-item') &&
+    guideRouteDetail.includes('@change="onHeroChange"') &&
+    !guideRouteDetail.includes('<scroll-view scroll-x'),
+  'guide route detail top images must use a snapping swiper, not a free horizontal scroll-view.'
+)
+
+assert(
+  guideRouteDetail.includes('height: 72vh') &&
+    guideRouteDetail.includes('min-height: 760rpx'),
+  'guide route detail hero image must occupy a large first-screen area.'
+)
+
+assert(
+  guideRouteDetail.includes('currentImageIndex') &&
+    guideRouteDetail.includes('#e64646'),
+  'guide route detail image dots must track the current slide and use a red active dot.'
+)
+
+assert(
+  guideRouteDetail.includes('HERO_SWIPE_THRESHOLD_PX') &&
+    guideRouteDetail.includes('heroSuppressNextPreview') &&
+    guideRouteDetail.includes('@touchmove="onHeroPointerMove"'),
+  'guide route detail swiper must avoid opening image preview by gesture distance, not a fixed delay.'
+)
+
+assert(
+  !guideRouteDetail.includes('lastHeroChangeAt') &&
+    !guideRouteDetail.includes('lastHeroMoveAt') &&
+    !guideRouteDetail.includes('setTimeout(() =>'),
+  'guide route detail image preview must not be delayed by a fixed post-swipe timeout.'
 )
 
 assert(
