@@ -63,6 +63,18 @@ export const useUserStore = defineStore('user', {
       this.isLoggedIn = true
       this.saveToStorage()
     },
+    async refreshLoginRole() {
+      if (!this.isLoggedIn) return
+      const name = (this.nickName || '').trim()
+      if (!name) return
+      const result = await userApi.login({ nickName: name, avatarUrl: this.avatarUrl || '' })
+      this.openId = result.user._id
+      this.nickName = result.user.nickName || name
+      this.avatarUrl = result.user.avatarUrl || this.avatarUrl || ''
+      this.role = result.user.role
+      this.isLoggedIn = true
+      this.saveToStorage()
+    },
     /**
      * DEV 模式登录：绕过 wx.login，直接用指定 openid 通过 http-gateway 调
      * user.login 云函数。用于测试环境 / H5 / 无法真机微信登录的场景。

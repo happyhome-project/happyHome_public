@@ -560,6 +560,71 @@ test('community.hardDelete: cleans cloud files from current and pending post con
   ])
 })
 
+test('admin.createAccount: 创建绑定微信的 superAdmin 时同步小程序用户角色', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([]) // username 未占用
+  ;(db.getById as jest.Mock).mockRejectedValueOnce(Object.assign(new Error('not found'), { errCode: -502001 }))
+  ;(db.create as jest.Mock)
+    .mockResolvedValueOnce('super-account-1')
+    .mockResolvedValueOnce('super-openid')
+
+  const result: any = await main({
+    action: 'admin.createAccount',
+    username: 'ops',
+    password: 'happyhome2024',
+    role: 'superAdmin',
+    userId: 'super-openid',
+    _actAs: { accountId: 'root', role: 'superAdmin', userId: 'root-openid', username: 'root' },
+  })
+
+  expect(db.create).toHaveBeenCalledWith('admin_accounts', expect.objectContaining({
+    username: 'ops',
+    userId: 'super-openid',
+    role: 'superAdmin',
+    status: 'active',
+  }))
+  expect(db.create).toHaveBeenCalledWith('users', expect.objectContaining({
+    _id: 'super-openid',
+    role: 'superAdmin',
+    roleSource: 'admin_account',
+  }))
+  expect(result.accountId).toBe('super-account-1')
+})
+
+test('admin.bindWechat: 绑定 superAdmin 微信 openId 时同步小程序用户角色', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([]) // openId 未绑定其他账号
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({
+      _id: 'super-account-1',
+      username: 'admin',
+      role: 'superAdmin',
+      status: 'active',
+      userId: '',
+    })
+    .mockResolvedValueOnce({
+      _id: 'super-openid',
+      nickName: '一年',
+      avatarUrl: '',
+      role: 'user',
+    })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+  ;(db.updateWhere as jest.Mock).mockResolvedValue({})
+
+  const result: any = await main({
+    action: 'admin.bindWechat',
+    accountId: 'super-account-1',
+    openId: 'super-openid',
+    _actAs: { accountId: 'root', role: 'superAdmin', userId: 'root-openid', username: 'root' },
+  })
+
+  expect(db.updateById).toHaveBeenCalledWith('admin_accounts', 'super-account-1', { userId: 'super-openid' })
+  expect(db.updateById).toHaveBeenCalledWith('users', 'super-openid', {
+    role: 'superAdmin',
+    roleSource: 'admin_account',
+  })
+  expect(db.updateWhere).toHaveBeenCalledWith('admin_sessions', { accountId: 'super-account-1' }, { userId: 'super-openid' })
+  expect(result.success).toBe(true)
+})
+
 test('admin.listAccounts: 标记未删除社区的创建者管理员账号', async () => {
   ;(db.query as jest.Mock)
     .mockResolvedValueOnce([

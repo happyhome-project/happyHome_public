@@ -21,6 +21,7 @@ import {
   listOwnedCommunityIds,
   verifyPassword,
 } from '../../lib/auth'
+import { syncMiniProgramUserRoleForAdminAccount } from '../../lib/admin-identity'
 import { handleCreate as handleCommunityCreate } from '../community'
 import type {
   AdminAccount,
@@ -728,6 +729,7 @@ async function publicRoute(action: string, params: Record<string, any>, openid =
     }
     if (account.status !== 'active') throw new Error('该管理员账号已停用')
 
+    await syncMiniProgramUserRoleForAdminAccount(openid, account.role, { nickName: account.username })
     const { token } = await createSessionForAccount(account)
     await db.updateById(ADMIN_LOGIN_TICKETS, ticket, {
       status: 'success' as WxLoginStatus,
@@ -1499,6 +1501,9 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       createdAt: now,
       createdBy: ctx.accountId,
     })
+    if (userId) {
+      await syncMiniProgramUserRoleForAdminAccount(userId, role, { nickName: username })
+    }
     return { accountId }
   }
   if (action === 'admin.resetPassword') {
@@ -1537,8 +1542,12 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (existing && existing._id !== accountId) {
       throw new Error('该微信身份已绑定到其他账号')
     }
+    const account = await db.getById(ADMIN_ACCOUNTS, accountId) as AdminAccount | null
+    if (!account) throw new Error('账号不存在')
+    if (account.status !== 'active') throw new Error('该管理员账号已停用')
     await db.updateById(ADMIN_ACCOUNTS, accountId, { userId: openId })
     await db.updateWhere(ADMIN_SESSIONS, { accountId }, { userId: openId })
+    await syncMiniProgramUserRoleForAdminAccount(openId, account.role, { nickName: account.username })
     return { success: true }
   }
 
