@@ -1,18 +1,32 @@
 <template>
   <view class="guide-route">
     <view v-if="detail.images.length" class="guide-hero">
-      <scroll-view scroll-x class="guide-hero-scroll" :show-scrollbar="false" enhanced>
-        <view class="guide-hero-track">
+      <swiper
+        class="guide-hero-swiper"
+        :current="currentImageIndex"
+        :circular="detail.images.length > 1"
+        :duration="260"
+        @change="onHeroChange"
+        @touchstart="onHeroPointerStart"
+        @touchmove="onHeroPointerMove"
+        @touchend="onHeroPointerEnd"
+        @mousedown="onHeroPointerStart"
+        @mousemove="onHeroPointerMove"
+        @mouseup="onHeroPointerEnd"
+      >
+        <swiper-item
+          v-for="(image, index) in detail.images"
+          :key="`${image}-${index}`"
+          class="guide-hero-slide"
+        >
           <image
-            v-for="(image, index) in detail.images"
-            :key="`${image}-${index}`"
             :src="image"
             class="guide-hero-image"
             mode="aspectFill"
             @tap="previewImage(index)"
           />
-        </view>
-      </scroll-view>
+        </swiper-item>
+      </swiper>
       <view class="guide-hero-mask" />
       <view class="guide-hero-copy">
         <view v-if="detail.tags.length" class="guide-tags">
@@ -20,14 +34,14 @@
         </view>
         <text v-if="detail.title" class="guide-title">{{ detail.title }}</text>
         <text v-if="detail.subtitle" class="guide-subtitle">{{ detail.subtitle }}</text>
-        <view v-if="detail.images.length > 1" class="guide-dots" aria-hidden="true">
-          <text
-            v-for="(_image, index) in detail.images"
-            :key="`dot-${index}`"
-            class="guide-dot"
-            :class="{ active: index === 0 }"
-          />
-        </view>
+      </view>
+      <view v-if="detail.images.length > 1" class="guide-dots" aria-hidden="true">
+        <text
+          v-for="(_image, index) in detail.images"
+          :key="`dot-${index}`"
+          class="guide-dot"
+          :class="{ active: index === currentImageIndex }"
+        />
       </view>
     </view>
 
@@ -100,12 +114,27 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { GuideRouteDetail } from '../utils/guide-detail'
 
 const props = defineProps<{
   detail: GuideRouteDetail
 }>()
+
+const HERO_SWIPE_THRESHOLD_PX = 8
+const currentImageIndex = ref(0)
+const heroSwipeIntent = ref(false)
+let heroPointerStartX = 0
+let heroPointerStartY = 0
+let heroHasPointerStart = false
+let heroSuppressNextPreview = false
+
+watch(
+  () => props.detail.images.length,
+  (length) => {
+    if (length === 0 || currentImageIndex.value >= length) currentImageIndex.value = 0
+  },
+)
 
 const mapMarkers = computed(() => {
   if (!props.detail.location) return []
@@ -125,8 +154,51 @@ const bodyImageUrls = computed(() =>
     .map((block) => block.src)
 )
 
+function onHeroChange(event: any) {
+  const next = Number(event?.detail?.current || 0)
+  if (Number.isFinite(next)) currentImageIndex.value = next
+  if (event?.detail?.source === 'touch') heroSuppressNextPreview = true
+}
+
+function onHeroPointerStart(event: any) {
+  const point = getPointerPoint(event)
+  heroPointerStartX = point.x
+  heroPointerStartY = point.y
+  heroHasPointerStart = true
+  heroSwipeIntent.value = false
+  heroSuppressNextPreview = false
+}
+
+function onHeroPointerMove(event: any) {
+  if (!heroHasPointerStart) return
+  const point = getPointerPoint(event)
+  const dx = Math.abs(point.x - heroPointerStartX)
+  const dy = Math.abs(point.y - heroPointerStartY)
+  if (Math.max(dx, dy) >= HERO_SWIPE_THRESHOLD_PX) {
+    heroSwipeIntent.value = true
+    heroSuppressNextPreview = true
+  }
+}
+
+function onHeroPointerEnd() {
+  if (heroSwipeIntent.value) heroSuppressNextPreview = true
+  heroHasPointerStart = false
+  heroSwipeIntent.value = false
+}
+
+function getPointerPoint(event: any) {
+  const touch = event?.touches?.[0] || event?.changedTouches?.[0]
+  const x = Number(touch?.clientX ?? touch?.pageX ?? event?.clientX ?? event?.pageX ?? 0)
+  const y = Number(touch?.clientY ?? touch?.pageY ?? event?.clientY ?? event?.pageY ?? 0)
+  return { x, y }
+}
+
 function previewImage(index: number) {
   if (!props.detail.images.length) return
+  if (heroSuppressNextPreview) {
+    heroSuppressNextPreview = false
+    return
+  }
   uni.previewImage({
     current: props.detail.images[index],
     urls: props.detail.images,
@@ -161,25 +233,21 @@ function openLocation() {
 
 .guide-hero {
   position: relative;
-  height: 430rpx;
+  height: 72vh;
+  min-height: 760rpx;
+  max-height: 1120rpx;
   overflow: hidden;
   background: $hh-surface-2;
 }
 
-.guide-hero-scroll,
-.guide-hero-track,
+.guide-hero-swiper,
+.guide-hero-slide,
 .guide-hero-image {
   width: 100%;
-  height: 430rpx;
-}
-
-.guide-hero-track {
-  display: flex;
-  white-space: nowrap;
+  height: 100%;
 }
 
 .guide-hero-image {
-  flex: 0 0 100%;
   display: block;
 }
 
@@ -194,7 +262,7 @@ function openLocation() {
   position: absolute;
   left: 28rpx;
   right: 28rpx;
-  bottom: 26rpx;
+  bottom: 72rpx;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -234,21 +302,25 @@ function openLocation() {
 }
 
 .guide-dots {
+  position: absolute;
+  left: 28rpx;
+  right: 28rpx;
+  bottom: 30rpx;
   display: flex;
-  gap: 8rpx;
-  margin-top: 18rpx;
+  justify-content: center;
+  gap: 12rpx;
+  pointer-events: none;
 }
 
 .guide-dot {
-  width: 30rpx;
-  height: 6rpx;
+  width: 12rpx;
+  height: 12rpx;
   border-radius: 999rpx;
-  background: rgba(255, 255, 255, 0.36);
+  background: rgba(255, 255, 255, 0.62);
 }
 
 .guide-dot.active {
-  width: 54rpx;
-  background: #fff;
+  background: #e64646;
 }
 
 .guide-hero-empty {
