@@ -803,6 +803,7 @@ async function refreshProfileData(reason = 'manual') {
   profileError.value = ''
   logProfile('info', 'profile.refresh.start', { reason })
   try {
+    await userStore.refreshLoginRole()
     await communityStore.loadMyCommunities()
     logProfile('info', 'profile.communities.load.success', {
       reason,

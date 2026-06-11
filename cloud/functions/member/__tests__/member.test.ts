@@ -273,8 +273,10 @@ test('退出社区：不是成员时抛出错误', async () => {
 })
 
 test('管理员审批通过：memberCount 原子递增', async () => {
-  // assertCommunityAdmin
-  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'admin-member', role: 'admin', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'test-openid', role: 'user' })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([]) // admin_accounts：不是 superAdmin
+    .mockResolvedValueOnce([{ _id: 'admin-member', role: 'admin', status: 'active' }])
   ;(db.updateWhere as jest.Mock).mockResolvedValue({ stats: { updated: 1 } })
   ;(db.increment as jest.Mock).mockResolvedValue({})
 
@@ -306,14 +308,20 @@ test('superAdmin 可在小程序端审批任意社区成员申请', async () => 
 })
 
 test('管理员审批通过：非管理员无权操作', async () => {
-  ;(db.query as jest.Mock).mockResolvedValueOnce([]) // not admin
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'test-openid', role: 'user' })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([]) // admin_accounts：不是 superAdmin
+    .mockResolvedValueOnce([]) // community_members：不是社区管理员
 
   await expect(handleMemberApprove({ communityId: 'c1', memberId: 'applicant-member' }, 'test-openid'))
     .rejects.toThrow('权限不足')
 })
 
 test('管理员拒绝申请：status 变为 rejected，设置 rejectedAt', async () => {
-  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'admin-member', role: 'admin', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'test-openid', role: 'user' })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([]) // admin_accounts：不是 superAdmin
+    .mockResolvedValueOnce([{ _id: 'admin-member', role: 'admin', status: 'active' }])
   ;(db.updateWhere as jest.Mock).mockResolvedValue({ stats: { updated: 1 } })
 
   await handleMemberReject({ communityId: 'c1', memberId: 'applicant-member' }, 'test-openid')
@@ -329,7 +337,10 @@ test('管理员拒绝申请：status 变为 rejected，设置 rejectedAt', async
 })
 
 test('管理员审批通过：已非 pending 时不重复递增', async () => {
-  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'admin-member', role: 'admin', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'test-openid', role: 'user' })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([]) // admin_accounts：不是 superAdmin
+    .mockResolvedValueOnce([{ _id: 'admin-member', role: 'admin', status: 'active' }])
   ;(db.updateWhere as jest.Mock).mockResolvedValue({ stats: { updated: 0 } })
 
   const result = await handleMemberApprove({ communityId: 'c1', memberId: 'applicant-member' }, 'test-openid')
@@ -339,10 +350,14 @@ test('管理员审批通过：已非 pending 时不重复递增', async () => {
 })
 
 test('pendingList：返回社区所有待审批成员', async () => {
-  ;(db.query as jest.Mock).mockResolvedValue([
-    { _id: 'm1', status: 'pending' },
-    { _id: 'm2', status: 'pending' },
-  ])
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'test-openid', role: 'user' })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([]) // admin_accounts：不是 superAdmin
+    .mockResolvedValueOnce([{ _id: 'admin-member', role: 'admin', status: 'active' }])
+    .mockResolvedValueOnce([
+      { _id: 'm1', status: 'pending' },
+      { _id: 'm2', status: 'pending' },
+    ])
 
   const result = await handlePendingList({ communityId: 'c1' }, 'test-openid')
 
@@ -360,6 +375,25 @@ test('pendingList：superAdmin 可查看任意社区待审批成员', async () =
 
   expect(db.query).toHaveBeenCalledTimes(1)
   expect(db.query).toHaveBeenCalledWith('community_members', { communityId: 'c1', status: 'pending' })
+  expect(result.members).toHaveLength(1)
+})
+
+test('pendingList：后台账号已绑定 superAdmin 时无需等待 users.role 同步', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'test-openid', role: 'user' })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([
+      { _id: 'admin-account-1', userId: 'test-openid', role: 'superAdmin', status: 'active' },
+    ])
+    .mockResolvedValueOnce([
+      { _id: 'm1', status: 'pending' },
+    ])
+
+  const result = await handlePendingList({ communityId: 'c1' }, 'test-openid')
+
+  expect(db.query).toHaveBeenCalledWith('admin_accounts', {
+    userId: 'test-openid',
+    status: 'active',
+  }, { limit: 20 })
   expect(result.members).toHaveLength(1)
 })
 
