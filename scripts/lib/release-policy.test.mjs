@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { isDevtoolsLoginSigningFailure, shouldFallbackAfterDevtoolsFailure } from './release-policy.mjs'
@@ -29,4 +30,14 @@ test('allows non-upload fallback for non-login DevTools failures', () => {
     target: 'cloud',
     reason: 'DevTools CLI not found',
   }), true)
+})
+
+test('release cloud smoke ensures required database collections before invoking fixtures', () => {
+  const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
+  const ensureIndexesScript = readFileSync(new URL('../ensure-indexes.mjs', import.meta.url), 'utf8')
+  const runCloudSmokeBody = deployScript.match(/async function runCloudSmoke[\s\S]+?\n}/)?.[0] || ''
+
+  assert.match(ensureIndexesScript, /content_audit_tasks/)
+  assert.match(runCloudSmokeBody, /ensure:indexes/)
+  assert(runCloudSmokeBody.indexOf('ensure:indexes') < runCloudSmokeBody.indexOf('runCloudReleaseSmoke'))
 })

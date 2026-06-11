@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid'
 import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
 import { assertCommunityAdmin } from '../../lib/auth'
+import { isPostVisibleToMembers } from '../../lib/content-audit'
 import type { Widget, Section, SectionType, SectionStatus } from '../../shared/types'
 import { LIST_DISPLAYABLE_TYPES } from '../../shared/types'
 
@@ -133,10 +134,13 @@ export async function handleList(params: { communityId: string; withPostCount?: 
 
   if (params.withPostCount) {
     const withCount = await Promise.all(
-      sections.map(async (section: Section) => ({
-        ...section,
-        postCount: await db.count('posts', { sectionId: section._id, status: 'active' }),
-      }))
+      sections.map(async (section: Section) => {
+        const posts = await db.query('posts', { sectionId: section._id, status: 'active' })
+        return {
+          ...section,
+          postCount: (posts as any[]).filter(isPostVisibleToMembers).length,
+        }
+      })
     )
     return { sections: withCount }
   }

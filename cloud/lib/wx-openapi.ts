@@ -165,3 +165,20 @@ export async function getWxacodeUnlimited(params: WxacodeUnlimitedParams): Promi
     `wxacode.getUnlimited HTTP failed: errcode=${errPayload?.errcode} errmsg=${errPayload?.errmsg || res.body.toString('utf-8').slice(0, 200)}`
   )
 }
+
+export async function postWxJson<T = any>(path: string, payload: any): Promise<T> {
+  const accessToken = await getAccessToken()
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  const url = `https://api.weixin.qq.com${normalizedPath}?access_token=${encodeURIComponent(accessToken)}`
+  const res = await httpsRequest('POST', url, JSON.stringify(payload || {}))
+  let json: any = {}
+  try {
+    json = JSON.parse(res.body.toString('utf-8'))
+  } catch {
+    throw new Error(`wx api returned non-json response: ${res.body.toString('utf-8').slice(0, 200)}`)
+  }
+  if (json?.errcode && json.errcode !== 0) {
+    throw new Error(`wx api failed: errcode=${json.errcode} errmsg=${json.errmsg || ''}`)
+  }
+  return json as T
+}

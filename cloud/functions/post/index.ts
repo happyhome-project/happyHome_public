@@ -3,6 +3,7 @@ import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
 import { getTempUrl } from '../../lib/storage'
 import { sanitizeContent, validateContentValues, validateRequiredWidgets } from '../../lib/post-validate'
+import { auditAndApply, isPostVisibleToMembers } from '../../lib/content-audit'
 import type {
   AttendancePreviewUser,
   AttendanceSummary,
@@ -159,7 +160,7 @@ async function enrichPostsWithAttendance<T extends { _id: string; sectionId: str
 
 async function getAttendanceWidgetForPost(postId: string, widgetId?: string) {
   const post = await db.getById('posts', postId) as any
-  if (!post || post.status === 'deleted') throw new Error('帖子不存在')
+  if (!post || post.status === 'deleted' || !isPostVisibleToMembers(post)) throw new Error('帖子不存在')
   const section = await db.getById('sections', post.sectionId) as Section
   const attendanceWidgets = getAttendanceWidgets(section)
   if (attendanceWidgets.length === 0) throw new Error('该板块下没有可以报名的控件')
@@ -216,6 +217,9 @@ export async function handleCreate(
     sectionId: params.sectionId,
     authorId: openid,
     status: 'active',
+    auditStatus: 'pending',
+    auditReason: 'content audit pending',
+    auditUpdatedAt: now,
     content: sanitizedContent,
     commentCount: 0,
     likeCount: 0,
@@ -225,7 +229,18 @@ export async function handleCreate(
     updatedAt: now,
   })
 
-  return { postId }
+  const audit = await auditAndApply({
+    postId,
+    communityId: params.communityId,
+    sectionId: params.sectionId,
+    section,
+    content: sanitizedContent,
+    authorId: openid,
+    source: 'user',
+    contentSlot: 'content',
+  })
+
+  return { postId, auditStatus: audit.status, auditReason: audit.reason }
 }
 
 export async function handleList(params: {
@@ -241,7 +256,7 @@ export async function handleList(params: {
   }, {
     orderBy: ['createdAt', 'desc'],
   })
-  const orderedPosts = (posts as any[]).slice().sort(comparePostListOrder)
+  const orderedPosts = (posts as any[]).filter(isPostVisibleToMembers).slice().sort(comparePostListOrder)
   const slicedPosts = orderedPosts.slice(params.skip ?? 0, (params.skip ?? 0) + (params.limit ?? 20))
   const withAttendance = await enrichPostsWithAttendance(slicedPosts, { [params.sectionId]: section }, openid)
   const enrichedPosts = await enrichPostsWithAuthor(withAttendance)
@@ -250,7 +265,7 @@ export async function handleList(params: {
 
 export async function handleGet(params: { postId: string }, openid?: string) {
   const post = await db.getById('posts', params.postId) as any
-  if (post.status === 'deleted') throw new Error('帖子不存在')
+  if (!post || post.status === 'deleted' || !isPostVisibleToMembers(post)) throw new Error('帖子不存在')
   await ensureActiveCommunityMember(post.communityId, openid || '')
   const section = await db.getById('sections', post.sectionId) as Section
   const attendanceSummaryByWidget = await buildAttendanceSummaryByWidget(post._id, section, openid)
@@ -284,9 +299,11 @@ export async function handleUpdate(
   if (!openid) throw new Error('Missing OPENID')
 
   const post = await db.getById('posts', params.postId) as {
+    communityId: string
     sectionId: string
     authorId: string
     status: string
+    auditStatus?: string
   }
   if (post.status === 'deleted') throw new Error('帖子已删除')
   if (post.authorId !== openid) throw new Error('无权修改')
@@ -300,11 +317,45 @@ export async function handleUpdate(
   validateContentValues(section, sanitizedContent)
 
   const updatedAt = new Date().toISOString()
+  if (post.auditStatus === 'pass' || !post.auditStatus) {
+    await db.updateById('posts', params.postId, {
+      pendingContent: sanitizedContent,
+      pendingAuditStatus: 'pending',
+      pendingAuditReason: 'content audit pending',
+      pendingSubmittedAt: updatedAt,
+      updatedAt,
+    })
+    const audit = await auditAndApply({
+      postId: params.postId,
+      communityId: post.communityId,
+      sectionId: post.sectionId,
+      section,
+      content: sanitizedContent,
+      authorId: openid,
+      source: 'user',
+      contentSlot: 'pendingContent',
+    })
+    return { success: true, updatedAt, auditStatus: audit.status, auditReason: audit.reason }
+  }
+
   await db.updateById('posts', params.postId, {
     content: sanitizedContent,
+    auditStatus: 'pending',
+    auditReason: 'content audit pending',
+    auditUpdatedAt: updatedAt,
     updatedAt,
   })
-  return { success: true, updatedAt }
+  const audit = await auditAndApply({
+    postId: params.postId,
+    communityId: post.communityId,
+    sectionId: post.sectionId,
+    section,
+    content: sanitizedContent,
+    authorId: openid,
+    source: 'user',
+    contentSlot: 'content',
+  })
+  return { success: true, updatedAt, auditStatus: audit.status, auditReason: audit.reason }
 }
 
 export async function handleJoinAttendance(

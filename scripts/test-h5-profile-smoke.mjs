@@ -6,9 +6,7 @@ import { chromium } from 'playwright'
 const root = join(process.cwd(), 'miniprogram', 'dist', 'build', 'h5')
 const buildInfoPath = join(process.cwd(), 'miniprogram', 'src', 'generated', 'build-info.ts')
 const buildInfoText = existsSync(buildInfoPath) ? readFileSync(buildInfoPath, 'utf8') : ''
-const buildInfoVersion = buildInfoText.match(/version:\s*["']([^"']+)["']/)?.[1] || ''
-const expectedVersion = process.env.EXPECTED_PROFILE_VERSION ||
-  buildInfoVersion.replace(/^1\.0\./, '0.7.')
+const expectedVersion = buildInfoText.match(/version:\s*["']([^"']+)["']/)?.[1] || ''
 
 const contentTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -80,11 +78,11 @@ async function runProfileCase(browser, port, options) {
 
     console.log(`[${options.label}] ${text}`)
 
-    if (!text.includes(`ver: ${expectedVersion}`)) {
-      throw new Error(`${options.label}: profile version missing: expected ver: ${expectedVersion}`)
+    if (!expectedVersion || !text.includes(expectedVersion)) {
+      throw new Error(`${options.label}: profile version missing: expected ${expectedVersion || '(unknown)'}`)
     }
-    if (!text.includes('state:logged-out login:0')) {
-      throw new Error(`${options.label}: profile debug state missing`)
+    if (/state:logged|login:[01]|cc:/.test(text)) {
+      throw new Error(`${options.label}: profile internal debug label leaked`)
     }
     for (const expectedText of options.expectedTexts) {
       if (!text.includes(expectedText)) {

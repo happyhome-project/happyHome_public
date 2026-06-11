@@ -26,6 +26,7 @@
     "test:admin:api": "node scripts/test-admin-api.mjs",
     "test:admin:ui": "node scripts/test-admin-ui.mjs",
     "test:admin:post-create-static": "node scripts/test-admin-post-create-static.mjs",
+    "test:admin:image-group-upload-ui": "node scripts/test-admin-image-group-upload-ui.mjs",
     "test:admin:note-blocks-ui": "node scripts/test-admin-note-blocks-ui.mjs",
     "test:admin:video-upload-ui": "node scripts/test-admin-video-upload-ui.mjs",
     "test:mp:detail-runtime-syntax": "node scripts/check-mp-detail-runtime-syntax.mjs",

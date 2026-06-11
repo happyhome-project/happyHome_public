@@ -221,12 +221,19 @@ async function submit() {
 
   submitting.value = true
   try {
-    await postAdminApi.createAdmin({
+    const result = await postAdminApi.createAdmin({
       communityId,
       sectionId: sectionId.value,
       content: { ...formData },
-    })
-    ElMessage.success('发布成功')
+    }) as any
+    const auditStatus = String(result?.auditStatus || 'pass')
+    if (auditStatus === 'pass') {
+      ElMessage.success('发布成功')
+    } else if (auditStatus === 'rejected') {
+      ElMessage.error(result?.auditReason || '内容未通过审核，暂不会公开')
+    } else {
+      ElMessage.warning(auditStatus === 'review' ? '已提交人工复核，通过后公开' : '已提交审核，通过后公开')
+    }
     goToPosts()
   } catch (err: any) {
     ElMessage.error(err?.response?.data?.error || err?.message || '发布失败')
