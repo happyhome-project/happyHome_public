@@ -161,7 +161,7 @@
 
     <el-empty v-if="!loading && posts.length === 0" description="暂无帖子记录" />
 
-    <el-dialog v-model="showDetail" title="帖子详情" width="720px">
+    <el-dialog v-model="showDetail" title="帖子详情" width="860px">
       <template v-if="detailPost">
         <div class="detail-meta">
           <div>板块：{{ detailSection?.name || detailPost.sectionName || '未知板块' }}</div>
@@ -255,6 +255,24 @@
               </div>
               <span v-if="audioItems(field.rawValue).length === 0">空</span>
             </div>
+            <div v-else-if="field.type === 'image_group'" class="image-group-detail">
+              <div
+                v-for="(image, index) in imageItems(field.rawValue)"
+                :key="`${image}-${index}`"
+                class="image-group-detail-item"
+              >
+                <el-image
+                  v-if="canRenderDetailImage(image)"
+                  :src="detailImageUrl(image)"
+                  class="image-detail-thumb"
+                  fit="cover"
+                  :preview-src-list="detailImagePreviewList(field.rawValue)"
+                  preview-teleported
+                />
+                <div v-else class="image-detail-thumb image-detail-placeholder">图片加载中</div>
+              </div>
+              <span v-if="imageItems(field.rawValue).length === 0">空</span>
+            </div>
             <div v-else-if="field.type === 'rich_note'" class="rich-note-detail">
               <RichNoteAdminPreview
                 v-if="richNoteText(field.rawValue)"
@@ -314,7 +332,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
-import { communityApi, postAdminApi, sectionApi } from '../../api/cloud'
+import { communityApi, mediaApi, postAdminApi, sectionApi } from '../../api/cloud'
 import { formatAdminDateTime } from '../../utils/datetime'
 import RichNoteAdminPreview from '../../components/RichNoteAdminPreview.vue'
 import { normalizeRichNoteContent } from '../../utils/rich-note'
@@ -329,6 +347,7 @@ const showDetail = ref(false)
 const detailPost = ref<any>(null)
 const detailSection = ref<any>(null)
 const attendanceMembersByWidget = ref<Record<string, any[]>>({})
+const detailImageUrlMap = ref<Record<string, string>>({})
 const dateRange = ref<string[]>([])
 const communityName = ref('')
 const filters = ref({
@@ -439,6 +458,7 @@ async function openDetail(row: any) {
     detailPost.value = res.post ?? null
     detailSection.value = res.section ?? null
     attendanceMembersByWidget.value = res.attendanceMembersByWidget ?? {}
+    await loadDetailImageUrls(detailPost.value, detailSection.value)
     showDetail.value = true
   } catch (error: any) {
     ElMessage.error(error.message || '加载详情失败')
@@ -481,6 +501,7 @@ async function refreshDetailIfOpen(postId: string) {
     detailPost.value = res.post ?? null
     detailSection.value = res.section ?? null
     attendanceMembersByWidget.value = res.attendanceMembersByWidget ?? {}
+    await loadDetailImageUrls(detailPost.value, detailSection.value)
   } catch {
     // The list has already refreshed; keep the existing dialog if detail refresh fails.
   }
@@ -613,6 +634,38 @@ function audioItems(value: unknown) {
   return Array.isArray(value) ? value.filter((item) => item && typeof item === 'object') : []
 }
 
+function imageItems(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((item) => String(item || '').trim()).filter(Boolean)
+    : []
+}
+
+function detailImageUrl(src: string) {
+  return detailImageUrlMap.value[src] || src
+}
+
+function canRenderDetailImage(src: string) {
+  const url = detailImageUrl(src)
+  return /^https?:\/\//.test(url) || url.startsWith('data:')
+}
+
+function detailImagePreviewList(value: unknown) {
+  return imageItems(value).map(detailImageUrl).filter((url) => /^https?:\/\//.test(url) || url.startsWith('data:'))
+}
+
+async function loadDetailImageUrls(post: any, section: any) {
+  const widgets = Array.isArray(section?.widgets) ? section.widgets : []
+  const content = post?.content || {}
+  const fileIDs: string[] = widgets
+    .filter((widget: any) => widget?.type === 'image_group')
+    .flatMap((widget: any) => imageItems(content?.[widget.widgetId]))
+    .filter((src: string) => src.startsWith('cloud://'))
+  const missing = Array.from(new Set<string>(fileIDs.filter((fileID) => !detailImageUrlMap.value[fileID])))
+  if (missing.length === 0) return
+  const res = await mediaApi.getUrls(missing).catch(() => ({ urls: {} }))
+  detailImageUrlMap.value = { ...detailImageUrlMap.value, ...(res.urls || {}) }
+}
+
 function formatBytes(value: unknown) {
   const bytes = Number(value || 0)
   if (!Number.isFinite(bytes) || bytes <= 0) return '-'
@@ -719,9 +772,34 @@ function videoPrimaryText(item: any) {
 
 .video-detail-list,
 .audio-detail-list,
+.image-group-detail,
 .rich-note-detail {
   display: grid;
   gap: 12px;
+}
+
+.image-group-detail {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+
+.image-group-detail-item {
+  min-width: 0;
+}
+
+.image-detail-thumb {
+  width: 240px;
+  max-width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 8px;
+  background: #f5f7fa;
+}
+
+.image-detail-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #909399;
+  font-size: 12px;
 }
 
 .rich-note-detail {

@@ -14,7 +14,7 @@
       <el-input
         v-model="manualUrl"
         class="manual-input"
-        placeholder="也可粘贴 cloud:// 或 https:// 图片地址"
+        placeholder="备用：粘贴图片地址"
         @keyup.enter="addManualUrl"
       />
       <el-button @click="addManualUrl">添加</el-button>
@@ -26,18 +26,20 @@
 
     <div v-if="images.length" class="image-list">
       <div v-for="(image, index) in images" :key="`${image}-${index}`" class="image-item">
-        <el-image
-          v-if="canRenderImage(image)"
-          :src="image"
-          class="thumb"
-          fit="cover"
-          :preview-src-list="previewImages"
-          preview-teleported
-        />
-        <div v-else class="thumb placeholder">云图片</div>
-        <div class="image-meta">
-          <span class="image-url">{{ image }}</span>
+        <div class="image-preview">
+          <el-image
+            v-if="canRenderImage(image)"
+            :src="imageUrl(image)"
+            class="thumb"
+            fit="cover"
+            :preview-src-list="previewImages"
+            preview-teleported
+          />
+          <div v-else class="thumb placeholder">图片加载中</div>
           <span v-if="index === 0" class="cover-tag">封面</span>
+        </div>
+        <div class="image-meta">
+          <span class="image-index">第 {{ index + 1 }} 张</span>
         </div>
         <div class="item-actions">
           <el-button size="small" :disabled="index === 0" @click="move(index, -1)">上移</el-button>
@@ -51,10 +53,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { Upload } from '@element-plus/icons-vue'
-import { imageApi } from '../api/cloud'
+import { imageApi, mediaApi } from '../api/cloud'
 
 const props = defineProps<{ modelValue: string[] | unknown }>()
 const emit = defineEmits<{
@@ -65,6 +67,7 @@ const fileInput = ref<HTMLInputElement>()
 const manualUrl = ref('')
 const uploading = ref(false)
 const percent = ref(0)
+const urlMap = ref<Record<string, string>>({})
 
 const images = computed(() => {
   return Array.isArray(props.modelValue)
@@ -72,13 +75,32 @@ const images = computed(() => {
     : []
 })
 
-const previewImages = computed(() => images.value.filter(canRenderImage))
+const previewImages = computed(() => images.value.map(imageUrl).filter(isRenderableImageUrl))
+
+watch(
+  () => images.value.filter((image) => image.startsWith('cloud://')),
+  async (fileIDs) => {
+    const missing = Array.from(new Set(fileIDs.filter((fileID) => !urlMap.value[fileID])))
+    if (missing.length === 0) return
+    const res = await mediaApi.getUrls(missing).catch(() => ({ urls: {} }))
+    urlMap.value = { ...urlMap.value, ...(res.urls || {}) }
+  },
+  { immediate: true },
+)
 
 function update(next: string[]) {
   emit('update:modelValue', Array.from(new Set(next.map((item) => item.trim()).filter(Boolean))))
 }
 
 function canRenderImage(src: string) {
+  return isRenderableImageUrl(imageUrl(src))
+}
+
+function imageUrl(src: string) {
+  return urlMap.value[src] || src
+}
+
+function isRenderableImageUrl(src: string) {
   return /^https?:\/\//.test(src) || src.startsWith('data:')
 }
 
@@ -204,24 +226,34 @@ async function onPickImages(event: Event) {
 
 .image-list {
   display: grid;
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
 }
 
 .image-item {
   display: grid;
-  grid-template-columns: 96px minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
+  gap: 10px;
+  min-width: 0;
   padding: 10px;
   border: 1px solid #ebeef5;
   border-radius: 8px;
-  background: #fafafa;
+  background: #fff;
+}
+
+.image-preview {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #f2f3f5;
 }
 
 .thumb {
-  width: 96px;
-  height: 72px;
-  border-radius: 6px;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
   background: #f2f3f5;
 }
 
@@ -237,38 +269,35 @@ async function onPickImages(event: Event) {
   min-width: 0;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
-.image-url {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.image-index {
   color: #606266;
   font-size: 12px;
 }
 
 .cover-tag {
-  flex: 0 0 auto;
-  padding: 2px 7px;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 3px 8px;
   border-radius: 999px;
-  background: #ecf5ff;
-  color: #409eff;
+  background: rgba(255, 255, 255, 0.92);
+  color: #2f7d4d;
   font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
 .item-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
-@media (max-width: 900px) {
-  .image-item {
-    grid-template-columns: 96px minmax(0, 1fr);
-  }
-
-  .item-actions {
-    grid-column: 1 / -1;
-  }
+.item-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 </style>

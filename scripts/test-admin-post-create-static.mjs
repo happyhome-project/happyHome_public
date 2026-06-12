@@ -6,11 +6,15 @@ const postCreatePath = path.join(root, 'admin-web', 'src', 'views', 'CommunityAd
 const postEditPath = path.join(root, 'admin-web', 'src', 'views', 'CommunityAdmin', 'PostEditAdmin.vue')
 const formPath = path.join(root, 'admin-web', 'src', 'utils', 'postAdminForm.ts')
 const apiPath = path.join(root, 'admin-web', 'src', 'api', 'cloud.ts')
+const imageGroupEditorPath = path.join(root, 'admin-web', 'src', 'components', 'ImageGroupAdminEditor.vue')
+const postManagementPath = path.join(root, 'admin-web', 'src', 'views', 'CommunityAdmin', 'PostManagement.vue')
 
 const postCreate = fs.readFileSync(postCreatePath, 'utf8')
 const postEdit = fs.readFileSync(postEditPath, 'utf8')
 const form = fs.readFileSync(formPath, 'utf8')
 const api = fs.readFileSync(apiPath, 'utf8')
+const imageGroupEditor = fs.readFileSync(imageGroupEditorPath, 'utf8')
+const postManagement = fs.readFileSync(postManagementPath, 'utf8')
 
 function assertIncludes(source, needle, message) {
   if (!source.includes(needle)) {
@@ -73,5 +77,26 @@ assertIncludes(
   ':allow-images="!isGuideNoteTemplate"',
   'PostEditAdmin guide-note rich_note body must not expose inline image insertion.'
 )
+assertIncludes(
+  imageGroupEditor,
+  'mediaApi.getUrls',
+  'ImageGroupAdminEditor must resolve cloud:// image_group fileIDs to temporary URLs for admin preview.'
+)
+assertIncludes(
+  postManagement,
+  `field.type === 'image_group'`,
+  'PostManagement detail must render image_group as images, not a raw comma-separated value.'
+)
+assertIncludes(
+  postManagement,
+  'detailImageUrl',
+  'PostManagement detail must resolve cloud:// image_group fileIDs before rendering thumbnails.'
+)
+if (imageGroupEditor.includes('{{ image }}')) {
+  throw new Error('ImageGroupAdminEditor must not display raw image URLs in the admin form.')
+}
+if (postManagement.includes('image-detail-url') || postManagement.includes(':title="image"')) {
+  throw new Error('PostManagement detail must not display raw image URLs for image_group fields.')
+}
 
 console.log('[admin-post-create-static] PASS')
