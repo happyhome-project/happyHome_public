@@ -126,6 +126,26 @@ assert(
 )
 
 assert(
+  locationAdminEditor.includes('map-workbench-dialog') &&
+    locationAdminEditor.includes('dialog-search-row') &&
+    locationAdminEditor.includes('dialog-candidate-list') &&
+    locationAdminEditor.includes('pendingLocation') &&
+    locationAdminEditor.includes('confirmMapSelection') &&
+    locationAdminEditor.includes('cancelMapSelection') &&
+    locationAdminEditor.includes('AMap.Scale') &&
+    locationAdminEditor.includes('AMap.ToolBar'),
+  'admin location editor must use a full map workbench with search, candidates, pending selection, controls, and explicit confirm/cancel.'
+)
+
+assert(
+  !locationAdminEditor.includes('class="search-row"') &&
+    !locationAdminEditor.includes('class="candidate-list"') &&
+    !locationAdminEditor.includes('class="map-entry"') &&
+    !locationAdminEditor.includes('打开大地图微调'),
+  'admin location editor outer form must not keep the old duplicate search/candidate/map-entry flow.'
+)
+
+assert(
   locationAdminEditor.includes('waitForMapContainer') &&
     locationAdminEditor.includes('requestAnimationFrame') &&
     locationAdminEditor.includes('await waitForMapContainer()'),
