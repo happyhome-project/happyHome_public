@@ -254,7 +254,7 @@ function openLocation() {
 .guide-hero-mask {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, rgba(13, 22, 17, 0.04) 8%, rgba(13, 22, 17, 0.32) 48%, rgba(13, 22, 17, 0.82) 100%);
+  background: linear-gradient(180deg, rgba(13, 22, 17, 0) 18%, rgba(13, 22, 17, 0.16) 58%, rgba(13, 22, 17, 0.56) 100%);
   pointer-events: none;
 }
 
@@ -292,6 +292,7 @@ function openLocation() {
   font-size: 46rpx;
   line-height: 1.16;
   font-weight: $hh-font-weight-bold;
+  text-shadow: 0 3rpx 16rpx rgba(0, 0, 0, 0.42), 0 1rpx 2rpx rgba(0, 0, 0, 0.35);
 }
 
 .guide-subtitle {
@@ -299,6 +300,7 @@ function openLocation() {
   color: rgba(255, 255, 255, 0.88);
   font-size: 28rpx;
   line-height: 1.6;
+  text-shadow: 0 2rpx 10rpx rgba(0, 0, 0, 0.38);
 }
 
 .guide-dots {
