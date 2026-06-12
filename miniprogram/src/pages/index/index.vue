@@ -255,7 +255,7 @@ import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard } from '../../utils/widget'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
-import { clearHomeSnapshotCache, getBackgroundFetchSnapshot, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
+import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
 import type { HomeSnapshot } from '../../../../cloud/shared/types'
 
 const communityStore = useCommunityStore()
@@ -620,7 +620,7 @@ function applyHomeSnapshot(snapshot: HomeSnapshot | null, source: 'prefetch' | '
 
 async function hydrateHomeFromFastPath() {
   if (!userStore.isLoggedIn || !userStore.openId) return false
-  const prefetched = await getBackgroundFetchSnapshot({
+  const prefetched = await getBestBackgroundFetchSnapshot({
     openId: userStore.openId,
     communityId: communityStore.currentCommunityId || undefined,
   })

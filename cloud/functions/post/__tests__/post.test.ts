@@ -316,6 +316,10 @@ test('bootstrap: returns active communities and the selected community home snap
     _id: 'post-1',
     authorNickname: '作者一',
   }))
+  expect(db.updateById).toHaveBeenCalledWith('users', 'test-openid', expect.objectContaining({
+    lastHomeCommunityId: 'community-1',
+    lastHomeCommunityAt: expect.any(String),
+  }))
 })
 
 test('joinAttendance: 同一用户重复参与不会重复创建记录', async () => {

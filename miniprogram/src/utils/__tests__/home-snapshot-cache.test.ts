@@ -131,4 +131,77 @@ describe('home snapshot cache', () => {
     callback?.({ fetchedData: JSON.stringify(snapshot) })
     expect(onSnapshot).toHaveBeenCalledTimes(1)
   })
+
+  test('uses periodic background data as a weak-network fallback when pre-fetch is missing', async () => {
+    const snapshot = {
+      schemaVersion: 1,
+      generatedAt: '2026-06-12T00:00:00.000Z',
+      viewerOpenId: 'user-1',
+      currentCommunityId: 'community-1',
+      communities: [],
+      sections: [],
+      postsBySection: {},
+    }
+    const fetchTypes: string[] = []
+    vi.stubGlobal('wx', {
+      getBackgroundFetchData: vi.fn((options: any) => {
+        fetchTypes.push(options.fetchType)
+        if (options.fetchType === 'pre') {
+          options.fail?.({ errMsg: 'missing pre cache' })
+          return
+        }
+        options.success?.({
+          fetchType: 'periodic',
+          fetchedData: JSON.stringify(snapshot),
+          timeStamp: Date.parse('2026-06-12T12:00:00.000Z'),
+        })
+      }),
+    })
+    const { getBestBackgroundFetchSnapshot } = await import('../home-snapshot-cache')
+
+    const result = await getBestBackgroundFetchSnapshot({
+      openId: 'user-1',
+      communityId: 'community-1',
+      now: Date.parse('2026-06-12T12:00:00.000Z'),
+    })
+
+    expect(result?.currentCommunityId).toBe('community-1')
+    expect(fetchTypes).toEqual(['pre', 'periodic'])
+  })
+
+  test('accepts late periodic background events within the longer periodic ttl', async () => {
+    let callback: ((res: any) => void) | null = null
+    vi.stubGlobal('wx', {
+      onBackgroundFetchData: vi.fn((cb: (res: any) => void) => {
+        callback = cb
+      }),
+    })
+    const { subscribeBackgroundFetchSnapshot } = await import('../home-snapshot-cache')
+    const onSnapshot = vi.fn()
+    const snapshot = {
+      schemaVersion: 1,
+      generatedAt: '2026-06-12T00:00:00.000Z',
+      viewerOpenId: 'user-1',
+      currentCommunityId: 'community-1',
+      communities: [],
+      sections: [],
+      postsBySection: {},
+    }
+
+    subscribeBackgroundFetchSnapshot(
+      () => ({
+        openId: 'user-1',
+        communityId: 'community-1',
+        now: Date.parse('2026-06-12T12:00:00.000Z'),
+      }),
+      onSnapshot,
+    )
+
+    callback?.({
+      fetchType: 'periodic',
+      fetchedData: JSON.stringify(snapshot),
+    })
+
+    expect(onSnapshot).toHaveBeenCalledTimes(1)
+  })
 })

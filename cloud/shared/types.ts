@@ -176,6 +176,8 @@ export interface User {
   roleSource?: string
   backgroundFetchToken?: string
   backgroundFetchTokenExpiresAt?: string
+  lastHomeCommunityId?: string
+  lastHomeCommunityAt?: string
   createdAt: string
 }
 

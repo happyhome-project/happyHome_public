@@ -1,13 +1,16 @@
 import type { HomeSnapshot } from '../../../cloud/shared/types'
 
 export const HOME_SNAPSHOT_CACHE_TTL_MS = 6 * 60 * 60 * 1000
+export const PERIODIC_HOME_SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000
 const HOME_SNAPSHOT_SCHEMA_VERSION = 1
 const HOME_SNAPSHOT_CACHE_PREFIX = 'home_snapshot_cache_v1'
+type BackgroundFetchType = 'pre' | 'periodic'
 
 interface SnapshotReadOptions {
   openId: string
   communityId?: string
   now?: number
+  maxAgeMs?: number
 }
 
 interface BackgroundFetchSubscription {
@@ -34,7 +37,7 @@ function getWx() {
 
 function isFresh(snapshot: HomeSnapshot, now: number) {
   const generatedAt = Date.parse(String(snapshot.generatedAt || ''))
-  return Number.isFinite(generatedAt) && now - generatedAt <= HOME_SNAPSHOT_CACHE_TTL_MS
+  return Number.isFinite(generatedAt)
 }
 
 function normalizeSnapshot(raw: any, options: SnapshotReadOptions): HomeSnapshot | null {
@@ -42,9 +45,17 @@ function normalizeSnapshot(raw: any, options: SnapshotReadOptions): HomeSnapshot
   if (raw.schemaVersion !== HOME_SNAPSHOT_SCHEMA_VERSION) return null
   if (String(raw.viewerOpenId || '') !== String(options.openId || '')) return null
   if (options.communityId && String(raw.currentCommunityId || '') !== String(options.communityId || '')) return null
-  if (!isFresh(raw as HomeSnapshot, options.now || Date.now())) return null
+  const now = options.now || Date.now()
+  const maxAgeMs = options.maxAgeMs ?? HOME_SNAPSHOT_CACHE_TTL_MS
+  if (!isFresh(raw as HomeSnapshot, now)) return null
+  const generatedAt = Date.parse(String(raw.generatedAt || ''))
+  if (now - generatedAt > maxAgeMs) return null
   if (!Array.isArray(raw.communities) || !Array.isArray(raw.sections) || typeof raw.postsBySection !== 'object') return null
   return raw as HomeSnapshot
+}
+
+function maxAgeForFetchType(fetchType: BackgroundFetchType) {
+  return fetchType === 'periodic' ? PERIODIC_HOME_SNAPSHOT_TTL_MS : HOME_SNAPSHOT_CACHE_TTL_MS
 }
 
 export function parseBackgroundFetchSnapshot(raw: string, options: SnapshotReadOptions): HomeSnapshot | null {
@@ -98,15 +109,21 @@ export function readHomeSnapshotCache(options: SnapshotReadOptions): HomeSnapsho
   }
 }
 
-export function getBackgroundFetchSnapshot(options: SnapshotReadOptions): Promise<HomeSnapshot | null> {
+export function getBackgroundFetchSnapshot(
+  options: SnapshotReadOptions,
+  fetchType: BackgroundFetchType = 'pre',
+): Promise<HomeSnapshot | null> {
   const wxRef = getWx()
   if (!wxRef?.getBackgroundFetchData) return Promise.resolve(null)
   return new Promise((resolve) => {
     try {
       wxRef.getBackgroundFetchData({
-        fetchType: 'pre',
+        fetchType,
         success: (res: any) => {
-          resolve(parseBackgroundFetchSnapshot(String(res?.fetchedData || ''), options))
+          resolve(parseBackgroundFetchSnapshot(String(res?.fetchedData || ''), {
+            ...options,
+            maxAgeMs: maxAgeForFetchType(fetchType),
+          }))
         },
         fail: () => resolve(null),
       })
@@ -116,6 +133,20 @@ export function getBackgroundFetchSnapshot(options: SnapshotReadOptions): Promis
   })
 }
 
+function snapshotTime(snapshot: HomeSnapshot | null) {
+  if (!snapshot) return 0
+  const time = Date.parse(String(snapshot.generatedAt || ''))
+  return Number.isFinite(time) ? time : 0
+}
+
+export async function getBestBackgroundFetchSnapshot(options: SnapshotReadOptions): Promise<HomeSnapshot | null> {
+  const [pre, periodic] = await Promise.all([
+    getBackgroundFetchSnapshot(options, 'pre'),
+    getBackgroundFetchSnapshot(options, 'periodic'),
+  ])
+  return snapshotTime(periodic) > snapshotTime(pre) ? periodic : pre
+}
+
 function installBackgroundFetchListener(wxRef: any) {
   if (backgroundFetchListenerInstalled || !wxRef?.onBackgroundFetchData) return
   backgroundFetchListenerInstalled = true
@@ -123,7 +154,11 @@ function installBackgroundFetchListener(wxRef: any) {
     const raw = String(res?.fetchedData || '')
     if (!raw) return
     for (const subscription of Array.from(backgroundFetchSubscriptions)) {
-      const snapshot = parseBackgroundFetchSnapshot(raw, subscription.getOptions())
+      const fetchType = res?.fetchType === 'periodic' ? 'periodic' : 'pre'
+      const snapshot = parseBackgroundFetchSnapshot(raw, {
+        ...subscription.getOptions(),
+        maxAgeMs: maxAgeForFetchType(fetchType),
+      })
       if (snapshot) subscription.onSnapshot(snapshot)
     }
   })
