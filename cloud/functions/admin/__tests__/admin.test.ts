@@ -464,18 +464,18 @@ test('section.updateWidgets: 图文攻略允许在固定控件后追加小控件
     sectionId: 'section-guide',
     widgets: [
       ...guideWidgets,
-      { widgetId: 'guide_age', type: 'short_text', label: '适合年龄', fieldKey: 'age', required: false, order: 9, showInList: false },
+      { widgetId: 'guide_scenery', type: 'short_text', label: '景色特点', fieldKey: 'scenery', required: false, order: 9, showInList: false },
     ],
   })
 
   expect(result.widgets.slice(0, 9).every((widget: any) => widget.locked === true)).toBe(true)
-  expect(result.widgets[9]).toEqual(expect.objectContaining({ widgetId: 'guide_age', locked: false }))
+  expect(result.widgets[9]).toEqual(expect.objectContaining({ widgetId: 'guide_scenery', locked: false }))
   expect(db.updateById).toHaveBeenCalledWith('sections', 'section-guide', expect.objectContaining({
     widgets: expect.arrayContaining([
       expect.objectContaining({ widgetId: 'guide_images', required: true, locked: true }),
       expect.objectContaining({ widgetId: 'guide_drive_duration', required: true, locked: true }),
       expect.objectContaining({ widgetId: 'guide_distance', locked: true }),
-      expect.objectContaining({ widgetId: 'guide_age', locked: false }),
+      expect.objectContaining({ widgetId: 'guide_scenery', locked: false }),
     ]),
   }))
 })

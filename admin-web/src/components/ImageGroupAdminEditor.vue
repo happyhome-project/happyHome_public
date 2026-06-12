@@ -24,30 +24,45 @@
       <el-progress :percentage="percent" :stroke-width="12" />
     </div>
 
-    <div v-if="images.length" class="image-list">
-      <div v-for="(image, index) in images" :key="`${image}-${index}`" class="image-item">
-        <div class="image-preview">
+    <draggable
+      v-if="images.length"
+      v-model="draggableImages"
+      class="image-list"
+      :item-key="imageItemKey"
+      ghost-class="image-ghost"
+      chosen-class="image-chosen"
+      drag-class="image-dragging"
+    >
+      <template #item="{ element: image, index }">
+      <div class="image-item">
+        <div class="image-preview" title="拖拽图片可调整顺序">
           <el-image
             v-if="canRenderImage(image)"
             :src="imageUrl(image)"
             class="thumb"
             fit="cover"
             :preview-src-list="previewImages"
+            :initial-index="previewIndexFor(image)"
             preview-teleported
           />
           <div v-else class="thumb placeholder">图片加载中</div>
           <span v-if="index === 0" class="cover-tag">封面</span>
+          <el-button
+            class="delete-button"
+            type="danger"
+            :icon="Close"
+            circle
+            aria-label="删除图片"
+            @click.stop="remove(index)"
+          />
         </div>
         <div class="image-meta">
           <span class="image-index">第 {{ index + 1 }} 张</span>
-        </div>
-        <div class="item-actions">
-          <el-button size="small" :disabled="index === 0" @click="move(index, -1)">上移</el-button>
-          <el-button size="small" :disabled="index === images.length - 1" @click="move(index, 1)">下移</el-button>
-          <el-button size="small" type="danger" @click="remove(index)">删除</el-button>
+          <span class="drag-tip">拖拽排序</span>
         </div>
       </div>
-    </div>
+      </template>
+    </draggable>
     <el-empty v-else description="暂无图片" :image-size="64" />
   </div>
 </template>
@@ -55,7 +70,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
-import { Upload } from '@element-plus/icons-vue'
+import { Close, Upload } from '@element-plus/icons-vue'
+import draggable from 'vuedraggable'
 import { imageApi, mediaApi } from '../api/cloud'
 
 const props = defineProps<{ modelValue: string[] | unknown }>()
@@ -73,6 +89,11 @@ const images = computed(() => {
   return Array.isArray(props.modelValue)
     ? props.modelValue.map((item) => String(item || '').trim()).filter(Boolean)
     : []
+})
+
+const draggableImages = computed<string[]>({
+  get: () => images.value,
+  set: (next) => update(next),
 })
 
 const previewImages = computed(() => images.value.map(imageUrl).filter(isRenderableImageUrl))
@@ -104,6 +125,16 @@ function isRenderableImageUrl(src: string) {
   return /^https?:\/\//.test(src) || src.startsWith('data:')
 }
 
+function previewIndexFor(src: string) {
+  const url = imageUrl(src)
+  const index = previewImages.value.findIndex((item) => item === url)
+  return index >= 0 ? index : 0
+}
+
+function imageItemKey(image: string) {
+  return image
+}
+
 function pickImages() {
   fileInput.value?.click()
 }
@@ -117,14 +148,6 @@ function addManualUrl() {
   }
   update([...images.value, value])
   manualUrl.value = ''
-}
-
-function move(index: number, delta: number) {
-  const next = images.value.slice()
-  const target = index + delta
-  if (target < 0 || target >= next.length) return
-  ;[next[index], next[target]] = [next[target], next[index]]
-  update(next)
 }
 
 function remove(index: number) {
@@ -238,6 +261,25 @@ async function onPickImages(event: Event) {
   border: 1px solid #ebeef5;
   border-radius: 8px;
   background: #fff;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.image-item:hover {
+  border-color: #c6e2ff;
+  box-shadow: 0 10px 28px rgba(48, 79, 128, 0.12);
+}
+
+.image-chosen {
+  border-color: #409eff;
+  box-shadow: 0 14px 32px rgba(64, 158, 255, 0.18);
+}
+
+.image-ghost {
+  opacity: 0.42;
+}
+
+.image-dragging {
+  transform: rotate(1deg);
 }
 
 .image-preview {
@@ -247,6 +289,11 @@ async function onPickImages(event: Event) {
   overflow: hidden;
   border-radius: 8px;
   background: #f2f3f5;
+  cursor: grab;
+}
+
+.image-preview:active {
+  cursor: grabbing;
 }
 
 .thumb {
@@ -281,7 +328,7 @@ async function onPickImages(event: Event) {
 .cover-tag {
   position: absolute;
   top: 8px;
-  right: 8px;
+  left: 8px;
   padding: 3px 8px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.92);
@@ -291,13 +338,27 @@ async function onPickImages(event: Event) {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
-.item-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+.delete-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  opacity: 0;
+  transform: translateY(-4px) scale(0.92);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
 }
 
-.item-actions :deep(.el-button + .el-button) {
-  margin-left: 0;
+.image-item:hover .delete-button,
+.delete-button:focus {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.drag-tip {
+  color: #a8abb2;
+  font-size: 12px;
 }
 </style>

@@ -157,6 +157,8 @@ const ADMIN_POST_EDITABLE_WIDGET_TYPES = new Set([
   'rich_text',
   'note_blocks',
   'rich_note',
+  'image_group',
+  'location',
   'video_group',
   'audio_group',
 ])
@@ -1303,7 +1305,8 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (!post) throw new Error('post not found')
     if (post.status === 'deleted') throw new Error('post is deleted')
 
-    const section = await db.getById('sections', post.sectionId) as Section | null
+    const rawSection = await db.getById('sections', post.sectionId) as Section | null
+    const section = rawSection ? normalizeSection(rawSection) as Section : null
     if (!section || !Array.isArray(section.widgets) || section.widgets.length === 0) {
       throw new Error('该板块尚未配置内容模板，无法编辑')
     }
@@ -1608,7 +1611,8 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (!ctx.userId) {
       throw new Error('当前管理员未绑定微信身份，请先在账号管理中绑定 openId')
     }
-    const section = await db.getById('sections', sectionId) as Section | null
+    const rawSection = await db.getById('sections', sectionId) as Section | null
+    const section = rawSection ? normalizeSection(rawSection) as Section : null
     if (!section) throw new Error('板块不存在')
     if (section.communityId !== communityId) throw new Error('板块不属于当前社区')
     if (!Array.isArray(section.widgets) || section.widgets.length === 0) {

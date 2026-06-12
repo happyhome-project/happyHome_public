@@ -20,10 +20,12 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5180,
     strictPort: true,
+    allowedHosts: ['localhost.localdomain'],
   },
   preview: {
     host: '127.0.0.1',
     port: 5180,
     strictPort: true,
+    allowedHosts: ['localhost.localdomain'],
   },
 })
