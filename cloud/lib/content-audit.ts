@@ -18,6 +18,7 @@ import type {
 export const AUDIT_TASKS = 'content_audit_tasks'
 const AUDIT_SCENE_FOR_POST = 3
 const TEXT_CHUNK_LIMIT = 2400
+const AUDIT_TARGET_CONCURRENCY = 4
 
 interface AuditTarget {
   widgetId?: string
@@ -421,6 +422,40 @@ async function createAuditTask(params: {
   })
 }
 
+async function auditTargetsConcurrently(params: {
+  targets: AuditTarget[]
+  postId: string
+  communityId: string
+  sectionId: string
+  source: 'user' | 'admin'
+  authorId: string
+  contentSlot: 'content' | 'pendingContent'
+}): Promise<AuditSubmitResult[]> {
+  const results: AuditSubmitResult[] = new Array(params.targets.length)
+  let nextIndex = 0
+  const workerCount = Math.min(AUDIT_TARGET_CONCURRENCY, params.targets.length)
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < params.targets.length) {
+      const index = nextIndex
+      nextIndex += 1
+      const target = params.targets[index]
+      const result = await submitTarget(target, params.source, params.authorId)
+      results[index] = result
+      await createAuditTask({
+        postId: params.postId,
+        communityId: params.communityId,
+        sectionId: params.sectionId,
+        contentSlot: params.contentSlot,
+        target,
+        result,
+      })
+    }
+  }))
+
+  return results
+}
+
 export async function auditPostContent(params: {
   postId: string
   communityId: string
@@ -432,19 +467,15 @@ export async function auditPostContent(params: {
   contentSlot?: 'content' | 'pendingContent'
 }): Promise<{ status: PostAuditStatus; reason: string }> {
   const targets = extractAuditTargets(params.section, params.content)
-  const results: AuditSubmitResult[] = []
-  for (const target of targets) {
-    const result = await submitTarget(target, params.source, params.authorId)
-    results.push(result)
-    await createAuditTask({
-      postId: params.postId,
-      communityId: params.communityId,
-      sectionId: params.sectionId,
-      contentSlot: params.contentSlot || 'content',
-      target,
-      result,
-    })
-  }
+  const results = await auditTargetsConcurrently({
+    targets,
+    postId: params.postId,
+    communityId: params.communityId,
+    sectionId: params.sectionId,
+    source: params.source,
+    authorId: params.authorId,
+    contentSlot: params.contentSlot || 'content',
+  })
   return summarizeResults(results)
 }
 
