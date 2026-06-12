@@ -1,4 +1,5 @@
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { hasValidLocationCoordinate, isRequiredLocationComplete } from './locationValidation'
 import { emptyRichNoteContent, isRichNoteEmpty } from './rich-note'
 
 export const ADMIN_POST_EDITABLE_WIDGET_TYPES = new Set([
@@ -170,12 +171,16 @@ function validateLocation(widget: any, formData: Record<string, any>) {
   const address = String(value.address || '').trim()
   const lat = Number(value.lat)
   const lng = Number(value.lng)
-  if (!address && widget.required) {
+  if (widget.required && !address && !String(value.name || '').trim()) {
     ElMessage.error(`请填写「${widget.label}」地址`)
     return false
   }
+  if (widget.required && !isRequiredLocationComplete(value)) {
+    ElMessage.error(`请选择「${widget.label}」候选点，或打开地图微调后保存`)
+    return false
+  }
   const hasCoordinate = value.lat !== '' && value.lng !== '' && value.lat !== undefined && value.lng !== undefined
-  if (hasCoordinate && (Number.isNaN(lat) || Number.isNaN(lng))) {
+  if (hasCoordinate && (Number.isNaN(lat) || Number.isNaN(lng) || ((lat !== 0 || lng !== 0) && !hasValidLocationCoordinate(value)))) {
     ElMessage.error(`「${widget.label}」经纬度不正确`)
     return false
   }

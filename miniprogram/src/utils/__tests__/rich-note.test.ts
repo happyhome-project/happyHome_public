@@ -6,6 +6,7 @@ import {
   htmlToMarkdown,
   markdownToHtml,
   markdownToText,
+  richNoteMarkdownToRenderBlocks,
   stripMarkdownImages,
 } from '../rich-note'
 
@@ -41,9 +42,27 @@ describe('rich_note markdown contract', () => {
     expect(markdownToHtml('第一行\n\n\n')).toBe('<p>第一行<br>&nbsp;<br>&nbsp;<br>&nbsp;</p>')
   })
 
+  test('preserves intentional line breaks after markdown block formatting', () => {
+    expect(markdownToHtml('### 标题\n\n正文')).toBe('<h3>标题</h3><p>&nbsp;<br>正文</p>')
+    expect(markdownToHtml('### 标题\n\n\n正文')).toBe('<h3>标题</h3><p>&nbsp;<br>&nbsp;<br>正文</p>')
+    expect(markdownToHtml('前言\n\n### 标题')).toBe('<p>前言</p><p>&nbsp;</p><h3>标题</h3>')
+    expect(markdownToHtml('- 第一项\n\n补充说明')).toBe('<ul><li>第一项</li></ul><p>&nbsp;<br>补充说明</p>')
+    expect(markdownToHtml('1. 第一项\n\n补充说明')).toBe('<ol><li>第一项</li></ol><p>&nbsp;<br>补充说明</p>')
+    expect(markdownToHtml('> 引用\n\n后续正文')).toBe('<blockquote>引用</blockquote><p>&nbsp;<br>后续正文</p>')
+    expect(markdownToHtml('![图](cloud://env/posts/a.jpg)\n\n说明'))
+      .toBe('<p><img src="cloud://env/posts/a.jpg" alt="图"></p><p>&nbsp;<br>说明</p>')
+  })
+
   test('preserves consecutive spaces inside plain text', () => {
     expect(markdownToHtml('甲  乙   丙')).toBe('<p>甲&nbsp;&nbsp;乙&nbsp;&nbsp;&nbsp;丙</p>')
     expect(markdownToHtml('**甲  乙**')).toBe('<p><strong>甲&nbsp;&nbsp;乙</strong></p>')
+  })
+
+  test('preserves line breaks when renderer splits image blocks', () => {
+    expect(richNoteMarkdownToRenderBlocks('![图](cloud://env/posts/a.jpg)\n\n说明')).toEqual([
+      { type: 'image', src: 'cloud://env/posts/a.jpg' },
+      { type: 'html', html: '<p>&nbsp;<br>说明</p>' },
+    ])
   })
 
   test('escapes raw html in markdown output', () => {

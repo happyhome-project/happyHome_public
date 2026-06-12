@@ -26,6 +26,31 @@ export function buildDevToolsAutoArgs({ projectPath, idePort, autoPort }) {
   ]
 }
 
+export function buildDevToolsQuitArgs() {
+  return ['quit']
+}
+
+export function buildDevToolsQuitPortArgs({ idePort }) {
+  return ['quit', '--port', String(idePort)]
+}
+
+export function buildDevToolsCloseArgs({ projectPath, idePort }) {
+  return [
+    'close',
+    '--project', projectPath,
+    '--port', String(idePort),
+  ]
+}
+
+export function buildDevToolsCacheArgs({ clean, projectPath, idePort }) {
+  return [
+    'cache',
+    '--clean', clean,
+    '--project', projectPath,
+    '--port', String(idePort),
+  ]
+}
+
 export function assertReleaseUiEvidence(evidence = {}) {
   const missing = []
   if (!evidence.homeDetailNonEmpty) missing.push(REQUIRED_RELEASE_UI_MARKERS[0])

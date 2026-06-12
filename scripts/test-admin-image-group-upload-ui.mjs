@@ -4,6 +4,7 @@ import http from 'node:http'
 import https from 'node:https'
 import path from 'node:path'
 import { chromium } from 'playwright'
+import { PNG } from 'pngjs'
 
 const ROOT = process.cwd()
 const DEFAULT_BASE_URL = 'http://127.0.0.1:5180'
@@ -109,6 +110,20 @@ function spawnNpm(args, options) {
   return spawn('npm', args, options)
 }
 
+function writeSolidPng(filePath, rgb) {
+  const png = new PNG({ width: 48, height: 36 })
+  for (let y = 0; y < png.height; y += 1) {
+    for (let x = 0; x < png.width; x += 1) {
+      const idx = (png.width * y + x) << 2
+      png.data[idx] = rgb[0]
+      png.data[idx + 1] = rgb[1]
+      png.data[idx + 2] = rgb[2]
+      png.data[idx + 3] = 255
+    }
+  }
+  fs.writeFileSync(filePath, PNG.sync.write(png))
+}
+
 async function ensureAdminWebServer() {
   if (await waitForHttp(`${BASE_URL}/login`, 3000)) return null
   const url = new URL(BASE_URL)
@@ -186,12 +201,8 @@ async function main() {
   fs.mkdirSync(ARTIFACT_DIR, { recursive: true })
   const img1 = path.join(ARTIFACT_DIR, 'fixture-a.png')
   const img2 = path.join(ARTIFACT_DIR, 'fixture-b.png')
-  const png = Buffer.from(
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
-    'base64',
-  )
-  fs.writeFileSync(img1, png)
-  fs.writeFileSync(img2, png)
+  writeSolidPng(img1, [220, 56, 56])
+  writeSolidPng(img2, [48, 140, 72])
 
   const server = await ensureAdminWebServer()
   const login = await admin('auth.login', { username, password })
@@ -228,12 +239,71 @@ async function main() {
       null,
       { timeout: 30000 },
     )
+    await page.waitForFunction(
+      () => Array.from(document.querySelectorAll('.image-item img'))
+        .filter((img) => {
+          const el = img
+          const rect = el.getBoundingClientRect()
+          return /^https?:\/\//.test(el.getAttribute('src') || '') &&
+            el.complete &&
+            el.naturalWidth > 0 &&
+            el.naturalHeight > 0 &&
+            rect.width >= 190 &&
+            rect.height >= 140
+        }).length >= 2,
+      null,
+      { timeout: 30000 },
+    )
     await page.screenshot({ path: path.join(ARTIFACT_DIR, 'after-image-upload.png'), fullPage: true })
+    const renderedThumbCount = await page.locator('.image-item img[src^="http"]').evaluateAll((imgs) =>
+      imgs.filter((img) => {
+        const rect = img.getBoundingClientRect()
+        return img.complete &&
+          img.naturalWidth > 0 &&
+          img.naturalHeight > 0 &&
+          rect.width >= 190 &&
+          rect.height >= 140
+      }).length
+    )
+    const visibleImageUrlCount = await page.locator('.image-item').evaluateAll((items) =>
+      items.filter((item) => /cloud:\/\/|https?:\/\//.test(item.textContent || '')).length
+    )
+    if (visibleImageUrlCount > 0) throw new Error(`image URL text should be hidden, found ${visibleImageUrlCount} visible image URL rows`)
+
+    await page.locator('input[placeholder="驾车到达用时"]').fill('约30分钟')
+    await page.locator('.location-admin-editor .keyword-input input').fill('太平水库')
+    await page.locator('.location-admin-editor .region-input input').fill('绵竹')
+    await page.locator('.location-admin-editor .search-row button').click()
+    await page.locator('.candidate-item').first().waitFor({ timeout: 20000 })
+    await page.locator('.candidate-item').first().click()
+    await page.locator('.selected-summary').waitFor({ timeout: 10000 })
 
     await page.locator('.actions .el-button--primary').click()
     await page.waitForURL(new RegExp(`/posts/${fixture.communityId}$`), { timeout: 15000 })
     await page.waitForLoadState('networkidle')
     await page.screenshot({ path: path.join(ARTIFACT_DIR, 'after-image-publish.png'), fullPage: true })
+    await page.getByRole('button', { name: '详情' }).first().click()
+    await page.locator('.el-dialog').waitFor({ timeout: 15000 })
+    await page.waitForFunction(
+      () => Array.from(document.querySelectorAll('.el-dialog .image-group-detail img'))
+        .filter((img) => {
+          const el = img
+          const rect = el.getBoundingClientRect()
+          return /^https?:\/\//.test(el.getAttribute('src') || '') &&
+            el.complete &&
+            el.naturalWidth > 0 &&
+            el.naturalHeight > 0 &&
+            rect.width >= 230 &&
+            rect.height >= 170
+        }).length >= 2,
+      null,
+      { timeout: 30000 },
+    )
+    const detailVisibleImageUrlCount = await page.locator('.el-dialog').evaluate((dialog) =>
+      /cloud:\/\/|https?:\/\//.test(dialog.textContent || '') ? 1 : 0
+    )
+    if (detailVisibleImageUrlCount > 0) throw new Error('detail dialog should not display image URL text')
+    await page.screenshot({ path: path.join(ARTIFACT_DIR, 'after-detail-open.png'), fullPage: true })
 
     const postList = await admin('post.listAdmin', { communityId: fixture.communityId, sectionId: fixture.sectionId }, token)
     const created = (postList.posts || []).find((post) => post.content?.[fixture.titleWidgetId] === title)
@@ -244,6 +314,7 @@ async function main() {
     if (!created) throw new Error('published image-group post was not found by admin API')
     if (!Array.isArray(images) || images.length !== 2) throw new Error(`expected 2 image fileIDs, got ${JSON.stringify(images)}`)
     if (!images.every((fileID) => String(fileID).startsWith('cloud://'))) throw new Error(`expected cloud fileIDs, got ${JSON.stringify(images)}`)
+    if (renderedThumbCount < 2) throw new Error(`expected 2 rendered image thumbnails, got ${renderedThumbCount}`)
     if (cos204Count < 2) throw new Error(`expected 2 COS 204 uploads, got ${cos204Count}`)
     if (corsErrors.length) throw new Error(`CORS browser errors: ${corsErrors.join('; ')}`)
 
@@ -254,10 +325,12 @@ async function main() {
       sectionId: fixture.sectionId,
       postId: created._id,
       imageCount: images.length,
+      renderedThumbCount,
       cos204Count,
       screenshots: [
         path.join(ARTIFACT_DIR, 'after-image-upload.png'),
         path.join(ARTIFACT_DIR, 'after-image-publish.png'),
+        path.join(ARTIFACT_DIR, 'after-detail-open.png'),
       ],
     }, null, 2))
   } finally {

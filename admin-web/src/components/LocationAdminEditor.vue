@@ -128,6 +128,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { Search } from '@element-plus/icons-vue'
 import { geoApi, type GeoSearchCandidate } from '../api/cloud'
+import { hasValidLocationCoordinate } from '../utils/locationValidation'
 
 type LocationValue = {
   name?: string
@@ -248,17 +249,7 @@ function normalize(value: unknown): LocationValue {
 }
 
 function hasValidCoordinate(value: LocationValue) {
-  const lat = Number(value.lat)
-  const lng = Number(value.lng)
-  return (
-    Number.isFinite(lat) &&
-    Number.isFinite(lng) &&
-    lat >= -90 &&
-    lat <= 90 &&
-    lng >= -180 &&
-    lng <= 180 &&
-    !(lat === 0 && lng === 0)
-  )
+  return hasValidLocationCoordinate(value)
 }
 
 function coordinateText(value: unknown) {
@@ -331,7 +322,8 @@ async function searchLocations() {
       ElMessage.warning('没有找到候选点，请换一个更具体的名称')
       return
     }
-    selectCandidate(searchCandidates.value[0])
+    selectedCandidateKey.value = candidateKey(local)
+    ElMessage.success(`找到 ${searchCandidates.value.length} 个候选点，请选择最准确的位置`)
   } catch (err: any) {
     ElMessage.error(err?.response?.data?.error || err?.message || '高德地点检索失败')
   } finally {
@@ -396,10 +388,10 @@ async function openMapDialog() {
 async function loadAmap() {
   const jsKey = amapJsKey.value
   if (!jsKey) return null
-  if (window.AMap) return window.AMap
   if (mapConfig.securityCode) {
     window._AMapSecurityConfig = { securityJsCode: mapConfig.securityCode }
   }
+  if (window.AMap) return window.AMap
   if (!window.__happyHomeAmapLoader) {
     window.__happyHomeAmapLoader = new Promise((resolve, reject) => {
       const script = document.createElement('script')
@@ -416,11 +408,25 @@ async function loadAmap() {
   return window.__happyHomeAmapLoader
 }
 
-async function waitForMapContainer(maxFrames = 8) {
-  if (mapContainer.value) return
+function hasReadyMapContainer() {
+  const el = mapContainer.value
+  if (!el) return false
+  const rect = el.getBoundingClientRect()
+  return rect.width > 0 && rect.height > 0
+}
+
+async function waitForMapContainer(maxFrames = 24) {
+  if (hasReadyMapContainer()) return
+  await nextTick()
   await new Promise<void>((resolve) => {
+    let stableFrames = 0
     const check = (remainingFrames: number) => {
-      if (mapContainer.value || remainingFrames <= 0) {
+      if (hasReadyMapContainer()) {
+        stableFrames += 1
+      } else {
+        stableFrames = 0
+      }
+      if (stableFrames >= 2 || remainingFrames <= 0) {
         resolve()
         return
       }
