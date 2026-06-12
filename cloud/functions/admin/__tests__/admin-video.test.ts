@@ -12,6 +12,8 @@ jest.mock('../../../lib/db', () => ({
   softDelete: jest.fn(),
   query: jest.fn(),
   increment: jest.fn(),
+  replaceValue: jest.fn((value) => ({ __set: value })),
+  removeField: jest.fn(() => ({ __remove: true })),
 }))
 
 jest.mock('../../../lib/storage', () => ({
@@ -470,11 +472,11 @@ describe('post.updateAdmin', () => {
     expect(result.updatedAt).toBeTruthy()
     expect(result.adminEditedAt).toBe(result.updatedAt)
     expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({
-      pendingContent: {
+      pendingContent: { __set: {
         title: 'new title',
         location: existingLocation,
         audio: [{ title: 'new audio', fileID: 'cloud://env/audios/new.mp3', cover: 'cloud://env/covers/new.jpg', duration: 120, size: 2048, ext: 'mp3' }],
-      },
+      } },
       pendingAuditStatus: 'pending',
       updatedAt: expect.any(String),
       adminEditedAt: expect.any(String),
@@ -486,7 +488,7 @@ describe('post.updateAdmin', () => {
     expect(patch.sectionId).toBeUndefined()
     expect(patch.commentCount).toBeUndefined()
     expect(patch.likeCount).toBeUndefined()
-    expect(patch.pendingContent.legacyRemovedWidget).toBeUndefined()
+    expect(patch.pendingContent.__set.legacyRemovedWidget).toBeUndefined()
   })
 
   test('updates rich_note content instead of preserving the old value', async () => {
@@ -536,7 +538,7 @@ describe('post.updateAdmin', () => {
 
     expect(result.success).toBe(true)
     expect(db.updateById).toHaveBeenCalledWith('posts', 'post-rich', expect.objectContaining({
-      pendingContent: { rich: nextRichNote },
+      pendingContent: { __set: { rich: nextRichNote } },
       pendingAuditStatus: 'pending',
     }))
   })
@@ -593,7 +595,7 @@ describe('post.updateAdmin', () => {
 
     expect(result.success).toBe(true)
     expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({
-      pendingContent: { title: 'new title' },
+      pendingContent: { __set: { title: 'new title' } },
       pendingAuditStatus: 'pending',
       adminEditedByAccountId: 'community-admin-1',
       adminEditedByUsername: 'community-admin',

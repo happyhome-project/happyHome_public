@@ -11,6 +11,8 @@ jest.mock('../../../lib/db', () => ({
   query: jest.fn(),
   removeById: jest.fn(),
   softDelete: jest.fn(),
+  replaceValue: jest.fn((value) => ({ __set: value })),
+  removeField: jest.fn(() => ({ __remove: true })),
 }))
 
 import {
@@ -184,7 +186,7 @@ test('update: 保存时会清理无效字段、attendance、公告和音频字�
   }, 'test-openid')
 
   expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({
-    pendingContent: { 'title-widget': '更新后的标题' },
+    pendingContent: { __set: { 'title-widget': '更新后的标题' } },
     pendingAuditStatus: 'pending',
   }))
 })

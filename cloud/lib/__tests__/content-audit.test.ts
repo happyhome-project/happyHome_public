@@ -3,6 +3,8 @@ jest.mock('../db', () => ({
   getById: jest.fn(),
   query: jest.fn(),
   updateById: jest.fn(),
+  replaceValue: jest.fn((value) => ({ __set: value })),
+  removeField: jest.fn(() => ({ __remove: true })),
 }))
 
 jest.mock('../storage', () => ({
@@ -74,10 +76,23 @@ test('approvePostAudit promotes pendingContent and marks the post as passed', as
   await approvePostAudit('post-1')
 
   expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({
-    content: { title: 'new title' },
-    pendingContent: null,
+    content: { __set: { title: 'new title' } },
+    pendingContent: { __remove: true },
     pendingAuditStatus: 'pass',
     auditStatus: 'pass',
+  }))
+})
+
+test('approvePostAudit replaces content and removes pendingContent atomically for CloudBase nested object updates', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({ _id: 'post-guide', pendingContent: { guide_age: '8岁以上' } })
+    .mockResolvedValueOnce({ _id: 'post-guide', pendingContent: { guide_age: '8岁以上' } })
+
+  await approvePostAudit('post-guide')
+
+  expect(db.updateById).toHaveBeenCalledWith('posts', 'post-guide', expect.objectContaining({
+    content: { __set: { guide_age: '8岁以上' } },
+    pendingContent: { __remove: true },
   }))
 })
 
