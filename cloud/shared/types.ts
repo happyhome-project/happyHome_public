@@ -180,9 +180,17 @@ export interface User {
 }
 
 export interface GeoLocation {
+  name?: string
   address: string
   lat: number
   lng: number
+  coordSystem?: 'gcj02'
+  source?: 'amap' | 'wechat' | 'manual'
+  adjusted?: boolean
+  amapPoiId?: string
+  province?: string
+  city?: string
+  district?: string
 }
 
 export interface Community {

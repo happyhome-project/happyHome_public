@@ -219,6 +219,24 @@ export const imageApi = {
     callAdmin('image.requestUpload', params) as Promise<UploadMetadata>,
 }
 
+export interface GeoSearchCandidate {
+  id: string
+  name: string
+  address: string
+  province?: string
+  city?: string
+  district?: string
+  lat: number
+  lng: number
+  coordSystem: 'gcj02'
+  source: 'amap'
+}
+
+export const geoApi = {
+  searchLocation: (params: { keyword: string; region?: string }) =>
+    callAdmin('geo.searchLocation', params) as Promise<{ candidates: GeoSearchCandidate[] }>,
+}
+
 export const mediaApi = {
   getUrls: (fileIDs: string[]) =>
     callAdmin('media.getUrls', { fileIDs }) as Promise<{ urls: Record<string, string> }>,

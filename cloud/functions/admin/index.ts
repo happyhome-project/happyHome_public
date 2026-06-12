@@ -13,6 +13,7 @@ import {
 } from '../../lib/content-audit'
 import { getEditableWidgetIds, sanitizeContent, validateContentValues, validateRequiredWidgets } from '../../lib/post-validate'
 import { getWxacodeUnlimited } from '../../lib/wx-openapi'
+import { searchAmapPoi } from '../../lib/amap'
 import {
   assertOwnCommunityOrSuper,
   generateSalt,
@@ -760,6 +761,14 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
   }
   if (action === 'admin.approvalSummary') {
     return buildApprovalSummary(ctx)
+  }
+
+  if (action === 'geo.searchLocation') {
+    const keyword = String(params.keyword || '').trim()
+    if (!keyword) throw new Error('地点关键字不能为空')
+    const region = String(params.region || '').trim()
+    const candidates = await searchAmapPoi({ keyword, region, limit: 8 })
+    return { candidates }
   }
 
   if (action === 'user.setSuperAdmin') {

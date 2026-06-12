@@ -11,6 +11,7 @@ export interface GuideRouteStat {
 }
 
 export interface GuideRouteLocation {
+  name?: string
   address: string
   lat: number
   lng: number
@@ -140,8 +141,8 @@ function collectBodySections(post: Post, bodyWidgets: SectionWidget[]): GuideRou
 
 function collectLocation(post: Post, section: Section): GuideRouteLocation | null {
   const widget = findFirstWidget(section, {
-    fieldKeys: ['location', 'trackLocation'],
-    labels: ['地点', '位置', '线路轨迹', '轨迹'],
+    fieldKeys: ['location', 'destinationLocation', 'trackLocation'],
+    labels: ['目的地位置', '目的地', '地点', '位置', '线路轨迹', '轨迹'],
     types: ['location'],
   })
   if (!widget) return null
@@ -149,8 +150,17 @@ function collectLocation(post: Post, section: Section): GuideRouteLocation | nul
   if (!raw || typeof raw !== 'object') return null
   const lat = Number((raw as any).lat)
   const lng = Number((raw as any).lng)
-  if (Number.isNaN(lat) || Number.isNaN(lng)) return null
+  if (
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng) ||
+    lat < -90 ||
+    lat > 90 ||
+    lng < -180 ||
+    lng > 180 ||
+    (lat === 0 && lng === 0)
+  ) return null
   return {
+    name: String((raw as any).name || ''),
     address: String((raw as any).address || ''),
     lat,
     lng,

@@ -54,6 +54,30 @@ export function isEmptyValue(value: unknown): boolean {
   )
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function hasValidLocationCoordinate(value: Record<string, unknown>): boolean {
+  const lat = Number(value.lat)
+  const lng = Number(value.lng)
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180 &&
+    !(lat === 0 && lng === 0)
+  )
+}
+
+function isEmptyRequiredLocation(value: unknown): boolean {
+  if (!isRecord(value)) return true
+  const text = String(value.address || value.name || '').trim()
+  return !text || !hasValidLocationCoordinate(value)
+}
+
 export function validateRequiredWidgets(
   section: Section,
   content: PostContent,
@@ -65,7 +89,11 @@ export function validateRequiredWidgets(
     if (!allowAdminOnly && ADMIN_ONLY_WIDGET_TYPES.has(widget.type)) continue
     if (!widget.required) continue
     const value = content[widget.widgetId]
-    if (isEmptyValue(value) || (widget.type === 'rich_note' && isEmptyRichNoteContent(value))) {
+    if (
+      isEmptyValue(value) ||
+      (widget.type === 'location' && isEmptyRequiredLocation(value)) ||
+      (widget.type === 'rich_note' && isEmptyRichNoteContent(value))
+    ) {
       throw new Error(`必填项未填写：${widget.label}`)
     }
   }
@@ -175,10 +203,6 @@ function validateNoteBlock(item: unknown, widgetLabel: string, index: number): v
     return
   }
   throw new Error(`${prefix}类型不支持`)
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
 function stripHtmlNoise(html: string): string {
@@ -291,6 +315,13 @@ export function validateContentValues(
 
     if (widget.type === 'rich_note') {
       validateRichNoteContent(value, widget.label)
+      continue
+    }
+
+    if (widget.type === 'location') {
+      if (!isRecord(value) || !hasValidLocationCoordinate(value)) {
+        throw new Error(`位置控件「${widget.label || '未命名'}」坐标不正确`)
+      }
       continue
     }
 

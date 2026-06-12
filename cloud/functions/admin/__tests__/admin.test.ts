@@ -18,6 +18,10 @@ jest.mock('../../../lib/storage', () => ({
   deleteFile: jest.fn(),
 }))
 
+jest.mock('../../../lib/amap', () => ({
+  searchAmapPoi: jest.fn(),
+}))
+
 jest.mock('uuid', () => ({
   v4: jest.fn().mockReturnValue('mocked-uuid'),
 }))
@@ -25,8 +29,46 @@ jest.mock('uuid', () => ({
 import { main } from '../index'
 import * as db from '../../../lib/db'
 import * as storage from '../../../lib/storage'
+import { searchAmapPoi } from '../../../lib/amap'
 
 beforeEach(() => jest.resetAllMocks())
+
+test('geo.searchLocation: 通过高德检索目的地候选点并返回 GCJ-02 坐标', async () => {
+  ;(searchAmapPoi as jest.Mock).mockResolvedValue([
+    {
+      id: 'B0FFTEST',
+      name: '太平水库',
+      address: '四川省德阳市绵竹市太平水库',
+      lat: 31.405678,
+      lng: 104.133456,
+      province: '四川省',
+      city: '德阳市',
+      district: '绵竹市',
+      coordSystem: 'gcj02',
+      source: 'amap',
+    },
+  ])
+
+  const result: any = await main({
+    action: 'geo.searchLocation',
+    keyword: '太平水库',
+    region: '德阳',
+    _actAs: { accountId: 'super-1', role: 'superAdmin', userId: 'boss-openid', username: 'boss' },
+  })
+
+  expect(searchAmapPoi).toHaveBeenCalledWith({ keyword: '太平水库', region: '德阳', limit: 8 })
+  expect(result.candidates).toEqual([
+    expect.objectContaining({
+      id: 'B0FFTEST',
+      name: '太平水库',
+      address: '四川省德阳市绵竹市太平水库',
+      lat: 31.405678,
+      lng: 104.133456,
+      coordSystem: 'gcj02',
+      source: 'amap',
+    }),
+  ])
+})
 
 test('admin.approvalSummary: superAdmin 返回社区创建和成员加入待办数', async () => {
   ;(db.query as jest.Mock)
@@ -331,7 +373,7 @@ test('section.create: 图文攻略展示模板可保存到板块', async () => {
       expect.objectContaining({ widgetId: 'guide_reference_duration', type: 'short_text', label: '参考用时', required: false, showInList: false, locked: true }),
       expect.objectContaining({ widgetId: 'guide_drive_duration', type: 'short_text', label: '驾车到达用时', required: true, showInList: false, locked: true }),
       expect.objectContaining({ widgetId: 'guide_body', type: 'rich_note', label: '正文', required: false, showInList: false, locked: true }),
-      expect.objectContaining({ widgetId: 'guide_location', type: 'location', label: '线路轨迹/地点', required: false, showInList: false, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_location', type: 'location', label: '目的地位置', required: true, showInList: false, locked: true }),
     ],
   }))
 })
@@ -346,7 +388,7 @@ test('section.updateWidgets: 图文攻略固定控件不能删除或修改', asy
     { widgetId: 'guide_reference_duration', type: 'short_text', label: '参考用时', fieldKey: 'referenceDuration', required: false, order: 5, showInList: false, locked: true },
     { widgetId: 'guide_drive_duration', type: 'short_text', label: '驾车到达用时', fieldKey: 'driveDuration', required: true, order: 6, showInList: false, locked: true },
     { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 7, showInList: false, locked: true },
-    { widgetId: 'guide_location', type: 'location', label: '线路轨迹/地点', fieldKey: 'location', required: false, order: 8, showInList: false, locked: true },
+    { widgetId: 'guide_location', type: 'location', label: '目的地位置', fieldKey: 'location', required: true, order: 8, showInList: false, locked: true },
   ]
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-guide',
@@ -382,7 +424,7 @@ test('section.updateWidgets: 图文攻略允许在固定控件后追加小控件
     { widgetId: 'guide_reference_duration', type: 'short_text', label: '参考用时', fieldKey: 'referenceDuration', required: false, order: 5, showInList: false, locked: true },
     { widgetId: 'guide_drive_duration', type: 'short_text', label: '驾车到达用时', fieldKey: 'driveDuration', required: true, order: 6, showInList: false, locked: true },
     { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 7, showInList: false, locked: true },
-    { widgetId: 'guide_location', type: 'location', label: '线路轨迹/地点', fieldKey: 'location', required: false, order: 8, showInList: false, locked: true },
+    { widgetId: 'guide_location', type: 'location', label: '目的地位置', fieldKey: 'location', required: true, order: 8, showInList: false, locked: true },
   ]
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-guide',
@@ -452,7 +494,8 @@ test('section.get: 旧图文攻略板块会补齐路线攻略固定控件', asyn
   }))
   expect(result.section.widgets[8]).toEqual(expect.objectContaining({
     widgetId: 'guide_location',
-    label: '线路轨迹/地点',
+    label: '目的地位置',
+    required: true,
     order: 8,
     locked: true,
   }))

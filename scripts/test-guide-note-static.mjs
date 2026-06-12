@@ -12,6 +12,7 @@ const detailPage = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'pages'
 const guideRouteDetail = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'components', 'GuideRouteDetailView.vue'), 'utf8')
 const widgetEditor = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'components', 'widgets', 'WidgetEditor.vue'), 'utf8')
 const widgetRenderer = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'components', 'widgets', 'WidgetRenderer.vue'), 'utf8')
+const locationAdminEditor = fs.readFileSync(path.join(root, 'admin-web', 'src', 'components', 'LocationAdminEditor.vue'), 'utf8')
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -31,6 +32,11 @@ assert(
 assert(
   adminApi.includes("displayTemplate?: 'default' | 'guide_note'"),
   'admin-web section API types must include displayTemplate.'
+)
+
+assert(
+  adminApi.includes('geoApi') && adminApi.includes('geo.searchLocation'),
+  'admin-web API must expose a geo.searchLocation wrapper for destination search.'
 )
 
 assert(
@@ -97,6 +103,33 @@ assert(
     !guideRouteDetail.includes('lastHeroMoveAt') &&
     !guideRouteDetail.includes('setTimeout(() =>'),
   'guide route detail image preview must not be delayed by a fixed post-swipe timeout.'
+)
+
+assert(
+  guideRouteDetail.includes('目的地位置') &&
+    !guideRouteDetail.includes('线路轨迹'),
+  'guide route detail must present the map as destination navigation, not route track.'
+)
+
+assert(
+  locationAdminEditor.includes('geoApi.searchLocation') &&
+    locationAdminEditor.includes('searchCandidates') &&
+    locationAdminEditor.includes('adjusted') &&
+    locationAdminEditor.includes('mapContainer') &&
+    locationAdminEditor.includes('draggable: true'),
+  'admin location editor must search Amap candidates and support map micro-adjustment.'
+)
+
+assert(
+  !locationAdminEditor.includes('暂时按真实目的地人工填写') &&
+    !locationAdminEditor.includes('地点名称或线路轨迹地址'),
+  'admin location editor must not lead with manual coordinate entry or route-track wording.'
+)
+
+assert(
+  adminWidgetEditor.includes('目的地位置') &&
+    !adminWidgetEditor.includes('线路轨迹/地点'),
+  'admin widget editor must describe the fixed guide location as destination position.'
 )
 
 assert(

@@ -145,6 +145,20 @@ test('create: 旧图文攻略板块补齐驾车到达用时并按必填校验', 
     },
   } as any, 'test-openid')).rejects.toThrow('必填项未填写：驾车到达用时')
   expect(db.create).not.toHaveBeenCalled()
+
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValue(oldGuideSection)
+
+  await expect(handleCreate({
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    content: {
+      guide_title: '太平水库亲子游',
+      guide_images: ['cloud://env/posts/cover.jpg'],
+      guide_drive_duration: '青山村约35分钟到达水库入口',
+    },
+  } as any, 'test-openid')).rejects.toThrow('必填项未填写：目的地位置')
+  expect(db.create).not.toHaveBeenCalled()
 })
 
 test('update: 保存时会清理无效字段、attendance、公告和音频字段', async () => {
