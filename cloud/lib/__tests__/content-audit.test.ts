@@ -17,6 +17,7 @@ jest.mock('../wx-openapi', () => ({
 
 import {
   approvePostAudit,
+  buildCiHttpString,
   extractAuditTargets,
   handleAuditCallback,
   isPostVisibleToMembers,
@@ -66,6 +67,17 @@ test('isPostVisibleToMembers only exposes active posts that passed audit', () =>
   expect(isPostVisibleToMembers({ status: 'active', auditStatus: 'review' })).toBe(false)
   expect(isPostVisibleToMembers({ status: 'active', auditStatus: 'rejected' })).toBe(false)
   expect(isPostVisibleToMembers({ status: 'deleted', auditStatus: 'pass' })).toBe(false)
+})
+
+test('buildCiHttpString follows Tencent CI XML signature newline format', () => {
+  expect(buildCiHttpString('POST', '/text/auditing', {
+    host: '636c-cloudbase-3gh862acb1505ff3-1307183045.ci.ap-shanghai.myqcloud.com',
+  })).toBe(
+    'post\n'
+    + '/text/auditing\n'
+    + '\n'
+    + 'host=636c-cloudbase-3gh862acb1505ff3-1307183045.ci.ap-shanghai.myqcloud.com\n',
+  )
 })
 
 test('approvePostAudit promotes pendingContent and marks the post as passed', async () => {
