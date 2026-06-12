@@ -20,11 +20,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { mediaApi } from '../api/cloud'
-import { markdownToHtml, normalizeRichNoteContent } from '../utils/rich-note'
-
-type RenderBlock =
-  | { type: 'html'; html: string }
-  | { type: 'image'; src: string }
+import {
+  normalizeRichNoteContent,
+  richNoteMarkdownToRenderBlocks,
+  type RichNoteRenderBlock,
+} from '../utils/rich-note'
 
 const props = withDefaults(defineProps<{ value: unknown; allowImages?: boolean }>(), {
   allowImages: true,
@@ -33,27 +33,9 @@ const urlMap = ref<Record<string, string>>({})
 
 const content = computed(() => normalizeRichNoteContent(props.value))
 
-const blocks = computed<RenderBlock[]>(() => {
-  const result: RenderBlock[] = []
-  const buffer: string[] = []
-  const flushText = () => {
-    const text = buffer.join('\n')
-    if (text) result.push({ type: 'html', html: markdownToHtml(text) })
-    buffer.length = 0
-  }
-  for (const rawLine of content.value.markdown.replace(/\r\n/g, '\n').split('\n')) {
-    const line = rawLine.trim()
-    const image = /^!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)$/.exec(line)
-    if (image) {
-      flushText()
-      if (props.allowImages) result.push({ type: 'image', src: image[1] })
-    } else {
-      buffer.push(rawLine)
-    }
-  }
-  flushText()
-  return result
-})
+const blocks = computed<RichNoteRenderBlock[]>(() =>
+  richNoteMarkdownToRenderBlocks(content.value.markdown, props.allowImages)
+)
 
 watch(
   () => blocks.value.map((block) => block.type === 'image' ? block.src : '').filter(Boolean),
