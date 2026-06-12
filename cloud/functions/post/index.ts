@@ -23,12 +23,13 @@ const COMMUNITY_READ_ERROR = '需要先加入社区后查看内容'
 const HOME_POST_LIMIT_PER_SECTION = 20
 
 function normalizeSectionForClient(section: Section): Section {
+  const normalized = normalizePostSection(section)
   return {
-    ...section,
-    type: section.type || 'evergreen',
-    status: section.status || 'active',
-    enableComment: section.enableComment !== false,
-    enableLike: section.enableLike !== false,
+    ...normalized,
+    type: normalized.type || 'evergreen',
+    status: normalized.status || 'active',
+    enableComment: normalized.enableComment !== false,
+    enableLike: normalized.enableLike !== false,
   } as Section
 }
 
