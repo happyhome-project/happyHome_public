@@ -4,6 +4,7 @@ import { resolveOpenId } from '../../lib/ctx'
 import { getTempUrl } from '../../lib/storage'
 import { sanitizeContent, validateContentValues, validateRequiredWidgets } from '../../lib/post-validate'
 import { auditAndApply, isPostVisibleToMembers } from '../../lib/content-audit'
+import { buildHomeBootstrap, buildHomeFeed } from '../../lib/home-snapshot'
 import type {
   AttendancePreviewUser,
   AttendanceSummary,
@@ -284,49 +285,19 @@ export async function handleHome(params: {
   communityId: string
   limitPerSection?: number
 }, openid?: string) {
-  const communityId = String(params.communityId || '').trim()
-  if (!communityId) throw new Error('communityId 不能为空')
-  await ensureActiveCommunityMember(communityId, openid || '')
+  return buildHomeFeed(params.communityId, openid || '', {
+    limitPerSection: params.limitPerSection,
+  })
+}
 
-  const rawSections = await db.query('sections', { communityId }, { orderBy: ['order', 'asc'] })
-  const sections = (rawSections as Section[]).map(normalizeSectionForClient)
-  const sectionById: Record<string, Section | null> = Object.fromEntries(
-    sections.map((section) => [section._id, section])
-  )
-  const sectionIdSet = new Set(sections.map((section) => section._id))
-  const limitPerSection = Math.min(
-    50,
-    Math.max(1, Math.floor(Number(params.limitPerSection || HOME_POST_LIMIT_PER_SECTION)))
-  )
-
-  const slicedBySection: Record<string, any[]> = {}
-  await Promise.all(sections.map(async (section) => {
-    const sectionPosts = await db.query('posts', {
-      sectionId: section._id,
-      status: 'active',
-    }, {
-      orderBy: ['createdAt', 'desc'],
-      limit: 100,
-    })
-    slicedBySection[section._id] = (sectionPosts as any[])
-      .filter((post) => sectionIdSet.has(post.sectionId))
-      .filter(isPostVisibleToMembers)
-      .slice()
-      .sort(comparePostListOrder)
-      .slice(0, limitPerSection)
-  }))
-
-  const slicedPosts = Object.values(slicedBySection).flat()
-  const withAttendance = await enrichPostsWithAttendance(slicedPosts, sectionById, openid)
-  const enrichedPosts = await enrichPostsWithAuthor(withAttendance)
-  const enrichedById = new Map(enrichedPosts.map((post: any) => [post._id, post]))
-  const postsBySection: Record<string, any[]> = {}
-  for (const section of sections) {
-    postsBySection[section._id] = (slicedBySection[section._id] || [])
-      .map((post) => enrichedById.get(post._id) || post)
-  }
-
-  return { sections, postsBySection }
+export async function handleBootstrap(params: {
+  currentCommunityId?: string
+  limitPerSection?: number
+}, openid?: string) {
+  return buildHomeBootstrap(openid || '', {
+    currentCommunityId: params.currentCommunityId,
+    limitPerSection: params.limitPerSection,
+  })
 }
 
 export async function handleGet(params: { postId: string }, openid?: string) {
@@ -561,6 +532,7 @@ export const main = async (event: any) => {
   if (action === 'create') return handleCreate(params, openid)
   if (action === 'list') return handleList(params, openid)
   if (action === 'home') return handleHome(params, openid)
+  if (action === 'bootstrap') return handleBootstrap(params, openid)
   if (action === 'get') return handleGet(params, openid)
   if (action === 'delete') return handleDelete(params, openid)
   if (action === 'update') return handleUpdate(params, openid)

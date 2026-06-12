@@ -244,7 +244,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
@@ -255,6 +255,8 @@ import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard } from '../../utils/widget'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
+import { clearHomeSnapshotCache, getBackgroundFetchSnapshot, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
+import type { HomeSnapshot } from '../../../../cloud/shared/types'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -262,6 +264,8 @@ const showSwitcher = ref(false)
 const postsBySection = ref<Record<string, any[]>>({})
 let refreshingHome = false
 let queuedForcedHomeRefresh = false
+let mountedAt = 0
+let unsubscribeBackgroundFetchSnapshot: (() => void) | null = null
 const NOTICE_PREVIEW_LIMIT = 68
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
@@ -595,6 +599,48 @@ function expandDormant() {
   // TODO: 展开所有休眠板块
 }
 
+function applyHomeSnapshot(snapshot: HomeSnapshot | null, source: 'prefetch' | 'cache' | 'cloud') {
+  if (!snapshot) return false
+  if (!userStore.isLoggedIn || snapshot.viewerOpenId !== userStore.openId) return false
+  communityStore.myCommunities = snapshot.communities || []
+  communityStore.currentCommunityId = snapshot.currentCommunityId || ''
+  communityStore.currentSectionIndex = 0
+  communityStore.currentSections = snapshot.sections || []
+  postsBySection.value = snapshot.postsBySection || {}
+  communityStore.saveToStorage()
+  clientLog('info', 'home.snapshot.apply', {
+    source,
+    communityCount: communityStore.myCommunities.length,
+    currentCommunityId: communityStore.currentCommunityId || '',
+    sectionCount: communityStore.currentSections.length,
+    totalPosts: Object.keys(postsBySection.value).reduce((sum, key) => sum + (postsBySection.value[key]?.length || 0), 0),
+  })
+  return true
+}
+
+async function hydrateHomeFromFastPath() {
+  if (!userStore.isLoggedIn || !userStore.openId) return false
+  const prefetched = await getBackgroundFetchSnapshot({
+    openId: userStore.openId,
+    communityId: communityStore.currentCommunityId || undefined,
+  })
+  if (applyHomeSnapshot(prefetched, 'prefetch')) {
+    writeHomeSnapshotCache(prefetched as HomeSnapshot)
+    return true
+  }
+  const cached = readHomeSnapshotCache({
+    openId: userStore.openId,
+    communityId: communityStore.currentCommunityId || '',
+  })
+  return applyHomeSnapshot(cached, 'cache')
+}
+
+function applyLateBackgroundFetchSnapshot(snapshot: HomeSnapshot) {
+  if (applyHomeSnapshot(snapshot, 'prefetch')) {
+    writeHomeSnapshotCache(snapshot)
+  }
+}
+
 async function switchCommunity(communityId: string) {
   showSwitcher.value = false
   communityStore.currentCommunityId = communityId
@@ -603,41 +649,7 @@ async function switchCommunity(communityId: string) {
   postsBySection.value = {}
   communityStore.saveToStorage()
   communityStore.refreshMembershipStatus(communityId).catch(() => {})
-  await loadAllSectionPosts()
-}
-
-async function loadAllSectionPosts() {
-  const communityId = String(communityStore.currentCommunityId || '')
-  clientLog('info', 'home.sections.posts.load.start', {
-    sectionCount: communityStore.currentSections?.length || 0,
-    communityId,
-  })
-  if (!communityId) {
-    communityStore.currentSections = []
-    postsBySection.value = {}
-    return
-  }
-  try {
-    const res = await postApi.home(communityId)
-    communityStore.currentSections = res.sections ?? []
-    postsBySection.value = res.postsBySection ?? {}
-    clientLog('info', 'home.sections.posts.load.done', {
-      sectionCount: communityStore.currentSections.length,
-      resultSectionCount: Object.keys(postsBySection.value).length,
-      totalPosts: Object.keys(postsBySection.value).reduce((sum, key) => sum + (postsBySection.value[key]?.length || 0), 0),
-    })
-  } catch (error: any) {
-    clientLog('error', 'home.sections.posts.load.fail', { communityId, error })
-    if (error?.message?.includes('需要先加入社区后查看内容')) {
-      communityStore.clearCommunityState()
-      uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
-      openOnboardingPreservingStack()
-      return
-    }
-    communityStore.currentSections = []
-    postsBySection.value = {}
-    throw error
-  }
+  await refreshHomeData({ force: true })
 }
 
 function getPendingHomeRefreshMarker() {
@@ -685,18 +697,20 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
   }
   refreshingHome = true
   try {
-    await communityStore.loadMyCommunities({ loadSections: false })
-    clientLog('info', 'home.communities.load.success', {
-      communityCount: communityStore.myCommunities.length,
-      currentCommunityId: communityStore.currentCommunityId || '',
-    })
+    const result = await postApi.bootstrap(communityStore.currentCommunityId || undefined)
+    if (result.backgroundFetchToken) {
+      userStore.setBackgroundFetchToken(result.backgroundFetchToken, result.backgroundFetchTokenExpiresAt)
+    }
+    applyHomeSnapshot(result as HomeSnapshot, 'cloud')
+    if (communityStore.currentCommunityId) {
+      writeHomeSnapshotCache(result as HomeSnapshot)
+    }
     if (communityStore.myCommunities.length === 0) {
       postsBySection.value = {}
       clientLog('warn', 'home.communities.empty.openOnboarding', {})
       openOnboardingPreservingStack()
       return
     }
-    await loadAllSectionPosts()
     if (force) clearHomeRefreshMarker()
     clientLog('info', 'home.refresh.success', {
       force,
@@ -704,6 +718,15 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
     })
   } catch (error) {
     clientLog('error', 'home.refresh.fail', { force, error })
+    const message = String((error as any)?.message || error || '')
+    if (message.includes('需要先加入社区后查看内容')) {
+      clearHomeSnapshotCache(userStore.openId, communityStore.currentCommunityId || '')
+      communityStore.clearCommunityState()
+      postsBySection.value = {}
+      uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
+      openOnboardingPreservingStack()
+      return
+    }
     throw error
   } finally {
     refreshingHome = false
@@ -715,9 +738,23 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
 }
 
 onMounted(async () => {
+  mountedAt = Date.now()
   hideNativeTabBar()
   clientLog('info', 'home.mounted', {})
+  unsubscribeBackgroundFetchSnapshot = subscribeBackgroundFetchSnapshot(
+    () => ({
+      openId: userStore.openId,
+      communityId: communityStore.currentCommunityId || undefined,
+    }),
+    applyLateBackgroundFetchSnapshot,
+  )
+  await hydrateHomeFromFastPath()
   await refreshHomeData()
+})
+
+onUnmounted(() => {
+  unsubscribeBackgroundFetchSnapshot?.()
+  unsubscribeBackgroundFetchSnapshot = null
 })
 
 // tabBar 页面切回首页时（如发帖后 switchTab 返回）不会重新 mount，只触发 onShow。
@@ -730,6 +767,10 @@ onShow(() => {
     hasPendingRefreshMarker: !!marker,
     marker,
   })
+  if (!marker && mountedAt && Date.now() - mountedAt < 1500) {
+    clientLog('debug', 'home.show.skip.afterMounted', {})
+    return
+  }
   void refreshHomeData({ force: !!marker })
 })
 

@@ -14,6 +14,7 @@ jest.mock('../../../lib/db', () => ({
 }))
 
 import {
+  handleBootstrap,
   handleCreate,
   handleClientLog,
   handleDelete,
@@ -240,6 +241,67 @@ test('home: returns sections and grouped posts with one membership check', async
   expect((db.query as jest.Mock).mock.calls.filter(([collection]) => collection === 'posts')).toHaveLength(2)
   expect((db.query as jest.Mock).mock.calls.filter(([collection]) => collection === 'posts').map(([, where]) => where.sectionId).sort())
     .toEqual(['section-1', 'section-2'])
+})
+
+test('bootstrap: returns active communities and the selected community home snapshot in one call', async () => {
+  const sections = [
+    {
+      ...mockSection,
+      _id: 'section-1',
+      communityId: 'community-1',
+      widgets: [mockSection.widgets[0]],
+    },
+  ]
+  const posts = [
+    {
+      _id: 'post-1',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      authorId: 'user-1',
+      status: 'active',
+      auditStatus: 'pass',
+      content: { 'title-widget': '活动 A' },
+      createdAt: '2024-01-01T00:00:00.000Z',
+    },
+  ]
+  ;(db.query as jest.Mock).mockImplementation(async (collectionName: string, where: any) => {
+    if (collectionName === 'community_members' && where.userId === 'test-openid') {
+      return [
+        { _id: 'member-1', communityId: 'community-1', userId: 'test-openid', status: 'active', joinedAt: '2024-01-02T00:00:00.000Z' },
+        { _id: 'member-2', communityId: 'disabled-community', userId: 'test-openid', status: 'active', joinedAt: '2024-01-01T00:00:00.000Z' },
+      ]
+    }
+    if (collectionName === 'community_members' && where.communityId === 'community-1') return [{ _id: 'member-1', status: 'active' }]
+    if (collectionName === 'sections') return sections
+    if (collectionName === 'posts') return posts.filter((post) => post.sectionId === where.sectionId)
+    return []
+  })
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'communities' && id === 'community-1') return { _id: 'community-1', name: '青山村', status: 'active' }
+    if (collectionName === 'communities' && id === 'disabled-community') return { _id: 'disabled-community', name: '旧社区', status: 'disabled' }
+    if (collectionName === 'users' && id === 'test-openid') return {
+      _id: 'test-openid',
+      nickName: '测试用户',
+      role: 'user',
+      backgroundFetchToken: 'hhpf_existing',
+      backgroundFetchTokenExpiresAt: '2999-01-01T00:00:00.000Z',
+    }
+    if (collectionName === 'users' && id === 'user-1') return { _id: 'user-1', nickName: '作者一' }
+    return null
+  })
+
+  const result = await handleBootstrap({ currentCommunityId: 'community-1', limitPerSection: 10 }, 'test-openid')
+
+  expect(result.schemaVersion).toBe(1)
+  expect(result.viewerOpenId).toBe('test-openid')
+  expect(result.backgroundFetchToken).toBe('hhpf_existing')
+  expect(result.communities.map((community: any) => community._id)).toEqual(['community-1'])
+  expect(result.currentCommunityId).toBe('community-1')
+  expect(result.sections.map((section: any) => section._id)).toEqual(['section-1'])
+  expect(result.postsBySection['section-1'][0]).toEqual(expect.objectContaining({
+    _id: 'post-1',
+    authorNickname: '作者一',
+  }))
 })
 
 test('joinAttendance: 同一用户重复参与不会重复创建记录', async () => {
