@@ -61,18 +61,19 @@
     </view>
 
     <view
-      v-for="section in detail.bodySections"
-      :key="section.title"
+      v-for="(section, sectionIndex) in detail.bodySections"
+      :key="`${section.title || section.type}-${sectionIndex}`"
       class="guide-section"
+      :class="{ 'guide-section--plain': !section.title }"
     >
-      <view class="guide-section-heading">
+      <view v-if="section.title" class="guide-section-heading">
         <text>{{ section.title }}</text>
       </view>
       <view v-if="section.type === 'rich_note'" class="guide-rich-note">
         <RichNoteRenderer :value="section.value" :allow-images="false" />
       </view>
       <view v-else class="guide-text">
-        <template v-for="(block, index) in section.blocks" :key="`${section.title}-${index}`">
+        <template v-for="(block, index) in section.blocks" :key="`${sectionIndex}-${index}`">
           <text
             v-if="block.type === 'paragraph'"
             class="guide-paragraph"
@@ -349,9 +350,12 @@ function openLocation() {
 }
 
 .guide-stat {
-  min-height: 104rpx;
-  padding: 18rpx 6rpx 16rpx;
+  min-height: 84rpx;
+  padding: 12rpx 6rpx 10rpx;
   border-right: 1rpx solid $hh-ink-line-2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   text-align: center;
 }
 
@@ -361,20 +365,20 @@ function openLocation() {
 
 .guide-stat-value {
   display: block;
-  min-height: 34rpx;
+  min-height: 30rpx;
   color: $hh-ink-1;
   font-family: $hh-font-num;
-  font-size: 32rpx;
+  font-size: 30rpx;
   line-height: 1.15;
   font-weight: $hh-font-weight-bold;
 }
 
 .guide-stat-label {
   display: block;
-  margin-top: 8rpx;
+  margin-top: 4rpx;
   color: $hh-ink-3;
   font-size: 22rpx;
-  line-height: 1.3;
+  line-height: 1.25;
 }
 
 .guide-section {
@@ -384,6 +388,10 @@ function openLocation() {
 
 .guide-section:last-child {
   border-bottom: 0;
+}
+
+.guide-section--plain {
+  padding-top: 22rpx;
 }
 
 .guide-drive {

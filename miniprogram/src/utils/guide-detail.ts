@@ -127,7 +127,7 @@ function collectBodySections(post: Post, bodyWidgets: SectionWidget[]): GuideRou
     if (widget.type === 'rich_note') {
       const rich = normalizeRichNoteContent(value)
       if (!isRichNoteEmpty(rich)) {
-        sections.push({ title: widget.label || '正文', type: 'rich_note', value: rich })
+        sections.push({ title: '', type: 'rich_note', value: rich })
       }
       return
     }
@@ -138,7 +138,7 @@ function collectBodySections(post: Post, bodyWidgets: SectionWidget[]): GuideRou
     const text = widgetTextValue(post, widget)
     if (text) blocks.push({ type: 'paragraph', text })
   })
-  if (blocks.length) sections.push({ title: '正文', type: 'blocks', blocks })
+  if (blocks.length) sections.push({ title: '', type: 'blocks', blocks })
   return sections
 }
 
