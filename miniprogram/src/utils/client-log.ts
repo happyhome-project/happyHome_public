@@ -30,11 +30,15 @@ function normalizeValue(value: any, depth: number): any {
   if (valueType === 'number' || valueType === 'boolean') return value
   if (valueType === 'function') return '[function]'
   if (value instanceof Error) {
-    return {
+    const normalized: Record<string, any> = {
       name: value.name,
       message: trimString(value.message || ''),
       stack: trimString(value.stack || ''),
     }
+    for (const key of ['errCode', 'errMsg', 'cloudFunction', 'action', 'requestId', 'trace']) {
+      if ((value as any)[key] !== undefined) normalized[key] = normalizeValue((value as any)[key], depth + 1)
+    }
+    return normalized
   }
   if (depth >= 3) return '[max-depth]'
   if (Array.isArray(value)) {

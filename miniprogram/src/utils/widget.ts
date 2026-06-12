@@ -21,7 +21,7 @@ export interface GuideNoteCard {
   title: string
   coverImage: string
   excerpt: string
-  location: string
+  driveDuration: string
   author: string
   when: string
   hasCover: boolean
@@ -73,7 +73,11 @@ export function getGuideNoteCard(post: Post, section: Section): GuideNoteCard {
     || findFirstWidgetByTypes(section, ['short_text', 'summary'])
   const imageWidget = findFirstWidgetByTypes(section, ['image_group'])
   const bodyWidget = findFirstWidgetByTypes(section, ['rich_note', 'rich_text', 'summary'])
-  const locationWidget = findFirstWidgetByTypes(section, ['location'])
+  const driveDurationWidget = findWidgetByFieldOrLabel(
+    section,
+    ['driveDuration', 'driveTime', 'drivingTime', 'arrivalDuration', 'arrivalTime'],
+    ['驾车到达用时', '驾车时间', '自驾时间', '到达时间', '车程'],
+  )
   const routeStats = getGuideRouteStats(post, section)
 
   const coverImage = imageWidget ? firstImageValue(post.content?.[imageWidget.widgetId]) : ''
@@ -81,13 +85,13 @@ export function getGuideNoteCard(post: Post, section: Section): GuideNoteCard {
   const excerpt = bodyWidget && bodyWidget.widgetId !== titleWidget?.widgetId
     ? getTextExcerpt(post.content?.[bodyWidget.widgetId])
     : ''
-  const location = locationWidget ? getWidgetValue(post, locationWidget) : ''
+  const driveDuration = driveDurationWidget ? getWidgetValue(post, driveDurationWidget) : ''
 
   return {
     title,
     coverImage,
     excerpt,
-    location,
+    driveDuration,
     author: String((post as any)?.authorNickname || '').trim(),
     when: formatShortDate(post.createdAt),
     hasCover: coverImage !== '',

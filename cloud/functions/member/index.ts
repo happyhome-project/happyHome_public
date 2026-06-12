@@ -2,6 +2,7 @@ import cloud from 'wx-server-sdk'
 import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
 import { assertCommunityAdmin } from '../../lib/auth'
+import { isBoundSuperAdmin } from '../../lib/admin-identity'
 import {
   getNotificationTemplateConfig,
   getNotificationStatus,
@@ -29,10 +30,11 @@ async function getLatestMembershipRecord(communityId: string, openid: string) {
 async function isSuperAdmin(openid: string) {
   try {
     const user = await db.getById('users', openid) as { role?: string } | null
-    return user?.role === 'superAdmin'
+    if (user?.role === 'superAdmin') return true
   } catch {
-    return false
+    // 用户记录缺失时继续查后台账号绑定，避免绑定源不同步导致审批入口消失。
   }
+  return isBoundSuperAdmin(openid)
 }
 
 async function assertCommunityApprover(openid: string, communityId: string) {

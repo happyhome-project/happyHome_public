@@ -173,6 +173,7 @@ export interface User {
   nickName: string
   avatarUrl: string
   role: UserRole
+  roleSource?: string
   createdAt: string
 }
 

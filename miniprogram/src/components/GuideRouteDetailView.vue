@@ -1,38 +1,56 @@
 <template>
   <view class="guide-route">
     <view v-if="detail.images.length" class="guide-hero">
-      <scroll-view scroll-x class="guide-hero-scroll" :show-scrollbar="false" enhanced>
-        <view class="guide-hero-track">
+      <swiper
+        class="guide-hero-swiper"
+        :current="currentImageIndex"
+        :circular="detail.images.length > 1"
+        :duration="260"
+        @change="onHeroChange"
+        @touchstart="onHeroPointerStart"
+        @touchmove="onHeroPointerMove"
+        @touchend="onHeroPointerEnd"
+        @mousedown="onHeroPointerStart"
+        @mousemove="onHeroPointerMove"
+        @mouseup="onHeroPointerEnd"
+      >
+        <swiper-item
+          v-for="(image, index) in detail.images"
+          :key="`${image}-${index}`"
+          class="guide-hero-slide"
+        >
           <image
-            v-for="(image, index) in detail.images"
-            :key="`${image}-${index}`"
             :src="image"
             class="guide-hero-image"
             mode="aspectFill"
             @tap="previewImage(index)"
           />
-        </view>
-      </scroll-view>
-      <view class="guide-hero-mask" />
-      <view class="guide-hero-copy">
-        <view v-if="detail.tags.length" class="guide-tags">
-          <text v-for="tag in detail.tags" :key="tag" class="guide-tag">{{ tag }}</text>
-        </view>
-        <text v-if="detail.title" class="guide-title">{{ detail.title }}</text>
-        <text v-if="detail.subtitle" class="guide-subtitle">{{ detail.subtitle }}</text>
-        <view v-if="detail.images.length > 1" class="guide-dots" aria-hidden="true">
-          <text
-            v-for="(_image, index) in detail.images"
-            :key="`dot-${index}`"
-            class="guide-dot"
-            :class="{ active: index === 0 }"
-          />
-        </view>
-      </view>
+        </swiper-item>
+      </swiper>
     </view>
 
     <view v-else class="guide-hero-empty">
       <text v-if="detail.title" class="guide-empty-title">{{ detail.title }}</text>
+    </view>
+
+    <view v-if="detail.images.length > 1" class="guide-dots" aria-hidden="true">
+      <text
+        v-for="(_image, index) in detail.images"
+        :key="`dot-${index}`"
+        class="guide-dot"
+        :class="{ active: index === currentImageIndex }"
+      />
+    </view>
+
+    <view
+      v-if="detail.images.length && (detail.title || detail.subtitle || detail.tags.length)"
+      class="guide-intro"
+    >
+      <view v-if="detail.tags.length" class="guide-tags">
+        <text v-for="tag in detail.tags" :key="tag" class="guide-tag">{{ tag }}</text>
+      </view>
+      <text v-if="detail.title" class="guide-title">{{ detail.title }}</text>
+      <text v-if="detail.subtitle" class="guide-subtitle">{{ detail.subtitle }}</text>
     </view>
 
     <view class="guide-stats" aria-label="路线数据">
@@ -65,6 +83,11 @@
           />
         </template>
       </view>
+    </view>
+
+    <view v-if="detail.driveDuration" class="guide-drive">
+      <text class="guide-drive-label">自驾到达</text>
+      <text class="guide-drive-value">{{ detail.driveDuration }}</text>
     </view>
 
     <view v-if="detail.location" class="guide-section">
@@ -100,12 +123,27 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { GuideRouteDetail } from '../utils/guide-detail'
 
 const props = defineProps<{
   detail: GuideRouteDetail
 }>()
+
+const HERO_SWIPE_THRESHOLD_PX = 8
+const currentImageIndex = ref(0)
+const heroSwipeIntent = ref(false)
+let heroPointerStartX = 0
+let heroPointerStartY = 0
+let heroHasPointerStart = false
+let heroSuppressNextPreview = false
+
+watch(
+  () => props.detail.images.length,
+  (length) => {
+    if (length === 0 || currentImageIndex.value >= length) currentImageIndex.value = 0
+  },
+)
 
 const mapMarkers = computed(() => {
   if (!props.detail.location) return []
@@ -125,8 +163,51 @@ const bodyImageUrls = computed(() =>
     .map((block) => block.src)
 )
 
+function onHeroChange(event: any) {
+  const next = Number(event?.detail?.current || 0)
+  if (Number.isFinite(next)) currentImageIndex.value = next
+  if (event?.detail?.source === 'touch') heroSuppressNextPreview = true
+}
+
+function onHeroPointerStart(event: any) {
+  const point = getPointerPoint(event)
+  heroPointerStartX = point.x
+  heroPointerStartY = point.y
+  heroHasPointerStart = true
+  heroSwipeIntent.value = false
+  heroSuppressNextPreview = false
+}
+
+function onHeroPointerMove(event: any) {
+  if (!heroHasPointerStart) return
+  const point = getPointerPoint(event)
+  const dx = Math.abs(point.x - heroPointerStartX)
+  const dy = Math.abs(point.y - heroPointerStartY)
+  if (Math.max(dx, dy) >= HERO_SWIPE_THRESHOLD_PX) {
+    heroSwipeIntent.value = true
+    heroSuppressNextPreview = true
+  }
+}
+
+function onHeroPointerEnd() {
+  if (heroSwipeIntent.value) heroSuppressNextPreview = true
+  heroHasPointerStart = false
+  heroSwipeIntent.value = false
+}
+
+function getPointerPoint(event: any) {
+  const touch = event?.touches?.[0] || event?.changedTouches?.[0]
+  const x = Number(touch?.clientX ?? touch?.pageX ?? event?.clientX ?? event?.pageX ?? 0)
+  const y = Number(touch?.clientY ?? touch?.pageY ?? event?.clientY ?? event?.pageY ?? 0)
+  return { x, y }
+}
+
 function previewImage(index: number) {
   if (!props.detail.images.length) return
+  if (heroSuppressNextPreview) {
+    heroSuppressNextPreview = false
+    return
+  }
   uni.previewImage({
     current: props.detail.images[index],
     urls: props.detail.images,
@@ -161,94 +242,82 @@ function openLocation() {
 
 .guide-hero {
   position: relative;
-  height: 430rpx;
+  height: 72vh;
+  min-height: 760rpx;
+  max-height: 1120rpx;
   overflow: hidden;
   background: $hh-surface-2;
 }
 
-.guide-hero-scroll,
-.guide-hero-track,
+.guide-hero-swiper,
+.guide-hero-slide,
 .guide-hero-image {
   width: 100%;
-  height: 430rpx;
-}
-
-.guide-hero-track {
-  display: flex;
-  white-space: nowrap;
+  height: 100%;
 }
 
 .guide-hero-image {
-  flex: 0 0 100%;
   display: block;
 }
 
-.guide-hero-mask {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(180deg, rgba(13, 22, 17, 0.04) 8%, rgba(13, 22, 17, 0.32) 48%, rgba(13, 22, 17, 0.82) 100%);
-  pointer-events: none;
-}
-
-.guide-hero-copy {
-  position: absolute;
-  left: 28rpx;
-  right: 28rpx;
-  bottom: 26rpx;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+.guide-intro {
+  padding: 20rpx 28rpx 24rpx;
+  background: $hh-surface-1;
 }
 
 .guide-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 10rpx;
-  margin-bottom: 16rpx;
+  margin-bottom: 18rpx;
 }
 
 .guide-tag {
   min-height: 46rpx;
   padding: 9rpx 18rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.38);
+  border: 1rpx solid $hh-accent-line;
   border-radius: $hh-radius-full;
-  background: rgba(255, 255, 255, 0.18);
-  color: rgba(255, 255, 255, 0.96);
+  background: $hh-accent-wash;
+  color: $hh-accent-ink;
   font-size: 24rpx;
   line-height: 1.2;
 }
 
 .guide-title {
-  color: #fff;
+  display: block;
+  color: $hh-ink-1;
   font-family: $hh-font-serif;
-  font-size: 46rpx;
-  line-height: 1.16;
+  font-size: 42rpx;
+  line-height: 1.22;
   font-weight: $hh-font-weight-bold;
 }
 
 .guide-subtitle {
+  display: block;
   margin-top: 12rpx;
-  color: rgba(255, 255, 255, 0.88);
+  color: $hh-ink-2;
   font-size: 28rpx;
   line-height: 1.6;
 }
 
 .guide-dots {
   display: flex;
-  gap: 8rpx;
-  margin-top: 18rpx;
+  justify-content: center;
+  gap: 12rpx;
+  padding: 18rpx 0 8rpx;
+  background: $hh-surface-1;
+  pointer-events: none;
 }
 
 .guide-dot {
-  width: 30rpx;
-  height: 6rpx;
+  width: 12rpx;
+  height: 12rpx;
   border-radius: 999rpx;
-  background: rgba(255, 255, 255, 0.36);
+  background: rgba(47, 52, 44, 0.24);
 }
 
 .guide-dot.active {
-  width: 54rpx;
-  background: #fff;
+  background: #e64646;
 }
 
 .guide-hero-empty {
@@ -270,6 +339,7 @@ function openLocation() {
 .guide-stats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1rpx solid $hh-ink-line-2;
   border-bottom: 1rpx solid $hh-ink-line-2;
   background: $hh-surface-1;
 }
@@ -310,6 +380,30 @@ function openLocation() {
 
 .guide-section:last-child {
   border-bottom: 0;
+}
+
+.guide-drive {
+  margin: 30rpx 28rpx 0;
+  padding: 22rpx 24rpx;
+  border: 1rpx solid $hh-accent-line;
+  border-radius: $hh-radius-md;
+  background: $hh-accent-wash;
+}
+
+.guide-drive-label {
+  display: block;
+  color: $hh-ink-3;
+  font-size: 23rpx;
+  line-height: 1.25;
+}
+
+.guide-drive-value {
+  display: block;
+  margin-top: 8rpx;
+  color: $hh-accent-ink;
+  font-size: 30rpx;
+  line-height: 1.35;
+  font-weight: $hh-font-weight-bold;
 }
 
 .guide-section-heading {

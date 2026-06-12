@@ -102,6 +102,18 @@ function normalizeCloudResult<T>(data: any, name: string, action: string, source
   return data as T
 }
 
+function buildCloudCallFailure(name: string, action: string, error: any) {
+  const rawMessage = error?.errMsg || error?.message || String(error)
+  const wrapped = new Error(`[wx.cloud] ${name}/${action}: ${rawMessage}`)
+  ;(wrapped as any).errCode = error?.errCode
+  ;(wrapped as any).errMsg = error?.errMsg
+  ;(wrapped as any).cloudFunction = name
+  ;(wrapped as any).action = action
+  ;(wrapped as any).requestId = error?.requestId || error?.requestID || error?.callId || ''
+  ;(wrapped as any).raw = error
+  return wrapped
+}
+
 function summarizeParams(params: any) {
   const summary: Record<string, any> = {}
   if (!params || typeof params !== 'object') return summary
@@ -183,7 +195,7 @@ export async function callCloud<T = any>(
         }
       },
       fail: (error: any) => {
-        const wrapped = new Error(error?.errMsg || error?.message || String(error))
+        const wrapped = buildCloudCallFailure(name, action, error)
         clientLog('error', 'cloud.call.fail', {
           name,
           action,

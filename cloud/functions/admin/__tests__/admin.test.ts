@@ -329,6 +329,7 @@ test('section.create: 图文攻略展示模板可保存到板块', async () => {
       expect.objectContaining({ widgetId: 'guide_highest_altitude', type: 'short_text', label: '最高海拔', required: false, showInList: false, locked: true }),
       expect.objectContaining({ widgetId: 'guide_total_climb', type: 'short_text', label: '累计爬升', required: false, showInList: false, locked: true }),
       expect.objectContaining({ widgetId: 'guide_reference_duration', type: 'short_text', label: '参考用时', required: false, showInList: false, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_drive_duration', type: 'short_text', label: '驾车到达用时', required: true, showInList: false, locked: true }),
       expect.objectContaining({ widgetId: 'guide_body', type: 'rich_note', label: '正文', required: false, showInList: false, locked: true }),
       expect.objectContaining({ widgetId: 'guide_location', type: 'location', label: '线路轨迹/地点', required: false, showInList: false, locked: true }),
     ],
@@ -343,8 +344,9 @@ test('section.updateWidgets: 图文攻略固定控件不能删除或修改', asy
     { widgetId: 'guide_highest_altitude', type: 'short_text', label: '最高海拔', fieldKey: 'highestAltitude', required: false, order: 3, showInList: false, locked: true },
     { widgetId: 'guide_total_climb', type: 'short_text', label: '累计爬升', fieldKey: 'totalClimb', required: false, order: 4, showInList: false, locked: true },
     { widgetId: 'guide_reference_duration', type: 'short_text', label: '参考用时', fieldKey: 'referenceDuration', required: false, order: 5, showInList: false, locked: true },
-    { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 6, showInList: false, locked: true },
-    { widgetId: 'guide_location', type: 'location', label: '线路轨迹/地点', fieldKey: 'location', required: false, order: 7, showInList: false, locked: true },
+    { widgetId: 'guide_drive_duration', type: 'short_text', label: '驾车到达用时', fieldKey: 'driveDuration', required: true, order: 6, showInList: false, locked: true },
+    { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 7, showInList: false, locked: true },
+    { widgetId: 'guide_location', type: 'location', label: '线路轨迹/地点', fieldKey: 'location', required: false, order: 8, showInList: false, locked: true },
   ]
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-guide',
@@ -378,8 +380,9 @@ test('section.updateWidgets: 图文攻略允许在固定控件后追加小控件
     { widgetId: 'guide_highest_altitude', type: 'short_text', label: '最高海拔', fieldKey: 'highestAltitude', required: false, order: 3, showInList: false, locked: true },
     { widgetId: 'guide_total_climb', type: 'short_text', label: '累计爬升', fieldKey: 'totalClimb', required: false, order: 4, showInList: false, locked: true },
     { widgetId: 'guide_reference_duration', type: 'short_text', label: '参考用时', fieldKey: 'referenceDuration', required: false, order: 5, showInList: false, locked: true },
-    { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 6, showInList: false, locked: true },
-    { widgetId: 'guide_location', type: 'location', label: '线路轨迹/地点', fieldKey: 'location', required: false, order: 7, showInList: false, locked: true },
+    { widgetId: 'guide_drive_duration', type: 'short_text', label: '驾车到达用时', fieldKey: 'driveDuration', required: true, order: 6, showInList: false, locked: true },
+    { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 7, showInList: false, locked: true },
+    { widgetId: 'guide_location', type: 'location', label: '线路轨迹/地点', fieldKey: 'location', required: false, order: 8, showInList: false, locked: true },
   ]
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-guide',
@@ -395,15 +398,16 @@ test('section.updateWidgets: 图文攻略允许在固定控件后追加小控件
     sectionId: 'section-guide',
     widgets: [
       ...guideWidgets,
-      { widgetId: 'guide_age', type: 'short_text', label: '适合年龄', fieldKey: 'age', required: false, order: 8, showInList: false },
+      { widgetId: 'guide_age', type: 'short_text', label: '适合年龄', fieldKey: 'age', required: false, order: 9, showInList: false },
     ],
   })
 
-  expect(result.widgets.slice(0, 8).every((widget: any) => widget.locked === true)).toBe(true)
-  expect(result.widgets[8]).toEqual(expect.objectContaining({ widgetId: 'guide_age', locked: false }))
+  expect(result.widgets.slice(0, 9).every((widget: any) => widget.locked === true)).toBe(true)
+  expect(result.widgets[9]).toEqual(expect.objectContaining({ widgetId: 'guide_age', locked: false }))
   expect(db.updateById).toHaveBeenCalledWith('sections', 'section-guide', expect.objectContaining({
     widgets: expect.arrayContaining([
       expect.objectContaining({ widgetId: 'guide_images', required: true, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_drive_duration', required: true, locked: true }),
       expect.objectContaining({ widgetId: 'guide_distance', locked: true }),
       expect.objectContaining({ widgetId: 'guide_age', locked: false }),
     ]),
@@ -428,20 +432,28 @@ test('section.get: 旧图文攻略板块会补齐路线攻略固定控件', asyn
     sectionId: 'section-guide',
   })
 
-  expect(result.section.widgets.map((widget: any) => widget.widgetId).slice(0, 8)).toEqual([
+  expect(result.section.widgets.map((widget: any) => widget.widgetId).slice(0, 9)).toEqual([
     'guide_title',
     'guide_images',
     'guide_distance',
     'guide_highest_altitude',
     'guide_total_climb',
     'guide_reference_duration',
+    'guide_drive_duration',
     'guide_body',
     'guide_location',
   ])
-  expect(result.section.widgets[7]).toEqual(expect.objectContaining({
+  expect(result.section.widgets[6]).toEqual(expect.objectContaining({
+    widgetId: 'guide_drive_duration',
+    label: '驾车到达用时',
+    required: true,
+    order: 6,
+    locked: true,
+  }))
+  expect(result.section.widgets[8]).toEqual(expect.objectContaining({
     widgetId: 'guide_location',
     label: '线路轨迹/地点',
-    order: 7,
+    order: 8,
     locked: true,
   }))
 })
@@ -558,6 +570,71 @@ test('community.hardDelete: cleans cloud files from current and pending post con
     'cloud://env/current.jpg',
     'cloud://env/pending.jpg',
   ])
+})
+
+test('admin.createAccount: 创建绑定微信的 superAdmin 时同步小程序用户角色', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([]) // username 未占用
+  ;(db.getById as jest.Mock).mockRejectedValueOnce(Object.assign(new Error('not found'), { errCode: -502001 }))
+  ;(db.create as jest.Mock)
+    .mockResolvedValueOnce('super-account-1')
+    .mockResolvedValueOnce('super-openid')
+
+  const result: any = await main({
+    action: 'admin.createAccount',
+    username: 'ops',
+    password: 'happyhome2024',
+    role: 'superAdmin',
+    userId: 'super-openid',
+    _actAs: { accountId: 'root', role: 'superAdmin', userId: 'root-openid', username: 'root' },
+  })
+
+  expect(db.create).toHaveBeenCalledWith('admin_accounts', expect.objectContaining({
+    username: 'ops',
+    userId: 'super-openid',
+    role: 'superAdmin',
+    status: 'active',
+  }))
+  expect(db.create).toHaveBeenCalledWith('users', expect.objectContaining({
+    _id: 'super-openid',
+    role: 'superAdmin',
+    roleSource: 'admin_account',
+  }))
+  expect(result.accountId).toBe('super-account-1')
+})
+
+test('admin.bindWechat: 绑定 superAdmin 微信 openId 时同步小程序用户角色', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([]) // openId 未绑定其他账号
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({
+      _id: 'super-account-1',
+      username: 'admin',
+      role: 'superAdmin',
+      status: 'active',
+      userId: '',
+    })
+    .mockResolvedValueOnce({
+      _id: 'super-openid',
+      nickName: '一年',
+      avatarUrl: '',
+      role: 'user',
+    })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+  ;(db.updateWhere as jest.Mock).mockResolvedValue({})
+
+  const result: any = await main({
+    action: 'admin.bindWechat',
+    accountId: 'super-account-1',
+    openId: 'super-openid',
+    _actAs: { accountId: 'root', role: 'superAdmin', userId: 'root-openid', username: 'root' },
+  })
+
+  expect(db.updateById).toHaveBeenCalledWith('admin_accounts', 'super-account-1', { userId: 'super-openid' })
+  expect(db.updateById).toHaveBeenCalledWith('users', 'super-openid', {
+    role: 'superAdmin',
+    roleSource: 'admin_account',
+  })
+  expect(db.updateWhere).toHaveBeenCalledWith('admin_sessions', { accountId: 'super-account-1' }, { userId: 'super-openid' })
+  expect(result.success).toBe(true)
 })
 
 test('admin.listAccounts: 标记未删除社区的创建者管理员账号', async () => {
