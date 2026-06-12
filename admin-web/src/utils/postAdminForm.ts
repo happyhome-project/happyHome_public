@@ -39,7 +39,7 @@ export function widgetHint(type: string) {
   if (type === 'note_blocks') return '按顺序添加文字和图片，适合家书、笔记、课程材料'
   if (type === 'rich_note') return '支持基础排版和图片混排'
   if (type === 'image_group') return '支持上传多张图片，第一张会作为列表封面'
-  if (type === 'location') return '填写真实目的地或线路轨迹位置'
+  if (type === 'location') return '搜索真实目的地，可在地图上微调点位'
   if (type === 'attendance') return '活动参与控件由成员点击参与产生数据，不在帖子内容中填写'
   return ''
 }

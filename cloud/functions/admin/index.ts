@@ -13,6 +13,7 @@ import {
 } from '../../lib/content-audit'
 import { getEditableWidgetIds, sanitizeContent, validateContentValues, validateRequiredWidgets } from '../../lib/post-validate'
 import { getWxacodeUnlimited } from '../../lib/wx-openapi'
+import { searchAmapPoi } from '../../lib/amap'
 import {
   assertOwnCommunityOrSuper,
   generateSalt,
@@ -161,7 +162,7 @@ const GUIDE_NOTE_LOCKED_WIDGETS: Widget[] = [
   { widgetId: 'guide_total_climb', type: 'short_text', label: '累计爬升', fieldKey: 'totalClimb', required: false, order: 4, showInList: false, locked: true },
   { widgetId: 'guide_reference_duration', type: 'short_text', label: '参考用时', fieldKey: 'referenceDuration', required: false, order: 5, showInList: false, locked: true },
   { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 6, showInList: false, locked: true },
-  { widgetId: 'guide_location', type: 'location', label: '线路轨迹/地点', fieldKey: 'location', required: false, order: 7, showInList: false, locked: true },
+  { widgetId: 'guide_location', type: 'location', label: '目的地位置', fieldKey: 'location', required: true, order: 7, showInList: false, locked: true },
 ]
 
 const GUIDE_NOTE_LOCKED_BY_ID = new Map(GUIDE_NOTE_LOCKED_WIDGETS.map((widget) => [widget.widgetId, widget]))
@@ -797,6 +798,14 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
   }
   if (action === 'admin.approvalSummary') {
     return buildApprovalSummary(ctx)
+  }
+
+  if (action === 'geo.searchLocation') {
+    const keyword = String(params.keyword || '').trim()
+    if (!keyword) throw new Error('地点关键字不能为空')
+    const region = String(params.region || '').trim()
+    const candidates = await searchAmapPoi({ keyword, region, limit: 8 })
+    return { candidates }
   }
 
   if (action === 'user.setSuperAdmin') {

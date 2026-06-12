@@ -83,12 +83,12 @@
 
     <view v-if="detail.location" class="guide-section">
       <view class="guide-section-heading">
-        <text>线路轨迹</text>
+        <text>目的地位置</text>
       </view>
       <!-- #ifdef H5 -->
       <view class="guide-map-fallback" @tap="openLocation">
-        <text class="guide-map-fallback-title">{{ detail.location.address || '线路轨迹' }}</text>
-        <text class="guide-map-fallback-sub">纬度 {{ detail.location.lat }} · 经度 {{ detail.location.lng }}</text>
+        <text class="guide-map-fallback-title">{{ detail.location.name || detail.location.address || '目的地位置' }}</text>
+        <text class="guide-map-fallback-sub">点击打开地图导航</text>
       </view>
       <!-- #endif -->
       <!-- #ifndef H5 -->
@@ -104,8 +104,8 @@
           :enable-rotate="false"
           :enable-overlooking="false"
         />
-        <view v-if="detail.location.address" class="guide-map-meta">
-          <text>{{ detail.location.address }}</text>
+        <view v-if="detail.location.address || detail.location.name" class="guide-map-meta">
+          <text>{{ detail.location.address || detail.location.name }}</text>
         </view>
       </view>
       <!-- #endif -->
@@ -218,7 +218,7 @@ function openLocation() {
     latitude: loc.lat,
     longitude: loc.lng,
     address: loc.address,
-    name: loc.address || '线路轨迹',
+    name: loc.name || loc.address || '目的地位置',
     scale: 16,
   })
 }
