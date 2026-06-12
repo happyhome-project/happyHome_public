@@ -356,7 +356,7 @@ export async function handleUpdate(
   const updatedAt = new Date().toISOString()
   if (post.auditStatus === 'pass' || !post.auditStatus) {
     await db.updateById('posts', params.postId, {
-      pendingContent: sanitizedContent,
+      pendingContent: db.replaceValue(sanitizedContent),
       pendingAuditStatus: 'pending',
       pendingAuditReason: 'content audit pending',
       pendingSubmittedAt: updatedAt,
@@ -376,7 +376,7 @@ export async function handleUpdate(
   }
 
   await db.updateById('posts', params.postId, {
-    content: sanitizedContent,
+    content: db.replaceValue(sanitizedContent),
     auditStatus: 'pending',
     auditReason: 'content audit pending',
     auditUpdatedAt: updatedAt,

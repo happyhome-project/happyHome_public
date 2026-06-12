@@ -11,6 +11,40 @@ function collection(name: string): Map<string, any> {
   return store.get(name)!
 }
 
+type LocalDbCommand =
+  | { __happyHomeDbCommand: 'set'; value: any }
+  | { __happyHomeDbCommand: 'remove' }
+
+function isLocalDbCommand(value: any): value is LocalDbCommand {
+  return value && typeof value === 'object' && typeof value.__happyHomeDbCommand === 'string'
+}
+
+function cloneValue<T>(value: T): T {
+  if (value === undefined || value === null) return value
+  return JSON.parse(JSON.stringify(value))
+}
+
+export function replaceValue<T>(value: T) {
+  return { __happyHomeDbCommand: 'set', value } as LocalDbCommand
+}
+
+export function removeField() {
+  return { __happyHomeDbCommand: 'remove' } as LocalDbCommand
+}
+
+function applyUpdate(existing: any, data: Record<string, any>) {
+  const next = { ...existing }
+  for (const [key, value] of Object.entries(data)) {
+    if (isLocalDbCommand(value)) {
+      if (value.__happyHomeDbCommand === 'remove') delete next[key]
+      else next[key] = cloneValue(value.value)
+      continue
+    }
+    next[key] = value
+  }
+  return next
+}
+
 /** 清空所有数据，测试间隔调用 */
 export function _resetAll() {
   store.clear()
@@ -51,7 +85,7 @@ export async function updateById(
     err.errCode = -502001
     throw err
   }
-  col.set(id, { ...existing, ...data })
+  col.set(id, applyUpdate(existing, data as Record<string, any>))
   return { stats: { updated: 1 } }
 }
 
@@ -64,7 +98,7 @@ export async function updateWhere(
   let updated = 0
   for (const [id, doc] of col) {
     if (matchesWhere(doc, where)) {
-      col.set(id, { ...doc, ...data })
+      col.set(id, applyUpdate(doc, data as Record<string, any>))
       updated++
     }
   }

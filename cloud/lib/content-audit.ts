@@ -427,8 +427,8 @@ export async function applyAuditSummary(postId: string, slot: 'content' | 'pendi
         return
       }
       await db.updateById('posts', postId, {
-        content: post.pendingContent,
-        pendingContent: null,
+        content: db.replaceValue(post.pendingContent),
+        pendingContent: db.removeField(),
         pendingAuditStatus: 'pass',
         pendingAuditReason: '',
         auditStatus: 'pass',

@@ -12,6 +12,8 @@ const expectedExports = [
   'removeById',
   'softDelete',
   'increment',
+  'replaceValue',
+  'removeField',
   'query',
 ]
 
@@ -56,6 +58,25 @@ test('updateById 更新字段', async () => {
   await dbLocal.updateById('test_col', id, { name: 'new' })
   const doc = await dbLocal.getById('test_col', id)
   expect(doc.name).toBe('new')
+})
+
+test('updateById 支持 replaceValue 整块替换对象和 removeField 删除字段', async () => {
+  const id = await dbLocal.create('test_col', {
+    pendingContent: null,
+    content: { old: 'value', stale: 'should be removed' },
+    staleField: 'remove me',
+  })
+
+  await dbLocal.updateById('test_col', id, {
+    pendingContent: dbLocal.replaceValue({ guide_age: '8岁以上' }),
+    content: dbLocal.replaceValue({ guide_title: '新标题' }),
+    staleField: dbLocal.removeField(),
+  })
+
+  const doc = await dbLocal.getById('test_col', id)
+  expect(doc.pendingContent).toEqual({ guide_age: '8岁以上' })
+  expect(doc.content).toEqual({ guide_title: '新标题' })
+  expect(doc).not.toHaveProperty('staleField')
 })
 
 test('softDelete 将 status 设为 deleted', async () => {
