@@ -47,19 +47,16 @@
           <view v-else class="guide-cover guide-cover-empty">
             <text>{{ sectionName.slice(0, 2) }}</text>
           </view>
-            <view class="guide-body">
-              <text class="guide-title">{{ item.title }}</text>
-              <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
-              <view v-if="item.routeStats.length" class="guide-stats">
-                <text
-                  v-for="stat in item.routeStats"
-                  :key="stat.label"
-                  class="guide-stat"
-                >{{ stat.value }} {{ stat.label }}</text>
-              </view>
-              <view class="guide-meta">
-                <text v-if="item.location" class="guide-location">{{ item.location }}</text>
-                <text v-if="item.when" class="guide-chip">{{ item.when }}</text>
+          <view class="guide-body">
+            <text class="guide-title">{{ item.title }}</text>
+            <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
+            <view v-if="item.driveDuration" class="guide-stats">
+              <text
+                class="guide-stat"
+              >{{ item.driveDuration }}</text>
+            </view>
+            <view class="guide-meta">
+              <text v-if="item.when" class="guide-chip">{{ item.when }}</text>
               <text v-if="item.author" class="guide-chip">{{ item.author }}</text>
             </view>
           </view>

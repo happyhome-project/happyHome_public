@@ -1,7 +1,10 @@
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 import {
+  approvalReminderErrorMessage,
   buildApprovalReminderState,
   buildSubscriptionSaves,
+  isRetryableApprovalSubscriptionSaveError,
+  saveApprovalSubscriptionWithRetry,
   uniqueTemplateIds,
   type ApprovalNotificationTemplate,
 } from '../approval-notification'
@@ -67,5 +70,45 @@ describe('approval notification helper', () => {
       message: '请在真机微信中开启审批提醒。',
       canRequest: false,
     })
+  })
+
+  test('marks transient cloud subscription save failures as retryable', () => {
+    expect(isRetryableApprovalSubscriptionSaveError({
+      errCode: -504002,
+      action: 'saveNotificationSubscription',
+    })).toBe(true)
+
+    expect(isRetryableApprovalSubscriptionSaveError({
+      errMsg: 'cloud.callFunction:fail Error: errCode: -504002 functions execute fail',
+      action: 'saveNotificationSubscription',
+    })).toBe(true)
+
+    expect(isRetryableApprovalSubscriptionSaveError({
+      errCode: -504002,
+      action: 'notificationStatus',
+    })).toBe(false)
+  })
+
+  test('converts approval reminder failures into user-readable text', () => {
+    expect(approvalReminderErrorMessage({
+      errCode: -504002,
+      action: 'saveNotificationSubscription',
+    })).toBe('提醒授权已返回，但保存失败（-504002），请稍后重试')
+
+    expect(approvalReminderErrorMessage({
+      errMsg: 'requestSubscribeMessage:fail cancel',
+    })).toBe('未开启提醒，可稍后再试')
+  })
+
+  test('retries a transient subscription save failure once', async () => {
+    const item = { eventType: 'member_join_pending' as const, templateId: 'tmpl-shared', status: 'accept' as const }
+    const save = vi.fn()
+      .mockRejectedValueOnce({ errCode: -504002, action: 'saveNotificationSubscription' })
+      .mockResolvedValueOnce({ success: true })
+
+    await expect(saveApprovalSubscriptionWithRetry(item, save, 0)).resolves.toEqual({ success: true })
+    expect(save).toHaveBeenCalledTimes(2)
+    expect(save).toHaveBeenNthCalledWith(1, item)
+    expect(save).toHaveBeenNthCalledWith(2, item)
   })
 })

@@ -4,14 +4,15 @@ import path from 'path'
 const root = process.cwd()
 const sectionList = fs.readFileSync(path.join(root, 'admin-web', 'src', 'views', 'CommunityAdmin', 'SectionList.vue'), 'utf8')
 const adminApi = fs.readFileSync(path.join(root, 'admin-web', 'src', 'api', 'cloud.ts'), 'utf8')
+const adminWidgetEditor = fs.readFileSync(path.join(root, 'admin-web', 'src', 'views', 'CommunityAdmin', 'WidgetEditor.vue'), 'utf8')
 const homePage = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'pages', 'index', 'index.vue'), 'utf8')
+const sectionPage = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'pages', 'section', 'index.vue'), 'utf8')
 const createPage = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'pages', 'create', 'index.vue'), 'utf8')
 const detailPage = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'pages', 'detail', 'index.vue'), 'utf8')
 const guideRouteDetail = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'components', 'GuideRouteDetailView.vue'), 'utf8')
 const widgetEditor = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'components', 'widgets', 'WidgetEditor.vue'), 'utf8')
 const widgetRenderer = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'components', 'widgets', 'WidgetRenderer.vue'), 'utf8')
 const locationAdminEditor = fs.readFileSync(path.join(root, 'admin-web', 'src', 'components', 'LocationAdminEditor.vue'), 'utf8')
-const adminWidgetEditor = fs.readFileSync(path.join(root, 'admin-web', 'src', 'views', 'CommunityAdmin', 'WidgetEditor.vue'), 'utf8')
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -20,6 +21,12 @@ function assert(condition, message) {
 assert(
   sectionList.includes('displayTemplate') && sectionList.includes('value="guide_note"'),
   'SectionList must expose a displayTemplate selector with a guide-note option.'
+)
+
+assert(
+  adminWidgetEditor.includes('guide_drive_duration') &&
+    adminWidgetEditor.includes('guide_location'),
+  'Admin widget editor must lock the guide drive-duration field together with the route location field.'
 )
 
 assert(
@@ -35,6 +42,14 @@ assert(
 assert(
   homePage.includes('getGuideNoteCard') && homePage.includes('guide-card'),
   'mini program home must render guide_note sections with guide cards.'
+)
+
+assert(
+  homePage.includes('driveDuration') &&
+    sectionPage.includes('driveDuration') &&
+    !homePage.includes('item.location') &&
+    !sectionPage.includes('item.location'),
+  'mini program guide cards must show drive duration instead of a precise location.'
 )
 
 assert(
@@ -57,10 +72,17 @@ assert(
 )
 
 assert(
-  guideRouteDetail.includes('rgba(13, 22, 17, 0.56)') &&
-    !guideRouteDetail.includes('rgba(13, 22, 17, 0.82)') &&
-    guideRouteDetail.includes('text-shadow'),
-  'guide route detail hero must keep scenic photos readable without relying on a heavy dark mask.'
+  !guideRouteDetail.includes('guide-hero-mask') &&
+    !guideRouteDetail.includes('guide-hero-copy') &&
+    !guideRouteDetail.includes('text-shadow') &&
+    guideRouteDetail.includes('class="guide-intro"'),
+  'guide route detail hero must preserve original photo color and move title copy below the image.'
+)
+
+assert(
+  guideRouteDetail.includes('guide-drive') &&
+    guideRouteDetail.indexOf('guide-drive') < guideRouteDetail.indexOf('guide-map'),
+  'guide route detail must show drive duration above the route/track section.'
 )
 
 assert(

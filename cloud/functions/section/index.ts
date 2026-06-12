@@ -6,6 +6,7 @@ import { assertCommunityAdmin } from '../../lib/auth'
 import { isPostVisibleToMembers } from '../../lib/content-audit'
 import type { Widget, Section, SectionType, SectionStatus } from '../../shared/types'
 import { LIST_DISPLAYABLE_TYPES } from '../../shared/types'
+import { normalizeGuideNoteSection } from '../../shared/guide-note-widgets'
 
 const COMMUNITY_READ_ERROR = '需要先加入社区后查看内容'
 
@@ -14,13 +15,13 @@ function normalizeNoticeContent(value: unknown) {
 }
 
 function normalizeSection(s: any): Section {
-  return {
+  return normalizeGuideNoteSection({
     ...s,
     type: (s.type as SectionType) || 'evergreen',
     status: (s.status as SectionStatus) || 'active',
     enableComment: s.enableComment !== false,
     enableLike: s.enableLike !== false,
-  }
+  }) as Section
 }
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })

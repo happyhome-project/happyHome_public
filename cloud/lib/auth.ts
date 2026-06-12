@@ -2,11 +2,19 @@
 // 共享权限校验函数，所有云函数通过此文件做权限检查
 import { randomBytes, scryptSync, timingSafeEqual } from 'crypto'
 import * as db from './db'
+import { isBoundSuperAdmin } from './admin-identity'
 import type { AdminCtx, Community, CommunityMember } from '../shared/types'
 
 export async function assertSuperAdmin(openId: string): Promise<void> {
-  const user = await db.getById('users', openId) as { role: string }
-  if (user.role !== 'superAdmin') throw new Error('权限不足')
+  try {
+    const user = await db.getById('users', openId) as { role: string }
+    if (user.role === 'superAdmin') return
+  } catch (error) {
+    if (await isBoundSuperAdmin(openId)) return
+    throw error
+  }
+  if (await isBoundSuperAdmin(openId)) return
+  throw new Error('权限不足')
 }
 
 export async function assertCommunityAdmin(openId: string, communityId: string): Promise<void> {

@@ -343,6 +343,8 @@ import {
   buildApprovalReminderState,
   buildSubscriptionSaves,
   configuredApprovalTemplates,
+  approvalReminderErrorMessage,
+  saveApprovalSubscriptionWithRetry,
   uniqueTemplateIds,
   type ApprovalNotificationTemplate,
 } from '../../utils/approval-notification'
@@ -514,10 +516,8 @@ const submitFormLock = useBusyLock(async () => {
   try {
     const avatarUrl = await uploadAvatarIfAny()
     await userStore.login({ nickName: formNickName.value, avatarUrl })
-    if (!isEditingProfile.value) {
-      // 首次登录：加载我的社区
-      await communityStore.loadMyCommunities()
-    }
+    if (isEditingProfile.value) await loadProfileDataAfterRoleResolved('profileSaved')
+    else await loadProfileDataAfterRoleResolved('loginSaved')
     isEditingProfile.value = false
     showNickConfirm.value = false
     formAvatarTempPath.value = ''
@@ -697,7 +697,7 @@ const notificationSubscribeLock = useBusyLock(async () => {
 
     const saves = buildSubscriptionSaves(templates, result)
     for (const item of saves) {
-      await notificationApi.saveSubscription(item)
+      await saveApprovalSubscriptionWithRetry(item, notificationApi.saveSubscription)
     }
     await loadNotificationStatus()
     const accepted = saves.some((item) => item.status === 'accept')
@@ -706,7 +706,7 @@ const notificationSubscribeLock = useBusyLock(async () => {
       icon: accepted ? 'success' : 'none',
     })
   } catch (e: any) {
-    uni.showToast({ title: e?.errMsg || e?.message || '开启提醒失败', icon: 'none' })
+    uni.showToast({ title: approvalReminderErrorMessage(e), icon: 'none' })
   }
 })
 
@@ -789,6 +789,36 @@ async function loadNotificationConfig() {
   }
 }
 
+async function loadProfileDataAfterRoleResolved(reason: string) {
+  await communityStore.loadMyCommunities()
+  logProfile('info', 'profile.communities.load.success', {
+    reason,
+    loadedCommunityCount: communityStore.myCommunities.length,
+  })
+  await loadPendingCommunities()
+  await loadPendingMembers()
+  logProfile('info', 'profile.pending.load.success', {
+    reason,
+    pendingCommunityCount: pendingCommunities.value.length,
+    pendingMemberCount: pendingMembers.value.length,
+    pendingApprovalCount: pendingApprovalCount.value,
+    adminCommunityCount: adminCommunityIds.value.length,
+  })
+  if (hasAdminTools.value) {
+    await loadNotificationConfig()
+    await loadNotificationSubscriptions()
+    logProfile('info', 'profile.notifications.load.success', {
+      reason,
+      templateCount: configuredNotificationTemplates.value.length,
+      subscriptionCount: notificationSubscriptions.value.length,
+    })
+  } else {
+    notificationTemplates.value = []
+    notificationSubscriptions.value = []
+    notificationNeedsAuthorization.value = false
+  }
+}
+
 async function refreshProfileData(reason = 'manual') {
   if (refreshingProfile) {
     logProfile('warn', 'profile.refresh.skip.busy', { reason })
@@ -803,29 +833,8 @@ async function refreshProfileData(reason = 'manual') {
   profileError.value = ''
   logProfile('info', 'profile.refresh.start', { reason })
   try {
-    await communityStore.loadMyCommunities()
-    logProfile('info', 'profile.communities.load.success', {
-      reason,
-      loadedCommunityCount: communityStore.myCommunities.length,
-    })
-    await loadPendingCommunities()
-    await loadPendingMembers()
-    logProfile('info', 'profile.pending.load.success', {
-      reason,
-      pendingCommunityCount: pendingCommunities.value.length,
-      pendingMemberCount: pendingMembers.value.length,
-      pendingApprovalCount: pendingApprovalCount.value,
-      adminCommunityCount: adminCommunityIds.value.length,
-    })
-    if (hasAdminTools.value) {
-      await loadNotificationConfig()
-      await loadNotificationSubscriptions()
-      logProfile('info', 'profile.notifications.load.success', {
-        reason,
-        templateCount: configuredNotificationTemplates.value.length,
-        subscriptionCount: notificationSubscriptions.value.length,
-      })
-    }
+    await userStore.refreshLoginRole()
+    await loadProfileDataAfterRoleResolved(reason)
   } catch (error: any) {
     profileError.value = error?.message || 'profile refresh failed'
     logProfile('error', 'profile.refresh.fail', { reason, error })

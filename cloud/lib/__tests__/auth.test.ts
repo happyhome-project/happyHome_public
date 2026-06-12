@@ -23,13 +23,37 @@ describe('assertSuperAdmin', () => {
     expect(db.getById).toHaveBeenCalledWith('users', 'admin-openid')
   })
 
+  test('users 仍是普通角色但后台账号已绑定 superAdmin 时通过校验', async () => {
+    ;(db.getById as jest.Mock).mockResolvedValue({ role: 'user' })
+    ;(db.query as jest.Mock).mockResolvedValue([
+      { _id: 'admin-account-1', userId: 'admin-openid', role: 'superAdmin', status: 'active' },
+    ])
+
+    await expect(assertSuperAdmin('admin-openid')).resolves.toBeUndefined()
+    expect(db.query).toHaveBeenCalledWith('admin_accounts', {
+      userId: 'admin-openid',
+      status: 'active',
+    }, { limit: 20 })
+  })
+
+  test('用户记录缺失但后台账号已绑定 superAdmin 时通过校验', async () => {
+    ;(db.getById as jest.Mock).mockRejectedValue(new Error('not found'))
+    ;(db.query as jest.Mock).mockResolvedValue([
+      { _id: 'admin-account-1', userId: 'admin-openid', role: 'superAdmin', status: 'active' },
+    ])
+
+    await expect(assertSuperAdmin('admin-openid')).resolves.toBeUndefined()
+  })
+
   test('普通 user 角色抛出权限不足', async () => {
     ;(db.getById as jest.Mock).mockResolvedValue({ role: 'user' })
+    ;(db.query as jest.Mock).mockResolvedValue([])
     await expect(assertSuperAdmin('user-openid')).rejects.toThrow('权限不足')
   })
 
   test('用户不存在时 getById 抛出错误向上传播', async () => {
     ;(db.getById as jest.Mock).mockRejectedValue(new Error('not found'))
+    ;(db.query as jest.Mock).mockResolvedValue([])
     await expect(assertSuperAdmin('nonexistent')).rejects.toThrow('not found')
   })
 })

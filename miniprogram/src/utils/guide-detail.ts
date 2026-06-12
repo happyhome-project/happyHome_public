@@ -33,6 +33,7 @@ export interface GuideRouteDetail {
   images: string[]
   stats: GuideRouteStat[]
   bodySections: GuideRouteBodySection[]
+  driveDuration: string
   location: GuideRouteLocation | null
 }
 
@@ -71,8 +72,18 @@ export function buildGuideRouteDetail(post: Post, section: Section): GuideRouteD
     images: collectTopImages(post, section),
     stats: buildStats(post, section),
     bodySections: collectBodySections(post, bodyWidgets),
+    driveDuration: collectDriveDuration(post, section),
     location: collectLocation(post, section),
   }
+}
+
+function collectDriveDuration(post: Post, section: Section): string {
+  const widget = findFirstWidget(section, {
+    fieldKeys: ['driveDuration', 'driveTime', 'drivingTime', 'arrivalDuration', 'arrivalTime'],
+    labels: ['驾车到达用时', '驾车时间', '自驾时间', '到达时间', '车程'],
+    types: ['short_text', 'summary'],
+  })
+  return widget ? widgetTextValue(post, widget) : ''
 }
 
 function buildStats(post: Post, section: Section): GuideRouteStat[] {

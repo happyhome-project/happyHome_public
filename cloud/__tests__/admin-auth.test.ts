@@ -204,16 +204,33 @@ describe('admin auth: session middleware', () => {
   })
 
   test('admin.bindWechat syncs existing sessions so binding takes effect immediately', async () => {
-    ;(db.getById as jest.Mock).mockResolvedValue({
-      _id: 'session-token',
-      accountId: 'acc-admin',
-      role: 'superAdmin',
-      userId: '',
-      username: 'admin',
-      expiresAt: new Date(Date.now() + 1e9).toISOString(),
-    })
+    ;(db.getById as jest.Mock)
+      .mockResolvedValueOnce({
+        _id: 'session-token',
+        accountId: 'acc-admin',
+        role: 'superAdmin',
+        userId: '',
+        username: 'admin',
+        expiresAt: new Date(Date.now() + 1e9).toISOString(),
+      })
+      .mockResolvedValueOnce({
+        _id: 'acc-admin',
+        role: 'superAdmin',
+        userId: '',
+        username: 'admin',
+        status: 'active',
+      })
+      .mockResolvedValueOnce({
+        _id: 'acc-admin',
+        role: 'superAdmin',
+        userId: '',
+        username: 'admin',
+        status: 'active',
+      })
+      .mockRejectedValueOnce(Object.assign(new Error('not found'), { errCode: -502001 }))
     ;(db.query as jest.Mock).mockResolvedValueOnce([])
     ;(db.updateById as jest.Mock).mockResolvedValue({})
+    ;(db.create as jest.Mock).mockResolvedValue('openid-year')
     ;(db.updateWhere as jest.Mock).mockResolvedValue({})
 
     const res = await adminMain(httpEvent(

@@ -64,6 +64,29 @@ describe('buildGuideRouteDetail', () => {
     ])
   })
 
+  test('驾车到达用时作为独立攻略信息，不进入路线数据四格', () => {
+    const section = baseSection([
+      { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
+      { widgetId: 'driveDuration', type: 'short_text', label: '驾车到达用时', fieldKey: 'driveDuration', required: true, order: 1, showInList: false },
+      { widgetId: 'distance', type: 'short_text', label: '距离', fieldKey: 'distance', required: false, order: 2, showInList: false },
+    ])
+    const post = basePost({
+      title: '太平水库亲子游',
+      driveDuration: '青山村约30分钟车程',
+      distance: '约1.5-2km',
+    })
+
+    const detail = buildGuideRouteDetail(post, section)
+
+    expect(detail.driveDuration).toBe('青山村约30分钟车程')
+    expect(detail.stats).toEqual([
+      { key: 'distance', label: '距离', value: '约1.5-2km' },
+      { key: 'highestAltitude', label: '最高海拔', value: '' },
+      { key: 'totalClimb', label: '累计爬升', value: '' },
+      { key: 'referenceDuration', label: '参考用时', value: '' },
+    ])
+  })
+
   test('封面图片用于顶部，正文只保留文字段落', () => {
     const section = baseSection([
       { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },

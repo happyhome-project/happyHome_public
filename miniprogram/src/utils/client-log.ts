@@ -30,11 +30,15 @@ function normalizeValue(value: any, depth: number): any {
   if (valueType === 'number' || valueType === 'boolean') return value
   if (valueType === 'function') return '[function]'
   if (value instanceof Error) {
-    return {
+    const normalized: Record<string, any> = {
       name: value.name,
       message: trimString(value.message || ''),
       stack: trimString(value.stack || ''),
     }
+    for (const key of ['errCode', 'errMsg', 'cloudFunction', 'action', 'requestId', 'trace']) {
+      if ((value as any)[key] !== undefined) normalized[key] = normalizeValue((value as any)[key], depth + 1)
+    }
+    return normalized
   }
   if (depth >= 3) return '[max-depth]'
   if (Array.isArray(value)) {
@@ -87,6 +91,20 @@ function emitConsole(level: LogLevel, event: string, payload: Record<string, any
   }
 }
 
+function isVerboseCloudLoggingEnabled() {
+  try {
+    const value = wxRef?.getStorageSync ? wxRef.getStorageSync('hh_client_log_verbose') : ''
+    return value === true || value === '1' || value === 'true'
+  } catch (_error) {
+    return false
+  }
+}
+
+function shouldUploadToCloud(level: LogLevel) {
+  if (level === 'warn' || level === 'error') return true
+  return isVerboseCloudLoggingEnabled()
+}
+
 export function clientLog(level: LogLevel, event: string, details: Record<string, any> = {}) {
   const payload = {
     action: 'clientLog',
@@ -102,6 +120,7 @@ export function clientLog(level: LogLevel, event: string, details: Record<string
   emitConsole(level, event, payload)
 
   try {
+    if (!shouldUploadToCloud(level)) return
     if (!wxRef || !wxRef.cloud || !wxRef.cloud.callFunction) return
     wxRef.cloud.callFunction({
       name: 'post',
