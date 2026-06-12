@@ -150,8 +150,16 @@ function renderParagraphLine(line: string): string {
   return preserveConsecutiveSpaces(renderInline(line))
 }
 
+function pushRepeated(target: string[], count: number, value: string) {
+  for (let i = 0; i < count; i += 1) {
+    target.push(value)
+  }
+}
+
 function renderBlankLines(count: number): string {
-  return Array.from({ length: count }, () => '&nbsp;').join('<br>')
+  const lines: string[] = []
+  pushRepeated(lines, count, '&nbsp;')
+  return lines.join('<br>')
 }
 
 function isMarkdownBlockStart(line: string): boolean {
@@ -203,7 +211,7 @@ export function markdownToHtml(markdown: string): string {
   }
   const prependPendingBlankLinesToParagraph = () => {
     if (pendingBlankLines > 0) {
-      paragraphBuffer.push(...Array.from({ length: pendingBlankLines }, () => ''))
+      pushRepeated(paragraphBuffer, pendingBlankLines, '')
       pendingBlankLines = 0
     }
   }
