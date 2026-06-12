@@ -9,6 +9,10 @@ export interface RichNoteContent {
 
 const SCHEMA_VERSION = 1 as const
 
+export type RichNoteRenderBlock =
+  | { type: 'html'; html: string }
+  | { type: 'image'; src: string }
+
 export function emptyRichNoteContent(): RichNoteContent {
   return {
     format: 'markdown',
@@ -146,6 +150,10 @@ function renderParagraphLine(line: string): string {
   return preserveConsecutiveSpaces(renderInline(line))
 }
 
+function renderBlankLines(count: number): string {
+  return Array.from({ length: count }, () => '&nbsp;').join('<br>')
+}
+
 function isMarkdownBlockStart(line: string): boolean {
   return (
     /^(#{1,3})\s+/.test(line) ||
@@ -170,6 +178,7 @@ export function markdownToHtml(markdown: string): string {
   let listBuffer: string[] = []
   let orderedListBuffer: string[] = []
   let paragraphBuffer: string[] = []
+  let pendingBlankLines = 0
 
   const flushParagraph = () => {
     if (paragraphBuffer.length === 0) return
@@ -186,6 +195,18 @@ export function markdownToHtml(markdown: string): string {
       orderedListBuffer = []
     }
   }
+  const flushPendingBlankLines = () => {
+    if (pendingBlankLines > 0 && blocks.length > 0) {
+      blocks.push(`<p>${renderBlankLines(pendingBlankLines)}</p>`)
+    }
+    pendingBlankLines = 0
+  }
+  const prependPendingBlankLinesToParagraph = () => {
+    if (pendingBlankLines > 0) {
+      paragraphBuffer.push(...Array.from({ length: pendingBlankLines }, () => ''))
+      pendingBlankLines = 0
+    }
+  }
 
   for (let index = 0; index < lines.length; index += 1) {
     const rawLine = lines[index]
@@ -195,9 +216,19 @@ export function markdownToHtml(markdown: string): string {
       if (paragraphBuffer.length > 0) {
         const nextLine = nextContentLine(lines, index)
         if (!nextLine || !isMarkdownBlockStart(nextLine)) paragraphBuffer.push('')
-        else flushParagraph()
+        else {
+          flushParagraph()
+          if (blocks.length > 0) pendingBlankLines += 1
+        }
+      } else if (blocks.length > 0) {
+        pendingBlankLines += 1
       }
       continue
+    }
+
+    if (pendingBlankLines > 0) {
+      if (isMarkdownBlockStart(line)) flushPendingBlankLines()
+      else prependPendingBlankLinesToParagraph()
     }
 
     const heading = /^(#{1,3})\s+(.+)$/.exec(line)
@@ -245,7 +276,52 @@ export function markdownToHtml(markdown: string): string {
 
   flushParagraph()
   flushList()
+  flushPendingBlankLines()
   return blocks.join('')
+}
+
+export function richNoteMarkdownToRenderBlocks(markdown: string, allowImages = true): RichNoteRenderBlock[] {
+  const result: RichNoteRenderBlock[] = []
+  const textBuffer: string[] = []
+  const flushText = () => {
+    if (textBuffer.length === 0) return
+    let leadingBlankLines = 0
+    while (
+      leadingBlankLines < textBuffer.length &&
+      textBuffer[leadingBlankLines].trim() === '' &&
+      result.length > 0
+    ) {
+      leadingBlankLines += 1
+    }
+    const remainingLines = textBuffer.slice(leadingBlankLines)
+    const firstRemainingLine = remainingLines.find((line) => line.trim())?.trim() || ''
+    const canMergeLeadingBlanks = firstRemainingLine && !isMarkdownBlockStart(firstRemainingLine)
+    if (leadingBlankLines > 0 && !canMergeLeadingBlanks) {
+      result.push({ type: 'html', html: `<p>${renderBlankLines(leadingBlankLines)}</p>` })
+    }
+    const text = remainingLines.join('\n')
+    if (text) {
+      const rawHtml = markdownToHtml(text)
+      const html = canMergeLeadingBlanks && rawHtml.startsWith('<p>')
+        ? rawHtml.replace(/^<p>/, `<p>${renderBlankLines(leadingBlankLines)}<br>`)
+        : rawHtml
+      if (html) result.push({ type: 'html', html })
+    }
+    textBuffer.length = 0
+  }
+
+  for (const rawLine of String(markdown || '').replace(/\r\n/g, '\n').split('\n')) {
+    const line = rawLine.trim()
+    const image = /^!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)$/.exec(line)
+    if (image) {
+      flushText()
+      if (allowImages) result.push({ type: 'image', src: image[1] })
+    } else {
+      textBuffer.push(rawLine)
+    }
+  }
+  flushText()
+  return result
 }
 
 export function markdownToText(markdown: string): string {
