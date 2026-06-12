@@ -50,6 +50,13 @@ assert(
 )
 
 assert(
+  guideRouteDetail.includes('rgba(13, 22, 17, 0.56)') &&
+    !guideRouteDetail.includes('rgba(13, 22, 17, 0.82)') &&
+    guideRouteDetail.includes('text-shadow'),
+  'guide route detail hero must keep scenic photos readable without relying on a heavy dark mask.'
+)
+
+assert(
   guideRouteDetail.includes('currentImageIndex') &&
     guideRouteDetail.includes('#e64646'),
   'guide route detail image dots must track the current slide and use a red active dot.'
