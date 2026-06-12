@@ -328,6 +328,15 @@ function extractMarkdownImageFileIDs(markdown: string): string[] {
   return ids
 }
 
+export function stripMarkdownImages(markdown: string): string {
+  const imgPattern = /!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
+  return String(markdown || '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(imgPattern, ''))
+    .join('\n')
+}
+
 export function buildRichNoteContentFromMarkdown(markdown: string): RichNoteContent {
   const normalizedMarkdown = String(markdown || '').replace(/\r\n/g, '\n')
   return {

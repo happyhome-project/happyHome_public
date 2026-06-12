@@ -174,6 +174,10 @@ export interface User {
   avatarUrl: string
   role: UserRole
   roleSource?: string
+  backgroundFetchToken?: string
+  backgroundFetchTokenExpiresAt?: string
+  lastHomeCommunityId?: string
+  lastHomeCommunityAt?: string
   createdAt: string
 }
 
@@ -280,6 +284,21 @@ export interface Post {
   adminEditedByAccountId?: string
   adminEditedByUsername?: string
   attendanceSummaryByWidget?: AttendanceSummaryByWidget
+}
+
+export interface HomeSnapshot {
+  schemaVersion: 1
+  generatedAt: string
+  viewerOpenId: string
+  currentCommunityId: string
+  communities: Community[]
+  sections: Section[]
+  postsBySection: Record<string, Post[]>
+}
+
+export interface HomeBootstrapResponse extends HomeSnapshot {
+  backgroundFetchToken: string
+  backgroundFetchTokenExpiresAt: string
 }
 
 export interface ContentAuditTask {

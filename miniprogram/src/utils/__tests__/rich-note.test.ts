@@ -6,6 +6,7 @@ import {
   htmlToMarkdown,
   markdownToHtml,
   markdownToText,
+  stripMarkdownImages,
 } from '../rich-note'
 
 describe('rich_note markdown contract', () => {
@@ -67,6 +68,13 @@ describe('rich_note markdown contract', () => {
     })
 
     expect(result.markdown).toBe('第一段\n\n![图片](wxfile://tmp/photo.jpg)\n\n第二段')
+  })
+
+  test('can remove image markdown while preserving text formatting and line breaks', () => {
+    expect(stripMarkdownImages('第一行\n\n![图片](cloud://env/posts/a.jpg)\n\n**第二行**'))
+      .toBe('第一行\n\n\n\n**第二行**')
+    expect(stripMarkdownImages('前缀 ![图片](cloud://env/posts/a.jpg) 后缀'))
+      .toBe('前缀  后缀')
   })
 
   test('converts legacy controlled html into markdown when normalizing old drafts', () => {

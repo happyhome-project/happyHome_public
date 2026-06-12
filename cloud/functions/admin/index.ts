@@ -1320,7 +1320,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const updatedAt = new Date().toISOString()
     if (post.auditStatus === 'pass' || !post.auditStatus) {
       await db.updateById('posts', postId, {
-        pendingContent: merged,
+        pendingContent: db.replaceValue(merged),
         pendingAuditStatus: 'pending',
         pendingAuditReason: 'content audit pending',
         pendingSubmittedAt: updatedAt,
@@ -1343,7 +1343,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     }
 
     await db.updateById('posts', postId, {
-      content: merged,
+      content: db.replaceValue(merged),
       auditStatus: 'pending',
       auditReason: 'content audit pending',
       auditUpdatedAt: updatedAt,

@@ -256,7 +256,11 @@
               <span v-if="audioItems(field.rawValue).length === 0">空</span>
             </div>
             <div v-else-if="field.type === 'rich_note'" class="rich-note-detail">
-              <RichNoteAdminPreview v-if="richNoteText(field.rawValue)" :value="field.rawValue" />
+              <RichNoteAdminPreview
+                v-if="richNoteText(field.rawValue)"
+                :value="field.rawValue"
+                :allow-images="field.allowImages"
+              />
               <span v-else>空</span>
             </div>
             <span v-else>{{ field.value }}</span>
@@ -343,6 +347,7 @@ const detailFields = computed(() => {
     .map((widget: any) => ({
       label: widget.label,
       type: widget.type,
+      allowImages: !isGuideNoteBodyWidget(widget),
       rawValue: detailPost.value.content?.[widget.widgetId],
       value: formatValue(detailPost.value.content?.[widget.widgetId], widget.type),
     }))
@@ -581,6 +586,11 @@ function formatValue(value: unknown, type?: string) {
 
 function richNoteText(value: unknown) {
   return normalizeRichNoteContent(value).text.trim()
+}
+
+function isGuideNoteBodyWidget(widget: any) {
+  if (detailSection.value?.displayTemplate !== 'guide_note') return false
+  return widget?.widgetId === 'guide_body' || widget?.fieldKey === 'body' || widget?.label === '正文'
 }
 
 function videoSourceLabel(source: string) {

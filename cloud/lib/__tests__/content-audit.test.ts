@@ -3,6 +3,8 @@ jest.mock('../db', () => ({
   getById: jest.fn(),
   query: jest.fn(),
   updateById: jest.fn(),
+  replaceValue: jest.fn((value) => ({ __set: value })),
+  removeField: jest.fn(() => ({ __remove: true })),
 }))
 
 jest.mock('../storage', () => ({
@@ -15,6 +17,7 @@ jest.mock('../wx-openapi', () => ({
 
 import {
   approvePostAudit,
+  buildCiHttpString,
   extractAuditTargets,
   handleAuditCallback,
   isPostVisibleToMembers,
@@ -66,6 +69,17 @@ test('isPostVisibleToMembers only exposes active posts that passed audit', () =>
   expect(isPostVisibleToMembers({ status: 'deleted', auditStatus: 'pass' })).toBe(false)
 })
 
+test('buildCiHttpString follows Tencent CI XML signature newline format', () => {
+  expect(buildCiHttpString('POST', '/text/auditing', {
+    host: '636c-cloudbase-3gh862acb1505ff3-1307183045.ci.ap-shanghai.myqcloud.com',
+  })).toBe(
+    'post\n'
+    + '/text/auditing\n'
+    + '\n'
+    + 'host=636c-cloudbase-3gh862acb1505ff3-1307183045.ci.ap-shanghai.myqcloud.com\n',
+  )
+})
+
 test('approvePostAudit promotes pendingContent and marks the post as passed', async () => {
   ;(db.getById as jest.Mock)
     .mockResolvedValueOnce({ _id: 'post-1', pendingContent: { title: 'new title' } })
@@ -74,10 +88,23 @@ test('approvePostAudit promotes pendingContent and marks the post as passed', as
   await approvePostAudit('post-1')
 
   expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({
-    content: { title: 'new title' },
-    pendingContent: null,
+    content: { __set: { title: 'new title' } },
+    pendingContent: { __remove: true },
     pendingAuditStatus: 'pass',
     auditStatus: 'pass',
+  }))
+})
+
+test('approvePostAudit replaces content and removes pendingContent atomically for CloudBase nested object updates', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({ _id: 'post-guide', pendingContent: { guide_age: '8岁以上' } })
+    .mockResolvedValueOnce({ _id: 'post-guide', pendingContent: { guide_age: '8岁以上' } })
+
+  await approvePostAudit('post-guide')
+
+  expect(db.updateById).toHaveBeenCalledWith('posts', 'post-guide', expect.objectContaining({
+    content: { __set: { guide_age: '8岁以上' } },
+    pendingContent: { __remove: true },
   }))
 })
 

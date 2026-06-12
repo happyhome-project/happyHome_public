@@ -68,6 +68,7 @@
             v-for="widget in editableWidgets"
             :key="widget.widgetId"
             :widget="widget"
+            :allow-rich-note-images="selectedSection.displayTemplate !== 'guide_note'"
             v-model="formData[widget.widgetId]"
           />
 

@@ -26,7 +26,9 @@ type RenderBlock =
   | { type: 'html'; html: string }
   | { type: 'image'; src: string }
 
-const props = defineProps<{ value: unknown }>()
+const props = withDefaults(defineProps<{ value: unknown; allowImages?: boolean }>(), {
+  allowImages: true,
+})
 const urlMap = ref<Record<string, string>>({})
 
 const content = computed(() => normalizeRichNoteContent(props.value))
@@ -44,7 +46,7 @@ const blocks = computed<RenderBlock[]>(() => {
     const image = /^!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)$/.exec(line)
     if (image) {
       flushText()
-      result.push({ type: 'image', src: image[1] })
+      if (props.allowImages) result.push({ type: 'image', src: image[1] })
     } else {
       buffer.push(rawLine)
     }

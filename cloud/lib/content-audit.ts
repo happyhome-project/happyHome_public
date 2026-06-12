@@ -255,12 +255,20 @@ function hmacSha1Hex(key: string | Buffer, value: string) {
   return crypto.createHmac('sha1', key).update(value).digest('hex')
 }
 
+export function buildCiHttpString(method: 'POST', pathname: string, headers: Record<string, string>): string {
+  const headerPairs = Object.entries(headers)
+    .map(([key, value]) => [key.toLowerCase(), value] as const)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+    .join('&')
+  return `${method.toLowerCase()}\n${pathname}\n\n${headerPairs}\n`
+}
+
 function ciAuthorization(method: 'POST', pathname: string, host: string, secretId: string, secretKey: string): string {
   const start = Math.floor(Date.now() / 1000)
   const end = start + 900
   const time = `${start};${end}`
-  const headerString = `host=${host}\n`
-  const httpString = `${method.toLowerCase()}\n${pathname}\n\n${headerString}\n`
+  const httpString = buildCiHttpString(method, pathname, { host })
   const signKey = hmacSha1Hex(secretKey, time)
   const stringToSign = `sha1\n${time}\n${sha1Hex(httpString)}\n`
   const signature = hmacSha1Hex(signKey, stringToSign)
@@ -427,8 +435,8 @@ export async function applyAuditSummary(postId: string, slot: 'content' | 'pendi
         return
       }
       await db.updateById('posts', postId, {
-        content: post.pendingContent,
-        pendingContent: null,
+        content: db.replaceValue(post.pendingContent),
+        pendingContent: db.removeField(),
         pendingAuditStatus: 'pass',
         pendingAuditReason: '',
         auditStatus: 'pass',

@@ -38,6 +38,8 @@ test('release cloud smoke ensures required database collections before invoking 
   const runCloudSmokeBody = deployScript.match(/async function runCloudSmoke[\s\S]+?\n}/)?.[0] || ''
 
   assert.match(ensureIndexesScript, /content_audit_tasks/)
+  assert.match(ensureIndexesScript, /admin_notification_subscriptions/)
+  assert.match(ensureIndexesScript, /admin_notifications/)
   assert.match(runCloudSmokeBody, /ensure:indexes/)
   assert(runCloudSmokeBody.indexOf('ensure:indexes') < runCloudSmokeBody.indexOf('runCloudReleaseSmoke'))
 })
