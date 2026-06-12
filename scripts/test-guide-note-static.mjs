@@ -132,6 +132,17 @@ assert(
 )
 
 assert(
+  locationAdminEditor.indexOf('window._AMapSecurityConfig') >= 0 &&
+    locationAdminEditor.indexOf('window._AMapSecurityConfig') < locationAdminEditor.indexOf('if (window.AMap)'),
+  'admin location editor must set Amap securityJsCode before reusing an existing window.AMap instance.'
+)
+
+assert(
+  !locationAdminEditor.includes('selectCandidate(searchCandidates.value[0])'),
+  'admin location search must not automatically overwrite the saved point with the first candidate.'
+)
+
+assert(
   locationAdminEditor.includes('scheduleMapResize') &&
     locationAdminEditor.includes('window.dispatchEvent(new Event') &&
     locationAdminEditor.includes('window.setTimeout') &&
