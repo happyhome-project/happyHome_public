@@ -13,6 +13,7 @@ const guideRouteDetail = fs.readFileSync(path.join(root, 'miniprogram', 'src', '
 const widgetEditor = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'components', 'widgets', 'WidgetEditor.vue'), 'utf8')
 const widgetRenderer = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'components', 'widgets', 'WidgetRenderer.vue'), 'utf8')
 const locationAdminEditor = fs.readFileSync(path.join(root, 'admin-web', 'src', 'components', 'LocationAdminEditor.vue'), 'utf8')
+const guideNoteWidgets = fs.readFileSync(path.join(root, 'cloud', 'shared', 'guide-note-widgets.ts'), 'utf8')
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -185,6 +186,15 @@ assert(
 assert(
   !homePage.includes('photo-count'),
   'guide note cards must not display photo-count badges.'
+)
+
+const lockedGuideWidgetSource = guideNoteWidgets
+  .split('export const GUIDE_NOTE_LOCKED_WIDGETS')[1]
+  .split('const GUIDE_NOTE_LOCKED_BY_ID')[0]
+assert(
+  ['guide_age', 'guide_duration', 'guide_fee', 'guide_cost', 'guide_tips', '适合年龄', '游玩时间', '游玩时长', '参考费用', '注意事项']
+    .every((value) => !lockedGuideWidgetSource.includes(value)),
+  'guide note locked widgets must not include retired parent-logistics fields.'
 )
 
 console.log('[guide-note-static] PASS')
