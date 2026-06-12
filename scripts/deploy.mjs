@@ -552,6 +552,8 @@ function buildAdminWeb(defaultRouterMode) {
     ...process.env,
     VITE_CLOUD_API_URL: process.env.VITE_CLOUD_API_URL || ADMIN_WEB_DEFAULT_API_URL,
     VITE_ROUTER_MODE: process.env.VITE_ROUTER_MODE || defaultRouterMode,
+    VITE_AMAP_JS_KEY: process.env.VITE_AMAP_JS_KEY || process.env.AMAP_JS_KEY || process.env.GAODE_JS_KEY || '',
+    VITE_AMAP_SECURITY_CODE: process.env.VITE_AMAP_SECURITY_CODE || process.env.AMAP_SECURITY_CODE || process.env.GAODE_SECURITY_CODE || '',
   }
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
   execSync(`${npm} run build`, { cwd: ADMIN_WEB_DIR, stdio: 'inherit', env })

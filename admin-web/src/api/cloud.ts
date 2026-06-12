@@ -232,7 +232,14 @@ export interface GeoSearchCandidate {
   source: 'amap'
 }
 
+export interface GeoMapConfig {
+  jsKey: string
+  securityCode?: string
+}
+
 export const geoApi = {
+  getMapConfig: () =>
+    callAdmin('geo.mapConfig') as Promise<GeoMapConfig>,
   searchLocation: (params: { keyword: string; region?: string }) =>
     callAdmin('geo.searchLocation', params) as Promise<{ candidates: GeoSearchCandidate[] }>,
 }
