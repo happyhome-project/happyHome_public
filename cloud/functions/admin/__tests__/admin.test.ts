@@ -33,6 +33,30 @@ import { searchAmapPoi } from '../../../lib/amap'
 
 beforeEach(() => jest.resetAllMocks())
 
+test('geo.mapConfig: 返回后台地图 JS 配置供 admin-web 运行时加载', async () => {
+  const oldJsKey = process.env.AMAP_JS_KEY
+  const oldSecurityCode = process.env.AMAP_SECURITY_CODE
+  process.env.AMAP_JS_KEY = 'amap-js-key'
+  process.env.AMAP_SECURITY_CODE = 'amap-security-code'
+
+  try {
+    const result: any = await main({
+      action: 'geo.mapConfig',
+      _actAs: { accountId: 'super-1', role: 'superAdmin', userId: 'boss-openid', username: 'boss' },
+    })
+
+    expect(result).toEqual({
+      jsKey: 'amap-js-key',
+      securityCode: 'amap-security-code',
+    })
+  } finally {
+    if (oldJsKey === undefined) delete process.env.AMAP_JS_KEY
+    else process.env.AMAP_JS_KEY = oldJsKey
+    if (oldSecurityCode === undefined) delete process.env.AMAP_SECURITY_CODE
+    else process.env.AMAP_SECURITY_CODE = oldSecurityCode
+  }
+})
+
 test('geo.searchLocation: 通过高德检索目的地候选点并返回 GCJ-02 坐标', async () => {
   ;(searchAmapPoi as jest.Mock).mockResolvedValue([
     {

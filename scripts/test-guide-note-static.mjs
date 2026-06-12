@@ -113,11 +113,35 @@ assert(
 
 assert(
   locationAdminEditor.includes('geoApi.searchLocation') &&
+    locationAdminEditor.includes('geoApi.getMapConfig') &&
     locationAdminEditor.includes('searchCandidates') &&
     locationAdminEditor.includes('adjusted') &&
     locationAdminEditor.includes('mapContainer') &&
-    locationAdminEditor.includes('draggable: true'),
-  'admin location editor must search Amap candidates and support map micro-adjustment.'
+    locationAdminEditor.includes('draggable: true') &&
+    locationAdminEditor.includes('mapDialogVisible') &&
+    locationAdminEditor.includes('openMapDialog') &&
+    locationAdminEditor.includes('<el-dialog'),
+  'admin location editor must search Amap candidates and support large-dialog map micro-adjustment with runtime Amap config.'
+)
+
+assert(
+  locationAdminEditor.includes('waitForMapContainer') &&
+    locationAdminEditor.includes('requestAnimationFrame') &&
+    locationAdminEditor.includes('await waitForMapContainer()'),
+  'admin location editor must wait for the dialog map container before first Amap initialization.'
+)
+
+assert(
+  locationAdminEditor.includes('scheduleMapResize') &&
+    locationAdminEditor.includes('window.dispatchEvent(new Event') &&
+    locationAdminEditor.includes('window.setTimeout') &&
+    locationAdminEditor.includes('window.setInterval') &&
+    locationAdminEditor.includes('window.clearInterval') &&
+    locationAdminEditor.includes('PerformanceObserver') &&
+    locationAdminEditor.includes('web_map\\/get_tile') &&
+    locationAdminEditor.includes('syncMapCenter') &&
+    locationAdminEditor.includes('setZoomAndCenter'),
+  'admin location editor must refresh the Amap canvas after the large dialog opens.'
 )
 
 assert(

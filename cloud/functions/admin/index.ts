@@ -67,6 +67,28 @@ const WXACODE_ENV_VERSION = (process.env.WXACODE_ENV_VERSION || 'release') as 'r
 
 type WxLoginStatus = 'pending' | 'success' | 'no_account' | 'expired' | 'denied'
 
+function adminAmapJsConfig() {
+  return {
+    jsKey: String(
+      process.env.AMAP_JS_KEY ||
+        process.env.GAODE_JS_KEY ||
+        process.env.AMAP_WEB_JS_KEY ||
+        process.env.GAODE_WEB_JS_KEY ||
+        process.env.VITE_AMAP_JS_KEY ||
+        process.env.VITE_GAODE_JS_KEY ||
+        ''
+    ).trim(),
+    securityCode: String(
+      process.env.AMAP_SECURITY_CODE ||
+        process.env.GAODE_SECURITY_CODE ||
+        process.env.AMAP_JS_SECURITY_CODE ||
+        process.env.VITE_AMAP_SECURITY_CODE ||
+        process.env.VITE_GAODE_SECURITY_CODE ||
+        ''
+    ).trim(),
+  }
+}
+
 interface LoginTicket {
   _id: string                  // ticket = 32 hex chars
   status: WxLoginStatus
@@ -761,6 +783,10 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
   }
   if (action === 'admin.approvalSummary') {
     return buildApprovalSummary(ctx)
+  }
+
+  if (action === 'geo.mapConfig') {
+    return adminAmapJsConfig()
   }
 
   if (action === 'geo.searchLocation') {
