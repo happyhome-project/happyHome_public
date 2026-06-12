@@ -26,6 +26,10 @@ export function buildDevToolsAutoArgs({ projectPath, idePort, autoPort }) {
   ]
 }
 
+export function buildDevToolsQuitArgs() {
+  return ['quit']
+}
+
 export function assertReleaseUiEvidence(evidence = {}) {
   const missing = []
   if (!evidence.homeDetailNonEmpty) missing.push(REQUIRED_RELEASE_UI_MARKERS[0])

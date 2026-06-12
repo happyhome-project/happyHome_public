@@ -11,6 +11,7 @@
  * auto-replay recording.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import net from 'node:net'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -20,6 +21,7 @@ import MiniProgram from 'miniprogram-automator/out/MiniProgram.js'
 import {
   assertReleaseUiEvidence,
   buildDevToolsAutoArgs,
+  buildDevToolsQuitArgs,
 } from './lib/mp-release-ui-policy.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -27,9 +29,8 @@ const ROOT = resolve(__dirname, '..')
 const DEFAULT_PROJECT_PATH = resolve(ROOT, 'miniprogram', 'dist', 'build', 'mp-weixin')
 const DEFAULT_IDE_PORT = 21929
 const DEFAULT_AUTO_PORT = 9420
-const DEFAULT_RELEASE_OPENID = 'h5-qa-user-001'
-const DEFAULT_RELEASE_COMMUNITY_ID = '6ded7a7769e789c1000879305ec314da'
 const HOME_POST_SELECTORS = ['.live-row', '.guide-card', '.arc-item', '.post-card']
+const RELEASE_FIXTURE_PREFIX = 'HH_RELEASE_UI_'
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
 
 function expectedBuildVersion() {
@@ -53,6 +54,43 @@ function runCli(cliPath, args, options = {}) {
     return spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psCommand], baseOptions)
   }
   return spawnSync(cliPath, args, baseOptions)
+}
+
+function canConnect(host, port, timeoutMs = 700) {
+  return new Promise((resolveConnect) => {
+    const socket = net.createConnection({ host, port })
+    const done = (ok) => {
+      socket.removeAllListeners()
+      socket.destroy()
+      resolveConnect(ok)
+    }
+    socket.setTimeout(timeoutMs)
+    socket.once('connect', () => done(true))
+    socket.once('timeout', () => done(false))
+    socket.once('error', () => done(false))
+  })
+}
+
+async function waitForTcpPort(port, options = {}) {
+  const host = options.host || '127.0.0.1'
+  const timeoutMs = Number(options.timeoutMs || 15000)
+  const intervalMs = Number(options.intervalMs || 500)
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (await canConnect(host, port)) return true
+    await sleep(intervalMs)
+  }
+  return false
+}
+
+function withTimeout(promise, timeoutMs, label) {
+  let timer
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs)
+    }),
+  ])
 }
 
 function resolveProjectPath() {
@@ -93,8 +131,8 @@ function detectAutoPort() {
   return DEFAULT_AUTO_PORT
 }
 
-function startAutomator({ cliPath, projectPath, idePort, autoPort }) {
-  const args = buildDevToolsAutoArgs({ projectPath, idePort, autoPort })
+function runAutomatorStart(cliPath, args, label) {
+  if (label) console.log(`[release-ui] ${label}`)
   const result = runCli(cliPath, args, { timeout: 120000 })
   const output = `${result.stdout || ''}${result.stderr || ''}`
   process.stdout.write(result.stdout || '')
@@ -105,6 +143,25 @@ function startAutomator({ cliPath, projectPath, idePort, autoPort }) {
   if (!/auto/i.test(output)) {
     throw new Error('DevTools cli auto did not report automation start.')
   }
+  return output
+}
+
+async function startAutomator({ cliPath, projectPath, idePort, autoPort }) {
+  const args = buildDevToolsAutoArgs({ projectPath, idePort, autoPort })
+  runAutomatorStart(cliPath, args, 'start DevTools automator')
+  if (await waitForTcpPort(autoPort, { timeoutMs: 15000 })) return
+
+  console.warn(`[release-ui] automator port ${autoPort} did not open after cli auto; quitting stale DevTools session and retrying`)
+  const quitResult = runCli(cliPath, buildDevToolsQuitArgs(), { timeout: 60000 })
+  process.stdout.write(quitResult.stdout || '')
+  process.stderr.write(quitResult.stderr || '')
+  if (quitResult.status !== 0) {
+    console.warn(`[release-ui] DevTools quit returned status ${quitResult.status}; retrying auto anyway`)
+  }
+  await sleep(3000)
+  runAutomatorStart(cliPath, args, 'restart DevTools automator after quit')
+  if (await waitForTcpPort(autoPort, { timeoutMs: 25000 })) return
+  throw new Error(`DevTools cli auto reported success, but automator websocket port ${autoPort} did not open.`)
 }
 
 async function connectMiniProgram(autoPort) {
@@ -112,7 +169,11 @@ async function connectMiniProgram(autoPort) {
   for (let attempt = 1; attempt <= 20; attempt += 1) {
     for (const host of ['127.0.0.1', 'localhost']) {
       try {
-        const conn = await Connection.default.create(`ws://${host}:${autoPort}`)
+        const conn = await withTimeout(
+          Connection.default.create(`ws://${host}:${autoPort}`),
+          5000,
+          `DevTools automator websocket connect ${host}:${autoPort}`,
+        )
         return new MiniProgram.default(conn)
       } catch (error) {
         lastError = error
@@ -158,22 +219,182 @@ async function restoreStorage(mp, snapshot) {
   }, snapshot || {})
 }
 
-async function seedReleaseLogin(mp) {
-  const openid = String(process.env.HH_RELEASE_TEST_OPENID || DEFAULT_RELEASE_OPENID)
-  const communityId = String(process.env.HH_RELEASE_TEST_COMMUNITY_ID || DEFAULT_RELEASE_COMMUNITY_ID)
-  const nickName = String(process.env.HH_RELEASE_TEST_NICKNAME || 'HH Release Bot')
-  await mp.evaluate(async (id, commId, nn) => {
-    wx.setStorageSync('dev-gateway', '1')
-    wx.setStorageSync('test-openid', id)
+function stringifyError(error) {
+  return String(error?.message || error?.errMsg || error || 'unknown error')
+}
+
+function makeReleaseRunId() {
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)
+  return `${stamp}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function makeFixtureAdminCtx(runId) {
+  return {
+    accountId: `release-ui-${runId}`,
+    role: 'superAdmin',
+    userId: `release-ui-owner-${runId}`,
+    username: 'release-ui',
+  }
+}
+
+function summarizeReleaseFixture(fixture) {
+  if (!fixture) return null
+  return {
+    runId: fixture.runId,
+    configured: fixture.configured === true,
+    communityId: fixture.communityId || '',
+    sectionId: fixture.sectionId || '',
+    postId: fixture.postId || '',
+  }
+}
+
+async function callMpCloud(mp, name, data, options = {}) {
+  const action = String(data?.action || '')
+  const timeoutMs = Number(options.timeoutMs || 60000)
+  const response = await withTimeout(
+    mp.evaluate(async (fnName, payload) => {
+      const wxRef = typeof wx !== 'undefined' ? wx : null
+      if (!wxRef?.cloud?.callFunction) {
+        return { ok: false, error: 'wx.cloud.callFunction unavailable' }
+      }
+      return await new Promise((resolveCall) => {
+        wxRef.cloud.callFunction({
+          name: fnName,
+          data: payload,
+          success: (res) => resolveCall({ ok: true, result: res.result }),
+          fail: (error) => resolveCall({
+            ok: false,
+            error: String(error?.errMsg || error?.message || error),
+            raw: error,
+          }),
+        })
+      })
+    }, name, data),
+    timeoutMs,
+    `${name}/${action || 'callFunction'}`,
+  )
+
+  if (!response?.ok) {
+    throw new Error(`[wx.cloud] ${name}/${action}: ${response?.error || 'call failed'}`)
+  }
+  const result = response.result
+  if (result?.error) throw new Error(`[wx.cloud] ${name}/${action}: ${result.error}`)
+  if (result?.success === false) {
+    throw new Error(`[wx.cloud] ${name}/${action}: ${result.message || result.errMsg || 'request failed'}`)
+  }
+  return result
+}
+
+async function createReleaseFixture(mp) {
+  const runId = makeReleaseRunId()
+  const adminCtx = makeFixtureAdminCtx(runId)
+  const name = `${RELEASE_FIXTURE_PREFIX}${runId}`
+  const fixture = { runId, adminCtx, configured: false, communityId: '', sectionId: '', postId: '' }
+
+  try {
+    const community = await callMpCloud(mp, 'admin', {
+      action: 'community.createAdmin',
+      _actAs: adminCtx,
+      name,
+      description: 'temporary release UI fixture',
+      coverImage: '',
+      location: { province: 'release', city: 'release', district: 'release', address: 'release-ui' },
+      joinType: 'open',
+    })
+    fixture.communityId = String(community.communityId || '')
+    if (!fixture.communityId) throw new Error('community.createAdmin did not return communityId')
+
+    const section = await callMpCloud(mp, 'admin', {
+      action: 'section.create',
+      _actAs: adminCtx,
+      communityId: fixture.communityId,
+      name: 'Release UI',
+      icon: 'R',
+      order: 0,
+      type: 'realtime',
+    })
+    fixture.sectionId = String(section.sectionId || '')
+    if (!fixture.sectionId) throw new Error('section.create did not return sectionId')
+
+    const widgetsResult = await callMpCloud(mp, 'admin', {
+      action: 'section.updateWidgets',
+      _actAs: adminCtx,
+      sectionId: fixture.sectionId,
+      widgets: [
+        { type: 'short_text', label: 'Title', fieldKey: 'title', required: true, showInList: true, widgetId: '' },
+        { type: 'summary', label: 'Summary', fieldKey: 'summary', required: false, showInList: true, widgetId: '' },
+      ],
+    })
+    const widgets = Array.isArray(widgetsResult.widgets) ? widgetsResult.widgets : []
+    const titleWidget = widgets.find((widget) => widget.type === 'short_text') || widgets[0]
+    const summaryWidget = widgets.find((widget) => widget.type === 'summary')
+    if (!titleWidget?.widgetId) throw new Error('section.updateWidgets did not return a title widget')
+
+    const content = {
+      [titleWidget.widgetId]: `Release UI fixture ${runId}`,
+    }
+    if (summaryWidget?.widgetId) {
+      content[summaryWidget.widgetId] = 'Automated release validation post.'
+    }
+
+    const post = await callMpCloud(mp, 'admin', {
+      action: 'post.createAdmin',
+      _actAs: adminCtx,
+      communityId: fixture.communityId,
+      sectionId: fixture.sectionId,
+      content,
+    }, { timeoutMs: 90000 })
+    fixture.postId = String(post.postId || '')
+    if (!fixture.postId) throw new Error('post.createAdmin did not return postId')
+
+    if (post.auditStatus !== 'pass') {
+      await callMpCloud(mp, 'admin', {
+        action: 'audit.approveAdmin',
+        _actAs: adminCtx,
+        postId: fixture.postId,
+      })
+    }
+
+    return fixture
+  } catch (error) {
+    if (fixture.communityId) {
+      try { await cleanupReleaseFixture(mp, fixture) } catch {}
+    }
+    throw error
+  }
+}
+
+async function seedCurrentViewerIntoCommunity(mp, fixture) {
+  try {
+    await callMpCloud(mp, 'member', { action: 'apply', communityId: fixture.communityId })
+  } catch (error) {
+    const message = stringifyError(error)
+    if (!/already|active|member|成员|宸叉槸/.test(message)) throw error
+  }
+
+  const snapshot = await callMpCloud(mp, 'post', {
+    action: 'bootstrap',
+    currentCommunityId: fixture.communityId,
+    limitPerSection: 20,
+  })
+  const viewerOpenId = String(snapshot.viewerOpenId || '')
+  if (!viewerOpenId) throw new Error('post.bootstrap did not return viewerOpenId')
+  if (String(snapshot.currentCommunityId || '') !== fixture.communityId) {
+    throw new Error(`post.bootstrap did not select release fixture community ${fixture.communityId}`)
+  }
+
+  await mp.evaluate((seed) => {
     wx.setStorageSync('user_store', {
-      openId: id,
-      nickName: nn,
+      openId: seed.viewerOpenId,
+      nickName: 'HH Release Bot',
       avatarUrl: '',
       role: 'user',
       isLoggedIn: true,
+      backgroundFetchToken: seed.backgroundFetchToken || '',
+      backgroundFetchTokenExpiresAt: seed.backgroundFetchTokenExpiresAt || '',
     })
     wx.setStorageSync('community_store', {
-      currentCommunityId: commId,
+      currentCommunityId: seed.currentCommunityId,
       currentSectionIndex: 0,
     })
     const pages = getCurrentPages()
@@ -181,15 +402,72 @@ async function seedReleaseLogin(mp) {
     const pinia = vm && (vm.$pinia || (vm.$ && vm.$appContext && vm.$appContext.config.globalProperties.$pinia))
     if (pinia) {
       for (const [storeId, store] of pinia._s) {
-        if (typeof store.loadFromStorage === 'function') store.loadFromStorage()
-        if (storeId === 'community' && typeof store.loadMyCommunities === 'function') {
-          await store.loadMyCommunities()
-          if (commId && typeof store.switchCommunity === 'function') await store.switchCommunity(commId)
+        if (storeId === 'user') {
+          store.$patch({
+            openId: seed.viewerOpenId,
+            nickName: 'HH Release Bot',
+            avatarUrl: '',
+            role: 'user',
+            isLoggedIn: true,
+            backgroundFetchToken: seed.backgroundFetchToken || '',
+            backgroundFetchTokenExpiresAt: seed.backgroundFetchTokenExpiresAt || '',
+          })
+        }
+        if (storeId === 'community') {
+          store.$patch({
+            currentCommunityId: seed.currentCommunityId,
+            currentSectionIndex: 0,
+            myCommunities: seed.communities || [],
+            currentSections: seed.sections || [],
+          })
         }
       }
     }
     return true
-  }, openid, communityId, nickName)
+  }, snapshot)
+
+  return snapshot
+}
+
+async function seedReleaseLogin(mp) {
+  const configuredCommunityId = String(process.env.HH_RELEASE_TEST_COMMUNITY_ID || '').trim()
+  const fixture = configuredCommunityId
+    ? {
+        runId: 'configured-community',
+        configured: true,
+        communityId: configuredCommunityId,
+        sectionId: '',
+        postId: '',
+        adminCtx: null,
+      }
+    : await createReleaseFixture(mp)
+  const snapshot = await seedCurrentViewerIntoCommunity(mp, fixture)
+  return { fixture, snapshot }
+}
+
+async function cleanupReleaseFixture(mp, fixture) {
+  if (!fixture || fixture.configured || !fixture.communityId || !fixture.adminCtx) {
+    return { ok: true, skipped: true, reason: 'no temporary fixture cleanup required' }
+  }
+  const steps = []
+  for (const action of ['community.disable', 'community.hardDelete']) {
+    try {
+      await callMpCloud(mp, 'admin', {
+        action,
+        _actAs: fixture.adminCtx,
+        communityId: fixture.communityId,
+      }, { timeoutMs: 90000 })
+      steps.push({ action, ok: true })
+    } catch (error) {
+      steps.push({ action, ok: false, error: stringifyError(error) })
+      break
+    }
+  }
+  return {
+    ok: steps.every((step) => step.ok),
+    communityId: fixture.communityId,
+    steps,
+  }
 }
 
 async function forceLogout(mp) {
@@ -226,16 +504,18 @@ async function findFirstPost(page) {
   return null
 }
 
-async function verifyHomeDetail(mp) {
+async function verifyHomeDetail(mp, context = {}) {
   console.log('[release-ui] open home')
+  let releaseSeed = null
   let home = await mp.reLaunch('/pages/index/index')
   await sleep(6000)
   let homeText = await pageText(home)
   let target = await findFirstPost(home)
 
   if (!target) {
-    console.log('[release-ui] no post candidates in current session; seeding release login fixture')
-    await seedReleaseLogin(mp)
+    console.log('[release-ui] no post candidates in current session; creating temporary release fixture')
+    releaseSeed = await seedReleaseLogin(mp)
+    context.releaseFixture = releaseSeed.fixture
     home = await mp.reLaunch('/pages/index/index')
     await sleep(7000)
     homeText = await pageText(home)
@@ -243,7 +523,8 @@ async function verifyHomeDetail(mp) {
   }
 
   if (!target) {
-    throw new Error(`Home page has no tappable post candidates. textLength=${homeText.length}. Log into DevTools or configure HH_RELEASE_TEST_OPENID/HH_RELEASE_TEST_COMMUNITY_ID.`)
+    const fixture = releaseSeed?.fixture ? ` fixture=${JSON.stringify(summarizeReleaseFixture(releaseSeed.fixture))}` : ''
+    throw new Error(`Home page has no tappable post candidates after release fixture. textLength=${homeText.length}.${fixture}`)
   }
 
   console.log(`[release-ui] tap first post via ${target.selector}`)
@@ -263,6 +544,7 @@ async function verifyHomeDetail(mp) {
   return {
     passed,
     homeTextLength: homeText.length,
+    homeTextSample: homeText.slice(0, 300),
     detailPath,
     detailTextLength: detailText.length,
     detailTextSample: detailText.slice(0, 300),
@@ -270,6 +552,7 @@ async function verifyHomeDetail(mp) {
     tappedSelectorCount: target.count,
     contentCount,
     errorCount,
+    releaseFixture: summarizeReleaseFixture(releaseSeed?.fixture),
   }
 }
 
@@ -340,10 +623,11 @@ async function main() {
   console.log(`idePort: ${idePort}`)
   console.log(`autoPort: ${autoPort}`)
 
-  startAutomator({ cliPath, projectPath, idePort, autoPort })
+  await startAutomator({ cliPath, projectPath, idePort, autoPort })
   const mp = await connectMiniProgram(autoPort)
   const evidenceDir = createEvidenceDir()
   const originalStorage = await captureStorage(mp)
+  const runContext = { releaseFixture: null }
 
   const evidence = {
     createdAt: new Date().toISOString(),
@@ -355,7 +639,7 @@ async function main() {
   }
 
   try {
-    const homeDetail = await verifyHomeDetail(mp)
+    const homeDetail = await verifyHomeDetail(mp, runContext)
     evidence.homeDetail = homeDetail
     if (homeDetail.passed) {
       evidence.markers.push('HH_RELEASE_HOME_DETAIL_NONEMPTY')
@@ -379,15 +663,38 @@ async function main() {
       profileLoginClean: profileLoginClean.cleanPassed,
     })
 
+    if (runContext.releaseFixture) {
+      evidence.releaseFixtureCleanup = await cleanupReleaseFixture(mp, runContext.releaseFixture)
+      runContext.releaseFixture = null
+      if (!evidence.releaseFixtureCleanup.ok) {
+        throw new Error(`Release fixture cleanup failed: ${JSON.stringify(evidence.releaseFixtureCleanup)}`)
+      }
+    }
+
     const jsonPath = await writeEvidence({ mp, evidenceDir, evidence })
     console.log(`[OK] DevTools release UI evidence passed: ${jsonPath}`)
   } catch (error) {
     evidence.error = String(error?.message || error)
+    if (runContext.releaseFixture) {
+      try {
+        evidence.releaseFixtureCleanup = await cleanupReleaseFixture(mp, runContext.releaseFixture)
+        runContext.releaseFixture = null
+      } catch (cleanupError) {
+        evidence.releaseFixtureCleanup = {
+          ok: false,
+          error: stringifyError(cleanupError),
+        }
+      }
+    }
     const jsonPath = resolve(evidenceDir, 'release-ui-evidence.failed.json')
     writeFileSync(jsonPath, JSON.stringify(evidence, null, 2), 'utf8')
     console.error(`[release-ui] failed evidence saved: ${jsonPath}`)
     throw error
   } finally {
+    if (runContext.releaseFixture) {
+      try { await cleanupReleaseFixture(mp, runContext.releaseFixture) } catch {}
+      runContext.releaseFixture = null
+    }
     try { await restoreStorage(mp, originalStorage) } catch {}
     try { await mp.disconnect() } catch {}
     try {

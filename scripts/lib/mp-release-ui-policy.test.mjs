@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   assertReleaseUiEvidence,
   buildDevToolsAutoArgs,
+  buildDevToolsQuitArgs,
   REQUIRED_RELEASE_UI_MARKERS,
 } from './mp-release-ui-policy.mjs'
 
@@ -19,6 +20,10 @@ test('builds DevTools auto args with hidden automator websocket port', () => {
     '--auto-port', '9420',
     '--trust-project',
   ])
+})
+
+test('builds DevTools quit args for stale automator recovery', () => {
+  assert.deepEqual(buildDevToolsQuitArgs(), ['quit'])
 })
 
 test('requires home detail, login version, and clean profile login release UI evidence', () => {
