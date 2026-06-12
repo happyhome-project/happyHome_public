@@ -140,8 +140,10 @@ function snapshotTime(snapshot: HomeSnapshot | null) {
 }
 
 export async function getBestBackgroundFetchSnapshot(options: SnapshotReadOptions): Promise<HomeSnapshot | null> {
-  const pre = await getBackgroundFetchSnapshot(options, 'pre')
-  const periodic = await getBackgroundFetchSnapshot(options, 'periodic')
+  const [pre, periodic] = await Promise.all([
+    getBackgroundFetchSnapshot(options, 'pre'),
+    getBackgroundFetchSnapshot(options, 'periodic'),
+  ])
   return snapshotTime(periodic) > snapshotTime(pre) ? periodic : pre
 }
 
