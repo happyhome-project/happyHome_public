@@ -200,6 +200,26 @@ const INDEXES = [
       { Name: 'expiresAt', Direction: '1' },
     ],
   },
+  // admin_notification_subscriptions: 保存管理员对审批提醒模板的授权结果
+  {
+    coll: 'admin_notification_subscriptions',
+    name: 'idx_user_event_template',
+    keys: [
+      { Name: 'userId', Direction: '1' },
+      { Name: 'eventType', Direction: '1' },
+      { Name: 'templateId', Direction: '1' },
+    ],
+    unique: true,
+  },
+  // admin_notifications: notificationStatus 读取当前管理员最近通知失败原因
+  {
+    coll: 'admin_notifications',
+    name: 'idx_recipient_createdAt',
+    keys: [
+      { Name: 'recipientUserId', Direction: '1' },
+      { Name: 'createdAt', Direction: '-1' },
+    ],
+  },
   // content_audit_tasks: audit detail pages and callback reconciliation by post/slot/trace/job
   {
     coll: 'content_audit_tasks',
@@ -232,6 +252,8 @@ const REQUIRED_COLLECTIONS = [
   'admin_sessions',
   'admin_login_tickets',  // 扫码登录会话（_id=ticket，主键查询，索引仅 expiresAt 用）
   'admin_runtime',        // 运行时缓存（wx access_token 等单文档，无需额外索引）
+  'admin_notification_subscriptions', // 审批提醒订阅授权状态
+  'admin_notifications',  // 审批提醒发送记录与失败原因
   'content_audit_tasks',  // 内容审核任务与回调对账
 ]
 
