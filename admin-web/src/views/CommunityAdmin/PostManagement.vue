@@ -267,6 +267,7 @@
                   class="image-detail-thumb"
                   fit="cover"
                   :preview-src-list="detailImagePreviewList(field.rawValue)"
+                  :initial-index="detailImagePreviewIndex(field.rawValue, image)"
                   preview-teleported
                 />
                 <div v-else class="image-detail-thumb image-detail-placeholder">图片加载中</div>
@@ -651,6 +652,12 @@ function canRenderDetailImage(src: string) {
 
 function detailImagePreviewList(value: unknown) {
   return imageItems(value).map(detailImageUrl).filter((url) => /^https?:\/\//.test(url) || url.startsWith('data:'))
+}
+
+function detailImagePreviewIndex(value: unknown, src: string) {
+  const url = detailImageUrl(src)
+  const index = detailImagePreviewList(value).findIndex((item) => item === url)
+  return index >= 0 ? index : 0
 }
 
 async function loadDetailImageUrls(post: any, section: any) {
