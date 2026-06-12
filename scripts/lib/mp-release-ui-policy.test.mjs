@@ -4,7 +4,10 @@ import test from 'node:test'
 import {
   assertReleaseUiEvidence,
   buildDevToolsAutoArgs,
+  buildDevToolsCacheArgs,
+  buildDevToolsCloseArgs,
   buildDevToolsQuitArgs,
+  buildDevToolsQuitPortArgs,
   REQUIRED_RELEASE_UI_MARKERS,
 } from './mp-release-ui-policy.mjs'
 
@@ -24,6 +27,33 @@ test('builds DevTools auto args with hidden automator websocket port', () => {
 
 test('builds DevTools quit args for stale automator recovery', () => {
   assert.deepEqual(buildDevToolsQuitArgs(), ['quit'])
+})
+
+test('builds DevTools maintenance args bound to one IDE port', () => {
+  assert.deepEqual(buildDevToolsQuitPortArgs({ idePort: 21929 }), [
+    'quit',
+    '--port', '21929',
+  ])
+
+  assert.deepEqual(buildDevToolsCloseArgs({
+    projectPath: 'dist/mp',
+    idePort: 21929,
+  }), [
+    'close',
+    '--project', 'dist/mp',
+    '--port', '21929',
+  ])
+
+  assert.deepEqual(buildDevToolsCacheArgs({
+    clean: 'compile',
+    projectPath: 'dist/mp',
+    idePort: 21929,
+  }), [
+    'cache',
+    '--clean', 'compile',
+    '--project', 'dist/mp',
+    '--port', '21929',
+  ])
 })
 
 test('requires home detail, login version, and clean profile login release UI evidence', () => {

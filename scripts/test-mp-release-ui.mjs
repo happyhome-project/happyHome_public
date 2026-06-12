@@ -10,9 +10,9 @@
  * It does not upload, does not generate QR codes, and does not require an
  * auto-replay recording.
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import net from 'node:net'
-import { dirname, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import Connection from 'miniprogram-automator/out/Connection.js'
@@ -21,7 +21,9 @@ import MiniProgram from 'miniprogram-automator/out/MiniProgram.js'
 import {
   assertReleaseUiEvidence,
   buildDevToolsAutoArgs,
-  buildDevToolsQuitArgs,
+  buildDevToolsCacheArgs,
+  buildDevToolsCloseArgs,
+  buildDevToolsQuitPortArgs,
 } from './lib/mp-release-ui-policy.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -83,6 +85,18 @@ async function waitForTcpPort(port, options = {}) {
   return false
 }
 
+async function waitForTcpPortClosed(port, options = {}) {
+  const host = options.host || '127.0.0.1'
+  const timeoutMs = Number(options.timeoutMs || 10000)
+  const intervalMs = Number(options.intervalMs || 500)
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (!(await canConnect(host, port))) return true
+    await sleep(intervalMs)
+  }
+  return false
+}
+
 function withTimeout(promise, timeoutMs, label) {
   let timer
   return Promise.race([
@@ -131,6 +145,77 @@ function detectAutoPort() {
   return DEFAULT_AUTO_PORT
 }
 
+function readOptionalText(path) {
+  try {
+    return readFileSync(path, 'utf8')
+  } catch {
+    return ''
+  }
+}
+
+function uniqueExistingDirs(paths) {
+  return [...new Set(paths.filter(Boolean).map((item) => resolve(String(item))))].filter((item) => existsSync(item))
+}
+
+function devToolsDefaultDirs() {
+  if (process.platform !== 'win32') return []
+  const localAppDataDirs = uniqueExistingDirs([
+    process.env.LOCALAPPDATA,
+    process.env.USERPROFILE ? join(process.env.USERPROFILE, 'AppData', 'Local') : '',
+  ])
+  const result = []
+  for (const localAppData of localAppDataDirs) {
+    const userDataRoot = join(localAppData, '微信开发者工具', 'User Data')
+    if (!existsSync(userDataRoot)) continue
+    for (const entry of readdirSync(userDataRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const defaultDir = join(userDataRoot, entry.name, 'Default')
+      if (existsSync(defaultDir)) result.push(defaultDir)
+    }
+  }
+  return uniqueExistingDirs(result)
+}
+
+function makeBackupPath(path) {
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)
+  let candidate = `${path}.codex-stale-${stamp}`
+  for (let index = 2; existsSync(candidate); index += 1) {
+    candidate = `${path}.codex-stale-${stamp}-${index}`
+  }
+  return candidate
+}
+
+async function clearStaleIdePortFiles(idePort) {
+  if (process.env.HH_RELEASE_UI_CLEAR_STALE_IDE === '0') return []
+  const moved = []
+  for (const defaultDir of devToolsDefaultDirs()) {
+    const ideStatusPath = join(defaultDir, '.ide-status')
+    const idePath = join(defaultDir, '.ide')
+    if (!existsSync(ideStatusPath) || !existsSync(idePath)) continue
+    const raw = readOptionalText(idePath).trim()
+    const recordedPort = Number(raw)
+    if (!Number.isFinite(recordedPort) || recordedPort <= 0) {
+      const backup = makeBackupPath(idePath)
+      renameSync(idePath, backup)
+      moved.push({ idePath, backup, raw, reason: 'invalid port' })
+      continue
+    }
+    if (recordedPort === idePort) continue
+    const listening = await canConnect('127.0.0.1', recordedPort, 500)
+    if (listening) {
+      console.warn(`[release-ui] DevTools .ide points to active port ${recordedPort}; keeping ${idePath}`)
+      continue
+    }
+    const backup = makeBackupPath(idePath)
+    renameSync(idePath, backup)
+    moved.push({ idePath, backup, raw, reason: 'stale port' })
+  }
+  for (const item of moved) {
+    console.log(`[release-ui] moved stale DevTools IDE port file ${item.idePath} -> ${item.backup} (${item.reason}: ${item.raw})`)
+  }
+  return moved
+}
+
 function runAutomatorStart(cliPath, args, label) {
   if (label) console.log(`[release-ui] ${label}`)
   const result = runCli(cliPath, args, { timeout: 120000 })
@@ -146,19 +231,66 @@ function runAutomatorStart(cliPath, args, label) {
   return output
 }
 
+function runDevToolsMaintenance(cliPath, args, label, options = {}) {
+  console.log(`[release-ui] ${label}`)
+  const result = runCli(cliPath, args, { timeout: options.timeout || 120000 })
+  const output = `${result.stdout || ''}${result.stderr || ''}`
+  process.stdout.write(result.stdout || '')
+  process.stderr.write(result.stderr || '')
+  if (result.status !== 0) {
+    const message = `DevTools maintenance command failed with status ${result.status}: ${output.trim()}`
+    if (options.required) throw new Error(message)
+    console.warn(`[release-ui] ${message}`)
+  }
+  return output
+}
+
+async function quitDevTools(cliPath, idePort, autoPort, reason) {
+  console.log(`[release-ui] quit DevTools before auto (${reason})`)
+  const quitResult = runCli(cliPath, buildDevToolsQuitPortArgs({ idePort }), { timeout: 60000 })
+  process.stdout.write(quitResult.stdout || '')
+  process.stderr.write(quitResult.stderr || '')
+  if (quitResult.status !== 0) {
+    console.warn(`[release-ui] DevTools quit returned status ${quitResult.status}`)
+  }
+  if (!(await waitForTcpPortClosed(autoPort, { timeoutMs: 12000 }))) {
+    console.warn(`[release-ui] automator port ${autoPort} was still reachable after quit`)
+  }
+  await sleep(1500)
+}
+
+async function refreshDevToolsProjectCache({ cliPath, projectPath, idePort, autoPort }) {
+  if (process.env.HH_RELEASE_UI_REFRESH_DEVTOOLS_CACHE === '0') return
+  runDevToolsMaintenance(
+    cliPath,
+    buildDevToolsCloseArgs({ projectPath, idePort }),
+    'close DevTools project before cache refresh',
+  )
+  for (const clean of ['compile', 'file']) {
+    runDevToolsMaintenance(
+      cliPath,
+      buildDevToolsCacheArgs({ clean, projectPath, idePort }),
+      `clean DevTools ${clean} cache`,
+      { required: true },
+    )
+  }
+  await quitDevTools(cliPath, idePort, autoPort, 'after cache refresh')
+}
+
 async function startAutomator({ cliPath, projectPath, idePort, autoPort }) {
   const args = buildDevToolsAutoArgs({ projectPath, idePort, autoPort })
+  if (process.env.HH_RELEASE_UI_COLD_START_DEVTOOLS !== '0') {
+    await clearStaleIdePortFiles(idePort)
+    await refreshDevToolsProjectCache({ cliPath, projectPath, idePort, autoPort })
+    await clearStaleIdePortFiles(idePort)
+    await quitDevTools(cliPath, idePort, autoPort, 'avoid stale compiled package/cache')
+  }
   runAutomatorStart(cliPath, args, 'start DevTools automator')
   if (await waitForTcpPort(autoPort, { timeoutMs: 15000 })) return
 
   console.warn(`[release-ui] automator port ${autoPort} did not open after cli auto; quitting stale DevTools session and retrying`)
-  const quitResult = runCli(cliPath, buildDevToolsQuitArgs(), { timeout: 60000 })
-  process.stdout.write(quitResult.stdout || '')
-  process.stderr.write(quitResult.stderr || '')
-  if (quitResult.status !== 0) {
-    console.warn(`[release-ui] DevTools quit returned status ${quitResult.status}; retrying auto anyway`)
-  }
-  await sleep(3000)
+  await clearStaleIdePortFiles(idePort)
+  await quitDevTools(cliPath, idePort, autoPort, 'automator port missing')
   runAutomatorStart(cliPath, args, 'restart DevTools automator after quit')
   if (await waitForTcpPort(autoPort, { timeoutMs: 25000 })) return
   throw new Error(`DevTools cli auto reported success, but automator websocket port ${autoPort} did not open.`)
