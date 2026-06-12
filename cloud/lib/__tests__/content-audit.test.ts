@@ -18,9 +18,11 @@ jest.mock('../wx-openapi', () => ({
 import {
   approvePostAudit,
   buildCiHttpString,
+  buildTencentCiAuditRequestBody,
   extractAuditTargets,
   handleAuditCallback,
   isPostVisibleToMembers,
+  parseTencentCiAuditResponse,
   rejectPostAudit,
 } from '../content-audit'
 import * as db from '../db'
@@ -78,6 +80,31 @@ test('buildCiHttpString follows Tencent CI XML signature newline format', () => 
     + '\n'
     + 'host=636c-cloudbase-3gh862acb1505ff3-1307183045.ci.ap-shanghai.myqcloud.com\n',
   )
+})
+
+test('buildTencentCiAuditRequestBody lets image audits use the default policy', () => {
+  const body = buildTencentCiAuditRequestBody('image', '<Url>https://example.com/a.webp</Url>')
+
+  expect(body).toContain('<Conf></Conf>')
+  expect(body).not.toContain('DetectType')
+  expect(body).not.toContain('Illegal')
+  expect(body).not.toContain('Abuse')
+  expect(body).not.toContain('Terrorism')
+})
+
+test('parseTencentCiAuditResponse keeps Tencent job errors visible', () => {
+  const result = parseTencentCiAuditResponse('image', `<?xml version="1.0" encoding="utf-8"?>
+<Response>
+  <JobsDetail>
+    <Code>InvalidArgument</Code>
+    <Message>invalid DetectType</Message>
+    <State>Failed</State>
+  </JobsDetail>
+</Response>`)
+
+  expect(result.status).toBe('review')
+  expect(result.provider).toBe('tencent_ci')
+  expect(result.reason).toBe('Tencent CI InvalidArgument: invalid DetectType')
 })
 
 test('approvePostAudit promotes pendingContent and marks the post as passed', async () => {

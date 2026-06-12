@@ -264,6 +264,19 @@ export function buildCiHttpString(method: 'POST', pathname: string, headers: Rec
   return `${method.toLowerCase()}\n${pathname}\n\n${headerPairs}\n`
 }
 
+function detectTypeForTencentCi(type: AuditTargetType): string | null {
+  if (type === 'image') return null
+  return 'Porn,Terrorism,Politics,Ads,Illegal,Abuse'
+}
+
+export function buildTencentCiAuditRequestBody(type: AuditTargetType, inputXml: string): string {
+  const imageBizType = String(process.env.TENCENT_CI_IMAGE_BIZ_TYPE || '').trim()
+  const confXml = type === 'image' && imageBizType
+    ? `<BizType>${xmlEscape(imageBizType)}</BizType>`
+    : (detectTypeForTencentCi(type) ? `<DetectType>${detectTypeForTencentCi(type)}</DetectType>` : '')
+  return `<Request><Input>${inputXml}</Input><Conf>${confXml}</Conf></Request>`
+}
+
 function ciAuthorization(method: 'POST', pathname: string, host: string, secretId: string, secretKey: string): string {
   const start = Math.floor(Date.now() / 1000)
   const end = start + 900
@@ -312,6 +325,30 @@ function xmlTag(xml: string, tag: string): string {
   return match ? match[1].trim() : ''
 }
 
+export function parseTencentCiAuditResponse(type: AuditTargetType, body: string): AuditSubmitResult {
+  const suggestion = xmlTag(body, 'Suggestion') || xmlTag(body, 'Result')
+  const state = xmlTag(body, 'State')
+  const code = xmlTag(body, 'Code')
+  if (!suggestion && code && code !== '0') {
+    const message = xmlTag(body, 'Message')
+    return {
+      status: 'review',
+      provider: 'tencent_ci',
+      reason: `Tencent CI ${code}: ${message || 'audit failed'}`,
+      raw: body,
+    }
+  }
+  const status = suggestion ? normalizeSuggest(suggestion) : (type === 'audio' || type === 'video' || state === 'Submitted' ? 'pending' : 'review')
+  return {
+    status,
+    provider: 'tencent_ci',
+    jobId: xmlTag(body, 'JobId'),
+    suggest: suggestion,
+    label: xmlTag(body, 'Label'),
+    raw: body,
+  }
+}
+
 async function submitTencentTarget(target: AuditTarget): Promise<AuditSubmitResult> {
   const cfg = ciConfig()
   if (!cfg.enabled) {
@@ -330,21 +367,12 @@ async function submitTencentTarget(target: AuditTarget): Promise<AuditSubmitResu
     const inputXml = target.type === 'text'
       ? `<Content>${Buffer.from(target.text || '', 'utf-8').toString('base64')}</Content>`
       : `<Url>${xmlEscape(await resolveTargetUrl(target))}</Url>`
-    const body = `<Request><Input>${inputXml}</Input><Conf><DetectType>Porn,Terrorism,Politics,Ads,Illegal,Abuse</DetectType></Conf></Request>`
+    const body = buildTencentCiAuditRequestBody(target.type, inputXml)
     const res = await postXml(url, body, ciAuthorization('POST', pathname, host, cfg.secretId, cfg.secretKey))
     if (res.statusCode < 200 || res.statusCode >= 300) {
       return { status: 'review', provider: 'manual', reason: `Tencent CI HTTP ${res.statusCode}: ${res.body.slice(0, 200)}` }
     }
-    const suggestion = xmlTag(res.body, 'Suggestion') || xmlTag(res.body, 'Result')
-    const status = suggestion ? normalizeSuggest(suggestion) : (target.type === 'audio' || target.type === 'video' ? 'pending' : 'review')
-    return {
-      status,
-      provider: 'tencent_ci',
-      jobId: xmlTag(res.body, 'JobId'),
-      suggest: suggestion,
-      label: xmlTag(res.body, 'Label'),
-      raw: res.body,
-    }
+    return parseTencentCiAuditResponse(target.type, res.body)
   } catch (error: any) {
     return {
       status: 'review',
