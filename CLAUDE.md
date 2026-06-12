@@ -88,6 +88,17 @@
 
 ---
 
+## 内容审核铁律
+
+1. **腾讯 CI 图片审核不要默认传 `DetectType`**：2026-06-12 实测 `/image/auditing` 携带旧的通用 `DetectType`（如 `Porn,Terrorism,Politics,Ads,Illegal,Abuse`，甚至缩减到 `Porn,Ads`）会返回 `InvalidArgument / invalid DetectType`，导致帖子被保守落到“人工复核”。图片审核默认走腾讯 CI 策略；如需自定义图片策略，先在腾讯云配置图片审核 BizType，再用 `TENCENT_CI_IMAGE_BIZ_TYPE` 显式指定。
+2. **审核问题不能只看帖子状态**：看到 `auditStatus=review` 时，要查 `content_audit_tasks.raw/reason/provider`。如果 raw 里是供应商参数错误，说明不是内容真的需要人工审核，而是调用协议/配置错误。
+3. **涉及媒体审核的修复必须做线上临时 fixture 闭环**：单测只能证明请求体形态，不能证明腾讯云真实接受。至少创建临时社区/板块/帖子，上传真实图片或媒体，确认 `auditStatus=pass` 或预期状态，再硬删除临时社区清理数据。
+4. **DevTools CLI 云函数部署仍不是成功证据**：如果 `npm.cmd run deploy:cloud -- --only=...` 报 `getCloudAPISignedHeader failed` / `ret=41002`，切到 `npm.cmd run deploy:cloud:tcb -- --only=...`。本次 `admin,post` 审核修复就是走 CloudBase CLI / COS 路径部署并线上验证。
+
+详情见 [memory/feedback_tencent_ci_image_audit.md](memory/feedback_tencent_ci_image_audit.md)。
+
+---
+
 ## 测试铁律
 
 1. **集成测试走 `main(event)` 入口**，不直接 call handler —— 否则会漏掉事件解构不匹配的问题
