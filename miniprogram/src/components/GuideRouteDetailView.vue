@@ -68,7 +68,10 @@
       <view class="guide-section-heading">
         <text>{{ section.title }}</text>
       </view>
-      <view class="guide-text">
+      <view v-if="section.type === 'rich_note'" class="guide-rich-note">
+        <RichNoteRenderer :value="section.value" :allow-images="false" />
+      </view>
+      <view v-else class="guide-text">
         <template v-for="(block, index) in section.blocks" :key="`${section.title}-${index}`">
           <text
             v-if="block.type === 'paragraph'"
@@ -125,6 +128,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { GuideRouteDetail } from '../utils/guide-detail'
+import RichNoteRenderer from './widgets/RichNoteRenderer.vue'
 
 const props = defineProps<{
   detail: GuideRouteDetail
@@ -158,7 +162,7 @@ const mapMarkers = computed(() => {
 
 const bodyImageUrls = computed(() =>
   props.detail.bodySections
-    .flatMap((section) => section.blocks)
+    .flatMap((section) => section.type === 'blocks' ? section.blocks : [])
     .filter((block): block is { type: 'image'; src: string } => block.type === 'image')
     .map((block) => block.src)
 )
@@ -444,6 +448,12 @@ function openLocation() {
   width: 100%;
   border-radius: $hh-radius-md;
   background: $hh-surface-2;
+}
+
+.guide-rich-note :deep(.rich-note-renderer) {
+  color: $hh-ink-2;
+  font-size: 29rpx;
+  line-height: 1.9;
 }
 
 .guide-map-card {

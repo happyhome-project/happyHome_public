@@ -22,10 +22,11 @@ type RenderBlock =
   | { type: 'html'; html: string }
   | { type: 'image'; src: string }
 
-const props = defineProps<{ value: unknown }>()
+const props = withDefaults(defineProps<{ value: unknown; allowImages?: boolean }>(), {
+  allowImages: true,
+})
 
 const content = computed(() => normalizeRichNoteContent(props.value))
-const hasContent = computed(() => !isRichNoteEmpty(props.value))
 
 const blocks = computed<RenderBlock[]>(() => {
   const markdown = content.value.markdown || ''
@@ -42,7 +43,7 @@ const blocks = computed<RenderBlock[]>(() => {
     const image = /^!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)$/.exec(line)
     if (image) {
       flushText()
-      result.push({ type: 'image', src: image[1] })
+      if (props.allowImages) result.push({ type: 'image', src: image[1] })
     } else {
       textBuffer.push(rawLine)
     }
@@ -50,6 +51,8 @@ const blocks = computed<RenderBlock[]>(() => {
   flushText()
   return result
 })
+
+const hasContent = computed(() => !isRichNoteEmpty(props.value) && blocks.value.length > 0)
 
 function previewImage(current: string) {
   const urls = blocks.value

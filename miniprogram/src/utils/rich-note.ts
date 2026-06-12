@@ -114,6 +114,15 @@ export function extractRichNoteImageSources(value: string): string[] {
   return sources
 }
 
+export function stripMarkdownImages(markdown: string): string {
+  const imgPattern = /!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
+  return String(markdown || '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(imgPattern, ''))
+    .join('\n')
+}
+
 function renderInline(markdown: string): string {
   let html = escapeHtml(markdown)
   html = html.replace(/!\[([^\]]*)]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g, (_all, alt, src) =>

@@ -87,7 +87,7 @@ describe('buildGuideRouteDetail', () => {
     ])
   })
 
-  test('封面图片用于顶部，正文只保留文字段落', () => {
+  test('封面图片用于顶部，正文交给通用富图文渲染并保留原始 Markdown', () => {
     const section = baseSection([
       { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
       { widgetId: 'images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false },
@@ -112,11 +112,38 @@ describe('buildGuideRouteDetail', () => {
     expect(detail.bodySections).toEqual([
       {
         title: '正文',
-        blocks: [
-          { type: 'paragraph', text: '线路概述：经过桂溪公园、中和湿地公园，寻找网红白房子' },
-          { type: 'paragraph', text: '线路行程：11+公里' },
-        ],
+        type: 'rich_note',
+        value: expect.objectContaining({
+          markdown: '线路概述：经过桂溪公园、中和湿地公园，寻找网红白房子\n\n![图片](cloud://env/body.jpg)\n\n线路行程：11+公里',
+        }),
       },
     ])
+  })
+
+  test('图文攻略正文保留普通富图文的多次换行和排版语法', () => {
+    const markdown = '第一行\n\n\n第二行\n\n**加粗提醒**\n\n- 第一项\n- 第二项'
+    const section = baseSection([
+      { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
+      { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 1, showInList: false },
+    ])
+    const post = basePost({
+      title: '太平水库亲子游',
+      body: {
+        format: 'markdown',
+        markdown,
+        html: '',
+        text: '第一行 第二行 加粗提醒 第一项 第二项',
+        imageFileIDs: [],
+        schemaVersion: 1,
+      },
+    })
+
+    const [body] = buildGuideRouteDetail(post, section).bodySections
+
+    expect(body).toEqual({
+      title: '正文',
+      type: 'rich_note',
+      value: expect.objectContaining({ markdown }),
+    })
   })
 })

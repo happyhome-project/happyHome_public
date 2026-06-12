@@ -9,7 +9,7 @@
       <button class="tool-btn" size="mini" @tap="applyAction('quote')">引用</button>
       <button class="tool-btn" size="mini" @tap="applyAction('line-break')">换行</button>
       <button class="tool-btn" size="mini" @tap="insertLink">链接</button>
-      <button class="tool-btn" size="mini" @tap="insertImage">图片</button>
+      <button v-if="allowImages" class="tool-btn" size="mini" @tap="insertImage">图片</button>
     </view>
 
     <textarea
@@ -17,7 +17,7 @@
       :value="markdown"
       :cursor="cursor"
       maxlength="-1"
-      placeholder="输入正文，可用上方按钮插入排版和图片"
+      :placeholder="allowImages ? '输入正文，可用上方按钮插入排版和图片' : '输入正文，可用上方按钮插入排版；图片请上传到封面/图片'"
       placeholder-class="rich-note-placeholder"
       auto-height
       @input="onInput"
@@ -26,37 +26,56 @@
     />
 
     <view class="rich-note-tip">
-      <text>内容会以兼容 Markdown 的结构保存。不会写格式也没关系：选中或停在光标处点上方按钮即可。</text>
+      <text>{{ allowImages
+        ? '内容会以兼容 Markdown 的结构保存。不会写格式也没关系：选中或停在光标处点上方按钮即可。'
+        : '内容会以兼容 Markdown 的结构保存；正文支持换行和基础排版，但不支持插图。'
+      }}</text>
     </view>
 
     <view v-if="markdown.trim()" class="preview-card">
       <text class="preview-title">预览</text>
-      <RichNoteRenderer :value="currentContent" />
+      <RichNoteRenderer :value="currentContent" :allow-images="allowImages" />
     </view>
   </view>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   applyMarkdownToolbarAction,
   buildRichNoteContentFromMarkdown,
   normalizeRichNoteContent,
+  stripMarkdownImages,
   type MarkdownToolbarAction,
 } from '../../utils/rich-note'
 import RichNoteRenderer from './RichNoteRenderer.vue'
 
-const props = defineProps<{ modelValue: unknown }>()
+const props = withDefaults(defineProps<{ modelValue: unknown; allowImages?: boolean }>(), {
+  allowImages: true,
+})
 const emit = defineEmits(['update:modelValue'])
 
-const markdown = ref(normalizeRichNoteContent(props.modelValue).markdown)
+const allowImages = computed(() => props.allowImages)
+
+function normalizeMarkdownForPolicy(value: unknown) {
+  const next = normalizeRichNoteContent(value).markdown
+  return allowImages.value ? next : stripMarkdownImages(next)
+}
+
+const markdown = ref(normalizeMarkdownForPolicy(props.modelValue))
 const cursor = ref(markdown.value.length)
 const currentContent = computed(() => buildRichNoteContentFromMarkdown(markdown.value))
+
+onMounted(() => {
+  if (!allowImages.value && normalizeRichNoteContent(props.modelValue).markdown !== markdown.value) {
+    emit('update:modelValue', buildRichNoteContentFromMarkdown(markdown.value))
+  }
+})
 
 watch(
   () => props.modelValue,
   (value) => {
-    const next = normalizeRichNoteContent(value).markdown
+    const next = normalizeMarkdownForPolicy(value)
     if (next !== markdown.value) {
       markdown.value = next
       cursor.value = next.length
@@ -66,8 +85,9 @@ watch(
 )
 
 function emitMarkdown(value: string) {
-  markdown.value = value
-  emit('update:modelValue', buildRichNoteContentFromMarkdown(value))
+  const next = allowImages.value ? value : stripMarkdownImages(value)
+  markdown.value = next
+  emit('update:modelValue', buildRichNoteContentFromMarkdown(next))
 }
 
 function rememberCursor(event: any) {
@@ -111,6 +131,7 @@ function chooseImages(): Promise<string[]> {
 }
 
 async function insertImage() {
+  if (!allowImages.value) return
   try {
     const paths = await chooseImages()
     if (paths.length === 0) return
