@@ -50,10 +50,11 @@ assert(
 )
 
 assert(
-  guideRouteDetail.includes('rgba(13, 22, 17, 0.56)') &&
-    !guideRouteDetail.includes('rgba(13, 22, 17, 0.82)') &&
-    guideRouteDetail.includes('text-shadow'),
-  'guide route detail hero must keep scenic photos readable without relying on a heavy dark mask.'
+  !guideRouteDetail.includes('guide-hero-mask') &&
+    !guideRouteDetail.includes('guide-hero-copy') &&
+    !guideRouteDetail.includes('text-shadow') &&
+    guideRouteDetail.includes('class="guide-intro"'),
+  'guide route detail hero must preserve original photo color and move title copy below the image.'
 )
 
 assert(
