@@ -160,6 +160,14 @@ const INDEXES = [
     ],
     unique: true,
   },
+  // users: 微信数据预拉取入口按 backgroundFetchToken 反查用户
+  {
+    coll: 'users',
+    name: 'idx_backgroundFetchToken',
+    keys: [
+      { Name: 'backgroundFetchToken', Direction: '1' },
+    ],
+  },
   // admin_accounts: admin.bindWechat / wxLogin 按 userId 反查
   {
     coll: 'admin_accounts',

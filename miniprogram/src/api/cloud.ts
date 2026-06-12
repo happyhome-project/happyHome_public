@@ -286,6 +286,12 @@ export const sectionApi = {
 }
 
 export const postApi = {
+  bootstrap: (currentCommunityId?: string, limitPerSection = 20) =>
+    callCloud<any>(
+      'post',
+      'bootstrap',
+      { currentCommunityId, limitPerSection },
+    ),
   home: (communityId: string, limitPerSection = 20) =>
     callCloud<{ sections: any[]; postsBySection: Record<string, any[]> }>(
       'post',
