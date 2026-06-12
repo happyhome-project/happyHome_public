@@ -91,6 +91,20 @@ function emitConsole(level: LogLevel, event: string, payload: Record<string, any
   }
 }
 
+function isVerboseCloudLoggingEnabled() {
+  try {
+    const value = wxRef?.getStorageSync ? wxRef.getStorageSync('hh_client_log_verbose') : ''
+    return value === true || value === '1' || value === 'true'
+  } catch (_error) {
+    return false
+  }
+}
+
+function shouldUploadToCloud(level: LogLevel) {
+  if (level === 'warn' || level === 'error') return true
+  return isVerboseCloudLoggingEnabled()
+}
+
 export function clientLog(level: LogLevel, event: string, details: Record<string, any> = {}) {
   const payload = {
     action: 'clientLog',
@@ -106,6 +120,7 @@ export function clientLog(level: LogLevel, event: string, details: Record<string
   emitConsole(level, event, payload)
 
   try {
+    if (!shouldUploadToCloud(level)) return
     if (!wxRef || !wxRef.cloud || !wxRef.cloud.callFunction) return
     wxRef.cloud.callFunction({
       name: 'post',

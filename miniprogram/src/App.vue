@@ -11,7 +11,7 @@ async function refreshMyCommunitiesSilently() {
 
   try {
     clientLog('debug', 'app.communities.refresh.start', {})
-    await useCommunityStore().loadMyCommunities()
+    await useCommunityStore().loadMyCommunities({ loadSections: false })
     clientLog('debug', 'app.communities.refresh.success', {})
   } catch (e) {
     clientLog('error', 'app.communities.refresh.fail', { error: e })
@@ -62,7 +62,7 @@ onLaunch(async () => {
   if (userStore.isLoggedIn) {
     try {
       clientLog('info', 'app.communities.load.start', {})
-      await communityStore.loadMyCommunities()
+      await communityStore.loadMyCommunities({ loadSections: false })
       clientLog('info', 'app.communities.load.success', {
         communityCount: communityStore.myCommunities.length,
         currentCommunityId: communityStore.currentCommunityId || '',
