@@ -93,6 +93,7 @@
     <RichNoteEditor
       v-else-if="widget.type === 'rich_note'"
       :model-value="modelValue"
+      :allow-images="allowRichNoteImages"
       @update:model-value="emit('update:modelValue', $event)"
     />
 
@@ -108,7 +109,9 @@ import { resolveWidgetLabel } from '../../utils/widget-form'
 import NoteBlocksEditor from './NoteBlocksEditor.vue'
 import RichNoteEditor from './RichNoteEditor.vue'
 
-const props = defineProps<{ widget: any; modelValue: any }>()
+const props = withDefaults(defineProps<{ widget: any; modelValue: any; allowRichNoteImages?: boolean }>(), {
+  allowRichNoteImages: true,
+})
 const emit = defineEmits(['update:modelValue'])
 
 interface GeoLocationValue {

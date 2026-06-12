@@ -163,6 +163,43 @@ test('create: 旧图文攻略板块补齐驾车到达用时并按必填校验', 
   expect(db.create).not.toHaveBeenCalled()
 })
 
+test('create: 图文攻略正文不允许提交富图文图片', async () => {
+  const guideSection = {
+    ...mockSection,
+    type: 'evergreen',
+    displayTemplate: 'guide_note',
+    widgets: [
+      { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true, locked: true },
+      { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false, locked: true },
+      { widgetId: 'guide_drive_duration', type: 'short_text', label: '驾车到达用时', fieldKey: 'driveDuration', required: true, order: 6, showInList: false, locked: true },
+      { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 7, showInList: false, locked: true },
+      { widgetId: 'guide_location', type: 'location', label: '目的地位置', fieldKey: 'location', required: true, order: 8, showInList: false, locked: true },
+    ],
+  }
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValue(guideSection)
+
+  await expect(handleCreate({
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    content: {
+      guide_title: '太平水库亲子游',
+      guide_images: ['cloud://env/posts/cover.jpg'],
+      guide_drive_duration: '青山村约35分钟到达水库入口',
+      guide_location: { address: '太平水库', lat: 30.1, lng: 104.1 },
+      guide_body: {
+        format: 'markdown',
+        markdown: '第一段\n\n![图片](cloud://env/posts/body.jpg)\n\n第二段',
+        html: '<p>第一段</p><p><img src="cloud://env/posts/body.jpg"></p><p>第二段</p>',
+        text: '第一段 第二段',
+        imageFileIDs: ['cloud://env/posts/body.jpg'],
+        schemaVersion: 1,
+      },
+    },
+  } as any, 'test-openid')).rejects.toThrow('图文攻略正文不支持插入图片')
+  expect(db.create).not.toHaveBeenCalled()
+})
+
 test('update: 保存时会清理无效字段、attendance、公告和音频字段', async () => {
   ;(db.getById as jest.Mock)
     .mockResolvedValueOnce({

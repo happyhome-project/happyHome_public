@@ -1,5 +1,5 @@
 import type { Post, Section } from '../../../cloud/shared/types'
-import { normalizeRichNoteContent } from './rich-note'
+import { isRichNoteEmpty, normalizeRichNoteContent, type RichNoteContent } from './rich-note'
 import { formatWidgetValue } from './widget'
 
 type SectionWidget = Section['widgets'][number]
@@ -21,10 +21,9 @@ export type GuideRouteBodyBlock =
   | { type: 'paragraph'; text: string }
   | { type: 'image'; src: string }
 
-export interface GuideRouteBodySection {
-  title: string
-  blocks: GuideRouteBodyBlock[]
-}
+export type GuideRouteBodySection =
+  | { title: string; type: 'blocks'; blocks: GuideRouteBodyBlock[] }
+  | { title: string; type: 'rich_note'; value: RichNoteContent }
 
 export interface GuideRouteDetail {
   title: string
@@ -121,12 +120,15 @@ function collectTopImages(post: Post, section: Section): string[] {
 }
 
 function collectBodySections(post: Post, bodyWidgets: SectionWidget[]): GuideRouteBodySection[] {
+  const sections: GuideRouteBodySection[] = []
   const blocks: GuideRouteBodyBlock[] = []
   bodyWidgets.forEach((widget) => {
     const value = post.content?.[widget.widgetId]
     if (widget.type === 'rich_note') {
       const rich = normalizeRichNoteContent(value)
-      blocks.push(...markdownToBodyBlocks(rich.markdown || rich.text || ''))
+      if (!isRichNoteEmpty(rich)) {
+        sections.push({ title: widget.label || '正文', type: 'rich_note', value: rich })
+      }
       return
     }
     if (widget.type === 'rich_text') {
@@ -136,7 +138,8 @@ function collectBodySections(post: Post, bodyWidgets: SectionWidget[]): GuideRou
     const text = widgetTextValue(post, widget)
     if (text) blocks.push({ type: 'paragraph', text })
   })
-  return blocks.length ? [{ title: '正文', blocks }] : []
+  if (blocks.length) sections.push({ title: '正文', type: 'blocks', blocks })
+  return sections
 }
 
 function collectLocation(post: Post, section: Section): GuideRouteLocation | null {
@@ -227,19 +230,6 @@ function splitParagraphs(value: string): string[] {
     .split(/\n+/g)
     .map((item) => item.trim())
     .filter(Boolean)
-}
-
-function markdownToBodyBlocks(value: string): GuideRouteBodyBlock[] {
-  const blocks: GuideRouteBodyBlock[] = []
-  splitParagraphs(value).forEach((paragraph) => {
-    const image = /^!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)$/.exec(paragraph)
-    if (image) {
-      return
-    } else {
-      blocks.push({ type: 'paragraph', text: paragraph })
-    }
-  })
-  return blocks
 }
 
 function htmlToBodyBlocks(value: string): GuideRouteBodyBlock[] {
