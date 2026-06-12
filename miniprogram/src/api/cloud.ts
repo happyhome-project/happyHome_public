@@ -274,6 +274,12 @@ export const sectionApi = {
 }
 
 export const postApi = {
+  home: (communityId: string, limitPerSection = 20) =>
+    callCloud<{ sections: any[]; postsBySection: Record<string, any[]> }>(
+      'post',
+      'home',
+      { communityId, limitPerSection },
+    ),
   list: (sectionId: string, skip = 0) =>
     callCloud<{ posts: any[] }>('post', 'list', { sectionId, skip }),
   get: (postId: string) =>

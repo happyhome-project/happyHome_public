@@ -600,55 +600,47 @@ function expandDormant() {
 
 async function switchCommunity(communityId: string) {
   showSwitcher.value = false
-  await communityStore.switchCommunity(communityId)
+  communityStore.currentCommunityId = communityId
+  communityStore.currentSectionIndex = 0
+  communityStore.currentSections = []
+  postsBySection.value = {}
+  communityStore.saveToStorage()
+  communityStore.refreshMembershipStatus(communityId).catch(() => {})
   await loadAllSectionPosts()
 }
 
 async function loadAllSectionPosts() {
-  const sections = communityStore.currentSections ?? []
-  const results: Record<string, any[]> = {}
+  const communityId = String(communityStore.currentCommunityId || '')
   clientLog('info', 'home.sections.posts.load.start', {
-    sectionCount: sections.length,
-    communityId: communityStore.currentCommunityId || '',
+    sectionCount: communityStore.currentSections?.length || 0,
+    communityId,
   })
-  await Promise.all(
-    sections.map(async (section) => {
-      try {
-        clientLog('debug', 'home.section.posts.load.start', {
-          sectionId: section._id,
-          sectionName: section.name,
-          sectionType: section.type || '',
-          sectionStatus: section.status || '',
-        })
-        const res = await postApi.list(section._id, 0)
-        results[section._id] = res.posts ?? []
-        clientLog('debug', 'home.section.posts.load.success', {
-          sectionId: section._id,
-          postCount: results[section._id].length,
-          firstPostId: results[section._id][0]?._id || '',
-        })
-      } catch (error: any) {
-        clientLog('error', 'home.section.posts.load.fail', {
-          sectionId: section._id,
-          sectionName: section.name,
-          error,
-        })
-        if (error?.message?.includes('需要先加入社区后查看内容')) {
-          communityStore.clearCommunityState()
-          uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
-          openOnboardingPreservingStack()
-          return
-        }
-        results[section._id] = []
-      }
+  if (!communityId) {
+    communityStore.currentSections = []
+    postsBySection.value = {}
+    return
+  }
+  try {
+    const res = await postApi.home(communityId)
+    communityStore.currentSections = res.sections ?? []
+    postsBySection.value = res.postsBySection ?? {}
+    clientLog('info', 'home.sections.posts.load.done', {
+      sectionCount: communityStore.currentSections.length,
+      resultSectionCount: Object.keys(postsBySection.value).length,
+      totalPosts: Object.keys(postsBySection.value).reduce((sum, key) => sum + (postsBySection.value[key]?.length || 0), 0),
     })
-  )
-  postsBySection.value = results
-  clientLog('info', 'home.sections.posts.load.done', {
-    sectionCount: sections.length,
-    resultSectionCount: Object.keys(results).length,
-    totalPosts: Object.keys(results).reduce((sum, key) => sum + (results[key]?.length || 0), 0),
-  })
+  } catch (error: any) {
+    clientLog('error', 'home.sections.posts.load.fail', { communityId, error })
+    if (error?.message?.includes('需要先加入社区后查看内容')) {
+      communityStore.clearCommunityState()
+      uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
+      openOnboardingPreservingStack()
+      return
+    }
+    communityStore.currentSections = []
+    postsBySection.value = {}
+    throw error
+  }
 }
 
 function getPendingHomeRefreshMarker() {
@@ -696,7 +688,7 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
   }
   refreshingHome = true
   try {
-    await communityStore.loadMyCommunities()
+    await communityStore.loadMyCommunities({ loadSections: false })
     clientLog('info', 'home.communities.load.success', {
       communityCount: communityStore.myCommunities.length,
       currentCommunityId: communityStore.currentCommunityId || '',

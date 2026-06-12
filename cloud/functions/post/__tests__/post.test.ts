@@ -18,6 +18,7 @@ import {
   handleClientLog,
   handleDelete,
   handleGet,
+  handleHome,
   handleJoinAttendance,
   handleListAttendanceMembers,
   handleList,
@@ -145,6 +146,74 @@ test('update: 保存时会清理无效字段、attendance、公告和音频字�
     pendingContent: { 'title-widget': '更新后的标题' },
     pendingAuditStatus: 'pending',
   }))
+})
+
+test('home: returns sections and grouped posts with one membership check', async () => {
+  const sections = [
+    {
+      ...mockSection,
+      _id: 'section-1',
+      communityId: 'community-1',
+      name: '活动',
+      widgets: [mockSection.widgets[0]],
+    },
+    {
+      ...mockSection,
+      _id: 'section-2',
+      communityId: 'community-1',
+      name: '档案',
+      type: 'evergreen',
+      order: 2,
+      widgets: [mockSection.widgets[0]],
+    },
+  ]
+  const posts = [
+    {
+      _id: 'post-2',
+      communityId: 'community-1',
+      sectionId: 'section-2',
+      authorId: 'user-2',
+      status: 'active',
+      content: { 'title-widget': '档案 B' },
+      createdAt: '2024-01-02T00:00:00.000Z',
+    },
+    {
+      _id: 'post-1',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      authorId: 'user-1',
+      status: 'active',
+      content: { 'title-widget': '活动 A' },
+      createdAt: '2024-01-01T00:00:00.000Z',
+    },
+  ]
+  ;(db.query as jest.Mock).mockImplementation(async (collectionName: string, where: any) => {
+    if (collectionName === 'community_members') return [{ _id: 'member-1', status: 'active' }]
+    if (collectionName === 'sections') return sections
+    if (collectionName === 'posts') return posts.filter((post) => post.sectionId === where.sectionId)
+    return []
+  })
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'users') return { _id: id, nickName: id === 'user-1' ? '一号' : '二号' }
+    return null
+  })
+
+  const result = await handleHome({ communityId: 'community-1', limitPerSection: 10 }, 'test-openid')
+
+  expect(result.sections.map((section: any) => section._id)).toEqual(['section-1', 'section-2'])
+  expect(Object.keys(result.postsBySection).sort()).toEqual(['section-1', 'section-2'])
+  expect(result.postsBySection['section-1'][0]).toEqual(expect.objectContaining({
+    _id: 'post-1',
+    authorNickname: '一号',
+  }))
+  expect(result.postsBySection['section-2'][0]).toEqual(expect.objectContaining({
+    _id: 'post-2',
+    authorNickname: '二号',
+  }))
+  expect((db.query as jest.Mock).mock.calls.filter(([collection]) => collection === 'community_members')).toHaveLength(1)
+  expect((db.query as jest.Mock).mock.calls.filter(([collection]) => collection === 'posts')).toHaveLength(2)
+  expect((db.query as jest.Mock).mock.calls.filter(([collection]) => collection === 'posts').map(([, where]) => where.sectionId).sort())
+    .toEqual(['section-1', 'section-2'])
 })
 
 test('joinAttendance: 同一用户重复参与不会重复创建记录', async () => {

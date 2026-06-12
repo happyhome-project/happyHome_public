@@ -19,6 +19,17 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const ATTENDANCE_COLLECTION = 'post_attendance_members'
 const ATTENDANCE_PREVIEW_LIMIT = 5
 const COMMUNITY_READ_ERROR = '需要先加入社区后查看内容'
+const HOME_POST_LIMIT_PER_SECTION = 20
+
+function normalizeSectionForClient(section: Section): Section {
+  return {
+    ...section,
+    type: section.type || 'evergreen',
+    status: section.status || 'active',
+    enableComment: section.enableComment !== false,
+    enableLike: section.enableLike !== false,
+  } as Section
+}
 
 function getAttendanceWidgets(section: Section): Widget[] {
   return (section.widgets || []).filter((widget) => widget.type === 'attendance')
@@ -263,6 +274,55 @@ export async function handleList(params: {
   return { posts: enrichedPosts }
 }
 
+export async function handleHome(params: {
+  communityId: string
+  limitPerSection?: number
+}, openid?: string) {
+  const communityId = String(params.communityId || '').trim()
+  if (!communityId) throw new Error('communityId 不能为空')
+  await ensureActiveCommunityMember(communityId, openid || '')
+
+  const rawSections = await db.query('sections', { communityId }, { orderBy: ['order', 'asc'] })
+  const sections = (rawSections as Section[]).map(normalizeSectionForClient)
+  const sectionById: Record<string, Section | null> = Object.fromEntries(
+    sections.map((section) => [section._id, section])
+  )
+  const sectionIdSet = new Set(sections.map((section) => section._id))
+  const limitPerSection = Math.min(
+    50,
+    Math.max(1, Math.floor(Number(params.limitPerSection || HOME_POST_LIMIT_PER_SECTION)))
+  )
+
+  const slicedBySection: Record<string, any[]> = {}
+  await Promise.all(sections.map(async (section) => {
+    const sectionPosts = await db.query('posts', {
+      sectionId: section._id,
+      status: 'active',
+    }, {
+      orderBy: ['createdAt', 'desc'],
+      limit: 100,
+    })
+    slicedBySection[section._id] = (sectionPosts as any[])
+      .filter((post) => sectionIdSet.has(post.sectionId))
+      .filter(isPostVisibleToMembers)
+      .slice()
+      .sort(comparePostListOrder)
+      .slice(0, limitPerSection)
+  }))
+
+  const slicedPosts = Object.values(slicedBySection).flat()
+  const withAttendance = await enrichPostsWithAttendance(slicedPosts, sectionById, openid)
+  const enrichedPosts = await enrichPostsWithAuthor(withAttendance)
+  const enrichedById = new Map(enrichedPosts.map((post: any) => [post._id, post]))
+  const postsBySection: Record<string, any[]> = {}
+  for (const section of sections) {
+    postsBySection[section._id] = (slicedBySection[section._id] || [])
+      .map((post) => enrichedById.get(post._id) || post)
+  }
+
+  return { sections, postsBySection }
+}
+
 export async function handleGet(params: { postId: string }, openid?: string) {
   const post = await db.getById('posts', params.postId) as any
   if (!post || post.status === 'deleted' || !isPostVisibleToMembers(post)) throw new Error('帖子不存在')
@@ -494,6 +554,7 @@ export const main = async (event: any) => {
   if (action === 'clientLog') return handleClientLog(params, openid)
   if (action === 'create') return handleCreate(params, openid)
   if (action === 'list') return handleList(params, openid)
+  if (action === 'home') return handleHome(params, openid)
   if (action === 'get') return handleGet(params, openid)
   if (action === 'delete') return handleDelete(params, openid)
   if (action === 'update') return handleUpdate(params, openid)
