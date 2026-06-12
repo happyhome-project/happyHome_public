@@ -4,7 +4,9 @@ import path from 'path'
 const root = process.cwd()
 const sectionList = fs.readFileSync(path.join(root, 'admin-web', 'src', 'views', 'CommunityAdmin', 'SectionList.vue'), 'utf8')
 const adminApi = fs.readFileSync(path.join(root, 'admin-web', 'src', 'api', 'cloud.ts'), 'utf8')
+const adminWidgetEditor = fs.readFileSync(path.join(root, 'admin-web', 'src', 'views', 'CommunityAdmin', 'WidgetEditor.vue'), 'utf8')
 const homePage = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'pages', 'index', 'index.vue'), 'utf8')
+const sectionPage = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'pages', 'section', 'index.vue'), 'utf8')
 const createPage = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'pages', 'create', 'index.vue'), 'utf8')
 const detailPage = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'pages', 'detail', 'index.vue'), 'utf8')
 const guideRouteDetail = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'components', 'GuideRouteDetailView.vue'), 'utf8')
@@ -21,6 +23,12 @@ assert(
 )
 
 assert(
+  adminWidgetEditor.includes('guide_drive_duration') &&
+    adminWidgetEditor.includes('guide_location'),
+  'Admin widget editor must lock the guide drive-duration field together with the route location field.'
+)
+
+assert(
   adminApi.includes("displayTemplate?: 'default' | 'guide_note'"),
   'admin-web section API types must include displayTemplate.'
 )
@@ -28,6 +36,14 @@ assert(
 assert(
   homePage.includes('getGuideNoteCard') && homePage.includes('guide-card'),
   'mini program home must render guide_note sections with guide cards.'
+)
+
+assert(
+  homePage.includes('driveDuration') &&
+    sectionPage.includes('driveDuration') &&
+    !homePage.includes('item.location') &&
+    !sectionPage.includes('item.location'),
+  'mini program guide cards must show drive duration instead of a precise location.'
 )
 
 assert(
@@ -55,6 +71,12 @@ assert(
     !guideRouteDetail.includes('text-shadow') &&
     guideRouteDetail.includes('class="guide-intro"'),
   'guide route detail hero must preserve original photo color and move title copy below the image.'
+)
+
+assert(
+  guideRouteDetail.includes('guide-drive') &&
+    guideRouteDetail.indexOf('guide-drive') < guideRouteDetail.indexOf('guide-map'),
+  'guide route detail must show drive duration above the route/track section.'
 )
 
 assert(

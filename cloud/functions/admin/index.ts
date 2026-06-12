@@ -30,11 +30,18 @@ import type {
   AdminSession,
   Community,
   Section,
-  SectionDisplayTemplate,
   SectionType,
   Widget,
 } from '../../shared/types'
 import { AUDIO_ALLOWED_EXTS } from '../../shared/types'
+import {
+  buildDefaultGuideNoteWidgets,
+  getGuideNoteLockedWidget,
+  GUIDE_NOTE_LOCKED_WIDGETS,
+  isGuideNoteSection,
+  normalizeGuideNoteWidgets,
+  normalizeSectionDisplayTemplate,
+} from '../../shared/guide-note-widgets'
 
 cloud.init({ env: process.env.TCB_ENV || cloud.DYNAMIC_CURRENT_ENV })
 
@@ -150,52 +157,6 @@ function normalizeSection(section: any) {
   }
 }
 
-function normalizeSectionDisplayTemplate(value: unknown): SectionDisplayTemplate {
-  return value === 'guide_note' ? 'guide_note' : 'default'
-}
-
-const GUIDE_NOTE_LOCKED_WIDGETS: Widget[] = [
-  { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true, locked: true },
-  { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false, locked: true },
-  { widgetId: 'guide_distance', type: 'short_text', label: '距离', fieldKey: 'distance', required: false, order: 2, showInList: false, locked: true },
-  { widgetId: 'guide_highest_altitude', type: 'short_text', label: '最高海拔', fieldKey: 'highestAltitude', required: false, order: 3, showInList: false, locked: true },
-  { widgetId: 'guide_total_climb', type: 'short_text', label: '累计爬升', fieldKey: 'totalClimb', required: false, order: 4, showInList: false, locked: true },
-  { widgetId: 'guide_reference_duration', type: 'short_text', label: '参考用时', fieldKey: 'referenceDuration', required: false, order: 5, showInList: false, locked: true },
-  { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 6, showInList: false, locked: true },
-  { widgetId: 'guide_location', type: 'location', label: '线路轨迹/地点', fieldKey: 'location', required: false, order: 7, showInList: false, locked: true },
-]
-
-const GUIDE_NOTE_LOCKED_BY_ID = new Map(GUIDE_NOTE_LOCKED_WIDGETS.map((widget) => [widget.widgetId, widget]))
-
-function buildDefaultGuideNoteWidgets(): Widget[] {
-  return GUIDE_NOTE_LOCKED_WIDGETS.map((widget) => ({ ...widget }))
-}
-
-function isGuideNoteSection(section: Section) {
-  return normalizeSectionDisplayTemplate(section?.displayTemplate) === 'guide_note'
-}
-
-function normalizeGuideNoteWidgets(section: any) {
-  const widgets = Array.isArray(section?.widgets) ? section.widgets : []
-  if (normalizeSectionDisplayTemplate(section?.displayTemplate) !== 'guide_note') return widgets
-
-  const lockedIds = new Set(GUIDE_NOTE_LOCKED_WIDGETS.map((widget) => widget.widgetId))
-  const customWidgets = widgets
-    .filter((widget: any) => !lockedIds.has(String(widget?.widgetId || '')))
-    .slice()
-    .sort((a: any, b: any) => Number(a?.order || 0) - Number(b?.order || 0))
-    .map((widget: any, index: number) => ({
-      ...widget,
-      order: GUIDE_NOTE_LOCKED_WIDGETS.length + index,
-      locked: false,
-    }))
-
-  return [
-    ...buildDefaultGuideNoteWidgets(),
-    ...customWidgets,
-  ]
-}
-
 function assertGuideNoteLockedWidgets(section: Section, widgets: Widget[]) {
   if (!isGuideNoteSection(section)) return
 
@@ -216,7 +177,7 @@ function assertGuideNoteLockedWidgets(section: Section, widgets: Widget[]) {
 function applyGuideNoteLockedFlags(section: Section, widgets: Widget[]) {
   if (!isGuideNoteSection(section)) return widgets
   return widgets.map((widget) => {
-    const lockedWidget = GUIDE_NOTE_LOCKED_BY_ID.get(widget.widgetId)
+    const lockedWidget = getGuideNoteLockedWidget(widget.widgetId)
     return lockedWidget ? { ...lockedWidget } : { ...widget, locked: false }
   })
 }

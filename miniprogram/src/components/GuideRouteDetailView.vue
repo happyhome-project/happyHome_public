@@ -85,6 +85,11 @@
       </view>
     </view>
 
+    <view v-if="detail.driveDuration" class="guide-drive">
+      <text class="guide-drive-label">自驾到达</text>
+      <text class="guide-drive-value">{{ detail.driveDuration }}</text>
+    </view>
+
     <view v-if="detail.location" class="guide-section">
       <view class="guide-section-heading">
         <text>线路轨迹</text>
@@ -375,6 +380,30 @@ function openLocation() {
 
 .guide-section:last-child {
   border-bottom: 0;
+}
+
+.guide-drive {
+  margin: 30rpx 28rpx 0;
+  padding: 22rpx 24rpx;
+  border: 1rpx solid $hh-accent-line;
+  border-radius: $hh-radius-md;
+  background: $hh-accent-wash;
+}
+
+.guide-drive-label {
+  display: block;
+  color: $hh-ink-3;
+  font-size: 23rpx;
+  line-height: 1.25;
+}
+
+.guide-drive-value {
+  display: block;
+  margin-top: 8rpx;
+  color: $hh-accent-ink;
+  font-size: 30rpx;
+  line-height: 1.35;
+  font-weight: $hh-font-weight-bold;
 }
 
 .guide-section-heading {

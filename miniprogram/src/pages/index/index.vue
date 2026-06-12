@@ -166,19 +166,16 @@
             <view class="guide-main">
               <text class="guide-title">{{ item.t }}</text>
               <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
-              <view v-if="item.routeStats?.length" class="guide-stats">
+              <view v-if="item.driveDuration" class="guide-stats">
                 <text
-                  v-for="stat in item.routeStats"
-                  :key="stat.label"
                   class="guide-stat"
-                >{{ stat.value }} {{ stat.label }}</text>
+                >{{ item.driveDuration }}</text>
               </view>
               <view v-if="item.isPinned || item.isFeatured" class="post-badges guide-badges">
                 <text v-if="item.isPinned" class="post-badge pin">置顶</text>
                 <text v-if="item.isFeatured" class="post-badge feature">精华</text>
               </view>
               <view class="guide-meta">
-                <text v-if="item.location">{{ item.location }}</text>
                 <text v-if="item.when">{{ item.when }}</text>
                 <text v-if="item.contentAuthor">{{ item.contentAuthor }}</text>
               </view>
@@ -384,7 +381,7 @@ interface ArchiveItem {
   meta?: string
   excerpt?: string
   coverImage?: string
-  location?: string
+  driveDuration?: string
   routeStats?: Array<{ label: string; value: string }>
   hot?: boolean
   when: string
@@ -416,7 +413,7 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
               meta: '',
               excerpt: guide.excerpt,
               coverImage: guide.coverImage,
-              location: guide.location,
+              driveDuration: guide.driveDuration,
               routeStats: guide.routeStats,
               hot: false,
               when: guide.when,

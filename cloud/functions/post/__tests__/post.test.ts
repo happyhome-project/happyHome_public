@@ -119,6 +119,32 @@ test('create: attendance、公告和音频控件不会参与普通用户发帖',
   }))
 })
 
+test('create: 旧图文攻略板块补齐驾车到达用时并按必填校验', async () => {
+  const oldGuideSection = {
+    ...mockSection,
+    type: 'evergreen',
+    displayTemplate: 'guide_note',
+    widgets: [
+      { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true, locked: true },
+      { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false, locked: true },
+      { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false, locked: true },
+      { widgetId: 'guide_location', type: 'location', label: '线路轨迹/地点', fieldKey: 'location', required: false, order: 3, showInList: false, locked: true },
+    ],
+  }
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValue(oldGuideSection)
+
+  await expect(handleCreate({
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    content: {
+      guide_title: '太平水库亲子游',
+      guide_images: ['cloud://env/posts/cover.jpg'],
+    },
+  } as any, 'test-openid')).rejects.toThrow('必填项未填写：驾车到达用时')
+  expect(db.create).not.toHaveBeenCalled()
+})
+
 test('update: 保存时会清理无效字段、attendance、公告和音频字段', async () => {
   ;(db.getById as jest.Mock)
     .mockResolvedValueOnce({

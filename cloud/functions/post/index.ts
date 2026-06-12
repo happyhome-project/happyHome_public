@@ -13,6 +13,7 @@ import type {
   Widget,
   PostContent,
 } from '../../shared/types'
+import { normalizeGuideNoteSection } from '../../shared/guide-note-widgets'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
@@ -22,6 +23,10 @@ const COMMUNITY_READ_ERROR = '需要先加入社区后查看内容'
 
 function getAttendanceWidgets(section: Section): Widget[] {
   return (section.widgets || []).filter((widget) => widget.type === 'attendance')
+}
+
+function normalizePostSection(section: Section): Section {
+  return normalizeGuideNoteSection(section) as Section
 }
 
 function normalizeCapacity(widget: Widget): number | undefined {
@@ -202,7 +207,7 @@ export async function handleCreate(
   if (!openid) throw new Error('Missing OPENID')
   await ensureActiveCommunityMember(params.communityId, openid)
 
-  const section = await db.getById('sections', params.sectionId) as Section
+  const section = normalizePostSection(await db.getById('sections', params.sectionId) as Section)
   // 板块尚未配置控件时，禁止发帖（否则会产生无任何字段的空 post）
   if (!section || !Array.isArray(section.widgets) || section.widgets.length === 0) {
     throw new Error('该板块尚未配置内容模板，请联系管理员完善板块设置后再发布')
@@ -248,7 +253,7 @@ export async function handleList(params: {
   skip?: number
   limit?: number
 }, openid?: string) {
-  const section = await db.getById('sections', params.sectionId) as Section
+  const section = normalizePostSection(await db.getById('sections', params.sectionId) as Section)
   await ensureActiveCommunityMember(section.communityId, openid || '')
   const posts = await db.query('posts', {
     sectionId: params.sectionId,
@@ -267,7 +272,7 @@ export async function handleGet(params: { postId: string }, openid?: string) {
   const post = await db.getById('posts', params.postId) as any
   if (!post || post.status === 'deleted' || !isPostVisibleToMembers(post)) throw new Error('帖子不存在')
   await ensureActiveCommunityMember(post.communityId, openid || '')
-  const section = await db.getById('sections', post.sectionId) as Section
+  const section = normalizePostSection(await db.getById('sections', post.sectionId) as Section)
   const attendanceSummaryByWidget = await buildAttendanceSummaryByWidget(post._id, section, openid)
   const [enrichedPost] = await enrichPostsWithAuthor([{ ...post, attendanceSummaryByWidget }])
   return { post: enrichedPost }
@@ -308,7 +313,7 @@ export async function handleUpdate(
   if (post.status === 'deleted') throw new Error('帖子已删除')
   if (post.authorId !== openid) throw new Error('无权修改')
 
-  const section = await db.getById('sections', post.sectionId) as Section
+  const section = normalizePostSection(await db.getById('sections', post.sectionId) as Section)
   if (!section || !Array.isArray(section.widgets) || section.widgets.length === 0) {
     throw new Error('该板块尚未配置内容模板，无法编辑')
   }

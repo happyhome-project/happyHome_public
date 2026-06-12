@@ -166,6 +166,7 @@ const GUIDE_NOTE_LOCKED_WIDGET_IDS = new Set([
   'guide_highest_altitude',
   'guide_total_climb',
   'guide_reference_duration',
+  'guide_drive_duration',
   'guide_body',
   'guide_location',
 ])
