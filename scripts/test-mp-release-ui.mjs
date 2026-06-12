@@ -58,6 +58,14 @@ function runCli(cliPath, args, options = {}) {
   return spawnSync(cliPath, args, baseOptions)
 }
 
+function runPowerShell(script, options = {}) {
+  return spawnSync(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    { encoding: 'utf8', timeout: options.timeout || 30000 },
+  )
+}
+
 function canConnect(host, port, timeoutMs = 700) {
   return new Promise((resolveConnect) => {
     const socket = net.createConnection({ host, port })
@@ -216,6 +224,41 @@ async function clearStaleIdePortFiles(idePort) {
   return moved
 }
 
+function stopStaleDevToolsAutoProcesses({ cliPath, projectPath, autoPort }) {
+  if (process.platform !== 'win32' || process.env.HH_RELEASE_UI_STOP_STALE_AUTOMATOR === '0') return 0
+  const root = dirname(cliPath)
+  const script = `
+$root = ${quoteForPowerShell(root)}
+$project = ${quoteForPowerShell(projectPath)}
+$autoPort = ${quoteForPowerShell(String(autoPort))}
+$targets = Get-CimInstance Win32_Process | Where-Object {
+  $_.ExecutablePath -and
+  $_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase) -and
+  $_.CommandLine -and
+  $_.CommandLine.Contains('auto --project') -and
+  $_.CommandLine.Contains($project) -and
+  $_.CommandLine.Contains('--auto-port') -and
+  $_.CommandLine.Contains($autoPort)
+}
+$count = 0
+foreach ($p in $targets) {
+  $count += 1
+  Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+}
+Write-Output $count
+`
+  const result = runPowerShell(script, { timeout: 30000 })
+  const count = Number(String(result.stdout || '').trim().split(/\s+/).pop() || 0)
+  if (result.status !== 0) {
+    console.warn(`[release-ui] failed to stop stale DevTools auto processes: ${(result.stderr || result.stdout || '').trim()}`)
+    return 0
+  }
+  if (count > 0) {
+    console.log(`[release-ui] stopped ${count} stale DevTools auto process(es) for this project`)
+  }
+  return count
+}
+
 function runAutomatorStart(cliPath, args, label) {
   if (label) console.log(`[release-ui] ${label}`)
   const result = runCli(cliPath, args, { timeout: 120000 })
@@ -280,20 +323,30 @@ async function refreshDevToolsProjectCache({ cliPath, projectPath, idePort, auto
 async function startAutomator({ cliPath, projectPath, idePort, autoPort }) {
   const args = buildDevToolsAutoArgs({ projectPath, idePort, autoPort })
   if (process.env.HH_RELEASE_UI_COLD_START_DEVTOOLS !== '0') {
+    stopStaleDevToolsAutoProcesses({ cliPath, projectPath, autoPort })
     await clearStaleIdePortFiles(idePort)
     await refreshDevToolsProjectCache({ cliPath, projectPath, idePort, autoPort })
     await clearStaleIdePortFiles(idePort)
     await quitDevTools(cliPath, idePort, autoPort, 'avoid stale compiled package/cache')
   }
-  runAutomatorStart(cliPath, args, 'start DevTools automator')
-  if (await waitForTcpPort(autoPort, { timeoutMs: 15000 })) return
-
-  console.warn(`[release-ui] automator port ${autoPort} did not open after cli auto; quitting stale DevTools session and retrying`)
-  await clearStaleIdePortFiles(idePort)
-  await quitDevTools(cliPath, idePort, autoPort, 'automator port missing')
-  runAutomatorStart(cliPath, args, 'restart DevTools automator after quit')
-  if (await waitForTcpPort(autoPort, { timeoutMs: 25000 })) return
-  throw new Error(`DevTools cli auto reported success, but automator websocket port ${autoPort} did not open.`)
+  let lastError = null
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      runAutomatorStart(cliPath, args, attempt === 1 ? 'start DevTools automator' : 'retry DevTools automator after cleanup')
+      if (await waitForTcpPort(autoPort, { timeoutMs: attempt === 1 ? 15000 : 25000 })) return
+      throw new Error(`DevTools cli auto reported success, but automator websocket port ${autoPort} did not open.`)
+    } catch (error) {
+      lastError = error
+      if (attempt >= 2) break
+      console.warn(`[release-ui] DevTools auto attempt failed: ${error?.message || error}`)
+      console.warn('[release-ui] cleaning release-owned DevTools auto processes and retrying once after DevTools settles')
+      stopStaleDevToolsAutoProcesses({ cliPath, projectPath, autoPort })
+      await clearStaleIdePortFiles(idePort)
+      await quitDevTools(cliPath, idePort, autoPort, 'auto attempt failed')
+      await sleep(5000)
+    }
+  }
+  throw lastError || new Error('DevTools automator failed to start.')
 }
 
 async function connectMiniProgram(autoPort) {
@@ -758,7 +811,7 @@ async function main() {
   await startAutomator({ cliPath, projectPath, idePort, autoPort })
   const mp = await connectMiniProgram(autoPort)
   const evidenceDir = createEvidenceDir()
-  const originalStorage = await captureStorage(mp)
+  const originalStorage = await withTimeout(captureStorage(mp), 15000, 'capture release UI storage')
   const runContext = { releaseFixture: null }
 
   const evidence = {
@@ -771,14 +824,14 @@ async function main() {
   }
 
   try {
-    const homeDetail = await verifyHomeDetail(mp, runContext)
+    const homeDetail = await withTimeout(verifyHomeDetail(mp, runContext), 150000, 'verify release home/detail UI')
     evidence.homeDetail = homeDetail
     if (homeDetail.passed) {
       evidence.markers.push('HH_RELEASE_HOME_DETAIL_NONEMPTY')
       console.log('HH_RELEASE_HOME_DETAIL_NONEMPTY')
     }
 
-    const profileLoginClean = await verifyProfileLoginClean(mp)
+    const profileLoginClean = await withTimeout(verifyProfileLoginClean(mp), 90000, 'verify release profile/login UI')
     evidence.profileLoginClean = profileLoginClean
     if (profileLoginClean.versionPassed) {
       evidence.markers.push('HH_RELEASE_LOGIN_VERSION')
@@ -796,7 +849,11 @@ async function main() {
     })
 
     if (runContext.releaseFixture) {
-      evidence.releaseFixtureCleanup = await cleanupReleaseFixture(mp, runContext.releaseFixture)
+      evidence.releaseFixtureCleanup = await withTimeout(
+        cleanupReleaseFixture(mp, runContext.releaseFixture),
+        60000,
+        'cleanup release UI fixture',
+      )
       runContext.releaseFixture = null
       if (!evidence.releaseFixtureCleanup.ok) {
         throw new Error(`Release fixture cleanup failed: ${JSON.stringify(evidence.releaseFixtureCleanup)}`)
@@ -809,7 +866,11 @@ async function main() {
     evidence.error = String(error?.message || error)
     if (runContext.releaseFixture) {
       try {
-        evidence.releaseFixtureCleanup = await cleanupReleaseFixture(mp, runContext.releaseFixture)
+        evidence.releaseFixtureCleanup = await withTimeout(
+          cleanupReleaseFixture(mp, runContext.releaseFixture),
+          60000,
+          'cleanup failed release UI fixture',
+        )
         runContext.releaseFixture = null
       } catch (cleanupError) {
         evidence.releaseFixtureCleanup = {
@@ -824,11 +885,11 @@ async function main() {
     throw error
   } finally {
     if (runContext.releaseFixture) {
-      try { await cleanupReleaseFixture(mp, runContext.releaseFixture) } catch {}
+      try { await withTimeout(cleanupReleaseFixture(mp, runContext.releaseFixture), 60000, 'cleanup leftover release UI fixture') } catch {}
       runContext.releaseFixture = null
     }
-    try { await restoreStorage(mp, originalStorage) } catch {}
-    try { await mp.disconnect() } catch {}
+    try { await withTimeout(restoreStorage(mp, originalStorage), 15000, 'restore release UI storage') } catch {}
+    try { await withTimeout(mp.disconnect(), 15000, 'disconnect release UI automator') } catch {}
     try {
       if (
         !existsSync(resolve(evidenceDir, 'release-ui-evidence.json')) &&
