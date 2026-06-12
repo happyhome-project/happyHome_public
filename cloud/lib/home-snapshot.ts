@@ -299,11 +299,14 @@ async function getActiveCommunitiesForUser(openid: string): Promise<Community[]>
 
 export async function buildHomeSnapshot(
   openid: string,
-  options: { currentCommunityId?: string; limitPerSection?: number } = {},
+  options: { currentCommunityId?: string; limitPerSection?: number; user?: Partial<User> | null } = {},
 ): Promise<HomeSnapshot> {
   if (!openid) return emptyHomeSnapshot('')
   const communities = await getActiveCommunitiesForUser(openid)
-  const preferred = String(options.currentCommunityId || '').trim()
+  const user = options.user !== undefined
+    ? options.user
+    : await db.getById('users', openid).catch(() => null) as User | null
+  const preferred = String(options.currentCommunityId || user?.lastHomeCommunityId || '').trim()
   const currentCommunity = preferred && communities.some((community) => community._id === preferred)
     ? preferred
     : communities[0]?._id || ''
@@ -334,7 +337,13 @@ export async function buildHomeBootstrap(
   if (!openid) throw new Error('Missing OPENID')
   const user = await db.getById('users', openid).catch(() => null) as User | null
   const token = await ensureBackgroundFetchToken(openid, user)
-  const snapshot = await buildHomeSnapshot(openid, options)
+  const snapshot = await buildHomeSnapshot(openid, { ...options, user })
+  if (user && snapshot.currentCommunityId && user.lastHomeCommunityId !== snapshot.currentCommunityId) {
+    await db.updateById('users', openid, {
+      lastHomeCommunityId: snapshot.currentCommunityId,
+      lastHomeCommunityAt: new Date().toISOString(),
+    })
+  }
   return {
     ...snapshot,
     backgroundFetchToken: token.backgroundFetchToken,
