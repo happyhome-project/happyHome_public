@@ -65,6 +65,26 @@ describe('callCloud', () => {
     await expect(callCloud('post', 'get', { postId: 'p1' })).rejects.toThrow('Missing OPENID')
   })
 
+  test('preserves wx.cloud fail errCode and action context for diagnostics', async () => {
+    const callFunction = vi.fn(({ fail }: { fail: (value: any) => void }) => {
+      fail({
+        errCode: -504002,
+        errMsg: 'cloud.callFunction:fail Error: errCode: -504002 functions execute fail',
+      })
+    })
+    vi.stubGlobal('wx', { cloud: { callFunction } })
+
+    const { callCloud } = await import('../cloud')
+
+    await expect(callCloud('member', 'saveNotificationSubscription', {})).rejects.toMatchObject({
+      errCode: -504002,
+      cloudFunction: 'member',
+      action: 'saveNotificationSubscription',
+    })
+    await expect(callCloud('member', 'saveNotificationSubscription', {}))
+      .rejects.toThrow('member/saveNotificationSubscription')
+  })
+
   test('loads approval reminder config and status from member cloud function at runtime', async () => {
     const callFunction = vi.fn(({ data, success }: { data: any; success: (value: any) => void }) => {
       if (data.action === 'notificationConfig') {
