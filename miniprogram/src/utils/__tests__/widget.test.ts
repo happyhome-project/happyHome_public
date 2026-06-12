@@ -290,6 +290,29 @@ describe('getGuideNoteCard', () => {
       routeStats: [],
     })
   })
+
+  test('固定图文攻略控件 guide_drive_duration 会进入首页卡片自驾用时', () => {
+    const guideSection: Section = {
+      ...section,
+      widgets: [
+        { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
+        { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false },
+        { widgetId: 'guide_drive_duration', type: 'short_text', label: '驾车到达用时', fieldKey: 'driveDuration', required: true, order: 6, showInList: false },
+        { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 7, showInList: false },
+        { widgetId: 'guide_location', type: 'location', label: '目的地位置', fieldKey: 'location', required: true, order: 8, showInList: false },
+      ],
+    }
+    const post = {
+      content: {
+        guide_title: '太平水库亲子游',
+        guide_images: ['cloud://env/posts/cover.jpg'],
+        guide_drive_duration: '青山村约35分钟到达入口',
+      },
+      createdAt: '2026-06-12T08:00:00.000Z',
+    } as Post
+
+    expect(getGuideNoteCard(post, guideSection).driveDuration).toBe('青山村约35分钟到达入口')
+  })
 })
 
 describe('getCarpoolListSummary', () => {
