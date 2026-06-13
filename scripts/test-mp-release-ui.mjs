@@ -231,7 +231,7 @@ function stopStaleDevToolsAutoProcesses({ cliPath, projectPath, autoPort }) {
 $root = ${quoteForPowerShell(root)}
 $project = ${quoteForPowerShell(projectPath)}
 $autoPort = ${quoteForPowerShell(String(autoPort))}
-$targets = Get-CimInstance Win32_Process | Where-Object {
+$autoTargets = Get-CimInstance Win32_Process | Where-Object {
   $_.ExecutablePath -and
   $_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase) -and
   $_.CommandLine -and
@@ -240,6 +240,23 @@ $targets = Get-CimInstance Win32_Process | Where-Object {
   $_.CommandLine.Contains('--auto-port') -and
   $_.CommandLine.Contains($autoPort)
 }
+$autoPortProcessIds = @(
+  Get-NetTCPConnection -State Listen -LocalPort ([int]$autoPort) -ErrorAction SilentlyContinue |
+    ForEach-Object { $_.OwningProcess } |
+    Where-Object { $_ -gt 0 } |
+    Sort-Object -Unique
+)
+$portTargets = @()
+if ($autoPortProcessIds.Count -gt 0) {
+  $portTargets = Get-CimInstance Win32_Process | Where-Object {
+    $autoPortProcessIds -contains $_.ProcessId -and
+    $_.ExecutablePath -and
+    $_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase) -and
+    $_.CommandLine -and
+    $_.CommandLine.Contains('--type=renderer')
+  }
+}
+$targets = @($autoTargets) + @($portTargets) | Sort-Object -Property ProcessId -Unique
 $count = 0
 foreach ($p in $targets) {
   $count += 1
@@ -386,6 +403,29 @@ async function captureStorage(mp) {
     }
     return values
   })
+}
+
+async function captureStorageWithRetry({ mp, autoPort, attempts = 3 }) {
+  let currentMp = mp
+  let lastError = null
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const storage = await withTimeout(
+        captureStorage(currentMp),
+        15000,
+        `capture release UI storage attempt ${attempt}`,
+      )
+      return { mp: currentMp, storage }
+    } catch (error) {
+      lastError = error
+      console.warn(`[release-ui] capture storage attempt ${attempt} failed: ${error?.message || error}`)
+      if (attempt >= attempts) break
+      try { await withTimeout(currentMp.disconnect(), 5000, 'disconnect stale release UI automator') } catch {}
+      await sleep(2000)
+      currentMp = await connectMiniProgram(autoPort)
+    }
+  }
+  throw lastError || new Error('capture release UI storage failed')
 }
 
 async function restoreStorage(mp, snapshot) {
@@ -809,9 +849,9 @@ async function main() {
   console.log(`autoPort: ${autoPort}`)
 
   await startAutomator({ cliPath, projectPath, idePort, autoPort })
-  const mp = await connectMiniProgram(autoPort)
+  let mp = await connectMiniProgram(autoPort)
   const evidenceDir = createEvidenceDir()
-  const originalStorage = await withTimeout(captureStorage(mp), 15000, 'capture release UI storage')
+  let originalStorage = {}
   const runContext = { releaseFixture: null }
 
   const evidence = {
@@ -824,6 +864,10 @@ async function main() {
   }
 
   try {
+    const storageCapture = await captureStorageWithRetry({ mp, autoPort })
+    mp = storageCapture.mp
+    originalStorage = storageCapture.storage
+
     const homeDetail = await withTimeout(verifyHomeDetail(mp, runContext), 150000, 'verify release home/detail UI')
     evidence.homeDetail = homeDetail
     if (homeDetail.passed) {
