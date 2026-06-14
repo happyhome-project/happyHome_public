@@ -13,7 +13,8 @@ export const GUIDE_NOTE_LOCKED_WIDGETS: Widget[] = [
   { widgetId: 'guide_reference_duration', type: 'short_text', label: '参考用时', fieldKey: 'referenceDuration', required: false, order: 5, showInList: false, locked: true },
   { widgetId: 'guide_drive_duration', type: 'short_text', label: '驾车到达用时', fieldKey: 'driveDuration', required: true, order: 6, showInList: false, locked: true },
   { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 7, showInList: false, locked: true },
-  { widgetId: 'guide_location', type: 'location', label: '目的地位置', fieldKey: 'location', required: true, order: 8, showInList: false, locked: true },
+  { widgetId: 'guide_liangbulu_track_id', type: 'short_text', label: '两步路轨迹编号', fieldKey: 'liangbuluTrackId', required: false, order: 8, showInList: false, locked: true },
+  { widgetId: 'guide_location', type: 'location', label: '目的地位置', fieldKey: 'location', required: true, order: 9, showInList: false, locked: true },
 ]
 
 const GUIDE_NOTE_LOCKED_BY_ID = new Map(GUIDE_NOTE_LOCKED_WIDGETS.map((widget) => [widget.widgetId, widget]))

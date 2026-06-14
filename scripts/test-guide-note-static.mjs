@@ -26,8 +26,9 @@ assert(
 
 assert(
   adminWidgetEditor.includes('guide_drive_duration') &&
+    adminWidgetEditor.includes('guide_liangbulu_track_id') &&
     adminWidgetEditor.includes('guide_location'),
-  'Admin widget editor must lock the guide drive-duration field together with the route location field.'
+  'Admin widget editor must lock the guide drive-duration, LiangBuLu track-id, and route location fields.'
 )
 
 assert(
@@ -81,9 +82,11 @@ assert(
 )
 
 assert(
-  guideRouteDetail.includes('guide-drive') &&
-    guideRouteDetail.indexOf('guide-drive') < guideRouteDetail.indexOf('guide-map'),
-  'guide route detail must show drive duration above the route/track section.'
+  !guideRouteDetail.includes('class="guide-drive"') &&
+    !guideRouteDetail.includes('自驾到达') &&
+    guideRouteDetail.includes('liangbuluTrackId') &&
+    guideRouteDetail.indexOf('guide-track') < guideRouteDetail.indexOf('guide-map'),
+  'guide route detail must show optional LiangBuLu track-id copy UI above the destination map, without repeating drive duration.'
 )
 
 assert(
@@ -108,6 +111,8 @@ assert(
 
 assert(
   guideRouteDetail.includes('目的地位置') &&
+    guideRouteDetail.includes('openLocation') &&
+    guideRouteDetail.includes('导航') &&
     !guideRouteDetail.includes('线路轨迹'),
   'guide route detail must present the map as destination navigation, not route track.'
 )
