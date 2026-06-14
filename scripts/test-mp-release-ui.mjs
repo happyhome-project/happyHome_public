@@ -256,6 +256,39 @@ function makeBackupPath(path) {
   return candidate
 }
 
+function moveCacheDir(path, label, moved) {
+  if (!existsSync(path)) return
+  const backup = makeBackupPath(path)
+  try {
+    renameSync(path, backup)
+    moved.push({ path, backup, label })
+  } catch (error) {
+    console.warn(`[release-ui] failed to move DevTools ${label} cache ${path}: ${error?.message || error}`)
+  }
+}
+
+function clearDevToolsRuntimeCacheDirs(reason) {
+  if (process.env.HH_RELEASE_UI_RENAME_DEVTOOLS_CACHE === '0') return []
+  const moved = []
+  for (const defaultDir of devToolsDefaultDirs()) {
+    const profileRoot = dirname(defaultDir)
+    moveCacheDir(join(profileRoot, 'WeappCache', 'WeappCompileCache'), 'compile', moved)
+
+    const extRoot = join(defaultDir, 'Storage', 'ext', 'mbeenbnhnmdhkbicabncjghgnikfbgjh')
+    if (!existsSync(extRoot)) continue
+    for (const entry of readdirSync(extRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const storageRoot = join(extRoot, entry.name)
+      moveCacheDir(join(storageRoot, 'Cache'), 'extension HTTP', moved)
+      moveCacheDir(join(storageRoot, 'Code Cache'), 'extension code', moved)
+    }
+  }
+  for (const item of moved) {
+    console.log(`[release-ui] moved DevTools ${item.label} cache ${item.path} -> ${item.backup} (${reason})`)
+  }
+  return moved
+}
+
 async function clearStaleIdePortFiles(idePort) {
   if (process.env.HH_RELEASE_UI_CLEAR_STALE_IDE === '0') return []
   const moved = []
@@ -339,6 +372,46 @@ Write-Output $count
   return count
 }
 
+function stopDevToolsPortProcesses({ cliPath, ports, reason }) {
+  if (process.platform !== 'win32' || process.env.HH_RELEASE_UI_FORCE_STOP_PORT_PROCESS === '0') return 0
+  const root = dirname(cliPath)
+  const portValues = ports.map((port) => `[int]${Number(port)}`).join(',')
+  const script = `
+$root = ${quoteForPowerShell(root)}
+$ports = @(${portValues})
+$portProcessIds = @(
+  Get-NetTCPConnection -State Listen -LocalPort $ports -ErrorAction SilentlyContinue |
+    ForEach-Object { $_.OwningProcess } |
+    Where-Object { $_ -gt 0 } |
+    Sort-Object -Unique
+)
+$targets = @()
+if ($portProcessIds.Count -gt 0) {
+  $targets = Get-CimInstance Win32_Process | Where-Object {
+    $portProcessIds -contains $_.ProcessId -and
+    $_.ExecutablePath -and
+    $_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)
+  }
+}
+$count = 0
+foreach ($p in $targets) {
+  $count += 1
+  Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+}
+Write-Output $count
+`
+  const result = runPowerShell(script, { timeout: 30000 })
+  const count = Number(String(result.stdout || '').trim().split(/\s+/).pop() || 0)
+  if (result.status !== 0) {
+    console.warn(`[release-ui] failed to stop DevTools port process(es): ${(result.stderr || result.stdout || '').trim()}`)
+    return 0
+  }
+  if (count > 0) {
+    console.log(`[release-ui] stopped ${count} DevTools process(es) still listening after ${reason}`)
+  }
+  return count
+}
+
 function runAutomatorStart(cliPath, args, label) {
   if (label) console.log(`[release-ui] ${label}`)
   const result = runCli(cliPath, args, { timeout: 120000 })
@@ -379,7 +452,15 @@ async function quitDevTools(cliPath, idePort, autoPort, reason) {
   if (!(await waitForTcpPortClosed(autoPort, { timeoutMs: 12000 }))) {
     console.warn(`[release-ui] automator port ${autoPort} was still reachable after quit`)
   }
+  if (!(await waitForTcpPortClosed(idePort, { timeoutMs: 20000 }))) {
+    console.warn(`[release-ui] IDE HTTP port ${idePort} was still reachable after quit; stopping the owning DevTools process`)
+    stopDevToolsPortProcesses({ cliPath, ports: [idePort], reason })
+    if (!(await waitForTcpPortClosed(idePort, { timeoutMs: 12000 }))) {
+      console.warn(`[release-ui] IDE HTTP port ${idePort} was still reachable after forced stop`)
+    }
+  }
   await sleep(1500)
+  clearDevToolsRuntimeCacheDirs(reason)
 }
 
 async function refreshDevToolsProjectCache({ cliPath, projectPath, idePort, autoPort }) {
@@ -389,7 +470,7 @@ async function refreshDevToolsProjectCache({ cliPath, projectPath, idePort, auto
     buildDevToolsCloseArgs({ projectPath, idePort }),
     'close DevTools project before cache refresh',
   )
-  for (const clean of ['compile', 'file', 'session']) {
+  for (const clean of ['compile', 'file', 'session', 'storage', 'network']) {
     runDevToolsMaintenance(
       cliPath,
       buildDevToolsCacheArgs({ clean, projectPath, idePort }),
@@ -498,7 +579,7 @@ async function disconnectMiniProgramQuietly(mp, label) {
   } catch {}
 }
 
-async function runAutomatorTaskWithRetry({ state, autoPort, label, attempts = 2, timeoutMs = 90000, task }) {
+async function runAutomatorTaskWithRetry({ state, autoPort, label, attempts = 2, timeoutMs = 90000, task, recover }) {
   let lastError = null
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
@@ -512,9 +593,13 @@ async function runAutomatorTaskWithRetry({ state, autoPort, label, attempts = 2,
       lastError = error
       console.warn(`[release-ui] ${label} attempt ${attempt} failed: ${error?.message || error}`)
       if (attempt >= attempts) break
-      await disconnectMiniProgramQuietly(state.mp, `disconnect stale automator after ${label} attempt ${attempt}`)
-      await sleep(2500)
-      state.mp = await connectMiniProgram(autoPort)
+      if (recover) {
+        await recover({ state, attempt, error })
+      } else {
+        await disconnectMiniProgramQuietly(state.mp, `disconnect stale automator after ${label} attempt ${attempt}`)
+        await sleep(2500)
+        state.mp = await connectMiniProgram(autoPort)
+      }
     }
   }
   throw lastError || new Error(`${label} failed`)
@@ -994,7 +1079,7 @@ async function main() {
         state: mpState,
         autoPort,
         label: 'verify release profile/login UI',
-        attempts: envPositiveInt('HH_RELEASE_UI_PROFILE_ATTEMPTS', 2),
+        attempts: envPositiveInt('HH_RELEASE_UI_PROFILE_ATTEMPTS', 3),
         timeoutMs: envPositiveInt('HH_RELEASE_UI_PROFILE_TIMEOUT_MS', 70000),
         task: async (currentMp) => {
           const result = await verifyProfileLoginClean(currentMp)
@@ -1002,6 +1087,18 @@ async function main() {
             throw makeEvidenceRetryError('release profile/login evidence', result)
           }
           return result
+        },
+        recover: async ({ state, attempt, error }) => {
+          await disconnectMiniProgramQuietly(state.mp, `disconnect stale automator after profile/login attempt ${attempt}`)
+          const shouldColdRestart = error?.releaseUiResult?.versionPassed === false
+          if (shouldColdRestart) {
+            console.warn('[release-ui] profile version mismatch; cold-restarting DevTools before retry')
+            await startAutomator({ cliPath, projectPath, idePort, autoPort })
+            state.mp = await connectMiniProgram(autoPort)
+            return
+          }
+          await sleep(2500)
+          state.mp = await connectMiniProgram(autoPort)
         },
       })
     } catch (error) {
