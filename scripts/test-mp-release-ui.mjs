@@ -389,7 +389,7 @@ async function refreshDevToolsProjectCache({ cliPath, projectPath, idePort, auto
     buildDevToolsCloseArgs({ projectPath, idePort }),
     'close DevTools project before cache refresh',
   )
-  for (const clean of ['compile', 'file']) {
+  for (const clean of ['compile', 'file', 'session']) {
     runDevToolsMaintenance(
       cliPath,
       buildDevToolsCacheArgs({ clean, projectPath, idePort }),
@@ -538,6 +538,12 @@ async function restoreStorage(mp, snapshot) {
 
 function stringifyError(error) {
   return String(error?.message || error?.errMsg || error || 'unknown error')
+}
+
+function makeEvidenceRetryError(label, result) {
+  const error = new Error(`${label} did not pass: ${JSON.stringify(result)}`)
+  error.releaseUiResult = result
+  return error
 }
 
 function makeReleaseRunId() {
@@ -883,10 +889,10 @@ async function verifyProfileLoginClean(mp) {
   console.log('[release-ui] open profile/login page')
   let page
   try {
-    page = await withTimeout(mp.switchTab('/pages/profile/index'), 30000, 'switch release profile tab')
-  } catch (error) {
-    console.log(`[release-ui] switchTab profile failed, fallback reLaunch: ${error?.message || error}`)
     page = await withTimeout(mp.reLaunch('/pages/profile/index'), 30000, 'open release profile page')
+  } catch (error) {
+    console.log(`[release-ui] reLaunch profile failed, fallback switchTab: ${error?.message || error}`)
+    page = await withTimeout(mp.switchTab('/pages/profile/index'), 30000, 'switch release profile tab')
   }
   await sleep(4000)
   const text = await withTimeout(pageText(page), 10000, 'read release profile text')
@@ -982,14 +988,26 @@ async function main() {
       console.log('HH_RELEASE_HOME_DETAIL_NONEMPTY')
     }
 
-    const profileLoginRun = await runAutomatorTaskWithRetry({
-      state: mpState,
-      autoPort,
-      label: 'verify release profile/login UI',
-      attempts: envPositiveInt('HH_RELEASE_UI_PROFILE_ATTEMPTS', 2),
-      timeoutMs: envPositiveInt('HH_RELEASE_UI_PROFILE_TIMEOUT_MS', 70000),
-      task: (currentMp) => verifyProfileLoginClean(currentMp),
-    })
+    let profileLoginRun
+    try {
+      profileLoginRun = await runAutomatorTaskWithRetry({
+        state: mpState,
+        autoPort,
+        label: 'verify release profile/login UI',
+        attempts: envPositiveInt('HH_RELEASE_UI_PROFILE_ATTEMPTS', 2),
+        timeoutMs: envPositiveInt('HH_RELEASE_UI_PROFILE_TIMEOUT_MS', 70000),
+        task: async (currentMp) => {
+          const result = await verifyProfileLoginClean(currentMp)
+          if (!result.cleanPassed || !result.versionPassed) {
+            throw makeEvidenceRetryError('release profile/login evidence', result)
+          }
+          return result
+        },
+      })
+    } catch (error) {
+      if (error?.releaseUiResult) evidence.profileLoginClean = error.releaseUiResult
+      throw error
+    }
     mp = mpState.mp
     evidence.profileLoginAttempt = profileLoginRun.attempt
     const profileLoginClean = profileLoginRun.result
