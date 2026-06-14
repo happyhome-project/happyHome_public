@@ -144,13 +144,76 @@ function resolveCliPath() {
 function detectIdePort() {
   const explicit = Number(process.env.WECHAT_DEVTOOLS_PORT || 0)
   if (Number.isFinite(explicit) && explicit > 0) return explicit
-  return DEFAULT_IDE_PORT
+  return detectRunningDevToolsIdePort() || DEFAULT_IDE_PORT
 }
 
 function detectAutoPort() {
   const explicit = Number(process.env.WECHAT_DEVTOOLS_AUTO_PORT || process.env.WS_PORT || 0)
   if (Number.isFinite(explicit) && explicit > 0) return explicit
   return DEFAULT_AUTO_PORT
+}
+
+function parseJsonArray(text) {
+  try {
+    const parsed = JSON.parse(String(text || '').trim())
+    return Array.isArray(parsed) ? parsed : [parsed]
+  } catch {
+    return []
+  }
+}
+
+function probeIdeHttpPort(port) {
+  if (!Number.isFinite(port) || port <= 0 || process.platform !== 'win32') return false
+  const script = [
+    `$url = 'http://127.0.0.1:${port}/open'`,
+    '$ErrorActionPreference = "SilentlyContinue"',
+    'try {',
+    '  $req = [System.Net.WebRequest]::Create($url)',
+    '  $req.AllowAutoRedirect = $false',
+    '  $req.Timeout = 1200',
+    '  $res = $req.GetResponse()',
+    '  $code = [int]$res.StatusCode',
+    '  $location = [string]$res.Headers["Location"]',
+    '  $res.Close()',
+    '  [pscustomobject]@{ status = $code; location = $location } | ConvertTo-Json -Compress',
+    '} catch {',
+    '  if ($_.Exception.Response) {',
+    '    $res = $_.Exception.Response',
+    '    $code = [int]$res.StatusCode',
+    '    $location = [string]$res.Headers["Location"]',
+    '    $res.Close()',
+    '    [pscustomobject]@{ status = $code; location = $location } | ConvertTo-Json -Compress',
+    '  }',
+    '}',
+  ].join('; ')
+  const result = runPowerShell(script, { timeout: 5000 })
+  const probe = parseJsonArray(result.stdout)[0] || {}
+  return probe.status >= 300 &&
+    probe.status < 400 &&
+    String(probe.location || '').startsWith('/v2/')
+}
+
+function detectRunningDevToolsIdePort() {
+  if (process.platform !== 'win32') return 0
+  const script = [
+    '$ErrorActionPreference = "SilentlyContinue"',
+    '$devtools = Get-Process wechatdevtools -ErrorAction SilentlyContinue',
+    'if (-not $devtools) { @() | ConvertTo-Json -Compress; return }',
+    '$conns = Get-NetTCPConnection -State Listen | Where-Object { $_.OwningProcess -in $devtools.Id }',
+    '$ports = $conns | Select-Object -ExpandProperty LocalPort -Unique | Sort-Object',
+    '$ports | ConvertTo-Json -Compress',
+  ].join('; ')
+  const result = runPowerShell(script, { timeout: 10000 })
+  for (const rawPort of parseJsonArray(result.stdout)) {
+    const port = Number(rawPort)
+    if (probeIdeHttpPort(port)) return port
+  }
+  return 0
+}
+
+function envPositiveInt(name, fallback) {
+  const explicit = Number(process.env[name] || 0)
+  return Number.isFinite(explicit) && explicit > 0 ? Math.floor(explicit) : fallback
 }
 
 function readOptionalText(path) {
@@ -428,6 +491,35 @@ async function captureStorageWithRetry({ mp, autoPort, attempts = 3 }) {
   throw lastError || new Error('capture release UI storage failed')
 }
 
+async function disconnectMiniProgramQuietly(mp, label) {
+  if (!mp) return
+  try {
+    await withTimeout(mp.disconnect(), 5000, label)
+  } catch {}
+}
+
+async function runAutomatorTaskWithRetry({ state, autoPort, label, attempts = 2, timeoutMs = 90000, task }) {
+  let lastError = null
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const result = await withTimeout(
+        task(state.mp, attempt),
+        timeoutMs,
+        `${label} attempt ${attempt}`,
+      )
+      return { result, attempt }
+    } catch (error) {
+      lastError = error
+      console.warn(`[release-ui] ${label} attempt ${attempt} failed: ${error?.message || error}`)
+      if (attempt >= attempts) break
+      await disconnectMiniProgramQuietly(state.mp, `disconnect stale automator after ${label} attempt ${attempt}`)
+      await sleep(2500)
+      state.mp = await connectMiniProgram(autoPort)
+    }
+  }
+  throw lastError || new Error(`${label} failed`)
+}
+
 async function restoreStorage(mp, snapshot) {
   await mp.evaluate((values) => {
     const keys = ['user_store', 'community_store', 'dev-gateway', 'test-openid']
@@ -608,7 +700,7 @@ async function seedCurrentViewerIntoCommunity(mp, fixture) {
     throw new Error(`post.bootstrap did not select release fixture community ${fixture.communityId}`)
   }
 
-  await mp.evaluate((seed) => {
+  await withTimeout(mp.evaluate((seed) => {
     wx.setStorageSync('user_store', {
       openId: seed.viewerOpenId,
       nickName: 'HH Release Bot',
@@ -649,12 +741,12 @@ async function seedCurrentViewerIntoCommunity(mp, fixture) {
       }
     }
     return true
-  }, snapshot)
+  }, snapshot), 30000, 'seed release viewer storage')
 
   return snapshot
 }
 
-async function seedReleaseLogin(mp) {
+async function seedReleaseLogin(mp, context = {}) {
   const configuredCommunityId = String(process.env.HH_RELEASE_TEST_COMMUNITY_ID || '').trim()
   const fixture = configuredCommunityId
     ? {
@@ -665,7 +757,8 @@ async function seedReleaseLogin(mp) {
         postId: '',
         adminCtx: null,
       }
-    : await createReleaseFixture(mp)
+    : context.releaseFixture || await createReleaseFixture(mp)
+  context.releaseFixture = fixture
   const snapshot = await seedCurrentViewerIntoCommunity(mp, fixture)
   return { fixture, snapshot }
 }
@@ -696,7 +789,7 @@ async function cleanupReleaseFixture(mp, fixture) {
 }
 
 async function forceLogout(mp) {
-  return await mp.evaluate(() => {
+  return await withTimeout(mp.evaluate(() => {
     const result = { ok: false, stores: [], errors: [] }
     try { wx.clearStorageSync() } catch (error) { result.errors.push(`clear:${String(error)}`) }
     try {
@@ -718,7 +811,7 @@ async function forceLogout(mp) {
       result.errors.push(String(error))
       return result
     }
-  })
+  }), 30000, 'force release UI logged-out state')
 }
 
 async function findFirstPost(page) {
@@ -732,19 +825,21 @@ async function findFirstPost(page) {
 async function verifyHomeDetail(mp, context = {}) {
   console.log('[release-ui] open home')
   let releaseSeed = null
-  let home = await mp.reLaunch('/pages/index/index')
+  let home = await withTimeout(mp.reLaunch('/pages/index/index'), 30000, 'open release home page')
   await sleep(6000)
-  let homeText = await pageText(home)
-  let target = await findFirstPost(home)
+  let homeText = await withTimeout(pageText(home), 10000, 'read release home text')
+  let target = await withTimeout(findFirstPost(home), 15000, 'find release home post')
 
   if (!target) {
-    console.log('[release-ui] no post candidates in current session; creating temporary release fixture')
-    releaseSeed = await seedReleaseLogin(mp)
+    console.log(context.releaseFixture
+      ? '[release-ui] no post candidates in current session; reusing temporary release fixture'
+      : '[release-ui] no post candidates in current session; creating temporary release fixture')
+    releaseSeed = await seedReleaseLogin(mp, context)
     context.releaseFixture = releaseSeed.fixture
-    home = await mp.reLaunch('/pages/index/index')
+    home = await withTimeout(mp.reLaunch('/pages/index/index'), 30000, 'open release home page after fixture')
     await sleep(7000)
-    homeText = await pageText(home)
-    target = await findFirstPost(home)
+    homeText = await withTimeout(pageText(home), 10000, 'read release home text after fixture')
+    target = await withTimeout(findFirstPost(home), 15000, 'find release home post after fixture')
   }
 
   if (!target) {
@@ -753,12 +848,12 @@ async function verifyHomeDetail(mp, context = {}) {
   }
 
   console.log(`[release-ui] tap first post via ${target.selector}`)
-  await target.node.tap()
+  await withTimeout(target.node.tap(), 15000, 'tap release home post')
   await sleep(6000)
-  const detail = await mp.currentPage()
-  const detailText = await pageText(detail)
-  const contentCount = (await detail.$$('.content').catch(() => [])).length
-  const errorCount = (await detail.$$('.detail-state-title').catch(() => [])).length
+  const detail = await withTimeout(mp.currentPage(), 10000, 'get release detail page')
+  const detailText = await withTimeout(pageText(detail), 10000, 'read release detail text')
+  const contentCount = (await withTimeout(detail.$$('.content'), 10000, 'find release detail content').catch(() => [])).length
+  const errorCount = (await withTimeout(detail.$$('.detail-state-title'), 10000, 'find release detail error state').catch(() => [])).length
   const detailPath = detail.path || ''
 
   const passed = detailPath.includes('pages/detail/index') &&
@@ -777,7 +872,7 @@ async function verifyHomeDetail(mp, context = {}) {
     tappedSelectorCount: target.count,
     contentCount,
     errorCount,
-    releaseFixture: summarizeReleaseFixture(releaseSeed?.fixture),
+    releaseFixture: summarizeReleaseFixture(releaseSeed?.fixture || context.releaseFixture),
   }
 }
 
@@ -788,14 +883,14 @@ async function verifyProfileLoginClean(mp) {
   console.log('[release-ui] open profile/login page')
   let page
   try {
-    page = await mp.switchTab('/pages/profile/index')
+    page = await withTimeout(mp.switchTab('/pages/profile/index'), 30000, 'switch release profile tab')
   } catch (error) {
     console.log(`[release-ui] switchTab profile failed, fallback reLaunch: ${error?.message || error}`)
-    page = await mp.reLaunch('/pages/profile/index')
+    page = await withTimeout(mp.reLaunch('/pages/profile/index'), 30000, 'open release profile page')
   }
   await sleep(4000)
-  const text = await pageText(page)
-  const loginFormCount = (await page.$$('.login-form').catch(() => [])).length
+  const text = await withTimeout(pageText(page), 10000, 'read release profile text')
+  const loginFormCount = (await withTimeout(page.$$('.login-form'), 10000, 'find release login form').catch(() => [])).length
   const debugLeakVisible = /state:logged|login:[01]|cc:/.test(text)
   const expectedVersion = expectedBuildVersion()
   const versionVisible = Boolean(expectedVersion && text.includes(expectedVersion))
@@ -850,6 +945,7 @@ async function main() {
 
   await startAutomator({ cliPath, projectPath, idePort, autoPort })
   let mp = await connectMiniProgram(autoPort)
+  const mpState = { mp }
   const evidenceDir = createEvidenceDir()
   let originalStorage = {}
   const runContext = { releaseFixture: null }
@@ -864,18 +960,39 @@ async function main() {
   }
 
   try {
-    const storageCapture = await captureStorageWithRetry({ mp, autoPort })
-    mp = storageCapture.mp
+    const storageCapture = await captureStorageWithRetry({ mp: mpState.mp, autoPort })
+    mpState.mp = storageCapture.mp
+    mp = mpState.mp
     originalStorage = storageCapture.storage
 
-    const homeDetail = await withTimeout(verifyHomeDetail(mp, runContext), 150000, 'verify release home/detail UI')
+    const homeDetailRun = await runAutomatorTaskWithRetry({
+      state: mpState,
+      autoPort,
+      label: 'verify release home/detail UI',
+      attempts: envPositiveInt('HH_RELEASE_UI_HOME_ATTEMPTS', 3),
+      timeoutMs: envPositiveInt('HH_RELEASE_UI_HOME_TIMEOUT_MS', 90000),
+      task: (currentMp) => verifyHomeDetail(currentMp, runContext),
+    })
+    mp = mpState.mp
+    evidence.homeDetailAttempt = homeDetailRun.attempt
+    const homeDetail = homeDetailRun.result
     evidence.homeDetail = homeDetail
     if (homeDetail.passed) {
       evidence.markers.push('HH_RELEASE_HOME_DETAIL_NONEMPTY')
       console.log('HH_RELEASE_HOME_DETAIL_NONEMPTY')
     }
 
-    const profileLoginClean = await withTimeout(verifyProfileLoginClean(mp), 90000, 'verify release profile/login UI')
+    const profileLoginRun = await runAutomatorTaskWithRetry({
+      state: mpState,
+      autoPort,
+      label: 'verify release profile/login UI',
+      attempts: envPositiveInt('HH_RELEASE_UI_PROFILE_ATTEMPTS', 2),
+      timeoutMs: envPositiveInt('HH_RELEASE_UI_PROFILE_TIMEOUT_MS', 70000),
+      task: (currentMp) => verifyProfileLoginClean(currentMp),
+    })
+    mp = mpState.mp
+    evidence.profileLoginAttempt = profileLoginRun.attempt
+    const profileLoginClean = profileLoginRun.result
     evidence.profileLoginClean = profileLoginClean
     if (profileLoginClean.versionPassed) {
       evidence.markers.push('HH_RELEASE_LOGIN_VERSION')
@@ -904,9 +1021,10 @@ async function main() {
       }
     }
 
-    const jsonPath = await writeEvidence({ mp, evidenceDir, evidence })
+    const jsonPath = await writeEvidence({ mp: mpState.mp, evidenceDir, evidence })
     console.log(`[OK] DevTools release UI evidence passed: ${jsonPath}`)
   } catch (error) {
+    mp = mpState.mp || mp
     evidence.error = String(error?.message || error)
     if (runContext.releaseFixture) {
       try {
@@ -933,7 +1051,7 @@ async function main() {
       runContext.releaseFixture = null
     }
     try { await withTimeout(restoreStorage(mp, originalStorage), 15000, 'restore release UI storage') } catch {}
-    try { await withTimeout(mp.disconnect(), 15000, 'disconnect release UI automator') } catch {}
+    try { await withTimeout(mpState.mp.disconnect(), 15000, 'disconnect release UI automator') } catch {}
     try {
       if (
         !existsSync(resolve(evidenceDir, 'release-ui-evidence.json')) &&
