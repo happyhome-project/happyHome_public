@@ -3,20 +3,12 @@
     <view class="detail-head">
       <view class="section-line">
         <text class="section-pill"><text class="section-dot"></text>{{ sectionName }}</text>
-        <text v-if="contentShapeLabel" class="shape-label">{{ contentShapeLabel }}</text>
       </view>
 
       <text class="detail-title">{{ titleText }}</text>
-      <text v-if="leadText" class="detail-lead">{{ leadText }}</text>
-
-      <view class="byline">
-        <view class="author">
-          <text class="avatar">{{ authorInitial }}</text>
-          <view class="author-main">
-            <text class="author-name">{{ authorName }}</text>
-            <text class="article-time">{{ shortDate }}</text>
-          </view>
-        </view>
+      <view v-if="leadText" class="lead-card">
+        <text v-if="leadLabel" class="lead-label">{{ leadLabel }}:</text>
+        <text class="lead-value">{{ leadText }}</text>
       </view>
     </view>
 
@@ -48,7 +40,7 @@
 
       <view v-if="detailFacts.length" class="fact-list">
         <view v-for="fact in detailFacts" :key="fact.key" class="fact-row">
-          <text class="fact-row-label">{{ fact.label }}</text>
+          <text class="fact-row-label">{{ fact.label }}:</text>
           <text class="fact-row-value">{{ fact.value }}</text>
         </view>
       </view>
@@ -196,9 +188,9 @@ const leadText = computed(() =>
   leadWidget.value ? textValue(leadWidget.value).trim() : ''
 )
 
-const authorName = computed(() => String(props.post?.authorNickname || '社区邻居').trim() || '社区邻居')
-const authorInitial = computed(() => authorName.value.slice(0, 1) || '邻')
-const shortDate = computed(() => formatShortDate(props.post?.createdAt))
+const leadLabel = computed(() =>
+  leadWidget.value ? resolveWidgetLabel(leadWidget.value).trim() : ''
+)
 
 const imageItems = computed(() => {
   const images: string[] = []
@@ -306,13 +298,6 @@ const locationItems = computed<LocationItem[]>(() =>
     })
     .filter((item): item is LocationItem => Boolean(item))
 )
-
-const contentShapeLabel = computed(() => {
-  if (imageItems.value.length) return '图文资料'
-  if (mediaWidgets.value.length) return '媒体资料'
-  if (bodyBlocks.value.length) return '说明资料'
-  return '信息卡片'
-})
 
 function hasWidgetValue(widget: any) {
   const value = props.post?.content?.[widget.widgetId]
@@ -435,12 +420,6 @@ function formatAudioDuration(value: unknown): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 
-function formatShortDate(value: unknown): string {
-  if (!value) return ''
-  const date = new Date(String(value))
-  if (Number.isNaN(date.getTime())) return ''
-  return `${date.getMonth() + 1}月${date.getDate()}日`
-}
 </script>
 
 <style lang="scss" scoped>
@@ -480,13 +459,6 @@ function formatShortDate(value: unknown): string {
   background: $hh-accent;
 }
 
-.shape-label {
-  font-family: $hh-font-mono;
-  font-size: 20rpx;
-  letter-spacing: 0.12em;
-  color: $hh-ink-3;
-}
-
 .detail-title {
   display: block;
   margin-top: 28rpx;
@@ -498,66 +470,33 @@ function formatShortDate(value: unknown): string {
   letter-spacing: $hh-tracking-serif-sm;
 }
 
-.detail-lead {
-  display: block;
-  margin-top: 18rpx;
-  font-size: 28rpx;
-  line-height: 1.78;
-  color: $hh-ink-2;
-  white-space: pre-wrap;
-}
-
-.byline {
+.lead-card {
+  margin-top: 22rpx;
+  padding: 20rpx 24rpx;
+  border: 1rpx solid $hh-ink-line;
+  border-radius: $hh-radius-md;
+  background: $hh-surface-1;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 28rpx;
-  padding-top: 24rpx;
-  border-top: 1rpx solid $hh-ink-line-2;
-}
-
-.author {
-  min-width: 0;
-  display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 16rpx;
 }
 
-.avatar {
-  width: 56rpx;
-  height: 56rpx;
-  border-radius: 999rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: $hh-accent-wash;
-  border: 1rpx solid $hh-accent-line;
-  color: $hh-accent-ink;
-  font-size: 24rpx;
-  font-weight: $hh-font-weight-bold;
+.lead-label {
   flex: 0 0 auto;
-}
-
-.author-main {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4rpx;
-}
-
-.author-name {
-  max-width: 420rpx;
-  color: $hh-ink-1;
-  font-size: 26rpx;
-  font-weight: $hh-font-weight-bold;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.article-time {
   color: $hh-ink-3;
-  font-size: 22rpx;
+  font-size: 24rpx;
+  line-height: 1.55;
+}
+
+.lead-value {
+  min-width: 0;
+  flex: 1;
+  color: $hh-ink-2;
+  font-size: 27rpx;
+  line-height: 1.55;
+  font-weight: $hh-font-weight-medium;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .image-module {
@@ -666,10 +605,10 @@ function formatShortDate(value: unknown): string {
 }
 
 .fact-row {
-  display: grid;
-  grid-template-columns: 132rpx minmax(0, 1fr);
+  display: flex;
+  align-items: flex-start;
   gap: 18rpx;
-  padding: 24rpx;
+  padding: 22rpx 24rpx;
   border-top: 1rpx solid $hh-ink-line-2;
 }
 
@@ -678,15 +617,18 @@ function formatShortDate(value: unknown): string {
 }
 
 .fact-row-label {
+  flex: 0 0 140rpx;
   color: $hh-ink-3;
   font-size: 24rpx;
-  line-height: 1.55;
+  line-height: 1.5;
 }
 
 .fact-row-value {
+  min-width: 0;
+  flex: 1;
   color: $hh-ink-2;
   font-size: 27rpx;
-  line-height: 1.62;
+  line-height: 1.5;
   font-weight: $hh-font-weight-medium;
   word-break: break-word;
 }

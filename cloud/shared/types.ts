@@ -261,6 +261,8 @@ export interface Post {
   communityId: string
   sectionId: string
   authorId: string
+  authorNickname?: string
+  authorAvatarUrl?: string
   status: PostStatus
   auditStatus?: PostAuditStatus
   auditReason?: string
