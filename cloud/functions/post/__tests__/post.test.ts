@@ -29,7 +29,11 @@ import {
 } from '../index'
 import * as db from '../../../lib/db'
 
-beforeEach(() => jest.clearAllMocks())
+beforeEach(() => {
+  jest.clearAllMocks()
+  delete process.env.DEFAULT_PUBLIC_COMMUNITY_ID
+  delete process.env.PUBLIC_READ_COMMUNITY_IDS
+})
 
 test('clientLog: accepts diagnostic payload without touching data collections', async () => {
   const result = await handleClientLog({
@@ -361,6 +365,146 @@ test('bootstrap: returns active communities and the selected community home snap
   }))
 })
 
+test('bootstrap: unauthenticated viewer lands on the configured public community', async () => {
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.query as jest.Mock).mockReset()
+  process.env.DEFAULT_PUBLIC_COMMUNITY_ID = 'public-community'
+  process.env.PUBLIC_READ_COMMUNITY_IDS = 'public-community'
+  const publicCommunity = { _id: 'public-community', name: '阳光花园小区', status: 'active' }
+  const sections = [{
+    ...mockSection,
+    _id: 'public-section',
+    communityId: 'public-community',
+    widgets: [mockSection.widgets[0]],
+  }]
+  const posts = [{
+    _id: 'public-post',
+    communityId: 'public-community',
+    sectionId: 'public-section',
+    authorId: 'author-1',
+    status: 'active',
+    auditStatus: 'pass',
+    content: { 'title-widget': '公开帖子' },
+    createdAt: '2024-01-01T00:00:00.000Z',
+  }]
+
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'communities' && id === 'public-community') return publicCommunity
+    if (collectionName === 'users' && id === 'author-1') return { _id: 'author-1', nickName: '作者一' }
+    return null
+  })
+  ;(db.query as jest.Mock).mockImplementation(async (collectionName: string, where: any) => {
+    if (collectionName === 'sections') return sections
+    if (collectionName === 'posts') return posts.filter((post) => post.sectionId === where.sectionId)
+    return []
+  })
+
+  const result = await handleBootstrap({ limitPerSection: 10 }, '')
+
+  expect(result.viewerOpenId).toBe('')
+  expect(result.currentCommunityId).toBe('public-community')
+  expect((result as any).currentCommunity).toEqual(expect.objectContaining(publicCommunity))
+  expect(result.communities).toEqual([])
+  expect(result.sections.map((section: any) => section._id)).toEqual(['public-section'])
+  expect(result.postsBySection['public-section'][0]).toEqual(expect.objectContaining({
+    _id: 'public-post',
+    authorNickname: '作者一',
+  }))
+  expect(result.backgroundFetchToken).toBe('')
+  expect((db.query as jest.Mock).mock.calls.some(([collection]) => collection === 'community_members')).toBe(false)
+})
+
+test('bootstrap: guest mode ignores WeChat injected openid and returns guest public snapshot', async () => {
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.query as jest.Mock).mockReset()
+  process.env.DEFAULT_PUBLIC_COMMUNITY_ID = 'public-community'
+  process.env.PUBLIC_READ_COMMUNITY_IDS = 'public-community'
+  const publicCommunity = { _id: 'public-community', name: '阳光花园小区', status: 'active' }
+  const sections = [{
+    ...mockSection,
+    _id: 'public-section',
+    communityId: 'public-community',
+  }]
+  const posts = [{
+    _id: 'public-post',
+    communityId: 'public-community',
+    sectionId: 'public-section',
+    authorId: 'author-1',
+    status: 'active',
+    auditStatus: 'pass',
+    content: { 'title-widget': '公开活动' },
+    createdAt: '2024-01-01T00:00:00.000Z',
+  }]
+
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'communities' && id === 'public-community') return publicCommunity
+    return null
+  })
+  ;(db.query as jest.Mock).mockImplementation(async (collectionName: string, where: any) => {
+    if (collectionName === 'sections') return sections
+    if (collectionName === 'posts') return posts.filter((post) => post.sectionId === where.sectionId)
+    if (collectionName === 'post_attendance_members') {
+      return [{ _id: 'a1', postId: 'public-post', widgetId: 'attendance-widget', userId: 'attendee-1', seatCount: 1 }]
+    }
+    if (collectionName === 'community_members' && where.userId === 'wx-injected-openid') {
+      return [{ _id: 'member-1', communityId: 'private-community', status: 'active' }]
+    }
+    return []
+  })
+
+  const result = await handleBootstrap({ asGuest: true, limitPerSection: 10 } as any, 'wx-injected-openid')
+
+  expect(result.viewerOpenId).toBe('')
+  expect(result.currentCommunityId).toBe('public-community')
+  expect(result.communities).toEqual([])
+  const publicPost: any = result.postsBySection['public-section'][0]
+  expect(publicPost.attendanceSummaryByWidget['attendance-widget'])
+    .toEqual(expect.objectContaining({
+      count: 1,
+      occupiedSeats: 1,
+      isJoined: false,
+      previewUsers: [],
+    }))
+})
+
+test('bootstrap: logged-in viewer with active communities does not get stuck on public community preference', async () => {
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.query as jest.Mock).mockReset()
+  process.env.DEFAULT_PUBLIC_COMMUNITY_ID = 'public-community'
+  process.env.PUBLIC_READ_COMMUNITY_IDS = 'public-community'
+  const publicCommunity = { _id: 'public-community', name: '阳光花园小区', status: 'active' }
+  const joinedCommunity = { _id: 'joined-community', name: '明士班', status: 'active' }
+  const joinedSection = {
+    ...mockSection,
+    _id: 'joined-section',
+    communityId: 'joined-community',
+    widgets: [mockSection.widgets[0]],
+  }
+
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'users' && id === 'user-1') {
+      return { _id: 'user-1', lastHomeCommunityId: 'public-community' }
+    }
+    if (collectionName === 'communities' && id === 'public-community') return publicCommunity
+    if (collectionName === 'communities' && id === 'joined-community') return joinedCommunity
+    return null
+  })
+  ;(db.query as jest.Mock).mockImplementation(async (collectionName: string, where: any) => {
+    if (collectionName === 'community_members') {
+      return [{ _id: 'member-1', communityId: 'joined-community', userId: 'user-1', status: 'active' }]
+    }
+    if (collectionName === 'sections' && where.communityId === 'joined-community') return [joinedSection]
+    if (collectionName === 'posts') return []
+    return []
+  })
+
+  const result = await handleBootstrap({ limitPerSection: 10 }, 'user-1')
+
+  expect(result.currentCommunityId).toBe('joined-community')
+  expect((result as any).currentCommunity).toEqual(expect.objectContaining(joinedCommunity))
+  expect(result.communities.map((community: any) => community._id)).toEqual(['joined-community'])
+})
+
 test('joinAttendance: 同一用户重复参与不会重复创建记录', async () => {
   ;(db.getById as jest.Mock)
     .mockResolvedValueOnce({
@@ -614,6 +758,69 @@ test('list：非 active 成员不可查看帖子', async () => {
   await expect(handleList({ sectionId: 'section-1' }, '')).rejects.toThrow('需要先加入社区后查看内容')
 })
 
+test('list: unauthenticated viewer can read posts in an active public community', async () => {
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.query as jest.Mock).mockReset()
+  process.env.PUBLIC_READ_COMMUNITY_IDS = 'community-1'
+  const sectionWithoutAttendance = {
+    ...mockSection,
+    widgets: mockSection.widgets.filter((widget) => widget.type !== 'attendance'),
+  }
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'sections' && id === 'section-1') return sectionWithoutAttendance
+    if (collectionName === 'communities' && id === 'community-1') return { _id: 'community-1', status: 'active' }
+    if (collectionName === 'users' && id === 'author-1') return { _id: 'author-1', nickName: '作者一' }
+    return null
+  })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{
+    _id: 'post-public',
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    authorId: 'author-1',
+    status: 'active',
+    auditStatus: 'pass',
+    content: { 'title-widget': '公开内容' },
+    createdAt: '2024-01-01T00:00:00.000Z',
+  }])
+
+  const result = await handleList({ sectionId: 'section-1' }, '')
+
+  expect(result.posts.map((post: any) => post._id)).toEqual(['post-public'])
+  expect((db.query as jest.Mock).mock.calls.some(([collection]) => collection === 'community_members')).toBe(false)
+})
+
+test('list: disabled public community is not readable by unauthenticated viewers', async () => {
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.query as jest.Mock).mockReset()
+  process.env.PUBLIC_READ_COMMUNITY_IDS = 'community-1'
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'sections' && id === 'section-1') return mockSection
+    if (collectionName === 'communities' && id === 'community-1') return { _id: 'community-1', status: 'disabled' }
+    return null
+  })
+  ;(db.query as jest.Mock).mockResolvedValue([])
+
+  await expect(handleList({ sectionId: 'section-1' }, '')).rejects.toThrow('需要先加入社区后查看内容')
+})
+
+test('list: guest mode does not use injected openid membership for private sections', async () => {
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.query as jest.Mock).mockReset()
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'sections' && id === 'section-1') return mockSection
+    return null
+  })
+  ;(db.query as jest.Mock).mockImplementation(async (collectionName: string, where: any) => {
+    if (collectionName === 'community_members' && where.userId === 'wx-injected-openid') {
+      return [{ _id: 'member-1', communityId: 'community-1', status: 'active' }]
+    }
+    return []
+  })
+
+  await expect(handleList({ sectionId: 'section-1', asGuest: true } as any, 'wx-injected-openid'))
+    .rejects.toThrow('需要先加入社区后查看内容')
+})
+
 test('list：板块内置顶帖优先，其余按发布时间倒序', async () => {
   ;(db.getById as jest.Mock).mockReset()
   ;(db.query as jest.Mock).mockReset()
@@ -725,6 +932,77 @@ test('get：非 active 成员不可查看帖子详情', async () => {
   ;(db.query as jest.Mock).mockResolvedValueOnce([])
 
   await expect(handleGet({ postId: 'post-1' }, '')).rejects.toThrow('需要先加入社区后查看内容')
+})
+
+test('get: unauthenticated viewer can read post detail in an active public community', async () => {
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.query as jest.Mock).mockReset()
+  process.env.PUBLIC_READ_COMMUNITY_IDS = 'community-1'
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'posts' && id === 'post-1') return {
+      _id: 'post-1',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      authorId: 'author-1',
+      status: 'active',
+      auditStatus: 'pass',
+      content: { 'title-widget': '公开详情' },
+      createdAt: '2024-01-01T00:00:00.000Z',
+    }
+    if (collectionName === 'communities' && id === 'community-1') return { _id: 'community-1', status: 'active' }
+    if (collectionName === 'sections' && id === 'section-1') return {
+      ...mockSection,
+      widgets: mockSection.widgets.filter((widget) => widget.type !== 'attendance'),
+    }
+    if (collectionName === 'users' && id === 'author-1') return { _id: 'author-1', nickName: '作者一' }
+    return null
+  })
+
+  const result = await handleGet({ postId: 'post-1' }, '')
+
+  expect(result.post).toEqual(expect.objectContaining({
+    _id: 'post-1',
+    authorNickname: '作者一',
+  }))
+  expect((db.query as jest.Mock).mock.calls.some(([collection]) => collection === 'community_members')).toBe(false)
+})
+
+test('get: guest public detail returns attendance count without preview identities', async () => {
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.query as jest.Mock).mockReset()
+  process.env.PUBLIC_READ_COMMUNITY_IDS = 'community-1'
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'posts' && id === 'post-1') return {
+      _id: 'post-1',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      authorId: 'author-1',
+      status: 'active',
+      auditStatus: 'pass',
+      content: { 'title-widget': '公开活动详情' },
+      createdAt: '2024-01-01T00:00:00.000Z',
+    }
+    if (collectionName === 'communities' && id === 'community-1') return { _id: 'community-1', status: 'active' }
+    if (collectionName === 'sections' && id === 'section-1') return mockSection
+    return null
+  })
+  ;(db.query as jest.Mock).mockImplementation(async (collectionName: string) => {
+    if (collectionName === 'post_attendance_members') {
+      return [{ _id: 'a1', postId: 'post-1', widgetId: 'attendance-widget', userId: 'attendee-1', seatCount: 2 }]
+    }
+    return []
+  })
+
+  const result = await handleGet({ postId: 'post-1', asGuest: true } as any, 'wx-injected-openid')
+  const summary = result.post.attendanceSummaryByWidget['attendance-widget']
+
+  expect(summary).toEqual(expect.objectContaining({
+    count: 1,
+    occupiedSeats: 2,
+    isJoined: false,
+    previewUsers: [],
+  }))
+  expect((db.getById as jest.Mock).mock.calls.some(([collection, id]) => collection === 'users' && id === 'attendee-1')).toBe(false)
 })
 
 test('create: note_blocks can be submitted by regular members', async () => {

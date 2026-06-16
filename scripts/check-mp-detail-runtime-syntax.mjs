@@ -9,7 +9,7 @@ const detailDependencyChunks = [
   'pages/detail/index.js',
   'api/cloud.js',
   'components/LoginGuard.js',
-  'components/widgets/WidgetRenderer.js',
+  'components/DefaultDetailView.js',
   'components/widgets/RichNoteRenderer.js',
   'components/widgets/NoteBlocksRenderer.js',
   'components/widgets/VideoPlayerCard.js',

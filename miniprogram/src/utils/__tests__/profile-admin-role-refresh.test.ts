@@ -36,4 +36,15 @@ describe('profile admin role refresh contract', () => {
     expect(loginIndex).toBeGreaterThan(-1)
     expect(immediateRefreshIndex).toBeGreaterThan(loginIndex)
   })
+
+  test('profile observes late restored login state without requiring pull-down refresh', () => {
+    const code = readSource('pages/profile/index.vue')
+    const watchImportIndex = code.indexOf("import { ref, computed, onMounted, nextTick, watch } from 'vue'")
+    const watcherIndex = code.indexOf('watch(')
+    const loginStateReadyIndex = code.indexOf("refreshProfileData('loginStateReady')", watcherIndex)
+
+    expect(watchImportIndex).toBeGreaterThan(-1)
+    expect(watcherIndex).toBeGreaterThan(-1)
+    expect(loginStateReadyIndex).toBeGreaterThan(watcherIndex)
+  })
 })

@@ -34,8 +34,20 @@
 
     <el-tabs data-testid="member-tabs" v-model="activeTab">
       <el-tab-pane :label="`待审批（${pendingMembers.length}）`" name="pending">
-        <el-table data-testid="member-pending-table" :data="pendingMembers" v-loading="loading">
-          <el-table-column label="昵称" min-width="140">
+        <el-table
+          data-testid="member-pending-table"
+          :data="pendingMembers"
+          v-loading="loading"
+          border
+          @header-dragend="handlePendingColumnDragEnd"
+        >
+          <el-table-column
+            column-key="nickname"
+            label="昵称"
+            :width="pendingColumnWidths.nickname"
+            min-width="130"
+            :resizable="true"
+          >
             <template #default="{ row }">
               <div class="member-identity">
                 <el-avatar :src="row.avatarUrl" :size="28">
@@ -45,19 +57,37 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="内部ID" min-width="220">
+          <el-table-column
+            column-key="userId"
+            label="内部ID"
+            :width="pendingColumnWidths.userId"
+            min-width="180"
+            :resizable="true"
+          >
             <template #default="{ row }">
               <el-tooltip :content="row.userId" placement="top">
                 <span>{{ formatUserId(row.userId) }}</span>
               </el-tooltip>
             </template>
           </el-table-column>
-          <el-table-column label="申请时间" width="180">
+          <el-table-column
+            column-key="appliedAt"
+            label="申请时间"
+            :width="pendingColumnWidths.appliedAt"
+            min-width="150"
+            :resizable="true"
+          >
             <template #default="{ row }">
               <span>{{ formatAdminDateTime(row.appliedAt) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="180">
+          <el-table-column
+            column-key="actions"
+            label="操作"
+            :width="pendingColumnWidths.actions"
+            min-width="160"
+            :resizable="true"
+          >
             <template #default="{ row }">
               <el-button data-testid="member-approve-button" :data-member-id="row._id" type="primary" size="small" @click="approve(row)">通过</el-button>
               <el-button data-testid="member-reject-button" :data-member-id="row._id" type="danger" size="small" @click="reject(row)">拒绝</el-button>
@@ -68,8 +98,20 @@
       </el-tab-pane>
 
       <el-tab-pane :label="`成员列表（${allMembers.length}）`" name="all">
-        <el-table data-testid="member-all-table" :data="allMembers" v-loading="loading">
-          <el-table-column label="昵称" min-width="140">
+        <el-table
+          data-testid="member-all-table"
+          :data="allMembers"
+          v-loading="loading"
+          border
+          @header-dragend="handleAllColumnDragEnd"
+        >
+          <el-table-column
+            column-key="nickname"
+            label="昵称"
+            :width="allColumnWidths.nickname"
+            min-width="130"
+            :resizable="true"
+          >
             <template #default="{ row }">
               <div class="member-identity">
                 <el-avatar :src="row.avatarUrl" :size="28">
@@ -79,38 +121,74 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="内部ID" min-width="220">
+          <el-table-column
+            column-key="userId"
+            label="内部ID"
+            :width="allColumnWidths.userId"
+            min-width="180"
+            :resizable="true"
+          >
             <template #default="{ row }">
               <el-tooltip :content="row.userId" placement="top">
                 <span>{{ formatUserId(row.userId) }}</span>
               </el-tooltip>
             </template>
           </el-table-column>
-          <el-table-column label="角色" width="100">
+          <el-table-column
+            column-key="role"
+            label="角色"
+            :width="allColumnWidths.role"
+            min-width="90"
+            :resizable="true"
+          >
             <template #default="{ row }">
               <el-tag size="small" :type="row.role === 'admin' ? 'danger' : 'info'">
                 {{ row.role === 'admin' ? '管理员' : '成员' }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="110">
+          <el-table-column
+            column-key="status"
+            label="状态"
+            :width="allColumnWidths.status"
+            min-width="100"
+            :resizable="true"
+          >
             <template #default="{ row }">
               <el-tag size="small" :type="statusTagType(row.status)">
                 {{ statusLabel(row.status) }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="申请时间" width="180">
+          <el-table-column
+            column-key="appliedAt"
+            label="申请时间"
+            :width="allColumnWidths.appliedAt"
+            min-width="150"
+            :resizable="true"
+          >
             <template #default="{ row }">
               <span>{{ formatAdminDateTime(row.appliedAt) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="加入时间" width="180">
+          <el-table-column
+            column-key="joinedAt"
+            label="加入时间"
+            :width="allColumnWidths.joinedAt"
+            min-width="150"
+            :resizable="true"
+          >
             <template #default="{ row }">
               <span>{{ formatAdminDateTime(row.joinedAt) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="180">
+          <el-table-column
+            column-key="actions"
+            label="操作"
+            :width="allColumnWidths.actions"
+            min-width="160"
+            :resizable="true"
+          >
             <template #default="{ row }">
               <el-button
                 size="small"
@@ -137,8 +215,43 @@ import { communityApi, memberApi } from '../../api/cloud'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { formatAdminDateTime } from '../../utils/datetime'
+import { usePersistedTableColumns } from '../../utils/persistedTableColumns'
 
 type MemberStatus = 'pending' | 'active' | 'rejected'
+type PendingMemberTableColumnKey = 'nickname' | 'userId' | 'appliedAt' | 'actions'
+type AllMemberTableColumnKey = 'nickname' | 'userId' | 'role' | 'status' | 'appliedAt' | 'joinedAt' | 'actions'
+
+const PENDING_MEMBER_TABLE_DEFAULT_COLUMN_WIDTHS: Record<PendingMemberTableColumnKey, number> = {
+  nickname: 160,
+  userId: 240,
+  appliedAt: 180,
+  actions: 180,
+}
+const PENDING_MEMBER_TABLE_MIN_COLUMN_WIDTHS: Record<PendingMemberTableColumnKey, number> = {
+  nickname: 130,
+  userId: 180,
+  appliedAt: 150,
+  actions: 160,
+}
+const ALL_MEMBER_TABLE_DEFAULT_COLUMN_WIDTHS: Record<AllMemberTableColumnKey, number> = {
+  nickname: 160,
+  userId: 240,
+  role: 100,
+  status: 110,
+  appliedAt: 180,
+  joinedAt: 180,
+  actions: 180,
+}
+const ALL_MEMBER_TABLE_MIN_COLUMN_WIDTHS: Record<AllMemberTableColumnKey, number> = {
+  nickname: 130,
+  userId: 180,
+  role: 90,
+  status: 100,
+  appliedAt: 150,
+  joinedAt: 150,
+  actions: 160,
+}
+
 interface MemberRow {
   _id: string
   communityId: string
@@ -162,6 +275,22 @@ const loading = ref(false)
 const keyword = ref('')
 const statusFilter = ref<'all' | MemberStatus>('all')
 const communityName = ref('')
+const {
+  columnWidths: pendingColumnWidths,
+  handleColumnDragEnd: handlePendingColumnDragEnd,
+} = usePersistedTableColumns<PendingMemberTableColumnKey>({
+  storageKey: 'happyhome.admin.memberPendingTable.columnWidths.v1',
+  defaults: PENDING_MEMBER_TABLE_DEFAULT_COLUMN_WIDTHS,
+  minimums: PENDING_MEMBER_TABLE_MIN_COLUMN_WIDTHS,
+})
+const {
+  columnWidths: allColumnWidths,
+  handleColumnDragEnd: handleAllColumnDragEnd,
+} = usePersistedTableColumns<AllMemberTableColumnKey>({
+  storageKey: 'happyhome.admin.memberAllTable.columnWidths.v1',
+  defaults: ALL_MEMBER_TABLE_DEFAULT_COLUMN_WIDTHS,
+  minimums: ALL_MEMBER_TABLE_MIN_COLUMN_WIDTHS,
+})
 
 onMounted(async () => {
   if (!communityId.value) {

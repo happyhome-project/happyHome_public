@@ -19,22 +19,46 @@
       </el-select>
     </div>
 
-    <el-table :data="posts" v-loading="loading" style="width: 100%">
-      <el-table-column label="社区/板块" min-width="190">
+    <el-table
+      :data="posts"
+      v-loading="loading"
+      border
+      style="width: 100%"
+      @header-dragend="handleColumnDragEnd"
+    >
+      <el-table-column
+        column-key="community"
+        label="社区/板块"
+        :width="columnWidths.community"
+        min-width="170"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <div>{{ row.communityName || row.communityId }}</div>
           <div class="muted">{{ row.sectionName || row.sectionId }}</div>
         </template>
       </el-table-column>
 
-      <el-table-column label="作者" min-width="160">
+      <el-table-column
+        column-key="author"
+        label="作者"
+        :width="columnWidths.author"
+        min-width="140"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <div>{{ row.authorNickname || '未设置' }}</div>
           <div class="muted">{{ shortId(row.authorId) }}</div>
         </template>
       </el-table-column>
 
-      <el-table-column label="审核状态" width="150">
+      <el-table-column
+        column-key="audit"
+        label="审核状态"
+        :width="columnWidths.audit"
+        min-width="120"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <el-tag :type="auditTag(displayAuditStatus(row))">
             {{ auditText(displayAuditStatus(row)) }}
@@ -42,7 +66,13 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="公开状态" width="120">
+      <el-table-column
+        column-key="visibility"
+        label="公开状态"
+        :width="columnWidths.visibility"
+        min-width="110"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <el-tag :type="row.isVisibleToMembers ? 'success' : 'info'">
             {{ row.isVisibleToMembers ? '已公开' : '未公开' }}
@@ -50,19 +80,39 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="原因" min-width="220" show-overflow-tooltip>
+      <el-table-column
+        column-key="reason"
+        label="原因"
+        :width="columnWidths.reason"
+        min-width="180"
+        show-overflow-tooltip
+        :resizable="true"
+      >
         <template #default="{ row }">
           {{ row.pendingAuditReason || row.auditReason || '-' }}
         </template>
       </el-table-column>
 
-      <el-table-column label="更新时间" width="180">
+      <el-table-column
+        column-key="updatedAt"
+        label="更新时间"
+        :width="columnWidths.updatedAt"
+        min-width="150"
+        :resizable="true"
+      >
         <template #default="{ row }">
           {{ formatTime(row.pendingSubmittedAt || row.auditUpdatedAt || row.updatedAt || row.createdAt) }}
         </template>
       </el-table-column>
 
-      <el-table-column label="操作" width="270" fixed="right">
+      <el-table-column
+        column-key="actions"
+        label="操作"
+        :width="columnWidths.actions"
+        min-width="240"
+        fixed="right"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <el-button size="small" @click="openDetail(row)">详情</el-button>
           <el-button size="small" type="success" @click="approve(row)">通过</el-button>
@@ -112,14 +162,40 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { auditApi } from '../../api/cloud'
+import { usePersistedTableColumns } from '../../utils/persistedTableColumns'
 
 type AuditStatus = 'actionable' | 'pending' | 'pass' | 'review' | 'rejected' | 'all'
+type ContentAuditTableColumnKey = 'community' | 'author' | 'audit' | 'visibility' | 'reason' | 'updatedAt' | 'actions'
+
+const CONTENT_AUDIT_TABLE_DEFAULT_COLUMN_WIDTHS: Record<ContentAuditTableColumnKey, number> = {
+  community: 210,
+  author: 170,
+  audit: 150,
+  visibility: 120,
+  reason: 260,
+  updatedAt: 180,
+  actions: 270,
+}
+const CONTENT_AUDIT_TABLE_MIN_COLUMN_WIDTHS: Record<ContentAuditTableColumnKey, number> = {
+  community: 170,
+  author: 140,
+  audit: 120,
+  visibility: 110,
+  reason: 180,
+  updatedAt: 150,
+  actions: 240,
+}
 
 const loading = ref(false)
 const posts = ref<any[]>([])
 const auditStatus = ref<AuditStatus>('actionable')
 const detailVisible = ref(false)
 const detail = ref<any | null>(null)
+const { columnWidths, handleColumnDragEnd } = usePersistedTableColumns<ContentAuditTableColumnKey>({
+  storageKey: 'happyhome.admin.contentAuditTable.columnWidths.v1',
+  defaults: CONTENT_AUDIT_TABLE_DEFAULT_COLUMN_WIDTHS,
+  minimums: CONTENT_AUDIT_TABLE_MIN_COLUMN_WIDTHS,
+})
 
 function displayAuditStatus(row: any) {
   return row?.pendingContent ? row?.pendingAuditStatus : row?.auditStatus

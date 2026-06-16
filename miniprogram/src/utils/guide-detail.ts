@@ -33,6 +33,7 @@ export interface GuideRouteDetail {
   stats: GuideRouteStat[]
   bodySections: GuideRouteBodySection[]
   driveDuration: string
+  liangbuluTrackId: string
   location: GuideRouteLocation | null
 }
 
@@ -72,6 +73,7 @@ export function buildGuideRouteDetail(post: Post, section: Section): GuideRouteD
     stats: buildStats(post, section),
     bodySections: collectBodySections(post, bodyWidgets),
     driveDuration: collectDriveDuration(post, section),
+    liangbuluTrackId: collectLiangbuluTrackId(post, section),
     location: collectLocation(post, section),
   }
 }
@@ -80,6 +82,15 @@ function collectDriveDuration(post: Post, section: Section): string {
   const widget = findFirstWidget(section, {
     fieldKeys: ['driveDuration', 'driveTime', 'drivingTime', 'arrivalDuration', 'arrivalTime'],
     labels: ['驾车到达用时', '驾车时间', '自驾时间', '到达时间', '车程'],
+    types: ['short_text', 'summary'],
+  })
+  return widget ? widgetTextValue(post, widget) : ''
+}
+
+function collectLiangbuluTrackId(post: Post, section: Section): string {
+  const widget = findFirstWidget(section, {
+    fieldKeys: ['liangbuluTrackId', 'liangbuluTrackNo', 'liangbuluId', 'trackId', 'trackNo', 'trackNumber'],
+    labels: ['两步路轨迹编号', '两步路编号', '轨迹编号', '轨迹ID'],
     types: ['short_text', 'summary'],
   })
   return widget ? widgetTextValue(post, widget) : ''
