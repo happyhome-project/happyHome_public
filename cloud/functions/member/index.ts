@@ -2,6 +2,7 @@ import cloud from 'wx-server-sdk'
 import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
 import { assertCommunityAdmin } from '../../lib/auth'
+import { isBoundSuperAdmin } from '../../lib/admin-identity'
 import {
   getNotificationTemplateConfig,
   getNotificationStatus,
@@ -24,6 +25,22 @@ async function getLatestMembershipRecord(communityId: string, openid: string) {
     limit: 1,
   })
   return records[0] || null
+}
+
+async function isSuperAdmin(openid: string) {
+  try {
+    const user = await db.getById('users', openid) as { role?: string } | null
+    if (user?.role === 'superAdmin') return true
+  } catch {
+    // 用户记录缺失时继续查后台账号绑定，避免绑定源不同步导致审批入口消失。
+  }
+  return isBoundSuperAdmin(openid)
+}
+
+async function assertCommunityApprover(openid: string, communityId: string) {
+  if (!communityId) throw new Error('communityId 不能为空')
+  if (await isSuperAdmin(openid)) return
+  await assertCommunityAdmin(openid, communityId)
 }
 
 export async function handleApply(params: { communityId: string }, openid: string) {
@@ -105,7 +122,7 @@ export async function handleMemberApprove(
   openid: string,
 ) {
   if (!openid) throw new Error('Missing OPENID')
-  await assertCommunityAdmin(openid, params.communityId)
+  await assertCommunityApprover(openid, params.communityId)
 
   const updateRes = await db.updateWhere('community_members', {
     _id: params.memberId,
@@ -126,7 +143,7 @@ export async function handleMemberReject(
   openid: string,
 ) {
   if (!openid) throw new Error('Missing OPENID')
-  await assertCommunityAdmin(openid, params.communityId)
+  await assertCommunityApprover(openid, params.communityId)
 
   const updateRes = await db.updateWhere('community_members', {
     _id: params.memberId,
@@ -141,7 +158,7 @@ export async function handleMemberReject(
 
 export async function handlePendingList(params: { communityId: string }, openid: string) {
   if (!openid) throw new Error('Missing OPENID')
-  await assertCommunityAdmin(openid, params.communityId)
+  await assertCommunityApprover(openid, params.communityId)
 
   const members = await db.query('community_members', {
     communityId: params.communityId,

@@ -18,14 +18,81 @@ jest.mock('../../../lib/storage', () => ({
   deleteFile: jest.fn(),
 }))
 
+jest.mock('../../../lib/amap', () => ({
+  searchAmapPoi: jest.fn(),
+}))
+
 jest.mock('uuid', () => ({
   v4: jest.fn().mockReturnValue('mocked-uuid'),
 }))
 
 import { main } from '../index'
 import * as db from '../../../lib/db'
+import * as storage from '../../../lib/storage'
+import { searchAmapPoi } from '../../../lib/amap'
 
 beforeEach(() => jest.resetAllMocks())
+
+test('geo.mapConfig: 返回后台地图 JS 配置供 admin-web 运行时加载', async () => {
+  const oldJsKey = process.env.AMAP_JS_KEY
+  const oldSecurityCode = process.env.AMAP_SECURITY_CODE
+  process.env.AMAP_JS_KEY = 'amap-js-key'
+  process.env.AMAP_SECURITY_CODE = 'amap-security-code'
+
+  try {
+    const result: any = await main({
+      action: 'geo.mapConfig',
+      _actAs: { accountId: 'super-1', role: 'superAdmin', userId: 'boss-openid', username: 'boss' },
+    })
+
+    expect(result).toEqual({
+      jsKey: 'amap-js-key',
+      securityCode: 'amap-security-code',
+    })
+  } finally {
+    if (oldJsKey === undefined) delete process.env.AMAP_JS_KEY
+    else process.env.AMAP_JS_KEY = oldJsKey
+    if (oldSecurityCode === undefined) delete process.env.AMAP_SECURITY_CODE
+    else process.env.AMAP_SECURITY_CODE = oldSecurityCode
+  }
+})
+
+test('geo.searchLocation: 通过高德检索目的地候选点并返回 GCJ-02 坐标', async () => {
+  ;(searchAmapPoi as jest.Mock).mockResolvedValue([
+    {
+      id: 'B0FFTEST',
+      name: '太平水库',
+      address: '四川省德阳市绵竹市太平水库',
+      lat: 31.405678,
+      lng: 104.133456,
+      province: '四川省',
+      city: '德阳市',
+      district: '绵竹市',
+      coordSystem: 'gcj02',
+      source: 'amap',
+    },
+  ])
+
+  const result: any = await main({
+    action: 'geo.searchLocation',
+    keyword: '太平水库',
+    region: '德阳',
+    _actAs: { accountId: 'super-1', role: 'superAdmin', userId: 'boss-openid', username: 'boss' },
+  })
+
+  expect(searchAmapPoi).toHaveBeenCalledWith({ keyword: '太平水库', region: '德阳', limit: 8 })
+  expect(result.candidates).toEqual([
+    expect.objectContaining({
+      id: 'B0FFTEST',
+      name: '太平水库',
+      address: '四川省德阳市绵竹市太平水库',
+      lat: 31.405678,
+      lng: 104.133456,
+      coordSystem: 'gcj02',
+      source: 'amap',
+    }),
+  ])
+})
 
 test('admin.approvalSummary: superAdmin 返回社区创建和成员加入待办数', async () => {
   ;(db.query as jest.Mock)
@@ -324,8 +391,14 @@ test('section.create: 图文攻略展示模板可保存到板块', async () => {
     widgets: [
       expect.objectContaining({ widgetId: 'guide_title', type: 'short_text', label: '标题', required: true, showInList: true, locked: true }),
       expect.objectContaining({ widgetId: 'guide_images', type: 'image_group', label: '封面/图片', required: true, showInList: false, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_distance', type: 'short_text', label: '距离', required: false, showInList: false, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_highest_altitude', type: 'short_text', label: '最高海拔', required: false, showInList: false, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_total_climb', type: 'short_text', label: '累计爬升', required: false, showInList: false, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_reference_duration', type: 'short_text', label: '参考用时', required: false, showInList: false, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_drive_duration', type: 'short_text', label: '驾车到达用时', required: true, showInList: false, locked: true }),
       expect.objectContaining({ widgetId: 'guide_body', type: 'rich_note', label: '正文', required: false, showInList: false, locked: true }),
-      expect.objectContaining({ widgetId: 'guide_location', type: 'location', label: '地点', required: false, showInList: false, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_liangbulu_track_id', type: 'short_text', label: '两步路轨迹编号', required: false, showInList: false, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_location', type: 'location', label: '目的地位置', required: true, showInList: false, locked: true }),
     ],
   }))
 })
@@ -334,8 +407,14 @@ test('section.updateWidgets: 图文攻略固定控件不能删除或修改', asy
   const guideWidgets = [
     { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true, locked: true },
     { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false, locked: true },
-    { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false, locked: true },
-    { widgetId: 'guide_location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false, locked: true },
+    { widgetId: 'guide_distance', type: 'short_text', label: '距离', fieldKey: 'distance', required: false, order: 2, showInList: false, locked: true },
+    { widgetId: 'guide_highest_altitude', type: 'short_text', label: '最高海拔', fieldKey: 'highestAltitude', required: false, order: 3, showInList: false, locked: true },
+    { widgetId: 'guide_total_climb', type: 'short_text', label: '累计爬升', fieldKey: 'totalClimb', required: false, order: 4, showInList: false, locked: true },
+    { widgetId: 'guide_reference_duration', type: 'short_text', label: '参考用时', fieldKey: 'referenceDuration', required: false, order: 5, showInList: false, locked: true },
+    { widgetId: 'guide_drive_duration', type: 'short_text', label: '驾车到达用时', fieldKey: 'driveDuration', required: true, order: 6, showInList: false, locked: true },
+    { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 7, showInList: false, locked: true },
+    { widgetId: 'guide_liangbulu_track_id', type: 'short_text', label: '两步路轨迹编号', fieldKey: 'liangbuluTrackId', required: false, order: 8, showInList: false, locked: true },
+    { widgetId: 'guide_location', type: 'location', label: '目的地位置', fieldKey: 'location', required: true, order: 9, showInList: false, locked: true },
   ]
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-guide',
@@ -365,8 +444,14 @@ test('section.updateWidgets: 图文攻略允许在固定控件后追加小控件
   const guideWidgets = [
     { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true, locked: true },
     { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false, locked: true },
-    { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false, locked: true },
-    { widgetId: 'guide_location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false, locked: true },
+    { widgetId: 'guide_distance', type: 'short_text', label: '距离', fieldKey: 'distance', required: false, order: 2, showInList: false, locked: true },
+    { widgetId: 'guide_highest_altitude', type: 'short_text', label: '最高海拔', fieldKey: 'highestAltitude', required: false, order: 3, showInList: false, locked: true },
+    { widgetId: 'guide_total_climb', type: 'short_text', label: '累计爬升', fieldKey: 'totalClimb', required: false, order: 4, showInList: false, locked: true },
+    { widgetId: 'guide_reference_duration', type: 'short_text', label: '参考用时', fieldKey: 'referenceDuration', required: false, order: 5, showInList: false, locked: true },
+    { widgetId: 'guide_drive_duration', type: 'short_text', label: '驾车到达用时', fieldKey: 'driveDuration', required: true, order: 6, showInList: false, locked: true },
+    { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 7, showInList: false, locked: true },
+    { widgetId: 'guide_liangbulu_track_id', type: 'short_text', label: '两步路轨迹编号', fieldKey: 'liangbuluTrackId', required: false, order: 8, showInList: false, locked: true },
+    { widgetId: 'guide_location', type: 'location', label: '目的地位置', fieldKey: 'location', required: true, order: 9, showInList: false, locked: true },
   ]
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-guide',
@@ -382,17 +467,73 @@ test('section.updateWidgets: 图文攻略允许在固定控件后追加小控件
     sectionId: 'section-guide',
     widgets: [
       ...guideWidgets,
-      { widgetId: 'guide_age', type: 'short_text', label: '适合年龄', fieldKey: 'age', required: false, order: 4, showInList: false },
+      { widgetId: 'guide_scenery', type: 'short_text', label: '景色特点', fieldKey: 'scenery', required: false, order: 10, showInList: false },
     ],
   })
 
-  expect(result.widgets.slice(0, 4).every((widget: any) => widget.locked === true)).toBe(true)
-  expect(result.widgets[4]).toEqual(expect.objectContaining({ widgetId: 'guide_age', locked: false }))
+  expect(result.widgets.slice(0, 10).every((widget: any) => widget.locked === true)).toBe(true)
+  expect(result.widgets[10]).toEqual(expect.objectContaining({ widgetId: 'guide_scenery', locked: false }))
   expect(db.updateById).toHaveBeenCalledWith('sections', 'section-guide', expect.objectContaining({
     widgets: expect.arrayContaining([
       expect.objectContaining({ widgetId: 'guide_images', required: true, locked: true }),
-      expect.objectContaining({ widgetId: 'guide_age', locked: false }),
+      expect.objectContaining({ widgetId: 'guide_drive_duration', required: true, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_liangbulu_track_id', required: false, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_distance', locked: true }),
+      expect.objectContaining({ widgetId: 'guide_scenery', locked: false }),
     ]),
+  }))
+})
+
+test('section.get: 旧图文攻略板块会补齐路线攻略固定控件', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-guide',
+    type: 'evergreen',
+    displayTemplate: 'guide_note',
+    widgets: [
+      { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true, locked: true },
+      { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false, locked: true },
+      { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false, locked: true },
+      { widgetId: 'guide_location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false, locked: true },
+    ],
+  })
+
+  const result: any = await main({
+    action: 'section.get',
+    sectionId: 'section-guide',
+  })
+
+  expect(result.section.widgets.map((widget: any) => widget.widgetId).slice(0, 10)).toEqual([
+    'guide_title',
+    'guide_images',
+    'guide_distance',
+    'guide_highest_altitude',
+    'guide_total_climb',
+    'guide_reference_duration',
+    'guide_drive_duration',
+    'guide_body',
+    'guide_liangbulu_track_id',
+    'guide_location',
+  ])
+  expect(result.section.widgets[6]).toEqual(expect.objectContaining({
+    widgetId: 'guide_drive_duration',
+    label: '驾车到达用时',
+    required: true,
+    order: 6,
+    locked: true,
+  }))
+  expect(result.section.widgets[8]).toEqual(expect.objectContaining({
+    widgetId: 'guide_liangbulu_track_id',
+    label: '两步路轨迹编号',
+    required: false,
+    order: 8,
+    locked: true,
+  }))
+  expect(result.section.widgets[9]).toEqual(expect.objectContaining({
+    widgetId: 'guide_location',
+    label: '目的地位置',
+    required: true,
+    order: 9,
+    locked: true,
   }))
 })
 
@@ -447,6 +588,7 @@ test('post.getAdmin: 返回 attendance 汇总和完整名单', async () => {
     })
     .mockResolvedValueOnce({ _id: 'user-1', nickName: '小王', avatarUrl: '1.png' })
   ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([])
     .mockResolvedValueOnce([
       { _id: 'record-1', postId: 'post-1', widgetId: 'attendance-1', userId: 'user-1', joinedAt: '2024-01-02T00:00:00.000Z' },
     ])
@@ -478,6 +620,100 @@ test('post.removeAttendanceMemberAdmin: 可移除参与人并返回最新名单'
 
   expect(db.removeById).toHaveBeenCalledWith('post_attendance_members', 'record-1')
   expect(result).toEqual({ success: true, members: [], total: 0 })
+})
+
+test('community.hardDelete: cleans cloud files from current and pending post content', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'community-1',
+    status: 'disabled',
+    coverImage: 'cloud://env/community-cover.jpg',
+  })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([
+      {
+        _id: 'post-1',
+        content: { images: ['cloud://env/current.jpg'] },
+        pendingContent: { rich: { imageFileIDs: ['cloud://env/pending.jpg'] } },
+      },
+    ])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([])
+  ;(db.removeById as jest.Mock).mockResolvedValue({})
+  ;(storage.deleteFile as jest.Mock).mockResolvedValue({})
+
+  await main({ action: 'community.hardDelete', communityId: 'community-1' })
+
+  expect(storage.deleteFile).toHaveBeenCalledWith([
+    'cloud://env/community-cover.jpg',
+    'cloud://env/current.jpg',
+    'cloud://env/pending.jpg',
+  ])
+})
+
+test('admin.createAccount: 创建绑定微信的 superAdmin 时同步小程序用户角色', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([]) // username 未占用
+  ;(db.getById as jest.Mock).mockRejectedValueOnce(Object.assign(new Error('not found'), { errCode: -502001 }))
+  ;(db.create as jest.Mock)
+    .mockResolvedValueOnce('super-account-1')
+    .mockResolvedValueOnce('super-openid')
+
+  const result: any = await main({
+    action: 'admin.createAccount',
+    username: 'ops',
+    password: 'happyhome2024',
+    role: 'superAdmin',
+    userId: 'super-openid',
+    _actAs: { accountId: 'root', role: 'superAdmin', userId: 'root-openid', username: 'root' },
+  })
+
+  expect(db.create).toHaveBeenCalledWith('admin_accounts', expect.objectContaining({
+    username: 'ops',
+    userId: 'super-openid',
+    role: 'superAdmin',
+    status: 'active',
+  }))
+  expect(db.create).toHaveBeenCalledWith('users', expect.objectContaining({
+    _id: 'super-openid',
+    role: 'superAdmin',
+    roleSource: 'admin_account',
+  }))
+  expect(result.accountId).toBe('super-account-1')
+})
+
+test('admin.bindWechat: 绑定 superAdmin 微信 openId 时同步小程序用户角色', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([]) // openId 未绑定其他账号
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({
+      _id: 'super-account-1',
+      username: 'admin',
+      role: 'superAdmin',
+      status: 'active',
+      userId: '',
+    })
+    .mockResolvedValueOnce({
+      _id: 'super-openid',
+      nickName: '一年',
+      avatarUrl: '',
+      role: 'user',
+    })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+  ;(db.updateWhere as jest.Mock).mockResolvedValue({})
+
+  const result: any = await main({
+    action: 'admin.bindWechat',
+    accountId: 'super-account-1',
+    openId: 'super-openid',
+    _actAs: { accountId: 'root', role: 'superAdmin', userId: 'root-openid', username: 'root' },
+  })
+
+  expect(db.updateById).toHaveBeenCalledWith('admin_accounts', 'super-account-1', { userId: 'super-openid' })
+  expect(db.updateById).toHaveBeenCalledWith('users', 'super-openid', {
+    role: 'superAdmin',
+    roleSource: 'admin_account',
+  })
+  expect(db.updateWhere).toHaveBeenCalledWith('admin_sessions', { accountId: 'super-account-1' }, { userId: 'super-openid' })
+  expect(result.success).toBe(true)
 })
 
 test('admin.listAccounts: 标记未删除社区的创建者管理员账号', async () => {

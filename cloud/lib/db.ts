@@ -12,6 +12,14 @@ function collection(name: string) {
   return db.collection(name)
 }
 
+export function replaceValue<T>(value: T) {
+  return _.set(value)
+}
+
+export function removeField() {
+  return _.remove()
+}
+
 // 原子递增，必须用此方法更新计数器，禁止先读再写
 export async function increment(
   collectionName: string,

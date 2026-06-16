@@ -208,6 +208,7 @@ import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { approvalApi, communityApi } from '../../api/cloud'
 import { useAuthStore } from '../../stores/auth'
+import { usePersistedTableColumns } from '../../utils/persistedTableColumns'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -253,7 +254,11 @@ const COMMUNITY_TABLE_MIN_COLUMN_WIDTHS: Record<CommunityTableColumnKey, number>
   actions: 520,
 }
 
-const columnWidths = ref<Record<CommunityTableColumnKey, number>>(loadCommunityColumnWidths())
+const { columnWidths, handleColumnDragEnd } = usePersistedTableColumns<CommunityTableColumnKey>({
+  storageKey: COMMUNITY_TABLE_COLUMN_WIDTHS_KEY,
+  defaults: COMMUNITY_TABLE_DEFAULT_COLUMN_WIDTHS,
+  minimums: COMMUNITY_TABLE_MIN_COLUMN_WIDTHS,
+})
 const mottoForm = ref<{ communityId: string; motto: string; mottoCite: string }>({
   communityId: '',
   motto: '',
@@ -273,50 +278,6 @@ const filteredCommunities = computed(() => {
 onMounted(() => {
   loadCommunities()
 })
-
-function isCommunityTableColumnKey(value: unknown): value is CommunityTableColumnKey {
-  return typeof value === 'string' && value in COMMUNITY_TABLE_DEFAULT_COLUMN_WIDTHS
-}
-
-function normalizeCommunityColumnWidths(value: unknown): Record<CommunityTableColumnKey, number> {
-  const result = { ...COMMUNITY_TABLE_DEFAULT_COLUMN_WIDTHS }
-  if (!value || typeof value !== 'object') return result
-
-  for (const key of Object.keys(COMMUNITY_TABLE_DEFAULT_COLUMN_WIDTHS) as CommunityTableColumnKey[]) {
-    const rawWidth = Number((value as Record<string, unknown>)[key])
-    if (Number.isFinite(rawWidth)) {
-      result[key] = Math.max(COMMUNITY_TABLE_MIN_COLUMN_WIDTHS[key], Math.round(rawWidth))
-    }
-  }
-  return result
-}
-
-function loadCommunityColumnWidths(): Record<CommunityTableColumnKey, number> {
-  if (typeof window === 'undefined') return { ...COMMUNITY_TABLE_DEFAULT_COLUMN_WIDTHS }
-  try {
-    return normalizeCommunityColumnWidths(
-      JSON.parse(window.localStorage.getItem(COMMUNITY_TABLE_COLUMN_WIDTHS_KEY) || '{}')
-    )
-  } catch {
-    return { ...COMMUNITY_TABLE_DEFAULT_COLUMN_WIDTHS }
-  }
-}
-
-function saveCommunityColumnWidths(widths: Record<CommunityTableColumnKey, number>) {
-  if (typeof window === 'undefined') return
-  window.localStorage.setItem(COMMUNITY_TABLE_COLUMN_WIDTHS_KEY, JSON.stringify(widths))
-}
-
-function handleColumnDragEnd(newWidth: number, _oldWidth: number, column: any) {
-  const key = column?.columnKey || column?.property
-  if (!isCommunityTableColumnKey(key) || !Number.isFinite(Number(newWidth))) return
-  const next = {
-    ...columnWidths.value,
-    [key]: Math.max(COMMUNITY_TABLE_MIN_COLUMN_WIDTHS[key], Math.round(Number(newWidth))),
-  }
-  columnWidths.value = next
-  saveCommunityColumnWidths(next)
-}
 
 async function loadCommunities() {
   loading.value = true

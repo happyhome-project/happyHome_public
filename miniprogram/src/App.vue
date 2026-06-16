@@ -3,15 +3,20 @@ import { onLaunch, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from './store/community'
 import { useUserStore } from './store/user'
 import { clientLog, installRuntimeLogHooks } from './utils/client-log'
-import { openOnboardingPreservingStack } from './utils/onboarding-nav'
+
+let lastCommunityRefreshAt = 0
+const FOREGROUND_COMMUNITY_REFRESH_INTERVAL = 30 * 1000
 
 async function refreshMyCommunitiesSilently() {
   const userStore = useUserStore()
   if (!userStore.isLoggedIn) return
+  const now = Date.now()
+  if (now - lastCommunityRefreshAt < FOREGROUND_COMMUNITY_REFRESH_INTERVAL) return
+  lastCommunityRefreshAt = now
 
   try {
     clientLog('debug', 'app.communities.refresh.start', {})
-    await useCommunityStore().loadMyCommunities()
+    await useCommunityStore().loadMyCommunities({ loadSections: false })
     clientLog('debug', 'app.communities.refresh.success', {})
   } catch (e) {
     clientLog('error', 'app.communities.refresh.fail', { error: e })
@@ -35,7 +40,9 @@ onLaunch(async () => {
   const communityStore = useCommunityStore()
 
   userStore.loadFromStorage()
+  userStore.syncBackgroundFetchToken()
   communityStore.loadFromStorage()
+  lastCommunityRefreshAt = Date.now()
   clientLog('info', 'app.storage.loaded', {
     loggedIn: userStore.isLoggedIn,
     openIdTail: userStore.openId ? String(userStore.openId).slice(-6) : '',
@@ -59,23 +66,8 @@ onLaunch(async () => {
     return
   }
 
-  if (userStore.isLoggedIn) {
-    try {
-      clientLog('info', 'app.communities.load.start', {})
-      await communityStore.loadMyCommunities()
-      clientLog('info', 'app.communities.load.success', {
-        communityCount: communityStore.myCommunities.length,
-        currentCommunityId: communityStore.currentCommunityId || '',
-      })
-      if (communityStore.myCommunities.length === 0) {
-        clientLog('warn', 'app.communities.empty.openOnboarding', {})
-        openOnboardingPreservingStack()
-      }
-    } catch (e) {
-      clientLog('error', 'app.communities.load.fail', { error: e })
-      console.error('Failed to load communities:', e)
-    }
-  }
+  // 首页首屏数据由 post.bootstrap / 数据预拉取负责；这里不再阻塞启动等待社区列表。
+  // 前台返回时仍会按阈值静默刷新，解决后台审批通过后用户无需杀进程的问题。
 })
 
 onShow(() => {

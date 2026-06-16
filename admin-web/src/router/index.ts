@@ -16,6 +16,7 @@ const router = createRouter({
         { path: 'community-approval', name: 'community-approval', component: () => import('../views/SuperAdmin/CommunityApproval.vue'), meta: { requiresRole: 'superAdmin' } },
         { path: 'disabled-communities', name: 'disabled-communities', component: () => import('../views/SuperAdmin/DisabledCommunityList.vue'), meta: { requiresRole: 'superAdmin' } },
         { path: 'admin-accounts', name: 'admin-accounts', component: () => import('../views/SuperAdmin/AdminAccountList.vue'), meta: { requiresRole: 'superAdmin' } },
+        { path: 'content-audit', name: 'content-audit', component: () => import('../views/SuperAdmin/ContentAudit.vue'), meta: { requiresRole: 'superAdmin' } },
         { path: 'communities', name: 'communities', component: () => import('../views/CommunityAdmin/CommunityList.vue') },
         { path: 'communities/new', name: 'community-create', component: () => import('../views/CommunityAdmin/CommunityCreate.vue') },
         { path: 'sections/:communityId', name: 'sections', component: () => import('../views/CommunityAdmin/SectionList.vue') },

@@ -12,6 +12,12 @@ export interface ApprovalNotificationSubscription {
   status: string
 }
 
+export interface ApprovalNotificationSubscriptionSave {
+  eventType: ApprovalNotificationEventType
+  templateId: string
+  status: ApprovalSubscriptionStatus
+}
+
 export type ApprovalReminderState =
   | { kind: 'hidden' }
   | { kind: 'prompt'; title: string; message: string; canRequest: true }
@@ -34,6 +40,57 @@ export function buildSubscriptionSaves(
     templateId: item.templateId,
     status: result[item.templateId] === 'accept' ? 'accept' as const : 'reject' as const,
   }))
+}
+
+function errorMessageOf(error: any) {
+  return String(error?.errMsg || error?.message || error || '')
+}
+
+function errorCodeOf(error: any) {
+  const explicit = Number(error?.errCode)
+  if (Number.isFinite(explicit)) return explicit
+  const matched = errorMessageOf(error).match(/errCode:\s*(-?\d+)/i)
+  return matched ? Number(matched[1]) : NaN
+}
+
+export function isRetryableApprovalSubscriptionSaveError(error: any) {
+  return error?.action === 'saveNotificationSubscription' && errorCodeOf(error) === -504002
+}
+
+export function approvalReminderErrorMessage(error: any) {
+  const message = errorMessageOf(error)
+  const code = errorCodeOf(error)
+  const codeSuffix = Number.isFinite(code) ? `（${code}）` : ''
+
+  if (error?.action === 'saveNotificationSubscription') {
+    return `提醒授权已返回，但保存失败${codeSuffix}，请稍后重试`
+  }
+  if (/requestSubscribeMessage/i.test(message) && /cancel|deny|reject/i.test(message)) {
+    return '未开启提醒，可稍后再试'
+  }
+  if (/requestSubscribeMessage/i.test(message)) {
+    return '微信订阅授权失败，请稍后重试'
+  }
+  return message || '开启提醒失败，请稍后重试'
+}
+
+function wait(ms: number) {
+  if (ms <= 0) return Promise.resolve()
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+export async function saveApprovalSubscriptionWithRetry<T>(
+  item: ApprovalNotificationSubscriptionSave,
+  save: (item: ApprovalNotificationSubscriptionSave) => Promise<T>,
+  retryDelayMs = 600,
+) {
+  try {
+    return await save(item)
+  } catch (error) {
+    if (!isRetryableApprovalSubscriptionSaveError(error)) throw error
+    await wait(retryDelayMs)
+    return save(item)
+  }
 }
 
 function hasAcceptedAllConfigured(

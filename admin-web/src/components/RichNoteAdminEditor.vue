@@ -1,6 +1,7 @@
 <template>
   <div class="rich-note-admin-editor">
     <input
+      v-if="allowImages"
       ref="fileInput"
       type="file"
       accept="image/*"
@@ -17,7 +18,7 @@
       <el-button size="small" @click="runAction('quote')">引用</el-button>
       <el-button size="small" @mousedown.prevent="runAction('line-break')">换行</el-button>
       <el-button size="small" @click="insertLink">链接</el-button>
-      <el-button size="small" :loading="uploading" @click="pickImage">插入图片</el-button>
+      <el-button v-if="allowImages" size="small" :loading="uploading" @click="pickImage">插入图片</el-button>
     </div>
 
     <div class="editor-grid">
@@ -25,7 +26,7 @@
         ref="textareaRef"
         v-model="markdown"
         class="markdown-textarea"
-        placeholder="输入正文，可用上方按钮插入加粗、标题、列表、链接和图片"
+        :placeholder="allowImages ? '输入正文，可用上方按钮插入加粗、标题、列表、链接和图片' : '输入正文，可用上方按钮插入加粗、标题、列表和链接'"
         @input="emitMarkdown"
         @click="rememberSelection"
         @focus="rememberSelection"
@@ -37,7 +38,7 @@
 
       <div class="preview-pane">
         <div class="preview-title">预览</div>
-        <RichNoteAdminPreview v-if="markdown.trim()" :value="currentContent" />
+        <RichNoteAdminPreview v-if="markdown.trim()" :value="currentContent" :allow-images="allowImages" />
         <el-empty v-else description="暂无内容" :image-size="64" />
       </div>
     </div>
@@ -46,13 +47,16 @@
       <el-progress :percentage="percent" :stroke-width="12" />
     </div>
     <div class="muted-tip">
-      内容以 Markdown 兼容结构保存。运营人员可以只用按钮排版；如果能看懂 Markdown，也可以直接微调。
+      {{ allowImages
+        ? '内容以 Markdown 兼容结构保存。运营人员可以只用按钮排版；如果能看懂 Markdown，也可以直接微调。'
+        : '内容以 Markdown 兼容结构保存，支持换行和基础排版；正文不支持插图，图片请上传到“封面/图片”。'
+      }}
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { imageApi } from '../api/cloud'
@@ -60,12 +64,15 @@ import {
   applyMarkdownToolbarAction,
   buildRichNoteContentFromMarkdown,
   normalizeRichNoteContent,
+  stripMarkdownImages,
   type MarkdownToolbarAction,
   type RichNoteContent,
 } from '../utils/rich-note'
 import RichNoteAdminPreview from './RichNoteAdminPreview.vue'
 
-const props = defineProps<{ modelValue: RichNoteContent | unknown }>()
+const props = withDefaults(defineProps<{ modelValue: RichNoteContent | unknown; allowImages?: boolean }>(), {
+  allowImages: true,
+})
 const emit = defineEmits<{
   (e: 'update:modelValue', value: RichNoteContent): void
 }>()
@@ -74,15 +81,27 @@ const fileInput = ref<HTMLInputElement>()
 const textareaRef = ref<HTMLTextAreaElement>()
 const uploading = ref(false)
 const percent = ref(0)
-const markdown = ref(normalizeRichNoteContent(props.modelValue).markdown)
+
+function normalizeMarkdownForPolicy(value: RichNoteContent | unknown) {
+  const next = normalizeRichNoteContent(value).markdown
+  return props.allowImages ? next : stripMarkdownImages(next)
+}
+
+const markdown = ref(normalizeMarkdownForPolicy(props.modelValue))
 const selectionStart = ref(markdown.value.length)
 const selectionEnd = ref(markdown.value.length)
 const currentContent = computed(() => buildRichNoteContentFromMarkdown(markdown.value))
 
+onMounted(() => {
+  if (!props.allowImages && normalizeRichNoteContent(props.modelValue).markdown !== markdown.value) {
+    emit('update:modelValue', buildRichNoteContentFromMarkdown(markdown.value))
+  }
+})
+
 watch(
   () => props.modelValue,
   (value) => {
-    const next = normalizeRichNoteContent(value).markdown
+    const next = normalizeMarkdownForPolicy(value)
     if (next !== markdown.value && document.activeElement !== textareaRef.value) {
       markdown.value = next
       selectionStart.value = next.length
@@ -94,7 +113,9 @@ watch(
 
 function emitMarkdown() {
   rememberSelection()
-  emit('update:modelValue', buildRichNoteContentFromMarkdown(markdown.value))
+  const next = props.allowImages ? markdown.value : stripMarkdownImages(markdown.value)
+  if (next !== markdown.value) markdown.value = next
+  emit('update:modelValue', buildRichNoteContentFromMarkdown(next))
 }
 
 function rememberSelection() {
@@ -114,6 +135,7 @@ function restoreSelection(start: number, end: number) {
 }
 
 function runAction(action: MarkdownToolbarAction, payload: Record<string, string> = {}) {
+  if (action === 'image' && !props.allowImages) return
   rememberSelection()
   const result = applyMarkdownToolbarAction(
     markdown.value,
@@ -122,10 +144,10 @@ function runAction(action: MarkdownToolbarAction, payload: Record<string, string
     selectionEnd.value,
     payload,
   )
-  markdown.value = result.markdown
+  markdown.value = props.allowImages ? result.markdown : stripMarkdownImages(result.markdown)
   selectionStart.value = result.selectionStart
   selectionEnd.value = result.selectionEnd
-  emit('update:modelValue', buildRichNoteContentFromMarkdown(result.markdown))
+  emit('update:modelValue', buildRichNoteContentFromMarkdown(markdown.value))
   restoreSelection(result.selectionStart, result.selectionEnd)
 }
 
@@ -141,6 +163,7 @@ async function insertLink() {
 }
 
 function pickImage() {
+  if (!props.allowImages) return
   fileInput.value?.click()
 }
 

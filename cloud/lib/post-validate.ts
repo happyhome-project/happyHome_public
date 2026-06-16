@@ -1,5 +1,6 @@
 import { AUDIO_ALLOWED_EXTS, AUDIO_MAX_SIZE_BYTES } from '../shared/types'
 import type { PostContent, Section, Widget, WidgetType } from '../shared/types'
+import { isGuideNoteSection } from '../shared/guide-note-widgets'
 
 // 永远不进 post.content 的控件类型（无论 user 还是 admin 路径）：
 //   attendance: 用户报名记录写在独立集合
@@ -54,6 +55,30 @@ export function isEmptyValue(value: unknown): boolean {
   )
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function hasValidLocationCoordinate(value: Record<string, unknown>): boolean {
+  const lat = Number(value.lat)
+  const lng = Number(value.lng)
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180 &&
+    !(lat === 0 && lng === 0)
+  )
+}
+
+function isEmptyRequiredLocation(value: unknown): boolean {
+  if (!isRecord(value)) return true
+  const text = String(value.address || value.name || '').trim()
+  return !text || !hasValidLocationCoordinate(value)
+}
+
 export function validateRequiredWidgets(
   section: Section,
   content: PostContent,
@@ -65,7 +90,11 @@ export function validateRequiredWidgets(
     if (!allowAdminOnly && ADMIN_ONLY_WIDGET_TYPES.has(widget.type)) continue
     if (!widget.required) continue
     const value = content[widget.widgetId]
-    if (isEmptyValue(value) || (widget.type === 'rich_note' && isEmptyRichNoteContent(value))) {
+    if (
+      isEmptyValue(value) ||
+      (widget.type === 'location' && isEmptyRequiredLocation(value)) ||
+      (widget.type === 'rich_note' && isEmptyRichNoteContent(value))
+    ) {
       throw new Error(`必填项未填写：${widget.label}`)
     }
   }
@@ -177,10 +206,6 @@ function validateNoteBlock(item: unknown, widgetLabel: string, index: number): v
   throw new Error(`${prefix}类型不支持`)
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
 function stripHtmlNoise(html: string): string {
   return html
     .replace(/<img\b[^>]*>/gi, '')
@@ -271,6 +296,20 @@ function validateRichNoteContent(value: unknown, widgetLabel: string): void {
   }
 }
 
+function isGuideNoteBodyWidget(section: Section, widget: Widget): boolean {
+  if (!isGuideNoteSection(section)) return false
+  return widget.widgetId === 'guide_body' || widget.fieldKey === 'body' || widget.label === '正文'
+}
+
+function richNoteHasImages(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  const imageFileIDs = Array.isArray(value.imageFileIDs) ? value.imageFileIDs.filter(Boolean) : []
+  if (imageFileIDs.length > 0) return true
+  const markdown = typeof value.markdown === 'string' ? value.markdown : ''
+  const html = typeof value.html === 'string' ? value.html : ''
+  return extractMarkdownImageSrcs(markdown).length > 0 || extractImageSrcs(html).length > 0
+}
+
 export function validateContentValues(
   section: Section,
   content: PostContent,
@@ -291,6 +330,16 @@ export function validateContentValues(
 
     if (widget.type === 'rich_note') {
       validateRichNoteContent(value, widget.label)
+      if (isGuideNoteBodyWidget(section, widget) && richNoteHasImages(value)) {
+        throw new Error('图文攻略正文不支持插入图片，请将图片上传到「封面/图片」')
+      }
+      continue
+    }
+
+    if (widget.type === 'location') {
+      if (!isRecord(value) || !hasValidLocationCoordinate(value)) {
+        throw new Error(`位置控件「${widget.label || '未命名'}」坐标不正确`)
+      }
       continue
     }
 

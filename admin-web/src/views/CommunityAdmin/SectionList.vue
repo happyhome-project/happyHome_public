@@ -23,16 +23,41 @@
       description="realtime 适合报名、拼车、签到等实时协作场景；evergreen 适合长期沉淀展示。"
     />
 
-    <el-table data-testid="section-table" :data="sections" v-loading="loading">
-      <el-table-column prop="name" label="板块名称" min-width="140" />
-      <el-table-column label="类型" width="120">
+    <el-table
+      data-testid="section-table"
+      :data="sections"
+      v-loading="loading"
+      border
+      @header-dragend="handleColumnDragEnd"
+    >
+      <el-table-column
+        prop="name"
+        column-key="name"
+        label="板块名称"
+        :width="columnWidths.name"
+        min-width="130"
+        :resizable="true"
+      />
+      <el-table-column
+        column-key="type"
+        label="类型"
+        :width="columnWidths.type"
+        min-width="110"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <el-tag :type="row.type === 'realtime' ? 'danger' : 'success'" size="small">
             {{ row.type === 'realtime' ? '实时协作' : '沉淀展示' }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="160">
+      <el-table-column
+        column-key="status"
+        label="状态"
+        :width="columnWidths.status"
+        min-width="130"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <template v-if="row.type === 'realtime'">
             <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
@@ -42,13 +67,32 @@
           </template>
         </template>
       </el-table-column>
-      <el-table-column label="入口图标" width="110">
+      <el-table-column
+        column-key="icon"
+        label="入口图标"
+        :width="columnWidths.icon"
+        min-width="100"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <span>{{ row.icon || '默认' }}</span>
         </template>
       </el-table-column>
-      <el-table-column prop="order" label="排序" width="70" />
-      <el-table-column label="互动" width="160">
+      <el-table-column
+        prop="order"
+        column-key="order"
+        label="排序"
+        :width="columnWidths.order"
+        min-width="70"
+        :resizable="true"
+      />
+      <el-table-column
+        column-key="interaction"
+        label="互动"
+        :width="columnWidths.interaction"
+        min-width="130"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <el-tag size="small" :type="row.enableComment ? 'success' : 'info'">
             {{ row.enableComment ? '评论开' : '评论关' }}
@@ -58,7 +102,13 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" min-width="360">
+      <el-table-column
+        column-key="actions"
+        label="操作"
+        :width="columnWidths.actions"
+        min-width="320"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <el-button data-testid="section-widgets-button" :data-section-id="getSectionId(row)" size="small" @click="goWidgetEditor(getSectionId(row))">控件</el-button>
           <el-button data-testid="section-edit-button" :data-section-id="getSectionId(row)" size="small" @click="openEdit(row)">编辑</el-button>
@@ -118,7 +168,7 @@
             <el-radio value="default">默认列表</el-radio>
             <el-radio value="guide_note">图文攻略</el-radio>
           </el-radio-group>
-          <div class="field-hint">图文攻略适合亲子出游、村游路线等轻图文沉淀板块；不会启用标签归类。</div>
+          <div class="field-hint">图文攻略适合亲子出游、村游路线等沉淀板块；会固定路线数据、顶部图片和富图文正文，不启用标签归类。</div>
         </el-form-item>
         <el-form-item>
           <template #label>
@@ -207,10 +257,43 @@ import { communityApi, sectionApi } from '../../api/cloud'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ArrowDown, WarningFilled } from '@element-plus/icons-vue'
+import { usePersistedTableColumns } from '../../utils/persistedTableColumns'
 
 type SectionType = 'realtime' | 'evergreen'
 type SectionStatus = 'active' | 'dormant' | 'archived'
 type SectionDisplayTemplate = 'default' | 'guide_note'
+type SectionTableColumnKey =
+  | 'name'
+  | 'type'
+  | 'status'
+  | 'icon'
+  | 'order'
+  | 'interaction'
+  | 'actions'
+
+const SECTION_TABLE_DEFAULT_COLUMN_WIDTHS: Record<SectionTableColumnKey, number> = {
+  name: 170,
+  type: 120,
+  status: 150,
+  icon: 110,
+  order: 80,
+  interaction: 160,
+  actions: 380,
+}
+const SECTION_TABLE_MIN_COLUMN_WIDTHS: Record<SectionTableColumnKey, number> = {
+  name: 130,
+  type: 110,
+  status: 130,
+  icon: 100,
+  order: 70,
+  interaction: 130,
+  actions: 320,
+}
+const { columnWidths, handleColumnDragEnd } = usePersistedTableColumns<SectionTableColumnKey>({
+  storageKey: 'happyhome.admin.sectionTable.columnWidths.v1',
+  defaults: SECTION_TABLE_DEFAULT_COLUMN_WIDTHS,
+  minimums: SECTION_TABLE_MIN_COLUMN_WIDTHS,
+})
 
 interface SectionRow {
   _id: string

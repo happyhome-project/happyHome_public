@@ -15,41 +15,25 @@
 
 <script setup lang="ts">
 import { computed, onMounted, watch } from 'vue'
-import { isRichNoteEmpty, markdownToHtml, normalizeRichNoteContent } from '../../utils/rich-note'
+import {
+  isRichNoteEmpty,
+  normalizeRichNoteContent,
+  richNoteMarkdownToRenderBlocks,
+  type RichNoteRenderBlock,
+} from '../../utils/rich-note'
 import { clientLog } from '../../utils/client-log'
 
-type RenderBlock =
-  | { type: 'html'; html: string }
-  | { type: 'image'; src: string }
-
-const props = defineProps<{ value: unknown }>()
+const props = withDefaults(defineProps<{ value: unknown; allowImages?: boolean }>(), {
+  allowImages: true,
+})
 
 const content = computed(() => normalizeRichNoteContent(props.value))
-const hasContent = computed(() => !isRichNoteEmpty(props.value))
 
-const blocks = computed<RenderBlock[]>(() => {
-  const markdown = content.value.markdown || ''
-  const result: RenderBlock[] = []
-  const textBuffer: string[] = []
-  const flushText = () => {
-    const text = textBuffer.join('\n')
-    if (text) result.push({ type: 'html', html: markdownToHtml(text) })
-    textBuffer.length = 0
-  }
+const blocks = computed<RichNoteRenderBlock[]>(() =>
+  richNoteMarkdownToRenderBlocks(content.value.markdown || '', props.allowImages)
+)
 
-  for (const rawLine of markdown.replace(/\r\n/g, '\n').split('\n')) {
-    const line = rawLine.trim()
-    const image = /^!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)$/.exec(line)
-    if (image) {
-      flushText()
-      result.push({ type: 'image', src: image[1] })
-    } else {
-      textBuffer.push(rawLine)
-    }
-  }
-  flushText()
-  return result
-})
+const hasContent = computed(() => !isRichNoteEmpty(props.value) && blocks.value.length > 0)
 
 function previewImage(current: string) {
   const urls = blocks.value

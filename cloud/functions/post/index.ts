@@ -3,6 +3,9 @@ import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
 import { getTempUrl } from '../../lib/storage'
 import { sanitizeContent, validateContentValues, validateRequiredWidgets } from '../../lib/post-validate'
+import { auditAndApply, isPostVisibleToMembers } from '../../lib/content-audit'
+import { buildHomeBootstrap, buildHomeFeed } from '../../lib/home-snapshot'
+import { ensureCommunityReadable } from '../../lib/public-community'
 import type {
   AttendancePreviewUser,
   AttendanceSummary,
@@ -12,15 +15,32 @@ import type {
   Widget,
   PostContent,
 } from '../../shared/types'
+import { normalizeGuideNoteSection } from '../../shared/guide-note-widgets'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
 const ATTENDANCE_COLLECTION = 'post_attendance_members'
 const ATTENDANCE_PREVIEW_LIMIT = 5
 const COMMUNITY_READ_ERROR = '需要先加入社区后查看内容'
+const HOME_POST_LIMIT_PER_SECTION = 20
+
+function normalizeSectionForClient(section: Section): Section {
+  const normalized = normalizePostSection(section)
+  return {
+    ...normalized,
+    type: normalized.type || 'evergreen',
+    status: normalized.status || 'active',
+    enableComment: normalized.enableComment !== false,
+    enableLike: normalized.enableLike !== false,
+  } as Section
+}
 
 function getAttendanceWidgets(section: Section): Widget[] {
   return (section.widgets || []).filter((widget) => widget.type === 'attendance')
+}
+
+function normalizePostSection(section: Section): Section {
+  return normalizeGuideNoteSection(section) as Section
 }
 
 function normalizeCapacity(widget: Widget): number | undefined {
@@ -105,8 +125,9 @@ async function buildAttendanceSummary(
   viewerId?: string
 ): Promise<AttendanceSummary> {
   const records = await getAttendanceRecords(postId, widget.widgetId)
-  const usersById = await getUsersByIds(records.map((record) => record.userId))
-  const previewUsers: AttendancePreviewUser[] = records.slice(0, ATTENDANCE_PREVIEW_LIMIT).map((record) => ({
+  const previewRecords = viewerId ? records.slice(0, ATTENDANCE_PREVIEW_LIMIT) : []
+  const usersById = await getUsersByIds(previewRecords.map((record) => record.userId))
+  const previewUsers: AttendancePreviewUser[] = previewRecords.map((record) => ({
     userId: record.userId,
     nickName: usersById[record.userId]?.nickName || '',
     avatarUrl: usersById[record.userId]?.avatarUrl || '',
@@ -159,7 +180,7 @@ async function enrichPostsWithAttendance<T extends { _id: string; sectionId: str
 
 async function getAttendanceWidgetForPost(postId: string, widgetId?: string) {
   const post = await db.getById('posts', postId) as any
-  if (!post || post.status === 'deleted') throw new Error('帖子不存在')
+  if (!post || post.status === 'deleted' || !isPostVisibleToMembers(post)) throw new Error('帖子不存在')
   const section = await db.getById('sections', post.sectionId) as Section
   const attendanceWidgets = getAttendanceWidgets(section)
   if (attendanceWidgets.length === 0) throw new Error('该板块下没有可以报名的控件')
@@ -201,7 +222,7 @@ export async function handleCreate(
   if (!openid) throw new Error('Missing OPENID')
   await ensureActiveCommunityMember(params.communityId, openid)
 
-  const section = await db.getById('sections', params.sectionId) as Section
+  const section = normalizePostSection(await db.getById('sections', params.sectionId) as Section)
   // 板块尚未配置控件时，禁止发帖（否则会产生无任何字段的空 post）
   if (!section || !Array.isArray(section.widgets) || section.widgets.length === 0) {
     throw new Error('该板块尚未配置内容模板，请联系管理员完善板块设置后再发布')
@@ -216,6 +237,9 @@ export async function handleCreate(
     sectionId: params.sectionId,
     authorId: openid,
     status: 'active',
+    auditStatus: 'pending',
+    auditReason: 'content audit pending',
+    auditUpdatedAt: now,
     content: sanitizedContent,
     commentCount: 0,
     likeCount: 0,
@@ -225,35 +249,70 @@ export async function handleCreate(
     updatedAt: now,
   })
 
-  return { postId }
+  const audit = await auditAndApply({
+    postId,
+    communityId: params.communityId,
+    sectionId: params.sectionId,
+    section,
+    content: sanitizedContent,
+    authorId: openid,
+    source: 'user',
+    contentSlot: 'content',
+  })
+
+  return { postId, auditStatus: audit.status, auditReason: audit.reason }
 }
 
 export async function handleList(params: {
   sectionId: string
   skip?: number
   limit?: number
+  asGuest?: boolean
 }, openid?: string) {
-  const section = await db.getById('sections', params.sectionId) as Section
-  await ensureActiveCommunityMember(section.communityId, openid || '')
+  const section = normalizePostSection(await db.getById('sections', params.sectionId) as Section)
+  const viewerId = params.asGuest ? '' : (openid || '')
+  await ensureCommunityReadable(section.communityId, viewerId, COMMUNITY_READ_ERROR)
   const posts = await db.query('posts', {
     sectionId: params.sectionId,
     status: 'active',
   }, {
     orderBy: ['createdAt', 'desc'],
   })
-  const orderedPosts = (posts as any[]).slice().sort(comparePostListOrder)
+  const orderedPosts = (posts as any[]).filter(isPostVisibleToMembers).slice().sort(comparePostListOrder)
   const slicedPosts = orderedPosts.slice(params.skip ?? 0, (params.skip ?? 0) + (params.limit ?? 20))
-  const withAttendance = await enrichPostsWithAttendance(slicedPosts, { [params.sectionId]: section }, openid)
+  const withAttendance = await enrichPostsWithAttendance(slicedPosts, { [params.sectionId]: section }, viewerId)
   const enrichedPosts = await enrichPostsWithAuthor(withAttendance)
   return { posts: enrichedPosts }
 }
 
-export async function handleGet(params: { postId: string }, openid?: string) {
+export async function handleHome(params: {
+  communityId: string
+  limitPerSection?: number
+  asGuest?: boolean
+}, openid?: string) {
+  return buildHomeFeed(params.communityId, params.asGuest ? '' : (openid || ''), {
+    limitPerSection: params.limitPerSection,
+  })
+}
+
+export async function handleBootstrap(params: {
+  currentCommunityId?: string
+  limitPerSection?: number
+  asGuest?: boolean
+}, openid?: string) {
+  return buildHomeBootstrap(params.asGuest ? '' : (openid || ''), {
+    currentCommunityId: params.currentCommunityId,
+    limitPerSection: params.limitPerSection,
+  })
+}
+
+export async function handleGet(params: { postId: string; asGuest?: boolean }, openid?: string) {
   const post = await db.getById('posts', params.postId) as any
-  if (post.status === 'deleted') throw new Error('帖子不存在')
-  await ensureActiveCommunityMember(post.communityId, openid || '')
-  const section = await db.getById('sections', post.sectionId) as Section
-  const attendanceSummaryByWidget = await buildAttendanceSummaryByWidget(post._id, section, openid)
+  if (!post || post.status === 'deleted' || !isPostVisibleToMembers(post)) throw new Error('帖子不存在')
+  const viewerId = params.asGuest ? '' : (openid || '')
+  await ensureCommunityReadable(post.communityId, viewerId, COMMUNITY_READ_ERROR)
+  const section = normalizePostSection(await db.getById('sections', post.sectionId) as Section)
+  const attendanceSummaryByWidget = await buildAttendanceSummaryByWidget(post._id, section, viewerId)
   const [enrichedPost] = await enrichPostsWithAuthor([{ ...post, attendanceSummaryByWidget }])
   return { post: enrichedPost }
 }
@@ -284,14 +343,16 @@ export async function handleUpdate(
   if (!openid) throw new Error('Missing OPENID')
 
   const post = await db.getById('posts', params.postId) as {
+    communityId: string
     sectionId: string
     authorId: string
     status: string
+    auditStatus?: string
   }
   if (post.status === 'deleted') throw new Error('帖子已删除')
   if (post.authorId !== openid) throw new Error('无权修改')
 
-  const section = await db.getById('sections', post.sectionId) as Section
+  const section = normalizePostSection(await db.getById('sections', post.sectionId) as Section)
   if (!section || !Array.isArray(section.widgets) || section.widgets.length === 0) {
     throw new Error('该板块尚未配置内容模板，无法编辑')
   }
@@ -300,11 +361,45 @@ export async function handleUpdate(
   validateContentValues(section, sanitizedContent)
 
   const updatedAt = new Date().toISOString()
+  if (post.auditStatus === 'pass' || !post.auditStatus) {
+    await db.updateById('posts', params.postId, {
+      pendingContent: db.replaceValue(sanitizedContent),
+      pendingAuditStatus: 'pending',
+      pendingAuditReason: 'content audit pending',
+      pendingSubmittedAt: updatedAt,
+      updatedAt,
+    })
+    const audit = await auditAndApply({
+      postId: params.postId,
+      communityId: post.communityId,
+      sectionId: post.sectionId,
+      section,
+      content: sanitizedContent,
+      authorId: openid,
+      source: 'user',
+      contentSlot: 'pendingContent',
+    })
+    return { success: true, updatedAt, auditStatus: audit.status, auditReason: audit.reason }
+  }
+
   await db.updateById('posts', params.postId, {
-    content: sanitizedContent,
+    content: db.replaceValue(sanitizedContent),
+    auditStatus: 'pending',
+    auditReason: 'content audit pending',
+    auditUpdatedAt: updatedAt,
     updatedAt,
   })
-  return { success: true, updatedAt }
+  const audit = await auditAndApply({
+    postId: params.postId,
+    communityId: post.communityId,
+    sectionId: post.sectionId,
+    section,
+    content: sanitizedContent,
+    authorId: openid,
+    source: 'user',
+    contentSlot: 'content',
+  })
+  return { success: true, updatedAt, auditStatus: audit.status, auditReason: audit.reason }
 }
 
 export async function handleJoinAttendance(
@@ -443,6 +538,8 @@ export const main = async (event: any) => {
   if (action === 'clientLog') return handleClientLog(params, openid)
   if (action === 'create') return handleCreate(params, openid)
   if (action === 'list') return handleList(params, openid)
+  if (action === 'home') return handleHome(params, openid)
+  if (action === 'bootstrap') return handleBootstrap(params, openid)
   if (action === 'get') return handleGet(params, openid)
   if (action === 'delete') return handleDelete(params, openid)
   if (action === 'update') return handleUpdate(params, openid)

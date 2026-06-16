@@ -1,6 +1,8 @@
 import cloud from 'wx-server-sdk'
 import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
+import { buildUserRolePatch, resolveMiniProgramUserRole } from '../../lib/admin-identity'
+import { buildBackgroundFetchTokenPatch, ensureBackgroundFetchToken } from '../../lib/background-fetch-token'
 import type { User } from '../../shared/types'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
@@ -28,20 +30,36 @@ export async function handleLogin(
   }
 
   if (existingUser) {
+    const roleState = await resolveMiniProgramUserRole(openid, existingUser)
+    const rolePatch = buildUserRolePatch(existingUser, roleState)
+    const tokenState = await ensureBackgroundFetchToken(openid, existingUser)
     await db.updateById('users', openid, {
       nickName: params.nickName,
-      avatarUrl: params.avatarUrl
+      avatarUrl: params.avatarUrl,
+      ...rolePatch,
     })
     return {
-      user: { ...existingUser, nickName: params.nickName, avatarUrl: params.avatarUrl },
+      user: {
+        ...existingUser,
+        nickName: params.nickName,
+        avatarUrl: params.avatarUrl,
+        role: roleState.role,
+        ...(roleState.roleSource !== undefined ? { roleSource: roleState.roleSource } : {}),
+        backgroundFetchToken: tokenState.backgroundFetchToken,
+        backgroundFetchTokenExpiresAt: tokenState.backgroundFetchTokenExpiresAt,
+      },
       isNew: false
     }
   } else {
+    const roleState = await resolveMiniProgramUserRole(openid, null)
+    const tokenPatch = buildBackgroundFetchTokenPatch()
     const newUser: User = {
       _id: openid,
       nickName: params.nickName,
       avatarUrl: params.avatarUrl,
-      role: 'user',
+      role: roleState.role,
+      ...(roleState.roleSource !== undefined ? { roleSource: roleState.roleSource } : {}),
+      ...tokenPatch,
       createdAt: new Date().toISOString()
     }
     await db.create('users', newUser)

@@ -29,12 +29,16 @@ jest.mock('wx-server-sdk', () => ({
       limit: jest.fn().mockReturnThis(),
       get: jest.fn().mockResolvedValue({ data: [] }),
     }),
-    command: { inc: (n: number) => ({ __inc: n }) }
+    command: {
+      inc: (n: number) => ({ __inc: n }),
+      set: (value: unknown) => ({ __set: value }),
+      remove: () => ({ __remove: true }),
+    }
   }),
   DYNAMIC_CURRENT_ENV: 'test'
 }))
 
-import { getById, create, increment } from '../db'
+import { getById, create, increment, replaceValue, removeField } from '../db'
 
 test('getById returns document data', async () => {
   const result = await getById('users', 'user-123')
@@ -69,6 +73,21 @@ test('updateById calls doc.update with data', async () => {
   mockUpdate.mockClear()
   await updateById('users', 'user-1', { nickName: '新名字' })
   expect(mockUpdate).toHaveBeenCalledWith({ data: { nickName: '新名字' } })
+})
+
+test('replaceValue and removeField expose CloudBase set/remove commands for object fields', async () => {
+  mockUpdate.mockClear()
+  await updateById('posts', 'post-1', {
+    pendingContent: replaceValue({ guide_age: '8岁以上' }),
+    oldPendingContent: removeField(),
+  })
+
+  expect(mockUpdate).toHaveBeenCalledWith({
+    data: {
+      pendingContent: { __set: { guide_age: '8岁以上' } },
+      oldPendingContent: { __remove: true },
+    },
+  })
 })
 
 test('softDelete sets status to deleted', async () => {

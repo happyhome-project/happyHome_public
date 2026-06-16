@@ -102,6 +102,18 @@ function normalizeCloudResult<T>(data: any, name: string, action: string, source
   return data as T
 }
 
+function buildCloudCallFailure(name: string, action: string, error: any) {
+  const rawMessage = error?.errMsg || error?.message || String(error)
+  const wrapped = new Error(`[wx.cloud] ${name}/${action}: ${rawMessage}`)
+  ;(wrapped as any).errCode = error?.errCode
+  ;(wrapped as any).errMsg = error?.errMsg
+  ;(wrapped as any).cloudFunction = name
+  ;(wrapped as any).action = action
+  ;(wrapped as any).requestId = error?.requestId || error?.requestID || error?.callId || ''
+  ;(wrapped as any).raw = error
+  return wrapped
+}
+
 function summarizeParams(params: any) {
   const summary: Record<string, any> = {}
   if (!params || typeof params !== 'object') return summary
@@ -183,7 +195,7 @@ export async function callCloud<T = any>(
         }
       },
       fail: (error: any) => {
-        const wrapped = new Error(error?.errMsg || error?.message || String(error))
+        const wrapped = buildCloudCallFailure(name, action, error)
         clientLog('error', 'cloud.call.fail', {
           name,
           action,
@@ -205,12 +217,18 @@ export const userApi = {
 export const communityApi = {
   list: (includeAll = false) =>
     callCloud<{ communities: any[] }>('community', 'list', { includeAll }),
+  pendingList: () =>
+    callCloud<{ communities: any[] }>('community', 'pendingList', {}),
   listDiscoverable: () =>
     callCloud<{ communities: any[] }>('community', 'listDiscoverable', {}),
   get: (communityId: string) =>
     callCloud<{ community: any }>('community', 'get', { communityId }),
   create: (params: object) =>
     callCloud('community', 'create', params),
+  approve: (communityId: string) =>
+    callCloud('community', 'approve', { communityId }),
+  reject: (communityId: string) =>
+    callCloud('community', 'reject', { communityId }),
 }
 
 export const memberApi = {
@@ -261,17 +279,29 @@ export const notificationApi = {
 }
 
 export const sectionApi = {
-  list: (communityId: string) =>
-    callCloud<{ sections: any[] }>('section', 'list', { communityId }),
-  get: (sectionId: string) =>
-    callCloud<{ section: any }>('section', 'get', { sectionId }),
+  list: (communityId: string, asGuest = false) =>
+    callCloud<{ sections: any[] }>('section', 'list', { communityId, asGuest }),
+  get: (sectionId: string, asGuest = false) =>
+    callCloud<{ section: any }>('section', 'get', { sectionId, asGuest }),
 }
 
 export const postApi = {
-  list: (sectionId: string, skip = 0) =>
-    callCloud<{ posts: any[] }>('post', 'list', { sectionId, skip }),
-  get: (postId: string) =>
-    callCloud<{ post: any }>('post', 'get', { postId }),
+  bootstrap: (currentCommunityId?: string, limitPerSection = 20, asGuest = false) =>
+    callCloud<any>(
+      'post',
+      'bootstrap',
+      { currentCommunityId, limitPerSection, asGuest },
+    ),
+  home: (communityId: string, limitPerSection = 20, asGuest = false) =>
+    callCloud<{ sections: any[]; postsBySection: Record<string, any[]> }>(
+      'post',
+      'home',
+      { communityId, limitPerSection, asGuest },
+    ),
+  list: (sectionId: string, skip = 0, asGuest = false) =>
+    callCloud<{ posts: any[] }>('post', 'list', { sectionId, skip, asGuest }),
+  get: (postId: string, asGuest = false) =>
+    callCloud<{ post: any }>('post', 'get', { postId, asGuest }),
   create: (params: object) =>
     callCloud('post', 'create', params),
   update: (postId: string, content: Record<string, any>) =>

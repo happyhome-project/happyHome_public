@@ -7,7 +7,7 @@
  * The replay config/file tree must contain these labels so the release gate can
  * prove it is not merely checking that DevTools can start:
  *   HH_RELEASE_HOME_DETAIL_NONEMPTY
- *   HH_RELEASE_LOGIN_VERSION
+ *   HH_RELEASE_PROFILE_LOGIN_CLEAN
  */
 import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -128,7 +128,7 @@ function main() {
     try {
       assertReleaseReplayCoverage(replayConfigPath)
     } catch (error) {
-      fail(`${error?.message || error}\nRecord/label DevTools replay cases with HH_RELEASE_HOME_DETAIL_NONEMPTY and HH_RELEASE_LOGIN_VERSION before release upload.`)
+      fail(`${error?.message || error}\nRecord/label DevTools replay cases with HH_RELEASE_HOME_DETAIL_NONEMPTY and HH_RELEASE_PROFILE_LOGIN_CLEAN before release upload.`)
     }
   }
 

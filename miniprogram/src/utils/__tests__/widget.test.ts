@@ -217,8 +217,12 @@ describe('getGuideNoteCard', () => {
     widgets: [
       { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
       { widgetId: 'images', type: 'image_group', label: '图片', fieldKey: 'images', required: false, order: 1, showInList: false },
-      { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false },
-      { widgetId: 'location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false },
+      { widgetId: 'distance', type: 'short_text', label: '距离', fieldKey: 'distance', required: false, order: 2, showInList: false },
+      { widgetId: 'totalClimb', type: 'short_text', label: '累计爬升', fieldKey: 'totalClimb', required: false, order: 3, showInList: false },
+      { widgetId: 'referenceDuration', type: 'short_text', label: '参考用时', fieldKey: 'referenceDuration', required: false, order: 4, showInList: false },
+      { widgetId: 'driveDuration', type: 'short_text', label: '驾车到达用时', fieldKey: 'driveDuration', required: true, order: 5, showInList: false },
+      { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 6, showInList: false },
+      { widgetId: 'location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 7, showInList: false },
     ],
   }
 
@@ -233,6 +237,10 @@ describe('getGuideNoteCard', () => {
       content: {
         title: '5 岁也能走完的溪边路线',
         images: ['cloud://env/images/cover.jpg', 'cloud://env/images/second.jpg'],
+        distance: '4.2km',
+        totalClimb: '128m',
+        referenceDuration: '1h50m',
+        driveDuration: '青山村约30分钟车程',
         body: {
           format: 'markdown',
           markdown: '从村口小桥出发，沿溪边慢慢走。\n\n孩子可以捡石头、看小鱼。',
@@ -253,10 +261,15 @@ describe('getGuideNoteCard', () => {
       title: '5 岁也能走完的溪边路线',
       coverImage: 'cloud://env/images/cover.jpg',
       excerpt: '从村口小桥出发，沿溪边慢慢走。孩子可以捡石头、看小鱼。',
-      location: '青山村溪边',
+      driveDuration: '青山村约30分钟车程',
       author: '小雨妈妈',
       when: '6/2',
       hasCover: true,
+      routeStats: [
+        { label: '距离', value: '4.2km' },
+        { label: '累计爬升', value: '128m' },
+        { label: '参考用时', value: '1h50m' },
+      ],
     })
   })
 
@@ -270,11 +283,35 @@ describe('getGuideNoteCard', () => {
       title: '油菜花田旁的小路',
       coverImage: '',
       excerpt: '',
-      location: '',
+      driveDuration: '',
       author: '',
       when: '5/26',
       hasCover: false,
+      routeStats: [],
     })
+  })
+
+  test('固定图文攻略控件 guide_drive_duration 会进入首页卡片自驾用时', () => {
+    const guideSection: Section = {
+      ...section,
+      widgets: [
+        { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
+        { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false },
+        { widgetId: 'guide_drive_duration', type: 'short_text', label: '驾车到达用时', fieldKey: 'driveDuration', required: true, order: 6, showInList: false },
+        { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 7, showInList: false },
+        { widgetId: 'guide_location', type: 'location', label: '目的地位置', fieldKey: 'location', required: true, order: 8, showInList: false },
+      ],
+    }
+    const post = {
+      content: {
+        guide_title: '太平水库亲子游',
+        guide_images: ['cloud://env/posts/cover.jpg'],
+        guide_drive_duration: '青山村约35分钟到达入口',
+      },
+      createdAt: '2026-06-12T08:00:00.000Z',
+    } as Post
+
+    expect(getGuideNoteCard(post, guideSection).driveDuration).toBe('青山村约35分钟到达入口')
   })
 })
 

@@ -1,12 +1,5 @@
 <template>
   <view class="section-page">
-    <LoginGuard
-      v-if="!userStore.isLoggedIn"
-      title="请先登录"
-      desc="登录后才能查看板块内容"
-    />
-
-    <template v-else>
       <view class="section-head">
         <view class="section-head-main">
           <text class="eyebrow">SECTION</text>
@@ -50,8 +43,12 @@
           <view class="guide-body">
             <text class="guide-title">{{ item.title }}</text>
             <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
+            <view v-if="item.driveDuration" class="guide-stats">
+              <text
+                class="guide-stat"
+              >{{ item.driveDuration }}</text>
+            </view>
             <view class="guide-meta">
-              <text v-if="item.location" class="guide-location">{{ item.location }}</text>
               <text v-if="item.when" class="guide-chip">{{ item.when }}</text>
               <text v-if="item.author" class="guide-chip">{{ item.author }}</text>
             </view>
@@ -82,18 +79,17 @@
           </view>
         </view>
       </view>
-    </template>
   </view>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
-import LoginGuard from '../../components/LoginGuard.vue'
 import { postApi, sectionApi } from '../../api/cloud'
 import { useUserStore } from '../../store/user'
 import { getArchiveHomeMeta, getGuideNoteCard, getListPreview } from '../../utils/widget'
 import { clientLog } from '../../utils/client-log'
+import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 
 const userStore = useUserStore()
 const sectionId = ref('')
@@ -131,7 +127,7 @@ onLoad((options: any) => {
 })
 
 onShow(() => {
-  if (userStore.isLoggedIn && sectionId.value && !section.value && !loading.value) {
+  if (sectionId.value && !section.value && !loading.value) {
     void loadSectionData()
   }
 })
@@ -144,14 +140,14 @@ watch(
 )
 
 async function loadSectionData() {
-  if (!sectionId.value || !userStore.isLoggedIn) return
+  if (!sectionId.value) return
   loading.value = true
   loadError.value = ''
   clientLog('info', 'section.load.start', { sectionId: sectionId.value })
   try {
     const [sectionRes, postRes] = await Promise.all([
-      sectionApi.get(sectionId.value),
-      postApi.list(sectionId.value, 0),
+      sectionApi.get(sectionId.value, !userStore.isLoggedIn),
+      postApi.list(sectionId.value, 0, !userStore.isLoggedIn),
     ])
     section.value = sectionRes.section || null
     posts.value = postRes.posts || []
@@ -164,6 +160,10 @@ async function loadSectionData() {
   } catch (error: any) {
     loadError.value = error?.message || '板块加载失败'
     clientLog('error', 'section.load.fail', { sectionId: sectionId.value, error })
+    if (String(loadError.value).includes('需要先加入社区后查看内容')) {
+      uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
+      openOnboardingPreservingStack({ replaceCurrent: true })
+    }
   } finally {
     loading.value = false
   }
@@ -344,6 +344,23 @@ function formatShortDate(value: unknown): string {
   color: $hh-ink-3;
   font-size: 23rpx;
   line-height: 1.34;
+}
+
+.guide-stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+
+.guide-stat {
+  padding: 7rpx 12rpx;
+  border-radius: 999rpx;
+  background: #eef5ea;
+  color: #365d42;
+  font-size: 23rpx;
+  line-height: 1.3;
+  font-weight: $hh-font-weight-medium;
 }
 
 .guide-location {

@@ -23,7 +23,7 @@
 
 | 动作 | 命令 | 备注 |
 |---|---|---|
-| 云函数部署 | `npm run deploy:cloud [-- --only=post,admin]` | DevTools CLI 主路径；`--use-tcb` 强制走 CloudBase CLI 诊断路径；`--use-ci` 强制走 miniprogram-ci fallback |
+| 云函数部署 | `npm.cmd run deploy:cloud:tcb -- --only=user` | 2026-06-09 已验证 CloudBase CLI / COS 直传可用；旧 `npm run deploy:cloud` DevTools CLI 路径当前签名失败，仅保留为旧路径说明 |
 | 小程序预览 | `npm run deploy:mp` | 同上；生成 `preview-qr.png` + `preview-info.json` |
 | 小程序开发版上传 | `npm run deploy:mp:upload -- --version=1.0.x --desc="trial ..."` | DevTools CLI `upload` 主路径；不生成二维码，默认自动生成版本号和描述；上传后到微信后台把该开发版本选为体验版 |
 | 正式发布流程 | `npm run deploy:release` | 云函数 + admin-web + 小程序 upload；不生成二维码；体验版切换需在微信后台确认 |
@@ -41,11 +41,23 @@
 
 ## 部署铁律
 
-> **优先级**：DevTools CLI > CloudBase CLI 诊断路径 > miniprogram-ci。**永远先试 `cli.bat`**——它走 IDE 自己的网络栈，绕开本机 IPv6 / 透明代理 / WeChat CI 白名单 / CloudBase 白名单全部坑。CloudBase CLI 是腾讯云官方通道，但 2026-05-26 本机实测 `fn deploy` 会在 COS 上传阶段超时；`miniprogram-ci` 只做"DevTools 装不上"的 CI 服务器 fallback。
+> **云函数当前可用路径**：CloudBase CLI / COS 直传。2026-06-09 本机实测 `tcb fn deploy <fn> --force --yes --deployMode cos` 在函数包目录内可部署 `user` 成功。旧 DevTools CLI 云函数路径仍保留，但当前会在真实上传阶段报 `getCloudAPISignedHeader failed` / `ret=41002`，不能当作可用主路径；`miniprogram-ci` 只做"DevTools 装不上"的 CI 服务器 fallback。
 
-1. **微信 / CloudBase 上传类操作**（云函数 deploy / 小程序 preview / 小程序 upload / packNpm）**一律优先走 DevTools CLI**：
-   - `scripts/deploy.mjs` 已默认走 `cli.bat`，主路径在 `deployCloudViaDevtoolsCli` / `deployMiniprogramViaDevtoolsCli` / `uploadMiniprogramViaDevtoolsCli`
-   - `--use-tcb` 强制先走 CloudBase CLI `fn deploy`（用于核验官方通道/诊断，不是默认路径）
+1. **云函数 deploy 优先走 CloudBase CLI / COS 直传**：
+   - 推荐入口：`npm.cmd run deploy:cloud:tcb -- --only=user`（多个函数可用逗号：`--only=user,post`；不传 `--only` 会部署全部 `CLOUD_FUNCTIONS`）
+   - 该入口会构建云函数、切到 `cloud/dist/<fn>`、用 `tcb fn deploy <fn> --force --yes --env-id cloudbase-3gh862acb1505ff3 --deployMode cos --json` 部署，并用 `tcb fn detail <fn> ... --json` 做只读校验。
+   - 底层参数依据官方 CLI：`--yes` 跳过交互、`--json` 便于解析、`--env-id` 指定环境、`--deployMode cos` 固定 COS 上传；CloudBase 官方也支持 `cloudbaserc.json` + `tcb fn deploy --all --yes`，但该项目暂不把 env/触发器配置写入配置文件，以免覆盖线上手工 env。
+   - 先构建：`cd cloud && node build.mjs`
+   - 到函数包目录执行，例如 `user`：
+     ```bash
+     cd C:\Project\Claude\happyHome\cloud\dist\user
+     npx.cmd --yes --package @cloudbase/cli tcb fn deploy user --force --yes --env-id cloudbase-3gh862acb1505ff3 --deployMode cos --json
+     ```
+   - 成功证据：输出包含 `[user] 部署方式: COS 上传` 和 `[user] 云函数部署成功`；`tcb fn detail user --env-id cloudbase-3gh862acb1505ff3 --json` 应显示 `Status: Active` / `AvailableStatus: Available` / 新的 `ModTime`。
+   - 注意：在 PowerShell 里用 `npx.cmd`，不要用会触发执行策略的 `npx.ps1`。
+   - 2026-06-09 已修正 `scripts/deploy.mjs cloud --use-tcb`：旧实现从仓库根目录调用 `cloudbase fn deploy <fn> --dir ...`，复测可挂起超过正常 10 秒级部署窗口；新实现改为函数包目录直传。
+2. **旧 DevTools CLI 云函数路径保留但当前不可用**：
+   - `scripts/deploy.mjs` 默认仍会先走 `cli.bat`，相关实现位于 `deployCloudViaDevtoolsCli`。
    - `--use-ci` 强制跳过 DevTools CLI / CloudBase CLI 直接走 miniprogram-ci（仅用于无 DevTools 的 CI 服务器）
    - `WX_DEVTOOLS_CLI=<path>` 可覆盖 cli.bat 路径，否则脚本自己在 `C:/D:/E:/X:` 下搜
    - 直接命令模板（无 `npm` 时备用）：
@@ -57,21 +69,33 @@
        --remote-npm-install
      ```
    - **`--project` 必须指向 `miniprogram/dist/build/mp-weixin`**，不是仓库根。2026-05-26 实测该路径可全量部署 7 个云函数；历史上 `cli.bat auto --project <ROOT>` 曾把根目录当独立小程序项目并覆写 `project.config.json`。
-   - DevTools CLI 可能出现"输出表格全是 `success=false`、报 `getCloudAPISignedHeader failed`，但进程 exit code 仍为 0"。这通常指向 IDE 登录/签名态问题；**必须提示用户先打开微信开发者工具重新登录/扫码，再重跑部署**。`scripts/deploy.mjs` 已解析输出表格，不能只信 exit code。
+   - 2026-06-09 复测：即使账号已登录、项目已打开，DevTools CLI 云函数部署仍可能在上传阶段输出 `success=false` 和 `getCloudAPISignedHeader failed` / `ret=41002`。这条旧路径当前不可用；不要把它当成云函数部署成功证据。
    - 日常真机测试上传走 `npm run deploy:mp:upload` 或 `npm run deploy:release`；不要为了真机测试额外跑 `deploy:mp`，避免生成预览二维码。
    - DevTools CLI `upload` 上传的是微信后台“开发版本”。要让体验成员看到它，需要在微信小程序后台的版本管理里把刚上传的开发版本“选为体验版”。
 
-2. **云函数 env 变量必须逐函数手工配**——`cli.bat cloud functions deploy` 不会同步 env。新增/改 env 后要去 CloudBase 控制台 → 云函数 → 函数配置里逐个填。常见踩坑：admin 函数加了 `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD` / `ADMIN_SESSION_TTL_DAYS` 后忘了在控制台填 → bootstrap 登录走默认值 admin/happyhome2024，不安全也不一致
+3. **云函数 env 变量必须逐函数手工配**——云函数代码部署不会自动同步 env。新增/改 env 后要去 CloudBase 控制台 → 云函数 → 函数配置里逐个填。常见踩坑：admin 函数加了 `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD` / `ADMIN_SESSION_TTL_DAYS` 后忘了在控制台填 → bootstrap 登录走默认值 admin/happyhome2024，不安全也不一致
 
-3. **fallback 路径（`miniprogram-ci`）必须强制 IPv4**：`scripts/deploy.mjs` 顶部已 `dns.setDefaultResultOrder('ipv4first')` + `dns.lookup` 猴补 `family=4`；命令行 fallback `NODE_OPTIONS=--dns-result-order=ipv4first npm run deploy:cloud -- --use-ci`
+4. **fallback 路径（`miniprogram-ci`）必须强制 IPv4**：`scripts/deploy.mjs` 顶部已 `dns.setDefaultResultOrder('ipv4first')` + `dns.lookup` 猴补 `family=4`；命令行 fallback `NODE_OPTIONS=--dns-result-order=ipv4first npm run deploy:cloud -- --use-ci`
 
-4. **部署失败排查顺序**：
+5. **部署失败排查顺序**：
    - 先看错误里 IP——如果是 IPv6（`2409:...`）→ 主路径就该走 DevTools CLI 而不是 ci，检查 `scripts/deploy.mjs` 是不是被 `--use-ci` 强制 fallback
    - 再看 DevTools 是否登录/签名态有效——即使 `cli.bat islogin` 看起来正常，`getCloudAPISignedHeader failed` 也要先提示用户打开微信开发者工具重新登录/扫码
-   - CloudBase CLI 可用 `npx.cmd --yes --package @cloudbase/cli cloudbase fn list --env-id cloudbase-3gh862acb1505ff3 --json` 验证 CAM/CloudBase 登录；能 list 说明不是腾讯云长期未登录导致的 CLI 认证过期
+   - CloudBase CLI 可用 `npx.cmd --yes --package @cloudbase/cli cloudbase fn list --env-id cloudbase-3gh862acb1505ff3 --json` 验证 CAM/CloudBase 登录；能 list 说明不是腾讯云长期未登录导致的 CLI 认证过期。
+   - 如果 `tcb fn deploy` 停在交互选择“使用合并配置更新 / 手动输入配置 / 退出”，补 `--yes`；如果通过 `--dir` 从仓库根部署挂起，切到 `cloud/dist/<fn>` 后用位置参数部署，或直接用 `npm.cmd run deploy:cloud:tcb -- --only=<fn>`。
    - 最后查 CloudBase 白名单 / COS 上传链路——只在前两步都排除后才考虑
 
-5. **详情与历史**：[memory/feedback_deploy_devtools_cli.md](memory/feedback_deploy_devtools_cli.md)（2026-04-26 由 `feedback_deploy_force_ipv4.md` 改名——核心结论从"强制 IPv4"已升级到"走 DevTools CLI"）
+6. **详情与历史**：[memory/feedback_cloudbase_cli_cos_deploy.md](memory/feedback_cloudbase_cli_cos_deploy.md) 记录 2026-06-09 已验证的新云函数部署路径；旧 DevTools CLI 背景见 `feedback_deploy_devtools_cli.md`（若该历史文件在当前 checkout 缺失，以本条新记录为准）。
+
+---
+
+## 内容审核铁律
+
+1. **腾讯 CI 图片审核不要默认传 `DetectType`**：2026-06-12 实测 `/image/auditing` 携带旧的通用 `DetectType`（如 `Porn,Terrorism,Politics,Ads,Illegal,Abuse`，甚至缩减到 `Porn,Ads`）会返回 `InvalidArgument / invalid DetectType`，导致帖子被保守落到“人工复核”。图片审核默认走腾讯 CI 策略；如需自定义图片策略，先在腾讯云配置图片审核 BizType，再用 `TENCENT_CI_IMAGE_BIZ_TYPE` 显式指定。
+2. **审核问题不能只看帖子状态**：看到 `auditStatus=review` 时，要查 `content_audit_tasks.raw/reason/provider`。如果 raw 里是供应商参数错误，说明不是内容真的需要人工审核，而是调用协议/配置错误。
+3. **涉及媒体审核的修复必须做线上临时 fixture 闭环**：单测只能证明请求体形态，不能证明腾讯云真实接受。至少创建临时社区/板块/帖子，上传真实图片或媒体，确认 `auditStatus=pass` 或预期状态，再硬删除临时社区清理数据。
+4. **DevTools CLI 云函数部署仍不是成功证据**：如果 `npm.cmd run deploy:cloud -- --only=...` 报 `getCloudAPISignedHeader failed` / `ret=41002`，切到 `npm.cmd run deploy:cloud:tcb -- --only=...`。本次 `admin,post` 审核修复就是走 CloudBase CLI / COS 路径部署并线上验证。
+
+详情见 [memory/feedback_tencent_ci_image_audit.md](memory/feedback_tencent_ci_image_audit.md)。
 
 ---
 

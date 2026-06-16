@@ -160,6 +160,14 @@ const INDEXES = [
     ],
     unique: true,
   },
+  // users: 微信数据预拉取入口按 backgroundFetchToken 反查用户
+  {
+    coll: 'users',
+    name: 'idx_backgroundFetchToken',
+    keys: [
+      { Name: 'backgroundFetchToken', Direction: '1' },
+    ],
+  },
   // admin_accounts: admin.bindWechat / wxLogin 按 userId 反查
   {
     coll: 'admin_accounts',
@@ -192,6 +200,50 @@ const INDEXES = [
       { Name: 'expiresAt', Direction: '1' },
     ],
   },
+  // admin_notification_subscriptions: 保存管理员对审批提醒模板的授权结果
+  {
+    coll: 'admin_notification_subscriptions',
+    name: 'idx_user_event_template',
+    keys: [
+      { Name: 'userId', Direction: '1' },
+      { Name: 'eventType', Direction: '1' },
+      { Name: 'templateId', Direction: '1' },
+    ],
+    unique: true,
+  },
+  // admin_notifications: notificationStatus 读取当前管理员最近通知失败原因
+  {
+    coll: 'admin_notifications',
+    name: 'idx_recipient_createdAt',
+    keys: [
+      { Name: 'recipientUserId', Direction: '1' },
+      { Name: 'createdAt', Direction: '-1' },
+    ],
+  },
+  // content_audit_tasks: audit detail pages and callback reconciliation by post/slot/trace/job
+  {
+    coll: 'content_audit_tasks',
+    name: 'idx_postId_contentSlot_createdAt',
+    keys: [
+      { Name: 'postId', Direction: '1' },
+      { Name: 'contentSlot', Direction: '1' },
+      { Name: 'createdAt', Direction: '-1' },
+    ],
+  },
+  {
+    coll: 'content_audit_tasks',
+    name: 'idx_traceId',
+    keys: [
+      { Name: 'traceId', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'content_audit_tasks',
+    name: 'idx_jobId',
+    keys: [
+      { Name: 'jobId', Direction: '1' },
+    ],
+  },
 ]
 
 const REQUIRED_COLLECTIONS = [
@@ -200,6 +252,9 @@ const REQUIRED_COLLECTIONS = [
   'admin_sessions',
   'admin_login_tickets',  // 扫码登录会话（_id=ticket，主键查询，索引仅 expiresAt 用）
   'admin_runtime',        // 运行时缓存（wx access_token 等单文档，无需额外索引）
+  'admin_notification_subscriptions', // 审批提醒订阅授权状态
+  'admin_notifications',  // 审批提醒发送记录与失败原因
+  'content_audit_tasks',  // 内容审核任务与回调对账
 ]
 
 let hadError = false

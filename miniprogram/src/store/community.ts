@@ -3,24 +3,32 @@ import type { Community, Section } from '../../../cloud/shared/types'
 import { memberApi, sectionApi } from '../api/cloud'
 
 const STORAGE_KEY = 'community_store'
+let loadingMyCommunities: Promise<void> | null = null
+
+interface LoadMyCommunitiesOptions {
+  loadSections?: boolean
+}
 
 export const useCommunityStore = defineStore('community', {
   state: () => ({
     currentCommunityId: '' as string,
     myCommunities: [] as Community[],
+    browsingCommunity: null as Community | null,
     currentSections: [] as Section[],
     currentSectionIndex: 0,
     membershipByCommunity: {} as Record<string, { isMember: boolean; status: string | null; checkedAt: number }>,
   }),
   getters: {
     currentCommunity: (state): Community | undefined =>
-      state.myCommunities.find(c => c._id === state.currentCommunityId),
+      state.myCommunities.find(c => c._id === state.currentCommunityId) ||
+      (state.browsingCommunity?._id === state.currentCommunityId ? state.browsingCommunity : undefined),
     currentSection: (state): Section | undefined =>
       state.currentSections[state.currentSectionIndex],
   },
   actions: {
     clearCommunityState() {
       this.currentCommunityId = ''
+      this.browsingCommunity = null
       this.currentSections = []
       this.currentSectionIndex = 0
       this.saveToStorage()
@@ -71,7 +79,22 @@ export const useCommunityStore = defineStore('community', {
     getMembershipStatus(communityId: string) {
       return this.membershipByCommunity[String(communityId || '').trim()] || null
     },
-    async loadMyCommunities() {
+    async loadMyCommunities(options: LoadMyCommunitiesOptions = {}) {
+      if (loadingMyCommunities) {
+        await loadingMyCommunities
+        if (options.loadSections !== false && this.currentCommunityId && this.currentSections.length === 0) {
+          await this.switchCommunity(this.currentCommunityId)
+        }
+        return
+      }
+      loadingMyCommunities = this.loadMyCommunitiesFresh(options)
+      try {
+        await loadingMyCommunities
+      } finally {
+        loadingMyCommunities = null
+      }
+    },
+    async loadMyCommunitiesFresh(options: LoadMyCommunitiesOptions = {}) {
       const res = await memberApi.myCommunities()
       this.myCommunities = res.communities as Community[]
       if (this.myCommunities.length === 0) {
@@ -82,7 +105,12 @@ export const useCommunityStore = defineStore('community', {
         this.myCommunities.some(c => c._id === this.currentCommunityId)
         ? this.currentCommunityId
         : this.myCommunities[0]._id
-      await this.switchCommunity(targetId)
+      this.currentCommunityId = targetId
+      this.currentSectionIndex = 0
+      this.saveToStorage()
+      if (options.loadSections !== false) {
+        await this.switchCommunity(targetId)
+      }
     },
   },
 })

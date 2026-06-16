@@ -22,6 +22,8 @@ export const useUserStore = defineStore('user', {
     avatarUrl: '' as string,
     role: 'user' as 'user' | 'superAdmin',
     isLoggedIn: false,
+    backgroundFetchToken: '' as string,
+    backgroundFetchTokenExpiresAt: '' as string,
   }),
   actions: {
     loadFromStorage() {
@@ -35,7 +37,37 @@ export const useUserStore = defineStore('user', {
         avatarUrl: this.avatarUrl,
         role: this.role,
         isLoggedIn: this.isLoggedIn,
+        backgroundFetchToken: this.backgroundFetchToken,
+        backgroundFetchTokenExpiresAt: this.backgroundFetchTokenExpiresAt,
       })
+    },
+    syncBackgroundFetchToken() {
+      const token = String(this.backgroundFetchToken || '').trim()
+      if (!token) return
+      this.applyBackgroundFetchToken(token)
+    },
+    applyBackgroundFetchToken(token: string) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore wx is injected by the mini-program runtime.
+        const wxRef: any = typeof wx !== 'undefined' ? wx : null
+        if (!wxRef?.setBackgroundFetchToken) return
+        wxRef.setBackgroundFetchToken({
+          token,
+          fail: (error: any) => console.warn('[background-fetch-token] set failed', error),
+        })
+      } catch (error) {
+        console.warn('[background-fetch-token] set threw', error)
+      }
+    },
+    clearBackgroundFetchToken() {
+      this.applyBackgroundFetchToken('')
+    },
+    setBackgroundFetchToken(token?: string, expiresAt?: string) {
+      this.backgroundFetchToken = String(token || '')
+      this.backgroundFetchTokenExpiresAt = String(expiresAt || '')
+      this.saveToStorage()
+      this.syncBackgroundFetchToken()
     },
     /**
      * 微信登录（新方案，2022-10 后策略变更）。
@@ -61,7 +93,25 @@ export const useUserStore = defineStore('user', {
       this.avatarUrl = avatarUrl || ''
       this.role = result.user.role
       this.isLoggedIn = true
+      this.backgroundFetchToken = result.user.backgroundFetchToken || ''
+      this.backgroundFetchTokenExpiresAt = result.user.backgroundFetchTokenExpiresAt || ''
       this.saveToStorage()
+      this.syncBackgroundFetchToken()
+    },
+    async refreshLoginRole() {
+      if (!this.isLoggedIn) return
+      const name = (this.nickName || '').trim()
+      if (!name) return
+      const result = await userApi.login({ nickName: name, avatarUrl: this.avatarUrl || '' })
+      this.openId = result.user._id
+      this.nickName = result.user.nickName || name
+      this.avatarUrl = result.user.avatarUrl || this.avatarUrl || ''
+      this.role = result.user.role
+      this.isLoggedIn = true
+      this.backgroundFetchToken = result.user.backgroundFetchToken || this.backgroundFetchToken || ''
+      this.backgroundFetchTokenExpiresAt = result.user.backgroundFetchTokenExpiresAt || this.backgroundFetchTokenExpiresAt || ''
+      this.saveToStorage()
+      this.syncBackgroundFetchToken()
     },
     /**
      * DEV 模式登录：绕过 wx.login，直接用指定 openid 通过 http-gateway 调
@@ -83,7 +133,10 @@ export const useUserStore = defineStore('user', {
       this.avatarUrl = ''
       this.role = result.user.role
       this.isLoggedIn = true
+      this.backgroundFetchToken = result.user.backgroundFetchToken || ''
+      this.backgroundFetchTokenExpiresAt = result.user.backgroundFetchTokenExpiresAt || ''
       this.saveToStorage()
+      this.syncBackgroundFetchToken()
     },
     logout() {
       this.openId = ''
@@ -91,7 +144,10 @@ export const useUserStore = defineStore('user', {
       this.avatarUrl = ''
       this.role = 'user'
       this.isLoggedIn = false
+      this.backgroundFetchToken = ''
+      this.backgroundFetchTokenExpiresAt = ''
       storageRemove(STORAGE_KEY)
+      this.clearBackgroundFetchToken()
       // Also clear DEV mode flags so next login path is clean
       storageRemove('dev-gateway')
       storageRemove('test-openid')

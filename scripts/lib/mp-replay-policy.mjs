@@ -8,9 +8,9 @@ export const REQUIRED_RELEASE_REPLAY_MARKERS = [
     description: 'home feed tap opens a non-empty detail page',
   },
   {
-    id: 'login-page-version',
-    marker: 'HH_RELEASE_LOGIN_VERSION',
-    description: 'login page renders and shows the build version',
+    id: 'profile-login-clean',
+    marker: 'HH_RELEASE_PROFILE_LOGIN_CLEAN',
+    description: 'profile login page renders without debug or version labels',
   },
 ]
 

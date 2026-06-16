@@ -48,6 +48,13 @@
         <el-option label="已删除" value="deleted" />
         <el-option label="全部状态" value="all" />
       </el-select>
+      <el-select v-model="filters.auditStatus" style="width: 150px;">
+        <el-option label="全部审核" value="all" />
+        <el-option label="审核中" value="pending" />
+        <el-option label="需复核" value="review" />
+        <el-option label="已通过" value="pass" />
+        <el-option label="已拒绝" value="rejected" />
+      </el-select>
       <el-select v-model="filters.pinnedStatus" style="width: 140px;">
         <el-option label="全部置顶" value="all" />
         <el-option label="仅置顶" value="true" />
@@ -69,22 +76,66 @@
       <el-button type="primary" @click="loadPosts">查询</el-button>
     </div>
 
-    <el-table :data="posts" v-loading="loading" style="width: 100%;">
-      <el-table-column prop="sectionName" label="板块" min-width="120" />
-      <el-table-column label="作者" min-width="180">
+    <el-table
+      :data="posts"
+      v-loading="loading"
+      border
+      style="width: 100%;"
+      @header-dragend="handleColumnDragEnd"
+    >
+      <el-table-column
+        prop="sectionName"
+        column-key="section"
+        label="板块"
+        :width="columnWidths.section"
+        min-width="100"
+        :resizable="true"
+      />
+      <el-table-column
+        column-key="author"
+        label="作者"
+        :width="columnWidths.author"
+        min-width="150"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <div>{{ row.authorNickname || '未设置昵称' }}</div>
           <div class="sub-text">{{ row.authorId }}</div>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="100">
+      <el-table-column
+        column-key="status"
+        label="状态"
+        :width="columnWidths.status"
+        min-width="90"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">
             {{ row.status === 'active' ? '已发布' : '已删除' }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="运营标记" width="130">
+      <el-table-column
+        column-key="audit"
+        label="审核"
+        :width="columnWidths.audit"
+        min-width="100"
+        :resizable="true"
+      >
+        <template #default="{ row }">
+          <el-tag :type="auditTag(row.pendingContent ? row.pendingAuditStatus : row.auditStatus)" size="small">
+            {{ auditText(row.pendingContent ? row.pendingAuditStatus : row.auditStatus) }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column
+        column-key="flags"
+        label="运营标记"
+        :width="columnWidths.flags"
+        min-width="110"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <div class="post-flags">
             <el-tag v-if="row.isPinned" size="small" type="warning">置顶</el-tag>
@@ -93,17 +144,36 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="摘要" min-width="320" show-overflow-tooltip>
+      <el-table-column
+        column-key="summary"
+        label="摘要"
+        :width="columnWidths.summary"
+        min-width="240"
+        show-overflow-tooltip
+        :resizable="true"
+      >
         <template #default="{ row }">
           {{ getPostSummary(row) }}
         </template>
       </el-table-column>
-      <el-table-column label="发布时间" width="180">
+      <el-table-column
+        column-key="createdAt"
+        label="发布时间"
+        :width="columnWidths.createdAt"
+        min-width="150"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <span>{{ formatAdminDateTime(row.createdAt) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="420">
+      <el-table-column
+        column-key="actions"
+        label="操作"
+        :width="columnWidths.actions"
+        min-width="320"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <el-button size="small" @click="openDetail(row)">详情</el-button>
           <el-button
@@ -147,7 +217,7 @@
 
     <el-empty v-if="!loading && posts.length === 0" description="暂无帖子记录" />
 
-    <el-dialog v-model="showDetail" title="帖子详情" width="720px">
+    <el-dialog v-model="showDetail" title="帖子详情" width="860px">
       <template v-if="detailPost">
         <div class="detail-meta">
           <div>板块：{{ detailSection?.name || detailPost.sectionName || '未知板块' }}</div>
@@ -241,8 +311,31 @@
               </div>
               <span v-if="audioItems(field.rawValue).length === 0">空</span>
             </div>
+            <div v-else-if="field.type === 'image_group'" class="image-group-detail">
+              <div
+                v-for="(image, index) in imageItems(field.rawValue)"
+                :key="`${image}-${index}`"
+                class="image-group-detail-item"
+              >
+                <el-image
+                  v-if="canRenderDetailImage(image)"
+                  :src="detailImageUrl(image)"
+                  class="image-detail-thumb"
+                  fit="cover"
+                  :preview-src-list="detailImagePreviewList(field.rawValue)"
+                  :initial-index="detailImagePreviewIndex(field.rawValue, image)"
+                  preview-teleported
+                />
+                <div v-else class="image-detail-thumb image-detail-placeholder">图片加载中</div>
+              </div>
+              <span v-if="imageItems(field.rawValue).length === 0">空</span>
+            </div>
             <div v-else-if="field.type === 'rich_note'" class="rich-note-detail">
-              <RichNoteAdminPreview v-if="richNoteText(field.rawValue)" :value="field.rawValue" />
+              <RichNoteAdminPreview
+                v-if="richNoteText(field.rawValue)"
+                :value="field.rawValue"
+                :allow-images="field.allowImages"
+              />
               <span v-else>空</span>
             </div>
             <span v-else>{{ field.value }}</span>
@@ -296,10 +389,11 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
-import { communityApi, postAdminApi, sectionApi } from '../../api/cloud'
+import { communityApi, mediaApi, postAdminApi, sectionApi } from '../../api/cloud'
 import { formatAdminDateTime } from '../../utils/datetime'
 import RichNoteAdminPreview from '../../components/RichNoteAdminPreview.vue'
 import { normalizeRichNoteContent } from '../../utils/rich-note'
+import { usePersistedTableColumns } from '../../utils/persistedTableColumns'
 
 const route = useRoute()
 const router = useRouter()
@@ -311,14 +405,51 @@ const showDetail = ref(false)
 const detailPost = ref<any>(null)
 const detailSection = ref<any>(null)
 const attendanceMembersByWidget = ref<Record<string, any[]>>({})
+const detailImageUrlMap = ref<Record<string, string>>({})
 const dateRange = ref<string[]>([])
 const communityName = ref('')
 const filters = ref({
   sectionId: '',
   authorQuery: '',
   status: 'active' as 'active' | 'deleted' | 'all',
+  auditStatus: 'all' as 'pending' | 'pass' | 'review' | 'rejected' | 'all',
   pinnedStatus: 'all' as 'all' | 'true' | 'false',
   featuredStatus: 'all' as 'all' | 'true' | 'false',
+})
+type PostTableColumnKey =
+  | 'section'
+  | 'author'
+  | 'status'
+  | 'audit'
+  | 'flags'
+  | 'summary'
+  | 'createdAt'
+  | 'actions'
+
+const POST_TABLE_DEFAULT_COLUMN_WIDTHS: Record<PostTableColumnKey, number> = {
+  section: 130,
+  author: 190,
+  status: 100,
+  audit: 110,
+  flags: 130,
+  summary: 520,
+  createdAt: 180,
+  actions: 420,
+}
+const POST_TABLE_MIN_COLUMN_WIDTHS: Record<PostTableColumnKey, number> = {
+  section: 100,
+  author: 150,
+  status: 90,
+  audit: 100,
+  flags: 110,
+  summary: 240,
+  createdAt: 150,
+  actions: 320,
+}
+const { columnWidths, handleColumnDragEnd } = usePersistedTableColumns<PostTableColumnKey>({
+  storageKey: 'happyhome.admin.postTable.columnWidths.v1',
+  defaults: POST_TABLE_DEFAULT_COLUMN_WIDTHS,
+  minimums: POST_TABLE_MIN_COLUMN_WIDTHS,
 })
 
 const detailFields = computed(() => {
@@ -328,6 +459,7 @@ const detailFields = computed(() => {
     .map((widget: any) => ({
       label: widget.label,
       type: widget.type,
+      allowImages: !isGuideNoteBodyWidget(widget),
       rawValue: detailPost.value.content?.[widget.widgetId],
       value: formatValue(detailPost.value.content?.[widget.widgetId], widget.type),
     }))
@@ -379,6 +511,7 @@ async function loadPosts() {
       sectionId: filters.value.sectionId || undefined,
       authorQuery: filters.value.authorQuery || undefined,
       status: filters.value.status,
+      auditStatus: filters.value.auditStatus,
       pinned: parseFlagFilter(filters.value.pinnedStatus),
       featured: parseFlagFilter(filters.value.featuredStatus),
       dateFrom: dateRange.value?.[0] || undefined,
@@ -398,12 +531,27 @@ function parseFlagFilter(value: 'all' | 'true' | 'false') {
   return undefined
 }
 
+function auditText(status?: string) {
+  if (status === 'pending') return '审核中'
+  if (status === 'review') return '需复核'
+  if (status === 'rejected') return '已拒绝'
+  return '已通过'
+}
+
+function auditTag(status?: string) {
+  if (status === 'pending') return 'info'
+  if (status === 'review') return 'warning'
+  if (status === 'rejected') return 'danger'
+  return 'success'
+}
+
 async function openDetail(row: any) {
   try {
     const res = await postAdminApi.get(row._id) as any
     detailPost.value = res.post ?? null
     detailSection.value = res.section ?? null
     attendanceMembersByWidget.value = res.attendanceMembersByWidget ?? {}
+    await loadDetailImageUrls(detailPost.value, detailSection.value)
     showDetail.value = true
   } catch (error: any) {
     ElMessage.error(error.message || '加载详情失败')
@@ -446,6 +594,7 @@ async function refreshDetailIfOpen(postId: string) {
     detailPost.value = res.post ?? null
     detailSection.value = res.section ?? null
     attendanceMembersByWidget.value = res.attendanceMembersByWidget ?? {}
+    await loadDetailImageUrls(detailPost.value, detailSection.value)
   } catch {
     // The list has already refreshed; keep the existing dialog if detail refresh fails.
   }
@@ -553,6 +702,11 @@ function richNoteText(value: unknown) {
   return normalizeRichNoteContent(value).text.trim()
 }
 
+function isGuideNoteBodyWidget(widget: any) {
+  if (detailSection.value?.displayTemplate !== 'guide_note') return false
+  return widget?.widgetId === 'guide_body' || widget?.fieldKey === 'body' || widget?.label === '正文'
+}
+
 function videoSourceLabel(source: string) {
   const labels: Record<string, string> = {
     cos: '自托管视频',
@@ -571,6 +725,44 @@ function videoItems(value: unknown) {
 
 function audioItems(value: unknown) {
   return Array.isArray(value) ? value.filter((item) => item && typeof item === 'object') : []
+}
+
+function imageItems(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((item) => String(item || '').trim()).filter(Boolean)
+    : []
+}
+
+function detailImageUrl(src: string) {
+  return detailImageUrlMap.value[src] || src
+}
+
+function canRenderDetailImage(src: string) {
+  const url = detailImageUrl(src)
+  return /^https?:\/\//.test(url) || url.startsWith('data:')
+}
+
+function detailImagePreviewList(value: unknown) {
+  return imageItems(value).map(detailImageUrl).filter((url) => /^https?:\/\//.test(url) || url.startsWith('data:'))
+}
+
+function detailImagePreviewIndex(value: unknown, src: string) {
+  const url = detailImageUrl(src)
+  const index = detailImagePreviewList(value).findIndex((item) => item === url)
+  return index >= 0 ? index : 0
+}
+
+async function loadDetailImageUrls(post: any, section: any) {
+  const widgets = Array.isArray(section?.widgets) ? section.widgets : []
+  const content = post?.content || {}
+  const fileIDs: string[] = widgets
+    .filter((widget: any) => widget?.type === 'image_group')
+    .flatMap((widget: any) => imageItems(content?.[widget.widgetId]))
+    .filter((src: string) => src.startsWith('cloud://'))
+  const missing = Array.from(new Set<string>(fileIDs.filter((fileID) => !detailImageUrlMap.value[fileID])))
+  if (missing.length === 0) return
+  const res = await mediaApi.getUrls(missing).catch(() => ({ urls: {} }))
+  detailImageUrlMap.value = { ...detailImageUrlMap.value, ...(res.urls || {}) }
 }
 
 function formatBytes(value: unknown) {
@@ -679,9 +871,34 @@ function videoPrimaryText(item: any) {
 
 .video-detail-list,
 .audio-detail-list,
+.image-group-detail,
 .rich-note-detail {
   display: grid;
   gap: 12px;
+}
+
+.image-group-detail {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+
+.image-group-detail-item {
+  min-width: 0;
+}
+
+.image-detail-thumb {
+  width: 240px;
+  max-width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 8px;
+  background: #f5f7fa;
+}
+
+.image-detail-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #909399;
+  font-size: 12px;
 }
 
 .rich-note-detail {

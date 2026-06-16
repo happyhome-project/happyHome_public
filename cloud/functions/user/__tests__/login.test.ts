@@ -2,6 +2,7 @@ jest.mock('../../../lib/db', () => ({
   getById: jest.fn(),
   create: jest.fn(),
   updateById: jest.fn(),
+  query: jest.fn(),
 }))
 jest.mock('wx-server-sdk', () => ({
   init: jest.fn(),
@@ -24,23 +25,81 @@ test('新用户首次登录：创建 user 记录', async () => {
   expect(db.create).toHaveBeenCalledWith('users', expect.objectContaining({
     _id: 'test-openid',
     nickName: '张三',
-    role: 'user'
+    role: 'user',
+    backgroundFetchToken: expect.stringMatching(/^hhpf_/),
+    backgroundFetchTokenExpiresAt: expect.any(String),
   }))
+  expect(result.user.backgroundFetchToken).toMatch(/^hhpf_/)
+  expect(result.user.backgroundFetchTokenExpiresAt).toEqual(expect.any(String))
   expect(result.isNew).toBe(true)
 })
 
 test('老用户登录：更新 nickName 和 avatarUrl', async () => {
   ;(db.getById as jest.Mock).mockResolvedValue({
-    _id: 'test-openid', nickName: '旧名', role: 'user'
+    _id: 'test-openid',
+    nickName: '旧名',
+    role: 'user',
+    backgroundFetchToken: 'hhpf_existing',
+    backgroundFetchTokenExpiresAt: '2999-01-01T00:00:00.000Z',
   })
+  ;(db.query as jest.Mock).mockResolvedValue([])
   ;(db.updateById as jest.Mock).mockResolvedValue({})
 
   const result = await handleLogin({ nickName: '新名', avatarUrl: 'https://new' }, 'test-openid')
 
   expect(db.updateById).toHaveBeenCalledWith('users', 'test-openid', {
-    nickName: '新名', avatarUrl: 'https://new'
+    nickName: '新名',
+    avatarUrl: 'https://new',
   })
+  expect(result.user.backgroundFetchToken).toBe('hhpf_existing')
   expect(result.isNew).toBe(false)
+})
+
+test('后台 superAdmin 账号绑定的微信登录小程序时自动获得 superAdmin 角色', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'admin-openid',
+    nickName: '一年',
+    role: 'user',
+  })
+  ;(db.query as jest.Mock).mockResolvedValue([
+    { _id: 'admin-account-1', userId: 'admin-openid', role: 'superAdmin', status: 'active' },
+  ])
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  const result = await handleLogin({ nickName: '一年', avatarUrl: '' }, 'admin-openid')
+
+  expect(db.query).toHaveBeenCalledWith('admin_accounts', {
+    userId: 'admin-openid',
+    status: 'active',
+  }, { limit: 20 })
+  expect(db.updateById).toHaveBeenCalledWith('users', 'admin-openid', {
+    nickName: '一年',
+    avatarUrl: '',
+    role: 'superAdmin',
+    roleSource: 'admin_account',
+  })
+  expect(result.user.role).toBe('superAdmin')
+  expect(result.isNew).toBe(false)
+})
+
+test('后台 superAdmin 账号先绑定、用户后登录时创建 superAdmin 用户记录', async () => {
+  const notFoundErr = Object.assign(new Error('not found'), { errCode: -502001 })
+  ;(db.getById as jest.Mock).mockRejectedValue(notFoundErr)
+  ;(db.query as jest.Mock).mockResolvedValue([
+    { _id: 'admin-account-1', userId: 'new-admin-openid', role: 'superAdmin', status: 'active' },
+  ])
+  ;(db.create as jest.Mock).mockResolvedValue('new-admin-openid')
+
+  const result = await handleLogin({ nickName: '新管理员', avatarUrl: '' }, 'new-admin-openid')
+
+  expect(db.create).toHaveBeenCalledWith('users', expect.objectContaining({
+    _id: 'new-admin-openid',
+    nickName: '新管理员',
+    role: 'superAdmin',
+    roleSource: 'admin_account',
+  }))
+  expect(result.user.role).toBe('superAdmin')
+  expect(result.isNew).toBe(true)
 })
 
 test('数据库网络错误应向上抛出，不被当作新用户', async () => {
