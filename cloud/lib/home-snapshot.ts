@@ -1,6 +1,7 @@
 import * as db from './db'
 import { ensureBackgroundFetchToken } from './background-fetch-token'
 import { isPostVisibleToMembers } from './content-audit'
+import { ensureCommunityReadable, getActivePublicCommunity, getDefaultPublicCommunityId } from './public-community'
 import { normalizeGuideNoteSection } from '../shared/guide-note-widgets'
 import type {
   AttendancePreviewUser,
@@ -111,8 +112,9 @@ async function buildAttendanceSummary(
   viewerId?: string
 ): Promise<AttendanceSummary> {
   const records = await getAttendanceRecords(postId, widget.widgetId)
-  const usersById = await getUsersByIds(records.map((record) => record.userId))
-  const previewUsers: AttendancePreviewUser[] = records.slice(0, ATTENDANCE_PREVIEW_LIMIT).map((record) => ({
+  const previewRecords = viewerId ? records.slice(0, ATTENDANCE_PREVIEW_LIMIT) : []
+  const usersById = await getUsersByIds(previewRecords.map((record) => record.userId))
+  const previewUsers: AttendancePreviewUser[] = previewRecords.map((record) => ({
     userId: record.userId,
     nickName: usersById[record.userId]?.nickName || '',
     avatarUrl: usersById[record.userId]?.avatarUrl || '',
@@ -221,7 +223,7 @@ export async function buildHomeFeed(
   const normalizedCommunityId = String(communityId || '').trim()
   if (!normalizedCommunityId) throw new Error('communityId 不能为空')
   if (!options.skipMembershipCheck) {
-    await ensureActiveCommunityMember(normalizedCommunityId, openid || '')
+    await ensureCommunityReadable(normalizedCommunityId, openid || '', COMMUNITY_READ_ERROR)
   }
 
   const rawSections = await db.query('sections', { communityId: normalizedCommunityId }, { orderBy: ['order', 'asc'] })
@@ -272,6 +274,7 @@ export function emptyHomeSnapshot(viewerOpenId = ''): HomeSnapshot {
     generatedAt: new Date().toISOString(),
     viewerOpenId,
     currentCommunityId: '',
+    currentCommunity: null,
     communities: [],
     sections: [],
     postsBySection: {},
@@ -301,15 +304,35 @@ export async function buildHomeSnapshot(
   openid: string,
   options: { currentCommunityId?: string; limitPerSection?: number; user?: Partial<User> | null } = {},
 ): Promise<HomeSnapshot> {
-  if (!openid) return emptyHomeSnapshot('')
+  const publicCommunityId = getDefaultPublicCommunityId()
+  const publicCommunity = publicCommunityId ? await getActivePublicCommunity(publicCommunityId) : null
+  if (!openid) {
+    if (!publicCommunity) return emptyHomeSnapshot('')
+    const feed = await buildHomeFeed(publicCommunity._id, '', {
+      limitPerSection: options.limitPerSection,
+      skipMembershipCheck: true,
+    })
+    return {
+      schemaVersion: HOME_SNAPSHOT_SCHEMA_VERSION,
+      generatedAt: new Date().toISOString(),
+      viewerOpenId: '',
+      currentCommunityId: publicCommunity._id,
+      currentCommunity: publicCommunity,
+      communities: [],
+      ...feed,
+    }
+  }
   const communities = await getActiveCommunitiesForUser(openid)
   const user = options.user !== undefined
     ? options.user
     : await db.getById('users', openid).catch(() => null) as User | null
   const preferred = String(options.currentCommunityId || user?.lastHomeCommunityId || '').trim()
-  const currentCommunity = preferred && communities.some((community) => community._id === preferred)
-    ? preferred
-    : communities[0]?._id || ''
+  const preferredJoinedCommunity = communities.find((community) => community._id === preferred)
+  const currentCommunity = preferredJoinedCommunity?._id ||
+    communities[0]?._id ||
+    (preferred && publicCommunity?._id === preferred ? preferred : publicCommunity?._id || '')
+  const currentCommunityObject = communities.find((community) => community._id === currentCommunity) ||
+    (publicCommunity?._id === currentCommunity ? publicCommunity : null)
   if (!currentCommunity) {
     return {
       ...emptyHomeSnapshot(openid),
@@ -325,6 +348,7 @@ export async function buildHomeSnapshot(
     generatedAt: new Date().toISOString(),
     viewerOpenId: openid,
     currentCommunityId: currentCommunity,
+    currentCommunity: currentCommunityObject,
     communities,
     ...feed,
   }
@@ -334,7 +358,13 @@ export async function buildHomeBootstrap(
   openid: string,
   options: { currentCommunityId?: string; limitPerSection?: number } = {},
 ): Promise<HomeBootstrapResponse> {
-  if (!openid) throw new Error('Missing OPENID')
+  if (!openid) {
+    return {
+      ...(await buildHomeSnapshot('', options)),
+      backgroundFetchToken: '',
+      backgroundFetchTokenExpiresAt: '',
+    }
+  }
   const user = await db.getById('users', openid).catch(() => null) as User | null
   const token = await ensureBackgroundFetchToken(openid, user)
   const snapshot = await buildHomeSnapshot(openid, { ...options, user })

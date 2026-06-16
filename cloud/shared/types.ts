@@ -291,6 +291,7 @@ export interface HomeSnapshot {
   generatedAt: string
   viewerOpenId: string
   currentCommunityId: string
+  currentCommunity?: Community | null
   communities: Community[]
   sections: Section[]
   postsBySection: Record<string, Post[]>

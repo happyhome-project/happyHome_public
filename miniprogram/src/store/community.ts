@@ -13,19 +13,22 @@ export const useCommunityStore = defineStore('community', {
   state: () => ({
     currentCommunityId: '' as string,
     myCommunities: [] as Community[],
+    browsingCommunity: null as Community | null,
     currentSections: [] as Section[],
     currentSectionIndex: 0,
     membershipByCommunity: {} as Record<string, { isMember: boolean; status: string | null; checkedAt: number }>,
   }),
   getters: {
     currentCommunity: (state): Community | undefined =>
-      state.myCommunities.find(c => c._id === state.currentCommunityId),
+      state.myCommunities.find(c => c._id === state.currentCommunityId) ||
+      (state.browsingCommunity?._id === state.currentCommunityId ? state.browsingCommunity : undefined),
     currentSection: (state): Section | undefined =>
       state.currentSections[state.currentSectionIndex],
   },
   actions: {
     clearCommunityState() {
       this.currentCommunityId = ''
+      this.browsingCommunity = null
       this.currentSections = []
       this.currentSectionIndex = 0
       this.saveToStorage()

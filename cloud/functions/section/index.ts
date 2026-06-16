@@ -4,6 +4,7 @@ import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
 import { assertCommunityAdmin } from '../../lib/auth'
 import { isPostVisibleToMembers } from '../../lib/content-audit'
+import { ensureCommunityReadable } from '../../lib/public-community'
 import type { Widget, Section, SectionType, SectionStatus } from '../../shared/types'
 import { LIST_DISPLAYABLE_TYPES } from '../../shared/types'
 import { normalizeGuideNoteSection } from '../../shared/guide-note-widgets'
@@ -118,16 +119,16 @@ export async function handleCreate(
   return { sectionId }
 }
 
-export async function handleGet(params: { sectionId: string }, openid: string) {
+export async function handleGet(params: { sectionId: string; asGuest?: boolean }, openid: string) {
   const raw = await db.getById('sections', params.sectionId)
   if (raw?.communityId) {
-    await ensureActiveCommunityMember(raw.communityId, openid)
+    await ensureCommunityReadable(raw.communityId, params.asGuest ? '' : openid, COMMUNITY_READ_ERROR)
   }
   return { section: raw ? normalizeSection(raw) : null }
 }
 
-export async function handleList(params: { communityId: string; withPostCount?: boolean }, openid: string) {
-  await ensureActiveCommunityMember(params.communityId, openid)
+export async function handleList(params: { communityId: string; withPostCount?: boolean; asGuest?: boolean }, openid: string) {
+  await ensureCommunityReadable(params.communityId, params.asGuest ? '' : openid, COMMUNITY_READ_ERROR)
   const raw = await db.query('sections', { communityId: params.communityId }, {
     orderBy: ['order', 'asc'],
   })
