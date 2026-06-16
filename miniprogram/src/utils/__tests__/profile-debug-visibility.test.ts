@@ -28,6 +28,7 @@ describe('profile page visible debug output', () => {
     expect(code).toContain('profile-version')
     expect(code).toContain('<text>ver: {{ appVersion }}</text>')
     expect(code).toContain('BUILD_INFO')
+    expect(code).toContain('__HH_BUILD_VERSION__')
     expect(code).toContain('appVersion')
     expect(code.match(/ver:/g) || []).toHaveLength(1)
   })

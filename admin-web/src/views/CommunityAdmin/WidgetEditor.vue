@@ -39,7 +39,7 @@
       :closable="false"
       style="margin-bottom: 16px;"
       title="图文攻略固定控件"
-      description="标题、封面/图片、距离、最高海拔、累计爬升、参考用时、正文、目的地位置为固定结构；正文使用富图文排版能力，支持换行和基础格式，但不支持插图。图片请上传到封面/图片。固定控件不能删除、改类型或调整顺序。"
+      description="标题、封面/图片、距离、最高海拔、累计爬升、参考用时、正文、两步路轨迹编号、目的地位置为固定结构；正文使用富图文排版能力，支持换行和基础格式，但不支持插图。图片请上传到封面/图片。固定控件不能删除、改类型或调整顺序。"
     />
 
     <draggable v-model="widgets" item-key="widgetId" handle=".drag-handle" :move="canMoveWidget">
@@ -168,6 +168,7 @@ const GUIDE_NOTE_LOCKED_WIDGET_IDS = new Set([
   'guide_reference_duration',
   'guide_drive_duration',
   'guide_body',
+  'guide_liangbulu_track_id',
   'guide_location',
 ])
 const DEFAULT_LABELS: Record<string, string> = {

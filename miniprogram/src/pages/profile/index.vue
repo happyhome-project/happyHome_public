@@ -361,7 +361,8 @@ const profileError = ref('')
 let refreshingProfile = false
 let lastLoginStateRefreshKey = ''
 let suppressNextLoginStateRefresh = false
-const appVersion = computed(() => String(BUILD_INFO.version || BUILD_INFO.buildId || 'unknown'))
+const buildVersion = typeof __HH_BUILD_VERSION__ === 'string' ? __HH_BUILD_VERSION__ : ''
+const appVersion = computed(() => String(buildVersion || BUILD_INFO.version || BUILD_INFO.buildId || 'unknown'))
 
 const configuredNotificationTemplates = computed(() => configuredApprovalTemplates(notificationTemplates.value))
 const hasAdminTools = computed(() => userStore.role === 'superAdmin' || adminCommunityIds.value.length > 0)

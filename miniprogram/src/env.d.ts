@@ -9,3 +9,4 @@ declare module '*.vue' {
 
 // WeChat Mini Program global wx object (minimal ambient declaration)
 declare const wx: Record<string, any>
+declare const __HH_BUILD_VERSION__: string
