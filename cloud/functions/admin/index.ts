@@ -43,6 +43,7 @@ import {
   normalizeGuideNoteWidgets,
   normalizeSectionDisplayTemplate,
 } from '../../shared/guide-note-widgets'
+import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
 
 cloud.init({ env: process.env.TCB_ENV || cloud.DYNAMIC_CURRENT_ENV })
 
@@ -1198,6 +1199,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       return {
         ...post,
         authorNickname: author?.nickName || '',
+        authorAvatarUrl: resolveAuthorAvatarUrl(author?.avatarUrl, post._id || post.authorId || ''),
         sectionName: section?.name || '',
         sectionType: section?.type || '',
         isVisibleToMembers: isPostVisibleToMembers(post),
@@ -1233,6 +1235,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       post: {
         ...post,
         authorNickname: (author as any)?.nickName || '',
+        authorAvatarUrl: resolveAuthorAvatarUrl((author as any)?.avatarUrl, post._id || post.authorId || ''),
         attendanceSummaryByWidget,
       },
       section: normalizedSection,
@@ -1397,6 +1400,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const rows = posts.map((post: any) => ({
       ...post,
       authorNickname: usersById[post.authorId]?.nickName || '',
+      authorAvatarUrl: resolveAuthorAvatarUrl(usersById[post.authorId]?.avatarUrl, post._id || post.authorId || ''),
       sectionName: sectionsById[post.sectionId]?.name || '',
       sectionType: sectionsById[post.sectionId]?.type || '',
       isVisibleToMembers: isPostVisibleToMembers(post),
@@ -1415,7 +1419,12 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       db.query(AUDIT_TASKS, { postId }, { orderBy: ['createdAt', 'desc'] }).catch(() => []),
     ])
     return {
-      post: { ...post, authorNickname: (author as any)?.nickName || '', isVisibleToMembers: isPostVisibleToMembers(post) },
+      post: {
+        ...post,
+        authorNickname: (author as any)?.nickName || '',
+        authorAvatarUrl: resolveAuthorAvatarUrl((author as any)?.avatarUrl, post._id || post.authorId || ''),
+        isVisibleToMembers: isPostVisibleToMembers(post),
+      },
       section: section ? normalizeSection(section) : null,
       auditTasks,
     }
