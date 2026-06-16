@@ -279,29 +279,29 @@ export const notificationApi = {
 }
 
 export const sectionApi = {
-  list: (communityId: string) =>
-    callCloud<{ sections: any[] }>('section', 'list', { communityId }),
-  get: (sectionId: string) =>
-    callCloud<{ section: any }>('section', 'get', { sectionId }),
+  list: (communityId: string, asGuest = false) =>
+    callCloud<{ sections: any[] }>('section', 'list', { communityId, asGuest }),
+  get: (sectionId: string, asGuest = false) =>
+    callCloud<{ section: any }>('section', 'get', { sectionId, asGuest }),
 }
 
 export const postApi = {
-  bootstrap: (currentCommunityId?: string, limitPerSection = 20) =>
+  bootstrap: (currentCommunityId?: string, limitPerSection = 20, asGuest = false) =>
     callCloud<any>(
       'post',
       'bootstrap',
-      { currentCommunityId, limitPerSection },
+      { currentCommunityId, limitPerSection, asGuest },
     ),
-  home: (communityId: string, limitPerSection = 20) =>
+  home: (communityId: string, limitPerSection = 20, asGuest = false) =>
     callCloud<{ sections: any[]; postsBySection: Record<string, any[]> }>(
       'post',
       'home',
-      { communityId, limitPerSection },
+      { communityId, limitPerSection, asGuest },
     ),
-  list: (sectionId: string, skip = 0) =>
-    callCloud<{ posts: any[] }>('post', 'list', { sectionId, skip }),
-  get: (postId: string) =>
-    callCloud<{ post: any }>('post', 'get', { postId }),
+  list: (sectionId: string, skip = 0, asGuest = false) =>
+    callCloud<{ posts: any[] }>('post', 'list', { sectionId, skip, asGuest }),
+  get: (postId: string, asGuest = false) =>
+    callCloud<{ post: any }>('post', 'get', { postId, asGuest }),
   create: (params: object) =>
     callCloud('post', 'create', params),
   update: (postId: string, content: Record<string, any>) =>

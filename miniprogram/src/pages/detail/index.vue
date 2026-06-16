@@ -1,11 +1,6 @@
 <template>
   <view class="detail-page">
-    <LoginGuard
-      v-if="!userStore.isLoggedIn"
-      title="请先登录"
-      desc="登录后才能查看帖子详情"
-    />
-    <view v-else-if="post && section" class="content" :class="{ 'guide-note-detail': isGuideNoteDetail }">
+    <view v-if="post && section" class="content" :class="{ 'guide-note-detail': isGuideNoteDetail }">
       <view v-if="post.isPinned || post.isFeatured" class="post-flag-row">
         <text v-if="post.isPinned" class="post-flag pin">置顶</text>
         <text v-if="post.isFeatured" class="post-flag feature">精华</text>
@@ -95,7 +90,7 @@
       </view>
     </view>
 
-    <view v-else-if="userStore.isLoggedIn" class="loading"><text>加载中...</text></view>
+    <view v-else class="loading"><text>加载中...</text></view>
 
     <view v-if="showRoster" class="roster-mask" @tap="closeRoster">
       <view class="roster-panel" @tap.stop>
@@ -141,7 +136,6 @@ import { onLoad, onShow } from '@dcloudio/uni-app'
 import { postApi, sectionApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
-import LoginGuard from '../../components/LoginGuard.vue'
 import GuideRouteDetailView from '../../components/GuideRouteDetailView.vue'
 import WidgetRenderer from '../../components/widgets/WidgetRenderer.vue'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
@@ -248,10 +242,6 @@ async function ensurePostLoaded() {
     clientLog('warn', 'detail.ensure.skip.noPostId', {})
     return
   }
-  if (!userStore.isLoggedIn) {
-    clientLog('warn', 'detail.ensure.skip.loggedOut', { postId: currentPostId.value })
-    return
-  }
   if (post.value?._id === currentPostId.value && section.value) {
     clientLog('debug', 'detail.ensure.skip.alreadyLoaded', {
       postId: currentPostId.value,
@@ -275,7 +265,7 @@ async function loadPost(postId: string) {
     loggedIn: userStore.isLoggedIn,
   })
   try {
-    const res = await postApi.get(postId)
+    const res = await postApi.get(postId, !userStore.isLoggedIn)
     clientLog('info', 'detail.post.get.success', {
       postId,
       hasPost: !!res?.post,
@@ -299,7 +289,7 @@ async function loadPost(postId: string) {
       clientLog('info', 'detail.section.get.start', {
         sectionId: post.value.sectionId,
       })
-      const sectionRes = await sectionApi.get(post.value.sectionId)
+      const sectionRes = await sectionApi.get(post.value.sectionId, !userStore.isLoggedIn)
       section.value = sectionRes.section || null
       clientLog('info', 'detail.section.get.success', {
         sectionId: post.value.sectionId,
@@ -499,6 +489,11 @@ const attendanceLock = useKeyedBusyLock(
 
 async function handleAttendanceAction(widget: any) {
   if (!post.value) return
+  if (!userStore.isLoggedIn) {
+    uni.showToast({ title: '请先登录后再参与', icon: 'none' })
+    uni.switchTab({ url: '/pages/profile/index' })
+    return
+  }
   const summary = getAttendanceSummary(widget)
 
   // 已参与 → 直接打开名单（取消动作在 sheet 里）
@@ -543,6 +538,11 @@ async function handleAttendanceAction(widget: any) {
 
 async function openRoster(widget: any) {
   if (!post.value) return
+  if (!userStore.isLoggedIn) {
+    uni.showToast({ title: '请先登录后查看名单', icon: 'none' })
+    uni.switchTab({ url: '/pages/profile/index' })
+    return
+  }
   try {
     const res = await postApi.listAttendanceMembers(post.value._id, widget.widgetId)
     rosterMembers.value = res.members || []

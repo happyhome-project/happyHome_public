@@ -5,6 +5,7 @@ import { getTempUrl } from '../../lib/storage'
 import { sanitizeContent, validateContentValues, validateRequiredWidgets } from '../../lib/post-validate'
 import { auditAndApply, isPostVisibleToMembers } from '../../lib/content-audit'
 import { buildHomeBootstrap, buildHomeFeed } from '../../lib/home-snapshot'
+import { ensureCommunityReadable } from '../../lib/public-community'
 import type {
   AttendancePreviewUser,
   AttendanceSummary,
@@ -124,8 +125,9 @@ async function buildAttendanceSummary(
   viewerId?: string
 ): Promise<AttendanceSummary> {
   const records = await getAttendanceRecords(postId, widget.widgetId)
-  const usersById = await getUsersByIds(records.map((record) => record.userId))
-  const previewUsers: AttendancePreviewUser[] = records.slice(0, ATTENDANCE_PREVIEW_LIMIT).map((record) => ({
+  const previewRecords = viewerId ? records.slice(0, ATTENDANCE_PREVIEW_LIMIT) : []
+  const usersById = await getUsersByIds(previewRecords.map((record) => record.userId))
+  const previewUsers: AttendancePreviewUser[] = previewRecords.map((record) => ({
     userId: record.userId,
     nickName: usersById[record.userId]?.nickName || '',
     avatarUrl: usersById[record.userId]?.avatarUrl || '',
@@ -265,9 +267,11 @@ export async function handleList(params: {
   sectionId: string
   skip?: number
   limit?: number
+  asGuest?: boolean
 }, openid?: string) {
   const section = normalizePostSection(await db.getById('sections', params.sectionId) as Section)
-  await ensureActiveCommunityMember(section.communityId, openid || '')
+  const viewerId = params.asGuest ? '' : (openid || '')
+  await ensureCommunityReadable(section.communityId, viewerId, COMMUNITY_READ_ERROR)
   const posts = await db.query('posts', {
     sectionId: params.sectionId,
     status: 'active',
@@ -276,7 +280,7 @@ export async function handleList(params: {
   })
   const orderedPosts = (posts as any[]).filter(isPostVisibleToMembers).slice().sort(comparePostListOrder)
   const slicedPosts = orderedPosts.slice(params.skip ?? 0, (params.skip ?? 0) + (params.limit ?? 20))
-  const withAttendance = await enrichPostsWithAttendance(slicedPosts, { [params.sectionId]: section }, openid)
+  const withAttendance = await enrichPostsWithAttendance(slicedPosts, { [params.sectionId]: section }, viewerId)
   const enrichedPosts = await enrichPostsWithAuthor(withAttendance)
   return { posts: enrichedPosts }
 }
@@ -284,8 +288,9 @@ export async function handleList(params: {
 export async function handleHome(params: {
   communityId: string
   limitPerSection?: number
+  asGuest?: boolean
 }, openid?: string) {
-  return buildHomeFeed(params.communityId, openid || '', {
+  return buildHomeFeed(params.communityId, params.asGuest ? '' : (openid || ''), {
     limitPerSection: params.limitPerSection,
   })
 }
@@ -293,19 +298,21 @@ export async function handleHome(params: {
 export async function handleBootstrap(params: {
   currentCommunityId?: string
   limitPerSection?: number
+  asGuest?: boolean
 }, openid?: string) {
-  return buildHomeBootstrap(openid || '', {
+  return buildHomeBootstrap(params.asGuest ? '' : (openid || ''), {
     currentCommunityId: params.currentCommunityId,
     limitPerSection: params.limitPerSection,
   })
 }
 
-export async function handleGet(params: { postId: string }, openid?: string) {
+export async function handleGet(params: { postId: string; asGuest?: boolean }, openid?: string) {
   const post = await db.getById('posts', params.postId) as any
   if (!post || post.status === 'deleted' || !isPostVisibleToMembers(post)) throw new Error('帖子不存在')
-  await ensureActiveCommunityMember(post.communityId, openid || '')
+  const viewerId = params.asGuest ? '' : (openid || '')
+  await ensureCommunityReadable(post.communityId, viewerId, COMMUNITY_READ_ERROR)
   const section = normalizePostSection(await db.getById('sections', post.sectionId) as Section)
-  const attendanceSummaryByWidget = await buildAttendanceSummaryByWidget(post._id, section, openid)
+  const attendanceSummaryByWidget = await buildAttendanceSummaryByWidget(post._id, section, viewerId)
   const [enrichedPost] = await enrichPostsWithAuthor([{ ...post, attendanceSummaryByWidget }])
   return { post: enrichedPost }
 }

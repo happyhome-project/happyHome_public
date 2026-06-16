@@ -26,7 +26,11 @@ import {
 import * as db from '../../../lib/db'
 import type { Widget } from '../../../shared/types'
 
-beforeEach(() => jest.clearAllMocks())
+beforeEach(() => {
+  jest.clearAllMocks()
+  delete process.env.DEFAULT_PUBLIC_COMMUNITY_ID
+  delete process.env.PUBLIC_READ_COMMUNITY_IDS
+})
 
 function makeWidget(overrides: Partial<Widget> = {}): Widget {
   return {
@@ -270,13 +274,62 @@ test('list：非 active 成员不可查看板块内容', async () => {
   await expect(main({ action: 'list', communityId: 'c1' })).rejects.toThrow('需要先加入社区后查看内容')
 })
 
+test('list: unauthenticated viewer can read active public community sections', async () => {
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.query as jest.Mock).mockReset()
+  process.env.PUBLIC_READ_COMMUNITY_IDS = 'c1'
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'communities' && id === 'c1') return { _id: 'c1', status: 'active' }
+    return null
+  })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([
+    { _id: 's1', communityId: 'c1', name: '公告', order: 1 },
+  ])
+
+  const result = await handleList({ communityId: 'c1' }, '')
+
+  expect(result.sections.map((section: any) => section._id)).toEqual(['s1'])
+  expect((db.query as jest.Mock).mock.calls.some(([collection]) => collection === 'community_members')).toBe(false)
+})
+
 test('get：active 成员可查看板块详情', async () => {
   ;(db.getById as jest.Mock).mockResolvedValue({ _id: 's1', communityId: 'c1', name: '拼车' })
   ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
 
   const result: any = await main({ action: 'get', sectionId: 's1' })
 
-  expect(result.section._id).toBe('s1')
+  expect(result.section?._id).toBe('s1')
+})
+
+test('get: unauthenticated viewer can read active public community section detail', async () => {
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.query as jest.Mock).mockReset()
+  process.env.PUBLIC_READ_COMMUNITY_IDS = 'c1'
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'sections' && id === 's1') return { _id: 's1', communityId: 'c1', name: '公告' }
+    if (collectionName === 'communities' && id === 'c1') return { _id: 'c1', status: 'active' }
+    return null
+  })
+
+  const result = await handleGet({ sectionId: 's1' }, '')
+
+  expect(result.section?._id).toBe('s1')
+  expect((db.query as jest.Mock).mock.calls.some(([collection]) => collection === 'community_members')).toBe(false)
+})
+
+test('get: guest mode ignores injected openid membership for private section detail', async () => {
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.query as jest.Mock).mockReset()
+  ;(db.getById as jest.Mock).mockResolvedValue({ _id: 's1', communityId: 'c1', name: '私密板块' })
+  ;(db.query as jest.Mock).mockImplementation(async (collectionName: string, where: any) => {
+    if (collectionName === 'community_members' && where.userId === 'wx-injected-openid') {
+      return [{ _id: 'm1', communityId: 'c1', status: 'active' }]
+    }
+    return []
+  })
+
+  await expect(handleGet({ sectionId: 's1', asGuest: true }, 'wx-injected-openid'))
+    .rejects.toThrow('需要先加入社区后查看内容')
 })
 
 test('main(): 未知 action 抛出错误', async () => {
