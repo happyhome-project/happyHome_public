@@ -16,14 +16,18 @@ jest.mock('../wx-openapi', () => ({
 }))
 
 import {
+  auditPostContent,
   approvePostAudit,
   buildCiHttpString,
+  buildTencentCiAuditRequestBody,
   extractAuditTargets,
   handleAuditCallback,
   isPostVisibleToMembers,
+  parseTencentCiAuditResponse,
   rejectPostAudit,
 } from '../content-audit'
 import * as db from '../db'
+import { postWxJson } from '../wx-openapi'
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -78,6 +82,65 @@ test('buildCiHttpString follows Tencent CI XML signature newline format', () => 
     + '\n'
     + 'host=636c-cloudbase-3gh862acb1505ff3-1307183045.ci.ap-shanghai.myqcloud.com\n',
   )
+})
+
+test('buildTencentCiAuditRequestBody lets image audits use the default policy', () => {
+  const body = buildTencentCiAuditRequestBody('image', '<Url>https://example.com/a.webp</Url>')
+
+  expect(body).toContain('<Conf></Conf>')
+  expect(body).not.toContain('DetectType')
+  expect(body).not.toContain('Illegal')
+  expect(body).not.toContain('Abuse')
+  expect(body).not.toContain('Terrorism')
+})
+
+test('parseTencentCiAuditResponse keeps Tencent job errors visible', () => {
+  const result = parseTencentCiAuditResponse('image', `<?xml version="1.0" encoding="utf-8"?>
+<Response>
+  <JobsDetail>
+    <Code>InvalidArgument</Code>
+    <Message>invalid DetectType</Message>
+    <State>Failed</State>
+  </JobsDetail>
+</Response>`)
+
+  expect(result.status).toBe('review')
+  expect(result.provider).toBe('tencent_ci')
+  expect(result.reason).toBe('Tencent CI InvalidArgument: invalid DetectType')
+})
+
+test('auditPostContent submits independent audit targets concurrently', async () => {
+  let inFlight = 0
+  let maxInFlight = 0
+  ;(postWxJson as jest.Mock).mockImplementation(async () => {
+    inFlight += 1
+    maxInFlight = Math.max(maxInFlight, inFlight)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    inFlight -= 1
+    return { result: { suggest: 'pass', label: 'normal' }, trace_id: `trace-${maxInFlight}` }
+  })
+
+  await auditPostContent({
+    postId: 'post-1',
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    authorId: 'openid-1',
+    source: 'user',
+    section: {
+      widgets: [
+        { widgetId: 'title', type: 'short_text', label: '标题' },
+        { widgetId: 'summary', type: 'summary', label: '摘要' },
+      ],
+    } as any,
+    content: {
+      title: '第一段待审核内容',
+      summary: '第二段待审核内容',
+    } as any,
+  })
+
+  expect(postWxJson).toHaveBeenCalledTimes(2)
+  expect(maxInFlight).toBeGreaterThan(1)
+  expect(db.create).toHaveBeenCalledTimes(2)
 })
 
 test('approvePostAudit promotes pendingContent and marks the post as passed', async () => {

@@ -83,6 +83,24 @@ assertIncludes(
   'ImageGroupAdminEditor must resolve cloud:// image_group fileIDs to temporary URLs for admin preview.'
 )
 assertIncludes(
+  imageGroupEditor,
+  ':initial-index="previewIndexFor(image)"',
+  'ImageGroupAdminEditor preview must open from the clicked image instead of always starting at the cover.'
+)
+assertIncludes(
+  imageGroupEditor,
+  'vuedraggable',
+  'ImageGroupAdminEditor must support drag-and-drop image ordering instead of up/down buttons.'
+)
+assertIncludes(
+  imageGroupEditor,
+  'delete-button',
+  'ImageGroupAdminEditor must expose a hover delete button on the image thumbnail.'
+)
+if (imageGroupEditor.includes('上移') || imageGroupEditor.includes('下移')) {
+  throw new Error('ImageGroupAdminEditor should not use visible up/down ordering buttons.')
+}
+assertIncludes(
   postManagement,
   `field.type === 'image_group'`,
   'PostManagement detail must render image_group as images, not a raw comma-separated value.'
@@ -91,6 +109,11 @@ assertIncludes(
   postManagement,
   'detailImageUrl',
   'PostManagement detail must resolve cloud:// image_group fileIDs before rendering thumbnails.'
+)
+assertIncludes(
+  postManagement,
+  ':initial-index="detailImagePreviewIndex(field.rawValue, image)"',
+  'PostManagement image_group detail preview must open from the clicked image instead of always starting at the first image.'
 )
 if (imageGroupEditor.includes('{{ image }}')) {
   throw new Error('ImageGroupAdminEditor must not display raw image URLs in the admin form.')

@@ -397,6 +397,7 @@ test('section.create: 图文攻略展示模板可保存到板块', async () => {
       expect.objectContaining({ widgetId: 'guide_reference_duration', type: 'short_text', label: '参考用时', required: false, showInList: false, locked: true }),
       expect.objectContaining({ widgetId: 'guide_drive_duration', type: 'short_text', label: '驾车到达用时', required: true, showInList: false, locked: true }),
       expect.objectContaining({ widgetId: 'guide_body', type: 'rich_note', label: '正文', required: false, showInList: false, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_liangbulu_track_id', type: 'short_text', label: '两步路轨迹编号', required: false, showInList: false, locked: true }),
       expect.objectContaining({ widgetId: 'guide_location', type: 'location', label: '目的地位置', required: true, showInList: false, locked: true }),
     ],
   }))
@@ -412,7 +413,8 @@ test('section.updateWidgets: 图文攻略固定控件不能删除或修改', asy
     { widgetId: 'guide_reference_duration', type: 'short_text', label: '参考用时', fieldKey: 'referenceDuration', required: false, order: 5, showInList: false, locked: true },
     { widgetId: 'guide_drive_duration', type: 'short_text', label: '驾车到达用时', fieldKey: 'driveDuration', required: true, order: 6, showInList: false, locked: true },
     { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 7, showInList: false, locked: true },
-    { widgetId: 'guide_location', type: 'location', label: '目的地位置', fieldKey: 'location', required: true, order: 8, showInList: false, locked: true },
+    { widgetId: 'guide_liangbulu_track_id', type: 'short_text', label: '两步路轨迹编号', fieldKey: 'liangbuluTrackId', required: false, order: 8, showInList: false, locked: true },
+    { widgetId: 'guide_location', type: 'location', label: '目的地位置', fieldKey: 'location', required: true, order: 9, showInList: false, locked: true },
   ]
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-guide',
@@ -448,7 +450,8 @@ test('section.updateWidgets: 图文攻略允许在固定控件后追加小控件
     { widgetId: 'guide_reference_duration', type: 'short_text', label: '参考用时', fieldKey: 'referenceDuration', required: false, order: 5, showInList: false, locked: true },
     { widgetId: 'guide_drive_duration', type: 'short_text', label: '驾车到达用时', fieldKey: 'driveDuration', required: true, order: 6, showInList: false, locked: true },
     { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 7, showInList: false, locked: true },
-    { widgetId: 'guide_location', type: 'location', label: '目的地位置', fieldKey: 'location', required: true, order: 8, showInList: false, locked: true },
+    { widgetId: 'guide_liangbulu_track_id', type: 'short_text', label: '两步路轨迹编号', fieldKey: 'liangbuluTrackId', required: false, order: 8, showInList: false, locked: true },
+    { widgetId: 'guide_location', type: 'location', label: '目的地位置', fieldKey: 'location', required: true, order: 9, showInList: false, locked: true },
   ]
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-guide',
@@ -464,18 +467,19 @@ test('section.updateWidgets: 图文攻略允许在固定控件后追加小控件
     sectionId: 'section-guide',
     widgets: [
       ...guideWidgets,
-      { widgetId: 'guide_age', type: 'short_text', label: '适合年龄', fieldKey: 'age', required: false, order: 9, showInList: false },
+      { widgetId: 'guide_scenery', type: 'short_text', label: '景色特点', fieldKey: 'scenery', required: false, order: 10, showInList: false },
     ],
   })
 
-  expect(result.widgets.slice(0, 9).every((widget: any) => widget.locked === true)).toBe(true)
-  expect(result.widgets[9]).toEqual(expect.objectContaining({ widgetId: 'guide_age', locked: false }))
+  expect(result.widgets.slice(0, 10).every((widget: any) => widget.locked === true)).toBe(true)
+  expect(result.widgets[10]).toEqual(expect.objectContaining({ widgetId: 'guide_scenery', locked: false }))
   expect(db.updateById).toHaveBeenCalledWith('sections', 'section-guide', expect.objectContaining({
     widgets: expect.arrayContaining([
       expect.objectContaining({ widgetId: 'guide_images', required: true, locked: true }),
       expect.objectContaining({ widgetId: 'guide_drive_duration', required: true, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_liangbulu_track_id', required: false, locked: true }),
       expect.objectContaining({ widgetId: 'guide_distance', locked: true }),
-      expect.objectContaining({ widgetId: 'guide_age', locked: false }),
+      expect.objectContaining({ widgetId: 'guide_scenery', locked: false }),
     ]),
   }))
 })
@@ -498,7 +502,7 @@ test('section.get: 旧图文攻略板块会补齐路线攻略固定控件', asyn
     sectionId: 'section-guide',
   })
 
-  expect(result.section.widgets.map((widget: any) => widget.widgetId).slice(0, 9)).toEqual([
+  expect(result.section.widgets.map((widget: any) => widget.widgetId).slice(0, 10)).toEqual([
     'guide_title',
     'guide_images',
     'guide_distance',
@@ -507,6 +511,7 @@ test('section.get: 旧图文攻略板块会补齐路线攻略固定控件', asyn
     'guide_reference_duration',
     'guide_drive_duration',
     'guide_body',
+    'guide_liangbulu_track_id',
     'guide_location',
   ])
   expect(result.section.widgets[6]).toEqual(expect.objectContaining({
@@ -517,10 +522,17 @@ test('section.get: 旧图文攻略板块会补齐路线攻略固定控件', asyn
     locked: true,
   }))
   expect(result.section.widgets[8]).toEqual(expect.objectContaining({
+    widgetId: 'guide_liangbulu_track_id',
+    label: '两步路轨迹编号',
+    required: false,
+    order: 8,
+    locked: true,
+  }))
+  expect(result.section.widgets[9]).toEqual(expect.objectContaining({
     widgetId: 'guide_location',
     label: '目的地位置',
     required: true,
-    order: 8,
+    order: 9,
     locked: true,
   }))
 })

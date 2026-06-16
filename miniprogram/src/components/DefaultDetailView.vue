@@ -102,9 +102,18 @@
         class="location-card"
         @tap="openLocation(item)"
       >
-        <view class="map-surface">
-          <text class="map-pin"></text>
-        </view>
+        <map
+          class="location-map"
+          :latitude="item.lat"
+          :longitude="item.lng"
+          :markers="item.markers"
+          :scale="15"
+          :enable-scroll="false"
+          :enable-zoom="false"
+          :enable-rotate="false"
+          :enable-overlooking="false"
+          @tap.stop="openLocation(item)"
+        />
         <view class="location-body">
           <text class="location-name">{{ item.name }}</text>
           <text v-if="item.address" class="location-address">{{ item.address }}</text>
@@ -134,7 +143,14 @@ const props = defineProps<{
 
 type FactItem = { key: string; label: string; value: string; style?: 'price' }
 type BodyBlock = { key: string; title: string; type: 'plain' | 'rich_text' | 'rich_note' | 'note_blocks'; value: any }
-type LocationItem = { key: string; name: string; address: string; lat: number; lng: number }
+type LocationItem = {
+  key: string
+  name: string
+  address: string
+  lat: number
+  lng: number
+  markers: Array<{ id: number; latitude: number; longitude: number; title: string }>
+}
 
 const audioStore = useAudioStore()
 const titleLabelNeedles = ['标题', '名称', '名字', '书名', '物品', '活动', '医生姓名', '音乐名称', '电影分类']
@@ -280,6 +296,12 @@ const locationItems = computed<LocationItem[]>(() =>
         address,
         lat: loc.lat,
         lng: loc.lng,
+        markers: [{
+          id: 1,
+          latitude: loc.lat,
+          longitude: loc.lng,
+          title: name,
+        }],
       }
     })
     .filter((item): item is LocationItem => Boolean(item))
@@ -764,26 +786,11 @@ function formatShortDate(value: unknown): string {
   background: $hh-surface-1;
 }
 
-.map-surface {
+.location-map {
+  width: 100%;
   height: 172rpx;
-  position: relative;
-  background:
-    linear-gradient(135deg, rgba(49, 105, 73, 0.16), transparent 48%),
-    linear-gradient(225deg, rgba(71, 102, 135, 0.14), transparent 46%),
-    $hh-surface-2;
-}
-
-.map-pin {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 28rpx;
-  height: 28rpx;
-  transform: translate(-50%, -50%);
-  border-radius: 999rpx 999rpx 999rpx 0;
-  background: $hh-accent;
-  transform: translate(-50%, -50%) rotate(-45deg);
-  box-shadow: 0 8rpx 18rpx rgba(0, 0, 0, 0.16);
+  display: block;
+  background: $hh-surface-2;
 }
 
 .location-body {

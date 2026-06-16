@@ -87,6 +87,28 @@ describe('buildGuideRouteDetail', () => {
     ])
   })
 
+  test('optional LiangBuLu track id is collected for copy-only detail display', () => {
+    const section = baseSection([
+      { widgetId: 'title', type: 'short_text', label: 'Title', fieldKey: 'title', required: true, order: 0, showInList: true },
+      { widgetId: 'liangbuluTrackId', type: 'short_text', label: 'LiangBuLu track id', fieldKey: 'liangbuluTrackId', required: false, order: 1, showInList: false },
+    ])
+    const post = basePost({
+      title: 'Taiping reservoir',
+      liangbuluTrackId: 'LB-20260614-001',
+    })
+
+    expect(buildGuideRouteDetail(post, section).liangbuluTrackId).toBe('LB-20260614-001')
+  })
+
+  test('optional LiangBuLu track id stays empty when it is not configured', () => {
+    const section = baseSection([
+      { widgetId: 'title', type: 'short_text', label: 'Title', fieldKey: 'title', required: true, order: 0, showInList: true },
+    ])
+    const post = basePost({ title: 'Taiping reservoir' })
+
+    expect(buildGuideRouteDetail(post, section).liangbuluTrackId).toBe('')
+  })
+
   test('封面图片用于顶部，正文交给通用富图文渲染并保留原始 Markdown', () => {
     const section = baseSection([
       { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
@@ -111,7 +133,7 @@ describe('buildGuideRouteDetail', () => {
     expect(detail.images).toEqual(['cloud://env/cover.jpg'])
     expect(detail.bodySections).toEqual([
       {
-        title: '正文',
+        title: '',
         type: 'rich_note',
         value: expect.objectContaining({
           markdown: '线路概述：经过桂溪公园、中和湿地公园，寻找网红白房子\n\n![图片](cloud://env/body.jpg)\n\n线路行程：11+公里',
@@ -141,7 +163,7 @@ describe('buildGuideRouteDetail', () => {
     const [body] = buildGuideRouteDetail(post, section).bodySections
 
     expect(body).toEqual({
-      title: '正文',
+      title: '',
       type: 'rich_note',
       value: expect.objectContaining({ markdown }),
     })

@@ -228,6 +228,42 @@ describe('post.createAdmin', () => {
     expect(payload.content['w-att']).toBeUndefined()
   })
 
+  test('normalizes old guide_note sections before admin-created posts are saved', async () => {
+    ;(db.getById as jest.Mock).mockResolvedValueOnce({
+      _id: 'section-guide',
+      communityId: 'community-1',
+      displayTemplate: 'guide_note',
+      widgets: [
+        { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true, locked: true },
+        { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false, locked: true },
+        { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false, locked: true },
+        { widgetId: 'guide_location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false, locked: true },
+      ],
+    })
+    ;(db.create as jest.Mock).mockResolvedValueOnce('post-GUIDE')
+
+    await main({
+      action: 'post.createAdmin',
+      _actAs: SUPER_CTX,
+      communityId: 'community-1',
+      sectionId: 'section-guide',
+      content: {
+        guide_title: '太平水库亲子游',
+        guide_images: ['cloud://env/posts/new-cover.jpg'],
+        guide_drive_duration: '青山村约35分钟到达入口',
+        guide_location: { address: '太平水库入口', lat: 30.2, lng: 104.2 },
+      },
+    })
+
+    const [, payload] = (db.create as jest.Mock).mock.calls[0]
+    expect(payload.content).toEqual(expect.objectContaining({
+      guide_title: '太平水库亲子游',
+      guide_images: ['cloud://env/posts/new-cover.jpg'],
+      guide_drive_duration: '青山村约35分钟到达入口',
+      guide_location: { address: '太平水库入口', lat: 30.2, lng: 104.2 },
+    }))
+  })
+
   test('video_group 必须是数组', async () => {
     ;(db.getById as jest.Mock).mockResolvedValueOnce({
       _id: 's-1', communityId: 'c-1', widgets: [
@@ -474,7 +510,7 @@ describe('post.updateAdmin', () => {
     expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({
       pendingContent: { __set: {
         title: 'new title',
-        location: existingLocation,
+        location: { address: 'malicious overwrite', lat: 9, lng: 9 },
         audio: [{ title: 'new audio', fileID: 'cloud://env/audios/new.mp3', cover: 'cloud://env/covers/new.jpg', duration: 120, size: 2048, ext: 'mp3' }],
       } },
       pendingAuditStatus: 'pending',
@@ -489,6 +525,58 @@ describe('post.updateAdmin', () => {
     expect(patch.commentCount).toBeUndefined()
     expect(patch.likeCount).toBeUndefined()
     expect(patch.pendingContent.__set.legacyRemovedWidget).toBeUndefined()
+  })
+
+  test('normalizes old guide_note sections before saving admin edits', async () => {
+    const existingPost = {
+      _id: 'post-guide',
+      communityId: 'community-1',
+      sectionId: 'section-guide',
+      authorId: 'author-openid',
+      status: 'active',
+      auditStatus: 'pass',
+      content: {
+        guide_title: '旧标题',
+        guide_images: ['cloud://env/posts/old-cover.jpg'],
+        guide_location: { address: '旧地点', lat: 30.1, lng: 104.1 },
+      },
+    }
+    const oldGuideSection = {
+      _id: 'section-guide',
+      communityId: 'community-1',
+      displayTemplate: 'guide_note',
+      widgets: [
+        { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true, locked: true },
+        { widgetId: 'guide_images', type: 'image_group', label: '封面/图片', fieldKey: 'images', required: true, order: 1, showInList: false, locked: true },
+        { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false, locked: true },
+        { widgetId: 'guide_location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false, locked: true },
+      ],
+    }
+    ;(db.getById as jest.Mock)
+      .mockResolvedValueOnce(existingPost)
+      .mockResolvedValueOnce(oldGuideSection)
+    ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+    const result: any = await main({
+      action: 'post.updateAdmin',
+      _actAs: SUPER_CTX,
+      postId: 'post-guide',
+      content: {
+        guide_title: '太平水库亲子游',
+        guide_images: ['cloud://env/posts/new-cover.jpg'],
+        guide_drive_duration: '青山村约35分钟到达入口',
+        guide_location: { address: '太平水库入口', lat: 30.2, lng: 104.2 },
+      },
+    })
+
+    expect(result.success).toBe(true)
+    const pendingPatch = (db.updateById as jest.Mock).mock.calls.find(([, , patch]) => patch.pendingContent)?.[2]
+    expect(pendingPatch.pendingContent.__set).toEqual(expect.objectContaining({
+      guide_title: '太平水库亲子游',
+      guide_images: ['cloud://env/posts/new-cover.jpg'],
+      guide_drive_duration: '青山村约35分钟到达入口',
+      guide_location: { address: '太平水库入口', lat: 30.2, lng: 104.2 },
+    }))
   })
 
   test('updates rich_note content instead of preserving the old value', async () => {

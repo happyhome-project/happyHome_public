@@ -150,11 +150,15 @@ function renderParagraphLine(line: string): string {
   return preserveConsecutiveSpaces(renderInline(line))
 }
 
+function pushRepeated(target: string[], count: number, value: string) {
+  for (let i = 0; i < count; i += 1) {
+    target.push(value)
+  }
+}
+
 function renderBlankLines(count: number): string {
   const lines: string[] = []
-  for (let index = 0; index < count; index += 1) {
-    lines.push('&nbsp;')
-  }
+  pushRepeated(lines, count, '&nbsp;')
   return lines.join('<br>')
 }
 
@@ -207,9 +211,7 @@ export function markdownToHtml(markdown: string): string {
   }
   const prependPendingBlankLinesToParagraph = () => {
     if (pendingBlankLines > 0) {
-      for (let index = 0; index < pendingBlankLines; index += 1) {
-        paragraphBuffer.push('')
-      }
+      pushRepeated(paragraphBuffer, pendingBlankLines, '')
       pendingBlankLines = 0
     }
   }

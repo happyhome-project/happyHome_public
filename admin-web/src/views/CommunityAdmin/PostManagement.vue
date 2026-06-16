@@ -76,29 +76,66 @@
       <el-button type="primary" @click="loadPosts">查询</el-button>
     </div>
 
-    <el-table :data="posts" v-loading="loading" style="width: 100%;">
-      <el-table-column prop="sectionName" label="板块" min-width="120" />
-      <el-table-column label="作者" min-width="180">
+    <el-table
+      :data="posts"
+      v-loading="loading"
+      border
+      style="width: 100%;"
+      @header-dragend="handleColumnDragEnd"
+    >
+      <el-table-column
+        prop="sectionName"
+        column-key="section"
+        label="板块"
+        :width="columnWidths.section"
+        min-width="100"
+        :resizable="true"
+      />
+      <el-table-column
+        column-key="author"
+        label="作者"
+        :width="columnWidths.author"
+        min-width="150"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <div>{{ row.authorNickname || '未设置昵称' }}</div>
           <div class="sub-text">{{ row.authorId }}</div>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="100">
+      <el-table-column
+        column-key="status"
+        label="状态"
+        :width="columnWidths.status"
+        min-width="90"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">
             {{ row.status === 'active' ? '已发布' : '已删除' }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="审核" width="120">
+      <el-table-column
+        column-key="audit"
+        label="审核"
+        :width="columnWidths.audit"
+        min-width="100"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <el-tag :type="auditTag(row.pendingContent ? row.pendingAuditStatus : row.auditStatus)" size="small">
             {{ auditText(row.pendingContent ? row.pendingAuditStatus : row.auditStatus) }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="运营标记" width="130">
+      <el-table-column
+        column-key="flags"
+        label="运营标记"
+        :width="columnWidths.flags"
+        min-width="110"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <div class="post-flags">
             <el-tag v-if="row.isPinned" size="small" type="warning">置顶</el-tag>
@@ -107,17 +144,36 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="摘要" min-width="320" show-overflow-tooltip>
+      <el-table-column
+        column-key="summary"
+        label="摘要"
+        :width="columnWidths.summary"
+        min-width="240"
+        show-overflow-tooltip
+        :resizable="true"
+      >
         <template #default="{ row }">
           {{ getPostSummary(row) }}
         </template>
       </el-table-column>
-      <el-table-column label="发布时间" width="180">
+      <el-table-column
+        column-key="createdAt"
+        label="发布时间"
+        :width="columnWidths.createdAt"
+        min-width="150"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <span>{{ formatAdminDateTime(row.createdAt) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="420">
+      <el-table-column
+        column-key="actions"
+        label="操作"
+        :width="columnWidths.actions"
+        min-width="320"
+        :resizable="true"
+      >
         <template #default="{ row }">
           <el-button size="small" @click="openDetail(row)">详情</el-button>
           <el-button
@@ -267,6 +323,7 @@
                   class="image-detail-thumb"
                   fit="cover"
                   :preview-src-list="detailImagePreviewList(field.rawValue)"
+                  :initial-index="detailImagePreviewIndex(field.rawValue, image)"
                   preview-teleported
                 />
                 <div v-else class="image-detail-thumb image-detail-placeholder">图片加载中</div>
@@ -336,6 +393,7 @@ import { communityApi, mediaApi, postAdminApi, sectionApi } from '../../api/clou
 import { formatAdminDateTime } from '../../utils/datetime'
 import RichNoteAdminPreview from '../../components/RichNoteAdminPreview.vue'
 import { normalizeRichNoteContent } from '../../utils/rich-note'
+import { usePersistedTableColumns } from '../../utils/persistedTableColumns'
 
 const route = useRoute()
 const router = useRouter()
@@ -357,6 +415,41 @@ const filters = ref({
   auditStatus: 'all' as 'pending' | 'pass' | 'review' | 'rejected' | 'all',
   pinnedStatus: 'all' as 'all' | 'true' | 'false',
   featuredStatus: 'all' as 'all' | 'true' | 'false',
+})
+type PostTableColumnKey =
+  | 'section'
+  | 'author'
+  | 'status'
+  | 'audit'
+  | 'flags'
+  | 'summary'
+  | 'createdAt'
+  | 'actions'
+
+const POST_TABLE_DEFAULT_COLUMN_WIDTHS: Record<PostTableColumnKey, number> = {
+  section: 130,
+  author: 190,
+  status: 100,
+  audit: 110,
+  flags: 130,
+  summary: 520,
+  createdAt: 180,
+  actions: 420,
+}
+const POST_TABLE_MIN_COLUMN_WIDTHS: Record<PostTableColumnKey, number> = {
+  section: 100,
+  author: 150,
+  status: 90,
+  audit: 100,
+  flags: 110,
+  summary: 240,
+  createdAt: 150,
+  actions: 320,
+}
+const { columnWidths, handleColumnDragEnd } = usePersistedTableColumns<PostTableColumnKey>({
+  storageKey: 'happyhome.admin.postTable.columnWidths.v1',
+  defaults: POST_TABLE_DEFAULT_COLUMN_WIDTHS,
+  minimums: POST_TABLE_MIN_COLUMN_WIDTHS,
 })
 
 const detailFields = computed(() => {
@@ -651,6 +744,12 @@ function canRenderDetailImage(src: string) {
 
 function detailImagePreviewList(value: unknown) {
   return imageItems(value).map(detailImageUrl).filter((url) => /^https?:\/\//.test(url) || url.startsWith('data:'))
+}
+
+function detailImagePreviewIndex(value: unknown, src: string) {
+  const url = detailImageUrl(src)
+  const index = detailImagePreviewList(value).findIndex((item) => item === url)
+  return index >= 0 ? index : 0
 }
 
 async function loadDetailImageUrls(post: any, section: any) {

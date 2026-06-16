@@ -46,4 +46,15 @@ describe('community store', () => {
     expect(sectionList).not.toHaveBeenCalled()
     expect(store.currentCommunityId).toBe('community-1')
   })
+
+  test('currentCommunity can come from a public browsing community without joining myCommunities', async () => {
+    const { useCommunityStore } = await import('../community')
+    const store = useCommunityStore()
+
+    store.currentCommunityId = 'public-community'
+    store.browsingCommunity = { _id: 'public-community', name: '阳光花园小区', status: 'active' } as any
+
+    expect(store.myCommunities).toEqual([])
+    expect(store.currentCommunity?.name).toBe('阳光花园小区')
+  })
 })

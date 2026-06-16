@@ -1,13 +1,5 @@
 <template>
   <view class="phone-inner">
-    <!-- 未登录：引导卡片（占满首页，挡住任何数据渲染） -->
-    <LoginGuard
-      v-if="!userStore.isLoggedIn"
-      title="欢迎来到 社群助手"
-      desc="登录后查看你的社群和近况"
-    />
-
-    <template v-else>
     <!-- Masthead：社群封面卡（整块可点切换社区） -->
     <view
       class="s1-top"
@@ -238,7 +230,6 @@
         </view>
       </view>
     </view>
-    </template>
     <AppTabBar current="home" />
   </view>
 </template>
@@ -250,7 +241,6 @@ import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { postApi } from '../../api/cloud'
 import AppTabBar from '../../components/AppTabBar.vue'
-import LoginGuard from '../../components/LoginGuard.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard } from '../../utils/widget'
 import { clientLog } from '../../utils/client-log'
@@ -601,15 +591,18 @@ function expandDormant() {
 
 function applyHomeSnapshot(snapshot: HomeSnapshot | null, source: 'prefetch' | 'cache' | 'cloud') {
   if (!snapshot) return false
-  if (!userStore.isLoggedIn || snapshot.viewerOpenId !== userStore.openId) return false
-  communityStore.myCommunities = snapshot.communities || []
+  const expectedViewer = userStore.isLoggedIn ? userStore.openId : ''
+  if (snapshot.viewerOpenId !== expectedViewer) return false
+  communityStore.myCommunities = userStore.isLoggedIn ? (snapshot.communities || []) : []
   communityStore.currentCommunityId = snapshot.currentCommunityId || ''
+  communityStore.browsingCommunity = snapshot.currentCommunity || snapshot.communities?.find((item) => item._id === snapshot.currentCommunityId) || null
   communityStore.currentSectionIndex = 0
   communityStore.currentSections = snapshot.sections || []
   postsBySection.value = snapshot.postsBySection || {}
-  communityStore.saveToStorage()
+  if (userStore.isLoggedIn) communityStore.saveToStorage()
   clientLog('info', 'home.snapshot.apply', {
     source,
+    viewerMode: userStore.isLoggedIn ? 'user' : 'guest',
     communityCount: communityStore.myCommunities.length,
     currentCommunityId: communityStore.currentCommunityId || '',
     sectionCount: communityStore.currentSections.length,
@@ -688,27 +681,25 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
     })
     return
   }
-  if (!userStore.isLoggedIn) {
-    communityStore.clearCommunityState()
-    communityStore.myCommunities = []
-    postsBySection.value = {}
-    clientLog('warn', 'home.refresh.skip.loggedOut', {})
-    return
-  }
   refreshingHome = true
   try {
-    const result = await postApi.bootstrap(communityStore.currentCommunityId || undefined)
-    if (result.backgroundFetchToken) {
+    const requestedCommunityId = userStore.isLoggedIn
+      ? communityStore.currentCommunityId || undefined
+      : undefined
+    const result = await postApi.bootstrap(requestedCommunityId, 20, !userStore.isLoggedIn)
+    if (userStore.isLoggedIn && result.backgroundFetchToken) {
       userStore.setBackgroundFetchToken(result.backgroundFetchToken, result.backgroundFetchTokenExpiresAt)
     }
     applyHomeSnapshot(result as HomeSnapshot, 'cloud')
-    if (communityStore.currentCommunityId) {
+    if (userStore.isLoggedIn && communityStore.currentCommunityId) {
       writeHomeSnapshotCache(result as HomeSnapshot)
     }
-    if (communityStore.myCommunities.length === 0) {
+    if (!communityStore.currentCommunityId) {
       postsBySection.value = {}
-      clientLog('warn', 'home.communities.empty.openOnboarding', {})
-      openOnboardingPreservingStack()
+      clientLog('warn', 'home.community.empty.openOnboarding', {
+        loggedIn: userStore.isLoggedIn,
+      })
+      if (userStore.isLoggedIn) openOnboardingPreservingStack()
       return
     }
     if (force) clearHomeRefreshMarker()

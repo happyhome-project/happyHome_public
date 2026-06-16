@@ -13,6 +13,7 @@ const guideRouteDetail = fs.readFileSync(path.join(root, 'miniprogram', 'src', '
 const widgetEditor = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'components', 'widgets', 'WidgetEditor.vue'), 'utf8')
 const widgetRenderer = fs.readFileSync(path.join(root, 'miniprogram', 'src', 'components', 'widgets', 'WidgetRenderer.vue'), 'utf8')
 const locationAdminEditor = fs.readFileSync(path.join(root, 'admin-web', 'src', 'components', 'LocationAdminEditor.vue'), 'utf8')
+const guideNoteWidgets = fs.readFileSync(path.join(root, 'cloud', 'shared', 'guide-note-widgets.ts'), 'utf8')
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -25,8 +26,9 @@ assert(
 
 assert(
   adminWidgetEditor.includes('guide_drive_duration') &&
+    adminWidgetEditor.includes('guide_liangbulu_track_id') &&
     adminWidgetEditor.includes('guide_location'),
-  'Admin widget editor must lock the guide drive-duration field together with the route location field.'
+  'Admin widget editor must lock the guide drive-duration, LiangBuLu track-id, and route location fields.'
 )
 
 assert(
@@ -80,9 +82,11 @@ assert(
 )
 
 assert(
-  guideRouteDetail.includes('guide-drive') &&
-    guideRouteDetail.indexOf('guide-drive') < guideRouteDetail.indexOf('guide-map'),
-  'guide route detail must show drive duration above the route/track section.'
+  !guideRouteDetail.includes('class="guide-drive"') &&
+    !guideRouteDetail.includes('自驾到达') &&
+    guideRouteDetail.includes('liangbuluTrackId') &&
+    guideRouteDetail.indexOf('guide-track') < guideRouteDetail.indexOf('guide-map'),
+  'guide route detail must show optional LiangBuLu track-id copy UI above the destination map, without repeating drive duration.'
 )
 
 assert(
@@ -107,6 +111,8 @@ assert(
 
 assert(
   guideRouteDetail.includes('目的地位置') &&
+    guideRouteDetail.includes('openLocation') &&
+    guideRouteDetail.includes('导航') &&
     !guideRouteDetail.includes('线路轨迹'),
   'guide route detail must present the map as destination navigation, not route track.'
 )
@@ -122,6 +128,26 @@ assert(
     locationAdminEditor.includes('openMapDialog') &&
     locationAdminEditor.includes('<el-dialog'),
   'admin location editor must search Amap candidates and support large-dialog map micro-adjustment with runtime Amap config.'
+)
+
+assert(
+  locationAdminEditor.includes('map-workbench-dialog') &&
+    locationAdminEditor.includes('dialog-search-row') &&
+    locationAdminEditor.includes('dialog-candidate-list') &&
+    locationAdminEditor.includes('pendingLocation') &&
+    locationAdminEditor.includes('confirmMapSelection') &&
+    locationAdminEditor.includes('cancelMapSelection') &&
+    locationAdminEditor.includes('AMap.Scale') &&
+    locationAdminEditor.includes('AMap.ToolBar'),
+  'admin location editor must use a full map workbench with search, candidates, pending selection, controls, and explicit confirm/cancel.'
+)
+
+assert(
+  !locationAdminEditor.includes('class="search-row"') &&
+    !locationAdminEditor.includes('class="candidate-list"') &&
+    !locationAdminEditor.includes('class="map-entry"') &&
+    !locationAdminEditor.includes('打开大地图微调'),
+  'admin location editor outer form must not keep the old duplicate search/candidate/map-entry flow.'
 )
 
 assert(
@@ -185,6 +211,15 @@ assert(
 assert(
   !homePage.includes('photo-count'),
   'guide note cards must not display photo-count badges.'
+)
+
+const lockedGuideWidgetSource = guideNoteWidgets
+  .split('export const GUIDE_NOTE_LOCKED_WIDGETS')[1]
+  .split('const GUIDE_NOTE_LOCKED_BY_ID')[0]
+assert(
+  ['guide_age', 'guide_duration', 'guide_fee', 'guide_cost', 'guide_tips', '适合年龄', '游玩时间', '游玩时长', '参考费用', '注意事项']
+    .every((value) => !lockedGuideWidgetSource.includes(value)),
+  'guide note locked widgets must not include retired parent-logistics fields.'
 )
 
 console.log('[guide-note-static] PASS')

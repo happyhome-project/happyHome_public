@@ -61,18 +61,19 @@
     </view>
 
     <view
-      v-for="section in detail.bodySections"
-      :key="section.title"
+      v-for="(section, sectionIndex) in detail.bodySections"
+      :key="`${section.title || section.type}-${sectionIndex}`"
       class="guide-section"
+      :class="{ 'guide-section--plain': !section.title }"
     >
-      <view class="guide-section-heading">
+      <view v-if="section.title" class="guide-section-heading">
         <text>{{ section.title }}</text>
       </view>
       <view v-if="section.type === 'rich_note'" class="guide-rich-note">
         <RichNoteRenderer :value="section.value" :allow-images="false" />
       </view>
       <view v-else class="guide-text">
-        <template v-for="(block, index) in section.blocks" :key="`${section.title}-${index}`">
+        <template v-for="(block, index) in section.blocks" :key="`${sectionIndex}-${index}`">
           <text
             v-if="block.type === 'paragraph'"
             class="guide-paragraph"
@@ -88,9 +89,15 @@
       </view>
     </view>
 
-    <view v-if="detail.driveDuration" class="guide-drive">
-      <text class="guide-drive-label">自驾到达</text>
-      <text class="guide-drive-value">{{ detail.driveDuration }}</text>
+    <view v-if="detail.liangbuluTrackId" class="guide-section guide-track">
+      <view class="guide-section-heading">
+        <text>两步路轨迹</text>
+      </view>
+      <view class="guide-track-copy" @tap="copyLiangbuluTrackId">
+        <text class="guide-track-id">{{ detail.liangbuluTrackId }}</text>
+        <text class="guide-track-action">复制编号</text>
+      </view>
+      <text class="guide-track-hint">复制后可到两步路搜索轨迹</text>
     </view>
 
     <view v-if="detail.location" class="guide-section">
@@ -100,7 +107,7 @@
       <!-- #ifdef H5 -->
       <view class="guide-map-fallback" @tap="openLocation">
         <text class="guide-map-fallback-title">{{ detail.location.name || detail.location.address || '目的地位置' }}</text>
-        <text class="guide-map-fallback-sub">点击打开地图导航</text>
+        <text class="guide-map-fallback-sub">点击打开微信地图导航</text>
       </view>
       <!-- #endif -->
       <!-- #ifndef H5 -->
@@ -115,9 +122,11 @@
           :enable-zoom="false"
           :enable-rotate="false"
           :enable-overlooking="false"
+          @tap.stop="openLocation"
         />
         <view v-if="detail.location.address || detail.location.name" class="guide-map-meta">
-          <text>{{ detail.location.address || detail.location.name }}</text>
+          <text class="guide-map-address">{{ detail.location.address || detail.location.name }}</text>
+          <text class="guide-map-action">导航</text>
         </view>
       </view>
       <!-- #endif -->
@@ -222,6 +231,20 @@ function previewBodyImage(current: string) {
   const urls = bodyImageUrls.value
   if (urls.length === 0) return
   uni.previewImage({ current, urls })
+}
+
+function copyLiangbuluTrackId() {
+  const trackId = String(props.detail.liangbuluTrackId || '').trim()
+  if (!trackId) return
+  uni.setClipboardData({
+    data: trackId,
+    success: () => {
+      uni.showToast({ title: '已复制编号', icon: 'success' })
+    },
+    fail: () => {
+      uni.showToast({ title: '复制失败', icon: 'none' })
+    },
+  })
 }
 
 function openLocation() {
@@ -349,9 +372,12 @@ function openLocation() {
 }
 
 .guide-stat {
-  min-height: 104rpx;
-  padding: 18rpx 6rpx 16rpx;
+  min-height: 84rpx;
+  padding: 12rpx 6rpx 10rpx;
   border-right: 1rpx solid $hh-ink-line-2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   text-align: center;
 }
 
@@ -361,20 +387,20 @@ function openLocation() {
 
 .guide-stat-value {
   display: block;
-  min-height: 34rpx;
+  min-height: 30rpx;
   color: $hh-ink-1;
   font-family: $hh-font-num;
-  font-size: 32rpx;
+  font-size: 30rpx;
   line-height: 1.15;
   font-weight: $hh-font-weight-bold;
 }
 
 .guide-stat-label {
   display: block;
-  margin-top: 8rpx;
+  margin-top: 4rpx;
   color: $hh-ink-3;
   font-size: 22rpx;
-  line-height: 1.3;
+  line-height: 1.25;
 }
 
 .guide-section {
@@ -386,28 +412,8 @@ function openLocation() {
   border-bottom: 0;
 }
 
-.guide-drive {
-  margin: 30rpx 28rpx 0;
-  padding: 22rpx 24rpx;
-  border: 1rpx solid $hh-accent-line;
-  border-radius: $hh-radius-md;
-  background: $hh-accent-wash;
-}
-
-.guide-drive-label {
-  display: block;
-  color: $hh-ink-3;
-  font-size: 23rpx;
-  line-height: 1.25;
-}
-
-.guide-drive-value {
-  display: block;
-  margin-top: 8rpx;
-  color: $hh-accent-ink;
-  font-size: 30rpx;
-  line-height: 1.35;
-  font-weight: $hh-font-weight-bold;
+.guide-section--plain {
+  padding-top: 22rpx;
 }
 
 .guide-section-heading {
@@ -456,6 +462,53 @@ function openLocation() {
   line-height: 1.9;
 }
 
+.guide-track {
+  padding-top: 26rpx;
+}
+
+.guide-track-copy {
+  min-height: 78rpx;
+  padding: 18rpx 20rpx;
+  border: 1rpx solid $hh-accent-line;
+  border-radius: $hh-radius-md;
+  background: $hh-accent-wash;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.guide-track-id {
+  flex: 1;
+  min-width: 0;
+  color: $hh-accent-ink;
+  font-family: $hh-font-num;
+  font-size: 30rpx;
+  line-height: 1.35;
+  font-weight: $hh-font-weight-bold;
+  word-break: break-all;
+}
+
+.guide-track-action {
+  flex: 0 0 auto;
+  min-height: 48rpx;
+  padding: 10rpx 18rpx;
+  border-radius: $hh-radius-full;
+  background: $hh-accent;
+  color: #fff;
+  font-size: 24rpx;
+  line-height: 1.2;
+  font-weight: $hh-font-weight-bold;
+}
+
+.guide-track-hint {
+  display: block;
+  margin-top: 12rpx;
+  color: $hh-ink-3;
+  font-size: 24rpx;
+  line-height: 1.45;
+}
+
 .guide-map-card {
   overflow: hidden;
   border: 1rpx solid $hh-ink-line-2;
@@ -474,6 +527,27 @@ function openLocation() {
   font-size: 26rpx;
   line-height: 1.5;
   border-top: 1rpx solid $hh-ink-line-2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.guide-map-address {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.guide-map-action {
+  flex: 0 0 auto;
+  padding: 8rpx 18rpx;
+  border-radius: $hh-radius-full;
+  background: $hh-accent;
+  color: #fff;
+  font-size: 24rpx;
+  line-height: 1.2;
+  font-weight: $hh-font-weight-bold;
 }
 
 .guide-map-fallback {

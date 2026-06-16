@@ -328,7 +328,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
@@ -359,7 +359,10 @@ const notificationSubscriptions = ref<Array<{ eventType: ApprovalNotificationEve
 const notificationNeedsAuthorization = ref(false)
 const profileError = ref('')
 let refreshingProfile = false
-const appVersion = computed(() => String(BUILD_INFO.version || BUILD_INFO.buildId || 'unknown'))
+let lastLoginStateRefreshKey = ''
+let suppressNextLoginStateRefresh = false
+const buildVersion = typeof __HH_BUILD_VERSION__ === 'string' ? __HH_BUILD_VERSION__ : ''
+const appVersion = computed(() => String(buildVersion || BUILD_INFO.version || BUILD_INFO.buildId || 'unknown'))
 
 const configuredNotificationTemplates = computed(() => configuredApprovalTemplates(notificationTemplates.value))
 const hasAdminTools = computed(() => userStore.role === 'superAdmin' || adminCommunityIds.value.length > 0)
@@ -439,6 +442,17 @@ function logProfile(level: 'debug' | 'info' | 'warn' | 'error', event: string, d
   clientLog(level, event, getProfileLogDetails(details))
 }
 
+function getLoginStateRefreshKey() {
+  if (!userStore.isLoggedIn) return ''
+  return `${userStore.openId || 'pending-openid'}:${userStore.role || 'user'}`
+}
+
+function markCurrentLoginStateRefreshHandled() {
+  const key = getLoginStateRefreshKey()
+  if (key) lastLoginStateRefreshKey = key
+  suppressNextLoginStateRefresh = false
+}
+
 function onChooseAvatar(e: any) {
   const tempPath = e?.detail?.avatarUrl || ''
   if (tempPath) {
@@ -515,7 +529,9 @@ function cancelEditProfile() {
 const submitFormLock = useBusyLock(async () => {
   try {
     const avatarUrl = await uploadAvatarIfAny()
+    suppressNextLoginStateRefresh = true
     await userStore.login({ nickName: formNickName.value, avatarUrl })
+    markCurrentLoginStateRefreshHandled()
     if (isEditingProfile.value) await loadProfileDataAfterRoleResolved('profileSaved')
     else await loadProfileDataAfterRoleResolved('loginSaved')
     isEditingProfile.value = false
@@ -529,6 +545,7 @@ const submitFormLock = useBusyLock(async () => {
       content: e?.message || '请重试',
       showCancel: false,
     })
+    suppressNextLoginStateRefresh = false
   }
 })
 
@@ -538,14 +555,17 @@ const devOpenid = ref('')
 const devNickname = ref('')
 const devLoginLock = useBusyLock(async () => {
   try {
+    suppressNextLoginStateRefresh = true
     await userStore.devLogin(devOpenid.value, devNickname.value)
-    await communityStore.loadMyCommunities()
+    markCurrentLoginStateRefreshHandled()
+    await loadProfileDataAfterRoleResolved('devLogin')
     showDevLogin.value = false
     devOpenid.value = ''
     devNickname.value = ''
     uni.showToast({ title: '登录成功', icon: 'success' })
   } catch (e: any) {
     uni.showModal({ title: '登录失败', content: e?.message || '请检查 openid 格式', showCancel: false })
+    suppressNextLoginStateRefresh = false
   }
 })
 
@@ -843,6 +863,25 @@ async function refreshProfileData(reason = 'manual') {
     logProfile('info', 'profile.refresh.done', { reason })
   }
 }
+
+watch(
+  () => getLoginStateRefreshKey(),
+  (key) => {
+    if (!key) {
+      lastLoginStateRefreshKey = ''
+      suppressNextLoginStateRefresh = false
+      return
+    }
+    if (key === lastLoginStateRefreshKey) return
+    lastLoginStateRefreshKey = key
+    if (suppressNextLoginStateRefresh) {
+      suppressNextLoginStateRefresh = false
+      return
+    }
+    void refreshProfileData('loginStateReady')
+  },
+  { flush: 'post' },
+)
 
 onMounted(() => {
   hideNativeTabBar()
