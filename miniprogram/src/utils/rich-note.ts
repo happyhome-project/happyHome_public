@@ -151,7 +151,11 @@ function renderParagraphLine(line: string): string {
 }
 
 function renderBlankLines(count: number): string {
-  return Array.from({ length: count }, () => '&nbsp;').join('<br>')
+  const lines: string[] = []
+  for (let index = 0; index < count; index += 1) {
+    lines.push('&nbsp;')
+  }
+  return lines.join('<br>')
 }
 
 function isMarkdownBlockStart(line: string): boolean {
@@ -203,7 +207,9 @@ export function markdownToHtml(markdown: string): string {
   }
   const prependPendingBlankLinesToParagraph = () => {
     if (pendingBlankLines > 0) {
-      paragraphBuffer.push(...Array.from({ length: pendingBlankLines }, () => ''))
+      for (let index = 0; index < pendingBlankLines; index += 1) {
+        paragraphBuffer.push('')
+      }
       pendingBlankLines = 0
     }
   }

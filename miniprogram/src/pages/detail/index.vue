@@ -16,11 +16,10 @@
       />
 
       <view v-else>
-        <WidgetRenderer
-          v-for="widget in regularWidgets"
-          :key="widget.widgetId"
-          :widget="widget"
-          :content="post.content"
+        <DefaultDetailView
+          :post="post"
+          :section="section"
+          :widgets="regularWidgets"
           :post-meta="postMeta"
         />
 
@@ -143,7 +142,7 @@ import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import LoginGuard from '../../components/LoginGuard.vue'
 import GuideRouteDetailView from '../../components/GuideRouteDetailView.vue'
-import WidgetRenderer from '../../components/widgets/WidgetRenderer.vue'
+import DefaultDetailView from '../../components/DefaultDetailView.vue'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
