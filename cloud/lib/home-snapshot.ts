@@ -1,6 +1,7 @@
 import * as db from './db'
 import { ensureBackgroundFetchToken } from './background-fetch-token'
 import { isPostVisibleToMembers } from './content-audit'
+import { getGuestIntroConfig } from './guest-intro-config'
 import { ensureCommunityReadable, getActivePublicCommunity, getDefaultPublicCommunityId } from './public-community'
 import { normalizeGuideNoteSection } from '../shared/guide-note-widgets'
 import type {
@@ -359,8 +360,10 @@ export async function buildHomeBootstrap(
   options: { currentCommunityId?: string; limitPerSection?: number } = {},
 ): Promise<HomeBootstrapResponse> {
   if (!openid) {
+    const snapshot = await buildHomeSnapshot('', options)
     return {
-      ...(await buildHomeSnapshot('', options)),
+      ...snapshot,
+      ...(snapshot.currentCommunityId ? { guestIntroConfig: await getGuestIntroConfig() } : {}),
       backgroundFetchToken: '',
       backgroundFetchTokenExpiresAt: '',
     }

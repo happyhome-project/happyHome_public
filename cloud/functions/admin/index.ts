@@ -14,6 +14,7 @@ import {
 import { getEditableWidgetIds, sanitizeContent, validateContentValues, validateRequiredWidgets } from '../../lib/post-validate'
 import { getWxacodeUnlimited } from '../../lib/wx-openapi'
 import { searchAmapPoi } from '../../lib/amap'
+import { getGuestIntroConfig, saveGuestIntroConfig } from '../../lib/guest-intro-config'
 import {
   assertOwnCommunityOrSuper,
   generateSalt,
@@ -118,6 +119,7 @@ const SUPER_ADMIN_ONLY: Array<string | RegExp> = [
   'user.setSuperAdmin',
   /^audit\./,
   /^admin\.(?!approvalSummary$)/,
+  /^appConfig\./,
 ]
 // 这些 action 需要校验对 communityId 的归属（superAdmin 自动放行）
 const COMMUNITY_SCOPED_ACTIONS = new Set([
@@ -797,6 +799,18 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const region = String(params.region || '').trim()
     const candidates = await searchAmapPoi({ keyword, region, limit: 8 })
     return { candidates }
+  }
+
+  if (action === 'appConfig.getGuestIntro') {
+    return { config: await getGuestIntroConfig() }
+  }
+
+  if (action === 'appConfig.updateGuestIntro') {
+    const config = await saveGuestIntroConfig(params.config || {}, {
+      publishNewVersion: params.publishNewVersion === true,
+      updatedBy: ctx.username || ctx.accountId,
+    })
+    return { config }
   }
 
   if (action === 'user.setSuperAdmin') {

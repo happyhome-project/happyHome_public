@@ -28,6 +28,7 @@ import {
   handleUpdate,
 } from '../index'
 import * as db from '../../../lib/db'
+import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -394,6 +395,14 @@ test('bootstrap: unauthenticated viewer lands on the configured public community
     return null
   })
   ;(db.query as jest.Mock).mockImplementation(async (collectionName: string, where: any) => {
+    if (collectionName === 'app_configs') {
+      return [{
+        _id: 'intro-1',
+        key: GUEST_INTRO_CONFIG_KEY,
+        ...DEFAULT_GUEST_INTRO_CONFIG,
+        title: '样板弹窗标题',
+      }]
+    }
     if (collectionName === 'sections') return sections
     if (collectionName === 'posts') return posts.filter((post) => post.sectionId === where.sectionId)
     return []
@@ -411,6 +420,10 @@ test('bootstrap: unauthenticated viewer lands on the configured public community
     authorNickname: '作者一',
   }))
   expect(result.backgroundFetchToken).toBe('')
+  expect((result as any).guestIntroConfig).toEqual(expect.objectContaining({
+    title: '样板弹窗标题',
+    secondaryActionText: '登录后加入或创建社群',
+  }))
   expect((db.query as jest.Mock).mock.calls.some(([collection]) => collection === 'community_members')).toBe(false)
 })
 
@@ -503,6 +516,7 @@ test('bootstrap: logged-in viewer with active communities does not get stuck on 
   expect(result.currentCommunityId).toBe('joined-community')
   expect((result as any).currentCommunity).toEqual(expect.objectContaining(joinedCommunity))
   expect(result.communities.map((community: any) => community._id)).toEqual(['joined-community'])
+  expect((result as any).guestIntroConfig).toBeUndefined()
 })
 
 test('joinAttendance: 同一用户重复参与不会重复创建记录', async () => {
