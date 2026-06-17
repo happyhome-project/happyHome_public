@@ -214,7 +214,9 @@
     </view>
 
     <!-- Foot -->
-    <text class="s1-foot">— {{ kind }} · 记忆在这里 —</text>
+    <view class="s1-foot-wrap">
+      <text class="s1-foot">— {{ kind }} · 记忆在这里 —</text>
+    </view>
     <!-- Community switcher modal -->
     <view v-if="showSwitcher" class="switcher-mask" @tap="showSwitcher = false">
       <view class="switcher-panel" @tap.stop>
@@ -831,7 +833,7 @@ onPullDownRefresh(async () => {
 
 <style lang="scss" scoped>
 .phone-inner {
-  padding: 16rpx 0 160rpx;
+  padding: 16rpx 0 112rpx;
   background: $hh-surface-0;
   min-height: 100vh;
   position: relative;
@@ -1515,14 +1517,20 @@ onPullDownRefresh(async () => {
 
 /* ═══ Foot ═══ */
 .s1-foot {
-  padding: 44rpx 0 20rpx;
+  display: block;
   text-align: center;
   font-family: $hh-font-mono;
   font-size: 19rpx;
+  line-height: 1.4;
   letter-spacing: $hh-tracking-mono;
   text-transform: uppercase;
   color: $hh-ink-4;
-  display: block;
+}
+
+.s1-foot-wrap {
+  margin: 0 32rpx;
+  padding: 4rpx 0 8rpx;
+  text-align: center;
 }
 /* ═══ Switcher ═══ */
 .switcher-mask {

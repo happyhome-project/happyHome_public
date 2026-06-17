@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="community neighbor avatar 12">
+  <defs>
+    <linearGradient id="bg11" x1="18" y1="14" x2="142" y2="146" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C9E3F1"/>
+      <stop offset="1" stop-color="#FFE0A8"/>
+    </linearGradient>
+    <clipPath id="clip"><circle cx="80" cy="80" r="76"/></clipPath>
+  </defs>
+  <circle cx="80" cy="80" r="76" fill="url(#bg11)"/>
+  <g clip-path="url(#clip)">
+    <circle cx="124" cy="50" r="9" fill="#FFFFFF" opacity="0.35"/>
+    <path d="M29 148c7-31 27-47 61-47s54 16 63 47z" fill="#3E7C59" opacity="0.18"/>
+    <path d="M66 123c13 8 35 8 49 0l4 21H62z" fill="#F7F0E7"/><path d="M88 124l12 22" stroke="#D95C4C" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="51" cy="84" r="9" fill="#F1D0B7"/><circle cx="129" cy="84" r="9" fill="#F1D0B7"/>
+    <ellipse cx="90" cy="80" rx="41" ry="47" fill="#F1D0B7" transform="translate(-2 0)"/>
+    <path d="M43 74c0-27 19-43 48-43 30 0 50 17 50 45-13-12-30-18-49-18-21 0-37 5-49 16z" fill="#1F2A2D"/><circle cx="123" cy="55" r="13" fill="#1F2A2D"/>
+
+    <path d="M56 69c12-10 24-14 39-13" fill="none" stroke="#1F2A2D" stroke-width="9" stroke-linecap="round" opacity="0.96"/>
+    <circle cx="72" cy="83" r="3.6" fill="#2F3030"/>
+    <circle cx="108" cy="84" r="3.6" fill="#2F3030"/>
+
+    <path d="M88 88c-2 5-3 10 3 12" fill="none" stroke="#9D684F" stroke-width="2.5" stroke-linecap="round" opacity="0.55"/>
+    <path d="M76 91c8 8 21 8 30 0" fill="none" stroke="#7E4A40" stroke-width="3" stroke-linecap="round"/>
+    <ellipse cx="62" cy="96" rx="8" ry="4" fill="#D9767E" opacity="0.24"/><ellipse cx="118" cy="96" rx="8" ry="4" fill="#D9767E" opacity="0.22"/>
+    <path d="M41 145c24 10 71 11 103 0" fill="none" stroke="#fff" stroke-width="9" opacity="0.18"/>
+  </g>
+</svg>

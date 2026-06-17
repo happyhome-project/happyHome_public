@@ -653,6 +653,7 @@ test('post.getAdmin: 返回 attendance 汇总和完整名单', async () => {
   expect(result.post.attendanceSummaryByWidget['attendance-1'].count).toBe(1)
   expect(result.post.adminEditedAt).toBe('2024-01-03T00:00:00.000Z')
   expect(result.post.adminEditedByUsername).toBe('ops-admin')
+  expect(result.post.authorAvatarUrl).toMatch(/^\/static\/ai-avatars\/avatar-\d{2}\.svg$/)
   expect(result.attendanceMembersByWidget['attendance-1']).toHaveLength(1)
   expect(result.attendanceMembersByWidget['attendance-1'][0].userId).toBe('user-1')
 })
