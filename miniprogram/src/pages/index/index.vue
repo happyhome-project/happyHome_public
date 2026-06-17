@@ -232,6 +232,28 @@
         </view>
       </view>
     </view>
+    <view v-if="showGuestIntro && guestIntroConfig" class="guest-intro-mask" @touchmove.stop.prevent>
+      <view class="guest-intro-panel" @tap.stop>
+        <text class="guest-intro-title">{{ guestIntroConfig.title }}</text>
+        <text class="guest-intro-body">{{ guestIntroConfig.body }}</text>
+        <view class="guest-intro-list">
+          <view
+            v-for="item in guestIntroConfig.features"
+            :key="item.key"
+            class="guest-intro-row"
+          >
+            <text class="guest-intro-row-label">{{ item.label }}</text>
+            <text class="guest-intro-row-text">{{ item.text }}</text>
+          </view>
+        </view>
+        <view class="guest-intro-primary" @tap="handleGuestIntroPrimary">
+          <text>{{ guestIntroConfig.primaryActionText }}</text>
+        </view>
+        <view class="guest-intro-secondary" @tap="handleGuestIntroSecondary">
+          <text>{{ guestIntroConfig.secondaryActionText }}</text>
+        </view>
+      </view>
+    </view>
     <AppTabBar current="home" />
   </view>
 </template>
@@ -248,11 +270,15 @@ import { getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamil
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
+import { markGuestIntroSeen, shouldShowGuestIntro } from '../../utils/guest-intro'
 import type { HomeSnapshot } from '../../../../cloud/shared/types'
+import type { GuestIntroConfig } from '../../../../cloud/shared/guest-intro-config'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
 const showSwitcher = ref(false)
+const showGuestIntro = ref(false)
+const guestIntroConfig = ref<GuestIntroConfig | null>(null)
 const postsBySection = ref<Record<string, any[]>>({})
 let refreshingHome = false
 let queuedForcedHomeRefresh = false
@@ -591,6 +617,29 @@ function expandDormant() {
   // TODO: 展开所有休眠板块
 }
 
+function refreshGuestIntroVisibility() {
+  showGuestIntro.value = shouldShowGuestIntro(guestIntroConfig.value, {
+    isLoggedIn: userStore.isLoggedIn,
+    hasPublicCommunity: Boolean(communityStore.currentCommunityId),
+  })
+}
+
+function markCurrentGuestIntroSeen() {
+  if (guestIntroConfig.value?.version) {
+    markGuestIntroSeen(guestIntroConfig.value.version)
+  }
+  showGuestIntro.value = false
+}
+
+function handleGuestIntroPrimary() {
+  markCurrentGuestIntroSeen()
+}
+
+function handleGuestIntroSecondary() {
+  markCurrentGuestIntroSeen()
+  openOnboardingPreservingStack({ mode: 'discover' })
+}
+
 function applyHomeSnapshot(snapshot: HomeSnapshot | null, source: 'prefetch' | 'cache' | 'cloud') {
   if (!snapshot) return false
   const expectedViewer = userStore.isLoggedIn ? userStore.openId : ''
@@ -601,6 +650,8 @@ function applyHomeSnapshot(snapshot: HomeSnapshot | null, source: 'prefetch' | '
   communityStore.currentSectionIndex = 0
   communityStore.currentSections = snapshot.sections || []
   postsBySection.value = snapshot.postsBySection || {}
+  guestIntroConfig.value = userStore.isLoggedIn ? null : (snapshot.guestIntroConfig || null)
+  refreshGuestIntroVisibility()
   if (userStore.isLoggedIn) communityStore.saveToStorage()
   clientLog('info', 'home.snapshot.apply', {
     source,
@@ -1522,4 +1573,97 @@ onPullDownRefresh(async () => {
   font-weight: $hh-font-weight-bold;
 }
 .switcher-item:last-child { border-bottom: none; }
+
+.guest-intro-mask {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40rpx 32rpx;
+  background: rgba(30, 26, 22, 0.42);
+}
+.guest-intro-panel {
+  width: 100%;
+  max-width: 640rpx;
+  padding: 36rpx 32rpx 34rpx;
+  border-radius: 32rpx;
+  background: $hh-surface-1;
+  border: 1rpx solid rgba(30, 26, 22, 0.08);
+  box-shadow: $hh-shadow-modal;
+}
+.guest-intro-title {
+  display: block;
+  font-family: $hh-font-serif;
+  font-size: 36rpx;
+  font-weight: $hh-font-weight-bold;
+  line-height: 1.28;
+  color: $hh-ink-1;
+  letter-spacing: $hh-tracking-serif-sm;
+}
+.guest-intro-body {
+  display: block;
+  margin-top: 18rpx;
+  font-size: 27rpx;
+  line-height: 1.62;
+  color: $hh-ink-2;
+}
+.guest-intro-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  margin-top: 26rpx;
+}
+.guest-intro-row {
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  min-height: 64rpx;
+  padding: 12rpx 18rpx;
+  border-radius: 18rpx;
+  background: $hh-surface-2;
+}
+.guest-intro-row-label {
+  flex: 0 0 auto;
+  min-width: 96rpx;
+  font-size: 24rpx;
+  font-weight: $hh-font-weight-heavy;
+  color: $hh-accent-ink;
+}
+.guest-intro-row-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 24rpx;
+  line-height: 1.35;
+  color: $hh-ink-2;
+}
+.guest-intro-primary,
+.guest-intro-secondary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 82rpx;
+}
+.guest-intro-primary {
+  margin-top: 28rpx;
+  border-radius: 42rpx;
+  background: $hh-ink-1;
+}
+.guest-intro-primary text {
+  font-size: 27rpx;
+  font-weight: $hh-font-weight-bold;
+  color: $hh-surface-1;
+}
+.guest-intro-secondary {
+  margin-top: 12rpx;
+}
+.guest-intro-secondary text {
+  font-size: 25rpx;
+  font-weight: $hh-font-weight-bold;
+  color: $hh-accent-ink;
+}
 </style>
