@@ -451,7 +451,7 @@ test('createActivityInvite: 同一源帖存在未过期邀约时直接返回现�
       return [{
         _id: 'existing-invite-1',
         status: 'active',
-        auditStatus: 'pass',
+        auditStatus: 'review',
         eventStartsAt: '2999-01-01T00:00:00.000Z',
         content: { activity_invite_title: '已有邀约' },
       }]

@@ -339,15 +339,19 @@ function buildVirtualActivityInviteSection(communityId: string): Section {
   } as Section)
 }
 
-async function findCurrentActivityInvite(sourcePostId: string) {
+async function findCurrentActivityInvite(
+  sourcePostId: string,
+  options: { visibleOnly?: boolean } = {},
+) {
   const invites = await db.query('posts', {
     originPostId: sourcePostId,
     originLinkType: 'activity_invite',
     status: 'active',
   }, { orderBy: ['eventStartsAt', 'asc'] }) as any[]
+  const visibleOnly = options.visibleOnly !== false
   return invites
-    .filter(isPostVisibleToMembers)
-    .filter((post) => isActivityInviteInProgress(post))
+    .filter((post) => !visibleOnly || isPostVisibleToMembers(post))
+    .filter((post) => visibleOnly ? isActivityInviteInProgress(post) : isActivityInviteTimeInProgress(post))
     .sort((a, b) => timeValue(a.eventStartsAt) - timeValue(b.eventStartsAt))[0] || null
 }
 
@@ -389,6 +393,12 @@ function validateActivityInviteContent(content: PostContent) {
   if (!Number.isFinite(Date.parse(startsAt))) throw new Error('出发时间不正确')
   const capacity = normalizeCapacityValue(content[ACTIVITY_INVITE_WIDGET_IDS.capacity])
   if (!capacity) throw new Error('人数上限必须大于 0')
+}
+
+function isActivityInviteTimeInProgress(post: { status?: string; eventStartsAt?: string }, now = Date.now()): boolean {
+  if (!post || post.status === 'deleted') return false
+  const startsAt = Date.parse(String(post.eventStartsAt || ''))
+  return Number.isFinite(startsAt) && startsAt > now
 }
 
 async function getAttendanceWidgetForPost(postId: string, widgetId?: string) {
@@ -515,7 +525,7 @@ export async function handleCreateActivityInvite(
   const { sourcePost, sourceSection } = await loadActivityInviteSource(params.sourcePostId, openid)
   await ensureActiveCommunityMember(sourcePost.communityId, openid)
 
-  const existingInvite = await findCurrentActivityInvite(sourcePost._id)
+  const existingInvite = await findCurrentActivityInvite(sourcePost._id, { visibleOnly: false })
   if (existingInvite) {
     return {
       postId: existingInvite._id,
