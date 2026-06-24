@@ -87,7 +87,7 @@ import { computed, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { postApi, sectionApi } from '../../api/cloud'
 import { useUserStore } from '../../store/user'
-import { getArchiveHomeMeta, getGuideNoteCard, getListPreview } from '../../utils/widget'
+import { getArchiveHomeMeta, getGuideNoteCard, getListPreview, getPostHomeTitle, getPostHomeTitleIssue } from '../../utils/widget'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 
@@ -97,6 +97,7 @@ const section = ref<any>(null)
 const posts = ref<any[]>([])
 const loading = ref(false)
 const loadError = ref('')
+const reportedMissingHomeTitle = new Set<string>()
 
 const sectionName = computed(() => String(section.value?.name || '板块'))
 const isGuideNote = computed(() => section.value?.displayTemplate === 'guide_note')
@@ -111,13 +112,16 @@ const guideItems = computed(() => {
 
 const defaultItems = computed(() => {
   if (!section.value) return []
-  return posts.value.map((post) => ({
-    postId: post._id,
-    title: getPostTitle(post, section.value),
-    preview: getListPreview(post, section.value),
-    meta: getArchiveHomeMeta(post, section.value),
-    when: formatShortDate(post.createdAt),
-  }))
+  return posts.value.map((post) => {
+    reportMissingHomeTitle(post, section.value, 'section.list')
+    return {
+      postId: post._id,
+      title: getPostHomeTitle(post, section.value),
+      preview: getListPreview(post, section.value),
+      meta: getArchiveHomeMeta(post, section.value),
+      when: formatShortDate(post.createdAt),
+    }
+  })
 })
 
 onLoad((options: any) => {
@@ -179,11 +183,22 @@ function openPost(postId: string) {
   })
 }
 
-function getPostTitle(post: any, currentSection: any): string {
-  const widget = (currentSection.widgets || []).find((item: any) => ['short_text', 'summary'].includes(item.type))
-  if (widget && post.content?.[widget.widgetId]) return String(post.content[widget.widgetId])
-  const firstKey = Object.keys(post.content || {})[0]
-  return firstKey ? String(post.content[firstKey]) : '无标题'
+function reportMissingHomeTitle(post: any, currentSection: any, source: string) {
+  const issue = getPostHomeTitleIssue(post, currentSection)
+  if (!issue) return
+  const key = `${source}:${currentSection?._id || ''}:${post?._id || ''}:${issue.code}`
+  if (reportedMissingHomeTitle.has(key)) return
+  reportedMissingHomeTitle.add(key)
+  clientLog('warn', 'post.missingHomeTitle', {
+    source,
+    issueCode: issue.code,
+    message: issue.message,
+    communityId: currentSection?.communityId || '',
+    sectionId: currentSection?._id || '',
+    sectionName: currentSection?.name || '',
+    postId: post?._id || '',
+    contentKeys: Object.keys(post?.content || {}),
+  })
 }
 
 function formatShortDate(value: unknown): string {

@@ -220,6 +220,9 @@ describe('post.createAdmin', () => {
     expect(result.postId).toBe('post-NEW')
     const [, payload] = (db.create as jest.Mock).mock.calls[0]
     expect(payload.authorId).toBe('admin-openid-1')
+    expect(payload.adminCreatedAt).toEqual(expect.any(String))
+    expect(payload.adminCreatedByAccountId).toBe('admin-1')
+    expect(payload.adminCreatedByUsername).toBe('super')
     expect(payload.communityId).toBe('c-1')
     expect(payload.sectionId).toBe('s-1')
     expect(payload.status).toBe('active')

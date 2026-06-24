@@ -284,6 +284,9 @@ export interface Post {
   isFeatured?: boolean
   featuredAt?: string
   featuredByAccountId?: string
+  adminCreatedAt?: string
+  adminCreatedByAccountId?: string
+  adminCreatedByUsername?: string
   adminEditedAt?: string
   adminEditedByAccountId?: string
   adminEditedByUsername?: string

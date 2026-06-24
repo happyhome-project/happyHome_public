@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { formatWidgetValue, getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard, getListPreview } from '../widget'
+import { formatWidgetValue, getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard, getHomeLiveMeta, getListPreview, getPostHomeTitle, getPostHomeTitleIssue } from '../widget'
 import type { Section, Post } from '../../../../cloud/shared/types'
 
 describe('formatWidgetValue', () => {
@@ -151,6 +151,63 @@ describe('getListPreview', () => {
 
     expect(result.some((item) => item.label === '音频')).toBe(false)
     expect(result).toEqual([{ label: '标题', value: '课程通知', type: 'text' }])
+  })
+})
+
+describe('home live card formatting', () => {
+  test('uses section name instead of object fallback when an activity has only attendance and location widgets', () => {
+    const section: Section = {
+      _id: 's-badminton',
+      communityId: 'c1',
+      name: '羽毛球活动',
+      icon: 'books',
+      order: 1,
+      enableComment: true,
+      enableLike: true,
+      createdAt: '2026-06-24',
+      type: 'realtime',
+      status: 'active',
+      widgets: [
+        { widgetId: 'att', type: 'attendance', label: '羽毛球活动', fieldKey: 'attendance', required: false, order: 0, showInList: true },
+        { widgetId: 'loc', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 1, showInList: false },
+        { widgetId: 'time', type: 'datetime', label: '时间', fieldKey: 'time', required: false, order: 2, showInList: false },
+      ],
+    }
+    const post = {
+      content: {
+        loc: { name: '成都西站', address: '四川省成都市青羊区西站一路', lat: 30.685329, lng: 103.979102 },
+        time: '2026-06-27T00:00:00',
+      },
+      createdAt: '2026-06-24T01:40:08.348Z',
+    } as Post
+
+    expect(getPostHomeTitle(post, section)).toBe('羽毛球活动')
+    expect(getPostHomeTitle(post, section)).not.toContain('[object Object]')
+    expect(getPostHomeTitleIssue(post, section)).toEqual(expect.objectContaining({
+      code: 'missing_home_title_content',
+      message: expect.stringContaining('缺少首页标题'),
+    }))
+  })
+
+  test('does not expose personal author nickname on generic live activity cards', () => {
+    const section = {
+      _id: 's-activity',
+      communityId: 'c1',
+      name: '活动',
+      type: 'realtime',
+      status: 'active',
+      widgets: [],
+    } as Section
+    const post = {
+      authorNickname: '一年',
+      createdAt: '2026-06-24T01:40:08.348Z',
+      attendanceSummaryByWidget: {
+        att: { count: 2, occupiedSeats: 2, isFull: false, isJoined: false, previewUsers: [] },
+      },
+    } as Post
+
+    expect(getHomeLiveMeta(post, section)).not.toContain('一年')
+    expect(getHomeLiveMeta(post, section)).toContain('2人参与')
   })
 })
 

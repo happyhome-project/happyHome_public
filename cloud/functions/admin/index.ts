@@ -45,6 +45,7 @@ import {
   normalizeSectionDisplayTemplate,
 } from '../../shared/guide-note-widgets'
 import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
+import { resolvePostAuthorNickname } from '../../shared/post-author'
 
 cloud.init({ env: process.env.TCB_ENV || cloud.DYNAMIC_CURRENT_ENV })
 
@@ -1212,7 +1213,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       const section = sectionsById[post.sectionId]
       return {
         ...post,
-        authorNickname: author?.nickName || '',
+        authorNickname: resolvePostAuthorNickname(post, author?.nickName, { audience: 'admin' }),
         authorAvatarUrl: resolveAuthorAvatarUrl(author?.avatarUrl, post._id || post.authorId || ''),
         sectionName: section?.name || '',
         sectionType: section?.type || '',
@@ -1248,7 +1249,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     return {
       post: {
         ...post,
-        authorNickname: (author as any)?.nickName || '',
+        authorNickname: resolvePostAuthorNickname(post, (author as any)?.nickName, { audience: 'admin' }),
         authorAvatarUrl: resolveAuthorAvatarUrl((author as any)?.avatarUrl, post._id || post.authorId || ''),
         attendanceSummaryByWidget,
       },
@@ -1658,6 +1659,9 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       likeCount: 0,
       isPinned: false,
       isFeatured: false,
+      adminCreatedAt: now,
+      adminCreatedByAccountId: ctx.accountId,
+      adminCreatedByUsername: ctx.username,
       createdAt: now,
       updatedAt: now,
     })
