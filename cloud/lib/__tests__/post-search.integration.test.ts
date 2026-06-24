@@ -6,6 +6,7 @@ import {
 import {
   backfillPostSearchIndexesForCommunity,
   backfillPostSearchIndexesForSection,
+  backfillPostSearchIndexesForSectionBatch,
   indexPostForSearch,
   refreshPostSearchIndexById,
   removePostSearchIndexesForSection,
@@ -342,6 +343,31 @@ test('backfillPostSearchIndexesForSection refreshes section and widget metadata'
   expect(searchResult.items[0].matchedFields[0]).toMatchObject({
     fieldLabel: '新正文',
   })
+})
+
+test('backfillPostSearchIndexesForSectionBatch processes a bounded page of posts', async () => {
+  await db.create('sections', section)
+  await db.create('posts', post({ _id: 'post-a', updatedAt: '2026-06-24T10:00:00.000Z' }))
+  await db.create('posts', post({ _id: 'post-b', updatedAt: '2026-06-24T09:00:00.000Z', content: { title: '第二篇 麒麟' } } as any))
+
+  const first = await backfillPostSearchIndexesForSectionBatch('section-course', { skip: 0, limit: 1 })
+  const second = await backfillPostSearchIndexesForSectionBatch('section-course', { skip: 1, limit: 1 })
+
+  expect(first).toMatchObject({
+    sectionId: 'section-course',
+    scannedCount: 1,
+    indexedCount: 1,
+    hasMore: true,
+    nextSkip: 1,
+  })
+  expect(second).toMatchObject({
+    sectionId: 'section-course',
+    scannedCount: 1,
+    indexedCount: 1,
+    hasMore: true,
+    nextSkip: 2,
+  })
+  expect((await searchPostIndex({ communityId: 'community-1', query: '麒麟' })).items.map((item) => item.postId)).toEqual(['post-b'])
 })
 
 test('removePostSearchIndexesForSection clears stale documents for deleted sections', async () => {

@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import process from 'node:process'
 import { pathToFileURL } from 'node:url'
 
@@ -14,6 +17,7 @@ import {
 
 const DEFAULT_TIMEOUT_MS = 120000
 const DEFAULT_ACTOR = 'post-search-rebuild'
+const DEFAULT_BATCH_SIZE = 5
 
 function getFlagValue(argv, name, fallback = '') {
   const equalsArg = argv.find((arg) => arg.startsWith(`--${name}=`))
@@ -67,6 +71,11 @@ export function parseRebuildArgs(argv = process.argv.slice(2), env = process.env
       'command-timeout-ms',
       env.HH_POST_SEARCH_REBUILD_TIMEOUT_MS || String(DEFAULT_TIMEOUT_MS),
     )),
+    batchSize: Math.min(20, Math.max(1, Math.floor(Number(getFlagValue(
+      argv,
+      'batch-size',
+      env.HH_POST_SEARCH_REBUILD_BATCH_SIZE || String(DEFAULT_BATCH_SIZE),
+    )) || DEFAULT_BATCH_SIZE))),
     actor: getFlagValue(argv, 'actor', DEFAULT_ACTOR),
     allActive: argv.includes('--all-active'),
     includeDisabled: argv.includes('--include-disabled'),
@@ -103,23 +112,37 @@ function extractErrorMessage(value) {
   return ''
 }
 
+function writePayloadFile(payload) {
+  const dir = mkdtempSync(join(tmpdir(), 'happyhome-post-search-rebuild-'))
+  const file = join(dir, 'payload.json')
+  writeFileSync(file, JSON.stringify(payload), 'utf8')
+  return { dir, file }
+}
+
 export async function invokeAdmin(action, params, options, runner = defaultRunner) {
   const payload = makeAdminPayload(action, params, options.actor)
-  const built = buildTcbCommand([
-    'fn',
-    'invoke',
-    'admin',
-    '-d',
-    JSON.stringify(payload),
-    '--env-id',
-    options.envId,
-    '--json',
-  ])
+  const payloadFile = writePayloadFile(payload)
+  let commandLine = ''
+  let result
+  try {
+    const built = buildTcbCommand([
+      'fn',
+      'invoke',
+      'admin',
+      '-d',
+      `@${payloadFile.file}`,
+      '--env-id',
+      options.envId,
+      '--json',
+    ])
 
-  const commandLine = formatCommand(built.command, built.args)
-  const result = await runner(built.command, built.args, {
-    timeoutMs: options.commandTimeoutMs,
-  })
+    commandLine = formatCommand(built.command, built.args)
+    result = await runner(built.command, built.args, {
+      timeoutMs: options.commandTimeoutMs,
+    })
+  } finally {
+    rmSync(payloadFile.dir, { recursive: true, force: true })
+  }
   const output = `${result.stdout || ''}${result.stderr || ''}`
   const parsed = parseFirstJson(output)
   const cloudInvoke = analyzeCloudInvoke(parsed)
@@ -171,6 +194,50 @@ function normalizeBackfillResult(communityId, value) {
   }
 }
 
+async function listCommunitySections(communityId, options, runner) {
+  const record = await invokeAdmin('section.list', { communityId }, options, runner)
+  const sections = Array.isArray(record.functionResult?.sections)
+    ? record.functionResult.sections
+    : []
+  return sections
+    .map((section) => ({
+      sectionId: String(section?._id || section?.id || '').trim(),
+      status: String(section?.status || 'active'),
+    }))
+    .filter((section) => section.sectionId)
+}
+
+async function rebuildCommunitySearchIndex(communityId, options, runner) {
+  const sections = await listCommunitySections(communityId, options, runner)
+  const totals = {
+    communityId,
+    sectionCount: sections.length,
+    scannedCount: 0,
+    indexedCount: 0,
+    removedCount: 0,
+    failedCount: 0,
+  }
+  for (const section of sections) {
+    let skip = 0
+    while (true) {
+      const record = await invokeAdmin(
+        'post.rebuildSearchIndexSectionBatchAdmin',
+        { sectionId: section.sectionId, skip, limit: options.batchSize },
+        options,
+        runner,
+      )
+      const sectionResult = normalizeBackfillResult(communityId, record.functionResult)
+      totals.scannedCount += sectionResult.scannedCount
+      totals.indexedCount += sectionResult.indexedCount
+      totals.removedCount += sectionResult.removedCount
+      totals.failedCount += sectionResult.failedCount
+      if (!record.functionResult?.hasMore || !record.functionResult?.nextSkip) break
+      skip = Number(record.functionResult.nextSkip)
+    }
+  }
+  return totals
+}
+
 export async function runPostSearchRebuild(options = parseRebuildArgs(), runner = defaultRunner) {
   if (options.help) {
     return { help: true, communityIds: [], results: [], totals: {} }
@@ -197,10 +264,9 @@ export async function runPostSearchRebuild(options = parseRebuildArgs(), runner 
   const results = []
   for (const communityId of communityIds) {
     try {
-      const record = await invokeAdmin('post.rebuildSearchIndexAdmin', { communityId }, options, runner)
       results.push({
         ok: true,
-        ...normalizeBackfillResult(communityId, record.functionResult),
+        ...await rebuildCommunitySearchIndex(communityId, options, runner),
       })
     } catch (error) {
       results.push({
@@ -252,6 +318,7 @@ Options:
   --community-ids <id1,id2>     Rebuild multiple communities.
   --include-disabled            With --all-active, include non-active communities too.
   --dry-run                     Print target community ids without rebuilding.
+  --batch-size <n>              Posts per cloud invocation for section rebuilds. Defaults to ${DEFAULT_BATCH_SIZE}.
   --env-id <envId>              CloudBase env id. Defaults to TCB_ENV or ${DEFAULT_ENV_ID}.
   --command-timeout-ms <ms>     Per-invocation timeout. Defaults to ${DEFAULT_TIMEOUT_MS}.
 `)
@@ -266,6 +333,7 @@ function printSummary(summary) {
     if (item.ok) {
       console.log([
         `[post-search-rebuild] ok community=${item.communityId}`,
+        `sections=${item.sectionCount || 0}`,
         `scanned=${item.scannedCount}`,
         `indexed=${item.indexedCount}`,
         `removed=${item.removedCount}`,

@@ -25,6 +25,7 @@ jest.mock('../../../lib/amap', () => ({
 jest.mock('../../../lib/post-search', () => ({
   backfillPostSearchIndexesForCommunity: jest.fn(),
   backfillPostSearchIndexesForSection: jest.fn(),
+  backfillPostSearchIndexesForSectionBatch: jest.fn(),
   refreshPostSearchIndexById: jest.fn(),
   removePostSearchIndex: jest.fn(),
   removePostSearchIndexesForSection: jest.fn(),
@@ -1099,5 +1100,78 @@ test('post.rebuildSearchIndexAdmin: rebuilds derived search index for a scoped c
     indexedCount: 2,
     removedCount: 1,
     failedCount: 0,
+  })
+})
+
+test('post.rebuildSearchIndexSectionAdmin: rebuilds derived search index for a scoped section', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'section-1',
+    communityId: 'community-1',
+    name: '课程',
+  })
+  ;(postSearch.backfillPostSearchIndexesForSection as jest.Mock).mockResolvedValue({
+    sectionId: 'section-1',
+    scannedCount: 2,
+    indexedCount: 2,
+    removedCount: 0,
+    failedCount: 0,
+  })
+
+  const result: any = await main({
+    action: 'post.rebuildSearchIndexSectionAdmin',
+    sectionId: 'section-1',
+    _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
+  })
+
+  expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledWith('section-1')
+  expect(result).toEqual({
+    sectionId: 'section-1',
+    scannedCount: 2,
+    indexedCount: 2,
+    removedCount: 0,
+    failedCount: 0,
+  })
+})
+
+test('post.rebuildSearchIndexSectionBatchAdmin: rebuilds a bounded derived search index batch', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'section-1',
+    communityId: 'community-1',
+    name: '课程',
+  })
+  ;(postSearch.backfillPostSearchIndexesForSectionBatch as jest.Mock).mockResolvedValue({
+    sectionId: 'section-1',
+    skip: 5,
+    limit: 5,
+    scannedCount: 5,
+    indexedCount: 5,
+    removedCount: 0,
+    failedCount: 0,
+    hasMore: true,
+    nextSkip: 10,
+  })
+
+  const result: any = await main({
+    action: 'post.rebuildSearchIndexSectionBatchAdmin',
+    sectionId: 'section-1',
+    skip: 5,
+    limit: 5,
+    _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
+  })
+
+  expect(postSearch.backfillPostSearchIndexesForSectionBatch).toHaveBeenCalledWith('section-1', {
+    skip: 5,
+    limit: 5,
+  })
+  expect(result).toEqual({
+    sectionId: 'section-1',
+    skip: 5,
+    limit: 5,
+    scannedCount: 5,
+    indexedCount: 5,
+    removedCount: 0,
+    failedCount: 0,
+    hasMore: true,
+    nextSkip: 10,
   })
 })

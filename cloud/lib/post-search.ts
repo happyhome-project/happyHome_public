@@ -733,6 +733,65 @@ export async function backfillPostSearchIndexesForSection(sectionId: string) {
   }
 }
 
+export async function backfillPostSearchIndexesForSectionBatch(
+  sectionId: string,
+  options: { skip?: number; limit?: number } = {}
+) {
+  const normalizedSectionId = String(sectionId || '').trim()
+  if (!normalizedSectionId) throw new Error('sectionId is required')
+  const skip = Math.max(0, Math.floor(Number(options.skip || 0)))
+  const limit = Math.min(20, Math.max(1, Math.floor(Number(options.limit || 5))))
+
+  let section: Section | null = null
+  try {
+    section = await getDb().getById('sections', normalizedSectionId) as Section
+  } catch {
+    section = null
+  }
+  if (!section) {
+    const result = await removePostSearchIndexesForSection(normalizedSectionId)
+    return {
+      ...result,
+      scannedCount: 0,
+      indexedCount: 0,
+      failedCount: 0,
+      hasMore: false,
+      nextSkip: null,
+    }
+  }
+
+  const posts = await getDb().query('posts', { sectionId: normalizedSectionId }, {
+    orderBy: ['updatedAt', 'desc'],
+    skip,
+    limit,
+  }) as Post[]
+  let indexedCount = 0
+  let removedCount = 0
+  let failedCount = 0
+  for (const post of posts) {
+    try {
+      const result = await indexPostForSearch(post, section)
+      if (result.indexed) indexedCount += 1
+      else removedCount += 1
+    } catch {
+      failedCount += 1
+    }
+  }
+  const hasMore = posts.length === limit
+
+  return {
+    sectionId: normalizedSectionId,
+    skip,
+    limit,
+    scannedCount: posts.length,
+    indexedCount,
+    removedCount,
+    failedCount,
+    hasMore,
+    nextSkip: hasMore ? skip + posts.length : null,
+  }
+}
+
 export async function removePostSearchIndexesForSection(sectionId: string) {
   const normalizedSectionId = String(sectionId || '').trim()
   if (!normalizedSectionId) {

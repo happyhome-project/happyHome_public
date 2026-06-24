@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
@@ -11,7 +12,11 @@ import {
 function payloadFromArgs(args) {
   const index = args.indexOf('-d')
   assert.notEqual(index, -1)
-  return JSON.parse(args[index + 1])
+  const payloadArg = args[index + 1]
+  if (String(payloadArg).startsWith('@')) {
+    return JSON.parse(readFileSync(String(payloadArg).slice(1), 'utf8'))
+  }
+  return JSON.parse(payloadArg)
 }
 
 function createMockRunner(options = {}) {
@@ -32,18 +37,32 @@ function createMockRunner(options = {}) {
         stderr: '',
       }
     }
-    if (payload.action === 'post.rebuildSearchIndexAdmin') {
-      if (options.failCommunityId === payload.communityId) {
+    if (payload.action === 'section.list') {
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          sections: [
+            { _id: `${payload.communityId}-section-1`, status: 'active' },
+          ],
+        }),
+        stderr: '',
+      }
+    }
+    if (payload.action === 'post.rebuildSearchIndexSectionBatchAdmin') {
+      const communityId = String(payload.sectionId || '').replace(/-section-\d+$/, '')
+      if (options.failCommunityId === communityId) {
         return { status: 1, stdout: '', stderr: 'invoke failed' }
       }
       return {
         status: 0,
         stdout: JSON.stringify({
-          communityId: payload.communityId,
+          sectionId: payload.sectionId,
           scannedCount: 3,
           indexedCount: 2,
           removedCount: 1,
           failedCount: options.failedPostCount || 0,
+          hasMore: false,
+          nextSkip: null,
         }),
         stderr: '',
       }
@@ -68,20 +87,22 @@ test('parseRebuildArgs requires explicit target intent and supports repeated ids
     '--community-id=c2',
     '--community-ids=c2,c3',
     '--command-timeout-ms=4567',
+    '--batch-size=7',
     '--dry-run',
   ], {})
 
   assert.equal(options.envId, 'env-x')
   assert.equal(options.commandTimeoutMs, 4567)
+  assert.equal(options.batchSize, 7)
   assert.equal(options.dryRun, true)
   assert.deepEqual(options.communityIds, ['c1', 'c2', 'c3'])
 })
 
 test('makeAdminPayload uses internal superAdmin actor context', () => {
-  const payload = makeAdminPayload('post.rebuildSearchIndexAdmin', { communityId: 'c1' }, 'actor-x')
+  const payload = makeAdminPayload('post.rebuildSearchIndexSectionBatchAdmin', { sectionId: 'section-1' }, 'actor-x')
 
-  assert.equal(payload.action, 'post.rebuildSearchIndexAdmin')
-  assert.equal(payload.communityId, 'c1')
+  assert.equal(payload.action, 'post.rebuildSearchIndexSectionBatchAdmin')
+  assert.equal(payload.sectionId, 'section-1')
   assert.equal(payload._actAs.role, 'superAdmin')
   assert.equal(payload._actAs.accountId, 'actor-x')
 })
@@ -101,8 +122,9 @@ test('runPostSearchRebuild lists active communities and rebuilds each one', asyn
   assert.equal(summary.totals.removedCount, 2)
   assert.equal(summary.totals.failedPostCount, 0)
   assert.equal(summary.totals.failedCommunityCount, 0)
-  assert.equal(runner.calls.length, 3)
+  assert.equal(runner.calls.length, 5)
   assert(runner.calls.every((call) => call.options.timeoutMs === 999))
+  assert(runner.calls.every((call) => String(call.args[call.args.indexOf('-d') + 1]).startsWith('@')))
 })
 
 test('runPostSearchRebuild dry run resolves targets without rebuilding', async () => {
@@ -128,13 +150,20 @@ test('runPostSearchRebuild records failed community invocations', async () => {
   assert.equal(summary.totals.communityCount, 2)
   assert.equal(summary.totals.failedCommunityCount, 1)
   assert.equal(summary.results[1].ok, false)
-  assert.match(summary.results[1].error, /post\.rebuildSearchIndexAdmin failed/)
+  assert.match(summary.results[1].error, /post\.rebuildSearchIndexSectionBatchAdmin failed/)
 })
 
 test('runPostSearchRebuild treats empty CLI output as failed invocation', async () => {
   const runner = async (_command, args) => {
     const payload = payloadFromArgs(args)
-    if (payload.action === 'post.rebuildSearchIndexAdmin') {
+    if (payload.action === 'section.list') {
+      return {
+        status: 0,
+        stdout: JSON.stringify({ sections: [{ _id: `${payload.communityId}-section-1` }] }),
+        stderr: '',
+      }
+    }
+    if (payload.action === 'post.rebuildSearchIndexSectionBatchAdmin') {
       return { status: 0, stdout: '', stderr: '' }
     }
     return { status: 2, stdout: '', stderr: 'unexpected action' }

@@ -18,6 +18,7 @@ import { getGuestIntroConfig, saveGuestIntroConfig } from '../../lib/guest-intro
 import {
   backfillPostSearchIndexesForCommunity,
   backfillPostSearchIndexesForSection,
+  backfillPostSearchIndexesForSectionBatch,
   removePostSearchIndex,
   removePostSearchIndexesForSection,
 } from '../../lib/post-search'
@@ -149,6 +150,8 @@ const ENTITY_TO_COMMUNITY_ACTIONS: Record<string, { collection: string; idParam:
   'section.updateStatus': { collection: 'sections', idParam: 'sectionId' },
   'section.updateWidgets': { collection: 'sections', idParam: 'sectionId' },
   'section.delete': { collection: 'sections', idParam: 'sectionId' },
+  'post.rebuildSearchIndexSectionAdmin': { collection: 'sections', idParam: 'sectionId' },
+  'post.rebuildSearchIndexSectionBatchAdmin': { collection: 'sections', idParam: 'sectionId' },
   'post.getAdmin': { collection: 'posts', idParam: 'postId' },
   'post.deleteAdmin': { collection: 'posts', idParam: 'postId' },
   'post.updateAdmin': { collection: 'posts', idParam: 'postId' },
@@ -1293,6 +1296,19 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const communityId = String(params.communityId || '').trim()
     if (!communityId) throw new Error('communityId 不能为空')
     return backfillPostSearchIndexesForCommunity(communityId)
+  }
+  if (action === 'post.rebuildSearchIndexSectionAdmin') {
+    const sectionId = String(params.sectionId || '').trim()
+    if (!sectionId) throw new Error('sectionId 不能为空')
+    return backfillPostSearchIndexesForSection(sectionId)
+  }
+  if (action === 'post.rebuildSearchIndexSectionBatchAdmin') {
+    const sectionId = String(params.sectionId || '').trim()
+    if (!sectionId) throw new Error('sectionId 不能为空')
+    return backfillPostSearchIndexesForSectionBatch(sectionId, {
+      skip: params.skip,
+      limit: params.limit,
+    })
   }
   if (action === 'post.pinAdmin' || action === 'post.unpinAdmin' || action === 'post.featureAdmin' || action === 'post.unfeatureAdmin') {
     const postId = String(params.postId || '').trim()

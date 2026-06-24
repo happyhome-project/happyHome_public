@@ -68,6 +68,7 @@ npm.cmd run ensure:indexes
 ```powershell
 npm.cmd run rebuild:post-search-index -- --all-active
 npm.cmd run rebuild:post-search-index -- --community-id <communityId>
+npm.cmd run rebuild:post-search-index -- --all-active --batch-size 5
 ```
 
 本地验证：
