@@ -305,17 +305,21 @@ function normalizeNoticeContent(value: unknown) {
 function normalizeWidgetForSave(widget: any): Widget {
   const normalized: Widget = {
     ...widget,
-    required: ['attendance', 'admin_notice'].includes(widget?.type) ? false : widget?.required === true,
-    showInList: widget?.type === 'admin_notice' ? false : widget?.showInList === true,
+    required: ['attendance', 'admin_notice', 'activity_invite'].includes(widget?.type) ? false : widget?.required === true,
+    showInList: ['admin_notice', 'activity_invite'].includes(widget?.type) ? false : widget?.showInList === true,
   }
   if (normalized.type === 'attendance') {
     normalized.capacity = normalizeCapacity(normalized.capacity)
+    if (typeof widget?.capacityWidgetId === 'string') {
+      normalized.capacityWidgetId = widget.capacityWidgetId
+    }
     const label = String(normalized.label || '').trim().toLowerCase()
     if (!label || label === '新控件' || label === 'new widget' || isGenericWidgetLabel(normalized.label)) {
       normalized.label = ''
     }
   } else {
     delete normalized.capacity
+    delete normalized.capacityWidgetId
   }
   if (normalized.type === 'admin_notice') {
     normalized.noticeContent = normalizeNoticeContent(widget?.noticeContent)
@@ -350,13 +354,18 @@ function validateSectionWidgets(sectionType: SectionType, widgets: any[]) {
   if (attendanceWidgets.length > 0 && sectionType !== 'realtime') {
     throw new Error('活动参与控件只能用于 realtime 板块')
   }
+  const activityInviteWidgets = widgets.filter((widget: any) => widget.type === 'activity_invite')
+  if (activityInviteWidgets.length > 1) throw new Error('每个板块最多只能配置 1 个活动召集控件')
+  if (activityInviteWidgets.length > 0 && sectionType !== 'evergreen') {
+    throw new Error('活动召集控件只能用于沉淀展示板块')
+  }
 
   for (const widget of widgets) {
     if (widget.showInList && !['short_text', 'summary', 'datetime', 'number', 'attendance'].includes(widget.type)) {
       throw new Error(`控件类型 ${widget.type} 不支持在列表展示`)
     }
-    if (['attendance', 'admin_notice'].includes(widget.type) && widget.required) {
-      throw new Error('活动参与/公告控件不能设为必填')
+    if (['attendance', 'admin_notice', 'activity_invite'].includes(widget.type) && widget.required) {
+      throw new Error('活动参与/公告/活动召集控件不能设为必填')
     }
   }
 }

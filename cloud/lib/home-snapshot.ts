@@ -47,7 +47,18 @@ function getAttendanceWidgets(section: Section): Widget[] {
   return (section.widgets || []).filter((widget) => widget.type === 'attendance')
 }
 
-function normalizeCapacity(widget: Widget): number | undefined {
+function normalizeCapacityValue(value: unknown): number | undefined {
+  const num = Number(value)
+  if (!Number.isFinite(num) || num <= 0) return undefined
+  return Math.floor(num)
+}
+
+function normalizeCapacity(widget: Widget, post?: Pick<Post, 'content'>): number | undefined {
+  const dynamicWidgetId = String(widget.capacityWidgetId || '').trim()
+  if (dynamicWidgetId && post?.content) {
+    const dynamicCapacity = normalizeCapacityValue((post.content as any)[dynamicWidgetId])
+    if (dynamicCapacity) return dynamicCapacity
+  }
   const value = Number(widget.capacity)
   if (!Number.isFinite(value) || value <= 0) return undefined
   return Math.floor(value)
@@ -61,6 +72,36 @@ export async function ensureActiveCommunityMember(communityId: string, userId: s
     status: 'active',
   })
   if (!members || members.length === 0) throw new Error(COMMUNITY_READ_ERROR)
+}
+
+async function isActiveCommunityMember(communityId: string, userId?: string) {
+  if (!userId) return false
+  const members = await db.query('community_members', {
+    communityId,
+    userId,
+    status: 'active',
+  }, { limit: 1 })
+  return Array.isArray(members) && members.length > 0
+}
+
+function maskMemberOnlyContent<T extends { content?: PostContent }>(
+  post: T,
+  section: Section,
+  canViewMemberOnly: boolean,
+): T {
+  if (canViewMemberOnly) return post
+  const memberOnlyWidgetIds = (section.widgets || [])
+    .filter((widget) => widget.visibility === 'member')
+    .map((widget) => widget.widgetId)
+  if (memberOnlyWidgetIds.length === 0) return post
+
+  const content = { ...(post.content || {}) } as PostContent
+  memberOnlyWidgetIds.forEach((widgetId) => {
+    if (Object.prototype.hasOwnProperty.call(content, widgetId)) {
+      ;(content as any)[widgetId] = ''
+    }
+  })
+  return { ...post, content }
 }
 
 function timeValue(value: unknown): number {
@@ -110,11 +151,11 @@ function sumOccupiedSeats(records: Pick<PostAttendanceMember, 'seatCount'>[]): n
 }
 
 async function buildAttendanceSummary(
-  postId: string,
+  post: Pick<Post, '_id' | 'content'>,
   widget: Widget,
   viewerId?: string
 ): Promise<AttendanceSummary> {
-  const records = await getAttendanceRecords(postId, widget.widgetId)
+  const records = await getAttendanceRecords(post._id, widget.widgetId)
   const previewRecords = viewerId ? records.slice(0, ATTENDANCE_PREVIEW_LIMIT) : []
   const usersById = await getUsersByIds(previewRecords.map((record) => record.userId))
   const previewUsers: AttendancePreviewUser[] = previewRecords.map((record) => ({
@@ -125,7 +166,7 @@ async function buildAttendanceSummary(
   }))
   const count = records.length
   const occupiedSeats = sumOccupiedSeats(records)
-  const capacity = normalizeCapacity(widget)
+  const capacity = normalizeCapacity(widget, post)
   const myRecord = viewerId ? records.find((record) => record.userId === viewerId) : undefined
   return {
     count,
@@ -139,14 +180,14 @@ async function buildAttendanceSummary(
 }
 
 async function buildAttendanceSummaryByWidget(
-  postId: string,
+  post: Pick<Post, '_id' | 'content'>,
   section: Section,
   viewerId?: string
 ): Promise<AttendanceSummaryByWidget> {
   const summaries = await Promise.all(
     getAttendanceWidgets(section).map(async (widget) => ([
       widget.widgetId,
-      await buildAttendanceSummary(postId, widget, viewerId),
+      await buildAttendanceSummary(post, widget, viewerId),
     ] as const))
   )
   return Object.fromEntries(summaries)
@@ -161,7 +202,7 @@ async function enrichPostsWithAttendance<T extends { _id: string; sectionId: str
     posts.map(async (post) => {
       const section = sectionById[post.sectionId]
       const attendanceSummaryByWidget = section
-        ? await buildAttendanceSummaryByWidget(post._id, section, viewerId)
+        ? await buildAttendanceSummaryByWidget(post as any, section, viewerId)
         : {}
       return { ...post, attendanceSummaryByWidget }
     })
@@ -262,7 +303,21 @@ export async function buildHomeFeed(
 
   const slicedPosts = Object.values(slicedBySection).flat()
   const withAttendance = await enrichPostsWithAttendance(slicedPosts, sectionById, openid)
-  const enrichedPosts = await enrichPostsWithAuthor(withAttendance)
+  const membershipByCommunity = new Map<string, boolean>()
+  const membershipAlreadyVerified = Boolean(openid) && !options.skipMembershipCheck
+  const visiblePosts = await Promise.all(withAttendance.map(async (post: any) => {
+    const section = sectionById[post.sectionId]
+    if (!section) return post
+    const communityId = String(post.communityId || section.communityId || '')
+    if (!membershipByCommunity.has(communityId)) {
+      membershipByCommunity.set(
+        communityId,
+        membershipAlreadyVerified ? true : await isActiveCommunityMember(communityId, openid),
+      )
+    }
+    return maskMemberOnlyContent(post, section, membershipByCommunity.get(communityId) === true)
+  }))
+  const enrichedPosts = await enrichPostsWithAuthor(visiblePosts)
   const enrichedById = new Map(enrichedPosts.map((post: any) => [post._id, post]))
   const postsBySection: Record<string, Post[]> = {}
   for (const section of sections) {
