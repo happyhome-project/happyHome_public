@@ -6,6 +6,14 @@ import { sanitizeContent, validateContentValues, validateRequiredWidgets } from 
 import { auditAndApply, isPostVisibleToMembers } from '../../lib/content-audit'
 import { buildHomeBootstrap, buildHomeFeed } from '../../lib/home-snapshot'
 import { ensureCommunityReadable } from '../../lib/public-community'
+import {
+  ACTIVITY_INVITE_SECTION_NAME,
+  ACTIVITY_INVITE_SYSTEM_KEY,
+  ACTIVITY_INVITE_WIDGET_IDS,
+  buildActivityInviteSectionWidgets,
+  isActivityInviteInProgress,
+  isActivityInviteSection,
+} from '../../shared/activity-invite'
 import type {
   AttendancePreviewUser,
   AttendanceSummary,
@@ -14,6 +22,7 @@ import type {
   Section,
   Widget,
   PostContent,
+  Post,
 } from '../../shared/types'
 import { normalizeGuideNoteSection } from '../../shared/guide-note-widgets'
 import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
@@ -44,7 +53,18 @@ function normalizePostSection(section: Section): Section {
   return normalizeGuideNoteSection(section) as Section
 }
 
-function normalizeCapacity(widget: Widget): number | undefined {
+function normalizeCapacityValue(value: unknown): number | undefined {
+  const num = Number(value)
+  if (!Number.isFinite(num) || num <= 0) return undefined
+  return Math.floor(num)
+}
+
+function normalizeCapacity(widget: Widget, post?: Pick<Post, 'content'>): number | undefined {
+  const dynamicWidgetId = String(widget.capacityWidgetId || '').trim()
+  if (dynamicWidgetId && post?.content) {
+    const dynamicCapacity = normalizeCapacityValue((post.content as any)[dynamicWidgetId])
+    if (dynamicCapacity) return dynamicCapacity
+  }
   const value = Number(widget.capacity)
   if (!Number.isFinite(value) || value <= 0) return undefined
   return Math.floor(value)
@@ -58,6 +78,36 @@ async function ensureActiveCommunityMember(communityId: string, userId: string) 
     status: 'active',
   })
   if (!members || members.length === 0) throw new Error(COMMUNITY_READ_ERROR)
+}
+
+async function isActiveCommunityMember(communityId: string, userId?: string) {
+  if (!userId) return false
+  const members = await db.query('community_members', {
+    communityId,
+    userId,
+    status: 'active',
+  }, { limit: 1 })
+  return Array.isArray(members) && members.length > 0
+}
+
+function maskMemberOnlyContent<T extends { content?: PostContent }>(
+  post: T,
+  section: Section,
+  canViewMemberOnly: boolean,
+): T {
+  if (canViewMemberOnly) return post
+  const memberOnlyWidgetIds = (section.widgets || [])
+    .filter((widget) => widget.visibility === 'member')
+    .map((widget) => widget.widgetId)
+  if (memberOnlyWidgetIds.length === 0) return post
+
+  const content = { ...(post.content || {}) } as PostContent
+  memberOnlyWidgetIds.forEach((widgetId) => {
+    if (Object.prototype.hasOwnProperty.call(content, widgetId)) {
+      ;(content as any)[widgetId] = ''
+    }
+  })
+  return { ...post, content }
 }
 
 function timeValue(value: unknown): number {
@@ -124,11 +174,11 @@ function sumOccupiedSeats(records: Pick<PostAttendanceMember, 'seatCount'>[]): n
 }
 
 async function buildAttendanceSummary(
-  postId: string,
+  post: Pick<Post, '_id' | 'content'>,
   widget: Widget,
   viewerId?: string
 ): Promise<AttendanceSummary> {
-  const records = await getAttendanceRecords(postId, widget.widgetId)
+  const records = await getAttendanceRecords(post._id, widget.widgetId)
   const previewRecords = viewerId ? records.slice(0, ATTENDANCE_PREVIEW_LIMIT) : []
   const usersById = await getUsersByIds(previewRecords.map((record) => record.userId))
   const previewUsers: AttendancePreviewUser[] = previewRecords.map((record) => ({
@@ -139,7 +189,7 @@ async function buildAttendanceSummary(
   }))
   const count = records.length
   const occupiedSeats = sumOccupiedSeats(records)
-  const capacity = normalizeCapacity(widget)
+  const capacity = normalizeCapacity(widget, post)
   const myRecord = viewerId ? records.find((record) => record.userId === viewerId) : undefined
   return {
     count,
@@ -153,14 +203,14 @@ async function buildAttendanceSummary(
 }
 
 async function buildAttendanceSummaryByWidget(
-  postId: string,
+  post: Pick<Post, '_id' | 'content'>,
   section: Section,
   viewerId?: string
 ): Promise<AttendanceSummaryByWidget> {
   const summaries = await Promise.all(
     getAttendanceWidgets(section).map(async (widget) => ([
       widget.widgetId,
-      await buildAttendanceSummary(postId, widget, viewerId),
+      await buildAttendanceSummary(post, widget, viewerId),
     ] as const))
   )
   return Object.fromEntries(summaries)
@@ -175,11 +225,167 @@ async function enrichPostsWithAttendance<T extends { _id: string; sectionId: str
     posts.map(async (post) => {
       const section = sectionById[post.sectionId]
       const attendanceSummaryByWidget = section
-        ? await buildAttendanceSummaryByWidget(post._id, section, viewerId)
+        ? await buildAttendanceSummaryByWidget(post as any, section, viewerId)
         : {}
       return { ...post, attendanceSummaryByWidget }
     })
   )
+}
+
+function hasActivityInviteWidget(section: Section): boolean {
+  return (section.widgets || []).some((widget) => widget.type === 'activity_invite')
+}
+
+function textFromContentValue(value: unknown): string {
+  if (value === undefined || value === null) return ''
+  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'number') return String(value)
+  return ''
+}
+
+function resolveSourceTitle(post: Pick<Post, 'content'>, section: Section): string {
+  const titleWidget = (section.widgets || []).find((widget) =>
+    ['guide_title', 'title'].includes(widget.widgetId) ||
+    ['title', 'name'].includes(String(widget.fieldKey || '').toLowerCase()) ||
+    ['标题', '名称'].includes(String(widget.label || '').trim())
+  )
+  if (titleWidget) {
+    const title = textFromContentValue((post.content || {})[titleWidget.widgetId])
+    if (title) return title
+  }
+  return '出游邀约'
+}
+
+function resolveSourceLocation(post: Pick<Post, 'content'>, section: Section) {
+  const locationWidget = (section.widgets || []).find((widget) =>
+    widget.type === 'location' && (
+      widget.widgetId === 'guide_location' ||
+      String(widget.fieldKey || '').toLowerCase().includes('location') ||
+      String(widget.label || '').includes('位置') ||
+      String(widget.label || '').includes('地点')
+    )
+  )
+  const value = locationWidget ? (post.content || {})[locationWidget.widgetId] : null
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const lat = Number((value as any).lat)
+  const lng = Number((value as any).lng)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+  return value
+}
+
+function buildActivityInvitePrefill(sourcePost: Post, sourceSection: Section) {
+  return {
+    title: resolveSourceTitle(sourcePost, sourceSection),
+    location: resolveSourceLocation(sourcePost, sourceSection),
+  }
+}
+
+async function findActivityInviteSection(communityId: string): Promise<Section | null> {
+  const sections = await db.query('sections', { communityId }, { orderBy: ['order', 'asc'] }) as Section[]
+  const found = sections.find((section) => isActivityInviteSection(section))
+  if (!found) return null
+  return normalizeSectionForClient({
+    ...found,
+    systemKey: ACTIVITY_INVITE_SYSTEM_KEY,
+    widgets: found.widgets?.length ? found.widgets : buildActivityInviteSectionWidgets(),
+  } as Section)
+}
+
+async function ensureActivityInviteSection(communityId: string): Promise<Section> {
+  const existing = await findActivityInviteSection(communityId)
+  if (existing) return {
+    ...existing,
+    systemKey: ACTIVITY_INVITE_SYSTEM_KEY,
+    widgets: existing.widgets?.length ? existing.widgets : buildActivityInviteSectionWidgets(),
+  }
+
+  const now = new Date().toISOString()
+  const sectionData = {
+    communityId,
+    name: ACTIVITY_INVITE_SECTION_NAME,
+    icon: '👣',
+    order: 999,
+    enableComment: true,
+    enableLike: true,
+    widgets: buildActivityInviteSectionWidgets(),
+    createdAt: now,
+    type: 'realtime',
+    status: 'active',
+    displayTemplate: 'default',
+    systemKey: ACTIVITY_INVITE_SYSTEM_KEY,
+  }
+  const sectionId = await db.create('sections', sectionData)
+  return normalizeSectionForClient({ ...sectionData, _id: sectionId } as Section)
+}
+
+function buildVirtualActivityInviteSection(communityId: string): Section {
+  return normalizeSectionForClient({
+    _id: '',
+    communityId,
+    name: ACTIVITY_INVITE_SECTION_NAME,
+    icon: '👣',
+    order: 999,
+    enableComment: true,
+    enableLike: true,
+    widgets: buildActivityInviteSectionWidgets(),
+    createdAt: new Date().toISOString(),
+    type: 'realtime',
+    status: 'active',
+    displayTemplate: 'default',
+    systemKey: ACTIVITY_INVITE_SYSTEM_KEY,
+  } as Section)
+}
+
+async function findCurrentActivityInvite(sourcePostId: string) {
+  const invites = await db.query('posts', {
+    originPostId: sourcePostId,
+    originLinkType: 'activity_invite',
+    status: 'active',
+  }, { orderBy: ['eventStartsAt', 'asc'] }) as any[]
+  return invites
+    .filter(isPostVisibleToMembers)
+    .filter((post) => isActivityInviteInProgress(post))
+    .sort((a, b) => timeValue(a.eventStartsAt) - timeValue(b.eventStartsAt))[0] || null
+}
+
+async function buildActivityInviteSummary(invitePost: any, inviteSection: Section | null, viewerId?: string) {
+  if (!invitePost) return null
+  const attendanceWidget = (inviteSection?.widgets || []).find((widget) => widget.type === 'attendance')
+  const attendanceSummary = attendanceWidget
+    ? await buildAttendanceSummary(invitePost, attendanceWidget, viewerId)
+    : null
+  const capacity = attendanceSummary?.capacity ?? normalizeCapacityValue(invitePost.content?.[ACTIVITY_INVITE_WIDGET_IDS.capacity])
+  return {
+    postId: invitePost._id,
+    sectionId: invitePost.sectionId,
+    eventStartsAt: invitePost.eventStartsAt || '',
+    title: textFromContentValue(invitePost.content?.[ACTIVITY_INVITE_WIDGET_IDS.title]),
+    occupiedSeats: attendanceSummary?.occupiedSeats || 0,
+    count: attendanceSummary?.count || 0,
+    ...(capacity ? { capacity } : {}),
+    isFull: Boolean(attendanceSummary?.isFull),
+    isJoined: Boolean(attendanceSummary?.isJoined),
+  }
+}
+
+async function loadActivityInviteSource(sourcePostId: string, viewerId?: string) {
+  const sourcePost = await db.getById('posts', sourcePostId) as Post
+  if (!sourcePost || sourcePost.status === 'deleted' || !isPostVisibleToMembers(sourcePost)) {
+    throw new Error('源帖子不存在或不可用')
+  }
+  await ensureCommunityReadable(sourcePost.communityId, viewerId || '', COMMUNITY_READ_ERROR)
+  const sourceSection = normalizePostSection(await db.getById('sections', sourcePost.sectionId) as Section)
+  if (!hasActivityInviteWidget(sourceSection)) {
+    throw new Error('该板块未启用活动召集')
+  }
+  return { sourcePost, sourceSection }
+}
+
+function validateActivityInviteContent(content: PostContent) {
+  const startsAt = String(content[ACTIVITY_INVITE_WIDGET_IDS.startsAt] || '').trim()
+  if (!Number.isFinite(Date.parse(startsAt))) throw new Error('出发时间不正确')
+  const capacity = normalizeCapacityValue(content[ACTIVITY_INVITE_WIDGET_IDS.capacity])
+  if (!capacity) throw new Error('人数上限必须大于 0')
 }
 
 async function getAttendanceWidgetForPost(postId: string, widgetId?: string) {
@@ -207,7 +413,7 @@ async function listAttendanceMembersInternal(postId: string, widgetId?: string) 
     joinedAt: record.joinedAt,
   }))
   const occupiedSeats = sumOccupiedSeats(records)
-  const capacity = normalizeCapacity(widget)
+  const capacity = normalizeCapacity(widget, post)
   return {
     widgetId: widget.widgetId,
     members,
@@ -267,6 +473,105 @@ export async function handleCreate(
   return { postId, auditStatus: audit.status, auditReason: audit.reason }
 }
 
+export async function handleGetActivityInviteState(
+  params: { sourcePostId: string; asGuest?: boolean },
+  openid?: string,
+) {
+  const viewerId = params.asGuest ? '' : (openid || '')
+  const { sourcePost, sourceSection } = await loadActivityInviteSource(params.sourcePostId, viewerId)
+  const invitePost = await findCurrentActivityInvite(sourcePost._id)
+  const inviteSection = invitePost?.sectionId
+    ? normalizeSectionForClient(await db.getById('sections', invitePost.sectionId) as Section)
+    : (await findActivityInviteSection(sourcePost.communityId) || buildVirtualActivityInviteSection(sourcePost.communityId))
+  const invite = invitePost
+    ? await buildActivityInviteSummary(invitePost, inviteSection, viewerId)
+    : null
+  return {
+    enabled: true,
+    sourcePostId: sourcePost._id,
+    prefill: buildActivityInvitePrefill(sourcePost, sourceSection),
+    invite,
+    targetSection: inviteSection
+      ? {
+          ...inviteSection,
+          sectionId: inviteSection._id,
+          name: inviteSection.name,
+          systemKey: inviteSection.systemKey || ACTIVITY_INVITE_SYSTEM_KEY,
+        }
+      : null,
+  }
+}
+
+export async function handleCreateActivityInvite(
+  params: { sourcePostId: string; content: PostContent },
+  openid: string,
+) {
+  if (!openid) throw new Error('Missing OPENID')
+  const { sourcePost, sourceSection } = await loadActivityInviteSource(params.sourcePostId, openid)
+  await ensureActiveCommunityMember(sourcePost.communityId, openid)
+
+  const existingInvite = await findCurrentActivityInvite(sourcePost._id)
+  if (existingInvite) {
+    return {
+      postId: existingInvite._id,
+      alreadyExists: true,
+      eventStartsAt: existingInvite.eventStartsAt || '',
+    }
+  }
+
+  const targetSection = await ensureActivityInviteSection(sourcePost.communityId)
+  const sanitizedContent = sanitizeContent(params.content, targetSection)
+  validateRequiredWidgets(targetSection, sanitizedContent)
+  validateContentValues(targetSection, sanitizedContent)
+  validateActivityInviteContent(sanitizedContent)
+
+  const now = new Date().toISOString()
+  const originTitle = resolveSourceTitle(sourcePost, sourceSection)
+  const eventStartsAt = String(sanitizedContent[ACTIVITY_INVITE_WIDGET_IDS.startsAt] || '').trim()
+  const postId = await db.create('posts', {
+    communityId: sourcePost.communityId,
+    sectionId: targetSection._id,
+    authorId: openid,
+    status: 'active',
+    auditStatus: 'pending',
+    auditReason: 'content audit pending',
+    auditUpdatedAt: now,
+    content: sanitizedContent,
+    commentCount: 0,
+    likeCount: 0,
+    isPinned: false,
+    isFeatured: false,
+    originPostId: sourcePost._id,
+    originSectionId: sourcePost.sectionId,
+    originCommunityId: sourcePost.communityId,
+    originTitle,
+    originLinkType: 'activity_invite',
+    eventStartsAt,
+    createdAt: now,
+    updatedAt: now,
+  })
+
+  const audit = await auditAndApply({
+    postId,
+    communityId: sourcePost.communityId,
+    sectionId: targetSection._id,
+    section: targetSection,
+    content: sanitizedContent,
+    authorId: openid,
+    source: 'user',
+    contentSlot: 'content',
+  })
+
+  return {
+    postId,
+    alreadyExists: false,
+    sectionId: targetSection._id,
+    eventStartsAt,
+    auditStatus: audit.status,
+    auditReason: audit.reason,
+  }
+}
+
 export async function handleList(params: {
   sectionId: string
   skip?: number
@@ -285,7 +590,9 @@ export async function handleList(params: {
   const orderedPosts = (posts as any[]).filter(isPostVisibleToMembers).slice().sort(comparePostListOrder)
   const slicedPosts = orderedPosts.slice(params.skip ?? 0, (params.skip ?? 0) + (params.limit ?? 20))
   const withAttendance = await enrichPostsWithAttendance(slicedPosts, { [params.sectionId]: section }, viewerId)
-  const enrichedPosts = await enrichPostsWithAuthor(withAttendance)
+  const canViewMemberOnly = await isActiveCommunityMember(section.communityId, viewerId)
+  const visiblePosts = withAttendance.map((post) => maskMemberOnlyContent(post, section, canViewMemberOnly))
+  const enrichedPosts = await enrichPostsWithAuthor(visiblePosts)
   return { posts: enrichedPosts }
 }
 
@@ -316,8 +623,10 @@ export async function handleGet(params: { postId: string; asGuest?: boolean }, o
   const viewerId = params.asGuest ? '' : (openid || '')
   await ensureCommunityReadable(post.communityId, viewerId, COMMUNITY_READ_ERROR)
   const section = normalizePostSection(await db.getById('sections', post.sectionId) as Section)
-  const attendanceSummaryByWidget = await buildAttendanceSummaryByWidget(post._id, section, viewerId)
-  const [enrichedPost] = await enrichPostsWithAuthor([{ ...post, attendanceSummaryByWidget }])
+  const canViewMemberOnly = await isActiveCommunityMember(post.communityId, viewerId)
+  const visiblePost = maskMemberOnlyContent(post, section, canViewMemberOnly)
+  const attendanceSummaryByWidget = await buildAttendanceSummaryByWidget(post, section, viewerId)
+  const [enrichedPost] = await enrichPostsWithAuthor([{ ...visiblePost, attendanceSummaryByWidget }])
   return { post: enrichedPost }
 }
 
@@ -422,7 +731,7 @@ export async function handleJoinAttendance(
   }, { limit: 1 })
   if (existing.length === 0) {
     const current = await getAttendanceRecords(post._id, widget.widgetId)
-    const capacity = normalizeCapacity(widget)
+    const capacity = normalizeCapacity(widget, post)
     const occupied = sumOccupiedSeats(current)
     if (capacity && occupied + seatCount > capacity) {
       const remaining = Math.max(0, capacity - occupied)
@@ -452,7 +761,7 @@ export async function handleJoinAttendance(
     }
   }
 
-  const summary = await buildAttendanceSummary(post._id, widget, openid)
+  const summary = await buildAttendanceSummary(post, widget, openid)
   return { widgetId: widget.widgetId, summary }
 }
 
@@ -473,7 +782,7 @@ export async function handleLeaveAttendance(
     await db.removeById(ATTENDANCE_COLLECTION, existing[0]._id)
   }
 
-  const summary = await buildAttendanceSummary(post._id, widget, openid)
+  const summary = await buildAttendanceSummary(post, widget, openid)
   return { widgetId: widget.widgetId, summary }
 }
 
@@ -541,6 +850,8 @@ export const main = async (event: any) => {
   const { action, _testOpenid, ...params } = event
   if (action === 'clientLog') return handleClientLog(params, openid)
   if (action === 'create') return handleCreate(params, openid)
+  if (action === 'getActivityInviteState') return handleGetActivityInviteState(params, openid)
+  if (action === 'createActivityInvite') return handleCreateActivityInvite(params, openid)
   if (action === 'list') return handleList(params, openid)
   if (action === 'home') return handleHome(params, openid)
   if (action === 'bootstrap') return handleBootstrap(params, openid)

@@ -26,6 +26,7 @@ export type WidgetType =
   | 'note_blocks'
   | 'rich_note'
   | 'location'
+  | 'activity_invite'
   | 'attendance'
   | 'video_group'
   | 'audio_group'
@@ -148,6 +149,8 @@ export interface Widget {
   locked?: boolean
   unit?: string
   capacity?: number
+  capacityWidgetId?: string
+  visibility?: 'public' | 'member'
   noticeContent?: string
 }
 
@@ -238,6 +241,7 @@ export interface Section {
   status: SectionStatus
   displayTemplate?: SectionDisplayTemplate
   accentColor?: string
+  systemKey?: 'activity_invite'
 }
 
 export interface SectionWithPostCount extends Section {
@@ -284,6 +288,12 @@ export interface Post {
   isFeatured?: boolean
   featuredAt?: string
   featuredByAccountId?: string
+  originPostId?: string
+  originSectionId?: string
+  originCommunityId?: string
+  originTitle?: string
+  originLinkType?: 'activity_invite'
+  eventStartsAt?: string
   adminEditedAt?: string
   adminEditedByAccountId?: string
   adminEditedByUsername?: string

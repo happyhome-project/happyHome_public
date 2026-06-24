@@ -467,8 +467,25 @@ test('section.create: 图文攻略展示模板可保存到板块', async () => {
       expect.objectContaining({ widgetId: 'guide_body', type: 'rich_note', label: '正文', required: false, showInList: false, locked: true }),
       expect.objectContaining({ widgetId: 'guide_liangbulu_track_id', type: 'short_text', label: '两步路轨迹编号', required: false, showInList: false, locked: true }),
       expect.objectContaining({ widgetId: 'guide_location', type: 'location', label: '目的地位置', required: true, showInList: false, locked: true }),
+      expect.objectContaining({ widgetId: 'guide_activity_invite', type: 'activity_invite', label: '活动召集', required: false, showInList: false, locked: true }),
     ],
   }))
+})
+
+test('section.updateWidgets: activity_invite 只能配置到 evergreen 板块', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-1',
+    type: 'realtime',
+    widgets: [],
+  })
+
+  await expect(main({
+    action: 'section.updateWidgets',
+    sectionId: 'section-1',
+    widgets: [
+      { widgetId: 'invite-1', type: 'activity_invite', label: '活动召集', fieldKey: 'activityInvite', required: false, order: 0, showInList: false },
+    ],
+  })).rejects.toThrow('沉淀')
 })
 
 test('section.updateWidgets: 图文攻略固定控件不能删除或修改', async () => {
@@ -483,6 +500,7 @@ test('section.updateWidgets: 图文攻略固定控件不能删除或修改', asy
     { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 7, showInList: false, locked: true },
     { widgetId: 'guide_liangbulu_track_id', type: 'short_text', label: '两步路轨迹编号', fieldKey: 'liangbuluTrackId', required: false, order: 8, showInList: false, locked: true },
     { widgetId: 'guide_location', type: 'location', label: '目的地位置', fieldKey: 'location', required: true, order: 9, showInList: false, locked: true },
+    { widgetId: 'guide_activity_invite', type: 'activity_invite', label: '活动召集', fieldKey: 'activityInvite', required: false, order: 10, showInList: false, locked: true },
   ]
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-guide',
@@ -520,6 +538,7 @@ test('section.updateWidgets: 图文攻略允许在固定控件后追加小控件
     { widgetId: 'guide_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 7, showInList: false, locked: true },
     { widgetId: 'guide_liangbulu_track_id', type: 'short_text', label: '两步路轨迹编号', fieldKey: 'liangbuluTrackId', required: false, order: 8, showInList: false, locked: true },
     { widgetId: 'guide_location', type: 'location', label: '目的地位置', fieldKey: 'location', required: true, order: 9, showInList: false, locked: true },
+    { widgetId: 'guide_activity_invite', type: 'activity_invite', label: '活动召集', fieldKey: 'activityInvite', required: false, order: 10, showInList: false, locked: true },
   ]
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-guide',
@@ -535,18 +554,19 @@ test('section.updateWidgets: 图文攻略允许在固定控件后追加小控件
     sectionId: 'section-guide',
     widgets: [
       ...guideWidgets,
-      { widgetId: 'guide_scenery', type: 'short_text', label: '景色特点', fieldKey: 'scenery', required: false, order: 10, showInList: false },
+      { widgetId: 'guide_scenery', type: 'short_text', label: '景色特点', fieldKey: 'scenery', required: false, order: 11, showInList: false },
     ],
   })
 
-  expect(result.widgets.slice(0, 10).every((widget: any) => widget.locked === true)).toBe(true)
-  expect(result.widgets[10]).toEqual(expect.objectContaining({ widgetId: 'guide_scenery', locked: false }))
+  expect(result.widgets.slice(0, 11).every((widget: any) => widget.locked === true)).toBe(true)
+  expect(result.widgets[11]).toEqual(expect.objectContaining({ widgetId: 'guide_scenery', locked: false }))
   expect(db.updateById).toHaveBeenCalledWith('sections', 'section-guide', expect.objectContaining({
     widgets: expect.arrayContaining([
       expect.objectContaining({ widgetId: 'guide_images', required: true, locked: true }),
       expect.objectContaining({ widgetId: 'guide_drive_duration', required: true, locked: true }),
       expect.objectContaining({ widgetId: 'guide_liangbulu_track_id', required: false, locked: true }),
       expect.objectContaining({ widgetId: 'guide_distance', locked: true }),
+      expect.objectContaining({ widgetId: 'guide_activity_invite', locked: true }),
       expect.objectContaining({ widgetId: 'guide_scenery', locked: false }),
     ]),
   }))
@@ -570,7 +590,7 @@ test('section.get: 旧图文攻略板块会补齐路线攻略固定控件', asyn
     sectionId: 'section-guide',
   })
 
-  expect(result.section.widgets.map((widget: any) => widget.widgetId).slice(0, 10)).toEqual([
+  expect(result.section.widgets.map((widget: any) => widget.widgetId).slice(0, 11)).toEqual([
     'guide_title',
     'guide_images',
     'guide_distance',
@@ -581,6 +601,7 @@ test('section.get: 旧图文攻略板块会补齐路线攻略固定控件', asyn
     'guide_body',
     'guide_liangbulu_track_id',
     'guide_location',
+    'guide_activity_invite',
   ])
   expect(result.section.widgets[6]).toEqual(expect.objectContaining({
     widgetId: 'guide_drive_duration',
@@ -601,6 +622,13 @@ test('section.get: 旧图文攻略板块会补齐路线攻略固定控件', asyn
     label: '目的地位置',
     required: true,
     order: 9,
+    locked: true,
+  }))
+  expect(result.section.widgets[10]).toEqual(expect.objectContaining({
+    widgetId: 'guide_activity_invite',
+    label: '活动召集',
+    required: false,
+    order: 10,
     locked: true,
   }))
 })

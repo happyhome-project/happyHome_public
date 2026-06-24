@@ -5,6 +5,11 @@
         <text v-if="post.isPinned" class="post-flag pin">置顶</text>
         <text v-if="post.isFeatured" class="post-flag feature">精华</text>
       </view>
+      <view v-if="post.originPostId && post.originLinkType === 'activity_invite'" class="origin-card" @tap="goOriginPost">
+        <text class="origin-label">来自攻略</text>
+        <text class="origin-title">{{ post.originTitle || '原帖' }}</text>
+        <text class="origin-action">查看原帖 ›</text>
+      </view>
       <GuideRouteDetailView
         v-if="isGuideNoteDetail && guideRouteDetail"
         :detail="guideRouteDetail"
@@ -64,6 +69,22 @@
             <view v-if="!getAttendanceSummary(widget).previewUsers.length && !emptySlotCount(widget)" class="hh-avatar-empty-text">暂无</view>
           </view>
         </view>
+      </view>
+
+      <view v-if="activityInviteWidgets.length" class="activity-invite-card">
+        <view class="activity-invite-main">
+          <text class="activity-invite-kicker">活动召集</text>
+          <text class="activity-invite-title">{{ activityInviteTitle }}</text>
+          <text class="activity-invite-desc">{{ activityInviteDesc }}</text>
+        </view>
+        <button
+          class="activity-invite-btn"
+          size="mini"
+          :disabled="activityInviteLoading"
+          @tap="handleActivityInviteTap"
+        >
+          {{ activityInviteButtonText }}
+        </button>
       </view>
 
       <view class="meta">
@@ -161,6 +182,7 @@ import { buildGuideRouteDetail } from '../../utils/guide-detail'
 
 const fallbackAvatar = '/static/default-avatar.png'
 const ATTENDANCE_SLOT_DISPLAY_MAX = 6
+const ACTIVITY_INVITE_CREATE_INTENT_KEY = 'activity_invite_create_intent_v1'
 
 const post = ref<any>(null)
 const section = ref<any>(null)
@@ -178,6 +200,8 @@ const rosterMeta = reactive({
 })
 const resolvedAvatarUrls = reactive<Record<string, string>>({})
 const cancelBusy = ref(false)
+const activityInviteState = ref<any>(null)
+const activityInviteLoading = ref(false)
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
 clientLog('info', 'detail.setup', {})
@@ -211,9 +235,28 @@ const guideRouteDetail = computed(() => {
   return buildGuideRouteDetail(post.value, section.value)
 })
 const regularWidgets = computed(() =>
-  (section.value?.widgets || []).filter((widget: any) => !['attendance', 'admin_notice'].includes(widget.type))
+  (section.value?.widgets || []).filter((widget: any) => !['attendance', 'admin_notice', 'activity_invite'].includes(widget.type))
 )
 const attendanceWidgets = computed(() => (section.value?.widgets || []).filter((widget: any) => widget.type === 'attendance'))
+const activityInviteWidgets = computed(() => (section.value?.widgets || []).filter((widget: any) => widget.type === 'activity_invite'))
+const activityInvite = computed(() => activityInviteState.value?.invite || null)
+const activityInviteTitle = computed(() => {
+  const invite = activityInvite.value
+  if (invite?.postId) return invite.title || '已有出游邀约'
+  return '想一起去？可以发起一次实时邀约'
+})
+const activityInviteDesc = computed(() => {
+  const invite = activityInvite.value
+  if (!invite?.postId) return '填写出发时间、集合地点、联系电话和人数，发布后大家可以直接报名参与。'
+  const occupied = Number(invite.occupiedSeats || 0)
+  const capacity = Number(invite.capacity || 0)
+  const seatText = capacity ? `${occupied}/${capacity} 席` : `${occupied} 席已报名`
+  return `${formatDateTime(invite.eventStartsAt)} · ${seatText}`
+})
+const activityInviteButtonText = computed(() => {
+  if (activityInviteLoading.value) return '加载中...'
+  return activityInvite.value?.postId ? '去参与' : '发起召集'
+})
 
 onErrorCaptured((error, _instance, info) => {
   clientLog('error', 'detail.errorCaptured', {
@@ -270,6 +313,7 @@ async function ensurePostLoaded() {
       postId: currentPostId.value,
       sectionId: section.value?._id || '',
     })
+    await loadActivityInviteState()
     return
   }
   await loadPost(currentPostId.value)
@@ -325,6 +369,7 @@ async function loadPost(postId: string) {
       throw new Error('板块信息加载失败，请稍后重试')
     }
     await resolveAttendanceAvatarUrls()
+    await loadActivityInviteState()
     clientLog('info', 'detail.load.success', {
       postId,
       sectionId: section.value?._id || '',
@@ -357,6 +402,25 @@ async function loadPost(postId: string) {
   }
 }
 
+async function loadActivityInviteState() {
+  if (!post.value?._id || activityInviteWidgets.value.length === 0) {
+    activityInviteState.value = null
+    return
+  }
+  activityInviteLoading.value = true
+  try {
+    activityInviteState.value = await postApi.getActivityInviteState(post.value._id, !userStore.isLoggedIn)
+  } catch (error: any) {
+    clientLog('warn', 'detail.activityInvite.state.fail', {
+      postId: post.value?._id || '',
+      error,
+    })
+    activityInviteState.value = null
+  } finally {
+    activityInviteLoading.value = false
+  }
+}
+
 function friendlyLoadError(error: any) {
   const message = String(error?.message || '')
   if (message.includes('缺少帖子参数')) return message
@@ -383,6 +447,32 @@ function goBack() {
   uni.navigateBack({
     fail: () => uni.switchTab({ url: '/pages/index/index' }),
   })
+}
+
+function goOriginPost() {
+  const originPostId = String(post.value?.originPostId || '')
+  if (!originPostId) return
+  uni.navigateTo({ url: `/pages/detail/index?postId=${encodeURIComponent(originPostId)}` })
+}
+
+async function handleActivityInviteTap() {
+  if (!post.value?._id) return
+  if (activityInvite.value?.postId) {
+    uni.navigateTo({ url: `/pages/detail/index?postId=${encodeURIComponent(activityInvite.value.postId)}` })
+    return
+  }
+  if (!userStore.isLoggedIn) {
+    uni.showToast({ title: '请先登录后发起召集', icon: 'none' })
+    uni.switchTab({ url: '/pages/profile/index' })
+    return
+  }
+  try {
+    uni.setStorageSync(ACTIVITY_INVITE_CREATE_INTENT_KEY, {
+      sourcePostId: post.value._id,
+      createdAt: Date.now(),
+    })
+  } catch {}
+  uni.switchTab({ url: '/pages/create/index' })
 }
 
 const deleteLock = useBusyLock(async () => {
@@ -636,6 +726,86 @@ function formatDateTime(iso: string): string {
   padding: $hh-space-lg;
   background: $hh-color-bg;
   min-height: 100vh;
+}
+
+.origin-card {
+  margin-bottom: $hh-space-md;
+  padding: $hh-space-md;
+  border-radius: $hh-radius-md;
+  background: rgba(47, 124, 78, 0.08);
+  border: 1rpx solid rgba(47, 124, 78, 0.16);
+}
+
+.origin-label {
+  display: block;
+  color: $hh-color-primary;
+  font-size: $hh-font-caption;
+  margin-bottom: 6rpx;
+}
+
+.origin-title {
+  display: block;
+  color: $hh-color-text;
+  font-size: $hh-font-body;
+  font-weight: $hh-font-weight-medium;
+}
+
+.origin-action {
+  display: block;
+  margin-top: 8rpx;
+  color: $hh-color-primary-text;
+  font-size: $hh-font-caption;
+}
+
+.activity-invite-card {
+  margin-top: $hh-space-lg;
+  padding: $hh-space-md;
+  border-radius: $hh-radius-lg;
+  background: linear-gradient(135deg, rgba(47, 124, 78, 0.11), rgba(255, 255, 255, 0.86));
+  border: 1rpx solid rgba(47, 124, 78, 0.18);
+  display: flex;
+  align-items: center;
+  gap: $hh-space-md;
+}
+
+.activity-invite-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.activity-invite-kicker {
+  display: block;
+  color: $hh-color-primary;
+  font-size: $hh-font-caption;
+  margin-bottom: 6rpx;
+}
+
+.activity-invite-title {
+  display: block;
+  color: $hh-color-text;
+  font-size: $hh-font-body-lg;
+  font-weight: $hh-font-weight-medium;
+  line-height: 1.4;
+}
+
+.activity-invite-desc {
+  display: block;
+  margin-top: 8rpx;
+  color: $hh-color-text-mute;
+  font-size: $hh-font-caption;
+  line-height: 1.55;
+}
+
+.activity-invite-btn {
+  flex: 0 0 auto;
+  margin: 0;
+  border: none;
+  border-radius: $hh-radius-full;
+  background: $hh-color-primary;
+  color: $hh-color-text-inverse;
+  font-size: $hh-font-caption;
+  line-height: 2.2;
+  padding: 0 24rpx;
 }
 
 .loading {

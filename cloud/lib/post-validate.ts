@@ -5,9 +5,11 @@ import { isGuideNoteSection } from '../shared/guide-note-widgets'
 // 永远不进 post.content 的控件类型（无论 user 还是 admin 路径）：
 //   attendance: 用户报名记录写在独立集合
 //   admin_notice: 管理员维护的公告内容，挂在 widget 上而非 post 上
+//   activity_invite: 沉淀帖上的跨板块动作入口，不是帖子正文
 export const NEVER_IN_POST_CONTENT: Set<WidgetType> = new Set([
   'attendance',
   'admin_notice',
+  'activity_invite',
 ])
 
 // 普通用户不能编辑、但 admin 代发帖时允许的控件类型：

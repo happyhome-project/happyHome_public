@@ -61,10 +61,12 @@
                   <el-option label="音频组" value="audio_group" />
                   <el-option v-if="widget.type === 'rich_text'" label="富文本（旧）" value="rich_text" />
                   <el-option label="地图位置" value="location" />
+                  <el-option label="活动召集" value="activity_invite" :disabled="sectionType !== 'evergreen'" />
                   <el-option label="活动参与" value="attendance" :disabled="sectionType !== 'realtime'" />
                   <el-option label="公告内容" value="admin_notice" />
                 </el-select>
-                <span v-if="sectionType !== 'realtime'" class="muted-tip">活动参与控件仅支持 realtime 板块</span>
+                <span v-if="widget.type === 'attendance' && sectionType !== 'realtime'" class="muted-tip">活动参与控件仅支持 realtime 板块</span>
+                <span v-else-if="widget.type === 'activity_invite'" class="muted-tip">在沉淀帖详情页展示“发起召集/去参与”，邀约内容会发布到实时协作板块</span>
               </el-form-item>
 
               <el-form-item label="标签名">
@@ -102,6 +104,10 @@
                 <el-tag type="info" effect="plain">管理员维护，不开放发帖</el-tag>
               </el-form-item>
 
+              <el-form-item v-else-if="widget.type === 'activity_invite'" label="使用方式">
+                <el-tag type="info" effect="plain">详情页操作入口，不进入帖子正文</el-tag>
+              </el-form-item>
+
               <el-form-item v-else label="必填">
                 <el-switch v-model="widget.required" :disabled="isLockedWidget(widget)" />
               </el-form-item>
@@ -119,10 +125,11 @@
                 </template>
                 <el-switch
                   v-model="widget.showInList"
-                  :disabled="isLockedWidget(widget) || widget.type === 'admin_notice' || !isListDisplayable(widget.type)"
+                  :disabled="isLockedWidget(widget) || widget.type === 'admin_notice' || widget.type === 'activity_invite' || !isListDisplayable(widget.type)"
                 />
                 <span class="muted-tip" v-if="widget.type === 'attendance'">开启后会显示“参与人数 + 头像预览”</span>
                 <span class="muted-tip" v-else-if="widget.type === 'admin_notice'">公告会直接展示在小程序首页板块区域，不进入帖子列表摘要</span>
+                <span class="muted-tip" v-else-if="widget.type === 'activity_invite'">召集入口只在帖子详情页展示</span>
                 <span class="muted-tip" v-else-if="widget.type === 'audio_group'">音频只在帖子详情页播放，不进入列表摘要</span>
                 <span class="muted-tip" v-else-if="!isListDisplayable(widget.type)">该类型不支持列表展示</span>
                 <span class="muted-tip" v-else>关闭后仅在帖子详情页展示</span>
@@ -170,6 +177,7 @@ const GUIDE_NOTE_LOCKED_WIDGET_IDS = new Set([
   'guide_body',
   'guide_liangbulu_track_id',
   'guide_location',
+  'guide_activity_invite',
 ])
 const DEFAULT_LABELS: Record<string, string> = {
   rich_note: '富图文',
@@ -183,6 +191,7 @@ const DEFAULT_LABELS: Record<string, string> = {
   audio_group: '音频列表',
   rich_text: '正文',
   location: '位置',
+  activity_invite: '活动召集',
   attendance: '活动参与',
   admin_notice: '公告',
 }
@@ -236,7 +245,7 @@ onMounted(async () => {
         ? ''
         : String(widget?.label || ''),
       fieldKey: resolveFieldKey(widget, index),
-      required: ['attendance', 'admin_notice'].includes(widget?.type) ? false : !!widget.required,
+      required: ['attendance', 'admin_notice', 'activity_invite'].includes(widget?.type) ? false : !!widget.required,
       showInList: isListDisplayable(widget?.type) ? !!widget.showInList : false,
       noticeContent: widget?.type === 'admin_notice' ? String(widget.noticeContent || '') : undefined,
       locked: !!widget.locked,
@@ -304,6 +313,11 @@ function handleTypeChange(widget: any) {
     widget.showInList = false
     widget.capacity = undefined
     widget.noticeContent = typeof widget.noticeContent === 'string' ? widget.noticeContent : ''
+  } else if (widget.type === 'activity_invite') {
+    widget.required = false
+    widget.showInList = false
+    widget.capacity = undefined
+    widget.noticeContent = undefined
   } else {
     widget.capacity = undefined
     widget.noticeContent = undefined
@@ -347,8 +361,8 @@ async function save() {
       ...widget,
       label: widget.type === 'attendance' && shouldClearAttendanceLabel(widget.label) ? '' : widget.label,
       fieldKey: resolveFieldKey(widget, index),
-      required: ['attendance', 'admin_notice'].includes(widget.type) ? false : !!widget.required,
-      showInList: isListDisplayable(widget.type) ? !!widget.showInList : false,
+      required: ['attendance', 'admin_notice', 'activity_invite'].includes(widget.type) ? false : !!widget.required,
+      showInList: widget.type === 'activity_invite' ? false : (isListDisplayable(widget.type) ? !!widget.showInList : false),
       capacity: widget.type === 'attendance' && widget.capacity ? Number(widget.capacity) : undefined,
       noticeContent: widget.type === 'admin_notice' ? String(widget.noticeContent || '').trim() : undefined,
       order: index,

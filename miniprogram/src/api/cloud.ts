@@ -304,6 +304,20 @@ export const postApi = {
     callCloud<{ post: any }>('post', 'get', { postId, asGuest }),
   create: (params: object) =>
     callCloud('post', 'create', params),
+  getActivityInviteState: (sourcePostId: string, asGuest = false) =>
+    callCloud<{
+      enabled: boolean
+      sourcePostId: string
+      prefill: { title: string; location?: any }
+      invite: any | null
+      targetSection: { _id?: string; sectionId: string; name: string; systemKey?: string; widgets?: any[]; type?: string } | null
+    }>('post', 'getActivityInviteState', { sourcePostId, asGuest }),
+  createActivityInvite: (sourcePostId: string, content: Record<string, any>) =>
+    callCloud<{ postId: string; sectionId?: string; alreadyExists?: boolean; auditStatus?: string; auditReason?: string }>(
+      'post',
+      'createActivityInvite',
+      { sourcePostId, content },
+    ),
   update: (postId: string, content: Record<string, any>) =>
     callCloud('post', 'update', { postId, content }),
   delete: (postId: string) =>

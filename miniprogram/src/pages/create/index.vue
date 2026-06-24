@@ -49,7 +49,8 @@
 
       <view v-else class="form">
         <view class="form-header">
-          <text class="section-tag" @tap="selectedSection = null">← {{ selectedSection.name }}</text>
+          <text class="section-tag" @tap="handleBackToSectionPicker">← {{ selectedSection.name }}</text>
+          <text v-if="isActivityInviteMode" class="invite-mode-tag">从攻略发起召集</text>
         </view>
 
         <!-- 未配置控件的板块：提示并禁用发布，避免空帖 -->
@@ -78,7 +79,7 @@
           </view>
 
           <button class="btn-primary" :disabled="submitting" @tap="handleSubmit">
-            {{ submitting ? '发布中...' : '发布' }}
+            {{ submitting ? '发布中...' : (isActivityInviteMode ? '发布邀约' : '发布') }}
           </button>
         </template>
       </view>
@@ -112,6 +113,15 @@ const memberStatus = ref<string | null>(null)
 const joining = ref(false)
 let checkSeq = 0
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
+const ACTIVITY_INVITE_CREATE_INTENT_KEY = 'activity_invite_create_intent_v1'
+const ACTIVITY_INVITE_INTENT_TTL_MS = 30 * 60 * 1000
+const ACTIVITY_INVITE_WIDGET_IDS = {
+  title: 'activity_invite_title',
+  location: 'activity_invite_location',
+} as const
+const isActivityInviteMode = ref(false)
+const activityInviteSourcePostId = ref('')
+const activityInviteLoading = ref(false)
 
 // 只允许在 active 板块发帖。dormant / archived 板块既无法发帖也无处展示（首页已过滤）。
 const activeSections = computed(() =>
@@ -119,7 +129,7 @@ const activeSections = computed(() =>
 )
 
 const editableWidgets = computed(() =>
-  (selectedSection.value?.widgets || []).filter((widget: any) => !['attendance', 'admin_notice'].includes(widget.type))
+  (selectedSection.value?.widgets || []).filter((widget: any) => !['attendance', 'admin_notice', 'activity_invite'].includes(widget.type))
 )
 
 const attendanceWidgets = computed(() =>
@@ -130,15 +140,17 @@ const adminNoticeWidgets = computed(() =>
   (selectedSection.value?.widgets || []).filter((widget: any) => widget.type === 'admin_notice')
 )
 
-onLoad(async () => {
+onLoad(async (options: any) => {
   hideNativeTabBar()
   await checkMembership({ silent: false })
+  await consumeActivityInviteIntent(options)
 })
 
 onShow(() => {
   hideNativeTabBar()
   // 返回页面（例如地图选择返回）时静默刷新，不再打断表单操作。
   void checkMembership({ silent: true })
+  void consumeActivityInviteIntent()
 })
 
 watch(() => communityStore.currentCommunityId, async () => {
@@ -224,8 +236,86 @@ function goOnboarding() {
 }
 
 function selectSection(section: any) {
+  if (isActivityInviteMode.value) return
   selectedSection.value = section
   Object.keys(formData).forEach((key) => delete formData[key])
+}
+
+function handleBackToSectionPicker() {
+  if (isActivityInviteMode.value) {
+    clearActivityInviteMode()
+    return
+  }
+  selectedSection.value = null
+}
+
+function clearActivityInviteMode() {
+  isActivityInviteMode.value = false
+  activityInviteSourcePostId.value = ''
+  selectedSection.value = null
+  Object.keys(formData).forEach((key) => delete formData[key])
+  try {
+    uni.removeStorageSync(ACTIVITY_INVITE_CREATE_INTENT_KEY)
+  } catch {}
+}
+
+function readActivityInviteIntent(options?: any) {
+  const queryMode = String(options?.mode || '')
+  const querySourcePostId = String(options?.sourcePostId || '').trim()
+  if (queryMode === 'activityInvite' && querySourcePostId) {
+    return { sourcePostId: querySourcePostId }
+  }
+  try {
+    const saved = uni.getStorageSync(ACTIVITY_INVITE_CREATE_INTENT_KEY)
+    const sourcePostId = String(saved?.sourcePostId || '').trim()
+    const createdAt = Number(saved?.createdAt || 0)
+    if (sourcePostId && Date.now() - createdAt <= ACTIVITY_INVITE_INTENT_TTL_MS) {
+      return { sourcePostId }
+    }
+    if (sourcePostId) uni.removeStorageSync(ACTIVITY_INVITE_CREATE_INTENT_KEY)
+  } catch {}
+  return null
+}
+
+async function consumeActivityInviteIntent(options?: any) {
+  const intent = readActivityInviteIntent(options)
+  if (!intent || activityInviteLoading.value || activityInviteSourcePostId.value === intent.sourcePostId) return
+  activityInviteLoading.value = true
+  try {
+    const state = await postApi.getActivityInviteState(intent.sourcePostId, !userStore.isLoggedIn)
+    if (state?.invite?.postId) {
+      uni.showToast({ title: '已有邀约，去参与', icon: 'none' })
+      try {
+        uni.removeStorageSync(ACTIVITY_INVITE_CREATE_INTENT_KEY)
+      } catch {}
+      uni.navigateTo({ url: `/pages/detail/index?postId=${encodeURIComponent(state.invite.postId)}` })
+      return
+    }
+    const targetSection = state?.targetSection
+    if (!targetSection?.widgets?.length) {
+      throw new Error('邀约板块未准备好，请稍后重试')
+    }
+    isActivityInviteMode.value = true
+    activityInviteSourcePostId.value = intent.sourcePostId
+    selectedSection.value = {
+      ...targetSection,
+      _id: targetSection._id || targetSection.sectionId || 'activity_invite_virtual',
+      name: targetSection.name || '出游邀约',
+      type: 'realtime',
+    }
+    Object.keys(formData).forEach((key) => delete formData[key])
+    if (state.prefill?.title) {
+      formData[ACTIVITY_INVITE_WIDGET_IDS.title] = `${state.prefill.title}邀约`
+    }
+    if (state.prefill?.location) {
+      formData[ACTIVITY_INVITE_WIDGET_IDS.location] = state.prefill.location
+    }
+  } catch (error: any) {
+    uni.showModal({ title: '发起召集失败', content: error?.message || '请稍后重试' })
+    clearActivityInviteMode()
+  } finally {
+    activityInviteLoading.value = false
+  }
 }
 
 async function uploadImages(tempPaths: string[]): Promise<string[]> {
@@ -335,11 +425,18 @@ async function handleSubmit() {
       }
     }
 
-    const result: any = await postApi.create({
-      communityId: communityStore.currentCommunityId,
-      sectionId,
-      content,
-    })
+    const result: any = isActivityInviteMode.value
+      ? await postApi.createActivityInvite(activityInviteSourcePostId.value, content)
+      : await postApi.create({
+          communityId: communityStore.currentCommunityId,
+          sectionId,
+          content,
+        })
+    if (isActivityInviteMode.value) {
+      try {
+        uni.removeStorageSync(ACTIVITY_INVITE_CREATE_INTENT_KEY)
+      } catch {}
+    }
     await handleAuditSubmitResult(result)
   } catch (error: any) {
     uni.showModal({ title: '发布失败', content: error?.message ?? '请重试' })
@@ -377,6 +474,21 @@ async function handleSubmit() {
 .section-name {
   font-size: $hh-font-body-lg;
   color: $hh-color-text;
+}
+
+.form-header {
+  display: flex;
+  align-items: center;
+  gap: $hh-space-sm;
+  flex-wrap: wrap;
+}
+
+.invite-mode-tag {
+  padding: 4rpx 12rpx;
+  border-radius: $hh-radius-full;
+  background: rgba(47, 124, 78, 0.1);
+  color: $hh-color-primary;
+  font-size: $hh-font-caption;
 }
 
 .arrow {

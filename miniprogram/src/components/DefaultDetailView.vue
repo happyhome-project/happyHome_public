@@ -301,6 +301,7 @@ const locationItems = computed<LocationItem[]>(() =>
 
 function hasWidgetValue(widget: any) {
   const value = props.post?.content?.[widget.widgetId]
+  if (widget.visibility === 'member' && (value === undefined || value === null || value === '')) return true
   if (widget.type === 'rich_note') return !isRichNoteEmpty(value)
   if (widget.type === 'note_blocks') return Array.isArray(value) && value.length > 0
   return value !== undefined && value !== null && value !== '' && !(Array.isArray(value) && value.length === 0)
@@ -308,16 +309,23 @@ function hasWidgetValue(widget: any) {
 
 function textValue(widget: any) {
   const value = props.post?.content?.[widget.widgetId]
+  if (widget.visibility === 'member' && (value === undefined || value === null || value === '')) {
+    return '加入后可查看联系电话'
+  }
   if (widget.type === 'rich_note') return normalizeRichNoteContent(value).text.trim()
   return formatWidgetValue(value, widget.type).trim()
 }
 
 function factValue(widget: any) {
+  const raw = props.post?.content?.[widget.widgetId]
+  if (widget.visibility === 'member' && (raw === undefined || raw === null || raw === '')) {
+    return '加入后可查看联系电话'
+  }
   if (widget.type === 'number') {
-    const value = formatWidgetValue(props.post?.content?.[widget.widgetId], widget.type).trim()
+    const value = formatWidgetValue(raw, widget.type).trim()
     return value ? `${value}${widget.unit ? ' ' + widget.unit : ''}` : ''
   }
-  return formatWidgetValue(props.post?.content?.[widget.widgetId], widget.type).trim()
+  return formatWidgetValue(raw, widget.type).trim()
 }
 
 function splitFacts(facts: FactItem[]) {
