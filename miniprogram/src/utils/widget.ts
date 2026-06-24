@@ -290,8 +290,16 @@ function getTextExcerpt(value: unknown): string {
 }
 
 function getAttendanceMeta(post: Post): string {
-  const summaries = Object.values(post?.attendanceSummaryByWidget || {}) as any[]
-  const summary = summaries.find((item) => Number(item?.occupiedSeats ?? item?.count ?? 0) > 0)
+  const summaries = (post?.attendanceSummaryByWidget || {}) as Record<string, any>
+  let summary: any = null
+  for (const key in summaries) {
+    if (!Object.prototype.hasOwnProperty.call(summaries, key)) continue
+    const item = summaries[key]
+    if (Number(item?.occupiedSeats ?? item?.count ?? 0) > 0) {
+      summary = item
+      break
+    }
+  }
   if (!summary) return ''
   const occupiedSeats = Number(summary.occupiedSeats ?? summary.count ?? 0)
   return occupiedSeats > 0 ? `${occupiedSeats}人参与` : ''
