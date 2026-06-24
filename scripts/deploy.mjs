@@ -170,9 +170,14 @@ function runShellCapture(commandLine, options = {}) {
     const proc = spawn(commandLine, {
       cwd: options.cwd || ROOT,
       env: options.env || process.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
       shell: true,
     })
+
+    if (options.input !== undefined && proc.stdin) {
+      proc.stdin.write(options.input)
+      proc.stdin.end()
+    }
 
     let stdout = ''
     let stderr = ''
@@ -271,10 +276,13 @@ async function deployCloudViaCloudBaseCli(fns) {
   for (const fn of fns) {
     const fnDir = resolve(CLOUD_DIST, fn)
     const result = await runShellCapture(
-      tcb('fn', 'deploy', fn, '--force', '--yes', '--env-id', envId, '--deployMode', 'cos', '--json'),
+      tcb('fn', 'deploy', fn, '--force', '--env-id', envId, '--deployMode', 'cos', '--json'),
       {
         cwd: fnDir,
-        displayCommandLine: `cd ${fnDir} && tcb fn deploy ${fn} --force --yes --env-id ${envId} --deployMode cos --json`,
+        displayCommandLine: `cd ${fnDir} && tcb fn deploy ${fn} --force --env-id ${envId} --deployMode cos --json`,
+        // CloudBase CLI 3.5.8 prompts to accept the merged existing function
+        // config; its --yes path throws "_a.includes is not a function".
+        input: '\n',
       }
     )
     if (!result.ok) return { ok: false, reason: `CloudBase CLI deploy ${fn} failed: ${result.reason}` }
