@@ -348,6 +348,10 @@ import {
   uniqueTemplateIds,
   type ApprovalNotificationTemplate,
 } from '../../utils/approval-notification'
+import {
+  buildCommunityOnboardingPath,
+  consumePendingShareCommunity,
+} from '../../utils/community-share'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -527,21 +531,25 @@ function cancelEditProfile() {
 }
 
 const submitFormLock = useBusyLock(async () => {
+  const wasEditingProfile = isEditingProfile.value
   try {
     const avatarUrl = await uploadAvatarIfAny()
     suppressNextLoginStateRefresh = true
     await userStore.login({ nickName: formNickName.value, avatarUrl })
     markCurrentLoginStateRefreshHandled()
-    if (isEditingProfile.value) await loadProfileDataAfterRoleResolved('profileSaved')
+    if (wasEditingProfile) await loadProfileDataAfterRoleResolved('profileSaved')
     else await loadProfileDataAfterRoleResolved('loginSaved')
     isEditingProfile.value = false
     showNickConfirm.value = false
     formAvatarTempPath.value = ''
     formAvatarCloudUrl.value = ''
-    uni.showToast({ title: '已保存', icon: 'success' })
+    const restoredShare = !wasEditingProfile && restorePendingShareCommunity()
+    if (!restoredShare) {
+      uni.showToast({ title: wasEditingProfile ? '已保存' : '登录成功', icon: 'success' })
+    }
   } catch (e: any) {
     uni.showModal({
-      title: isEditingProfile.value ? '保存失败' : '登录失败',
+      title: wasEditingProfile ? '保存失败' : '登录失败',
       content: e?.message || '请重试',
       showCancel: false,
     })
@@ -562,7 +570,10 @@ const devLoginLock = useBusyLock(async () => {
     showDevLogin.value = false
     devOpenid.value = ''
     devNickname.value = ''
-    uni.showToast({ title: '登录成功', icon: 'success' })
+    const restoredShare = restorePendingShareCommunity()
+    if (!restoredShare) {
+      uni.showToast({ title: '登录成功', icon: 'success' })
+    }
   } catch (e: any) {
     uni.showModal({ title: '登录失败', content: e?.message || '请检查 openid 格式', showCancel: false })
     suppressNextLoginStateRefresh = false
@@ -581,6 +592,17 @@ function handleLogout() {
 
 function goOnboarding() {
   openOnboardingPreservingStack({ mode: 'discover' })
+}
+
+function restorePendingShareCommunity() {
+  const communityId = consumePendingShareCommunity()
+  if (!communityId) return false
+  const url = buildCommunityOnboardingPath(communityId)
+  uni.navigateTo({
+    url,
+    fail: () => uni.reLaunch({ url }),
+  })
+  return true
 }
 
 function isAdminOf(communityId: string) {

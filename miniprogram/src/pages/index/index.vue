@@ -259,17 +259,27 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
+import { onLoad, onPullDownRefresh, onShareAppMessage, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
-import { postApi } from '../../api/cloud'
+import { memberApi, postApi } from '../../api/cloud'
 import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard } from '../../utils/widget'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
+import { resolveCloudFileUrl } from '../../utils/cloud-file-url'
+import {
+  buildCommunityOnboardingPath,
+  buildCommunitySharePath,
+  buildCommunityShareTitle,
+  DEFAULT_COMMUNITY_SHARE_IMAGE,
+  isCommunityShareQuery,
+  normalizeCommunityShareId,
+  savePendingShareCommunity,
+} from '../../utils/community-share'
 import { markGuestIntroSeen, shouldShowGuestIntro } from '../../utils/guest-intro'
 import type { HomeSnapshot } from '../../../../cloud/shared/types'
 import type { GuestIntroConfig } from '../../../../cloud/shared/guest-intro-config'
@@ -280,6 +290,8 @@ const showSwitcher = ref(false)
 const showGuestIntro = ref(false)
 const guestIntroConfig = ref<GuestIntroConfig | null>(null)
 const postsBySection = ref<Record<string, any[]>>({})
+const incomingShareCommunityId = ref('')
+const shareImageUrl = ref(DEFAULT_COMMUNITY_SHARE_IMAGE)
 let refreshingHome = false
 let queuedForcedHomeRefresh = false
 let mountedAt = 0
@@ -287,6 +299,15 @@ let unsubscribeBackgroundFetchSnapshot: (() => void) | null = null
 const NOTICE_PREVIEW_LIMIT = 68
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
+
+onLoad((options?: Record<string, any>) => {
+  if (!isCommunityShareQuery(options)) return
+  incomingShareCommunityId.value = normalizeCommunityShareId(options?.communityId)
+  clientLog('info', 'home.share.load', {
+    communityId: incomingShareCommunityId.value,
+  })
+})
+
 // ── Computed: masthead ──
 const communityName = computed(() => communityStore.currentCommunity?.name ?? '选择社区')
 const communityMeta = computed(() => '')
@@ -310,6 +331,7 @@ const kindEn = computed(() => 'Welcome : )')
 // ── 群训引文：读 community.motto / mottoCite ──
 const quote = computed(() => communityStore.currentCommunity?.motto || '')
 const quoteCite = computed(() => communityStore.currentCommunity?.mottoCite || '')
+const currentShareCommunityId = computed(() => communityStore.currentCommunityId || communityStore.currentCommunity?._id || '')
 
 // 辅助：归一化 section 的 type/status（应对老数据）
 function secType(s: any): 'realtime' | 'evergreen' {
@@ -617,6 +639,73 @@ function expandDormant() {
   // TODO: 展开所有休眠板块
 }
 
+function openSharedCommunityOnboarding(communityId: string) {
+  const url = buildCommunityOnboardingPath(communityId)
+  uni.navigateTo({
+    url,
+    fail: () => {
+      uni.redirectTo({
+        url,
+        fail: () => uni.reLaunch({ url }),
+      })
+    },
+  })
+}
+
+async function handleInitialShareLanding(): Promise<boolean> {
+  const targetCommunityId = normalizeCommunityShareId(incomingShareCommunityId.value)
+  if (!targetCommunityId) return false
+
+  if (!userStore.isLoggedIn) {
+    savePendingShareCommunity(targetCommunityId)
+    clientLog('info', 'home.share.redirect.guest', { communityId: targetCommunityId })
+    openSharedCommunityOnboarding(targetCommunityId)
+    return true
+  }
+
+  try {
+    const status = await memberApi.myStatus(targetCommunityId)
+    if (status.isMember && status.status === 'active') {
+      communityStore.currentCommunityId = targetCommunityId
+      communityStore.currentSectionIndex = 0
+      communityStore.saveToStorage()
+      clientLog('info', 'home.share.member.accept', { communityId: targetCommunityId })
+      return false
+    }
+    clientLog('info', 'home.share.redirect.nonMember', {
+      communityId: targetCommunityId,
+      status: status.status || '',
+    })
+    openSharedCommunityOnboarding(targetCommunityId)
+    return true
+  } catch (error) {
+    clientLog('warn', 'home.share.status.fail', { communityId: targetCommunityId, error })
+    uni.showToast({ title: '社群信息暂不可用，请稍后重试', icon: 'none' })
+    return false
+  }
+}
+
+async function prepareCommunityShareImage() {
+  const coverImage = String(communityStore.currentCommunity?.coverImage || '').trim()
+  if (!coverImage) {
+    shareImageUrl.value = DEFAULT_COMMUNITY_SHARE_IMAGE
+    return
+  }
+
+  const expectedCoverImage = coverImage
+  try {
+    const resolved = await resolveCloudFileUrl(coverImage)
+    if (String(communityStore.currentCommunity?.coverImage || '').trim() === expectedCoverImage) {
+      shareImageUrl.value = resolved || DEFAULT_COMMUNITY_SHARE_IMAGE
+    }
+  } catch (error) {
+    clientLog('warn', 'home.share.image.resolve.fail', { coverImage, error })
+    if (String(communityStore.currentCommunity?.coverImage || '').trim() === expectedCoverImage) {
+      shareImageUrl.value = DEFAULT_COMMUNITY_SHARE_IMAGE
+    }
+  }
+}
+
 function refreshGuestIntroVisibility() {
   showGuestIntro.value = shouldShowGuestIntro(guestIntroConfig.value, {
     isLoggedIn: userStore.isLoggedIn,
@@ -792,6 +881,8 @@ onMounted(async () => {
     }),
     applyLateBackgroundFetchSnapshot,
   )
+  const redirectedByShare = await handleInitialShareLanding()
+  if (redirectedByShare) return
   await hydrateHomeFromFastPath()
   await refreshHomeData()
 })
@@ -827,6 +918,23 @@ onPullDownRefresh(async () => {
     uni.showToast({ title: '刷新失败，请重试', icon: 'none' })
   } finally {
     uni.stopPullDownRefresh()
+  }
+})
+
+watch(
+  () => communityStore.currentCommunity?.coverImage,
+  () => {
+    void prepareCommunityShareImage()
+  },
+  { immediate: true },
+)
+
+onShareAppMessage(() => {
+  const communityId = currentShareCommunityId.value
+  return {
+    title: buildCommunityShareTitle(communityName.value),
+    path: communityId ? buildCommunitySharePath(communityId) : '/pages/index/index',
+    imageUrl: shareImageUrl.value || DEFAULT_COMMUNITY_SHARE_IMAGE,
   }
 })
 </script>
