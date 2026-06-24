@@ -294,6 +294,9 @@ export interface Post {
   originTitle?: string
   originLinkType?: 'activity_invite'
   eventStartsAt?: string
+  adminCreatedAt?: string
+  adminCreatedByAccountId?: string
+  adminCreatedByUsername?: string
   adminEditedAt?: string
   adminEditedByAccountId?: string
   adminEditedByUsername?: string

@@ -300,6 +300,33 @@ export const postApi = {
     ),
   list: (sectionId: string, skip = 0, asGuest = false) =>
     callCloud<{ posts: any[] }>('post', 'list', { sectionId, skip, asGuest }),
+  search: (params: {
+    communityId: string
+    query: string
+    sectionId?: string
+    skip?: number
+    limit?: number
+    asGuest?: boolean
+  }) =>
+    callCloud<{
+      query: string
+      communityId: string
+      sectionId: string
+      total: number
+      skip: number
+      limit: number
+      items: Array<{
+        postId: string
+        communityId: string
+        sectionId: string
+        sectionName: string
+        title: string
+        score: number
+        matchedFields: Array<{ fieldLabel: string; fieldType: string; preview: string }>
+        createdAt: string
+        updatedAt: string
+      }>
+    }>('post', 'search', params),
   get: (postId: string, asGuest = false) =>
     callCloud<{ post: any }>('post', 'get', { postId, asGuest }),
   create: (params: object) =>

@@ -312,6 +312,44 @@ function richNoteHasImages(value: unknown): boolean {
   return extractMarkdownImageSrcs(markdown).length > 0 || extractImageSrcs(html).length > 0
 }
 
+const HOME_TITLE_WIDGET_TYPES = new Set<WidgetType>([
+  'short_text',
+  'summary',
+  'number',
+  'rich_text',
+  'rich_note',
+])
+
+function normalizeTitleText(value: unknown): string {
+  if (value === undefined || value === null) return ''
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value).trim()
+  if (typeof value === 'string') return value.trim()
+  if (isRecord(value)) {
+    const text = typeof value.text === 'string' ? value.text.trim() : ''
+    if (text) return text
+    const markdown = typeof value.markdown === 'string' ? value.markdown.replace(/[#*_`>\-\[\]()!]/g, ' ').replace(/\s+/g, ' ').trim() : ''
+    if (markdown) return markdown
+  }
+  return ''
+}
+
+function validateRealtimeHomeTitle(section: Section, content: PostContent): void {
+  if (section.type !== 'realtime') return
+  const titleWidgets = ((section.widgets || []) as Widget[])
+    .filter((widget) => HOME_TITLE_WIDGET_TYPES.has(widget.type))
+    .sort((a, b) => a.order - b.order)
+
+  if (titleWidgets.length === 0) {
+    throw new Error('该板块缺少可用于首页标题的字段，请管理员添加「短文字」或「摘要」控件后再发布')
+  }
+
+  const filledWidget = titleWidgets.find((widget) => normalizeTitleText(content[widget.widgetId]) !== '')
+  if (!filledWidget) {
+    const firstLabel = String(titleWidgets[0]?.label || '标题').trim() || '标题'
+    throw new Error(`首页标题不能为空：请填写「${firstLabel}」后再发布`)
+  }
+}
+
 export function validateContentValues(
   section: Section,
   content: PostContent,
@@ -361,4 +399,5 @@ export function validateContentValues(
       value.forEach((item, index) => validateAudioTrack(item, widget.label, index))
     }
   }
+  validateRealtimeHomeTitle(section, content)
 }

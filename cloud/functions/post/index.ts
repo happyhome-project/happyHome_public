@@ -14,6 +14,7 @@ import {
   isActivityInviteInProgress,
   isActivityInviteSection,
 } from '../../shared/activity-invite'
+import { removePostSearchIndex, searchPostIndex } from '../../lib/post-search'
 import type {
   AttendancePreviewUser,
   AttendanceSummary,
@@ -26,6 +27,7 @@ import type {
 } from '../../shared/types'
 import { normalizeGuideNoteSection } from '../../shared/guide-note-widgets'
 import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
+import { resolvePostAuthorNickname } from '../../shared/post-author'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
@@ -33,6 +35,7 @@ const ATTENDANCE_COLLECTION = 'post_attendance_members'
 const ATTENDANCE_PREVIEW_LIMIT = 5
 const COMMUNITY_READ_ERROR = '需要先加入社区后查看内容'
 const HOME_POST_LIMIT_PER_SECTION = 20
+const DEFAULT_SEARCH_LIMIT = 20
 
 function normalizeSectionForClient(section: Section): Section {
   const normalized = normalizePostSection(section)
@@ -141,14 +144,14 @@ async function getUsersByIds(userIds: string[]) {
  * 给 posts 附上作者昵称/头像。post 表只存 authorId（openid），展示时 JOIN users 取最新昵称。
  * 这样用户改昵称后所有历史帖子同步显示新昵称（不走发帖时快照）。
  */
-async function enrichPostsWithAuthor<T extends { _id?: string; authorId?: string }>(posts: T[]): Promise<Array<T & { authorNickname?: string; authorAvatarUrl?: string }>> {
+async function enrichPostsWithAuthor<T extends { _id?: string; authorId?: string; adminCreatedByUsername?: unknown }>(posts: T[]): Promise<Array<T & { authorNickname?: string; authorAvatarUrl?: string }>> {
   if (!posts.length) return posts as any
   const usersById = await getUsersByIds(posts.map((p) => p.authorId).filter(Boolean) as string[])
   return posts.map((p) => {
     const author = usersById[p.authorId || '']
     return {
       ...p,
-      authorNickname: author?.nickName || '',
+      authorNickname: resolvePostAuthorNickname(p, author?.nickName),
       authorAvatarUrl: resolveAuthorAvatarUrl(author?.avatarUrl, p._id || p.authorId || ''),
     }
   })
@@ -437,6 +440,9 @@ export async function handleCreate(
   if (!section || !Array.isArray(section.widgets) || section.widgets.length === 0) {
     throw new Error('该板块尚未配置内容模板，请联系管理员完善板块设置后再发布')
   }
+  if (section.communityId !== params.communityId) {
+    throw new Error('板块不属于当前社区')
+  }
   const sanitizedContent = sanitizeContent(params.content, section)
   validateRequiredWidgets(section, sanitizedContent)
   validateContentValues(section, sanitizedContent)
@@ -469,7 +475,6 @@ export async function handleCreate(
     source: 'user',
     contentSlot: 'content',
   })
-
   return { postId, auditStatus: audit.status, auditReason: audit.reason }
 }
 
@@ -630,6 +635,30 @@ export async function handleGet(params: { postId: string; asGuest?: boolean }, o
   return { post: enrichedPost }
 }
 
+export async function handleSearch(params: {
+  communityId: string
+  q?: string
+  query?: string
+  sectionId?: string
+  skip?: number
+  limit?: number
+  asGuest?: boolean
+}, openid?: string) {
+  const communityId = String(params.communityId || '').trim()
+  if (!communityId) throw new Error('communityId 不能为空')
+  const viewerId = params.asGuest ? '' : (openid || '')
+  await ensureCommunityReadable(communityId, viewerId, COMMUNITY_READ_ERROR)
+  return searchPostIndex({
+    communityId,
+    query: String(params.q ?? params.query ?? ''),
+    sectionId: String(params.sectionId || '').trim(),
+    skip: Number.isFinite(Number(params.skip)) ? Math.max(0, Math.floor(Number(params.skip))) : 0,
+    limit: Number.isFinite(Number(params.limit)) && Number(params.limit) > 0
+      ? Math.floor(Number(params.limit))
+      : DEFAULT_SEARCH_LIMIT,
+  })
+}
+
 export async function handleDelete(params: { postId: string }, openid: string) {
   if (!openid) throw new Error('Missing OPENID')
 
@@ -646,6 +675,7 @@ export async function handleDelete(params: { postId: string }, openid: string) {
     featuredAt: '',
     featuredByAccountId: '',
   })
+  await removePostSearchIndex(params.postId)
   return { success: true }
 }
 
@@ -856,6 +886,7 @@ export const main = async (event: any) => {
   if (action === 'home') return handleHome(params, openid)
   if (action === 'bootstrap') return handleBootstrap(params, openid)
   if (action === 'get') return handleGet(params, openid)
+  if (action === 'search') return handleSearch(params, openid)
   if (action === 'delete') return handleDelete(params, openid)
   if (action === 'update') return handleUpdate(params, openid)
   if (action === 'joinAttendance') return handleJoinAttendance(params, openid)

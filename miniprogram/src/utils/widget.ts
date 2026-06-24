@@ -28,6 +28,70 @@ export interface GuideNoteCard {
   routeStats: Array<{ label: string; value: string }>
 }
 
+export interface PostHomeTitleIssue {
+  code: 'missing_home_title_content'
+  message: string
+}
+
+const HOME_TITLE_WIDGET_TYPES = ['short_text', 'summary', 'number', 'rich_text', 'rich_note']
+
+export function getPostHomeTitle(post: Post, section: Section): string {
+  const carpoolSummary = getCarpoolListSummary(post, section)
+  if (carpoolSummary?.route) return carpoolSummary.route
+
+  const widgets = (section.widgets || []).slice().sort((a, b) => a.order - b.order)
+  const titleWidget = widgets.find((widget) => {
+    if (!['short_text', 'summary', 'number'].includes(widget.type)) return false
+    const fieldKey = String(widget.fieldKey || '').toLowerCase()
+    const label = String(widget.label || '').replace(/\s/g, '')
+    return fieldKey === 'title' ||
+      fieldKey.includes('title') ||
+      ['标题', '名称', '名字'].some((item) => label.includes(item))
+  }) || widgets.find((widget) => ['short_text', 'summary', 'number'].includes(widget.type))
+
+  if (titleWidget) {
+    const value = getWidgetValue(post, titleWidget)
+    if (value) return value
+  }
+
+  for (const widget of widgets.filter((item) => HOME_TITLE_WIDGET_TYPES.includes(item.type))) {
+    const value = getWidgetValue(post, widget)
+    if (value) return value
+  }
+
+  const attendanceWidget = widgets.find((widget) => widget.type === 'attendance' && String(widget.label || '').trim())
+  return String(attendanceWidget?.label || section.name || '无标题').trim()
+}
+
+export function getPostHomeTitleIssue(post: Post, section: Section): PostHomeTitleIssue | null {
+  if (section.type !== 'realtime') return null
+  if (getCarpoolListSummary(post, section)?.route) return null
+  const widgets = (section.widgets || []).slice().sort((a, b) => a.order - b.order)
+  const hasTitleContent = widgets
+    .filter((widget) => HOME_TITLE_WIDGET_TYPES.includes(widget.type))
+    .some((widget) => getWidgetValue(post, widget) !== '')
+  if (hasTitleContent) return null
+  return {
+    code: 'missing_home_title_content',
+    message: '帖子缺少首页标题内容，已使用活动/板块名称临时展示。',
+  }
+}
+
+export function getHomeLiveMeta(post: Post, section: Section): string[] {
+  const meta: string[] = []
+  const carpoolSummary = getCarpoolListSummary(post, section)
+  if (carpoolSummary) {
+    meta.push(...(getCarpoolLiveMeta(post, section) || []))
+  } else {
+    const timeText = formatRelativeTime(post.createdAt)
+    if (timeText) meta.push(timeText)
+  }
+
+  const attendanceText = getAttendanceMeta(post)
+  if (attendanceText) meta.push(attendanceText)
+  return meta
+}
+
 export function getCarpoolLiveMeta(post: Post, section: Section): string[] | null {
   const summary = getCarpoolListSummary(post, section)
   if (!summary) return null
@@ -150,12 +214,16 @@ export function formatWidgetValue(value: any, type: string): string {
     }
     return ''
   }
+  if (type === 'rich_note' && value && typeof value === 'object' && !Array.isArray(value)) {
+    return getTextExcerpt(value)
+  }
   if (type === 'datetime') {
     const d = new Date(value as string)
     if (Number.isNaN(d.getTime())) return String(value)
     return `${d.getMonth() + 1}月${d.getDate()}日 ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
   }
   if (Array.isArray(value)) return ''
+  if (typeof value === 'object') return ''
   return String(value)
 }
 
@@ -219,6 +287,34 @@ function getTextExcerpt(value: unknown): string {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 72)
+}
+
+function getAttendanceMeta(post: Post): string {
+  const summaries = (post?.attendanceSummaryByWidget || {}) as Record<string, any>
+  let summary: any = null
+  for (const key in summaries) {
+    if (!Object.prototype.hasOwnProperty.call(summaries, key)) continue
+    const item = summaries[key]
+    if (Number(item?.occupiedSeats ?? item?.count ?? 0) > 0) {
+      summary = item
+      break
+    }
+  }
+  if (!summary) return ''
+  const occupiedSeats = Number(summary.occupiedSeats ?? summary.count ?? 0)
+  return occupiedSeats > 0 ? `${occupiedSeats}人参与` : ''
+}
+
+function formatRelativeTime(value: unknown): string {
+  if (!value) return ''
+  const d = new Date(String(value))
+  if (Number.isNaN(d.getTime())) return ''
+  const now = new Date()
+  const diffH = (now.getTime() - d.getTime()) / 3600000
+  if (diffH < 1) return '刚刚'
+  if (diffH < 24) return `${Math.floor(diffH)}h`
+  const sameYear = d.getFullYear() === now.getFullYear()
+  return sameYear ? `${d.getMonth() + 1}/${d.getDate()}` : `${d.getFullYear()}/${d.getMonth() + 1}`
 }
 
 function formatShortDate(value: unknown): string {

@@ -26,9 +26,18 @@ jest.mock('uuid', () => ({
   v4: jest.fn().mockReturnValue('mocked-uuid'),
 }))
 
+jest.mock('../../../lib/post-search', () => ({
+  backfillPostSearchIndexesForCommunity: jest.fn(),
+  backfillPostSearchIndexesForSection: jest.fn(),
+  refreshPostSearchIndexById: jest.fn(),
+  removePostSearchIndex: jest.fn(),
+  removePostSearchIndexesForSection: jest.fn(),
+}))
+
 import { main } from '../index'
 import * as db from '../../../lib/db'
 import * as storage from '../../../lib/storage'
+import * as postSearch from '../../../lib/post-search'
 
 beforeEach(() => jest.clearAllMocks())
 
@@ -220,12 +229,16 @@ describe('post.createAdmin', () => {
     expect(result.postId).toBe('post-NEW')
     const [, payload] = (db.create as jest.Mock).mock.calls[0]
     expect(payload.authorId).toBe('admin-openid-1')
+    expect(payload.adminCreatedAt).toEqual(expect.any(String))
+    expect(payload.adminCreatedByAccountId).toBe('admin-1')
+    expect(payload.adminCreatedByUsername).toBe('super')
     expect(payload.communityId).toBe('c-1')
     expect(payload.sectionId).toBe('s-1')
     expect(payload.status).toBe('active')
     expect(payload.content['w-1']).toBe('Hello')
     expect(payload.content['w-2']).toHaveLength(1)
     expect(payload.content['w-att']).toBeUndefined()
+    expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-NEW')
   })
 
   test('normalizes old guide_note sections before admin-created posts are saved', async () => {
@@ -525,6 +538,7 @@ describe('post.updateAdmin', () => {
     expect(patch.commentCount).toBeUndefined()
     expect(patch.likeCount).toBeUndefined()
     expect(patch.pendingContent.__set.legacyRemovedWidget).toBeUndefined()
+    expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
   })
 
   test('normalizes old guide_note sections before saving admin edits', async () => {

@@ -30,6 +30,23 @@
       <text v-if="quoteCite" class="cite">— {{ quoteCite }}</text>
     </view>
 
+    <view class="home-search">
+      <view class="home-search-box">
+        <text class="home-search-icon">⌕</text>
+        <input
+          v-model="homeSearchQuery"
+          class="home-search-input"
+          confirm-type="search"
+          placeholder="搜索帖子、正文、视频"
+          placeholder-class="home-search-placeholder"
+          @confirm="submitHomeSearch"
+        />
+        <view class="home-search-action" @tap="submitHomeSearch">
+          <text>搜索</text>
+        </view>
+      </view>
+    </view>
+
     <!-- Admin notice · 管理员维护的固定公告 -->
     <view v-if="sectionNotices.length > 0" class="notice-list">
       <view
@@ -266,7 +283,7 @@ import { useUserStore } from '../../store/user'
 import { memberApi, postApi } from '../../api/cloud'
 import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
-import { getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard } from '../../utils/widget'
+import { getArchiveHomeMeta, getFamilyLetterListSummary, getGuideNoteCard, getHomeLiveMeta, getPostHomeTitle, getPostHomeTitleIssue } from '../../utils/widget'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
@@ -292,10 +309,12 @@ const guestIntroConfig = ref<GuestIntroConfig | null>(null)
 const postsBySection = ref<Record<string, any[]>>({})
 const incomingShareCommunityId = ref('')
 const shareImageUrl = ref(DEFAULT_COMMUNITY_SHARE_IMAGE)
+const homeSearchQuery = ref('')
 let refreshingHome = false
 let queuedForcedHomeRefresh = false
 let mountedAt = 0
 let unsubscribeBackgroundFetchSnapshot: (() => void) | null = null
+const reportedMissingHomeTitle = new Set<string>()
 const NOTICE_PREVIEW_LIMIT = 68
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
@@ -398,10 +417,11 @@ const liveItems = computed<LiveItem[]>(() => {
     if (secType(section) !== 'realtime' || secStatus(section) !== 'active') continue
     const posts = postsBySection.value[section._id] ?? []
     for (const post of posts) {
+      reportMissingHomeTitle(post, section, 'home.live')
       items.push({
         ic: section.icon || '·',
-        t: getPostTitle(post, section) || section.name,
-        m: getLivePostMeta(post, section),
+        t: getPostHomeTitle(post, section) || section.name,
+        m: getHomeLiveMeta(post, section),
         cta: '进入',
         sectionId: section._id,
         postId: post._id,
@@ -469,11 +489,11 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
           const familyLetterSummary = getFamilyLetterListSummary(p, section)
           return {
             k: formatArchiveKicker(idx),
-            t: familyLetterSummary ? familyLetterSummary.title : getPostTitle(p, section),
+            t: familyLetterSummary ? familyLetterSummary.title : getPostHomeTitle(p, section),
             contentAuthor: familyLetterSummary?.author || '',
             meta: getArchiveHomeMeta(p, section),
             hot: isPostHot(p),
-            when: formatTime(p.createdAt),
+            when: formatArchiveWhen(p.createdAt),
             postId: p._id,
             isPinned: Boolean(p.isPinned),
             isFeatured: Boolean(p.isFeatured),
@@ -499,46 +519,35 @@ function formatArchiveKicker(index: number): string {
   return String(index + 1).padStart(2, '0')
 }
 
-function getPostTitle(post: any, section: any): string {
-  const carpoolSummary = getCarpoolListSummary(post, section)
-  if (carpoolSummary?.route) return carpoolSummary.route
+function reportMissingHomeTitle(post: any, section: any, source: string) {
+  const issue = getPostHomeTitleIssue(post, section)
+  if (!issue) return
+  const key = `${source}:${section?._id || ''}:${post?._id || ''}:${issue.code}`
+  if (reportedMissingHomeTitle.has(key)) return
+  reportedMissingHomeTitle.add(key)
+  clientLog('warn', 'post.missingHomeTitle', {
+    source,
+    issueCode: issue.code,
+    message: issue.message,
+    communityId: communityStore.currentCommunityId || section?.communityId || '',
+    sectionId: section?._id || '',
+    sectionName: section?.name || '',
+    postId: post?._id || '',
+    contentKeys: Object.keys(post?.content || {}),
+  })
+}
 
-  // 优先拿第一个 widget 的值作为标题
-  if (!post.content) return '无标题'
-  const w = section.widgets?.find((x: any) => ['short_text', 'summary'].includes(x.type))
-  if (w && post.content[w.widgetId]) return String(post.content[w.widgetId])
-  // fallback
-  const firstKey = Object.keys(post.content)[0]
-  return firstKey ? String(post.content[firstKey]) : '无标题'
+function formatArchiveWhen(iso?: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const now = new Date()
+  const sameYear = d.getFullYear() === now.getFullYear()
+  return sameYear ? `${d.getMonth() + 1}/${d.getDate()}` : `${d.getFullYear()}/${d.getMonth() + 1}`
 }
 
 function isPostHot(post: any): boolean {
   return Number(post?.likeCount || 0) > 10
-}
-
-function getLivePostMeta(post: any, section: any): string[] {
-  const meta: string[] = []
-  const carpoolSummary = getCarpoolListSummary(post, section)
-  if (carpoolSummary) {
-    meta.push(...(getCarpoolLiveMeta(post, section) || []))
-    const attendanceText = getAttendanceMeta(post)
-    if (attendanceText) meta.push(attendanceText)
-    return meta
-  }
-
-  if (post.authorNickname) meta.push(post.authorNickname)
-  meta.push(formatTime(post.createdAt))
-  const attendanceText = getAttendanceMeta(post)
-  if (attendanceText) meta.push(attendanceText)
-  return meta
-}
-
-function getAttendanceMeta(post: any): string {
-  const summaries = Object.values(post?.attendanceSummaryByWidget || {}) as any[]
-  const summary = summaries.find((item) => Number(item?.occupiedSeats ?? item?.count ?? 0) > 0)
-  if (!summary) return ''
-  const occupiedSeats = Number(summary.occupiedSeats ?? summary.count ?? 0)
-  return occupiedSeats > 0 ? `${occupiedSeats}人参与` : ''
 }
 
 function getArchiveCardStyle(group: ArchiveGroup, index: number) {
@@ -560,18 +569,6 @@ function makeNoticePreview(content: string) {
   const chars = Array.from(normalized)
   if (chars.length <= NOTICE_PREVIEW_LIMIT) return normalized
   return `${chars.slice(0, NOTICE_PREVIEW_LIMIT).join('').trimEnd()}…`
-}
-
-function formatTime(iso?: string): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  const now = new Date()
-  const diffMs = now.getTime() - d.getTime()
-  const diffH = diffMs / 3600000
-  if (diffH < 1) return '刚刚'
-  if (diffH < 24) return `${Math.floor(diffH)}h`
-  const sameYear = d.getFullYear() === now.getFullYear()
-  return sameYear ? `${d.getMonth() + 1}/${d.getDate()}` : `${d.getFullYear()}/${d.getMonth() + 1}`
 }
 
 // ── Actions ──
@@ -632,6 +629,22 @@ function openNotice(notice: SectionNotice) {
   uni.navigateTo({
     url,
     fail: (error) => clientLog('error', 'home.notice.navigate.fail', { sectionId: notice.sectionId, widgetId: notice.widgetId, error }),
+  })
+}
+
+function submitHomeSearch() {
+  const communityId = communityStore.currentCommunityId || ''
+  if (!communityId) {
+    uni.showToast({ title: '请先加入社区', icon: 'none' })
+    openOnboardingPreservingStack()
+    return
+  }
+  const query = homeSearchQuery.value.trim()
+  const url = `/pages/search/index?communityId=${encodeURIComponent(communityId)}${query ? `&q=${encodeURIComponent(query)}` : ''}`
+  clientLog('info', 'home.search.submit', { communityId, hasQuery: !!query, url })
+  uni.navigateTo({
+    url,
+    fail: (error) => clientLog('error', 'home.search.navigate.fail', { communityId, url, error }),
   })
 }
 
@@ -1066,6 +1079,55 @@ onShareAppMessage(() => {
   color: $hh-ink-3;
   text-align: right;
   text-transform: uppercase;
+}
+
+/* ═══ Search ═══ */
+.home-search {
+  margin: 0 32rpx 28rpx;
+}
+.home-search-box {
+  min-height: 84rpx;
+  padding: 0 16rpx 0 24rpx;
+  border: 1rpx solid $hh-ink-line;
+  border-radius: 22rpx;
+  background: $hh-surface-1;
+  box-shadow: $hh-shadow-card;
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+}
+.home-search-icon {
+  flex-shrink: 0;
+  width: 32rpx;
+  font-size: 30rpx;
+  line-height: 1;
+  color: $hh-ink-3;
+}
+.home-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 84rpx;
+  font-size: 27rpx;
+  color: $hh-ink-1;
+}
+.home-search-placeholder {
+  color: $hh-ink-4;
+}
+.home-search-action {
+  flex-shrink: 0;
+  min-width: 92rpx;
+  height: 56rpx;
+  padding: 0 18rpx;
+  border-radius: $hh-radius-full;
+  background: $hh-ink-1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.home-search-action text {
+  font-size: 23rpx;
+  font-weight: $hh-font-weight-bold;
+  color: $hh-surface-1;
 }
 
 /* ═══ Admin notices ═══ */

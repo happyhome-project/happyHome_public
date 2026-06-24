@@ -15,6 +15,12 @@ jest.mock('../../../lib/db', () => ({
   removeField: jest.fn(() => ({ __remove: true })),
 }))
 
+jest.mock('../../../lib/post-search', () => ({
+  refreshPostSearchIndexById: jest.fn(),
+  removePostSearchIndex: jest.fn(),
+  searchPostIndex: jest.fn(),
+}))
+
 import {
   handleBootstrap,
   handleCreate,
@@ -27,9 +33,11 @@ import {
   handleListAttendanceMembers,
   handleList,
   handleCreateActivityInvite,
+  handleSearch,
   handleUpdate,
 } from '../index'
 import * as db from '../../../lib/db'
+import * as postSearch from '../../../lib/post-search'
 import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
 
 beforeEach(() => {
@@ -128,6 +136,70 @@ test('create: attendance、公告和音频控件不会参与普通用户发帖',
   expect(db.create).toHaveBeenCalledWith('posts', expect.objectContaining({
     content: { 'title-widget': '周六爬山' },
   }))
+  expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
+})
+
+test('create: rejects sections that do not belong to the requested community', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    ...mockSection,
+    communityId: 'other-community',
+  })
+
+  await expect(handleCreate({
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    content: { 'title-widget': '跨社区发帖' },
+  } as any, 'test-openid')).rejects.toThrow('板块不属于当前社区')
+  expect(db.create).not.toHaveBeenCalled()
+  expect(postSearch.refreshPostSearchIndexById).not.toHaveBeenCalled()
+})
+
+test('create: 实时活动帖缺少首页标题来源时拒绝保存并给出清晰提示', async () => {
+  const activityWithoutTitleSection = {
+    ...mockSection,
+    widgets: [
+      {
+        widgetId: 'attendance-widget',
+        type: 'attendance',
+        label: '羽毛球活动',
+        fieldKey: 'attendance',
+        required: false,
+        order: 0,
+        showInList: true,
+      },
+      {
+        widgetId: 'location-widget',
+        type: 'location',
+        label: '地点',
+        fieldKey: 'location',
+        required: true,
+        order: 1,
+        showInList: false,
+      },
+      {
+        widgetId: 'time-widget',
+        type: 'datetime',
+        label: '时间',
+        fieldKey: 'time',
+        required: true,
+        order: 2,
+        showInList: false,
+      },
+    ],
+  }
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValue(activityWithoutTitleSection)
+
+  await expect(handleCreate({
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    content: {
+      'location-widget': { name: '体育馆', address: '社区体育馆', lat: 30.1, lng: 104.1 },
+      'time-widget': '2026-06-24T20:00:00.000Z',
+    },
+  } as any, 'test-openid')).rejects.toThrow('该板块缺少可用于首页标题的字段')
+  expect(db.create).not.toHaveBeenCalled()
 })
 
 test('create: activity_invite 控件不会进入普通帖子内容', async () => {
@@ -268,6 +340,7 @@ test('update: 保存时会清理无效字段、attendance、公告和音频字�
     pendingContent: { __set: { 'title-widget': '更新后的标题' } },
     pendingAuditStatus: 'pending',
   }))
+  expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
 })
 
 test('createActivityInvite: 自动创建系统实时邀约板块并创建关联帖子', async () => {
@@ -1240,6 +1313,37 @@ test('delete: clears pin and featured flags', async () => {
     featuredByAccountId: '',
   })
   expect(result).toEqual({ success: true })
+  expect(postSearch.removePostSearchIndex).toHaveBeenCalledWith('post-flagged')
+})
+
+test('search: checks community readability and delegates to post search index', async () => {
+  ;(postSearch.searchPostIndex as jest.Mock).mockResolvedValue({
+    query: '鲲鹏',
+    communityId: 'community-1',
+    sectionId: '',
+    total: 1,
+    skip: 0,
+    limit: 20,
+    items: [{ postId: 'post-1', title: '视频帖' }],
+  })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([
+    { _id: 'member-1', communityId: 'community-1', userId: 'member-openid', status: 'active' },
+  ])
+
+  const result = await handleSearch({
+    communityId: 'community-1',
+    q: '鲲鹏',
+    limit: 20,
+  }, 'member-openid')
+
+  expect(postSearch.searchPostIndex).toHaveBeenCalledWith({
+    communityId: 'community-1',
+    query: '鲲鹏',
+    sectionId: '',
+    skip: 0,
+    limit: 20,
+  })
+  expect(result.items).toEqual([{ postId: 'post-1', title: '视频帖' }])
 })
 
 test('get：非 active 成员不可查看帖子详情', async () => {
@@ -1323,6 +1427,41 @@ test('get: public guest detail masks member-only contact fields', async () => {
   expect(result.post.content.activity_invite_title).toBe('周六去云盖村')
   expect(result.post.content.activity_invite_contact).toBe('')
   expect((db.query as jest.Mock).mock.calls.some(([collection]) => collection === 'community_members')).toBe(false)
+})
+
+test('get: admin-created posts use public admin identity instead of bound WeChat nickname', async () => {
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.query as jest.Mock).mockReset()
+  process.env.PUBLIC_READ_COMMUNITY_IDS = 'community-1'
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'posts' && id === 'post-admin-created') return {
+      _id: 'post-admin-created',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      authorId: 'admin-openid',
+      adminCreatedAt: '2026-06-24T09:53:23.529Z',
+      adminCreatedByAccountId: 'admin-account',
+      adminCreatedByUsername: 'admin',
+      status: 'active',
+      auditStatus: 'pass',
+      content: { 'title-widget': '后台代发活动' },
+      createdAt: '2026-06-24T09:53:23.529Z',
+    }
+    if (collectionName === 'communities' && id === 'community-1') return { _id: 'community-1', status: 'active' }
+    if (collectionName === 'sections' && id === 'section-1') return {
+      ...mockSection,
+      widgets: mockSection.widgets.filter((widget) => widget.type !== 'attendance'),
+    }
+    if (collectionName === 'users' && id === 'admin-openid') return { _id: 'admin-openid', nickName: '一年' }
+    return null
+  })
+
+  const result = await handleGet({ postId: 'post-admin-created' }, '')
+
+  expect(result.post).toEqual(expect.objectContaining({
+    _id: 'post-admin-created',
+    authorNickname: '社区管理员',
+  }))
 })
 
 test('get: guest public detail returns attendance count without preview identities', async () => {

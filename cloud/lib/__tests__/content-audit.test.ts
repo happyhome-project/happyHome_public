@@ -15,6 +15,10 @@ jest.mock('../wx-openapi', () => ({
   postWxJson: jest.fn(),
 }))
 
+jest.mock('../post-search', () => ({
+  refreshPostSearchIndexById: jest.fn(),
+}))
+
 import {
   auditPostContent,
   approvePostAudit,
@@ -27,6 +31,7 @@ import {
   rejectPostAudit,
 } from '../content-audit'
 import * as db from '../db'
+import * as postSearch from '../post-search'
 import { postWxJson } from '../wx-openapi'
 
 beforeEach(() => {
@@ -156,6 +161,7 @@ test('approvePostAudit promotes pendingContent and marks the post as passed', as
     pendingAuditStatus: 'pass',
     auditStatus: 'pass',
   }))
+  expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
 })
 
 test('approvePostAudit replaces content and removes pendingContent atomically for CloudBase nested object updates', async () => {
@@ -169,6 +175,7 @@ test('approvePostAudit replaces content and removes pendingContent atomically fo
     content: { __set: { guide_age: '8岁以上' } },
     pendingContent: { __remove: true },
   }))
+  expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-guide')
 })
 
 test('rejectPostAudit rejects pending edits without replacing current content', async () => {
@@ -185,6 +192,7 @@ test('rejectPostAudit rejects pending edits without replacing current content', 
     pendingAuditReason: 'manual reject',
   }))
   expect((db.updateById as jest.Mock).mock.calls[0][2].content).toBeUndefined()
+  expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
 })
 
 test('handleAuditCallback rejects public callback when callback token is not configured', async () => {

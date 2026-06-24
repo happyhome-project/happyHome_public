@@ -194,6 +194,33 @@ function runShellCapture(commandLine, options = {}) {
   })
 }
 
+function sleep(ms) {
+  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
+}
+
+function isTransientCloudBaseCliFailure(result) {
+  const text = `${result?.reason || ''}\n${result?.output || ''}`
+  return /ECONNRESET|ETIMEDOUT|TLS connection|socket disconnected|network timeout|ENOTFOUND|EAI_AGAIN/i.test(text)
+}
+
+async function runCloudBaseCliCaptureWithRetry(commandLine, options = {}, attempts = 3) {
+  let lastResult = null
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const result = await runShellCapture(commandLine, {
+      ...options,
+      displayCommandLine: attempt === 1
+        ? options.displayCommandLine
+        : `${options.displayCommandLine || commandLine} (retry ${attempt}/${attempts})`,
+    })
+    if (result.ok) return result
+    lastResult = result
+    if (!isTransientCloudBaseCliFailure(result) || attempt >= attempts) break
+    console.warn(`[CloudBase CLI] transient failure; retrying in ${attempt * 3000}ms`)
+    await sleep(attempt * 3000)
+  }
+  return lastResult
+}
+
 // Lazy: miniprogram-ci 的 Project 构造会 eager 读 private key；DevTools CLI
 // 主路径完全不需要 key。key 只在主仓（不进 worktree/CI 环境），所以延迟到真
 // 正要走 miniprogram-ci fallback 时再构造——避免 worktree 里 import 期即崩。
@@ -255,6 +282,9 @@ async function deployCloudViaDevtoolsCli(fns) {
 async function deployCloudViaCloudBaseCli(fns) {
   const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
   const tcb = (...args) => [npx, '--yes', '--package', '@cloudbase/cli', 'tcb', ...args].map(quote).join(' ')
+  const confirmDefault = (commandLine) => process.platform === 'win32'
+    ? `echo. | ${commandLine}`
+    : `printf '\\n' | ${commandLine}`
   const envId = getCloudEnvId()
 
   const authProbe = await runShellCapture(
@@ -270,16 +300,18 @@ async function deployCloudViaCloudBaseCli(fns) {
 
   for (const fn of fns) {
     const fnDir = resolve(CLOUD_DIST, fn)
-    const result = await runShellCapture(
-      tcb('fn', 'deploy', fn, '--force', '--yes', '--env-id', envId, '--deployMode', 'cos', '--json'),
+    const result = await runCloudBaseCliCaptureWithRetry(
+      confirmDefault(tcb('fn', 'deploy', fn, '--force', '--env-id', envId, '--deployMode', 'cos', '--json')),
       {
         cwd: fnDir,
-        displayCommandLine: `cd ${fnDir} && tcb fn deploy ${fn} --force --yes --env-id ${envId} --deployMode cos --json`,
+        displayCommandLine: `cd ${fnDir} && <confirm default> | tcb fn deploy ${fn} --force --env-id ${envId} --deployMode cos --json`,
+        // CloudBase CLI 3.5.8 prompts to accept the merged existing function
+        // config; its --yes path throws "_a.includes is not a function".
       }
     )
     if (!result.ok) return { ok: false, reason: `CloudBase CLI deploy ${fn} failed: ${result.reason}` }
 
-    const detail = await runShellCapture(
+    const detail = await runCloudBaseCliCaptureWithRetry(
       tcb('fn', 'detail', fn, '--env-id', envId, '--json'),
       { displayCommandLine: `tcb fn detail ${fn} --env-id ${envId} --json` }
     )

@@ -16,6 +16,13 @@ import { getWxacodeUnlimited } from '../../lib/wx-openapi'
 import { searchAmapPoi } from '../../lib/amap'
 import { getGuestIntroConfig, saveGuestIntroConfig } from '../../lib/guest-intro-config'
 import {
+  backfillPostSearchIndexesForCommunity,
+  backfillPostSearchIndexesForSection,
+  backfillPostSearchIndexesForSectionBatch,
+  removePostSearchIndex,
+  removePostSearchIndexesForSection,
+} from '../../lib/post-search'
+import {
   assertOwnCommunityOrSuper,
   generateSalt,
   generateSessionToken,
@@ -45,6 +52,7 @@ import {
   normalizeSectionDisplayTemplate,
 } from '../../shared/guide-note-widgets'
 import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
+import { resolvePostAuthorNickname } from '../../shared/post-author'
 
 cloud.init({ env: process.env.TCB_ENV || cloud.DYNAMIC_CURRENT_ENV })
 
@@ -134,6 +142,7 @@ const COMMUNITY_SCOPED_ACTIONS = new Set([
   'member.kick',
   'post.listAdmin',
   'post.createAdmin',
+  'post.rebuildSearchIndexAdmin',
 ])
 // 这些 action 只给了实体 id，需要先查出 communityId 再校验
 const ENTITY_TO_COMMUNITY_ACTIONS: Record<string, { collection: string; idParam: string }> = {
@@ -142,6 +151,8 @@ const ENTITY_TO_COMMUNITY_ACTIONS: Record<string, { collection: string; idParam:
   'section.updateStatus': { collection: 'sections', idParam: 'sectionId' },
   'section.updateWidgets': { collection: 'sections', idParam: 'sectionId' },
   'section.delete': { collection: 'sections', idParam: 'sectionId' },
+  'post.rebuildSearchIndexSectionAdmin': { collection: 'sections', idParam: 'sectionId' },
+  'post.rebuildSearchIndexSectionBatchAdmin': { collection: 'sections', idParam: 'sectionId' },
   'post.getAdmin': { collection: 'posts', idParam: 'postId' },
   'post.deleteAdmin': { collection: 'posts', idParam: 'postId' },
   'post.updateAdmin': { collection: 'posts', idParam: 'postId' },
@@ -1017,6 +1028,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (updates.type === 'evergreen') updates.status = 'active'
     if (Object.keys(updates).length === 0) throw new Error('没有可更新字段')
     await db.updateById('sections', sectionId, updates)
+    await backfillPostSearchIndexesForSection(sectionId)
     return { success: true }
   }
   if (action === 'section.updateStatus') {
@@ -1031,6 +1043,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       throw new Error('evergreen 板块只能保持 active')
     }
     await db.updateById('sections', sectionId, { status: params.status })
+    await backfillPostSearchIndexesForSection(sectionId)
     return { success: true }
   }
   if (action === 'section.updateWidgets') {
@@ -1079,6 +1092,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     }
 
     await db.updateById('sections', sectionId, { widgets })
+    await backfillPostSearchIndexesForSection(sectionId)
     return { widgets, ...impact, requireConfirmation: false }
   }
   if (action === 'section.delete') {
@@ -1087,10 +1101,11 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
 
     const activePosts = await db.query('posts', { sectionId, status: 'active' }, { limit: 1 })
     if (activePosts.length > 0) {
-      throw new Error('当前板块内还有已发布帖子，不能直接删除板块。请先到帖子管理中删除或处理这些帖子后，再删除板块。')
+      throw new Error('该板块下已有帖子，暂不支持删除')
     }
 
     await db.removeById('sections', sectionId)
+    await removePostSearchIndexesForSection(sectionId)
     return { success: true }
   }
 
@@ -1221,7 +1236,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       const section = sectionsById[post.sectionId]
       return {
         ...post,
-        authorNickname: author?.nickName || '',
+        authorNickname: resolvePostAuthorNickname(post, author?.nickName, { audience: 'admin' }),
         authorAvatarUrl: resolveAuthorAvatarUrl(author?.avatarUrl, post._id || post.authorId || ''),
         sectionName: section?.name || '',
         sectionType: section?.type || '',
@@ -1257,7 +1272,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     return {
       post: {
         ...post,
-        authorNickname: (author as any)?.nickName || '',
+        authorNickname: resolvePostAuthorNickname(post, (author as any)?.nickName, { audience: 'admin' }),
         authorAvatarUrl: resolveAuthorAvatarUrl((author as any)?.avatarUrl, post._id || post.authorId || ''),
         attendanceSummaryByWidget,
       },
@@ -1272,6 +1287,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const post = await db.getById('posts', postId) as any
     if (!post) throw new Error('post not found')
     if (post.status === 'deleted') {
+      await removePostSearchIndex(postId)
       return { success: true, alreadyDeleted: true }
     }
     await db.updateById('posts', postId, {
@@ -1283,7 +1299,26 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       featuredAt: '',
       featuredByAccountId: '',
     })
+    await removePostSearchIndex(postId)
     return { success: true }
+  }
+  if (action === 'post.rebuildSearchIndexAdmin') {
+    const communityId = String(params.communityId || '').trim()
+    if (!communityId) throw new Error('communityId 不能为空')
+    return backfillPostSearchIndexesForCommunity(communityId)
+  }
+  if (action === 'post.rebuildSearchIndexSectionAdmin') {
+    const sectionId = String(params.sectionId || '').trim()
+    if (!sectionId) throw new Error('sectionId 不能为空')
+    return backfillPostSearchIndexesForSection(sectionId)
+  }
+  if (action === 'post.rebuildSearchIndexSectionBatchAdmin') {
+    const sectionId = String(params.sectionId || '').trim()
+    if (!sectionId) throw new Error('sectionId 不能为空')
+    return backfillPostSearchIndexesForSectionBatch(sectionId, {
+      skip: params.skip,
+      limit: params.limit,
+    })
   }
   if (action === 'post.pinAdmin' || action === 'post.unpinAdmin' || action === 'post.featureAdmin' || action === 'post.unfeatureAdmin') {
     const postId = String(params.postId || '').trim()
@@ -1667,6 +1702,9 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       likeCount: 0,
       isPinned: false,
       isFeatured: false,
+      adminCreatedAt: now,
+      adminCreatedByAccountId: ctx.accountId,
+      adminCreatedByUsername: ctx.username,
       createdAt: now,
       updatedAt: now,
     })
@@ -1697,6 +1735,7 @@ async function hardDeleteCommunity(communityId: string, community: Community) {
   }
 
   for (const post of posts) {
+    await removePostSearchIndex((post as any)._id)
     await db.removeById('posts', (post as any)._id)
   }
 

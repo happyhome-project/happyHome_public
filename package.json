@@ -46,6 +46,8 @@
     "test:real": "node scripts/test-real.mjs",
     "set:superadmin": "node scripts/set-super-admin.mjs",
     "ensure:indexes": "node scripts/ensure-indexes.mjs",
+    "rebuild:post-search-index": "node scripts/rebuild-post-search-index.mjs",
+    "test:post-search-rebuild": "node --test scripts/lib/rebuild-post-search-index.test.mjs",
     "seed:admin": "node scripts/seed-admin-accounts.mjs",
     "verify:community-creator": "node scripts/verify-community-creator.mjs",
     "update:approval-env": "node scripts/update-approval-notification-env.mjs",

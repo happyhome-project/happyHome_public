@@ -4,6 +4,7 @@ import { URL } from 'url'
 import * as db from './db'
 import * as storage from './storage'
 import { postWxJson } from './wx-openapi'
+import { refreshPostSearchIndexById } from './post-search'
 import type {
   AuditProvider,
   AuditTargetType,
@@ -491,6 +492,7 @@ export async function applyAuditSummary(postId: string, slot: 'content' | 'pendi
           pendingAuditReason: '',
           auditUpdatedAt: now,
         })
+        await refreshPostSearchIndexById(postId)
         return
       }
       await db.updateById('posts', postId, {
@@ -503,6 +505,7 @@ export async function applyAuditSummary(postId: string, slot: 'content' | 'pendi
         auditUpdatedAt: now,
         updatedAt: now,
       })
+      await refreshPostSearchIndexById(postId)
       return
     }
     await db.updateById('posts', postId, {
@@ -510,6 +513,7 @@ export async function applyAuditSummary(postId: string, slot: 'content' | 'pendi
       pendingAuditReason: reason,
       auditUpdatedAt: now,
     })
+    await refreshPostSearchIndexById(postId)
     return
   }
 
@@ -518,6 +522,7 @@ export async function applyAuditSummary(postId: string, slot: 'content' | 'pendi
     auditReason: reason,
     auditUpdatedAt: now,
   })
+  await refreshPostSearchIndexById(postId)
 }
 
 export async function auditAndApply(params: {
