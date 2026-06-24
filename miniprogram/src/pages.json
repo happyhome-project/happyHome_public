@@ -12,6 +12,10 @@
       "style": { "navigationBarTitleText": "社群助手", "enablePullDownRefresh": true }
     },
     {
+      "path": "pages/search/index",
+      "style": { "navigationBarTitleText": "搜索" }
+    },
+    {
       "path": "pages/create/index",
       "style": { "navigationBarTitleText": "发帖" }
     },
