@@ -18,6 +18,7 @@ import type {
 } from '../../shared/types'
 import { normalizeGuideNoteSection } from '../../shared/guide-note-widgets'
 import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
+import { resolvePostAuthorNickname } from '../../shared/post-author'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
@@ -93,14 +94,14 @@ async function getUsersByIds(userIds: string[]) {
  * 给 posts 附上作者昵称/头像。post 表只存 authorId（openid），展示时 JOIN users 取最新昵称。
  * 这样用户改昵称后所有历史帖子同步显示新昵称（不走发帖时快照）。
  */
-async function enrichPostsWithAuthor<T extends { _id?: string; authorId?: string }>(posts: T[]): Promise<Array<T & { authorNickname?: string; authorAvatarUrl?: string }>> {
+async function enrichPostsWithAuthor<T extends { _id?: string; authorId?: string; adminCreatedByUsername?: unknown }>(posts: T[]): Promise<Array<T & { authorNickname?: string; authorAvatarUrl?: string }>> {
   if (!posts.length) return posts as any
   const usersById = await getUsersByIds(posts.map((p) => p.authorId).filter(Boolean) as string[])
   return posts.map((p) => {
     const author = usersById[p.authorId || '']
     return {
       ...p,
-      authorNickname: author?.nickName || '',
+      authorNickname: resolvePostAuthorNickname(p, author?.nickName),
       authorAvatarUrl: resolveAuthorAvatarUrl(author?.avatarUrl, p._id || p.authorId || ''),
     }
   })

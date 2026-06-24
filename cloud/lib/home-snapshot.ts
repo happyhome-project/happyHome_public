@@ -5,6 +5,7 @@ import { getGuestIntroConfig } from './guest-intro-config'
 import { ensureCommunityReadable, getActivePublicCommunity, getDefaultPublicCommunityId } from './public-community'
 import { normalizeGuideNoteSection } from '../shared/guide-note-widgets'
 import { resolveAuthorAvatarUrl } from '../shared/simulated-author-avatars'
+import { resolvePostAuthorNickname } from '../shared/post-author'
 import type {
   AttendancePreviewUser,
   AttendanceSummary,
@@ -167,14 +168,14 @@ async function enrichPostsWithAttendance<T extends { _id: string; sectionId: str
   )
 }
 
-async function enrichPostsWithAuthor<T extends { _id?: string; authorId?: string }>(posts: T[]): Promise<Array<T & { authorNickname?: string; authorAvatarUrl?: string }>> {
+async function enrichPostsWithAuthor<T extends { _id?: string; authorId?: string; adminCreatedByUsername?: unknown }>(posts: T[]): Promise<Array<T & { authorNickname?: string; authorAvatarUrl?: string }>> {
   if (!posts.length) return posts as any
   const usersById = await getUsersByIds(posts.map((p) => p.authorId).filter(Boolean) as string[])
   return posts.map((p) => {
     const author = usersById[p.authorId || '']
     return {
       ...p,
-      authorNickname: author?.nickName || '',
+      authorNickname: resolvePostAuthorNickname(p, author?.nickName),
       authorAvatarUrl: resolveAuthorAvatarUrl(author?.avatarUrl, p._id || p.authorId || ''),
     }
   })

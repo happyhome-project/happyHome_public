@@ -972,6 +972,9 @@ test('post.listAdmin: filters pinned and featured posts', async () => {
       status: 'active',
       isPinned: true,
       isFeatured: true,
+      adminCreatedAt: '2026-04-22T09:55:00.000Z',
+      adminCreatedByAccountId: 'admin-creator',
+      adminCreatedByUsername: 'ops-admin',
       createdAt: '2026-04-22T10:00:00.000Z',
       content: {},
     },
@@ -1011,6 +1014,7 @@ test('post.listAdmin: filters pinned and featured posts', async () => {
   })
 
   expect(result.posts.map((post: any) => post._id)).toEqual(['post-featured-pinned'])
+  expect(result.posts[0].authorNickname).toBe('后台代发：ops-admin')
   expect(result.total).toBe(1)
 })
 
