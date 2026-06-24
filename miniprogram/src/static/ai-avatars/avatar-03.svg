@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="community neighbor avatar 03">
+  <defs>
+    <linearGradient id="bg2" x1="18" y1="14" x2="142" y2="146" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EAD7F2"/>
+      <stop offset="1" stop-color="#CDE9DF"/>
+    </linearGradient>
+    <clipPath id="clip"><circle cx="80" cy="80" r="76"/></clipPath>
+  </defs>
+  <circle cx="80" cy="80" r="76" fill="url(#bg2)"/>
+  <g clip-path="url(#clip)">
+    <circle cx="70" cy="43" r="10" fill="#FFFFFF" opacity="0.35"/>
+    <path d="M29 148c7-31 27-47 61-47s54 16 63 47z" fill="#6B84A8" opacity="0.18"/>
+    <path d="M66 123l22 16 24-16 8 23H58z" fill="#F7F0E7"/>
+    <circle cx="51" cy="84" r="9" fill="#EFB58E"/><circle cx="129" cy="84" r="9" fill="#EFB58E"/>
+    <ellipse cx="90" cy="80" rx="41" ry="47" fill="#EFB58E" transform="translate(1 0)"/>
+    <path d="M48 68c6-26 27-39 58-32 17 4 27 17 29 35-22-15-48-18-87-3z" fill="#2F2523"/><path d="M100 34c-11 16-24 23-41 24" fill="none" stroke="#2F2523" stroke-width="10" stroke-linecap="round"/>
+
+    <path d="M56 69c12-10 24-14 39-13" fill="none" stroke="#2F2523" stroke-width="9" stroke-linecap="round" opacity="0.96"/>
+    <circle cx="72" cy="83" r="3.6" fill="#2F3030"/>
+    <circle cx="108" cy="84" r="3.6" fill="#2F3030"/>
+
+    <path d="M88 88c-2 5-3 10 3 12" fill="none" stroke="#9D684F" stroke-width="2.5" stroke-linecap="round" opacity="0.55"/>
+    <path d="M76 90c8 8 21 8 30 0" fill="none" stroke="#7E4A40" stroke-width="3" stroke-linecap="round"/>
+    <ellipse cx="62" cy="96" rx="8" ry="4" fill="#D9767E" opacity="0.24"/><ellipse cx="118" cy="96" rx="8" ry="4" fill="#D9767E" opacity="0.22"/>
+    <path d="M41 145c24 10 71 11 103 0" fill="none" stroke="#fff" stroke-width="9" opacity="0.18"/>
+  </g>
+</svg>

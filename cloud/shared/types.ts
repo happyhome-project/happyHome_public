@@ -1,3 +1,5 @@
+import type { GuestIntroConfig } from './guest-intro-config'
+
 export type UserRole = 'user' | 'superAdmin'
 export type AdminRole = 'superAdmin' | 'communityAdmin'
 export type AdminAccountStatus = 'active' | 'disabled'
@@ -261,6 +263,8 @@ export interface Post {
   communityId: string
   sectionId: string
   authorId: string
+  authorNickname?: string
+  authorAvatarUrl?: string
   status: PostStatus
   auditStatus?: PostAuditStatus
   auditReason?: string
@@ -295,6 +299,7 @@ export interface HomeSnapshot {
   communities: Community[]
   sections: Section[]
   postsBySection: Record<string, Post[]>
+  guestIntroConfig?: GuestIntroConfig
 }
 
 export interface HomeBootstrapResponse extends HomeSnapshot {

@@ -15,7 +15,10 @@
         v-for="community in communities"
         :key="community._id"
         class="community-card"
-        :class="{ disabled: isCardDisabled(community) || applyLock.isBusy(community._id) }"
+        :class="{
+          disabled: isCardDisabled(community) || applyLock.isBusy(community._id),
+          'share-target': isShareTarget(community),
+        }"
         @tap="handleCommunityTap(community)"
       >
         <image
@@ -27,6 +30,7 @@
           <text class="name">{{ community.name }}</text>
           <text class="desc">{{ community.description }}</text>
           <text class="meta">{{ community.memberCount }} 位成员</text>
+          <text v-if="isShareTarget(community)" class="share-hint">来自分享邀请</text>
         </view>
         <view class="badge" :class="[community.joinType, `status-${community.viewerStatus || 'none'}`]">
           {{ getBadgeText(community) }}
@@ -53,16 +57,31 @@ import {
   shouldRedirectJoinedUserFromOnboarding,
   type OnboardingEntryMode,
 } from '../../utils/onboarding-flow'
+import {
+  buildCommunitySharePath,
+  isCommunityShareQuery,
+  normalizeCommunityShareId,
+  prioritizeShareTargetCommunities,
+  savePendingShareCommunity,
+} from '../../utils/community-share'
 import LoginGuard from '../../components/LoginGuard.vue'
 
 const communities = ref<any[]>([])
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
 const entryMode = ref<OnboardingEntryMode>('auto')
+const targetCommunityId = ref('')
+const fromCommunityShare = ref(false)
 let refreshingOnboarding = false
+let targetUnavailableNotified = false
 
 onLoad((query?: Record<string, any>) => {
-  entryMode.value = resolveEntryMode(query)
+  fromCommunityShare.value = isCommunityShareQuery(query)
+  targetCommunityId.value = fromCommunityShare.value ? normalizeCommunityShareId(query?.communityId) : ''
+  entryMode.value = fromCommunityShare.value ? 'discover' : resolveEntryMode(query)
+  if (targetCommunityId.value && !userStore.isLoggedIn) {
+    savePendingShareCommunity(targetCommunityId.value)
+  }
   if (entryMode.value === 'discover') {
     try {
       uni.removeStorageSync(DISCOVER_ENTRY_STORAGE_KEY)
@@ -76,7 +95,14 @@ onMounted(async () => {
 
 async function loadCommunities() {
   const res = await communityApi.listDiscoverable()
-  communities.value = res.communities
+  communities.value = prioritizeShareTargetCommunities(res.communities || [], targetCommunityId.value)
+  if (targetCommunityId.value && fromCommunityShare.value) {
+    const found = communities.value.some((community) => String(community?._id || '') === targetCommunityId.value)
+    if (!found && !targetUnavailableNotified) {
+      targetUnavailableNotified = true
+      uni.showToast({ title: '分享的社群暂不可加入', icon: 'none' })
+    }
+  }
 }
 
 async function refreshOnboardingData() {
@@ -88,6 +114,13 @@ async function refreshOnboardingData() {
       return
     }
     await communityStore.loadMyCommunities()
+    if (targetCommunityId.value && communityStore.myCommunities.some((community) => community._id === targetCommunityId.value)) {
+      communityStore.currentCommunityId = targetCommunityId.value
+      communityStore.currentSectionIndex = 0
+      communityStore.saveToStorage()
+      uni.reLaunch({ url: buildCommunitySharePath(targetCommunityId.value) })
+      return
+    }
     if (shouldRedirectJoinedUserFromOnboarding(resolveEntryMode(), communityStore.myCommunities.length)) {
       uni.reLaunch({ url: '/pages/index/index' })
       return
@@ -145,6 +178,10 @@ function isCardDisabled(community: any) {
   return community.viewerStatus === 'pending'
 }
 
+function isShareTarget(community: any) {
+  return !!targetCommunityId.value && String(community?._id || '') === targetCommunityId.value
+}
+
 function getBadgeText(community: any) {
   if (community.viewerStatus === 'creator-pending') return '审核中 · 你创建的'
   if (community.viewerStatus === 'pending') return '审核中'
@@ -197,11 +234,16 @@ onPullDownRefresh(async () => {
   transition: opacity $hh-duration-base $hh-ease-standard;
 }
 .community-card.disabled { opacity: $hh-opacity-disabled; pointer-events: none; }
+.community-card.share-target {
+  border: 2rpx solid $hh-accent;
+  background: $hh-accent-wash;
+}
 .cover { width: 100rpx; height: 100rpx; border-radius: $hh-radius-sm; flex-shrink: 0; }
 .info { flex: 1; margin: 0 $hh-space-md; }
 .name { font-size: $hh-font-h3; font-weight: $hh-font-weight-bold; display: block; color: $hh-color-text; }
 .desc { font-size: $hh-font-caption; color: $hh-color-text-sub; margin-top: 4rpx; display: block; }
 .meta { font-size: $hh-font-caption; color: $hh-color-text-mute; margin-top: 4rpx; display: block; }
+.share-hint { font-size: $hh-font-caption; color: $hh-accent-ink; margin-top: 6rpx; display: block; font-weight: $hh-font-weight-bold; }
 .badge { font-size: $hh-font-caption; padding: $hh-space-xs $hh-space-sm; border-radius: $hh-radius-lg; white-space: nowrap; }
 .badge.open { background: #e8f5e9; color: #2e7d32; }
 .badge.approval { background: #fff3e0; color: #e65100; }

@@ -214,7 +214,9 @@
     </view>
 
     <!-- Foot -->
-    <text class="s1-foot">— {{ kind }} · 记忆在这里 —</text>
+    <view class="s1-foot-wrap">
+      <text class="s1-foot">— {{ kind }} · 记忆在这里 —</text>
+    </view>
     <!-- Community switcher modal -->
     <view v-if="showSwitcher" class="switcher-mask" @tap="showSwitcher = false">
       <view class="switcher-panel" @tap.stop>
@@ -230,28 +232,66 @@
         </view>
       </view>
     </view>
+    <view v-if="showGuestIntro && guestIntroConfig" class="guest-intro-mask" @touchmove.stop.prevent>
+      <view class="guest-intro-panel" @tap.stop>
+        <text class="guest-intro-title">{{ guestIntroConfig.title }}</text>
+        <text class="guest-intro-body">{{ guestIntroConfig.body }}</text>
+        <view class="guest-intro-list">
+          <view
+            v-for="item in guestIntroConfig.features"
+            :key="item.key"
+            class="guest-intro-row"
+          >
+            <text class="guest-intro-row-label">{{ item.label }}</text>
+            <text class="guest-intro-row-text">{{ item.text }}</text>
+          </view>
+        </view>
+        <view class="guest-intro-primary" @tap="handleGuestIntroPrimary">
+          <text>{{ guestIntroConfig.primaryActionText }}</text>
+        </view>
+        <view class="guest-intro-secondary" @tap="handleGuestIntroSecondary">
+          <text>{{ guestIntroConfig.secondaryActionText }}</text>
+        </view>
+      </view>
+    </view>
     <AppTabBar current="home" />
   </view>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
+import { onLoad, onPullDownRefresh, onShareAppMessage, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
-import { postApi } from '../../api/cloud'
+import { memberApi, postApi } from '../../api/cloud'
 import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard } from '../../utils/widget'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
+import { resolveCloudFileUrl } from '../../utils/cloud-file-url'
+import {
+  buildCommunityOnboardingPath,
+  buildCommunitySharePath,
+  buildCommunityShareTitle,
+  DEFAULT_COMMUNITY_SHARE_IMAGE,
+  isCommunityShareQuery,
+  normalizeCommunityShareId,
+  savePendingShareCommunity,
+} from '../../utils/community-share'
+import { markGuestIntroSeen, shouldShowGuestIntro } from '../../utils/guest-intro'
 import type { HomeSnapshot } from '../../../../cloud/shared/types'
+import type { GuestIntroConfig } from '../../../../cloud/shared/guest-intro-config'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
 const showSwitcher = ref(false)
+const showGuestIntro = ref(false)
+const guestIntroConfig = ref<GuestIntroConfig | null>(null)
 const postsBySection = ref<Record<string, any[]>>({})
+const incomingShareCommunityId = ref('')
+const shareImageUrl = ref(DEFAULT_COMMUNITY_SHARE_IMAGE)
 let refreshingHome = false
 let queuedForcedHomeRefresh = false
 let mountedAt = 0
@@ -259,6 +299,15 @@ let unsubscribeBackgroundFetchSnapshot: (() => void) | null = null
 const NOTICE_PREVIEW_LIMIT = 68
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
+
+onLoad((options?: Record<string, any>) => {
+  if (!isCommunityShareQuery(options)) return
+  incomingShareCommunityId.value = normalizeCommunityShareId(options?.communityId)
+  clientLog('info', 'home.share.load', {
+    communityId: incomingShareCommunityId.value,
+  })
+})
+
 // ── Computed: masthead ──
 const communityName = computed(() => communityStore.currentCommunity?.name ?? '选择社区')
 const communityMeta = computed(() => '')
@@ -282,6 +331,7 @@ const kindEn = computed(() => 'Welcome : )')
 // ── 群训引文：读 community.motto / mottoCite ──
 const quote = computed(() => communityStore.currentCommunity?.motto || '')
 const quoteCite = computed(() => communityStore.currentCommunity?.mottoCite || '')
+const currentShareCommunityId = computed(() => communityStore.currentCommunityId || communityStore.currentCommunity?._id || '')
 
 // 辅助：归一化 section 的 type/status（应对老数据）
 function secType(s: any): 'realtime' | 'evergreen' {
@@ -589,6 +639,96 @@ function expandDormant() {
   // TODO: 展开所有休眠板块
 }
 
+function openSharedCommunityOnboarding(communityId: string) {
+  const url = buildCommunityOnboardingPath(communityId)
+  uni.navigateTo({
+    url,
+    fail: () => {
+      uni.redirectTo({
+        url,
+        fail: () => uni.reLaunch({ url }),
+      })
+    },
+  })
+}
+
+async function handleInitialShareLanding(): Promise<boolean> {
+  const targetCommunityId = normalizeCommunityShareId(incomingShareCommunityId.value)
+  if (!targetCommunityId) return false
+
+  if (!userStore.isLoggedIn) {
+    savePendingShareCommunity(targetCommunityId)
+    clientLog('info', 'home.share.redirect.guest', { communityId: targetCommunityId })
+    openSharedCommunityOnboarding(targetCommunityId)
+    return true
+  }
+
+  try {
+    const status = await memberApi.myStatus(targetCommunityId)
+    if (status.isMember && status.status === 'active') {
+      communityStore.currentCommunityId = targetCommunityId
+      communityStore.currentSectionIndex = 0
+      communityStore.saveToStorage()
+      clientLog('info', 'home.share.member.accept', { communityId: targetCommunityId })
+      return false
+    }
+    clientLog('info', 'home.share.redirect.nonMember', {
+      communityId: targetCommunityId,
+      status: status.status || '',
+    })
+    openSharedCommunityOnboarding(targetCommunityId)
+    return true
+  } catch (error) {
+    clientLog('warn', 'home.share.status.fail', { communityId: targetCommunityId, error })
+    uni.showToast({ title: '社群信息暂不可用，请稍后重试', icon: 'none' })
+    return false
+  }
+}
+
+async function prepareCommunityShareImage() {
+  const coverImage = String(communityStore.currentCommunity?.coverImage || '').trim()
+  if (!coverImage) {
+    shareImageUrl.value = DEFAULT_COMMUNITY_SHARE_IMAGE
+    return
+  }
+
+  const expectedCoverImage = coverImage
+  try {
+    const resolved = await resolveCloudFileUrl(coverImage)
+    if (String(communityStore.currentCommunity?.coverImage || '').trim() === expectedCoverImage) {
+      shareImageUrl.value = resolved || DEFAULT_COMMUNITY_SHARE_IMAGE
+    }
+  } catch (error) {
+    clientLog('warn', 'home.share.image.resolve.fail', { coverImage, error })
+    if (String(communityStore.currentCommunity?.coverImage || '').trim() === expectedCoverImage) {
+      shareImageUrl.value = DEFAULT_COMMUNITY_SHARE_IMAGE
+    }
+  }
+}
+
+function refreshGuestIntroVisibility() {
+  showGuestIntro.value = shouldShowGuestIntro(guestIntroConfig.value, {
+    isLoggedIn: userStore.isLoggedIn,
+    hasPublicCommunity: Boolean(communityStore.currentCommunityId),
+  })
+}
+
+function markCurrentGuestIntroSeen() {
+  if (guestIntroConfig.value?.version) {
+    markGuestIntroSeen(guestIntroConfig.value.version)
+  }
+  showGuestIntro.value = false
+}
+
+function handleGuestIntroPrimary() {
+  markCurrentGuestIntroSeen()
+}
+
+function handleGuestIntroSecondary() {
+  markCurrentGuestIntroSeen()
+  openOnboardingPreservingStack({ mode: 'discover' })
+}
+
 function applyHomeSnapshot(snapshot: HomeSnapshot | null, source: 'prefetch' | 'cache' | 'cloud') {
   if (!snapshot) return false
   const expectedViewer = userStore.isLoggedIn ? userStore.openId : ''
@@ -599,6 +739,8 @@ function applyHomeSnapshot(snapshot: HomeSnapshot | null, source: 'prefetch' | '
   communityStore.currentSectionIndex = 0
   communityStore.currentSections = snapshot.sections || []
   postsBySection.value = snapshot.postsBySection || {}
+  guestIntroConfig.value = userStore.isLoggedIn ? null : (snapshot.guestIntroConfig || null)
+  refreshGuestIntroVisibility()
   if (userStore.isLoggedIn) communityStore.saveToStorage()
   clientLog('info', 'home.snapshot.apply', {
     source,
@@ -739,6 +881,8 @@ onMounted(async () => {
     }),
     applyLateBackgroundFetchSnapshot,
   )
+  const redirectedByShare = await handleInitialShareLanding()
+  if (redirectedByShare) return
   await hydrateHomeFromFastPath()
   await refreshHomeData()
 })
@@ -776,11 +920,28 @@ onPullDownRefresh(async () => {
     uni.stopPullDownRefresh()
   }
 })
+
+watch(
+  () => communityStore.currentCommunity?.coverImage,
+  () => {
+    void prepareCommunityShareImage()
+  },
+  { immediate: true },
+)
+
+onShareAppMessage(() => {
+  const communityId = currentShareCommunityId.value
+  return {
+    title: buildCommunityShareTitle(communityName.value),
+    path: communityId ? buildCommunitySharePath(communityId) : '/pages/index/index',
+    imageUrl: shareImageUrl.value || DEFAULT_COMMUNITY_SHARE_IMAGE,
+  }
+})
 </script>
 
 <style lang="scss" scoped>
 .phone-inner {
-  padding: 16rpx 0 160rpx;
+  padding: 16rpx 0 112rpx;
   background: $hh-surface-0;
   min-height: 100vh;
   position: relative;
@@ -1464,14 +1625,20 @@ onPullDownRefresh(async () => {
 
 /* ═══ Foot ═══ */
 .s1-foot {
-  padding: 44rpx 0 20rpx;
+  display: block;
   text-align: center;
   font-family: $hh-font-mono;
   font-size: 19rpx;
+  line-height: 1.4;
   letter-spacing: $hh-tracking-mono;
   text-transform: uppercase;
   color: $hh-ink-4;
-  display: block;
+}
+
+.s1-foot-wrap {
+  margin: 0 32rpx;
+  padding: 4rpx 0 8rpx;
+  text-align: center;
 }
 /* ═══ Switcher ═══ */
 .switcher-mask {
@@ -1514,4 +1681,97 @@ onPullDownRefresh(async () => {
   font-weight: $hh-font-weight-bold;
 }
 .switcher-item:last-child { border-bottom: none; }
+
+.guest-intro-mask {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40rpx 32rpx;
+  background: rgba(30, 26, 22, 0.42);
+}
+.guest-intro-panel {
+  width: 100%;
+  max-width: 640rpx;
+  padding: 36rpx 32rpx 34rpx;
+  border-radius: 32rpx;
+  background: $hh-surface-1;
+  border: 1rpx solid rgba(30, 26, 22, 0.08);
+  box-shadow: $hh-shadow-modal;
+}
+.guest-intro-title {
+  display: block;
+  font-family: $hh-font-serif;
+  font-size: 36rpx;
+  font-weight: $hh-font-weight-bold;
+  line-height: 1.28;
+  color: $hh-ink-1;
+  letter-spacing: $hh-tracking-serif-sm;
+}
+.guest-intro-body {
+  display: block;
+  margin-top: 18rpx;
+  font-size: 27rpx;
+  line-height: 1.62;
+  color: $hh-ink-2;
+}
+.guest-intro-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  margin-top: 26rpx;
+}
+.guest-intro-row {
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  min-height: 64rpx;
+  padding: 12rpx 18rpx;
+  border-radius: 18rpx;
+  background: $hh-surface-2;
+}
+.guest-intro-row-label {
+  flex: 0 0 auto;
+  min-width: 96rpx;
+  font-size: 24rpx;
+  font-weight: $hh-font-weight-heavy;
+  color: $hh-accent-ink;
+}
+.guest-intro-row-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 24rpx;
+  line-height: 1.35;
+  color: $hh-ink-2;
+}
+.guest-intro-primary,
+.guest-intro-secondary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 82rpx;
+}
+.guest-intro-primary {
+  margin-top: 28rpx;
+  border-radius: 42rpx;
+  background: $hh-ink-1;
+}
+.guest-intro-primary text {
+  font-size: 27rpx;
+  font-weight: $hh-font-weight-bold;
+  color: $hh-surface-1;
+}
+.guest-intro-secondary {
+  margin-top: 12rpx;
+}
+.guest-intro-secondary text {
+  font-size: 25rpx;
+  font-weight: $hh-font-weight-bold;
+  color: $hh-accent-ink;
+}
 </style>

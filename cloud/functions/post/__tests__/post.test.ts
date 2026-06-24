@@ -28,6 +28,7 @@ import {
   handleUpdate,
 } from '../index'
 import * as db from '../../../lib/db'
+import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -300,6 +301,57 @@ test('home: returns sections and grouped posts with one membership check', async
     .toEqual(['section-1', 'section-2'])
 })
 
+test('home: uses real author avatars first and fills missing avatars from the simulated pool', async () => {
+  const sections = [
+    {
+      ...mockSection,
+      _id: 'section-1',
+      communityId: 'community-1',
+      widgets: [mockSection.widgets[0]],
+    },
+  ]
+  const posts = [
+    {
+      _id: 'post-with-real-avatar',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      authorId: 'user-real',
+      status: 'active',
+      content: { 'title-widget': 'real avatar post' },
+      createdAt: '2024-01-02T00:00:00.000Z',
+    },
+    {
+      _id: 'post-needs-sim-avatar',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      authorId: 'user-sim',
+      status: 'active',
+      content: { 'title-widget': 'sim avatar post' },
+      createdAt: '2024-01-01T00:00:00.000Z',
+    },
+  ]
+  ;(db.query as jest.Mock).mockImplementation(async (collectionName: string, where: any) => {
+    if (collectionName === 'community_members') return [{ _id: 'member-1', status: 'active' }]
+    if (collectionName === 'sections') return sections
+    if (collectionName === 'posts') return posts.filter((post) => post.sectionId === where.sectionId)
+    return []
+  })
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'users' && id === 'user-real') return { _id: id, nickName: '真实邻居', avatarUrl: 'https://cdn.example.com/real.png' }
+    if (collectionName === 'users' && id === 'user-sim') return { _id: id, nickName: 'AI整理员', avatarUrl: '' }
+    return null
+  })
+
+  const result = await handleHome({ communityId: 'community-1', limitPerSection: 10 }, 'test-openid')
+  const [realPost, simulatedPost] = result.postsBySection['section-1']
+
+  expect(realPost.authorAvatarUrl).toBe('https://cdn.example.com/real.png')
+  expect(simulatedPost.authorAvatarUrl).toMatch(/^\/static\/ai-avatars\/avatar-\d{2}\.svg$/)
+
+  const secondResult = await handleHome({ communityId: 'community-1', limitPerSection: 10 }, 'test-openid')
+  expect(secondResult.postsBySection['section-1'][1].authorAvatarUrl).toBe(simulatedPost.authorAvatarUrl)
+})
+
 test('bootstrap: returns active communities and the selected community home snapshot in one call', async () => {
   const sections = [
     {
@@ -394,6 +446,14 @@ test('bootstrap: unauthenticated viewer lands on the configured public community
     return null
   })
   ;(db.query as jest.Mock).mockImplementation(async (collectionName: string, where: any) => {
+    if (collectionName === 'app_configs') {
+      return [{
+        _id: 'intro-1',
+        key: GUEST_INTRO_CONFIG_KEY,
+        ...DEFAULT_GUEST_INTRO_CONFIG,
+        title: '样板弹窗标题',
+      }]
+    }
     if (collectionName === 'sections') return sections
     if (collectionName === 'posts') return posts.filter((post) => post.sectionId === where.sectionId)
     return []
@@ -411,6 +471,10 @@ test('bootstrap: unauthenticated viewer lands on the configured public community
     authorNickname: '作者一',
   }))
   expect(result.backgroundFetchToken).toBe('')
+  expect((result as any).guestIntroConfig).toEqual(expect.objectContaining({
+    title: '样板弹窗标题',
+    secondaryActionText: '登录后加入或创建社群',
+  }))
   expect((db.query as jest.Mock).mock.calls.some(([collection]) => collection === 'community_members')).toBe(false)
 })
 
@@ -503,6 +567,7 @@ test('bootstrap: logged-in viewer with active communities does not get stuck on 
   expect(result.currentCommunityId).toBe('joined-community')
   expect((result as any).currentCommunity).toEqual(expect.objectContaining(joinedCommunity))
   expect(result.communities.map((community: any) => community._id)).toEqual(['joined-community'])
+  expect((result as any).guestIntroConfig).toBeUndefined()
 })
 
 test('joinAttendance: 同一用户重复参与不会重复创建记录', async () => {

@@ -244,9 +244,19 @@ const INDEXES = [
       { Name: 'jobId', Direction: '1' },
     ],
   },
+  // app_configs: global product/admin configuration documents by stable key
+  {
+    coll: 'app_configs',
+    name: 'idx_key_unique',
+    unique: true,
+    keys: [
+      { Name: 'key', Direction: '1' },
+    ],
+  },
 ]
 
 const REQUIRED_COLLECTIONS = [
+  'app_configs',
   'post_attendance_members',
   'admin_accounts',
   'admin_sessions',
