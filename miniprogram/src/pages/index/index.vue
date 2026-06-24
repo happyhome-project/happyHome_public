@@ -30,6 +30,23 @@
       <text v-if="quoteCite" class="cite">— {{ quoteCite }}</text>
     </view>
 
+    <view class="home-search">
+      <view class="home-search-box">
+        <text class="home-search-icon">⌕</text>
+        <input
+          v-model="homeSearchQuery"
+          class="home-search-input"
+          confirm-type="search"
+          placeholder="搜索帖子、正文、视频"
+          placeholder-class="home-search-placeholder"
+          @confirm="submitHomeSearch"
+        />
+        <view class="home-search-action" @tap="submitHomeSearch">
+          <text>搜索</text>
+        </view>
+      </view>
+    </view>
+
     <!-- Admin notice · 管理员维护的固定公告 -->
     <view v-if="sectionNotices.length > 0" class="notice-list">
       <view
@@ -292,6 +309,7 @@ const guestIntroConfig = ref<GuestIntroConfig | null>(null)
 const postsBySection = ref<Record<string, any[]>>({})
 const incomingShareCommunityId = ref('')
 const shareImageUrl = ref(DEFAULT_COMMUNITY_SHARE_IMAGE)
+const homeSearchQuery = ref('')
 let refreshingHome = false
 let queuedForcedHomeRefresh = false
 let mountedAt = 0
@@ -632,6 +650,22 @@ function openNotice(notice: SectionNotice) {
   uni.navigateTo({
     url,
     fail: (error) => clientLog('error', 'home.notice.navigate.fail', { sectionId: notice.sectionId, widgetId: notice.widgetId, error }),
+  })
+}
+
+function submitHomeSearch() {
+  const communityId = communityStore.currentCommunityId || ''
+  if (!communityId) {
+    uni.showToast({ title: '请先加入社区', icon: 'none' })
+    openOnboardingPreservingStack()
+    return
+  }
+  const query = homeSearchQuery.value.trim()
+  const url = `/pages/search/index?communityId=${encodeURIComponent(communityId)}${query ? `&q=${encodeURIComponent(query)}` : ''}`
+  clientLog('info', 'home.search.submit', { communityId, hasQuery: !!query, url })
+  uni.navigateTo({
+    url,
+    fail: (error) => clientLog('error', 'home.search.navigate.fail', { communityId, url, error }),
   })
 }
 
@@ -1066,6 +1100,55 @@ onShareAppMessage(() => {
   color: $hh-ink-3;
   text-align: right;
   text-transform: uppercase;
+}
+
+/* ═══ Search ═══ */
+.home-search {
+  margin: 0 32rpx 28rpx;
+}
+.home-search-box {
+  min-height: 84rpx;
+  padding: 0 16rpx 0 24rpx;
+  border: 1rpx solid $hh-ink-line;
+  border-radius: 22rpx;
+  background: $hh-surface-1;
+  box-shadow: $hh-shadow-card;
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+}
+.home-search-icon {
+  flex-shrink: 0;
+  width: 32rpx;
+  font-size: 30rpx;
+  line-height: 1;
+  color: $hh-ink-3;
+}
+.home-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 84rpx;
+  font-size: 27rpx;
+  color: $hh-ink-1;
+}
+.home-search-placeholder {
+  color: $hh-ink-4;
+}
+.home-search-action {
+  flex-shrink: 0;
+  min-width: 92rpx;
+  height: 56rpx;
+  padding: 0 18rpx;
+  border-radius: $hh-radius-full;
+  background: $hh-ink-1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.home-search-action text {
+  font-size: 23rpx;
+  font-weight: $hh-font-weight-bold;
+  color: $hh-surface-1;
 }
 
 /* ═══ Admin notices ═══ */

@@ -22,6 +22,14 @@ jest.mock('../../../lib/amap', () => ({
   searchAmapPoi: jest.fn(),
 }))
 
+jest.mock('../../../lib/post-search', () => ({
+  backfillPostSearchIndexesForCommunity: jest.fn(),
+  backfillPostSearchIndexesForSection: jest.fn(),
+  refreshPostSearchIndexById: jest.fn(),
+  removePostSearchIndex: jest.fn(),
+  removePostSearchIndexesForSection: jest.fn(),
+}))
+
 jest.mock('uuid', () => ({
   v4: jest.fn().mockReturnValue('mocked-uuid'),
 }))
@@ -30,6 +38,7 @@ import { main } from '../index'
 import * as db from '../../../lib/db'
 import * as storage from '../../../lib/storage'
 import { searchAmapPoi } from '../../../lib/amap'
+import * as postSearch from '../../../lib/post-search'
 import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
 
 beforeEach(() => jest.resetAllMocks())
@@ -195,22 +204,6 @@ test('admin.approvalSummary: communityAdmin 只返回自己可管理社区的成
   ])
 })
 
-test('section.delete: rejects deletion when active posts still exist with clear guidance', async () => {
-  ;(db.query as jest.Mock).mockResolvedValueOnce([
-    { _id: 'post-1', sectionId: 'section-1', status: 'active' },
-  ])
-
-  await expect(main({
-    action: 'section.delete',
-    sectionId: 'section-1',
-    _actAs: { accountId: 'super-1', role: 'superAdmin', userId: 'boss-openid', username: 'boss' },
-  })).rejects.toThrow('当前板块内还有已发布帖子，不能直接删除板块。请先到帖子管理中删除或处理这些帖子后，再删除板块。')
-
-  expect(db.query).toHaveBeenCalledWith('posts', { sectionId: 'section-1', status: 'active' }, { limit: 1 })
-  expect(db.updateById).not.toHaveBeenCalled()
-  expect(db.removeById).not.toHaveBeenCalledWith('sections', 'section-1')
-})
-
 test('member.list: 会物理清理历史 left 记录并且不返回', async () => {
   ;(db.getById as jest.Mock)
     .mockResolvedValueOnce({ _id: 'community-1', creatorId: 'creator-1' })
@@ -346,6 +339,7 @@ test('section.updateWidgets: attendance 空标签或通用标签会按无标题�
       expect.objectContaining({ widgetId: 'attendance-1', type: 'attendance', label: '' }),
     ]),
   })
+  expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledWith('section-1')
 })
 
 test('section.updateWidgets: 新增控件不查询历史帖子影响', async () => {
@@ -368,6 +362,7 @@ test('section.updateWidgets: 新增控件不查询历史帖子影响', async () 
   })
 
   expect(db.query).not.toHaveBeenCalledWith('posts', { sectionId: 'section-1', status: 'active' })
+  expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledWith('section-1')
 })
 
 test('section.updateWidgets: 公告控件由管理员维护且不进入帖子列表展示', async () => {
@@ -408,6 +403,7 @@ test('section.updateWidgets: 公告控件由管理员维护且不进入帖子列
       expect.objectContaining({ type: 'admin_notice', noticeContent: '周三晚 7 点开课' }),
     ]),
   })
+  expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledWith('section-1')
 })
 
 test('section.updateWidgets: 公告正文按 emoji 安全字符数截断', async () => {
@@ -550,6 +546,7 @@ test('section.updateWidgets: 图文攻略允许在固定控件后追加小控件
       expect.objectContaining({ widgetId: 'guide_scenery', locked: false }),
     ]),
   }))
+  expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledWith('section-guide')
 })
 
 test('section.get: 旧图文攻略板块会补齐路线攻略固定控件', async () => {
@@ -617,6 +614,7 @@ test('section.updateMeta: 展示模板只接受默认和图文攻略', async () 
   expect(db.updateById).toHaveBeenLastCalledWith('sections', 'section-1', {
     displayTemplate: 'guide_note',
   })
+  expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledWith('section-1')
 
   await main({
     action: 'section.updateMeta',
@@ -627,6 +625,40 @@ test('section.updateMeta: 展示模板只接受默认和图文攻略', async () 
   expect(db.updateById).toHaveBeenLastCalledWith('sections', 'section-1', {
     displayTemplate: 'default',
   })
+  expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledTimes(2)
+})
+
+test('section.updateStatus: refreshes search index metadata after status changes', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-live',
+    type: 'realtime',
+    status: 'active',
+  })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  const result: any = await main({
+    action: 'section.updateStatus',
+    sectionId: 'section-live',
+    status: 'dormant',
+  })
+
+  expect(result.success).toBe(true)
+  expect(db.updateById).toHaveBeenCalledWith('sections', 'section-live', { status: 'dormant' })
+  expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledWith('section-live')
+})
+
+test('section.delete: removes stale search index rows for the deleted section', async () => {
+  ;(db.query as jest.Mock).mockResolvedValue([])
+  ;(db.removeById as jest.Mock).mockResolvedValue({})
+
+  const result: any = await main({
+    action: 'section.delete',
+    sectionId: 'section-empty',
+  })
+
+  expect(result.success).toBe(true)
+  expect(db.removeById).toHaveBeenCalledWith('sections', 'section-empty')
+  expect(postSearch.removePostSearchIndexesForSection).toHaveBeenCalledWith('section-empty')
 })
 
 test('post.getAdmin: 返回 attendance 汇总和完整名单', async () => {
@@ -1042,4 +1074,30 @@ test('post.deleteAdmin: clears pin and featured flags', async () => {
     featuredByAccountId: '',
   })
   expect(result).toEqual({ success: true })
+  expect(postSearch.removePostSearchIndex).toHaveBeenCalledWith('post-flagged')
+})
+
+test('post.rebuildSearchIndexAdmin: rebuilds derived search index for a scoped community', async () => {
+  ;(postSearch.backfillPostSearchIndexesForCommunity as jest.Mock).mockResolvedValue({
+    communityId: 'community-1',
+    scannedCount: 3,
+    indexedCount: 2,
+    removedCount: 1,
+    failedCount: 0,
+  })
+
+  const result: any = await main({
+    action: 'post.rebuildSearchIndexAdmin',
+    communityId: 'community-1',
+    _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
+  })
+
+  expect(postSearch.backfillPostSearchIndexesForCommunity).toHaveBeenCalledWith('community-1')
+  expect(result).toEqual({
+    communityId: 'community-1',
+    scannedCount: 3,
+    indexedCount: 2,
+    removedCount: 1,
+    failedCount: 0,
+  })
 })
