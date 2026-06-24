@@ -30,8 +30,60 @@ import { main } from '../index'
 import * as db from '../../../lib/db'
 import * as storage from '../../../lib/storage'
 import { searchAmapPoi } from '../../../lib/amap'
+import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
 
 beforeEach(() => jest.resetAllMocks())
+
+test('appConfig.getGuestIntro: superAdmin reads the guest intro popup config', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([
+    {
+      _id: 'doc-1',
+      key: GUEST_INTRO_CONFIG_KEY,
+      ...DEFAULT_GUEST_INTRO_CONFIG,
+      title: '自定义标题',
+    },
+  ])
+
+  const result: any = await main({
+    action: 'appConfig.getGuestIntro',
+    _actAs: { accountId: 'super-1', role: 'superAdmin', userId: 'boss-openid', username: 'boss' },
+  })
+
+  expect(result.config.title).toBe('自定义标题')
+  expect(db.query).toHaveBeenCalledWith('app_configs', { key: GUEST_INTRO_CONFIG_KEY }, { limit: 1 })
+})
+
+test('appConfig.updateGuestIntro: superAdmin saves copy without forcing a new version', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([
+    {
+      _id: 'doc-1',
+      key: GUEST_INTRO_CONFIG_KEY,
+      ...DEFAULT_GUEST_INTRO_CONFIG,
+      version: 'intro-v1',
+    },
+  ])
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  const result: any = await main({
+    action: 'appConfig.updateGuestIntro',
+    config: { title: '  新标题  ' },
+    publishNewVersion: false,
+    _actAs: { accountId: 'super-1', role: 'superAdmin', userId: 'boss-openid', username: 'boss' },
+  })
+
+  expect(result.config.title).toBe('新标题')
+  expect(result.config.version).toBe('intro-v1')
+  expect(db.updateById).toHaveBeenCalledWith(
+    'app_configs',
+    'doc-1',
+    expect.objectContaining({
+      key: GUEST_INTRO_CONFIG_KEY,
+      title: '新标题',
+      version: 'intro-v1',
+      updatedBy: 'boss',
+    }),
+  )
+})
 
 test('geo.mapConfig: 返回后台地图 JS 配置供 admin-web 运行时加载', async () => {
   const oldJsKey = process.env.AMAP_JS_KEY
@@ -617,6 +669,7 @@ test('post.getAdmin: 返回 attendance 汇总和完整名单', async () => {
   expect(result.post.attendanceSummaryByWidget['attendance-1'].count).toBe(1)
   expect(result.post.adminEditedAt).toBe('2024-01-03T00:00:00.000Z')
   expect(result.post.adminEditedByUsername).toBe('ops-admin')
+  expect(result.post.authorAvatarUrl).toMatch(/^\/static\/ai-avatars\/avatar-\d{2}\.svg$/)
   expect(result.attendanceMembersByWidget['attendance-1']).toHaveLength(1)
   expect(result.attendanceMembersByWidget['attendance-1'][0].userId).toBe('user-1')
 })

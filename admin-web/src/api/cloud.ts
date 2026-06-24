@@ -1,4 +1,5 @@
 import axios from 'axios'
+import type { GuestIntroConfig } from '../../../cloud/shared/guest-intro-config'
 
 const BASE_URL = import.meta.env.VITE_CLOUD_API_URL
 
@@ -247,4 +248,13 @@ export const geoApi = {
 export const mediaApi = {
   getUrls: (fileIDs: string[]) =>
     callAdmin('media.getUrls', { fileIDs }) as Promise<{ urls: Record<string, string> }>,
+}
+
+export type { GuestIntroConfig }
+
+export const appConfigApi = {
+  getGuestIntro: () =>
+    callAdmin('appConfig.getGuestIntro') as Promise<{ config: GuestIntroConfig }>,
+  updateGuestIntro: (config: GuestIntroConfig, publishNewVersion = false) =>
+    callAdmin('appConfig.updateGuestIntro', { config, publishNewVersion }) as Promise<{ config: GuestIntroConfig }>,
 }

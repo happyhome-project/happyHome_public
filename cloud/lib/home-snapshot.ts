@@ -1,8 +1,10 @@
 import * as db from './db'
 import { ensureBackgroundFetchToken } from './background-fetch-token'
 import { isPostVisibleToMembers } from './content-audit'
+import { getGuestIntroConfig } from './guest-intro-config'
 import { ensureCommunityReadable, getActivePublicCommunity, getDefaultPublicCommunityId } from './public-community'
 import { normalizeGuideNoteSection } from '../shared/guide-note-widgets'
+import { resolveAuthorAvatarUrl } from '../shared/simulated-author-avatars'
 import type {
   AttendancePreviewUser,
   AttendanceSummary,
@@ -165,14 +167,17 @@ async function enrichPostsWithAttendance<T extends { _id: string; sectionId: str
   )
 }
 
-async function enrichPostsWithAuthor<T extends { authorId?: string }>(posts: T[]): Promise<Array<T & { authorNickname?: string; authorAvatarUrl?: string }>> {
+async function enrichPostsWithAuthor<T extends { _id?: string; authorId?: string }>(posts: T[]): Promise<Array<T & { authorNickname?: string; authorAvatarUrl?: string }>> {
   if (!posts.length) return posts as any
   const usersById = await getUsersByIds(posts.map((p) => p.authorId).filter(Boolean) as string[])
-  return posts.map((p) => ({
-    ...p,
-    authorNickname: usersById[p.authorId || '']?.nickName || '',
-    authorAvatarUrl: usersById[p.authorId || '']?.avatarUrl || '',
-  }))
+  return posts.map((p) => {
+    const author = usersById[p.authorId || '']
+    return {
+      ...p,
+      authorNickname: author?.nickName || '',
+      authorAvatarUrl: resolveAuthorAvatarUrl(author?.avatarUrl, p._id || p.authorId || ''),
+    }
+  })
 }
 
 function trimText(value: unknown, max = 500) {
@@ -359,8 +364,10 @@ export async function buildHomeBootstrap(
   options: { currentCommunityId?: string; limitPerSection?: number } = {},
 ): Promise<HomeBootstrapResponse> {
   if (!openid) {
+    const snapshot = await buildHomeSnapshot('', options)
     return {
-      ...(await buildHomeSnapshot('', options)),
+      ...snapshot,
+      ...(snapshot.currentCommunityId ? { guestIntroConfig: await getGuestIntroConfig() } : {}),
       backgroundFetchToken: '',
       backgroundFetchTokenExpiresAt: '',
     }

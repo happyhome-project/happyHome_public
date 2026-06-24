@@ -14,6 +14,7 @@ import {
 import { getEditableWidgetIds, sanitizeContent, validateContentValues, validateRequiredWidgets } from '../../lib/post-validate'
 import { getWxacodeUnlimited } from '../../lib/wx-openapi'
 import { searchAmapPoi } from '../../lib/amap'
+import { getGuestIntroConfig, saveGuestIntroConfig } from '../../lib/guest-intro-config'
 import {
   assertOwnCommunityOrSuper,
   generateSalt,
@@ -43,6 +44,7 @@ import {
   normalizeGuideNoteWidgets,
   normalizeSectionDisplayTemplate,
 } from '../../shared/guide-note-widgets'
+import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
 
 cloud.init({ env: process.env.TCB_ENV || cloud.DYNAMIC_CURRENT_ENV })
 
@@ -118,6 +120,7 @@ const SUPER_ADMIN_ONLY: Array<string | RegExp> = [
   'user.setSuperAdmin',
   /^audit\./,
   /^admin\.(?!approvalSummary$)/,
+  /^appConfig\./,
 ]
 // 这些 action 需要校验对 communityId 的归属（superAdmin 自动放行）
 const COMMUNITY_SCOPED_ACTIONS = new Set([
@@ -799,6 +802,18 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     return { candidates }
   }
 
+  if (action === 'appConfig.getGuestIntro') {
+    return { config: await getGuestIntroConfig() }
+  }
+
+  if (action === 'appConfig.updateGuestIntro') {
+    const config = await saveGuestIntroConfig(params.config || {}, {
+      publishNewVersion: params.publishNewVersion === true,
+      updatedBy: ctx.username || ctx.accountId,
+    })
+    return { config }
+  }
+
   if (action === 'user.setSuperAdmin') {
     const openId = String(params.openId || '').trim()
     if (!openId) throw new Error('openId 不能为空')
@@ -1198,6 +1213,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       return {
         ...post,
         authorNickname: author?.nickName || '',
+        authorAvatarUrl: resolveAuthorAvatarUrl(author?.avatarUrl, post._id || post.authorId || ''),
         sectionName: section?.name || '',
         sectionType: section?.type || '',
         isVisibleToMembers: isPostVisibleToMembers(post),
@@ -1233,6 +1249,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       post: {
         ...post,
         authorNickname: (author as any)?.nickName || '',
+        authorAvatarUrl: resolveAuthorAvatarUrl((author as any)?.avatarUrl, post._id || post.authorId || ''),
         attendanceSummaryByWidget,
       },
       section: normalizedSection,
@@ -1397,6 +1414,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const rows = posts.map((post: any) => ({
       ...post,
       authorNickname: usersById[post.authorId]?.nickName || '',
+      authorAvatarUrl: resolveAuthorAvatarUrl(usersById[post.authorId]?.avatarUrl, post._id || post.authorId || ''),
       sectionName: sectionsById[post.sectionId]?.name || '',
       sectionType: sectionsById[post.sectionId]?.type || '',
       isVisibleToMembers: isPostVisibleToMembers(post),
@@ -1415,7 +1433,12 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       db.query(AUDIT_TASKS, { postId }, { orderBy: ['createdAt', 'desc'] }).catch(() => []),
     ])
     return {
-      post: { ...post, authorNickname: (author as any)?.nickName || '', isVisibleToMembers: isPostVisibleToMembers(post) },
+      post: {
+        ...post,
+        authorNickname: (author as any)?.nickName || '',
+        authorAvatarUrl: resolveAuthorAvatarUrl((author as any)?.avatarUrl, post._id || post.authorId || ''),
+        isVisibleToMembers: isPostVisibleToMembers(post),
+      },
       section: section ? normalizeSection(section) : null,
       auditTasks,
     }

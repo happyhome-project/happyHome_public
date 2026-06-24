@@ -58,10 +58,27 @@
       />
       <view
         v-else-if="widget.type === 'location'"
-        class="location-value"
+        class="location-card"
         @tap="openLocation"
       >
-        <text>{{ locationText }}</text>
+        <map
+          v-if="locationPreview"
+          class="location-map"
+          :latitude="locationPreview.lat"
+          :longitude="locationPreview.lng"
+          :markers="locationPreview.markers"
+          :scale="15"
+          :enable-scroll="false"
+          :enable-zoom="false"
+          :enable-rotate="false"
+          :enable-overlooking="false"
+          @tap.stop="openLocation"
+        />
+        <view class="location-meta">
+          <text class="location-name">{{ locationPreview?.name || locationText }}</text>
+          <text v-if="locationPreview?.address" class="location-address">{{ locationPreview.address }}</text>
+          <text class="location-action">打开导航</text>
+        </view>
       </view>
       <text v-else class="empty-value">-</text>
     </view>
@@ -110,7 +127,22 @@ const displayValue = computed(() => formatWidgetValue(rawValue.value, props.widg
 const locationText = computed(() => {
   const loc = parseLocation(rawValue.value)
   if (!loc) return '-'
-  return loc.address || `${loc.lat}, ${loc.lng}`
+  return loc.name || loc.address || `${loc.lat}, ${loc.lng}`
+})
+const locationPreview = computed(() => {
+  const loc = parseLocation(rawValue.value)
+  if (!loc) return null
+  const name = loc.name || loc.address || displayLabel.value || '位置'
+  return {
+    ...loc,
+    name,
+    markers: [{
+      id: 1,
+      latitude: loc.lat,
+      longitude: loc.lng,
+      title: name,
+    }],
+  }
 })
 
 function formatDatetime(val: any): string {
@@ -127,12 +159,13 @@ function previewImage(index: number) {
   })
 }
 
-function parseLocation(value: any): { address: string; lat: number; lng: number } | null {
+function parseLocation(value: any): { name: string; address: string; lat: number; lng: number } | null {
   if (!value || typeof value !== 'object') return null
   const lat = Number(value.lat)
   const lng = Number(value.lng)
   if (Number.isNaN(lat) || Number.isNaN(lng)) return null
   return {
+    name: String(value.name || ''),
     address: String(value.address || ''),
     lat,
     lng,
@@ -146,7 +179,7 @@ function openLocation() {
     latitude: loc.lat,
     longitude: loc.lng,
     address: loc.address,
-    name: displayLabel.value || '位置',
+    name: loc.name || loc.address || displayLabel.value || '位置',
     scale: 16,
   })
 }
@@ -243,9 +276,43 @@ watch(hasValue, () => {
   white-space: nowrap;
 }
 .audio-meta { font-size: $hh-font-caption; color: $hh-color-text-mute; }
-.location-value {
-  color: $hh-color-info;
-  text-decoration: underline;
+.location-card {
+  overflow: hidden;
+  border: 1rpx solid $hh-color-divider;
+  border-radius: $hh-radius-md;
+  background: $hh-surface-1;
+}
+
+.location-map {
+  width: 100%;
+  height: 172rpx;
+  display: block;
+  background: $hh-color-bg-sub;
+}
+
+.location-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  padding: $hh-space-md;
+}
+
+.location-name {
+  color: $hh-color-text;
+  font-size: $hh-font-body;
+  font-weight: $hh-font-weight-bold;
+}
+
+.location-address {
+  color: $hh-color-text-mute;
+  font-size: $hh-font-caption;
+  line-height: 1.5;
+}
+
+.location-action {
+  color: $hh-accent;
+  font-size: $hh-font-caption;
+  font-weight: $hh-font-weight-medium;
 }
 .empty-value { color: $hh-color-text-mute; }
 

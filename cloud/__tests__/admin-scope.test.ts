@@ -55,6 +55,8 @@ describe('superAdmin-only gate', () => {
     ['admin.listAccounts', {}],
     ['admin.createAccount', { username: 'x', password: '123456' }],
     ['admin.deleteAccount', { accountId: 'a' }],
+    ['appConfig.getGuestIntro', {}],
+    ['appConfig.updateGuestIntro', { config: { title: 'x' } }],
   ]
   test.each(blockedActions)('communityAdmin cannot call %s', async (action, params) => {
     await expect(internalCall(action, params, ADMIN_CTX_COMMUNITY)).rejects.toThrow(/权限不足/)

@@ -11,11 +11,10 @@
       />
 
       <view v-else>
-        <WidgetRenderer
-          v-for="widget in regularWidgets"
-          :key="widget.widgetId"
-          :widget="widget"
-          :content="post.content"
+        <DefaultDetailView
+          :post="post"
+          :section="section"
+          :widgets="regularWidgets"
           :post-meta="postMeta"
         />
 
@@ -68,7 +67,22 @@
       </view>
 
       <view class="meta">
-        <view>
+        <view class="meta-main">
+          <view class="meta-author">
+            <image
+              v-if="detailAuthorAvatarUrl"
+              :src="resolvedAvatarUrl(detailAuthorAvatarUrl)"
+              class="meta-author-avatar"
+              mode="aspectFill"
+            />
+            <view
+              v-else-if="shouldUseGeneratedAuthorAvatar"
+              class="meta-author-avatar meta-author-avatar--generated"
+            >
+              <text>{{ detailAuthorInitial }}</text>
+            </view>
+            <text class="meta-author-name">{{ detailAuthorName }}</text>
+          </view>
           <text class="time">发布于 {{ formatDate(post.createdAt) }}</text>
         </view>
         <view v-if="isAuthor" class="actions">
@@ -137,7 +151,7 @@ import { postApi, sectionApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import GuideRouteDetailView from '../../components/GuideRouteDetailView.vue'
-import WidgetRenderer from '../../components/widgets/WidgetRenderer.vue'
+import DefaultDetailView from '../../components/DefaultDetailView.vue'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
@@ -175,6 +189,15 @@ const rosterSelfJoined = computed(() => {
 })
 
 const isAuthor = computed(() => post.value?.authorId === userStore.openId)
+const detailAuthorName = computed(() =>
+  String(post.value?.authorNickname || '社区邻居').trim() || '社区邻居'
+)
+const detailAuthorInitial = computed(() => detailAuthorName.value.slice(0, 1) || '邻')
+const detailAuthorAvatarUrl = computed(() => String(post.value?.authorAvatarUrl || '').trim())
+const shouldUseGeneratedAuthorAvatar = computed(() => {
+  if (detailAuthorAvatarUrl.value) return false
+  return String(post.value?.source || '').toLowerCase() === 'ai'
+})
 const postMeta = computed(() => ({
   postId: String(post.value?._id || currentPostId.value || ''),
   postTitle: String(post.value?.content?.[regularWidgets.value[0]?.widgetId] || detailSectionTitle.value || '帖子'),
@@ -405,6 +428,7 @@ function attendanceAvatarSrc(user: any) {
 
 function collectAttendanceAvatarUrls() {
   const urls: string[] = []
+  if (post.value?.authorAvatarUrl) urls.push(String(post.value.authorAvatarUrl))
   if (userStore.avatarUrl) urls.push(userStore.avatarUrl)
   const summaries = post.value?.attendanceSummaryByWidget || {}
   Object.keys(summaries).forEach((key) => {
@@ -863,14 +887,61 @@ function formatDateTime(iso: string): string {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: $hh-space-md;
+}
+
+.meta-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  flex-wrap: wrap;
+}
+
+.meta-author {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.meta-author-avatar {
+  width: 34rpx;
+  height: 34rpx;
+  border-radius: 999rpx;
+  flex: 0 0 auto;
+  background: $hh-surface-2;
+  border: 1rpx solid $hh-ink-line-2;
+}
+
+.meta-author-avatar--generated {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: $hh-accent-wash;
+  color: $hh-accent-ink;
+  font-size: 18rpx;
+  font-weight: $hh-font-weight-bold;
+}
+
+.meta-author-name {
+  max-width: 180rpx;
+  color: $hh-color-text-mute;
+  font-size: $hh-font-caption;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .time {
   font-size: $hh-font-caption;
   color: $hh-color-text-mute;
+  line-height: 1.4;
 }
 
 .actions {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: $hh-space-md;
