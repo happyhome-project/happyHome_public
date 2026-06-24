@@ -1063,7 +1063,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
 
     const activePosts = await db.query('posts', { sectionId, status: 'active' }, { limit: 1 })
     if (activePosts.length > 0) {
-      throw new Error('该板块下已有帖子，暂不支持删除')
+      throw new Error('当前板块内还有已发布帖子，不能直接删除板块。请先到帖子管理中删除或处理这些帖子后，再删除板块。')
     }
 
     await db.removeById('sections', sectionId)

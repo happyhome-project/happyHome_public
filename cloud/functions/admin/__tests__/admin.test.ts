@@ -143,6 +143,22 @@ test('admin.approvalSummary: communityAdmin 只返回自己可管理社区的成
   ])
 })
 
+test('section.delete: rejects deletion when active posts still exist with clear guidance', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([
+    { _id: 'post-1', sectionId: 'section-1', status: 'active' },
+  ])
+
+  await expect(main({
+    action: 'section.delete',
+    sectionId: 'section-1',
+    _actAs: { accountId: 'super-1', role: 'superAdmin', userId: 'boss-openid', username: 'boss' },
+  })).rejects.toThrow('当前板块内还有已发布帖子，不能直接删除板块。请先到帖子管理中删除或处理这些帖子后，再删除板块。')
+
+  expect(db.query).toHaveBeenCalledWith('posts', { sectionId: 'section-1', status: 'active' }, { limit: 1 })
+  expect(db.updateById).not.toHaveBeenCalled()
+  expect(db.removeById).not.toHaveBeenCalledWith('sections', 'section-1')
+})
+
 test('member.list: 会物理清理历史 left 记录并且不返回', async () => {
   ;(db.getById as jest.Mock)
     .mockResolvedValueOnce({ _id: 'community-1', creatorId: 'creator-1' })
