@@ -21,6 +21,11 @@ jest.mock('../../../lib/post-search', () => ({
   searchPostIndex: jest.fn(),
 }))
 
+jest.mock('../../../lib/post-rag', () => ({
+  enqueuePostRagJob: jest.fn(),
+  searchPostsWithRag: jest.fn(),
+}))
+
 import {
   handleBootstrap,
   handleCreate,
@@ -38,6 +43,7 @@ import {
 } from '../index'
 import * as db from '../../../lib/db'
 import * as postSearch from '../../../lib/post-search'
+import * as postRag from '../../../lib/post-rag'
 import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
 
 beforeEach(() => {
@@ -1296,6 +1302,8 @@ test('delete: clears pin and featured flags', async () => {
     _id: 'post-flagged',
     authorId: 'test-openid',
     status: 'active',
+    communityId: 'community-1',
+    sectionId: 'section-1',
     isPinned: true,
     isFeatured: true,
   })
@@ -1313,17 +1321,37 @@ test('delete: clears pin and featured flags', async () => {
     featuredByAccountId: '',
   })
   expect(result).toEqual({ success: true })
+  expect(postRag.enqueuePostRagJob).toHaveBeenCalledWith({
+    postId: 'post-flagged',
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    action: 'delete',
+    reason: 'post.delete',
+  })
   expect(postSearch.removePostSearchIndex).toHaveBeenCalledWith('post-flagged')
 })
 
-test('search: checks community readability and delegates to post search index', async () => {
-  ;(postSearch.searchPostIndex as jest.Mock).mockResolvedValue({
+test('search: checks community readability and delegates to formal RAG search', async () => {
+  ;(postRag.searchPostsWithRag as jest.Mock).mockResolvedValue({
     query: '鲲鹏',
     communityId: 'community-1',
     sectionId: '',
     total: 1,
     skip: 0,
     limit: 20,
+    answer: '找到 1 篇包含该视频的帖子。',
+    citations: [
+      {
+        postId: 'post-1',
+        chunkId: 'chunk-1',
+        title: '视频帖',
+        fieldLabel: '视频',
+        fieldType: 'video_group',
+        preview: '鲲鹏',
+        score: 0.92,
+      },
+    ],
+    mode: 'rag',
     items: [{ postId: 'post-1', title: '视频帖' }],
   })
   ;(db.query as jest.Mock).mockResolvedValueOnce([
@@ -1336,13 +1364,17 @@ test('search: checks community readability and delegates to post search index', 
     limit: 20,
   }, 'member-openid')
 
-  expect(postSearch.searchPostIndex).toHaveBeenCalledWith({
+  expect(postRag.searchPostsWithRag).toHaveBeenCalledWith(expect.objectContaining({
     communityId: 'community-1',
     query: '鲲鹏',
     sectionId: '',
     skip: 0,
     limit: 20,
-  })
+  }))
+  expect(postSearch.searchPostIndex).not.toHaveBeenCalled()
+  expect(result.mode).toBe('rag')
+  expect(result.answer).toContain('找到')
+  expect(result.citations[0]).toMatchObject({ postId: 'post-1', fieldLabel: '视频' })
   expect(result.items).toEqual([{ postId: 'post-1', title: '视频帖' }])
 })
 

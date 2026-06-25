@@ -19,6 +19,10 @@ jest.mock('../post-search', () => ({
   refreshPostSearchIndexById: jest.fn(),
 }))
 
+jest.mock('../post-rag', () => ({
+  enqueuePostRagJob: jest.fn(),
+}))
+
 import {
   auditPostContent,
   approvePostAudit,
@@ -32,6 +36,7 @@ import {
 } from '../content-audit'
 import * as db from '../db'
 import * as postSearch from '../post-search'
+import * as postRag from '../post-rag'
 import { postWxJson } from '../wx-openapi'
 
 beforeEach(() => {
@@ -162,6 +167,11 @@ test('approvePostAudit promotes pendingContent and marks the post as passed', as
     auditStatus: 'pass',
   }))
   expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
+  expect(postRag.enqueuePostRagJob).toHaveBeenCalledWith(expect.objectContaining({
+    postId: 'post-1',
+    action: 'upsert',
+    reason: 'audit.pending.pass',
+  }))
 })
 
 test('approvePostAudit replaces content and removes pendingContent atomically for CloudBase nested object updates', async () => {
@@ -176,6 +186,11 @@ test('approvePostAudit replaces content and removes pendingContent atomically fo
     pendingContent: { __remove: true },
   }))
   expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-guide')
+  expect(postRag.enqueuePostRagJob).toHaveBeenCalledWith(expect.objectContaining({
+    postId: 'post-guide',
+    action: 'upsert',
+    reason: 'audit.pending.pass',
+  }))
 })
 
 test('rejectPostAudit rejects pending edits without replacing current content', async () => {
@@ -193,6 +208,7 @@ test('rejectPostAudit rejects pending edits without replacing current content', 
   }))
   expect((db.updateById as jest.Mock).mock.calls[0][2].content).toBeUndefined()
   expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
+  expect(postRag.enqueuePostRagJob).not.toHaveBeenCalled()
 })
 
 test('handleAuditCallback rejects public callback when callback token is not configured', async () => {

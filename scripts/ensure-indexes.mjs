@@ -335,6 +335,62 @@ const INDEXES = [
       { Name: 'indexedAt', Direction: '-1' },
     ],
   },
+  {
+    coll: 'post_rag_jobs',
+    name: 'idx_status_createdAt',
+    keys: [
+      { Name: 'status', Direction: '1' },
+      { Name: 'createdAt', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_rag_jobs',
+    name: 'idx_postId_status',
+    keys: [
+      { Name: 'postId', Direction: '1' },
+      { Name: 'status', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_rag_jobs',
+    name: 'idx_communityId_status',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'status', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_rag_index_state',
+    name: 'idx_communityId_status',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'status', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_rag_index_state',
+    name: 'idx_status_indexedAt',
+    keys: [
+      { Name: 'status', Direction: '1' },
+      { Name: 'indexedAt', Direction: '-1' },
+    ],
+  },
+  {
+    coll: 'post_rag_chunks',
+    name: 'idx_communityId_postId',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'postId', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_rag_chunks',
+    name: 'idx_sectionId_postId',
+    keys: [
+      { Name: 'sectionId', Direction: '1' },
+      { Name: 'postId', Direction: '1' },
+    ],
+  },
   // app_configs: global product/admin configuration documents by stable key
   {
     coll: 'app_configs',
@@ -361,6 +417,9 @@ const REQUIRED_COLLECTIONS = [
   'post_search_chunks',    // RAG 证据分块（_id=chunkId）
   'post_search_vector_terms', // 本地稀疏向量词条
   'post_search_index_state',  // 每篇帖子索引状态
+  'post_rag_jobs',            // 正式 RAG 异步索引任务
+  'post_rag_index_state',     // 正式 RAG 每篇帖子索引状态
+  'post_rag_chunks',          // RAG chunk 元数据镜像/排障用
 ]
 
 let hadError = false

@@ -34,6 +34,10 @@ jest.mock('../../../lib/post-search', () => ({
   removePostSearchIndexesForSection: jest.fn(),
 }))
 
+jest.mock('../../../lib/post-rag', () => ({
+  enqueuePostRagJob: jest.fn(),
+}))
+
 import { main } from '../index'
 import * as db from '../../../lib/db'
 import * as storage from '../../../lib/storage'

@@ -315,6 +315,19 @@ export const postApi = {
       total: number
       skip: number
       limit: number
+      answer: string
+      mode: 'rag' | 'fallback' | 'no_answer'
+      citations: Array<{
+        postId: string
+        chunkId: string
+        title: string
+        sectionId?: string
+        sectionName?: string
+        fieldLabel: string
+        fieldType: string
+        preview: string
+        score: number
+      }>
       items: Array<{
         postId: string
         communityId: string
