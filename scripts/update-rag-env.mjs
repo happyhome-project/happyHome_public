@@ -43,6 +43,7 @@ const targetEnv = {
   TENCENT_LKEAP_EMBEDDING_MODEL: process.env.TENCENT_LKEAP_EMBEDDING_MODEL || lkeapEnv.TENCENT_LKEAP_EMBEDDING_MODEL || 'lke-text-embedding-v2',
   TENCENT_LKEAP_RERANK_MODEL: process.env.TENCENT_LKEAP_RERANK_MODEL || lkeapEnv.TENCENT_LKEAP_RERANK_MODEL || 'lke-reranker-base',
   TENCENT_LKEAP_CHAT_MODEL: process.env.TENCENT_LKEAP_CHAT_MODEL || lkeapEnv.TENCENT_LKEAP_CHAT_MODEL || 'deepseek-v3-0324',
+  POST_RAG_WORKER_TOKEN: process.env.POST_RAG_WORKER_TOKEN || lkeapEnv.POST_RAG_WORKER_TOKEN,
 }
 
 const missing = Object.entries(targetEnv)
@@ -55,7 +56,7 @@ if (missing.length > 0) {
   process.exit(1)
 }
 
-const functionNames = (process.argv.find((arg) => arg.startsWith('--only='))?.slice('--only='.length) || 'post,post-rag-worker')
+const functionNames = (process.argv.find((arg) => arg.startsWith('--only='))?.slice('--only='.length) || 'post,post-rag-worker,post-video-rag-worker')
   .split(',')
   .map((item) => item.trim())
   .filter(Boolean)

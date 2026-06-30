@@ -115,7 +115,7 @@ test('processPostRagJobBatch chunks approved post content and upserts through pr
       status: 'active',
       widgets: [
         { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', showInList: true, order: 0 },
-        { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', showInList: true, order: 1 },
+        { widgetId: 'body', type: 'rich_text', label: '正文', fieldKey: 'body', showInList: true, order: 1, visibility: 'member' },
       ],
     })
   mockDb.updateById.mockResolvedValue({ stats: { updated: 1 } })
@@ -131,8 +131,13 @@ test('processPostRagJobBatch chunks approved post content and upserts through pr
       sectionId: 'section-1',
       fieldLabel: expect.stringMatching(/标题|正文/),
       sourceUpdatedAt: '2026-06-25T00:00:00.000Z',
-      visibility: 'member',
+      visibility: expect.any(String),
     }),
+  ]))
+  const chunks = (provider.upsertChunks as jest.Mock).mock.calls[0][0]
+  expect(chunks).toEqual(expect.arrayContaining([
+    expect.objectContaining({ fieldLabel: '标题', visibility: 'public' }),
+    expect.objectContaining({ fieldLabel: '正文', visibility: 'member' }),
   ]))
   expect(mockDb.updateById).toHaveBeenCalledWith(POST_RAG_INDEX_STATE, 'post-1', expect.objectContaining({
     status: 'indexed',
@@ -193,7 +198,7 @@ test('processPostRagJobBatch adds video metadata chunks and cost-gated analysis 
             title: '家风',
             description: '',
             fileID: 'cloud://env/posts/videos/family-video.mp4',
-            duration: 600,
+            duration: 96,
           },
         ],
       },
@@ -355,6 +360,63 @@ test('searchPostsWithRag returns no_answer instead of inventing an answer withou
   expect(result.answer).toContain('没有找到足够相关的帖子')
   expect(result.citations).toEqual([])
   expect(result.items).toEqual([])
+})
+
+test('searchPostsWithRag drops member-only citations and generated answer for public readers', async () => {
+  const provider = {
+    name: 'fake-rag',
+    isConfigured: jest.fn(() => true),
+    search: jest.fn().mockResolvedValue({
+      total: 2,
+      answer: '秘密联系方式：13800000000',
+      citations: [
+        {
+          postId: 'post-public',
+          chunkId: 'chunk-public',
+          communityId: 'community-1',
+          title: '公开家风笔记',
+          sectionId: 'section-1',
+          sectionName: '论语',
+          fieldLabel: '正文',
+          fieldType: 'rich_note',
+          preview: '一粥一饭，当思来处不易。',
+          score: 0.9,
+          visibility: 'public',
+        },
+        {
+          postId: 'post-member',
+          chunkId: 'chunk-member',
+          communityId: 'community-1',
+          title: '成员联系资料',
+          sectionId: 'section-1',
+          sectionName: '论语',
+          fieldLabel: '联系方式',
+          fieldType: 'rich_note',
+          preview: '秘密联系方式：13800000000',
+          score: 0.95,
+          visibility: 'member',
+        },
+      ],
+      items: [],
+      mode: 'rag',
+    }),
+  }
+
+  const result = await searchPostsWithRag({
+    communityId: 'community-1',
+    query: '联系方式',
+    limit: 10,
+    includeMemberOnly: false,
+  }, { provider })
+
+  expect(provider.search).toHaveBeenCalledWith(expect.objectContaining({
+    includeMemberOnly: false,
+  }))
+  expect(result.mode).toBe('rag')
+  expect(result.answer).not.toContain('13800000000')
+  expect(result.citations).toHaveLength(1)
+  expect(result.citations[0]).toMatchObject({ postId: 'post-public', visibility: 'public' })
+  expect(result.items.map((item) => item.postId)).toEqual(['post-public'])
 })
 
 test('hasRagEvidenceSignal rejects weak unrelated candidates and accepts real evidence signals', () => {
@@ -531,7 +593,7 @@ test('planVideoRagAnalysisJobsForPost queues only low-text missing-cache videos 
     source: 'cos',
     title: '家风',
     fileID: 'cloud://env/posts/videos/short.mp4',
-    duration: 600,
+    duration: 96,
   }
   const describedVideo = {
     itemId: 'video-described',
@@ -587,6 +649,44 @@ test('planVideoRagAnalysisJobsForPost queues only low-text missing-cache videos 
       title: '家风',
     }),
   }))
+})
+
+test('planVideoRagAnalysisJobsForPost does not queue ASR when video duration exceeds the ASR budget', () => {
+  const section = {
+    _id: 'section-1',
+    communityId: 'community-1',
+    name: '家风课堂',
+    widgets: [
+      { widgetId: 'videos', type: 'video_group', label: '视频', fieldKey: 'videos', required: false, showInList: false, order: 1 },
+    ],
+  } as any
+  const post = {
+    _id: 'post-video',
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    content: {
+      videos: [{
+        itemId: 'video-long',
+        source: 'cos',
+        title: '家风',
+        fileID: 'cloud://env/posts/videos/long.mp4',
+        duration: 3600,
+      }],
+    },
+  } as any
+
+  const jobs = planVideoRagAnalysisJobsForPost(post, section, {
+    policy: {
+      analysisEnabled: true,
+      maxJobsPerPost: 1,
+      maxCostUnitsPerPost: 8,
+      maxFramesPerVideo: 0,
+      maxAsrSecondsPerVideo: 120,
+      minMetadataTextCharsForAnalysis: 24,
+    },
+  })
+
+  expect(jobs).toEqual([])
 })
 
 test('readVideoRagCostPolicyFromEnv allows explicit one-hour ASR analysis budget', () => {

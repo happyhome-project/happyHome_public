@@ -1354,9 +1354,13 @@ test('search: checks community readability and delegates to formal RAG search', 
     mode: 'rag',
     items: [{ postId: 'post-1', title: '视频帖' }],
   })
-  ;(db.query as jest.Mock).mockResolvedValueOnce([
-    { _id: 'member-1', communityId: 'community-1', userId: 'member-openid', status: 'active' },
-  ])
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([
+      { _id: 'member-1', communityId: 'community-1', userId: 'member-openid', status: 'active' },
+    ])
+    .mockResolvedValueOnce([
+      { _id: 'member-1', communityId: 'community-1', userId: 'member-openid', status: 'active' },
+    ])
 
   const result = await handleSearch({
     communityId: 'community-1',
@@ -1370,12 +1374,42 @@ test('search: checks community readability and delegates to formal RAG search', 
     sectionId: '',
     skip: 0,
     limit: 20,
+    includeMemberOnly: true,
   }))
   expect(postSearch.searchPostIndex).not.toHaveBeenCalled()
   expect(result.mode).toBe('rag')
   expect(result.answer).toContain('找到')
   expect(result.citations[0]).toMatchObject({ postId: 'post-1', fieldLabel: '视频' })
   expect(result.items).toEqual([{ postId: 'post-1', title: '视频帖' }])
+})
+
+test('search: public guest readers do not receive member-only RAG evidence', async () => {
+  process.env.PUBLIC_READ_COMMUNITY_IDS = 'community-1'
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
+  ;(postRag.searchPostsWithRag as jest.Mock).mockResolvedValue({
+    query: '联系方式',
+    communityId: 'community-1',
+    sectionId: '',
+    total: 0,
+    skip: 0,
+    limit: 20,
+    answer: '没有找到足够相关的帖子。',
+    citations: [],
+    mode: 'no_answer',
+    items: [],
+  })
+
+  await handleSearch({
+    communityId: 'community-1',
+    q: '联系方式',
+    asGuest: true,
+  }, 'member-openid')
+
+  expect(postRag.searchPostsWithRag).toHaveBeenCalledWith(expect.objectContaining({
+    communityId: 'community-1',
+    query: '联系方式',
+    includeMemberOnly: false,
+  }))
 })
 
 test('get：非 active 成员不可查看帖子详情', async () => {

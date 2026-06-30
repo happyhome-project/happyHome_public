@@ -42,6 +42,7 @@ function parseArgs() {
       process.env.HH_POST_RAG_SMOKE_TIMEOUT_MS || String(DEFAULT_TIMEOUT_MS),
     )) || DEFAULT_TIMEOUT_MS)),
     actor: getFlagValue('actor', `rag-smoke-${nowRunId()}`),
+    workerToken: String(getFlagValue('worker-token', process.env.POST_RAG_WORKER_TOKEN || '')).trim(),
   }
 }
 
@@ -153,6 +154,9 @@ function assertRagHit(result, postId, label) {
 
 async function main() {
   const options = parseArgs()
+  if (!options.workerToken) {
+    throw new Error('POST_RAG_WORKER_TOKEN is required to invoke post-rag-worker')
+  }
   const ownerOpenid = `${options.actor}-user`
   let communityId = ''
   let sectionId = ''
@@ -210,7 +214,7 @@ async function main() {
       await invokeAdmin('audit.approveAdmin', { postId }, options)
     }
 
-    const worker = await invokeFunction('post-rag-worker', { limit: 20, postId }, options)
+    const worker = await invokeFunction('post-rag-worker', { limit: 20, postId, workerToken: options.workerToken }, options)
     if (!Array.isArray(worker?.results) || !worker.results.some((item) => item.ok)) {
       throw new Error(`post-rag-worker did not index target post: ${JSON.stringify(worker)}`)
     }
@@ -242,7 +246,7 @@ async function main() {
       }
       if (postId) {
         try {
-          await invokeFunction('post-rag-worker', { limit: 20, postId }, options)
+          await invokeFunction('post-rag-worker', { limit: 20, postId, workerToken: options.workerToken }, options)
         } catch (error) {
           console.warn(`[post-rag-smoke] cleanup worker warning: ${error?.message || error}`)
         }

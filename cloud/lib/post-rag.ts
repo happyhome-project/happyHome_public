@@ -31,6 +31,7 @@ export interface RagCitation {
   fieldType: string
   preview: string
   score: number
+  visibility?: 'public' | 'member'
   sourceUpdatedAt?: string
 }
 
@@ -55,6 +56,7 @@ export interface RagSearchParams {
   sectionId?: string
   skip?: number
   limit?: number
+  includeMemberOnly?: boolean
 }
 
 export interface RagProviderSearchInput extends RagSearchParams {
@@ -267,6 +269,14 @@ function resultItemsFromCitations(citations: RagCitation[]): PostSearchResultIte
   return Array.from(byPost.values()).sort((left, right) => right.score - left.score)
 }
 
+function normalizeRagVisibility(value: unknown): 'public' | 'member' {
+  return value === 'public' ? 'public' : 'member'
+}
+
+function filterCitationsForReader(citations: RagCitation[], includeMemberOnly: boolean): RagCitation[] {
+  return citations.filter((citation) => includeMemberOnly || normalizeRagVisibility(citation.visibility) === 'public')
+}
+
 export async function searchPostsWithRag(
   params: RagSearchParams,
   options: {
@@ -279,35 +289,40 @@ export async function searchPostsWithRag(
   const query = String(params.query || '')
   const skip = Math.max(0, Math.floor(Number(params.skip || 0)))
   const limit = Math.max(1, Math.floor(Number(params.limit || 20)))
+  const includeMemberOnly = params.includeMemberOnly !== false
   const fallbackSearch = options.fallbackSearch || searchPostIndex
   const provider = options.provider === undefined ? createTencentRagProviderFromEnv() : options.provider
+  const fallbackParams = { communityId, query, sectionId, skip, limit, includeMemberOnly }
 
   if (!provider || !provider.isConfigured()) {
-    return withFallbackFields(await fallbackSearch({ communityId, query, sectionId, skip, limit }), 'rag_provider_not_configured')
+    return withFallbackFields(await fallbackSearch(fallbackParams), 'rag_provider_not_configured')
   }
 
   try {
     const ragQuery = buildRagQuery(query)
-    const providerResult = await provider.search({ communityId, query, sectionId, skip, limit, ragQuery })
-    if (!providerResult.citations.length) {
+    const providerResult = await provider.search({ ...fallbackParams, ragQuery })
+    const originalCitations = providerResult.citations || []
+    const citations = filterCitationsForReader(originalCitations, includeMemberOnly)
+    if (!citations.length) {
       return buildNoEvidenceRagResult({ query, communityId, sectionId, skip, limit })
     }
+    const droppedCitations = citations.length !== originalCitations.length
     return {
       query,
       communityId,
       sectionId,
-      total: providerResult.total || providerResult.items.length,
+      total: citations.length,
       skip,
       limit,
-      items: providerResult.items.length ? providerResult.items : resultItemsFromCitations(providerResult.citations),
-      answer: providerResult.answer,
-      citations: providerResult.citations,
+      items: resultItemsFromCitations(citations),
+      answer: droppedCitations ? deterministicAnswer(citations) : (providerResult.answer || deterministicAnswer(citations)),
+      citations,
       mode: 'rag',
       provider: provider.name,
     }
   } catch (error: any) {
     return withFallbackFields(
-      await fallbackSearch({ communityId, query, sectionId, skip, limit }),
+      await fallbackSearch(fallbackParams),
       error?.message || 'rag_provider_failed'
     )
   }
@@ -413,6 +428,7 @@ function toCitation(hit: any): RagCitation {
     fieldType: String(source.fieldType || ''),
     preview: String(source.preview || source.text || '').slice(0, 180),
     score: Number(hit?._score || source.score || 0),
+    visibility: normalizeRagVisibility(source.visibility),
     sourceUpdatedAt: String(source.sourceUpdatedAt || ''),
   }
 }
@@ -588,7 +604,12 @@ async function loadLkeapChunks(input: RagProviderSearchInput, pageSize: number, 
     }) as Array<RagChunkDocument & { _id?: string; embedding?: number[] }>
     if (!page.length) break
     for (const chunk of page) {
-      if ((!input.sectionId || chunk.sectionId === input.sectionId) && Array.isArray(chunk.embedding) && chunk.embedding.length) {
+      if (
+        (!input.sectionId || chunk.sectionId === input.sectionId) &&
+        (input.includeMemberOnly !== false || normalizeRagVisibility(chunk.visibility) === 'public') &&
+        Array.isArray(chunk.embedding) &&
+        chunk.embedding.length
+      ) {
         chunks.push(chunk)
       }
       if (chunks.length >= maxChunks) break
@@ -731,6 +752,7 @@ export function createTencentRagProvider(config: TencentRagConfig): TencentRagPr
       if (!isConfigured(config)) throw new Error('rag_provider_not_configured')
       const filters: any[] = [{ term: { communityId: input.communityId } }]
       if (input.sectionId) filters.push({ term: { sectionId: input.sectionId } })
+      if (input.includeMemberOnly === false) filters.push({ term: { visibility: 'public' } })
       const size = Math.max(1, Math.min(50, Number(input.limit || 20)))
       const from = Math.max(0, Math.floor(Number(input.skip || 0)))
       const queryVector = await embedText(input.ragQuery.expandedText)
@@ -949,6 +971,10 @@ function videoAnalysisLines(asset: VideoRagAsset): string[] {
   return lines
 }
 
+function widgetRagVisibility(widget: { visibility?: unknown }): 'public' | 'member' {
+  return widget.visibility === 'member' ? 'member' : 'public'
+}
+
 export function buildVideoRagChunksForPost(
   post: Post,
   section: Section,
@@ -964,6 +990,7 @@ export function buildVideoRagChunksForPost(
   const chunks: RagChunkDocument[] = []
 
   for (const entry of extractVideoEntriesForRag(post, section)) {
+    const visibility = widgetRagVisibility(entry.widget)
     const metadataLines = videoMetadataLines(entry.video)
     if (metadataLines.length) {
       const text = metadataLines.join('\n')
@@ -979,7 +1006,7 @@ export function buildVideoRagChunksForPost(
         text,
         preview: previewForRagText(text),
         sourceUpdatedAt,
-        visibility: 'member',
+        visibility,
         metadata: {
           evidenceSource: 'video_metadata',
           costTier: 'free',
@@ -1010,7 +1037,7 @@ export function buildVideoRagChunksForPost(
           text,
           preview: previewForRagText(text),
           sourceUpdatedAt: asset.updatedAt || sourceUpdatedAt,
-          visibility: 'member',
+          visibility,
           metadata: {
             evidenceSource: 'video_analysis_cache',
             costTier: 'cached',
@@ -1040,8 +1067,13 @@ export function readVideoRagCostPolicyFromEnv(env: NodeJS.ProcessEnv = process.e
   }
 }
 
-function estimateVideoAnalysisCostUnits(policy: VideoRagCostPolicy): number {
-  return Math.max(0, Number(policy.maxFramesPerVideo || 0)) + Math.ceil(Math.max(0, Number(policy.maxAsrSecondsPerVideo || 0)) / 30)
+function estimateVideoAnalysisCostUnits(policy: VideoRagCostPolicy, durationSeconds: number): number {
+  const frameUnits = Math.max(0, Number(policy.maxFramesPerVideo || 0))
+  const asrSeconds = Math.min(
+    Math.max(0, Number(durationSeconds || 0)),
+    Math.max(0, Number(policy.maxAsrSecondsPerVideo || 0))
+  )
+  return frameUnits + Math.ceil(asrSeconds / 30)
 }
 
 function canAnalyzeVideoSource(video: Record<string, any>): boolean {
@@ -1070,7 +1102,14 @@ export function planVideoRagAnalysisJobsForPost(
     if (existingAsset && existingAsset.status !== 'failed') continue
     if (metadataTextLength(entry.video) >= policy.minMetadataTextCharsForAnalysis) continue
 
-    const estimatedCostUnits = estimateVideoAnalysisCostUnits(policy)
+    const durationSeconds = Math.floor(Number(entry.video.duration || 0))
+    const canAnalyzeAsr = policy.maxAsrSecondsPerVideo > 0 && durationSeconds > 0 && durationSeconds <= policy.maxAsrSecondsPerVideo
+    if (!canAnalyzeAsr) continue
+    const requestedAnalyses = [
+      ...(policy.maxFramesPerVideo > 0 ? ['cover_ocr', 'keyframe_vision'] : []),
+      'asr',
+    ]
+    const estimatedCostUnits = estimateVideoAnalysisCostUnits(policy, durationSeconds)
     if (estimatedCostUnits <= 0 || usedCostUnits + estimatedCostUnits > policy.maxCostUnitsPerPost) continue
     usedCostUnits += estimatedCostUnits
 
@@ -1083,11 +1122,7 @@ export function planVideoRagAnalysisJobsForPost(
       status: 'pending',
       attempts: 0,
       reason: 'rag.video.low_text_signal',
-      requestedAnalyses: [
-        'cover_ocr',
-        ...(policy.maxFramesPerVideo > 0 ? ['keyframe_vision'] : []),
-        ...(policy.maxAsrSecondsPerVideo > 0 ? ['asr'] : []),
-      ],
+      requestedAnalyses,
       frameStrategy: {
         includeCover: true,
         maxFrames: policy.maxFramesPerVideo,
@@ -1102,7 +1137,7 @@ export function planVideoRagAnalysisJobsForPost(
         source: asCleanText(entry.video.source),
         fileID: asCleanText(entry.video.fileID),
         cover: asCleanText(entry.video.cover),
-        duration: Number(entry.video.duration || 0),
+        duration: durationSeconds,
       },
       createdAt: now,
       updatedAt: now,
@@ -1757,7 +1792,7 @@ function toRagChunkDocuments(post: Post, section: Section): RagChunkDocument[] {
     text: chunk.text,
     preview: chunk.preview,
     sourceUpdatedAt: chunk.sourceUpdatedAt,
-    visibility: 'member',
+    visibility: normalizeRagVisibility((chunk as any).visibility),
   }))
 }
 

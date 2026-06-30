@@ -53,6 +53,7 @@ function parseRagRebuildArgs(argv = process.argv.slice(2), env = process.env) {
       'worker-rounds',
       env.HH_POST_RAG_REBUILD_WORKER_ROUNDS || String(DEFAULT_WORKER_ROUNDS),
     )) || DEFAULT_WORKER_ROUNDS)),
+    workerToken: String(getFlagValue(argv, 'worker-token', env.POST_RAG_WORKER_TOKEN || '')).trim(),
   }
 }
 
@@ -133,9 +134,12 @@ async function enqueueCommunityRagJobs(communityId, options, runner) {
 }
 
 async function processQueuedJobs(options, runner) {
+  if (!options.workerToken) {
+    throw new Error('POST_RAG_WORKER_TOKEN is required to invoke post-rag-worker; use --no-process to only enqueue jobs')
+  }
   const rounds = []
   for (let round = 0; round < options.workerRounds; round += 1) {
-    const result = await invokeFunction('post-rag-worker', { limit: 20 }, options, runner)
+    const result = await invokeFunction('post-rag-worker', { limit: 20, workerToken: options.workerToken }, options, runner)
     const scannedCount = Number(result?.scannedCount || 0)
     rounds.push({
       round: round + 1,
@@ -218,6 +222,7 @@ Options:
   --dry-run                     Print target community ids without enqueueing.
   --batch-size <n>              Posts per admin invocation. Defaults to ${DEFAULT_BATCH_SIZE}.
   --no-process                  Only enqueue jobs; do not invoke post-rag-worker.
+  --worker-token <token>        Required when processing jobs; defaults to POST_RAG_WORKER_TOKEN.
   --worker-rounds <n>           Max worker invocations when processing. Defaults to ${DEFAULT_WORKER_ROUNDS}.
 `)
 }

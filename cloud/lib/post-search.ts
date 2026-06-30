@@ -7,6 +7,7 @@ export interface PostSearchField {
   fieldKey: string
   fieldLabel: string
   fieldType: string
+  visibility: 'public' | 'member'
   text: string
   preview: string
 }
@@ -44,6 +45,7 @@ export interface PostSearchChunk {
   fieldKey: string
   fieldLabel: string
   fieldType: string
+  visibility: 'public' | 'member'
   chunkIndex: number
   text: string
   preview: string
@@ -160,6 +162,10 @@ function previewText(value: string): string {
     : chars.join('')
 }
 
+function widgetVisibility(widget: Widget): 'public' | 'member' {
+  return widget.visibility === 'member' ? 'member' : 'public'
+}
+
 function pushField(fields: PostSearchField[], widget: Widget, text: unknown, suffix = '') {
   const normalized = normalizeWhitespace(String(text || ''))
   if (!normalized) return
@@ -168,6 +174,7 @@ function pushField(fields: PostSearchField[], widget: Widget, text: unknown, suf
     fieldKey: suffix ? `${widget.fieldKey}.${suffix}` : widget.fieldKey,
     fieldLabel: widget.label,
     fieldType: widget.type,
+    visibility: widgetVisibility(widget),
     text: normalized,
     preview: previewText(normalized),
   })
@@ -377,6 +384,7 @@ export function buildPostSearchChunks(document: PostSearchDocument): PostSearchC
         fieldKey: field.fieldKey,
         fieldLabel: field.fieldLabel,
         fieldType: field.fieldType,
+        visibility: field.visibility,
         chunkIndex,
         text,
         preview: previewText(text),
@@ -586,6 +594,7 @@ export async function indexPostForSearch(post: Post, section: Section, now = new
         postId: document.postId,
         chunkId: chunk._id,
         fieldKey: chunk.fieldKey,
+        visibility: chunk.visibility,
         term,
         updatedAt: now,
       }))
@@ -600,6 +609,7 @@ export async function indexPostForSearch(post: Post, section: Section, now = new
         postId: document.postId,
         chunkId: chunk._id,
         fieldKey: chunk.fieldKey,
+        visibility: chunk.visibility,
         term: item.term,
         weight: item.weight,
         updatedAt: now,
@@ -962,12 +972,14 @@ export async function searchPostIndex(params: {
   sectionId?: string
   skip?: number
   limit?: number
+  includeMemberOnly?: boolean
 }): Promise<PostSearchResult> {
   const communityId = String(params.communityId || '').trim()
   const sectionId = String(params.sectionId || '').trim()
   const searchQuery = buildSearchQuery(String(params.query || ''))
   const skip = normalizeSkip(params.skip)
   const limit = normalizeLimit(params.limit)
+  const includeMemberOnly = params.includeMemberOnly !== false
   if (!communityId) throw new Error('post search requires communityId')
   if (searchQuery.compact.length < 2) {
     return { query: searchQuery.raw, communityId, sectionId, total: 0, skip, limit, items: [] }
@@ -979,6 +991,7 @@ export async function searchPostIndex(params: {
     const rows = await queryAll<any>(POST_SEARCH_TERMS, { communityId, term })
     for (const row of rows) {
       if (sectionId && row.sectionId !== sectionId) continue
+      if (!includeMemberOnly && row.visibility !== 'public') continue
       if (row.chunkId) {
         const previous = candidateChunkScores.get(row.chunkId) || 0
         candidateChunkScores.set(row.chunkId, previous + Math.max(4, Array.from(term).length * 2))
@@ -994,6 +1007,7 @@ export async function searchPostIndex(params: {
     for (const row of rows) {
       if (!row.chunkId) continue
       if (sectionId && row.sectionId !== sectionId) continue
+      if (!includeMemberOnly && row.visibility !== 'public') continue
       const previous = candidateChunkScores.get(row.chunkId) || 0
       const rowWeight = Number(row.weight || 0)
       candidateChunkScores.set(row.chunkId, previous + item.weight * rowWeight * 60)
@@ -1006,6 +1020,7 @@ export async function searchPostIndex(params: {
     if (!chunk) continue
     if (chunk.communityId !== communityId) continue
     if (sectionId && chunk.sectionId !== sectionId) continue
+    if (!includeMemberOnly && chunk.visibility !== 'public') continue
     if (!chunkMatchesQuery(chunk, searchQuery) && score <= 0) continue
     const list = chunksByPostId.get(chunk.postId) || []
     list.push({ chunk, score })
