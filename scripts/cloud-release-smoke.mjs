@@ -1,19 +1,23 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process'
-import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import process from 'node:process'
+import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
 
 export const DEFAULT_ENV_ID = 'cloudbase-3gh862acb1505ff3'
-export const DEFAULT_FUNCTIONS = ['user', 'community', 'member', 'section', 'post', 'admin', 'http-gateway']
+export const DEFAULT_FUNCTIONS = ['user', 'community', 'member', 'section', 'post', 'post-rag-worker', 'post-video-rag-worker', 'admin', 'http-gateway']
 export const REQUIRED_SMOKE_LABELS = [
   'HH_CLOUD_INVOKE_SMOKE_COMMUNITY',
   'HH_CLOUD_INVOKE_SMOKE_MEMBER',
   'HH_CLOUD_INVOKE_SMOKE_POST',
+  'HH_CLOUD_INVOKE_SMOKE_POST_RAG_WORKER',
+  'HH_CLOUD_INVOKE_SMOKE_POST_VIDEO_RAG_WORKER',
   'HH_CLOUD_INVOKE_SMOKE_HTTP_GATEWAY',
   'HH_CLOUD_INVOKE_SMOKE_ADMIN_FIXTURE',
   'HH_CLOUD_LOG_CAPTURE_POST',
@@ -56,6 +60,7 @@ export function parseArgs(argv = process.argv.slice(2), env = process.env) {
   const logWaitMs = Number(getFlag('log-wait-ms', env.HH_CLOUD_SMOKE_LOG_WAIT_MS || '3000'))
   const commandTimeoutMs = Number(getFlag('command-timeout-ms', env.HH_CLOUD_SMOKE_COMMAND_TIMEOUT_MS || '60000'))
   const runId = getFlag('run-id', env.HH_RELEASE_CLOUD_SMOKE_RUN_ID || makeRunId())
+  const workerToken = getFlag('worker-token', resolvePostRagWorkerToken(env))
   const evidenceDir = getFlag(
     'evidence-dir',
     resolve(ROOT, '.codex-local', 'release-evidence', runId, 'cloud-smoke'),
@@ -68,6 +73,7 @@ export function parseArgs(argv = process.argv.slice(2), env = process.env) {
     logWaitMs: Number.isFinite(logWaitMs) && logWaitMs >= 0 ? Math.floor(logWaitMs) : 3000,
     commandTimeoutMs: Number.isFinite(commandTimeoutMs) && commandTimeoutMs > 0 ? Math.floor(commandTimeoutMs) : 60000,
     noFixture: argv.includes('--no-fixture'),
+    workerToken,
     evidenceDir,
     runId,
   }
@@ -96,9 +102,9 @@ export function redactSensitive(value, env = process.env) {
   text = text
     .replace(/(Bearer\s+)[^\s"']+/gi, '$1[REDACTED]')
     .replace(/(--api-key\s+)[^\s"']+/gi, '$1[REDACTED]')
-    .replace(/((?:apiKey|apiKeyId|apiKeySecret|secretId|secretKey)["']?\s*[:=]\s*["']?)[^"',\s}]+/gi, '$1[REDACTED]')
+    .replace(/((?:apiKey|apiKeyId|apiKeySecret|secretId|secretKey|workerToken|postRagWorkerToken|token|password)["']?\s*[:=]\s*["']?)[^"',\s}]+/gi, '$1[REDACTED]')
 
-  for (const key of ['ADMIN_TOKEN', 'TEST_ADMIN_SESSION_TOKEN', 'TCB_SECRET_ID', 'TCB_SECRET_KEY', 'TCB_API_KEY']) {
+  for (const key of ['ADMIN_TOKEN', 'TEST_ADMIN_SESSION_TOKEN', 'TCB_SECRET_ID', 'TCB_SECRET_KEY', 'TCB_API_KEY', 'POST_RAG_WORKER_TOKEN', 'HH_POST_RAG_WORKER_TOKEN']) {
     const secret = env[key]
     if (secret && String(secret).length >= 6) {
       text = text.split(String(secret)).join('[REDACTED]')
@@ -316,8 +322,16 @@ export class CloudSmokeRun {
   async invoke(fn, payload, opts = {}) {
     const stage = `invoke-${fn}-${opts.name || payload.action || 'event'}`
     const payloadPath = resolve(this.options.evidenceDir, `${stage}-payload.json`)
-    await writeJson(payloadPath, payload)
-    const record = await this.runTcb(stage, ['fn', 'invoke', fn, '-d', `@${payloadPath}`], payload)
+    await writeJson(payloadPath, JSON.parse(redactSensitive(JSON.stringify(payload))))
+    const tempDir = await mkdtemp(join(tmpdir(), 'happyhome-cloud-smoke-payload-'))
+    const invokePayloadPath = join(tempDir, 'payload.json')
+    let record
+    try {
+      await writeJson(invokePayloadPath, payload)
+      record = await this.runTcb(stage, ['fn', 'invoke', fn, '-d', `@${invokePayloadPath}`], payload)
+    } finally {
+      await rm(tempDir, { recursive: true, force: true })
+    }
     const ok = opts.expectedFailure ? true : record.ok
     if (ok && opts.label) this.addLabel(opts.label)
     if (!ok && opts.required !== false) this.fail(`${fn} invoke failed`, { stage, status: record.status })
@@ -387,6 +401,34 @@ export class CloudSmokeRun {
       await this.invoke('post', payload, {
         label: 'HH_CLOUD_INVOKE_SMOKE_POST',
       })
+    }
+    if (this.options.only.includes('post-rag-worker')) {
+      if (!this.options.workerToken) {
+        this.fail('post-rag-worker smoke missing POST_RAG_WORKER_TOKEN / HH_POST_RAG_WORKER_TOKEN')
+      } else {
+        await this.invoke('post-rag-worker', {
+          limit: 1,
+          postId: '__release_smoke_missing__',
+          workerToken: this.options.workerToken,
+        }, {
+          name: 'token-guard',
+          label: 'HH_CLOUD_INVOKE_SMOKE_POST_RAG_WORKER',
+        })
+      }
+    }
+    if (this.options.only.includes('post-video-rag-worker')) {
+      if (!this.options.workerToken) {
+        this.fail('post-video-rag-worker smoke missing POST_RAG_WORKER_TOKEN / HH_POST_RAG_WORKER_TOKEN')
+      } else {
+        await this.invoke('post-video-rag-worker', {
+          limit: 1,
+          postId: '__release_smoke_missing__',
+          workerToken: this.options.workerToken,
+        }, {
+          name: 'token-guard',
+          label: 'HH_CLOUD_INVOKE_SMOKE_POST_VIDEO_RAG_WORKER',
+        })
+      }
     }
     if (this.options.only.includes('http-gateway')) {
       await this.invoke('http-gateway', { httpMethod: 'OPTIONS', headers: {}, body: '' }, {

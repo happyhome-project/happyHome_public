@@ -3,6 +3,7 @@ import CloudBase from '@cloudbase/manager-node'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
 
 function loadDotEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return {}
@@ -45,20 +46,30 @@ const targetEnv = {
   TENCENT_LKEAP_CHAT_MODEL: process.env.TENCENT_LKEAP_CHAT_MODEL || lkeapEnv.TENCENT_LKEAP_CHAT_MODEL || 'deepseek-v3-0324',
 }
 
+const workerEnv = {
+  POST_RAG_WORKER_TOKEN: resolvePostRagWorkerToken(),
+}
+
+const functionNames = (process.argv.find((arg) => arg.startsWith('--only='))?.slice('--only='.length) || 'post,post-rag-worker,post-video-rag-worker')
+  .split(',')
+  .map((item) => item.trim())
+  .filter(Boolean)
+
+const workerFunctions = new Set(['post-rag-worker', 'post-video-rag-worker'])
+
 const missing = Object.entries(targetEnv)
   .filter(([, value]) => !value)
   .map(([key]) => key)
+
+if (functionNames.some((functionName) => workerFunctions.has(functionName)) && !workerEnv.POST_RAG_WORKER_TOKEN) {
+  missing.push('POST_RAG_WORKER_TOKEN')
+}
 
 if (missing.length > 0) {
   console.error(`[rag-env] Missing RAG env values: ${missing.join(', ')}`)
   console.error('  Expected LKEAP file: ~/.happyhome/tencent-lkeap.env')
   process.exit(1)
 }
-
-const functionNames = (process.argv.find((arg) => arg.startsWith('--only='))?.slice('--only='.length) || 'post,post-rag-worker')
-  .split(',')
-  .map((item) => item.trim())
-  .filter(Boolean)
 
 function redact(value, key) {
   if (/SECRET|KEY|TOKEN|PASSWORD/i.test(key)) return '[redacted]'
@@ -71,10 +82,11 @@ for (const functionName of functionNames) {
   const detail = await app.functions.getFunctionDetail(functionName)
   const existing = {}
   for (const item of detail?.Environment?.Variables || []) existing[item.Key] = item.Value
-  const merged = { ...existing, ...targetEnv }
+  const envForFunction = workerFunctions.has(functionName) ? { ...targetEnv, ...workerEnv } : targetEnv
+  const merged = { ...existing, ...envForFunction }
   await app.functions.updateFunctionConfig({ name: functionName, envVariables: merged })
   console.log(`[rag-env] ${functionName} updated`)
-  console.table(Object.entries(targetEnv).map(([Key, Value]) => ({ Key, Value: redact(Value, Key) })))
+  console.table(Object.entries(envForFunction).map(([Key, Value]) => ({ Key, Value: redact(Value, Key) })))
 }
 
 console.log(`[rag-env] Done for env ${envId}`)

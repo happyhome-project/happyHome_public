@@ -31,6 +31,7 @@ export interface RagCitation {
   fieldType: string
   preview: string
   score: number
+  visibility?: 'public' | 'member'
   sourceUpdatedAt?: string
 }
 
@@ -55,6 +56,7 @@ export interface RagSearchParams {
   sectionId?: string
   skip?: number
   limit?: number
+  includeMemberOnly?: boolean
 }
 
 export interface RagProviderSearchInput extends RagSearchParams {
@@ -267,6 +269,29 @@ function resultItemsFromCitations(citations: RagCitation[]): PostSearchResultIte
   return Array.from(byPost.values()).sort((left, right) => right.score - left.score)
 }
 
+function isEvidenceVisible(visibility: unknown, includeMemberOnly: boolean) {
+  return includeMemberOnly || visibility === 'public'
+}
+
+function filterCitationsForVisibility(citations: RagCitation[], includeMemberOnly: boolean) {
+  return citations.filter((citation) => isEvidenceVisible(citation.visibility, includeMemberOnly))
+}
+
+function filterProviderResultForVisibility(
+  providerResult: Omit<RagSearchResult, 'query' | 'communityId' | 'sectionId' | 'skip' | 'limit'>,
+  includeMemberOnly: boolean,
+) {
+  const citations = filterCitationsForVisibility(providerResult.citations, includeMemberOnly)
+  if (citations.length === providerResult.citations.length) return providerResult
+  return {
+    ...providerResult,
+    total: citations.length,
+    citations,
+    items: resultItemsFromCitations(citations),
+    answer: citations.length ? deterministicAnswer(citations) : '',
+  }
+}
+
 export async function searchPostsWithRag(
   params: RagSearchParams,
   options: {
@@ -279,16 +304,24 @@ export async function searchPostsWithRag(
   const query = String(params.query || '')
   const skip = Math.max(0, Math.floor(Number(params.skip || 0)))
   const limit = Math.max(1, Math.floor(Number(params.limit || 20)))
+  const includeMemberOnly = params.includeMemberOnly !== false
   const fallbackSearch = options.fallbackSearch || searchPostIndex
   const provider = options.provider === undefined ? createTencentRagProviderFromEnv() : options.provider
 
   if (!provider || !provider.isConfigured()) {
-    return withFallbackFields(await fallbackSearch({ communityId, query, sectionId, skip, limit }), 'rag_provider_not_configured')
+    if (!includeMemberOnly) {
+      return {
+        ...buildNoEvidenceRagResult({ query, communityId, sectionId, skip, limit }),
+        fallbackReason: 'rag_provider_not_configured',
+      }
+    }
+    return withFallbackFields(await fallbackSearch({ communityId, query, sectionId, skip, limit, includeMemberOnly }), 'rag_provider_not_configured')
   }
 
   try {
     const ragQuery = buildRagQuery(query)
-    const providerResult = await provider.search({ communityId, query, sectionId, skip, limit, ragQuery })
+    const rawProviderResult = await provider.search({ communityId, query, sectionId, skip, limit, includeMemberOnly, ragQuery })
+    const providerResult = filterProviderResultForVisibility(rawProviderResult, includeMemberOnly)
     if (!providerResult.citations.length) {
       return buildNoEvidenceRagResult({ query, communityId, sectionId, skip, limit })
     }
@@ -306,8 +339,14 @@ export async function searchPostsWithRag(
       provider: provider.name,
     }
   } catch (error: any) {
+    if (!includeMemberOnly) {
+      return {
+        ...buildNoEvidenceRagResult({ query, communityId, sectionId, skip, limit }),
+        fallbackReason: error?.message || 'rag_provider_failed',
+      }
+    }
     return withFallbackFields(
-      await fallbackSearch({ communityId, query, sectionId, skip, limit }),
+      await fallbackSearch({ communityId, query, sectionId, skip, limit, includeMemberOnly }),
       error?.message || 'rag_provider_failed'
     )
   }
@@ -413,6 +452,7 @@ function toCitation(hit: any): RagCitation {
     fieldType: String(source.fieldType || ''),
     preview: String(source.preview || source.text || '').slice(0, 180),
     score: Number(hit?._score || source.score || 0),
+    visibility: source.visibility === 'public' ? 'public' : source.visibility === 'member' ? 'member' : undefined,
     sourceUpdatedAt: String(source.sourceUpdatedAt || ''),
   }
 }
@@ -588,7 +628,12 @@ async function loadLkeapChunks(input: RagProviderSearchInput, pageSize: number, 
     }) as Array<RagChunkDocument & { _id?: string; embedding?: number[] }>
     if (!page.length) break
     for (const chunk of page) {
-      if ((!input.sectionId || chunk.sectionId === input.sectionId) && Array.isArray(chunk.embedding) && chunk.embedding.length) {
+      if (
+        (!input.sectionId || chunk.sectionId === input.sectionId) &&
+        isEvidenceVisible(chunk.visibility, input.includeMemberOnly !== false) &&
+        Array.isArray(chunk.embedding) &&
+        chunk.embedding.length
+      ) {
         chunks.push(chunk)
       }
       if (chunks.length >= maxChunks) break
@@ -731,6 +776,7 @@ export function createTencentRagProvider(config: TencentRagConfig): TencentRagPr
       if (!isConfigured(config)) throw new Error('rag_provider_not_configured')
       const filters: any[] = [{ term: { communityId: input.communityId } }]
       if (input.sectionId) filters.push({ term: { sectionId: input.sectionId } })
+      if (input.includeMemberOnly === false) filters.push({ term: { visibility: 'public' } })
       const size = Math.max(1, Math.min(50, Number(input.limit || 20)))
       const from = Math.max(0, Math.floor(Number(input.skip || 0)))
       const queryVector = await embedText(input.ragQuery.expandedText)
@@ -761,7 +807,10 @@ export function createTencentRagProvider(config: TencentRagConfig): TencentRagPr
       const response = await requestJson<any>(config, 'POST', `${config.indexName}/_search`, {
         ...searchBody,
       })
-      let citations = (response?.hits?.hits || []).map(toCitation).filter((citation: RagCitation) => citation.postId && citation.chunkId)
+      let citations = (response?.hits?.hits || [])
+        .map(toCitation)
+        .filter((citation: RagCitation) => citation.postId && citation.chunkId)
+        .filter((citation: RagCitation) => isEvidenceVisible(citation.visibility, input.includeMemberOnly !== false))
 
       if (config.rerankInferenceId && citations.length > 1) {
         const reranked = await requestJson<any>(config, 'POST', `_inference/rerank/${config.rerankInferenceId}`, {

@@ -659,6 +659,7 @@ export async function handleSearch(params: {
   if (!communityId) throw new Error('communityId 不能为空')
   const viewerId = params.asGuest ? '' : (openid || '')
   await ensureCommunityReadable(communityId, viewerId, COMMUNITY_READ_ERROR)
+  const canViewMemberOnly = await isActiveCommunityMember(communityId, viewerId)
   return searchPostsWithRag({
     communityId,
     query: String(params.q ?? params.query ?? ''),
@@ -667,6 +668,7 @@ export async function handleSearch(params: {
     limit: Number.isFinite(Number(params.limit)) && Number(params.limit) > 0
       ? Math.floor(Number(params.limit))
       : DEFAULT_SEARCH_LIMIT,
+    includeMemberOnly: canViewMemberOnly,
   })
 }
 

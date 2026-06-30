@@ -357,6 +357,60 @@ test('searchPostsWithRag returns no_answer instead of inventing an answer withou
   expect(result.items).toEqual([])
 })
 
+test('searchPostsWithRag drops member-only citations and generated answer for public readers', async () => {
+  const provider = {
+    name: 'fake-rag',
+    isConfigured: jest.fn(() => true),
+    search: jest.fn().mockResolvedValue({
+      total: 2,
+      answer: '秘密联系方式：13800000000',
+      citations: [
+        {
+          postId: 'post-public',
+          chunkId: 'chunk-public',
+          communityId: 'community-1',
+          title: '公开家风笔记',
+          sectionId: 'section-1',
+          sectionName: '论语',
+          fieldLabel: '正文',
+          fieldType: 'rich_note',
+          preview: '一粥一饭，当思来处不易。',
+          score: 0.9,
+          visibility: 'public',
+        },
+        {
+          postId: 'post-member',
+          chunkId: 'chunk-member',
+          communityId: 'community-1',
+          title: '成员联系资料',
+          sectionId: 'section-1',
+          sectionName: '论语',
+          fieldLabel: '联系方式',
+          fieldType: 'rich_note',
+          preview: '秘密联系方式：13800000000',
+          score: 0.95,
+          visibility: 'member',
+        },
+      ],
+      items: [],
+      mode: 'rag',
+    }),
+  }
+
+  const result = await searchPostsWithRag({
+    communityId: 'community-1',
+    query: '联系方式',
+    limit: 10,
+    includeMemberOnly: false,
+  }, { provider })
+
+  expect(result.mode).toBe('rag')
+  expect(result.answer).not.toContain('13800000000')
+  expect(result.citations).toHaveLength(1)
+  expect(result.citations[0]).toMatchObject({ postId: 'post-public', visibility: 'public' })
+  expect(result.items.map((item) => item.postId)).toEqual(['post-public'])
+})
+
 test('hasRagEvidenceSignal rejects weak unrelated candidates and accepts real evidence signals', () => {
   expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 0, rerankScore: -3 })).toBe(false)
   expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 1, rerankScore: -3 })).toBe(true)
