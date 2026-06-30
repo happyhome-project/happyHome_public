@@ -1,0 +1,436 @@
+import { access, appendFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+
+export const RELEASE_RUNS_DIR = '.codex-local/release-runs'
+
+export const RELEASE_STAGE_ORDER = [
+  'miniprogram-build-gate',
+  'cloud-deploy',
+  'cloud-smoke',
+  'admin-web-deploy',
+  'miniprogram-upload',
+  'verify-upload',
+]
+
+const REQUIRED_RELEASE_UI_MARKERS = [
+  'HH_RELEASE_HOME_DETAIL_NONEMPTY',
+  'HH_RELEASE_LOGIN_VERSION',
+]
+
+function pad(value) {
+  return String(value).padStart(2, '0')
+}
+
+export function makeReleaseRunId(date = new Date(), random = Math.random) {
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+    'T',
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds()),
+    '-',
+    random().toString(36).slice(2, 8),
+  ].join('')
+}
+
+function isoNow(now) {
+  return (now ? now() : new Date()).toISOString()
+}
+
+function safeJson(value) {
+  return `${JSON.stringify(value, null, 2)}\n`
+}
+
+function oneLineJson(value) {
+  return `${JSON.stringify(value)}\n`
+}
+
+function pathFromRoot(root, value) {
+  if (!value) return ''
+  return isAbsolute(value) ? value : resolve(root, value)
+}
+
+function relativeToRoot(root, value) {
+  if (!value) return ''
+  return isAbsolute(value) ? relative(root, value).replace(/\\/g, '/') : String(value).replace(/\\/g, '/')
+}
+
+async function pathExists(path) {
+  try {
+    await access(path, constants.F_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function readJson(path) {
+  return JSON.parse(await readFile(path, 'utf8'))
+}
+
+async function writeJson(path, value) {
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, safeJson(value), 'utf8')
+}
+
+function durationMs(startedAt, finishedAt) {
+  const start = Date.parse(startedAt)
+  const finish = Date.parse(finishedAt)
+  if (!Number.isFinite(start) || !Number.isFinite(finish)) return null
+  return Math.max(0, finish - start)
+}
+
+function contextMismatch(stageContext = {}, expected = {}) {
+  for (const key of ['gitSha', 'version', 'desc']) {
+    if (expected[key] && stageContext[key] && expected[key] !== stageContext[key]) {
+      return `${key} mismatch: expected ${expected[key]}, got ${stageContext[key]}`
+    }
+  }
+  return ''
+}
+
+function textHasBuildInfo(text, version, desc) {
+  return text.includes(version) && text.includes(desc) && text.includes(`mp-${version}`)
+}
+
+async function inspectBuildInfoEvidence(stage, context) {
+  const root = context.root
+  const sourcePath = pathFromRoot(root, stage.evidence?.buildInfoPath || 'miniprogram/src/generated/build-info.ts')
+  const distPath = pathFromRoot(root, stage.evidence?.distBuildInfoPath || 'miniprogram/dist/build/mp-weixin/generated/build-info.js')
+  if (!(await pathExists(sourcePath))) return { reusable: false, reason: `build info missing: ${relativeToRoot(root, sourcePath)}` }
+  if (!(await pathExists(distPath))) return { reusable: false, reason: `dist build info missing: ${relativeToRoot(root, distPath)}` }
+
+  const source = await readFile(sourcePath, 'utf8')
+  const dist = await readFile(distPath, 'utf8')
+  if (!textHasBuildInfo(source, context.version, context.desc)) return { reusable: false, reason: 'source build info does not match version/desc' }
+  if (!textHasBuildInfo(dist, context.version, context.desc)) return { reusable: false, reason: 'dist build info does not match version/desc' }
+
+  const uiEvidencePath = stage.evidence?.releaseUiEvidencePath
+  if (!uiEvidencePath) return { reusable: false, reason: 'release UI evidence path missing' }
+  const absoluteUiEvidencePath = pathFromRoot(root, uiEvidencePath)
+  if (!(await pathExists(absoluteUiEvidencePath))) return { reusable: false, reason: `release UI evidence missing: ${relativeToRoot(root, absoluteUiEvidencePath)}` }
+  const evidence = await readJson(absoluteUiEvidencePath)
+  const markers = new Set(evidence.markers || [])
+  const missingMarker = REQUIRED_RELEASE_UI_MARKERS.find((marker) => !markers.has(marker))
+  if (missingMarker) return { reusable: false, reason: `release UI evidence missing marker ${missingMarker}` }
+  const expectedVersion = evidence.profileLoginClean?.expectedVersion || evidence.expectedVersion
+  if (expectedVersion && expectedVersion !== context.version) {
+    return { reusable: false, reason: `release UI evidence version mismatch: expected ${context.version}, got ${expectedVersion}` }
+  }
+  return { reusable: true, reason: 'build and release UI evidence match' }
+}
+
+async function inspectCloudSmokeEvidence(stage, context) {
+  const root = context.root
+  const summaryPath = pathFromRoot(root, stage.evidence?.summaryPath)
+  if (!summaryPath) return { reusable: false, reason: 'cloud smoke summary path missing' }
+  if (!(await pathExists(summaryPath))) return { reusable: false, reason: `cloud smoke summary missing: ${relativeToRoot(root, summaryPath)}` }
+
+  const summary = await readJson(summaryPath)
+  if (summary.status !== 'passed') return { reusable: false, reason: `cloud smoke status is ${summary.status || 'unknown'}` }
+  if (Array.isArray(summary.missingLabels) && summary.missingLabels.length > 0) {
+    return { reusable: false, reason: `cloud smoke missing labels: ${summary.missingLabels.join(', ')}` }
+  }
+  const labels = new Set(summary.labels || [])
+  const missingRequired = (summary.requiredLabels || []).filter((label) => !labels.has(label))
+  if (missingRequired.length > 0) {
+    return { reusable: false, reason: `cloud smoke required labels absent: ${missingRequired.join(', ')}` }
+  }
+  return { reusable: true, reason: 'cloud smoke summary passed with required labels', evidence: { summaryPath: relativeToRoot(root, summaryPath) } }
+}
+
+async function inspectUploadEvidence(stage, context) {
+  const root = context.root
+  if (stage.result?.version !== context.version) {
+    return { reusable: false, reason: `upload version mismatch: expected ${context.version}, got ${stage.result?.version || 'unknown'}` }
+  }
+  if (stage.result?.desc !== context.desc) {
+    return { reusable: false, reason: `upload desc mismatch: expected ${context.desc}, got ${stage.result?.desc || 'unknown'}` }
+  }
+
+  const uploadInfoPath = pathFromRoot(root, stage.evidence?.uploadInfoPath || 'mp-upload-info.json')
+  if (!(await pathExists(uploadInfoPath))) return { reusable: false, reason: `upload info missing: ${relativeToRoot(root, uploadInfoPath)}` }
+  const fileStat = await stat(uploadInfoPath)
+  if (!fileStat.isFile() || fileStat.size <= 0) return { reusable: false, reason: 'upload info is empty or not a file' }
+  return { reusable: true, reason: 'upload info exists and ledger version/desc match', evidence: { uploadInfoPath: relativeToRoot(root, uploadInfoPath) } }
+}
+
+export async function inspectReleaseStageReuse(runState, stageName, context) {
+  const stage = runState?.stages?.[stageName]
+  if (!stage) return { reusable: false, reason: `${stageName} has no ledger entry` }
+  if (stage.status !== 'passed' && !(stage.status === 'skipped' && stage.reused === true)) {
+    return { reusable: false, reason: `${stageName} status is ${stage.status || 'unknown'}` }
+  }
+
+  const mismatch = contextMismatch(stage.context || runState.context, context)
+  if (mismatch) return { reusable: false, reason: mismatch }
+
+  if (stageName === 'miniprogram-build-gate') return await inspectBuildInfoEvidence(stage, context)
+  if (stageName === 'cloud-deploy') {
+    if (stage.result?.path !== 'cloudbase-cli') return { reusable: false, reason: 'cloud deploy did not use CloudBase CLI/COS' }
+    if (!Array.isArray(stage.result?.fns) || stage.result.fns.length === 0) return { reusable: false, reason: 'cloud deploy function list missing' }
+    return { reusable: true, reason: 'cloud deploy stage passed for this commit/version', result: stage.result }
+  }
+  if (stageName === 'cloud-smoke') return await inspectCloudSmokeEvidence(stage, context)
+  if (stageName === 'miniprogram-upload') return await inspectUploadEvidence(stage, context)
+
+  return { reusable: true, reason: `${stageName} passed for this commit/version`, result: stage.result, evidence: stage.evidence }
+}
+
+export class ReleaseRunLedger {
+  constructor(options) {
+    this.root = resolve(options.root || process.cwd())
+    this.runId = options.runId
+    this.now = options.now || (() => new Date())
+    this.runDir = resolve(this.root, RELEASE_RUNS_DIR, this.runId)
+    this.runPath = join(this.runDir, 'run.json')
+    this.eventsPath = join(this.runDir, 'events.jsonl')
+    this.latestPath = resolve(this.root, RELEASE_RUNS_DIR, 'latest.json')
+    this.state = options.state
+  }
+
+  async save() {
+    this.state.updatedAt = isoNow(this.now)
+    await writeJson(this.runPath, this.state)
+    await writeJson(this.latestPath, {
+      runId: this.runId,
+      runDir: relativeToRoot(this.root, this.runDir),
+      runPath: relativeToRoot(this.root, this.runPath),
+      updatedAt: this.state.updatedAt,
+      status: this.state.status,
+      gitSha: this.state.context?.gitSha,
+      version: this.state.context?.version,
+      desc: this.state.context?.desc,
+    })
+  }
+
+  async appendEvent(event, payload = {}) {
+    await mkdir(this.runDir, { recursive: true })
+    await appendFile(this.eventsPath, oneLineJson({
+      at: isoNow(this.now),
+      event,
+      runId: this.runId,
+      ...payload,
+    }), 'utf8')
+  }
+
+  async startStage(name, details = {}) {
+    const at = isoNow(this.now)
+    this.state.status = 'running'
+    this.state.stages[name] = {
+      ...(this.state.stages[name] || {}),
+      name,
+      status: 'running',
+      startedAt: at,
+      finishedAt: null,
+      durationMs: null,
+      context: { ...this.state.context },
+      command: details.command || this.state.stages[name]?.command || '',
+      evidence: details.evidence || this.state.stages[name]?.evidence || {},
+      result: details.result || this.state.stages[name]?.result || null,
+      reason: details.reason || '',
+    }
+    await this.appendEvent('stage_started', { stage: name, command: this.state.stages[name].command })
+    await this.save()
+  }
+
+  async passStage(name, details = {}) {
+    const at = isoNow(this.now)
+    const existing = this.state.stages[name] || {}
+    const startedAt = existing.startedAt || at
+    this.state.stages[name] = {
+      ...existing,
+      name,
+      status: 'passed',
+      startedAt,
+      finishedAt: at,
+      durationMs: durationMs(startedAt, at),
+      context: { ...(existing.context || this.state.context) },
+      command: details.command || existing.command || '',
+      evidence: { ...(existing.evidence || {}), ...(details.evidence || {}) },
+      result: details.result ?? existing.result ?? null,
+      reason: '',
+    }
+    await this.appendEvent('stage_passed', { stage: name, evidence: this.state.stages[name].evidence, result: this.state.stages[name].result })
+    await this.save()
+  }
+
+  async failStage(name, error, details = {}) {
+    const at = isoNow(this.now)
+    const existing = this.state.stages[name] || {}
+    const startedAt = existing.startedAt || at
+    this.state.status = 'failed'
+    this.state.stages[name] = {
+      ...existing,
+      name,
+      status: 'failed',
+      startedAt,
+      finishedAt: at,
+      durationMs: durationMs(startedAt, at),
+      context: { ...(existing.context || this.state.context) },
+      command: details.command || existing.command || '',
+      evidence: { ...(existing.evidence || {}), ...(details.evidence || {}) },
+      result: details.result ?? existing.result ?? null,
+      error: String(error?.stack || error?.message || error),
+      reason: details.reason || String(error?.message || error),
+    }
+    await this.appendEvent('stage_failed', { stage: name, reason: this.state.stages[name].reason })
+    await this.save()
+  }
+
+  async skipStage(name, details = {}) {
+    const at = isoNow(this.now)
+    const existing = this.state.stages[name] || {}
+    this.state.stages[name] = {
+      ...existing,
+      name,
+      status: 'skipped',
+      skippedAt: at,
+      context: { ...(existing.context || this.state.context) },
+      command: details.command || existing.command || '',
+      evidence: { ...(existing.evidence || {}), ...(details.evidence || {}) },
+      result: details.result ?? existing.result ?? null,
+      reason: details.reason || 'reused previous passed stage',
+      reused: details.reused ?? true,
+    }
+    await this.appendEvent('stage_skipped', { stage: name, reason: this.state.stages[name].reason })
+    await this.save()
+  }
+
+  async complete(status = 'passed') {
+    this.state.status = status
+    this.state.finishedAt = isoNow(this.now)
+    await this.appendEvent('run_completed', { status })
+    await this.save()
+  }
+}
+
+export async function createReleaseRunLedger(options) {
+  const root = resolve(options.root || process.cwd())
+  const runId = options.runId
+  if (!runId) throw new Error('release runId is required')
+  const runPath = resolve(root, RELEASE_RUNS_DIR, runId, 'run.json')
+  let state
+  if (await pathExists(runPath)) {
+    state = await readJson(runPath)
+    state.context = {
+      ...(state.context || {}),
+      gitSha: options.gitSha || state.context?.gitSha || '',
+      version: options.version || state.context?.version || '',
+      desc: options.desc || state.context?.desc || '',
+    }
+  } else {
+    const createdAt = isoNow(options.now)
+    state = {
+      schemaVersion: 1,
+      runId,
+      command: options.command || '',
+      status: 'running',
+      createdAt,
+      updatedAt: createdAt,
+      finishedAt: null,
+      context: {
+        gitSha: options.gitSha || '',
+        version: options.version || '',
+        desc: options.desc || '',
+      },
+      stages: {},
+    }
+  }
+
+  const ledger = new ReleaseRunLedger({ ...options, root, runId, state })
+  await ledger.appendEvent('run_opened', { command: state.command, status: state.status })
+  await ledger.save()
+  return ledger
+}
+
+export async function loadReleaseRun(root, runId) {
+  const absoluteRoot = resolve(root || process.cwd())
+  return await readJson(resolve(absoluteRoot, RELEASE_RUNS_DIR, runId, 'run.json'))
+}
+
+export async function loadLatestReleaseRun(root) {
+  const absoluteRoot = resolve(root || process.cwd())
+  const latest = await readJson(resolve(absoluteRoot, RELEASE_RUNS_DIR, 'latest.json'))
+  return await loadReleaseRun(absoluteRoot, latest.runId)
+}
+
+export async function findLatestReleaseUiEvidence(root) {
+  const evidenceRoot = resolve(root || process.cwd(), '.codex-local', 'release-evidence')
+  if (!(await pathExists(evidenceRoot))) return ''
+  const entries = await readdir(evidenceRoot, { withFileTypes: true })
+  const candidates = []
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const evidencePath = join(evidenceRoot, entry.name, 'release-ui-evidence.json')
+    if (await pathExists(evidencePath)) {
+      const evidenceStat = await stat(evidencePath)
+      candidates.push({ path: evidencePath, mtimeMs: evidenceStat.mtimeMs })
+    }
+  }
+  candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
+  return candidates[0]?.path || ''
+}
+
+export async function runLedgerStage(ledger, name, options = {}, action) {
+  if (options.resume && options.reuseCheck) {
+    const reuse = await options.reuseCheck(ledger.state, name)
+    if (reuse.reusable) {
+      await ledger.skipStage(name, {
+        command: options.command,
+        reason: reuse.reason,
+        evidence: reuse.evidence,
+        result: reuse.result,
+        reused: true,
+      })
+      return reuse.result ?? ledger.state.stages[name]?.result ?? null
+    }
+    await ledger.appendEvent('stage_reuse_rejected', {
+      stage: name,
+      reason: reuse.reason || 'reuse check did not approve this stage',
+    })
+  }
+
+  await ledger.startStage(name, { command: options.command, evidence: options.evidence })
+  try {
+    const value = await action()
+    const stageDetails = value && typeof value === 'object' && (
+      Object.hasOwn(value, 'result') ||
+      Object.hasOwn(value, 'evidence') ||
+      Object.hasOwn(value, 'reason')
+    )
+      ? value
+      : { result: value }
+    await ledger.passStage(name, { command: options.command, ...stageDetails })
+    return stageDetails.result ?? value
+  } catch (error) {
+    await ledger.failStage(name, error, { command: options.command })
+    throw error
+  }
+}
+
+export function formatReleaseRunStatus(runState) {
+  if (!runState) return 'No HappyHome release run found.'
+  const lines = [
+    `HappyHome release run ${runState.runId}`,
+    `Status: ${runState.status}`,
+    `Git: ${runState.context?.gitSha || 'unknown'}`,
+    `Version: ${runState.context?.version || 'unknown'}`,
+    `Desc: ${runState.context?.desc || 'unknown'}`,
+    'Stages:',
+  ]
+
+  const seen = new Set()
+  for (const stageName of RELEASE_STAGE_ORDER) {
+    const stage = runState.stages?.[stageName]
+    seen.add(stageName)
+    lines.push(`- ${stageName}: ${stage?.status || 'pending'}${stage?.reason ? ` (${stage.reason})` : ''}`)
+  }
+  for (const [stageName, stage] of Object.entries(runState.stages || {})) {
+    if (!seen.has(stageName)) lines.push(`- ${stageName}: ${stage.status}${stage.reason ? ` (${stage.reason})` : ''}`)
+  }
+  return lines.join('\n')
+}
