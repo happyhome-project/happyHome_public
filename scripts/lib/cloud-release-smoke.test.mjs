@@ -98,7 +98,7 @@ test('parseArgs supports env, only, log controls, no-fixture, and evidence-dir',
     '--no-fixture',
     '--evidence-dir', 'evidence-x',
     '--run-id', 'run-x',
-  ], {})
+  ], { POST_RAG_WORKER_TOKEN: 'unit-worker-token' })
 
   assert.equal(args.envId, 'env-x')
   assert.deepEqual(args.only, ['user', 'post'])
@@ -106,7 +106,7 @@ test('parseArgs supports env, only, log controls, no-fixture, and evidence-dir',
   assert.equal(args.logWaitMs, 0)
   assert.equal(args.commandTimeoutMs, 1234)
   assert.equal(args.noFixture, true)
-  assert.equal(args.workerToken, '')
+  assert.equal(args.workerToken, 'unit-worker-token')
   assert.equal(args.evidenceDir, 'evidence-x')
   assert.equal(args.runId, 'run-x')
 })
