@@ -22,6 +22,7 @@ import {
   removePostSearchIndex,
   removePostSearchIndexesForSection,
 } from '../../lib/post-search'
+import { backfillPostRagJobsForSectionBatch, enqueuePostRagJob } from '../../lib/post-rag'
 import {
   assertOwnCommunityOrSuper,
   generateSalt,
@@ -58,6 +59,18 @@ cloud.init({ env: process.env.TCB_ENV || cloud.DYNAMIC_CURRENT_ENV })
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'happyhome-admin-2024'
 const ADMIN_LEGACY_TOKEN_FALLBACK = process.env.ADMIN_LEGACY_TOKEN_FALLBACK === '1'
+
+async function enqueuePostRagJobsForSection(sectionId: string, reason: string, preloadedPosts?: any[]) {
+  const posts = preloadedPosts || (await db.query('posts', { sectionId, status: 'active' }) as any[])
+  const safePosts = Array.isArray(posts) ? posts : []
+  await Promise.all(safePosts.map((post: any) => enqueuePostRagJob({
+    postId: String(post._id || ''),
+    communityId: String(post.communityId || ''),
+    sectionId: String(post.sectionId || sectionId),
+    action: 'upsert',
+    reason,
+  })))
+}
 // Bootstrap 登录：当 admin_accounts 为空时，命中这两个环境变量的用户名/密码可一键
 // 创建首个 superAdmin。和老的 VITE_ADMIN_USERNAME/PASSWORD 共用一组凭据即可。
 const BOOTSTRAP_ADMIN_USERNAME = process.env.BOOTSTRAP_ADMIN_USERNAME || 'admin'
@@ -153,6 +166,7 @@ const ENTITY_TO_COMMUNITY_ACTIONS: Record<string, { collection: string; idParam:
   'section.delete': { collection: 'sections', idParam: 'sectionId' },
   'post.rebuildSearchIndexSectionAdmin': { collection: 'sections', idParam: 'sectionId' },
   'post.rebuildSearchIndexSectionBatchAdmin': { collection: 'sections', idParam: 'sectionId' },
+  'post.rebuildRagIndexSectionBatchAdmin': { collection: 'sections', idParam: 'sectionId' },
   'post.getAdmin': { collection: 'posts', idParam: 'postId' },
   'post.deleteAdmin': { collection: 'posts', idParam: 'postId' },
   'post.updateAdmin': { collection: 'posts', idParam: 'postId' },
@@ -1028,6 +1042,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (updates.type === 'evergreen') updates.status = 'active'
     if (Object.keys(updates).length === 0) throw new Error('没有可更新字段')
     await db.updateById('sections', sectionId, updates)
+    await enqueuePostRagJobsForSection(sectionId, 'section.updateMeta')
     await backfillPostSearchIndexesForSection(sectionId)
     return { success: true }
   }
@@ -1068,10 +1083,19 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       const current = currentById.get(String(widget.widgetId || ''))
       return current && current.type !== widget.type
     })
+    const changedIndexMetadataWidgets = widgets.filter((widget: any) => {
+      const current = currentById.get(String(widget.widgetId || ''))
+      return current && (
+        current.label !== widget.label ||
+        current.fieldKey !== widget.fieldKey ||
+        current.order !== widget.order
+      )
+    })
     const hasStructuralChanges =
       removedWidgets.length > 0 ||
       changedTypeWidgets.length > 0
-    const activePosts = hasStructuralChanges ? await db.query('posts', { sectionId, status: 'active' }) : []
+    const shouldReindexExistingPosts = hasStructuralChanges || changedIndexMetadataWidgets.length > 0
+    const activePosts = shouldReindexExistingPosts ? await db.query('posts', { sectionId, status: 'active' }) : []
     const hasActivePosts = activePosts.length > 0
     const impact = {
       hasActivePosts,
@@ -1092,6 +1116,9 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     }
 
     await db.updateById('sections', sectionId, { widgets })
+    if (shouldReindexExistingPosts) {
+      await enqueuePostRagJobsForSection(sectionId, 'section.updateWidgets', activePosts)
+    }
     await backfillPostSearchIndexesForSection(sectionId)
     return { widgets, ...impact, requireConfirmation: false }
   }
@@ -1287,6 +1314,13 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const post = await db.getById('posts', postId) as any
     if (!post) throw new Error('post not found')
     if (post.status === 'deleted') {
+      await enqueuePostRagJob({
+        postId,
+        communityId: post.communityId,
+        sectionId: post.sectionId,
+        action: 'delete',
+        reason: 'post.deleteAdmin.alreadyDeleted',
+      })
       await removePostSearchIndex(postId)
       return { success: true, alreadyDeleted: true }
     }
@@ -1298,6 +1332,13 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       isFeatured: false,
       featuredAt: '',
       featuredByAccountId: '',
+    })
+    await enqueuePostRagJob({
+      postId,
+      communityId: post.communityId,
+      sectionId: post.sectionId,
+      action: 'delete',
+      reason: 'post.deleteAdmin',
     })
     await removePostSearchIndex(postId)
     return { success: true }
@@ -1316,6 +1357,14 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const sectionId = String(params.sectionId || '').trim()
     if (!sectionId) throw new Error('sectionId 不能为空')
     return backfillPostSearchIndexesForSectionBatch(sectionId, {
+      skip: params.skip,
+      limit: params.limit,
+    })
+  }
+  if (action === 'post.rebuildRagIndexSectionBatchAdmin') {
+    const sectionId = String(params.sectionId || '').trim()
+    if (!sectionId) throw new Error('sectionId 不能为空')
+    return backfillPostRagJobsForSectionBatch(sectionId, {
       skip: params.skip,
       limit: params.limit,
     })
@@ -1735,6 +1784,13 @@ async function hardDeleteCommunity(communityId: string, community: Community) {
   }
 
   for (const post of posts) {
+    await enqueuePostRagJob({
+      postId: String((post as any)._id || ''),
+      communityId,
+      sectionId: String((post as any).sectionId || ''),
+      action: 'delete',
+      reason: 'community.hardDelete',
+    })
     await removePostSearchIndex((post as any)._id)
     await db.removeById('posts', (post as any)._id)
   }

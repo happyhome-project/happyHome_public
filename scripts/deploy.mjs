@@ -75,7 +75,7 @@ const CLOUD_ENV = process.env.TCB_ENV || DEFAULT_CLOUD_ENV
 const ADMIN_WEB_DEFAULT_API_URL = 'https://cloudbase-3gh862acb1505ff3-1307183045.ap-shanghai.app.tcloudbase.com'
 const ADMIN_WEB_ALIYUN_HOST = process.env.ADMIN_WEB_SSH_HOST || 'aliyun'
 const ADMIN_WEB_ALIYUN_ROOT = process.env.ADMIN_WEB_REMOTE_ROOT || '/var/www/happyhome-admin'
-const CLOUD_FUNCTIONS = ['user', 'community', 'member', 'section', 'post', 'admin', 'http-gateway', 'home-prefetch']
+const CLOUD_FUNCTIONS = ['user', 'community', 'member', 'section', 'post', 'post-rag-worker', 'post-video-rag-worker', 'admin', 'http-gateway', 'home-prefetch']
 
 // Common DevTools install locations on Windows
 const DEVTOOLS_CLI_CANDIDATES = [
@@ -179,12 +179,12 @@ function runShellCapture(commandLine, options = {}) {
     proc.stdout?.on('data', (chunk) => {
       const text = String(chunk)
       stdout += text
-      process.stdout.write(text)
+      if (!options.silentOutput) process.stdout.write(text)
     })
     proc.stderr?.on('data', (chunk) => {
       const text = String(chunk)
       stderr += text
-      process.stderr.write(text)
+      if (!options.silentOutput) process.stderr.write(text)
     })
     proc.on('exit', (code) => {
       const output = `${stdout}${stderr}`
@@ -192,6 +192,25 @@ function runShellCapture(commandLine, options = {}) {
     })
     proc.on('error', (err) => res({ ok: false, reason: String(err?.message || err), output: `${stdout}${stderr}` }))
   })
+}
+
+function parseCliJson(output) {
+  const text = String(output || '').trim()
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start < 0 || end < start) return null
+  try {
+    return JSON.parse(text.slice(start, end + 1))
+  } catch {
+    return null
+  }
+}
+
+function logCloudFunctionDetailSummary(functionName, output) {
+  const parsed = parseCliJson(output)
+  const data = parsed?.data || {}
+  const envKeys = (data.Environment?.Variables || []).map((item) => item.Key).filter(Boolean)
+  console.log(`[tcb fn detail] ${functionName}: status=${data.Status || 'unknown'} available=${data.AvailableStatus || 'unknown'} runtime=${data.Runtime || 'unknown'} envKeys=${envKeys.length ? envKeys.join(',') : 'none'}`)
 }
 
 function sleep(ms) {
@@ -313,9 +332,10 @@ async function deployCloudViaCloudBaseCli(fns) {
 
     const detail = await runCloudBaseCliCaptureWithRetry(
       tcb('fn', 'detail', fn, '--env-id', envId, '--json'),
-      { displayCommandLine: `tcb fn detail ${fn} --env-id ${envId} --json` }
+      { displayCommandLine: `tcb fn detail ${fn} --env-id ${envId} --json`, silentOutput: true }
     )
     if (!detail.ok) return { ok: false, reason: `CloudBase CLI detail ${fn} failed after deploy: ${detail.reason}` }
+    logCloudFunctionDetailSummary(fn, detail.output)
   }
 
   return { ok: true, reason: 'ok' }

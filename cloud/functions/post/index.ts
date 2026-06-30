@@ -14,7 +14,8 @@ import {
   isActivityInviteInProgress,
   isActivityInviteSection,
 } from '../../shared/activity-invite'
-import { removePostSearchIndex, searchPostIndex } from '../../lib/post-search'
+import { removePostSearchIndex } from '../../lib/post-search'
+import { enqueuePostRagJob, searchPostsWithRag } from '../../lib/post-rag'
 import type {
   AttendancePreviewUser,
   AttendanceSummary,
@@ -658,7 +659,7 @@ export async function handleSearch(params: {
   if (!communityId) throw new Error('communityId 不能为空')
   const viewerId = params.asGuest ? '' : (openid || '')
   await ensureCommunityReadable(communityId, viewerId, COMMUNITY_READ_ERROR)
-  return searchPostIndex({
+  return searchPostsWithRag({
     communityId,
     query: String(params.q ?? params.query ?? ''),
     sectionId: String(params.sectionId || '').trim(),
@@ -672,7 +673,12 @@ export async function handleSearch(params: {
 export async function handleDelete(params: { postId: string }, openid: string) {
   if (!openid) throw new Error('Missing OPENID')
 
-  const post = await db.getById('posts', params.postId) as { authorId: string; status: string }
+  const post = await db.getById('posts', params.postId) as {
+    authorId: string
+    status: string
+    communityId?: string
+    sectionId?: string
+  }
   if (post.status === 'deleted') throw new Error('帖子已删除')
   if (post.authorId !== openid) throw new Error('无权删除')
 
@@ -684,6 +690,13 @@ export async function handleDelete(params: { postId: string }, openid: string) {
     isFeatured: false,
     featuredAt: '',
     featuredByAccountId: '',
+  })
+  await enqueuePostRagJob({
+    postId: params.postId,
+    communityId: post.communityId,
+    sectionId: post.sectionId,
+    action: 'delete',
+    reason: 'post.delete',
   })
   await removePostSearchIndex(params.postId)
   return { success: true }

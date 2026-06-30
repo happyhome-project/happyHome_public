@@ -34,11 +34,37 @@
       <text>输入关键词开始搜索</text>
     </view>
 
-    <view v-else-if="items.length === 0" class="state">
-      <text>没有找到相关帖子</text>
+    <view v-else-if="answer || citations.length || mode === 'fallback'" class="rag-section">
+      <view v-if="answer" class="answer-card" :class="{ muted: mode === 'no_answer' }">
+        <text class="answer-label">{{ mode === 'fallback' ? '普通搜索' : 'AI 回答' }}</text>
+        <text class="answer-text">{{ answer }}</text>
+      </view>
+      <view v-else-if="mode === 'fallback'" class="answer-card muted">
+        <text class="answer-label">普通搜索</text>
+        <text class="answer-text">智能检索暂不可用，当前显示基础搜索结果。</text>
+      </view>
+
+      <view v-if="citations.length" class="citation-list">
+        <view
+          v-for="citation in citations"
+          :key="citation.chunkId || `${citation.postId}-${citation.fieldLabel}`"
+          class="citation-card"
+          @tap="openPost(citation.postId)"
+        >
+          <view class="citation-top">
+            <text class="citation-title">{{ citation.title || '相关帖子' }}</text>
+            <text class="citation-field">{{ citation.fieldLabel }}</text>
+          </view>
+          <text class="citation-preview">{{ citation.preview }}</text>
+        </view>
+      </view>
     </view>
 
-    <view v-else class="result-list">
+    <view v-else-if="items.length === 0" class="state">
+      <text>{{ mode === 'no_answer' ? '没有找到足够相关的帖子' : '没有找到相关帖子' }}</text>
+    </view>
+
+    <view v-if="items.length" class="result-list">
       <view class="result-summary">
         <text>{{ total }} 条结果</text>
       </view>
@@ -104,6 +130,18 @@ interface SearchItem {
   updatedAt: string
 }
 
+interface SearchCitation {
+  postId: string
+  chunkId: string
+  title: string
+  sectionId?: string
+  sectionName?: string
+  fieldLabel: string
+  fieldType: string
+  preview: string
+  score: number
+}
+
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
 const communityId = ref('')
@@ -112,6 +150,9 @@ const searched = ref(false)
 const loading = ref(false)
 const loadError = ref('')
 const items = ref<SearchItem[]>([])
+const answer = ref('')
+const citations = ref<SearchCitation[]>([])
+const mode = ref<'rag' | 'fallback' | 'no_answer' | ''>('')
 const total = ref(0)
 const limit = 20
 
@@ -177,6 +218,9 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
     }
     searched.value = Boolean(normalizedQuery)
     items.value = []
+    answer.value = ''
+    citations.value = []
+    mode.value = ''
     total.value = 0
     loadError.value = ''
     return
@@ -200,6 +244,9 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
     })
     const nextItems = result.items || []
     items.value = options.reset ? nextItems : [...items.value, ...nextItems]
+    answer.value = String(result.answer || '')
+    citations.value = result.citations || []
+    mode.value = result.mode || ''
     total.value = Number(result.total || items.value.length)
     searched.value = true
     clientLog('info', 'search.load.success', {
@@ -357,6 +404,106 @@ function formatDate(value: unknown): string {
   display: flex;
   flex-direction: column;
   gap: 20rpx;
+}
+
+.rag-section {
+  margin-top: 24rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.answer-card,
+.citation-card {
+  border: 1rpx solid $hh-ink-line;
+  border-radius: 16rpx;
+  background: $hh-surface-1;
+  box-shadow: $hh-shadow-card;
+}
+
+.answer-card {
+  padding: 22rpx 24rpx;
+  border-left: 6rpx solid #375C79;
+}
+
+.answer-card.muted {
+  border-left-color: $hh-ink-line;
+}
+
+.answer-label {
+  display: block;
+  margin-bottom: 10rpx;
+  font-family: $hh-font-mono;
+  font-size: 20rpx;
+  letter-spacing: $hh-tracking-mono-sm;
+  color: $hh-ink-3;
+}
+
+.answer-text {
+  display: block;
+  color: $hh-ink-1;
+  font-size: 27rpx;
+  line-height: 1.55;
+}
+
+.citation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+}
+
+.citation-card {
+  padding: 18rpx 20rpx;
+}
+
+.citation-card:active {
+  transform: translateY(1rpx);
+  opacity: 0.92;
+}
+
+.citation-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-bottom: 8rpx;
+}
+
+.citation-title {
+  flex: 1;
+  min-width: 0;
+  color: $hh-ink-1;
+  font-size: 26rpx;
+  line-height: 1.35;
+  font-weight: $hh-font-weight-bold;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.citation-field {
+  flex-shrink: 0;
+  max-width: 180rpx;
+  padding: 4rpx 10rpx;
+  border-radius: 999rpx;
+  background: $hh-surface-2;
+  color: $hh-ink-3;
+  font-size: 20rpx;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.citation-preview {
+  display: -webkit-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  color: $hh-ink-2;
+  font-size: 24rpx;
+  line-height: 1.5;
 }
 
 .result-summary {

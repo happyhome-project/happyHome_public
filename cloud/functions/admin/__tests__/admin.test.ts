@@ -31,6 +31,10 @@ jest.mock('../../../lib/post-search', () => ({
   removePostSearchIndexesForSection: jest.fn(),
 }))
 
+jest.mock('../../../lib/post-rag', () => ({
+  enqueuePostRagJob: jest.fn(),
+}))
+
 jest.mock('uuid', () => ({
   v4: jest.fn().mockReturnValue('mocked-uuid'),
 }))
@@ -40,6 +44,7 @@ import * as db from '../../../lib/db'
 import * as storage from '../../../lib/storage'
 import { searchAmapPoi } from '../../../lib/amap'
 import * as postSearch from '../../../lib/post-search'
+import * as postRag from '../../../lib/post-rag'
 import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
 
 beforeEach(() => jest.resetAllMocks())
@@ -673,6 +678,7 @@ test('section.updateStatus: refreshes search index metadata after status changes
 
   expect(result.success).toBe(true)
   expect(db.updateById).toHaveBeenCalledWith('sections', 'section-live', { status: 'dormant' })
+  expect(postRag.enqueuePostRagJob).not.toHaveBeenCalled()
   expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledWith('section-live')
 })
 
@@ -1081,6 +1087,7 @@ test('post.deleteAdmin: clears pin and featured flags', async () => {
   ;(db.getById as jest.Mock).mockResolvedValueOnce({
     _id: 'post-flagged',
     communityId: 'community-1',
+    sectionId: 'section-1',
     status: 'active',
     isPinned: true,
     pinnedAt: '2026-04-20T10:00:00.000Z',
@@ -1107,6 +1114,13 @@ test('post.deleteAdmin: clears pin and featured flags', async () => {
     featuredByAccountId: '',
   })
   expect(result).toEqual({ success: true })
+  expect(postRag.enqueuePostRagJob).toHaveBeenCalledWith({
+    postId: 'post-flagged',
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    action: 'delete',
+    reason: 'post.deleteAdmin',
+  })
   expect(postSearch.removePostSearchIndex).toHaveBeenCalledWith('post-flagged')
 })
 
