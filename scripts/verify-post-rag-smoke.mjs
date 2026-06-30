@@ -218,6 +218,9 @@ async function main() {
     const thrift = await searchPost(options, ownerOpenid, communityId, '有没有讲节俭家风的帖子？')
     assertRagHit(thrift, postId, 'thrift-family query')
 
+    const thriftPhrase = await searchPost(options, ownerOpenid, communityId, '勤俭持家')
+    assertRagHit(thriftPhrase, postId, 'thrift-family phrase query')
+
     const quote = await searchPost(options, ownerOpenid, communityId, '一粥一饭当思来处不易')
     assertRagHit(quote, postId, 'quote query')
 

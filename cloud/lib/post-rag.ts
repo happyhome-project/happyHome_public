@@ -15,6 +15,8 @@ import {
 export const POST_RAG_JOBS = 'post_rag_jobs'
 export const POST_RAG_INDEX_STATE = 'post_rag_index_state'
 export const POST_RAG_CHUNKS = 'post_rag_chunks'
+export const POST_VIDEO_RAG_ASSETS = 'post_video_rag_assets'
+export const POST_VIDEO_RAG_JOBS = 'post_video_rag_jobs'
 
 export type RagSearchMode = 'rag' | 'fallback' | 'no_answer'
 
@@ -80,6 +82,74 @@ export interface RagChunkDocument {
   preview: string
   sourceUpdatedAt: string
   visibility: 'public' | 'member'
+  metadata?: Record<string, any>
+}
+
+export interface VideoRagAsset {
+  _id?: string
+  cacheKey: string
+  status: 'ready' | 'pending' | 'failed'
+  visualSummary?: string
+  ocrText?: string
+  asrTranscript?: string
+  frameSummaries?: Array<{
+    timeMs?: number
+    timeSeconds?: number
+    summary?: string
+    ocrText?: string
+  }>
+  updatedAt?: string
+}
+
+export interface VideoRagCostPolicy {
+  analysisEnabled: boolean
+  maxJobsPerPost: number
+  maxCostUnitsPerPost: number
+  maxFramesPerVideo: number
+  maxAsrSecondsPerVideo: number
+  minMetadataTextCharsForAnalysis: number
+}
+
+export interface VideoRagAnalysisJobDocument {
+  _id: string
+  postId: string
+  communityId: string
+  sectionId: string
+  cacheKey: string
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  attempts: number
+  reason: string
+  requestedAnalyses: string[]
+  frameStrategy: {
+    includeCover: boolean
+    maxFrames: number
+    minSceneGapSeconds: number
+  }
+  maxAsrSeconds: number
+  estimatedCostUnits: number
+  budgetDate: string
+  video: Record<string, any>
+  provider?: string
+  providerTaskId?: string
+  providerStatus?: string
+  errorMessage?: string
+  completedAt?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface VideoRagAnalyzerPendingResult {
+  pending: true
+  providerTaskId: string
+  providerStatus?: string
+}
+
+export type VideoRagAnalyzerResult = Partial<VideoRagAsset> | VideoRagAnalyzerPendingResult
+
+export interface VideoRagAnalyzer {
+  name: string
+  isConfigured(): boolean
+  analyze(job: VideoRagAnalysisJobDocument): Promise<VideoRagAnalyzerResult>
 }
 
 export interface TencentRagConfig {
@@ -745,6 +815,854 @@ function stableId(value: string) {
   return createHash('sha1').update(value).digest('hex')
 }
 
+function isPlainRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function asCleanText(value: unknown): string {
+  return String(value || '').replace(/\s+/g, ' ').trim()
+}
+
+function basenameFromMediaRef(value: unknown): string {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  const withoutQuery = raw.split(/[?#]/)[0]
+  const normalized = withoutQuery.replace(/\\/g, '/')
+  const name = normalized.split('/').filter(Boolean).pop() || ''
+  try {
+    return decodeURIComponent(name)
+  } catch {
+    return name
+  }
+}
+
+function videoIdentityParts(video: Record<string, any>): string[] {
+  return [
+    video.source,
+    video.fileID,
+    video.url,
+    video.feedId,
+    video.nonceId,
+    video.finderUserName,
+    video.appId,
+    video.path,
+    video.itemId,
+    video.title,
+  ].map(asCleanText).filter(Boolean)
+}
+
+export function buildVideoRagCacheKey(video: unknown): string {
+  const record = isPlainRecord(video) ? video : {}
+  const parts = videoIdentityParts(record)
+  return `vrk_${stableId(parts.length ? parts.join('\u0001') : JSON.stringify(record))}`
+}
+
+function sourceUpdatedAtForPost(post: Post, fallback: string): string {
+  return String((post as any)?.updatedAt || (post as any)?.createdAt || fallback)
+}
+
+function extractVideoEntriesForRag(post: Post, section: Section) {
+  const content = (post as any)?.content || {}
+  const widgets = (section.widgets || [])
+    .filter((widget: any) => widget?.type === 'video_group')
+    .slice()
+    .sort((left: any, right: any) => Number(left.order || 0) - Number(right.order || 0))
+  const entries: Array<{
+    widget: any
+    video: Record<string, any>
+    videoIndex: number
+    cacheKey: string
+  }> = []
+  for (const widget of widgets) {
+    const value = content[widget.widgetId]
+    if (!Array.isArray(value)) continue
+    value.forEach((item, index) => {
+      if (!isPlainRecord(item)) return
+      entries.push({
+        widget,
+        video: item,
+        videoIndex: index,
+        cacheKey: buildVideoRagCacheKey(item),
+      })
+    })
+  }
+  return entries
+}
+
+function videoMetadataLines(video: Record<string, any>): string[] {
+  const lines: string[] = []
+  const title = asCleanText(video.title)
+  const description = asCleanText(video.description)
+  const hint = asCleanText(video.hint)
+  const source = asCleanText(video.source)
+  const duration = Number(video.duration || 0)
+  const fileName = basenameFromMediaRef(video.fileID || video.url || video.path)
+  const coverName = basenameFromMediaRef(video.cover)
+  if (title) lines.push(`视频名称：${title}`)
+  if (description) lines.push(`描述：${description}`)
+  if (hint) lines.push(`提示：${hint}`)
+  if (source) lines.push(`来源：${source}`)
+  if (duration > 0) lines.push(`时长：${Math.round(duration)}秒`)
+  if (fileName) lines.push(`文件名：${fileName}`)
+  if (coverName) lines.push(`封面：${coverName}`)
+  return lines
+}
+
+function metadataTextLength(video: Record<string, any>): number {
+  return [
+    video.title,
+    video.description,
+    video.hint,
+  ]
+    .map(asCleanText)
+    .join('')
+    .replace(/\s+/g, '')
+    .length
+}
+
+function previewForRagText(value: string): string {
+  const text = asCleanText(value)
+  return Array.from(text).slice(0, 180).join('')
+}
+
+function formatFrameTime(frame: { timeMs?: number; timeSeconds?: number }): string {
+  const seconds = Number.isFinite(Number(frame.timeSeconds))
+    ? Number(frame.timeSeconds)
+    : Number(frame.timeMs || 0) / 1000
+  if (!Number.isFinite(seconds) || seconds <= 0) return ''
+  return Number.isInteger(seconds) ? `${seconds}s` : `${seconds.toFixed(1)}s`
+}
+
+function videoAnalysisLines(asset: VideoRagAsset): string[] {
+  const lines: string[] = []
+  if (asset.visualSummary) lines.push(`视觉摘要：${asCleanText(asset.visualSummary)}`)
+  if (asset.ocrText) lines.push(`OCR：${asCleanText(asset.ocrText)}`)
+  if (asset.asrTranscript) lines.push(`语音转写：${asCleanText(asset.asrTranscript)}`)
+  for (const frame of asset.frameSummaries || []) {
+    const parts: string[] = []
+    if (frame.summary) parts.push(asCleanText(frame.summary))
+    if (frame.ocrText) parts.push(`OCR：${asCleanText(frame.ocrText)}`)
+    if (!parts.length) continue
+    const time = formatFrameTime(frame)
+    lines.push(time ? `关键帧 ${time}：${parts.join(' ')}` : `关键帧：${parts.join(' ')}`)
+  }
+  return lines
+}
+
+export function buildVideoRagChunksForPost(
+  post: Post,
+  section: Section,
+  options: {
+    now?: string
+    assetsByCacheKey?: Map<string, VideoRagAsset>
+  } = {}
+): RagChunkDocument[] {
+  const now = options.now || new Date().toISOString()
+  const sourceUpdatedAt = sourceUpdatedAtForPost(post, now)
+  const sectionName = String(section?.name || '')
+  const title = asCleanText((post as any)?.content?.title) || 'Untitled'
+  const chunks: RagChunkDocument[] = []
+
+  for (const entry of extractVideoEntriesForRag(post, section)) {
+    const metadataLines = videoMetadataLines(entry.video)
+    if (metadataLines.length) {
+      const text = metadataLines.join('\n')
+      chunks.push({
+        chunkId: `prv_${stableId(`${post._id}\u0001${entry.cacheKey}\u0001metadata\u0001${text}`)}`,
+        postId: post._id,
+        communityId: post.communityId,
+        sectionId: post.sectionId,
+        sectionName,
+        title,
+        fieldLabel: String(entry.widget.label || '视频'),
+        fieldType: 'video_group',
+        text,
+        preview: previewForRagText(text),
+        sourceUpdatedAt,
+        visibility: 'member',
+        metadata: {
+          evidenceSource: 'video_metadata',
+          costTier: 'free',
+          cacheKey: entry.cacheKey,
+          widgetId: entry.widget.widgetId,
+          fieldKey: entry.widget.fieldKey,
+          videoItemId: asCleanText(entry.video.itemId),
+          videoIndex: entry.videoIndex,
+          source: asCleanText(entry.video.source),
+        },
+      })
+    }
+
+    const asset = options.assetsByCacheKey?.get(entry.cacheKey)
+    if (asset?.status === 'ready') {
+      const analysisLines = videoAnalysisLines(asset)
+      if (analysisLines.length) {
+        const text = analysisLines.join('\n')
+        chunks.push({
+          chunkId: `prv_${stableId(`${post._id}\u0001${entry.cacheKey}\u0001analysis\u0001${asset.updatedAt || ''}\u0001${text}`)}`,
+          postId: post._id,
+          communityId: post.communityId,
+          sectionId: post.sectionId,
+          sectionName,
+          title,
+          fieldLabel: `${String(entry.widget.label || '视频')}理解`,
+          fieldType: 'video_group',
+          text,
+          preview: previewForRagText(text),
+          sourceUpdatedAt: asset.updatedAt || sourceUpdatedAt,
+          visibility: 'member',
+          metadata: {
+            evidenceSource: 'video_analysis_cache',
+            costTier: 'cached',
+            cacheKey: entry.cacheKey,
+            widgetId: entry.widget.widgetId,
+            fieldKey: entry.widget.fieldKey,
+            videoItemId: asCleanText(entry.video.itemId),
+            videoIndex: entry.videoIndex,
+            source: asCleanText(entry.video.source),
+          },
+        })
+      }
+    }
+  }
+
+  return chunks
+}
+
+export function readVideoRagCostPolicyFromEnv(env: NodeJS.ProcessEnv = process.env): VideoRagCostPolicy {
+  return {
+    analysisEnabled: /^(1|true|yes|on)$/i.test(String(env.POST_VIDEO_RAG_ANALYSIS_ENABLED || '')),
+    maxJobsPerPost: Math.max(0, Math.min(10, Math.floor(Number(env.POST_VIDEO_RAG_MAX_JOBS_PER_POST || 2)))),
+    maxCostUnitsPerPost: Math.max(0, Math.min(1000, Math.floor(Number(env.POST_VIDEO_RAG_MAX_COST_UNITS_PER_POST || 16)))),
+    maxFramesPerVideo: Math.max(0, Math.min(12, Math.floor(Number(env.POST_VIDEO_RAG_MAX_FRAMES_PER_VIDEO || 4)))),
+    maxAsrSecondsPerVideo: Math.max(0, Math.min(7200, Math.floor(Number(env.POST_VIDEO_RAG_MAX_ASR_SECONDS_PER_VIDEO || 120)))),
+    minMetadataTextCharsForAnalysis: Math.max(0, Math.min(500, Math.floor(Number(env.POST_VIDEO_RAG_MIN_TEXT_CHARS_FOR_ANALYSIS || 48)))),
+  }
+}
+
+function estimateVideoAnalysisCostUnits(policy: VideoRagCostPolicy): number {
+  return Math.max(0, Number(policy.maxFramesPerVideo || 0)) + Math.ceil(Math.max(0, Number(policy.maxAsrSecondsPerVideo || 0)) / 30)
+}
+
+function canAnalyzeVideoSource(video: Record<string, any>): boolean {
+  return asCleanText(video.source) === 'cos' && Boolean(asCleanText(video.fileID))
+}
+
+export function planVideoRagAnalysisJobsForPost(
+  post: Post,
+  section: Section,
+  options: {
+    now?: string
+    assetsByCacheKey?: Map<string, VideoRagAsset>
+    policy?: VideoRagCostPolicy
+  } = {}
+): VideoRagAnalysisJobDocument[] {
+  const policy = options.policy || readVideoRagCostPolicyFromEnv()
+  if (!policy.analysisEnabled || policy.maxJobsPerPost <= 0 || policy.maxCostUnitsPerPost <= 0) return []
+
+  const now = options.now || new Date().toISOString()
+  const jobs: VideoRagAnalysisJobDocument[] = []
+  let usedCostUnits = 0
+  for (const entry of extractVideoEntriesForRag(post, section)) {
+    if (jobs.length >= policy.maxJobsPerPost) break
+    if (!canAnalyzeVideoSource(entry.video)) continue
+    const existingAsset = options.assetsByCacheKey?.get(entry.cacheKey)
+    if (existingAsset && existingAsset.status !== 'failed') continue
+    if (metadataTextLength(entry.video) >= policy.minMetadataTextCharsForAnalysis) continue
+
+    const estimatedCostUnits = estimateVideoAnalysisCostUnits(policy)
+    if (estimatedCostUnits <= 0 || usedCostUnits + estimatedCostUnits > policy.maxCostUnitsPerPost) continue
+    usedCostUnits += estimatedCostUnits
+
+    jobs.push({
+      _id: `vrj_${stableId(`${post._id}\u0001${entry.cacheKey}`)}`,
+      postId: post._id,
+      communityId: post.communityId,
+      sectionId: post.sectionId,
+      cacheKey: entry.cacheKey,
+      status: 'pending',
+      attempts: 0,
+      reason: 'rag.video.low_text_signal',
+      requestedAnalyses: [
+        'cover_ocr',
+        ...(policy.maxFramesPerVideo > 0 ? ['keyframe_vision'] : []),
+        ...(policy.maxAsrSecondsPerVideo > 0 ? ['asr'] : []),
+      ],
+      frameStrategy: {
+        includeCover: true,
+        maxFrames: policy.maxFramesPerVideo,
+        minSceneGapSeconds: 10,
+      },
+      maxAsrSeconds: policy.maxAsrSecondsPerVideo,
+      estimatedCostUnits,
+      budgetDate: now.slice(0, 10),
+      video: {
+        itemId: asCleanText(entry.video.itemId),
+        title: asCleanText(entry.video.title),
+        source: asCleanText(entry.video.source),
+        fileID: asCleanText(entry.video.fileID),
+        cover: asCleanText(entry.video.cover),
+        duration: Number(entry.video.duration || 0),
+      },
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
+  return jobs
+}
+
+async function loadVideoRagAssetsByCacheKey(cacheKeys: string[]): Promise<Map<string, VideoRagAsset>> {
+  const assets = new Map<string, VideoRagAsset>()
+  for (const cacheKey of Array.from(new Set(cacheKeys)).filter(Boolean)) {
+    try {
+      const rows = await db.query(POST_VIDEO_RAG_ASSETS, { cacheKey }, { limit: 1 }) as VideoRagAsset[]
+      if (rows[0]) assets.set(cacheKey, rows[0])
+    } catch {
+      // Video enrichment is optional; missing state must not block text RAG indexing.
+    }
+  }
+  return assets
+}
+
+async function enqueueVideoRagAnalysisJobs(jobs: VideoRagAnalysisJobDocument[]) {
+  let queuedCount = 0
+  let skippedCount = 0
+  for (const job of jobs) {
+    try {
+      await db.create(POST_VIDEO_RAG_JOBS, job)
+      queuedCount += 1
+    } catch {
+      skippedCount += 1
+    }
+  }
+  return { queuedCount, skippedCount }
+}
+
+function normalizeVideoAssetResult(value: Partial<VideoRagAsset>, job: VideoRagAnalysisJobDocument, provider: string, now: string): VideoRagAsset & {
+  provider: string
+  sourceJobId: string
+  costUnits: number
+} {
+  return {
+    _id: job.cacheKey,
+    cacheKey: job.cacheKey,
+    status: 'ready',
+    visualSummary: asCleanText(value.visualSummary),
+    ocrText: asCleanText(value.ocrText),
+    asrTranscript: asCleanText(value.asrTranscript),
+    frameSummaries: Array.isArray(value.frameSummaries)
+      ? value.frameSummaries
+        .map((frame) => ({
+          timeMs: Number(frame.timeMs || 0),
+          timeSeconds: Number(frame.timeSeconds || 0),
+          summary: asCleanText(frame.summary),
+          ocrText: asCleanText(frame.ocrText),
+        }))
+        .filter((frame) => frame.summary || frame.ocrText)
+      : [],
+    updatedAt: now,
+    provider,
+    sourceJobId: job._id,
+    costUnits: Number(job.estimatedCostUnits || 0),
+  }
+}
+
+async function upsertVideoRagAsset(asset: Record<string, any>) {
+  const { _id, ...updateData } = asset
+  try {
+    const result = await db.updateById(POST_VIDEO_RAG_ASSETS, String(_id), updateData) as any
+    if (result?.stats && Number(result.stats.updated || 0) === 0) {
+      await db.create(POST_VIDEO_RAG_ASSETS, asset)
+    }
+  } catch {
+    await db.create(POST_VIDEO_RAG_ASSETS, asset)
+  }
+}
+
+function isVideoRagPendingResult(value: VideoRagAnalyzerResult): value is VideoRagAnalyzerPendingResult {
+  return Boolean((value as VideoRagAnalyzerPendingResult)?.pending)
+}
+
+function parsePositiveInt(value: unknown, fallback: number, min: number, max: number) {
+  const number = Math.floor(Number(value))
+  if (!Number.isFinite(number)) return fallback
+  return Math.max(min, Math.min(max, number))
+}
+
+function createDisabledVideoRagAnalyzer(): VideoRagAnalyzer {
+  return {
+    name: 'disabled-video-rag-analyzer',
+    isConfigured: () => false,
+    async analyze() {
+      throw new Error('video_rag_analyzer_not_configured')
+    },
+  }
+}
+
+function requestExternalVideoAnalyzer(config: {
+  url: string
+  token: string
+  timeoutMs: number
+}, job: VideoRagAnalysisJobDocument): Promise<VideoRagAnalyzerResult> {
+  const target = new URL(config.url)
+  const transport = target.protocol === 'http:' ? http : https
+  const payload = JSON.stringify({
+    jobId: job._id,
+    cacheKey: job.cacheKey,
+    postId: job.postId,
+    communityId: job.communityId,
+    sectionId: job.sectionId,
+    requestedAnalyses: job.requestedAnalyses,
+    frameStrategy: job.frameStrategy,
+    maxAsrSeconds: job.maxAsrSeconds,
+    video: job.video,
+  })
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      req.destroy(new Error('video_rag_analyzer_timeout'))
+    }, config.timeoutMs)
+    const req = transport.request(target, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(config.token ? { Authorization: `Bearer ${config.token}` } : {}),
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    }, (res) => {
+      const chunks: Buffer[] = []
+      res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)))
+      res.on('end', () => {
+        clearTimeout(timer)
+        const text = Buffer.concat(chunks).toString('utf8')
+        if ((res.statusCode || 500) >= 400) {
+          reject(new Error(`video_rag_analyzer_http_${res.statusCode}: ${text.slice(0, 300)}`))
+          return
+        }
+        try {
+          const parsed = text ? JSON.parse(text) : {}
+          resolve(parsed.asset || parsed)
+        } catch (error) {
+          reject(error)
+        }
+      })
+    })
+    req.on('error', (error) => {
+      clearTimeout(timer)
+      reject(error)
+    })
+    req.write(payload)
+    req.end()
+  })
+}
+
+async function resolveVideoUrlForAnalyzer(video: Record<string, any>): Promise<string> {
+  const directUrl = asCleanText(video.url)
+  if (directUrl) return directUrl
+  const fileID = asCleanText(video.fileID)
+  if (!fileID) throw new Error('video_rag_missing_video_url')
+  // Lazy require keeps pure post-rag unit tests independent from wx-server-sdk setup.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const storage = require('./storage') as typeof import('./storage')
+  return storage.getTempUrl(fileID)
+}
+
+interface TencentAsrVideoRagConfig {
+  secretId: string
+  secretKey: string
+  region: string
+  engineModelType: string
+  channelNum: number
+  resTextFormat: number
+  timeoutMs: number
+}
+
+function isTencentAsrConfigured(config: TencentAsrVideoRagConfig) {
+  return Boolean(config.secretId && config.secretKey && config.region && config.engineModelType)
+}
+
+async function requestTencentAsr<T>(config: TencentAsrVideoRagConfig, action: string, body: unknown): Promise<T> {
+  const host = 'asr.tencentcloudapi.com'
+  const service = 'asr'
+  const version = '2019-06-14'
+  const timestamp = Math.floor(Date.now() / 1000)
+  const date = new Date(timestamp * 1000).toISOString().slice(0, 10)
+  const payload = JSON.stringify(body)
+  const canonicalHeaders = `content-type:application/json; charset=utf-8\nhost:${host}\n`
+  const signedHeaders = 'content-type;host'
+  const canonicalRequest = ['POST', '/', '', canonicalHeaders, signedHeaders, tc3Sha256(payload)].join('\n')
+  const credentialScope = `${date}/${service}/tc3_request`
+  const stringToSign = ['TC3-HMAC-SHA256', timestamp, credentialScope, tc3Sha256(canonicalRequest)].join('\n')
+  const secretDate = tc3HmacBuffer(`TC3${config.secretKey}`, date)
+  const secretService = tc3HmacBuffer(secretDate, service)
+  const secretSigning = tc3HmacBuffer(secretService, 'tc3_request')
+  const signature = tc3HmacHex(secretSigning, stringToSign)
+  const authorization = `TC3-HMAC-SHA256 Credential=${config.secretId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`
+  return new Promise<T>((resolve, reject) => {
+    const req = https.request({
+      hostname: host,
+      method: 'POST',
+      path: '/',
+      headers: {
+        Authorization: authorization,
+        'Content-Type': 'application/json; charset=utf-8',
+        Host: host,
+        'X-TC-Action': action,
+        'X-TC-Version': version,
+        'X-TC-Timestamp': String(timestamp),
+        'X-TC-Region': config.region,
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    }, (res) => {
+      const chunks: Buffer[] = []
+      res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)))
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8')
+        let parsed: any
+        try {
+          parsed = text ? JSON.parse(text) : {}
+        } catch (error) {
+          reject(error)
+          return
+        }
+        if ((res.statusCode || 500) >= 400 || parsed?.Response?.Error) {
+          const error = parsed?.Response?.Error
+          reject(new Error(`Tencent ASR ${action} failed: ${error?.Code || res.statusCode} ${error?.Message || text}`))
+          return
+        }
+        resolve(parsed.Response as T)
+      })
+    })
+    req.setTimeout(config.timeoutMs, () => {
+      req.destroy(new Error(`Tencent ASR ${action} timeout`))
+    })
+    req.on('error', reject)
+    req.write(payload)
+    req.end()
+  })
+}
+
+function extractTencentAsrTaskId(response: any): string {
+  return String(response?.Data?.TaskId || response?.TaskId || '').trim()
+}
+
+function extractTencentAsrTaskData(response: any): any {
+  return response?.Data || response?.Task || response || {}
+}
+
+function normalizeTencentAsrTaskStatus(data: any): string {
+  const statusNumber = Number(data?.Status ?? data?.status)
+  if (Number.isFinite(statusNumber)) return String(statusNumber)
+  return String(data?.StatusStr || data?.statusStr || data?.StatusText || data?.statusText || '').trim()
+}
+
+function isTencentAsrProcessingStatus(status: string) {
+  const normalized = String(status || '').trim().toLowerCase()
+  return normalized === '0' || normalized === '1' || normalized === 'waiting' || normalized === 'doing' || normalized === 'processing'
+}
+
+function isTencentAsrSuccessStatus(status: string) {
+  const normalized = String(status || '').trim().toLowerCase()
+  return normalized === '2' || normalized === 'success' || normalized === 'completed' || normalized === 'finished'
+}
+
+function isTencentAsrFailedStatus(status: string) {
+  const normalized = String(status || '').trim().toLowerCase()
+  return normalized === '3' || normalized === 'failed' || normalized === 'error'
+}
+
+function extractTencentAsrTranscript(data: any): string {
+  const direct = asCleanText(data?.Result || data?.result || data?.Text || data?.text)
+  if (direct) return direct
+  const detail = data?.ResultDetail || data?.resultDetail || data?.ResultDetailList || data?.resultDetailList
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => asCleanText(item?.FinalSentence || item?.Sentence || item?.Text || item?.text))
+      .filter(Boolean)
+      .join('\n')
+  }
+  return ''
+}
+
+async function requestTencentAsrVideoAnalysis(config: TencentAsrVideoRagConfig, job: VideoRagAnalysisJobDocument): Promise<VideoRagAnalyzerResult> {
+  if (job.providerTaskId) {
+    const response = await requestTencentAsr<any>(config, 'DescribeTaskStatus', {
+      TaskId: Number(job.providerTaskId),
+    })
+    const data = extractTencentAsrTaskData(response)
+    const providerStatus = normalizeTencentAsrTaskStatus(data)
+    if (isTencentAsrSuccessStatus(providerStatus)) {
+      return {
+        asrTranscript: extractTencentAsrTranscript(data),
+        visualSummary: '',
+        ocrText: '',
+        frameSummaries: [],
+      }
+    }
+    if (isTencentAsrFailedStatus(providerStatus)) {
+      throw new Error(`tencent_asr_task_failed: ${asCleanText(data?.ErrorMsg || data?.errorMsg || data?.Message || data?.message || providerStatus)}`)
+    }
+    return {
+      pending: true,
+      providerTaskId: String(job.providerTaskId),
+      providerStatus: providerStatus || 'processing',
+    }
+  }
+
+  const videoUrl = await resolveVideoUrlForAnalyzer(job.video || {})
+  const response = await requestTencentAsr<any>(config, 'CreateRecTask', {
+    EngineModelType: config.engineModelType,
+    ChannelNum: config.channelNum,
+    ResTextFormat: config.resTextFormat,
+    SourceType: 0,
+    Url: videoUrl,
+  })
+  const taskId = extractTencentAsrTaskId(response)
+  if (!taskId) throw new Error('tencent_asr_missing_task_id')
+  return {
+    pending: true,
+    providerTaskId: taskId,
+    providerStatus: 'created',
+  }
+}
+
+function tokenHubEndpointFromEnv(env: NodeJS.ProcessEnv) {
+  const explicitEndpoint = String(env.POST_VIDEO_RAG_TOKENHUB_ENDPOINT || '').trim()
+  if (explicitEndpoint) return explicitEndpoint
+  const baseUrl = String(env.POST_VIDEO_RAG_TOKENHUB_BASE_URL || 'https://tokenhub.tencentmaas.com/v1')
+    .trim()
+    .replace(/\/+$/, '')
+  return `${baseUrl}/chat/completions`
+}
+
+function extractJsonObjectFromText(text: string): any | null {
+  const source = String(text || '').trim()
+  if (!source) return null
+  const fenced = source.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]
+  const candidates = [fenced, source].filter(Boolean) as string[]
+  for (const candidate of candidates) {
+    const first = candidate.indexOf('{')
+    const last = candidate.lastIndexOf('}')
+    if (first < 0 || last <= first) continue
+    try {
+      return JSON.parse(candidate.slice(first, last + 1))
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return null
+}
+
+function extractTokenHubAnswer(value: any): string {
+  return String(value?.choices?.[0]?.message?.content || value?.choices?.[0]?.text || '').trim()
+}
+
+function normalizeTokenHubAssetFromAnswer(answer: string): Partial<VideoRagAsset> {
+  const parsed = extractJsonObjectFromText(answer)
+  if (parsed && typeof parsed === 'object') {
+    return {
+      visualSummary: asCleanText(parsed.visualSummary || parsed.visual_summary || parsed.summary),
+      ocrText: asCleanText(parsed.ocrText || parsed.ocr_text || parsed.ocr),
+      asrTranscript: asCleanText(parsed.asrTranscript || parsed.asr_transcript || parsed.transcript),
+      frameSummaries: Array.isArray(parsed.frameSummaries || parsed.frame_summaries)
+        ? (parsed.frameSummaries || parsed.frame_summaries)
+        : [],
+    }
+  }
+  return { visualSummary: answer }
+}
+
+function requestTokenHubVideoAnalysis(config: {
+  endpoint: string
+  apiKey: string
+  model: string
+  timeoutMs: number
+}, job: VideoRagAnalysisJobDocument): Promise<Partial<VideoRagAsset>> {
+  return new Promise(async (resolve, reject) => {
+    let videoUrl = ''
+    try {
+      videoUrl = await resolveVideoUrlForAnalyzer(job.video || {})
+    } catch (error) {
+      reject(error)
+      return
+    }
+    const target = new URL(config.endpoint)
+    const transport = target.protocol === 'http:' ? http : https
+    const prompt = [
+      '你是 HappyHome 视频 RAG 分析器。',
+      '请只分析这个视频中与帖子搜索相关的可检索信息，优先关注画面文字、主题、人物讲解和可作为证据的时间点。',
+      '为了控制成本，按抽样思路输出，不要冗长描述。',
+      '请严格输出 JSON，不要输出 Markdown：',
+      '{"visualSummary":"一句话视觉摘要","ocrText":"画面文字合并","asrTranscript":"语音要点摘要","frameSummaries":[{"timeMs":0,"summary":"关键帧摘要","ocrText":"该帧文字"}]}',
+      `视频标题：${asCleanText(job.video?.title)}`,
+      `请求分析：${(job.requestedAnalyses || []).join(', ')}`,
+      `最多关键帧：${Number(job.frameStrategy?.maxFrames || 0)}；最多语音秒数：${Number(job.maxAsrSeconds || 0)}`,
+    ].join('\n')
+    const payload = JSON.stringify({
+      model: config.model,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          { type: 'video_url', video_url: { url: videoUrl } },
+        ],
+      }],
+      temperature: 0.1,
+      max_tokens: 900,
+    })
+    const timer = setTimeout(() => {
+      req.destroy(new Error('tokenhub_video_analyzer_timeout'))
+    }, config.timeoutMs)
+    const req = transport.request(target, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    }, (res) => {
+      const chunks: Buffer[] = []
+      res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)))
+      res.on('end', () => {
+        clearTimeout(timer)
+        const text = Buffer.concat(chunks).toString('utf8')
+        if ((res.statusCode || 500) >= 400) {
+          reject(new Error(`tokenhub_video_analyzer_http_${res.statusCode}: ${text.slice(0, 300)}`))
+          return
+        }
+        try {
+          const parsed = text ? JSON.parse(text) : {}
+          resolve(normalizeTokenHubAssetFromAnswer(extractTokenHubAnswer(parsed)))
+        } catch (error) {
+          reject(error)
+        }
+      })
+    })
+    req.on('error', (error) => {
+      clearTimeout(timer)
+      reject(error)
+    })
+    req.write(payload)
+    req.end()
+  })
+}
+
+export function createVideoRagAnalyzerFromEnv(env: NodeJS.ProcessEnv = process.env): VideoRagAnalyzer {
+  const asrSecretId = String(env.POST_VIDEO_RAG_ASR_SECRET_ID || env.POST_VIDEO_RAG_ASR_SECRETID || '').trim()
+  const asrSecretKey = String(env.POST_VIDEO_RAG_ASR_SECRET_KEY || env.POST_VIDEO_RAG_ASR_SECRETKEY || '')
+  if (asrSecretId && asrSecretKey) {
+    const config: TencentAsrVideoRagConfig = {
+      secretId: asrSecretId,
+      secretKey: asrSecretKey,
+      region: String(env.POST_VIDEO_RAG_ASR_REGION || 'ap-guangzhou').trim(),
+      engineModelType: String(env.POST_VIDEO_RAG_ASR_ENGINE_MODEL_TYPE || '16k_zh').trim(),
+      channelNum: parsePositiveInt(env.POST_VIDEO_RAG_ASR_CHANNEL_NUM, 1, 1, 16),
+      resTextFormat: parsePositiveInt(env.POST_VIDEO_RAG_ASR_RES_TEXT_FORMAT, 0, 0, 3),
+      timeoutMs: parsePositiveInt(env.POST_VIDEO_RAG_ASR_TIMEOUT_MS, 30000, 3000, 120000),
+    }
+    return {
+      name: 'tencent-asr-video-rag-analyzer',
+      isConfigured: () => isTencentAsrConfigured(config),
+      analyze: (job) => requestTencentAsrVideoAnalysis(config, job),
+    }
+  }
+
+  const tokenHubApiKey = String(env.POST_VIDEO_RAG_TOKENHUB_API_KEY || '').trim()
+  if (tokenHubApiKey) {
+    const config = {
+      endpoint: tokenHubEndpointFromEnv(env),
+      apiKey: tokenHubApiKey,
+      model: String(env.POST_VIDEO_RAG_TOKENHUB_MODEL || 'youtu-vita').trim(),
+      timeoutMs: parsePositiveInt(env.POST_VIDEO_RAG_TOKENHUB_TIMEOUT_MS, 120000, 10000, 300000),
+    }
+    return {
+      name: 'tokenhub-video-rag-analyzer',
+      isConfigured: () => Boolean(config.endpoint && config.apiKey && config.model),
+      analyze: (job) => requestTokenHubVideoAnalysis(config, job),
+    }
+  }
+
+  const url = String(env.POST_VIDEO_RAG_ANALYZER_URL || '').trim()
+  if (!url) return createDisabledVideoRagAnalyzer()
+  const config = {
+    url,
+    token: String(env.POST_VIDEO_RAG_ANALYZER_TOKEN || ''),
+    timeoutMs: parsePositiveInt(env.POST_VIDEO_RAG_ANALYZER_TIMEOUT_MS, 30000, 3000, 180000),
+  }
+  return {
+    name: 'http-video-rag-analyzer',
+    isConfigured: () => Boolean(config.url),
+    analyze: (job) => requestExternalVideoAnalyzer(config, job),
+  }
+}
+
+export async function processPostVideoRagJobBatch(options: {
+  limit?: number
+  postId?: string
+  analyzer?: VideoRagAnalyzer
+} = {}) {
+  const analyzer = options.analyzer || createVideoRagAnalyzerFromEnv()
+  const limit = Math.max(1, Math.min(10, Math.floor(Number(options.limit || 3))))
+  const postId = String(options.postId || '').trim()
+  const pendingJobs = await db.query(
+    POST_VIDEO_RAG_JOBS,
+    { status: 'pending', ...(postId ? { postId } : {}) },
+    { orderBy: ['createdAt', 'asc'], limit }
+  ) as VideoRagAnalysisJobDocument[]
+  let jobs = pendingJobs
+  if (jobs.length < limit) {
+    const processingJobs = await db.query(
+      POST_VIDEO_RAG_JOBS,
+      { status: 'processing', ...(postId ? { postId } : {}) },
+      { orderBy: ['updatedAt', 'asc'], limit: limit - jobs.length }
+    ) as VideoRagAnalysisJobDocument[]
+    jobs = jobs.concat(processingJobs)
+  }
+  const results: Array<{ jobId: string; ok: boolean; pending?: boolean; error?: string }> = []
+  for (const job of jobs) {
+    const now = new Date().toISOString()
+    try {
+      if (!analyzer.isConfigured()) throw new Error('video_rag_analyzer_not_configured')
+      const rawAsset = await analyzer.analyze(job)
+      if (isVideoRagPendingResult(rawAsset)) {
+        await db.updateById(POST_VIDEO_RAG_JOBS, job._id, {
+          status: 'processing',
+          provider: analyzer.name,
+          providerTaskId: asCleanText(rawAsset.providerTaskId),
+          providerStatus: asCleanText(rawAsset.providerStatus) || 'processing',
+          updatedAt: now,
+        })
+        results.push({ jobId: job._id, ok: true, pending: true })
+        continue
+      }
+      const asset = normalizeVideoAssetResult(rawAsset, job, analyzer.name, now)
+      await upsertVideoRagAsset(asset)
+      await db.updateById(POST_VIDEO_RAG_JOBS, job._id, {
+        status: 'completed',
+        completedAt: now,
+        updatedAt: now,
+        provider: analyzer.name,
+      })
+      await enqueuePostRagJob({
+        postId: job.postId,
+        communityId: job.communityId,
+        sectionId: job.sectionId,
+        action: 'upsert',
+        reason: 'rag.video.analysis.ready',
+      })
+      results.push({ jobId: job._id, ok: true })
+    } catch (error: any) {
+      await db.updateById(POST_VIDEO_RAG_JOBS, job._id, {
+        status: 'failed',
+        attempts: Number((job as any).attempts || 0) + 1,
+        errorMessage: String(error?.message || error),
+        updatedAt: now,
+      })
+      results.push({ jobId: job._id, ok: false, error: String(error?.message || error) })
+    }
+  }
+  return { scannedCount: jobs.length, results }
+}
+
 export async function enqueuePostRagJob(input: {
   postId: string
   communityId?: string
@@ -843,6 +1761,24 @@ function toRagChunkDocuments(post: Post, section: Section): RagChunkDocument[] {
   }))
 }
 
+async function buildRagChunkDocumentsForPost(post: Post, section: Section, now: string) {
+  const baseChunks = toRagChunkDocuments(post, section)
+  const cacheKeys = extractVideoEntriesForRag(post, section).map((entry) => entry.cacheKey)
+  const videoAssetsByCacheKey = cacheKeys.length
+    ? await loadVideoRagAssetsByCacheKey(cacheKeys)
+    : new Map<string, VideoRagAsset>()
+  const videoChunks = buildVideoRagChunksForPost(post, section, {
+    now,
+    assetsByCacheKey: videoAssetsByCacheKey,
+  })
+  return {
+    chunks: [...baseChunks, ...videoChunks],
+    videoAssetsByCacheKey,
+    videoMetadataChunkCount: videoChunks.filter((chunk) => chunk.metadata?.evidenceSource === 'video_metadata').length,
+    videoAnalysisChunkCount: videoChunks.filter((chunk) => chunk.metadata?.evidenceSource === 'video_analysis_cache').length,
+  }
+}
+
 function isPostSearchableForRag(post: any): boolean {
   return Boolean(
     post
@@ -855,6 +1791,7 @@ export async function processPostRagJobBatch(options: {
   limit?: number
   postId?: string
   provider?: TencentRagProvider
+  videoPolicy?: VideoRagCostPolicy
 } = {}) {
   const provider = options.provider || createTencentRagProviderFromEnv()
   const limit = Math.max(1, Math.min(20, Math.floor(Number(options.limit || 5))))
@@ -902,7 +1839,19 @@ export async function processPostRagJobBatch(options: {
           continue
         }
         const section = await db.getById('sections', post.sectionId) as Section
-        const chunks = toRagChunkDocuments(post, section)
+        const {
+          chunks,
+          videoAssetsByCacheKey,
+          videoMetadataChunkCount,
+          videoAnalysisChunkCount,
+        } = await buildRagChunkDocumentsForPost(post, section, now)
+        const videoPolicy = options.videoPolicy || readVideoRagCostPolicyFromEnv()
+        const videoAnalysisJobs = planVideoRagAnalysisJobsForPost(post, section, {
+          now,
+          assetsByCacheKey: videoAssetsByCacheKey,
+          policy: videoPolicy,
+        })
+        const videoJobResult = await enqueueVideoRagAnalysisJobs(videoAnalysisJobs)
         await provider.deletePostChunks?.(job.postId)
         await provider.upsertChunks?.(chunks)
         await db.updateById(POST_RAG_INDEX_STATE, job.postId, {
@@ -912,6 +1861,15 @@ export async function processPostRagJobBatch(options: {
           sourceUpdatedAt: post.updatedAt || post.createdAt || now,
           indexedAt: now,
           chunkCount: chunks.length,
+          videoRag: {
+            metadataChunkCount: videoMetadataChunkCount,
+            analysisChunkCount: videoAnalysisChunkCount,
+            analysisJobQueuedCount: videoJobResult.queuedCount,
+            analysisJobSkippedCount: videoJobResult.skippedCount,
+            analysisEnabled: videoPolicy.analysisEnabled,
+            maxFramesPerVideo: videoPolicy.maxFramesPerVideo,
+            maxAsrSecondsPerVideo: videoPolicy.maxAsrSecondsPerVideo,
+          },
         }).catch(() => db.create(POST_RAG_INDEX_STATE, {
           _id: job.postId,
           postId: job.postId,
@@ -921,6 +1879,15 @@ export async function processPostRagJobBatch(options: {
           sourceUpdatedAt: post.updatedAt || post.createdAt || now,
           indexedAt: now,
           chunkCount: chunks.length,
+          videoRag: {
+            metadataChunkCount: videoMetadataChunkCount,
+            analysisChunkCount: videoAnalysisChunkCount,
+            analysisJobQueuedCount: videoJobResult.queuedCount,
+            analysisJobSkippedCount: videoJobResult.skippedCount,
+            analysisEnabled: videoPolicy.analysisEnabled,
+            maxFramesPerVideo: videoPolicy.maxFramesPerVideo,
+            maxAsrSecondsPerVideo: videoPolicy.maxAsrSecondsPerVideo,
+          },
         }))
       }
       await db.updateById(POST_RAG_JOBS, job._id, { status: 'completed', updatedAt: now })

@@ -15,6 +15,9 @@
 - `post_rag_jobs`：发帖、改帖、审核、删除、板块字段变化产生的 RAG 索引任务。
 - `post_rag_index_state`：每篇帖子在正式 RAG 索引里的 indexed/removed/failed 状态。
 - `post-rag-worker` 云函数：分批处理 pending job。
+- `post_video_rag_jobs`：低文本信号视频的可选分析任务，按成本策略排队。
+- `post_video_rag_assets`：视频 ASR/OCR/关键帧摘要缓存，按 `cacheKey` 复用，避免重复付费分析。
+- `post-video-rag-worker` 云函数：分批处理视频分析 job，完成后重新排帖子 RAG upsert。
 
 检索层：
 
@@ -33,6 +36,14 @@ LKEAP 原子能力：
 - LKEAP 本身不是持久化向量数据库；本分支的 `lkeap` provider 用 CloudBase 的 `post_rag_chunks` 保存 chunk 与 embedding，保证不是查询时临时导出数据再分析。
 - 云函数环境中可能存在 CloudBase 注入的 `TENCENTCLOUD_SECRETID`；LKEAP provider 必须优先读取显式配置的 `TENCENT_LKEAP_SECRET_ID/KEY`，否则 worker 会拿错密钥并返回 `AuthFailure.SecretIdNotFound`。
 - 如果帖子量和并发增长，仍应切换到 ES/等价向量检索服务，避免云函数内扫描过多 chunk。
+
+视频 RAG：
+
+- `post-rag-worker` 会把每个视频的标题、描述、hint、文件名、封面、时长写成免费 metadata chunk，因此“某个视频名”不需要先跑高成本视频理解。
+- 只有低文本信号、未命中缓存、COS 可访问的视频，才会在 `POST_VIDEO_RAG_ANALYSIS_ENABLED=true` 时写入 `post_video_rag_jobs`。
+- `post-video-rag-worker` 优先使用腾讯云 ASR 做音频转写：配置 `POST_VIDEO_RAG_ASR_SECRET_ID/KEY` 后，先调用 `CreateRecTask` 创建异步识别任务，把 job 置为 `processing`；后续轮询 `DescribeTaskStatus` 成功后写入 `asrTranscript`，再排 `rag.video.analysis.ready` 的帖子 RAG upsert。
+- 未配置 ASR 时，可选使用 `POST_VIDEO_RAG_TOKENHUB_API_KEY` 走 TokenHub 多模态视频理解；再未配置时可接 `POST_VIDEO_RAG_ANALYZER_URL` 外部分析器。三者都没有时明确失败，不隐式调用付费服务。
+- 成本控制靠环境变量：每帖 job 数、单视频 ASR 秒数、关键帧数、估算 cost units 都有上限。显式配置可覆盖到 60 分钟音频，例如 `POST_VIDEO_RAG_MAX_ASR_SECONDS_PER_VIDEO=3600`、`POST_VIDEO_RAG_MAX_COST_UNITS_PER_POST=120`、`POST_VIDEO_RAG_MAX_FRAMES_PER_VIDEO=0`。
 
 降级层：
 
@@ -115,6 +126,28 @@ TENCENT_LKEAP_RERANK_MODEL=lke-reranker-base
 TENCENT_LKEAP_CHAT_MODEL=deepseek-v3-0324
 ```
 
+视频音频优先分析可选配置：
+
+```text
+POST_VIDEO_RAG_ANALYSIS_ENABLED=true
+POST_VIDEO_RAG_ASR_SECRET_ID=
+POST_VIDEO_RAG_ASR_SECRET_KEY=
+POST_VIDEO_RAG_ASR_REGION=ap-guangzhou
+POST_VIDEO_RAG_ASR_ENGINE_MODEL_TYPE=16k_zh
+POST_VIDEO_RAG_MAX_JOBS_PER_POST=1
+POST_VIDEO_RAG_MAX_FRAMES_PER_VIDEO=0
+POST_VIDEO_RAG_MAX_ASR_SECONDS_PER_VIDEO=3600
+POST_VIDEO_RAG_MAX_COST_UNITS_PER_POST=120
+```
+
+多模态视频理解可选配置：
+
+```text
+POST_VIDEO_RAG_TOKENHUB_API_KEY=
+POST_VIDEO_RAG_TOKENHUB_MODEL=youtu-vita
+POST_VIDEO_RAG_TOKENHUB_BASE_URL=https://tokenhub.tencentmaas.com/v1
+```
+
 ES provider 可选配置：
 
 ```text
@@ -195,6 +228,13 @@ npm.cmd run verify:post-rag-smoke
 { "limit": 20, "postId": "<postId>" }
 ```
 
+手动触发视频分析 job：
+
+```ts
+// 调用云函数 post-video-rag-worker
+{ "limit": 3 }
+```
+
 旧 fallback 索引回填仍保留：
 
 ```powershell
@@ -206,6 +246,7 @@ npm.cmd run rebuild:post-search-index -- --all-active
 必须支持：
 
 - `有没有讲节俭家风的帖子？`
+- `勤俭持家`
 - `一粥一饭当思来处不易`
 - 某个视频名
 
@@ -221,6 +262,12 @@ npm.cmd run rebuild:post-search-index -- --all-active
 - 验收问题 `有没有讲节俭家风的帖子？` 返回 `mode=rag`，answer 包含《朱子治家格言》和“一粥一饭，当思来处不易；半丝半缕，恒念物力维艰”，`citations=2`，`items=1`。
 - 原句查询 `一粥一饭当思来处不易` 命中同一临时帖子。
 - 临时社区已 hardDelete，删除 job 已由 worker 清理。
+
+2026-06-30 本地新增验收：
+
+- `verify:post-rag-smoke` 已加入 `勤俭持家` 查询，必须命中同一临时帖子。
+- `test:mp:post-rag-search-static` 会验证小程序首页搜索入口、搜索页输入框、`postApi.search`、AI 回答、引用卡片和帖子跳转结构。
+- 视频分析 worker 支持 ASR 异步任务的 `pending -> processing -> completed` 状态流；ASR 未完成前不会提前写资产或重建帖子索引。
 
 当前未完成的真实验收：
 

@@ -12,20 +12,28 @@ import {
   backfillPostRagJobsForSectionBatch,
   buildNoEvidenceRagResult,
   buildRagQuery,
+  buildVideoRagCacheKey,
+  buildVideoRagChunksForPost,
+  planVideoRagAnalysisJobsForPost,
   createTencentLkeapCloudBaseProvider,
   createTencentRagProviderFromEnv,
+  createVideoRagAnalyzerFromEnv,
   enqueuePostRagJob,
   hasRagEvidenceSignal,
   POST_RAG_CHUNKS,
   POST_RAG_INDEX_STATE,
   POST_RAG_JOBS,
+  POST_VIDEO_RAG_ASSETS,
+  POST_VIDEO_RAG_JOBS,
   processPostRagJobBatch,
+  processPostVideoRagJobBatch,
   readTencentLkeapRagConfigFromEnv,
+  readVideoRagCostPolicyFromEnv,
   searchPostsWithRag,
 } from '../post-rag'
 
 beforeEach(() => {
-  jest.clearAllMocks()
+  jest.resetAllMocks()
 })
 
 test('buildRagQuery expands thrift family-style intent into classical family-rule evidence terms', () => {
@@ -155,6 +163,104 @@ test('processPostRagJobBatch can target pending jobs for one post', async () => 
     orderBy: ['createdAt', 'asc'],
     limit: 3,
   })
+})
+
+test('processPostRagJobBatch adds video metadata chunks and cost-gated analysis jobs', async () => {
+  const provider = {
+    name: 'fake-rag',
+    isConfigured: jest.fn(() => true),
+    search: jest.fn(),
+    upsertChunks: jest.fn().mockResolvedValue(undefined),
+    deletePostChunks: jest.fn(),
+  }
+  mockDb.query
+    .mockResolvedValueOnce([{ _id: 'job-1', postId: 'post-video', action: 'upsert', attempts: 0 }])
+    .mockResolvedValueOnce([])
+  mockDb.getById
+    .mockResolvedValueOnce({
+      _id: 'post-video',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      authorId: 'user-1',
+      status: 'active',
+      auditStatus: 'pass',
+      content: {
+        title: '视频帖子',
+        videos: [
+          {
+            itemId: 'video-1',
+            source: 'cos',
+            title: '家风',
+            description: '',
+            fileID: 'cloud://env/posts/videos/family-video.mp4',
+            duration: 600,
+          },
+        ],
+      },
+      commentCount: 0,
+      likeCount: 0,
+      createdAt: '2026-06-30T00:00:00.000Z',
+      updatedAt: '2026-06-30T01:00:00.000Z',
+    })
+    .mockResolvedValueOnce({
+      _id: 'section-1',
+      communityId: 'community-1',
+      name: '视频课',
+      icon: 'video',
+      order: 1,
+      enableComment: true,
+      enableLike: true,
+      type: 'evergreen',
+      status: 'active',
+      widgets: [
+        { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, showInList: true, order: 0 },
+        { widgetId: 'videos', type: 'video_group', label: '视频', fieldKey: 'videos', required: false, showInList: false, order: 1 },
+      ],
+    })
+  mockDb.updateById.mockResolvedValue({ stats: { updated: 1 } })
+  mockDb.create.mockResolvedValue('video-job-1')
+
+  const result = await processPostRagJobBatch({
+    provider,
+    limit: 1,
+    videoPolicy: {
+      analysisEnabled: true,
+      maxJobsPerPost: 1,
+      maxCostUnitsPerPost: 8,
+      maxFramesPerVideo: 4,
+      maxAsrSecondsPerVideo: 120,
+      minMetadataTextCharsForAnalysis: 24,
+    },
+  })
+
+  expect(result.scannedCount).toBe(1)
+  expect(provider.upsertChunks).toHaveBeenCalledWith(expect.arrayContaining([
+    expect.objectContaining({
+      postId: 'post-video',
+      fieldLabel: '视频',
+      fieldType: 'video_group',
+      text: expect.stringContaining('文件名：family-video.mp4'),
+      metadata: expect.objectContaining({
+        evidenceSource: 'video_metadata',
+        costTier: 'free',
+      }),
+    }),
+  ]))
+  expect(mockDb.create).toHaveBeenCalledWith(POST_VIDEO_RAG_JOBS, expect.objectContaining({
+    postId: 'post-video',
+    status: 'pending',
+    requestedAnalyses: ['cover_ocr', 'keyframe_vision', 'asr'],
+    estimatedCostUnits: 8,
+  }))
+  expect(mockDb.updateById).toHaveBeenCalledWith(POST_RAG_INDEX_STATE, 'post-video', expect.objectContaining({
+    status: 'indexed',
+    videoRag: expect.objectContaining({
+      metadataChunkCount: 1,
+      analysisChunkCount: 0,
+      analysisJobQueuedCount: 1,
+      analysisEnabled: true,
+    }),
+  }))
 })
 
 test('backfillPostRagJobsForSectionBatch enqueues upsert and delete jobs without embedding inline', async () => {
@@ -287,6 +393,26 @@ test('readTencentLkeapRagConfigFromEnv prefers explicit LKEAP secrets over Cloud
   expect(config.secretKey).toBe('lkeap-secret-key')
 })
 
+test('createVideoRagAnalyzerFromEnv selects TokenHub multimodal analyzer when configured', () => {
+  const analyzer = createVideoRagAnalyzerFromEnv({
+    POST_VIDEO_RAG_TOKENHUB_API_KEY: 'tokenhub-key',
+    POST_VIDEO_RAG_TOKENHUB_MODEL: 'youtu-vita',
+  } as NodeJS.ProcessEnv)
+
+  expect(analyzer.name).toBe('tokenhub-video-rag-analyzer')
+  expect(analyzer.isConfigured()).toBe(true)
+})
+
+test('createVideoRagAnalyzerFromEnv prefers Tencent ASR analyzer for audio-first video analysis', () => {
+  const analyzer = createVideoRagAnalyzerFromEnv({
+    POST_VIDEO_RAG_ASR_SECRET_ID: 'asr-secret-id',
+    POST_VIDEO_RAG_ASR_SECRET_KEY: 'asr-secret-key',
+  } as NodeJS.ProcessEnv)
+
+  expect(analyzer.name).toBe('tencent-asr-video-rag-analyzer')
+  expect(analyzer.isConfigured()).toBe(true)
+})
+
 test('LKEAP provider deletes all CloudBase chunks for a post across pages', async () => {
   const provider = createTencentLkeapCloudBaseProvider({
     secretId: 'AKIDtest',
@@ -310,4 +436,357 @@ test('LKEAP provider deletes all CloudBase chunks for a post across pages', asyn
   expect(mockDb.query).toHaveBeenNthCalledWith(2, POST_RAG_CHUNKS, { postId: 'post-1' }, { limit: 100 })
   expect(mockDb.removeById).toHaveBeenCalledTimes(102)
   expect(mockDb.removeById).toHaveBeenCalledWith(POST_RAG_CHUNKS, 'chunk-101')
+})
+
+test('buildVideoRagChunksForPost adds low-cost metadata and cached OCR ASR frame evidence', () => {
+  const section = {
+    _id: 'section-1',
+    communityId: 'community-1',
+    name: '家风课堂',
+    icon: 'video',
+    order: 1,
+    enableComment: true,
+    enableLike: true,
+    type: 'evergreen',
+    status: 'active',
+    widgets: [
+      { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, showInList: true, order: 0 },
+      { widgetId: 'videos', type: 'video_group', label: '视频', fieldKey: 'videos', required: false, showInList: false, order: 1 },
+    ],
+  } as any
+  const video = {
+    itemId: 'video-1',
+    source: 'cos',
+    title: '朱子家风视频课',
+    description: '讲勤俭持家',
+    hint: '节俭家风',
+    fileID: 'cloud://env/posts/videos/zhuzi-family.mp4',
+    cover: 'cloud://env/posts/covers/zhuzi-cover.jpg',
+    duration: 96,
+  }
+  const post = {
+    _id: 'post-video',
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    content: { title: '视频帖子', videos: [video] },
+    createdAt: '2026-06-30T00:00:00.000Z',
+    updatedAt: '2026-06-30T01:00:00.000Z',
+  } as any
+  const cacheKey = buildVideoRagCacheKey(video)
+  const chunks = buildVideoRagChunksForPost(post, section, {
+    now: '2026-06-30T02:00:00.000Z',
+    assetsByCacheKey: new Map([[cacheKey, {
+      cacheKey,
+      status: 'ready',
+      visualSummary: '关键帧显示朱子治家格言讲义。',
+      ocrText: '一粥一饭，当思来处不易。',
+      asrTranscript: '这段视频讲半丝半缕，恒念物力维艰。',
+      frameSummaries: [
+        { timeMs: 3000, summary: '老师展示节俭家风板书。', ocrText: '勤俭持家' },
+      ],
+      updatedAt: '2026-06-30T01:30:00.000Z',
+    } as any]]),
+  })
+
+  expect(chunks).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      postId: 'post-video',
+      fieldLabel: '视频',
+      fieldType: 'video_group',
+      text: expect.stringContaining('视频名称：朱子家风视频课'),
+      metadata: expect.objectContaining({
+        evidenceSource: 'video_metadata',
+        costTier: 'free',
+        cacheKey,
+      }),
+    }),
+    expect.objectContaining({
+      postId: 'post-video',
+      fieldLabel: '视频理解',
+      fieldType: 'video_group',
+      text: expect.stringContaining('语音转写：这段视频讲半丝半缕'),
+      metadata: expect.objectContaining({
+        evidenceSource: 'video_analysis_cache',
+        costTier: 'cached',
+        cacheKey,
+      }),
+    }),
+  ]))
+  expect(chunks.map((chunk) => chunk.text).join('\n')).toContain('文件名：zhuzi-family.mp4')
+  expect(chunks.map((chunk) => chunk.text).join('\n')).toContain('OCR：一粥一饭，当思来处不易。')
+  expect(chunks.map((chunk) => chunk.text).join('\n')).toContain('关键帧 3s：老师展示节俭家风板书。 OCR：勤俭持家')
+})
+
+test('planVideoRagAnalysisJobsForPost queues only low-text missing-cache videos within cost policy', () => {
+  const section = {
+    _id: 'section-1',
+    communityId: 'community-1',
+    name: '家风课堂',
+    widgets: [
+      { widgetId: 'videos', type: 'video_group', label: '视频', fieldKey: 'videos', required: false, showInList: false, order: 1 },
+    ],
+  } as any
+  const shortVideo = {
+    itemId: 'video-short',
+    source: 'cos',
+    title: '家风',
+    fileID: 'cloud://env/posts/videos/short.mp4',
+    duration: 600,
+  }
+  const describedVideo = {
+    itemId: 'video-described',
+    source: 'cos',
+    title: '朱子治家格言节俭家风完整讲解',
+    description: '这个视频已经有很完整的文字描述，讲一粥一饭，当思来处不易，半丝半缕，恒念物力维艰。',
+    fileID: 'cloud://env/posts/videos/described.mp4',
+    duration: 600,
+  }
+  const cachedVideo = {
+    itemId: 'video-cached',
+    source: 'cos',
+    title: '缓存视频',
+    fileID: 'cloud://env/posts/videos/cached.mp4',
+  }
+  const post = {
+    _id: 'post-video',
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    content: { videos: [shortVideo, describedVideo, cachedVideo] },
+    updatedAt: '2026-06-30T01:00:00.000Z',
+  } as any
+
+  const jobs = planVideoRagAnalysisJobsForPost(post, section, {
+    now: '2026-06-30T02:00:00.000Z',
+    assetsByCacheKey: new Map([[buildVideoRagCacheKey(cachedVideo), { status: 'ready' } as any]]),
+    policy: {
+      analysisEnabled: true,
+      maxJobsPerPost: 2,
+      maxCostUnitsPerPost: 8,
+      maxFramesPerVideo: 4,
+      maxAsrSecondsPerVideo: 120,
+      minMetadataTextCharsForAnalysis: 24,
+    },
+  })
+
+  expect(jobs).toHaveLength(1)
+  expect(jobs[0]).toEqual(expect.objectContaining({
+    postId: 'post-video',
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    status: 'pending',
+    reason: 'rag.video.low_text_signal',
+    requestedAnalyses: ['cover_ocr', 'keyframe_vision', 'asr'],
+    frameStrategy: expect.objectContaining({
+      includeCover: true,
+      maxFrames: 4,
+    }),
+    maxAsrSeconds: 120,
+    estimatedCostUnits: 8,
+    video: expect.objectContaining({
+      itemId: 'video-short',
+      title: '家风',
+    }),
+  }))
+})
+
+test('readVideoRagCostPolicyFromEnv allows explicit one-hour ASR analysis budget', () => {
+  const policy = readVideoRagCostPolicyFromEnv({
+    POST_VIDEO_RAG_ANALYSIS_ENABLED: 'true',
+    POST_VIDEO_RAG_MAX_JOBS_PER_POST: '1',
+    POST_VIDEO_RAG_MAX_COST_UNITS_PER_POST: '120',
+    POST_VIDEO_RAG_MAX_FRAMES_PER_VIDEO: '0',
+    POST_VIDEO_RAG_MAX_ASR_SECONDS_PER_VIDEO: '3600',
+  } as NodeJS.ProcessEnv)
+
+  expect(policy).toEqual(expect.objectContaining({
+    analysisEnabled: true,
+    maxJobsPerPost: 1,
+    maxCostUnitsPerPost: 120,
+    maxFramesPerVideo: 0,
+    maxAsrSecondsPerVideo: 3600,
+  }))
+})
+
+test('processPostVideoRagJobBatch caches analyzer output and requeues post RAG indexing', async () => {
+  const analyzer = {
+    name: 'fake-video-analyzer',
+    isConfigured: jest.fn(() => true),
+    analyze: jest.fn(async () => ({
+      visualSummary: '关键帧显示家训课程。',
+      ocrText: '一粥一饭，当思来处不易。',
+      asrTranscript: '老师讲到半丝半缕，恒念物力维艰。',
+      frameSummaries: [
+        { timeMs: 5000, summary: '画面出现节俭家风板书。', ocrText: '勤俭持家' },
+      ],
+    })),
+  }
+  mockDb.query.mockResolvedValueOnce([
+    {
+      _id: 'video-job-1',
+      postId: 'post-video',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      cacheKey: 'vrk-video-1',
+      status: 'pending',
+      attempts: 0,
+      requestedAnalyses: ['cover_ocr', 'keyframe_vision', 'asr'],
+      frameStrategy: { includeCover: true, maxFrames: 4, minSceneGapSeconds: 10 },
+      maxAsrSeconds: 120,
+      estimatedCostUnits: 8,
+      video: {
+        itemId: 'video-1',
+        source: 'cos',
+        title: '家风',
+        fileID: 'cloud://env/posts/videos/family-video.mp4',
+      },
+    },
+  ])
+  mockDb.updateById.mockImplementation(async (collectionName: string) => {
+    if (collectionName === POST_VIDEO_RAG_ASSETS) throw new Error('asset missing')
+    return { stats: { updated: 1 } }
+  })
+  mockDb.create.mockResolvedValue('created')
+
+  const result = await processPostVideoRagJobBatch({ analyzer, limit: 1 })
+
+  expect(result).toEqual({
+    scannedCount: 1,
+    results: [{ jobId: 'video-job-1', ok: true }],
+  })
+  expect(analyzer.analyze).toHaveBeenCalledWith(expect.objectContaining({
+    cacheKey: 'vrk-video-1',
+    video: expect.objectContaining({ title: '家风' }),
+  }))
+  expect(mockDb.create).toHaveBeenCalledWith(POST_VIDEO_RAG_ASSETS, expect.objectContaining({
+    _id: 'vrk-video-1',
+    cacheKey: 'vrk-video-1',
+    status: 'ready',
+    visualSummary: '关键帧显示家训课程。',
+    ocrText: '一粥一饭，当思来处不易。',
+    asrTranscript: '老师讲到半丝半缕，恒念物力维艰。',
+    provider: 'fake-video-analyzer',
+  }))
+  expect(mockDb.updateById).toHaveBeenCalledWith(POST_VIDEO_RAG_JOBS, 'video-job-1', expect.objectContaining({
+    status: 'completed',
+  }))
+  expect(mockDb.create).toHaveBeenCalledWith(POST_RAG_JOBS, expect.objectContaining({
+    postId: 'post-video',
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    action: 'upsert',
+    reason: 'rag.video.analysis.ready',
+    status: 'pending',
+  }))
+})
+
+test('processPostVideoRagJobBatch keeps async ASR jobs processing without reindexing too early', async () => {
+  const analyzer = {
+    name: 'fake-asr-analyzer',
+    isConfigured: jest.fn(() => true),
+    analyze: jest.fn(async () => ({
+      pending: true as const,
+      providerTaskId: '123456',
+      providerStatus: 'processing',
+    })),
+  }
+  mockDb.query
+    .mockResolvedValueOnce([
+      {
+        _id: 'video-job-1',
+        postId: 'post-video',
+        communityId: 'community-1',
+        sectionId: 'section-1',
+        cacheKey: 'vrk-video-1',
+        status: 'pending',
+        attempts: 0,
+        requestedAnalyses: ['asr'],
+        frameStrategy: { includeCover: false, maxFrames: 0, minSceneGapSeconds: 10 },
+        maxAsrSeconds: 3600,
+        estimatedCostUnits: 120,
+        video: {
+          itemId: 'video-1',
+          source: 'cos',
+          title: '家风课',
+          fileID: 'cloud://env/posts/videos/family-video.mp4',
+        },
+      },
+    ])
+    .mockResolvedValueOnce([])
+  mockDb.updateById.mockResolvedValue({ stats: { updated: 1 } })
+  mockDb.create.mockResolvedValue('created')
+
+  const result = await processPostVideoRagJobBatch({ analyzer, limit: 1 })
+
+  expect(result.results).toEqual([{ jobId: 'video-job-1', ok: true, pending: true }])
+  expect(mockDb.updateById).toHaveBeenCalledWith(POST_VIDEO_RAG_JOBS, 'video-job-1', expect.objectContaining({
+    status: 'processing',
+    providerTaskId: '123456',
+    providerStatus: 'processing',
+  }))
+  expect(mockDb.create).not.toHaveBeenCalledWith(POST_RAG_JOBS, expect.anything())
+})
+
+test('processPostVideoRagJobBatch polls processing ASR jobs and indexes completed transcript', async () => {
+  const analyzer = {
+    name: 'fake-asr-analyzer',
+    isConfigured: jest.fn(() => true),
+    analyze: jest.fn(async () => ({
+      asrTranscript: '老师讲到勤俭持家，也讲一粥一饭，当思来处不易。',
+      visualSummary: '',
+      ocrText: '',
+      frameSummaries: [],
+    })),
+  }
+  mockDb.query
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([
+      {
+        _id: 'video-job-1',
+        postId: 'post-video',
+        communityId: 'community-1',
+        sectionId: 'section-1',
+        cacheKey: 'vrk-video-1',
+        status: 'processing',
+        attempts: 0,
+        requestedAnalyses: ['asr'],
+        frameStrategy: { includeCover: false, maxFrames: 0, minSceneGapSeconds: 10 },
+        maxAsrSeconds: 3600,
+        estimatedCostUnits: 120,
+        providerTaskId: '123456',
+        providerStatus: 'created',
+        video: {
+          itemId: 'video-1',
+          source: 'cos',
+          title: '家风课',
+          fileID: 'cloud://env/posts/videos/family-video.mp4',
+        },
+      },
+    ])
+  mockDb.updateById.mockImplementation(async (collectionName: string) => {
+    if (collectionName === POST_VIDEO_RAG_ASSETS) throw new Error('asset missing')
+    return { stats: { updated: 1 } }
+  })
+  mockDb.create.mockResolvedValue('created')
+
+  const result = await processPostVideoRagJobBatch({ analyzer, limit: 1 })
+
+  expect(result.results).toEqual([{ jobId: 'video-job-1', ok: true }])
+  expect(analyzer.analyze).toHaveBeenCalledWith(expect.objectContaining({
+    status: 'processing',
+    providerTaskId: '123456',
+  }))
+  expect(mockDb.create).toHaveBeenCalledWith(POST_VIDEO_RAG_ASSETS, expect.objectContaining({
+    _id: 'vrk-video-1',
+    status: 'ready',
+    asrTranscript: '老师讲到勤俭持家，也讲一粥一饭，当思来处不易。',
+    provider: 'fake-asr-analyzer',
+  }))
+  expect(mockDb.updateById).toHaveBeenCalledWith(POST_VIDEO_RAG_JOBS, 'video-job-1', expect.objectContaining({
+    status: 'completed',
+  }))
+  expect(mockDb.create).toHaveBeenCalledWith(POST_RAG_JOBS, expect.objectContaining({
+    postId: 'post-video',
+    action: 'upsert',
+    reason: 'rag.video.analysis.ready',
+  }))
 })

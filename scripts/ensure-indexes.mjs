@@ -391,6 +391,45 @@ const INDEXES = [
       { Name: 'postId', Direction: '1' },
     ],
   },
+  {
+    coll: 'post_video_rag_assets',
+    name: 'idx_cacheKey',
+    keys: [
+      { Name: 'cacheKey', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_video_rag_assets',
+    name: 'idx_status_updatedAt',
+    keys: [
+      { Name: 'status', Direction: '1' },
+      { Name: 'updatedAt', Direction: '-1' },
+    ],
+  },
+  {
+    coll: 'post_video_rag_jobs',
+    name: 'idx_status_createdAt',
+    keys: [
+      { Name: 'status', Direction: '1' },
+      { Name: 'createdAt', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_video_rag_jobs',
+    name: 'idx_budgetDate_status',
+    keys: [
+      { Name: 'budgetDate', Direction: '1' },
+      { Name: 'status', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_video_rag_jobs',
+    name: 'idx_postId_status',
+    keys: [
+      { Name: 'postId', Direction: '1' },
+      { Name: 'status', Direction: '1' },
+    ],
+  },
   // app_configs: global product/admin configuration documents by stable key
   {
     coll: 'app_configs',
@@ -420,6 +459,8 @@ const REQUIRED_COLLECTIONS = [
   'post_rag_jobs',            // 正式 RAG 异步索引任务
   'post_rag_index_state',     // 正式 RAG 每篇帖子索引状态
   'post_rag_chunks',          // RAG chunk 元数据镜像/排障用
+  'post_video_rag_assets',     // 视频 OCR/ASR/关键帧摘要缓存（按 cacheKey 复用）
+  'post_video_rag_jobs',       // 成本感知的视频分析异步任务
 ]
 
 let hadError = false
