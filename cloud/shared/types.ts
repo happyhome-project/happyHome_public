@@ -213,6 +213,16 @@ export interface Community {
   createdAt: string
   motto?: string
   mottoCite?: string
+  homeBanners?: HomeBanner[]
+}
+
+export interface HomeBanner {
+  bannerId: string
+  postId: string
+  title?: string
+  coverImage: string
+  order: number
+  enabled?: boolean
 }
 
 export interface CommunityMember {

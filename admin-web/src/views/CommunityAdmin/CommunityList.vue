@@ -135,7 +135,8 @@
             <el-button data-testid="community-sections-button" :data-community-id="getCommunityId(row)" size="small" @click="goSections(getCommunityId(row))">板块管理</el-button>
             <el-button data-testid="community-members-button" :data-community-id="getCommunityId(row)" size="small" @click="goMembers(getCommunityId(row))">成员管理</el-button>
             <el-button size="small" @click="goPosts(getCommunityId(row))">帖子管理</el-button>
-            <el-button data-testid="community-motto-button" :data-community-id="getCommunityId(row)" size="small" @click="openMotto(row)">格言</el-button>
+            <el-button data-testid="community-motto-button" :data-community-id="getCommunityId(row)" size="small" @click="openMottoEditor(row)">格言</el-button>
+            <el-button data-testid="community-banner-button" :data-community-id="getCommunityId(row)" size="small" @click="openBannerManager(row)">首页 Banner</el-button>
             <el-button
               data-testid="community-join-type-toggle"
               :data-community-id="getCommunityId(row)"
@@ -165,11 +166,11 @@
 
     <el-empty v-if="!loading && filteredCommunities.length === 0" description="暂无可管理社区" />
 
-    <el-dialog v-model="showMottoDialog" title="编辑社区格言" width="480px">
+    <el-dialog v-model="showMottoDialog" title="编辑格言" width="560px">
       <div style="color: #909399; font-size: 13px; margin-bottom: 12px;">
-        格言会显示在小程序首页的引文区域，可以留空不展示。
+        格言会显示在小程序首页社区名下方，可以留空不展示。Banner 图片请到“首页 Banner”单独管理。
       </div>
-      <el-form :model="mottoForm" label-width="80px">
+      <el-form :model="mottoForm" label-width="70px">
         <el-form-item label="格言">
           <div data-testid="community-motto-input" style="width: 100%;">
             <el-input
@@ -198,6 +199,75 @@
         <el-button data-testid="community-motto-save" type="primary" @click="saveMotto" :loading="savingMotto">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="showBannerDialog"
+      data-testid="community-banner-dialog"
+      title="首页 Banner 管理"
+      width="860px"
+    >
+      <div class="banner-dialog-help">
+        从当前社区的任意板块选择帖子，单独上传首页展示图。用户点击 Banner 后会进入关联帖子详情。
+      </div>
+      <div class="banner-toolbar">
+        <el-button data-testid="community-banner-add" type="primary" @click="addBannerRow">添加 Banner</el-button>
+        <span class="muted-table-cell">拖拽图片可更换封面；第一张图会作为 Banner 图。</span>
+      </div>
+      <div v-loading="loadingBannerPosts" class="banner-manager">
+        <div
+          v-for="(row, index) in bannerForm.rows"
+          :key="row.localId"
+          data-testid="community-banner-row"
+          class="banner-row"
+        >
+          <div class="banner-row-head">
+            <strong>第 {{ index + 1 }} 位</strong>
+            <div class="banner-row-actions">
+              <el-button size="small" :disabled="index === 0" @click="moveBannerRow(index, -1)">上移</el-button>
+              <el-button size="small" :disabled="index === bannerForm.rows.length - 1" @click="moveBannerRow(index, 1)">下移</el-button>
+              <el-button size="small" type="danger" @click="removeBannerRow(index)">删除</el-button>
+            </div>
+          </div>
+          <el-form :model="row" label-width="86px">
+            <el-form-item label="关联帖子">
+              <el-select
+                v-model="row.postId"
+                filterable
+                style="width: 100%;"
+                placeholder="选择当前社区中的帖子"
+                @change="onBannerPostChange(row)"
+              >
+                <el-option
+                  v-for="post in bannerPostOptions"
+                  :key="post.postId"
+                  :label="post.label"
+                  :value="post.postId"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="展示标题">
+              <el-input
+                v-model="row.title"
+                maxlength="60"
+                show-word-limit
+                placeholder="可选；为空时小程序会使用帖子标题"
+              />
+            </el-form-item>
+            <el-form-item label="封面图">
+              <div data-testid="community-banner-cover-editor" style="width: 100%;">
+                <ImageGroupAdminEditor v-model="row.coverImages" />
+                <div class="muted-table-cell" style="margin-top: 6px;">仅第一张作为首页 Banner 图；可上传图片，也可粘贴 cloud:// 或 https:// 图片地址。</div>
+              </div>
+            </el-form-item>
+          </el-form>
+        </div>
+        <el-empty v-if="!loadingBannerPosts && bannerForm.rows.length === 0" description="暂无 Banner" />
+      </div>
+      <template #footer>
+        <el-button @click="showBannerDialog = false">取消</el-button>
+        <el-button data-testid="community-banner-save" type="primary" @click="saveHomeBanners" :loading="savingBanners">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -206,9 +276,10 @@ import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
-import { approvalApi, communityApi } from '../../api/cloud'
+import { approvalApi, communityApi, postAdminApi } from '../../api/cloud'
 import { useAuthStore } from '../../stores/auth'
 import { usePersistedTableColumns } from '../../utils/persistedTableColumns'
+import ImageGroupAdminEditor from '../../components/ImageGroupAdminEditor.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -218,9 +289,20 @@ const disablingId = ref('')
 const updatingJoinTypeId = ref('')
 const showMottoDialog = ref(false)
 const savingMotto = ref(false)
+const showBannerDialog = ref(false)
+const savingBanners = ref(false)
+const loadingBannerPosts = ref(false)
+const bannerPosts = ref<any[]>([])
 const keyword = ref('')
 const statusFilter = ref<'all' | 'active' | 'pending' | 'rejected'>('all')
 const pendingMemberCountByCommunity = ref<Record<string, number>>({})
+interface BannerFormRow {
+  localId: string
+  bannerId: string
+  postId: string
+  title: string
+  coverImages: string[]
+}
 type JoinType = 'open' | 'approval'
 type CommunityTableColumnKey =
   | 'name'
@@ -264,6 +346,10 @@ const mottoForm = ref<{ communityId: string; motto: string; mottoCite: string }>
   motto: '',
   mottoCite: '',
 })
+const bannerForm = ref<{ communityId: string; rows: BannerFormRow[] }>({
+  communityId: '',
+  rows: [],
+})
 
 const filteredCommunities = computed(() => {
   const q = keyword.value.trim().toLowerCase()
@@ -273,6 +359,14 @@ const filteredCommunities = computed(() => {
     return [community.name, community.description, community.motto, community.mottoCite]
       .some((part) => String(part || '').toLowerCase().includes(q))
   })
+})
+
+const bannerPostOptions = computed(() => {
+  return bannerPosts.value.map((post) => ({
+    postId: String(post._id || post.id || ''),
+    title: extractPostTitle(post),
+    label: `${post.sectionName || '未命名板块'}｜${extractPostTitle(post)}`,
+  })).filter((post) => post.postId)
 })
 
 onMounted(() => {
@@ -351,7 +445,7 @@ async function goPosts(communityId: string) {
   await router.push({ name: 'posts', params: { communityId } })
 }
 
-function openMotto(row: any) {
+function openMottoEditor(row: any) {
   const communityId = getCommunityId(row)
   if (!communityId) {
     ElMessage.error('社区 ID 缺失，无法编辑格言')
@@ -386,6 +480,159 @@ async function saveMotto() {
   } finally {
     savingMotto.value = false
   }
+}
+
+async function openBannerManager(row: any) {
+  const communityId = getCommunityId(row)
+  if (!communityId) {
+    ElMessage.error('社区 ID 缺失，无法管理首页 Banner')
+    return
+  }
+
+  bannerForm.value = {
+    communityId,
+    rows: normalizeBannerRows(row.homeBanners || []),
+  }
+  showBannerDialog.value = true
+  await loadBannerPosts(communityId)
+}
+
+async function loadBannerPosts(communityId: string) {
+  loadingBannerPosts.value = true
+  try {
+    const res = await postAdminApi.list({
+      communityId,
+      status: 'active',
+      auditStatus: 'all',
+    }) as any
+    bannerPosts.value = res.posts || []
+  } catch (e: any) {
+    bannerPosts.value = []
+    ElMessage.error(e.message || '加载帖子失败')
+  } finally {
+    loadingBannerPosts.value = false
+  }
+}
+
+function normalizeBannerRows(banners: any[]): BannerFormRow[] {
+  return (Array.isArray(banners) ? banners : [])
+    .slice()
+    .sort((a, b) => Number(a?.order || 0) - Number(b?.order || 0))
+    .map((banner, index) => ({
+      localId: `${Date.now()}-${index}-${String(banner?.postId || '')}`,
+      bannerId: String(banner?.bannerId || ''),
+      postId: String(banner?.postId || ''),
+      title: String(banner?.title || ''),
+      coverImages: banner?.coverImage ? [String(banner.coverImage)] : [],
+    }))
+}
+
+function addBannerRow() {
+  bannerForm.value.rows.push({
+    localId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    bannerId: '',
+    postId: '',
+    title: '',
+    coverImages: [],
+  })
+}
+
+function moveBannerRow(index: number, delta: number) {
+  const nextIndex = index + delta
+  if (nextIndex < 0 || nextIndex >= bannerForm.value.rows.length) return
+  const rows = bannerForm.value.rows
+  const [row] = rows.splice(index, 1)
+  rows.splice(nextIndex, 0, row)
+}
+
+function removeBannerRow(index: number) {
+  bannerForm.value.rows.splice(index, 1)
+}
+
+function onBannerPostChange(row: BannerFormRow) {
+  if (row.title.trim()) return
+  const selected = bannerPostOptions.value.find((post) => post.postId === row.postId)
+  if (selected) row.title = selected.title
+}
+
+async function saveHomeBanners() {
+  const seenPostIds = new Set<string>()
+  for (const [index, row] of bannerForm.value.rows.entries()) {
+    if (!row.postId) {
+      ElMessage.error(`第 ${index + 1} 个 Banner 请选择关联帖子`)
+      return
+    }
+    if (!row.coverImages[0]) {
+      ElMessage.error(`第 ${index + 1} 个 Banner 请上传封面图`)
+      return
+    }
+    if (seenPostIds.has(row.postId)) {
+      ElMessage.error('Banner 关联帖子不能重复')
+      return
+    }
+    seenPostIds.add(row.postId)
+  }
+
+  savingBanners.value = true
+  try {
+    const banners = bannerForm.value.rows.map((row) => ({
+      bannerId: row.bannerId,
+      postId: row.postId,
+      title: row.title,
+      coverImage: row.coverImages[0] || '',
+      enabled: true,
+    }))
+    await communityApi.updateHomeBanners({
+      communityId: bannerForm.value.communityId,
+      banners,
+    })
+    const target = communities.value.find(c => c._id === bannerForm.value.communityId)
+    if (target) {
+      target.homeBanners = banners.map((banner, index) => ({
+        ...banner,
+        bannerId: banner.bannerId || `${banner.postId}-${index}`,
+        order: index,
+      }))
+    }
+    ElMessage.success('已保存首页 Banner')
+    showBannerDialog.value = false
+  } catch (e: any) {
+    ElMessage.error(e.message || '保存失败')
+  } finally {
+    savingBanners.value = false
+  }
+}
+
+function extractPostTitle(post: any): string {
+  const content = post?.content || {}
+  const direct = pickReadableText(Object.values(content), 0)
+  return direct || post?.title || post?._id || '未命名帖子'
+}
+
+function pickReadableText(values: unknown[], depth: number): string {
+  if (depth > 2) return ''
+  for (const value of values) {
+    if (typeof value === 'string') {
+      const text = value.trim().replace(/\s+/g, ' ')
+      if (text) return text.slice(0, 40)
+    }
+    if (Array.isArray(value)) {
+      const nested = pickReadableText(value, depth + 1)
+      if (nested) return nested
+    }
+    if (value && typeof value === 'object') {
+      const objectValue = value as Record<string, unknown>
+      const preferred = pickReadableText([
+        objectValue.title,
+        objectValue.name,
+        objectValue.text,
+        objectValue.address,
+        objectValue.content,
+      ], depth + 1)
+      if (preferred) return preferred
+    }
+  }
+  return ''
 }
 
 async function toggleJoinType(row: any) {
@@ -461,5 +708,48 @@ async function disableCommunity(row: any) {
 
 .muted-table-cell {
   color: #c0c4cc;
+}
+
+.banner-dialog-help {
+  color: #606266;
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+
+.banner-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.banner-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 62vh;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.banner-row {
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  padding: 14px 14px 4px;
+  background: #fff;
+}
+
+.banner-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.banner-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 </style>

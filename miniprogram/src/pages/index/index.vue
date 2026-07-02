@@ -30,6 +30,45 @@
       <text v-if="quoteCite" class="cite">— {{ quoteCite }}</text>
     </view>
 
+    <view v-if="homeBannerItems.length > 0" class="home-banner">
+      <swiper
+        class="home-banner-swiper"
+        :current="homeBannerActiveIndex"
+        :indicator-dots="false"
+        :autoplay="false"
+        @change="onHomeBannerChange"
+      >
+        <swiper-item
+          v-for="banner in homeBannerItems"
+          :key="banner.bannerId"
+          class="home-banner-slide"
+          @touchstart="onHomeBannerPointerStart"
+          @touchmove="onHomeBannerPointerMove"
+          @touchend="onHomeBannerPointerEnd"
+          @mousedown="onHomeBannerPointerStart"
+          @mousemove="onHomeBannerPointerMove"
+          @mouseup="onHomeBannerPointerEnd"
+          @tap="openHomeBanner(banner)"
+        >
+          <image
+            :src="banner.coverImage"
+            class="home-banner-image"
+            mode="aspectFill"
+          />
+          <view class="home-banner-shade"></view>
+          <text class="home-banner-title">{{ banner.title }}</text>
+        </swiper-item>
+      </swiper>
+      <view v-if="homeBannerItems.length > 1" class="home-banner-dots">
+        <text
+          v-for="(banner, i) in homeBannerItems"
+          :key="`${banner.bannerId}-dot`"
+          class="home-banner-dot"
+          :class="{ active: i === homeBannerActiveIndex }"
+        ></text>
+      </view>
+    </view>
+
     <view class="home-search">
       <view class="home-search-box">
         <text class="home-search-icon">⌕</text>
@@ -298,7 +337,7 @@ import {
   savePendingShareCommunity,
 } from '../../utils/community-share'
 import { markGuestIntroSeen, shouldShowGuestIntro } from '../../utils/guest-intro'
-import type { HomeSnapshot } from '../../../../cloud/shared/types'
+import type { HomeBanner, HomeSnapshot } from '../../../../cloud/shared/types'
 import type { GuestIntroConfig } from '../../../../cloud/shared/guest-intro-config'
 
 const communityStore = useCommunityStore()
@@ -307,13 +346,19 @@ const showSwitcher = ref(false)
 const showGuestIntro = ref(false)
 const guestIntroConfig = ref<GuestIntroConfig | null>(null)
 const postsBySection = ref<Record<string, any[]>>({})
+const resolvedHomeBannerCoverUrls = ref<Record<string, string>>({})
 const incomingShareCommunityId = ref('')
 const shareImageUrl = ref(DEFAULT_COMMUNITY_SHARE_IMAGE)
 const homeSearchQuery = ref('')
+const homeBannerActiveIndex = ref(0)
 let refreshingHome = false
 let queuedForcedHomeRefresh = false
 let mountedAt = 0
 let unsubscribeBackgroundFetchSnapshot: (() => void) | null = null
+let homeBannerPointerStartX = 0
+let homeBannerPointerMoved = false
+let suppressNextHomeBannerTap = false
+let homeBannerResolveToken = 0
 const reportedMissingHomeTitle = new Set<string>()
 const NOTICE_PREVIEW_LIMIT = 68
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
@@ -351,6 +396,39 @@ const kindEn = computed(() => 'Welcome : )')
 const quote = computed(() => communityStore.currentCommunity?.motto || '')
 const quoteCite = computed(() => communityStore.currentCommunity?.mottoCite || '')
 const currentShareCommunityId = computed(() => communityStore.currentCommunityId || communityStore.currentCommunity?._id || '')
+
+interface HomeBannerItem {
+  bannerId: string
+  postId: string
+  title: string
+  coverImage: string
+}
+
+const rawHomeBannerCoverImages = computed(() => {
+  const banners = ((communityStore.currentCommunity as any)?.homeBanners || []) as HomeBanner[]
+  return banners
+    .map((banner) => String(banner?.coverImage || '').trim())
+    .filter(Boolean)
+})
+
+const homeBannerItems = computed<HomeBannerItem[]>(() => {
+  const banners = ((communityStore.currentCommunity as any)?.homeBanners || []) as HomeBanner[]
+  return banners
+    .filter((banner) => banner && banner.enabled !== false)
+    .slice()
+    .sort((a, b) => Number(a?.order || 0) - Number(b?.order || 0))
+    .map((banner, index) => {
+      const rawCover = String(banner.coverImage || '').trim()
+      const coverImage = resolvedHomeBannerCoverUrls.value[rawCover] || rawCover
+      return {
+        bannerId: String(banner.bannerId || `${banner.postId}-${index}`),
+        postId: String(banner.postId || '').trim(),
+        title: String(banner.title || '').trim() || '新人必看',
+        coverImage,
+      }
+    })
+    .filter((banner) => banner.postId && banner.coverImage)
+})
 
 // 辅助：归一化 section 的 type/status（应对老数据）
 function secType(s: any): 'realtime' | 'evergreen' {
@@ -572,6 +650,65 @@ function makeNoticePreview(content: string) {
 }
 
 // ── Actions ──
+function getHomeBannerPointerX(event: any): number {
+  const touch = event?.touches?.[0] || event?.changedTouches?.[0]
+  const clientX = Number(touch?.clientX ?? event?.clientX ?? 0)
+  return Number.isFinite(clientX) ? clientX : 0
+}
+
+function onHomeBannerPointerStart(event: any) {
+  homeBannerPointerStartX = getHomeBannerPointerX(event)
+  homeBannerPointerMoved = false
+}
+
+function onHomeBannerPointerMove(event: any) {
+  const currentX = getHomeBannerPointerX(event)
+  if (Math.abs(currentX - homeBannerPointerStartX) > 16) {
+    homeBannerPointerMoved = true
+  }
+}
+
+function onHomeBannerPointerEnd(event: any) {
+  const currentX = getHomeBannerPointerX(event)
+  if (Math.abs(currentX - homeBannerPointerStartX) > 16 || homeBannerPointerMoved) {
+    suppressNextHomeBannerTap = true
+    setTimeout(() => {
+      suppressNextHomeBannerTap = false
+      homeBannerPointerMoved = false
+    }, 350)
+  }
+}
+
+function onHomeBannerChange(event: any) {
+  const current = Number(event?.detail?.current || 0)
+  homeBannerActiveIndex.value = Number.isFinite(current) ? current : 0
+  suppressNextHomeBannerTap = true
+  setTimeout(() => {
+    suppressNextHomeBannerTap = false
+  }, 350)
+}
+
+function openHomeBanner(item: HomeBannerItem) {
+  if (suppressNextHomeBannerTap || homeBannerPointerMoved) {
+    suppressNextHomeBannerTap = false
+    homeBannerPointerMoved = false
+    return
+  }
+  if (!item.postId) return
+  const url = `/pages/detail/index?postId=${encodeURIComponent(item.postId)}`
+  clientLog('info', 'home.banner.tap', {
+    bannerId: item.bannerId,
+    postId: item.postId,
+    title: item.title,
+    url,
+  })
+  uni.navigateTo({
+    url,
+    success: () => clientLog('info', 'home.banner.navigate.success', { postId: item.postId, url }),
+    fail: (error) => clientLog('error', 'home.banner.navigate.fail', { postId: item.postId, url, error }),
+  })
+}
+
 function onLiveTap(item: LiveItem) {
   if (item.postId) {
     const url = `/pages/detail/index?postId=${item.postId}`
@@ -935,6 +1072,33 @@ onPullDownRefresh(async () => {
 })
 
 watch(
+  rawHomeBannerCoverImages,
+  async (images) => {
+    const token = ++homeBannerResolveToken
+    if (!images.length) {
+      resolvedHomeBannerCoverUrls.value = {}
+      homeBannerActiveIndex.value = 0
+      return
+    }
+    const next: Record<string, string> = {}
+    await Promise.all(images.map(async (image) => {
+      try {
+        next[image] = await resolveCloudFileUrl(image)
+      } catch (error) {
+        next[image] = image
+        clientLog('warn', 'home.bannerCover.resolve.fail', { image, error })
+      }
+    }))
+    if (token !== homeBannerResolveToken) return
+    resolvedHomeBannerCoverUrls.value = next
+    if (homeBannerActiveIndex.value >= homeBannerItems.value.length) {
+      homeBannerActiveIndex.value = 0
+    }
+  },
+  { immediate: true },
+)
+
+watch(
   () => communityStore.currentCommunity?.coverImage,
   () => {
     void prepareCommunityShareImage()
@@ -1079,6 +1243,71 @@ onShareAppMessage(() => {
   color: $hh-ink-3;
   text-align: right;
   text-transform: uppercase;
+}
+
+/* ═══ Home Banner ═══ */
+.home-banner {
+  position: relative;
+  margin: 0 32rpx 28rpx;
+  height: 260rpx;
+  border-radius: 24rpx;
+  overflow: hidden;
+  background: $hh-surface-2;
+  box-shadow: $hh-shadow-card;
+}
+.home-banner-swiper,
+.home-banner-slide,
+.home-banner-image {
+  width: 100%;
+  height: 100%;
+}
+.home-banner-image {
+  display: block;
+}
+.home-banner-shade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 58%;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.56));
+  pointer-events: none;
+}
+.home-banner-title {
+  position: absolute;
+  left: 28rpx;
+  right: 28rpx;
+  bottom: 34rpx;
+  font-size: 31rpx;
+  font-weight: $hh-font-weight-bold;
+  line-height: 1.28;
+  color: #fff;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  text-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.24);
+}
+.home-banner-dots {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 14rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  pointer-events: none;
+}
+.home-banner-dot {
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 999rpx;
+  background: rgba(255, 255, 255, 0.55);
+}
+.home-banner-dot.active {
+  width: 24rpx;
+  background: #e84f5f;
 }
 
 /* ═══ Search ═══ */
