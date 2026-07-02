@@ -164,4 +164,3 @@ if (!answer.includes('2')) {
 }
 console.log(`[ok] chat answer returned: ${answer.slice(0, 80)}`)
 console.log('[verify-tencent-lkeap] Done')
-
