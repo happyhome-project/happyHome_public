@@ -1,12 +1,9 @@
 <template>
   <view class="section-page">
-      <view class="section-head">
-        <view class="section-head-main">
-          <text class="eyebrow">SECTION</text>
-          <view class="title-row">
-            <text class="section-title">{{ sectionName }}</text>
-            <text v-if="posts.length" class="section-count">{{ posts.length }} 条</text>
-          </view>
+      <view v-if="!loading && section" class="section-head">
+        <view class="title-row">
+          <text class="section-title">{{ sectionName }}</text>
+          <text v-if="posts.length" class="section-count">{{ posts.length }} 条</text>
         </view>
       </view>
 
@@ -20,62 +17,71 @@
         <button class="retry-btn" size="mini" @tap="loadSectionData">重试</button>
       </view>
 
-      <view v-else-if="posts.length === 0" class="state">
-        <text>还没有内容</text>
-      </view>
-
-      <view v-else-if="isGuideNote" class="guide-list">
-        <view
-          v-for="item in guideItems"
-          :key="item.postId"
-          class="guide-list-card"
-          @tap="openPost(item.postId)"
-        >
-          <image
-            v-if="item.coverImage"
-            :src="item.coverImage"
-            mode="aspectFill"
-            class="guide-cover"
-          />
-          <view v-else class="guide-cover guide-cover-empty">
-            <text>{{ sectionName.slice(0, 2) }}</text>
+      <view v-else-if="posts.length === 0" class="empty-state">
+        <view class="empty-illustration" aria-hidden="true">
+          <view class="empty-paper">
+            <view class="empty-line wide"></view>
+            <view class="empty-line mid"></view>
+            <view class="empty-line short"></view>
+            <view class="empty-block"></view>
           </view>
-          <view class="guide-body">
-            <text class="guide-title">{{ item.title }}</text>
-            <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
-            <view v-if="item.driveDuration" class="guide-stats">
-              <text
-                class="guide-stat"
-              >{{ item.driveDuration }}</text>
-            </view>
-            <view class="guide-meta">
-              <text v-if="item.when" class="guide-chip">{{ item.when }}</text>
-              <text v-if="item.author" class="guide-chip">{{ item.author }}</text>
-            </view>
-          </view>
+          <view class="empty-pencil">✎</view>
         </view>
+        <text class="empty-title">暂无内容</text>
+        <text class="empty-desc">这里还没有帖子，成为第一个分享的人吧</text>
+        <button class="empty-action" @tap="goCreatePost">去发布帖子</button>
       </view>
 
-      <view v-else class="default-list">
+      <view v-else class="post-list">
         <view
-          v-for="item in defaultItems"
+          v-for="item in sectionItems"
           :key="item.postId"
-          class="default-card"
+          class="post-card"
+          :class="{ 'post-card--visual': !!item.coverImage }"
           @tap="openPost(item.postId)"
         >
-          <view class="default-main">
-            <text class="default-title">{{ item.title }}</text>
-            <view v-if="item.preview.length" class="preview-list">
+          <view v-if="item.coverImage" class="post-cover">
+            <image
+              :src="item.coverImage"
+              mode="aspectFill"
+              class="post-cover-image"
+            />
+          </view>
+          <view v-else-if="item.hasVisualPlaceholder" class="post-cover post-cover-empty">
+            <text>{{ coverFallbackText(item) }}</text>
+          </view>
+
+          <view class="post-body">
+            <text class="post-title">{{ item.title }}</text>
+            <text v-if="item.preview" class="post-preview">{{ item.preview }}</text>
+            <view v-if="item.previewLines.length" class="preview-list">
               <text
-                v-for="preview in item.preview"
+                v-for="preview in item.previewLines"
                 :key="preview.label"
                 class="preview-line"
-              >{{ preview.label }}：{{ preview.value }}</text>
+              >{{ preview.label }}: {{ preview.value }}</text>
             </view>
-          </view>
-          <view class="default-side">
-            <text v-if="item.meta" class="default-meta">{{ item.meta }}</text>
-            <text class="default-when">{{ item.when }}</text>
+            <text v-if="item.highlight" class="post-highlight">{{ item.highlight }}</text>
+            <view class="post-meta">
+              <view class="post-author">
+                <image
+                  v-if="item.authorAvatar"
+                  :src="item.authorAvatar"
+                  mode="aspectFill"
+                  class="post-avatar"
+                />
+                <view
+                  v-else
+                  class="post-avatar post-avatar--generated"
+                  :style="generatedAvatarStyle(item.postId)"
+                >
+                  <text>{{ authorInitial(item.authorName) }}</text>
+                </view>
+                <text class="post-author-name">{{ item.authorName }}</text>
+              </view>
+              <text v-if="item.meta" class="post-meta-text">{{ item.meta }}</text>
+              <text class="post-date">{{ item.when }}</text>
+            </view>
           </view>
         </view>
       </view>
@@ -87,9 +93,11 @@ import { computed, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { postApi, sectionApi } from '../../api/cloud'
 import { useUserStore } from '../../store/user'
+import { CREATE_SECTION_INTENT_KEY } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getGuideNoteCard, getListPreview, getPostHomeTitle, getPostHomeTitleIssue } from '../../utils/widget'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
+import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
 
 const userStore = useUserStore()
 const sectionId = ref('')
@@ -98,30 +106,85 @@ const posts = ref<any[]>([])
 const loading = ref(false)
 const loadError = ref('')
 const reportedMissingHomeTitle = new Set<string>()
+const resolvedGuideCoverUrls = ref<Record<string, string>>({})
+const resolvedAuthorAvatarUrls = ref<Record<string, string>>({})
+const GUIDE_NOTE_NAME_HINTS = ['亲子出游', '周末遛娃', '村游攻略', '路线攻略', '出游攻略']
+
+interface SectionListItem {
+  postId: string
+  title: string
+  coverImage: string
+  preview: string
+  previewLines: Array<{ label: string; value: string }>
+  highlight: string
+  meta: string
+  authorName: string
+  authorAvatar: string
+  when: string
+  hasVisualPlaceholder: boolean
+}
 
 const sectionName = computed(() => String(section.value?.name || '板块'))
-const isGuideNote = computed(() => section.value?.displayTemplate === 'guide_note')
-
-const guideItems = computed(() => {
-  if (!section.value) return []
-  return posts.value.map((post) => ({
-    postId: post._id,
-    ...getGuideNoteCard(post, section.value),
-  }))
+const isGuideNote = computed(() => {
+  if (section.value?.displayTemplate === 'guide_note') return true
+  const name = String(section.value?.name || '').trim()
+  return GUIDE_NOTE_NAME_HINTS.some((hint) => name.includes(hint))
 })
 
-const defaultItems = computed(() => {
+const sectionItems = computed<SectionListItem[]>(() => {
   if (!section.value) return []
   return posts.value.map((post) => {
+    if (isGuideNote.value) {
+      const card = getGuideNoteCard(post, section.value)
+      const rawCover = String(card.coverImage || '').trim()
+      const rawAvatar = String(post.authorAvatarUrl || '').trim()
+      return {
+        postId: post._id,
+        title: card.title,
+        coverImage: resolvedGuideCoverUrls.value[rawCover] || rawCover,
+        preview: '',
+        previewLines: [],
+        highlight: card.driveDuration,
+        meta: '',
+        authorName: resolveAuthorName(post, card.author),
+        authorAvatar: resolvedAuthorAvatarUrls.value[rawAvatar] || rawAvatar,
+        when: card.when || formatShortDate(post.createdAt),
+        hasVisualPlaceholder: true,
+      }
+    }
+
     reportMissingHomeTitle(post, section.value, 'section.list')
+    const rawCover = resolvePostCover(post, section.value)
+    const rawAvatar = String(post.authorAvatarUrl || '').trim()
+    const previewLines = getListPreview(post, section.value).slice(0, 2)
     return {
       postId: post._id,
       title: getPostHomeTitle(post, section.value),
-      preview: getListPreview(post, section.value),
+      coverImage: resolvedGuideCoverUrls.value[rawCover] || rawCover,
+      preview: previewLines.length ? '' : resolveFallbackPreview(post, section.value),
+      previewLines,
+      highlight: '',
       meta: getArchiveHomeMeta(post, section.value),
+      authorName: resolveAuthorName(post),
+      authorAvatar: resolvedAuthorAvatarUrls.value[rawAvatar] || rawAvatar,
       when: formatShortDate(post.createdAt),
+      hasVisualPlaceholder: false,
     }
   })
+})
+
+const rawGuideCoverImages = computed(() => {
+  if (!section.value) return []
+  return posts.value
+    .map((post) => isGuideNote.value ? getGuideNoteCard(post, section.value).coverImage : resolvePostCover(post, section.value))
+    .filter((url) => String(url || '').trim())
+})
+
+const rawAuthorAvatarImages = computed(() => {
+  if (!section.value) return []
+  return posts.value
+    .map((post) => String(post.authorAvatarUrl || '').trim())
+    .filter(Boolean)
 })
 
 onLoad((options: any) => {
@@ -143,10 +206,58 @@ watch(
   },
 )
 
+watch(
+  rawGuideCoverImages,
+  async (urls) => {
+    if (urls.length === 0) {
+      resolvedGuideCoverUrls.value = {}
+      return
+    }
+    try {
+      resolvedGuideCoverUrls.value = {
+        ...resolvedGuideCoverUrls.value,
+        ...(await resolveCloudFileUrls(urls)),
+      }
+    } catch (error) {
+      clientLog('warn', 'section.guideCover.resolve.fail', {
+        sectionId: sectionId.value,
+        count: urls.length,
+        error,
+      })
+    }
+  },
+  { immediate: true },
+)
+
+watch(
+  rawAuthorAvatarImages,
+  async (urls) => {
+    if (urls.length === 0) {
+      resolvedAuthorAvatarUrls.value = {}
+      return
+    }
+    try {
+      resolvedAuthorAvatarUrls.value = {
+        ...resolvedAuthorAvatarUrls.value,
+        ...(await resolveCloudFileUrls(urls)),
+      }
+    } catch (error) {
+      clientLog('warn', 'section.authorAvatar.resolve.fail', {
+        sectionId: sectionId.value,
+        count: urls.length,
+        error,
+      })
+    }
+  },
+  { immediate: true },
+)
+
 async function loadSectionData() {
   if (!sectionId.value) return
   loading.value = true
   loadError.value = ''
+  resolvedGuideCoverUrls.value = {}
+  resolvedAuthorAvatarUrls.value = {}
   clientLog('info', 'section.load.start', { sectionId: sectionId.value })
   try {
     const [sectionRes, postRes] = await Promise.all([
@@ -183,6 +294,23 @@ function openPost(postId: string) {
   })
 }
 
+function goCreatePost() {
+  if (!sectionId.value) return
+  try {
+    uni.setStorageSync(CREATE_SECTION_INTENT_KEY, {
+      sectionId: sectionId.value,
+      createdAt: Date.now(),
+      source: 'section.empty',
+    })
+  } catch (error) {
+    clientLog('warn', 'section.create.intent.storage.fail', { sectionId: sectionId.value, error })
+  }
+  uni.switchTab({
+    url: '/pages/create/index',
+    fail: (error) => clientLog('error', 'section.create.navigate.fail', { sectionId: sectionId.value, error }),
+  })
+}
+
 function reportMissingHomeTitle(post: any, currentSection: any, source: string) {
   const issue = getPostHomeTitleIssue(post, currentSection)
   if (!issue) return
@@ -206,55 +334,126 @@ function formatShortDate(value: unknown): string {
   if (Number.isNaN(d.getTime())) return ''
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
+
+function resolveAuthorName(post: any, fallback = ''): string {
+  return String(fallback || post?.authorNickname || '社区邻居').trim()
+}
+
+function authorInitial(name: string): string {
+  return Array.from(String(name || '').trim()).find((char) => char.trim()) || '邻'
+}
+
+function coverFallbackText(item: SectionListItem): string {
+  return Array.from(item.title || sectionName.value || '社区').slice(0, 2).join('') || '社区'
+}
+
+function generatedAvatarStyle(postId: string) {
+  const palettes = [
+    ['#F4C7B8', '#7FB099'],
+    ['#BFD7EA', '#E5B183'],
+    ['#D9C3E6', '#85AFA5'],
+    ['#F1D08A', '#7294B8'],
+    ['#C9D6A3', '#C4867D'],
+  ]
+  const palette = palettes[stableHash(postId) % palettes.length]
+  return {
+    '--section-avatar-start': palette[0],
+    '--section-avatar-end': palette[1],
+  }
+}
+
+function stableHash(value: string): number {
+  let hash = 2166136261
+  for (const char of String(value || '')) {
+    hash ^= char.charCodeAt(0)
+    hash = Math.imul(hash, 16777619)
+  }
+  return hash >>> 0
+}
+
+function resolvePostCover(post: any, currentSection: any): string {
+  const imageWidget = (currentSection?.widgets || []).find((widget: any) => widget?.type === 'image_group')
+  if (!imageWidget) return ''
+  return firstImageValue(post?.content?.[imageWidget.widgetId])
+}
+
+function firstImageValue(value: any): string {
+  if (Array.isArray(value)) {
+    const first = value.find((item) => String(item || '').trim())
+    return String(first || '').trim()
+  }
+  if (value && typeof value === 'object') {
+    const list = Array.isArray(value.urls)
+      ? value.urls
+      : Array.isArray(value.images)
+        ? value.images
+        : []
+    const first = list.find((item: any) => String(typeof item === 'string' ? item : item?.url || '').trim())
+    return String(typeof first === 'string' ? first : first?.url || '').trim()
+  }
+  return ''
+}
+
+function resolveFallbackPreview(post: any, currentSection: any): string {
+  const widgets = (currentSection?.widgets || [])
+    .filter((widget: any) => ['summary', 'short_text', 'rich_text', 'rich_note'].includes(widget?.type))
+    .sort((a: any, b: any) => Number(a.order || 0) - Number(b.order || 0))
+  for (const widget of widgets) {
+    const value = post?.content?.[widget.widgetId]
+    const text = extractText(value)
+    if (text && text !== getPostHomeTitle(post, currentSection)) return text.slice(0, 80)
+  }
+  return ''
+}
+
+function extractText(value: any): string {
+  if (value === undefined || value === null) return ''
+  if (typeof value === 'string' || typeof value === 'number') {
+    return String(value).replace(/\s+/g, ' ').trim()
+  }
+  if (Array.isArray(value)) {
+    return value.map(extractText).filter(Boolean).join(' ').trim()
+  }
+  if (typeof value === 'object') {
+    if (typeof value.text === 'string') return value.text.replace(/\s+/g, ' ').trim()
+    if (typeof value.markdown === 'string') return value.markdown.replace(/\s+/g, ' ').trim()
+    if (Array.isArray(value.blocks)) return value.blocks.map(extractText).filter(Boolean).join(' ').trim()
+  }
+  return ''
+}
 </script>
 
 <style lang="scss" scoped>
 .section-page {
   min-height: 100vh;
-  background: $hh-surface-0;
-  padding: 28rpx 28rpx 64rpx;
+  background: var(--hh-color-page);
+  padding: 24rpx 24rpx 72rpx;
   box-sizing: border-box;
 }
 
 .section-head {
-  padding: 10rpx 0 26rpx;
-  border-bottom: 1rpx solid $hh-ink-line-2;
-  margin-bottom: 24rpx;
-}
-
-.section-head-main {
-  min-width: 0;
-}
-
-.eyebrow {
-  display: block;
-  font-family: $hh-font-mono;
-  font-size: 20rpx;
-  letter-spacing: $hh-tracking-mono;
-  color: $hh-ink-3;
-  margin-bottom: 12rpx;
+  padding: 6rpx 4rpx 20rpx;
 }
 
 .title-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 18rpx;
 }
 
 .section-title {
   min-width: 0;
-  font-family: $hh-font-serif;
-  font-size: 44rpx;
-  line-height: 1.16;
-  color: $hh-ink-1;
+  font-size: var(--hh-text-heading-md-size);
+  line-height: var(--hh-text-heading-md-line);
+  color: var(--hh-color-text-primary);
   font-weight: $hh-font-weight-bold;
 }
 
 .section-count {
   flex-shrink: 0;
   font-size: 24rpx;
-  color: $hh-ink-3;
+  color: var(--hh-color-text-tertiary);
 }
 
 .state {
@@ -264,187 +463,292 @@ function formatShortDate(value: unknown): string {
   justify-content: center;
   flex-direction: column;
   gap: 16rpx;
-  color: $hh-ink-3;
-  font-size: 26rpx;
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-body-base-size);
+}
+
+.empty-state {
+  min-height: 620rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 128rpx 64rpx 0;
+  box-sizing: border-box;
+}
+
+.empty-illustration {
+  position: relative;
+  width: 360rpx;
+  height: 290rpx;
+  margin-bottom: 32rpx;
+}
+
+.empty-paper {
+  position: absolute;
+  left: 90rpx;
+  top: 20rpx;
+  width: 220rpx;
+  height: 240rpx;
+  padding: 28rpx;
+  box-sizing: border-box;
+  border-radius: 36rpx;
+  background: #fff;
+  box-shadow: 0 16rpx 24rpx rgba(61, 173, 125, 0.1);
+}
+
+.empty-line {
+  height: 16rpx;
+  margin-bottom: 16rpx;
+  border-radius: 999rpx;
+  background: #e3f5ea;
+}
+
+.empty-line.wide { width: 132rpx; }
+.empty-line.mid { width: 98rpx; }
+.empty-line.short { width: 114rpx; }
+
+.empty-block {
+  width: 164rpx;
+  height: 84rpx;
+  margin-top: 8rpx;
+  border-radius: 20rpx;
+  background: #e3f5ea;
+}
+
+.empty-pencil {
+  position: absolute;
+  right: 36rpx;
+  top: 0;
+  width: 80rpx;
+  height: 80rpx;
+  border-radius: 999rpx;
+  background: var(--hh-color-brand-primary);
+  color: #fff;
+  font-size: 40rpx;
+  line-height: 80rpx;
+  text-align: center;
+  box-shadow: 0 12rpx 16rpx rgba(61, 173, 125, 0.35);
+}
+
+.empty-title {
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-heading-md-size);
+  line-height: var(--hh-text-heading-md-line);
+  font-weight: $hh-font-weight-bold;
+}
+
+.empty-desc {
+  margin-top: 8rpx;
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-body-lg-size);
+  line-height: var(--hh-text-body-lg-line);
+  text-align: center;
+}
+
+.empty-action {
+  width: 576rpx;
+  max-width: 100%;
+  height: 96rpx;
+  margin: 32rpx 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: $hh-radius-full;
+  background: var(--hh-color-brand-primary);
+  color: #fff;
+  font-size: var(--hh-text-heading-sm-size);
+  line-height: 96rpx;
+  font-weight: $hh-font-weight-bold;
+}
+
+.empty-action::after {
+  border: 0;
 }
 
 .state-title {
-  color: $hh-ink-1;
-  font-size: 30rpx;
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-body-lg-size);
   font-weight: $hh-font-weight-bold;
 }
 
 .state-desc {
-  color: $hh-ink-3;
-  font-size: 24rpx;
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-caption-lg-size);
 }
 
 .retry-btn {
-  border: 1rpx solid $hh-ink-line;
-  color: $hh-ink-1;
-  background: $hh-surface-1;
+  border: 1rpx solid var(--hh-color-line);
+  color: var(--hh-color-text-primary);
+  background: var(--hh-color-card);
 }
 
-.guide-list,
-.default-list {
+.post-list {
   display: flex;
   flex-direction: column;
   gap: 24rpx;
 }
 
-.guide-list-card {
-  display: flex;
-  flex-direction: column;
+.post-card {
   overflow: hidden;
-  border: 1rpx solid $hh-ink-line;
-  border-left: 6rpx solid #6C8A4E;
-  border-radius: 18rpx;
-  background: $hh-surface-1;
-  box-shadow: $hh-shadow-card;
+  border-radius: 16rpx;
+  background: var(--hh-color-card);
 }
 
-.guide-list-card:active,
-.default-card:active {
+.post-card:active {
   transform: translateY(1rpx);
   opacity: 0.92;
 }
 
-.guide-cover {
+.post-cover {
   width: 100%;
-  height: 380rpx;
-  border-radius: 0;
-  background: $hh-surface-2;
+  height: 316rpx;
+  overflow: hidden;
+  background: #cecece;
 }
 
-.guide-cover-empty {
+.post-cover-image,
+.post-cover-empty {
+  width: 100%;
+  height: 100%;
+}
+
+.post-cover-empty {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: $hh-ink-3;
-  font-size: 24rpx;
+  background:
+    radial-gradient(circle at 24% 18%, rgba(255, 255, 255, 0.62), transparent 24%),
+    linear-gradient(135deg, #d4eadf 0%, #7daf8e 52%, #5a765f 100%);
 }
 
-.guide-body {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 14rpx;
-  padding: 22rpx 24rpx 24rpx;
-}
-
-.guide-title,
-.default-title {
-  color: $hh-ink-1;
-  font-size: 34rpx;
-  line-height: 1.36;
+.post-cover-empty text {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 64rpx;
+  line-height: 1;
   font-weight: $hh-font-weight-bold;
 }
 
-.guide-excerpt {
-  color: $hh-ink-2;
-  font-size: 27rpx;
-  line-height: 1.56;
-  display: -webkit-box;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-}
-
-.guide-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12rpx;
-  color: $hh-ink-3;
-  font-size: 23rpx;
-  line-height: 1.34;
-}
-
-.guide-stats {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10rpx;
-}
-
-.guide-stat {
-  padding: 7rpx 12rpx;
-  border-radius: 999rpx;
-  background: #eef5ea;
-  color: #365d42;
-  font-size: 23rpx;
-  line-height: 1.3;
-  font-weight: $hh-font-weight-medium;
-}
-
-.guide-location {
-  width: 100%;
-  color: $hh-ink-3;
-  display: -webkit-box;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-
-.guide-chip {
-  padding: 5rpx 12rpx;
-  border-radius: 999rpx;
-  background: $hh-surface-2;
-  color: $hh-ink-3;
-}
-
-.default-card {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18rpx;
-  padding: 24rpx;
-  border: 1rpx solid $hh-ink-line;
-  border-left: 6rpx solid #4F6D8A;
-  border-radius: 16rpx;
-  background: $hh-surface-1;
-  box-shadow: $hh-shadow-card;
-}
-
-.default-main {
+.post-body {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 12rpx;
+  padding: 18rpx 26rpx 18rpx;
+}
+
+.post-title {
+  display: block;
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-body-lg-size);
+  line-height: var(--hh-text-body-lg-line);
+  font-weight: $hh-font-weight-bold;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.post-preview {
+  display: -webkit-box;
+  padding-top: 8rpx;
+  overflow: hidden;
+  color: var(--hh-color-text-secondary);
+  font-size: var(--hh-text-body-base-size);
+  line-height: var(--hh-text-body-base-line);
+  text-overflow: ellipsis;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .preview-list {
   display: flex;
   flex-direction: column;
   gap: 6rpx;
+  padding-top: 10rpx;
 }
 
 .preview-line {
-  color: $hh-ink-2;
-  font-size: 25rpx;
-  line-height: 1.4;
+  display: -webkit-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  color: var(--hh-color-text-secondary);
+  font-size: var(--hh-text-body-base-size);
+  line-height: var(--hh-text-body-base-line);
 }
 
-.default-side {
-  flex-shrink: 0;
+.post-highlight {
+  align-self: flex-start;
+  margin-top: 12rpx;
+  padding: 5rpx 12rpx;
+  border-radius: 999rpx;
+  background: var(--hh-color-brand-soft);
+  color: var(--hh-color-brand-strong);
+  font-size: var(--hh-text-caption-base-size);
+  line-height: var(--hh-text-caption-base-line);
+  font-weight: $hh-font-weight-medium;
+}
+
+.post-meta {
+  padding-top: 16rpx;
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8rpx;
-  color: $hh-ink-3;
-  font-size: 22rpx;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
 }
 
-.default-meta {
-  color: $hh-accent;
+.post-author {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.post-avatar {
+  width: 40rpx;
+  height: 40rpx;
+  border-radius: $hh-radius-full;
+  flex: 0 0 auto;
+  background: var(--hh-color-brand-soft);
+}
+
+.post-avatar--generated {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 30% 24%, rgba(255, 255, 255, 0.72), transparent 23%),
+    linear-gradient(135deg, var(--section-avatar-start), var(--section-avatar-end));
+  color: rgba(30, 26, 22, 0.82);
+  box-shadow: inset 0 0 0 1rpx rgba(255, 255, 255, 0.7);
+}
+
+.post-avatar--generated text {
+  font-size: 21rpx;
+  line-height: 1;
   font-weight: $hh-font-weight-bold;
 }
 
-@media (max-width: 420px) {
-  .guide-cover {
-    height: 330rpx;
-  }
+.post-author-name {
+  min-width: 0;
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-caption-base-size);
+  line-height: var(--hh-text-caption-base-line);
+  font-weight: $hh-font-weight-bold;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.post-meta-text,
+.post-date {
+  flex-shrink: 0;
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-caption-base-size);
+  line-height: var(--hh-text-caption-base-line);
+}
+
+.post-meta-text {
+  color: var(--hh-color-brand-strong);
+  font-weight: $hh-font-weight-medium;
 }
 </style>

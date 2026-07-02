@@ -55,13 +55,16 @@ export function buildGuideRouteDetail(post: Post, section: Section): GuideRouteD
     labels: ['标题', '名称', '名字'],
     types: ['short_text', 'summary'],
   })
-  const bodyWidgets = findWidgetsByTypes(section, ['rich_note', 'rich_text', 'summary'])
-    .filter((widget) => widget.widgetId !== titleWidget?.widgetId)
   const summaryWidget = findFirstWidget(section, {
     fieldKeys: ['summary', 'subtitle', 'intro'],
     labels: ['摘要', '简介', '短摘要'],
     types: ['summary', 'rich_text', 'short_text'],
   })
+  const bodyWidgets = findWidgetsByTypes(section, ['rich_note', 'rich_text', 'summary'])
+    .filter((widget) =>
+      widget.widgetId !== titleWidget?.widgetId &&
+      widget.widgetId !== summaryWidget?.widgetId
+    )
 
   return {
     title: titleWidget ? widgetTextValue(post, titleWidget) : '',

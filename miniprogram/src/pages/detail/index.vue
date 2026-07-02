@@ -1,5 +1,5 @@
 <template>
-  <view class="detail-page">
+  <view class="detail-page" :class="{ 'detail-page--guide': isGuideNoteDetail }">
     <view v-if="post && section" class="content" :class="{ 'guide-note-detail': isGuideNoteDetail }">
       <view v-if="post.isPinned || post.isFeatured" class="post-flag-row">
         <text v-if="post.isPinned" class="post-flag pin">置顶</text>
@@ -17,7 +17,7 @@
 
       <view v-else>
         <DefaultDetailView
-          :post="post"
+          :post="renderPost"
           :section="section"
           :widgets="regularWidgets"
           :post-meta="postMeta"
@@ -179,6 +179,7 @@ import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { buildGuideRouteDetail } from '../../utils/guide-detail'
+import { extractRichNoteImageSources } from '../../utils/rich-note'
 
 const fallbackAvatar = '/static/default-avatar.png'
 const ATTENDANCE_SLOT_DISPLAY_MAX = 6
@@ -199,11 +200,13 @@ const rosterMeta = reactive({
   capacity: undefined as number | undefined,
 })
 const resolvedAvatarUrls = reactive<Record<string, string>>({})
+const resolvedDetailMediaUrls = reactive<Record<string, string>>({})
 const cancelBusy = ref(false)
 const activityInviteState = ref<any>(null)
 const activityInviteLoading = ref(false)
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
+const GUIDE_NOTE_NAME_HINTS = ['亲子出游', '周末遛娃', '村游攻略', '路线攻略', '出游攻略']
 clientLog('info', 'detail.setup', {})
 
 const rosterSelfJoined = computed(() => {
@@ -229,10 +232,19 @@ const postMeta = computed(() => ({
   communityId: String(post.value?.communityId || section.value?.communityId || ''),
 }))
 const detailSectionTitle = computed(() => section.value?.name || '')
-const isGuideNoteDetail = computed(() => section.value?.displayTemplate === 'guide_note')
+const isGuideNoteDetail = computed(() => resolveGuideNoteDetailTemplate(section.value))
+const renderPost = computed(() => {
+  if (!post.value) return post.value
+  const replacements = resolvedDetailMediaUrls
+  if (!Object.keys(replacements).length) return post.value
+  return {
+    ...post.value,
+    content: replaceResolvedMediaUrls(post.value.content || {}, replacements),
+  }
+})
 const guideRouteDetail = computed(() => {
-  if (!post.value || !section.value || !isGuideNoteDetail.value) return null
-  return buildGuideRouteDetail(post.value, section.value)
+  if (!renderPost.value || !section.value || !isGuideNoteDetail.value) return null
+  return buildGuideRouteDetail(renderPost.value, section.value)
 })
 const regularWidgets = computed(() =>
   (section.value?.widgets || []).filter((widget: any) => !['attendance', 'admin_notice', 'activity_invite'].includes(widget.type))
@@ -257,6 +269,12 @@ const activityInviteButtonText = computed(() => {
   if (activityInviteLoading.value) return '加载中...'
   return activityInvite.value?.postId ? '去参与' : '发起召集'
 })
+
+function resolveGuideNoteDetailTemplate(currentSection: any): boolean {
+  if (currentSection?.displayTemplate === 'guide_note') return true
+  const sectionName = String(currentSection?.name || '').trim()
+  return GUIDE_NOTE_NAME_HINTS.some((hint) => sectionName.includes(hint))
+}
 
 onErrorCaptured((error, _instance, info) => {
   clientLog('error', 'detail.errorCaptured', {
@@ -326,6 +344,7 @@ async function loadPost(postId: string) {
   }
   loading.value = true
   loadError.value = ''
+  clearRecord(resolvedDetailMediaUrls)
   clientLog('info', 'detail.load.start', {
     postId,
     cachedSectionCount: communityStore.currentSections.length,
@@ -368,6 +387,7 @@ async function loadPost(postId: string) {
     if (!section.value) {
       throw new Error('板块信息加载失败，请稍后重试')
     }
+    await resolveDetailMediaUrls()
     await resolveAttendanceAvatarUrls()
     await loadActivityInviteState()
     clientLog('info', 'detail.load.success', {
@@ -400,6 +420,90 @@ async function loadPost(postId: string) {
       loadError: loadError.value,
     })
   }
+}
+
+function clearRecord(record: Record<string, string>) {
+  Object.keys(record).forEach((key) => {
+    delete record[key]
+  })
+}
+
+function collectCloudMediaUrls(value: unknown, target: string[] = []): string[] {
+  if (typeof value === 'string') {
+    if (value.startsWith('cloud://') && !target.includes(value)) target.push(value)
+    if (value.includes('cloud://')) {
+      extractRichNoteImageSources(value).forEach((src) => {
+        if (src.startsWith('cloud://') && !target.includes(src)) target.push(src)
+      })
+    }
+    return target
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectCloudMediaUrls(item, target))
+    return target
+  }
+  if (value && typeof value === 'object') {
+    Object.values(value as Record<string, unknown>).forEach((item) => collectCloudMediaUrls(item, target))
+  }
+  return target
+}
+
+async function resolveDetailMediaUrls() {
+  const urls = collectCloudMediaUrls(post.value?.content || {})
+  clientLog('debug', 'detail.media.resolve.start', {
+    postId: currentPostId.value,
+    urlCount: urls.length,
+  })
+  if (urls.length === 0) return
+  const [primaryUrl, ...remainingUrls] = urls
+  let resolvedCount = 0
+  try {
+    const primaryResolved = await resolveCloudFileUrls([primaryUrl])
+    Object.assign(resolvedDetailMediaUrls, primaryResolved)
+    resolvedCount += Object.keys(primaryResolved).length
+  } catch (error) {
+    clientLog('warn', 'detail.media.resolve.primary.fail', {
+      postId: currentPostId.value,
+      error,
+    })
+  }
+  if (remainingUrls.length) {
+    try {
+      const resolved = await resolveCloudFileUrls(remainingUrls)
+      Object.assign(resolvedDetailMediaUrls, resolved)
+      resolvedCount += Object.keys(resolved).length
+    } catch (error) {
+      clientLog('warn', 'detail.media.resolve.rest.fail', {
+        postId: currentPostId.value,
+        urlCount: remainingUrls.length,
+        error,
+      })
+    }
+  }
+  clientLog('debug', 'detail.media.resolve.success', {
+    postId: currentPostId.value,
+    resolvedCount,
+  })
+}
+
+function replaceResolvedMediaUrls(value: unknown, replacements: Record<string, string>): any {
+  if (typeof value === 'string') {
+    let next = value
+    Object.entries(replacements).forEach(([rawUrl, resolvedUrl]) => {
+      if (rawUrl && resolvedUrl && rawUrl !== resolvedUrl) {
+        next = next.split(rawUrl).join(resolvedUrl)
+      }
+    })
+    return next
+  }
+  if (Array.isArray(value)) return value.map((item) => replaceResolvedMediaUrls(item, replacements))
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .map(([key, item]) => [key, replaceResolvedMediaUrls(item, replacements)])
+    )
+  }
+  return value
 }
 
 async function loadActivityInviteState() {
@@ -723,46 +827,62 @@ function formatDateTime(iso: string): string {
 
 <style lang="scss" scoped>
 .detail-page {
-  padding: $hh-space-lg;
-  background: $hh-color-bg;
+  padding: $hh-space-lg var(--hh-page-x);
+  background: var(--hh-color-page);
   min-height: 100vh;
+}
+
+.detail-page--guide {
+  padding: 0;
+}
+
+.detail-page--guide :deep(.guide-route) {
+  border-radius: 0;
+}
+
+.detail-page--guide .post-flag-row,
+.detail-page--guide .origin-card,
+.detail-page--guide .activity-invite-card,
+.detail-page--guide .meta {
+  margin-left: var(--hh-page-x);
+  margin-right: var(--hh-page-x);
 }
 
 .origin-card {
   margin-bottom: $hh-space-md;
   padding: $hh-space-md;
-  border-radius: $hh-radius-md;
-  background: rgba(47, 124, 78, 0.08);
-  border: 1rpx solid rgba(47, 124, 78, 0.16);
+  border-radius: var(--hh-radius-card);
+  background: var(--hh-color-brand-soft);
+  border: 1rpx solid var(--hh-color-brand-line);
 }
 
 .origin-label {
   display: block;
-  color: $hh-color-primary;
-  font-size: $hh-font-caption;
+  color: var(--hh-color-brand-primary);
+  font-size: var(--hh-text-caption-lg-size);
   margin-bottom: 6rpx;
 }
 
 .origin-title {
   display: block;
-  color: $hh-color-text;
-  font-size: $hh-font-body;
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-body-base-size);
   font-weight: $hh-font-weight-medium;
 }
 
 .origin-action {
   display: block;
   margin-top: 8rpx;
-  color: $hh-color-primary-text;
-  font-size: $hh-font-caption;
+  color: var(--hh-color-brand-strong);
+  font-size: var(--hh-text-caption-lg-size);
 }
 
 .activity-invite-card {
   margin-top: $hh-space-lg;
   padding: $hh-space-md;
-  border-radius: $hh-radius-lg;
-  background: linear-gradient(135deg, rgba(47, 124, 78, 0.11), rgba(255, 255, 255, 0.86));
-  border: 1rpx solid rgba(47, 124, 78, 0.18);
+  border-radius: var(--hh-radius-card);
+  background: linear-gradient(135deg, rgba(232, 248, 240, 0.95), rgba(255, 255, 255, 0.92));
+  border: 1rpx solid var(--hh-color-brand-line);
   display: flex;
   align-items: center;
   gap: $hh-space-md;
@@ -775,15 +895,15 @@ function formatDateTime(iso: string): string {
 
 .activity-invite-kicker {
   display: block;
-  color: $hh-color-primary;
-  font-size: $hh-font-caption;
+  color: var(--hh-color-brand-primary);
+  font-size: var(--hh-text-caption-lg-size);
   margin-bottom: 6rpx;
 }
 
 .activity-invite-title {
   display: block;
-  color: $hh-color-text;
-  font-size: $hh-font-body-lg;
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-body-lg-size);
   font-weight: $hh-font-weight-medium;
   line-height: 1.4;
 }
@@ -791,8 +911,8 @@ function formatDateTime(iso: string): string {
 .activity-invite-desc {
   display: block;
   margin-top: 8rpx;
-  color: $hh-color-text-mute;
-  font-size: $hh-font-caption;
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-caption-lg-size);
   line-height: 1.55;
 }
 
@@ -801,9 +921,9 @@ function formatDateTime(iso: string): string {
   margin: 0;
   border: none;
   border-radius: $hh-radius-full;
-  background: $hh-color-primary;
-  color: $hh-color-text-inverse;
-  font-size: $hh-font-caption;
+  background: var(--hh-color-brand-primary);
+  color: #fff;
+  font-size: var(--hh-text-caption-lg-size);
   line-height: 2.2;
   padding: 0 24rpx;
 }
@@ -811,7 +931,7 @@ function formatDateTime(iso: string): string {
 .loading {
   text-align: center;
   padding: $hh-space-xxl;
-  color: $hh-color-text-mute;
+  color: var(--hh-color-text-tertiary);
 }
 
 .detail-state {
@@ -829,13 +949,13 @@ function formatDateTime(iso: string): string {
   font-family: $hh-font-serif;
   font-size: 34rpx;
   font-weight: $hh-font-weight-bold;
-  color: $hh-ink-1;
+  color: var(--hh-color-text-primary);
 }
 
 .detail-state-desc {
   max-width: 560rpx;
   font-size: 26rpx;
-  color: $hh-ink-3;
+  color: var(--hh-color-text-tertiary);
   line-height: 1.6;
 }
 
@@ -848,16 +968,16 @@ function formatDateTime(iso: string): string {
 .detail-state-btn {
   margin: 0;
   min-width: 132rpx;
-  background: $hh-surface-1;
-  color: $hh-ink-2;
-  border: 1rpx solid $hh-ink-line-2;
-  border-radius: $hh-radius-sm;
+  background: var(--hh-color-card);
+  color: var(--hh-color-text-secondary);
+  border: 1rpx solid var(--hh-color-line);
+  border-radius: var(--hh-radius-card);
   font-size: 26rpx;
 }
 
 .detail-state-btn.primary {
-  color: $hh-accent-ink;
-  border-color: $hh-accent-line;
+  color: var(--hh-color-brand-strong);
+  border-color: var(--hh-color-brand-line);
 }
 
 /* Classical Dossier · 参与条 */
@@ -865,9 +985,10 @@ function formatDateTime(iso: string): string {
   position: relative;
   margin-top: $hh-space-lg;
   padding: $hh-space-lg $hh-space-lg $hh-space-md;
-  border: 1rpx solid $hh-ink-line;
-  border-radius: $hh-radius-lg;
-  background: $hh-surface-1;
+  border: 1rpx solid var(--hh-color-line);
+  border-radius: var(--hh-radius-card);
+  background: var(--hh-color-card);
+  box-shadow: var(--hh-shadow-soft);
 }
 
 .attendance-head {
@@ -884,14 +1005,14 @@ function formatDateTime(iso: string): string {
   gap: 0;
   font-family: $hh-font-serif;
   font-size: 34rpx;
-  color: $hh-ink-1;
+  color: var(--hh-color-text-primary);
   letter-spacing: $hh-tracking-serif-sm;
 }
 
 .attendance-count {
   font-family: $hh-font-num;
   font-weight: $hh-font-weight-bold;
-  color: $hh-ink-1;
+  color: var(--hh-color-text-primary);
 }
 
 .attendance-sep {
@@ -1033,9 +1154,9 @@ function formatDateTime(iso: string): string {
   line-height: 1;
   padding: 7rpx 12rpx;
   border-radius: $hh-radius-full;
-  border: 1rpx solid $hh-ink-line;
-  color: $hh-ink-3;
-  background: $hh-surface-1;
+  border: 1rpx solid var(--hh-color-line);
+  color: var(--hh-color-text-tertiary);
+  background: var(--hh-color-card);
 }
 
 .post-flag.pin {
@@ -1053,7 +1174,7 @@ function formatDateTime(iso: string): string {
 .meta {
   margin-top: $hh-space-xl;
   padding-top: $hh-space-md;
-  border-top: 1rpx solid $hh-color-divider;
+  border-top: 1rpx solid var(--hh-color-line-soft);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1080,24 +1201,24 @@ function formatDateTime(iso: string): string {
   height: 34rpx;
   border-radius: 999rpx;
   flex: 0 0 auto;
-  background: $hh-surface-2;
-  border: 1rpx solid $hh-ink-line-2;
+  background: var(--hh-color-brand-soft);
+  border: 1rpx solid var(--hh-color-brand-line);
 }
 
 .meta-author-avatar--generated {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: $hh-accent-wash;
-  color: $hh-accent-ink;
+  background: var(--hh-color-brand-soft);
+  color: var(--hh-color-brand-strong);
   font-size: 18rpx;
   font-weight: $hh-font-weight-bold;
 }
 
 .meta-author-name {
   max-width: 180rpx;
-  color: $hh-color-text-mute;
-  font-size: $hh-font-caption;
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-caption-lg-size);
   line-height: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1105,8 +1226,8 @@ function formatDateTime(iso: string): string {
 }
 
 .time {
-  font-size: $hh-font-caption;
-  color: $hh-color-text-mute;
+  font-size: var(--hh-text-caption-lg-size);
+  color: var(--hh-color-text-tertiary);
   line-height: 1.4;
 }
 
@@ -1159,8 +1280,8 @@ function formatDateTime(iso: string): string {
 .roster-panel {
   width: 100%;
   max-height: 70vh;
-  background: #fff;
-  border-radius: 28rpx 28rpx 0 0;
+  background: var(--hh-color-card);
+  border-radius: var(--hh-radius-panel) var(--hh-radius-panel) 0 0;
   padding: $hh-space-lg;
 }
 

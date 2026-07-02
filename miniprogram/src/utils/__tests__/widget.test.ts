@@ -50,19 +50,20 @@ describe('getListPreview', () => {
     status: 'active',
     widgets: [
       { widgetId: 'w1', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
-      { widgetId: 'w2', type: 'attendance', label: '活动参与', fieldKey: 'attendance', required: false, order: 1, showInList: true, capacity: 5 },
-      { widgetId: 'w3', type: 'rich_text', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false },
+      { widgetId: 'w4', type: 'short_text', label: '集合地点', fieldKey: 'meetingPlace', required: false, order: 1, showInList: true },
+      { widgetId: 'w2', type: 'attendance', label: '活动参与', fieldKey: 'attendance', required: false, order: 2, showInList: true, capacity: 5 },
+      { widgetId: 'w3', type: 'rich_text', label: '正文', fieldKey: 'body', required: false, order: 3, showInList: false },
     ],
   }
 
-  test('返回普通字段和 attendance 摘要', () => {
+  test('返回普通字段和 attendance 摘要，但不重复展示标题字段', () => {
     const post: Post = {
       _id: 'p1',
       communityId: 'c1',
       sectionId: 's1',
       authorId: 'u1',
       status: 'active',
-      content: { w1: '周六爬山', w3: '正文' },
+      content: { w1: '周六爬山', w3: '正文', w4: '青山村口' },
       commentCount: 0,
       likeCount: 0,
       createdAt: '',
@@ -81,7 +82,7 @@ describe('getListPreview', () => {
 
     const result = getListPreview(post, section)
     expect(result).toHaveLength(2)
-    expect(result[0]).toMatchObject({ label: '标题', value: '周六爬山', type: 'text' })
+    expect(result[0]).toMatchObject({ label: '集合地点', value: '青山村口', type: 'text' })
     expect(result[1]).toMatchObject({ label: '活动参与', value: '3人参与', type: 'attendance' })
     expect(result[1].previewUsers).toHaveLength(1)
   })
@@ -93,7 +94,7 @@ describe('getListPreview', () => {
       sectionId: 's1',
       authorId: 'u1',
       status: 'active',
-      content: { w1: '周六爬山' },
+      content: { w1: '周六爬山', w4: '青山村口' },
       commentCount: 0,
       likeCount: 0,
       createdAt: '',
@@ -110,7 +111,7 @@ describe('getListPreview', () => {
 
     const result = getListPreview(post, section)
     expect(result).toHaveLength(1)
-    expect(result[0].label).toBe('标题')
+    expect(result[0].label).toBe('集合地点')
   })
 
   test('audio_group 不进入列表摘要', () => {
@@ -150,7 +151,7 @@ describe('getListPreview', () => {
     const result = getListPreview(post, sectionWithAudio)
 
     expect(result.some((item) => item.label === '音频')).toBe(false)
-    expect(result).toEqual([{ label: '标题', value: '课程通知', type: 'text' }])
+    expect(result).toEqual([])
   })
 })
 
@@ -208,6 +209,35 @@ describe('home live card formatting', () => {
 
     expect(getHomeLiveMeta(post, section)).not.toContain('一年')
     expect(getHomeLiveMeta(post, section)).toContain('2人参与')
+  })
+
+  test('uses configured showInList fields for generic live activity cards', () => {
+    const section = {
+      _id: 's-trip',
+      communityId: 'c1',
+      name: '我的组局',
+      type: 'realtime',
+      status: 'active',
+      widgets: [
+        { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
+        { widgetId: 'participants', type: 'short_text', label: '参与人数', fieldKey: 'participants', required: false, order: 1, showInList: true },
+        { widgetId: 'time', type: 'datetime', label: '活动时间', fieldKey: 'activityTime', required: false, order: 2, showInList: true },
+      ],
+    } as Section
+    const post = {
+      content: {
+        title: '6月30日出发 成都至川西大环线',
+        participants: '4人参与',
+        time: '2026-06-30T09:00:00+08:00',
+      },
+      authorNickname: '一年',
+      createdAt: '2026-06-24T01:40:08.348Z',
+    } as Post
+
+    expect(getHomeLiveMeta(post, section)).toEqual([
+      '4人参与',
+      '活动时间：06月30日',
+    ])
   })
 })
 

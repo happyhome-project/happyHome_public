@@ -13,7 +13,7 @@
     },
     {
       "path": "pages/search/index",
-      "style": { "navigationBarTitleText": "搜索" }
+      "style": { "navigationBarTitleText": "搜索", "navigationStyle": "custom" }
     },
     {
       "path": "pages/create/index",
@@ -73,14 +73,14 @@
         "selectedIconPath": "static/tab-profile-active.png"
       }
     ],
-    "color": "#847F7B",
-    "selectedColor": "#1E1A16",
-    "backgroundColor": "#FDFBF8"
+    "color": "#88918C",
+    "selectedColor": "#3DAD7D",
+    "backgroundColor": "#FFFFFF"
   },
   "globalStyle": {
     "navigationBarTextStyle": "black",
     "navigationBarTitleText": "社群助手",
-    "navigationBarBackgroundColor": "#FDFBF8",
-    "backgroundColor": "#F5F3F0"
+    "navigationBarBackgroundColor": "#FFFFFF",
+    "backgroundColor": "#F6F7F9"
   }
 }

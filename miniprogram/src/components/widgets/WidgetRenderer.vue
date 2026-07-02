@@ -234,11 +234,11 @@ watch(hasValue, () => {
 </script>
 
 <style lang="scss" scoped>
-.widget-item { padding: $hh-space-md 0; border-bottom: 1rpx solid $hh-color-divider; }
-.label { font-size: $hh-font-caption; color: $hh-color-text-mute; display: block; margin-bottom: $hh-space-xs; }
-.value { font-size: $hh-font-body-lg; color: $hh-color-text; }
+.widget-item { padding: $hh-space-md 0; border-bottom: 1rpx solid var(--hh-color-line-soft); }
+.label { font-size: var(--hh-text-caption-lg-size); color: var(--hh-color-text-tertiary); display: block; margin-bottom: $hh-space-xs; }
+.value { font-size: var(--hh-text-body-lg-size); color: var(--hh-color-text-primary); }
 .images { display: flex; flex-wrap: wrap; gap: $hh-space-sm; }
-.thumb { width: 160rpx; height: 160rpx; border-radius: $hh-radius-sm; }
+.thumb { width: 188rpx; height: 188rpx; border-radius: var(--hh-radius-card); }
 .videos { display: block; }
 .audio-list { display: grid; gap: $hh-space-sm; }
 .audio-card {
@@ -246,20 +246,20 @@ watch(hasValue, () => {
   align-items: center;
   gap: $hh-space-sm;
   padding: $hh-space-md;
-  background: $hh-color-bg-sub;
-  border: 1rpx solid $hh-color-divider;
-  border-radius: $hh-radius-md;
+  background: var(--hh-color-card);
+  border: 1rpx solid var(--hh-color-line);
+  border-radius: var(--hh-radius-card);
 }
 .audio-card.active {
-  border-color: $hh-accent;
-  background: $hh-accent-wash;
+  border-color: var(--hh-color-brand-primary);
+  background: var(--hh-color-brand-soft);
 }
 .audio-play {
   width: 56rpx;
   height: 56rpx;
   border-radius: 50%;
-  background: $hh-accent;
-  color: $hh-surface-1;
+  background: var(--hh-color-brand-primary);
+  color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -270,24 +270,24 @@ watch(hasValue, () => {
 .audio-main { min-width: 0; display: flex; flex-direction: column; gap: 4rpx; }
 .audio-title {
   font-size: $hh-font-body;
-  color: $hh-color-text;
+  color: var(--hh-color-text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.audio-meta { font-size: $hh-font-caption; color: $hh-color-text-mute; }
+.audio-meta { font-size: var(--hh-text-caption-lg-size); color: var(--hh-color-text-tertiary); }
 .location-card {
   overflow: hidden;
-  border: 1rpx solid $hh-color-divider;
-  border-radius: $hh-radius-md;
-  background: $hh-surface-1;
+  border: 1rpx solid var(--hh-color-line);
+  border-radius: var(--hh-radius-card);
+  background: var(--hh-color-card);
 }
 
 .location-map {
   width: 100%;
   height: 172rpx;
   display: block;
-  background: $hh-color-bg-sub;
+  background: $hh-surface-2;
 }
 
 .location-meta {
@@ -298,20 +298,20 @@ watch(hasValue, () => {
 }
 
 .location-name {
-  color: $hh-color-text;
-  font-size: $hh-font-body;
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-body-base-size);
   font-weight: $hh-font-weight-bold;
 }
 
 .location-address {
-  color: $hh-color-text-mute;
-  font-size: $hh-font-caption;
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-caption-lg-size);
   line-height: 1.5;
 }
 
 .location-action {
-  color: $hh-accent;
-  font-size: $hh-font-caption;
+  color: var(--hh-color-brand-primary);
+  font-size: var(--hh-text-caption-lg-size);
   font-weight: $hh-font-weight-medium;
 }
 .empty-value { color: $hh-color-text-mute; }
@@ -337,9 +337,9 @@ watch(hasValue, () => {
 .widget-item.is-guide-note.widget-short_text .value,
 .widget-item.is-guide-note.widget-summary .value {
   font-family: $hh-font-serif;
-  font-size: 42rpx;
-  line-height: 1.36;
-  color: $hh-ink-1;
+  font-size: var(--hh-text-heading-lg-size);
+  line-height: var(--hh-text-heading-lg-line);
+  color: var(--hh-color-text-primary);
   font-weight: $hh-font-weight-bold;
 }
 
@@ -352,23 +352,23 @@ watch(hasValue, () => {
 .widget-item.is-guide-note.widget-image_group .thumb {
   width: 100%;
   height: 420rpx;
-  border-radius: $hh-radius-md;
+  border-radius: var(--hh-radius-card);
   background: $hh-surface-2;
 }
 
 .widget-item.is-guide-note.widget-rich_text .value,
 .widget-item.is-guide-note.widget-rich_note .value {
-  font-size: 30rpx;
+  font-size: var(--hh-text-body-lg-size);
   line-height: 1.78;
-  color: $hh-ink-1;
+  color: var(--hh-color-text-primary);
 }
 
 .widget-item.is-guide-note.widget-location {
   margin-top: 12rpx;
   padding: 18rpx 22rpx;
-  border: 1rpx solid $hh-ink-line-2;
-  border-radius: $hh-radius-md;
-  background: $hh-surface-1;
+  border: 1rpx solid var(--hh-color-line);
+  border-radius: var(--hh-radius-card);
+  background: var(--hh-color-card);
 }
 
 .widget-item.is-guide-note.widget-location .label {

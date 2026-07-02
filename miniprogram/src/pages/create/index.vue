@@ -47,8 +47,8 @@
         </view>
       </view>
 
-      <view v-else class="form">
-        <view class="form-header">
+      <view v-else class="form" :class="{ 'form--figma': isFigmaCreateMode }">
+        <view v-if="!isFigmaCreateMode" class="form-header">
           <text class="section-tag" @tap="handleBackToSectionPicker">← {{ selectedSection.name }}</text>
           <text v-if="isActivityInviteMode" class="invite-mode-tag">从攻略发起召集</text>
         </view>
@@ -65,38 +65,103 @@
         </view>
 
         <template v-else>
-          <WidgetEditor
-            v-for="widget in editableWidgets"
-            :key="widget.widgetId"
-            :widget="widget"
-            :allow-rich-note-images="selectedSection.displayTemplate !== 'guide_note'"
-            v-model="formData[widget.widgetId]"
-          />
+          <view class="figma-form-list">
+            <template v-for="block in createFormBlocks" :key="block.key">
+              <view v-if="block.type === 'guideMain'" class="figma-guide-main-card">
+                <WidgetEditor
+                  v-if="block.imageWidget"
+                  :widget="block.imageWidget"
+                  variant="figma"
+                  embedded
+                  hide-label
+                  guide-role="cover"
+                  :allow-rich-note-images="!isGuideCreateMode"
+                  v-model="formData[block.imageWidget.widgetId]"
+                />
+                <WidgetEditor
+                  v-if="block.titleWidget"
+                  :widget="block.titleWidget"
+                  variant="figma"
+                  embedded
+                  hide-label
+                  guide-role="title"
+                  placeholder="添加主题"
+                  :allow-rich-note-images="!isGuideCreateMode"
+                  v-model="formData[block.titleWidget.widgetId]"
+                />
+                <WidgetEditor
+                  v-if="block.bodyWidget"
+                  :widget="block.bodyWidget"
+                  variant="figma"
+                  embedded
+                  hide-label
+                  guide-role="body"
+                  placeholder="添加正文内容"
+                  :allow-rich-note-images="!isGuideCreateMode"
+                  v-model="formData[block.bodyWidget.widgetId]"
+                />
+                <view class="figma-ai-write">
+                  <text class="figma-ai-icon">✣</text>
+                  <text>AI帮你写</text>
+                </view>
+              </view>
+
+              <view v-else-if="block.type === 'routeStats'" class="figma-route-stats-card">
+                <WidgetEditor
+                  v-for="widget in block.widgets"
+                  :key="widget.widgetId"
+                  :widget="widget"
+                  variant="figma"
+                  embedded
+                  :allow-rich-note-images="!isGuideCreateMode"
+                  v-model="formData[widget.widgetId]"
+                />
+              </view>
+
+              <WidgetEditor
+                v-else
+                :widget="block.widget"
+                variant="figma"
+                :allow-rich-note-images="!isGuideCreateMode"
+                v-model="formData[block.widget.widgetId]"
+              />
+            </template>
+          </view>
 
           <view v-for="widget in attendanceWidgets" :key="widget.widgetId" class="attendance-hint">
             <text v-if="resolveAttendanceWidgetLabel(widget)" class="attendance-label">{{ resolveAttendanceWidgetLabel(widget) }}</text>
             <text class="attendance-desc">发布后成员可点击参与，人数和头像会自动统计。</text>
           </view>
 
-          <button class="btn-primary" :disabled="submitting" @tap="handleSubmit">
-            {{ submitting ? '发布中...' : (isActivityInviteMode ? '发布邀约' : '发布') }}
-          </button>
+          <view class="submit-dock">
+            <button class="draft-btn" @tap="saveDraft">
+              <text class="draft-icon">▣</text>
+              <text>存草稿</text>
+            </button>
+            <button class="btn-primary" :disabled="submitting" @tap="handleSubmit">
+              {{ submitting ? '发布中...' : (isActivityInviteMode ? '发布邀约' : '发布') }}
+            </button>
+          </view>
         </template>
       </view>
     </template>
-    <AppTabBar current="create" />
+    <AppTabBar v-if="!selectedSection" current="create" />
   </view>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi, postApi } from '../../api/cloud'
 import AppTabBar from '../../components/AppTabBar.vue'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
-import { hideNativeTabBar } from '../../utils/app-tabbar'
+import {
+  CREATE_SECTION_INTENT_KEY,
+  CREATE_SECTION_INTENT_TTL_MS,
+  hideNativeTabBar,
+} from '../../utils/app-tabbar'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
@@ -113,12 +178,15 @@ const memberStatus = ref<string | null>(null)
 const joining = ref(false)
 let checkSeq = 0
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
+const CREATE_DRAFT_KEY = 'create_draft_v1'
 const ACTIVITY_INVITE_CREATE_INTENT_KEY = 'activity_invite_create_intent_v1'
 const ACTIVITY_INVITE_INTENT_TTL_MS = 30 * 60 * 1000
 const ACTIVITY_INVITE_WIDGET_IDS = {
   title: 'activity_invite_title',
   location: 'activity_invite_location',
 } as const
+const GUIDE_CREATE_NAME_HINTS = ['亲子出游', '周末遛娃', '村游攻略', '路线攻略', '出游攻略']
+const CREATE_SECTION_EVENT = 'happyhome:create-section-intent'
 const isActivityInviteMode = ref(false)
 const activityInviteSourcePostId = ref('')
 const activityInviteLoading = ref(false)
@@ -140,23 +208,110 @@ const adminNoticeWidgets = computed(() =>
   (selectedSection.value?.widgets || []).filter((widget: any) => widget.type === 'admin_notice')
 )
 
+const isFigmaCreateMode = computed(() => !!selectedSection.value)
+const isGuideCreateMode = computed(() => {
+  const section = selectedSection.value
+  if (!section) return false
+  if (section.displayTemplate === 'guide_note') return true
+  const name = String(section.name || '').replace(/\s/g, '')
+  return GUIDE_CREATE_NAME_HINTS.some((hint) => name.includes(hint))
+})
+
+const createFormBlocks = computed(() => {
+  const blocks: any[] = []
+  const widgets = editableWidgets.value
+  const guideMain = getGuideMainWidgets(widgets)
+  if (isGuideCreateMode.value && guideMain && (guideMain.imageWidget || guideMain.titleWidget || guideMain.bodyWidget)) {
+    const usedWidgetIds = new Set<string>()
+    ;[guideMain.imageWidget, guideMain.titleWidget, guideMain.bodyWidget].forEach((widget) => {
+      if (widget?.widgetId) usedWidgetIds.add(String(widget.widgetId))
+    })
+    blocks.push({ type: 'guideMain', key: 'guide-main', ...guideMain })
+
+    const locationWidgets = widgets.filter((widget: any) => isGuideLocationWidget(widget))
+    const trackWidgets = widgets.filter((widget: any) => isGuideTrackWidget(widget))
+    const routeStats = widgets.filter((widget: any) => isGuideRouteStatWidget(widget))
+
+    for (const widget of locationWidgets) {
+      if (usedWidgetIds.has(String(widget.widgetId))) continue
+      usedWidgetIds.add(String(widget.widgetId))
+      blocks.push({ type: 'widget', key: String(widget.widgetId), widget })
+    }
+    for (const widget of trackWidgets) {
+      if (usedWidgetIds.has(String(widget.widgetId))) continue
+      usedWidgetIds.add(String(widget.widgetId))
+      blocks.push({ type: 'widget', key: String(widget.widgetId), widget })
+    }
+    const statWidgets = routeStats.filter((widget: any) => {
+      if (usedWidgetIds.has(String(widget.widgetId))) return false
+      usedWidgetIds.add(String(widget.widgetId))
+      return true
+    })
+    if (statWidgets.length > 0) {
+      blocks.push({ type: 'routeStats', key: `route-${statWidgets.map((item: any) => item.widgetId).join('-')}`, widgets: statWidgets })
+    }
+    for (const widget of widgets) {
+      if (usedWidgetIds.has(String(widget.widgetId))) continue
+      blocks.push({ type: 'widget', key: String(widget.widgetId), widget })
+    }
+    return blocks
+  }
+
+  const routeStats: any[] = []
+  for (const widget of widgets) {
+    if (guideMain && isGuideMainWidget(widget, guideMain)) continue
+    if (isGuideRouteStatWidget(widget)) {
+      routeStats.push(widget)
+      continue
+    }
+    if (routeStats.length > 0) {
+      blocks.push({ type: 'routeStats', key: `route-${routeStats.map((item) => item.widgetId).join('-')}`, widgets: routeStats.splice(0) })
+    }
+    blocks.push({ type: 'widget', key: String(widget.widgetId), widget })
+  }
+  if (routeStats.length > 0) {
+    blocks.push({ type: 'routeStats', key: `route-${routeStats.map((item) => item.widgetId).join('-')}`, widgets: routeStats.splice(0) })
+  }
+  return blocks
+})
+
 onLoad(async (options: any) => {
   hideNativeTabBar()
+  await ensureSectionsLoaded()
   await checkMembership({ silent: false })
+  await consumeCreateSectionIntent(options)
   await consumeActivityInviteIntent(options)
 })
 
 onShow(() => {
   hideNativeTabBar()
   // 返回页面（例如地图选择返回）时静默刷新，不再打断表单操作。
+  void ensureSectionsLoaded()
   void checkMembership({ silent: true })
+  void consumeCreateSectionIntent()
   void consumeActivityInviteIntent()
 })
 
 watch(() => communityStore.currentCommunityId, async () => {
   selectedSection.value = null
   membershipReady.value = false
+  await ensureSectionsLoaded()
   await checkMembership({ silent: false, forceRefresh: true })
+  await consumeCreateSectionIntent()
+})
+
+watch(selectedSection, (section) => {
+  uni.setNavigationBarTitle({ title: section?.name || '发布' })
+}, { immediate: true })
+
+try {
+  ;(uni as any).$on?.(CREATE_SECTION_EVENT, handleCreateSectionIntentEvent)
+} catch (_error) {}
+
+onBeforeUnmount(() => {
+  try {
+    ;(uni as any).$off?.(CREATE_SECTION_EVENT, handleCreateSectionIntentEvent)
+  } catch (_error) {}
 })
 
 async function checkMembership(options: { silent: boolean; forceRefresh?: boolean }) {
@@ -257,6 +412,112 @@ function clearActivityInviteMode() {
   try {
     uni.removeStorageSync(ACTIVITY_INVITE_CREATE_INTENT_KEY)
   } catch {}
+}
+
+function isGuideRouteStatWidget(widget: any) {
+  if (!isGuideCreateMode.value) return false
+  const label = String(widget?.label || '').replace(/\s/g, '')
+  const fieldKey = String(widget?.fieldKey || '').toLowerCase()
+  return [
+    '距离',
+    '最高海拔',
+    '累计爬升',
+    '参考用时',
+    '驾车到达用时',
+  ].includes(label) || [
+    'distance',
+    'routedistance',
+    'totaldistance',
+    'mileage',
+    'highestaltitude',
+    'altitude',
+    'maxaltitude',
+    'totalclimb',
+    'climb',
+    'ascent',
+    'referenceduration',
+    'duration',
+    'timecost',
+    'driveduration',
+    'drivetime',
+    'drivingtime',
+    'arrivalduration',
+    'arrivaltime',
+  ].includes(fieldKey)
+}
+
+function isGuideLocationWidget(widget: any) {
+  if (!isGuideCreateMode.value) return false
+  return String(widget?.type || '') === 'location'
+}
+
+function isGuideTrackWidget(widget: any) {
+  if (!isGuideCreateMode.value) return false
+  const label = String(widget?.label || '').replace(/\s/g, '')
+  const fieldKey = String(widget?.fieldKey || '').toLowerCase()
+  return label.includes('两步路') || label.includes('轨迹') || fieldKey.includes('track')
+}
+
+function getGuideMainWidgets(widgets: any[]) {
+  if (!isGuideCreateMode.value) return null
+  const sorted = widgets.slice().sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
+  const imageWidget = sorted.find((widget) => widget.type === 'image_group') || null
+  const titleWidget = sorted.find((widget) => {
+    if (!['short_text', 'summary'].includes(widget.type)) return false
+    const label = String(widget.label || '').replace(/\s/g, '')
+    const fieldKey = String(widget.fieldKey || '').toLowerCase()
+    return fieldKey === 'title' || fieldKey.includes('title') || ['标题', '名称', '名字'].some((item) => label.includes(item))
+  }) || null
+  const bodyWidget = sorted.find((widget) => ['rich_text', 'rich_note', 'summary'].includes(widget.type) && widget.widgetId !== titleWidget?.widgetId) || null
+  return { imageWidget, titleWidget, bodyWidget }
+}
+
+function isGuideMainWidget(widget: any, guideMain: any) {
+  return [guideMain.imageWidget, guideMain.titleWidget, guideMain.bodyWidget]
+    .some((item) => item?.widgetId && item.widgetId === widget.widgetId)
+}
+
+async function ensureSectionsLoaded() {
+  const communityId = String(communityStore.currentCommunityId || '')
+  if (!communityId || communityStore.currentSections.length > 0) return
+  try {
+    await communityStore.switchCommunity(communityId)
+  } catch (_error) {}
+}
+
+function handleCreateSectionIntentEvent(payload?: { sectionId?: string }) {
+  void consumeCreateSectionIntent(payload)
+}
+
+function readCreateSectionIntent(options?: any) {
+  const querySectionId = String(options?.sectionId || '').trim()
+  if (querySectionId) return { sectionId: querySectionId, removeStored: false }
+
+  try {
+    const saved = uni.getStorageSync(CREATE_SECTION_INTENT_KEY)
+    const sectionId = String(saved?.sectionId || '').trim()
+    const createdAt = Number(saved?.createdAt || 0)
+    if (sectionId && createdAt && Date.now() - createdAt <= CREATE_SECTION_INTENT_TTL_MS) {
+      return { sectionId, removeStored: true }
+    }
+    if (sectionId || createdAt) uni.removeStorageSync(CREATE_SECTION_INTENT_KEY)
+  } catch (_error) {}
+
+  return null
+}
+
+async function consumeCreateSectionIntent(options?: any) {
+  const intent = readCreateSectionIntent(options)
+  if (!intent || isActivityInviteMode.value) return
+  await ensureSectionsLoaded()
+  const target = activeSections.value.find((section: any) => String(section?._id || '') === intent.sectionId)
+  if (!target) return
+  selectSection(target)
+  if (intent.removeStored) {
+    try {
+      uni.removeStorageSync(CREATE_SECTION_INTENT_KEY)
+    } catch (_error) {}
+  }
 }
 
 function readActivityInviteIntent(options?: any) {
@@ -382,10 +643,33 @@ async function handleAuditSubmitResult(result: any) {
       })
     } catch {}
     uni.showToast({ title: '发布成功', icon: 'success' })
+    clearDraft()
   }
 
   selectedSection.value = null
   uni.switchTab({ url: '/pages/index/index' })
+}
+
+function saveDraft() {
+  if (!selectedSection.value) return
+  try {
+    uni.setStorageSync(CREATE_DRAFT_KEY, {
+      communityId: communityStore.currentCommunityId,
+      sectionId: selectedSection.value._id,
+      sectionName: selectedSection.value.name,
+      content: JSON.parse(JSON.stringify(formData)),
+      savedAt: Date.now(),
+    })
+    uni.showToast({ title: '已保存草稿', icon: 'success' })
+  } catch (_error) {
+    uni.showToast({ title: '保存失败', icon: 'none' })
+  }
+}
+
+function clearDraft() {
+  try {
+    uni.removeStorageSync(CREATE_DRAFT_KEY)
+  } catch (_error) {}
 }
 
 async function handleSubmit() {
@@ -448,17 +732,22 @@ async function handleSubmit() {
 
 <style lang="scss" scoped>
 .create-page {
-  padding: $hh-space-lg $hh-space-lg calc(132rpx + env(safe-area-inset-bottom));
-  background: $hh-color-bg;
+  padding: 0;
+  background: #f4f5f9;
   min-height: 100vh;
 }
 
 .title {
-  font-size: $hh-font-h2;
+  font-size: var(--hh-text-heading-md-size);
   font-weight: $hh-font-weight-medium;
-  color: $hh-color-text;
+  color: var(--hh-color-text-primary);
   display: block;
   margin-bottom: $hh-space-lg;
+}
+
+.section-picker {
+  padding: $hh-space-lg var(--hh-page-x) calc(132rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
 }
 
 .section-option {
@@ -466,14 +755,16 @@ async function handleSubmit() {
   justify-content: space-between;
   align-items: center;
   padding: $hh-space-lg;
-  border-radius: $hh-radius-md;
-  background: $hh-color-bg-sub;
+  border: 1rpx solid var(--hh-color-line);
+  border-radius: var(--hh-radius-card);
+  background: var(--hh-color-card);
+  box-shadow: var(--hh-shadow-soft);
   margin-bottom: $hh-space-sm;
 }
 
 .section-name {
   font-size: $hh-font-body-lg;
-  color: $hh-color-text;
+  color: var(--hh-color-text-primary);
 }
 
 .form-header {
@@ -486,8 +777,8 @@ async function handleSubmit() {
 .invite-mode-tag {
   padding: 4rpx 12rpx;
   border-radius: $hh-radius-full;
-  background: rgba(47, 124, 78, 0.1);
-  color: $hh-color-primary;
+  background: var(--hh-color-brand-soft);
+  color: var(--hh-color-brand-strong);
   font-size: $hh-font-caption;
 }
 
@@ -505,70 +796,113 @@ async function handleSubmit() {
   margin-bottom: $hh-space-lg;
 }
 
+.form--figma {
+  margin: 0;
+  padding: 24rpx 32rpx calc(144rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  min-height: 100vh;
+}
+
+.figma-form-list {
+  display: grid;
+  gap: 24rpx;
+}
+
+.figma-guide-main-card {
+  padding: 32rpx;
+  border-radius: 24rpx;
+  background: #fff;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 32rpx;
+}
+
+.figma-ai-write {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  color: var(--hh-color-brand-primary);
+  font-size: var(--hh-text-body-lg-size);
+  font-weight: $hh-font-weight-bold;
+  line-height: var(--hh-text-body-lg-line);
+}
+
+.figma-ai-icon {
+  font-size: 32rpx;
+  line-height: 1;
+}
+
+.figma-route-stats-card {
+  overflow: hidden;
+  border-radius: 24rpx;
+  background: #fff;
+}
+
 .section-tag {
   font-size: $hh-font-body;
-  color: $hh-color-primary-text;
+  color: var(--hh-color-brand-strong);
 }
 
 .empty-widgets-hint {
   margin-top: $hh-space-xl;
   padding: $hh-space-lg;
-  border: 1rpx dashed $hh-color-border;
-  border-radius: $hh-radius-md;
-  background: $hh-color-bg-sub;
+  border: 1rpx dashed var(--hh-color-line);
+  border-radius: var(--hh-radius-card);
+  background: var(--hh-color-card);
   text-align: center;
 }
 .empty-widgets-title {
   display: block;
   font-size: $hh-font-body-lg;
-  color: $hh-color-text;
+  color: var(--hh-color-text-primary);
   margin-bottom: $hh-space-sm;
   font-weight: $hh-font-weight-medium;
 }
 .empty-widgets-desc {
   display: block;
   font-size: $hh-font-caption;
-  color: $hh-color-text-mute;
+  color: var(--hh-color-text-tertiary);
   line-height: 1.6;
 }
 
 .attendance-hint {
   margin-bottom: $hh-space-lg;
   padding: $hh-space-md;
-  border-radius: $hh-radius-md;
-  background: #f4f8ff;
+  border-radius: var(--hh-radius-card);
+  background: var(--hh-color-brand-soft);
 }
 
 .attendance-label {
   display: block;
   font-size: $hh-font-body;
-  color: $hh-color-text;
+  color: var(--hh-color-text-primary);
   margin-bottom: $hh-space-xs;
 }
 
 .attendance-desc {
   display: block;
   font-size: $hh-font-caption;
-  color: $hh-color-text-mute;
+  color: var(--hh-color-text-tertiary);
 }
 
 .btn-primary {
-  width: 560rpx;
-  height: 86rpx;
-  margin: 56rpx auto 0;
+  flex: 1;
+  height: 96rpx;
+  margin: 0;
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  background: $hh-color-primary;
-  color: $hh-color-text-inverse;
+  background: var(--hh-color-brand-primary);
+  color: #fff;
   border: none;
-  border-radius: 22rpx;
-  font-size: $hh-font-body-lg;
+  border-radius: $hh-radius-full;
+  font-size: var(--hh-text-body-lg-size);
   font-weight: $hh-font-weight-bold;
-  line-height: 86rpx;
-  box-shadow: 0 8rpx 18rpx rgba(58, 106, 69, 0.14);
+  line-height: 96rpx;
+  box-shadow: none;
 }
 
 .btn-primary::after {
@@ -579,12 +913,53 @@ async function handleSubmit() {
   opacity: $hh-opacity-disabled;
 }
 
+.submit-dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: $hh-z-sticky;
+  display: flex;
+  align-items: center;
+  gap: 64rpx;
+  padding: 32rpx 32rpx calc(32rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  background: #fff;
+}
+
+.draft-btn {
+  width: 112rpx;
+  min-width: 112rpx;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-body-base-size);
+  line-height: 1.35;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8rpx;
+  white-space: nowrap;
+}
+
+.draft-btn::after {
+  border: none;
+}
+
+.draft-icon {
+  font-size: 44rpx;
+  line-height: 1;
+  color: var(--hh-color-brand-primary);
+}
+
 .btn-primary-plain {
   margin-top: $hh-space-sm;
-  background: $hh-color-bg;
-  color: $hh-color-primary;
-  border: 2rpx solid $hh-color-primary;
-  border-radius: $hh-radius-sm;
+  background: var(--hh-color-card);
+  color: var(--hh-color-brand-primary);
+  border: 2rpx solid var(--hh-color-brand-primary);
+  border-radius: var(--hh-radius-card);
   font-size: $hh-font-body;
 }
 
@@ -604,13 +979,13 @@ async function handleSubmit() {
 .guard-title {
   font-size: $hh-font-h3;
   font-weight: $hh-font-weight-medium;
-  color: $hh-color-text;
+  color: var(--hh-color-text-primary);
   text-align: center;
 }
 
 .guard-desc {
   font-size: $hh-font-body;
-  color: $hh-color-text-mute;
+  color: var(--hh-color-text-tertiary);
   text-align: center;
 }
 </style>
