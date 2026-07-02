@@ -1,6 +1,6 @@
 <template>
-  <view class="widget-editor">
-    <text class="label">
+  <view class="widget-editor" :class="editorClasses">
+    <text v-if="showOuterLabel" class="label">
       {{ displayLabel }}
       <text v-if="widget.required" class="required">*</text>
     </text>
@@ -11,7 +11,7 @@
     >
       <input
         :value="modelValue as string"
-        :placeholder="`请输入${displayLabel}`"
+        :placeholder="inputPlaceholder"
         placeholder-class="input-placeholder"
         class="input"
         @input="emit('update:modelValue', ($event as any).detail.value)"
@@ -25,7 +25,7 @@
         :value="datetimePickerValue"
         :start="datetimeRangeStart"
         :end="datetimeRangeEnd"
-        :placeholder="`选择${displayLabel}`"
+        :placeholder="variant === 'figma' ? '' : `选择${displayLabel}`"
         return-type="string"
         @change="onDatetimeChange"
       />
@@ -35,7 +35,7 @@
       <input
         type="number"
         :value="numberInputValue"
-        :placeholder="`请输入${displayLabel}`"
+        :placeholder="inputPlaceholder"
         placeholder-class="input-placeholder"
         class="input"
         @input="emit('update:modelValue', Number(($event as any).detail.value))"
@@ -56,28 +56,61 @@
       </view>
     </view>
 
-    <view v-else-if="widget.type === 'location'" class="location-picker">
-      <view v-if="locationValue" class="location-value">
-        <text class="address">{{ locationValue.address || '已选择位置' }}</text>
-        <text class="coord">{{ locationValue.lat }}, {{ locationValue.lng }}</text>
-      </view>
-      <view class="location-actions">
-        <button class="loc-btn" size="mini" @tap="chooseLocation">选择位置</button>
-        <button
-          v-if="locationValue"
-          class="loc-btn clear"
-          size="mini"
-          @tap="clearLocation"
-        >
-          清除
-        </button>
-      </view>
+    <view
+      v-else-if="widget.type === 'location'"
+      class="location-picker"
+      :class="{ 'location-picker--selected': isSelectedFigmaLocation }"
+      @tap="chooseLocation"
+    >
+      <template v-if="isSelectedFigmaLocation && locationValue">
+        <view class="location-selected-head">
+          <view class="location-selected-title">
+            <text>{{ displayLabel }}</text>
+            <text v-if="widget.required" class="required">*</text>
+          </view>
+          <view class="location-selected-actions">
+            <text class="location-clear-text" @tap.stop="clearLocation">清除</text>
+            <text class="location-pin-mini">⌖</text>
+          </view>
+        </view>
+        <view class="location-selected-card">
+          <view class="location-map-ghost"></view>
+          <view class="location-selected-content">
+            <text class="address">{{ locationValue.name || locationValue.address || '已选择位置' }}</text>
+            <text
+              v-if="locationValue.address && locationValue.name && locationValue.address !== locationValue.name"
+              class="location-region"
+            >
+              {{ locationValue.address }}
+            </text>
+          </view>
+          <text class="location-card-pin">●</text>
+        </view>
+      </template>
+      <template v-else>
+        <view v-if="locationValue" class="location-value">
+          <text class="address">{{ locationValue.name || locationValue.address || '已选择位置' }}</text>
+          <text v-if="variant !== 'figma'" class="coord">{{ locationValue.lat }}, {{ locationValue.lng }}</text>
+        </view>
+        <view class="location-actions">
+          <button class="loc-btn" size="mini" @tap.stop="chooseLocation">{{ locationValue ? '重新选择' : '去选择' }}</button>
+          <text v-if="variant === 'figma'" class="location-pin-mini">⌖</text>
+          <button
+            v-if="locationValue"
+            class="loc-btn clear"
+            size="mini"
+            @tap.stop="clearLocation"
+          >
+            清除
+          </button>
+        </view>
+      </template>
     </view>
 
     <view v-else-if="widget.type === 'rich_text'" class="textarea-wrap">
       <textarea
         :value="modelValue as string"
-        :placeholder="`请输入${displayLabel}`"
+        :placeholder="inputPlaceholder"
         placeholder-class="input-placeholder"
         class="textarea"
         @input="emit('update:modelValue', ($event as any).detail.value)"
@@ -94,6 +127,8 @@
       v-else-if="widget.type === 'rich_note'"
       :model-value="modelValue"
       :allow-images="allowRichNoteImages"
+      :minimal="variant === 'figma' && guideRole === 'body'"
+      :placeholder="inputPlaceholder"
       @update:model-value="emit('update:modelValue', $event)"
     />
 
@@ -109,18 +144,70 @@ import { resolveWidgetLabel } from '../../utils/widget-form'
 import NoteBlocksEditor from './NoteBlocksEditor.vue'
 import RichNoteEditor from './RichNoteEditor.vue'
 
-const props = withDefaults(defineProps<{ widget: any; modelValue: any; allowRichNoteImages?: boolean }>(), {
+const props = withDefaults(defineProps<{
+  widget: any
+  modelValue: any
+  allowRichNoteImages?: boolean
+  variant?: 'default' | 'figma'
+  embedded?: boolean
+  hideLabel?: boolean
+  placeholder?: string
+  guideRole?: 'cover' | 'title' | 'body' | ''
+}>(), {
   allowRichNoteImages: true,
+  variant: 'default',
+  embedded: false,
+  hideLabel: false,
+  placeholder: '',
+  guideRole: '',
 })
 const emit = defineEmits(['update:modelValue'])
 
 interface GeoLocationValue {
   address: string
+  name?: string
   lat: number
   lng: number
 }
 
 const displayLabel = computed(() => resolveWidgetLabel(props.widget))
+const variant = computed(() => props.variant)
+const locationValue = computed<GeoLocationValue | null>(() => {
+  const val = props.modelValue
+  if (!val || typeof val !== 'object') return null
+  if (typeof val.lat !== 'number' || typeof val.lng !== 'number') return null
+  return {
+    address: String(val.address || ''),
+    name: String(val.name || ''),
+    lat: Number(val.lat),
+    lng: Number(val.lng),
+  }
+})
+const isSelectedFigmaLocation = computed(() =>
+  variant.value === 'figma' &&
+  String(props.widget?.type || '') === 'location' &&
+  !!locationValue.value
+)
+const showOuterLabel = computed(() => !props.hideLabel && !isSelectedFigmaLocation.value)
+const isLineWidget = computed(() =>
+  variant.value === 'figma' &&
+  ['short_text', 'summary', 'number', 'datetime', 'location'].includes(String(props.widget?.type || '')) &&
+  !isSelectedFigmaLocation.value
+)
+const editorClasses = computed(() => ({
+  'widget-editor--figma': variant.value === 'figma',
+  'widget-editor--embedded': props.embedded,
+  'widget-editor--hide-label': props.hideLabel,
+  'widget-editor--line': isLineWidget.value,
+  'widget-editor--block': variant.value === 'figma' && !isLineWidget.value,
+  [`widget-editor--guide-${props.guideRole}`]: !!props.guideRole,
+  [`widget-editor--${String(props.widget?.type || 'unknown')}`]: true,
+}))
+const inputPlaceholder = computed(() => {
+  const custom = String(props.placeholder || '').trim()
+  if (custom) return custom
+  return variant.value === 'figma' ? '请输入' : `请输入${displayLabel.value}`
+})
 const numberInputValue = computed(() => {
   const value = props.modelValue
   return String(value === undefined || value === null ? '' : value)
@@ -160,17 +247,6 @@ function onDatetimeChange(value: any) {
   emit('update:modelValue', normalized)
 }
 
-const locationValue = computed<GeoLocationValue | null>(() => {
-  const val = props.modelValue
-  if (!val || typeof val !== 'object') return null
-  if (typeof val.lat !== 'number' || typeof val.lng !== 'number') return null
-  return {
-    address: String(val.address || ''),
-    lat: Number(val.lat),
-    lng: Number(val.lng),
-  }
-})
-
 function addImage() {
   wx.chooseMedia({
     count: 9,
@@ -194,6 +270,7 @@ function chooseLocation() {
     success: (res: any) => {
       emit('update:modelValue', {
         address: res.address || res.name || '',
+        name: res.name || '',
         lat: Number(res.latitude),
         lng: Number(res.longitude),
       })
@@ -213,47 +290,366 @@ function clearLocation() {
 
 <style lang="scss" scoped>
 .widget-editor { margin-bottom: $hh-space-lg; }
-.label { font-size: $hh-font-body; color: $hh-color-text; margin-bottom: $hh-space-sm; display: block; }
+.label { font-size: var(--hh-text-body-base-size); color: var(--hh-color-text-primary); margin-bottom: $hh-space-sm; display: block; font-weight: $hh-font-weight-medium; }
 .required { color: $hh-color-danger; margin-left: 4rpx; }
 .input-wrap {
-  background: $hh-color-bg-sub;
-  border-radius: $hh-radius-sm;
+  background: var(--hh-color-card);
+  border: 1rpx solid var(--hh-color-line);
+  border-radius: var(--hh-radius-card);
   padding: $hh-space-md;
 }
 .input {
-  font-size: $hh-font-body;
+  font-size: var(--hh-text-body-base-size);
   width: 100%;
   min-height: 40rpx;
   background: transparent;
-  color: $hh-color-text;
+  color: var(--hh-color-text-primary);
 }
 .textarea-wrap {
-  background: $hh-color-bg-sub;
-  border-radius: $hh-radius-sm;
+  background: var(--hh-color-card);
+  border: 1rpx solid var(--hh-color-line);
+  border-radius: var(--hh-radius-card);
   padding: $hh-space-md;
 }
 .input-placeholder {
-  color: $hh-color-text-mute;
-  font-size: $hh-font-body;
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-body-base-size);
 }
 .datetime-picker {
   /* uni-datetime-picker 自带外观，容器用全宽块级即可 */
   display: block;
 }
 .image-uploader { display: flex; flex-wrap: wrap; gap: $hh-space-sm; }
-.thumb-wrap { position: relative; width: 160rpx; height: 160rpx; }
-.thumb { width: 160rpx; height: 160rpx; border-radius: $hh-radius-sm; }
+.thumb-wrap { position: relative; width: 188rpx; height: 188rpx; }
+.thumb { width: 188rpx; height: 188rpx; border-radius: var(--hh-radius-card); }
 .thumb-del { position: absolute; top: -10rpx; right: -10rpx; width: 36rpx; height: 36rpx; background: $hh-color-mask; color: $hh-color-text-inverse; border-radius: $hh-radius-full; font-size: $hh-font-body; line-height: 36rpx; text-align: center; }
-.add-btn { width: 160rpx; height: 160rpx; background: $hh-color-bg-sub; border-radius: $hh-radius-sm; display: flex; align-items: center; justify-content: center; }
-.add-icon { font-size: 60rpx; color: $hh-color-text-mute; }
-.location-picker { background: $hh-color-bg-sub; border-radius: $hh-radius-sm; padding: $hh-space-md; }
+.add-btn { width: 188rpx; height: 188rpx; background: var(--hh-color-card); border: 1rpx dashed var(--hh-color-brand-line); border-radius: var(--hh-radius-card); display: flex; align-items: center; justify-content: center; }
+.add-icon { font-size: 60rpx; color: var(--hh-color-brand-primary); }
+.location-picker { background: var(--hh-color-card); border: 1rpx solid var(--hh-color-line); border-radius: var(--hh-radius-card); padding: $hh-space-md; }
 .location-value { margin-bottom: $hh-space-sm; }
-.address { display: block; font-size: $hh-font-body; color: $hh-color-text; }
-.coord { display: block; font-size: $hh-font-caption; color: $hh-color-text-mute; margin-top: $hh-space-xs; }
+.address { display: block; font-size: var(--hh-text-body-base-size); color: var(--hh-color-text-primary); }
+.coord { display: block; font-size: var(--hh-text-caption-lg-size); color: var(--hh-color-text-tertiary); margin-top: $hh-space-xs; }
 .location-actions { display: flex; gap: $hh-space-sm; }
-.loc-btn { margin: 0; background: $hh-color-primary; color: $hh-color-text-inverse; font-size: $hh-font-caption; line-height: 1.8; border: none; }
-.loc-btn.clear { background: $hh-color-text-mute; }
-.textarea { font-size: $hh-font-body; width: 100%; min-height: 200rpx; background: transparent; color: $hh-color-text; }
-.video-readonly { background: $hh-color-bg-sub; border-radius: $hh-radius-sm; padding: $hh-space-md; }
-.readonly-hint { font-size: $hh-font-caption; color: $hh-color-text-mute; }
+.loc-btn { margin: 0; background: var(--hh-color-brand-primary); color: #fff; font-size: var(--hh-text-caption-lg-size); line-height: 1.8; border: none; }
+.loc-btn.clear { background: var(--hh-color-text-tertiary); }
+.textarea { font-size: var(--hh-text-body-base-size); width: 100%; min-height: 240rpx; background: transparent; color: var(--hh-color-text-primary); }
+.video-readonly { background: var(--hh-color-card); border: 1rpx solid var(--hh-color-line); border-radius: var(--hh-radius-card); padding: $hh-space-md; }
+.readonly-hint { font-size: var(--hh-text-caption-lg-size); color: var(--hh-color-text-tertiary); }
+
+.widget-editor--figma {
+  margin-bottom: 0;
+  padding: 32rpx;
+  border-radius: 24rpx;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.widget-editor--figma .label {
+  font-size: 32rpx;
+  font-weight: 400;
+  line-height: 48rpx;
+  color: #181818;
+  margin-bottom: 0;
+}
+
+.widget-editor--figma .required {
+  margin-left: 8rpx;
+  color: #d53d3c;
+}
+
+.widget-editor--line {
+  min-height: 112rpx;
+  display: flex;
+  align-items: center;
+  gap: 32rpx;
+}
+
+.widget-editor--line .label {
+  flex-shrink: 0;
+  max-width: 300rpx;
+}
+
+.widget-editor--line .input-wrap,
+.widget-editor--line .textarea-wrap,
+.widget-editor--line .location-picker,
+.widget-editor--line .datetime-picker {
+  flex: 1;
+  min-width: 0;
+}
+
+.widget-editor--figma .input-wrap,
+.widget-editor--figma .textarea-wrap,
+.widget-editor--figma .location-picker,
+.widget-editor--figma .video-readonly {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.widget-editor--figma .input {
+  min-height: 48rpx;
+  font-size: 32rpx;
+  line-height: 48rpx;
+  text-align: right;
+  color: #181818;
+}
+
+.widget-editor--figma .textarea {
+  min-height: 400rpx;
+  padding-top: 0;
+  font-size: 32rpx;
+  line-height: 48rpx;
+}
+
+.widget-editor--figma .input-placeholder {
+  color: #a6a6a6;
+  font-size: 32rpx;
+}
+
+.widget-editor--figma .image-uploader {
+  margin-top: 24rpx;
+  gap: 16rpx;
+}
+
+.widget-editor--figma .thumb-wrap,
+.widget-editor--figma .thumb,
+.widget-editor--figma .add-btn {
+  width: 160rpx;
+  height: 160rpx;
+}
+
+.widget-editor--figma .add-btn {
+  border: 0;
+  background: #f7f7f7;
+}
+
+.widget-editor--figma .add-icon {
+  color: #a6a6a6;
+  font-size: 64rpx;
+  font-weight: 300;
+}
+
+.widget-editor--figma .location-picker {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16rpx;
+}
+
+.widget-editor--figma .location-picker--selected {
+  display: block;
+  width: 100%;
+}
+
+.location-selected-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24rpx;
+  min-height: 48rpx;
+}
+
+.location-selected-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 8rpx;
+  color: #181818;
+  font-size: 32rpx;
+  font-weight: 400;
+  line-height: 48rpx;
+}
+
+.location-selected-actions {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  color: var(--hh-color-brand-primary);
+  font-size: 32rpx;
+  line-height: 48rpx;
+}
+
+.location-clear-text {
+  color: var(--hh-color-brand-primary);
+}
+
+.location-pin-mini {
+  color: var(--hh-color-brand-primary);
+  font-size: 32rpx;
+  line-height: 1;
+}
+
+.location-selected-card {
+  position: relative;
+  overflow: hidden;
+  min-height: 148rpx;
+  margin-top: 16rpx;
+  padding: 24rpx;
+  border-radius: 16rpx;
+  box-sizing: border-box;
+  background: linear-gradient(90deg, #edf9fd 0%, #f5fffb 62%, #fff 100%);
+}
+
+.location-map-ghost {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 58%;
+  opacity: 0.55;
+  background:
+    radial-gradient(circle at 64% 34%, rgba(61, 173, 125, 0.18) 0 10rpx, transparent 11rpx),
+    linear-gradient(135deg, rgba(61, 173, 125, 0.05), rgba(93, 193, 234, 0.12)),
+    repeating-linear-gradient(26deg, transparent 0 22rpx, rgba(61, 173, 125, 0.12) 23rpx 25rpx);
+}
+
+.location-selected-content {
+  position: relative;
+  z-index: 1;
+  max-width: 70%;
+}
+
+.widget-editor--figma .location-selected-card .address {
+  overflow: hidden;
+  color: #181818;
+  font-size: var(--hh-text-heading-sm-size);
+  font-weight: $hh-font-weight-bold;
+  line-height: var(--hh-text-heading-sm-line);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.location-region {
+  display: block;
+  overflow: hidden;
+  margin-top: 4rpx;
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-body-base-size);
+  line-height: var(--hh-text-body-base-line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.location-card-pin {
+  position: absolute;
+  z-index: 1;
+  right: 108rpx;
+  top: 40rpx;
+  color: #ef3434;
+  font-size: 28rpx;
+  line-height: 1;
+}
+
+.widget-editor--figma .location-value {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+  text-align: right;
+}
+
+.widget-editor--figma .address {
+  overflow: hidden;
+  color: #181818;
+  font-size: 32rpx;
+  line-height: 48rpx;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.widget-editor--figma .location-actions {
+  flex-shrink: 0;
+  gap: 16rpx;
+}
+
+.widget-editor--figma .loc-btn {
+  padding: 0;
+  background: transparent;
+  color: var(--hh-color-brand-primary);
+  font-size: 32rpx;
+  line-height: 48rpx;
+}
+
+.widget-editor--figma .loc-btn::after {
+  border: none;
+}
+
+.widget-editor--figma .loc-btn.clear {
+  background: transparent;
+  color: var(--hh-color-brand-primary);
+}
+
+.widget-editor--figma .rich-note-editor {
+  margin-top: 16rpx;
+}
+
+.widget-editor--figma.widget-editor--rich_note,
+.widget-editor--figma.widget-editor--rich_text {
+  min-height: 400rpx;
+}
+
+.widget-editor--guide-cover,
+.widget-editor--guide-title,
+.widget-editor--guide-body {
+  padding: 0;
+  min-height: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.widget-editor--guide-cover .image-uploader {
+  margin-top: 0;
+}
+
+.widget-editor--guide-cover .thumb-wrap,
+.widget-editor--guide-cover .thumb,
+.widget-editor--guide-cover .add-btn {
+  width: 160rpx;
+  height: 160rpx;
+}
+
+.widget-editor--guide-title {
+  display: block;
+}
+
+.widget-editor--guide-title .input {
+  min-height: 56rpx;
+  font-size: var(--hh-text-heading-md-size);
+  font-weight: $hh-font-weight-bold;
+  line-height: var(--hh-text-heading-md-line);
+  text-align: left;
+}
+
+.widget-editor--guide-title .input-placeholder {
+  font-size: var(--hh-text-heading-md-size);
+  line-height: var(--hh-text-heading-md-line);
+}
+
+.widget-editor--guide-body {
+  min-height: 400rpx;
+}
+
+.widget-editor--guide-body .rich-note-editor {
+  margin-top: 0;
+}
+
+.widget-editor--guide-body .textarea {
+  min-height: 400rpx;
+  padding: 0;
+  font-size: var(--hh-text-body-lg-size);
+  line-height: var(--hh-text-body-lg-line);
+}
+
+.widget-editor--embedded {
+  border-radius: 0;
+}
+
+.widget-editor--embedded + .widget-editor--embedded {
+  border-top: 1rpx solid #f1f1f1;
+}
+
+.widget-editor--guide-cover + .widget-editor--guide-title,
+.widget-editor--guide-title + .widget-editor--guide-body {
+  border-top: 0;
+}
 </style>

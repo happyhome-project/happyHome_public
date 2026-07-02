@@ -83,12 +83,15 @@ export function getHomeLiveMeta(post: Post, section: Section): string[] {
   if (carpoolSummary) {
     meta.push(...(getCarpoolLiveMeta(post, section) || []))
   } else {
-    const timeText = formatRelativeTime(post.createdAt)
-    if (timeText) meta.push(timeText)
+    meta.push(...getConfiguredLiveMeta(post, section))
+    if (meta.length === 0) {
+      const timeText = formatRelativeTime(post.createdAt)
+      if (timeText) meta.push(timeText)
+    }
   }
 
   const attendanceText = getAttendanceMeta(post)
-  if (attendanceText) meta.push(attendanceText)
+  if (attendanceText && !meta.includes(attendanceText)) meta.push(attendanceText)
   return meta
 }
 
@@ -100,7 +103,11 @@ export function getCarpoolLiveMeta(post: Post, section: Section): string[] | nul
 
 export function getListPreview(post: Post, section: Section): ListPreviewItem[] {
   return section.widgets
-    .filter((widget) => widget.showInList && !['admin_notice', 'video_group', 'audio_group', 'note_blocks', 'rich_note'].includes(widget.type))
+    .filter((widget) =>
+      widget.showInList &&
+      !isTitleLikeWidget(widget) &&
+      !['admin_notice', 'video_group', 'audio_group', 'note_blocks', 'rich_note'].includes(widget.type)
+    )
     .sort((a, b) => a.order - b.order)
     .map((widget) => {
       if (widget.type === 'attendance') {
@@ -120,6 +127,14 @@ export function getListPreview(post: Post, section: Section): ListPreviewItem[] 
       }
     })
     .filter((item) => item.value !== '')
+}
+
+function isTitleLikeWidget(widget: Section['widgets'][number]): boolean {
+  const fieldKey = String(widget.fieldKey || '').toLowerCase()
+  const label = String(widget.label || '').replace(/\s/g, '')
+  return fieldKey === 'title' ||
+    fieldKey.includes('title') ||
+    ['标题', '名称', '名字'].some((item) => label.includes(item))
 }
 
 export function getArchiveHomeMeta(post: Post, section: Section): string {
@@ -266,6 +281,36 @@ function findFirstWidgetByTypes(section: Section, types: string[]) {
 
 function getWidgetValue(post: Post, widget: Section['widgets'][number]): string {
   return formatWidgetValue(post.content?.[widget.widgetId], widget.type).trim()
+}
+
+function getConfiguredLiveMeta(post: Post, section: Section): string[] {
+  return (section.widgets || [])
+    .slice()
+    .sort((a, b) => a.order - b.order)
+    .filter((widget) =>
+      widget.showInList &&
+      !isTitleLikeWidget(widget) &&
+      ['short_text', 'summary', 'number', 'datetime'].includes(widget.type)
+    )
+    .map((widget) => {
+      const value = widget.type === 'datetime'
+        ? formatLiveDateOnly(post.content?.[widget.widgetId]) || getWidgetValue(post, widget)
+        : getWidgetValue(post, widget)
+      if (!value) return ''
+      if (widget.type === 'datetime') {
+        const label = String(widget.label || '时间').trim() || '时间'
+        return `${label}：${value}`
+      }
+      return value
+    })
+    .filter((item) => item !== '')
+}
+
+function formatLiveDateOnly(value: unknown): string {
+  if (!value) return ''
+  const d = new Date(String(value))
+  if (Number.isNaN(d.getTime())) return ''
+  return `${String(d.getMonth() + 1).padStart(2, '0')}月${String(d.getDate()).padStart(2, '0')}日`
 }
 
 function firstImageValue(value: unknown): string {
