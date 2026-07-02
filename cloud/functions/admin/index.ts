@@ -16,6 +16,14 @@ import { getWxacodeUnlimited } from '../../lib/wx-openapi'
 import { searchAmapPoi } from '../../lib/amap'
 import { getGuestIntroConfig, saveGuestIntroConfig } from '../../lib/guest-intro-config'
 import {
+  backfillPostSearchIndexesForCommunity,
+  backfillPostSearchIndexesForSection,
+  backfillPostSearchIndexesForSectionBatch,
+  removePostSearchIndex,
+  removePostSearchIndexesForSection,
+} from '../../lib/post-search'
+import { backfillPostRagJobsForSectionBatch, enqueuePostRagJob } from '../../lib/post-rag'
+import {
   assertOwnCommunityOrSuper,
   generateSalt,
   generateSessionToken,
@@ -51,6 +59,18 @@ cloud.init({ env: process.env.TCB_ENV || cloud.DYNAMIC_CURRENT_ENV })
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'happyhome-admin-2024'
 const ADMIN_LEGACY_TOKEN_FALLBACK = process.env.ADMIN_LEGACY_TOKEN_FALLBACK === '1'
+
+async function enqueuePostRagJobsForSection(sectionId: string, reason: string, preloadedPosts?: any[]) {
+  const posts = preloadedPosts || (await db.query('posts', { sectionId, status: 'active' }) as any[])
+  const safePosts = Array.isArray(posts) ? posts : []
+  await Promise.all(safePosts.map((post: any) => enqueuePostRagJob({
+    postId: String(post._id || ''),
+    communityId: String(post.communityId || ''),
+    sectionId: String(post.sectionId || sectionId),
+    action: 'upsert',
+    reason,
+  })))
+}
 // Bootstrap 登录：当 admin_accounts 为空时，命中这两个环境变量的用户名/密码可一键
 // 创建首个 superAdmin。和老的 VITE_ADMIN_USERNAME/PASSWORD 共用一组凭据即可。
 const BOOTSTRAP_ADMIN_USERNAME = process.env.BOOTSTRAP_ADMIN_USERNAME || 'admin'
@@ -135,6 +155,7 @@ const COMMUNITY_SCOPED_ACTIONS = new Set([
   'member.kick',
   'post.listAdmin',
   'post.createAdmin',
+  'post.rebuildSearchIndexAdmin',
 ])
 // 这些 action 只给了实体 id，需要先查出 communityId 再校验
 const ENTITY_TO_COMMUNITY_ACTIONS: Record<string, { collection: string; idParam: string }> = {
@@ -143,6 +164,9 @@ const ENTITY_TO_COMMUNITY_ACTIONS: Record<string, { collection: string; idParam:
   'section.updateStatus': { collection: 'sections', idParam: 'sectionId' },
   'section.updateWidgets': { collection: 'sections', idParam: 'sectionId' },
   'section.delete': { collection: 'sections', idParam: 'sectionId' },
+  'post.rebuildSearchIndexSectionAdmin': { collection: 'sections', idParam: 'sectionId' },
+  'post.rebuildSearchIndexSectionBatchAdmin': { collection: 'sections', idParam: 'sectionId' },
+  'post.rebuildRagIndexSectionBatchAdmin': { collection: 'sections', idParam: 'sectionId' },
   'post.getAdmin': { collection: 'posts', idParam: 'postId' },
   'post.deleteAdmin': { collection: 'posts', idParam: 'postId' },
   'post.updateAdmin': { collection: 'posts', idParam: 'postId' },
@@ -295,17 +319,21 @@ function normalizeNoticeContent(value: unknown) {
 function normalizeWidgetForSave(widget: any): Widget {
   const normalized: Widget = {
     ...widget,
-    required: ['attendance', 'admin_notice'].includes(widget?.type) ? false : widget?.required === true,
-    showInList: widget?.type === 'admin_notice' ? false : widget?.showInList === true,
+    required: ['attendance', 'admin_notice', 'activity_invite'].includes(widget?.type) ? false : widget?.required === true,
+    showInList: ['admin_notice', 'activity_invite'].includes(widget?.type) ? false : widget?.showInList === true,
   }
   if (normalized.type === 'attendance') {
     normalized.capacity = normalizeCapacity(normalized.capacity)
+    if (typeof widget?.capacityWidgetId === 'string') {
+      normalized.capacityWidgetId = widget.capacityWidgetId
+    }
     const label = String(normalized.label || '').trim().toLowerCase()
     if (!label || label === '新控件' || label === 'new widget' || isGenericWidgetLabel(normalized.label)) {
       normalized.label = ''
     }
   } else {
     delete normalized.capacity
+    delete normalized.capacityWidgetId
   }
   if (normalized.type === 'admin_notice') {
     normalized.noticeContent = normalizeNoticeContent(widget?.noticeContent)
@@ -340,13 +368,18 @@ function validateSectionWidgets(sectionType: SectionType, widgets: any[]) {
   if (attendanceWidgets.length > 0 && sectionType !== 'realtime') {
     throw new Error('活动参与控件只能用于 realtime 板块')
   }
+  const activityInviteWidgets = widgets.filter((widget: any) => widget.type === 'activity_invite')
+  if (activityInviteWidgets.length > 1) throw new Error('每个板块最多只能配置 1 个活动召集控件')
+  if (activityInviteWidgets.length > 0 && sectionType !== 'evergreen') {
+    throw new Error('活动召集控件只能用于沉淀展示板块')
+  }
 
   for (const widget of widgets) {
     if (widget.showInList && !['short_text', 'summary', 'datetime', 'number', 'attendance'].includes(widget.type)) {
       throw new Error(`控件类型 ${widget.type} 不支持在列表展示`)
     }
-    if (['attendance', 'admin_notice'].includes(widget.type) && widget.required) {
-      throw new Error('活动参与/公告控件不能设为必填')
+    if (['attendance', 'admin_notice', 'activity_invite'].includes(widget.type) && widget.required) {
+      throw new Error('活动参与/公告/活动召集控件不能设为必填')
     }
   }
 }
@@ -1009,6 +1042,8 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (updates.type === 'evergreen') updates.status = 'active'
     if (Object.keys(updates).length === 0) throw new Error('没有可更新字段')
     await db.updateById('sections', sectionId, updates)
+    await enqueuePostRagJobsForSection(sectionId, 'section.updateMeta')
+    await backfillPostSearchIndexesForSection(sectionId)
     return { success: true }
   }
   if (action === 'section.updateStatus') {
@@ -1023,6 +1058,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       throw new Error('evergreen 板块只能保持 active')
     }
     await db.updateById('sections', sectionId, { status: params.status })
+    await backfillPostSearchIndexesForSection(sectionId)
     return { success: true }
   }
   if (action === 'section.updateWidgets') {
@@ -1047,10 +1083,19 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       const current = currentById.get(String(widget.widgetId || ''))
       return current && current.type !== widget.type
     })
+    const changedIndexMetadataWidgets = widgets.filter((widget: any) => {
+      const current = currentById.get(String(widget.widgetId || ''))
+      return current && (
+        current.label !== widget.label ||
+        current.fieldKey !== widget.fieldKey ||
+        current.order !== widget.order
+      )
+    })
     const hasStructuralChanges =
       removedWidgets.length > 0 ||
       changedTypeWidgets.length > 0
-    const activePosts = hasStructuralChanges ? await db.query('posts', { sectionId, status: 'active' }) : []
+    const shouldReindexExistingPosts = hasStructuralChanges || changedIndexMetadataWidgets.length > 0
+    const activePosts = shouldReindexExistingPosts ? await db.query('posts', { sectionId, status: 'active' }) : []
     const hasActivePosts = activePosts.length > 0
     const impact = {
       hasActivePosts,
@@ -1071,6 +1116,10 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     }
 
     await db.updateById('sections', sectionId, { widgets })
+    if (shouldReindexExistingPosts) {
+      await enqueuePostRagJobsForSection(sectionId, 'section.updateWidgets', activePosts)
+    }
+    await backfillPostSearchIndexesForSection(sectionId)
     return { widgets, ...impact, requireConfirmation: false }
   }
   if (action === 'section.delete') {
@@ -1079,10 +1128,11 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
 
     const activePosts = await db.query('posts', { sectionId, status: 'active' }, { limit: 1 })
     if (activePosts.length > 0) {
-      throw new Error('当前板块内还有已发布帖子，不能直接删除板块。请先到帖子管理中删除或处理这些帖子后，再删除板块。')
+      throw new Error('该板块下已有帖子，暂不支持删除')
     }
 
     await db.removeById('sections', sectionId)
+    await removePostSearchIndexesForSection(sectionId)
     return { success: true }
   }
 
@@ -1264,6 +1314,14 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const post = await db.getById('posts', postId) as any
     if (!post) throw new Error('post not found')
     if (post.status === 'deleted') {
+      await enqueuePostRagJob({
+        postId,
+        communityId: post.communityId,
+        sectionId: post.sectionId,
+        action: 'delete',
+        reason: 'post.deleteAdmin.alreadyDeleted',
+      })
+      await removePostSearchIndex(postId)
       return { success: true, alreadyDeleted: true }
     }
     await db.updateById('posts', postId, {
@@ -1275,7 +1333,41 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       featuredAt: '',
       featuredByAccountId: '',
     })
+    await enqueuePostRagJob({
+      postId,
+      communityId: post.communityId,
+      sectionId: post.sectionId,
+      action: 'delete',
+      reason: 'post.deleteAdmin',
+    })
+    await removePostSearchIndex(postId)
     return { success: true }
+  }
+  if (action === 'post.rebuildSearchIndexAdmin') {
+    const communityId = String(params.communityId || '').trim()
+    if (!communityId) throw new Error('communityId 不能为空')
+    return backfillPostSearchIndexesForCommunity(communityId)
+  }
+  if (action === 'post.rebuildSearchIndexSectionAdmin') {
+    const sectionId = String(params.sectionId || '').trim()
+    if (!sectionId) throw new Error('sectionId 不能为空')
+    return backfillPostSearchIndexesForSection(sectionId)
+  }
+  if (action === 'post.rebuildSearchIndexSectionBatchAdmin') {
+    const sectionId = String(params.sectionId || '').trim()
+    if (!sectionId) throw new Error('sectionId 不能为空')
+    return backfillPostSearchIndexesForSectionBatch(sectionId, {
+      skip: params.skip,
+      limit: params.limit,
+    })
+  }
+  if (action === 'post.rebuildRagIndexSectionBatchAdmin') {
+    const sectionId = String(params.sectionId || '').trim()
+    if (!sectionId) throw new Error('sectionId 不能为空')
+    return backfillPostRagJobsForSectionBatch(sectionId, {
+      skip: params.skip,
+      limit: params.limit,
+    })
   }
   if (action === 'post.pinAdmin' || action === 'post.unpinAdmin' || action === 'post.featureAdmin' || action === 'post.unfeatureAdmin') {
     const postId = String(params.postId || '').trim()
@@ -1692,6 +1784,14 @@ async function hardDeleteCommunity(communityId: string, community: Community) {
   }
 
   for (const post of posts) {
+    await enqueuePostRagJob({
+      postId: String((post as any)._id || ''),
+      communityId,
+      sectionId: String((post as any).sectionId || ''),
+      action: 'delete',
+      reason: 'community.hardDelete',
+    })
+    await removePostSearchIndex((post as any)._id)
     await db.removeById('posts', (post as any)._id)
   }
 

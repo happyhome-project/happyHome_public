@@ -43,3 +43,26 @@ test('release cloud smoke ensures required database collections before invoking 
   assert.match(runCloudSmokeBody, /ensure:indexes/)
   assert(runCloudSmokeBody.indexOf('ensure:indexes') < runCloudSmokeBody.indexOf('runCloudReleaseSmoke'))
 })
+
+test('formal release path records resumable ledger stages before upload', () => {
+  const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
+  const releaseBlock = deployScript.match(/if \(target === 'release'\) \{[\s\S]+?\n\} else \{/)?.[0] || ''
+
+  assert.match(deployScript, /release-run-ledger\.mjs/)
+  assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'miniprogram-build-gate'/)
+  assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-deploy'/)
+  assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-smoke'/)
+  assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'admin-web-deploy'/)
+  assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'miniprogram-upload'/)
+  assert.match(deployScript, /inspectReleaseStageReuse/)
+  assert.match(releaseBlock, /reuseCheck/)
+
+  assert(releaseBlock.indexOf("'cloud-smoke'") < releaseBlock.indexOf("'admin-web-deploy'"))
+  assert(releaseBlock.indexOf("'admin-web-deploy'") < releaseBlock.indexOf("'miniprogram-upload'"))
+  assert(releaseBlock.indexOf("'miniprogram-upload'") < releaseBlock.indexOf('complete'))
+})
+
+test('package exposes a release status command for the latest ledger', () => {
+  const packageJson = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
+  assert.equal(packageJson.scripts['release:status'], 'node scripts/release-status.mjs')
+})

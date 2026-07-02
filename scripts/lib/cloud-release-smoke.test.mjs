@@ -51,12 +51,23 @@ function createMockRunner(options = {}) {
 
     if (action !== 'invoke') return { status: 2, stdout: '', stderr: 'unexpected action' }
     const payload = payloadFromArgs(args)
+    const invokeSequence = options.invokeResponses?.[fn]
+    if (invokeSequence?.length) return invokeSequence.shift()
     if (fn === 'user' || fn === 'section') {
       return { status: 1, stdout: JSON.stringify({ error: 'Missing OPENID' }), stderr: '' }
     }
     if (fn === 'community') return { status: 0, stdout: JSON.stringify({ communities: [] }), stderr: '' }
     if (fn === 'member') return { status: 0, stdout: JSON.stringify({ communities: [] }), stderr: '' }
-    if (fn === 'post') return { status: 0, stdout: JSON.stringify({ success: true, receivedAt: 'now', echo: payload.details?.runId }), stderr: '' }
+    if (fn === 'post') {
+      return options.missingPostInvokeRunId
+        ? { status: 0, stdout: JSON.stringify({ success: true, receivedAt: 'now' }), stderr: '' }
+        : { status: 0, stdout: JSON.stringify({ success: true, receivedAt: 'now', echo: payload.details?.runId }), stderr: '' }
+    }
+    if (fn === 'post-rag-worker' || fn === 'post-video-rag-worker') {
+      return payload.workerToken === 'unit-worker-token' && payload.postId === '__release_smoke_missing__'
+        ? { status: 0, stdout: JSON.stringify({ scannedCount: 0, results: [] }), stderr: '' }
+        : { status: 1, stdout: JSON.stringify({ errorMessage: 'Unauthorized' }), stderr: '' }
+    }
     if (fn === 'http-gateway') return { status: 0, stdout: JSON.stringify({ statusCode: 200, body: '' }), stderr: '' }
 
     if (fn === 'admin') {
@@ -65,7 +76,11 @@ function createMockRunner(options = {}) {
       if (payload.action === 'section.updateWidgets') return { status: 0, stdout: JSON.stringify({ widgets: [{ widgetId: 'w1' }] }), stderr: '' }
       if (payload.action === 'post.createAdmin') return { status: 0, stdout: JSON.stringify({ postId: 'p1' }), stderr: '' }
       if (payload.action === 'post.listAdmin') return { status: 0, stdout: JSON.stringify({ posts: [{ _id: 'p1' }] }), stderr: '' }
-      if (payload.action === 'community.disable') return { status: 0, stdout: JSON.stringify({ success: true }), stderr: '' }
+      if (payload.action === 'community.disable') {
+        return options.disableFails
+          ? { status: 1, stdout: '', stderr: 'disable failed' }
+          : { status: 0, stdout: JSON.stringify({ success: true }), stderr: '' }
+      }
       if (payload.action === 'community.hardDelete') {
         return options.cleanupFails
           ? { status: 1, stdout: '', stderr: 'hard delete failed' }
@@ -93,7 +108,7 @@ test('parseArgs supports env, only, log controls, no-fixture, and evidence-dir',
     '--no-fixture',
     '--evidence-dir', 'evidence-x',
     '--run-id', 'run-x',
-  ], {})
+  ], { POST_RAG_WORKER_TOKEN: 'unit-worker-token' })
 
   assert.equal(args.envId, 'env-x')
   assert.deepEqual(args.only, ['user', 'post'])
@@ -101,6 +116,7 @@ test('parseArgs supports env, only, log controls, no-fixture, and evidence-dir',
   assert.equal(args.logWaitMs, 0)
   assert.equal(args.commandTimeoutMs, 1234)
   assert.equal(args.noFixture, true)
+  assert.equal(args.workerToken, 'unit-worker-token')
   assert.equal(args.evidenceDir, 'evidence-x')
   assert.equal(args.runId, 'run-x')
 })
@@ -136,16 +152,19 @@ test('cloud release smoke passes with generated invoke, log, fixture, and cleanu
     const runId = 'unit-run'
     const summary = await runCloudReleaseSmoke({
       envId: 'env-x',
-      only: ['user', 'community', 'member', 'section', 'post', 'admin', 'http-gateway'],
+      only: ['user', 'community', 'member', 'section', 'post', 'post-rag-worker', 'post-video-rag-worker', 'admin', 'http-gateway'],
       logLimit: 3,
       logWaitMs: 0,
       noFixture: false,
+      workerToken: 'unit-worker-token',
       evidenceDir,
       runId,
     }, createMockRunner({ runId }))
 
     assert.equal(summary.status, 'passed')
     assert.equal(summary.missingLabels.length, 0)
+    assert(summary.labels.includes('HH_CLOUD_INVOKE_SMOKE_POST_RAG_WORKER'))
+    assert(summary.labels.includes('HH_CLOUD_INVOKE_SMOKE_POST_VIDEO_RAG_WORKER'))
     assert(summary.labels.includes('HH_CLOUD_INVOKE_SMOKE_ADMIN_FIXTURE'))
     assert(summary.labels.includes('HH_CLOUD_FIXTURE_CLEANUP_OK'))
 
@@ -156,7 +175,7 @@ test('cloud release smoke passes with generated invoke, log, fixture, and cleanu
   }
 })
 
-test('post smoke fails when recent logs do not include the runId', async () => {
+test('post smoke fails when neither logs nor inline invoke output include the runId', async () => {
   const evidenceDir = await tempEvidenceDir()
   try {
     const summary = await runCloudReleaseSmoke({
@@ -167,10 +186,33 @@ test('post smoke fails when recent logs do not include the runId', async () => {
       noFixture: true,
       evidenceDir,
       runId: 'unit-run',
-    }, createMockRunner({ missingPostRunId: true, runId: 'unit-run' }))
+    }, createMockRunner({ missingPostRunId: true, missingPostInvokeRunId: true, runId: 'unit-run' }))
 
     assert.equal(summary.status, 'failed')
     assert(summary.failures.some((failure) => /runId/.test(failure.message)))
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true })
+  }
+})
+
+test('post log capture can use inline invoke output when log listing is noisy', async () => {
+  const evidenceDir = await tempEvidenceDir()
+  try {
+    const runId = 'unit-run'
+    const summary = await runCloudReleaseSmoke({
+      envId: 'env-x',
+      only: ['post'],
+      logLimit: 3,
+      logWaitMs: 0,
+      noFixture: true,
+      evidenceDir,
+      runId,
+    }, createMockRunner({ missingPostRunId: true, runId }))
+
+    assert.equal(summary.status, 'passed')
+    assert(summary.labels.includes('HH_CLOUD_LOG_CAPTURE_POST'))
+    const stored = JSON.parse(await readFile(join(evidenceDir, 'log-post.json'), 'utf8'))
+    assert.equal(stored.inlineLogFallbackStage, 'invoke-post-clientLog')
   } finally {
     await rm(evidenceDir, { recursive: true, force: true })
   }
@@ -244,6 +286,27 @@ test('admin fixture smoke fails when cleanup fails', async () => {
   }
 })
 
+test('admin fixture cleanup passes when hard delete succeeds after disable failure', async () => {
+  const evidenceDir = await tempEvidenceDir()
+  try {
+    const summary = await runCloudReleaseSmoke({
+      envId: 'env-x',
+      only: ['admin'],
+      logLimit: 3,
+      logWaitMs: 0,
+      noFixture: false,
+      evidenceDir,
+      runId: 'unit-run',
+    }, createMockRunner({ disableFails: true, runId: 'unit-run' }))
+
+    assert.equal(summary.status, 'passed')
+    assert.equal(summary.cleanup.ok, true)
+    assert(summary.labels.includes('HH_CLOUD_FIXTURE_CLEANUP_OK'))
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true })
+  }
+})
+
 test('optional non-post log failures are warnings, not hard blockers', async () => {
   const evidenceDir = await tempEvidenceDir()
   try {
@@ -283,6 +346,62 @@ test('optional non-post log capture uses a small limit and command timeout', asy
     const logCall = runner.calls.find((call) => commandPart(call.args, 2) === 'log' && commandPart(call.args, 3) === 'admin')
     assert.equal(logCall.args[logCall.args.indexOf('--limit') + 1], '5')
     assert.equal(logCall.options.timeoutMs, 6789)
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true })
+  }
+})
+
+test('worker smoke fails clearly when the worker token is missing', async () => {
+  const evidenceDir = await tempEvidenceDir()
+  try {
+    const runner = createMockRunner({ runId: 'unit-run' })
+    const summary = await runCloudReleaseSmoke({
+      envId: 'env-x',
+      only: ['post-rag-worker'],
+      logLimit: 3,
+      logWaitMs: 0,
+      commandTimeoutMs: 1234,
+      noFixture: true,
+      workerToken: '',
+      evidenceDir,
+      runId: 'unit-run',
+    }, runner)
+
+    assert.equal(summary.status, 'failed')
+    assert(summary.failures.some((failure) => /missing POST_RAG_WORKER_TOKEN/.test(failure.message)))
+    assert(!runner.calls.some((call) => commandPart(call.args, 2) === 'invoke'))
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true })
+  }
+})
+
+test('required invoke retries transient CloudBase network failures', async () => {
+  const evidenceDir = await tempEvidenceDir()
+  try {
+    const runner = createMockRunner({
+      runId: 'unit-run',
+      invokeResponses: {
+        'post-rag-worker': [
+          { status: 1, stdout: JSON.stringify({ error: { code: 'ECONNRESET', message: 'socket disconnected before secure TLS connection' } }), stderr: '' },
+        ],
+      },
+    })
+    const summary = await runCloudReleaseSmoke({
+      envId: 'env-x',
+      only: ['post-rag-worker'],
+      logLimit: 3,
+      logWaitMs: 0,
+      commandTimeoutMs: 1234,
+      noFixture: true,
+      workerToken: 'unit-worker-token',
+      evidenceDir,
+      runId: 'unit-run',
+    }, runner)
+
+    assert.equal(summary.status, 'passed')
+    assert(summary.labels.includes('HH_CLOUD_INVOKE_SMOKE_POST_RAG_WORKER'))
+    const invokeCalls = runner.calls.filter((call) => commandPart(call.args, 2) === 'invoke')
+    assert.equal(invokeCalls.length, 2)
   } finally {
     await rm(evidenceDir, { recursive: true, force: true })
   }

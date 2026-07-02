@@ -47,6 +47,7 @@ function main() {
 
   run('detail/profile compiled runtime syntax guard', npmCmd, ['run', 'test:mp:detail-runtime-syntax'])
   run('profile critical path guard', npmCmd, ['run', 'test:mp:profile-critical-path'])
+  run('post RAG search static guard', npmCmd, ['run', 'test:mp:post-rag-search-static'])
 
   run('build H5 for smoke tests', npmCmd, ['run', 'build:h5', '--workspace', 'miniprogram'])
   run('H5 profile blank-page smoke', npmCmd, ['run', 'test:h5:profile-smoke'])

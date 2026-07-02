@@ -19,6 +19,8 @@
  *   --env-id=x     CloudBase env id for deploy and smoke (default: cloudbase-3gh862acb1505ff3)
  *   --use-ci       skip DevTools/CloudBase CLI paths, go straight to miniprogram-ci
  *                  (useful when DevTools is not installed on the machine)
+ *   --resume       resume the latest release ledger conservatively
+ *   --release-run-id=x  use or resume a specific release ledger run id
  *
  * Deploy path resolution:
  *   Primary   = WeChat DevTools CLI `cloud functions deploy`
@@ -60,6 +62,15 @@ import { tmpdir } from 'os'
 import { parseArgs as parseCloudSmokeArgs, runCloudReleaseSmoke } from './cloud-release-smoke.mjs'
 import { analyzeDevtoolsCloudDeployOutput, analyzeDevtoolsUploadOutput } from './lib/deploy-output.mjs'
 import { shouldFallbackAfterDevtoolsFailure } from './lib/release-policy.mjs'
+import {
+  createReleaseRunLedger,
+  findLatestReleaseUiEvidence,
+  inspectReleaseStageReuse,
+  loadReleaseRun,
+  loadLatestReleaseRun,
+  makeReleaseRunId,
+  runLedgerStage,
+} from './lib/release-run-ledger.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
@@ -75,7 +86,7 @@ const CLOUD_ENV = process.env.TCB_ENV || DEFAULT_CLOUD_ENV
 const ADMIN_WEB_DEFAULT_API_URL = 'https://cloudbase-3gh862acb1505ff3-1307183045.ap-shanghai.app.tcloudbase.com'
 const ADMIN_WEB_ALIYUN_HOST = process.env.ADMIN_WEB_SSH_HOST || 'aliyun'
 const ADMIN_WEB_ALIYUN_ROOT = process.env.ADMIN_WEB_REMOTE_ROOT || '/var/www/happyhome-admin'
-const CLOUD_FUNCTIONS = ['user', 'community', 'member', 'section', 'post', 'admin', 'http-gateway', 'home-prefetch']
+const CLOUD_FUNCTIONS = ['user', 'community', 'member', 'section', 'post', 'post-rag-worker', 'post-video-rag-worker', 'admin', 'http-gateway', 'home-prefetch']
 
 // Common DevTools install locations on Windows
 const DEVTOOLS_CLI_CANDIDATES = [
@@ -114,6 +125,39 @@ function getShortGitSha() {
   } catch {
     return 'unknown'
   }
+}
+
+function getGitSha() {
+  try {
+    return execSync('git rev-parse HEAD', { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+  } catch {
+    return 'unknown'
+  }
+}
+
+function hasFlag(name) {
+  return process.argv.includes(`--${name}`)
+}
+
+async function getResumeRunState() {
+  if (!hasFlag('resume')) return null
+  const explicitRunId = getFlagValue('release-run-id') || getFlagValue('run-id') || process.env.HH_RELEASE_RUN_ID || ''
+  if (explicitRunId) return await loadReleaseRun(ROOT, explicitRunId)
+  try {
+    return await loadLatestReleaseRun(ROOT)
+  } catch {
+    throw new Error('No previous release ledger found. Start without --resume or pass --release-run-id=<id>.')
+  }
+}
+
+async function resolveReleaseRunId() {
+  const explicitRunId = getFlagValue('release-run-id') || getFlagValue('run-id') || process.env.HH_RELEASE_RUN_ID || ''
+  if (explicitRunId) return explicitRunId
+  if (hasFlag('resume')) {
+    const latest = await loadLatestReleaseRun(ROOT)
+    return latest.runId
+  }
+  return makeReleaseRunId()
 }
 
 function getLocalTimestamp() {
@@ -179,12 +223,12 @@ function runShellCapture(commandLine, options = {}) {
     proc.stdout?.on('data', (chunk) => {
       const text = String(chunk)
       stdout += text
-      process.stdout.write(text)
+      if (!options.silentOutput) process.stdout.write(text)
     })
     proc.stderr?.on('data', (chunk) => {
       const text = String(chunk)
       stderr += text
-      process.stderr.write(text)
+      if (!options.silentOutput) process.stderr.write(text)
     })
     proc.on('exit', (code) => {
       const output = `${stdout}${stderr}`
@@ -192,6 +236,52 @@ function runShellCapture(commandLine, options = {}) {
     })
     proc.on('error', (err) => res({ ok: false, reason: String(err?.message || err), output: `${stdout}${stderr}` }))
   })
+}
+
+function parseCliJson(output) {
+  const text = String(output || '').trim()
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start < 0 || end < start) return null
+  try {
+    return JSON.parse(text.slice(start, end + 1))
+  } catch {
+    return null
+  }
+}
+
+function logCloudFunctionDetailSummary(functionName, output) {
+  const parsed = parseCliJson(output)
+  const data = parsed?.data || {}
+  const envKeys = (data.Environment?.Variables || []).map((item) => item.Key).filter(Boolean)
+  console.log(`[tcb fn detail] ${functionName}: status=${data.Status || 'unknown'} available=${data.AvailableStatus || 'unknown'} runtime=${data.Runtime || 'unknown'} envKeys=${envKeys.length ? envKeys.join(',') : 'none'}`)
+}
+
+function sleep(ms) {
+  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
+}
+
+function isTransientCloudBaseCliFailure(result) {
+  const text = `${result?.reason || ''}\n${result?.output || ''}`
+  return /ECONNRESET|ETIMEDOUT|TLS connection|socket disconnected|network timeout|ENOTFOUND|EAI_AGAIN/i.test(text)
+}
+
+async function runCloudBaseCliCaptureWithRetry(commandLine, options = {}, attempts = 3) {
+  let lastResult = null
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const result = await runShellCapture(commandLine, {
+      ...options,
+      displayCommandLine: attempt === 1
+        ? options.displayCommandLine
+        : `${options.displayCommandLine || commandLine} (retry ${attempt}/${attempts})`,
+    })
+    if (result.ok) return result
+    lastResult = result
+    if (!isTransientCloudBaseCliFailure(result) || attempt >= attempts) break
+    console.warn(`[CloudBase CLI] transient failure; retrying in ${attempt * 3000}ms`)
+    await sleep(attempt * 3000)
+  }
+  return lastResult
 }
 
 // Lazy: miniprogram-ci 的 Project 构造会 eager 读 private key；DevTools CLI
@@ -255,6 +345,9 @@ async function deployCloudViaDevtoolsCli(fns) {
 async function deployCloudViaCloudBaseCli(fns) {
   const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
   const tcb = (...args) => [npx, '--yes', '--package', '@cloudbase/cli', 'tcb', ...args].map(quote).join(' ')
+  const confirmDefault = (commandLine) => process.platform === 'win32'
+    ? `echo. | ${commandLine}`
+    : `printf '\\n' | ${commandLine}`
   const envId = getCloudEnvId()
 
   const authProbe = await runShellCapture(
@@ -270,20 +363,23 @@ async function deployCloudViaCloudBaseCli(fns) {
 
   for (const fn of fns) {
     const fnDir = resolve(CLOUD_DIST, fn)
-    const result = await runShellCapture(
-      tcb('fn', 'deploy', fn, '--force', '--yes', '--env-id', envId, '--deployMode', 'cos', '--json'),
+    const result = await runCloudBaseCliCaptureWithRetry(
+      confirmDefault(tcb('fn', 'deploy', fn, '--force', '--env-id', envId, '--deployMode', 'cos', '--json')),
       {
         cwd: fnDir,
-        displayCommandLine: `cd ${fnDir} && tcb fn deploy ${fn} --force --yes --env-id ${envId} --deployMode cos --json`,
+        displayCommandLine: `cd ${fnDir} && <confirm default> | tcb fn deploy ${fn} --force --env-id ${envId} --deployMode cos --json`,
+        // CloudBase CLI 3.5.8 prompts to accept the merged existing function
+        // config; its --yes path throws "_a.includes is not a function".
       }
     )
     if (!result.ok) return { ok: false, reason: `CloudBase CLI deploy ${fn} failed: ${result.reason}` }
 
-    const detail = await runShellCapture(
+    const detail = await runCloudBaseCliCaptureWithRetry(
       tcb('fn', 'detail', fn, '--env-id', envId, '--json'),
-      { displayCommandLine: `tcb fn detail ${fn} --env-id ${envId} --json` }
+      { displayCommandLine: `tcb fn detail ${fn} --env-id ${envId} --json`, silentOutput: true }
     )
     if (!detail.ok) return { ok: false, reason: `CloudBase CLI detail ${fn} failed after deploy: ${detail.reason}` }
+    logCloudFunctionDetailSummary(fn, detail.output)
   }
 
   return { ok: true, reason: 'ok' }
@@ -387,6 +483,7 @@ async function runCloudSmoke(fns) {
     throw new Error(`Cloud release smoke failed. See ${summary.evidenceDir}`)
   }
   console.log(`[OK] Cloud release smoke passed: ${summary.evidenceDir}`)
+  return summary
 }
 
 // ── Primary preview path: WeChat DevTools CLI `preview` ──
@@ -461,12 +558,12 @@ async function uploadMiniprogramViaMiniprogramCi(version, desc) {
   console.log('Miniprogram upload finished via miniprogram-ci')
 }
 
-function resolveMiniprogramUploadMetadata() {
+function resolveMiniprogramUploadMetadata(defaults = {}) {
   const stamp = getLocalTimestamp()
   const shortSha = getShortGitSha()
   return {
-    version: getFlagValue('version') || `1.0.${stamp.yy}${stamp.MM}${stamp.dd}${stamp.hh}${stamp.mm}`,
-    desc: getFlagValue('desc') || `trial ${stamp.yyyy}-${stamp.MM}-${stamp.dd} ${stamp.hh}:${stamp.mm} ${shortSha}`,
+    version: getFlagValue('version') || defaults.version || `1.0.${stamp.yy}${stamp.MM}${stamp.dd}${stamp.hh}${stamp.mm}`,
+    desc: getFlagValue('desc') || defaults.desc || `trial ${stamp.yyyy}-${stamp.MM}-${stamp.dd} ${stamp.hh}:${stamp.mm} ${shortSha}`,
     forceCi: process.argv.includes('--use-ci'),
   }
 }
@@ -643,17 +740,136 @@ async function deployAdminWeb() {
   throw new Error(`Unknown ADMIN_WEB_TARGET=${target}. Expected aliyun or cloudbase.`)
 }
 
+async function collectMiniprogramBuildGateEvidence() {
+  const releaseUiEvidencePath = await findLatestReleaseUiEvidence(ROOT)
+  return {
+    buildInfoPath: resolve(ROOT, 'miniprogram/src/generated/build-info.ts'),
+    distBuildInfoPath: resolve(ROOT, 'miniprogram/dist/build/mp-weixin/generated/build-info.js'),
+    ...(releaseUiEvidencePath ? { releaseUiEvidencePath } : {}),
+  }
+}
+
+function releaseStageReuseCheck(context) {
+  return (runState, stageName) => inspectReleaseStageReuse(runState, stageName, context)
+}
+
 const target = process.argv[2] || 'all'
 if (target === 'release') {
-  const miniprogramUpload = resolveMiniprogramUploadMetadata()
-  buildAndGateMiniprogramUpload(miniprogramUpload)
-  const cloudDeploy = await deployCloud()
-  if (cloudDeploy.path !== 'cloudbase-cli') {
-    throw new Error(`Formal release cloud deploy must use CloudBase CLI/COS before smoke; got ${cloudDeploy.path}. Rerun with --use-tcb.`)
+  const resumeRunState = await getResumeRunState()
+  const miniprogramUpload = resolveMiniprogramUploadMetadata(resumeRunState?.context || {})
+  const releaseContext = {
+    root: ROOT,
+    gitSha: getGitSha(),
+    version: miniprogramUpload.version,
+    desc: miniprogramUpload.desc,
   }
-  await runCloudSmoke(cloudDeploy.fns)
-  await deployAdminWeb()
-  await uploadBuiltMiniprogram(miniprogramUpload)
+  const releaseRunId = await resolveReleaseRunId()
+  const releaseLedger = await createReleaseRunLedger({
+    root: ROOT,
+    runId: releaseRunId,
+    command: ['node', 'scripts/deploy.mjs', ...process.argv.slice(2)].join(' '),
+    gitSha: releaseContext.gitSha,
+    version: releaseContext.version,
+    desc: releaseContext.desc,
+  })
+  const resume = hasFlag('resume')
+  const reuseCheck = releaseStageReuseCheck(releaseContext)
+
+  console.log(`[release-ledger] runId=${releaseLedger.runId}`)
+  console.log(`[release-ledger] run=${releaseLedger.runPath}`)
+  console.log(`[release-ledger] events=${releaseLedger.eventsPath}`)
+  if (resume) console.log('[release-ledger] resume enabled; stages will be reused only after explicit evidence checks')
+
+  try {
+    await runLedgerStage(releaseLedger, 'miniprogram-build-gate', {
+      resume,
+      reuseCheck,
+      command: 'write build-info + npm run build:mp-weixin + npm run test:mp:release-gate -- --skip-mp-build',
+    }, async () => {
+      buildAndGateMiniprogramUpload(miniprogramUpload)
+      return {
+        evidence: await collectMiniprogramBuildGateEvidence(),
+        result: { version: miniprogramUpload.version, desc: miniprogramUpload.desc },
+      }
+    })
+
+    const cloudDeploy = await runLedgerStage(releaseLedger, 'cloud-deploy', {
+      resume,
+      reuseCheck,
+      command: 'npm.cmd --workspace cloud run build && CloudBase CLI/COS fn deploy',
+    }, async () => {
+      const result = await deployCloud()
+      if (result.path !== 'cloudbase-cli') {
+        throw new Error(`Formal release cloud deploy must use CloudBase CLI/COS before smoke; got ${result.path}. Rerun with --use-tcb.`)
+      }
+      return result
+    })
+
+    await runLedgerStage(releaseLedger, 'cloud-smoke', {
+      resume,
+      reuseCheck,
+      command: 'npm.cmd run test:cloud:release-smoke',
+    }, async () => {
+      const summary = await runCloudSmoke(cloudDeploy.fns)
+      return {
+        evidence: { summaryPath: resolve(summary.evidenceDir, 'summary.json') },
+        result: {
+          status: summary.status,
+          evidenceDir: summary.evidenceDir,
+          labels: summary.labels,
+          missingLabels: summary.missingLabels,
+        },
+      }
+    })
+
+    await runLedgerStage(releaseLedger, 'admin-web-deploy', {
+      resume,
+      reuseCheck,
+      command: 'npm.cmd --workspace admin-web run build + admin-web deploy',
+    }, async () => {
+      await deployAdminWeb()
+      return { result: { target: process.env.ADMIN_WEB_TARGET || 'aliyun' } }
+    })
+
+    await runLedgerStage(releaseLedger, 'miniprogram-upload', {
+      resume,
+      reuseCheck,
+      command: 'WeChat DevTools CLI upload or explicit miniprogram-ci fallback',
+    }, async () => {
+      await uploadBuiltMiniprogram(miniprogramUpload)
+      return {
+        evidence: { uploadInfoPath: resolve(ROOT, 'mp-upload-info.json') },
+        result: {
+          version: miniprogramUpload.version,
+          desc: miniprogramUpload.desc,
+          forceCi: miniprogramUpload.forceCi,
+        },
+      }
+    })
+
+    await runLedgerStage(releaseLedger, 'verify-upload', {
+      resume,
+      reuseCheck,
+      command: 'verify build-info and mp-upload-info after upload',
+    }, async () => {
+      const uploadInfoPath = resolve(ROOT, 'mp-upload-info.json')
+      if (!existsSync(uploadInfoPath)) throw new Error(`upload info file not found: ${uploadInfoPath}`)
+      const buildInfoPath = resolve(ROOT, 'miniprogram/src/generated/build-info.ts')
+      const buildInfo = readFileSync(buildInfoPath, 'utf8')
+      if (!buildInfo.includes(miniprogramUpload.version) || !buildInfo.includes(miniprogramUpload.desc)) {
+        throw new Error('build-info does not match uploaded version/desc')
+      }
+      return {
+        evidence: { uploadInfoPath, buildInfoPath },
+        result: { version: miniprogramUpload.version, desc: miniprogramUpload.desc },
+      }
+    })
+
+    await releaseLedger.complete('passed')
+  } catch (error) {
+    await releaseLedger.complete('failed')
+    throw error
+  }
 } else {
   if (target === 'cloud' || target === 'all') {
     const cloudDeploy = await deployCloud()

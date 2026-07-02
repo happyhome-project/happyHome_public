@@ -15,19 +15,35 @@ jest.mock('../../../lib/db', () => ({
   removeField: jest.fn(() => ({ __remove: true })),
 }))
 
+jest.mock('../../../lib/post-search', () => ({
+  refreshPostSearchIndexById: jest.fn(),
+  removePostSearchIndex: jest.fn(),
+  searchPostIndex: jest.fn(),
+}))
+
+jest.mock('../../../lib/post-rag', () => ({
+  enqueuePostRagJob: jest.fn(),
+  searchPostsWithRag: jest.fn(),
+}))
+
 import {
   handleBootstrap,
   handleCreate,
   handleClientLog,
   handleDelete,
   handleGet,
+  handleGetActivityInviteState,
   handleHome,
   handleJoinAttendance,
   handleListAttendanceMembers,
   handleList,
+  handleCreateActivityInvite,
+  handleSearch,
   handleUpdate,
 } from '../index'
 import * as db from '../../../lib/db'
+import * as postSearch from '../../../lib/post-search'
+import * as postRag from '../../../lib/post-rag'
 import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
 
 beforeEach(() => {
@@ -126,6 +142,23 @@ test('create: attendance、公告和音频控件不会参与普通用户发帖',
   expect(db.create).toHaveBeenCalledWith('posts', expect.objectContaining({
     content: { 'title-widget': '周六爬山' },
   }))
+  expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
+})
+
+test('create: rejects sections that do not belong to the requested community', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    ...mockSection,
+    communityId: 'other-community',
+  })
+
+  await expect(handleCreate({
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    content: { 'title-widget': '跨社区发帖' },
+  } as any, 'test-openid')).rejects.toThrow('板块不属于当前社区')
+  expect(db.create).not.toHaveBeenCalled()
+  expect(postSearch.refreshPostSearchIndexById).not.toHaveBeenCalled()
 })
 
 test('create: 实时活动帖缺少首页标题来源时拒绝保存并给出清晰提示', async () => {
@@ -173,6 +206,41 @@ test('create: 实时活动帖缺少首页标题来源时拒绝保存并给出清
     },
   } as any, 'test-openid')).rejects.toThrow('该板块缺少可用于首页标题的字段')
   expect(db.create).not.toHaveBeenCalled()
+})
+
+test('create: activity_invite 控件不会进入普通帖子内容', async () => {
+  const sectionWithInviteWidget = {
+    ...mockSection,
+    type: 'evergreen',
+    widgets: [
+      mockSection.widgets[0],
+      {
+        widgetId: 'invite-widget',
+        type: 'activity_invite',
+        label: '活动召集',
+        fieldKey: 'activityInvite',
+        required: false,
+        order: 4,
+        showInList: false,
+      },
+    ],
+  }
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValue(sectionWithInviteWidget)
+  ;(db.create as jest.Mock).mockResolvedValue('post-1')
+
+  await handleCreate({
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    content: {
+      'title-widget': '云盖村攻略',
+      'invite-widget': 'should-be-removed',
+    },
+  } as any, 'test-openid')
+
+  expect(db.create).toHaveBeenCalledWith('posts', expect.objectContaining({
+    content: { 'title-widget': '云盖村攻略' },
+  }))
 })
 
 test('create: 旧图文攻略板块补齐驾车到达用时并按必填校验', async () => {
@@ -278,6 +346,192 @@ test('update: 保存时会清理无效字段、attendance、公告和音频字�
     pendingContent: { __set: { 'title-widget': '更新后的标题' } },
     pendingAuditStatus: 'pending',
   }))
+  expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
+})
+
+test('createActivityInvite: 自动创建系统实时邀约板块并创建关联帖子', async () => {
+  const sourcePost = {
+    _id: 'source-post-1',
+    communityId: 'community-1',
+    sectionId: 'guide-section-1',
+    authorId: 'guide-author',
+    status: 'active',
+    auditStatus: 'pass',
+    content: {
+      guide_title: '云盖村亲子游',
+      guide_location: { name: '云盖村', address: '云盖村游客中心', lat: 31.1, lng: 104.2 },
+    },
+    createdAt: '2026-06-01T00:00:00.000Z',
+  }
+  const sourceSection = {
+    ...mockSection,
+    _id: 'guide-section-1',
+    type: 'evergreen',
+    displayTemplate: 'guide_note',
+    widgets: [
+      { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true, locked: true },
+      { widgetId: 'guide_location', type: 'location', label: '目的地位置', fieldKey: 'location', required: true, order: 9, showInList: false, locked: true },
+      { widgetId: 'guide_activity_invite', type: 'activity_invite', label: '活动召集', fieldKey: 'activityInvite', required: false, order: 10, showInList: false, locked: true },
+    ],
+  }
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce(sourcePost)
+    .mockResolvedValueOnce(sourceSection)
+  ;(db.query as jest.Mock).mockImplementation(async (collectionName: string, where: any) => {
+    if (collectionName === 'community_members') return [{ _id: 'member-1', status: 'active' }]
+    if (collectionName === 'posts' && where.originPostId === 'source-post-1') return []
+    if (collectionName === 'sections') return []
+    return []
+  })
+  ;(db.create as jest.Mock).mockImplementation(async (collectionName: string) => {
+    if (collectionName === 'sections') return 'activity-section-1'
+    if (collectionName === 'posts') return 'activity-post-1'
+    return 'audit-task-1'
+  })
+
+  const result = await handleCreateActivityInvite({
+    sourcePostId: 'source-post-1',
+    content: {
+      activity_invite_title: '周六去云盖村',
+      activity_invite_starts_at: '2026-07-01T01:30:00.000Z',
+      activity_invite_location: { name: '云盖村', address: '云盖村游客中心', lat: 31.1, lng: 104.2 },
+      activity_invite_contact: '13800000000',
+      activity_invite_capacity: 6,
+      activity_invite_note: [{ blockId: 'n1', type: 'text', text: '带娃轻徒步' }],
+    },
+  } as any, 'test-openid')
+
+  expect(result).toEqual(expect.objectContaining({ postId: 'activity-post-1', alreadyExists: false }))
+  expect(db.create).toHaveBeenCalledWith('sections', expect.objectContaining({
+    communityId: 'community-1',
+    name: '出游邀约',
+    type: 'realtime',
+    systemKey: 'activity_invite',
+    widgets: expect.arrayContaining([
+      expect.objectContaining({ widgetId: 'activity_invite_contact', visibility: 'member' }),
+      expect.objectContaining({ widgetId: 'activity_invite_attendance', type: 'attendance', capacityWidgetId: 'activity_invite_capacity' }),
+    ]),
+  }))
+  expect(db.create).toHaveBeenCalledWith('posts', expect.objectContaining({
+    communityId: 'community-1',
+    sectionId: 'activity-section-1',
+    authorId: 'test-openid',
+    originPostId: 'source-post-1',
+    originSectionId: 'guide-section-1',
+    originCommunityId: 'community-1',
+    originTitle: '云盖村亲子游',
+    originLinkType: 'activity_invite',
+    eventStartsAt: '2026-07-01T01:30:00.000Z',
+    content: expect.objectContaining({
+      activity_invite_title: '周六去云盖村',
+      activity_invite_contact: '13800000000',
+      activity_invite_capacity: 6,
+    }),
+  }))
+  expect((db.create as jest.Mock).mock.calls.some(([collection]) => collection === 'post_attendance_members')).toBe(false)
+})
+
+test('createActivityInvite: 同一源帖存在未过期邀约时直接返回现有邀约', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({
+      _id: 'source-post-1',
+      communityId: 'community-1',
+      sectionId: 'guide-section-1',
+      status: 'active',
+      auditStatus: 'pass',
+      content: { guide_title: '云盖村亲子游' },
+    })
+    .mockResolvedValueOnce({
+      ...mockSection,
+      _id: 'guide-section-1',
+      type: 'evergreen',
+      displayTemplate: 'guide_note',
+      widgets: [
+        { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true, locked: true },
+        { widgetId: 'guide_activity_invite', type: 'activity_invite', label: '活动召集', fieldKey: 'activityInvite', required: false, order: 10, showInList: false, locked: true },
+      ],
+    })
+  ;(db.query as jest.Mock).mockImplementation(async (collectionName: string, where: any) => {
+    if (collectionName === 'community_members') return [{ _id: 'member-1', status: 'active' }]
+    if (collectionName === 'posts' && where.originPostId === 'source-post-1') {
+      return [{
+        _id: 'existing-invite-1',
+        status: 'active',
+        auditStatus: 'review',
+        eventStartsAt: '2999-01-01T00:00:00.000Z',
+        content: { activity_invite_title: '已有邀约' },
+      }]
+    }
+    return []
+  })
+
+  const result = await handleCreateActivityInvite({
+    sourcePostId: 'source-post-1',
+    content: {
+      activity_invite_title: '重复发起',
+      activity_invite_starts_at: '2026-07-01T01:30:00.000Z',
+      activity_invite_contact: '13800000000',
+      activity_invite_capacity: 6,
+    },
+  } as any, 'test-openid')
+
+  expect(result).toEqual(expect.objectContaining({ postId: 'existing-invite-1', alreadyExists: true }))
+  expect(db.create).not.toHaveBeenCalledWith('posts', expect.anything())
+})
+
+test('getActivityInviteState: 返回源帖预填信息和当前进行中邀约', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({
+      _id: 'source-post-1',
+      communityId: 'community-1',
+      sectionId: 'guide-section-1',
+      status: 'active',
+      auditStatus: 'pass',
+      content: {
+        guide_title: '云盖村亲子游',
+        guide_location: { name: '云盖村', address: '云盖村游客中心', lat: 31.1, lng: 104.2 },
+      },
+    })
+    .mockResolvedValueOnce({
+      ...mockSection,
+      _id: 'guide-section-1',
+      type: 'evergreen',
+      displayTemplate: 'guide_note',
+      widgets: [
+        { widgetId: 'guide_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true, locked: true },
+        { widgetId: 'guide_location', type: 'location', label: '目的地位置', fieldKey: 'location', required: true, order: 9, showInList: false, locked: true },
+        { widgetId: 'guide_activity_invite', type: 'activity_invite', label: '活动召集', fieldKey: 'activityInvite', required: false, order: 10, showInList: false, locked: true },
+      ],
+    })
+  ;(db.query as jest.Mock).mockImplementation(async (collectionName: string, where: any) => {
+    if (collectionName === 'community_members') return [{ _id: 'member-1', status: 'active' }]
+    if (collectionName === 'posts' && where.originPostId === 'source-post-1') {
+      return [{
+        _id: 'existing-invite-1',
+        status: 'active',
+        auditStatus: 'pass',
+        eventStartsAt: '2999-01-01T00:00:00.000Z',
+        content: { activity_invite_title: '已有邀约', activity_invite_capacity: 6 },
+      }]
+    }
+    if (collectionName === 'sections') return [{ _id: 'activity-section-1', systemKey: 'activity_invite' }]
+    if (collectionName === 'post_attendance_members') return [{ _id: 'a1', userId: 'u1', seatCount: 2 }]
+    return []
+  })
+
+  const result = await handleGetActivityInviteState({ sourcePostId: 'source-post-1' } as any, 'test-openid')
+
+  expect(result.prefill).toEqual(expect.objectContaining({
+    title: '云盖村亲子游',
+    location: { name: '云盖村', address: '云盖村游客中心', lat: 31.1, lng: 104.2 },
+  }))
+  expect(result.invite).toEqual(expect.objectContaining({
+    postId: 'existing-invite-1',
+    eventStartsAt: '2999-01-01T00:00:00.000Z',
+    occupiedSeats: 2,
+    capacity: 6,
+  }))
+  expect(result.targetSection).toEqual(expect.objectContaining({ sectionId: 'activity-section-1' }))
 })
 
 test('home: returns sections and grouped posts with one membership check', async () => {
@@ -768,6 +1022,39 @@ test('joinAttendance: seatCount 累加超容时抛含剩余座位数的明确错
   expect(db.create).not.toHaveBeenCalled()
 })
 
+test('joinAttendance: attendance 可从当前帖子内容读取动态人数上限', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({
+      _id: 'invite-post-1',
+      communityId: 'community-1',
+      sectionId: 'invite-section-1',
+      status: 'active',
+      content: {
+        activity_invite_capacity: 3,
+      },
+    })
+    .mockResolvedValueOnce({
+      ...mockSection,
+      _id: 'invite-section-1',
+      widgets: [
+        { ...mockSection.widgets[1], capacity: undefined, capacityWidgetId: 'activity_invite_capacity' },
+      ],
+    })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([
+      { _id: 'a1', userId: 'u1', seatCount: 2, joinedAt: 't1' },
+    ])
+
+  await expect(handleJoinAttendance({
+    postId: 'invite-post-1',
+    widgetId: 'attendance-widget',
+    seatCount: 2,
+  } as any, 'test-openid')).rejects.toThrow('剩余 1 座，无法容纳 2 位')
+  expect(db.create).not.toHaveBeenCalled()
+})
+
 test('joinAttendance: 存量记录无 seatCount 字段时按 1 座累加（向后兼容）', async () => {
   ;(db.getById as jest.Mock)
     .mockResolvedValueOnce({
@@ -1015,6 +1302,8 @@ test('delete: clears pin and featured flags', async () => {
     _id: 'post-flagged',
     authorId: 'test-openid',
     status: 'active',
+    communityId: 'community-1',
+    sectionId: 'section-1',
     isPinned: true,
     isFeatured: true,
   })
@@ -1032,6 +1321,95 @@ test('delete: clears pin and featured flags', async () => {
     featuredByAccountId: '',
   })
   expect(result).toEqual({ success: true })
+  expect(postRag.enqueuePostRagJob).toHaveBeenCalledWith({
+    postId: 'post-flagged',
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    action: 'delete',
+    reason: 'post.delete',
+  })
+  expect(postSearch.removePostSearchIndex).toHaveBeenCalledWith('post-flagged')
+})
+
+test('search: checks community readability and delegates to formal RAG search', async () => {
+  ;(postRag.searchPostsWithRag as jest.Mock).mockResolvedValue({
+    query: '鲲鹏',
+    communityId: 'community-1',
+    sectionId: '',
+    total: 1,
+    skip: 0,
+    limit: 20,
+    answer: '找到 1 篇包含该视频的帖子。',
+    citations: [
+      {
+        postId: 'post-1',
+        chunkId: 'chunk-1',
+        title: '视频帖',
+        fieldLabel: '视频',
+        fieldType: 'video_group',
+        preview: '鲲鹏',
+        score: 0.92,
+      },
+    ],
+    mode: 'rag',
+    items: [{ postId: 'post-1', title: '视频帖' }],
+  })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([
+      { _id: 'member-1', communityId: 'community-1', userId: 'member-openid', status: 'active' },
+    ])
+    .mockResolvedValueOnce([
+    { _id: 'member-1', communityId: 'community-1', userId: 'member-openid', status: 'active' },
+  ])
+
+  const result = await handleSearch({
+    communityId: 'community-1',
+    q: '鲲鹏',
+    limit: 20,
+  }, 'member-openid')
+
+  expect(postRag.searchPostsWithRag).toHaveBeenCalledWith(expect.objectContaining({
+    communityId: 'community-1',
+    query: '鲲鹏',
+    sectionId: '',
+    skip: 0,
+    limit: 20,
+    includeMemberOnly: true,
+  }))
+  expect(postSearch.searchPostIndex).not.toHaveBeenCalled()
+  expect(result.mode).toBe('rag')
+  expect(result.answer).toContain('找到')
+  expect(result.citations[0]).toMatchObject({ postId: 'post-1', fieldLabel: '视频' })
+  expect(result.items).toEqual([{ postId: 'post-1', title: '视频帖' }])
+})
+
+test('search: public guest readers do not receive member-only RAG evidence', async () => {
+  process.env.PUBLIC_READ_COMMUNITY_IDS = 'community-1'
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
+  ;(postRag.searchPostsWithRag as jest.Mock).mockResolvedValue({
+    query: '联系方式',
+    communityId: 'community-1',
+    sectionId: '',
+    total: 0,
+    skip: 0,
+    limit: 20,
+    answer: '没有找到足够相关的帖子。',
+    citations: [],
+    mode: 'no_answer',
+    items: [],
+  })
+
+  await handleSearch({
+    communityId: 'community-1',
+    q: '联系方式',
+    asGuest: true,
+  }, 'member-openid')
+
+  expect(postRag.searchPostsWithRag).toHaveBeenCalledWith(expect.objectContaining({
+    communityId: 'community-1',
+    query: '联系方式',
+    includeMemberOnly: false,
+  }))
 })
 
 test('get：非 active 成员不可查看帖子详情', async () => {
@@ -1076,6 +1454,44 @@ test('get: unauthenticated viewer can read post detail in an active public commu
     _id: 'post-1',
     authorNickname: '作者一',
   }))
+  expect((db.query as jest.Mock).mock.calls.some(([collection]) => collection === 'community_members')).toBe(false)
+})
+
+test('get: public guest detail masks member-only contact fields', async () => {
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.query as jest.Mock).mockReset()
+  process.env.PUBLIC_READ_COMMUNITY_IDS = 'community-1'
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'posts' && id === 'invite-post-1') return {
+      _id: 'invite-post-1',
+      communityId: 'community-1',
+      sectionId: 'invite-section-1',
+      authorId: 'author-1',
+      status: 'active',
+      auditStatus: 'pass',
+      content: {
+        activity_invite_title: '周六去云盖村',
+        activity_invite_contact: '13800000000',
+      },
+      createdAt: '2024-01-01T00:00:00.000Z',
+    }
+    if (collectionName === 'communities' && id === 'community-1') return { _id: 'community-1', status: 'active' }
+    if (collectionName === 'sections' && id === 'invite-section-1') return {
+      ...mockSection,
+      _id: 'invite-section-1',
+      widgets: [
+        { widgetId: 'activity_invite_title', type: 'short_text', label: '邀约主题', fieldKey: 'title', required: true, order: 0, showInList: true },
+        { widgetId: 'activity_invite_contact', type: 'short_text', label: '联系电话', fieldKey: 'contact', required: true, order: 3, showInList: false, visibility: 'member' },
+      ],
+    }
+    if (collectionName === 'users' && id === 'author-1') return { _id: 'author-1', nickName: '作者一' }
+    return null
+  })
+
+  const result = await handleGet({ postId: 'invite-post-1', asGuest: true } as any, 'wx-injected-openid')
+
+  expect(result.post.content.activity_invite_title).toBe('周六去云盖村')
+  expect(result.post.content.activity_invite_contact).toBe('')
   expect((db.query as jest.Mock).mock.calls.some(([collection]) => collection === 'community_members')).toBe(false)
 })
 

@@ -244,6 +244,192 @@ const INDEXES = [
       { Name: 'jobId', Direction: '1' },
     ],
   },
+  // post_search_terms: member-facing post search candidate lookup and cleanup
+  {
+    coll: 'post_search_terms',
+    name: 'idx_communityId_term',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'term', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_search_terms',
+    name: 'idx_postId',
+    keys: [
+      { Name: 'postId', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_search_terms',
+    name: 'idx_chunkId',
+    keys: [
+      { Name: 'chunkId', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_search_documents',
+    name: 'idx_communityId_sectionId',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'sectionId', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_search_chunks',
+    name: 'idx_postId',
+    keys: [
+      { Name: 'postId', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_search_chunks',
+    name: 'idx_sectionId',
+    keys: [
+      { Name: 'sectionId', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_search_chunks',
+    name: 'idx_communityId_sectionId',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'sectionId', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_search_vector_terms',
+    name: 'idx_communityId_term',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'term', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_search_vector_terms',
+    name: 'idx_postId',
+    keys: [
+      { Name: 'postId', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_search_vector_terms',
+    name: 'idx_chunkId',
+    keys: [
+      { Name: 'chunkId', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_search_index_state',
+    name: 'idx_communityId_status',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'status', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_search_index_state',
+    name: 'idx_status_indexedAt',
+    keys: [
+      { Name: 'status', Direction: '1' },
+      { Name: 'indexedAt', Direction: '-1' },
+    ],
+  },
+  {
+    coll: 'post_rag_jobs',
+    name: 'idx_status_createdAt',
+    keys: [
+      { Name: 'status', Direction: '1' },
+      { Name: 'createdAt', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_rag_jobs',
+    name: 'idx_postId_status',
+    keys: [
+      { Name: 'postId', Direction: '1' },
+      { Name: 'status', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_rag_jobs',
+    name: 'idx_communityId_status',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'status', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_rag_index_state',
+    name: 'idx_communityId_status',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'status', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_rag_index_state',
+    name: 'idx_status_indexedAt',
+    keys: [
+      { Name: 'status', Direction: '1' },
+      { Name: 'indexedAt', Direction: '-1' },
+    ],
+  },
+  {
+    coll: 'post_rag_chunks',
+    name: 'idx_communityId_postId',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'postId', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_rag_chunks',
+    name: 'idx_sectionId_postId',
+    keys: [
+      { Name: 'sectionId', Direction: '1' },
+      { Name: 'postId', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_video_rag_assets',
+    name: 'idx_cacheKey',
+    keys: [
+      { Name: 'cacheKey', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_video_rag_assets',
+    name: 'idx_status_updatedAt',
+    keys: [
+      { Name: 'status', Direction: '1' },
+      { Name: 'updatedAt', Direction: '-1' },
+    ],
+  },
+  {
+    coll: 'post_video_rag_jobs',
+    name: 'idx_status_createdAt',
+    keys: [
+      { Name: 'status', Direction: '1' },
+      { Name: 'createdAt', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_video_rag_jobs',
+    name: 'idx_budgetDate_status',
+    keys: [
+      { Name: 'budgetDate', Direction: '1' },
+      { Name: 'status', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_video_rag_jobs',
+    name: 'idx_postId_status',
+    keys: [
+      { Name: 'postId', Direction: '1' },
+      { Name: 'status', Direction: '1' },
+    ],
+  },
   // app_configs: global product/admin configuration documents by stable key
   {
     coll: 'app_configs',
@@ -265,6 +451,16 @@ const REQUIRED_COLLECTIONS = [
   'admin_notification_subscriptions', // 审批提醒订阅授权状态
   'admin_notifications',  // 审批提醒发送记录与失败原因
   'content_audit_tasks',  // 内容审核任务与回调对账
+  'post_search_documents', // 帖子搜索文档（_id=postId）
+  'post_search_terms',     // 帖子搜索倒排词条
+  'post_search_chunks',    // RAG 证据分块（_id=chunkId）
+  'post_search_vector_terms', // 本地稀疏向量词条
+  'post_search_index_state',  // 每篇帖子索引状态
+  'post_rag_jobs',            // 正式 RAG 异步索引任务
+  'post_rag_index_state',     // 正式 RAG 每篇帖子索引状态
+  'post_rag_chunks',          // RAG chunk 元数据镜像/排障用
+  'post_video_rag_assets',     // 视频 OCR/ASR/关键帧摘要缓存（按 cacheKey 复用）
+  'post_video_rag_jobs',       // 成本感知的视频分析异步任务
 ]
 
 let hadError = false

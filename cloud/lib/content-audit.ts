@@ -4,6 +4,8 @@ import { URL } from 'url'
 import * as db from './db'
 import * as storage from './storage'
 import { postWxJson } from './wx-openapi'
+import { refreshPostSearchIndexById } from './post-search'
+import { enqueuePostRagJob } from './post-rag'
 import type {
   AuditProvider,
   AuditTargetType,
@@ -481,6 +483,16 @@ export async function auditPostContent(params: {
 
 export async function applyAuditSummary(postId: string, slot: 'content' | 'pendingContent', status: PostAuditStatus, reason = '') {
   const now = nowIso()
+  const queueRagIndexJob = async (jobReason: string, action: 'upsert' | 'delete', postSnapshot?: Post) => {
+    const post = postSnapshot || await db.getById('posts', postId) as Post
+    await enqueuePostRagJob({
+      postId,
+      communityId: post?.communityId,
+      sectionId: post?.sectionId,
+      action,
+      reason: jobReason,
+    })
+  }
   if (slot === 'pendingContent') {
     if (status === 'pass') {
       const post = await db.getById('posts', postId) as Post
@@ -491,6 +503,8 @@ export async function applyAuditSummary(postId: string, slot: 'content' | 'pendi
           pendingAuditReason: '',
           auditUpdatedAt: now,
         })
+        await queueRagIndexJob('audit.pending.pass.no_content', 'upsert', post)
+        await refreshPostSearchIndexById(postId)
         return
       }
       await db.updateById('posts', postId, {
@@ -503,6 +517,8 @@ export async function applyAuditSummary(postId: string, slot: 'content' | 'pendi
         auditUpdatedAt: now,
         updatedAt: now,
       })
+      await queueRagIndexJob('audit.pending.pass', 'upsert', post)
+      await refreshPostSearchIndexById(postId)
       return
     }
     await db.updateById('posts', postId, {
@@ -510,6 +526,7 @@ export async function applyAuditSummary(postId: string, slot: 'content' | 'pendi
       pendingAuditReason: reason,
       auditUpdatedAt: now,
     })
+    await refreshPostSearchIndexById(postId)
     return
   }
 
@@ -518,6 +535,8 @@ export async function applyAuditSummary(postId: string, slot: 'content' | 'pendi
     auditReason: reason,
     auditUpdatedAt: now,
   })
+  await queueRagIndexJob('audit.content.apply', status === 'pass' ? 'upsert' : 'delete')
+  await refreshPostSearchIndexById(postId)
 }
 
 export async function auditAndApply(params: {

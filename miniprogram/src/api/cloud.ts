@@ -300,10 +300,64 @@ export const postApi = {
     ),
   list: (sectionId: string, skip = 0, asGuest = false) =>
     callCloud<{ posts: any[] }>('post', 'list', { sectionId, skip, asGuest }),
+  search: (params: {
+    communityId: string
+    query: string
+    sectionId?: string
+    skip?: number
+    limit?: number
+    asGuest?: boolean
+  }) =>
+    callCloud<{
+      query: string
+      communityId: string
+      sectionId: string
+      total: number
+      skip: number
+      limit: number
+      answer: string
+      mode: 'rag' | 'fallback' | 'no_answer'
+      citations: Array<{
+        postId: string
+        chunkId: string
+        title: string
+        sectionId?: string
+        sectionName?: string
+        fieldLabel: string
+        fieldType: string
+        preview: string
+        score: number
+      }>
+      items: Array<{
+        postId: string
+        communityId: string
+        sectionId: string
+        sectionName: string
+        title: string
+        score: number
+        matchedFields: Array<{ fieldLabel: string; fieldType: string; preview: string }>
+        createdAt: string
+        updatedAt: string
+      }>
+    }>('post', 'search', params),
   get: (postId: string, asGuest = false) =>
     callCloud<{ post: any }>('post', 'get', { postId, asGuest }),
   create: (params: object) =>
     callCloud('post', 'create', params),
+  getActivityInviteState: (sourcePostId: string, asGuest = false) =>
+    callCloud<{
+      enabled: boolean
+      sourcePostId: string
+      prefill: { title: string; location?: any }
+      invite: any | null
+      targetSection: { _id?: string; sectionId: string; name: string; systemKey?: string; widgets?: any[]; type?: string } | null
+    }>('post', 'getActivityInviteState', { sourcePostId, asGuest }),
+  createActivityInvite: (sourcePostId: string, content: Record<string, any>) =>
+    callCloud<{ postId: string; sectionId?: string; alreadyExists?: boolean; auditStatus?: string; auditReason?: string }>(
+      'post',
+      'createActivityInvite',
+      { sourcePostId, content },
+    ),
   update: (postId: string, content: Record<string, any>) =>
     callCloud('post', 'update', { postId, content }),
   delete: (postId: string) =>
