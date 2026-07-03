@@ -148,6 +148,92 @@ test('processPostRagJobBatch chunks approved post content and upserts through pr
   }))
 })
 
+test('processPostRagJobBatch creates index state when CloudBase update misses the document', async () => {
+  const provider = {
+    name: 'fake-rag',
+    isConfigured: jest.fn(() => true),
+    search: jest.fn(),
+    upsertChunks: jest.fn().mockResolvedValue(undefined),
+    deletePostChunks: jest.fn(),
+  }
+  mockDb.query.mockResolvedValue([
+    { _id: 'job-missing-state', postId: 'post-missing-state', action: 'upsert', attempts: 0 },
+  ])
+  mockDb.getById
+    .mockResolvedValueOnce({
+      _id: 'post-missing-state',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      authorId: 'user-1',
+      status: 'active',
+      auditStatus: 'pass',
+      content: { title: '明士课程', body: '一粥一饭，当思来处不易。' },
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z',
+    })
+    .mockResolvedValueOnce({
+      _id: 'section-1',
+      communityId: 'community-1',
+      name: '明士课堂',
+      type: 'evergreen',
+      status: 'active',
+      widgets: [
+        { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', showInList: true, order: 0 },
+        { widgetId: 'body', type: 'rich_text', label: '正文', fieldKey: 'body', showInList: true, order: 1 },
+      ],
+    })
+  mockDb.updateById
+    .mockResolvedValueOnce({ stats: { updated: 0 } })
+    .mockResolvedValueOnce({ stats: { updated: 1 } })
+  mockDb.create.mockResolvedValue('state-created')
+
+  await processPostRagJobBatch({ provider, limit: 1 })
+
+  expect(mockDb.create).toHaveBeenCalledWith(POST_RAG_INDEX_STATE, expect.objectContaining({
+    _id: 'post-missing-state',
+    postId: 'post-missing-state',
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    status: 'indexed',
+    chunkCount: expect.any(Number),
+  }))
+})
+
+test('processPostRagJobBatch records community metadata when delete jobs remove index state', async () => {
+  const provider = {
+    name: 'fake-rag',
+    isConfigured: jest.fn(() => true),
+    search: jest.fn(),
+    upsertChunks: jest.fn(),
+    deletePostChunks: jest.fn().mockResolvedValue(undefined),
+  }
+  mockDb.query.mockResolvedValue([
+    {
+      _id: 'job-delete',
+      postId: 'post-deleted',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      action: 'delete',
+      attempts: 0,
+    },
+  ])
+  mockDb.updateById
+    .mockResolvedValueOnce({ stats: { updated: 0 } })
+    .mockResolvedValueOnce({ stats: { updated: 1 } })
+  mockDb.create.mockResolvedValue('state-created')
+
+  await processPostRagJobBatch({ provider, limit: 1 })
+
+  expect(provider.deletePostChunks).toHaveBeenCalledWith('post-deleted')
+  expect(mockDb.create).toHaveBeenCalledWith(POST_RAG_INDEX_STATE, expect.objectContaining({
+    _id: 'post-deleted',
+    postId: 'post-deleted',
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    status: 'removed',
+  }))
+})
+
 test('processPostRagJobBatch can target pending jobs for one post', async () => {
   const provider = {
     name: 'fake-rag',
@@ -738,6 +824,7 @@ test('processPostVideoRagJobBatch caches analyzer output and requeues post RAG i
         source: 'cos',
         title: '家风',
         fileID: 'cloud://env/posts/videos/family-video.mp4',
+        duration: 96,
       },
     },
   ])
@@ -747,7 +834,18 @@ test('processPostVideoRagJobBatch caches analyzer output and requeues post RAG i
   })
   mockDb.create.mockResolvedValue('created')
 
-  const result = await processPostVideoRagJobBatch({ analyzer, limit: 1 })
+  const result = await processPostVideoRagJobBatch({
+    analyzer,
+    limit: 1,
+    policy: {
+      analysisEnabled: true,
+      maxJobsPerPost: 1,
+      maxCostUnitsPerPost: 8,
+      maxFramesPerVideo: 4,
+      maxAsrSecondsPerVideo: 120,
+      minMetadataTextCharsForAnalysis: 48,
+    },
+  })
 
   expect(result).toEqual({
     scannedCount: 1,
@@ -776,6 +874,61 @@ test('processPostVideoRagJobBatch caches analyzer output and requeues post RAG i
     action: 'upsert',
     reason: 'rag.video.analysis.ready',
     status: 'pending',
+  }))
+})
+
+test('processPostVideoRagJobBatch rejects legacy ASR jobs without duration before calling analyzer', async () => {
+  const analyzer = {
+    name: 'fake-asr-analyzer',
+    isConfigured: jest.fn(() => true),
+    analyze: jest.fn(),
+  }
+  mockDb.query.mockResolvedValue([
+    {
+      _id: 'video-job-legacy',
+      postId: 'post-video',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      cacheKey: 'vrk-video-legacy',
+      status: 'pending',
+      attempts: 0,
+      requestedAnalyses: ['asr'],
+      frameStrategy: { includeCover: false, maxFrames: 0, minSceneGapSeconds: 10 },
+      maxAsrSeconds: 3600,
+      estimatedCostUnits: 120,
+      video: {
+        itemId: 'video-legacy',
+        source: 'cos',
+        title: '未知时长视频',
+        fileID: 'cloud://env/posts/videos/legacy.mp4',
+        duration: 0,
+      },
+    },
+  ])
+  mockDb.updateById.mockResolvedValue({ stats: { updated: 1 } })
+
+  const result = await processPostVideoRagJobBatch({
+    analyzer,
+    limit: 1,
+    policy: {
+      analysisEnabled: true,
+      maxJobsPerPost: 1,
+      maxCostUnitsPerPost: 120,
+      maxFramesPerVideo: 0,
+      maxAsrSecondsPerVideo: 3600,
+      minMetadataTextCharsForAnalysis: 48,
+    },
+  })
+
+  expect(analyzer.analyze).not.toHaveBeenCalled()
+  expect(result.results).toEqual([{
+    jobId: 'video-job-legacy',
+    ok: false,
+    error: 'video_rag_asr_duration_unknown',
+  }])
+  expect(mockDb.updateById).toHaveBeenCalledWith(POST_VIDEO_RAG_JOBS, 'video-job-legacy', expect.objectContaining({
+    status: 'failed',
+    errorMessage: 'video_rag_asr_duration_unknown',
   }))
 })
 
@@ -808,6 +961,7 @@ test('processPostVideoRagJobBatch keeps async ASR jobs processing without reinde
           source: 'cos',
           title: '家风课',
           fileID: 'cloud://env/posts/videos/family-video.mp4',
+          duration: 3600,
         },
       },
     ])
@@ -815,7 +969,18 @@ test('processPostVideoRagJobBatch keeps async ASR jobs processing without reinde
   mockDb.updateById.mockResolvedValue({ stats: { updated: 1 } })
   mockDb.create.mockResolvedValue('created')
 
-  const result = await processPostVideoRagJobBatch({ analyzer, limit: 1 })
+  const result = await processPostVideoRagJobBatch({
+    analyzer,
+    limit: 1,
+    policy: {
+      analysisEnabled: true,
+      maxJobsPerPost: 1,
+      maxCostUnitsPerPost: 120,
+      maxFramesPerVideo: 0,
+      maxAsrSecondsPerVideo: 3600,
+      minMetadataTextCharsForAnalysis: 48,
+    },
+  })
 
   expect(result.results).toEqual([{ jobId: 'video-job-1', ok: true, pending: true }])
   expect(mockDb.updateById).toHaveBeenCalledWith(POST_VIDEO_RAG_JOBS, 'video-job-1', expect.objectContaining({

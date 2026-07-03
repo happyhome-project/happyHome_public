@@ -69,7 +69,7 @@
       </view>
     </view>
 
-    <view v-else-if="items.length === 0 && mode !== 'no_answer' && (answer || citations.length || mode === 'fallback')" class="rag-section">
+    <view v-if="searched && !loadError && mode !== 'no_answer' && (answer || citations.length || mode === 'fallback')" class="rag-section">
       <view v-if="answer" class="answer-card" :class="{ muted: mode !== 'rag' }">
         <text class="answer-label">{{ mode === 'fallback' ? '普通搜索' : 'AI 回答' }}</text>
         <text class="answer-text">{{ answer }}</text>
@@ -95,7 +95,7 @@
       </view>
     </view>
 
-    <view v-else-if="items.length === 0" class="empty-result">
+    <view v-if="!loading && !loadError && searched && items.length === 0" class="empty-result">
       <view class="empty-illustration" aria-hidden="true">
         <view class="empty-paper"></view>
         <view class="empty-folder"></view>

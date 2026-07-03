@@ -1653,12 +1653,33 @@ export function createVideoRagAnalyzerFromEnv(env: NodeJS.ProcessEnv = process.e
   }
 }
 
+function validatePendingVideoRagJobBudget(job: VideoRagAnalysisJobDocument, policy: VideoRagCostPolicy): string {
+  if (!policy.analysisEnabled) return 'video_rag_analysis_disabled'
+  const estimatedCostUnits = Number(job.estimatedCostUnits || 0)
+  if (!Number.isFinite(estimatedCostUnits) || estimatedCostUnits <= 0) return 'video_rag_cost_unknown'
+  if (estimatedCostUnits > policy.maxCostUnitsPerPost) return 'video_rag_job_over_budget'
+
+  const requestedAnalyses = new Set((job.requestedAnalyses || []).map((item) => String(item || '').trim()))
+  if (requestedAnalyses.has('asr')) {
+    const durationSeconds = Number(job.video?.duration || 0)
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return 'video_rag_asr_duration_unknown'
+    if (durationSeconds > policy.maxAsrSecondsPerVideo) return 'video_rag_asr_duration_over_budget'
+    if (Number(job.maxAsrSeconds || 0) > policy.maxAsrSecondsPerVideo) return 'video_rag_asr_budget_over_limit'
+  }
+
+  const maxFrames = Number(job.frameStrategy?.maxFrames || 0)
+  if (Number.isFinite(maxFrames) && maxFrames > policy.maxFramesPerVideo) return 'video_rag_frame_budget_over_limit'
+  return ''
+}
+
 export async function processPostVideoRagJobBatch(options: {
   limit?: number
   postId?: string
   analyzer?: VideoRagAnalyzer
+  policy?: VideoRagCostPolicy
 } = {}) {
   const analyzer = options.analyzer || createVideoRagAnalyzerFromEnv()
+  const policy = options.policy || readVideoRagCostPolicyFromEnv()
   const limit = Math.max(1, Math.min(10, Math.floor(Number(options.limit || 3))))
   const postId = String(options.postId || '').trim()
   const pendingJobs = await db.query(
@@ -1679,6 +1700,17 @@ export async function processPostVideoRagJobBatch(options: {
   for (const job of jobs) {
     const now = new Date().toISOString()
     try {
+      const budgetError = job.status === 'pending' ? validatePendingVideoRagJobBudget(job, policy) : ''
+      if (budgetError) {
+        await db.updateById(POST_VIDEO_RAG_JOBS, job._id, {
+          status: 'failed',
+          attempts: Number((job as any).attempts || 0) + 1,
+          errorMessage: budgetError,
+          updatedAt: now,
+        })
+        results.push({ jobId: job._id, ok: false, error: budgetError })
+        continue
+      }
       if (!analyzer.isConfigured()) throw new Error('video_rag_analyzer_not_configured')
       const rawAsset = await analyzer.analyze(job)
       if (isVideoRagPendingResult(rawAsset)) {
@@ -1845,6 +1877,35 @@ function isPostSearchableForRag(post: any): boolean {
   )
 }
 
+function updateMatchedDocument(result: any): boolean {
+  const stats = result?.stats || result
+  const updated = Number(stats?.updated ?? stats?.updatedCount ?? stats?.ModifiedCount ?? 0)
+  return Number.isFinite(updated) && updated > 0
+}
+
+async function upsertPostRagIndexState(postId: string, data: Record<string, any>) {
+  const state = { postId, ...data }
+  const updateResult = await db.updateById(POST_RAG_INDEX_STATE, postId, state).catch(() => null)
+  if (updateMatchedDocument(updateResult)) return
+  await db.create(POST_RAG_INDEX_STATE, {
+    _id: postId,
+    ...state,
+  })
+}
+
+function removedRagIndexState(job: any, now: string, post?: Partial<Post> | null) {
+  const state: Record<string, any> = {
+    status: 'removed',
+    indexedAt: now,
+    sourceUpdatedAt: now,
+  }
+  const communityId = String((post as any)?.communityId || job?.communityId || '').trim()
+  const sectionId = String((post as any)?.sectionId || job?.sectionId || '').trim()
+  if (communityId) state.communityId = communityId
+  if (sectionId) state.sectionId = sectionId
+  return state
+}
+
 export async function processPostRagJobBatch(options: {
   limit?: number
   postId?: string
@@ -1866,32 +1927,12 @@ export async function processPostRagJobBatch(options: {
       if (!provider.isConfigured()) throw new Error('rag_provider_not_configured')
       if (job.action === 'delete') {
         await provider.deletePostChunks?.(job.postId)
-        await db.updateById(POST_RAG_INDEX_STATE, job.postId, {
-          status: 'removed',
-          indexedAt: now,
-          sourceUpdatedAt: now,
-        }).catch(() => db.create(POST_RAG_INDEX_STATE, {
-          _id: job.postId,
-          postId: job.postId,
-          status: 'removed',
-          indexedAt: now,
-          sourceUpdatedAt: now,
-        }))
+        await upsertPostRagIndexState(job.postId, removedRagIndexState(job, now))
       } else {
         const post = await db.getById('posts', job.postId) as Post
         if (!isPostSearchableForRag(post)) {
           await provider.deletePostChunks?.(job.postId)
-          await db.updateById(POST_RAG_INDEX_STATE, job.postId, {
-            status: 'removed',
-            indexedAt: now,
-            sourceUpdatedAt: now,
-          }).catch(() => db.create(POST_RAG_INDEX_STATE, {
-            _id: job.postId,
-            postId: job.postId,
-            status: 'removed',
-            indexedAt: now,
-            sourceUpdatedAt: now,
-          }))
+          await upsertPostRagIndexState(job.postId, removedRagIndexState(job, now, post))
           await db.updateById(POST_RAG_JOBS, job._id, { status: 'completed', updatedAt: now })
           results.push({ jobId: job._id, ok: true })
           continue
@@ -1912,7 +1953,7 @@ export async function processPostRagJobBatch(options: {
         const videoJobResult = await enqueueVideoRagAnalysisJobs(videoAnalysisJobs)
         await provider.deletePostChunks?.(job.postId)
         await provider.upsertChunks?.(chunks)
-        await db.updateById(POST_RAG_INDEX_STATE, job.postId, {
+        await upsertPostRagIndexState(job.postId, {
           status: 'indexed',
           communityId: post.communityId,
           sectionId: post.sectionId,
@@ -1928,25 +1969,7 @@ export async function processPostRagJobBatch(options: {
             maxFramesPerVideo: videoPolicy.maxFramesPerVideo,
             maxAsrSecondsPerVideo: videoPolicy.maxAsrSecondsPerVideo,
           },
-        }).catch(() => db.create(POST_RAG_INDEX_STATE, {
-          _id: job.postId,
-          postId: job.postId,
-          status: 'indexed',
-          communityId: post.communityId,
-          sectionId: post.sectionId,
-          sourceUpdatedAt: post.updatedAt || post.createdAt || now,
-          indexedAt: now,
-          chunkCount: chunks.length,
-          videoRag: {
-            metadataChunkCount: videoMetadataChunkCount,
-            analysisChunkCount: videoAnalysisChunkCount,
-            analysisJobQueuedCount: videoJobResult.queuedCount,
-            analysisJobSkippedCount: videoJobResult.skippedCount,
-            analysisEnabled: videoPolicy.analysisEnabled,
-            maxFramesPerVideo: videoPolicy.maxFramesPerVideo,
-            maxAsrSecondsPerVideo: videoPolicy.maxAsrSecondsPerVideo,
-          },
-        }))
+        })
       }
       await db.updateById(POST_RAG_JOBS, job._id, { status: 'completed', updatedAt: now })
       results.push({ jobId: job._id, ok: true })
