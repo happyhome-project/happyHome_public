@@ -22,14 +22,14 @@ describe('profile page visible debug output', () => {
     expect(code).not.toContain('cc:')
   })
 
-  test('keeps only the bottom profile build version text for the release UI gate', () => {
+  test('keeps build metadata out of the Figma profile page surface', () => {
     const code = readSource('pages/profile/index.vue')
 
-    expect(code).toContain('profile-version')
-    expect(code).toContain('<text>ver: {{ appVersion }}</text>')
-    expect(code).toContain('BUILD_INFO')
-    expect(code).toContain('__HH_BUILD_VERSION__')
-    expect(code).toContain('appVersion')
-    expect(code.match(/ver:/g) || []).toHaveLength(1)
+    expect(code).not.toContain('profile-version')
+    expect(code).not.toContain('<text>ver: {{ appVersion }}</text>')
+    expect(code).not.toContain('BUILD_INFO')
+    expect(code).not.toContain('__HH_BUILD_VERSION__')
+    expect(code).not.toContain('appVersion')
+    expect(code.match(/ver:/g) || []).toHaveLength(0)
   })
 })

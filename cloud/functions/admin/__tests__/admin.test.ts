@@ -161,6 +161,82 @@ test('geo.searchLocation: 通过高德检索目的地候选点并返回 GCJ-02 �
   ])
 })
 
+test('community.updateHomeBanners: saves ordered banners for posts in the same community', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({ _id: 'post-1', communityId: 'community-1', status: 'active' })
+    .mockResolvedValueOnce({ _id: 'post-2', communityId: 'community-1', status: 'active' })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  const result: any = await main({
+    action: 'community.updateHomeBanners',
+    communityId: 'community-1',
+    banners: [
+      { postId: 'post-1', title: '新人必看', coverImage: 'cloud://cover-1', enabled: true },
+      { bannerId: 'custom-banner', postId: 'post-2', title: '周末互助', coverImage: 'https://example.com/cover.jpg' },
+    ],
+    _actAs: { accountId: 'super-1', role: 'superAdmin', userId: 'boss-openid', username: 'boss' },
+  })
+
+  expect(result.success).toBe(true)
+  expect(db.updateById).toHaveBeenCalledWith('communities', 'community-1', {
+    homeBanners: [
+      {
+        bannerId: 'post-1-0',
+        postId: 'post-1',
+        title: '新人必看',
+        coverImage: 'cloud://cover-1',
+        order: 0,
+        enabled: true,
+      },
+      {
+        bannerId: 'custom-banner',
+        postId: 'post-2',
+        title: '周末互助',
+        coverImage: 'https://example.com/cover.jpg',
+        order: 1,
+        enabled: true,
+      },
+    ],
+  })
+})
+
+test('community.updateHomeBanners: rejects duplicate posts', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'post-1',
+    communityId: 'community-1',
+    status: 'active',
+  })
+
+  await expect(main({
+    action: 'community.updateHomeBanners',
+    communityId: 'community-1',
+    banners: [
+      { postId: 'post-1', coverImage: 'cloud://cover-1' },
+      { postId: 'post-1', coverImage: 'cloud://cover-2' },
+    ],
+    _actAs: { accountId: 'super-1', role: 'superAdmin', userId: 'boss-openid', username: 'boss' },
+  })).rejects.toThrow('Banner 关联帖子不能重复')
+
+  expect(db.updateById).not.toHaveBeenCalled()
+})
+
+test('community.updateHomeBanners: rejects posts from other communities', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'post-1',
+    communityId: 'other-community',
+    status: 'active',
+  })
+
+  await expect(main({
+    action: 'community.updateHomeBanners',
+    communityId: 'community-1',
+    banners: [{ postId: 'post-1', coverImage: 'cloud://cover-1' }],
+    _actAs: { accountId: 'super-1', role: 'superAdmin', userId: 'boss-openid', username: 'boss' },
+  })).rejects.toThrow('Banner 只能关联当前社区的帖子')
+
+  expect(db.updateById).not.toHaveBeenCalled()
+})
+
 test('admin.approvalSummary: superAdmin 返回社区创建和成员加入待办数', async () => {
   ;(db.query as jest.Mock)
     .mockResolvedValueOnce([

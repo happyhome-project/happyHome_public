@@ -76,35 +76,51 @@ $uni-color-paragraph: #3f536e; // 文章段落颜色
 $uni-font-size-paragraph: 15px;
 
 // ═══════════════════════════════════════════════════════════════
-// ▼ happyHome / 美好 Home · Design Tokens v2
-// ▼ Classical Dossier · 经典卷宗风格
+// ▼ happyHome / 美好 Home · Design Tokens v3
+// ▼ Figma 0626 · 社区小程序风格
 // ▼ 命名空间: $hh-* （happyHome）
 // ▼ 与上方 $uni-* 变量并行存在，互不干扰。
-// ▼ 调性锚点: 反算法邻里 App - "是一本合订的册子，不是信息流"
-// ▼ 主色：墨绿 accent · 暖灰白纸底 · 三字体分工（Serif/Sans/Mono）
-// ▼ 详见: docs/VISUAL-TONE.md · design_handoff/tokens-v2.css
-// ▼ 历史：v1 木色橙方向已弃用（2026-04-20 Classical Dossier 取代）
+// ▼ 主色：Figma 0626 亮绿 · 浅灰页面底 · 白卡片 · 清晰信息层级
+// ▼ 旧 Classical Dossier 变量保留为兼容别名，逐步迁移页面。
 // ═══════════════════════════════════════════════════════════════
 
+// ─────────── Figma 0626 基础 token ───────────
+$hh-figma-green:       #3DAD7D;
+$hh-figma-green-dark:  #1F7A50;
+$hh-figma-green-soft:  #E8F8F0;
+$hh-figma-green-line:  #BFEFD3;
+$hh-figma-bg:          #F6F7F9;
+$hh-figma-card:        #FFFFFF;
+$hh-figma-card-soft:   #F9FFFF;
+$hh-figma-line:        #E8E8E8;
+$hh-figma-line-soft:   #F0F1F2;
+$hh-figma-ink:         #1F2320;
+$hh-figma-ink-2:       #4C5650;
+$hh-figma-ink-3:       #88918C;
+$hh-figma-ink-4:       #B7BEBB;
+
+$hh-radius-card-figma: 24rpx; // Figma 12px
+$hh-radius-panel-figma: 32rpx;
+
 // ─────────── Surface（暖灰白纸底） ───────────
-$hh-surface-0:     #F5F3F0;  // 主底色（页面背景）
-$hh-surface-1:     #FDFBF8;  // 卡片底
-$hh-surface-2:     #ECE9E5;  // hover / 次级块
-$hh-surface-3:     #E3DFDA;  // 更深的次级
+$hh-surface-0:     $hh-figma-bg;       // 主底色（页面背景）
+$hh-surface-1:     $hh-figma-card;     // 卡片底
+$hh-surface-2:     #EEF1EF;            // hover / 次级块
+$hh-surface-3:     #E3E7E5;            // 更深的次级
 
 // ─────────── Ink（墨色） ───────────
-$hh-ink-1:         #1E1A16;  // 主文字（暖黑）
-$hh-ink-2:         #514C48;  // 次文字
-$hh-ink-3:         #847F7B;  // 辅助 / mono 标签
-$hh-ink-4:         #B1ADAA;  // 禁用 / 更弱
-$hh-ink-line:      #DAD7D4;  // 分隔线
-$hh-ink-line-2:    #EAE7E5;  // 更浅的分隔
+$hh-ink-1:         $hh-figma-ink;      // 主文字
+$hh-ink-2:         $hh-figma-ink-2;    // 次文字
+$hh-ink-3:         $hh-figma-ink-3;    // 辅助
+$hh-ink-4:         $hh-figma-ink-4;    // 禁用 / 更弱
+$hh-ink-line:      $hh-figma-line;     // 分隔线
+$hh-ink-line-2:    $hh-figma-line-soft;// 更浅的分隔
 
 // ─────────── Accent（单一墨绿） ───────────
-$hh-accent:        #3A6A45;  // 主强调色：此刻发生、精选、已选中
-$hh-accent-ink:    #1D4E2B;  // 强调色暗版 · 文字强调
-$hh-accent-wash:   #DEF1E1;  // 强调背景（浅）
-$hh-accent-line:   #AECEB3;  // 强调边框
+$hh-accent:        $hh-figma-green;       // 主强调色
+$hh-accent-ink:    $hh-figma-green-dark;  // 强调色暗版 · 文字强调
+$hh-accent-wash:   $hh-figma-green-soft;  // 强调背景（浅）
+$hh-accent-line:   $hh-figma-green-line;  // 强调边框
 
 // ─────────── Semantic ───────────
 $hh-live:          #CF4040;  // 实时/举报/驳回 砖红
@@ -140,8 +156,8 @@ $hh-color-hover:         rgba($hh-ink-1, 0.04);
 $hh-opacity-disabled:    0.4;
 
 // ─────────── Font Families · 三体分工 ───────────
-$hh-font-serif: "Songti SC", "STSong", "Source Han Serif SC", Georgia, serif;
 $hh-font-sans:  -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Segoe UI", sans-serif;
+$hh-font-serif: $hh-font-sans;
 $hh-font-mono:  "SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace;
 $hh-font-num:   "SF Pro Display", ui-sans-serif, $hh-font-sans;
 
@@ -167,11 +183,11 @@ $hh-line-height-base:    1.45;  // 正文
 $hh-line-height-relaxed: 1.75;  // 长段落（正文 text-body）
 
 // Letter spacing（设计稿关键细节）
-$hh-tracking-mono:       0.18em;  // mono uppercase 标签
-$hh-tracking-mono-sm:    0.14em;  // mono 小标签
-$hh-tracking-serif:      -0.02em; // serif 大标题收紧
-$hh-tracking-serif-sm:   -0.005em;// serif 小标题
-$hh-tracking-sans:       0.005em; // sans 正文
+$hh-tracking-mono:       0; // 小程序端避免字距随设备渲染产生拥挤/溢出
+$hh-tracking-mono-sm:    0;
+$hh-tracking-serif:      0;
+$hh-tracking-serif-sm:   0;
+$hh-tracking-sans:       0;
 
 // ─────────── Spacing ───────────
 $hh-space-xs:   8rpx;

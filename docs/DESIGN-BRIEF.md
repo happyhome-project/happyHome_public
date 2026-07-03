@@ -1,7 +1,9 @@
 # 美好 Home · 设计交接简报 ⚠️ 已过时
 
 > ⚠️ **本文档是 v1 木色橙方向的简报，已于 2026-04-20 废弃。**
-> 当前 Claude.ai/design 已交付 Classical Dossier 方案，见 `_claude-design-drop/happyhome/project/design_handoff_happyhome/README.md`（新权威）。
+> 2026-06-30 起，小程序 UI/UX 新准则以 Figma 文件 `社区资源共享_小程序_0626` 为准。
+> 执行参考：[docs/figma-mini-0626-inventory.md](./figma-mini-0626-inventory.md)
+> 下文关于“单列卡片流”“不做双列瀑布流”等结论均为历史判断，不再作为当前小程序实现依据。
 > 当前状态总览：[docs/SESSION-HANDOFF.md](./SESSION-HANDOFF.md)
 
 ---

@@ -10,6 +10,7 @@ miniprogram/project.private.config.json
 artifacts/
 playwright-report/
 test-results/
+output/
 preview-qr.*
 preview-info.json
 mp-upload-info.json

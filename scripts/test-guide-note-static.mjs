@@ -60,6 +60,11 @@ assert(
 )
 
 assert(
+  detailPage.includes('GUIDE_NOTE_NAME_HINTS') && detailPage.includes('resolveGuideNoteDetailTemplate'),
+  'mini program detail must use the same guide-note name fallback as the homepage for older sections.'
+)
+
+assert(
   guideRouteDetail.includes('<swiper') &&
     guideRouteDetail.includes('<swiper-item') &&
     guideRouteDetail.includes('@change="onHeroChange"') &&
@@ -85,8 +90,9 @@ assert(
   !guideRouteDetail.includes('class="guide-drive"') &&
     !guideRouteDetail.includes('自驾到达') &&
     guideRouteDetail.includes('liangbuluTrackId') &&
-    guideRouteDetail.indexOf('guide-track') < guideRouteDetail.indexOf('guide-map'),
-  'guide route detail must show optional LiangBuLu track-id copy UI above the destination map, without repeating drive duration.'
+    guideRouteDetail.indexOf('class="guide-location"') < guideRouteDetail.indexOf('guide-track') &&
+    guideRouteDetail.indexOf('guide-track') < guideRouteDetail.indexOf('v-for="(section, sectionIndex) in detail.bodySections"'),
+  'guide route detail must show optional LiangBuLu track-id copy UI near destination location and before body, without repeating drive duration.'
 )
 
 assert(
@@ -110,7 +116,7 @@ assert(
 )
 
 assert(
-  guideRouteDetail.includes('目的地位置') &&
+  guideRouteDetail.includes('<text>位置</text>') &&
     guideRouteDetail.includes('openLocation') &&
     guideRouteDetail.includes('导航') &&
     !guideRouteDetail.includes('线路轨迹'),

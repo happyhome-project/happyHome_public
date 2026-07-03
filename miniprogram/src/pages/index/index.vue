@@ -1,109 +1,141 @@
 <template>
   <view class="phone-inner">
-    <!-- Masthead：社群封面卡（整块可点切换社区） -->
-    <view
-      class="s1-top"
-      :class="{ 'is-tappable': hasMultipleCommunities }"
-      @tap="onMastheadTap"
-    >
-      <view class="top-body">
-        <text class="eyebrow">{{ kindEn }}</text>
-        <view class="title-wrap">
-          <text class="title">{{ communityName }}</text>
-          <text v-if="hasMultipleCommunities" class="title-chev">⌄</text>
+    <view class="home-shell">
+      <view class="home-topbar">
+        <view class="community-identity" @tap="onMastheadTap">
+          <view class="community-avatar">
+            <image
+              v-if="homeHeroImage"
+              :src="homeHeroImage"
+              class="community-avatar-image"
+              mode="aspectFill"
+            />
+            <text v-else>{{ avatarLetter }}</text>
+          </view>
+          <text class="community-title">{{ communityName }}</text>
         </view>
-        <view v-if="communityMeta || hasMultipleCommunities" class="sub-row">
-          <text v-if="communityMeta" class="sub">{{ communityMeta }}</text>
-          <text v-if="hasMultipleCommunities" class="sub-switch">
-            <text v-if="communityMeta" class="sub-dot">·</text>切换社区 ›
-          </text>
+        <view
+          v-if="hasMultipleCommunities"
+          class="community-switch"
+          @tap.stop="onMastheadTap"
+        >
+          <text class="switch-icon">↔</text>
+          <text>切换</text>
         </view>
       </view>
-      <view class="avatar">
-        <text>{{ avatarLetter }}</text>
+
+      <view v-if="quoteText" class="home-quote">
+        <text class="home-quote-mark">“</text>
+        <view class="home-quote-main">
+          <text class="home-quote-text">{{ quoteText }}</text>
+          <view v-if="quoteCite" class="home-quote-cite-wrap">
+            <view class="home-quote-line"></view>
+            <text class="home-quote-cite">《{{ quoteCite }}》</text>
+          </view>
+        </view>
       </view>
-    </view>
 
-    <!-- Quote · 群训引文（可选） -->
-    <view v-if="quote" class="s1-quote">
-      <text class="q-text">{{ quote }}</text>
-      <text v-if="quoteCite" class="cite">— {{ quoteCite }}</text>
-    </view>
+      <view class="home-search">
+        <view class="home-search-box">
+          <text class="home-search-icon">⌕</text>
+          <input
+            v-model="homeSearchQuery"
+            class="home-search-input"
+            confirm-type="search"
+            placeholder="搜索帖子、正文、视频"
+            placeholder-class="home-search-placeholder"
+            @confirm="submitHomeSearch"
+          />
+          <view class="home-search-action" @tap="submitHomeSearch">
+            <text>搜索</text>
+          </view>
+        </view>
+      </view>
 
-    <view class="home-search">
-      <view class="home-search-box">
-        <text class="home-search-icon">⌕</text>
-        <input
-          v-model="homeSearchQuery"
-          class="home-search-input"
-          confirm-type="search"
-          placeholder="搜索帖子、正文、视频"
-          placeholder-class="home-search-placeholder"
-          @confirm="submitHomeSearch"
-        />
-        <view class="home-search-action" @tap="submitHomeSearch">
-          <text>搜索</text>
+      <view class="home-banner">
+        <view
+          v-if="homeBannerItems.length > 0"
+          class="home-banner-swiper"
+          @touchstart="onHomeBannerPointerStart"
+          @touchmove="onHomeBannerPointerMove"
+          @touchend="onHomeBannerPointerEnd"
+          @mousedown="onHomeBannerPointerStart"
+          @mousemove="onHomeBannerPointerMove"
+          @mouseup="onHomeBannerPointerEnd"
+        >
+          <view
+            v-for="(banner, i) in homeBannerItems"
+            :key="banner.bannerId"
+            class="home-banner-slide"
+            :class="{ active: i === homeBannerActiveIndex }"
+            @tap="openHomeBanner(banner)"
+          >
+            <image
+              :src="banner.coverImage"
+              class="home-banner-image"
+              mode="aspectFill"
+            />
+            <view class="home-banner-shade"></view>
+            <text class="home-banner-title">{{ banner.title }}</text>
+          </view>
+        </view>
+        <template v-else>
+          <view class="home-banner-art"></view>
+          <view class="home-banner-shade"></view>
+          <text class="home-banner-title">新人必看</text>
+        </template>
+        <view v-if="homeBannerItems.length > 1" class="home-banner-dots">
+          <text
+            v-for="(banner, i) in homeBannerItems"
+            :key="`${banner.bannerId}-dot`"
+            class="home-banner-dot"
+            :class="{ active: i === homeBannerActiveIndex }"
+          ></text>
         </view>
       </view>
     </view>
 
     <!-- Admin notice · 管理员维护的固定公告 -->
-    <view v-if="sectionNotices.length > 0" class="notice-list">
+    <view v-if="noticeRows.length > 0" class="notice-board">
       <view
-        v-for="(notice, i) in sectionNotices"
+        v-for="(notice, i) in noticeRows"
         :key="notice.id"
-        class="notice-card"
+        class="notice-row"
         :class="{ 'is-long': notice.isLong }"
         :style="getNoticeCardStyle(notice, i)"
-        @tap="notice.isLong && openNotice(notice)"
+        @tap="openNotice(notice)"
       >
-        <view class="notice-head">
-          <view class="notice-mark">
-            <text>{{ notice.icon }}</text>
-          </view>
-          <view class="notice-title-wrap">
-            <text class="notice-section">{{ notice.sectionName }}</text>
-            <text class="notice-label">{{ notice.label }}</text>
+        <text class="notice-kind">{{ notice.sectionName || notice.label }}</text>
+        <view class="notice-main">
+          <view class="notice-line">
+            <text class="notice-badge">{{ i === 0 ? '置顶' : '最新' }}</text>
+            <text class="notice-content">{{ notice.preview }}</text>
           </view>
         </view>
-        <text class="notice-content">{{ notice.preview }}</text>
-        <view v-if="notice.isLong" class="notice-foot">
-          <text>查看全文</text>
-          <text class="notice-arrow">›</text>
-        </view>
+        <text v-if="notice.when" class="notice-time">{{ notice.when }}</text>
       </view>
     </view>
 
     <!-- Live strip · 实时脉冲区：有激活的实时协作板块时显示 -->
-    <view v-if="liveItems.length > 0" class="s1-live">
-      <view class="live-h">
-        <view class="live-h-l">
-          <view class="ping"></view>
-          <text>正在进行</text>
-        </view>
-        <text class="live-h-n">{{ liveItems.length }} 件</text>
-      </view>
+    <view v-if="liveItems.length > 0" class="group-section">
+      <text class="group-section-title">我的组局</text>
       <view
         v-for="(item, i) in liveItems"
         :key="i"
-        class="live-row"
+        class="group-card"
         @tap="onLiveTap(item)"
       >
-        <view class="live-ic">
+        <view class="group-icon">
           <text>{{ item.ic }}</text>
         </view>
-        <view class="live-body">
-          <text class="live-t">{{ item.t }}</text>
-          <view v-if="item.isPinned || item.isFeatured" class="post-badges">
-            <text v-if="item.isPinned" class="post-badge pin">置顶</text>
-            <text v-if="item.isFeatured" class="post-badge feature">精华</text>
-          </view>
-          <view class="live-m">
-            <text v-for="(m, j) in item.m" :key="j" class="live-m-item">{{ m }}</text>
+        <view class="group-body">
+          <text class="group-title">{{ item.t }}</text>
+          <view class="group-meta">
+            <text v-for="(m, j) in item.m" :key="j" class="group-meta-item">{{ m }}</text>
           </view>
         </view>
-        <view class="live-cta">
-          <text>{{ item.cta }}</text>
+        <view v-if="item.isPinned || item.isFeatured" class="group-ribbon">
+          <text>推荐</text>
         </view>
       </view>
     </view>
@@ -134,34 +166,47 @@
       </scroll-view>
     </template>
 
-    <!-- Section Head · 沉淀板块标题 -->
-    <view class="sec-head">
-      <text class="sec-head-t"><text class="sec-head-b">时光胶囊</text><text>· 沉淀精华</text></text>
-    </view>
+    <scroll-view
+      v-if="archiveGroups.length"
+      scroll-x
+      class="section-tabs"
+      :show-scrollbar="false"
+    >
+      <view class="section-tabs-inner">
+        <text
+          v-for="(g, index) in archiveGroups"
+          :key="g.id"
+          class="section-tab"
+          :class="{ active: index === activeArchiveIndex }"
+          @tap="selectArchiveGroup(g)"
+        >{{ g.name }}</text>
+      </view>
+    </scroll-view>
 
-    <!-- Archive cards · 沉淀板块分组卡 -->
-    <view class="arc-group">
-      <view
-        v-for="(g, gi) in archiveGroups"
-        :key="g.id"
-        class="arc-card"
-        :data-index="gi"
-        :style="getArchiveCardStyle(g, gi)"
-        @tap="onGroupHeaderTap(g)"
-      >
-        <view class="arc-bh">
-          <view class="arc-bh-l">
-            <text class="arc-nm">{{ g.name }}</text>
-            <text class="arc-cnt">· {{ g.count }} 条</text>
-          </view>
-          <text class="arc-arrow">›</text>
+    <!-- Archive feed · Figma 0626 选中板块内容区 -->
+    <view v-if="activeArchiveGroup" class="active-archive">
+      <view class="active-archive-head" @tap="onGroupHeaderTap(activeArchiveGroup)">
+        <view class="active-archive-title-wrap">
+          <text class="active-archive-title">{{ activeArchiveGroup.name }}</text>
+          <text class="active-archive-count">· {{ activeArchiveGroup.count }} 条</text>
         </view>
-        <template v-if="g.displayTemplate === 'guide_note'">
+        <text class="active-archive-arrow">›</text>
+      </view>
+
+      <view
+        v-if="activeArchiveGroup.displayTemplate === 'guide_note'"
+        class="guide-feed"
+      >
+        <view
+          v-for="(column, columnIndex) in guideColumns"
+          :key="columnIndex"
+          class="guide-feed-column"
+        >
           <view
-            v-for="(item, i) in g.items"
-            :key="i"
+            v-for="(item, i) in column"
+            :key="item.postId || columnIndex + '-' + i"
             class="guide-card"
-            @tap.stop="onPostTap(item)"
+            @tap="onPostTap(item)"
           >
             <image
               v-if="item.coverImage"
@@ -170,50 +215,63 @@
               class="guide-cover"
             />
             <view v-else class="guide-cover guide-cover-empty">
-              <text>{{ g.name.slice(0, 2) }}</text>
+              <text>{{ activeArchiveGroup.name.slice(0, 2) }}</text>
             </view>
             <view class="guide-main">
               <text class="guide-title">{{ item.t }}</text>
               <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
               <view v-if="item.driveDuration" class="guide-stats">
-                <text
-                  class="guide-stat"
-                >{{ item.driveDuration }}</text>
+                <text class="guide-stat">{{ item.driveDuration }}</text>
               </view>
               <view v-if="item.isPinned || item.isFeatured" class="post-badges guide-badges">
                 <text v-if="item.isPinned" class="post-badge pin">置顶</text>
                 <text v-if="item.isFeatured" class="post-badge feature">精华</text>
               </view>
               <view class="guide-meta">
-                <text v-if="item.when">{{ item.when }}</text>
-                <text v-if="item.contentAuthor">{{ item.contentAuthor }}</text>
+                <view v-if="item.contentAuthor" class="guide-author">
+                  <view
+                    class="guide-author-avatar"
+                    :style="getGuideAuthorAvatarStyle(item.contentAuthor)"
+                  >
+                    <text>{{ getAuthorInitial(item.contentAuthor) }}</text>
+                  </view>
+                  <text class="guide-author-name">{{ item.contentAuthor }}</text>
+                </view>
+                <text v-if="item.when" class="guide-when">{{ item.when }}</text>
               </view>
             </view>
           </view>
-        </template>
-        <template v-else>
-          <view
-            v-for="(item, i) in g.items"
-            :key="i"
-            class="arc-item"
-            @tap.stop="onPostTap(item)"
-          >
-            <!-- kicker 小标：当前装饰版固定 01/02/03；未来接真实档案号时仍走 item.k -->
-            <text v-if="item.k" class="arc-k">{{ item.k }}</text>
-            <view class="arc-tl">
-              <text class="arc-title">{{ item.t }}</text>
-              <view v-if="item.isPinned || item.isFeatured" class="post-badges">
-                <text v-if="item.isPinned" class="post-badge pin">置顶</text>
-                <text v-if="item.isFeatured" class="post-badge feature">精华</text>
-              </view>
-              <view class="arc-mm">
-                <text v-if="item.contentAuthor" class="arc-content-author">{{ item.contentAuthor }}</text>
-                <text v-if="item.meta" class="arc-meta" :class="{ hot: item.hot }">{{ item.meta }}</text>
-              </view>
+        </view>
+      </view>
+
+      <view
+        v-else
+        class="arc-card"
+        :data-index="activeArchiveIndex"
+        :style="getArchiveCardStyle(activeArchiveGroup, activeArchiveIndex)"
+        @tap="onGroupHeaderTap(activeArchiveGroup)"
+      >
+        <view
+          v-for="(item, i) in activeArchiveGroup.items"
+          :key="item.postId || i"
+          class="arc-item"
+          @tap.stop="onPostTap(item)"
+        >
+          <!-- kicker 小标：当前装饰版固定 01/02/03；未来接真实档案号时仍走 item.k -->
+          <text v-if="item.k" class="arc-k">{{ item.k }}</text>
+          <view class="arc-tl">
+            <text class="arc-title">{{ item.t }}</text>
+            <view v-if="item.isPinned || item.isFeatured" class="post-badges">
+              <text v-if="item.isPinned" class="post-badge pin">置顶</text>
+              <text v-if="item.isFeatured" class="post-badge feature">精华</text>
             </view>
-            <text class="arc-when">{{ item.when }}</text>
+            <view class="arc-mm">
+              <text v-if="item.contentAuthor" class="arc-content-author">{{ item.contentAuthor }}</text>
+              <text v-if="item.meta" class="arc-meta" :class="{ hot: item.hot }">{{ item.meta }}</text>
+            </view>
           </view>
-        </template>
+          <text class="arc-when">{{ item.when }}</text>
+        </view>
       </view>
     </view>
 
@@ -287,7 +345,7 @@ import { getArchiveHomeMeta, getFamilyLetterListSummary, getGuideNoteCard, getHo
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
-import { resolveCloudFileUrl } from '../../utils/cloud-file-url'
+import { resolveCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import {
   buildCommunityOnboardingPath,
   buildCommunitySharePath,
@@ -298,7 +356,7 @@ import {
   savePendingShareCommunity,
 } from '../../utils/community-share'
 import { markGuestIntroSeen, shouldShowGuestIntro } from '../../utils/guest-intro'
-import type { HomeSnapshot } from '../../../../cloud/shared/types'
+import type { HomeBanner, HomeSnapshot } from '../../../../cloud/shared/types'
 import type { GuestIntroConfig } from '../../../../cloud/shared/guest-intro-config'
 
 const communityStore = useCommunityStore()
@@ -307,17 +365,34 @@ const showSwitcher = ref(false)
 const showGuestIntro = ref(false)
 const guestIntroConfig = ref<GuestIntroConfig | null>(null)
 const postsBySection = ref<Record<string, any[]>>({})
+const resolvedHomeBannerCoverUrls = ref<Record<string, string>>({})
+const resolvedHomeGuideCoverUrls = ref<Record<string, string>>({})
 const incomingShareCommunityId = ref('')
 const shareImageUrl = ref(DEFAULT_COMMUNITY_SHARE_IMAGE)
 const homeSearchQuery = ref('')
+const selectedArchiveId = ref('')
+const homeBannerActiveIndex = ref(0)
 let refreshingHome = false
 let queuedForcedHomeRefresh = false
 let mountedAt = 0
 let unsubscribeBackgroundFetchSnapshot: (() => void) | null = null
+let homeBannerPointerStartX = 0
+let homeBannerPointerMoved = false
+let suppressNextHomeBannerTap = false
+let homeBannerResolveToken = 0
 const reportedMissingHomeTitle = new Set<string>()
 const NOTICE_PREVIEW_LIMIT = 68
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
+const GUIDE_AUTHOR_AVATAR_PALETTE = [
+  ['#CFE8DE', '#7EC6A0'],
+  ['#F6D7C3', '#D28A63'],
+  ['#DCE6F8', '#7C9ED9'],
+  ['#F3D9E5', '#D18AAA'],
+  ['#E8E0C8', '#BBA66D'],
+  ['#D7E8EA', '#72B2B8'],
+]
+const GUIDE_NOTE_NAME_HINTS = ['亲子出游', '周末遛娃', '村游攻略', '路线攻略', '出游攻略']
 
 onLoad((options?: Record<string, any>) => {
   if (!isCommunityShareQuery(options)) return
@@ -329,12 +404,26 @@ onLoad((options?: Record<string, any>) => {
 
 // ── Computed: masthead ──
 const communityName = computed(() => communityStore.currentCommunity?.name ?? '选择社区')
-const communityMeta = computed(() => '')
 const avatarLetter = computed(() => {
   const name = communityStore.currentCommunity?.name ?? ''
   return name.charAt(0) || '?'
 })
 const hasMultipleCommunities = computed(() => (communityStore.myCommunities?.length ?? 0) > 1)
+const homeHeroImage = computed(() =>
+  String(communityStore.currentCommunity?.coverImage || '').trim() ? shareImageUrl.value : ''
+)
+const quoteText = computed(() => String(communityStore.currentCommunity?.motto || '').trim())
+const quoteCite = computed(() => String(communityStore.currentCommunity?.mottoCite || '').trim())
+const activeArchiveIndex = computed(() => {
+  const groups = archiveGroups.value
+  if (!groups.length) return -1
+  const selectedIndex = selectedArchiveId.value
+    ? groups.findIndex((group) => group.id === selectedArchiveId.value)
+    : -1
+  if (selectedIndex >= 0) return selectedIndex
+  const guideIndex = groups.findIndex((group) => group.displayTemplate === 'guide_note')
+  return guideIndex >= 0 ? guideIndex : 0
+})
 
 function onMastheadTap() {
   // 仅当用户有多个社区时才打开切换器；否则 tap 不做任何事（避免空切换器困扰）
@@ -345,12 +434,33 @@ function onMastheadTap() {
 
 // 场景类型（暂时固定为社群，将来由 community.type 决定）
 const kind = computed(() => '社群')
-const kindEn = computed(() => 'Welcome : )')
-
-// ── 群训引文：读 community.motto / mottoCite ──
-const quote = computed(() => communityStore.currentCommunity?.motto || '')
-const quoteCite = computed(() => communityStore.currentCommunity?.mottoCite || '')
 const currentShareCommunityId = computed(() => communityStore.currentCommunityId || communityStore.currentCommunity?._id || '')
+
+interface HomeBannerItem {
+  bannerId: string
+  postId: string
+  title: string
+  coverImage: string
+}
+
+const homeBannerItems = computed<HomeBannerItem[]>(() => {
+  const banners = ((communityStore.currentCommunity as any)?.homeBanners || []) as HomeBanner[]
+  return banners
+    .filter((banner) => banner && banner.enabled !== false)
+    .slice()
+    .sort((a, b) => Number(a?.order || 0) - Number(b?.order || 0))
+    .map((banner, index) => {
+      const rawCover = String(banner.coverImage || '').trim()
+      const coverImage = resolvedHomeBannerCoverUrls.value[rawCover] || rawCover
+      return {
+        bannerId: String(banner.bannerId || `${banner.postId}-${index}`),
+        postId: String(banner.postId || '').trim(),
+        title: String(banner.title || '').trim() || '新人必看',
+        coverImage,
+      }
+    })
+    .filter((banner) => banner.postId && banner.coverImage)
+})
 
 // 辅助：归一化 section 的 type/status（应对老数据）
 function secType(s: any): 'realtime' | 'evergreen' {
@@ -371,6 +481,7 @@ interface SectionNotice {
   isLong: boolean
   icon: string
   accentColor?: string
+  when: string
 }
 
 const sectionNotices = computed<SectionNotice[]>(() => {
@@ -393,11 +504,13 @@ const sectionNotices = computed<SectionNotice[]>(() => {
         isLong: Array.from(content).length > NOTICE_PREVIEW_LIMIT,
         icon: section.icon || '告',
         accentColor: section.accentColor || '',
+        when: formatHomeRelativeTime((section as any).updatedAt || section.createdAt),
       })
     }
   }
   return notices
 })
+const noticeRows = computed(() => sectionNotices.value.slice(0, 2))
 
 // ── 实时协作区：type='realtime' && status='active' 的板块，按帖子逐条展示 ──
 interface LiveItem {
@@ -455,28 +568,35 @@ interface ArchiveItem {
 }
 interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[]; accentColor?: string; displayTemplate: 'default' | 'guide_note' }
 
+function resolveArchiveDisplayTemplate(section: any): ArchiveGroup['displayTemplate'] {
+  if (section?.displayTemplate === 'guide_note') return 'guide_note'
+  const sectionName = String(section?.name || '').trim()
+  return GUIDE_NOTE_NAME_HINTS.some((hint) => sectionName.includes(hint)) ? 'guide_note' : 'default'
+}
+
 const archiveGroups = computed<ArchiveGroup[]>(() => {
   return (communityStore.currentSections ?? [])
     .filter((section) => secType(section) === 'evergreen' && secStatus(section) !== 'archived')
     .map((section) => {
       const posts = postsBySection.value[section._id] ?? []
-      const displayTemplate: ArchiveGroup['displayTemplate'] = section.displayTemplate === 'guide_note' ? 'guide_note' : 'default'
+      const displayTemplate = resolveArchiveDisplayTemplate(section)
       return {
         id: section._id,
         name: section.name,
         count: posts.length,
         accentColor: section.accentColor || '',
         displayTemplate,
-        items: posts.slice(0, 3).map((p, idx) => {
+        items: posts.slice(0, displayTemplate === 'guide_note' ? 6 : 3).map((p, idx) => {
           if (displayTemplate === 'guide_note') {
             const guide = getGuideNoteCard(p, section)
+            const resolvedCover = resolvedHomeGuideCoverUrls.value[guide.coverImage] || guide.coverImage
             return {
               k: '',
               t: guide.title,
               contentAuthor: guide.author,
               meta: '',
               excerpt: guide.excerpt,
-              coverImage: guide.coverImage,
+              coverImage: resolvedCover,
               driveDuration: guide.driveDuration,
               routeStats: guide.routeStats,
               hot: false,
@@ -503,6 +623,80 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
     })
     .filter((g) => g.items.length > 0)
 })
+
+const rawHomeGuideCoverImages = computed(() => {
+  const urls: string[] = []
+  for (const section of communityStore.currentSections ?? []) {
+    if (secType(section) !== 'evergreen' || secStatus(section) === 'archived') continue
+    if (resolveArchiveDisplayTemplate(section) !== 'guide_note') continue
+    const posts = postsBySection.value[section._id] ?? []
+    for (const post of posts.slice(0, 6)) {
+      const coverImage = getGuideNoteCard(post, section).coverImage
+      if (coverImage && !urls.includes(coverImage)) urls.push(coverImage)
+    }
+  }
+  return urls
+})
+
+const rawHomeBannerCoverImages = computed(() => {
+  const banners = ((communityStore.currentCommunity as any)?.homeBanners || []) as HomeBanner[]
+  const urls: string[] = []
+  for (const banner of banners) {
+    const coverImage = String(banner?.coverImage || '').trim()
+    if (coverImage && !urls.includes(coverImage)) urls.push(coverImage)
+  }
+  return urls
+})
+
+const activeArchiveGroup = computed(() => {
+  const index = activeArchiveIndex.value
+  return index >= 0 ? archiveGroups.value[index] ?? null : null
+})
+
+const guideColumns = computed<ArchiveItem[][]>(() => {
+  const group = activeArchiveGroup.value
+  if (!group || group.displayTemplate !== 'guide_note') return [[], []]
+  return group.items.reduce<ArchiveItem[][]>((columns, item, index) => {
+    columns[index % 2].push(item)
+    return columns
+  }, [[], []])
+})
+
+watch(archiveGroups, (groups) => {
+  if (!groups.length) {
+    selectedArchiveId.value = ''
+    return
+  }
+  if (selectedArchiveId.value && groups.some((group) => group.id === selectedArchiveId.value)) return
+  selectedArchiveId.value = groups.find((group) => group.displayTemplate === 'guide_note')?.id || groups[0].id
+}, { immediate: true })
+
+watch(homeBannerItems, (items) => {
+  if (homeBannerActiveIndex.value >= items.length) homeBannerActiveIndex.value = 0
+}, { immediate: true })
+
+watch(
+  rawHomeGuideCoverImages,
+  async (urls) => {
+    if (urls.length === 0) {
+      resolvedHomeGuideCoverUrls.value = {}
+      return
+    }
+    try {
+      resolvedHomeGuideCoverUrls.value = {
+        ...resolvedHomeGuideCoverUrls.value,
+        ...(await resolveCloudFileUrls(urls)),
+      }
+    } catch (error) {
+      clientLog('warn', 'home.guideCover.resolve.fail', {
+        communityId: communityStore.currentCommunityId || '',
+        count: urls.length,
+        error,
+      })
+    }
+  },
+  { immediate: true },
+)
 
 // ── 休眠板块：type='realtime' && status='dormant' 的板块名字 ──
 const dormantNames = computed(() => {
@@ -571,7 +765,91 @@ function makeNoticePreview(content: string) {
   return `${chars.slice(0, NOTICE_PREVIEW_LIMIT).join('').trimEnd()}…`
 }
 
+function formatHomeRelativeTime(value: unknown): string {
+  if (!value) return ''
+  const date = new Date(String(value))
+  if (Number.isNaN(date.getTime())) return ''
+  const diffMinutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000))
+  if (diffMinutes < 1) return '刚刚'
+  if (diffMinutes < 60) return `${diffMinutes}分钟前`
+  const diffHours = Math.floor(diffMinutes / 60)
+  if (diffHours < 24) return `${diffHours}小时前`
+  const sameYear = date.getFullYear() === new Date().getFullYear()
+  return sameYear ? `${date.getMonth() + 1}/${date.getDate()}` : `${date.getFullYear()}/${date.getMonth() + 1}`
+}
+
+function getAuthorInitial(author?: string): string {
+  const chars = Array.from(String(author || '').trim())
+  return chars[0] || '邻'
+}
+
+function getGuideAuthorAvatarStyle(author?: string) {
+  const text = String(author || '邻里居民')
+  const hash = Array.from(text).reduce((sum, char) => sum + char.charCodeAt(0), 0)
+  const palette = GUIDE_AUTHOR_AVATAR_PALETTE[hash % GUIDE_AUTHOR_AVATAR_PALETTE.length]
+  return {
+    '--guide-avatar-start': palette[0],
+    '--guide-avatar-end': palette[1],
+  }
+}
+
 // ── Actions ──
+function getHomeBannerPointerX(event: any): number {
+  const touch = event?.touches?.[0] || event?.changedTouches?.[0]
+  const clientX = Number(touch?.clientX ?? event?.clientX ?? 0)
+  return Number.isFinite(clientX) ? clientX : 0
+}
+
+function onHomeBannerPointerStart(event: any) {
+  homeBannerPointerStartX = getHomeBannerPointerX(event)
+  homeBannerPointerMoved = false
+}
+
+function onHomeBannerPointerMove(event: any) {
+  const currentX = getHomeBannerPointerX(event)
+  if (Math.abs(currentX - homeBannerPointerStartX) > 16) {
+    homeBannerPointerMoved = true
+  }
+}
+
+function onHomeBannerPointerEnd(event: any) {
+  const currentX = getHomeBannerPointerX(event)
+  const deltaX = currentX - homeBannerPointerStartX
+  if (Math.abs(deltaX) > 16 || homeBannerPointerMoved) {
+    if (Math.abs(deltaX) > 32 && homeBannerItems.value.length > 1) {
+      const step = deltaX < 0 ? 1 : -1
+      const length = homeBannerItems.value.length
+      homeBannerActiveIndex.value = (homeBannerActiveIndex.value + step + length) % length
+    }
+    suppressNextHomeBannerTap = true
+    setTimeout(() => {
+      suppressNextHomeBannerTap = false
+      homeBannerPointerMoved = false
+    }, 350)
+  }
+}
+
+function openHomeBanner(item: HomeBannerItem) {
+  if (suppressNextHomeBannerTap || homeBannerPointerMoved) {
+    suppressNextHomeBannerTap = false
+    homeBannerPointerMoved = false
+    return
+  }
+  if (!item.postId) return
+  const url = `/pages/detail/index?postId=${encodeURIComponent(item.postId)}`
+  clientLog('info', 'home.banner.tap', {
+    bannerId: item.bannerId,
+    postId: item.postId,
+    title: item.title,
+    url,
+  })
+  uni.navigateTo({
+    url,
+    success: () => clientLog('info', 'home.banner.navigate.success', { postId: item.postId, url }),
+    fail: (error) => clientLog('error', 'home.banner.navigate.fail', { postId: item.postId, url, error }),
+  })
+}
+
 function onLiveTap(item: LiveItem) {
   if (item.postId) {
     const url = `/pages/detail/index?postId=${item.postId}`
@@ -586,6 +864,17 @@ function onLiveTap(item: LiveItem) {
       fail: (error) => clientLog('error', 'home.live.navigate.fail', { postId: item.postId, url, error }),
     })
   }
+}
+
+function selectArchiveGroup(g: ArchiveGroup) {
+  if (!g.id) return
+  selectedArchiveId.value = g.id
+  clientLog('info', 'home.archive.group.select', {
+    sectionId: g.id,
+    name: g.name,
+    count: g.count,
+    displayTemplate: g.displayTemplate,
+  })
 }
 
 function onGroupHeaderTap(g: ArchiveGroup) {
@@ -935,6 +1224,33 @@ onPullDownRefresh(async () => {
 })
 
 watch(
+  rawHomeBannerCoverImages,
+  async (images) => {
+    const token = ++homeBannerResolveToken
+    if (!images.length) {
+      resolvedHomeBannerCoverUrls.value = {}
+      homeBannerActiveIndex.value = 0
+      return
+    }
+    const next: Record<string, string> = {}
+    await Promise.all(images.map(async (image) => {
+      try {
+        next[image] = await resolveCloudFileUrl(image)
+      } catch (error) {
+        next[image] = image
+        clientLog('warn', 'home.bannerCover.resolve.fail', { image, error })
+      }
+    }))
+    if (token !== homeBannerResolveToken) return
+    resolvedHomeBannerCoverUrls.value = next
+    if (homeBannerActiveIndex.value >= homeBannerItems.value.length) {
+      homeBannerActiveIndex.value = 0
+    }
+  },
+  { immediate: true },
+)
+
+watch(
   () => communityStore.currentCommunity?.coverImage,
   () => {
     void prepareCommunityShareImage()
@@ -1079,6 +1395,71 @@ onShareAppMessage(() => {
   color: $hh-ink-3;
   text-align: right;
   text-transform: uppercase;
+}
+
+/* ═══ Home Banner ═══ */
+.home-banner {
+  position: relative;
+  margin: 0 32rpx 28rpx;
+  height: 260rpx;
+  border-radius: 24rpx;
+  overflow: hidden;
+  background: $hh-surface-2;
+  box-shadow: $hh-shadow-card;
+}
+.home-banner-swiper,
+.home-banner-slide,
+.home-banner-image {
+  width: 100%;
+  height: 100%;
+}
+.home-banner-image {
+  display: block;
+}
+.home-banner-shade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 58%;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.56));
+  pointer-events: none;
+}
+.home-banner-title {
+  position: absolute;
+  left: 28rpx;
+  right: 28rpx;
+  bottom: 34rpx;
+  font-size: 31rpx;
+  font-weight: $hh-font-weight-bold;
+  line-height: 1.28;
+  color: #fff;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  text-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.24);
+}
+.home-banner-dots {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 14rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  pointer-events: none;
+}
+.home-banner-dot {
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 999rpx;
+  background: rgba(255, 255, 255, 0.55);
+}
+.home-banner-dot.active {
+  width: 24rpx;
+  background: #e84f5f;
 }
 
 /* ═══ Search ═══ */
@@ -1336,6 +1717,181 @@ onShareAppMessage(() => {
   background: $hh-ink-1;
 }
 .live-cta text { color: $hh-surface-1; }
+
+/* ═══ Figma home notice + group cards ═══ */
+.notice-board {
+  margin: 24rpx 32rpx 30rpx;
+  padding: 16rpx 20rpx;
+  border: 1rpx solid $hh-ink-line;
+  border-radius: 16rpx;
+  background: $hh-surface-1;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  box-shadow: $hh-shadow-card;
+}
+
+.notice-row {
+  min-height: 44rpx;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.notice-row.is-long:active {
+  opacity: 0.9;
+}
+
+.notice-kind {
+  width: 76rpx;
+  flex-shrink: 0;
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-body-lg-size);
+  line-height: var(--hh-text-body-lg-line);
+  font-weight: $hh-font-weight-bold;
+}
+
+.notice-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.notice-line {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.notice-badge {
+  flex: 0 0 auto;
+  padding: 1rpx 8rpx;
+  border-radius: 6rpx;
+  border: 1rpx solid rgba(61, 173, 125, 0.42);
+  color: var(--hh-color-brand-primary);
+  background: rgba(61, 173, 125, 0.08);
+  font-size: var(--hh-text-caption-base-size);
+  line-height: 30rpx;
+  font-weight: $hh-font-weight-bold;
+}
+
+.notice-row:nth-child(2) .notice-badge {
+  color: #f0942b;
+  border-color: rgba(240, 148, 43, 0.36);
+  background: rgba(240, 148, 43, 0.08);
+}
+
+.notice-board .notice-content {
+  min-width: 0;
+  display: block;
+  color: var(--hh-color-text-secondary);
+  font-size: var(--hh-text-body-base-size);
+  line-height: var(--hh-text-body-base-line);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.notice-time {
+  flex: 0 0 auto;
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-caption-lg-size);
+  line-height: var(--hh-text-caption-lg-line);
+}
+
+.group-section {
+  margin: 0 32rpx 34rpx;
+}
+
+.group-section-title {
+  display: block;
+  margin-bottom: 16rpx;
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-heading-sm-size);
+  line-height: var(--hh-text-heading-sm-line);
+  font-weight: $hh-font-weight-bold;
+}
+
+.group-card {
+  position: relative;
+  min-height: 104rpx;
+  padding: 18rpx 26rpx 18rpx 18rpx;
+  border: 1rpx solid $hh-ink-line;
+  border-radius: 16rpx;
+  background: $hh-surface-1;
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  overflow: hidden;
+  box-shadow: $hh-shadow-card;
+}
+
+.group-card + .group-card {
+  margin-top: 14rpx;
+}
+
+.group-icon {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 16rpx;
+  background: var(--hh-color-brand-soft);
+  color: var(--hh-color-brand-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.group-icon text {
+  font-size: 34rpx;
+  line-height: 1;
+}
+
+.group-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.group-title {
+  display: block;
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-body-lg-size);
+  line-height: var(--hh-text-body-lg-line);
+  font-weight: $hh-font-weight-bold;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.group-meta {
+  margin-top: 4rpx;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8rpx 16rpx;
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-caption-lg-size);
+  line-height: var(--hh-text-caption-lg-line);
+}
+
+.group-ribbon {
+  position: absolute;
+  right: -42rpx;
+  top: 8rpx;
+  width: 118rpx;
+  height: 34rpx;
+  transform: rotate(45deg);
+  background: #ffd66e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.group-ribbon text {
+  color: #a96a00;
+  font-size: 20rpx;
+  line-height: 1;
+  font-weight: $hh-font-weight-bold;
+}
 
 /* ═══ Schedule strip ═══ */
 .sch-head {
@@ -1702,6 +2258,611 @@ onShareAppMessage(() => {
   padding: 4rpx 0 8rpx;
   text-align: center;
 }
+
+/* ═══ Figma 0626 visual pass ═══ */
+.phone-inner {
+  background: var(--hh-color-page);
+}
+
+.home-shell {
+  padding: 42rpx var(--hh-page-x) 24rpx;
+  background:
+    radial-gradient(circle at 84% 0%, rgba(61, 173, 125, 0.18), transparent 34%),
+    linear-gradient(170deg, #cff5f2 0%, #f2f3f7 46%, var(--hh-color-page) 100%);
+}
+
+.home-topbar {
+  min-height: 64rpx;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.community-identity {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.community-avatar {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: $hh-radius-full;
+  overflow: hidden;
+  background: var(--hh-color-brand-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.community-avatar-image {
+  width: 100%;
+  height: 100%;
+}
+
+.community-avatar text {
+  color: var(--hh-color-brand-strong);
+  font-size: var(--hh-text-body-base-size);
+  font-weight: $hh-font-weight-bold;
+}
+
+.community-title {
+  min-width: 0;
+  color: #111;
+  font-size: var(--hh-text-heading-md-size);
+  line-height: var(--hh-text-heading-md-line);
+  font-weight: $hh-font-weight-bold;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.community-switch {
+  min-height: 48rpx;
+  padding: 0 18rpx;
+  border-radius: $hh-radius-full;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--hh-color-brand-primary);
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  flex: 0 0 auto;
+}
+
+.community-switch text {
+  font-size: var(--hh-text-body-base-size);
+  line-height: var(--hh-text-body-base-line);
+  font-weight: $hh-font-weight-bold;
+}
+
+.switch-icon {
+  font-size: 24rpx;
+  line-height: 1;
+}
+
+.home-quote {
+  margin: 24rpx 0 28rpx;
+  display: flex;
+  align-items: flex-start;
+  gap: 12rpx;
+}
+
+.home-quote-mark {
+  width: 30rpx;
+  color: rgba(61, 173, 125, 0.32);
+  font-size: 54rpx;
+  line-height: 0.9;
+  font-weight: $hh-font-weight-bold;
+}
+
+.home-quote-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.home-quote-text {
+  display: block;
+  color: #3f8f75;
+  font-size: var(--hh-text-body-lg-size);
+  line-height: var(--hh-text-body-lg-line);
+  font-weight: $hh-font-weight-regular;
+}
+
+.home-quote-cite-wrap {
+  margin-top: 12rpx;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14rpx;
+}
+
+.home-quote-line {
+  width: 96rpx;
+  height: 2rpx;
+  background: rgba(61, 173, 125, 0.22);
+}
+
+.home-quote-cite {
+  color: #5c907e;
+  font-size: var(--hh-text-caption-base-size);
+  line-height: var(--hh-text-caption-base-line);
+}
+
+.home-shell .home-search {
+  margin: 28rpx 0 24rpx;
+}
+
+.home-shell .home-search-box {
+  min-height: 96rpx;
+  border: 0;
+  border-radius: $hh-radius-full;
+  box-shadow: none;
+}
+
+.home-shell .home-search-input {
+  height: 96rpx;
+  font-size: var(--hh-text-body-lg-size);
+}
+
+.home-shell .home-search-action {
+  min-width: 112rpx;
+  height: 80rpx;
+  background: var(--hh-color-brand-primary);
+}
+
+.home-shell .home-search-action text {
+  font-size: var(--hh-text-body-lg-size);
+  line-height: var(--hh-text-body-lg-line);
+}
+
+.home-banner {
+  position: relative;
+  height: 310rpx;
+  overflow: hidden;
+  border-radius: var(--hh-radius-card);
+  background: #cecece;
+}
+
+.home-banner-swiper,
+.home-banner-slide {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.home-banner-slide {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.home-banner-slide.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.home-banner-image,
+.home-banner-art,
+.home-banner-shade {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.home-banner-art {
+  background:
+    linear-gradient(130deg, rgba(36, 77, 54, 0.2), rgba(61, 173, 125, 0.06)),
+    radial-gradient(circle at 24% 24%, #eaf6de 0, #b9ddc8 28%, transparent 29%),
+    linear-gradient(155deg, #385b44 0%, #7ea67f 48%, #d0b78a 100%);
+}
+
+.home-banner-shade {
+  background: linear-gradient(180deg, transparent 45%, rgba(0, 0, 0, 0.56) 100%);
+}
+
+.home-banner-title {
+  position: absolute;
+  left: 30rpx;
+  bottom: 44rpx;
+  color: #fff;
+  font-size: var(--hh-text-heading-sm-size);
+  line-height: var(--hh-text-heading-sm-line);
+  font-weight: $hh-font-weight-bold;
+}
+
+.home-banner-dots {
+  position: absolute;
+  left: 30rpx;
+  right: 30rpx;
+  bottom: 16rpx;
+  display: flex;
+  gap: 10rpx;
+  z-index: 3;
+}
+
+.home-banner-dot {
+  width: 18rpx;
+  height: 6rpx;
+  border-radius: 999rpx;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.home-banner-dot.active {
+  width: 42rpx;
+  background: #ef4444;
+}
+
+.section-tabs {
+  margin: 34rpx 0 20rpx;
+  white-space: nowrap;
+}
+
+.section-tabs-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 32rpx;
+  padding: 0 var(--hh-page-x);
+}
+
+.section-tab {
+  position: relative;
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-heading-sm-size);
+  line-height: var(--hh-text-heading-sm-line);
+  font-weight: $hh-font-weight-regular;
+  white-space: nowrap;
+}
+
+.section-tab.active {
+  font-weight: $hh-font-weight-bold;
+}
+
+.section-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 18rpx;
+  right: -8rpx;
+  bottom: 8rpx;
+  height: 18rpx;
+  border-radius: $hh-radius-full;
+  background: linear-gradient(90deg, rgba(61, 173, 125, 0.34), rgba(61, 173, 125, 0));
+  z-index: -1;
+}
+
+.active-archive {
+  margin: 0 var(--hh-page-x) 28rpx;
+}
+
+.active-archive-head {
+  min-height: 52rpx;
+  margin-bottom: 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.active-archive-title-wrap {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10rpx;
+}
+
+.active-archive-title {
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-heading-sm-size);
+  line-height: var(--hh-text-heading-sm-line);
+  font-weight: $hh-font-weight-bold;
+}
+
+.active-archive-count,
+.active-archive-arrow {
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-caption-lg-size);
+  line-height: var(--hh-text-caption-lg-line);
+}
+
+.active-archive-arrow {
+  flex: 0 0 auto;
+  font-size: 34rpx;
+  line-height: 1;
+}
+
+.guide-feed {
+  display: flex;
+  align-items: flex-start;
+  gap: 16rpx;
+}
+
+.guide-feed-column {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.guide-feed .guide-card {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+  border: 1rpx solid var(--hh-color-line);
+  border-radius: var(--hh-radius-card);
+  background: var(--hh-color-card);
+  box-shadow: var(--hh-shadow-soft);
+}
+
+.guide-feed .guide-card:active {
+  transform: scale(0.992);
+}
+
+.guide-feed .guide-cover {
+  width: 100%;
+  height: 286rpx;
+  border: 0;
+  border-radius: 0;
+}
+
+.guide-feed-column:first-child .guide-card:nth-child(2n) .guide-cover {
+  height: 238rpx;
+}
+
+.guide-feed-column:nth-child(2) .guide-card:nth-child(2n + 1) .guide-cover {
+  height: 248rpx;
+}
+
+.guide-feed-column:nth-child(2) .guide-card:nth-child(2n) .guide-cover {
+  height: 306rpx;
+}
+
+.guide-feed .guide-cover-empty {
+  min-height: 248rpx;
+}
+
+.guide-feed .guide-main {
+  padding: 16rpx 16rpx 18rpx;
+  gap: 8rpx;
+}
+
+.guide-feed .guide-title {
+  font-family: $hh-font-sans;
+  font-size: var(--hh-text-body-lg-size);
+  line-height: var(--hh-text-body-lg-line);
+  font-weight: $hh-font-weight-bold;
+  color: var(--hh-color-text-primary);
+  -webkit-line-clamp: 2;
+}
+
+.guide-feed .guide-excerpt {
+  margin-top: 0;
+  font-size: var(--hh-text-caption-lg-size);
+  line-height: var(--hh-text-caption-lg-line);
+  color: var(--hh-color-text-secondary);
+  -webkit-line-clamp: 2;
+}
+
+.guide-feed .guide-stats {
+  margin-top: 2rpx;
+}
+
+.guide-feed .guide-stat {
+  padding: 4rpx 10rpx;
+  font-size: var(--hh-text-caption-base-size);
+  line-height: var(--hh-text-caption-base-line);
+}
+
+.guide-feed .guide-meta {
+  margin-top: 2rpx;
+  padding-top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10rpx;
+  font-family: $hh-font-sans;
+  font-size: var(--hh-text-caption-base-size);
+  line-height: var(--hh-text-caption-base-line);
+}
+
+.guide-author {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.guide-author-avatar {
+  width: 32rpx;
+  height: 32rpx;
+  border-radius: $hh-radius-full;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: linear-gradient(135deg, var(--guide-avatar-start), var(--guide-avatar-end));
+}
+
+.guide-author-avatar text {
+  color: #fff;
+  font-size: 18rpx;
+  line-height: 1;
+  font-weight: $hh-font-weight-bold;
+}
+
+.guide-author-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-when {
+  flex: 0 0 auto;
+}
+
+.s1-top {
+  margin: 0 var(--hh-page-x) 18rpx;
+  padding: 24rpx;
+  border: 1rpx solid var(--hh-color-line);
+  border-radius: var(--hh-radius-panel);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(232, 248, 240, 0.76));
+  box-shadow: var(--hh-shadow-soft);
+}
+
+.s1-top.is-tappable:active {
+  background: var(--hh-color-card);
+}
+
+.eyebrow,
+.sec-head-t,
+.sch-head-t {
+  color: var(--hh-color-text-tertiary);
+}
+
+.title {
+  font-size: 48rpx;
+  color: var(--hh-color-text-primary);
+  line-height: 1.14;
+}
+
+.sub,
+.title-chev,
+.sub-dot,
+.arc-cnt,
+.arc-arrow,
+.arc-k,
+.arc-mm,
+.arc-when,
+.guide-meta {
+  color: var(--hh-color-text-tertiary);
+}
+
+.sub-switch,
+.arc-meta.hot,
+.switcher-item.active {
+  color: var(--hh-color-brand-primary);
+}
+
+.avatar {
+  background: var(--hh-color-brand-soft);
+}
+
+.avatar text {
+  color: var(--hh-color-brand-strong);
+}
+
+.s1-quote {
+  margin: 8rpx var(--hh-page-x) 28rpx;
+  border-color: var(--hh-color-line-soft);
+}
+
+.home-search,
+.notice-list,
+.s1-live,
+.arc-group,
+.dormant {
+  margin-left: var(--hh-page-x);
+  margin-right: var(--hh-page-x);
+}
+
+.home-search-box {
+  border-color: var(--hh-color-line);
+  border-radius: var(--hh-radius-card);
+  background: var(--hh-color-card);
+  box-shadow: var(--hh-shadow-soft);
+}
+
+.home-search-action,
+.live-cta {
+  background: var(--hh-color-brand-primary);
+}
+
+.home-search-input {
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-body-base-size);
+}
+
+.home-search-icon,
+.home-search-placeholder {
+  color: var(--hh-color-text-tertiary);
+}
+
+.notice-board,
+.group-card,
+.sch-card,
+.arc-card,
+.dormant {
+  border-color: var(--hh-color-line);
+  border-radius: var(--hh-radius-card);
+  background: var(--hh-color-card);
+  box-shadow: var(--hh-shadow-soft);
+}
+
+.arc-card::before {
+  background: var(--arc-accent, var(--hh-color-brand-primary));
+  opacity: 0.82;
+}
+
+.arc-bh,
+.live-h,
+.arc-item,
+.guide-card {
+  border-color: var(--hh-color-line-soft);
+}
+
+.arc-nm,
+.arc-title,
+.guide-title,
+.notice-section,
+.live-t,
+.sch-head-b,
+.sec-head-b {
+  color: var(--hh-color-text-primary);
+}
+
+.arc-nm,
+.guide-title {
+  font-family: $hh-font-sans;
+}
+
+.arc-group {
+  margin-top: 0;
+}
+
+.guide-cover,
+.guide-cover-empty {
+  border-color: var(--hh-color-line-soft);
+  border-radius: var(--hh-radius-card);
+}
+
+.guide-title {
+  font-size: var(--hh-text-heading-sm-size);
+}
+
+.guide-excerpt,
+.notice-content,
+.q-text {
+  color: var(--hh-color-text-secondary);
+}
+
+.guide-stat {
+  background: var(--hh-color-brand-soft);
+  color: var(--hh-color-brand-strong);
+}
+
+.switcher-panel,
+.guest-intro-panel {
+  background: var(--hh-color-card);
+  border-color: var(--hh-color-line);
+}
+
 /* ═══ Switcher ═══ */
 .switcher-mask {
   position: fixed;

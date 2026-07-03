@@ -90,6 +90,16 @@ export const communityApi = {
   hardDelete: (communityId: string) => callAdmin('community.hardDelete', { communityId }),
   updateMeta: (params: { communityId: string; name?: string; description?: string; motto?: string; mottoCite?: string; joinType?: 'open' | 'approval' }) =>
     callAdmin('community.updateMeta', params),
+  updateHomeBanners: (params: {
+    communityId: string
+    banners: Array<{
+      bannerId?: string
+      postId: string
+      title?: string
+      coverImage: string
+      enabled?: boolean
+    }>
+  }) => callAdmin('community.updateHomeBanners', params),
   createAdmin: (params: {
     name: string
     description: string

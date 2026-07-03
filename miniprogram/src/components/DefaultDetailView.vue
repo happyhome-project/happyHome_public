@@ -234,16 +234,17 @@ const bodyBlocks = computed<BodyBlock[]>(() => {
   sortedWidgets.value.forEach((widget) => {
     if ([titleWidget.value?.widgetId, leadWidget.value?.widgetId].includes(widget.widgetId)) return
     const label = resolveWidgetLabel(widget)
+    const title = bodyBlockTitle(label)
     const value = props.post?.content?.[widget.widgetId]
     if (widget.type === 'rich_text') {
-      blocks.push({ key: widget.widgetId, title: label, type: 'rich_text', value: String(value || '') })
+      blocks.push({ key: widget.widgetId, title, type: 'rich_text', value: String(value || '') })
     } else if (widget.type === 'rich_note' && !isRichNoteEmpty(value)) {
-      blocks.push({ key: widget.widgetId, title: label, type: 'rich_note', value })
+      blocks.push({ key: widget.widgetId, title, type: 'rich_note', value })
     } else if (widget.type === 'note_blocks' && Array.isArray(value) && value.length) {
-      blocks.push({ key: widget.widgetId, title: label, type: 'note_blocks', value })
+      blocks.push({ key: widget.widgetId, title, type: 'note_blocks', value })
     } else if (widget.type === 'summary') {
       const text = textValue(widget)
-      if (text) blocks.push({ key: widget.widgetId, title: label, type: 'plain', value: text })
+      if (text) blocks.push({ key: widget.widgetId, title, type: 'plain', value: text })
     }
   })
   return blocks
@@ -359,6 +360,12 @@ function isPriceWidget(widget: any) {
   return fieldKey.includes('price') || labelLooksLike(label, ['价格', '费用', '预算'])
 }
 
+function bodyBlockTitle(label: string) {
+  const normalized = String(label || '').replace(/\s/g, '')
+  if (['正文', '内容', '正文内容', '详情内容'].includes(normalized)) return ''
+  return String(label || '').trim()
+}
+
 function parseLocation(value: any): { name: string; address: string; lat: number; lng: number } | null {
   if (!value || typeof value !== 'object') return null
   const lat = Number(value.lat)
@@ -452,11 +459,11 @@ function formatAudioDuration(value: unknown): string {
   gap: 8rpx;
   min-height: 44rpx;
   padding: 0 18rpx;
-  border: 1rpx solid $hh-ink-line;
+  border: 1rpx solid var(--hh-color-line);
   border-radius: $hh-radius-full;
-  background: $hh-surface-1;
-  color: $hh-ink-2;
-  font-size: 24rpx;
+  background: var(--hh-color-card);
+  color: var(--hh-color-text-secondary);
+  font-size: var(--hh-text-caption-lg-size);
   font-weight: $hh-font-weight-medium;
 }
 
@@ -464,26 +471,26 @@ function formatAudioDuration(value: unknown): string {
   width: 10rpx;
   height: 10rpx;
   border-radius: 999rpx;
-  background: $hh-accent;
+  background: var(--hh-color-brand-primary);
 }
 
 .detail-title {
   display: block;
   margin-top: 28rpx;
   font-family: $hh-font-serif;
-  font-size: 44rpx;
-  line-height: 1.24;
+  font-size: var(--hh-text-heading-lg-size);
+  line-height: var(--hh-text-heading-lg-line);
   font-weight: $hh-font-weight-bold;
-  color: $hh-ink-1;
+  color: var(--hh-color-text-primary);
   letter-spacing: $hh-tracking-serif-sm;
 }
 
 .lead-card {
   margin-top: 22rpx;
   padding: 20rpx 24rpx;
-  border: 1rpx solid $hh-ink-line;
-  border-radius: $hh-radius-md;
-  background: $hh-surface-1;
+  border: 1rpx solid var(--hh-color-brand-line);
+  border-radius: var(--hh-radius-card);
+  background: var(--hh-color-card-soft);
   display: flex;
   align-items: flex-start;
   gap: 16rpx;
@@ -491,16 +498,16 @@ function formatAudioDuration(value: unknown): string {
 
 .lead-label {
   flex: 0 0 auto;
-  color: $hh-ink-3;
-  font-size: 24rpx;
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-caption-lg-size);
   line-height: 1.55;
 }
 
 .lead-value {
   min-width: 0;
   flex: 1;
-  color: $hh-ink-2;
-  font-size: 27rpx;
+  color: var(--hh-color-text-secondary);
+  font-size: var(--hh-text-body-base-size);
   line-height: 1.55;
   font-weight: $hh-font-weight-medium;
   white-space: pre-wrap;
@@ -517,29 +524,29 @@ function formatAudioDuration(value: unknown): string {
 .detail-image {
   width: 100%;
   height: 210rpx;
-  border-radius: $hh-radius-sm;
+  border-radius: var(--hh-radius-card);
   background: $hh-surface-2;
 }
 
 .detail-image.primary {
   grid-column: 1 / -1;
   height: 420rpx;
-  border-radius: $hh-radius-md;
+  border-radius: var(--hh-radius-card);
 }
 
 .fact-strip {
   margin-top: $hh-space-lg;
-  border: 1rpx solid $hh-ink-line;
-  border-radius: $hh-radius-lg;
+  border: 1rpx solid var(--hh-color-line);
+  border-radius: var(--hh-radius-card);
   overflow: hidden;
-  background: $hh-surface-1;
+  background: var(--hh-color-card);
 }
 
 .fact-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rpx;
-  background: $hh-ink-line-2;
+  background: var(--hh-color-line-soft);
 }
 
 .fact-grid.count-1 {
@@ -553,7 +560,7 @@ function formatAudioDuration(value: unknown): string {
 .fact {
   min-height: 126rpx;
   padding: 24rpx;
-  background: $hh-surface-1;
+  background: var(--hh-color-card);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -577,7 +584,7 @@ function formatAudioDuration(value: unknown): string {
   font-size: 34rpx;
   line-height: 1.22;
   font-weight: $hh-font-weight-bold;
-  color: $hh-ink-1;
+  color: var(--hh-color-text-primary);
   word-break: break-all;
 }
 
@@ -600,12 +607,12 @@ function formatAudioDuration(value: unknown): string {
 
 .fact-label {
   font-size: 23rpx;
-  color: $hh-ink-3;
+  color: var(--hh-color-text-tertiary);
 }
 
 .fact-list {
-  border-top: 1rpx solid $hh-ink-line-2;
-  background: $hh-surface-1;
+  border-top: 1rpx solid var(--hh-color-line-soft);
+  background: var(--hh-color-card);
 }
 
 .fact-list:first-child {
@@ -617,7 +624,7 @@ function formatAudioDuration(value: unknown): string {
   align-items: flex-start;
   gap: 18rpx;
   padding: 22rpx 24rpx;
-  border-top: 1rpx solid $hh-ink-line-2;
+  border-top: 1rpx solid var(--hh-color-line-soft);
 }
 
 .fact-row:first-child {
@@ -626,16 +633,16 @@ function formatAudioDuration(value: unknown): string {
 
 .fact-row-label {
   flex: 0 0 140rpx;
-  color: $hh-ink-3;
-  font-size: 24rpx;
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-caption-lg-size);
   line-height: 1.5;
 }
 
 .fact-row-value {
   min-width: 0;
   flex: 1;
-  color: $hh-ink-2;
-  font-size: 27rpx;
+  color: var(--hh-color-text-secondary);
+  font-size: var(--hh-text-body-base-size);
   line-height: 1.5;
   font-weight: $hh-font-weight-medium;
   word-break: break-word;
@@ -644,7 +651,7 @@ function formatAudioDuration(value: unknown): string {
 .content-block {
   margin-top: $hh-space-xl;
   padding-top: $hh-space-lg;
-  border-top: 1rpx solid $hh-ink-line-2;
+  border-top: 1rpx solid var(--hh-color-line-soft);
 }
 
 .block-title {
@@ -652,8 +659,8 @@ function formatAudioDuration(value: unknown): string {
   align-items: center;
   gap: 12rpx;
   margin-bottom: $hh-space-md;
-  color: $hh-ink-1;
-  font-size: 30rpx;
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-heading-sm-size);
   font-weight: $hh-font-weight-bold;
 }
 
@@ -662,14 +669,14 @@ function formatAudioDuration(value: unknown): string {
   width: 7rpx;
   height: 34rpx;
   border-radius: 999rpx;
-  background: $hh-accent;
+  background: var(--hh-color-brand-primary);
   flex: 0 0 auto;
 }
 
 .prose,
 .prose-text {
-  color: $hh-ink-1;
-  font-size: 29rpx;
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-body-lg-size);
   line-height: 1.82;
   white-space: pre-wrap;
   word-break: break-word;
@@ -685,21 +692,21 @@ function formatAudioDuration(value: unknown): string {
   align-items: center;
   gap: $hh-space-md;
   padding: $hh-space-md;
-  background: $hh-surface-1;
-  border: 1rpx solid $hh-ink-line-2;
-  border-radius: $hh-radius-md;
+  background: var(--hh-color-card);
+  border: 1rpx solid var(--hh-color-line);
+  border-radius: var(--hh-radius-card);
 }
 
 .audio-card.active {
-  border-color: $hh-accent-line;
-  background: $hh-accent-wash;
+  border-color: var(--hh-color-brand-line);
+  background: var(--hh-color-brand-soft);
 }
 
 .audio-play {
   width: 60rpx;
   height: 60rpx;
   border-radius: 999rpx;
-  background: $hh-accent;
+  background: var(--hh-color-brand-primary);
   color: $hh-surface-1;
   display: flex;
   align-items: center;
@@ -718,7 +725,7 @@ function formatAudioDuration(value: unknown): string {
 
 .audio-title {
   font-size: 28rpx;
-  color: $hh-ink-1;
+  color: var(--hh-color-text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -726,14 +733,14 @@ function formatAudioDuration(value: unknown): string {
 
 .audio-meta {
   font-size: 23rpx;
-  color: $hh-ink-3;
+  color: var(--hh-color-text-tertiary);
 }
 
 .location-card {
   overflow: hidden;
-  border: 1rpx solid $hh-ink-line;
-  border-radius: $hh-radius-lg;
-  background: $hh-surface-1;
+  border: 1rpx solid var(--hh-color-line);
+  border-radius: var(--hh-radius-card);
+  background: var(--hh-color-card);
 }
 
 .location-map {
@@ -753,18 +760,18 @@ function formatAudioDuration(value: unknown): string {
 .location-name {
   font-size: 29rpx;
   font-weight: $hh-font-weight-bold;
-  color: $hh-ink-1;
+  color: var(--hh-color-text-primary);
 }
 
 .location-address {
   font-size: 25rpx;
   line-height: 1.55;
-  color: $hh-ink-3;
+  color: var(--hh-color-text-tertiary);
 }
 
 .location-action {
   margin-top: 4rpx;
-  color: $hh-accent-ink;
+  color: var(--hh-color-brand-strong);
   font-size: 25rpx;
   font-weight: $hh-font-weight-medium;
 }

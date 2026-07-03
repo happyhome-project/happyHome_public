@@ -3,17 +3,26 @@
     <view v-if="profileError" class="profile-error">
       <text>{{ profileError }}</text>
     </view>
-    <!-- User info / login form -->
-    <view class="user-card">
+    <view class="user-card" :class="{ 'user-card--form': isEditingProfile || showManualLoginForm }">
       <!-- 已登录且非编辑态：显示头像+昵称+登出/编辑按钮 -->
       <template v-if="userStore.isLoggedIn && !isEditingProfile">
-        <image :src="userStore.avatarUrl || '/static/default-avatar.png'" class="avatar" />
+        <image :src="profileAvatarSrc" class="avatar" />
         <view class="user-info">
-          <text class="name">{{ userStore.nickName || '未登录' }}</text>
-          <view class="action-row">
-            <button size="mini" @tap="openEditProfile">编辑资料</button>
-            <button size="mini" @tap="handleLogout">登出</button>
+          <view class="name-row">
+            <text class="name">{{ profileDisplayName }}</text>
+            <text v-if="isCurrentCommunityAdmin" class="profile-admin-badge">管理员</text>
           </view>
+          <view class="profile-community-row">
+            <text class="profile-community-name">{{ currentCommunityName }}</text>
+            <view class="profile-switch" @tap="goOnboarding">
+              <text class="profile-switch-icon">⇄</text>
+              <text>切换</text>
+            </view>
+          </view>
+        </view>
+        <view class="profile-edit-link" @tap="openEditProfile">
+          <text>编辑</text>
+          <text class="profile-edit-arrow">›</text>
         </view>
       </template>
 
@@ -33,7 +42,7 @@
             >
               <view class="avatar-edit-wrap">
                 <image
-                  :src="formAvatarDisplay || '/static/default-avatar.png'"
+                  :src="formAvatarDisplay || profileAvatarSrc"
                   class="avatar-preview"
                 />
                 <view class="avatar-edit-badge">📷</view>
@@ -41,7 +50,7 @@
             </button>
             <image
               v-else
-              :src="formAvatarDisplay || '/static/default-avatar.png'"
+              :src="formAvatarDisplay || profileAvatarSrc"
               class="avatar-preview"
             />
             <text class="avatar-hint">
@@ -78,34 +87,14 @@
         </view>
       </template>
 
-      <!-- 未登录态：支持 chooseAvatar 时走"一按钮登录"，否则 fallback 旧表单 -->
-      <template v-else-if="supportsChooseAvatar">
+      <template v-else-if="showManualLoginForm">
         <view class="login-form">
           <text class="form-title">登录</text>
-          <text class="form-hint">点击下方按钮，选择你的头像和昵称</text>
-
-          <button
-            open-type="chooseAvatar"
-            class="login-hero-btn"
-            @chooseavatar="onLoginChooseAvatar"
-          >微信登录</button>
-
-          <view class="login-alt-row">
-            <text class="login-alt-hint">使用其他账号？</text>
-            <text class="login-alt-link" @tap="showDevLogin = true">DEV 登录</text>
-          </view>
-        </view>
-      </template>
-
-      <!-- Fallback：H5 / 老基础库，旧三步表单 -->
-      <template v-else>
-        <view class="login-form">
-          <text class="form-title">登录</text>
-          <text class="form-hint">当前环境不支持微信原生登录，请手动填写</text>
+          <text class="form-hint">当前环境不支持微信原生登录，请手动填写昵称后继续使用社区功能</text>
 
           <view class="avatar-row">
             <image
-              :src="formAvatarDisplay || '/static/default-avatar.png'"
+              :src="formAvatarDisplay || profileAvatarSrc"
               class="avatar-preview"
             />
             <text class="avatar-hint">默认头像</text>
@@ -125,6 +114,7 @@
           </view>
 
           <view class="form-actions">
+            <button size="mini" @tap="showManualLoginForm = false">取消</button>
             <button
               size="mini"
               :disabled="!canSubmitForm || submitFormLock.busy.value"
@@ -141,13 +131,89 @@
           </view>
         </view>
       </template>
+
+      <template v-else>
+        <image :src="profileAvatarSrc" class="avatar" @tap="openLoginEntry" />
+        <view class="user-info" @tap="openLoginEntry">
+          <view class="name-row">
+            <text class="name">{{ profileDisplayName }}</text>
+          </view>
+        </view>
+        <view v-if="supportsChooseAvatar" class="login-form profile-login-actions">
+          <button
+            open-type="chooseAvatar"
+            class="login-hero-btn"
+            @chooseavatar="onLoginChooseAvatar"
+          >微信登录</button>
+          <view class="login-alt-row">
+            <text class="login-alt-hint">使用其他账号？</text>
+            <text class="login-alt-link" @tap.stop="showDevLogin = true">DEV 登录</text>
+          </view>
+        </view>
+        <button
+          v-else
+          class="profile-login-hit"
+          @tap.stop="openLoginEntry"
+        ></button>
+      </template>
     </view>
+
+    <view v-if="releaseVersion && !userStore.isLoggedIn && !isEditingProfile" class="profile-release-id">
+      <text>{{ releaseVersion }}</text>
+    </view>
+
+    <view v-if="!isEditingProfile && !showManualLoginForm" class="profile-shortcuts">
+      <view class="profile-shortcut create" @tap="goOnboarding">
+        <text class="shortcut-title">创建社区</text>
+        <view class="shortcut-icon"><text>＋</text></view>
+      </view>
+      <view class="profile-shortcut join" @tap="goOnboarding">
+        <text class="shortcut-title">加入社区</text>
+        <view class="shortcut-icon"><text>⌖</text></view>
+      </view>
+    </view>
+
+    <view v-if="!isEditingProfile && !showManualLoginForm" class="profile-tools-card">
+      <template v-for="item in profileToolItems" :key="item.key">
+        <button
+          v-if="item.kind === 'contact'"
+          class="profile-tool"
+          open-type="contact"
+          show-message-card
+          send-message-title="HappyHome 使用反馈"
+          send-message-path="/pages/profile/index"
+        >
+          <text class="profile-tool-icon" :class="`profile-tool-icon--${item.tone}`">{{ item.icon }}</text>
+          <text class="profile-tool-label">{{ item.label }}</text>
+        </button>
+        <view v-else class="profile-tool" @tap="handleProfileTool(item)">
+          <text class="profile-tool-icon" :class="`profile-tool-icon--${item.tone}`">{{ item.icon }}</text>
+          <text class="profile-tool-label">{{ item.label }}</text>
+        </view>
+      </template>
+    </view>
+
+    <button
+      v-if="!isEditingProfile && !showManualLoginForm"
+      class="profile-primary-action"
+      open-type="share"
+      @tap="handleInviteTap"
+    >邀请好友加入社区</button>
+
+    <button
+      v-if="!isEditingProfile && !showManualLoginForm"
+      class="profile-secondary-action"
+      :disabled="leaveCurrentCommunityLock.isBusy"
+      @tap="handleLeaveCurrentCommunity"
+    >
+      {{ leaveCurrentCommunityLock.isBusy ? '退出中...' : '退出当前社区' }}
+    </button>
 
     <!-- 昵称确认浮层：chooseAvatar 回调后自动弹出 -->
     <view v-if="showNickConfirm" class="nick-modal-mask" @tap="cancelNickConfirm">
       <view class="nick-modal" @tap.stop>
         <image
-          :src="formAvatarDisplay || '/static/default-avatar.png'"
+          :src="formAvatarDisplay || profileAvatarSrc"
           class="nick-modal-avatar"
         />
         <text class="nick-modal-title">请确认你的昵称</text>
@@ -197,56 +263,6 @@
           </button>
         </view>
       </view>
-    </view>
-
-    <!-- My Communities -->
-    <view class="section">
-      <text class="section-title">我的社区</text>
-      <view
-        v-for="c in communityStore.myCommunities"
-        :key="c._id"
-        class="list-item"
-        @tap="communityStore.switchCommunity(c._id)"
-      >
-        <text class="item-name">{{ c.name }}</text>
-        <view class="community-actions" @tap.stop>
-          <view class="badges">
-            <text v-if="isAdminOf(c._id)" class="badge admin">管理员</text>
-            <text v-if="c._id === communityStore.currentCommunityId" class="badge current">当前</text>
-          </view>
-          <button
-            v-if="canLeaveCommunity(c)"
-            size="mini"
-            class="leave-community-btn"
-            :disabled="leaveCommunityLock.isBusy(c._id)"
-            @tap.stop="leaveCommunityLock.run(c)"
-          >
-            {{ leaveCommunityLock.isBusy(c._id) ? '退出中...' : '退出' }}
-          </button>
-        </view>
-      </view>
-      <view v-if="communityStore.myCommunities.length === 0" class="empty">
-        <text>还没有加入社区</text>
-      </view>
-      <button size="mini" class="join-btn" @tap="goOnboarding">
-        加入或创建社区
-      </button>
-    </view>
-
-    <view data-testid="profile-feedback-contact-card" class="feedback-contact-card">
-      <view class="feedback-copy">
-        <text class="feedback-title">联系与反馈</text>
-        <text class="feedback-desc">使用中遇到问题，或有建议想告诉我，可以直接留言。</text>
-      </view>
-      <button
-        class="feedback-contact-btn"
-        open-type="contact"
-        show-message-card
-        send-message-title="HappyHome 使用反馈"
-        send-message-path="/pages/profile/index"
-      >
-        留言反馈
-      </button>
     </view>
 
     <!-- Pending approvals (admin only) -->
@@ -320,25 +336,22 @@
         </view>
       </view>
     </view>
-    <view class="profile-version">
-      <text>ver: {{ appVersion }}</text>
-    </view>
     <AppTabBar current="profile" />
   </view>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
-import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
+import { onPullDownRefresh, onShareAppMessage, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { communityApi, memberApi, notificationApi, type ApprovalNotificationEventType } from '../../api/cloud'
 import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
-import { BUILD_INFO } from '../../generated/build-info'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
+import { getReleaseVersion } from '../../utils/release-version'
 import {
   buildApprovalReminderState,
   buildSubscriptionSaves,
@@ -349,6 +362,9 @@ import {
   type ApprovalNotificationTemplate,
 } from '../../utils/approval-notification'
 import {
+  DEFAULT_COMMUNITY_SHARE_IMAGE,
+  buildCommunitySharePath,
+  buildCommunityShareTitle,
   buildCommunityOnboardingPath,
   consumePendingShareCommunity,
 } from '../../utils/community-share'
@@ -362,15 +378,46 @@ const notificationTemplates = ref<ApprovalNotificationTemplate[]>([])
 const notificationSubscriptions = ref<Array<{ eventType: ApprovalNotificationEventType; templateId: string; status: string }>>([])
 const notificationNeedsAuthorization = ref(false)
 const profileError = ref('')
+const releaseVersion = getReleaseVersion()
 let refreshingProfile = false
 let lastLoginStateRefreshKey = ''
 let suppressNextLoginStateRefresh = false
-const buildVersion = typeof __HH_BUILD_VERSION__ === 'string' ? __HH_BUILD_VERSION__ : ''
-const appVersion = computed(() => String(buildVersion || BUILD_INFO.version || BUILD_INFO.buildId || 'unknown'))
+
+type ProfileToolItem = {
+  key: string
+  label: string
+  icon: string
+  tone: 'heart' | 'like' | 'archive' | 'activity' | 'post' | 'checkin' | 'service'
+  kind?: 'contact'
+}
+
+const profileToolItems: ProfileToolItem[] = [
+  { key: 'favorite', label: '我的收藏', icon: '♡', tone: 'heart' },
+  { key: 'like', label: '我的点赞', icon: '♧', tone: 'like' },
+  { key: 'archive', label: '我的归档', icon: '▣', tone: 'archive' },
+  { key: 'activity', label: '我的活动', icon: '✦', tone: 'activity' },
+  { key: 'posts', label: '我发布的', icon: '✎', tone: 'post' },
+  { key: 'checkin', label: '打卡记录', icon: '✓', tone: 'checkin' },
+  { key: 'service', label: '联系客服', icon: '☏', tone: 'service', kind: 'contact' },
+]
 
 const configuredNotificationTemplates = computed(() => configuredApprovalTemplates(notificationTemplates.value))
 const hasAdminTools = computed(() => userStore.role === 'superAdmin' || adminCommunityIds.value.length > 0)
 const pendingApprovalCount = computed(() => pendingCommunities.value.length + pendingMembers.value.length)
+const currentCommunity = computed(() => {
+  const currentId = String(communityStore.currentCommunityId || '')
+  return communityStore.currentCommunity ||
+    communityStore.myCommunities.find((community: any) => String(community?._id || '') === currentId) ||
+    null
+})
+const currentShareCommunityId = computed(() => String(currentCommunity.value?._id || communityStore.currentCommunityId || ''))
+const currentCommunityName = computed(() => currentCommunity.value?.name || '暂无社区')
+const profileAvatarSrc = computed(() => userStore.avatarUrl || '/static/ai-avatars/avatar-01.svg')
+const profileDisplayName = computed(() => userStore.isLoggedIn ? (userStore.nickName || '未命名') : '登录')
+const isCurrentCommunityAdmin = computed(() => {
+  const id = String(communityStore.currentCommunityId || '')
+  return userStore.role === 'superAdmin' || (!!id && adminCommunityIds.value.includes(id))
+})
 const supportsSubscribeMessage = computed(() => {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore
@@ -387,6 +434,7 @@ const approvalReminderState = computed(() => buildApprovalReminderState({
 
 // ── 登录 / 编辑资料表单状态 ──
 const isEditingProfile = ref(false)
+const showManualLoginForm = ref(false)
 const showNickConfirm = ref(false)    // 登录流程：chooseAvatar 后弹出昵称确认浮层
 const formNickName = ref('')
 const formAvatarCloudUrl = ref('')    // 已上传到 COS 的 cloud://… URL（持久）
@@ -540,6 +588,7 @@ const submitFormLock = useBusyLock(async () => {
     if (wasEditingProfile) await loadProfileDataAfterRoleResolved('profileSaved')
     else await loadProfileDataAfterRoleResolved('loginSaved')
     isEditingProfile.value = false
+    showManualLoginForm.value = false
     showNickConfirm.value = false
     formAvatarTempPath.value = ''
     formAvatarCloudUrl.value = ''
@@ -580,18 +629,36 @@ const devLoginLock = useBusyLock(async () => {
   }
 })
 
-function handleLogout() {
-  userStore.logout()
-  communityStore.$patch({ myCommunities: [], currentCommunityId: '', currentSections: [] })
-  pendingCommunities.value = []
-  pendingMembers.value = []
-  adminCommunityIds.value = []
-  notificationSubscriptions.value = []
-  uni.showToast({ title: '已登出', icon: 'none' })
+function isH5Runtime() {
+  return typeof window !== 'undefined' && typeof document !== 'undefined'
+}
+
+function openLoginEntry() {
+  if (userStore.isLoggedIn) return
+  if (supportsChooseAvatar.value) return
+  showManualLoginForm.value = true
 }
 
 function goOnboarding() {
   openOnboardingPreservingStack({ mode: 'discover' })
+}
+
+function handleProfileTool(item: ProfileToolItem) {
+  if (!userStore.isLoggedIn) {
+    openLoginEntry()
+    return
+  }
+  uni.showToast({ title: `${item.label}暂未开放`, icon: 'none' })
+}
+
+function handleInviteTap() {
+  if (!currentShareCommunityId.value) {
+    uni.showToast({ title: '暂无可邀请社区', icon: 'none' })
+    return
+  }
+  if (isH5Runtime()) {
+    uni.showToast({ title: '请在小程序内分享', icon: 'none' })
+  }
 }
 
 function restorePendingShareCommunity() {
@@ -603,10 +670,6 @@ function restorePendingShareCommunity() {
     fail: () => uni.reLaunch({ url }),
   })
   return true
-}
-
-function isAdminOf(communityId: string) {
-  return adminCommunityIds.value.includes(communityId)
 }
 
 function canLeaveCommunity(community: any) {
@@ -662,6 +725,23 @@ const leaveCommunityLock = useKeyedBusyLock(
   },
   (community) => String(community?._id || ''),
 )
+
+const leaveCurrentCommunityLock = computed(() => {
+  const id = String(currentCommunity.value?._id || '')
+  return { isBusy: !!id && leaveCommunityLock.isBusy(id) }
+})
+
+function handleLeaveCurrentCommunity() {
+  if (!userStore.isLoggedIn) {
+    openLoginEntry()
+    return
+  }
+  if (!currentCommunity.value) {
+    uni.showToast({ title: '暂无当前社区', icon: 'none' })
+    return
+  }
+  leaveCommunityLock.run(currentCommunity.value)
+}
 
 const approveCommunityLock = useKeyedBusyLock(
   async (community: any) => {
@@ -907,6 +987,9 @@ watch(
 
 onMounted(() => {
   hideNativeTabBar()
+  if (!userStore.isLoggedIn && isH5Runtime() && !supportsChooseAvatar.value) {
+    showManualLoginForm.value = true
+  }
   logProfile('info', 'profile.mounted', {})
   void nextTick(() => logProfile('info', 'profile.render.tick', { reason: 'mounted' }))
   void refreshProfileData('mounted')
@@ -929,10 +1012,19 @@ onPullDownRefresh(async () => {
     uni.stopPullDownRefresh()
   }
 })
+
+onShareAppMessage(() => {
+  const communityId = currentShareCommunityId.value
+  return {
+    title: buildCommunityShareTitle(currentCommunityName.value),
+    path: communityId ? buildCommunitySharePath(communityId) : '/pages/index/index',
+    imageUrl: DEFAULT_COMMUNITY_SHARE_IMAGE,
+  }
+})
 </script>
 
 <style lang="scss" scoped>
-.profile-page { padding: $hh-space-lg $hh-space-lg calc(132rpx + env(safe-area-inset-bottom)); background: $hh-color-bg-sub; min-height: 100vh; }
+.profile-page { padding: $hh-space-lg var(--hh-page-x) calc(132rpx + env(safe-area-inset-bottom)); background: var(--hh-color-page); min-height: 100vh; }
 .profile-error {
   margin-bottom: $hh-space-sm;
   padding: 12rpx 16rpx;
@@ -942,23 +1034,30 @@ onPullDownRefresh(async () => {
   font-size: $hh-font-caption;
   line-height: 1.5;
 }
-.user-card { background: $hh-color-surface; border-radius: $hh-radius-md; padding: $hh-space-lg; display: flex; align-items: center; margin-bottom: $hh-space-md; }
+.profile-release-id {
+  margin: -8rpx 0 $hh-space-md;
+  text-align: center;
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-caption-size);
+  line-height: var(--hh-text-caption-line-height);
+}
+.user-card { background: var(--hh-color-card); border: 1rpx solid var(--hh-color-line); border-radius: var(--hh-radius-card); padding: $hh-space-lg; display: flex; align-items: center; margin-bottom: $hh-space-md; box-shadow: var(--hh-shadow-soft); }
 .avatar { width: 100rpx; height: 100rpx; border-radius: $hh-radius-full; margin-right: $hh-space-md; }
-.name { font-size: $hh-font-h3; font-weight: $hh-font-weight-bold; color: $hh-color-text; display: block; }
+.name { font-size: var(--hh-text-heading-sm-size); font-weight: $hh-font-weight-bold; color: var(--hh-color-text-primary); display: block; }
 .user-info { flex: 1; min-width: 0; }
 .action-row { display: flex; gap: $hh-space-sm; margin-top: $hh-space-xs; }
 
 .feedback-contact-card {
-  background: $hh-color-surface;
-  border: 1rpx solid $hh-color-border;
-  border-radius: $hh-radius-md;
+  background: var(--hh-color-card);
+  border: 1rpx solid var(--hh-color-line);
+  border-radius: var(--hh-radius-card);
   padding: $hh-space-md $hh-space-lg;
   margin-bottom: $hh-space-md;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: $hh-space-md;
-  box-shadow: 0 8rpx 20rpx rgba(58, 106, 69, 0.06);
+  box-shadow: var(--hh-shadow-soft);
 }
 .feedback-copy {
   flex: 1;
@@ -970,11 +1069,11 @@ onPullDownRefresh(async () => {
 .feedback-title {
   font-size: $hh-font-body-lg;
   font-weight: $hh-font-weight-bold;
-  color: $hh-color-text;
+  color: var(--hh-color-text-primary);
 }
 .feedback-desc {
   font-size: $hh-font-caption;
-  color: $hh-color-text-mute;
+  color: var(--hh-color-text-tertiary);
   line-height: 1.5;
 }
 .feedback-contact-btn {
@@ -984,8 +1083,8 @@ onPullDownRefresh(async () => {
   height: 60rpx;
   line-height: 60rpx;
   border-radius: $hh-radius-full;
-  background: $hh-color-primary;
-  color: $hh-color-surface;
+  background: var(--hh-color-brand-primary);
+  color: #fff;
   font-size: $hh-font-caption;
   font-weight: $hh-font-weight-bold;
 }
@@ -1001,12 +1100,12 @@ onPullDownRefresh(async () => {
 .form-title {
   font-size: $hh-font-h3;
   font-weight: $hh-font-weight-bold;
-  color: $hh-color-text;
+  color: var(--hh-color-text-primary);
   display: block;
 }
 .form-hint {
   font-size: $hh-font-caption;
-  color: $hh-color-text-mute;
+  color: var(--hh-color-text-tertiary);
   display: block;
   line-height: 1.5;
 }
@@ -1042,7 +1141,7 @@ onPullDownRefresh(async () => {
   width: 44rpx;
   height: 44rpx;
   border-radius: $hh-radius-full;
-  background: $hh-accent;
+  background: var(--hh-color-brand-primary);
   color: #fff;
   font-size: 24rpx;
   line-height: 44rpx;
@@ -1059,10 +1158,10 @@ onPullDownRefresh(async () => {
   width: 78%;
   height: 76rpx;
   align-self: center;
-  background: $hh-surface-1;
-  color: $hh-accent-ink;
-  border: 2rpx solid $hh-accent-line;
-  box-shadow: 0 8rpx 20rpx rgba(58, 106, 69, 0.08);
+  background: var(--hh-color-card);
+  color: var(--hh-color-brand-strong);
+  border: 2rpx solid var(--hh-color-brand-line);
+  box-shadow: var(--hh-shadow-soft);
   font-size: $hh-font-body;
   font-weight: $hh-font-weight-bold;
   line-height: 76rpx;
@@ -1085,7 +1184,7 @@ onPullDownRefresh(async () => {
 }
 .login-alt-link {
   font-size: $hh-font-caption;
-  color: $hh-accent;
+  color: var(--hh-color-brand-primary);
   text-decoration: underline;
 }
 .form-actions {
@@ -1095,17 +1194,17 @@ onPullDownRefresh(async () => {
   margin-top: $hh-space-xs;
 }
 .form-actions button { flex: 1; min-width: 160rpx; }
-.primary-btn { background: $hh-color-primary; color: $hh-color-text-inverse; }
+.primary-btn { background: var(--hh-color-brand-primary); color: #fff; }
 .primary-btn[disabled] { opacity: $hh-opacity-disabled; }
-.section { background: $hh-color-surface; border-radius: $hh-radius-md; padding: $hh-space-md $hh-space-lg; margin-bottom: $hh-space-md; }
-.section-title { font-size: $hh-font-body; color: $hh-color-text-mute; display: block; margin-bottom: $hh-space-md; }
-.list-item { display: flex; justify-content: space-between; align-items: center; padding: $hh-space-md 0; border-bottom: 1rpx solid $hh-color-divider; }
-.item-name { font-size: $hh-font-body-lg; color: $hh-color-text; }
+.section { background: var(--hh-color-card); border: 1rpx solid var(--hh-color-line); border-radius: var(--hh-radius-card); padding: $hh-space-md $hh-space-lg; margin-bottom: $hh-space-md; box-shadow: var(--hh-shadow-soft); }
+.section-title { font-size: var(--hh-text-body-base-size); color: var(--hh-color-text-tertiary); display: block; margin-bottom: $hh-space-md; }
+.list-item { display: flex; justify-content: space-between; align-items: center; padding: $hh-space-md 0; border-bottom: 1rpx solid var(--hh-color-line-soft); }
+.item-name { font-size: var(--hh-text-body-lg-size); color: var(--hh-color-text-primary); }
 .community-actions { display: flex; align-items: center; gap: $hh-space-sm; }
 .badges { display: flex; gap: $hh-space-xs; }
 .badge { font-size: $hh-font-tag; padding: 4rpx 12rpx; border-radius: $hh-radius-lg; }
 .badge.admin { background: #e3f2fd; color: #1565c0; }
-.badge.current { background: #e8f5e9; color: #2e7d32; }
+.badge.current { background: var(--hh-color-brand-soft); color: var(--hh-color-brand-strong); }
 .leave-community-btn {
   margin: 0;
   padding: 0 18rpx;
@@ -1175,8 +1274,8 @@ onPullDownRefresh(async () => {
   margin-bottom: $hh-space-sm;
   padding: $hh-space-sm $hh-space-md;
   border-radius: $hh-radius-sm;
-  background: #f4f8f5;
-  border: 1rpx solid #dcebdd;
+  background: var(--hh-color-brand-soft);
+  border: 1rpx solid var(--hh-color-brand-line);
 }
 .approval-reminder-copy {
   flex: 1;
@@ -1202,25 +1301,14 @@ onPullDownRefresh(async () => {
   height: 52rpx;
   line-height: 52rpx;
   border-radius: $hh-radius-full;
-  background: $hh-color-primary;
-  color: $hh-color-text-inverse;
+  background: var(--hh-color-brand-primary);
+  color: #fff;
   font-size: $hh-font-caption;
 }
 .approval-reminder-btn::after { border: none; }
 .hint-text { display: block; margin-top: $hh-space-sm; color: $hh-color-text-sub; font-size: $hh-font-caption; line-height: $hh-line-height-base; }
 .hint-text.warn { color: #b7791f; }
 .login-actions { display: flex; gap: $hh-space-sm; }
-.profile-version {
-  padding: 20rpx 0 10rpx;
-  text-align: center;
-  font-family: $hh-font-mono;
-  font-size: 18rpx;
-  color: $hh-color-text-mute;
-  opacity: 0.58;
-}
-.profile-version text {
-  user-select: text;
-}
 .dev-btn { background: $hh-color-warning; color: $hh-color-text-inverse; font-size: $hh-font-caption; }
 
 .dev-modal-mask {
@@ -1231,7 +1319,7 @@ onPullDownRefresh(async () => {
   z-index: $hh-z-modal;
 }
 .dev-modal {
-  background: $hh-color-surface; border-radius: $hh-radius-md;
+  background: var(--hh-color-card); border-radius: var(--hh-radius-card);
   padding: 40rpx $hh-space-lg; width: 84%; max-width: 600rpx;
   display: flex; flex-direction: column; gap: $hh-space-md;
   box-shadow: $hh-shadow-modal;
@@ -1250,7 +1338,7 @@ onPullDownRefresh(async () => {
   z-index: $hh-z-modal;
 }
 .nick-modal {
-  background: $hh-color-surface; border-radius: $hh-radius-md;
+  background: var(--hh-color-card); border-radius: var(--hh-radius-card);
   padding: 40rpx $hh-space-lg; width: 84%; max-width: 600rpx;
   display: flex; flex-direction: column; align-items: center;
   gap: $hh-space-md;
@@ -1283,9 +1371,428 @@ onPullDownRefresh(async () => {
 }
 .nick-modal-actions button { flex: 1; }
 
-.input-wrap { background: $hh-color-bg-sub; border-radius: $hh-radius-sm; padding: $hh-space-md; }
-.input { font-size: $hh-font-body; width: 100%; min-height: 40rpx; background: transparent; color: $hh-color-text; }
-.input-placeholder { color: $hh-color-text-mute; font-size: $hh-font-body; }
+.input-wrap { background: var(--hh-color-page); border-radius: $hh-radius-sm; padding: $hh-space-md; }
+.input { font-size: var(--hh-text-body-base-size); width: 100%; min-height: 40rpx; background: transparent; color: var(--hh-color-text-primary); }
+.input-placeholder { color: var(--hh-color-text-tertiary); font-size: var(--hh-text-body-base-size); }
 .dev-login-btn { background: $hh-color-text; color: $hh-color-text-inverse; }
 .approve-btn { background: $hh-color-info; color: $hh-color-text-inverse; }
+
+/* Figma 0626 profile pass */
+.profile-page {
+  padding-top: 42rpx;
+  background:
+    radial-gradient(circle at 80% 4%, rgba(61, 173, 125, 0.18), transparent 30%),
+    linear-gradient(188deg, #cff5f2 0%, #fff 26%, #f2f3f7 58%, var(--hh-color-page) 100%);
+}
+
+.user-card {
+  margin-top: 12rpx;
+  margin-bottom: 24rpx;
+  padding: 28rpx 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.avatar {
+  width: 128rpx;
+  height: 128rpx;
+  margin-right: 32rpx;
+  background: var(--hh-color-brand-soft);
+}
+
+.user-info {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.name-row,
+.profile-community-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  min-width: 0;
+}
+
+.name {
+  min-width: 0;
+  font-size: var(--hh-text-heading-lg-size);
+  line-height: var(--hh-text-heading-lg-line);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-admin-badge {
+  flex: 0 0 auto;
+  padding: 4rpx 12rpx;
+  border: 1rpx solid #d27700;
+  border-radius: 8rpx;
+  background: #fffae8;
+  color: #d27700;
+  font-size: var(--hh-text-body-base-size);
+  line-height: var(--hh-text-body-base-line);
+}
+
+.profile-community-name {
+  min-width: 0;
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-heading-sm-size);
+  line-height: var(--hh-text-heading-sm-line);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-switch {
+  flex: 0 0 auto;
+  min-height: 48rpx;
+  padding: 0 22rpx;
+  border: 2rpx solid var(--hh-color-brand-primary);
+  border-radius: $hh-radius-full;
+  background: rgba(255, 255, 255, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.profile-switch text {
+  color: var(--hh-color-brand-primary);
+  font-size: var(--hh-text-body-lg-size);
+  line-height: var(--hh-text-body-lg-line);
+  font-weight: $hh-font-weight-bold;
+}
+
+.action-row {
+  margin-top: 4rpx;
+}
+
+.action-row button {
+  margin: 0;
+  padding: 0;
+  height: 42rpx;
+  line-height: 42rpx;
+  border: 0;
+  background: transparent;
+  color: var(--hh-color-brand-primary);
+  font-size: var(--hh-text-body-base-size);
+}
+
+.action-row button::after {
+  border: 0;
+}
+
+.profile-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24rpx;
+  margin-bottom: 24rpx;
+}
+
+.profile-shortcut {
+  position: relative;
+  min-height: 152rpx;
+  overflow: hidden;
+  padding: 32rpx;
+  border-radius: var(--hh-radius-card);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.profile-shortcut.create {
+  background: #fdf6e6;
+}
+
+.profile-shortcut.join {
+  background: #e5f8f2;
+}
+
+.shortcut-title {
+  color: var(--hh-color-brand-primary);
+  font-size: var(--hh-text-heading-sm-size);
+  line-height: var(--hh-text-heading-sm-line);
+  font-weight: $hh-font-weight-bold;
+}
+
+.profile-shortcut.create .shortcut-title {
+  color: #f90;
+}
+
+.shortcut-icon {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 16rpx;
+  background: var(--hh-color-brand-primary);
+  color: #fff;
+  font-size: 44rpx;
+  line-height: 64rpx;
+  text-align: center;
+  font-weight: $hh-font-weight-bold;
+}
+
+.profile-shortcut.create .shortcut-icon {
+  background: #ffad3d;
+}
+
+.section,
+.feedback-contact-card {
+  border: 0;
+  border-radius: var(--hh-radius-card);
+}
+
+/* Figma 4.1 / 4.2 final profile structure */
+.profile-page {
+  box-sizing: border-box;
+  padding: 32rpx 32rpx calc(132rpx + env(safe-area-inset-bottom));
+  background:
+    radial-gradient(circle at 86% 2%, rgba(61, 173, 125, 0.18), transparent 28%),
+    linear-gradient(188.63deg, #cff5f2 0%, #fff 24%, #fff 40%, #f2f3f7 58%, #f2f3f7 100%);
+}
+
+.user-card {
+  position: relative;
+  box-sizing: border-box;
+  min-height: 192rpx;
+  margin: 0 0 24rpx;
+  padding: 32rpx 0 28rpx;
+  display: flex;
+  align-items: center;
+}
+
+.user-card--form {
+  min-height: auto;
+  padding: 32rpx;
+  border-radius: 24rpx;
+  background: #fff;
+  box-shadow: none;
+}
+
+.avatar {
+  width: 128rpx;
+  height: 128rpx;
+  flex: 0 0 128rpx;
+  margin-right: 32rpx;
+  border-radius: 9999rpx;
+  object-fit: cover;
+  background: #f7efe8;
+}
+
+.user-info {
+  flex: 1;
+  min-width: 0;
+  gap: 8rpx;
+}
+
+.name {
+  max-width: 216rpx;
+  font-size: var(--hh-text-heading-lg-size);
+  line-height: var(--hh-text-heading-lg-line);
+  color: #292116;
+}
+
+.profile-community-name {
+  max-width: 164rpx;
+  font-size: var(--hh-text-heading-sm-size);
+  line-height: var(--hh-text-heading-sm-line);
+  color: #292116;
+}
+
+.profile-switch {
+  min-height: 52rpx;
+  padding: 0 24rpx;
+  gap: 8rpx;
+  border-width: 2rpx;
+  background: #fff;
+}
+
+.profile-switch-icon {
+  font-size: 24rpx;
+  line-height: 1;
+}
+
+.profile-edit-link {
+  position: absolute;
+  right: 0;
+  top: 92rpx;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  color: var(--hh-color-brand-primary);
+  font-size: var(--hh-text-body-base-size);
+  line-height: var(--hh-text-body-base-line);
+}
+
+.profile-edit-arrow {
+  color: #b4bab7;
+  font-size: 38rpx;
+  line-height: 1;
+}
+
+.profile-login-actions {
+  flex: 0 0 224rpx;
+  width: 224rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8rpx;
+}
+
+.profile-login-actions .login-hero-btn {
+  width: 100%;
+  height: 64rpx;
+  line-height: 64rpx;
+  margin: 0;
+}
+
+.profile-login-actions .login-alt-row {
+  margin-top: 0;
+  justify-content: flex-end;
+}
+
+.profile-login-hit {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: transparent;
+  opacity: 0;
+}
+
+.profile-login-hit::after,
+.profile-tool::after,
+.profile-primary-action::after,
+.profile-secondary-action::after {
+  border: 0;
+}
+
+.profile-shortcuts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24rpx;
+  margin-bottom: 40rpx;
+}
+
+.profile-shortcut {
+  min-height: 152rpx;
+  box-sizing: border-box;
+  padding: 0 32rpx;
+  border-radius: 24rpx;
+}
+
+.shortcut-title {
+  font-size: var(--hh-text-heading-sm-size);
+  line-height: 36rpx;
+}
+
+.shortcut-icon {
+  width: 80rpx;
+  height: 80rpx;
+  border-radius: 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.96;
+}
+
+.shortcut-icon text {
+  color: #fff;
+  font-size: 52rpx;
+  line-height: 1;
+  font-weight: $hh-font-weight-bold;
+}
+
+.profile-tools-card {
+  box-sizing: border-box;
+  margin-bottom: 40rpx;
+  padding: 32rpx 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  row-gap: 28rpx;
+  border-radius: 24rpx;
+  background: #fff;
+}
+
+.profile-tool {
+  min-width: 0;
+  min-height: 132rpx;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 16rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  line-height: 1;
+}
+
+.profile-tool-icon {
+  width: 56rpx;
+  height: 56rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #181818;
+  font-size: 44rpx;
+  line-height: 1;
+  font-weight: $hh-font-weight-bold;
+}
+
+.profile-tool-icon--heart,
+.profile-tool-icon--like,
+.profile-tool-icon--activity,
+.profile-tool-icon--service {
+  text-shadow: 12rpx -6rpx 0 rgba(76, 203, 148, 0.68);
+}
+
+.profile-tool-icon--archive,
+.profile-tool-icon--post,
+.profile-tool-icon--checkin {
+  text-shadow: 8rpx -8rpx 0 rgba(76, 203, 148, 0.58);
+}
+
+.profile-tool-label {
+  color: #292116;
+  font-size: var(--hh-text-body-base-size);
+  line-height: var(--hh-text-body-base-line);
+  white-space: nowrap;
+}
+
+.profile-primary-action,
+.profile-secondary-action {
+  width: 100%;
+  height: 96rpx;
+  margin: 0 0 24rpx;
+  padding: 0;
+  border-radius: 999rpx;
+  font-size: var(--hh-text-heading-sm-size);
+  line-height: 96rpx;
+  text-align: center;
+}
+
+.profile-primary-action {
+  background: var(--hh-color-brand-primary);
+  color: #fff;
+  font-weight: $hh-font-weight-bold;
+}
+
+.profile-secondary-action {
+  background: #fff;
+  color: #181818;
+}
+
+.profile-secondary-action[disabled] {
+  opacity: 0.58;
+}
+
+.approval-section {
+  margin-top: 8rpx;
+}
 </style>
