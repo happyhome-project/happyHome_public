@@ -1,6 +1,13 @@
 <template>
   <view class="phone-inner">
     <view class="home-shell">
+      <view class="home-brandbar" aria-label="社群助手">
+        <view class="home-brand-title-wrap">
+          <text class="home-brand-title">社群助手</text>
+          <view class="home-brand-line"></view>
+        </view>
+      </view>
+
       <view class="home-topbar">
         <view class="community-identity" @tap="onMastheadTap">
           <view class="community-avatar">
@@ -2337,10 +2344,46 @@ onShareAppMessage(() => {
 }
 
 .home-shell {
-  padding: 42rpx var(--hh-page-x) 24rpx;
+  padding: calc(86rpx + env(safe-area-inset-top)) var(--hh-page-x) 24rpx;
   background:
-    radial-gradient(circle at 84% 0%, rgba(61, 173, 125, 0.18), transparent 34%),
-    linear-gradient(170deg, #cff5f2 0%, #f2f3f7 46%, var(--hh-color-page) 100%);
+    radial-gradient(circle at 84% 0%, rgba(48, 91, 70, 0.22), transparent 34%),
+    linear-gradient(170deg, #caeee7 0%, #f1f3ee 58%, var(--hh-color-page) 100%);
+}
+
+.home-brandbar {
+  height: 78rpx;
+  margin-bottom: 16rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.home-brand-title-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.home-brand-title {
+  color: #183327;
+  font-family: $hh-font-serif;
+  font-size: 52rpx;
+  line-height: 1;
+  font-weight: 760;
+  letter-spacing: 0;
+  white-space: nowrap;
+  text-shadow: 0 10rpx 22rpx rgba(24, 51, 39, 0.1);
+}
+
+.home-brand-line {
+  position: absolute;
+  left: -56rpx;
+  right: -56rpx;
+  bottom: -12rpx;
+  height: 2rpx;
+  background: linear-gradient(90deg, transparent, rgba(36, 77, 57, 0.38), transparent);
+  pointer-events: none;
 }
 
 .home-topbar {

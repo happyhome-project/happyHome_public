@@ -12,6 +12,8 @@ function assert(condition, message) {
 }
 
 const app = read('miniprogram', 'src', 'App.vue')
+const pagesJson = read('miniprogram', 'src', 'pages.json')
+const pagesConfig = JSON.parse(pagesJson)
 const uniScss = read('miniprogram', 'src', 'uni.scss')
 const tabbar = read('miniprogram', 'src', 'components', 'AppTabBar.vue')
 const guideDetail = read('miniprogram', 'src', 'components', 'GuideRouteDetailView.vue')
@@ -144,6 +146,9 @@ assert(
 
 assert(
     home.includes('class="home-shell"') &&
+    home.includes('class="home-brandbar"') &&
+    home.includes('class="home-brand-title"') &&
+    home.includes('社群助手') &&
     home.includes('class="home-quote"') &&
     home.includes('quoteText') &&
     home.includes('placeholder="搜索帖子、正文、视频"') &&
@@ -189,7 +194,14 @@ assert(
     home.includes('rawHomeGuideCoverImages') &&
     home.includes('resolveCloudFileUrls') &&
     !home.includes(`<template v-if="g.displayTemplate === 'guide_note'">`),
-  'home should follow Figma tabs plus two-column guide feed, keep tab switching scroll-stable, and keep notice-board short labels controlled instead of binding long section names.'
+  'home should use the custom continuous Figma-style top area, tabs plus two-column guide feed, keep tab switching scroll-stable, and keep notice-board short labels controlled instead of binding long section names.'
+)
+
+assert(
+  pagesConfig.pages.some((page) =>
+    page.path === 'pages/index/index' && page.style?.navigationStyle === 'custom'
+  ),
+  'home page should use a custom navigation area so the title and hero background can visually connect instead of showing a white native bar.'
 )
 
 assert(
