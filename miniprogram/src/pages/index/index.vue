@@ -30,7 +30,7 @@
           <text class="home-quote-text">{{ quoteText }}</text>
           <view v-if="quoteCite" class="home-quote-cite-wrap">
             <view class="home-quote-line"></view>
-            <text class="home-quote-cite">《{{ quoteCite }}》</text>
+            <text class="home-quote-cite">{{ quoteCite }}</text>
           </view>
         </view>
       </view>
@@ -105,7 +105,7 @@
         :style="getNoticeCardStyle(notice, i)"
         @tap="openNotice(notice)"
       >
-        <text class="notice-kind">{{ notice.sectionName || notice.label }}</text>
+        <text class="notice-kind">{{ notice.kind }}</text>
         <view class="notice-main">
           <view class="notice-line">
             <text class="notice-badge">{{ i === 0 ? '置顶' : '最新' }}</text>
@@ -345,6 +345,8 @@ import { getArchiveHomeMeta, getFamilyLetterListSummary, getGuideNoteCard, getHo
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
+import { normalizeHomeNoticeKind } from '../../utils/home-notice'
+import { formatHomeQuoteCite } from '../../utils/home-quote'
 import { resolveCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import {
   buildCommunityOnboardingPath,
@@ -413,7 +415,7 @@ const homeHeroImage = computed(() =>
   String(communityStore.currentCommunity?.coverImage || '').trim() ? shareImageUrl.value : ''
 )
 const quoteText = computed(() => String(communityStore.currentCommunity?.motto || '').trim())
-const quoteCite = computed(() => String(communityStore.currentCommunity?.mottoCite || '').trim())
+const quoteCite = computed(() => formatHomeQuoteCite(communityStore.currentCommunity?.mottoCite))
 const activeArchiveIndex = computed(() => {
   const groups = archiveGroups.value
   if (!groups.length) return -1
@@ -476,6 +478,7 @@ interface SectionNotice {
   widgetId: string
   sectionName: string
   label: string
+  kind: string
   content: string
   preview: string
   isLong: boolean
@@ -499,6 +502,7 @@ const sectionNotices = computed<SectionNotice[]>(() => {
         widgetId: widget.widgetId,
         sectionName: section.name,
         label: widget.label || '公告',
+        kind: normalizeHomeNoticeKind(widget.label),
         content,
         preview,
         isLong: Array.from(content).length > NOTICE_PREVIEW_LIMIT,
@@ -1745,10 +1749,14 @@ onShareAppMessage(() => {
 .notice-kind {
   width: 76rpx;
   flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--hh-color-text-primary);
   font-size: var(--hh-text-body-lg-size);
   line-height: var(--hh-text-body-lg-line);
   font-weight: $hh-font-weight-bold;
+  text-align: left;
 }
 
 .notice-main {

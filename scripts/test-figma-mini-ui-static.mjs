@@ -156,6 +156,8 @@ assert(
     !home.includes('<swiper') &&
     home.includes('class="notice-board"') &&
     home.includes('noticeRows') &&
+    home.includes('{{ notice.kind }}') &&
+    !home.includes('notice.sectionName || notice.label') &&
     home.includes('我的组局') &&
     home.includes('class="group-card"') &&
     home.includes('class="section-tabs"') &&
@@ -169,7 +171,7 @@ assert(
     home.includes('rawHomeGuideCoverImages') &&
     home.includes('resolveCloudFileUrls') &&
     !home.includes(`<template v-if="g.displayTemplate === 'guide_note'">`),
-  'home should follow Figma tabs plus two-column guide feed, including a narrow name-based guide fallback, instead of nesting guide posts inside single-column archive cards.'
+  'home should follow Figma tabs plus two-column guide feed, and keep notice-board short labels controlled instead of binding long section names.'
 )
 
 assert(
@@ -184,8 +186,13 @@ assert(
     search.includes('class="result-cover"') &&
     search.includes('resultAuthorAvatar') &&
     search.includes('avatar-') &&
-    search.includes('border: 3rpx solid var(--hh-color-brand-primary)'),
-  'search page should use the Figma search pill, large visual result card, and realistic fallback author avatars.'
+    search.includes('border: 3rpx solid var(--hh-color-brand-primary)') &&
+    !search.includes('search-capsule') &&
+    !search.includes('capsule-dot') &&
+    !search.includes('capsule-ring') &&
+    !search.includes('•••') &&
+    !search.includes('◎'),
+  'search page should use the Figma search pill and result card without drawing WeChat native capsule chrome.'
 )
 
 assert(

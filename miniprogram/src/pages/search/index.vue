@@ -16,11 +16,9 @@
         <text v-if="query" class="clear-icon" @tap="clearQuery">×</text>
         <button v-if="!searched" class="search-submit" @tap="submitSearch">搜索</button>
       </view>
-      <view class="search-capsule" aria-hidden="true">
-        <text class="capsule-dot">•••</text>
-        <view class="capsule-line"></view>
-        <text class="capsule-ring">◎</text>
-      </view>
+      <!-- #ifdef MP-WEIXIN -->
+      <view class="search-native-menu-spacer" aria-hidden="true"></view>
+      <!-- #endif -->
     </view>
 
     <view v-if="loading && items.length === 0" class="state">
@@ -685,20 +683,14 @@ function formatDate(value: unknown): string {
   border: 0;
 }
 
-.search-capsule {
+.search-native-menu-spacer {
   flex: 0 0 174rpx;
   height: 64rpx;
-  border: 1rpx solid #f7f7f7;
-  border-radius: $hh-radius-full;
-  background: rgba(255, 255, 255, 0.74);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 18rpx;
-  color: #181818;
+  visibility: hidden;
+  pointer-events: none;
 }
 
-.search-nav--initial .search-capsule {
+.search-nav--initial .search-native-menu-spacer {
   position: absolute;
   right: 13px;
   top: 73px;
@@ -711,23 +703,6 @@ function formatDate(value: unknown): string {
   left: 16px;
   top: 77px;
   z-index: 2;
-}
-
-.capsule-dot {
-  font-size: 34rpx;
-  line-height: 1;
-  transform: translateY(-3rpx);
-}
-
-.capsule-line {
-  width: 1rpx;
-  height: 36rpx;
-  background: #f1f1f1;
-}
-
-.capsule-ring {
-  font-size: 36rpx;
-  line-height: 1;
 }
 
 .search-discovery {
