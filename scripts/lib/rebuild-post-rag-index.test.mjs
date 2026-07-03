@@ -19,10 +19,23 @@ function createMockRunner() {
   const runner = async (command, args, runnerOptions = {}) => {
     const payload = payloadFromArgs(args)
     calls.push({ command, args, options: runnerOptions, payload })
+    if (payload.action === 'community.list') {
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          communities: [
+            { _id: 'c-active-1', status: 'active' },
+            { _id: 'c-disabled', status: 'disabled' },
+            { id: 'c-active-2', status: 'active' },
+          ],
+        }),
+        stderr: '',
+      }
+    }
     if (payload.action === 'section.list') {
       return {
         status: 0,
-        stdout: JSON.stringify({ sections: [{ _id: 'section-1' }] }),
+        stdout: JSON.stringify({ sections: [{ _id: `${payload.communityId}-section-1` }] }),
         stderr: '',
       }
     }
@@ -73,4 +86,36 @@ test('runPostRagRebuild sends the explicit worker token when processing queued j
   assert.equal(summary.totals.failedCommunityCount, 0)
   const workerCall = runner.calls.find((call) => !call.payload.action)
   assert.equal(workerCall.payload.workerToken, 'worker-secret')
+})
+
+test('runPostRagRebuild with --all-active enqueues every active community', async () => {
+  const runner = createMockRunner()
+
+  const summary = await runPostRagRebuild({
+    envId: 'env-x',
+    communityIds: [],
+    allActive: true,
+    dryRun: false,
+    help: false,
+    commandTimeoutMs: 999,
+    batchSize: 5,
+    processJobs: false,
+    workerRounds: 0,
+    workerToken: '',
+    includeDisabled: false,
+  }, runner)
+
+  assert.deepEqual(summary.communityIds, ['c-active-1', 'c-active-2'])
+  assert.equal(summary.totals.communityCount, 2)
+  assert.equal(summary.totals.scannedCount, 2)
+  assert.equal(summary.totals.upsertQueuedCount, 2)
+  assert.equal(summary.totals.deleteQueuedCount, 0)
+  assert.equal(summary.totals.failedCommunityCount, 0)
+  const sectionListCalls = runner.calls.filter((call) => call.payload.action === 'section.list')
+  assert.deepEqual(sectionListCalls.map((call) => call.payload.communityId), ['c-active-1', 'c-active-2'])
+  const backfillCalls = runner.calls.filter((call) => call.payload.action === 'post.rebuildRagIndexSectionBatchAdmin')
+  assert.deepEqual(backfillCalls.map((call) => call.payload.sectionId), [
+    'c-active-1-section-1',
+    'c-active-2-section-1',
+  ])
 })

@@ -1906,6 +1906,11 @@ function removedRagIndexState(job: any, now: string, post?: Partial<Post> | null
   return state
 }
 
+function isMissingDocumentError(error: any): boolean {
+  const message = String(error?.message || error || '')
+  return /document\.get:fail/i.test(message) && /does not exist|not found/i.test(message)
+}
+
 export async function processPostRagJobBatch(options: {
   limit?: number
   postId?: string
@@ -1929,7 +1934,17 @@ export async function processPostRagJobBatch(options: {
         await provider.deletePostChunks?.(job.postId)
         await upsertPostRagIndexState(job.postId, removedRagIndexState(job, now))
       } else {
-        const post = await db.getById('posts', job.postId) as Post
+        let post: Post | null = null
+        try {
+          post = await db.getById('posts', job.postId) as Post
+        } catch (error) {
+          if (!isMissingDocumentError(error)) throw error
+          await provider.deletePostChunks?.(job.postId)
+          await upsertPostRagIndexState(job.postId, removedRagIndexState(job, now))
+          await db.updateById(POST_RAG_JOBS, job._id, { status: 'completed', updatedAt: now })
+          results.push({ jobId: job._id, ok: true })
+          continue
+        }
         if (!isPostSearchableForRag(post)) {
           await provider.deletePostChunks?.(job.postId)
           await upsertPostRagIndexState(job.postId, removedRagIndexState(job, now, post))

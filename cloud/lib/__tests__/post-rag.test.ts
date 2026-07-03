@@ -234,6 +234,42 @@ test('processPostRagJobBatch records community metadata when delete jobs remove 
   }))
 })
 
+test('processPostRagJobBatch treats missing posts as removed instead of failing stale upserts', async () => {
+  const provider = {
+    name: 'fake-rag',
+    isConfigured: jest.fn(() => true),
+    search: jest.fn(),
+    upsertChunks: jest.fn(),
+    deletePostChunks: jest.fn().mockResolvedValue(undefined),
+  }
+  mockDb.query.mockResolvedValue([
+    {
+      _id: 'job-stale-upsert',
+      postId: 'post-gone',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      action: 'upsert',
+      attempts: 0,
+    },
+  ])
+  mockDb.getById.mockRejectedValue(new Error('document.get:fail document with _id post-gone does not exist'))
+  mockDb.updateById.mockResolvedValue({ stats: { updated: 1 } })
+
+  const result = await processPostRagJobBatch({ provider, limit: 1 })
+
+  expect(result.results).toEqual([{ jobId: 'job-stale-upsert', ok: true }])
+  expect(provider.deletePostChunks).toHaveBeenCalledWith('post-gone')
+  expect(provider.upsertChunks).not.toHaveBeenCalled()
+  expect(mockDb.updateById).toHaveBeenCalledWith(POST_RAG_INDEX_STATE, 'post-gone', expect.objectContaining({
+    status: 'removed',
+    communityId: 'community-1',
+    sectionId: 'section-1',
+  }))
+  expect(mockDb.updateById).toHaveBeenCalledWith(POST_RAG_JOBS, 'job-stale-upsert', expect.objectContaining({
+    status: 'completed',
+  }))
+})
+
 test('processPostRagJobBatch can target pending jobs for one post', async () => {
   const provider = {
     name: 'fake-rag',
