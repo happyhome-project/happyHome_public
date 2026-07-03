@@ -16,11 +16,9 @@
         <text v-if="query" class="clear-icon" @tap="clearQuery">×</text>
         <button v-if="!searched" class="search-submit" @tap="submitSearch">搜索</button>
       </view>
-      <view class="search-capsule" aria-hidden="true">
-        <text class="capsule-dot">•••</text>
-        <view class="capsule-line"></view>
-        <text class="capsule-ring">◎</text>
-      </view>
+      <!-- #ifdef MP-WEIXIN -->
+      <view class="search-native-menu-spacer" aria-hidden="true"></view>
+      <!-- #endif -->
     </view>
 
     <view v-if="loading && items.length === 0" class="state">
@@ -167,6 +165,7 @@ import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { getGuideNoteCard, getPostHomeTitle } from '../../utils/widget'
+import { navigateBackOrHome } from '../../utils/hierarchy-nav'
 
 interface SearchField {
   fieldLabel: string
@@ -293,12 +292,7 @@ function clearQuery() {
 }
 
 function goBack() {
-  const pages = getCurrentPages()
-  if (pages.length > 1) {
-    uni.navigateBack()
-    return
-  }
-  uni.switchTab({ url: '/pages/index/index' })
+  navigateBackOrHome()
 }
 
 async function loadMore() {
@@ -368,7 +362,8 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
       usedBootstrapFallback,
     })
   } catch (error: any) {
-    loadError.value = error?.message || '搜索失败'
+    loadError.value = friendlySearchError(error)
+    searched.value = true
     clientLog('error', 'search.load.fail', { communityId: communityId.value, error })
     if (String(loadError.value).includes('需要先加入社区后查看内容')) {
       uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
@@ -376,6 +371,15 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
   } finally {
     loading.value = false
   }
+}
+
+function friendlySearchError(error: any): string {
+  const message = String(error?.message || error?.errMsg || '')
+  if (message.includes('需要先加入社区后查看内容')) return '需要先加入社区后查看内容'
+  if (message.includes('FUNCTIONS_EXECUTE_FAIL') || message.includes('callFunction') || message.includes('cloud') || message.includes('HTTP')) {
+    return '搜索暂时不可用，请稍后再试'
+  }
+  return message || '搜索失败'
 }
 
 function shouldSearchAsGuest(targetCommunityId: string): boolean {
@@ -685,20 +689,14 @@ function formatDate(value: unknown): string {
   border: 0;
 }
 
-.search-capsule {
+.search-native-menu-spacer {
   flex: 0 0 174rpx;
   height: 64rpx;
-  border: 1rpx solid #f7f7f7;
-  border-radius: $hh-radius-full;
-  background: rgba(255, 255, 255, 0.74);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 18rpx;
-  color: #181818;
+  visibility: hidden;
+  pointer-events: none;
 }
 
-.search-nav--initial .search-capsule {
+.search-nav--initial .search-native-menu-spacer {
   position: absolute;
   right: 13px;
   top: 73px;
@@ -711,23 +709,6 @@ function formatDate(value: unknown): string {
   left: 16px;
   top: 77px;
   z-index: 2;
-}
-
-.capsule-dot {
-  font-size: 34rpx;
-  line-height: 1;
-  transform: translateY(-3rpx);
-}
-
-.capsule-line {
-  width: 1rpx;
-  height: 36rpx;
-  background: #f1f1f1;
-}
-
-.capsule-ring {
-  font-size: 36rpx;
-  line-height: 1;
 }
 
 .search-discovery {

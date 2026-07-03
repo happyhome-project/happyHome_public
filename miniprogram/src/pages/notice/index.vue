@@ -26,6 +26,7 @@ import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
+import { navigateBackOrHome } from '../../utils/hierarchy-nav'
 
 interface NoticeDetail {
   sectionName: string
@@ -71,7 +72,7 @@ function resolveNotice() {
 }
 
 function goHome() {
-  uni.switchTab({ url: '/pages/index/index' })
+  navigateBackOrHome()
 }
 
 onLoad(async (query) => {

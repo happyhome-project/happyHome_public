@@ -296,10 +296,12 @@ function openPost(postId: string) {
 
 function goCreatePost() {
   if (!sectionId.value) return
+  const returnTo = `/pages/section/index?sectionId=${encodeURIComponent(sectionId.value)}`
   try {
     uni.setStorageSync(CREATE_SECTION_INTENT_KEY, {
       sectionId: sectionId.value,
       createdAt: Date.now(),
+      returnTo,
       source: 'section.empty',
     })
   } catch (error) {

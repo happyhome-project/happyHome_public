@@ -49,6 +49,7 @@ import { communityApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import LoginGuard from '../../components/LoginGuard.vue'
+import { navigateBackOrHome } from '../../utils/hierarchy-nav'
 
 const userStore = useUserStore()
 
@@ -82,7 +83,7 @@ async function handleSubmit() {
       title: '提交成功',
       content: '社区已创建，等待平台审核通过后即可对外展示',
       showCancel: false,
-      success: () => uni.navigateBack(),
+      success: () => navigateBackOrHome(),
     })
   } catch (e: any) {
     uni.showToast({ title: e?.message || '创建失败', icon: 'none' })
