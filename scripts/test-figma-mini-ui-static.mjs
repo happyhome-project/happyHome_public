@@ -175,6 +175,12 @@ assert(
     home.includes('font-weight: $hh-font-weight-medium;') &&
     !home.includes('<text class="home-search-icon">⌕</text>') &&
     home.includes('class="guide-feed"') &&
+    home.includes('onPageScroll') &&
+    home.includes('restoreArchiveSwitchScroll') &&
+    home.includes('uni.pageScrollTo') &&
+    !home.includes('active-archive-head') &&
+    !home.includes('active-archive-count') &&
+    !home.includes('active-archive-arrow') &&
     home.includes('guideColumns') &&
     home.includes('selectArchiveGroup(g)') &&
     home.includes('GUIDE_NOTE_NAME_HINTS') &&
@@ -183,7 +189,7 @@ assert(
     home.includes('rawHomeGuideCoverImages') &&
     home.includes('resolveCloudFileUrls') &&
     !home.includes(`<template v-if="g.displayTemplate === 'guide_note'">`),
-  'home should follow Figma tabs plus two-column guide feed, and keep notice-board short labels controlled instead of binding long section names.'
+  'home should follow Figma tabs plus two-column guide feed, keep tab switching scroll-stable, and keep notice-board short labels controlled instead of binding long section names.'
 )
 
 assert(

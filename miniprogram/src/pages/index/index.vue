@@ -188,14 +188,6 @@
 
     <!-- Archive feed · Figma 0626 选中板块内容区 -->
     <view v-if="activeArchiveGroup" class="active-archive">
-      <view class="active-archive-head" @tap="onGroupHeaderTap(activeArchiveGroup)">
-        <view class="active-archive-title-wrap">
-          <text class="active-archive-title">{{ activeArchiveGroup.name }}</text>
-          <text class="active-archive-count">· {{ activeArchiveGroup.count }} 条</text>
-        </view>
-        <text class="active-archive-arrow">›</text>
-      </view>
-
       <view
         v-if="activeArchiveGroup.displayTemplate === 'guide_note'"
         class="guide-feed"
@@ -337,8 +329,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
-import { onLoad, onPullDownRefresh, onShareAppMessage, onShow } from '@dcloudio/uni-app'
+import { computed, ref, nextTick, onMounted, onUnmounted, watch } from 'vue'
+import { onLoad, onPageScroll, onPullDownRefresh, onShareAppMessage, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi, postApi } from '../../api/cloud'
@@ -375,11 +367,13 @@ const incomingShareCommunityId = ref('')
 const shareImageUrl = ref(DEFAULT_COMMUNITY_SHARE_IMAGE)
 const homeSearchQuery = ref('')
 const selectedArchiveId = ref('')
+const homePageScrollTop = ref(0)
 const homeBannerActiveIndex = ref(0)
 let refreshingHome = false
 let queuedForcedHomeRefresh = false
 let mountedAt = 0
 let unsubscribeBackgroundFetchSnapshot: (() => void) | null = null
+let archiveSwitchScrollTimers: ReturnType<typeof setTimeout>[] = []
 let homeBannerPointerStartX = 0
 let homeBannerPointerMoved = false
 let suppressNextHomeBannerTap = false
@@ -397,6 +391,11 @@ const GUIDE_AUTHOR_AVATAR_PALETTE = [
   ['#D7E8EA', '#72B2B8'],
 ]
 const GUIDE_NOTE_NAME_HINTS = ['亲子出游', '周末遛娃', '村游攻略', '路线攻略', '出游攻略']
+
+onPageScroll((event) => {
+  const nextScrollTop = Number(event?.scrollTop || 0)
+  homePageScrollTop.value = Number.isFinite(nextScrollTop) ? Math.max(0, Math.round(nextScrollTop)) : 0
+})
 
 onLoad((options?: Record<string, any>) => {
   if (!isCommunityShareQuery(options)) return
@@ -872,9 +871,56 @@ function onLiveTap(item: LiveItem) {
   }
 }
 
+function clearArchiveSwitchScrollTimers() {
+  archiveSwitchScrollTimers.forEach((timer) => clearTimeout(timer))
+  archiveSwitchScrollTimers = []
+}
+
+function getCurrentPageScrollTop() {
+  let scrollTop = homePageScrollTop.value
+  // #ifdef H5
+  if (typeof window !== 'undefined' || typeof document !== 'undefined') {
+    const candidates = [
+      typeof window !== 'undefined' ? window.scrollY : 0,
+      typeof document !== 'undefined' ? document.documentElement?.scrollTop || 0 : 0,
+      typeof document !== 'undefined' ? document.body?.scrollTop || 0 : 0,
+    ].filter((value) => Number.isFinite(value) && value >= 0)
+    if (candidates.length) scrollTop = Math.max(...candidates)
+  }
+  // #endif
+  return Math.max(0, Math.round(Number(scrollTop) || 0))
+}
+
+function restoreArchiveSwitchScroll(scrollTop: number) {
+  clearArchiveSwitchScrollTimers()
+  const target = Math.max(0, Math.round(Number(scrollTop) || 0))
+  const restore = () => {
+    try {
+      uni.pageScrollTo({ scrollTop: target, duration: 0 })
+      homePageScrollTop.value = target
+    } catch (error) {
+      clientLog('warn', 'home.archive.scroll.restore.fail', { target, error })
+    }
+
+    // #ifdef H5
+    if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+      window.scrollTo({ top: target, left: 0, behavior: 'auto' })
+    }
+    // #endif
+  }
+
+  nextTick(() => {
+    restore()
+    archiveSwitchScrollTimers.push(setTimeout(restore, 60))
+    archiveSwitchScrollTimers.push(setTimeout(restore, 180))
+  })
+}
+
 function selectArchiveGroup(g: ArchiveGroup) {
   if (!g.id) return
+  const previousScrollTop = getCurrentPageScrollTop()
   selectedArchiveId.value = g.id
+  restoreArchiveSwitchScroll(previousScrollTop)
   clientLog('info', 'home.archive.group.select', {
     sectionId: g.id,
     name: g.name,
@@ -1187,6 +1233,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  clearArchiveSwitchScrollTimers()
   unsubscribeBackgroundFetchSnapshot?.()
   unsubscribeBackgroundFetchSnapshot = null
 })
@@ -2536,6 +2583,7 @@ onShareAppMessage(() => {
 .section-tabs {
   margin: 34rpx 0 20rpx;
   white-space: nowrap;
+  overflow-anchor: none;
 }
 
 .section-tabs-inner {
@@ -2572,42 +2620,7 @@ onShareAppMessage(() => {
 
 .active-archive {
   margin: 0 var(--hh-page-x) 28rpx;
-}
-
-.active-archive-head {
-  min-height: 52rpx;
-  margin-bottom: 18rpx;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16rpx;
-}
-
-.active-archive-title-wrap {
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 10rpx;
-}
-
-.active-archive-title {
-  color: var(--hh-color-text-primary);
-  font-size: var(--hh-text-heading-sm-size);
-  line-height: var(--hh-text-heading-sm-line);
-  font-weight: $hh-font-weight-bold;
-}
-
-.active-archive-count,
-.active-archive-arrow {
-  color: var(--hh-color-text-tertiary);
-  font-size: var(--hh-text-caption-lg-size);
-  line-height: var(--hh-text-caption-lg-line);
-}
-
-.active-archive-arrow {
-  flex: 0 0 auto;
-  font-size: 34rpx;
-  line-height: 1;
+  overflow-anchor: none;
 }
 
 .guide-feed {
