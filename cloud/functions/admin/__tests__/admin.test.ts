@@ -738,12 +738,16 @@ test('section.updateMeta: 展示模板只接受默认和图文攻略', async () 
   expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledTimes(2)
 })
 
-test('section.updateStatus: refreshes search index metadata after status changes', async () => {
+test('section.updateStatus: refreshes search and queues RAG jobs for existing posts', async () => {
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-live',
     type: 'realtime',
     status: 'active',
   })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([
+    { _id: 'post-a', communityId: 'community-a', sectionId: 'section-live', status: 'active' },
+    { _id: 'post-b', communityId: 'community-b', sectionId: 'section-live', status: 'active' },
+  ])
   ;(db.updateById as jest.Mock).mockResolvedValue({})
 
   const result: any = await main({
@@ -754,7 +758,22 @@ test('section.updateStatus: refreshes search index metadata after status changes
 
   expect(result.success).toBe(true)
   expect(db.updateById).toHaveBeenCalledWith('sections', 'section-live', { status: 'dormant' })
-  expect(postRag.enqueuePostRagJob).not.toHaveBeenCalled()
+  expect(db.query).toHaveBeenCalledWith('posts', { sectionId: 'section-live', status: 'active' })
+  expect(postRag.enqueuePostRagJob).toHaveBeenCalledTimes(2)
+  expect(postRag.enqueuePostRagJob).toHaveBeenNthCalledWith(1, {
+    postId: 'post-a',
+    communityId: 'community-a',
+    sectionId: 'section-live',
+    action: 'upsert',
+    reason: 'section.updateStatus',
+  })
+  expect(postRag.enqueuePostRagJob).toHaveBeenNthCalledWith(2, {
+    postId: 'post-b',
+    communityId: 'community-b',
+    sectionId: 'section-live',
+    action: 'upsert',
+    reason: 'section.updateStatus',
+  })
   expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledWith('section-live')
 })
 

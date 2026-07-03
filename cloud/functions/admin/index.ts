@@ -1067,6 +1067,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       throw new Error('evergreen 板块只能保持 active')
     }
     await db.updateById('sections', sectionId, { status: params.status })
+    await enqueuePostRagJobsForSection(sectionId, 'section.updateStatus')
     await backfillPostSearchIndexesForSection(sectionId)
     return { success: true }
   }

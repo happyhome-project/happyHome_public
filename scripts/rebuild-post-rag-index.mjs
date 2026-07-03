@@ -142,6 +142,9 @@ async function enqueueCommunityRagJobs(communityId, options, runner) {
 }
 
 async function processQueuedJobs(options, runner) {
+  if (!options.workerToken) {
+    throw new Error('POST_RAG_WORKER_TOKEN is required to invoke post-rag-worker; use --no-process to only enqueue jobs')
+  }
   const rounds = []
   for (let round = 0; round < options.workerRounds; round += 1) {
     const result = await invokeFunction('post-rag-worker', withWorkerToken({ limit: 20 }, options), options, runner)
@@ -227,8 +230,8 @@ Options:
   --dry-run                     Print target community ids without enqueueing.
   --batch-size <n>              Posts per admin invocation. Defaults to ${DEFAULT_BATCH_SIZE}.
   --no-process                  Only enqueue jobs; do not invoke post-rag-worker.
-  --worker-rounds <n>           Max worker invocations when processing. Defaults to ${DEFAULT_WORKER_ROUNDS}.
   --worker-token <token>        Token used to invoke post-rag-worker.
+  --worker-rounds <n>           Max worker invocations when processing. Defaults to ${DEFAULT_WORKER_ROUNDS}.
 `)
 }
 
