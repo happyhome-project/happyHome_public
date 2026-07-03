@@ -234,13 +234,13 @@ const postMeta = computed(() => ({
 const detailSectionTitle = computed(() => section.value?.name || '')
 const isGuideNoteDetail = computed(() => resolveGuideNoteDetailTemplate(section.value))
 const renderPost = computed(() => {
-  if (!post.value) return post.value
+  const currentPost = post.value
+  if (!currentPost) return currentPost
   const replacements = resolvedDetailMediaUrls
-  if (!Object.keys(replacements).length) return post.value
-  return {
-    ...post.value,
-    content: replaceResolvedMediaUrls(post.value.content || {}, replacements),
-  }
+  if (!Object.keys(replacements).length) return currentPost
+  return Object.assign({}, currentPost, {
+    content: replaceResolvedMediaUrls(currentPost.content || {}, replacements),
+  })
 })
 const guideRouteDetail = computed(() => {
   if (!renderPost.value || !section.value || !isGuideNoteDetail.value) return null
@@ -443,7 +443,8 @@ function collectCloudMediaUrls(value: unknown, target: string[] = []): string[] 
     return target
   }
   if (value && typeof value === 'object') {
-    Object.values(value as Record<string, unknown>).forEach((item) => collectCloudMediaUrls(item, target))
+    const source = value as Record<string, unknown>
+    Object.keys(source).forEach((key) => collectCloudMediaUrls(source[key], target))
   }
   return target
 }
@@ -455,7 +456,8 @@ async function resolveDetailMediaUrls() {
     urlCount: urls.length,
   })
   if (urls.length === 0) return
-  const [primaryUrl, ...remainingUrls] = urls
+  const primaryUrl = urls[0]
+  const remainingUrls = urls.slice(1)
   let resolvedCount = 0
   try {
     const primaryResolved = await resolveCloudFileUrls([primaryUrl])
@@ -489,7 +491,8 @@ async function resolveDetailMediaUrls() {
 function replaceResolvedMediaUrls(value: unknown, replacements: Record<string, string>): any {
   if (typeof value === 'string') {
     let next = value
-    Object.entries(replacements).forEach(([rawUrl, resolvedUrl]) => {
+    Object.keys(replacements).forEach((rawUrl) => {
+      const resolvedUrl = replacements[rawUrl]
       if (rawUrl && resolvedUrl && rawUrl !== resolvedUrl) {
         next = next.split(rawUrl).join(resolvedUrl)
       }
@@ -498,10 +501,12 @@ function replaceResolvedMediaUrls(value: unknown, replacements: Record<string, s
   }
   if (Array.isArray(value)) return value.map((item) => replaceResolvedMediaUrls(item, replacements))
   if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .map(([key, item]) => [key, replaceResolvedMediaUrls(item, replacements)])
-    )
+    const source = value as Record<string, unknown>
+    const next: Record<string, any> = {}
+    Object.keys(source).forEach((key) => {
+      next[key] = replaceResolvedMediaUrls(source[key], replacements)
+    })
+    return next
   }
   return value
 }

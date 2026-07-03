@@ -90,7 +90,7 @@
       <template v-else-if="showManualLoginForm">
         <view class="login-form">
           <text class="form-title">登录</text>
-          <text class="form-hint">当前环境不支持微信原生登录，请手动填写</text>
+          <text class="form-hint">当前环境不支持微信原生登录，请手动填写昵称后继续使用社区功能</text>
 
           <view class="avatar-row">
             <image
@@ -139,18 +139,27 @@
             <text class="name">{{ profileDisplayName }}</text>
           </view>
         </view>
-        <button
-          v-if="supportsChooseAvatar"
-          open-type="chooseAvatar"
-          class="profile-login-hit"
-          @chooseavatar="onLoginChooseAvatar"
-        ></button>
+        <view v-if="supportsChooseAvatar" class="login-form profile-login-actions">
+          <button
+            open-type="chooseAvatar"
+            class="login-hero-btn"
+            @chooseavatar="onLoginChooseAvatar"
+          >微信登录</button>
+          <view class="login-alt-row">
+            <text class="login-alt-hint">使用其他账号？</text>
+            <text class="login-alt-link" @tap.stop="showDevLogin = true">DEV 登录</text>
+          </view>
+        </view>
         <button
           v-else
           class="profile-login-hit"
           @tap.stop="openLoginEntry"
         ></button>
       </template>
+    </view>
+
+    <view v-if="releaseVersion && !userStore.isLoggedIn && !isEditingProfile" class="profile-release-id">
+      <text>{{ releaseVersion }}</text>
     </view>
 
     <view v-if="!isEditingProfile && !showManualLoginForm" class="profile-shortcuts">
@@ -342,6 +351,7 @@ import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
+import { getReleaseVersion } from '../../utils/release-version'
 import {
   buildApprovalReminderState,
   buildSubscriptionSaves,
@@ -368,6 +378,7 @@ const notificationTemplates = ref<ApprovalNotificationTemplate[]>([])
 const notificationSubscriptions = ref<Array<{ eventType: ApprovalNotificationEventType; templateId: string; status: string }>>([])
 const notificationNeedsAuthorization = ref(false)
 const profileError = ref('')
+const releaseVersion = getReleaseVersion()
 let refreshingProfile = false
 let lastLoginStateRefreshKey = ''
 let suppressNextLoginStateRefresh = false
@@ -624,10 +635,7 @@ function isH5Runtime() {
 
 function openLoginEntry() {
   if (userStore.isLoggedIn) return
-  if (isH5Runtime()) {
-    showDevLogin.value = true
-    return
-  }
+  if (supportsChooseAvatar.value) return
   showManualLoginForm.value = true
 }
 
@@ -979,6 +987,9 @@ watch(
 
 onMounted(() => {
   hideNativeTabBar()
+  if (!userStore.isLoggedIn && isH5Runtime() && !supportsChooseAvatar.value) {
+    showManualLoginForm.value = true
+  }
   logProfile('info', 'profile.mounted', {})
   void nextTick(() => logProfile('info', 'profile.render.tick', { reason: 'mounted' }))
   void refreshProfileData('mounted')
@@ -1022,6 +1033,13 @@ onShareAppMessage(() => {
   color: #d93026;
   font-size: $hh-font-caption;
   line-height: 1.5;
+}
+.profile-release-id {
+  margin: -8rpx 0 $hh-space-md;
+  text-align: center;
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-caption-size);
+  line-height: var(--hh-text-caption-line-height);
 }
 .user-card { background: var(--hh-color-card); border: 1rpx solid var(--hh-color-line); border-radius: var(--hh-radius-card); padding: $hh-space-lg; display: flex; align-items: center; margin-bottom: $hh-space-md; box-shadow: var(--hh-shadow-soft); }
 .avatar { width: 100rpx; height: 100rpx; border-radius: $hh-radius-full; margin-right: $hh-space-md; }
@@ -1611,6 +1629,27 @@ onShareAppMessage(() => {
   color: #b4bab7;
   font-size: 38rpx;
   line-height: 1;
+}
+
+.profile-login-actions {
+  flex: 0 0 224rpx;
+  width: 224rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8rpx;
+}
+
+.profile-login-actions .login-hero-btn {
+  width: 100%;
+  height: 64rpx;
+  line-height: 64rpx;
+  margin: 0;
+}
+
+.profile-login-actions .login-alt-row {
+  margin-top: 0;
+  justify-content: flex-end;
 }
 
 .profile-login-hit {

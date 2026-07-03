@@ -142,7 +142,7 @@ assert(
     home.includes('class="home-shell"') &&
     home.includes('class="home-quote"') &&
     home.includes('quoteText') &&
-    home.includes('placeholder="试试搜周边亲子游路线"') &&
+    home.includes('placeholder="搜索帖子、正文、视频"') &&
     home.includes('class="home-banner"') &&
     home.includes('homeBannerItems') &&
     home.includes('openHomeBanner') &&

@@ -101,8 +101,8 @@
         <view class="empty-folder"></view>
         <text class="empty-plane">↗</text>
       </view>
-      <text class="empty-title">暂无相关结果</text>
-      <text class="empty-desc">换个关键词试试</text>
+      <text class="empty-title">{{ mode === 'no_answer' ? '没有找到足够相关的帖子' : '暂无相关结果' }}</text>
+      <text class="empty-desc">{{ mode === 'no_answer' ? '换个关键词，或试试搜索正文/视频内容' : '换个关键词试试' }}</text>
     </view>
 
     <view v-if="items.length" class="result-list">

@@ -42,7 +42,7 @@
             v-model="homeSearchQuery"
             class="home-search-input"
             confirm-type="search"
-            placeholder="试试搜周边亲子游路线"
+            placeholder="搜索帖子、正文、视频"
             placeholder-class="home-search-placeholder"
             @confirm="submitHomeSearch"
           />

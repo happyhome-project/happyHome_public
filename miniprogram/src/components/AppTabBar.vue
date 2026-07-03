@@ -71,10 +71,14 @@ const activePublishSections = computed(() =>
 )
 
 const publishOptions = computed(() =>
-  activePublishSections.value.slice(0, 8).map((section: any, index: number) => ({
-    section,
-    ...resolvePublishMeta(section?.name, index),
-  }))
+  activePublishSections.value.slice(0, 8).map((section: any, index: number) => {
+    const meta = resolvePublishMeta(section?.name, index)
+    return {
+      section,
+      tone: meta.tone,
+      iconSrc: meta.iconSrc,
+    }
+  })
 )
 
 onMounted(() => {
