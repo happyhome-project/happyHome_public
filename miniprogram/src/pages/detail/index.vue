@@ -180,6 +180,7 @@ import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { buildGuideRouteDetail } from '../../utils/guide-detail'
 import { extractRichNoteImageSources } from '../../utils/rich-note'
+import { navigateBackOrHome } from '../../utils/hierarchy-nav'
 
 const fallbackAvatar = '/static/default-avatar.png'
 const ATTENDANCE_SLOT_DISPLAY_MAX = 6
@@ -553,9 +554,7 @@ function retryLoad() {
 
 function goBack() {
   clientLog('info', 'detail.goBack.tap', { postId: currentPostId.value })
-  uni.navigateBack({
-    fail: () => uni.switchTab({ url: '/pages/index/index' }),
-  })
+  navigateBackOrHome()
 }
 
 function goOriginPost() {
@@ -578,6 +577,7 @@ async function handleActivityInviteTap() {
   try {
     uni.setStorageSync(ACTIVITY_INVITE_CREATE_INTENT_KEY, {
       sourcePostId: post.value._id,
+      returnTo: `/pages/detail/index?postId=${encodeURIComponent(post.value._id)}`,
       createdAt: Date.now(),
     })
   } catch {}
@@ -596,7 +596,7 @@ const deleteLock = useBusyLock(async () => {
   try {
     await postApi.delete(post.value._id)
     uni.showToast({ title: '已删除', icon: 'success' })
-    uni.navigateBack()
+    navigateBackOrHome()
   } catch (error: any) {
     uni.showToast({ title: error?.message || '删除失败', icon: 'none' })
   }

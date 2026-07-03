@@ -30,14 +30,17 @@
           <text class="home-quote-text">{{ quoteText }}</text>
           <view v-if="quoteCite" class="home-quote-cite-wrap">
             <view class="home-quote-line"></view>
-            <text class="home-quote-cite">《{{ quoteCite }}》</text>
+            <text class="home-quote-cite">{{ quoteCite }}</text>
           </view>
         </view>
       </view>
 
       <view class="home-search">
         <view class="home-search-box">
-          <text class="home-search-icon">⌕</text>
+          <view class="home-search-icon" aria-hidden="true">
+            <view class="home-search-icon-ring"></view>
+            <view class="home-search-icon-handle"></view>
+          </view>
           <input
             v-model="homeSearchQuery"
             class="home-search-input"
@@ -105,7 +108,7 @@
         :style="getNoticeCardStyle(notice, i)"
         @tap="openNotice(notice)"
       >
-        <text class="notice-kind">{{ notice.sectionName || notice.label }}</text>
+        <text class="notice-kind">{{ notice.kind }}</text>
         <view class="notice-main">
           <view class="notice-line">
             <text class="notice-badge">{{ i === 0 ? '置顶' : '最新' }}</text>
@@ -118,7 +121,7 @@
 
     <!-- Live strip · 实时脉冲区：有激活的实时协作板块时显示 -->
     <view v-if="liveItems.length > 0" class="group-section">
-      <text class="group-section-title">我的组局</text>
+      <text class="group-section-title">活动召集</text>
       <view
         v-for="(item, i) in liveItems"
         :key="i"
@@ -345,9 +348,10 @@ import { getArchiveHomeMeta, getFamilyLetterListSummary, getGuideNoteCard, getHo
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
+import { normalizeHomeNoticeKind } from '../../utils/home-notice'
+import { formatHomeQuoteCite } from '../../utils/home-quote'
 import { resolveCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import {
-  buildCommunityOnboardingPath,
   buildCommunitySharePath,
   buildCommunityShareTitle,
   DEFAULT_COMMUNITY_SHARE_IMAGE,
@@ -413,7 +417,7 @@ const homeHeroImage = computed(() =>
   String(communityStore.currentCommunity?.coverImage || '').trim() ? shareImageUrl.value : ''
 )
 const quoteText = computed(() => String(communityStore.currentCommunity?.motto || '').trim())
-const quoteCite = computed(() => String(communityStore.currentCommunity?.mottoCite || '').trim())
+const quoteCite = computed(() => formatHomeQuoteCite(communityStore.currentCommunity?.mottoCite))
 const activeArchiveIndex = computed(() => {
   const groups = archiveGroups.value
   if (!groups.length) return -1
@@ -476,6 +480,7 @@ interface SectionNotice {
   widgetId: string
   sectionName: string
   label: string
+  kind: string
   content: string
   preview: string
   isLong: boolean
@@ -499,6 +504,7 @@ const sectionNotices = computed<SectionNotice[]>(() => {
         widgetId: widget.widgetId,
         sectionName: section.name,
         label: widget.label || '公告',
+        kind: normalizeHomeNoticeKind(widget.label),
         content,
         preview,
         isLong: Array.from(content).length > NOTICE_PREVIEW_LIMIT,
@@ -942,16 +948,7 @@ function expandDormant() {
 }
 
 function openSharedCommunityOnboarding(communityId: string) {
-  const url = buildCommunityOnboardingPath(communityId)
-  uni.navigateTo({
-    url,
-    fail: () => {
-      uni.redirectTo({
-        url,
-        fail: () => uni.reLaunch({ url }),
-      })
-    },
-  })
+  openOnboardingPreservingStack({ mode: 'discover', communityId })
 }
 
 async function handleInitialShareLanding(): Promise<boolean> {
@@ -1467,47 +1464,71 @@ onShareAppMessage(() => {
   margin: 0 32rpx 28rpx;
 }
 .home-search-box {
-  min-height: 84rpx;
-  padding: 0 16rpx 0 24rpx;
-  border: 1rpx solid $hh-ink-line;
-  border-radius: 22rpx;
-  background: $hh-surface-1;
-  box-shadow: $hh-shadow-card;
+  min-height: 90rpx;
+  padding: 0 8rpx 0 30rpx;
+  border: 0;
+  border-radius: $hh-radius-full;
+  background: #fff;
+  box-shadow: none;
   display: flex;
   align-items: center;
-  gap: 14rpx;
+  gap: 15rpx;
 }
 .home-search-icon {
+  position: relative;
   flex-shrink: 0;
-  width: 32rpx;
-  font-size: 30rpx;
-  line-height: 1;
-  color: $hh-ink-3;
+  width: 38rpx;
+  height: 38rpx;
+  color: rgba(0, 0, 0, 0.45);
+}
+.home-search-icon-ring {
+  position: absolute;
+  left: 4rpx;
+  top: 4rpx;
+  width: 26rpx;
+  height: 26rpx;
+  border: 3rpx solid currentColor;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+.home-search-icon-handle {
+  position: absolute;
+  left: 27rpx;
+  top: 28rpx;
+  width: 13rpx;
+  height: 3rpx;
+  border-radius: $hh-radius-full;
+  background: currentColor;
+  transform: rotate(45deg);
+  transform-origin: left center;
 }
 .home-search-input {
   flex: 1;
   min-width: 0;
-  height: 84rpx;
-  font-size: 27rpx;
+  height: 90rpx;
+  font-size: 30rpx;
+  line-height: 45rpx;
   color: $hh-ink-1;
 }
 .home-search-placeholder {
-  color: $hh-ink-4;
+  color: rgba(0, 0, 0, 0.45);
 }
 .home-search-action {
-  flex-shrink: 0;
-  min-width: 92rpx;
-  height: 56rpx;
-  padding: 0 18rpx;
+  flex: 0 0 150rpx;
+  width: 150rpx;
+  min-width: 0;
+  height: 75rpx;
+  padding: 0;
   border-radius: $hh-radius-full;
-  background: $hh-ink-1;
+  background: var(--hh-color-brand-primary);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .home-search-action text {
-  font-size: 23rpx;
-  font-weight: $hh-font-weight-bold;
+  font-size: 30rpx;
+  line-height: 45rpx;
+  font-weight: $hh-font-weight-medium;
   color: $hh-surface-1;
 }
 
@@ -1745,10 +1766,14 @@ onShareAppMessage(() => {
 .notice-kind {
   width: 76rpx;
   flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--hh-color-text-primary);
   font-size: var(--hh-text-body-lg-size);
   line-height: var(--hh-text-body-lg-line);
   font-weight: $hh-font-weight-bold;
+  text-align: left;
 }
 
 .notice-main {
@@ -2396,26 +2421,38 @@ onShareAppMessage(() => {
 }
 
 .home-shell .home-search-box {
-  min-height: 96rpx;
+  min-height: 90rpx;
+  padding: 0 8rpx 0 30rpx;
   border: 0;
   border-radius: $hh-radius-full;
   box-shadow: none;
+  gap: 15rpx;
 }
 
 .home-shell .home-search-input {
-  height: 96rpx;
-  font-size: var(--hh-text-body-lg-size);
+  height: 90rpx;
+  font-size: 30rpx;
+  line-height: 45rpx;
+}
+
+.home-shell .home-search-icon,
+.home-shell .home-search-placeholder {
+  color: rgba(0, 0, 0, 0.45);
 }
 
 .home-shell .home-search-action {
-  min-width: 112rpx;
-  height: 80rpx;
+  flex: 0 0 150rpx;
+  width: 150rpx;
+  min-width: 0;
+  height: 75rpx;
+  padding: 0;
   background: var(--hh-color-brand-primary);
 }
 
 .home-shell .home-search-action text {
-  font-size: var(--hh-text-body-lg-size);
-  line-height: var(--hh-text-body-lg-line);
+  font-size: 30rpx;
+  line-height: 45rpx;
+  font-weight: $hh-font-weight-medium;
 }
 
 .home-banner {
