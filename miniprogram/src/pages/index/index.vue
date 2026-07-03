@@ -1,6 +1,13 @@
 <template>
   <view class="phone-inner">
     <view class="home-shell">
+      <view class="home-brandbar" aria-label="社群助手">
+        <view class="home-brand-title-wrap">
+          <text class="home-brand-title">社群助手</text>
+          <view class="home-brand-line"></view>
+        </view>
+      </view>
+
       <view class="home-topbar">
         <view class="community-identity" @tap="onMastheadTap">
           <view class="community-avatar">
@@ -30,7 +37,7 @@
           <text class="home-quote-text">{{ quoteText }}</text>
           <view v-if="quoteCite" class="home-quote-cite-wrap">
             <view class="home-quote-line"></view>
-            <text class="home-quote-cite">《{{ quoteCite }}》</text>
+            <text class="home-quote-cite">{{ quoteCite }}</text>
           </view>
         </view>
       </view>
@@ -105,7 +112,7 @@
         :style="getNoticeCardStyle(notice, i)"
         @tap="openNotice(notice)"
       >
-        <text class="notice-kind">{{ notice.sectionName || notice.label }}</text>
+        <text class="notice-kind">{{ notice.kind }}</text>
         <view class="notice-main">
           <view class="notice-line">
             <text class="notice-badge">{{ i === 0 ? '置顶' : '最新' }}</text>
@@ -345,6 +352,8 @@ import { getArchiveHomeMeta, getFamilyLetterListSummary, getGuideNoteCard, getHo
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
+import { normalizeHomeNoticeKind } from '../../utils/home-notice'
+import { formatHomeQuoteCite } from '../../utils/home-quote'
 import { resolveCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import {
   buildCommunityOnboardingPath,
@@ -413,7 +422,7 @@ const homeHeroImage = computed(() =>
   String(communityStore.currentCommunity?.coverImage || '').trim() ? shareImageUrl.value : ''
 )
 const quoteText = computed(() => String(communityStore.currentCommunity?.motto || '').trim())
-const quoteCite = computed(() => String(communityStore.currentCommunity?.mottoCite || '').trim())
+const quoteCite = computed(() => formatHomeQuoteCite(communityStore.currentCommunity?.mottoCite))
 const activeArchiveIndex = computed(() => {
   const groups = archiveGroups.value
   if (!groups.length) return -1
@@ -476,6 +485,7 @@ interface SectionNotice {
   widgetId: string
   sectionName: string
   label: string
+  kind: string
   content: string
   preview: string
   isLong: boolean
@@ -499,6 +509,7 @@ const sectionNotices = computed<SectionNotice[]>(() => {
         widgetId: widget.widgetId,
         sectionName: section.name,
         label: widget.label || '公告',
+        kind: normalizeHomeNoticeKind(widget.label),
         content,
         preview,
         isLong: Array.from(content).length > NOTICE_PREVIEW_LIMIT,
@@ -1745,10 +1756,14 @@ onShareAppMessage(() => {
 .notice-kind {
   width: 76rpx;
   flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--hh-color-text-primary);
   font-size: var(--hh-text-body-lg-size);
   line-height: var(--hh-text-body-lg-line);
   font-weight: $hh-font-weight-bold;
+  text-align: left;
 }
 
 .notice-main {
@@ -2265,10 +2280,46 @@ onShareAppMessage(() => {
 }
 
 .home-shell {
-  padding: 42rpx var(--hh-page-x) 24rpx;
+  padding: calc(86rpx + env(safe-area-inset-top)) var(--hh-page-x) 24rpx;
   background:
-    radial-gradient(circle at 84% 0%, rgba(61, 173, 125, 0.18), transparent 34%),
-    linear-gradient(170deg, #cff5f2 0%, #f2f3f7 46%, var(--hh-color-page) 100%);
+    radial-gradient(circle at 84% 0%, rgba(48, 91, 70, 0.22), transparent 34%),
+    linear-gradient(170deg, #caeee7 0%, #f1f3ee 58%, var(--hh-color-page) 100%);
+}
+
+.home-brandbar {
+  height: 78rpx;
+  margin-bottom: 16rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.home-brand-title-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.home-brand-title {
+  color: #183327;
+  font-family: $hh-font-serif;
+  font-size: 52rpx;
+  line-height: 1;
+  font-weight: 760;
+  letter-spacing: 0;
+  white-space: nowrap;
+  text-shadow: 0 10rpx 22rpx rgba(24, 51, 39, 0.1);
+}
+
+.home-brand-line {
+  position: absolute;
+  left: -56rpx;
+  right: -56rpx;
+  bottom: -12rpx;
+  height: 2rpx;
+  background: linear-gradient(90deg, transparent, rgba(36, 77, 57, 0.38), transparent);
+  pointer-events: none;
 }
 
 .home-topbar {
