@@ -39,6 +39,7 @@ import type {
   AdminRole,
   AdminSession,
   Community,
+  HomeBanner,
   Section,
   SectionType,
   Widget,
@@ -146,6 +147,7 @@ const SUPER_ADMIN_ONLY: Array<string | RegExp> = [
 // 这些 action 需要校验对 communityId 的归属（superAdmin 自动放行）
 const COMMUNITY_SCOPED_ACTIONS = new Set([
   'community.updateMeta',
+  'community.updateHomeBanners',
   'section.list',
   'section.create',
   'member.pendingList',
@@ -987,6 +989,13 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     await db.updateById('communities', communityId, updates)
     return { success: true }
   }
+  if (action === 'community.updateHomeBanners') {
+    const communityId = String(params.communityId || '').trim()
+    if (!communityId) throw new Error('communityId 不能为空')
+    const banners = await normalizeCommunityHomeBanners(communityId, params.banners)
+    await db.updateById('communities', communityId, { homeBanners: banners })
+    return { success: true }
+  }
   if (action === 'community.hardDelete') {
     const community = await db.getById('communities', params.communityId) as Community | null
     if (!community) throw new Error('community not found')
@@ -1773,9 +1782,49 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
   throw new Error(`Unknown action: ${action}`)
 }
 
+async function normalizeCommunityHomeBanners(communityId: string, input: unknown): Promise<HomeBanner[]> {
+  const rows = Array.isArray(input) ? input : []
+  const normalized: HomeBanner[] = []
+  const seenPostIds = new Set<string>()
+
+  for (const [index, rawValue] of rows.entries()) {
+    const raw = rawValue as Record<string, unknown>
+    const postId = String(raw?.postId || '').trim()
+    const title = String(raw?.title || '').trim()
+    const coverImage = String(raw?.coverImage || '').trim()
+    const enabled = raw?.enabled !== false
+
+    if (!postId) throw new Error('Banner 必须选择关联帖子')
+    if (!coverImage) throw new Error('Banner 必须上传封面图')
+    if (seenPostIds.has(postId)) throw new Error('Banner 关联帖子不能重复')
+    seenPostIds.add(postId)
+
+    const post = await db.getById('posts', postId) as any
+    if (!post || post.status === 'deleted') throw new Error('Banner 关联帖子不存在或已删除')
+    if (String(post.communityId || '') !== communityId) {
+      throw new Error('Banner 只能关联当前社区的帖子')
+    }
+
+    const bannerId = String(raw?.bannerId || '').trim() || `${postId}-${index}`
+    normalized.push({
+      bannerId,
+      postId,
+      title,
+      coverImage,
+      order: index,
+      enabled,
+    })
+  }
+
+  return normalized
+}
+
 async function hardDeleteCommunity(communityId: string, community: Community) {
   const fileIDs: string[] = []
   if (community.coverImage) fileIDs.push(community.coverImage)
+  for (const banner of community.homeBanners || []) {
+    if (banner.coverImage) fileIDs.push(banner.coverImage)
+  }
 
   const posts = await db.query('posts', { communityId })
   for (const post of posts) {

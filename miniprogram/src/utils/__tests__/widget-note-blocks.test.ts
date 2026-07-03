@@ -40,9 +40,7 @@ describe('note_blocks list preview', () => {
       updatedAt: '',
     }
 
-    expect(getListPreview(post, section)).toEqual([
-      { label: 'Title', value: 'weekly reading', type: 'text' },
-    ])
+    expect(getListPreview(post, section)).toEqual([])
   })
 })
 
@@ -88,8 +86,6 @@ describe('rich_note list preview', () => {
       updatedAt: '',
     }
 
-    expect(getListPreview(post, section)).toEqual([
-      { label: 'Title', value: 'weekly reading', type: 'text' },
-    ])
+    expect(getListPreview(post, section)).toEqual([])
   })
 })

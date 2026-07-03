@@ -334,6 +334,9 @@ export const postApi = {
         sectionId: string
         sectionName: string
         title: string
+        coverImage?: string
+        authorName?: string
+        authorAvatarUrl?: string
         score: number
         matchedFields: Array<{ fieldLabel: string; fieldType: string; preview: string }>
         createdAt: string

@@ -15,6 +15,7 @@ import {
   parseFirstJson,
 } from './cloud-release-smoke.mjs'
 import { invokeAdmin } from './rebuild-post-search-index.mjs'
+import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
 
 const DEFAULT_BASE_URL = 'https://cloudbase-3gh862acb1505ff3-1307183045.ap-shanghai.app.tcloudbase.com'
 const DEFAULT_TIMEOUT_MS = 180000
@@ -42,8 +43,15 @@ function parseArgs() {
       process.env.HH_POST_RAG_SMOKE_TIMEOUT_MS || String(DEFAULT_TIMEOUT_MS),
     )) || DEFAULT_TIMEOUT_MS)),
     actor: getFlagValue('actor', `rag-smoke-${nowRunId()}`),
-    workerToken: String(getFlagValue('worker-token', process.env.POST_RAG_WORKER_TOKEN || '')).trim(),
+    workerToken: getFlagValue('worker-token', resolvePostRagWorkerToken()),
   }
+}
+
+function withWorkerToken(payload, options) {
+  if (!options.workerToken) {
+    throw new Error('Missing POST_RAG_WORKER_TOKEN / HH_POST_RAG_WORKER_TOKEN for post-rag-worker invocation')
+  }
+  return { ...payload, workerToken: options.workerToken }
 }
 
 function writePayloadFile(payload) {
@@ -214,7 +222,7 @@ async function main() {
       await invokeAdmin('audit.approveAdmin', { postId }, options)
     }
 
-    const worker = await invokeFunction('post-rag-worker', { limit: 20, postId, workerToken: options.workerToken }, options)
+    const worker = await invokeFunction('post-rag-worker', withWorkerToken({ limit: 20, postId }, options), options)
     if (!Array.isArray(worker?.results) || !worker.results.some((item) => item.ok)) {
       throw new Error(`post-rag-worker did not index target post: ${JSON.stringify(worker)}`)
     }
@@ -246,7 +254,7 @@ async function main() {
       }
       if (postId) {
         try {
-          await invokeFunction('post-rag-worker', { limit: 20, postId, workerToken: options.workerToken }, options)
+          await invokeFunction('post-rag-worker', withWorkerToken({ limit: 20, postId }, options), options)
         } catch (error) {
           console.warn(`[post-rag-smoke] cleanup worker warning: ${error?.message || error}`)
         }

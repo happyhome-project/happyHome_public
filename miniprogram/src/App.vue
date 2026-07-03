@@ -85,9 +85,8 @@ onShow(() => {
 
 <style lang="scss">
 /* ═══════════════════════════════════════════════════════════════
- * Classical Dossier · 全局样式
- * 暖灰白纸底 · 墨色文字 · 三字体分工（Serif/Sans/Mono）
- * 详见: design_handoff_happyhome/README.md
+ * Figma 0626 · 全局样式
+ * 浅灰页面底 · 白卡片 · 亮绿强调 · CSS variables for mini-program pages
  * ═══════════════════════════════════════════════════════════════ */
 page {
   background: $hh-surface-0;
@@ -118,5 +117,45 @@ page {
   --blue-wash: #{$hh-blue-wash};
   --accent-ochre: #{$hh-accent-ochre};
   --accent-blue: #{$hh-accent-blue};
+
+  /* Figma 0626 tokens */
+  --hh-color-page: #{$hh-figma-bg};
+  --hh-color-card: #{$hh-figma-card};
+  --hh-color-card-soft: #{$hh-figma-card-soft};
+  --hh-color-line: #{$hh-figma-line};
+  --hh-color-line-soft: #{$hh-figma-line-soft};
+  --hh-color-brand-primary: #{$hh-figma-green};
+  --hh-color-brand-strong: #{$hh-figma-green-dark};
+  --hh-color-brand-soft: #{$hh-figma-green-soft};
+  --hh-color-brand-line: #{$hh-figma-green-line};
+  --hh-color-text-primary: #{$hh-figma-ink};
+  --hh-color-text-secondary: #{$hh-figma-ink-2};
+  --hh-color-text-tertiary: #{$hh-figma-ink-3};
+  --hh-color-text-disabled: #{$hh-figma-ink-4};
+
+  --hh-text-display-size: 64rpx;
+  --hh-text-display-line: 96rpx;
+  --hh-text-heading-lg-size: 48rpx;
+  --hh-text-heading-lg-line: 72rpx;
+  --hh-text-heading-md-size: 40rpx;
+  --hh-text-heading-md-line: 56rpx;
+  --hh-text-heading-sm-size: 36rpx;
+  --hh-text-heading-sm-line: 52rpx;
+  --hh-text-body-lg-size: 32rpx;
+  --hh-text-body-lg-line: 48rpx;
+  --hh-text-body-base-size: 28rpx;
+  --hh-text-body-base-line: 44rpx;
+  --hh-text-caption-lg-size: 26rpx;
+  --hh-text-caption-lg-line: 40rpx;
+  --hh-text-caption-base-size: 24rpx;
+  --hh-text-caption-base-line: 32rpx;
+  --hh-text-mark-size: 20rpx;
+  --hh-text-mark-line: 28rpx;
+
+  --hh-page-x: 24rpx;
+  --hh-section-gap: 24rpx;
+  --hh-radius-card: #{$hh-radius-card-figma};
+  --hh-radius-panel: #{$hh-radius-panel-figma};
+  --hh-shadow-soft: 0 12rpx 32rpx rgba(31, 35, 32, 0.06);
 }
 </style>

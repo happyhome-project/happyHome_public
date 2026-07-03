@@ -1,6 +1,6 @@
 <template>
-  <view class="rich-note-editor">
-    <view class="rich-note-toolbar">
+  <view class="rich-note-editor" :class="{ 'rich-note-editor--minimal': minimal }">
+    <view v-if="!minimal" class="rich-note-toolbar">
       <button class="tool-btn strong" size="mini" @tap="applyAction('bold')">B</button>
       <button class="tool-btn italic" size="mini" @tap="applyAction('italic')">I</button>
       <button class="tool-btn" size="mini" @tap="applyAction('heading')">标题</button>
@@ -17,22 +17,22 @@
       :value="markdown"
       :cursor="cursor"
       maxlength="-1"
-      :placeholder="allowImages ? '输入正文，可用上方按钮插入排版和图片' : '输入正文，可用上方按钮插入排版；图片请上传到封面/图片'"
+      :placeholder="textareaPlaceholder"
       placeholder-class="rich-note-placeholder"
-      auto-height
+      :auto-height="!minimal"
       @input="onInput"
       @focus="rememberCursor"
       @blur="rememberCursor"
     />
 
-    <view class="rich-note-tip">
+    <view v-if="!minimal" class="rich-note-tip">
       <text>{{ allowImages
         ? '内容会以兼容 Markdown 的结构保存。不会写格式也没关系：选中或停在光标处点上方按钮即可。'
         : '内容会以兼容 Markdown 的结构保存；正文支持换行和基础排版，但不支持插图。'
       }}</text>
     </view>
 
-    <view v-if="markdown.trim()" class="preview-card">
+    <view v-if="!minimal && markdown.trim()" class="preview-card">
       <text class="preview-title">预览</text>
       <RichNoteRenderer :value="currentContent" :allow-images="allowImages" />
     </view>
@@ -50,12 +50,25 @@ import {
 } from '../../utils/rich-note'
 import RichNoteRenderer from './RichNoteRenderer.vue'
 
-const props = withDefaults(defineProps<{ modelValue: unknown; allowImages?: boolean }>(), {
+const props = withDefaults(defineProps<{
+  modelValue: unknown
+  allowImages?: boolean
+  minimal?: boolean
+  placeholder?: string
+}>(), {
   allowImages: true,
+  minimal: false,
+  placeholder: '',
 })
 const emit = defineEmits(['update:modelValue'])
 
 const allowImages = computed(() => props.allowImages)
+const minimal = computed(() => props.minimal)
+const textareaPlaceholder = computed(() => {
+  const custom = String(props.placeholder || '').trim()
+  if (custom) return custom
+  return allowImages.value ? '输入正文，可用上方按钮插入排版和图片' : '输入正文，可用上方按钮插入排版；图片请上传到封面/图片'
+})
 
 function normalizeMarkdownForPolicy(value: unknown) {
   const next = normalizeRichNoteContent(value).markdown
@@ -232,5 +245,26 @@ function insertLink() {
   margin-bottom: $hh-space-sm;
   color: $hh-color-text-mute;
   font-size: $hh-font-caption;
+}
+
+.rich-note-editor--minimal {
+  display: block;
+}
+
+.rich-note-editor--minimal .rich-note-textarea {
+  min-height: 400rpx;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-body-lg-size);
+  line-height: var(--hh-text-body-lg-line);
+}
+
+.rich-note-editor--minimal .rich-note-placeholder {
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-body-lg-size);
+  line-height: var(--hh-text-body-lg-line);
 }
 </style>

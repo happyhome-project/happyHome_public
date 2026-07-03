@@ -142,6 +142,32 @@ describe('buildGuideRouteDetail', () => {
     ])
   })
 
+  test('摘要只用于顶部副标题，不重复进入正文内容', () => {
+    const section = baseSection([
+      { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
+      { widgetId: 'summary', type: 'summary', label: '简介', fieldKey: 'summary', required: false, order: 1, showInList: true },
+      { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false },
+    ])
+    const post = basePost({
+      title: '九溪茶山亲子轻徒步',
+      summary: '从青山村口出发，沿溪谷进竹林，再上茶山观景台。',
+      body: {
+        format: 'markdown',
+        markdown: '线路概述\n\n线路行程',
+        html: '',
+        text: '线路概述 线路行程',
+        imageFileIDs: [],
+        schemaVersion: 1,
+      },
+    })
+
+    const detail = buildGuideRouteDetail(post, section)
+
+    expect(detail.subtitle).toBe('从青山村口出发，沿溪谷进竹林，再上茶山观景台。')
+    expect(detail.bodySections).toHaveLength(1)
+    expect(JSON.stringify(detail.bodySections)).not.toContain('从青山村口出发')
+  })
+
   test('图文攻略正文保留普通富图文的多次换行和排版语法', () => {
     const markdown = '第一行\n\n\n第二行\n\n**加粗提醒**\n\n- 第一项\n- 第二项'
     const section = baseSection([
