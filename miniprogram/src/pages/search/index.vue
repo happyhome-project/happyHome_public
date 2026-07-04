@@ -1,20 +1,26 @@
 <template>
-  <view class="search-page" :class="{ 'search-page--initial': !searched, 'search-page--searched': searched }">
-    <view class="search-nav" :class="{ 'search-nav--initial': !searched }">
+  <view class="search-page" :class="{ 'search-page--initial': isInitialSearchLayout, 'search-page--searched': !isInitialSearchLayout }">
+    <view class="search-nav" :class="{ 'search-nav--initial': isInitialSearchLayout }">
       <button class="search-back" aria-label="返回" @tap="goBack">
         <text>‹</text>
       </button>
-      <view class="search-box" :class="{ 'search-box--initial': !searched }">
-        <input
-          v-model="query"
-          class="search-input"
-          confirm-type="search"
-          placeholder="亲子游路线"
-          placeholder-class="search-placeholder"
-          @confirm="submitSearch"
-        />
-        <text v-if="query" class="clear-icon" @tap="clearQuery">×</text>
-        <button v-if="!searched" class="search-submit" @tap="submitSearch">搜索</button>
+      <view class="search-box" :class="{ 'search-box--initial': isInitialSearchLayout }">
+        <view
+          class="search-query-field"
+          :class="{ 'search-query-field--compact': !isInitialSearchLayout && query }"
+          :style="compactQueryChipStyle"
+        >
+          <input
+            v-model="query"
+            class="search-input"
+            confirm-type="search"
+            placeholder="亲子游路线"
+            placeholder-class="search-placeholder"
+            @confirm="submitSearch"
+          />
+          <text v-if="query && !isInitialSearchLayout" class="clear-icon" @tap="clearQuery">×</text>
+        </view>
+        <button v-if="isInitialSearchLayout" class="search-submit" @tap="submitSearch">搜索</button>
       </view>
       <!-- #ifdef MP-WEIXIN -->
       <view class="search-native-menu-spacer" aria-hidden="true"></view>
@@ -226,12 +232,21 @@ const generatedAvatarPalettes = [
   ['#F1D08A', '#7294B8'],
   ['#C9D6A3', '#C4867D'],
 ]
+let searchRequestSeq = 0
 
 const communityName = computed(() => {
   if (communityStore.currentCommunityId === communityId.value && communityStore.currentCommunity?.name) {
     return communityStore.currentCommunity.name
   }
   return '帖子搜索'
+})
+const isInitialSearchLayout = computed(() => !searched.value && !loading.value)
+const compactQueryChipStyle = computed(() => {
+  if (isInitialSearchLayout.value || !query.value.trim()) return {}
+  const queryWidth = Array.from(query.value.trim()).reduce((total, char) => {
+    return total + (/[\u4e00-\u9fff]/.test(char) ? 16 : 8)
+  }, 0)
+  return { width: `${Math.min(203, Math.max(64, queryWidth + 49))}px` }
 })
 
 onLoad((options: any) => {
@@ -282,6 +297,7 @@ function quickSearch(term: string) {
 }
 
 function clearQuery() {
+  searchRequestSeq += 1
   query.value = ''
   searched.value = false
   items.value = []
@@ -301,6 +317,7 @@ async function loadMore() {
 }
 
 async function runSearch(options: { reset: boolean; showShortToast?: boolean }) {
+  const requestSeq = ++searchRequestSeq
   const normalizedQuery = query.value.trim()
   if (!communityId.value) {
     uni.showToast({ title: '请先选择社区', icon: 'none' })
@@ -339,10 +356,12 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
       limit,
       asGuest,
     })
+    if (requestSeq !== searchRequestSeq) return
     let nextItems = result.items || []
     let usedBootstrapFallback = false
     if (options.reset && nextItems.length === 0 && result.mode === 'no_answer') {
       const fallbackItems = await searchVisibleBootstrapPosts(normalizedQuery, asGuest)
+      if (requestSeq !== searchRequestSeq) return
       if (fallbackItems.length > 0) {
         nextItems = fallbackItems
         usedBootstrapFallback = true
@@ -362,6 +381,7 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
       usedBootstrapFallback,
     })
   } catch (error: any) {
+    if (requestSeq !== searchRequestSeq) return
     loadError.value = friendlySearchError(error)
     searched.value = true
     clientLog('error', 'search.load.fail', { communityId: communityId.value, error })
@@ -369,7 +389,9 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
       uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
     }
   } finally {
-    loading.value = false
+    if (requestSeq === searchRequestSeq) {
+      loading.value = false
+    }
   }
 }
 
@@ -569,13 +591,13 @@ function formatDate(value: unknown): string {
 
 .search-nav {
   position: relative;
-  height: 223rpx;
+  height: 116px;
   margin: 0 -24rpx;
-  padding: 124rpx 26rpx 0 32rpx;
+  padding: 62px 16px 0;
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 16rpx;
+  gap: 16px;
   background: #fefefe;
 }
 
@@ -586,9 +608,9 @@ function formatDate(value: unknown): string {
 }
 
 .search-back {
-  flex: 0 0 48rpx;
-  width: 48rpx;
-  height: 48rpx;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
   margin: 0;
   padding: 0;
   border: 0;
@@ -604,23 +626,24 @@ function formatDate(value: unknown): string {
 }
 
 .search-back text {
-  font-size: 52rpx;
+  font-size: 32px;
   font-weight: $hh-font-weight-regular;
-  line-height: 48rpx;
+  line-height: 24px;
 }
 
 .search-box {
-  flex: 1;
+  flex: 0 1 227px;
   min-width: 0;
-  height: 72rpx;
+  max-width: 227px;
+  height: 36px;
   box-sizing: border-box;
-  padding: 0 18rpx 0 30rpx;
+  padding: 0 12px 0 16px;
   border: 3rpx solid var(--hh-color-brand-primary);
-  border-radius: $hh-radius-full;
+  border-radius: 18px;
   background: var(--hh-color-card);
   display: flex;
   align-items: center;
-  gap: 12rpx;
+  gap: 8px;
 }
 
 .search-box--initial {
@@ -639,10 +662,35 @@ function formatDate(value: unknown): string {
   box-shadow: 0 8rpx 48rpx rgba(0, 0, 0, 0.05);
 }
 
+.search-query-field {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+}
+
+.search-box--initial .search-query-field {
+  flex: 0 0 48rpx;
+  width: 100%;
+  height: 48rpx;
+}
+
+.search-query-field--compact {
+  flex: 0 1 auto;
+  max-width: 203px;
+  height: 30px;
+  padding: 0 6px 0 13px;
+  border-radius: $hh-radius-full;
+  background: #f7f7f7;
+  gap: 4px;
+}
+
 .search-input {
   flex: 1;
   min-width: 0;
-  height: 72rpx;
+  height: 36px;
   color: var(--hh-color-text-primary);
   font-size: var(--hh-text-body-lg-size);
 }
@@ -653,19 +701,25 @@ function formatDate(value: unknown): string {
   padding-left: 32px;
 }
 
+.search-query-field--compact .search-input {
+  height: 24px;
+  font-size: 15px;
+  line-height: 24px;
+}
+
 .search-placeholder {
   color: var(--hh-color-text-disabled);
 }
 
 .clear-icon {
   flex-shrink: 0;
-  width: 40rpx;
-  height: 40rpx;
+  width: 16px;
+  height: 16px;
   border-radius: 999rpx;
   background: var(--hh-color-line-soft);
   color: var(--hh-color-text-tertiary);
-  font-size: 32rpx;
-  line-height: 36rpx;
+  font-size: 16px;
+  line-height: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -690,8 +744,8 @@ function formatDate(value: unknown): string {
 }
 
 .search-native-menu-spacer {
-  flex: 0 0 174rpx;
-  height: 64rpx;
+  flex: 0 0 87px;
+  height: 32px;
   visibility: hidden;
   pointer-events: none;
 }

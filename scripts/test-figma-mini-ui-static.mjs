@@ -206,6 +206,11 @@ assert(
     !home.includes('<text class="home-search-icon">⌕</text>') &&
     home.includes('class="guide-feed"') &&
     home.includes('onPageScroll') &&
+    home.includes('archivePreviewMinHeightPx') &&
+    home.includes('scheduleArchivePreviewMeasure') &&
+    home.includes('shouldCaptureHeight') &&
+    home.includes('class="active-archive-body"') &&
+    home.includes('active-archive--default .arc-card') &&
     home.includes('restoreArchiveSwitchScroll') &&
     home.includes('uni.pageScrollTo') &&
     !home.includes('active-archive-head') &&
@@ -219,7 +224,7 @@ assert(
     home.includes('rawHomeGuideCoverImages') &&
     home.includes('resolveCloudFileUrls') &&
     !home.includes(`<template v-if="g.displayTemplate === 'guide_note'">`),
-  'home should use the custom continuous Figma-style top area, tabs plus two-column guide feed, keep tab switching scroll-stable, and keep notice-board short labels controlled instead of binding long section names.'
+  'home should use the custom continuous Figma-style top area, tabs plus two-column guide feed, keep tab switching height/scroll stable, and keep notice-board short labels controlled instead of binding long section names.'
 )
 
 assert(
@@ -249,6 +254,17 @@ for (const [name, source] of [
 
 assert(
   search.includes('class="search-nav"') &&
+    search.includes('isInitialSearchLayout') &&
+    search.includes('const isInitialSearchLayout = computed(() => !searched.value && !loading.value)') &&
+    search.includes('compactQueryChipStyle') &&
+    search.includes('class="search-query-field"') &&
+    search.includes('search-query-field--compact') &&
+    search.includes('width: `${Math.min(203, Math.max(64, queryWidth + 49))}px`') &&
+    search.includes('height: 116px') &&
+    search.includes('flex: 0 1 227px') &&
+    search.includes('max-width: 227px') &&
+    search.includes('height: 36px') &&
+    search.includes('background: #f7f7f7') &&
     search.includes('class="result-cover"') &&
     search.includes('resultAuthorAvatar') &&
     search.includes('avatar-') &&
