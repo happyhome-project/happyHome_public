@@ -48,7 +48,7 @@
       </view>
 
       <view v-else class="form" :class="{ 'form--figma': isFigmaCreateMode }">
-        <view class="create-form-nav">
+        <view v-if="!isActivityInviteMode" class="create-form-nav">
           <button class="create-back" aria-label="返回" @tap="handleBackToSectionPicker">
             <text>‹</text>
           </button>
