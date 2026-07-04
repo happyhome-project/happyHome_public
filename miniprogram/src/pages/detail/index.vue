@@ -237,10 +237,9 @@ const renderPost = computed(() => {
   if (!post.value) return post.value
   const replacements = resolvedDetailMediaUrls
   if (!Object.keys(replacements).length) return post.value
-  return {
-    ...post.value,
+  return Object.assign({}, post.value, {
     content: replaceResolvedMediaUrls(post.value.content || {}, replacements),
-  }
+  })
 })
 const guideRouteDetail = computed(() => {
   if (!renderPost.value || !section.value || !isGuideNoteDetail.value) return null
@@ -443,7 +442,10 @@ function collectCloudMediaUrls(value: unknown, target: string[] = []): string[] 
     return target
   }
   if (value && typeof value === 'object') {
-    Object.values(value as Record<string, unknown>).forEach((item) => collectCloudMediaUrls(item, target))
+    const record = value as Record<string, unknown>
+    Object.keys(record).forEach((key) => {
+      collectCloudMediaUrls(record[key], target)
+    })
   }
   return target
 }
@@ -455,7 +457,8 @@ async function resolveDetailMediaUrls() {
     urlCount: urls.length,
   })
   if (urls.length === 0) return
-  const [primaryUrl, ...remainingUrls] = urls
+  const primaryUrl = urls[0]
+  const remainingUrls = urls.slice(1)
   let resolvedCount = 0
   try {
     const primaryResolved = await resolveCloudFileUrls([primaryUrl])
@@ -489,7 +492,8 @@ async function resolveDetailMediaUrls() {
 function replaceResolvedMediaUrls(value: unknown, replacements: Record<string, string>): any {
   if (typeof value === 'string') {
     let next = value
-    Object.entries(replacements).forEach(([rawUrl, resolvedUrl]) => {
+    Object.keys(replacements).forEach((rawUrl) => {
+      const resolvedUrl = replacements[rawUrl]
       if (rawUrl && resolvedUrl && rawUrl !== resolvedUrl) {
         next = next.split(rawUrl).join(resolvedUrl)
       }
@@ -498,10 +502,12 @@ function replaceResolvedMediaUrls(value: unknown, replacements: Record<string, s
   }
   if (Array.isArray(value)) return value.map((item) => replaceResolvedMediaUrls(item, replacements))
   if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .map(([key, item]) => [key, replaceResolvedMediaUrls(item, replacements)])
-    )
+    const record = value as Record<string, unknown>
+    const nextRecord: Record<string, unknown> = {}
+    Object.keys(record).forEach((key) => {
+      nextRecord[key] = replaceResolvedMediaUrls(record[key], replacements)
+    })
+    return nextRecord
   }
   return value
 }

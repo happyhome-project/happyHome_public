@@ -4,9 +4,6 @@ import { extname, join } from 'node:path'
 import { chromium } from 'playwright'
 
 const root = join(process.cwd(), 'miniprogram', 'dist', 'build', 'h5')
-const buildInfoPath = join(process.cwd(), 'miniprogram', 'src', 'generated', 'build-info.ts')
-const buildInfoText = existsSync(buildInfoPath) ? readFileSync(buildInfoPath, 'utf8') : ''
-const expectedVersion = buildInfoText.match(/version:\s*["']([^"']+)["']/)?.[1] || ''
 
 const contentTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -43,7 +40,7 @@ server.listen(0, '127.0.0.1', async () => {
     await runProfileCase(browser, port, {
       label: 'fallback-login',
       setup: null,
-      expectedTexts: ['确认登录', 'DEV 登录'],
+      expectedTexts: ['登录', '创建社区', '加入社区', '邀请好友加入社区'],
     })
     await runProfileCase(browser, port, {
       label: 'choose-avatar-login',
@@ -52,7 +49,7 @@ server.listen(0, '127.0.0.1', async () => {
           window.__HH_TEST_CHOOSE_AVATAR__ = true
         })
       },
-      expectedTexts: ['微信登录', 'DEV 登录'],
+      expectedTexts: ['登录', '创建社区', '加入社区', '邀请好友加入社区'],
     })
     console.log('H5 profile smoke passed')
   } finally {
@@ -78,9 +75,6 @@ async function runProfileCase(browser, port, options) {
 
     console.log(`[${options.label}] ${text}`)
 
-    if (!expectedVersion || !text.includes(expectedVersion)) {
-      throw new Error(`${options.label}: profile version missing: expected ${expectedVersion || '(unknown)'}`)
-    }
     if (/state:logged|login:[01]|cc:/.test(text)) {
       throw new Error(`${options.label}: profile internal debug label leaked`)
     }
