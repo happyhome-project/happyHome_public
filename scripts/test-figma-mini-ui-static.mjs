@@ -158,11 +158,29 @@ assert(
     home.includes('resolvedHomeBannerCoverUrls') &&
     home.includes('rawHomeBannerCoverImages') &&
     home.includes('homeBannerActiveIndex') &&
-    home.includes('suppressNextHomeBannerTap') &&
-    home.includes('onHomeBannerPointerMove') &&
+    home.includes('<swiper') &&
+    home.includes('<swiper-item') &&
+    home.includes('class="home-banner-swiper"') &&
     home.includes('class="home-banner-slide"') &&
-    home.includes(':class="{ active: i === homeBannerActiveIndex }"') &&
-    !home.includes('<swiper') &&
+    home.includes(':current="homeBannerActiveIndex"') &&
+    home.includes(':circular="homeBannerItems.length > 1"') &&
+    home.includes(':duration="260"') &&
+    home.includes('@change="onHomeBannerChange"') &&
+    home.includes('@touchstart="onHomeBannerGestureStart"') &&
+    home.includes('@touchmove="onHomeBannerGestureMove"') &&
+    home.includes('@touchend="onHomeBannerGestureEnd"') &&
+    home.includes('HOME_BANNER_SWIPE_THRESHOLD_PX') &&
+    home.includes('HOME_BANNER_TAP_SUPPRESS_MS') &&
+    home.includes('Math.max(dx, dy)') &&
+    home.includes('suppressHomeBannerTapTemporarily') &&
+    home.includes('event?.detail?.source === \'touch\'') &&
+    home.includes('suppressNextHomeBannerTap') &&
+    !home.includes('onHomeBannerPointerMove') &&
+    !home.includes('homeBannerPointerMoved') &&
+    !home.includes('const step = deltaX < 0 ? 1 : -1') &&
+    !home.includes('homeBannerActiveIndex.value = (homeBannerActiveIndex.value + step + length) % length') &&
+    !/class="home-banner-slide"[\s\S]{0,120}:class="\{ active: i === homeBannerActiveIndex \}"/.test(home) &&
+    !home.includes('.home-banner-slide.active') &&
     home.includes('class="notice-board"') &&
     home.includes('noticeRows') &&
     home.includes('{{ notice.kind }}') &&
