@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
 import https from 'node:https'
@@ -24,8 +25,10 @@ function loadDotEnvFile(filePath) {
 }
 
 const RAG_ENV_FILE = path.join(os.homedir(), '.happyhome', 'tencent-rag.env')
+const CAM_ENV_FILE = path.join(os.homedir(), '.happyhome', 'cam.env')
 const fileEnv = loadDotEnvFile(RAG_ENV_FILE)
-const env = { ...fileEnv, ...process.env }
+const camEnv = loadDotEnvFile(CAM_ENV_FILE)
+const env = { ...camEnv, ...fileEnv, ...process.env }
 
 const config = {
   endpoint: String(env.TENCENT_RAG_ES_ENDPOINT || '').trim().replace(/\/+$/, ''),
@@ -34,11 +37,35 @@ const config = {
   indexName: String(env.TENCENT_RAG_INDEX_NAME || 'happyhome_post_rag_chunks').trim(),
   vectorField: String(env.TENCENT_RAG_VECTOR_FIELD || 'embedding').trim(),
   embeddingInferenceId: String(env.TENCENT_RAG_EMBEDDING_INFERENCE_ID || '').trim(),
+  atomicSecretId: String(env.TENCENT_RAG_ATOMIC_SECRET_ID || env.TENCENTCLOUD_SECRETID || '').trim(),
+  atomicSecretKey: String(env.TENCENT_RAG_ATOMIC_SECRET_KEY || env.TENCENTCLOUD_SECRETKEY || ''),
+  atomicRegion: String(env.TENCENT_RAG_ATOMIC_REGION || 'ap-beijing').trim(),
+  embeddingModel: String(env.TENCENT_RAG_EMBEDDING_MODEL || 'bge-base-zh-v1.5').trim(),
 }
 
-const missing = Object.entries(config)
+const baseConfig = {
+  endpoint: config.endpoint,
+  username: config.username,
+  password: config.password,
+  indexName: config.indexName,
+  vectorField: config.vectorField,
+}
+const atomicConfig = {
+  atomicSecretId: config.atomicSecretId,
+  atomicSecretKey: config.atomicSecretKey,
+  atomicRegion: config.atomicRegion,
+  embeddingModel: config.embeddingModel,
+}
+
+const missing = Object.entries(baseConfig)
   .filter(([, value]) => !value)
   .map(([key]) => key)
+
+if (!config.embeddingInferenceId && !Object.values(atomicConfig).every(Boolean)) {
+  missing.push(...Object.entries(atomicConfig)
+    .filter(([, value]) => !value)
+    .map(([key]) => key))
+}
 
 if (missing.length > 0) {
   console.error(`[ensure-tencent-rag-index] Missing config: ${missing.join(', ')}`)
@@ -88,13 +115,81 @@ function requestJson(method, requestPath, body, { allow404 = false } = {}) {
   })
 }
 
+function sha256(message, encoding = 'hex') {
+  return crypto.createHash('sha256').update(message, 'utf8').digest(encoding)
+}
+
+function hmac(key, message, encoding) {
+  return crypto.createHmac('sha256', key).update(message, 'utf8').digest(encoding)
+}
+
+async function requestTencentAtomic(action, payload) {
+  const host = 'es.tencentcloudapi.com'
+  const service = 'es'
+  const version = '2025-01-01'
+  const timestamp = Math.floor(Date.now() / 1000)
+  const date = new Date(timestamp * 1000).toISOString().slice(0, 10)
+  const body = JSON.stringify(payload)
+  const canonicalHeaders = `content-type:application/json; charset=utf-8\nhost:${host}\n`
+  const signedHeaders = 'content-type;host'
+  const canonicalRequest = ['POST', '/', '', canonicalHeaders, signedHeaders, sha256(body)].join('\n')
+  const credentialScope = `${date}/${service}/tc3_request`
+  const stringToSign = ['TC3-HMAC-SHA256', timestamp, credentialScope, sha256(canonicalRequest)].join('\n')
+  const secretDate = hmac(`TC3${config.atomicSecretKey}`, date)
+  const secretService = hmac(secretDate, service)
+  const secretSigning = hmac(secretService, 'tc3_request')
+  const signature = hmac(secretSigning, stringToSign, 'hex')
+  const authorization = `TC3-HMAC-SHA256 Credential=${config.atomicSecretId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`
+
+  const res = await fetch(`https://${host}/`, {
+    method: 'POST',
+    headers: {
+      Authorization: authorization,
+      'Content-Type': 'application/json; charset=utf-8',
+      Host: host,
+      'X-TC-Action': action,
+      'X-TC-Version': version,
+      'X-TC-Timestamp': String(timestamp),
+      'X-TC-Region': config.atomicRegion,
+    },
+    body,
+  })
+  const text = await res.text()
+  let json
+  try {
+    json = JSON.parse(text)
+  } catch {
+    json = { raw: text.slice(0, 1000) }
+  }
+  if (!res.ok || json.Response?.Error) {
+    const error = json.Response?.Error
+    throw new Error(`${action} failed: ${error?.Code || res.status} ${error?.Message || json.raw || ''}`)
+  }
+  return json.Response
+}
+
 function embeddingLength(value) {
+  const response = value?.Response || value
   const direct = value?.embedding?.[0]?.result
     || value?.embedding?.[0]?.embedding
     || value?.data?.[0]?.embedding
+    || response?.Data?.[0]?.Embedding
+    || response?.Data?.[0]?.embedding
     || value?.result
     || value?.vector
   return Array.isArray(direct) ? direct.length : 0
+}
+
+async function probeEmbedding() {
+  if (config.embeddingInferenceId) {
+    return requestJson('POST', `_inference/text_embedding/${config.embeddingInferenceId}`, {
+      input: ['HappyHome RAG index mapping dimension probe'],
+    })
+  }
+  return requestTencentAtomic('GetTextEmbedding', {
+    ModelName: config.embeddingModel,
+    Texts: ['HappyHome RAG index mapping dimension probe'],
+  })
 }
 
 const existing = await requestJson('HEAD', config.indexName, undefined, { allow404: true })
@@ -103,9 +198,7 @@ if (existing?.statusCode !== 404) {
   process.exit(0)
 }
 
-const embedding = await requestJson('POST', `_inference/text_embedding/${config.embeddingInferenceId}`, {
-  input: ['HappyHome RAG index mapping dimension probe'],
-})
+const embedding = await probeEmbedding()
 const dims = embeddingLength(embedding)
 if (dims <= 0) throw new Error('embedding endpoint returned no vector; cannot create dense_vector mapping')
 

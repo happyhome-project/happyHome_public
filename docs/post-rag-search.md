@@ -26,7 +26,7 @@
   - `TENCENT_RAG_PROVIDER=lkeap-cloudbase`：仅作显式调试/旧路径，LKEAP embedding + CloudBase `post_rag_chunks` chunk mirror + LKEAP rerank + LKEAP LLM answer。
 - index 文档粒度是 chunk，不是整篇帖子。
 - chunk metadata 固定包含：`communityId`、`sectionId`、`postId`、`chunkId`、`fieldType`、`fieldLabel`、`sourceUpdatedAt`、`visibility`。
-- 腾讯云 `secret_id/secret_key` 用于在 ES 中创建 inference endpoint；运行时搜索服务只读取 ES endpoint、ES 用户名/密码和已创建好的 inference id。
+- 运行时必须有 ES index endpoint/用户名/密码；模型服务默认走腾讯 ES 智能搜索原子 API（Embedding、Rerank、LLM），也兼容已经创建好的 ES inference endpoint。
 
 ES 智能搜索主路径：
 
@@ -35,6 +35,13 @@ ES 智能搜索主路径：
 - 社区、板块和 `visibility` 过滤在全文 retriever 与 knn retriever 两侧同时生效。
 - rerank 后先过滤弱证据；没有合格 citation 时返回 `mode=no_answer`，不调用 LLM、不展示无关帖子作为答案证据。
 - 只有有合格 citations 时才调用 LLM answer，prompt 中只包含这些已授权、已过滤的片段。
+
+腾讯 ES 智能搜索原子能力：
+
+- 2026-07-04 已开通 ES 智能搜索开发原子服务后付费。
+- `GetTextEmbedding`、`RunRerank`、`ChatCompletions` 已用真实 API 连通验证；`verify:tencent-rag -- --models-only` 可只验证这三项。
+- `ChatCompletions` 原子 API 不接受 `MaxTokens` 参数；输出长度靠 prompt 约束，不能把 OpenAI/LKEAP 参数照搬过去。
+- 正式主路径仍然必须有 ES 混合搜索索引；原子 API 只负责模型调用，不承担持久化检索索引。
 
 LKEAP 原子能力旧路径：
 
@@ -131,6 +138,14 @@ TENCENT_RAG_ES_USERNAME=
 TENCENT_RAG_ES_PASSWORD=
 TENCENT_RAG_INDEX_NAME=happyhome_post_rag_chunks
 TENCENT_RAG_VECTOR_FIELD=embedding
+# 默认模型服务：腾讯 ES 智能搜索原子 API
+TENCENT_RAG_ATOMIC_SECRET_ID=
+TENCENT_RAG_ATOMIC_SECRET_KEY=
+TENCENT_RAG_ATOMIC_REGION=ap-beijing
+TENCENT_RAG_EMBEDDING_MODEL=bge-base-zh-v1.5
+TENCENT_RAG_RERANK_MODEL=bge-reranker-large
+TENCENT_RAG_LLM_MODEL=deepseek-v3
+# 可选兼容：已经在 ES 内创建好的 inference endpoint
 TENCENT_RAG_EMBEDDING_INFERENCE_ID=
 TENCENT_RAG_RERANK_INFERENCE_ID=
 TENCENT_RAG_LLM_INFERENCE_ID=
@@ -193,10 +208,11 @@ npm.cmd run ensure:indexes
 npm.cmd run ensure:tencent-rag-index
 ```
 
-验证腾讯 ES inference 三件套连通性：
+验证腾讯 ES 智能搜索模型服务连通性。完整验证要求 ES index endpoint 已配置；如果只想先验证腾讯原子 API 三件套：
 
 ```powershell
 npm.cmd run verify:tencent-rag
+npm.cmd run verify:tencent-rag -- --models-only
 ```
 
 验证腾讯 LKEAP 原子能力连通性：

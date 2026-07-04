@@ -769,6 +769,101 @@ test('Tencent ES provider uses rank_fusion hybrid retrieval and filters weak evi
   )
 })
 
+test('Tencent ES provider can use Tencent atomic APIs for embedding rerank and answer without ES inference endpoints', async () => {
+  const esCalls: Array<{ method: string; path: string; body: any }> = []
+  const atomicCalls: Array<{ action: string; body: any }> = []
+  const requestJson = jest.fn(async (_config: any, method: string, path: string, body?: any) => {
+    esCalls.push({ method, path, body })
+    if (path.endsWith('/_search')) {
+      return {
+        hits: {
+          total: { value: 1 },
+          hits: [{
+            _id: 'atomic-thrift-chunk',
+            _score: 10,
+            _source: {
+              postId: 'atomic-thrift-post',
+              chunkId: 'atomic-thrift-chunk',
+              communityId: 'community-1',
+              sectionId: 'section-1',
+              sectionName: '明士班',
+              title: '朱子治家格言共读',
+              fieldLabel: '正文',
+              fieldType: 'rich_note',
+              preview: '一粥一饭，当思来处不易；半丝半缕，恒念物力维艰。',
+              text: '一粥一饭，当思来处不易；半丝半缕，恒念物力维艰。',
+              visibility: 'public',
+              sourceUpdatedAt: '2026-06-25T00:00:00.000Z',
+            },
+          }],
+        },
+      }
+    }
+    throw new Error(`unexpected ES request path: ${path}`)
+  })
+  const requestAtomicJson = jest.fn(async (_config: any, action: string, body: any) => {
+    atomicCalls.push({ action, body })
+    if (action === 'GetTextEmbedding') {
+      return { Response: { Data: [{ Embedding: [0.12, 0.23, 0.34] }] } }
+    }
+    if (action === 'RunRerank') {
+      return { Response: { Data: [{ Index: 0, RelevanceScore: 0.93 }] } }
+    }
+    if (action === 'ChatCompletions') {
+      return { Response: { Choices: [{ Message: { Content: '有，相关帖子提到了朱子治家格言中的勤俭家风。' } }] } }
+    }
+    throw new Error(`unexpected atomic action: ${action}`)
+  })
+  const provider = createTencentRagProvider({
+    endpoint: 'https://es.example.com',
+    username: 'elastic',
+    password: 'secret-test',
+    indexName: 'happyhome_post_rag_chunks',
+    vectorField: 'embedding',
+    atomicSecretId: 'AKIDtest',
+    atomicSecretKey: 'atomic-secret',
+    atomicRegion: 'ap-beijing',
+    embeddingModel: 'bge-base-zh-v1.5',
+    rerankModel: 'bge-reranker-large',
+    llmModel: 'deepseek-v3',
+  } as any, { requestJson: requestJson as any, requestAtomicJson: requestAtomicJson as any } as any)
+
+  expect(provider.isConfigured()).toBe(true)
+
+  const result = await provider.search({
+    communityId: 'community-1',
+    sectionId: '',
+    query: '有没有讲节俭家风的帖子？',
+    skip: 0,
+    limit: 10,
+    includeMemberOnly: false,
+    ragQuery: buildRagQuery('有没有讲节俭家风的帖子？'),
+  })
+
+  expect(esCalls[0]?.path).toBe('happyhome_post_rag_chunks/_search')
+  expect(esCalls[0]?.body.retriever.rank_fusion.retrievers).toEqual(expect.arrayContaining([
+    expect.objectContaining({ standard: expect.any(Object) }),
+    expect.objectContaining({ knn: expect.objectContaining({ query_vector: [0.12, 0.23, 0.34] }) }),
+  ]))
+  expect(atomicCalls.map((call) => call.action)).toEqual(['GetTextEmbedding', 'RunRerank', 'ChatCompletions'])
+  expect(atomicCalls[0]?.body).toEqual(expect.objectContaining({
+    ModelName: 'bge-base-zh-v1.5',
+    Texts: [expect.stringContaining('朱子治家格言')],
+  }))
+  expect(atomicCalls[1]?.body).toEqual(expect.objectContaining({
+    ModelName: 'bge-reranker-large',
+    Query: '有没有讲节俭家风的帖子？',
+    Documents: ['一粥一饭，当思来处不易；半丝半缕，恒念物力维艰。'],
+    ReturnDocuments: false,
+  }))
+  expect(atomicCalls[2]?.body).toEqual(expect.objectContaining({
+    ModelName: 'deepseek-v3',
+    Stream: false,
+  }))
+  expect(result.citations.map((citation) => citation.chunkId)).toEqual(['atomic-thrift-chunk'])
+  expect(result.answer).toContain('勤俭家风')
+})
+
 test('Tencent ES provider reranks a single semantic candidate before evidence filtering', async () => {
   const requestJson = jest.fn(async (_config: any, _method: string, path: string) => {
     if (path.startsWith('_inference/text_embedding/')) {

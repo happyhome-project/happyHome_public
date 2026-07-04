@@ -36,16 +36,36 @@ if (!managerSecretId || !managerSecretKey) {
   process.exit(1)
 }
 
-const targetEnv = {
+const baseEnv = {
   TENCENT_RAG_PROVIDER: 'es',
   TENCENT_RAG_ES_ENDPOINT: process.env.TENCENT_RAG_ES_ENDPOINT || ragEnv.TENCENT_RAG_ES_ENDPOINT,
   TENCENT_RAG_ES_USERNAME: process.env.TENCENT_RAG_ES_USERNAME || ragEnv.TENCENT_RAG_ES_USERNAME,
   TENCENT_RAG_ES_PASSWORD: process.env.TENCENT_RAG_ES_PASSWORD || ragEnv.TENCENT_RAG_ES_PASSWORD,
   TENCENT_RAG_INDEX_NAME: process.env.TENCENT_RAG_INDEX_NAME || ragEnv.TENCENT_RAG_INDEX_NAME || 'happyhome_post_rag_chunks',
   TENCENT_RAG_VECTOR_FIELD: process.env.TENCENT_RAG_VECTOR_FIELD || ragEnv.TENCENT_RAG_VECTOR_FIELD || 'embedding',
+}
+
+const atomicEnv = {
+  TENCENT_RAG_ATOMIC_SECRET_ID: process.env.TENCENT_RAG_ATOMIC_SECRET_ID || ragEnv.TENCENT_RAG_ATOMIC_SECRET_ID || camEnv.TENCENTCLOUD_SECRETID,
+  TENCENT_RAG_ATOMIC_SECRET_KEY: process.env.TENCENT_RAG_ATOMIC_SECRET_KEY || ragEnv.TENCENT_RAG_ATOMIC_SECRET_KEY || camEnv.TENCENTCLOUD_SECRETKEY,
+  TENCENT_RAG_ATOMIC_REGION: process.env.TENCENT_RAG_ATOMIC_REGION || ragEnv.TENCENT_RAG_ATOMIC_REGION || 'ap-beijing',
+  TENCENT_RAG_EMBEDDING_MODEL: process.env.TENCENT_RAG_EMBEDDING_MODEL || ragEnv.TENCENT_RAG_EMBEDDING_MODEL || 'bge-base-zh-v1.5',
+  TENCENT_RAG_RERANK_MODEL: process.env.TENCENT_RAG_RERANK_MODEL || ragEnv.TENCENT_RAG_RERANK_MODEL || 'bge-reranker-large',
+  TENCENT_RAG_LLM_MODEL: process.env.TENCENT_RAG_LLM_MODEL || ragEnv.TENCENT_RAG_LLM_MODEL || 'deepseek-v3',
+}
+
+const inferenceEnv = {
   TENCENT_RAG_EMBEDDING_INFERENCE_ID: process.env.TENCENT_RAG_EMBEDDING_INFERENCE_ID || ragEnv.TENCENT_RAG_EMBEDDING_INFERENCE_ID,
   TENCENT_RAG_RERANK_INFERENCE_ID: process.env.TENCENT_RAG_RERANK_INFERENCE_ID || ragEnv.TENCENT_RAG_RERANK_INFERENCE_ID,
   TENCENT_RAG_LLM_INFERENCE_ID: process.env.TENCENT_RAG_LLM_INFERENCE_ID || ragEnv.TENCENT_RAG_LLM_INFERENCE_ID,
+}
+
+const hasAtomicModelConfig = Object.values(atomicEnv).every(Boolean)
+const hasInferenceModelConfig = Object.values(inferenceEnv).every(Boolean)
+const targetEnv = {
+  ...baseEnv,
+  ...(hasAtomicModelConfig ? atomicEnv : {}),
+  ...(hasInferenceModelConfig ? inferenceEnv : {}),
 }
 
 const workerEnv = {
@@ -59,9 +79,19 @@ const functionNames = (process.argv.find((arg) => arg.startsWith('--only='))?.sl
 
 const workerFunctions = new Set(['post-rag-worker', 'post-video-rag-worker'])
 
-const missing = Object.entries(targetEnv)
+const missing = Object.entries(baseEnv)
   .filter(([, value]) => !value)
   .map(([key]) => key)
+
+if (!hasAtomicModelConfig && !hasInferenceModelConfig) {
+  const atomicMissing = Object.entries(atomicEnv)
+    .filter(([, value]) => !value)
+    .map(([key]) => key)
+  const inferenceMissing = Object.entries(inferenceEnv)
+    .filter(([, value]) => !value)
+    .map(([key]) => key)
+  missing.push(...(atomicMissing.length < inferenceMissing.length ? atomicMissing : inferenceMissing))
+}
 
 if (functionNames.some((functionName) => workerFunctions.has(functionName)) && !workerEnv.POST_RAG_WORKER_TOKEN) {
   missing.push('POST_RAG_WORKER_TOKEN')

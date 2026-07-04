@@ -169,6 +169,12 @@ export interface TencentRagConfig {
   embeddingInferenceId?: string
   rerankInferenceId?: string
   llmInferenceId?: string
+  atomicSecretId?: string
+  atomicSecretKey?: string
+  atomicRegion?: string
+  embeddingModel?: string
+  rerankModel?: string
+  llmModel?: string
 }
 
 export type TencentRagRequestJson = <T>(
@@ -178,8 +184,15 @@ export type TencentRagRequestJson = <T>(
   body?: unknown
 ) => Promise<T>
 
+export type TencentRagAtomicRequestJson = <T>(
+  config: TencentRagConfig,
+  action: string,
+  body: unknown
+) => Promise<T>
+
 export interface TencentRagProviderOptions {
   requestJson?: TencentRagRequestJson
+  requestAtomicJson?: TencentRagAtomicRequestJson
 }
 
 export interface TencentLkeapRagConfig {
@@ -426,6 +439,12 @@ export function readTencentRagConfigFromEnv(env: NodeJS.ProcessEnv = process.env
     embeddingInferenceId: String(env.TENCENT_RAG_EMBEDDING_INFERENCE_ID || ''),
     rerankInferenceId: String(env.TENCENT_RAG_RERANK_INFERENCE_ID || ''),
     llmInferenceId: String(env.TENCENT_RAG_LLM_INFERENCE_ID || ''),
+    atomicSecretId: String(env.TENCENT_RAG_ATOMIC_SECRET_ID || ''),
+    atomicSecretKey: String(env.TENCENT_RAG_ATOMIC_SECRET_KEY || ''),
+    atomicRegion: String(env.TENCENT_RAG_ATOMIC_REGION || 'ap-beijing'),
+    embeddingModel: String(env.TENCENT_RAG_EMBEDDING_MODEL || 'bge-base-zh-v1.5'),
+    rerankModel: String(env.TENCENT_RAG_RERANK_MODEL || 'bge-reranker-large'),
+    llmModel: String(env.TENCENT_RAG_LLM_MODEL || 'deepseek-v3'),
   }
 }
 
@@ -450,16 +469,36 @@ export function createTencentRagProviderFromEnv() {
   return createTencentRagProvider(readTencentRagConfigFromEnv())
 }
 
-function isConfigured(config: TencentRagConfig) {
+function hasEsIndexConfig(config: TencentRagConfig) {
   return Boolean(
     config.endpoint
     && config.username
     && config.password
     && config.indexName
-    && config.embeddingInferenceId
+  )
+}
+
+function hasInferenceModelConfig(config: TencentRagConfig) {
+  return Boolean(
+    config.embeddingInferenceId
     && config.rerankInferenceId
     && config.llmInferenceId
   )
+}
+
+function hasAtomicModelConfig(config: TencentRagConfig) {
+  return Boolean(
+    config.atomicSecretId
+    && config.atomicSecretKey
+    && config.atomicRegion
+    && config.embeddingModel
+    && config.rerankModel
+    && config.llmModel
+  )
+}
+
+function isConfigured(config: TencentRagConfig) {
+  return hasEsIndexConfig(config) && (hasInferenceModelConfig(config) || hasAtomicModelConfig(config))
 }
 
 function authHeader(config: TencentRagConfig) {
@@ -496,6 +535,75 @@ const requestJson: TencentRagRequestJson = async <T>(config: TencentRagConfig, m
     })
     req.on('error', reject)
     if (payload) req.write(payload)
+    req.end()
+  })
+}
+
+function tencentEsAtomicHost(action: string) {
+  return action === 'ChatCompletions' ? 'es.ai.tencentcloudapi.com' : 'es.tencentcloudapi.com'
+}
+
+const requestTencentEsAtomic: TencentRagAtomicRequestJson = async <T>(
+  config: TencentRagConfig,
+  action: string,
+  body: unknown,
+): Promise<T> => {
+  if (!config.atomicSecretId || !config.atomicSecretKey) {
+    throw new Error('rag_atomic_provider_not_configured')
+  }
+  const host = tencentEsAtomicHost(action)
+  const service = 'es'
+  const version = '2025-01-01'
+  const timestamp = Math.floor(Date.now() / 1000)
+  const date = new Date(timestamp * 1000).toISOString().slice(0, 10)
+  const payload = JSON.stringify(body)
+  const canonicalHeaders = `content-type:application/json; charset=utf-8\nhost:${host}\n`
+  const signedHeaders = 'content-type;host'
+  const canonicalRequest = ['POST', '/', '', canonicalHeaders, signedHeaders, tc3Sha256(payload)].join('\n')
+  const credentialScope = `${date}/${service}/tc3_request`
+  const stringToSign = ['TC3-HMAC-SHA256', timestamp, credentialScope, tc3Sha256(canonicalRequest)].join('\n')
+  const secretDate = tc3HmacBuffer(`TC3${config.atomicSecretKey}`, date)
+  const secretService = tc3HmacBuffer(secretDate, service)
+  const secretSigning = tc3HmacBuffer(secretService, 'tc3_request')
+  const signature = tc3HmacHex(secretSigning, stringToSign)
+  const authorization = `TC3-HMAC-SHA256 Credential=${config.atomicSecretId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`
+  return new Promise<T>((resolve, reject) => {
+    const req = https.request({
+      hostname: host,
+      method: 'POST',
+      path: '/',
+      headers: {
+        Authorization: authorization,
+        'Content-Type': 'application/json; charset=utf-8',
+        Host: host,
+        'X-TC-Action': action,
+        'X-TC-Version': version,
+        'X-TC-Timestamp': String(timestamp),
+        'X-TC-Region': config.atomicRegion || 'ap-beijing',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    }, (res) => {
+      const chunks: Buffer[] = []
+      res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)))
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8')
+        let parsed: any
+        try {
+          parsed = text ? JSON.parse(text) : {}
+        } catch (error) {
+          reject(error)
+          return
+        }
+        if ((res.statusCode || 500) >= 400 || parsed?.Response?.Error) {
+          const error = parsed?.Response?.Error
+          reject(new Error(`Tencent ES atomic ${action} failed: ${error?.Code || res.statusCode} ${error?.Message || text}`))
+          return
+        }
+        resolve((parsed?.Response || parsed) as T)
+      })
+    })
+    req.on('error', reject)
+    req.write(payload)
     req.end()
   })
 }
@@ -603,14 +711,25 @@ function buildAnswerPrompt(query: string, citations: RagCitation[]) {
 
 function extractCompletionText(value: any): string {
   const completion = value?.completion?.[0]?.result || value?.completion?.[0]?.text
-  const result = value?.result || value?.text || value?.choices?.[0]?.message?.content
+  const response = value?.Response || value
+  const choice = response?.Choices?.[0] || response?.choices?.[0] || {}
+  const result = value?.result
+    || value?.text
+    || value?.choices?.[0]?.message?.content
+    || choice?.Message?.Content
+    || choice?.message?.content
+    || choice?.Content
   return String(completion || result || '').trim()
 }
 
 function extractEmbeddingVector(value: any): number[] {
+  const response = value?.Response || value
   const direct = value?.embedding?.[0]?.result
     || value?.embedding?.[0]?.embedding
     || value?.data?.[0]?.embedding
+    || response?.Data?.[0]?.Embedding
+    || response?.Data?.[0]?.embedding
+    || response?.data?.[0]?.embedding
     || value?.result
     || value?.vector
   if (!Array.isArray(direct)) return []
@@ -618,13 +737,16 @@ function extractEmbeddingVector(value: any): number[] {
 }
 
 function extractRerankItems(value: any): Array<{ index: number; score: number }> {
+  const response = value?.Response || value
   const rawItems = Array.isArray(value?.rerank)
     ? value.rerank
-    : (Array.isArray(value?.data) ? value.data : [])
+    : (Array.isArray(value?.data)
+      ? value.data
+      : (Array.isArray(response?.Data) ? response.Data : []))
   return rawItems
     .map((item: any) => ({
-      index: Number(item?.index ?? item?.document_index),
-      score: Number(item?.relevance_score ?? item?.score),
+      index: Number(item?.index ?? item?.document_index ?? item?.Index ?? item?.DocumentIndex),
+      score: Number(item?.relevance_score ?? item?.score ?? item?.RelevanceScore ?? item?.Score),
     }))
     .filter((item: { index: number; score: number }) => Number.isFinite(item.index) && Number.isFinite(item.score))
 }
@@ -952,11 +1074,16 @@ export function createTencentRagProvider(
   options: TencentRagProviderOptions = {},
 ): TencentRagProvider {
   const sendJson = options.requestJson || requestJson
+  const sendAtomicJson = options.requestAtomicJson || requestTencentEsAtomic
   const embedText = async (text: string): Promise<number[]> => {
-    if (!config.embeddingInferenceId) return []
-    const response = await sendJson<any>(config, 'POST', `_inference/text_embedding/${config.embeddingInferenceId}`, {
-      input: [text],
-    })
+    const response = config.embeddingInferenceId
+      ? await sendJson<any>(config, 'POST', `_inference/text_embedding/${config.embeddingInferenceId}`, {
+        input: [text],
+      })
+      : await sendAtomicJson<any>(config, 'GetTextEmbedding', {
+        ModelName: config.embeddingModel,
+        Texts: [text],
+      })
     return extractEmbeddingVector(response)
   }
 
@@ -982,11 +1109,19 @@ export function createTencentRagProvider(
           }),
         }))
 
-      if (config.rerankInferenceId && citations.length > 0) {
-        const reranked = await sendJson<any>(config, 'POST', `_inference/rerank/${config.rerankInferenceId}`, {
-          query: input.ragQuery.raw,
-          input: citations.map((citation: RagCitation) => citation.preview),
-        })
+      if (citations.length > 0) {
+        const documents = citations.map((citation: RagCitation) => citation.preview)
+        const reranked = config.rerankInferenceId
+          ? await sendJson<any>(config, 'POST', `_inference/rerank/${config.rerankInferenceId}`, {
+            query: input.ragQuery.raw,
+            input: documents,
+          })
+          : await sendAtomicJson<any>(config, 'RunRerank', {
+            ModelName: config.rerankModel,
+            Query: input.ragQuery.raw,
+            Documents: documents,
+            ReturnDocuments: false,
+          })
         const byIndex = new Map<number, number>(extractRerankItems(reranked).map((item) => [item.index, item.score]))
         citations = citations
           .map((citation: ScoredRagCitation, index: number) => ({
@@ -998,11 +1133,18 @@ export function createTencentRagProvider(
       }
       citations = rankLkeapEvidenceCitations(citations, input.limit)
 
-      const answerResponse = citations.length && config.llmInferenceId
-        ? await sendJson<any>(config, 'POST', `_inference/completion/${config.llmInferenceId}?timeout=300s`, {
-          input: buildAnswerPrompt(input.query, citations),
-          task_settings: { temperature: 0.1, max_new_tokens: 300 },
-        })
+      const answerResponse = citations.length
+        ? (config.llmInferenceId
+          ? await sendJson<any>(config, 'POST', `_inference/completion/${config.llmInferenceId}?timeout=300s`, {
+            input: buildAnswerPrompt(input.query, citations),
+            task_settings: { temperature: 0.1, max_new_tokens: 300 },
+          })
+          : await sendAtomicJson<any>(config, 'ChatCompletions', {
+            ModelName: config.llmModel,
+            Messages: [{ Role: 'user', Content: buildAnswerPrompt(input.query, citations) }],
+            Stream: false,
+            Temperature: 0.1,
+          }))
         : null
       const answer = extractCompletionText(answerResponse) || (citations.length ? deterministicAnswer(citations) : '')
       return {

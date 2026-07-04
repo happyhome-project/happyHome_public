@@ -12,3 +12,11 @@ test('ensure-tencent-rag-index creates an indexed cosine dense_vector mapping', 
   assert.match(source, /index:\s*true/)
   assert.match(source, /similarity:\s*'cosine'/)
 })
+
+test('ensure-tencent-rag-index can probe dimensions through Tencent atomic embedding API', () => {
+  assert.match(source, /TENCENT_RAG_ATOMIC_SECRET_ID/)
+  assert.match(source, /TENCENT_RAG_ATOMIC_SECRET_KEY/)
+  assert.match(source, /GetTextEmbedding/)
+  assert.match(source, /ModelName:\s*config\.embeddingModel/)
+  assert.match(source, /Texts:/)
+})

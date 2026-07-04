@@ -10,6 +10,7 @@ The formal design needs CloudBase to own business data, jobs, and index state, w
 
 - CloudBase remains the source of truth for `posts`, `sections`, `post_rag_jobs`, and `post_rag_index_state`.
 - `post-rag-worker` writes chunk documents and embeddings into Tencent ES AI Search.
+- Tencent ES AI Search atomic APIs can provide Embedding, Rerank, and LLM generation directly; ES inference endpoints remain an optional compatibility path.
 - Runtime search uses Tencent ES `retriever.rank_fusion` with:
   - full-text retrieval over `text`, `preview`, `title`, `fieldLabel`, and `sectionName`;
   - vector retrieval over the configured dense vector field;
@@ -44,7 +45,7 @@ The formal design needs CloudBase to own business data, jobs, and index state, w
 
 5. Change deployment configuration.
    - `scripts/update-rag-env.mjs` reads `~/.happyhome/tencent-rag.env`.
-   - It writes `TENCENT_RAG_PROVIDER=es` and ES endpoint/credential/inference IDs into cloud functions.
+   - It writes `TENCENT_RAG_PROVIDER=es`, ES endpoint/credential, and either Tencent ES atomic model config or ES inference IDs into cloud functions.
    - It no longer writes LKEAP as the normal provider.
 
 6. Update docs and verification commands.
@@ -57,6 +58,7 @@ The formal design needs CloudBase to own business data, jobs, and index state, w
 - `npm.cmd --workspace cloud run test:unit -- --runTestsByPath lib/__tests__/post-rag.test.ts`
 - `npm.cmd run test:post-rag-rebuild`
 - `npm.cmd run test:mp:post-rag-search-static`
+- `npm.cmd run verify:tencent-rag -- --models-only`
 - If ES credentials are available: `npm.cmd run verify:tencent-rag`
 
 ## Known Constraint
