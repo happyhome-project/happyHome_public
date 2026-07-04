@@ -7,6 +7,8 @@ import { tmpdir } from 'node:os'
 
 import {
   buildTcbCommand,
+  DEFAULT_FUNCTIONS,
+  REQUIRED_SMOKE_LABELS,
   defaultRunner,
   parseArgs,
   parseFirstJson,
@@ -69,6 +71,7 @@ function createMockRunner(options = {}) {
         : { status: 1, stdout: JSON.stringify({ errorMessage: 'Unauthorized' }), stderr: '' }
     }
     if (fn === 'http-gateway') return { status: 0, stdout: JSON.stringify({ statusCode: 200, body: '' }), stderr: '' }
+    if (fn === 'home-prefetch') return { status: 0, stdout: JSON.stringify({ statusCode: 200, body: '' }), stderr: '' }
 
     if (fn === 'admin') {
       if (payload.action === 'community.createAdmin') return { status: 0, stdout: JSON.stringify({ communityId: 'c1' }), stderr: '' }
@@ -105,6 +108,7 @@ test('parseArgs supports env, only, log controls, no-fixture, and evidence-dir',
     '--log-limit=7',
     '--log-wait-ms=0',
     '--command-timeout-ms=1234',
+    '--concurrency=4',
     '--no-fixture',
     '--evidence-dir', 'evidence-x',
     '--run-id', 'run-x',
@@ -115,10 +119,38 @@ test('parseArgs supports env, only, log controls, no-fixture, and evidence-dir',
   assert.equal(args.logLimit, 7)
   assert.equal(args.logWaitMs, 0)
   assert.equal(args.commandTimeoutMs, 1234)
+  assert.equal(args.concurrency, 4)
   assert.equal(args.noFixture, true)
   assert.equal(args.workerToken, 'unit-worker-token')
   assert.equal(args.evidenceDir, 'evidence-x')
   assert.equal(args.runId, 'run-x')
+})
+
+test('release smoke requires home-prefetch invoke evidence', async () => {
+  assert(DEFAULT_FUNCTIONS.includes('home-prefetch'))
+  assert(REQUIRED_SMOKE_LABELS.includes('HH_CLOUD_INVOKE_SMOKE_HOME_PREFETCH'))
+
+  const evidenceDir = await tempEvidenceDir()
+  try {
+    const summary = await runCloudReleaseSmoke({
+      envId: 'env-x',
+      only: ['home-prefetch'],
+      logLimit: 3,
+      logWaitMs: 0,
+      noFixture: true,
+      evidenceDir,
+      runId: 'unit-run',
+    }, createMockRunner({
+      invokeResponses: {
+        'home-prefetch': [{ status: 1, stdout: '', stderr: 'prefetch failed' }],
+      },
+    }))
+
+    assert.equal(summary.status, 'failed')
+    assert(summary.missingLabels.includes('HH_CLOUD_INVOKE_SMOKE_HOME_PREFETCH'))
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true })
+  }
 })
 
 test('buildTcbCommand and redaction keep command evidence safe', () => {
@@ -170,6 +202,43 @@ test('cloud release smoke passes with generated invoke, log, fixture, and cleanu
 
     const stored = JSON.parse(await readFile(join(evidenceDir, 'summary.json'), 'utf8'))
     assert.equal(stored.status, 'passed')
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true })
+  }
+})
+
+test('cloud release smoke runs independent basic invokes with bounded concurrency', async () => {
+  const evidenceDir = await tempEvidenceDir()
+  try {
+    let activeInvokes = 0
+    let maxActiveInvokes = 0
+    const baseRunner = createMockRunner({ runId: 'unit-run' })
+    const runner = async (command, args, options) => {
+      if (commandPart(args, 2) === 'invoke') {
+        activeInvokes += 1
+        maxActiveInvokes = Math.max(maxActiveInvokes, activeInvokes)
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        const result = await baseRunner(command, args, options)
+        activeInvokes -= 1
+        return result
+      }
+      return await baseRunner(command, args, options)
+    }
+
+    const summary = await runCloudReleaseSmoke({
+      envId: 'env-x',
+      only: ['community', 'member', 'post'],
+      logLimit: 3,
+      logWaitMs: 0,
+      commandTimeoutMs: 1234,
+      concurrency: 3,
+      noFixture: true,
+      evidenceDir,
+      runId: 'unit-run',
+    }, runner)
+
+    assert.equal(summary.status, 'passed')
+    assert.equal(maxActiveInvokes, 3)
   } finally {
     await rm(evidenceDir, { recursive: true, force: true })
   }

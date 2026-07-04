@@ -6,7 +6,22 @@
     </text>
 
     <view
-      v-if="['short_text', 'summary'].includes(widget.type)"
+      v-if="useMultilineTextInput"
+      class="textarea-wrap text-field-wrap"
+    >
+      <textarea
+        :value="modelValue as string"
+        :placeholder="inputPlaceholder"
+        placeholder-class="input-placeholder"
+        class="textarea text-field-textarea"
+        auto-height
+        maxlength="-1"
+        @input="emit('update:modelValue', ($event as any).detail.value)"
+      />
+    </view>
+
+    <view
+      v-else-if="['short_text', 'summary'].includes(widget.type)"
       class="input-wrap"
     >
       <input
@@ -120,6 +135,9 @@
     <NoteBlocksEditor
       v-else-if="widget.type === 'note_blocks'"
       :model-value="modelValue"
+      :minimal="variant === 'figma'"
+      :placeholder="inputPlaceholder"
+      :allow-images="allowRichNoteImages"
       @update:model-value="emit('update:modelValue', $event)"
     />
 
@@ -188,17 +206,30 @@ const isSelectedFigmaLocation = computed(() =>
   String(props.widget?.type || '') === 'location' &&
   !!locationValue.value
 )
+const widgetId = computed(() => String(props.widget?.widgetId || ''))
+const normalizedFieldKey = computed(() => String(props.widget?.fieldKey || '').toLowerCase())
+const normalizedLabel = computed(() => String(displayLabel.value || '').replace(/\s/g, ''))
+const useMultilineTextInput = computed(() =>
+  variant.value === 'figma' &&
+  ['short_text', 'summary'].includes(String(props.widget?.type || '')) &&
+  (
+    widgetId.value === 'activity_invite_title' ||
+    (normalizedFieldKey.value === 'title' && normalizedLabel.value.includes('邀约'))
+  )
+)
 const showOuterLabel = computed(() => !props.hideLabel && !isSelectedFigmaLocation.value)
 const isLineWidget = computed(() =>
   variant.value === 'figma' &&
   ['short_text', 'summary', 'number', 'datetime', 'location'].includes(String(props.widget?.type || '')) &&
-  !isSelectedFigmaLocation.value
+  !isSelectedFigmaLocation.value &&
+  !useMultilineTextInput.value
 )
 const editorClasses = computed(() => ({
   'widget-editor--figma': variant.value === 'figma',
   'widget-editor--embedded': props.embedded,
   'widget-editor--hide-label': props.hideLabel,
   'widget-editor--line': isLineWidget.value,
+  'widget-editor--multiline-text': useMultilineTextInput.value,
   'widget-editor--block': variant.value === 'figma' && !isLineWidget.value,
   [`widget-editor--guide-${props.guideRole}`]: !!props.guideRole,
   [`widget-editor--${String(props.widget?.type || 'unknown')}`]: true,
@@ -289,27 +320,41 @@ function clearLocation() {
 </script>
 
 <style lang="scss" scoped>
-.widget-editor { margin-bottom: $hh-space-lg; }
+.widget-editor {
+  min-width: 0;
+  max-width: 100%;
+  margin-bottom: $hh-space-lg;
+  box-sizing: border-box;
+}
 .label { font-size: var(--hh-text-body-base-size); color: var(--hh-color-text-primary); margin-bottom: $hh-space-sm; display: block; font-weight: $hh-font-weight-medium; }
 .required { color: $hh-color-danger; margin-left: 4rpx; }
 .input-wrap {
+  min-width: 0;
+  max-width: 100%;
   background: var(--hh-color-card);
   border: 1rpx solid var(--hh-color-line);
   border-radius: var(--hh-radius-card);
   padding: $hh-space-md;
+  box-sizing: border-box;
 }
 .input {
   font-size: var(--hh-text-body-base-size);
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 40rpx;
   background: transparent;
   color: var(--hh-color-text-primary);
+  box-sizing: border-box;
 }
 .textarea-wrap {
+  min-width: 0;
+  max-width: 100%;
   background: var(--hh-color-card);
   border: 1rpx solid var(--hh-color-line);
   border-radius: var(--hh-radius-card);
   padding: $hh-space-md;
+  box-sizing: border-box;
 }
 .input-placeholder {
   color: var(--hh-color-text-tertiary);
@@ -319,13 +364,25 @@ function clearLocation() {
   /* uni-datetime-picker 自带外观，容器用全宽块级即可 */
   display: block;
 }
-.image-uploader { display: flex; flex-wrap: wrap; gap: $hh-space-sm; }
+.datetime-picker {
+  min-width: 0;
+  max-width: 100%;
+}
+.image-uploader { display: flex; flex-wrap: wrap; gap: $hh-space-sm; min-width: 0; max-width: 100%; }
 .thumb-wrap { position: relative; width: 188rpx; height: 188rpx; }
 .thumb { width: 188rpx; height: 188rpx; border-radius: var(--hh-radius-card); }
 .thumb-del { position: absolute; top: -10rpx; right: -10rpx; width: 36rpx; height: 36rpx; background: $hh-color-mask; color: $hh-color-text-inverse; border-radius: $hh-radius-full; font-size: $hh-font-body; line-height: 36rpx; text-align: center; }
 .add-btn { width: 188rpx; height: 188rpx; background: var(--hh-color-card); border: 1rpx dashed var(--hh-color-brand-line); border-radius: var(--hh-radius-card); display: flex; align-items: center; justify-content: center; }
 .add-icon { font-size: 60rpx; color: var(--hh-color-brand-primary); }
-.location-picker { background: var(--hh-color-card); border: 1rpx solid var(--hh-color-line); border-radius: var(--hh-radius-card); padding: $hh-space-md; }
+.location-picker {
+  min-width: 0;
+  max-width: 100%;
+  background: var(--hh-color-card);
+  border: 1rpx solid var(--hh-color-line);
+  border-radius: var(--hh-radius-card);
+  padding: $hh-space-md;
+  box-sizing: border-box;
+}
 .location-value { margin-bottom: $hh-space-sm; }
 .address { display: block; font-size: var(--hh-text-body-base-size); color: var(--hh-color-text-primary); }
 .coord { display: block; font-size: var(--hh-text-caption-lg-size); color: var(--hh-color-text-tertiary); margin-top: $hh-space-xs; }
@@ -337,11 +394,14 @@ function clearLocation() {
 .readonly-hint { font-size: var(--hh-text-caption-lg-size); color: var(--hh-color-text-tertiary); }
 
 .widget-editor--figma {
+  width: 100%;
+  max-width: 100%;
   margin-bottom: 0;
   padding: 32rpx;
   border-radius: 24rpx;
   background: #fff;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .widget-editor--figma .label {
@@ -366,7 +426,10 @@ function clearLocation() {
 
 .widget-editor--line .label {
   flex-shrink: 0;
-  max-width: 300rpx;
+  max-width: 284rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .widget-editor--line .input-wrap,
@@ -375,6 +438,17 @@ function clearLocation() {
 .widget-editor--line .datetime-picker {
   flex: 1;
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.widget-editor--figma.widget-editor--multiline-text {
+  display: block;
+  min-height: 0;
+}
+
+.widget-editor--figma.widget-editor--multiline-text .label {
+  margin-bottom: 20rpx;
 }
 
 .widget-editor--figma .input-wrap,
@@ -393,6 +467,9 @@ function clearLocation() {
   line-height: 48rpx;
   text-align: right;
   color: #181818;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .widget-editor--figma .textarea {
@@ -400,6 +477,15 @@ function clearLocation() {
   padding-top: 0;
   font-size: 32rpx;
   line-height: 48rpx;
+}
+
+.widget-editor--figma.widget-editor--multiline-text .text-field-textarea {
+  min-height: 96rpx;
+  max-height: 192rpx;
+  color: #181818;
+  font-size: 32rpx;
+  line-height: 48rpx;
+  text-align: left;
 }
 
 .widget-editor--figma .input-placeholder {
@@ -482,6 +568,7 @@ function clearLocation() {
 .location-selected-card {
   position: relative;
   overflow: hidden;
+  width: 100%;
   min-height: 148rpx;
   margin-top: 16rpx;
   padding: 24rpx;
@@ -544,6 +631,7 @@ function clearLocation() {
 .widget-editor--figma .location-value {
   flex: 1;
   min-width: 0;
+  max-width: 100%;
   margin-bottom: 0;
   text-align: right;
 }
@@ -560,6 +648,23 @@ function clearLocation() {
 .widget-editor--figma .location-actions {
   flex-shrink: 0;
   gap: 16rpx;
+}
+
+.widget-editor--figma :deep(.uni-date-editor),
+.widget-editor--figma :deep(.uni-date-x),
+.widget-editor--figma :deep(.uni-date__x-input),
+.widget-editor--figma :deep(.uni-date-single) {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  width: 100% !important;
+  box-sizing: border-box;
+}
+
+.widget-editor--figma :deep(.uni-date__x-input) {
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .widget-editor--figma .loc-btn {
