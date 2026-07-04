@@ -29,6 +29,7 @@ const CAM_ENV_FILE = path.join(os.homedir(), '.happyhome', 'cam.env')
 const fileEnv = loadDotEnvFile(RAG_ENV_FILE)
 const camEnv = loadDotEnvFile(CAM_ENV_FILE)
 const env = { ...camEnv, ...fileEnv, ...process.env }
+const MAX_HTTP_RETRIES = Math.max(1, Math.floor(Number(env.TENCENT_RAG_HTTP_RETRIES || 4)))
 
 const config = {
   endpoint: String(env.TENCENT_RAG_ES_ENDPOINT || '').trim().replace(/\/+$/, ''),
@@ -77,11 +78,35 @@ function authHeader() {
   return `Basic ${Buffer.from(`${config.username}:${config.password}`).toString('base64')}`
 }
 
+function isTransientNetworkError(error) {
+  const text = String(error?.message || error)
+  return /ECONNRESET|fetch failed|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket disconnected/i.test(text)
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function withTransientRetry(label, fn) {
+  let lastError
+  for (let attempt = 1; attempt <= MAX_HTTP_RETRIES; attempt += 1) {
+    try {
+      return await fn()
+    } catch (error) {
+      lastError = error
+      if (!isTransientNetworkError(error) || attempt >= MAX_HTTP_RETRIES) throw error
+      console.warn(`[ensure-tencent-rag-index] transient ${label} failure; retry ${attempt + 1}/${MAX_HTTP_RETRIES}`)
+      await delay(1000 * attempt)
+    }
+  }
+  throw lastError
+}
+
 function requestJson(method, requestPath, body, { allow404 = false } = {}) {
   const url = new URL(`${config.endpoint}/${requestPath.replace(/^\/+/, '')}`)
   const transport = url.protocol === 'http:' ? http : https
   const payload = body === undefined ? '' : JSON.stringify(body)
-  return new Promise((resolve, reject) => {
+  return withTransientRetry(`${method} ${url.pathname}`, () => new Promise((resolve, reject) => {
     const req = transport.request(url, {
       method,
       headers: {
@@ -112,7 +137,7 @@ function requestJson(method, requestPath, body, { allow404 = false } = {}) {
     req.on('error', reject)
     if (payload) req.write(payload)
     req.end()
-  })
+  }))
 }
 
 function sha256(message, encoding = 'hex') {
@@ -127,32 +152,34 @@ async function requestTencentAtomic(action, payload) {
   const host = 'es.tencentcloudapi.com'
   const service = 'es'
   const version = '2025-01-01'
-  const timestamp = Math.floor(Date.now() / 1000)
-  const date = new Date(timestamp * 1000).toISOString().slice(0, 10)
-  const body = JSON.stringify(payload)
-  const canonicalHeaders = `content-type:application/json; charset=utf-8\nhost:${host}\n`
-  const signedHeaders = 'content-type;host'
-  const canonicalRequest = ['POST', '/', '', canonicalHeaders, signedHeaders, sha256(body)].join('\n')
-  const credentialScope = `${date}/${service}/tc3_request`
-  const stringToSign = ['TC3-HMAC-SHA256', timestamp, credentialScope, sha256(canonicalRequest)].join('\n')
-  const secretDate = hmac(`TC3${config.atomicSecretKey}`, date)
-  const secretService = hmac(secretDate, service)
-  const secretSigning = hmac(secretService, 'tc3_request')
-  const signature = hmac(secretSigning, stringToSign, 'hex')
-  const authorization = `TC3-HMAC-SHA256 Credential=${config.atomicSecretId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`
+  const res = await withTransientRetry(action, async () => {
+    const timestamp = Math.floor(Date.now() / 1000)
+    const date = new Date(timestamp * 1000).toISOString().slice(0, 10)
+    const body = JSON.stringify(payload)
+    const canonicalHeaders = `content-type:application/json; charset=utf-8\nhost:${host}\n`
+    const signedHeaders = 'content-type;host'
+    const canonicalRequest = ['POST', '/', '', canonicalHeaders, signedHeaders, sha256(body)].join('\n')
+    const credentialScope = `${date}/${service}/tc3_request`
+    const stringToSign = ['TC3-HMAC-SHA256', timestamp, credentialScope, sha256(canonicalRequest)].join('\n')
+    const secretDate = hmac(`TC3${config.atomicSecretKey}`, date)
+    const secretService = hmac(secretDate, service)
+    const secretSigning = hmac(secretService, 'tc3_request')
+    const signature = hmac(secretSigning, stringToSign, 'hex')
+    const authorization = `TC3-HMAC-SHA256 Credential=${config.atomicSecretId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`
 
-  const res = await fetch(`https://${host}/`, {
-    method: 'POST',
-    headers: {
-      Authorization: authorization,
-      'Content-Type': 'application/json; charset=utf-8',
-      Host: host,
-      'X-TC-Action': action,
-      'X-TC-Version': version,
-      'X-TC-Timestamp': String(timestamp),
-      'X-TC-Region': config.atomicRegion,
-    },
-    body,
+    return fetch(`https://${host}/`, {
+      method: 'POST',
+      headers: {
+        Authorization: authorization,
+        'Content-Type': 'application/json; charset=utf-8',
+        Host: host,
+        'X-TC-Action': action,
+        'X-TC-Version': version,
+        'X-TC-Timestamp': String(timestamp),
+        'X-TC-Region': config.atomicRegion,
+      },
+      body,
+    })
   })
   const text = await res.text()
   let json

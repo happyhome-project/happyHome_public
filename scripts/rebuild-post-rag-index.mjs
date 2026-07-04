@@ -49,6 +49,8 @@ function parseRagRebuildArgs(argv = process.argv.slice(2), env = process.env) {
       env.HH_POST_RAG_REBUILD_BATCH_SIZE || String(DEFAULT_BATCH_SIZE),
     )) || DEFAULT_BATCH_SIZE))),
     processJobs: !argv.includes('--no-process'),
+    reconcile: argv.includes('--reconcile'),
+    health: argv.includes('--health'),
     workerRounds: Math.max(0, Math.floor(Number(getFlagValue(
       argv,
       'worker-rounds',
@@ -141,6 +143,55 @@ async function enqueueCommunityRagJobs(communityId, options, runner) {
   return totals
 }
 
+async function loadCommunityRagHealth(communityId, options, runner) {
+  const record = await invokeAdmin(
+    'post.ragIndexHealthAdmin',
+    { communityId },
+    options,
+    runner,
+  )
+  return {
+    communityId,
+    ...(record.functionResult || {}),
+  }
+}
+
+async function reconcileCommunityRagJobs(communityId, options, runner) {
+  const totals = {
+    communityId,
+    sectionCount: 0,
+    scannedCount: 0,
+    upsertQueuedCount: 0,
+    deleteQueuedCount: 0,
+    skippedCount: 0,
+    missingStateCount: 0,
+    staleStateCount: 0,
+    removableStateCount: 0,
+    failedCount: 0,
+  }
+  let skip = 0
+  while (true) {
+    const record = await invokeAdmin(
+      'post.reconcileRagIndexCommunityBatchAdmin',
+      { communityId, skip, limit: options.batchSize },
+      options,
+      runner,
+    )
+    const result = record.functionResult || {}
+    totals.scannedCount += Number(result.scannedCount || 0)
+    totals.upsertQueuedCount += Number(result.upsertQueuedCount || 0)
+    totals.deleteQueuedCount += Number(result.deleteQueuedCount || 0)
+    totals.skippedCount += Number(result.skippedCount || 0)
+    totals.missingStateCount += Number(result.missingStateCount || 0)
+    totals.staleStateCount += Number(result.staleStateCount || 0)
+    totals.removableStateCount += Number(result.removableStateCount || 0)
+    totals.failedCount += Number(result.failedCount || 0)
+    if (!result.hasMore || !result.nextSkip) break
+    skip = Number(result.nextSkip)
+  }
+  return totals
+}
+
 async function processQueuedJobs(options, runner) {
   if (!options.workerToken) {
     throw new Error('POST_RAG_WORKER_TOKEN is required to invoke post-rag-worker; use --no-process to only enqueue jobs')
@@ -167,15 +218,74 @@ export async function runPostRagRebuild(options = parseRagRebuildArgs(), runner 
     return {
       envId: options.envId,
       dryRun: true,
+      health: Boolean(options.health),
       communityIds: normalizeCommunityIds(communityIds),
       results: [],
+      workerRounds: [],
+    }
+  }
+  if (options.health) {
+    const results = []
+    for (const communityId of communityIds) {
+      try {
+        results.push({ ok: true, ...await loadCommunityRagHealth(communityId, options, runner) })
+      } catch (error) {
+        results.push({
+          ok: false,
+          communityId,
+          error: String(error?.message || error),
+          activePostCount: 0,
+          indexedStateCount: 0,
+          removedStateCount: 0,
+          failedStateCount: 0,
+          pendingJobCount: 0,
+          failedJobCount: 0,
+          potentialMissingActiveCount: 0,
+        })
+      }
+    }
+    const totals = results.reduce((acc, item) => {
+      acc.communityCount += 1
+      acc.activePostCount += Number(item.activePostCount || 0)
+      acc.indexedStateCount += Number(item.indexedStateCount || 0)
+      acc.removedStateCount += Number(item.removedStateCount || 0)
+      acc.failedStateCount += Number(item.failedStateCount || 0)
+      acc.pendingJobCount += Number(item.pendingJobCount || 0)
+      acc.failedJobCount += Number(item.failedJobCount || 0)
+      acc.potentialMissingActiveCount += Number(item.potentialMissingActiveCount || 0)
+      if (!item.ok) acc.failedCommunityCount += 1
+      return acc
+    }, {
+      communityCount: 0,
+      activePostCount: 0,
+      indexedStateCount: 0,
+      removedStateCount: 0,
+      failedStateCount: 0,
+      pendingJobCount: 0,
+      failedJobCount: 0,
+      potentialMissingActiveCount: 0,
+      failedCommunityCount: 0,
+    })
+    totals.coverageRatio = totals.activePostCount > 0
+      ? totals.indexedStateCount / totals.activePostCount
+      : 1
+    return {
+      envId: options.envId,
+      dryRun: false,
+      health: true,
+      communityIds,
+      results,
+      totals,
       workerRounds: [],
     }
   }
   const results = []
   for (const communityId of communityIds) {
     try {
-      results.push({ ok: true, ...await enqueueCommunityRagJobs(communityId, options, runner) })
+      const communityResult = options.reconcile
+        ? await reconcileCommunityRagJobs(communityId, options, runner)
+        : await enqueueCommunityRagJobs(communityId, options, runner)
+      results.push({ ok: true, ...communityResult })
     } catch (error) {
       results.push({
         ok: false,
@@ -196,6 +306,10 @@ export async function runPostRagRebuild(options = parseRagRebuildArgs(), runner 
     acc.scannedCount += item.scannedCount || 0
     acc.upsertQueuedCount += item.upsertQueuedCount || 0
     acc.deleteQueuedCount += item.deleteQueuedCount || 0
+    acc.skippedCount += item.skippedCount || 0
+    acc.missingStateCount += item.missingStateCount || 0
+    acc.staleStateCount += item.staleStateCount || 0
+    acc.removableStateCount += item.removableStateCount || 0
     acc.failedPostCount += item.failedCount || 0
     if (!item.ok) acc.failedCommunityCount += 1
     return acc
@@ -205,6 +319,10 @@ export async function runPostRagRebuild(options = parseRagRebuildArgs(), runner 
     scannedCount: 0,
     upsertQueuedCount: 0,
     deleteQueuedCount: 0,
+    skippedCount: 0,
+    missingStateCount: 0,
+    staleStateCount: 0,
+    removableStateCount: 0,
     failedPostCount: 0,
     failedCommunityCount: 0,
   })
@@ -227,6 +345,8 @@ Options:
   --all-active                  Enqueue RAG jobs for all active communities.
   --community-id <id>           Enqueue one community. Can be repeated.
   --community-ids <id1,id2>     Enqueue multiple communities.
+  --reconcile                   Queue only missing/stale/removable RAG jobs from post_rag_index_state.
+  --health                      Read RAG source/state/job counts without queueing or processing jobs.
   --dry-run                     Print target community ids without enqueueing.
   --batch-size <n>              Posts per admin invocation. Defaults to ${DEFAULT_BATCH_SIZE}.
   --no-process                  Only enqueue jobs; do not invoke post-rag-worker.
@@ -242,8 +362,19 @@ function printSummary(summary) {
     return
   }
   for (const item of summary.results) {
+    if (summary.health) {
+      if (item.ok) {
+        console.log(`[post-rag-health] ok community=${item.communityId} active=${item.activePostCount} indexed=${item.indexedStateCount} removed=${item.removedStateCount} failedState=${item.failedStateCount} pendingJobs=${item.pendingJobCount} failedJobs=${item.failedJobCount} potentialMissing=${item.potentialMissingActiveCount} coverage=${Number(item.coverageRatio || 0).toFixed(3)}`)
+      } else {
+        console.error(`[post-rag-health] failed community=${item.communityId} ${item.error}`)
+      }
+      continue
+    }
     if (item.ok) {
-      console.log(`[post-rag-rebuild] ok community=${item.communityId} sections=${item.sectionCount} scanned=${item.scannedCount} upsertJobs=${item.upsertQueuedCount} deleteJobs=${item.deleteQueuedCount} failed=${item.failedCount}`)
+      const reconcileBits = item.missingStateCount || item.staleStateCount || item.removableStateCount || item.skippedCount
+        ? ` skipped=${item.skippedCount || 0} missing=${item.missingStateCount || 0} stale=${item.staleStateCount || 0} removable=${item.removableStateCount || 0}`
+        : ''
+      console.log(`[post-rag-rebuild] ok community=${item.communityId} sections=${item.sectionCount} scanned=${item.scannedCount} upsertJobs=${item.upsertQueuedCount} deleteJobs=${item.deleteQueuedCount}${reconcileBits} failed=${item.failedCount}`)
     } else {
       console.error(`[post-rag-rebuild] failed community=${item.communityId} ${item.error}`)
     }

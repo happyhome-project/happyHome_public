@@ -15,4 +15,6 @@ test('verify-tencent-rag supports Tencent atomic embedding rerank and LLM APIs',
   assert.match(source, /ModelName:\s*config\.embeddingModel/)
   assert.match(source, /Documents:/)
   assert.match(source, /Stream:\s*false/)
+  assert.match(source, /TENCENT_RAG_HTTP_RETRIES/)
+  assert.match(source, /ECONNRESET/)
 })

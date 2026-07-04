@@ -78,10 +78,11 @@ LKEAP 原子能力旧路径：
 - 帖子删除：排 `delete` job，并清理 fallback 索引。
 - 板块名称、字段变化：按板块给 active posts 排 `upsert` job；纯新增空字段不扫描历史帖。
 - 社区硬删除：给社区下帖子排 `delete` job，并清理 fallback 索引。
+- 周期性/手动 reconcile：按社区扫描 `posts` 与 `post_rag_index_state`，只给缺失、过期、应删除的帖子排 job，避免所有历史帖反复付费重建。
 
 worker 处理 `upsert` 时会先删除该 post 在 ES 中的旧 chunks，再写当前 chunks，避免旧正文、旧视频名继续被搜到。
 
-历史帖子不会自动拥有 RAG job。上线或大改字段后需要运行 RAG 回填脚本，把现有帖子重新排入 `post_rag_jobs`，再由 worker 分批处理。
+历史帖子不会自动拥有 RAG job。上线或大改字段后可以先跑只读健康检查，再优先用 reconcile 补缺失/过期索引；只有索引结构大改或需要强制重建时，才运行全量回填脚本把现有帖子全部重新排入 `post_rag_jobs`。
 
 ## Search API
 
@@ -208,6 +209,19 @@ npm.cmd run ensure:indexes
 npm.cmd run ensure:tencent-rag-index
 ```
 
+将直接访问 ES 索引的云函数接入 ES 所在 VPC/子网；CloudBase 继续只负责业务数据和 job/state：
+
+```powershell
+npm.cmd run configure:rag-network -- --vpc-id <vpcId> --subnet-id <subnetId>
+```
+
+如果 ES 仅开放私网访问，本地机器通常不能直连 ES endpoint；此时应在云函数环境变量和 VPC 配置完成后，通过已授权的 `post-rag-worker` 在云端初始化索引：
+
+```ts
+// 调用云函数 post-rag-worker
+{ "action": "ensureIndex", "workerToken": "<POST_RAG_WORKER_TOKEN>" }
+```
+
 验证腾讯 ES 智能搜索模型服务连通性。完整验证要求 ES index endpoint 已配置；如果只想先验证腾讯原子 API 三件套：
 
 ```powershell
@@ -226,6 +240,20 @@ npm.cmd run verify:tencent-lkeap
 ```powershell
 npm.cmd run rebuild:post-rag-index -- --all-active
 npm.cmd run rebuild:post-rag-index -- --community-id <communityId>
+```
+
+只读检查各社区 RAG 覆盖率和 job 积压，不排队、不调用 worker：
+
+```powershell
+npm.cmd run rebuild:post-rag-index -- --all-active --health
+npm.cmd run rebuild:post-rag-index -- --community-id <communityId> --health
+```
+
+按 `post_rag_index_state` 补偿缺失、过期和应删除的索引，并默认驱动 worker 处理队列：
+
+```powershell
+npm.cmd run rebuild:post-rag-index -- --all-active --reconcile
+npm.cmd run rebuild:post-rag-index -- --community-id <communityId> --reconcile
 ```
 
 只入队不处理：
@@ -278,7 +306,7 @@ npm.cmd run rebuild:post-search-index -- --all-active
 预期：
 
 - 有证据时返回 `mode=rag`、`answer`、`citations`、可跳转 `items`。
-- 没有足够证据时返回 `mode=no_answer`。
+- 没有足够证据时返回 `mode=no_answer`，小程序搜索页不能再用本地 `bootstrap` 快照混入非 RAG 结果。
 - 腾讯服务不可用时返回 `mode=fallback`，不显示 AI answer。
 
 2026-06-25 云端真实 smoke 结果：
@@ -298,9 +326,11 @@ npm.cmd run rebuild:post-search-index -- --all-active
 
 - `createTencentRagProviderFromEnv` 已改为默认/旧 `lkeap` 值都走 ES provider；只有显式 `lkeap-cloudbase` 才进入旧 CloudBase chunk 扫描路径。
 - ES provider 单测会校验 `_search` 请求使用 `retriever.rank_fusion`，而不是顶层 `query + knn`。
-- ES provider 单测会校验 rerank 后过滤弱证据，且单候选语义命中也必须先 rerank 再过证据门槛。
+- ES provider 单测会校验 rerank 后过滤弱证据；低分噪声不能触发 LLM，也不能作为 RAG items 返回。
+- 小程序静态测试会校验搜索页不再把 `mode=no_answer` 降级成本地 bootstrap 搜索结果，避免无证据帖子被误看成 RAG 命中。
+- 新增社区级 reconcile 和 health admin action：`post.reconcileRagIndexCommunityBatchAdmin` 只给缺失/过期/应删除帖子排 job，`post.ragIndexHealthAdmin` 返回 source/state/job 覆盖率计数。
 - `update:rag-env` 已改为写入 `TENCENT_RAG_PROVIDER=es` 和 ES endpoint/credential/inference ids。
-- 本次迁移尚未声称云端 ES index 已完成全量回填；上线后仍需运行 `update:rag-env`、`ensure:tencent-rag-index`、`rebuild:post-rag-index -- --all-active`，再跑真实 smoke。
+- 本次迁移尚未声称云端 ES index 已完成全量回填；上线后仍需运行 `update:rag-env`、`ensure:tencent-rag-index`、`rebuild:post-rag-index -- --all-active --health`、`rebuild:post-rag-index -- --all-active --reconcile`，再跑真实 smoke。
 
 当前未完成的真实验收：
 

@@ -32,7 +32,10 @@ jest.mock('../../../lib/post-search', () => ({
 }))
 
 jest.mock('../../../lib/post-rag', () => ({
+  backfillPostRagJobsForSectionBatch: jest.fn(),
   enqueuePostRagJob: jest.fn(),
+  getPostRagIndexHealthForCommunity: jest.fn(),
+  reconcilePostRagJobsForCommunityBatch: jest.fn(),
 }))
 
 jest.mock('uuid', () => ({
@@ -1314,5 +1317,84 @@ test('post.rebuildSearchIndexSectionBatchAdmin: rebuilds a bounded derived searc
     failedCount: 0,
     hasMore: true,
     nextSkip: 10,
+  })
+})
+
+test('post.reconcileRagIndexCommunityBatchAdmin: queues missing stale and removable RAG jobs for a community batch', async () => {
+  ;(postRag.reconcilePostRagJobsForCommunityBatch as jest.Mock).mockResolvedValue({
+    communityId: 'community-1',
+    skip: 5,
+    limit: 10,
+    scannedCount: 10,
+    upsertQueuedCount: 2,
+    deleteQueuedCount: 1,
+    skippedCount: 7,
+    missingStateCount: 1,
+    staleStateCount: 1,
+    removableStateCount: 1,
+    failedCount: 0,
+    hasMore: true,
+    nextSkip: 15,
+  })
+
+  const result: any = await main({
+    action: 'post.reconcileRagIndexCommunityBatchAdmin',
+    communityId: 'community-1',
+    skip: 5,
+    limit: 10,
+    _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
+  })
+
+  expect(postRag.reconcilePostRagJobsForCommunityBatch).toHaveBeenCalledWith('community-1', {
+    skip: 5,
+    limit: 10,
+  })
+  expect(result).toEqual({
+    communityId: 'community-1',
+    skip: 5,
+    limit: 10,
+    scannedCount: 10,
+    upsertQueuedCount: 2,
+    deleteQueuedCount: 1,
+    skippedCount: 7,
+    missingStateCount: 1,
+    staleStateCount: 1,
+    removableStateCount: 1,
+    failedCount: 0,
+    hasMore: true,
+    nextSkip: 15,
+  })
+})
+
+test('post.ragIndexHealthAdmin: returns RAG index health counts for a scoped community', async () => {
+  ;(postRag.getPostRagIndexHealthForCommunity as jest.Mock).mockResolvedValue({
+    communityId: 'community-1',
+    activePostCount: 6,
+    indexedStateCount: 4,
+    removedStateCount: 1,
+    failedStateCount: 1,
+    pendingJobCount: 2,
+    failedJobCount: 1,
+    potentialMissingActiveCount: 2,
+    coverageRatio: 4 / 6,
+  })
+
+  const result: any = await main({
+    action: 'post.ragIndexHealthAdmin',
+    communityId: 'community-1',
+    _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
+  })
+
+  expect(postRag.getPostRagIndexHealthForCommunity).toHaveBeenCalledWith('community-1')
+  expect(result).toEqual({
+    communityId: 'community-1',
+    activePostCount: 6,
+    indexedStateCount: 4,
+    removedStateCount: 1,
+    failedStateCount: 1,
+    pendingJobCount: 2,
+    failedJobCount: 1,
+    potentialMissingActiveCount: 2,
+    coverageRatio: 4 / 6,
   })
 })

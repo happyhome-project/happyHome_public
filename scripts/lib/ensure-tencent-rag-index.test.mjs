@@ -19,4 +19,6 @@ test('ensure-tencent-rag-index can probe dimensions through Tencent atomic embed
   assert.match(source, /GetTextEmbedding/)
   assert.match(source, /ModelName:\s*config\.embeddingModel/)
   assert.match(source, /Texts:/)
+  assert.match(source, /TENCENT_RAG_HTTP_RETRIES/)
+  assert.match(source, /ECONNRESET/)
 })

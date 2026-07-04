@@ -72,6 +72,7 @@ export interface RagProviderSearchInput extends RagSearchParams {
 export interface TencentRagProvider {
   name: string
   isConfigured(): boolean
+  ensureIndex?(): Promise<{ created: boolean; indexName: string; dims?: number }>
   search(input: RagProviderSearchInput): Promise<Omit<RagSearchResult, 'query' | 'communityId' | 'sectionId' | 'skip' | 'limit'>>
   upsertChunks?(chunks: RagChunkDocument[]): Promise<void>
   deletePostChunks?(postId: string): Promise<void>
@@ -226,7 +227,7 @@ const THRIFT_FAMILY_EXPANSION = [
   '俭约',
   '儉約',
 ]
-const MIN_LKEAP_RERANK_EVIDENCE_SCORE = 0
+const MIN_LKEAP_RERANK_EVIDENCE_SCORE = 0.45
 const MIN_LKEAP_SEMANTIC_EVIDENCE_SCORE = 0.42
 
 function logRagSearchDecision(event: string, payload: Record<string, unknown>) {
@@ -736,6 +737,39 @@ function extractEmbeddingVector(value: any): number[] {
   return direct.map((item) => Number(item)).filter((item) => Number.isFinite(item))
 }
 
+function isTencentEsNotFoundError(error: any) {
+  const text = String(error?.message || error)
+  return /\b404\b|not[_ -]?found|index_not_found/i.test(text)
+}
+
+function buildTencentEsIndexMapping(config: TencentRagConfig, dims: number) {
+  const vectorField = String(config.vectorField || 'embedding')
+  return {
+    mappings: {
+      properties: {
+        chunkId: { type: 'keyword' },
+        postId: { type: 'keyword' },
+        communityId: { type: 'keyword' },
+        sectionId: { type: 'keyword' },
+        sectionName: { type: 'text' },
+        title: { type: 'text' },
+        fieldLabel: { type: 'text' },
+        fieldType: { type: 'keyword' },
+        text: { type: 'text' },
+        preview: { type: 'text' },
+        sourceUpdatedAt: { type: 'date' },
+        visibility: { type: 'keyword' },
+        [vectorField]: {
+          type: 'dense_vector',
+          dims,
+          index: true,
+          similarity: 'cosine',
+        },
+      },
+    },
+  }
+}
+
 function extractRerankItems(value: any): Array<{ index: number; score: number }> {
   const response = value?.Response || value
   const rawItems = Array.isArray(value?.rerank)
@@ -1090,6 +1124,20 @@ export function createTencentRagProvider(
   return {
     name: 'tencent-es-ai-search',
     isConfigured: () => isConfigured(config),
+    async ensureIndex() {
+      if (!isConfigured(config)) throw new Error('rag_provider_not_configured')
+      try {
+        await sendJson<any>(config, 'HEAD', config.indexName)
+        return { created: false, indexName: config.indexName }
+      } catch (error) {
+        if (!isTencentEsNotFoundError(error)) throw error
+      }
+      const probeVector = await embedText('HappyHome RAG index mapping dimension probe')
+      const dims = probeVector.length
+      if (dims <= 0) throw new Error('embedding endpoint returned no vector; cannot create dense_vector mapping')
+      await sendJson(config, 'PUT', config.indexName, buildTencentEsIndexMapping(config, dims))
+      return { created: true, indexName: config.indexName, dims }
+    },
     async search(input) {
       if (!isConfigured(config)) throw new Error('rag_provider_not_configured')
       const queryVector = await embedText(input.ragQuery.expandedText)
@@ -1167,11 +1215,23 @@ export function createTencentRagProvider(
     },
     async deletePostChunks(postId) {
       if (!isConfigured(config)) throw new Error('rag_provider_not_configured')
-      await sendJson(config, 'POST', `${config.indexName}/_delete_by_query`, {
-        query: { term: { postId } },
-      })
+      try {
+        await sendJson(config, 'POST', `${config.indexName}/_delete_by_query`, {
+          query: { term: { postId } },
+        })
+      } catch (error) {
+        if (isTencentEsNotFoundError(error)) return
+        throw error
+      }
     },
   }
+}
+
+export async function ensurePostRagIndex(options: { provider?: TencentRagProvider } = {}) {
+  const provider = options.provider || createTencentRagProviderFromEnv()
+  if (!provider.isConfigured()) throw new Error('rag_provider_not_configured')
+  if (!provider.ensureIndex) return { created: false, indexName: '', skipped: true }
+  return provider.ensureIndex()
 }
 
 function stableId(value: string) {
@@ -2151,6 +2211,141 @@ export async function backfillPostRagJobsForSectionBatch(
   }
 }
 
+async function getPostRagIndexState(postId: string): Promise<Record<string, any> | null> {
+  try {
+    return await db.getById(POST_RAG_INDEX_STATE, postId) as Record<string, any>
+  } catch (error) {
+    if (isMissingDocumentError(error)) return null
+    throw error
+  }
+}
+
+function timestampIsFresh(indexedSourceUpdatedAt: unknown, sourceUpdatedAt: string): boolean {
+  const indexedTime = Date.parse(String(indexedSourceUpdatedAt || ''))
+  const sourceTime = Date.parse(String(sourceUpdatedAt || ''))
+  if (Number.isFinite(indexedTime) && Number.isFinite(sourceTime)) return indexedTime >= sourceTime
+  return String(indexedSourceUpdatedAt || '') === sourceUpdatedAt
+}
+
+export async function reconcilePostRagJobsForCommunityBatch(
+  communityId: string,
+  options: { skip?: number; limit?: number } = {}
+) {
+  const normalizedCommunityId = String(communityId || '').trim()
+  if (!normalizedCommunityId) throw new Error('communityId is required')
+  const skip = Math.max(0, Math.floor(Number(options.skip || 0)))
+  const limit = Math.max(1, Math.min(50, Math.floor(Number(options.limit || 10))))
+  const posts = await db.query('posts', { communityId: normalizedCommunityId }, {
+    orderBy: ['updatedAt', 'desc'],
+    skip,
+    limit,
+  }) as Post[]
+  let upsertQueuedCount = 0
+  let deleteQueuedCount = 0
+  let skippedCount = 0
+  let missingStateCount = 0
+  let staleStateCount = 0
+  let removableStateCount = 0
+  let failedCount = 0
+
+  for (const post of posts) {
+    try {
+      const sourceUpdatedAt = sourceUpdatedAtForPost(post, '')
+      const state = await getPostRagIndexState(post._id)
+      if (isPostSearchableForRag(post)) {
+        let reason = ''
+        if (!state) {
+          missingStateCount += 1
+          reason = 'rag.reconcile.missing_state'
+        } else if (state.status !== 'indexed') {
+          staleStateCount += 1
+          reason = 'rag.reconcile.not_indexed'
+        } else if (!timestampIsFresh(state.sourceUpdatedAt, sourceUpdatedAt)) {
+          staleStateCount += 1
+          reason = 'rag.reconcile.stale_state'
+        }
+        if (reason) {
+          await enqueuePostRagJob({
+            postId: post._id,
+            communityId: post.communityId || normalizedCommunityId,
+            sectionId: post.sectionId || '',
+            action: 'upsert',
+            reason,
+          })
+          upsertQueuedCount += 1
+        } else {
+          skippedCount += 1
+        }
+        continue
+      }
+
+      if (state && state.status !== 'removed') {
+        removableStateCount += 1
+        await enqueuePostRagJob({
+          postId: post._id,
+          communityId: post.communityId || normalizedCommunityId,
+          sectionId: post.sectionId || '',
+          action: 'delete',
+          reason: 'rag.reconcile.removed_source',
+        })
+        deleteQueuedCount += 1
+      } else {
+        skippedCount += 1
+      }
+    } catch {
+      failedCount += 1
+    }
+  }
+
+  const hasMore = posts.length === limit
+  return {
+    communityId: normalizedCommunityId,
+    skip,
+    limit,
+    scannedCount: posts.length,
+    upsertQueuedCount,
+    deleteQueuedCount,
+    skippedCount,
+    missingStateCount,
+    staleStateCount,
+    removableStateCount,
+    failedCount,
+    hasMore,
+    nextSkip: hasMore ? skip + posts.length : null,
+  }
+}
+
+export async function getPostRagIndexHealthForCommunity(communityId: string) {
+  const normalizedCommunityId = String(communityId || '').trim()
+  if (!normalizedCommunityId) throw new Error('communityId is required')
+  const [
+    activePostCount,
+    indexedStateCount,
+    removedStateCount,
+    failedStateCount,
+    pendingJobCount,
+    failedJobCount,
+  ] = await Promise.all([
+    db.count('posts', { communityId: normalizedCommunityId, status: 'active' }),
+    db.count(POST_RAG_INDEX_STATE, { communityId: normalizedCommunityId, status: 'indexed' }),
+    db.count(POST_RAG_INDEX_STATE, { communityId: normalizedCommunityId, status: 'removed' }),
+    db.count(POST_RAG_INDEX_STATE, { communityId: normalizedCommunityId, status: 'failed' }),
+    db.count(POST_RAG_JOBS, { communityId: normalizedCommunityId, status: 'pending' }),
+    db.count(POST_RAG_JOBS, { communityId: normalizedCommunityId, status: 'failed' }),
+  ])
+  return {
+    communityId: normalizedCommunityId,
+    activePostCount,
+    indexedStateCount,
+    removedStateCount,
+    failedStateCount,
+    pendingJobCount,
+    failedJobCount,
+    potentialMissingActiveCount: Math.max(0, activePostCount - indexedStateCount),
+    coverageRatio: activePostCount > 0 ? indexedStateCount / activePostCount : 1,
+  }
+}
+
 function toRagChunkDocuments(post: Post, section: Section): RagChunkDocument[] {
   const document = buildPostSearchDocument(post, section)
   return buildPostSearchChunks(document).map((chunk) => ({
@@ -2244,6 +2439,7 @@ export async function processPostRagJobBatch(options: {
     { orderBy: ['createdAt', 'asc'], limit }
   ) as any[]
   const results: Array<{ jobId: string; ok: boolean; error?: string }> = []
+  let indexEnsured = false
   for (const job of jobs) {
     const now = new Date().toISOString()
     try {
@@ -2284,6 +2480,10 @@ export async function processPostRagJobBatch(options: {
           policy: videoPolicy,
         })
         const videoJobResult = await enqueueVideoRagAnalysisJobs(videoAnalysisJobs)
+        if (!indexEnsured) {
+          await provider.ensureIndex?.()
+          indexEnsured = true
+        }
         await provider.deletePostChunks?.(job.postId)
         await provider.upsertChunks?.(chunks)
         await upsertPostRagIndexState(job.postId, {
