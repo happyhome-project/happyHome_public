@@ -197,85 +197,97 @@
     </scroll-view>
 
     <!-- Archive feed · Figma 0626 选中板块内容区 -->
-    <view v-if="activeArchiveGroup" class="active-archive">
-      <view
-        v-if="activeArchiveGroup.displayTemplate === 'guide_note'"
-        class="guide-feed"
-      >
+    <view
+      v-if="activeArchiveGroup"
+      class="active-archive"
+      :class="{
+        'active-archive--guide': activeArchiveGroup.displayTemplate === 'guide_note',
+        'active-archive--default': activeArchiveGroup.displayTemplate !== 'guide_note',
+      }"
+      :style="activeArchiveStyle"
+    >
+      <view class="active-archive-body">
         <view
-          v-for="(column, columnIndex) in guideColumns"
-          :key="columnIndex"
-          class="guide-feed-column"
+          v-if="activeArchiveGroup.displayTemplate === 'guide_note'"
+          class="guide-feed"
         >
           <view
-            v-for="(item, i) in column"
-            :key="item.postId || columnIndex + '-' + i"
-            class="guide-card"
-            @tap="onPostTap(item)"
+            v-for="(column, columnIndex) in guideColumns"
+            :key="columnIndex"
+            class="guide-feed-column"
           >
-            <image
-              v-if="item.coverImage"
-              :src="item.coverImage"
-              mode="aspectFill"
-              class="guide-cover"
-            />
-            <view v-else class="guide-cover guide-cover-empty">
-              <text>{{ activeArchiveGroup.name.slice(0, 2) }}</text>
-            </view>
-            <view class="guide-main">
-              <text class="guide-title">{{ item.t }}</text>
-              <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
-              <view v-if="item.driveDuration" class="guide-stats">
-                <text class="guide-stat">{{ item.driveDuration }}</text>
+            <view
+              v-for="(item, i) in column"
+              :key="item.postId || columnIndex + '-' + i"
+              class="guide-card"
+              @tap="onPostTap(item)"
+            >
+              <image
+                v-if="item.coverImage"
+                :src="item.coverImage"
+                mode="aspectFill"
+                class="guide-cover"
+                @load="scheduleArchivePreviewMeasure"
+                @error="scheduleArchivePreviewMeasure"
+              />
+              <view v-else class="guide-cover guide-cover-empty">
+                <text>{{ activeArchiveGroup.name.slice(0, 2) }}</text>
               </view>
-              <view v-if="item.isPinned || item.isFeatured" class="post-badges guide-badges">
-                <text v-if="item.isPinned" class="post-badge pin">置顶</text>
-                <text v-if="item.isFeatured" class="post-badge feature">精华</text>
-              </view>
-              <view class="guide-meta">
-                <view v-if="item.contentAuthor" class="guide-author">
-                  <view
-                    class="guide-author-avatar"
-                    :style="getGuideAuthorAvatarStyle(item.contentAuthor)"
-                  >
-                    <text>{{ getAuthorInitial(item.contentAuthor) }}</text>
-                  </view>
-                  <text class="guide-author-name">{{ item.contentAuthor }}</text>
+              <view class="guide-main">
+                <text class="guide-title">{{ item.t }}</text>
+                <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
+                <view v-if="item.driveDuration" class="guide-stats">
+                  <text class="guide-stat">{{ item.driveDuration }}</text>
                 </view>
-                <text v-if="item.when" class="guide-when">{{ item.when }}</text>
+                <view v-if="item.isPinned || item.isFeatured" class="post-badges guide-badges">
+                  <text v-if="item.isPinned" class="post-badge pin">置顶</text>
+                  <text v-if="item.isFeatured" class="post-badge feature">精华</text>
+                </view>
+                <view class="guide-meta">
+                  <view v-if="item.contentAuthor" class="guide-author">
+                    <view
+                      class="guide-author-avatar"
+                      :style="getGuideAuthorAvatarStyle(item.contentAuthor)"
+                    >
+                      <text>{{ getAuthorInitial(item.contentAuthor) }}</text>
+                    </view>
+                    <text class="guide-author-name">{{ item.contentAuthor }}</text>
+                  </view>
+                  <text v-if="item.when" class="guide-when">{{ item.when }}</text>
+                </view>
               </view>
             </view>
           </view>
         </view>
-      </view>
 
-      <view
-        v-else
-        class="arc-card"
-        :data-index="activeArchiveIndex"
-        :style="getArchiveCardStyle(activeArchiveGroup, activeArchiveIndex)"
-        @tap="onGroupHeaderTap(activeArchiveGroup)"
-      >
         <view
-          v-for="(item, i) in activeArchiveGroup.items"
-          :key="item.postId || i"
-          class="arc-item"
-          @tap.stop="onPostTap(item)"
+          v-else
+          class="arc-card"
+          :data-index="activeArchiveIndex"
+          :style="getArchiveCardStyle(activeArchiveGroup, activeArchiveIndex)"
+          @tap="onGroupHeaderTap(activeArchiveGroup)"
         >
-          <!-- kicker 小标：当前装饰版固定 01/02/03；未来接真实档案号时仍走 item.k -->
-          <text v-if="item.k" class="arc-k">{{ item.k }}</text>
-          <view class="arc-tl">
-            <text class="arc-title">{{ item.t }}</text>
-            <view v-if="item.isPinned || item.isFeatured" class="post-badges">
-              <text v-if="item.isPinned" class="post-badge pin">置顶</text>
-              <text v-if="item.isFeatured" class="post-badge feature">精华</text>
+          <view
+            v-for="(item, i) in activeArchiveGroup.items"
+            :key="item.postId || i"
+            class="arc-item"
+            @tap.stop="onPostTap(item)"
+          >
+            <!-- kicker 小标：当前装饰版固定 01/02/03；未来接真实档案号时仍走 item.k -->
+            <text v-if="item.k" class="arc-k">{{ item.k }}</text>
+            <view class="arc-tl">
+              <text class="arc-title">{{ item.t }}</text>
+              <view v-if="item.isPinned || item.isFeatured" class="post-badges">
+                <text v-if="item.isPinned" class="post-badge pin">置顶</text>
+                <text v-if="item.isFeatured" class="post-badge feature">精华</text>
+              </view>
+              <view class="arc-mm">
+                <text v-if="item.contentAuthor" class="arc-content-author">{{ item.contentAuthor }}</text>
+                <text v-if="item.meta" class="arc-meta" :class="{ hot: item.hot }">{{ item.meta }}</text>
+              </view>
             </view>
-            <view class="arc-mm">
-              <text v-if="item.contentAuthor" class="arc-content-author">{{ item.contentAuthor }}</text>
-              <text v-if="item.meta" class="arc-meta" :class="{ hot: item.hot }">{{ item.meta }}</text>
-            </view>
+            <text class="arc-when">{{ item.when }}</text>
           </view>
-          <text class="arc-when">{{ item.when }}</text>
         </view>
       </view>
     </view>
@@ -378,6 +390,7 @@ const shareImageUrl = ref(DEFAULT_COMMUNITY_SHARE_IMAGE)
 const homeSearchQuery = ref('')
 const selectedArchiveId = ref('')
 const homePageScrollTop = ref(0)
+const archivePreviewMinHeightPx = ref(0)
 const homeBannerActiveIndex = ref(0)
 const homeBannerSwipeIntent = ref(false)
 let refreshingHome = false
@@ -385,6 +398,7 @@ let queuedForcedHomeRefresh = false
 let mountedAt = 0
 let unsubscribeBackgroundFetchSnapshot: (() => void) | null = null
 let archiveSwitchScrollTimers: ReturnType<typeof setTimeout>[] = []
+let archivePreviewMeasureTimers: ReturnType<typeof setTimeout>[] = []
 let suppressNextHomeBannerTap = false
 let suppressHomeBannerTapTimer: ReturnType<typeof setTimeout> | null = null
 let homeBannerPointerStartX = 0
@@ -442,6 +456,11 @@ const activeArchiveIndex = computed(() => {
   const guideIndex = groups.findIndex((group) => group.displayTemplate === 'guide_note')
   return guideIndex >= 0 ? guideIndex : 0
 })
+const activeArchiveStyle = computed(() =>
+  archivePreviewMinHeightPx.value > 0
+    ? `min-height: ${archivePreviewMinHeightPx.value}px;`
+    : ''
+)
 
 function onMastheadTap() {
   // 仅当用户有多个社区时才打开切换器；否则 tap 不做任何事（避免空切换器困扰）
@@ -682,6 +701,20 @@ const guideColumns = computed<ArchiveItem[][]>(() => {
   }, [[], []])
 })
 
+watch(
+  () => activeArchiveGroup.value?.id || '',
+  () => scheduleArchivePreviewMeasure(),
+  { immediate: true },
+)
+
+watch(
+  () => currentShareCommunityId.value,
+  () => {
+    archivePreviewMinHeightPx.value = 0
+    scheduleArchivePreviewMeasure()
+  },
+)
+
 watch(archiveGroups, (groups) => {
   if (!groups.length) {
     selectedArchiveId.value = ''
@@ -913,6 +946,50 @@ function clearArchiveSwitchScrollTimers() {
   archiveSwitchScrollTimers = []
 }
 
+function clearArchivePreviewMeasureTimers() {
+  archivePreviewMeasureTimers.forEach((timer) => clearTimeout(timer))
+  archivePreviewMeasureTimers = []
+}
+
+function getArchiveMeasuredHeight(rect: any) {
+  const target = Array.isArray(rect) ? rect[0] : rect
+  const height = Number(target?.height || 0)
+  return Number.isFinite(height) ? Math.ceil(height) : 0
+}
+
+function measureActiveArchiveHeight() {
+  try {
+    uni
+      .createSelectorQuery()
+      .select('.active-archive-body')
+      .boundingClientRect((rect) => {
+        const height = getArchiveMeasuredHeight(rect)
+        const group = activeArchiveGroup.value
+        const hasGuideGroup = archiveGroups.value.some((item) => item.displayTemplate === 'guide_note')
+        // Only natural guide/feed height may raise the baseline; short default tabs inherit it.
+        const shouldCaptureHeight =
+          !hasGuideGroup ||
+          group?.displayTemplate === 'guide_note' ||
+          archivePreviewMinHeightPx.value === 0
+        if (shouldCaptureHeight && height > archivePreviewMinHeightPx.value) {
+          archivePreviewMinHeightPx.value = height
+        }
+      })
+      .exec()
+  } catch (error) {
+    clientLog('warn', 'home.archive.measure.fail', { error })
+  }
+}
+
+function scheduleArchivePreviewMeasure() {
+  clearArchivePreviewMeasureTimers()
+  nextTick(() => {
+    measureActiveArchiveHeight()
+    archivePreviewMeasureTimers.push(setTimeout(measureActiveArchiveHeight, 80))
+    archivePreviewMeasureTimers.push(setTimeout(measureActiveArchiveHeight, 260))
+  })
+}
+
 function getCurrentPageScrollTop() {
   let scrollTop = homePageScrollTop.value
   // #ifdef H5
@@ -957,6 +1034,7 @@ function selectArchiveGroup(g: ArchiveGroup) {
   if (!g.id) return
   const previousScrollTop = getCurrentPageScrollTop()
   selectedArchiveId.value = g.id
+  scheduleArchivePreviewMeasure()
   restoreArchiveSwitchScroll(previousScrollTop)
   clientLog('info', 'home.archive.group.select', {
     sectionId: g.id,
@@ -1271,6 +1349,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   clearArchiveSwitchScrollTimers()
+  clearArchivePreviewMeasureTimers()
   unsubscribeBackgroundFetchSnapshot?.()
   unsubscribeBackgroundFetchSnapshot = null
 })
@@ -2686,7 +2765,18 @@ onShareAppMessage(() => {
 
 .active-archive {
   margin: 0 var(--hh-page-x) 28rpx;
+  box-sizing: border-box;
   overflow-anchor: none;
+}
+
+.active-archive-body {
+  min-height: inherit;
+}
+
+.active-archive--default .arc-card {
+  box-sizing: border-box;
+  min-height: inherit;
+  margin-bottom: 0;
 }
 
 .guide-feed {
