@@ -22,7 +22,12 @@ import {
   removePostSearchIndex,
   removePostSearchIndexesForSection,
 } from '../../lib/post-search'
-import { backfillPostRagJobsForSectionBatch, enqueuePostRagJob } from '../../lib/post-rag'
+import {
+  backfillPostRagJobsForSectionBatch,
+  enqueuePostRagJob,
+  getPostRagIndexHealthForCommunity,
+  reconcilePostRagJobsForCommunityBatch,
+} from '../../lib/post-rag'
 import {
   assertOwnCommunityOrSuper,
   generateSalt,
@@ -158,6 +163,8 @@ const COMMUNITY_SCOPED_ACTIONS = new Set([
   'post.listAdmin',
   'post.createAdmin',
   'post.rebuildSearchIndexAdmin',
+  'post.ragIndexHealthAdmin',
+  'post.reconcileRagIndexCommunityBatchAdmin',
 ])
 // 这些 action 只给了实体 id，需要先查出 communityId 再校验
 const ENTITY_TO_COMMUNITY_ACTIONS: Record<string, { collection: string; idParam: string }> = {
@@ -1378,6 +1385,19 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       skip: params.skip,
       limit: params.limit,
     })
+  }
+  if (action === 'post.reconcileRagIndexCommunityBatchAdmin') {
+    const communityId = String(params.communityId || '').trim()
+    if (!communityId) throw new Error('communityId 不能为空')
+    return reconcilePostRagJobsForCommunityBatch(communityId, {
+      skip: params.skip,
+      limit: params.limit,
+    })
+  }
+  if (action === 'post.ragIndexHealthAdmin') {
+    const communityId = String(params.communityId || '').trim()
+    if (!communityId) throw new Error('communityId 不能为空')
+    return getPostRagIndexHealthForCommunity(communityId)
   }
   if (action === 'post.pinAdmin' || action === 'post.unpinAdmin' || action === 'post.featureAdmin' || action === 'post.unfeatureAdmin') {
     const postId = String(params.postId || '').trim()

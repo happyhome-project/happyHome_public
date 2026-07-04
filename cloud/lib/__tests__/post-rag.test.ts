@@ -1,4 +1,5 @@
 const mockDb = {
+  count: jest.fn(),
   create: jest.fn(),
   getById: jest.fn(),
   query: jest.fn(),
@@ -16,9 +17,11 @@ import {
   buildVideoRagChunksForPost,
   planVideoRagAnalysisJobsForPost,
   createTencentLkeapCloudBaseProvider,
+  createTencentRagProvider,
   createTencentRagProviderFromEnv,
   createVideoRagAnalyzerFromEnv,
   enqueuePostRagJob,
+  getPostRagIndexHealthForCommunity,
   hasRagEvidenceSignal,
   rankLkeapEvidenceCitations,
   selectLkeapCandidateCitations,
@@ -31,6 +34,7 @@ import {
   processPostVideoRagJobBatch,
   readTencentLkeapRagConfigFromEnv,
   readVideoRagCostPolicyFromEnv,
+  reconcilePostRagJobsForCommunityBatch,
   searchPostsWithRag,
 } from '../post-rag'
 
@@ -91,6 +95,7 @@ test('processPostRagJobBatch chunks approved post content and upserts through pr
   const provider = {
     name: 'fake-rag',
     isConfigured: jest.fn(() => true),
+    ensureIndex: jest.fn().mockResolvedValue({ created: false, indexName: 'test-index' }),
     search: jest.fn(),
     upsertChunks: jest.fn().mockResolvedValue(undefined),
     deletePostChunks: jest.fn(),
@@ -132,6 +137,8 @@ test('processPostRagJobBatch chunks approved post content and upserts through pr
   const result = await processPostRagJobBatch({ provider, limit: 1 })
 
   expect(result.scannedCount).toBe(1)
+  expect(provider.ensureIndex).toHaveBeenCalledTimes(1)
+  expect(provider.ensureIndex.mock.invocationCallOrder[0]).toBeLessThan(provider.upsertChunks.mock.invocationCallOrder[0])
   expect(provider.deletePostChunks).toHaveBeenCalledWith('post-1')
   expect(provider.upsertChunks).toHaveBeenCalledWith(expect.arrayContaining([
     expect.objectContaining({
@@ -161,6 +168,7 @@ test('processPostRagJobBatch creates index state when CloudBase update misses th
   const provider = {
     name: 'fake-rag',
     isConfigured: jest.fn(() => true),
+    ensureIndex: jest.fn().mockResolvedValue({ created: false, indexName: 'test-index' }),
     search: jest.fn(),
     upsertChunks: jest.fn().mockResolvedValue(undefined),
     deletePostChunks: jest.fn(),
@@ -212,6 +220,7 @@ test('processPostRagJobBatch records community metadata when delete jobs remove 
   const provider = {
     name: 'fake-rag',
     isConfigured: jest.fn(() => true),
+    ensureIndex: jest.fn().mockResolvedValue({ created: false, indexName: 'test-index' }),
     search: jest.fn(),
     upsertChunks: jest.fn(),
     deletePostChunks: jest.fn().mockResolvedValue(undefined),
@@ -440,6 +449,144 @@ test('backfillPostRagJobsForSectionBatch enqueues upsert and delete jobs without
   }))
 })
 
+test('reconcilePostRagJobsForCommunityBatch queues only missing stale and removable index jobs', async () => {
+  mockDb.query.mockResolvedValueOnce([
+    {
+      _id: 'post-missing-state',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      status: 'active',
+      auditStatus: 'pass',
+      updatedAt: '2026-07-04T10:00:00.000Z',
+      createdAt: '2026-07-04T09:00:00.000Z',
+    },
+    {
+      _id: 'post-fresh',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      status: 'active',
+      auditStatus: 'pass',
+      updatedAt: '2026-07-04T08:00:00.000Z',
+      createdAt: '2026-07-04T07:00:00.000Z',
+    },
+    {
+      _id: 'post-stale',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      status: 'active',
+      auditStatus: 'pass',
+      updatedAt: '2026-07-04T06:00:00.000Z',
+      createdAt: '2026-07-04T05:00:00.000Z',
+    },
+    {
+      _id: 'post-deleted',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      status: 'deleted',
+      auditStatus: 'pass',
+      updatedAt: '2026-07-04T04:00:00.000Z',
+      createdAt: '2026-07-04T03:00:00.000Z',
+    },
+  ])
+  mockDb.getById
+    .mockRejectedValueOnce(new Error('document.get:fail document does not exist'))
+    .mockResolvedValueOnce({
+      _id: 'post-fresh',
+      postId: 'post-fresh',
+      status: 'indexed',
+      sourceUpdatedAt: '2026-07-04T08:00:00.000Z',
+      chunkCount: 3,
+    })
+    .mockResolvedValueOnce({
+      _id: 'post-stale',
+      postId: 'post-stale',
+      status: 'indexed',
+      sourceUpdatedAt: '2026-07-03T06:00:00.000Z',
+      chunkCount: 3,
+    })
+    .mockResolvedValueOnce({
+      _id: 'post-deleted',
+      postId: 'post-deleted',
+      status: 'indexed',
+      sourceUpdatedAt: '2026-07-04T04:00:00.000Z',
+      chunkCount: 2,
+    })
+  mockDb.create.mockResolvedValue('job-id')
+
+  const result = await reconcilePostRagJobsForCommunityBatch('community-1', { skip: 0, limit: 4 })
+
+  expect(result).toMatchObject({
+    communityId: 'community-1',
+    scannedCount: 4,
+    upsertQueuedCount: 2,
+    deleteQueuedCount: 1,
+    skippedCount: 1,
+    missingStateCount: 1,
+    staleStateCount: 1,
+    removableStateCount: 1,
+    failedCount: 0,
+    hasMore: true,
+    nextSkip: 4,
+  })
+  expect(mockDb.query).toHaveBeenCalledWith('posts', { communityId: 'community-1' }, {
+    orderBy: ['updatedAt', 'desc'],
+    skip: 0,
+    limit: 4,
+  })
+  expect(mockDb.create).toHaveBeenCalledWith(POST_RAG_JOBS, expect.objectContaining({
+    postId: 'post-missing-state',
+    action: 'upsert',
+    reason: 'rag.reconcile.missing_state',
+  }))
+  expect(mockDb.create).toHaveBeenCalledWith(POST_RAG_JOBS, expect.objectContaining({
+    postId: 'post-stale',
+    action: 'upsert',
+    reason: 'rag.reconcile.stale_state',
+  }))
+  expect(mockDb.create).toHaveBeenCalledWith(POST_RAG_JOBS, expect.objectContaining({
+    postId: 'post-deleted',
+    action: 'delete',
+    reason: 'rag.reconcile.removed_source',
+  }))
+  expect(mockDb.create).toHaveBeenCalledTimes(3)
+})
+
+test('getPostRagIndexHealthForCommunity exposes source coverage and job backlog counts', async () => {
+  mockDb.count
+    .mockResolvedValueOnce(6)
+    .mockResolvedValueOnce(4)
+    .mockResolvedValueOnce(1)
+    .mockResolvedValueOnce(1)
+    .mockResolvedValueOnce(2)
+    .mockResolvedValueOnce(1)
+
+  const result = await getPostRagIndexHealthForCommunity('community-1')
+
+  expect(result).toEqual({
+    communityId: 'community-1',
+    activePostCount: 6,
+    indexedStateCount: 4,
+    removedStateCount: 1,
+    failedStateCount: 1,
+    pendingJobCount: 2,
+    failedJobCount: 1,
+    potentialMissingActiveCount: 2,
+    coverageRatio: 4 / 6,
+  })
+  expect(mockDb.count).toHaveBeenNthCalledWith(1, 'posts', {
+    communityId: 'community-1',
+    status: 'active',
+  })
+  expect(mockDb.count).toHaveBeenNthCalledWith(2, POST_RAG_INDEX_STATE, {
+    communityId: 'community-1',
+    status: 'indexed',
+  })
+  expect(mockDb.count).toHaveBeenNthCalledWith(5, POST_RAG_JOBS, {
+    communityId: 'community-1',
+    status: 'pending',
+  })
+})
+
 test('searchPostsWithRag falls back explicitly when Tencent RAG provider is not configured', async () => {
   const result = await searchPostsWithRag({
     communityId: 'community-1',
@@ -553,7 +700,9 @@ test('searchPostsWithRag drops member-only citations and generated answer for pu
 test('hasRagEvidenceSignal rejects weak unrelated candidates and accepts real evidence signals', () => {
   expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 0, rerankScore: -3 })).toBe(false)
   expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 1, rerankScore: -3 })).toBe(true)
-  expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 0, rerankScore: 0.1 })).toBe(true)
+  expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 0, rerankScore: 0.1 })).toBe(false)
+  expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 0, rerankScore: 0.55 })).toBe(true)
+  expect(hasRagEvidenceSignal({ semanticScore: 0.5, lexicalScore: 0, rerankScore: 0.1 })).toBe(false)
   expect(hasRagEvidenceSignal({ semanticScore: 0.5, lexicalScore: 0, rerankScore: -3 })).toBe(false)
   expect(hasRagEvidenceSignal({ semanticScore: 0.5, lexicalScore: 0 })).toBe(true)
 })
@@ -625,7 +774,7 @@ test('rankLkeapEvidenceCitations drops negative rerank noise and keeps lexical e
 test('createTencentRagProviderFromEnv selects LKEAP provider when configured', () => {
   const previousEnv = { ...process.env }
   try {
-    process.env.TENCENT_RAG_PROVIDER = 'lkeap'
+    process.env.TENCENT_RAG_PROVIDER = 'lkeap-cloudbase'
     process.env.TENCENTCLOUD_SECRETID = 'AKIDtest'
     process.env.TENCENTCLOUD_SECRETKEY = 'secret-test'
     process.env.TENCENT_LKEAP_REGION = 'ap-guangzhou'
@@ -637,6 +786,448 @@ test('createTencentRagProviderFromEnv selects LKEAP provider when configured', (
   } finally {
     process.env = previousEnv
   }
+})
+
+test('createTencentRagProviderFromEnv ignores legacy lkeap flag and keeps ES as formal RAG provider', () => {
+  const previousEnv = { ...process.env }
+  try {
+    process.env.TENCENT_RAG_PROVIDER = 'lkeap'
+    process.env.TENCENT_RAG_ES_ENDPOINT = 'https://es.example.com'
+    process.env.TENCENT_RAG_ES_USERNAME = 'elastic'
+    process.env.TENCENT_RAG_ES_PASSWORD = 'secret-test'
+    process.env.TENCENT_RAG_INDEX_NAME = 'happyhome_post_rag_chunks'
+    process.env.TENCENT_RAG_EMBEDDING_INFERENCE_ID = 'embedding-endpoint'
+    process.env.TENCENT_RAG_RERANK_INFERENCE_ID = 'rerank-endpoint'
+    process.env.TENCENT_RAG_LLM_INFERENCE_ID = 'llm-endpoint'
+
+    const provider = createTencentRagProviderFromEnv()
+
+    expect(provider.name).toBe('tencent-es-ai-search')
+    expect(provider.isConfigured()).toBe(true)
+  } finally {
+    process.env = previousEnv
+  }
+})
+
+test('Tencent ES provider uses rank_fusion hybrid retrieval and filters weak evidence before LLM answer', async () => {
+  const calls: Array<{ method: string; path: string; body: any }> = []
+  const requestJson = jest.fn(async (_config: any, method: string, path: string, body?: any) => {
+    calls.push({ method, path, body })
+    if (path.startsWith('_inference/text_embedding/')) {
+      return { embedding: [{ result: [0.11, 0.22, 0.33] }] }
+    }
+    if (path.endsWith('/_search')) {
+      return {
+        hits: {
+          total: { value: 2 },
+          hits: [
+            {
+              _id: 'thrift-chunk',
+              _score: 12,
+              _source: {
+                postId: 'thrift-post',
+                chunkId: 'thrift-chunk',
+                communityId: 'community-1',
+                sectionId: 'section-1',
+                sectionName: '明士班',
+                title: '第50次明士课程资料',
+                fieldLabel: '图文资料',
+                fieldType: 'rich_note',
+                preview: '一粥一饭，当思来处不易；半丝半缕，恒念物力维艰。',
+                text: '一粥一饭，当思来处不易；半丝半缕，恒念物力维艰。',
+                visibility: 'public',
+                sourceUpdatedAt: '2026-06-25T00:00:00.000Z',
+              },
+            },
+            {
+              _id: 'noise-chunk',
+              _score: 9,
+              _source: {
+                postId: 'noise-post',
+                chunkId: 'noise-chunk',
+                communityId: 'community-1',
+                sectionId: 'section-1',
+                sectionName: '明士班',
+                title: '实木书桌 + 椅子',
+                fieldLabel: '标题',
+                fieldType: 'title',
+                preview: '实木书桌 + 椅子',
+                text: '实木书桌 + 椅子',
+                visibility: 'public',
+                sourceUpdatedAt: '2026-06-25T00:00:00.000Z',
+              },
+            },
+          ],
+        },
+      }
+    }
+    if (path.startsWith('_inference/rerank/')) {
+      return {
+        rerank: [
+          { index: 0, relevance_score: 0.87 },
+          { index: 1, relevance_score: -2.4 },
+        ],
+      }
+    }
+    if (path.startsWith('_inference/completion/')) {
+      return { completion: [{ result: '有，最相关的是《第50次明士课程资料》。' }] }
+    }
+    throw new Error(`unexpected request path: ${path}`)
+  })
+  const provider = createTencentRagProvider({
+    endpoint: 'https://es.example.com',
+    username: 'elastic',
+    password: 'secret-test',
+    indexName: 'happyhome_post_rag_chunks',
+    vectorField: 'embedding',
+    embeddingInferenceId: 'embedding-endpoint',
+    rerankInferenceId: 'rerank-endpoint',
+    llmInferenceId: 'llm-endpoint',
+  }, { requestJson: requestJson as any })
+
+  const result = await provider.search({
+    communityId: 'community-1',
+    sectionId: '',
+    query: '勤俭持家',
+    skip: 0,
+    limit: 10,
+    includeMemberOnly: false,
+    ragQuery: buildRagQuery('勤俭持家'),
+  })
+
+  const searchCall = calls.find((call) => call.path.endsWith('/_search'))
+  expect(searchCall?.body.query).toBeUndefined()
+  expect(searchCall?.body.knn).toBeUndefined()
+  expect(searchCall?.body.retriever.rank_fusion.retrievers).toEqual(expect.arrayContaining([
+    expect.objectContaining({ standard: expect.any(Object) }),
+    expect.objectContaining({ knn: expect.objectContaining({ field: 'embedding' }) }),
+  ]))
+  expect(searchCall?.body.retriever.rank_fusion.retrievers[0].standard.query.bool.filter).toEqual(expect.arrayContaining([
+    { term: { communityId: 'community-1' } },
+    { term: { visibility: 'public' } },
+  ]))
+  expect(result.citations.map((citation) => citation.chunkId)).toEqual(['thrift-chunk'])
+  expect(result.items.map((item) => item.postId)).toEqual(['thrift-post'])
+  expect(result.answer).toContain('第50次明士课程资料')
+  expect(requestJson).toHaveBeenCalledWith(
+    expect.any(Object),
+    'POST',
+    expect.stringContaining('_inference/completion/'),
+    expect.any(Object),
+  )
+})
+
+test('Tencent ES provider can use Tencent atomic APIs for embedding rerank and answer without ES inference endpoints', async () => {
+  const esCalls: Array<{ method: string; path: string; body: any }> = []
+  const atomicCalls: Array<{ action: string; body: any }> = []
+  const requestJson = jest.fn(async (_config: any, method: string, path: string, body?: any) => {
+    esCalls.push({ method, path, body })
+    if (path.endsWith('/_search')) {
+      return {
+        hits: {
+          total: { value: 1 },
+          hits: [{
+            _id: 'atomic-thrift-chunk',
+            _score: 10,
+            _source: {
+              postId: 'atomic-thrift-post',
+              chunkId: 'atomic-thrift-chunk',
+              communityId: 'community-1',
+              sectionId: 'section-1',
+              sectionName: '明士班',
+              title: '朱子治家格言共读',
+              fieldLabel: '正文',
+              fieldType: 'rich_note',
+              preview: '一粥一饭，当思来处不易；半丝半缕，恒念物力维艰。',
+              text: '一粥一饭，当思来处不易；半丝半缕，恒念物力维艰。',
+              visibility: 'public',
+              sourceUpdatedAt: '2026-06-25T00:00:00.000Z',
+            },
+          }],
+        },
+      }
+    }
+    throw new Error(`unexpected ES request path: ${path}`)
+  })
+  const requestAtomicJson = jest.fn(async (_config: any, action: string, body: any) => {
+    atomicCalls.push({ action, body })
+    if (action === 'GetTextEmbedding') {
+      return { Response: { Data: [{ Embedding: [0.12, 0.23, 0.34] }] } }
+    }
+    if (action === 'RunRerank') {
+      return { Response: { Data: [{ Index: 0, RelevanceScore: 0.93 }] } }
+    }
+    if (action === 'ChatCompletions') {
+      return { Response: { Choices: [{ Message: { Content: '有，相关帖子提到了朱子治家格言中的勤俭家风。' } }] } }
+    }
+    throw new Error(`unexpected atomic action: ${action}`)
+  })
+  const provider = createTencentRagProvider({
+    endpoint: 'https://es.example.com',
+    username: 'elastic',
+    password: 'secret-test',
+    indexName: 'happyhome_post_rag_chunks',
+    vectorField: 'embedding',
+    atomicSecretId: 'AKIDtest',
+    atomicSecretKey: 'atomic-secret',
+    atomicRegion: 'ap-beijing',
+    embeddingModel: 'bge-base-zh-v1.5',
+    rerankModel: 'bge-reranker-large',
+    llmModel: 'deepseek-v3',
+  } as any, { requestJson: requestJson as any, requestAtomicJson: requestAtomicJson as any } as any)
+
+  expect(provider.isConfigured()).toBe(true)
+
+  const result = await provider.search({
+    communityId: 'community-1',
+    sectionId: '',
+    query: '有没有讲节俭家风的帖子？',
+    skip: 0,
+    limit: 10,
+    includeMemberOnly: false,
+    ragQuery: buildRagQuery('有没有讲节俭家风的帖子？'),
+  })
+
+  expect(esCalls[0]?.path).toBe('happyhome_post_rag_chunks/_search')
+  expect(esCalls[0]?.body.retriever.rank_fusion.retrievers).toEqual(expect.arrayContaining([
+    expect.objectContaining({ standard: expect.any(Object) }),
+    expect.objectContaining({ knn: expect.objectContaining({ query_vector: [0.12, 0.23, 0.34] }) }),
+  ]))
+  expect(atomicCalls.map((call) => call.action)).toEqual(['GetTextEmbedding', 'RunRerank', 'ChatCompletions'])
+  expect(atomicCalls[0]?.body).toEqual(expect.objectContaining({
+    ModelName: 'bge-base-zh-v1.5',
+    Texts: [expect.stringContaining('朱子治家格言')],
+  }))
+  expect(atomicCalls[1]?.body).toEqual(expect.objectContaining({
+    ModelName: 'bge-reranker-large',
+    Query: '有没有讲节俭家风的帖子？',
+    Documents: ['一粥一饭，当思来处不易；半丝半缕，恒念物力维艰。'],
+    ReturnDocuments: false,
+  }))
+  expect(atomicCalls[2]?.body).toEqual(expect.objectContaining({
+    ModelName: 'deepseek-v3',
+    Stream: false,
+  }))
+  expect(result.citations.map((citation) => citation.chunkId)).toEqual(['atomic-thrift-chunk'])
+  expect(result.answer).toContain('勤俭家风')
+})
+
+test('Tencent ES provider can create the private index mapping from cloud runtime', async () => {
+  const requestJson = jest.fn(async (_config: any, method: string, path: string, body?: any) => {
+    if (method === 'HEAD' && path === 'happyhome_post_rag_chunks') {
+      throw new Error('Tencent RAG request failed: 404 index_not_found_exception')
+    }
+    if (method === 'PUT' && path === 'happyhome_post_rag_chunks') {
+      return { acknowledged: true, body }
+    }
+    throw new Error(`unexpected ES request: ${method} ${path}`)
+  })
+  const requestAtomicJson = jest.fn(async (_config: any, action: string) => {
+    if (action === 'GetTextEmbedding') {
+      return { Response: { Data: [{ Embedding: [0.1, 0.2, 0.3] }] } }
+    }
+    throw new Error(`unexpected atomic action: ${action}`)
+  })
+  const provider = createTencentRagProvider({
+    endpoint: 'http://10.89.2.4:9200',
+    username: 'elastic',
+    password: 'secret-test',
+    indexName: 'happyhome_post_rag_chunks',
+    vectorField: 'embedding',
+    atomicSecretId: 'sid',
+    atomicSecretKey: 'skey',
+    atomicRegion: 'ap-shanghai',
+    embeddingModel: 'bge-base-zh-v1.5',
+    rerankModel: 'bge-reranker-large',
+    llmModel: 'deepseek-v3',
+  } as any, { requestJson: requestJson as any, requestAtomicJson: requestAtomicJson as any } as any)
+
+  const result = await provider.ensureIndex?.()
+
+  expect(result).toEqual({
+    created: true,
+    indexName: 'happyhome_post_rag_chunks',
+    dims: 3,
+  })
+  expect(requestJson).toHaveBeenCalledWith(expect.any(Object), 'PUT', 'happyhome_post_rag_chunks', expect.objectContaining({
+    mappings: expect.objectContaining({
+      properties: expect.objectContaining({
+        chunkId: { type: 'keyword' },
+        embedding: expect.objectContaining({
+          type: 'dense_vector',
+          dims: 3,
+          index: true,
+          similarity: 'cosine',
+        }),
+      }),
+    }),
+  }))
+})
+
+test('Tencent ES provider treats delete on a missing index as idempotent cleanup', async () => {
+  const requestJson = jest.fn(async (_config: any, method: string, path: string) => {
+    if (method === 'POST' && path === 'happyhome_post_rag_chunks/_delete_by_query') {
+      throw new Error('Tencent RAG request failed: 404 index_not_found_exception')
+    }
+    throw new Error(`unexpected ES request: ${method} ${path}`)
+  })
+  const provider = createTencentRagProvider({
+    endpoint: 'http://10.89.2.4:9200',
+    username: 'elastic',
+    password: 'secret-test',
+    indexName: 'happyhome_post_rag_chunks',
+    vectorField: 'embedding',
+    atomicSecretId: 'sid',
+    atomicSecretKey: 'skey',
+    atomicRegion: 'ap-shanghai',
+    embeddingModel: 'bge-base-zh-v1.5',
+    rerankModel: 'bge-reranker-large',
+    llmModel: 'deepseek-v3',
+  } as any, { requestJson: requestJson as any } as any)
+
+  await expect(provider.deletePostChunks?.('post-deleted-before-index')).resolves.toBeUndefined()
+
+  expect(requestJson).toHaveBeenCalledWith(expect.any(Object), 'POST', 'happyhome_post_rag_chunks/_delete_by_query', {
+    query: { term: { postId: 'post-deleted-before-index' } },
+  })
+})
+
+test('Tencent ES provider reranks a single semantic candidate before evidence filtering', async () => {
+  const requestJson = jest.fn(async (_config: any, _method: string, path: string) => {
+    if (path.startsWith('_inference/text_embedding/')) {
+      return { embedding: [{ result: [0.44, 0.55, 0.66] }] }
+    }
+    if (path.endsWith('/_search')) {
+      return {
+        hits: {
+          total: { value: 1 },
+          hits: [{
+            _id: 'semantic-chunk',
+            _score: 8,
+            _source: {
+              postId: 'semantic-post',
+              chunkId: 'semantic-chunk',
+              communityId: 'community-1',
+              sectionId: 'section-1',
+              sectionName: '明士班',
+              title: '生活札记',
+              fieldLabel: '正文',
+              fieldType: 'rich_note',
+              preview: '每周记账，减少冲动消费，把更多资源留给家庭长期目标。',
+              text: '每周记账，减少冲动消费，把更多资源留给家庭长期目标。',
+              visibility: 'public',
+              sourceUpdatedAt: '2026-06-25T00:00:00.000Z',
+            },
+          }],
+        },
+      }
+    }
+    if (path.startsWith('_inference/rerank/')) {
+      return { rerank: [{ index: 0, relevance_score: 0.73 }] }
+    }
+    if (path.startsWith('_inference/completion/')) {
+      return { completion: [{ result: '有，找到一篇关于家庭节制消费的帖子。' }] }
+    }
+    throw new Error(`unexpected request path: ${path}`)
+  })
+  const provider = createTencentRagProvider({
+    endpoint: 'https://es.example.com',
+    username: 'elastic',
+    password: 'secret-test',
+    indexName: 'happyhome_post_rag_chunks',
+    vectorField: 'embedding',
+    embeddingInferenceId: 'embedding-endpoint',
+    rerankInferenceId: 'rerank-endpoint',
+    llmInferenceId: 'llm-endpoint',
+  }, { requestJson: requestJson as any })
+
+  const result = await provider.search({
+    communityId: 'community-1',
+    sectionId: '',
+    query: '有没有讲家庭长期节制消费的帖子',
+    skip: 0,
+    limit: 10,
+    includeMemberOnly: false,
+    ragQuery: buildRagQuery('有没有讲家庭长期节制消费的帖子'),
+  })
+
+  expect(result.citations.map((citation) => citation.chunkId)).toEqual(['semantic-chunk'])
+  expect(requestJson).toHaveBeenCalledWith(
+    expect.any(Object),
+    'POST',
+    expect.stringContaining('_inference/rerank/'),
+    expect.objectContaining({ input: ['每周记账，减少冲动消费，把更多资源留给家庭长期目标。'] }),
+  )
+})
+
+test('Tencent ES provider does not answer when rerank leaves only weak noise', async () => {
+  const requestJson = jest.fn(async (_config: any, _method: string, path: string) => {
+    if (path.startsWith('_inference/text_embedding/')) {
+      return { embedding: [{ result: [0.44, 0.55, 0.66] }] }
+    }
+    if (path.endsWith('/_search')) {
+      return {
+        hits: {
+          total: { value: 1 },
+          hits: [{
+            _id: 'noise-chunk',
+            _score: 8,
+            _source: {
+              postId: 'noise-post',
+              chunkId: 'noise-chunk',
+              communityId: 'community-1',
+              sectionId: 'section-1',
+              sectionName: '明士班',
+              title: '实木书桌 + 椅子',
+              fieldLabel: '标题',
+              fieldType: 'short_text',
+              preview: '实木书桌 + 椅子',
+              text: '实木书桌 + 椅子',
+              visibility: 'public',
+              sourceUpdatedAt: '2026-06-25T00:00:00.000Z',
+            },
+          }],
+        },
+      }
+    }
+    if (path.startsWith('_inference/rerank/')) {
+      return { rerank: [{ index: 0, relevance_score: 0.1 }] }
+    }
+    if (path.startsWith('_inference/completion/')) {
+      throw new Error('LLM must not be called for weak evidence')
+    }
+    throw new Error(`unexpected request path: ${path}`)
+  })
+  const provider = createTencentRagProvider({
+    endpoint: 'https://es.example.com',
+    username: 'elastic',
+    password: 'secret-test',
+    indexName: 'happyhome_post_rag_chunks',
+    vectorField: 'embedding',
+    embeddingInferenceId: 'embedding-endpoint',
+    rerankInferenceId: 'rerank-endpoint',
+    llmInferenceId: 'llm-endpoint',
+  }, { requestJson: requestJson as any })
+
+  const result = await provider.search({
+    communityId: 'community-1',
+    sectionId: '',
+    query: '勤俭持家',
+    skip: 0,
+    limit: 10,
+    includeMemberOnly: false,
+    ragQuery: buildRagQuery('勤俭持家'),
+  })
+
+  expect(result.citations).toEqual([])
+  expect(result.items).toEqual([])
+  expect(result.answer).toBe('')
+  expect(requestJson).not.toHaveBeenCalledWith(
+    expect.any(Object),
+    'POST',
+    expect.stringContaining('_inference/completion/'),
+    expect.any(Object),
+  )
 })
 
 test('readTencentLkeapRagConfigFromEnv prefers explicit LKEAP secrets over CloudBase runtime secrets', () => {

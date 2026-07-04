@@ -54,6 +54,42 @@ function createMockRunner() {
         stderr: '',
       }
     }
+    if (payload.action === 'post.reconcileRagIndexCommunityBatchAdmin') {
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          communityId: payload.communityId,
+          scannedCount: 2,
+          upsertQueuedCount: 1,
+          deleteQueuedCount: 1,
+          skippedCount: 0,
+          missingStateCount: 1,
+          staleStateCount: 0,
+          removableStateCount: 1,
+          failedCount: 0,
+          hasMore: false,
+          nextSkip: null,
+        }),
+        stderr: '',
+      }
+    }
+    if (payload.action === 'post.ragIndexHealthAdmin') {
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          communityId: payload.communityId,
+          activePostCount: 3,
+          indexedStateCount: 2,
+          removedStateCount: 1,
+          failedStateCount: 0,
+          pendingJobCount: 1,
+          failedJobCount: 0,
+          potentialMissingActiveCount: 1,
+          coverageRatio: 2 / 3,
+        }),
+        stderr: '',
+      }
+    }
     if (payload.workerToken) {
       return {
         status: 0,
@@ -118,4 +154,69 @@ test('runPostRagRebuild with --all-active enqueues every active community', asyn
     'c-active-1-section-1',
     'c-active-2-section-1',
   ])
+})
+
+test('runPostRagRebuild with reconcile scans communities directly against index state', async () => {
+  const runner = createMockRunner()
+
+  const summary = await runPostRagRebuild({
+    envId: 'env-x',
+    communityIds: [],
+    allActive: true,
+    dryRun: false,
+    help: false,
+    commandTimeoutMs: 999,
+    batchSize: 5,
+    processJobs: false,
+    workerRounds: 0,
+    workerToken: '',
+    includeDisabled: false,
+    reconcile: true,
+  }, runner)
+
+  assert.deepEqual(summary.communityIds, ['c-active-1', 'c-active-2'])
+  assert.equal(summary.totals.communityCount, 2)
+  assert.equal(summary.totals.scannedCount, 4)
+  assert.equal(summary.totals.upsertQueuedCount, 2)
+  assert.equal(summary.totals.deleteQueuedCount, 2)
+  assert.equal(summary.totals.failedCommunityCount, 0)
+  const sectionListCalls = runner.calls.filter((call) => call.payload.action === 'section.list')
+  assert.equal(sectionListCalls.length, 0)
+  const reconcileCalls = runner.calls.filter((call) => call.payload.action === 'post.reconcileRagIndexCommunityBatchAdmin')
+  assert.deepEqual(reconcileCalls.map((call) => call.payload.communityId), ['c-active-1', 'c-active-2'])
+})
+
+test('runPostRagRebuild with health reads RAG health without queueing jobs', async () => {
+  const runner = createMockRunner()
+
+  const summary = await runPostRagRebuild({
+    envId: 'env-x',
+    communityIds: [],
+    allActive: true,
+    dryRun: false,
+    help: false,
+    commandTimeoutMs: 999,
+    batchSize: 5,
+    processJobs: true,
+    workerRounds: 1,
+    workerToken: 'worker-secret',
+    includeDisabled: false,
+    reconcile: false,
+    health: true,
+  }, runner)
+
+  assert.equal(summary.health, true)
+  assert.deepEqual(summary.communityIds, ['c-active-1', 'c-active-2'])
+  assert.equal(summary.totals.communityCount, 2)
+  assert.equal(summary.totals.activePostCount, 6)
+  assert.equal(summary.totals.indexedStateCount, 4)
+  assert.equal(summary.totals.pendingJobCount, 2)
+  const healthCalls = runner.calls.filter((call) => call.payload.action === 'post.ragIndexHealthAdmin')
+  assert.deepEqual(healthCalls.map((call) => call.payload.communityId), ['c-active-1', 'c-active-2'])
+  const writeCalls = runner.calls.filter((call) =>
+    call.payload.action === 'post.rebuildRagIndexSectionBatchAdmin'
+    || call.payload.action === 'post.reconcileRagIndexCommunityBatchAdmin'
+    || call.payload.workerToken
+  )
+  assert.equal(writeCalls.length, 0)
 })
