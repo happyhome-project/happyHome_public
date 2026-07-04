@@ -24,6 +24,8 @@ const search = read('miniprogram', 'src', 'pages', 'search', 'index.vue')
 const create = read('miniprogram', 'src', 'pages', 'create', 'index.vue')
 const profile = read('miniprogram', 'src', 'pages', 'profile', 'index.vue')
 const section = read('miniprogram', 'src', 'pages', 'section', 'index.vue')
+const widgetEditor = read('miniprogram', 'src', 'components', 'widgets', 'WidgetEditor.vue')
+const noteBlocksEditor = read('miniprogram', 'src', 'components', 'widgets', 'NoteBlocksEditor.vue')
 const figmaInventory = read('docs', 'figma-mini-0626-inventory.md')
 const retiredGroupTitle = ['我的', '组局'].join('')
 
@@ -91,6 +93,29 @@ assert(
     create.includes('openHierarchyParent(returnTo)') &&
     create.includes('selectSection(target, { returnTo: intent.returnTo })'),
   'create page should consume the selected publish section intent, preserve its parent, and expose a real form-level back affordance.'
+)
+
+assert(
+  widgetEditor.includes(`:minimal="variant === 'figma'"`) &&
+    widgetEditor.includes('useMultilineTextInput') &&
+    widgetEditor.includes("activity_invite_title") &&
+    widgetEditor.includes('widget-editor--multiline-text') &&
+    widgetEditor.includes('.widget-editor--line .input-wrap') &&
+    widgetEditor.includes('min-width: 0;') &&
+    widgetEditor.includes(':deep(.uni-date-editor)') &&
+    create.includes('overflow-x: hidden;'),
+  'Figma create form fields should be width-constrained, and activity invite titles should use a multiline block field instead of clipping inside a short row.'
+)
+
+assert(
+    noteBlocksEditor.includes('v-if="minimal"') &&
+    noteBlocksEditor.includes('class="note-simple-textarea"') &&
+    noteBlocksEditor.includes('updateMinimalText') &&
+    noteBlocksEditor.includes('v-if="allowImages" class="note-simple-actions"') &&
+    create.includes('allowImagesForWidget') &&
+    create.includes('ACTIVITY_INVITE_WIDGET_IDS.note') &&
+    !noteBlocksEditor.match(/v-if="minimal"[\s\S]*添加文字[\s\S]*粘贴文字[\s\S]*<template v-else>/),
+  'Figma create note_blocks should use a direct textarea, and activity invite notes should not expose image/text-block editor controls.'
 )
 
 for (const [name, source] of [
