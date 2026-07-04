@@ -20,6 +20,8 @@ import {
   createVideoRagAnalyzerFromEnv,
   enqueuePostRagJob,
   hasRagEvidenceSignal,
+  rankLkeapEvidenceCitations,
+  selectLkeapCandidateCitations,
   POST_RAG_CHUNKS,
   POST_RAG_INDEX_STATE,
   POST_RAG_JOBS,
@@ -43,16 +45,23 @@ test('buildRagQuery expands thrift family-style intent into classical family-rul
   expect(query.expansionTerms).toEqual(expect.arrayContaining([
     '节俭',
     '勤俭',
+    '勤儉',
     '节约',
     '家风',
+    '家風',
     '家训',
     '朱子治家格言',
     '一粥一饭',
+    '一粥一飯',
     '半丝半缕',
+    '半絲半縷',
     '物力维艰',
+    '物力維艱',
   ]))
   expect(query.expandedText).toContain('一粥一饭')
+  expect(query.expandedText).toContain('一粥一飯')
   expect(query.expandedText).toContain('半丝半缕')
+  expect(query.expandedText).toContain('半絲半縷')
 })
 
 test('enqueuePostRagJob records a pending async index job with fixed metadata', async () => {
@@ -545,7 +554,72 @@ test('hasRagEvidenceSignal rejects weak unrelated candidates and accepts real ev
   expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 0, rerankScore: -3 })).toBe(false)
   expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 1, rerankScore: -3 })).toBe(true)
   expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 0, rerankScore: 0.1 })).toBe(true)
-  expect(hasRagEvidenceSignal({ semanticScore: 0.5, lexicalScore: 0, rerankScore: -3 })).toBe(true)
+  expect(hasRagEvidenceSignal({ semanticScore: 0.5, lexicalScore: 0, rerankScore: -3 })).toBe(false)
+  expect(hasRagEvidenceSignal({ semanticScore: 0.5, lexicalScore: 0 })).toBe(true)
+})
+
+test('selectLkeapCandidateCitations keeps lexical evidence even when semantic candidates are ahead', () => {
+  const semanticOnly = Array.from({ length: 20 }, (_, index) => ({
+    postId: `semantic-${index}`,
+    chunkId: `semantic-chunk-${index}`,
+    communityId: 'community-1',
+    title: `semantic ${index}`,
+    fieldLabel: '正文',
+    fieldType: 'rich_note',
+    preview: '普通内容',
+    score: 0.9 - index * 0.01,
+    semanticScore: 0.9 - index * 0.01,
+    lexicalScore: 0,
+  }))
+  const lexicalEvidence = {
+    postId: 'thrift-post',
+    chunkId: 'thrift-chunk',
+    communityId: 'community-1',
+    title: '第50次明士课程资料',
+    fieldLabel: '图文资料',
+    fieldType: 'rich_note',
+    preview: '一粥一飯，當思來處不易；半絲半縷，恆念物力維艱。',
+    score: 0.2,
+    semanticScore: 0.2,
+    lexicalScore: 3,
+  }
+
+  const selected = selectLkeapCandidateCitations([...semanticOnly, lexicalEvidence], 5)
+
+  expect(selected.some((citation) => citation.chunkId === 'thrift-chunk')).toBe(true)
+})
+
+test('rankLkeapEvidenceCitations drops negative rerank noise and keeps lexical evidence first', () => {
+  const ranked = rankLkeapEvidenceCitations([
+    {
+      postId: 'noise-post',
+      chunkId: 'noise-chunk',
+      communityId: 'community-1',
+      title: 'tst',
+      fieldLabel: '标题',
+      fieldType: 'short_text',
+      preview: 'tst',
+      score: -1,
+      semanticScore: 0.55,
+      lexicalScore: 0,
+      rerankScore: -4.9,
+    },
+    {
+      postId: 'thrift-post',
+      chunkId: 'thrift-chunk',
+      communityId: 'community-1',
+      title: '第50次明士课程资料',
+      fieldLabel: '图文资料',
+      fieldType: 'rich_note',
+      preview: '一粥一飯，當思來處不易；半絲半縷，恆念物力維艱。',
+      score: -3,
+      semanticScore: 0.2,
+      lexicalScore: 3,
+      rerankScore: -5.5,
+    },
+  ], 5)
+
+  expect(ranked.map((citation) => citation.chunkId)).toEqual(['thrift-chunk'])
 })
 
 test('createTencentRagProviderFromEnv selects LKEAP provider when configured', () => {

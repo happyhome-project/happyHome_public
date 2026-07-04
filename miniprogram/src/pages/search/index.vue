@@ -232,6 +232,7 @@ const generatedAvatarPalettes = [
   ['#F1D08A', '#7294B8'],
   ['#C9D6A3', '#C4867D'],
 ]
+let searchRequestSeq = 0
 
 const communityName = computed(() => {
   if (communityStore.currentCommunityId === communityId.value && communityStore.currentCommunity?.name) {
@@ -296,6 +297,7 @@ function quickSearch(term: string) {
 }
 
 function clearQuery() {
+  searchRequestSeq += 1
   query.value = ''
   searched.value = false
   items.value = []
@@ -315,6 +317,7 @@ async function loadMore() {
 }
 
 async function runSearch(options: { reset: boolean; showShortToast?: boolean }) {
+  const requestSeq = ++searchRequestSeq
   const normalizedQuery = query.value.trim()
   if (!communityId.value) {
     uni.showToast({ title: '请先选择社区', icon: 'none' })
@@ -353,10 +356,12 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
       limit,
       asGuest,
     })
+    if (requestSeq !== searchRequestSeq) return
     let nextItems = result.items || []
     let usedBootstrapFallback = false
     if (options.reset && nextItems.length === 0 && result.mode === 'no_answer') {
       const fallbackItems = await searchVisibleBootstrapPosts(normalizedQuery, asGuest)
+      if (requestSeq !== searchRequestSeq) return
       if (fallbackItems.length > 0) {
         nextItems = fallbackItems
         usedBootstrapFallback = true
@@ -376,6 +381,7 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
       usedBootstrapFallback,
     })
   } catch (error: any) {
+    if (requestSeq !== searchRequestSeq) return
     loadError.value = friendlySearchError(error)
     searched.value = true
     clientLog('error', 'search.load.fail', { communityId: communityId.value, error })
@@ -383,7 +389,9 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
       uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
     }
   } finally {
-    loading.value = false
+    if (requestSeq === searchRequestSeq) {
+      loading.value = false
+    }
   }
 }
 
