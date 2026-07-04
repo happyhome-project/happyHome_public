@@ -171,6 +171,17 @@ export interface TencentRagConfig {
   llmInferenceId?: string
 }
 
+export type TencentRagRequestJson = <T>(
+  config: TencentRagConfig,
+  method: string,
+  path: string,
+  body?: unknown
+) => Promise<T>
+
+export interface TencentRagProviderOptions {
+  requestJson?: TencentRagRequestJson
+}
+
 export interface TencentLkeapRagConfig {
   secretId: string
   secretKey: string
@@ -204,6 +215,17 @@ const THRIFT_FAMILY_EXPANSION = [
 ]
 const MIN_LKEAP_RERANK_EVIDENCE_SCORE = 0
 const MIN_LKEAP_SEMANTIC_EVIDENCE_SCORE = 0.42
+
+function logRagSearchDecision(event: string, payload: Record<string, unknown>) {
+  try {
+    console.info('[post.rag.search]', JSON.stringify({
+      event,
+      ...payload,
+    }))
+  } catch {
+    // Logging must never break search.
+  }
+}
 
 export function buildRagQuery(raw: string): RagQuery {
   const normalized = normalizeSearchText(raw)
@@ -332,6 +354,12 @@ export async function searchPostsWithRag(
   const fallbackParams = { communityId, query, sectionId, skip, limit, includeMemberOnly }
 
   if (!provider || !provider.isConfigured()) {
+    logRagSearchDecision('fallback', {
+      reason: 'rag_provider_not_configured',
+      communityId,
+      sectionId,
+      queryLength: query.length,
+    })
     return withFallbackFields(await fallbackSearch(fallbackParams), 'rag_provider_not_configured')
   }
 
@@ -340,8 +368,22 @@ export async function searchPostsWithRag(
     const rawProviderResult = await provider.search({ ...fallbackParams, ragQuery })
     const providerResult = filterProviderResultForVisibility(rawProviderResult, includeMemberOnly)
     if (!providerResult.citations.length) {
+      logRagSearchDecision('no_answer', {
+        provider: provider.name,
+        communityId,
+        sectionId,
+        queryLength: query.length,
+      })
       return buildNoEvidenceRagResult({ query, communityId, sectionId, skip, limit })
     }
+    logRagSearchDecision('rag', {
+      provider: provider.name,
+      communityId,
+      sectionId,
+      citationCount: providerResult.citations.length,
+      itemCount: providerResult.items.length,
+      queryLength: query.length,
+    })
     return {
       query,
       communityId,
@@ -356,6 +398,13 @@ export async function searchPostsWithRag(
       provider: provider.name,
     }
   } catch (error: any) {
+    logRagSearchDecision('fallback', {
+      reason: error?.message || 'rag_provider_failed',
+      provider: provider.name,
+      communityId,
+      sectionId,
+      queryLength: query.length,
+    })
     return withFallbackFields(
       await fallbackSearch(fallbackParams),
       error?.message || 'rag_provider_failed'
@@ -394,7 +443,8 @@ export function readTencentLkeapRagConfigFromEnv(env: NodeJS.ProcessEnv = proces
 }
 
 export function createTencentRagProviderFromEnv() {
-  if (String(process.env.TENCENT_RAG_PROVIDER || '').trim().toLowerCase() === 'lkeap') {
+  const providerName = String(process.env.TENCENT_RAG_PROVIDER || '').trim().toLowerCase()
+  if (providerName === 'lkeap-cloudbase') {
     return createTencentLkeapCloudBaseProvider(readTencentLkeapRagConfigFromEnv())
   }
   return createTencentRagProvider(readTencentRagConfigFromEnv())
@@ -416,7 +466,7 @@ function authHeader(config: TencentRagConfig) {
   return `Basic ${Buffer.from(`${config.username}:${config.password}`).toString('base64')}`
 }
 
-async function requestJson<T>(config: TencentRagConfig, method: string, path: string, body?: unknown): Promise<T> {
+const requestJson: TencentRagRequestJson = async <T>(config: TencentRagConfig, method: string, path: string, body?: unknown): Promise<T> => {
   const url = new URL(`${config.endpoint}/${path.replace(/^\/+/, '')}`)
   const transport = url.protocol === 'http:' ? http : https
   const payload = body === undefined ? '' : JSON.stringify(body)
@@ -448,6 +498,75 @@ async function requestJson<T>(config: TencentRagConfig, method: string, path: st
     if (payload) req.write(payload)
     req.end()
   })
+}
+
+function buildTencentEsFilters(input: RagProviderSearchInput) {
+  const filters: any[] = [{ term: { communityId: input.communityId } }]
+  if (input.sectionId) filters.push({ term: { sectionId: input.sectionId } })
+  if (input.includeMemberOnly === false) filters.push({ term: { visibility: 'public' } })
+  return filters
+}
+
+export function buildTencentEsHybridSearchBody(
+  input: RagProviderSearchInput,
+  config: TencentRagConfig,
+  queryVector: number[],
+) {
+  const filters = buildTencentEsFilters(input)
+  const size = Math.max(1, Math.min(50, Number(input.limit || 20)))
+  const from = Math.max(0, Math.floor(Number(input.skip || 0)))
+  const textQuery = {
+    bool: {
+      must: [{
+        multi_match: {
+          query: input.ragQuery.expandedText,
+          fields: ['text^4', 'preview^4', 'title^3', 'fieldLabel^2', 'sectionName'],
+        },
+      }],
+      filter: filters,
+    },
+  }
+  const retrievers: any[] = [{
+    standard: {
+      query: textQuery,
+    },
+  }]
+  if (Array.isArray(queryVector) && queryVector.length > 0 && config.vectorField) {
+    retrievers.push({
+      knn: {
+        field: config.vectorField,
+        query_vector: queryVector,
+        k: Math.max(size, 20),
+        num_candidates: Math.max(100, size * 8),
+        filter: { bool: { filter: filters } },
+      },
+    })
+  }
+  return {
+    from,
+    size,
+    _source: [
+      'postId',
+      'chunkId',
+      'communityId',
+      'sectionId',
+      'sectionName',
+      'title',
+      'fieldLabel',
+      'fieldType',
+      'preview',
+      'text',
+      'visibility',
+      'sourceUpdatedAt',
+    ],
+    retriever: {
+      rank_fusion: {
+        retrievers,
+        rank_window_size: Math.max(50, size * 5),
+        rank_constant: 60,
+      },
+    },
+  }
 }
 
 function toCitation(hit: any): RagCitation {
@@ -496,6 +615,18 @@ function extractEmbeddingVector(value: any): number[] {
     || value?.vector
   if (!Array.isArray(direct)) return []
   return direct.map((item) => Number(item)).filter((item) => Number.isFinite(item))
+}
+
+function extractRerankItems(value: any): Array<{ index: number; score: number }> {
+  const rawItems = Array.isArray(value?.rerank)
+    ? value.rerank
+    : (Array.isArray(value?.data) ? value.data : [])
+  return rawItems
+    .map((item: any) => ({
+      index: Number(item?.index ?? item?.document_index),
+      score: Number(item?.relevance_score ?? item?.score),
+    }))
+    .filter((item: { index: number; score: number }) => Number.isFinite(item.index) && Number.isFinite(item.score))
 }
 
 function deterministicAnswer(citations: RagCitation[]) {
@@ -816,10 +947,14 @@ export function createTencentLkeapCloudBaseProvider(config: TencentLkeapRagConfi
   }
 }
 
-export function createTencentRagProvider(config: TencentRagConfig): TencentRagProvider {
+export function createTencentRagProvider(
+  config: TencentRagConfig,
+  options: TencentRagProviderOptions = {},
+): TencentRagProvider {
+  const sendJson = options.requestJson || requestJson
   const embedText = async (text: string): Promise<number[]> => {
     if (!config.embeddingInferenceId) return []
-    const response = await requestJson<any>(config, 'POST', `_inference/text_embedding/${config.embeddingInferenceId}`, {
+    const response = await sendJson<any>(config, 'POST', `_inference/text_embedding/${config.embeddingInferenceId}`, {
       input: [text],
     })
     return extractEmbeddingVector(response)
@@ -830,60 +965,41 @@ export function createTencentRagProvider(config: TencentRagConfig): TencentRagPr
     isConfigured: () => isConfigured(config),
     async search(input) {
       if (!isConfigured(config)) throw new Error('rag_provider_not_configured')
-      const filters: any[] = [{ term: { communityId: input.communityId } }]
-      if (input.sectionId) filters.push({ term: { sectionId: input.sectionId } })
-      if (input.includeMemberOnly === false) filters.push({ term: { visibility: 'public' } })
-      const size = Math.max(1, Math.min(50, Number(input.limit || 20)))
-      const from = Math.max(0, Math.floor(Number(input.skip || 0)))
       const queryVector = await embedText(input.ragQuery.expandedText)
-      const searchBody: any = {
-        from,
-        size,
-        query: {
-          bool: {
-            must: [{
-              multi_match: {
-                query: input.ragQuery.expandedText,
-                fields: ['text^4', 'title^3', 'fieldLabel^2', 'sectionName'],
-              },
-            }],
-            filter: filters,
-          },
-        },
-      }
-      if (queryVector.length > 0 && config.vectorField) {
-        searchBody.knn = {
-          field: config.vectorField,
-          query_vector: queryVector,
-          k: size,
-          num_candidates: Math.max(100, size * 8),
-          filter: filters,
-        }
-      }
-      const response = await requestJson<any>(config, 'POST', `${config.indexName}/_search`, {
-        ...searchBody,
-      })
-      let citations = (response?.hits?.hits || [])
+      const searchBody = buildTencentEsHybridSearchBody(input, config, queryVector)
+      const response = await sendJson<any>(config, 'POST', `${config.indexName}/_search`, searchBody)
+      let citations: ScoredRagCitation[] = (response?.hits?.hits || [])
         .map(toCitation)
         .filter((citation: RagCitation) => citation.postId && citation.chunkId)
         .filter((citation: RagCitation) => isEvidenceVisible(citation.visibility, input.includeMemberOnly !== false))
+        .map((citation: RagCitation) => ({
+          ...citation,
+          lexicalScore: lexicalEvidenceScore(input.ragQuery, {
+            title: citation.title,
+            fieldLabel: citation.fieldLabel,
+            preview: citation.preview,
+            text: citation.preview,
+          }),
+        }))
 
-      if (config.rerankInferenceId && citations.length > 1) {
-        const reranked = await requestJson<any>(config, 'POST', `_inference/rerank/${config.rerankInferenceId}`, {
+      if (config.rerankInferenceId && citations.length > 0) {
+        const reranked = await sendJson<any>(config, 'POST', `_inference/rerank/${config.rerankInferenceId}`, {
           query: input.ragQuery.raw,
           input: citations.map((citation: RagCitation) => citation.preview),
         })
-        const byIndex = new Map<number, any>((reranked?.rerank || []).map((item: any) => [Number(item.index), item]))
+        const byIndex = new Map<number, number>(extractRerankItems(reranked).map((item) => [item.index, item.score]))
         citations = citations
-          .map((citation: RagCitation, index: number) => ({
+          .map((citation: ScoredRagCitation, index: number) => ({
             ...citation,
-            score: Number(byIndex.get(index)?.relevance_score ?? citation.score),
+            score: Number(byIndex.get(index) ?? citation.score),
+            rerankScore: byIndex.has(index) ? Number(byIndex.get(index)) : citation.rerankScore,
           }))
-          .sort((left: RagCitation, right: RagCitation) => right.score - left.score)
+          .sort((left: ScoredRagCitation, right: ScoredRagCitation) => right.score - left.score)
       }
+      citations = rankLkeapEvidenceCitations(citations, input.limit)
 
       const answerResponse = citations.length && config.llmInferenceId
-        ? await requestJson<any>(config, 'POST', `_inference/completion/${config.llmInferenceId}?timeout=300s`, {
+        ? await sendJson<any>(config, 'POST', `_inference/completion/${config.llmInferenceId}?timeout=300s`, {
           input: buildAnswerPrompt(input.query, citations),
           task_settings: { temperature: 0.1, max_new_tokens: 300 },
         })
@@ -901,7 +1017,7 @@ export function createTencentRagProvider(config: TencentRagConfig): TencentRagPr
       if (!isConfigured(config)) throw new Error('rag_provider_not_configured')
       for (const chunk of chunks) {
         const embedding = await embedText([chunk.title, chunk.fieldLabel, chunk.text].filter(Boolean).join('\n'))
-        await requestJson(config, 'PUT', `${config.indexName}/_doc/${encodeURIComponent(chunk.chunkId)}`, {
+        await sendJson(config, 'PUT', `${config.indexName}/_doc/${encodeURIComponent(chunk.chunkId)}`, {
           ...chunk,
           ...(embedding.length > 0 && config.vectorField ? { [config.vectorField]: embedding } : {}),
         })
@@ -909,7 +1025,7 @@ export function createTencentRagProvider(config: TencentRagConfig): TencentRagPr
     },
     async deletePostChunks(postId) {
       if (!isConfigured(config)) throw new Error('rag_provider_not_configured')
-      await requestJson(config, 'POST', `${config.indexName}/_delete_by_query`, {
+      await sendJson(config, 'POST', `${config.indexName}/_delete_by_query`, {
         query: { term: { postId } },
       })
     },

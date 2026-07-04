@@ -16,6 +16,7 @@ import {
   buildVideoRagChunksForPost,
   planVideoRagAnalysisJobsForPost,
   createTencentLkeapCloudBaseProvider,
+  createTencentRagProvider,
   createTencentRagProviderFromEnv,
   createVideoRagAnalyzerFromEnv,
   enqueuePostRagJob,
@@ -625,7 +626,7 @@ test('rankLkeapEvidenceCitations drops negative rerank noise and keeps lexical e
 test('createTencentRagProviderFromEnv selects LKEAP provider when configured', () => {
   const previousEnv = { ...process.env }
   try {
-    process.env.TENCENT_RAG_PROVIDER = 'lkeap'
+    process.env.TENCENT_RAG_PROVIDER = 'lkeap-cloudbase'
     process.env.TENCENTCLOUD_SECRETID = 'AKIDtest'
     process.env.TENCENTCLOUD_SECRETKEY = 'secret-test'
     process.env.TENCENT_LKEAP_REGION = 'ap-guangzhou'
@@ -637,6 +638,203 @@ test('createTencentRagProviderFromEnv selects LKEAP provider when configured', (
   } finally {
     process.env = previousEnv
   }
+})
+
+test('createTencentRagProviderFromEnv ignores legacy lkeap flag and keeps ES as formal RAG provider', () => {
+  const previousEnv = { ...process.env }
+  try {
+    process.env.TENCENT_RAG_PROVIDER = 'lkeap'
+    process.env.TENCENT_RAG_ES_ENDPOINT = 'https://es.example.com'
+    process.env.TENCENT_RAG_ES_USERNAME = 'elastic'
+    process.env.TENCENT_RAG_ES_PASSWORD = 'secret-test'
+    process.env.TENCENT_RAG_INDEX_NAME = 'happyhome_post_rag_chunks'
+    process.env.TENCENT_RAG_EMBEDDING_INFERENCE_ID = 'embedding-endpoint'
+    process.env.TENCENT_RAG_RERANK_INFERENCE_ID = 'rerank-endpoint'
+    process.env.TENCENT_RAG_LLM_INFERENCE_ID = 'llm-endpoint'
+
+    const provider = createTencentRagProviderFromEnv()
+
+    expect(provider.name).toBe('tencent-es-ai-search')
+    expect(provider.isConfigured()).toBe(true)
+  } finally {
+    process.env = previousEnv
+  }
+})
+
+test('Tencent ES provider uses rank_fusion hybrid retrieval and filters weak evidence before LLM answer', async () => {
+  const calls: Array<{ method: string; path: string; body: any }> = []
+  const requestJson = jest.fn(async (_config: any, method: string, path: string, body?: any) => {
+    calls.push({ method, path, body })
+    if (path.startsWith('_inference/text_embedding/')) {
+      return { embedding: [{ result: [0.11, 0.22, 0.33] }] }
+    }
+    if (path.endsWith('/_search')) {
+      return {
+        hits: {
+          total: { value: 2 },
+          hits: [
+            {
+              _id: 'thrift-chunk',
+              _score: 12,
+              _source: {
+                postId: 'thrift-post',
+                chunkId: 'thrift-chunk',
+                communityId: 'community-1',
+                sectionId: 'section-1',
+                sectionName: '明士班',
+                title: '第50次明士课程资料',
+                fieldLabel: '图文资料',
+                fieldType: 'rich_note',
+                preview: '一粥一饭，当思来处不易；半丝半缕，恒念物力维艰。',
+                text: '一粥一饭，当思来处不易；半丝半缕，恒念物力维艰。',
+                visibility: 'public',
+                sourceUpdatedAt: '2026-06-25T00:00:00.000Z',
+              },
+            },
+            {
+              _id: 'noise-chunk',
+              _score: 9,
+              _source: {
+                postId: 'noise-post',
+                chunkId: 'noise-chunk',
+                communityId: 'community-1',
+                sectionId: 'section-1',
+                sectionName: '明士班',
+                title: '实木书桌 + 椅子',
+                fieldLabel: '标题',
+                fieldType: 'title',
+                preview: '实木书桌 + 椅子',
+                text: '实木书桌 + 椅子',
+                visibility: 'public',
+                sourceUpdatedAt: '2026-06-25T00:00:00.000Z',
+              },
+            },
+          ],
+        },
+      }
+    }
+    if (path.startsWith('_inference/rerank/')) {
+      return {
+        rerank: [
+          { index: 0, relevance_score: 0.87 },
+          { index: 1, relevance_score: -2.4 },
+        ],
+      }
+    }
+    if (path.startsWith('_inference/completion/')) {
+      return { completion: [{ result: '有，最相关的是《第50次明士课程资料》。' }] }
+    }
+    throw new Error(`unexpected request path: ${path}`)
+  })
+  const provider = createTencentRagProvider({
+    endpoint: 'https://es.example.com',
+    username: 'elastic',
+    password: 'secret-test',
+    indexName: 'happyhome_post_rag_chunks',
+    vectorField: 'embedding',
+    embeddingInferenceId: 'embedding-endpoint',
+    rerankInferenceId: 'rerank-endpoint',
+    llmInferenceId: 'llm-endpoint',
+  }, { requestJson: requestJson as any })
+
+  const result = await provider.search({
+    communityId: 'community-1',
+    sectionId: '',
+    query: '勤俭持家',
+    skip: 0,
+    limit: 10,
+    includeMemberOnly: false,
+    ragQuery: buildRagQuery('勤俭持家'),
+  })
+
+  const searchCall = calls.find((call) => call.path.endsWith('/_search'))
+  expect(searchCall?.body.query).toBeUndefined()
+  expect(searchCall?.body.knn).toBeUndefined()
+  expect(searchCall?.body.retriever.rank_fusion.retrievers).toEqual(expect.arrayContaining([
+    expect.objectContaining({ standard: expect.any(Object) }),
+    expect.objectContaining({ knn: expect.objectContaining({ field: 'embedding' }) }),
+  ]))
+  expect(searchCall?.body.retriever.rank_fusion.retrievers[0].standard.query.bool.filter).toEqual(expect.arrayContaining([
+    { term: { communityId: 'community-1' } },
+    { term: { visibility: 'public' } },
+  ]))
+  expect(result.citations.map((citation) => citation.chunkId)).toEqual(['thrift-chunk'])
+  expect(result.items.map((item) => item.postId)).toEqual(['thrift-post'])
+  expect(result.answer).toContain('第50次明士课程资料')
+  expect(requestJson).toHaveBeenCalledWith(
+    expect.any(Object),
+    'POST',
+    expect.stringContaining('_inference/completion/'),
+    expect.any(Object),
+  )
+})
+
+test('Tencent ES provider reranks a single semantic candidate before evidence filtering', async () => {
+  const requestJson = jest.fn(async (_config: any, _method: string, path: string) => {
+    if (path.startsWith('_inference/text_embedding/')) {
+      return { embedding: [{ result: [0.44, 0.55, 0.66] }] }
+    }
+    if (path.endsWith('/_search')) {
+      return {
+        hits: {
+          total: { value: 1 },
+          hits: [{
+            _id: 'semantic-chunk',
+            _score: 8,
+            _source: {
+              postId: 'semantic-post',
+              chunkId: 'semantic-chunk',
+              communityId: 'community-1',
+              sectionId: 'section-1',
+              sectionName: '明士班',
+              title: '生活札记',
+              fieldLabel: '正文',
+              fieldType: 'rich_note',
+              preview: '每周记账，减少冲动消费，把更多资源留给家庭长期目标。',
+              text: '每周记账，减少冲动消费，把更多资源留给家庭长期目标。',
+              visibility: 'public',
+              sourceUpdatedAt: '2026-06-25T00:00:00.000Z',
+            },
+          }],
+        },
+      }
+    }
+    if (path.startsWith('_inference/rerank/')) {
+      return { rerank: [{ index: 0, relevance_score: 0.73 }] }
+    }
+    if (path.startsWith('_inference/completion/')) {
+      return { completion: [{ result: '有，找到一篇关于家庭节制消费的帖子。' }] }
+    }
+    throw new Error(`unexpected request path: ${path}`)
+  })
+  const provider = createTencentRagProvider({
+    endpoint: 'https://es.example.com',
+    username: 'elastic',
+    password: 'secret-test',
+    indexName: 'happyhome_post_rag_chunks',
+    vectorField: 'embedding',
+    embeddingInferenceId: 'embedding-endpoint',
+    rerankInferenceId: 'rerank-endpoint',
+    llmInferenceId: 'llm-endpoint',
+  }, { requestJson: requestJson as any })
+
+  const result = await provider.search({
+    communityId: 'community-1',
+    sectionId: '',
+    query: '有没有讲家庭长期节制消费的帖子',
+    skip: 0,
+    limit: 10,
+    includeMemberOnly: false,
+    ragQuery: buildRagQuery('有没有讲家庭长期节制消费的帖子'),
+  })
+
+  expect(result.citations.map((citation) => citation.chunkId)).toEqual(['semantic-chunk'])
+  expect(requestJson).toHaveBeenCalledWith(
+    expect.any(Object),
+    'POST',
+    expect.stringContaining('_inference/rerank/'),
+    expect.objectContaining({ input: ['每周记账，减少冲动消费，把更多资源留给家庭长期目标。'] }),
+  )
 })
 
 test('readTencentLkeapRagConfigFromEnv prefers explicit LKEAP secrets over CloudBase runtime secrets', () => {

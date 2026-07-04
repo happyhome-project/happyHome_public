@@ -128,7 +128,7 @@ await requestJson('PUT', config.indexName, {
         type: 'dense_vector',
         dims,
         index: true,
-        similarity: 'dot_product',
+        similarity: 'cosine',
       },
     },
   },
