@@ -4,6 +4,42 @@ import test from 'node:test'
 
 import { isDevtoolsLoginSigningFailure, shouldFallbackAfterDevtoolsFailure } from './release-policy.mjs'
 
+function extractFunctionBlock(source, signature) {
+  const start = source.indexOf(signature)
+  assert.notEqual(start, -1, `Missing function signature: ${signature}`)
+
+  const paramsStart = source.indexOf('(', start)
+  assert.notEqual(paramsStart, -1, `Missing function params: ${signature}`)
+
+  let paramsDepth = 0
+  let paramsEnd = -1
+  for (let index = paramsStart; index < source.length; index += 1) {
+    if (source[index] === '(') paramsDepth += 1
+    if (source[index] === ')') {
+      paramsDepth -= 1
+      if (paramsDepth === 0) {
+        paramsEnd = index
+        break
+      }
+    }
+  }
+  assert.notEqual(paramsEnd, -1, `Could not parse function params: ${signature}`)
+
+  const bodyStart = source.indexOf('{', paramsEnd)
+  assert.notEqual(bodyStart, -1, `Missing function body: ${signature}`)
+
+  let depth = 0
+  for (let index = bodyStart; index < source.length; index += 1) {
+    if (source[index] === '{') depth += 1
+    if (source[index] === '}') {
+      depth -= 1
+      if (depth === 0) return source.slice(start, index + 1)
+    }
+  }
+
+  assert.fail(`Could not extract function block: ${signature}`)
+}
+
 test('blocks fallback when DevTools login or signing state is bad', () => {
   assert.equal(isDevtoolsLoginSigningFailure('Cloud API signed-header failure'), true)
   assert.equal(isDevtoolsLoginSigningFailure('getCloudAPISignedHeader failed ret=41002'), true)
@@ -35,7 +71,7 @@ test('allows non-upload fallback for non-login DevTools failures', () => {
 test('release cloud smoke ensures required database collections before invoking fixtures', () => {
   const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
   const ensureIndexesScript = readFileSync(new URL('../ensure-indexes.mjs', import.meta.url), 'utf8')
-  const runCloudSmokeBody = deployScript.match(/async function runCloudSmoke[\s\S]+?\n}/)?.[0] || ''
+  const runCloudSmokeBody = extractFunctionBlock(deployScript, 'async function runCloudSmoke')
 
   assert.match(ensureIndexesScript, /content_audit_tasks/)
   assert.match(ensureIndexesScript, /admin_notification_subscriptions/)
@@ -46,7 +82,7 @@ test('release cloud smoke ensures required database collections before invoking 
 
 test('formal release path records resumable ledger stages before upload', () => {
   const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
-  const releaseBlock = deployScript.match(/async function runFormalRelease[\s\S]+?\n}\n\nconst target/)?.[0] || ''
+  const releaseBlock = extractFunctionBlock(deployScript, 'async function runFormalRelease')
 
   assert.match(deployScript, /release-run-ledger\.mjs/)
   assert.match(deployScript, /target === 'release-prepare'/)
