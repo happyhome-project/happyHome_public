@@ -20,6 +20,8 @@ describe('hierarchy navigation helpers', () => {
   beforeEach(() => {
     delete (globalThis as any).uni
     delete (globalThis as any).getCurrentPages
+    delete (globalThis as any).window
+    delete (globalThis as any).document
   })
 
   test('goes back when the current page has a parent in the stack', async () => {
@@ -106,6 +108,18 @@ describe('hierarchy navigation helpers', () => {
 
     expect(ensureHierarchyStack('/pages/detail/index', { postId: 'p1' })).toBe(false)
     expect(ensureHierarchyStack('/pages/detail/index', { postId: 'p1', __hhStack: '1' })).toBe(false)
+    expect(uniMock.switchTab).not.toHaveBeenCalled()
+    expect(uniMock.navigateTo).not.toHaveBeenCalled()
+  })
+
+  test('does not rebuild direct links in browser H5 runtime', async () => {
+    const uniMock = installUniMock()
+    ;(globalThis as any).window = {}
+    ;(globalThis as any).document = {}
+    ;(globalThis as any).getCurrentPages = () => [{ route: 'pages/detail/index' }]
+    const { ensureHierarchyStack } = await loadNav()
+
+    expect(ensureHierarchyStack('/pages/detail/index', { postId: 'p1' })).toBe(false)
     expect(uniMock.switchTab).not.toHaveBeenCalled()
     expect(uniMock.navigateTo).not.toHaveBeenCalled()
   })

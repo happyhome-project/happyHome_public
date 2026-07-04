@@ -60,6 +60,10 @@ export function buildRouteUrl(path: string, options: Record<string, unknown> = {
   return `${normalizeRouteUrl(path)}${routeQuery(options, extra)}`
 }
 
+function isBrowserRuntime(): boolean {
+  return typeof window !== 'undefined' && typeof document !== 'undefined'
+}
+
 export function switchHome() {
   runSwitchTab(HOME_TAB_URL, () => {
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -103,6 +107,7 @@ export function ensureHierarchyStack(
   options: Record<string, unknown> = {},
   parent: unknown = '',
 ): boolean {
+  if (isBrowserRuntime()) return false
   if (currentStackDepth() > 1) return false
   if (String(options?.[HIERARCHY_STACK_MARK] || '')) return false
 
