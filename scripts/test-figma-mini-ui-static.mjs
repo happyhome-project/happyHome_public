@@ -224,6 +224,17 @@ for (const [name, source] of [
 
 assert(
   search.includes('class="search-nav"') &&
+    search.includes('isInitialSearchLayout') &&
+    search.includes('const isInitialSearchLayout = computed(() => !searched.value && !loading.value)') &&
+    search.includes('compactQueryChipStyle') &&
+    search.includes('class="search-query-field"') &&
+    search.includes('search-query-field--compact') &&
+    search.includes('width: `${Math.min(203, Math.max(64, queryWidth + 49))}px`') &&
+    search.includes('height: 116px') &&
+    search.includes('flex: 0 1 227px') &&
+    search.includes('max-width: 227px') &&
+    search.includes('height: 36px') &&
+    search.includes('background: #f7f7f7') &&
     search.includes('class="result-cover"') &&
     search.includes('resultAuthorAvatar') &&
     search.includes('avatar-') &&
