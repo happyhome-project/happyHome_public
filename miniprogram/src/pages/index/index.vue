@@ -63,21 +63,24 @@
       </view>
 
       <view class="home-banner">
-        <view
+        <swiper
           v-if="homeBannerItems.length > 0"
           class="home-banner-swiper"
-          @touchstart="onHomeBannerPointerStart"
-          @touchmove="onHomeBannerPointerMove"
-          @touchend="onHomeBannerPointerEnd"
-          @mousedown="onHomeBannerPointerStart"
-          @mousemove="onHomeBannerPointerMove"
-          @mouseup="onHomeBannerPointerEnd"
+          :current="homeBannerActiveIndex"
+          :circular="homeBannerItems.length > 1"
+          :duration="260"
+          @change="onHomeBannerChange"
+          @touchstart="onHomeBannerGestureStart"
+          @touchmove="onHomeBannerGestureMove"
+          @touchend="onHomeBannerGestureEnd"
+          @mousedown="onHomeBannerGestureStart"
+          @mousemove="onHomeBannerGestureMove"
+          @mouseup="onHomeBannerGestureEnd"
         >
-          <view
+          <swiper-item
             v-for="(banner, i) in homeBannerItems"
             :key="banner.bannerId"
             class="home-banner-slide"
-            :class="{ active: i === homeBannerActiveIndex }"
             @tap="openHomeBanner(banner)"
           >
             <image
@@ -87,8 +90,8 @@
             />
             <view class="home-banner-shade"></view>
             <text class="home-banner-title">{{ banner.title }}</text>
-          </view>
-        </view>
+          </swiper-item>
+        </swiper>
         <template v-else>
           <view class="home-banner-art"></view>
           <view class="home-banner-shade"></view>
@@ -389,18 +392,23 @@ const selectedArchiveId = ref('')
 const homePageScrollTop = ref(0)
 const archivePreviewMinHeightPx = ref(0)
 const homeBannerActiveIndex = ref(0)
+const homeBannerSwipeIntent = ref(false)
 let refreshingHome = false
 let queuedForcedHomeRefresh = false
 let mountedAt = 0
 let unsubscribeBackgroundFetchSnapshot: (() => void) | null = null
 let archiveSwitchScrollTimers: ReturnType<typeof setTimeout>[] = []
 let archivePreviewMeasureTimers: ReturnType<typeof setTimeout>[] = []
-let homeBannerPointerStartX = 0
-let homeBannerPointerMoved = false
 let suppressNextHomeBannerTap = false
+let suppressHomeBannerTapTimer: ReturnType<typeof setTimeout> | null = null
+let homeBannerPointerStartX = 0
+let homeBannerPointerStartY = 0
+let homeBannerHasPointerStart = false
 let homeBannerResolveToken = 0
 const reportedMissingHomeTitle = new Set<string>()
 const NOTICE_PREVIEW_LIMIT = 68
+const HOME_BANNER_SWIPE_THRESHOLD_PX = 8
+const HOME_BANNER_TAP_SUPPRESS_MS = 320
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
 const GUIDE_AUTHOR_AVATAR_PALETTE = [
@@ -839,45 +847,67 @@ function getGuideAuthorAvatarStyle(author?: string) {
 }
 
 // ── Actions ──
-function getHomeBannerPointerX(event: any): number {
+function onHomeBannerChange(event: any) {
+  const next = Number(event?.detail?.current ?? 0)
+  if (Number.isFinite(next)) homeBannerActiveIndex.value = next
+  if (event?.detail?.source === 'touch') {
+    suppressHomeBannerTapTemporarily()
+  }
+}
+
+function onHomeBannerGestureStart(event: any) {
+  const point = getHomeBannerGesturePoint(event)
+  homeBannerPointerStartX = point.x
+  homeBannerPointerStartY = point.y
+  homeBannerHasPointerStart = true
+  homeBannerSwipeIntent.value = false
+  if (suppressHomeBannerTapTimer) {
+    clearTimeout(suppressHomeBannerTapTimer)
+    suppressHomeBannerTapTimer = null
+  }
+  suppressNextHomeBannerTap = false
+}
+
+function onHomeBannerGestureMove(event: any) {
+  if (!homeBannerHasPointerStart) return
+  const point = getHomeBannerGesturePoint(event)
+  const dx = Math.abs(point.x - homeBannerPointerStartX)
+  const dy = Math.abs(point.y - homeBannerPointerStartY)
+  if (Math.max(dx, dy) >= HOME_BANNER_SWIPE_THRESHOLD_PX) {
+    homeBannerSwipeIntent.value = true
+    suppressHomeBannerTapTemporarily()
+  }
+}
+
+function onHomeBannerGestureEnd() {
+  if (homeBannerSwipeIntent.value) suppressHomeBannerTapTemporarily()
+  homeBannerHasPointerStart = false
+  homeBannerSwipeIntent.value = false
+}
+
+function getHomeBannerGesturePoint(event: any) {
   const touch = event?.touches?.[0] || event?.changedTouches?.[0]
-  const clientX = Number(touch?.clientX ?? event?.clientX ?? 0)
-  return Number.isFinite(clientX) ? clientX : 0
+  const x = Number(touch?.clientX ?? touch?.pageX ?? event?.clientX ?? event?.pageX ?? 0)
+  const y = Number(touch?.clientY ?? touch?.pageY ?? event?.clientY ?? event?.pageY ?? 0)
+  return { x, y }
 }
 
-function onHomeBannerPointerStart(event: any) {
-  homeBannerPointerStartX = getHomeBannerPointerX(event)
-  homeBannerPointerMoved = false
-}
-
-function onHomeBannerPointerMove(event: any) {
-  const currentX = getHomeBannerPointerX(event)
-  if (Math.abs(currentX - homeBannerPointerStartX) > 16) {
-    homeBannerPointerMoved = true
-  }
-}
-
-function onHomeBannerPointerEnd(event: any) {
-  const currentX = getHomeBannerPointerX(event)
-  const deltaX = currentX - homeBannerPointerStartX
-  if (Math.abs(deltaX) > 16 || homeBannerPointerMoved) {
-    if (Math.abs(deltaX) > 32 && homeBannerItems.value.length > 1) {
-      const step = deltaX < 0 ? 1 : -1
-      const length = homeBannerItems.value.length
-      homeBannerActiveIndex.value = (homeBannerActiveIndex.value + step + length) % length
-    }
-    suppressNextHomeBannerTap = true
-    setTimeout(() => {
-      suppressNextHomeBannerTap = false
-      homeBannerPointerMoved = false
-    }, 350)
-  }
+function suppressHomeBannerTapTemporarily() {
+  suppressNextHomeBannerTap = true
+  if (suppressHomeBannerTapTimer) clearTimeout(suppressHomeBannerTapTimer)
+  suppressHomeBannerTapTimer = setTimeout(() => {
+    suppressNextHomeBannerTap = false
+    suppressHomeBannerTapTimer = null
+  }, HOME_BANNER_TAP_SUPPRESS_MS)
 }
 
 function openHomeBanner(item: HomeBannerItem) {
-  if (suppressNextHomeBannerTap || homeBannerPointerMoved) {
+  if (suppressNextHomeBannerTap) {
     suppressNextHomeBannerTap = false
-    homeBannerPointerMoved = false
+    if (suppressHomeBannerTapTimer) {
+      clearTimeout(suppressHomeBannerTapTimer)
+      suppressHomeBannerTapTimer = null
+    }
     return
   }
   if (!item.postId) return
@@ -2634,20 +2664,13 @@ onShareAppMessage(() => {
 
 .home-banner-swiper,
 .home-banner-slide {
-  position: absolute;
-  inset: 0;
   width: 100%;
   height: 100%;
 }
 
 .home-banner-slide {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.home-banner-slide.active {
-  opacity: 1;
-  pointer-events: auto;
+  position: relative;
+  overflow: hidden;
 }
 
 .home-banner-image,
