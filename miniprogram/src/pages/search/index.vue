@@ -67,7 +67,7 @@
       </view>
     </view>
 
-    <view v-else-if="items.length === 0 && mode !== 'no_answer' && (answer || citations.length || mode === 'fallback')" class="rag-section">
+    <view v-if="searched && !loadError && mode !== 'no_answer' && (answer || citations.length || mode === 'fallback')" class="rag-section">
       <view v-if="answer" class="answer-card" :class="{ muted: mode !== 'rag' }">
         <text class="answer-label">{{ mode === 'fallback' ? '普通搜索' : 'AI 回答' }}</text>
         <text class="answer-text">{{ answer }}</text>
@@ -93,14 +93,14 @@
       </view>
     </view>
 
-    <view v-else-if="items.length === 0" class="empty-result">
+    <view v-if="!loading && !loadError && searched && items.length === 0" class="empty-result">
       <view class="empty-illustration" aria-hidden="true">
         <view class="empty-paper"></view>
         <view class="empty-folder"></view>
         <text class="empty-plane">↗</text>
       </view>
-      <text class="empty-title">暂无相关结果</text>
-      <text class="empty-desc">换个关键词试试</text>
+      <text class="empty-title">{{ mode === 'no_answer' ? '没有找到足够相关的帖子' : '暂无相关结果' }}</text>
+      <text class="empty-desc">{{ mode === 'no_answer' ? '换个关键词，或试试搜索正文/视频内容' : '换个关键词试试' }}</text>
     </view>
 
     <view v-if="items.length" class="result-list">
@@ -165,6 +165,7 @@ import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { getGuideNoteCard, getPostHomeTitle } from '../../utils/widget'
+import { navigateBackOrHome } from '../../utils/hierarchy-nav'
 
 interface SearchField {
   fieldLabel: string
@@ -291,12 +292,7 @@ function clearQuery() {
 }
 
 function goBack() {
-  const pages = getCurrentPages()
-  if (pages.length > 1) {
-    uni.navigateBack()
-    return
-  }
-  uni.switchTab({ url: '/pages/index/index' })
+  navigateBackOrHome()
 }
 
 async function loadMore() {
@@ -366,7 +362,8 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
       usedBootstrapFallback,
     })
   } catch (error: any) {
-    loadError.value = error?.message || '搜索失败'
+    loadError.value = friendlySearchError(error)
+    searched.value = true
     clientLog('error', 'search.load.fail', { communityId: communityId.value, error })
     if (String(loadError.value).includes('需要先加入社区后查看内容')) {
       uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
@@ -374,6 +371,15 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
   } finally {
     loading.value = false
   }
+}
+
+function friendlySearchError(error: any): string {
+  const message = String(error?.message || error?.errMsg || '')
+  if (message.includes('需要先加入社区后查看内容')) return '需要先加入社区后查看内容'
+  if (message.includes('FUNCTIONS_EXECUTE_FAIL') || message.includes('callFunction') || message.includes('cloud') || message.includes('HTTP')) {
+    return '搜索暂时不可用，请稍后再试'
+  }
+  return message || '搜索失败'
 }
 
 function shouldSearchAsGuest(targetCommunityId: string): boolean {

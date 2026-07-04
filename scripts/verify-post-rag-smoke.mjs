@@ -162,6 +162,9 @@ function assertRagHit(result, postId, label) {
 
 async function main() {
   const options = parseArgs()
+  if (!options.workerToken) {
+    throw new Error('POST_RAG_WORKER_TOKEN is required to invoke post-rag-worker')
+  }
   const ownerOpenid = `${options.actor}-user`
   let communityId = ''
   let sectionId = ''

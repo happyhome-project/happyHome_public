@@ -32,6 +32,6 @@ describe('community share page integration contract', () => {
 
     expect(code).toContain('consumePendingShareCommunity')
     expect(code).toContain('restorePendingShareCommunity')
-    expect(code).toContain('buildCommunityOnboardingPath')
+    expect(code).toContain('openOnboardingPreservingStack({ mode: \'discover\', communityId })')
   })
 })

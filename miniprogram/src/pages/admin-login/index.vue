@@ -48,6 +48,7 @@
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { useUserStore } from '../../store/user'
+import { navigateBackOrHome } from '../../utils/hierarchy-nav'
 
 const userStore = useUserStore()
 const ticket = ref('')
@@ -101,10 +102,7 @@ async function confirm() {
 }
 
 function cancel() {
-  uni.navigateBack({
-    delta: 1,
-    fail: () => uni.switchTab({ url: '/pages/index/index' }),
-  })
+  navigateBackOrHome()
 }
 
 function goLogin() {

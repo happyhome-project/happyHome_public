@@ -71,10 +71,14 @@ const activePublishSections = computed(() =>
 )
 
 const publishOptions = computed(() =>
-  activePublishSections.value.slice(0, 8).map((section: any, index: number) => ({
-    section,
-    ...resolvePublishMeta(section?.name, index),
-  }))
+  activePublishSections.value.slice(0, 8).map((section: any, index: number) => {
+    const meta = resolvePublishMeta(section?.name, index)
+    return {
+      section,
+      tone: meta.tone,
+      iconSrc: meta.iconSrc,
+    }
+  })
 )
 
 onMounted(() => {
@@ -110,14 +114,17 @@ function closePublishSheet() {
 function handlePublishOption(section: any) {
   const sectionId = String(section?._id || '')
   if (!sectionId) return
+  const returnTo = props.current === 'create' ? '' : (getTabByKey(props.current)?.path || '')
   try {
     uni.setStorageSync(CREATE_SECTION_INTENT_KEY, {
       sectionId,
       createdAt: Date.now(),
+      returnTo,
+      source: 'tabbar.publish',
     })
   } catch (_error) {}
   closePublishSheet()
-  ;(uni as any).$emit?.('happyhome:create-section-intent', { sectionId })
+  ;(uni as any).$emit?.('happyhome:create-section-intent', { sectionId, returnTo })
   if (props.current !== 'create') {
     uni.switchTab({ url: '/pages/create/index' })
   }
@@ -126,7 +133,7 @@ function handlePublishOption(section: any) {
 function isPublishableSection(section: any) {
   const name = String(section?.name || '').trim()
   const systemKey = String(section?.systemKey || '')
-  if (systemKey === 'activity_invite' || name === '出游邀约' || name === '我的组局') return false
+  if (systemKey === 'activity_invite' || name === '出游邀约' || name === '活动召集') return false
 
   const widgets = Array.isArray(section?.widgets) ? section.widgets : []
   if (widgets.length === 0) return false
