@@ -180,6 +180,7 @@ import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { buildGuideRouteDetail } from '../../utils/guide-detail'
 import { extractRichNoteImageSources } from '../../utils/rich-note'
+import { navigateBackOrHome } from '../../utils/hierarchy-nav'
 
 const fallbackAvatar = '/static/default-avatar.png'
 const ATTENDANCE_SLOT_DISPLAY_MAX = 6
@@ -234,11 +235,12 @@ const postMeta = computed(() => ({
 const detailSectionTitle = computed(() => section.value?.name || '')
 const isGuideNoteDetail = computed(() => resolveGuideNoteDetailTemplate(section.value))
 const renderPost = computed(() => {
-  if (!post.value) return post.value
+  const currentPost = post.value
+  if (!currentPost) return currentPost
   const replacements = resolvedDetailMediaUrls
-  if (!Object.keys(replacements).length) return post.value
-  return Object.assign({}, post.value, {
-    content: replaceResolvedMediaUrls(post.value.content || {}, replacements),
+  if (!Object.keys(replacements).length) return currentPost
+  return Object.assign({}, currentPost, {
+    content: replaceResolvedMediaUrls(currentPost.content || {}, replacements),
   })
 })
 const guideRouteDetail = computed(() => {
@@ -442,10 +444,8 @@ function collectCloudMediaUrls(value: unknown, target: string[] = []): string[] 
     return target
   }
   if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>
-    Object.keys(record).forEach((key) => {
-      collectCloudMediaUrls(record[key], target)
-    })
+    const source = value as Record<string, unknown>
+    Object.keys(source).forEach((key) => collectCloudMediaUrls(source[key], target))
   }
   return target
 }
@@ -502,12 +502,12 @@ function replaceResolvedMediaUrls(value: unknown, replacements: Record<string, s
   }
   if (Array.isArray(value)) return value.map((item) => replaceResolvedMediaUrls(item, replacements))
   if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>
-    const nextRecord: Record<string, unknown> = {}
-    Object.keys(record).forEach((key) => {
-      nextRecord[key] = replaceResolvedMediaUrls(record[key], replacements)
+    const source = value as Record<string, unknown>
+    const next: Record<string, any> = {}
+    Object.keys(source).forEach((key) => {
+      next[key] = replaceResolvedMediaUrls(source[key], replacements)
     })
-    return nextRecord
+    return next
   }
   return value
 }
@@ -554,9 +554,7 @@ function retryLoad() {
 
 function goBack() {
   clientLog('info', 'detail.goBack.tap', { postId: currentPostId.value })
-  uni.navigateBack({
-    fail: () => uni.switchTab({ url: '/pages/index/index' }),
-  })
+  navigateBackOrHome()
 }
 
 function goOriginPost() {
@@ -579,6 +577,7 @@ async function handleActivityInviteTap() {
   try {
     uni.setStorageSync(ACTIVITY_INVITE_CREATE_INTENT_KEY, {
       sourcePostId: post.value._id,
+      returnTo: `/pages/detail/index?postId=${encodeURIComponent(post.value._id)}`,
       createdAt: Date.now(),
     })
   } catch {}
@@ -597,7 +596,7 @@ const deleteLock = useBusyLock(async () => {
   try {
     await postApi.delete(post.value._id)
     uni.showToast({ title: '已删除', icon: 'success' })
-    uni.navigateBack()
+    navigateBackOrHome()
   } catch (error: any) {
     uni.showToast({ title: error?.message || '删除失败', icon: 'none' })
   }

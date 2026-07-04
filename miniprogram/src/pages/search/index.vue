@@ -16,11 +16,9 @@
         <text v-if="query" class="clear-icon" @tap="clearQuery">×</text>
         <button v-if="!searched" class="search-submit" @tap="submitSearch">搜索</button>
       </view>
-      <view class="search-capsule" aria-hidden="true">
-        <text class="capsule-dot">•••</text>
-        <view class="capsule-line"></view>
-        <text class="capsule-ring">◎</text>
-      </view>
+      <!-- #ifdef MP-WEIXIN -->
+      <view class="search-native-menu-spacer" aria-hidden="true"></view>
+      <!-- #endif -->
     </view>
 
     <view v-if="loading && items.length === 0" class="state">
@@ -69,7 +67,7 @@
       </view>
     </view>
 
-    <view v-else-if="items.length === 0 && mode !== 'no_answer' && (answer || citations.length || mode === 'fallback')" class="rag-section">
+    <view v-if="searched && !loadError && mode !== 'no_answer' && (answer || citations.length || mode === 'fallback')" class="rag-section">
       <view v-if="answer" class="answer-card" :class="{ muted: mode !== 'rag' }">
         <text class="answer-label">{{ mode === 'fallback' ? '普通搜索' : 'AI 回答' }}</text>
         <text class="answer-text">{{ answer }}</text>
@@ -95,14 +93,14 @@
       </view>
     </view>
 
-    <view v-else-if="items.length === 0" class="empty-result">
+    <view v-if="!loading && !loadError && searched && items.length === 0" class="empty-result">
       <view class="empty-illustration" aria-hidden="true">
         <view class="empty-paper"></view>
         <view class="empty-folder"></view>
         <text class="empty-plane">↗</text>
       </view>
-      <text class="empty-title">暂无相关结果</text>
-      <text class="empty-desc">换个关键词试试</text>
+      <text class="empty-title">{{ mode === 'no_answer' ? '没有找到足够相关的帖子' : '暂无相关结果' }}</text>
+      <text class="empty-desc">{{ mode === 'no_answer' ? '换个关键词，或试试搜索正文/视频内容' : '换个关键词试试' }}</text>
     </view>
 
     <view v-if="items.length" class="result-list">
@@ -167,6 +165,7 @@ import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { getGuideNoteCard, getPostHomeTitle } from '../../utils/widget'
+import { navigateBackOrHome } from '../../utils/hierarchy-nav'
 
 interface SearchField {
   fieldLabel: string
@@ -227,6 +226,7 @@ const generatedAvatarPalettes = [
   ['#F1D08A', '#7294B8'],
   ['#C9D6A3', '#C4867D'],
 ]
+let searchRequestSeq = 0
 
 const communityName = computed(() => {
   if (communityStore.currentCommunityId === communityId.value && communityStore.currentCommunity?.name) {
@@ -283,6 +283,7 @@ function quickSearch(term: string) {
 }
 
 function clearQuery() {
+  searchRequestSeq += 1
   query.value = ''
   searched.value = false
   items.value = []
@@ -293,12 +294,7 @@ function clearQuery() {
 }
 
 function goBack() {
-  const pages = getCurrentPages()
-  if (pages.length > 1) {
-    uni.navigateBack()
-    return
-  }
-  uni.switchTab({ url: '/pages/index/index' })
+  navigateBackOrHome()
 }
 
 async function loadMore() {
@@ -307,6 +303,7 @@ async function loadMore() {
 }
 
 async function runSearch(options: { reset: boolean; showShortToast?: boolean }) {
+  const requestSeq = ++searchRequestSeq
   const normalizedQuery = query.value.trim()
   if (!communityId.value) {
     uni.showToast({ title: '请先选择社区', icon: 'none' })
@@ -345,10 +342,12 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
       limit,
       asGuest,
     })
+    if (requestSeq !== searchRequestSeq) return
     let nextItems = result.items || []
     let usedBootstrapFallback = false
     if (options.reset && nextItems.length === 0 && result.mode === 'no_answer') {
       const fallbackItems = await searchVisibleBootstrapPosts(normalizedQuery, asGuest)
+      if (requestSeq !== searchRequestSeq) return
       if (fallbackItems.length > 0) {
         nextItems = fallbackItems
         usedBootstrapFallback = true
@@ -368,14 +367,27 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
       usedBootstrapFallback,
     })
   } catch (error: any) {
-    loadError.value = error?.message || '搜索失败'
+    if (requestSeq !== searchRequestSeq) return
+    loadError.value = friendlySearchError(error)
+    searched.value = true
     clientLog('error', 'search.load.fail', { communityId: communityId.value, error })
     if (String(loadError.value).includes('需要先加入社区后查看内容')) {
       uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
     }
   } finally {
-    loading.value = false
+    if (requestSeq === searchRequestSeq) {
+      loading.value = false
+    }
   }
+}
+
+function friendlySearchError(error: any): string {
+  const message = String(error?.message || error?.errMsg || '')
+  if (message.includes('需要先加入社区后查看内容')) return '需要先加入社区后查看内容'
+  if (message.includes('FUNCTIONS_EXECUTE_FAIL') || message.includes('callFunction') || message.includes('cloud') || message.includes('HTTP')) {
+    return '搜索暂时不可用，请稍后再试'
+  }
+  return message || '搜索失败'
 }
 
 function shouldSearchAsGuest(targetCommunityId: string): boolean {
@@ -685,20 +697,14 @@ function formatDate(value: unknown): string {
   border: 0;
 }
 
-.search-capsule {
+.search-native-menu-spacer {
   flex: 0 0 174rpx;
   height: 64rpx;
-  border: 1rpx solid #f7f7f7;
-  border-radius: $hh-radius-full;
-  background: rgba(255, 255, 255, 0.74);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 18rpx;
-  color: #181818;
+  visibility: hidden;
+  pointer-events: none;
 }
 
-.search-nav--initial .search-capsule {
+.search-nav--initial .search-native-menu-spacer {
   position: absolute;
   right: 13px;
   top: 73px;
@@ -711,23 +717,6 @@ function formatDate(value: unknown): string {
   left: 16px;
   top: 77px;
   z-index: 2;
-}
-
-.capsule-dot {
-  font-size: 34rpx;
-  line-height: 1;
-  transform: translateY(-3rpx);
-}
-
-.capsule-line {
-  width: 1rpx;
-  height: 36rpx;
-  background: #f1f1f1;
-}
-
-.capsule-ring {
-  font-size: 36rpx;
-  line-height: 1;
 }
 
 .search-discovery {

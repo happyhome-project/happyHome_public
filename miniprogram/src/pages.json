@@ -9,7 +9,7 @@
   "pages": [
     {
       "path": "pages/index/index",
-      "style": { "navigationBarTitleText": "社群助手", "enablePullDownRefresh": true }
+      "style": { "navigationBarTitleText": "社群助手", "navigationStyle": "custom", "enablePullDownRefresh": true }
     },
     {
       "path": "pages/search/index",

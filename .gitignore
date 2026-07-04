@@ -14,6 +14,7 @@ output/
 preview-qr.*
 preview-info.json
 mp-upload-info.json
+Figma/ShareToAmy/
 
 # logs
 *.log

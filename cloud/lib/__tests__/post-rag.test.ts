@@ -20,6 +20,8 @@ import {
   createVideoRagAnalyzerFromEnv,
   enqueuePostRagJob,
   hasRagEvidenceSignal,
+  rankLkeapEvidenceCitations,
+  selectLkeapCandidateCitations,
   POST_RAG_CHUNKS,
   POST_RAG_INDEX_STATE,
   POST_RAG_JOBS,
@@ -43,16 +45,23 @@ test('buildRagQuery expands thrift family-style intent into classical family-rul
   expect(query.expansionTerms).toEqual(expect.arrayContaining([
     '节俭',
     '勤俭',
+    '勤儉',
     '节约',
     '家风',
+    '家風',
     '家训',
     '朱子治家格言',
     '一粥一饭',
+    '一粥一飯',
     '半丝半缕',
+    '半絲半縷',
     '物力维艰',
+    '物力維艱',
   ]))
   expect(query.expandedText).toContain('一粥一饭')
+  expect(query.expandedText).toContain('一粥一飯')
   expect(query.expandedText).toContain('半丝半缕')
+  expect(query.expandedText).toContain('半絲半縷')
 })
 
 test('enqueuePostRagJob records a pending async index job with fixed metadata', async () => {
@@ -115,7 +124,7 @@ test('processPostRagJobBatch chunks approved post content and upserts through pr
       status: 'active',
       widgets: [
         { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', showInList: true, order: 0 },
-        { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', showInList: true, order: 1 },
+        { widgetId: 'body', type: 'rich_text', label: '正文', fieldKey: 'body', showInList: true, order: 1, visibility: 'member' },
       ],
     })
   mockDb.updateById.mockResolvedValue({ stats: { updated: 1 } })
@@ -131,14 +140,141 @@ test('processPostRagJobBatch chunks approved post content and upserts through pr
       sectionId: 'section-1',
       fieldLabel: expect.stringMatching(/标题|正文/),
       sourceUpdatedAt: '2026-06-25T00:00:00.000Z',
-      visibility: 'member',
+      visibility: expect.any(String),
     }),
+  ]))
+  const chunks = (provider.upsertChunks as jest.Mock).mock.calls[0][0]
+  expect(chunks).toEqual(expect.arrayContaining([
+    expect.objectContaining({ fieldLabel: '标题', visibility: 'public' }),
+    expect.objectContaining({ fieldLabel: '正文', visibility: 'member' }),
   ]))
   expect(mockDb.updateById).toHaveBeenCalledWith(POST_RAG_INDEX_STATE, 'post-1', expect.objectContaining({
     status: 'indexed',
     chunkCount: expect.any(Number),
   }))
   expect(mockDb.updateById).toHaveBeenCalledWith(POST_RAG_JOBS, 'job-1', expect.objectContaining({
+    status: 'completed',
+  }))
+})
+
+test('processPostRagJobBatch creates index state when CloudBase update misses the document', async () => {
+  const provider = {
+    name: 'fake-rag',
+    isConfigured: jest.fn(() => true),
+    search: jest.fn(),
+    upsertChunks: jest.fn().mockResolvedValue(undefined),
+    deletePostChunks: jest.fn(),
+  }
+  mockDb.query.mockResolvedValue([
+    { _id: 'job-missing-state', postId: 'post-missing-state', action: 'upsert', attempts: 0 },
+  ])
+  mockDb.getById
+    .mockResolvedValueOnce({
+      _id: 'post-missing-state',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      authorId: 'user-1',
+      status: 'active',
+      auditStatus: 'pass',
+      content: { title: '明士课程', body: '一粥一饭，当思来处不易。' },
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z',
+    })
+    .mockResolvedValueOnce({
+      _id: 'section-1',
+      communityId: 'community-1',
+      name: '明士课堂',
+      type: 'evergreen',
+      status: 'active',
+      widgets: [
+        { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', showInList: true, order: 0 },
+        { widgetId: 'body', type: 'rich_text', label: '正文', fieldKey: 'body', showInList: true, order: 1 },
+      ],
+    })
+  mockDb.updateById
+    .mockResolvedValueOnce({ stats: { updated: 0 } })
+    .mockResolvedValueOnce({ stats: { updated: 1 } })
+  mockDb.create.mockResolvedValue('state-created')
+
+  await processPostRagJobBatch({ provider, limit: 1 })
+
+  expect(mockDb.create).toHaveBeenCalledWith(POST_RAG_INDEX_STATE, expect.objectContaining({
+    _id: 'post-missing-state',
+    postId: 'post-missing-state',
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    status: 'indexed',
+    chunkCount: expect.any(Number),
+  }))
+})
+
+test('processPostRagJobBatch records community metadata when delete jobs remove index state', async () => {
+  const provider = {
+    name: 'fake-rag',
+    isConfigured: jest.fn(() => true),
+    search: jest.fn(),
+    upsertChunks: jest.fn(),
+    deletePostChunks: jest.fn().mockResolvedValue(undefined),
+  }
+  mockDb.query.mockResolvedValue([
+    {
+      _id: 'job-delete',
+      postId: 'post-deleted',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      action: 'delete',
+      attempts: 0,
+    },
+  ])
+  mockDb.updateById
+    .mockResolvedValueOnce({ stats: { updated: 0 } })
+    .mockResolvedValueOnce({ stats: { updated: 1 } })
+  mockDb.create.mockResolvedValue('state-created')
+
+  await processPostRagJobBatch({ provider, limit: 1 })
+
+  expect(provider.deletePostChunks).toHaveBeenCalledWith('post-deleted')
+  expect(mockDb.create).toHaveBeenCalledWith(POST_RAG_INDEX_STATE, expect.objectContaining({
+    _id: 'post-deleted',
+    postId: 'post-deleted',
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    status: 'removed',
+  }))
+})
+
+test('processPostRagJobBatch treats missing posts as removed instead of failing stale upserts', async () => {
+  const provider = {
+    name: 'fake-rag',
+    isConfigured: jest.fn(() => true),
+    search: jest.fn(),
+    upsertChunks: jest.fn(),
+    deletePostChunks: jest.fn().mockResolvedValue(undefined),
+  }
+  mockDb.query.mockResolvedValue([
+    {
+      _id: 'job-stale-upsert',
+      postId: 'post-gone',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      action: 'upsert',
+      attempts: 0,
+    },
+  ])
+  mockDb.getById.mockRejectedValue(new Error('document.get:fail document with _id post-gone does not exist'))
+  mockDb.updateById.mockResolvedValue({ stats: { updated: 1 } })
+
+  const result = await processPostRagJobBatch({ provider, limit: 1 })
+
+  expect(result.results).toEqual([{ jobId: 'job-stale-upsert', ok: true }])
+  expect(provider.deletePostChunks).toHaveBeenCalledWith('post-gone')
+  expect(provider.upsertChunks).not.toHaveBeenCalled()
+  expect(mockDb.updateById).toHaveBeenCalledWith(POST_RAG_INDEX_STATE, 'post-gone', expect.objectContaining({
+    status: 'removed',
+    communityId: 'community-1',
+    sectionId: 'section-1',
+  }))
+  expect(mockDb.updateById).toHaveBeenCalledWith(POST_RAG_JOBS, 'job-stale-upsert', expect.objectContaining({
     status: 'completed',
   }))
 })
@@ -193,7 +329,7 @@ test('processPostRagJobBatch adds video metadata chunks and cost-gated analysis 
             title: '家风',
             description: '',
             fileID: 'cloud://env/posts/videos/family-video.mp4',
-            duration: 600,
+            duration: 96,
           },
         ],
       },
@@ -404,6 +540,9 @@ test('searchPostsWithRag drops member-only citations and generated answer for pu
     includeMemberOnly: false,
   }, { provider })
 
+  expect(provider.search).toHaveBeenCalledWith(expect.objectContaining({
+    includeMemberOnly: false,
+  }))
   expect(result.mode).toBe('rag')
   expect(result.answer).not.toContain('13800000000')
   expect(result.citations).toHaveLength(1)
@@ -415,7 +554,72 @@ test('hasRagEvidenceSignal rejects weak unrelated candidates and accepts real ev
   expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 0, rerankScore: -3 })).toBe(false)
   expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 1, rerankScore: -3 })).toBe(true)
   expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 0, rerankScore: 0.1 })).toBe(true)
-  expect(hasRagEvidenceSignal({ semanticScore: 0.5, lexicalScore: 0, rerankScore: -3 })).toBe(true)
+  expect(hasRagEvidenceSignal({ semanticScore: 0.5, lexicalScore: 0, rerankScore: -3 })).toBe(false)
+  expect(hasRagEvidenceSignal({ semanticScore: 0.5, lexicalScore: 0 })).toBe(true)
+})
+
+test('selectLkeapCandidateCitations keeps lexical evidence even when semantic candidates are ahead', () => {
+  const semanticOnly = Array.from({ length: 20 }, (_, index) => ({
+    postId: `semantic-${index}`,
+    chunkId: `semantic-chunk-${index}`,
+    communityId: 'community-1',
+    title: `semantic ${index}`,
+    fieldLabel: '正文',
+    fieldType: 'rich_note',
+    preview: '普通内容',
+    score: 0.9 - index * 0.01,
+    semanticScore: 0.9 - index * 0.01,
+    lexicalScore: 0,
+  }))
+  const lexicalEvidence = {
+    postId: 'thrift-post',
+    chunkId: 'thrift-chunk',
+    communityId: 'community-1',
+    title: '第50次明士课程资料',
+    fieldLabel: '图文资料',
+    fieldType: 'rich_note',
+    preview: '一粥一飯，當思來處不易；半絲半縷，恆念物力維艱。',
+    score: 0.2,
+    semanticScore: 0.2,
+    lexicalScore: 3,
+  }
+
+  const selected = selectLkeapCandidateCitations([...semanticOnly, lexicalEvidence], 5)
+
+  expect(selected.some((citation) => citation.chunkId === 'thrift-chunk')).toBe(true)
+})
+
+test('rankLkeapEvidenceCitations drops negative rerank noise and keeps lexical evidence first', () => {
+  const ranked = rankLkeapEvidenceCitations([
+    {
+      postId: 'noise-post',
+      chunkId: 'noise-chunk',
+      communityId: 'community-1',
+      title: 'tst',
+      fieldLabel: '标题',
+      fieldType: 'short_text',
+      preview: 'tst',
+      score: -1,
+      semanticScore: 0.55,
+      lexicalScore: 0,
+      rerankScore: -4.9,
+    },
+    {
+      postId: 'thrift-post',
+      chunkId: 'thrift-chunk',
+      communityId: 'community-1',
+      title: '第50次明士课程资料',
+      fieldLabel: '图文资料',
+      fieldType: 'rich_note',
+      preview: '一粥一飯，當思來處不易；半絲半縷，恆念物力維艱。',
+      score: -3,
+      semanticScore: 0.2,
+      lexicalScore: 3,
+      rerankScore: -5.5,
+    },
+  ], 5)
+
+  expect(ranked.map((citation) => citation.chunkId)).toEqual(['thrift-chunk'])
 })
 
 test('createTencentRagProviderFromEnv selects LKEAP provider when configured', () => {
@@ -585,7 +789,7 @@ test('planVideoRagAnalysisJobsForPost queues only low-text missing-cache videos 
     source: 'cos',
     title: '家风',
     fileID: 'cloud://env/posts/videos/short.mp4',
-    duration: 600,
+    duration: 96,
   }
   const describedVideo = {
     itemId: 'video-described',
@@ -643,6 +847,44 @@ test('planVideoRagAnalysisJobsForPost queues only low-text missing-cache videos 
   }))
 })
 
+test('planVideoRagAnalysisJobsForPost does not queue ASR when video duration exceeds the ASR budget', () => {
+  const section = {
+    _id: 'section-1',
+    communityId: 'community-1',
+    name: '家风课堂',
+    widgets: [
+      { widgetId: 'videos', type: 'video_group', label: '视频', fieldKey: 'videos', required: false, showInList: false, order: 1 },
+    ],
+  } as any
+  const post = {
+    _id: 'post-video',
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    content: {
+      videos: [{
+        itemId: 'video-long',
+        source: 'cos',
+        title: '家风',
+        fileID: 'cloud://env/posts/videos/long.mp4',
+        duration: 3600,
+      }],
+    },
+  } as any
+
+  const jobs = planVideoRagAnalysisJobsForPost(post, section, {
+    policy: {
+      analysisEnabled: true,
+      maxJobsPerPost: 1,
+      maxCostUnitsPerPost: 8,
+      maxFramesPerVideo: 0,
+      maxAsrSecondsPerVideo: 120,
+      minMetadataTextCharsForAnalysis: 24,
+    },
+  })
+
+  expect(jobs).toEqual([])
+})
+
 test('readVideoRagCostPolicyFromEnv allows explicit one-hour ASR analysis budget', () => {
   const policy = readVideoRagCostPolicyFromEnv({
     POST_VIDEO_RAG_ANALYSIS_ENABLED: 'true',
@@ -692,6 +934,7 @@ test('processPostVideoRagJobBatch caches analyzer output and requeues post RAG i
         source: 'cos',
         title: '家风',
         fileID: 'cloud://env/posts/videos/family-video.mp4',
+        duration: 96,
       },
     },
   ])
@@ -701,7 +944,18 @@ test('processPostVideoRagJobBatch caches analyzer output and requeues post RAG i
   })
   mockDb.create.mockResolvedValue('created')
 
-  const result = await processPostVideoRagJobBatch({ analyzer, limit: 1 })
+  const result = await processPostVideoRagJobBatch({
+    analyzer,
+    limit: 1,
+    policy: {
+      analysisEnabled: true,
+      maxJobsPerPost: 1,
+      maxCostUnitsPerPost: 8,
+      maxFramesPerVideo: 4,
+      maxAsrSecondsPerVideo: 120,
+      minMetadataTextCharsForAnalysis: 48,
+    },
+  })
 
   expect(result).toEqual({
     scannedCount: 1,
@@ -730,6 +984,61 @@ test('processPostVideoRagJobBatch caches analyzer output and requeues post RAG i
     action: 'upsert',
     reason: 'rag.video.analysis.ready',
     status: 'pending',
+  }))
+})
+
+test('processPostVideoRagJobBatch rejects legacy ASR jobs without duration before calling analyzer', async () => {
+  const analyzer = {
+    name: 'fake-asr-analyzer',
+    isConfigured: jest.fn(() => true),
+    analyze: jest.fn(),
+  }
+  mockDb.query.mockResolvedValue([
+    {
+      _id: 'video-job-legacy',
+      postId: 'post-video',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      cacheKey: 'vrk-video-legacy',
+      status: 'pending',
+      attempts: 0,
+      requestedAnalyses: ['asr'],
+      frameStrategy: { includeCover: false, maxFrames: 0, minSceneGapSeconds: 10 },
+      maxAsrSeconds: 3600,
+      estimatedCostUnits: 120,
+      video: {
+        itemId: 'video-legacy',
+        source: 'cos',
+        title: '未知时长视频',
+        fileID: 'cloud://env/posts/videos/legacy.mp4',
+        duration: 0,
+      },
+    },
+  ])
+  mockDb.updateById.mockResolvedValue({ stats: { updated: 1 } })
+
+  const result = await processPostVideoRagJobBatch({
+    analyzer,
+    limit: 1,
+    policy: {
+      analysisEnabled: true,
+      maxJobsPerPost: 1,
+      maxCostUnitsPerPost: 120,
+      maxFramesPerVideo: 0,
+      maxAsrSecondsPerVideo: 3600,
+      minMetadataTextCharsForAnalysis: 48,
+    },
+  })
+
+  expect(analyzer.analyze).not.toHaveBeenCalled()
+  expect(result.results).toEqual([{
+    jobId: 'video-job-legacy',
+    ok: false,
+    error: 'video_rag_asr_duration_unknown',
+  }])
+  expect(mockDb.updateById).toHaveBeenCalledWith(POST_VIDEO_RAG_JOBS, 'video-job-legacy', expect.objectContaining({
+    status: 'failed',
+    errorMessage: 'video_rag_asr_duration_unknown',
   }))
 })
 
@@ -762,6 +1071,7 @@ test('processPostVideoRagJobBatch keeps async ASR jobs processing without reinde
           source: 'cos',
           title: '家风课',
           fileID: 'cloud://env/posts/videos/family-video.mp4',
+          duration: 3600,
         },
       },
     ])
@@ -769,7 +1079,18 @@ test('processPostVideoRagJobBatch keeps async ASR jobs processing without reinde
   mockDb.updateById.mockResolvedValue({ stats: { updated: 1 } })
   mockDb.create.mockResolvedValue('created')
 
-  const result = await processPostVideoRagJobBatch({ analyzer, limit: 1 })
+  const result = await processPostVideoRagJobBatch({
+    analyzer,
+    limit: 1,
+    policy: {
+      analysisEnabled: true,
+      maxJobsPerPost: 1,
+      maxCostUnitsPerPost: 120,
+      maxFramesPerVideo: 0,
+      maxAsrSecondsPerVideo: 3600,
+      minMetadataTextCharsForAnalysis: 48,
+    },
+  })
 
   expect(result.results).toEqual([{ jobId: 'video-job-1', ok: true, pending: true }])
   expect(mockDb.updateById).toHaveBeenCalledWith(POST_VIDEO_RAG_JOBS, 'video-job-1', expect.objectContaining({

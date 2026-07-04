@@ -48,6 +48,14 @@
       </view>
 
       <view v-else class="form" :class="{ 'form--figma': isFigmaCreateMode }">
+        <view class="create-form-nav">
+          <button class="create-back" aria-label="返回" @tap="handleBackToSectionPicker">
+            <text>‹</text>
+          </button>
+          <text class="create-nav-title">{{ selectedSection.name || '发布' }}</text>
+          <view class="create-nav-spacer"></view>
+        </view>
+
         <view v-if="!isFigmaCreateMode" class="form-header">
           <text class="section-tag" @tap="handleBackToSectionPicker">← {{ selectedSection.name }}</text>
           <text v-if="isActivityInviteMode" class="invite-mode-tag">从攻略发起召集</text>
@@ -165,6 +173,7 @@ import {
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
+import { normalizeRouteUrl, openHierarchyParent } from '../../utils/hierarchy-nav'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -190,6 +199,7 @@ const CREATE_SECTION_EVENT = 'happyhome:create-section-intent'
 const isActivityInviteMode = ref(false)
 const activityInviteSourcePostId = ref('')
 const activityInviteLoading = ref(false)
+const createReturnTo = ref('')
 
 // 只允许在 active 板块发帖。dormant / archived 板块既无法发帖也无处展示（首页已过滤）。
 const activeSections = computed(() =>
@@ -390,23 +400,38 @@ function goOnboarding() {
   openOnboardingPreservingStack({ mode: 'discover' })
 }
 
-function selectSection(section: any) {
+function selectSection(section: any, options: { returnTo?: string } = {}) {
   if (isActivityInviteMode.value) return
   selectedSection.value = section
+  createReturnTo.value = normalizeRouteUrl(options.returnTo)
   Object.keys(formData).forEach((key) => delete formData[key])
 }
 
 function handleBackToSectionPicker() {
+  const returnTo = createReturnTo.value
+  if (returnTo) {
+    if (isActivityInviteMode.value) {
+      clearActivityInviteMode()
+    } else {
+      selectedSection.value = null
+      createReturnTo.value = ''
+      Object.keys(formData).forEach((key) => delete formData[key])
+    }
+    openHierarchyParent(returnTo)
+    return
+  }
   if (isActivityInviteMode.value) {
     clearActivityInviteMode()
     return
   }
   selectedSection.value = null
+  Object.keys(formData).forEach((key) => delete formData[key])
 }
 
 function clearActivityInviteMode() {
   isActivityInviteMode.value = false
   activityInviteSourcePostId.value = ''
+  createReturnTo.value = ''
   selectedSection.value = null
   Object.keys(formData).forEach((key) => delete formData[key])
   try {
@@ -485,20 +510,22 @@ async function ensureSectionsLoaded() {
   } catch (_error) {}
 }
 
-function handleCreateSectionIntentEvent(payload?: { sectionId?: string }) {
+function handleCreateSectionIntentEvent(payload?: { sectionId?: string; returnTo?: string }) {
   void consumeCreateSectionIntent(payload)
 }
 
 function readCreateSectionIntent(options?: any) {
   const querySectionId = String(options?.sectionId || '').trim()
-  if (querySectionId) return { sectionId: querySectionId, removeStored: false }
+  const queryReturnTo = String(options?.returnTo || '').trim()
+  if (querySectionId) return { sectionId: querySectionId, returnTo: queryReturnTo, removeStored: false }
 
   try {
     const saved = uni.getStorageSync(CREATE_SECTION_INTENT_KEY)
     const sectionId = String(saved?.sectionId || '').trim()
+    const returnTo = String(saved?.returnTo || '').trim()
     const createdAt = Number(saved?.createdAt || 0)
     if (sectionId && createdAt && Date.now() - createdAt <= CREATE_SECTION_INTENT_TTL_MS) {
-      return { sectionId, removeStored: true }
+      return { sectionId, returnTo, removeStored: true }
     }
     if (sectionId || createdAt) uni.removeStorageSync(CREATE_SECTION_INTENT_KEY)
   } catch (_error) {}
@@ -512,7 +539,7 @@ async function consumeCreateSectionIntent(options?: any) {
   await ensureSectionsLoaded()
   const target = activeSections.value.find((section: any) => String(section?._id || '') === intent.sectionId)
   if (!target) return
-  selectSection(target)
+  selectSection(target, { returnTo: intent.returnTo })
   if (intent.removeStored) {
     try {
       uni.removeStorageSync(CREATE_SECTION_INTENT_KEY)
@@ -523,15 +550,17 @@ async function consumeCreateSectionIntent(options?: any) {
 function readActivityInviteIntent(options?: any) {
   const queryMode = String(options?.mode || '')
   const querySourcePostId = String(options?.sourcePostId || '').trim()
+  const queryReturnTo = String(options?.returnTo || '').trim()
   if (queryMode === 'activityInvite' && querySourcePostId) {
-    return { sourcePostId: querySourcePostId }
+    return { sourcePostId: querySourcePostId, returnTo: queryReturnTo }
   }
   try {
     const saved = uni.getStorageSync(ACTIVITY_INVITE_CREATE_INTENT_KEY)
     const sourcePostId = String(saved?.sourcePostId || '').trim()
+    const returnTo = String(saved?.returnTo || '').trim()
     const createdAt = Number(saved?.createdAt || 0)
     if (sourcePostId && Date.now() - createdAt <= ACTIVITY_INVITE_INTENT_TTL_MS) {
-      return { sourcePostId }
+      return { sourcePostId, returnTo }
     }
     if (sourcePostId) uni.removeStorageSync(ACTIVITY_INVITE_CREATE_INTENT_KEY)
   } catch {}
@@ -558,6 +587,7 @@ async function consumeActivityInviteIntent(options?: any) {
     }
     isActivityInviteMode.value = true
     activityInviteSourcePostId.value = intent.sourcePostId
+    createReturnTo.value = normalizeRouteUrl(intent.returnTo)
     selectedSection.value = {
       ...targetSection,
       _id: targetSection._id || targetSection.sectionId || 'activity_invite_virtual',
@@ -647,6 +677,7 @@ async function handleAuditSubmitResult(result: any) {
   }
 
   selectedSection.value = null
+  createReturnTo.value = ''
   uni.switchTab({ url: '/pages/index/index' })
 }
 
@@ -772,6 +803,51 @@ async function handleSubmit() {
   align-items: center;
   gap: $hh-space-sm;
   flex-wrap: wrap;
+}
+
+.create-form-nav {
+  height: 88rpx;
+  margin: -24rpx -32rpx 24rpx;
+  padding: 0 28rpx;
+  display: grid;
+  grid-template-columns: 64rpx 1fr 64rpx;
+  align-items: center;
+  background: var(--hh-color-card);
+  border-bottom: 1rpx solid var(--hh-color-line-soft);
+  box-sizing: border-box;
+}
+
+.create-back {
+  width: 64rpx;
+  height: 64rpx;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--hh-color-text-primary);
+  font-size: 52rpx;
+  line-height: 64rpx;
+  text-align: left;
+}
+
+.create-back::after {
+  border: 0;
+}
+
+.create-nav-title {
+  min-width: 0;
+  text-align: center;
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-heading-sm-size);
+  line-height: var(--hh-text-heading-sm-line);
+  font-weight: $hh-font-weight-bold;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.create-nav-spacer {
+  width: 64rpx;
+  height: 64rpx;
 }
 
 .invite-mode-tag {
