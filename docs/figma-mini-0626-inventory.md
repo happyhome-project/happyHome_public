@@ -90,8 +90,8 @@
 ## 逐页验收状态
 
 - Banner / 格言 / HomeBanner 数据结构：已作为独立功能线进入 `origin/main`，不混入本轮小程序 Figma UI 改版。
-- 首页：已用 Figma MCP 读取 `效果图` 总览和首页区域；H5 fixture 覆盖阳光花园社区、格言、双 Banner、通知公告、我的组局、亲子出游双列 Feed。2026-07-02 修复首页 Banner 多图时 H5 露底风险，改为自有 active-slide 渲染，保留左右滑切换和红点。截图证据包括 `output/playwright/figma-pages/home.png`、`output/playwright/home-figma-guide-feed-images.png`、`output/playwright/home-banner-clean.png`（验证产物不提交）。
-- 发布：已用 Figma MCP/Dev Mode 确认 `3.1.发布`、`3.2.亲子出游`、`3.3.其他组件`；2026-07-02 H5 390x844 复核发布弹层按真实阳光花园数据过滤为 6 个可发布入口，排除 `activity_invite` / `我的组局` 这类首页聚合入口。发布弹层实测高度 324px；亲子出游发布表单首卡按 MCP 对齐为 412px，正文输入区 200px，首卡到目的地行间距 12px。发布页对名称明确为亲子出游/路线攻略的板块采用攻略表单兜底：首屏为封面/标题/正文主卡、目的地、两步路编号、路线数据和底部固定操作区；攻略正文使用 Figma 极简输入态，不显示 Markdown 工具栏。
+- 首页：已用 Figma MCP 读取 `效果图` 总览和首页区域；H5 fixture 覆盖阳光花园社区、格言、双 Banner、通知公告、活动召集、亲子出游双列 Feed。2026-07-02 修复首页 Banner 多图时 H5 露底风险，改为自有 active-slide 渲染，保留左右滑切换和红点。截图证据包括 `output/playwright/figma-pages/home.png`、`output/playwright/home-figma-guide-feed-images.png`、`output/playwright/home-banner-clean.png`（验证产物不提交）。
+- 发布：已用 Figma MCP/Dev Mode 确认 `3.1.发布`、`3.2.亲子出游`、`3.3.其他组件`；2026-07-02 H5 390x844 复核发布弹层按真实阳光花园数据过滤为 6 个可发布入口，排除 `activity_invite` / `活动召集` 这类首页聚合入口。发布弹层实测高度 324px；亲子出游发布表单首卡按 MCP 对齐为 412px，正文输入区 200px，首卡到目的地行间距 12px。发布页对名称明确为亲子出游/路线攻略的板块采用攻略表单兜底：首屏为封面/标题/正文主卡、目的地、两步路编号、路线数据和底部固定操作区；攻略正文使用 Figma 极简输入态，不显示 Markdown 工具栏。
 - 详情：已用 Figma MCP/Dev Mode 确认 `2.5.1.详情`；H5 fixture 验证亲子出游路线详情大图约 603px、数据卡约 82px、位置卡约 84px，接近 Figma 402px 画板下的 623px / 79px / 84px；默认详情另按 Annotation 规则验证顶部只保留板块名、lead 独立小框、作者与发布日期沉到底部。
 - 搜索：已用 Figma MCP/Dev Mode 确认 `2.6.1.全局搜索`、`2.6.2.全局搜索-有结果`、`2.6.3.全局搜索-无结果`；H5 390x844 验证初始态大搜索框、历史/猜你找、结果卡和空态。结果态按 MCP 对齐 nav 116px、卡片 y=128px、封面 158px；在后端 search 索引无结果时，会用同社区 bootstrap 可见帖子做一次客户端兜底，避免“首页有内容但搜索无卡片”的体验断层。
 - 我的：已用 Figma MCP/Dev Mode 确认 `4.1.我的`、`4.2.我的-未登录`；2026-07-02 H5 390x844 验证登录态与未登录态：头像 64px、用户/登录区约 100px、快捷卡约 76px、功能宫格约 180px、主/次按钮约 48px。截图保存于 `output/figma-profile-logged-in.png`、`output/figma-profile-logged-out.png`（验证产物不提交）。H5 直接刷新时如本地账号没有当前社区，会显示 `暂无社区`，这是本地测试状态而非视觉结构问题。

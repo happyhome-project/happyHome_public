@@ -1,14 +1,22 @@
+import { COMMUNITY_SHARE_FROM, normalizeCommunityShareId } from './community-share'
+
 type OnboardingMode = 'auto' | 'discover'
 
 type OpenOnboardingOptions = {
   mode?: OnboardingMode
   replaceCurrent?: boolean
+  communityId?: string
 }
 
-function buildOnboardingUrl(mode?: OnboardingMode) {
-  return mode && mode !== 'auto'
-    ? `/pages/onboarding/index?mode=${encodeURIComponent(mode)}`
-    : '/pages/onboarding/index'
+function buildOnboardingUrl(mode?: OnboardingMode, communityId?: string) {
+  const params: string[] = []
+  if (mode && mode !== 'auto') params.push(`mode=${encodeURIComponent(mode)}`)
+  const targetCommunityId = normalizeCommunityShareId(communityId)
+  if (targetCommunityId) {
+    params.push(`communityId=${encodeURIComponent(targetCommunityId)}`)
+    params.push(`fromShare=${COMMUNITY_SHARE_FROM}`)
+  }
+  return params.length ? `/pages/onboarding/index?${params.join('&')}` : '/pages/onboarding/index'
 }
 
 function currentStackDepth() {
@@ -48,7 +56,7 @@ function redirectOrRelaunch(url: string) {
  * instead of dropping the user out of the mini-program.
  */
 export function openOnboardingPreservingStack(options: OpenOnboardingOptions = {}) {
-  const url = buildOnboardingUrl(options.mode)
+  const url = buildOnboardingUrl(options.mode, options.communityId)
   if (options.mode) {
     try {
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment

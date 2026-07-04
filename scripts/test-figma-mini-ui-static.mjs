@@ -12,6 +12,8 @@ function assert(condition, message) {
 }
 
 const app = read('miniprogram', 'src', 'App.vue')
+const pagesJson = read('miniprogram', 'src', 'pages.json')
+const pagesConfig = JSON.parse(pagesJson)
 const uniScss = read('miniprogram', 'src', 'uni.scss')
 const tabbar = read('miniprogram', 'src', 'components', 'AppTabBar.vue')
 const guideDetail = read('miniprogram', 'src', 'components', 'GuideRouteDetailView.vue')
@@ -23,6 +25,7 @@ const create = read('miniprogram', 'src', 'pages', 'create', 'index.vue')
 const profile = read('miniprogram', 'src', 'pages', 'profile', 'index.vue')
 const section = read('miniprogram', 'src', 'pages', 'section', 'index.vue')
 const figmaInventory = read('docs', 'figma-mini-0626-inventory.md')
+const retiredGroupTitle = ['我的', '组局'].join('')
 
 for (const token of [
   '--hh-color-brand-primary',
@@ -83,8 +86,11 @@ assert(
   create.includes('CREATE_SECTION_INTENT_KEY') &&
     create.includes('consumeCreateSectionIntent') &&
     create.includes('happyhome:create-section-intent') &&
-    create.includes('selectSection(target)'),
-  'create page should consume the selected publish section intent and land directly on the matching form.'
+    create.includes('createReturnTo') &&
+    create.includes('class="create-form-nav"') &&
+    create.includes('openHierarchyParent(returnTo)') &&
+    create.includes('selectSection(target, { returnTo: intent.returnTo })'),
+  'create page should consume the selected publish section intent, preserve its parent, and expose a real form-level back affordance.'
 )
 
 for (const [name, source] of [
@@ -140,6 +146,9 @@ assert(
 
 assert(
     home.includes('class="home-shell"') &&
+    home.includes('class="home-brandbar"') &&
+    home.includes('class="home-brand-title"') &&
+    home.includes('社群助手') &&
     home.includes('class="home-quote"') &&
     home.includes('quoteText') &&
     home.includes('placeholder="搜索帖子、正文、视频"') &&
@@ -156,11 +165,27 @@ assert(
     !home.includes('<swiper') &&
     home.includes('class="notice-board"') &&
     home.includes('noticeRows') &&
-    home.includes('我的组局') &&
+    home.includes('{{ notice.kind }}') &&
+    !home.includes('notice.sectionName || notice.label') &&
+    home.includes('活动召集') &&
     home.includes('class="group-card"') &&
     home.includes('class="section-tabs"') &&
     home.includes('class="home-search-box"') &&
+    home.includes('class="home-search-icon-ring"') &&
+    home.includes('class="home-search-icon-handle"') &&
+    home.includes('min-height: 90rpx;') &&
+    home.includes('padding: 0 8rpx 0 30rpx;') &&
+    home.includes('flex: 0 0 150rpx;') &&
+    home.includes('height: 75rpx;') &&
+    home.includes('font-weight: $hh-font-weight-medium;') &&
+    !home.includes('<text class="home-search-icon">⌕</text>') &&
     home.includes('class="guide-feed"') &&
+    home.includes('onPageScroll') &&
+    home.includes('restoreArchiveSwitchScroll') &&
+    home.includes('uni.pageScrollTo') &&
+    !home.includes('active-archive-head') &&
+    !home.includes('active-archive-count') &&
+    !home.includes('active-archive-arrow') &&
     home.includes('guideColumns') &&
     home.includes('selectArchiveGroup(g)') &&
     home.includes('GUIDE_NOTE_NAME_HINTS') &&
@@ -169,7 +194,14 @@ assert(
     home.includes('rawHomeGuideCoverImages') &&
     home.includes('resolveCloudFileUrls') &&
     !home.includes(`<template v-if="g.displayTemplate === 'guide_note'">`),
-  'home should follow Figma tabs plus two-column guide feed, including a narrow name-based guide fallback, instead of nesting guide posts inside single-column archive cards.'
+  'home should use the custom continuous Figma-style top area, tabs plus two-column guide feed, keep tab switching scroll-stable, and keep notice-board short labels controlled instead of binding long section names.'
+)
+
+assert(
+  pagesConfig.pages.some((page) =>
+    page.path === 'pages/index/index' && page.style?.navigationStyle === 'custom'
+  ),
+  'home page should use a custom navigation area so the title and hero background can visually connect instead of showing a white native bar.'
 )
 
 assert(
@@ -179,13 +211,29 @@ assert(
   'Figma inventory should document the new source-of-truth rule and homepage two-column guide feed.'
 )
 
+for (const [name, source] of [
+  ['home', home],
+  ['tabbar', tabbar],
+  ['Figma inventory', figmaInventory],
+]) {
+  assert(
+    !source.includes(retiredGroupTitle),
+    `${name} should use 活动召集 instead of the retired activity wording.`
+  )
+}
+
 assert(
   search.includes('class="search-nav"') &&
     search.includes('class="result-cover"') &&
     search.includes('resultAuthorAvatar') &&
     search.includes('avatar-') &&
-    search.includes('border: 3rpx solid var(--hh-color-brand-primary)'),
-  'search page should use the Figma search pill, large visual result card, and realistic fallback author avatars.'
+    search.includes('border: 3rpx solid var(--hh-color-brand-primary)') &&
+    !search.includes('search-capsule') &&
+    !search.includes('capsule-dot') &&
+    !search.includes('capsule-ring') &&
+    !search.includes('•••') &&
+    !search.includes('◎'),
+  'search page should use the Figma search pill and result card without drawing WeChat native capsule chrome.'
 )
 
 assert(

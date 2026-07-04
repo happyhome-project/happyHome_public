@@ -35,6 +35,18 @@ describe('openOnboardingPreservingStack', () => {
     expect(uniMock.reLaunch).not.toHaveBeenCalled()
   })
 
+  test('shared community onboarding keeps the share target while preserving stack', async () => {
+    const uniMock = installUniMock()
+    const { openOnboardingPreservingStack } = await loadNav()
+
+    openOnboardingPreservingStack({ mode: 'discover', communityId: 'community 1' })
+
+    expect(uniMock.navigateTo).toHaveBeenCalledWith(expect.objectContaining({
+      url: '/pages/onboarding/index?mode=discover&communityId=community%201&fromShare=community',
+    }))
+    expect(uniMock.reLaunch).not.toHaveBeenCalled()
+  })
+
   test('replace mode uses redirectTo so invalid current detail page is removed but lower stack remains', async () => {
     const uniMock = installUniMock()
     const { openOnboardingPreservingStack } = await loadNav()
