@@ -35,6 +35,12 @@ export interface RagCitation {
   sourceUpdatedAt?: string
 }
 
+export type ScoredRagCitation = RagCitation & {
+  semanticScore?: number
+  lexicalScore?: number
+  rerankScore?: number
+}
+
 export interface RagSearchResult extends PostSearchResult {
   answer: string
   citations: RagCitation[]
@@ -179,13 +185,22 @@ export interface TencentLkeapRagConfig {
 const THRIFT_FAMILY_EXPANSION = [
   '节俭',
   '勤俭',
+  '勤儉',
   '节约',
+  '節約',
   '家风',
+  '家風',
   '家训',
+  '家訓',
   '朱子治家格言',
   '一粥一饭',
+  '一粥一飯',
   '半丝半缕',
+  '半絲半縷',
   '物力维艰',
+  '物力維艱',
+  '俭约',
+  '儉約',
 ]
 const MIN_LKEAP_RERANK_EVIDENCE_SCORE = 0
 const MIN_LKEAP_SEMANTIC_EVIDENCE_SCORE = 0.42
@@ -606,11 +621,63 @@ export function hasRagEvidenceSignal(citation: {
   lexicalScore?: number
   rerankScore?: number
 }) {
-  return (
-    Number(citation.lexicalScore || 0) > 0 ||
-    Number(citation.rerankScore ?? Number.NEGATIVE_INFINITY) >= MIN_LKEAP_RERANK_EVIDENCE_SCORE ||
-    Number(citation.semanticScore || 0) >= MIN_LKEAP_SEMANTIC_EVIDENCE_SCORE
-  )
+  if (Number(citation.lexicalScore || 0) > 0) return true
+
+  const rerankScore = Number(citation.rerankScore)
+  if (Number.isFinite(rerankScore)) {
+    return rerankScore >= MIN_LKEAP_RERANK_EVIDENCE_SCORE
+  }
+
+  return Number(citation.semanticScore || 0) >= MIN_LKEAP_SEMANTIC_EVIDENCE_SCORE
+}
+
+export function selectLkeapCandidateCitations(citations: ScoredRagCitation[], limit?: number): ScoredRagCitation[] {
+  const candidateLimit = Math.max(10, Math.min(30, Number(limit || 20) * 3))
+  const lexicalCandidates = citations
+    .filter((citation) => Number(citation.lexicalScore || 0) > 0)
+    .sort((left, right) => (
+      Number(right.lexicalScore || 0) - Number(left.lexicalScore || 0) ||
+      Number(right.score || 0) - Number(left.score || 0)
+    ))
+    .slice(0, 50)
+  const semanticCandidates = citations
+    .slice()
+    .sort((left, right) => Number(right.score || 0) - Number(left.score || 0))
+
+  const selected = new Map<string, ScoredRagCitation>()
+  const add = (citation: ScoredRagCitation) => {
+    const key = citation.chunkId || `${citation.postId}:${citation.fieldLabel}:${citation.preview}`
+    if (!selected.has(key)) selected.set(key, citation)
+  }
+  lexicalCandidates.forEach(add)
+
+  const targetSize = Math.max(candidateLimit, lexicalCandidates.length)
+  for (const citation of semanticCandidates) {
+    if (selected.size >= targetSize) break
+    add(citation)
+  }
+
+  return Array.from(selected.values())
+}
+
+export function rankLkeapEvidenceCitations(citations: ScoredRagCitation[], limit?: number): ScoredRagCitation[] {
+  const evidenceLimit = Math.max(5, Math.min(20, Number(limit || 20)))
+  return citations
+    .filter(hasRagEvidenceSignal)
+    .sort((left, right) => {
+      const leftLexical = Number(left.lexicalScore || 0) > 0 ? 1 : 0
+      const rightLexical = Number(right.lexicalScore || 0) > 0 ? 1 : 0
+      if (leftLexical !== rightLexical) return rightLexical - leftLexical
+
+      const leftRerank = Number(left.rerankScore)
+      const rightRerank = Number(right.rerankScore)
+      if (Number.isFinite(leftRerank) && Number.isFinite(rightRerank) && leftRerank !== rightRerank) {
+        return rightRerank - leftRerank
+      }
+
+      return Number(right.score || 0) - Number(left.score || 0)
+    })
+    .slice(0, evidenceLimit)
 }
 
 async function loadLkeapChunks(input: RagProviderSearchInput, pageSize: number, maxChunks: number) {
@@ -667,8 +734,6 @@ async function deleteCloudBaseRagChunksByPostId(postId: string) {
 }
 
 export function createTencentLkeapCloudBaseProvider(config: TencentLkeapRagConfig): TencentRagProvider {
-  type ScoredRagCitation = RagCitation & { semanticScore?: number; lexicalScore?: number; rerankScore?: number }
-
   const embed = async (text: string, textType: 'query' | 'document'): Promise<number[]> => {
     const response = await requestTencentLkeap<any>(config, 'GetEmbedding', {
       Model: config.embeddingModel,
@@ -725,15 +790,10 @@ export function createTencentLkeapCloudBaseProvider(config: TencentLkeapRagConfi
           }
         })
         .filter((citation) => citation.postId && citation.chunkId)
-        .sort((left, right) => right.score - left.score)
-        .slice(0, Math.max(10, Math.min(30, Number(input.limit || 20) * 3)))
+      citations = selectLkeapCandidateCitations(citations, input.limit)
 
       citations = await rerank(input.ragQuery.raw, citations)
-      citations = citations
-        .filter((citation: any, index) => (
-          index < Math.max(5, Math.min(20, Number(input.limit || 20))) &&
-          hasRagEvidenceSignal(citation)
-        ))
+      citations = rankLkeapEvidenceCitations(citations, input.limit)
       const generatedAnswer = citations.length ? await answer(input.query, citations).catch(() => '') : ''
       return {
         total: citations.length,
