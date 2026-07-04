@@ -165,7 +165,7 @@ import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { getGuideNoteCard, getPostHomeTitle } from '../../utils/widget'
-import { navigateBackOrHome } from '../../utils/hierarchy-nav'
+import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
 
 interface SearchField {
   fieldLabel: string
@@ -236,6 +236,7 @@ const communityName = computed(() => {
 })
 
 onLoad((options: any) => {
+  if (ensureHierarchyStack('/pages/search/index', options || {})) return
   communityId.value = decodeParam(options?.communityId) || communityStore.currentCommunityId || ''
   query.value = decodeParam(options?.q || options?.query)
   clientLog('info', 'search.onLoad', {
