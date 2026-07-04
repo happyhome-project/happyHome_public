@@ -4,6 +4,8 @@ import test from 'node:test'
 
 import { runPostRagRebuild } from '../rebuild-post-rag-index.mjs'
 
+const source = readFileSync(new URL('../rebuild-post-rag-index.mjs', import.meta.url), 'utf8')
+
 function payloadFromArgs(args) {
   const index = args.indexOf('-d')
   assert.notEqual(index, -1)
@@ -13,6 +15,11 @@ function payloadFromArgs(args) {
   }
   return JSON.parse(payloadArg)
 }
+
+test('rebuild-post-rag-index exposes a RAG-specific admin invoke retry env knob', () => {
+  assert.match(source, /HH_POST_RAG_REBUILD_ADMIN_INVOKE_RETRIES/)
+  assert.match(source, /admin-invoke-retries/)
+})
 
 function createMockRunner() {
   const calls = []
@@ -219,4 +226,61 @@ test('runPostRagRebuild with health reads RAG health without queueing jobs', asy
     || call.payload.workerToken
   )
   assert.equal(writeCalls.length, 0)
+})
+
+test('runPostRagRebuild retries transient admin invoke failures before giving up', async () => {
+  let communityListAttempts = 0
+  const runner = async (_command, args, runnerOptions = {}) => {
+    const payload = payloadFromArgs(args)
+    if (payload.action === 'community.list') {
+      communityListAttempts += 1
+      if (communityListAttempts === 1) {
+        return { status: 1, stdout: '', stderr: '[object Object]', options: runnerOptions }
+      }
+      return {
+        status: 0,
+        stdout: JSON.stringify({ communities: [{ _id: 'c-active-1', status: 'active' }] }),
+        stderr: '',
+      }
+    }
+    if (payload.action === 'post.ragIndexHealthAdmin') {
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          communityId: payload.communityId,
+          activePostCount: 1,
+          indexedStateCount: 1,
+          removedStateCount: 0,
+          failedStateCount: 0,
+          pendingJobCount: 0,
+          failedJobCount: 0,
+          potentialMissingActiveCount: 0,
+          coverageRatio: 1,
+        }),
+        stderr: '',
+      }
+    }
+    throw new Error(`unexpected action ${payload.action}`)
+  }
+
+  const summary = await runPostRagRebuild({
+    envId: 'env-x',
+    communityIds: [],
+    allActive: true,
+    dryRun: false,
+    help: false,
+    commandTimeoutMs: 999,
+    batchSize: 5,
+    processJobs: false,
+    workerRounds: 0,
+    workerToken: '',
+    includeDisabled: false,
+    reconcile: false,
+    health: true,
+    adminInvokeRetries: 2,
+  }, runner)
+
+  assert.equal(communityListAttempts, 2)
+  assert.equal(summary.totals.failedCommunityCount, 0)
+  assert.deepEqual(summary.communityIds, ['c-active-1'])
 })

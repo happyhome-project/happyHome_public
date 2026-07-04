@@ -44,6 +44,9 @@ assertIncludes(searchPage, 'v-if="searched && !loadError && mode !== \'no_answer
 assertIncludes(searchPage, "mode === 'no_answer' ? '没有找到足够相关的帖子'", 'search no-answer copy')
 assertIncludes(searchPage, 'class="citation-card"', 'search citation cards')
 assertIncludes(searchPage, '@tap="openPost(citation.postId)"', 'search citation navigation')
+assertIncludes(searchPage, 'v-if="items.length && mode !== \'fallback\'"', 'fallback mode must not render ordinary result cards as RAG results')
+assertNotIncludes(searchPage, '当前显示基础搜索结果', 'fallback mode must not claim ordinary search results are shown')
+assertIncludes(searchPage, '智能检索暂不可用，请稍后重试。', 'fallback mode copy should match empty fallback result contract')
 assertIncludes(searchPage, '@tap="openPost(item.postId)"', 'search result navigation')
 
 assertIncludes(cloudApi, 'answer: string', 'post.search answer type')

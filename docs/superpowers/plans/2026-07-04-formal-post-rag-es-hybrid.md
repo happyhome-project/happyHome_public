@@ -26,14 +26,14 @@ The formal design needs CloudBase to own business data, jobs, and index state, w
 
 1. Add failing tests for the formal provider contract.
    - `createTencentRagProviderFromEnv` must keep ES as the formal provider even if an old `TENCENT_RAG_PROVIDER=lkeap` value remains.
-   - LKEAP CloudBase scan is allowed only through explicit `TENCENT_RAG_PROVIDER=lkeap-cloudbase`.
+   - LKEAP CloudBase scan is allowed only through explicit `TENCENT_RAG_PROVIDER=lkeap-cloudbase` plus `HAPPYHOME_ALLOW_LEGACY_CLOUDBASE_RAG=1`.
    - `TencentRagProvider.search` must send ES `retriever.rank_fusion` instead of top-level `query + knn`.
    - Weak rerank/no-lexical candidates must be filtered before LLM generation.
 
 2. Change runtime provider selection.
    - Default and `es` both resolve to `tencent-es-ai-search`.
    - Legacy `lkeap` no longer selects CloudBase chunk scanning.
-   - `lkeap-cloudbase` remains as a deliberate debug/escape provider.
+   - `lkeap-cloudbase` remains as a deliberate debug/escape provider only when `HAPPYHOME_ALLOW_LEGACY_CLOUDBASE_RAG=1`.
 
 3. Change ES search body.
    - Build a `rank_fusion` retriever with one `standard` full-text retriever and one `knn` retriever when the query embedding exists.

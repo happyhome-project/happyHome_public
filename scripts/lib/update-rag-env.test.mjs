@@ -24,3 +24,25 @@ test('update-rag-env configures Tencent ES AI Search as the formal post RAG prov
   assert.match(source, /TENCENT_RAG_LLM_INFERENCE_ID/)
   assert.doesNotMatch(source, /TENCENT_RAG_PROVIDER:\s*'lkeap'/)
 })
+
+test('update-rag-env carries cost-controlled video ASR policy into RAG workers', () => {
+  assert.match(source, /videoPolicyEnv/)
+  assert.match(source, /videoAnalyzerEnv/)
+  assert.match(source, /POST_VIDEO_RAG_ANALYSIS_ENABLED/)
+  assert.match(source, /POST_VIDEO_RAG_ASR_SECRET_ID/)
+  assert.match(source, /POST_VIDEO_RAG_ASR_SECRET_KEY/)
+  assert.match(source, /POST_VIDEO_RAG_MAX_JOBS_PER_POST/)
+  assert.match(source, /POST_VIDEO_RAG_MAX_FRAMES_PER_VIDEO/)
+  assert.match(source, /POST_VIDEO_RAG_MAX_ASR_SECONDS_PER_VIDEO/)
+  assert.match(source, /POST_VIDEO_RAG_MAX_COST_UNITS_PER_POST/)
+  assert.match(source, /POST_VIDEO_RAG_MIN_TEXT_CHARS_FOR_ANALYSIS/)
+  assert.match(source, /functionName === 'post-video-rag-worker'\s*\?\s*\{ \.\.\.targetEnv, \.\.\.workerEnv, \.\.\.videoPolicyEnv, \.\.\.videoAnalyzerEnv \}/)
+})
+
+test('update-rag-env retries transient Tencent Cloud API failures', () => {
+  assert.match(source, /TENCENT_RAG_HTTP_RETRIES/)
+  assert.match(source, /withTransientRetry/)
+  assert.match(source, /ECONNRESET|ETIMEDOUT|TLS connection|socket disconnected|ENOTFOUND|EAI_AGAIN/)
+  assert.match(source, /getFunctionDetail/)
+  assert.match(source, /updateFunctionConfig/)
+})

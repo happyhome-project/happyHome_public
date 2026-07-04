@@ -79,8 +79,8 @@
         <text class="answer-text">{{ answer }}</text>
       </view>
       <view v-else-if="mode === 'fallback'" class="answer-card muted">
-        <text class="answer-label">普通搜索</text>
-        <text class="answer-text">智能检索暂不可用，当前显示基础搜索结果。</text>
+        <text class="answer-label">智能检索暂不可用</text>
+        <text class="answer-text">智能检索暂不可用，请稍后重试。</text>
       </view>
 
       <view v-if="citations.length" class="citation-list">
@@ -109,7 +109,7 @@
       <text class="empty-desc">{{ mode === 'no_answer' ? '换个关键词，或试试搜索正文/视频内容' : '换个关键词试试' }}</text>
     </view>
 
-    <view v-if="items.length" class="result-list">
+    <view v-if="items.length && mode !== 'fallback'" class="result-list">
       <view
         v-for="item in items"
         :key="item.postId"

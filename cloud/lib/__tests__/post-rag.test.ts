@@ -28,6 +28,7 @@ import {
   POST_RAG_CHUNKS,
   POST_RAG_INDEX_STATE,
   POST_RAG_JOBS,
+  POST_RAG_WORKER_STATE,
   POST_VIDEO_RAG_ASSETS,
   POST_VIDEO_RAG_JOBS,
   processPostRagJobBatch,
@@ -551,7 +552,7 @@ test('reconcilePostRagJobsForCommunityBatch queues only missing stale and remova
   expect(mockDb.create).toHaveBeenCalledTimes(3)
 })
 
-test('getPostRagIndexHealthForCommunity exposes source coverage and job backlog counts', async () => {
+test('getPostRagIndexHealthForCommunity exposes source coverage, backlog, and worker state', async () => {
   mockDb.count
     .mockResolvedValueOnce(6)
     .mockResolvedValueOnce(4)
@@ -559,6 +560,20 @@ test('getPostRagIndexHealthForCommunity exposes source coverage and job backlog 
     .mockResolvedValueOnce(1)
     .mockResolvedValueOnce(2)
     .mockResolvedValueOnce(1)
+  mockDb.query
+    .mockResolvedValueOnce([{ indexedAt: '2026-07-05T08:00:00.000Z' }])
+    .mockResolvedValueOnce([{ createdAt: '2026-07-05T07:30:00.000Z' }])
+    .mockResolvedValueOnce([{ updatedAt: '2026-07-05T07:45:00.000Z' }])
+  mockDb.getById.mockResolvedValueOnce({
+    _id: 'post-rag-worker',
+    status: 'completed_with_errors',
+    lastRunAt: '2026-07-05T08:01:00.000Z',
+    lastCompletedAt: '2026-07-05T08:02:00.000Z',
+    lastScannedCount: 3,
+    lastOkCount: 2,
+    lastFailedCount: 1,
+    lastErrorMessage: 'es_timeout',
+  })
 
   const result = await getPostRagIndexHealthForCommunity('community-1')
 
@@ -572,6 +587,20 @@ test('getPostRagIndexHealthForCommunity exposes source coverage and job backlog 
     failedJobCount: 1,
     potentialMissingActiveCount: 2,
     coverageRatio: 4 / 6,
+    latestIndexedAt: '2026-07-05T08:00:00.000Z',
+    oldestPendingJobCreatedAt: '2026-07-05T07:30:00.000Z',
+    latestFailedJobUpdatedAt: '2026-07-05T07:45:00.000Z',
+    readyForRag: false,
+    hasBlockingIssues: true,
+    worker: {
+      status: 'completed_with_errors',
+      lastRunAt: '2026-07-05T08:01:00.000Z',
+      lastCompletedAt: '2026-07-05T08:02:00.000Z',
+      lastScannedCount: 3,
+      lastOkCount: 2,
+      lastFailedCount: 1,
+      lastErrorMessage: 'es_timeout',
+    },
   })
   expect(mockDb.count).toHaveBeenNthCalledWith(1, 'posts', {
     communityId: 'community-1',
@@ -585,44 +614,109 @@ test('getPostRagIndexHealthForCommunity exposes source coverage and job backlog 
     communityId: 'community-1',
     status: 'pending',
   })
+  expect(mockDb.query).toHaveBeenNthCalledWith(1, POST_RAG_INDEX_STATE, {
+    communityId: 'community-1',
+    status: 'indexed',
+  }, { orderBy: ['indexedAt', 'desc'], limit: 1 })
+  expect(mockDb.query).toHaveBeenNthCalledWith(2, POST_RAG_JOBS, {
+    communityId: 'community-1',
+    status: 'pending',
+  }, { orderBy: ['createdAt', 'asc'], limit: 1 })
+  expect(mockDb.query).toHaveBeenNthCalledWith(3, POST_RAG_JOBS, {
+    communityId: 'community-1',
+    status: 'failed',
+  }, { orderBy: ['updatedAt', 'desc'], limit: 1 })
+  expect(mockDb.getById).toHaveBeenCalledWith(POST_RAG_WORKER_STATE, 'post-rag-worker')
 })
 
-test('searchPostsWithRag falls back explicitly when Tencent RAG provider is not configured', async () => {
+test('searchPostsWithRag does not use CloudBase fallback items when Tencent RAG provider is not configured', async () => {
+  const fallbackSearch = jest.fn(async () => ({
+    query: '有没有讲节俭家风的帖子？',
+    communityId: 'community-1',
+    sectionId: '',
+    total: 1,
+    skip: 0,
+    limit: 10,
+    items: [
+      {
+        postId: 'post-1',
+        communityId: 'community-1',
+        sectionId: 'section-1',
+        sectionName: '论语',
+        title: '朱子治家格言',
+        score: 12,
+        matchedFields: [
+          { fieldLabel: '正文', fieldType: 'rich_note', preview: '一粥一饭，当思来处不易。' },
+        ],
+        createdAt: '2026-06-25T00:00:00.000Z',
+        updatedAt: '2026-06-25T00:00:00.000Z',
+      },
+    ],
+  }))
+
   const result = await searchPostsWithRag({
     communityId: 'community-1',
     query: '有没有讲节俭家风的帖子？',
     limit: 10,
   }, {
     provider: null,
-    fallbackSearch: async () => ({
-      query: '有没有讲节俭家风的帖子？',
-      communityId: 'community-1',
-      sectionId: '',
-      total: 1,
-      skip: 0,
-      limit: 10,
-      items: [
-        {
-          postId: 'post-1',
-          communityId: 'community-1',
-          sectionId: 'section-1',
-          sectionName: '论语',
-          title: '朱子治家格言',
-          score: 12,
-          matchedFields: [
-            { fieldLabel: '正文', fieldType: 'rich_note', preview: '一粥一饭，当思来处不易。' },
-          ],
-          createdAt: '2026-06-25T00:00:00.000Z',
-          updatedAt: '2026-06-25T00:00:00.000Z',
-        },
-      ],
-    }),
+    fallbackSearch,
   })
 
   expect(result.mode).toBe('fallback')
   expect(result.answer).toBe('')
   expect(result.citations).toEqual([])
-  expect(result.items[0].postId).toBe('post-1')
+  expect(result.items).toEqual([])
+  expect(result.total).toBe(0)
+  expect(result.fallbackReason).toBe('rag_provider_not_configured')
+  expect(fallbackSearch).not.toHaveBeenCalled()
+})
+
+test('searchPostsWithRag does not leak CloudBase fallback items when ES provider fails', async () => {
+  const provider = {
+    name: 'fake-es',
+    isConfigured: jest.fn(() => true),
+    search: jest.fn(async () => {
+      throw new Error('es_timeout')
+    }),
+  }
+  const fallbackSearch = jest.fn(async () => ({
+    query: '勤俭持家',
+    communityId: 'community-1',
+    sectionId: '',
+    total: 1,
+    skip: 0,
+    limit: 10,
+    items: [
+      {
+        postId: 'noise-post',
+        communityId: 'community-1',
+        sectionId: 'section-1',
+        sectionName: '物品转让',
+        title: '实木书桌 + 椅子',
+        score: 1,
+        matchedFields: [{ fieldLabel: '标题', fieldType: 'short_text', preview: '实木书桌 + 椅子' }],
+        createdAt: '2026-06-25T00:00:00.000Z',
+        updatedAt: '2026-06-25T00:00:00.000Z',
+      },
+    ],
+  }))
+
+  const result = await searchPostsWithRag({
+    communityId: 'community-1',
+    query: '勤俭持家',
+    limit: 10,
+  }, { provider, fallbackSearch })
+
+  expect(result).toEqual(expect.objectContaining({
+    mode: 'fallback',
+    answer: '',
+    citations: [],
+    items: [],
+    total: 0,
+    fallbackReason: 'es_timeout',
+  }))
+  expect(fallbackSearch).not.toHaveBeenCalled()
 })
 
 test('searchPostsWithRag returns no_answer instead of inventing an answer without citations', async () => {
@@ -701,7 +795,8 @@ test('hasRagEvidenceSignal rejects weak unrelated candidates and accepts real ev
   expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 0, rerankScore: -3 })).toBe(false)
   expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 1, rerankScore: -3 })).toBe(true)
   expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 0, rerankScore: 0.1 })).toBe(false)
-  expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 0, rerankScore: 0.55 })).toBe(true)
+  expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 0, rerankScore: 0.55 })).toBe(false)
+  expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 0, rerankScore: 0.73 })).toBe(true)
   expect(hasRagEvidenceSignal({ semanticScore: 0.5, lexicalScore: 0, rerankScore: 0.1 })).toBe(false)
   expect(hasRagEvidenceSignal({ semanticScore: 0.5, lexicalScore: 0, rerankScore: -3 })).toBe(false)
   expect(hasRagEvidenceSignal({ semanticScore: 0.5, lexicalScore: 0 })).toBe(true)
@@ -771,17 +866,24 @@ test('rankLkeapEvidenceCitations drops negative rerank noise and keeps lexical e
   expect(ranked.map((citation) => citation.chunkId)).toEqual(['thrift-chunk'])
 })
 
-test('createTencentRagProviderFromEnv selects LKEAP provider when configured', () => {
+test('createTencentRagProviderFromEnv keeps ES as the formal provider even when legacy CloudBase RAG is configured', () => {
   const previousEnv = { ...process.env }
   try {
     process.env.TENCENT_RAG_PROVIDER = 'lkeap-cloudbase'
     process.env.TENCENTCLOUD_SECRETID = 'AKIDtest'
     process.env.TENCENTCLOUD_SECRETKEY = 'secret-test'
     process.env.TENCENT_LKEAP_REGION = 'ap-guangzhou'
+    process.env.TENCENT_RAG_ES_ENDPOINT = 'https://es.example.com'
+    process.env.TENCENT_RAG_ES_USERNAME = 'elastic'
+    process.env.TENCENT_RAG_ES_PASSWORD = 'secret-test'
+    process.env.TENCENT_RAG_INDEX_NAME = 'happyhome_post_rag_chunks'
+    process.env.TENCENT_RAG_EMBEDDING_INFERENCE_ID = 'embedding-endpoint'
+    process.env.TENCENT_RAG_RERANK_INFERENCE_ID = 'rerank-endpoint'
+    process.env.TENCENT_RAG_LLM_INFERENCE_ID = 'llm-endpoint'
 
     const provider = createTencentRagProviderFromEnv()
 
-    expect(provider.name).toBe('tencent-lkeap-cloudbase')
+    expect(provider.name).toBe('tencent-es-ai-search')
     expect(provider.isConfigured()).toBe(true)
   } finally {
     process.env = previousEnv
@@ -915,6 +1017,73 @@ test('Tencent ES provider uses rank_fusion hybrid retrieval and filters weak evi
     expect.stringContaining('_inference/completion/'),
     expect.any(Object),
   )
+})
+
+test('Tencent ES provider builds citation evidence from the full chunk text, not the stale preview', async () => {
+  const requestJson = jest.fn(async (_config: any, _method: string, path: string, body?: any) => {
+    if (path.startsWith('_inference/text_embedding/')) {
+      return { embedding: [{ result: [0.11, 0.22, 0.33] }] }
+    }
+    if (path.endsWith('/_search')) {
+      return {
+        hits: {
+          total: { value: 1 },
+          hits: [{
+            _id: 'long-thrift-chunk',
+            _score: 12,
+            _source: {
+              postId: 'thrift-post',
+              chunkId: 'long-thrift-chunk',
+              communityId: 'community-1',
+              sectionId: 'section-1',
+              sectionName: '明士班',
+              title: '第50次明士课程资料',
+              fieldLabel: '图文资料',
+              fieldType: 'rich_note',
+              preview: '课程材料摘要，包含古代家训节选。',
+              text: '课程材料摘要，包含古代家训节选。前文较长，用于模拟固定 preview 没有覆盖命中位置。后文引用朱子治家格言：一粥一饭，当思来处不易；半丝半缕，恒念物力维艰，并讨论勤俭持家。',
+              visibility: 'public',
+              sourceUpdatedAt: '2026-06-25T00:00:00.000Z',
+            },
+          }],
+        },
+      }
+    }
+    if (path.startsWith('_inference/rerank/')) {
+      expect(body.input[0]).toContain('一粥一饭')
+      return { rerank: [{ index: 0, relevance_score: 0.91 }] }
+    }
+    if (path.startsWith('_inference/completion/')) {
+      expect(body.input).toContain('一粥一饭')
+      return { completion: [{ result: '有，相关帖子引用了朱子治家格言来讲勤俭持家。' }] }
+    }
+    throw new Error(`unexpected request path: ${path}`)
+  })
+  const provider = createTencentRagProvider({
+    endpoint: 'https://es.example.com',
+    username: 'elastic',
+    password: 'secret-test',
+    indexName: 'happyhome_post_rag_chunks',
+    vectorField: 'embedding',
+    embeddingInferenceId: 'embedding-endpoint',
+    rerankInferenceId: 'rerank-endpoint',
+    llmInferenceId: 'llm-endpoint',
+  }, { requestJson: requestJson as any })
+
+  const result = await provider.search({
+    communityId: 'community-1',
+    sectionId: '',
+    query: '勤俭持家',
+    skip: 0,
+    limit: 10,
+    includeMemberOnly: false,
+    ragQuery: buildRagQuery('勤俭持家'),
+  })
+
+  expect(result.citations).toHaveLength(1)
+  expect(result.citations[0].preview).toContain('一粥一饭')
+  expect(result.citations[0].preview).toContain('勤俭持家')
+  expect(result.answer).toContain('朱子治家格言')
 })
 
 test('Tencent ES provider can use Tencent atomic APIs for embedding rerank and answer without ES inference endpoints', async () => {

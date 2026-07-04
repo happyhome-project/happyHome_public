@@ -30,6 +30,7 @@ const ragEnv = loadDotEnvFile(path.join(home, '.happyhome', 'tencent-rag.env'))
 const envId = process.env.TCB_ENV || camEnv.TCB_ENV || 'cloudbase-3gh862acb1505ff3'
 const managerSecretId = process.env.TENCENTCLOUD_SECRETID || camEnv.TENCENTCLOUD_SECRETID
 const managerSecretKey = process.env.TENCENTCLOUD_SECRETKEY || camEnv.TENCENTCLOUD_SECRETKEY
+const MAX_HTTP_RETRIES = Math.max(1, Math.floor(Number(process.env.TENCENT_RAG_HTTP_RETRIES || 5)))
 
 if (!managerSecretId || !managerSecretKey) {
   console.error('[rag-env] Missing manager TENCENTCLOUD_SECRETID / TENCENTCLOUD_SECRETKEY in env or ~/.happyhome/cam.env')
@@ -72,6 +73,33 @@ const workerEnv = {
   POST_RAG_WORKER_TOKEN: resolvePostRagWorkerToken(),
 }
 
+function configuredEnv(values) {
+  return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined && value !== ''))
+}
+
+const videoPolicyEnv = configuredEnv({
+  POST_VIDEO_RAG_ANALYSIS_ENABLED: process.env.POST_VIDEO_RAG_ANALYSIS_ENABLED || ragEnv.POST_VIDEO_RAG_ANALYSIS_ENABLED || 'false',
+  POST_VIDEO_RAG_MAX_JOBS_PER_POST: process.env.POST_VIDEO_RAG_MAX_JOBS_PER_POST || ragEnv.POST_VIDEO_RAG_MAX_JOBS_PER_POST || '1',
+  POST_VIDEO_RAG_MAX_FRAMES_PER_VIDEO: process.env.POST_VIDEO_RAG_MAX_FRAMES_PER_VIDEO || ragEnv.POST_VIDEO_RAG_MAX_FRAMES_PER_VIDEO || '0',
+  POST_VIDEO_RAG_MAX_ASR_SECONDS_PER_VIDEO: process.env.POST_VIDEO_RAG_MAX_ASR_SECONDS_PER_VIDEO || ragEnv.POST_VIDEO_RAG_MAX_ASR_SECONDS_PER_VIDEO || '3600',
+  POST_VIDEO_RAG_MAX_COST_UNITS_PER_POST: process.env.POST_VIDEO_RAG_MAX_COST_UNITS_PER_POST || ragEnv.POST_VIDEO_RAG_MAX_COST_UNITS_PER_POST || '120',
+  POST_VIDEO_RAG_MIN_TEXT_CHARS_FOR_ANALYSIS: process.env.POST_VIDEO_RAG_MIN_TEXT_CHARS_FOR_ANALYSIS || ragEnv.POST_VIDEO_RAG_MIN_TEXT_CHARS_FOR_ANALYSIS || '48',
+})
+
+const videoAnalyzerEnv = configuredEnv({
+  POST_VIDEO_RAG_ASR_SECRET_ID: process.env.POST_VIDEO_RAG_ASR_SECRET_ID || ragEnv.POST_VIDEO_RAG_ASR_SECRET_ID,
+  POST_VIDEO_RAG_ASR_SECRET_KEY: process.env.POST_VIDEO_RAG_ASR_SECRET_KEY || ragEnv.POST_VIDEO_RAG_ASR_SECRET_KEY,
+  POST_VIDEO_RAG_ASR_REGION: process.env.POST_VIDEO_RAG_ASR_REGION || ragEnv.POST_VIDEO_RAG_ASR_REGION || 'ap-guangzhou',
+  POST_VIDEO_RAG_ASR_ENGINE_MODEL_TYPE: process.env.POST_VIDEO_RAG_ASR_ENGINE_MODEL_TYPE || ragEnv.POST_VIDEO_RAG_ASR_ENGINE_MODEL_TYPE || '16k_zh',
+  POST_VIDEO_RAG_ASR_CHANNEL_NUM: process.env.POST_VIDEO_RAG_ASR_CHANNEL_NUM || ragEnv.POST_VIDEO_RAG_ASR_CHANNEL_NUM || '1',
+  POST_VIDEO_RAG_ASR_RES_TEXT_FORMAT: process.env.POST_VIDEO_RAG_ASR_RES_TEXT_FORMAT || ragEnv.POST_VIDEO_RAG_ASR_RES_TEXT_FORMAT || '0',
+  POST_VIDEO_RAG_TOKENHUB_API_KEY: process.env.POST_VIDEO_RAG_TOKENHUB_API_KEY || ragEnv.POST_VIDEO_RAG_TOKENHUB_API_KEY,
+  POST_VIDEO_RAG_TOKENHUB_MODEL: process.env.POST_VIDEO_RAG_TOKENHUB_MODEL || ragEnv.POST_VIDEO_RAG_TOKENHUB_MODEL,
+  POST_VIDEO_RAG_TOKENHUB_BASE_URL: process.env.POST_VIDEO_RAG_TOKENHUB_BASE_URL || ragEnv.POST_VIDEO_RAG_TOKENHUB_BASE_URL,
+  POST_VIDEO_RAG_ANALYZER_URL: process.env.POST_VIDEO_RAG_ANALYZER_URL || ragEnv.POST_VIDEO_RAG_ANALYZER_URL,
+  POST_VIDEO_RAG_ANALYZER_TOKEN: process.env.POST_VIDEO_RAG_ANALYZER_TOKEN || ragEnv.POST_VIDEO_RAG_ANALYZER_TOKEN,
+})
+
 const functionNames = (process.argv.find((arg) => arg.startsWith('--only='))?.slice('--only='.length) || 'post,post-rag-worker,post-video-rag-worker')
   .split(',')
   .map((item) => item.trim())
@@ -110,13 +138,43 @@ function redact(value, key) {
 
 const app = CloudBase.init({ secretId: managerSecretId, secretKey: managerSecretKey, envId })
 
+function isTransientCloudApiError(error) {
+  const text = String(error?.message || error?.code || error?.original?.Code || error?.original?.Message || error)
+  return /ECONNRESET|ETIMEDOUT|TLS connection|socket disconnected|ENOTFOUND|EAI_AGAIN|FetchError|Updating状态|FailedOperation\.UpdateFunctionConfiguration/i.test(text)
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function withTransientRetry(label, fn) {
+  let lastError
+  for (let attempt = 1; attempt <= MAX_HTTP_RETRIES; attempt += 1) {
+    try {
+      return await fn()
+    } catch (error) {
+      lastError = error
+      if (!isTransientCloudApiError(error) || attempt >= MAX_HTTP_RETRIES) throw error
+      console.warn(`[rag-env] transient ${label} failure; retry ${attempt + 1}/${MAX_HTTP_RETRIES}`)
+      await delay(Math.min(10000, 1000 * attempt))
+    }
+  }
+  throw lastError
+}
+
 for (const functionName of functionNames) {
-  const detail = await app.functions.getFunctionDetail(functionName)
+  const detail = await withTransientRetry(`${functionName}.getFunctionDetail`, () =>
+    app.functions.getFunctionDetail(functionName)
+  )
   const existing = {}
   for (const item of detail?.Environment?.Variables || []) existing[item.Key] = item.Value
-  const envForFunction = workerFunctions.has(functionName) ? { ...targetEnv, ...workerEnv } : targetEnv
+  const envForFunction = functionName === 'post-video-rag-worker' ? { ...targetEnv, ...workerEnv, ...videoPolicyEnv, ...videoAnalyzerEnv } : (
+    functionName === 'post-rag-worker' ? { ...targetEnv, ...workerEnv, ...videoPolicyEnv } : targetEnv
+  )
   const merged = { ...existing, ...envForFunction }
-  await app.functions.updateFunctionConfig({ name: functionName, envVariables: merged })
+  await withTransientRetry(`${functionName}.updateFunctionConfig`, () =>
+    app.functions.updateFunctionConfig({ name: functionName, envVariables: merged })
+  )
   console.log(`[rag-env] ${functionName} updated`)
   console.table(Object.entries(envForFunction).map(([Key, Value]) => ({ Key, Value: redact(Value, Key) })))
 }
