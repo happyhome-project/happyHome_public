@@ -9,9 +9,12 @@
  *   node scripts/deploy.mjs admin-web            # upload admin-web dist to Aliyun Nginx production host
  *   node scripts/deploy.mjs all                  # cloud + miniprogram
  *   node scripts/deploy.mjs release --use-tcb    # CloudBase CLI/COS cloud + cloud smoke + admin-web + miniprogram-upload
+ *   node scripts/deploy.mjs release-prepare      # write fixed build-info + build/gate/DevTools evidence, no cloud/upload
+ *   node scripts/deploy.mjs release-publish --use-tcb --resume --release-run-id=<id>
+ *                                                # resume prepared evidence, then cloud + smoke + admin-web + upload
  *
  * Flags:
- *   --only=a,b,c   filter cloud functions by name
+ *   --only=a,b,c   filter cloud functions by name (not allowed for formal release)
  *   --version=x    version for miniprogram-upload (default: 1.0.YYMMDDHHmm)
  *   --desc=x       description for miniprogram-upload
  *   --use-tcb      force CloudBase CLI deploy path for cloud functions
@@ -21,6 +24,8 @@
  *                  (useful when DevTools is not installed on the machine)
  *   --resume       resume the latest release ledger conservatively
  *   --release-run-id=x  use or resume a specific release ledger run id
+ *   --cloud-deploy-concurrency=x  bounded CloudBase CLI/COS deploy concurrency (default: 2)
+ *   --cloud-smoke-concurrency=x   bounded cloud invoke/log concurrency (default: 3)
  *
  * Deploy path resolution:
  *   Primary   = WeChat DevTools CLI `cloud functions deploy`
@@ -57,10 +62,12 @@ import ci from 'miniprogram-ci'
 import { resolve, dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import { execSync, spawn } from 'child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { parseArgs as parseCloudSmokeArgs, runCloudReleaseSmoke } from './cloud-release-smoke.mjs'
+import { deployFunctionsWithConcurrency } from './lib/cloudbase-function-deploy.mjs'
 import { analyzeDevtoolsCloudDeployOutput, analyzeDevtoolsUploadOutput } from './lib/deploy-output.mjs'
+import { parsePositiveIntOption } from './lib/release-concurrency.mjs'
 import { shouldFallbackAfterDevtoolsFailure } from './lib/release-policy.mjs'
 import {
   createReleaseRunLedger,
@@ -115,6 +122,18 @@ function getFlagValue(name) {
   return ''
 }
 
+function getPositiveIntFlag(name, fallback, options = {}) {
+  return parsePositiveIntOption(getFlagValue(name) || process.env[`HH_${name.toUpperCase().replace(/-/g, '_')}`], fallback, options)
+}
+
+function getCloudDeployConcurrency() {
+  return getPositiveIntFlag('cloud-deploy-concurrency', 2, { min: 1, max: 4 })
+}
+
+function getCloudSmokeConcurrency() {
+  return getPositiveIntFlag('cloud-smoke-concurrency', 3, { min: 1, max: 5 })
+}
+
 function getCloudEnvId() {
   return getFlagValue('env-id') || CLOUD_ENV
 }
@@ -139,9 +158,27 @@ function hasFlag(name) {
   return process.argv.includes(`--${name}`)
 }
 
-async function getResumeRunState() {
-  if (!hasFlag('resume')) return null
-  const explicitRunId = getFlagValue('release-run-id') || getFlagValue('run-id') || process.env.HH_RELEASE_RUN_ID || ''
+function getExplicitReleaseRunId() {
+  return getFlagValue('release-run-id') || getFlagValue('run-id') || process.env.HH_RELEASE_RUN_ID || ''
+}
+
+function assertNoFormalReleaseOnlyFilter() {
+  const hasOnlyFilter = process.argv.some((arg) => arg === '--only' || arg.startsWith('--only='))
+  if (hasOnlyFilter) {
+    throw new Error('Formal release does not support --only; deploy and smoke all release functions.')
+  }
+}
+
+function assertFormalReleaseCloudBasePath({ prepareOnly }) {
+  if (prepareOnly) return
+  if (!hasFlag('use-tcb')) {
+    throw new Error('Formal release publish requires --use-tcb so cloud deploy uses CloudBase CLI/COS before upload.')
+  }
+}
+
+async function getResumeRunState(forceResume = false) {
+  if (!forceResume && !hasFlag('resume')) return null
+  const explicitRunId = getExplicitReleaseRunId()
   if (explicitRunId) return await loadReleaseRun(ROOT, explicitRunId)
   try {
     return await loadLatestReleaseRun(ROOT)
@@ -150,10 +187,10 @@ async function getResumeRunState() {
   }
 }
 
-async function resolveReleaseRunId() {
-  const explicitRunId = getFlagValue('release-run-id') || getFlagValue('run-id') || process.env.HH_RELEASE_RUN_ID || ''
+async function resolveReleaseRunId(forceResume = false) {
+  const explicitRunId = getExplicitReleaseRunId()
   if (explicitRunId) return explicitRunId
-  if (hasFlag('resume')) {
+  if (forceResume || hasFlag('resume')) {
     const latest = await loadLatestReleaseRun(ROOT)
     return latest.runId
   }
@@ -349,6 +386,7 @@ async function deployCloudViaCloudBaseCli(fns) {
     ? `echo. | ${commandLine}`
     : `printf '\\n' | ${commandLine}`
   const envId = getCloudEnvId()
+  const concurrency = getCloudDeployConcurrency()
 
   const authProbe = await runShellCapture(
     tcb('fn', 'list', '--env-id', envId, '--json'),
@@ -361,28 +399,73 @@ async function deployCloudViaCloudBaseCli(fns) {
     }
   }
 
-  for (const fn of fns) {
-    const fnDir = resolve(CLOUD_DIST, fn)
-    const result = await runCloudBaseCliCaptureWithRetry(
-      confirmDefault(tcb('fn', 'deploy', fn, '--force', '--env-id', envId, '--deployMode', 'cos', '--json')),
-      {
-        cwd: fnDir,
-        displayCommandLine: `cd ${fnDir} && <confirm default> | tcb fn deploy ${fn} --force --env-id ${envId} --deployMode cos --json`,
-        // CloudBase CLI 3.5.8 prompts to accept the merged existing function
-        // config; its --yes path throws "_a.includes is not a function".
-      }
-    )
-    if (!result.ok) return { ok: false, reason: `CloudBase CLI deploy ${fn} failed: ${result.reason}` }
-
-    const detail = await runCloudBaseCliCaptureWithRetry(
-      tcb('fn', 'detail', fn, '--env-id', envId, '--json'),
-      { displayCommandLine: `tcb fn detail ${fn} --env-id ${envId} --json`, silentOutput: true }
-    )
-    if (!detail.ok) return { ok: false, reason: `CloudBase CLI detail ${fn} failed after deploy: ${detail.reason}` }
-    logCloudFunctionDetailSummary(fn, detail.output)
+  console.log(`[CloudBase CLI] deploying ${fns.length} function(s) with concurrency=${concurrency}`)
+  try {
+    const functionResults = await deployFunctionsWithConcurrency({
+      functions: fns,
+      concurrency,
+      deployOne: async (fn) => {
+        const fnDir = resolve(CLOUD_DIST, fn)
+        return await runCloudBaseCliCaptureWithRetry(
+          confirmDefault(tcb('fn', 'deploy', fn, '--force', '--env-id', envId, '--deployMode', 'cos', '--json')),
+          {
+            cwd: fnDir,
+            displayCommandLine: `cd ${fnDir} && <confirm default> | tcb fn deploy ${fn} --force --env-id ${envId} --deployMode cos --json`,
+            // CloudBase CLI 3.5.8 prompts to accept the merged existing function
+            // config; its --yes path throws "_a.includes is not a function".
+          }
+        )
+      },
+      detailOne: async (fn) => {
+        const detail = await runCloudBaseCliCaptureWithRetry(
+          tcb('fn', 'detail', fn, '--env-id', envId, '--json'),
+          { displayCommandLine: `tcb fn detail ${fn} --env-id ${envId} --json`, silentOutput: true }
+        )
+        if (detail.ok) logCloudFunctionDetailSummary(fn, detail.output)
+        return detail
+      },
+    })
+    return { ok: true, reason: 'ok', concurrency, functionResults }
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `CloudBase CLI deploy failed: ${error?.message || error}`,
+      concurrency,
+      functionResults: error?.functionResults || [],
+    }
   }
+}
 
-  return { ok: true, reason: 'ok' }
+function writeJsonFile(path, value) {
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
+}
+
+function getMiniprogramUploadEvidencePath(releaseRunId) {
+  return resolve(ROOT, '.codex-local', 'release-evidence', releaseRunId, 'miniprogram-upload', 'upload-evidence.json')
+}
+
+function writeMiniprogramUploadEvidence({ releaseRunId, version, desc, uploadResult }) {
+  const evidencePath = getMiniprogramUploadEvidencePath(releaseRunId)
+  const uploadInfoPath = uploadResult.uploadInfoPath || ''
+  const evidence = {
+    success: true,
+    appid: APPID,
+    version,
+    desc,
+    method: uploadResult.method,
+    uploadInfoPath,
+    uploadInfoSize: uploadInfoPath && existsSync(uploadInfoPath) ? statSync(uploadInfoPath).size : 0,
+    uploadedAt: new Date().toISOString(),
+  }
+  writeJsonFile(evidencePath, evidence)
+  return { evidencePath, evidence }
+}
+
+function readMiniprogramUploadEvidence(releaseRunId) {
+  const evidencePath = getMiniprogramUploadEvidencePath(releaseRunId)
+  if (!existsSync(evidencePath)) throw new Error(`upload evidence file not found: ${evidencePath}`)
+  return { evidencePath, evidence: JSON.parse(readFileSync(evidencePath, 'utf8')) }
 }
 
 // ── Fallback deploy path: miniprogram-ci ──
@@ -403,7 +486,8 @@ async function deployCloudViaMiniprogramCi(fns) {
   }
 }
 
-async function deployCloud() {
+async function deployCloud(options = {}) {
+  const requireCloudBaseCli = options.requireCloudBaseCli === true
   const onlyArg = process.argv.find((a) => a.startsWith('--only='))
   const onlyList = onlyArg ? onlyArg.slice(7).split(',').map((s) => s.trim()).filter(Boolean) : null
   const fns = onlyList && onlyList.length
@@ -426,7 +510,18 @@ async function deployCloud() {
     const tcbResult = await deployCloudViaCloudBaseCli(fns)
     if (tcbResult.ok) {
       console.log('[OK] Cloud functions deployed via CloudBase CLI')
-      return { fns, path: 'cloudbase-cli' }
+      return { fns, path: 'cloudbase-cli', concurrency: tcbResult.concurrency, functionResults: tcbResult.functionResults || [] }
+    }
+    if (requireCloudBaseCli) {
+      const error = new Error(`Formal release CloudBase CLI/COS deploy failed: ${tcbResult.reason}`)
+      error.result = {
+        path: 'cloudbase-cli',
+        status: 'failed',
+        fns,
+        concurrency: tcbResult.concurrency,
+        functionResults: tcbResult.functionResults || [],
+      }
+      throw error
     }
     const nextPath = forceCi ? 'falling back to miniprogram-ci' : 'trying WeChat DevTools CLI'
     console.log(`[!] CloudBase CLI failed (${tcbResult.reason}) - ${nextPath}`)
@@ -449,7 +544,7 @@ async function deployCloud() {
       const tcbResult = await deployCloudViaCloudBaseCli(fns)
       if (tcbResult.ok) {
         console.log('[OK] Cloud functions deployed via CloudBase CLI')
-        return { fns, path: 'cloudbase-cli' }
+        return { fns, path: 'cloudbase-cli', concurrency: tcbResult.concurrency, functionResults: tcbResult.functionResults || [] }
       }
       console.log(`[!] CloudBase CLI failed (${tcbResult.reason}) - falling back to miniprogram-ci`)
     } else {
@@ -465,11 +560,17 @@ async function deployCloud() {
   return { fns, path: 'miniprogram-ci' }
 }
 
-async function runCloudSmoke(fns) {
+async function runCloudSmoke(fns, releaseRunId = '') {
+  const parsedSmokeArgs = parseCloudSmokeArgs(process.argv.slice(3))
   const smokeOptions = {
-    ...parseCloudSmokeArgs(process.argv.slice(3)),
+    ...parsedSmokeArgs,
     envId: getCloudEnvId(),
     only: fns,
+    runId: releaseRunId || parsedSmokeArgs.runId,
+    evidenceDir: releaseRunId
+      ? resolve(ROOT, '.codex-local', 'release-evidence', releaseRunId, 'cloud-smoke')
+      : parsedSmokeArgs.evidenceDir,
+    concurrency: getCloudSmokeConcurrency(),
   }
   console.log('\nEnsuring release database collections and indexes...')
   execSync('npm.cmd run ensure:indexes', {
@@ -587,7 +688,7 @@ async function uploadBuiltMiniprogram({ version, desc, forceCi }) {
     const result = await uploadMiniprogramViaDevtoolsCli(version, desc)
     if (result.ok) {
       console.log('[OK] Miniprogram uploaded via DevTools CLI (no preview QR generated)')
-      return
+      return { method: 'devtools-cli', uploadInfoPath: resolve(ROOT, 'mp-upload-info.json') }
     }
     if (!shouldFallbackAfterDevtoolsFailure({ target: 'miniprogram-upload', reason: result.reason, forceCi })) {
       throw new Error(`DevTools CLI upload failed (${result.reason}). Open WeChat DevTools, log in again if needed, then retry upload. miniprogram-ci fallback is only allowed with --use-ci.`)
@@ -599,6 +700,7 @@ async function uploadBuiltMiniprogram({ version, desc, forceCi }) {
 
   await uploadMiniprogramViaMiniprogramCi(version, desc)
   console.log('[OK] Miniprogram uploaded via miniprogram-ci')
+  return { method: 'miniprogram-ci', uploadInfoPath: '' }
 }
 
 // ── Fallback preview path: miniprogram-ci ──
@@ -753,17 +855,30 @@ function releaseStageReuseCheck(context) {
   return (runState, stageName) => inspectReleaseStageReuse(runState, stageName, context)
 }
 
-const target = process.argv[2] || 'all'
-if (target === 'release') {
-  const resumeRunState = await getResumeRunState()
+async function runFormalRelease(options = {}) {
+  assertNoFormalReleaseOnlyFilter()
+
+  const prepareOnly = options.prepareOnly === true
+  assertFormalReleaseCloudBasePath({ prepareOnly })
+
+  const publishOnly = options.publishOnly === true
+  if (publishOnly && !getExplicitReleaseRunId()) {
+    throw new Error('release-publish requires an explicit --release-run-id=<id> or HH_RELEASE_RUN_ID; refusing implicit latest.')
+  }
+  const forceResume = publishOnly
+  const resumeRunState = await getResumeRunState(forceResume)
   const miniprogramUpload = resolveMiniprogramUploadMetadata(resumeRunState?.context || {})
   const releaseContext = {
     root: ROOT,
     gitSha: getGitSha(),
     version: miniprogramUpload.version,
     desc: miniprogramUpload.desc,
+    envId: getCloudEnvId(),
+    appid: APPID,
   }
-  const releaseRunId = await resolveReleaseRunId()
+  const releaseRunId = await resolveReleaseRunId(forceResume)
+  releaseContext.runId = releaseRunId
+  releaseContext.cloudFunctions = [...CLOUD_FUNCTIONS]
   const releaseLedger = await createReleaseRunLedger({
     root: ROOT,
     runId: releaseRunId,
@@ -771,18 +886,21 @@ if (target === 'release') {
     gitSha: releaseContext.gitSha,
     version: releaseContext.version,
     desc: releaseContext.desc,
+    envId: releaseContext.envId,
   })
-  const resume = hasFlag('resume')
+  const resume = forceResume || hasFlag('resume')
   const reuseCheck = releaseStageReuseCheck(releaseContext)
 
   console.log(`[release-ledger] runId=${releaseLedger.runId}`)
   console.log(`[release-ledger] run=${releaseLedger.runPath}`)
   console.log(`[release-ledger] events=${releaseLedger.eventsPath}`)
   if (resume) console.log('[release-ledger] resume enabled; stages will be reused only after explicit evidence checks')
+  if (prepareOnly) console.log('[release-ledger] prepare only; stopping after miniprogram build/gate evidence')
 
   try {
     await runLedgerStage(releaseLedger, 'miniprogram-build-gate', {
       resume,
+      mustReuse: publishOnly,
       reuseCheck,
       command: 'write build-info + npm run build:mp-weixin + npm run test:mp:release-gate -- --skip-mp-build',
     }, async () => {
@@ -793,12 +911,17 @@ if (target === 'release') {
       }
     })
 
+    if (prepareOnly) {
+      await releaseLedger.complete('prepared')
+      return
+    }
+
     const cloudDeploy = await runLedgerStage(releaseLedger, 'cloud-deploy', {
       resume,
       reuseCheck,
-      command: 'npm.cmd --workspace cloud run build && CloudBase CLI/COS fn deploy',
+      command: `npm.cmd --workspace cloud run build && CloudBase CLI/COS fn deploy (concurrency=${getCloudDeployConcurrency()})`,
     }, async () => {
-      const result = await deployCloud()
+      const result = await deployCloud({ requireCloudBaseCli: true })
       if (result.path !== 'cloudbase-cli') {
         throw new Error(`Formal release cloud deploy must use CloudBase CLI/COS before smoke; got ${result.path}. Rerun with --use-tcb.`)
       }
@@ -808,14 +931,15 @@ if (target === 'release') {
     await runLedgerStage(releaseLedger, 'cloud-smoke', {
       resume,
       reuseCheck,
-      command: 'npm.cmd run test:cloud:release-smoke',
+      command: `npm.cmd run test:cloud:release-smoke (concurrency=${getCloudSmokeConcurrency()})`,
     }, async () => {
-      const summary = await runCloudSmoke(cloudDeploy.fns)
+      const summary = await runCloudSmoke(cloudDeploy.fns, releaseLedger.runId)
       return {
         evidence: { summaryPath: resolve(summary.evidenceDir, 'summary.json') },
         result: {
           status: summary.status,
           evidenceDir: summary.evidenceDir,
+          concurrency: summary.concurrency,
           labels: summary.labels,
           missingLabels: summary.missingLabels,
         },
@@ -836,12 +960,22 @@ if (target === 'release') {
       reuseCheck,
       command: 'WeChat DevTools CLI upload or explicit miniprogram-ci fallback',
     }, async () => {
-      await uploadBuiltMiniprogram(miniprogramUpload)
+      const uploadResult = await uploadBuiltMiniprogram(miniprogramUpload)
+      const uploadEvidence = writeMiniprogramUploadEvidence({
+        releaseRunId: releaseLedger.runId,
+        version: miniprogramUpload.version,
+        desc: miniprogramUpload.desc,
+        uploadResult,
+      })
       return {
-        evidence: { uploadInfoPath: resolve(ROOT, 'mp-upload-info.json') },
+        evidence: {
+          uploadEvidencePath: uploadEvidence.evidencePath,
+          uploadInfoPath: uploadResult.uploadInfoPath || '',
+        },
         result: {
           version: miniprogramUpload.version,
           desc: miniprogramUpload.desc,
+          method: uploadResult.method,
           forceCi: miniprogramUpload.forceCi,
         },
       }
@@ -852,16 +986,25 @@ if (target === 'release') {
       reuseCheck,
       command: 'verify build-info and mp-upload-info after upload',
     }, async () => {
-      const uploadInfoPath = resolve(ROOT, 'mp-upload-info.json')
-      if (!existsSync(uploadInfoPath)) throw new Error(`upload info file not found: ${uploadInfoPath}`)
+      const { evidencePath: uploadEvidencePath, evidence: uploadEvidence } = readMiniprogramUploadEvidence(releaseLedger.runId)
+      if (uploadEvidence.success !== true) throw new Error('upload evidence is not successful')
+      if (uploadEvidence.appid !== APPID) throw new Error('upload evidence appid does not match')
+      if (uploadEvidence.version !== miniprogramUpload.version || uploadEvidence.desc !== miniprogramUpload.desc) {
+        throw new Error('upload evidence does not match uploaded version/desc')
+      }
+      const uploadInfoPath = uploadEvidence.uploadInfoPath || ''
+      if (uploadEvidence.method === 'devtools-cli') {
+        if (!uploadInfoPath) throw new Error('upload evidence uploadInfoPath is missing')
+        if (!existsSync(uploadInfoPath)) throw new Error(`upload info file not found: ${uploadInfoPath}`)
+      }
       const buildInfoPath = resolve(ROOT, 'miniprogram/src/generated/build-info.ts')
       const buildInfo = readFileSync(buildInfoPath, 'utf8')
       if (!buildInfo.includes(miniprogramUpload.version) || !buildInfo.includes(miniprogramUpload.desc)) {
         throw new Error('build-info does not match uploaded version/desc')
       }
       return {
-        evidence: { uploadInfoPath, buildInfoPath },
-        result: { version: miniprogramUpload.version, desc: miniprogramUpload.desc },
+        evidence: { uploadEvidencePath, uploadInfoPath, buildInfoPath },
+        result: { version: miniprogramUpload.version, desc: miniprogramUpload.desc, method: uploadEvidence.method },
       }
     })
 
@@ -870,6 +1013,15 @@ if (target === 'release') {
     await releaseLedger.complete('failed')
     throw error
   }
+}
+
+const target = process.argv[2] || 'all'
+if (target === 'release') {
+  await runFormalRelease()
+} else if (target === 'release-prepare') {
+  await runFormalRelease({ prepareOnly: true })
+} else if (target === 'release-publish') {
+  await runFormalRelease({ publishOnly: true })
 } else {
   if (target === 'cloud' || target === 'all') {
     const cloudDeploy = await deployCloud()

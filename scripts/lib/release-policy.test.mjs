@@ -46,10 +46,25 @@ test('release cloud smoke ensures required database collections before invoking 
 
 test('formal release path records resumable ledger stages before upload', () => {
   const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
-  const releaseBlock = deployScript.match(/if \(target === 'release'\) \{[\s\S]+?\n\} else \{/)?.[0] || ''
+  const releaseBlock = deployScript.match(/async function runFormalRelease[\s\S]+?\n}\n\nconst target/)?.[0] || ''
 
   assert.match(deployScript, /release-run-ledger\.mjs/)
+  assert.match(deployScript, /target === 'release-prepare'/)
+  assert.match(deployScript, /target === 'release-publish'/)
+  assert.match(deployScript, /function getExplicitReleaseRunId/)
+  assert.match(deployScript, /function assertNoFormalReleaseOnlyFilter/)
+  assert.match(releaseBlock, /assertNoFormalReleaseOnlyFilter\(\)/)
+  assert.match(deployScript, /Formal release does not support --only/)
+  assert.match(releaseBlock, /publishOnly && !getExplicitReleaseRunId\(\)/)
+  assert.match(deployScript, /release-publish requires an explicit --release-run-id/)
+  assert.match(deployScript, /function assertFormalReleaseCloudBasePath/)
+  assert.match(releaseBlock, /assertFormalReleaseCloudBasePath\(\{ prepareOnly }\)/)
+  assert.match(deployScript, /Formal release publish requires --use-tcb/)
+  assert.match(releaseBlock, /deployCloud\(\{ requireCloudBaseCli: true }\)/)
+  assert.match(deployScript, /requireCloudBaseCli/)
+  assert.match(deployScript, /Formal release CloudBase CLI\/COS deploy failed/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'miniprogram-build-gate'/)
+  assert.match(releaseBlock, /mustReuse: publishOnly/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-deploy'/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-smoke'/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'admin-web-deploy'/)
@@ -59,7 +74,7 @@ test('formal release path records resumable ledger stages before upload', () => 
 
   assert(releaseBlock.indexOf("'cloud-smoke'") < releaseBlock.indexOf("'admin-web-deploy'"))
   assert(releaseBlock.indexOf("'admin-web-deploy'") < releaseBlock.indexOf("'miniprogram-upload'"))
-  assert(releaseBlock.indexOf("'miniprogram-upload'") < releaseBlock.indexOf('complete'))
+  assert(releaseBlock.indexOf("'miniprogram-upload'") < releaseBlock.indexOf("complete('passed')"))
 })
 
 test('package exposes a release status command for the latest ledger', () => {
