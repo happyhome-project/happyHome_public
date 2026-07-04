@@ -1,6 +1,7 @@
 import { access, appendFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { REQUIRED_SMOKE_LABELS } from '../cloud-release-smoke.mjs'
 
 export const RELEASE_RUNS_DIR = '.codex-local/release-runs'
 
@@ -17,6 +18,8 @@ const REQUIRED_RELEASE_UI_MARKERS = [
   'HH_RELEASE_HOME_DETAIL_NONEMPTY',
   'HH_RELEASE_LOGIN_VERSION',
 ]
+
+const RELEASE_CONTEXT_KEYS = ['gitSha', 'version', 'desc', 'envId']
 
 function pad(value) {
   return String(value).padStart(2, '0')
@@ -84,12 +87,26 @@ function durationMs(startedAt, finishedAt) {
 }
 
 function contextMismatch(stageContext = {}, expected = {}) {
-  for (const key of ['gitSha', 'version', 'desc']) {
+  for (const key of RELEASE_CONTEXT_KEYS) {
+    if (expected[key] && !stageContext[key]) {
+      return `${key} missing from reusable stage context`
+    }
     if (expected[key] && stageContext[key] && expected[key] !== stageContext[key]) {
       return `${key} mismatch: expected ${expected[key]}, got ${stageContext[key]}`
     }
   }
   return ''
+}
+
+function mergeExistingRunContext(existing = {}, next = {}) {
+  const merged = { ...existing }
+  for (const key of RELEASE_CONTEXT_KEYS) {
+    if (existing[key] && next[key] && existing[key] !== next[key]) {
+      throw new Error(`release run context mismatch for ${key}: existing ${existing[key]}, requested ${next[key]}`)
+    }
+    merged[key] = existing[key] || next[key] || ''
+  }
+  return merged
 }
 
 function textHasBuildInfo(text, version, desc) {
@@ -131,11 +148,33 @@ async function inspectCloudSmokeEvidence(stage, context) {
 
   const summary = await readJson(summaryPath)
   if (summary.status !== 'passed') return { reusable: false, reason: `cloud smoke status is ${summary.status || 'unknown'}` }
+  if (context.envId && summary.envId !== context.envId) {
+    return { reusable: false, reason: `cloud smoke envId mismatch: expected ${context.envId}, got ${summary.envId || 'unknown'}` }
+  }
+  if (context.runId && summary.runId !== context.runId) {
+    return { reusable: false, reason: `cloud smoke runId mismatch: expected ${context.runId}, got ${summary.runId || 'unknown'}` }
+  }
+  const expectedFunctions = Array.isArray(context.cloudFunctions) ? [...context.cloudFunctions].sort() : []
+  if (expectedFunctions.length > 0) {
+    const actualFunctions = Array.isArray(summary.functions) ? [...summary.functions].sort() : []
+    if (JSON.stringify(actualFunctions) !== JSON.stringify(expectedFunctions)) {
+      return { reusable: false, reason: `cloud smoke functions mismatch: expected ${expectedFunctions.join(',')}, got ${actualFunctions.join(',') || 'none'}` }
+    }
+  }
   if (Array.isArray(summary.missingLabels) && summary.missingLabels.length > 0) {
     return { reusable: false, reason: `cloud smoke missing labels: ${summary.missingLabels.join(', ')}` }
   }
   const labels = new Set(summary.labels || [])
-  const missingRequired = (summary.requiredLabels || []).filter((label) => !labels.has(label))
+  const fixedRequiredLabels = REQUIRED_SMOKE_LABELS.filter((label) => {
+    if (label === 'HH_CLOUD_INVOKE_SMOKE_ADMIN_FIXTURE' || label === 'HH_CLOUD_FIXTURE_CLEANUP_OK') {
+      return expectedFunctions.length === 0 || expectedFunctions.includes('admin')
+    }
+    if (label === 'HH_CLOUD_LOG_CAPTURE_POST') {
+      return expectedFunctions.length === 0 || expectedFunctions.includes('post')
+    }
+    return true
+  })
+  const missingRequired = fixedRequiredLabels.filter((label) => !labels.has(label))
   if (missingRequired.length > 0) {
     return { reusable: false, reason: `cloud smoke required labels absent: ${missingRequired.join(', ')}` }
   }
@@ -151,11 +190,42 @@ async function inspectUploadEvidence(stage, context) {
     return { reusable: false, reason: `upload desc mismatch: expected ${context.desc}, got ${stage.result?.desc || 'unknown'}` }
   }
 
-  const uploadInfoPath = pathFromRoot(root, stage.evidence?.uploadInfoPath || 'mp-upload-info.json')
-  if (!(await pathExists(uploadInfoPath))) return { reusable: false, reason: `upload info missing: ${relativeToRoot(root, uploadInfoPath)}` }
-  const fileStat = await stat(uploadInfoPath)
-  if (!fileStat.isFile() || fileStat.size <= 0) return { reusable: false, reason: 'upload info is empty or not a file' }
-  return { reusable: true, reason: 'upload info exists and ledger version/desc match', evidence: { uploadInfoPath: relativeToRoot(root, uploadInfoPath) } }
+  const uploadEvidencePath = pathFromRoot(root, stage.evidence?.uploadEvidencePath)
+  if (!uploadEvidencePath) return { reusable: false, reason: 'upload evidence path missing' }
+  if (!(await pathExists(uploadEvidencePath))) return { reusable: false, reason: `upload evidence missing: ${relativeToRoot(root, uploadEvidencePath)}` }
+  const evidence = await readJson(uploadEvidencePath)
+  if (evidence.success !== true) return { reusable: false, reason: 'upload evidence is not successful' }
+  if (evidence.version !== context.version) {
+    return { reusable: false, reason: `upload evidence version mismatch: expected ${context.version}, got ${evidence.version || 'unknown'}` }
+  }
+  if (evidence.desc !== context.desc) {
+    return { reusable: false, reason: `upload evidence desc mismatch: expected ${context.desc}, got ${evidence.desc || 'unknown'}` }
+  }
+  if (context.appid && evidence.appid !== context.appid) {
+    return { reusable: false, reason: `upload evidence appid mismatch: expected ${context.appid}, got ${evidence.appid || 'unknown'}` }
+  }
+  if (!['devtools-cli', 'miniprogram-ci'].includes(evidence.method)) {
+    return { reusable: false, reason: `upload evidence method is ${evidence.method || 'unknown'}` }
+  }
+
+  const uploadInfoPathValue = Object.prototype.hasOwnProperty.call(evidence, 'uploadInfoPath')
+    ? evidence.uploadInfoPath
+    : stage.evidence?.uploadInfoPath || ''
+  const uploadInfoPath = pathFromRoot(root, uploadInfoPathValue)
+  if (evidence.method === 'devtools-cli') {
+    if (!uploadInfoPath) return { reusable: false, reason: 'upload info path missing from normalized evidence' }
+    if (!(await pathExists(uploadInfoPath))) return { reusable: false, reason: `upload info missing: ${relativeToRoot(root, uploadInfoPath)}` }
+    const fileStat = await stat(uploadInfoPath)
+    if (!fileStat.isFile() || fileStat.size <= 0) return { reusable: false, reason: 'upload info is empty or not a file' }
+  }
+  return {
+    reusable: true,
+    reason: 'normalized upload evidence matches ledger version/desc',
+    evidence: {
+      uploadEvidencePath: relativeToRoot(root, uploadEvidencePath),
+      uploadInfoPath: relativeToRoot(root, uploadInfoPath),
+    },
+  }
 }
 
 export async function inspectReleaseStageReuse(runState, stageName, context) {
@@ -174,7 +244,13 @@ export async function inspectReleaseStageReuse(runState, stageName, context) {
     if (!Array.isArray(stage.result?.fns) || stage.result.fns.length === 0) return { reusable: false, reason: 'cloud deploy function list missing' }
     return { reusable: true, reason: 'cloud deploy stage passed for this commit/version', result: stage.result }
   }
-  if (stageName === 'cloud-smoke') return await inspectCloudSmokeEvidence(stage, context)
+  if (stageName === 'cloud-smoke') {
+    const cloudDeployFns = runState?.stages?.['cloud-deploy']?.result?.fns
+    return await inspectCloudSmokeEvidence(stage, {
+      ...context,
+      cloudFunctions: context.cloudFunctions || cloudDeployFns,
+    })
+  }
   if (stageName === 'miniprogram-upload') return await inspectUploadEvidence(stage, context)
 
   return { reusable: true, reason: `${stageName} passed for this commit/version`, result: stage.result, evidence: stage.evidence }
@@ -204,6 +280,7 @@ export class ReleaseRunLedger {
       gitSha: this.state.context?.gitSha,
       version: this.state.context?.version,
       desc: this.state.context?.desc,
+      envId: this.state.context?.envId,
     })
   }
 
@@ -316,12 +393,12 @@ export async function createReleaseRunLedger(options) {
   let state
   if (await pathExists(runPath)) {
     state = await readJson(runPath)
-    state.context = {
-      ...(state.context || {}),
-      gitSha: options.gitSha || state.context?.gitSha || '',
-      version: options.version || state.context?.version || '',
-      desc: options.desc || state.context?.desc || '',
-    }
+    state.context = mergeExistingRunContext(state.context || {}, {
+      gitSha: options.gitSha || '',
+      version: options.version || '',
+      desc: options.desc || '',
+      envId: options.envId || '',
+    })
   } else {
     const createdAt = isoNow(options.now)
     state = {
@@ -336,6 +413,7 @@ export async function createReleaseRunLedger(options) {
         gitSha: options.gitSha || '',
         version: options.version || '',
         desc: options.desc || '',
+        envId: options.envId || '',
       },
       stages: {},
     }
@@ -392,6 +470,9 @@ export async function runLedgerStage(ledger, name, options = {}, action) {
       stage: name,
       reason: reuse.reason || 'reuse check did not approve this stage',
     })
+    if (options.mustReuse) {
+      throw new Error(`${name} must reuse prepared evidence: ${reuse.reason || 'reuse check did not approve this stage'}`)
+    }
   }
 
   await ledger.startStage(name, { command: options.command, evidence: options.evidence })
@@ -407,7 +488,14 @@ export async function runLedgerStage(ledger, name, options = {}, action) {
     await ledger.passStage(name, { command: options.command, ...stageDetails })
     return stageDetails.result ?? value
   } catch (error) {
-    await ledger.failStage(name, error, { command: options.command })
+    const errorDetails = error && typeof error === 'object'
+      ? {
+          evidence: error.evidence,
+          result: error.result,
+          reason: error.reason || error.message,
+        }
+      : {}
+    await ledger.failStage(name, error, { command: options.command, ...errorDetails })
     throw error
   }
 }
@@ -433,4 +521,41 @@ export function formatReleaseRunStatus(runState) {
     if (!seen.has(stageName)) lines.push(`- ${stageName}: ${stage.status}${stage.reason ? ` (${stage.reason})` : ''}`)
   }
   return lines.join('\n')
+}
+
+export function summarizeReleaseRun(runState) {
+  const stages = {}
+  const allStageNames = [
+    ...RELEASE_STAGE_ORDER,
+    ...Object.keys(runState?.stages || {}).filter((stageName) => !RELEASE_STAGE_ORDER.includes(stageName)),
+  ]
+  for (const stageName of allStageNames) {
+    const stage = runState?.stages?.[stageName] || {}
+    stages[stageName] = {
+      status: stage.status || 'pending',
+      durationMs: stage.durationMs ?? null,
+      startedAt: stage.startedAt || null,
+      finishedAt: stage.finishedAt || null,
+      skippedAt: stage.skippedAt || null,
+      command: stage.command || '',
+      evidence: stage.evidence || {},
+      result: stage.result || null,
+      reason: stage.reason || '',
+      reused: stage.reused === true,
+    }
+  }
+  return {
+    runId: runState?.runId || '',
+    status: runState?.status || 'unknown',
+    createdAt: runState?.createdAt || null,
+    updatedAt: runState?.updatedAt || null,
+    finishedAt: runState?.finishedAt || null,
+    context: {
+      gitSha: runState?.context?.gitSha || '',
+      version: runState?.context?.version || '',
+      desc: runState?.context?.desc || '',
+      envId: runState?.context?.envId || '',
+    },
+    stages,
+  }
 }

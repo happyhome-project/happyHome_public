@@ -101,7 +101,7 @@ function go(key: AppTabKey) {
 function openPublishSheet() {
   hideNativeTabBar()
   if (publishOptions.value.length === 0) {
-    uni.switchTab({ url: '/pages/create/index' })
+    openCreatePage()
     return
   }
   showPublishSheet.value = true
@@ -126,8 +126,19 @@ function handlePublishOption(section: any) {
   closePublishSheet()
   ;(uni as any).$emit?.('happyhome:create-section-intent', { sectionId, returnTo })
   if (props.current !== 'create') {
-    uni.switchTab({ url: '/pages/create/index' })
+    openCreatePage(returnTo)
   }
+}
+
+function currentReturnTo() {
+  if (props.current === 'profile') return '/pages/profile/index'
+  if (props.current === 'home') return '/pages/index/index'
+  return ''
+}
+
+function openCreatePage(returnTo = currentReturnTo()) {
+  const query = returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ''
+  uni.navigateTo({ url: `/pages/create/index${query}` })
 }
 
 function isPublishableSection(section: any) {

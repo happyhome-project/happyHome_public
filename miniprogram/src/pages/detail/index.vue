@@ -180,7 +180,7 @@ import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { buildGuideRouteDetail } from '../../utils/guide-detail'
 import { extractRichNoteImageSources } from '../../utils/rich-note'
-import { navigateBackOrHome } from '../../utils/hierarchy-nav'
+import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
 
 const fallbackAvatar = '/static/default-avatar.png'
 const ATTENDANCE_SLOT_DISPLAY_MAX = 6
@@ -290,6 +290,7 @@ onErrorCaptured((error, _instance, info) => {
 })
 
 onLoad(async (options: any) => {
+  if (ensureHierarchyStack('/pages/detail/index', options || {}, options?.returnTo)) return
   const postId = String(options?.postId || '')
   clientLog('info', 'detail.onLoad', {
     rawOptions: options || {},
@@ -575,13 +576,16 @@ async function handleActivityInviteTap() {
     return
   }
   try {
+    const returnTo = `/pages/detail/index?postId=${encodeURIComponent(post.value._id)}`
     uni.setStorageSync(ACTIVITY_INVITE_CREATE_INTENT_KEY, {
       sourcePostId: post.value._id,
-      returnTo: `/pages/detail/index?postId=${encodeURIComponent(post.value._id)}`,
+      returnTo,
       createdAt: Date.now(),
     })
+    uni.navigateTo({ url: `/pages/create/index?returnTo=${encodeURIComponent(returnTo)}` })
+    return
   } catch {}
-  uni.switchTab({ url: '/pages/create/index' })
+  uni.navigateTo({ url: '/pages/create/index' })
 }
 
 const deleteLock = useBusyLock(async () => {

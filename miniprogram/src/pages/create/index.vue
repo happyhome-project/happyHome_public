@@ -171,7 +171,7 @@ import {
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
-import { normalizeRouteUrl, openHierarchyParent } from '../../utils/hierarchy-nav'
+import { ensureHierarchyStack, normalizeRouteUrl, openHierarchyParent } from '../../utils/hierarchy-nav'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -291,6 +291,7 @@ const createFormBlocks = computed(() => {
 })
 
 onLoad(async (options: any) => {
+  if (ensureHierarchyStack('/pages/create/index', options || {}, options?.returnTo)) return
   hideNativeTabBar()
   await ensureSectionsLoaded()
   await checkMembership({ silent: false })
