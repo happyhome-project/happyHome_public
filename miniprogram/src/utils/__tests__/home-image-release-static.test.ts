@@ -9,6 +9,8 @@ describe('home image release guard', () => {
     const source = readFileSync(resolve(root, 'pages/index/index.vue'), 'utf8')
 
     expect(source).toContain('function getReleaseHomeImageProbe()')
+    expect(source).toContain('defineExpose({')
+    expect(source).toContain('getReleaseHomeImageProbe,')
     expect(source).toContain('home.banner.image.fail')
     expect(source).toContain('home.guide.image.fail')
     expect(source).toContain('@load="onHomeBannerImageLoad(banner)"')

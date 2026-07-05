@@ -49,7 +49,7 @@ describe('home image probe', () => {
     })
   })
 
-  test('dedupes keys and requires one successful render when current images exist', () => {
+  test('dedupes keys and accepts graceful fallback once all current images are resolved', () => {
     const bannerKey = buildHomeImageKey('banner', 'cloud://banner')
     const entries = {
       [bannerKey]: {
@@ -69,6 +69,21 @@ describe('home image probe', () => {
       loadedCount: 0,
       failedCount: 1,
       pendingCount: 0,
+      hasRendered: false,
+      satisfied: true,
+    })
+  })
+
+  test('does not satisfy release evidence while current images are still pending', () => {
+    const bannerKey = buildHomeImageKey('banner', 'cloud://banner')
+
+    const summary = summarizeHomeImageProbe([bannerKey], {})
+
+    expect(summary).toMatchObject({
+      currentImageCount: 1,
+      loadedCount: 0,
+      failedCount: 0,
+      pendingCount: 1,
       hasRendered: false,
       satisfied: false,
     })

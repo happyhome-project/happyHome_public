@@ -541,12 +541,23 @@ async function captureHomeImageProbe(mp) {
   return await mp.evaluate(() => {
     try {
       const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
-      const vm = pages && pages[0] && (pages[0].$vm || pages[0].$vue || pages[0])
-      const getter = vm && vm.getReleaseHomeImageProbe
+      const page = pages && pages[0]
+      const vm = page && (page.$vm || page.$vue || page)
+      const getterCandidates = [
+        vm && vm.getReleaseHomeImageProbe,
+        vm && vm.$ && vm.$.setupState && vm.$.setupState.getReleaseHomeImageProbe,
+        vm && vm.$ && vm.$.ctx && vm.$.ctx.getReleaseHomeImageProbe,
+        vm && vm.$ && vm.$.exposed && vm.$.exposed.getReleaseHomeImageProbe,
+        page && page.getReleaseHomeImageProbe,
+      ]
+      const getter = getterCandidates.find((candidate) => typeof candidate === 'function')
       if (typeof getter !== 'function') {
         return {
           ok: false,
           error: 'getReleaseHomeImageProbe unavailable',
+          vmKeys: vm ? Object.keys(vm).slice(0, 40) : [],
+          setupStateKeys: vm && vm.$ && vm.$.setupState ? Object.keys(vm.$.setupState).slice(0, 40) : [],
+          ctxKeys: vm && vm.$ && vm.$.ctx ? Object.keys(vm.$.ctx).slice(0, 40) : [],
           currentImageCount: 0,
           loadedCount: 0,
           failedCount: 0,

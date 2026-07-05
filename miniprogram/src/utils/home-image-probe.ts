@@ -75,13 +75,14 @@ export function summarizeHomeImageProbe(
   const currentImageCount = dedupedKeys.length
   const loadedCount = loaded.length
   const failedCount = failed.length
+  const pendingCount = Math.max(0, currentImageCount - loadedCount - failedCount)
   return {
     currentImageCount,
     loadedCount,
     failedCount,
-    pendingCount: Math.max(0, currentImageCount - loadedCount - failedCount),
+    pendingCount,
     hasRendered: loadedCount > 0,
-    satisfied: currentImageCount === 0 || loadedCount > 0,
+    satisfied: currentImageCount === 0 || pendingCount === 0,
     loaded,
     failed,
   }

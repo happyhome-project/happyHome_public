@@ -875,6 +875,10 @@ function getReleaseHomeImageProbe() {
   return summarizeHomeImageProbe(currentHomeImageKeys.value, homeImageProbeEntries.value)
 }
 
+defineExpose({
+  getReleaseHomeImageProbe,
+})
+
 function reportMissingHomeTitle(post: any, section: any, source: string) {
   const issue = getPostHomeTitleIssue(post, section)
   if (!issue) return
