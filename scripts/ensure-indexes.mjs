@@ -466,6 +466,12 @@ const REQUIRED_COLLECTIONS = [
 
 let hadError = false
 
+function isAlreadyExistsError(error) {
+  const msg = String(error?.message || error)
+  if (/not exist|does not exist|不存在|CollectionNotExists/i.test(msg)) return false
+  return /Table exist|already exists|collection .*exists|index .*exists|已存在/i.test(msg)
+}
+
 for (const coll of REQUIRED_COLLECTIONS) {
   try {
     const existRes = await db.checkCollectionExists(coll)
@@ -477,6 +483,10 @@ for (const coll of REQUIRED_COLLECTIONS) {
     console.log(`✓ collection ${coll} created`)
   } catch (e) {
     const msg = String(e?.message || e)
+    if (isAlreadyExistsError(e)) {
+      console.log(`= collection ${coll} (already exists)`)
+      continue
+    }
     console.error(`✗ collection ${coll}`, msg)
     hadError = true
   }
@@ -506,6 +516,10 @@ for (const idx of INDEXES) {
   } catch (e) {
     // checkIndexExists 对不存在的集合会抛错；降级到尝试直接建，若失败再报
     const msg = String(e?.message || e)
+    if (isAlreadyExistsError(e)) {
+      console.log(`= ${idx.coll}.${idx.name} (already exists)`)
+      continue
+    }
     if (msg.includes('不存在') || msg.includes('not exist') || msg.includes('CollectionNotExists')) {
       console.error(`✗ ${idx.coll}.${idx.name}  collection "${idx.coll}" 不存在，跳过`)
       continue

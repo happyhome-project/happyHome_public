@@ -14,3 +14,10 @@ test('ensure-indexes creates every CloudBase collection used by formal post RAG 
   assert.match(source, /post_video_rag_assets/)
   assert.match(source, /post_video_rag_jobs/)
 })
+
+test('ensure-indexes treats CloudBase already-exists races as idempotent success', () => {
+  assert.match(source, /function isAlreadyExistsError/)
+  assert.match(source, /Table exist/)
+  assert.match(source, /already exists/)
+  assert.match(source, /= collection \$\{coll\} \(already exists\)/)
+})
