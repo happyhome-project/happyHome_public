@@ -300,7 +300,7 @@ function sleep(ms) {
 
 function isTransientCloudBaseCliFailure(result) {
   const text = `${result?.reason || ''}\n${result?.output || ''}`
-  return /ECONNRESET|ETIMEDOUT|TLS connection|socket disconnected|network timeout|ENOTFOUND|EAI_AGAIN|_a\.includes is not a function/i.test(text)
+  return /ECONNRESET|ETIMEDOUT|TLS connection|socket disconnected|network timeout|ENOTFOUND|EAI_AGAIN|_a\.includes is not a function|e\.message\.includes is not a function/i.test(text)
 }
 
 async function runCloudBaseCliCaptureWithRetry(commandLine, options = {}, attempts = 3) {

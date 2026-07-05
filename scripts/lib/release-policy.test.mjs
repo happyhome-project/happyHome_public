@@ -85,6 +85,7 @@ test('CloudBase CLI retry treats its known includes TypeError as transient', () 
   const retryClassifier = extractFunctionBlock(deployScript, 'function isTransientCloudBaseCliFailure')
 
   assert.match(retryClassifier, /_a\\\.includes is not a function/)
+  assert.match(retryClassifier, /e\\\.message\\\.includes is not a function/)
 })
 
 test('formal release path records resumable ledger stages before upload', () => {
