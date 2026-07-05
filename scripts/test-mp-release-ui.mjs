@@ -3,6 +3,7 @@
  *
  * This script opens the built mp-weixin package through the DevTools automator
  * websocket and proves the release-critical paths:
+ *   - HH_RELEASE_HOME_IMAGES_RENDERED
  *   - HH_RELEASE_HOME_DETAIL_NONEMPTY
  *   - HH_RELEASE_LOGIN_VERSION
  *   - HH_RELEASE_PROFILE_LOGIN_CLEAN
@@ -536,6 +537,70 @@ async function pageText(page) {
   return String(await root.text().catch(() => '') || '')
 }
 
+async function captureHomeImageProbe(mp) {
+  return await mp.evaluate(() => {
+    try {
+      const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+      const vm = pages && pages[0] && (pages[0].$vm || pages[0].$vue || pages[0])
+      const getter = vm && vm.getReleaseHomeImageProbe
+      if (typeof getter !== 'function') {
+        return {
+          ok: false,
+          error: 'getReleaseHomeImageProbe unavailable',
+          currentImageCount: 0,
+          loadedCount: 0,
+          failedCount: 0,
+          pendingCount: 0,
+          hasRendered: false,
+          loaded: [],
+          failed: [],
+        }
+      }
+      const probe = getter()
+      return { ok: true, ...probe }
+    } catch (error) {
+      return {
+        ok: false,
+        error: String(error?.message || error),
+        currentImageCount: 0,
+        loadedCount: 0,
+        failedCount: 0,
+        pendingCount: 0,
+        hasRendered: false,
+        loaded: [],
+        failed: [],
+      }
+    }
+  })
+}
+
+async function waitForHomeImagesRendered(mp, options = {}) {
+  const timeoutMs = Number(options.timeoutMs || 15000)
+  const intervalMs = Number(options.intervalMs || 1000)
+  const deadline = Date.now() + timeoutMs
+  let lastProbe = null
+
+  while (Date.now() < deadline) {
+    lastProbe = await withTimeout(captureHomeImageProbe(mp), 15000, 'capture release home image probe')
+    if (lastProbe?.ok === false) return lastProbe
+    if (lastProbe?.hasRendered) return lastProbe
+    if ((lastProbe?.currentImageCount || 0) > 0 && (lastProbe?.pendingCount || 0) === 0) return lastProbe
+    await sleep(intervalMs)
+  }
+
+  return lastProbe || {
+    ok: false,
+    error: 'home image probe timed out without data',
+    currentImageCount: 0,
+    loadedCount: 0,
+    failedCount: 0,
+    pendingCount: 0,
+    hasRendered: false,
+    loaded: [],
+    failed: [],
+  }
+}
+
 async function captureStorage(mp) {
   return await mp.evaluate(() => {
     const keys = ['user_store', 'community_store', 'dev-gateway', 'test-openid']
@@ -918,7 +983,6 @@ async function verifyHomeDetail(mp, context = {}) {
   let releaseSeed = null
   let home = await withTimeout(mp.reLaunch('/pages/index/index'), 30000, 'open release home page')
   await sleep(6000)
-  let homeText = await withTimeout(pageText(home), 10000, 'read release home text')
   let target = await withTimeout(findFirstPost(home), 15000, 'find release home post')
 
   if (!target) {
@@ -929,9 +993,11 @@ async function verifyHomeDetail(mp, context = {}) {
     context.releaseFixture = releaseSeed.fixture
     home = await withTimeout(mp.reLaunch('/pages/index/index'), 30000, 'open release home page after fixture')
     await sleep(7000)
-    homeText = await withTimeout(pageText(home), 10000, 'read release home text after fixture')
     target = await withTimeout(findFirstPost(home), 15000, 'find release home post after fixture')
   }
+
+  const homeImages = await waitForHomeImagesRendered(mp)
+  const homeText = await withTimeout(pageText(home), 10000, 'read release home text')
 
   if (!target) {
     const fixture = releaseSeed?.fixture ? ` fixture=${JSON.stringify(summarizeReleaseFixture(releaseSeed.fixture))}` : ''
@@ -954,6 +1020,8 @@ async function verifyHomeDetail(mp, context = {}) {
 
   return {
     passed,
+    homeImages,
+    homeImagesRendered: Boolean(homeImages?.ok !== false && homeImages?.satisfied),
     homeTextLength: homeText.length,
     homeTextSample: homeText.slice(0, 300),
     detailPath,
@@ -1068,6 +1136,11 @@ async function main() {
     evidence.homeDetailAttempt = homeDetailRun.attempt
     const homeDetail = homeDetailRun.result
     evidence.homeDetail = homeDetail
+    evidence.homeImages = homeDetail.homeImages
+    if (homeDetail.homeImagesRendered) {
+      evidence.markers.push('HH_RELEASE_HOME_IMAGES_RENDERED')
+      console.log('HH_RELEASE_HOME_IMAGES_RENDERED')
+    }
     if (homeDetail.passed) {
       evidence.markers.push('HH_RELEASE_HOME_DETAIL_NONEMPTY')
       console.log('HH_RELEASE_HOME_DETAIL_NONEMPTY')
@@ -1119,6 +1192,7 @@ async function main() {
     }
 
     assertReleaseUiEvidence({
+      homeImagesRendered: homeDetail.homeImagesRendered,
       homeDetailNonEmpty: homeDetail.passed,
       loginVersionVisible: profileLoginClean.versionPassed,
       profileLoginClean: profileLoginClean.cleanPassed,

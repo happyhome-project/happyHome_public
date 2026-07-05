@@ -1,5 +1,10 @@
 export const REQUIRED_RELEASE_UI_MARKERS = [
   {
+    id: 'home-images-rendered',
+    marker: 'HH_RELEASE_HOME_IMAGES_RENDERED',
+    description: 'home page image evidence is satisfied for current content',
+  },
+  {
     id: 'home-detail-nonempty',
     marker: 'HH_RELEASE_HOME_DETAIL_NONEMPTY',
     description: 'home feed tap opens a non-empty detail page',
@@ -53,9 +58,10 @@ export function buildDevToolsCacheArgs({ clean, projectPath, idePort }) {
 
 export function assertReleaseUiEvidence(evidence = {}) {
   const missing = []
-  if (!evidence.homeDetailNonEmpty) missing.push(REQUIRED_RELEASE_UI_MARKERS[0])
-  if (!evidence.loginVersionVisible) missing.push(REQUIRED_RELEASE_UI_MARKERS[1])
-  if (!evidence.profileLoginClean) missing.push(REQUIRED_RELEASE_UI_MARKERS[2])
+  if (!evidence.homeImagesRendered) missing.push(REQUIRED_RELEASE_UI_MARKERS[0])
+  if (!evidence.homeDetailNonEmpty) missing.push(REQUIRED_RELEASE_UI_MARKERS[1])
+  if (!evidence.loginVersionVisible) missing.push(REQUIRED_RELEASE_UI_MARKERS[2])
+  if (!evidence.profileLoginClean) missing.push(REQUIRED_RELEASE_UI_MARKERS[3])
   if (missing.length) {
     const details = missing.map(({ marker, description }) => `${marker} (${description})`).join(', ')
     throw new Error(`Release UI evidence markers missing: ${details}`)
