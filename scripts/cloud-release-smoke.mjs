@@ -265,6 +265,28 @@ function logAttemptLimits(logLimit) {
     .filter((limit, index, values) => values.indexOf(limit) === index)
 }
 
+function escapeClsQueryValue(value) {
+  return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
+export function buildLogsSearchArgs(fn, opts = {}, limit = 20) {
+  const query = [`function_name:"${escapeClsQueryValue(fn)}"`]
+  if (opts.contains) query.push(`log:"${escapeClsQueryValue(opts.contains)}"`)
+  if (opts.errorOnly) query.push('status_code>200 AND status_code!=202')
+  return [
+    'logs',
+    'search',
+    '--query',
+    query.join(' AND '),
+    '--timeRange',
+    opts.timeRange || '30m',
+    '--limit',
+    String(limit),
+    '--sort',
+    'desc',
+  ]
+}
+
 function tcbArgs(actionArgs, envId, json = true) {
   const args = [...actionArgs, '--env-id', envId]
   if (json) args.push('--json')
@@ -361,23 +383,42 @@ export class CloudSmokeRun {
     const stage = `log-${fn}${opts.errorOnly ? '-error' : ''}`
     const required = opts.required !== false
     const limits = required ? logAttemptLimits(this.options.logLimit) : [Math.min(this.options.logLimit, 5)]
-    const attempts = []
+    const searchAttempts = []
+    const legacyAttempts = []
     let selected = null
+    let method = 'logs-search'
 
     for (let index = 0; index < limits.length; index += 1) {
       if (index > 0 && this.options.logWaitMs > 0) {
         await new Promise((resolveDelay) => setTimeout(resolveDelay, Math.min(this.options.logWaitMs, 5000)))
       }
-      const attemptStage = limits.length === 1 ? stage : `${stage}-attempt-${index + 1}`
-      const args = ['fn', 'log', fn, '--limit', String(limits[index]), '--order', 'desc']
-      if (opts.errorOnly) args.push('--error')
+      const attemptStage = limits.length === 1 ? `${stage}-search` : `${stage}-search-attempt-${index + 1}`
+      const args = buildLogsSearchArgs(fn, opts, limits[index])
       const record = await this.runTcb(attemptStage, args)
-      attempts.push(record)
+      searchAttempts.push(record)
       selected = record
       if (record.ok && includesRequiredText(record, opts.contains)) break
     }
 
     let ok = Boolean(selected?.ok && includesRequiredText(selected, opts.contains))
+
+    if (!ok) {
+      for (let index = 0; index < limits.length; index += 1) {
+        if (index > 0 && this.options.logWaitMs > 0) {
+          await new Promise((resolveDelay) => setTimeout(resolveDelay, Math.min(this.options.logWaitMs, 5000)))
+        }
+        const attemptStage = limits.length === 1 ? `${stage}-legacy` : `${stage}-legacy-attempt-${index + 1}`
+        const args = ['fn', 'log', fn, '--limit', String(limits[index]), '--order', 'desc']
+        if (opts.errorOnly) args.push('--error')
+        const record = await this.runTcb(attemptStage, args)
+        legacyAttempts.push(record)
+        selected = record
+        method = 'fn-log'
+        if (record.ok && includesRequiredText(record, opts.contains)) break
+      }
+      ok = Boolean(selected?.ok && includesRequiredText(selected, opts.contains))
+    }
+
     const inlineLogFallback = !ok && opts.contains
       ? this.evidence.find((record) => record.stage.startsWith(`invoke-${fn}-`) && includesRequiredText(record, opts.contains))
       : null
@@ -386,7 +427,10 @@ export class CloudSmokeRun {
       ...(selected || {}),
       stage,
       ok,
-      attempts,
+      method: inlineLogFallback ? 'inline-invoke-output' : method,
+      attempts: [...searchAttempts, ...legacyAttempts],
+      searchAttempts,
+      legacyAttempts,
       ...(inlineLogFallback ? { inlineLogFallbackStage: inlineLogFallback.stage } : {}),
       finishedAt: new Date().toISOString(),
     }
