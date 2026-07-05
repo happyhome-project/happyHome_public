@@ -7,7 +7,6 @@ import {
   buildPostSearchChunks,
   buildPostSearchDocument,
   normalizeSearchText,
-  searchPostIndex,
   type PostSearchResult,
   type PostSearchResultItem,
 } from './post-search'
@@ -15,6 +14,7 @@ import {
 export const POST_RAG_JOBS = 'post_rag_jobs'
 export const POST_RAG_INDEX_STATE = 'post_rag_index_state'
 export const POST_RAG_CHUNKS = 'post_rag_chunks'
+export const POST_RAG_WORKER_STATE = 'post_rag_worker_state'
 export const POST_VIDEO_RAG_ASSETS = 'post_video_rag_assets'
 export const POST_VIDEO_RAG_JOBS = 'post_video_rag_jobs'
 
@@ -227,7 +227,7 @@ const THRIFT_FAMILY_EXPANSION = [
   '俭约',
   '儉約',
 ]
-const MIN_LKEAP_RERANK_EVIDENCE_SCORE = 0.45
+const MIN_LKEAP_RERANK_EVIDENCE_SCORE = 0.7
 const MIN_LKEAP_SEMANTIC_EVIDENCE_SCORE = 0.42
 
 function logRagSearchDecision(event: string, payload: Record<string, unknown>) {
@@ -276,13 +276,26 @@ export function buildNoEvidenceRagResult(params: {
   }
 }
 
-function withFallbackFields(result: PostSearchResult, reason?: string): RagSearchResult {
+function buildUnavailableFallbackRagResult(params: {
+  query: string
+  communityId: string
+  sectionId?: string
+  skip?: number
+  limit?: number
+  reason?: string
+}): RagSearchResult {
   return {
-    ...result,
+    query: params.query,
+    communityId: params.communityId,
+    sectionId: params.sectionId || '',
+    total: 0,
+    skip: Math.max(0, Math.floor(Number(params.skip || 0))),
+    limit: Math.max(1, Math.floor(Number(params.limit || 20))),
+    items: [],
     answer: '',
     citations: [],
     mode: 'fallback',
-    ...(reason ? { fallbackReason: reason } : {}),
+    ...(params.reason ? { fallbackReason: params.reason } : {}),
   }
 }
 
@@ -363,7 +376,6 @@ export async function searchPostsWithRag(
   const skip = Math.max(0, Math.floor(Number(params.skip || 0)))
   const limit = Math.max(1, Math.floor(Number(params.limit || 20)))
   const includeMemberOnly = params.includeMemberOnly !== false
-  const fallbackSearch = options.fallbackSearch || searchPostIndex
   const provider = options.provider === undefined ? createTencentRagProviderFromEnv() : options.provider
   const fallbackParams = { communityId, query, sectionId, skip, limit, includeMemberOnly }
 
@@ -374,7 +386,14 @@ export async function searchPostsWithRag(
       sectionId,
       queryLength: query.length,
     })
-    return withFallbackFields(await fallbackSearch(fallbackParams), 'rag_provider_not_configured')
+    return buildUnavailableFallbackRagResult({
+      query,
+      communityId,
+      sectionId,
+      skip,
+      limit,
+      reason: 'rag_provider_not_configured',
+    })
   }
 
   try {
@@ -419,10 +438,14 @@ export async function searchPostsWithRag(
       sectionId,
       queryLength: query.length,
     })
-    return withFallbackFields(
-      await fallbackSearch(fallbackParams),
-      error?.message || 'rag_provider_failed'
-    )
+    return buildUnavailableFallbackRagResult({
+      query,
+      communityId,
+      sectionId,
+      skip,
+      limit,
+      reason: error?.message || 'rag_provider_failed',
+    })
   }
 }
 
@@ -464,7 +487,8 @@ export function readTencentLkeapRagConfigFromEnv(env: NodeJS.ProcessEnv = proces
 
 export function createTencentRagProviderFromEnv() {
   const providerName = String(process.env.TENCENT_RAG_PROVIDER || '').trim().toLowerCase()
-  if (providerName === 'lkeap-cloudbase') {
+  const allowLegacyCloudBaseRag = /^(1|true|yes|on)$/i.test(String(process.env.HAPPYHOME_ALLOW_LEGACY_CLOUDBASE_RAG || ''))
+  if (providerName === 'lkeap-cloudbase' && allowLegacyCloudBaseRag) {
     return createTencentLkeapCloudBaseProvider(readTencentLkeapRagConfigFromEnv())
   }
   return createTencentRagProvider(readTencentRagConfigFromEnv())
@@ -678,8 +702,48 @@ export function buildTencentEsHybridSearchBody(
   }
 }
 
-function toCitation(hit: any): RagCitation {
+function evidenceNeedlesForQuery(query?: RagQuery): string[] {
+  if (!query) return []
+  const candidates = [
+    query.raw,
+    query.normalized,
+    ...query.expansionTerms,
+  ]
+  const seen = new Set<string>()
+  const needles: string[] = []
+  for (const candidate of candidates) {
+    const text = String(candidate || '').replace(/\s+/g, '').trim()
+    if (text.length < 2 || seen.has(text)) continue
+    seen.add(text)
+    needles.push(text)
+  }
+  return needles.sort((left, right) => right.length - left.length || left.localeCompare(right))
+}
+
+function evidenceSnippetFromText(text: string, fallback: string, query?: RagQuery): string {
+  const source = String(text || fallback || '').replace(/\s+/g, ' ').trim()
+  if (!source) return ''
+  const fallbackText = String(fallback || source).replace(/\s+/g, ' ').trim()
+  const sourceLower = source.toLowerCase()
+  const matchIndex = evidenceNeedlesForQuery(query)
+    .map((needle) => sourceLower.indexOf(needle.toLowerCase()))
+    .filter((index) => index >= 0)
+    .sort((left, right) => left - right)[0]
+  if (matchIndex === undefined) return fallbackText ? fallbackText.slice(0, 180) : source.slice(0, 180)
+
+  const chars = Array.from(source)
+  const prefix = source.slice(0, matchIndex)
+  const charIndex = Array.from(prefix).length
+  const start = Math.max(0, charIndex - 48)
+  const end = Math.min(chars.length, charIndex + 132)
+  const snippet = `${start > 0 ? '...' : ''}${chars.slice(start, end).join('')}${end < chars.length ? '...' : ''}`
+  return snippet
+}
+
+function toCitation(hit: any, query?: RagQuery): RagCitation {
   const source = hit?._source || hit || {}
+  const sourceText = String(source.text || source.preview || '')
+  const sourcePreview = String(source.preview || source.text || '')
   return {
     postId: String(source.postId || ''),
     chunkId: String(source.chunkId || hit?._id || ''),
@@ -689,7 +753,7 @@ function toCitation(hit: any): RagCitation {
     sectionName: String(source.sectionName || ''),
     fieldLabel: String(source.fieldLabel || ''),
     fieldType: String(source.fieldType || ''),
-    preview: String(source.preview || source.text || '').slice(0, 180),
+    preview: evidenceSnippetFromText(sourceText, sourcePreview, query).slice(0, 200),
     score: Number(hit?._score || source.score || 0),
     visibility: normalizeRagVisibility(source.visibility),
     sourceUpdatedAt: String(source.sourceUpdatedAt || ''),
@@ -1070,7 +1134,7 @@ export function createTencentLkeapCloudBaseProvider(config: TencentLkeapRagConfi
           const semanticScore = vectorCosine(queryVector, chunk.embedding)
           const lexicalScore = lexicalEvidenceScore(input.ragQuery, chunk)
           return {
-            ...toCitation({ _id: chunk.chunkId, _source: chunk }),
+            ...toCitation({ _id: chunk.chunkId, _source: chunk }, input.ragQuery),
             score: semanticScore + lexicalScore * 0.08,
             semanticScore,
             lexicalScore,
@@ -1144,18 +1208,21 @@ export function createTencentRagProvider(
       const searchBody = buildTencentEsHybridSearchBody(input, config, queryVector)
       const response = await sendJson<any>(config, 'POST', `${config.indexName}/_search`, searchBody)
       let citations: ScoredRagCitation[] = (response?.hits?.hits || [])
-        .map(toCitation)
+        .map((hit: any) => {
+          const citation = toCitation(hit, input.ragQuery)
+          const source = hit?._source || hit || {}
+          return {
+            ...citation,
+            lexicalScore: lexicalEvidenceScore(input.ragQuery, {
+              title: citation.title,
+              fieldLabel: citation.fieldLabel,
+              preview: citation.preview,
+              text: String(source.text || citation.preview),
+            }),
+          }
+        })
         .filter((citation: RagCitation) => citation.postId && citation.chunkId)
         .filter((citation: RagCitation) => isEvidenceVisible(citation.visibility, input.includeMemberOnly !== false))
-        .map((citation: RagCitation) => ({
-          ...citation,
-          lexicalScore: lexicalEvidenceScore(input.ragQuery, {
-            title: citation.title,
-            fieldLabel: citation.fieldLabel,
-            preview: citation.preview,
-            text: citation.preview,
-          }),
-        }))
 
       if (citations.length > 0) {
         const documents = citations.map((citation: RagCitation) => citation.preview)
@@ -1196,7 +1263,7 @@ export function createTencentRagProvider(
         : null
       const answer = extractCompletionText(answerResponse) || (citations.length ? deterministicAnswer(citations) : '')
       return {
-        total: Number(response?.hits?.total?.value ?? citations.length),
+        total: citations.length,
         answer,
         citations,
         items: resultItemsFromCitations(citations),
@@ -2333,6 +2400,22 @@ export async function getPostRagIndexHealthForCommunity(communityId: string) {
     db.count(POST_RAG_JOBS, { communityId: normalizedCommunityId, status: 'pending' }),
     db.count(POST_RAG_JOBS, { communityId: normalizedCommunityId, status: 'failed' }),
   ])
+  const [
+    latestIndexedRows,
+    oldestPendingRows,
+    latestFailedRows,
+    workerState,
+  ] = await Promise.all([
+    db.query(POST_RAG_INDEX_STATE, { communityId: normalizedCommunityId, status: 'indexed' }, { orderBy: ['indexedAt', 'desc'], limit: 1 }).catch(() => []),
+    db.query(POST_RAG_JOBS, { communityId: normalizedCommunityId, status: 'pending' }, { orderBy: ['createdAt', 'asc'], limit: 1 }).catch(() => []),
+    db.query(POST_RAG_JOBS, { communityId: normalizedCommunityId, status: 'failed' }, { orderBy: ['updatedAt', 'desc'], limit: 1 }).catch(() => []),
+    getPostRagWorkerState(),
+  ])
+  const potentialMissingActiveCount = Math.max(0, activePostCount - indexedStateCount)
+  const hasBlockingIssues = potentialMissingActiveCount > 0
+    || failedStateCount > 0
+    || pendingJobCount > 0
+    || failedJobCount > 0
   return {
     communityId: normalizedCommunityId,
     activePostCount,
@@ -2341,8 +2424,52 @@ export async function getPostRagIndexHealthForCommunity(communityId: string) {
     failedStateCount,
     pendingJobCount,
     failedJobCount,
-    potentialMissingActiveCount: Math.max(0, activePostCount - indexedStateCount),
+    potentialMissingActiveCount,
     coverageRatio: activePostCount > 0 ? indexedStateCount / activePostCount : 1,
+    latestIndexedAt: String((latestIndexedRows as any[])?.[0]?.indexedAt || ''),
+    oldestPendingJobCreatedAt: String((oldestPendingRows as any[])?.[0]?.createdAt || ''),
+    latestFailedJobUpdatedAt: String((latestFailedRows as any[])?.[0]?.updatedAt || ''),
+    readyForRag: !hasBlockingIssues,
+    hasBlockingIssues,
+    worker: workerState,
+  }
+}
+
+async function getPostRagWorkerState() {
+  try {
+    const state = await db.getById(POST_RAG_WORKER_STATE, 'post-rag-worker') as Record<string, any>
+    if (!state) return null
+    return {
+      status: String(state.status || ''),
+      lastRunAt: String(state.lastRunAt || ''),
+      lastCompletedAt: String(state.lastCompletedAt || ''),
+      lastScannedCount: Number(state.lastScannedCount || 0),
+      lastOkCount: Number(state.lastOkCount || 0),
+      lastFailedCount: Number(state.lastFailedCount || 0),
+      lastErrorMessage: String(state.lastErrorMessage || ''),
+    }
+  } catch {
+    return null
+  }
+}
+
+async function updatePostRagWorkerState(data: Record<string, any>) {
+  try {
+    const updateResult = await db.updateById(POST_RAG_WORKER_STATE, 'post-rag-worker', data) as any
+    if (updateResult === undefined || updateMatchedDocument(updateResult)) return
+    await db.create(POST_RAG_WORKER_STATE, {
+      _id: 'post-rag-worker',
+      ...data,
+    }).catch(() => null)
+  } catch {
+    try {
+      await db.create(POST_RAG_WORKER_STATE, {
+        _id: 'post-rag-worker',
+        ...data,
+      })
+    } catch {
+      // Worker health telemetry must not block indexing.
+    }
   }
 }
 
@@ -2433,6 +2560,7 @@ export async function processPostRagJobBatch(options: {
   const provider = options.provider || createTencentRagProviderFromEnv()
   const limit = Math.max(1, Math.min(20, Math.floor(Number(options.limit || 5))))
   const postId = String(options.postId || '').trim()
+  const startedAt = new Date().toISOString()
   const jobs = await db.query(
     POST_RAG_JOBS,
     { status: 'pending', ...(postId ? { postId } : {}) },
@@ -2440,6 +2568,8 @@ export async function processPostRagJobBatch(options: {
   ) as any[]
   const results: Array<{ jobId: string; ok: boolean; error?: string }> = []
   let indexEnsured = false
+  let okCount = 0
+  let failedCount = 0
   for (const job of jobs) {
     const now = new Date().toISOString()
     try {
@@ -2457,6 +2587,7 @@ export async function processPostRagJobBatch(options: {
           await upsertPostRagIndexState(job.postId, removedRagIndexState(job, now))
           await db.updateById(POST_RAG_JOBS, job._id, { status: 'completed', updatedAt: now })
           results.push({ jobId: job._id, ok: true })
+          okCount += 1
           continue
         }
         if (!isPostSearchableForRag(post)) {
@@ -2464,6 +2595,7 @@ export async function processPostRagJobBatch(options: {
           await upsertPostRagIndexState(job.postId, removedRagIndexState(job, now, post))
           await db.updateById(POST_RAG_JOBS, job._id, { status: 'completed', updatedAt: now })
           results.push({ jobId: job._id, ok: true })
+          okCount += 1
           continue
         }
         const section = await db.getById('sections', post.sectionId) as Section
@@ -2506,6 +2638,7 @@ export async function processPostRagJobBatch(options: {
       }
       await db.updateById(POST_RAG_JOBS, job._id, { status: 'completed', updatedAt: now })
       results.push({ jobId: job._id, ok: true })
+      okCount += 1
     } catch (error: any) {
       await db.updateById(POST_RAG_JOBS, job._id, {
         status: 'failed',
@@ -2514,7 +2647,17 @@ export async function processPostRagJobBatch(options: {
         updatedAt: now,
       })
       results.push({ jobId: job._id, ok: false, error: String(error?.message || error) })
+      failedCount += 1
     }
   }
+  await updatePostRagWorkerState({
+    status: failedCount > 0 ? 'completed_with_errors' : 'completed',
+    lastRunAt: startedAt,
+    lastCompletedAt: new Date().toISOString(),
+    lastScannedCount: jobs.length,
+    lastOkCount: okCount,
+    lastFailedCount: failedCount,
+    lastErrorMessage: results.find((result) => !result.ok)?.error || '',
+  })
   return { scannedCount: jobs.length, results }
 }

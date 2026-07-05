@@ -14,6 +14,7 @@
 
 - `post_rag_jobs`：发帖、改帖、审核、删除、板块字段变化产生的 RAG 索引任务。
 - `post_rag_index_state`：每篇帖子在正式 RAG 索引里的 indexed/removed/failed 状态。
+- `post_rag_worker_state`：`post-rag-worker` 最近一次运行状态、成功/失败计数和错误摘要。
 - `post-rag-worker` 云函数：分批处理 pending job。
 - `post_video_rag_jobs`：低文本信号视频的可选分析任务，按成本策略排队。
 - `post_video_rag_assets`：视频 ASR/OCR/关键帧摘要缓存，按 `cacheKey` 复用，避免重复付费分析。
@@ -23,7 +24,7 @@
 
 - `TencentRagProvider` 是 provider 接口，正式主路径是腾讯 ES 智能搜索开发：
   - `TENCENT_RAG_PROVIDER=es` 或未配置 provider：ES embedding + `retriever.rank_fusion` hybrid search + rerank + LLM answer。
-  - `TENCENT_RAG_PROVIDER=lkeap-cloudbase`：仅作显式调试/旧路径，LKEAP embedding + CloudBase `post_rag_chunks` chunk mirror + LKEAP rerank + LKEAP LLM answer。
+  - `TENCENT_RAG_PROVIDER=lkeap-cloudbase` 且 `HAPPYHOME_ALLOW_LEGACY_CLOUDBASE_RAG=1`：仅作显式调试/旧路径，LKEAP embedding + CloudBase `post_rag_chunks` chunk mirror + LKEAP rerank + LKEAP LLM answer。
 - index 文档粒度是 chunk，不是整篇帖子。
 - chunk metadata 固定包含：`communityId`、`sectionId`、`postId`、`chunkId`、`fieldType`、`fieldLabel`、`sourceUpdatedAt`、`visibility`。
 - 运行时必须有 ES index endpoint/用户名/密码；模型服务默认走腾讯 ES 智能搜索原子 API（Embedding、Rerank、LLM），也兼容已经创建好的 ES inference endpoint。
@@ -33,7 +34,7 @@ ES 智能搜索主路径：
 - 每个 chunk 写入 ES index，字段包括正文文本、preview、标题、字段标签、板块名、权限 metadata 和 dense vector。
 - 查询时先对扩展后的 query 做 embedding，再用 `retriever.rank_fusion` 同时召回全文匹配和向量匹配候选。
 - 社区、板块和 `visibility` 过滤在全文 retriever 与 knn retriever 两侧同时生效。
-- rerank 后先过滤弱证据；没有合格 citation 时返回 `mode=no_answer`，不调用 LLM、不展示无关帖子作为答案证据。
+- rerank 后先过滤弱证据；无词面证据的候选必须达到更高 rerank 门槛才可作为 citation。没有合格 citation 时返回 `mode=no_answer`，不调用 LLM、不展示无关帖子作为答案证据。
 - 只有有合格 citations 时才调用 LLM answer，prompt 中只包含这些已授权、已过滤的片段。
 
 腾讯 ES 智能搜索原子能力：
@@ -48,7 +49,7 @@ LKEAP 原子能力旧路径：
 - 2026-06-25 已开通知识引擎原子能力后付费，并创建子用户 `happyhome_rag`。
 - 子用户已绑定预设策略 `QcloudLKEAPFullAccess`，本地密钥文件位于仓库外 `~/.happyhome/tencent-lkeap.env`。
 - `GetEmbedding`、`RunRerank`、`ChatCompletions` 已用真实 API 连通验证。
-- LKEAP 本身不是持久化向量数据库；`lkeap-cloudbase` provider 用 CloudBase 的 `post_rag_chunks` 保存 chunk 与 embedding，只能作为显式调试/旧路径，不能作为正式主检索。
+- LKEAP 本身不是持久化向量数据库；`lkeap-cloudbase` provider 用 CloudBase 的 `post_rag_chunks` 保存 chunk 与 embedding，只能在 `HAPPYHOME_ALLOW_LEGACY_CLOUDBASE_RAG=1` 时作为显式调试/旧路径，不能作为正式主检索。
 - 云函数环境中可能存在 CloudBase 注入的 `TENCENTCLOUD_SECRETID`；LKEAP provider 必须优先读取显式配置的 `TENCENT_LKEAP_SECRET_ID/KEY`，否则 worker 会拿错密钥并返回 `AuthFailure.SecretIdNotFound`。
 - 生产环境不应配置 `TENCENT_RAG_PROVIDER=lkeap`。旧值会被视为无效旧配置，正式 provider 仍走 ES。
 
@@ -62,8 +63,8 @@ LKEAP 原子能力旧路径：
 
 降级层：
 
-- 旧 `post_search_*` 倒排/本地稀疏向量索引只作为 fallback。
-- provider 未配置或腾讯服务失败时，`post.search` 返回 `mode=fallback`，不生成 AI 回答。
+- 旧 `post_search_*` 倒排/本地稀疏向量索引只保留为旧搜索/排障/迁移辅助，不作为 `post.search` 的 RAG 主检索。
+- provider 未配置或腾讯服务失败时，`post.search` 返回 `mode=fallback`，不生成 AI 回答，也不返回普通搜索 `items/citations` 冒充 RAG 结果。
 
 ## 动态更新
 
@@ -75,9 +76,9 @@ LKEAP 原子能力旧路径：
 - 管理后台发帖/改帖：复用 `auditAndApply` 排 RAG job。
 - 审核通过：排 `upsert` job。
 - 审核不通过：初始内容排 `delete` job；pending 编辑被拒不删除旧内容索引。
-- 帖子删除：排 `delete` job，并清理 fallback 索引。
+- 帖子删除：排 `delete` job，并清理旧搜索索引。
 - 板块名称、字段变化：按板块给 active posts 排 `upsert` job；纯新增空字段不扫描历史帖。
-- 社区硬删除：给社区下帖子排 `delete` job，并清理 fallback 索引。
+- 社区硬删除：给社区下帖子排 `delete` job，并清理旧搜索索引。
 - 周期性/手动 reconcile：按社区扫描 `posts` 与 `post_rag_index_state`，只给缺失、过期、应删除的帖子排 job，避免所有历史帖反复付费重建。
 
 worker 处理 `upsert` 时会先删除该 post 在 ES 中的旧 chunks，再写当前 chunks，避免旧正文、旧视频名继续被搜到。
@@ -178,6 +179,7 @@ POST_VIDEO_RAG_TOKENHUB_BASE_URL=https://tokenhub.tencentmaas.com/v1
 
 ```text
 TENCENT_RAG_PROVIDER=lkeap-cloudbase
+HAPPYHOME_ALLOW_LEGACY_CLOUDBASE_RAG=1
 TENCENT_LKEAP_SECRET_ID=
 TENCENT_LKEAP_SECRET_KEY=
 TENCENT_LKEAP_REGION=ap-guangzhou
@@ -288,7 +290,7 @@ npm.cmd run verify:post-rag-smoke
 { "limit": 3 }
 ```
 
-旧 fallback 索引回填仍保留：
+旧搜索索引回填仍保留，仅用于旧搜索排障/迁移辅助，不用于正式 `post.search` RAG 主路径：
 
 ```powershell
 npm.cmd run rebuild:post-search-index -- --all-active
@@ -307,7 +309,7 @@ npm.cmd run rebuild:post-search-index -- --all-active
 
 - 有证据时返回 `mode=rag`、`answer`、`citations`、可跳转 `items`。
 - 没有足够证据时返回 `mode=no_answer`，小程序搜索页不能再用本地 `bootstrap` 快照混入非 RAG 结果。
-- 腾讯服务不可用时返回 `mode=fallback`，不显示 AI answer。
+- 腾讯服务不可用时返回 `mode=fallback`，不显示 AI answer，也不展示普通搜索结果冒充 RAG 命中。
 
 2026-06-25 云端真实 smoke 结果：
 
@@ -324,9 +326,9 @@ npm.cmd run rebuild:post-search-index -- --all-active
 
 2026-07-04 ES hybrid 主路径迁移本地验收：
 
-- `createTencentRagProviderFromEnv` 已改为默认/旧 `lkeap` 值都走 ES provider；只有显式 `lkeap-cloudbase` 才进入旧 CloudBase chunk 扫描路径。
+- `createTencentRagProviderFromEnv` 已改为默认/旧 `lkeap` 值都走 ES provider；只有显式 `lkeap-cloudbase` 且设置 `HAPPYHOME_ALLOW_LEGACY_CLOUDBASE_RAG=1` 才进入旧 CloudBase chunk 扫描路径。
 - ES provider 单测会校验 `_search` 请求使用 `retriever.rank_fusion`，而不是顶层 `query + knn`。
-- ES provider 单测会校验 rerank 后过滤弱证据；低分噪声不能触发 LLM，也不能作为 RAG items 返回。
+- ES provider 单测会校验 rerank 后过滤弱证据；低分噪声和中低分无词面噪声不能触发 LLM，也不能作为 RAG items 返回。
 - 小程序静态测试会校验搜索页不再把 `mode=no_answer` 降级成本地 bootstrap 搜索结果，避免无证据帖子被误看成 RAG 命中。
 - 新增社区级 reconcile 和 health admin action：`post.reconcileRagIndexCommunityBatchAdmin` 只给缺失/过期/应删除帖子排 job，`post.ragIndexHealthAdmin` 返回 source/state/job 覆盖率计数。
 - `update:rag-env` 已改为写入 `TENCENT_RAG_PROVIDER=es` 和 ES endpoint/credential/inference ids。
@@ -334,4 +336,4 @@ npm.cmd run rebuild:post-search-index -- --all-active
 
 当前未完成的真实验收：
 
-- “某个视频名”字段级真实 smoke 暂未纳入默认脚本。原因不是 RAG chunk 提取缺失，`video_group` 的 `title/hint` 已进入 chunk；实际阻塞是视频字段会触发腾讯内容审核 `review`，再走 `audit.approveAdmin` 时旧 fallback 全文索引刷新在 15s 云函数超时内可能写不完。后续要么把旧全文索引刷新异步化，要么提高 admin 函数超时，再把视频字段加入真实 smoke。
+- “某个视频名”字段级真实 smoke 暂未纳入默认脚本。原因不是 RAG chunk 提取缺失，`video_group` 的 `title/hint` 已进入 chunk；实际阻塞是视频字段会触发腾讯内容审核 `review`，再走 `audit.approveAdmin` 时旧搜索全文索引刷新在 15s 云函数超时内可能写不完。后续要么把旧全文索引刷新异步化，要么提高 admin 函数超时，再把视频字段加入真实 smoke。

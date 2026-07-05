@@ -56,6 +56,11 @@ function parseRagRebuildArgs(argv = process.argv.slice(2), env = process.env) {
       'worker-rounds',
       env.HH_POST_RAG_REBUILD_WORKER_ROUNDS || String(DEFAULT_WORKER_ROUNDS),
     )) || DEFAULT_WORKER_ROUNDS)),
+    adminInvokeRetries: Math.max(1, Math.floor(Number(getFlagValue(
+      argv,
+      'admin-invoke-retries',
+      env.HH_POST_RAG_REBUILD_ADMIN_INVOKE_RETRIES || env.HH_POST_SEARCH_REBUILD_ADMIN_INVOKE_RETRIES || String(base.adminInvokeRetries || 3),
+    )) || Number(base.adminInvokeRetries || 3))),
     workerToken: getFlagValue(argv, 'worker-token', resolvePostRagWorkerToken(env)),
   }
 }
@@ -352,6 +357,7 @@ Options:
   --no-process                  Only enqueue jobs; do not invoke post-rag-worker.
   --worker-token <token>        Token used to invoke post-rag-worker.
   --worker-rounds <n>           Max worker invocations when processing. Defaults to ${DEFAULT_WORKER_ROUNDS}.
+  --admin-invoke-retries <n>    Retries for transient admin invocation failures.
 `)
 }
 
