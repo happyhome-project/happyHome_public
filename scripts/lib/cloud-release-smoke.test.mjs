@@ -542,3 +542,35 @@ test('required invoke retries transient CloudBase network failures', async () =>
     await rm(evidenceDir, { recursive: true, force: true })
   }
 })
+
+test('required invoke retries transient command timeouts', async () => {
+  const evidenceDir = await tempEvidenceDir()
+  try {
+    const runner = createMockRunner({
+      runId: 'unit-run',
+      invokeResponses: {
+        'post-video-rag-worker': [
+          { status: 1, stdout: '', stderr: '', error: 'command timed out after 60000ms' },
+        ],
+      },
+    })
+    const summary = await runCloudReleaseSmoke({
+      envId: 'env-x',
+      only: ['post-video-rag-worker'],
+      logLimit: 3,
+      logWaitMs: 0,
+      commandTimeoutMs: 1234,
+      noFixture: true,
+      workerToken: 'unit-worker-token',
+      evidenceDir,
+      runId: 'unit-run',
+    }, runner)
+
+    assert.equal(summary.status, 'passed')
+    assert(summary.labels.includes('HH_CLOUD_INVOKE_SMOKE_POST_VIDEO_RAG_WORKER'))
+    const invokeCalls = runner.calls.filter((call) => commandPart(call.args, 2) === 'invoke')
+    assert.equal(invokeCalls.length, 2)
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true })
+  }
+})

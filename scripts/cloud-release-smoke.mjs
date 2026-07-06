@@ -256,7 +256,7 @@ function includesRequiredText(record, text) {
 
 function isTransientCloudBaseFailure(record) {
   const haystack = `${record.error || ''}\n${record.stdout || ''}\n${record.stderr || ''}\n${JSON.stringify(record.parsed || {})}`
-  return /ECONNRESET|ETIMEDOUT|EAI_AGAIN|socket disconnected|TLS connection|RequestTimeout|context deadline exceeded/i.test(haystack)
+  return /ECONNRESET|ETIMEDOUT|EAI_AGAIN|socket disconnected|TLS connection|RequestTimeout|context deadline exceeded|command timed out after/i.test(haystack)
 }
 
 function logAttemptLimits(logLimit) {
