@@ -1,15 +1,18 @@
 <template>
   <div data-testid="member-approval-page">
     <div class="page-header">
-      <div>
-        <el-breadcrumb separator="/">
-          <el-breadcrumb-item :to="{ name: 'communities' }">社区管理</el-breadcrumb-item>
-          <el-breadcrumb-item>{{ communityName || '当前社区' }}</el-breadcrumb-item>
-          <el-breadcrumb-item>成员管理</el-breadcrumb-item>
-        </el-breadcrumb>
-        <div class="title-row">
-          <h3 style="margin: 0;">成员管理</h3>
-          <el-tag size="small" effect="plain" type="info">当前社区：{{ communityName || communityId }}</el-tag>
+      <div class="header-left">
+        <el-button :icon="ArrowLeft" circle title="返回社区管理" @click="goBackToCommunities" />
+        <div>
+          <el-breadcrumb separator="/">
+            <el-breadcrumb-item :to="{ name: 'communities' }">社区管理</el-breadcrumb-item>
+            <el-breadcrumb-item>{{ communityName || '当前社区' }}</el-breadcrumb-item>
+            <el-breadcrumb-item>成员管理</el-breadcrumb-item>
+          </el-breadcrumb>
+          <div class="title-row">
+            <h3 style="margin: 0;">成员管理</h3>
+            <el-tag size="small" effect="plain" type="info">当前社区：{{ communityName || communityId }}</el-tag>
+          </div>
         </div>
       </div>
       <el-button data-testid="member-refresh-button" @click="loadMembers" :loading="loading">刷新</el-button>
@@ -214,6 +217,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { communityApi, memberApi } from '../../api/cloud'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { ArrowLeft } from '@element-plus/icons-vue'
 import { formatAdminDateTime } from '../../utils/datetime'
 import { usePersistedTableColumns } from '../../utils/persistedTableColumns'
 
@@ -311,6 +315,10 @@ async function loadCommunityContext() {
   } catch {
     communityName.value = ''
   }
+}
+
+function goBackToCommunities() {
+  router.push({ name: 'communities' })
 }
 
 async function loadMembers() {
@@ -415,6 +423,12 @@ function formatUserId(userId: string) {
   margin-bottom: 16px;
 }
 
+.header-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
 .member-identity {
   display: flex;
   align-items: center;
@@ -439,6 +453,10 @@ function formatUserId(userId: string) {
   .page-header {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .header-left {
+    width: 100%;
   }
 }
 </style>

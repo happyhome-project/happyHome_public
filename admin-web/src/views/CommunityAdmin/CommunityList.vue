@@ -8,6 +8,17 @@
       </div>
     </div>
 
+    <el-tabs v-model="communityTab" class="community-tabs" style="margin-bottom: 12px;">
+      <el-tab-pane data-testid="community-tab-all" name="all" :label="`全部社区(${allCount})`" />
+      <el-tab-pane data-testid="community-tab-active" name="active" :label="`已启用(${activeCount})`" />
+      <el-tab-pane
+        v-if="authStore.isSuperAdmin"
+        data-testid="community-tab-disabled"
+        name="disabled"
+        :label="`已禁用(${disabledCount})`"
+      />
+    </el-tabs>
+
     <div style="display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">
       <el-input
         v-model="keyword"
@@ -20,6 +31,7 @@
         <el-option label="已启用" value="active" />
         <el-option label="待审批" value="pending" />
         <el-option label="已拒绝" value="rejected" />
+        <el-option v-if="authStore.isSuperAdmin" label="已禁用" value="disabled" />
       </el-select>
     </div>
 
@@ -133,19 +145,7 @@
         <template #default="{ row }">
           <template v-if="row.status === 'active'">
             <el-button data-testid="community-sections-button" :data-community-id="getCommunityId(row)" size="small" @click="goSections(getCommunityId(row))">板块管理</el-button>
-            <el-button data-testid="community-members-button" :data-community-id="getCommunityId(row)" size="small" @click="goMembers(getCommunityId(row))">成员管理</el-button>
             <el-button size="small" @click="goPosts(getCommunityId(row))">帖子管理</el-button>
-            <el-button data-testid="community-motto-button" :data-community-id="getCommunityId(row)" size="small" @click="openMottoEditor(row)">格言</el-button>
-            <el-button data-testid="community-banner-button" :data-community-id="getCommunityId(row)" size="small" @click="openBannerManager(row)">首页 Banner</el-button>
-            <el-button
-              data-testid="community-join-type-toggle"
-              :data-community-id="getCommunityId(row)"
-              size="small"
-              :loading="updatingJoinTypeId === getCommunityId(row)"
-              @click="toggleJoinType(row)"
-            >
-              {{ normalizeJoinType(row.joinType) === 'open' ? '改为申请加入' : '改为直接加入' }}
-            </el-button>
             <el-button
               v-if="authStore.isSuperAdmin"
               data-testid="community-disable-button"
@@ -157,6 +157,62 @@
             >
               禁用
             </el-button>
+            <el-dropdown
+              data-testid="community-more-actions"
+              trigger="click"
+              style="margin-left: 8px;"
+              @command="(command: any) => handleCommunityCommand(row, command)"
+            >
+              <el-button size="small">
+                更多<el-icon style="margin-left: 4px;"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item data-testid="community-members-button" command="members">成员管理</el-dropdown-item>
+                  <el-dropdown-item data-testid="community-motto-button" command="motto">格言</el-dropdown-item>
+                  <el-dropdown-item data-testid="community-banner-button" command="banner">首页 Banner</el-dropdown-item>
+                  <el-dropdown-item
+                    data-testid="community-join-type-toggle"
+                    command="joinType"
+                    :disabled="updatingJoinTypeId === getCommunityId(row)"
+                  >
+                    {{ normalizeJoinType(row.joinType) === 'open' ? '改为申请加入' : '改为直接加入' }}
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </template>
+          <template v-else-if="row.status === 'disabled'">
+            <el-button
+              data-testid="community-restore-button"
+              :data-community-id="getCommunityId(row)"
+              size="small"
+              type="primary"
+              plain
+              :loading="restoringId === getCommunityId(row)"
+              @click="restoreCommunity(row)"
+            >
+              恢复
+            </el-button>
+            <el-dropdown
+              data-testid="community-more-actions"
+              trigger="click"
+              style="margin-left: 8px;"
+              @command="(command: any) => handleCommunityCommand(row, command)"
+            >
+              <el-button size="small">
+                更多<el-icon style="margin-left: 4px;"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item
+                    command="hardDelete"
+                    :disabled="hardDeletingId === getCommunityId(row)"
+                    class="danger-dropdown-item"
+                  >永久删除</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
           <span v-else-if="row.status === 'pending'" style="color: #909399;">等待超级管理员审批</span>
           <span v-else style="color: #909399;">已拒绝，仅读历史记录</span>
@@ -272,10 +328,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { ArrowDown } from '@element-plus/icons-vue'
 import { approvalApi, communityApi, postAdminApi } from '../../api/cloud'
 import { useAuthStore } from '../../stores/auth'
 import { usePersistedTableColumns } from '../../utils/persistedTableColumns'
@@ -286,6 +343,8 @@ const authStore = useAuthStore()
 const loading = ref(false)
 const communities = ref<any[]>([])
 const disablingId = ref('')
+const restoringId = ref('')
+const hardDeletingId = ref('')
 const updatingJoinTypeId = ref('')
 const showMottoDialog = ref(false)
 const savingMotto = ref(false)
@@ -294,7 +353,8 @@ const savingBanners = ref(false)
 const loadingBannerPosts = ref(false)
 const bannerPosts = ref<any[]>([])
 const keyword = ref('')
-const statusFilter = ref<'all' | 'active' | 'pending' | 'rejected'>('all')
+const communityTab = ref<'all' | 'active' | 'disabled'>('all')
+const statusFilter = ref<'all' | 'active' | 'pending' | 'rejected' | 'disabled'>('all')
 const pendingMemberCountByCommunity = ref<Record<string, number>>({})
 interface BannerFormRow {
   localId: string
@@ -314,26 +374,26 @@ type CommunityTableColumnKey =
   | 'pendingMemberCount'
   | 'actions'
 
-const COMMUNITY_TABLE_COLUMN_WIDTHS_KEY = 'happyhome.admin.communityTable.columnWidths.v1'
+const COMMUNITY_TABLE_COLUMN_WIDTHS_KEY = 'happyhome.admin.communityTable.columnWidths.v2'
 const COMMUNITY_TABLE_DEFAULT_COLUMN_WIDTHS: Record<CommunityTableColumnKey, number> = {
-  name: 180,
-  description: 260,
-  motto: 260,
-  status: 120,
-  joinType: 120,
-  memberCount: 100,
-  pendingMemberCount: 120,
-  actions: 520,
+  name: 150,
+  description: 180,
+  motto: 180,
+  status: 100,
+  joinType: 105,
+  memberCount: 85,
+  pendingMemberCount: 110,
+  actions: 250,
 }
 const COMMUNITY_TABLE_MIN_COLUMN_WIDTHS: Record<CommunityTableColumnKey, number> = {
-  name: 160,
-  description: 220,
-  motto: 220,
-  status: 110,
-  joinType: 120,
-  memberCount: 100,
-  pendingMemberCount: 120,
-  actions: 520,
+  name: 140,
+  description: 160,
+  motto: 160,
+  status: 90,
+  joinType: 100,
+  memberCount: 80,
+  pendingMemberCount: 100,
+  actions: 230,
 }
 
 const { columnWidths, handleColumnDragEnd } = usePersistedTableColumns<CommunityTableColumnKey>({
@@ -354,12 +414,18 @@ const bannerForm = ref<{ communityId: string; rows: BannerFormRow[] }>({
 const filteredCommunities = computed(() => {
   const q = keyword.value.trim().toLowerCase()
   return communities.value.filter((community) => {
+    if (communityTab.value === 'active' && community.status !== 'active') return false
+    if (communityTab.value === 'disabled' && community.status !== 'disabled') return false
     if (statusFilter.value !== 'all' && community.status !== statusFilter.value) return false
     if (!q) return true
     return [community.name, community.description, community.motto, community.mottoCite]
       .some((part) => String(part || '').toLowerCase().includes(q))
   })
 })
+
+const allCount = computed(() => communities.value.length)
+const activeCount = computed(() => communities.value.filter((community) => community.status === 'active').length)
+const disabledCount = computed(() => communities.value.filter((community) => community.status === 'disabled').length)
 
 const bannerPostOptions = computed(() => {
   return bannerPosts.value.map((post) => ({
@@ -373,13 +439,28 @@ onMounted(() => {
   loadCommunities()
 })
 
+watch(communityTab, () => {
+  statusFilter.value = 'all'
+})
+
 async function loadCommunities() {
   loading.value = true
   try {
-    const res = await communityApi.list() as any
-    communities.value = (res.communities ?? [])
+    const [res, disabledRes] = await Promise.all([
+      communityApi.list() as Promise<any>,
+      authStore.isSuperAdmin ? communityApi.listDisabled() as Promise<any> : Promise.resolve({ communities: [] }),
+    ])
+    const visibleCommunities = (res.communities ?? [])
       .map((c: any) => ({ ...c, _id: c._id || c.id || '' }))
       .filter((c: any) => ['active', 'pending', 'rejected'].includes(c.status))
+    const disabledCommunities = (disabledRes.communities ?? [])
+      .map((c: any) => ({ ...c, _id: c._id || c.id || '', status: 'disabled' }))
+      .filter((c: any) => getCommunityId(c))
+    const byId = new Map<string, any>()
+    for (const community of [...visibleCommunities, ...disabledCommunities]) {
+      byId.set(getCommunityId(community), community)
+    }
+    communities.value = Array.from(byId.values())
     await loadApprovalSummary()
   } catch (e: any) {
     ElMessage.error(e.message || '加载失败')
@@ -443,6 +524,28 @@ async function goPosts(communityId: string) {
     return
   }
   await router.push({ name: 'posts', params: { communityId } })
+}
+
+async function handleCommunityCommand(row: any, command: string) {
+  if (command === 'members') {
+    await goMembers(getCommunityId(row))
+    return
+  }
+  if (command === 'motto') {
+    openMottoEditor(row)
+    return
+  }
+  if (command === 'banner') {
+    await openBannerManager(row)
+    return
+  }
+  if (command === 'joinType') {
+    await toggleJoinType(row)
+    return
+  }
+  if (command === 'hardDelete') {
+    await hardDeleteCommunity(row)
+  }
 }
 
 function openMottoEditor(row: any) {
@@ -676,7 +779,7 @@ async function disableCommunity(row: any) {
 
   try {
     await ElMessageBox.confirm(
-      `确认禁用社区「${row.name}」吗？禁用后小程序端将不可见，可随时在“已禁用社区”页面恢复。`,
+      `确认禁用社区「${row.name}」吗？禁用后小程序端将不可见，可在当前页面“已禁用”tab 中恢复。`,
       '禁用确认',
       { type: 'warning', confirmButtonText: '禁用', cancelButtonText: '取消' }
     )
@@ -688,11 +791,61 @@ async function disableCommunity(row: any) {
   try {
     await communityApi.disable(communityId)
     ElMessage.success('已禁用')
-    communities.value = communities.value.filter(c => c._id !== communityId)
+    await loadCommunities()
+    communityTab.value = 'disabled'
   } catch (e: any) {
     ElMessage.error(e.message || '禁用失败')
   } finally {
     disablingId.value = ''
+  }
+}
+
+async function restoreCommunity(row: any) {
+  const communityId = getCommunityId(row)
+  if (!communityId) {
+    ElMessage.error('社区 ID 缺失，无法恢复')
+    return
+  }
+
+  restoringId.value = communityId
+  try {
+    await communityApi.restore(communityId)
+    ElMessage.success('已恢复')
+    await loadCommunities()
+    communityTab.value = 'active'
+  } catch (e: any) {
+    ElMessage.error(e.message || '恢复失败')
+  } finally {
+    restoringId.value = ''
+  }
+}
+
+async function hardDeleteCommunity(row: any) {
+  const communityId = getCommunityId(row)
+  if (!communityId) {
+    ElMessage.error('社区 ID 缺失，无法永久删除')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确认永久删除社区「${row.name || communityId}」吗？该操作不可恢复，请确认社区已经不再需要保留。`,
+      '永久删除确认',
+      { type: 'error', confirmButtonText: '永久删除', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+
+  hardDeletingId.value = communityId
+  try {
+    await communityApi.hardDelete(communityId)
+    ElMessage.success('已永久删除')
+    communities.value = communities.value.filter((community) => getCommunityId(community) !== communityId)
+  } catch (e: any) {
+    ElMessage.error(e.message || '永久删除失败')
+  } finally {
+    hardDeletingId.value = ''
   }
 }
 </script>
@@ -708,6 +861,14 @@ async function disableCommunity(row: any) {
 
 .muted-table-cell {
   color: #c0c4cc;
+}
+
+.community-tabs {
+  --el-tabs-header-height: 36px;
+}
+
+:deep(.danger-dropdown-item) {
+  color: #f56c6c;
 }
 
 .banner-dialog-help {
