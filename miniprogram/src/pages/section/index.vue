@@ -336,7 +336,9 @@ function reportMissingHomeTitle(post: any, currentSection: any, source: string) 
 function formatShortDate(value: unknown): string {
   const d = new Date(String(value || ''))
   if (Number.isNaN(d.getTime())) return ''
-  return `${d.getMonth() + 1}/${d.getDate()}`
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${month}-${day}`
 }
 
 function resolveAuthorName(post: any, fallback = ''): string {

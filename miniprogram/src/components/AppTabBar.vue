@@ -27,8 +27,8 @@
         :class="{ active: props.current === 'home' }"
         @tap="go('home')"
       >
-        <text>首&nbsp;&nbsp;页</text>
-        <view class="active-dot"></view>
+        <image class="tab-icon" :src="tabIconSrc('home')" mode="aspectFit" />
+        <text class="tab-label">首页</text>
       </button>
 
       <button class="fab-btn" aria-label="发布" @tap="go('create')">
@@ -42,8 +42,8 @@
         :class="{ active: props.current === 'profile' }"
         @tap="go('profile')"
       >
-        <text>我&nbsp;&nbsp;的</text>
-        <view class="active-dot"></view>
+        <image class="tab-icon" :src="tabIconSrc('profile')" mode="aspectFit" />
+        <text class="tab-label">我的</text>
       </button>
     </view>
   </view>
@@ -102,6 +102,12 @@ function go(key: AppTabKey) {
     return
   }
   uni.switchTab({ url: target.path })
+}
+
+function tabIconSrc(key: 'home' | 'profile') {
+  const active = props.current === key
+  if (key === 'home') return active ? '/static/tab-home-active.png' : '/static/tab-home.png'
+  return active ? '/static/tab-profile-active.png' : '/static/tab-profile.png'
 }
 
 function openPublishSheet() {
@@ -323,37 +329,35 @@ button::after {
 }
 
 .tab-btn {
-  width: 112rpx;
-  height: 84rpx;
+  width: 124rpx;
+  height: 88rpx;
   justify-self: center;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6rpx;
-  color: var(--hh-color-text-tertiary);
-  font-size: var(--hh-text-caption-lg-size);
+  gap: 4rpx;
+  color: var(--hh-color-text-primary);
+  font-size: 22rpx;
+  line-height: 24rpx;
   font-weight: $hh-font-weight-medium;
 }
 
-.tab-btn text {
-  white-space: pre;
+.tab-icon {
+  width: 48rpx;
+  height: 48rpx;
+  display: block;
+}
+
+.tab-label {
+  display: block;
+  line-height: 24rpx;
+  white-space: nowrap;
 }
 
 .tab-btn.active {
   color: var(--hh-color-brand-primary);
   font-weight: $hh-font-weight-bold;
-}
-
-.active-dot {
-  width: 7rpx;
-  height: 7rpx;
-  border-radius: $hh-radius-full;
-  background: transparent;
-}
-
-.tab-btn.active .active-dot {
-  background: var(--hh-color-brand-primary);
 }
 
 .fab-btn {

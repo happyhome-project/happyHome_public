@@ -1,6 +1,10 @@
-import { describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { formatWidgetValue, getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard, getHomeLiveMeta, getListPreview, getPostHomeTitle, getPostHomeTitleIssue } from '../widget'
 import type { Section, Post } from '../../../../cloud/shared/types'
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe('formatWidgetValue', () => {
   test('undefined/null/空字符串返回空', () => {
@@ -239,6 +243,25 @@ describe('home live card formatting', () => {
       '活动时间：06月30日',
     ])
   })
+
+  test('uses zero-padded hyphen date for generic live fallback meta', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-09T12:00:00+08:00'))
+    const section = {
+      _id: 's-generic',
+      communityId: 'c1',
+      name: '活动召集',
+      type: 'realtime',
+      status: 'active',
+      widgets: [],
+    } as Section
+    const post = {
+      content: {},
+      createdAt: '2026-06-30T09:00:00+08:00',
+    } as Post
+
+    expect(getHomeLiveMeta(post, section)).toEqual(['06-30'])
+  })
 })
 
 describe('getArchiveHomeMeta', () => {
@@ -350,7 +373,7 @@ describe('getGuideNoteCard', () => {
       excerpt: '从村口小桥出发，沿溪边慢慢走。孩子可以捡石头、看小鱼。',
       driveDuration: '青山村约30分钟车程',
       author: '小雨妈妈',
-      when: '6/2',
+      when: '06-02',
       hasCover: true,
       routeStats: [
         { label: '距离', value: '4.2km' },
@@ -372,7 +395,7 @@ describe('getGuideNoteCard', () => {
       excerpt: '',
       driveDuration: '',
       author: '',
-      when: '5/26',
+      when: '05-26',
       hasCover: false,
       routeStats: [],
     })

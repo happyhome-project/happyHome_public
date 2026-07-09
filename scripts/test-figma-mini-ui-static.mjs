@@ -7,6 +7,18 @@ function read(...segments) {
   return fs.readFileSync(path.join(root, ...segments), 'utf8')
 }
 
+function fileSize(...segments) {
+  return fs.statSync(path.join(root, ...segments)).size
+}
+
+function pngDimensions(...segments) {
+  const buffer = fs.readFileSync(path.join(root, ...segments))
+  return {
+    width: buffer.readUInt32BE(16),
+    height: buffer.readUInt32BE(20),
+  }
+}
+
 function assert(condition, message) {
   if (!condition) throw new Error(message)
 }
@@ -66,6 +78,50 @@ assert(
     tabbar.includes('HOME_TAB_RETAP_EVENT') &&
     tabbar.includes('$emit?.(HOME_TAB_RETAP_EVENT)'),
   'custom tabbar should use Figma green, 56px center action, blur, safe-area aware layout, and retap home to scroll the homepage back to top.'
+)
+
+assert(
+    tabbar.includes('class="tab-icon"') &&
+    tabbar.includes("tabIconSrc('home')") &&
+    tabbar.includes("tabIconSrc('profile')") &&
+    tabbar.includes('/static/tab-home-active.png') &&
+    tabbar.includes('/static/tab-home.png') &&
+    tabbar.includes('/static/tab-profile-active.png') &&
+    tabbar.includes('/static/tab-profile.png') &&
+    tabbar.includes('首页') &&
+    tabbar.includes('我的') &&
+    !tabbar.includes('active-dot') &&
+    !tabbar.includes('/static/tab-icons/') &&
+    !tabbar.includes('&nbsp;'),
+  'custom tabbar should follow the Figma three-column nav: PNG icon + label selected/unselected states, without the old active dot, SVG runtime paths, or spaced labels.'
+)
+
+for (const iconFile of [
+  'tab-home.png',
+  'tab-home-active.png',
+  'tab-profile.png',
+  'tab-profile-active.png',
+]) {
+  const size = fileSize('miniprogram', 'src', 'static', iconFile)
+  const dimensions = pngDimensions('miniprogram', 'src', 'static', iconFile)
+  assert(
+    size > 900 && size < 40 * 1024 && dimensions.width === 81 && dimensions.height === 81,
+    `${iconFile} should be a real native-tab fallback icon, not the old tiny placeholder block.`
+  )
+}
+
+assert(
+  pagesConfig.tabBar?.list?.some((item) =>
+    item.pagePath === 'pages/index/index' &&
+    item.iconPath === 'static/tab-home.png' &&
+    item.selectedIconPath === 'static/tab-home-active.png'
+  ) &&
+    pagesConfig.tabBar?.list?.some((item) =>
+      item.pagePath === 'pages/profile/index' &&
+      item.iconPath === 'static/tab-profile.png' &&
+      item.selectedIconPath === 'static/tab-profile-active.png'
+    ),
+  'native tabBar fallback should be wired to the real PNG home/profile icons in pages.json.'
 )
 
 assert(
