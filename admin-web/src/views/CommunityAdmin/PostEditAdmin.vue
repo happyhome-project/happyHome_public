@@ -1,12 +1,17 @@
 <template>
   <div class="post-edit-admin">
     <div class="page-header">
-      <el-breadcrumb separator="/">
-        <el-breadcrumb-item :to="{ name: 'communities' }">社区管理</el-breadcrumb-item>
-        <el-breadcrumb-item :to="{ name: 'posts', params: { communityId } }">{{ communityName || '当前社区' }}</el-breadcrumb-item>
-        <el-breadcrumb-item>编辑帖子</el-breadcrumb-item>
-      </el-breadcrumb>
-      <h3>编辑帖子</h3>
+      <div class="page-header-top">
+        <el-button :icon="ArrowLeft" circle title="返回帖子管理" @click="goToPosts" />
+        <div>
+          <el-breadcrumb separator="/">
+            <el-breadcrumb-item :to="{ name: 'communities' }">社区管理</el-breadcrumb-item>
+            <el-breadcrumb-item :to="{ name: 'posts', params: { communityId } }">{{ communityName || '当前社区' }}</el-breadcrumb-item>
+            <el-breadcrumb-item>编辑帖子</el-breadcrumb-item>
+          </el-breadcrumb>
+          <h3>编辑帖子</h3>
+        </div>
+      </div>
     </div>
 
     <el-card v-loading="loading" shadow="never">
@@ -123,7 +128,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { v4 as uuidv4 } from 'uuid'
 import { ElMessage } from 'element-plus/es/components/message/index'
-import { Plus } from '@element-plus/icons-vue'
+import { ArrowLeft, Plus } from '@element-plus/icons-vue'
 import { communityApi, postAdminApi } from '../../api/cloud'
 import AudioGroupEditor from '../../components/AudioGroupEditor.vue'
 import ImageGroupAdminEditor from '../../components/ImageGroupAdminEditor.vue'
@@ -153,6 +158,10 @@ const post = ref<any>(null)
 const section = ref<any>(null)
 const communityName = ref('')
 const formData = reactive<Record<string, any>>({})
+
+function goToPosts() {
+  router.push({ name: 'posts', params: { communityId } })
+}
 
 const editableWidgets = computed(() => editableWidgetsFor(section.value))
 const isGuideNoteTemplate = computed(() => section.value?.displayTemplate === 'guide_note')
@@ -234,6 +243,7 @@ async function submit() {
 <style scoped>
 .post-edit-admin { padding: 0; }
 .page-header { margin-bottom: 16px; }
+.page-header-top { display: flex; align-items: flex-start; gap: 12px; }
 .page-header h3 { margin: 10px 0; }
 .meta-box { margin-bottom: 16px; }
 .sub-text { color: #909399; font-size: 12px; }

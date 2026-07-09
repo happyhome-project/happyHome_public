@@ -1,15 +1,24 @@
 <template>
   <div data-testid="section-list-page">
     <div class="page-header">
-      <div>
-        <el-breadcrumb separator="/">
-          <el-breadcrumb-item :to="{ name: 'communities' }">社区管理</el-breadcrumb-item>
-          <el-breadcrumb-item>{{ communityName || '当前社区' }}</el-breadcrumb-item>
-          <el-breadcrumb-item>板块管理</el-breadcrumb-item>
-        </el-breadcrumb>
-        <div class="title-row">
-          <h3>板块管理</h3>
-          <el-tag size="small" effect="plain" type="info">当前社区：{{ communityName || communityId }}</el-tag>
+      <div class="header-left">
+        <el-button
+          data-testid="section-back-button"
+          :icon="ArrowLeft"
+          circle
+          title="返回社区管理"
+          @click="goBackToCommunities"
+        />
+        <div>
+          <el-breadcrumb separator="/">
+            <el-breadcrumb-item :to="{ name: 'communities' }">社区管理</el-breadcrumb-item>
+            <el-breadcrumb-item>{{ communityName || '当前社区' }}</el-breadcrumb-item>
+            <el-breadcrumb-item>板块管理</el-breadcrumb-item>
+          </el-breadcrumb>
+          <div class="title-row">
+            <h3>板块管理</h3>
+            <el-tag size="small" effect="plain" type="info">当前社区：{{ communityName || communityId }}</el-tag>
+          </div>
         </div>
       </div>
       <el-button data-testid="section-create-button" type="primary" @click="openCreate">新建板块</el-button>
@@ -110,7 +119,7 @@
         :resizable="true"
       >
         <template #default="{ row }">
-          <el-button data-testid="section-widgets-button" :data-section-id="getSectionId(row)" size="small" @click="goWidgetEditor(getSectionId(row))">控件</el-button>
+          <el-button data-testid="section-widgets-button" :data-section-id="getSectionId(row)" size="small" @click="openWidgetEditor(getSectionId(row))">控件</el-button>
           <el-button data-testid="section-edit-button" :data-section-id="getSectionId(row)" size="small" @click="openEdit(row)">编辑</el-button>
           <el-dropdown
             data-testid="section-status-dropdown"
@@ -149,6 +158,31 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <el-dialog
+      v-model="showWidgetDialog"
+      data-testid="widget-config-dialog"
+      class="widget-config-dialog"
+      width="min(1180px, calc(100vw - 48px))"
+      top="6vh"
+      :destroy-on-close="true"
+      :close-on-click-modal="false"
+    >
+      <template #header>
+        <div class="widget-dialog-title">
+          <strong>控件配置</strong>
+          <span>{{ communityName || communityId }} / {{ widgetDialogSectionName || widgetDialogSectionId }}</span>
+        </div>
+      </template>
+      <WidgetEditor
+        v-if="showWidgetDialog && widgetDialogSectionId"
+        :key="widgetDialogSectionId"
+        :section-id="widgetDialogSectionId"
+        :community-id="communityId"
+        embedded
+        @saved="loadSections"
+      />
+    </el-dialog>
 
     <el-dialog v-model="showDialog" :title="editingId ? '编辑板块' : '新建板块'" width="480px">
       <el-form :model="form" label-width="100px">
@@ -256,8 +290,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { communityApi, sectionApi } from '../../api/cloud'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
-import { ArrowDown, WarningFilled } from '@element-plus/icons-vue'
+import { ArrowDown, ArrowLeft, WarningFilled } from '@element-plus/icons-vue'
 import { usePersistedTableColumns } from '../../utils/persistedTableColumns'
+import WidgetEditor from './WidgetEditor.vue'
 
 type SectionType = 'realtime' | 'evergreen'
 type SectionStatus = 'active' | 'dormant' | 'archived'
@@ -316,6 +351,9 @@ const loading = ref(false)
 const saving = ref(false)
 const deletingId = ref('')
 const showDialog = ref(false)
+const showWidgetDialog = ref(false)
+const widgetDialogSectionId = ref('')
+const widgetDialogSectionName = ref('')
 const editingId = ref('')
 const communityName = ref('')
 const iconOptions = [
@@ -497,7 +535,11 @@ async function submit() {
   }
 }
 
-async function goWidgetEditor(sectionId: string) {
+function goBackToCommunities() {
+  router.push({ name: 'communities' })
+}
+
+function openWidgetEditor(sectionId: string) {
   if (!sectionId) {
     ElMessage.error('板块 ID 缺失，无法进入控件配置')
     return
@@ -506,7 +548,10 @@ async function goWidgetEditor(sectionId: string) {
     ElMessage.error('社区 ID 缺失，无法进入控件配置')
     return
   }
-  await router.push({ name: 'widgets', params: { sectionId }, query: { communityId: communityId.value } })
+  const section = sections.value.find((item) => getSectionId(item) === sectionId)
+  widgetDialogSectionId.value = sectionId
+  widgetDialogSectionName.value = section?.name || ''
+  showWidgetDialog.value = true
 }
 
 async function deleteSection(row: SectionRow) {
@@ -569,6 +614,12 @@ function statusTagType(s: SectionStatus): 'success' | 'info' | 'warning' {
   align-items: flex-start;
   gap: 16px;
   margin-bottom: 16px;
+}
+
+.header-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
 }
 
 .title-row {
@@ -656,6 +707,22 @@ function statusTagType(s: SectionStatus): 'success' | 'info' | 'warning' {
   line-height: 1.5;
 }
 
+.widget-dialog-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.widget-dialog-title span {
+  color: #909399;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+:deep(.widget-config-dialog .el-dialog__body) {
+  padding-top: 8px;
+}
+
 @media (max-width: 768px) {
   .page-header {
     flex-direction: column;
@@ -664,6 +731,10 @@ function statusTagType(s: SectionStatus): 'success' | 'info' | 'warning' {
 
   .title-row {
     flex-wrap: wrap;
+  }
+
+  .header-left {
+    width: 100%;
   }
 }
 </style>

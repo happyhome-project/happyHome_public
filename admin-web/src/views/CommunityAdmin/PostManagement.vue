@@ -1,15 +1,18 @@
 <template>
   <div>
     <div class="page-header">
-      <div>
-        <el-breadcrumb separator="/">
-          <el-breadcrumb-item :to="{ name: 'communities' }">社区管理</el-breadcrumb-item>
-          <el-breadcrumb-item>{{ communityName || '当前社区' }}</el-breadcrumb-item>
-          <el-breadcrumb-item>帖子管理</el-breadcrumb-item>
-        </el-breadcrumb>
-        <div class="title-row">
-          <h3>帖子管理</h3>
-          <el-tag size="small" effect="plain" type="info">当前社区：{{ communityName || communityId }}</el-tag>
+      <div class="header-left">
+        <el-button :icon="ArrowLeft" circle title="返回社区管理" @click="goBackToCommunities" />
+        <div>
+          <el-breadcrumb separator="/">
+            <el-breadcrumb-item :to="{ name: 'communities' }">社区管理</el-breadcrumb-item>
+            <el-breadcrumb-item>{{ communityName || '当前社区' }}</el-breadcrumb-item>
+            <el-breadcrumb-item>帖子管理</el-breadcrumb-item>
+          </el-breadcrumb>
+          <div class="title-row">
+            <h3>帖子管理</h3>
+            <el-tag size="small" effect="plain" type="info">当前社区：{{ communityName || communityId }}</el-tag>
+          </div>
         </div>
       </div>
       <div class="header-actions">
@@ -389,6 +392,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { ArrowLeft } from '@element-plus/icons-vue'
 import { communityApi, mediaApi, postAdminApi, sectionApi } from '../../api/cloud'
 import { formatAdminDateTime } from '../../utils/datetime'
 import RichNoteAdminPreview from '../../components/RichNoteAdminPreview.vue'
@@ -416,6 +420,10 @@ const filters = ref({
   pinnedStatus: 'all' as 'all' | 'true' | 'false',
   featuredStatus: 'all' as 'all' | 'true' | 'false',
 })
+
+function goBackToCommunities() {
+  router.push({ name: 'communities' })
+}
 type PostTableColumnKey =
   | 'section'
   | 'author'
@@ -801,6 +809,12 @@ function videoPrimaryText(item: any) {
   margin-bottom: 16px;
 }
 
+.header-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
 .title-row {
   display: flex;
   align-items: center;
@@ -968,6 +982,10 @@ function videoPrimaryText(item: any) {
   .page-header {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .header-left {
+    width: 100%;
   }
 }
 </style>
