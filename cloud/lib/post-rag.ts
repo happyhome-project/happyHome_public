@@ -7,7 +7,6 @@ import {
   buildPostSearchChunks,
   buildPostSearchDocument,
   normalizeSearchText,
-  searchPostIndex,
   type PostSearchResult,
   type PostSearchResultItem,
 } from './post-search'
@@ -15,6 +14,7 @@ import {
 export const POST_RAG_JOBS = 'post_rag_jobs'
 export const POST_RAG_INDEX_STATE = 'post_rag_index_state'
 export const POST_RAG_CHUNKS = 'post_rag_chunks'
+export const POST_RAG_WORKER_STATE = 'post_rag_worker_state'
 export const POST_VIDEO_RAG_ASSETS = 'post_video_rag_assets'
 export const POST_VIDEO_RAG_JOBS = 'post_video_rag_jobs'
 
@@ -72,6 +72,7 @@ export interface RagProviderSearchInput extends RagSearchParams {
 export interface TencentRagProvider {
   name: string
   isConfigured(): boolean
+  ensureIndex?(): Promise<{ created: boolean; indexName: string; dims?: number }>
   search(input: RagProviderSearchInput): Promise<Omit<RagSearchResult, 'query' | 'communityId' | 'sectionId' | 'skip' | 'limit'>>
   upsertChunks?(chunks: RagChunkDocument[]): Promise<void>
   deletePostChunks?(postId: string): Promise<void>
@@ -169,6 +170,30 @@ export interface TencentRagConfig {
   embeddingInferenceId?: string
   rerankInferenceId?: string
   llmInferenceId?: string
+  atomicSecretId?: string
+  atomicSecretKey?: string
+  atomicRegion?: string
+  embeddingModel?: string
+  rerankModel?: string
+  llmModel?: string
+}
+
+export type TencentRagRequestJson = <T>(
+  config: TencentRagConfig,
+  method: string,
+  path: string,
+  body?: unknown
+) => Promise<T>
+
+export type TencentRagAtomicRequestJson = <T>(
+  config: TencentRagConfig,
+  action: string,
+  body: unknown
+) => Promise<T>
+
+export interface TencentRagProviderOptions {
+  requestJson?: TencentRagRequestJson
+  requestAtomicJson?: TencentRagAtomicRequestJson
 }
 
 export interface TencentLkeapRagConfig {
@@ -202,8 +227,19 @@ const THRIFT_FAMILY_EXPANSION = [
   '俭约',
   '儉約',
 ]
-const MIN_LKEAP_RERANK_EVIDENCE_SCORE = 0
+const MIN_LKEAP_RERANK_EVIDENCE_SCORE = 0.7
 const MIN_LKEAP_SEMANTIC_EVIDENCE_SCORE = 0.42
+
+function logRagSearchDecision(event: string, payload: Record<string, unknown>) {
+  try {
+    console.info('[post.rag.search]', JSON.stringify({
+      event,
+      ...payload,
+    }))
+  } catch {
+    // Logging must never break search.
+  }
+}
 
 export function buildRagQuery(raw: string): RagQuery {
   const normalized = normalizeSearchText(raw)
@@ -240,13 +276,26 @@ export function buildNoEvidenceRagResult(params: {
   }
 }
 
-function withFallbackFields(result: PostSearchResult, reason?: string): RagSearchResult {
+function buildUnavailableFallbackRagResult(params: {
+  query: string
+  communityId: string
+  sectionId?: string
+  skip?: number
+  limit?: number
+  reason?: string
+}): RagSearchResult {
   return {
-    ...result,
+    query: params.query,
+    communityId: params.communityId,
+    sectionId: params.sectionId || '',
+    total: 0,
+    skip: Math.max(0, Math.floor(Number(params.skip || 0))),
+    limit: Math.max(1, Math.floor(Number(params.limit || 20))),
+    items: [],
     answer: '',
     citations: [],
     mode: 'fallback',
-    ...(reason ? { fallbackReason: reason } : {}),
+    ...(params.reason ? { fallbackReason: params.reason } : {}),
   }
 }
 
@@ -327,12 +376,24 @@ export async function searchPostsWithRag(
   const skip = Math.max(0, Math.floor(Number(params.skip || 0)))
   const limit = Math.max(1, Math.floor(Number(params.limit || 20)))
   const includeMemberOnly = params.includeMemberOnly !== false
-  const fallbackSearch = options.fallbackSearch || searchPostIndex
   const provider = options.provider === undefined ? createTencentRagProviderFromEnv() : options.provider
   const fallbackParams = { communityId, query, sectionId, skip, limit, includeMemberOnly }
 
   if (!provider || !provider.isConfigured()) {
-    return withFallbackFields(await fallbackSearch(fallbackParams), 'rag_provider_not_configured')
+    logRagSearchDecision('fallback', {
+      reason: 'rag_provider_not_configured',
+      communityId,
+      sectionId,
+      queryLength: query.length,
+    })
+    return buildUnavailableFallbackRagResult({
+      query,
+      communityId,
+      sectionId,
+      skip,
+      limit,
+      reason: 'rag_provider_not_configured',
+    })
   }
 
   try {
@@ -340,8 +401,22 @@ export async function searchPostsWithRag(
     const rawProviderResult = await provider.search({ ...fallbackParams, ragQuery })
     const providerResult = filterProviderResultForVisibility(rawProviderResult, includeMemberOnly)
     if (!providerResult.citations.length) {
+      logRagSearchDecision('no_answer', {
+        provider: provider.name,
+        communityId,
+        sectionId,
+        queryLength: query.length,
+      })
       return buildNoEvidenceRagResult({ query, communityId, sectionId, skip, limit })
     }
+    logRagSearchDecision('rag', {
+      provider: provider.name,
+      communityId,
+      sectionId,
+      citationCount: providerResult.citations.length,
+      itemCount: providerResult.items.length,
+      queryLength: query.length,
+    })
     return {
       query,
       communityId,
@@ -356,10 +431,21 @@ export async function searchPostsWithRag(
       provider: provider.name,
     }
   } catch (error: any) {
-    return withFallbackFields(
-      await fallbackSearch(fallbackParams),
-      error?.message || 'rag_provider_failed'
-    )
+    logRagSearchDecision('fallback', {
+      reason: error?.message || 'rag_provider_failed',
+      provider: provider.name,
+      communityId,
+      sectionId,
+      queryLength: query.length,
+    })
+    return buildUnavailableFallbackRagResult({
+      query,
+      communityId,
+      sectionId,
+      skip,
+      limit,
+      reason: error?.message || 'rag_provider_failed',
+    })
   }
 }
 
@@ -377,6 +463,12 @@ export function readTencentRagConfigFromEnv(env: NodeJS.ProcessEnv = process.env
     embeddingInferenceId: String(env.TENCENT_RAG_EMBEDDING_INFERENCE_ID || ''),
     rerankInferenceId: String(env.TENCENT_RAG_RERANK_INFERENCE_ID || ''),
     llmInferenceId: String(env.TENCENT_RAG_LLM_INFERENCE_ID || ''),
+    atomicSecretId: String(env.TENCENT_RAG_ATOMIC_SECRET_ID || ''),
+    atomicSecretKey: String(env.TENCENT_RAG_ATOMIC_SECRET_KEY || ''),
+    atomicRegion: String(env.TENCENT_RAG_ATOMIC_REGION || 'ap-beijing'),
+    embeddingModel: String(env.TENCENT_RAG_EMBEDDING_MODEL || 'bge-base-zh-v1.5'),
+    rerankModel: String(env.TENCENT_RAG_RERANK_MODEL || 'bge-reranker-large'),
+    llmModel: String(env.TENCENT_RAG_LLM_MODEL || 'deepseek-v3'),
   }
 }
 
@@ -394,29 +486,51 @@ export function readTencentLkeapRagConfigFromEnv(env: NodeJS.ProcessEnv = proces
 }
 
 export function createTencentRagProviderFromEnv() {
-  if (String(process.env.TENCENT_RAG_PROVIDER || '').trim().toLowerCase() === 'lkeap') {
+  const providerName = String(process.env.TENCENT_RAG_PROVIDER || '').trim().toLowerCase()
+  const allowLegacyCloudBaseRag = /^(1|true|yes|on)$/i.test(String(process.env.HAPPYHOME_ALLOW_LEGACY_CLOUDBASE_RAG || ''))
+  if (providerName === 'lkeap-cloudbase' && allowLegacyCloudBaseRag) {
     return createTencentLkeapCloudBaseProvider(readTencentLkeapRagConfigFromEnv())
   }
   return createTencentRagProvider(readTencentRagConfigFromEnv())
 }
 
-function isConfigured(config: TencentRagConfig) {
+function hasEsIndexConfig(config: TencentRagConfig) {
   return Boolean(
     config.endpoint
     && config.username
     && config.password
     && config.indexName
-    && config.embeddingInferenceId
+  )
+}
+
+function hasInferenceModelConfig(config: TencentRagConfig) {
+  return Boolean(
+    config.embeddingInferenceId
     && config.rerankInferenceId
     && config.llmInferenceId
   )
+}
+
+function hasAtomicModelConfig(config: TencentRagConfig) {
+  return Boolean(
+    config.atomicSecretId
+    && config.atomicSecretKey
+    && config.atomicRegion
+    && config.embeddingModel
+    && config.rerankModel
+    && config.llmModel
+  )
+}
+
+function isConfigured(config: TencentRagConfig) {
+  return hasEsIndexConfig(config) && (hasInferenceModelConfig(config) || hasAtomicModelConfig(config))
 }
 
 function authHeader(config: TencentRagConfig) {
   return `Basic ${Buffer.from(`${config.username}:${config.password}`).toString('base64')}`
 }
 
-async function requestJson<T>(config: TencentRagConfig, method: string, path: string, body?: unknown): Promise<T> {
+const requestJson: TencentRagRequestJson = async <T>(config: TencentRagConfig, method: string, path: string, body?: unknown): Promise<T> => {
   const url = new URL(`${config.endpoint}/${path.replace(/^\/+/, '')}`)
   const transport = url.protocol === 'http:' ? http : https
   const payload = body === undefined ? '' : JSON.stringify(body)
@@ -450,8 +564,186 @@ async function requestJson<T>(config: TencentRagConfig, method: string, path: st
   })
 }
 
-function toCitation(hit: any): RagCitation {
+function tencentEsAtomicHost(action: string) {
+  return action === 'ChatCompletions' ? 'es.ai.tencentcloudapi.com' : 'es.tencentcloudapi.com'
+}
+
+const requestTencentEsAtomic: TencentRagAtomicRequestJson = async <T>(
+  config: TencentRagConfig,
+  action: string,
+  body: unknown,
+): Promise<T> => {
+  if (!config.atomicSecretId || !config.atomicSecretKey) {
+    throw new Error('rag_atomic_provider_not_configured')
+  }
+  const host = tencentEsAtomicHost(action)
+  const service = 'es'
+  const version = '2025-01-01'
+  const timestamp = Math.floor(Date.now() / 1000)
+  const date = new Date(timestamp * 1000).toISOString().slice(0, 10)
+  const payload = JSON.stringify(body)
+  const canonicalHeaders = `content-type:application/json; charset=utf-8\nhost:${host}\n`
+  const signedHeaders = 'content-type;host'
+  const canonicalRequest = ['POST', '/', '', canonicalHeaders, signedHeaders, tc3Sha256(payload)].join('\n')
+  const credentialScope = `${date}/${service}/tc3_request`
+  const stringToSign = ['TC3-HMAC-SHA256', timestamp, credentialScope, tc3Sha256(canonicalRequest)].join('\n')
+  const secretDate = tc3HmacBuffer(`TC3${config.atomicSecretKey}`, date)
+  const secretService = tc3HmacBuffer(secretDate, service)
+  const secretSigning = tc3HmacBuffer(secretService, 'tc3_request')
+  const signature = tc3HmacHex(secretSigning, stringToSign)
+  const authorization = `TC3-HMAC-SHA256 Credential=${config.atomicSecretId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`
+  return new Promise<T>((resolve, reject) => {
+    const req = https.request({
+      hostname: host,
+      method: 'POST',
+      path: '/',
+      headers: {
+        Authorization: authorization,
+        'Content-Type': 'application/json; charset=utf-8',
+        Host: host,
+        'X-TC-Action': action,
+        'X-TC-Version': version,
+        'X-TC-Timestamp': String(timestamp),
+        'X-TC-Region': config.atomicRegion || 'ap-beijing',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    }, (res) => {
+      const chunks: Buffer[] = []
+      res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)))
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8')
+        let parsed: any
+        try {
+          parsed = text ? JSON.parse(text) : {}
+        } catch (error) {
+          reject(error)
+          return
+        }
+        if ((res.statusCode || 500) >= 400 || parsed?.Response?.Error) {
+          const error = parsed?.Response?.Error
+          reject(new Error(`Tencent ES atomic ${action} failed: ${error?.Code || res.statusCode} ${error?.Message || text}`))
+          return
+        }
+        resolve((parsed?.Response || parsed) as T)
+      })
+    })
+    req.on('error', reject)
+    req.write(payload)
+    req.end()
+  })
+}
+
+function buildTencentEsFilters(input: RagProviderSearchInput) {
+  const filters: any[] = [{ term: { communityId: input.communityId } }]
+  if (input.sectionId) filters.push({ term: { sectionId: input.sectionId } })
+  if (input.includeMemberOnly === false) filters.push({ term: { visibility: 'public' } })
+  return filters
+}
+
+export function buildTencentEsHybridSearchBody(
+  input: RagProviderSearchInput,
+  config: TencentRagConfig,
+  queryVector: number[],
+) {
+  const filters = buildTencentEsFilters(input)
+  const size = Math.max(1, Math.min(50, Number(input.limit || 20)))
+  const from = Math.max(0, Math.floor(Number(input.skip || 0)))
+  const textQuery = {
+    bool: {
+      must: [{
+        multi_match: {
+          query: input.ragQuery.expandedText,
+          fields: ['text^4', 'preview^4', 'title^3', 'fieldLabel^2', 'sectionName'],
+        },
+      }],
+      filter: filters,
+    },
+  }
+  const retrievers: any[] = [{
+    standard: {
+      query: textQuery,
+    },
+  }]
+  if (Array.isArray(queryVector) && queryVector.length > 0 && config.vectorField) {
+    retrievers.push({
+      knn: {
+        field: config.vectorField,
+        query_vector: queryVector,
+        k: Math.max(size, 20),
+        num_candidates: Math.max(100, size * 8),
+        filter: { bool: { filter: filters } },
+      },
+    })
+  }
+  return {
+    from,
+    size,
+    _source: [
+      'postId',
+      'chunkId',
+      'communityId',
+      'sectionId',
+      'sectionName',
+      'title',
+      'fieldLabel',
+      'fieldType',
+      'preview',
+      'text',
+      'visibility',
+      'sourceUpdatedAt',
+    ],
+    retriever: {
+      rank_fusion: {
+        retrievers,
+        rank_window_size: Math.max(50, size * 5),
+        rank_constant: 60,
+      },
+    },
+  }
+}
+
+function evidenceNeedlesForQuery(query?: RagQuery): string[] {
+  if (!query) return []
+  const candidates = [
+    query.raw,
+    query.normalized,
+    ...query.expansionTerms,
+  ]
+  const seen = new Set<string>()
+  const needles: string[] = []
+  for (const candidate of candidates) {
+    const text = String(candidate || '').replace(/\s+/g, '').trim()
+    if (text.length < 2 || seen.has(text)) continue
+    seen.add(text)
+    needles.push(text)
+  }
+  return needles.sort((left, right) => right.length - left.length || left.localeCompare(right))
+}
+
+function evidenceSnippetFromText(text: string, fallback: string, query?: RagQuery): string {
+  const source = String(text || fallback || '').replace(/\s+/g, ' ').trim()
+  if (!source) return ''
+  const fallbackText = String(fallback || source).replace(/\s+/g, ' ').trim()
+  const sourceLower = source.toLowerCase()
+  const matchIndex = evidenceNeedlesForQuery(query)
+    .map((needle) => sourceLower.indexOf(needle.toLowerCase()))
+    .filter((index) => index >= 0)
+    .sort((left, right) => left - right)[0]
+  if (matchIndex === undefined) return fallbackText ? fallbackText.slice(0, 180) : source.slice(0, 180)
+
+  const chars = Array.from(source)
+  const prefix = source.slice(0, matchIndex)
+  const charIndex = Array.from(prefix).length
+  const start = Math.max(0, charIndex - 48)
+  const end = Math.min(chars.length, charIndex + 132)
+  const snippet = `${start > 0 ? '...' : ''}${chars.slice(start, end).join('')}${end < chars.length ? '...' : ''}`
+  return snippet
+}
+
+function toCitation(hit: any, query?: RagQuery): RagCitation {
   const source = hit?._source || hit || {}
+  const sourceText = String(source.text || source.preview || '')
+  const sourcePreview = String(source.preview || source.text || '')
   return {
     postId: String(source.postId || ''),
     chunkId: String(source.chunkId || hit?._id || ''),
@@ -461,7 +753,7 @@ function toCitation(hit: any): RagCitation {
     sectionName: String(source.sectionName || ''),
     fieldLabel: String(source.fieldLabel || ''),
     fieldType: String(source.fieldType || ''),
-    preview: String(source.preview || source.text || '').slice(0, 180),
+    preview: evidenceSnippetFromText(sourceText, sourcePreview, query).slice(0, 200),
     score: Number(hit?._score || source.score || 0),
     visibility: normalizeRagVisibility(source.visibility),
     sourceUpdatedAt: String(source.sourceUpdatedAt || ''),
@@ -484,18 +776,77 @@ function buildAnswerPrompt(query: string, citations: RagCitation[]) {
 
 function extractCompletionText(value: any): string {
   const completion = value?.completion?.[0]?.result || value?.completion?.[0]?.text
-  const result = value?.result || value?.text || value?.choices?.[0]?.message?.content
+  const response = value?.Response || value
+  const choice = response?.Choices?.[0] || response?.choices?.[0] || {}
+  const result = value?.result
+    || value?.text
+    || value?.choices?.[0]?.message?.content
+    || choice?.Message?.Content
+    || choice?.message?.content
+    || choice?.Content
   return String(completion || result || '').trim()
 }
 
 function extractEmbeddingVector(value: any): number[] {
+  const response = value?.Response || value
   const direct = value?.embedding?.[0]?.result
     || value?.embedding?.[0]?.embedding
     || value?.data?.[0]?.embedding
+    || response?.Data?.[0]?.Embedding
+    || response?.Data?.[0]?.embedding
+    || response?.data?.[0]?.embedding
     || value?.result
     || value?.vector
   if (!Array.isArray(direct)) return []
   return direct.map((item) => Number(item)).filter((item) => Number.isFinite(item))
+}
+
+function isTencentEsNotFoundError(error: any) {
+  const text = String(error?.message || error)
+  return /\b404\b|not[_ -]?found|index_not_found/i.test(text)
+}
+
+function buildTencentEsIndexMapping(config: TencentRagConfig, dims: number) {
+  const vectorField = String(config.vectorField || 'embedding')
+  return {
+    mappings: {
+      properties: {
+        chunkId: { type: 'keyword' },
+        postId: { type: 'keyword' },
+        communityId: { type: 'keyword' },
+        sectionId: { type: 'keyword' },
+        sectionName: { type: 'text' },
+        title: { type: 'text' },
+        fieldLabel: { type: 'text' },
+        fieldType: { type: 'keyword' },
+        text: { type: 'text' },
+        preview: { type: 'text' },
+        sourceUpdatedAt: { type: 'date' },
+        visibility: { type: 'keyword' },
+        [vectorField]: {
+          type: 'dense_vector',
+          dims,
+          index: true,
+          similarity: 'cosine',
+        },
+      },
+    },
+  }
+}
+
+function extractRerankItems(value: any): Array<{ index: number; score: number }> {
+  const response = value?.Response || value
+  const rawItems = Array.isArray(value?.rerank)
+    ? value.rerank
+    : (Array.isArray(value?.data)
+      ? value.data
+      : (Array.isArray(response?.Data) ? response.Data : []))
+  return rawItems
+    .map((item: any) => ({
+      index: Number(item?.index ?? item?.document_index ?? item?.Index ?? item?.DocumentIndex),
+      score: Number(item?.relevance_score ?? item?.score ?? item?.RelevanceScore ?? item?.Score),
+    }))
+    .filter((item: { index: number; score: number }) => Number.isFinite(item.index) && Number.isFinite(item.score))
 }
 
 function deterministicAnswer(citations: RagCitation[]) {
@@ -783,7 +1134,7 @@ export function createTencentLkeapCloudBaseProvider(config: TencentLkeapRagConfi
           const semanticScore = vectorCosine(queryVector, chunk.embedding)
           const lexicalScore = lexicalEvidenceScore(input.ragQuery, chunk)
           return {
-            ...toCitation({ _id: chunk.chunkId, _source: chunk }),
+            ...toCitation({ _id: chunk.chunkId, _source: chunk }, input.ragQuery),
             score: semanticScore + lexicalScore * 0.08,
             semanticScore,
             lexicalScore,
@@ -816,81 +1167,103 @@ export function createTencentLkeapCloudBaseProvider(config: TencentLkeapRagConfi
   }
 }
 
-export function createTencentRagProvider(config: TencentRagConfig): TencentRagProvider {
+export function createTencentRagProvider(
+  config: TencentRagConfig,
+  options: TencentRagProviderOptions = {},
+): TencentRagProvider {
+  const sendJson = options.requestJson || requestJson
+  const sendAtomicJson = options.requestAtomicJson || requestTencentEsAtomic
   const embedText = async (text: string): Promise<number[]> => {
-    if (!config.embeddingInferenceId) return []
-    const response = await requestJson<any>(config, 'POST', `_inference/text_embedding/${config.embeddingInferenceId}`, {
-      input: [text],
-    })
+    const response = config.embeddingInferenceId
+      ? await sendJson<any>(config, 'POST', `_inference/text_embedding/${config.embeddingInferenceId}`, {
+        input: [text],
+      })
+      : await sendAtomicJson<any>(config, 'GetTextEmbedding', {
+        ModelName: config.embeddingModel,
+        Texts: [text],
+      })
     return extractEmbeddingVector(response)
   }
 
   return {
     name: 'tencent-es-ai-search',
     isConfigured: () => isConfigured(config),
+    async ensureIndex() {
+      if (!isConfigured(config)) throw new Error('rag_provider_not_configured')
+      try {
+        await sendJson<any>(config, 'HEAD', config.indexName)
+        return { created: false, indexName: config.indexName }
+      } catch (error) {
+        if (!isTencentEsNotFoundError(error)) throw error
+      }
+      const probeVector = await embedText('HappyHome RAG index mapping dimension probe')
+      const dims = probeVector.length
+      if (dims <= 0) throw new Error('embedding endpoint returned no vector; cannot create dense_vector mapping')
+      await sendJson(config, 'PUT', config.indexName, buildTencentEsIndexMapping(config, dims))
+      return { created: true, indexName: config.indexName, dims }
+    },
     async search(input) {
       if (!isConfigured(config)) throw new Error('rag_provider_not_configured')
-      const filters: any[] = [{ term: { communityId: input.communityId } }]
-      if (input.sectionId) filters.push({ term: { sectionId: input.sectionId } })
-      if (input.includeMemberOnly === false) filters.push({ term: { visibility: 'public' } })
-      const size = Math.max(1, Math.min(50, Number(input.limit || 20)))
-      const from = Math.max(0, Math.floor(Number(input.skip || 0)))
       const queryVector = await embedText(input.ragQuery.expandedText)
-      const searchBody: any = {
-        from,
-        size,
-        query: {
-          bool: {
-            must: [{
-              multi_match: {
-                query: input.ragQuery.expandedText,
-                fields: ['text^4', 'title^3', 'fieldLabel^2', 'sectionName'],
-              },
-            }],
-            filter: filters,
-          },
-        },
-      }
-      if (queryVector.length > 0 && config.vectorField) {
-        searchBody.knn = {
-          field: config.vectorField,
-          query_vector: queryVector,
-          k: size,
-          num_candidates: Math.max(100, size * 8),
-          filter: filters,
-        }
-      }
-      const response = await requestJson<any>(config, 'POST', `${config.indexName}/_search`, {
-        ...searchBody,
-      })
-      let citations = (response?.hits?.hits || [])
-        .map(toCitation)
+      const searchBody = buildTencentEsHybridSearchBody(input, config, queryVector)
+      const response = await sendJson<any>(config, 'POST', `${config.indexName}/_search`, searchBody)
+      let citations: ScoredRagCitation[] = (response?.hits?.hits || [])
+        .map((hit: any) => {
+          const citation = toCitation(hit, input.ragQuery)
+          const source = hit?._source || hit || {}
+          return {
+            ...citation,
+            lexicalScore: lexicalEvidenceScore(input.ragQuery, {
+              title: citation.title,
+              fieldLabel: citation.fieldLabel,
+              preview: citation.preview,
+              text: String(source.text || citation.preview),
+            }),
+          }
+        })
         .filter((citation: RagCitation) => citation.postId && citation.chunkId)
         .filter((citation: RagCitation) => isEvidenceVisible(citation.visibility, input.includeMemberOnly !== false))
 
-      if (config.rerankInferenceId && citations.length > 1) {
-        const reranked = await requestJson<any>(config, 'POST', `_inference/rerank/${config.rerankInferenceId}`, {
-          query: input.ragQuery.raw,
-          input: citations.map((citation: RagCitation) => citation.preview),
-        })
-        const byIndex = new Map<number, any>((reranked?.rerank || []).map((item: any) => [Number(item.index), item]))
+      if (citations.length > 0) {
+        const documents = citations.map((citation: RagCitation) => citation.preview)
+        const reranked = config.rerankInferenceId
+          ? await sendJson<any>(config, 'POST', `_inference/rerank/${config.rerankInferenceId}`, {
+            query: input.ragQuery.raw,
+            input: documents,
+          })
+          : await sendAtomicJson<any>(config, 'RunRerank', {
+            ModelName: config.rerankModel,
+            Query: input.ragQuery.raw,
+            Documents: documents,
+            ReturnDocuments: false,
+          })
+        const byIndex = new Map<number, number>(extractRerankItems(reranked).map((item) => [item.index, item.score]))
         citations = citations
-          .map((citation: RagCitation, index: number) => ({
+          .map((citation: ScoredRagCitation, index: number) => ({
             ...citation,
-            score: Number(byIndex.get(index)?.relevance_score ?? citation.score),
+            score: Number(byIndex.get(index) ?? citation.score),
+            rerankScore: byIndex.has(index) ? Number(byIndex.get(index)) : citation.rerankScore,
           }))
-          .sort((left: RagCitation, right: RagCitation) => right.score - left.score)
+          .sort((left: ScoredRagCitation, right: ScoredRagCitation) => right.score - left.score)
       }
+      citations = rankLkeapEvidenceCitations(citations, input.limit)
 
-      const answerResponse = citations.length && config.llmInferenceId
-        ? await requestJson<any>(config, 'POST', `_inference/completion/${config.llmInferenceId}?timeout=300s`, {
-          input: buildAnswerPrompt(input.query, citations),
-          task_settings: { temperature: 0.1, max_new_tokens: 300 },
-        })
+      const answerResponse = citations.length
+        ? (config.llmInferenceId
+          ? await sendJson<any>(config, 'POST', `_inference/completion/${config.llmInferenceId}?timeout=300s`, {
+            input: buildAnswerPrompt(input.query, citations),
+            task_settings: { temperature: 0.1, max_new_tokens: 300 },
+          })
+          : await sendAtomicJson<any>(config, 'ChatCompletions', {
+            ModelName: config.llmModel,
+            Messages: [{ Role: 'user', Content: buildAnswerPrompt(input.query, citations) }],
+            Stream: false,
+            Temperature: 0.1,
+          }))
         : null
       const answer = extractCompletionText(answerResponse) || (citations.length ? deterministicAnswer(citations) : '')
       return {
-        total: Number(response?.hits?.total?.value ?? citations.length),
+        total: citations.length,
         answer,
         citations,
         items: resultItemsFromCitations(citations),
@@ -901,7 +1274,7 @@ export function createTencentRagProvider(config: TencentRagConfig): TencentRagPr
       if (!isConfigured(config)) throw new Error('rag_provider_not_configured')
       for (const chunk of chunks) {
         const embedding = await embedText([chunk.title, chunk.fieldLabel, chunk.text].filter(Boolean).join('\n'))
-        await requestJson(config, 'PUT', `${config.indexName}/_doc/${encodeURIComponent(chunk.chunkId)}`, {
+        await sendJson(config, 'PUT', `${config.indexName}/_doc/${encodeURIComponent(chunk.chunkId)}`, {
           ...chunk,
           ...(embedding.length > 0 && config.vectorField ? { [config.vectorField]: embedding } : {}),
         })
@@ -909,11 +1282,23 @@ export function createTencentRagProvider(config: TencentRagConfig): TencentRagPr
     },
     async deletePostChunks(postId) {
       if (!isConfigured(config)) throw new Error('rag_provider_not_configured')
-      await requestJson(config, 'POST', `${config.indexName}/_delete_by_query`, {
-        query: { term: { postId } },
-      })
+      try {
+        await sendJson(config, 'POST', `${config.indexName}/_delete_by_query`, {
+          query: { term: { postId } },
+        })
+      } catch (error) {
+        if (isTencentEsNotFoundError(error)) return
+        throw error
+      }
     },
   }
+}
+
+export async function ensurePostRagIndex(options: { provider?: TencentRagProvider } = {}) {
+  const provider = options.provider || createTencentRagProviderFromEnv()
+  if (!provider.isConfigured()) throw new Error('rag_provider_not_configured')
+  if (!provider.ensureIndex) return { created: false, indexName: '', skipped: true }
+  return provider.ensureIndex()
 }
 
 function stableId(value: string) {
@@ -1893,6 +2278,201 @@ export async function backfillPostRagJobsForSectionBatch(
   }
 }
 
+async function getPostRagIndexState(postId: string): Promise<Record<string, any> | null> {
+  try {
+    return await db.getById(POST_RAG_INDEX_STATE, postId) as Record<string, any>
+  } catch (error) {
+    if (isMissingDocumentError(error)) return null
+    throw error
+  }
+}
+
+function timestampIsFresh(indexedSourceUpdatedAt: unknown, sourceUpdatedAt: string): boolean {
+  const indexedTime = Date.parse(String(indexedSourceUpdatedAt || ''))
+  const sourceTime = Date.parse(String(sourceUpdatedAt || ''))
+  if (Number.isFinite(indexedTime) && Number.isFinite(sourceTime)) return indexedTime >= sourceTime
+  return String(indexedSourceUpdatedAt || '') === sourceUpdatedAt
+}
+
+export async function reconcilePostRagJobsForCommunityBatch(
+  communityId: string,
+  options: { skip?: number; limit?: number } = {}
+) {
+  const normalizedCommunityId = String(communityId || '').trim()
+  if (!normalizedCommunityId) throw new Error('communityId is required')
+  const skip = Math.max(0, Math.floor(Number(options.skip || 0)))
+  const limit = Math.max(1, Math.min(50, Math.floor(Number(options.limit || 10))))
+  const posts = await db.query('posts', { communityId: normalizedCommunityId }, {
+    orderBy: ['updatedAt', 'desc'],
+    skip,
+    limit,
+  }) as Post[]
+  let upsertQueuedCount = 0
+  let deleteQueuedCount = 0
+  let skippedCount = 0
+  let missingStateCount = 0
+  let staleStateCount = 0
+  let removableStateCount = 0
+  let failedCount = 0
+
+  for (const post of posts) {
+    try {
+      const sourceUpdatedAt = sourceUpdatedAtForPost(post, '')
+      const state = await getPostRagIndexState(post._id)
+      if (isPostSearchableForRag(post)) {
+        let reason = ''
+        if (!state) {
+          missingStateCount += 1
+          reason = 'rag.reconcile.missing_state'
+        } else if (state.status !== 'indexed') {
+          staleStateCount += 1
+          reason = 'rag.reconcile.not_indexed'
+        } else if (!timestampIsFresh(state.sourceUpdatedAt, sourceUpdatedAt)) {
+          staleStateCount += 1
+          reason = 'rag.reconcile.stale_state'
+        }
+        if (reason) {
+          await enqueuePostRagJob({
+            postId: post._id,
+            communityId: post.communityId || normalizedCommunityId,
+            sectionId: post.sectionId || '',
+            action: 'upsert',
+            reason,
+          })
+          upsertQueuedCount += 1
+        } else {
+          skippedCount += 1
+        }
+        continue
+      }
+
+      if (state && state.status !== 'removed') {
+        removableStateCount += 1
+        await enqueuePostRagJob({
+          postId: post._id,
+          communityId: post.communityId || normalizedCommunityId,
+          sectionId: post.sectionId || '',
+          action: 'delete',
+          reason: 'rag.reconcile.removed_source',
+        })
+        deleteQueuedCount += 1
+      } else {
+        skippedCount += 1
+      }
+    } catch {
+      failedCount += 1
+    }
+  }
+
+  const hasMore = posts.length === limit
+  return {
+    communityId: normalizedCommunityId,
+    skip,
+    limit,
+    scannedCount: posts.length,
+    upsertQueuedCount,
+    deleteQueuedCount,
+    skippedCount,
+    missingStateCount,
+    staleStateCount,
+    removableStateCount,
+    failedCount,
+    hasMore,
+    nextSkip: hasMore ? skip + posts.length : null,
+  }
+}
+
+export async function getPostRagIndexHealthForCommunity(communityId: string) {
+  const normalizedCommunityId = String(communityId || '').trim()
+  if (!normalizedCommunityId) throw new Error('communityId is required')
+  const [
+    activePostCount,
+    indexedStateCount,
+    removedStateCount,
+    failedStateCount,
+    pendingJobCount,
+    failedJobCount,
+  ] = await Promise.all([
+    db.count('posts', { communityId: normalizedCommunityId, status: 'active' }),
+    db.count(POST_RAG_INDEX_STATE, { communityId: normalizedCommunityId, status: 'indexed' }),
+    db.count(POST_RAG_INDEX_STATE, { communityId: normalizedCommunityId, status: 'removed' }),
+    db.count(POST_RAG_INDEX_STATE, { communityId: normalizedCommunityId, status: 'failed' }),
+    db.count(POST_RAG_JOBS, { communityId: normalizedCommunityId, status: 'pending' }),
+    db.count(POST_RAG_JOBS, { communityId: normalizedCommunityId, status: 'failed' }),
+  ])
+  const [
+    latestIndexedRows,
+    oldestPendingRows,
+    latestFailedRows,
+    workerState,
+  ] = await Promise.all([
+    db.query(POST_RAG_INDEX_STATE, { communityId: normalizedCommunityId, status: 'indexed' }, { orderBy: ['indexedAt', 'desc'], limit: 1 }).catch(() => []),
+    db.query(POST_RAG_JOBS, { communityId: normalizedCommunityId, status: 'pending' }, { orderBy: ['createdAt', 'asc'], limit: 1 }).catch(() => []),
+    db.query(POST_RAG_JOBS, { communityId: normalizedCommunityId, status: 'failed' }, { orderBy: ['updatedAt', 'desc'], limit: 1 }).catch(() => []),
+    getPostRagWorkerState(),
+  ])
+  const potentialMissingActiveCount = Math.max(0, activePostCount - indexedStateCount)
+  const hasBlockingIssues = potentialMissingActiveCount > 0
+    || failedStateCount > 0
+    || pendingJobCount > 0
+    || failedJobCount > 0
+  return {
+    communityId: normalizedCommunityId,
+    activePostCount,
+    indexedStateCount,
+    removedStateCount,
+    failedStateCount,
+    pendingJobCount,
+    failedJobCount,
+    potentialMissingActiveCount,
+    coverageRatio: activePostCount > 0 ? indexedStateCount / activePostCount : 1,
+    latestIndexedAt: String((latestIndexedRows as any[])?.[0]?.indexedAt || ''),
+    oldestPendingJobCreatedAt: String((oldestPendingRows as any[])?.[0]?.createdAt || ''),
+    latestFailedJobUpdatedAt: String((latestFailedRows as any[])?.[0]?.updatedAt || ''),
+    readyForRag: !hasBlockingIssues,
+    hasBlockingIssues,
+    worker: workerState,
+  }
+}
+
+async function getPostRagWorkerState() {
+  try {
+    const state = await db.getById(POST_RAG_WORKER_STATE, 'post-rag-worker') as Record<string, any>
+    if (!state) return null
+    return {
+      status: String(state.status || ''),
+      lastRunAt: String(state.lastRunAt || ''),
+      lastCompletedAt: String(state.lastCompletedAt || ''),
+      lastScannedCount: Number(state.lastScannedCount || 0),
+      lastOkCount: Number(state.lastOkCount || 0),
+      lastFailedCount: Number(state.lastFailedCount || 0),
+      lastErrorMessage: String(state.lastErrorMessage || ''),
+    }
+  } catch {
+    return null
+  }
+}
+
+async function updatePostRagWorkerState(data: Record<string, any>) {
+  try {
+    const updateResult = await db.updateById(POST_RAG_WORKER_STATE, 'post-rag-worker', data) as any
+    if (updateResult === undefined || updateMatchedDocument(updateResult)) return
+    await db.create(POST_RAG_WORKER_STATE, {
+      _id: 'post-rag-worker',
+      ...data,
+    }).catch(() => null)
+  } catch {
+    try {
+      await db.create(POST_RAG_WORKER_STATE, {
+        _id: 'post-rag-worker',
+        ...data,
+      })
+    } catch {
+      // Worker health telemetry must not block indexing.
+    }
+  }
+}
+
 function toRagChunkDocuments(post: Post, section: Section): RagChunkDocument[] {
   const document = buildPostSearchDocument(post, section)
   return buildPostSearchChunks(document).map((chunk) => ({
@@ -1980,12 +2560,16 @@ export async function processPostRagJobBatch(options: {
   const provider = options.provider || createTencentRagProviderFromEnv()
   const limit = Math.max(1, Math.min(20, Math.floor(Number(options.limit || 5))))
   const postId = String(options.postId || '').trim()
+  const startedAt = new Date().toISOString()
   const jobs = await db.query(
     POST_RAG_JOBS,
     { status: 'pending', ...(postId ? { postId } : {}) },
     { orderBy: ['createdAt', 'asc'], limit }
   ) as any[]
   const results: Array<{ jobId: string; ok: boolean; error?: string }> = []
+  let indexEnsured = false
+  let okCount = 0
+  let failedCount = 0
   for (const job of jobs) {
     const now = new Date().toISOString()
     try {
@@ -2003,6 +2587,7 @@ export async function processPostRagJobBatch(options: {
           await upsertPostRagIndexState(job.postId, removedRagIndexState(job, now))
           await db.updateById(POST_RAG_JOBS, job._id, { status: 'completed', updatedAt: now })
           results.push({ jobId: job._id, ok: true })
+          okCount += 1
           continue
         }
         if (!isPostSearchableForRag(post)) {
@@ -2010,6 +2595,7 @@ export async function processPostRagJobBatch(options: {
           await upsertPostRagIndexState(job.postId, removedRagIndexState(job, now, post))
           await db.updateById(POST_RAG_JOBS, job._id, { status: 'completed', updatedAt: now })
           results.push({ jobId: job._id, ok: true })
+          okCount += 1
           continue
         }
         const section = await db.getById('sections', post.sectionId) as Section
@@ -2026,6 +2612,10 @@ export async function processPostRagJobBatch(options: {
           policy: videoPolicy,
         })
         const videoJobResult = await enqueueVideoRagAnalysisJobs(videoAnalysisJobs)
+        if (!indexEnsured) {
+          await provider.ensureIndex?.()
+          indexEnsured = true
+        }
         await provider.deletePostChunks?.(job.postId)
         await provider.upsertChunks?.(chunks)
         await upsertPostRagIndexState(job.postId, {
@@ -2048,6 +2638,7 @@ export async function processPostRagJobBatch(options: {
       }
       await db.updateById(POST_RAG_JOBS, job._id, { status: 'completed', updatedAt: now })
       results.push({ jobId: job._id, ok: true })
+      okCount += 1
     } catch (error: any) {
       await db.updateById(POST_RAG_JOBS, job._id, {
         status: 'failed',
@@ -2056,7 +2647,17 @@ export async function processPostRagJobBatch(options: {
         updatedAt: now,
       })
       results.push({ jobId: job._id, ok: false, error: String(error?.message || error) })
+      failedCount += 1
     }
   }
+  await updatePostRagWorkerState({
+    status: failedCount > 0 ? 'completed_with_errors' : 'completed',
+    lastRunAt: startedAt,
+    lastCompletedAt: new Date().toISOString(),
+    lastScannedCount: jobs.length,
+    lastOkCount: okCount,
+    lastFailedCount: failedCount,
+    lastErrorMessage: results.find((result) => !result.ok)?.error || '',
+  })
   return { scannedCount: jobs.length, results }
 }

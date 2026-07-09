@@ -6,12 +6,13 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import process from 'node:process'
 import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
+import { parsePositiveIntOption, runBounded } from './lib/release-concurrency.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
 
 export const DEFAULT_ENV_ID = 'cloudbase-3gh862acb1505ff3'
-export const DEFAULT_FUNCTIONS = ['user', 'community', 'member', 'section', 'post', 'post-rag-worker', 'post-video-rag-worker', 'admin', 'http-gateway']
+export const DEFAULT_FUNCTIONS = ['user', 'community', 'member', 'section', 'post', 'post-rag-worker', 'post-video-rag-worker', 'admin', 'http-gateway', 'home-prefetch']
 export const REQUIRED_SMOKE_LABELS = [
   'HH_CLOUD_INVOKE_SMOKE_COMMUNITY',
   'HH_CLOUD_INVOKE_SMOKE_MEMBER',
@@ -19,6 +20,7 @@ export const REQUIRED_SMOKE_LABELS = [
   'HH_CLOUD_INVOKE_SMOKE_POST_RAG_WORKER',
   'HH_CLOUD_INVOKE_SMOKE_POST_VIDEO_RAG_WORKER',
   'HH_CLOUD_INVOKE_SMOKE_HTTP_GATEWAY',
+  'HH_CLOUD_INVOKE_SMOKE_HOME_PREFETCH',
   'HH_CLOUD_INVOKE_SMOKE_ADMIN_FIXTURE',
   'HH_CLOUD_LOG_CAPTURE_POST',
   'HH_CLOUD_FIXTURE_CLEANUP_OK',
@@ -59,6 +61,11 @@ export function parseArgs(argv = process.argv.slice(2), env = process.env) {
   const logLimit = Number(getFlag('log-limit', env.HH_CLOUD_SMOKE_LOG_LIMIT || '30'))
   const logWaitMs = Number(getFlag('log-wait-ms', env.HH_CLOUD_SMOKE_LOG_WAIT_MS || '3000'))
   const commandTimeoutMs = Number(getFlag('command-timeout-ms', env.HH_CLOUD_SMOKE_COMMAND_TIMEOUT_MS || '60000'))
+  const concurrency = parsePositiveIntOption(
+    getFlag('concurrency', getFlag('cloud-smoke-concurrency', env.HH_CLOUD_SMOKE_CONCURRENCY || '3')),
+    3,
+    { min: 1, max: 5 },
+  )
   const runId = getFlag('run-id', env.HH_RELEASE_CLOUD_SMOKE_RUN_ID || makeRunId())
   const workerToken = getFlag('worker-token', resolvePostRagWorkerToken(env))
   const evidenceDir = getFlag(
@@ -72,6 +79,7 @@ export function parseArgs(argv = process.argv.slice(2), env = process.env) {
     logLimit: Number.isFinite(logLimit) && logLimit > 0 ? Math.floor(logLimit) : 30,
     logWaitMs: Number.isFinite(logWaitMs) && logWaitMs >= 0 ? Math.floor(logWaitMs) : 3000,
     commandTimeoutMs: Number.isFinite(commandTimeoutMs) && commandTimeoutMs > 0 ? Math.floor(commandTimeoutMs) : 60000,
+    concurrency,
     noFixture: argv.includes('--no-fixture'),
     workerToken,
     evidenceDir,
@@ -248,13 +256,35 @@ function includesRequiredText(record, text) {
 
 function isTransientCloudBaseFailure(record) {
   const haystack = `${record.error || ''}\n${record.stdout || ''}\n${record.stderr || ''}\n${JSON.stringify(record.parsed || {})}`
-  return /ECONNRESET|ETIMEDOUT|EAI_AGAIN|socket disconnected|TLS connection|RequestTimeout|context deadline exceeded/i.test(haystack)
+  return /ECONNRESET|ETIMEDOUT|EAI_AGAIN|socket disconnected|TLS connection|RequestTimeout|context deadline exceeded|command timed out after/i.test(haystack)
 }
 
 function logAttemptLimits(logLimit) {
   return [logLimit, Math.min(logLimit, 5), 1]
     .filter((limit) => Number.isFinite(limit) && limit > 0)
     .filter((limit, index, values) => values.indexOf(limit) === index)
+}
+
+function escapeClsQueryValue(value) {
+  return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
+export function buildLogsSearchArgs(fn, opts = {}, limit = 20) {
+  const query = [`function_name:"${escapeClsQueryValue(fn)}"`]
+  if (opts.contains) query.push(`log:"${escapeClsQueryValue(opts.contains)}"`)
+  if (opts.errorOnly) query.push('status_code>200 AND status_code!=202')
+  return [
+    'logs',
+    'search',
+    '--query',
+    query.join(' AND '),
+    '--timeRange',
+    opts.timeRange || '30m',
+    '--limit',
+    String(limit),
+    '--sort',
+    'desc',
+  ]
 }
 
 function tcbArgs(actionArgs, envId, json = true) {
@@ -353,23 +383,42 @@ export class CloudSmokeRun {
     const stage = `log-${fn}${opts.errorOnly ? '-error' : ''}`
     const required = opts.required !== false
     const limits = required ? logAttemptLimits(this.options.logLimit) : [Math.min(this.options.logLimit, 5)]
-    const attempts = []
+    const searchAttempts = []
+    const legacyAttempts = []
     let selected = null
+    let method = 'logs-search'
 
     for (let index = 0; index < limits.length; index += 1) {
       if (index > 0 && this.options.logWaitMs > 0) {
         await new Promise((resolveDelay) => setTimeout(resolveDelay, Math.min(this.options.logWaitMs, 5000)))
       }
-      const attemptStage = limits.length === 1 ? stage : `${stage}-attempt-${index + 1}`
-      const args = ['fn', 'log', fn, '--limit', String(limits[index]), '--order', 'desc']
-      if (opts.errorOnly) args.push('--error')
+      const attemptStage = limits.length === 1 ? `${stage}-search` : `${stage}-search-attempt-${index + 1}`
+      const args = buildLogsSearchArgs(fn, opts, limits[index])
       const record = await this.runTcb(attemptStage, args)
-      attempts.push(record)
+      searchAttempts.push(record)
       selected = record
       if (record.ok && includesRequiredText(record, opts.contains)) break
     }
 
     let ok = Boolean(selected?.ok && includesRequiredText(selected, opts.contains))
+
+    if (!ok) {
+      for (let index = 0; index < limits.length; index += 1) {
+        if (index > 0 && this.options.logWaitMs > 0) {
+          await new Promise((resolveDelay) => setTimeout(resolveDelay, Math.min(this.options.logWaitMs, 5000)))
+        }
+        const attemptStage = limits.length === 1 ? `${stage}-legacy` : `${stage}-legacy-attempt-${index + 1}`
+        const args = ['fn', 'log', fn, '--limit', String(limits[index]), '--order', 'desc']
+        if (opts.errorOnly) args.push('--error')
+        const record = await this.runTcb(attemptStage, args)
+        legacyAttempts.push(record)
+        selected = record
+        method = 'fn-log'
+        if (record.ok && includesRequiredText(record, opts.contains)) break
+      }
+      ok = Boolean(selected?.ok && includesRequiredText(selected, opts.contains))
+    }
+
     const inlineLogFallback = !ok && opts.contains
       ? this.evidence.find((record) => record.stage.startsWith(`invoke-${fn}-`) && includesRequiredText(record, opts.contains))
       : null
@@ -378,7 +427,10 @@ export class CloudSmokeRun {
       ...(selected || {}),
       stage,
       ok,
-      attempts,
+      method: inlineLogFallback ? 'inline-invoke-output' : method,
+      attempts: [...searchAttempts, ...legacyAttempts],
+      searchAttempts,
+      legacyAttempts,
       ...(inlineLogFallback ? { inlineLogFallbackStage: inlineLogFallback.stage } : {}),
       finishedAt: new Date().toISOString(),
     }
@@ -395,15 +447,16 @@ export class CloudSmokeRun {
   }
 
   async smokeBasicFunctions() {
+    const tasks = []
     if (this.options.only.includes('community')) {
-      await this.invoke('community', { action: 'list' }, {
+      tasks.push(() => this.invoke('community', { action: 'list' }, {
         label: 'HH_CLOUD_INVOKE_SMOKE_COMMUNITY',
-      })
+      }))
     }
     if (this.options.only.includes('member')) {
-      await this.invoke('member', { action: 'myCommunities' }, {
+      tasks.push(() => this.invoke('member', { action: 'myCommunities' }, {
         label: 'HH_CLOUD_INVOKE_SMOKE_MEMBER',
-      })
+      }))
     }
     if (this.options.only.includes('post')) {
       const payload = {
@@ -414,60 +467,70 @@ export class CloudSmokeRun {
         build: { runId: this.options.runId },
         details: { runId: this.options.runId },
       }
-      await this.invoke('post', payload, {
+      tasks.push(() => this.invoke('post', payload, {
         label: 'HH_CLOUD_INVOKE_SMOKE_POST',
-      })
+      }))
     }
     if (this.options.only.includes('post-rag-worker')) {
       if (!this.options.workerToken) {
-        this.fail('post-rag-worker smoke missing POST_RAG_WORKER_TOKEN / HH_POST_RAG_WORKER_TOKEN')
+        tasks.push(async () => this.fail('post-rag-worker smoke missing POST_RAG_WORKER_TOKEN / HH_POST_RAG_WORKER_TOKEN'))
       } else {
-        await this.invoke('post-rag-worker', {
+        tasks.push(() => this.invoke('post-rag-worker', {
           limit: 1,
           postId: '__release_smoke_missing__',
           workerToken: this.options.workerToken,
         }, {
           name: 'token-guard',
           label: 'HH_CLOUD_INVOKE_SMOKE_POST_RAG_WORKER',
-        })
+        }))
       }
     }
     if (this.options.only.includes('post-video-rag-worker')) {
       if (!this.options.workerToken) {
-        this.fail('post-video-rag-worker smoke missing POST_RAG_WORKER_TOKEN / HH_POST_RAG_WORKER_TOKEN')
+        tasks.push(async () => this.fail('post-video-rag-worker smoke missing POST_RAG_WORKER_TOKEN / HH_POST_RAG_WORKER_TOKEN'))
       } else {
-        await this.invoke('post-video-rag-worker', {
+        tasks.push(() => this.invoke('post-video-rag-worker', {
           limit: 1,
           postId: '__release_smoke_missing__',
           workerToken: this.options.workerToken,
         }, {
           name: 'token-guard',
           label: 'HH_CLOUD_INVOKE_SMOKE_POST_VIDEO_RAG_WORKER',
-        })
+        }))
       }
     }
     if (this.options.only.includes('http-gateway')) {
-      await this.invoke('http-gateway', { httpMethod: 'OPTIONS', headers: {}, body: '' }, {
+      tasks.push(() => this.invoke('http-gateway', { httpMethod: 'OPTIONS', headers: {}, body: '' }, {
         name: 'options',
         label: 'HH_CLOUD_INVOKE_SMOKE_HTTP_GATEWAY',
-      })
+      }))
+    }
+    if (this.options.only.includes('home-prefetch')) {
+      tasks.push(() => this.invoke('home-prefetch', {
+        httpMethod: 'GET',
+        queryStringParameters: { token: '__release_smoke_missing__' },
+      }, {
+        name: 'missing-token-fallback',
+        label: 'HH_CLOUD_INVOKE_SMOKE_HOME_PREFETCH',
+      }))
     }
     if (this.options.only.includes('user')) {
-      await this.invoke('user', { action: 'login', nickName: 'ReleaseSmoke', avatarUrl: '' }, {
+      tasks.push(() => this.invoke('user', { action: 'login', nickName: 'ReleaseSmoke', avatarUrl: '' }, {
         name: 'openid-guard',
         expectedFailure: true,
         required: false,
         label: 'HH_CLOUD_RUNTIME_GUARD_USER',
-      })
+      }))
     }
     if (this.options.only.includes('section')) {
-      await this.invoke('section', { action: 'list', communityId: '__release_smoke_missing__' }, {
+      tasks.push(() => this.invoke('section', { action: 'list', communityId: '__release_smoke_missing__' }, {
         name: 'membership-guard',
         expectedFailure: true,
         required: false,
         label: 'HH_CLOUD_RUNTIME_GUARD_SECTION',
-      })
+      }))
     }
+    await runBounded(tasks, this.options.concurrency)
   }
 
   adminPayload(action, params = {}) {
@@ -576,13 +639,21 @@ export class CloudSmokeRun {
     if (this.options.logWaitMs > 0) {
       await new Promise((resolveDelay) => setTimeout(resolveDelay, this.options.logWaitMs))
     }
-    for (const fn of this.options.only) {
-      const record = await this.log(fn, {
-        required: fn === 'post',
-        label: `HH_CLOUD_LOG_CAPTURE_${fn.toUpperCase().replace(/-/g, '_')}`,
-        contains: fn === 'post' ? this.options.runId : '',
+    if (this.options.only.includes('post')) {
+      await this.log('post', {
+        required: true,
+        label: 'HH_CLOUD_LOG_CAPTURE_POST',
+        contains: this.options.runId,
       })
     }
+    const optionalLogTasks = this.options.only
+      .filter((fn) => fn !== 'post')
+      .map((fn) => () => this.log(fn, {
+        required: false,
+        label: `HH_CLOUD_LOG_CAPTURE_${fn.toUpperCase().replace(/-/g, '_')}`,
+        contains: '',
+      }))
+    await runBounded(optionalLogTasks, this.options.concurrency)
   }
 
   async writeSummary() {
@@ -603,6 +674,7 @@ export class CloudSmokeRun {
       envId: this.options.envId,
       functions: this.options.only,
       evidenceDir: this.options.evidenceDir,
+      concurrency: this.options.concurrency,
       labels: [...this.labels].sort(),
       requiredLabels,
       missingLabels,

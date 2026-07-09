@@ -26,7 +26,7 @@ import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
-import { navigateBackOrHome } from '../../utils/hierarchy-nav'
+import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
 
 interface NoticeDetail {
   sectionName: string
@@ -76,6 +76,7 @@ function goHome() {
 }
 
 onLoad(async (query) => {
+  if (ensureHierarchyStack('/pages/notice/index', query || {})) return
   sectionId.value = decodeURIComponent(String(query?.sectionId || ''))
   widgetId.value = decodeURIComponent(String(query?.widgetId || ''))
   await ensureSectionsLoaded()

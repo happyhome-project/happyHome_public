@@ -458,12 +458,19 @@ const REQUIRED_COLLECTIONS = [
   'post_search_index_state',  // 每篇帖子索引状态
   'post_rag_jobs',            // 正式 RAG 异步索引任务
   'post_rag_index_state',     // 正式 RAG 每篇帖子索引状态
+  'post_rag_worker_state',    // 正式 RAG worker 最近运行状态
   'post_rag_chunks',          // RAG chunk 元数据镜像/排障用
   'post_video_rag_assets',     // 视频 OCR/ASR/关键帧摘要缓存（按 cacheKey 复用）
   'post_video_rag_jobs',       // 成本感知的视频分析异步任务
 ]
 
 let hadError = false
+
+function isAlreadyExistsError(error) {
+  const msg = String(error?.message || error)
+  if (/not exist|does not exist|不存在|CollectionNotExists/i.test(msg)) return false
+  return /Table exist|already exists|collection .*exists|index .*exists|已存在/i.test(msg)
+}
 
 for (const coll of REQUIRED_COLLECTIONS) {
   try {
@@ -476,6 +483,10 @@ for (const coll of REQUIRED_COLLECTIONS) {
     console.log(`✓ collection ${coll} created`)
   } catch (e) {
     const msg = String(e?.message || e)
+    if (isAlreadyExistsError(e)) {
+      console.log(`= collection ${coll} (already exists)`)
+      continue
+    }
     console.error(`✗ collection ${coll}`, msg)
     hadError = true
   }
@@ -505,6 +516,10 @@ for (const idx of INDEXES) {
   } catch (e) {
     // checkIndexExists 对不存在的集合会抛错；降级到尝试直接建，若失败再报
     const msg = String(e?.message || e)
+    if (isAlreadyExistsError(e)) {
+      console.log(`= ${idx.coll}.${idx.name} (already exists)`)
+      continue
+    }
     if (msg.includes('不存在') || msg.includes('not exist') || msg.includes('CollectionNotExists')) {
       console.error(`✗ ${idx.coll}.${idx.name}  collection "${idx.coll}" 不存在，跳过`)
       continue
