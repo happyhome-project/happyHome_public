@@ -45,6 +45,24 @@ describe('guest intro config', () => {
     expect(config.secondaryActionText).toBe('去加入')
   })
 
+  test('migrates the legacy default version to the Figma welcome copy', () => {
+    const config = normalizeGuestIntroConfig({
+      enabled: false,
+      version: 'guest-intro-default-v1',
+      title: '欢迎来到社群小助手 ^_^',
+      body: '旧版默认说明',
+      primaryActionText: '先看看样板',
+      secondaryActionText: '登录后加入或创建社群',
+      updatedAt: '2026-06-01T00:00:00.000Z',
+    })
+
+    expect(config).toEqual({
+      ...DEFAULT_GUEST_INTRO_CONFIG,
+      enabled: false,
+      updatedAt: '2026-06-01T00:00:00.000Z',
+    })
+  })
+
   test('saving copy keeps the current version unless publishNewVersion is requested', () => {
     const current = normalizeGuestIntroConfig({
       ...DEFAULT_GUEST_INTRO_CONFIG,

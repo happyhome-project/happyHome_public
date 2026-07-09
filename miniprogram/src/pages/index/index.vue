@@ -391,7 +391,7 @@ import {
 } from '../../utils/community-share'
 import { markGuestIntroSeen, shouldShowGuestIntro } from '../../utils/guest-intro'
 import type { HomeBanner, HomeSnapshot } from '../../../../cloud/shared/types'
-import type { GuestIntroConfig } from '../../../../cloud/shared/guest-intro-config'
+import { normalizeGuestIntroConfig, type GuestIntroConfig } from '../../../../cloud/shared/guest-intro-config'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -1329,7 +1329,9 @@ function applyHomeSnapshot(snapshot: HomeSnapshot | null, source: 'prefetch' | '
   communityStore.currentSectionIndex = 0
   communityStore.currentSections = snapshot.sections || []
   postsBySection.value = snapshot.postsBySection || {}
-  guestIntroConfig.value = userStore.isLoggedIn ? null : (snapshot.guestIntroConfig || null)
+  guestIntroConfig.value = userStore.isLoggedIn
+    ? null
+    : normalizeGuestIntroConfig(snapshot.guestIntroConfig || null)
   refreshGuestIntroVisibility()
   if (userStore.isLoggedIn) communityStore.saveToStorage()
   clientLog('info', 'home.snapshot.apply', {

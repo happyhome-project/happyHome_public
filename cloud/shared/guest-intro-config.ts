@@ -38,9 +38,20 @@ export const DEFAULT_GUEST_INTRO_CONFIG: GuestIntroConfig = {
   secondaryActionText: '免费创建我的社群',
 }
 
+const LEGACY_DEFAULT_GUEST_INTRO_VERSIONS = new Set([
+  'guest-intro-default-v1',
+])
+
 function textOrDefault(value: unknown, fallback: string): string {
   const text = typeof value === 'string' ? value.trim() : ''
   return text || fallback
+}
+
+function copyMetaFields(raw: Partial<GuestIntroConfig>): Partial<GuestIntroConfig> {
+  return {
+    ...(raw.updatedAt ? { updatedAt: String(raw.updatedAt) } : {}),
+    ...(raw.updatedBy ? { updatedBy: String(raw.updatedBy) } : {}),
+  }
 }
 
 function normalizeFeature(value: unknown, fallback: GuestIntroFeature): GuestIntroFeature {
@@ -54,6 +65,15 @@ function normalizeFeature(value: unknown, fallback: GuestIntroFeature): GuestInt
 
 export function normalizeGuestIntroConfig(value: unknown): GuestIntroConfig {
   const raw = value && typeof value === 'object' ? value as Partial<GuestIntroConfig> : {}
+  const version = textOrDefault(raw.version, DEFAULT_GUEST_INTRO_CONFIG.version)
+  if (LEGACY_DEFAULT_GUEST_INTRO_VERSIONS.has(version)) {
+    return {
+      ...DEFAULT_GUEST_INTRO_CONFIG,
+      enabled: typeof raw.enabled === 'boolean' ? raw.enabled : DEFAULT_GUEST_INTRO_CONFIG.enabled,
+      ...copyMetaFields(raw),
+    }
+  }
+
   const rawFeatures = Array.isArray(raw.features) ? raw.features : []
   const features = DEFAULT_GUEST_INTRO_CONFIG.features.map((fallback, index) =>
     normalizeFeature(rawFeatures[index], fallback)
@@ -61,14 +81,13 @@ export function normalizeGuestIntroConfig(value: unknown): GuestIntroConfig {
 
   return {
     enabled: typeof raw.enabled === 'boolean' ? raw.enabled : DEFAULT_GUEST_INTRO_CONFIG.enabled,
-    version: textOrDefault(raw.version, DEFAULT_GUEST_INTRO_CONFIG.version),
+    version,
     title: textOrDefault(raw.title, DEFAULT_GUEST_INTRO_CONFIG.title),
     body: textOrDefault(raw.body, DEFAULT_GUEST_INTRO_CONFIG.body),
     features,
     primaryActionText: textOrDefault(raw.primaryActionText, DEFAULT_GUEST_INTRO_CONFIG.primaryActionText),
     secondaryActionText: textOrDefault(raw.secondaryActionText, DEFAULT_GUEST_INTRO_CONFIG.secondaryActionText),
-    ...(raw.updatedAt ? { updatedAt: String(raw.updatedAt) } : {}),
-    ...(raw.updatedBy ? { updatedBy: String(raw.updatedBy) } : {}),
+    ...copyMetaFields(raw),
   }
 }
 
