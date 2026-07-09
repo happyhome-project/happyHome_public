@@ -27,6 +27,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
+import { resolveSectionIconGlyph } from '../../utils/section-icon'
 
 interface NoticeDetail {
   sectionName: string
@@ -66,7 +67,7 @@ function resolveNotice() {
     sectionName: section.name,
     label: widget.label || '公告',
     content,
-    icon: section.icon || '告',
+    icon: resolveSectionIconGlyph(section.icon, '告'),
     accentColor: section.accentColor || '',
   }
 }
