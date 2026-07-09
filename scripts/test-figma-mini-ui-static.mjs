@@ -171,14 +171,16 @@ assert(
 
 assert(
     home.includes('class="home-shell"') &&
-    home.includes('class="home-brandbar"') &&
-    home.includes('class="home-brand-title"') &&
-    home.includes('社群助手') &&
+    !home.includes('class="home-brandbar"') &&
+    !home.includes('class="home-brand-title"') &&
     home.includes('class="home-quote"') &&
     home.includes('quoteText') &&
+    home.includes("'Source Han Serif SC', 'Noto Serif CJK SC', '思源宋体'") &&
     home.includes('placeholder="搜索帖子、正文、视频"') &&
     home.includes('class="home-banner"') &&
     home.includes('homeBannerItems') &&
+    home.includes("imageKey: buildHomeImageKey('banner', coverImage || rawCover") &&
+    home.includes("imageKey: buildHomeImageKey('guide', resolvedCover || guide.coverImage") &&
     home.includes('openHomeBanner') &&
     home.includes('resolvedHomeBannerCoverUrls') &&
     home.includes('rawHomeBannerCoverImages') &&
@@ -207,15 +209,22 @@ assert(
     !/class="home-banner-slide"[\s\S]{0,120}:class="\{ active: i === homeBannerActiveIndex \}"/.test(home) &&
     !home.includes('.home-banner-slide.active') &&
     home.includes('class="notice-board"') &&
+    home.includes('class="notice-kind-image"') &&
+    home.includes('src="/static/home-notice-title.png"') &&
+    home.includes('class="notice-lines"') &&
     home.includes('noticeRows') &&
-    home.includes('{{ notice.kind }}') &&
+    !home.includes('{{ notice.kind }}') &&
     !home.includes('notice.sectionName || notice.label') &&
+    home.includes("padStart(2, '0')") &&
+    home.includes('`${month}-${day}`') &&
     home.includes('活动召集') &&
     home.includes('class="group-card"') &&
     home.includes('class="section-tabs"') &&
     home.includes('class="home-search-box"') &&
     home.includes('class="home-search-icon-ring"') &&
     home.includes('class="home-search-icon-handle"') &&
+    home.includes('class="switch-icon">⇄</text>') &&
+    home.includes('gap: 12px;') &&
     home.includes('min-height: 90rpx;') &&
     home.includes('padding: 0 8rpx 0 30rpx;') &&
     home.includes('flex: 0 0 150rpx;') &&
