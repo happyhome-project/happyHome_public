@@ -1,13 +1,6 @@
 <template>
   <view class="phone-inner">
     <view class="home-shell">
-      <view class="home-brandbar" aria-label="社群助手">
-        <view class="home-brand-title-wrap">
-          <text class="home-brand-title">社群助手</text>
-          <view class="home-brand-line"></view>
-        </view>
-      </view>
-
       <view class="home-topbar">
         <view class="community-identity" @tap="onMastheadTap">
           <view class="community-avatar">
@@ -26,7 +19,7 @@
           class="community-switch"
           @tap.stop="onMastheadTap"
         >
-          <text class="switch-icon">↔</text>
+          <text class="switch-icon">⇄</text>
           <text>切换</text>
         </view>
       </view>
@@ -42,7 +35,7 @@
         </view>
       </view>
 
-      <view class="home-search">
+      <view class="home-search home-search--primary">
         <view class="home-search-box">
           <view class="home-search-icon" aria-hidden="true">
             <view class="home-search-icon-ring"></view>
@@ -60,6 +53,11 @@
             <text>搜索</text>
           </view>
         </view>
+      </view>
+
+      <view v-if="showHomePullRefreshHint" class="home-refresh-hint">
+        <view class="home-refresh-spinner" aria-hidden="true"></view>
+        <text>用力加载中...</text>
       </view>
 
       <view class="home-banner">
@@ -112,24 +110,68 @@
       </view>
     </view>
 
-    <!-- Admin notice · 管理员维护的固定公告 -->
-    <view v-if="noticeRows.length > 0" class="notice-board">
-      <view
-        v-for="(notice, i) in noticeRows"
-        :key="notice.id"
-        class="notice-row"
-        :class="{ 'is-long': notice.isLong }"
-        :style="getNoticeCardStyle(notice, i)"
-        @tap="openNotice(notice)"
-      >
-        <text class="notice-kind">{{ notice.kind }}</text>
-        <view class="notice-main">
-          <view class="notice-line">
-            <text class="notice-badge">{{ i === 0 ? '置顶' : '最新' }}</text>
-            <text class="notice-content">{{ notice.preview }}</text>
+    <view
+      v-if="archiveGroups.length"
+      class="home-fixed-controls"
+      :class="{ 'is-visible': showHomeFixedControls }"
+    >
+      <view class="home-search home-search--fixed">
+        <view class="home-search-box">
+          <view class="home-search-icon" aria-hidden="true">
+            <view class="home-search-icon-ring"></view>
+            <view class="home-search-icon-handle"></view>
+          </view>
+          <input
+            v-model="homeSearchQuery"
+            class="home-search-input"
+            confirm-type="search"
+            placeholder="搜索帖子、正文、视频"
+            placeholder-class="home-search-placeholder"
+            @confirm="submitHomeSearch"
+          />
+          <view class="home-search-action" @tap="submitHomeSearch">
+            <text>搜索</text>
           </view>
         </view>
-        <text v-if="notice.when" class="notice-time">{{ notice.when }}</text>
+      </view>
+
+      <scroll-view
+        scroll-x
+        class="section-tabs section-tabs--fixed"
+        :show-scrollbar="false"
+      >
+        <view class="section-tabs-inner">
+          <text
+            v-for="(g, index) in archiveGroups"
+            :key="`fixed-${g.id}`"
+            class="section-tab"
+            :class="{ active: index === activeArchiveIndex }"
+            @tap="selectArchiveGroup(g)"
+          >{{ g.name }}</text>
+        </view>
+      </scroll-view>
+    </view>
+
+    <!-- Admin notice · 管理员维护的固定公告 -->
+    <view v-if="noticeRows.length > 0" class="notice-board">
+      <image class="notice-kind-image" src="/static/home-notice-title.png" mode="aspectFit" />
+      <view class="notice-lines">
+        <view
+          v-for="(notice, i) in noticeRows"
+          :key="notice.id"
+          class="notice-row"
+          :class="{ 'is-long': notice.isLong }"
+          :style="getNoticeCardStyle(notice, i)"
+          @tap="openNotice(notice)"
+        >
+          <view class="notice-main">
+            <view class="notice-line">
+              <text class="notice-badge">{{ i === 0 ? '置顶' : '最新' }}</text>
+              <text class="notice-content">{{ notice.preview }}</text>
+            </view>
+          </view>
+          <text v-if="notice.when" class="notice-time">{{ notice.when }}</text>
+        </view>
       </view>
     </view>
 
@@ -186,7 +228,8 @@
     <scroll-view
       v-if="archiveGroups.length"
       scroll-x
-      class="section-tabs"
+      class="section-tabs section-tabs--flow"
+      :class="{ 'is-shadowed-by-fixed': showHomeFixedControls }"
       :show-scrollbar="false"
     >
       <view class="section-tabs-inner">
@@ -313,24 +356,12 @@
     <view class="s1-foot-wrap">
       <text class="s1-foot">— {{ kind }} · 记忆在这里 —</text>
     </view>
-    <!-- Community switcher modal -->
-    <view v-if="showSwitcher" class="switcher-mask" @tap="showSwitcher = false">
-      <view class="switcher-panel" @tap.stop>
-        <text class="switcher-title">切换社区</text>
-        <view
-          v-for="c in communityStore.myCommunities"
-          :key="c._id"
-          class="switcher-item"
-          :class="{ active: c._id === communityStore.currentCommunityId }"
-          @tap="switchCommunity(c._id)"
-        >
-          <text>{{ c.name }}</text>
-        </view>
-      </view>
-    </view>
     <view v-if="showGuestIntro && guestIntroConfig" class="guest-intro-mask" @touchmove.stop.prevent>
       <view class="guest-intro-panel" @tap.stop>
-        <text class="guest-intro-title">{{ guestIntroConfig.title }}</text>
+        <view class="guest-intro-heading">
+          <text class="guest-intro-kicker">欢迎体验</text>
+          <text class="guest-intro-title">{{ guestIntroConfig.title }}</text>
+        </view>
         <text class="guest-intro-body">{{ guestIntroConfig.body }}</text>
         <view class="guest-intro-list">
           <view
@@ -338,14 +369,24 @@
             :key="item.key"
             class="guest-intro-row"
           >
-            <text class="guest-intro-row-label">{{ item.label }}</text>
-            <text class="guest-intro-row-text">{{ item.text }}</text>
+            <view class="guest-intro-row-icon" :class="`guest-intro-row-icon--${item.key}`">
+              <view class="guest-intro-icon-shape"></view>
+            </view>
+            <view class="guest-intro-row-copy">
+              <text class="guest-intro-row-label">{{ item.label }}</text>
+              <text class="guest-intro-row-text">{{ item.text }}</text>
+            </view>
           </view>
         </view>
         <view class="guest-intro-primary" @tap="handleGuestIntroPrimary">
+          <view class="guest-intro-wechat-icon">
+            <view class="guest-intro-wechat-bubble guest-intro-wechat-bubble--main"></view>
+            <view class="guest-intro-wechat-bubble guest-intro-wechat-bubble--mini"></view>
+          </view>
           <text>{{ guestIntroConfig.primaryActionText }}</text>
         </view>
         <view class="guest-intro-secondary" @tap="handleGuestIntroSecondary">
+          <text class="guest-intro-secondary-plus">＋</text>
           <text>{{ guestIntroConfig.secondaryActionText }}</text>
         </view>
       </view>
@@ -366,7 +407,6 @@ import { getArchiveHomeMeta, getFamilyLetterListSummary, getGuideNoteCard, getHo
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
-import { normalizeHomeNoticeKind } from '../../utils/home-notice'
 import { formatHomeQuoteCite } from '../../utils/home-quote'
 import { resolveCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import {
@@ -388,11 +428,10 @@ import {
 } from '../../utils/community-share'
 import { markGuestIntroSeen, shouldShowGuestIntro } from '../../utils/guest-intro'
 import type { HomeBanner, HomeSnapshot } from '../../../../cloud/shared/types'
-import type { GuestIntroConfig } from '../../../../cloud/shared/guest-intro-config'
+import { normalizeGuestIntroConfig, type GuestIntroConfig } from '../../../../cloud/shared/guest-intro-config'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
-const showSwitcher = ref(false)
 const showGuestIntro = ref(false)
 const guestIntroConfig = ref<GuestIntroConfig | null>(null)
 const postsBySection = ref<Record<string, any[]>>({})
@@ -404,15 +443,18 @@ const shareImageUrl = ref(DEFAULT_COMMUNITY_SHARE_IMAGE)
 const homeSearchQuery = ref('')
 const selectedArchiveId = ref('')
 const homePageScrollTop = ref(0)
+const homeFixedControlsThresholdPx = ref(180)
 const archivePreviewMinHeightPx = ref(0)
 const homeBannerActiveIndex = ref(0)
 const homeBannerSwipeIntent = ref(false)
+const showHomePullRefreshHint = ref(false)
 let refreshingHome = false
 let queuedForcedHomeRefresh = false
 let mountedAt = 0
 let unsubscribeBackgroundFetchSnapshot: (() => void) | null = null
 let archiveSwitchScrollTimers: ReturnType<typeof setTimeout>[] = []
 let archivePreviewMeasureTimers: ReturnType<typeof setTimeout>[] = []
+let homeFixedControlsMeasureTimers: ReturnType<typeof setTimeout>[] = []
 let suppressNextHomeBannerTap = false
 let suppressHomeBannerTapTimer: ReturnType<typeof setTimeout> | null = null
 let homeBannerPointerStartX = 0
@@ -425,6 +467,10 @@ const HOME_BANNER_SWIPE_THRESHOLD_PX = 8
 const HOME_BANNER_TAP_SUPPRESS_MS = 320
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
+const HOME_FIXED_CONTROLS_MIN_SCROLL_PX = 80
+const HOME_FIXED_CONTROLS_OFFSET_PX = 8
+const HOME_TAB_RETAP_EVENT = 'happyhome:home-tab-retap'
+const HOME_PULL_REFRESH_HINT_MIN_MS = 480
 const GUIDE_AUTHOR_AVATAR_PALETTE = [
   ['#CFE8DE', '#7EC6A0'],
   ['#F6D7C3', '#D28A63'],
@@ -434,6 +480,7 @@ const GUIDE_AUTHOR_AVATAR_PALETTE = [
   ['#D7E8EA', '#72B2B8'],
 ]
 const GUIDE_NOTE_NAME_HINTS = ['亲子出游', '周末遛娃', '村游攻略', '路线攻略', '出游攻略']
+let activeHomeRefreshPromise: Promise<void> | null = null
 
 onPageScroll((event) => {
   const nextScrollTop = Number(event?.scrollTop || 0)
@@ -470,16 +517,25 @@ const activeArchiveIndex = computed(() => {
   const guideIndex = groups.findIndex((group) => group.displayTemplate === 'guide_note')
   return guideIndex >= 0 ? guideIndex : 0
 })
-const activeArchiveStyle = computed(() =>
-  archivePreviewMinHeightPx.value > 0
-    ? `min-height: ${archivePreviewMinHeightPx.value}px;`
-    : ''
+const activeArchiveStyle = computed(() => {
+  const group = activeArchiveGroup.value
+  if (group?.displayTemplate === 'guide_note' && archivePreviewMinHeightPx.value > 0) {
+    return `min-height: ${archivePreviewMinHeightPx.value}px;`
+  }
+  // Sticky tabs need transparent scroll runway when switching to short text-only lists.
+  if (group && group.displayTemplate !== 'guide_note' && showHomeFixedControls.value) {
+    return 'min-height: 100vh;'
+  }
+  return ''
+})
+const showHomeFixedControls = computed(() =>
+  archiveGroups.value.length > 0 && homePageScrollTop.value >= homeFixedControlsThresholdPx.value
 )
 
 function onMastheadTap() {
-  // 仅当用户有多个社区时才打开切换器；否则 tap 不做任何事（避免空切换器困扰）
+  // 仅当用户有多个社区时才进入切换页；否则 tap 不做任何事（避免空页面困扰）
   if (hasMultipleCommunities.value) {
-    showSwitcher.value = true
+    uni.navigateTo({ url: '/pages/community-switch/index' })
   }
 }
 
@@ -508,7 +564,7 @@ const homeBannerItems = computed<HomeBannerItem[]>(() => {
         bannerId: String(banner.bannerId || `${banner.postId}-${index}`),
         postId: String(banner.postId || '').trim(),
         title: String(banner.title || '').trim() || '新人必看',
-        imageKey: buildHomeImageKey('banner', rawCover || String(banner.bannerId || banner.postId || index)),
+        imageKey: buildHomeImageKey('banner', coverImage || rawCover || String(banner.bannerId || banner.postId || index)),
         coverImage,
       }
     })
@@ -522,6 +578,9 @@ function secType(s: any): 'realtime' | 'evergreen' {
 function secStatus(s: any): 'active' | 'dormant' | 'archived' {
   return s?.status === 'dormant' || s?.status === 'archived' ? s.status : 'active'
 }
+function sectionIconGlyph(section: any, fallback = '·'): string {
+  return String(section?.icon || '').trim() || fallback
+}
 
 interface SectionNotice {
   id: string
@@ -529,7 +588,6 @@ interface SectionNotice {
   widgetId: string
   sectionName: string
   label: string
-  kind: string
   content: string
   preview: string
   isLong: boolean
@@ -553,11 +611,10 @@ const sectionNotices = computed<SectionNotice[]>(() => {
         widgetId: widget.widgetId,
         sectionName: section.name,
         label: widget.label || '公告',
-        kind: normalizeHomeNoticeKind(widget.label),
         content,
         preview,
         isLong: Array.from(content).length > NOTICE_PREVIEW_LIMIT,
-        icon: section.icon || '告',
+        icon: sectionIconGlyph(section, '告'),
         accentColor: section.accentColor || '',
         when: formatHomeRelativeTime((section as any).updatedAt || section.createdAt),
       })
@@ -587,7 +644,7 @@ const liveItems = computed<LiveItem[]>(() => {
     for (const post of posts) {
       reportMissingHomeTitle(post, section, 'home.live')
       items.push({
-        ic: section.icon || '·',
+        ic: sectionIconGlyph(section),
         t: getPostHomeTitle(post, section) || section.name,
         m: getHomeLiveMeta(post, section),
         cta: '进入',
@@ -652,7 +709,7 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
               contentAuthor: guide.author,
               meta: '',
               excerpt: guide.excerpt,
-              imageKey: buildHomeImageKey('guide', guide.coverImage || p._id || idx),
+              imageKey: buildHomeImageKey('guide', resolvedCover || guide.coverImage || p._id || idx),
               coverImage: resolvedCover,
               driveDuration: guide.driveDuration,
               routeStats: guide.routeStats,
@@ -903,7 +960,9 @@ function formatArchiveWhen(iso?: string): string {
   if (Number.isNaN(d.getTime())) return ''
   const now = new Date()
   const sameYear = d.getFullYear() === now.getFullYear()
-  return sameYear ? `${d.getMonth() + 1}/${d.getDate()}` : `${d.getFullYear()}/${d.getMonth() + 1}`
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return sameYear ? `${month}-${day}` : `${d.getFullYear()}-${month}`
 }
 
 function isPostHot(post: any): boolean {
@@ -925,7 +984,7 @@ function getNoticeCardStyle(notice: SectionNotice, index: number) {
 }
 
 function makeNoticePreview(content: string) {
-  const normalized = content.trim().replace(/\n{2,}/g, '\n')
+  const normalized = content.trim().replace(/\s+/g, ' ')
   const chars = Array.from(normalized)
   if (chars.length <= NOTICE_PREVIEW_LIMIT) return normalized
   return `${chars.slice(0, NOTICE_PREVIEW_LIMIT).join('').trimEnd()}…`
@@ -941,7 +1000,9 @@ function formatHomeRelativeTime(value: unknown): string {
   const diffHours = Math.floor(diffMinutes / 60)
   if (diffHours < 24) return `${diffHours}小时前`
   const sameYear = date.getFullYear() === new Date().getFullYear()
-  return sameYear ? `${date.getMonth() + 1}/${date.getDate()}` : `${date.getFullYear()}/${date.getMonth() + 1}`
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return sameYear ? `${month}-${day}` : `${date.getFullYear()}-${month}-${day}`
 }
 
 function getAuthorInitial(author?: string): string {
@@ -1078,12 +1139,8 @@ function measureActiveArchiveHeight() {
       .boundingClientRect((rect) => {
         const height = getArchiveMeasuredHeight(rect)
         const group = activeArchiveGroup.value
-        const hasGuideGroup = archiveGroups.value.some((item) => item.displayTemplate === 'guide_note')
-        // Only natural guide/feed height may raise the baseline; short default tabs inherit it.
-        const shouldCaptureHeight =
-          !hasGuideGroup ||
-          group?.displayTemplate === 'guide_note' ||
-          archivePreviewMinHeightPx.value === 0
+        // Only guide feeds reserve image-heavy height; text-only lists should hug their content.
+        const shouldCaptureHeight = group?.displayTemplate === 'guide_note'
         if (shouldCaptureHeight && height > archivePreviewMinHeightPx.value) {
           archivePreviewMinHeightPx.value = height
         }
@@ -1116,6 +1173,54 @@ function getCurrentPageScrollTop() {
   }
   // #endif
   return Math.max(0, Math.round(Number(scrollTop) || 0))
+}
+
+function clearHomeFixedControlsMeasureTimers() {
+  homeFixedControlsMeasureTimers.forEach((timer) => clearTimeout(timer))
+  homeFixedControlsMeasureTimers = []
+}
+
+function measureHomeFixedControlsThreshold() {
+  try {
+    uni.createSelectorQuery()
+      .select('.home-search--primary')
+      .boundingClientRect((rect) => {
+        const top = Number(Array.isArray(rect) ? rect[0]?.top : rect?.top)
+        if (!Number.isFinite(top)) return
+        const nextThreshold = getCurrentPageScrollTop() + top - HOME_FIXED_CONTROLS_OFFSET_PX
+        homeFixedControlsThresholdPx.value = Math.max(
+          HOME_FIXED_CONTROLS_MIN_SCROLL_PX,
+          Math.round(nextThreshold),
+        )
+      })
+      .exec()
+  } catch (error) {
+    clientLog('warn', 'home.fixedControls.measure.fail', { error })
+  }
+}
+
+function scheduleHomeFixedControlsMeasure() {
+  clearHomeFixedControlsMeasureTimers()
+  nextTick(() => {
+    measureHomeFixedControlsThreshold()
+    homeFixedControlsMeasureTimers.push(setTimeout(measureHomeFixedControlsThreshold, 120))
+    homeFixedControlsMeasureTimers.push(setTimeout(measureHomeFixedControlsThreshold, 420))
+  })
+}
+
+function scrollHomeToTop() {
+  try {
+    uni.pageScrollTo({ scrollTop: 0, duration: 260 })
+    homePageScrollTop.value = 0
+  } catch (error) {
+    clientLog('warn', 'home.tab.retapped.scrollTop.fail', { error })
+  }
+
+  // #ifdef H5
+  if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+    window.scrollTo({ top: 0, left: 0, behavior: 'smooth' })
+  }
+  // #endif
 }
 
 function restoreArchiveSwitchScroll(scrollTop: number) {
@@ -1293,8 +1398,20 @@ function markCurrentGuestIntroSeen() {
   showGuestIntro.value = false
 }
 
+function openProfileLoginFromGuestIntro() {
+  const url = '/pages/profile/index'
+  uni.switchTab({
+    url,
+    fail: (error) => {
+      clientLog('warn', 'guestIntro.profile.switchTab.fail', { url, error })
+      uni.reLaunch({ url })
+    },
+  })
+}
+
 function handleGuestIntroPrimary() {
   markCurrentGuestIntroSeen()
+  openProfileLoginFromGuestIntro()
 }
 
 function handleGuestIntroSecondary() {
@@ -1312,7 +1429,9 @@ function applyHomeSnapshot(snapshot: HomeSnapshot | null, source: 'prefetch' | '
   communityStore.currentSectionIndex = 0
   communityStore.currentSections = snapshot.sections || []
   postsBySection.value = snapshot.postsBySection || {}
-  guestIntroConfig.value = userStore.isLoggedIn ? null : (snapshot.guestIntroConfig || null)
+  guestIntroConfig.value = userStore.isLoggedIn
+    ? null
+    : normalizeGuestIntroConfig(snapshot.guestIntroConfig || null)
   refreshGuestIntroVisibility()
   if (userStore.isLoggedIn) communityStore.saveToStorage()
   clientLog('info', 'home.snapshot.apply', {
@@ -1349,17 +1468,6 @@ function applyLateBackgroundFetchSnapshot(snapshot: HomeSnapshot) {
   }
 }
 
-async function switchCommunity(communityId: string) {
-  showSwitcher.value = false
-  communityStore.currentCommunityId = communityId
-  communityStore.currentSectionIndex = 0
-  communityStore.currentSections = []
-  postsBySection.value = {}
-  communityStore.saveToStorage()
-  communityStore.refreshMembershipStatus(communityId).catch(() => {})
-  await refreshHomeData({ force: true })
-}
-
 function getPendingHomeRefreshMarker() {
   try {
     const marker = uni.getStorageSync(HOME_REFRESH_AFTER_POST_KEY)
@@ -1381,21 +1489,17 @@ function clearHomeRefreshMarker() {
   } catch {}
 }
 
-async function refreshHomeData(options: { force?: boolean } = {}) {
-  const force = options.force === true
+function waitForHomeRefreshHint(ms: number) {
+  if (ms <= 0) return Promise.resolve()
+  return new Promise<void>((resolve) => setTimeout(resolve, ms))
+}
+
+async function runSingleHomeRefresh(force: boolean) {
   clientLog('info', 'home.refresh.start', {
     force,
     loggedIn: userStore.isLoggedIn,
     currentCommunityId: communityStore.currentCommunityId || '',
   })
-  if (refreshingHome) {
-    if (force) queuedForcedHomeRefresh = true
-    clientLog('warn', 'home.refresh.skip.busy', {
-      force,
-      queuedForcedHomeRefresh,
-    })
-    return
-  }
   refreshingHome = true
   try {
     const requestedCommunityId = userStore.isLoggedIn
@@ -1437,15 +1541,44 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
   } finally {
     refreshingHome = false
   }
-  if (queuedForcedHomeRefresh) {
-    queuedForcedHomeRefresh = false
-    await refreshHomeData({ force: true })
+}
+
+async function refreshHomeData(options: { force?: boolean } = {}) {
+  const force = options.force === true
+  if (activeHomeRefreshPromise) {
+    if (force) queuedForcedHomeRefresh = true
+    clientLog('warn', 'home.refresh.skip.busy', {
+      force,
+      queuedForcedHomeRefresh,
+    })
+    await activeHomeRefreshPromise
+    return
+  }
+
+  const refreshPromise = (async () => {
+    let nextForce = force
+    do {
+      const currentForce = nextForce
+      queuedForcedHomeRefresh = false
+      await runSingleHomeRefresh(currentForce)
+      nextForce = queuedForcedHomeRefresh
+    } while (nextForce)
+  })()
+  activeHomeRefreshPromise = refreshPromise
+  try {
+    await refreshPromise
+  } finally {
+    if (activeHomeRefreshPromise === refreshPromise) {
+      activeHomeRefreshPromise = null
+    }
   }
 }
 
 onMounted(async () => {
   mountedAt = Date.now()
   hideNativeTabBar()
+  ;(uni as any).$on?.(HOME_TAB_RETAP_EVENT, scrollHomeToTop)
+  scheduleHomeFixedControlsMeasure()
   clientLog('info', 'home.mounted', {})
   unsubscribeBackgroundFetchSnapshot = subscribeBackgroundFetchSnapshot(
     () => ({
@@ -1458,11 +1591,14 @@ onMounted(async () => {
   if (redirectedByShare) return
   await hydrateHomeFromFastPath()
   await refreshHomeData()
+  scheduleHomeFixedControlsMeasure()
 })
 
 onUnmounted(() => {
+  ;(uni as any).$off?.(HOME_TAB_RETAP_EVENT, scrollHomeToTop)
   clearArchiveSwitchScrollTimers()
   clearArchivePreviewMeasureTimers()
+  clearHomeFixedControlsMeasureTimers()
   unsubscribeBackgroundFetchSnapshot?.()
   unsubscribeBackgroundFetchSnapshot = null
 })
@@ -1472,6 +1608,7 @@ onUnmounted(() => {
 // 首次 onShow 发生在 onMounted 之后，会二次拉取（可接受：代价低、换取数据新鲜度）。
 onShow(() => {
   hideNativeTabBar()
+  scheduleHomeFixedControlsMeasure()
   const marker = getPendingHomeRefreshMarker()
   clientLog('info', 'home.show', {
     hasPendingRefreshMarker: !!marker,
@@ -1484,14 +1621,32 @@ onShow(() => {
   void refreshHomeData({ force: !!marker })
 })
 
+watch(
+  () => [
+    currentShareCommunityId.value,
+    archiveGroups.value.length,
+    homeBannerItems.value.length,
+    noticeRows.value.length,
+    liveItems.value.length,
+    quoteText.value,
+    quoteCite.value,
+  ],
+  () => scheduleHomeFixedControlsMeasure(),
+)
+
 onPullDownRefresh(async () => {
   clientLog('info', 'home.pullDownRefresh', {})
+  showHomePullRefreshHint.value = true
+  const refreshStartedAt = Date.now()
   try {
     await refreshHomeData({ force: true })
   } catch (error) {
     clientLog('error', 'home.pullDownRefresh.fail', { error })
     uni.showToast({ title: '刷新失败，请重试', icon: 'none' })
   } finally {
+    const remaining = HOME_PULL_REFRESH_HINT_MIN_MS - (Date.now() - refreshStartedAt)
+    await waitForHomeRefreshHint(remaining)
+    showHomePullRefreshHint.value = false
     uni.stopPullDownRefresh()
   }
 })
@@ -1812,6 +1967,51 @@ onShareAppMessage(() => {
   color: $hh-surface-1;
 }
 
+.home-fixed-controls {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 80;
+  box-sizing: border-box;
+  padding: calc(18rpx + env(safe-area-inset-top)) 0 12rpx;
+  background: rgba(250, 250, 249, 0.96);
+  box-shadow: 0 12rpx 28rpx rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(18rpx);
+  opacity: 0;
+  transform: translateY(-100%);
+  pointer-events: none;
+  transition: opacity 160ms ease, transform 180ms ease;
+  overflow: hidden;
+}
+
+.home-fixed-controls.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.home-fixed-controls .home-search {
+  margin: 0 32rpx 16rpx;
+}
+
+.home-fixed-controls .home-search-box {
+  min-height: 82rpx;
+  padding-left: 28rpx;
+  border-radius: $hh-radius-full;
+  box-shadow: 0 6rpx 18rpx rgba(15, 23, 42, 0.05);
+}
+
+.home-fixed-controls .home-search-input {
+  height: 82rpx;
+}
+
+.home-fixed-controls .home-search-action {
+  flex: 0 0 132rpx;
+  width: 132rpx;
+  height: 68rpx;
+}
+
 /* ═══ Admin notices ═══ */
 .notice-list {
   margin: 0 32rpx 30rpx;
@@ -2021,15 +2221,23 @@ onShareAppMessage(() => {
 
 /* ═══ Figma home notice + group cards ═══ */
 .notice-board {
-  margin: 24rpx 32rpx 30rpx;
-  padding: 16rpx 20rpx;
+  margin: 24rpx var(--hh-page-x) 30rpx;
+  padding: 18rpx 22rpx;
   border: 1rpx solid $hh-ink-line;
   border-radius: 16rpx;
   background: $hh-surface-1;
   display: flex;
+  align-items: center;
+  gap: 18rpx;
+  box-shadow: $hh-shadow-card;
+}
+
+.notice-lines {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   flex-direction: column;
   gap: 8rpx;
-  box-shadow: $hh-shadow-card;
 }
 
 .notice-row {
@@ -2043,17 +2251,10 @@ onShareAppMessage(() => {
   opacity: 0.9;
 }
 
-.notice-kind {
-  width: 76rpx;
+.notice-kind-image {
+  width: 80rpx;
+  height: 72rpx;
   flex-shrink: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--hh-color-text-primary);
-  font-size: var(--hh-text-body-lg-size);
-  line-height: var(--hh-text-body-lg-line);
-  font-weight: $hh-font-weight-bold;
-  text-align: left;
 }
 
 .notice-main {
@@ -2120,7 +2321,7 @@ onShareAppMessage(() => {
 .group-card {
   position: relative;
   min-height: 104rpx;
-  padding: 18rpx 26rpx 18rpx 18rpx;
+  padding: 18rpx 104rpx 18rpx 18rpx;
   border: 1rpx solid $hh-ink-line;
   border-radius: 16rpx;
   background: $hh-surface-1;
@@ -2180,9 +2381,9 @@ onShareAppMessage(() => {
 
 .group-ribbon {
   position: absolute;
-  right: -42rpx;
-  top: 8rpx;
-  width: 118rpx;
+  right: -30rpx;
+  top: 20rpx;
+  width: 108rpx;
   height: 34rpx;
   transform: rotate(45deg);
   background: #ffd66e;
@@ -2567,6 +2768,7 @@ onShareAppMessage(() => {
 /* ═══ Figma 0626 visual pass ═══ */
 .phone-inner {
   background: var(--hh-color-page);
+  padding-top: 0;
 }
 
 .home-shell {
@@ -2576,51 +2778,15 @@ onShareAppMessage(() => {
     linear-gradient(170deg, #caeee7 0%, #f1f3ee 58%, var(--hh-color-page) 100%);
 }
 
-.home-brandbar {
-  height: 78rpx;
-  margin-bottom: 16rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.home-brand-title-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.home-brand-title {
-  color: #183327;
-  font-family: $hh-font-serif;
-  font-size: 52rpx;
-  line-height: 1;
-  font-weight: 760;
-  letter-spacing: 0;
-  white-space: nowrap;
-  text-shadow: 0 10rpx 22rpx rgba(24, 51, 39, 0.1);
-}
-
-.home-brand-line {
-  position: absolute;
-  left: -56rpx;
-  right: -56rpx;
-  bottom: -12rpx;
-  height: 2rpx;
-  background: linear-gradient(90deg, transparent, rgba(36, 77, 57, 0.38), transparent);
-  pointer-events: none;
-}
-
 .home-topbar {
   min-height: 64rpx;
   display: flex;
   align-items: center;
-  gap: 16rpx;
+  gap: 12px;
 }
 
 .community-identity {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -2651,7 +2817,9 @@ onShareAppMessage(() => {
 }
 
 .community-title {
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 426rpx;
   color: #111;
   font-size: var(--hh-text-heading-md-size);
   line-height: var(--hh-text-heading-md-line);
@@ -2669,7 +2837,7 @@ onShareAppMessage(() => {
   color: var(--hh-color-brand-primary);
   display: flex;
   align-items: center;
-  gap: 8rpx;
+  gap: 7rpx;
   flex: 0 0 auto;
 }
 
@@ -2680,8 +2848,9 @@ onShareAppMessage(() => {
 }
 
 .switch-icon {
-  font-size: 24rpx;
+  font-size: 26rpx;
   line-height: 1;
+  transform: translateY(-1rpx);
 }
 
 .home-quote {
@@ -2706,6 +2875,7 @@ onShareAppMessage(() => {
 
 .home-quote-text {
   display: block;
+  font-family: 'Source Han Serif SC', 'Noto Serif CJK SC', '思源宋体', 'Songti SC', SimSun, serif;
   color: #3f8f75;
   font-size: var(--hh-text-body-lg-size);
   line-height: var(--hh-text-body-lg-line);
@@ -2727,6 +2897,7 @@ onShareAppMessage(() => {
 }
 
 .home-quote-cite {
+  font-family: 'Source Han Serif SC', 'Noto Serif CJK SC', '思源宋体', 'Songti SC', SimSun, serif;
   color: #5c907e;
   font-size: var(--hh-text-caption-base-size);
   line-height: var(--hh-text-caption-base-line);
@@ -2771,8 +2942,42 @@ onShareAppMessage(() => {
   font-weight: $hh-font-weight-medium;
 }
 
+.home-refresh-hint {
+  height: 164rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 15rpx;
+  color: #4b4b4b;
+}
+
+.home-refresh-spinner {
+  width: 38rpx;
+  height: 38rpx;
+  box-sizing: border-box;
+  border: 3rpx solid rgba(61, 173, 125, 0.22);
+  border-top-color: #3dad7d;
+  border-radius: 999rpx;
+  animation: homeRefreshSpin 0.8s linear infinite;
+}
+
+.home-refresh-hint text {
+  font-size: 30rpx;
+  line-height: 45rpx;
+  font-weight: $hh-font-weight-regular;
+  color: #4b4b4b;
+  white-space: nowrap;
+}
+
+@keyframes homeRefreshSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .home-banner {
   position: relative;
+  margin: 0;
   height: 310rpx;
   overflow: hidden;
   border-radius: var(--hh-radius-card);
@@ -2848,6 +3053,18 @@ onShareAppMessage(() => {
   overflow-anchor: none;
 }
 
+.section-tabs--fixed {
+  margin: 0;
+}
+
+.section-tabs--flow.is-shadowed-by-fixed {
+  height: 0;
+  margin: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 .section-tabs-inner {
   display: inline-flex;
   align-items: center;
@@ -2862,21 +3079,25 @@ onShareAppMessage(() => {
   line-height: var(--hh-text-heading-sm-line);
   font-weight: $hh-font-weight-regular;
   white-space: nowrap;
+  padding: 0 12rpx;
+  border-radius: $hh-radius-full;
+  transition: background 160ms ease, color 160ms ease;
 }
 
 .section-tab.active {
   font-weight: $hh-font-weight-bold;
+  background: rgba(61, 173, 125, 0.16);
 }
 
 .section-tab.active::after {
   content: "";
   position: absolute;
-  left: 18rpx;
-  right: -8rpx;
-  bottom: 8rpx;
-  height: 18rpx;
+  left: 12rpx;
+  right: 12rpx;
+  bottom: 6rpx;
+  height: 16rpx;
   border-radius: $hh-radius-full;
-  background: linear-gradient(90deg, rgba(61, 173, 125, 0.34), rgba(61, 173, 125, 0));
+  background: rgba(61, 173, 125, 0.12);
   z-index: -1;
 }
 
@@ -2892,8 +3113,42 @@ onShareAppMessage(() => {
 
 .active-archive--default .arc-card {
   box-sizing: border-box;
-  min-height: inherit;
+  min-height: 0;
   margin-bottom: 0;
+}
+
+.active-archive--default .arc-card::before {
+  content: none;
+}
+
+.active-archive--default .arc-item {
+  min-height: 78rpx;
+  padding: 15rpx 24rpx;
+  align-items: center;
+  gap: 22rpx;
+}
+
+.active-archive--default .arc-k {
+  width: 50rpx;
+  padding-top: 0;
+  font-size: var(--hh-text-caption-base-size);
+  line-height: var(--hh-text-caption-base-line);
+}
+
+.active-archive--default .arc-title {
+  font-size: var(--hh-text-body-lg-size);
+  line-height: var(--hh-text-body-lg-line);
+  font-weight: $hh-font-weight-bold;
+}
+
+.active-archive--default .arc-mm {
+  margin-top: 2rpx;
+}
+
+.active-archive--default .arc-when {
+  padding-top: 0;
+  font-size: var(--hh-text-caption-lg-size);
+  line-height: var(--hh-text-caption-lg-line);
 }
 
 .guide-feed {
@@ -3068,8 +3323,7 @@ onShareAppMessage(() => {
 }
 
 .sub-switch,
-.arc-meta.hot,
-.switcher-item.active {
+.arc-meta.hot {
   color: var(--hh-color-brand-primary);
 }
 
@@ -3180,53 +3434,10 @@ onShareAppMessage(() => {
   color: var(--hh-color-brand-strong);
 }
 
-.switcher-panel,
 .guest-intro-panel {
   background: var(--hh-color-card);
   border-color: var(--hh-color-line);
 }
-
-/* ═══ Switcher ═══ */
-.switcher-mask {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0, 0, 0, 0.4);
-  z-index: 100;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-}
-.switcher-panel {
-  width: 100%;
-  background: $hh-surface-1;
-  border-radius: 28rpx 28rpx 0 0;
-  padding: 36rpx 32rpx 60rpx;
-  max-height: 70vh;
-  overflow-y: auto;
-  border-top: 1rpx solid $hh-ink-line;
-}
-.switcher-title {
-  display: block;
-  font-family: $hh-font-mono;
-  font-size: 20rpx;
-  letter-spacing: $hh-tracking-mono;
-  text-transform: uppercase;
-  color: $hh-ink-3;
-  margin-bottom: 20rpx;
-  text-align: center;
-}
-.switcher-item {
-  padding: 28rpx 24rpx;
-  font-family: $hh-font-serif;
-  font-size: 30rpx;
-  color: $hh-ink-1;
-  border-bottom: 1rpx solid $hh-ink-line-2;
-}
-.switcher-item.active {
-  color: $hh-accent;
-  font-weight: $hh-font-weight-bold;
-}
-.switcher-item:last-child { border-bottom: none; }
 
 .guest-intro-mask {
   position: fixed;
@@ -3238,86 +3449,264 @@ onShareAppMessage(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 40rpx 32rpx;
-  background: rgba(30, 26, 22, 0.42);
+  padding: 56rpx;
+  background: rgba(0, 0, 0, 0.65);
 }
 .guest-intro-panel {
-  width: 100%;
-  max-width: 640rpx;
-  padding: 36rpx 32rpx 34rpx;
+  position: relative;
+  width: 680rpx;
+  max-width: calc(100vw - 62rpx);
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 60rpx 48rpx 52rpx;
   border-radius: 32rpx;
-  background: $hh-surface-1;
-  border: 1rpx solid rgba(30, 26, 22, 0.08);
-  box-shadow: $hh-shadow-modal;
+  background:
+    radial-gradient(ellipse at 78% -3%, rgba(175, 242, 220, 0.72) 0%, rgba(220, 243, 241, 0.42) 36%, rgba(255, 255, 255, 0) 66%),
+    linear-gradient(180deg, #dcf3f1 0%, #ffffff 26.3%, #ffffff 100%);
+  box-shadow: 0 64rpx 80rpx rgba(0, 0, 0, 0.1), 0 8rpx 16rpx rgba(0, 0, 0, 0.06);
+}
+.guest-intro-heading {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  text-align: center;
+}
+.guest-intro-kicker {
+  display: block;
+  font-size: 48rpx;
+  font-weight: 200;
+  line-height: 64rpx;
+  color: #181818;
+  text-align: center;
 }
 .guest-intro-title {
   display: block;
-  font-family: $hh-font-serif;
-  font-size: 36rpx;
-  font-weight: $hh-font-weight-bold;
-  line-height: 1.28;
-  color: $hh-ink-1;
-  letter-spacing: $hh-tracking-serif-sm;
+  font-size: 48rpx;
+  font-weight: 600;
+  line-height: 68rpx;
+  color: #3dad7d;
+  text-align: center;
+  letter-spacing: 0;
 }
 .guest-intro-body {
   display: block;
-  margin-top: 18rpx;
-  font-size: 27rpx;
-  line-height: 1.62;
-  color: $hh-ink-2;
+  width: 100%;
+  margin-top: 36rpx;
+  font-size: 28rpx;
+  font-weight: 400;
+  line-height: 42rpx;
+  color: #4b4b4b;
+  text-align: center;
 }
 .guest-intro-list {
   display: flex;
   flex-direction: column;
-  gap: 12rpx;
-  margin-top: 26rpx;
+  gap: 14rpx;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 36rpx;
+  padding: 16rpx 2rpx;
+  border: 2rpx solid #f1f1f1;
+  border-radius: 24rpx;
+  background: #ffffff;
+  box-shadow: 0 8rpx 12rpx rgba(0, 0, 0, 0.06);
 }
 .guest-intro-row {
   display: flex;
   align-items: center;
-  gap: 18rpx;
-  min-height: 64rpx;
-  padding: 12rpx 18rpx;
-  border-radius: 18rpx;
-  background: $hh-surface-2;
+  gap: 40rpx;
+  min-height: 76rpx;
+  padding: 14rpx 40rpx;
+  box-sizing: border-box;
 }
-.guest-intro-row-label {
+.guest-intro-row-icon {
+  position: relative;
   flex: 0 0 auto;
-  min-width: 96rpx;
-  font-size: 24rpx;
-  font-weight: $hh-font-weight-heavy;
-  color: $hh-accent-ink;
+  width: 76rpx;
+  height: 76rpx;
+  border-radius: 16rpx;
+  background: #e9fbf4;
 }
-.guest-intro-row-text {
+.guest-intro-icon-shape,
+.guest-intro-icon-shape::before,
+.guest-intro-icon-shape::after {
+  position: absolute;
+  box-sizing: border-box;
+  content: '';
+}
+.guest-intro-row-icon--recent .guest-intro-icon-shape {
+  left: 24rpx;
+  top: 18rpx;
+  width: 32rpx;
+  height: 38rpx;
+  border: 4rpx solid #59b384;
+  border-bottom: 0;
+  border-radius: 24rpx 24rpx 8rpx 8rpx;
+}
+.guest-intro-row-icon--recent .guest-intro-icon-shape::before {
+  left: -8rpx;
+  bottom: -8rpx;
+  width: 48rpx;
+  height: 14rpx;
+  border: 4rpx solid #59b384;
+  border-top: 0;
+  border-radius: 0 0 20rpx 20rpx;
+}
+.guest-intro-row-icon--recent .guest-intro-icon-shape::after {
+  left: 10rpx;
+  bottom: -18rpx;
+  width: 12rpx;
+  height: 8rpx;
+  border: 4rpx solid #59b384;
+  border-top: 0;
+  border-radius: 0 0 12rpx 12rpx;
+}
+.guest-intro-row-icon--materials .guest-intro-icon-shape {
+  left: 18rpx;
+  top: 20rpx;
+  width: 42rpx;
+  height: 34rpx;
+  border: 4rpx solid #59b384;
+  border-radius: 8rpx;
+}
+.guest-intro-row-icon--materials .guest-intro-icon-shape::before {
+  left: -4rpx;
+  top: -10rpx;
+  width: 22rpx;
+  height: 14rpx;
+  border: 4rpx solid #59b384;
+  border-bottom: 0;
+  border-radius: 8rpx 8rpx 0 0;
+}
+.guest-intro-row-icon--materials .guest-intro-icon-shape::after {
+  right: -8rpx;
+  bottom: -8rpx;
+  width: 18rpx;
+  height: 18rpx;
+  border: 4rpx solid #59b384;
+  border-radius: 50%;
+  box-shadow: 10rpx 10rpx 0 -6rpx #59b384;
+}
+.guest-intro-row-icon--history .guest-intro-icon-shape {
+  left: 20rpx;
+  top: 20rpx;
+  width: 40rpx;
+  height: 38rpx;
+  border: 4rpx solid #59b384;
+  border-radius: 6rpx;
+}
+.guest-intro-row-icon--history .guest-intro-icon-shape::before {
+  left: 6rpx;
+  top: 9rpx;
+  width: 20rpx;
+  height: 4rpx;
+  border-radius: 4rpx;
+  background: #59b384;
+}
+.guest-intro-row-icon--history .guest-intro-icon-shape::after {
+  left: -4rpx;
+  top: -8rpx;
+  width: 48rpx;
+  height: 10rpx;
+  border: 4rpx solid #59b384;
+  border-radius: 6rpx;
+  background: #e9fbf4;
+}
+.guest-intro-row-copy {
+  display: flex;
   flex: 1;
   min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.guest-intro-row-label {
+  display: block;
+  font-size: 32rpx;
+  font-weight: 400;
+  line-height: 48rpx;
+  color: #181818;
+}
+.guest-intro-row-text {
+  display: block;
+  min-width: 0;
   font-size: 24rpx;
-  line-height: 1.35;
-  color: $hh-ink-2;
+  font-weight: 400;
+  line-height: 32rpx;
+  color: #777777;
 }
 .guest-intro-primary,
 .guest-intro-secondary {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 82rpx;
+  width: 100%;
+  box-sizing: border-box;
 }
 .guest-intro-primary {
-  margin-top: 28rpx;
-  border-radius: 42rpx;
-  background: $hh-ink-1;
+  gap: 16rpx;
+  height: 90rpx;
+  margin-top: 36rpx;
+  border-radius: 999rpx;
+  background: #07c160;
 }
 .guest-intro-primary text {
-  font-size: 27rpx;
-  font-weight: $hh-font-weight-bold;
-  color: $hh-surface-1;
+  font-size: 32rpx;
+  font-weight: 700;
+  line-height: 48rpx;
+  color: #ffffff;
 }
+.guest-intro-wechat-icon {
+  position: relative;
+  width: 40rpx;
+  height: 40rpx;
+}
+.guest-intro-wechat-bubble {
+  position: absolute;
+  border-radius: 50%;
+  background: #ffffff;
+}
+.guest-intro-wechat-bubble::before,
+.guest-intro-wechat-bubble::after {
+  position: absolute;
+  top: 50%;
+  width: 4rpx;
+  height: 4rpx;
+  margin-top: -2rpx;
+  border-radius: 50%;
+  background: #07c160;
+  content: '';
+}
+.guest-intro-wechat-bubble--main {
+  left: 1rpx;
+  top: 7rpx;
+  width: 24rpx;
+  height: 20rpx;
+}
+.guest-intro-wechat-bubble--main::before { left: 7rpx; }
+.guest-intro-wechat-bubble--main::after { left: 15rpx; }
+.guest-intro-wechat-bubble--mini {
+  right: 2rpx;
+  bottom: 6rpx;
+  width: 22rpx;
+  height: 18rpx;
+}
+.guest-intro-wechat-bubble--mini::before { left: 6rpx; }
+.guest-intro-wechat-bubble--mini::after { left: 14rpx; }
 .guest-intro-secondary {
-  margin-top: 12rpx;
+  gap: 16rpx;
+  min-height: 44rpx;
+  margin-top: 20rpx;
 }
 .guest-intro-secondary text {
-  font-size: 25rpx;
-  font-weight: $hh-font-weight-bold;
-  color: $hh-accent-ink;
+  font-size: 32rpx;
+  font-weight: 400;
+  line-height: 48rpx;
+  color: #181818;
+}
+.guest-intro-secondary .guest-intro-secondary-plus {
+  font-size: 42rpx;
+  line-height: 48rpx;
 }
 </style>

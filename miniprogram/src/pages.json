@@ -16,6 +16,10 @@
       "style": { "navigationBarTitleText": "搜索", "navigationStyle": "custom" }
     },
     {
+      "path": "pages/community-switch/index",
+      "style": { "navigationBarTitleText": "切换社区" }
+    },
+    {
       "path": "pages/create/index",
       "style": { "navigationBarTitleText": "发帖" }
     },

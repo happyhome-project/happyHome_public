@@ -359,12 +359,16 @@ function formatRelativeTime(value: unknown): string {
   if (diffH < 1) return '刚刚'
   if (diffH < 24) return `${Math.floor(diffH)}h`
   const sameYear = d.getFullYear() === now.getFullYear()
-  return sameYear ? `${d.getMonth() + 1}/${d.getDate()}` : `${d.getFullYear()}/${d.getMonth() + 1}`
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return sameYear ? `${month}-${day}` : `${d.getFullYear()}-${month}`
 }
 
 function formatShortDate(value: unknown): string {
   if (!value) return ''
   const d = new Date(String(value))
   if (Number.isNaN(d.getTime())) return ''
-  return `${d.getMonth() + 1}/${d.getDate()}`
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${month}-${day}`
 }

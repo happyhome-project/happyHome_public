@@ -82,7 +82,7 @@ export function summarizeHomeImageProbe(
     failedCount,
     pendingCount,
     hasRendered: loadedCount > 0,
-    satisfied: currentImageCount === 0 || pendingCount === 0,
+    satisfied: currentImageCount === 0 || (pendingCount === 0 && failedCount === 0),
     loaded,
     failed,
   }
