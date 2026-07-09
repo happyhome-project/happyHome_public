@@ -63,32 +63,39 @@
       </view>
 
       <view class="home-banner">
-        <view
+        <swiper
           v-if="homeBannerItems.length > 0"
           class="home-banner-swiper"
-          @touchstart="onHomeBannerPointerStart"
-          @touchmove="onHomeBannerPointerMove"
-          @touchend="onHomeBannerPointerEnd"
-          @mousedown="onHomeBannerPointerStart"
-          @mousemove="onHomeBannerPointerMove"
-          @mouseup="onHomeBannerPointerEnd"
+          :current="homeBannerActiveIndex"
+          :circular="homeBannerItems.length > 1"
+          :duration="260"
+          @change="onHomeBannerChange"
+          @touchstart="onHomeBannerGestureStart"
+          @touchmove="onHomeBannerGestureMove"
+          @touchend="onHomeBannerGestureEnd"
+          @mousedown="onHomeBannerGestureStart"
+          @mousemove="onHomeBannerGestureMove"
+          @mouseup="onHomeBannerGestureEnd"
         >
-          <view
+          <swiper-item
             v-for="(banner, i) in homeBannerItems"
             :key="banner.bannerId"
             class="home-banner-slide"
-            :class="{ active: i === homeBannerActiveIndex }"
             @tap="openHomeBanner(banner)"
           >
             <image
+              v-if="!isHomeBannerImageFailed(banner.imageKey)"
               :src="banner.coverImage"
               class="home-banner-image"
               mode="aspectFill"
+              @load="onHomeBannerImageLoad(banner)"
+              @error="onHomeBannerImageError(banner, $event)"
             />
+            <view v-else class="home-banner-art"></view>
             <view class="home-banner-shade"></view>
             <text class="home-banner-title">{{ banner.title }}</text>
-          </view>
-        </view>
+          </swiper-item>
+        </swiper>
         <template v-else>
           <view class="home-banner-art"></view>
           <view class="home-banner-shade"></view>
@@ -194,85 +201,97 @@
     </scroll-view>
 
     <!-- Archive feed · Figma 0626 选中板块内容区 -->
-    <view v-if="activeArchiveGroup" class="active-archive">
-      <view
-        v-if="activeArchiveGroup.displayTemplate === 'guide_note'"
-        class="guide-feed"
-      >
+    <view
+      v-if="activeArchiveGroup"
+      class="active-archive"
+      :class="{
+        'active-archive--guide': activeArchiveGroup.displayTemplate === 'guide_note',
+        'active-archive--default': activeArchiveGroup.displayTemplate !== 'guide_note',
+      }"
+      :style="activeArchiveStyle"
+    >
+      <view class="active-archive-body">
         <view
-          v-for="(column, columnIndex) in guideColumns"
-          :key="columnIndex"
-          class="guide-feed-column"
+          v-if="activeArchiveGroup.displayTemplate === 'guide_note'"
+          class="guide-feed"
         >
           <view
-            v-for="(item, i) in column"
-            :key="item.postId || columnIndex + '-' + i"
-            class="guide-card"
-            @tap="onPostTap(item)"
+            v-for="(column, columnIndex) in guideColumns"
+            :key="columnIndex"
+            class="guide-feed-column"
           >
-            <image
-              v-if="item.coverImage"
-              :src="item.coverImage"
-              mode="aspectFill"
-              class="guide-cover"
-            />
-            <view v-else class="guide-cover guide-cover-empty">
-              <text>{{ activeArchiveGroup.name.slice(0, 2) }}</text>
-            </view>
-            <view class="guide-main">
-              <text class="guide-title">{{ item.t }}</text>
-              <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
-              <view v-if="item.driveDuration" class="guide-stats">
-                <text class="guide-stat">{{ item.driveDuration }}</text>
+            <view
+              v-for="(item, i) in column"
+              :key="item.postId || columnIndex + '-' + i"
+              class="guide-card"
+              @tap="onPostTap(item)"
+            >
+              <image
+                v-if="item.coverImage && !isHomeGuideImageFailed(item.imageKey)"
+                :src="item.coverImage"
+                mode="aspectFill"
+                class="guide-cover"
+                @load="onHomeGuideImageLoad(item)"
+                @error="onHomeGuideImageError(item, $event)"
+              />
+              <view v-else class="guide-cover guide-cover-empty">
+                <text>{{ activeArchiveGroup.name.slice(0, 2) }}</text>
               </view>
-              <view v-if="item.isPinned || item.isFeatured" class="post-badges guide-badges">
-                <text v-if="item.isPinned" class="post-badge pin">置顶</text>
-                <text v-if="item.isFeatured" class="post-badge feature">精华</text>
-              </view>
-              <view class="guide-meta">
-                <view v-if="item.contentAuthor" class="guide-author">
-                  <view
-                    class="guide-author-avatar"
-                    :style="getGuideAuthorAvatarStyle(item.contentAuthor)"
-                  >
-                    <text>{{ getAuthorInitial(item.contentAuthor) }}</text>
-                  </view>
-                  <text class="guide-author-name">{{ item.contentAuthor }}</text>
+              <view class="guide-main">
+                <text class="guide-title">{{ item.t }}</text>
+                <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
+                <view v-if="item.driveDuration" class="guide-stats">
+                  <text class="guide-stat">{{ item.driveDuration }}</text>
                 </view>
-                <text v-if="item.when" class="guide-when">{{ item.when }}</text>
+                <view v-if="item.isPinned || item.isFeatured" class="post-badges guide-badges">
+                  <text v-if="item.isPinned" class="post-badge pin">置顶</text>
+                  <text v-if="item.isFeatured" class="post-badge feature">精华</text>
+                </view>
+                <view class="guide-meta">
+                  <view v-if="item.contentAuthor" class="guide-author">
+                    <view
+                      class="guide-author-avatar"
+                      :style="getGuideAuthorAvatarStyle(item.contentAuthor)"
+                    >
+                      <text>{{ getAuthorInitial(item.contentAuthor) }}</text>
+                    </view>
+                    <text class="guide-author-name">{{ item.contentAuthor }}</text>
+                  </view>
+                  <text v-if="item.when" class="guide-when">{{ item.when }}</text>
+                </view>
               </view>
             </view>
           </view>
         </view>
-      </view>
 
-      <view
-        v-else
-        class="arc-card"
-        :data-index="activeArchiveIndex"
-        :style="getArchiveCardStyle(activeArchiveGroup, activeArchiveIndex)"
-        @tap="onGroupHeaderTap(activeArchiveGroup)"
-      >
         <view
-          v-for="(item, i) in activeArchiveGroup.items"
-          :key="item.postId || i"
-          class="arc-item"
-          @tap.stop="onPostTap(item)"
+          v-else
+          class="arc-card"
+          :data-index="activeArchiveIndex"
+          :style="getArchiveCardStyle(activeArchiveGroup, activeArchiveIndex)"
+          @tap="onGroupHeaderTap(activeArchiveGroup)"
         >
-          <!-- kicker 小标：当前装饰版固定 01/02/03；未来接真实档案号时仍走 item.k -->
-          <text v-if="item.k" class="arc-k">{{ item.k }}</text>
-          <view class="arc-tl">
-            <text class="arc-title">{{ item.t }}</text>
-            <view v-if="item.isPinned || item.isFeatured" class="post-badges">
-              <text v-if="item.isPinned" class="post-badge pin">置顶</text>
-              <text v-if="item.isFeatured" class="post-badge feature">精华</text>
+          <view
+            v-for="(item, i) in activeArchiveGroup.items"
+            :key="item.postId || i"
+            class="arc-item"
+            @tap.stop="onPostTap(item)"
+          >
+            <!-- kicker 小标：当前装饰版固定 01/02/03；未来接真实档案号时仍走 item.k -->
+            <text v-if="item.k" class="arc-k">{{ item.k }}</text>
+            <view class="arc-tl">
+              <text class="arc-title">{{ item.t }}</text>
+              <view v-if="item.isPinned || item.isFeatured" class="post-badges">
+                <text v-if="item.isPinned" class="post-badge pin">置顶</text>
+                <text v-if="item.isFeatured" class="post-badge feature">精华</text>
+              </view>
+              <view class="arc-mm">
+                <text v-if="item.contentAuthor" class="arc-content-author">{{ item.contentAuthor }}</text>
+                <text v-if="item.meta" class="arc-meta" :class="{ hot: item.hot }">{{ item.meta }}</text>
+              </view>
             </view>
-            <view class="arc-mm">
-              <text v-if="item.contentAuthor" class="arc-content-author">{{ item.contentAuthor }}</text>
-              <text v-if="item.meta" class="arc-meta" :class="{ hot: item.hot }">{{ item.meta }}</text>
-            </view>
+            <text class="arc-when">{{ item.when }}</text>
           </view>
-          <text class="arc-when">{{ item.when }}</text>
         </view>
       </view>
     </view>
@@ -351,6 +370,15 @@ import { normalizeHomeNoticeKind } from '../../utils/home-notice'
 import { formatHomeQuoteCite } from '../../utils/home-quote'
 import { resolveCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import {
+  buildHomeImageKey,
+  clearFailedHomeImageProbeEntries,
+  summarizeHomeImageProbe,
+  upsertHomeImageProbeEntry,
+  type HomeImageKind,
+  type HomeImageProbeEntry,
+  type HomeImageStatus,
+} from '../../utils/home-image-probe'
+import {
   buildCommunitySharePath,
   buildCommunityShareTitle,
   DEFAULT_COMMUNITY_SHARE_IMAGE,
@@ -370,23 +398,31 @@ const guestIntroConfig = ref<GuestIntroConfig | null>(null)
 const postsBySection = ref<Record<string, any[]>>({})
 const resolvedHomeBannerCoverUrls = ref<Record<string, string>>({})
 const resolvedHomeGuideCoverUrls = ref<Record<string, string>>({})
+const homeImageProbeEntries = ref<Record<string, HomeImageProbeEntry>>({})
 const incomingShareCommunityId = ref('')
 const shareImageUrl = ref(DEFAULT_COMMUNITY_SHARE_IMAGE)
 const homeSearchQuery = ref('')
 const selectedArchiveId = ref('')
 const homePageScrollTop = ref(0)
+const archivePreviewMinHeightPx = ref(0)
 const homeBannerActiveIndex = ref(0)
+const homeBannerSwipeIntent = ref(false)
 let refreshingHome = false
 let queuedForcedHomeRefresh = false
 let mountedAt = 0
 let unsubscribeBackgroundFetchSnapshot: (() => void) | null = null
 let archiveSwitchScrollTimers: ReturnType<typeof setTimeout>[] = []
-let homeBannerPointerStartX = 0
-let homeBannerPointerMoved = false
+let archivePreviewMeasureTimers: ReturnType<typeof setTimeout>[] = []
 let suppressNextHomeBannerTap = false
+let suppressHomeBannerTapTimer: ReturnType<typeof setTimeout> | null = null
+let homeBannerPointerStartX = 0
+let homeBannerPointerStartY = 0
+let homeBannerHasPointerStart = false
 let homeBannerResolveToken = 0
 const reportedMissingHomeTitle = new Set<string>()
 const NOTICE_PREVIEW_LIMIT = 68
+const HOME_BANNER_SWIPE_THRESHOLD_PX = 8
+const HOME_BANNER_TAP_SUPPRESS_MS = 320
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
 const GUIDE_AUTHOR_AVATAR_PALETTE = [
@@ -434,6 +470,11 @@ const activeArchiveIndex = computed(() => {
   const guideIndex = groups.findIndex((group) => group.displayTemplate === 'guide_note')
   return guideIndex >= 0 ? guideIndex : 0
 })
+const activeArchiveStyle = computed(() =>
+  archivePreviewMinHeightPx.value > 0
+    ? `min-height: ${archivePreviewMinHeightPx.value}px;`
+    : ''
+)
 
 function onMastheadTap() {
   // 仅当用户有多个社区时才打开切换器；否则 tap 不做任何事（避免空切换器困扰）
@@ -450,6 +491,7 @@ interface HomeBannerItem {
   bannerId: string
   postId: string
   title: string
+  imageKey: string
   coverImage: string
 }
 
@@ -466,6 +508,7 @@ const homeBannerItems = computed<HomeBannerItem[]>(() => {
         bannerId: String(banner.bannerId || `${banner.postId}-${index}`),
         postId: String(banner.postId || '').trim(),
         title: String(banner.title || '').trim() || '新人必看',
+        imageKey: buildHomeImageKey('banner', rawCover || String(banner.bannerId || banner.postId || index)),
         coverImage,
       }
     })
@@ -569,6 +612,7 @@ interface ArchiveItem {
   contentAuthor?: string
   meta?: string
   excerpt?: string
+  imageKey?: string
   coverImage?: string
   driveDuration?: string
   routeStats?: Array<{ label: string; value: string }>
@@ -608,6 +652,7 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
               contentAuthor: guide.author,
               meta: '',
               excerpt: guide.excerpt,
+              imageKey: buildHomeImageKey('guide', guide.coverImage || p._id || idx),
               coverImage: resolvedCover,
               driveDuration: guide.driveDuration,
               routeStats: guide.routeStats,
@@ -674,6 +719,34 @@ const guideColumns = computed<ArchiveItem[][]>(() => {
   }, [[], []])
 })
 
+const currentHomeImageKeys = computed(() => {
+  const keys: string[] = []
+  for (const item of homeBannerItems.value) {
+    if (item.imageKey) keys.push(item.imageKey)
+  }
+  const group = activeArchiveGroup.value
+  if (group?.displayTemplate === 'guide_note') {
+    for (const item of group.items) {
+      if (item.imageKey && item.coverImage) keys.push(item.imageKey)
+    }
+  }
+  return keys
+})
+
+watch(
+  () => activeArchiveGroup.value?.id || '',
+  () => scheduleArchivePreviewMeasure(),
+  { immediate: true },
+)
+
+watch(
+  () => currentShareCommunityId.value,
+  () => {
+    archivePreviewMinHeightPx.value = 0
+    scheduleArchivePreviewMeasure()
+  },
+)
+
 watch(archiveGroups, (groups) => {
   if (!groups.length) {
     selectedArchiveId.value = ''
@@ -694,6 +767,10 @@ watch(
       resolvedHomeGuideCoverUrls.value = {}
       return
     }
+    homeImageProbeEntries.value = clearFailedHomeImageProbeEntries(
+      homeImageProbeEntries.value,
+      urls.map((url) => buildHomeImageKey('guide', url)),
+    )
     try {
       resolvedHomeGuideCoverUrls.value = {
         ...resolvedHomeGuideCoverUrls.value,
@@ -724,6 +801,83 @@ const dormantNames = computed(() => {
 function formatArchiveKicker(index: number): string {
   return String(index + 1).padStart(2, '0')
 }
+
+function updateHomeImageProbe(
+  kind: HomeImageKind,
+  key: string,
+  src: string,
+  label: string,
+  status: HomeImageStatus,
+  error?: unknown,
+) {
+  const safeKey = String(key || '').trim()
+  if (!safeKey) return
+  const previous = homeImageProbeEntries.value[safeKey]
+  homeImageProbeEntries.value = upsertHomeImageProbeEntry(homeImageProbeEntries.value, {
+    key: safeKey,
+    kind,
+    src: String(src || '').trim(),
+    label: String(label || '').trim(),
+    status,
+    updatedAt: new Date().toISOString(),
+  })
+  if (status === 'failed' && previous?.status !== 'failed') {
+    clientLog('warn', kind === 'banner' ? 'home.banner.image.fail' : 'home.guide.image.fail', {
+      imageKey: safeKey,
+      src: String(src || '').trim(),
+      label: String(label || '').trim(),
+      error,
+    })
+  }
+}
+
+function isHomeBannerImageFailed(imageKey: string): boolean {
+  return homeImageProbeEntries.value[String(imageKey || '').trim()]?.status === 'failed'
+}
+
+function isHomeGuideImageFailed(imageKey?: string): boolean {
+  return homeImageProbeEntries.value[String(imageKey || '').trim()]?.status === 'failed'
+}
+
+function onHomeBannerImageLoad(item: HomeBannerItem) {
+  updateHomeImageProbe('banner', item.imageKey, item.coverImage, item.title, 'loaded')
+}
+
+function onHomeBannerImageError(item: HomeBannerItem, event?: any) {
+  updateHomeImageProbe(
+    'banner',
+    item.imageKey,
+    item.coverImage,
+    item.title,
+    'failed',
+    event?.detail?.errMsg || event,
+  )
+}
+
+function onHomeGuideImageLoad(item: ArchiveItem) {
+  updateHomeImageProbe('guide', String(item.imageKey || ''), String(item.coverImage || ''), item.t, 'loaded')
+  scheduleArchivePreviewMeasure()
+}
+
+function onHomeGuideImageError(item: ArchiveItem, event?: any) {
+  updateHomeImageProbe(
+    'guide',
+    String(item.imageKey || ''),
+    String(item.coverImage || ''),
+    item.t,
+    'failed',
+    event?.detail?.errMsg || event,
+  )
+  scheduleArchivePreviewMeasure()
+}
+
+function getReleaseHomeImageProbe() {
+  return summarizeHomeImageProbe(currentHomeImageKeys.value, homeImageProbeEntries.value)
+}
+
+defineExpose({
+  getReleaseHomeImageProbe,
+})
 
 function reportMissingHomeTitle(post: any, section: any, source: string) {
   const issue = getPostHomeTitleIssue(post, section)
@@ -806,45 +960,67 @@ function getGuideAuthorAvatarStyle(author?: string) {
 }
 
 // ── Actions ──
-function getHomeBannerPointerX(event: any): number {
+function onHomeBannerChange(event: any) {
+  const next = Number(event?.detail?.current ?? 0)
+  if (Number.isFinite(next)) homeBannerActiveIndex.value = next
+  if (event?.detail?.source === 'touch') {
+    suppressHomeBannerTapTemporarily()
+  }
+}
+
+function onHomeBannerGestureStart(event: any) {
+  const point = getHomeBannerGesturePoint(event)
+  homeBannerPointerStartX = point.x
+  homeBannerPointerStartY = point.y
+  homeBannerHasPointerStart = true
+  homeBannerSwipeIntent.value = false
+  if (suppressHomeBannerTapTimer) {
+    clearTimeout(suppressHomeBannerTapTimer)
+    suppressHomeBannerTapTimer = null
+  }
+  suppressNextHomeBannerTap = false
+}
+
+function onHomeBannerGestureMove(event: any) {
+  if (!homeBannerHasPointerStart) return
+  const point = getHomeBannerGesturePoint(event)
+  const dx = Math.abs(point.x - homeBannerPointerStartX)
+  const dy = Math.abs(point.y - homeBannerPointerStartY)
+  if (Math.max(dx, dy) >= HOME_BANNER_SWIPE_THRESHOLD_PX) {
+    homeBannerSwipeIntent.value = true
+    suppressHomeBannerTapTemporarily()
+  }
+}
+
+function onHomeBannerGestureEnd() {
+  if (homeBannerSwipeIntent.value) suppressHomeBannerTapTemporarily()
+  homeBannerHasPointerStart = false
+  homeBannerSwipeIntent.value = false
+}
+
+function getHomeBannerGesturePoint(event: any) {
   const touch = event?.touches?.[0] || event?.changedTouches?.[0]
-  const clientX = Number(touch?.clientX ?? event?.clientX ?? 0)
-  return Number.isFinite(clientX) ? clientX : 0
+  const x = Number(touch?.clientX ?? touch?.pageX ?? event?.clientX ?? event?.pageX ?? 0)
+  const y = Number(touch?.clientY ?? touch?.pageY ?? event?.clientY ?? event?.pageY ?? 0)
+  return { x, y }
 }
 
-function onHomeBannerPointerStart(event: any) {
-  homeBannerPointerStartX = getHomeBannerPointerX(event)
-  homeBannerPointerMoved = false
-}
-
-function onHomeBannerPointerMove(event: any) {
-  const currentX = getHomeBannerPointerX(event)
-  if (Math.abs(currentX - homeBannerPointerStartX) > 16) {
-    homeBannerPointerMoved = true
-  }
-}
-
-function onHomeBannerPointerEnd(event: any) {
-  const currentX = getHomeBannerPointerX(event)
-  const deltaX = currentX - homeBannerPointerStartX
-  if (Math.abs(deltaX) > 16 || homeBannerPointerMoved) {
-    if (Math.abs(deltaX) > 32 && homeBannerItems.value.length > 1) {
-      const step = deltaX < 0 ? 1 : -1
-      const length = homeBannerItems.value.length
-      homeBannerActiveIndex.value = (homeBannerActiveIndex.value + step + length) % length
-    }
-    suppressNextHomeBannerTap = true
-    setTimeout(() => {
-      suppressNextHomeBannerTap = false
-      homeBannerPointerMoved = false
-    }, 350)
-  }
+function suppressHomeBannerTapTemporarily() {
+  suppressNextHomeBannerTap = true
+  if (suppressHomeBannerTapTimer) clearTimeout(suppressHomeBannerTapTimer)
+  suppressHomeBannerTapTimer = setTimeout(() => {
+    suppressNextHomeBannerTap = false
+    suppressHomeBannerTapTimer = null
+  }, HOME_BANNER_TAP_SUPPRESS_MS)
 }
 
 function openHomeBanner(item: HomeBannerItem) {
-  if (suppressNextHomeBannerTap || homeBannerPointerMoved) {
+  if (suppressNextHomeBannerTap) {
     suppressNextHomeBannerTap = false
-    homeBannerPointerMoved = false
+    if (suppressHomeBannerTapTimer) {
+      clearTimeout(suppressHomeBannerTapTimer)
+      suppressHomeBannerTapTimer = null
+    }
     return
   }
   if (!item.postId) return
@@ -881,6 +1057,50 @@ function onLiveTap(item: LiveItem) {
 function clearArchiveSwitchScrollTimers() {
   archiveSwitchScrollTimers.forEach((timer) => clearTimeout(timer))
   archiveSwitchScrollTimers = []
+}
+
+function clearArchivePreviewMeasureTimers() {
+  archivePreviewMeasureTimers.forEach((timer) => clearTimeout(timer))
+  archivePreviewMeasureTimers = []
+}
+
+function getArchiveMeasuredHeight(rect: any) {
+  const target = Array.isArray(rect) ? rect[0] : rect
+  const height = Number(target?.height || 0)
+  return Number.isFinite(height) ? Math.ceil(height) : 0
+}
+
+function measureActiveArchiveHeight() {
+  try {
+    uni
+      .createSelectorQuery()
+      .select('.active-archive-body')
+      .boundingClientRect((rect) => {
+        const height = getArchiveMeasuredHeight(rect)
+        const group = activeArchiveGroup.value
+        const hasGuideGroup = archiveGroups.value.some((item) => item.displayTemplate === 'guide_note')
+        // Only natural guide/feed height may raise the baseline; short default tabs inherit it.
+        const shouldCaptureHeight =
+          !hasGuideGroup ||
+          group?.displayTemplate === 'guide_note' ||
+          archivePreviewMinHeightPx.value === 0
+        if (shouldCaptureHeight && height > archivePreviewMinHeightPx.value) {
+          archivePreviewMinHeightPx.value = height
+        }
+      })
+      .exec()
+  } catch (error) {
+    clientLog('warn', 'home.archive.measure.fail', { error })
+  }
+}
+
+function scheduleArchivePreviewMeasure() {
+  clearArchivePreviewMeasureTimers()
+  nextTick(() => {
+    measureActiveArchiveHeight()
+    archivePreviewMeasureTimers.push(setTimeout(measureActiveArchiveHeight, 80))
+    archivePreviewMeasureTimers.push(setTimeout(measureActiveArchiveHeight, 260))
+  })
 }
 
 function getCurrentPageScrollTop() {
@@ -927,6 +1147,7 @@ function selectArchiveGroup(g: ArchiveGroup) {
   if (!g.id) return
   const previousScrollTop = getCurrentPageScrollTop()
   selectedArchiveId.value = g.id
+  scheduleArchivePreviewMeasure()
   restoreArchiveSwitchScroll(previousScrollTop)
   clientLog('info', 'home.archive.group.select', {
     sectionId: g.id,
@@ -1241,6 +1462,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   clearArchiveSwitchScrollTimers()
+  clearArchivePreviewMeasureTimers()
   unsubscribeBackgroundFetchSnapshot?.()
   unsubscribeBackgroundFetchSnapshot = null
 })
@@ -1283,6 +1505,10 @@ watch(
       homeBannerActiveIndex.value = 0
       return
     }
+    homeImageProbeEntries.value = clearFailedHomeImageProbeEntries(
+      homeImageProbeEntries.value,
+      images.map((image) => buildHomeImageKey('banner', image)),
+    )
     const next: Record<string, string> = {}
     await Promise.all(images.map(async (image) => {
       try {
@@ -2555,20 +2781,13 @@ onShareAppMessage(() => {
 
 .home-banner-swiper,
 .home-banner-slide {
-  position: absolute;
-  inset: 0;
   width: 100%;
   height: 100%;
 }
 
 .home-banner-slide {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.home-banner-slide.active {
-  opacity: 1;
-  pointer-events: auto;
+  position: relative;
+  overflow: hidden;
 }
 
 .home-banner-image,
@@ -2663,7 +2882,18 @@ onShareAppMessage(() => {
 
 .active-archive {
   margin: 0 var(--hh-page-x) 28rpx;
+  box-sizing: border-box;
   overflow-anchor: none;
+}
+
+.active-archive-body {
+  min-height: inherit;
+}
+
+.active-archive--default .arc-card {
+  box-sizing: border-box;
+  min-height: inherit;
+  margin-bottom: 0;
 }
 
 .guide-feed {

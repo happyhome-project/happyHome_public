@@ -16,13 +16,13 @@
    - 处理：用 `npm install --no-audit --no-fund` 重算 lockfile。
    - 验证：`npm ci --dry-run --no-audit --no-fund` 可解析。
 
-2. `scripts/test-h5-profile-smoke.mjs` 仍按旧 profile 首屏断言版本号和默认登录表单。
-   - 当前契约：Profile 版本号不是 release 硬要求；登录页版本号才是 release gate。
-   - 处理：改为检查当前 Figma 版 profile shell 是否稳定渲染。
+2. `scripts/test-h5-profile-smoke.mjs` 必须继续覆盖 release 可见版本号和两种登录入口。
+   - 当前契约：Profile smoke 需要检查 `build-info.ts` 中的版本号出现在页面里，并分别覆盖 fallback 登录与 `chooseAvatar` 登录入口。
+   - 处理：保留 main 上的版本号/登录入口断言，只把它作为本地安全验证项执行。
 
-3. `scripts/test-mp-post-rag-search-static.mjs` 绑定旧搜索 placeholder 和旧赋值语句。
-   - 当前契约：首页和搜索页采用 Figma 文案，但 `postApi.search`、AI answer、citations、no-answer 处理必须保留。
-   - 处理：断言业务链路而不是旧 UI 文案。
+3. `scripts/test-mp-post-rag-search-static.mjs` 需要保护正式 Post RAG 搜索契约。
+   - 当前契约：首页搜索入口存在，搜索页只消费 `postApi.search` 返回的 RAG / fallback / no-answer 结果，不再混入本地 bootstrap fallback。
+   - 处理：保留 main 上的 anti-bootstrap 断言、fallback 空态文案和 `post.search` 类型契约。
 
 4. `npm run test:mp:detail-runtime-syntax` 检出 detail/profile 关键 chunk 中的 trial 空白页风险语法。
    - 处理：去掉详情页和 AppTabBar 中会编译出风险模式的写法。

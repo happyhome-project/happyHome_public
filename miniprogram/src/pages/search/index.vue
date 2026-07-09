@@ -1,20 +1,26 @@
 <template>
-  <view class="search-page" :class="{ 'search-page--initial': !searched, 'search-page--searched': searched }">
-    <view class="search-nav" :class="{ 'search-nav--initial': !searched }">
+  <view class="search-page" :class="{ 'search-page--initial': isInitialSearchLayout, 'search-page--searched': !isInitialSearchLayout }">
+    <view class="search-nav" :class="{ 'search-nav--initial': isInitialSearchLayout }">
       <button class="search-back" aria-label="返回" @tap="goBack">
         <text>‹</text>
       </button>
-      <view class="search-box" :class="{ 'search-box--initial': !searched }">
-        <input
-          v-model="query"
-          class="search-input"
-          confirm-type="search"
-          placeholder="亲子游路线"
-          placeholder-class="search-placeholder"
-          @confirm="submitSearch"
-        />
-        <text v-if="query" class="clear-icon" @tap="clearQuery">×</text>
-        <button v-if="!searched" class="search-submit" @tap="submitSearch">搜索</button>
+      <view class="search-box" :class="{ 'search-box--initial': isInitialSearchLayout }">
+        <view
+          class="search-query-field"
+          :class="{ 'search-query-field--compact': !isInitialSearchLayout && query }"
+          :style="compactQueryChipStyle"
+        >
+          <input
+            v-model="query"
+            class="search-input"
+            confirm-type="search"
+            placeholder="亲子游路线"
+            placeholder-class="search-placeholder"
+            @confirm="submitSearch"
+          />
+          <text v-if="query && !isInitialSearchLayout" class="clear-icon" @tap="clearQuery">×</text>
+        </view>
+        <button v-if="isInitialSearchLayout" class="search-submit" @tap="submitSearch">搜索</button>
       </view>
       <!-- #ifdef MP-WEIXIN -->
       <view class="search-native-menu-spacer" aria-hidden="true"></view>
@@ -73,8 +79,8 @@
         <text class="answer-text">{{ answer }}</text>
       </view>
       <view v-else-if="mode === 'fallback'" class="answer-card muted">
-        <text class="answer-label">普通搜索</text>
-        <text class="answer-text">智能检索暂不可用，当前显示基础搜索结果。</text>
+        <text class="answer-label">智能检索暂不可用</text>
+        <text class="answer-text">智能检索暂不可用，请稍后重试。</text>
       </view>
 
       <view v-if="citations.length" class="citation-list">
@@ -103,7 +109,7 @@
       <text class="empty-desc">{{ mode === 'no_answer' ? '换个关键词，或试试搜索正文/视频内容' : '换个关键词试试' }}</text>
     </view>
 
-    <view v-if="items.length" class="result-list">
+    <view v-if="items.length && mode !== 'fallback'" class="result-list">
       <view
         v-for="item in items"
         :key="item.postId"
@@ -164,7 +170,6 @@ import { useUserStore } from '../../store/user'
 import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
-import { getGuideNoteCard, getPostHomeTitle } from '../../utils/widget'
 import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
 
 interface SearchField {
@@ -233,6 +238,14 @@ const communityName = computed(() => {
     return communityStore.currentCommunity.name
   }
   return '帖子搜索'
+})
+const isInitialSearchLayout = computed(() => !searched.value && !loading.value)
+const compactQueryChipStyle = computed(() => {
+  if (isInitialSearchLayout.value || !query.value.trim()) return {}
+  const queryWidth = Array.from(query.value.trim()).reduce((total, char) => {
+    return total + (/[\u4e00-\u9fff]/.test(char) ? 16 : 8)
+  }, 0)
+  return { width: `${Math.min(203, Math.max(64, queryWidth + 49))}px` }
 })
 
 onLoad((options: any) => {
@@ -344,28 +357,18 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
       asGuest,
     })
     if (requestSeq !== searchRequestSeq) return
-    let nextItems = result.items || []
-    let usedBootstrapFallback = false
-    if (options.reset && nextItems.length === 0 && result.mode === 'no_answer') {
-      const fallbackItems = await searchVisibleBootstrapPosts(normalizedQuery, asGuest)
-      if (requestSeq !== searchRequestSeq) return
-      if (fallbackItems.length > 0) {
-        nextItems = fallbackItems
-        usedBootstrapFallback = true
-      }
-    }
+    const nextItems = result.items || []
     items.value = options.reset ? nextItems : [...items.value, ...nextItems]
-    answer.value = usedBootstrapFallback ? '' : String(result.answer || '')
-    citations.value = usedBootstrapFallback ? [] : (result.citations || [])
-    mode.value = usedBootstrapFallback ? '' : (result.mode || '')
-    total.value = usedBootstrapFallback ? nextItems.length : Number(result.total || items.value.length)
+    answer.value = String(result.answer || '')
+    citations.value = result.citations || []
+    mode.value = result.mode || ''
+    total.value = Number(result.total || items.value.length)
     searched.value = true
     void resolveResultCovers(items.value)
     clientLog('info', 'search.load.success', {
       communityId: communityId.value,
       total: total.value,
       returned: nextItems.length,
-      usedBootstrapFallback,
     })
   } catch (error: any) {
     if (requestSeq !== searchRequestSeq) return
@@ -461,84 +464,6 @@ function stableHash(value: string): number {
   return hash >>> 0
 }
 
-async function searchVisibleBootstrapPosts(normalizedQuery: string, asGuest: boolean): Promise<SearchItem[]> {
-  const queryKey = compactQuery(normalizedQuery).toLowerCase()
-  if (!queryKey) return []
-  try {
-    const snapshot = await postApi.bootstrap(communityId.value, 20, asGuest)
-    const sections = (snapshot?.sections || []) as any[]
-    const sectionsById = new Map(sections.map((section) => [String(section._id || ''), section]))
-    const postsBySection = (snapshot?.postsBySection || {}) as Record<string, any[]>
-    const matches: SearchItem[] = []
-
-    for (const [sectionId, posts] of Object.entries(postsBySection)) {
-      const section = sectionsById.get(sectionId)
-      if (!section || !Array.isArray(posts)) continue
-      for (const post of posts) {
-        const title = resolveFallbackTitle(post, section)
-        const contentText = stringifyContentValue(post?.content)
-        const haystack = compactQuery([section.name, title, contentText].join(' ')).toLowerCase()
-        if (!haystack.includes(queryKey)) continue
-        matches.push({
-          postId: String(post._id || ''),
-          communityId: String(post.communityId || communityId.value),
-          sectionId,
-          sectionName: String(section.name || '帖子'),
-          title,
-          coverImage: resolveFallbackCover(post, section),
-          authorName: String(post.authorNickname || post.authorName || '').trim(),
-          authorAvatarUrl: String(post.authorAvatarUrl || post.avatarUrl || '').trim(),
-          score: 0,
-          matchedFields: [{
-            fieldLabel: String(section.name || '内容'),
-            fieldType: 'bootstrap_fallback',
-            preview: buildFallbackPreview(contentText, title),
-          }],
-          createdAt: String(post.createdAt || ''),
-          updatedAt: String(post.updatedAt || post.createdAt || ''),
-        })
-      }
-    }
-    return matches.slice(0, limit)
-  } catch (error) {
-    clientLog('warn', 'search.bootstrapFallback.fail', { communityId: communityId.value, error })
-    return []
-  }
-}
-
-function resolveFallbackTitle(post: any, section: any): string {
-  if (section?.displayTemplate === 'guide_note') {
-    return getGuideNoteCard(post, section).title
-  }
-  return getPostHomeTitle(post, section) || String(section?.name || '无标题')
-}
-
-function resolveFallbackCover(post: any, section: any): string {
-  const guideCover = getGuideNoteCard(post, section).coverImage
-  if (guideCover) return guideCover
-  const imageWidget = (section?.widgets || []).find((widget: any) => widget?.type === 'image_group')
-  const value = imageWidget ? post?.content?.[imageWidget.widgetId] : null
-  if (Array.isArray(value)) return String(value[0] || '').trim()
-  return ''
-}
-
-function stringifyContentValue(value: unknown): string {
-  if (value === undefined || value === null) return ''
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value)
-  if (Array.isArray(value)) return value.map((item) => stringifyContentValue(item)).join(' ')
-  if (typeof value === 'object') {
-    const record = value as Record<string, unknown>
-    if (typeof record.text === 'string') return record.text
-    return Object.values(record).map((item) => stringifyContentValue(item)).join(' ')
-  }
-  return ''
-}
-
-function buildFallbackPreview(contentText: string, title: string): string {
-  const text = String(contentText || '').replace(String(title || ''), '').replace(/\s+/g, ' ').trim()
-  return text.slice(0, 80)
-}
-
 async function resolveResultCovers(nextItems: SearchItem[]) {
   const covers = nextItems.map((item) => String(item.coverImage || '').trim()).filter(Boolean)
   const avatars = nextItems.map((item) => String(item.authorAvatarUrl || item.avatarUrl || '').trim()).filter(Boolean)
@@ -578,13 +503,13 @@ function formatDate(value: unknown): string {
 
 .search-nav {
   position: relative;
-  height: 223rpx;
+  height: 116px;
   margin: 0 -24rpx;
-  padding: 124rpx 26rpx 0 32rpx;
+  padding: 62px 16px 0;
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 16rpx;
+  gap: 16px;
   background: #fefefe;
 }
 
@@ -595,9 +520,9 @@ function formatDate(value: unknown): string {
 }
 
 .search-back {
-  flex: 0 0 48rpx;
-  width: 48rpx;
-  height: 48rpx;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
   margin: 0;
   padding: 0;
   border: 0;
@@ -613,23 +538,24 @@ function formatDate(value: unknown): string {
 }
 
 .search-back text {
-  font-size: 52rpx;
+  font-size: 32px;
   font-weight: $hh-font-weight-regular;
-  line-height: 48rpx;
+  line-height: 24px;
 }
 
 .search-box {
-  flex: 1;
+  flex: 0 1 227px;
   min-width: 0;
-  height: 72rpx;
+  max-width: 227px;
+  height: 36px;
   box-sizing: border-box;
-  padding: 0 18rpx 0 30rpx;
+  padding: 0 12px 0 16px;
   border: 3rpx solid var(--hh-color-brand-primary);
-  border-radius: $hh-radius-full;
+  border-radius: 18px;
   background: var(--hh-color-card);
   display: flex;
   align-items: center;
-  gap: 12rpx;
+  gap: 8px;
 }
 
 .search-box--initial {
@@ -648,10 +574,35 @@ function formatDate(value: unknown): string {
   box-shadow: 0 8rpx 48rpx rgba(0, 0, 0, 0.05);
 }
 
+.search-query-field {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+}
+
+.search-box--initial .search-query-field {
+  flex: 0 0 48rpx;
+  width: 100%;
+  height: 48rpx;
+}
+
+.search-query-field--compact {
+  flex: 0 1 auto;
+  max-width: 203px;
+  height: 30px;
+  padding: 0 6px 0 13px;
+  border-radius: $hh-radius-full;
+  background: #f7f7f7;
+  gap: 4px;
+}
+
 .search-input {
   flex: 1;
   min-width: 0;
-  height: 72rpx;
+  height: 36px;
   color: var(--hh-color-text-primary);
   font-size: var(--hh-text-body-lg-size);
 }
@@ -662,19 +613,25 @@ function formatDate(value: unknown): string {
   padding-left: 32px;
 }
 
+.search-query-field--compact .search-input {
+  height: 24px;
+  font-size: 15px;
+  line-height: 24px;
+}
+
 .search-placeholder {
   color: var(--hh-color-text-disabled);
 }
 
 .clear-icon {
   flex-shrink: 0;
-  width: 40rpx;
-  height: 40rpx;
+  width: 16px;
+  height: 16px;
   border-radius: 999rpx;
   background: var(--hh-color-line-soft);
   color: var(--hh-color-text-tertiary);
-  font-size: 32rpx;
-  line-height: 36rpx;
+  font-size: 16px;
+  line-height: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -699,8 +656,8 @@ function formatDate(value: unknown): string {
 }
 
 .search-native-menu-spacer {
-  flex: 0 0 174rpx;
-  height: 64rpx;
+  flex: 0 0 87px;
+  height: 32px;
   visibility: hidden;
   pointer-events: none;
 }
