@@ -177,7 +177,7 @@
 
     <!-- Live strip · 实时脉冲区：有激活的实时协作板块时显示 -->
     <view v-if="liveItems.length > 0" class="group-section">
-      <text class="group-section-title">活动召集</text>
+      <text class="group-section-title">我的组局</text>
       <view
         v-for="(item, i) in liveItems"
         :key="i"
@@ -243,7 +243,7 @@
       </view>
     </scroll-view>
 
-    <!-- Archive feed · Figma 0626 选中板块内容区 -->
+    <!-- Archive feed · Figma 0709_v2 选中板块内容区 -->
     <view
       v-if="activeArchiveGroup"
       class="active-archive"
@@ -2765,7 +2765,7 @@ onShareAppMessage(() => {
   text-align: center;
 }
 
-/* ═══ Figma 0626 visual pass ═══ */
+/* ═══ Figma 0709_v2 visual pass ═══ */
 .phone-inner {
   background: var(--hh-color-page);
   padding-top: 0;

@@ -77,6 +77,12 @@ assert(
 )
 
 assert(
+  homePage.includes('<text class="group-section-title">我的组局</text>') &&
+    !homePage.includes('<text class="group-section-title">活动召集</text>'),
+  'home live section heading should follow the 0709_v2 Figma label 我的组局.',
+)
+
+assert(
   sectionTabActiveStyle.includes('background: rgba(61, 173, 125, 0.16)'),
   'home archive tabs should show the Figma selected-state background behind the active tab.',
 )

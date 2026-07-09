@@ -141,7 +141,7 @@ function collectBodySections(post: Post, bodyWidgets: SectionWidget[]): GuideRou
     if (widget.type === 'rich_note') {
       const rich = normalizeRichNoteContent(value)
       if (!isRichNoteEmpty(rich)) {
-        sections.push({ title: '', type: 'rich_note', value: rich })
+        sections.push({ title: bodySectionTitle(sections), type: 'rich_note', value: rich })
       }
       return
     }
@@ -152,8 +152,12 @@ function collectBodySections(post: Post, bodyWidgets: SectionWidget[]): GuideRou
     const text = widgetTextValue(post, widget)
     if (text) blocks.push({ type: 'paragraph', text })
   })
-  if (blocks.length) sections.push({ title: '', type: 'blocks', blocks })
+  if (blocks.length) sections.push({ title: bodySectionTitle(sections), type: 'blocks', blocks })
   return sections
+}
+
+function bodySectionTitle(sections: GuideRouteBodySection[]): string {
+  return sections.length === 0 ? '线路介绍' : ''
 }
 
 function collectLocation(post: Post, section: Section): GuideRouteLocation | null {
