@@ -84,10 +84,14 @@
             @tap="openHomeBanner(banner)"
           >
             <image
+              v-if="!isHomeBannerImageFailed(banner.imageKey)"
               :src="banner.coverImage"
               class="home-banner-image"
               mode="aspectFill"
+              @load="onHomeBannerImageLoad(banner)"
+              @error="onHomeBannerImageError(banner, $event)"
             />
+            <view v-else class="home-banner-art"></view>
             <view class="home-banner-shade"></view>
             <text class="home-banner-title">{{ banner.title }}</text>
           </swiper-item>
@@ -223,12 +227,12 @@
               @tap="onPostTap(item)"
             >
               <image
-                v-if="item.coverImage"
+                v-if="item.coverImage && !isHomeGuideImageFailed(item.imageKey)"
                 :src="item.coverImage"
                 mode="aspectFill"
                 class="guide-cover"
-                @load="scheduleArchivePreviewMeasure"
-                @error="scheduleArchivePreviewMeasure"
+                @load="onHomeGuideImageLoad(item)"
+                @error="onHomeGuideImageError(item, $event)"
               />
               <view v-else class="guide-cover guide-cover-empty">
                 <text>{{ activeArchiveGroup.name.slice(0, 2) }}</text>
@@ -366,6 +370,15 @@ import { normalizeHomeNoticeKind } from '../../utils/home-notice'
 import { formatHomeQuoteCite } from '../../utils/home-quote'
 import { resolveCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import {
+  buildHomeImageKey,
+  clearFailedHomeImageProbeEntries,
+  summarizeHomeImageProbe,
+  upsertHomeImageProbeEntry,
+  type HomeImageKind,
+  type HomeImageProbeEntry,
+  type HomeImageStatus,
+} from '../../utils/home-image-probe'
+import {
   buildCommunitySharePath,
   buildCommunityShareTitle,
   DEFAULT_COMMUNITY_SHARE_IMAGE,
@@ -385,6 +398,7 @@ const guestIntroConfig = ref<GuestIntroConfig | null>(null)
 const postsBySection = ref<Record<string, any[]>>({})
 const resolvedHomeBannerCoverUrls = ref<Record<string, string>>({})
 const resolvedHomeGuideCoverUrls = ref<Record<string, string>>({})
+const homeImageProbeEntries = ref<Record<string, HomeImageProbeEntry>>({})
 const incomingShareCommunityId = ref('')
 const shareImageUrl = ref(DEFAULT_COMMUNITY_SHARE_IMAGE)
 const homeSearchQuery = ref('')
@@ -477,6 +491,7 @@ interface HomeBannerItem {
   bannerId: string
   postId: string
   title: string
+  imageKey: string
   coverImage: string
 }
 
@@ -493,6 +508,7 @@ const homeBannerItems = computed<HomeBannerItem[]>(() => {
         bannerId: String(banner.bannerId || `${banner.postId}-${index}`),
         postId: String(banner.postId || '').trim(),
         title: String(banner.title || '').trim() || '新人必看',
+        imageKey: buildHomeImageKey('banner', rawCover || String(banner.bannerId || banner.postId || index)),
         coverImage,
       }
     })
@@ -596,6 +612,7 @@ interface ArchiveItem {
   contentAuthor?: string
   meta?: string
   excerpt?: string
+  imageKey?: string
   coverImage?: string
   driveDuration?: string
   routeStats?: Array<{ label: string; value: string }>
@@ -635,6 +652,7 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
               contentAuthor: guide.author,
               meta: '',
               excerpt: guide.excerpt,
+              imageKey: buildHomeImageKey('guide', guide.coverImage || p._id || idx),
               coverImage: resolvedCover,
               driveDuration: guide.driveDuration,
               routeStats: guide.routeStats,
@@ -701,6 +719,20 @@ const guideColumns = computed<ArchiveItem[][]>(() => {
   }, [[], []])
 })
 
+const currentHomeImageKeys = computed(() => {
+  const keys: string[] = []
+  for (const item of homeBannerItems.value) {
+    if (item.imageKey) keys.push(item.imageKey)
+  }
+  const group = activeArchiveGroup.value
+  if (group?.displayTemplate === 'guide_note') {
+    for (const item of group.items) {
+      if (item.imageKey && item.coverImage) keys.push(item.imageKey)
+    }
+  }
+  return keys
+})
+
 watch(
   () => activeArchiveGroup.value?.id || '',
   () => scheduleArchivePreviewMeasure(),
@@ -735,6 +767,10 @@ watch(
       resolvedHomeGuideCoverUrls.value = {}
       return
     }
+    homeImageProbeEntries.value = clearFailedHomeImageProbeEntries(
+      homeImageProbeEntries.value,
+      urls.map((url) => buildHomeImageKey('guide', url)),
+    )
     try {
       resolvedHomeGuideCoverUrls.value = {
         ...resolvedHomeGuideCoverUrls.value,
@@ -765,6 +801,83 @@ const dormantNames = computed(() => {
 function formatArchiveKicker(index: number): string {
   return String(index + 1).padStart(2, '0')
 }
+
+function updateHomeImageProbe(
+  kind: HomeImageKind,
+  key: string,
+  src: string,
+  label: string,
+  status: HomeImageStatus,
+  error?: unknown,
+) {
+  const safeKey = String(key || '').trim()
+  if (!safeKey) return
+  const previous = homeImageProbeEntries.value[safeKey]
+  homeImageProbeEntries.value = upsertHomeImageProbeEntry(homeImageProbeEntries.value, {
+    key: safeKey,
+    kind,
+    src: String(src || '').trim(),
+    label: String(label || '').trim(),
+    status,
+    updatedAt: new Date().toISOString(),
+  })
+  if (status === 'failed' && previous?.status !== 'failed') {
+    clientLog('warn', kind === 'banner' ? 'home.banner.image.fail' : 'home.guide.image.fail', {
+      imageKey: safeKey,
+      src: String(src || '').trim(),
+      label: String(label || '').trim(),
+      error,
+    })
+  }
+}
+
+function isHomeBannerImageFailed(imageKey: string): boolean {
+  return homeImageProbeEntries.value[String(imageKey || '').trim()]?.status === 'failed'
+}
+
+function isHomeGuideImageFailed(imageKey?: string): boolean {
+  return homeImageProbeEntries.value[String(imageKey || '').trim()]?.status === 'failed'
+}
+
+function onHomeBannerImageLoad(item: HomeBannerItem) {
+  updateHomeImageProbe('banner', item.imageKey, item.coverImage, item.title, 'loaded')
+}
+
+function onHomeBannerImageError(item: HomeBannerItem, event?: any) {
+  updateHomeImageProbe(
+    'banner',
+    item.imageKey,
+    item.coverImage,
+    item.title,
+    'failed',
+    event?.detail?.errMsg || event,
+  )
+}
+
+function onHomeGuideImageLoad(item: ArchiveItem) {
+  updateHomeImageProbe('guide', String(item.imageKey || ''), String(item.coverImage || ''), item.t, 'loaded')
+  scheduleArchivePreviewMeasure()
+}
+
+function onHomeGuideImageError(item: ArchiveItem, event?: any) {
+  updateHomeImageProbe(
+    'guide',
+    String(item.imageKey || ''),
+    String(item.coverImage || ''),
+    item.t,
+    'failed',
+    event?.detail?.errMsg || event,
+  )
+  scheduleArchivePreviewMeasure()
+}
+
+function getReleaseHomeImageProbe() {
+  return summarizeHomeImageProbe(currentHomeImageKeys.value, homeImageProbeEntries.value)
+}
+
+defineExpose({
+  getReleaseHomeImageProbe,
+})
 
 function reportMissingHomeTitle(post: any, section: any, source: string) {
   const issue = getPostHomeTitleIssue(post, section)
@@ -1392,6 +1505,10 @@ watch(
       homeBannerActiveIndex.value = 0
       return
     }
+    homeImageProbeEntries.value = clearFailedHomeImageProbeEntries(
+      homeImageProbeEntries.value,
+      images.map((image) => buildHomeImageKey('banner', image)),
+    )
     const next: Record<string, string> = {}
     await Promise.all(images.map(async (image) => {
       try {

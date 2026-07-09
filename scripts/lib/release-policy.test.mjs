@@ -80,6 +80,14 @@ test('release cloud smoke ensures required database collections before invoking 
   assert(runCloudSmokeBody.indexOf('ensure:indexes') < runCloudSmokeBody.indexOf('runCloudReleaseSmoke'))
 })
 
+test('CloudBase CLI retry treats its known includes TypeError as transient', () => {
+  const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
+  const retryClassifier = extractFunctionBlock(deployScript, 'function isTransientCloudBaseCliFailure')
+
+  assert.match(retryClassifier, /_a\\\.includes is not a function/)
+  assert.match(retryClassifier, /e\\\.message\\\.includes is not a function/)
+})
+
 test('formal release path records resumable ledger stages before upload', () => {
   const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
   const releaseBlock = extractFunctionBlock(deployScript, 'async function runFormalRelease')

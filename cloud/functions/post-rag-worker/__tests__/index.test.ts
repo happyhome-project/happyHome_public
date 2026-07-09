@@ -4,11 +4,12 @@ jest.mock('wx-server-sdk', () => ({
 }))
 
 jest.mock('../../../lib/post-rag', () => ({
+  ensurePostRagIndex: jest.fn(),
   processPostRagJobBatch: jest.fn(),
 }))
 
 import { main } from '../index'
-import { processPostRagJobBatch } from '../../../lib/post-rag'
+import { ensurePostRagIndex, processPostRagJobBatch } from '../../../lib/post-rag'
 
 describe('post-rag-worker auth', () => {
   beforeEach(() => {
@@ -33,5 +34,15 @@ describe('post-rag-worker auth', () => {
 
     expect(processPostRagJobBatch).toHaveBeenCalledWith({ limit: 20, postId: 'post-1' })
     expect(result).toEqual({ scannedCount: 1, results: [] })
+  })
+
+  test('ensures the private ES index when requested by an authorized worker', async () => {
+    ;(ensurePostRagIndex as jest.Mock).mockResolvedValue({ created: true, indexName: 'happyhome_post_rag_chunks', dims: 768 })
+
+    const result = await main({ action: 'ensureIndex', workerToken: 'worker-secret' })
+
+    expect(ensurePostRagIndex).toHaveBeenCalledWith()
+    expect(processPostRagJobBatch).not.toHaveBeenCalled()
+    expect(result).toEqual({ created: true, indexName: 'happyhome_post_rag_chunks', dims: 768 })
   })
 })
