@@ -30,4 +30,34 @@ describe('mini-program pull-down refresh contract', () => {
     expect(code).toContain('onPullDownRefresh')
     expect(code).toContain('uni.stopPullDownRefresh()')
   })
+
+  test('home page shows the Figma refresh hint only during pull-down refresh', () => {
+    const code = readProjectFile('pages/index/index.vue')
+
+    expect(code).toContain('showHomePullRefreshHint')
+    expect(code).toContain('用力加载中...')
+    expect(code).toContain('HOME_PULL_REFRESH_HINT_MIN_MS')
+    expect(code).toContain('activeHomeRefreshPromise')
+    expect(code).toMatch(/onPullDownRefresh[\s\S]*showHomePullRefreshHint\.value = true/)
+    expect(code).toMatch(/finally[\s\S]*showHomePullRefreshHint\.value = false[\s\S]*uni\.stopPullDownRefresh\(\)/)
+    expect(code).toMatch(/if \(activeHomeRefreshPromise\)[\s\S]*await activeHomeRefreshPromise/)
+  })
+
+  test('home refresh hint keeps the compact Figma loading rhythm', () => {
+    const code = readProjectFile('pages/index/index.vue')
+
+    expect(code).toContain('height: 164rpx;')
+    expect(code).toContain('gap: 15rpx;')
+    expect(code).toContain('width: 38rpx;')
+    expect(code).toContain('height: 38rpx;')
+    expect(code).toContain('font-size: 30rpx;')
+    expect(code).toContain('line-height: 45rpx;')
+  })
+
+  test('home page normalizes server guest intro config before rendering', () => {
+    const code = readProjectFile('pages/index/index.vue')
+
+    expect(code).toContain('normalizeGuestIntroConfig')
+    expect(code).toMatch(/guestIntroConfig\.value = userStore\.isLoggedIn[\s\S]*normalizeGuestIntroConfig\(snapshot\.guestIntroConfig \|\| null\)/)
+  })
 })

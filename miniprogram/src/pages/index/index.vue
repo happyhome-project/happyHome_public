@@ -55,6 +55,11 @@
         </view>
       </view>
 
+      <view v-if="showHomePullRefreshHint" class="home-refresh-hint">
+        <view class="home-refresh-spinner" aria-hidden="true"></view>
+        <text>用力加载中...</text>
+      </view>
+
       <view class="home-banner">
         <swiper
           v-if="homeBannerItems.length > 0"
@@ -308,24 +313,12 @@
     <view class="s1-foot-wrap">
       <text class="s1-foot">— {{ kind }} · 记忆在这里 —</text>
     </view>
-    <!-- Community switcher modal -->
-    <view v-if="showSwitcher" class="switcher-mask" @tap="showSwitcher = false">
-      <view class="switcher-panel" @tap.stop>
-        <text class="switcher-title">切换社区</text>
-        <view
-          v-for="c in communityStore.myCommunities"
-          :key="c._id"
-          class="switcher-item"
-          :class="{ active: c._id === communityStore.currentCommunityId }"
-          @tap="switchCommunity(c._id)"
-        >
-          <text>{{ c.name }}</text>
-        </view>
-      </view>
-    </view>
     <view v-if="showGuestIntro && guestIntroConfig" class="guest-intro-mask" @touchmove.stop.prevent>
       <view class="guest-intro-panel" @tap.stop>
-        <text class="guest-intro-title">{{ guestIntroConfig.title }}</text>
+        <view class="guest-intro-heading">
+          <text class="guest-intro-kicker">欢迎体验</text>
+          <text class="guest-intro-title">{{ guestIntroConfig.title }}</text>
+        </view>
         <text class="guest-intro-body">{{ guestIntroConfig.body }}</text>
         <view class="guest-intro-list">
           <view
@@ -333,14 +326,24 @@
             :key="item.key"
             class="guest-intro-row"
           >
-            <text class="guest-intro-row-label">{{ item.label }}</text>
-            <text class="guest-intro-row-text">{{ item.text }}</text>
+            <view class="guest-intro-row-icon" :class="`guest-intro-row-icon--${item.key}`">
+              <view class="guest-intro-icon-shape"></view>
+            </view>
+            <view class="guest-intro-row-copy">
+              <text class="guest-intro-row-label">{{ item.label }}</text>
+              <text class="guest-intro-row-text">{{ item.text }}</text>
+            </view>
           </view>
         </view>
         <view class="guest-intro-primary" @tap="handleGuestIntroPrimary">
+          <view class="guest-intro-wechat-icon">
+            <view class="guest-intro-wechat-bubble guest-intro-wechat-bubble--main"></view>
+            <view class="guest-intro-wechat-bubble guest-intro-wechat-bubble--mini"></view>
+          </view>
           <text>{{ guestIntroConfig.primaryActionText }}</text>
         </view>
         <view class="guest-intro-secondary" @tap="handleGuestIntroSecondary">
+          <text class="guest-intro-secondary-plus">＋</text>
           <text>{{ guestIntroConfig.secondaryActionText }}</text>
         </view>
       </view>
@@ -382,11 +385,10 @@ import {
 } from '../../utils/community-share'
 import { markGuestIntroSeen, shouldShowGuestIntro } from '../../utils/guest-intro'
 import type { HomeBanner, HomeSnapshot } from '../../../../cloud/shared/types'
-import type { GuestIntroConfig } from '../../../../cloud/shared/guest-intro-config'
+import { normalizeGuestIntroConfig, type GuestIntroConfig } from '../../../../cloud/shared/guest-intro-config'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
-const showSwitcher = ref(false)
 const showGuestIntro = ref(false)
 const guestIntroConfig = ref<GuestIntroConfig | null>(null)
 const postsBySection = ref<Record<string, any[]>>({})
@@ -401,6 +403,7 @@ const homePageScrollTop = ref(0)
 const archivePreviewMinHeightPx = ref(0)
 const homeBannerActiveIndex = ref(0)
 const homeBannerSwipeIntent = ref(false)
+const showHomePullRefreshHint = ref(false)
 let refreshingHome = false
 let queuedForcedHomeRefresh = false
 let mountedAt = 0
@@ -419,6 +422,7 @@ const HOME_BANNER_SWIPE_THRESHOLD_PX = 8
 const HOME_BANNER_TAP_SUPPRESS_MS = 320
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
+const HOME_PULL_REFRESH_HINT_MIN_MS = 480
 const GUIDE_AUTHOR_AVATAR_PALETTE = [
   ['#CFE8DE', '#7EC6A0'],
   ['#F6D7C3', '#D28A63'],
@@ -428,6 +432,7 @@ const GUIDE_AUTHOR_AVATAR_PALETTE = [
   ['#D7E8EA', '#72B2B8'],
 ]
 const GUIDE_NOTE_NAME_HINTS = ['亲子出游', '周末遛娃', '村游攻略', '路线攻略', '出游攻略']
+let activeHomeRefreshPromise: Promise<void> | null = null
 
 onPageScroll((event) => {
   const nextScrollTop = Number(event?.scrollTop || 0)
@@ -471,9 +476,9 @@ const activeArchiveStyle = computed(() =>
 )
 
 function onMastheadTap() {
-  // 仅当用户有多个社区时才打开切换器；否则 tap 不做任何事（避免空切换器困扰）
+  // 仅当用户有多个社区时才进入切换页；否则 tap 不做任何事（避免空页面困扰）
   if (hasMultipleCommunities.value) {
-    showSwitcher.value = true
+    uni.navigateTo({ url: '/pages/community-switch/index' })
   }
 }
 
@@ -516,6 +521,9 @@ function secType(s: any): 'realtime' | 'evergreen' {
 function secStatus(s: any): 'active' | 'dormant' | 'archived' {
   return s?.status === 'dormant' || s?.status === 'archived' ? s.status : 'active'
 }
+function sectionIconGlyph(section: any, fallback = '·'): string {
+  return String(section?.icon || '').trim() || fallback
+}
 
 interface SectionNotice {
   id: string
@@ -549,7 +557,7 @@ const sectionNotices = computed<SectionNotice[]>(() => {
         content,
         preview,
         isLong: Array.from(content).length > NOTICE_PREVIEW_LIMIT,
-        icon: section.icon || '告',
+        icon: sectionIconGlyph(section, '告'),
         accentColor: section.accentColor || '',
         when: formatHomeRelativeTime((section as any).updatedAt || section.createdAt),
       })
@@ -579,7 +587,7 @@ const liveItems = computed<LiveItem[]>(() => {
     for (const post of posts) {
       reportMissingHomeTitle(post, section, 'home.live')
       items.push({
-        ic: section.icon || '·',
+        ic: sectionIconGlyph(section),
         t: getPostHomeTitle(post, section) || section.name,
         m: getHomeLiveMeta(post, section),
         cta: '进入',
@@ -895,7 +903,9 @@ function formatArchiveWhen(iso?: string): string {
   if (Number.isNaN(d.getTime())) return ''
   const now = new Date()
   const sameYear = d.getFullYear() === now.getFullYear()
-  return sameYear ? `${d.getMonth() + 1}/${d.getDate()}` : `${d.getFullYear()}/${d.getMonth() + 1}`
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return sameYear ? `${month}-${day}` : `${d.getFullYear()}-${month}`
 }
 
 function isPostHot(post: any): boolean {
@@ -1287,8 +1297,20 @@ function markCurrentGuestIntroSeen() {
   showGuestIntro.value = false
 }
 
+function openProfileLoginFromGuestIntro() {
+  const url = '/pages/profile/index'
+  uni.switchTab({
+    url,
+    fail: (error) => {
+      clientLog('warn', 'guestIntro.profile.switchTab.fail', { url, error })
+      uni.reLaunch({ url })
+    },
+  })
+}
+
 function handleGuestIntroPrimary() {
   markCurrentGuestIntroSeen()
+  openProfileLoginFromGuestIntro()
 }
 
 function handleGuestIntroSecondary() {
@@ -1306,7 +1328,9 @@ function applyHomeSnapshot(snapshot: HomeSnapshot | null, source: 'prefetch' | '
   communityStore.currentSectionIndex = 0
   communityStore.currentSections = snapshot.sections || []
   postsBySection.value = snapshot.postsBySection || {}
-  guestIntroConfig.value = userStore.isLoggedIn ? null : (snapshot.guestIntroConfig || null)
+  guestIntroConfig.value = userStore.isLoggedIn
+    ? null
+    : normalizeGuestIntroConfig(snapshot.guestIntroConfig || null)
   refreshGuestIntroVisibility()
   if (userStore.isLoggedIn) communityStore.saveToStorage()
   clientLog('info', 'home.snapshot.apply', {
@@ -1343,17 +1367,6 @@ function applyLateBackgroundFetchSnapshot(snapshot: HomeSnapshot) {
   }
 }
 
-async function switchCommunity(communityId: string) {
-  showSwitcher.value = false
-  communityStore.currentCommunityId = communityId
-  communityStore.currentSectionIndex = 0
-  communityStore.currentSections = []
-  postsBySection.value = {}
-  communityStore.saveToStorage()
-  communityStore.refreshMembershipStatus(communityId).catch(() => {})
-  await refreshHomeData({ force: true })
-}
-
 function getPendingHomeRefreshMarker() {
   try {
     const marker = uni.getStorageSync(HOME_REFRESH_AFTER_POST_KEY)
@@ -1375,21 +1388,17 @@ function clearHomeRefreshMarker() {
   } catch {}
 }
 
-async function refreshHomeData(options: { force?: boolean } = {}) {
-  const force = options.force === true
+function waitForHomeRefreshHint(ms: number) {
+  if (ms <= 0) return Promise.resolve()
+  return new Promise<void>((resolve) => setTimeout(resolve, ms))
+}
+
+async function runSingleHomeRefresh(force: boolean) {
   clientLog('info', 'home.refresh.start', {
     force,
     loggedIn: userStore.isLoggedIn,
     currentCommunityId: communityStore.currentCommunityId || '',
   })
-  if (refreshingHome) {
-    if (force) queuedForcedHomeRefresh = true
-    clientLog('warn', 'home.refresh.skip.busy', {
-      force,
-      queuedForcedHomeRefresh,
-    })
-    return
-  }
   refreshingHome = true
   try {
     const requestedCommunityId = userStore.isLoggedIn
@@ -1431,9 +1440,36 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
   } finally {
     refreshingHome = false
   }
-  if (queuedForcedHomeRefresh) {
-    queuedForcedHomeRefresh = false
-    await refreshHomeData({ force: true })
+}
+
+async function refreshHomeData(options: { force?: boolean } = {}) {
+  const force = options.force === true
+  if (activeHomeRefreshPromise) {
+    if (force) queuedForcedHomeRefresh = true
+    clientLog('warn', 'home.refresh.skip.busy', {
+      force,
+      queuedForcedHomeRefresh,
+    })
+    await activeHomeRefreshPromise
+    return
+  }
+
+  const refreshPromise = (async () => {
+    let nextForce = force
+    do {
+      const currentForce = nextForce
+      queuedForcedHomeRefresh = false
+      await runSingleHomeRefresh(currentForce)
+      nextForce = queuedForcedHomeRefresh
+    } while (nextForce)
+  })()
+  activeHomeRefreshPromise = refreshPromise
+  try {
+    await refreshPromise
+  } finally {
+    if (activeHomeRefreshPromise === refreshPromise) {
+      activeHomeRefreshPromise = null
+    }
   }
 }
 
@@ -1480,12 +1516,17 @@ onShow(() => {
 
 onPullDownRefresh(async () => {
   clientLog('info', 'home.pullDownRefresh', {})
+  showHomePullRefreshHint.value = true
+  const refreshStartedAt = Date.now()
   try {
     await refreshHomeData({ force: true })
   } catch (error) {
     clientLog('error', 'home.pullDownRefresh.fail', { error })
     uni.showToast({ title: '刷新失败，请重试', icon: 'none' })
   } finally {
+    const remaining = HOME_PULL_REFRESH_HINT_MIN_MS - (Date.now() - refreshStartedAt)
+    await waitForHomeRefreshHint(remaining)
+    showHomePullRefreshHint.value = false
     uni.stopPullDownRefresh()
   }
 })
@@ -2115,7 +2156,7 @@ onShareAppMessage(() => {
 .group-card {
   position: relative;
   min-height: 104rpx;
-  padding: 18rpx 26rpx 18rpx 18rpx;
+  padding: 18rpx 104rpx 18rpx 18rpx;
   border: 1rpx solid $hh-ink-line;
   border-radius: 16rpx;
   background: $hh-surface-1;
@@ -2175,9 +2216,9 @@ onShareAppMessage(() => {
 
 .group-ribbon {
   position: absolute;
-  right: -42rpx;
-  top: 8rpx;
-  width: 118rpx;
+  right: -30rpx;
+  top: 20rpx;
+  width: 108rpx;
   height: 34rpx;
   transform: rotate(45deg);
   background: #ffd66e;
@@ -2736,6 +2777,39 @@ onShareAppMessage(() => {
   font-weight: $hh-font-weight-medium;
 }
 
+.home-refresh-hint {
+  height: 164rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 15rpx;
+  color: #4b4b4b;
+}
+
+.home-refresh-spinner {
+  width: 38rpx;
+  height: 38rpx;
+  box-sizing: border-box;
+  border: 3rpx solid rgba(61, 173, 125, 0.22);
+  border-top-color: #3dad7d;
+  border-radius: 999rpx;
+  animation: homeRefreshSpin 0.8s linear infinite;
+}
+
+.home-refresh-hint text {
+  font-size: 30rpx;
+  line-height: 45rpx;
+  font-weight: $hh-font-weight-regular;
+  color: #4b4b4b;
+  white-space: nowrap;
+}
+
+@keyframes homeRefreshSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .home-banner {
   position: relative;
   margin: 0;
@@ -2828,21 +2902,25 @@ onShareAppMessage(() => {
   line-height: var(--hh-text-heading-sm-line);
   font-weight: $hh-font-weight-regular;
   white-space: nowrap;
+  padding: 0 12rpx;
+  border-radius: $hh-radius-full;
+  transition: background 160ms ease, color 160ms ease;
 }
 
 .section-tab.active {
   font-weight: $hh-font-weight-bold;
+  background: rgba(61, 173, 125, 0.16);
 }
 
 .section-tab.active::after {
   content: "";
   position: absolute;
-  left: 18rpx;
-  right: -8rpx;
-  bottom: 8rpx;
-  height: 18rpx;
+  left: 12rpx;
+  right: 12rpx;
+  bottom: 6rpx;
+  height: 16rpx;
   border-radius: $hh-radius-full;
-  background: linear-gradient(90deg, rgba(61, 173, 125, 0.34), rgba(61, 173, 125, 0));
+  background: rgba(61, 173, 125, 0.12);
   z-index: -1;
 }
 
@@ -3034,8 +3112,7 @@ onShareAppMessage(() => {
 }
 
 .sub-switch,
-.arc-meta.hot,
-.switcher-item.active {
+.arc-meta.hot {
   color: var(--hh-color-brand-primary);
 }
 
@@ -3146,53 +3223,10 @@ onShareAppMessage(() => {
   color: var(--hh-color-brand-strong);
 }
 
-.switcher-panel,
 .guest-intro-panel {
   background: var(--hh-color-card);
   border-color: var(--hh-color-line);
 }
-
-/* ═══ Switcher ═══ */
-.switcher-mask {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0, 0, 0, 0.4);
-  z-index: 100;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-}
-.switcher-panel {
-  width: 100%;
-  background: $hh-surface-1;
-  border-radius: 28rpx 28rpx 0 0;
-  padding: 36rpx 32rpx 60rpx;
-  max-height: 70vh;
-  overflow-y: auto;
-  border-top: 1rpx solid $hh-ink-line;
-}
-.switcher-title {
-  display: block;
-  font-family: $hh-font-mono;
-  font-size: 20rpx;
-  letter-spacing: $hh-tracking-mono;
-  text-transform: uppercase;
-  color: $hh-ink-3;
-  margin-bottom: 20rpx;
-  text-align: center;
-}
-.switcher-item {
-  padding: 28rpx 24rpx;
-  font-family: $hh-font-serif;
-  font-size: 30rpx;
-  color: $hh-ink-1;
-  border-bottom: 1rpx solid $hh-ink-line-2;
-}
-.switcher-item.active {
-  color: $hh-accent;
-  font-weight: $hh-font-weight-bold;
-}
-.switcher-item:last-child { border-bottom: none; }
 
 .guest-intro-mask {
   position: fixed;
@@ -3204,86 +3238,264 @@ onShareAppMessage(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 40rpx 32rpx;
-  background: rgba(30, 26, 22, 0.42);
+  padding: 56rpx;
+  background: rgba(0, 0, 0, 0.65);
 }
 .guest-intro-panel {
-  width: 100%;
-  max-width: 640rpx;
-  padding: 36rpx 32rpx 34rpx;
+  position: relative;
+  width: 680rpx;
+  max-width: calc(100vw - 62rpx);
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 60rpx 48rpx 52rpx;
   border-radius: 32rpx;
-  background: $hh-surface-1;
-  border: 1rpx solid rgba(30, 26, 22, 0.08);
-  box-shadow: $hh-shadow-modal;
+  background:
+    radial-gradient(ellipse at 78% -3%, rgba(175, 242, 220, 0.72) 0%, rgba(220, 243, 241, 0.42) 36%, rgba(255, 255, 255, 0) 66%),
+    linear-gradient(180deg, #dcf3f1 0%, #ffffff 26.3%, #ffffff 100%);
+  box-shadow: 0 64rpx 80rpx rgba(0, 0, 0, 0.1), 0 8rpx 16rpx rgba(0, 0, 0, 0.06);
+}
+.guest-intro-heading {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  text-align: center;
+}
+.guest-intro-kicker {
+  display: block;
+  font-size: 48rpx;
+  font-weight: 200;
+  line-height: 64rpx;
+  color: #181818;
+  text-align: center;
 }
 .guest-intro-title {
   display: block;
-  font-family: $hh-font-serif;
-  font-size: 36rpx;
-  font-weight: $hh-font-weight-bold;
-  line-height: 1.28;
-  color: $hh-ink-1;
-  letter-spacing: $hh-tracking-serif-sm;
+  font-size: 48rpx;
+  font-weight: 600;
+  line-height: 68rpx;
+  color: #3dad7d;
+  text-align: center;
+  letter-spacing: 0;
 }
 .guest-intro-body {
   display: block;
-  margin-top: 18rpx;
-  font-size: 27rpx;
-  line-height: 1.62;
-  color: $hh-ink-2;
+  width: 100%;
+  margin-top: 36rpx;
+  font-size: 28rpx;
+  font-weight: 400;
+  line-height: 42rpx;
+  color: #4b4b4b;
+  text-align: center;
 }
 .guest-intro-list {
   display: flex;
   flex-direction: column;
-  gap: 12rpx;
-  margin-top: 26rpx;
+  gap: 14rpx;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 36rpx;
+  padding: 16rpx 2rpx;
+  border: 2rpx solid #f1f1f1;
+  border-radius: 24rpx;
+  background: #ffffff;
+  box-shadow: 0 8rpx 12rpx rgba(0, 0, 0, 0.06);
 }
 .guest-intro-row {
   display: flex;
   align-items: center;
-  gap: 18rpx;
-  min-height: 64rpx;
-  padding: 12rpx 18rpx;
-  border-radius: 18rpx;
-  background: $hh-surface-2;
+  gap: 40rpx;
+  min-height: 76rpx;
+  padding: 14rpx 40rpx;
+  box-sizing: border-box;
 }
-.guest-intro-row-label {
+.guest-intro-row-icon {
+  position: relative;
   flex: 0 0 auto;
-  min-width: 96rpx;
-  font-size: 24rpx;
-  font-weight: $hh-font-weight-heavy;
-  color: $hh-accent-ink;
+  width: 76rpx;
+  height: 76rpx;
+  border-radius: 16rpx;
+  background: #e9fbf4;
 }
-.guest-intro-row-text {
+.guest-intro-icon-shape,
+.guest-intro-icon-shape::before,
+.guest-intro-icon-shape::after {
+  position: absolute;
+  box-sizing: border-box;
+  content: '';
+}
+.guest-intro-row-icon--recent .guest-intro-icon-shape {
+  left: 24rpx;
+  top: 18rpx;
+  width: 32rpx;
+  height: 38rpx;
+  border: 4rpx solid #59b384;
+  border-bottom: 0;
+  border-radius: 24rpx 24rpx 8rpx 8rpx;
+}
+.guest-intro-row-icon--recent .guest-intro-icon-shape::before {
+  left: -8rpx;
+  bottom: -8rpx;
+  width: 48rpx;
+  height: 14rpx;
+  border: 4rpx solid #59b384;
+  border-top: 0;
+  border-radius: 0 0 20rpx 20rpx;
+}
+.guest-intro-row-icon--recent .guest-intro-icon-shape::after {
+  left: 10rpx;
+  bottom: -18rpx;
+  width: 12rpx;
+  height: 8rpx;
+  border: 4rpx solid #59b384;
+  border-top: 0;
+  border-radius: 0 0 12rpx 12rpx;
+}
+.guest-intro-row-icon--materials .guest-intro-icon-shape {
+  left: 18rpx;
+  top: 20rpx;
+  width: 42rpx;
+  height: 34rpx;
+  border: 4rpx solid #59b384;
+  border-radius: 8rpx;
+}
+.guest-intro-row-icon--materials .guest-intro-icon-shape::before {
+  left: -4rpx;
+  top: -10rpx;
+  width: 22rpx;
+  height: 14rpx;
+  border: 4rpx solid #59b384;
+  border-bottom: 0;
+  border-radius: 8rpx 8rpx 0 0;
+}
+.guest-intro-row-icon--materials .guest-intro-icon-shape::after {
+  right: -8rpx;
+  bottom: -8rpx;
+  width: 18rpx;
+  height: 18rpx;
+  border: 4rpx solid #59b384;
+  border-radius: 50%;
+  box-shadow: 10rpx 10rpx 0 -6rpx #59b384;
+}
+.guest-intro-row-icon--history .guest-intro-icon-shape {
+  left: 20rpx;
+  top: 20rpx;
+  width: 40rpx;
+  height: 38rpx;
+  border: 4rpx solid #59b384;
+  border-radius: 6rpx;
+}
+.guest-intro-row-icon--history .guest-intro-icon-shape::before {
+  left: 6rpx;
+  top: 9rpx;
+  width: 20rpx;
+  height: 4rpx;
+  border-radius: 4rpx;
+  background: #59b384;
+}
+.guest-intro-row-icon--history .guest-intro-icon-shape::after {
+  left: -4rpx;
+  top: -8rpx;
+  width: 48rpx;
+  height: 10rpx;
+  border: 4rpx solid #59b384;
+  border-radius: 6rpx;
+  background: #e9fbf4;
+}
+.guest-intro-row-copy {
+  display: flex;
   flex: 1;
   min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.guest-intro-row-label {
+  display: block;
+  font-size: 32rpx;
+  font-weight: 400;
+  line-height: 48rpx;
+  color: #181818;
+}
+.guest-intro-row-text {
+  display: block;
+  min-width: 0;
   font-size: 24rpx;
-  line-height: 1.35;
-  color: $hh-ink-2;
+  font-weight: 400;
+  line-height: 32rpx;
+  color: #777777;
 }
 .guest-intro-primary,
 .guest-intro-secondary {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 82rpx;
+  width: 100%;
+  box-sizing: border-box;
 }
 .guest-intro-primary {
-  margin-top: 28rpx;
-  border-radius: 42rpx;
-  background: $hh-ink-1;
+  gap: 16rpx;
+  height: 90rpx;
+  margin-top: 36rpx;
+  border-radius: 999rpx;
+  background: #07c160;
 }
 .guest-intro-primary text {
-  font-size: 27rpx;
-  font-weight: $hh-font-weight-bold;
-  color: $hh-surface-1;
+  font-size: 32rpx;
+  font-weight: 700;
+  line-height: 48rpx;
+  color: #ffffff;
 }
+.guest-intro-wechat-icon {
+  position: relative;
+  width: 40rpx;
+  height: 40rpx;
+}
+.guest-intro-wechat-bubble {
+  position: absolute;
+  border-radius: 50%;
+  background: #ffffff;
+}
+.guest-intro-wechat-bubble::before,
+.guest-intro-wechat-bubble::after {
+  position: absolute;
+  top: 50%;
+  width: 4rpx;
+  height: 4rpx;
+  margin-top: -2rpx;
+  border-radius: 50%;
+  background: #07c160;
+  content: '';
+}
+.guest-intro-wechat-bubble--main {
+  left: 1rpx;
+  top: 7rpx;
+  width: 24rpx;
+  height: 20rpx;
+}
+.guest-intro-wechat-bubble--main::before { left: 7rpx; }
+.guest-intro-wechat-bubble--main::after { left: 15rpx; }
+.guest-intro-wechat-bubble--mini {
+  right: 2rpx;
+  bottom: 6rpx;
+  width: 22rpx;
+  height: 18rpx;
+}
+.guest-intro-wechat-bubble--mini::before { left: 6rpx; }
+.guest-intro-wechat-bubble--mini::after { left: 14rpx; }
 .guest-intro-secondary {
-  margin-top: 12rpx;
+  gap: 16rpx;
+  min-height: 44rpx;
+  margin-top: 20rpx;
 }
 .guest-intro-secondary text {
-  font-size: 25rpx;
-  font-weight: $hh-font-weight-bold;
-  color: $hh-accent-ink;
+  font-size: 32rpx;
+  font-weight: 400;
+  line-height: 48rpx;
+  color: #181818;
+}
+.guest-intro-secondary .guest-intro-secondary-plus {
+  font-size: 42rpx;
+  line-height: 48rpx;
 }
 </style>
