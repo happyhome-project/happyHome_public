@@ -1,16 +1,21 @@
 <template>
   <div class="post-create-admin">
     <div class="page-header">
-      <el-breadcrumb separator="/">
-        <el-breadcrumb-item :to="{ name: 'communities' }">社区管理</el-breadcrumb-item>
-        <el-breadcrumb-item>
-          <span class="breadcrumb-link" tabindex="0" @click="goToPosts" @keydown.enter="goToPosts">
-            {{ communityName || '当前社区' }}
-          </span>
-        </el-breadcrumb-item>
-        <el-breadcrumb-item>新建帖子</el-breadcrumb-item>
-      </el-breadcrumb>
-      <h3>代发帖子</h3>
+      <div class="page-header-top">
+        <el-button :icon="ArrowLeft" circle title="返回帖子管理" @click="goToPosts" />
+        <div>
+          <el-breadcrumb separator="/">
+            <el-breadcrumb-item :to="{ name: 'communities' }">社区管理</el-breadcrumb-item>
+            <el-breadcrumb-item>
+              <span class="breadcrumb-link" tabindex="0" @click="goToPosts" @keydown.enter="goToPosts">
+                {{ communityName || '当前社区' }}
+              </span>
+            </el-breadcrumb-item>
+            <el-breadcrumb-item>新建帖子</el-breadcrumb-item>
+          </el-breadcrumb>
+          <h3>代发帖子</h3>
+        </div>
+      </div>
       <el-alert
         v-if="!authReady"
         type="warning"
@@ -119,10 +124,10 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { v4 as uuidv4 } from 'uuid'
 import { ElMessage } from 'element-plus/es/components/message/index'
-import { Plus } from '@element-plus/icons-vue'
+import { ArrowLeft, Plus } from '@element-plus/icons-vue'
 import { communityApi, postAdminApi, sectionApi } from '../../api/cloud'
 import { useAuthStore } from '../../stores/auth'
 import AudioGroupEditor from '../../components/AudioGroupEditor.vue'
@@ -140,6 +145,7 @@ import {
 } from '../../utils/postAdminForm'
 
 const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
 
 const communityId = String(route.params.communityId || '')
@@ -153,7 +159,6 @@ const submitting = ref(false)
 const loadingSection = ref(false)
 const communityName = ref('')
 const authReady = computed(() => Boolean(auth.userId))
-const postsPath = `/posts/${encodeURIComponent(communityId)}`
 
 const editableWidgets = computed(() => editableWidgetsFor(section.value))
 const isGuideNoteTemplate = computed(() => section.value?.displayTemplate === 'guide_note')
@@ -243,13 +248,14 @@ async function submit() {
 }
 
 function goToPosts() {
-  window.location.assign(postsPath)
+  router.push({ name: 'posts', params: { communityId } })
 }
 </script>
 
 <style scoped>
 .post-create-admin { padding: 0; }
 .page-header { margin-bottom: 16px; }
+.page-header-top { display: flex; align-items: flex-start; gap: 12px; }
 .page-header h3 { margin: 10px 0; }
 .widget-block { margin: 18px 0; }
 .widget-label { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-weight: 600; }
