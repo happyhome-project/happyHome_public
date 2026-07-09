@@ -20,6 +20,7 @@ import { ElInput } from 'element-plus/es/components/input/index'
 import { ElInputNumber } from 'element-plus/es/components/input-number/index'
 import { ElLoading } from 'element-plus/es/components/loading/index'
 import { ElMenu, ElMenuItem } from 'element-plus/es/components/menu/index'
+import { ElPopover } from 'element-plus/es/components/popover/index'
 import { ElProgress } from 'element-plus/es/components/progress/index'
 import { ElRadio, ElRadioGroup } from 'element-plus/es/components/radio/index'
 import { ElOption, ElSelect } from 'element-plus/es/components/select/index'
@@ -68,6 +69,7 @@ app.use(pinia)
   ElMenu,
   ElMenuItem,
   ElOption,
+  ElPopover,
   ElProgress,
   ElRadio,
   ElRadioGroup,
