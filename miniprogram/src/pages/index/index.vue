@@ -19,7 +19,10 @@
           class="community-switch"
           @tap.stop="onMastheadTap"
         >
-          <text class="switch-icon">⇄</text>
+          <view class="switch-icon" aria-hidden="true">
+            <view class="switch-icon-line switch-icon-line--top"></view>
+            <view class="switch-icon-line switch-icon-line--bottom"></view>
+          </view>
           <text>切换</text>
         </view>
       </view>
@@ -45,7 +48,7 @@
             v-model="homeSearchQuery"
             class="home-search-input"
             confirm-type="search"
-            placeholder="搜索帖子、正文、视频"
+            placeholder="试试搜周边亲子游路线"
             placeholder-class="home-search-placeholder"
             @confirm="submitHomeSearch"
           />
@@ -125,7 +128,7 @@
             v-model="homeSearchQuery"
             class="home-search-input"
             confirm-type="search"
-            placeholder="搜索帖子、正文、视频"
+            placeholder="试试搜周边亲子游路线"
             placeholder-class="home-search-placeholder"
             @confirm="submitHomeSearch"
           />
@@ -2848,9 +2851,50 @@ onShareAppMessage(() => {
 }
 
 .switch-icon {
-  font-size: 26rpx;
-  line-height: 1;
-  transform: translateY(-1rpx);
+  position: relative;
+  width: 28rpx;
+  height: 22rpx;
+  color: var(--hh-color-brand-primary);
+  flex: 0 0 28rpx;
+}
+
+.switch-icon-line {
+  position: absolute;
+  left: 3rpx;
+  right: 3rpx;
+  height: 3rpx;
+  border-radius: $hh-radius-full;
+  background: currentColor;
+}
+
+.switch-icon-line::after {
+  content: "";
+  position: absolute;
+  width: 8rpx;
+  height: 8rpx;
+  border-top: 3rpx solid currentColor;
+  border-right: 3rpx solid currentColor;
+  border-radius: 1rpx;
+}
+
+.switch-icon-line--top {
+  top: 4rpx;
+}
+
+.switch-icon-line--top::after {
+  right: -1rpx;
+  top: -3rpx;
+  transform: rotate(45deg);
+}
+
+.switch-icon-line--bottom {
+  bottom: 4rpx;
+}
+
+.switch-icon-line--bottom::after {
+  left: -1rpx;
+  top: -3rpx;
+  transform: rotate(225deg);
 }
 
 .home-quote {

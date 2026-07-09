@@ -39,7 +39,7 @@ const section = read('miniprogram', 'src', 'pages', 'section', 'index.vue')
 const widgetEditor = read('miniprogram', 'src', 'components', 'widgets', 'WidgetEditor.vue')
 const noteBlocksEditor = read('miniprogram', 'src', 'components', 'widgets', 'NoteBlocksEditor.vue')
 const figmaInventory = read('docs', 'figma-mini-0626-inventory.md')
-const retiredGroupTitle = '<text class="group-section-title">活动召集</text>'
+const olderLiveSectionHeading = '<text class="group-section-title">活动召集</text>'
 
 for (const token of [
   '--hh-color-brand-primary',
@@ -78,6 +78,14 @@ assert(
     tabbar.includes('HOME_TAB_RETAP_EVENT') &&
     tabbar.includes('$emit?.(HOME_TAB_RETAP_EVENT)'),
   'custom tabbar should use Figma green, 56px center action, blur, safe-area aware layout, and retap home to scroll the homepage back to top.'
+)
+
+assert(
+  tabbar.includes('{{ option.label }}') &&
+    tabbar.includes('displayPublishSectionName') &&
+    !tabbar.includes('{{ option.section.name }}') &&
+    !tabbar.includes('/邀约|组局/'),
+  'publish sheet should normalize retired labels without broadly rewriting valid future section names.'
 )
 
 assert(
@@ -234,7 +242,7 @@ assert(
     home.includes('class="home-quote"') &&
     home.includes('quoteText') &&
     home.includes("'Source Han Serif SC', 'Noto Serif CJK SC', '思源宋体'") &&
-    home.includes('placeholder="搜索帖子、正文、视频"') &&
+    home.includes('placeholder="试试搜周边亲子游路线"') &&
     home.includes('class="home-banner"') &&
     home.includes('homeBannerItems') &&
     home.includes("imageKey: buildHomeImageKey('banner', coverImage || rawCover") &&
@@ -292,7 +300,9 @@ assert(
     home.includes('class="home-search-box"') &&
     home.includes('class="home-search-icon-ring"') &&
     home.includes('class="home-search-icon-handle"') &&
-    home.includes('class="switch-icon">⇄</text>') &&
+    home.includes('class="switch-icon"') &&
+    home.includes('class="switch-icon-line switch-icon-line--top"') &&
+    home.includes('class="switch-icon-line switch-icon-line--bottom"') &&
     home.includes('gap: 12px;') &&
     home.includes('min-height: 90rpx;') &&
     home.includes('padding: 0 8rpx 0 30rpx;') &&
@@ -346,7 +356,8 @@ assert(
 )
 
 assert(
-  !home.includes(retiredGroupTitle),
+  home.includes('<text class="group-section-title">我的组局</text>') &&
+    !home.includes(olderLiveSectionHeading),
   'home live section should use 0709_v2 wording 我的组局 instead of the older 活动召集 heading.'
 )
 
