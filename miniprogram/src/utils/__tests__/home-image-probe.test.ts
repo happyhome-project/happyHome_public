@@ -49,7 +49,7 @@ describe('home image probe', () => {
     })
   })
 
-  test('dedupes keys and accepts graceful fallback once all current images are resolved', () => {
+  test('dedupes keys and does not satisfy release evidence when current images failed', () => {
     const bannerKey = buildHomeImageKey('banner', 'cloud://banner')
     const entries = {
       [bannerKey]: {
@@ -70,7 +70,7 @@ describe('home image probe', () => {
       failedCount: 1,
       pendingCount: 0,
       hasRendered: false,
-      satisfied: true,
+      satisfied: false,
     })
   })
 

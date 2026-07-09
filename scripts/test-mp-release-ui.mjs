@@ -594,8 +594,7 @@ async function waitForHomeImagesRendered(mp, options = {}) {
   while (Date.now() < deadline) {
     lastProbe = await withTimeout(captureHomeImageProbe(mp), 15000, 'capture release home image probe')
     if (lastProbe?.ok === false) return lastProbe
-    if (lastProbe?.hasRendered) return lastProbe
-    if ((lastProbe?.currentImageCount || 0) > 0 && (lastProbe?.pendingCount || 0) === 0) return lastProbe
+    if (lastProbe?.satisfied) return lastProbe
     await sleep(intervalMs)
   }
 

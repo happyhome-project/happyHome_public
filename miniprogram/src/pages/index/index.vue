@@ -1,13 +1,6 @@
 <template>
   <view class="phone-inner">
     <view class="home-shell">
-      <view class="home-brandbar" aria-label="社群助手">
-        <view class="home-brand-title-wrap">
-          <text class="home-brand-title">社群助手</text>
-          <view class="home-brand-line"></view>
-        </view>
-      </view>
-
       <view class="home-topbar">
         <view class="community-identity" @tap="onMastheadTap">
           <view class="community-avatar">
@@ -26,7 +19,7 @@
           class="community-switch"
           @tap.stop="onMastheadTap"
         >
-          <text class="switch-icon">↔</text>
+          <text class="switch-icon">⇄</text>
           <text>切换</text>
         </view>
       </view>
@@ -161,22 +154,24 @@
 
     <!-- Admin notice · 管理员维护的固定公告 -->
     <view v-if="noticeRows.length > 0" class="notice-board">
-      <view
-        v-for="(notice, i) in noticeRows"
-        :key="notice.id"
-        class="notice-row"
-        :class="{ 'is-long': notice.isLong }"
-        :style="getNoticeCardStyle(notice, i)"
-        @tap="openNotice(notice)"
-      >
-        <text class="notice-kind">{{ notice.kind }}</text>
-        <view class="notice-main">
-          <view class="notice-line">
-            <text class="notice-badge">{{ i === 0 ? '置顶' : '最新' }}</text>
-            <text class="notice-content">{{ notice.preview }}</text>
+      <image class="notice-kind-image" src="/static/home-notice-title.png" mode="aspectFit" />
+      <view class="notice-lines">
+        <view
+          v-for="(notice, i) in noticeRows"
+          :key="notice.id"
+          class="notice-row"
+          :class="{ 'is-long': notice.isLong }"
+          :style="getNoticeCardStyle(notice, i)"
+          @tap="openNotice(notice)"
+        >
+          <view class="notice-main">
+            <view class="notice-line">
+              <text class="notice-badge">{{ i === 0 ? '置顶' : '最新' }}</text>
+              <text class="notice-content">{{ notice.preview }}</text>
+            </view>
           </view>
+          <text v-if="notice.when" class="notice-time">{{ notice.when }}</text>
         </view>
-        <text v-if="notice.when" class="notice-time">{{ notice.when }}</text>
       </view>
     </view>
 
@@ -412,7 +407,6 @@ import { getArchiveHomeMeta, getFamilyLetterListSummary, getGuideNoteCard, getHo
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
-import { normalizeHomeNoticeKind } from '../../utils/home-notice'
 import { formatHomeQuoteCite } from '../../utils/home-quote'
 import { resolveCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import {
@@ -570,7 +564,7 @@ const homeBannerItems = computed<HomeBannerItem[]>(() => {
         bannerId: String(banner.bannerId || `${banner.postId}-${index}`),
         postId: String(banner.postId || '').trim(),
         title: String(banner.title || '').trim() || '新人必看',
-        imageKey: buildHomeImageKey('banner', rawCover || String(banner.bannerId || banner.postId || index)),
+        imageKey: buildHomeImageKey('banner', coverImage || rawCover || String(banner.bannerId || banner.postId || index)),
         coverImage,
       }
     })
@@ -594,7 +588,6 @@ interface SectionNotice {
   widgetId: string
   sectionName: string
   label: string
-  kind: string
   content: string
   preview: string
   isLong: boolean
@@ -618,7 +611,6 @@ const sectionNotices = computed<SectionNotice[]>(() => {
         widgetId: widget.widgetId,
         sectionName: section.name,
         label: widget.label || '公告',
-        kind: normalizeHomeNoticeKind(widget.label),
         content,
         preview,
         isLong: Array.from(content).length > NOTICE_PREVIEW_LIMIT,
@@ -717,7 +709,7 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
               contentAuthor: guide.author,
               meta: '',
               excerpt: guide.excerpt,
-              imageKey: buildHomeImageKey('guide', guide.coverImage || p._id || idx),
+              imageKey: buildHomeImageKey('guide', resolvedCover || guide.coverImage || p._id || idx),
               coverImage: resolvedCover,
               driveDuration: guide.driveDuration,
               routeStats: guide.routeStats,
@@ -992,7 +984,7 @@ function getNoticeCardStyle(notice: SectionNotice, index: number) {
 }
 
 function makeNoticePreview(content: string) {
-  const normalized = content.trim().replace(/\n{2,}/g, '\n')
+  const normalized = content.trim().replace(/\s+/g, ' ')
   const chars = Array.from(normalized)
   if (chars.length <= NOTICE_PREVIEW_LIMIT) return normalized
   return `${chars.slice(0, NOTICE_PREVIEW_LIMIT).join('').trimEnd()}…`
@@ -1010,7 +1002,7 @@ function formatHomeRelativeTime(value: unknown): string {
   const sameYear = date.getFullYear() === new Date().getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
-  return sameYear ? `${month}-${day}` : `${date.getFullYear()}-${month}`
+  return sameYear ? `${month}-${day}` : `${date.getFullYear()}-${month}-${day}`
 }
 
 function getAuthorInitial(author?: string): string {
@@ -2229,15 +2221,23 @@ onShareAppMessage(() => {
 
 /* ═══ Figma home notice + group cards ═══ */
 .notice-board {
-  margin: 24rpx 32rpx 30rpx;
-  padding: 16rpx 20rpx;
+  margin: 24rpx var(--hh-page-x) 30rpx;
+  padding: 18rpx 22rpx;
   border: 1rpx solid $hh-ink-line;
   border-radius: 16rpx;
   background: $hh-surface-1;
   display: flex;
+  align-items: center;
+  gap: 18rpx;
+  box-shadow: $hh-shadow-card;
+}
+
+.notice-lines {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   flex-direction: column;
   gap: 8rpx;
-  box-shadow: $hh-shadow-card;
 }
 
 .notice-row {
@@ -2251,17 +2251,10 @@ onShareAppMessage(() => {
   opacity: 0.9;
 }
 
-.notice-kind {
-  width: 76rpx;
+.notice-kind-image {
+  width: 80rpx;
+  height: 72rpx;
   flex-shrink: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--hh-color-text-primary);
-  font-size: var(--hh-text-body-lg-size);
-  line-height: var(--hh-text-body-lg-line);
-  font-weight: $hh-font-weight-bold;
-  text-align: left;
 }
 
 .notice-main {
@@ -2775,6 +2768,7 @@ onShareAppMessage(() => {
 /* ═══ Figma 0626 visual pass ═══ */
 .phone-inner {
   background: var(--hh-color-page);
+  padding-top: 0;
 }
 
 .home-shell {
@@ -2784,51 +2778,15 @@ onShareAppMessage(() => {
     linear-gradient(170deg, #caeee7 0%, #f1f3ee 58%, var(--hh-color-page) 100%);
 }
 
-.home-brandbar {
-  height: 78rpx;
-  margin-bottom: 16rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.home-brand-title-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.home-brand-title {
-  color: #183327;
-  font-family: $hh-font-serif;
-  font-size: 52rpx;
-  line-height: 1;
-  font-weight: 760;
-  letter-spacing: 0;
-  white-space: nowrap;
-  text-shadow: 0 10rpx 22rpx rgba(24, 51, 39, 0.1);
-}
-
-.home-brand-line {
-  position: absolute;
-  left: -56rpx;
-  right: -56rpx;
-  bottom: -12rpx;
-  height: 2rpx;
-  background: linear-gradient(90deg, transparent, rgba(36, 77, 57, 0.38), transparent);
-  pointer-events: none;
-}
-
 .home-topbar {
   min-height: 64rpx;
   display: flex;
   align-items: center;
-  gap: 16rpx;
+  gap: 12px;
 }
 
 .community-identity {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -2859,7 +2817,9 @@ onShareAppMessage(() => {
 }
 
 .community-title {
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 426rpx;
   color: #111;
   font-size: var(--hh-text-heading-md-size);
   line-height: var(--hh-text-heading-md-line);
@@ -2877,7 +2837,7 @@ onShareAppMessage(() => {
   color: var(--hh-color-brand-primary);
   display: flex;
   align-items: center;
-  gap: 8rpx;
+  gap: 7rpx;
   flex: 0 0 auto;
 }
 
@@ -2888,8 +2848,9 @@ onShareAppMessage(() => {
 }
 
 .switch-icon {
-  font-size: 24rpx;
+  font-size: 26rpx;
   line-height: 1;
+  transform: translateY(-1rpx);
 }
 
 .home-quote {
@@ -2914,6 +2875,7 @@ onShareAppMessage(() => {
 
 .home-quote-text {
   display: block;
+  font-family: 'Source Han Serif SC', 'Noto Serif CJK SC', '思源宋体', 'Songti SC', SimSun, serif;
   color: #3f8f75;
   font-size: var(--hh-text-body-lg-size);
   line-height: var(--hh-text-body-lg-line);
@@ -2935,6 +2897,7 @@ onShareAppMessage(() => {
 }
 
 .home-quote-cite {
+  font-family: 'Source Han Serif SC', 'Noto Serif CJK SC', '思源宋体', 'Songti SC', SimSun, serif;
   color: #5c907e;
   font-size: var(--hh-text-caption-base-size);
   line-height: var(--hh-text-caption-base-line);
@@ -3014,6 +2977,7 @@ onShareAppMessage(() => {
 
 .home-banner {
   position: relative;
+  margin: 0;
   height: 310rpx;
   overflow: hidden;
   border-radius: var(--hh-radius-card);

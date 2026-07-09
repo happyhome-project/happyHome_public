@@ -6,6 +6,14 @@ const homePage = fs.readFileSync(
   path.join(root, 'miniprogram', 'src', 'pages', 'index', 'index.vue'),
   'utf8',
 )
+const homeImageProbe = fs.readFileSync(
+  path.join(root, 'miniprogram', 'src', 'utils', 'home-image-probe.ts'),
+  'utf8',
+)
+const releaseUi = fs.readFileSync(
+  path.join(root, 'scripts', 'test-mp-release-ui.mjs'),
+  'utf8',
+)
 const pagesJson = JSON.parse(fs.readFileSync(
   path.join(root, 'miniprogram', 'src', 'pages.json'),
   'utf8',
@@ -53,6 +61,13 @@ assert(
 assert(
   homePage.includes('padding: 16rpx 0 112rpx'),
   'home page bottom padding should leave room for the custom tabbar without creating a large blank tail.',
+)
+
+assert(
+  homeImageProbe.includes('pendingCount === 0 && failedCount === 0') &&
+    releaseUi.includes('if (lastProbe?.satisfied) return lastProbe') &&
+    !releaseUi.includes('(lastProbe?.pendingCount || 0) === 0) return lastProbe'),
+  'home image release evidence should not treat failed-only image probes as rendered.',
 )
 
 assert(
