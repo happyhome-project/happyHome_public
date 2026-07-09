@@ -81,6 +81,14 @@ assert(
 )
 
 assert(
+  tabbar.includes('{{ option.label }}') &&
+    tabbar.includes('displayPublishSectionName') &&
+    !tabbar.includes('{{ option.section.name }}') &&
+    !tabbar.includes('/邀约|组局/'),
+  'publish sheet should normalize retired labels without broadly rewriting valid future section names.'
+)
+
+assert(
     tabbar.includes('class="tab-icon"') &&
     tabbar.includes("tabIconSrc('home')") &&
     tabbar.includes("tabIconSrc('profile')") &&
@@ -234,7 +242,7 @@ assert(
     home.includes('class="home-quote"') &&
     home.includes('quoteText') &&
     home.includes("'Source Han Serif SC', 'Noto Serif CJK SC', '思源宋体'") &&
-    home.includes('placeholder="搜索帖子、正文、视频"') &&
+    home.includes('placeholder="试试搜周边亲子游路线"') &&
     home.includes('class="home-banner"') &&
     home.includes('homeBannerItems') &&
     home.includes("imageKey: buildHomeImageKey('banner', coverImage || rawCover") &&
@@ -292,7 +300,9 @@ assert(
     home.includes('class="home-search-box"') &&
     home.includes('class="home-search-icon-ring"') &&
     home.includes('class="home-search-icon-handle"') &&
-    home.includes('class="switch-icon">⇄</text>') &&
+    home.includes('class="switch-icon"') &&
+    home.includes('class="switch-icon-line switch-icon-line--top"') &&
+    home.includes('class="switch-icon-line switch-icon-line--bottom"') &&
     home.includes('gap: 12px;') &&
     home.includes('min-height: 90rpx;') &&
     home.includes('padding: 0 8rpx 0 30rpx;') &&
