@@ -63,6 +63,7 @@ import {
 const props = defineProps<{ current: AppTabKey }>()
 const communityStore = useCommunityStore()
 const showPublishSheet = ref(false)
+const HOME_TAB_RETAP_EVENT = 'happyhome:home-tab-retap'
 
 const activePublishSections = computed(() =>
   (communityStore.currentSections || []).filter((section: any) => (
@@ -94,7 +95,12 @@ function go(key: AppTabKey) {
   const target = getTabByKey(key)
   if (!target) return
   hideNativeTabBar()
-  if (props.current === key) return
+  if (props.current === key) {
+    if (key === 'home') {
+      ;(uni as any).$emit?.(HOME_TAB_RETAP_EVENT)
+    }
+    return
+  }
   uni.switchTab({ url: target.path })
 }
 

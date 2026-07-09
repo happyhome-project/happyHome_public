@@ -42,7 +42,7 @@
         </view>
       </view>
 
-      <view class="home-search">
+      <view class="home-search home-search--primary">
         <view class="home-search-box">
           <view class="home-search-icon" aria-hidden="true">
             <view class="home-search-icon-ring"></view>
@@ -110,6 +110,48 @@
           ></text>
         </view>
       </view>
+    </view>
+
+    <view
+      v-if="archiveGroups.length"
+      class="home-fixed-controls"
+      :class="{ 'is-visible': showHomeFixedControls }"
+    >
+      <view class="home-search home-search--fixed">
+        <view class="home-search-box">
+          <view class="home-search-icon" aria-hidden="true">
+            <view class="home-search-icon-ring"></view>
+            <view class="home-search-icon-handle"></view>
+          </view>
+          <input
+            v-model="homeSearchQuery"
+            class="home-search-input"
+            confirm-type="search"
+            placeholder="搜索帖子、正文、视频"
+            placeholder-class="home-search-placeholder"
+            @confirm="submitHomeSearch"
+          />
+          <view class="home-search-action" @tap="submitHomeSearch">
+            <text>搜索</text>
+          </view>
+        </view>
+      </view>
+
+      <scroll-view
+        scroll-x
+        class="section-tabs section-tabs--fixed"
+        :show-scrollbar="false"
+      >
+        <view class="section-tabs-inner">
+          <text
+            v-for="(g, index) in archiveGroups"
+            :key="`fixed-${g.id}`"
+            class="section-tab"
+            :class="{ active: index === activeArchiveIndex }"
+            @tap="selectArchiveGroup(g)"
+          >{{ g.name }}</text>
+        </view>
+      </scroll-view>
     </view>
 
     <!-- Admin notice · 管理员维护的固定公告 -->
@@ -186,7 +228,8 @@
     <scroll-view
       v-if="archiveGroups.length"
       scroll-x
-      class="section-tabs"
+      class="section-tabs section-tabs--flow"
+      :class="{ 'is-shadowed-by-fixed': showHomeFixedControls }"
       :show-scrollbar="false"
     >
       <view class="section-tabs-inner">
@@ -404,6 +447,7 @@ const shareImageUrl = ref(DEFAULT_COMMUNITY_SHARE_IMAGE)
 const homeSearchQuery = ref('')
 const selectedArchiveId = ref('')
 const homePageScrollTop = ref(0)
+const homeFixedControlsThresholdPx = ref(180)
 const archivePreviewMinHeightPx = ref(0)
 const homeBannerActiveIndex = ref(0)
 const homeBannerSwipeIntent = ref(false)
@@ -413,6 +457,7 @@ let mountedAt = 0
 let unsubscribeBackgroundFetchSnapshot: (() => void) | null = null
 let archiveSwitchScrollTimers: ReturnType<typeof setTimeout>[] = []
 let archivePreviewMeasureTimers: ReturnType<typeof setTimeout>[] = []
+let homeFixedControlsMeasureTimers: ReturnType<typeof setTimeout>[] = []
 let suppressNextHomeBannerTap = false
 let suppressHomeBannerTapTimer: ReturnType<typeof setTimeout> | null = null
 let homeBannerPointerStartX = 0
@@ -425,6 +470,9 @@ const HOME_BANNER_SWIPE_THRESHOLD_PX = 8
 const HOME_BANNER_TAP_SUPPRESS_MS = 320
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
+const HOME_FIXED_CONTROLS_MIN_SCROLL_PX = 80
+const HOME_FIXED_CONTROLS_OFFSET_PX = 8
+const HOME_TAB_RETAP_EVENT = 'happyhome:home-tab-retap'
 const GUIDE_AUTHOR_AVATAR_PALETTE = [
   ['#CFE8DE', '#7EC6A0'],
   ['#F6D7C3', '#D28A63'],
@@ -470,10 +518,19 @@ const activeArchiveIndex = computed(() => {
   const guideIndex = groups.findIndex((group) => group.displayTemplate === 'guide_note')
   return guideIndex >= 0 ? guideIndex : 0
 })
-const activeArchiveStyle = computed(() =>
-  archivePreviewMinHeightPx.value > 0
-    ? `min-height: ${archivePreviewMinHeightPx.value}px;`
-    : ''
+const activeArchiveStyle = computed(() => {
+  const group = activeArchiveGroup.value
+  if (group?.displayTemplate === 'guide_note' && archivePreviewMinHeightPx.value > 0) {
+    return `min-height: ${archivePreviewMinHeightPx.value}px;`
+  }
+  // Sticky tabs need transparent scroll runway when switching to short text-only lists.
+  if (group && group.displayTemplate !== 'guide_note' && showHomeFixedControls.value) {
+    return 'min-height: 100vh;'
+  }
+  return ''
+})
+const showHomeFixedControls = computed(() =>
+  archiveGroups.value.length > 0 && homePageScrollTop.value >= homeFixedControlsThresholdPx.value
 )
 
 function onMastheadTap() {
@@ -1078,12 +1135,8 @@ function measureActiveArchiveHeight() {
       .boundingClientRect((rect) => {
         const height = getArchiveMeasuredHeight(rect)
         const group = activeArchiveGroup.value
-        const hasGuideGroup = archiveGroups.value.some((item) => item.displayTemplate === 'guide_note')
-        // Only natural guide/feed height may raise the baseline; short default tabs inherit it.
-        const shouldCaptureHeight =
-          !hasGuideGroup ||
-          group?.displayTemplate === 'guide_note' ||
-          archivePreviewMinHeightPx.value === 0
+        // Only guide feeds reserve image-heavy height; text-only lists should hug their content.
+        const shouldCaptureHeight = group?.displayTemplate === 'guide_note'
         if (shouldCaptureHeight && height > archivePreviewMinHeightPx.value) {
           archivePreviewMinHeightPx.value = height
         }
@@ -1116,6 +1169,54 @@ function getCurrentPageScrollTop() {
   }
   // #endif
   return Math.max(0, Math.round(Number(scrollTop) || 0))
+}
+
+function clearHomeFixedControlsMeasureTimers() {
+  homeFixedControlsMeasureTimers.forEach((timer) => clearTimeout(timer))
+  homeFixedControlsMeasureTimers = []
+}
+
+function measureHomeFixedControlsThreshold() {
+  try {
+    uni.createSelectorQuery()
+      .select('.home-search--primary')
+      .boundingClientRect((rect) => {
+        const top = Number(Array.isArray(rect) ? rect[0]?.top : rect?.top)
+        if (!Number.isFinite(top)) return
+        const nextThreshold = getCurrentPageScrollTop() + top - HOME_FIXED_CONTROLS_OFFSET_PX
+        homeFixedControlsThresholdPx.value = Math.max(
+          HOME_FIXED_CONTROLS_MIN_SCROLL_PX,
+          Math.round(nextThreshold),
+        )
+      })
+      .exec()
+  } catch (error) {
+    clientLog('warn', 'home.fixedControls.measure.fail', { error })
+  }
+}
+
+function scheduleHomeFixedControlsMeasure() {
+  clearHomeFixedControlsMeasureTimers()
+  nextTick(() => {
+    measureHomeFixedControlsThreshold()
+    homeFixedControlsMeasureTimers.push(setTimeout(measureHomeFixedControlsThreshold, 120))
+    homeFixedControlsMeasureTimers.push(setTimeout(measureHomeFixedControlsThreshold, 420))
+  })
+}
+
+function scrollHomeToTop() {
+  try {
+    uni.pageScrollTo({ scrollTop: 0, duration: 260 })
+    homePageScrollTop.value = 0
+  } catch (error) {
+    clientLog('warn', 'home.tab.retapped.scrollTop.fail', { error })
+  }
+
+  // #ifdef H5
+  if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+    window.scrollTo({ top: 0, left: 0, behavior: 'smooth' })
+  }
+  // #endif
 }
 
 function restoreArchiveSwitchScroll(scrollTop: number) {
@@ -1446,6 +1547,8 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
 onMounted(async () => {
   mountedAt = Date.now()
   hideNativeTabBar()
+  ;(uni as any).$on?.(HOME_TAB_RETAP_EVENT, scrollHomeToTop)
+  scheduleHomeFixedControlsMeasure()
   clientLog('info', 'home.mounted', {})
   unsubscribeBackgroundFetchSnapshot = subscribeBackgroundFetchSnapshot(
     () => ({
@@ -1458,11 +1561,14 @@ onMounted(async () => {
   if (redirectedByShare) return
   await hydrateHomeFromFastPath()
   await refreshHomeData()
+  scheduleHomeFixedControlsMeasure()
 })
 
 onUnmounted(() => {
+  ;(uni as any).$off?.(HOME_TAB_RETAP_EVENT, scrollHomeToTop)
   clearArchiveSwitchScrollTimers()
   clearArchivePreviewMeasureTimers()
+  clearHomeFixedControlsMeasureTimers()
   unsubscribeBackgroundFetchSnapshot?.()
   unsubscribeBackgroundFetchSnapshot = null
 })
@@ -1472,6 +1578,7 @@ onUnmounted(() => {
 // 首次 onShow 发生在 onMounted 之后，会二次拉取（可接受：代价低、换取数据新鲜度）。
 onShow(() => {
   hideNativeTabBar()
+  scheduleHomeFixedControlsMeasure()
   const marker = getPendingHomeRefreshMarker()
   clientLog('info', 'home.show', {
     hasPendingRefreshMarker: !!marker,
@@ -1483,6 +1590,19 @@ onShow(() => {
   }
   void refreshHomeData({ force: !!marker })
 })
+
+watch(
+  () => [
+    currentShareCommunityId.value,
+    archiveGroups.value.length,
+    homeBannerItems.value.length,
+    noticeRows.value.length,
+    liveItems.value.length,
+    quoteText.value,
+    quoteCite.value,
+  ],
+  () => scheduleHomeFixedControlsMeasure(),
+)
 
 onPullDownRefresh(async () => {
   clientLog('info', 'home.pullDownRefresh', {})
@@ -1810,6 +1930,51 @@ onShareAppMessage(() => {
   line-height: 45rpx;
   font-weight: $hh-font-weight-medium;
   color: $hh-surface-1;
+}
+
+.home-fixed-controls {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 80;
+  box-sizing: border-box;
+  padding: calc(18rpx + env(safe-area-inset-top)) 0 12rpx;
+  background: rgba(250, 250, 249, 0.96);
+  box-shadow: 0 12rpx 28rpx rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(18rpx);
+  opacity: 0;
+  transform: translateY(-100%);
+  pointer-events: none;
+  transition: opacity 160ms ease, transform 180ms ease;
+  overflow: hidden;
+}
+
+.home-fixed-controls.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.home-fixed-controls .home-search {
+  margin: 0 32rpx 16rpx;
+}
+
+.home-fixed-controls .home-search-box {
+  min-height: 82rpx;
+  padding-left: 28rpx;
+  border-radius: $hh-radius-full;
+  box-shadow: 0 6rpx 18rpx rgba(15, 23, 42, 0.05);
+}
+
+.home-fixed-controls .home-search-input {
+  height: 82rpx;
+}
+
+.home-fixed-controls .home-search-action {
+  flex: 0 0 132rpx;
+  width: 132rpx;
+  height: 68rpx;
 }
 
 /* ═══ Admin notices ═══ */
@@ -2848,6 +3013,18 @@ onShareAppMessage(() => {
   overflow-anchor: none;
 }
 
+.section-tabs--fixed {
+  margin: 0;
+}
+
+.section-tabs--flow.is-shadowed-by-fixed {
+  height: 0;
+  margin: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 .section-tabs-inner {
   display: inline-flex;
   align-items: center;
@@ -2892,8 +3069,42 @@ onShareAppMessage(() => {
 
 .active-archive--default .arc-card {
   box-sizing: border-box;
-  min-height: inherit;
+  min-height: 0;
   margin-bottom: 0;
+}
+
+.active-archive--default .arc-card::before {
+  content: none;
+}
+
+.active-archive--default .arc-item {
+  min-height: 78rpx;
+  padding: 15rpx 24rpx;
+  align-items: center;
+  gap: 22rpx;
+}
+
+.active-archive--default .arc-k {
+  width: 50rpx;
+  padding-top: 0;
+  font-size: var(--hh-text-caption-base-size);
+  line-height: var(--hh-text-caption-base-line);
+}
+
+.active-archive--default .arc-title {
+  font-size: var(--hh-text-body-lg-size);
+  line-height: var(--hh-text-body-lg-line);
+  font-weight: $hh-font-weight-bold;
+}
+
+.active-archive--default .arc-mm {
+  margin-top: 2rpx;
+}
+
+.active-archive--default .arc-when {
+  padding-top: 0;
+  font-size: var(--hh-text-caption-lg-size);
+  line-height: var(--hh-text-caption-lg-line);
 }
 
 .guide-feed {
