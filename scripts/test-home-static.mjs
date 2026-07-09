@@ -6,6 +6,14 @@ const homePage = fs.readFileSync(
   path.join(root, 'miniprogram', 'src', 'pages', 'index', 'index.vue'),
   'utf8',
 )
+const pagesJson = JSON.parse(fs.readFileSync(
+  path.join(root, 'miniprogram', 'src', 'pages.json'),
+  'utf8',
+))
+const communitySwitchPage = fs.readFileSync(
+  path.join(root, 'miniprogram', 'src', 'pages', 'community-switch', 'index.vue'),
+  'utf8',
+)
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -42,6 +50,27 @@ assert(
 assert(
   homePage.includes('padding: 16rpx 0 112rpx'),
   'home page bottom padding should leave room for the custom tabbar without creating a large blank tail.',
+)
+
+assert(
+  pagesJson.pages.some((page) => page.path === 'pages/community-switch/index'),
+  'community switch should be registered as a standalone page.',
+)
+
+assert(
+  homePage.includes("uni.navigateTo({ url: '/pages/community-switch/index' })") &&
+    !homePage.includes('showSwitcher') &&
+    !homePage.includes('switcher-mask') &&
+    !homePage.includes('switcher-panel'),
+  'home community switch should navigate to the standalone page, not open an inline modal.',
+)
+
+assert(
+  communitySwitchPage.includes('communityStore.switchCommunity(id)') &&
+    communitySwitchPage.includes("uni.switchTab({ url: '/pages/index/index' })") &&
+    communitySwitchPage.includes('openOnboardingPreservingStack({ mode: \'discover\' })') &&
+    communitySwitchPage.includes('if (!userStore.isLoggedIn)'),
+  'community switch page should reuse the store switch action and return to home.',
 )
 
 console.log('[home-static] PASS')

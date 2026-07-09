@@ -313,21 +313,6 @@
     <view class="s1-foot-wrap">
       <text class="s1-foot">— {{ kind }} · 记忆在这里 —</text>
     </view>
-    <!-- Community switcher modal -->
-    <view v-if="showSwitcher" class="switcher-mask" @tap="showSwitcher = false">
-      <view class="switcher-panel" @tap.stop>
-        <text class="switcher-title">切换社区</text>
-        <view
-          v-for="c in communityStore.myCommunities"
-          :key="c._id"
-          class="switcher-item"
-          :class="{ active: c._id === communityStore.currentCommunityId }"
-          @tap="switchCommunity(c._id)"
-        >
-          <text>{{ c.name }}</text>
-        </view>
-      </view>
-    </view>
     <view v-if="showGuestIntro && guestIntroConfig" class="guest-intro-mask" @touchmove.stop.prevent>
       <view class="guest-intro-panel" @tap.stop>
         <text class="guest-intro-title">{{ guestIntroConfig.title }}</text>
@@ -392,7 +377,6 @@ import type { GuestIntroConfig } from '../../../../cloud/shared/guest-intro-conf
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
-const showSwitcher = ref(false)
 const showGuestIntro = ref(false)
 const guestIntroConfig = ref<GuestIntroConfig | null>(null)
 const postsBySection = ref<Record<string, any[]>>({})
@@ -477,9 +461,9 @@ const activeArchiveStyle = computed(() =>
 )
 
 function onMastheadTap() {
-  // 仅当用户有多个社区时才打开切换器；否则 tap 不做任何事（避免空切换器困扰）
+  // 仅当用户有多个社区时才进入切换页；否则 tap 不做任何事（避免空页面困扰）
   if (hasMultipleCommunities.value) {
-    showSwitcher.value = true
+    uni.navigateTo({ url: '/pages/community-switch/index' })
   }
 }
 
@@ -1347,17 +1331,6 @@ function applyLateBackgroundFetchSnapshot(snapshot: HomeSnapshot) {
   if (applyHomeSnapshot(snapshot, 'prefetch')) {
     writeHomeSnapshotCache(snapshot)
   }
-}
-
-async function switchCommunity(communityId: string) {
-  showSwitcher.value = false
-  communityStore.currentCommunityId = communityId
-  communityStore.currentSectionIndex = 0
-  communityStore.currentSections = []
-  postsBySection.value = {}
-  communityStore.saveToStorage()
-  communityStore.refreshMembershipStatus(communityId).catch(() => {})
-  await refreshHomeData({ force: true })
 }
 
 function getPendingHomeRefreshMarker() {
@@ -3068,8 +3041,7 @@ onShareAppMessage(() => {
 }
 
 .sub-switch,
-.arc-meta.hot,
-.switcher-item.active {
+.arc-meta.hot {
   color: var(--hh-color-brand-primary);
 }
 
@@ -3180,53 +3152,10 @@ onShareAppMessage(() => {
   color: var(--hh-color-brand-strong);
 }
 
-.switcher-panel,
 .guest-intro-panel {
   background: var(--hh-color-card);
   border-color: var(--hh-color-line);
 }
-
-/* ═══ Switcher ═══ */
-.switcher-mask {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0, 0, 0, 0.4);
-  z-index: 100;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-}
-.switcher-panel {
-  width: 100%;
-  background: $hh-surface-1;
-  border-radius: 28rpx 28rpx 0 0;
-  padding: 36rpx 32rpx 60rpx;
-  max-height: 70vh;
-  overflow-y: auto;
-  border-top: 1rpx solid $hh-ink-line;
-}
-.switcher-title {
-  display: block;
-  font-family: $hh-font-mono;
-  font-size: 20rpx;
-  letter-spacing: $hh-tracking-mono;
-  text-transform: uppercase;
-  color: $hh-ink-3;
-  margin-bottom: 20rpx;
-  text-align: center;
-}
-.switcher-item {
-  padding: 28rpx 24rpx;
-  font-family: $hh-font-serif;
-  font-size: 30rpx;
-  color: $hh-ink-1;
-  border-bottom: 1rpx solid $hh-ink-line-2;
-}
-.switcher-item.active {
-  color: $hh-accent;
-  font-weight: $hh-font-weight-bold;
-}
-.switcher-item:last-child { border-bottom: none; }
 
 .guest-intro-mask {
   position: fixed;
