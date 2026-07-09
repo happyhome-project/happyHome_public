@@ -39,7 +39,8 @@ const section = read('miniprogram', 'src', 'pages', 'section', 'index.vue')
 const widgetEditor = read('miniprogram', 'src', 'components', 'widgets', 'WidgetEditor.vue')
 const noteBlocksEditor = read('miniprogram', 'src', 'components', 'widgets', 'NoteBlocksEditor.vue')
 const figmaInventory = read('docs', 'figma-mini-0626-inventory.md')
-const olderLiveSectionHeading = '<text class="group-section-title">活动召集</text>'
+const expectedLiveSectionHeading = '<text class="group-section-title">活动召集</text>'
+const olderLiveSectionHeading = '<text class="group-section-title">我的组局</text>'
 
 for (const token of [
   '--hh-color-brand-primary',
@@ -294,7 +295,7 @@ assert(
     !home.includes('notice.sectionName || notice.label') &&
     home.includes("padStart(2, '0')") &&
     home.includes('`${month}-${day}`') &&
-    home.includes('<text class="group-section-title">我的组局</text>') &&
+    home.includes(expectedLiveSectionHeading) &&
     home.includes('class="group-card"') &&
     home.includes('class="section-tabs section-tabs--flow"') &&
     home.includes('class="home-search-box"') &&
@@ -356,9 +357,9 @@ assert(
 )
 
 assert(
-  home.includes('<text class="group-section-title">我的组局</text>') &&
+  home.includes(expectedLiveSectionHeading) &&
     !home.includes(olderLiveSectionHeading),
-  'home live section should use 0709_v2 wording 我的组局 instead of the older 活动召集 heading.'
+  'home live section should use 活动召集 instead of 我的组局.'
 )
 
 assert(
