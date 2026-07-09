@@ -26,6 +26,9 @@ function styleBlock(selector) {
 
 const footStyle = styleBlock('.s1-foot')
 const footWrapStyle = styleBlock('.s1-foot-wrap')
+const sectionTabActiveStyle = styleBlock('.section-tab.active')
+const groupCardStyle = styleBlock('.group-card')
+const groupRibbonStyle = styleBlock('.group-ribbon')
 
 assert(
   homePage.includes('class="s1-foot-wrap"'),
@@ -50,6 +53,35 @@ assert(
 assert(
   homePage.includes('padding: 16rpx 0 112rpx'),
   'home page bottom padding should leave room for the custom tabbar without creating a large blank tail.',
+)
+
+assert(
+  homePage.includes("function sectionIconGlyph(section: any, fallback = '·'): string") &&
+    homePage.includes('ic: sectionIconGlyph(section)'),
+  'home live cards should render the backend section icon instead of deriving or hardcoding an activity icon.',
+)
+
+assert(
+  sectionTabActiveStyle.includes('background: rgba(61, 173, 125, 0.16)'),
+  'home archive tabs should show the Figma selected-state background behind the active tab.',
+)
+
+assert(
+  groupRibbonStyle.includes('right: -30rpx') &&
+    groupRibbonStyle.includes('top: 20rpx'),
+  'home activity ribbon should be inset from the top-right corner instead of touching the card edge.',
+)
+
+assert(
+  groupCardStyle.includes('padding: 18rpx 104rpx 18rpx 18rpx'),
+  'home activity cards should reserve a right-side safe area so long titles do not run under the ribbon.',
+)
+
+assert(
+  homePage.includes("padStart(2, '0')") &&
+    homePage.includes('`${month}-${day}`') &&
+    !homePage.includes('${date.getMonth() + 1}/${date.getDate()}'),
+  'home short post dates should use zero-padded hyphen format such as 06-30.',
 )
 
 assert(
