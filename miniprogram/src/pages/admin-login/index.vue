@@ -48,7 +48,7 @@
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { useUserStore } from '../../store/user'
-import { navigateBackOrHome } from '../../utils/hierarchy-nav'
+import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
 
 const userStore = useUserStore()
 const ticket = ref('')
@@ -57,6 +57,7 @@ const submitting = ref(false)
 const errorMsg = ref('')
 
 onLoad((options: any) => {
+  if (ensureHierarchyStack('/pages/admin-login/index', options || {}, '/pages/profile/index')) return
   // 来源 1：无限带参小程序码 → wechat 注入 options.scene
   // 来源 2：开发期 / 调试 → ?ticket=xxx 直传
   ticket.value = decodeURIComponent(options?.scene || options?.ticket || '')

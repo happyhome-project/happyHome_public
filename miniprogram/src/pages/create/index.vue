@@ -48,12 +48,10 @@
       </view>
 
       <view v-else class="form" :class="{ 'form--figma': isFigmaCreateMode }">
-        <view class="create-form-nav">
+        <view v-if="!isActivityInviteMode" class="create-form-nav">
           <button class="create-back" aria-label="返回" @tap="handleBackToSectionPicker">
             <text>‹</text>
           </button>
-          <text class="create-nav-title">{{ selectedSection.name || '发布' }}</text>
-          <view class="create-nav-spacer"></view>
         </view>
 
         <view v-if="!isFigmaCreateMode" class="form-header">
@@ -83,7 +81,7 @@
                   embedded
                   hide-label
                   guide-role="cover"
-                  :allow-rich-note-images="!isGuideCreateMode"
+                  :allow-rich-note-images="allowImagesForWidget(block.imageWidget)"
                   v-model="formData[block.imageWidget.widgetId]"
                 />
                 <WidgetEditor
@@ -94,7 +92,7 @@
                   hide-label
                   guide-role="title"
                   placeholder="添加主题"
-                  :allow-rich-note-images="!isGuideCreateMode"
+                  :allow-rich-note-images="allowImagesForWidget(block.titleWidget)"
                   v-model="formData[block.titleWidget.widgetId]"
                 />
                 <WidgetEditor
@@ -105,7 +103,7 @@
                   hide-label
                   guide-role="body"
                   placeholder="添加正文内容"
-                  :allow-rich-note-images="!isGuideCreateMode"
+                  :allow-rich-note-images="allowImagesForWidget(block.bodyWidget)"
                   v-model="formData[block.bodyWidget.widgetId]"
                 />
                 <view class="figma-ai-write">
@@ -121,7 +119,7 @@
                   :widget="widget"
                   variant="figma"
                   embedded
-                  :allow-rich-note-images="!isGuideCreateMode"
+                  :allow-rich-note-images="allowImagesForWidget(widget)"
                   v-model="formData[widget.widgetId]"
                 />
               </view>
@@ -130,7 +128,7 @@
                 v-else
                 :widget="block.widget"
                 variant="figma"
-                :allow-rich-note-images="!isGuideCreateMode"
+                :allow-rich-note-images="allowImagesForWidget(block.widget)"
                 v-model="formData[block.widget.widgetId]"
               />
             </template>
@@ -173,7 +171,7 @@ import {
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
-import { normalizeRouteUrl, openHierarchyParent } from '../../utils/hierarchy-nav'
+import { ensureHierarchyStack, normalizeRouteUrl, openHierarchyParent } from '../../utils/hierarchy-nav'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -193,6 +191,7 @@ const ACTIVITY_INVITE_INTENT_TTL_MS = 30 * 60 * 1000
 const ACTIVITY_INVITE_WIDGET_IDS = {
   title: 'activity_invite_title',
   location: 'activity_invite_location',
+  note: 'activity_invite_note',
 } as const
 const GUIDE_CREATE_NAME_HINTS = ['亲子出游', '周末遛娃', '村游攻略', '路线攻略', '出游攻略']
 const CREATE_SECTION_EVENT = 'happyhome:create-section-intent'
@@ -226,6 +225,12 @@ const isGuideCreateMode = computed(() => {
   const name = String(section.name || '').replace(/\s/g, '')
   return GUIDE_CREATE_NAME_HINTS.some((hint) => name.includes(hint))
 })
+
+function allowImagesForWidget(widget: any) {
+  if (isGuideCreateMode.value) return false
+  if (isActivityInviteMode.value && String(widget?.widgetId || '') === ACTIVITY_INVITE_WIDGET_IDS.note) return false
+  return true
+}
 
 const createFormBlocks = computed(() => {
   const blocks: any[] = []
@@ -286,6 +291,7 @@ const createFormBlocks = computed(() => {
 })
 
 onLoad(async (options: any) => {
+  if (ensureHierarchyStack('/pages/create/index', options || {}, options?.returnTo)) return
   hideNativeTabBar()
   await ensureSectionsLoaded()
   await checkMembership({ silent: false })
@@ -766,6 +772,7 @@ async function handleSubmit() {
   padding: 0;
   background: #f4f5f9;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 .title {
@@ -806,20 +813,19 @@ async function handleSubmit() {
 }
 
 .create-form-nav {
-  height: 88rpx;
-  margin: -24rpx -32rpx 24rpx;
+  height: 64rpx;
+  margin: -12rpx -32rpx 16rpx;
   padding: 0 28rpx;
-  display: grid;
-  grid-template-columns: 64rpx 1fr 64rpx;
+  display: flex;
   align-items: center;
-  background: var(--hh-color-card);
-  border-bottom: 1rpx solid var(--hh-color-line-soft);
+  background: transparent;
   box-sizing: border-box;
 }
 
 .create-back {
   width: 64rpx;
   height: 64rpx;
+  margin: 0;
   padding: 0;
   border: 0;
   background: transparent;
@@ -827,27 +833,13 @@ async function handleSubmit() {
   font-size: 52rpx;
   line-height: 64rpx;
   text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
 }
 
 .create-back::after {
   border: 0;
-}
-
-.create-nav-title {
-  min-width: 0;
-  text-align: center;
-  color: var(--hh-color-text-primary);
-  font-size: var(--hh-text-heading-sm-size);
-  line-height: var(--hh-text-heading-sm-line);
-  font-weight: $hh-font-weight-bold;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.create-nav-spacer {
-  width: 64rpx;
-  height: 64rpx;
 }
 
 .invite-mode-tag {
@@ -874,14 +866,17 @@ async function handleSubmit() {
 
 .form--figma {
   margin: 0;
-  padding: 24rpx 32rpx calc(144rpx + env(safe-area-inset-bottom));
+  padding: 24rpx 32rpx calc(240rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 .figma-form-list {
   display: grid;
   gap: 24rpx;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .figma-guide-main-card {
@@ -913,6 +908,8 @@ async function handleSubmit() {
   overflow: hidden;
   border-radius: 24rpx;
   background: #fff;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .section-tag {
@@ -943,10 +940,13 @@ async function handleSubmit() {
 }
 
 .attendance-hint {
+  width: 100%;
+  max-width: 100%;
   margin-bottom: $hh-space-lg;
   padding: $hh-space-md;
   border-radius: var(--hh-radius-card);
   background: var(--hh-color-brand-soft);
+  box-sizing: border-box;
 }
 
 .attendance-label {

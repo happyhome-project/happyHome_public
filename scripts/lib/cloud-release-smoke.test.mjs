@@ -6,7 +6,10 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 import {
+  buildLogsSearchArgs,
   buildTcbCommand,
+  DEFAULT_FUNCTIONS,
+  REQUIRED_SMOKE_LABELS,
   defaultRunner,
   parseArgs,
   parseFirstJson,
@@ -27,6 +30,12 @@ function commandPart(args, offset) {
   return args[tcbIndex + offset]
 }
 
+function logSearchFunction(args) {
+  const query = args[args.indexOf('--query') + 1] || ''
+  const match = query.match(/function_name:"([^"]+)"/)
+  return match?.[1] || ''
+}
+
 function createMockRunner(options = {}) {
   const calls = []
   const runner = async (command, args, runnerOptions = {}) => {
@@ -35,12 +44,25 @@ function createMockRunner(options = {}) {
     const action = commandPart(args, 2)
     const fn = commandPart(args, 3)
 
+    if (kind === 'logs' && action === 'search') {
+      const searchFn = logSearchFunction(args)
+      const sequence = options.logSearchResponses?.[searchFn] || options.logResponses?.[searchFn]
+      if (sequence?.length) return sequence.shift()
+      if (options.logSearchFailures?.includes(searchFn) || options.logFailures?.includes(searchFn)) {
+        return { status: 1, stdout: JSON.stringify({ error: { code: 'InternalError', message: 'logs search failed' } }), stderr: '' }
+      }
+      const logText = options.missingPostRunId && searchFn === 'post'
+        ? 'recent log without smoke id'
+        : `recent log for ${searchFn} ${options.runId || 'unit-run'}`
+      return { status: 0, stdout: JSON.stringify({ records: [{ function_name: searchFn, log: logText }] }), stderr: '' }
+    }
+
     if (kind !== 'fn') return { status: 2, stdout: '', stderr: 'unexpected command' }
 
     if (action === 'log') {
-      const sequence = options.logResponses?.[fn]
+      const sequence = options.legacyLogResponses?.[fn]
       if (sequence?.length) return sequence.shift()
-      if (options.logFailures?.includes(fn)) {
+      if (options.legacyLogFailures?.includes(fn) || options.logFailures?.includes(fn)) {
         return { status: 1, stdout: JSON.stringify({ error: { code: 'InternalError', message: 'log failed' } }), stderr: '' }
       }
       const logText = options.missingPostRunId && fn === 'post'
@@ -69,6 +91,7 @@ function createMockRunner(options = {}) {
         : { status: 1, stdout: JSON.stringify({ errorMessage: 'Unauthorized' }), stderr: '' }
     }
     if (fn === 'http-gateway') return { status: 0, stdout: JSON.stringify({ statusCode: 200, body: '' }), stderr: '' }
+    if (fn === 'home-prefetch') return { status: 0, stdout: JSON.stringify({ statusCode: 200, body: '' }), stderr: '' }
 
     if (fn === 'admin') {
       if (payload.action === 'community.createAdmin') return { status: 0, stdout: JSON.stringify({ communityId: 'c1' }), stderr: '' }
@@ -105,6 +128,7 @@ test('parseArgs supports env, only, log controls, no-fixture, and evidence-dir',
     '--log-limit=7',
     '--log-wait-ms=0',
     '--command-timeout-ms=1234',
+    '--concurrency=4',
     '--no-fixture',
     '--evidence-dir', 'evidence-x',
     '--run-id', 'run-x',
@@ -115,10 +139,38 @@ test('parseArgs supports env, only, log controls, no-fixture, and evidence-dir',
   assert.equal(args.logLimit, 7)
   assert.equal(args.logWaitMs, 0)
   assert.equal(args.commandTimeoutMs, 1234)
+  assert.equal(args.concurrency, 4)
   assert.equal(args.noFixture, true)
   assert.equal(args.workerToken, 'unit-worker-token')
   assert.equal(args.evidenceDir, 'evidence-x')
   assert.equal(args.runId, 'run-x')
+})
+
+test('release smoke requires home-prefetch invoke evidence', async () => {
+  assert(DEFAULT_FUNCTIONS.includes('home-prefetch'))
+  assert(REQUIRED_SMOKE_LABELS.includes('HH_CLOUD_INVOKE_SMOKE_HOME_PREFETCH'))
+
+  const evidenceDir = await tempEvidenceDir()
+  try {
+    const summary = await runCloudReleaseSmoke({
+      envId: 'env-x',
+      only: ['home-prefetch'],
+      logLimit: 3,
+      logWaitMs: 0,
+      noFixture: true,
+      evidenceDir,
+      runId: 'unit-run',
+    }, createMockRunner({
+      invokeResponses: {
+        'home-prefetch': [{ status: 1, stdout: '', stderr: 'prefetch failed' }],
+      },
+    }))
+
+    assert.equal(summary.status, 'failed')
+    assert(summary.missingLabels.includes('HH_CLOUD_INVOKE_SMOKE_HOME_PREFETCH'))
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true })
+  }
 })
 
 test('buildTcbCommand and redaction keep command evidence safe', () => {
@@ -130,6 +182,18 @@ test('buildTcbCommand and redaction keep command evidence safe', () => {
   assert.match(redacted, /Bearer \[REDACTED\]/)
   assert.match(redacted, /--api-key \[REDACTED\]/)
   assert.doesNotMatch(redacted, /secret-token|abc123/)
+})
+
+test('buildLogsSearchArgs uses CLS function and runId filters', () => {
+  const args = buildLogsSearchArgs('post', { contains: 'unit-run', errorOnly: true }, 7)
+  assert.equal(args[0], 'logs')
+  assert.equal(args[1], 'search')
+  assert.equal(args[args.indexOf('--limit') + 1], '7')
+  assert.equal(args[args.indexOf('--sort') + 1], 'desc')
+  const query = args[args.indexOf('--query') + 1]
+  assert.match(query, /function_name:"post"/)
+  assert.match(query, /log:"unit-run"/)
+  assert.match(query, /status_code>200/)
 })
 
 test('parseFirstJson skips CLI banners', () => {
@@ -175,6 +239,43 @@ test('cloud release smoke passes with generated invoke, log, fixture, and cleanu
   }
 })
 
+test('cloud release smoke runs independent basic invokes with bounded concurrency', async () => {
+  const evidenceDir = await tempEvidenceDir()
+  try {
+    let activeInvokes = 0
+    let maxActiveInvokes = 0
+    const baseRunner = createMockRunner({ runId: 'unit-run' })
+    const runner = async (command, args, options) => {
+      if (commandPart(args, 2) === 'invoke') {
+        activeInvokes += 1
+        maxActiveInvokes = Math.max(maxActiveInvokes, activeInvokes)
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        const result = await baseRunner(command, args, options)
+        activeInvokes -= 1
+        return result
+      }
+      return await baseRunner(command, args, options)
+    }
+
+    const summary = await runCloudReleaseSmoke({
+      envId: 'env-x',
+      only: ['community', 'member', 'post'],
+      logLimit: 3,
+      logWaitMs: 0,
+      commandTimeoutMs: 1234,
+      concurrency: 3,
+      noFixture: true,
+      evidenceDir,
+      runId: 'unit-run',
+    }, runner)
+
+    assert.equal(summary.status, 'passed')
+    assert.equal(maxActiveInvokes, 3)
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true })
+  }
+})
+
 test('post smoke fails when neither logs nor inline invoke output include the runId', async () => {
   const evidenceDir = await tempEvidenceDir()
   try {
@@ -212,13 +313,14 @@ test('post log capture can use inline invoke output when log listing is noisy', 
     assert.equal(summary.status, 'passed')
     assert(summary.labels.includes('HH_CLOUD_LOG_CAPTURE_POST'))
     const stored = JSON.parse(await readFile(join(evidenceDir, 'log-post.json'), 'utf8'))
+    assert.equal(stored.method, 'inline-invoke-output')
     assert.equal(stored.inlineLogFallbackStage, 'invoke-post-clientLog')
   } finally {
     await rm(evidenceDir, { recursive: true, force: true })
   }
 })
 
-test('required post log capture retries with a smaller limit after transient CLS timeout', async () => {
+test('required post log capture uses logs search and retries with a smaller limit after transient CLS timeout', async () => {
   const evidenceDir = await tempEvidenceDir()
   try {
     const runId = 'unit-run'
@@ -252,14 +354,48 @@ test('required post log capture retries with a smaller limit after transient CLS
 
     assert.equal(summary.status, 'passed')
     assert(summary.labels.includes('HH_CLOUD_LOG_CAPTURE_POST'))
-    const logCalls = runner.calls.filter((call) => commandPart(call.args, 2) === 'log' && commandPart(call.args, 3) === 'post')
+    const logCalls = runner.calls.filter((call) => commandPart(call.args, 1) === 'logs' && commandPart(call.args, 2) === 'search' && logSearchFunction(call.args) === 'post')
     assert.equal(logCalls.length, 2)
     assert.deepEqual(logCalls.map((call) => call.args[call.args.indexOf('--limit') + 1]), ['30', '5'])
+    assert(logCalls.every((call) => call.args.includes('--json')))
 
     const finalRecord = JSON.parse(await readFile(join(evidenceDir, 'log-post.json'), 'utf8'))
     assert.equal(finalRecord.ok, true)
+    assert.equal(finalRecord.method, 'logs-search')
     assert.equal(finalRecord.attempts.length, 2)
+    assert.equal(finalRecord.searchAttempts.length, 2)
+    assert.equal(finalRecord.legacyAttempts.length, 0)
     assert.match(finalRecord.attempts[0].parsed.error.message, /context deadline exceeded/)
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true })
+  }
+})
+
+test('required post log capture falls back to legacy fn log when logs search is unavailable', async () => {
+  const evidenceDir = await tempEvidenceDir()
+  try {
+    const runId = 'unit-run'
+    const runner = createMockRunner({
+      runId,
+      logSearchFailures: ['post'],
+    })
+    const summary = await runCloudReleaseSmoke({
+      envId: 'env-x',
+      only: ['post'],
+      logLimit: 3,
+      logWaitMs: 0,
+      noFixture: true,
+      evidenceDir,
+      runId,
+    }, runner)
+
+    assert.equal(summary.status, 'passed')
+    assert(summary.labels.includes('HH_CLOUD_LOG_CAPTURE_POST'))
+    const stored = JSON.parse(await readFile(join(evidenceDir, 'log-post.json'), 'utf8'))
+    assert.equal(stored.method, 'fn-log')
+    assert.equal(stored.searchAttempts.length, 2)
+    assert.equal(stored.legacyAttempts.length, 1)
+    assert(runner.calls.some((call) => commandPart(call.args, 1) === 'fn' && commandPart(call.args, 2) === 'log'))
   } finally {
     await rm(evidenceDir, { recursive: true, force: true })
   }
@@ -343,7 +479,7 @@ test('optional non-post log capture uses a small limit and command timeout', asy
     }, runner)
 
     assert.equal(summary.status, 'passed')
-    const logCall = runner.calls.find((call) => commandPart(call.args, 2) === 'log' && commandPart(call.args, 3) === 'admin')
+    const logCall = runner.calls.find((call) => commandPart(call.args, 1) === 'logs' && commandPart(call.args, 2) === 'search' && logSearchFunction(call.args) === 'admin')
     assert.equal(logCall.args[logCall.args.indexOf('--limit') + 1], '5')
     assert.equal(logCall.options.timeoutMs, 6789)
   } finally {
@@ -400,6 +536,38 @@ test('required invoke retries transient CloudBase network failures', async () =>
 
     assert.equal(summary.status, 'passed')
     assert(summary.labels.includes('HH_CLOUD_INVOKE_SMOKE_POST_RAG_WORKER'))
+    const invokeCalls = runner.calls.filter((call) => commandPart(call.args, 2) === 'invoke')
+    assert.equal(invokeCalls.length, 2)
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true })
+  }
+})
+
+test('required invoke retries transient command timeouts', async () => {
+  const evidenceDir = await tempEvidenceDir()
+  try {
+    const runner = createMockRunner({
+      runId: 'unit-run',
+      invokeResponses: {
+        'post-video-rag-worker': [
+          { status: 1, stdout: '', stderr: '', error: 'command timed out after 60000ms' },
+        ],
+      },
+    })
+    const summary = await runCloudReleaseSmoke({
+      envId: 'env-x',
+      only: ['post-video-rag-worker'],
+      logLimit: 3,
+      logWaitMs: 0,
+      commandTimeoutMs: 1234,
+      noFixture: true,
+      workerToken: 'unit-worker-token',
+      evidenceDir,
+      runId: 'unit-run',
+    }, runner)
+
+    assert.equal(summary.status, 'passed')
+    assert(summary.labels.includes('HH_CLOUD_INVOKE_SMOKE_POST_VIDEO_RAG_WORKER'))
     const invokeCalls = runner.calls.filter((call) => commandPart(call.args, 2) === 'invoke')
     assert.equal(invokeCalls.length, 2)
   } finally {

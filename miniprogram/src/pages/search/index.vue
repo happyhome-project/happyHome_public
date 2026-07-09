@@ -79,8 +79,8 @@
         <text class="answer-text">{{ answer }}</text>
       </view>
       <view v-else-if="mode === 'fallback'" class="answer-card muted">
-        <text class="answer-label">普通搜索</text>
-        <text class="answer-text">智能检索暂不可用，当前显示基础搜索结果。</text>
+        <text class="answer-label">智能检索暂不可用</text>
+        <text class="answer-text">智能检索暂不可用，请稍后重试。</text>
       </view>
 
       <view v-if="citations.length" class="citation-list">
@@ -109,7 +109,7 @@
       <text class="empty-desc">{{ mode === 'no_answer' ? '换个关键词，或试试搜索正文/视频内容' : '换个关键词试试' }}</text>
     </view>
 
-    <view v-if="items.length" class="result-list">
+    <view v-if="items.length && mode !== 'fallback'" class="result-list">
       <view
         v-for="item in items"
         :key="item.postId"
@@ -170,8 +170,7 @@ import { useUserStore } from '../../store/user'
 import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
-import { getGuideNoteCard, getPostHomeTitle } from '../../utils/widget'
-import { navigateBackOrHome } from '../../utils/hierarchy-nav'
+import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
 
 interface SearchField {
   fieldLabel: string
@@ -250,6 +249,7 @@ const compactQueryChipStyle = computed(() => {
 })
 
 onLoad((options: any) => {
+  if (ensureHierarchyStack('/pages/search/index', options || {})) return
   communityId.value = decodeParam(options?.communityId) || communityStore.currentCommunityId || ''
   query.value = decodeParam(options?.q || options?.query)
   clientLog('info', 'search.onLoad', {
@@ -357,28 +357,18 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
       asGuest,
     })
     if (requestSeq !== searchRequestSeq) return
-    let nextItems = result.items || []
-    let usedBootstrapFallback = false
-    if (options.reset && nextItems.length === 0 && result.mode === 'no_answer') {
-      const fallbackItems = await searchVisibleBootstrapPosts(normalizedQuery, asGuest)
-      if (requestSeq !== searchRequestSeq) return
-      if (fallbackItems.length > 0) {
-        nextItems = fallbackItems
-        usedBootstrapFallback = true
-      }
-    }
+    const nextItems = result.items || []
     items.value = options.reset ? nextItems : [...items.value, ...nextItems]
-    answer.value = usedBootstrapFallback ? '' : String(result.answer || '')
-    citations.value = usedBootstrapFallback ? [] : (result.citations || [])
-    mode.value = usedBootstrapFallback ? '' : (result.mode || '')
-    total.value = usedBootstrapFallback ? nextItems.length : Number(result.total || items.value.length)
+    answer.value = String(result.answer || '')
+    citations.value = result.citations || []
+    mode.value = result.mode || ''
+    total.value = Number(result.total || items.value.length)
     searched.value = true
     void resolveResultCovers(items.value)
     clientLog('info', 'search.load.success', {
       communityId: communityId.value,
       total: total.value,
       returned: nextItems.length,
-      usedBootstrapFallback,
     })
   } catch (error: any) {
     if (requestSeq !== searchRequestSeq) return
@@ -472,84 +462,6 @@ function stableHash(value: string): number {
     hash = Math.imul(hash, 16777619)
   }
   return hash >>> 0
-}
-
-async function searchVisibleBootstrapPosts(normalizedQuery: string, asGuest: boolean): Promise<SearchItem[]> {
-  const queryKey = compactQuery(normalizedQuery).toLowerCase()
-  if (!queryKey) return []
-  try {
-    const snapshot = await postApi.bootstrap(communityId.value, 20, asGuest)
-    const sections = (snapshot?.sections || []) as any[]
-    const sectionsById = new Map(sections.map((section) => [String(section._id || ''), section]))
-    const postsBySection = (snapshot?.postsBySection || {}) as Record<string, any[]>
-    const matches: SearchItem[] = []
-
-    for (const [sectionId, posts] of Object.entries(postsBySection)) {
-      const section = sectionsById.get(sectionId)
-      if (!section || !Array.isArray(posts)) continue
-      for (const post of posts) {
-        const title = resolveFallbackTitle(post, section)
-        const contentText = stringifyContentValue(post?.content)
-        const haystack = compactQuery([section.name, title, contentText].join(' ')).toLowerCase()
-        if (!haystack.includes(queryKey)) continue
-        matches.push({
-          postId: String(post._id || ''),
-          communityId: String(post.communityId || communityId.value),
-          sectionId,
-          sectionName: String(section.name || '帖子'),
-          title,
-          coverImage: resolveFallbackCover(post, section),
-          authorName: String(post.authorNickname || post.authorName || '').trim(),
-          authorAvatarUrl: String(post.authorAvatarUrl || post.avatarUrl || '').trim(),
-          score: 0,
-          matchedFields: [{
-            fieldLabel: String(section.name || '内容'),
-            fieldType: 'bootstrap_fallback',
-            preview: buildFallbackPreview(contentText, title),
-          }],
-          createdAt: String(post.createdAt || ''),
-          updatedAt: String(post.updatedAt || post.createdAt || ''),
-        })
-      }
-    }
-    return matches.slice(0, limit)
-  } catch (error) {
-    clientLog('warn', 'search.bootstrapFallback.fail', { communityId: communityId.value, error })
-    return []
-  }
-}
-
-function resolveFallbackTitle(post: any, section: any): string {
-  if (section?.displayTemplate === 'guide_note') {
-    return getGuideNoteCard(post, section).title
-  }
-  return getPostHomeTitle(post, section) || String(section?.name || '无标题')
-}
-
-function resolveFallbackCover(post: any, section: any): string {
-  const guideCover = getGuideNoteCard(post, section).coverImage
-  if (guideCover) return guideCover
-  const imageWidget = (section?.widgets || []).find((widget: any) => widget?.type === 'image_group')
-  const value = imageWidget ? post?.content?.[imageWidget.widgetId] : null
-  if (Array.isArray(value)) return String(value[0] || '').trim()
-  return ''
-}
-
-function stringifyContentValue(value: unknown): string {
-  if (value === undefined || value === null) return ''
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value)
-  if (Array.isArray(value)) return value.map((item) => stringifyContentValue(item)).join(' ')
-  if (typeof value === 'object') {
-    const record = value as Record<string, unknown>
-    if (typeof record.text === 'string') return record.text
-    return Object.values(record).map((item) => stringifyContentValue(item)).join(' ')
-  }
-  return ''
-}
-
-function buildFallbackPreview(contentText: string, title: string): string {
-  const text = String(contentText || '').replace(String(title || ''), '').replace(/\s+/g, ' ').trim()
-  return text.slice(0, 80)
 }
 
 async function resolveResultCovers(nextItems: SearchItem[]) {

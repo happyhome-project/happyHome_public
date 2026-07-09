@@ -45,11 +45,12 @@
 
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
 import { communityApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import LoginGuard from '../../components/LoginGuard.vue'
-import { navigateBackOrHome } from '../../utils/hierarchy-nav'
+import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
 
 const userStore = useUserStore()
 
@@ -59,6 +60,10 @@ const form = reactive({
   name: '',
   description: '',
   joinType: 'open' as 'open' | 'approval',
+})
+
+onLoad((options: any) => {
+  if (ensureHierarchyStack('/pages/createCommunity/index', options || {}, '/pages/onboarding/index?mode=discover')) return
 })
 
 async function handleSubmit() {
