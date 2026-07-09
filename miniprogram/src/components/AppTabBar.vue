@@ -101,7 +101,7 @@ function go(key: AppTabKey) {
 function openPublishSheet() {
   hideNativeTabBar()
   if (publishOptions.value.length === 0) {
-    uni.switchTab({ url: '/pages/create/index' })
+    openCreatePage()
     return
   }
   showPublishSheet.value = true
@@ -114,23 +114,37 @@ function closePublishSheet() {
 function handlePublishOption(section: any) {
   const sectionId = String(section?._id || '')
   if (!sectionId) return
+  const returnTo = props.current === 'create' ? '' : (getTabByKey(props.current)?.path || '')
   try {
     uni.setStorageSync(CREATE_SECTION_INTENT_KEY, {
       sectionId,
       createdAt: Date.now(),
+      returnTo,
+      source: 'tabbar.publish',
     })
   } catch (_error) {}
   closePublishSheet()
-  ;(uni as any).$emit?.('happyhome:create-section-intent', { sectionId })
+  ;(uni as any).$emit?.('happyhome:create-section-intent', { sectionId, returnTo })
   if (props.current !== 'create') {
-    uni.switchTab({ url: '/pages/create/index' })
+    openCreatePage(returnTo)
   }
+}
+
+function currentReturnTo() {
+  if (props.current === 'profile') return '/pages/profile/index'
+  if (props.current === 'home') return '/pages/index/index'
+  return ''
+}
+
+function openCreatePage(returnTo = currentReturnTo()) {
+  const query = returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ''
+  uni.navigateTo({ url: `/pages/create/index${query}` })
 }
 
 function isPublishableSection(section: any) {
   const name = String(section?.name || '').trim()
   const systemKey = String(section?.systemKey || '')
-  if (systemKey === 'activity_invite' || name === '出游邀约' || name === '我的组局') return false
+  if (systemKey === 'activity_invite' || name === '出游邀约' || name === '活动召集') return false
 
   const widgets = Array.isArray(section?.widgets) ? section.widgets : []
   if (widgets.length === 0) return false

@@ -5,6 +5,7 @@ import {
   formatReleaseRunStatus,
   loadLatestReleaseRun,
   loadReleaseRun,
+  summarizeReleaseRun,
 } from './lib/release-run-ledger.mjs'
 
 function getFlagValue(name) {
@@ -20,7 +21,11 @@ try {
   const state = runId
     ? await loadReleaseRun(process.cwd(), runId)
     : await loadLatestReleaseRun(process.cwd())
-  console.log(formatReleaseRunStatus(state))
+  if (process.argv.includes('--json')) {
+    console.log(JSON.stringify(summarizeReleaseRun(state), null, 2))
+  } else {
+    console.log(formatReleaseRunStatus(state))
+  }
 } catch (error) {
   console.error(`[release-status] ${error?.message || error}`)
   process.exitCode = 1

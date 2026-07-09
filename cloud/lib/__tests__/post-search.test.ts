@@ -174,6 +174,7 @@ test('buildPostSearchChunks creates RAG evidence chunks with stable ids and fiel
     sectionId: 'section-course',
     fieldLabel: '视频',
     fieldType: 'video_group',
+    visibility: 'public',
     chunkIndex: expect.any(Number),
     terms: expect.arrayContaining(['鲲鹏']),
     sparseVector: expect.arrayContaining([
@@ -181,6 +182,25 @@ test('buildPostSearchChunks creates RAG evidence chunks with stable ids and fiel
     ]),
   })
   expect(new Set(chunks.map((chunk) => chunk._id)).size).toBe(chunks.length)
+})
+
+test('buildPostSearchChunks preserves member-only widget visibility', () => {
+  const memberSection = {
+    ...section,
+    widgets: section.widgets.map((widget) => (
+      widget.widgetId === 'body' ? { ...widget, visibility: 'member' as const } : widget
+    )),
+  }
+  const document = buildPostSearchDocument(post, memberSection, '2026-06-24T09:00:00.000Z')
+  const chunks = buildPostSearchChunks(document)
+
+  expect(chunks.find((chunk) => chunk.fieldKey === 'title')).toMatchObject({
+    visibility: 'public',
+  })
+  expect(chunks.find((chunk) => chunk.fieldKey === 'body')).toMatchObject({
+    visibility: 'member',
+    text: expect.stringContaining('一粥一饭'),
+  })
 })
 
 test('buildSparseVectorTerms produces bounded weighted terms for local semantic fallback', () => {

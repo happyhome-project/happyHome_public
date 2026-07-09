@@ -9,7 +9,7 @@
   "pages": [
     {
       "path": "pages/index/index",
-      "style": { "navigationBarTitleText": "社群助手", "enablePullDownRefresh": true }
+      "style": { "navigationBarTitleText": "社群助手", "navigationStyle": "custom", "enablePullDownRefresh": true }
     },
     {
       "path": "pages/search/index",
@@ -59,12 +59,6 @@
         "text": "首页",
         "iconPath": "static/tab-home.png",
         "selectedIconPath": "static/tab-home-active.png"
-      },
-      {
-        "pagePath": "pages/create/index",
-        "text": "发帖",
-        "iconPath": "static/tab-add.png",
-        "selectedIconPath": "static/tab-add-active.png"
       },
       {
         "pagePath": "pages/profile/index",

@@ -365,7 +365,6 @@ import {
   DEFAULT_COMMUNITY_SHARE_IMAGE,
   buildCommunitySharePath,
   buildCommunityShareTitle,
-  buildCommunityOnboardingPath,
   consumePendingShareCommunity,
 } from '../../utils/community-share'
 
@@ -664,11 +663,7 @@ function handleInviteTap() {
 function restorePendingShareCommunity() {
   const communityId = consumePendingShareCommunity()
   if (!communityId) return false
-  const url = buildCommunityOnboardingPath(communityId)
-  uni.navigateTo({
-    url,
-    fail: () => uni.reLaunch({ url }),
-  })
+  openOnboardingPreservingStack({ mode: 'discover', communityId })
   return true
 }
 

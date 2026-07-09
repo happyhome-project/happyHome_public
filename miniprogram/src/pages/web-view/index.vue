@@ -8,10 +8,12 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import { ensureHierarchyStack } from '../../utils/hierarchy-nav'
 
 const url = ref('')
 
 onLoad((options: any) => {
+  if (ensureHierarchyStack('/pages/web-view/index', options || {})) return
   const raw = String(options?.url || '')
   if (!raw) return
   try { url.value = decodeURIComponent(raw) } catch { url.value = raw }

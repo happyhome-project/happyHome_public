@@ -32,7 +32,10 @@ jest.mock('../../../lib/post-search', () => ({
 }))
 
 jest.mock('../../../lib/post-rag', () => ({
+  backfillPostRagJobsForSectionBatch: jest.fn(),
   enqueuePostRagJob: jest.fn(),
+  getPostRagIndexHealthForCommunity: jest.fn(),
+  reconcilePostRagJobsForCommunityBatch: jest.fn(),
 }))
 
 jest.mock('uuid', () => ({
@@ -738,12 +741,16 @@ test('section.updateMeta: 展示模板只接受默认和图文攻略', async () 
   expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledTimes(2)
 })
 
-test('section.updateStatus: refreshes search index metadata after status changes', async () => {
+test('section.updateStatus: refreshes search and queues RAG jobs for existing posts', async () => {
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-live',
     type: 'realtime',
     status: 'active',
   })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([
+    { _id: 'post-a', communityId: 'community-a', sectionId: 'section-live', status: 'active' },
+    { _id: 'post-b', communityId: 'community-b', sectionId: 'section-live', status: 'active' },
+  ])
   ;(db.updateById as jest.Mock).mockResolvedValue({})
 
   const result: any = await main({
@@ -754,7 +761,22 @@ test('section.updateStatus: refreshes search index metadata after status changes
 
   expect(result.success).toBe(true)
   expect(db.updateById).toHaveBeenCalledWith('sections', 'section-live', { status: 'dormant' })
-  expect(postRag.enqueuePostRagJob).not.toHaveBeenCalled()
+  expect(db.query).toHaveBeenCalledWith('posts', { sectionId: 'section-live', status: 'active' })
+  expect(postRag.enqueuePostRagJob).toHaveBeenCalledTimes(2)
+  expect(postRag.enqueuePostRagJob).toHaveBeenNthCalledWith(1, {
+    postId: 'post-a',
+    communityId: 'community-a',
+    sectionId: 'section-live',
+    action: 'upsert',
+    reason: 'section.updateStatus',
+  })
+  expect(postRag.enqueuePostRagJob).toHaveBeenNthCalledWith(2, {
+    postId: 'post-b',
+    communityId: 'community-b',
+    sectionId: 'section-live',
+    action: 'upsert',
+    reason: 'section.updateStatus',
+  })
   expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledWith('section-live')
 })
 
@@ -1295,5 +1317,84 @@ test('post.rebuildSearchIndexSectionBatchAdmin: rebuilds a bounded derived searc
     failedCount: 0,
     hasMore: true,
     nextSkip: 10,
+  })
+})
+
+test('post.reconcileRagIndexCommunityBatchAdmin: queues missing stale and removable RAG jobs for a community batch', async () => {
+  ;(postRag.reconcilePostRagJobsForCommunityBatch as jest.Mock).mockResolvedValue({
+    communityId: 'community-1',
+    skip: 5,
+    limit: 10,
+    scannedCount: 10,
+    upsertQueuedCount: 2,
+    deleteQueuedCount: 1,
+    skippedCount: 7,
+    missingStateCount: 1,
+    staleStateCount: 1,
+    removableStateCount: 1,
+    failedCount: 0,
+    hasMore: true,
+    nextSkip: 15,
+  })
+
+  const result: any = await main({
+    action: 'post.reconcileRagIndexCommunityBatchAdmin',
+    communityId: 'community-1',
+    skip: 5,
+    limit: 10,
+    _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
+  })
+
+  expect(postRag.reconcilePostRagJobsForCommunityBatch).toHaveBeenCalledWith('community-1', {
+    skip: 5,
+    limit: 10,
+  })
+  expect(result).toEqual({
+    communityId: 'community-1',
+    skip: 5,
+    limit: 10,
+    scannedCount: 10,
+    upsertQueuedCount: 2,
+    deleteQueuedCount: 1,
+    skippedCount: 7,
+    missingStateCount: 1,
+    staleStateCount: 1,
+    removableStateCount: 1,
+    failedCount: 0,
+    hasMore: true,
+    nextSkip: 15,
+  })
+})
+
+test('post.ragIndexHealthAdmin: returns RAG index health counts for a scoped community', async () => {
+  ;(postRag.getPostRagIndexHealthForCommunity as jest.Mock).mockResolvedValue({
+    communityId: 'community-1',
+    activePostCount: 6,
+    indexedStateCount: 4,
+    removedStateCount: 1,
+    failedStateCount: 1,
+    pendingJobCount: 2,
+    failedJobCount: 1,
+    potentialMissingActiveCount: 2,
+    coverageRatio: 4 / 6,
+  })
+
+  const result: any = await main({
+    action: 'post.ragIndexHealthAdmin',
+    communityId: 'community-1',
+    _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
+  })
+
+  expect(postRag.getPostRagIndexHealthForCommunity).toHaveBeenCalledWith('community-1')
+  expect(result).toEqual({
+    communityId: 'community-1',
+    activePostCount: 6,
+    indexedStateCount: 4,
+    removedStateCount: 1,
+    failedStateCount: 1,
+    pendingJobCount: 2,
+    failedJobCount: 1,
+    potentialMissingActiveCount: 2,
+    coverageRatio: 4 / 6,
   })
 })

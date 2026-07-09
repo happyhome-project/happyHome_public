@@ -98,6 +98,7 @@ import { getArchiveHomeMeta, getGuideNoteCard, getListPreview, getPostHomeTitle,
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
+import { ensureHierarchyStack } from '../../utils/hierarchy-nav'
 
 const userStore = useUserStore()
 const sectionId = ref('')
@@ -188,6 +189,7 @@ const rawAuthorAvatarImages = computed(() => {
 })
 
 onLoad((options: any) => {
+  if (ensureHierarchyStack('/pages/section/index', options || {})) return
   sectionId.value = String(options?.sectionId || '')
   clientLog('info', 'section.onLoad', { sectionId: sectionId.value })
   void loadSectionData()
@@ -296,17 +298,19 @@ function openPost(postId: string) {
 
 function goCreatePost() {
   if (!sectionId.value) return
+  const returnTo = `/pages/section/index?sectionId=${encodeURIComponent(sectionId.value)}`
   try {
     uni.setStorageSync(CREATE_SECTION_INTENT_KEY, {
       sectionId: sectionId.value,
       createdAt: Date.now(),
+      returnTo,
       source: 'section.empty',
     })
   } catch (error) {
     clientLog('warn', 'section.create.intent.storage.fail', { sectionId: sectionId.value, error })
   }
-  uni.switchTab({
-    url: '/pages/create/index',
+  uni.navigateTo({
+    url: `/pages/create/index?returnTo=${encodeURIComponent(returnTo)}`,
     fail: (error) => clientLog('error', 'section.create.navigate.fail', { sectionId: sectionId.value, error }),
   })
 }

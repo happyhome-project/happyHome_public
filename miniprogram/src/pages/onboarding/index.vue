@@ -65,6 +65,7 @@ import {
   savePendingShareCommunity,
 } from '../../utils/community-share'
 import LoginGuard from '../../components/LoginGuard.vue'
+import { ensureHierarchyStack } from '../../utils/hierarchy-nav'
 
 const communities = ref<any[]>([])
 const communityStore = useCommunityStore()
@@ -76,6 +77,7 @@ let refreshingOnboarding = false
 let targetUnavailableNotified = false
 
 onLoad((query?: Record<string, any>) => {
+  if (ensureHierarchyStack('/pages/onboarding/index', query || {})) return
   fromCommunityShare.value = isCommunityShareQuery(query)
   targetCommunityId.value = fromCommunityShare.value ? normalizeCommunityShareId(query?.communityId) : ''
   entryMode.value = fromCommunityShare.value ? 'discover' : resolveEntryMode(query)

@@ -1359,8 +1359,8 @@ test('search: checks community readability and delegates to formal RAG search', 
       { _id: 'member-1', communityId: 'community-1', userId: 'member-openid', status: 'active' },
     ])
     .mockResolvedValueOnce([
-    { _id: 'member-1', communityId: 'community-1', userId: 'member-openid', status: 'active' },
-  ])
+      { _id: 'member-1', communityId: 'community-1', userId: 'member-openid', status: 'active' },
+    ])
 
   const result = await handleSearch({
     communityId: 'community-1',

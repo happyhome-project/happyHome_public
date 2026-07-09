@@ -215,7 +215,7 @@ describe('home live card formatting', () => {
     const section = {
       _id: 's-trip',
       communityId: 'c1',
-      name: '我的组局',
+      name: '活动召集',
       type: 'realtime',
       status: 'active',
       widgets: [

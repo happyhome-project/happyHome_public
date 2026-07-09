@@ -19,6 +19,7 @@ import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
 
 const DEFAULT_BASE_URL = 'https://cloudbase-3gh862acb1505ff3-1307183045.ap-shanghai.app.tcloudbase.com'
 const DEFAULT_TIMEOUT_MS = 180000
+const DEFAULT_ADMIN_INVOKE_RETRIES = 5
 
 function nowRunId() {
   return `rag-${Date.now().toString(36)}`
@@ -43,6 +44,10 @@ function parseArgs() {
       process.env.HH_POST_RAG_SMOKE_TIMEOUT_MS || String(DEFAULT_TIMEOUT_MS),
     )) || DEFAULT_TIMEOUT_MS)),
     actor: getFlagValue('actor', `rag-smoke-${nowRunId()}`),
+    adminInvokeRetries: Math.max(1, Math.floor(Number(getFlagValue(
+      'admin-invoke-retries',
+      process.env.HH_POST_RAG_SMOKE_ADMIN_INVOKE_RETRIES || String(DEFAULT_ADMIN_INVOKE_RETRIES),
+    )) || DEFAULT_ADMIN_INVOKE_RETRIES)),
     workerToken: getFlagValue('worker-token', resolvePostRagWorkerToken()),
   }
 }
@@ -162,6 +167,9 @@ function assertRagHit(result, postId, label) {
 
 async function main() {
   const options = parseArgs()
+  if (!options.workerToken) {
+    throw new Error('POST_RAG_WORKER_TOKEN is required to invoke post-rag-worker')
+  }
   const ownerOpenid = `${options.actor}-user`
   let communityId = ''
   let sectionId = ''

@@ -180,6 +180,7 @@ import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { buildGuideRouteDetail } from '../../utils/guide-detail'
 import { extractRichNoteImageSources } from '../../utils/rich-note'
+import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
 
 const fallbackAvatar = '/static/default-avatar.png'
 const ATTENDANCE_SLOT_DISPLAY_MAX = 6
@@ -289,6 +290,7 @@ onErrorCaptured((error, _instance, info) => {
 })
 
 onLoad(async (options: any) => {
+  if (ensureHierarchyStack('/pages/detail/index', options || {}, options?.returnTo)) return
   const postId = String(options?.postId || '')
   clientLog('info', 'detail.onLoad', {
     rawOptions: options || {},
@@ -553,9 +555,7 @@ function retryLoad() {
 
 function goBack() {
   clientLog('info', 'detail.goBack.tap', { postId: currentPostId.value })
-  uni.navigateBack({
-    fail: () => uni.switchTab({ url: '/pages/index/index' }),
-  })
+  navigateBackOrHome()
 }
 
 function goOriginPost() {
@@ -576,12 +576,16 @@ async function handleActivityInviteTap() {
     return
   }
   try {
+    const returnTo = `/pages/detail/index?postId=${encodeURIComponent(post.value._id)}`
     uni.setStorageSync(ACTIVITY_INVITE_CREATE_INTENT_KEY, {
       sourcePostId: post.value._id,
+      returnTo,
       createdAt: Date.now(),
     })
+    uni.navigateTo({ url: `/pages/create/index?returnTo=${encodeURIComponent(returnTo)}` })
+    return
   } catch {}
-  uni.switchTab({ url: '/pages/create/index' })
+  uni.navigateTo({ url: '/pages/create/index' })
 }
 
 const deleteLock = useBusyLock(async () => {
@@ -596,7 +600,7 @@ const deleteLock = useBusyLock(async () => {
   try {
     await postApi.delete(post.value._id)
     uni.showToast({ title: '已删除', icon: 'success' })
-    uni.navigateBack()
+    navigateBackOrHome()
   } catch (error: any) {
     uni.showToast({ title: error?.message || '删除失败', icon: 'none' })
   }

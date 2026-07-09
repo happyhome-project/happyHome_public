@@ -138,6 +138,48 @@ test('searchPostIndex returns visible current-community posts with matched field
   })
 })
 
+test('searchPostIndex filters member-only chunks for public readers', async () => {
+  const memberSection = {
+    ...section,
+    widgets: section.widgets.map((widget) => (
+      widget.widgetId === 'body' ? { ...widget, visibility: 'member' as const } : widget
+    )),
+  }
+  await indexPostForSearch(post({
+    _id: 'post-member-field',
+    content: {
+      title: '公开标题',
+      body: {
+        format: 'markdown',
+        markdown: '秘密联系方式：13800000000',
+        html: '',
+        text: '秘密联系方式：13800000000',
+        imageFileIDs: [],
+        schemaVersion: 1,
+      },
+      videos: [],
+    },
+  } as any), memberSection)
+
+  const publicResult = await searchPostIndex({
+    communityId: 'community-1',
+    query: '13800000000',
+    includeMemberOnly: false,
+  })
+  const memberResult = await searchPostIndex({
+    communityId: 'community-1',
+    query: '13800000000',
+    includeMemberOnly: true,
+  })
+
+  expect(publicResult.items).toEqual([])
+  expect(memberResult.items.map((item) => item.postId)).toEqual(['post-member-field'])
+  expect(memberResult.items[0].matchedFields[0]).toMatchObject({
+    fieldLabel: '正文',
+    preview: expect.stringContaining('13800000000'),
+  })
+})
+
 test('indexPostForSearch writes chunk, vector, and index-state rows for RAG retrieval', async () => {
   const result = await indexPostForSearch(post(), section)
 

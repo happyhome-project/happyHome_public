@@ -1,6 +1,13 @@
 <template>
   <view class="phone-inner">
     <view class="home-shell">
+      <view class="home-brandbar" aria-label="社群助手">
+        <view class="home-brand-title-wrap">
+          <text class="home-brand-title">社群助手</text>
+          <view class="home-brand-line"></view>
+        </view>
+      </view>
+
       <view class="home-topbar">
         <view class="community-identity" @tap="onMastheadTap">
           <view class="community-avatar">
@@ -30,14 +37,17 @@
           <text class="home-quote-text">{{ quoteText }}</text>
           <view v-if="quoteCite" class="home-quote-cite-wrap">
             <view class="home-quote-line"></view>
-            <text class="home-quote-cite">《{{ quoteCite }}》</text>
+            <text class="home-quote-cite">{{ quoteCite }}</text>
           </view>
         </view>
       </view>
 
       <view class="home-search">
         <view class="home-search-box">
-          <text class="home-search-icon">⌕</text>
+          <view class="home-search-icon" aria-hidden="true">
+            <view class="home-search-icon-ring"></view>
+            <view class="home-search-icon-handle"></view>
+          </view>
           <input
             v-model="homeSearchQuery"
             class="home-search-input"
@@ -53,32 +63,39 @@
       </view>
 
       <view class="home-banner">
-        <view
+        <swiper
           v-if="homeBannerItems.length > 0"
           class="home-banner-swiper"
-          @touchstart="onHomeBannerPointerStart"
-          @touchmove="onHomeBannerPointerMove"
-          @touchend="onHomeBannerPointerEnd"
-          @mousedown="onHomeBannerPointerStart"
-          @mousemove="onHomeBannerPointerMove"
-          @mouseup="onHomeBannerPointerEnd"
+          :current="homeBannerActiveIndex"
+          :circular="homeBannerItems.length > 1"
+          :duration="260"
+          @change="onHomeBannerChange"
+          @touchstart="onHomeBannerGestureStart"
+          @touchmove="onHomeBannerGestureMove"
+          @touchend="onHomeBannerGestureEnd"
+          @mousedown="onHomeBannerGestureStart"
+          @mousemove="onHomeBannerGestureMove"
+          @mouseup="onHomeBannerGestureEnd"
         >
-          <view
+          <swiper-item
             v-for="(banner, i) in homeBannerItems"
             :key="banner.bannerId"
             class="home-banner-slide"
-            :class="{ active: i === homeBannerActiveIndex }"
             @tap="openHomeBanner(banner)"
           >
             <image
+              v-if="!isHomeBannerImageFailed(banner.imageKey)"
               :src="banner.coverImage"
               class="home-banner-image"
               mode="aspectFill"
+              @load="onHomeBannerImageLoad(banner)"
+              @error="onHomeBannerImageError(banner, $event)"
             />
+            <view v-else class="home-banner-art"></view>
             <view class="home-banner-shade"></view>
             <text class="home-banner-title">{{ banner.title }}</text>
-          </view>
-        </view>
+          </swiper-item>
+        </swiper>
         <template v-else>
           <view class="home-banner-art"></view>
           <view class="home-banner-shade"></view>
@@ -105,7 +122,7 @@
         :style="getNoticeCardStyle(notice, i)"
         @tap="openNotice(notice)"
       >
-        <text class="notice-kind">{{ notice.sectionName || notice.label }}</text>
+        <text class="notice-kind">{{ notice.kind }}</text>
         <view class="notice-main">
           <view class="notice-line">
             <text class="notice-badge">{{ i === 0 ? '置顶' : '最新' }}</text>
@@ -118,7 +135,7 @@
 
     <!-- Live strip · 实时脉冲区：有激活的实时协作板块时显示 -->
     <view v-if="liveItems.length > 0" class="group-section">
-      <text class="group-section-title">我的组局</text>
+      <text class="group-section-title">活动召集</text>
       <view
         v-for="(item, i) in liveItems"
         :key="i"
@@ -184,93 +201,97 @@
     </scroll-view>
 
     <!-- Archive feed · Figma 0626 选中板块内容区 -->
-    <view v-if="activeArchiveGroup" class="active-archive">
-      <view class="active-archive-head" @tap="onGroupHeaderTap(activeArchiveGroup)">
-        <view class="active-archive-title-wrap">
-          <text class="active-archive-title">{{ activeArchiveGroup.name }}</text>
-          <text class="active-archive-count">· {{ activeArchiveGroup.count }} 条</text>
-        </view>
-        <text class="active-archive-arrow">›</text>
-      </view>
-
-      <view
-        v-if="activeArchiveGroup.displayTemplate === 'guide_note'"
-        class="guide-feed"
-      >
+    <view
+      v-if="activeArchiveGroup"
+      class="active-archive"
+      :class="{
+        'active-archive--guide': activeArchiveGroup.displayTemplate === 'guide_note',
+        'active-archive--default': activeArchiveGroup.displayTemplate !== 'guide_note',
+      }"
+      :style="activeArchiveStyle"
+    >
+      <view class="active-archive-body">
         <view
-          v-for="(column, columnIndex) in guideColumns"
-          :key="columnIndex"
-          class="guide-feed-column"
+          v-if="activeArchiveGroup.displayTemplate === 'guide_note'"
+          class="guide-feed"
         >
           <view
-            v-for="(item, i) in column"
-            :key="item.postId || columnIndex + '-' + i"
-            class="guide-card"
-            @tap="onPostTap(item)"
+            v-for="(column, columnIndex) in guideColumns"
+            :key="columnIndex"
+            class="guide-feed-column"
           >
-            <image
-              v-if="item.coverImage"
-              :src="item.coverImage"
-              mode="aspectFill"
-              class="guide-cover"
-            />
-            <view v-else class="guide-cover guide-cover-empty">
-              <text>{{ activeArchiveGroup.name.slice(0, 2) }}</text>
-            </view>
-            <view class="guide-main">
-              <text class="guide-title">{{ item.t }}</text>
-              <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
-              <view v-if="item.driveDuration" class="guide-stats">
-                <text class="guide-stat">{{ item.driveDuration }}</text>
+            <view
+              v-for="(item, i) in column"
+              :key="item.postId || columnIndex + '-' + i"
+              class="guide-card"
+              @tap="onPostTap(item)"
+            >
+              <image
+                v-if="item.coverImage && !isHomeGuideImageFailed(item.imageKey)"
+                :src="item.coverImage"
+                mode="aspectFill"
+                class="guide-cover"
+                @load="onHomeGuideImageLoad(item)"
+                @error="onHomeGuideImageError(item, $event)"
+              />
+              <view v-else class="guide-cover guide-cover-empty">
+                <text>{{ activeArchiveGroup.name.slice(0, 2) }}</text>
               </view>
-              <view v-if="item.isPinned || item.isFeatured" class="post-badges guide-badges">
+              <view class="guide-main">
+                <text class="guide-title">{{ item.t }}</text>
+                <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
+                <view v-if="item.driveDuration" class="guide-stats">
+                  <text class="guide-stat">{{ item.driveDuration }}</text>
+                </view>
+                <view v-if="item.isPinned || item.isFeatured" class="post-badges guide-badges">
+                  <text v-if="item.isPinned" class="post-badge pin">置顶</text>
+                  <text v-if="item.isFeatured" class="post-badge feature">精华</text>
+                </view>
+                <view class="guide-meta">
+                  <view v-if="item.contentAuthor" class="guide-author">
+                    <view
+                      class="guide-author-avatar"
+                      :style="getGuideAuthorAvatarStyle(item.contentAuthor)"
+                    >
+                      <text>{{ getAuthorInitial(item.contentAuthor) }}</text>
+                    </view>
+                    <text class="guide-author-name">{{ item.contentAuthor }}</text>
+                  </view>
+                  <text v-if="item.when" class="guide-when">{{ item.when }}</text>
+                </view>
+              </view>
+            </view>
+          </view>
+        </view>
+
+        <view
+          v-else
+          class="arc-card"
+          :data-index="activeArchiveIndex"
+          :style="getArchiveCardStyle(activeArchiveGroup, activeArchiveIndex)"
+          @tap="onGroupHeaderTap(activeArchiveGroup)"
+        >
+          <view
+            v-for="(item, i) in activeArchiveGroup.items"
+            :key="item.postId || i"
+            class="arc-item"
+            @tap.stop="onPostTap(item)"
+          >
+            <!-- kicker 小标：当前装饰版固定 01/02/03；未来接真实档案号时仍走 item.k -->
+            <text v-if="item.k" class="arc-k">{{ item.k }}</text>
+            <view class="arc-tl">
+              <text class="arc-title">{{ item.t }}</text>
+              <view v-if="item.isPinned || item.isFeatured" class="post-badges">
                 <text v-if="item.isPinned" class="post-badge pin">置顶</text>
                 <text v-if="item.isFeatured" class="post-badge feature">精华</text>
               </view>
-              <view class="guide-meta">
-                <view v-if="item.contentAuthor" class="guide-author">
-                  <view
-                    class="guide-author-avatar"
-                    :style="getGuideAuthorAvatarStyle(item.contentAuthor)"
-                  >
-                    <text>{{ getAuthorInitial(item.contentAuthor) }}</text>
-                  </view>
-                  <text class="guide-author-name">{{ item.contentAuthor }}</text>
-                </view>
-                <text v-if="item.when" class="guide-when">{{ item.when }}</text>
+              <view class="arc-mm">
+                <text v-if="item.contentAuthor" class="arc-content-author">{{ item.contentAuthor }}</text>
+                <text v-if="item.meta" class="arc-meta" :class="{ hot: item.hot }">{{ item.meta }}</text>
               </view>
             </view>
+            <text class="arc-when">{{ item.when }}</text>
           </view>
-        </view>
-      </view>
-
-      <view
-        v-else
-        class="arc-card"
-        :data-index="activeArchiveIndex"
-        :style="getArchiveCardStyle(activeArchiveGroup, activeArchiveIndex)"
-        @tap="onGroupHeaderTap(activeArchiveGroup)"
-      >
-        <view
-          v-for="(item, i) in activeArchiveGroup.items"
-          :key="item.postId || i"
-          class="arc-item"
-          @tap.stop="onPostTap(item)"
-        >
-          <!-- kicker 小标：当前装饰版固定 01/02/03；未来接真实档案号时仍走 item.k -->
-          <text v-if="item.k" class="arc-k">{{ item.k }}</text>
-          <view class="arc-tl">
-            <text class="arc-title">{{ item.t }}</text>
-            <view v-if="item.isPinned || item.isFeatured" class="post-badges">
-              <text v-if="item.isPinned" class="post-badge pin">置顶</text>
-              <text v-if="item.isFeatured" class="post-badge feature">精华</text>
-            </view>
-            <view class="arc-mm">
-              <text v-if="item.contentAuthor" class="arc-content-author">{{ item.contentAuthor }}</text>
-              <text v-if="item.meta" class="arc-meta" :class="{ hot: item.hot }">{{ item.meta }}</text>
-            </view>
-          </view>
-          <text class="arc-when">{{ item.when }}</text>
         </view>
       </view>
     </view>
@@ -334,8 +355,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
-import { onLoad, onPullDownRefresh, onShareAppMessage, onShow } from '@dcloudio/uni-app'
+import { computed, ref, nextTick, onMounted, onUnmounted, watch } from 'vue'
+import { onLoad, onPageScroll, onPullDownRefresh, onShareAppMessage, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi, postApi } from '../../api/cloud'
@@ -345,9 +366,19 @@ import { getArchiveHomeMeta, getFamilyLetterListSummary, getGuideNoteCard, getHo
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
+import { normalizeHomeNoticeKind } from '../../utils/home-notice'
+import { formatHomeQuoteCite } from '../../utils/home-quote'
 import { resolveCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import {
-  buildCommunityOnboardingPath,
+  buildHomeImageKey,
+  clearFailedHomeImageProbeEntries,
+  summarizeHomeImageProbe,
+  upsertHomeImageProbeEntry,
+  type HomeImageKind,
+  type HomeImageProbeEntry,
+  type HomeImageStatus,
+} from '../../utils/home-image-probe'
+import {
   buildCommunitySharePath,
   buildCommunityShareTitle,
   DEFAULT_COMMUNITY_SHARE_IMAGE,
@@ -367,21 +398,31 @@ const guestIntroConfig = ref<GuestIntroConfig | null>(null)
 const postsBySection = ref<Record<string, any[]>>({})
 const resolvedHomeBannerCoverUrls = ref<Record<string, string>>({})
 const resolvedHomeGuideCoverUrls = ref<Record<string, string>>({})
+const homeImageProbeEntries = ref<Record<string, HomeImageProbeEntry>>({})
 const incomingShareCommunityId = ref('')
 const shareImageUrl = ref(DEFAULT_COMMUNITY_SHARE_IMAGE)
 const homeSearchQuery = ref('')
 const selectedArchiveId = ref('')
+const homePageScrollTop = ref(0)
+const archivePreviewMinHeightPx = ref(0)
 const homeBannerActiveIndex = ref(0)
+const homeBannerSwipeIntent = ref(false)
 let refreshingHome = false
 let queuedForcedHomeRefresh = false
 let mountedAt = 0
 let unsubscribeBackgroundFetchSnapshot: (() => void) | null = null
-let homeBannerPointerStartX = 0
-let homeBannerPointerMoved = false
+let archiveSwitchScrollTimers: ReturnType<typeof setTimeout>[] = []
+let archivePreviewMeasureTimers: ReturnType<typeof setTimeout>[] = []
 let suppressNextHomeBannerTap = false
+let suppressHomeBannerTapTimer: ReturnType<typeof setTimeout> | null = null
+let homeBannerPointerStartX = 0
+let homeBannerPointerStartY = 0
+let homeBannerHasPointerStart = false
 let homeBannerResolveToken = 0
 const reportedMissingHomeTitle = new Set<string>()
 const NOTICE_PREVIEW_LIMIT = 68
+const HOME_BANNER_SWIPE_THRESHOLD_PX = 8
+const HOME_BANNER_TAP_SUPPRESS_MS = 320
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
 const GUIDE_AUTHOR_AVATAR_PALETTE = [
@@ -393,6 +434,11 @@ const GUIDE_AUTHOR_AVATAR_PALETTE = [
   ['#D7E8EA', '#72B2B8'],
 ]
 const GUIDE_NOTE_NAME_HINTS = ['亲子出游', '周末遛娃', '村游攻略', '路线攻略', '出游攻略']
+
+onPageScroll((event) => {
+  const nextScrollTop = Number(event?.scrollTop || 0)
+  homePageScrollTop.value = Number.isFinite(nextScrollTop) ? Math.max(0, Math.round(nextScrollTop)) : 0
+})
 
 onLoad((options?: Record<string, any>) => {
   if (!isCommunityShareQuery(options)) return
@@ -413,7 +459,7 @@ const homeHeroImage = computed(() =>
   String(communityStore.currentCommunity?.coverImage || '').trim() ? shareImageUrl.value : ''
 )
 const quoteText = computed(() => String(communityStore.currentCommunity?.motto || '').trim())
-const quoteCite = computed(() => String(communityStore.currentCommunity?.mottoCite || '').trim())
+const quoteCite = computed(() => formatHomeQuoteCite(communityStore.currentCommunity?.mottoCite))
 const activeArchiveIndex = computed(() => {
   const groups = archiveGroups.value
   if (!groups.length) return -1
@@ -424,6 +470,11 @@ const activeArchiveIndex = computed(() => {
   const guideIndex = groups.findIndex((group) => group.displayTemplate === 'guide_note')
   return guideIndex >= 0 ? guideIndex : 0
 })
+const activeArchiveStyle = computed(() =>
+  archivePreviewMinHeightPx.value > 0
+    ? `min-height: ${archivePreviewMinHeightPx.value}px;`
+    : ''
+)
 
 function onMastheadTap() {
   // 仅当用户有多个社区时才打开切换器；否则 tap 不做任何事（避免空切换器困扰）
@@ -440,6 +491,7 @@ interface HomeBannerItem {
   bannerId: string
   postId: string
   title: string
+  imageKey: string
   coverImage: string
 }
 
@@ -456,6 +508,7 @@ const homeBannerItems = computed<HomeBannerItem[]>(() => {
         bannerId: String(banner.bannerId || `${banner.postId}-${index}`),
         postId: String(banner.postId || '').trim(),
         title: String(banner.title || '').trim() || '新人必看',
+        imageKey: buildHomeImageKey('banner', rawCover || String(banner.bannerId || banner.postId || index)),
         coverImage,
       }
     })
@@ -476,6 +529,7 @@ interface SectionNotice {
   widgetId: string
   sectionName: string
   label: string
+  kind: string
   content: string
   preview: string
   isLong: boolean
@@ -499,6 +553,7 @@ const sectionNotices = computed<SectionNotice[]>(() => {
         widgetId: widget.widgetId,
         sectionName: section.name,
         label: widget.label || '公告',
+        kind: normalizeHomeNoticeKind(widget.label),
         content,
         preview,
         isLong: Array.from(content).length > NOTICE_PREVIEW_LIMIT,
@@ -557,6 +612,7 @@ interface ArchiveItem {
   contentAuthor?: string
   meta?: string
   excerpt?: string
+  imageKey?: string
   coverImage?: string
   driveDuration?: string
   routeStats?: Array<{ label: string; value: string }>
@@ -596,6 +652,7 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
               contentAuthor: guide.author,
               meta: '',
               excerpt: guide.excerpt,
+              imageKey: buildHomeImageKey('guide', guide.coverImage || p._id || idx),
               coverImage: resolvedCover,
               driveDuration: guide.driveDuration,
               routeStats: guide.routeStats,
@@ -662,6 +719,34 @@ const guideColumns = computed<ArchiveItem[][]>(() => {
   }, [[], []])
 })
 
+const currentHomeImageKeys = computed(() => {
+  const keys: string[] = []
+  for (const item of homeBannerItems.value) {
+    if (item.imageKey) keys.push(item.imageKey)
+  }
+  const group = activeArchiveGroup.value
+  if (group?.displayTemplate === 'guide_note') {
+    for (const item of group.items) {
+      if (item.imageKey && item.coverImage) keys.push(item.imageKey)
+    }
+  }
+  return keys
+})
+
+watch(
+  () => activeArchiveGroup.value?.id || '',
+  () => scheduleArchivePreviewMeasure(),
+  { immediate: true },
+)
+
+watch(
+  () => currentShareCommunityId.value,
+  () => {
+    archivePreviewMinHeightPx.value = 0
+    scheduleArchivePreviewMeasure()
+  },
+)
+
 watch(archiveGroups, (groups) => {
   if (!groups.length) {
     selectedArchiveId.value = ''
@@ -682,6 +767,10 @@ watch(
       resolvedHomeGuideCoverUrls.value = {}
       return
     }
+    homeImageProbeEntries.value = clearFailedHomeImageProbeEntries(
+      homeImageProbeEntries.value,
+      urls.map((url) => buildHomeImageKey('guide', url)),
+    )
     try {
       resolvedHomeGuideCoverUrls.value = {
         ...resolvedHomeGuideCoverUrls.value,
@@ -712,6 +801,83 @@ const dormantNames = computed(() => {
 function formatArchiveKicker(index: number): string {
   return String(index + 1).padStart(2, '0')
 }
+
+function updateHomeImageProbe(
+  kind: HomeImageKind,
+  key: string,
+  src: string,
+  label: string,
+  status: HomeImageStatus,
+  error?: unknown,
+) {
+  const safeKey = String(key || '').trim()
+  if (!safeKey) return
+  const previous = homeImageProbeEntries.value[safeKey]
+  homeImageProbeEntries.value = upsertHomeImageProbeEntry(homeImageProbeEntries.value, {
+    key: safeKey,
+    kind,
+    src: String(src || '').trim(),
+    label: String(label || '').trim(),
+    status,
+    updatedAt: new Date().toISOString(),
+  })
+  if (status === 'failed' && previous?.status !== 'failed') {
+    clientLog('warn', kind === 'banner' ? 'home.banner.image.fail' : 'home.guide.image.fail', {
+      imageKey: safeKey,
+      src: String(src || '').trim(),
+      label: String(label || '').trim(),
+      error,
+    })
+  }
+}
+
+function isHomeBannerImageFailed(imageKey: string): boolean {
+  return homeImageProbeEntries.value[String(imageKey || '').trim()]?.status === 'failed'
+}
+
+function isHomeGuideImageFailed(imageKey?: string): boolean {
+  return homeImageProbeEntries.value[String(imageKey || '').trim()]?.status === 'failed'
+}
+
+function onHomeBannerImageLoad(item: HomeBannerItem) {
+  updateHomeImageProbe('banner', item.imageKey, item.coverImage, item.title, 'loaded')
+}
+
+function onHomeBannerImageError(item: HomeBannerItem, event?: any) {
+  updateHomeImageProbe(
+    'banner',
+    item.imageKey,
+    item.coverImage,
+    item.title,
+    'failed',
+    event?.detail?.errMsg || event,
+  )
+}
+
+function onHomeGuideImageLoad(item: ArchiveItem) {
+  updateHomeImageProbe('guide', String(item.imageKey || ''), String(item.coverImage || ''), item.t, 'loaded')
+  scheduleArchivePreviewMeasure()
+}
+
+function onHomeGuideImageError(item: ArchiveItem, event?: any) {
+  updateHomeImageProbe(
+    'guide',
+    String(item.imageKey || ''),
+    String(item.coverImage || ''),
+    item.t,
+    'failed',
+    event?.detail?.errMsg || event,
+  )
+  scheduleArchivePreviewMeasure()
+}
+
+function getReleaseHomeImageProbe() {
+  return summarizeHomeImageProbe(currentHomeImageKeys.value, homeImageProbeEntries.value)
+}
+
+defineExpose({
+  getReleaseHomeImageProbe,
+})
 
 function reportMissingHomeTitle(post: any, section: any, source: string) {
   const issue = getPostHomeTitleIssue(post, section)
@@ -794,45 +960,67 @@ function getGuideAuthorAvatarStyle(author?: string) {
 }
 
 // ── Actions ──
-function getHomeBannerPointerX(event: any): number {
+function onHomeBannerChange(event: any) {
+  const next = Number(event?.detail?.current ?? 0)
+  if (Number.isFinite(next)) homeBannerActiveIndex.value = next
+  if (event?.detail?.source === 'touch') {
+    suppressHomeBannerTapTemporarily()
+  }
+}
+
+function onHomeBannerGestureStart(event: any) {
+  const point = getHomeBannerGesturePoint(event)
+  homeBannerPointerStartX = point.x
+  homeBannerPointerStartY = point.y
+  homeBannerHasPointerStart = true
+  homeBannerSwipeIntent.value = false
+  if (suppressHomeBannerTapTimer) {
+    clearTimeout(suppressHomeBannerTapTimer)
+    suppressHomeBannerTapTimer = null
+  }
+  suppressNextHomeBannerTap = false
+}
+
+function onHomeBannerGestureMove(event: any) {
+  if (!homeBannerHasPointerStart) return
+  const point = getHomeBannerGesturePoint(event)
+  const dx = Math.abs(point.x - homeBannerPointerStartX)
+  const dy = Math.abs(point.y - homeBannerPointerStartY)
+  if (Math.max(dx, dy) >= HOME_BANNER_SWIPE_THRESHOLD_PX) {
+    homeBannerSwipeIntent.value = true
+    suppressHomeBannerTapTemporarily()
+  }
+}
+
+function onHomeBannerGestureEnd() {
+  if (homeBannerSwipeIntent.value) suppressHomeBannerTapTemporarily()
+  homeBannerHasPointerStart = false
+  homeBannerSwipeIntent.value = false
+}
+
+function getHomeBannerGesturePoint(event: any) {
   const touch = event?.touches?.[0] || event?.changedTouches?.[0]
-  const clientX = Number(touch?.clientX ?? event?.clientX ?? 0)
-  return Number.isFinite(clientX) ? clientX : 0
+  const x = Number(touch?.clientX ?? touch?.pageX ?? event?.clientX ?? event?.pageX ?? 0)
+  const y = Number(touch?.clientY ?? touch?.pageY ?? event?.clientY ?? event?.pageY ?? 0)
+  return { x, y }
 }
 
-function onHomeBannerPointerStart(event: any) {
-  homeBannerPointerStartX = getHomeBannerPointerX(event)
-  homeBannerPointerMoved = false
-}
-
-function onHomeBannerPointerMove(event: any) {
-  const currentX = getHomeBannerPointerX(event)
-  if (Math.abs(currentX - homeBannerPointerStartX) > 16) {
-    homeBannerPointerMoved = true
-  }
-}
-
-function onHomeBannerPointerEnd(event: any) {
-  const currentX = getHomeBannerPointerX(event)
-  const deltaX = currentX - homeBannerPointerStartX
-  if (Math.abs(deltaX) > 16 || homeBannerPointerMoved) {
-    if (Math.abs(deltaX) > 32 && homeBannerItems.value.length > 1) {
-      const step = deltaX < 0 ? 1 : -1
-      const length = homeBannerItems.value.length
-      homeBannerActiveIndex.value = (homeBannerActiveIndex.value + step + length) % length
-    }
-    suppressNextHomeBannerTap = true
-    setTimeout(() => {
-      suppressNextHomeBannerTap = false
-      homeBannerPointerMoved = false
-    }, 350)
-  }
+function suppressHomeBannerTapTemporarily() {
+  suppressNextHomeBannerTap = true
+  if (suppressHomeBannerTapTimer) clearTimeout(suppressHomeBannerTapTimer)
+  suppressHomeBannerTapTimer = setTimeout(() => {
+    suppressNextHomeBannerTap = false
+    suppressHomeBannerTapTimer = null
+  }, HOME_BANNER_TAP_SUPPRESS_MS)
 }
 
 function openHomeBanner(item: HomeBannerItem) {
-  if (suppressNextHomeBannerTap || homeBannerPointerMoved) {
+  if (suppressNextHomeBannerTap) {
     suppressNextHomeBannerTap = false
-    homeBannerPointerMoved = false
+    if (suppressHomeBannerTapTimer) {
+      clearTimeout(suppressHomeBannerTapTimer)
+      suppressHomeBannerTapTimer = null
+    }
     return
   }
   if (!item.postId) return
@@ -866,9 +1054,101 @@ function onLiveTap(item: LiveItem) {
   }
 }
 
+function clearArchiveSwitchScrollTimers() {
+  archiveSwitchScrollTimers.forEach((timer) => clearTimeout(timer))
+  archiveSwitchScrollTimers = []
+}
+
+function clearArchivePreviewMeasureTimers() {
+  archivePreviewMeasureTimers.forEach((timer) => clearTimeout(timer))
+  archivePreviewMeasureTimers = []
+}
+
+function getArchiveMeasuredHeight(rect: any) {
+  const target = Array.isArray(rect) ? rect[0] : rect
+  const height = Number(target?.height || 0)
+  return Number.isFinite(height) ? Math.ceil(height) : 0
+}
+
+function measureActiveArchiveHeight() {
+  try {
+    uni
+      .createSelectorQuery()
+      .select('.active-archive-body')
+      .boundingClientRect((rect) => {
+        const height = getArchiveMeasuredHeight(rect)
+        const group = activeArchiveGroup.value
+        const hasGuideGroup = archiveGroups.value.some((item) => item.displayTemplate === 'guide_note')
+        // Only natural guide/feed height may raise the baseline; short default tabs inherit it.
+        const shouldCaptureHeight =
+          !hasGuideGroup ||
+          group?.displayTemplate === 'guide_note' ||
+          archivePreviewMinHeightPx.value === 0
+        if (shouldCaptureHeight && height > archivePreviewMinHeightPx.value) {
+          archivePreviewMinHeightPx.value = height
+        }
+      })
+      .exec()
+  } catch (error) {
+    clientLog('warn', 'home.archive.measure.fail', { error })
+  }
+}
+
+function scheduleArchivePreviewMeasure() {
+  clearArchivePreviewMeasureTimers()
+  nextTick(() => {
+    measureActiveArchiveHeight()
+    archivePreviewMeasureTimers.push(setTimeout(measureActiveArchiveHeight, 80))
+    archivePreviewMeasureTimers.push(setTimeout(measureActiveArchiveHeight, 260))
+  })
+}
+
+function getCurrentPageScrollTop() {
+  let scrollTop = homePageScrollTop.value
+  // #ifdef H5
+  if (typeof window !== 'undefined' || typeof document !== 'undefined') {
+    const candidates = [
+      typeof window !== 'undefined' ? window.scrollY : 0,
+      typeof document !== 'undefined' ? document.documentElement?.scrollTop || 0 : 0,
+      typeof document !== 'undefined' ? document.body?.scrollTop || 0 : 0,
+    ].filter((value) => Number.isFinite(value) && value >= 0)
+    if (candidates.length) scrollTop = Math.max(...candidates)
+  }
+  // #endif
+  return Math.max(0, Math.round(Number(scrollTop) || 0))
+}
+
+function restoreArchiveSwitchScroll(scrollTop: number) {
+  clearArchiveSwitchScrollTimers()
+  const target = Math.max(0, Math.round(Number(scrollTop) || 0))
+  const restore = () => {
+    try {
+      uni.pageScrollTo({ scrollTop: target, duration: 0 })
+      homePageScrollTop.value = target
+    } catch (error) {
+      clientLog('warn', 'home.archive.scroll.restore.fail', { target, error })
+    }
+
+    // #ifdef H5
+    if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+      window.scrollTo({ top: target, left: 0, behavior: 'auto' })
+    }
+    // #endif
+  }
+
+  nextTick(() => {
+    restore()
+    archiveSwitchScrollTimers.push(setTimeout(restore, 60))
+    archiveSwitchScrollTimers.push(setTimeout(restore, 180))
+  })
+}
+
 function selectArchiveGroup(g: ArchiveGroup) {
   if (!g.id) return
+  const previousScrollTop = getCurrentPageScrollTop()
   selectedArchiveId.value = g.id
+  scheduleArchivePreviewMeasure()
+  restoreArchiveSwitchScroll(previousScrollTop)
   clientLog('info', 'home.archive.group.select', {
     sectionId: g.id,
     name: g.name,
@@ -942,16 +1222,7 @@ function expandDormant() {
 }
 
 function openSharedCommunityOnboarding(communityId: string) {
-  const url = buildCommunityOnboardingPath(communityId)
-  uni.navigateTo({
-    url,
-    fail: () => {
-      uni.redirectTo({
-        url,
-        fail: () => uni.reLaunch({ url }),
-      })
-    },
-  })
+  openOnboardingPreservingStack({ mode: 'discover', communityId })
 }
 
 async function handleInitialShareLanding(): Promise<boolean> {
@@ -1190,6 +1461,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  clearArchiveSwitchScrollTimers()
+  clearArchivePreviewMeasureTimers()
   unsubscribeBackgroundFetchSnapshot?.()
   unsubscribeBackgroundFetchSnapshot = null
 })
@@ -1232,6 +1505,10 @@ watch(
       homeBannerActiveIndex.value = 0
       return
     }
+    homeImageProbeEntries.value = clearFailedHomeImageProbeEntries(
+      homeImageProbeEntries.value,
+      images.map((image) => buildHomeImageKey('banner', image)),
+    )
     const next: Record<string, string> = {}
     await Promise.all(images.map(async (image) => {
       try {
@@ -1467,47 +1744,71 @@ onShareAppMessage(() => {
   margin: 0 32rpx 28rpx;
 }
 .home-search-box {
-  min-height: 84rpx;
-  padding: 0 16rpx 0 24rpx;
-  border: 1rpx solid $hh-ink-line;
-  border-radius: 22rpx;
-  background: $hh-surface-1;
-  box-shadow: $hh-shadow-card;
+  min-height: 90rpx;
+  padding: 0 8rpx 0 30rpx;
+  border: 0;
+  border-radius: $hh-radius-full;
+  background: #fff;
+  box-shadow: none;
   display: flex;
   align-items: center;
-  gap: 14rpx;
+  gap: 15rpx;
 }
 .home-search-icon {
+  position: relative;
   flex-shrink: 0;
-  width: 32rpx;
-  font-size: 30rpx;
-  line-height: 1;
-  color: $hh-ink-3;
+  width: 38rpx;
+  height: 38rpx;
+  color: rgba(0, 0, 0, 0.45);
+}
+.home-search-icon-ring {
+  position: absolute;
+  left: 4rpx;
+  top: 4rpx;
+  width: 26rpx;
+  height: 26rpx;
+  border: 3rpx solid currentColor;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+.home-search-icon-handle {
+  position: absolute;
+  left: 27rpx;
+  top: 28rpx;
+  width: 13rpx;
+  height: 3rpx;
+  border-radius: $hh-radius-full;
+  background: currentColor;
+  transform: rotate(45deg);
+  transform-origin: left center;
 }
 .home-search-input {
   flex: 1;
   min-width: 0;
-  height: 84rpx;
-  font-size: 27rpx;
+  height: 90rpx;
+  font-size: 30rpx;
+  line-height: 45rpx;
   color: $hh-ink-1;
 }
 .home-search-placeholder {
-  color: $hh-ink-4;
+  color: rgba(0, 0, 0, 0.45);
 }
 .home-search-action {
-  flex-shrink: 0;
-  min-width: 92rpx;
-  height: 56rpx;
-  padding: 0 18rpx;
+  flex: 0 0 150rpx;
+  width: 150rpx;
+  min-width: 0;
+  height: 75rpx;
+  padding: 0;
   border-radius: $hh-radius-full;
-  background: $hh-ink-1;
+  background: var(--hh-color-brand-primary);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .home-search-action text {
-  font-size: 23rpx;
-  font-weight: $hh-font-weight-bold;
+  font-size: 30rpx;
+  line-height: 45rpx;
+  font-weight: $hh-font-weight-medium;
   color: $hh-surface-1;
 }
 
@@ -1745,10 +2046,14 @@ onShareAppMessage(() => {
 .notice-kind {
   width: 76rpx;
   flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--hh-color-text-primary);
   font-size: var(--hh-text-body-lg-size);
   line-height: var(--hh-text-body-lg-line);
   font-weight: $hh-font-weight-bold;
+  text-align: left;
 }
 
 .notice-main {
@@ -2265,10 +2570,46 @@ onShareAppMessage(() => {
 }
 
 .home-shell {
-  padding: 42rpx var(--hh-page-x) 24rpx;
+  padding: calc(86rpx + env(safe-area-inset-top)) var(--hh-page-x) 24rpx;
   background:
-    radial-gradient(circle at 84% 0%, rgba(61, 173, 125, 0.18), transparent 34%),
-    linear-gradient(170deg, #cff5f2 0%, #f2f3f7 46%, var(--hh-color-page) 100%);
+    radial-gradient(circle at 84% 0%, rgba(48, 91, 70, 0.22), transparent 34%),
+    linear-gradient(170deg, #caeee7 0%, #f1f3ee 58%, var(--hh-color-page) 100%);
+}
+
+.home-brandbar {
+  height: 78rpx;
+  margin-bottom: 16rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.home-brand-title-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.home-brand-title {
+  color: #183327;
+  font-family: $hh-font-serif;
+  font-size: 52rpx;
+  line-height: 1;
+  font-weight: 760;
+  letter-spacing: 0;
+  white-space: nowrap;
+  text-shadow: 0 10rpx 22rpx rgba(24, 51, 39, 0.1);
+}
+
+.home-brand-line {
+  position: absolute;
+  left: -56rpx;
+  right: -56rpx;
+  bottom: -12rpx;
+  height: 2rpx;
+  background: linear-gradient(90deg, transparent, rgba(36, 77, 57, 0.38), transparent);
+  pointer-events: none;
 }
 
 .home-topbar {
@@ -2396,26 +2737,38 @@ onShareAppMessage(() => {
 }
 
 .home-shell .home-search-box {
-  min-height: 96rpx;
+  min-height: 90rpx;
+  padding: 0 8rpx 0 30rpx;
   border: 0;
   border-radius: $hh-radius-full;
   box-shadow: none;
+  gap: 15rpx;
 }
 
 .home-shell .home-search-input {
-  height: 96rpx;
-  font-size: var(--hh-text-body-lg-size);
+  height: 90rpx;
+  font-size: 30rpx;
+  line-height: 45rpx;
+}
+
+.home-shell .home-search-icon,
+.home-shell .home-search-placeholder {
+  color: rgba(0, 0, 0, 0.45);
 }
 
 .home-shell .home-search-action {
-  min-width: 112rpx;
-  height: 80rpx;
+  flex: 0 0 150rpx;
+  width: 150rpx;
+  min-width: 0;
+  height: 75rpx;
+  padding: 0;
   background: var(--hh-color-brand-primary);
 }
 
 .home-shell .home-search-action text {
-  font-size: var(--hh-text-body-lg-size);
-  line-height: var(--hh-text-body-lg-line);
+  font-size: 30rpx;
+  line-height: 45rpx;
+  font-weight: $hh-font-weight-medium;
 }
 
 .home-banner {
@@ -2428,20 +2781,13 @@ onShareAppMessage(() => {
 
 .home-banner-swiper,
 .home-banner-slide {
-  position: absolute;
-  inset: 0;
   width: 100%;
   height: 100%;
 }
 
 .home-banner-slide {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.home-banner-slide.active {
-  opacity: 1;
-  pointer-events: auto;
+  position: relative;
+  overflow: hidden;
 }
 
 .home-banner-image,
@@ -2499,6 +2845,7 @@ onShareAppMessage(() => {
 .section-tabs {
   margin: 34rpx 0 20rpx;
   white-space: nowrap;
+  overflow-anchor: none;
 }
 
 .section-tabs-inner {
@@ -2535,42 +2882,18 @@ onShareAppMessage(() => {
 
 .active-archive {
   margin: 0 var(--hh-page-x) 28rpx;
+  box-sizing: border-box;
+  overflow-anchor: none;
 }
 
-.active-archive-head {
-  min-height: 52rpx;
-  margin-bottom: 18rpx;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16rpx;
+.active-archive-body {
+  min-height: inherit;
 }
 
-.active-archive-title-wrap {
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 10rpx;
-}
-
-.active-archive-title {
-  color: var(--hh-color-text-primary);
-  font-size: var(--hh-text-heading-sm-size);
-  line-height: var(--hh-text-heading-sm-line);
-  font-weight: $hh-font-weight-bold;
-}
-
-.active-archive-count,
-.active-archive-arrow {
-  color: var(--hh-color-text-tertiary);
-  font-size: var(--hh-text-caption-lg-size);
-  line-height: var(--hh-text-caption-lg-line);
-}
-
-.active-archive-arrow {
-  flex: 0 0 auto;
-  font-size: 34rpx;
-  line-height: 1;
+.active-archive--default .arc-card {
+  box-sizing: border-box;
+  min-height: inherit;
+  margin-bottom: 0;
 }
 
 .guide-feed {
