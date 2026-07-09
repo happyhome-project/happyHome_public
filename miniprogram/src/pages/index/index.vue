@@ -180,7 +180,7 @@
 
     <!-- Live strip · 实时脉冲区：有激活的实时协作板块时显示 -->
     <view v-if="liveItems.length > 0" class="group-section">
-      <text class="group-section-title">我的组局</text>
+      <text class="group-section-title">活动召集</text>
       <view
         v-for="(item, i) in liveItems"
         :key="i"

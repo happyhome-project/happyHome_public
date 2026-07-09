@@ -77,9 +77,9 @@ assert(
 )
 
 assert(
-  homePage.includes('<text class="group-section-title">我的组局</text>') &&
-    !homePage.includes('<text class="group-section-title">活动召集</text>'),
-  'home live section heading should follow the 0709_v2 Figma label 我的组局.',
+  homePage.includes('<text class="group-section-title">活动召集</text>') &&
+    !homePage.includes('<text class="group-section-title">我的组局</text>'),
+  'home live section heading should use 活动召集.',
 )
 
 assert(
