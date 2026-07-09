@@ -74,8 +74,10 @@ assert(
   tabbar.includes('var(--hh-color-brand-primary)') &&
     tabbar.includes('width: 112rpx') &&
     tabbar.includes('backdrop-filter: blur') &&
-    tabbar.includes('env(safe-area-inset-bottom)'),
-  'custom tabbar should use Figma green, 56px center action, blur, and safe-area aware layout.'
+    tabbar.includes('env(safe-area-inset-bottom)') &&
+    tabbar.includes('HOME_TAB_RETAP_EVENT') &&
+    tabbar.includes('$emit?.(HOME_TAB_RETAP_EVENT)'),
+  'custom tabbar should use Figma green, 56px center action, blur, safe-area aware layout, and retap home to scroll the homepage back to top.'
 )
 
 assert(
@@ -241,6 +243,17 @@ assert(
     home.includes('resolvedHomeBannerCoverUrls') &&
     home.includes('rawHomeBannerCoverImages') &&
     home.includes('homeBannerActiveIndex') &&
+    home.includes('class="home-search home-search--primary"') &&
+    home.includes('class="home-fixed-controls"') &&
+    home.includes('showHomeFixedControls') &&
+    home.includes('homeFixedControlsThresholdPx') &&
+    home.includes('measureHomeFixedControlsThreshold') &&
+    home.includes('scheduleHomeFixedControlsMeasure') &&
+    home.includes('HOME_TAB_RETAP_EVENT') &&
+    home.includes('scrollHomeToTop') &&
+    home.includes('section-tabs--fixed') &&
+    home.includes('section-tabs section-tabs--flow') &&
+    home.includes('is-shadowed-by-fixed') &&
     home.includes('<swiper') &&
     home.includes('<swiper-item') &&
     home.includes('class="home-banner-swiper"') &&
@@ -275,7 +288,7 @@ assert(
     home.includes('`${month}-${day}`') &&
     home.includes('活动召集') &&
     home.includes('class="group-card"') &&
-    home.includes('class="section-tabs"') &&
+    home.includes('class="section-tabs section-tabs--flow"') &&
     home.includes('class="home-search-box"') &&
     home.includes('class="home-search-icon-ring"') &&
     home.includes('class="home-search-icon-handle"') &&
@@ -292,8 +305,16 @@ assert(
     home.includes('archivePreviewMinHeightPx') &&
     home.includes('scheduleArchivePreviewMeasure') &&
     home.includes('shouldCaptureHeight') &&
+    home.includes("group?.displayTemplate === 'guide_note' && archivePreviewMinHeightPx.value > 0") &&
+    home.includes("group.displayTemplate !== 'guide_note' && showHomeFixedControls.value") &&
+    home.includes("return 'min-height: 100vh;'") &&
     home.includes('class="active-archive-body"') &&
     home.includes('active-archive--default .arc-card') &&
+    home.includes('.active-archive--default .arc-card::before') &&
+    home.includes('content: none;') &&
+    home.includes('.active-archive--default .arc-item') &&
+    home.includes('min-height: 78rpx;') &&
+    home.includes('min-height: 0;') &&
     home.includes('restoreArchiveSwitchScroll') &&
     home.includes('uni.pageScrollTo') &&
     !home.includes('active-archive-head') &&
