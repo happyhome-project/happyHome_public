@@ -7,6 +7,18 @@ function read(...segments) {
   return fs.readFileSync(path.join(root, ...segments), 'utf8')
 }
 
+function fileSize(...segments) {
+  return fs.statSync(path.join(root, ...segments)).size
+}
+
+function pngDimensions(...segments) {
+  const buffer = fs.readFileSync(path.join(root, ...segments))
+  return {
+    width: buffer.readUInt32BE(16),
+    height: buffer.readUInt32BE(20),
+  }
+}
+
 function assert(condition, message) {
   if (!condition) throw new Error(message)
 }
@@ -62,8 +74,54 @@ assert(
   tabbar.includes('var(--hh-color-brand-primary)') &&
     tabbar.includes('width: 112rpx') &&
     tabbar.includes('backdrop-filter: blur') &&
-    tabbar.includes('env(safe-area-inset-bottom)'),
-  'custom tabbar should use Figma green, 56px center action, blur, and safe-area aware layout.'
+    tabbar.includes('env(safe-area-inset-bottom)') &&
+    tabbar.includes('HOME_TAB_RETAP_EVENT') &&
+    tabbar.includes('$emit?.(HOME_TAB_RETAP_EVENT)'),
+  'custom tabbar should use Figma green, 56px center action, blur, safe-area aware layout, and retap home to scroll the homepage back to top.'
+)
+
+assert(
+    tabbar.includes('class="tab-icon"') &&
+    tabbar.includes("tabIconSrc('home')") &&
+    tabbar.includes("tabIconSrc('profile')") &&
+    tabbar.includes('/static/tab-home-active.png') &&
+    tabbar.includes('/static/tab-home.png') &&
+    tabbar.includes('/static/tab-profile-active.png') &&
+    tabbar.includes('/static/tab-profile.png') &&
+    tabbar.includes('首页') &&
+    tabbar.includes('我的') &&
+    !tabbar.includes('active-dot') &&
+    !tabbar.includes('/static/tab-icons/') &&
+    !tabbar.includes('&nbsp;'),
+  'custom tabbar should follow the Figma three-column nav: PNG icon + label selected/unselected states, without the old active dot, SVG runtime paths, or spaced labels.'
+)
+
+for (const iconFile of [
+  'tab-home.png',
+  'tab-home-active.png',
+  'tab-profile.png',
+  'tab-profile-active.png',
+]) {
+  const size = fileSize('miniprogram', 'src', 'static', iconFile)
+  const dimensions = pngDimensions('miniprogram', 'src', 'static', iconFile)
+  assert(
+    size > 900 && size < 40 * 1024 && dimensions.width === 81 && dimensions.height === 81,
+    `${iconFile} should be a real native-tab fallback icon, not the old tiny placeholder block.`
+  )
+}
+
+assert(
+  pagesConfig.tabBar?.list?.some((item) =>
+    item.pagePath === 'pages/index/index' &&
+    item.iconPath === 'static/tab-home.png' &&
+    item.selectedIconPath === 'static/tab-home-active.png'
+  ) &&
+    pagesConfig.tabBar?.list?.some((item) =>
+      item.pagePath === 'pages/profile/index' &&
+      item.iconPath === 'static/tab-profile.png' &&
+      item.selectedIconPath === 'static/tab-profile-active.png'
+    ),
+  'native tabBar fallback should be wired to the real PNG home/profile icons in pages.json.'
 )
 
 assert(
@@ -171,18 +229,31 @@ assert(
 
 assert(
     home.includes('class="home-shell"') &&
-    home.includes('class="home-brandbar"') &&
-    home.includes('class="home-brand-title"') &&
-    home.includes('社群助手') &&
+    !home.includes('class="home-brandbar"') &&
+    !home.includes('class="home-brand-title"') &&
     home.includes('class="home-quote"') &&
     home.includes('quoteText') &&
+    home.includes("'Source Han Serif SC', 'Noto Serif CJK SC', '思源宋体'") &&
     home.includes('placeholder="搜索帖子、正文、视频"') &&
     home.includes('class="home-banner"') &&
     home.includes('homeBannerItems') &&
+    home.includes("imageKey: buildHomeImageKey('banner', coverImage || rawCover") &&
+    home.includes("imageKey: buildHomeImageKey('guide', resolvedCover || guide.coverImage") &&
     home.includes('openHomeBanner') &&
     home.includes('resolvedHomeBannerCoverUrls') &&
     home.includes('rawHomeBannerCoverImages') &&
     home.includes('homeBannerActiveIndex') &&
+    home.includes('class="home-search home-search--primary"') &&
+    home.includes('class="home-fixed-controls"') &&
+    home.includes('showHomeFixedControls') &&
+    home.includes('homeFixedControlsThresholdPx') &&
+    home.includes('measureHomeFixedControlsThreshold') &&
+    home.includes('scheduleHomeFixedControlsMeasure') &&
+    home.includes('HOME_TAB_RETAP_EVENT') &&
+    home.includes('scrollHomeToTop') &&
+    home.includes('section-tabs--fixed') &&
+    home.includes('section-tabs section-tabs--flow') &&
+    home.includes('is-shadowed-by-fixed') &&
     home.includes('<swiper') &&
     home.includes('<swiper-item') &&
     home.includes('class="home-banner-swiper"') &&
@@ -207,15 +278,22 @@ assert(
     !/class="home-banner-slide"[\s\S]{0,120}:class="\{ active: i === homeBannerActiveIndex \}"/.test(home) &&
     !home.includes('.home-banner-slide.active') &&
     home.includes('class="notice-board"') &&
+    home.includes('class="notice-kind-image"') &&
+    home.includes('src="/static/home-notice-title.png"') &&
+    home.includes('class="notice-lines"') &&
     home.includes('noticeRows') &&
-    home.includes('{{ notice.kind }}') &&
+    !home.includes('{{ notice.kind }}') &&
     !home.includes('notice.sectionName || notice.label') &&
+    home.includes("padStart(2, '0')") &&
+    home.includes('`${month}-${day}`') &&
     home.includes('活动召集') &&
     home.includes('class="group-card"') &&
-    home.includes('class="section-tabs"') &&
+    home.includes('class="section-tabs section-tabs--flow"') &&
     home.includes('class="home-search-box"') &&
     home.includes('class="home-search-icon-ring"') &&
     home.includes('class="home-search-icon-handle"') &&
+    home.includes('class="switch-icon">⇄</text>') &&
+    home.includes('gap: 12px;') &&
     home.includes('min-height: 90rpx;') &&
     home.includes('padding: 0 8rpx 0 30rpx;') &&
     home.includes('flex: 0 0 150rpx;') &&
@@ -227,8 +305,16 @@ assert(
     home.includes('archivePreviewMinHeightPx') &&
     home.includes('scheduleArchivePreviewMeasure') &&
     home.includes('shouldCaptureHeight') &&
+    home.includes("group?.displayTemplate === 'guide_note' && archivePreviewMinHeightPx.value > 0") &&
+    home.includes("group.displayTemplate !== 'guide_note' && showHomeFixedControls.value") &&
+    home.includes("return 'min-height: 100vh;'") &&
     home.includes('class="active-archive-body"') &&
     home.includes('active-archive--default .arc-card') &&
+    home.includes('.active-archive--default .arc-card::before') &&
+    home.includes('content: none;') &&
+    home.includes('.active-archive--default .arc-item') &&
+    home.includes('min-height: 78rpx;') &&
+    home.includes('min-height: 0;') &&
     home.includes('restoreArchiveSwitchScroll') &&
     home.includes('uni.pageScrollTo') &&
     !home.includes('active-archive-head') &&
