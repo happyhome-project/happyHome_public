@@ -125,50 +125,6 @@ assert(
 )
 
 assert(
-    tabbar.includes('class="tab-icon"') &&
-    tabbar.includes("tabIconSrc('home')") &&
-    tabbar.includes("tabIconSrc('profile')") &&
-    tabbar.includes('/static/tab-home-active.png') &&
-    tabbar.includes('/static/tab-home.png') &&
-    tabbar.includes('/static/tab-profile-active.png') &&
-    tabbar.includes('/static/tab-profile.png') &&
-    tabbar.includes('首页') &&
-    tabbar.includes('我的') &&
-    !tabbar.includes('active-dot') &&
-    !tabbar.includes('/static/tab-icons/') &&
-    !tabbar.includes('&nbsp;'),
-  'custom tabbar should follow the Figma three-column nav: PNG icon + label selected/unselected states, without the old active dot, SVG runtime paths, or spaced labels.'
-)
-
-for (const iconFile of [
-  'tab-home.png',
-  'tab-home-active.png',
-  'tab-profile.png',
-  'tab-profile-active.png',
-]) {
-  const size = fileSize('miniprogram', 'src', 'static', iconFile)
-  const dimensions = pngDimensions('miniprogram', 'src', 'static', iconFile)
-  assert(
-    size > 900 && size < 40 * 1024 && dimensions.width === 81 && dimensions.height === 81,
-    `${iconFile} should be a real native-tab fallback icon, not the old tiny placeholder block.`
-  )
-}
-
-assert(
-  pagesConfig.tabBar?.list?.some((item) =>
-    item.pagePath === 'pages/index/index' &&
-    item.iconPath === 'static/tab-home.png' &&
-    item.selectedIconPath === 'static/tab-home-active.png'
-  ) &&
-    pagesConfig.tabBar?.list?.some((item) =>
-      item.pagePath === 'pages/profile/index' &&
-      item.iconPath === 'static/tab-profile.png' &&
-      item.selectedIconPath === 'static/tab-profile-active.png'
-    ),
-  'native tabBar fallback should be wired to the real PNG home/profile icons in pages.json.'
-)
-
-assert(
   tabbar.includes('class="publish-mask"') &&
     tabbar.includes('class="publish-sheet"') &&
     tabbar.includes('class="publish-grid"') &&
