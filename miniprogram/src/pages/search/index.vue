@@ -486,9 +486,11 @@ function formatDate(value: unknown): string {
   if (Number.isNaN(d.getTime())) return ''
   const now = new Date()
   const sameYear = d.getFullYear() === now.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
   return sameYear
-    ? `${d.getMonth() + 1}/${d.getDate()}`
-    : `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`
+    ? `${month}-${day}`
+    : `${d.getFullYear()}-${month}-${day}`
 }
 </script>
 
