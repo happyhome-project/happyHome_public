@@ -18,6 +18,7 @@ import {
 const DEFAULT_TIMEOUT_MS = 120000
 const DEFAULT_ACTOR = 'post-search-rebuild'
 const DEFAULT_BATCH_SIZE = 5
+const DEFAULT_ADMIN_INVOKE_RETRIES = 3
 
 function getFlagValue(argv, name, fallback = '') {
   const equalsArg = argv.find((arg) => arg.startsWith(`--${name}=`))
@@ -62,6 +63,11 @@ function normalizeTimeoutMs(value) {
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_TIMEOUT_MS
 }
 
+function normalizePositiveInt(value, fallback) {
+  const n = Math.floor(Number(value || fallback))
+  return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
 export function parseRebuildArgs(argv = process.argv.slice(2), env = process.env) {
   return {
     help: argv.includes('--help') || argv.includes('-h'),
@@ -77,6 +83,11 @@ export function parseRebuildArgs(argv = process.argv.slice(2), env = process.env
       env.HH_POST_SEARCH_REBUILD_BATCH_SIZE || String(DEFAULT_BATCH_SIZE),
     )) || DEFAULT_BATCH_SIZE))),
     actor: getFlagValue(argv, 'actor', DEFAULT_ACTOR),
+    adminInvokeRetries: normalizePositiveInt(getFlagValue(
+      argv,
+      'admin-invoke-retries',
+      env.HH_POST_SEARCH_REBUILD_ADMIN_INVOKE_RETRIES || String(DEFAULT_ADMIN_INVOKE_RETRIES),
+    ), DEFAULT_ADMIN_INVOKE_RETRIES),
     allActive: argv.includes('--all-active'),
     includeDisabled: argv.includes('--include-disabled'),
     dryRun: argv.includes('--dry-run'),
@@ -119,6 +130,15 @@ function writePayloadFile(payload) {
   return { dir, file }
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isTransientInvokeFailure(value) {
+  const text = String(value?.message || value?.error || value?.stderr || value?.stdout || value || '')
+  return /ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket disconnected|TLS connection|RequestTimeout|context deadline exceeded|\[object Object\]/i.test(text)
+}
+
 export async function invokeAdmin(action, params, options, runner = defaultRunner) {
   const payload = makeAdminPayload(action, params, options.actor)
   const payloadFile = writePayloadFile(payload)
@@ -137,9 +157,17 @@ export async function invokeAdmin(action, params, options, runner = defaultRunne
     ])
 
     commandLine = formatCommand(built.command, built.args)
-    result = await runner(built.command, built.args, {
-      timeoutMs: options.commandTimeoutMs,
-    })
+    const maxAttempts = normalizePositiveInt(options.adminInvokeRetries, DEFAULT_ADMIN_INVOKE_RETRIES)
+    let lastTransientFailure
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      result = await runner(built.command, built.args, {
+        timeoutMs: options.commandTimeoutMs,
+      })
+      if (!isTransientInvokeFailure(result) || result.status === 0 || attempt >= maxAttempts) break
+      lastTransientFailure = result
+      await delay(Math.min(10000, 1000 * attempt))
+    }
+    if (!result && lastTransientFailure) result = lastTransientFailure
   } finally {
     rmSync(payloadFile.dir, { recursive: true, force: true })
   }
@@ -321,6 +349,7 @@ Options:
   --batch-size <n>              Posts per cloud invocation for section rebuilds. Defaults to ${DEFAULT_BATCH_SIZE}.
   --env-id <envId>              CloudBase env id. Defaults to TCB_ENV or ${DEFAULT_ENV_ID}.
   --command-timeout-ms <ms>     Per-invocation timeout. Defaults to ${DEFAULT_TIMEOUT_MS}.
+  --admin-invoke-retries <n>    Retries for transient admin invocation failures. Defaults to ${DEFAULT_ADMIN_INVOKE_RETRIES}.
 `)
 }
 

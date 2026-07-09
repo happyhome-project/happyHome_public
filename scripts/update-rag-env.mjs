@@ -25,30 +25,80 @@ function loadDotEnvFile(filePath) {
 
 const home = os.homedir()
 const camEnv = loadDotEnvFile(path.join(home, '.happyhome', 'cam.env'))
-const lkeapEnv = loadDotEnvFile(path.join(home, '.happyhome', 'tencent-lkeap.env'))
+const ragEnv = loadDotEnvFile(path.join(home, '.happyhome', 'tencent-rag.env'))
 
 const envId = process.env.TCB_ENV || camEnv.TCB_ENV || 'cloudbase-3gh862acb1505ff3'
 const managerSecretId = process.env.TENCENTCLOUD_SECRETID || camEnv.TENCENTCLOUD_SECRETID
 const managerSecretKey = process.env.TENCENTCLOUD_SECRETKEY || camEnv.TENCENTCLOUD_SECRETKEY
+const MAX_HTTP_RETRIES = Math.max(1, Math.floor(Number(process.env.TENCENT_RAG_HTTP_RETRIES || 5)))
 
 if (!managerSecretId || !managerSecretKey) {
   console.error('[rag-env] Missing manager TENCENTCLOUD_SECRETID / TENCENTCLOUD_SECRETKEY in env or ~/.happyhome/cam.env')
   process.exit(1)
 }
 
+const baseEnv = {
+  TENCENT_RAG_PROVIDER: 'es',
+  TENCENT_RAG_ES_ENDPOINT: process.env.TENCENT_RAG_ES_ENDPOINT || ragEnv.TENCENT_RAG_ES_ENDPOINT,
+  TENCENT_RAG_ES_USERNAME: process.env.TENCENT_RAG_ES_USERNAME || ragEnv.TENCENT_RAG_ES_USERNAME,
+  TENCENT_RAG_ES_PASSWORD: process.env.TENCENT_RAG_ES_PASSWORD || ragEnv.TENCENT_RAG_ES_PASSWORD,
+  TENCENT_RAG_INDEX_NAME: process.env.TENCENT_RAG_INDEX_NAME || ragEnv.TENCENT_RAG_INDEX_NAME || 'happyhome_post_rag_chunks',
+  TENCENT_RAG_VECTOR_FIELD: process.env.TENCENT_RAG_VECTOR_FIELD || ragEnv.TENCENT_RAG_VECTOR_FIELD || 'embedding',
+}
+
+const atomicEnv = {
+  TENCENT_RAG_ATOMIC_SECRET_ID: process.env.TENCENT_RAG_ATOMIC_SECRET_ID || ragEnv.TENCENT_RAG_ATOMIC_SECRET_ID || camEnv.TENCENTCLOUD_SECRETID,
+  TENCENT_RAG_ATOMIC_SECRET_KEY: process.env.TENCENT_RAG_ATOMIC_SECRET_KEY || ragEnv.TENCENT_RAG_ATOMIC_SECRET_KEY || camEnv.TENCENTCLOUD_SECRETKEY,
+  TENCENT_RAG_ATOMIC_REGION: process.env.TENCENT_RAG_ATOMIC_REGION || ragEnv.TENCENT_RAG_ATOMIC_REGION || 'ap-beijing',
+  TENCENT_RAG_EMBEDDING_MODEL: process.env.TENCENT_RAG_EMBEDDING_MODEL || ragEnv.TENCENT_RAG_EMBEDDING_MODEL || 'bge-base-zh-v1.5',
+  TENCENT_RAG_RERANK_MODEL: process.env.TENCENT_RAG_RERANK_MODEL || ragEnv.TENCENT_RAG_RERANK_MODEL || 'bge-reranker-large',
+  TENCENT_RAG_LLM_MODEL: process.env.TENCENT_RAG_LLM_MODEL || ragEnv.TENCENT_RAG_LLM_MODEL || 'deepseek-v3',
+}
+
+const inferenceEnv = {
+  TENCENT_RAG_EMBEDDING_INFERENCE_ID: process.env.TENCENT_RAG_EMBEDDING_INFERENCE_ID || ragEnv.TENCENT_RAG_EMBEDDING_INFERENCE_ID,
+  TENCENT_RAG_RERANK_INFERENCE_ID: process.env.TENCENT_RAG_RERANK_INFERENCE_ID || ragEnv.TENCENT_RAG_RERANK_INFERENCE_ID,
+  TENCENT_RAG_LLM_INFERENCE_ID: process.env.TENCENT_RAG_LLM_INFERENCE_ID || ragEnv.TENCENT_RAG_LLM_INFERENCE_ID,
+}
+
+const hasAtomicModelConfig = Object.values(atomicEnv).every(Boolean)
+const hasInferenceModelConfig = Object.values(inferenceEnv).every(Boolean)
 const targetEnv = {
-  TENCENT_RAG_PROVIDER: 'lkeap',
-  TENCENT_LKEAP_SECRET_ID: process.env.RAG_TENCENTCLOUD_SECRETID || process.env.TENCENT_LKEAP_SECRET_ID || lkeapEnv.TENCENTCLOUD_SECRETID || lkeapEnv.TENCENT_LKEAP_SECRET_ID,
-  TENCENT_LKEAP_SECRET_KEY: process.env.RAG_TENCENTCLOUD_SECRETKEY || process.env.TENCENT_LKEAP_SECRET_KEY || lkeapEnv.TENCENTCLOUD_SECRETKEY || lkeapEnv.TENCENT_LKEAP_SECRET_KEY,
-  TENCENT_LKEAP_REGION: process.env.TENCENT_LKEAP_REGION || lkeapEnv.TENCENT_LKEAP_REGION || 'ap-guangzhou',
-  TENCENT_LKEAP_EMBEDDING_MODEL: process.env.TENCENT_LKEAP_EMBEDDING_MODEL || lkeapEnv.TENCENT_LKEAP_EMBEDDING_MODEL || 'lke-text-embedding-v2',
-  TENCENT_LKEAP_RERANK_MODEL: process.env.TENCENT_LKEAP_RERANK_MODEL || lkeapEnv.TENCENT_LKEAP_RERANK_MODEL || 'lke-reranker-base',
-  TENCENT_LKEAP_CHAT_MODEL: process.env.TENCENT_LKEAP_CHAT_MODEL || lkeapEnv.TENCENT_LKEAP_CHAT_MODEL || 'deepseek-v3-0324',
+  ...baseEnv,
+  ...(hasAtomicModelConfig ? atomicEnv : {}),
+  ...(hasInferenceModelConfig ? inferenceEnv : {}),
 }
 
 const workerEnv = {
   POST_RAG_WORKER_TOKEN: resolvePostRagWorkerToken(),
 }
+
+function configuredEnv(values) {
+  return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined && value !== ''))
+}
+
+const videoPolicyEnv = configuredEnv({
+  POST_VIDEO_RAG_ANALYSIS_ENABLED: process.env.POST_VIDEO_RAG_ANALYSIS_ENABLED || ragEnv.POST_VIDEO_RAG_ANALYSIS_ENABLED || 'false',
+  POST_VIDEO_RAG_MAX_JOBS_PER_POST: process.env.POST_VIDEO_RAG_MAX_JOBS_PER_POST || ragEnv.POST_VIDEO_RAG_MAX_JOBS_PER_POST || '1',
+  POST_VIDEO_RAG_MAX_FRAMES_PER_VIDEO: process.env.POST_VIDEO_RAG_MAX_FRAMES_PER_VIDEO || ragEnv.POST_VIDEO_RAG_MAX_FRAMES_PER_VIDEO || '0',
+  POST_VIDEO_RAG_MAX_ASR_SECONDS_PER_VIDEO: process.env.POST_VIDEO_RAG_MAX_ASR_SECONDS_PER_VIDEO || ragEnv.POST_VIDEO_RAG_MAX_ASR_SECONDS_PER_VIDEO || '3600',
+  POST_VIDEO_RAG_MAX_COST_UNITS_PER_POST: process.env.POST_VIDEO_RAG_MAX_COST_UNITS_PER_POST || ragEnv.POST_VIDEO_RAG_MAX_COST_UNITS_PER_POST || '120',
+  POST_VIDEO_RAG_MIN_TEXT_CHARS_FOR_ANALYSIS: process.env.POST_VIDEO_RAG_MIN_TEXT_CHARS_FOR_ANALYSIS || ragEnv.POST_VIDEO_RAG_MIN_TEXT_CHARS_FOR_ANALYSIS || '48',
+})
+
+const videoAnalyzerEnv = configuredEnv({
+  POST_VIDEO_RAG_ASR_SECRET_ID: process.env.POST_VIDEO_RAG_ASR_SECRET_ID || ragEnv.POST_VIDEO_RAG_ASR_SECRET_ID,
+  POST_VIDEO_RAG_ASR_SECRET_KEY: process.env.POST_VIDEO_RAG_ASR_SECRET_KEY || ragEnv.POST_VIDEO_RAG_ASR_SECRET_KEY,
+  POST_VIDEO_RAG_ASR_REGION: process.env.POST_VIDEO_RAG_ASR_REGION || ragEnv.POST_VIDEO_RAG_ASR_REGION || 'ap-guangzhou',
+  POST_VIDEO_RAG_ASR_ENGINE_MODEL_TYPE: process.env.POST_VIDEO_RAG_ASR_ENGINE_MODEL_TYPE || ragEnv.POST_VIDEO_RAG_ASR_ENGINE_MODEL_TYPE || '16k_zh',
+  POST_VIDEO_RAG_ASR_CHANNEL_NUM: process.env.POST_VIDEO_RAG_ASR_CHANNEL_NUM || ragEnv.POST_VIDEO_RAG_ASR_CHANNEL_NUM || '1',
+  POST_VIDEO_RAG_ASR_RES_TEXT_FORMAT: process.env.POST_VIDEO_RAG_ASR_RES_TEXT_FORMAT || ragEnv.POST_VIDEO_RAG_ASR_RES_TEXT_FORMAT || '0',
+  POST_VIDEO_RAG_TOKENHUB_API_KEY: process.env.POST_VIDEO_RAG_TOKENHUB_API_KEY || ragEnv.POST_VIDEO_RAG_TOKENHUB_API_KEY,
+  POST_VIDEO_RAG_TOKENHUB_MODEL: process.env.POST_VIDEO_RAG_TOKENHUB_MODEL || ragEnv.POST_VIDEO_RAG_TOKENHUB_MODEL,
+  POST_VIDEO_RAG_TOKENHUB_BASE_URL: process.env.POST_VIDEO_RAG_TOKENHUB_BASE_URL || ragEnv.POST_VIDEO_RAG_TOKENHUB_BASE_URL,
+  POST_VIDEO_RAG_ANALYZER_URL: process.env.POST_VIDEO_RAG_ANALYZER_URL || ragEnv.POST_VIDEO_RAG_ANALYZER_URL,
+  POST_VIDEO_RAG_ANALYZER_TOKEN: process.env.POST_VIDEO_RAG_ANALYZER_TOKEN || ragEnv.POST_VIDEO_RAG_ANALYZER_TOKEN,
+})
 
 const functionNames = (process.argv.find((arg) => arg.startsWith('--only='))?.slice('--only='.length) || 'post,post-rag-worker,post-video-rag-worker')
   .split(',')
@@ -57,9 +107,19 @@ const functionNames = (process.argv.find((arg) => arg.startsWith('--only='))?.sl
 
 const workerFunctions = new Set(['post-rag-worker', 'post-video-rag-worker'])
 
-const missing = Object.entries(targetEnv)
+const missing = Object.entries(baseEnv)
   .filter(([, value]) => !value)
   .map(([key]) => key)
+
+if (!hasAtomicModelConfig && !hasInferenceModelConfig) {
+  const atomicMissing = Object.entries(atomicEnv)
+    .filter(([, value]) => !value)
+    .map(([key]) => key)
+  const inferenceMissing = Object.entries(inferenceEnv)
+    .filter(([, value]) => !value)
+    .map(([key]) => key)
+  missing.push(...(atomicMissing.length < inferenceMissing.length ? atomicMissing : inferenceMissing))
+}
 
 if (functionNames.some((functionName) => workerFunctions.has(functionName)) && !workerEnv.POST_RAG_WORKER_TOKEN) {
   missing.push('POST_RAG_WORKER_TOKEN')
@@ -67,7 +127,7 @@ if (functionNames.some((functionName) => workerFunctions.has(functionName)) && !
 
 if (missing.length > 0) {
   console.error(`[rag-env] Missing RAG env values: ${missing.join(', ')}`)
-  console.error('  Expected LKEAP file: ~/.happyhome/tencent-lkeap.env')
+  console.error('  Expected Tencent ES RAG file: ~/.happyhome/tencent-rag.env')
   process.exit(1)
 }
 
@@ -78,13 +138,43 @@ function redact(value, key) {
 
 const app = CloudBase.init({ secretId: managerSecretId, secretKey: managerSecretKey, envId })
 
+function isTransientCloudApiError(error) {
+  const text = String(error?.message || error?.code || error?.original?.Code || error?.original?.Message || error)
+  return /ECONNRESET|ETIMEDOUT|TLS connection|socket disconnected|ENOTFOUND|EAI_AGAIN|FetchError|Updating状态|FailedOperation\.UpdateFunctionConfiguration/i.test(text)
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function withTransientRetry(label, fn) {
+  let lastError
+  for (let attempt = 1; attempt <= MAX_HTTP_RETRIES; attempt += 1) {
+    try {
+      return await fn()
+    } catch (error) {
+      lastError = error
+      if (!isTransientCloudApiError(error) || attempt >= MAX_HTTP_RETRIES) throw error
+      console.warn(`[rag-env] transient ${label} failure; retry ${attempt + 1}/${MAX_HTTP_RETRIES}`)
+      await delay(Math.min(10000, 1000 * attempt))
+    }
+  }
+  throw lastError
+}
+
 for (const functionName of functionNames) {
-  const detail = await app.functions.getFunctionDetail(functionName)
+  const detail = await withTransientRetry(`${functionName}.getFunctionDetail`, () =>
+    app.functions.getFunctionDetail(functionName)
+  )
   const existing = {}
   for (const item of detail?.Environment?.Variables || []) existing[item.Key] = item.Value
-  const envForFunction = workerFunctions.has(functionName) ? { ...targetEnv, ...workerEnv } : targetEnv
+  const envForFunction = functionName === 'post-video-rag-worker' ? { ...targetEnv, ...workerEnv, ...videoPolicyEnv, ...videoAnalyzerEnv } : (
+    functionName === 'post-rag-worker' ? { ...targetEnv, ...workerEnv, ...videoPolicyEnv } : targetEnv
+  )
   const merged = { ...existing, ...envForFunction }
-  await app.functions.updateFunctionConfig({ name: functionName, envVariables: merged })
+  await withTransientRetry(`${functionName}.updateFunctionConfig`, () =>
+    app.functions.updateFunctionConfig({ name: functionName, envVariables: merged })
+  )
   console.log(`[rag-env] ${functionName} updated`)
   console.table(Object.entries(envForFunction).map(([Key, Value]) => ({ Key, Value: redact(Value, Key) })))
 }

@@ -9,8 +9,8 @@ import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
 
 export const DEFAULT_RAG_WORKER_TIMEOUT_SECONDS = 120
 export const DEFAULT_RAG_WORKER_MEMORY_MB = 512
-export const DEFAULT_POST_RAG_CRON = '*/5 * * * * * *'
-export const DEFAULT_POST_VIDEO_RAG_CRON = '*/10 * * * * * *'
+export const DEFAULT_POST_RAG_CRON = '0 */5 * * * * *'
+export const DEFAULT_POST_VIDEO_RAG_CRON = '0 */10 * * * * *'
 
 function loadDotEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return {}
