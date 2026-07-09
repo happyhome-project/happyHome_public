@@ -527,6 +527,9 @@ function secType(s: any): 'realtime' | 'evergreen' {
 function secStatus(s: any): 'active' | 'dormant' | 'archived' {
   return s?.status === 'dormant' || s?.status === 'archived' ? s.status : 'active'
 }
+function sectionIconGlyph(section: any, fallback = '·'): string {
+  return String(section?.icon || '').trim() || fallback
+}
 
 interface SectionNotice {
   id: string
@@ -562,7 +565,7 @@ const sectionNotices = computed<SectionNotice[]>(() => {
         content,
         preview,
         isLong: Array.from(content).length > NOTICE_PREVIEW_LIMIT,
-        icon: section.icon || '告',
+        icon: sectionIconGlyph(section, '告'),
         accentColor: section.accentColor || '',
         when: formatHomeRelativeTime((section as any).updatedAt || section.createdAt),
       })
@@ -592,7 +595,7 @@ const liveItems = computed<LiveItem[]>(() => {
     for (const post of posts) {
       reportMissingHomeTitle(post, section, 'home.live')
       items.push({
-        ic: section.icon || '·',
+        ic: sectionIconGlyph(section),
         t: getPostHomeTitle(post, section) || section.name,
         m: getHomeLiveMeta(post, section),
         cta: '进入',
@@ -908,7 +911,9 @@ function formatArchiveWhen(iso?: string): string {
   if (Number.isNaN(d.getTime())) return ''
   const now = new Date()
   const sameYear = d.getFullYear() === now.getFullYear()
-  return sameYear ? `${d.getMonth() + 1}/${d.getDate()}` : `${d.getFullYear()}/${d.getMonth() + 1}`
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return sameYear ? `${month}-${day}` : `${d.getFullYear()}-${month}`
 }
 
 function isPostHot(post: any): boolean {
@@ -946,7 +951,9 @@ function formatHomeRelativeTime(value: unknown): string {
   const diffHours = Math.floor(diffMinutes / 60)
   if (diffHours < 24) return `${diffHours}小时前`
   const sameYear = date.getFullYear() === new Date().getFullYear()
-  return sameYear ? `${date.getMonth() + 1}/${date.getDate()}` : `${date.getFullYear()}/${date.getMonth() + 1}`
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return sameYear ? `${month}-${day}` : `${date.getFullYear()}-${month}`
 }
 
 function getAuthorInitial(author?: string): string {
@@ -2156,7 +2163,7 @@ onShareAppMessage(() => {
 .group-card {
   position: relative;
   min-height: 104rpx;
-  padding: 18rpx 26rpx 18rpx 18rpx;
+  padding: 18rpx 104rpx 18rpx 18rpx;
   border: 1rpx solid $hh-ink-line;
   border-radius: 16rpx;
   background: $hh-surface-1;
@@ -2216,9 +2223,9 @@ onShareAppMessage(() => {
 
 .group-ribbon {
   position: absolute;
-  right: -42rpx;
-  top: 8rpx;
-  width: 118rpx;
+  right: -30rpx;
+  top: 20rpx;
+  width: 108rpx;
   height: 34rpx;
   transform: rotate(45deg);
   background: #ffd66e;
@@ -2931,21 +2938,25 @@ onShareAppMessage(() => {
   line-height: var(--hh-text-heading-sm-line);
   font-weight: $hh-font-weight-regular;
   white-space: nowrap;
+  padding: 0 12rpx;
+  border-radius: $hh-radius-full;
+  transition: background 160ms ease, color 160ms ease;
 }
 
 .section-tab.active {
   font-weight: $hh-font-weight-bold;
+  background: rgba(61, 173, 125, 0.16);
 }
 
 .section-tab.active::after {
   content: "";
   position: absolute;
-  left: 18rpx;
-  right: -8rpx;
-  bottom: 8rpx;
-  height: 18rpx;
+  left: 12rpx;
+  right: 12rpx;
+  bottom: 6rpx;
+  height: 16rpx;
   border-radius: $hh-radius-full;
-  background: linear-gradient(90deg, rgba(61, 173, 125, 0.34), rgba(61, 173, 125, 0));
+  background: rgba(61, 173, 125, 0.12);
   z-index: -1;
 }
 
