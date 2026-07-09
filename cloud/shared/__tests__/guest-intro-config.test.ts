@@ -5,20 +5,20 @@ import {
 } from '../guest-intro-config'
 
 describe('guest intro config', () => {
-  test('normalizes an empty config to the B1-a default copy', () => {
+  test('normalizes an empty config to the Figma welcome default copy', () => {
     const config = normalizeGuestIntroConfig(null)
 
     expect(config.enabled).toBe(true)
-    expect(config.title).toBe('以后社群里的事，可以从这里找')
-    expect(config.body).toContain('青山村样板')
-    expect(config.body).toContain('自己的社群')
+    expect(config.title).toBe('「专属社群空间」')
+    expect(config.body).toContain('志同道合的邻居')
+    expect(config.body).toContain('更美好的社区')
     expect(config.features).toEqual([
       { key: 'recent', label: '看最近', text: '通知、活动、课程安排' },
       { key: 'materials', label: '找资料', text: '就医、出行、电话和地点' },
       { key: 'history', label: '翻历史', text: '以前整理过的有用内容' },
     ])
-    expect(config.primaryActionText).toBe('先看看样板')
-    expect(config.secondaryActionText).toBe('登录后加入或创建社群')
+    expect(config.primaryActionText).toBe('微信一键登录')
+    expect(config.secondaryActionText).toBe('免费创建我的社群')
   })
 
   test('trims editable fields and fills missing feature rows from defaults', () => {
