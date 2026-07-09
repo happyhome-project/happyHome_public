@@ -133,7 +133,7 @@ describe('buildGuideRouteDetail', () => {
     expect(detail.images).toEqual(['cloud://env/cover.jpg'])
     expect(detail.bodySections).toEqual([
       {
-        title: '',
+        title: '线路介绍',
         type: 'rich_note',
         value: expect.objectContaining({
           markdown: '线路概述：经过桂溪公园、中和湿地公园，寻找网红白房子\n\n![图片](cloud://env/body.jpg)\n\n线路行程：11+公里',
@@ -189,7 +189,7 @@ describe('buildGuideRouteDetail', () => {
     const [body] = buildGuideRouteDetail(post, section).bodySections
 
     expect(body).toEqual({
-      title: '',
+      title: '线路介绍',
       type: 'rich_note',
       value: expect.objectContaining({ markdown }),
     })

@@ -12,7 +12,7 @@
             <view class="publish-icon" :class="`publish-icon--${option.tone}`">
               <image class="publish-icon-image" :src="option.iconSrc" mode="aspectFit" />
             </view>
-            <text class="publish-label">{{ option.section.name }}</text>
+            <text class="publish-label">{{ option.label }}</text>
           </button>
         </view>
         <button class="publish-close" aria-label="关闭发布面板" @tap="closePublishSheet">
@@ -64,6 +64,7 @@ const props = defineProps<{ current: AppTabKey }>()
 const communityStore = useCommunityStore()
 const showPublishSheet = ref(false)
 const HOME_TAB_RETAP_EVENT = 'happyhome:home-tab-retap'
+const RETIRED_ACTIVITY_INVITE_NAME = ['我的', '组局'].join('')
 
 const activePublishSections = computed(() =>
   (communityStore.currentSections || []).filter((section: any) => (
@@ -76,6 +77,7 @@ const publishOptions = computed(() =>
     const meta = resolvePublishMeta(section?.name, index)
     return {
       section,
+      label: displayPublishSectionName(section?.name),
       tone: meta.tone,
       iconSrc: meta.iconSrc,
     }
@@ -188,6 +190,13 @@ function resolvePublishMeta(name: unknown, index: number) {
     tone,
     iconSrc: iconByTone[tone],
   }
+}
+
+function displayPublishSectionName(name: unknown) {
+  const text = String(name || '').trim()
+  if (!text) return '发布'
+  if (text === RETIRED_ACTIVITY_INVITE_NAME || text === '组局') return '活动召集'
+  return text
 }
 
 void APP_TABS

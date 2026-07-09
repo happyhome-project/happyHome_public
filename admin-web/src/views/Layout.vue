@@ -27,14 +27,6 @@
         <el-menu-item data-testid="menu-communities" index="/communities">
           {{ authStore.isSuperAdmin ? '社区管理' : '我的社区' }}
         </el-menu-item>
-        <el-menu-item data-testid="menu-community-create" index="/communities/new">
-          创建社区
-        </el-menu-item>
-        <el-menu-item
-          v-if="authStore.isSuperAdmin"
-          data-testid="menu-disabled-communities"
-          index="/disabled-communities"
-        >已禁用社区</el-menu-item>
         <el-menu-item
           v-if="authStore.isSuperAdmin"
           data-testid="menu-admin-accounts"

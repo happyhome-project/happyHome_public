@@ -24,8 +24,9 @@ const homePage = readProjectFile('miniprogram', 'src', 'pages', 'index', 'index.
 const searchPage = readProjectFile('miniprogram', 'src', 'pages', 'search', 'index.vue')
 const cloudApi = readProjectFile('miniprogram', 'src', 'api', 'cloud.ts')
 
-assertIncludes(homePage, 'class="home-search"', 'home search entry')
-assertIncludes(homePage, 'placeholder="搜索帖子、正文、视频"', 'home search placeholder')
+assertIncludes(homePage, 'class="home-search home-search--primary"', 'home primary search entry')
+assertIncludes(homePage, 'class="home-search home-search--fixed"', 'home fixed search entry')
+assertIncludes(homePage, 'placeholder="试试搜周边亲子游路线"', 'home search placeholder')
 assertIncludes(homePage, '@confirm="submitHomeSearch"', 'home search confirm')
 assertIncludes(homePage, '/pages/search/index', 'home search navigation')
 

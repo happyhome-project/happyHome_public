@@ -39,7 +39,8 @@ const section = read('miniprogram', 'src', 'pages', 'section', 'index.vue')
 const widgetEditor = read('miniprogram', 'src', 'components', 'widgets', 'WidgetEditor.vue')
 const noteBlocksEditor = read('miniprogram', 'src', 'components', 'widgets', 'NoteBlocksEditor.vue')
 const figmaInventory = read('docs', 'figma-mini-0626-inventory.md')
-const retiredGroupTitle = ['我的', '组局'].join('')
+const expectedLiveSectionHeading = '<text class="group-section-title">活动召集</text>'
+const olderLiveSectionHeading = '<text class="group-section-title">我的组局</text>'
 
 for (const token of [
   '--hh-color-brand-primary',
@@ -67,7 +68,7 @@ assert(
   uniScss.includes('$hh-figma-green') &&
     uniScss.includes('#3DAD7D') &&
     uniScss.includes('$hh-radius-card-figma'),
-  'uni.scss should define the Figma 0626 color/radius token layer.'
+  'uni.scss should define the Figma 0709_v2 color/radius token layer.'
 )
 
 assert(
@@ -78,6 +79,14 @@ assert(
     tabbar.includes('HOME_TAB_RETAP_EVENT') &&
     tabbar.includes('$emit?.(HOME_TAB_RETAP_EVENT)'),
   'custom tabbar should use Figma green, 56px center action, blur, safe-area aware layout, and retap home to scroll the homepage back to top.'
+)
+
+assert(
+  tabbar.includes('{{ option.label }}') &&
+    tabbar.includes('displayPublishSectionName') &&
+    !tabbar.includes('{{ option.section.name }}') &&
+    !tabbar.includes('/邀约|组局/'),
+  'publish sheet should normalize retired labels without broadly rewriting valid future section names.'
 )
 
 assert(
@@ -234,7 +243,7 @@ assert(
     home.includes('class="home-quote"') &&
     home.includes('quoteText') &&
     home.includes("'Source Han Serif SC', 'Noto Serif CJK SC', '思源宋体'") &&
-    home.includes('placeholder="搜索帖子、正文、视频"') &&
+    home.includes('placeholder="试试搜周边亲子游路线"') &&
     home.includes('class="home-banner"') &&
     home.includes('homeBannerItems') &&
     home.includes("imageKey: buildHomeImageKey('banner', coverImage || rawCover") &&
@@ -286,13 +295,15 @@ assert(
     !home.includes('notice.sectionName || notice.label') &&
     home.includes("padStart(2, '0')") &&
     home.includes('`${month}-${day}`') &&
-    home.includes('活动召集') &&
+    home.includes(expectedLiveSectionHeading) &&
     home.includes('class="group-card"') &&
     home.includes('class="section-tabs section-tabs--flow"') &&
     home.includes('class="home-search-box"') &&
     home.includes('class="home-search-icon-ring"') &&
     home.includes('class="home-search-icon-handle"') &&
-    home.includes('class="switch-icon">⇄</text>') &&
+    home.includes('class="switch-icon"') &&
+    home.includes('class="switch-icon-line switch-icon-line--top"') &&
+    home.includes('class="switch-icon-line switch-icon-line--bottom"') &&
     home.includes('gap: 12px;') &&
     home.includes('min-height: 90rpx;') &&
     home.includes('padding: 0 8rpx 0 30rpx;') &&
@@ -339,22 +350,17 @@ assert(
 )
 
 assert(
-  figmaInventory.includes('Figma 是 2026-06-30 起的小程序 UI/UX 新准则') &&
+  figmaInventory.includes('Figma 是 2026-07-09 起的小程序 UI/UX 当前准则') &&
     figmaInventory.includes('与 Figma 冲突的旧单栏/非瀑布流判断全部废弃') &&
     figmaInventory.includes('首页亲子出游采用双列图文卡 Feed'),
   'Figma inventory should document the new source-of-truth rule and homepage two-column guide feed.'
 )
 
-for (const [name, source] of [
-  ['home', home],
-  ['tabbar', tabbar],
-  ['Figma inventory', figmaInventory],
-]) {
-  assert(
-    !source.includes(retiredGroupTitle),
-    `${name} should use 活动召集 instead of the retired activity wording.`
-  )
-}
+assert(
+  home.includes(expectedLiveSectionHeading) &&
+    !home.includes(olderLiveSectionHeading),
+  'home live section should use 活动召集 instead of 我的组局.'
+)
 
 assert(
   search.includes('class="search-nav"') &&

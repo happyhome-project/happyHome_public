@@ -12,7 +12,9 @@ playwright-report/
 test-results/
 output/
 preview-qr.*
+preview-qr-*.png
 preview-info.json
+preview-info-*.json
 mp-upload-info.json
 Figma/ShareToAmy/
 
