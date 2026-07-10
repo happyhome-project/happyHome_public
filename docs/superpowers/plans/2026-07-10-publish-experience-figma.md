@@ -121,4 +121,3 @@ Run the H5 server and verify at a mobile viewport:
 - [ ] **Step 4: Review the final diff**
 
 Run `git diff --check`, `git diff --stat`, and inspect every changed file for accidental schema, navigation, or unrelated visual changes.
-

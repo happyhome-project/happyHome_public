@@ -54,4 +54,3 @@ Align the mini-program publish entry and publish forms with the current `0709_v2
 - A static UI guard covers Figma asset usage, the shared date control, the draft asset, and the activity content block.
 - H5 browser QA covers publish sheet, a generic datetime form, activity announcement, and guide publishing.
 - Type-check, unit tests, H5 build, and mp-weixin build verify packaging and platform compatibility.
-
