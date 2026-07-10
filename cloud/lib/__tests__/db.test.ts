@@ -6,6 +6,7 @@ const mockGet = jest.fn()
 const mockAdd = jest.fn().mockResolvedValue({ _id: 'new-id' })
 const mockRemove = jest.fn().mockResolvedValue({ stats: { removed: 1 } })
 const mockWhereUpdate = jest.fn().mockResolvedValue({ stats: { updated: 1 } })
+const mockRunTransaction = jest.fn()
 
 jest.mock('wx-server-sdk', () => ({
   init: jest.fn(),
@@ -33,12 +34,13 @@ jest.mock('wx-server-sdk', () => ({
       inc: (n: number) => ({ __inc: n }),
       set: (value: unknown) => ({ __set: value }),
       remove: () => ({ __remove: true }),
-    }
+    },
+    runTransaction: mockRunTransaction,
   }),
   DYNAMIC_CURRENT_ENV: 'test'
 }))
 
-import { getById, create, increment, replaceValue, removeField } from '../db'
+import { getById, create, increment, replaceValue, removeField, runTransaction } from '../db'
 
 test('getById returns document data', async () => {
   const result = await getById('users', 'user-123')
@@ -48,6 +50,15 @@ test('getById returns document data', async () => {
 test('create returns new document id', async () => {
   const id = await create('posts', { title: 'test' })
   expect(id).toBe('new-id')
+})
+
+test('runTransaction returns the callback result rather than the SDK envelope', async () => {
+  mockRunTransaction.mockResolvedValueOnce({ result: { changed: true } })
+
+  const result = await runTransaction(async () => ({ changed: true }))
+
+  expect(mockRunTransaction).toHaveBeenCalledWith(expect.any(Function))
+  expect(result).toEqual({ changed: true })
 })
 
 test('increment uses _.inc (atomic), not read-then-write', async () => {

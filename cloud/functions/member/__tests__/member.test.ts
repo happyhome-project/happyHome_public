@@ -17,6 +17,7 @@ jest.mock('../../../lib/db', () => ({
   query: jest.fn(),
   increment: jest.fn(),
   softDelete: jest.fn(),
+  runTransaction: jest.fn(),
 }))
 
 import {
@@ -32,6 +33,44 @@ import {
 import * as db from '../../../lib/db'
 import cloud from 'wx-server-sdk'
 
+let applyTransaction: any
+
+function useApplyTransaction(options: {
+  community?: Record<string, any> | null
+  state?: Record<string, any> | null
+  member?: Record<string, any> | null
+  memberId?: string
+} = {}) {
+  const community = options.community === undefined
+    ? { _id: 'c1', name: '青山村', status: 'active', joinType: 'open', memberCount: 0 }
+    : options.community
+  const state = options.state === undefined ? null : options.state
+  const memberAdd = jest.fn().mockResolvedValue({ _id: options.memberId || 'member-1' })
+  const stateSet = jest.fn().mockResolvedValue({})
+  const communityUpdate = jest.fn().mockResolvedValue({})
+  applyTransaction = {
+    memberAdd,
+    stateSet,
+    communityUpdate,
+    collection: jest.fn((collectionName: string) => ({
+      doc: jest.fn(() => ({
+        get: jest.fn().mockResolvedValue({
+          data: collectionName === 'communities'
+            ? community
+            : collectionName === 'community_members'
+              ? (options.member === undefined ? state : options.member)
+              : state,
+        }),
+        set: stateSet,
+        update: communityUpdate,
+        remove: jest.fn(),
+      })),
+      add: memberAdd,
+    })),
+  }
+  ;(db.runTransaction as jest.Mock).mockImplementation(async (callback) => callback(applyTransaction))
+}
+
 beforeEach(() => {
   jest.resetAllMocks()
   ;(cloud.getWXContext as jest.Mock).mockReturnValue({ OPENID: 'test-openid' })
@@ -39,48 +78,71 @@ beforeEach(() => {
   delete process.env.APPROVAL_MEMBER_JOIN_TEMPLATE_FIELDS
   delete process.env.APPROVAL_COMMUNITY_CREATE_TEMPLATE_ID
   delete process.env.APPROVAL_COMMUNITY_CREATE_TEMPLATE_FIELDS
+  ;(db.query as jest.Mock).mockResolvedValue([])
+  useApplyTransaction()
 })
 
 test('申请加入开放社区：直接创建 active 记录并递增 memberCount', async () => {
-  ;(db.query as jest.Mock).mockResolvedValueOnce([]) // no existing active member
-  ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'c1', status: 'active', joinType: 'open' })
-  ;(db.create as jest.Mock).mockResolvedValue('member-1')
-  ;(db.increment as jest.Mock).mockResolvedValue({})
-
   const result = await handleApply({ communityId: 'c1' }, 'test-openid')
 
-  expect(db.create).toHaveBeenCalledWith('community_members', expect.objectContaining({
+  expect(applyTransaction.memberAdd).toHaveBeenCalledWith({ data: expect.objectContaining({
     status: 'active',
     role: 'member',
-  }))
-  expect(db.increment).toHaveBeenCalledWith('communities', 'c1', 'memberCount', 1)
+  }) })
+  expect(applyTransaction.communityUpdate).toHaveBeenCalledWith({ data: { memberCount: 1 } })
   expect(result.status).toBe('active')
 })
 
-test('申请加入审批社区：创建 pending 记录，不递增 memberCount', async () => {
-  ;(db.query as jest.Mock).mockResolvedValueOnce([]) // no existing active member
-  ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'c1', status: 'active', joinType: 'approval' })
-  ;(db.create as jest.Mock).mockResolvedValue('member-1')
+test('重复申请加入：事务内命中成员状态后复用结果，不重复创建或计数', async () => {
+  useApplyTransaction({
+    state: { communityId: 'c1', userId: 'test-openid', status: 'active', memberId: 'member-1' },
+  })
 
   const result = await handleApply({ communityId: 'c1' }, 'test-openid')
 
-  expect(db.create).toHaveBeenCalledWith('community_members', expect.objectContaining({
+  expect(result).toEqual({ status: 'active', alreadyApplied: true })
+  expect(applyTransaction.memberAdd).not.toHaveBeenCalled()
+  expect(applyTransaction.communityUpdate).not.toHaveBeenCalled()
+})
+
+test('成员状态滞后时：以真实成员记录为准并在事务内自修复', async () => {
+  useApplyTransaction({
+    state: { communityId: 'c1', userId: 'test-openid', status: 'pending', memberId: 'member-1' },
+    member: { communityId: 'c1', userId: 'test-openid', status: 'active' },
+  })
+
+  const result = await handleApply({ communityId: 'c1' }, 'test-openid')
+
+  expect(result).toEqual({ status: 'active', alreadyApplied: true })
+  expect(applyTransaction.stateSet).toHaveBeenCalledWith({
+    data: expect.objectContaining({ status: 'active' }),
+  })
+  expect(applyTransaction.memberAdd).not.toHaveBeenCalled()
+})
+
+test('申请加入审批社区：创建 pending 记录，不递增 memberCount', async () => {
+  useApplyTransaction({
+    community: { _id: 'c1', name: '青山村', status: 'active', joinType: 'approval', memberCount: 0 },
+  })
+
+  const result = await handleApply({ communityId: 'c1' }, 'test-openid')
+
+  expect(applyTransaction.memberAdd).toHaveBeenCalledWith({ data: expect.objectContaining({
     status: 'pending',
-  }))
-  expect(db.increment).not.toHaveBeenCalled()
+  }) })
+  expect(applyTransaction.communityUpdate).not.toHaveBeenCalled()
   expect(result.status).toBe('pending')
 })
 
 test('申请加入审批社区：创建成员审批通知记录，不因通知未配置而阻断申请', async () => {
+  useApplyTransaction({
+    community: { _id: 'c1', name: '青山村', status: 'active', joinType: 'approval', memberCount: 0 },
+  })
   ;(db.query as jest.Mock)
-    .mockResolvedValueOnce([]) // no existing active member
-    .mockResolvedValueOnce([]) // no existing pending member
+    .mockResolvedValueOnce([]) // legacy member state
     .mockResolvedValueOnce([{ userId: 'community-admin', role: 'admin', status: 'active' }])
     .mockResolvedValueOnce([{ userId: 'super-admin', role: 'superAdmin', status: 'active' }])
     .mockResolvedValue([]) // subscription lookups
-  ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'c1', name: '青山村', status: 'active', joinType: 'approval' })
-  ;(db.create as jest.Mock).mockResolvedValue('member-1')
-
   const result = await handleApply({ communityId: 'c1' }, 'applicant-openid')
 
   expect(result.status).toBe('pending')
@@ -208,14 +270,14 @@ test('成员申请通知：按 env 字段映射发送订阅消息', async () => 
     time: 'time7',
     status: 'phrase8',
   })
+  useApplyTransaction({
+    community: { _id: 'c1', name: '青山村', status: 'active', joinType: 'approval', memberCount: 0 },
+  })
   ;(db.query as jest.Mock)
-    .mockResolvedValueOnce([]) // no existing active member
-    .mockResolvedValueOnce([]) // no existing pending member
+    .mockResolvedValueOnce([]) // legacy member state
     .mockResolvedValueOnce([{ userId: 'community-admin', role: 'admin', status: 'active' }])
     .mockResolvedValueOnce([]) // no super admins
     .mockResolvedValueOnce([{ _id: 'sub-1', status: 'accept' }])
-  ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'c1', name: '青山村', status: 'active', joinType: 'approval' })
-  ;(db.create as jest.Mock).mockResolvedValue('member-1')
   ;((cloud as any).openapi.subscribeMessage.send as jest.Mock).mockResolvedValue({})
 
   const result = await handleApply({ communityId: 'c1' }, 'applicant-openid')
@@ -238,11 +300,14 @@ test('成员申请通知：按 env 字段映射发送订阅消息', async () => 
   }))
 })
 
-test('申请加入：已是成员时抛出错误', async () => {
-  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
+test('申请加入：已是成员时返回已有结果，不把网络重试当作错误', async () => {
+  useApplyTransaction({ state: {
+    communityId: 'c1', userId: 'test-openid', status: 'active', memberId: 'm1',
+  } })
 
-  await expect(handleApply({ communityId: 'c1' }, 'test-openid')).rejects.toThrow('已是社区成员')
-  expect(db.create).not.toHaveBeenCalled()
+  await expect(handleApply({ communityId: 'c1' }, 'test-openid'))
+    .resolves.toEqual({ status: 'active', alreadyApplied: true })
+  expect(applyTransaction.memberAdd).not.toHaveBeenCalled()
 })
 
 test('退出社区：物理删除成员记录，memberCount 原子递减', async () => {
@@ -416,13 +481,13 @@ test('myStatus：按最新 appliedAt 返回状态', async () => {
 })
 
 test('申请加入：pending 社区在平台审核前不可加入', async () => {
-  ;(db.query as jest.Mock).mockResolvedValue([])
-  ;(db.getById as jest.Mock).mockResolvedValue({
+  useApplyTransaction({ community: {
     _id: 'pending-community',
     name: '待审核社区',
     status: 'pending',
     joinType: 'open',
-  })
+    memberCount: 0,
+  } })
 
   await expect(handleApply({ communityId: 'pending-community' }, 'test-openid'))
     .rejects.toThrow('社区暂不可加入')

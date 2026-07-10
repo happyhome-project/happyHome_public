@@ -15,6 +15,7 @@ const expectedExports = [
   'replaceValue',
   'removeField',
   'query',
+  'runTransaction',
 ]
 
 test('db.local 导出与 db.ts 一一对应', () => {
@@ -98,6 +99,15 @@ test('increment 支持负数', async () => {
   await dbLocal.increment('test_col', id, 'count', -2)
   const doc = await dbLocal.getById('test_col', id)
   expect(doc.count).toBe(8)
+})
+
+test('runTransaction 在回调抛错时回滚已写入的数据', async () => {
+  await expect(dbLocal.runTransaction(async (transaction) => {
+    await transaction.collection('items').doc('temporary').set({ data: { title: '临时数据' } })
+    throw new Error('rollback')
+  })).rejects.toThrow('rollback')
+
+  await expect(dbLocal.getById('items', 'temporary')).rejects.toMatchObject({ errCode: -502001 })
 })
 
 test('query where 条件过滤', async () => {

@@ -13,6 +13,11 @@ import {
   type SubscriptionStatus,
 } from '../../lib/approval-notifications'
 import type { Community } from '../../shared/types'
+import {
+  MEMBER_STATE_COLLECTION,
+  membershipStateId,
+  type MembershipStateStatus,
+} from '../../lib/membership-state'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
@@ -45,58 +50,116 @@ async function assertCommunityApprover(openid: string, communityId: string) {
 
 export async function handleApply(params: { communityId: string }, openid: string) {
   if (!openid) throw new Error('Missing OPENID')
-
-  // Check if already an active or pending member (prevent duplicate records)
-  const existingActive = await db.query('community_members', {
-    communityId: params.communityId,
-    userId: openid,
-    status: 'active',
-  })
-  if (existingActive && existingActive.length > 0) throw new Error('已是社区成员')
-
-  const existingPending = await db.query('community_members', {
-    communityId: params.communityId,
-    userId: openid,
-    status: 'pending',
-  })
-  if (existingPending && existingPending.length > 0) throw new Error('已有待审批的申请')
-
-  const community = await db.getById('communities', params.communityId) as Community
-  if (!community || community.status !== 'active') throw new Error('社区暂不可加入')
   const now = new Date().toISOString()
+  const stateId = membershipStateId(params.communityId, openid)
+  // Existing production records predate the state document. Read once outside
+  // the transaction only to seed their current state; all new writes serialize
+  // through the deterministic state document below.
+  const legacy = await getLatestMembershipRecord(params.communityId, openid) as {
+    _id?: string
+    status?: MembershipStateStatus
+  } | null
 
-  if (community.joinType === 'open') {
-    await db.create('community_members', {
-      communityId: params.communityId,
-      userId: openid,
-      role: 'member',
-      status: 'active',
-      appliedAt: now,
-      joinedAt: now,
+  const result = await db.runTransaction(async (transaction) => {
+    const [communityRes, stateRes] = await Promise.all([
+      transaction.collection('communities').doc(params.communityId).get(),
+      transaction.collection(MEMBER_STATE_COLLECTION).doc(stateId).get(),
+    ])
+    const community = communityRes.data as Community | null
+    if (!community || community.status !== 'active') throw new Error('社区暂不可加入')
+
+    const state = stateRes.data as {
+      status?: MembershipStateStatus
+      memberId?: string
+    } | null
+    if ((state?.status === 'active' || state?.status === 'pending') && state.memberId) {
+      const memberRes = await transaction.collection('community_members').doc(state.memberId).get()
+      const member = memberRes.data as {
+        communityId?: string
+        userId?: string
+        status?: MembershipStateStatus
+      } | null
+      const actualStatus = member?.communityId === params.communityId && member?.userId === openid
+        ? member.status
+        : undefined
+      if (actualStatus === 'active' || actualStatus === 'pending') {
+        if (actualStatus !== state.status) {
+          await transaction.collection(MEMBER_STATE_COLLECTION).doc(stateId).set({
+            data: { ...state, status: actualStatus, updatedAt: now },
+          })
+        }
+        return {
+          status: actualStatus,
+          memberId: state.memberId,
+          created: false,
+          communityName: community.name,
+        }
+      }
+    }
+
+    if (!state && (legacy?.status === 'active' || legacy?.status === 'pending')) {
+      await transaction.collection(MEMBER_STATE_COLLECTION).doc(stateId).set({
+        data: {
+          communityId: params.communityId,
+          userId: openid,
+          memberId: legacy._id || '',
+          status: legacy.status,
+          updatedAt: now,
+        },
+      })
+      return {
+        status: legacy.status,
+        memberId: legacy._id || '',
+        created: false,
+        communityName: community.name,
+      }
+    }
+
+    const status: MembershipStateStatus = community.joinType === 'open' ? 'active' : 'pending'
+    const memberRes = await transaction.collection('community_members').add({
+      data: {
+        communityId: params.communityId,
+        userId: openid,
+        role: 'member',
+        status,
+        appliedAt: now,
+        ...(status === 'active' ? { joinedAt: now } : {}),
+      },
     })
-    await db.increment('communities', params.communityId, 'memberCount', 1)
-    return { status: 'active' }
-  } else {
-    const memberId = await db.create('community_members', {
-      communityId: params.communityId,
-      userId: openid,
-      role: 'member',
-      status: 'pending',
-      appliedAt: now,
+    await transaction.collection(MEMBER_STATE_COLLECTION).doc(stateId).set({
+      data: {
+        communityId: params.communityId,
+        userId: openid,
+        memberId: memberRes._id,
+        status,
+        updatedAt: now,
+      },
     })
+    if (status === 'active') {
+      await transaction.collection('communities').doc(params.communityId).update({
+        data: { memberCount: Number(community.memberCount || 0) + 1 },
+      })
+    }
+    return { status, memberId: memberRes._id, created: true, communityName: community.name }
+  })
+
+  if (result.status === 'pending' && result.created) {
     try {
       await notifyMemberJoinPending({
         communityId: params.communityId,
-        communityName: community.name,
-        memberId,
+        communityName: result.communityName || '',
+        memberId: result.memberId,
         applicantUserId: openid,
         appliedAt: now,
       })
     } catch (error) {
       console.warn('[member.apply] approval notification failed', error)
     }
-    return { status: 'pending' }
   }
+
+  return result.created
+    ? { status: result.status }
+    : { status: result.status, alreadyApplied: true }
 }
 
 export async function handleLeave(params: { communityId: string }, openid: string) {
@@ -113,9 +176,20 @@ export async function handleLeave(params: { communityId: string }, openid: strin
   if (community?.creatorId === openid) throw new Error('社区创建者不能退出社区')
 
   const memberId = members[0]._id
-  await db.removeById('community_members', memberId)
-  await db.increment('communities', params.communityId, 'memberCount', -1)
-  return { success: true }
+  const removeResult = await db.removeById('community_members', memberId)
+  const changed = (removeResult as any)?.stats?.removed !== 0
+  if (changed) {
+    await db.increment('communities', params.communityId, 'memberCount', -1)
+    await db.updateWhere(MEMBER_STATE_COLLECTION, {
+      communityId: params.communityId,
+      userId: openid,
+    }, {
+      status: 'none',
+      memberId: '',
+      updatedAt: new Date().toISOString(),
+    })
+  }
+  return { success: true, changed }
 }
 
 export async function handleMemberApprove(
@@ -135,6 +209,10 @@ export async function handleMemberApprove(
   })
   if ((updateRes as any)?.stats?.updated > 0) {
     await db.increment('communities', params.communityId, 'memberCount', 1)
+    await db.updateWhere(MEMBER_STATE_COLLECTION, { memberId: params.memberId }, {
+      status: 'active',
+      updatedAt: new Date().toISOString(),
+    })
   }
   return { success: true, changed: (updateRes as any)?.stats?.updated > 0 }
 }
@@ -154,6 +232,12 @@ export async function handleMemberReject(
     status: 'rejected',
     rejectedAt: new Date().toISOString(),
   })
+  if ((updateRes as any)?.stats?.updated > 0) {
+    await db.updateWhere(MEMBER_STATE_COLLECTION, { memberId: params.memberId }, {
+      status: 'rejected',
+      updatedAt: new Date().toISOString(),
+    })
+  }
   return { success: true, changed: (updateRes as any)?.stats?.updated > 0 }
 }
 

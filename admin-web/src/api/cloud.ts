@@ -106,6 +106,7 @@ export const communityApi = {
     coverImage: string
     location: { address: string; lat: number; lng: number }
     joinType: 'open' | 'approval'
+    requestId?: string
   }) => callAdmin('community.createAdmin', params),
 }
 

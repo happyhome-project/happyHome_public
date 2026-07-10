@@ -18,6 +18,7 @@ jest.mock('../lib/db', () => ({
   softDelete: jest.fn(),
   query: jest.fn(),
   increment: jest.fn(),
+  runTransaction: jest.fn(),
 }))
 
 jest.mock('../lib/auth', () => ({
@@ -49,6 +50,22 @@ const communityMain = _communityMain as AnyMain
 const memberMain = _memberMain as AnyMain
 const sectionMain = _sectionMain as AnyMain
 const postMain = _postMain as AnyMain
+
+function mockCommunityCreateTransaction(communityId = 'c-new') {
+  const communityAdd = jest.fn().mockResolvedValue({ _id: communityId })
+  ;(db.runTransaction as jest.Mock).mockImplementation(async (callback) => callback({
+    collection: (collectionName: string) => ({
+      doc: () => ({
+        get: jest.fn().mockResolvedValue({ data: null }),
+        set: jest.fn().mockResolvedValue({}),
+      }),
+      add: collectionName === 'communities'
+        ? communityAdd
+        : jest.fn().mockResolvedValue({ _id: 'creator-member-1' }),
+    }),
+  }))
+  return communityAdd
+}
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -137,32 +154,32 @@ describe('OPENID injection via _testOpenid', () => {
   const cloud = require('wx-server-sdk')
 
   test('without ALLOW_TEST_OPENID env, _testOpenid is IGNORED, falls back to wxContext', async () => {
-    ;(db.create as jest.Mock).mockResolvedValue('c-new')
+    const communityAdd = mockCommunityCreateTransaction()
     await communityMain(fe('create', {
       name: 'x', description: '', coverImage: '', location: {}, joinType: 'open',
     }, { _testOpenid: 'attacker' }))
-    const createdCommunity = (db.create as jest.Mock).mock.calls[0][1]
+    const createdCommunity = communityAdd.mock.calls[0][0].data
     expect(createdCommunity.creatorId).toBe('wxcontext-openid')
     expect(createdCommunity.creatorId).not.toBe('attacker')
   })
 
   test('WITH ALLOW_TEST_OPENID=true, _testOpenid overrides wxContext', async () => {
     process.env.ALLOW_TEST_OPENID = 'true'
-    ;(db.create as jest.Mock).mockResolvedValue('c-new')
+    const communityAdd = mockCommunityCreateTransaction()
     await communityMain(fe('create', {
       name: 'y', description: '', coverImage: '', location: {}, joinType: 'open',
     }, { _testOpenid: 'injected-user' }))
-    const createdCommunity = (db.create as jest.Mock).mock.calls[0][1]
+    const createdCommunity = communityAdd.mock.calls[0][0].data
     expect(createdCommunity.creatorId).toBe('injected-user')
   })
 
   test('_testOpenid field is not leaked into params passed to handlers', async () => {
     process.env.ALLOW_TEST_OPENID = 'true'
-    ;(db.create as jest.Mock).mockResolvedValue('c-new')
+    const communityAdd = mockCommunityCreateTransaction()
     await communityMain(fe('create', {
       name: 'z', description: '', coverImage: '', location: {}, joinType: 'open',
     }, { _testOpenid: 'u1' }))
-    const createdCommunity = (db.create as jest.Mock).mock.calls[0][1]
+    const createdCommunity = communityAdd.mock.calls[0][0].data
     expect(createdCommunity).not.toHaveProperty('_testOpenid')
   })
 

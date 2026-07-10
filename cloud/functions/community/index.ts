@@ -1,4 +1,5 @@
 import cloud from 'wx-server-sdk'
+import crypto from 'crypto'
 import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
 import { assertSuperAdmin } from '../../lib/auth'
@@ -19,6 +20,12 @@ async function getLatestViewerStatus(communityId: string, openid: string) {
   return records[0]?.status || null
 }
 
+function createRequestDocumentId(openid: string, requestId: string) {
+  return crypto.createHash('sha256')
+    .update(`${openid}\n${requestId}`)
+    .digest('hex')
+}
+
 export async function handleCreate(
   params: {
     name: string
@@ -26,6 +33,7 @@ export async function handleCreate(
     coverImage: string
     location: Community['location']
     joinType: Community['joinType']
+    requestId?: string
     suppressNotification?: boolean
   },
   openid: string,
@@ -33,31 +41,54 @@ export async function handleCreate(
   if (!openid) throw new Error('Missing OPENID')
 
   const now = new Date().toISOString()
-  const communityId = await db.create('communities', {
-    name: params.name,
-    description: params.description,
-    coverImage: params.coverImage,
-    location: params.location,
-    joinType: params.joinType,
-    creatorId: openid,
-    status: 'pending',
-    memberCount: 0,
-    createdAt: now,
+  // The current clients send a stable id for a submit/retry. Keep a unique
+  // fallback for older trusted callers so their existing requests keep working.
+  const requestId = String(params.requestId || crypto.randomBytes(16).toString('hex')).trim()
+  const requestDocId = createRequestDocumentId(openid, requestId)
+  const result = await db.runTransaction(async (transaction) => {
+    const request = await transaction.collection('community_create_requests').doc(requestDocId).get()
+    if (request.data?.communityId) {
+      return { communityId: String(request.data.communityId), created: false }
+    }
+
+    const communityRes = await transaction.collection('communities').add({
+      data: {
+        name: params.name,
+        description: params.description,
+        coverImage: params.coverImage,
+        location: params.location,
+        joinType: params.joinType,
+        creatorId: openid,
+        status: 'pending',
+        memberCount: 0,
+        createdAt: now,
+      },
+    })
+    await transaction.collection('community_members').add({
+      data: {
+        communityId: communityRes._id,
+        userId: openid,
+        role: 'admin',
+        status: 'active',
+        appliedAt: now,
+        joinedAt: now,
+      },
+    })
+    await transaction.collection('community_create_requests').doc(requestDocId).set({
+      data: {
+        communityId: communityRes._id,
+        creatorId: openid,
+        requestId,
+        createdAt: now,
+      },
+    })
+    return { communityId: communityRes._id, created: true }
   })
 
-  await db.create('community_members', {
-    communityId,
-    userId: openid,
-    role: 'admin',
-    status: 'active',
-    appliedAt: now,
-    joinedAt: now,
-  })
-
-  if (!params.suppressNotification) {
+  if (!params.suppressNotification && result.created) {
     try {
       await notifyCommunityCreatePending({
-        communityId,
+        communityId: result.communityId,
         communityName: params.name,
         creatorUserId: openid,
         createdAt: now,
@@ -67,7 +98,9 @@ export async function handleCreate(
     }
   }
 
-  return { communityId }
+  return result.created
+    ? { communityId: result.communityId }
+    : { communityId: result.communityId, alreadyCreated: true }
 }
 
 export async function handleApprove(params: { communityId: string }, openid: string) {

@@ -38,6 +38,7 @@ import {
 } from '../../lib/auth'
 import { syncMiniProgramUserRoleForAdminAccount } from '../../lib/admin-identity'
 import { handleCreate as handleCommunityCreate } from '../community'
+import { MEMBER_STATE_COLLECTION } from '../../lib/membership-state'
 import type {
   AdminAccount,
   AdminCtx,
@@ -910,6 +911,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       coverImage: String(params.coverImage || ''),
       location: params.location,
       joinType: params.joinType === 'approval' ? 'approval' : 'open',
+      requestId: String(params.requestId || ''),
       suppressNotification: ctx.role === 'superAdmin',
     }, ctx.userId)
     // superAdmin 创建的社区可直接 active
@@ -1213,11 +1215,22 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       throw new Error('当前状态不支持移除')
     }
 
-    await db.removeById('community_members', memberId)
-    if (status === 'active') {
+    const removeResult = await db.removeById('community_members', memberId)
+    const changed = (removeResult as any)?.stats?.removed !== 0
+    if (changed && status === 'active') {
       await db.increment('communities', communityId, 'memberCount', -1)
     }
-    return { success: true }
+    if (changed) {
+      await db.updateWhere(MEMBER_STATE_COLLECTION, {
+        communityId,
+        userId: member.userId,
+      }, {
+        status: 'none',
+        memberId: '',
+        updatedAt: new Date().toISOString(),
+      })
+    }
+    return { success: true, changed }
   }
   if (action === 'member.approve') {
     const updateRes = await db.updateWhere('community_members', {
@@ -1230,6 +1243,10 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     })
     if ((updateRes as any)?.stats?.updated > 0) {
       await db.increment('communities', params.communityId, 'memberCount', 1)
+      await db.updateWhere(MEMBER_STATE_COLLECTION, { memberId: params.memberId }, {
+        status: 'active',
+        updatedAt: new Date().toISOString(),
+      })
     }
     return { success: true, changed: (updateRes as any)?.stats?.updated > 0 }
   }
@@ -1242,6 +1259,12 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       status: 'rejected',
       rejectedAt: new Date().toISOString(),
     })
+    if ((updateRes as any)?.stats?.updated > 0) {
+      await db.updateWhere(MEMBER_STATE_COLLECTION, { memberId: params.memberId }, {
+        status: 'rejected',
+        updatedAt: new Date().toISOString(),
+      })
+    }
     return { success: true, changed: (updateRes as any)?.stats?.updated > 0 }
   }
 
@@ -1878,6 +1901,16 @@ async function hardDeleteCommunity(communityId: string, community: Community) {
   const members = await db.query('community_members', { communityId })
   for (const member of members) {
     await db.removeById('community_members', (member as any)._id)
+  }
+
+  const memberStates = await db.query(MEMBER_STATE_COLLECTION, { communityId })
+  for (const state of memberStates) {
+    await db.removeById(MEMBER_STATE_COLLECTION, (state as any)._id)
+  }
+
+  const createRequests = await db.query('community_create_requests', { communityId })
+  for (const request of createRequests) {
+    await db.removeById('community_create_requests', (request as any)._id)
   }
 
   await db.removeById('communities', communityId)

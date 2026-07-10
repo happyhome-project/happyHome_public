@@ -10,6 +10,7 @@ jest.mock('../../../lib/db', () => ({
   query: jest.fn(),
   increment: jest.fn(),
   softDelete: jest.fn(),
+  runTransaction: jest.fn(),
 }))
 
 import {
@@ -25,14 +26,39 @@ import {
 import * as db from '../../../lib/db'
 import cloud from 'wx-server-sdk'
 
+let createTransaction: any
+
+function useCreateTransaction(existingCommunityId = '') {
+  const communityAdd = jest.fn().mockResolvedValue({ _id: 'community-123' })
+  const memberAdd = jest.fn().mockResolvedValue({ _id: 'creator-member-1' })
+  const requestSet = jest.fn().mockResolvedValue({})
+  createTransaction = {
+    communityAdd,
+    memberAdd,
+    requestSet,
+    collection: jest.fn((collectionName: string) => ({
+      doc: jest.fn(() => ({
+        get: jest.fn().mockResolvedValue({
+          data: collectionName === 'community_create_requests' && existingCommunityId
+            ? { communityId: existingCommunityId }
+            : null,
+        }),
+        set: requestSet,
+      })),
+      add: collectionName === 'communities' ? communityAdd : memberAdd,
+    })),
+  }
+  ;(db.runTransaction as jest.Mock).mockImplementation(async (callback) => callback(createTransaction))
+}
+
 beforeEach(() => {
   jest.resetAllMocks()
   ;(cloud.getWXContext as jest.Mock).mockReturnValue({ OPENID: 'test-openid' })
+  ;(db.query as jest.Mock).mockResolvedValue([])
+  useCreateTransaction()
 })
 
 test('创建社区：status 默认为 pending，creatorId 为 OPENID', async () => {
-  ;(db.create as jest.Mock).mockResolvedValue('community-123')
-
   const result = await handleCreate({
     name: '测试社区',
     description: '描述',
@@ -41,17 +67,15 @@ test('创建社区：status 默认为 pending，creatorId 为 OPENID', async () 
     joinType: 'open',
   }, 'test-openid')
 
-  expect(db.create).toHaveBeenCalledWith('communities', expect.objectContaining({
+  expect(createTransaction.communityAdd).toHaveBeenCalledWith({ data: expect.objectContaining({
     status: 'pending',
     creatorId: 'test-openid',
     memberCount: 0,
-  }))
+  }) })
   expect(result.communityId).toBe('community-123')
 })
 
 test('创建社区：同时为创建者创建 admin 成员记录', async () => {
-  ;(db.create as jest.Mock).mockResolvedValue('community-123')
-
   await handleCreate({
     name: '测试社区',
     description: '描述',
@@ -60,13 +84,29 @@ test('创建社区：同时为创建者创建 admin 成员记录', async () => {
     joinType: 'open',
   }, 'test-openid')
 
-  expect(db.create).toHaveBeenCalledTimes(2)
-  expect(db.create).toHaveBeenCalledWith('community_members', expect.objectContaining({
+  expect(createTransaction.memberAdd).toHaveBeenCalledWith({ data: expect.objectContaining({
     communityId: 'community-123',
     userId: 'test-openid',
     role: 'admin',
     status: 'active',
-  }))
+  }) })
+})
+
+test('相同提交标识重试：复用已创建社区，不再次写入社区或创建者成员', async () => {
+  useCreateTransaction('community-123')
+
+  const result = await handleCreate({
+    name: '测试社区',
+    description: '描述',
+    coverImage: '',
+    location: { address: '', lat: 0, lng: 0 },
+    joinType: 'open',
+    requestId: 'retry-key-1',
+  }, 'test-openid')
+
+  expect(result).toEqual({ communityId: 'community-123', alreadyCreated: true })
+  expect(createTransaction.communityAdd).not.toHaveBeenCalled()
+  expect(createTransaction.memberAdd).not.toHaveBeenCalled()
 })
 
 test('创建社区：创建社区审批通知记录给 superAdmin，不因通知未配置而阻断创建', async () => {

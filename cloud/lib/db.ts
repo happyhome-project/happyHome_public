@@ -7,6 +7,18 @@ cloud.init({ env: process.env.TCB_ENV || cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
 
+export type DbTransaction = {
+  collection: (collectionName: string) => {
+    doc: (id: string) => {
+      get: () => Promise<{ data: any }>
+      set: (options: { data: object }) => Promise<any>
+      update: (options: { data: object }) => Promise<any>
+      remove: () => Promise<any>
+    }
+    add: (options: { data: object }) => Promise<{ _id: string }>
+  }
+}
+
 // _ 和 collection 仅在适配层内部使用，不对外导出，保持迁移边界清晰
 function collection(name: string) {
   return db.collection(name)
@@ -40,6 +52,15 @@ export async function getById(collectionName: string, id: string) {
 export async function create(collectionName: string, data: object) {
   const res = await collection(collectionName).add({ data })
   return res._id as string
+}
+
+/**
+ * CloudBase transactions make a multi-document decision atomic. The SDK wraps
+ * the callback result in `{ result }`; callers only need the callback value.
+ */
+export async function runTransaction<T>(callback: (transaction: DbTransaction) => Promise<T>): Promise<T> {
+  const response = await (db as any).runTransaction(callback)
+  return (response && typeof response === 'object' && 'result' in response ? response.result : response) as T
 }
 
 export async function updateById(

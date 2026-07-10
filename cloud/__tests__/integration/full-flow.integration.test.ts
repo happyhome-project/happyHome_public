@@ -117,6 +117,25 @@ describe('核心业务全链路', () => {
     expect(approved.status).toBe('active')
   })
 
+  test('相同创建提交标识重试：只生成一座待审核社区', async () => {
+    setCurrentUser(COMMUNITY_CREATOR)
+    const params = {
+      name: '幂等社区',
+      description: '网络重试验证',
+      coverImage: '',
+      location: { address: '北京市', lat: 39.9, lng: 116.4 },
+      joinType: 'open' as const,
+      requestId: 'community-retry-1',
+    }
+
+    const first = await createCommunity(params, _getOpenId())
+    const second = await createCommunity(params, _getOpenId())
+
+    expect(second).toEqual({ communityId: first.communityId, alreadyCreated: true })
+    expect(_dump('communities')).toHaveLength(1)
+    expect(_dump('community_members')).toHaveLength(1)
+  })
+
   test('完整链路：建社区 → 加入 → 建板块 → 发帖 → 改帖 → 删帖', async () => {
     await setupSuperAdmin()
 
@@ -223,6 +242,30 @@ describe('核心业务全链路', () => {
     // 列表不再显示已删除帖子
     const { posts: afterDelete } = await listPosts({ sectionId }, _getOpenId())
     expect(afterDelete).toHaveLength(0)
+  })
+
+  test('重复加入开放社区：只保留一名成员且 memberCount 只增加一次', async () => {
+    await setupSuperAdmin()
+    setCurrentUser(COMMUNITY_CREATOR)
+    const { communityId } = await createCommunity({
+      name: '重复加入验证社区',
+      description: '验证成员幂等',
+      coverImage: '',
+      location: { address: '上海市', lat: 31.2, lng: 121.5 },
+      joinType: 'open',
+    }, _getOpenId())
+    setCurrentUser(SUPER_ADMIN)
+    await approveCommunity({ communityId }, _getOpenId())
+
+    setCurrentUser(NORMAL_USER)
+    const first = await handleApply({ communityId }, _getOpenId())
+    const second = await handleApply({ communityId }, _getOpenId())
+
+    expect(first).toEqual({ status: 'active' })
+    expect(second).toEqual({ status: 'active', alreadyApplied: true })
+    expect(_dump('community_members').filter((member) => member.userId === NORMAL_USER)).toHaveLength(1)
+    const community = _dump('communities').find((item) => item._id === communityId)
+    expect(community.memberCount).toBe(1)
   })
 
   test('需审批社区：申请 → 管理员审批 → 加入', async () => {

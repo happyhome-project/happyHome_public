@@ -73,6 +73,64 @@ export async function create(collectionName: string, data: any) {
   return id
 }
 
+type LocalTransaction = {
+  collection: (collectionName: string) => {
+    doc: (id: string) => {
+      get: () => Promise<{ data: any }>
+      set: (options: { data: object }) => Promise<{ stats: { updated: number } }>
+      update: (options: { data: object }) => Promise<{ stats: { updated: number } }>
+      remove: () => Promise<{ stats: { removed: number } }>
+    }
+    add: (options: { data: object }) => Promise<{ _id: string }>
+  }
+}
+
+function snapshotStore() {
+  return new Map(
+    Array.from(store.entries(), ([collectionName, documents]) => [
+      collectionName,
+      new Map(Array.from(documents.entries(), ([id, doc]) => [id, cloneValue(doc)])),
+    ]),
+  )
+}
+
+function restoreStore(snapshot: Map<string, Map<string, any>>) {
+  store.clear()
+  for (const [collectionName, documents] of snapshot) {
+    store.set(collectionName, documents)
+  }
+}
+
+/**
+ * The integration adapter mirrors CloudBase's callback transaction contract.
+ * Tests are single-threaded, so a snapshot is sufficient to assert all-or-
+ * nothing behavior without bringing a database server into the test suite.
+ */
+export async function runTransaction<T>(callback: (transaction: LocalTransaction) => Promise<T>): Promise<T> {
+  const snapshot = snapshotStore()
+  const transaction: LocalTransaction = {
+    collection: (collectionName) => ({
+      doc: (id) => ({
+        get: async () => ({ data: cloneValue(collection(collectionName).get(id) || null) }),
+        set: async ({ data }) => {
+          collection(collectionName).set(id, { _id: id, ...cloneValue(data) })
+          return { stats: { updated: 1 } }
+        },
+        update: async ({ data }) => updateById(collectionName, id, data),
+        remove: async () => removeById(collectionName, id),
+      }),
+      add: async ({ data }) => ({ _id: await create(collectionName, data) }),
+    }),
+  }
+
+  try {
+    return await callback(transaction)
+  } catch (error) {
+    restoreStore(snapshot)
+    throw error
+  }
+}
+
 export async function updateById(
   collectionName: string,
   id: string,

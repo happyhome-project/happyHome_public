@@ -41,7 +41,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { communityApi } from '../../api/cloud'
@@ -50,6 +50,7 @@ import { useAuthStore } from '../../stores/auth'
 const router = useRouter()
 const authStore = useAuthStore()
 const submitting = ref(false)
+const pendingRequestId = ref('')
 
 const form = ref({
   name: '',
@@ -59,6 +60,10 @@ const form = ref({
   joinType: 'open' as 'open' | 'approval',
 })
 
+watch(form, () => {
+  if (!submitting.value) pendingRequestId.value = ''
+}, { deep: true })
+
 async function submit() {
   if (submitting.value) return
   if (!form.value.name.trim() || !form.value.description.trim()) {
@@ -67,12 +72,16 @@ async function submit() {
   }
   submitting.value = true
   try {
+    if (!pendingRequestId.value) {
+      pendingRequestId.value = `admin-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+    }
     await communityApi.createAdmin({
       name: form.value.name.trim(),
       description: form.value.description.trim(),
       coverImage: form.value.coverImage.trim(),
       location: { ...form.value.location },
       joinType: form.value.joinType,
+      requestId: pendingRequestId.value,
     })
     ElMessage.success(authStore.isSuperAdmin ? '创建成功' : '已提交，等待审批')
     router.push({ name: 'communities' })

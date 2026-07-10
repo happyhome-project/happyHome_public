@@ -15,6 +15,7 @@ jest.mock('../lib/db', () => ({
   softDelete: jest.fn(),
   query: jest.fn(),
   increment: jest.fn(),
+  runTransaction: jest.fn(),
 }))
 jest.mock('wx-server-sdk', () => ({
   init: jest.fn(),
@@ -27,6 +28,22 @@ import * as db from '../lib/db'
 import { main as _adminMain } from '../functions/admin/index'
 
 const adminMain = _adminMain as (event: any) => Promise<any>
+
+function mockCommunityCreateTransaction(communityId = 'c-new') {
+  const communityAdd = jest.fn().mockResolvedValue({ _id: communityId })
+  ;(db.runTransaction as jest.Mock).mockImplementation(async (callback) => callback({
+    collection: (collectionName: string) => ({
+      doc: () => ({
+        get: jest.fn().mockResolvedValue({ data: null }),
+        set: jest.fn().mockResolvedValue({}),
+      }),
+      add: collectionName === 'communities'
+        ? communityAdd
+        : jest.fn().mockResolvedValue({ _id: 'creator-member-1' }),
+    }),
+  }))
+  return communityAdd
+}
 
 function internalCall(action: string, params: Record<string, any>, actAs: any) {
   return adminMain({ action, _actAs: actAs, ...params })
@@ -175,15 +192,14 @@ describe('community.approve auto-creates communityAdmin', () => {
 
 describe('community.createAdmin', () => {
   test('communityAdmin create goes to pending and sets creatorId', async () => {
-    ;(db.create as jest.Mock).mockResolvedValue('c-new')
+    const communityAdd = mockCommunityCreateTransaction()
     ;(db.updateById as jest.Mock).mockResolvedValue(undefined)
 
     await internalCall('community.createAdmin', {
       name: 'hood', description: 'd', coverImage: '', location: { address: '', lat: 0, lng: 0 }, joinType: 'open',
     }, ADMIN_CTX_COMMUNITY)
 
-    const createCall = (db.create as jest.Mock).mock.calls.find(c => c[0] === 'communities')
-    expect(createCall[1]).toEqual(expect.objectContaining({
+    expect(communityAdd.mock.calls[0][0].data).toEqual(expect.objectContaining({
       creatorId: 'u-c1',
       status: 'pending',
     }))
@@ -192,7 +208,7 @@ describe('community.createAdmin', () => {
   })
 
   test('superAdmin create auto-activates', async () => {
-    ;(db.create as jest.Mock).mockResolvedValue('c-new')
+    mockCommunityCreateTransaction('c-new')
     ;(db.updateById as jest.Mock).mockResolvedValue(undefined)
 
     await internalCall('community.createAdmin', {

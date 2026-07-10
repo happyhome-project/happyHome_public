@@ -873,6 +873,8 @@ test('community.hardDelete: cleans cloud files from current and pending post con
     .mockResolvedValueOnce([])
     .mockResolvedValueOnce([])
     .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([])
   ;(db.removeById as jest.Mock).mockResolvedValue({})
   ;(storage.deleteFile as jest.Mock).mockResolvedValue({})
 

@@ -87,6 +87,30 @@ const INDEXES = [
       { Name: 'status', Direction: '1' },
     ],
   },
+  // community_member_states: 加入事务外的审批、退出和后台移除会按状态文档定位。
+  {
+    coll: 'community_member_states',
+    name: 'idx_communityId_userId',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'userId', Direction: '1' },
+    ],
+  },
+  // community_create_requests: hardDelete 清理与单次创建请求按 communityId 查找。
+  {
+    coll: 'community_create_requests',
+    name: 'idx_communityId',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'community_member_states',
+    name: 'idx_memberId',
+    keys: [
+      { Name: 'memberId', Direction: '1' },
+    ],
+  },
   // community_members: 发帖/加入前校验按 userId + status 查
   {
     coll: 'community_members',

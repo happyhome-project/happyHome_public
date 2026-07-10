@@ -59,7 +59,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { reactive, ref, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { communityApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
@@ -71,11 +71,19 @@ const userStore = useUserStore()
 
 const communityStore = useCommunityStore()
 const submitting = ref(false)
+const pendingRequestId = ref('')
 const form = reactive({
   name: '',
   description: '',
   joinType: 'open' as 'open' | 'approval',
 })
+
+watch(
+  () => [form.name, form.description, form.joinType],
+  () => {
+    if (!submitting.value) pendingRequestId.value = ''
+  },
+)
 
 onLoad((options: any) => {
   if (ensureHierarchyStack('/pages/createCommunity/index', options || {}, '/pages/onboarding/index?mode=discover')) return
@@ -93,12 +101,16 @@ async function handleSubmit() {
   }
   submitting.value = true
   try {
+    if (!pendingRequestId.value) {
+      pendingRequestId.value = `mini-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+    }
     await communityApi.create({
       name: form.name.trim(),
       description: form.description.trim(),
       coverImage: '',
       location: null,
       joinType: form.joinType,
+      requestId: pendingRequestId.value,
     })
     uni.showModal({
       title: '提交成功',
