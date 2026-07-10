@@ -12,11 +12,11 @@ export const RELEASE_ACTIONS = new Set([
 ])
 
 function normalizePath(value) {
-  return String(value || '').replace(/\\/g, '/').replace(/^[ADMR]\t(?:[^\t]+\t)?/, '')
+  return String(value || '').replace(/\\/g, '/').replace(/^[ADMR]\d*\t(?:[^\t]+\t)?/, '')
 }
 
 function changeStatus(value) {
-  return String(value || '').match(/^([ADMR])\t/)?.[1] || 'M'
+  return String(value || '').match(/^([ADMR])\d*\t/)?.[1] || 'M'
 }
 
 function unique(values) {
@@ -34,7 +34,7 @@ export function classifyReleaseImpact({ changedPaths = [], allFunctions = ALL_CL
   const cloudPaths = paths.filter(({ path }) => path.startsWith('cloud/'))
   let cloud = { functions: [], mode: 'none', reasons: [] }
 
-  const forceAll = cloudPaths.find(({ path, status }) => status === 'D'
+  const forceAll = cloudPaths.find(({ path, status }) => status === 'D' || status === 'R'
     || path === 'cloud/build.mjs'
     || path === 'cloud/package.json'
     || path === 'cloud/package-lock.json'

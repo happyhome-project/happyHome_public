@@ -35,7 +35,7 @@ test('shared inputs use the dependency map and unknown mappings fall back to all
 })
 
 test('deletions and build configuration changes conservatively deploy all cloud functions', () => {
-  for (const changedPath of ['D\tcloud/lib/db.ts', 'cloud/build.mjs', 'cloud/package-lock.json', 'cloud/tsconfig.json']) {
+  for (const changedPath of ['D\tcloud/lib/db.ts', 'R100\tcloud/lib/old.ts\tcloud/lib/new.ts', 'cloud/build.mjs', 'cloud/package-lock.json', 'cloud/tsconfig.json']) {
     const impact = classifyReleaseImpact({ changedPaths: [changedPath], allFunctions: ['post', 'user'], functionInputs: {} })
     assert.equal(impact.cloud.mode, 'all')
   }
