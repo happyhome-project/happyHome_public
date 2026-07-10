@@ -10,6 +10,13 @@ test('root DevTools project config points manual cloud deploys at the built func
   assert.equal(config.cloudfunctionRoot, 'cloud/dist/')
 })
 
+test('H5 runtime does not bundle the historical production gateway or shared token', () => {
+  const source = readFileSync(new URL('../../miniprogram/src/api/cloud.ts', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /happyhome-admin-2024/)
+  assert.doesNotMatch(source, /app\.tcloudbase\.com\/http-gateway/)
+  assert.match(source, /H5 gateway is opt-in/)
+})
+
 test('remote release stages are always revalidated instead of trusted from local ledger state', () => {
   assert.equal(releasePolicyModule.mustRevalidateRemoteReleaseStage('cloud-deploy'), true)
   assert.equal(releasePolicyModule.mustRevalidateRemoteReleaseStage('cloud-smoke'), true)
