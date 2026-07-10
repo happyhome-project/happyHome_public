@@ -12,11 +12,13 @@ function normalizeWorkspacePath(value) {
 
 export function assertWorktreePolicy({
   agentsExists,
+  agentsIsSymbolicLink = false,
   branch,
   cwd,
   canonicalMainPath = CANONICAL_MAIN_WORKSPACE,
 }) {
   if (!agentsExists) throw new Error(`Required repository policy file is missing: ${cwd}/AGENTS.md`)
+  if (agentsIsSymbolicLink) throw new Error(`Required repository policy file must not be a symbolic link: ${cwd}/AGENTS.md`)
 
   if (branch === 'main' && normalizeWorkspacePath(cwd) !== normalizeWorkspacePath(canonicalMainPath)) {
     throw new Error(`Branch main is allowed only in the canonical workspace ${canonicalMainPath}; got ${cwd}`)

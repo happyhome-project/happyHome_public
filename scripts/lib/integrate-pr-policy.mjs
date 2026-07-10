@@ -1,13 +1,45 @@
 import {
   closeSync,
+  linkSync,
   openSync,
+  readFileSync,
+  renameSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 
 import { CANONICAL_MAIN_WORKSPACE } from './worktree-policy.mjs'
 
 export const REQUIRED_PR_CHECK = 'pr-ci / offline'
+
+const releaseLockErrors = new WeakMap()
+
+const defaultFileSystem = {
+  closeSync,
+  linkSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+}
+
+export function getReleaseLockError(error) {
+  return error && typeof error === 'object' ? releaseLockErrors.get(error) : undefined
+}
+
+function recordReleaseLockError(primaryError, releaseLockError) {
+  releaseLockErrors.set(primaryError, releaseLockError)
+  try {
+    Object.defineProperty(primaryError, 'releaseLockError', {
+      configurable: true,
+      value: releaseLockError,
+    })
+  } catch {
+    // Frozen errors retain their identity; callers can use getReleaseLockError(error).
+  }
+}
 
 function quoteWindowsCmdArgument(value) {
   const stringValue = String(value)
@@ -70,15 +102,42 @@ export function acquireIntegrationLock(lockPath, {
   prNumber,
   pid = process.pid,
   now = () => new Date().toISOString(),
+  createOwnerToken = randomUUID,
+  fileSystem = defaultFileSystem,
 } = {}) {
+  const ownerToken = createOwnerToken()
+  const {
+    closeSync: close,
+    linkSync: link,
+    openSync: open,
+    readFileSync: read,
+    renameSync: rename,
+    unlinkSync: unlink,
+    writeFileSync: write,
+  } = fileSystem
   let descriptor
+  let createdLock = false
   try {
-    descriptor = openSync(lockPath, 'wx')
-    writeFileSync(descriptor, `${JSON.stringify({ pid, prNumber, acquiredAt: now() })}\n`, 'utf8')
-    closeSync(descriptor)
+    descriptor = open(lockPath, 'wx')
+    createdLock = true
+    write(descriptor, `${JSON.stringify({ ownerToken, pid, prNumber, acquiredAt: now() })}\n`, 'utf8')
+    close(descriptor)
     descriptor = undefined
   } catch (error) {
-    if (descriptor !== undefined) closeSync(descriptor)
+    if (descriptor !== undefined) {
+      try {
+        close(descriptor)
+      } catch {
+        // The original initialization failure remains the actionable error.
+      }
+    }
+    if (createdLock) {
+      try {
+        unlink(lockPath)
+      } catch {
+        // A failed cleanup is intentionally left visible through the original error path.
+      }
+    }
     if (error?.code === 'EEXIST') {
       throw new Error(`A PR integration is already in progress; lock exists at ${lockPath}`)
     }
@@ -88,8 +147,29 @@ export function acquireIntegrationLock(lockPath, {
   let released = false
   return () => {
     if (released) return
+    const releasePath = `${lockPath}.${ownerToken}.releasing`
+    try {
+      rename(lockPath, releasePath)
+    } catch (error) {
+      throw new Error(`Unable to atomically claim PR integration lock at ${lockPath}: ${error?.message || error}`)
+    }
+    let currentLock
+    try {
+      currentLock = JSON.parse(read(releasePath, 'utf8'))
+    } catch (error) {
+      throw new Error(`Unable to verify PR integration lock ownership at ${releasePath}: ${error?.message || error}`)
+    }
+    if (currentLock?.ownerToken !== ownerToken) {
+      try {
+        link(releasePath, lockPath)
+        unlink(releasePath)
+      } catch (restoreError) {
+        throw new Error(`PR integration lock ownership changed at ${lockPath}; refusing to release another owner's lock and could not restore it: ${restoreError?.message || restoreError}`)
+      }
+      throw new Error(`PR integration lock ownership changed at ${lockPath}; refusing to release another owner's lock`)
+    }
+    unlink(releasePath)
     released = true
-    unlinkSync(lockPath)
   }
 }
 
@@ -121,7 +201,10 @@ export async function integratePullRequest({
   const gitCommonDir = await commandOutput(runCommand, 'git', ['rev-parse', '--git-common-dir'], root)
   const releaseLock = await acquireLock({ root, gitCommonDir, prNumber: parsedPrNumber })
 
+  let primaryError
   try {
+    await runCommand('git', ['fetch', 'origin', 'main'], { cwd: root })
+    await runCommand('git', ['fetch', 'origin', `pull/${parsedPrNumber}/head`], { cwd: root })
     const prJson = await commandOutput(runCommand, 'gh', [
       'pr',
       'view',
@@ -136,6 +219,16 @@ export async function integratePullRequest({
       throw new Error(`Unable to parse gh pr view output: ${error?.message || error}`)
     }
     assertPullRequestReady(pullRequest)
+    try {
+      await runCommand('git', ['merge-base', '--is-ancestor', 'origin/main', pullRequest.headRefOid], { cwd: root })
+    } catch {
+      throw new Error(`PR head ${pullRequest.headRefOid} does not include the latest origin/main; sync and rerun PR CI before integration`)
+    }
+    try {
+      await runCommand('git', ['diff', '--quiet', 'origin/main', pullRequest.headRefOid, '--', '.github/workflows/pr-ci.yml'], { cwd: root })
+    } catch {
+      throw new Error('PR changes the trusted CI definition .github/workflows/pr-ci.yml; it cannot use its own modified check as an integration gate')
+    }
 
     await runCommand('gh', [
       'pr',
@@ -159,7 +252,15 @@ export async function integratePullRequest({
       releasePlanInvoked,
       url: pullRequest.url,
     }
+  } catch (error) {
+    primaryError = error
+    throw error
   } finally {
-    await releaseLock()
+    try {
+      await releaseLock()
+    } catch (releaseLockError) {
+      if (primaryError) recordReleaseLockError(primaryError, releaseLockError)
+      else throw releaseLockError
+    }
   }
 }

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
 import {
@@ -19,6 +21,16 @@ test('worktree policy requires the repository AGENTS.md', () => {
     cwd: 'X:\\worktrees\\example\\happyHome',
     canonicalMainPath: CANONICAL_MAIN,
   }), /AGENTS\.md/)
+})
+
+test('worktree policy rejects a symbolic-link AGENTS.md', () => {
+  assert.throws(() => assertWorktreePolicy({
+    agentsExists: true,
+    agentsIsSymbolicLink: true,
+    branch: 'codex/example',
+    cwd: 'X:\\worktrees\\example\\happyHome',
+    canonicalMainPath: CANONICAL_MAIN,
+  }), /symbolic link/i)
 })
 
 test('worktree policy allows main only in the canonical workspace', () => {
@@ -102,4 +114,16 @@ test('pre-push parser rejects malformed hook input', () => {
 test('hooks path verification requires the repository-managed path', () => {
   assert.doesNotThrow(() => assertHooksPathConfigured('.githooks\n'))
   assert.throws(() => assertHooksPathConfigured('.git/hooks'), /core\.hooksPath/)
+})
+
+test('PR CI checks out the exact head, checks the PR diff, and tolerates an absent future release plan', () => {
+  const workflowPath = fileURLToPath(new URL('../../.github/workflows/pr-ci.yml', import.meta.url))
+  const workflow = readFileSync(workflowPath, 'utf8')
+
+  assert.match(workflow, /^name:\s*pr-ci\s*$/m)
+  assert.match(workflow, /offline:\s*\r?\n\s*name:\s*offline/)
+  assert.match(workflow, /ref:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}/)
+  assert.match(workflow, /fetch-depth:\s*0/)
+  assert.match(workflow, /git diff --check \$\{\{ github\.event\.pull_request\.base\.sha \}\} \$\{\{ github\.event\.pull_request\.head\.sha \}\}/)
+  assert.match(workflow, /scripts\['release:plan'\]/)
 })

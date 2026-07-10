@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import process from 'node:process'
 
 import {
+  assertHooksPathConfigured,
   assertPrePushAllowed,
   assertWorktreePolicy,
   formatWorktreeReport,
@@ -24,18 +25,32 @@ function runGit(args, cwd = process.cwd()) {
   return String(result.stdout || '').trim()
 }
 
+function readGitConfig(args, cwd = process.cwd()) {
+  const result = spawnSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    windowsHide: true,
+  })
+  if (result.error) throw result.error
+  if (result.status !== 0) return ''
+  return String(result.stdout || '').trim()
+}
+
 function runPostCheckoutPreflight() {
   const root = runGit(['rev-parse', '--show-toplevel'])
   const branch = runGit(['branch', '--show-current'], root)
   const head = runGit(['rev-parse', 'HEAD'], root)
   const { behind, ahead } = parseDivergence(runGit(['rev-list', '--left-right', '--count', 'origin/main...HEAD'], root))
+  const agentsPath = join(root, 'AGENTS.md')
 
   console.log(formatWorktreeReport({ cwd: root, branch, head, behind, ahead }))
   assertWorktreePolicy({
-    agentsExists: existsSync(join(root, 'AGENTS.md')),
+    agentsExists: existsSync(agentsPath),
+    agentsIsSymbolicLink: existsSync(agentsPath) && lstatSync(agentsPath).isSymbolicLink(),
     branch,
     cwd: root,
   })
+  assertHooksPathConfigured(readGitConfig(['config', '--local', '--get', 'core.hooksPath'], root))
 }
 
 function runPrePushPolicy() {

@@ -4,12 +4,19 @@
 
 本仓库当前无法通过 GitHub 套餐强制保护 `main`，因此以下规则是所有 HappyHome 任务必须主动遵守的项目约束。GitHub 没有拦截，不代表允许绕过。
 
+本地 Git hooks、AGENTS 和共享凭据约束是防误操作的流程护栏，不是能对抗 `--no-verify`、GitHub API 或持有生产凭据者的安全隔离。生产权限的物理隔离不在当前方案范围内。
+
 ### 角色边界
 
 - 一个功能必须使用一个独立的 `codex/<feature>` 分支和独立 worktree。
 - 功能任务只能开发、测试、提交并推送自己的功能分支，不得直接提交或推送 `main`。
 - 功能任务不得在真实主工作区执行合并、部署或发布，除非用户明确指定当前任务为主干集成/发布任务。
 - HappyHome 的真实主工作区是 `C:\Project\Claude\happyHome`。只有主干集成/发布任务可以在该目录操作 `main`。
+
+### Worktree 引导
+
+- 新 worktree 必须由最新 `origin/main` 创建；`AGENTS.md` 必须是仓库内真实文件，禁止软链接或符号链接。
+- 每台开发机首次使用仓库时必须在任一 HappyHome worktree 执行 `npm.cmd run hooks:install`。该配置使用共享 Git hooks，在后续 `git worktree add` 后执行预检。
 
 ### 共享云环境边界
 

@@ -6,6 +6,7 @@ import process from 'node:process'
 
 import {
   acquireIntegrationLock,
+  getReleaseLockError,
   integratePullRequest,
   parsePrNumber,
   resolveSpawnInvocation,
@@ -62,5 +63,7 @@ try {
   console.log(`[integrate-pr] release plan ${result.releasePlanInvoked ? 'completed' : 'skipped (release:plan is not defined)'}`)
 } catch (error) {
   console.error(`[integrate-pr] ${error?.message || error}`)
+  const releaseLockError = getReleaseLockError(error)
+  if (releaseLockError) console.error(`[integrate-pr] lock release also failed: ${releaseLockError.message || releaseLockError}`)
   process.exitCode = 1
 }

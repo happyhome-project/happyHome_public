@@ -16,7 +16,8 @@
     "acorn": "^8.16.0"
   },
   "scripts": {
-    "setup:git-hooks": "node scripts/install-git-hooks.mjs",
+    "hooks:install": "node scripts/install-git-hooks.mjs",
+    "setup:git-hooks": "npm run hooks:install",
     "integrate:pr": "node scripts/integrate-pr.mjs",
     "test:governance": "node --test scripts/lib/worktree-policy.test.mjs scripts/lib/integrate-pr-policy.test.mjs",
     "deploy:cloud": "node scripts/deploy.mjs cloud",

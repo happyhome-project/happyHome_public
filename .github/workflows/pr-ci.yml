@@ -17,6 +17,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -52,7 +55,12 @@ jobs:
         run: npm run test:deploy-output
 
       - name: Check whitespace
-        run: git diff --check
+        run: git diff --check ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }}
 
       - name: Plan PR release
-        run: npm run release:plan -- --mode=pr
+        run: |
+          if node -e "const {scripts = {}} = require('./package.json'); process.exit(scripts['release:plan'] ? 0 : 1)"; then
+            npm run release:plan -- --mode=pr
+          else
+            echo "release:plan is not installed yet; skipping PR release-plan generation"
+          fi
