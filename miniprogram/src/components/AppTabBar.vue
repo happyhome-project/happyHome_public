@@ -260,27 +260,27 @@ void APP_TABS
 }
 
 .publish-icon--family {
-  background: #fff2d9;
+  background: #fdf6e6;
 }
 
 .publish-icon--trade {
-  background: #e7f2ff;
+  background: #e3f0fb;
 }
 
 .publish-icon--notice {
-  background: #e8f8f0;
+  background: #e0fbf7;
 }
 
 .publish-icon--lost {
-  background: #fff0df;
+  background: #fef6e3;
 }
 
 .publish-icon--neighbor {
-  background: #dff7ff;
+  background: #ddf6fc;
 }
 
 .publish-icon--car {
-  background: #e1f7ed;
+  background: #def7ec;
 }
 
 .publish-label {
