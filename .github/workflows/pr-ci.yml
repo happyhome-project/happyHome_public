@@ -64,4 +64,5 @@ jobs:
             npm run release:plan -- --mode=pr
           } else {
             Write-Output "release:plan is not installed yet; skipping PR release-plan generation"
+            exit 0
           }

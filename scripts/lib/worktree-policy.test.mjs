@@ -128,4 +128,5 @@ test('PR CI checks out the exact head, checks the PR diff, and tolerates an abse
   assert.match(workflow, /git diff --check \$\{\{ github\.event\.pull_request\.base\.sha \}\} \$\{\{ github\.event\.pull_request\.head\.sha \}\}/)
   assert.match(workflow, /scripts\['release:plan'\]/)
   assert.doesNotMatch(workflow, /\n\s+fi\s*$/m)
+  assert.match(workflow, /release:plan is not installed yet; skipping PR release-plan generation[\s\S]*exit 0/)
 })
