@@ -61,11 +61,12 @@ dns.lookup = function forcedIPv4Lookup(hostname, options, callback) {
 import ci from 'miniprogram-ci'
 import { resolve, dirname, join } from 'path'
 import { fileURLToPath } from 'url'
-import { execSync, spawn } from 'child_process'
+import { execSync, spawn, spawnSync } from 'child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { parseArgs as parseCloudSmokeArgs, runCloudReleaseSmoke } from './cloud-release-smoke.mjs'
 import { deployFunctionsWithConcurrency } from './lib/cloudbase-function-deploy.mjs'
+import { createProductionReleaseStore } from './lib/cloudbase-release-store.mjs'
 import {
   analyzeDevtoolsCloudDeployOutput,
   analyzeDevtoolsUploadInfo,
@@ -91,6 +92,8 @@ import {
   makeReleaseRunId,
   runLedgerStage,
 } from './lib/release-run-ledger.mjs'
+import { ProductionReleaseGuard } from './lib/production-release-guard.mjs'
+import { ReleaseGovernance } from './lib/release-governance.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
@@ -418,7 +421,7 @@ async function deployCloudViaDevtoolsCli(fns) {
   return { ok: true, reason: 'ok' }
 }
 
-async function deployCloudViaCloudBaseCli(fns) {
+async function deployCloudViaCloudBaseCli(fns, options = {}) {
   const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
   const tcb = (...args) => [npx, '--yes', '--package', '@cloudbase/cli', 'tcb', ...args].map(quote).join(' ')
   const confirmDefault = (commandLine) => process.platform === 'win32'
@@ -445,6 +448,7 @@ async function deployCloudViaCloudBaseCli(fns) {
       functions: fns,
       concurrency,
       deployOne: async (fn) => {
+        if (typeof options.beforeFunctionDeploy === 'function') await options.beforeFunctionDeploy(fn)
         const fnDir = resolve(CLOUD_DIST, fn)
         return await runCloudBaseCliCaptureWithRetry(
           confirmDefault(tcb('fn', 'deploy', fn, '--force', '--env-id', envId, '--deployMode', 'cos', '--json')),
@@ -469,6 +473,7 @@ async function deployCloudViaCloudBaseCli(fns) {
         }
         return detail
       },
+      afterDeploy: options.afterFunctionDeploy,
     })
     assertReleaseCapabilitySeparation(securityConfigByFunction)
     return { ok: true, reason: 'ok', concurrency, functionResults }
@@ -539,16 +544,21 @@ async function deployCloud(options = {}) {
   const requireCloudBaseCli = options.requireCloudBaseCli === true
   const onlyArg = process.argv.find((a) => a.startsWith('--only='))
   const onlyList = onlyArg ? onlyArg.slice(7).split(',').map((s) => s.trim()).filter(Boolean) : null
-  const fns = onlyList && onlyList.length
+  const plannedFunctions = Array.isArray(options.functions) ? options.functions : null
+  const fns = plannedFunctions
+    ? CLOUD_FUNCTIONS.filter((f) => plannedFunctions.includes(f))
+    : onlyList && onlyList.length
     ? CLOUD_FUNCTIONS.filter((f) => onlyList.includes(f))
     : CLOUD_FUNCTIONS
+  if (!fns.length) throw new Error('No cloud functions selected for deployment')
+  if (plannedFunctions) console.log(`Release plan selected: ${fns.join(', ')}`)
   if (onlyList) console.log(`Filtering to: ${fns.join(', ')}`)
 
   console.log('\nBuilding cloud functions...')
   execSync('node build.mjs', {
     cwd: resolve(ROOT, 'cloud'),
     stdio: 'inherit',
-    env: { ...process.env, HH_CLOUD_BUILD_ONLY: onlyList ? fns.join(',') : '' },
+    env: { ...process.env, HH_CLOUD_BUILD_ONLY: fns.length < CLOUD_FUNCTIONS.length ? fns.join(',') : '' },
   })
 
   const forceCi = process.argv.includes('--use-ci')
@@ -556,7 +566,7 @@ async function deployCloud(options = {}) {
 
   if (forceTcb) {
     console.log('\n[--use-tcb] Attempting deploy via CloudBase CLI...')
-    const tcbResult = await deployCloudViaCloudBaseCli(fns)
+    const tcbResult = await deployCloudViaCloudBaseCli(fns, options)
     if (tcbResult.ok) {
       console.log('[OK] Cloud functions deployed via CloudBase CLI')
       return { fns, path: 'cloudbase-cli', concurrency: tcbResult.concurrency, functionResults: tcbResult.functionResults || [] }
@@ -590,7 +600,7 @@ async function deployCloud(options = {}) {
       console.log(`[!] DevTools CLI failed (${result.reason}) - trying CloudBase CLI`)
 
       console.log('\n[fallback] Attempting deploy via CloudBase CLI...')
-      const tcbResult = await deployCloudViaCloudBaseCli(fns)
+      const tcbResult = await deployCloudViaCloudBaseCli(fns, options)
       if (tcbResult.ok) {
         console.log('[OK] Cloud functions deployed via CloudBase CLI')
         return { fns, path: 'cloudbase-cli', concurrency: tcbResult.concurrency, functionResults: tcbResult.functionResults || [] }
@@ -609,7 +619,7 @@ async function deployCloud(options = {}) {
   return { fns, path: 'miniprogram-ci' }
 }
 
-async function runCloudSmoke(fns, releaseRunId = '') {
+async function runCloudSmoke(fns, releaseRunId = '', options = {}) {
   const parsedSmokeArgs = parseCloudSmokeArgs(process.argv.slice(3))
   const smokeOptions = {
     ...parsedSmokeArgs,
@@ -622,6 +632,7 @@ async function runCloudSmoke(fns, releaseRunId = '') {
     concurrency: getCloudSmokeConcurrency(),
   }
   console.log('\nEnsuring release database collections and indexes...')
+  if (typeof options.beforeEnsureIndexes === 'function') await options.beforeEnsureIndexes()
   execSync('npm.cmd run ensure:indexes', {
     cwd: ROOT,
     stdio: 'inherit',
@@ -952,6 +963,54 @@ function releaseStageReuseCheck(context) {
   }
 }
 
+function createFormalReleasePlan(gitSha) {
+  const result = spawnSync(process.execPath, ['scripts/release-plan.mjs', '--mode=main', `--head=${gitSha}`], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    windowsHide: true,
+  })
+  if (result.status !== 0) {
+    const detail = String(result.stderr || result.stdout || '').trim() || `exit ${result.status}`
+    throw new Error(`Formal release plan failed: ${detail}`)
+  }
+  if (result.stdout) process.stdout.write(result.stdout)
+  const planPath = resolve(ROOT, '.codex-local', 'release-plans', `${gitSha}.json`)
+  if (!existsSync(planPath)) throw new Error(`Formal release plan did not write ${planPath}`)
+  const plan = JSON.parse(readFileSync(planPath, 'utf8'))
+  if (plan.mode !== 'main' || plan.headSha !== gitSha || !plan.releaseRequired) {
+    throw new Error('Formal release plan is missing, stale, or does not require a release')
+  }
+  return plan
+}
+
+function createProductionReleaseGuard(releaseContext, plan) {
+  const store = createProductionReleaseStore({ root: ROOT })
+  const governance = new ReleaseGovernance({ store })
+  return new ProductionReleaseGuard({
+    governance,
+    gitSha: releaseContext.gitSha,
+    owner: `formal-release:${process.env.COMPUTERNAME || process.env.HOSTNAME || 'unknown'}:${process.pid}`,
+    plan,
+    runId: releaseContext.runId,
+  })
+}
+
+function releaseComponents({ cloudDeploy, miniprogramUpload, plan, releaseContext }) {
+  const functions = Object.fromEntries((cloudDeploy?.fns || []).map((name) => [name, {
+    sourceSha: releaseContext.gitSha,
+    buildId: `cloud-${releaseContext.gitSha.slice(0, 12)}-${name}`,
+  }]))
+  return {
+    adminWeb: plan.targets.adminWeb ? { sourceSha: releaseContext.gitSha } : null,
+    cloud: { functions },
+    miniprogram: plan.targets.miniprogram ? {
+      buildId: `mp-${miniprogramUpload.version}`,
+      sourceSha: releaseContext.gitSha,
+      version: miniprogramUpload.version,
+    } : null,
+  }
+}
+
 async function runFormalRelease(options = {}) {
   assertNoFormalReleaseOnlyFilter()
   execSync('git fetch --quiet origin main', { cwd: ROOT, stdio: 'inherit' })
@@ -981,7 +1040,8 @@ async function runFormalRelease(options = {}) {
   }
   const releaseRunId = await resolveReleaseRunId(forceResume)
   releaseContext.runId = releaseRunId
-  releaseContext.cloudFunctions = [...CLOUD_FUNCTIONS]
+  const formalPlan = prepareOnly ? null : createFormalReleasePlan(releaseContext.gitSha)
+  releaseContext.cloudFunctions = formalPlan?.targets.cloud.functions || []
   const releaseLedger = await createReleaseRunLedger({
     root: ROOT,
     runId: releaseRunId,
@@ -993,6 +1053,7 @@ async function runFormalRelease(options = {}) {
   })
   const resume = forceResume || hasFlag('resume')
   const reuseCheck = releaseStageReuseCheck(releaseContext)
+  const releaseGuard = prepareOnly ? null : createProductionReleaseGuard(releaseContext, formalPlan)
 
   console.log(`[release-ledger] runId=${releaseLedger.runId}`)
   console.log(`[release-ledger] run=${releaseLedger.runPath}`)
@@ -1001,7 +1062,9 @@ async function runFormalRelease(options = {}) {
   if (prepareOnly) console.log('[release-ledger] prepare only; stopping after miniprogram build/gate evidence')
 
   try {
-    await runLedgerStage(releaseLedger, 'miniprogram-build-gate', {
+    if (!prepareOnly) await releaseGuard.acquire()
+
+    if (!formalPlan || formalPlan.targets.miniprogram) await runLedgerStage(releaseLedger, 'miniprogram-build-gate', {
       resume,
       mustReuse: publishOnly,
       reuseCheck,
@@ -1016,30 +1079,41 @@ async function runFormalRelease(options = {}) {
         result: { version: miniprogramUpload.version, desc: miniprogramUpload.desc },
       }
     })
+    else await releaseLedger.skipStage('miniprogram-build-gate', { reason: 'release plan has no miniprogram changes' })
 
     if (prepareOnly) {
       await releaseLedger.complete('prepared')
       return
     }
 
-    const cloudDeploy = await runLedgerStage(releaseLedger, 'cloud-deploy', {
+    let cloudDeploy = { fns: [] }
+    if (formalPlan.targets.cloud.mode !== 'none') cloudDeploy = await runLedgerStage(releaseLedger, 'cloud-deploy', {
       resume,
       reuseCheck,
       command: `npm.cmd --workspace cloud run build && CloudBase CLI/COS fn deploy (concurrency=${getCloudDeployConcurrency()})`,
     }, async () => {
-      const result = await deployCloud({ requireCloudBaseCli: true })
+      const result = await deployCloud({
+        afterFunctionDeploy: async (fn, record) => await releaseGuard.recordStage(`cloud:${fn}`, { evidence: record }),
+        beforeFunctionDeploy: async (fn) => await releaseGuard.beforeRemoteMutation(`cloud:${fn}`),
+        functions: formalPlan.targets.cloud.functions,
+        requireCloudBaseCli: true,
+      })
       if (result.path !== 'cloudbase-cli') {
         throw new Error(`Formal release cloud deploy must use CloudBase CLI/COS before smoke; got ${result.path}. Rerun with --use-tcb.`)
       }
       return result
     })
+    else await releaseLedger.skipStage('cloud-deploy', { reason: 'release plan has no cloud function changes' })
 
-    await runLedgerStage(releaseLedger, 'cloud-smoke', {
+    if (cloudDeploy.fns.length) await runLedgerStage(releaseLedger, 'cloud-smoke', {
       resume,
       reuseCheck,
       command: `npm.cmd run test:cloud:release-smoke (concurrency=${getCloudSmokeConcurrency()})`,
     }, async () => {
-      const summary = await runCloudSmoke(cloudDeploy.fns, releaseLedger.runId)
+      const summary = await runCloudSmoke(cloudDeploy.fns, releaseLedger.runId, {
+        beforeEnsureIndexes: async () => await releaseGuard.beforeRemoteMutation('ensure-indexes'),
+      })
+      await releaseGuard.recordStage('cloud-smoke', { evidence: { summaryPath: resolve(summary.evidenceDir, 'summary.json') } })
       return {
         evidence: { summaryPath: resolve(summary.evidenceDir, 'summary.json') },
         result: {
@@ -1051,17 +1125,21 @@ async function runFormalRelease(options = {}) {
         },
       }
     })
+    else await releaseLedger.skipStage('cloud-smoke', { reason: 'release plan has no cloud function changes' })
 
-    await runLedgerStage(releaseLedger, 'admin-web-deploy', {
+    if (formalPlan.targets.adminWeb) await runLedgerStage(releaseLedger, 'admin-web-deploy', {
       resume,
       reuseCheck,
       command: 'npm.cmd --workspace admin-web run build + admin-web deploy',
     }, async () => {
+      await releaseGuard.beforeRemoteMutation('admin-web-deploy')
       await deployAdminWeb()
+      await releaseGuard.recordStage('admin-web-deploy')
       return { result: { target: process.env.ADMIN_WEB_TARGET || 'aliyun' } }
     })
+    else await releaseLedger.skipStage('admin-web-deploy', { reason: 'release plan has no admin-web changes' })
 
-    await runLedgerStage(releaseLedger, 'miniprogram-upload', {
+    if (formalPlan.targets.miniprogram) await runLedgerStage(releaseLedger, 'miniprogram-upload', {
       resume,
       reuseCheck,
       command: 'WeChat DevTools CLI upload or explicit miniprogram-ci fallback',
@@ -1074,6 +1152,7 @@ async function runFormalRelease(options = {}) {
       if (currentPackageDigest !== preparedPackageDigest) {
         throw new Error(`miniprogram package changed after release UI validation: expected ${preparedPackageDigest}, got ${currentPackageDigest}`)
       }
+      await releaseGuard.beforeRemoteMutation('miniprogram-upload')
       const uploadResult = await uploadBuiltMiniprogram(miniprogramUpload)
       const uploadEvidence = writeMiniprogramUploadEvidence({
         releaseRunId: releaseLedger.runId,
@@ -1082,6 +1161,7 @@ async function runFormalRelease(options = {}) {
         packageDigest: currentPackageDigest,
         uploadResult,
       })
+      await releaseGuard.recordStage('miniprogram-upload', { evidence: { uploadEvidencePath: uploadEvidence.evidencePath } })
       return {
         evidence: {
           uploadEvidencePath: uploadEvidence.evidencePath,
@@ -1096,8 +1176,9 @@ async function runFormalRelease(options = {}) {
         },
       }
     })
+    else await releaseLedger.skipStage('miniprogram-upload', { reason: 'release plan has no miniprogram changes' })
 
-    await runLedgerStage(releaseLedger, 'verify-upload', {
+    if (formalPlan.targets.miniprogram) await runLedgerStage(releaseLedger, 'verify-upload', {
       resume,
       reuseCheck,
       command: 'verify build-info and mp-upload-info after upload',
@@ -1138,9 +1219,21 @@ async function runFormalRelease(options = {}) {
         },
       }
     })
+    else await releaseLedger.skipStage('verify-upload', { reason: 'release plan has no miniprogram changes' })
 
+    if (releaseGuard) await releaseGuard.complete({
+      components: releaseComponents({ cloudDeploy, miniprogramUpload, plan: formalPlan, releaseContext }),
+      evidence: { localReleaseRunId: releaseLedger.runId, planBaseSha: formalPlan.baseSha || null },
+    })
     await releaseLedger.complete('passed')
   } catch (error) {
+    if (releaseGuard && !releaseGuard.finished) {
+      try {
+        await releaseGuard.fail(error, { localReleaseRunId: releaseLedger.runId })
+      } catch (guardError) {
+        console.error(`[release-lock] failed to record release failure: ${guardError?.message || guardError}`)
+      }
+    }
     await releaseLedger.complete('failed')
     throw error
   }

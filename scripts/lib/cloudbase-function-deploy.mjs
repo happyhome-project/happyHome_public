@@ -15,6 +15,8 @@ export async function deployFunctionsWithConcurrency(options) {
   const concurrency = options.concurrency || 1
   const deployOne = options.deployOne
   const detailOne = options.detailOne
+  const beforeDeploy = options.beforeDeploy
+  const afterDeploy = options.afterDeploy
   const clock = options.now || nowMs
 
   if (typeof deployOne !== 'function') throw new Error('deployOne is required')
@@ -26,6 +28,7 @@ export async function deployFunctionsWithConcurrency(options) {
     let deployResult
     let deployFinishedAtMs
     try {
+      if (typeof beforeDeploy === 'function') await beforeDeploy(fn)
       deployResult = await deployOne(fn)
       deployFinishedAtMs = clock()
     } catch (error) {
@@ -98,7 +101,7 @@ export async function deployFunctionsWithConcurrency(options) {
       }
     }
 
-    return {
+    const record = {
       fn,
       status: 'passed',
       durationMs: Math.max(0, detailFinishedAtMs - startedAtMs),
@@ -111,6 +114,8 @@ export async function deployFunctionsWithConcurrency(options) {
         reason: detailResult.reason || 'ok',
       },
     }
+    if (typeof afterDeploy === 'function') await afterDeploy(fn, record)
+    return record
   })
 
   const functionResults = await runBounded(tasks, concurrency)
