@@ -40,10 +40,26 @@
         :value="datetimePickerValue"
         :start="datetimeRangeStart"
         :end="datetimeRangeEnd"
-        :placeholder="variant === 'figma' ? '' : `选择${displayLabel}`"
+        placeholder="选择日期时间"
+        :border="false"
+        hide-second
         return-type="string"
         @change="onDatetimeChange"
-      />
+      >
+        <view class="datetime-field">
+          <image
+            class="datetime-field-icon"
+            src="/static/publish-icons/calendar.svg"
+            mode="aspectFit"
+          />
+          <text
+            class="datetime-field-value"
+            :class="{ 'datetime-field-value--placeholder': !datetimeDisplayValue }"
+          >
+            {{ datetimeDisplayValue || '选择日期时间' }}
+          </text>
+        </view>
+      </uni-datetime-picker>
     </view>
 
     <view v-else-if="widget.type === 'number'" class="input-wrap">
@@ -259,6 +275,8 @@ const datetimePickerValue = computed(() => {
   return v.replace('T', ' ').slice(0, 19)
 })
 
+const datetimeDisplayValue = computed(() => datetimePickerValue.value.slice(0, 16))
+
 // 范围：从"现在"起到今年底，年列只剩 1 个选项即视觉上锁定为今年
 const datetimeRangeStart = computed(() => {
   const d = new Date()
@@ -361,12 +379,40 @@ function clearLocation() {
   font-size: var(--hh-text-body-base-size);
 }
 .datetime-picker {
-  /* uni-datetime-picker 自带外观，容器用全宽块级即可 */
   display: block;
-}
-.datetime-picker {
   min-width: 0;
   max-width: 100%;
+  width: 100%;
+}
+.datetime-field {
+  width: 100%;
+  min-height: 64rpx;
+  padding: 0 16rpx;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  border: 1rpx solid #e6e8eb;
+  border-radius: 8rpx;
+  background: #fff;
+  box-sizing: border-box;
+}
+.datetime-field-icon {
+  width: 40rpx;
+  height: 40rpx;
+  flex-shrink: 0;
+}
+.datetime-field-value {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: #181818;
+  font-size: var(--hh-text-body-base-size);
+  line-height: var(--hh-text-body-base-line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.datetime-field-value--placeholder {
+  color: #a6a6a6;
 }
 .image-uploader { display: flex; flex-wrap: wrap; gap: $hh-space-sm; min-width: 0; max-width: 100%; }
 .thumb-wrap { position: relative; width: 188rpx; height: 188rpx; }
@@ -434,12 +480,22 @@ function clearLocation() {
 
 .widget-editor--line .input-wrap,
 .widget-editor--line .textarea-wrap,
-.widget-editor--line .location-picker,
-.widget-editor--line .datetime-picker {
+.widget-editor--line .location-picker {
   flex: 1;
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
+}
+
+.widget-editor--line .datetime-picker {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.widget-editor--figma.widget-editor--datetime {
+  overflow: visible;
 }
 
 .widget-editor--figma.widget-editor--multiline-text {
@@ -650,21 +706,12 @@ function clearLocation() {
   gap: 16rpx;
 }
 
-.widget-editor--figma :deep(.uni-date-editor),
-.widget-editor--figma :deep(.uni-date-x),
-.widget-editor--figma :deep(.uni-date__x-input),
-.widget-editor--figma :deep(.uni-date-single) {
+.widget-editor--figma :deep(.uni-date),
+.widget-editor--figma :deep(.uni-date-editor) {
   min-width: 0 !important;
   max-width: 100% !important;
   width: 100% !important;
   box-sizing: border-box;
-}
-
-.widget-editor--figma :deep(.uni-date__x-input) {
-  overflow: hidden;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .widget-editor--figma .loc-btn {
