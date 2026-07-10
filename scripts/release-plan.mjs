@@ -1,11 +1,16 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { join, relative, resolve } from 'node:path'
 import process from 'node:process'
 
-import { build } from '../node_modules/esbuild/lib/main.js'
+import { createProductionReleaseStore } from './lib/cloudbase-release-store.mjs'
 import { ALL_CLOUD_FUNCTIONS, createReleasePlan } from './lib/release-plan.mjs'
+import { resolveMainReleasePlanBase } from './lib/release-plan-base.mjs'
+
+const workspaceRequire = createRequire(new URL('../cloud/package.json', import.meta.url))
+const { build } = workspaceRequire('esbuild')
 
 function git(args, cwd) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim()
@@ -49,9 +54,9 @@ async function collectFunctionInputs(root) {
   return result
 }
 
-function printSummary(plan) {
+function printSummary(plan, baseSource) {
   const cloud = plan.targets.cloud
-  console.log(`[release-plan] mode=${plan.mode} head=${plan.headSha} base=${plan.baseSha || '(bootstrap)'}`)
+  console.log(`[release-plan] mode=${plan.mode} head=${plan.headSha} base=${plan.baseSha || '(bootstrap)'} source=${baseSource}`)
   console.log(`[release-plan] required=${plan.releaseRequired} cloud=${cloud.mode}:${cloud.functions.join(',') || '-'}`)
   console.log(`[release-plan] miniprogram=${plan.targets.miniprogram} admin-web=${plan.targets.adminWeb} actions=${plan.changeIds.join(',') || '-'}`)
 }
@@ -61,7 +66,23 @@ try {
   const mode = option('mode') || (process.argv[2] === 'pending' ? 'main' : '')
   if (!['main', 'pr'].includes(mode)) throw new Error('use --mode=pr or --mode=main')
   const headSha = option('head') || git(['rev-parse', 'HEAD'], root)
-  const baseSha = option('base') || (mode === 'pr' ? git(['merge-base', headSha, 'origin/main'], root) : process.env.HH_RELEASE_BASE_SHA || '')
+  let baseSha = option('base') || ''
+  let baseSource = baseSha ? 'explicit' : ''
+  if (mode === 'pr') {
+    baseSha = baseSha || git(['merge-base', headSha, 'origin/main'], root)
+    baseSource = baseSource || 'origin-main-merge-base'
+  } else {
+    const resolved = await resolveMainReleasePlanBase({
+      explicitBase: baseSha,
+      readProductionState: async () => await createProductionReleaseStore({ root }).readProductionState(),
+    })
+    baseSha = resolved.baseSha
+    baseSource = resolved.source
+  }
+  if (baseSha) {
+    git(['cat-file', '-e', `${baseSha}^{commit}`], root)
+    if (mode === 'main') git(['merge-base', '--is-ancestor', baseSha, headSha], root)
+  }
   const plan = createReleasePlan({
     baseSha,
     changedPaths: changedPaths(root, baseSha, headSha),
@@ -74,7 +95,7 @@ try {
   mkdirSync(destination, { recursive: true })
   const outputPath = join(destination, `${mode === 'main' ? '' : 'pr-'}${headSha}.json`)
   writeFileSync(outputPath, `${JSON.stringify(plan, null, 2)}\n`, 'utf8')
-  printSummary(plan)
+  printSummary(plan, baseSource)
   console.log(`[release-plan] wrote=${outputPath}`)
   if (process.env.GITHUB_STEP_SUMMARY) writeFileSync(process.env.GITHUB_STEP_SUMMARY, `\nRelease plan: \`${plan.targets.cloud.mode}\` cloud deployment.\n`, { flag: 'a' })
 } catch (error) {

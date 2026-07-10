@@ -88,3 +88,20 @@ test('deployFunctionsWithConcurrency keeps per-function evidence when deploy or 
   assert.equal(user.status, 'failed')
   assert.equal(user.detail.reason, 'detail crashed')
 })
+
+test('deployFunctionsWithConcurrency runs the release fence immediately before each function deployment', async () => {
+  const events = []
+  await deployFunctionsWithConcurrency({
+    functions: ['post', 'admin'],
+    concurrency: 2,
+    beforeDeploy: async (fn) => events.push(`${fn}:fence`),
+    afterDeploy: async (fn) => events.push(`${fn}:record`),
+    deployOne: async (fn) => { events.push(`${fn}:deploy`); return { ok: true } },
+    detailOne: async () => ({ ok: true }),
+  })
+
+  for (const fn of ['post', 'admin']) {
+    assert(events.indexOf(`${fn}:fence`) < events.indexOf(`${fn}:deploy`))
+    assert(events.indexOf(`${fn}:deploy`) < events.indexOf(`${fn}:record`))
+  }
+})
