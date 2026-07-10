@@ -8,6 +8,12 @@ export interface ActivityAnnouncementMainLayout {
 
 const TITLE_TYPES: Widget['type'][] = ['short_text', 'summary']
 const BODY_TYPES: Widget['type'][] = ['rich_text', 'rich_note', 'note_blocks', 'summary']
+const TITLE_FIELD_KEYS = new Set(['title', 'activitytitle', 'name', 'activityname'])
+const BODY_FIELD_KEYS = new Set(['detail', 'activitydetail', 'body', 'content', 'activitycontent'])
+const TITLE_LABELS = new Set(['活动名称', '活动标题', '标题', '名称'])
+const BODY_LABELS = new Set(['活动详情', '活动正文', '活动说明', '详情', '正文', '说明'])
+const FIELD_SEMANTIC_PARTS = ['title', 'name', 'detail', 'body', 'content']
+const LABEL_SEMANTIC_PARTS = ['标题', '名称', '详情', '正文', '说明']
 
 export function resolveActivityAnnouncementMain(
   section: Pick<Section, 'name'>,
@@ -24,7 +30,8 @@ export function resolveActivityAnnouncementMain(
     .map((widget, index) => ({ widget, index }))
     .filter(({ widget, index }) => index !== titleIndex && BODY_TYPES.includes(widget.type))
   const bodyCandidate = bodyCandidates.find(({ widget }) => isBodySemantic(widget))
-    || bodyCandidates[0]
+    || bodyCandidates.find(({ widget }) => widget.type !== 'summary' && isNeutralBodyFallback(widget))
+    || bodyCandidates.find(({ widget }) => widget.type === 'summary' && isNeutralBodyFallback(widget))
   if (!bodyCandidate) return null
 
   return {
@@ -39,15 +46,20 @@ export function resolveActivityAnnouncementMain(
 function isTitleSemantic(widget: Widget): boolean {
   const fieldKey = normalizeKey(widget.fieldKey)
   const label = normalizeLabel(widget.label)
-  return ['title', 'name'].some((item) => fieldKey.includes(item))
-    || ['活动名称', '标题', '名称'].some((item) => label.includes(item))
+  return TITLE_FIELD_KEYS.has(fieldKey) || TITLE_LABELS.has(label)
 }
 
 function isBodySemantic(widget: Widget): boolean {
   const fieldKey = normalizeKey(widget.fieldKey)
   const label = normalizeLabel(widget.label)
-  return ['detail', 'body', 'content'].some((item) => fieldKey.includes(item))
-    || ['详情', '正文', '说明'].some((item) => label.includes(item))
+  return BODY_FIELD_KEYS.has(fieldKey) || BODY_LABELS.has(label)
+}
+
+function isNeutralBodyFallback(widget: Widget): boolean {
+  const fieldKey = normalizeKey(widget.fieldKey)
+  const label = normalizeLabel(widget.label)
+  return !FIELD_SEMANTIC_PARTS.some((item) => fieldKey.includes(item))
+    && !LABEL_SEMANTIC_PARTS.some((item) => label.includes(item))
 }
 
 function normalizeLabel(value: string): string {
@@ -55,5 +67,5 @@ function normalizeLabel(value: string): string {
 }
 
 function normalizeKey(value: string): string {
-  return String(value || '').normalize('NFKC').trim().toLowerCase()
+  return String(value || '').normalize('NFKC').trim().toLowerCase().replace(/[\s._-]+/g, '')
 }

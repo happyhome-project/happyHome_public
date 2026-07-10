@@ -55,7 +55,7 @@ describe('resolveActivityAnnouncementMain', () => {
   })
 
   test('matches title field keys and body labels case-insensitively', () => {
-    const titleWidget = widget('title', 'short_text', '主题', 'AnnouncementTitle', 0)
+    const titleWidget = widget('title', 'short_text', '主题', 'ActivityTitle', 0)
     const bodyWidget = widget('body', 'rich_note', '活动 详情', 'field_2', 1)
 
     const result = resolveActivityAnnouncementMain(
@@ -66,6 +66,26 @@ describe('resolveActivityAnnouncementMain', () => {
     expect(result?.titleWidget).toBe(titleWidget)
     expect(result?.bodyWidget).toBe(bodyWidget)
     expect(result?.remainingWidgets).toEqual([])
+  })
+
+  test.each([
+    ['title', 'detail'],
+    ['activityTitle', 'activityDetail'],
+    ['name', 'body'],
+    ['activityName', 'content'],
+    ['activity_name', 'activity_content'],
+  ])('recognizes canonical field keys %s and %s', (titleFieldKey, bodyFieldKey) => {
+    const titleWidget = widget('title', 'short_text', '主题', titleFieldKey, 0)
+    const bodyWidget = widget('body', 'rich_text', '介绍', bodyFieldKey, 1)
+
+    expect(resolveActivityAnnouncementMain(
+      baseSection('活动公告'),
+      [titleWidget, bodyWidget],
+    )).toEqual({
+      titleWidget,
+      bodyWidget,
+      remainingWidgets: [],
+    })
   })
 
   test('uses a remaining summary as the body fallback', () => {
@@ -79,6 +99,21 @@ describe('resolveActivityAnnouncementMain', () => {
       titleWidget,
       bodyWidget,
       remainingWidgets: [],
+    })
+  })
+
+  test('prefers a rich body widget to an earlier unrelated summary fallback', () => {
+    const titleWidget = widget('title', 'short_text', '标题', 'title', 0)
+    const summaryWidget = widget('summary', 'summary', '摘要', 'summary', 1)
+    const bodyWidget = widget('body', 'rich_text', '补充信息', 'notes', 2)
+
+    expect(resolveActivityAnnouncementMain(
+      baseSection('活动公告'),
+      [titleWidget, summaryWidget, bodyWidget],
+    )).toEqual({
+      titleWidget,
+      bodyWidget,
+      remainingWidgets: [summaryWidget],
     })
   })
 
@@ -116,10 +151,32 @@ describe('resolveActivityAnnouncementMain', () => {
     expect(resolveActivityAnnouncementMain(baseSection('活动公告'), widgets)).toBeNull()
   })
 
+  test.each([
+    ['contactName', '联系人'],
+    ['displayName', '显示名'],
+    ['location', '地点名称'],
+  ])('does not treat metadata %s / %s as an activity title', (fieldKey, label) => {
+    const widgets = [
+      widget('metadata', 'summary', label, fieldKey, 0),
+      widget('body', 'rich_text', '正文', 'body', 1),
+    ]
+
+    expect(resolveActivityAnnouncementMain(baseSection('活动公告'), widgets)).toBeNull()
+  })
+
   test('returns null when no eligible body widget exists', () => {
     const widgets = [
       widget('title', 'short_text', '活动名称', 'name', 0),
       widget('wrong-body-type', 'short_text', '活动说明', 'content', 1),
+    ]
+
+    expect(resolveActivityAnnouncementMain(baseSection('活动公告'), widgets)).toBeNull()
+  })
+
+  test('does not use contentType metadata as the activity body fallback', () => {
+    const widgets = [
+      widget('title', 'short_text', '标题', 'title', 0),
+      widget('metadata', 'rich_text', '内容类型', 'contentType', 1),
     ]
 
     expect(resolveActivityAnnouncementMain(baseSection('活动公告'), widgets)).toBeNull()
