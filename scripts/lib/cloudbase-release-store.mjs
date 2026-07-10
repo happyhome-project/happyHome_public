@@ -18,7 +18,7 @@ function equal(left, right) {
 
 function isMissingDocumentError(error) {
   const message = String(error?.message || error || '')
-  return /document(?:\.get)?:fail[\s\S]*(?:does not exist|not found)|document not found/i.test(message)
+  return /document(?:\.get)?:fail[\s\S]*(?:does not exist|not found)|document not found|\bdb or table not exist\b/i.test(message)
 }
 
 async function readDocument(transaction, collectionName, documentId) {
