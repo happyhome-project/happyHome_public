@@ -15,6 +15,11 @@ test('ensure-indexes creates every CloudBase collection used by formal post RAG 
   assert.match(source, /post_video_rag_jobs/)
 })
 
+test('ensure-indexes creates membership idempotency collections before indexing them', () => {
+  assert.match(source, /const REQUIRED_COLLECTIONS = \[[\s\S]*'community_member_states'/)
+  assert.match(source, /const REQUIRED_COLLECTIONS = \[[\s\S]*'community_create_requests'/)
+})
+
 test('ensure-indexes treats CloudBase already-exists races as idempotent success', () => {
   assert.match(source, /function isAlreadyExistsError/)
   assert.match(source, /Table exist/)

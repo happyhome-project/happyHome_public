@@ -474,6 +474,8 @@ const REQUIRED_COLLECTIONS = [
   'admin_runtime',        // 运行时缓存（wx access_token 等单文档，无需额外索引）
   'admin_notification_subscriptions', // 审批提醒订阅授权状态
   'admin_notifications',  // 审批提醒发送记录与失败原因
+  'community_member_states', // 成员申请幂等状态（communityId + userId）
+  'community_create_requests', // 社区创建请求幂等记录
   'content_audit_tasks',  // 内容审核任务与回调对账
   'post_search_documents', // 帖子搜索文档（_id=postId）
   'post_search_terms',     // 帖子搜索倒排词条
