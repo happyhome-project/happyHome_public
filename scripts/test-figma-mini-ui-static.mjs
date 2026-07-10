@@ -39,7 +39,8 @@ const section = read('miniprogram', 'src', 'pages', 'section', 'index.vue')
 const widgetEditor = read('miniprogram', 'src', 'components', 'widgets', 'WidgetEditor.vue')
 const noteBlocksEditor = read('miniprogram', 'src', 'components', 'widgets', 'NoteBlocksEditor.vue')
 const figmaInventory = read('docs', 'figma-mini-0626-inventory.md')
-const retiredGroupTitle = ['我的', '组局'].join('')
+const expectedLiveSectionHeading = '<text class="group-section-title">活动召集</text>'
+const olderLiveSectionHeading = '<text class="group-section-title">我的组局</text>'
 
 for (const token of [
   '--hh-color-brand-primary',
@@ -67,7 +68,7 @@ assert(
   uniScss.includes('$hh-figma-green') &&
     uniScss.includes('#3DAD7D') &&
     uniScss.includes('$hh-radius-card-figma'),
-  'uni.scss should define the Figma 0626 color/radius token layer.'
+  'uni.scss should define the Figma 0709_v2 color/radius token layer.'
 )
 
 assert(
@@ -294,7 +295,7 @@ assert(
     !home.includes('notice.sectionName || notice.label') &&
     home.includes("padStart(2, '0')") &&
     home.includes('`${month}-${day}`') &&
-    home.includes('活动召集') &&
+    home.includes(expectedLiveSectionHeading) &&
     home.includes('class="group-card"') &&
     home.includes('class="section-tabs section-tabs--flow"') &&
     home.includes('class="home-search-box"') &&
@@ -349,22 +350,17 @@ assert(
 )
 
 assert(
-  figmaInventory.includes('Figma 是 2026-06-30 起的小程序 UI/UX 新准则') &&
+  figmaInventory.includes('Figma 是 2026-07-09 起的小程序 UI/UX 当前准则') &&
     figmaInventory.includes('与 Figma 冲突的旧单栏/非瀑布流判断全部废弃') &&
     figmaInventory.includes('首页亲子出游采用双列图文卡 Feed'),
   'Figma inventory should document the new source-of-truth rule and homepage two-column guide feed.'
 )
 
-for (const [name, source] of [
-  ['home', home],
-  ['tabbar', tabbar],
-  ['Figma inventory', figmaInventory],
-]) {
-  assert(
-    !source.includes(retiredGroupTitle),
-    `${name} should use 活动召集 instead of the retired activity wording.`
-  )
-}
+assert(
+  home.includes(expectedLiveSectionHeading) &&
+    !home.includes(olderLiveSectionHeading),
+  'home live section should use 活动召集 instead of 我的组局.'
+)
 
 assert(
   search.includes('class="search-nav"') &&

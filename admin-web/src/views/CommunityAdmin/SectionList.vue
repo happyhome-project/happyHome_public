@@ -84,7 +84,9 @@
         :resizable="true"
       >
         <template #default="{ row }">
-          <span>{{ row.icon || '默认' }}</span>
+          <span class="table-icon-preview" :title="resolveIconLabel(row.icon)">
+            {{ resolveIconGlyph(row.icon) }}
+          </span>
         </template>
       </el-table-column>
       <el-table-column
@@ -184,8 +186,13 @@
       />
     </el-dialog>
 
-    <el-dialog v-model="showDialog" :title="editingId ? '编辑板块' : '新建板块'" width="480px">
-      <el-form :model="form" label-width="100px">
+    <el-dialog
+      v-model="showDialog"
+      :title="editingId ? '编辑板块' : '新建板块'"
+      width="840px"
+      class="section-editor-dialog"
+    >
+      <el-form :model="form" label-width="120px">
         <el-form-item label="板块名称">
           <div data-testid="section-name-input" style="width: 100%;">
             <el-input v-model="form.name" placeholder="例如：宠物交流、闲置转让、本周拼车" />
@@ -206,7 +213,7 @@
         </el-form-item>
         <el-form-item>
           <template #label>
-            <span>首页入口图标（可选）</span>
+            <span>首页入口图标</span>
             <el-tooltip
               placement="top"
               effect="dark"
@@ -215,27 +222,50 @@
               <el-icon class="help-icon"><WarningFilled /></el-icon>
             </el-tooltip>
           </template>
-          <div class="preset-grid">
-            <button
-              v-for="option in iconOptions"
-              :key="option.value || 'default'"
-              type="button"
-              class="preset-button icon-preset"
-              :class="{ active: form.icon === option.value }"
-              @click="form.icon = option.value"
+          <div class="icon-picker-row">
+            <el-popover
+              placement="bottom-start"
+              trigger="click"
+              width="360px"
+              popper-class="section-icon-popover"
             >
-              <span class="icon-glyph">{{ option.glyph }}</span>
-              <span class="preset-label">{{ option.label }}</span>
-            </button>
+              <template #reference>
+                <button
+                  type="button"
+                  class="icon-picker-trigger"
+                  :title="`当前图标：${resolveIconLabel(form.icon)}`"
+                >
+                  <span class="icon-picker-preview">{{ resolveIconGlyph(form.icon) }}</span>
+                </button>
+              </template>
+              <div class="icon-picker-panel">
+                <div class="icon-picker-title">选择图标</div>
+                <div class="icon-only-grid">
+                  <button
+                    v-for="option in iconOptions"
+                    :key="option.value || 'default'"
+                    type="button"
+                    class="icon-only-button"
+                    :class="{ active: isIconOptionActive(option.value, form.icon) }"
+                    :title="option.label"
+                    :aria-label="option.label"
+                    @click="form.icon = option.value"
+                  >
+                    <span>{{ option.glyph }}</span>
+                  </button>
+                </div>
+              </div>
+            </el-popover>
+            <span class="inline-hint">点击可以换图标</span>
           </div>
-          <div class="field-hint">不需要手输。直接点一个图标；不选则使用系统默认样式。</div>
+          <div class="field-hint">不需要手输。直接点图标即可；不选则使用系统默认样式。</div>
         </el-form-item>
         <el-form-item label="排序">
           <el-input-number v-model="form.order" :min="0" :step="1" style="width: 180px;" />
         </el-form-item>
         <el-form-item>
           <template #label>
-            <span>首页强调色（可选）</span>
+            <span>首页强调色</span>
             <el-tooltip
               placement="top"
               effect="dark"
@@ -251,13 +281,14 @@
               type="button"
               class="preset-button color-preset"
               :class="{ active: form.accentColor === option.value }"
+              :title="option.label"
+              :aria-label="option.label"
               @click="form.accentColor = option.value"
             >
               <span
                 class="color-swatch"
                 :style="{ background: option.preview }"
               />
-              <span class="preset-label">{{ option.label }}</span>
             </button>
           </div>
           <div class="field-hint">不需要手写色号。直接点选一种颜色；不选则由系统自动分配。</div>
@@ -358,16 +389,50 @@ const editingId = ref('')
 const communityName = ref('')
 const iconOptions = [
   { value: '', glyph: '·', label: '系统默认' },
-  { value: '📣', glyph: '📣', label: '通知' },
-  { value: '🚗', glyph: '🚗', label: '出行' },
-  { value: '🍲', glyph: '🍲', label: '美食' },
-  { value: '🛍️', glyph: '🛍️', label: '闲置' },
-  { value: '📚', glyph: '📚', label: '学习' },
-  { value: '🏃', glyph: '🏃', label: '活动' },
-  { value: '🐾', glyph: '🐾', label: '宠物' },
-  { value: '👨‍👩‍👧', glyph: '👨‍👩‍👧', label: '亲子' },
-  { value: '💬', glyph: '💬', label: '交流' },
+  { value: 'notice', glyph: '📣', label: '通知' },
+  { value: 'car', glyph: '🚗', label: '出行' },
+  { value: 'food', glyph: '🍲', label: '美食' },
+  { value: 'trade', glyph: '🛍️', label: '闲置' },
+  { value: 'book', glyph: '📚', label: '学习' },
+  { value: 'activity', glyph: '🏃', label: '活动' },
+  { value: 'pet', glyph: '🐾', label: '宠物' },
+  { value: 'family', glyph: '👨‍👩‍👧', label: '亲子' },
+  { value: 'chat', glyph: '💬', label: '交流' },
 ] as const
+const iconGlyphByValue: Map<string, string> = new Map(iconOptions.map((option) => [option.value, option.glyph]))
+const iconLabelByValue: Map<string, string> = new Map(iconOptions.map((option) => [option.value, option.label]))
+const legacyIconValueAliases: Record<string, string> = {
+  '📣': 'notice',
+  '🚗': 'car',
+  '🍲': 'food',
+  '🛍️': 'trade',
+  '📚': 'book',
+  '🏃': 'activity',
+  '🐾': 'pet',
+  '👨‍👩‍👧': 'family',
+  '💬': 'chat',
+  books: 'book',
+  letter: 'book',
+  walk: 'family',
+  travel: 'car',
+  video: 'video',
+  play: 'video',
+  class: 'book',
+  star: 'star',
+  child: 'family',
+  test: 'test',
+}
+const legacyIconGlyphs: Record<string, string> = {
+  video: '🎬',
+  star: '⭐',
+  test: '🧪',
+}
+const legacyIconLabels: Record<string, string> = {
+  video: '视频',
+  star: '精选',
+  test: '测试',
+}
+const customIconGlyphPattern = /\p{Extended_Pictographic}/u
 const colorOptions = [
   { value: '', label: '系统默认', preview: 'linear-gradient(135deg, #e5e7eb, #cbd5e1)' },
   { value: '#3A6A45', label: '松林绿', preview: '#3A6A45' },
@@ -401,6 +466,28 @@ const form = ref<{
   enableLike: true,
 })
 const communityId = ref(String(route.params.communityId || ''))
+
+function normalizeIconValue(value: unknown): string {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  if (iconGlyphByValue.has(raw)) return raw
+  return legacyIconValueAliases[raw] || raw
+}
+
+function resolveIconGlyph(value: unknown): string {
+  const raw = String(value || '').trim()
+  const normalized = normalizeIconValue(raw)
+  return iconGlyphByValue.get(normalized) || legacyIconGlyphs[normalized] || (customIconGlyphPattern.test(raw) ? raw : '·')
+}
+
+function resolveIconLabel(value: unknown): string {
+  const normalized = normalizeIconValue(value)
+  return iconLabelByValue.get(normalized) || legacyIconLabels[normalized] || '自定义图标'
+}
+
+function isIconOptionActive(optionValue: string, currentValue: unknown): boolean {
+  return normalizeIconValue(currentValue) === optionValue
+}
 
 onMounted(async () => {
   if (!communityId.value) {
@@ -641,6 +728,19 @@ function statusTagType(s: SectionStatus): 'success' | 'info' | 'warning' {
   vertical-align: middle;
 }
 
+.table-icon-preview {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f7fa;
+  color: #303133;
+  font-size: 19px;
+  line-height: 1;
+}
+
 .preset-grid {
   display: flex;
   flex-wrap: wrap;
@@ -670,18 +770,96 @@ function statusTagType(s: SectionStatus): 'success' | 'info' | 'warning' {
   box-shadow: 0 0 0 1px rgba(64, 158, 255, 0.15) inset;
 }
 
-.icon-preset {
-  min-width: 92px;
+.icon-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
-.icon-glyph {
-  font-size: 18px;
+.icon-picker-trigger {
+  width: 48px;
+  height: 48px;
+  border: 1px solid #ebeef5;
+  border-radius: 11px;
+  background: #fff6df;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 0;
+}
+
+.icon-picker-trigger:hover {
+  border-color: #409eff;
+  box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.1);
+}
+
+.icon-picker-preview {
+  font-size: 24px;
   line-height: 1;
 }
 
-.preset-label {
+.inline-hint {
   font-size: 13px;
+  color: #606266;
+}
+
+.icon-picker-panel {
+  padding: 4px;
+}
+
+:global(.section-icon-popover) {
+  --el-popover-bg-color: #fff;
+  z-index: 4000 !important;
+  border-radius: 12px;
+  background: #fff !important;
+  padding: 16px !important;
+  box-shadow: 0 14px 36px rgba(31, 45, 61, 0.16);
+}
+
+:global(.section-icon-popover .el-popper__arrow::before) {
+  background: #fff !important;
+}
+
+.icon-picker-title {
+  margin-bottom: 12px;
   color: #303133;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.icon-only-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 44px);
+  gap: 10px;
+}
+
+.icon-only-button {
+  width: 44px;
+  height: 44px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: #f6f8fb;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 24px;
+  line-height: 1;
+  padding: 0;
+  transition: all 0.2s ease;
+}
+
+.icon-only-button:hover {
+  border-color: #a0cfff;
+  background: #eef6ff;
+}
+
+.icon-only-button.active {
+  border-color: #409eff;
+  background: #ecf5ff;
+  box-shadow: 0 0 0 1px rgba(64, 158, 255, 0.16) inset;
 }
 
 .color-grid {
@@ -689,12 +867,17 @@ function statusTagType(s: SectionStatus): 'success' | 'info' | 'warning' {
 }
 
 .color-preset {
-  min-width: 110px;
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  border-radius: 999px;
+  padding: 2px;
+  justify-content: center;
 }
 
 .color-swatch {
-  width: 18px;
-  height: 18px;
+  width: 26px;
+  height: 26px;
   border-radius: 999px;
   border: 1px solid rgba(0, 0, 0, 0.08);
   flex: none;

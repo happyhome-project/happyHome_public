@@ -72,8 +72,17 @@ assert(
 
 assert(
   homePage.includes("function sectionIconGlyph(section: any, fallback = '·'): string") &&
-    homePage.includes('ic: sectionIconGlyph(section)'),
-  'home live cards should render the backend section icon instead of deriving or hardcoding an activity icon.',
+    homePage.includes('return resolveSectionIconGlyph(section?.icon, fallback)') &&
+    homePage.includes('ic: sectionIconGlyph(section)') &&
+    homePage.includes(':key="`fixed-${g.id}`"') &&
+    homePage.includes('class="section-tab-icon"'),
+  'home live cards and archive tabs should render the safe backend section icon instead of deriving or leaking internal values.',
+)
+
+assert(
+  homePage.includes('<text class="group-section-title">活动召集</text>') &&
+    !homePage.includes('<text class="group-section-title">我的组局</text>'),
+  'home live section heading should use 活动召集.',
 )
 
 assert(

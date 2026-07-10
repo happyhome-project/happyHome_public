@@ -422,6 +422,7 @@ function openLocation() {
 }
 
 .guide-stat {
+  min-width: 0;
   min-height: 0;
   height: 100%;
   padding: 16rpx 8rpx;
@@ -439,19 +440,27 @@ function openLocation() {
 
 .guide-stat-value {
   display: block;
+  max-width: 100%;
   min-height: 52rpx;
   color: var(--hh-color-brand-primary);
   font-family: $hh-font-num;
   font-size: var(--hh-text-heading-sm-size);
   line-height: var(--hh-text-heading-sm-line);
   font-weight: $hh-font-weight-bold;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .guide-stat-label {
   display: block;
+  max-width: 100%;
   color: var(--hh-color-text-primary);
   font-size: var(--hh-text-body-base-size);
   line-height: var(--hh-text-body-base-line);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .guide-section {
