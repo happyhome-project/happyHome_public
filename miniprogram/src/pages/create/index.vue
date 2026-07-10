@@ -73,7 +73,30 @@
         <template v-else>
           <view class="figma-form-list">
             <template v-for="block in createFormBlocks" :key="block.key">
-              <view v-if="block.type === 'guideMain'" class="figma-guide-main-card">
+              <view v-if="block.type === 'activityMain'" class="figma-activity-main-card">
+                <WidgetEditor
+                  :widget="block.titleWidget"
+                  variant="figma"
+                  embedded
+                  hide-label
+                  guide-role="title"
+                  placeholder="添加活动名称"
+                  :allow-rich-note-images="allowImagesForWidget(block.titleWidget)"
+                  v-model="formData[block.titleWidget.widgetId]"
+                />
+                <WidgetEditor
+                  :widget="block.bodyWidget"
+                  variant="figma"
+                  embedded
+                  hide-label
+                  guide-role="body"
+                  placeholder="添加活动详情"
+                  :allow-rich-note-images="allowImagesForWidget(block.bodyWidget)"
+                  v-model="formData[block.bodyWidget.widgetId]"
+                />
+              </view>
+
+              <view v-else-if="block.type === 'guideMain'" class="figma-guide-main-card">
                 <WidgetEditor
                   v-if="block.imageWidget"
                   :widget="block.imageWidget"
@@ -141,7 +164,11 @@
 
           <view class="submit-dock">
             <button class="draft-btn" @tap="saveDraft">
-              <text class="draft-icon">▣</text>
+              <image
+                class="draft-icon"
+                src="/static/publish-icons/save-draft.svg"
+                mode="aspectFit"
+              />
               <text>存草稿</text>
             </button>
             <button class="btn-primary" :disabled="submitting" @tap="handleSubmit">
@@ -169,6 +196,7 @@ import {
   hideNativeTabBar,
 } from '../../utils/app-tabbar'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
+import { resolveActivityAnnouncementMain } from '../../utils/create-form-layout'
 import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { ensureHierarchyStack, normalizeRouteUrl, openHierarchyParent } from '../../utils/hierarchy-nav'
@@ -235,6 +263,22 @@ function allowImagesForWidget(widget: any) {
 const createFormBlocks = computed(() => {
   const blocks: any[] = []
   const widgets = editableWidgets.value
+  const activityMain = selectedSection.value
+    ? resolveActivityAnnouncementMain(selectedSection.value, widgets)
+    : null
+  if (activityMain) {
+    blocks.push({
+      type: 'activityMain',
+      key: 'activity-main',
+      titleWidget: activityMain.titleWidget,
+      bodyWidget: activityMain.bodyWidget,
+    })
+    for (const widget of activityMain.remainingWidgets) {
+      blocks.push({ type: 'widget', key: String(widget.widgetId), widget })
+    }
+    return blocks
+  }
+
   const guideMain = getGuideMainWidgets(widgets)
   if (isGuideCreateMode.value && guideMain && (guideMain.imageWidget || guideMain.titleWidget || guideMain.bodyWidget)) {
     const usedWidgetIds = new Set<string>()
@@ -879,7 +923,8 @@ async function handleSubmit() {
   max-width: 100%;
 }
 
-.figma-guide-main-card {
+.figma-guide-main-card,
+.figma-activity-main-card {
   padding: 32rpx;
   border-radius: 24rpx;
   background: #fff;
@@ -1025,9 +1070,9 @@ async function handleSubmit() {
 }
 
 .draft-icon {
-  font-size: 44rpx;
-  line-height: 1;
-  color: var(--hh-color-brand-primary);
+  width: 48rpx;
+  height: 48rpx;
+  display: block;
 }
 
 .btn-primary-plain {
