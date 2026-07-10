@@ -51,9 +51,9 @@ export const useCommunityStore = defineStore('community', {
       } catch (_error) {}
     },
     async switchCommunity(communityId: string) {
+      const res = await sectionApi.list(communityId)
       this.currentCommunityId = communityId
       this.currentSectionIndex = 0
-      const res = await sectionApi.list(communityId)
       this.currentSections = res.sections as Section[]
       this.refreshMembershipStatus(communityId).catch(() => {})
       this.saveToStorage()
@@ -96,7 +96,9 @@ export const useCommunityStore = defineStore('community', {
     },
     async loadMyCommunitiesFresh(options: LoadMyCommunitiesOptions = {}) {
       const res = await memberApi.myCommunities()
-      this.myCommunities = res.communities as Community[]
+      this.myCommunities = (res.communities as Community[]).filter(
+        (community) => community?.status === 'active',
+      )
       if (this.myCommunities.length === 0) {
         this.clearCommunityState()
         return

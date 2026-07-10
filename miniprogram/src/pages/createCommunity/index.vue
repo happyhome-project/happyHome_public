@@ -5,29 +5,43 @@
       title="请先登录"
       desc="登录后才能创建社区"
     />
-    <view v-else class="form">
-      <view class="field">
+    <view v-else class="form-content">
+      <view class="form-section name-section">
         <text class="label">社区名称 <text class="required">*</text></text>
         <view class="input-wrap">
           <input v-model="form.name" placeholder="如：阳光小区、星河村" placeholder-class="input-placeholder" class="input" maxlength="20" />
         </view>
       </view>
 
-      <view class="field">
+      <view class="form-section description-section">
         <text class="label">社区简介 <text class="required">*</text></text>
-        <view class="input-wrap">
+        <view class="textarea-wrap">
           <textarea v-model="form.description" placeholder="介绍一下你的社区..." placeholder-class="input-placeholder" class="textarea" maxlength="200" />
         </view>
       </view>
 
-      <view class="field">
+      <view class="form-section join-section">
         <text class="label">加入方式</text>
-        <view class="radio-group">
-          <view class="radio-item" @tap="form.joinType = 'open'">
+        <view class="radio-group" role="radiogroup" aria-label="加入方式">
+          <view
+            class="radio-item"
+            role="radio"
+            :aria-checked="form.joinType === 'open'"
+            tabindex="0"
+            @tap="form.joinType = 'open'"
+            @keydown.enter="form.joinType = 'open'"
+          >
             <view class="radio" :class="{ checked: form.joinType === 'open' }" />
             <text>直接加入</text>
           </view>
-          <view class="radio-item" @tap="form.joinType = 'approval'">
+          <view
+            class="radio-item"
+            role="radio"
+            :aria-checked="form.joinType === 'approval'"
+            tabindex="0"
+            @tap="form.joinType = 'approval'"
+            @keydown.enter="form.joinType = 'approval'"
+          >
             <view class="radio" :class="{ checked: form.joinType === 'approval' }" />
             <text>需要审批</text>
           </view>
@@ -35,11 +49,12 @@
       </view>
     </view>
 
-    <button class="submit-btn" :disabled="submitting" @tap="handleSubmit">
-      {{ submitting ? '创建中...' : '创建社区' }}
-    </button>
-
-    <text class="tip">创建后需等待平台审核通过，才能对外展示</text>
+    <view v-if="userStore.isLoggedIn" class="bottom-action">
+      <button class="submit-btn" :disabled="submitting" @tap="handleSubmit">
+        {{ submitting ? '创建中...' : '创建社区' }}
+      </button>
+      <text class="tip">创建后需等待平台审核通过，才能对外展示</text>
+    </view>
   </view>
 </template>
 
@@ -67,6 +82,7 @@ onLoad((options: any) => {
 })
 
 async function handleSubmit() {
+  if (submitting.value) return
   if (!form.name.trim()) {
     uni.showToast({ title: '请填写社区名称', icon: 'none' })
     return
@@ -99,22 +115,181 @@ async function handleSubmit() {
 </script>
 
 <style lang="scss" scoped>
-.page { padding: $hh-space-lg; min-height: 100vh; background: $hh-color-bg-sub; }
-.form { background: $hh-color-surface; border-radius: $hh-radius-md; padding: $hh-space-lg; margin-bottom: $hh-space-lg; }
-.field { margin-bottom: $hh-space-xl; }
-.field:last-child { margin-bottom: 0; }
-.label { font-size: $hh-font-body; color: $hh-color-text; display: block; margin-bottom: $hh-space-sm; font-weight: $hh-font-weight-medium; }
-.required { color: $hh-color-danger; }
-/* padding 放在外层 view，input/textarea 本身不带 padding，避免微信原生组件 placeholder 截断 */
-.input-wrap { background: $hh-color-bg-sub; border-radius: $hh-radius-sm; padding: $hh-space-md; }
-.input { font-size: $hh-font-body; width: 100%; min-height: 40rpx; background: transparent; color: $hh-color-text; }
-.textarea { font-size: $hh-font-body; width: 100%; min-height: 160rpx; background: transparent; color: $hh-color-text; }
-.input-placeholder { color: $hh-color-text-mute; font-size: $hh-font-body; }
-.radio-group { display: flex; gap: $hh-space-xl; }
-.radio-item { display: flex; align-items: center; gap: $hh-space-sm; font-size: $hh-font-body; color: $hh-color-text; }
-.radio { width: 36rpx; height: 36rpx; border-radius: 50%; border: 2rpx solid $hh-color-border; }
-.radio.checked { border-color: $hh-color-primary; background: $hh-color-primary; box-shadow: inset 0 0 0 6rpx $hh-color-surface; }
-.submit-btn { background: $hh-color-primary; color: $hh-color-text-inverse; border-radius: $hh-radius-md; font-size: $hh-font-h3; padding: $hh-space-md; width: 100%; border: none; }
-.submit-btn[disabled] { opacity: $hh-opacity-disabled; }
-.tip { display: block; text-align: center; font-size: $hh-font-caption; color: $hh-color-text-mute; margin-top: $hh-space-md; }
+.page {
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: 32rpx 32rpx calc(288rpx + env(safe-area-inset-bottom));
+  background: #f2f3f7;
+}
+
+.form-content {
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
+}
+
+.form-section {
+  box-sizing: border-box;
+  padding: 32rpx;
+  background: #fff;
+  border-radius: 24rpx;
+}
+
+.label {
+  display: block;
+  margin-bottom: 24rpx;
+  color: #181818;
+  font-size: 36rpx;
+  font-weight: $hh-font-weight-bold;
+  line-height: 52rpx;
+}
+
+.required {
+  color: #d53d3c;
+  font-weight: $hh-font-weight-medium;
+}
+
+.input-wrap {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  height: 80rpx;
+  padding: 0 24rpx;
+  background: #fff;
+  border: 2rpx solid #f1f1f1;
+  border-radius: 12rpx;
+}
+
+.input {
+  width: 100%;
+  min-height: 44rpx;
+  background: transparent;
+  color: #181818;
+  font-size: 28rpx;
+  line-height: 44rpx;
+}
+
+.textarea-wrap {
+  min-height: 400rpx;
+}
+
+.textarea {
+  box-sizing: border-box;
+  width: 100%;
+  height: 400rpx;
+  padding: 0;
+  background: transparent;
+  color: #181818;
+  font-size: 32rpx;
+  line-height: 48rpx;
+}
+
+.input-placeholder {
+  color: #a6a6a6;
+  font-size: 28rpx;
+}
+
+.join-section {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+}
+
+.join-section .label {
+  flex: 0 0 auto;
+  margin-bottom: 0;
+  white-space: nowrap;
+}
+
+.radio-group {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 48rpx;
+}
+
+.radio-item {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 20rpx;
+  color: #181818;
+  font-size: 32rpx;
+  line-height: 48rpx;
+  white-space: nowrap;
+}
+
+.radio-item text {
+  white-space: nowrap;
+}
+
+.radio {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 48rpx;
+  height: 48rpx;
+  border: 2rpx solid #c6c6c6;
+  border-radius: 50%;
+}
+
+.radio.checked {
+  border-color: #3dad7d;
+  background: #3dad7d;
+}
+
+.radio.checked::after {
+  width: 18rpx;
+  height: 10rpx;
+  border-bottom: 4rpx solid #fff;
+  border-left: 4rpx solid #fff;
+  content: '';
+  transform: translateY(-2rpx) rotate(-45deg);
+}
+
+.bottom-action {
+  position: fixed;
+  z-index: 10;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  box-sizing: border-box;
+  padding: 32rpx 32rpx calc(64rpx + env(safe-area-inset-bottom));
+  background: #fff;
+}
+
+.submit-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 96rpx;
+  padding: 0;
+  background: #3dad7d;
+  border: 0;
+  border-radius: 999rpx;
+  color: #fff;
+  font-size: 36rpx;
+  font-weight: $hh-font-weight-bold;
+  line-height: 52rpx;
+}
+
+.submit-btn::after {
+  border: 0;
+}
+
+.submit-btn[disabled] {
+  opacity: $hh-opacity-disabled;
+}
+
+.tip {
+  display: block;
+  margin-top: 24rpx;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 28rpx;
+  line-height: 44rpx;
+  text-align: center;
+}
 </style>

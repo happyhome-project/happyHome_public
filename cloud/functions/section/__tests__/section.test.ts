@@ -71,7 +71,11 @@ test('创建板块：非管理员无权创建', async () => {
 })
 
 test('get：返回板块信息', async () => {
-  ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'section-1', communityId: 'c1', name: '日记' })
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string) => {
+    if (collectionName === 'sections') return { _id: 'section-1', communityId: 'c1', name: '日记' }
+    if (collectionName === 'communities') return { _id: 'c1', status: 'active' }
+    return null
+  })
   ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
 
   const result = await handleGet({ sectionId: 'section-1' }, 'test-openid')
@@ -81,6 +85,7 @@ test('get：返回板块信息', async () => {
 })
 
 test('list：按 order asc 返回社区所有板块', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'c1', status: 'active' })
   ;(db.query as jest.Mock)
     .mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
     .mockResolvedValueOnce([
@@ -293,7 +298,11 @@ test('list: unauthenticated viewer can read active public community sections', a
 })
 
 test('get：active 成员可查看板块详情', async () => {
-  ;(db.getById as jest.Mock).mockResolvedValue({ _id: 's1', communityId: 'c1', name: '拼车' })
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string) => {
+    if (collectionName === 'sections') return { _id: 's1', communityId: 'c1', name: '拼车' }
+    if (collectionName === 'communities') return { _id: 'c1', status: 'active' }
+    return null
+  })
   ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
 
   const result: any = await main({ action: 'get', sectionId: 's1' })

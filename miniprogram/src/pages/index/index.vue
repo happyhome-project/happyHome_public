@@ -1438,9 +1438,16 @@ function applyHomeSnapshot(snapshot: HomeSnapshot | null, source: 'prefetch' | '
   if (!snapshot) return false
   const expectedViewer = userStore.isLoggedIn ? userStore.openId : ''
   if (snapshot.viewerOpenId !== expectedViewer) return false
-  communityStore.myCommunities = userStore.isLoggedIn ? (snapshot.communities || []) : []
+  const activeCommunities = (snapshot.communities || []).filter((community) => community?.status === 'active')
+  if (
+    userStore.isLoggedIn && snapshot.currentCommunityId && !activeCommunities.some(
+      (community) => community._id === snapshot.currentCommunityId,
+    )
+  ) return false
+  if (snapshot.currentCommunity && snapshot.currentCommunity.status !== 'active') return false
+  communityStore.myCommunities = userStore.isLoggedIn ? activeCommunities : []
   communityStore.currentCommunityId = snapshot.currentCommunityId || ''
-  communityStore.browsingCommunity = snapshot.currentCommunity || snapshot.communities?.find((item) => item._id === snapshot.currentCommunityId) || null
+  communityStore.browsingCommunity = snapshot.currentCommunity || activeCommunities.find((item) => item._id === snapshot.currentCommunityId) || null
   communityStore.currentSectionIndex = 0
   communityStore.currentSections = snapshot.sections || []
   postsBySection.value = snapshot.postsBySection || {}
@@ -1524,7 +1531,16 @@ async function runSingleHomeRefresh(force: boolean) {
     if (userStore.isLoggedIn && result.backgroundFetchToken) {
       userStore.setBackgroundFetchToken(result.backgroundFetchToken, result.backgroundFetchTokenExpiresAt)
     }
-    applyHomeSnapshot(result as HomeSnapshot, 'cloud')
+    const acceptedSnapshot = applyHomeSnapshot(result as HomeSnapshot, 'cloud')
+    if (!acceptedSnapshot) {
+      const rejectedCommunityId = String(result.currentCommunityId || requestedCommunityId || '')
+      clearHomeSnapshotCache(userStore.openId, rejectedCommunityId)
+      communityStore.clearCommunityState()
+      postsBySection.value = {}
+      clientLog('warn', 'home.snapshot.rejected', { rejectedCommunityId })
+      if (userStore.isLoggedIn) openOnboardingPreservingStack()
+      return
+    }
     if (userStore.isLoggedIn && communityStore.currentCommunityId) {
       writeHomeSnapshotCache(result as HomeSnapshot)
     }
