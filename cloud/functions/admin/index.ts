@@ -39,6 +39,7 @@ import {
 import { syncMiniProgramUserRoleForAdminAccount } from '../../lib/admin-identity'
 import { handleCreate as handleCommunityCreate } from '../community'
 import { MEMBER_STATE_COLLECTION } from '../../lib/membership-state'
+import { approveMembership, kickMembership, rejectMembership } from '../../lib/membership-transitions'
 import type {
   AdminAccount,
   AdminCtx,
@@ -1204,68 +1205,13 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (!communityId) throw new Error('communityId 不能为空')
     if (!memberId) throw new Error('memberId 不能为空')
 
-    const community = await db.getById('communities', communityId) as Community
-    const member = await db.getById('community_members', memberId) as any
-    if (!member || member.communityId !== communityId) throw new Error('member not found')
-    if (member.userId === community.creatorId) throw new Error('不能移出社区创建者')
-    if (member.role !== 'member') throw new Error('不能移出管理员')
-
-    const status = String(member.status || '').trim()
-    if (!['active', 'rejected', 'pending'].includes(status)) {
-      throw new Error('当前状态不支持移除')
-    }
-
-    const removeResult = await db.removeById('community_members', memberId)
-    const changed = (removeResult as any)?.stats?.removed !== 0
-    if (changed && status === 'active') {
-      await db.increment('communities', communityId, 'memberCount', -1)
-    }
-    if (changed) {
-      await db.updateWhere(MEMBER_STATE_COLLECTION, {
-        communityId,
-        userId: member.userId,
-      }, {
-        status: 'none',
-        memberId: '',
-        updatedAt: new Date().toISOString(),
-      })
-    }
-    return { success: true, changed }
+    return kickMembership({ communityId, memberId })
   }
   if (action === 'member.approve') {
-    const updateRes = await db.updateWhere('community_members', {
-      _id: params.memberId,
-      communityId: params.communityId,
-      status: 'pending',
-    }, {
-      status: 'active',
-      joinedAt: new Date().toISOString(),
-    })
-    if ((updateRes as any)?.stats?.updated > 0) {
-      await db.increment('communities', params.communityId, 'memberCount', 1)
-      await db.updateWhere(MEMBER_STATE_COLLECTION, { memberId: params.memberId }, {
-        status: 'active',
-        updatedAt: new Date().toISOString(),
-      })
-    }
-    return { success: true, changed: (updateRes as any)?.stats?.updated > 0 }
+    return approveMembership({ communityId: params.communityId, memberId: params.memberId })
   }
   if (action === 'member.reject') {
-    const updateRes = await db.updateWhere('community_members', {
-      _id: params.memberId,
-      communityId: params.communityId,
-      status: 'pending',
-    }, {
-      status: 'rejected',
-      rejectedAt: new Date().toISOString(),
-    })
-    if ((updateRes as any)?.stats?.updated > 0) {
-      await db.updateWhere(MEMBER_STATE_COLLECTION, { memberId: params.memberId }, {
-        status: 'rejected',
-        updatedAt: new Date().toISOString(),
-      })
-    }
-    return { success: true, changed: (updateRes as any)?.stats?.updated > 0 }
+    return rejectMembership({ communityId: params.communityId, memberId: params.memberId })
   }
 
   if (action === 'post.listAdmin') {

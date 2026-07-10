@@ -12,6 +12,7 @@ jest.mock('../../../lib/db', () => ({
   softDelete: jest.fn(),
   query: jest.fn(),
   increment: jest.fn(),
+  runTransaction: jest.fn(),
 }))
 
 jest.mock('../../../lib/storage', () => ({
@@ -51,6 +52,27 @@ import * as postRag from '../../../lib/post-rag'
 import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
 
 beforeEach(() => jest.resetAllMocks())
+
+function useAdminMembershipTransaction(options: {
+  community?: Record<string, any>
+  member?: Record<string, any>
+}) {
+  const memberRemove = jest.fn().mockResolvedValue({ stats: { removed: 1 } })
+  const communityUpdate = jest.fn().mockResolvedValue({ stats: { updated: 1 } })
+  const stateSet = jest.fn().mockResolvedValue({ stats: { updated: 1 } })
+  const transaction = {
+    collection: jest.fn((name: string) => ({
+      doc: jest.fn(() => ({
+        get: jest.fn().mockResolvedValue({ data: name === 'communities' ? options.community : options.member }),
+        remove: memberRemove,
+        update: communityUpdate,
+        set: stateSet,
+      })),
+    })),
+  }
+  ;(db.runTransaction as jest.Mock).mockImplementationOnce(async (callback) => callback(transaction))
+  return { memberRemove, communityUpdate, stateSet }
+}
 
 test('appConfig.getGuestIntro: superAdmin reads the guest intro popup config', async () => {
   ;(db.query as jest.Mock).mockResolvedValueOnce([
@@ -325,42 +347,78 @@ test('member.list: 昵称优先显示真实昵称，测试账号缺失昵称时�
 })
 
 test('member.kick: rejected 记录可移除，且不递减 memberCount', async () => {
-  ;(db.getById as jest.Mock)
-    .mockResolvedValueOnce({ _id: 'community-1', creatorId: 'creator-1' })
-    .mockResolvedValueOnce({
+  const transaction = useAdminMembershipTransaction({
+    community: { _id: 'community-1', creatorId: 'creator-1', memberCount: 2 },
+    member: {
       _id: 'member-1',
       communityId: 'community-1',
       userId: 'h5-reject-candidate-001',
       role: 'member',
       status: 'rejected',
-    })
-  ;(db.removeById as jest.Mock).mockResolvedValue({})
+    },
+  })
 
   const result: any = await main({ action: 'member.kick', communityId: 'community-1', memberId: 'member-1' })
 
-  expect(db.removeById).toHaveBeenCalledWith('community_members', 'member-1')
-  expect(db.increment).not.toHaveBeenCalled()
+  expect(transaction.memberRemove).toHaveBeenCalled()
+  expect(transaction.communityUpdate).not.toHaveBeenCalled()
   expect(result.success).toBe(true)
 })
 
 test('member.kick: active 成员移除后递减 memberCount', async () => {
-  ;(db.getById as jest.Mock)
-    .mockResolvedValueOnce({ _id: 'community-1', creatorId: 'creator-1' })
-    .mockResolvedValueOnce({
+  const transaction = useAdminMembershipTransaction({
+    community: { _id: 'community-1', creatorId: 'creator-1', memberCount: 2 },
+    member: {
       _id: 'member-2',
       communityId: 'community-1',
       userId: 'u-active',
       role: 'member',
       status: 'active',
-    })
-  ;(db.removeById as jest.Mock).mockResolvedValue({})
-  ;(db.increment as jest.Mock).mockResolvedValue({})
+    },
+  })
 
   const result: any = await main({ action: 'member.kick', communityId: 'community-1', memberId: 'member-2' })
 
-  expect(db.removeById).toHaveBeenCalledWith('community_members', 'member-2')
-  expect(db.increment).toHaveBeenCalledWith('communities', 'community-1', 'memberCount', -1)
+  expect(transaction.memberRemove).toHaveBeenCalled()
+  expect(transaction.communityUpdate).toHaveBeenCalledWith({ data: { memberCount: 1 } })
   expect(result.success).toBe(true)
+})
+
+test('member.kick: 成员、计数和幂等状态在同一事务内提交', async () => {
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce({ _id: 'community-1', creatorId: 'creator-1', memberCount: 2 })
+    .mockResolvedValueOnce({
+      _id: 'member-2', communityId: 'community-1', userId: 'u-active', role: 'member', status: 'active',
+    })
+  ;(db.removeById as jest.Mock).mockResolvedValue({ stats: { removed: 1 } })
+  const memberRemove = jest.fn().mockResolvedValue({ stats: { removed: 1 } })
+  const communityUpdate = jest.fn().mockResolvedValue({ stats: { updated: 1 } })
+  const stateSet = jest.fn().mockResolvedValue({ stats: { updated: 1 } })
+  const transaction = {
+    collection: jest.fn((name: string) => ({
+      doc: jest.fn(() => ({
+        get: jest.fn().mockResolvedValue({ data: name === 'communities'
+          ? { _id: 'community-1', creatorId: 'creator-1', memberCount: 2 }
+          : name === 'community_members'
+            ? { _id: 'member-2', communityId: 'community-1', userId: 'u-active', role: 'member', status: 'active' }
+            : null }),
+        remove: memberRemove,
+        update: communityUpdate,
+        set: stateSet,
+      })),
+    })),
+  }
+  ;(db.runTransaction as jest.Mock).mockImplementationOnce(async (callback) => callback(transaction))
+
+  await main({ action: 'member.kick', communityId: 'community-1', memberId: 'member-2' })
+
+  expect(db.runTransaction).toHaveBeenCalledTimes(1)
+  expect(memberRemove).toHaveBeenCalled()
+  expect(communityUpdate).toHaveBeenCalledWith({ data: { memberCount: 1 } })
+  expect(stateSet).toHaveBeenCalledWith({ data: expect.objectContaining({ status: 'none', memberId: '' }) })
+  expect(db.removeById).not.toHaveBeenCalled()
+  expect(db.increment).not.toHaveBeenCalled()
+  expect(db.updateWhere).not.toHaveBeenCalled()
 })
 
 test('section.updateWidgets: evergreen 板块不允许配置 attendance', async () => {

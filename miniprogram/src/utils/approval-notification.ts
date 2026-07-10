@@ -28,7 +28,11 @@ export function configuredApprovalTemplates(templates: ApprovalNotificationTempl
 }
 
 export function uniqueTemplateIds(templates: ApprovalNotificationTemplate[]) {
-  return Array.from(new Set(configuredApprovalTemplates(templates).map((item) => item.templateId)))
+  const uniqueIds: string[] = []
+  for (const item of configuredApprovalTemplates(templates)) {
+    if (!uniqueIds.includes(item.templateId)) uniqueIds.push(item.templateId)
+  }
+  return uniqueIds
 }
 
 export function buildSubscriptionSaves(

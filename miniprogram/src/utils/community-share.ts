@@ -103,8 +103,8 @@ export function prioritizeShareTargetCommunities<T extends { _id?: string }>(
   targetCommunityId: string,
 ): T[] {
   const targetId = normalizeCommunityShareId(targetCommunityId)
-  if (!targetId) return [...communities]
+  if (!targetId) return communities.slice()
   const target = communities.find((item) => String(item?._id || '') === targetId)
-  if (!target) return [...communities]
-  return [target, ...communities.filter((item) => String(item?._id || '') !== targetId)]
+  if (!target) return communities.slice()
+  return [target].concat(communities.filter((item) => String(item?._id || '') !== targetId))
 }

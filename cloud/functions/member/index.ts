@@ -18,6 +18,7 @@ import {
   membershipStateId,
   type MembershipStateStatus,
 } from '../../lib/membership-state'
+import { approveMembership, leaveMembership, rejectMembership } from '../../lib/membership-transitions'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
@@ -172,24 +173,7 @@ export async function handleLeave(params: { communityId: string }, openid: strin
   })
   if (!members || members.length === 0) throw new Error('不是社区成员')
 
-  const community = await db.getById('communities', params.communityId) as Community | null
-  if (community?.creatorId === openid) throw new Error('社区创建者不能退出社区')
-
-  const memberId = members[0]._id
-  const removeResult = await db.removeById('community_members', memberId)
-  const changed = (removeResult as any)?.stats?.removed !== 0
-  if (changed) {
-    await db.increment('communities', params.communityId, 'memberCount', -1)
-    await db.updateWhere(MEMBER_STATE_COLLECTION, {
-      communityId: params.communityId,
-      userId: openid,
-    }, {
-      status: 'none',
-      memberId: '',
-      updatedAt: new Date().toISOString(),
-    })
-  }
-  return { success: true, changed }
+  return leaveMembership({ communityId: params.communityId, userId: openid, memberId: members[0]._id })
 }
 
 export async function handleMemberApprove(
@@ -199,22 +183,7 @@ export async function handleMemberApprove(
   if (!openid) throw new Error('Missing OPENID')
   await assertCommunityApprover(openid, params.communityId)
 
-  const updateRes = await db.updateWhere('community_members', {
-    _id: params.memberId,
-    communityId: params.communityId,
-    status: 'pending',
-  }, {
-    status: 'active',
-    joinedAt: new Date().toISOString(),
-  })
-  if ((updateRes as any)?.stats?.updated > 0) {
-    await db.increment('communities', params.communityId, 'memberCount', 1)
-    await db.updateWhere(MEMBER_STATE_COLLECTION, { memberId: params.memberId }, {
-      status: 'active',
-      updatedAt: new Date().toISOString(),
-    })
-  }
-  return { success: true, changed: (updateRes as any)?.stats?.updated > 0 }
+  return approveMembership(params)
 }
 
 export async function handleMemberReject(
@@ -224,21 +193,7 @@ export async function handleMemberReject(
   if (!openid) throw new Error('Missing OPENID')
   await assertCommunityApprover(openid, params.communityId)
 
-  const updateRes = await db.updateWhere('community_members', {
-    _id: params.memberId,
-    communityId: params.communityId,
-    status: 'pending',
-  }, {
-    status: 'rejected',
-    rejectedAt: new Date().toISOString(),
-  })
-  if ((updateRes as any)?.stats?.updated > 0) {
-    await db.updateWhere(MEMBER_STATE_COLLECTION, { memberId: params.memberId }, {
-      status: 'rejected',
-      updatedAt: new Date().toISOString(),
-    })
-  }
-  return { success: true, changed: (updateRes as any)?.stats?.updated > 0 }
+  return rejectMembership(params)
 }
 
 export async function handlePendingList(params: { communityId: string }, openid: string) {
