@@ -165,7 +165,7 @@
 - **Author**：AngryBird / `48046333+angrybirddd@users.noreply.github.com`（全局 CLAUDE.md 强制；错了要 filter-branch 改写 author + committer）
 - **Commit 风格**：`feat(scope): ...` / `fix(scope): ...` / `test: ...` / `docs: ...` / `refactor: ...`
 - **部署源分支**：`main`。feature 工作在 worktree 分支（`claude/<name>` 或 `codex/<name>`）
-- 合回 main 流程：worktree 分支 rebase 到 latest main → 主 repo fast-forward → push origin main
+- 合回 main 流程：worktree 分支同步 latest main 并通过 PR CI → 主 repo 使用 `npm.cmd run integrate:pr -- <PR号>` 串行合并；禁止直接 push origin main
 - 已推送的错误身份 commit 用 `git filter-branch --env-filter` 改 author + committer，然后 `git push --force-with-lease`
 
 ---
@@ -183,7 +183,7 @@
 
 - 每个 worktree 是一个独立 feature 分支（`.claude/worktrees/<name>` 下）
 - preview_start 在 worktree 里起 dev server 会报 "cwd must be within project root" —— 需要 preview 时从主仓库根新开会话（详见 `memory/feedback_preview_worktree_lock.md`）
-- 合回 main 前在 worktree 里 rebase origin/main，主 repo 做 `merge --ff-only` 再 push
+- 合回 main 前在 worktree 里同步 origin/main 并通过 PR CI；主 repo 只通过 `integrate:pr` 合并，不做手工 fast-forward 或直接 push
 - 多 worktree 同时改共享文件（`cloud.ts` / `deploy.mjs` / 全局 token）时小心冲突，合并顺序：小改动面先、大改动面后
 
 ---
