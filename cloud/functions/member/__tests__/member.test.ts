@@ -18,6 +18,10 @@ jest.mock('../../../lib/db', () => ({
   increment: jest.fn(),
   softDelete: jest.fn(),
   runTransaction: jest.fn(),
+  transactionGetByIdOrNull: jest.fn(async (transaction, collectionName, id) => {
+    const response = await transaction.collection(collectionName).doc(id).get()
+    return response?.data || null
+  }),
 }))
 
 import {
@@ -105,6 +109,10 @@ function useApplyTransaction(options: {
 
 beforeEach(() => {
   jest.resetAllMocks()
+  ;(db.transactionGetByIdOrNull as jest.Mock).mockImplementation(async (transaction, collectionName, id) => {
+    const response = await transaction.collection(collectionName).doc(id).get()
+    return response?.data || null
+  })
   ;(cloud.getWXContext as jest.Mock).mockReturnValue({ OPENID: 'test-openid' })
   delete process.env.APPROVAL_MEMBER_JOIN_TEMPLATE_ID
   delete process.env.APPROVAL_MEMBER_JOIN_TEMPLATE_FIELDS

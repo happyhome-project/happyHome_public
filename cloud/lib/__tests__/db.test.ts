@@ -40,7 +40,7 @@ jest.mock('wx-server-sdk', () => ({
   DYNAMIC_CURRENT_ENV: 'test'
 }))
 
-import { getById, create, increment, replaceValue, removeField, runTransaction } from '../db'
+import { getById, create, increment, replaceValue, removeField, runTransaction, transactionGetByIdOrNull } from '../db'
 
 test('getById returns document data', async () => {
   const result = await getById('users', 'user-123')
@@ -59,6 +59,32 @@ test('runTransaction returns the callback result rather than the SDK envelope', 
 
   expect(mockRunTransaction).toHaveBeenCalledWith(expect.any(Function))
   expect(result).toEqual({ changed: true })
+})
+
+test('transactionGetByIdOrNull normalizes CloudBase missing-document errors', async () => {
+  const transaction = {
+    collection: () => ({
+      doc: () => ({
+        get: jest.fn().mockRejectedValue(new Error(
+          'document.get:fail document with _id request-1 does not exist',
+        )),
+      }),
+    }),
+  }
+
+  await expect(transactionGetByIdOrNull(transaction as any, 'requests', 'request-1'))
+    .resolves.toBeNull()
+})
+
+test('transactionGetByIdOrNull preserves non-missing transaction errors', async () => {
+  const transaction = {
+    collection: () => ({
+      doc: () => ({ get: jest.fn().mockRejectedValue(new Error('network timeout')) }),
+    }),
+  }
+
+  await expect(transactionGetByIdOrNull(transaction as any, 'requests', 'request-1'))
+    .rejects.toThrow('network timeout')
 })
 
 test('increment uses _.inc (atomic), not read-then-write', async () => {

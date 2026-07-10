@@ -16,6 +16,7 @@ const expectedExports = [
   'removeField',
   'query',
   'runTransaction',
+  'transactionGetByIdOrNull',
 ]
 
 test('db.local 导出与 db.ts 一一对应', () => {

@@ -13,6 +13,10 @@ jest.mock('../../../lib/db', () => ({
   query: jest.fn(),
   increment: jest.fn(),
   runTransaction: jest.fn(),
+  transactionGetByIdOrNull: jest.fn(async (transaction, collectionName, id) => {
+    const response = await transaction.collection(collectionName).doc(id).get()
+    return response?.data || null
+  }),
 }))
 
 jest.mock('../../../lib/storage', () => ({
@@ -51,7 +55,13 @@ import * as postSearch from '../../../lib/post-search'
 import * as postRag from '../../../lib/post-rag'
 import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
 
-beforeEach(() => jest.resetAllMocks())
+beforeEach(() => {
+  jest.resetAllMocks()
+  ;(db.transactionGetByIdOrNull as jest.Mock).mockImplementation(async (transaction, collectionName, id) => {
+    const response = await transaction.collection(collectionName).doc(id).get()
+    return response?.data || null
+  })
+})
 
 function useAdminMembershipTransaction(options: {
   community?: Record<string, any>

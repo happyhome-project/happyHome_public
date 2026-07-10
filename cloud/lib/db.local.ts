@@ -131,6 +131,22 @@ export async function runTransaction<T>(callback: (transaction: LocalTransaction
   }
 }
 
+export async function transactionGetByIdOrNull<T = any>(
+  transaction: LocalTransaction,
+  collectionName: string,
+  id: string,
+): Promise<T | null> {
+  try {
+    const response = await transaction.collection(collectionName).doc(id).get()
+    return (response?.data || null) as T | null
+  } catch (error: any) {
+    if (Number(error?.errCode) === -502001 || /document(?:\.get)?:fail[\s\S]*does not exist|document not found/i.test(String(error?.message || ''))) {
+      return null
+    }
+    throw error
+  }
+}
+
 export async function updateById(
   collectionName: string,
   id: string,

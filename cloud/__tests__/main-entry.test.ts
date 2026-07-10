@@ -19,6 +19,10 @@ jest.mock('../lib/db', () => ({
   query: jest.fn(),
   increment: jest.fn(),
   runTransaction: jest.fn(),
+  transactionGetByIdOrNull: jest.fn(async (transaction, collectionName, id) => {
+    const response = await transaction.collection(collectionName).doc(id).get()
+    return response?.data || null
+  }),
 }))
 
 jest.mock('../lib/auth', () => ({

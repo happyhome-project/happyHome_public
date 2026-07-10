@@ -46,9 +46,13 @@ export async function handleCreate(
   const requestId = String(params.requestId || crypto.randomBytes(16).toString('hex')).trim()
   const requestDocId = createRequestDocumentId(openid, requestId)
   const result = await db.runTransaction(async (transaction) => {
-    const request = await transaction.collection('community_create_requests').doc(requestDocId).get()
-    if (request.data?.communityId) {
-      return { communityId: String(request.data.communityId), created: false }
+    const request = await db.transactionGetByIdOrNull<{ communityId?: string }>(
+      transaction,
+      'community_create_requests',
+      requestDocId,
+    )
+    if (request?.communityId) {
+      return { communityId: String(request.communityId), created: false }
     }
 
     const communityRes = await transaction.collection('communities').add({

@@ -42,12 +42,10 @@ async function setMembershipState(
 export async function leaveMembership(input: { communityId: string; userId: string; memberId: string }) {
   const now = new Date().toISOString()
   return db.runTransaction(async (transaction) => {
-    const [communityRes, memberRes] = await Promise.all([
-      transaction.collection('communities').doc(input.communityId).get(),
-      transaction.collection('community_members').doc(input.memberId).get(),
+    const [community, member] = await Promise.all([
+      db.transactionGetByIdOrNull<CommunityRecord>(transaction, 'communities', input.communityId),
+      db.transactionGetByIdOrNull<MembershipRecord>(transaction, 'community_members', input.memberId),
     ])
-    const community = communityRes.data as CommunityRecord | null
-    const member = memberRes.data as MembershipRecord | null
     if (!member || member.communityId !== input.communityId || member.userId !== input.userId || member.status !== 'active') {
       return { success: true, changed: false }
     }
@@ -68,14 +66,12 @@ async function transitionPendingMembership(
 ) {
   const now = new Date().toISOString()
   return db.runTransaction(async (transaction) => {
-    const [memberRes, communityRes] = await Promise.all([
-      transaction.collection('community_members').doc(input.memberId).get(),
+    const [member, community] = await Promise.all([
+      db.transactionGetByIdOrNull<MembershipRecord>(transaction, 'community_members', input.memberId),
       status === 'active'
-        ? transaction.collection('communities').doc(input.communityId).get()
-        : Promise.resolve({ data: null }),
+        ? db.transactionGetByIdOrNull<CommunityRecord>(transaction, 'communities', input.communityId)
+        : Promise.resolve(null),
     ])
-    const member = memberRes.data as MembershipRecord | null
-    const community = communityRes.data as CommunityRecord | null
     if (!member || member.communityId !== input.communityId || member.status !== 'pending') {
       return { success: true, changed: false }
     }
@@ -107,12 +103,10 @@ export function rejectMembership(input: { communityId: string; memberId: string 
 export async function kickMembership(input: { communityId: string; memberId: string }) {
   const now = new Date().toISOString()
   return db.runTransaction(async (transaction) => {
-    const [communityRes, memberRes] = await Promise.all([
-      transaction.collection('communities').doc(input.communityId).get(),
-      transaction.collection('community_members').doc(input.memberId).get(),
+    const [community, member] = await Promise.all([
+      db.transactionGetByIdOrNull<CommunityRecord>(transaction, 'communities', input.communityId),
+      db.transactionGetByIdOrNull<MembershipRecord>(transaction, 'community_members', input.memberId),
     ])
-    const community = communityRes.data as CommunityRecord | null
-    const member = memberRes.data as MembershipRecord | null
     if (!member || member.communityId !== input.communityId) throw new Error('member not found')
     if (member.userId === community?.creatorId) throw new Error('不能移出社区创建者')
     if (member.role !== 'member') throw new Error('不能移出管理员')

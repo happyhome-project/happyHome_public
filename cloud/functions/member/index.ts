@@ -64,22 +64,21 @@ export async function handleApply(params: { communityId: string }, openid: strin
   const result = await db.runTransaction(async (transaction) => {
     const [communityRes, stateRes] = await Promise.all([
       transaction.collection('communities').doc(params.communityId).get(),
-      transaction.collection(MEMBER_STATE_COLLECTION).doc(stateId).get(),
+      db.transactionGetByIdOrNull<{
+        status?: MembershipStateStatus
+        memberId?: string
+      }>(transaction, MEMBER_STATE_COLLECTION, stateId),
     ])
     const community = communityRes.data as Community | null
     if (!community || community.status !== 'active') throw new Error('社区暂不可加入')
 
-    const state = stateRes.data as {
-      status?: MembershipStateStatus
-      memberId?: string
-    } | null
+    const state = stateRes
     if ((state?.status === 'active' || state?.status === 'pending') && state.memberId) {
-      const memberRes = await transaction.collection('community_members').doc(state.memberId).get()
-      const member = memberRes.data as {
+      const member = await db.transactionGetByIdOrNull<{
         communityId?: string
         userId?: string
         status?: MembershipStateStatus
-      } | null
+      }>(transaction, 'community_members', state.memberId)
       const actualStatus = member?.communityId === params.communityId && member?.userId === openid
         ? member.status
         : undefined

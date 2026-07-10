@@ -63,6 +63,27 @@ export async function runTransaction<T>(callback: (transaction: DbTransaction) =
   return (response && typeof response === 'object' && 'result' in response ? response.result : response) as T
 }
 
+function isMissingDocumentError(error: unknown) {
+  const value = error as { errCode?: number; code?: number; message?: string }
+  const code = Number(value?.errCode ?? value?.code)
+  const message = String(value?.message || '')
+  return code === -502001 || /document(?:\.get)?:fail[\s\S]*does not exist|document not found/i.test(message)
+}
+
+export async function transactionGetByIdOrNull<T = any>(
+  transaction: DbTransaction,
+  collectionName: string,
+  id: string,
+): Promise<T | null> {
+  try {
+    const response = await transaction.collection(collectionName).doc(id).get()
+    return (response?.data || null) as T | null
+  } catch (error) {
+    if (isMissingDocumentError(error)) return null
+    throw error
+  }
+}
+
 export async function updateById(
   collectionName: string,
   id: string,
