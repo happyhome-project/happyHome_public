@@ -11,6 +11,10 @@ function fileSize(...segments) {
   return fs.statSync(path.join(root, ...segments)).size
 }
 
+function fileExists(...segments) {
+  return fs.existsSync(path.join(root, ...segments))
+}
+
 function pngDimensions(...segments) {
   const buffer = fs.readFileSync(path.join(root, ...segments))
   return {
@@ -395,5 +399,68 @@ assert(
     profile.includes('加入社区'),
   'profile page should use the Figma-style user header and real community action shortcuts.'
 )
+
+assert(
+  pagesConfig.pages.some((page) =>
+    page.path === 'pages/profile/index' && page.style?.navigationStyle === 'custom'
+  ) &&
+    profile.includes('class="profile-custom-nav"') &&
+    profile.includes('class="profile-custom-nav-title"') &&
+    profile.includes('env(safe-area-inset-top)') &&
+    !profile.includes('profile-native-capsule'),
+  'profile should own a safe-area-aware custom title over the continuous Figma background without drawing fake WeChat chrome.'
+)
+
+assert(
+    profile.includes('class="profile-shortcut-decoration"') &&
+    profile.includes('class="shortcut-icon-image"') &&
+    profile.includes('/static/profile/switch.svg') &&
+    profile.includes('/static/profile/edit-arrow.svg') &&
+    profile.includes('/static/profile/create-community.svg') &&
+    profile.includes('/static/profile/join-community-back.svg') &&
+    profile.includes('/static/profile/join-community-front.svg') &&
+    profile.includes('/static/profile/join-community-pin.svg') &&
+    profile.includes('/static/profile/shortcut-create-bg.svg') &&
+    profile.includes('/static/profile/shortcut-join-bg.svg'),
+  'profile create/join shortcuts should use the Figma icon and decorative background assets.'
+)
+
+assert(
+  profile.includes('iconSrc:') &&
+    profile.includes('class="profile-tool-icon-image"') &&
+    profile.includes('class="avatar-edit-camera"') &&
+    !profile.includes('📷') &&
+    !profile.includes("icon: '♡'") &&
+    !profile.includes("icon: '♧'") &&
+    !profile.includes("icon: '▣'") &&
+    !profile.includes("icon: '✦'") &&
+    !profile.includes("icon: '✎'") &&
+    !profile.includes("icon: '✓'") &&
+    !profile.includes("icon: '☏'"),
+  'profile tool entries should render local Figma assets instead of character glyph approximations.'
+)
+
+for (const iconFile of [
+  'create-community.svg',
+  'switch.svg',
+  'edit-arrow.svg',
+  'join-community-back.svg',
+  'join-community-front.svg',
+  'join-community-pin.svg',
+  'shortcut-create-bg.svg',
+  'shortcut-join-bg.svg',
+  'favorite.svg',
+  'like.svg',
+  'archive.svg',
+  'activity.svg',
+  'posts.svg',
+  'checkin.svg',
+  'service.svg',
+]) {
+  assert(
+    fileExists('miniprogram', 'src', 'static', 'profile', iconFile),
+    `profile Figma asset ${iconFile} should be persisted locally.`
+  )
+}
 
 console.log('[figma-mini-ui-static] PASS')

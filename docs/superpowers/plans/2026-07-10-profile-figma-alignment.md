@@ -16,11 +16,11 @@
 - Modify: `scripts/test-figma-mini-ui-static.mjs`
 - Test: `scripts/test-figma-mini-ui-static.mjs`
 
-- [ ] **Step 1: Add failing assertions**
+- [x] **Step 1: Add failing assertions**
 
 Assert that `pages/profile/index` uses `navigationStyle: custom`, the profile template contains a custom header and image assets, the shortcut cards contain decorative layers, the tool model uses icon paths, and the retired character glyph definitions are absent.
 
-- [ ] **Step 2: Verify the test fails for the missing implementation**
+- [x] **Step 2: Verify the test fails for the missing implementation**
 
 Run: `node scripts/test-figma-mini-ui-static.mjs`
 
@@ -30,7 +30,11 @@ Expected: FAIL on the first new profile assertion.
 
 **Files:**
 - Create: `miniprogram/src/static/profile/create-community.svg`
-- Create: `miniprogram/src/static/profile/join-community.svg`
+- Create: `miniprogram/src/static/profile/switch.svg`
+- Create: `miniprogram/src/static/profile/edit-arrow.svg`
+- Create: `miniprogram/src/static/profile/join-community-back.svg`
+- Create: `miniprogram/src/static/profile/join-community-front.svg`
+- Create: `miniprogram/src/static/profile/join-community-pin.svg`
 - Create: `miniprogram/src/static/profile/shortcut-create-bg.svg`
 - Create: `miniprogram/src/static/profile/shortcut-join-bg.svg`
 - Create: `miniprogram/src/static/profile/favorite.svg`
@@ -41,11 +45,11 @@ Expected: FAIL on the first new profile assertion.
 - Create: `miniprogram/src/static/profile/checkin.svg`
 - Create: `miniprogram/src/static/profile/service.svg`
 
-- [ ] **Step 1: Download each MCP asset while the URLs are valid**
+- [x] **Step 1: Download each MCP asset while the URLs are valid**
 
-Use the exact asset mapping returned for Figma nodes `20001:14460` and `20036:4085`, then store the raw SVG files locally.
+Use the exact asset mapping returned for Figma nodes `20001:14460` and `20036:4085`. Preserve the join icon's three exported vector layers and sanitize unsupported SVG CSS-variable/`foreignObject` constructs before storing the files locally.
 
-- [ ] **Step 2: Validate every file is an SVG and non-empty**
+- [x] **Step 2: Validate every file is an SVG and non-empty**
 
 Run a PowerShell file signature/size check and fail if any asset is missing or contains an HTML error document.
 
@@ -55,11 +59,11 @@ Run a PowerShell file signature/size check and fail if any asset is missing or c
 - Modify: `miniprogram/src/pages.json`
 - Modify: `miniprogram/src/pages/profile/index.vue`
 
-- [ ] **Step 1: Make the profile page custom-navigation aware**
+- [x] **Step 1: Make the profile page custom-navigation aware**
 
 Set `navigationStyle` to `custom`; add a header containing only the app-owned `我的` title; reserve status/capsule space with safe-area CSS rather than drawing platform chrome.
 
-- [ ] **Step 2: Make the gradient continuous from the top**
+- [x] **Step 2: Make the gradient continuous from the top**
 
 Move the Figma gradient to the page root, remove the old top padding assumption from the native navigation layout, and retain bottom tabbar safe space.
 
@@ -68,15 +72,15 @@ Move the Figma gradient to the page root, remove the old top padding assumption 
 **Files:**
 - Modify: `miniprogram/src/pages/profile/index.vue`
 
-- [ ] **Step 1: Replace shortcut glyphs**
+- [x] **Step 1: Replace shortcut glyphs**
 
-Render local `<image>` assets for create/join and add the corresponding decorative background image as an absolutely positioned visual layer behind each icon.
+Render the local `<image>` asset for create, the three-layer vector composition for join, and the corresponding decorative background image as an absolutely positioned visual layer behind each icon.
 
-- [ ] **Step 2: Replace all seven tool glyphs**
+- [x] **Step 2: Replace all seven tool glyphs**
 
 Change `ProfileToolItem.icon` to `iconSrc`, render `<image class="profile-tool-icon-image">`, and keep the existing handler mapping unchanged.
 
-- [ ] **Step 3: Match Figma geometry**
+- [x] **Step 3: Match Figma geometry**
 
 Use two equal shortcut columns with a 12 px reference gap, a 76 px reference height, a four-column tool grid, 40 px icon slots, and 14/22 px labels.
 
@@ -85,11 +89,11 @@ Use two equal shortcut columns with a 12 px reference gap, a 76 px reference hei
 **Files:**
 - Modify: `miniprogram/src/pages/profile/index.vue`
 
-- [ ] **Step 1: Keep the current behavior contract**
+- [x] **Step 1: Keep the current behavior contract**
 
 Preserve `isEditingProfile`, `chooseAvatar`, nickname input, cancel, save, loading, and validation behavior.
 
-- [ ] **Step 2: Apply the profile visual language**
+- [x] **Step 2: Apply the profile visual language**
 
 Render the editor as a focused white card within the same continuous gradient shell, with a centered avatar control, calm field surface, and equal-width actions sized to the Figma spacing/radius system.
 
@@ -99,29 +103,28 @@ Render the editor as a focused white card within the same continuous gradient sh
 - Test: `scripts/test-figma-mini-ui-static.mjs`
 - Test: `miniprogram/src/pages/profile/index.vue`
 
-- [ ] **Step 1: Verify the static test turns green**
+- [x] **Step 1: Verify the static test turns green**
 
 Run: `node scripts/test-figma-mini-ui-static.mjs`
 
 Expected: PASS.
 
-- [ ] **Step 2: Run type and unit checks**
+- [x] **Step 2: Run type and unit checks**
 
 Run: `npm.cmd --workspace miniprogram run type-check`
 
 Run: `npm.cmd --workspace miniprogram run test:unit`
 
-- [ ] **Step 3: Build both targets**
+- [x] **Step 3: Build both targets**
 
 Run: `npm.cmd --workspace miniprogram run build:h5`
 
 Run: `npm.cmd --workspace miniprogram run build:mp-weixin`
 
-- [ ] **Step 4: Run browser interaction and visual QA**
+- [x] **Step 4: Run browser interaction and visual QA**
 
 Open the H5 profile page at 402 x 874 and a narrower mobile viewport. Verify page identity, nonblank content, no framework overlay, console health, edit open/cancel, shortcut/tool response, and screenshot fidelity.
 
-- [ ] **Step 5: Review the final diff**
+- [x] **Step 5: Review the final diff**
 
 Confirm no backend/admin changes, no temporary Figma URLs, no fake system chrome, no character-icon regressions, and no unrelated file churn.
-

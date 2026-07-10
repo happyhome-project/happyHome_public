@@ -1,5 +1,14 @@
 <template>
-  <view class="profile-page">
+  <view
+    class="profile-page"
+    :class="{ 'profile-page--editing': isEditingProfile || showManualLoginForm }"
+  >
+    <view class="profile-custom-nav" :style="profileCustomNavStyle">
+      <view class="profile-custom-nav-row">
+        <text class="profile-custom-nav-title">我的</text>
+      </view>
+    </view>
+
     <view v-if="profileError" class="profile-error">
       <text>{{ profileError }}</text>
     </view>
@@ -15,14 +24,14 @@
           <view class="profile-community-row">
             <text class="profile-community-name">{{ currentCommunityName }}</text>
             <view class="profile-switch" @tap="goOnboarding">
-              <text class="profile-switch-icon">⇄</text>
+              <image class="profile-switch-icon" src="/static/profile/switch.svg" mode="aspectFit" />
               <text>切换</text>
             </view>
           </view>
         </view>
         <view class="profile-edit-link" @tap="openEditProfile">
           <text>编辑</text>
-          <text class="profile-edit-arrow">›</text>
+          <image class="profile-edit-arrow" src="/static/profile/edit-arrow.svg" mode="aspectFit" />
         </view>
       </template>
 
@@ -45,7 +54,11 @@
                   :src="formAvatarDisplay || profileAvatarSrc"
                   class="avatar-preview"
                 />
-                <view class="avatar-edit-badge">📷</view>
+                <view class="avatar-edit-badge" aria-hidden="true">
+                  <view class="avatar-edit-camera">
+                    <view class="avatar-edit-camera-lens"></view>
+                  </view>
+                </view>
               </view>
             </button>
             <image
@@ -164,12 +177,40 @@
 
     <view v-if="!isEditingProfile && !showManualLoginForm" class="profile-shortcuts">
       <view class="profile-shortcut create" @tap="goOnboarding">
+        <image
+          class="profile-shortcut-decoration"
+          src="/static/profile/shortcut-create-bg.svg"
+          mode="aspectFit"
+        />
         <text class="shortcut-title">创建社区</text>
-        <view class="shortcut-icon"><text>＋</text></view>
+        <view class="shortcut-icon shortcut-icon--create">
+          <image class="shortcut-icon-image" src="/static/profile/create-community.svg" mode="aspectFit" />
+        </view>
       </view>
       <view class="profile-shortcut join" @tap="goOnboarding">
+        <image
+          class="profile-shortcut-decoration"
+          src="/static/profile/shortcut-join-bg.svg"
+          mode="aspectFit"
+        />
         <text class="shortcut-title">加入社区</text>
-        <view class="shortcut-icon"><text>⌖</text></view>
+        <view class="shortcut-icon shortcut-icon--join" aria-hidden="true">
+          <image
+            class="shortcut-icon-image shortcut-icon-image--join-front"
+            src="/static/profile/join-community-front.svg"
+            mode="scaleToFill"
+          />
+          <image
+            class="shortcut-icon-image shortcut-icon-image--join-back"
+            src="/static/profile/join-community-back.svg"
+            mode="scaleToFill"
+          />
+          <image
+            class="shortcut-icon-image shortcut-icon-image--join-pin"
+            src="/static/profile/join-community-pin.svg"
+            mode="scaleToFill"
+          />
+        </view>
       </view>
     </view>
 
@@ -183,11 +224,25 @@
           send-message-title="HappyHome 使用反馈"
           send-message-path="/pages/profile/index"
         >
-          <text class="profile-tool-icon" :class="`profile-tool-icon--${item.tone}`">{{ item.icon }}</text>
+          <view class="profile-tool-icon">
+            <image
+              class="profile-tool-icon-image"
+              :class="`profile-tool-icon-image--${item.tone}`"
+              :src="item.iconSrc"
+              mode="aspectFit"
+            />
+          </view>
           <text class="profile-tool-label">{{ item.label }}</text>
         </button>
         <view v-else class="profile-tool" @tap="handleProfileTool(item)">
-          <text class="profile-tool-icon" :class="`profile-tool-icon--${item.tone}`">{{ item.icon }}</text>
+          <view class="profile-tool-icon">
+            <image
+              class="profile-tool-icon-image"
+              :class="`profile-tool-icon-image--${item.tone}`"
+              :src="item.iconSrc"
+              mode="aspectFit"
+            />
+          </view>
           <text class="profile-tool-label">{{ item.label }}</text>
         </view>
       </template>
@@ -378,6 +433,11 @@ const notificationSubscriptions = ref<Array<{ eventType: ApprovalNotificationEve
 const notificationNeedsAuthorization = ref(false)
 const profileError = ref('')
 const releaseVersion = getReleaseVersion()
+const profileStatusBarHeight = ref(44)
+const profileNavRowHeight = ref(54)
+const profileCustomNavStyle = computed(() => (
+  `padding-top: ${profileStatusBarHeight.value}px; --profile-nav-row-height: ${profileNavRowHeight.value}px;`
+))
 let refreshingProfile = false
 let lastLoginStateRefreshKey = ''
 let suppressNextLoginStateRefresh = false
@@ -385,19 +445,19 @@ let suppressNextLoginStateRefresh = false
 type ProfileToolItem = {
   key: string
   label: string
-  icon: string
+  iconSrc: string
   tone: 'heart' | 'like' | 'archive' | 'activity' | 'post' | 'checkin' | 'service'
   kind?: 'contact'
 }
 
 const profileToolItems: ProfileToolItem[] = [
-  { key: 'favorite', label: '我的收藏', icon: '♡', tone: 'heart' },
-  { key: 'like', label: '我的点赞', icon: '♧', tone: 'like' },
-  { key: 'archive', label: '我的归档', icon: '▣', tone: 'archive' },
-  { key: 'activity', label: '我的活动', icon: '✦', tone: 'activity' },
-  { key: 'posts', label: '我发布的', icon: '✎', tone: 'post' },
-  { key: 'checkin', label: '打卡记录', icon: '✓', tone: 'checkin' },
-  { key: 'service', label: '联系客服', icon: '☏', tone: 'service', kind: 'contact' },
+  { key: 'favorite', label: '我的收藏', iconSrc: '/static/profile/favorite.svg', tone: 'heart' },
+  { key: 'like', label: '我的点赞', iconSrc: '/static/profile/like.svg', tone: 'like' },
+  { key: 'archive', label: '我的归档', iconSrc: '/static/profile/archive.svg', tone: 'archive' },
+  { key: 'activity', label: '我的活动', iconSrc: '/static/profile/activity.svg', tone: 'activity' },
+  { key: 'posts', label: '我发布的', iconSrc: '/static/profile/posts.svg', tone: 'post' },
+  { key: 'checkin', label: '打卡记录', iconSrc: '/static/profile/checkin.svg', tone: 'checkin' },
+  { key: 'service', label: '联系客服', iconSrc: '/static/profile/service.svg', tone: 'service', kind: 'contact' },
 ]
 
 const configuredNotificationTemplates = computed(() => configuredApprovalTemplates(notificationTemplates.value))
@@ -630,6 +690,36 @@ const devLoginLock = useBusyLock(async () => {
 
 function isH5Runtime() {
   return typeof window !== 'undefined' && typeof document !== 'undefined'
+}
+
+function updateProfileNavMetrics() {
+  let statusBarHeight = isH5Runtime() ? 44 : 20
+  let navRowHeight = 54
+
+  try {
+    const systemInfo = uni.getSystemInfoSync?.()
+    const measuredStatusBar = Number(systemInfo?.statusBarHeight || 0)
+    if (measuredStatusBar > 0) statusBarHeight = measuredStatusBar
+  } catch (_error) {}
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    if (typeof wx !== 'undefined' && typeof wx.getMenuButtonBoundingClientRect === 'function') {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      const menuRect = wx.getMenuButtonBoundingClientRect()
+      const menuTop = Number(menuRect?.top || 0)
+      const menuHeight = Number(menuRect?.height || 0)
+      if (menuHeight > 0) {
+        const verticalGap = Math.max(0, menuTop - statusBarHeight)
+        navRowHeight = Math.max(54, menuHeight + verticalGap * 2)
+      }
+    }
+  } catch (_error) {}
+
+  profileStatusBarHeight.value = Math.max(0, Math.round(statusBarHeight))
+  profileNavRowHeight.value = Math.max(44, Math.round(navRowHeight))
 }
 
 function openLoginEntry() {
@@ -982,6 +1072,7 @@ watch(
 
 onMounted(() => {
   hideNativeTabBar()
+  updateProfileNavMetrics()
   if (!userStore.isLoggedIn && isH5Runtime() && !supportsChooseAvatar.value) {
     showManualLoginForm.value = true
   }
@@ -993,6 +1084,7 @@ onMounted(() => {
 // 需要在 onShow 重新拉取，否则 admin 在本 tab 看不到实时变动。
 onShow(() => {
   hideNativeTabBar()
+  updateProfileNavMetrics()
   logProfile('info', 'profile.show', {})
   void nextTick(() => logProfile('info', 'profile.render.tick', { reason: 'show' }))
   void refreshProfileData('show')
@@ -1541,10 +1633,30 @@ onShareAppMessage(() => {
 /* Figma 4.1 / 4.2 final profile structure */
 .profile-page {
   box-sizing: border-box;
-  padding: 32rpx 32rpx calc(132rpx + env(safe-area-inset-bottom));
+  min-height: 100vh;
+  padding: 0 32rpx calc(132rpx + env(safe-area-inset-bottom));
   background:
-    radial-gradient(circle at 86% 2%, rgba(61, 173, 125, 0.18), transparent 28%),
-    linear-gradient(188.63deg, #cff5f2 0%, #fff 24%, #fff 40%, #f2f3f7 58%, #f2f3f7 100%);
+    radial-gradient(circle at 100% 0%, rgba(61, 173, 125, 0.12), transparent 26%),
+    linear-gradient(188.63deg, #cff5f2 4.09%, #fff 22.04%, #fff 35.76%, #f2f3f7 52.32%, #f2f3f7 100%);
+}
+
+.profile-custom-nav {
+  box-sizing: border-box;
+  width: 100%;
+  padding-top: env(safe-area-inset-top);
+}
+
+.profile-custom-nav-row {
+  height: var(--profile-nav-row-height, 54px);
+  display: flex;
+  align-items: center;
+}
+
+.profile-custom-nav-title {
+  color: #181818;
+  font-size: var(--hh-text-heading-lg-size);
+  line-height: var(--hh-text-heading-lg-line);
+  font-weight: $hh-font-weight-bold;
 }
 
 .user-card {
@@ -1559,10 +1671,117 @@ onShareAppMessage(() => {
 
 .user-card--form {
   min-height: auto;
-  padding: 32rpx;
-  border-radius: 24rpx;
+  margin: 16rpx 0 40rpx;
+  padding: 40rpx;
+  border-radius: 32rpx;
   background: #fff;
   box-shadow: none;
+}
+
+.user-card--form .login-form {
+  gap: 32rpx;
+}
+
+.user-card--form .form-title {
+  font-size: var(--hh-text-heading-lg-size);
+  line-height: var(--hh-text-heading-lg-line);
+}
+
+.user-card--form .form-hint {
+  font-size: var(--hh-text-body-lg-size);
+  line-height: var(--hh-text-body-lg-line);
+}
+
+.user-card--form .avatar-row {
+  gap: 16rpx;
+  padding: 24rpx 0 8rpx;
+}
+
+.user-card--form .avatar-edit-wrap,
+.user-card--form .avatar-preview {
+  width: 176rpx;
+  height: 176rpx;
+}
+
+.user-card--form .avatar-edit-badge {
+  right: 0;
+  bottom: 0;
+  width: 48rpx;
+  height: 48rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--hh-color-brand-primary);
+}
+
+.avatar-edit-camera {
+  box-sizing: border-box;
+  width: 26rpx;
+  height: 20rpx;
+  border: 3rpx solid #fff;
+  border-radius: 5rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.avatar-edit-camera-lens {
+  box-sizing: border-box;
+  width: 9rpx;
+  height: 9rpx;
+  border: 2rpx solid #fff;
+  border-radius: 999rpx;
+}
+
+.user-card--form .avatar-hint {
+  font-size: var(--hh-text-body-base-size);
+  line-height: var(--hh-text-body-base-line);
+}
+
+.user-card--form .input-wrap {
+  box-sizing: border-box;
+  min-height: 112rpx;
+  padding: 0 24rpx;
+  border: 1rpx solid transparent;
+  border-radius: 12rpx;
+  background: #f6f7f9;
+  display: flex;
+  align-items: center;
+}
+
+.user-card--form .input {
+  min-height: 64rpx;
+  font-size: var(--hh-text-heading-sm-size);
+  line-height: var(--hh-text-heading-sm-line);
+}
+
+.user-card--form .form-actions {
+  flex-wrap: nowrap;
+  gap: 16rpx;
+  margin-top: 8rpx;
+}
+
+.user-card--form .form-actions button {
+  min-width: 0;
+  height: 72rpx;
+  margin: 0;
+  padding: 0;
+  border: 1rpx solid #d8ddda;
+  border-radius: 12rpx;
+  background: #fff;
+  color: #181818;
+  font-size: var(--hh-text-body-lg-size);
+  line-height: 72rpx;
+}
+
+.user-card--form .form-actions button::after {
+  border: 0;
+}
+
+.user-card--form .form-actions .primary-btn {
+  border-color: var(--hh-color-brand-primary);
+  background: var(--hh-color-brand-primary);
+  color: #fff;
 }
 
 .avatar {
@@ -1604,8 +1823,9 @@ onShareAppMessage(() => {
 }
 
 .profile-switch-icon {
-  font-size: 24rpx;
-  line-height: 1;
+  width: 32rpx;
+  height: 32rpx;
+  display: block;
 }
 
 .profile-edit-link {
@@ -1621,9 +1841,9 @@ onShareAppMessage(() => {
 }
 
 .profile-edit-arrow {
-  color: #b4bab7;
-  font-size: 38rpx;
-  line-height: 1;
+  width: 36rpx;
+  height: 36rpx;
+  display: block;
 }
 
 .profile-login-actions {
@@ -1680,25 +1900,72 @@ onShareAppMessage(() => {
 }
 
 .shortcut-title {
+  position: relative;
+  z-index: 2;
   font-size: var(--hh-text-heading-sm-size);
   line-height: 36rpx;
 }
 
+.profile-shortcut-decoration {
+  position: absolute;
+  z-index: 1;
+  top: -22rpx;
+  right: -47rpx;
+  width: 200rpx;
+  height: 200rpx;
+  pointer-events: none;
+}
+
 .shortcut-icon {
+  position: relative;
+  z-index: 2;
   width: 80rpx;
   height: 80rpx;
-  border-radius: 18rpx;
+  border-radius: 0;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.96;
+  opacity: 1;
 }
 
-.shortcut-icon text {
-  color: #fff;
-  font-size: 52rpx;
-  line-height: 1;
-  font-weight: $hh-font-weight-bold;
+.profile-shortcut.create .shortcut-icon {
+  background: transparent;
+}
+
+.shortcut-icon--create .shortcut-icon-image {
+  width: 67rpx;
+  height: 69rpx;
+  display: block;
+}
+
+.shortcut-icon--join .shortcut-icon-image {
+  position: absolute;
+  display: block;
+}
+
+.shortcut-icon-image--join-front {
+  z-index: 1;
+  left: 40.74%;
+  top: 36.1%;
+  width: 43.99%;
+  height: 48.63%;
+}
+
+.shortcut-icon-image--join-back {
+  z-index: 2;
+  left: 15.28%;
+  top: 15.28%;
+  width: 62.5%;
+  height: 69.45%;
+}
+
+.shortcut-icon-image--join-pin {
+  z-index: 3;
+  left: 26.76%;
+  top: 27.33%;
+  width: 39.54%;
+  height: 43.41%;
 }
 
 .profile-tools-card {
@@ -1729,29 +1996,26 @@ onShareAppMessage(() => {
 }
 
 .profile-tool-icon {
-  width: 56rpx;
-  height: 56rpx;
+  width: 80rpx;
+  height: 80rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #181818;
-  font-size: 44rpx;
-  line-height: 1;
-  font-weight: $hh-font-weight-bold;
 }
 
-.profile-tool-icon--heart,
-.profile-tool-icon--like,
-.profile-tool-icon--activity,
-.profile-tool-icon--service {
-  text-shadow: 12rpx -6rpx 0 rgba(76, 203, 148, 0.68);
+.profile-tool-icon-image {
+  width: 60rpx;
+  height: 60rpx;
+  display: block;
 }
 
-.profile-tool-icon--archive,
-.profile-tool-icon--post,
-.profile-tool-icon--checkin {
-  text-shadow: 8rpx -8rpx 0 rgba(76, 203, 148, 0.58);
-}
+.profile-tool-icon-image--heart { width: 60rpx; height: 54rpx; }
+.profile-tool-icon-image--like { width: 58rpx; height: 58rpx; }
+.profile-tool-icon-image--archive { width: 55rpx; height: 50rpx; }
+.profile-tool-icon-image--activity { width: 55rpx; height: 55rpx; }
+.profile-tool-icon-image--post { width: 51rpx; height: 56rpx; }
+.profile-tool-icon-image--checkin { width: 50rpx; height: 55rpx; }
+.profile-tool-icon-image--service { width: 56rpx; height: 56rpx; }
 
 .profile-tool-label {
   color: #292116;

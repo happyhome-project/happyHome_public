@@ -25,7 +25,7 @@
     },
     {
       "path": "pages/profile/index",
-      "style": { "navigationBarTitleText": "我的", "enablePullDownRefresh": true }
+      "style": { "navigationBarTitleText": "我的", "navigationStyle": "custom", "enablePullDownRefresh": true }
     },
     {
       "path": "pages/detail/index",
