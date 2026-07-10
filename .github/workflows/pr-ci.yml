@@ -13,7 +13,7 @@ concurrency:
 jobs:
   offline:
     name: offline
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -59,8 +59,9 @@ jobs:
 
       - name: Plan PR release
         run: |
-          if node -e "const {scripts = {}} = require('./package.json'); process.exit(scripts['release:plan'] ? 0 : 1)"; then
+          node -e "const {scripts = {}} = require('./package.json'); process.exit(scripts['release:plan'] ? 0 : 1)"
+          if ($LASTEXITCODE -eq 0) {
             npm run release:plan -- --mode=pr
-          else
-            echo "release:plan is not installed yet; skipping PR release-plan generation"
-          fi
+          } else {
+            Write-Output "release:plan is not installed yet; skipping PR release-plan generation"
+          }
