@@ -33,6 +33,7 @@ function loadDotEnvFile(filePath) {
 }
 
 const fileEnv = loadDotEnvFile(path.join(os.homedir(), '.happyhome', 'cam.env'))
+const adminPrivateEnv = loadDotEnvFile(path.join(os.homedir(), '.happyhome', 'admin-internal.env'))
 const ENV_ID = process.env.TCB_ENV || fileEnv.TCB_ENV || 'cloudbase-3gh862acb1505ff3'
 const SECRET_ID = process.env.TENCENTCLOUD_SECRETID || fileEnv.TENCENTCLOUD_SECRETID
 const SECRET_KEY = process.env.TENCENTCLOUD_SECRETKEY || fileEnv.TENCENTCLOUD_SECRETKEY
@@ -43,12 +44,9 @@ if (!SECRET_ID || !SECRET_KEY) {
 }
 
 const TARGET_ENVS = {
-  ADMIN_LEGACY_TOKEN_FALLBACK: '1',
-  BOOTSTRAP_ADMIN_USERNAME: 'admin',
-  BOOTSTRAP_ADMIN_PASSWORD: 'happyhome2024',
+  ADMIN_LEGACY_TOKEN_FALLBACK: '0',
+  BOOTSTRAP_ADMIN_ENABLED: 'false',
   ADMIN_SESSION_TTL_DAYS: '7',
-  // 保留原 ADMIN_TOKEN（fallback 路径要用）
-  ADMIN_TOKEN: 'happyhome-admin-2024',
 }
 
 const app = CloudBase.init({ secretId: SECRET_ID, secretKey: SECRET_KEY, envId: ENV_ID })
@@ -57,6 +55,16 @@ const detail = await app.functions.getFunctionDetail('admin')
 const existing = {}
 const envItems = detail?.Environment?.Variables || []
 for (const v of envItems) existing[v.Key] = v.Value
+const adminInternalToken = String(
+  process.env.ADMIN_INTERNAL_CALL_TOKEN ||
+  adminPrivateEnv.ADMIN_INTERNAL_CALL_TOKEN ||
+  existing.ADMIN_INTERNAL_CALL_TOKEN ||
+  '',
+).trim()
+if (adminInternalToken.length < 32) {
+  console.error('[update-env] Missing strong ADMIN_INTERNAL_CALL_TOKEN in env or ~/.happyhome/admin-internal.env')
+  process.exit(1)
+}
 
 const envInfo = await app.env.getEnvInfo()
 const storageConf = envInfo?.EnvInfo?.Storages?.[0]
@@ -81,7 +89,10 @@ for (const key of ['TENCENT_SECRET_ID', 'TENCENT_SECRET_KEY', 'TENCENT_CI_BUCKET
   }
 }
 
-const merged = { ...existing, ...TARGET_ENVS }
+const merged = { ...existing, ...TARGET_ENVS, ADMIN_INTERNAL_CALL_TOKEN: adminInternalToken }
+delete merged.ADMIN_TOKEN
+delete merged.BOOTSTRAP_ADMIN_USERNAME
+delete merged.BOOTSTRAP_ADMIN_PASSWORD
 for (const [key, value] of Object.entries(AUDIT_ENVS)) merged[key] = value
 
 function redactEnvRows(rows) {

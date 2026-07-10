@@ -30,6 +30,10 @@ export function analyzeDevtoolsUploadOutput(output) {
   const text = String(output || '')
   const reasons = []
 
+  if (!/(?:^|\n)\s*(?:√|\u221a)\s+upload\s*$/im.test(text)) {
+    reasons.push('upload success marker missing')
+  }
+
   if (/(?:^|\n)\s*(?:×|x)\s+(?:compile_start|upload)/i.test(text)) {
     reasons.push('DevTools CLI failure marker')
   }
@@ -52,4 +56,14 @@ export function analyzeDevtoolsUploadOutput(output) {
     ok: false,
     reason: [...new Set(reasons)].join('; '),
   }
+}
+
+export function analyzeDevtoolsUploadInfo(fileStat, uploadStartedAtMs, clockToleranceMs = 5000) {
+  if (!fileStat || fileStat.isFile !== true) return { ok: false, reason: 'upload info file missing' }
+  if (!Number.isFinite(fileStat.size) || fileStat.size <= 0) return { ok: false, reason: 'upload info file is empty' }
+  if (!Number.isFinite(fileStat.mtimeMs)) return { ok: false, reason: 'upload info mtime is missing' }
+  if (fileStat.mtimeMs + clockToleranceMs < uploadStartedAtMs) {
+    return { ok: false, reason: 'upload info file predates this upload attempt' }
+  }
+  return { ok: true, reason: 'ok' }
 }

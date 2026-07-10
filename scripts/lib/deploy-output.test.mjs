@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { analyzeDevtoolsCloudDeployOutput, analyzeDevtoolsUploadOutput } from './deploy-output.mjs'
+import {
+  analyzeDevtoolsCloudDeployOutput,
+  analyzeDevtoolsUploadInfo,
+  analyzeDevtoolsUploadOutput,
+} from './deploy-output.mjs'
 
 test('detects DevTools cloud deploy table failures even when process exits 0', () => {
   const output = `
@@ -57,4 +61,22 @@ test('accepts normal DevTools upload output', () => {
   `
 
   assert.deepEqual(analyzeDevtoolsUploadOutput(output), { ok: true, reason: 'ok' })
+})
+
+test('rejects DevTools upload output without an explicit upload success marker', () => {
+  const result = analyzeDevtoolsUploadOutput('IDE server started successfully\npreparing\nclose')
+
+  assert.equal(result.ok, false)
+  assert.match(result.reason, /success marker/i)
+})
+
+test('rejects stale or empty DevTools upload info and accepts a fresh receipt', () => {
+  const startedAt = 10_000
+  assert.equal(analyzeDevtoolsUploadInfo(null, startedAt).ok, false)
+  assert.equal(analyzeDevtoolsUploadInfo({ isFile: true, size: 0, mtimeMs: startedAt }, startedAt).ok, false)
+  assert.equal(analyzeDevtoolsUploadInfo({ isFile: true, size: 10, mtimeMs: 1_000 }, startedAt, 0).ok, false)
+  assert.deepEqual(
+    analyzeDevtoolsUploadInfo({ isFile: true, size: 10, mtimeMs: startedAt + 1 }, startedAt),
+    { ok: true, reason: 'ok' },
+  )
 })

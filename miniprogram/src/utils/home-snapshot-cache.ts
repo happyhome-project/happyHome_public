@@ -120,10 +120,10 @@ export function getBackgroundFetchSnapshot(
       wxRef.getBackgroundFetchData({
         fetchType,
         success: (res: any) => {
-          resolve(parseBackgroundFetchSnapshot(String(res?.fetchedData || ''), {
-            ...options,
-            maxAgeMs: maxAgeForFetchType(fetchType),
-          }))
+          resolve(parseBackgroundFetchSnapshot(
+            String(res?.fetchedData || ''),
+            Object.assign({}, options, { maxAgeMs: maxAgeForFetchType(fetchType) }),
+          ))
         },
         fail: () => resolve(null),
       })
@@ -140,10 +140,12 @@ function snapshotTime(snapshot: HomeSnapshot | null) {
 }
 
 export async function getBestBackgroundFetchSnapshot(options: SnapshotReadOptions): Promise<HomeSnapshot | null> {
-  const [pre, periodic] = await Promise.all([
+  const snapshots = await Promise.all([
     getBackgroundFetchSnapshot(options, 'pre'),
     getBackgroundFetchSnapshot(options, 'periodic'),
   ])
+  const pre = snapshots[0]
+  const periodic = snapshots[1]
   return snapshotTime(periodic) > snapshotTime(pre) ? periodic : pre
 }
 
@@ -153,14 +155,14 @@ function installBackgroundFetchListener(wxRef: any) {
   wxRef.onBackgroundFetchData((res: any) => {
     const raw = String(res?.fetchedData || '')
     if (!raw) return
-    for (const subscription of Array.from(backgroundFetchSubscriptions)) {
+    backgroundFetchSubscriptions.forEach((subscription) => {
       const fetchType = res?.fetchType === 'periodic' ? 'periodic' : 'pre'
-      const snapshot = parseBackgroundFetchSnapshot(raw, {
-        ...subscription.getOptions(),
-        maxAgeMs: maxAgeForFetchType(fetchType),
-      })
+      const snapshot = parseBackgroundFetchSnapshot(
+        raw,
+        Object.assign({}, subscription.getOptions(), { maxAgeMs: maxAgeForFetchType(fetchType) }),
+      )
       if (snapshot) subscription.onSnapshot(snapshot)
-    }
+    })
   })
 }
 

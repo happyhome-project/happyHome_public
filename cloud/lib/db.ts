@@ -65,9 +65,8 @@ export async function runTransaction<T>(callback: (transaction: DbTransaction) =
 
 function isMissingDocumentError(error: unknown) {
   const value = error as { errCode?: number; code?: number; message?: string }
-  const code = Number(value?.errCode ?? value?.code)
   const message = String(value?.message || '')
-  return code === -502001 || /document(?:\.get)?:fail[\s\S]*does not exist|document not found/i.test(message)
+  return /document(?:\.get)?:fail[\s\S]*does not exist|document not found/i.test(message)
 }
 
 export async function transactionGetByIdOrNull<T = any>(

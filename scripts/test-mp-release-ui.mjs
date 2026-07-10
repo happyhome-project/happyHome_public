@@ -11,8 +11,9 @@
  * It does not upload, does not generate QR codes, and does not require an
  * auto-replay recording.
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import net from 'node:net'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -26,6 +27,15 @@ import {
   buildDevToolsCloseArgs,
   buildDevToolsQuitPortArgs,
 } from './lib/mp-release-ui-policy.mjs'
+import { requireAdminInternalToken } from './lib/admin-internal-token.mjs'
+import {
+  analyzeCloudInvoke,
+  buildTcbCommand,
+  defaultRunner as runCloudBaseCommand,
+  extractFunctionResult,
+  parseFirstJson,
+} from './cloud-release-smoke.mjs'
+import { computeDirectoryDigest } from './lib/release-run-ledger.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
@@ -734,6 +744,7 @@ function summarizeReleaseFixture(fixture) {
 async function callMpCloud(mp, name, data, options = {}) {
   const action = String(data?.action || '')
   const timeoutMs = Number(options.timeoutMs || 60000)
+  if (name === 'admin') return await callTrustedAdminCloud(data, { timeoutMs })
   const response = await withTimeout(
     mp.evaluate(async (fnName, payload) => {
       const wxRef = typeof wx !== 'undefined' ? wx : null
@@ -768,6 +779,60 @@ async function callMpCloud(mp, name, data, options = {}) {
   return result
 }
 
+async function captureHomeImageLayout(mp) {
+  return await withTimeout(mp.evaluate(() => new Promise((resolveLayout) => {
+    try {
+      wx.createSelectorQuery()
+        .selectAll('.community-avatar-image, .home-banner-image, .guide-cover')
+        .boundingClientRect((rects) => {
+          const items = (Array.isArray(rects) ? rects : []).map((rect) => ({
+            width: Number(rect?.width || 0),
+            height: Number(rect?.height || 0),
+          }))
+          resolveLayout({
+            count: items.length,
+            visibleCount: items.filter((item) => item.width > 1 && item.height > 1).length,
+            items,
+          })
+        })
+        .exec()
+    } catch (error) {
+      resolveLayout({ count: 0, visibleCount: 0, items: [], error: String(error) })
+    }
+  })), 15000, 'capture release home image layout')
+}
+
+async function callTrustedAdminCloud(data, options = {}) {
+  const action = String(data?.action || '')
+  const tempDir = mkdtempSync(join(tmpdir(), 'happyhome-release-admin-'))
+  const payloadPath = join(tempDir, 'payload.json')
+  const payload = Object.assign({}, data, { _internalToken: requireAdminInternalToken() })
+  try {
+    writeFileSync(payloadPath, JSON.stringify(payload), 'utf8')
+    const built = buildTcbCommand([
+      'fn', 'invoke', 'admin',
+      '-d', `@${payloadPath}`,
+      '--env-id', process.env.TCB_ENV || 'cloudbase-3gh862acb1505ff3',
+      '--json',
+    ])
+    const result = await runCloudBaseCommand(built.command, built.args, {
+      cwd: ROOT,
+      env: process.env,
+      timeoutMs: Number(options.timeoutMs || 60000),
+    })
+    const parsed = parseFirstJson(`${result.stdout || ''}${result.stderr || ''}`)
+    const cloudInvoke = analyzeCloudInvoke(parsed)
+    const functionResult = extractFunctionResult(parsed)
+    const functionError = functionResult?.error || functionResult?.message || cloudInvoke?.errMsg || ''
+    if (result.status !== 0 || !parsed || (cloudInvoke && !cloudInvoke.ok) || functionResult?.success === false || functionResult?.error) {
+      throw new Error(`[trusted admin] ${action}: ${functionError || result.error || result.stderr || 'invoke failed'}`)
+    }
+    return functionResult
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true })
+  }
+}
+
 async function createReleaseFixture(mp) {
   const runId = makeReleaseRunId()
   const adminCtx = makeFixtureAdminCtx(runId)
@@ -780,7 +845,7 @@ async function createReleaseFixture(mp) {
       _actAs: adminCtx,
       name,
       description: 'temporary release UI fixture',
-      coverImage: '',
+      coverImage: '/static/logo.png',
       location: { province: 'release', city: 'release', district: 'release', address: 'release-ui' },
       joinType: 'open',
     })
@@ -1007,6 +1072,7 @@ async function verifyHomeDetail(mp, context = {}) {
   }
 
   const homeImages = await waitForHomeImagesRendered(mp)
+  const homeImageLayout = await captureHomeImageLayout(mp)
   const homeText = await withTimeout(pageText(home), 10000, 'read release home text')
 
   if (!target) {
@@ -1031,7 +1097,13 @@ async function verifyHomeDetail(mp, context = {}) {
   return {
     passed,
     homeImages,
-    homeImagesRendered: Boolean(homeImages?.ok !== false && homeImages?.satisfied),
+    homeImageLayout,
+    homeImagesRendered: Boolean(
+      homeImages?.ok !== false &&
+      homeImages?.satisfied &&
+      Number(homeImages?.loadedCount || 0) > 0 &&
+      Number(homeImageLayout?.visibleCount || 0) >= Number(homeImages?.loadedCount || 0)
+    ),
     homeTextLength: homeText.length,
     homeTextSample: homeText.slice(0, 300),
     detailPath,
@@ -1078,8 +1150,12 @@ async function verifyProfileLoginClean(mp) {
 }
 
 function createEvidenceDir() {
-  const dir = resolve(ROOT, '.codex-local', 'release-evidence', new Date().toISOString().replace(/[:.]/g, '-'))
+  const dir = process.env.HH_RELEASE_UI_EVIDENCE_DIR
+    ? resolve(process.env.HH_RELEASE_UI_EVIDENCE_DIR)
+    : resolve(ROOT, '.codex-local', 'release-evidence', new Date().toISOString().replace(/[:.]/g, '-'))
   mkdirSync(dir, { recursive: true })
+  rmSync(resolve(dir, 'release-ui-evidence.json'), { force: true })
+  rmSync(resolve(dir, 'release-ui-evidence.failed.json'), { force: true })
   return dir
 }
 
@@ -1105,6 +1181,11 @@ async function main() {
 
   if (!cliPath) throw new Error('WeChat DevTools CLI was not found. Set WECHAT_DEVTOOLS_CLI_PATH.')
   if (!projectPath) throw new Error('mp-weixin build output was not found. Run the mp-weixin build first.')
+  const packageDigest = await computeDirectoryDigest(projectPath)
+  const expectedPackageDigest = String(process.env.HH_RELEASE_PACKAGE_DIGEST || '').trim()
+  if (expectedPackageDigest && packageDigest !== expectedPackageDigest) {
+    throw new Error(`DevTools project package digest mismatch: expected ${expectedPackageDigest}, got ${packageDigest}`)
+  }
 
   console.log('[DevTools release UI gate]')
   console.log(`cliPath: ${cliPath}`)
@@ -1121,6 +1202,8 @@ async function main() {
 
   const evidence = {
     createdAt: new Date().toISOString(),
+    releaseRunId: String(process.env.HH_RELEASE_RUN_ID || ''),
+    packageDigest,
     cliPath,
     projectPath,
     idePort,

@@ -36,16 +36,29 @@ describe('home image probe', () => {
     expect(next[guideKey]).toBeUndefined()
   })
 
-  test('summarizes current home images and treats empty image sets as satisfied', () => {
+  test('does not satisfy release evidence when the home renders zero images', () => {
     const summary = summarizeHomeImageProbe([], {})
 
     expect(summary).toMatchObject({
       currentImageCount: 0,
+      expectedImageCount: 0,
       loadedCount: 0,
       failedCount: 0,
       pendingCount: 0,
       hasRendered: false,
-      satisfied: true,
+      satisfied: false,
+    })
+  })
+
+  test('does not satisfy release evidence when expected image data disappears before rendering', () => {
+    const summary = summarizeHomeImageProbe([], {}, 2)
+
+    expect(summary).toMatchObject({
+      currentImageCount: 0,
+      expectedImageCount: 2,
+      loadedCount: 0,
+      pendingCount: 2,
+      satisfied: false,
     })
   })
 

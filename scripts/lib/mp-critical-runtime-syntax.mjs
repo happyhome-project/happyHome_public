@@ -1,8 +1,13 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import { parse } from 'acorn'
 
+export const KNOWN_FRAMEWORK_VENDOR_SHA256 = 'b573e2806c3946c5ffca160c372b3322cf167636a2a3841f0f77c57b616ba60a'
+
 const CRITICAL_ENTRYPOINTS = [
+  'app.js',
+  'pages/index/index.js',
   'pages/detail/index.js',
   'pages/profile/index.js',
 ]
@@ -139,7 +144,7 @@ function scanChunk(relativePath, source, ast) {
   return findings
 }
 
-export function scanCriticalRuntimeSyntax(inputDistRoot) {
+export function scanCriticalRuntimeSyntax(inputDistRoot, options = {}) {
   const distRoot = path.resolve(inputDistRoot)
   const detailConfig = path.join(distRoot, 'pages', 'detail', 'index.json')
   if (!fs.existsSync(detailConfig)) {
@@ -147,6 +152,17 @@ export function scanCriticalRuntimeSyntax(inputDistRoot) {
   }
 
   const findings = []
+  const vendorPath = path.join(distRoot, 'common', 'vendor.js')
+  const expectedVendorHash = Object.prototype.hasOwnProperty.call(options, 'expectedVendorHash')
+    ? options.expectedVendorHash
+    : KNOWN_FRAMEWORK_VENDOR_SHA256
+  if (expectedVendorHash) {
+    if (!fs.existsSync(vendorPath)) throw new Error(`Missing mp-weixin framework runtime chunk: ${vendorPath}`)
+    const actualVendorHash = createHash('sha256').update(fs.readFileSync(vendorPath)).digest('hex')
+    if (actualVendorHash !== expectedVendorHash) {
+      throw new Error(`mp-weixin framework runtime changed: expected ${expectedVendorHash}, got ${actualVendorHash}. Review trial-runtime compatibility before updating the baseline.`)
+    }
+  }
   const detailJson = JSON.parse(fs.readFileSync(detailConfig, 'utf8'))
   if (detailJson.usingComponents?.['widget-editor']) {
     findings.push({

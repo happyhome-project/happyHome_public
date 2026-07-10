@@ -1,6 +1,7 @@
 import { access, appendFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { createHash } from 'node:crypto'
 import { REQUIRED_SMOKE_LABELS } from '../cloud-release-smoke.mjs'
 
 export const RELEASE_RUNS_DIR = '.codex-local/release-runs'
@@ -15,8 +16,10 @@ export const RELEASE_STAGE_ORDER = [
 ]
 
 const REQUIRED_RELEASE_UI_MARKERS = [
+  'HH_RELEASE_HOME_IMAGES_RENDERED',
   'HH_RELEASE_HOME_DETAIL_NONEMPTY',
   'HH_RELEASE_LOGIN_VERSION',
+  'HH_RELEASE_PROFILE_LOGIN_CLEAN',
 ]
 
 const RELEASE_CONTEXT_KEYS = ['gitSha', 'version', 'desc', 'envId']
@@ -74,6 +77,28 @@ async function readJson(path) {
   return JSON.parse(await readFile(path, 'utf8'))
 }
 
+export async function computeDirectoryDigest(inputRoot) {
+  const root = resolve(inputRoot)
+  const entries = []
+  async function walk(directory, prefix = '') {
+    const children = await readdir(directory, { withFileTypes: true })
+    children.sort((left, right) => left.name.localeCompare(right.name))
+    for (const child of children) {
+      const relativePath = prefix ? `${prefix}/${child.name}` : child.name
+      const absolutePath = join(directory, child.name)
+      if (child.isDirectory()) {
+        await walk(absolutePath, relativePath)
+      } else if (child.isFile()) {
+        const contents = await readFile(absolutePath)
+        const fileStat = await stat(absolutePath)
+        entries.push(`${relativePath}\0${fileStat.size}\0${createHash('sha256').update(contents).digest('hex')}`)
+      }
+    }
+  }
+  await walk(root)
+  return createHash('sha256').update(entries.join('\n')).digest('hex')
+}
+
 async function writeJson(path, value) {
   await mkdir(dirname(path), { recursive: true })
   await writeFile(path, safeJson(value), 'utf8')
@@ -125,16 +150,36 @@ async function inspectBuildInfoEvidence(stage, context) {
   if (!textHasBuildInfo(source, context.version, context.desc)) return { reusable: false, reason: 'source build info does not match version/desc' }
   if (!textHasBuildInfo(dist, context.version, context.desc)) return { reusable: false, reason: 'dist build info does not match version/desc' }
 
+  const packageRoot = pathFromRoot(root, stage.evidence?.packageRoot)
+  const expectedPackageDigest = String(stage.evidence?.packageDigest || '')
+  if (!packageRoot || !expectedPackageDigest) return { reusable: false, reason: 'package digest evidence is missing' }
+  if (!(await pathExists(packageRoot))) return { reusable: false, reason: `package root missing: ${relativeToRoot(root, packageRoot)}` }
+  const actualPackageDigest = await computeDirectoryDigest(packageRoot)
+  if (actualPackageDigest !== expectedPackageDigest) {
+    return { reusable: false, reason: `package digest mismatch: expected ${expectedPackageDigest}, got ${actualPackageDigest}` }
+  }
+
   const uiEvidencePath = stage.evidence?.releaseUiEvidencePath
   if (!uiEvidencePath) return { reusable: false, reason: 'release UI evidence path missing' }
   const absoluteUiEvidencePath = pathFromRoot(root, uiEvidencePath)
   if (!(await pathExists(absoluteUiEvidencePath))) return { reusable: false, reason: `release UI evidence missing: ${relativeToRoot(root, absoluteUiEvidencePath)}` }
   const evidence = await readJson(absoluteUiEvidencePath)
+  const evidenceProjectPath = pathFromRoot(root, evidence.projectPath)
+  if (!evidenceProjectPath || resolve(evidenceProjectPath) !== resolve(packageRoot)) {
+    return { reusable: false, reason: 'release UI evidence project path does not match prepared package root' }
+  }
+  if (context.runId && evidence.releaseRunId !== context.runId) {
+    return { reusable: false, reason: `release UI evidence runId mismatch: expected ${context.runId}, got ${evidence.releaseRunId || 'missing'}` }
+  }
+  if (evidence.packageDigest !== expectedPackageDigest) {
+    return { reusable: false, reason: 'release UI evidence package digest does not match prepared package' }
+  }
   const markers = new Set(evidence.markers || [])
   const missingMarker = REQUIRED_RELEASE_UI_MARKERS.find((marker) => !markers.has(marker))
   if (missingMarker) return { reusable: false, reason: `release UI evidence missing marker ${missingMarker}` }
   const expectedVersion = evidence.profileLoginClean?.expectedVersion || evidence.expectedVersion
-  if (expectedVersion && expectedVersion !== context.version) {
+  if (!expectedVersion) return { reusable: false, reason: 'release UI evidence version is missing' }
+  if (expectedVersion !== context.version) {
     return { reusable: false, reason: `release UI evidence version mismatch: expected ${context.version}, got ${expectedVersion}` }
   }
   return { reusable: true, reason: 'build and release UI evidence match' }
@@ -207,6 +252,10 @@ async function inspectUploadEvidence(stage, context) {
   if (!['devtools-cli', 'miniprogram-ci'].includes(evidence.method)) {
     return { reusable: false, reason: `upload evidence method is ${evidence.method || 'unknown'}` }
   }
+  if (!context.packageDigest) return { reusable: false, reason: 'prepared package digest is missing for upload reuse' }
+  if (evidence.packageDigest !== context.packageDigest) {
+    return { reusable: false, reason: 'upload evidence package digest does not match prepared package' }
+  }
 
   const uploadInfoPathValue = Object.prototype.hasOwnProperty.call(evidence, 'uploadInfoPath')
     ? evidence.uploadInfoPath
@@ -217,6 +266,16 @@ async function inspectUploadEvidence(stage, context) {
     if (!(await pathExists(uploadInfoPath))) return { reusable: false, reason: `upload info missing: ${relativeToRoot(root, uploadInfoPath)}` }
     const fileStat = await stat(uploadInfoPath)
     if (!fileStat.isFile() || fileStat.size <= 0) return { reusable: false, reason: 'upload info is empty or not a file' }
+    if (Number(evidence.uploadInfoSize || 0) !== fileStat.size) {
+      return { reusable: false, reason: 'upload info size does not match normalized evidence' }
+    }
+    const uploadStartedAtMs = Number(evidence.uploadStartedAtMs || 0)
+    if (!Number.isFinite(uploadStartedAtMs) || uploadStartedAtMs <= 0) {
+      return { reusable: false, reason: 'upload attempt start time is missing' }
+    }
+    if (fileStat.mtimeMs + 5000 < uploadStartedAtMs) {
+      return { reusable: false, reason: 'upload info predates the recorded upload attempt' }
+    }
   }
   return {
     reusable: true,
@@ -251,7 +310,12 @@ export async function inspectReleaseStageReuse(runState, stageName, context) {
       cloudFunctions: context.cloudFunctions || cloudDeployFns,
     })
   }
-  if (stageName === 'miniprogram-upload') return await inspectUploadEvidence(stage, context)
+  if (stageName === 'miniprogram-upload') {
+    return await inspectUploadEvidence(stage, {
+      ...context,
+      packageDigest: context.packageDigest || runState?.stages?.['miniprogram-build-gate']?.evidence?.packageDigest || '',
+    })
+  }
 
   return { reusable: true, reason: `${stageName} passed for this commit/version`, result: stage.result, evidence: stage.evidence }
 }
@@ -364,8 +428,9 @@ export class ReleaseRunLedger {
     this.state.stages[name] = {
       ...existing,
       name,
-      status: 'skipped',
+      status: 'passed',
       skippedAt: at,
+      reusedAt: at,
       context: { ...(existing.context || this.state.context) },
       command: details.command || existing.command || '',
       evidence: { ...(existing.evidence || {}), ...(details.evidence || {}) },
@@ -373,7 +438,7 @@ export class ReleaseRunLedger {
       reason: details.reason || 'reused previous passed stage',
       reused: details.reused ?? true,
     }
-    await this.appendEvent('stage_skipped', { stage: name, reason: this.state.stages[name].reason })
+    await this.appendEvent('stage_reused', { stage: name, reason: this.state.stages[name].reason })
     await this.save()
   }
 

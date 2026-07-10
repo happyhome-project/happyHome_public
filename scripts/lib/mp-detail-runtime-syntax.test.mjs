@@ -14,6 +14,9 @@ async function writeFixture(root, relativePath, content) {
 
 async function createCriticalPageFixture() {
   const root = await mkdtemp(join(tmpdir(), 'hh-mp-runtime-'))
+  await writeFixture(root, 'app.js', '')
+  await writeFixture(root, 'pages/index/index.js', '')
+  await writeFixture(root, 'pages/index/index.json', '{}')
   await writeFixture(root, 'pages/detail/index.js', 'require("../../utils/onboarding-nav.js")')
   await writeFixture(root, 'pages/detail/index.json', JSON.stringify({
     usingComponents: {
@@ -28,10 +31,36 @@ async function createCriticalPageFixture() {
   return root
 }
 
+test('rejects forbidden syntax in a transitive home dependency', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    await writeFixture(fixture, 'pages/index/index.js', 'require("../../utils/home-image-probe.js")')
+    await writeFixture(fixture, 'utils/home-image-probe.js', 'const values = Array.from(new Set(["a"]))')
+    const result = scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' })
+    assert.ok(result.findings.some((finding) =>
+      finding.file === 'utils/home-image-probe.js' && finding.rule === 'Array.from'))
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test('rejects an unreviewed framework runtime change', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    await writeFixture(fixture, 'common/vendor.js', 'const changedFrameworkRuntime = true')
+    assert.throws(
+      () => scanCriticalRuntimeSyntax(fixture),
+      /framework runtime changed/,
+    )
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
 test('rejects forbidden syntax in a transitive detail dependency', async () => {
   const fixture = await createCriticalPageFixture()
   try {
-    const result = scanCriticalRuntimeSyntax(fixture)
+    const result = scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' })
     assert.ok(result.findings.some((finding) =>
       finding.file === 'utils/community-share.js' && finding.rule === 'collection spread'))
   } finally {
@@ -44,7 +73,7 @@ test('scans root-relative usingComponents dependencies', async () => {
   try {
     await writeFixture(fixture, 'utils/community-share.js', 'const copy = (items) => items.slice()')
     await writeFixture(fixture, 'components/GuideRouteDetailView.js', 'const copy = (items) => [...items]')
-    const result = scanCriticalRuntimeSyntax(fixture)
+    const result = scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' })
     assert.ok(result.findings.some((finding) =>
       finding.file === 'components/GuideRouteDetailView.js' && finding.rule === 'collection spread'))
   } finally {
@@ -60,7 +89,7 @@ test('accepts safe dependencies and ignores syntax-like strings or comments', as
       '// const copy = (items) => [...items]',
       'const copy = (items) => items.slice()',
     ].join('\n'))
-    const result = scanCriticalRuntimeSyntax(fixture)
+    const result = scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' })
     assert.deepEqual(result.findings, [])
   } finally {
     await rm(fixture, { recursive: true, force: true })

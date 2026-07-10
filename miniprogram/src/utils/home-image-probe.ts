@@ -1,4 +1,4 @@
-export type HomeImageKind = 'banner' | 'guide'
+export type HomeImageKind = 'hero' | 'banner' | 'guide'
 export type HomeImageStatus = 'loaded' | 'failed'
 
 export interface HomeImageProbeEntry {
@@ -20,6 +20,7 @@ export interface HomeImageProbeItem {
 
 export interface HomeImageProbeSummary {
   currentImageCount: number
+  expectedImageCount: number
   loadedCount: number
   failedCount: number
   pendingCount: number
@@ -37,10 +38,9 @@ export function upsertHomeImageProbeEntry(
   entries: Record<string, HomeImageProbeEntry>,
   entry: HomeImageProbeEntry,
 ): Record<string, HomeImageProbeEntry> {
-  return {
-    ...entries,
-    [entry.key]: entry,
-  }
+  const next = Object.assign({}, entries)
+  next[entry.key] = entry
+  return next
 }
 
 export function clearFailedHomeImageProbeEntries(
@@ -49,7 +49,7 @@ export function clearFailedHomeImageProbeEntries(
 ): Record<string, HomeImageProbeEntry> {
   if (!keys.length) return entries
   let changed = false
-  const next: Record<string, HomeImageProbeEntry> = { ...entries }
+  const next: Record<string, HomeImageProbeEntry> = Object.assign({}, entries)
   for (const key of keys) {
     if (next[key]?.status !== 'failed') continue
     delete next[key]
@@ -61,8 +61,15 @@ export function clearFailedHomeImageProbeEntries(
 export function summarizeHomeImageProbe(
   currentKeys: string[],
   entries: Record<string, HomeImageProbeEntry>,
+  expectedImageCount?: number,
 ): HomeImageProbeSummary {
-  const dedupedKeys = Array.from(new Set(currentKeys.filter(Boolean)))
+  const dedupedKeys: string[] = []
+  const seen: Record<string, true> = {}
+  for (const key of currentKeys) {
+    if (!key || seen[key]) continue
+    seen[key] = true
+    dedupedKeys.push(key)
+  }
   const currentEntries = dedupedKeys
     .map((key) => entries[key])
     .filter((entry): entry is HomeImageProbeEntry => Boolean(entry))
@@ -73,16 +80,20 @@ export function summarizeHomeImageProbe(
     .filter((entry) => entry.status === 'failed')
     .map(({ kind, key, src, label, updatedAt }) => ({ kind, key, src, label, updatedAt }))
   const currentImageCount = dedupedKeys.length
+  const normalizedExpectedImageCount = expectedImageCount === undefined
+    ? currentImageCount
+    : Math.max(currentImageCount, Math.floor(Number(expectedImageCount) || 0))
   const loadedCount = loaded.length
   const failedCount = failed.length
-  const pendingCount = Math.max(0, currentImageCount - loadedCount - failedCount)
+  const pendingCount = Math.max(0, normalizedExpectedImageCount - loadedCount - failedCount)
   return {
     currentImageCount,
+    expectedImageCount: normalizedExpectedImageCount,
     loadedCount,
     failedCount,
     pendingCount,
     hasRendered: loadedCount > 0,
-    satisfied: currentImageCount === 0 || (pendingCount === 0 && failedCount === 0),
+    satisfied: normalizedExpectedImageCount > 0 && loadedCount === normalizedExpectedImageCount && pendingCount === 0 && failedCount === 0,
     loaded,
     failed,
   }

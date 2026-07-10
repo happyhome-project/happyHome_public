@@ -17,7 +17,8 @@ import cloud from 'wx-server-sdk'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
-const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || process.env.ADMIN_TOKEN || 'happyhome-admin-2024'
+const GATEWAY_ENABLED = process.env.GATEWAY_ENABLED === 'true'
+const GATEWAY_TOKEN = String(process.env.GATEWAY_TOKEN || '').trim()
 const ALLOWED_FNS = ['user', 'community', 'member', 'section', 'post']
 
 const BASE_HEADERS = {
@@ -39,6 +40,9 @@ export const main = async (event: any) => {
   }
 
   try {
+    if (!GATEWAY_ENABLED || !GATEWAY_TOKEN) {
+      return { statusCode: 503, headers: BASE_HEADERS, body: JSON.stringify({ error: 'Gateway disabled' }) }
+    }
     const auth = String(event.headers?.authorization || event.headers?.Authorization || '')
     if (auth !== `Bearer ${GATEWAY_TOKEN}`) {
       return { statusCode: 403, headers: BASE_HEADERS, body: JSON.stringify({ error: 'Unauthorized' }) }
@@ -84,7 +88,7 @@ export const main = async (event: any) => {
     return {
       statusCode: 500,
       headers: BASE_HEADERS,
-      body: JSON.stringify({ error: e?.message || String(e), stack: e?.stack }),
+      body: JSON.stringify({ error: e?.message || String(e) }),
     }
   }
 }

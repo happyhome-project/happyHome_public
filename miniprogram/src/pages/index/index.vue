@@ -9,6 +9,8 @@
               :src="homeHeroImage"
               class="community-avatar-image"
               mode="aspectFill"
+              @load="onHomeHeroImageLoad"
+              @error="onHomeHeroImageError"
             />
             <text v-else>{{ avatarLetter }}</text>
           </view>
@@ -578,7 +580,7 @@ const homeBannerItems = computed<HomeBannerItem[]>(() => {
         bannerId: String(banner.bannerId || `${banner.postId}-${index}`),
         postId: String(banner.postId || '').trim(),
         title: String(banner.title || '').trim() || '新人必看',
-        imageKey: buildHomeImageKey('banner', coverImage || rawCover || String(banner.bannerId || banner.postId || index)),
+        imageKey: buildHomeImageKey('banner', String(banner.bannerId || `${banner.postId}-${index}`)),
         coverImage,
       }
     })
@@ -627,7 +629,7 @@ const sectionNotices = computed<SectionNotice[]>(() => {
         label: widget.label || '公告',
         content,
         preview,
-        isLong: Array.from(content).length > NOTICE_PREVIEW_LIMIT,
+        isLong: splitUnicodeCharacters(content).length > NOTICE_PREVIEW_LIMIT,
         icon: sectionIconGlyph(section, '告'),
         accentColor: section.accentColor || '',
         when: formatHomeRelativeTime((section as any).updatedAt || section.createdAt),
@@ -724,7 +726,7 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
               contentAuthor: guide.author,
               meta: '',
               excerpt: guide.excerpt,
-              imageKey: buildHomeImageKey('guide', resolvedCover || guide.coverImage || p._id || idx),
+              imageKey: buildHomeImageKey('guide', `${section._id}:${p._id || idx}`),
               coverImage: resolvedCover,
               driveDuration: guide.driveDuration,
               routeStats: guide.routeStats,
@@ -793,6 +795,7 @@ const guideColumns = computed<ArchiveItem[][]>(() => {
 
 const currentHomeImageKeys = computed(() => {
   const keys: string[] = []
+  if (homeHeroImage.value) keys.push(buildHomeImageKey('hero', homeHeroImage.value))
   for (const item of homeBannerItems.value) {
     if (item.imageKey) keys.push(item.imageKey)
   }
@@ -803,6 +806,15 @@ const currentHomeImageKeys = computed(() => {
     }
   }
   return keys
+})
+
+const expectedHomeImageCount = computed(() => {
+  let count = String(communityStore.currentCommunity?.coverImage || '').trim() ? 1 : 0
+  const banners = ((communityStore.currentCommunity as any)?.homeBanners || []) as HomeBanner[]
+  count += banners.filter((banner) => banner && banner.enabled !== false).length
+  const group = activeArchiveGroup.value
+  if (group?.displayTemplate === 'guide_note') count += group.items.length
+  return count
 })
 
 watch(
@@ -841,13 +853,16 @@ watch(
     }
     homeImageProbeEntries.value = clearFailedHomeImageProbeEntries(
       homeImageProbeEntries.value,
-      urls.map((url) => buildHomeImageKey('guide', url)),
+      Object.keys(homeImageProbeEntries.value).filter((key) =>
+        homeImageProbeEntries.value[key]?.kind === 'guide' &&
+        homeImageProbeEntries.value[key]?.status === 'failed'),
     )
     try {
-      resolvedHomeGuideCoverUrls.value = {
-        ...resolvedHomeGuideCoverUrls.value,
-        ...(await resolveCloudFileUrls(urls)),
-      }
+      resolvedHomeGuideCoverUrls.value = Object.assign(
+        {},
+        resolvedHomeGuideCoverUrls.value,
+        await resolveCloudFileUrls(urls),
+      )
     } catch (error) {
       clientLog('warn', 'home.guideCover.resolve.fail', {
         communityId: communityStore.currentCommunityId || '',
@@ -874,6 +889,24 @@ function formatArchiveKicker(index: number): string {
   return String(index + 1).padStart(2, '0')
 }
 
+function splitUnicodeCharacters(value: unknown): string[] {
+  const source = String(value || '')
+  const chars: string[] = []
+  for (let index = 0; index < source.length; index += 1) {
+    let char = source.charAt(index)
+    const first = source.charCodeAt(index)
+    if (first >= 0xD800 && first <= 0xDBFF && index + 1 < source.length) {
+      const second = source.charCodeAt(index + 1)
+      if (second >= 0xDC00 && second <= 0xDFFF) {
+        char += source.charAt(index + 1)
+        index += 1
+      }
+    }
+    chars.push(char)
+  }
+  return chars
+}
+
 function updateHomeImageProbe(
   kind: HomeImageKind,
   key: string,
@@ -894,7 +927,12 @@ function updateHomeImageProbe(
     updatedAt: new Date().toISOString(),
   })
   if (status === 'failed' && previous?.status !== 'failed') {
-    clientLog('warn', kind === 'banner' ? 'home.banner.image.fail' : 'home.guide.image.fail', {
+    const eventName = kind === 'hero'
+      ? 'home.hero.image.fail'
+      : kind === 'banner'
+        ? 'home.banner.image.fail'
+        : 'home.guide.image.fail'
+    clientLog('warn', eventName, {
       imageKey: safeKey,
       src: String(src || '').trim(),
       label: String(label || '').trim(),
@@ -913,6 +951,27 @@ function isHomeGuideImageFailed(imageKey?: string): boolean {
 
 function onHomeBannerImageLoad(item: HomeBannerItem) {
   updateHomeImageProbe('banner', item.imageKey, item.coverImage, item.title, 'loaded')
+}
+
+function onHomeHeroImageLoad() {
+  updateHomeImageProbe(
+    'hero',
+    buildHomeImageKey('hero', homeHeroImage.value),
+    homeHeroImage.value,
+    communityName.value,
+    'loaded',
+  )
+}
+
+function onHomeHeroImageError(event?: any) {
+  updateHomeImageProbe(
+    'hero',
+    buildHomeImageKey('hero', homeHeroImage.value),
+    homeHeroImage.value,
+    communityName.value,
+    'failed',
+    event?.detail?.errMsg || event,
+  )
 }
 
 function onHomeBannerImageError(item: HomeBannerItem, event?: any) {
@@ -944,7 +1003,11 @@ function onHomeGuideImageError(item: ArchiveItem, event?: any) {
 }
 
 function getReleaseHomeImageProbe() {
-  return summarizeHomeImageProbe(currentHomeImageKeys.value, homeImageProbeEntries.value)
+  return summarizeHomeImageProbe(
+    currentHomeImageKeys.value,
+    homeImageProbeEntries.value,
+    expectedHomeImageCount.value,
+  )
 }
 
 defineExpose({
@@ -1000,7 +1063,7 @@ function getNoticeCardStyle(notice: SectionNotice, index: number) {
 
 function makeNoticePreview(content: string) {
   const normalized = content.trim().replace(/\s+/g, ' ')
-  const chars = Array.from(normalized)
+  const chars = splitUnicodeCharacters(normalized)
   if (chars.length <= NOTICE_PREVIEW_LIMIT) return normalized
   return `${chars.slice(0, NOTICE_PREVIEW_LIMIT).join('').trimEnd()}…`
 }
@@ -1021,13 +1084,15 @@ function formatHomeRelativeTime(value: unknown): string {
 }
 
 function getAuthorInitial(author?: string): string {
-  const chars = Array.from(String(author || '').trim())
+  const chars = splitUnicodeCharacters(String(author || '').trim())
   return chars[0] || '邻'
 }
 
 function getGuideAuthorAvatarStyle(author?: string) {
   const text = String(author || '邻里居民')
-  const hash = Array.from(text).reduce((sum, char) => sum + char.charCodeAt(0), 0)
+  const chars = splitUnicodeCharacters(text)
+  let hash = 0
+  for (const char of chars) hash += char.charCodeAt(0)
   const palette = GUIDE_AUTHOR_AVATAR_PALETTE[hash % GUIDE_AUTHOR_AVATAR_PALETTE.length]
   return {
     '--guide-avatar-start': palette[0],
@@ -1184,7 +1249,12 @@ function getCurrentPageScrollTop() {
       typeof document !== 'undefined' ? document.documentElement?.scrollTop || 0 : 0,
       typeof document !== 'undefined' ? document.body?.scrollTop || 0 : 0,
     ].filter((value) => Number.isFinite(value) && value >= 0)
-    if (candidates.length) scrollTop = Math.max(...candidates)
+    if (candidates.length) {
+      scrollTop = candidates[0]
+      for (let index = 1; index < candidates.length; index += 1) {
+        if (candidates[index] > scrollTop) scrollTop = candidates[index]
+      }
+    }
   }
   // #endif
   return Math.max(0, Math.round(Number(scrollTop) || 0))
@@ -1693,7 +1763,9 @@ watch(
     }
     homeImageProbeEntries.value = clearFailedHomeImageProbeEntries(
       homeImageProbeEntries.value,
-      images.map((image) => buildHomeImageKey('banner', image)),
+      Object.keys(homeImageProbeEntries.value).filter((key) =>
+        homeImageProbeEntries.value[key]?.kind === 'banner' &&
+        homeImageProbeEntries.value[key]?.status === 'failed'),
     )
     const next: Record<string, string> = {}
     await Promise.all(images.map(async (image) => {

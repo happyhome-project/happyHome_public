@@ -87,6 +87,19 @@ test('transactionGetByIdOrNull preserves non-missing transaction errors', async 
     .rejects.toThrow('network timeout')
 })
 
+test('transactionGetByIdOrNull does not treat generic -502001 database failures as missing documents', async () => {
+  const error: any = new Error('document.get:fail database request fail')
+  error.errCode = -502001
+  const transaction = {
+    collection: () => ({
+      doc: () => ({ get: jest.fn().mockRejectedValue(error) }),
+    }),
+  }
+
+  await expect(transactionGetByIdOrNull(transaction as any, 'requests', 'request-1'))
+    .rejects.toBe(error)
+})
+
 test('increment uses _.inc (atomic), not read-then-write', async () => {
   // 验证 increment 传入的 data 包含 _.inc 对象，而非直接数值
   mockUpdate.mockClear()

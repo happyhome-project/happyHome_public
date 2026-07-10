@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
@@ -10,6 +11,17 @@ import {
   buildDevToolsQuitPortArgs,
   REQUIRED_RELEASE_UI_MARKERS,
 } from './mp-release-ui-policy.mjs'
+
+test('release UI fixture capability stays in the trusted Node process', () => {
+  const source = readFileSync(new URL('../test-mp-release-ui.mjs', import.meta.url), 'utf8')
+  const callMpCloud = source.slice(
+    source.indexOf('async function callMpCloud'),
+    source.indexOf('async function callTrustedAdminCloud'),
+  )
+  assert.match(callMpCloud, /name === 'admin'.*callTrustedAdminCloud/s)
+  assert.doesNotMatch(callMpCloud, /ADMIN_INTERNAL_CALL_TOKEN|requireAdminInternalToken|_internalToken/)
+  assert.match(source, /happyhome-release-admin-/)
+})
 
 test('builds DevTools auto args with hidden automator websocket port', () => {
   assert.deepEqual(buildDevToolsAutoArgs({

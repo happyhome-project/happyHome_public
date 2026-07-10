@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { createHash } from 'node:crypto'
 
 import {
   createReleaseRunLedger,
@@ -20,6 +21,26 @@ async function tempRoot() {
 async function writeJson(path, value) {
   await mkdir(join(path, '..'), { recursive: true })
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
+}
+
+async function directoryDigest(root) {
+  const entries = []
+  async function walk(dir, prefix = '') {
+    const children = await readdir(dir, { withFileTypes: true })
+    children.sort((a, b) => a.name.localeCompare(b.name))
+    for (const child of children) {
+      const relativePath = prefix ? `${prefix}/${child.name}` : child.name
+      const absolutePath = join(dir, child.name)
+      if (child.isDirectory()) await walk(absolutePath, relativePath)
+      else if (child.isFile()) {
+        const contents = await readFile(absolutePath)
+        const fileStat = await stat(absolutePath)
+        entries.push(`${relativePath}\0${fileStat.size}\0${createHash('sha256').update(contents).digest('hex')}`)
+      }
+    }
+  }
+  await walk(root)
+  return createHash('sha256').update(entries.join('\n')).digest('hex')
 }
 
 test('release ledger records stage lifecycle, events, and latest pointer', async () => {
@@ -265,8 +286,20 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
     await mkdir(join(distBuildInfoPath, '..'), { recursive: true })
     await writeFile(sourceBuildInfoPath, buildInfoText, 'utf8')
     await writeFile(distBuildInfoPath, buildInfoText, 'utf8')
+    const pagePath = join(root, 'miniprogram', 'dist', 'build', 'mp-weixin', 'pages', 'index', 'index.js')
+    await mkdir(join(pagePath, '..'), { recursive: true })
+    await writeFile(pagePath, 'module.exports = { version: 1 }\n', 'utf8')
+    const packageDigest = await directoryDigest(join(root, 'miniprogram', 'dist', 'build', 'mp-weixin'))
     await writeJson(uiEvidencePath, {
-      markers: ['HH_RELEASE_HOME_DETAIL_NONEMPTY', 'HH_RELEASE_LOGIN_VERSION'],
+      releaseRunId: 'unit-run',
+      packageDigest,
+      projectPath: join(root, 'miniprogram', 'dist', 'build', 'mp-weixin'),
+      markers: [
+        'HH_RELEASE_HOME_IMAGES_RENDERED',
+        'HH_RELEASE_HOME_DETAIL_NONEMPTY',
+        'HH_RELEASE_LOGIN_VERSION',
+        'HH_RELEASE_PROFILE_LOGIN_CLEAN',
+      ],
       profileLoginClean: { expectedVersion: '1.0.1' },
     })
 
@@ -283,6 +316,8 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
         buildInfoPath: 'miniprogram/src/generated/build-info.ts',
         distBuildInfoPath: 'miniprogram/dist/build/mp-weixin/generated/build-info.js',
         releaseUiEvidencePath: '.codex-local/release-evidence/unit/release-ui-evidence.json',
+        packageRoot: 'miniprogram/dist/build/mp-weixin',
+        packageDigest,
       },
       result: { version: '1.0.1', desc: 'trial-unit' },
     })
@@ -293,11 +328,73 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
       gitSha: 'abc123',
       version: '1.0.1',
       desc: 'trial-unit',
+      runId: 'unit-run',
     })
     assert.equal(reusable.reusable, true)
 
+    await writeFile(pagePath, 'module.exports = { version: 2 }\n', 'utf8')
+    const changedPackage = await inspectReleaseStageReuse(runState, 'miniprogram-build-gate', {
+      root,
+      gitSha: 'abc123',
+      version: '1.0.1',
+      desc: 'trial-unit',
+    })
+    assert.equal(changedPackage.reusable, false)
+    assert.match(changedPackage.reason, /package digest/i)
+    await writeFile(pagePath, 'module.exports = { version: 1 }\n', 'utf8')
+
     await writeJson(uiEvidencePath, {
-      markers: ['HH_RELEASE_HOME_DETAIL_NONEMPTY', 'HH_RELEASE_LOGIN_VERSION'],
+      releaseRunId: 'unit-run',
+      packageDigest,
+      projectPath: join(root, 'miniprogram', 'dist', 'build', 'mp-weixin'),
+      markers: [
+        'HH_RELEASE_HOME_IMAGES_RENDERED',
+        'HH_RELEASE_HOME_DETAIL_NONEMPTY',
+        'HH_RELEASE_LOGIN_VERSION',
+        'HH_RELEASE_PROFILE_LOGIN_CLEAN',
+      ],
+    })
+    const missingUiVersion = await inspectReleaseStageReuse(runState, 'miniprogram-build-gate', {
+      root,
+      gitSha: 'abc123',
+      version: '1.0.1',
+      desc: 'trial-unit',
+      runId: 'unit-run',
+    })
+    assert.equal(missingUiVersion.reusable, false)
+    assert.match(missingUiVersion.reason, /version.*missing/i)
+
+    await writeJson(uiEvidencePath, {
+      releaseRunId: 'unit-run',
+      packageDigest,
+      projectPath: join(root, 'miniprogram', 'dist', 'build', 'mp-weixin'),
+      markers: [
+        'HH_RELEASE_HOME_IMAGES_RENDERED',
+        'HH_RELEASE_HOME_DETAIL_NONEMPTY',
+        'HH_RELEASE_LOGIN_VERSION',
+      ],
+      profileLoginClean: { expectedVersion: '1.0.1' },
+    })
+    const missingCleanProfileMarker = await inspectReleaseStageReuse(runState, 'miniprogram-build-gate', {
+      root,
+      gitSha: 'abc123',
+      version: '1.0.1',
+      desc: 'trial-unit',
+      runId: 'unit-run',
+    })
+    assert.equal(missingCleanProfileMarker.reusable, false)
+    assert.match(missingCleanProfileMarker.reason, /HH_RELEASE_PROFILE_LOGIN_CLEAN/)
+
+    await writeJson(uiEvidencePath, {
+      releaseRunId: 'unit-run',
+      packageDigest,
+      projectPath: join(root, 'miniprogram', 'dist', 'build', 'mp-weixin'),
+      markers: [
+        'HH_RELEASE_HOME_IMAGES_RENDERED',
+        'HH_RELEASE_HOME_DETAIL_NONEMPTY',
+        'HH_RELEASE_LOGIN_VERSION',
+        'HH_RELEASE_PROFILE_LOGIN_CLEAN',
+      ],
       profileLoginClean: { expectedVersion: '1.0.2' },
     })
     const wrongUiVersion = await inspectReleaseStageReuse(runState, 'miniprogram-build-gate', {
@@ -305,12 +402,18 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
       gitSha: 'abc123',
       version: '1.0.1',
       desc: 'trial-unit',
+      runId: 'unit-run',
     })
     assert.equal(wrongUiVersion.reusable, false)
     assert.match(wrongUiVersion.reason, /version mismatch/)
 
     await writeJson(uiEvidencePath, {
-      markers: ['HH_RELEASE_HOME_DETAIL_NONEMPTY', 'HH_RELEASE_LOGIN_VERSION'],
+      markers: [
+        'HH_RELEASE_HOME_IMAGES_RENDERED',
+        'HH_RELEASE_HOME_DETAIL_NONEMPTY',
+        'HH_RELEASE_LOGIN_VERSION',
+        'HH_RELEASE_PROFILE_LOGIN_CLEAN',
+      ],
       profileLoginClean: { expectedVersion: '1.0.1' },
     })
     await writeFile(distBuildInfoPath, buildInfoText.replace('trial-unit', 'trial-other'), 'utf8')
@@ -332,6 +435,7 @@ test('miniprogram upload is reused only with normalized release-owned evidence',
   try {
     const uploadEvidencePath = join(root, '.codex-local', 'release-evidence', 'unit-run', 'miniprogram-upload', 'upload-evidence.json')
     const uploadInfoPath = join(root, 'mp-upload-info.json')
+    const packageDigest = 'prepared-package-digest'
     const ledger = await createReleaseRunLedger({
       root,
       runId: 'unit-run',
@@ -339,6 +443,7 @@ test('miniprogram upload is reused only with normalized release-owned evidence',
       gitSha: 'abc123',
       version: '1.0.1',
       desc: 'trial-unit',
+      packageDigest,
     })
     await ledger.passStage('miniprogram-upload', {
       evidence: {
@@ -354,6 +459,7 @@ test('miniprogram upload is reused only with normalized release-owned evidence',
       gitSha: 'abc123',
       version: '1.0.1',
       desc: 'trial-unit',
+      packageDigest,
     })
     assert.equal(missing.reusable, false)
     assert.match(missing.reason, /upload evidence/)
@@ -364,17 +470,23 @@ test('miniprogram upload is reused only with normalized release-owned evidence',
       gitSha: 'abc123',
       version: '1.0.1',
       desc: 'trial-unit',
+      packageDigest,
     })
     assert.equal(weak.reusable, false)
     assert.match(weak.reason, /upload evidence/)
 
+    const uploadInfoStat = await stat(uploadInfoPath)
     await writeJson(uploadEvidencePath, {
       success: true,
       appid: 'wx-unit',
       version: '1.0.1',
       desc: 'trial-unit',
       method: 'devtools-cli',
+      packageDigest,
       uploadInfoPath: 'mp-upload-info.json',
+      uploadInfoSize: uploadInfoStat.size,
+      uploadInfoMtimeMs: uploadInfoStat.mtimeMs,
+      uploadStartedAtMs: uploadInfoStat.mtimeMs,
       uploadedAt: '2026-06-30T00:00:00.000Z',
     })
     const reusable = await inspectReleaseStageReuse(runState, 'miniprogram-upload', {
@@ -382,6 +494,7 @@ test('miniprogram upload is reused only with normalized release-owned evidence',
       gitSha: 'abc123',
       version: '1.0.1',
       desc: 'trial-unit',
+      packageDigest,
     })
     assert.equal(reusable.reusable, true)
 
@@ -392,6 +505,7 @@ test('miniprogram upload is reused only with normalized release-owned evidence',
       version: '1.0.1',
       desc: 'trial-unit',
       method: 'miniprogram-ci',
+      packageDigest,
       uploadInfoPath: '',
       uploadedAt: '2026-06-30T00:00:00.000Z',
     })
@@ -400,6 +514,7 @@ test('miniprogram upload is reused only with normalized release-owned evidence',
       gitSha: 'abc123',
       version: '1.0.1',
       desc: 'trial-unit',
+      packageDigest,
     })
     assert.equal(reusableCi.reusable, true)
     assert.equal(reusableCi.evidence.uploadInfoPath, '')
@@ -436,7 +551,8 @@ test('runLedgerStage skips only when the explicit reuse check approves', async (
 
     const status = formatReleaseRunStatus(ledger.state)
     assert.match(status, /unit-run/)
-    assert.match(status, /cloud-deploy: skipped/)
+    assert.match(status, /cloud-deploy: passed/)
+    assert.equal(ledger.state.stages['cloud-deploy'].reused, true)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

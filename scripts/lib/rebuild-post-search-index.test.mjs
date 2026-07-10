@@ -98,19 +98,25 @@ test('parseRebuildArgs requires explicit target intent and supports repeated ids
   assert.deepEqual(options.communityIds, ['c1', 'c2', 'c3'])
 })
 
-test('makeAdminPayload uses internal superAdmin actor context', () => {
-  const payload = makeAdminPayload('post.rebuildSearchIndexSectionBatchAdmin', { sectionId: 'section-1' }, 'actor-x')
+test('makeAdminPayload uses the internal capability and superAdmin actor context', () => {
+  const payload = makeAdminPayload(
+    'post.rebuildSearchIndexSectionBatchAdmin',
+    { sectionId: 'section-1' },
+    'actor-x',
+    'internal-secret',
+  )
 
   assert.equal(payload.action, 'post.rebuildSearchIndexSectionBatchAdmin')
   assert.equal(payload.sectionId, 'section-1')
   assert.equal(payload._actAs.role, 'superAdmin')
   assert.equal(payload._actAs.accountId, 'actor-x')
+  assert.equal(payload._internalToken, 'internal-secret')
 })
 
 test('runPostSearchRebuild lists active communities and rebuilds each one', async () => {
   const runner = createMockRunner()
   const summary = await runPostSearchRebuild({
-    ...parseRebuildArgs(['--all-active', '--env-id', 'env-x'], {}),
+    ...parseRebuildArgs(['--all-active', '--env-id', 'env-x'], { ADMIN_INTERNAL_CALL_TOKEN: 'test-secret' }),
     commandTimeoutMs: 999,
   }, runner)
 
@@ -130,7 +136,7 @@ test('runPostSearchRebuild lists active communities and rebuilds each one', asyn
 test('runPostSearchRebuild dry run resolves targets without rebuilding', async () => {
   const runner = createMockRunner()
   const summary = await runPostSearchRebuild(
-    parseRebuildArgs(['--all-active', '--dry-run'], {}),
+    parseRebuildArgs(['--all-active', '--dry-run'], { ADMIN_INTERNAL_CALL_TOKEN: 'test-secret' }),
     runner,
   )
 
@@ -143,7 +149,7 @@ test('runPostSearchRebuild dry run resolves targets without rebuilding', async (
 test('runPostSearchRebuild records failed community invocations', async () => {
   const runner = createMockRunner({ failCommunityId: 'c2' })
   const summary = await runPostSearchRebuild(
-    parseRebuildArgs(['--community-ids=c1,c2'], {}),
+    parseRebuildArgs(['--community-ids=c1,c2'], { ADMIN_INTERNAL_CALL_TOKEN: 'test-secret' }),
     runner,
   )
 
@@ -170,7 +176,7 @@ test('runPostSearchRebuild treats empty CLI output as failed invocation', async 
   }
 
   const summary = await runPostSearchRebuild(
-    parseRebuildArgs(['--community-id=c1'], {}),
+    parseRebuildArgs(['--community-id=c1'], { ADMIN_INTERNAL_CALL_TOKEN: 'test-secret' }),
     runner,
   )
 

@@ -14,6 +14,7 @@ import {
   formatCommand,
   parseFirstJson,
 } from './cloud-release-smoke.mjs'
+import { resolveAdminInternalToken } from './lib/admin-internal-token.mjs'
 
 const DEFAULT_TIMEOUT_MS = 120000
 const DEFAULT_ACTOR = 'post-search-rebuild'
@@ -83,6 +84,7 @@ export function parseRebuildArgs(argv = process.argv.slice(2), env = process.env
       env.HH_POST_SEARCH_REBUILD_BATCH_SIZE || String(DEFAULT_BATCH_SIZE),
     )) || DEFAULT_BATCH_SIZE))),
     actor: getFlagValue(argv, 'actor', DEFAULT_ACTOR),
+    adminInternalToken: resolveAdminInternalToken(env),
     adminInvokeRetries: normalizePositiveInt(getFlagValue(
       argv,
       'admin-invoke-retries',
@@ -98,9 +100,10 @@ export function parseRebuildArgs(argv = process.argv.slice(2), env = process.env
   }
 }
 
-export function makeAdminPayload(action, params = {}, actor = DEFAULT_ACTOR) {
+export function makeAdminPayload(action, params = {}, actor = DEFAULT_ACTOR, internalToken = '') {
   return {
     action,
+    _internalToken: internalToken,
     _actAs: {
       accountId: actor,
       role: 'superAdmin',
@@ -140,7 +143,10 @@ function isTransientInvokeFailure(value) {
 }
 
 export async function invokeAdmin(action, params, options, runner = defaultRunner) {
-  const payload = makeAdminPayload(action, params, options.actor)
+  if (!options.adminInternalToken) {
+    throw new Error('Missing ADMIN_INTERNAL_CALL_TOKEN in env or ~/.happyhome/admin-internal.env')
+  }
+  const payload = makeAdminPayload(action, params, options.actor, options.adminInternalToken)
   const payloadFile = writePayloadFile(payload)
   let commandLine = ''
   let result

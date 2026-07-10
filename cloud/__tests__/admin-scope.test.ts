@@ -32,6 +32,8 @@ import * as db from '../lib/db'
 import { main as _adminMain } from '../functions/admin/index'
 
 const adminMain = _adminMain as (event: any) => Promise<any>
+const TEST_INTERNAL_TOKEN = 'admin-scope-unit-internal-token'
+process.env.ADMIN_INTERNAL_CALL_TOKEN = TEST_INTERNAL_TOKEN
 
 function mockCommunityCreateTransaction(communityId = 'c-new') {
   const communityAdd = jest.fn().mockResolvedValue({ _id: communityId })
@@ -50,7 +52,7 @@ function mockCommunityCreateTransaction(communityId = 'c-new') {
 }
 
 function internalCall(action: string, params: Record<string, any>, actAs: any) {
-  return adminMain({ action, _actAs: actAs, ...params })
+  return adminMain({ action, _actAs: actAs, _internalToken: TEST_INTERNAL_TOKEN, ...params })
 }
 
 const ADMIN_CTX_SUPER = {

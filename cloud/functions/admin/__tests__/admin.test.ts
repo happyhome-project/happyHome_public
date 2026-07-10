@@ -47,7 +47,7 @@ jest.mock('uuid', () => ({
   v4: jest.fn().mockReturnValue('mocked-uuid'),
 }))
 
-import { main } from '../index'
+import { main as rawMain } from '../index'
 import * as db from '../../../lib/db'
 import * as storage from '../../../lib/storage'
 import { searchAmapPoi } from '../../../lib/amap'
@@ -55,12 +55,62 @@ import * as postSearch from '../../../lib/post-search'
 import * as postRag from '../../../lib/post-rag'
 import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
 
+const TEST_INTERNAL_TOKEN = 'admin-unit-internal-token'
+process.env.ADMIN_INTERNAL_CALL_TOKEN = TEST_INTERNAL_TOKEN
+const TEST_INTERNAL_ACTOR = {
+  accountId: 'admin-unit',
+  role: 'superAdmin',
+  userId: 'admin-unit-openid',
+  username: 'admin-unit',
+}
+const main = (event: any) => rawMain({
+  ...event,
+  _actAs: event?._actAs || TEST_INTERNAL_ACTOR,
+  _internalToken: TEST_INTERNAL_TOKEN,
+})
+
 beforeEach(() => {
   jest.resetAllMocks()
   ;(db.transactionGetByIdOrNull as jest.Mock).mockImplementation(async (transaction, collectionName, id) => {
     const response = await transaction.collection(collectionName).doc(id).get()
     return response?.data || null
   })
+})
+
+test('production non-HTTP calls reject caller-supplied admin identities', async () => {
+  const originalNodeEnv = process.env.NODE_ENV
+  const originalInternalToken = process.env.ADMIN_INTERNAL_CALL_TOKEN
+  process.env.NODE_ENV = 'production'
+  delete process.env.ADMIN_INTERNAL_CALL_TOKEN
+  ;(db.query as jest.Mock).mockResolvedValue([])
+
+  try {
+    await expect(rawMain({
+      action: 'admin.listAccounts',
+      _actAs: { accountId: 'forged', role: 'superAdmin', userId: 'attacker', username: 'attacker' },
+    })).rejects.toThrow('Unauthorized')
+    expect(db.query).not.toHaveBeenCalled()
+  } finally {
+    process.env.NODE_ENV = originalNodeEnv
+    if (originalInternalToken === undefined) delete process.env.ADMIN_INTERNAL_CALL_TOKEN
+    else process.env.ADMIN_INTERNAL_CALL_TOKEN = originalInternalToken
+  }
+})
+
+test('production non-HTTP calls accept the configured internal capability', async () => {
+  const originalNodeEnv = process.env.NODE_ENV
+  process.env.NODE_ENV = 'production'
+  ;(db.query as jest.Mock).mockResolvedValue([])
+
+  try {
+    await expect(rawMain({
+      action: 'admin.listAccounts',
+      _internalToken: TEST_INTERNAL_TOKEN,
+      _actAs: { accountId: 'trusted', role: 'superAdmin', userId: 'ops', username: 'ops' },
+    })).resolves.toEqual({ accounts: [] })
+  } finally {
+    process.env.NODE_ENV = originalNodeEnv
+  }
 })
 
 function useAdminMembershipTransaction(options: {

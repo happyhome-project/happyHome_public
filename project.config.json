@@ -1,6 +1,6 @@
 {
   "miniprogramRoot": "miniprogram/dist/build/mp-weixin/",
-  "cloudfunctionRoot": "cloudfunctions/",
+  "cloudfunctionRoot": "cloud/dist/",
   "setting": {
     "es6": true,
     "postcss": true,

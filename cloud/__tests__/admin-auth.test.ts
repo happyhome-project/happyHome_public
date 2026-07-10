@@ -7,6 +7,10 @@
  *   - legacy fallback honors ADMIN_LEGACY_TOKEN_FALLBACK=1
  */
 
+process.env.BOOTSTRAP_ADMIN_ENABLED = 'true'
+process.env.BOOTSTRAP_ADMIN_USERNAME = 'admin'
+process.env.BOOTSTRAP_ADMIN_PASSWORD = 'happyhome2024'
+
 jest.mock('../lib/db', () => ({
   getById: jest.fn(),
   create: jest.fn(),

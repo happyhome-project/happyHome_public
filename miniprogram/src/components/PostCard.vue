@@ -61,10 +61,11 @@ watch(
       .filter(Boolean)
     if (urls.length === 0) return
     try {
-      resolvedAvatarUrls.value = {
-        ...resolvedAvatarUrls.value,
-        ...(await resolveCloudFileUrls(urls)),
-      }
+      resolvedAvatarUrls.value = Object.assign(
+        {},
+        resolvedAvatarUrls.value,
+        await resolveCloudFileUrls(urls),
+      )
     } catch {
       // Keep original URLs when temp URL resolution is unavailable.
     }

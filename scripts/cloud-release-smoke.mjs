@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import process from 'node:process'
 import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
+import { resolveAdminInternalToken } from './lib/admin-internal-token.mjs'
 import { parsePositiveIntOption, runBounded } from './lib/release-concurrency.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -68,6 +69,7 @@ export function parseArgs(argv = process.argv.slice(2), env = process.env) {
   )
   const runId = getFlag('run-id', env.HH_RELEASE_CLOUD_SMOKE_RUN_ID || makeRunId())
   const workerToken = getFlag('worker-token', resolvePostRagWorkerToken(env))
+  const adminInternalToken = getFlag('admin-internal-token', resolveAdminInternalToken(env))
   const evidenceDir = getFlag(
     'evidence-dir',
     resolve(ROOT, '.codex-local', 'release-evidence', runId, 'cloud-smoke'),
@@ -82,6 +84,7 @@ export function parseArgs(argv = process.argv.slice(2), env = process.env) {
     concurrency,
     noFixture: argv.includes('--no-fixture'),
     workerToken,
+    adminInternalToken,
     evidenceDir,
     runId,
   }
@@ -112,7 +115,7 @@ export function redactSensitive(value, env = process.env) {
     .replace(/(--api-key\s+)[^\s"']+/gi, '$1[REDACTED]')
     .replace(/((?:apiKey|apiKeyId|apiKeySecret|secretId|secretKey|workerToken|postRagWorkerToken|token|password)["']?\s*[:=]\s*["']?)[^"',\s}]+/gi, '$1[REDACTED]')
 
-  for (const key of ['ADMIN_TOKEN', 'TEST_ADMIN_SESSION_TOKEN', 'TCB_SECRET_ID', 'TCB_SECRET_KEY', 'TCB_API_KEY', 'POST_RAG_WORKER_TOKEN', 'HH_POST_RAG_WORKER_TOKEN']) {
+  for (const key of ['ADMIN_TOKEN', 'ADMIN_INTERNAL_CALL_TOKEN', 'TEST_ADMIN_SESSION_TOKEN', 'TCB_SECRET_ID', 'TCB_SECRET_KEY', 'TCB_API_KEY', 'POST_RAG_WORKER_TOKEN', 'HH_POST_RAG_WORKER_TOKEN']) {
     const secret = env[key]
     if (secret && String(secret).length >= 6) {
       text = text.split(String(secret)).join('[REDACTED]')
@@ -534,8 +537,12 @@ export class CloudSmokeRun {
   }
 
   adminPayload(action, params = {}) {
+    if (!this.options.adminInternalToken) {
+      throw new Error('admin smoke requires ADMIN_INTERNAL_CALL_TOKEN')
+    }
     return {
       action,
+      _internalToken: this.options.adminInternalToken,
       _actAs: {
         accountId: `release-smoke-${this.options.runId}`,
         role: 'superAdmin',

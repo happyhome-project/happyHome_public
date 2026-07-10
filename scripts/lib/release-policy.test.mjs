@@ -3,6 +3,19 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { isDevtoolsLoginSigningFailure, shouldFallbackAfterDevtoolsFailure } from './release-policy.mjs'
+import * as releasePolicyModule from './release-policy.mjs'
+
+test('root DevTools project config points manual cloud deploys at the built function tree', () => {
+  const config = JSON.parse(readFileSync(new URL('../../project.config.json', import.meta.url), 'utf8'))
+  assert.equal(config.cloudfunctionRoot, 'cloud/dist/')
+})
+
+test('remote release stages are always revalidated instead of trusted from local ledger state', () => {
+  assert.equal(releasePolicyModule.mustRevalidateRemoteReleaseStage('cloud-deploy'), true)
+  assert.equal(releasePolicyModule.mustRevalidateRemoteReleaseStage('cloud-smoke'), true)
+  assert.equal(releasePolicyModule.mustRevalidateRemoteReleaseStage('admin-web-deploy'), true)
+  assert.equal(releasePolicyModule.mustRevalidateRemoteReleaseStage('miniprogram-build-gate'), false)
+})
 
 function extractFunctionBlock(source, signature) {
   const start = source.indexOf(signature)
@@ -78,6 +91,45 @@ test('release cloud smoke ensures required database collections before invoking 
   assert.match(ensureIndexesScript, /admin_notifications/)
   assert.match(runCloudSmokeBody, /ensure:indexes/)
   assert(runCloudSmokeBody.indexOf('ensure:indexes') < runCloudSmokeBody.indexOf('runCloudReleaseSmoke'))
+})
+
+test('formal release git state rejects non-main, dirty, and unsynchronized sources', () => {
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    branch: 'feature', headSha: 'a', originMainSha: 'a', changedPaths: [],
+  }), /main/)
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    branch: 'main', headSha: 'a', originMainSha: 'a', changedPaths: ['cloud/functions/admin/index.ts'],
+  }), /clean/i)
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    branch: 'main', headSha: 'a', originMainSha: 'b', changedPaths: [],
+  }), /origin\/main/)
+})
+
+test('publish resume allows only its matching generated build-info change', () => {
+  assert.doesNotThrow(() => releasePolicyModule.assertFormalReleaseGitState({
+    branch: 'main',
+    headSha: 'a',
+    originMainSha: 'a',
+    changedPaths: ['miniprogram/src/generated/build-info.ts'],
+    publishOnly: true,
+    generatedBuildInfoMatches: true,
+  }))
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    branch: 'main',
+    headSha: 'a',
+    originMainSha: 'a',
+    changedPaths: ['miniprogram/src/generated/build-info.ts', 'cloud/functions/admin/index.ts'],
+    publishOnly: true,
+    generatedBuildInfoMatches: true,
+  }), /unexpected/i)
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    branch: 'main',
+    headSha: 'a',
+    originMainSha: 'a',
+    changedPaths: ['miniprogram/src/generated/build-info.ts'],
+    publishOnly: true,
+    generatedBuildInfoMatches: false,
+  }), /build-info/i)
 })
 
 test('CloudBase CLI retry treats its known includes TypeError as transient', () => {

@@ -65,7 +65,7 @@ import { resolvePostAuthorNickname } from '../../shared/post-author'
 
 cloud.init({ env: process.env.TCB_ENV || cloud.DYNAMIC_CURRENT_ENV })
 
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'happyhome-admin-2024'
+const ADMIN_TOKEN = String(process.env.ADMIN_TOKEN || '').trim()
 const ADMIN_LEGACY_TOKEN_FALLBACK = process.env.ADMIN_LEGACY_TOKEN_FALLBACK === '1'
 
 async function enqueuePostRagJobsForSection(sectionId: string, reason: string, preloadedPosts?: any[]) {
@@ -81,8 +81,9 @@ async function enqueuePostRagJobsForSection(sectionId: string, reason: string, p
 }
 // Bootstrap 登录：当 admin_accounts 为空时，命中这两个环境变量的用户名/密码可一键
 // 创建首个 superAdmin。和老的 VITE_ADMIN_USERNAME/PASSWORD 共用一组凭据即可。
-const BOOTSTRAP_ADMIN_USERNAME = process.env.BOOTSTRAP_ADMIN_USERNAME || 'admin'
-const BOOTSTRAP_ADMIN_PASSWORD = process.env.BOOTSTRAP_ADMIN_PASSWORD || 'happyhome2024'
+const BOOTSTRAP_ADMIN_ENABLED = process.env.BOOTSTRAP_ADMIN_ENABLED === 'true'
+const BOOTSTRAP_ADMIN_USERNAME = String(process.env.BOOTSTRAP_ADMIN_USERNAME || '').trim()
+const BOOTSTRAP_ADMIN_PASSWORD = String(process.env.BOOTSTRAP_ADMIN_PASSWORD || '')
 const ATTENDANCE_COLLECTION = 'post_attendance_members'
 const ATTENDANCE_PREVIEW_LIMIT = 5
 const ADMIN_ACCOUNTS = 'admin_accounts'
@@ -139,6 +140,31 @@ const PUBLIC_ACTIONS = new Set([
   'auth.wxLoginConfirm',
   'audit.callback',
 ])
+
+function safeTokenEquals(actual: unknown, expected: unknown): boolean {
+  const actualBuffer = Buffer.from(String(actual || ''), 'utf8')
+  const expectedBuffer = Buffer.from(String(expected || ''), 'utf8')
+  return actualBuffer.length > 0 &&
+    actualBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(actualBuffer, expectedBuffer)
+}
+
+function resolveNonHttpAdminContext(event: any): AdminCtx {
+  const expectedToken = String(process.env.ADMIN_INTERNAL_CALL_TOKEN || '').trim()
+  if (!expectedToken || !safeTokenEquals(event?._internalToken, expectedToken)) {
+    throw new Error('Unauthorized')
+  }
+  const actAs = event?._actAs
+  if (!actAs || !['superAdmin', 'communityAdmin'].includes(String(actAs.role || ''))) {
+    throw new Error('Unauthorized')
+  }
+  return {
+    accountId: String(actAs.accountId || ''),
+    role: actAs.role,
+    userId: String(actAs.userId || ''),
+    username: String(actAs.username || ''),
+  }
+}
 const SUPER_ADMIN_ONLY: Array<string | RegExp> = [
   'community.approve',
   'community.reject',
@@ -612,6 +638,9 @@ async function publicRoute(action: string, params: Record<string, any>, openid =
 
     // ---- Bootstrap：admin_accounts 为空 + 命中 env 凭据时自动 seed 首个 superAdmin ----
     if (!account
+      && BOOTSTRAP_ADMIN_ENABLED
+      && BOOTSTRAP_ADMIN_USERNAME
+      && BOOTSTRAP_ADMIN_PASSWORD
       && username === BOOTSTRAP_ADMIN_USERNAME
       && password === BOOTSTRAP_ADMIN_PASSWORD) {
       const total = (await db.query(ADMIN_ACCOUNTS, {}, { limit: 1 })) as any[]
@@ -1920,7 +1949,7 @@ export const main = async (event: any) => {
 
     // 非 HTTP 触发（小程序 wx.cloud.callFunction / 内部云函数 / 测试直调）
     // 小程序路径下 cloud.getWXContext().OPENID 自动有值 → 传给 publicRoute 给 wxLoginConfirm 用
-    const { action, _actAs, _testOpenid, ...params } = event
+    const { action, _actAs, _internalToken, _testOpenid, ...params } = event
     if (PUBLIC_ACTIONS.has(action)) {
       let openid = ''
       try {
@@ -1933,12 +1962,7 @@ export const main = async (event: any) => {
       }
       return publicRoute(action, params, openid)
     }
-    const ctx: AdminCtx = _actAs || {
-      accountId: 'internal',
-      role: 'superAdmin',
-      userId: '',
-      username: 'internal',
-    }
+    const ctx = resolveNonHttpAdminContext({ _actAs, _internalToken })
     return route(action, params, ctx)
   } catch (error: any) {
     if (event.httpMethod) {
@@ -1949,7 +1973,7 @@ export const main = async (event: any) => {
       return {
         statusCode: status,
         headers,
-        body: JSON.stringify({ error: msg, stack: error.stack }),
+        body: JSON.stringify({ error: msg }),
       }
     }
     throw error

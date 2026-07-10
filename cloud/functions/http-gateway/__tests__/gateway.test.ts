@@ -2,6 +2,8 @@
 // Mock cloud.callFunction to capture what gets forwarded to target functions.
 
 const mockCallFunction = jest.fn()
+process.env.GATEWAY_ENABLED = 'true'
+process.env.GATEWAY_TOKEN = 'unit-gateway-token'
 jest.mock('wx-server-sdk', () => ({
   init: jest.fn(),
   callFunction: (...args: any[]) => mockCallFunction(...args),
@@ -12,7 +14,7 @@ import { main as _main } from '../index'
 // Gateway's main returns a union of shapes; we always assert on statusCode/body in HTTP branches.
 const main = _main as (event: any) => Promise<any>
 
-const TOKEN = 'happyhome-admin-2024'
+const TOKEN = 'unit-gateway-token'
 const BEARER = `Bearer ${TOKEN}`
 
 function httpEvent(opts: {
@@ -143,13 +145,13 @@ describe('Response shaping', () => {
     expect(JSON.parse(res.body)).toEqual({ user: { _id: 'x' }, isNew: true })
   })
 
-  test('target function error is mapped to 500 with message + stack', async () => {
+  test('target function error is mapped to 500 without exposing a stack', async () => {
     mockCallFunction.mockRejectedValue(Object.assign(new Error('boom'), { stack: 'stack-trace' }))
     const res = await main(httpEvent({ testOpenid: 'u', body: { _fn: 'user', action: 'login' } }))
     expect(res.statusCode).toBe(500)
     const body = JSON.parse(res.body)
     expect(body.error).toBe('boom')
-    expect(body.stack).toBe('stack-trace')
+    expect(body).not.toHaveProperty('stack')
   })
 
   test('all responses include CORS headers', async () => {

@@ -62,15 +62,28 @@ import ci from 'miniprogram-ci'
 import { resolve, dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import { execSync, spawn } from 'child_process'
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { parseArgs as parseCloudSmokeArgs, runCloudReleaseSmoke } from './cloud-release-smoke.mjs'
 import { deployFunctionsWithConcurrency } from './lib/cloudbase-function-deploy.mjs'
-import { analyzeDevtoolsCloudDeployOutput, analyzeDevtoolsUploadOutput } from './lib/deploy-output.mjs'
+import {
+  analyzeDevtoolsCloudDeployOutput,
+  analyzeDevtoolsUploadInfo,
+  analyzeDevtoolsUploadOutput,
+} from './lib/deploy-output.mjs'
 import { parsePositiveIntOption } from './lib/release-concurrency.mjs'
-import { shouldFallbackAfterDevtoolsFailure } from './lib/release-policy.mjs'
+import {
+  assertFormalReleaseGitState,
+  mustRevalidateRemoteReleaseStage,
+  shouldFallbackAfterDevtoolsFailure,
+} from './lib/release-policy.mjs'
+import {
+  assertReleaseCapabilitySeparation,
+  assertReleaseFunctionSecurityConfig,
+} from './lib/release-security-policy.mjs'
 import {
   createReleaseRunLedger,
+  computeDirectoryDigest,
   findLatestReleaseUiEvidence,
   inspectReleaseStageReuse,
   loadReleaseRun,
@@ -151,6 +164,31 @@ function getGitSha() {
     return execSync('git rev-parse HEAD', { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
   } catch {
     return 'unknown'
+  }
+}
+
+function getGitOutput(command) {
+  return execSync(command, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+}
+
+function getFormalReleaseGitState({ publishOnly, version, desc }) {
+  const changedPaths = new Set()
+  for (const command of [
+    'git diff --name-only --no-ext-diff',
+    'git diff --cached --name-only --no-ext-diff',
+    'git ls-files --others --exclude-standard',
+  ]) {
+    for (const path of getGitOutput(command).split(/\r?\n/).filter(Boolean)) changedPaths.add(path)
+  }
+  const buildInfoPath = resolve(ROOT, 'miniprogram/src/generated/build-info.ts')
+  const buildInfo = existsSync(buildInfoPath) ? readFileSync(buildInfoPath, 'utf8') : ''
+  return {
+    branch: getGitOutput('git branch --show-current'),
+    headSha: getGitOutput('git rev-parse HEAD'),
+    originMainSha: getGitOutput('git rev-parse origin/main'),
+    changedPaths: [...changedPaths],
+    publishOnly,
+    generatedBuildInfoMatches: buildInfo.includes(version) && buildInfo.includes(desc),
   }
 }
 
@@ -292,6 +330,7 @@ function logCloudFunctionDetailSummary(functionName, output) {
   const data = parsed?.data || {}
   const envKeys = (data.Environment?.Variables || []).map((item) => item.Key).filter(Boolean)
   console.log(`[tcb fn detail] ${functionName}: status=${data.Status || 'unknown'} available=${data.AvailableStatus || 'unknown'} runtime=${data.Runtime || 'unknown'} envKeys=${envKeys.length ? envKeys.join(',') : 'none'}`)
+  return data
 }
 
 function sleep(ms) {
@@ -387,6 +426,7 @@ async function deployCloudViaCloudBaseCli(fns) {
     : `printf '\\n' | ${commandLine}`
   const envId = getCloudEnvId()
   const concurrency = getCloudDeployConcurrency()
+  const securityConfigByFunction = {}
 
   const authProbe = await runShellCapture(
     tcb('fn', 'list', '--env-id', envId, '--json'),
@@ -421,10 +461,16 @@ async function deployCloudViaCloudBaseCli(fns) {
           tcb('fn', 'detail', fn, '--env-id', envId, '--json'),
           { displayCommandLine: `tcb fn detail ${fn} --env-id ${envId} --json`, silentOutput: true }
         )
-        if (detail.ok) logCloudFunctionDetailSummary(fn, detail.output)
+        if (detail.ok) {
+          const data = logCloudFunctionDetailSummary(fn, detail.output)
+          const environmentVariables = data.Environment?.Variables || []
+          assertReleaseFunctionSecurityConfig(fn, environmentVariables)
+          securityConfigByFunction[fn] = environmentVariables
+        }
         return detail
       },
     })
+    assertReleaseCapabilitySeparation(securityConfigByFunction)
     return { ok: true, reason: 'ok', concurrency, functionResults }
   } catch (error) {
     return {
@@ -445,7 +491,7 @@ function getMiniprogramUploadEvidencePath(releaseRunId) {
   return resolve(ROOT, '.codex-local', 'release-evidence', releaseRunId, 'miniprogram-upload', 'upload-evidence.json')
 }
 
-function writeMiniprogramUploadEvidence({ releaseRunId, version, desc, uploadResult }) {
+function writeMiniprogramUploadEvidence({ releaseRunId, version, desc, packageDigest, uploadResult }) {
   const evidencePath = getMiniprogramUploadEvidencePath(releaseRunId)
   const uploadInfoPath = uploadResult.uploadInfoPath || ''
   const evidence = {
@@ -453,9 +499,12 @@ function writeMiniprogramUploadEvidence({ releaseRunId, version, desc, uploadRes
     appid: APPID,
     version,
     desc,
+    packageDigest,
     method: uploadResult.method,
     uploadInfoPath,
     uploadInfoSize: uploadInfoPath && existsSync(uploadInfoPath) ? statSync(uploadInfoPath).size : 0,
+    uploadInfoMtimeMs: uploadResult.uploadInfoMtimeMs || 0,
+    uploadStartedAtMs: uploadResult.uploadStartedAtMs || 0,
     uploadedAt: new Date().toISOString(),
   }
   writeJsonFile(evidencePath, evidence)
@@ -621,6 +670,7 @@ async function uploadMiniprogramViaDevtoolsCli(version, desc) {
   if (!cli) return { ok: false, reason: 'DevTools CLI not found at known paths (set WX_DEVTOOLS_CLI env to override)' }
 
   const infoPath = resolve(ROOT, 'mp-upload-info.json')
+  rmSync(infoPath, { force: true })
   const args = [
     'upload',
     '--project', MP_DIST,
@@ -631,6 +681,7 @@ async function uploadMiniprogramViaDevtoolsCli(version, desc) {
 
   const commandLine = [cli, ...args].map(quote).join(' ')
   console.log(`[DevTools CLI] ${commandLine}`)
+  const uploadStartedAtMs = Date.now()
   const result = await runShellCapture(commandLine)
   if (!result.ok) return result
 
@@ -645,7 +696,21 @@ async function uploadMiniprogramViaDevtoolsCli(version, desc) {
       reason: `DevTools CLI upload failed: ${semantic.reason}${loginHint}`,
     }
   }
-  return { ok: true, reason: `ok; info-output=${infoPath}` }
+  if (!existsSync(infoPath)) return { ok: false, reason: 'DevTools CLI upload info file was not created' }
+  const receiptStat = statSync(infoPath)
+  const receipt = analyzeDevtoolsUploadInfo({
+    isFile: receiptStat.isFile(),
+    size: receiptStat.size,
+    mtimeMs: receiptStat.mtimeMs,
+  }, uploadStartedAtMs)
+  if (!receipt.ok) return { ok: false, reason: `DevTools CLI upload receipt failed: ${receipt.reason}` }
+  return {
+    ok: true,
+    reason: `ok; info-output=${infoPath}`,
+    uploadInfoSize: receiptStat.size,
+    uploadInfoMtimeMs: receiptStat.mtimeMs,
+    uploadStartedAtMs,
+  }
 }
 
 async function uploadMiniprogramViaMiniprogramCi(version, desc) {
@@ -669,14 +734,32 @@ function resolveMiniprogramUploadMetadata(defaults = {}) {
   }
 }
 
-function buildAndGateMiniprogramUpload({ version, desc }) {
+async function buildAndGateMiniprogramUpload({ version, desc, releaseRunId }) {
   writeMiniprogramBuildInfo(version, desc)
 
   console.log('\nBuilding miniprogram...')
   execSync('npm run build:mp-weixin', { cwd: resolve(ROOT, 'miniprogram'), stdio: 'inherit' })
 
+  const packageDigest = await computeDirectoryDigest(MP_DIST)
+  const releaseUiEvidenceDir = resolve(ROOT, '.codex-local', 'release-evidence', releaseRunId, 'release-ui')
+
   console.log('\nRunning miniprogram release gate...')
-  execSync('npm run test:mp:release-gate -- --skip-mp-build', { cwd: ROOT, stdio: 'inherit' })
+  execSync('npm run test:mp:release-gate -- --skip-mp-build', {
+    cwd: ROOT,
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      HH_RELEASE_RUN_ID: releaseRunId,
+      HH_RELEASE_PACKAGE_DIGEST: packageDigest,
+      HH_RELEASE_UI_EVIDENCE_DIR: releaseUiEvidenceDir,
+      WECHAT_DEVTOOLS_PROJECT_PATH: MP_DIST,
+    },
+  })
+  return {
+    packageRoot: MP_DIST,
+    packageDigest,
+    releaseUiEvidencePath: resolve(releaseUiEvidenceDir, 'release-ui-evidence.json'),
+  }
 }
 
 async function uploadBuiltMiniprogram({ version, desc, forceCi }) {
@@ -688,7 +771,13 @@ async function uploadBuiltMiniprogram({ version, desc, forceCi }) {
     const result = await uploadMiniprogramViaDevtoolsCli(version, desc)
     if (result.ok) {
       console.log('[OK] Miniprogram uploaded via DevTools CLI (no preview QR generated)')
-      return { method: 'devtools-cli', uploadInfoPath: resolve(ROOT, 'mp-upload-info.json') }
+      return {
+        method: 'devtools-cli',
+        uploadInfoPath: resolve(ROOT, 'mp-upload-info.json'),
+        uploadInfoSize: result.uploadInfoSize,
+        uploadInfoMtimeMs: result.uploadInfoMtimeMs,
+        uploadStartedAtMs: result.uploadStartedAtMs,
+      }
     }
     if (!shouldFallbackAfterDevtoolsFailure({ target: 'miniprogram-upload', reason: result.reason, forceCi })) {
       throw new Error(`DevTools CLI upload failed (${result.reason}). Open WeChat DevTools, log in again if needed, then retry upload. miniprogram-ci fallback is only allowed with --use-ci.`)
@@ -741,7 +830,7 @@ async function deployMiniprogram() {
 
 async function uploadMiniprogram() {
   const upload = resolveMiniprogramUploadMetadata()
-  buildAndGateMiniprogramUpload(upload)
+  await buildAndGateMiniprogramUpload({ ...upload, releaseRunId: makeReleaseRunId() })
   await uploadBuiltMiniprogram(upload)
 }
 
@@ -842,21 +931,30 @@ async function deployAdminWeb() {
   throw new Error(`Unknown ADMIN_WEB_TARGET=${target}. Expected aliyun or cloudbase.`)
 }
 
-async function collectMiniprogramBuildGateEvidence() {
-  const releaseUiEvidencePath = await findLatestReleaseUiEvidence(ROOT)
+async function collectMiniprogramBuildGateEvidence(preparedEvidence = {}) {
+  const releaseUiEvidencePath = preparedEvidence.releaseUiEvidencePath || await findLatestReleaseUiEvidence(ROOT)
   return {
     buildInfoPath: resolve(ROOT, 'miniprogram/src/generated/build-info.ts'),
     distBuildInfoPath: resolve(ROOT, 'miniprogram/dist/build/mp-weixin/generated/build-info.js'),
+    packageRoot: preparedEvidence.packageRoot || MP_DIST,
+    packageDigest: preparedEvidence.packageDigest || await computeDirectoryDigest(MP_DIST),
     ...(releaseUiEvidencePath ? { releaseUiEvidencePath } : {}),
   }
 }
 
 function releaseStageReuseCheck(context) {
-  return (runState, stageName) => inspectReleaseStageReuse(runState, stageName, context)
+  return async (runState, stageName) => {
+    const reuse = await inspectReleaseStageReuse(runState, stageName, context)
+    if (reuse.reusable && mustRevalidateRemoteReleaseStage(stageName)) {
+      return { reusable: false, reason: `${stageName} remote state must be revalidated` }
+    }
+    return reuse
+  }
 }
 
 async function runFormalRelease(options = {}) {
   assertNoFormalReleaseOnlyFilter()
+  execSync('git fetch --quiet origin main', { cwd: ROOT, stdio: 'inherit' })
 
   const prepareOnly = options.prepareOnly === true
   assertFormalReleaseCloudBasePath({ prepareOnly })
@@ -868,6 +966,11 @@ async function runFormalRelease(options = {}) {
   const forceResume = publishOnly
   const resumeRunState = await getResumeRunState(forceResume)
   const miniprogramUpload = resolveMiniprogramUploadMetadata(resumeRunState?.context || {})
+  assertFormalReleaseGitState(getFormalReleaseGitState({
+    publishOnly,
+    version: miniprogramUpload.version,
+    desc: miniprogramUpload.desc,
+  }))
   const releaseContext = {
     root: ROOT,
     gitSha: getGitSha(),
@@ -904,9 +1007,12 @@ async function runFormalRelease(options = {}) {
       reuseCheck,
       command: 'write build-info + npm run build:mp-weixin + npm run test:mp:release-gate -- --skip-mp-build',
     }, async () => {
-      buildAndGateMiniprogramUpload(miniprogramUpload)
+      const preparedEvidence = await buildAndGateMiniprogramUpload({
+        ...miniprogramUpload,
+        releaseRunId: releaseLedger.runId,
+      })
       return {
-        evidence: await collectMiniprogramBuildGateEvidence(),
+        evidence: await collectMiniprogramBuildGateEvidence(preparedEvidence),
         result: { version: miniprogramUpload.version, desc: miniprogramUpload.desc },
       }
     })
@@ -960,11 +1066,20 @@ async function runFormalRelease(options = {}) {
       reuseCheck,
       command: 'WeChat DevTools CLI upload or explicit miniprogram-ci fallback',
     }, async () => {
+      const preparedPackageDigest = String(
+        releaseLedger.state.stages['miniprogram-build-gate']?.evidence?.packageDigest || '',
+      )
+      if (!preparedPackageDigest) throw new Error('prepared miniprogram package digest is missing before upload')
+      const currentPackageDigest = await computeDirectoryDigest(MP_DIST)
+      if (currentPackageDigest !== preparedPackageDigest) {
+        throw new Error(`miniprogram package changed after release UI validation: expected ${preparedPackageDigest}, got ${currentPackageDigest}`)
+      }
       const uploadResult = await uploadBuiltMiniprogram(miniprogramUpload)
       const uploadEvidence = writeMiniprogramUploadEvidence({
         releaseRunId: releaseLedger.runId,
         version: miniprogramUpload.version,
         desc: miniprogramUpload.desc,
+        packageDigest: currentPackageDigest,
         uploadResult,
       })
       return {
@@ -976,6 +1091,7 @@ async function runFormalRelease(options = {}) {
           version: miniprogramUpload.version,
           desc: miniprogramUpload.desc,
           method: uploadResult.method,
+          packageDigest: currentPackageDigest,
           forceCi: miniprogramUpload.forceCi,
         },
       }
@@ -992,6 +1108,16 @@ async function runFormalRelease(options = {}) {
       if (uploadEvidence.version !== miniprogramUpload.version || uploadEvidence.desc !== miniprogramUpload.desc) {
         throw new Error('upload evidence does not match uploaded version/desc')
       }
+      const preparedPackageDigest = String(
+        releaseLedger.state.stages['miniprogram-build-gate']?.evidence?.packageDigest || '',
+      )
+      if (!preparedPackageDigest || uploadEvidence.packageDigest !== preparedPackageDigest) {
+        throw new Error('upload evidence package digest does not match prepared package')
+      }
+      const currentPackageDigest = await computeDirectoryDigest(MP_DIST)
+      if (currentPackageDigest !== preparedPackageDigest) {
+        throw new Error('uploaded miniprogram package changed before verification')
+      }
       const uploadInfoPath = uploadEvidence.uploadInfoPath || ''
       if (uploadEvidence.method === 'devtools-cli') {
         if (!uploadInfoPath) throw new Error('upload evidence uploadInfoPath is missing')
@@ -1003,8 +1129,13 @@ async function runFormalRelease(options = {}) {
         throw new Error('build-info does not match uploaded version/desc')
       }
       return {
-        evidence: { uploadEvidencePath, uploadInfoPath, buildInfoPath },
-        result: { version: miniprogramUpload.version, desc: miniprogramUpload.desc, method: uploadEvidence.method },
+        evidence: { uploadEvidencePath, uploadInfoPath, buildInfoPath, packageDigest: currentPackageDigest },
+        result: {
+          version: miniprogramUpload.version,
+          desc: miniprogramUpload.desc,
+          method: uploadEvidence.method,
+          packageDigest: currentPackageDigest,
+        },
       }
     })
 

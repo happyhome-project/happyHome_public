@@ -38,10 +38,14 @@ jest.mock('../../../lib/post-rag', () => ({
   enqueuePostRagJob: jest.fn(),
 }))
 
-import { main } from '../index'
+import { main as rawMain } from '../index'
 import * as db from '../../../lib/db'
 import * as storage from '../../../lib/storage'
 import * as postSearch from '../../../lib/post-search'
+
+const TEST_INTERNAL_TOKEN = 'admin-video-unit-internal-token'
+process.env.ADMIN_INTERNAL_CALL_TOKEN = TEST_INTERNAL_TOKEN
+const main = (event: any) => rawMain({ ...event, _internalToken: TEST_INTERNAL_TOKEN })
 
 beforeEach(() => jest.clearAllMocks())
 

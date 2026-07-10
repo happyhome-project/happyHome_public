@@ -132,7 +132,7 @@ test('parseArgs supports env, only, log controls, no-fixture, and evidence-dir',
     '--no-fixture',
     '--evidence-dir', 'evidence-x',
     '--run-id', 'run-x',
-  ], { POST_RAG_WORKER_TOKEN: 'unit-worker-token' })
+  ], { POST_RAG_WORKER_TOKEN: 'unit-worker-token', ADMIN_INTERNAL_CALL_TOKEN: 'unit-admin-token' })
 
   assert.equal(args.envId, 'env-x')
   assert.deepEqual(args.only, ['user', 'post'])
@@ -142,6 +142,7 @@ test('parseArgs supports env, only, log controls, no-fixture, and evidence-dir',
   assert.equal(args.concurrency, 4)
   assert.equal(args.noFixture, true)
   assert.equal(args.workerToken, 'unit-worker-token')
+  assert.equal(args.adminInternalToken, 'unit-admin-token')
   assert.equal(args.evidenceDir, 'evidence-x')
   assert.equal(args.runId, 'run-x')
 })
@@ -221,6 +222,7 @@ test('cloud release smoke passes with generated invoke, log, fixture, and cleanu
       logWaitMs: 0,
       noFixture: false,
       workerToken: 'unit-worker-token',
+      adminInternalToken: 'unit-admin-token',
       evidenceDir,
       runId,
     }, createMockRunner({ runId }))
@@ -410,6 +412,7 @@ test('admin fixture smoke fails when cleanup fails', async () => {
       logLimit: 3,
       logWaitMs: 0,
       noFixture: false,
+      adminInternalToken: 'unit-admin-token',
       evidenceDir,
       runId: 'unit-run',
     }, createMockRunner({ cleanupFails: true, runId: 'unit-run' }))
@@ -431,6 +434,7 @@ test('admin fixture cleanup passes when hard delete succeeds after disable failu
       logLimit: 3,
       logWaitMs: 0,
       noFixture: false,
+      adminInternalToken: 'unit-admin-token',
       evidenceDir,
       runId: 'unit-run',
     }, createMockRunner({ disableFails: true, runId: 'unit-run' }))

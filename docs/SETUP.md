@@ -27,7 +27,7 @@ happyHome/
 │   │   ├── views/              # Login, Layout, SuperAdmin/, CommunityAdmin/
 │   │   └── router/index.ts     # 路由 + 鉴权守卫
 │   └── .env.local              # 环境变量（VITE_CLOUD_API_URL / VITE_ADMIN_*）
-├── cloudfunctions/       # 微信开发者工具用的云函数目录（deploy 时自动同步）
+├── cloudfunctions/       # 历史快照，不作为部署源
 ├── scripts/
 │   ├── deploy.mjs        # 一键部署（miniprogram-ci）
 │   ├── test-mp.mjs       # 旧版小程序自动化测试（miniprogram-automator，需要 DevTools 支持 --auto-port）
@@ -37,6 +37,8 @@ happyHome/
 ├── project.config.json   # 微信开发者工具项目配置
 └── package.json          # 根 workspace 配置
 ```
+
+正式及手工云函数部署都必须使用 `cloud/dist/`。先运行 `npm.cmd --workspace cloud run build`，不要从历史 `cloudfunctions/` 目录部署。
 
 ---
 
