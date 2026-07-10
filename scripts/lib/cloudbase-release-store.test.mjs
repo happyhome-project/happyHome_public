@@ -83,6 +83,15 @@ test('CloudBaseReleaseStore can read release state without creating state docume
   assert.equal(db.documents.size, 0)
 })
 
+test('CloudBaseReleaseStore treats an absent release_state collection as initial bootstrap state', async () => {
+  const db = createFakeDatabase()
+  db.collection = () => ({ doc: () => ({
+    async get() { throw new Error('[ResourceNotFound] Db or Table not exist: release_state') },
+  }) })
+  const store = new CloudBaseReleaseStore({ db })
+  assert.equal(await store.readProductionState(), null)
+})
+
 test('ReleaseGovernance uses the CloudBase store as the durable fencing and production-version source', async () => {
   const db = createFakeDatabase()
   const governance = new ReleaseGovernance({ store: new CloudBaseReleaseStore({ db }), now: () => 1000 })
