@@ -95,6 +95,25 @@ describe('home snapshot cache', () => {
     })).toBeNull()
   })
 
+  test('normalizes optional nested collections before Home consumes a snapshot', async () => {
+    const { normalizeHomeSnapshotShape } = await import('../home-snapshot-cache')
+    const snapshot = normalizeHomeSnapshotShape({
+      schemaVersion: 1,
+      generatedAt: '2026-06-12T00:00:00.000Z',
+      viewerOpenId: 'user-1',
+      currentCommunityId: 'community-1',
+      communities: [{ _id: 'community-1' }, null],
+      sections: [{ _id: 'section-1', widgets: 'invalid' }, null],
+      postsBySection: { 'section-1': [{ _id: 'post-1' }], broken: 'invalid' },
+      currentCommunity: { _id: 'community-1', homeBanners: 'invalid' },
+    })
+
+    expect(snapshot?.communities).toEqual([{ _id: 'community-1' }])
+    expect(snapshot?.sections).toEqual([{ _id: 'section-1', widgets: [] }])
+    expect(snapshot?.postsBySection).toEqual({ 'section-1': [{ _id: 'post-1' }] })
+    expect(snapshot?.currentCommunity).toEqual({ _id: 'community-1', homeBanners: [] })
+  })
+
   test('listens for late wx pre-fetch data and supports unsubscribe', async () => {
     let callback: ((res: any) => void) | null = null
     vi.stubGlobal('wx', {

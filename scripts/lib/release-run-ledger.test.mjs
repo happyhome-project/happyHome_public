@@ -290,16 +290,35 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
     await mkdir(join(pagePath, '..'), { recursive: true })
     await writeFile(pagePath, 'module.exports = { version: 1 }\n', 'utf8')
     const packageDigest = await directoryDigest(join(root, 'miniprogram', 'dist', 'build', 'mp-weixin'))
+    const coldStartEvidence = {
+      passed: true,
+      path: 'pages/index/index',
+      layout: {
+        phoneInner: { width: 375, height: 700 },
+        homeShell: { width: 375, height: 600 },
+      },
+      appTabBarCount: 1,
+    }
     await writeJson(uiEvidencePath, {
       releaseRunId: 'unit-run',
       packageDigest,
       projectPath: join(root, 'miniprogram', 'dist', 'build', 'mp-weixin'),
       markers: [
+        'HH_RELEASE_HOME_COLD_START_NONEMPTY',
         'HH_RELEASE_HOME_IMAGES_RENDERED',
         'HH_RELEASE_HOME_DETAIL_NONEMPTY',
         'HH_RELEASE_LOGIN_VERSION',
         'HH_RELEASE_PROFILE_LOGIN_CLEAN',
       ],
+      homeColdStart: {
+        passed: true,
+        path: 'pages/index/index',
+        layout: {
+          phoneInner: { width: 375, height: 700 },
+          homeShell: { width: 375, height: 600 },
+        },
+        appTabBarCount: 1,
+      },
       profileLoginClean: { expectedVersion: '1.0.1' },
     })
 
@@ -332,6 +351,52 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
     })
     assert.equal(reusable.reusable, true)
 
+    await writeJson(uiEvidencePath, {
+      releaseRunId: 'unit-run',
+      packageDigest,
+      projectPath: join(root, 'miniprogram', 'dist', 'build', 'mp-weixin'),
+      markers: [
+        'HH_RELEASE_HOME_COLD_START_NONEMPTY',
+        'HH_RELEASE_HOME_IMAGES_RENDERED',
+        'HH_RELEASE_HOME_DETAIL_NONEMPTY',
+        'HH_RELEASE_LOGIN_VERSION',
+        'HH_RELEASE_PROFILE_LOGIN_CLEAN',
+      ],
+      profileLoginClean: { expectedVersion: '1.0.1' },
+    })
+    const missingColdStartResult = await inspectReleaseStageReuse(runState, 'miniprogram-build-gate', {
+      root,
+      gitSha: 'abc123',
+      version: '1.0.1',
+      desc: 'trial-unit',
+      runId: 'unit-run',
+    })
+    assert.equal(missingColdStartResult.reusable, false)
+    assert.match(missingColdStartResult.reason, /cold-start/i)
+
+    await writeJson(uiEvidencePath, {
+      releaseRunId: 'unit-run',
+      packageDigest,
+      projectPath: join(root, 'miniprogram', 'dist', 'build', 'mp-weixin'),
+      markers: [
+        'HH_RELEASE_HOME_COLD_START_NONEMPTY',
+        'HH_RELEASE_HOME_IMAGES_RENDERED',
+        'HH_RELEASE_HOME_DETAIL_NONEMPTY',
+        'HH_RELEASE_LOGIN_VERSION',
+        'HH_RELEASE_PROFILE_LOGIN_CLEAN',
+      ],
+      homeColdStart: {
+        passed: true,
+        path: 'pages/index/index',
+        layout: {
+          phoneInner: { width: 375, height: 700 },
+          homeShell: { width: 375, height: 600 },
+        },
+        appTabBarCount: 1,
+      },
+      profileLoginClean: { expectedVersion: '1.0.1' },
+    })
+
     await writeFile(pagePath, 'module.exports = { version: 2 }\n', 'utf8')
     const changedPackage = await inspectReleaseStageReuse(runState, 'miniprogram-build-gate', {
       root,
@@ -348,11 +413,13 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
       packageDigest,
       projectPath: join(root, 'miniprogram', 'dist', 'build', 'mp-weixin'),
       markers: [
+        'HH_RELEASE_HOME_COLD_START_NONEMPTY',
         'HH_RELEASE_HOME_IMAGES_RENDERED',
         'HH_RELEASE_HOME_DETAIL_NONEMPTY',
         'HH_RELEASE_LOGIN_VERSION',
         'HH_RELEASE_PROFILE_LOGIN_CLEAN',
       ],
+      homeColdStart: coldStartEvidence,
     })
     const missingUiVersion = await inspectReleaseStageReuse(runState, 'miniprogram-build-gate', {
       root,
@@ -369,10 +436,12 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
       packageDigest,
       projectPath: join(root, 'miniprogram', 'dist', 'build', 'mp-weixin'),
       markers: [
+        'HH_RELEASE_HOME_COLD_START_NONEMPTY',
         'HH_RELEASE_HOME_IMAGES_RENDERED',
         'HH_RELEASE_HOME_DETAIL_NONEMPTY',
         'HH_RELEASE_LOGIN_VERSION',
       ],
+      homeColdStart: coldStartEvidence,
       profileLoginClean: { expectedVersion: '1.0.1' },
     })
     const missingCleanProfileMarker = await inspectReleaseStageReuse(runState, 'miniprogram-build-gate', {
@@ -390,11 +459,13 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
       packageDigest,
       projectPath: join(root, 'miniprogram', 'dist', 'build', 'mp-weixin'),
       markers: [
+        'HH_RELEASE_HOME_COLD_START_NONEMPTY',
         'HH_RELEASE_HOME_IMAGES_RENDERED',
         'HH_RELEASE_HOME_DETAIL_NONEMPTY',
         'HH_RELEASE_LOGIN_VERSION',
         'HH_RELEASE_PROFILE_LOGIN_CLEAN',
       ],
+      homeColdStart: coldStartEvidence,
       profileLoginClean: { expectedVersion: '1.0.2' },
     })
     const wrongUiVersion = await inspectReleaseStageReuse(runState, 'miniprogram-build-gate', {
@@ -409,11 +480,13 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
 
     await writeJson(uiEvidencePath, {
       markers: [
+        'HH_RELEASE_HOME_COLD_START_NONEMPTY',
         'HH_RELEASE_HOME_IMAGES_RENDERED',
         'HH_RELEASE_HOME_DETAIL_NONEMPTY',
         'HH_RELEASE_LOGIN_VERSION',
         'HH_RELEASE_PROFILE_LOGIN_CLEAN',
       ],
+      homeColdStart: coldStartEvidence,
       profileLoginClean: { expectedVersion: '1.0.1' },
     })
     await writeFile(distBuildInfoPath, buildInfoText.replace('trial-unit', 'trial-other'), 'utf8')

@@ -411,17 +411,18 @@
 </template>
 
 <script setup lang="ts">
+import '../../utils/home-entry-probe'
 import { computed, ref, nextTick, onMounted, onUnmounted, watch } from 'vue'
-import { onLoad, onPageScroll, onPullDownRefresh, onShareAppMessage, onShow } from '@dcloudio/uni-app'
+import { onLoad, onPageScroll, onPullDownRefresh, onReady, onShareAppMessage, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi, postApi } from '../../api/cloud'
 import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getFamilyLetterListSummary, getGuideNoteCard, getHomeLiveMeta, getPostHomeTitle, getPostHomeTitleIssue } from '../../utils/widget'
-import { clientLog } from '../../utils/client-log'
+import { clientLog, markClientDiagnosticStage, startHomeDiagnosticWatchdog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
-import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
+import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, normalizeHomeSnapshotShape, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
 import { formatHomeQuoteCite } from '../../utils/home-quote'
 import { resolveCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { resolveSectionIconGlyph } from '../../utils/section-icon'
@@ -446,8 +447,15 @@ import { markGuestIntroSeen, shouldShowGuestIntro } from '../../utils/guest-intr
 import type { HomeBanner, HomeSnapshot } from '../../../../cloud/shared/types'
 import { normalizeGuestIntroConfig, type GuestIntroConfig } from '../../../../cloud/shared/guest-intro-config'
 
+markClientDiagnosticStage('home.module.dependencies.ready')
+markClientDiagnosticStage('home.setup.enter')
+
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
+markClientDiagnosticStage('home.stores.ready', {
+  loggedIn: userStore.isLoggedIn,
+  currentCommunityId: userStore.isLoggedIn ? communityStore.currentCommunityId || '' : '',
+})
 const showGuestIntro = ref(false)
 const guestIntroConfig = ref<GuestIntroConfig | null>(null)
 const postsBySection = ref<Record<string, any[]>>({})
@@ -504,6 +512,7 @@ onPageScroll((event) => {
 })
 
 onLoad((options?: Record<string, any>) => {
+  markClientDiagnosticStage('home.onLoad')
   if (!isCommunityShareQuery(options)) return
   incomingShareCommunityId.value = normalizeCommunityShareId(options?.communityId)
   clientLog('info', 'home.share.load', {
@@ -1504,8 +1513,12 @@ function handleGuestIntroSecondary() {
   openOnboardingPreservingStack({ mode: 'discover' })
 }
 
-function applyHomeSnapshot(snapshot: HomeSnapshot | null, source: 'prefetch' | 'cache' | 'cloud') {
-  if (!snapshot) return false
+function applyHomeSnapshot(rawSnapshot: HomeSnapshot | null, source: 'prefetch' | 'cache' | 'cloud') {
+  const snapshot = normalizeHomeSnapshotShape(rawSnapshot)
+  if (!snapshot) {
+    clientLog('warn', 'home.snapshot.invalidShape', { source })
+    return false
+  }
   const expectedViewer = userStore.isLoggedIn ? userStore.openId : ''
   if (snapshot.viewerOpenId !== expectedViewer) return false
   const activeCommunities = (snapshot.communities || []).filter((community) => community?.status === 'active')
@@ -1675,7 +1688,32 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
   }
 }
 
-onMounted(async () => {
+function probeHomeRender(reason: string) {
+  void nextTick(() => {
+    try {
+      uni.createSelectorQuery()
+        .select('.home-shell').boundingClientRect()
+        .select('.app-tabbar').boundingClientRect()
+        .exec((result: any[]) => {
+          const shell = result?.[0]
+          const tabbar = result?.[1]
+          const shellVisible = Number(shell?.width || 0) > 0 && Number(shell?.height || 0) > 0
+          const tabbarVisible = Number(tabbar?.width || 0) > 0 && Number(tabbar?.height || 0) > 0
+          markClientDiagnosticStage(shellVisible && tabbarVisible ? 'home.render.commit' : 'home.render.incomplete', {
+            reason,
+            shellVisible,
+            tabbarVisible,
+            shellHeight: Number(shell?.height || 0),
+            tabbarHeight: Number(tabbar?.height || 0),
+          })
+        })
+    } catch (error) {
+      clientLog('warn', 'home.render.probe.fail', { reason, error })
+    }
+  })
+}
+
+async function initializeHome() {
   mountedAt = Date.now()
   hideNativeTabBar()
   ;(uni as any).$on?.(HOME_TAB_RETAP_EVENT, scrollHomeToTop)
@@ -1688,11 +1726,30 @@ onMounted(async () => {
     }),
     applyLateBackgroundFetchSnapshot,
   )
-  const redirectedByShare = await handleInitialShareLanding()
-  if (redirectedByShare) return
-  await hydrateHomeFromFastPath()
-  await refreshHomeData()
-  scheduleHomeFixedControlsMeasure()
+  try {
+    const redirectedByShare = await handleInitialShareLanding()
+    if (redirectedByShare) {
+      probeHomeRender('share.redirect')
+      return
+    }
+    await hydrateHomeFromFastPath()
+    await refreshHomeData()
+    scheduleHomeFixedControlsMeasure()
+    probeHomeRender('mounted')
+  } catch (error) {
+    clientLog('error', 'home.mounted.fail', { error })
+    probeHomeRender('mounted.fail')
+  }
+}
+
+onMounted(() => {
+  markClientDiagnosticStage('home.onMounted')
+  void initializeHome()
+})
+
+onReady(() => {
+  markClientDiagnosticStage('home.onReady')
+  probeHomeRender('ready')
 })
 
 onUnmounted(() => {
@@ -1708,6 +1765,8 @@ onUnmounted(() => {
 // 这里 onShow 统一刷新帖子数据，确保新发/新删的内容能实时反映。
 // 首次 onShow 发生在 onMounted 之后，会二次拉取（可接受：代价低、换取数据新鲜度）。
 onShow(() => {
+  markClientDiagnosticStage('home.onShow')
+  startHomeDiagnosticWatchdog()
   hideNativeTabBar()
   scheduleHomeFixedControlsMeasure()
   const marker = getPendingHomeRefreshMarker()
@@ -1719,7 +1778,10 @@ onShow(() => {
     clientLog('debug', 'home.show.skip.afterMounted', {})
     return
   }
-  void refreshHomeData({ force: !!marker })
+  void refreshHomeData({ force: !!marker }).catch((error) => {
+    clientLog('error', 'home.show.refresh.fail', { error })
+  })
+  probeHomeRender('show')
 })
 
 watch(

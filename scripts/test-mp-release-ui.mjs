@@ -3,6 +3,7 @@
  *
  * This script opens the built mp-weixin package through the DevTools automator
  * websocket and proves the release-critical paths:
+ *   - HH_RELEASE_HOME_COLD_START_NONEMPTY
  *   - HH_RELEASE_HOME_IMAGES_RENDERED
  *   - HH_RELEASE_HOME_DETAIL_NONEMPTY
  *   - HH_RELEASE_LOGIN_VERSION
@@ -22,6 +23,7 @@ import MiniProgram from 'miniprogram-automator/out/MiniProgram.js'
 
 import {
   assertReleaseUiEvidence,
+  assertColdStartDevToolsEnabled,
   buildDevToolsAutoArgs,
   buildDevToolsCacheArgs,
   buildDevToolsCloseArgs,
@@ -545,6 +547,44 @@ async function pageText(page) {
   const root = await page.$('page').catch(() => null)
   if (!root) return ''
   return String(await root.text().catch(() => '') || '')
+}
+
+async function verifyHomeColdStart(mp) {
+  console.log('[release-ui] verify cold-start home shell')
+  await sleep(6000)
+  const page = await withTimeout(mp.currentPage(), 10000, 'get cold-start release home page')
+  const text = await withTimeout(pageText(page), 10000, 'read cold-start release home text')
+  const appTabBarCount = (await withTimeout(page.$$('.app-tabbar'), 10000, 'find cold-start custom app tab bar').catch(() => [])).length
+  const layout = await withTimeout(mp.evaluate(() => new Promise((resolveLayout) => {
+    try {
+      wx.createSelectorQuery()
+        .select('.phone-inner').boundingClientRect()
+        .select('.home-shell').boundingClientRect()
+        .exec((rects) => {
+          const items = Array.isArray(rects) ? rects : []
+          resolveLayout({
+            phoneInner: items[0] || null,
+            homeShell: items[1] || null,
+          })
+        })
+    } catch (error) {
+      resolveLayout({ error: String(error?.message || error) })
+    }
+  })), 15000, 'capture cold-start release home layout')
+  const visible = (rect) => Number(rect?.width || 0) > 1 && Number(rect?.height || 0) > 1
+  const passed = (page.path || '').includes('pages/index/index') &&
+    text.trim().length >= 20 &&
+    visible(layout?.phoneInner) &&
+    visible(layout?.homeShell) &&
+    appTabBarCount > 0
+  return {
+    passed,
+    path: page.path || '',
+    textLength: text.length,
+    textSample: text.slice(0, 300),
+    appTabBarCount,
+    layout,
+  }
 }
 
 async function captureHomeImageProbe(mp) {
@@ -1179,6 +1219,8 @@ async function main() {
   const idePort = detectIdePort()
   const autoPort = detectAutoPort()
 
+  assertColdStartDevToolsEnabled()
+
   if (!cliPath) throw new Error('WeChat DevTools CLI was not found. Set WECHAT_DEVTOOLS_CLI_PATH.')
   if (!projectPath) throw new Error('mp-weixin build output was not found. Run the mp-weixin build first.')
   const packageDigest = await computeDirectoryDigest(projectPath)
@@ -1216,6 +1258,29 @@ async function main() {
     mpState.mp = storageCapture.mp
     mp = mpState.mp
     originalStorage = storageCapture.storage
+
+    const coldStartHome = await runAutomatorTaskWithRetry({
+      state: mpState,
+      autoPort,
+      label: 'verify cold-start release home UI',
+      attempts: envPositiveInt('HH_RELEASE_UI_HOME_ATTEMPTS', 3),
+      timeoutMs: envPositiveInt('HH_RELEASE_UI_HOME_TIMEOUT_MS', 90000),
+      task: async (currentMp) => {
+        const result = await verifyHomeColdStart(currentMp)
+        if (!result.passed) throw makeEvidenceRetryError('cold-start release home evidence', result)
+        return result
+      },
+      recover: async ({ state, attempt }) => {
+        await disconnectMiniProgramQuietly(state.mp, `disconnect failed cold-start attempt ${attempt}`)
+        await startAutomator({ cliPath, projectPath, idePort, autoPort })
+        state.mp = await connectMiniProgram(autoPort)
+      },
+    })
+    mp = mpState.mp
+    evidence.homeColdStartAttempt = coldStartHome.attempt
+    evidence.homeColdStart = coldStartHome.result
+    evidence.markers.push('HH_RELEASE_HOME_COLD_START_NONEMPTY')
+    console.log('HH_RELEASE_HOME_COLD_START_NONEMPTY')
 
     const homeDetailRun = await runAutomatorTaskWithRetry({
       state: mpState,
@@ -1285,6 +1350,7 @@ async function main() {
     }
 
     assertReleaseUiEvidence({
+      homeColdStartNonEmpty: coldStartHome.result.passed,
       homeImagesRendered: homeDetail.homeImagesRendered,
       homeDetailNonEmpty: homeDetail.passed,
       loginVersionVisible: profileLoginClean.versionPassed,

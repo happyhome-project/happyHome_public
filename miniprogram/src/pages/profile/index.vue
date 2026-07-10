@@ -175,6 +175,20 @@
       <text>{{ releaseVersion }}</text>
     </view>
 
+    <view v-if="showHomeDiagnostics && !isEditingProfile && !showManualLoginForm" class="profile-diagnostics">
+      <view class="profile-diagnostics__header">
+        <text>Home 诊断</text>
+        <text class="profile-diagnostics__state">{{ diagnosticsState.enabled ? '已开启' : '未开启' }}</text>
+      </view>
+      <text class="profile-diagnostics__hint">仅记录启动与渲染阶段，30 分钟后自动关闭。</text>
+      <view class="profile-diagnostics__actions">
+        <switch :checked="diagnosticsState.enabled" color="#36b37e" @change="toggleHomeDiagnostics" />
+        <button size="mini" @tap="flushHomeDiagnostics">上传诊断</button>
+        <button size="mini" @tap="clearHomeDiagnostics">清空</button>
+      </view>
+      <text v-if="diagnosticsStatus" class="profile-diagnostics__hint">{{ diagnosticsStatus }}</text>
+    </view>
+
     <view v-if="!isEditingProfile && !showManualLoginForm" class="profile-shortcuts">
       <view class="profile-shortcut create" @tap="goOnboarding">
         <image
@@ -404,7 +418,13 @@ import { communityApi, memberApi, notificationApi, type ApprovalNotificationEven
 import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
-import { clientLog } from '../../utils/client-log'
+import { clientLog, flushClientDiagnostics } from '../../utils/client-log'
+import {
+  clearClientDiagnosticEvents,
+  disableClientDiagnostics,
+  enableClientDiagnostics,
+  getClientDiagnosticsState,
+} from '../../utils/client-diagnostics'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { getReleaseVersion } from '../../utils/release-version'
 import {
@@ -433,6 +453,16 @@ const notificationSubscriptions = ref<Array<{ eventType: ApprovalNotificationEve
 const notificationNeedsAuthorization = ref(false)
 const profileError = ref('')
 const releaseVersion = getReleaseVersion()
+const diagnosticsState = ref(getClientDiagnosticsState())
+const diagnosticsStatus = ref('')
+const showHomeDiagnostics = computed(() => {
+  try {
+    const envVersion = String((wx as any)?.getAccountInfoSync?.()?.miniProgram?.envVersion || '')
+    return envVersion === 'develop' || envVersion === 'trial'
+  } catch (_error) {
+    return false
+  }
+})
 const profileStatusBarHeight = ref(44)
 const profileNavRowHeight = ref(54)
 const profileCustomNavStyle = computed(() => (
@@ -551,6 +581,34 @@ function getProfileLogDetails(extra: Record<string, any> = {}) {
 
 function logProfile(level: 'debug' | 'info' | 'warn' | 'error', event: string, details: Record<string, any> = {}) {
   clientLog(level, event, getProfileLogDetails(details))
+}
+
+function refreshDiagnosticsState() {
+  diagnosticsState.value = getClientDiagnosticsState()
+}
+
+function toggleHomeDiagnostics(event: any) {
+  if (event?.detail?.value) {
+    const state = enableClientDiagnostics({ scope: 'home' })
+    diagnosticsState.value = state
+    diagnosticsStatus.value = '已开始记录 Home 启动诊断'
+    clientLog('info', 'profile.diagnostics.enabled', { traceId: state.traceId })
+    return
+  }
+  disableClientDiagnostics()
+  refreshDiagnosticsState()
+  diagnosticsStatus.value = '诊断已关闭'
+}
+
+async function flushHomeDiagnostics() {
+  const result = await flushClientDiagnostics()
+  refreshDiagnosticsState()
+  diagnosticsStatus.value = `已上传 ${result.uploaded}/${result.attempted} 条诊断`
+}
+
+function clearHomeDiagnostics() {
+  clearClientDiagnosticEvents()
+  diagnosticsStatus.value = '本机诊断已清空'
 }
 
 function getLoginStateRefreshKey() {
@@ -1072,6 +1130,7 @@ watch(
 
 onMounted(() => {
   hideNativeTabBar()
+  refreshDiagnosticsState()
   updateProfileNavMetrics()
   if (!userStore.isLoggedIn && isH5Runtime() && !supportsChooseAvatar.value) {
     showManualLoginForm.value = true
@@ -1128,6 +1187,19 @@ onShareAppMessage(() => {
   font-size: var(--hh-text-caption-size);
   line-height: var(--hh-text-caption-line-height);
 }
+.profile-diagnostics {
+  margin: -4rpx 0 $hh-space-md;
+  padding: $hh-space-md;
+  border: 1rpx solid var(--hh-color-line);
+  border-radius: var(--hh-radius-card);
+  background: var(--hh-color-card);
+  box-shadow: var(--hh-shadow-soft);
+}
+.profile-diagnostics__header { display: flex; align-items: center; justify-content: space-between; color: var(--hh-color-text-primary); font-size: var(--hh-text-body-size); font-weight: $hh-font-weight-bold; }
+.profile-diagnostics__state { color: var(--hh-color-text-secondary); font-size: var(--hh-text-caption-size); font-weight: $hh-font-weight-regular; }
+.profile-diagnostics__hint { display: block; margin-top: 8rpx; color: var(--hh-color-text-tertiary); font-size: var(--hh-text-caption-size); line-height: var(--hh-text-caption-line-height); }
+.profile-diagnostics__actions { display: flex; align-items: center; gap: $hh-space-sm; margin-top: $hh-space-sm; }
+.profile-diagnostics__actions button { margin: 0; font-size: var(--hh-text-caption-size); }
 .user-card { background: var(--hh-color-card); border: 1rpx solid var(--hh-color-line); border-radius: var(--hh-radius-card); padding: $hh-space-lg; display: flex; align-items: center; margin-bottom: $hh-space-md; box-shadow: var(--hh-shadow-soft); }
 .avatar { width: 100rpx; height: 100rpx; border-radius: $hh-radius-full; margin-right: $hh-space-md; }
 .name { font-size: var(--hh-text-heading-sm-size); font-weight: $hh-font-weight-bold; color: var(--hh-color-text-primary); display: block; }

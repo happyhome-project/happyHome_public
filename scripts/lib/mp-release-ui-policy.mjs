@@ -1,5 +1,10 @@
 export const REQUIRED_RELEASE_UI_MARKERS = [
   {
+    id: 'home-cold-start-nonempty',
+    marker: 'HH_RELEASE_HOME_COLD_START_NONEMPTY',
+    description: 'cold-started home page registers and renders its custom shell',
+  },
+  {
     id: 'home-images-rendered',
     marker: 'HH_RELEASE_HOME_IMAGES_RENDERED',
     description: 'home page image evidence is satisfied for current content',
@@ -31,6 +36,12 @@ export function buildDevToolsAutoArgs({ projectPath, idePort, autoPort }) {
   ]
 }
 
+export function assertColdStartDevToolsEnabled(env = process.env) {
+  if (String(env.HH_RELEASE_UI_COLD_START_DEVTOOLS || '') === '0') {
+    throw new Error('Release UI cold-start evidence must not be disabled.')
+  }
+}
+
 export function buildDevToolsQuitArgs() {
   return ['quit']
 }
@@ -58,10 +69,11 @@ export function buildDevToolsCacheArgs({ clean, projectPath, idePort }) {
 
 export function assertReleaseUiEvidence(evidence = {}) {
   const missing = []
-  if (!evidence.homeImagesRendered) missing.push(REQUIRED_RELEASE_UI_MARKERS[0])
-  if (!evidence.homeDetailNonEmpty) missing.push(REQUIRED_RELEASE_UI_MARKERS[1])
-  if (!evidence.loginVersionVisible) missing.push(REQUIRED_RELEASE_UI_MARKERS[2])
-  if (!evidence.profileLoginClean) missing.push(REQUIRED_RELEASE_UI_MARKERS[3])
+  if (!evidence.homeColdStartNonEmpty) missing.push(REQUIRED_RELEASE_UI_MARKERS[0])
+  if (!evidence.homeImagesRendered) missing.push(REQUIRED_RELEASE_UI_MARKERS[1])
+  if (!evidence.homeDetailNonEmpty) missing.push(REQUIRED_RELEASE_UI_MARKERS[2])
+  if (!evidence.loginVersionVisible) missing.push(REQUIRED_RELEASE_UI_MARKERS[3])
+  if (!evidence.profileLoginClean) missing.push(REQUIRED_RELEASE_UI_MARKERS[4])
   if (missing.length) {
     const details = missing.map(({ marker, description }) => `${marker} (${description})`).join(', ')
     throw new Error(`Release UI evidence markers missing: ${details}`)

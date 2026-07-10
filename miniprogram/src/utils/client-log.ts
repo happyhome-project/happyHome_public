@@ -1,4 +1,13 @@
 import { BUILD_INFO } from '../generated/build-info'
+import {
+  flushClientDiagnosticEvents,
+  getClientDiagnosticsState,
+  isClientDiagnosticsEnabled,
+  markClientDiagnosticEventUploaded,
+  normalizeClientDiagnosticValue,
+  readClientDiagnosticEvents,
+  recordClientDiagnosticEvent,
+} from './client-diagnostics'
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -6,70 +15,19 @@ type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 // @ts-ignore wx is injected by the miniprogram runtime.
 const wxRef: any = typeof wx !== 'undefined' ? wx : undefined
 
-const MAX_STRING_LENGTH = 500
-const MAX_ARRAY_LENGTH = 12
-const MAX_OBJECT_KEYS = 24
 const SESSION_ID = makeSessionId()
 
 let hooksInstalled = false
+let homeWatchdogTraceId = ''
 
 function makeSessionId() {
   const rand = Math.random().toString(36).slice(2, 8)
   return 's-' + Date.now().toString(36) + '-' + rand
 }
 
-function trimString(value: string) {
-  if (value.length <= MAX_STRING_LENGTH) return value
-  return value.slice(0, MAX_STRING_LENGTH) + '...'
-}
-
 function normalizeValue(value: any, depth: number): any {
-  if (value === null || value === undefined) return value
-  const valueType = typeof value
-  if (valueType === 'string') return trimString(value)
-  if (valueType === 'number' || valueType === 'boolean') return value
-  if (valueType === 'function') return '[function]'
-  if (value instanceof Error) {
-    const normalized: Record<string, any> = {
-      name: value.name,
-      message: trimString(value.message || ''),
-      stack: trimString(value.stack || ''),
-    }
-    for (const key of ['errCode', 'errMsg', 'cloudFunction', 'action', 'requestId', 'trace']) {
-      if ((value as any)[key] !== undefined) normalized[key] = normalizeValue((value as any)[key], depth + 1)
-    }
-    return normalized
-  }
-  if (depth >= 3) return '[max-depth]'
-  if (Array.isArray(value)) {
-    const output: any[] = []
-    const limit = Math.min(value.length, MAX_ARRAY_LENGTH)
-    for (let i = 0; i < limit; i += 1) {
-      output.push(normalizeValue(value[i], depth + 1))
-    }
-    if (value.length > limit) output.push('[+' + (value.length - limit) + ' more]')
-    return output
-  }
-  if (valueType === 'object') {
-    const output: Record<string, any> = {}
-    const keys = Object.keys(value)
-    const limit = Math.min(keys.length, MAX_OBJECT_KEYS)
-    for (let i = 0; i < limit; i += 1) {
-      const key = keys[i]
-      if (/token|secret|password|authorization|cookie/i.test(key)) {
-        output[key] = '[redacted]'
-      } else {
-        try {
-          output[key] = normalizeValue(value[key], depth + 1)
-        } catch (error) {
-          output[key] = '[unreadable]'
-        }
-      }
-    }
-    if (keys.length > limit) output.__moreKeys = keys.length - limit
-    return output
-  }
-  return String(value)
+  void depth
+  return normalizeClientDiagnosticValue(value, 0)
 }
 
 function currentRoute() {
@@ -100,43 +58,154 @@ function isVerboseCloudLoggingEnabled() {
   }
 }
 
-function shouldUploadToCloud(level: LogLevel, event: string) {
+function shouldUploadToCloud(level: LogLevel, event: string, diagnosticCapture: boolean) {
   if (level === 'warn' || level === 'error') return true
   if (event === 'app.launch.start') return true
+  if (diagnosticCapture) return true
   return isVerboseCloudLoggingEnabled()
 }
 
+function emitNativeLog(level: LogLevel, event: string, details: Record<string, any>, diagnosticCapture: boolean) {
+  if (!diagnosticCapture) return
+  try {
+    const manager = wxRef?.getLogManager?.({ level: 0 })
+    const method = level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log'
+    manager?.[method]?.(event, details)
+  } catch (_error) {
+    // Native diagnostics must never affect product behavior.
+  }
+}
+
+function uploadPayload(payload: Record<string, any>, onSuccess?: () => void) {
+  try {
+    if (!wxRef?.cloud?.callFunction) return false
+    wxRef.cloud.callFunction({
+      name: 'post',
+      data: payload,
+      success: () => onSuccess?.(),
+      fail: (error: any) => emitConsole('warn', 'clientLog.send.fail', {
+        event: payload.event,
+        error: normalizeValue(error, 0),
+      }),
+    })
+    return true
+  } catch (error) {
+    emitConsole('warn', 'clientLog.send.throw', {
+      event: payload.event,
+      error: normalizeValue(error, 0),
+    })
+    return false
+  }
+}
+
 export function clientLog(level: LogLevel, event: string, details: Record<string, any> = {}) {
+  const route = currentRoute()
+  const diagnosticCapture = isClientDiagnosticsEnabled('home') && (
+    route === 'pages/index/index' ||
+    event.startsWith('home.') ||
+    event.startsWith('runtime.')
+  )
   const payload = {
     action: 'clientLog',
     level,
     event,
     sessionId: SESSION_ID,
-    route: currentRoute(),
+    route,
     clientTime: new Date().toISOString(),
     build: BUILD_INFO,
     details: normalizeValue(details, 0),
   }
 
   emitConsole(level, event, payload)
+  emitNativeLog(level, event, payload.details, diagnosticCapture)
+  const diagnosticEvent = diagnosticCapture ? recordClientDiagnosticEvent({ level, event, details: payload.details }) : null
 
-  try {
-    if (!shouldUploadToCloud(level, event)) return
-    if (!wxRef || !wxRef.cloud || !wxRef.cloud.callFunction) return
-    wxRef.cloud.callFunction({
-      name: 'post',
-      data: payload,
-      success: () => {},
-      fail: (error: any) => emitConsole('warn', 'clientLog.send.fail', {
-        event,
-        error: normalizeValue(error, 0),
+  if (!shouldUploadToCloud(level, event, diagnosticCapture)) return
+  uploadPayload(payload, () => {
+    if (diagnosticEvent) {
+      markClientDiagnosticEventUploaded(diagnosticEvent.traceId, diagnosticEvent.sequence)
+    }
+  })
+}
+
+export async function flushClientDiagnostics() {
+  return flushClientDiagnosticEvents(async (event) => {
+    const payload = {
+      action: 'clientLog',
+      level: event.level,
+      event: event.event,
+      sessionId: `diagnostic:${event.traceId}`,
+      route: currentRoute(),
+      clientTime: event.createdAt,
+      build: BUILD_INFO,
+      details: Object.assign({}, event.details, {
+        diagnosticTraceId: event.traceId,
+        diagnosticSequence: event.sequence,
+        diagnosticReplay: true,
       }),
+    }
+    return await new Promise<boolean>((resolve) => {
+      try {
+        if (!wxRef?.cloud?.callFunction) {
+          resolve(false)
+          return
+        }
+        wxRef.cloud.callFunction({
+          name: 'post',
+          data: payload,
+          success: () => resolve(true),
+          fail: () => resolve(false),
+        })
+      } catch (_error) {
+        resolve(false)
+      }
     })
-  } catch (error) {
-    emitConsole('warn', 'clientLog.send.throw', {
-      event,
-      error: normalizeValue(error, 0),
+  })
+}
+
+export function markClientDiagnosticStage(event: string, details: Record<string, any> = {}) {
+  clientLog('info', event, details)
+}
+
+export function startHomeDiagnosticWatchdog() {
+  const state = getClientDiagnosticsState()
+  if (!state.enabled || state.scope !== 'home' && state.scope !== 'all') return
+  if (homeWatchdogTraceId === state.traceId) return
+  homeWatchdogTraceId = state.traceId
+  for (const delayMs of [2000, 8000]) {
+    setTimeout(() => {
+      if (!isClientDiagnosticsEnabled('home')) return
+      const route = currentRoute()
+      if (route !== 'pages/index/index') return
+      const committed = readClientDiagnosticEvents().some((event) => event.event === 'home.render.commit')
+      if (!committed) {
+        clientLog('warn', 'home.watchdog.timeout', { delayMs, route })
+      }
+    }, delayMs)
+  }
+}
+
+export function installVueRuntimeLogHooks(app: any) {
+  if (!app?.config) return
+  const previousErrorHandler = app.config.errorHandler
+  const previousWarnHandler = app.config.warnHandler
+  app.config.errorHandler = (error: any, instance: any, info: string) => {
+    clientLog('error', 'vue.error', {
+      error,
+      info: String(info || ''),
+      component: String(instance?.$options?.name || instance?.type?.name || ''),
     })
+    if (typeof previousErrorHandler === 'function') previousErrorHandler(error, instance, info)
+  }
+  app.config.warnHandler = (message: string, instance: any, trace: string) => {
+    if (isClientDiagnosticsEnabled('home')) {
+      clientLog('debug', 'vue.warn', {
+        message: String(message || ''),
+        trace: String(trace || ''),
+        component: String(instance?.$options?.name || instance?.type?.name || ''),
+      })
+    }
+    if (typeof previousWarnHandler === 'function') previousWarnHandler(message, instance, trace)
   }
 }
 

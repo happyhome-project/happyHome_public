@@ -325,14 +325,47 @@ test('rejects forbidden syntax in a transitive home dependency', async () => {
   }
 })
 
-test('rejects an unreviewed framework runtime change', async () => {
+test('rejects Unicode property escapes in a transitive home dependency', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    await writeFixture(fixture, 'pages/index/index.js', 'require("../../utils/section-icon.js")')
+    await writeFixture(fixture, 'utils/section-icon.js', [
+      'const literal = /\\p{Extended_Pictographic}/u',
+      'const constructed = new RegExp("\\\\p{Extended_Pictographic}", "u")',
+      'const called = RegExp("\\\\p{Emoji}", "u")',
+      'const inverted = RegExp("\\\\P{ASCII}", "u")',
+    ].join('\n'))
+
+    const result = scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' })
+
+    assert.equal(result.findings.filter((finding) =>
+      finding.file === 'utils/section-icon.js' && finding.rule === 'Unicode property escape').length, 4)
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test('does not treat the mixed project/framework vendor bundle as a fixed framework hash by default', async () => {
   const fixture = await createCriticalPageFixture()
   try {
     await writeFixture(fixture, 'common/vendor.js', 'const changedFrameworkRuntime = true')
+    assert.doesNotThrow(() => scanCriticalRuntimeSyntax(fixture))
     assert.throws(
-      () => scanCriticalRuntimeSyntax(fixture),
+      () => scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: 'reviewed-framework-runtime' }),
       /framework runtime changed/,
     )
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test('rejects Unicode property escapes in the mixed vendor bundle', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    await writeFixture(fixture, 'common/vendor.js', 'const unsupported = /\\p{Extended_Pictographic}/u')
+    const result = scanCriticalRuntimeSyntax(fixture)
+    assert.ok(result.findings.some((finding) =>
+      finding.file === 'common/vendor.js' && finding.rule === 'Unicode property escape'))
   } finally {
     await rm(fixture, { recursive: true, force: true })
   }

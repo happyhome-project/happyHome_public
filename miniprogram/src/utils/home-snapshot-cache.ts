@@ -40,6 +40,39 @@ function isFresh(snapshot: HomeSnapshot, now: number) {
   return Number.isFinite(generatedAt)
 }
 
+function isRecord(value: any): value is Record<string, any> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+export function normalizeHomeSnapshotShape(raw: any): HomeSnapshot | null {
+  if (!isRecord(raw) || !Array.isArray(raw.communities) || !Array.isArray(raw.sections) || !isRecord(raw.postsBySection)) {
+    return null
+  }
+  const postsBySection: Record<string, any[]> = {}
+  Object.keys(raw.postsBySection).forEach((sectionId) => {
+    const posts = raw.postsBySection[sectionId]
+    if (Array.isArray(posts)) postsBySection[sectionId] = posts.filter((post) => isRecord(post))
+  })
+  const sections = raw.sections
+    .filter((section: any) => isRecord(section))
+    .map((section: any) => Object.assign({}, section, {
+      widgets: Array.isArray(section.widgets) ? section.widgets.filter((widget: any) => isRecord(widget)) : [],
+    }))
+  const currentCommunity = isRecord(raw.currentCommunity)
+    ? Object.assign({}, raw.currentCommunity, {
+      homeBanners: Array.isArray(raw.currentCommunity.homeBanners)
+        ? raw.currentCommunity.homeBanners.filter((banner: any) => isRecord(banner))
+        : [],
+    })
+    : raw.currentCommunity || null
+  return Object.assign({}, raw, {
+    communities: raw.communities.filter((community: any) => isRecord(community)),
+    sections,
+    postsBySection,
+    currentCommunity,
+  }) as HomeSnapshot
+}
+
 function normalizeSnapshot(raw: any, options: SnapshotReadOptions): HomeSnapshot | null {
   if (!raw || typeof raw !== 'object') return null
   if (raw.schemaVersion !== HOME_SNAPSHOT_SCHEMA_VERSION) return null
@@ -50,8 +83,7 @@ function normalizeSnapshot(raw: any, options: SnapshotReadOptions): HomeSnapshot
   if (!isFresh(raw as HomeSnapshot, now)) return null
   const generatedAt = Date.parse(String(raw.generatedAt || ''))
   if (now - generatedAt > maxAgeMs) return null
-  if (!Array.isArray(raw.communities) || !Array.isArray(raw.sections) || typeof raw.postsBySection !== 'object') return null
-  return raw as HomeSnapshot
+  return normalizeHomeSnapshotShape(raw)
 }
 
 function maxAgeForFetchType(fetchType: BackgroundFetchType) {

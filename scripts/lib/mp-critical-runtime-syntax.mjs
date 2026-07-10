@@ -3,7 +3,6 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { parse } from 'acorn'
 
-export const KNOWN_FRAMEWORK_VENDOR_SHA256 = 'b573e2806c3946c5ffca160c372b3322cf167636a2a3841f0f77c57b616ba60a'
 export const KNOWN_NODE_MODULES_SHA256 = '62908539d813918af9bcb32a99b3dc24798213463fb4bb2c552dddcb815a7f2f'
 export const KNOWN_WECHAT_BASE_LIBRARY_VERSION = '3.15.1'
 
@@ -254,9 +253,35 @@ function findingForNode(relativePath, rule, node, source) {
   }
 }
 
+function isUnicodePropertyEscape(node) {
+  if (node.type === 'Literal' && node.regex) {
+    return /\\[pP]\{/.test(String(node.regex.pattern || ''))
+  }
+  return (
+    (node.type === 'NewExpression' || node.type === 'CallExpression') &&
+    node.callee?.type === 'Identifier' &&
+    node.callee.name === 'RegExp' &&
+    node.arguments?.[0]?.type === 'Literal' &&
+    /\\[pP]\{/.test(String(node.arguments[0].value || ''))
+  )
+}
+
+function scanVendorCompatibilitySyntax(relativePath, source, ast) {
+  const findings = []
+  walk(ast, (node) => {
+    if (isUnicodePropertyEscape(node)) {
+      findings.push(findingForNode(relativePath, 'Unicode property escape', node, source))
+    }
+  })
+  return findings
+}
+
 function scanChunk(relativePath, source, ast) {
   const findings = []
   walk(ast, (node, parent) => {
+    if (isUnicodePropertyEscape(node)) {
+      findings.push(findingForNode(relativePath, 'Unicode property escape', node, source))
+    }
     if (node.type === 'ArrowFunctionExpression' && node.params.some((param) => param.type === 'ArrayPattern')) {
       findings.push(findingForNode(relativePath, 'array destructuring arrow parameter', node, source))
     }
@@ -332,13 +357,19 @@ export function scanCriticalRuntimeSyntax(inputDistRoot, options = {}) {
   const vendorPath = path.join(distRoot, 'common', 'vendor.js')
   const expectedVendorHash = Object.prototype.hasOwnProperty.call(options, 'expectedVendorHash')
     ? options.expectedVendorHash
-    : KNOWN_FRAMEWORK_VENDOR_SHA256
-  if (expectedVendorHash) {
-    if (!fs.existsSync(vendorPath)) throw new Error(`Missing mp-weixin framework runtime chunk: ${vendorPath}`)
-    const actualVendorHash = createHash('sha256').update(fs.readFileSync(vendorPath)).digest('hex')
-    if (actualVendorHash !== expectedVendorHash) {
-      throw new Error(`mp-weixin framework runtime changed: expected ${expectedVendorHash}, got ${actualVendorHash}. Review trial-runtime compatibility before updating the baseline.`)
+    : ''
+  const hasVendorRuntime = fs.existsSync(vendorPath)
+  if (hasVendorRuntime) {
+    const vendorSource = fs.readFileSync(vendorPath, 'utf8')
+    findings.push(...scanVendorCompatibilitySyntax('common/vendor.js', vendorSource, parseChunk(vendorSource, vendorPath)))
+    if (expectedVendorHash) {
+      const actualVendorHash = createHash('sha256').update(vendorSource).digest('hex')
+      if (actualVendorHash !== expectedVendorHash) {
+        throw new Error(`mp-weixin framework runtime changed: expected ${expectedVendorHash}, got ${actualVendorHash}. Review trial-runtime compatibility before updating the baseline.`)
+      }
     }
+  } else if (expectedVendorHash) {
+    throw new Error(`Missing mp-weixin framework runtime chunk: ${vendorPath}`)
   }
   const nodeModulesPath = path.join(distRoot, 'node-modules')
   const expectedNodeModulesHash = Object.prototype.hasOwnProperty.call(options, 'expectedNodeModulesHash')

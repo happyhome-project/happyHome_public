@@ -16,6 +16,7 @@ export const RELEASE_STAGE_ORDER = [
 ]
 
 const REQUIRED_RELEASE_UI_MARKERS = [
+  'HH_RELEASE_HOME_COLD_START_NONEMPTY',
   'HH_RELEASE_HOME_IMAGES_RENDERED',
   'HH_RELEASE_HOME_DETAIL_NONEMPTY',
   'HH_RELEASE_LOGIN_VERSION',
@@ -23,6 +24,16 @@ const REQUIRED_RELEASE_UI_MARKERS = [
 ]
 
 const RELEASE_CONTEXT_KEYS = ['gitSha', 'version', 'desc', 'envId']
+
+function hasReusableColdStartEvidence(evidence = {}) {
+  const coldStart = evidence.homeColdStart
+  const visible = (rect) => Number(rect?.width || 0) > 1 && Number(rect?.height || 0) > 1
+  return coldStart?.passed === true &&
+    String(coldStart.path || '').includes('pages/index/index') &&
+    visible(coldStart.layout?.phoneInner) &&
+    visible(coldStart.layout?.homeShell) &&
+    Number(coldStart.appTabBarCount || 0) > 0
+}
 
 function pad(value) {
   return String(value).padStart(2, '0')
@@ -177,6 +188,9 @@ async function inspectBuildInfoEvidence(stage, context) {
   const markers = new Set(evidence.markers || [])
   const missingMarker = REQUIRED_RELEASE_UI_MARKERS.find((marker) => !markers.has(marker))
   if (missingMarker) return { reusable: false, reason: `release UI evidence missing marker ${missingMarker}` }
+  if (!hasReusableColdStartEvidence(evidence)) {
+    return { reusable: false, reason: 'release UI evidence cold-start result is missing or invalid' }
+  }
   const expectedVersion = evidence.profileLoginClean?.expectedVersion || evidence.expectedVersion
   if (!expectedVersion) return { reusable: false, reason: 'release UI evidence version is missing' }
   if (expectedVersion !== context.version) {

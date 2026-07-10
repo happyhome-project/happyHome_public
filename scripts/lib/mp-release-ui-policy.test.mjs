@@ -4,6 +4,7 @@ import test from 'node:test'
 
 import {
   assertReleaseUiEvidence,
+  assertColdStartDevToolsEnabled,
   buildDevToolsAutoArgs,
   buildDevToolsCacheArgs,
   buildDevToolsCloseArgs,
@@ -41,6 +42,14 @@ test('builds DevTools quit args for stale automator recovery', () => {
   assert.deepEqual(buildDevToolsQuitArgs(), ['quit'])
 })
 
+test('requires release UI evidence to start from a clean DevTools process state', () => {
+  assert.throws(
+    () => assertColdStartDevToolsEnabled({ HH_RELEASE_UI_COLD_START_DEVTOOLS: '0' }),
+    /must not be disabled/i,
+  )
+  assert.doesNotThrow(() => assertColdStartDevToolsEnabled({}))
+})
+
 test('builds DevTools maintenance args bound to one IDE port', () => {
   assert.deepEqual(buildDevToolsQuitPortArgs({ idePort: 21929 }), [
     'quit',
@@ -68,8 +77,17 @@ test('builds DevTools maintenance args bound to one IDE port', () => {
   ])
 })
 
-test('requires home images, home detail, login version, and clean profile login release UI evidence', () => {
+test('requires cold-start home, home images, home detail, login version, and clean profile login release UI evidence', () => {
   assert.throws(() => assertReleaseUiEvidence({
+    homeColdStartNonEmpty: false,
+    homeImagesRendered: true,
+    homeDetailNonEmpty: true,
+    loginVersionVisible: true,
+    profileLoginClean: true,
+  }), /HH_RELEASE_HOME_COLD_START_NONEMPTY/)
+
+  assert.throws(() => assertReleaseUiEvidence({
+    homeColdStartNonEmpty: true,
     homeImagesRendered: false,
     homeDetailNonEmpty: true,
     loginVersionVisible: true,
@@ -77,6 +95,7 @@ test('requires home images, home detail, login version, and clean profile login 
   }), /HH_RELEASE_HOME_IMAGES_RENDERED/)
 
   assert.throws(() => assertReleaseUiEvidence({
+    homeColdStartNonEmpty: true,
     homeImagesRendered: true,
     homeDetailNonEmpty: true,
     loginVersionVisible: true,
@@ -84,6 +103,7 @@ test('requires home images, home detail, login version, and clean profile login 
   }), /HH_RELEASE_PROFILE_LOGIN_CLEAN/)
 
   assert.throws(() => assertReleaseUiEvidence({
+    homeColdStartNonEmpty: true,
     homeImagesRendered: true,
     homeDetailNonEmpty: true,
     loginVersionVisible: false,
@@ -91,6 +111,7 @@ test('requires home images, home detail, login version, and clean profile login 
   }), /HH_RELEASE_LOGIN_VERSION/)
 
   assert.doesNotThrow(() => assertReleaseUiEvidence({
+    homeColdStartNonEmpty: true,
     homeImagesRendered: true,
     homeDetailNonEmpty: true,
     loginVersionVisible: true,
@@ -100,6 +121,7 @@ test('requires home images, home detail, login version, and clean profile login 
 
 test('documents the release UI evidence markers used by the gate', () => {
   assert.deepEqual(REQUIRED_RELEASE_UI_MARKERS.map((item) => item.marker), [
+    'HH_RELEASE_HOME_COLD_START_NONEMPTY',
     'HH_RELEASE_HOME_IMAGES_RENDERED',
     'HH_RELEASE_HOME_DETAIL_NONEMPTY',
     'HH_RELEASE_LOGIN_VERSION',
