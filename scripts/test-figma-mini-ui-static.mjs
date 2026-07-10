@@ -426,6 +426,12 @@ assert(
 )
 
 assert(
+  !profile.includes('mode="scaleToFill"') &&
+    (profile.match(/shortcut-icon-image--join-[^\n]+[\s\S]*?mode="aspectFit"/g) || []).length === 3,
+  'profile join shortcut SVG layers should use the mini-program-compatible aspectFit mode.'
+)
+
+assert(
   profile.includes('iconSrc:') &&
     profile.includes('class="profile-tool-icon-image"') &&
     profile.includes('class="avatar-edit-camera"') &&

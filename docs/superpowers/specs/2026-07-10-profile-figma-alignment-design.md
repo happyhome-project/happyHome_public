@@ -37,4 +37,3 @@ Figma MCP asset URLs are temporary. Required icons and decorations are downloade
 - Run mini-program type checking, unit tests, H5 build, and mp-weixin build.
 - Exercise logged-in profile, edit-open, cancel, and shortcut/tool interactions in H5 at 402 x 874 and a narrower mobile viewport.
 - Capture screenshots and compare top background continuity, card dimensions, grid alignment, icon fidelity, clipping, and edit-state spacing against Figma.
-

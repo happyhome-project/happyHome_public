@@ -198,17 +198,17 @@
           <image
             class="shortcut-icon-image shortcut-icon-image--join-front"
             src="/static/profile/join-community-front.svg"
-            mode="scaleToFill"
+            mode="aspectFit"
           />
           <image
             class="shortcut-icon-image shortcut-icon-image--join-back"
             src="/static/profile/join-community-back.svg"
-            mode="scaleToFill"
+            mode="aspectFit"
           />
           <image
             class="shortcut-icon-image shortcut-icon-image--join-pin"
             src="/static/profile/join-community-pin.svg"
-            mode="scaleToFill"
+            mode="aspectFit"
           />
         </view>
       </view>
