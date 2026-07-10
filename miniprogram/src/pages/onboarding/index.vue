@@ -6,40 +6,51 @@
       desc="登录后再来发现和加入社区"
     />
     <template v-else>
-    <view class="header">
-      <text class="title">选择你的社区</text>
-      <text class="subtitle">加入后即可浏览和发帖</text>
-    </view>
-    <view class="community-list">
-      <view
-        v-for="community in communities"
-        :key="community._id"
-        class="community-card"
-        :class="{
-          disabled: isCardDisabled(community) || applyLock.isBusy(community._id),
-          'share-target': isShareTarget(community),
-        }"
-        @tap="handleCommunityTap(community)"
-      >
-        <image
-          :src="community.coverImage || '/static/default-community.png'"
-          class="cover"
-          mode="aspectFill"
-        />
-        <view class="info">
-          <text class="name">{{ community.name }}</text>
-          <text class="desc">{{ community.description }}</text>
-          <text class="meta">{{ community.memberCount }} 位成员</text>
-          <text v-if="isShareTarget(community)" class="share-hint">来自分享邀请</text>
+      <view class="header">
+        <text class="title">请选择你的社区</text>
+        <text class="subtitle">加入后即可浏览和发帖</text>
+      </view>
+      <view class="community-list">
+        <view
+          v-for="community in communities"
+          :key="community._id"
+          class="community-card"
+          :class="{
+            disabled: communityActionBusy || isCardDisabled(community) || applyLock.isBusy(community._id),
+            'share-target': isShareTarget(community),
+          }"
+          @tap="handleCommunityTap(community)"
+        >
+          <image
+            v-if="communityAvatar(community)"
+            :src="communityAvatar(community)"
+            class="cover"
+            mode="aspectFill"
+            @error="handleAvatarError(community)"
+          />
+          <view v-else class="cover cover-fallback">
+            <text>{{ communityInitial(community) }}</text>
+          </view>
+          <view class="info">
+            <text class="name">{{ communityName(community) }}</text>
+            <text class="desc">{{ communityDescription(community) }}</text>
+          </view>
+          <view
+            class="status"
+            :class="{
+              joined: community.viewerStatus === 'active',
+              pending: community.viewerStatus === 'pending',
+              joinable: community.viewerStatus !== 'active' && community.viewerStatus !== 'pending',
+            }"
+          >
+            {{ getBadgeText(community) }}
+          </view>
         </view>
-        <view class="badge" :class="[community.joinType, `status-${community.viewerStatus || 'none'}`]">
-          {{ getBadgeText(community) }}
+        <view class="create-entry" @tap="handleCreate">
+          <text class="create-plus">＋</text>
+          <text>创建新社区</text>
         </view>
       </view>
-    </view>
-    <view class="footer">
-      <button class="create-btn" @tap="handleCreate">创建新社区</button>
-    </view>
     </template>
   </view>
 </template>
@@ -66,8 +77,17 @@ import {
 } from '../../utils/community-share'
 import LoginGuard from '../../components/LoginGuard.vue'
 import { ensureHierarchyStack } from '../../utils/hierarchy-nav'
+import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
+import {
+  mergeCommunityDirectory,
+  resolvedCommunityCoverUrl,
+  singleLineCommunityText,
+} from '../../utils/community-directory'
 
 const communities = ref<any[]>([])
+const resolvedCoverUrls = ref<Record<string, string>>({})
+const failedCoverIds = ref<Record<string, boolean>>({})
+const communityActionBusy = ref(false)
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
 const entryMode = ref<OnboardingEntryMode>('auto')
@@ -75,6 +95,7 @@ const targetCommunityId = ref('')
 const fromCommunityShare = ref(false)
 let refreshingOnboarding = false
 let targetUnavailableNotified = false
+let coverResolveVersion = 0
 
 onLoad((query?: Record<string, any>) => {
   if (ensureHierarchyStack('/pages/onboarding/index', query || {})) return
@@ -97,7 +118,12 @@ onMounted(async () => {
 
 async function loadCommunities() {
   const res = await communityApi.listDiscoverable()
-  communities.value = prioritizeShareTargetCommunities(res.communities || [], targetCommunityId.value)
+  const directory = mergeCommunityDirectory(
+    communityStore.myCommunities,
+    (res.communities || []) as any[],
+  )
+  communities.value = prioritizeShareTargetCommunities(directory, targetCommunityId.value)
+  await resolveCommunityCovers(communities.value)
   if (targetCommunityId.value && fromCommunityShare.value) {
     const found = communities.value.some((community) => String(community?._id || '') === targetCommunityId.value)
     if (!found && !targetUnavailableNotified) {
@@ -105,6 +131,51 @@ async function loadCommunities() {
       uni.showToast({ title: '分享的社群暂不可加入', icon: 'none' })
     }
   }
+}
+
+async function resolveCommunityCovers(items: any[]) {
+  const version = ++coverResolveVersion
+  failedCoverIds.value = {}
+  const covers = items
+    .map((community) => String(community?.coverImage || '').trim())
+    .filter(Boolean)
+  if (!covers.length) {
+    if (version === coverResolveVersion) resolvedCoverUrls.value = {}
+    return
+  }
+  try {
+    const resolved = await resolveCloudFileUrls(covers)
+    if (version === coverResolveVersion) resolvedCoverUrls.value = resolved
+  } catch (error) {
+    console.warn('Failed to resolve community covers:', error)
+    if (version === coverResolveVersion) resolvedCoverUrls.value = {}
+  }
+}
+
+function communityAvatar(community: any) {
+  const id = String(community?._id || '')
+  return resolvedCommunityCoverUrl(
+    community?.coverImage,
+    resolvedCoverUrls.value,
+    !!failedCoverIds.value[id],
+  )
+}
+
+function handleAvatarError(community: any) {
+  const id = String(community?._id || '')
+  if (id) failedCoverIds.value = { ...failedCoverIds.value, [id]: true }
+}
+
+function communityInitial(community: any) {
+  return communityName(community).charAt(0) || '社'
+}
+
+function communityName(community: any) {
+  return singleLineCommunityText(community?.name, '未命名社区')
+}
+
+function communityDescription(community: any) {
+  return singleLineCommunityText(community?.description, '社区内容与活动')
 }
 
 async function refreshOnboardingData() {
@@ -154,9 +225,10 @@ function resolveEntryMode(query?: Record<string, any>): 'auto' | 'discover' {
   })
 }
 
-// Per-community lock — clicking on card A doesn't block card B.
 const applyLock = useKeyedBusyLock(
   async (community: any) => {
+    if (communityActionBusy.value) return
+    communityActionBusy.value = true
     try {
       await memberApi.apply(community._id)
       if (community.joinType === 'open') {
@@ -169,14 +241,14 @@ const applyLock = useKeyedBusyLock(
       }
     } catch (e: any) {
       uni.showToast({ title: e?.message || '操作失败', icon: 'none' })
+    } finally {
+      communityActionBusy.value = false
     }
   },
   (community) => community._id,
 )
 
 function isCardDisabled(community: any) {
-  // pending 申请中的社区：不能重复申请 → 点击无反应
-  // creator-pending 自己创建的等超管审批：可点但走 toast 分支（下方 handleCommunityTap 处理）
   return community.viewerStatus === 'pending'
 }
 
@@ -185,27 +257,36 @@ function isShareTarget(community: any) {
 }
 
 function getBadgeText(community: any) {
-  if (community.viewerStatus === 'creator-pending') return '审核中 · 你创建的'
+  if (community.viewerStatus === 'active') return '已加入'
   if (community.viewerStatus === 'pending') return '审核中'
-  if (community.viewerStatus === 'rejected') return '重新申请'
-  return community.joinType === 'open' ? '直接加入' : '申请加入'
+  return '我要加入'
 }
 
 function handleCommunityTap(community: any) {
-  if (isCardDisabled(community) || applyLock.isBusy(community._id)) return
-  // 自己创建的待审批社区：点击只弹 toast 说明状态，不触发 apply 流程
-  if (community.viewerStatus === 'creator-pending') {
-    uni.showToast({
-      title: '等待超管审批中，通过后会自动加入',
-      icon: 'none',
-      duration: 2500,
-    })
+  if (communityActionBusy.value || isCardDisabled(community) || applyLock.isBusy(community._id)) return
+  if (community.viewerStatus === 'active') {
+    void openJoinedCommunity(community._id)
     return
   }
   applyLock.run(community)
 }
 
+async function openJoinedCommunity(communityId: string) {
+  if (communityActionBusy.value) return
+  communityActionBusy.value = true
+  try {
+    await communityStore.switchCommunity(communityId)
+    uni.reLaunch({ url: '/pages/index/index' })
+  } catch (error) {
+    console.error('Failed to switch community:', error)
+    uni.showToast({ title: '切换失败，请重试', icon: 'none' })
+  } finally {
+    communityActionBusy.value = false
+  }
+}
+
 function handleCreate() {
+  if (communityActionBusy.value) return
   uni.navigateTo({ url: '/pages/createCommunity/index' })
 }
 
@@ -225,38 +306,150 @@ onPullDownRefresh(async () => {
 </script>
 
 <style lang="scss" scoped>
-.onboarding { padding: $hh-space-lg; }
-.header { margin-bottom: $hh-space-xl; }
-.title { font-size: $hh-font-h1; font-weight: $hh-font-weight-bold; display: block; color: $hh-color-text; }
-.subtitle { font-size: $hh-font-body; color: $hh-color-text-sub; margin-top: $hh-space-xs; display: block; }
+.onboarding {
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: 32rpx 32rpx calc(32rpx + env(safe-area-inset-bottom));
+  background: #f2f3f7;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  margin-bottom: 32rpx;
+}
+
+.title {
+  display: block;
+  color: #181818;
+  font-size: 40rpx;
+  font-weight: $hh-font-weight-bold;
+  line-height: 56rpx;
+}
+
+.subtitle {
+  display: block;
+  color: #777;
+  font-size: 28rpx;
+  line-height: 44rpx;
+}
+
+.community-list {
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
+}
+
 .community-card {
-  display: flex; align-items: center; padding: $hh-space-md;
-  background: $hh-color-surface; border-radius: $hh-radius-md; margin-bottom: $hh-space-md;
-  box-shadow: $hh-shadow-card;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+  min-height: 160rpx;
+  padding: 32rpx;
+  background: #fff;
+  border: 2rpx solid transparent;
+  border-radius: 24rpx;
   transition: opacity $hh-duration-base $hh-ease-standard;
 }
-.community-card.disabled { opacity: $hh-opacity-disabled; pointer-events: none; }
+
+.community-card.disabled { opacity: 0.7; }
+
 .community-card.share-target {
   border: 2rpx solid $hh-accent;
-  background: $hh-accent-wash;
 }
-.cover { width: 100rpx; height: 100rpx; border-radius: $hh-radius-sm; flex-shrink: 0; }
-.info { flex: 1; margin: 0 $hh-space-md; }
-.name { font-size: $hh-font-h3; font-weight: $hh-font-weight-bold; display: block; color: $hh-color-text; }
-.desc { font-size: $hh-font-caption; color: $hh-color-text-sub; margin-top: 4rpx; display: block; }
-.meta { font-size: $hh-font-caption; color: $hh-color-text-mute; margin-top: 4rpx; display: block; }
-.share-hint { font-size: $hh-font-caption; color: $hh-accent-ink; margin-top: 6rpx; display: block; font-weight: $hh-font-weight-bold; }
-.badge { font-size: $hh-font-caption; padding: $hh-space-xs $hh-space-sm; border-radius: $hh-radius-lg; white-space: nowrap; }
-.badge.open { background: #e8f5e9; color: #2e7d32; }
-.badge.approval { background: #fff3e0; color: #e65100; }
-/* creator-pending 用墨绿色调，与普通"审核中"区分开（你创建的 vs 你申请加入的别人的） */
-.badge.status-creator-pending {
+
+.cover {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 88rpx;
+  height: 88rpx;
+  overflow: hidden;
+  border-radius: 50%;
+}
+
+.cover-fallback {
   background: $hh-accent-wash;
   color: $hh-accent-ink;
+  font-size: 32rpx;
   font-weight: $hh-font-weight-bold;
 }
-.badge.status-pending { background: #f5f5f5; color: #757575; }
-.badge.status-rejected { background: #ffebee; color: #c62828; }
-.footer { margin-top: $hh-space-xl; }
-.create-btn { background: $hh-color-bg-sub; color: $hh-color-text; border-radius: $hh-radius-md; }
+
+.info {
+  min-width: 0;
+  flex: 1;
+}
+
+.name,
+.desc {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.name {
+  color: #181818;
+  font-size: 36rpx;
+  font-weight: $hh-font-weight-bold;
+  line-height: 52rpx;
+}
+
+.desc {
+  margin-top: 4rpx;
+  color: #a6a6a6;
+  font-size: 28rpx;
+  line-height: 44rpx;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 112rpx;
+  height: 64rpx;
+  padding: 0 24rpx;
+  border-radius: 999rpx;
+  font-size: 32rpx;
+  line-height: 48rpx;
+  white-space: nowrap;
+}
+
+.status.joined,
+.status.pending {
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border-radius: 0;
+  color: #a6a6a6;
+}
+
+.status.joinable {
+  background: #3dad7d;
+  color: #fff;
+}
+
+.create-entry {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4rpx;
+  height: 96rpx;
+  background: #fff;
+  border-radius: 24rpx;
+  color: #3dad7d;
+  font-size: 36rpx;
+  font-weight: $hh-font-weight-bold;
+  line-height: 52rpx;
+}
+
+.create-plus {
+  font-size: 42rpx;
+  font-weight: $hh-font-weight-medium;
+}
 </style>

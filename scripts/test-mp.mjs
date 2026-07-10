@@ -175,11 +175,11 @@ async function runTests() {
     await page.waitFor(2000)
     const title = await page.$('.title')
     const titleText = await title.text()
-    console.assert(titleText === '选择你的社区', `Expected title "选择你的社区", got "${titleText}"`)
+    console.assert(titleText === '请选择你的社区', `Expected title "请选择你的社区", got "${titleText}"`)
     console.log('  ✓ Onboarding title correct')
 
     // ---- Test 2: Create community button exists ----
-    const createBtn = await page.$('.create-btn')
+    const createBtn = await page.$('.create-entry')
     console.assert(createBtn !== null, 'Create community button should exist')
     console.log('  ✓ Create community button found')
 

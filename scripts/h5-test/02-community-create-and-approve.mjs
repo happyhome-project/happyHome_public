@@ -27,10 +27,10 @@ assert(
   'pending community is NOT in public list',
 )
 
-// ...but visible in includeAll view
-const allList = await callAs(owner, 'community', 'list', { includeAll: true })
-const found = allList.communities.find((c) => c._id === communityId)
-assert(!!found, 'pending community IS in includeAll list')
+// ...but visible to the superAdmin approval queue
+const pendingList = await callAdmin('community.pendingList', {})
+const found = pendingList.communities.find((c) => c._id === communityId)
+assert(!!found, 'pending community IS in the superAdmin approval queue')
 assert(found?.status === 'pending', 'status is pending before approval')
 assert(found?.creatorId === owner, 'creatorId is the owner')
 

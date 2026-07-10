@@ -580,6 +580,7 @@ test('home: returns sections and grouped posts with one membership check', async
     return []
   })
   ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'communities') return { _id: id, status: 'active' }
     if (collectionName === 'users') return { _id: id, nickName: id === 'user-1' ? '一号' : '二号' }
     return null
   })
@@ -638,6 +639,7 @@ test('home: uses real author avatars first and fills missing avatars from the si
     return []
   })
   ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'communities') return { _id: id, status: 'active' }
     if (collectionName === 'users' && id === 'user-real') return { _id: id, nickName: '真实邻居', avatarUrl: 'https://cdn.example.com/real.png' }
     if (collectionName === 'users' && id === 'user-sim') return { _id: id, nickName: 'AI整理员', avatarUrl: '' }
     return null
@@ -915,7 +917,8 @@ test('joinAttendance: 满员后新用户不能再参与', async () => {
 })
 
 test('get/listAttendanceMembers: 返回参与聚合和完整名单', async () => {
-  ;(db.getById as jest.Mock).mockImplementation(async (_collectionName: string, id: string) => {
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'communities') return { _id: id, status: 'active' }
     if (id === 'post-1') {
       return {
         _id: 'post-1',
@@ -1227,7 +1230,8 @@ test('list：板块内置顶帖优先，其余按发布时间倒序', async () =
     ...mockSection,
     widgets: mockSection.widgets.filter((widget) => widget.type !== 'attendance'),
   }
-  ;(db.getById as jest.Mock).mockImplementation(async (_collectionName: string, id: string) => {
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'communities') return { _id: id, status: 'active' }
     if (id === 'section-1') return sectionWithoutAttendance
     if (id === 'author-1') return { _id: 'author-1', nickName: 'Author', avatarUrl: '' }
     return null
@@ -1332,6 +1336,7 @@ test('delete: clears pin and featured flags', async () => {
 })
 
 test('search: checks community readability and delegates to formal RAG search', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
   ;(postRag.searchPostsWithRag as jest.Mock).mockResolvedValue({
     query: '鲲鹏',
     communityId: 'community-1',

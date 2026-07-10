@@ -57,4 +57,35 @@ describe('community store', () => {
     expect(store.myCommunities).toEqual([])
     expect(store.currentCommunity?.name).toBe('阳光花园小区')
   })
+
+  test('loadMyCommunities ignores pending communities even if an older backend returns them', async () => {
+    myCommunities.mockResolvedValueOnce({
+      communities: [
+        { _id: 'active-community', name: '明士班', status: 'active' },
+        { _id: 'pending-community', name: 'test', status: 'pending' },
+      ],
+    })
+    const { useCommunityStore } = await import('../community')
+    const store = useCommunityStore()
+
+    await store.loadMyCommunities({ loadSections: false })
+
+    expect(store.myCommunities.map((community) => community._id)).toEqual(['active-community'])
+    expect(store.currentCommunityId).toBe('active-community')
+  })
+
+  test('switchCommunity keeps the previous state when loading the new community fails', async () => {
+    sectionList.mockRejectedValueOnce(new Error('network failed'))
+    const { useCommunityStore } = await import('../community')
+    const store = useCommunityStore()
+    store.currentCommunityId = 'old-community'
+    store.currentSections = [{ _id: 'old-section', communityId: 'old-community' }] as any[]
+    store.currentSectionIndex = 1
+
+    await expect(store.switchCommunity('new-community')).rejects.toThrow('network failed')
+
+    expect(store.currentCommunityId).toBe('old-community')
+    expect(store.currentSections.map((section) => section._id)).toEqual(['old-section'])
+    expect(store.currentSectionIndex).toBe(1)
+  })
 })

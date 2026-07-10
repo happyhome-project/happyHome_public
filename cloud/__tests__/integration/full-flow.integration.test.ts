@@ -105,9 +105,8 @@ describe('核心业务全链路', () => {
     }, _getOpenId())
     expect(communityId).toBeTruthy()
 
-    // 查询应有 pending 状态
-    const { community } = await getCommunity({ communityId })
-    expect(community.status).toBe('pending')
+    // 审批前不能通过面向小程序的公开详情接口读取
+    await expect(getCommunity({ communityId })).rejects.toThrow('社区不存在或尚未开放')
 
     // SuperAdmin 审批通过
     setCurrentUser(SUPER_ADMIN)

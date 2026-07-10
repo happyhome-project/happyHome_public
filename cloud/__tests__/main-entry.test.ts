@@ -68,14 +68,16 @@ function fe(action: string, params: Record<string, any> = {}, extra: Record<stri
 // ============================================================
 describe('Event shape: flat destructuring (regression for event mismatch bug)', () => {
   test('community.get reads communityId directly from event, not event.params', async () => {
-    ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'c1', name: 'Test' })
+    ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'c1', name: 'Test', status: 'active' })
     const res = await communityMain(fe('get', { communityId: 'c1' }))
     expect(db.getById).toHaveBeenCalledWith('communities', 'c1')
     expect(res.community._id).toBe('c1')
   })
 
   test('post.list reads sectionId from flat event', async () => {
-    ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 's1', communityId: 'c1', status: 'active' })
+    ;(db.getById as jest.Mock)
+      .mockResolvedValueOnce({ _id: 's1', communityId: 'c1', status: 'active' })
+      .mockResolvedValueOnce({ _id: 'c1', status: 'active' })
     ;(db.query as jest.Mock)
       .mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
       .mockResolvedValueOnce([])
@@ -86,6 +88,7 @@ describe('Event shape: flat destructuring (regression for event mismatch bug)', 
   })
 
   test('section.list reads communityId from flat event', async () => {
+    ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'c1', status: 'active' })
     ;(db.query as jest.Mock)
       .mockResolvedValueOnce([{ _id: 'm1', status: 'active' }])
       .mockResolvedValueOnce([])

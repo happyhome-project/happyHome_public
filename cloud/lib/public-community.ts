@@ -38,7 +38,11 @@ export async function ensureCommunityReadable(
   readErrorMessage: string,
 ) {
   const normalized = String(communityId || '').trim()
-  if (await isPublicReadableCommunity(normalized)) return
+  const community = await Promise.resolve()
+    .then(() => db.getById('communities', normalized))
+    .catch(() => null) as Community | null
+  if (!community || community.status !== 'active') throw new Error(readErrorMessage)
+  if (getPublicReadCommunityIds().includes(normalized)) return
   if (!userId) throw new Error(readErrorMessage)
   const members = await db.query('community_members', {
     communityId: normalized,

@@ -62,6 +62,7 @@ export async function handleApply(params: { communityId: string }, openid: strin
   if (existingPending && existingPending.length > 0) throw new Error('已有待审批的申请')
 
   const community = await db.getById('communities', params.communityId) as Community
+  if (!community || community.status !== 'active') throw new Error('社区暂不可加入')
   const now = new Date().toISOString()
 
   if (community.joinType === 'open') {
@@ -170,6 +171,8 @@ export async function handlePendingList(params: { communityId: string }, openid:
 // 查询当前用户在指定社区的成员状态（给前端判断是否需要引导加入）
 export async function handleMyStatus(params: { communityId: string }, openid: string) {
   if (!openid) return { isMember: false, status: null }
+  const community = await db.getById('communities', params.communityId).catch(() => null) as Community | null
+  if (!community || community.status !== 'active') return { isMember: false, status: null }
   const latest = await getLatestMembershipRecord(params.communityId, openid) as { status: string } | null
   if (!latest) return { isMember: false, status: null }
   return { isMember: latest.status === 'active', status: latest.status }

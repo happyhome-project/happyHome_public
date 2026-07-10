@@ -93,9 +93,10 @@ export async function handlePendingList(openid: string) {
   return { communities }
 }
 
-export async function handleList(params: { includeAll?: boolean }) {
+export async function handleList(params: { includeAll?: boolean }, openid = '') {
   // wx-server-sdk 不支持 $in 操作符，includeAll 时分两次查询
   if (params.includeAll) {
+    await assertSuperAdmin(openid)
     const [active, pending] = await Promise.all([
       db.query('communities', { status: 'active' }, { orderBy: ['createdAt', 'desc'] }),
       db.query('communities', { status: 'pending' }, { orderBy: ['createdAt', 'desc'] }),
@@ -111,28 +112,20 @@ export async function handleList(params: { includeAll?: boolean }) {
 
 export async function handleGet(params: { communityId: string }) {
   const community = await db.getById('communities', params.communityId)
+  if (!community || community.status !== 'active') throw new Error('社区不存在或尚未开放')
   return { community }
 }
 
 export async function handleListDiscoverable(openid: string) {
-  // active 社区（所有人可见，用于发现和申请加入）
-  // 以及 viewer 自己创建的还在审核的社区（让创建者能看到"我的申请还在审核"）
-  const [activeList, myPendingCreations] = await Promise.all([
-    db.query('communities', { status: 'active' }, { orderBy: ['createdAt', 'desc'] }),
-    openid
-      ? db.query('communities', { status: 'pending', creatorId: openid }, { orderBy: ['createdAt', 'desc'] })
-      : Promise.resolve([]),
-  ])
+  // 社区是否出现在小程序目录，只由社区审核状态决定。
+  // 成员记录仅用于渲染“已加入 / 审核中 / 我要加入”，不能让 pending 社区提前曝光。
+  const activeList = await db.query('communities', { status: 'active' }, {
+    orderBy: ['createdAt', 'desc'],
+  })
 
   const result = []
-  // 先塞自己创建的 pending（放最上面，让创建者一眼看到状态）
-  for (const community of myPendingCreations) {
-    result.push({ ...community, viewerStatus: 'creator-pending' })
-  }
-  // 再塞 active 社区，过滤掉已经是成员的（不再出现在"发现"列表）
   for (const community of activeList) {
     const viewerStatus = await getLatestViewerStatus(community._id, openid)
-    if (viewerStatus === 'active') continue
     result.push({ ...community, viewerStatus })
   }
 
@@ -146,7 +139,7 @@ export const main = async (event: any) => {
   if (action === 'approve') return handleApprove(params, openid)
   if (action === 'reject') return handleReject(params, openid)
   if (action === 'pendingList') return handlePendingList(openid)
-  if (action === 'list') return handleList(params)
+  if (action === 'list') return handleList(params, openid)
   if (action === 'get') return handleGet(params)
   if (action === 'listDiscoverable') return handleListDiscoverable(openid)
   throw new Error(`Unknown action: ${action}`)
