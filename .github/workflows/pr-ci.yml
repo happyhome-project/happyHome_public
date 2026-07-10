@@ -1,0 +1,58 @@
+name: pr-ci
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  offline:
+    name: offline
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test cloud
+        run: npm --workspace cloud test
+
+      - name: Build cloud
+        run: npm --workspace cloud run build
+
+      - name: Type-check admin
+        run: npm --workspace admin-web run type-check
+
+      - name: Build admin
+        run: npm --workspace admin-web run build
+
+      - name: Type-check miniprogram
+        run: npm --workspace miniprogram run type-check
+
+      - name: Unit test miniprogram
+        run: npm --workspace miniprogram run test:unit
+
+      - name: Build miniprogram
+        run: npm --workspace miniprogram run build:mp-weixin
+
+      - name: Test deploy output policy
+        run: npm run test:deploy-output
+
+      - name: Check whitespace
+        run: git diff --check
+
+      - name: Plan PR release
+        run: npm run release:plan -- --mode=pr
