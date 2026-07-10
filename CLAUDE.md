@@ -104,7 +104,7 @@
 1. **集成测试走 `main(event)` 入口**，不直接 call handler —— 否则会漏掉事件解构不匹配的问题
 2. **前端异步写按钮必须用 `useBusyLock` / `useKeyedBusyLock`** —— 后端不保证去重（5 次并发发帖 = 5 条重复帖），前端是唯一防线
 3. **覆盖用户视角**，不只测"系统能不能做到"—— 测前端守卫 + 后端兜底双层；冷启动路径必测
-4. **体验版关键入口必须扫 mp-weixin 编译产物** —— 详情页和登录所在的 `profile` 页都可能在真机解析阶段先炸。发布前必须跑 `npm run test:mp:detail-runtime-syntax`，它会扫描 detail/profile 关键依赖中的高风险语法/API（如 `Object.fromEntries`、`Object.values`、`Array.from`、`Map/Set` 转换链、对象/数组展开、数组解构回调、`catch {}` optional catch binding）以及 detail 是否误引入 `widget-editor`。`miniprogram/vite.config.ts` 的 `build.target` 必须保持可兼容微信基础库的低目标（当前 `es2017`）；不要只看 H5 正常就上传体验版。
+4. **体验版所有页面必须扫 mp-weixin 编译产物** —— 微信真机可能在首屏前装载非当前页面，一个非首页页面的缺失依赖或高风险语法也能让整个应用白屏。发布前必须跑 `npm run test:mp:detail-runtime-syntax`：它从 `app.json` 的全部页面递归验证本地 `require` / `import()` / `usingComponents` / WXML / WXSS 闭包，要求 `lazyCodeLoading=requiredComponents`、固定基础库和已审查的第三方产物 hash，并扫描项目自有依赖中的高风险语法/API。`miniprogram/vite.config.ts` 的 `build.target` 必须保持当前 `es2017`；上传项目必须关闭 DevTools 的 ES6 二次转换、增强编译和二次压缩，保证门禁扫描的 JavaScript 就是交给上传器的 JavaScript。不要只看 H5 或 DevTools 正常就上传体验版。
 5. **改完代码必须自己自测** —— 有 H5 / preview / automator 环境，别把验证甩给用户
 6. 四层金字塔和必过 checklist 统一入口：[docs/TESTING-PRINCIPLES.md](docs/TESTING-PRINCIPLES.md)
 

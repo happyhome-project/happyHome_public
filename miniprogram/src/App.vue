@@ -7,6 +7,25 @@ import { clientLog, installRuntimeLogHooks } from './utils/client-log'
 let lastCommunityRefreshAt = 0
 const FOREGROUND_COMMUNITY_REFRESH_INTERVAL = 30 * 1000
 
+function getRuntimeDiagnostics() {
+  try {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore wx is injected by the mini-program runtime.
+    const appBase = typeof wx !== 'undefined' && wx.getAppBaseInfo ? wx.getAppBaseInfo() : null
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore wx is injected by the mini-program runtime.
+    const system = typeof wx !== 'undefined' && wx.getSystemInfoSync ? wx.getSystemInfoSync() : null
+    return {
+      SDKVersion: String(appBase?.SDKVersion || system?.SDKVersion || ''),
+      platform: String(appBase?.platform || system?.platform || ''),
+      system: String(appBase?.system || system?.system || ''),
+      version: String(appBase?.version || system?.version || ''),
+    }
+  } catch (error) {
+    return { diagnosticsError: String((error as any)?.message || error || '') }
+  }
+}
+
 async function refreshMyCommunitiesSilently() {
   const userStore = useUserStore()
   if (!userStore.isLoggedIn) return
@@ -34,7 +53,7 @@ onLaunch(async () => {
     wx.cloud.init({ env: 'cloudbase-3gh862acb1505ff3', traceUser: true })
   }
   installRuntimeLogHooks()
-  clientLog('info', 'app.launch.start', {})
+  clientLog('info', 'app.launch.start', getRuntimeDiagnostics())
 
   const userStore = useUserStore()
   const communityStore = useCommunityStore()

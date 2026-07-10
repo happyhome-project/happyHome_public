@@ -285,7 +285,7 @@ const createFormBlocks = computed(() => {
     ;[guideMain.imageWidget, guideMain.titleWidget, guideMain.bodyWidget].forEach((widget) => {
       if (widget?.widgetId) usedWidgetIds.add(String(widget.widgetId))
     })
-    blocks.push({ type: 'guideMain', key: 'guide-main', ...guideMain })
+    blocks.push(Object.assign({ type: 'guideMain', key: 'guide-main' }, guideMain))
 
     const locationWidgets = widgets.filter((widget: any) => isGuideLocationWidget(widget))
     const trackWidgets = widgets.filter((widget: any) => isGuideTrackWidget(widget))
@@ -638,12 +638,11 @@ async function consumeActivityInviteIntent(options?: any) {
     isActivityInviteMode.value = true
     activityInviteSourcePostId.value = intent.sourcePostId
     createReturnTo.value = normalizeRouteUrl(intent.returnTo)
-    selectedSection.value = {
-      ...targetSection,
+    selectedSection.value = Object.assign({}, targetSection, {
       _id: targetSection._id || targetSection.sectionId || 'activity_invite_virtual',
       name: targetSection.name || '出游邀约',
       type: 'realtime',
-    }
+    })
     Object.keys(formData).forEach((key) => delete formData[key])
     if (state.prefill?.title) {
       formData[ACTIVITY_INVITE_WIDGET_IDS.title] = `${state.prefill.title}邀约`
@@ -678,8 +677,8 @@ async function uploadImages(tempPaths: string[]): Promise<string[]> {
 async function uploadNoteBlockImages(blocks: any[]): Promise<any[]> {
   return Promise.all((blocks || []).map(async (block) => {
     if (!block || block.type !== 'image') return block
-    const [fileID] = await uploadImages([String(block.fileID || '')])
-    return { ...block, fileID }
+    const uploaded = await uploadImages([String(block.fileID || '')])
+    return Object.assign({}, block, { fileID: uploaded[0] })
   }))
 }
 
@@ -758,7 +757,7 @@ async function handleSubmit() {
   submitting.value = true
   try {
     const sectionId = selectedSection.value._id
-    const content = { ...formData }
+    const content = Object.assign({}, formData)
     for (const widget of editableWidgets.value) {
       const value = content[widget.widgetId]
       const isEmpty =
@@ -784,8 +783,8 @@ async function handleSubmit() {
       }
       if (widget.type === 'rich_note') {
         content[widget.widgetId] = await uploadRichNoteImages(content[widget.widgetId], async (path) => {
-          const [fileID] = await uploadImages([path])
-          return fileID
+          const uploaded = await uploadImages([path])
+          return uploaded[0]
         })
       }
     }

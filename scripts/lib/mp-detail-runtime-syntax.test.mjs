@@ -14,22 +14,303 @@ async function writeFixture(root, relativePath, content) {
 
 async function createCriticalPageFixture() {
   const root = await mkdtemp(join(tmpdir(), 'hh-mp-runtime-'))
+  await writeFixture(root, 'app.json', JSON.stringify({
+    pages: [
+      'pages/index/index',
+      'pages/detail/index',
+      'pages/profile/index',
+      'pages/search/index',
+    ],
+    lazyCodeLoading: 'requiredComponents',
+  }))
+  await writeFixture(root, 'project.config.json', JSON.stringify({
+    libVersion: '3.15.1',
+    setting: { es6: false, minified: false, enhance: false },
+  }))
   await writeFixture(root, 'app.js', '')
   await writeFixture(root, 'pages/index/index.js', '')
   await writeFixture(root, 'pages/index/index.json', '{}')
+  await writeFixture(root, 'pages/index/index.wxml', '<view />')
   await writeFixture(root, 'pages/detail/index.js', 'require("../../utils/onboarding-nav.js")')
   await writeFixture(root, 'pages/detail/index.json', JSON.stringify({
     usingComponents: {
       'guide-route-detail-view': '/components/GuideRouteDetailView',
     },
   }))
+  await writeFixture(root, 'pages/detail/index.wxml', '<guide-route-detail-view />')
   await writeFixture(root, 'pages/profile/index.js', '')
   await writeFixture(root, 'pages/profile/index.json', '{}')
+  await writeFixture(root, 'pages/profile/index.wxml', '<view />')
+  await writeFixture(root, 'pages/search/index.js', '')
+  await writeFixture(root, 'pages/search/index.json', '{}')
+  await writeFixture(root, 'pages/search/index.wxml', '<view />')
   await writeFixture(root, 'utils/onboarding-nav.js', 'require("./community-share.js")')
   await writeFixture(root, 'utils/community-share.js', 'const copy = (items) => [...items]')
   await writeFixture(root, 'components/GuideRouteDetailView.js', 'const safe = true')
+  await writeFixture(root, 'components/GuideRouteDetailView.json', '{"component":true}')
+  await writeFixture(root, 'components/GuideRouteDetailView.wxml', '<view />')
   return root
 }
+
+test('requires WeChat required-components lazy code loading', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    await writeFixture(fixture, 'app.json', JSON.stringify({
+      pages: [
+        'pages/index/index',
+        'pages/detail/index',
+        'pages/profile/index',
+        'pages/search/index',
+      ],
+    }))
+    const result = scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' })
+    assert.ok(result.findings.some((finding) =>
+      finding.file === 'app.json' && finding.rule === 'requiredComponents lazy code loading'))
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test('requires the uploaded dist project to pin a WeChat base library version', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    await writeFixture(fixture, 'project.config.json', JSON.stringify({ libVersion: '' }))
+    const result = scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' })
+    assert.ok(result.findings.some((finding) =>
+      finding.file === 'project.config.json' && finding.rule === 'pinned WeChat base library'))
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test('rejects an unreviewed WeChat base library version change', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    await writeFixture(fixture, 'project.config.json', JSON.stringify({ libVersion: '3.15.2' }))
+    const result = scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' })
+    assert.ok(result.findings.some((finding) =>
+      finding.file === 'project.config.json' &&
+      finding.rule === 'pinned WeChat base library' &&
+      finding.snippet.includes('3.15.1')))
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test('requires upload settings that preserve the scanned JavaScript', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    await writeFixture(fixture, 'project.config.json', JSON.stringify({
+      libVersion: '3.15.1',
+      setting: { es6: true, minified: true },
+    }))
+    const result = scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' })
+    assert.ok(result.findings.some((finding) =>
+      finding.file === 'project.config.json' && finding.rule === 'upload preserves scanned JavaScript'))
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test('rejects the DevTools enhanced compiler after package scanning', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    await writeFixture(fixture, 'project.config.json', JSON.stringify({
+      libVersion: '3.15.1',
+      setting: { es6: false, minified: false, enhance: true },
+    }))
+    const result = scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' })
+    assert.ok(result.findings.some((finding) =>
+      finding.file === 'project.config.json' && finding.rule === 'upload preserves scanned JavaScript'))
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test('rejects forbidden syntax in every page declared by app.json', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    await writeFixture(fixture, 'pages/search/index.js', 'const values = Object.fromEntries([])')
+    const result = scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' })
+    assert.ok(result.findings.some((finding) =>
+      finding.file === 'pages/search/index.js' && finding.rule === 'Object.fromEntries'))
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test('rejects a missing dependency reachable from any declared page', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    await writeFixture(fixture, 'pages/search/index.js', 'require("../../utils/missing-search-helper.js")')
+    assert.throws(
+      () => scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' }),
+      /Missing mp-weixin critical dependency chunk.*missing-search-helper\.js/,
+    )
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test('rejects dynamic require calls whose package dependency cannot be proven', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    await writeFixture(fixture, 'pages/search/index.js', 'const helper = "../../utils/search-helper.js"; require(helper)')
+    assert.throws(
+      () => scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' }),
+      /Dynamic require prevents mp-weixin dependency verification.*pages.search.index\.js/i,
+    )
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test('rejects bare and package-escaping require requests', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    await writeFixture(fixture, 'pages/search/index.js', 'require("missing-bare")')
+    assert.throws(
+      () => scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' }),
+      /Unsupported bare mp-weixin dependency request.*missing-bare/i,
+    )
+
+    await writeFixture(fixture, 'pages/search/index.js', 'require("../../../outside.js")')
+    assert.throws(
+      () => scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' }),
+      /mp-weixin dependency escapes package root.*outside\.js/i,
+    )
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test('rejects dynamic import dependencies that cannot be proven', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    await writeFixture(fixture, 'pages/search/index.js', 'import("../../utils/missing-dynamic.js")')
+    assert.throws(
+      () => scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' }),
+      /Missing mp-weixin critical dependency chunk.*missing-dynamic\.js/i,
+    )
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test('requires complete page and local component artifacts', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    await rm(join(fixture, 'components/GuideRouteDetailView.wxml'))
+    assert.throws(
+      () => scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' }),
+      /Missing mp-weixin component template.*GuideRouteDetailView\.wxml/i,
+    )
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test('requires component metadata even when its JavaScript was already visited as a module', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    const fsPromises = await import('node:fs/promises')
+    const appConfig = JSON.parse(await fsPromises.readFile(join(fixture, 'app.json'), 'utf8'))
+    appConfig.pages.push('pages/component-owner/index', 'pages/module-user/index')
+    await writeFixture(fixture, 'app.json', JSON.stringify(appConfig))
+    await writeFixture(fixture, 'pages/component-owner/index.js', '')
+    await writeFixture(fixture, 'pages/component-owner/index.json', JSON.stringify({
+      usingComponents: { foo: '/components/Foo' },
+    }))
+    await writeFixture(fixture, 'pages/component-owner/index.wxml', '<foo />')
+    await writeFixture(fixture, 'pages/module-user/index.js', 'require("../../components/Foo.js")')
+    await writeFixture(fixture, 'pages/module-user/index.json', '{}')
+    await writeFixture(fixture, 'pages/module-user/index.wxml', '<view />')
+    await writeFixture(fixture, 'components/Foo.js', 'const safe = true')
+
+    assert.throws(
+      () => scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' }),
+      /Missing mp-weixin component config.*Foo\.json/i,
+    )
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test('requires local component JSON to declare component true', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    await writeFixture(fixture, 'components/GuideRouteDetailView.json', '{}')
+    assert.throws(
+      () => scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' }),
+      /Invalid mp-weixin component config.*component=true.*GuideRouteDetailView\.json/i,
+    )
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test('validates app-level global components', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    const fsPromises = await import('node:fs/promises')
+    const appConfig = JSON.parse(await fsPromises.readFile(join(fixture, 'app.json'), 'utf8'))
+    appConfig.usingComponents = { 'global-shell': '/components/MissingGlobalShell' }
+    await writeFixture(fixture, 'app.json', JSON.stringify(appConfig))
+    assert.throws(
+      () => scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' }),
+      /Missing mp-weixin critical dependency chunk.*MissingGlobalShell\.js/i,
+    )
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test('recursively validates WXML and WXSS dependencies', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    await writeFixture(fixture, 'pages/search/index.wxml', [
+      '<import src="../../templates/missing-card.wxml" />',
+      '<wxs src="../../utils/missing-format.wxs" module="format" />',
+    ].join('\n'))
+    assert.throws(
+      () => scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' }),
+      /Missing mp-weixin template dependency.*missing-(card|format)/i,
+    )
+
+    await writeFixture(fixture, 'pages/search/index.wxml', '<view />')
+    await writeFixture(fixture, 'pages/search/index.wxss', '@import "../../styles/missing-theme.wxss";')
+    assert.throws(
+      () => scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' }),
+      /Missing mp-weixin style dependency.*missing-theme\.wxss/i,
+    )
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test('scans subpackage pages and rejects page path traversal', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    const appConfig = JSON.parse(await (await import('node:fs/promises')).readFile(join(fixture, 'app.json'), 'utf8'))
+    appConfig.subPackages = [{ root: 'feature', pages: ['pages/tool/index'] }]
+    await writeFixture(fixture, 'app.json', JSON.stringify(appConfig))
+    await writeFixture(fixture, 'feature/pages/tool/index.js', 'const values = Object.fromEntries([])')
+    await writeFixture(fixture, 'feature/pages/tool/index.json', '{}')
+    await writeFixture(fixture, 'feature/pages/tool/index.wxml', '<view />')
+    const result = scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' })
+    assert.ok(result.findings.some((finding) =>
+      finding.file === 'feature/pages/tool/index.js' && finding.rule === 'Object.fromEntries'))
+
+    appConfig.subPackages = [{ root: 'feature', pages: ['../../outside'] }]
+    await writeFixture(fixture, 'app.json', JSON.stringify(appConfig))
+    assert.throws(
+      () => scanCriticalRuntimeSyntax(fixture, { expectedVendorHash: '' }),
+      /Invalid mp-weixin page path outside app root/i,
+    )
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
 
 test('rejects forbidden syntax in a transitive home dependency', async () => {
   const fixture = await createCriticalPageFixture()
@@ -51,6 +332,23 @@ test('rejects an unreviewed framework runtime change', async () => {
     assert.throws(
       () => scanCriticalRuntimeSyntax(fixture),
       /framework runtime changed/,
+    )
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test('rejects an unreviewed compiled third-party runtime change', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    await writeFixture(fixture, 'pages/search/index.js', 'require("/node-modules/example/index.js")')
+    await writeFixture(fixture, 'node-modules/example/index.js', 'const thirdPartyRuntime = true')
+    assert.throws(
+      () => scanCriticalRuntimeSyntax(fixture, {
+        expectedVendorHash: '',
+        expectedNodeModulesHash: 'reviewed-third-party-runtime',
+      }),
+      /third-party runtime changed/i,
     )
   } finally {
     await rm(fixture, { recursive: true, force: true })

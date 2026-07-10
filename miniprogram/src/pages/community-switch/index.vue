@@ -99,10 +99,11 @@ async function loadCommunities() {
   loading.value = true
   loadError.value = ''
   try {
-    const [, directory] = await Promise.all([
+    const results = await Promise.all([
       communityStore.loadMyCommunities({ loadSections: false }),
       communityApi.listDiscoverable(),
     ])
+    const directory = results[1]
     communities.value = mergeCommunityDirectory(
       communityStore.myCommunities,
       (directory.communities || []) as DirectoryCommunity[],
@@ -146,7 +147,7 @@ function communityAvatar(community: DirectoryCommunity) {
 
 function handleAvatarError(community: DirectoryCommunity) {
   const id = String(community?._id || '')
-  if (id) failedCoverIds.value = { ...failedCoverIds.value, [id]: true }
+  if (id) failedCoverIds.value = Object.assign({}, failedCoverIds.value, { [id]: true })
 }
 
 function communityInitial(community: DirectoryCommunity) {

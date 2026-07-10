@@ -14,7 +14,7 @@ try {
     }
     process.exit(1)
   }
-  console.log('mp-weixin app/home/detail/profile critical runtime syntax check passed')
+  console.log('mp-weixin all-page dependency and critical runtime syntax check passed')
 } catch (error) {
   console.error(error?.message || error)
   console.error('Run npm.cmd --workspace miniprogram run build:mp-weixin first.')

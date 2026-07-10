@@ -100,8 +100,9 @@ function isVerboseCloudLoggingEnabled() {
   }
 }
 
-function shouldUploadToCloud(level: LogLevel) {
+function shouldUploadToCloud(level: LogLevel, event: string) {
   if (level === 'warn' || level === 'error') return true
+  if (event === 'app.launch.start') return true
   return isVerboseCloudLoggingEnabled()
 }
 
@@ -120,7 +121,7 @@ export function clientLog(level: LogLevel, event: string, details: Record<string
   emitConsole(level, event, payload)
 
   try {
-    if (!shouldUploadToCloud(level)) return
+    if (!shouldUploadToCloud(level, event)) return
     if (!wxRef || !wxRef.cloud || !wxRef.cloud.callFunction) return
     wxRef.cloud.callFunction({
       name: 'post',

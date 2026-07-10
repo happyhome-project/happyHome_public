@@ -125,7 +125,13 @@ function updateMinimalText(text: string) {
     return
   }
   const existing = blocks.value.find((block): block is NoteTextBlock => block.type === 'text')
-  commit([{ blockId: existing?.blockId || newBlockId(), type: 'text', text: nextText }, ...images])
+  const nextBlocks: NoteBlock[] = [{
+    blockId: existing?.blockId || newBlockId(),
+    type: 'text',
+    text: nextText,
+  }]
+  for (const image of images) nextBlocks.push(image)
+  commit(nextBlocks)
 }
 
 function addTextBlock(text = '') {

@@ -36,6 +36,20 @@ describe('clientLog cloud upload policy', () => {
     expect(callFunction).toHaveBeenCalledTimes(2)
   })
 
+  test('uploads the app launch canary without enabling verbose logging', async () => {
+    const callFunction = vi.fn()
+    vi.stubGlobal('wx', {
+      cloud: { callFunction },
+      getStorageSync: vi.fn(() => ''),
+    })
+    vi.stubGlobal('getCurrentPages', vi.fn(() => []))
+    const { clientLog } = await import('../client-log')
+
+    clientLog('info', 'app.launch.start', { SDKVersion: '3.15.1', platform: 'android' })
+
+    expect(callFunction).toHaveBeenCalledTimes(1)
+  })
+
   test('uploads debug/info logs when verbose client logging is enabled', async () => {
     const callFunction = vi.fn()
     vi.stubGlobal('wx', {

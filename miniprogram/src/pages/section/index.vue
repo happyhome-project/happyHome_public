@@ -216,10 +216,11 @@ watch(
       return
     }
     try {
-      resolvedGuideCoverUrls.value = {
-        ...resolvedGuideCoverUrls.value,
-        ...(await resolveCloudFileUrls(urls)),
-      }
+      resolvedGuideCoverUrls.value = Object.assign(
+        {},
+        resolvedGuideCoverUrls.value,
+        await resolveCloudFileUrls(urls),
+      )
     } catch (error) {
       clientLog('warn', 'section.guideCover.resolve.fail', {
         sectionId: sectionId.value,
@@ -239,10 +240,11 @@ watch(
       return
     }
     try {
-      resolvedAuthorAvatarUrls.value = {
-        ...resolvedAuthorAvatarUrls.value,
-        ...(await resolveCloudFileUrls(urls)),
-      }
+      resolvedAuthorAvatarUrls.value = Object.assign(
+        {},
+        resolvedAuthorAvatarUrls.value,
+        await resolveCloudFileUrls(urls),
+      )
     } catch (error) {
       clientLog('warn', 'section.authorAvatar.resolve.fail', {
         sectionId: sectionId.value,
@@ -262,10 +264,12 @@ async function loadSectionData() {
   resolvedAuthorAvatarUrls.value = {}
   clientLog('info', 'section.load.start', { sectionId: sectionId.value })
   try {
-    const [sectionRes, postRes] = await Promise.all([
+    const results = await Promise.all([
       sectionApi.get(sectionId.value, !userStore.isLoggedIn),
       postApi.list(sectionId.value, 0, !userStore.isLoggedIn),
     ])
+    const sectionRes = results[0]
+    const postRes = results[1]
     section.value = sectionRes.section || null
     posts.value = postRes.posts || []
     if (!section.value) throw new Error('板块不存在')
@@ -346,11 +350,29 @@ function resolveAuthorName(post: any, fallback = ''): string {
 }
 
 function authorInitial(name: string): string {
-  return Array.from(String(name || '').trim()).find((char) => char.trim()) || '邻'
+  return splitUnicodeCharacters(String(name || '').trim()).find((char) => char.trim()) || '邻'
 }
 
 function coverFallbackText(item: SectionListItem): string {
-  return Array.from(item.title || sectionName.value || '社区').slice(0, 2).join('') || '社区'
+  return splitUnicodeCharacters(item.title || sectionName.value || '社区').slice(0, 2).join('') || '社区'
+}
+
+function splitUnicodeCharacters(value: unknown): string[] {
+  const source = String(value || '')
+  const chars: string[] = []
+  for (let index = 0; index < source.length; index += 1) {
+    let char = source.charAt(index)
+    const first = source.charCodeAt(index)
+    if (first >= 0xD800 && first <= 0xDBFF && index + 1 < source.length) {
+      const second = source.charCodeAt(index + 1)
+      if (second >= 0xDC00 && second <= 0xDFFF) {
+        char += source.charAt(index + 1)
+        index += 1
+      }
+    }
+    chars.push(char)
+  }
+  return chars
 }
 
 function generatedAvatarStyle(postId: string) {

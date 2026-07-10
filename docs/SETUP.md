@@ -320,6 +320,7 @@ npm run set:superadmin -- o1234567890abcdef https://<env-id>-<uin>.ap-shanghai.a
    - `npm.cmd run test:h5:detail-smoke` 必须能在未登录详情路径渲染 `.hh-login-guard` 和 `ver:`，确保详情页至少不会首屏完全空白；已登录、真实帖子点击仍需要 DevTools 录制回放或真机验证。
    - `test:h5:profile-smoke` 必须同时覆盖 H5 fallback 登录分支和模拟真机 `wx.canIUse('button.open-type.chooseAvatar')` 分支；不能只看 fallback 分支就认为真机登录页安全。
    - `npm.cmd run test:mp:profile-critical-path` 必须在 `build:mp-weixin` 之后通过，确保 `pages/profile/index.js` 首屏不会静态拉入登录后/管理员专用 helper。真机体验版一旦出现 `我的` 页空白，优先检查 profile 首屏静态依赖是否又变重。
+   - `npm.cmd run test:mp:detail-runtime-syntax` 会读取编译后的 `app.json` 和 `project.config.json`，要求 `lazyCodeLoading=requiredComponents`、固定基础库，并遍历全部页面与分包的本地 JS、组件、WXML/WXS、WXSS 依赖；bare/动态/越界依赖、缺失产物、未经审查的 framework/第三方 runtime hash 或项目自有高风险语法都会阻断上传。上传配置必须关闭 DevTools 的 ES6 二次转换、增强编译和二次压缩，让被扫描的 JavaScript 与交给上传器的 JavaScript 保持一致。
    - `pages/profile/index` 保留顶部 `ver/state/login/cc` 诊断条，以及 `profile.mounted/profile.show/profile.render.tick/profile.refresh.*` clientLog；真机反馈空白时，先用 CloudBase 日志确认这些事件和 build 号。
    - 结论边界：当前新版 DevTools CLI 可以在发布环节验证工具链、编译产物、回放窗口和已录制用例，但不能凭空断言“任意帖子点击详情在真机一定不空白”。要机器证明这个点击路径，必须先在微信开发者工具里录制覆盖“首页点击帖子 -> 详情有内容”和“进入我的页 -> 有版本/登录内容”的回放用例；没有录制用例时，发布 gate 只能阻止已知空白根因，最终体验版仍需真机点测。
 6. `scripts/deploy.mjs` 中的路径用 `path.resolve()` 构建，跨平台兼容

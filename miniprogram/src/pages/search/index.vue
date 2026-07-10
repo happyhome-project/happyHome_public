@@ -242,7 +242,7 @@ const communityName = computed(() => {
 const isInitialSearchLayout = computed(() => !searched.value && !loading.value)
 const compactQueryChipStyle = computed(() => {
   if (isInitialSearchLayout.value || !query.value.trim()) return {}
-  const queryWidth = Array.from(query.value.trim()).reduce((total, char) => {
+  const queryWidth = splitUnicodeCharacters(query.value.trim()).reduce((total, char) => {
     return total + (/[\u4e00-\u9fff]/.test(char) ? 16 : 8)
   }, 0)
   return { width: `${Math.min(203, Math.max(64, queryWidth + 49))}px` }
@@ -358,7 +358,7 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
     })
     if (requestSeq !== searchRequestSeq) return
     const nextItems = result.items || []
-    items.value = options.reset ? nextItems : [...items.value, ...nextItems]
+    items.value = options.reset ? nextItems : items.value.concat(nextItems)
     answer.value = String(result.answer || '')
     citations.value = result.citations || []
     mode.value = result.mode || ''
@@ -425,7 +425,7 @@ function firstPreview(item: SearchItem): string {
 
 function coverFallbackText(item: SearchItem): string {
   const name = String(item.sectionName || item.title || '社区').trim()
-  return Array.from(name).slice(0, 2).join('') || '社区'
+  return splitUnicodeCharacters(name).slice(0, 2).join('') || '社区'
 }
 
 function resultAuthorName(item: SearchItem): string {
@@ -444,7 +444,7 @@ function hasRealAuthorAvatar(item: SearchItem): boolean {
 
 function resultAuthorInitial(item: SearchItem): string {
   const name = resultAuthorName(item)
-  return Array.from(name).find((char) => char.trim()) || '邻'
+  return splitUnicodeCharacters(name).find((char) => char.trim()) || '邻'
 }
 
 function resultGeneratedAvatarStyle(item: SearchItem) {
@@ -473,12 +473,34 @@ async function resolveResultCovers(nextItems: SearchItem[]) {
     return
   }
   try {
-    const resolved = await resolveCloudFileUrls([...covers, ...avatars])
-    resolvedResultCoverUrls.value = Object.fromEntries(covers.map((cover) => [cover, resolved[cover] || cover]))
-    resolvedResultAvatarUrls.value = Object.fromEntries(avatars.map((avatar) => [avatar, resolved[avatar] || avatar]))
+    const resolved = await resolveCloudFileUrls(covers.concat(avatars))
+    const resolvedCovers: Record<string, string> = {}
+    for (const cover of covers) resolvedCovers[cover] = resolved[cover] || cover
+    const resolvedAvatars: Record<string, string> = {}
+    for (const avatar of avatars) resolvedAvatars[avatar] = resolved[avatar] || avatar
+    resolvedResultCoverUrls.value = resolvedCovers
+    resolvedResultAvatarUrls.value = resolvedAvatars
   } catch (error) {
     clientLog('warn', 'search.cover.resolve.fail', { error })
   }
+}
+
+function splitUnicodeCharacters(value: unknown): string[] {
+  const source = String(value || '')
+  const chars: string[] = []
+  for (let index = 0; index < source.length; index += 1) {
+    let char = source.charAt(index)
+    const first = source.charCodeAt(index)
+    if (first >= 0xD800 && first <= 0xDBFF && index + 1 < source.length) {
+      const second = source.charCodeAt(index + 1)
+      if (second >= 0xDC00 && second <= 0xDFFF) {
+        char += source.charAt(index + 1)
+        index += 1
+      }
+    }
+    chars.push(char)
+  }
+  return chars
 }
 
 function formatDate(value: unknown): string {

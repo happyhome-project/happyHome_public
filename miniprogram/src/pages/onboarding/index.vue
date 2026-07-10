@@ -163,7 +163,7 @@ function communityAvatar(community: any) {
 
 function handleAvatarError(community: any) {
   const id = String(community?._id || '')
-  if (id) failedCoverIds.value = { ...failedCoverIds.value, [id]: true }
+  if (id) failedCoverIds.value = Object.assign({}, failedCoverIds.value, { [id]: true })
 }
 
 function communityInitial(community: any) {

@@ -4,13 +4,8 @@ import { createHash } from 'node:crypto'
 import { parse } from 'acorn'
 
 export const KNOWN_FRAMEWORK_VENDOR_SHA256 = 'b573e2806c3946c5ffca160c372b3322cf167636a2a3841f0f77c57b616ba60a'
-
-const CRITICAL_ENTRYPOINTS = [
-  'app.js',
-  'pages/index/index.js',
-  'pages/detail/index.js',
-  'pages/profile/index.js',
-]
+export const KNOWN_NODE_MODULES_SHA256 = '62908539d813918af9bcb32a99b3dc24798213463fb4bb2c552dddcb815a7f2f'
+export const KNOWN_WECHAT_BASE_LIBRARY_VERSION = '3.15.1'
 
 function walk(node, visitor, parent = null) {
   if (!node || typeof node.type !== 'string') return
@@ -42,17 +37,49 @@ function isFrameworkRuntimeChunk(distRoot, chunkPath) {
   return path.relative(distRoot, chunkPath).replaceAll(path.sep, '/') === 'common/vendor.js'
 }
 
-function resolveLocalChunk(distRoot, importerPath, request) {
+function hashDirectory(directoryPath) {
+  const files = []
+  const pending = [directoryPath]
+  while (pending.length > 0) {
+    const current = pending.pop()
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const entryPath = path.join(current, entry.name)
+      if (entry.isDirectory()) pending.push(entryPath)
+      else files.push(entryPath)
+    }
+  }
+  files.sort((left, right) => left.localeCompare(right, 'en'))
+  const hash = createHash('sha256')
+  for (const filePath of files) {
+    hash.update(path.relative(directoryPath, filePath).replaceAll(path.sep, '/'))
+    hash.update('\0')
+    hash.update(fs.readFileSync(filePath))
+    hash.update('\0')
+  }
+  return hash.digest('hex')
+}
+
+function resolveLocalArtifact(distRoot, importerPath, request, defaultExtension, dependencyKind) {
   const value = String(request || '')
   let candidate = ''
   if (value.startsWith('.')) candidate = path.resolve(path.dirname(importerPath), value)
   else if (value.startsWith('/')) candidate = path.resolve(distRoot, value.slice(1))
-  else return ''
+  else if (/^(?:plugin|ext):\/\//.test(value)) return ''
+  else throw new Error(`Unsupported bare mp-weixin dependency request in ${importerPath}: ${value}`)
 
-  const chunkPath = path.extname(candidate) ? candidate : `${candidate}.js`
-  const relativePath = path.relative(distRoot, chunkPath)
-  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) return ''
-  return chunkPath
+  const artifactPath = path.extname(candidate) ? candidate : `${candidate}${defaultExtension}`
+  const relativePath = path.relative(distRoot, artifactPath)
+  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    throw new Error(`mp-weixin dependency escapes package root in ${importerPath}: ${value}`)
+  }
+  if (!fs.existsSync(artifactPath)) {
+    throw new Error(`Missing mp-weixin ${dependencyKind}: ${artifactPath}`)
+  }
+  return artifactPath
+}
+
+function resolveLocalChunk(distRoot, importerPath, request) {
+  return resolveLocalArtifact(distRoot, importerPath, request, '.js', 'critical dependency chunk')
 }
 
 function parseChunk(source, chunkPath) {
@@ -63,37 +90,154 @@ function parseChunk(source, chunkPath) {
   }
 }
 
-function readComponentDependencies(distRoot, chunkPath) {
+function readWxmlDependencies(distRoot, templatePath, visited = new Set()) {
+  if (visited.has(templatePath)) return
+  visited.add(templatePath)
+  const source = fs.readFileSync(templatePath, 'utf8')
+  const dependencyPattern = /<(import|include|wxs)\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi
+  for (const match of source.matchAll(dependencyPattern)) {
+    const extension = match[1].toLowerCase() === 'wxs' ? '.wxs' : '.wxml'
+    const dependency = resolveLocalArtifact(distRoot, templatePath, match[2], extension, 'template dependency')
+    if (dependency && extension === '.wxml') readWxmlDependencies(distRoot, dependency, visited)
+  }
+}
+
+function readWxssDependencies(distRoot, stylePath, visited = new Set()) {
+  if (!fs.existsSync(stylePath) || visited.has(stylePath)) return
+  visited.add(stylePath)
+  const source = fs.readFileSync(stylePath, 'utf8')
+  const dependencyPattern = /@import\s+(?:url\(\s*)?["']([^"']+)["']\s*\)?\s*;/gi
+  for (const match of source.matchAll(dependencyPattern)) {
+    const dependency = resolveLocalArtifact(distRoot, stylePath, match[1], '.wxss', 'style dependency')
+    if (dependency) readWxssDependencies(distRoot, dependency, visited)
+  }
+}
+
+function componentRequests(config) {
+  const requests = Object.values(config.usingComponents || {})
+  for (const generic of Object.values(config.componentGenerics || {})) {
+    if (generic && typeof generic === 'object' && typeof generic.default === 'string') {
+      requests.push(generic.default)
+    }
+  }
+  return requests
+}
+
+function readComponentDependencies(distRoot, chunkPath, artifactType) {
   const configPath = chunkPath.replace(/\.js$/i, '.json')
-  if (!fs.existsSync(configPath)) return []
+  const templatePath = chunkPath.replace(/\.js$/i, '.wxml')
+  if (!fs.existsSync(configPath)) {
+    throw new Error(`Missing mp-weixin ${artifactType} config: ${configPath}`)
+  }
+  if (!fs.existsSync(templatePath)) {
+    throw new Error(`Missing mp-weixin ${artifactType} template: ${templatePath}`)
+  }
+  readWxmlDependencies(distRoot, templatePath)
+  readWxssDependencies(distRoot, chunkPath.replace(/\.js$/i, '.wxss'))
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'))
-  return Object.values(config.usingComponents || {})
+  if (artifactType === 'component' && config.component !== true) {
+    throw new Error(`Invalid mp-weixin component config; expected component=true: ${configPath}`)
+  }
+  return componentRequests(config)
     .map((request) => resolveLocalChunk(distRoot, configPath, request))
     .filter(Boolean)
 }
 
-function collectCriticalDependencyChunks(distRoot) {
-  const pending = CRITICAL_ENTRYPOINTS.map((relativePath) => path.join(distRoot, relativePath))
+function readApplicationEntrypoints(distRoot) {
+  const configPath = path.join(distRoot, 'app.json')
+  if (!fs.existsSync(configPath)) throw new Error(`Missing mp-weixin app config: ${configPath}`)
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'))
+  const pages = Array.isArray(config.pages) ? config.pages.slice() : []
+  const subPackages = Array.isArray(config.subPackages)
+    ? config.subPackages
+    : Array.isArray(config.subpackages)
+      ? config.subpackages
+      : []
+  for (const subPackage of subPackages) {
+    const root = String(subPackage?.root || '').replace(/^\/+|\/+$/g, '')
+    for (const page of Array.isArray(subPackage?.pages) ? subPackage.pages : []) {
+      pages.push(root ? `${root}/${page}` : String(page || ''))
+    }
+  }
+  const entrypoints = [{ relativePath: 'app.js', artifactType: 'application' }]
+  for (const page of pages) {
+    const relativePath = String(page || '').replaceAll('\\', '/').replace(/^\/+/, '')
+    if (relativePath.split('/').includes('..')) {
+      throw new Error(`Invalid mp-weixin page path outside app root: ${relativePath}`)
+    }
+    if (relativePath) {
+      entrypoints.push({
+        relativePath: relativePath.endsWith('.js') ? relativePath : `${relativePath}.js`,
+        artifactType: 'page',
+      })
+    }
+  }
+  for (const request of componentRequests(config)) {
+    const chunkPath = resolveLocalChunk(distRoot, configPath, request)
+    if (chunkPath) {
+      entrypoints.push({
+        relativePath: path.relative(distRoot, chunkPath),
+        artifactType: 'component',
+      })
+    }
+  }
+  return { config, entrypoints }
+}
+
+function readProjectConfig(distRoot) {
+  const configPath = path.join(distRoot, 'project.config.json')
+  if (!fs.existsSync(configPath)) throw new Error(`Missing mp-weixin project config: ${configPath}`)
+  return JSON.parse(fs.readFileSync(configPath, 'utf8'))
+}
+
+function collectCriticalDependencyChunks(distRoot, entrypoints) {
+  const pending = entrypoints.map(({ relativePath, artifactType }) => ({
+    chunkPath: path.join(distRoot, relativePath),
+    artifactType,
+  }))
   const visited = new Set()
+  const validatedBundles = new Set()
 
   while (pending.length > 0) {
-    const chunkPath = pending.pop()
-    if (!chunkPath || visited.has(chunkPath) || isFrameworkRuntimeChunk(distRoot, chunkPath)) continue
+    const current = pending.pop()
+    const chunkPath = current?.chunkPath
+    if (!chunkPath || isFrameworkRuntimeChunk(distRoot, chunkPath)) continue
     if (!fs.existsSync(chunkPath)) {
       throw new Error(`Missing mp-weixin critical dependency chunk: ${chunkPath}`)
     }
+
+    if (current.artifactType === 'page' || current.artifactType === 'component') {
+      const bundleKey = `${current.artifactType}:${chunkPath}`
+      if (!validatedBundles.has(bundleKey)) {
+        validatedBundles.add(bundleKey)
+        for (const dependency of readComponentDependencies(distRoot, chunkPath, current.artifactType)) {
+          pending.push({ chunkPath: dependency, artifactType: 'component' })
+        }
+      }
+    }
+    if (visited.has(chunkPath)) continue
 
     visited.add(chunkPath)
     const source = fs.readFileSync(chunkPath, 'utf8')
     const ast = parseChunk(source, chunkPath)
     walk(ast, (node) => {
-      if (node.type !== 'CallExpression' || node.callee?.type !== 'Identifier' || node.callee.name !== 'require') return
-      const request = node.arguments?.[0]
-      if (request?.type !== 'Literal' || typeof request.value !== 'string') return
-      const dependency = resolveLocalChunk(distRoot, chunkPath, request.value)
-      if (dependency) pending.push(dependency)
+      if (node.type === 'CallExpression' && node.callee?.type === 'Identifier' && node.callee.name === 'require') {
+        const request = node.arguments?.[0]
+        if (request?.type !== 'Literal' || typeof request.value !== 'string') {
+          throw new Error(`Dynamic require prevents mp-weixin dependency verification: ${chunkPath}`)
+        }
+        const dependency = resolveLocalChunk(distRoot, chunkPath, request.value)
+        if (dependency) pending.push({ chunkPath: dependency, artifactType: 'module' })
+      }
+      if (node.type === 'ImportExpression') {
+        const request = node.source
+        if (request?.type !== 'Literal' || typeof request.value !== 'string') {
+          throw new Error(`Dynamic import prevents mp-weixin dependency verification: ${chunkPath}`)
+        }
+        const dependency = resolveLocalChunk(distRoot, chunkPath, request.value)
+        if (dependency) pending.push({ chunkPath: dependency, artifactType: 'module' })
+      }
     })
-    pending.push(...readComponentDependencies(distRoot, chunkPath))
   }
 
   return [...visited].sort()
@@ -146,12 +290,45 @@ function scanChunk(relativePath, source, ast) {
 
 export function scanCriticalRuntimeSyntax(inputDistRoot, options = {}) {
   const distRoot = path.resolve(inputDistRoot)
+  const application = readApplicationEntrypoints(distRoot)
+  const projectConfig = readProjectConfig(distRoot)
   const detailConfig = path.join(distRoot, 'pages', 'detail', 'index.json')
   if (!fs.existsSync(detailConfig)) {
     throw new Error(`Missing mp-weixin detail page config: ${detailConfig}`)
   }
 
   const findings = []
+  if (application.config.lazyCodeLoading !== 'requiredComponents') {
+    findings.push({
+      file: 'app.json',
+      rule: 'requiredComponents lazy code loading',
+      offset: 0,
+      snippet: `lazyCodeLoading=${JSON.stringify(application.config.lazyCodeLoading || '')}`,
+    })
+  }
+  const expectedBaseLibraryVersion = Object.prototype.hasOwnProperty.call(options, 'expectedBaseLibraryVersion')
+    ? String(options.expectedBaseLibraryVersion || '')
+    : KNOWN_WECHAT_BASE_LIBRARY_VERSION
+  if (expectedBaseLibraryVersion && String(projectConfig.libVersion || '') !== expectedBaseLibraryVersion) {
+    findings.push({
+      file: 'project.config.json',
+      rule: 'pinned WeChat base library',
+      offset: 0,
+      snippet: `expected=${JSON.stringify(expectedBaseLibraryVersion)} actual=${JSON.stringify(projectConfig.libVersion || '')}`,
+    })
+  }
+  if (
+    projectConfig.setting?.es6 !== false ||
+    projectConfig.setting?.minified !== false ||
+    projectConfig.setting?.enhance !== false
+  ) {
+    findings.push({
+      file: 'project.config.json',
+      rule: 'upload preserves scanned JavaScript',
+      offset: 0,
+      snippet: `es6=${JSON.stringify(projectConfig.setting?.es6)} minified=${JSON.stringify(projectConfig.setting?.minified)} enhance=${JSON.stringify(projectConfig.setting?.enhance)}`,
+    })
+  }
   const vendorPath = path.join(distRoot, 'common', 'vendor.js')
   const expectedVendorHash = Object.prototype.hasOwnProperty.call(options, 'expectedVendorHash')
     ? options.expectedVendorHash
@@ -161,6 +338,16 @@ export function scanCriticalRuntimeSyntax(inputDistRoot, options = {}) {
     const actualVendorHash = createHash('sha256').update(fs.readFileSync(vendorPath)).digest('hex')
     if (actualVendorHash !== expectedVendorHash) {
       throw new Error(`mp-weixin framework runtime changed: expected ${expectedVendorHash}, got ${actualVendorHash}. Review trial-runtime compatibility before updating the baseline.`)
+    }
+  }
+  const nodeModulesPath = path.join(distRoot, 'node-modules')
+  const expectedNodeModulesHash = Object.prototype.hasOwnProperty.call(options, 'expectedNodeModulesHash')
+    ? options.expectedNodeModulesHash
+    : KNOWN_NODE_MODULES_SHA256
+  if (expectedNodeModulesHash && fs.existsSync(nodeModulesPath)) {
+    const actualNodeModulesHash = hashDirectory(nodeModulesPath)
+    if (actualNodeModulesHash !== expectedNodeModulesHash) {
+      throw new Error(`mp-weixin third-party runtime changed: expected ${expectedNodeModulesHash}, got ${actualNodeModulesHash}. Review trial-runtime compatibility before updating the baseline.`)
     }
   }
   const detailJson = JSON.parse(fs.readFileSync(detailConfig, 'utf8'))
@@ -173,9 +360,10 @@ export function scanCriticalRuntimeSyntax(inputDistRoot, options = {}) {
     })
   }
 
-  const dependencyChunks = collectCriticalDependencyChunks(distRoot)
+  const dependencyChunks = collectCriticalDependencyChunks(distRoot, application.entrypoints)
   for (const chunkPath of dependencyChunks) {
     const relativePath = path.relative(distRoot, chunkPath).replaceAll(path.sep, '/')
+    if (relativePath.startsWith('node-modules/')) continue
     const source = fs.readFileSync(chunkPath, 'utf8')
     findings.push(...scanChunk(relativePath, source, parseChunk(source, chunkPath)))
   }

@@ -31,12 +31,12 @@ export function mergeCommunityDirectory(
   for (const community of joinedCommunities || []) {
     if (!community?._id || community.status !== 'active') continue
     joinedIds.add(community._id)
-    result.push({ ...community, viewerStatus: 'active' })
+    result.push(Object.assign({}, community, { viewerStatus: 'active' }))
   }
 
   for (const community of directoryCommunities || []) {
     if (!community?._id || community.status !== 'active' || joinedIds.has(community._id)) continue
-    result.push({ ...community })
+    result.push(Object.assign({}, community))
   }
 
   return result
