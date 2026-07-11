@@ -148,6 +148,13 @@ async function main() {
     communityId = community.functionResult?.communityId || ''
     if (!communityId) throw new Error('community.createAdmin did not return communityId')
 
+    const member = await invokeFunction('member', {
+      action: 'apply',
+      communityId,
+      _testOpenid: ownerOpenid,
+    }, options)
+    if (member?.status !== 'active') throw new Error(`member.apply did not activate fixture user: ${JSON.stringify(member)}`)
+
     const section = await invokeAdmin('section.create', {
       communityId,
       name: `RAG Smoke ${options.actor}`,

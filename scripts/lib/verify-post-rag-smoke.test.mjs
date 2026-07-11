@@ -20,3 +20,8 @@ test('verify-post-rag-smoke queries the post cloud function instead of the disab
   assert.match(source, /_testOpenid: openid/)
   assert.doesNotMatch(source, /http-gateway/)
 })
+
+test('verify-post-rag-smoke joins the temporary community before searching as its fixture user', () => {
+  assert.match(source, /invokeFunction\('member', \{[\s\S]*action: 'apply'/)
+  assert.match(source, /member\?\.status !== 'active'/)
+})
