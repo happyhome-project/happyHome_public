@@ -893,7 +893,7 @@ const dormantNames = computed(() => {
 // ── Helpers ──
 // kicker（档案左栏小标）— 当前用「装饰版」：前 3 条固定 01 / 02 / 03。
 // 未来如果接入真实档案号（#27/#26/… 按板块累计），换成 post 自带的 seqInSection 字段即可。
-// 详见 memory/feedback_kicker_design_decision.md
+// 保持与当前首页 kicker 视觉规范一致。
 function formatArchiveKicker(index: number): string {
   return String(index + 1).padStart(2, '0')
 }

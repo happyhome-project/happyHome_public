@@ -6,8 +6,9 @@
 
 - [环境与首次安装](SETUP.md)
 - [测试原则](TESTING-PRINCIPLES.md)
-- [当前会话交接](SESSION-HANDOFF.md)
 - [RAG 运维](post-rag-search.md)
 - [视觉与交互资料](VISUAL-TONE.md)
+- [协作与合并边界](../AGENTS.md)
+- [当前任务与待决策项](../TASKS.md)
 
-历史计划和已废弃设计不得作为当前实现依据；其状态必须在文件顶部明确标注。项目级经验记录在 [memory/MEMORY.md](../memory/MEMORY.md)。
+历史计划和已废弃设计不得作为当前实现依据；其状态必须在文件顶部明确标注。Agent memory、聊天记录和临时故障现场不得作为公开仓库的文档依赖。

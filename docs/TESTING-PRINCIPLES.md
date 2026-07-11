@@ -106,7 +106,7 @@
 - `width: 100%` + `padding` 的容器是否设了 `box-sizing: border-box`（注意微信小程序 `input` 组件对 box-sizing 支持不完全，用 `display:block; width:auto` 更稳）
 - 不同屏幕宽度（小屏 iPhone SE、大屏 Pro Max）的布局
 
-**记录模式**：已知的跨端样式坑，记到 `memory/feedback_wx_style_pitfalls.md`（按需创建），避免下次重犯。
+**记录模式**：可复用且不含隐私的跨端样式约束应补充到本文档并用回归测试固化。
 
 ## 九、连击、并发、压力测试
 

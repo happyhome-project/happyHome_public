@@ -4,7 +4,7 @@
 > 2026-07-09 起，小程序 UI/UX 当前准则以 Figma 文件 `社区资源共享_小程序_0709_v2` 为准；`0626` 仅作为历史基线。
 > 执行参考：[docs/figma-mini-0626-inventory.md](./figma-mini-0626-inventory.md)
 > 下文关于“单列卡片流”“不做双列瀑布流”等结论均为历史判断，不再作为当前小程序实现依据。
-> 当前状态总览：[docs/SESSION-HANDOFF.md](./SESSION-HANDOFF.md)
+> 当前实现状态以代码、关联 PR 和 [figma-mini-0626-inventory.md](./figma-mini-0626-inventory.md) 为准。
 
 ---
 

@@ -44,6 +44,6 @@ Production work is performed from `main` in `C:\Project\Claude\happyHome`; featu
 - [Post RAG Search](./docs/post-rag-search.md): architecture, operations, cost boundaries, and RAG smoke acceptance.
 - [Testing](./docs/TESTING.md): test layers and commands.
 - [Release Gate](./docs/release-gate.md): formal release evidence and CloudBase deployment rules.
-- [Session Handoff](./docs/SESSION-HANDOFF.md): current operational state for a new session.
+- [Tasks](./TASKS.md): current backlog and unresolved project decisions.
 
-Use Node 24 and npm 11. Read [AGENTS.md](./AGENTS.md) for mandatory PR/CI/worktree/release boundaries, [CLAUDE.md](./CLAUDE.md) for collaboration guidance, and [memory/MEMORY.md](./memory/MEMORY.md) for the project memory index.
+Use Node 24 and npm 11. Read [AGENTS.md](./AGENTS.md) for mandatory PR/CI/worktree/release boundaries and [CLAUDE.md](./CLAUDE.md) for collaboration guidance.

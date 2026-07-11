@@ -1,5 +1,9 @@
 import { dirname, normalize } from 'node:path'
 
+export function requiredPublicDocumentPaths() {
+  return ['README.md', 'AGENTS.md', 'TASKS.md', 'docs/README.md']
+}
+
 function isRelativeMarkdownTarget(target) {
   const value = String(target || '').trim()
   return value.endsWith('.md') && !value.startsWith('#') && !/^[a-z][a-z0-9+.-]*:/i.test(value)

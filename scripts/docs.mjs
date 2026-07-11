@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import process from 'node:process'
 
-import { findRelativeMarkdownLinks } from './lib/docs-policy.mjs'
+import { findRelativeMarkdownLinks, requiredPublicDocumentPaths } from './lib/docs-policy.mjs'
 
 function git(args) {
   const result = spawnSync('git', args, { encoding: 'utf8', windowsHide: true })
@@ -27,7 +27,7 @@ function catalog(root, files) {
 }
 
 function check(root, files) {
-  const required = ['README.md', 'docs/README.md', 'memory/MEMORY.md']
+  const required = requiredPublicDocumentPaths()
   const missing = required.filter((path) => !existsSync(join(root, path)))
   const broken = []
   for (const path of files) {

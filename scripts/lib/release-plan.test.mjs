@@ -83,14 +83,14 @@ test('release plan selects only manifests changed in the production diff', () =>
     { changeId: 'current', source: 'release/changes/20260711-current.json' },
   ]
   assert.deepEqual(
-    selectChangeManifestsForDiff(manifests, ['M\trelease/changes/20260711-current.json', 'docs/SESSION-HANDOFF.md']),
+    selectChangeManifestsForDiff(manifests, ['M\trelease/changes/20260711-current.json', 'docs/README.md']),
     [manifests[1]],
   )
-  assert.deepEqual(selectChangeManifestsForDiff(manifests, ['docs/SESSION-HANDOFF.md']), [])
+  assert.deepEqual(selectChangeManifestsForDiff(manifests, ['docs/README.md']), [])
 })
 
 test('documentation and release-tooling changes do not require production publication', () => {
-  for (const changedPath of ['docs/SESSION-HANDOFF.md', 'README.md', 'scripts/release-plan.mjs']) {
+  for (const changedPath of ['docs/README.md', 'README.md', 'scripts/release-plan.mjs']) {
     const plan = createReleasePlan({
       baseSha: 'base',
       headSha: 'head',

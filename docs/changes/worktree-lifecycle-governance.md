@@ -6,10 +6,10 @@ Implemented on the `codex/worktree-lifecycle-governance` feature branch; it is n
 
 ## Change
 
-- Pin worktree bootstrap/runtime checks to Node 24/npm 11 and use the root workspace lockfile only. Trusted CI workflow upgrades are intentionally excluded from this feature PR and require a separate CI-governance change.
+- Pin worktree bootstrap/runtime checks to Node 24/npm 11 and use the root workspace lockfile only. The trusted CI workflow and Merge Queue support are inherited unchanged from public `main`; this feature does not modify either workflow.
 - Add explicit doctor, bootstrap, status, sync-main, retire, environment-profile, docs-check, and docs-catalog commands.
 - Record Codex/Claude session heartbeats in the common Git directory under a shared lock; a hook must first be trusted by its client. Missing or stale (over 12 hours) heartbeats remain `unknown`, not inactive, and are retirement blockers.
-- Keep main integration PR-only; no background merge, rebase, stash, or remote branch deletion is introduced.
+- Keep main integration PR-only through the repository Ruleset and Merge Queue; no background merge, rebase, stash, or remote branch deletion is introduced.
 - `env:run` classifies local commands only. Actual deployment commands enforce canonical `main`, clean state, and `HEAD=origin/main` at runtime.
 
 ## Operational impact

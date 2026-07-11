@@ -2,12 +2,13 @@ name: pr-ci
 
 on:
   pull_request:
+  merge_group:
 
 permissions:
   contents: read
 
 concurrency:
-  group: pr-ci-${{ github.event.pull_request.number }}
+  group: pr-ci-${{ github.event.pull_request.number || github.event.merge_group.head_sha }}
   cancel-in-progress: true
 
 jobs:
@@ -18,7 +19,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           fetch-depth: 0
 
       - name: Setup Node
@@ -54,8 +55,13 @@ jobs:
       - name: Test deploy output policy
         run: npm run test:deploy-output
 
-      - name: Check whitespace
+      - name: Check pull request whitespace
+        if: github.event_name == 'pull_request'
         run: git diff --check ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }}
+
+      - name: Check merge group whitespace
+        if: github.event_name == 'merge_group'
+        run: git diff --check ${{ github.event.merge_group.base_sha }} ${{ github.event.merge_group.head_sha }}
 
       - name: Plan PR release
         run: |
