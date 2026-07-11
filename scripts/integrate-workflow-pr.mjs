@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process'
 import process from 'node:process'
 import { acquireIntegrationLock, parsePrNumber, resolveSpawnInvocation } from './lib/integrate-pr-policy.mjs'
 import { CANONICAL_MAIN_WORKSPACE } from './lib/worktree-policy.mjs'
-import { VALIDATOR_PATH, applyAfterValidation, assertAttestation, createManifest, discoverWorkflowCandidate } from './lib/trusted-workflow-policy.mjs'
+import { VALIDATOR_PATH, assertAttestation, createManifest, discoverWorkflowCandidate, executeTrustedApply, findValidatorRun } from './lib/trusted-workflow-policy.mjs'
 
 const VALIDATOR_WORKFLOW = basename(VALIDATOR_PATH)
 function run(command, args, { cwd = process.cwd(), encoding = 'utf8' } = {}) {
@@ -63,14 +63,16 @@ async function main() {
       run('gh', ['workflow', 'run', VALIDATOR_WORKFLOW, '--ref', 'main', '-f', `prNumber=${prNumber}`, '-f', `baseSha=${candidate.baseSha}`, '-f', `headSha=${candidate.headSha}`, '-f', `diffSha256=${candidate.diffSha256}`, '-f', `requestId=${requestId}`], { cwd: root })
       let info
       for (let attempt = 0; attempt < 20 && !info; attempt += 1) {
-        info = JSON.parse(output('gh', ['run', 'list', '--workflow', VALIDATOR_WORKFLOW, '--event', 'workflow_dispatch', '--limit', '20', '--json', 'databaseId,displayTitle,status,conclusion,headSha'], root)).find((item) => item.displayTitle?.includes(requestId))
+        info = JSON.parse(output('gh', ['run', 'list', '--workflow', VALIDATOR_WORKFLOW, '--event', 'workflow_dispatch', '--limit', '20', '--json', 'databaseId,displayTitle,status,conclusion,headSha,createdAt'], root)).find((item) => item.displayTitle?.includes(requestId))
         if (!info) await new Promise((resolveDelay) => setTimeout(resolveDelay, 3000))
       }
       if (!info) throw new Error(`Unable to find validator run for request ${requestId}`)
       run('gh', ['run', 'watch', String(info.databaseId), '--exit-status'], { cwd: root })
+      info = findValidatorRun([JSON.parse(output('gh', ['run', 'view', String(info.databaseId), '--json', 'databaseId,displayTitle,status,conclusion,headSha,createdAt'], root))], requestId, candidate.validatorWorkflowSha)
       const attestation = downloadAttestation(root, info.databaseId, requestId)
-      assertAttestation(attestation, { schemaVersion: 1, prNumber, ...candidate, requestId, runId: info.databaseId })
-      const manifest = createManifest({ prNumber, ...candidate, requestId, runId: info.databaseId, attestation })
+      assertAttestation(attestation, { schemaVersion: 1, prNumber, ...candidate, requestId, runId: info.databaseId, validatedAt: attestation.validatedAt })
+      const runCreatedAt = new Date(info.createdAt).toISOString()
+      const manifest = createManifest({ prNumber, ...candidate, requestId, runId: info.databaseId, runCreatedAt, attestation, createdAt: attestation.validatedAt })
       const directory = join(root, '.codex-local', 'workflow-integrations'); mkdirSync(directory, { recursive: true })
       const path = join(directory, `pr-${prNumber}-${requestId}.json`); writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
       console.log(`[integrate-workflow-pr] manifest: ${path}`); console.log(`[integrate-workflow-pr] approval: ${manifest.approvalPhrase}`)
@@ -79,12 +81,15 @@ async function main() {
       const manifest = JSON.parse(readFileSync(resolve(manifestPath), 'utf8'))
       if (manifest.prNumber !== prNumber) throw new Error('Manifest PR mismatch')
       const attestation = downloadAttestation(root, manifest.runId, manifest.requestId)
-      await applyAfterValidation({
+      const runInfo = findValidatorRun([JSON.parse(output('gh', ['run', 'view', String(manifest.runId), '--json', 'databaseId,displayTitle,status,conclusion,headSha,createdAt'], root))], manifest.requestId, manifest.validatorWorkflowSha)
+      await executeTrustedApply({
         manifest,
-        current: { now: new Date().toISOString(), approval: argument('approve'), ...candidate, prNumber, requestId: manifest.requestId, runId: manifest.runId, attestation },
+        current: { now: new Date().toISOString(), approval: argument('approve'), ...candidate, prNumber, requestId: manifest.requestId, runId: manifest.runId, runCreatedAt: new Date(runInfo.createdAt).toISOString(), attestation },
+        refreshBase: async () => { run('git', ['fetch', 'origin', 'main'], { cwd: root }); return output('git', ['rev-parse', 'origin/main'], root) },
+        readPullRequest: async () => JSON.parse(output('gh', ['pr', 'view', String(prNumber), '--json', 'state,isDraft,baseRefName,baseRefOid,headRefOid,mergeStateStatus'], root)),
         merge: async () => run('gh', ['pr', 'merge', String(prNumber), '--merge', '--match-head-commit', candidate.headSha], { cwd: root }),
+        pull: async () => run('git', ['pull', '--ff-only', 'origin', 'main'], { cwd: root }),
       })
-      run('git', ['pull', '--ff-only', 'origin', 'main'], { cwd: root })
       console.log(`[integrate-workflow-pr] merged PR #${prNumber} at ${candidate.headSha}`)
     }
   } finally { release() }

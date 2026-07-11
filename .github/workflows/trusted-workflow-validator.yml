@@ -18,12 +18,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ inputs.headSha }}
           fetch-depth: 0
       - name: Setup Node 24
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 24
           cache: npm
@@ -67,6 +67,7 @@ jobs:
             schemaVersion=1; prNumber=[int]$env:PR_NUMBER; baseSha=$env:BASE_SHA; headSha=$env:HEAD_SHA
             diffSha256=$env:DIFF_SHA256; requestId=$env:REQUEST_ID; runId=[long]$env:RUN_ID
             validatorWorkflowSha=$env:VALIDATOR_WORKFLOW_SHA; conclusion='success'
+            validatedAt=(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
             checks=@{
               cloudTest='passed'; cloudBuild='passed'; adminTypecheck='passed'; adminBuild='passed'
               miniprogramTypecheck='passed'; miniprogramUnit='passed'; miniprogramBuild='passed'
@@ -76,7 +77,7 @@ jobs:
           }
           $attestation | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 trusted-workflow-attestation.json
       - name: Upload attestation
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: trusted-workflow-attestation-${{ inputs.requestId }}
           path: trusted-workflow-attestation.json
