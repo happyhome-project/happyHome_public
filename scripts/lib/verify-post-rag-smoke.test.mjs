@@ -28,6 +28,8 @@ test('verify-post-rag-smoke binds the signed identity to a server-side temporary
   assert.match(source, /createProductionReleaseStore/)
   assert.match(source, /async function seedFixtureMember/)
   assert.match(source, /collection\('community_members'\)\.add/)
+  assert.match(source, /collection\('community_members'\)\.add\(\{\s*communityId,\s*userId,\s*role: 'member',\s*status: 'active'/)
+  assert.doesNotMatch(source, /collection\('community_members'\)\.add\(\{\s*data:/)
   assert.match(source, /async function seedFixtureRun/)
   assert.match(source, /collection\('post_rag_smoke_runs'\)\.doc\(identity\.runId\)\.set/)
   assert.match(source, /async function cleanupFixtureRun/)

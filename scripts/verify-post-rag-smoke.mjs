@@ -128,7 +128,7 @@ async function seedFixtureMember(communityId, userId) {
   const db = createProductionReleaseStore({ root: process.cwd() }).db
   const now = new Date().toISOString()
   await db.collection('community_members').add({
-    data: { communityId, userId, role: 'member', status: 'active', appliedAt: now, joinedAt: now },
+    communityId, userId, role: 'member', status: 'active', appliedAt: now, joinedAt: now,
   })
 }
 
