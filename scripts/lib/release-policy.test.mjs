@@ -163,7 +163,7 @@ test('formal release path records resumable ledger stages before upload', () => 
   assert.match(deployScript, /function assertFormalReleaseCloudBasePath/)
   assert.match(releaseBlock, /assertFormalReleaseCloudBasePath\(\{ prepareOnly }\)/)
   assert.match(deployScript, /Formal release publish requires --use-tcb/)
-  assert.match(releaseBlock, /deployCloud\(\{ requireCloudBaseCli: true }\)/)
+  assert.match(releaseBlock, /deployCloud\(\{[\s\S]*?requireCloudBaseCli:\s*true/)
   assert.match(deployScript, /requireCloudBaseCli/)
   assert.match(deployScript, /Formal release CloudBase CLI\/COS deploy failed/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'miniprogram-build-gate'/)
