@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 export const APPROVAL_PREFIX = 'APPROVE TRUSTED WORKFLOW PR '
 export const MANIFEST_SCHEMA_VERSION = 1
 export const MANIFEST_TTL_MS = 2 * 60 * 60 * 1000
+export const TRUSTED_REPOSITORY = 'happyhome-project/happyHome_public'
 export const VALIDATOR_PATH = '.github/workflows/trusted-workflow-validator.yml'
 export const REQUIRED_VALIDATOR_CHECKS = Object.freeze([
   'cloudTest', 'cloudBuild', 'adminTypecheck', 'adminBuild', 'miniprogramTypecheck',
@@ -18,6 +19,36 @@ const TRUST_ROOT_PATHS = new Set([
   'package.json',
   'AGENTS.md',
 ])
+
+export function assertTrustedWorkflowWorkspace({ root, repository, isPrivate, repositoryUrl, originUrl, branch, status, headSha, originMainSha }) {
+  if (String(repository || '').toLowerCase() !== TRUSTED_REPOSITORY.toLowerCase()) {
+    throw new Error(`Trusted workflow integration requires the trusted public repository ${TRUSTED_REPOSITORY}; got ${repository || '(missing)'}`)
+  }
+  if (isPrivate !== false) throw new Error(`Trusted workflow repository ${TRUSTED_REPOSITORY} must remain public`)
+  let repositoryHost
+  try { repositoryHost = new URL(repositoryUrl).hostname.toLowerCase() } catch { throw new Error('Trusted workflow repository URL must identify github.com') }
+  if (repositoryHost !== 'github.com') throw new Error(`Trusted workflow repository must be hosted on github.com; got ${repositoryHost}`)
+  let originHost, originRepository
+  const scpOrigin = String(originUrl || '').match(/^git@([^:]+):(.+)$/i)
+  if (scpOrigin) {
+    originHost = scpOrigin[1]
+    originRepository = scpOrigin[2]
+  } else {
+    try {
+      const parsedOrigin = new URL(originUrl)
+      originHost = parsedOrigin.hostname
+      originRepository = parsedOrigin.pathname
+    } catch { throw new Error('Git origin must identify the trusted public repository on github.com') }
+  }
+  const normalizedOriginRepository = String(originRepository).replace(/^\/+|\/+$/g, '').replace(/\.git$/i, '')
+  if (String(originHost).toLowerCase() !== 'github.com' || normalizedOriginRepository.toLowerCase() !== TRUSTED_REPOSITORY.toLowerCase()) {
+    throw new Error(`Git origin must identify the trusted public repository ${TRUSTED_REPOSITORY}`)
+  }
+  if (branch !== 'main') throw new Error(`Trusted workflow integration requires branch main; got ${branch || '(detached)'}`)
+  if (String(status || '').trim()) throw new Error('Trusted workflow integration requires a clean worktree')
+  if (!headSha || headSha !== originMainSha) throw new Error(`Trusted workflow integration requires HEAD=origin/main; got HEAD=${headSha || '(missing)'} origin/main=${originMainSha || '(missing)'}`)
+  return { root, repository: TRUSTED_REPOSITORY, branch, headSha, originMainSha }
+}
 
 export function assertWorkflowPaths(paths) {
   const normalized = [...paths].map((path) => String(path).replace(/\\/g, '/')).sort()
@@ -125,15 +156,82 @@ export function findValidatorRun(runs, requestId, validatorWorkflowSha) {
   return run
 }
 
-export async function executeTrustedApply({ manifest, current, refreshBase, readPullRequest, merge, pull }) {
+function baseAdvanceError(expectedBaseSha, latestBaseSha) {
+  return new Error(`PR base advanced from ${expectedBaseSha} to ${latestBaseSha}; fresh prepare required`)
+}
+
+function mergedTerminalEvidence(pr, expectedHeadSha) {
+  if (pr.state !== 'MERGED') return undefined
+  if (expectedHeadSha && pr.headRefOid !== expectedHeadSha) throw new Error(`PR merged head identity mismatch: expected ${expectedHeadSha}, got ${pr.headRefOid || '(missing)'}`)
+  if (!pr.mergedAt || !pr.mergeCommit?.oid) throw new Error('PR is MERGED but merge terminal evidence is incomplete')
+  return { state: 'MERGED', mergedAt: pr.mergedAt, mergeCommitOid: pr.mergeCommit.oid }
+}
+
+function assertOpenQueueState(pr) {
+  if (pr.state === 'CLOSED') throw new Error('PR closed without merge while waiting for merge queue')
+  if (pr.state !== 'OPEN') throw new Error(`Unexpected PR state while waiting for merge queue: ${pr.state || '(missing)'}`)
+}
+
+async function resolveQueuedFailure({ primaryError, dequeueSuccessMessage, readPullRequest, dequeue, expectedHeadSha }) {
+  const beforeDequeue = await readPullRequest()
+  const racedTerminal = mergedTerminalEvidence(beforeDequeue, expectedHeadSha)
+  if (racedTerminal) return racedTerminal
+  assertOpenQueueState(beforeDequeue)
+  try {
+    await dequeue()
+    primaryError.message += `; ${dequeueSuccessMessage}`
+  } catch (cleanupError) {
+    const afterCleanupFailure = await readPullRequest()
+    const cleanupRaceTerminal = mergedTerminalEvidence(afterCleanupFailure, expectedHeadSha)
+    if (cleanupRaceTerminal) return cleanupRaceTerminal
+    primaryError.cleanupError = cleanupError
+    primaryError.message += `; dequeue cleanup failed: ${cleanupError?.message || cleanupError}`
+  }
+  throw primaryError
+}
+
+export function assertMergeCommitParents({ parents, baseSha, headSha }) {
+  if (!Array.isArray(parents) || parents[0] !== baseSha || !parents.slice(1).includes(headSha)) {
+    throw new Error(`Merge commit parents do not bind expected base ${baseSha} and head ${headSha}`)
+  }
+  return parents
+}
+
+export async function waitForMergeQueueTerminal({ refreshBase, readPullRequest, dequeue, delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), maxAttempts = 360, pollIntervalMs = 10_000, expectedBaseSha, expectedHeadSha }) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const pr = await readPullRequest()
+    const terminal = mergedTerminalEvidence(pr, expectedHeadSha)
+    if (terminal) return terminal
+    assertOpenQueueState(pr)
+
+    const latestBaseSha = await refreshBase()
+    if (latestBaseSha !== expectedBaseSha) {
+      const driftError = baseAdvanceError(expectedBaseSha, latestBaseSha)
+      return await resolveQueuedFailure({ primaryError: driftError, dequeueSuccessMessage: 'dequeued', readPullRequest, dequeue, expectedHeadSha })
+    }
+    if (attempt + 1 < maxAttempts) await delay(pollIntervalMs)
+  }
+  return await resolveQueuedFailure({
+    primaryError: new Error(`Timed out waiting for merge queue after ${maxAttempts} attempts`),
+    dequeueSuccessMessage: 'dequeued; fresh prepare required',
+    readPullRequest,
+    dequeue,
+    expectedHeadSha,
+  })
+}
+
+export async function executeTrustedApply({ manifest, current, refreshBase, readPullRequest, enqueue, dequeue, readMergeParents, pull, delay, maxAttempts, pollIntervalMs }) {
   validateManifest(manifest, current)
   const latestBase = await refreshBase()
-  if (latestBase !== manifest.baseSha) throw new Error(`PR base advanced from ${manifest.baseSha} to ${latestBase}`)
+  if (latestBase !== manifest.baseSha) throw new Error(`PR base advanced from ${manifest.baseSha} to ${latestBase}; fresh prepare required`)
   const pr = await readPullRequest()
-  if (pr.state !== 'OPEN' || pr.isDraft || pr.baseRefName !== 'main' || pr.baseRefOid !== manifest.baseSha || pr.headRefOid !== manifest.headSha) throw new Error('Server PR identity drift detected')
+  if (!pr.id || pr.state !== 'OPEN' || pr.isDraft || pr.baseRefName !== 'main' || pr.baseRefOid !== manifest.baseSha || pr.headRefOid !== manifest.headSha) throw new Error('Server PR identity drift detected')
   if (pr.mergeStateStatus !== 'CLEAN') throw new Error(`Server PR is not up-to-date and clean; got ${pr.mergeStateStatus || '(missing)'}`)
-  await merge()
+  await enqueue(manifest.headSha)
+  const terminal = await waitForMergeQueueTerminal({ refreshBase, readPullRequest, dequeue: () => dequeue(pr.id), delay, maxAttempts, pollIntervalMs, expectedBaseSha: manifest.baseSha, expectedHeadSha: manifest.headSha })
+  assertMergeCommitParents({ parents: await readMergeParents(terminal.mergeCommitOid), baseSha: manifest.baseSha, headSha: manifest.headSha })
   await pull()
+  return terminal
 }
 
 export async function withIntegrationLock(acquire, work) {

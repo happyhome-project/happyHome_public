@@ -2,8 +2,11 @@ import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, win32 } from 'node:path'
 import test from 'node:test'
+
+import * as trustedPolicy from './trusted-workflow-policy.mjs'
+import * as workflowIntegrator from '../integrate-workflow-pr.mjs'
 
 import {
   APPROVAL_PREFIX,
@@ -27,6 +30,40 @@ const base = sha('a')
 const head = sha('b')
 const validator = sha('c')
 const diffSha256 = 'd'.repeat(64)
+
+test('trusted workflow workspace accepts any clean synchronized main checkout of the public repository', () => {
+  assert.equal(trustedPolicy.TRUSTED_REPOSITORY, 'happyhome-project/happyHome_public')
+  assert.equal(typeof trustedPolicy.assertTrustedWorkflowWorkspace, 'function')
+  assert.deepEqual(trustedPolicy.assertTrustedWorkflowWorkspace({
+    root: 'D:\\arbitrary\\clean-main',
+    repository: 'HappyHome-Project/HAPPYHOME_PUBLIC',
+    isPrivate: false,
+    repositoryUrl: 'https://github.com/happyhome-project/happyHome_public',
+    originUrl: 'git@github.com:happyhome-project/happyHome_public.git',
+    branch: 'main',
+    status: '',
+    headSha: base,
+    originMainSha: base,
+  }), {
+    root: 'D:\\arbitrary\\clean-main',
+    repository: 'happyhome-project/happyHome_public',
+    branch: 'main',
+    headSha: base,
+    originMainSha: base,
+  })
+})
+
+test('trusted workflow workspace rejects private, feature, dirty, and stale checkouts', () => {
+  assert.equal(typeof trustedPolicy.assertTrustedWorkflowWorkspace, 'function')
+  const valid = { root: 'D:\\main', repository: 'happyhome-project/happyHome_public', isPrivate: false, repositoryUrl: 'https://github.com/happyhome-project/happyHome_public', originUrl: 'git@github.com:happyhome-project/happyHome_public.git', branch: 'main', status: '', headSha: base, originMainSha: base }
+  assert.throws(() => trustedPolicy.assertTrustedWorkflowWorkspace({ ...valid, repository: 'other-owner/private-repo' }), /trusted public repository/i)
+  assert.throws(() => trustedPolicy.assertTrustedWorkflowWorkspace({ ...valid, isPrivate: true }), /must remain public/i)
+  assert.throws(() => trustedPolicy.assertTrustedWorkflowWorkspace({ ...valid, repositoryUrl: 'https://github.example.com/happyhome-project/happyHome_public' }), /github\.com/i)
+  assert.throws(() => trustedPolicy.assertTrustedWorkflowWorkspace({ ...valid, originUrl: 'git@github.com:other-owner/private-repo.git' }), /origin.*trusted public repository/i)
+  assert.throws(() => trustedPolicy.assertTrustedWorkflowWorkspace({ ...valid, branch: 'codex/feature' }), /branch main/i)
+  assert.throws(() => trustedPolicy.assertTrustedWorkflowWorkspace({ ...valid, status: ' M scripts/file.mjs' }), /clean worktree/i)
+  assert.throws(() => trustedPolicy.assertTrustedWorkflowWorkspace({ ...valid, headSha: head }), /origin\/main/i)
+})
 
 function attestation(overrides = {}) {
   return {
@@ -149,19 +186,231 @@ test('artifact is downloaded, read, and fully verified in order', async () => {
   await assert.rejects(() => obtainVerifiedAttestation({ downloadArtifact: async () => {}, readArtifact: async () => attestation({ checks: {} }), expected }), /required validator check/i)
 })
 
-test('apply refetches and rechecks base plus server clean state immediately before merge', async () => {
+test('apply enqueues the exact head, waits for MERGED, then pulls and returns terminal evidence', async () => {
   const manifest = createManifest({ prNumber: 42, baseSha: base, headSha: head, changedPaths: ['.github/workflows/example.yml'], diffSha256, validatorWorkflowSha: validator, requestId: 'req-42', runId: 1234, runCreatedAt: '2026-07-11T00:00:00.000Z', attestation: attestation(), createdAt: '2026-07-11T00:10:00.000Z' })
   const current = { ...manifest, now: '2026-07-11T01:00:00.000Z', approval: manifest.approvalPhrase, attestation: attestation() }
+  const events = [], mergeCommit = sha('f')
+  let originMain = base
+  const states = [
+    { id: 'PR_node_42', state: 'OPEN', isDraft: false, baseRefName: 'main', baseRefOid: base, headRefOid: head, mergeStateStatus: 'CLEAN' },
+    { state: 'OPEN' },
+    { state: 'MERGED', headRefOid: head, mergedAt: '2026-07-11T01:02:00.000Z', mergeCommit: { oid: mergeCommit } },
+  ]
+  const result = await executeTrustedApply({
+    manifest,
+    current,
+    refreshBase: async () => { events.push(`fetch-base:${originMain}`); return originMain },
+    readPullRequest: async () => { const state = states.shift(); if (state.state === 'MERGED') originMain = mergeCommit; events.push(`read-pr:${state.state}`); return state },
+    enqueue: async (exactHead) => { events.push(`enqueue:${exactHead}`) },
+    dequeue: async () => { events.push('dequeue') },
+    readMergeParents: async (mergeCommitOid) => { assert.equal(originMain, mergeCommit); events.push(`read-parents:${mergeCommitOid}`); return [base, head] },
+    delay: async () => { events.push('delay') },
+    pull: async () => events.push('pull'),
+  })
+  assert.deepEqual(events, [`fetch-base:${base}`, 'read-pr:OPEN', `enqueue:${head}`, 'read-pr:OPEN', `fetch-base:${base}`, 'delay', 'read-pr:MERGED', `read-parents:${mergeCommit}`, 'pull'])
+  assert.deepEqual(result, { state: 'MERGED', mergedAt: '2026-07-11T01:02:00.000Z', mergeCommitOid: mergeCommit })
+})
+
+test('merge queue terminal wait polls OPEN and succeeds only for MERGED', async () => {
+  assert.equal(typeof trustedPolicy.waitForMergeQueueTerminal, 'function')
   const events = []
-  await executeTrustedApply({ manifest, current, refreshBase: async () => { events.push('fetch-base'); return base }, readPullRequest: async () => { events.push('read-pr'); return { state: 'OPEN', isDraft: false, baseRefName: 'main', baseRefOid: base, headRefOid: head, mergeStateStatus: 'CLEAN' } }, merge: async () => events.push('merge'), pull: async () => events.push('pull') })
-  assert.deepEqual(events, ['fetch-base', 'read-pr', 'merge', 'pull'])
+  const states = [{ state: 'OPEN' }, { state: 'MERGED', headRefOid: head, mergedAt: '2026-07-11T01:02:00.000Z', mergeCommit: { oid: sha('f') } }]
+  const result = await trustedPolicy.waitForMergeQueueTerminal({
+    refreshBase: async () => { events.push('fetch-base'); return base },
+    readPullRequest: async () => { const state = states.shift(); events.push(state.state); return state },
+    dequeue: async () => events.push('dequeue'),
+    delay: async () => events.push('delay'),
+    maxAttempts: 2,
+    expectedBaseSha: base,
+    expectedHeadSha: head,
+  })
+  assert.deepEqual(events, ['OPEN', 'fetch-base', 'delay', 'MERGED'])
+  assert.deepEqual(result, { state: 'MERGED', mergedAt: '2026-07-11T01:02:00.000Z', mergeCommitOid: sha('f') })
+})
+
+test('merge queue terminal wait rejects closed-without-merge and timeout', async () => {
+  assert.equal(typeof trustedPolicy.waitForMergeQueueTerminal, 'function')
+  const baseOptions = { refreshBase: async () => base, dequeue: async () => {}, expectedBaseSha: base, delay: async () => {}, maxAttempts: 1 }
+  await assert.rejects(() => trustedPolicy.waitForMergeQueueTerminal({ ...baseOptions, readPullRequest: async () => ({ state: 'CLOSED' }) }), /closed without merge/i)
+  await assert.rejects(() => trustedPolicy.waitForMergeQueueTerminal({ ...baseOptions, readPullRequest: async () => ({ state: 'MERGED', mergedAt: null, mergeCommit: null }) }), /merge terminal evidence/i)
+  await assert.rejects(() => trustedPolicy.waitForMergeQueueTerminal({ ...baseOptions, readPullRequest: async () => ({ state: 'MERGED', headRefOid: sha('e'), mergedAt: '2026-07-11T01:02:00.000Z', mergeCommit: { oid: sha('f') } }), expectedHeadSha: head }), /merged head.*mismatch/i)
+  let reads = 0, dequeues = 0
+  await assert.rejects(() => trustedPolicy.waitForMergeQueueTerminal({ ...baseOptions, readPullRequest: async () => { reads += 1; return { state: 'OPEN' } }, dequeue: async () => { dequeues += 1 }, maxAttempts: 2 }), /timed out.*dequeued.*fresh prepare/i)
+  assert.equal(reads, 3)
+  assert.equal(dequeues, 1)
+})
+
+test('OPEN queue wait dequeues once and rejects without pull when base advances', async () => {
+  const manifest = createManifest({ prNumber: 42, baseSha: base, headSha: head, changedPaths: ['.github/workflows/example.yml'], diffSha256, validatorWorkflowSha: validator, requestId: 'req-42', runId: 1234, runCreatedAt: '2026-07-11T00:00:00.000Z', attestation: attestation(), createdAt: '2026-07-11T00:10:00.000Z' })
+  const current = { ...manifest, now: '2026-07-11T01:00:00.000Z', approval: manifest.approvalPhrase, attestation: attestation() }
+  const bases = [base, sha('e')], events = []
+  await assert.rejects(() => executeTrustedApply({
+    manifest, current,
+    refreshBase: async () => { const value = bases.shift(); events.push(`base:${value}`); return value },
+    readPullRequest: async () => { events.push('read-pr'); return { id: 'PR_node_42', state: 'OPEN', isDraft: false, baseRefName: 'main', baseRefOid: base, headRefOid: head, mergeStateStatus: 'CLEAN' } },
+    enqueue: async () => events.push('enqueue'),
+    dequeue: async (id) => events.push(`dequeue:${id}`),
+    readMergeParents: async () => { events.push('read-parents'); return [base, head] },
+    delay: async () => {},
+    maxAttempts: 1,
+    pull: async () => events.push('pull'),
+  }), /base advanced.*fresh prepare required/i)
+  assert.deepEqual(events, [`base:${base}`, 'read-pr', 'enqueue', 'read-pr', `base:${sha('e')}`, 'read-pr', 'dequeue:PR_node_42'])
+})
+
+test('base drift preserves the primary error when dequeue cleanup fails', async () => {
+  let error
+  try {
+    await trustedPolicy.waitForMergeQueueTerminal({ refreshBase: async () => sha('e'), readPullRequest: async () => ({ state: 'OPEN' }), dequeue: async () => { throw new Error('graphql unavailable') }, expectedBaseSha: base, maxAttempts: 1 })
+  } catch (caught) { error = caught }
+  assert.ok(error)
+  assert.match(error.message, /base advanced/i)
+  assert.match(error.message, /fresh prepare required.*dequeue cleanup failed.*graphql unavailable/i)
+})
+
+test('MERGED terminal with parents bound to a new base rejects without pull', async () => {
+  const manifest = createManifest({ prNumber: 42, baseSha: base, headSha: head, changedPaths: ['.github/workflows/example.yml'], diffSha256, validatorWorkflowSha: validator, requestId: 'req-42', runId: 1234, runCreatedAt: '2026-07-11T00:00:00.000Z', attestation: attestation(), createdAt: '2026-07-11T00:10:00.000Z' })
+  const current = { ...manifest, now: '2026-07-11T01:00:00.000Z', approval: manifest.approvalPhrase, attestation: attestation() }
+  let pulls = 0
+  const states = [
+    { id: 'PR_node_42', state: 'OPEN', isDraft: false, baseRefName: 'main', baseRefOid: base, headRefOid: head, mergeStateStatus: 'CLEAN' },
+    { state: 'MERGED', headRefOid: head, mergedAt: '2026-07-11T01:02:00.000Z', mergeCommit: { oid: sha('f') } },
+  ]
+  await assert.rejects(() => executeTrustedApply({ manifest, current, refreshBase: async () => base, readPullRequest: async () => states.shift(), enqueue: async () => {}, dequeue: async () => {}, readMergeParents: async () => [sha('e'), head], pull: async () => { pulls += 1 } }), /merge commit parents.*base/i)
+  assert.equal(pulls, 0)
+})
+
+test('OPEN base drift that becomes MERGED before dequeue succeeds only with original parents', async () => {
+  const manifest = createManifest({ prNumber: 42, baseSha: base, headSha: head, changedPaths: ['.github/workflows/example.yml'], diffSha256, validatorWorkflowSha: validator, requestId: 'req-42', runId: 1234, runCreatedAt: '2026-07-11T00:00:00.000Z', attestation: attestation(), createdAt: '2026-07-11T00:10:00.000Z' })
+  const current = { ...manifest, now: '2026-07-11T01:00:00.000Z', approval: manifest.approvalPhrase, attestation: attestation() }
+  const merged = { state: 'MERGED', headRefOid: head, mergedAt: '2026-07-11T01:02:00.000Z', mergeCommit: { oid: sha('f') } }
+  const states = [
+    { id: 'PR_node_42', state: 'OPEN', isDraft: false, baseRefName: 'main', baseRefOid: base, headRefOid: head, mergeStateStatus: 'CLEAN' },
+    { state: 'OPEN' },
+    merged,
+  ]
+  const bases = [base, sha('e')], events = []
+  const result = await executeTrustedApply({ manifest, current, refreshBase: async () => bases.shift(), readPullRequest: async () => states.shift(), enqueue: async () => events.push('enqueue'), dequeue: async () => events.push('dequeue'), readMergeParents: async () => [base, head], pull: async () => events.push('pull') })
+  assert.deepEqual(events, ['enqueue', 'pull'])
+  assert.equal(result.mergeCommitOid, sha('f'))
+})
+
+test('OPEN base drift that becomes MERGED before dequeue rejects mismatched parents', async () => {
+  const manifest = createManifest({ prNumber: 42, baseSha: base, headSha: head, changedPaths: ['.github/workflows/example.yml'], diffSha256, validatorWorkflowSha: validator, requestId: 'req-42', runId: 1234, runCreatedAt: '2026-07-11T00:00:00.000Z', attestation: attestation(), createdAt: '2026-07-11T00:10:00.000Z' })
+  const current = { ...manifest, now: '2026-07-11T01:00:00.000Z', approval: manifest.approvalPhrase, attestation: attestation() }
+  const states = [
+    { id: 'PR_node_42', state: 'OPEN', isDraft: false, baseRefName: 'main', baseRefOid: base, headRefOid: head, mergeStateStatus: 'CLEAN' },
+    { state: 'OPEN' },
+    { state: 'MERGED', headRefOid: head, mergedAt: '2026-07-11T01:02:00.000Z', mergeCommit: { oid: sha('f') } },
+  ]
+  const bases = [base, sha('e')]
+  let pulls = 0
+  await assert.rejects(() => executeTrustedApply({ manifest, current, refreshBase: async () => bases.shift(), readPullRequest: async () => states.shift(), enqueue: async () => {}, dequeue: async () => {}, readMergeParents: async () => [sha('e'), head], pull: async () => { pulls += 1 } }), /merge commit parents.*base/i)
+  assert.equal(pulls, 0)
+})
+
+test('dequeue failure race that becomes MERGED validates parents and succeeds', async () => {
+  const manifest = createManifest({ prNumber: 42, baseSha: base, headSha: head, changedPaths: ['.github/workflows/example.yml'], diffSha256, validatorWorkflowSha: validator, requestId: 'req-42', runId: 1234, runCreatedAt: '2026-07-11T00:00:00.000Z', attestation: attestation(), createdAt: '2026-07-11T00:10:00.000Z' })
+  const current = { ...manifest, now: '2026-07-11T01:00:00.000Z', approval: manifest.approvalPhrase, attestation: attestation() }
+  const states = [
+    { id: 'PR_node_42', state: 'OPEN', isDraft: false, baseRefName: 'main', baseRefOid: base, headRefOid: head, mergeStateStatus: 'CLEAN' },
+    { state: 'OPEN' },
+    { state: 'OPEN' },
+    { state: 'MERGED', headRefOid: head, mergedAt: '2026-07-11T01:02:00.000Z', mergeCommit: { oid: sha('f') } },
+  ]
+  const bases = [base, sha('e')], events = []
+  const result = await executeTrustedApply({ manifest, current, refreshBase: async () => bases.shift(), readPullRequest: async () => states.shift(), enqueue: async () => events.push('enqueue'), dequeue: async () => { events.push('dequeue'); throw new Error('race') }, readMergeParents: async () => [base, head], pull: async () => events.push('pull') })
+  assert.deepEqual(events, ['enqueue', 'dequeue', 'pull'])
+  assert.equal(result.mergeCommitOid, sha('f'))
+})
+
+test('timeout while still OPEN dequeues once and rejects without pull', async () => {
+  const manifest = createManifest({ prNumber: 42, baseSha: base, headSha: head, changedPaths: ['.github/workflows/example.yml'], diffSha256, validatorWorkflowSha: validator, requestId: 'req-42', runId: 1234, runCreatedAt: '2026-07-11T00:00:00.000Z', attestation: attestation(), createdAt: '2026-07-11T00:10:00.000Z' })
+  const current = { ...manifest, now: '2026-07-11T01:00:00.000Z', approval: manifest.approvalPhrase, attestation: attestation() }
+  let dequeues = 0, pulls = 0
+  await assert.rejects(() => executeTrustedApply({ manifest, current, refreshBase: async () => base, readPullRequest: async () => ({ id: 'PR_node_42', state: 'OPEN', isDraft: false, baseRefName: 'main', baseRefOid: base, headRefOid: head, mergeStateStatus: 'CLEAN' }), enqueue: async () => {}, dequeue: async () => { dequeues += 1 }, readMergeParents: async () => [base, head], delay: async () => {}, maxAttempts: 1, pull: async () => { pulls += 1 } }), /timed out.*dequeued.*fresh prepare/i)
+  assert.equal(dequeues, 1)
+  assert.equal(pulls, 0)
+})
+
+test('timeout pre-dequeue reread that is MERGED validates parents and succeeds', async () => {
+  const manifest = createManifest({ prNumber: 42, baseSha: base, headSha: head, changedPaths: ['.github/workflows/example.yml'], diffSha256, validatorWorkflowSha: validator, requestId: 'req-42', runId: 1234, runCreatedAt: '2026-07-11T00:00:00.000Z', attestation: attestation(), createdAt: '2026-07-11T00:10:00.000Z' })
+  const current = { ...manifest, now: '2026-07-11T01:00:00.000Z', approval: manifest.approvalPhrase, attestation: attestation() }
+  const states = [
+    { id: 'PR_node_42', state: 'OPEN', isDraft: false, baseRefName: 'main', baseRefOid: base, headRefOid: head, mergeStateStatus: 'CLEAN' },
+    { state: 'OPEN' },
+    { state: 'MERGED', headRefOid: head, mergedAt: '2026-07-11T01:02:00.000Z', mergeCommit: { oid: sha('f') } },
+  ]
+  const events = []
+  const result = await executeTrustedApply({ manifest, current, refreshBase: async () => base, readPullRequest: async () => states.shift(), enqueue: async () => {}, dequeue: async () => events.push('dequeue'), readMergeParents: async () => [base, head], delay: async () => {}, maxAttempts: 1, pull: async () => events.push('pull') })
+  assert.deepEqual(events, ['pull'])
+  assert.equal(result.mergeCommitOid, sha('f'))
+})
+
+test('timeout dequeue failure followed by MERGED validates parents and succeeds', async () => {
+  const manifest = createManifest({ prNumber: 42, baseSha: base, headSha: head, changedPaths: ['.github/workflows/example.yml'], diffSha256, validatorWorkflowSha: validator, requestId: 'req-42', runId: 1234, runCreatedAt: '2026-07-11T00:00:00.000Z', attestation: attestation(), createdAt: '2026-07-11T00:10:00.000Z' })
+  const current = { ...manifest, now: '2026-07-11T01:00:00.000Z', approval: manifest.approvalPhrase, attestation: attestation() }
+  const states = [
+    { id: 'PR_node_42', state: 'OPEN', isDraft: false, baseRefName: 'main', baseRefOid: base, headRefOid: head, mergeStateStatus: 'CLEAN' },
+    { state: 'OPEN' },
+    { state: 'OPEN' },
+    { state: 'MERGED', headRefOid: head, mergedAt: '2026-07-11T01:02:00.000Z', mergeCommit: { oid: sha('f') } },
+  ]
+  const events = []
+  const result = await executeTrustedApply({ manifest, current, refreshBase: async () => base, readPullRequest: async () => states.shift(), enqueue: async () => {}, dequeue: async () => { events.push('dequeue'); throw new Error('race') }, readMergeParents: async () => [base, head], delay: async () => {}, maxAttempts: 1, pull: async () => events.push('pull') })
+  assert.deepEqual(events, ['dequeue', 'pull'])
+  assert.equal(result.mergeCommitOid, sha('f'))
+})
+
+test('timeout dequeue failure while still OPEN preserves timeout and cleanup errors', async () => {
+  const manifest = createManifest({ prNumber: 42, baseSha: base, headSha: head, changedPaths: ['.github/workflows/example.yml'], diffSha256, validatorWorkflowSha: validator, requestId: 'req-42', runId: 1234, runCreatedAt: '2026-07-11T00:00:00.000Z', attestation: attestation(), createdAt: '2026-07-11T00:10:00.000Z' })
+  const current = { ...manifest, now: '2026-07-11T01:00:00.000Z', approval: manifest.approvalPhrase, attestation: attestation() }
+  let pulls = 0
+  await assert.rejects(() => executeTrustedApply({ manifest, current, refreshBase: async () => base, readPullRequest: async () => ({ id: 'PR_node_42', state: 'OPEN', isDraft: false, baseRefName: 'main', baseRefOid: base, headRefOid: head, mergeStateStatus: 'CLEAN' }), enqueue: async () => {}, dequeue: async () => { throw new Error('graphql unavailable') }, readMergeParents: async () => [base, head], delay: async () => {}, maxAttempts: 1, pull: async () => { pulls += 1 } }), /timed out.*dequeue cleanup failed.*graphql unavailable/i)
+  assert.equal(pulls, 0)
+})
+
+test('workflow integrator bootstraps trust from the public repository and reports the terminal merge commit', () => {
+  const script = readFileSync(new URL('../integrate-workflow-pr.mjs', import.meta.url), 'utf8')
+  assert.doesNotMatch(script, /CANONICAL_MAIN_WORKSPACE/)
+  assert.match(script, /gh[\s\S]*repo[\s\S]*view[\s\S]*nameWithOwner,isPrivate,url/)
+  assert.match(script, /remote', 'get-url', 'origin'/)
+  assert.match(script, /TRUSTED_REPOSITORY/)
+  assert.match(script, /assertTrustedWorkflowWorkspace/)
+  assert.match(script, /inspectTrustedWorkspace\(root\)\s*\r?\n/)
+  assert.match(script, /inspectTrustedWorkspace\(root, \{ fetch: true \}\)/)
+  assert.equal(script.match(/inspectTrustedWorkspace\(root, \{ fetch: true \}\)/g)?.length, 1)
+  const candidateInspection = script.slice(script.indexOf('function inspectCandidate'), script.indexOf('function downloadAttestation'))
+  assert.doesNotMatch(candidateInspection, /\['fetch', 'origin', 'main'\]/)
+  assert.match(script, /enqueue:\s*async\s*\(exactHead\)/)
+  assert.match(script, /mergedAt,mergeCommit/)
+  assert.match(script, /dequeuePullRequest\(input:\{id:\$id\}\)/)
+  assert.match(script, /--hostname[\s\S]*github\.com/)
+  const mergeParentReader = script.slice(script.indexOf('readMergeParents:'), script.indexOf('pull: async', script.indexOf('readMergeParents:')))
+  assert.match(mergeParentReader, /merge-base[\s\S]*--is-ancestor[\s\S]*origin\/main/)
+  assert.match(script, /git[\s\S]*show[\s\S]*--format=%P/)
+  assert.match(script, /terminal\.mergeCommitOid/)
+})
+
+test('workflow integration lock matches normal integrator git common-dir semantics on Windows', () => {
+  assert.equal(typeof workflowIntegrator.workflowIntegrationLockPath, 'function')
+  const absoluteRoot = 'D:\\repo\\linked-main'
+  const absoluteCommonDir = 'D:\\repo\\.git'
+  assert.equal(workflowIntegrator.workflowIntegrationLockPath(absoluteRoot, absoluteCommonDir), win32.join(absoluteCommonDir, 'happyhome-integrate-pr.lock'))
+
+  const relativeRoot = 'D:\\repo\\linked-main'
+  const relativeCommonDir = '..\\.git'
+  assert.equal(workflowIntegrator.workflowIntegrationLockPath(relativeRoot, relativeCommonDir), win32.join(win32.resolve(relativeRoot, relativeCommonDir), 'happyhome-integrate-pr.lock'))
+
+  const normalIntegrator = readFileSync(new URL('../integrate-pr.mjs', import.meta.url), 'utf8')
+  assert.match(normalIntegrator, /gitCommonDir[\s\S]*happyhome-integrate-pr\.lock/)
 })
 
 test('apply refuses a base-advance race and always releases its lock on failure', async () => {
   let merged = false, released = false
   const manifest = createManifest({ prNumber: 42, baseSha: base, headSha: head, changedPaths: ['.github/workflows/example.yml'], diffSha256, validatorWorkflowSha: validator, requestId: 'req-42', runId: 1234, runCreatedAt: '2026-07-11T00:00:00.000Z', attestation: attestation(), createdAt: '2026-07-11T00:10:00.000Z' })
   const current = { ...manifest, now: '2026-07-11T01:00:00.000Z', approval: manifest.approvalPhrase, attestation: attestation() }
-  await assert.rejects(() => withIntegrationLock(async () => () => { released = true }, () => executeTrustedApply({ manifest, current, refreshBase: async () => sha('e'), readPullRequest: async () => ({}), merge: async () => { merged = true }, pull: async () => {} })), /base.*advanced/i)
+  await assert.rejects(() => withIntegrationLock(async () => () => { released = true }, () => executeTrustedApply({ manifest, current, refreshBase: async () => sha('e'), readPullRequest: async () => ({}), enqueue: async () => { merged = true }, pull: async () => {} })), /base.*advanced/i)
   assert.equal(merged, false); assert.equal(released, true)
 })
 
