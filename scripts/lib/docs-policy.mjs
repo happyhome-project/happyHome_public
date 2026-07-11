@@ -51,17 +51,12 @@ export function classifyPublicDocument({ path, source }) {
   return { category: 'reference', authority: 'supporting' }
 }
 
-export function requiresExplicitHistoricalHeader(path) {
-  const normalizedPath = String(path || '').replace(/\\/g, '/')
-  return (
-    /^docs\/superpowers\/(?:plans|specs)\/[^/]+\.md$/i.test(normalizedPath)
-    || /^news\/[^/]+\/README\.md$/i.test(normalizedPath)
-    || /^prototype\/[^/]+\/README\.md$/i.test(normalizedPath)
-  )
+export function requiresExplicitHistoricalHeader({ path, source }) {
+  return classifyPublicDocument({ path, source }).category === 'historical'
 }
 
 export function findHistoricalHeaderProblems({ path, source }) {
-  if (!requiresExplicitHistoricalHeader(path)) return []
+  if (!requiresExplicitHistoricalHeader({ path, source })) return []
   const header = String(source || '').split(/\r?\n/).slice(0, 12).join('\n')
   const problems = []
   if (!/historical|point-in-time|历史|归档/i.test(header)) {
@@ -69,6 +64,12 @@ export function findHistoricalHeaderProblems({ path, source }) {
   }
   if (!/(?:Current authority|当前权威)[^\n]*\[[^\]]+\]\([^)]+\.md(?:#[^)]*)?\)/i.test(header)) {
     problems.push('missing labeled current-authority Markdown link in the header')
+  }
+  const fullSource = String(source || '')
+  const directiveIndex = fullSource.search(/For agentic workers|REQUIRED SUB-SKILL/i)
+  const historicalInstructionsIndex = fullSource.search(/^## Original historical instructions \(do not execute\)\s*$/im)
+  if (directiveIndex >= 0 && (historicalInstructionsIndex < 0 || historicalInstructionsIndex > directiveIndex)) {
+    problems.push('agent execution directive is outside the original historical instructions section')
   }
   return problems
 }

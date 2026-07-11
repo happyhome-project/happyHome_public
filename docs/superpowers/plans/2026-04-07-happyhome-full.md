@@ -4,6 +4,8 @@
 > **Current authority:** 开放任务以 [`TASKS.md`](../../../TASKS.md) 为准，文档状态以 [`docs/README.md`](../../README.md) 为准，已实现行为以当前代码和测试为准。
 > 兼容提醒：文内若出现 `VITE_WECHAT_APPID`、`VITE_REDIRECT_URI` 等旧字段，均为历史草稿，不再用于当前实现。
 
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 构建一套地理位置型社区微信小程序，含动态控件板块系统、微信云开发后端、uni-app 小程序前端、Vue3 Web 管理后台。

@@ -3,6 +3,8 @@
 > **Historical / point-in-time:** This delivery plan records the approved 2026-07-10 implementation sequence. Retain it for traceability; do not treat its task state as current repository status.
 > **Current authority:** Use the [documentation authority map](../../README.md), current Figma source, checked-in styles, code, and tests.
 
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Use exact Figma publish assets, unify date/draft controls, and group activity announcement title plus detail without changing backend widget contracts.

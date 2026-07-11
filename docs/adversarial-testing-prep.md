@@ -1,6 +1,7 @@
 # HappyHome 对抗性测试准备（historical）
 
-> 本文件是一次共享环境风险盘点的历史记录，不是当前测试或发布操作手册。当前测试命令见 [`TESTING.md`](./TESTING.md)，发布门禁见 [`release-gate.md`](./release-gate.md)。
+> **Historical / point-in-time:** 本文件是一次共享环境风险盘点的历史记录，不是当前测试或发布操作手册。
+> **Current authority:** 当前测试命令见 [`TESTING.md`](./TESTING.md)，发布门禁见 [`release-gate.md`](./release-gate.md)。
 
 ## 当前原则
 

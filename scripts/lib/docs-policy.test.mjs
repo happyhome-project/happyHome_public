@@ -98,21 +98,24 @@ test('documentation catalog does not downgrade current authority for links to hi
   })
 })
 
-test('delivery plans, specs, collection news indexes, and prototype handoffs require explicit historical headers', () => {
-  for (const path of [
-    'docs/superpowers/plans/2026-07-10-example.md',
-    'docs/superpowers/specs/2026-07-10-example.md',
-    'news/qingshan/README.md',
-    'prototype/design_handoff_happyhome/README.md',
+test('every document classified as historical requires an explicit governed header', () => {
+  for (const document of [
+    { path: 'docs/DESIGN-TOKENS.md', source: '# Design Tokens - 已过时' },
+    { path: 'docs/changes/example.md', source: '# Change record' },
+    { path: 'docs/superpowers/plans/example.md', source: '# Delivery plan' },
+    { path: 'docs/superpowers/specs/example.md', source: '# Delivery spec' },
+    { path: 'news/qingshan/2026-05-13_to_2026-05-19/README.md', source: '# Weekly news' },
+    { path: 'prototype/design_handoff_happyhome/README.md', source: '# Prototype handoff' },
   ]) {
-    assert.equal(requiresExplicitHistoricalHeader(path), true, path)
-    assert.deepEqual(findHistoricalHeaderProblems({ path, source: '# Delivery\n\nCurrent-looking content.' }), [
+    assert.equal(classifyPublicDocument(document).category, 'historical', document.path)
+    assert.equal(requiresExplicitHistoricalHeader(document), true, document.path)
+    assert.deepEqual(findHistoricalHeaderProblems(document), [
       'missing explicit historical or point-in-time status in the header',
       'missing labeled current-authority Markdown link in the header',
-    ])
+    ], document.path)
   }
 
-  assert.equal(requiresExplicitHistoricalHeader('news/qingshan/2026-05-13_to_2026-05-19/README.md'), false)
+  assert.equal(requiresExplicitHistoricalHeader({ path: 'docs/TESTING.md', source: '# Testing' }), false)
 })
 
 test('historical delivery header links readers to current authority', () => {
@@ -126,5 +129,26 @@ test('historical delivery header links readers to current authority', () => {
   assert.deepEqual(findHistoricalHeaderProblems({
     path: 'docs/superpowers/specs/2026-07-10-example.md',
     source,
+  }), [])
+})
+
+test('historical plans cannot expose an unmarked agent execution directive', () => {
+  const header = [
+    '# Delivery',
+    '',
+    '> **Historical / point-in-time:** retained for traceability; do not execute directly.',
+    '> **Current authority:** [Documentation authority](../../README.md).',
+    '',
+  ]
+  const directive = '> **For agentic workers:** REQUIRED SUB-SKILL: execute this plan task-by-task.'
+
+  assert.deepEqual(findHistoricalHeaderProblems({
+    path: 'docs/superpowers/plans/example.md',
+    source: [...header, directive].join('\n'),
+  }), ['agent execution directive is outside the original historical instructions section'])
+
+  assert.deepEqual(findHistoricalHeaderProblems({
+    path: 'docs/superpowers/plans/example.md',
+    source: [...header, '## Original historical instructions (do not execute)', '', directive].join('\n'),
   }), [])
 })

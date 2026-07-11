@@ -4,12 +4,14 @@
 
 Implemented on the `codex/docs-authority-governance` feature branch. This fragment is a point-in-time delivery record, not a current operational authority.
 
+**Current authority:** Use the [documentation authority map](../README.md), current code, and tests.
+
 ## Change
 
 - Assigned one responsibility to each repository entry point: project landing page, mandatory collaboration boundaries, collaboration playbook, documentation catalog, and open backlog.
 - Added machine-readable `current`, `operational`, `reference`, `historical`, and `generated` catalog categories with authority levels.
 - Made explicit deprecated or archived status override path-based current classification.
-- Made `docs:check` reject delivery plans, specifications, collection news indexes, and prototype handoffs that lack an explicit historical status plus a labeled current-authority link.
+- Made `docs:check` apply to every document the catalog classifies as `historical`, rejecting missing historical status, missing labeled current-authority links, and unmarked agent execution directives.
 - Classified plans, specifications, change fragments, dated news, and prototype design handoffs as historical records without deleting them.
 - Retired `docs/NOTES.md` as a duplicate backlog and moved its open deliverables to `TASKS.md`.
 - Kept test principles separate from executable testing operations and made `docs/release-gate.md` the sole authority for cross-component formal release orchestration, gates, and evidence.
