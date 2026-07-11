@@ -131,6 +131,19 @@ export class ReleaseGovernance {
     })
   }
 
+  async recordMigration(lock, migrationId) {
+    if (!migrationId) throw new Error('migration id is required')
+    return await this.store.transact({ runId: lock?.runId }, (model) => {
+      this.assertOwner(model, lock)
+      const appliedMigrations = { ...(model.state?.appliedMigrations || {}) }
+      if (!appliedMigrations[migrationId]) {
+        appliedMigrations[migrationId] = { appliedAt: this.now(), runId: lock.runId }
+      }
+      model.state = { ...model.state, appliedMigrations }
+      return clone(model.state.appliedMigrations[migrationId])
+    })
+  }
+
   async fail(lock, error, evidence = null) {
     return await this.store.transact({ runId: lock?.runId }, (model) => {
       this.assertOwner(model, lock)

@@ -80,8 +80,11 @@ export function validateChangeManifests(manifests = []) {
       if (!RELEASE_ACTIONS.has(action)) throw new Error(`unknown action: ${action}`)
     }
     for (const migration of manifest.migrations || []) {
-      const id = typeof migration === 'string' ? migration : migration?.id
-      if (!id) throw new Error(`migration requires an id in ${manifest.changeId}`)
+      const id = migration?.id
+      if (!id || !migration?.module) throw new Error(`migration requires an id and module in ${manifest.changeId}`)
+      if (!String(migration.module).startsWith('release/migrations/') || !String(migration.module).endsWith('.mjs')) {
+        throw new Error(`migration module must be under release/migrations: ${migration.module}`)
+      }
       if (migrationIds.has(id)) throw new Error(`duplicate migration id: ${id}`)
       migrationIds.add(id)
     }

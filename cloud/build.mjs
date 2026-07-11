@@ -2,9 +2,10 @@
 // Output goes to cloud/dist/<fnName>/index.js with its own package.json
 import { build } from '../node_modules/esbuild/lib/main.js'
 import ts from 'typescript'
-import { mkdirSync, writeFileSync, readdirSync, statSync, readFileSync } from 'fs'
+import { mkdirSync, writeFileSync, readdirSync, statSync, readFileSync, renameSync, rmSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { createCloudReleaseProbe, createCloudReleaseProbeWrapper } from '../scripts/lib/cloud-release-probe.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const FUNCTIONS_DIR = join(__dirname, 'functions')
@@ -53,6 +54,7 @@ const allFunctions = readdirSync(FUNCTIONS_DIR).filter(
 const functions = requestedFunctions.length
   ? allFunctions.filter((fnName) => requestedFunctions.includes(fnName))
   : allFunctions
+const sourceSha = process.env.HH_RELEASE_SOURCE_SHA || 'unknown'
 
 const missingFunctions = requestedFunctions.filter((fnName) => !allFunctions.includes(fnName))
 if (missingFunctions.length) {
@@ -88,6 +90,13 @@ for (const fnName of functions) {
     console.warn(`esbuild failed for ${fnName}; falling back to TypeScript transpile.`)
     buildFallback(fnName, outDir)
   }
+
+  const handlerPath = join(outDir, 'handler.js')
+  rmSync(handlerPath, { force: true })
+  renameSync(join(outDir, 'index.js'), handlerPath)
+  const probe = createCloudReleaseProbe({ functionName: fnName, sourceSha })
+  writeFileSync(join(outDir, '__release.info.json'), JSON.stringify(probe, null, 2))
+  writeFileSync(join(outDir, 'index.js'), createCloudReleaseProbeWrapper())
 
   // Each cloud function needs its own package.json listing wx-server-sdk
   writeFileSync(
