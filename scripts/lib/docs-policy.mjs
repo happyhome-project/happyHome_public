@@ -51,6 +51,28 @@ export function classifyPublicDocument({ path, source }) {
   return { category: 'reference', authority: 'supporting' }
 }
 
+export function requiresExplicitHistoricalHeader(path) {
+  const normalizedPath = String(path || '').replace(/\\/g, '/')
+  return (
+    /^docs\/superpowers\/(?:plans|specs)\/[^/]+\.md$/i.test(normalizedPath)
+    || /^news\/[^/]+\/README\.md$/i.test(normalizedPath)
+    || /^prototype\/[^/]+\/README\.md$/i.test(normalizedPath)
+  )
+}
+
+export function findHistoricalHeaderProblems({ path, source }) {
+  if (!requiresExplicitHistoricalHeader(path)) return []
+  const header = String(source || '').split(/\r?\n/).slice(0, 12).join('\n')
+  const problems = []
+  if (!/historical|point-in-time|历史|归档/i.test(header)) {
+    problems.push('missing explicit historical or point-in-time status in the header')
+  }
+  if (!/(?:Current authority|当前权威)[^\n]*\[[^\]]+\]\([^)]+\.md(?:#[^)]*)?\)/i.test(header)) {
+    problems.push('missing labeled current-authority Markdown link in the header')
+  }
+  return problems
+}
+
 function isRelativeMarkdownTarget(target) {
   const value = String(target || '').trim()
   return value.endsWith('.md') && !value.startsWith('#') && !/^[a-z][a-z0-9+.-]*:/i.test(value)

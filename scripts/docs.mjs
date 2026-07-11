@@ -6,6 +6,7 @@ import process from 'node:process'
 
 import {
   classifyPublicDocument,
+  findHistoricalHeaderProblems,
   findRelativeMarkdownLinks,
   requiredPublicDocumentPaths,
 } from './lib/docs-policy.mjs'
@@ -37,13 +38,16 @@ function check(root, files) {
   const required = requiredPublicDocumentPaths()
   const missing = required.filter((path) => !existsSync(join(root, path)))
   const broken = []
+  const historicalHeaders = []
   for (const path of files) {
     const source = readFileSync(join(root, path), 'utf8')
+    const problems = findHistoricalHeaderProblems({ path, source })
+    if (problems.length) historicalHeaders.push({ path, problems })
     for (const target of findRelativeMarkdownLinks({ sourcePath: path, source, exists: (candidate) => existsSync(join(root, candidate)) })) {
       broken.push({ path, target })
     }
   }
-  return { missing, broken }
+  return { missing, broken, historicalHeaders }
 }
 
 try {
@@ -55,7 +59,7 @@ try {
   } else if (mode === 'check') {
     const result = check(root, files)
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
-    if (result.missing.length || result.broken.length) process.exitCode = 1
+    if (result.missing.length || result.broken.length || result.historicalHeaders.length) process.exitCode = 1
   } else {
     throw new Error('Usage: docs.mjs <check|catalog>')
   }

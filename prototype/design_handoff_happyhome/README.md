@@ -1,6 +1,9 @@
 # Handoff · HappyHome (美好 Home · 邻里社区)
 
-> 这份包交给 Claude Code 后，请在目标代码库里**还原这些 HTML 设计稿**。HTML 文件是**设计参考**，不是生产代码；不要直接把 HTML 塞进产品。
+> **Historical / point-in-time:** 这是一次已完成的设计交付快照，只保留用于追溯；不得作为当前产品或实现权威，也不得按下文直接重做产品。
+> **Current authority:** 文档状态以 [`docs/README.md`](../../docs/README.md) 为准；当前视觉与交互以现行 Figma、checked-in styles、代码和测试为准。
+>
+> 原始交付说明要求在目标代码库中还原这些 HTML 设计稿；该要求已归档。HTML 文件始终只是设计参考，不是生产代码。
 
 ---
 

@@ -31,6 +31,6 @@ npm.cmd --workspace miniprogram run type-check
 npm.cmd run docs:check
 ```
 
-Release commands, evidence requirements, upload policy, and production verification live only in the [release gate](./docs/release-gate.md).
+Cross-component formal release orchestration, mandatory gates, evidence, upload policy, and final production verification live in the [release gate](./docs/release-gate.md). Component guides may retain component-specific build or deployment reference material, but they do not define a formal HappyHome release.
 
 Use Node 24 and npm 11. Feature work uses an isolated `codex/<feature>` branch and enters `main` through a passing pull request and merge queue.

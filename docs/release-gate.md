@@ -1,6 +1,6 @@
 # HappyHome Release Gate
 
-This is the single repository source for release commands, evidence requirements, upload policy, and post-upload verification. Release work must run from the authorized clean `main` checkout defined by [AGENTS.md](../AGENTS.md); feature worktrees may read this guide but must not publish.
+This is the single repository source for cross-component formal release orchestration, mandatory gates, evidence requirements, upload policy, and final production verification. Component guides may document component-specific build or deployment mechanics, but they do not define a formal HappyHome release. Release work must run from the authorized clean `main` checkout defined by [AGENTS.md](../AGENTS.md); feature worktrees may read this guide but must not publish.
 
 ## Before Upload
 

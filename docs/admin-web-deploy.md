@@ -1,5 +1,7 @@
 # Admin Web 云端部署
 
+> **职责边界：**本文只记录 Admin Web 组件自身的构建、主机和部署参考。跨组件正式发布的编排、强制门禁、证据和最终生产验证必须回到 [`release-gate.md`](./release-gate.md)；不能仅凭本文完成正式发布。
+
 Admin 控制台是 Vite + Vue 纯静态前端，构建产物位于 `admin-web/dist`。当前正式入口 `admin.tinghai.xin` 由阿里云香港服务器上的 Nginx 提供静态文件；腾讯云 CloudBase 静态网站托管只保留为备用入口。
 
 ## 当前生产入口

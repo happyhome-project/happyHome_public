@@ -3,7 +3,9 @@ import test from 'node:test'
 
 import {
   classifyPublicDocument,
+  findHistoricalHeaderProblems,
   findRelativeMarkdownLinks,
+  requiresExplicitHistoricalHeader,
   requiredPublicDocumentPaths,
 } from './docs-policy.mjs'
 
@@ -94,4 +96,35 @@ test('documentation catalog does not downgrade current authority for links to hi
     category: 'current',
     authority: 'canonical',
   })
+})
+
+test('delivery plans, specs, collection news indexes, and prototype handoffs require explicit historical headers', () => {
+  for (const path of [
+    'docs/superpowers/plans/2026-07-10-example.md',
+    'docs/superpowers/specs/2026-07-10-example.md',
+    'news/qingshan/README.md',
+    'prototype/design_handoff_happyhome/README.md',
+  ]) {
+    assert.equal(requiresExplicitHistoricalHeader(path), true, path)
+    assert.deepEqual(findHistoricalHeaderProblems({ path, source: '# Delivery\n\nCurrent-looking content.' }), [
+      'missing explicit historical or point-in-time status in the header',
+      'missing labeled current-authority Markdown link in the header',
+    ])
+  }
+
+  assert.equal(requiresExplicitHistoricalHeader('news/qingshan/2026-05-13_to_2026-05-19/README.md'), false)
+})
+
+test('historical delivery header links readers to current authority', () => {
+  const source = [
+    '# Delivery',
+    '',
+    '> **Historical / point-in-time:** retained for traceability; do not execute directly.',
+    '> **Current authority:** [Documentation authority](../../README.md).',
+  ].join('\n')
+
+  assert.deepEqual(findHistoricalHeaderProblems({
+    path: 'docs/superpowers/specs/2026-07-10-example.md',
+    source,
+  }), [])
 })

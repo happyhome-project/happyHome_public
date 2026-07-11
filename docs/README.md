@@ -12,7 +12,7 @@ When documents disagree, use this order:
 4. Supporting references.
 5. Historical records, including plans, specifications, change fragments, news snapshots, design drops, and documents explicitly marked deprecated or archived.
 
-`README.md` is the project landing page, `CLAUDE.md` is the stable collaboration playbook, this file owns documentation classification, and `TASKS.md` is the only repository backlog. None of them should duplicate release procedure.
+`README.md` is the project landing page, `CLAUDE.md` is the stable collaboration playbook, this file owns documentation classification, and `TASKS.md` is the only repository backlog. None of them should duplicate cross-component formal release orchestration, gates, or evidence.
 
 ## Categories
 
@@ -39,7 +39,7 @@ Run `npm.cmd run docs:catalog` for the machine-readable catalog and `npm.cmd run
 
 - [Setup and local environment](SETUP.md)
 - [Testing layers and commands](TESTING.md)
-- [Release gate](release-gate.md): the only source for release commands, evidence, upload policy, and post-upload verification.
+- [Release gate](release-gate.md): the only source for cross-component formal release orchestration, mandatory gates, evidence, upload policy, and final production verification. Component guides remain authoritative only for their component-specific mechanics.
 - [Formal post RAG](post-rag-search.md)
 - [Admin web deployment](admin-web-deploy.md)
 - [Approval notifications](approval-notifications.md)

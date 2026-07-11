@@ -1,6 +1,7 @@
 # HappyHome 微信小程序 Implementation Plan
 
-> 归档说明：本文件为 2026-04-07 的历史实施计划，包含当时的任务拆解与草稿 TODO，可能与当前代码状态不一致。请以 `docs/NOTES.md` 和实际代码为准。
+> **Historical / do not execute:** 本文件为 2026-04-07 的历史实施计划，包含当时的任务拆解与草稿 TODO，可能与当前代码状态不一致，不得直接执行。
+> **Current authority:** 开放任务以 [`TASKS.md`](../../../TASKS.md) 为准，文档状态以 [`docs/README.md`](../../README.md) 为准，已实现行为以当前代码和测试为准。
 > 兼容提醒：文内若出现 `VITE_WECHAT_APPID`、`VITE_REDIRECT_URI` 等旧字段，均为历史草稿，不再用于当前实现。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

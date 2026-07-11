@@ -29,6 +29,6 @@ This file describes stable day-to-day engineering habits. It does not override [
 | Open, claimable work | [TASKS.md](./TASKS.md) |
 | Test selection principles | [docs/TESTING-PRINCIPLES.md](./docs/TESTING-PRINCIPLES.md) |
 | Test commands and layers | [docs/TESTING.md](./docs/TESTING.md) |
-| Release and upload procedure | [docs/release-gate.md](./docs/release-gate.md) |
+| Cross-component formal release orchestration and evidence | [docs/release-gate.md](./docs/release-gate.md) |
 
 Implementation plans, specifications, change fragments, news snapshots, design handoffs, and documents marked deprecated or archived are point-in-time records. They may explain past decisions, but they do not override current authorities or the code.
