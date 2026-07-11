@@ -1,7 +1,6 @@
 # 美好 Home · 交互规范
 
-> 所有页面的交互行为都应回到这份文档对齐。
-> 上游依赖：[docs/VISUAL-TONE.md](./VISUAL-TONE.md)（调性） / [docs/DESIGN-TOKENS.md](./DESIGN-TOKENS.md)（tokens）
+> 本文是当前交互行为原则，不是视觉 token 或页面版式权威。当前视觉来源是 Figma `社区资源共享_小程序_0709_v2`，已确认观察见 [`figma-mini-0626-inventory.md`](./figma-mini-0626-inventory.md)，实现值以 `miniprogram/src/uni.scss` 和页面代码为准。已废弃的 [`VISUAL-TONE.md`](./VISUAL-TONE.md) 与 [`DESIGN-TOKENS.md`](./DESIGN-TOKENS.md) 仅供历史追溯。
 
 ---
 

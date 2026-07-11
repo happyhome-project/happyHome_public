@@ -1,20 +1,20 @@
 # HappyHome Release Gate
 
-Use `$happyhome-release` for release work from `C:\Project\Claude\happyHome`.
+This is the single repository source for release commands, evidence requirements, upload policy, and post-upload verification. Release work must run from the authorized clean `main` checkout defined by [AGENTS.md](../AGENTS.md); feature worktrees may read this guide but must not publish.
 
 ## Before Upload
 
 - Review `main`, `origin/main`, recent commits, working tree status, and git author.
 - Fix risky changes before release, especially detail blank screens, login/profile first render, build-info, DevTools CLI, and deploy scripts.
-- Run the guard from the repo root:
+- Run the checked-in gates from the repository root:
 
 ```powershell
-node X:\Users\<user>\.codex\skills\happyhome-release\scripts\happyhome-release-guard.mjs audit
-node X:\Users\<user>\.codex\skills\happyhome-release\scripts\happyhome-release-guard.mjs gate
-node X:\Users\<user>\.codex\skills\happyhome-release\scripts\happyhome-release-guard.mjs cloudSmoke
+npm.cmd run test:mp:release-gate
+npm.cmd run test:mp:release-ui
+npm.cmd run test:cloud:release-smoke
 ```
 
-`gate` requires DevTools release UI evidence. The release agent must actively create or refresh that evidence when it is missing; it must not stop merely because another session did not provide it.
+The release gate requires DevTools release UI evidence. The release operator must actively create or refresh that evidence when it is missing; it must not stop merely because another task did not provide it.
 
 The default evidence path is `npm.cmd run test:mp:release-ui`. It opens the built `mp-weixin` package through WeChat DevTools automator and must output both labels:
 

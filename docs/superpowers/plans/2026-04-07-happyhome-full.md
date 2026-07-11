@@ -88,7 +88,7 @@ happyHome/
 - [ ] **Step 1: 初始化 uni-app 小程序项目**
 
 ```bash
-cd /home/dwang1/project/claude_workspace/happyHome
+cd <repository-root>
 npx degit dcloudio/uni-preset-vue#vite-ts miniprogram
 cd miniprogram && npm install
 ```
@@ -96,7 +96,7 @@ cd miniprogram && npm install
 - [ ] **Step 2: 初始化 admin-web**
 
 ```bash
-cd /home/dwang1/project/claude_workspace/happyHome
+cd <repository-root>
 npm create vite@latest admin-web -- --template vue-ts
 cd admin-web && npm install
 npm install element-plus @element-plus/icons-vue vue-router@4 pinia axios
@@ -105,7 +105,7 @@ npm install element-plus @element-plus/icons-vue vue-router@4 pinia axios
 - [ ] **Step 3: 初始化 cloud 包**
 
 ```bash
-cd /home/dwang1/project/claude_workspace/happyHome
+cd <repository-root>
 mkdir -p cloud/lib cloud/functions/user cloud/functions/community \
   cloud/functions/member cloud/functions/section cloud/functions/post \
   cloud/shared
@@ -144,7 +144,7 @@ module.exports = {
 - [ ] **Step 6: 初始化 git，首次提交**
 
 ```bash
-cd /home/dwang1/project/claude_workspace/happyHome
+cd <repository-root>
 git init
 echo "node_modules/\ndist/\n.env" > .gitignore
 git add .

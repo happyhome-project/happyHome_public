@@ -1,4 +1,6 @@
-# HappyHome 对抗性测试准备
+# HappyHome 对抗性测试准备（historical）
+
+> 本文件是一次共享环境风险盘点的历史记录，不是当前测试或发布操作手册。当前测试命令见 [`TESTING.md`](./TESTING.md)，发布门禁见 [`release-gate.md`](./release-gate.md)。
 
 ## 当前原则
 
@@ -60,23 +62,7 @@ git diff --check
 
 ## 暂停执行的共享环境测试
 
-以下命令会触达共享环境或全局工具状态，本轮不在其他发布 session 并行期间执行：
-
-```powershell
-npm.cmd run deploy:release -- --use-tcb
-npm.cmd run deploy:cloud:tcb
-npm.cmd run deploy:mp
-npm.cmd run deploy:mp:upload
-npm.cmd run deploy:admin-web
-npm.cmd run test:cloud:release-smoke
-npm.cmd run test:admin:api
-npm.cmd run test:real
-npm.cmd run test:mp:release-ui
-npm.cmd run test:mp:replay
-npm.cmd run ensure:indexes
-node scripts/h5-test/run-all.mjs
-node scripts/h5-test/08-concurrent-clicks.mjs
-```
+共享环境、DevTools、上传和发布检查不得与其他发布操作者并行。当前发布命令与证据以 [release gate](./release-gate.md) 为唯一来源；其它真实环境测试在执行前必须按 [AGENTS.md](../AGENTS.md) 确认权限和共享状态。
 
 这些测试可以做，但必须满足：
 

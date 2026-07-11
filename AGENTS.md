@@ -29,6 +29,7 @@
 - 功能会话不得修改共享云环境的环境变量、数据库索引、触发器或迁移状态。
 - 生产部署、环境变量/索引/触发器/迁移变更和小程序上传，必须由主干发布角色在真实主工作区执行。
 - `scripts/deploy.mjs` 的直接生产目标也会在运行时检查 canonical main、工作区干净和 `HEAD=origin/main`；不依赖 `env:run` 或 Git hook 作为该边界。
+- 发布命令、证据要求、上传策略和发布后验证只在 [`docs/release-gate.md`](docs/release-gate.md) 维护；本文件只定义权限和流程边界。
 
 ### PR 流程
 

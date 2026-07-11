@@ -1,6 +1,6 @@
 # HappyHome 测试策略（本地 + 云端）
 
-> **相关文档**：测试原则和方法论见 [`TESTING-PRINCIPLES.md`](./TESTING-PRINCIPLES.md)（何时测什么、前端守卫 + 后端兜底、连击并发等）。本文只讲分层架构和实操命令。
+> **职责**：本文是测试分层、命令和运行前置条件的操作权威。如何选择用户旅程、权限、冷启动和并发用例，见 [`TESTING-PRINCIPLES.md`](./TESTING-PRINCIPLES.md)。发布专属门禁与证据只在 [`release-gate.md`](./release-gate.md) 维护。
 
 ## 背景
 

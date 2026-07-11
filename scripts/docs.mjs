@@ -4,7 +4,11 @@ import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import process from 'node:process'
 
-import { findRelativeMarkdownLinks, requiredPublicDocumentPaths } from './lib/docs-policy.mjs'
+import {
+  classifyPublicDocument,
+  findRelativeMarkdownLinks,
+  requiredPublicDocumentPaths,
+} from './lib/docs-policy.mjs'
 
 function git(args) {
   const result = spawnSync('git', args, { encoding: 'utf8', windowsHide: true })
@@ -23,7 +27,10 @@ function title(source) {
 }
 
 function catalog(root, files) {
-  return files.sort().map((path) => ({ path, title: title(readFileSync(join(root, path), 'utf8')) }))
+  return files.sort().map((path) => {
+    const source = readFileSync(join(root, path), 'utf8')
+    return { path, title: title(source), ...classifyPublicDocument({ path, source }) }
+  })
 }
 
 function check(root, files) {

@@ -11,7 +11,7 @@ Each script:
 ## Run
 
 ```bash
-cd C:\Project\Claude\happyHome
+cd <repository-root>
 
 node scripts/h5-test/01-login.mjs
 node scripts/h5-test/02-community-create-and-approve.mjs
@@ -35,7 +35,7 @@ for f in scripts/h5-test/[0-9]*.mjs; do node "$f" || exit 1; done
 ## Environment
 
 - `CLOUD_API_URL` — override the CloudBase HTTP base (default: prod host)
-- `ADMIN_TOKEN` — bearer token (default: `happyhome-admin-2024`)
+- `ADMIN_TOKEN` — required bearer token supplied through the local environment; never commit its value.
 
 ## When to reach for these vs `test-h5-e2e.mjs`
 
