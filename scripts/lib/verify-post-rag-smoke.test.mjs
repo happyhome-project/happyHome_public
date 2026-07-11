@@ -14,3 +14,9 @@ test('verify-post-rag-smoke forwards the admin internal token to fixture actions
   assert.match(source, /resolveAdminInternalToken/)
   assert.match(source, /adminInternalToken:\s*resolveAdminInternalToken\(\)/)
 })
+
+test('verify-post-rag-smoke queries the post cloud function instead of the disabled HTTP gateway', () => {
+  assert.match(source, /invokeFunction\('post', \{[\s\S]*action: 'search'/)
+  assert.match(source, /_testOpenid: openid/)
+  assert.doesNotMatch(source, /http-gateway/)
+})
