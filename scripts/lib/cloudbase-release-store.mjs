@@ -24,8 +24,12 @@ function isMissingDocumentError(error) {
 async function readDocument(transaction, collectionName, documentId) {
   try {
     const response = await transaction.collection(collectionName).doc(documentId).get()
-    const value = response?.data || null
-    return value && typeof value.data === 'object' && value.data !== null ? clone(value.data) : clone(value)
+    const raw = response?.data || null
+    const record = Array.isArray(raw) ? raw[0] || null : raw
+    const value = record && typeof record.data === 'object' && record.data !== null ? record.data : record
+    const oldWrapper = value && typeof value === 'object' && !Array.isArray(value) &&
+      Object.keys(value).length === 1 && typeof value.data === 'object' && value.data !== null
+    return clone(oldWrapper ? value.data : value)
   } catch (error) {
     if (isMissingDocumentError(error)) return null
     throw error

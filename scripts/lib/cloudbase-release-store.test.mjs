@@ -14,7 +14,7 @@ function createFakeDatabase() {
   const makeDocument = (key) => ({
     async get() {
       if (!documents.has(key)) throw missingError()
-      return { data: structuredClone(documents.get(key)) }
+      return { data: [{ _id: key, data: structuredClone(documents.get(key)) }] }
     },
     async set(data) {
       writes.push({ key, op: 'set' })
