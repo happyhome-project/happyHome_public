@@ -18,6 +18,7 @@ test('cloud release probes use a per-function strong token and do not expose it 
 test('cloud release probe response validation accepts nested CloudBase invoke output only when version fields match', () => {
   const probe = createCloudReleaseProbe({ functionName: 'post', randomBytes: () => Buffer.alloc(32, 1), sourceSha: 'abc' })
   assert.equal(hasCloudReleaseProbeResponse({ data: { response: probe.response } }, probe), true)
+  assert.equal(hasCloudReleaseProbeResponse({ data: { RetMsg: JSON.stringify(probe.response) } }, probe), true)
   assert.equal(hasCloudReleaseProbeResponse({ data: { response: { ...probe.response, buildId: 'wrong' } } }, probe), false)
 })
 

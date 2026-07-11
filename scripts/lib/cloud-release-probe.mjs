@@ -25,6 +25,9 @@ exports.main = async function main(event, context) {
 export function hasCloudReleaseProbeResponse(value, probe) {
   if (value == null) return false
   if (Array.isArray(value)) return value.some((item) => hasCloudReleaseProbeResponse(item, probe))
+  if (typeof value === 'string') {
+    try { return hasCloudReleaseProbeResponse(JSON.parse(value), probe) } catch { return false }
+  }
   if (typeof value !== 'object') return false
   const expected = probe?.response || probe
   if (value.functionName === expected.functionName && value.sourceSha === expected.sourceSha && value.buildId === expected.buildId) return true
