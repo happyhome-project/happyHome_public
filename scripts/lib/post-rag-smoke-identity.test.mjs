@@ -40,6 +40,17 @@ test('signed smoke identity is accepted only for the signed search community', (
   }), null)
 })
 
+test('signed five-minute smoke identity tolerates one minute of verifier clock skew', () => {
+  const identity = signPostRagSmokeIdentity(claims({ expiresAt: now + 5 * 60_000 }), secret)
+
+  assert.deepEqual(verifyPostRagSmokeIdentity(identity, {
+    secret,
+    action: 'search',
+    communityId: 'fixture-community',
+    now: now - 30_000,
+  }), claims({ expiresAt: now + 5 * 60_000 }))
+})
+
 test('signed smoke identity rejects tampering, expiration, and non-search use', () => {
   const identity = signPostRagSmokeIdentity(claims(), secret)
   assert.equal(verifyPostRagSmokeIdentity({ ...identity, userId: 'attacker' }, {
