@@ -226,7 +226,7 @@ npm.cmd run rebuild:post-rag-index -- --community-id <communityId> --no-process
 npm.cmd run verify:post-rag-smoke
 ```
 
-`verify:post-rag-smoke` 不启用生产 `ALLOW_TEST_OPENID`。它会生成 HMAC 签名身份，签名同时绑定 `post.search`、临时 `communityId`、短期 `runId`、用户和 5 分钟过期时间；云函数还会核对 `post_rag_smoke_runs` 中同一 run 的状态与过期时间，再走普通成员权限检查。脚本在成功或失败路径均清理 run 记录和临时社区；任一清理失败都使 smoke 失败。
+`verify:post-rag-smoke` 不启用生产 `ALLOW_TEST_OPENID`。它会生成 HMAC 签名身份，签名同时绑定 `post.search`、临时 `communityId`、短期 `runId`、用户和 5 分钟过期时间；验证端只允许额外 60 秒时钟偏差，云函数还会核对 `post_rag_smoke_runs` 中同一 run 的状态与过期时间，再走普通成员权限检查。脚本在成功或失败路径均清理 run 记录和临时社区；任一清理失败都使 smoke 失败。
 
 手动触发一批 RAG job：
 

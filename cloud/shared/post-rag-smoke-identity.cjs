@@ -4,6 +4,7 @@ const { createHmac, timingSafeEqual } = require('node:crypto')
 
 const POST_RAG_SMOKE_IDENTITY_VERSION = 1
 const MAX_POST_RAG_SMOKE_IDENTITY_TTL_MS = 5 * 60 * 1000
+const MAX_POST_RAG_SMOKE_IDENTITY_CLOCK_SKEW_MS = 60 * 1000
 const MIN_POST_RAG_SMOKE_SECRET_BYTES = 32
 
 function normalizeText(value, maxLength) {
@@ -76,7 +77,7 @@ function verifyPostRagSmokeIdentity(value, { secret, action, communityId, now = 
     || claims.action !== expectedAction
     || claims.communityId !== expectedCommunityId
     || claims.expiresAt <= now
-    || claims.expiresAt > now + MAX_POST_RAG_SMOKE_IDENTITY_TTL_MS
+    || claims.expiresAt > now + MAX_POST_RAG_SMOKE_IDENTITY_TTL_MS + MAX_POST_RAG_SMOKE_IDENTITY_CLOCK_SKEW_MS
     || !/^[a-f0-9]{64}$/i.test(signature)
     || Buffer.byteLength(key, 'utf8') < MIN_POST_RAG_SMOKE_SECRET_BYTES
   ) {
@@ -94,6 +95,7 @@ function verifyPostRagSmokeIdentity(value, { secret, action, communityId, now = 
 module.exports = {
   POST_RAG_SMOKE_IDENTITY_VERSION,
   MAX_POST_RAG_SMOKE_IDENTITY_TTL_MS,
+  MAX_POST_RAG_SMOKE_IDENTITY_CLOCK_SKEW_MS,
   signPostRagSmokeIdentity,
   verifyPostRagSmokeIdentity,
 }
