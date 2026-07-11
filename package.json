@@ -22,7 +22,7 @@
     "release:plan": "node scripts/release-plan.mjs",
     "release:pending": "node scripts/release-plan.mjs pending",
     "release:lock": "node scripts/release-lock.mjs",
-    "test:governance": "node --test scripts/lib/worktree-policy.test.mjs scripts/lib/integrate-pr-policy.test.mjs scripts/lib/release-plan.test.mjs scripts/lib/release-plan-base.test.mjs scripts/lib/release-governance.test.mjs scripts/lib/cloudbase-release-store.test.mjs scripts/lib/production-release-guard.test.mjs scripts/lib/release-lock-command.test.mjs scripts/lib/release-operations.test.mjs scripts/lib/cloud-release-probe.test.mjs scripts/lib/release-control-plane.test.mjs",
+    "test:governance": "node --test scripts/lib/worktree-policy.test.mjs scripts/lib/integrate-pr-policy.test.mjs scripts/lib/release-plan.test.mjs scripts/lib/release-plan-base.test.mjs scripts/lib/release-governance.test.mjs scripts/lib/cloudbase-release-store.test.mjs scripts/lib/production-release-guard.test.mjs scripts/lib/deploy-release-actions.test.mjs scripts/lib/release-lock-command.test.mjs scripts/lib/release-operations.test.mjs scripts/lib/cloud-release-probe.test.mjs scripts/lib/release-control-plane.test.mjs",
     "deploy:cloud": "node scripts/deploy.mjs cloud",
     "deploy:cloud:tcb": "node scripts/deploy.mjs cloud --use-tcb",
     "deploy:mp": "node scripts/deploy.mjs miniprogram",

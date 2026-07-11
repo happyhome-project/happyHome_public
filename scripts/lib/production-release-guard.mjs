@@ -9,6 +9,7 @@ export class ProductionReleaseGuard {
     governance,
     gitSha,
     heartbeatIntervalMs,
+    createHeartbeat = startReleaseHeartbeat,
     host = hostname(),
     owner,
     pid = process.pid,
@@ -20,6 +21,7 @@ export class ProductionReleaseGuard {
     this.governance = governance
     this.context = { gitSha, host, owner, pid, plan, runId }
     this.heartbeatIntervalMs = heartbeatIntervalMs
+    this.createHeartbeat = createHeartbeat
     this.lock = null
     this.heartbeat = null
     this.finished = false
@@ -30,10 +32,11 @@ export class ProductionReleaseGuard {
     this.assertNotFinished()
     if (this.lock) throw new Error('production release guard is already acquired')
     this.lock = await this.governance.acquire(this.context)
-    this.heartbeat = startReleaseHeartbeat({
+    this.heartbeat = this.createHeartbeat({
       governance: this.governance,
       intervalMs: this.heartbeatIntervalMs,
       lock: this.lock,
+      renew: async (lock) => await this.renewScheduledHeartbeat(lock),
       onError: () => { this.finished = true },
     })
     return this.lock
@@ -92,6 +95,14 @@ export class ProductionReleaseGuard {
     if (this.finished || this.heartbeat?.stopped) throw new Error('production release lock heartbeat stopped')
     this.lock = await this.governance.heartbeat(this.lock)
     return this.lock
+  }
+
+  async renewScheduledHeartbeat(lock) {
+    return await this.serialize(async () => {
+      if (this.finished || !this.lock) throw new Error('production release lock heartbeat stopped')
+      this.lock = await this.governance.heartbeat(this.lock || lock)
+      return this.lock
+    })
   }
 
   async stopHeartbeat() {

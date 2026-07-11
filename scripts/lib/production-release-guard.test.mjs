@@ -54,3 +54,43 @@ test('ProductionReleaseGuard serializes concurrent mutation fences so every depl
   assert.deepEqual(run.stages.map(({ stage }) => stage), ['cloud:post', 'cloud:admin'])
   await guard.fail(new Error('stop for test'))
 })
+
+test('ProductionReleaseGuard serializes a scheduled heartbeat with a stage renewal', async () => {
+  const lock = { fencingToken: 1, runId: 'run-1', status: 'active' }
+  const events = []
+  let concurrentHeartbeats = 0
+  let maxConcurrentHeartbeats = 0
+  let triggerHeartbeat
+  const governance = {
+    async acquire() { return { ...lock } },
+    async heartbeat(current) {
+      concurrentHeartbeats += 1
+      maxConcurrentHeartbeats = Math.max(maxConcurrentHeartbeats, concurrentHeartbeats)
+      await Promise.resolve()
+      concurrentHeartbeats -= 1
+      events.push('heartbeat')
+      return { ...current }
+    },
+    async markMutationStarted() {},
+    async recordStage() { events.push('record-stage') },
+  }
+  const guard = new ProductionReleaseGuard({
+    governance,
+    gitSha: 'abc',
+    owner: 'release-host',
+    runId: 'run-1',
+    createHeartbeat: ({ renew }) => {
+      triggerHeartbeat = renew
+      return { stopped: false, async stop() {} }
+    },
+  })
+
+  await guard.acquire()
+  await Promise.all([
+    triggerHeartbeat(lock),
+    guard.recordStage('action:update-rag-env'),
+  ])
+
+  assert.equal(maxConcurrentHeartbeats, 1)
+  assert.deepEqual(events, ['heartbeat', 'heartbeat', 'record-stage'])
+})
