@@ -79,3 +79,11 @@ test('recovery records explicit verification evidence before a stale lock can be
   assert.equal(inspection.run.status, 'recovered')
   assert.deepEqual(inspection.run.recovery.evidence.functionVersions, ['post:a'])
 })
+
+test('migration completion is persisted in production state under the active fencing token', async () => {
+  const governance = new ReleaseGovernance({ store: new InMemoryReleaseStore(), now: () => 1000 })
+  const lock = await governance.acquire({ gitSha: 'a', owner: 'one', runId: 'run-1' })
+  await governance.recordMigration(lock, 'post-index-v2')
+  const state = await governance.getProductionState()
+  assert.deepEqual(state.appliedMigrations['post-index-v2'], { runId: 'run-1', appliedAt: 1000 })
+})

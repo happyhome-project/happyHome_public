@@ -62,6 +62,9 @@ test('change manifests reject unknown actions, duplicate ids, and missing declar
     baseSha: 'base', headSha: 'head', changedPaths: ['scripts/ensure-indexes.mjs'],
     allFunctions: ['post'], functionInputs: {}, manifests: [], mode: 'pr',
   }), /release\/changes/i)
+  assert.throws(() => validateChangeManifests([
+    { schemaVersion: 1, changeId: 'migration', actions: [], migrations: [{ id: 'missing-module' }], smokeSuites: [] },
+  ]), /id and module/i)
 })
 
 test('main plans use production state base and bootstrap safely when it is unavailable', () => {

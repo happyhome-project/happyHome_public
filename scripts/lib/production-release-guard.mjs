@@ -54,6 +54,17 @@ export class ProductionReleaseGuard {
     })
   }
 
+  async recordMigration(migrationId) {
+    return await this.serialize(async () => {
+      await this.renew()
+      return await this.governance.recordMigration(this.lock, migrationId)
+    })
+  }
+
+  async getProductionState() {
+    return await this.governance.getProductionState()
+  }
+
   async complete({ components = {}, evidence = {} } = {}) {
     return await this.serialize(async () => {
       await this.renew()

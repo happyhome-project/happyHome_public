@@ -93,6 +93,8 @@ import {
   runLedgerStage,
 } from './lib/release-run-ledger.mjs'
 import { ProductionReleaseGuard } from './lib/production-release-guard.mjs'
+import { hasCloudReleaseProbeResponse } from './lib/cloud-release-probe.mjs'
+import { executeReleaseOperations } from './lib/release-operations.mjs'
 import { ReleaseGovernance } from './lib/release-governance.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -558,7 +560,11 @@ async function deployCloud(options = {}) {
   execSync('node build.mjs', {
     cwd: resolve(ROOT, 'cloud'),
     stdio: 'inherit',
-    env: { ...process.env, HH_CLOUD_BUILD_ONLY: fns.length < CLOUD_FUNCTIONS.length ? fns.join(',') : '' },
+    env: {
+      ...process.env,
+      HH_CLOUD_BUILD_ONLY: fns.length < CLOUD_FUNCTIONS.length ? fns.join(',') : '',
+      HH_RELEASE_SOURCE_SHA: options.sourceSha || process.env.HH_RELEASE_SOURCE_SHA || 'unknown',
+    },
   })
 
   const forceCi = process.argv.includes('--use-ci')
@@ -995,11 +1001,11 @@ function createProductionReleaseGuard(releaseContext, plan) {
   })
 }
 
-function releaseComponents({ cloudDeploy, miniprogramUpload, plan, releaseContext }) {
-  const functions = Object.fromEntries((cloudDeploy?.fns || []).map((name) => [name, {
-    sourceSha: releaseContext.gitSha,
-    buildId: `cloud-${releaseContext.gitSha.slice(0, 12)}-${name}`,
-  }]))
+function releaseComponents({ cloudDeploy, cloudReleaseProbes = [], miniprogramUpload, plan, releaseContext }) {
+  const probeByFunction = new Map(cloudReleaseProbes.map((probe) => [probe.functionName, probe]))
+  const functions = Object.fromEntries((cloudDeploy?.fns || []).map((name) => [name,
+    probeByFunction.get(name) || { sourceSha: releaseContext.gitSha, buildId: `cloud-${releaseContext.gitSha.slice(0, 12)}-${name}` },
+  ]))
   return {
     adminWeb: plan.targets.adminWeb ? { sourceSha: releaseContext.gitSha } : null,
     cloud: { functions },
@@ -1009,6 +1015,66 @@ function releaseComponents({ cloudDeploy, miniprogramUpload, plan, releaseContex
       version: miniprogramUpload.version,
     } : null,
   }
+}
+
+function readCloudReleaseProbes(functions) {
+  return functions.map((functionName) => {
+    const path = resolve(CLOUD_DIST, functionName, '__release.info.json')
+    if (!existsSync(path)) throw new Error(`cloud release probe is missing for ${functionName}`)
+    const probe = JSON.parse(readFileSync(path, 'utf8'))
+    if (probe.functionName !== functionName || !/^[a-f0-9]{64}$/i.test(String(probe.probeToken || ''))) {
+      throw new Error(`cloud release probe is invalid for ${functionName}`)
+    }
+    return probe
+  })
+}
+
+async function verifyCloudReleaseProbes(probes) {
+  const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
+  const envId = getCloudEnvId()
+  const verified = []
+  for (const probe of probes) {
+    const payloadPath = join(tmpdir(), `happyhome-release-probe-${probe.functionName}-${Date.now()}.json`)
+    writeFileSync(payloadPath, JSON.stringify({ __happyhomeReleaseProbe: probe.probeToken }), 'utf8')
+    try {
+      const commandLine = [npx, '--yes', '--package', '@cloudbase/cli', 'tcb', 'fn', 'invoke', probe.functionName,
+        '-d', `@${payloadPath}`, '--env-id', envId, '--json'].map(quote).join(' ')
+      const result = await runCloudBaseCliCaptureWithRetry(commandLine, {
+        displayCommandLine: `tcb fn invoke ${probe.functionName} <release-probe> --env-id ${envId} --json`,
+        silentOutput: true,
+      })
+      const response = parseCliJson(result.output)
+      if (!result.ok || !hasCloudReleaseProbeResponse(response, probe)) {
+        throw new Error(`release probe verification failed for ${probe.functionName}`)
+      }
+      verified.push(probe.response)
+    } finally {
+      rmSync(payloadPath, { force: true })
+    }
+  }
+  return verified
+}
+
+const RELEASE_ACTION_SCRIPTS = Object.freeze({
+  'configure-rag-network': 'configure:rag-network',
+  'configure-rag-workers': 'configure:rag-workers',
+  'ensure-indexes': 'ensure:indexes',
+  'ensure-tencent-rag-index': 'ensure:tencent-rag-index',
+  'update-rag-env': 'update:rag-env',
+})
+
+function runDeclaredReleaseAction(action) {
+  const script = RELEASE_ACTION_SCRIPTS[action]
+  if (!script) throw new Error(`release action has no approved command: ${action}`)
+  execSync(`npm.cmd run ${script}`, { cwd: ROOT, stdio: 'inherit' })
+}
+
+async function runDeclaredReleaseMigration(migration, releaseContext) {
+  const modulePath = resolve(ROOT, migration.module)
+  const migrationModule = await import(new URL(`file:///${modulePath.replace(/\\/g, '/')}`).href)
+  const up = migrationModule.up || migrationModule.default
+  if (typeof up !== 'function') throw new Error(`migration ${migration.id} must export up() or default()`)
+  await up({ root: ROOT, releaseContext })
 }
 
 async function runFormalRelease(options = {}) {
@@ -1086,7 +1152,22 @@ async function runFormalRelease(options = {}) {
       return
     }
 
+    await runLedgerStage(releaseLedger, 'release-operations', {
+      command: 'execute allowlisted release actions and idempotent migrations declared by release/changes',
+    }, async () => {
+      const state = await releaseGuard.getProductionState()
+      const result = await executeReleaseOperations({
+        appliedMigrations: new Set(Object.keys(state?.appliedMigrations || {})),
+        guard: releaseGuard,
+        manifests: formalPlan.manifests,
+        runAction: runDeclaredReleaseAction,
+        runMigration: async (migration) => await runDeclaredReleaseMigration(migration, releaseContext),
+      })
+      return { result }
+    })
+
     let cloudDeploy = { fns: [] }
+    let cloudReleaseProbes = []
     if (formalPlan.targets.cloud.mode !== 'none') cloudDeploy = await runLedgerStage(releaseLedger, 'cloud-deploy', {
       resume,
       reuseCheck,
@@ -1097,6 +1178,7 @@ async function runFormalRelease(options = {}) {
         beforeFunctionDeploy: async (fn) => await releaseGuard.beforeRemoteMutation(`cloud:${fn}`),
         functions: formalPlan.targets.cloud.functions,
         requireCloudBaseCli: true,
+        sourceSha: releaseContext.gitSha,
       })
       if (result.path !== 'cloudbase-cli') {
         throw new Error(`Formal release cloud deploy must use CloudBase CLI/COS before smoke; got ${result.path}. Rerun with --use-tcb.`)
@@ -1104,6 +1186,16 @@ async function runFormalRelease(options = {}) {
       return result
     })
     else await releaseLedger.skipStage('cloud-deploy', { reason: 'release plan has no cloud function changes' })
+
+    if (cloudDeploy.fns.length) cloudReleaseProbes = await runLedgerStage(releaseLedger, 'cloud-version-probes', {
+      command: 'invoke each deployed cloud function with its internal release probe token',
+    }, async () => {
+      const probes = readCloudReleaseProbes(cloudDeploy.fns)
+      const verified = await verifyCloudReleaseProbes(probes)
+      await releaseGuard.recordStage('cloud-version-probes', { evidence: { functions: verified.map((probe) => probe.functionName) } })
+      return verified
+    })
+    else await releaseLedger.skipStage('cloud-version-probes', { reason: 'release plan has no cloud function changes' })
 
     if (cloudDeploy.fns.length) await runLedgerStage(releaseLedger, 'cloud-smoke', {
       resume,
@@ -1222,7 +1314,7 @@ async function runFormalRelease(options = {}) {
     else await releaseLedger.skipStage('verify-upload', { reason: 'release plan has no miniprogram changes' })
 
     if (releaseGuard) await releaseGuard.complete({
-      components: releaseComponents({ cloudDeploy, miniprogramUpload, plan: formalPlan, releaseContext }),
+      components: releaseComponents({ cloudDeploy, cloudReleaseProbes, miniprogramUpload, plan: formalPlan, releaseContext }),
       evidence: { localReleaseRunId: releaseLedger.runId, planBaseSha: formalPlan.baseSha || null },
     })
     await releaseLedger.complete('passed')
