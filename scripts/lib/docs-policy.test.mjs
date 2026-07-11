@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
@@ -272,12 +273,45 @@ test('every agent execution directive stays inside the original historical instr
   }), ['agent execution directive is outside the original historical instructions section'])
 })
 
-test('documentation map places machine-classified historical files in the historical section', () => {
+test('documentation map places machine-classified authorities in their matching sections', () => {
+  const repositoryRoot = new URL('../../', import.meta.url)
   const documentSource = readFileSync(new URL('../../docs/adversarial-testing-prep.md', import.meta.url), 'utf8')
   const mapSource = readFileSync(new URL('../../docs/README.md', import.meta.url), 'utf8')
   const documentPath = 'docs/adversarial-testing-prep.md'
   const mapLink = '[Adversarial testing preparation](adversarial-testing-prep.md)'
+  const trackedMarkdown = execFileSync('git', ['ls-files', '*.md'], {
+    cwd: repositoryRoot,
+    encoding: 'utf8',
+    windowsHide: true,
+  }).split(/\r?\n/).filter(Boolean)
+  const catalog = trackedMarkdown.map((path) => ({
+    path: path.replace(/\\/g, '/'),
+    ...classifyPublicDocument({ path, source: readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8') }),
+  }))
+  const sectionPaths = (heading) => {
+    const sectionStart = mapSource.indexOf(`## ${heading}`)
+    assert.notEqual(sectionStart, -1, heading)
+    const sectionBody = mapSource.slice(sectionStart + heading.length + 3).split(/^## /m, 1)[0]
+    return new Set([...sectionBody.matchAll(/\[[^\]]+\]\(([^)\s]+\.md)(?:#[^)]*)?\)/g)].map((match) => {
+      const target = match[1].replace(/\\/g, '/')
+      return target.startsWith('../') ? target.slice(3) : `docs/${target}`
+    }))
+  }
 
   assert.equal(classifyPublicDocument({ path: documentPath, source: documentSource }).category, 'historical')
   assert.ok(mapSource.indexOf(mapLink) > mapSource.indexOf('## Historical and delivery records'))
+
+  const currentPaths = sectionPaths('Current authorities')
+  const operationalPaths = sectionPaths('Operational guides')
+  const missingCurrent = catalog
+    .filter(({ path, category }) => category === 'current' && path !== 'docs/README.md')
+    .map(({ path }) => path)
+    .filter((path) => !currentPaths.has(path))
+  const missingOperational = catalog
+    .filter(({ category, authority }) => category === 'operational' && authority === 'canonical')
+    .map(({ path }) => path)
+    .filter((path) => !operationalPaths.has(path))
+
+  assert.deepEqual(missingCurrent, [])
+  assert.deepEqual(missingOperational, [])
 })

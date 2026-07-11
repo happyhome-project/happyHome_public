@@ -44,6 +44,7 @@ Run `npm.cmd run docs:catalog` for the machine-readable catalog and `npm.cmd run
 - [Admin web deployment](admin-web-deploy.md)
 - [Approval notifications](approval-notifications.md)
 - [H5 preview](h5-preview-runbook.md)
+- [WeChat operations](../wechat-ops/README.md): official analytics and customer-service account utilities; does not submit audits or release mini-program versions.
 
 ## Supporting references
 
