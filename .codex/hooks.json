@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/scripts/worktree.mjs\" heartbeat --provider=codex --quiet",
+            "commandWindows": "for /f \"delims=\" %i in ('git rev-parse --show-toplevel') do @node \"%i\\scripts\\worktree.mjs\" heartbeat --provider=codex --quiet",
+            "timeout": 10,
+            "statusMessage": "Recording HappyHome worktree ownership"
+          }
+        ]
+      }
+    ]
+  }
+}

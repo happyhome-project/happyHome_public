@@ -174,6 +174,29 @@ test('release smoke requires home-prefetch invoke evidence', async () => {
   }
 })
 
+test('release smoke revalidates immediately before every remote command', async () => {
+  const evidenceDir = await tempEvidenceDir()
+  let remoteCommandRan = false
+  try {
+    await assert.rejects(() => runCloudReleaseSmoke({
+      envId: 'env-x',
+      only: ['community'],
+      logLimit: 1,
+      logWaitMs: 0,
+      noFixture: true,
+      evidenceDir,
+      runId: 'unit-run',
+      beforeCommand: () => { throw new Error('workspace drift') },
+    }, async () => {
+      remoteCommandRan = true
+      return { status: 0, stdout: '{}', stderr: '' }
+    }), /workspace drift/i)
+    assert.equal(remoteCommandRan, false)
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true })
+  }
+})
+
 test('buildTcbCommand and redaction keep command evidence safe', () => {
   const cmd = buildTcbCommand(['fn', 'invoke', 'post', '-d', '{"action":"clientLog"}'])
   assert.equal(cmd.args.slice(0, 3).join(' '), '--yes --package @cloudbase/cli')

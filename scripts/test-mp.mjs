@@ -51,11 +51,10 @@ function resolveProjectPath() {
 async function loadAutomator() {
   try {
     return (await import('miniprogram-automator')).default
-  } catch {
-    console.log('Installing miniprogram-automator...')
-    const { execSync } = await import('child_process')
-    execSync('npm install miniprogram-automator', { stdio: 'inherit' })
-    return (await import('miniprogram-automator')).default
+  } catch (error) {
+    throw new Error(
+      `miniprogram-automator is unavailable. Run npm.cmd ci from the repository root before this test. ${error?.message || error}`
+    )
   }
 }
 

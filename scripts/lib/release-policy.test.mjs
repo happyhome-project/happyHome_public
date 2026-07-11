@@ -102,18 +102,24 @@ test('release cloud smoke ensures required database collections before invoking 
 
 test('formal release git state rejects non-main, dirty, and unsynchronized sources', () => {
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
-    branch: 'feature', headSha: 'a', originMainSha: 'a', changedPaths: [],
+    cwd: 'X:\\Users\\<user>\\.codex\\worktrees\\feature\\happyHome',
+    canonicalPath: 'C:\\Project\\Claude\\happyHome',
+    branch: 'main', headSha: 'a', originMainSha: 'a', changedPaths: [],
+  }), /canonical main workspace/i)
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    cwd: 'C:\\Project\\Claude\\happyHome', branch: 'feature', headSha: 'a', originMainSha: 'a', changedPaths: [],
   }), /main/)
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
-    branch: 'main', headSha: 'a', originMainSha: 'a', changedPaths: ['cloud/functions/admin/index.ts'],
+    cwd: 'C:\\Project\\Claude\\happyHome', branch: 'main', headSha: 'a', originMainSha: 'a', changedPaths: ['cloud/functions/admin/index.ts'],
   }), /clean/i)
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
-    branch: 'main', headSha: 'a', originMainSha: 'b', changedPaths: [],
+    cwd: 'C:\\Project\\Claude\\happyHome', branch: 'main', headSha: 'a', originMainSha: 'b', changedPaths: [],
   }), /origin\/main/)
 })
 
 test('publish resume allows only its matching generated build-info change', () => {
   assert.doesNotThrow(() => releasePolicyModule.assertFormalReleaseGitState({
+    cwd: 'C:\\Project\\Claude\\happyHome',
     branch: 'main',
     headSha: 'a',
     originMainSha: 'a',
@@ -122,6 +128,7 @@ test('publish resume allows only its matching generated build-info change', () =
     generatedBuildInfoMatches: true,
   }))
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    cwd: 'C:\\Project\\Claude\\happyHome',
     branch: 'main',
     headSha: 'a',
     originMainSha: 'a',
@@ -130,6 +137,7 @@ test('publish resume allows only its matching generated build-info change', () =
     generatedBuildInfoMatches: true,
   }), /unexpected/i)
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    cwd: 'C:\\Project\\Claude\\happyHome',
     branch: 'main',
     headSha: 'a',
     originMainSha: 'a',
@@ -179,6 +187,38 @@ test('formal release path records resumable ledger stages before upload', () => 
   assert(releaseBlock.indexOf("'cloud-smoke'") < releaseBlock.indexOf("'admin-web-deploy'"))
   assert(releaseBlock.indexOf("'admin-web-deploy'") < releaseBlock.indexOf("'miniprogram-upload'"))
   assert(releaseBlock.indexOf("'miniprogram-upload'") < releaseBlock.indexOf("complete('passed')"))
+})
+
+test('every direct production deployment is fenced to the canonical clean main workspace', () => {
+  const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
+  const dispatch = deployScript.slice(deployScript.lastIndexOf("const target = process.argv[2] || 'all'"))
+  const cloud = extractFunctionBlock(deployScript, 'async function deployCloud(options')
+  const miniprogram = extractFunctionBlock(deployScript, 'async function deployMiniprogram(options')
+  const upload = extractFunctionBlock(deployScript, 'async function uploadBuiltMiniprogram({')
+  const uploadEntry = extractFunctionBlock(deployScript, 'async function uploadMiniprogram(options')
+  const adminCloudBase = extractFunctionBlock(deployScript, 'async function deployAdminWebToCloudBase(options')
+  const adminAliyun = extractFunctionBlock(deployScript, 'async function deployAdminWebToAliyun(options')
+  const cloudBaseRetry = extractFunctionBlock(deployScript, 'async function runCloudBaseCliCaptureWithRetry(')
+  const cloudBaseDeploy = extractFunctionBlock(deployScript, 'async function deployCloudViaCloudBaseCli(')
+
+  assert.match(deployScript, /function assertDirectProductionDeployWorkspace\(/)
+  assert.match(dispatch, /assertDirectProductionDeployWorkspace\(\)/)
+  assert.match(dispatch, /beforeRemoteMutation:\s*assertDirectProductionDeployWorkspace/)
+  assert.match(dispatch, /beforeFunctionDeploy:\s*assertDirectProductionDeployWorkspace/)
+  assert.match(dispatch, /deployCloud\(directMutationOptions\)/)
+  assert.match(dispatch, /beforeEnsureIndexes:\s*assertDirectProductionDeployWorkspace/)
+  assert.match(dispatch, /beforeSmokeCommand:\s*assertDirectProductionDeployWorkspace/)
+  assert.match(dispatch, /deployMiniprogram\(directMutationOptions\)/)
+  assert.match(dispatch, /uploadMiniprogram\(directMutationOptions\)/)
+  assert.match(dispatch, /deployAdminWeb\(directMutationOptions\)/)
+  assert.match(cloud, /runOptionalDirectRemoteMutation/)
+  assert.match(miniprogram, /runOptionalDirectRemoteMutation/)
+  assert.match(upload, /runOptionalDirectRemoteMutation/)
+  assert.match(uploadEntry, /publishOnly:\s*true/)
+  assert.match(adminCloudBase, /runOptionalDirectRemoteMutation/)
+  assert.match(adminAliyun, /runOptionalDirectRemoteMutation/)
+  assert.match(cloudBaseRetry, /beforeAttempt[\s\S]*runShellCapture/)
+  assert.match(cloudBaseDeploy, /beforeAttempt:[\s\S]*async \(\) => await options\.beforeFunctionDeploy\(fn\)/)
 })
 
 test('package exposes a release status command for the latest ledger', () => {

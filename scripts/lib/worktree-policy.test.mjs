@@ -133,3 +133,10 @@ test('PR CI checks pull requests and merge groups at their exact heads', () => {
   assert.doesNotMatch(workflow, /\n\s+fi\s*$/m)
   assert.match(workflow, /release:plan is not installed yet; skipping PR release-plan generation[\s\S]*exit 0/)
 })
+
+test('mini-program test runner never mutates dependencies during a test run', () => {
+  const runnerPath = fileURLToPath(new URL('../test-mp.mjs', import.meta.url))
+  const runner = readFileSync(runnerPath, 'utf8')
+  assert.doesNotMatch(runner, /npm install miniprogram-automator/)
+  assert.match(runner, /Run npm\.cmd ci from the repository root/)
+})

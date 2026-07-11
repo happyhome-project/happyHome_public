@@ -44,7 +44,7 @@ happyHome/
 
 ## 环境要求
 
-- Node.js 16+（推荐 18+）
+- Node.js 24.x LTS
 - 微信开发者工具（最新稳定版）
 - npm（项目使用 npm workspaces）
 
@@ -55,8 +55,18 @@ happyHome/
 ### 1. 安装依赖
 
 ```bash
-npm install                        # 根目录，安装所有 workspace 依赖
+npm.cmd ci                         # 根目录，按唯一 root lockfile 安装所有 workspace 依赖
 ```
+
+新 worktree 使用以下顺序：
+
+```bash
+npm.cmd run worktree:create -- --name=<task-name> --path=<absolute-worktree-path>  # 仅 canonical main；自动 npm ci
+npm.cmd run worktree:doctor
+npm.cmd run worktree:bootstrap       # 仅 clean、已同步的 codex/* 分支
+```
+
+`worktree:create` 从刷新后的 `origin/main` 创建安全的 `codex/*` 分支，检查真实 `AGENTS.md` 与 Git hooks，并自动在新目录运行根 `npm.cmd ci`。`worktree:doctor` 只报告状态；缺依赖、错误 Node/npm、hooks/AGENTS 异常或已落后 main 会显示为 `not_ready`。不要把其它 worktree 的 `node_modules` 复制、软链接或 junction 到当前目录。
 
 ### 2. 配置小程序
 
@@ -272,12 +282,9 @@ npm run set:superadmin -- o1234567890abcdef https://<env-id>-<uin>.ap-shanghai.a
    - 如果已经复制过，先删掉根目录和各 workspace 的 `node_modules`
 2. 在项目根目录执行依赖安装：
    ```bash
-   npm install
+   npm.cmd ci
    ```
-3. 如果 `admin-web` 构建报 `@rollup/rollup-win32-x64-msvc` 缺失，执行：
-   ```bash
-   npm i -D @rollup/rollup-win32-x64-msvc --workspace=admin-web
-   ```
+3. 如果 `admin-web` 构建仍报 `@rollup/rollup-win32-x64-msvc` 缺失，先确认没有复用或复制旧 `node_modules`，删除当前 worktree 的 `node_modules` 后重新执行根 `npm.cmd ci`。不要在某个 workspace 临时执行 `npm i`，否则会偏离唯一 root lockfile。
 4. 验证核心命令：
    ```bash
    # admin web
@@ -294,10 +301,10 @@ npm run set:superadmin -- o1234567890abcdef https://<env-id>-<uin>.ap-shanghai.a
 
 1. `esbuild` 平台包不匹配（`linux-x64` 与 `win32-x64` 冲突）
    - 根因：直接复用了 WSL 的 `node_modules`
-   - 修复：在 Windows 上重新执行 `npm install`
+   - 修复：在 Windows 上重新执行根 `npm.cmd ci`
 2. `rollup` 可选依赖未自动安装
    - 现象：`Cannot find module @rollup/rollup-win32-x64-msvc`
-   - 修复：手动安装该依赖（见上方第 3 步）
+   - 修复：删除当前 worktree 的 `node_modules`，在根目录重新执行 `npm.cmd ci`；若仍失败，记录 lockfile/Node/npm 版本并作为依赖问题处理，不在 workspace 临时加包
 3. `miniprogram` 的 `pinia` 类型安装时报错
    - 现象：`Argument of type 'Pinia' is not assignable to parameter of type 'Plugin<[]>'`
    - 修复：`src/main.ts` 中对 `app.use(pinia)` 做类型断言（已在代码中修复）

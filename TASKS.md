@@ -7,11 +7,11 @@
 
 ---
 
-## P1 · Worktree 并行开发脚手架（待决策或认领）
+## P1 · Worktree 并行开发补全（部分已实现，待后续拆分认领）
 
-**来源**：`eloquent-pike-35f53c` worktree 里有一份 158 行的 `docs/WORKTREE-WORKFLOW.md`（未 commit，在工作区），描述了完整的 worktree 协作工作流。
+**来源**：`eloquent-pike-35f53c` worktree 曾有一份未提交的 `docs/WORKTREE-WORKFLOW.md`；其思路已在 `codex/worktree-lifecycle-governance` 分支中重新审查。
 
-**内容提纲**：
+**历史草案主要内容（仅供追溯，不作为当前操作指令）**：
 - `npm run worktree:bootstrap`——分配专属端口 + symlink private key + npm install
 - `npm run worktree:doctor` / `worktree:ports`——诊断 / 列端口
 - `.claude/worktrees/ports.json` + `.claude/worktree.env`——端口状态
@@ -20,22 +20,15 @@
 - `deploy:cloud` 分支守卫（只从 main，非 main exit 1）
 - 合并顺序约定：按改动面小 → 大
 
-**现状**：引用的所有脚本和 deploy.mjs 分支守卫**主 repo 都不存在**。这份文档**描述的是一套未实现的工作流**。
+**当前已实现（待合入 main）**：`worktree:create/doctor/bootstrap/status/sync-main/retire`、Node 24/npm 11 + root lockfile、Git hooks/AGENTS 检查、session heartbeat 的 fail-closed retirement、以及 `deploy.mjs` 的 canonical-main 运行时门禁。没有采用端口分配、私钥 symlink 或共享 `node_modules`，因为它们会扩大跨 worktree 影响面。
 
 **选项**（待拍板）：
-- **(A) 认领实现**——工程量：1 个完整 session。需要：
-  - `scripts/worktree-bootstrap.mjs`（端口分配 + key symlink + npm install）
-  - `scripts/worktree-doctor.mjs`（只读诊断）
-  - `scripts/devtools-lock.mjs` + status/unlock 配套
-  - `scripts/pre-merge-check.mjs`（rebase 检查 + 冲突扫描）
-  - `.claude/worktrees/ports.json` + `.claude/worktree.env` schema + 写入逻辑
-  - `deploy.mjs` 分支守卫（`getCurrentBranch()` + `exit(1)` if not main）
-  - package.json scripts 补齐
-  - 文档从 worktree 合进 main
-- **(B) 降级为规划文档**——塞进 `docs/roadmap/WORKTREE-WORKFLOW.md`，顶部加 `⚠️ 本文档描述未实现的工作流` 标，让未来决策者知道这个设计已经存在，别重新设计
-- **(C) 作废**——当前 2-3 个活跃 worktree 的量级靠人脑 + CLAUDE.md 的"Worktree 协作"那段已够用
+**仍待决策/认领**：
+- DevTools 单例资源锁（需要先确认真实 DevTools 并发行为，而非只锁端口）。
+- 跨 worktree 语义冲突检查与完整 46 篇 Markdown 的权威性审计。
+- 是否需要每个 worktree 的固定本地端口；若需要，必须先定义端口冲突、回收和失败恢复契约，不能用 symlink 私钥或共享 `node_modules` 代替。
 
-**现状（2026-04-24）**：文档内容当前还只漂在 `eloquent-pike-35f53c` 的工作区里，没提交。如果 (A) 或 (B)，需要从那个 worktree 拿源文件。
+**当前限制**：以上治理尚未合入 `main`；在 PR CI 与主干集成前，已存在 worktree 仍按原有流程工作，所有权未知时不会被自动清理。
 
 ---
 

@@ -180,6 +180,11 @@
 ## Worktree 协作
 
 - 每个 worktree 是一个独立 feature 分支（`.claude/worktrees/<name>` 下）
+- 创建或接手时先运行 `npm.cmd run worktree:doctor`；依赖由根 `npm.cmd ci` 安装，npm/Playwright cache 可共享，`node_modules` 不可共享。
+- 远端 main 更新只会通过 `worktree:status` / `worktree:sync-main -- --prepare` 被发现；任何 apply 都是显式操作，绝不后台 merge/rebase。
+- `worktree:retire` 默认对所有权未知 fail-closed；Codex-managed worktree 优先通过 App 删除，以保留其快照恢复路径。
+- Codex 首次发现仓库 `.codex/hooks.json` 时，必须在客户端的 `/hooks` 审核并信任；未获信任、未执行或超过 12 小时的心跳一律只会显示为 `unknown`，不会触发删除。
+- `env:run` 是本地命令分类器，不是权限系统；共享云、上传和部署仍由 `deploy.mjs` 的 canonical-main/clean/HEAD=origin/main 运行时门禁决定。
 - preview_start 在 worktree 里起 dev server 会报 "cwd must be within project root" —— 需要 preview 时从主仓库根新开会话
 - 合回 main 前在 worktree 里同步 origin/main 并通过 PR CI；主 repo 只通过 `integrate:pr` 合并，不做手工 fast-forward 或直接 push
 - 多 worktree 同时改共享文件（`cloud.ts` / `deploy.mjs` / 全局 token）时小心冲突，合并顺序：小改动面先、大改动面后

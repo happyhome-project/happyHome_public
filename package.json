@@ -1,6 +1,11 @@
 {
   "name": "happyhome",
   "private": true,
+  "engines": {
+    "node": "24.x",
+    "npm": "11.x"
+  },
+  "packageManager": "npm@11.11.0",
   "workspaces": [
     "miniprogram",
     "admin-web",
@@ -12,18 +17,29 @@
   },
   "devDependencies": {
     "@cloudbase/manager-node": "^4.0.0",
+    "@dcloudio/uni-ui": "^1.5.12",
     "@playwright/test": "^1.52.0",
-    "acorn": "^8.16.0"
+    "acorn": "^8.16.0",
+    "wot-design-uni": "^1.14.0"
   },
   "scripts": {
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "setup:git-hooks": "npm run hooks:install",
+    "worktree:create": "node scripts/worktree.mjs create",
+    "worktree:doctor": "node scripts/worktree.mjs doctor",
+    "worktree:bootstrap": "node scripts/worktree.mjs bootstrap",
+    "worktree:status": "node scripts/worktree.mjs status",
+    "worktree:sync-main": "node scripts/worktree.mjs sync-main",
+    "worktree:retire": "node scripts/worktree.mjs retire",
+    "env:run": "node scripts/env-run.mjs",
+    "docs:check": "node scripts/docs.mjs check",
+    "docs:catalog": "node scripts/docs.mjs catalog",
     "integrate:pr": "node scripts/integrate-pr.mjs",
     "integrate:workflow-pr": "node scripts/integrate-workflow-pr.mjs",
     "release:plan": "node scripts/release-plan.mjs",
     "release:pending": "node scripts/release-plan.mjs pending",
     "release:lock": "node scripts/release-lock.mjs",
-    "test:governance": "node --test scripts/lib/worktree-policy.test.mjs scripts/lib/integrate-pr-policy.test.mjs scripts/lib/trusted-workflow-policy.test.mjs scripts/lib/release-plan.test.mjs scripts/lib/release-plan-base.test.mjs scripts/lib/release-governance.test.mjs scripts/lib/cloudbase-release-store.test.mjs scripts/lib/production-release-guard.test.mjs scripts/lib/deploy-release-actions.test.mjs scripts/lib/cloud-release-probe-command.test.mjs scripts/lib/release-lock-command.test.mjs scripts/lib/release-operations.test.mjs scripts/lib/cloud-release-probe.test.mjs scripts/lib/release-control-plane.test.mjs",
+    "test:governance": "node --test scripts/lib/worktree-policy.test.mjs scripts/lib/worktree-lifecycle.test.mjs scripts/lib/worktree-environment.test.mjs scripts/lib/environment-profile.test.mjs scripts/lib/docs-policy.test.mjs scripts/lib/direct-deploy-policy.test.mjs scripts/lib/integrate-pr-policy.test.mjs scripts/lib/trusted-workflow-policy.test.mjs scripts/lib/release-plan.test.mjs scripts/lib/release-plan-base.test.mjs scripts/lib/release-governance.test.mjs scripts/lib/cloudbase-release-store.test.mjs scripts/lib/production-release-guard.test.mjs scripts/lib/deploy-release-actions.test.mjs scripts/lib/cloud-release-probe-command.test.mjs scripts/lib/release-lock-command.test.mjs scripts/lib/release-operations.test.mjs scripts/lib/cloud-release-probe.test.mjs scripts/lib/release-control-plane.test.mjs",
     "deploy:cloud": "node scripts/deploy.mjs cloud",
     "deploy:cloud:tcb": "node scripts/deploy.mjs cloud --use-tcb",
     "deploy:mp": "node scripts/deploy.mjs miniprogram",
