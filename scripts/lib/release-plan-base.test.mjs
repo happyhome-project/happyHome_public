@@ -21,6 +21,9 @@ test('main release planning uses the last successful production SHA and bootstra
 
   const bootstrap = await resolveMainReleasePlanBase({ readProductionState: async () => null })
   assert.deepEqual(bootstrap, { baseSha: '', source: 'bootstrap' })
+
+  const initializedButUnreleased = await resolveMainReleasePlanBase({ readProductionState: async () => ({ nextFencingToken: 2 }) })
+  assert.deepEqual(initializedButUnreleased, { baseSha: '', source: 'bootstrap' })
 })
 
 test('main release planning rejects malformed production release state rather than silently redeploying all functions', async () => {
