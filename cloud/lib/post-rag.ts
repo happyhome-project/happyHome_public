@@ -207,6 +207,11 @@ export interface TencentLkeapRagConfig {
   maxCandidateChunks: number
 }
 
+export interface TencentCloudBaseAtomicRagConfig extends TencentRagConfig {
+  chunkPageSize: number
+  maxCandidateChunks: number
+}
+
 const THRIFT_FAMILY_EXPANSION = [
   '节俭',
   '勤俭',
@@ -463,12 +468,20 @@ export function readTencentRagConfigFromEnv(env: NodeJS.ProcessEnv = process.env
     embeddingInferenceId: String(env.TENCENT_RAG_EMBEDDING_INFERENCE_ID || ''),
     rerankInferenceId: String(env.TENCENT_RAG_RERANK_INFERENCE_ID || ''),
     llmInferenceId: String(env.TENCENT_RAG_LLM_INFERENCE_ID || ''),
-    atomicSecretId: String(env.TENCENT_RAG_ATOMIC_SECRET_ID || ''),
-    atomicSecretKey: String(env.TENCENT_RAG_ATOMIC_SECRET_KEY || ''),
+    atomicSecretId: String(env.TENCENT_RAG_ATOMIC_SECRET_ID || env.TENCENTCLOUD_SECRETID || ''),
+    atomicSecretKey: String(env.TENCENT_RAG_ATOMIC_SECRET_KEY || env.TENCENTCLOUD_SECRETKEY || ''),
     atomicRegion: String(env.TENCENT_RAG_ATOMIC_REGION || 'ap-beijing'),
     embeddingModel: String(env.TENCENT_RAG_EMBEDDING_MODEL || 'bge-base-zh-v1.5'),
     rerankModel: String(env.TENCENT_RAG_RERANK_MODEL || 'bge-reranker-large'),
     llmModel: String(env.TENCENT_RAG_LLM_MODEL || 'deepseek-v3'),
+  }
+}
+
+export function readTencentCloudBaseAtomicRagConfigFromEnv(env: NodeJS.ProcessEnv = process.env): TencentCloudBaseAtomicRagConfig {
+  return {
+    ...readTencentRagConfigFromEnv(env),
+    chunkPageSize: Math.max(20, Math.min(100, Math.floor(Number(env.TENCENT_RAG_CLOUDBASE_CHUNK_PAGE_SIZE || 100)))),
+    maxCandidateChunks: Math.max(20, Math.min(500, Math.floor(Number(env.TENCENT_RAG_CLOUDBASE_MAX_CANDIDATE_CHUNKS || 200)))),
   }
 }
 
@@ -486,12 +499,7 @@ export function readTencentLkeapRagConfigFromEnv(env: NodeJS.ProcessEnv = proces
 }
 
 export function createTencentRagProviderFromEnv() {
-  const providerName = String(process.env.TENCENT_RAG_PROVIDER || '').trim().toLowerCase()
-  const allowLegacyCloudBaseRag = /^(1|true|yes|on)$/i.test(String(process.env.HAPPYHOME_ALLOW_LEGACY_CLOUDBASE_RAG || ''))
-  if (providerName === 'lkeap-cloudbase' && allowLegacyCloudBaseRag) {
-    return createTencentLkeapCloudBaseProvider(readTencentLkeapRagConfigFromEnv())
-  }
-  return createTencentRagProvider(readTencentRagConfigFromEnv())
+  return createTencentCloudBaseAtomicProvider(readTencentCloudBaseAtomicRagConfigFromEnv())
 }
 
 function hasEsIndexConfig(config: TencentRagConfig) {
@@ -1164,6 +1172,69 @@ export function createTencentLkeapCloudBaseProvider(config: TencentLkeapRagConfi
     async deletePostChunks(postId) {
       await deleteCloudBaseRagChunksByPostId(postId)
     },
+  }
+}
+
+export function createTencentCloudBaseAtomicProvider(
+  config: TencentCloudBaseAtomicRagConfig,
+  options: TencentRagProviderOptions = {},
+): TencentRagProvider {
+  const sendAtomicJson = options.requestAtomicJson || requestTencentEsAtomic
+  const embed = async (text: string) => extractEmbeddingVector(await sendAtomicJson<any>(config, 'GetTextEmbedding', {
+    ModelName: config.embeddingModel,
+    Texts: [text],
+  }))
+  const rerank = async (query: string, citations: ScoredRagCitation[]) => {
+    if (citations.length <= 1) return citations
+    const response = await sendAtomicJson<any>(config, 'RunRerank', {
+      ModelName: config.rerankModel,
+      Query: query,
+      Documents: citations.map((citation) => citation.preview),
+      ReturnDocuments: false,
+    })
+    const scores = new Map<number, number>(extractRerankItems(response).map((item) => [item.index, item.score]))
+    return citations.map((citation, index) => ({
+      ...citation,
+      score: Number(scores.get(index) ?? citation.score),
+      rerankScore: scores.get(index),
+    })).sort((left, right) => right.score - left.score)
+  }
+  return {
+    name: 'tencent-cloudbase-atomic',
+    isConfigured: () => hasAtomicModelConfig(config),
+    async search(input) {
+      if (!hasAtomicModelConfig(config)) throw new Error('rag_provider_not_configured')
+      const queryVector = await embed(input.ragQuery.expandedText)
+      const chunks = await loadLkeapChunks(input, config.chunkPageSize, config.maxCandidateChunks)
+      let citations: ScoredRagCitation[] = chunks.map((chunk) => {
+        const semanticScore = vectorCosine(queryVector, chunk.embedding)
+        const lexicalScore = lexicalEvidenceScore(input.ragQuery, chunk)
+        return { ...toCitation({ _id: chunk.chunkId, _source: chunk }, input.ragQuery), score: semanticScore + lexicalScore * 0.08, semanticScore, lexicalScore }
+      }).filter((citation) => citation.postId && citation.chunkId)
+      citations = selectLkeapCandidateCitations(citations, input.limit)
+      citations = rankLkeapEvidenceCitations(await rerank(input.ragQuery.raw, citations), input.limit)
+      const answerResponse = citations.length ? await sendAtomicJson<any>(config, 'ChatCompletions', {
+        ModelName: config.llmModel,
+        Messages: [{ Role: 'user', Content: buildAnswerPrompt(input.query, citations) }],
+        Stream: false,
+        Temperature: 0.1,
+      }) : null
+      return {
+        total: citations.length,
+        answer: extractCompletionText(answerResponse) || (citations.length ? deterministicAnswer(citations) : ''),
+        citations,
+        items: resultItemsFromCitations(citations),
+        mode: 'rag' as const,
+      }
+    },
+    async upsertChunks(chunks) {
+      if (!hasAtomicModelConfig(config)) throw new Error('rag_provider_not_configured')
+      for (const chunk of chunks) {
+        const embedding = await embed([chunk.title, chunk.fieldLabel, chunk.text].filter(Boolean).join('\n'))
+        await upsertCloudBaseRagChunk({ ...chunk, embedding })
+      }
+    },
+    async deletePostChunks(postId) { await deleteCloudBaseRagChunksByPostId(postId) },
   }
 }
 

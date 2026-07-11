@@ -38,12 +38,9 @@ if (!managerSecretId || !managerSecretKey) {
 }
 
 const baseEnv = {
-  TENCENT_RAG_PROVIDER: 'es',
-  TENCENT_RAG_ES_ENDPOINT: process.env.TENCENT_RAG_ES_ENDPOINT || ragEnv.TENCENT_RAG_ES_ENDPOINT,
-  TENCENT_RAG_ES_USERNAME: process.env.TENCENT_RAG_ES_USERNAME || ragEnv.TENCENT_RAG_ES_USERNAME,
-  TENCENT_RAG_ES_PASSWORD: process.env.TENCENT_RAG_ES_PASSWORD || ragEnv.TENCENT_RAG_ES_PASSWORD,
-  TENCENT_RAG_INDEX_NAME: process.env.TENCENT_RAG_INDEX_NAME || ragEnv.TENCENT_RAG_INDEX_NAME || 'happyhome_post_rag_chunks',
-  TENCENT_RAG_VECTOR_FIELD: process.env.TENCENT_RAG_VECTOR_FIELD || ragEnv.TENCENT_RAG_VECTOR_FIELD || 'embedding',
+  TENCENT_RAG_PROVIDER: 'cloudbase',
+  TENCENT_RAG_CLOUDBASE_CHUNK_PAGE_SIZE: process.env.TENCENT_RAG_CLOUDBASE_CHUNK_PAGE_SIZE || ragEnv.TENCENT_RAG_CLOUDBASE_CHUNK_PAGE_SIZE || '100',
+  TENCENT_RAG_CLOUDBASE_MAX_CANDIDATE_CHUNKS: process.env.TENCENT_RAG_CLOUDBASE_MAX_CANDIDATE_CHUNKS || ragEnv.TENCENT_RAG_CLOUDBASE_MAX_CANDIDATE_CHUNKS || '200',
 }
 
 const atomicEnv = {
@@ -55,18 +52,10 @@ const atomicEnv = {
   TENCENT_RAG_LLM_MODEL: process.env.TENCENT_RAG_LLM_MODEL || ragEnv.TENCENT_RAG_LLM_MODEL || 'deepseek-v3',
 }
 
-const inferenceEnv = {
-  TENCENT_RAG_EMBEDDING_INFERENCE_ID: process.env.TENCENT_RAG_EMBEDDING_INFERENCE_ID || ragEnv.TENCENT_RAG_EMBEDDING_INFERENCE_ID,
-  TENCENT_RAG_RERANK_INFERENCE_ID: process.env.TENCENT_RAG_RERANK_INFERENCE_ID || ragEnv.TENCENT_RAG_RERANK_INFERENCE_ID,
-  TENCENT_RAG_LLM_INFERENCE_ID: process.env.TENCENT_RAG_LLM_INFERENCE_ID || ragEnv.TENCENT_RAG_LLM_INFERENCE_ID,
-}
-
 const hasAtomicModelConfig = Object.values(atomicEnv).every(Boolean)
-const hasInferenceModelConfig = Object.values(inferenceEnv).every(Boolean)
 const targetEnv = {
   ...baseEnv,
   ...(hasAtomicModelConfig ? atomicEnv : {}),
-  ...(hasInferenceModelConfig ? inferenceEnv : {}),
 }
 
 const workerEnv = {
@@ -106,20 +95,22 @@ const functionNames = (process.argv.find((arg) => arg.startsWith('--only='))?.sl
   .filter(Boolean)
 
 const workerFunctions = new Set(['post-rag-worker', 'post-video-rag-worker'])
+const deprecatedEsEnvKeys = new Set([
+  'TENCENT_RAG_ES_ENDPOINT',
+  'TENCENT_RAG_ES_USERNAME',
+  'TENCENT_RAG_ES_PASSWORD',
+  'TENCENT_RAG_INDEX_NAME',
+  'TENCENT_RAG_VECTOR_FIELD',
+  'TENCENT_RAG_EMBEDDING_INFERENCE_ID',
+  'TENCENT_RAG_RERANK_INFERENCE_ID',
+  'TENCENT_RAG_LLM_INFERENCE_ID',
+])
 
 const missing = Object.entries(baseEnv)
   .filter(([, value]) => !value)
   .map(([key]) => key)
 
-if (!hasAtomicModelConfig && !hasInferenceModelConfig) {
-  const atomicMissing = Object.entries(atomicEnv)
-    .filter(([, value]) => !value)
-    .map(([key]) => key)
-  const inferenceMissing = Object.entries(inferenceEnv)
-    .filter(([, value]) => !value)
-    .map(([key]) => key)
-  missing.push(...(atomicMissing.length < inferenceMissing.length ? atomicMissing : inferenceMissing))
-}
+if (!hasAtomicModelConfig) missing.push(...Object.entries(atomicEnv).filter(([, value]) => !value).map(([key]) => key))
 
 if (functionNames.some((functionName) => workerFunctions.has(functionName)) && !workerEnv.POST_RAG_WORKER_TOKEN) {
   missing.push('POST_RAG_WORKER_TOKEN')
@@ -168,6 +159,7 @@ for (const functionName of functionNames) {
   )
   const existing = {}
   for (const item of detail?.Environment?.Variables || []) existing[item.Key] = item.Value
+  for (const key of deprecatedEsEnvKeys) delete existing[key]
   const envForFunction = functionName === 'post-video-rag-worker' ? { ...targetEnv, ...workerEnv, ...videoPolicyEnv, ...videoAnalyzerEnv } : (
     functionName === 'post-rag-worker' ? { ...targetEnv, ...workerEnv, ...videoPolicyEnv } : targetEnv
   )
