@@ -118,6 +118,7 @@ async function searchPost(options, communityId, query, identity) {
     q: query,
     limit: 5,
     __happyhomeSmokeIdentity: identity,
+    happyhomeSmokeAudit: true,
   }, options)
   if (result?.error) throw new Error(`post.search failed: ${result.error}`)
   return result

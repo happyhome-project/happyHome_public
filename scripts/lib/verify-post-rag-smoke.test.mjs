@@ -19,6 +19,7 @@ test('verify-post-rag-smoke queries the post cloud function instead of the disab
   assert.match(source, /invokeFunction\('post', \{[\s\S]*action: 'search'/)
   assert.match(source, /createSignedPostRagSmokeIdentity/)
   assert.match(source, /__happyhomeSmokeIdentity: identity/)
+  assert.match(source, /happyhomeSmokeAudit: true/)
   assert.doesNotMatch(source, /_testOpenid: openid/)
   assert.doesNotMatch(source, /http-gateway/)
 })

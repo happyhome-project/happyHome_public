@@ -1471,6 +1471,60 @@ test('search: accepts a short-lived signed RAG smoke identity only for its fixtu
   }))
 })
 
+test('search: smoke identity audit logs validation state without leaking signed claims', async () => {
+  const cloud = require('wx-server-sdk')
+  cloud.getWXContext.mockReturnValueOnce({ OPENID: '' })
+  process.env.POST_RAG_SMOKE_IDENTITY_SECRET = POST_RAG_SMOKE_SECRET
+  const identity = createSignedPostRagSmokeIdentity()
+  const log = jest.spyOn(console, 'info').mockImplementation(() => undefined)
+
+  ;(db.query as jest.Mock).mockImplementation(async (collection: string, where: Record<string, string>) => {
+    if (collection === 'post_rag_smoke_runs' && where.runId === identity.runId) {
+      return [{ ...where, expiresAt: identity.expiresAt }]
+    }
+    if (collection === 'community_members' && where.userId === identity.userId) {
+      return [{ _id: 'fixture-member', ...where }]
+    }
+    return []
+  })
+  ;(postRag.searchPostsWithRag as jest.Mock).mockResolvedValue({ mode: 'rag', answer: '命中', citations: [], items: [] })
+
+  await main({
+    action: 'search',
+    communityId: identity.communityId,
+    q: '勤俭持家',
+    __happyhomeSmokeIdentity: identity,
+  })
+
+  const audit = log.mock.calls.find(([label]) => label === '[post.rag.smoke.identity]')?.[1]
+  expect(audit).toEqual(expect.stringContaining('"present":true'))
+  expect(audit).toEqual(expect.stringContaining('"accepted":true'))
+  expect(audit).not.toContain(POST_RAG_SMOKE_SECRET)
+  expect(audit).not.toContain(identity.signature)
+  expect(audit).not.toContain(identity.userId)
+  expect(audit).not.toContain(identity.runId)
+  expect(audit).not.toContain(identity.communityId)
+  log.mockRestore()
+})
+
+test('search: smoke identity audit records an absent smoke identity', async () => {
+  const cloud = require('wx-server-sdk')
+  cloud.getWXContext.mockReturnValueOnce({ OPENID: '' })
+  const log = jest.spyOn(console, 'info').mockImplementation(() => undefined)
+
+  await expect(main({
+    action: 'search',
+    communityId: 'fixture-community',
+    q: '勤俭持家',
+    happyhomeSmokeAudit: true,
+  })).rejects.toThrow('需要先加入社区后查看内容')
+
+  const audit = log.mock.calls.find(([label]) => label === '[post.rag.smoke.identity]')?.[1]
+  expect(audit).toEqual(expect.stringContaining('"present":false'))
+  expect(audit).toEqual(expect.stringContaining('"accepted":false'))
+  log.mockRestore()
+})
+
 test('search: rejects a fixture run whose expiry differs from the signed identity', async () => {
   const cloud = require('wx-server-sdk')
   cloud.getWXContext.mockReturnValueOnce({ OPENID: '' })
