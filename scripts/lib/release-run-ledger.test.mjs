@@ -6,12 +6,14 @@ import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
 
 import {
+  confirmReleaseLedgerAgainstProductionInspection,
   createReleaseRunLedger,
   formatReleaseRunStatus,
   inspectReleaseStageReuse,
   runLedgerStage,
   summarizeReleaseRun,
 } from './release-run-ledger.mjs'
+import { completeProductionReleaseWithRemoteConfirmation } from './production-release-guard.mjs'
 import { DEFAULT_FUNCTIONS, REQUIRED_SMOKE_LABELS } from '../cloud-release-smoke.mjs'
 
 async function tempRoot() {
@@ -717,4 +719,182 @@ test('runLedgerStage stores structured failure result evidence from errors', asy
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('remote release inspection can complete a local ledger only for the exact passed release identity', async () => {
+  const events = []
+  const ledger = {
+    runId: 'run-123',
+    state: { context: { gitSha: 'abc123' } },
+    async appendEvent(event, payload) { events.push({ event, payload }) },
+    async complete(status) { this.status = status },
+  }
+
+  const confirmation = await confirmReleaseLedgerAgainstProductionInspection({
+    ledger,
+    productionInspection: {
+      lock: null,
+      run: { gitSha: 'abc123', runId: 'run-123', status: 'passed' },
+      state: {
+        gitSha: 'abc123',
+        lastSuccessfulRunId: 'run-123',
+        releasedAt: 123,
+      },
+    },
+  })
+
+  assert.equal(confirmation.gitSha, 'abc123')
+  assert.equal(ledger.status, 'passed')
+  assert.equal(events[0].event, 'remote_release_completion_confirmed')
+
+  await assert.rejects(
+    () => confirmReleaseLedgerAgainstProductionInspection({
+      ledger: { ...ledger, status: undefined },
+      productionInspection: {
+        lock: null,
+        run: { gitSha: 'different', runId: 'run-123', status: 'passed' },
+        state: { gitSha: 'different', lastSuccessfulRunId: 'run-123' },
+      },
+    }),
+    /does not prove completion/,
+  )
+
+  await assert.rejects(
+    () => confirmReleaseLedgerAgainstProductionInspection({
+      ledger,
+      productionInspection: {
+        lock: { runId: 'run-124', status: 'active' },
+        run: { gitSha: 'abc123', runId: 'run-123', status: 'passed' },
+        state: { gitSha: 'abc123', lastSuccessfulRunId: 'run-123' },
+      },
+    }),
+    /does not prove completion/,
+  )
+
+  await assert.rejects(
+    () => confirmReleaseLedgerAgainstProductionInspection({
+      ledger,
+      productionInspection: {
+        lock: null,
+        run: { gitSha: 'abc123', status: 'passed' },
+        state: { gitSha: 'abc123', lastSuccessfulRunId: 'run-123' },
+      },
+    }),
+    /does not prove completion/,
+  )
+})
+
+test('production release completes the local ledger after a timed-out completion only when remote state proves success', async () => {
+  const events = []
+  const ledger = {
+    runId: 'run-123',
+    state: { context: { gitSha: 'abc123' } },
+    async appendEvent(event, payload) { events.push({ event, payload }) },
+    async complete(status) { this.status = status },
+  }
+  let remotelyMarked = false
+  const guard = {
+    context: { gitSha: 'abc123', runId: 'run-123' },
+    complete: () => new Promise(() => {}),
+    async getReleaseInspection() {
+      return {
+        lock: null,
+        run: { gitSha: 'abc123', runId: 'run-123', status: 'passed' },
+        state: { gitSha: 'abc123', lastSuccessfulRunId: 'run-123', releasedAt: 123 },
+      }
+    },
+    markRemotelyCompleted() { remotelyMarked = true },
+  }
+
+  const result = await completeProductionReleaseWithRemoteConfirmation({
+    guard,
+    ledger,
+    timeoutMs: 0,
+  })
+
+  assert.equal(result.mode, 'remote-state-confirmed')
+  assert.equal(ledger.status, 'passed')
+  assert.equal(remotelyMarked, true)
+  assert.equal(events[0].event, 'remote_release_completion_confirmed')
+})
+
+test('production release leaves the ledger incomplete when timed-out completion lacks remote proof', async () => {
+  const ledger = {
+    runId: 'run-123',
+    state: { context: { gitSha: 'abc123' } },
+    async appendEvent() {},
+    async complete(status) { this.status = status },
+  }
+  const guard = {
+    context: { gitSha: 'abc123', runId: 'run-123' },
+    complete: () => new Promise(() => {}),
+    async getReleaseInspection() {
+      return {
+        lock: null,
+        run: { gitSha: 'different', runId: 'run-123', status: 'passed' },
+        state: { gitSha: 'different', lastSuccessfulRunId: 'run-123' },
+      }
+    },
+    markRemotelyCompleted() { throw new Error('must not mark unproven completion') },
+  }
+
+  await assert.rejects(
+    () => completeProductionReleaseWithRemoteConfirmation({ guard, ledger, timeoutMs: 0 }),
+    /does not prove completion/,
+  )
+  assert.equal(ledger.status, undefined)
+})
+
+test('remote-confirmed release does not become failed when the local ledger write fails', async () => {
+  let remotelyMarked = false
+  const guard = {
+    context: { gitSha: 'abc123', runId: 'run-123' },
+    complete: () => new Promise(() => {}),
+    async getReleaseInspection() {
+      return {
+        lock: null,
+        run: { gitSha: 'abc123', runId: 'run-123', status: 'passed' },
+        state: { gitSha: 'abc123', lastSuccessfulRunId: 'run-123' },
+      }
+    },
+    markRemotelyCompleted() { remotelyMarked = true },
+  }
+  const ledger = {
+    runId: 'run-123',
+    state: { context: { gitSha: 'abc123' } },
+    async appendEvent() { throw new Error('local disk unavailable') },
+    async complete() { throw new Error('must not complete after append failure') },
+  }
+
+  await assert.rejects(
+    () => completeProductionReleaseWithRemoteConfirmation({ guard, ledger, timeoutMs: 0 }),
+    (error) => error?.releaseRemotelyCompleted === true && /local disk unavailable/.test(error.message),
+  )
+  assert.equal(remotelyMarked, true)
+})
+
+test('remote-confirmed release preserves its recovery marker for non-Error local failures', async () => {
+  const guard = {
+    context: { gitSha: 'abc123', runId: 'run-123' },
+    complete: () => new Promise(() => {}),
+    async getReleaseInspection() {
+      return {
+        lock: null,
+        run: { gitSha: 'abc123', runId: 'run-123', status: 'passed' },
+        state: { gitSha: 'abc123', lastSuccessfulRunId: 'run-123' },
+      }
+    },
+    markRemotelyCompleted() {},
+  }
+  const ledger = {
+    runId: 'run-123',
+    state: { context: { gitSha: 'abc123' } },
+    async appendEvent() { throw 'local disk unavailable' },
+    async complete() {},
+  }
+
+  await assert.rejects(
+    () => completeProductionReleaseWithRemoteConfirmation({ guard, ledger, timeoutMs: 0 }),
+    (error) => error?.releaseRemotelyCompleted === true && /local disk unavailable/.test(error.message),
+  )
 })

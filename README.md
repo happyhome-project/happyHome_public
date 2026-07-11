@@ -28,6 +28,8 @@ npm.cmd --workspace cloud test
 npm.cmd run integrate:pr -- --pr <number>
 npm.cmd run release:pending
 npm.cmd run release:status
+# Repairs a local running ledger only after the remote state proves the same SHA/run passed and no production lock remains.
+npm.cmd run release:reconcile -- --run-id=<id>
 
 # Formal RAG verification with a temporary, self-cleaning fixture
 npm.cmd run verify:post-rag-smoke

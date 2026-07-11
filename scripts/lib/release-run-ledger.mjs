@@ -504,6 +504,41 @@ export async function createReleaseRunLedger(options) {
   return ledger
 }
 
+function releaseIdentityFromLedger(ledger) {
+  const gitSha = String(ledger?.state?.context?.gitSha || '').trim()
+  const runId = String(ledger?.runId || '').trim()
+  if (!gitSha || !runId) throw new Error('release ledger is missing gitSha or runId')
+  return { gitSha, runId }
+}
+
+export function productionInspectionProvesReleaseCompletion(ledger, productionInspection) {
+  const expected = releaseIdentityFromLedger(ledger)
+  const productionState = productionInspection?.state
+  const run = productionInspection?.run
+  return productionInspection?.lock == null &&
+    String(productionState?.gitSha || '') === expected.gitSha &&
+    String(productionState?.lastSuccessfulRunId || '') === expected.runId &&
+    String(run?.gitSha || '') === expected.gitSha &&
+    String(run?.runId || '') === expected.runId &&
+    run?.status === 'passed'
+}
+
+export async function confirmReleaseLedgerAgainstProductionInspection({ ledger, productionInspection }) {
+  const expected = releaseIdentityFromLedger(ledger)
+  if (!productionInspectionProvesReleaseCompletion(ledger, productionInspection)) {
+    throw new Error(`Production state does not prove completion for run ${expected.runId} at ${expected.gitSha}`)
+  }
+  const productionState = productionInspection.state
+  const evidence = {
+    gitSha: expected.gitSha,
+    lastSuccessfulRunId: expected.runId,
+    releasedAt: productionState.releasedAt || null,
+  }
+  await ledger.appendEvent('remote_release_completion_confirmed', { evidence })
+  await ledger.complete('passed')
+  return evidence
+}
+
 export async function loadReleaseRun(root, runId) {
   const absoluteRoot = resolve(root || process.cwd())
   return await readJson(resolve(absoluteRoot, RELEASE_RUNS_DIR, runId, 'run.json'))

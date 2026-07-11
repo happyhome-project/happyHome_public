@@ -92,7 +92,10 @@ import {
   makeReleaseRunId,
   runLedgerStage,
 } from './lib/release-run-ledger.mjs'
-import { ProductionReleaseGuard } from './lib/production-release-guard.mjs'
+import {
+  completeProductionReleaseWithRemoteConfirmation,
+  ProductionReleaseGuard,
+} from './lib/production-release-guard.mjs'
 import { hasCloudReleaseProbeResponse } from './lib/cloud-release-probe.mjs'
 import { executeReleaseOperations } from './lib/release-operations.mjs'
 import { ReleaseGovernance } from './lib/release-governance.mjs'
@@ -1334,11 +1337,13 @@ async function runFormalRelease(options = {}) {
     })
     else await releaseLedger.skipStage('verify-upload', { reason: 'release plan has no miniprogram changes' })
 
-    if (releaseGuard) await releaseGuard.complete({
+    if (releaseGuard) await completeProductionReleaseWithRemoteConfirmation({
+      guard: releaseGuard,
+      ledger: releaseLedger,
       components: releaseComponents({ cloudDeploy, cloudReleaseProbes, miniprogramUpload, plan: formalPlan, releaseContext }),
       evidence: { localReleaseRunId: releaseLedger.runId, planBaseSha: formalPlan.baseSha || null },
     })
-    await releaseLedger.complete('passed')
+    else await releaseLedger.complete('passed')
   } catch (error) {
     if (releaseGuard && !releaseGuard.finished) {
       try {
@@ -1347,7 +1352,8 @@ async function runFormalRelease(options = {}) {
         console.error(`[release-lock] failed to record release failure: ${guardError?.message || guardError}`)
       }
     }
-    await releaseLedger.complete('failed')
+    if (!error?.releaseRemotelyCompleted) await releaseLedger.complete('failed')
+    else console.error('[release-ledger] remote production state already proves success; run release:reconcile to repair the local ledger')
     throw error
   }
 }
