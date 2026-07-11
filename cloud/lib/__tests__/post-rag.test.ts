@@ -866,13 +866,12 @@ test('rankLkeapEvidenceCitations drops negative rerank noise and keeps lexical e
   expect(ranked.map((citation) => citation.chunkId)).toEqual(['thrift-chunk'])
 })
 
-test('createTencentRagProviderFromEnv keeps ES as the formal provider even when legacy CloudBase RAG is configured', () => {
+test('createTencentRagProviderFromEnv uses CloudBase retrieval as the formal provider even when stale ES settings exist', () => {
   const previousEnv = { ...process.env }
   try {
-    process.env.TENCENT_RAG_PROVIDER = 'lkeap-cloudbase'
-    process.env.TENCENTCLOUD_SECRETID = 'AKIDtest'
-    process.env.TENCENTCLOUD_SECRETKEY = 'secret-test'
-    process.env.TENCENT_LKEAP_REGION = 'ap-guangzhou'
+    process.env.TENCENT_RAG_PROVIDER = 'es'
+    process.env.TENCENT_RAG_ATOMIC_SECRET_ID = 'AKIDtest'
+    process.env.TENCENT_RAG_ATOMIC_SECRET_KEY = 'secret-test'
     process.env.TENCENT_RAG_ES_ENDPOINT = 'https://es.example.com'
     process.env.TENCENT_RAG_ES_USERNAME = 'elastic'
     process.env.TENCENT_RAG_ES_PASSWORD = 'secret-test'
@@ -883,28 +882,26 @@ test('createTencentRagProviderFromEnv keeps ES as the formal provider even when 
 
     const provider = createTencentRagProviderFromEnv()
 
-    expect(provider.name).toBe('tencent-es-ai-search')
+    expect(provider.name).toBe('tencent-cloudbase-atomic')
     expect(provider.isConfigured()).toBe(true)
   } finally {
     process.env = previousEnv
   }
 })
 
-test('createTencentRagProviderFromEnv ignores legacy lkeap flag and keeps ES as formal RAG provider', () => {
+test('createTencentRagProviderFromEnv defaults to CloudBase retrieval without an ES endpoint', () => {
   const previousEnv = { ...process.env }
   try {
-    process.env.TENCENT_RAG_PROVIDER = 'lkeap'
-    process.env.TENCENT_RAG_ES_ENDPOINT = 'https://es.example.com'
-    process.env.TENCENT_RAG_ES_USERNAME = 'elastic'
-    process.env.TENCENT_RAG_ES_PASSWORD = 'secret-test'
-    process.env.TENCENT_RAG_INDEX_NAME = 'happyhome_post_rag_chunks'
-    process.env.TENCENT_RAG_EMBEDDING_INFERENCE_ID = 'embedding-endpoint'
-    process.env.TENCENT_RAG_RERANK_INFERENCE_ID = 'rerank-endpoint'
-    process.env.TENCENT_RAG_LLM_INFERENCE_ID = 'llm-endpoint'
+    process.env.TENCENT_RAG_PROVIDER = 'cloudbase'
+    process.env.TENCENT_RAG_ATOMIC_SECRET_ID = 'AKIDtest'
+    process.env.TENCENT_RAG_ATOMIC_SECRET_KEY = 'secret-test'
+    delete process.env.TENCENT_RAG_ES_ENDPOINT
+    delete process.env.TENCENT_RAG_ES_USERNAME
+    delete process.env.TENCENT_RAG_ES_PASSWORD
 
     const provider = createTencentRagProviderFromEnv()
 
-    expect(provider.name).toBe('tencent-es-ai-search')
+    expect(provider.name).toBe('tencent-cloudbase-atomic')
     expect(provider.isConfigured()).toBe(true)
   } finally {
     process.env = previousEnv

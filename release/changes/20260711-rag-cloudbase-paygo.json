@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "changeId": "rag-cloudbase-paygo",
+  "actions": [
+    "ensure-indexes",
+    "update-rag-env",
+    "configure-rag-workers"
+  ],
+  "migrations": [],
+  "smokeSuites": [
+    "post-rag"
+  ]
+}
