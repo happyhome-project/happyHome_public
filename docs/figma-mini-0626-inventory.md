@@ -12,15 +12,7 @@
 - Figma 文件：`社区资源共享_小程序_0709_v2`
 - File key：`s9qznMHulxrBryT7Hwj2El`
 - 已确认 page：`效果图`、`基础控件`
-- 本地辅助文件：`C:\Project\Claude\happyHome\Figma\社区资源共享_小程序_0709_v2.fig`
-- 2026-06-30 使用新账号重新连接 Figma MCP：
-  - handle：`craiggrace2164`
-  - email：`craiggrace2164@outlook.com`
-  - plan：`craiggrace2164's team`
-  - seat：`Full`
-  - tier：`student`
-  - seat_type：`expert`
-- 新账号可正常读取 Dev Mode 设计上下文；旧 Starter 调用额度限制不再作为本轮实现依据。
+- 2026-06-30 已通过具备 Dev Mode 权限的协作账号确认可读取设计上下文。账号身份、席位和本机导出路径不属于仓库文档。
 
 ## 已由 Figma MCP 确认
 

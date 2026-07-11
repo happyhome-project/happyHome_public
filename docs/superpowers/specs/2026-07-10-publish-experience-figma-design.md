@@ -1,5 +1,8 @@
 # Publish Experience Figma Alignment Design
 
+> **Historical / point-in-time:** This specification records the design accepted for the 2026-07-10 delivery. It does not override later product or implementation decisions.
+> **Current authority:** Use the [documentation authority map](../../README.md), current Figma source, checked-in styles, code, and tests.
+
 ## Objective
 
 Align the mini-program publish entry and publish forms with the current `0709_v2` Figma source while preserving the existing section/widget data model.

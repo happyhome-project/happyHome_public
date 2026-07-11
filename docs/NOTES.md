@@ -1,20 +1,7 @@
-# 待办与设计问题
+# Historical project notes (archived)
 
-> 完整历史已归档到 git。本文件只保留仍然 open 的待办。
+> **Current authority:** Open, claimable work lives in [TASKS.md](../TASKS.md); documentation status lives in [`docs/README.md`](./README.md).
 
----
+This file used to hold a second backlog. Open, claimable work now lives only in [TASKS.md](../TASKS.md), so this document is retained solely to preserve old links and explain the transition.
 
-## 未实现功能
-
-### 中优先级
-1. **评论/点赞** — 数据结构预留了，代码未实现
-
-### 低优先级
-2. **miniprogram-automator 测试** — 旧 SDK 只在 DevTools CLI 支持 `--auto-port` 时可用；当前 Windows 稳定版主路径改为 `npm.cmd run test:mp:devtools`（能力检查 + `auto-replay`），不得把 WebSocket 404 计为通过。
-
----
-
-## 已知设计限制（可接受）
-- 管理员退出社区后可能无管理员
-- 待审批成员列表无分页
-- 错误提示比较通用，缺少具体上下文
+Known limitations that need an owner and deliverable should be added to `TASKS.md`. Current behavior and accepted constraints should be documented beside the relevant implementation or operational guide. Completed items are recoverable from Git history.

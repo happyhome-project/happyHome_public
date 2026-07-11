@@ -1,5 +1,8 @@
 # Worktree lifecycle governance
 
+> **Historical / point-in-time:** This fragment records one feature-branch delivery and does not represent current branch or merge status.
+> **Current authority:** Use [AGENTS.md](../../AGENTS.md), the [documentation authority map](../README.md), current worktree tooling, and tests.
+
 ## Status
 
 Implemented on the `codex/worktree-lifecycle-governance` feature branch; it is not merged until PR CI passes and the canonical main workspace integrates the PR.

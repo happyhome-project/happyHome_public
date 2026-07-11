@@ -1,5 +1,8 @@
 # Profile Figma Alignment Design
 
+> **Historical / point-in-time:** This specification records the design accepted for the 2026-07-10 delivery. It does not override later product or implementation decisions.
+> **Current authority:** Use the [documentation authority map](../../README.md), current Figma source, checked-in styles, code, and tests.
+
 ## Source of truth
 
 - Figma file: `社区资源共享_小程序_0709_v2`, file key `s9qznMHulxrBryT7Hwj2El`.

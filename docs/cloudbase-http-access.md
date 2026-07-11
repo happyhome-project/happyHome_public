@@ -78,7 +78,7 @@ VITE_CLOUD_API_URL=https://<env-id>-<uin>.ap-shanghai.app.tcloudbase.com
 
 ```env
 VITE_ADMIN_USERNAME=admin
-VITE_ADMIN_PASSWORD=happyhome2024
+VITE_ADMIN_PASSWORD=<local-admin-password>
 VITE_ADMIN_TOKEN=your_admin_token
 ```
 

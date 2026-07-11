@@ -1,49 +1,36 @@
 # HappyHome
 
-HappyHome is a WeChat mini-program community product with a Vue admin site and CloudBase backend. It includes formal post RAG search with cited answers.
+HappyHome is a WeChat mini-program community product with a Vue admin site and CloudBase backend. The monorepo also contains cited formal-post RAG search.
 
 ## Components
 
 - `miniprogram/`: uni-app / Vue 3 mini-program client.
 - `admin-web/`: Vue 3 management site.
 - `cloud/`: CloudBase functions and shared business libraries.
-- `scripts/`: release, indexing, verification, and operational tooling.
+- `scripts/`: verification, worktree, integration, and release tooling.
 
-## Start Here
+## Start here
 
 ```powershell
 npm.cmd ci
 npm.cmd run hooks:install
+npm.cmd run worktree:doctor
 ```
 
-Read [CLAUDE.md](./CLAUDE.md) for project conventions and [AGENTS.md](./AGENTS.md) for the mandatory PR, CI, worktree, and release boundaries.
+- [AGENTS.md](./AGENTS.md) defines mandatory PR, CI, worktree, and production boundaries.
+- [CLAUDE.md](./CLAUDE.md) defines the repository collaboration playbook.
+- [Documentation map](./docs/README.md) identifies current authorities, runbooks, references, and historical records.
+- [TASKS.md](./TASKS.md) contains only open, claimable project work.
 
-## Common Commands
+## Common local checks
 
 ```powershell
-# Cloud tests
 npm.cmd --workspace cloud test
-
-# PR integration and release state
-npm.cmd run integrate:pr -- --pr <number>
-npm.cmd run release:pending
-npm.cmd run release:status
-# Repairs a local running ledger only after the remote state proves the same SHA/run passed and no production lock remains.
-npm.cmd run release:reconcile -- --run-id=<id>
-
-# Formal RAG verification with a temporary, self-cleaning fixture
-npm.cmd run verify:post-rag-smoke
+npm.cmd --workspace admin-web run type-check
+npm.cmd --workspace miniprogram run type-check
+npm.cmd run docs:check
 ```
 
-Production work is performed from `main` in `C:\Project\Claude\happyHome`; feature branches must use their own worktree and enter through a passing PR.
+Cross-component formal release orchestration, mandatory gates, evidence, upload policy, and final production verification live in the [release gate](./docs/release-gate.md). Component guides may retain component-specific build or deployment reference material, but they do not define a formal HappyHome release.
 
-## Documentation
-
-- [Documentation map](./docs/README.md): canonical document entry point.
-- [Setup](./docs/SETUP.md): local environment and CloudBase deployment setup.
-- [Post RAG Search](./docs/post-rag-search.md): architecture, operations, cost boundaries, and RAG smoke acceptance.
-- [Testing](./docs/TESTING.md): test layers and commands.
-- [Release Gate](./docs/release-gate.md): formal release evidence and CloudBase deployment rules.
-- [Tasks](./TASKS.md): current backlog and unresolved project decisions.
-
-Use Node 24 and npm 11. Read [AGENTS.md](./AGENTS.md) for mandatory PR/CI/worktree/release boundaries and [CLAUDE.md](./CLAUDE.md) for collaboration guidance.
+Use Node 24 and npm 11. Feature work uses an isolated `codex/<feature>` branch and enters `main` through a passing pull request and merge queue.

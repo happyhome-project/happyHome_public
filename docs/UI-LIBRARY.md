@@ -1,6 +1,7 @@
 # 美好 Home · UI 组件库使用速查 ⚠️ 已废弃（描述 wot-design-uni 时代）
 
 > ⚠️ **本文档描述基于 wot-design-uni 的旧组件方案，已于 2026-04 全面回退到原生 button/view + tokens-only 方案。**
+> **Current authority:** 文档状态见 [`docs/README.md`](./README.md)，组件实现以当前页面代码与 [`miniprogram/src/uni.scss`](../miniprogram/src/uni.scss) 为准。
 >
 > 回退原因：wot-design-uni 真机小程序兼容性差（wd-button/wd-cell click 不响应、styleIsolation:shared 污染其他页面）。
 > 回退记录：参考 commit `c6cefe / 4750ff` 系列及相关 Git 历史。

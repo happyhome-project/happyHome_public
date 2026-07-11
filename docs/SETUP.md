@@ -107,7 +107,7 @@ npm.cmd run deploy:cloud:tcb -- --only=user
 
 ```bash
 cd cloud && node build.mjs
-cd C:\Project\Claude\happyHome\cloud\dist\user
+cd <repository-root>\cloud\dist\user
 npx.cmd --yes --package @cloudbase/cli tcb fn deploy user --force --yes --env-id cloudbase-3gh862acb1505ff3 --deployMode cos --json
 ```
 
@@ -145,26 +145,7 @@ npx.cmd --yes --package @cloudbase/cli cloudbase fn list --env-id cloudbase-3gh8
 node scripts/deploy.mjs cloud --use-tcb
 ```
 
-Release cloud smoke and log gate:
-
-```bash
-# Full cloud release smoke: invokes safe cloud paths, creates/cleans HH_RELEASE_SMOKE_* fixture,
-# captures logs, and writes evidence under .codex-local/release-evidence/<run>/cloud-smoke/.
-npm.cmd run test:cloud:release-smoke -- --env-id cloudbase-3gh862acb1505ff3
-
-# Deploy selected cloud functions through CloudBase CLI/COS and then run the same smoke gate.
-npm.cmd run deploy:cloud:tcb -- --only=user,post --smoke
-
-# Formal release path. Cloud smoke runs after cloud deploy and before admin-web/mp upload.
-npm.cmd run deploy:release -- --use-tcb
-```
-
-Notes:
-
-- `tcb fn invoke` on Windows should use `-d @payload.json`; inline JSON can return `ClientContext parameter error` even when the CLI exits 0.
-- The release gate parses CloudBase `RetMsg`/`ErrMsg`, so CLI exit code 0 alone is not enough.
-- `HH_CLOUD_LOG_CAPTURE_POST` plus the `post.clientLog` runId is a hard log gate. Non-critical `fn log` failures such as CloudBase `GetFunctionLogDetail InternalError` for `member`/`section` are recorded as warnings in `summary.json`.
-- Do not enable production `ALLOW_TEST_OPENID`; `user` and `section` direct invokes record runtime guard evidence, while real OPENID flows stay covered by mini-program release UI evidence.
+Release-owned cloud smoke, log evidence, formal deployment ordering, and upload commands are maintained only in the [release gate](./release-gate.md).
 
 可继续自动化的 CloudBase CLI 命令：
 
@@ -203,8 +184,7 @@ cd admin-web
 npm run dev
 ```
 
-访问 `http://localhost:5173`。  
-默认账号为 `admin / happyhome2024`（可通过 `VITE_ADMIN_USERNAME` / `VITE_ADMIN_PASSWORD` 覆盖）。
+访问 `http://localhost:5173`。登录凭据必须通过本地环境提供，不在仓库文档中记录默认值或真实值。
 
 > 生产环境请在 `admin` 云函数中配置环境变量 `ADMIN_TOKEN`，并与
 > Admin Web 的 `VITE_ADMIN_TOKEN` 保持一致。
@@ -221,8 +201,10 @@ npm run set:superadmin -- <openId> <CloudBaseHttpBaseUrl> [adminToken]
 npm run set:superadmin -- o1234567890abcdef https://<env-id>-<uin>.ap-shanghai.app.tcloudbase.com
 ```
 
-- `adminToken` 默认是 `happyhome-admin-2024`
-- 也可以用环境变量 `CLOUD_API_URL`、`ADMIN_TOKEN`
+- `adminToken` 应通过命令参数或本地 `ADMIN_TOKEN` 环境变量提供；不要把值提交到仓库。
+- `CLOUD_API_URL` 可通过本地环境提供。
+
+> 注意：当前 `set:superadmin` 和 H5/API 测试工具仍包含 legacy fallback，缺少本地 `ADMIN_TOKEN` 时不会 fail closed。运行这些工具时必须显式提供 `ADMIN_TOKEN`，不应依赖 fallback；fallback 值不得作为配置或文档默认值。
 
 ---
 
@@ -314,20 +296,6 @@ npm run set:superadmin -- o1234567890abcdef https://<env-id>-<uin>.ap-shanghai.a
 1. 所有路径使用 `/` 或 `path.join()`，代码中无硬编码 Linux 路径
 2. `private.*.key` 文件需要一起迁移（不在 git 中）
 3. `.env.local` 文件需要一起迁移（不在 git 中）
-4. 微信开发者工具自动化在 Windows + 原生环境下运行；当前新版 DevTools 的 `auto-replay` 使用 IDE HTTP 服务端口。
-   - 发布前优先执行 `npm.cmd run test:mp:devtools`。它会同时检查：DevTools CLI 路径、当前工具版本、IDE HTTP 服务端口、`cli auto --help` 是否支持 `--auto-port`、`cli auto-replay --help` 是否支持 `--replay-all`，最后实际运行 `auto-replay` 并要求出现 `auto-replay finish`。
-   - `scripts/test-mp-replay.mjs` / `scripts/check-devtools-automation.mjs` 会优先自动识别已运行的 DevTools IDE 端口（例如 `21929`）：当存在多个 `wechatdevtools` 监听端口时，必须探测 `http://127.0.0.1:<port>/open`，只有返回 `/v2/open` 重定向的端口才算 IDE HTTP 服务端口，不能简单取第一个端口。
-   - 如识别失败，再设置 `WECHAT_DEVTOOLS_PORT=<实际端口>` 执行 `npm.cmd run test:mp:devtools` 或 `npm.cmd run test:mp:replay`。
-   - 旧 `miniprogram-automator` 仍依赖 WebSocket 自动化端口。官方 CLI 文档仍写有 `cli auto --project <path> --auto-port <port>`，但本机 DevTools Stable v2.01.2510290 的 `cli auto --help` 已没有 `--auto-port`，只有 `--test-ticket` / `--ticket`。因此遇到新版 DevTools `ws://127.0.0.1:<IDE_HTTP_PORT>/` 返回 404 时，结论是“旧 WebSocket automator 入口不可用”，不得把 automator 失败当作通过，也不得把 IDE HTTP 端口当作 WebSocket 端口。
-   - 官方依据：命令行/HTTP 文档要求 CLI/HTTP 服务端口在“设置 -> 安全设置”中开启，HTTP V2 路径需使用 `/v2` 前缀；小程序自动化 SDK 文档的旧 WebSocket 用法依赖 `--auto-port`；录制回放 CLI 文档支持 `cli auto-replay --project <path> --replay-all` 和 `--replay-config-path`。
-5. 小程序发布前必须单独覆盖 `我的` 页，不得只用首页或通用 replay 代替。
-   - `node scripts/deploy.mjs miniprogram-upload` 和 `node scripts/deploy.mjs release` 会在上传前自动执行 `npm.cmd run test:mp:release-gate -- --skip-mp-build`；这一步不生成二维码，失败时必须先修复，不能继续上传体验版。
-   - 手动发布前也可以单独跑 `npm.cmd run test:mp:release-gate`。该 gate 会覆盖：`build:mp-weixin`、详情/我的 compiled runtime syntax guard、profile critical path guard、H5 profile smoke、H5 detail smoke、DevTools automation capability。
-   - 先执行 `npm.cmd --workspace miniprogram run build:h5`，再执行 `npm.cmd run test:h5:profile-smoke`，确认 `#/pages/profile/index` 首屏包含 `ver:`、`state:logged-out login:0` 和实际页面内容。
-   - `npm.cmd run test:h5:detail-smoke` 必须能在未登录详情路径渲染 `.hh-login-guard` 和 `ver:`，确保详情页至少不会首屏完全空白；已登录、真实帖子点击仍需要 DevTools 录制回放或真机验证。
-   - `test:h5:profile-smoke` 必须同时覆盖 H5 fallback 登录分支和模拟真机 `wx.canIUse('button.open-type.chooseAvatar')` 分支；不能只看 fallback 分支就认为真机登录页安全。
-   - `npm.cmd run test:mp:profile-critical-path` 必须在 `build:mp-weixin` 之后通过，确保 `pages/profile/index.js` 首屏不会静态拉入登录后/管理员专用 helper。真机体验版一旦出现 `我的` 页空白，优先检查 profile 首屏静态依赖是否又变重。
-   - `npm.cmd run test:mp:detail-runtime-syntax` 会读取编译后的 `app.json` 和 `project.config.json`，要求 `lazyCodeLoading=requiredComponents`、固定基础库，并遍历全部页面与分包的本地 JS、组件、WXML/WXS、WXSS 依赖；bare/动态/越界依赖、缺失产物、未经审查的 framework/第三方 runtime hash 或项目自有高风险语法都会阻断上传。上传配置必须关闭 DevTools 的 ES6 二次转换、增强编译和二次压缩，让被扫描的 JavaScript 与交给上传器的 JavaScript 保持一致。
-   - `pages/profile/index` 保留顶部 `ver/state/login/cc` 诊断条，以及 `profile.mounted/profile.show/profile.render.tick/profile.refresh.*` clientLog；真机反馈空白时，先用 CloudBase 日志确认这些事件和 build 号。
-   - 结论边界：当前新版 DevTools CLI 可以在发布环节验证工具链、编译产物、回放窗口和已录制用例，但不能凭空断言“任意帖子点击详情在真机一定不空白”。要机器证明这个点击路径，必须先在微信开发者工具里录制覆盖“首页点击帖子 -> 详情有内容”和“进入我的页 -> 有版本/登录内容”的回放用例；没有录制用例时，发布 gate 只能阻止已知空白根因，最终体验版仍需真机点测。
-6. `scripts/deploy.mjs` 中的路径用 `path.resolve()` 构建，跨平台兼容
+4. 微信开发者工具自动化需要 Windows 原生环境；开发阶段的测试分层与命令见 [`TESTING.md`](./TESTING.md)。
+5. 小程序发布专属的 DevTools、录制回放、上传、真机证据和最终验证要求统一见 [release gate](./release-gate.md)。本搭建指南不复制正式发布步骤。
+6. `scripts/deploy.mjs` 中的路径用 `path.resolve()` 构建，跨平台兼容。

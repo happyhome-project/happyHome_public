@@ -95,14 +95,14 @@ VITE_APPROVAL_MEMBER_JOIN_TEMPLATE_ID=成员加入申请模板ID
 VITE_APPROVAL_COMMUNITY_CREATE_TEMPLATE_ID=社区创建申请模板ID
 ```
 
-配置后重新构建并上传小程序开发版本：
+配置后可在当前功能分支做组件级开发验证：
 
 ```bash
+npm --workspace miniprogram run type-check
 npm --workspace miniprogram run build:mp-weixin
-npm run deploy:mp:upload -- --desc="approval notifications"
 ```
 
-如果当前还没有正式版，上传后需要在微信公众平台版本管理里把开发版本设为体验版。
+跨组件正式发布、上传、体验版选择和证据要求统一见 [`release-gate.md`](./release-gate.md)；本文只维护审批提醒配置与功能验收。
 
 ## 4. 验收路径
 
