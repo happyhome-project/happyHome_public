@@ -1507,6 +1507,24 @@ test('search: smoke identity audit logs validation state without leaking signed 
   log.mockRestore()
 })
 
+test('search: smoke identity audit records an absent smoke identity', async () => {
+  const cloud = require('wx-server-sdk')
+  cloud.getWXContext.mockReturnValueOnce({ OPENID: '' })
+  const log = jest.spyOn(console, 'info').mockImplementation(() => undefined)
+
+  await expect(main({
+    action: 'search',
+    communityId: 'fixture-community',
+    q: '勤俭持家',
+    happyhomeSmokeAudit: true,
+  })).rejects.toThrow('需要先加入社区后查看内容')
+
+  const audit = log.mock.calls.find(([label]) => label === '[post.rag.smoke.identity]')?.[1]
+  expect(audit).toEqual(expect.stringContaining('"present":false'))
+  expect(audit).toEqual(expect.stringContaining('"accepted":false'))
+  log.mockRestore()
+})
+
 test('search: rejects a fixture run whose expiry differs from the signed identity', async () => {
   const cloud = require('wx-server-sdk')
   cloud.getWXContext.mockReturnValueOnce({ OPENID: '' })

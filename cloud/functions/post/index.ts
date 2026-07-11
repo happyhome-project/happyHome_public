@@ -68,15 +68,17 @@ function resolvePostRagSmokeIdentity(event: any, action: string, communityId: st
 
 function logPostRagSmokeIdentityAudit(event: any, action: string, communityId: string, identity: PostRagSmokeIdentity | null) {
   const candidate = event?.__happyhomeSmokeIdentity
-  if (!candidate || typeof candidate !== 'object') return
-  const expiresAt = Number(candidate.expiresAt)
+  const present = Boolean(candidate && typeof candidate === 'object')
+  if (!present && event?.happyhomeSmokeAudit !== true) return
+  const auditCandidate = present ? candidate : {}
+  const expiresAt = Number(auditCandidate.expiresAt)
   console.info('[post.rag.smoke.identity]', JSON.stringify({
-    present: true,
+    present,
     accepted: Boolean(identity),
-    actionMatches: String(candidate.action || '') === action,
-    communityMatches: String(candidate.communityId || '').trim() === communityId,
+    actionMatches: String(auditCandidate.action || '') === action,
+    communityMatches: String(auditCandidate.communityId || '').trim() === communityId,
     hasConfiguredSecret: Boolean(String(process.env.POST_RAG_SMOKE_IDENTITY_SECRET || '').trim()),
-    hasSignature: typeof candidate.signature === 'string' && candidate.signature.length > 0,
+    hasSignature: typeof auditCandidate.signature === 'string' && auditCandidate.signature.length > 0,
     expiresInMs: Number.isFinite(expiresAt) ? Math.round(expiresAt - Date.now()) : null,
   }))
 }
