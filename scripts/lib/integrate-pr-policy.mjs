@@ -225,9 +225,9 @@ export async function integratePullRequest({
       throw new Error(`PR head ${pullRequest.headRefOid} does not include the latest origin/main; sync and rerun PR CI before integration`)
     }
     try {
-      await runCommand('git', ['diff', '--quiet', 'origin/main', pullRequest.headRefOid, '--', '.github/workflows/pr-ci.yml'], { cwd: root })
+      await runCommand('git', ['diff', '--quiet', 'origin/main', pullRequest.headRefOid, '--', '.github/workflows/*.yml', '.github/workflows/*.yaml'], { cwd: root })
     } catch {
-      throw new Error('PR changes the trusted CI definition .github/workflows/pr-ci.yml; it cannot use its own modified check as an integration gate')
+      throw new Error('PR changes a GitHub workflow; use npm.cmd run integrate:workflow-pr and its independently attested validator path')
     }
 
     await runCommand('gh', [

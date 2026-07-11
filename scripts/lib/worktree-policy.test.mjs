@@ -116,16 +116,19 @@ test('hooks path verification requires the repository-managed path', () => {
   assert.throws(() => assertHooksPathConfigured('.git/hooks'), /core\.hooksPath/)
 })
 
-test('PR CI checks out the exact head, checks the PR diff, and tolerates an absent future release plan', () => {
+test('PR CI checks pull requests and merge groups at their exact heads', () => {
   const workflowPath = fileURLToPath(new URL('../../.github/workflows/pr-ci.yml', import.meta.url))
   const workflow = readFileSync(workflowPath, 'utf8')
 
   assert.match(workflow, /^name:\s*pr-ci\s*$/m)
+  assert.match(workflow, /^\s+pull_request:\s*$/m)
+  assert.match(workflow, /^\s+merge_group:\s*$/m)
   assert.match(workflow, /offline:\s*\r?\n\s*name:\s*offline/)
   assert.match(workflow, /runs-on:\s*windows-latest/)
-  assert.match(workflow, /ref:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}/)
+  assert.match(workflow, /ref:\s*\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.event\.merge_group\.head_sha \}\}/)
   assert.match(workflow, /fetch-depth:\s*0/)
   assert.match(workflow, /git diff --check \$\{\{ github\.event\.pull_request\.base\.sha \}\} \$\{\{ github\.event\.pull_request\.head\.sha \}\}/)
+  assert.match(workflow, /git diff --check \$\{\{ github\.event\.merge_group\.base_sha \}\} \$\{\{ github\.event\.merge_group\.head_sha \}\}/)
   assert.match(workflow, /scripts\['release:plan'\]/)
   assert.doesNotMatch(workflow, /\n\s+fi\s*$/m)
   assert.match(workflow, /release:plan is not installed yet; skipping PR release-plan generation[\s\S]*exit 0/)

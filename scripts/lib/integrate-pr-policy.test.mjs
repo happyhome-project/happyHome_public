@@ -274,17 +274,17 @@ test('integration validates, merges the checked head, pulls main, and plans rele
     ['git', 'fetch', 'origin', 'pull/42/head'],
     ['gh', 'pr', 'view', '42', '--json', 'number,state,isDraft,baseRefName,headRefOid,statusCheckRollup,url'],
     ['git', 'merge-base', '--is-ancestor', 'origin/main', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'],
-    ['git', 'diff', '--quiet', 'origin/main', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '--', '.github/workflows/pr-ci.yml'],
+    ['git', 'diff', '--quiet', 'origin/main', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '--', '.github/workflows/*.yml', '.github/workflows/*.yaml'],
     ['gh', 'pr', 'merge', '42', '--merge', '--match-head-commit', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'],
     ['git', 'pull', '--ff-only', 'origin', 'main'],
     ['npm.cmd', 'run', 'release:plan', '--', '--mode=main'],
   ])
 })
 
-test('integration rejects a PR that changes the trusted CI definition', async () => {
+test('normal integration rejects any workflow change and points to the trusted workflow path', async () => {
   const { calls, runCommand: baseRunner } = createCommandRunner()
   const runCommand = async (command, args, options) => {
-    if ([command, ...args].join(' ') === 'git diff --quiet origin/main aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -- .github/workflows/pr-ci.yml') {
+    if ([command, ...args].join(' ') === 'git diff --quiet origin/main aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -- .github/workflows/*.yml .github/workflows/*.yaml') {
       throw new Error('files differ')
     }
     return baseRunner(command, args, options)
@@ -297,7 +297,7 @@ test('integration rejects a PR that changes the trusted CI definition', async ()
     acquireLock: async () => async () => {},
     packageScripts: {},
     canonicalMainPath: CANONICAL_MAIN,
-  }), /trusted CI definition/i)
+  }), /integrate:workflow-pr/i)
   assert.equal(calls.some(({ command, args }) => command === 'gh' && args[1] === 'merge'), false)
 })
 
