@@ -26,6 +26,7 @@ jest.mock('../../../lib/post-rag', () => ({
   searchPostsWithRag: jest.fn(),
 }))
 
+import { createHmac } from 'crypto'
 import {
   handleBootstrap,
   handleCreate,
@@ -40,16 +41,45 @@ import {
   handleCreateActivityInvite,
   handleSearch,
   handleUpdate,
+  main,
 } from '../index'
 import * as db from '../../../lib/db'
 import * as postSearch from '../../../lib/post-search'
 import * as postRag from '../../../lib/post-rag'
 import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
 
+const POST_RAG_SMOKE_SECRET = 'r'.repeat(48)
+
+function createSignedPostRagSmokeIdentity(overrides: Partial<{
+  version: number
+  action: string
+  communityId: string
+  runId: string
+  userId: string
+  expiresAt: number
+}> = {}) {
+  const claims = {
+    version: 1,
+    action: 'search',
+    communityId: 'community-1',
+    runId: 'rag-run-1',
+    userId: 'rag-smoke-user',
+    expiresAt: Date.now() + 60_000,
+    ...overrides,
+  }
+  return {
+    ...claims,
+    signature: createHmac('sha256', POST_RAG_SMOKE_SECRET)
+      .update(JSON.stringify(claims), 'utf8')
+      .digest('hex'),
+  }
+}
+
 beforeEach(() => {
   jest.clearAllMocks()
   delete process.env.DEFAULT_PUBLIC_COMMUNITY_ID
   delete process.env.PUBLIC_READ_COMMUNITY_IDS
+  delete process.env.POST_RAG_SMOKE_IDENTITY_SECRET
 })
 
 test('clientLog: accepts diagnostic payload without touching data collections', async () => {
@@ -1386,6 +1416,83 @@ test('search: checks community readability and delegates to formal RAG search', 
   expect(result.answer).toContain('找到')
   expect(result.citations[0]).toMatchObject({ postId: 'post-1', fieldLabel: '视频' })
   expect(result.items).toEqual([{ postId: 'post-1', title: '视频帖' }])
+})
+
+test('search: accepts a short-lived signed RAG smoke identity only for its fixture run and community', async () => {
+  const cloud = require('wx-server-sdk')
+  cloud.getWXContext.mockReturnValueOnce({ OPENID: '' })
+  process.env.POST_RAG_SMOKE_IDENTITY_SECRET = POST_RAG_SMOKE_SECRET
+  const identity = createSignedPostRagSmokeIdentity()
+
+  ;(db.query as jest.Mock).mockImplementation(async (collection: string, where: Record<string, string>) => {
+    if (
+      collection === 'post_rag_smoke_runs'
+      && where.runId === identity.runId
+      && where.communityId === identity.communityId
+      && where.userId === identity.userId
+      && where.status === 'active'
+    ) {
+      return [{ ...where, expiresAt: identity.expiresAt }]
+    }
+    if (
+      collection === 'community_members'
+      && where.communityId === identity.communityId
+      && where.userId === identity.userId
+      && where.status === 'active'
+    ) {
+      return [{ _id: 'fixture-member', ...where }]
+    }
+    return []
+  })
+  ;(postRag.searchPostsWithRag as jest.Mock).mockResolvedValue({
+    mode: 'rag',
+    answer: '找到讲勤俭持家的帖子。',
+    citations: [{ postId: 'fixture-post' }],
+    items: [{ postId: 'fixture-post', title: '朱子治家格言' }],
+  })
+
+  await expect(main({
+    action: 'search',
+    communityId: identity.communityId,
+    q: '勤俭持家',
+    __happyhomeSmokeIdentity: identity,
+  })).resolves.toMatchObject({ mode: 'rag' })
+
+  expect(db.query).toHaveBeenCalledWith('post_rag_smoke_runs', {
+    runId: identity.runId,
+    communityId: identity.communityId,
+    userId: identity.userId,
+    status: 'active',
+  }, { limit: 1 })
+  expect(postRag.searchPostsWithRag).toHaveBeenCalledWith(expect.objectContaining({
+    communityId: identity.communityId,
+    query: '勤俭持家',
+    includeMemberOnly: true,
+  }))
+})
+
+test('search: rejects a fixture run whose expiry differs from the signed identity', async () => {
+  const cloud = require('wx-server-sdk')
+  cloud.getWXContext.mockReturnValueOnce({ OPENID: '' })
+  process.env.POST_RAG_SMOKE_IDENTITY_SECRET = POST_RAG_SMOKE_SECRET
+  const identity = createSignedPostRagSmokeIdentity()
+
+  ;(db.query as jest.Mock).mockImplementation(async (collection: string, where: Record<string, string>) => {
+    if (collection === 'post_rag_smoke_runs' && where.runId === identity.runId) {
+      return [{ ...where, expiresAt: identity.expiresAt + 60_000 }]
+    }
+    if (collection === 'community_members' && where.userId === identity.userId) {
+      return [{ _id: 'fixture-member', ...where }]
+    }
+    return []
+  })
+
+  await expect(main({
+    action: 'search',
+    communityId: identity.communityId,
+    q: '勤俭持家',
+    __happyhomeSmokeIdentity: identity,
+  })).rejects.toThrow('Invalid RAG smoke identity')
 })
 
 test('search: public guest readers do not receive member-only RAG evidence', async () => {

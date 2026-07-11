@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "changeId": "post-rag-signed-smoke-identity",
+  "actions": [
+    "ensure-indexes",
+    "update-rag-env"
+  ],
+  "migrations": [],
+  "smokeSuites": [
+    "post-rag"
+  ]
+}

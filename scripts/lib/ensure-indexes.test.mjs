@@ -11,6 +11,7 @@ test('ensure-indexes creates every CloudBase collection used by formal post RAG 
   assert.match(source, /post_rag_jobs/)
   assert.match(source, /post_rag_index_state/)
   assert.match(source, /post_rag_worker_state/)
+  assert.match(source, /post_rag_smoke_runs/)
   assert.match(source, /post_video_rag_assets/)
   assert.match(source, /post_video_rag_jobs/)
 })

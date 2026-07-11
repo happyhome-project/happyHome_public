@@ -3,6 +3,7 @@ import CloudBase from '@cloudbase/manager-node'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { ensurePostRagSmokeIdentitySecret } from './lib/post-rag-smoke-identity.mjs'
 import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
 
 function loadDotEnvFile(filePath) {
@@ -60,6 +61,10 @@ const targetEnv = {
 
 const workerEnv = {
   POST_RAG_WORKER_TOKEN: resolvePostRagWorkerToken(),
+}
+
+const postSmokeIdentityEnv = {
+  POST_RAG_SMOKE_IDENTITY_SECRET: ensurePostRagSmokeIdentitySecret(),
 }
 
 function configuredEnv(values) {
@@ -160,8 +165,10 @@ for (const functionName of functionNames) {
   const existing = {}
   for (const item of detail?.Environment?.Variables || []) existing[item.Key] = item.Value
   for (const key of deprecatedEsEnvKeys) delete existing[key]
-  const envForFunction = functionName === 'post-video-rag-worker' ? { ...targetEnv, ...workerEnv, ...videoPolicyEnv, ...videoAnalyzerEnv } : (
-    functionName === 'post-rag-worker' ? { ...targetEnv, ...workerEnv, ...videoPolicyEnv } : targetEnv
+  const envForFunction = functionName === 'post' ? { ...targetEnv, ...postSmokeIdentityEnv } : (
+    functionName === 'post-video-rag-worker' ? { ...targetEnv, ...workerEnv, ...videoPolicyEnv, ...videoAnalyzerEnv } : (
+      functionName === 'post-rag-worker' ? { ...targetEnv, ...workerEnv, ...videoPolicyEnv } : targetEnv
+    )
   )
   const merged = { ...existing, ...envForFunction }
   await withTransientRetry(`${functionName}.updateFunctionConfig`, () =>
