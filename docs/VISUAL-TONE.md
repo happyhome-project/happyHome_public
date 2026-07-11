@@ -4,7 +4,6 @@
 > 2026-07-09 起，小程序 UI/UX 当前准则以 Figma 文件 `社区资源共享_小程序_0709_v2` 为准；`0626` 仅作为历史基线。
 > 执行参考：[docs/figma-mini-0626-inventory.md](./figma-mini-0626-inventory.md)
 > 下文关于“单栏卡片流”“不做双列瀑布流”“小红书只学语感”的判断均为历史判断，不再约束当前小程序 UI。
-> 设计原稿：`_claude-design-drop/happyhome/project/design_handoff_happyhome/README.md`
 > 代码里 `miniprogram/src/uni.scss` 的 `$hh-*` tokens 已更新为 v2。
 > **不要按这里说的做。** 下文保留仅作历史参考。
 

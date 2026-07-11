@@ -1,6 +1,6 @@
 # happyHome · 项目指南
 
-> 这是 **主 repo 的"项目宪法"**。所有 worktree / 所有会话都受它约束。它只写**不变的约定**和**反复踩坑的铁律**。动态状态（当前进度 / 最近改动）去 `docs/SESSION-HANDOFF.md`；单次踩坑细节去 `memory/`。
+> 这是 **主 repo 的"项目宪法"**。所有 worktree / 所有会话都受它约束。它只写**不变的约定**和**反复踩坑的铁律**。动态状态通过对应的 GitHub PR、Issue 和 `TASKS.md` 维护，不把私有会话记录提交到仓库。
 
 ---
 
@@ -12,9 +12,9 @@
 
 ## 新会话开场 4 件事（必做）
 
-1. **读 [docs/SESSION-HANDOFF.md](docs/SESSION-HANDOFF.md)** —— 当前进度、近期改动、正在走的迁移
+1. **读 [README.md](README.md) 和 [AGENTS.md](AGENTS.md)** —— 项目入口与强制协作边界
 2. **扫 [TASKS.md](TASKS.md)** —— 跨 session 的 TODO / 待决策项
-3. **扫 `memory/MEMORY.md` 索引**（系统自动加载到 context）—— 过往踩坑提示
+3. **按任务读取 `docs/` 下对应的设计、测试或运维文档**
 4. **对齐用户需求再开工** —— "有 95% 把握理解需求后再开始"（CLAUDE.md 全局原则）
 
 ---
@@ -84,7 +84,7 @@
    - 如果 `tcb fn deploy` 停在交互选择“使用合并配置更新 / 手动输入配置 / 退出”，补 `--yes`；如果通过 `--dir` 从仓库根部署挂起，切到 `cloud/dist/<fn>` 后用位置参数部署，或直接用 `npm.cmd run deploy:cloud:tcb -- --only=<fn>`。
    - 最后查 CloudBase 白名单 / COS 上传链路——只在前两步都排除后才考虑
 
-6. **详情与历史**：[memory/feedback_cloudbase_cli_cos_deploy.md](memory/feedback_cloudbase_cli_cos_deploy.md) 记录 2026-06-09 已验证的新云函数部署路径；旧 DevTools CLI 背景见 `feedback_deploy_devtools_cli.md`（若该历史文件在当前 checkout 缺失，以本条新记录为准）。
+6. **详情与历史**：以本节、相关代码测试和 Git 历史为准；私有故障记录不提交到公开仓库。
 
 ---
 
@@ -95,7 +95,7 @@
 3. **涉及媒体审核的修复必须做线上临时 fixture 闭环**：单测只能证明请求体形态，不能证明腾讯云真实接受。至少创建临时社区/板块/帖子，上传真实图片或媒体，确认 `auditStatus=pass` 或预期状态，再硬删除临时社区清理数据。
 4. **DevTools CLI 云函数部署仍不是成功证据**：如果 `npm.cmd run deploy:cloud -- --only=...` 报 `getCloudAPISignedHeader failed` / `ret=41002`，切到 `npm.cmd run deploy:cloud:tcb -- --only=...`。本次 `admin,post` 审核修复就是走 CloudBase CLI / COS 路径部署并线上验证。
 
-详情见 [memory/feedback_tencent_ci_image_audit.md](memory/feedback_tencent_ci_image_audit.md)。
+详细约束以相关脚本、测试和腾讯云当前官方文档为准。
 
 ---
 
@@ -170,19 +170,17 @@
 
 ---
 
-## Memory 系统
+## 私有会话记录
 
-- **自动加载**：`~/.claude/projects/C--Project-Claude-happyHome/memory/MEMORY.md`（索引）
-- **按需加载**：`memory/feedback_*.md`（单条细节）
-- **发现新教训主动写入**并更新索引。不要在 memory 里写已经能从代码 / git 推出来的事实
-- 不是 git 仓内文件，per-user 存储
+- Agent memory、聊天记录、临时导出和故障现场不得提交到公开仓库。
+- 可复用且不含隐私的结论应整理进 `docs/`、`AGENTS.md` 或代码测试，而不是依赖私有会话记录。
 
 ---
 
 ## Worktree 协作
 
 - 每个 worktree 是一个独立 feature 分支（`.claude/worktrees/<name>` 下）
-- preview_start 在 worktree 里起 dev server 会报 "cwd must be within project root" —— 需要 preview 时从主仓库根新开会话（详见 `memory/feedback_preview_worktree_lock.md`）
+- preview_start 在 worktree 里起 dev server 会报 "cwd must be within project root" —— 需要 preview 时从主仓库根新开会话
 - 合回 main 前在 worktree 里同步 origin/main 并通过 PR CI；主 repo 只通过 `integrate:pr` 合并，不做手工 fast-forward 或直接 push
 - 多 worktree 同时改共享文件（`cloud.ts` / `deploy.mjs` / 全局 token）时小心冲突，合并顺序：小改动面先、大改动面后
 
@@ -192,7 +190,7 @@
 
 | 类别 | 文件 | 什么时候读 |
 |---|---|---|
-| Session 入口 | `docs/SESSION-HANDOFF.md` | 每次开场 |
+| 项目入口 | `README.md` / `AGENTS.md` / `TASKS.md` | 每次开场 |
 | 测试原则 | `docs/TESTING-PRINCIPLES.md` | 写测试 / 改跟用户交互相关代码 |
 | 设计系统 | `docs/VISUAL-TONE.md` / `DESIGN-TOKENS.md` / `UI-LIBRARY.md` / `UX-PRINCIPLES.md` | 做 UI |
 | 本地环境 | `docs/SETUP.md` | 首次 clone |

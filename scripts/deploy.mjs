@@ -39,7 +39,7 @@
  *     - Applies dns.setDefaultResultOrder('ipv4first') + dns.lookup monkey-patch
  *       to force IPv4, still subject to WeChat CI IP 白名单
  *
- * 详见 memory/feedback_deploy_force_ipv4.md 和 feedback_deploy_pitfalls.md
+ * 该请求路径要求显式 IPv4，避免双栈环境中的连接不确定性。
  */
 
 // ── IPv4 forcing for miniprogram-ci fallback path ──
@@ -401,7 +401,7 @@ async function deployCloudViaDevtoolsCli(fns) {
     // 2026-04-24 实测：`cli.bat auto --project <ROOT>` 会让 DevTools 把根目录
     // 当成独立小程序项目，**把 project.config.json 覆写成只剩 {"appid":...}**
     // 的单行版（丢掉 miniprogramRoot/cloudfunctionRoot/packOptions.include 等）。
-    // 详见 memory/feedback_devtools_automator_usage.md 坑 #6
+    // DevTools automator 需要先完成 CLI 登录并保持端口可用。
     '--project', MP_DIST,
     '--remote-npm-install',
   ]
@@ -660,7 +660,7 @@ async function runCloudSmoke(fns, releaseRunId = '', options = {}) {
 // 跟 deployCloudViaDevtoolsCli 同源：走 IDE 内部网络栈，绕开 miniprogram-ci 撞
 // IPv6 / 透明代理 / WeChat CI 白名单的一切老坑（2026-04-24 血泪教训：那天
 // `ci.preview()` 在本机再次被 `-10008 invalid ip: 2409:...` 拦下）。
-// 详见 memory/feedback_deploy_force_ipv4.md。
+// 云端请求保持显式 IPv4 策略。
 async function deployMiniprogramViaDevtoolsCli() {
   const cli = findDevtoolsCli()
   if (!cli) return { ok: false, reason: 'DevTools CLI not found at known paths (set WX_DEVTOOLS_CLI env to override)' }

@@ -43,4 +43,4 @@ Production work is performed from `main` in `C:\Project\Claude\happyHome`; featu
 - [Post RAG Search](./docs/post-rag-search.md): architecture, operations, cost boundaries, and RAG smoke acceptance.
 - [Testing](./docs/TESTING.md): test layers and commands.
 - [Release Gate](./docs/release-gate.md): formal release evidence and CloudBase deployment rules.
-- [Session Handoff](./docs/SESSION-HANDOFF.md): current operational state for a new session.
+- [Tasks](./TASKS.md): current backlog and unresolved project decisions.

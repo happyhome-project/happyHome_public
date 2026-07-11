@@ -3,8 +3,7 @@
 > ⚠️ **本文档描述 v1 木色橙 tokens，已于 2026-04-20 废弃。**
 > 当前 tokens 已升级为 **v2 Classical Dossier**（墨绿 + 三字体栈 + 暖灰白纸底）。
 > 代码权威源：[miniprogram/src/uni.scss](../miniprogram/src/uni.scss)（已是 v2）
-> 设计权威源：`_claude-design-drop/happyhome/project/design_handoff_happyhome/tokens-v2.css`
-> 现状摘要：[docs/SESSION-HANDOFF.md](./SESSION-HANDOFF.md)
+> 设计与代码权威源：[miniprogram/src/uni.scss](../miniprogram/src/uni.scss)
 > **迁移状态**：$hh-color-* 等旧名保留为别名指向 v2 值，保证未重构页面不崩。具体对应见 uni.scss 第 130-150 行。
 
 ---

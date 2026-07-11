@@ -3,7 +3,7 @@
 > ⚠️ **本文档描述基于 wot-design-uni 的旧组件方案，已于 2026-04 全面回退到原生 button/view + tokens-only 方案。**
 >
 > 回退原因：wot-design-uni 真机小程序兼容性差（wd-button/wd-cell click 不响应、styleIsolation:shared 污染其他页面）。
-> 回退记录：参考 commit `c6cefe / 4750ff` 系列 + `memory/feedback_wot_mp_weixin_issues.md`。
+> 回退记录：参考 commit `c6cefe / 4750ff` 系列及相关 Git 历史。
 >
 > **当前真相**：所有页面都用 `<button class="btn-primary">` / `<view class="card">` 等原生标签 + `miniprogram/src/uni.scss` 的 `$hh-*` tokens。
 > **代码权威源**：直接搜代码 `class="btn-` / `class="card"` 等，无 `wd-*` 残留。
