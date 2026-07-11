@@ -1035,10 +1035,11 @@ async function verifyCloudReleaseProbes(probes) {
   const verified = []
   for (const probe of probes) {
     const payloadPath = join(tmpdir(), `happyhome-release-probe-${probe.functionName}-${Date.now()}.json`)
+    const payloadArgument = `"@${payloadPath}"`
     writeFileSync(payloadPath, JSON.stringify({ __happyhomeReleaseProbe: probe.probeToken }), 'utf8')
     try {
       const commandLine = [npx, '--yes', '--package', '@cloudbase/cli', 'tcb', 'fn', 'invoke', probe.functionName,
-        '-d', `@${payloadPath}`, '--env-id', envId, '--json'].map(quote).join(' ')
+        '-d', payloadArgument, '--env-id', envId, '--json'].map(quote).join(' ')
       const result = await runCloudBaseCliCaptureWithRetry(commandLine, {
         displayCommandLine: `tcb fn invoke ${probe.functionName} <release-probe> --env-id ${envId} --json`,
         silentOutput: true,
