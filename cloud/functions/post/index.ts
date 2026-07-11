@@ -66,6 +66,21 @@ function resolvePostRagSmokeIdentity(event: any, action: string, communityId: st
   })
 }
 
+function logPostRagSmokeIdentityAudit(event: any, action: string, communityId: string, identity: PostRagSmokeIdentity | null) {
+  const candidate = event?.__happyhomeSmokeIdentity
+  if (!candidate || typeof candidate !== 'object') return
+  const expiresAt = Number(candidate.expiresAt)
+  console.info('[post.rag.smoke.identity]', JSON.stringify({
+    present: true,
+    accepted: Boolean(identity),
+    actionMatches: String(candidate.action || '') === action,
+    communityMatches: String(candidate.communityId || '').trim() === communityId,
+    hasConfiguredSecret: Boolean(String(process.env.POST_RAG_SMOKE_IDENTITY_SECRET || '').trim()),
+    hasSignature: typeof candidate.signature === 'string' && candidate.signature.length > 0,
+    expiresInMs: Number.isFinite(expiresAt) ? Math.round(expiresAt - Date.now()) : null,
+  }))
+}
+
 async function ensureActivePostRagSmokeRun(identity: PostRagSmokeIdentity) {
   const runs = await db.query(POST_RAG_SMOKE_RUNS_COLLECTION, {
     runId: identity.runId,
@@ -949,6 +964,7 @@ export async function handleClientLog(params: any, openid?: string) {
 export const main = async (event: any) => {
   const { action, _testOpenid, __happyhomeSmokeIdentity, ...params } = event
   const smokeIdentity = resolvePostRagSmokeIdentity(event, action, String(params.communityId || '').trim())
+  logPostRagSmokeIdentityAudit(event, action, String(params.communityId || '').trim(), smokeIdentity)
   const openid = smokeIdentity?.userId || resolveOpenId(event)
   if (smokeIdentity) await ensureActivePostRagSmokeRun(smokeIdentity)
   if (action === 'clientLog') return handleClientLog(params, openid)
