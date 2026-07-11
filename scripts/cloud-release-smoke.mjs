@@ -330,6 +330,7 @@ export class CloudSmokeRun {
     const built = buildTcbCommand(tcbArgs(args, this.options.envId))
     const commandLine = formatCommand(built.command, built.args)
     console.log(`[cloud-smoke] ${stage}: ${commandLine}`)
+    if (typeof this.options.beforeCommand === 'function') await this.options.beforeCommand({ stage, command: built.command, args: built.args })
     const result = await this.runner(built.command, built.args, {
       cwd: ROOT,
       env: process.env,

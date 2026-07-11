@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 
@@ -9,9 +9,13 @@ import {
   confirmNoOwner,
   createWorktreePlan,
   createRetirementManifest,
+  createRetirementRecord,
   decideSync,
   evaluateLeaseOwner,
   evaluateRetirement,
+  executeHeartbeatCriticalSection,
+  executeRetirementCriticalSection,
+  verifyCreateTargetBoundary,
   verifyRetirementManifest,
 } from './lib/worktree-lifecycle.mjs'
 import { assessRuntime } from './lib/worktree-environment.mjs'
@@ -84,6 +88,32 @@ function writeRegistry(value, cwd = process.cwd()) {
   renameSync(temporary, path)
 }
 
+function retirementRecordsPath(cwd = process.cwd()) {
+  return join(registryDir(cwd), 'retire-records.json')
+}
+
+function loadRetirementRecords(cwd = process.cwd()) {
+  const path = retirementRecordsPath(cwd)
+  if (!existsSync(path)) return { schemaVersion: 1, records: {} }
+  try {
+    const value = JSON.parse(readFileSync(path, 'utf8'))
+    return value?.schemaVersion === 1 && value?.records && typeof value.records === 'object'
+      ? value
+      : { schemaVersion: 1, records: {} }
+  } catch {
+    return { schemaVersion: 1, records: {} }
+  }
+}
+
+function writeRetirementRecords(value, cwd = process.cwd()) {
+  const directory = registryDir(cwd)
+  mkdirSync(directory, { recursive: true })
+  const path = retirementRecordsPath(cwd)
+  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`
+  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
+  renameSync(temporary, path)
+}
+
 function withRegistryLock(cwd, action) {
   const directory = registryDir(cwd)
   mkdirSync(directory, { recursive: true })
@@ -142,6 +172,24 @@ function hasExistingReparseAncestor(path) {
     const parent = dirname(current)
     if (parent === current) return false
     current = parent
+  }
+}
+
+function captureCreateTargetBoundary(targetPath) {
+  let anchor = dirname(resolve(targetPath))
+  while (!existsSync(anchor)) {
+    const parent = dirname(anchor)
+    if (parent === anchor) die(`worktree:create cannot find an existing target ancestor: ${targetPath}`)
+    anchor = parent
+  }
+  const stats = lstatSync(anchor)
+  return {
+    targetExists: existsSync(targetPath),
+    hasReparseAncestor: hasExistingReparseAncestor(dirname(targetPath)),
+    anchorPath: normalizePath(anchor),
+    anchorRealPath: normalizePath(realpathSync.native(anchor)),
+    anchorDevice: String(stats.dev),
+    anchorInode: String(stats.ino),
   }
 }
 
@@ -274,20 +322,24 @@ function npmVersion(root = process.cwd()) {
 function heartbeat({ flags }) {
   const raw = readFileSync(0, 'utf8').trim()
   const input = raw ? JSON.parse(raw) : {}
-  const identity = currentIdentity(input.worktree_path || input.worktreePath || input.cwd || process.cwd())
-  withRegistryLock(identity.root, () => {
-    const registry = loadRegistry(identity.root)
-    registry.leases[pathKey(identity.root)] = {
-      provider: flags.get('provider') || input.provider || 'codex',
-      ownerId: input.session_id || input.sessionId || null,
-      path: identity.root,
-      branch: identity.branch,
-      head: identity.head,
-      retention: input.retention || 'managed',
-      state: 'active',
-      lastSeenAt: new Date().toISOString(),
-    }
-    writeRegistry(registry, identity.root)
+  const requestedCwd = input.worktree_path || input.worktreePath || input.cwd || process.cwd()
+  const identity = executeHeartbeatCriticalSection({
+    withLeaseLock: (action) => withRegistryLock(requestedCwd, action),
+    readIdentity: () => currentIdentity(requestedCwd),
+    writeLease: (liveIdentity) => {
+      const registry = loadRegistry(liveIdentity.root)
+      registry.leases[pathKey(liveIdentity.root)] = {
+        provider: flags.get('provider') || input.provider || 'codex',
+        ownerId: input.session_id || input.sessionId || null,
+        path: liveIdentity.root,
+        branch: liveIdentity.branch,
+        head: liveIdentity.head,
+        retention: input.retention || 'managed',
+        state: 'active',
+        lastSeenAt: new Date().toISOString(),
+      }
+      writeRegistry(registry, liveIdentity.root)
+    },
   })
   if (!flags.has('quiet')) report({ status: 'recorded', path: identity.root })
 }
@@ -340,14 +392,15 @@ function create({ flags }) {
   const runtime = assessRuntime({ nodeVersion: process.versions.node, npmVersion: npmVersion(beforeFetch.root) })
   if (!runtime.ready) die(`worktree:create requires Node 24 and npm 11; got Node ${process.versions.node}, npm ${npmVersion(beforeFetch.root) || '(unavailable)'}`)
   if (isWithinPath(plan.path, beforeFetch.root)) die('worktree:create target must not be inside the canonical main workspace')
-  if (hasExistingReparseAncestor(dirname(plan.path))) die('worktree:create target must not have a reparse-point ancestor')
-  if (existsSync(plan.path)) die(`worktree:create target already exists: ${plan.path}`)
+  const targetBoundary = captureCreateTargetBoundary(plan.path)
+  verifyCreateTargetBoundary(targetBoundary, targetBoundary)
 
   refreshOriginMain(beforeFetch.root)
   const identity = currentIdentity(beforeFetch.root)
   if (identity.head !== identity.main) die('worktree:create requires canonical main HEAD to equal origin/main after fetch')
   const agents = git(['cat-file', '-e', 'origin/main:AGENTS.md'], { cwd: identity.root, allowFailure: true })
   if (!agents.ok) die('worktree:create requires origin/main to contain AGENTS.md')
+  verifyCreateTargetBoundary(targetBoundary, captureCreateTargetBoundary(plan.path))
 
   git(['worktree', 'add', '-b', plan.branch, plan.path, 'origin/main'], { cwd: identity.root })
   const created = currentIdentity(plan.path)
@@ -364,9 +417,10 @@ function create({ flags }) {
 function sync({ flags }) {
   refreshOriginMain(process.cwd())
   const identity = currentIdentity()
-  const owner = ownerState(identity.root, identity.root)
+  const owner = confirmNoOwner(ownerState(identity.root, identity.root), flags.has('confirm-no-owner'))
   const decision = decideSync({
     activeOwner: owner.activeOwner,
+    ownerState: owner.ownerState,
     isDirty: identity.dirty,
     behind: identity.behind,
     ahead: identity.ahead,
@@ -410,22 +464,52 @@ function retire({ flags, positionals }) {
     assertRegisteredWorktree(path, operator.root)
     const probe = retirementProbe(path, { hasOwnerConfirmation: flags.has('confirm-no-owner') })
     if (!probe.decision.eligible) return report({ status: 'blocked', ...probe })
-    const manifest = createRetirementManifest({ ...probe.identity, path: probe.identity.root, provider: probe.owner.lease?.provider || 'manual' })
+    const manifest = createRetirementManifest({
+      ...probe.identity,
+      path: probe.identity.root,
+      provider: probe.owner.lease?.provider || 'manual',
+      confirmNoOwner: flags.has('confirm-no-owner'),
+    })
     const directory = join(registryDir(probe.identity.root), 'retire')
     mkdirSync(directory, { recursive: true })
     const file = join(directory, `${new Date().toISOString().replace(/[:.]/g, '-')}-${basename(probe.identity.root)}.json`)
-    writeFileSync(file, `${JSON.stringify({ ...manifest, confirmNoOwner: flags.has('confirm-no-owner') }, null, 2)}\n`, 'utf8')
+    withRegistryLock(operator.root, () => {
+      const records = loadRetirementRecords(operator.root)
+      const record = createRetirementRecord({ manifest, manifestPath: file })
+      if (records.records[manifest.manifestId]) die(`retirement manifest id already exists: ${manifest.manifestId}`)
+      writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+      records.records[manifest.manifestId] = record
+      writeRetirementRecords(records, operator.root)
+    })
     return report({ status: 'prepared', manifestPath: file, manifest })
   }
 
   if (!flags.has('apply')) die('retire requires --prepare <path> or --apply <manifest>')
-  const manifestPath = String(flags.get('apply'))
+  const manifestPath = resolve(String(flags.get('apply')))
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
-  assertRegisteredWorktree(manifest.path, operator.root)
-  const probe = retirementProbe(manifest.path, { hasOwnerConfirmation: manifest.confirmNoOwner === true })
-  verifyRetirementManifest(manifest, { ...probe.identity, path: probe.identity.root })
-  if (!probe.decision.eligible) die(`retirement is blocked: ${probe.decision.reasons.join(', ')}`)
-  git(['worktree', 'remove', manifest.path])
+  const managedDirectory = join(registryDir(operator.root), 'retire')
+  executeRetirementCriticalSection({
+    withLeaseLock: (action) => withRegistryLock(operator.root, action),
+    probe: () => {
+      assertRegisteredWorktree(manifest.path, operator.root)
+      const records = loadRetirementRecords(operator.root)
+      const record = records.records[manifest.manifestId]
+      const identity = currentIdentity(manifest.path)
+      const verification = { manifestPath, managedDirectory, record }
+      verifyRetirementManifest(manifest, { ...identity, path: identity.root }, verification)
+      const liveProbe = retirementProbe(manifest.path, { hasOwnerConfirmation: manifest.confirmNoOwner })
+      verifyRetirementManifest(manifest, { ...liveProbe.identity, path: liveProbe.identity.root }, verification)
+      return { liveProbe, record, records }
+    },
+    verify: ({ liveProbe }) => {
+      if (!liveProbe.decision.eligible) die(`retirement is blocked: ${liveProbe.decision.reasons.join(', ')}`)
+    },
+    remove: ({ record, records }) => {
+      git(['worktree', 'remove', manifest.path])
+      record.consumedAt = new Date().toISOString()
+      writeRetirementRecords(records, operator.root)
+    },
+  })
   if (flags.has('delete-merged-local-branch') && manifest.branch !== '(detached)') {
     git(['branch', '-d', manifest.branch], { cwd: 'C:\\Project\\Claude\\happyHome' })
   }

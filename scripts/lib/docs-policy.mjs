@@ -1,4 +1,4 @@
-import { dirname, normalize } from 'node:path'
+import { dirname, isAbsolute, normalize } from 'node:path'
 
 export function requiredPublicDocumentPaths() {
   return ['README.md', 'AGENTS.md', 'TASKS.md', 'docs/README.md']
@@ -16,6 +16,10 @@ export function findRelativeMarkdownLinks({ sourcePath, source, exists }) {
     const target = match[1].split('#', 1)[0]
     if (!isRelativeMarkdownTarget(target)) continue
     const resolved = normalize(`${dirname(sourcePath)}/${target}`).replace(/\\/g, '/')
+    if (resolved === '..' || resolved.startsWith('../') || isAbsolute(resolved)) {
+      missing.push(resolved)
+      continue
+    }
     if (!exists(resolved)) missing.push(resolved)
   }
   return [...new Set(missing)]

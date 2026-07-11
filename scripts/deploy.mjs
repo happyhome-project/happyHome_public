@@ -72,6 +72,7 @@ import {
   analyzeDevtoolsUploadInfo,
   analyzeDevtoolsUploadOutput,
 } from './lib/deploy-output.mjs'
+import { runDirectRemoteMutation } from './lib/direct-deploy-policy.mjs'
 import { parsePositiveIntOption } from './lib/release-concurrency.mjs'
 import {
   assertFormalReleaseGitState,
@@ -109,6 +110,12 @@ const MP_DIST = resolve(ROOT, 'miniprogram/dist/build/mp-weixin')
 const CLOUD_DIST = resolve(ROOT, 'cloud/dist')
 const ADMIN_WEB_DIR = resolve(ROOT, 'admin-web')
 const ADMIN_WEB_DIST = resolve(ROOT, 'admin-web/dist')
+
+async function runOptionalDirectRemoteMutation(options, mutate) {
+  if (typeof options?.beforeRemoteMutation !== 'function') return await mutate()
+  return await runDirectRemoteMutation({ revalidate: options.beforeRemoteMutation, mutate })
+}
+
 const DEFAULT_CLOUD_ENV = 'cloudbase-3gh862acb1505ff3'
 const CLOUD_ENV = process.env.TCB_ENV || DEFAULT_CLOUD_ENV
 const ADMIN_WEB_DEFAULT_API_URL = 'https://cloudbase-3gh862acb1505ff3-1307183045.ap-shanghai.app.tcloudbase.com'
@@ -352,13 +359,15 @@ function isTransientCloudBaseCliFailure(result) {
 }
 
 async function runCloudBaseCliCaptureWithRetry(commandLine, options = {}, attempts = 3) {
+  const { beforeAttempt, ...shellOptions } = options
   let lastResult = null
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    if (typeof beforeAttempt === 'function') await beforeAttempt({ attempt, attempts })
     const result = await runShellCapture(commandLine, {
-      ...options,
+      ...shellOptions,
       displayCommandLine: attempt === 1
-        ? options.displayCommandLine
-        : `${options.displayCommandLine || commandLine} (retry ${attempt}/${attempts})`,
+        ? shellOptions.displayCommandLine
+        : `${shellOptions.displayCommandLine || commandLine} (retry ${attempt}/${attempts})`,
     })
     if (result.ok) return result
     lastResult = result
@@ -454,7 +463,6 @@ async function deployCloudViaCloudBaseCli(fns, options = {}) {
       functions: fns,
       concurrency,
       deployOne: async (fn) => {
-        if (typeof options.beforeFunctionDeploy === 'function') await options.beforeFunctionDeploy(fn)
         const fnDir = resolve(CLOUD_DIST, fn)
         return await runCloudBaseCliCaptureWithRetry(
           confirmDefault(tcb('fn', 'deploy', fn, '--force', '--env-id', envId, '--deployMode', 'cos', '--json')),
@@ -463,6 +471,9 @@ async function deployCloudViaCloudBaseCli(fns, options = {}) {
             displayCommandLine: `cd ${fnDir} && <confirm default> | tcb fn deploy ${fn} --force --env-id ${envId} --deployMode cos --json`,
             // CloudBase CLI 3.5.8 prompts to accept the merged existing function
             // config; its --yes path throws "_a.includes is not a function".
+            beforeAttempt: typeof options.beforeFunctionDeploy === 'function'
+              ? async () => await options.beforeFunctionDeploy(fn)
+              : undefined,
           }
         )
       },
@@ -531,17 +542,17 @@ function readMiniprogramUploadEvidence(releaseRunId) {
 // ── Fallback deploy path: miniprogram-ci ──
 // Subject to WeChat CI IP 白名单 (mp.weixin.qq.com → 开发管理 → 代码上传)
 // Prone to IPv6/transparent-proxy issues despite DNS patching.
-async function deployCloudViaMiniprogramCi(fns) {
+async function deployCloudViaMiniprogramCi(fns, options = {}) {
   const envId = getCloudEnvId()
   for (const fn of fns) {
     console.log(`[miniprogram-ci] Uploading: ${fn}`)
-    await ci.cloud.uploadFunction({
+    await runOptionalDirectRemoteMutation(options, async () => await ci.cloud.uploadFunction({
       project: getCiProject(),
       name: fn,
       path: resolve(CLOUD_DIST, fn),
       env: envId,
       remoteNpmInstall: true,
-    })
+    }))
     console.log(`  OK: ${fn}`)
   }
 }
@@ -598,7 +609,7 @@ async function deployCloud(options = {}) {
 
   if (!forceCi) {
     console.log('\n[primary] Attempting deploy via WeChat DevTools CLI...')
-    const result = await deployCloudViaDevtoolsCli(fns)
+    const result = await runOptionalDirectRemoteMutation(options, async () => await deployCloudViaDevtoolsCli(fns))
     if (result.ok) {
       console.log('[OK] Cloud functions deployed via DevTools CLI')
       return { fns, path: 'devtools-cli' }
@@ -624,7 +635,7 @@ async function deployCloud(options = {}) {
   }
 
   console.log('\n[fallback] Deploying via miniprogram-ci...')
-  await deployCloudViaMiniprogramCi(fns)
+  await deployCloudViaMiniprogramCi(fns, options)
   console.log('[OK] Cloud functions deployed via miniprogram-ci')
   return { fns, path: 'miniprogram-ci' }
 }
@@ -640,6 +651,7 @@ async function runCloudSmoke(fns, releaseRunId = '', options = {}) {
       ? resolve(ROOT, '.codex-local', 'release-evidence', releaseRunId, 'cloud-smoke')
       : parsedSmokeArgs.evidenceDir,
     concurrency: getCloudSmokeConcurrency(),
+    beforeCommand: options.beforeSmokeCommand,
   }
   console.log('\nEnsuring release database collections and indexes...')
   if (typeof options.beforeEnsureIndexes === 'function') await options.beforeEnsureIndexes()
@@ -783,13 +795,14 @@ async function buildAndGateMiniprogramUpload({ version, desc, releaseRunId }) {
   }
 }
 
-async function uploadBuiltMiniprogram({ version, desc, forceCi }) {
+async function uploadBuiltMiniprogram({ version, desc, forceCi, beforeRemoteMutation }) {
+  const options = { beforeRemoteMutation }
   console.log(`\nMiniprogram upload version: ${version}`)
   console.log(`Miniprogram upload desc: ${desc}`)
 
   if (!forceCi) {
     console.log('\n[primary] Uploading via WeChat DevTools CLI...')
-    const result = await uploadMiniprogramViaDevtoolsCli(version, desc)
+    const result = await runOptionalDirectRemoteMutation(options, async () => await uploadMiniprogramViaDevtoolsCli(version, desc))
     if (result.ok) {
       console.log('[OK] Miniprogram uploaded via DevTools CLI (no preview QR generated)')
       return {
@@ -808,7 +821,7 @@ async function uploadBuiltMiniprogram({ version, desc, forceCi }) {
     console.log('\n[--use-ci] Skipping DevTools CLI, using miniprogram-ci directly')
   }
 
-  await uploadMiniprogramViaMiniprogramCi(version, desc)
+  await runOptionalDirectRemoteMutation(options, async () => await uploadMiniprogramViaMiniprogramCi(version, desc))
   console.log('[OK] Miniprogram uploaded via miniprogram-ci')
   return { method: 'miniprogram-ci', uploadInfoPath: '' }
 }
@@ -827,7 +840,7 @@ async function deployMiniprogramViaMiniprogramCi() {
   console.log('Miniprogram preview ready! Scan preview-qr.jpg')
 }
 
-async function deployMiniprogram() {
+async function deployMiniprogram(options = {}) {
   console.log('\nBuilding miniprogram...')
   execSync('npm run build:mp-weixin', { cwd: resolve(ROOT, 'miniprogram'), stdio: 'inherit' })
 
@@ -835,7 +848,7 @@ async function deployMiniprogram() {
 
   if (!forceCi) {
     console.log('\n[primary] Generating preview via WeChat DevTools CLI...')
-    const result = await deployMiniprogramViaDevtoolsCli()
+    const result = await runOptionalDirectRemoteMutation(options, async () => await deployMiniprogramViaDevtoolsCli())
     if (result.ok) {
       console.log('[✓] Miniprogram preview ready via DevTools CLI (preview-qr.png + preview-info.json)')
       return
@@ -845,14 +858,21 @@ async function deployMiniprogram() {
     console.log('\n[--use-ci] Skipping DevTools CLI, using miniprogram-ci directly')
   }
 
-  await deployMiniprogramViaMiniprogramCi()
+  await runOptionalDirectRemoteMutation(options, async () => await deployMiniprogramViaMiniprogramCi())
   console.log('[✓] Miniprogram preview ready via miniprogram-ci')
 }
 
-async function uploadMiniprogram() {
+async function uploadMiniprogram(options = {}) {
   const upload = resolveMiniprogramUploadMetadata()
   await buildAndGateMiniprogramUpload({ ...upload, releaseRunId: makeReleaseRunId() })
-  await uploadBuiltMiniprogram(upload)
+  const beforeRemoteMutation = typeof options.beforeRemoteMutation === 'function'
+    ? () => assertDirectProductionDeployWorkspace({
+        publishOnly: true,
+        version: upload.version,
+        desc: upload.desc,
+      })
+    : undefined
+  await uploadBuiltMiniprogram({ ...upload, beforeRemoteMutation })
 }
 
 function buildAdminWeb(defaultRouterMode) {
@@ -869,7 +889,7 @@ function buildAdminWeb(defaultRouterMode) {
   return env
 }
 
-async function deployAdminWebToCloudBase() {
+async function deployAdminWebToCloudBase(options = {}) {
   const env = buildAdminWeb('hash')
   const cloudPath = process.env.ADMIN_WEB_CLOUD_PATH || '/'
   const envId = getCloudEnvId()
@@ -889,7 +909,7 @@ async function deployAdminWebToCloudBase() {
 
   console.log('\nDeploying admin-web dist to CloudBase static hosting...')
   console.log(`Using VITE_CLOUD_API_URL=${env.VITE_CLOUD_API_URL}`)
-  const result = await runShell(args.map(quote).join(' '))
+  const result = await runOptionalDirectRemoteMutation(options, async () => await runShell(args.map(quote).join(' ')))
   if (!result.ok) {
     throw new Error(`Admin web deploy failed: ${result.reason}. Ensure CloudBase CLI is logged in and static hosting is enabled for ${envId}.`)
   }
@@ -897,7 +917,7 @@ async function deployAdminWebToCloudBase() {
   console.log('Reminder: configure static hosting fallback/error page to index.html for Vue history routes.')
 }
 
-async function deployAdminWebToAliyun() {
+async function deployAdminWebToAliyun(options = {}) {
   const env = buildAdminWeb('history')
   const stamp = Date.now()
   const archivePath = join(tmpdir(), `happyhome-admin-web-${stamp}.tgz`)
@@ -936,19 +956,19 @@ readlink -f "$root/current"
   console.log(`Using VITE_CLOUD_API_URL=${env.VITE_CLOUD_API_URL}`)
   console.log(`Using VITE_ROUTER_MODE=${env.VITE_ROUTER_MODE}`)
   console.log(`Using ADMIN_WEB_SSH_HOST=${ADMIN_WEB_ALIYUN_HOST}`)
-  const uploadArchive = await runShell(`scp ${quote(archivePath)} ${quote(`${ADMIN_WEB_ALIYUN_HOST}:${remoteArchivePath}`)}`)
+  const uploadArchive = await runOptionalDirectRemoteMutation(options, async () => await runShell(`scp ${quote(archivePath)} ${quote(`${ADMIN_WEB_ALIYUN_HOST}:${remoteArchivePath}`)}`))
   if (!uploadArchive.ok) throw new Error(`Admin web archive upload failed: ${uploadArchive.reason}`)
-  const uploadScript = await runShell(`scp ${quote(localScriptPath)} ${quote(`${ADMIN_WEB_ALIYUN_HOST}:${remoteScriptPath}`)}`)
+  const uploadScript = await runOptionalDirectRemoteMutation(options, async () => await runShell(`scp ${quote(localScriptPath)} ${quote(`${ADMIN_WEB_ALIYUN_HOST}:${remoteScriptPath}`)}`))
   if (!uploadScript.ok) throw new Error(`Admin web deploy script upload failed: ${uploadScript.reason}`)
-  const deploy = await runShell(`ssh ${quote(ADMIN_WEB_ALIYUN_HOST)} ${quote(`bash ${remoteScriptPath}`)}`)
+  const deploy = await runOptionalDirectRemoteMutation(options, async () => await runShell(`ssh ${quote(ADMIN_WEB_ALIYUN_HOST)} ${quote(`bash ${remoteScriptPath}`)}`))
   if (!deploy.ok) throw new Error(`Admin web Aliyun deploy failed: ${deploy.reason}`)
   console.log('[OK] Admin web deployed to Aliyun Nginx host')
 }
 
-async function deployAdminWeb() {
+async function deployAdminWeb(options = {}) {
   const target = (process.env.ADMIN_WEB_TARGET || 'aliyun').toLowerCase()
-  if (target === 'cloudbase') return deployAdminWebToCloudBase()
-  if (target === 'aliyun') return deployAdminWebToAliyun()
+  if (target === 'cloudbase') return deployAdminWebToCloudBase(options)
+  if (target === 'aliyun') return deployAdminWebToAliyun(options)
   throw new Error(`Unknown ADMIN_WEB_TARGET=${target}. Expected aliyun or cloudbase.`)
 }
 
@@ -1229,6 +1249,7 @@ async function runFormalRelease(options = {}) {
     }, async () => {
       const summary = await runCloudSmoke(cloudDeploy.fns, releaseLedger.runId, {
         beforeEnsureIndexes: async () => await releaseGuard.beforeRemoteMutation('ensure-indexes'),
+        beforeSmokeCommand: async ({ stage }) => await releaseGuard.beforeRemoteMutation(`cloud-smoke:${stage}`),
       })
       await releaseGuard.recordStage('cloud-smoke', { evidence: { summaryPath: resolve(summary.evidenceDir, 'summary.json') } })
       return {
@@ -1359,12 +1380,12 @@ async function runFormalRelease(options = {}) {
   }
 }
 
-function assertDirectProductionDeployWorkspace() {
+function assertDirectProductionDeployWorkspace({ publishOnly = false, version = '', desc = '' } = {}) {
   execSync('git fetch --quiet origin main', { cwd: ROOT, stdio: 'inherit' })
   assertFormalReleaseGitState(getFormalReleaseGitState({
-    publishOnly: false,
-    version: '',
-    desc: '',
+    publishOnly,
+    version,
+    desc,
   }))
 }
 
@@ -1377,11 +1398,18 @@ if (target === 'release') {
   await runFormalRelease({ publishOnly: true })
 } else {
   assertDirectProductionDeployWorkspace()
-  if (target === 'cloud' || target === 'all') {
-    const cloudDeploy = await deployCloud()
-    if (process.argv.includes('--smoke')) await runCloudSmoke(cloudDeploy.fns)
+  const directMutationOptions = {
+    beforeRemoteMutation: assertDirectProductionDeployWorkspace,
+    beforeFunctionDeploy: assertDirectProductionDeployWorkspace,
   }
-  if (target === 'miniprogram' || target === 'all') await deployMiniprogram()
-  if (target === 'miniprogram-upload') await uploadMiniprogram()
-  if (target === 'admin-web') await deployAdminWeb()
+  if (target === 'cloud' || target === 'all') {
+    const cloudDeploy = await deployCloud(directMutationOptions)
+    if (process.argv.includes('--smoke')) await runCloudSmoke(cloudDeploy.fns, '', {
+      beforeEnsureIndexes: assertDirectProductionDeployWorkspace,
+      beforeSmokeCommand: assertDirectProductionDeployWorkspace,
+    })
+  }
+  if (target === 'miniprogram' || target === 'all') await deployMiniprogram(directMutationOptions)
+  if (target === 'miniprogram-upload') await uploadMiniprogram(directMutationOptions)
+  if (target === 'admin-web') await deployAdminWeb(directMutationOptions)
 }

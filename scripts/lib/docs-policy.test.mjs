@@ -21,3 +21,18 @@ test('documentation checker ignores web anchors and identifies only missing rela
 
   assert.deepEqual(missing, ['docs/missing.md'])
 })
+
+test('documentation checker rejects links that escape the repository root', () => {
+  const inspected = []
+  const missing = findRelativeMarkdownLinks({
+    sourcePath: 'README.md',
+    source: '[outside](../outside.md)',
+    exists: (path) => {
+      inspected.push(path)
+      return true
+    },
+  })
+
+  assert.deepEqual(missing, ['../outside.md'])
+  assert.deepEqual(inspected, [])
+})
