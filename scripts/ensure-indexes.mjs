@@ -415,6 +415,15 @@ const INDEXES = [
       { Name: 'postId', Direction: '1' },
     ],
   },
+  // post_rag_smoke_runs: short-lived signed smoke identities are read by runId.
+  {
+    coll: 'post_rag_smoke_runs',
+    name: 'idx_runId_unique',
+    unique: true,
+    keys: [
+      { Name: 'runId', Direction: '1' },
+    ],
+  },
   {
     coll: 'post_video_rag_assets',
     name: 'idx_cacheKey',
@@ -486,6 +495,7 @@ const REQUIRED_COLLECTIONS = [
   'post_rag_index_state',     // 正式 RAG 每篇帖子索引状态
   'post_rag_worker_state',    // 正式 RAG worker 最近运行状态
   'post_rag_chunks',          // RAG chunk 元数据镜像/排障用
+  'post_rag_smoke_runs',      // 短期签名 smoke 身份的服务端 run 绑定
   'post_video_rag_assets',     // 视频 OCR/ASR/关键帧摘要缓存（按 cacheKey 复用）
   'post_video_rag_jobs',       // 成本感知的视频分析异步任务
 ]

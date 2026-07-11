@@ -20,6 +20,9 @@ test('update-rag-env configures CloudBase retrieval with Tencent atomic models a
   assert.match(source, /TENCENT_RAG_EMBEDDING_MODEL/)
   assert.match(source, /TENCENT_RAG_RERANK_MODEL/)
   assert.match(source, /TENCENT_RAG_LLM_MODEL/)
+  assert.match(source, /ensurePostRagSmokeIdentitySecret/)
+  assert.match(source, /POST_RAG_SMOKE_IDENTITY_SECRET/)
+  assert.match(source, /functionName === 'post'/)
   assert.doesNotMatch(source, /TENCENT_RAG_PROVIDER:\s*'es'/)
 })
 

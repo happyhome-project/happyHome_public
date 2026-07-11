@@ -30,13 +30,59 @@ import { normalizeGuideNoteSection } from '../../shared/guide-note-widgets'
 import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
 import { resolvePostAuthorNickname } from '../../shared/post-author'
 
+type PostRagSmokeIdentity = {
+  version: number
+  action: string
+  communityId: string
+  runId: string
+  userId: string
+  expiresAt: number
+}
+
+const { verifyPostRagSmokeIdentity }: {
+  verifyPostRagSmokeIdentity: (value: unknown, options: {
+    secret: string
+    action: string
+    communityId: string
+  }) => PostRagSmokeIdentity | null
+} = require('../../shared/post-rag-smoke-identity.cjs')
+
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
 const ATTENDANCE_COLLECTION = 'post_attendance_members'
+const POST_RAG_SMOKE_RUNS_COLLECTION = 'post_rag_smoke_runs'
 const ATTENDANCE_PREVIEW_LIMIT = 5
 const COMMUNITY_READ_ERROR = '需要先加入社区后查看内容'
 const HOME_POST_LIMIT_PER_SECTION = 20
 const DEFAULT_SEARCH_LIMIT = 20
+
+function resolvePostRagSmokeIdentity(event: any, action: string, communityId: string): PostRagSmokeIdentity | null {
+  if (action !== 'search') return null
+  const secret = String(process.env.POST_RAG_SMOKE_IDENTITY_SECRET || '').trim()
+  return verifyPostRagSmokeIdentity(event?.__happyhomeSmokeIdentity, {
+    secret,
+    action,
+    communityId,
+  })
+}
+
+async function ensureActivePostRagSmokeRun(identity: PostRagSmokeIdentity) {
+  const runs = await db.query(POST_RAG_SMOKE_RUNS_COLLECTION, {
+    runId: identity.runId,
+    communityId: identity.communityId,
+    userId: identity.userId,
+    status: 'active',
+  }, { limit: 1 })
+  const expiresAt = Number(runs?.[0]?.expiresAt)
+  if (
+    !runs?.length
+    || !Number.isSafeInteger(expiresAt)
+    || expiresAt !== identity.expiresAt
+    || expiresAt < Date.now()
+  ) {
+    throw new Error('Invalid RAG smoke identity')
+  }
+}
 
 function normalizeSectionForClient(section: Section): Section {
   const normalized = normalizePostSection(section)
@@ -901,8 +947,10 @@ export async function handleClientLog(params: any, openid?: string) {
 }
 
 export const main = async (event: any) => {
-  const openid = resolveOpenId(event)
-  const { action, _testOpenid, ...params } = event
+  const { action, _testOpenid, __happyhomeSmokeIdentity, ...params } = event
+  const smokeIdentity = resolvePostRagSmokeIdentity(event, action, String(params.communityId || '').trim())
+  const openid = smokeIdentity?.userId || resolveOpenId(event)
+  if (smokeIdentity) await ensureActivePostRagSmokeRun(smokeIdentity)
   if (action === 'clientLog') return handleClientLog(params, openid)
   if (action === 'create') return handleCreate(params, openid)
   if (action === 'getActivityInviteState') return handleGetActivityInviteState(params, openid)

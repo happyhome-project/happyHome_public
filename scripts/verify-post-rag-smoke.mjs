@@ -15,10 +15,15 @@ import {
 import { invokeAdmin } from './rebuild-post-search-index.mjs'
 import { resolveAdminInternalToken } from './lib/admin-internal-token.mjs'
 import { createProductionReleaseStore } from './lib/cloudbase-release-store.mjs'
+import {
+  createSignedPostRagSmokeIdentity,
+  requirePostRagSmokeIdentitySecret,
+} from './lib/post-rag-smoke-identity.mjs'
 import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
 
 const DEFAULT_TIMEOUT_MS = 180000
 const DEFAULT_ADMIN_INVOKE_RETRIES = 5
+const SMOKE_IDENTITY_TTL_MS = 5 * 60 * 1000
 
 function nowRunId() {
   return `rag-${Date.now().toString(36)}`
@@ -47,6 +52,7 @@ function parseArgs() {
       process.env.HH_POST_RAG_SMOKE_ADMIN_INVOKE_RETRIES || String(DEFAULT_ADMIN_INVOKE_RETRIES),
     )) || DEFAULT_ADMIN_INVOKE_RETRIES)),
     adminInternalToken: resolveAdminInternalToken(),
+    smokeIdentitySecret: requirePostRagSmokeIdentitySecret(),
     workerToken: getFlagValue('worker-token', resolvePostRagWorkerToken()),
   }
 }
@@ -105,13 +111,13 @@ async function invokeFunction(functionName, payload, options) {
   return functionResult
 }
 
-async function searchPost(options, openid, communityId, query) {
+async function searchPost(options, communityId, query, identity) {
   const result = await invokeFunction('post', {
     action: 'search',
     communityId,
     q: query,
     limit: 5,
-    _testOpenid: openid,
+    __happyhomeSmokeIdentity: identity,
   }, options)
   if (result?.error) throw new Error(`post.search failed: ${result.error}`)
   return result
@@ -123,6 +129,35 @@ async function seedFixtureMember(communityId, userId) {
   await db.collection('community_members').add({
     data: { communityId, userId, role: 'member', status: 'active', appliedAt: now, joinedAt: now },
   })
+}
+
+async function seedFixtureRun(identity) {
+  const db = createProductionReleaseStore({ root: process.cwd() }).db
+  await db.collection('post_rag_smoke_runs').doc(identity.runId).set({
+    runId: identity.runId,
+    communityId: identity.communityId,
+    userId: identity.userId,
+    action: identity.action,
+    status: 'active',
+    expiresAt: identity.expiresAt,
+    createdAt: new Date().toISOString(),
+  })
+  const record = await db.collection('post_rag_smoke_runs').doc(identity.runId).get()
+  const data = Array.isArray(record?.data) ? record.data[0] : record?.data
+  if (
+    data?.runId !== identity.runId
+    || data?.communityId !== identity.communityId
+    || data?.userId !== identity.userId
+    || data?.status !== 'active'
+  ) {
+    throw new Error('post_rag_smoke_runs seed verification failed')
+  }
+}
+
+async function cleanupFixtureRun(runId) {
+  if (!runId) return
+  const db = createProductionReleaseStore({ root: process.cwd() }).db
+  await db.collection('post_rag_smoke_runs').doc(runId).remove()
 }
 
 function assertRagHit(result, postId, label) {
@@ -140,7 +175,8 @@ async function main() {
   if (!options.workerToken) {
     throw new Error('POST_RAG_WORKER_TOKEN is required to invoke post-rag-worker')
   }
-  const ownerOpenid = `${options.actor}-user`
+  let runId = ''
+  let ownerOpenid = ''
   let communityId = ''
   let sectionId = ''
   let postId = ''
@@ -157,7 +193,18 @@ async function main() {
     communityId = community.functionResult?.communityId || ''
     if (!communityId) throw new Error('community.createAdmin did not return communityId')
 
+    runId = `${options.actor}-${nowRunId()}`
+    ownerOpenid = `${runId}-user`
+    const identity = createSignedPostRagSmokeIdentity({
+      version: 1,
+      action: 'search',
+      communityId,
+      runId,
+      userId: ownerOpenid,
+      expiresAt: Date.now() + SMOKE_IDENTITY_TTL_MS,
+    }, options.smokeIdentitySecret)
     await seedFixtureMember(communityId, ownerOpenid)
+    await seedFixtureRun(identity)
 
     const section = await invokeAdmin('section.create', {
       communityId,
@@ -204,19 +251,26 @@ async function main() {
       throw new Error(`post-rag-worker did not index target post: ${JSON.stringify(worker)}`)
     }
 
-    const thrift = await searchPost(options, ownerOpenid, communityId, '有没有讲节俭家风的帖子？')
+    const thrift = await searchPost(options, communityId, '有没有讲节俭家风的帖子？', identity)
     assertRagHit(thrift, postId, 'thrift-family query')
 
-    const thriftPhrase = await searchPost(options, ownerOpenid, communityId, '勤俭持家')
+    const thriftPhrase = await searchPost(options, communityId, '勤俭持家', identity)
     assertRagHit(thriftPhrase, postId, 'thrift-family phrase query')
 
-    const quote = await searchPost(options, ownerOpenid, communityId, '一粥一饭当思来处不易')
+    const quote = await searchPost(options, communityId, '一粥一饭当思来处不易', identity)
     assertRagHit(quote, postId, 'quote query')
 
     console.log(`[post-rag-smoke] PASS post=${postId} community=${communityId}`)
     console.log(`[post-rag-smoke] answer=${String(thrift.answer || '').slice(0, 160)}`)
     console.log(`[post-rag-smoke] citations=${thrift.citations.length} items=${thrift.items.length}`)
   } finally {
+    let cleanupError
+    try {
+      await cleanupFixtureRun(runId)
+    } catch (error) {
+      console.warn(`[post-rag-smoke] cleanup run warning: ${error?.message || error}`)
+      cleanupError = error
+    }
     if (communityId) {
       try {
         await invokeAdmin('community.disable', { communityId }, options)
@@ -227,17 +281,19 @@ async function main() {
         await invokeAdmin('community.hardDelete', { communityId }, options)
       } catch (error) {
         console.warn(`[post-rag-smoke] cleanup hardDelete warning: ${error?.message || error}`)
-        throw error
+        cleanupError ||= error
       }
       if (postId) {
         try {
           await invokeFunction('post-rag-worker', withWorkerToken({ limit: 20, postId }, options), options)
         } catch (error) {
           console.warn(`[post-rag-smoke] cleanup worker warning: ${error?.message || error}`)
+          cleanupError ||= error
         }
       }
-      console.log(`[post-rag-smoke] cleanup ok community=${communityId}`)
+      if (!cleanupError) console.log(`[post-rag-smoke] cleanup ok community=${communityId}`)
     }
+    if (cleanupError) throw cleanupError
   }
 }
 
