@@ -6,7 +6,7 @@ import { join, relative, resolve } from 'node:path'
 import process from 'node:process'
 
 import { createProductionReleaseStore } from './lib/cloudbase-release-store.mjs'
-import { ALL_CLOUD_FUNCTIONS, createReleasePlan } from './lib/release-plan.mjs'
+import { ALL_CLOUD_FUNCTIONS, createReleasePlan, selectChangeManifestsForDiff } from './lib/release-plan.mjs'
 import { resolveMainReleasePlanBase } from './lib/release-plan-base.mjs'
 
 const workspaceRequire = createRequire(new URL('../cloud/package.json', import.meta.url))
@@ -83,12 +83,13 @@ try {
     git(['cat-file', '-e', `${baseSha}^{commit}`], root)
     if (mode === 'main') git(['merge-base', '--is-ancestor', baseSha, headSha], root)
   }
+  const changes = changedPaths(root, baseSha, headSha)
   const plan = createReleasePlan({
     baseSha,
-    changedPaths: changedPaths(root, baseSha, headSha),
+    changedPaths: changes,
     functionInputs: await collectFunctionInputs(root),
     headSha,
-    manifests: readManifests(root),
+    manifests: selectChangeManifestsForDiff(readManifests(root), changes),
     mode,
   })
   const destination = join(root, '.codex-local', 'release-plans')
