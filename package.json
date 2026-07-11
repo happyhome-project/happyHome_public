@@ -20,6 +20,7 @@
     "@dcloudio/uni-ui": "^1.5.12",
     "@playwright/test": "^1.52.0",
     "acorn": "^8.16.0",
+    "markdown-it": "14.3.0",
     "wot-design-uni": "^1.14.0"
   },
   "scripts": {

@@ -204,6 +204,8 @@ npm run set:superadmin -- o1234567890abcdef https://<env-id>-<uin>.ap-shanghai.a
 - `adminToken` 应通过命令参数或本地 `ADMIN_TOKEN` 环境变量提供；不要把值提交到仓库。
 - `CLOUD_API_URL` 可通过本地环境提供。
 
+> 注意：当前 `set:superadmin` 和 H5/API 测试工具仍包含 legacy fallback，缺少本地 `ADMIN_TOKEN` 时不会 fail closed。运行这些工具时必须显式提供 `ADMIN_TOKEN`，不应依赖 fallback；fallback 值不得作为配置或文档默认值。
+
 ---
 
 ## 关键配置文件

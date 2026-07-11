@@ -37,6 +37,8 @@ for f in scripts/h5-test/[0-9]*.mjs; do node "$f" || exit 1; done
 - `CLOUD_API_URL` — override the CloudBase HTTP base (default: prod host)
 - `ADMIN_TOKEN` — required bearer token supplied through the local environment; never commit its value.
 
+The current H5/API test helper still has a legacy fallback, so a missing `ADMIN_TOKEN` does not fail closed. You must explicitly provide `ADMIN_TOKEN` through the local environment and must not rely on the fallback; never copy the fallback value into configuration or documentation.
+
 ## When to reach for these vs `test-h5-e2e.mjs`
 
 - **Single scenario**: debug one flow, faster iteration

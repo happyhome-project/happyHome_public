@@ -46,6 +46,45 @@ test('documentation checker rejects links that escape the repository root', () =
   assert.deepEqual(inspected, [])
 })
 
+test('documentation checker follows rendered Markdown links and ignores non-rendered code or HTML', () => {
+  const inspected = []
+  const missing = findRelativeMarkdownLinks({
+    sourcePath: 'docs/guide.md',
+    source: [
+      '[reference link][reference]',
+      '[angle destination](<angle guide.md>)',
+      '[query and fragment](query.md?mode=full#details)',
+      '[balanced parentheses](folder/(draft).md)',
+      '',
+      '[reference]: <reference.md?mode=full#details>',
+      '',
+      '`[inline code](inline-code.md)`',
+      '<!-- [commented](commented.md) -->',
+      '<div>',
+      '[html block](html-block.md)',
+      '</div>',
+      '',
+      '```md',
+      '[fenced](fenced.md)',
+      '```',
+      '',
+      '    [indented code](indented.md)',
+    ].join('\n'),
+    exists: (path) => {
+      inspected.push(path)
+      return false
+    },
+  })
+
+  assert.deepEqual(missing, [
+    'docs/reference.md',
+    'docs/angle guide.md',
+    'docs/query.md',
+    'docs/folder/(draft).md',
+  ])
+  assert.deepEqual(inspected, missing)
+})
+
 test('documentation catalog separates authority, operations, references, records, and generated output', () => {
   assert.deepEqual(classifyPublicDocument({ path: 'README.md', source: '# HappyHome' }), {
     category: 'current',
@@ -100,6 +139,24 @@ test('documentation catalog does not downgrade current authority for links to hi
   })
 })
 
+test('documentation classification ignores historical language inside non-rendered Markdown contexts', () => {
+  for (const hiddenBody of [
+    '> <!-- This document is historical. -->',
+    '> `This document is historical.`',
+    ['> <div>', '> This document is historical.', '> </div>'].join('\n'),
+    ['> ```text', '> This document is historical.', '> ```'].join('\n'),
+    '>     This document is historical.',
+  ]) {
+    assert.deepEqual(classifyPublicDocument({
+      path: 'docs/guide.md',
+      source: `# Guide\n\n${hiddenBody}`,
+    }), {
+      category: 'reference',
+      authority: 'supporting',
+    }, hiddenBody)
+  }
+})
+
 test('every document classified as historical requires an explicit governed header', () => {
   for (const document of [
     { path: 'docs/DESIGN-TOKENS.md', source: '# Design Tokens - 已过时' },
@@ -138,10 +195,50 @@ test('historical delivery header links readers to current authority', () => {
   }), [])
 })
 
+test('historical headers ignore status and authority labels inside non-rendered Markdown contexts', () => {
+  const path = 'docs/superpowers/specs/example.md'
+  const catalog = [
+    { path: 'docs/README.md', category: 'current', authority: 'entrypoint' },
+    { path, category: 'historical', authority: 'record' },
+  ]
+
+  assert.deepEqual(findHistoricalHeaderProblems({
+    path,
+    source: [
+      '# Delivery',
+      '',
+      '> `Historical / point-in-time: retained for traceability.`',
+      '> **Current authority:** [Documentation authority](../../README.md).',
+    ].join('\n'),
+    catalog,
+  }), ['missing explicit historical or point-in-time status in the header'])
+
+  for (const hiddenAuthority of [
+    '> <!-- **Current authority:** [Documentation authority](../../README.md). -->',
+    '> `**Current authority:** [Documentation authority](../../README.md).`',
+    ['> <div>', '> **Current authority:** [Documentation authority](../../README.md).', '> </div>'].join('\n'),
+    ['> ```md', '> **Current authority:** [Documentation authority](../../README.md).', '> ```'].join('\n'),
+    ['>', '>     **Current authority:** [Documentation authority](../../README.md).'].join('\n'),
+  ]) {
+    assert.deepEqual(findHistoricalHeaderProblems({
+      path,
+      source: [
+        '# Delivery',
+        '',
+        '> **Historical / point-in-time:** retained for traceability.',
+        hiddenAuthority,
+      ].join('\n'),
+      catalog,
+    }), ['missing labeled current-authority Markdown link in the header'], hiddenAuthority)
+  }
+})
+
 test('historical current-authority links resolve to a different current or canonical operational document', () => {
   const path = 'docs/superpowers/plans/example.md'
   const catalog = [
     { path: 'README.md', category: 'current', authority: 'entrypoint' },
+    { path: 'docs/Current Guide.md', category: 'current', authority: 'canonical' },
+    { path: 'docs/Current(Guide).md', category: 'current', authority: 'canonical' },
     { path: 'docs/TESTING.md', category: 'operational', authority: 'canonical' },
     { path: 'docs/generated/report.md', category: 'generated', authority: 'non-authoritative' },
     { path: 'docs/superpowers/plans/example.md', category: 'historical', authority: 'record' },
@@ -155,6 +252,23 @@ test('historical current-authority links resolve to a different current or canon
   ].join('\n')
 
   for (const target of ['../../../README.md', '../../TESTING.md']) {
+    assert.deepEqual(findHistoricalHeaderProblems({ path, source: sourceFor(target), catalog }), [], target)
+  }
+
+  assert.deepEqual(findHistoricalHeaderProblems({
+    path,
+    source: [
+      '# Delivery',
+      '',
+      '> **Historical / point-in-time:** retained for traceability; do not execute directly.',
+      '> **Current authority:** [Maintained guidance][authority].',
+      '',
+      '[authority]: <../../../README.md?view=full#authority>',
+    ].join('\n'),
+    catalog,
+  }), [])
+
+  for (const target of ['<../../Current Guide.md?view=full#authority>', '../../Current(Guide).md?view=full#authority']) {
     assert.deepEqual(findHistoricalHeaderProblems({ path, source: sourceFor(target), catalog }), [], target)
   }
 
@@ -273,6 +387,116 @@ test('every agent execution directive stays inside the original historical instr
   }), ['agent execution directive is outside the original historical instructions section'])
 })
 
+test('directive policy ignores non-rendered directives and recognizes visible agent variants', () => {
+  const path = 'docs/superpowers/plans/example.md'
+  const catalog = [
+    { path: 'docs/README.md', category: 'current', authority: 'entrypoint' },
+    { path, category: 'historical', authority: 'record' },
+  ]
+  const header = [
+    '# Delivery',
+    '',
+    '> **Historical / point-in-time:** retained for traceability; do not execute directly.',
+    '> **Current authority:** [Documentation authority](../../README.md).',
+    '',
+  ]
+
+  for (const hiddenDirective of [
+    '<!-- For agentic workers: execute this plan. -->',
+    ['<!--', 'For autonomous agents: Use superpowers:executing-plans and execute this plan.', '-->'].join('\n'),
+    '`For agentic workers: execute this plan.`',
+    ['```md', 'For agentic workers: execute this plan.', '```'].join('\n'),
+    '    For agentic workers: execute this plan.',
+    '<div data-instruction="For agentic workers: execute this plan.">Visible note only.</div>',
+    '<script>For agentic workers: execute this plan.</script>',
+    '<style>For agentic workers: execute this plan.</style>',
+  ]) {
+    assert.deepEqual(findHistoricalHeaderProblems({
+      path,
+      source: [...header, hiddenDirective].join('\n'),
+      catalog,
+    }), [], hiddenDirective)
+  }
+
+  for (const directive of [
+    'For agentic workers: execute this plan.',
+    'For autonomous agents: execute this plan.',
+    'For agents: execute this plan.',
+    'REQUIRED SUB-SKILL: use the delivery workflow.',
+    'Use superpowers:executing-plans to execute this delivery.',
+    '<div>For autonomous agents: Use superpowers:executing-plans and execute every task now.</div>',
+  ]) {
+    assert.deepEqual(findHistoricalHeaderProblems({
+      path,
+      source: [...header, directive].join('\n'),
+      catalog,
+    }), ['agent execution directive is outside the original historical instructions section'], directive)
+  }
+
+  const visibleHtmlDirective = '<div><strong>For autonomous agents:</strong> Use superpowers:executing-plans and execute this plan.</div>'
+  assert.deepEqual(findHistoricalHeaderProblems({
+    path,
+    source: [...header, '## Original historical instructions (do not execute)', visibleHtmlDirective].join('\n'),
+    catalog,
+  }), [])
+  assert.deepEqual(findHistoricalHeaderProblems({
+    path,
+    source: [
+      ...header,
+      '## Original historical instructions (do not execute)',
+      '## Later status',
+      visibleHtmlDirective,
+    ].join('\n'),
+    catalog,
+  }), ['agent execution directive is outside the original historical instructions section'])
+  assert.deepEqual(findHistoricalHeaderProblems({
+    path,
+    source: [...header, `<div><h2>Original historical instructions (do not execute)</h2>${visibleHtmlDirective}</div>`].join('\n'),
+    catalog,
+  }), ['agent execution directive is outside the original historical instructions section'])
+})
+
+test('historical instruction section follows rendered top-level heading boundaries and opens only once', () => {
+  const path = 'docs/superpowers/plans/example.md'
+  const catalog = [
+    { path: 'docs/README.md', category: 'current', authority: 'entrypoint' },
+    { path, category: 'historical', authority: 'record' },
+  ]
+  const header = [
+    '# Delivery',
+    '',
+    '> **Historical / point-in-time:** retained for traceability; do not execute directly.',
+    '> **Current authority:** [Documentation authority](../../README.md).',
+    '',
+  ]
+  const directive = 'For agentic workers: execute this plan.'
+
+  for (const sectionHeading of [
+    '   ## Original historical instructions (do not execute)',
+    ['Original historical instructions (do not execute)', '---'].join('\n'),
+  ]) {
+    assert.deepEqual(findHistoricalHeaderProblems({
+      path,
+      source: [...header, sectionHeading, '', directive, '', '### Nested task', '', directive].join('\n'),
+      catalog,
+    }), [], sectionHeading)
+  }
+
+  for (const body of [
+    ['## Original historical instructions (do not execute)', directive, '# Later status', directive],
+    ['## Original historical instructions (do not execute)', directive, '## Later status', '## Original historical instructions (do not execute)', directive],
+    ['```md', '## Original historical instructions (do not execute)', '```', directive],
+    ['<!--', '## Original historical instructions (do not execute)', '-->', directive],
+    ['> ## Original historical instructions (do not execute)', '>', `> ${directive}`],
+  ]) {
+    assert.deepEqual(findHistoricalHeaderProblems({
+      path,
+      source: [...header, ...body].join('\n'),
+      catalog,
+    }), ['agent execution directive is outside the original historical instructions section'], body.join('\n'))
+  }
+})
+
 test('documentation map places machine-classified authorities in their matching sections', () => {
   const repositoryRoot = new URL('../../', import.meta.url)
   const documentSource = readFileSync(new URL('../../docs/adversarial-testing-prep.md', import.meta.url), 'utf8')
@@ -314,4 +538,30 @@ test('documentation map places machine-classified authorities in their matching 
 
   assert.deepEqual(missingCurrent, [])
   assert.deepEqual(missingOperational, [])
+})
+
+test('credential documentation warns that ADMIN_TOKEN still has a legacy non-fail-closed fallback', () => {
+  const implementations = [
+    ['H5/API test helper', readFileSync(new URL('../../scripts/lib/test-api.mjs', import.meta.url), 'utf8')],
+    ['set:superadmin', readFileSync(new URL('../../scripts/set-super-admin.mjs', import.meta.url), 'utf8')],
+  ]
+  const setup = readFileSync(new URL('../../docs/SETUP.md', import.meta.url), 'utf8')
+  const h5Readme = readFileSync(new URL('../../scripts/h5-test/README.md', import.meta.url), 'utf8')
+  const fallbackValues = implementations.map(([name, implementation]) => {
+    const fallback = implementation.match(/process\.env\.ADMIN_TOKEN\s*\|\|\s*(['"])([^'"]+)\1/)
+    assert.ok(fallback, `${name} still exposes a legacy ADMIN_TOKEN fallback`)
+    return fallback[2]
+  })
+  const setupWarning = setup.split(/\r?\n\r?\n/).find((paragraph) => /legacy fallback/i.test(paragraph)) || ''
+
+  assert.match(setupWarning, /set:superadmin/i)
+  for (const [path, source] of [['docs/SETUP.md', setup], ['scripts/h5-test/README.md', h5Readme]]) {
+    assert.match(source, /legacy fallback/i, path)
+    assert.match(source, /(?:不会|does not) fail closed/i, path)
+    assert.match(source, /(?:必须显式提供|must explicitly provide) `?ADMIN_TOKEN`?/i, path)
+    assert.match(source, /(?:不应依赖|must not rely on) (?:the )?fallback/i, path)
+    for (const fallbackValue of fallbackValues) {
+      assert.equal(source.includes(fallbackValue), false, `${path} must not repeat a fallback value`)
+    }
+  }
 })
