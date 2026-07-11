@@ -92,6 +92,11 @@ export function validateChangeManifests(manifests = []) {
   return { changeIds: [...changeIds], migrationIds: [...migrationIds] }
 }
 
+export function selectChangeManifestsForDiff(manifests = [], changedPaths = []) {
+  const changed = new Set(changedPaths.map(normalizePath))
+  return manifests.filter((manifest) => changed.has(normalizePath(manifest?.source)))
+}
+
 function needsExternalManifest(changedPaths) {
   return changedPaths.map(normalizePath).some((path) => path.startsWith('scripts/ensure-')
     || path.startsWith('scripts/configure-')
@@ -118,6 +123,7 @@ export function createReleasePlan({
   const bootstrap = mode === 'main' && !baseSha
   const targets = classifyReleaseImpact({ changedPaths, allFunctions, functionInputs })
   if (bootstrap) targets.cloud = allCloud(allFunctions, 'bootstrap:no-production-base')
+  const hasRuntimeTarget = targets.cloud.functions.length > 0 || targets.miniprogram || targets.adminWeb
   return {
     baseSha: baseSha || null,
     bootstrap,
@@ -126,7 +132,7 @@ export function createReleasePlan({
     headSha,
     manifests,
     mode,
-    releaseRequired: bootstrap || changedPaths.length > 0,
+    releaseRequired: bootstrap || hasRuntimeTarget || manifests.length > 0,
     targets,
   }
 }

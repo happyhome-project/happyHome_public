@@ -5,6 +5,7 @@ import {
   ALL_CLOUD_FUNCTIONS,
   classifyReleaseImpact,
   createReleasePlan,
+  selectChangeManifestsForDiff,
   validateChangeManifests,
 } from './release-plan.mjs'
 
@@ -74,4 +75,42 @@ test('main plans use production state base and bootstrap safely when it is unava
   assert.equal(plan.bootstrap, true)
   assert.equal(plan.targets.cloud.mode, 'all')
   assert.equal(plan.baseSha, null)
+})
+
+test('release plan selects only manifests changed in the production diff', () => {
+  const manifests = [
+    { changeId: 'historical', source: 'release/changes/20260701-historical.json' },
+    { changeId: 'current', source: 'release/changes/20260711-current.json' },
+  ]
+  assert.deepEqual(
+    selectChangeManifestsForDiff(manifests, ['M\trelease/changes/20260711-current.json', 'docs/SESSION-HANDOFF.md']),
+    [manifests[1]],
+  )
+  assert.deepEqual(selectChangeManifestsForDiff(manifests, ['docs/SESSION-HANDOFF.md']), [])
+})
+
+test('documentation and release-tooling changes do not require production publication', () => {
+  for (const changedPath of ['docs/SESSION-HANDOFF.md', 'README.md', 'scripts/release-plan.mjs']) {
+    const plan = createReleasePlan({
+      baseSha: 'base',
+      headSha: 'head',
+      changedPaths: [changedPath],
+      allFunctions: ['post'],
+      functionInputs: {},
+      manifests: [],
+      mode: 'main',
+    })
+    assert.equal(plan.releaseRequired, false, changedPath)
+  }
+
+  const manifestPlan = createReleasePlan({
+    baseSha: 'base',
+    headSha: 'head',
+    changedPaths: ['release/changes/20260711-current.json'],
+    allFunctions: ['post'],
+    functionInputs: {},
+    manifests: [{ schemaVersion: 1, changeId: 'current', actions: ['ensure-indexes'], migrations: [], smokeSuites: [] }],
+    mode: 'main',
+  })
+  assert.equal(manifestPlan.releaseRequired, true)
 })
