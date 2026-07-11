@@ -2,8 +2,6 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import http from 'node:http'
-import https from 'node:https'
 
 import {
   DEFAULT_ENV_ID,
@@ -18,7 +16,6 @@ import { invokeAdmin } from './rebuild-post-search-index.mjs'
 import { resolveAdminInternalToken } from './lib/admin-internal-token.mjs'
 import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
 
-const DEFAULT_BASE_URL = 'https://cloudbase-3gh862acb1505ff3-1307183045.ap-shanghai.app.tcloudbase.com'
 const DEFAULT_TIMEOUT_MS = 180000
 const DEFAULT_ADMIN_INVOKE_RETRIES = 5
 
@@ -39,7 +36,6 @@ function getFlagValue(name, fallback = '') {
 function parseArgs() {
   return {
     envId: getFlagValue('env-id', process.env.TCB_ENV || DEFAULT_ENV_ID),
-    baseUrl: String(getFlagValue('base-url', process.env.CLOUD_API_URL || DEFAULT_BASE_URL)).replace(/\/+$/, ''),
     commandTimeoutMs: Math.max(30000, Math.floor(Number(getFlagValue(
       'command-timeout-ms',
       process.env.HH_POST_RAG_SMOKE_TIMEOUT_MS || String(DEFAULT_TIMEOUT_MS),
@@ -108,53 +104,16 @@ async function invokeFunction(functionName, payload, options) {
   return functionResult
 }
 
-function requestJson(url, body, headers = {}) {
-  return new Promise((resolve, reject) => {
-    const target = new URL(url)
-    const transport = target.protocol === 'https:' ? https : http
-    const payload = JSON.stringify(body)
-    const req = transport.request({
-      method: 'POST',
-      hostname: target.hostname,
-      port: target.port || (target.protocol === 'https:' ? 443 : 80),
-      path: `${target.pathname}${target.search}`,
-      headers: {
-        'content-type': 'application/json',
-        'content-length': Buffer.byteLength(payload),
-        ...headers,
-      },
-    }, (res) => {
-      let raw = ''
-      res.on('data', (chunk) => { raw += chunk })
-      res.on('end', () => {
-        let data = {}
-        try { data = raw ? JSON.parse(raw) : {} } catch { data = { raw } }
-        resolve({ statusCode: res.statusCode || 0, data })
-      })
-    })
-    req.on('error', reject)
-    req.write(payload)
-    req.end()
-  })
-}
-
 async function searchPost(options, openid, communityId, query) {
-  const token = process.env.GATEWAY_TOKEN || process.env.ADMIN_TOKEN || 'happyhome-admin-2024'
-  const res = await requestJson(`${options.baseUrl}/http-gateway`, {
-    _fn: 'post',
+  const result = await invokeFunction('post', {
     action: 'search',
     communityId,
     q: query,
     limit: 5,
-  }, {
-    authorization: `Bearer ${token}`,
-    'x-test-openid': openid,
-  })
-  if (res.statusCode !== 200) {
-    throw new Error(`post.search HTTP ${res.statusCode}: ${res.data?.error || JSON.stringify(res.data)}`)
-  }
-  if (res.data?.error) throw new Error(`post.search failed: ${res.data.error}`)
-  return res.data
+    _testOpenid: openid,
+  }, options)
+  if (result?.error) throw new Error(`post.search failed: ${result.error}`)
+  return result
 }
 
 function assertRagHit(result, postId, label) {
