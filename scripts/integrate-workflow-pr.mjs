@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process'
 import process from 'node:process'
 import { acquireIntegrationLock, parsePrNumber, resolveSpawnInvocation } from './lib/integrate-pr-policy.mjs'
 import { CANONICAL_MAIN_WORKSPACE } from './lib/worktree-policy.mjs'
-import { VALIDATOR_PATH, applyAfterValidation, assertAttestation, assertWorkflowPaths, createManifest, hashWorkflowDiff } from './lib/trusted-workflow-policy.mjs'
+import { VALIDATOR_PATH, applyAfterValidation, assertAttestation, createManifest, discoverWorkflowCandidate } from './lib/trusted-workflow-policy.mjs'
 
 const VALIDATOR_WORKFLOW = basename(VALIDATOR_PATH)
 function run(command, args, { cwd = process.cwd(), encoding = 'utf8' } = {}) {
@@ -36,9 +36,8 @@ function inspectCandidate(root, prNumber) {
   if (pr.state !== 'OPEN' || pr.isDraft || pr.baseRefName !== 'main' || !pr.headRefOid) throw new Error('PR must be OPEN, non-draft, based on main, with an exact head commit')
   const baseSha = output('git', ['rev-parse', 'origin/main'], root)
   try { run('git', ['merge-base', '--is-ancestor', baseSha, pr.headRefOid], { cwd: root }) } catch { throw new Error(`PR head ${pr.headRefOid} does not include latest main`) }
-  const changedPaths = assertWorkflowPaths(output('git', ['diff', '--name-only', baseSha, pr.headRefOid], root).split(/\r?\n/).filter(Boolean))
-  const binaryDiff = run('git', ['diff', '--binary', '--no-ext-diff', baseSha, pr.headRefOid, '--', ...changedPaths], { cwd: root, encoding: 'buffer' })
-  return { baseSha, headSha: pr.headRefOid, changedPaths, diffSha256: hashWorkflowDiff(binaryDiff), validatorWorkflowSha: baseSha }
+  const discovered = discoverWorkflowCandidate({ root, baseSha, headSha: pr.headRefOid, runCommand: run })
+  return { baseSha, headSha: pr.headRefOid, ...discovered, validatorWorkflowSha: baseSha }
 }
 function downloadAttestation(root, runId, requestId) {
   const directory = join(tmpdir(), `happyhome-workflow-${runId}-${randomUUID()}`); mkdirSync(directory, { recursive: true })

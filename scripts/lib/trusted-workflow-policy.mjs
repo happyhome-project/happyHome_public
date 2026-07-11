@@ -29,6 +29,13 @@ export function hashWorkflowDiff(binaryDiff) {
   return createHash('sha256').update(binaryDiff).digest('hex')
 }
 
+export function discoverWorkflowCandidate({ root, baseSha, headSha, runCommand }) {
+  const changedOutput = runCommand('git', ['diff', '--no-renames', '--name-only', baseSha, headSha], { cwd: root, encoding: 'utf8' })
+  const changedPaths = assertWorkflowPaths(String(changedOutput || '').trim().split(/\r?\n/).filter(Boolean))
+  const binaryDiff = runCommand('git', ['diff', '--binary', '--no-ext-diff', '--no-renames', baseSha, headSha], { cwd: root, encoding: 'buffer' })
+  return { changedPaths, diffSha256: hashWorkflowDiff(binaryDiff) }
+}
+
 export function buildApprovalPhrase({ prNumber, baseSha, headSha, diffSha256, requestId }) {
   return `${APPROVAL_PREFIX}#${prNumber} BASE ${baseSha} HEAD ${headSha} DIFF ${diffSha256} REQUEST ${requestId}`
 }
