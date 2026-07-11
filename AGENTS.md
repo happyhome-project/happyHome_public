@@ -17,12 +17,18 @@
 
 - 新 worktree 必须由最新 `origin/main` 创建；`AGENTS.md` 必须是仓库内真实文件，禁止软链接或符号链接。
 - 每台开发机首次使用仓库时必须在任一 HappyHome worktree 执行 `npm.cmd run hooks:install`。该配置使用共享 Git hooks，在后续 `git worktree add` 后执行预检。
+- 新 worktree 先运行 `npm.cmd run worktree:doctor`；只有 attached、clean、同步到 `origin/main` 的 `codex/*` 分支才可运行 `npm.cmd run worktree:bootstrap`。bootstrap 仅在仓库根执行 `npm.cmd ci`，不链接其它 worktree 的 `node_modules`。
+- 推荐只从 canonical main 使用 `npm.cmd run worktree:create -- --name=<task-name> --path=<absolute-path>` 创建；它会刷新 `origin/main`、创建安全的 `codex/*` 分支、校验 AGENTS/hooks 并自动执行 bootstrap。
+- `npm.cmd run worktree:sync-main -- --prepare` 只报告同步方案；apply 必须带 prepare 输出的 `--expected-head` 和 `--expected-main`。dirty、活跃所有权或分叉分支不得自动 stash、merge 或 rebase。
+- worktree 退役必须先 `worktree:retire -- --prepare <path> --confirm-no-owner`，再用生成 manifest apply；禁止 `git worktree remove --force`、批量 prune 或删除未进入 main 的本地分支。
+- 项目 hook 必须获客户端信任才会产生 heartbeat；缺失或超过 12 小时的 heartbeat 是 `unknown`，不是“无人使用”。`env:run` 仅为本地命令分类，不能授予生产权限。
 
 ### 共享云环境边界
 
 - 功能会话不得部署或发布到生产环境，也不得上传小程序版本。
 - 功能会话不得修改共享云环境的环境变量、数据库索引、触发器或迁移状态。
 - 生产部署、环境变量/索引/触发器/迁移变更和小程序上传，必须由主干发布角色在真实主工作区执行。
+- `scripts/deploy.mjs` 的直接生产目标也会在运行时检查 canonical main、工作区干净和 `HEAD=origin/main`；不依赖 `env:run` 或 Git hook 作为该边界。
 
 ### PR 流程
 

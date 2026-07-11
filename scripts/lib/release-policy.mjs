@@ -11,12 +11,24 @@ export function shouldFallbackAfterDevtoolsFailure({ target, reason, forceCi = f
 
 const GENERATED_BUILD_INFO_PATH = 'miniprogram/src/generated/build-info.ts'
 const REMOTE_REVALIDATE_STAGES = new Set(['cloud-deploy', 'cloud-smoke', 'admin-web-deploy'])
+const CANONICAL_MAIN_WORKSPACE = 'C:\\Project\\Claude\\happyHome'
+
+function normalizeWorkspacePath(value) {
+  const normalized = String(value || '')
+    .trim()
+    .replace(/^\\\\\\?\\/, '')
+    .replace(/\\\\/g, '/')
+    .replace(/\/+$/, '')
+  return /^[a-z]:\//i.test(normalized) ? normalized.toLowerCase() : normalized
+}
 
 export function mustRevalidateRemoteReleaseStage(stageName) {
   return REMOTE_REVALIDATE_STAGES.has(String(stageName || ''))
 }
 
 export function assertFormalReleaseGitState({
+  cwd,
+  canonicalPath = CANONICAL_MAIN_WORKSPACE,
   branch,
   headSha,
   originMainSha,
@@ -24,6 +36,9 @@ export function assertFormalReleaseGitState({
   publishOnly = false,
   generatedBuildInfoMatches = false,
 }) {
+  if (normalizeWorkspacePath(cwd) !== normalizeWorkspacePath(canonicalPath)) {
+    throw new Error(`Formal release must run in the canonical main workspace ${canonicalPath}; got ${cwd || '(missing)'}`)
+  }
   if (branch !== 'main') throw new Error(`Formal release must run on main; got ${branch || '(detached)'}`)
   if (!headSha || !originMainSha || headSha !== originMainSha) {
     throw new Error(`Formal release requires HEAD to equal origin/main; got HEAD=${headSha || 'missing'} origin/main=${originMainSha || 'missing'}`)

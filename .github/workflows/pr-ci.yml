@@ -24,7 +24,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
@@ -56,6 +56,9 @@ jobs:
 
       - name: Check whitespace
         run: git diff --check ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }}
+
+      - name: Check documentation
+        run: npm run docs:check
 
       - name: Plan PR release
         run: |

@@ -12,7 +12,7 @@ HappyHome is a WeChat mini-program community product with a Vue admin site and C
 ## Start Here
 
 ```powershell
-npm.cmd install
+npm.cmd ci
 npm.cmd run hooks:install
 ```
 
@@ -39,8 +39,11 @@ Production work is performed from `main` in `C:\Project\Claude\happyHome`; featu
 
 ## Documentation
 
+- [Documentation map](./docs/README.md): canonical document entry point.
 - [Setup](./docs/SETUP.md): local environment and CloudBase deployment setup.
 - [Post RAG Search](./docs/post-rag-search.md): architecture, operations, cost boundaries, and RAG smoke acceptance.
 - [Testing](./docs/TESTING.md): test layers and commands.
 - [Release Gate](./docs/release-gate.md): formal release evidence and CloudBase deployment rules.
 - [Session Handoff](./docs/SESSION-HANDOFF.md): current operational state for a new session.
+
+Use Node 24 and npm 11. Read [AGENTS.md](./AGENTS.md) for mandatory PR/CI/worktree/release boundaries, [CLAUDE.md](./CLAUDE.md) for collaboration guidance, and [memory/MEMORY.md](./memory/MEMORY.md) for the project memory index.

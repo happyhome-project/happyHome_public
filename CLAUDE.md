@@ -12,7 +12,7 @@
 
 ## 新会话开场 4 件事（必做）
 
-1. **读 [docs/SESSION-HANDOFF.md](docs/SESSION-HANDOFF.md)** —— 当前进度、近期改动、正在走的迁移
+1. **读 [docs/README.md](docs/README.md)** —— 先定位当前 canonical 文档；`SESSION-HANDOFF` 仅作历史交接参考，不能覆盖现行规则或代码
 2. **扫 [TASKS.md](TASKS.md)** —— 跨 session 的 TODO / 待决策项
 3. **扫 `memory/MEMORY.md` 索引**（系统自动加载到 context）—— 过往踩坑提示
 4. **对齐用户需求再开工** —— "有 95% 把握理解需求后再开始"（CLAUDE.md 全局原则）
@@ -172,16 +172,20 @@
 
 ## Memory 系统
 
-- **自动加载**：`~/.claude/projects/C--Project-Claude-happyHome/memory/MEMORY.md`（索引）
-- **按需加载**：`memory/feedback_*.md`（单条细节）
-- **发现新教训主动写入**并更新索引。不要在 memory 里写已经能从代码 / git 推出来的事实
-- 不是 git 仓内文件，per-user 存储
+- **项目权威记忆**：仓库内 `memory/MEMORY.md` 及其索引文件，随功能 PR 合入 `main`
+- **个人会话记忆**：`~/.claude/projects/...`，只能作为本机辅助信息，不能替代仓库事实
+- 发现新教训时更新项目索引；不要在 memory 里写已经能从代码 / git 推出来的事实
 
 ---
 
 ## Worktree 协作
 
 - 每个 worktree 是一个独立 feature 分支（`.claude/worktrees/<name>` 下）
+- 创建或接手时先运行 `npm.cmd run worktree:doctor`；依赖由根 `npm.cmd ci` 安装，npm/Playwright cache 可共享，`node_modules` 不可共享。
+- 远端 main 更新只会通过 `worktree:status` / `worktree:sync-main -- --prepare` 被发现；任何 apply 都是显式操作，绝不后台 merge/rebase。
+- `worktree:retire` 默认对所有权未知 fail-closed；Codex-managed worktree 优先通过 App 删除，以保留其快照恢复路径。
+- Codex 首次发现仓库 `.codex/hooks.json` 时，必须在客户端的 `/hooks` 审核并信任；未获信任、未执行或超过 12 小时的心跳一律只会显示为 `unknown`，不会触发删除。
+- `env:run` 是本地命令分类器，不是权限系统；共享云、上传和部署仍由 `deploy.mjs` 的 canonical-main/clean/HEAD=origin/main 运行时门禁决定。
 - preview_start 在 worktree 里起 dev server 会报 "cwd must be within project root" —— 需要 preview 时从主仓库根新开会话（详见 `memory/feedback_preview_worktree_lock.md`）
 - 合回 main 前在 worktree 里同步 origin/main 并通过 PR CI；主 repo 只通过 `integrate:pr` 合并，不做手工 fast-forward 或直接 push
 - 多 worktree 同时改共享文件（`cloud.ts` / `deploy.mjs` / 全局 token）时小心冲突，合并顺序：小改动面先、大改动面后

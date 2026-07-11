@@ -102,18 +102,24 @@ test('release cloud smoke ensures required database collections before invoking 
 
 test('formal release git state rejects non-main, dirty, and unsynchronized sources', () => {
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
-    branch: 'feature', headSha: 'a', originMainSha: 'a', changedPaths: [],
+    cwd: 'X:\\Users\\<user>\\.codex\\worktrees\\feature\\happyHome',
+    canonicalPath: 'C:\\Project\\Claude\\happyHome',
+    branch: 'main', headSha: 'a', originMainSha: 'a', changedPaths: [],
+  }), /canonical main workspace/i)
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    cwd: 'C:\\Project\\Claude\\happyHome', branch: 'feature', headSha: 'a', originMainSha: 'a', changedPaths: [],
   }), /main/)
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
-    branch: 'main', headSha: 'a', originMainSha: 'a', changedPaths: ['cloud/functions/admin/index.ts'],
+    cwd: 'C:\\Project\\Claude\\happyHome', branch: 'main', headSha: 'a', originMainSha: 'a', changedPaths: ['cloud/functions/admin/index.ts'],
   }), /clean/i)
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
-    branch: 'main', headSha: 'a', originMainSha: 'b', changedPaths: [],
+    cwd: 'C:\\Project\\Claude\\happyHome', branch: 'main', headSha: 'a', originMainSha: 'b', changedPaths: [],
   }), /origin\/main/)
 })
 
 test('publish resume allows only its matching generated build-info change', () => {
   assert.doesNotThrow(() => releasePolicyModule.assertFormalReleaseGitState({
+    cwd: 'C:\\Project\\Claude\\happyHome',
     branch: 'main',
     headSha: 'a',
     originMainSha: 'a',
@@ -122,6 +128,7 @@ test('publish resume allows only its matching generated build-info change', () =
     generatedBuildInfoMatches: true,
   }))
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    cwd: 'C:\\Project\\Claude\\happyHome',
     branch: 'main',
     headSha: 'a',
     originMainSha: 'a',
@@ -130,6 +137,7 @@ test('publish resume allows only its matching generated build-info change', () =
     generatedBuildInfoMatches: true,
   }), /unexpected/i)
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    cwd: 'C:\\Project\\Claude\\happyHome',
     branch: 'main',
     headSha: 'a',
     originMainSha: 'a',
@@ -179,6 +187,15 @@ test('formal release path records resumable ledger stages before upload', () => 
   assert(releaseBlock.indexOf("'cloud-smoke'") < releaseBlock.indexOf("'admin-web-deploy'"))
   assert(releaseBlock.indexOf("'admin-web-deploy'") < releaseBlock.indexOf("'miniprogram-upload'"))
   assert(releaseBlock.indexOf("'miniprogram-upload'") < releaseBlock.indexOf("complete('passed')"))
+})
+
+test('every direct production deployment is fenced to the canonical clean main workspace', () => {
+  const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
+  const dispatch = deployScript.slice(deployScript.lastIndexOf("const target = process.argv[2] || 'all'"))
+
+  assert.match(deployScript, /function assertDirectProductionDeployWorkspace\(\)/)
+  assert.match(dispatch, /assertDirectProductionDeployWorkspace\(\)/)
+  assert.match(dispatch, /target === 'cloud' \|\| target === 'all'/)
 })
 
 test('package exposes a release status command for the latest ledger', () => {

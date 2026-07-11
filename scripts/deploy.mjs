@@ -191,6 +191,7 @@ function getFormalReleaseGitState({ publishOnly, version, desc }) {
   const buildInfoPath = resolve(ROOT, 'miniprogram/src/generated/build-info.ts')
   const buildInfo = existsSync(buildInfoPath) ? readFileSync(buildInfoPath, 'utf8') : ''
   return {
+    cwd: ROOT,
     branch: getGitOutput('git branch --show-current'),
     headSha: getGitOutput('git rev-parse HEAD'),
     originMainSha: getGitOutput('git rev-parse origin/main'),
@@ -1358,6 +1359,15 @@ async function runFormalRelease(options = {}) {
   }
 }
 
+function assertDirectProductionDeployWorkspace() {
+  execSync('git fetch --quiet origin main', { cwd: ROOT, stdio: 'inherit' })
+  assertFormalReleaseGitState(getFormalReleaseGitState({
+    publishOnly: false,
+    version: '',
+    desc: '',
+  }))
+}
+
 const target = process.argv[2] || 'all'
 if (target === 'release') {
   await runFormalRelease()
@@ -1366,6 +1376,7 @@ if (target === 'release') {
 } else if (target === 'release-publish') {
   await runFormalRelease({ publishOnly: true })
 } else {
+  assertDirectProductionDeployWorkspace()
   if (target === 'cloud' || target === 'all') {
     const cloudDeploy = await deployCloud()
     if (process.argv.includes('--smoke')) await runCloudSmoke(cloudDeploy.fns)
