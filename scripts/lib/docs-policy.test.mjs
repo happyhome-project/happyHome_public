@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
@@ -129,7 +130,60 @@ test('historical delivery header links readers to current authority', () => {
   assert.deepEqual(findHistoricalHeaderProblems({
     path: 'docs/superpowers/specs/2026-07-10-example.md',
     source,
+    catalog: [
+      { path: 'docs/README.md', category: 'current', authority: 'entrypoint' },
+      { path: 'docs/superpowers/specs/2026-07-10-example.md', category: 'historical', authority: 'record' },
+    ],
   }), [])
+})
+
+test('historical current-authority links resolve to a different current or canonical operational document', () => {
+  const path = 'docs/superpowers/plans/example.md'
+  const catalog = [
+    { path: 'README.md', category: 'current', authority: 'entrypoint' },
+    { path: 'docs/TESTING.md', category: 'operational', authority: 'canonical' },
+    { path: 'docs/generated/report.md', category: 'generated', authority: 'non-authoritative' },
+    { path: 'docs/superpowers/plans/example.md', category: 'historical', authority: 'record' },
+    { path: 'docs/superpowers/specs/example.md', category: 'historical', authority: 'record' },
+  ]
+  const sourceFor = (target) => [
+    '# Delivery',
+    '',
+    '> **Historical / point-in-time:** retained for traceability; do not execute directly.',
+    `> **Current authority:** [Maintained guidance](${target}).`,
+  ].join('\n')
+
+  for (const target of ['../../../README.md', '../../TESTING.md']) {
+    assert.deepEqual(findHistoricalHeaderProblems({ path, source: sourceFor(target), catalog }), [], target)
+  }
+
+  assert.deepEqual(findHistoricalHeaderProblems({
+    path,
+    source: `${sourceFor('../../../README.md')} Current implementation: [tokens](../../../miniprogram/src/uni.scss).`,
+    catalog,
+  }), [])
+
+  assert.deepEqual(findHistoricalHeaderProblems({
+    path,
+    source: sourceFor('./example.md'),
+    catalog,
+  }), ['current-authority link must not point to the historical document itself'])
+
+  for (const target of ['../specs/example.md', '../../generated/report.md']) {
+    assert.deepEqual(findHistoricalHeaderProblems({
+      path,
+      source: sourceFor(target),
+      catalog,
+    }), ['current-authority link must point to current or canonical operational documentation'], target)
+  }
+
+  for (const target of ['../../missing.md', 'https://example.com/README.md']) {
+    assert.deepEqual(findHistoricalHeaderProblems({
+      path,
+      source: sourceFor(target),
+      catalog,
+    }), ['current-authority link must resolve to a cataloged repository document'], target)
+  }
 })
 
 test('historical plans cannot expose an unmarked agent execution directive', () => {
@@ -141,14 +195,89 @@ test('historical plans cannot expose an unmarked agent execution directive', () 
     '',
   ]
   const directive = '> **For agentic workers:** REQUIRED SUB-SKILL: execute this plan task-by-task.'
+  const catalog = [
+    { path: 'docs/README.md', category: 'current', authority: 'entrypoint' },
+    { path: 'docs/superpowers/plans/example.md', category: 'historical', authority: 'record' },
+  ]
 
   assert.deepEqual(findHistoricalHeaderProblems({
     path: 'docs/superpowers/plans/example.md',
     source: [...header, directive].join('\n'),
+    catalog,
   }), ['agent execution directive is outside the original historical instructions section'])
 
   assert.deepEqual(findHistoricalHeaderProblems({
     path: 'docs/superpowers/plans/example.md',
     source: [...header, '## Original historical instructions (do not execute)', '', directive].join('\n'),
+    catalog,
   }), [])
+})
+
+test('every agent execution directive stays inside the original historical instructions H2 section', () => {
+  const header = [
+    '# Delivery',
+    '',
+    '> **Historical / point-in-time:** retained for traceability; do not execute directly.',
+    '> **Current authority:** [Documentation authority](../../README.md).',
+    '',
+  ]
+  const workerDirective = '> **For agentic workers:** execute this plan task-by-task.'
+  const subSkillDirective = '> REQUIRED SUB-SKILL: use the historical implementation workflow.'
+  const catalog = [
+    { path: 'docs/README.md', category: 'current', authority: 'entrypoint' },
+    { path: 'docs/superpowers/plans/example.md', category: 'historical', authority: 'record' },
+  ]
+
+  assert.deepEqual(findHistoricalHeaderProblems({
+    path: 'docs/superpowers/plans/example.md',
+    source: [
+      ...header,
+      '## Original historical instructions (do not execute)',
+      '',
+      workerDirective,
+      '',
+      '### Nested task',
+      '',
+      subSkillDirective,
+    ].join('\n'),
+    catalog,
+  }), [])
+
+  assert.deepEqual(findHistoricalHeaderProblems({
+    path: 'docs/superpowers/plans/example.md',
+    source: [
+      ...header,
+      '## Original historical instructions (do not execute)',
+      '',
+      workerDirective,
+      '',
+      '## Later status',
+      '',
+      subSkillDirective,
+    ].join('\n'),
+    catalog,
+  }), ['agent execution directive is outside the original historical instructions section'])
+
+  assert.deepEqual(findHistoricalHeaderProblems({
+    path: 'docs/superpowers/plans/example.md',
+    source: [
+      ...header,
+      subSkillDirective,
+      '',
+      '## Original historical instructions (do not execute)',
+      '',
+      workerDirective,
+    ].join('\n'),
+    catalog,
+  }), ['agent execution directive is outside the original historical instructions section'])
+})
+
+test('documentation map places machine-classified historical files in the historical section', () => {
+  const documentSource = readFileSync(new URL('../../docs/adversarial-testing-prep.md', import.meta.url), 'utf8')
+  const mapSource = readFileSync(new URL('../../docs/README.md', import.meta.url), 'utf8')
+  const documentPath = 'docs/adversarial-testing-prep.md'
+  const mapLink = '[Adversarial testing preparation](adversarial-testing-prep.md)'
+
+  assert.equal(classifyPublicDocument({ path: documentPath, source: documentSource }).category, 'historical')
+  assert.ok(mapSource.indexOf(mapLink) > mapSource.indexOf('## Historical and delivery records'))
 })

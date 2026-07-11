@@ -51,10 +51,10 @@ Run `npm.cmd run docs:catalog` for the machine-readable catalog and `npm.cmd run
 - [CloudBase HTTP access](cloudbase-http-access.md)
 - [Mini-program pre-fetch](miniprogram-pre-fetch.md)
 - [UI click regression checklist](ui-click-regression-checklist.md)
-- [Adversarial testing preparation](adversarial-testing-prep.md): a point-in-time risk inventory; current commands remain in `TESTING.md` and `release-gate.md`.
 
 ## Historical and delivery records
 
+- [Adversarial testing preparation](adversarial-testing-prep.md): a point-in-time risk inventory; current commands remain in `TESTING.md` and `release-gate.md`.
 - `docs/superpowers/plans/` and `docs/superpowers/specs/`: point-in-time implementation plans and approved design specifications.
 - `docs/changes/`: change fragments describing individual branches or deliveries; status text must not be read as current branch state later.
 - `news/`: dated content snapshots.

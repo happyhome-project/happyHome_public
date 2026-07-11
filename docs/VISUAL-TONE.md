@@ -2,7 +2,8 @@
 
 > ⚠️ **本文档描述 v1 木色橙方向，已于 2026-04-20 废弃。**
 > 2026-07-09 起，小程序 UI/UX 当前准则以 Figma 文件 `社区资源共享_小程序_0709_v2` 为准；`0626` 仅作为历史基线。
-> **Current authority:** 文档状态见 [`docs/README.md`](./README.md)，当前设计观察见 [`figma-mini-0626-inventory.md`](./figma-mini-0626-inventory.md)，实现值以 checked-in styles 和代码为准。
+> **Current authority:** 文档状态见 [`docs/README.md`](./README.md)，当前交互原则见 [`UX-PRINCIPLES.md`](./UX-PRINCIPLES.md)，实现值以 checked-in styles 和代码为准。
+> **Supporting reference:** 当前设计观察见 [`figma-mini-0626-inventory.md`](./figma-mini-0626-inventory.md)。
 > 执行参考：[docs/figma-mini-0626-inventory.md](./figma-mini-0626-inventory.md)
 > 下文关于“单栏卡片流”“不做双列瀑布流”“小红书只学语感”的判断均为历史判断，不再约束当前小程序 UI。
 > 代码里 `miniprogram/src/uni.scss` 的 `$hh-*` tokens 已更新为 v2。

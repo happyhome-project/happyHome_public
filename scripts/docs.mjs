@@ -34,14 +34,14 @@ function catalog(root, files) {
   })
 }
 
-function check(root, files) {
+function check(root, files, documents) {
   const required = requiredPublicDocumentPaths()
   const missing = required.filter((path) => !existsSync(join(root, path)))
   const broken = []
   const historicalHeaders = []
   for (const path of files) {
     const source = readFileSync(join(root, path), 'utf8')
-    const problems = findHistoricalHeaderProblems({ path, source })
+    const problems = findHistoricalHeaderProblems({ path, source, catalog: documents })
     if (problems.length) historicalHeaders.push({ path, problems })
     for (const target of findRelativeMarkdownLinks({ sourcePath: path, source, exists: (candidate) => existsSync(join(root, candidate)) })) {
       broken.push({ path, target })
@@ -54,10 +54,11 @@ try {
   const mode = process.argv[2]
   const root = git(['rev-parse', '--show-toplevel'])
   const files = workspaceMarkdown(root)
+  const documents = catalog(root, files)
   if (mode === 'catalog') {
-    process.stdout.write(`${JSON.stringify({ documents: catalog(root, files) }, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify({ documents }, null, 2)}\n`)
   } else if (mode === 'check') {
-    const result = check(root, files)
+    const result = check(root, files, documents)
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
     if (result.missing.length || result.broken.length || result.historicalHeaders.length) process.exitCode = 1
   } else {
