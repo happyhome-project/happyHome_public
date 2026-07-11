@@ -128,3 +128,13 @@ cloud/
 1. admin 函数已部署为 HTTP 类型（参考 `docs/cloudbase-http-access.md`）
 2. 函数环境变量 `ADMIN_TOKEN` 已设置
 3. 至少有一个 active 状态的社区（用于 `TEST_COMMUNITY_ID`）
+
+## RAG 生产验收
+
+`post.search` 的正式 RAG 验收不能只靠 mock。使用下面的命令创建隔离社区、板块和帖子，定向运行 `post-rag-worker`，再以真实 `post.search` 查询验证回答、引用和帖子跳转；成功和失败路径都会删除临时数据：
+
+```powershell
+npm.cmd run verify:post-rag-smoke
+```
+
+脚本必须验证三个语义查询：`有没有讲节俭家风的帖子？`、`勤俭持家` 和 `一粥一饭当思来处不易`。每个查询都要求 `mode=rag`、非空 `answer`，并在 `citations` 或 `items` 中命中同一临时帖子。该 fixture 验证检索能力，不代表正式业务库已经存在相关内容；排查真实无结果时，先检查原帖和 `post_rag_chunks` 是否包含可召回证据。

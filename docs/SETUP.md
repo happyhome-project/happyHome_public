@@ -16,7 +16,7 @@ happyHome/
 │   │   └── manifest.json       # AppID 等配置
 │   └── dist/build/mp-weixin/   # 编译输出（微信开发者工具导入此目录）
 ├── cloud/                # 云函数源码（TypeScript）
-│   ├── functions/        # 6个云函数: user, community, member, section, post, admin
+│   ├── functions/        # 10个云函数: user, community, member, section, post, admin, home-prefetch, http-gateway, post-rag-worker, post-video-rag-worker
 │   ├── lib/              # 共享适配层: db.ts, auth.ts, storage.ts
 │   ├── shared/types.ts   # 全项目共享的 TypeScript 类型定义
 │   ├── build.mjs         # esbuild 构建脚本
