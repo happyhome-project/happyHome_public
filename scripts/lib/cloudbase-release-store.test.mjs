@@ -83,6 +83,20 @@ test('CloudBaseReleaseStore can read release state without creating state docume
   assert.equal(db.documents.size, 0)
 })
 
+test('CloudBaseReleaseStore retries transient CloudBase transaction busy failures', async () => {
+  const db = createFakeDatabase()
+  const original = db.runTransaction.bind(db)
+  let attempts = 0
+  db.runTransaction = async (callback) => {
+    attempts += 1
+    if (attempts === 1) throw new Error('[ResourceUnavailable.TransactionBusy] Transaction is busy')
+    return await original(callback)
+  }
+  const store = new CloudBaseReleaseStore({ db, sleep: async () => {}, transactionAttempts: 2 })
+  await store.transact({ runId: 'run-1' }, async (model) => { model.run = { runId: 'run-1' } })
+  assert.equal(attempts, 2)
+})
+
 test('CloudBaseReleaseStore treats an absent release_state collection as initial bootstrap state', async () => {
   const db = createFakeDatabase()
   db.collection = () => ({ doc: () => ({

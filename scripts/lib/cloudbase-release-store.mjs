@@ -60,14 +60,16 @@ function parseDotEnvFile(filePath) {
 }
 
 export class CloudBaseReleaseStore {
-  constructor({ db }) {
+  constructor({ db, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), transactionAttempts = 4 }) {
     if (!db?.runTransaction || !db?.collection) throw new Error('CloudBaseReleaseStore requires a CloudBase database client')
     this.db = db
+    this.sleep = sleep
+    this.transactionAttempts = transactionAttempts
   }
 
   async transact({ runId }, callback) {
     if (!runId) throw new Error('release store transaction requires runId')
-    return await this.db.runTransaction(async (transaction) => {
+    const execute = async () => await this.db.runTransaction(async (transaction) => {
       const [lock, run, persistedState] = await Promise.all([
         readDocument(transaction, RELEASE_LOCKS_COLLECTION, PRODUCTION_DOCUMENT_ID),
         readDocument(transaction, RELEASE_RUNS_COLLECTION, runId),
@@ -82,6 +84,15 @@ export class CloudBaseReleaseStore {
       await writeDocument(transaction, RELEASE_STATE_COLLECTION, PRODUCTION_DOCUMENT_ID, before.state, model.state)
       return result
     })
+    for (let attempt = 1; attempt <= this.transactionAttempts; attempt += 1) {
+      try {
+        return await execute()
+      } catch (error) {
+        if (!/TransactionBusy|Transaction is busy|DATABASE_TRANSACTION_FAIL/i.test(String(error?.message || error)) || attempt >= this.transactionAttempts) throw error
+        await this.sleep(attempt * 250)
+      }
+    }
+    throw new Error('release transaction retry exhausted')
   }
 
   async readProductionState() {
