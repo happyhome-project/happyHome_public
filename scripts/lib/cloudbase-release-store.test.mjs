@@ -16,7 +16,7 @@ function createFakeDatabase() {
       if (!documents.has(key)) throw missingError()
       return { data: structuredClone(documents.get(key)) }
     },
-    async set({ data }) {
+    async set(data) {
       writes.push({ key, op: 'set' })
       documents.set(key, structuredClone(data))
     },
@@ -52,14 +52,14 @@ test('CloudBaseReleaseStore atomically persists the production lock, run, and st
 
   assert.deepEqual(db.documents.get('release_locks/production'), { runId: 'run-1', fencingToken: 1, status: 'active' })
   assert.deepEqual(db.documents.get('release_runs/run-1'), { runId: 'run-1', status: 'active' })
-  assert.deepEqual(db.documents.get('release_state/production'), { _id: 'production', nextFencingToken: 2, gitSha: 'abc' })
+  assert.deepEqual(db.documents.get('release_state/production'), { nextFencingToken: 2, gitSha: 'abc' })
 })
 
 test('CloudBaseReleaseStore removes only an existing lock and preserves persisted production state', async () => {
   const db = createFakeDatabase()
   db.documents.set('release_locks/production', { runId: 'run-1', fencingToken: 1, status: 'active' })
   db.documents.set('release_runs/run-1', { runId: 'run-1', status: 'active' })
-  db.documents.set('release_state/production', { _id: 'production', nextFencingToken: 2, gitSha: 'abc' })
+  db.documents.set('release_state/production', { nextFencingToken: 2, gitSha: 'abc' })
   const store = new CloudBaseReleaseStore({ db })
 
   await store.transact({ runId: 'run-1' }, async (model) => {
@@ -69,11 +69,20 @@ test('CloudBaseReleaseStore removes only an existing lock and preserves persiste
 
   assert.equal(db.documents.has('release_locks/production'), false)
   assert.deepEqual(db.documents.get('release_runs/run-1'), { runId: 'run-1', status: 'recovered' })
-  assert.deepEqual(db.documents.get('release_state/production'), { _id: 'production', nextFencingToken: 2, gitSha: 'abc' })
+  assert.deepEqual(db.documents.get('release_state/production'), { nextFencingToken: 2, gitSha: 'abc' })
   assert.deepEqual(db.writes.map(({ key, op }) => `${op}:${key}`), [
     'remove:release_locks/production',
     'set:release_runs/run-1',
   ])
+})
+
+test('CloudBaseReleaseStore unwraps and repairs an old nested data document', async () => {
+  const db = createFakeDatabase()
+  db.documents.set('release_state/production', { data: { nextFencingToken: 2, gitSha: 'abc' } })
+  const store = new CloudBaseReleaseStore({ db })
+  assert.deepEqual(await store.readProductionState(), { nextFencingToken: 2, gitSha: 'abc' })
+  await store.transact({ runId: 'run-1' }, async (model) => { model.state = { ...model.state, nextFencingToken: 3 } })
+  assert.deepEqual(db.documents.get('release_state/production'), { nextFencingToken: 3, gitSha: 'abc' })
 })
 
 test('CloudBaseReleaseStore can read release state without creating state documents', async () => {

@@ -24,7 +24,8 @@ function isMissingDocumentError(error) {
 async function readDocument(transaction, collectionName, documentId) {
   try {
     const response = await transaction.collection(collectionName).doc(documentId).get()
-    return response?.data ? clone(response.data) : null
+    const value = response?.data || null
+    return value && typeof value.data === 'object' && value.data !== null ? clone(value.data) : clone(value)
   } catch (error) {
     if (isMissingDocumentError(error)) return null
     throw error
@@ -38,7 +39,9 @@ async function writeDocument(transaction, collectionName, documentId, before, af
     if (before != null) await document.remove()
     return
   }
-  await document.set({ data: clone(after) })
+  const data = clone(after)
+  if (data && typeof data === 'object') delete data._id
+  await document.set(data)
 }
 
 function parseDotEnvFile(filePath) {
@@ -75,7 +78,7 @@ export class CloudBaseReleaseStore {
         readDocument(transaction, RELEASE_RUNS_COLLECTION, runId),
         readDocument(transaction, RELEASE_STATE_COLLECTION, PRODUCTION_DOCUMENT_ID),
       ])
-      const state = persistedState || { _id: PRODUCTION_DOCUMENT_ID, nextFencingToken: 1 }
+      const state = persistedState || { nextFencingToken: 1 }
       const model = { lock, run, state }
       const before = clone(model)
       const result = await callback(model)
