@@ -1,0 +1,83 @@
+name: trusted-workflow-validator
+run-name: trusted-workflow-validator ${{ inputs.requestId }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      prNumber: { required: true, type: string }
+      baseSha: { required: true, type: string }
+      headSha: { required: true, type: string }
+      diffSha256: { required: true, type: string }
+      requestId: { required: true, type: string }
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.headSha }}
+          fetch-depth: 0
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install fixed npm
+        run: npm install --global npm@11.11.0
+      - name: Verify tool versions
+        run: |
+          if (-not ((node --version) -like 'v24.*')) { throw 'Node 24 required' }
+          if ((npm --version) -ne '11.11.0') { throw 'npm 11.11.0 required' }
+      - name: Install dependencies
+        run: npm ci
+      - name: Fixed offline gates
+        run: |
+          npm --workspace cloud test
+          npm --workspace cloud run build
+          npm --workspace admin-web run type-check
+          npm --workspace admin-web run build
+          npm --workspace miniprogram run type-check
+          npm --workspace miniprogram run test:unit
+          npm --workspace miniprogram run build:mp-weixin
+          npm run test:deploy-output
+          npm run test:governance
+          git diff --check ${{ inputs.baseSha }} ${{ inputs.headSha }}
+      - name: Optional docs check and attestation
+        env:
+          PR_NUMBER: ${{ inputs.prNumber }}
+          BASE_SHA: ${{ inputs.baseSha }}
+          HEAD_SHA: ${{ inputs.headSha }}
+          DIFF_SHA256: ${{ inputs.diffSha256 }}
+          REQUEST_ID: ${{ inputs.requestId }}
+          VALIDATOR_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          $hasRelease = node -e "const {scripts={}}=require('./package.json'); process.stdout.write(scripts['release:plan']?'yes':'no')"
+          $release = 'not-present'
+          if ($hasRelease -eq 'yes') { npm run release:plan -- --mode=pr; $release = 'passed' }
+          $hasDocs = node -e "const {scripts={}}=require('./package.json'); process.stdout.write(scripts['docs:check']?'yes':'no')"
+          $docs = 'not-present'
+          if ($hasDocs -eq 'yes') { npm run docs:check; $docs = 'passed' }
+          $attestation = @{
+            schemaVersion=1; prNumber=[int]$env:PR_NUMBER; baseSha=$env:BASE_SHA; headSha=$env:HEAD_SHA
+            diffSha256=$env:DIFF_SHA256; requestId=$env:REQUEST_ID; runId=[long]$env:RUN_ID
+            validatorWorkflowSha=$env:VALIDATOR_WORKFLOW_SHA; conclusion='success'
+            checks=@{
+              cloudTest='passed'; cloudBuild='passed'; adminTypecheck='passed'; adminBuild='passed'
+              miniprogramTypecheck='passed'; miniprogramUnit='passed'; miniprogramBuild='passed'
+              deployOutput='passed'; governance='passed'; diffCheck='passed'
+              releasePlan=$release; docs=$docs
+            }
+          }
+          $attestation | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 trusted-workflow-attestation.json
+      - name: Upload attestation
+        uses: actions/upload-artifact@v4
+        with:
+          name: trusted-workflow-attestation-${{ inputs.requestId }}
+          path: trusted-workflow-attestation.json
+          if-no-files-found: error

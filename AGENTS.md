@@ -39,6 +39,9 @@
 - 本地测试不能冒充 GitHub PR CI；可以作为补充证据，但不能报告为“CI 已通过”。
 - 当前仓库若尚无可运行的 PR CI，任务必须明确报告 `blocked: PR CI not configured`，不得静默绕过后合并功能代码。
 - CI 的 job 名称必须稳定且唯一，避免以后配置 Required Status Checks 时产生歧义。
+- 普通 `integrate:pr` 拒绝任何 `.github/workflows/*.yml` / `*.yaml` 变更。纯 workflow PR 必须从 canonical main 使用 `integrate:workflow-pr -- --pr=N --prepare`，由 main 上的只读 Windows hosted validator 独立验证，再以 manifest 中逐字段绑定的精确授权短语执行 `--apply`。
+- workflow 授权在 PR push/rebase、`origin/main` 前进、changed paths/binary diff、validator run/attestation 任一变化后立即失效，必须重新 prepare。候选 PR 自身 CI 只能作为补充证据，不能替代 validator attestation。
+- `.github/workflows/trusted-workflow-validator.yml`、integration CLI/policy、package script 或本节信任规则均属 trust root，不能通过候选 workflow PR 自我验证；这类变更必须走独立的信任根引导审查。
 
 ### 串行合并
 
