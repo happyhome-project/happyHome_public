@@ -9,3 +9,8 @@ test('verify-post-rag-smoke exposes admin invoke retry controls for fixture clea
   assert.match(source, /HH_POST_RAG_SMOKE_ADMIN_INVOKE_RETRIES/)
   assert.match(source, /adminInvokeRetries/)
 })
+
+test('verify-post-rag-smoke forwards the admin internal token to fixture actions', () => {
+  assert.match(source, /resolveAdminInternalToken/)
+  assert.match(source, /adminInternalToken:\s*resolveAdminInternalToken\(\)/)
+})

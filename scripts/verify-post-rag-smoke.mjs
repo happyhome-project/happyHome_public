@@ -15,6 +15,7 @@ import {
   parseFirstJson,
 } from './cloud-release-smoke.mjs'
 import { invokeAdmin } from './rebuild-post-search-index.mjs'
+import { resolveAdminInternalToken } from './lib/admin-internal-token.mjs'
 import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
 
 const DEFAULT_BASE_URL = 'https://cloudbase-3gh862acb1505ff3-1307183045.ap-shanghai.app.tcloudbase.com'
@@ -48,6 +49,7 @@ function parseArgs() {
       'admin-invoke-retries',
       process.env.HH_POST_RAG_SMOKE_ADMIN_INVOKE_RETRIES || String(DEFAULT_ADMIN_INVOKE_RETRIES),
     )) || DEFAULT_ADMIN_INVOKE_RETRIES)),
+    adminInternalToken: resolveAdminInternalToken(),
     workerToken: getFlagValue('worker-token', resolvePostRagWorkerToken()),
   }
 }
