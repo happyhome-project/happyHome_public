@@ -17,8 +17,10 @@
   },
   "devDependencies": {
     "@cloudbase/manager-node": "^4.0.0",
+    "@dcloudio/uni-ui": "^1.5.12",
     "@playwright/test": "^1.52.0",
-    "acorn": "^8.16.0"
+    "acorn": "^8.16.0",
+    "wot-design-uni": "^1.14.0"
   },
   "scripts": {
     "hooks:install": "node scripts/install-git-hooks.mjs",

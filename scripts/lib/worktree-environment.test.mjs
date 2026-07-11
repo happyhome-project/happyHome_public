@@ -32,6 +32,22 @@ test('root package exposes the governed worktree commands and runtime contract',
   }
 })
 
+test('root lockfile represents the workspace hoist contract without invalid duplicates', () => {
+  const root = fileURLToPath(new URL('../../', import.meta.url))
+  const rootPackage = JSON.parse(readFileSync(`${root}/package.json`, 'utf8'))
+  const miniprogramPackage = JSON.parse(readFileSync(`${root}/miniprogram/package.json`, 'utf8'))
+  const lock = JSON.parse(readFileSync(`${root}/package-lock.json`, 'utf8'))
+
+  for (const dependency of ['@dcloudio/uni-ui', 'wot-design-uni']) {
+    assert.equal(rootPackage.devDependencies[dependency], miniprogramPackage.dependencies[dependency])
+    assert.equal(lock.packages[''].devDependencies[dependency], miniprogramPackage.dependencies[dependency])
+  }
+
+  const uniH5Router = lock.packages['miniprogram/node_modules/@dcloudio/uni-h5'].dependencies['vue-router']
+  assert.equal(miniprogramPackage.dependencies['vue-router'], uniH5Router)
+  assert.equal(lock.packages.miniprogram.dependencies['vue-router'], uniH5Router)
+})
+
 test('Windows hook commands derive the repository root with CMD syntax', () => {
   const root = fileURLToPath(new URL('../../', import.meta.url))
   const codex = JSON.parse(readFileSync(`${root}/.codex/hooks.json`, 'utf8'))
