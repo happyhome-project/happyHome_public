@@ -30,6 +30,7 @@
     "deploy:admin-web": "node scripts/deploy.mjs admin-web",
     "deploy:release": "node scripts/deploy.mjs release",
     "release:status": "node scripts/release-status.mjs",
+    "release:reconcile": "node scripts/release-reconcile.mjs",
     "deploy": "node scripts/deploy.mjs all",
     "test:nightly": "node scripts/nightly-full.mjs",
     "test:admin:api": "node scripts/test-admin-api.mjs",

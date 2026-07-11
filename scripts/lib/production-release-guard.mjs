@@ -1,4 +1,10 @@
 import { startReleaseHeartbeat } from './release-governance.mjs'
+import {
+  confirmReleaseLedgerAgainstProductionInspection,
+  productionInspectionProvesReleaseCompletion,
+} from './release-run-ledger.mjs'
+
+export const DEFAULT_RELEASE_COMPLETION_TIMEOUT_MS = 30 * 1000
 
 function hostname() {
   return process.env.COMPUTERNAME || process.env.HOSTNAME || ''
@@ -68,6 +74,10 @@ export class ProductionReleaseGuard {
     return await this.governance.getProductionState()
   }
 
+  async getReleaseInspection() {
+    return await this.governance.inspect({ runId: this.context.runId })
+  }
+
   async complete({ components = {}, evidence = {} } = {}) {
     return await this.serialize(async () => {
       await this.renew()
@@ -109,6 +119,12 @@ export class ProductionReleaseGuard {
     if (this.heartbeat) await this.heartbeat.stop()
   }
 
+  markRemotelyCompleted() {
+    this.finished = true
+    const stop = this.heartbeat?.stop?.()
+    if (stop?.catch) void stop.catch(() => {})
+  }
+
   async serialize(operation) {
     const next = this.mutationQueue.then(operation)
     this.mutationQueue = next.catch(() => {})
@@ -121,5 +137,73 @@ export class ProductionReleaseGuard {
 
   assertNotFinished() {
     if (this.finished) throw new Error('production release guard is already finished')
+  }
+}
+
+function validateCompletionTimeout(timeoutMs) {
+  const parsed = Number(timeoutMs)
+  if (!Number.isFinite(parsed) || parsed < 0) throw new Error('release completion timeout must be a non-negative number')
+  return parsed
+}
+
+async function awaitGuardCompletion(guard, payload, { clearTimer = clearTimeout, setTimer = setTimeout, timeoutMs }) {
+  const completion = Promise.resolve().then(async () => await guard.complete(payload))
+  // A timeout can leave the SDK promise pending forever. Keep a rejection from becoming unhandled later.
+  void completion.catch(() => {})
+  let timer = null
+  const timeout = new Promise((resolve) => {
+    timer = setTimer(() => resolve({ kind: 'timeout' }), timeoutMs)
+  })
+  const outcome = await Promise.race([
+    completion.then(
+      (value) => ({ kind: 'completed', value }),
+      (error) => ({ kind: 'failed', error }),
+    ),
+    timeout,
+  ])
+  if (timer != null) clearTimer(timer)
+  return outcome
+}
+
+export async function completeProductionReleaseWithRemoteConfirmation({
+  clearTimer = clearTimeout,
+  components = {},
+  evidence = {},
+  guard,
+  ledger,
+  setTimer = setTimeout,
+  timeoutMs = DEFAULT_RELEASE_COMPLETION_TIMEOUT_MS,
+} = {}) {
+  if (!guard?.complete || !guard?.getReleaseInspection || !ledger?.complete || !ledger?.appendEvent) {
+    throw new Error('release completion requires guard and ledger interfaces')
+  }
+  const normalizedTimeoutMs = validateCompletionTimeout(timeoutMs)
+  const outcome = await awaitGuardCompletion(guard, { components, evidence }, {
+    clearTimer,
+    setTimer,
+    timeoutMs: normalizedTimeoutMs,
+  })
+  if (outcome.kind === 'completed') {
+    await ledger.complete('passed')
+    return { mode: 'direct' }
+  }
+
+  const productionInspection = await guard.getReleaseInspection()
+  if (!productionInspectionProvesReleaseCompletion(ledger, productionInspection)) {
+    if (outcome.kind === 'failed') throw outcome.error
+    const gitSha = String(ledger?.state?.context?.gitSha || '')
+    const runId = String(ledger?.runId || '')
+    throw new Error(`Production state does not prove completion for run ${runId} at ${gitSha}`)
+  }
+  guard.markRemotelyCompleted?.()
+  try {
+    const confirmation = await confirmReleaseLedgerAgainstProductionInspection({ ledger, productionInspection })
+    return { mode: 'remote-state-confirmed', productionState: confirmation }
+  } catch (confirmationError) {
+    const error = confirmationError instanceof Error
+      ? confirmationError
+      : new Error(String(confirmationError))
+    error.releaseRemotelyCompleted = true
+    throw error
   }
 }

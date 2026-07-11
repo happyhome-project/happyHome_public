@@ -152,6 +152,7 @@ test('formal release path records resumable ledger stages before upload', () => 
   const releaseBlock = extractFunctionBlock(deployScript, 'async function runFormalRelease')
 
   assert.match(deployScript, /release-run-ledger\.mjs/)
+  assert.match(deployScript, /completeProductionReleaseWithRemoteConfirmation/)
   assert.match(deployScript, /target === 'release-prepare'/)
   assert.match(deployScript, /target === 'release-publish'/)
   assert.match(deployScript, /function getExplicitReleaseRunId/)
@@ -183,4 +184,5 @@ test('formal release path records resumable ledger stages before upload', () => 
 test('package exposes a release status command for the latest ledger', () => {
   const packageJson = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
   assert.equal(packageJson.scripts['release:status'], 'node scripts/release-status.mjs')
+  assert.equal(packageJson.scripts['release:reconcile'], 'node scripts/release-reconcile.mjs')
 })
