@@ -8,13 +8,23 @@ function missingError() {
   return Object.assign(new Error('document.get:fail document not found'), { errCode: -1 })
 }
 
-function createFakeDatabase() {
+function createFakeDatabase({ rejectConcurrentReads = false } = {}) {
   const documents = new Map()
   const writes = []
+  let readsInFlight = 0
   const makeDocument = (key) => ({
     async get() {
-      if (!documents.has(key)) throw missingError()
-      return { data: [{ _id: key, data: structuredClone(documents.get(key)) }] }
+      if (rejectConcurrentReads && readsInFlight > 0) {
+        throw new Error('[ResourceUnavailable.TransactionBusy] Transaction is busy')
+      }
+      readsInFlight += 1
+      try {
+        await Promise.resolve()
+        if (!documents.has(key)) throw missingError()
+        return { data: [{ _id: key, data: structuredClone(documents.get(key)) }] }
+      } finally {
+        readsInFlight -= 1
+      }
     },
     async set(data) {
       writes.push({ key, op: 'set' })
@@ -104,6 +114,20 @@ test('CloudBaseReleaseStore retries transient CloudBase transaction busy failure
   const store = new CloudBaseReleaseStore({ db, sleep: async () => {}, transactionAttempts: 2 })
   await store.transact({ runId: 'run-1' }, async (model) => { model.run = { runId: 'run-1' } })
   assert.equal(attempts, 2)
+})
+
+test('CloudBaseReleaseStore serializes document reads inside a transaction', async () => {
+  const db = createFakeDatabase({ rejectConcurrentReads: true })
+  db.documents.set('release_locks/production', { runId: 'run-1', fencingToken: 1, status: 'active' })
+  db.documents.set('release_runs/run-1', { runId: 'run-1', status: 'active' })
+  db.documents.set('release_state/production', { nextFencingToken: 2, gitSha: 'abc' })
+  const store = new CloudBaseReleaseStore({ db })
+
+  await store.transact({ runId: 'run-1' }, async (model) => {
+    assert.equal(model.lock?.runId, 'run-1')
+    assert.equal(model.run?.runId, 'run-1')
+    assert.equal(model.state?.gitSha, 'abc')
+  })
 })
 
 test('CloudBaseReleaseStore treats an absent release_state collection as initial bootstrap state', async () => {
