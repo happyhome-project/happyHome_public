@@ -1,5 +1,7 @@
 # HappyHome Formal Post RAG ES Hybrid Migration Plan
 
+> Historical and superseded. This 2026-07-04 plan assumed an always-on Tencent ES retrieval cluster. The current formal path is CloudBase chunks plus Tencent pay-per-call atomic embedding, rerank, and LLM APIs; see [Post RAG Search](../../post-rag-search.md). Do not execute this plan or create an ES cluster.
+
 ## Diagnosis
 
 The current production-facing RAG design still has a structural flaw: the configured main path can select `TENCENT_RAG_PROVIDER=lkeap`, which stores embeddings in CloudBase `post_rag_chunks` and recalls candidates by scanning CloudBase documents inside the cloud function. That is not the formal RAG architecture we want.

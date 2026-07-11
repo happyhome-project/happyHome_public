@@ -282,12 +282,14 @@ npm.cmd run rebuild:post-search-index -- --all-active
 - `test:mp:post-rag-search-static` 会验证小程序首页搜索入口、搜索页输入框、`postApi.search`、AI 回答、引用卡片和帖子跳转结构。
 - 视频分析 worker 支持 ASR 异步任务的 `pending -> processing -> completed` 状态流；ASR 未完成前不会提前写资产或重建帖子索引。
 
-2026-07-11 当前正式路径与验证状态：
+2026-07-11 生产验证：
 
 - 正式 provider 是 `TENCENT_RAG_PROVIDER=cloudbase`，CloudBase 保存 chunk/embedding，腾讯原子 API 按调用量执行 embedding、rerank、LLM answer；ES 不在运行路径中。
-- 新 smoke 身份不依赖也不打开 `ALLOW_TEST_OPENID`：它需要 HMAC、匹配的 `post_rag_smoke_runs` 记录、同一社区和普通成员权限。
-- 此文档随 PR #21 更新时，新的签名 smoke 尚未部署到生产，因此不能报告“当前生产 RAG 验收已通过”。合入后必须执行受控发布、`rebuild:post-rag-index -- --all-active --reconcile`，再运行 `verify:post-rag-smoke`。
+- RAG 生产验证时的发布状态为 `d13be16`；该次发布没有重复上传云函数、小程序或后台，只幂等确认索引、RAG 环境和 worker 配置。
+- `npm.cmd run verify:post-rag-smoke` 已在生产环境真实通过：临时帖子包含《朱子治家格言》、“一粥一饭，当思来处不易”、“半丝半缕，恒念物力维艰”和“勤俭持家/节俭家风”。`有没有讲节俭家风的帖子？` 返回 `mode=rag`、AI answer、2 条 citations 和 1 个可跳转 item；`勤俭持家` 与原句查询均命中同一帖子；临时社区和 run 记录已清理。
+- 新 smoke 身份不依赖也不打开 `ALLOW_TEST_OPENID`：它需要 HMAC、匹配的 `post_rag_smoke_runs` 记录、同一社区和普通成员权限。CloudBase Node SDK 创建临时 `community_members` 记录时必须直接传成员文档，不能包成 `{ data: ... }`，否则生产权限查询无法命中。
+- 上述 fixture 证明能力链路，不代表正式业务库已有同主题内容。2026-07-11 只读核对到 110 篇正式帖子和 302 个 `post_rag_chunks`，其中没有“勤俭/节俭/朱子治家/一粥一饭/家风”等证据。因此当前真实业务数据搜索该主题时，正确结果应是无足够证据；发布相关帖子并完成索引后，才应期待它出现在小程序搜索结果中。
 
-当前未完成的真实验收：
+仍未纳入默认真实 smoke：
 
-- “某个视频名”字段级真实 smoke 暂未纳入默认脚本。`video_group` 的 `title/hint` 已进入 chunk，但视频字段会触发腾讯内容审核；后续需要把视频 fixture 的审核与索引回填闭环稳定下来，再将其加入正式 smoke。
+- “某个视频名”字段级真实 smoke。`video_group` 的 `title/hint` 已进入 chunk，但视频字段会触发腾讯内容审核；后续需要把视频 fixture 的审核与索引回填闭环稳定下来，再将其加入正式 smoke。
