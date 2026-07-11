@@ -226,8 +226,8 @@ export class ReleaseGovernance {
   }
 }
 
-export function startReleaseHeartbeat({ governance, intervalMs = HEARTBEAT_MS, lock, onError = () => {} }) {
-  if (!governance || !lock) throw new Error('release heartbeat requires governance and lock')
+export function startReleaseHeartbeat({ governance, intervalMs = HEARTBEAT_MS, lock, onError = () => {}, renew = null }) {
+  if ((!governance && typeof renew !== 'function') || !lock) throw new Error('release heartbeat requires governance and lock')
   let currentLock = lock
   let stopped = false
   let pending = Promise.resolve()
@@ -235,7 +235,9 @@ export function startReleaseHeartbeat({ governance, intervalMs = HEARTBEAT_MS, l
     pending = pending.then(async () => {
       if (stopped) return
       try {
-        currentLock = await governance.heartbeat(currentLock)
+        currentLock = typeof renew === 'function'
+          ? await renew(currentLock)
+          : await governance.heartbeat(currentLock)
       } catch (error) {
         stopped = true
         onError(error)

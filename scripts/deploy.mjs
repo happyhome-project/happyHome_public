@@ -1063,10 +1063,27 @@ const RELEASE_ACTION_SCRIPTS = Object.freeze({
   'update-rag-env': 'update:rag-env',
 })
 
-function runDeclaredReleaseAction(action) {
+function runReleaseNpmScript(script) {
+  return new Promise((resolve, reject) => {
+    const isWindows = process.platform === 'win32'
+    const child = spawn(isWindows ? 'npm.cmd' : 'npm', ['run', script], {
+      cwd: ROOT,
+      shell: isWindows,
+      stdio: 'inherit',
+      windowsHide: isWindows,
+    })
+    child.once('error', reject)
+    child.once('exit', (code, signal) => {
+      if (code === 0) resolve()
+      else reject(new Error(`release action npm run ${script} failed with ${signal || `exit ${code}`}`))
+    })
+  })
+}
+
+async function runDeclaredReleaseAction(action) {
   const script = RELEASE_ACTION_SCRIPTS[action]
   if (!script) throw new Error(`release action has no approved command: ${action}`)
-  execSync(`npm.cmd run ${script}`, { cwd: ROOT, stdio: 'inherit' })
+  await runReleaseNpmScript(script)
 }
 
 async function runDeclaredReleaseMigration(migration, releaseContext) {
