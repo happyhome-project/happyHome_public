@@ -77,11 +77,10 @@ export class CloudBaseReleaseStore {
   async transact({ runId }, callback) {
     if (!runId) throw new Error('release store transaction requires runId')
     const execute = async () => await this.db.runTransaction(async (transaction) => {
-      const [lock, run, persistedState] = await Promise.all([
-        readDocument(transaction, RELEASE_LOCKS_COLLECTION, PRODUCTION_DOCUMENT_ID),
-        readDocument(transaction, RELEASE_RUNS_COLLECTION, runId),
-        readDocument(transaction, RELEASE_STATE_COLLECTION, PRODUCTION_DOCUMENT_ID),
-      ])
+      // CloudBase transactions reject overlapping document reads with TransactionBusy.
+      const lock = await readDocument(transaction, RELEASE_LOCKS_COLLECTION, PRODUCTION_DOCUMENT_ID)
+      const run = await readDocument(transaction, RELEASE_RUNS_COLLECTION, runId)
+      const persistedState = await readDocument(transaction, RELEASE_STATE_COLLECTION, PRODUCTION_DOCUMENT_ID)
       const state = persistedState || { nextFencingToken: 1 }
       const model = { lock, run, state }
       const before = clone(model)
