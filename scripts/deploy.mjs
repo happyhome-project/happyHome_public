@@ -1128,7 +1128,10 @@ async function runFormalRelease(options = {}) {
   if (prepareOnly) console.log('[release-ledger] prepare only; stopping after miniprogram build/gate evidence')
 
   try {
-    if (!prepareOnly) await releaseGuard.acquire()
+    if (!prepareOnly) {
+      execSync('node scripts/ensure-release-control-plane.mjs', { cwd: ROOT, stdio: 'inherit' })
+      await releaseGuard.acquire()
+    }
 
     if (!formalPlan || formalPlan.targets.miniprogram) await runLedgerStage(releaseLedger, 'miniprogram-build-gate', {
       resume,
