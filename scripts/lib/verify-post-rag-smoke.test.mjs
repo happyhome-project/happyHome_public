@@ -21,7 +21,9 @@ test('verify-post-rag-smoke queries the post cloud function instead of the disab
   assert.doesNotMatch(source, /http-gateway/)
 })
 
-test('verify-post-rag-smoke joins the temporary community before searching as its fixture user', () => {
-  assert.match(source, /invokeFunction\('member', \{[\s\S]*action: 'apply'/)
-  assert.match(source, /member\?\.status !== 'active'/)
+test('verify-post-rag-smoke seeds an active member only inside its temporary fixture community', () => {
+  assert.match(source, /createProductionReleaseStore/)
+  assert.match(source, /async function seedFixtureMember/)
+  assert.match(source, /collection\('community_members'\)\.add/)
+  assert.doesNotMatch(source, /invokeFunction\('member', \{[\s\S]*action: 'apply'/)
 })

@@ -14,6 +14,7 @@ import {
 } from './cloud-release-smoke.mjs'
 import { invokeAdmin } from './rebuild-post-search-index.mjs'
 import { resolveAdminInternalToken } from './lib/admin-internal-token.mjs'
+import { createProductionReleaseStore } from './lib/cloudbase-release-store.mjs'
 import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
 
 const DEFAULT_TIMEOUT_MS = 180000
@@ -116,6 +117,14 @@ async function searchPost(options, openid, communityId, query) {
   return result
 }
 
+async function seedFixtureMember(communityId, userId) {
+  const db = createProductionReleaseStore({ root: process.cwd() }).db
+  const now = new Date().toISOString()
+  await db.collection('community_members').add({
+    data: { communityId, userId, role: 'member', status: 'active', appliedAt: now, joinedAt: now },
+  })
+}
+
 function assertRagHit(result, postId, label) {
   const citations = Array.isArray(result?.citations) ? result.citations : []
   const items = Array.isArray(result?.items) ? result.items : []
@@ -148,12 +157,7 @@ async function main() {
     communityId = community.functionResult?.communityId || ''
     if (!communityId) throw new Error('community.createAdmin did not return communityId')
 
-    const member = await invokeFunction('member', {
-      action: 'apply',
-      communityId,
-      _testOpenid: ownerOpenid,
-    }, options)
-    if (member?.status !== 'active') throw new Error(`member.apply did not activate fixture user: ${JSON.stringify(member)}`)
+    await seedFixtureMember(communityId, ownerOpenid)
 
     const section = await invokeAdmin('section.create', {
       communityId,
