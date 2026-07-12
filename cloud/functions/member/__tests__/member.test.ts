@@ -615,6 +615,29 @@ test('myCommunities：只返回 active 成员且社区状态为 active 的社区
   expect(result.communities).toEqual([{ _id: 'c1', name: '青山村', status: 'active' }])
 })
 
+test('myCommunities：成员仍可通过 main 看到 discoverable=false 的 active 社区', async () => {
+  ;(db.query as jest.Mock).mockResolvedValue([
+    { communityId: 'hidden', status: 'active', joinedAt: '2026-07-13T10:00:00.000Z' },
+  ])
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'hidden',
+    name: '测试社区',
+    status: 'active',
+    discoverable: false,
+  })
+
+  const result = await main({ action: 'myCommunities' })
+
+  expect(result).toEqual({
+    communities: [{
+      _id: 'hidden',
+      name: '测试社区',
+      status: 'active',
+      discoverable: false,
+    }],
+  })
+})
+
 test('myCommunities：未登录（openid 空）时返回空列表，不抛错（后端兜底）', async () => {
   const result = await handleMyCommunities('')
   expect(result).toEqual({ communities: [] })

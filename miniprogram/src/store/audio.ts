@@ -5,6 +5,7 @@ import {
   type AudioBackendEvent,
   type AudioBackendMeta,
 } from '../utils/audio-manager'
+import { getCloudTempFileURL } from '../api/storage'
 
 export interface AudioTrackLite {
   fileID: string
@@ -52,16 +53,7 @@ let deps: AudioStoreDeps = {
       try { uni.setStorageSync(key, value) } catch (_error) {}
     },
   },
-  getTempFileURL: async (fileIDs) => {
-    if (typeof wx === 'undefined' || !wx?.cloud?.getTempFileURL) {
-      return fileIDs.map((fileID) => ({ fileID, tempFileURL: fileID }))
-    }
-    const res = await wx.cloud.getTempFileURL({ fileList: fileIDs })
-    return (res.fileList || []).map((item: any) => ({
-      fileID: String(item.fileID),
-      tempFileURL: String(item.tempFileURL),
-    }))
-  },
+  getTempFileURL: getCloudTempFileURL,
 }
 
 export function _setAudioStoreDepsForTesting(overrides: Partial<AudioStoreDeps>) {

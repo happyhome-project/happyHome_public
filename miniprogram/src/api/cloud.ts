@@ -1,7 +1,7 @@
 ﻿// Wraps cloud calls with unified error handling.
 // Runtime routing:
 //   1. Mini-program: always use wx.cloud.callFunction so WeChat injects real OPENID.
-//   2. H5 preview: use an explicitly configured development gateway.
+//   2. H5: use the CloudBase Web SDK.
 // Do not let stale DEV gateway flags affect real mini-program users.
 import { clientLog } from '../utils/client-log'
 
@@ -10,87 +10,12 @@ import { clientLog } from '../utils/client-log'
 const _wx: any = typeof wx !== 'undefined' ? wx : undefined
 const IS_H5 = !_wx?.cloud?.callFunction
 
-// H5 gateway is opt-in. Production credentials must never be bundled into H5.
-const viteEnv = (import.meta as any).env || {}
-const H5_GATEWAY_URL: string =
-  String(viteEnv.VITE_H5_GATEWAY_URL || '').trim()
-const H5_GATEWAY_TOKEN: string =
-  String(viteEnv.VITE_H5_GATEWAY_TOKEN || '').trim()
-
-/** Read a key from whichever storage is available (localStorage in H5, wx.getStorageSync in mp). */
-function readStorage(key: string): string | null {
-  try {
-    if (typeof localStorage !== 'undefined') {
-      const v = localStorage.getItem(key)
-      if (v) return v
-    }
-  } catch (_error) { /* ignore */ }
-  try {
-    if (typeof uni !== 'undefined' && uni.getStorageSync) {
-      const v = uni.getStorageSync(key)
-      if (v) return String(v)
-    }
-  } catch (_error) { /* ignore */ }
-  return null
-}
-
-function getTestOpenid(): string {
-  return readStorage('test-openid') || 'h5-test-user-001'
-}
-
-/** Should this call go through http-gateway instead of wx.cloud? */
-function shouldUseGateway(): boolean {
-  // In the real mini-program runtime, stale DEV flags must not bypass wx.cloud.
-  return IS_H5
-}
-
 function copyParams(target: Record<string, any>, params: object) {
   const source: any = params || {}
   Object.keys(source).forEach((key) => {
     target[key] = source[key]
   })
   return target
-}
-
-async function callViaHttpGateway<T>(name: string, action: string, params: object): Promise<T> {
-  if (!H5_GATEWAY_URL || H5_GATEWAY_TOKEN.length < 32) {
-    throw new Error('[h5-gateway] disabled; configure VITE_H5_GATEWAY_URL and a strong VITE_H5_GATEWAY_TOKEN for development only')
-  }
-  // Use fetch in H5; uni.request in miniprogram (fetch is not guaranteed in all mp runtimes)
-  const body = copyParams({ _fn: name, action }, params)
-  const headers = {
-    'content-type': 'application/json',
-    authorization: `Bearer ${H5_GATEWAY_TOKEN}`,
-    'x-test-openid': getTestOpenid(),
-  }
-
-  let data: any, statusCode = 0
-  if (typeof fetch !== 'undefined' && IS_H5) {
-    const res = await fetch(H5_GATEWAY_URL, { method: 'POST', headers, body: JSON.stringify(body) })
-    statusCode = res.status
-    const text = await res.text()
-    try { data = text ? JSON.parse(text) : {} } catch (_error) { data = { raw: text } }
-  } else {
-    // miniprogram: use uni.request
-    const res: any = await new Promise((resolve, reject) => {
-      uni.request({
-        url: H5_GATEWAY_URL,
-        method: 'POST',
-        header: headers,
-        data: body,
-        success: resolve,
-        fail: reject,
-      })
-    })
-    statusCode = res.statusCode
-    data = res.data
-  }
-
-  if (statusCode !== 200) {
-    const msg = data?.error || `HTTP ${statusCode}`
-    throw new Error(`[http-gateway] ${name}/${action} failed: ${msg}`)
-  }
-  return normalizeCloudResult<T>(data, name, action, 'http-gateway')
 }
 
 function normalizeCloudResult<T>(data: any, name: string, action: string, source: string): T {
@@ -142,16 +67,19 @@ export async function callCloud<T = any>(
   name: string, action: string, params: object = {}
 ): Promise<T> {
   const startedAt = Date.now()
-  const source = shouldUseGateway() ? 'http-gateway' : 'wx.cloud'
+  const source = IS_H5 ? 'web-cloudbase' : 'wx.cloud'
   clientLog('debug', 'cloud.call.start', {
     name,
     action,
     source,
     params: summarizeParams(params),
   })
-  if (shouldUseGateway()) {
+  if (IS_H5) {
+    // #ifdef H5
     try {
-      const result = await callViaHttpGateway<T>(name, action, params)
+      const { callFunction } = await import('./web-cloudbase')
+      const data = await callFunction(name, copyParams({ action }, params))
+      const result = normalizeCloudResult<T>(data, name, action, 'web-cloudbase')
       clientLog('debug', 'cloud.call.success', {
         name,
         action,
@@ -169,6 +97,7 @@ export async function callCloud<T = any>(
       })
       throw error
     }
+    // #endif
   }
 
   return new Promise((resolve, reject) => {

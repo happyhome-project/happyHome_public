@@ -39,6 +39,7 @@
     "postinstall": "node -e \"const f=require('fs'),p=require('path');for(const n of ['wot-design-uni','@dcloudio/uni-ui']){const s='../node_modules/'+n,t='node_modules/'+n;if(!f.existsSync(t)&&f.existsSync(s)){f.mkdirSync(p.dirname(t),{recursive:true});f.cpSync(s,t,{recursive:true});console.log(n+': copied to local node_modules (workspace hoist fix)')}}\""
   },
   "dependencies": {
+    "@cloudbase/js-sdk": "3.6.2",
     "@dcloudio/uni-app": "3.0.0-4080420251103001",
     "@dcloudio/uni-app-harmony": "3.0.0-4080420251103001",
     "@dcloudio/uni-app-plus": "3.0.0-4080420251103001",

@@ -68,8 +68,8 @@ export async function handleLogin(
 }
 
 // 云函数入口
-export const main = async (event: LoginEvent) => {
-  const openid = resolveOpenId(event)
+export const main = async (event: LoginEvent, context?: any) => {
+  const openid = resolveOpenId(event, context)
   const { action, _testOpenid, ...params } = event as any
   if (action === 'login') return handleLogin(params, openid)
   throw new Error(`Unknown action: ${action}`)

@@ -37,6 +37,7 @@
           v-for="section in activeSections"
           :key="section._id"
           class="section-option"
+          :data-testid="`create-section-${section._id}`"
           @tap="selectSection(section)"
         >
           <text class="section-name">{{ section.name }}</text>
@@ -171,7 +172,7 @@
               />
               <text>存草稿</text>
             </button>
-            <button class="btn-primary" :disabled="submitting" @tap="handleSubmit">
+            <button class="btn-primary" data-testid="create-submit" :disabled="submitting" @tap="handleSubmit">
               {{ submitting ? '发布中...' : (isActivityInviteMode ? '发布邀约' : '发布') }}
             </button>
           </view>
@@ -188,6 +189,7 @@ import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi, postApi } from '../../api/cloud'
+import { uploadCloudFile } from '../../api/storage'
 import AppTabBar from '../../components/AppTabBar.vue'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
 import {
@@ -659,18 +661,19 @@ async function consumeActivityInviteIntent(options?: any) {
 }
 
 async function uploadImages(tempPaths: string[]): Promise<string[]> {
-  return Promise.all(tempPaths.map((path) => {
+  return Promise.all(tempPaths.map(async (path) => {
     if (path.startsWith('cloud://')) return Promise.resolve(path)
-    const ext = path.split('.').pop() ?? 'jpg'
+    const ext = path.startsWith('blob:') ? 'jpg' : (path.split('.').pop()?.split('?')[0] || 'jpg')
     const cloudPath = `posts/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
-    return new Promise<string>((resolve, reject) => {
-      wx.cloud.uploadFile({
-        cloudPath,
-        filePath: path,
-        success: (res: any) => resolve(res.fileID),
-        fail: reject,
-      })
-    })
+    const result = await uploadCloudFile({ cloudPath, source: path })
+    // #ifdef H5
+    if ((import.meta as any).env?.DEV) {
+      const key = 'hh-h5-smoke-uploaded-file-ids'
+      const current = JSON.parse(sessionStorage.getItem(key) || '[]')
+      sessionStorage.setItem(key, JSON.stringify([...current, result.fileID]))
+    }
+    // #endif
+    return result.fileID
   }))
 }
 
@@ -796,6 +799,11 @@ async function handleSubmit() {
           sectionId,
           content,
         })
+    // #ifdef H5
+    if (import.meta.env.DEV && result?.postId) {
+      sessionStorage.setItem('hh-h5-smoke-last-created-post-id', String(result.postId))
+    }
+    // #endif
     if (isActivityInviteMode.value) {
       try {
         uni.removeStorageSync(ACTIVITY_INVITE_CREATE_INTENT_KEY)

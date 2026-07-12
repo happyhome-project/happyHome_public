@@ -1002,11 +1002,11 @@ export async function handleClientLog(params: any, openid?: string) {
   return { success: true, receivedAt: new Date().toISOString() }
 }
 
-export const main = async (event: any) => {
+export const main = async (event: any, context?: any) => {
   const { action, _testOpenid, __happyhomeSmokeIdentity, ...params } = event
   const smokeIdentity = resolvePostRagSmokeIdentity(event, action, String(params.communityId || '').trim())
   logPostRagSmokeIdentityAudit(event, action, String(params.communityId || '').trim(), smokeIdentity)
-  const openid = smokeIdentity?.userId || resolveOpenId(event)
+  const openid = smokeIdentity?.userId || resolveOpenId(event, context)
   if (smokeIdentity) await ensureActivePostRagSmokeRun(smokeIdentity)
   if (action === 'clientLog') return handleClientLog(params, openid)
   if (action === 'create') return handleCreate(params, openid)

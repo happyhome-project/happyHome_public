@@ -3,6 +3,7 @@ name: pr-ci
 on:
   pull_request:
   merge_group:
+    types: [checks_requested]
 
 permissions:
   contents: read
@@ -28,7 +29,28 @@ jobs:
           node-version: 24
           cache: npm
 
+      - name: Classify CI impact
+        id: impact
+        run: |
+          if ('${{ github.event_name }}' -eq 'pull_request') {
+            node scripts/ci-impact.mjs --base=${{ github.event.pull_request.base.sha }} --head=${{ github.event.pull_request.head.sha }}
+          } else {
+            Write-Output "Running full integration validation for merge group"
+            @(
+              'full=true'
+              'install=true'
+              'cloud=true'
+              'admin=true'
+              'miniprogram=true'
+              'deployOutput=true'
+              'docs=true'
+              'governance=true'
+              'releasePlan=true'
+            ) | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+
       - name: Pin and verify toolchain
+        if: steps.impact.outputs.install == 'true'
         run: |
           npm.cmd install --global npm@11.11.0
           $nodeVersion = node --version
@@ -42,36 +64,47 @@ jobs:
           Write-Output "node=$nodeVersion npm=$npmVersion"
 
       - name: Install dependencies
+        if: steps.impact.outputs.install == 'true'
         run: npm.cmd ci
 
       - name: Test cloud
+        if: steps.impact.outputs.cloud == 'true'
         run: npm --workspace cloud test
 
       - name: Build cloud
+        if: steps.impact.outputs.cloud == 'true'
         run: npm --workspace cloud run build
 
       - name: Type-check admin
+        if: steps.impact.outputs.admin == 'true'
         run: npm --workspace admin-web run type-check
 
       - name: Build admin
+        if: steps.impact.outputs.admin == 'true'
         run: npm --workspace admin-web run build
 
       - name: Type-check miniprogram
+        if: steps.impact.outputs.miniprogram == 'true'
         run: npm --workspace miniprogram run type-check
 
       - name: Unit test miniprogram
+        if: steps.impact.outputs.miniprogram == 'true'
         run: npm --workspace miniprogram run test:unit
 
       - name: Build miniprogram
+        if: steps.impact.outputs.miniprogram == 'true'
         run: npm --workspace miniprogram run build:mp-weixin
 
       - name: Test deploy output policy
+        if: steps.impact.outputs.deployOutput == 'true'
         run: npm run test:deploy-output
 
       - name: Check docs
+        if: steps.impact.outputs.docs == 'true'
         run: npm.cmd run docs:check
 
       - name: Test governance
+        if: steps.impact.outputs.governance == 'true'
         run: npm.cmd run test:governance
 
       - name: Check pull request whitespace
@@ -83,6 +116,7 @@ jobs:
         run: git diff --check ${{ github.event.merge_group.base_sha }} ${{ github.event.merge_group.head_sha }}
 
       - name: Plan PR release
+        if: steps.impact.outputs.releasePlan == 'true'
         run: |
           node -e "const {scripts = {}} = require('./package.json'); process.exit(scripts['release:plan'] ? 0 : 1)"
           if ($LASTEXITCODE -eq 0) {

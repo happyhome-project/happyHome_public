@@ -2,19 +2,22 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 const myCommunities = vi.fn()
+const myStatus = vi.fn()
 const sectionList = vi.fn()
 
 vi.mock('../../api/cloud', () => ({
-  memberApi: { myCommunities },
+  memberApi: { myCommunities, myStatus },
   sectionApi: { list: sectionList },
 }))
 
 function makeDeferred<T>() {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((nextResolve) => {
+  let reject!: (error: any) => void
+  const promise = new Promise<T>((nextResolve, nextReject) => {
     resolve = nextResolve
+    reject = nextReject
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 describe('community store', () => {
@@ -87,5 +90,70 @@ describe('community store', () => {
     expect(store.currentCommunityId).toBe('old-community')
     expect(store.currentSections.map((section) => section._id)).toEqual(['old-section'])
     expect(store.currentSectionIndex).toBe(1)
+  })
+
+  test('clearCommunityState fences an in-flight myCommunities response', async () => {
+    const pending = makeDeferred<{ communities: any[] }>()
+    myCommunities.mockReturnValueOnce(pending.promise)
+    const { useCommunityStore } = await import('../community')
+    const store = useCommunityStore()
+
+    const loading = store.loadMyCommunities({ loadSections: false })
+    store.clearCommunityState()
+    pending.resolve({ communities: [{ _id: 'stale-community', status: 'active' }] })
+    await loading
+
+    expect(store.myCommunities).toEqual([])
+    expect(store.currentCommunityId).toBe('')
+  })
+
+  test('clearCommunityState fences an in-flight section response', async () => {
+    const pending = makeDeferred<{ sections: any[] }>()
+    sectionList.mockReturnValueOnce(pending.promise)
+    const { useCommunityStore } = await import('../community')
+    const store = useCommunityStore()
+
+    const loading = store.switchCommunity('stale-community')
+    store.clearCommunityState()
+    pending.resolve({ sections: [{ _id: 'stale-section' }] })
+    await loading
+
+    expect(store.currentCommunityId).toBe('')
+    expect(store.currentSections).toEqual([])
+  })
+
+  test.each(['success', 'failure'])('clearCommunityState fences an in-flight membership %s', async (outcome) => {
+    const pending = makeDeferred<{ isMember: boolean; status: string | null }>()
+    myStatus.mockReturnValueOnce(pending.promise)
+    const { useCommunityStore } = await import('../community')
+    const store = useCommunityStore()
+
+    const loading = store.refreshMembershipStatus('stale-community')
+    store.clearCommunityState()
+    if (outcome === 'success') pending.resolve({ isMember: true, status: 'approved' })
+    else pending.reject(new Error('stale failure'))
+    await loading
+
+    expect(store.membershipByCommunity).toEqual({})
+  })
+
+  test('a stale coalesced load does not block a new epoch fresh load', async () => {
+    const stale = makeDeferred<{ communities: any[] }>()
+    myCommunities
+      .mockReturnValueOnce(stale.promise)
+      .mockResolvedValueOnce({ communities: [{ _id: 'fresh-community', status: 'active' }] })
+    const { useCommunityStore } = await import('../community')
+    const store = useCommunityStore()
+
+    const oldLoad = store.loadMyCommunities({ loadSections: false })
+    store.clearCommunityState()
+    const freshLoad = store.loadMyCommunities({ loadSections: false })
+    await freshLoad
+
+    expect(myCommunities).toHaveBeenCalledTimes(2)
+    expect(store.currentCommunityId).toBe('fresh-community')
+    stale.resolve({ communities: [{ _id: 'stale-community', status: 'active' }] })
+    await oldLoad
+    expect(store.currentCommunityId).toBe('fresh-community')
   })
 })

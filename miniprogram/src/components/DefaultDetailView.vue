@@ -17,6 +17,7 @@
         v-for="(image, index) in imageItems"
         :key="`${image}-${index}`"
         :src="image"
+        data-testid="detail-content-image"
         class="detail-image"
         :class="{ primary: index === 0 }"
         mode="aspectFill"
