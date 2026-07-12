@@ -115,14 +115,20 @@ export function createReleasePlan({
   mode,
 } = {}) {
   if (!headSha) throw new Error('release plan requires headSha')
-  if (!['main', 'pr'].includes(mode)) throw new Error(`release plan mode must be main or pr; got ${mode || '(missing)'}`)
+  if (!['main', 'pr', 'full-current'].includes(mode)) throw new Error(`release plan mode must be main, pr, or full-current; got ${mode || '(missing)'}`)
   const manifestSummary = validateChangeManifests(manifests)
   if (needsExternalManifest(changedPaths) && !manifests.length) {
     throw new Error('external release changes require a release/changes manifest')
   }
   const bootstrap = mode === 'main' && !baseSha
+  const planningStrategy = mode === 'full-current' ? 'full-current' : bootstrap ? 'bootstrap' : 'incremental'
   const targets = classifyReleaseImpact({ changedPaths, allFunctions, functionInputs })
   if (bootstrap) targets.cloud = allCloud(allFunctions, 'bootstrap:no-production-base')
+  if (mode === 'full-current') {
+    targets.adminWeb = true
+    targets.cloud = allCloud(allFunctions, 'full-current:explicit')
+    targets.miniprogram = true
+  }
   const hasRuntimeTarget = targets.cloud.functions.length > 0 || targets.miniprogram || targets.adminWeb
   return {
     baseSha: baseSha || null,
@@ -132,6 +138,7 @@ export function createReleasePlan({
     headSha,
     manifests,
     mode,
+    planningStrategy,
     releaseRequired: bootstrap || hasRuntimeTarget || manifests.length > 0,
     targets,
   }

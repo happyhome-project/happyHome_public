@@ -77,6 +77,36 @@ test('main plans use production state base and bootstrap safely when it is unava
   assert.equal(plan.baseSha, null)
 })
 
+test('full-current plans explicitly publish every current runtime target and retain manifests', () => {
+  const manifests = [
+    { schemaVersion: 1, changeId: 'indexes', actions: ['ensure-indexes'], migrations: [], smokeSuites: [] },
+    { schemaVersion: 1, changeId: 'network', actions: ['configure-rag-network'], migrations: [], smokeSuites: [] },
+  ]
+  const plan = createReleasePlan({
+    baseSha: '',
+    headSha: 'head',
+    changedPaths: ['docs/guide.md'],
+    allFunctions: ['post', 'user'],
+    functionInputs: {},
+    manifests,
+    mode: 'full-current',
+  })
+
+  assert.equal(plan.baseSha, null)
+  assert.equal(plan.bootstrap, false)
+  assert.equal(plan.planningStrategy, 'full-current')
+  assert.equal(plan.releaseRequired, true)
+  assert.deepEqual(plan.targets.cloud, {
+    functions: ['post', 'user'],
+    mode: 'all',
+    reasons: ['full-current:explicit'],
+  })
+  assert.equal(plan.targets.adminWeb, true)
+  assert.equal(plan.targets.miniprogram, true)
+  assert.deepEqual(plan.manifests, manifests)
+  assert.deepEqual(plan.changeIds, ['indexes', 'network'])
+})
+
 test('release plan selects only manifests changed in the production diff', () => {
   const manifests = [
     { changeId: 'historical', source: 'release/changes/20260701-historical.json' },
@@ -100,6 +130,7 @@ test('documentation and release-tooling changes do not require production public
       manifests: [],
       mode: 'main',
     })
+    assert.equal(plan.planningStrategy, 'incremental', changedPath)
     assert.equal(plan.releaseRequired, false, changedPath)
   }
 
