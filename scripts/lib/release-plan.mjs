@@ -97,6 +97,10 @@ export function selectChangeManifestsForDiff(manifests = [], changedPaths = []) 
   return manifests.filter((manifest) => changed.has(normalizePath(manifest?.source)))
 }
 
+export function selectChangeManifests(mode, manifests = [], changedPaths = []) {
+  return mode === 'full-current' ? manifests : selectChangeManifestsForDiff(manifests, changedPaths)
+}
+
 function needsExternalManifest(changedPaths) {
   return changedPaths.map(normalizePath).some((path) => path.startsWith('scripts/ensure-')
     || path.startsWith('scripts/configure-')

@@ -5,6 +5,7 @@ import {
   ALL_CLOUD_FUNCTIONS,
   classifyReleaseImpact,
   createReleasePlan,
+  selectChangeManifests,
   selectChangeManifestsForDiff,
   validateChangeManifests,
 } from './release-plan.mjs'
@@ -134,6 +135,17 @@ test('release plan selects only manifests changed in the production diff', () =>
     [manifests[1]],
   )
   assert.deepEqual(selectChangeManifestsForDiff(manifests, ['docs/README.md']), [])
+})
+
+test('manifest selection includes all manifests only for full-current plans', () => {
+  const manifests = [
+    { changeId: 'historical', source: 'release/changes/20260701-historical.json' },
+    { changeId: 'current', source: 'release/changes/20260711-current.json' },
+  ]
+  const changedPaths = ['M\trelease/changes/20260711-current.json']
+
+  assert.deepEqual(selectChangeManifests('full-current', manifests, changedPaths), manifests)
+  assert.deepEqual(selectChangeManifests('main', manifests, changedPaths), [manifests[1]])
 })
 
 test('documentation and release-tooling changes do not require production publication', () => {
