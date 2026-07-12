@@ -8,6 +8,8 @@ import {
   getPostRagJob,
   isPostRagJobLeaseError,
   listPostRagJobCandidates,
+  renewPostRagJobLease,
+  PostRagJobLeaseError,
   validateStoredPostRagJob,
   type PostRagJobDocument,
   type PostRagJobErrorCode,
@@ -113,6 +115,7 @@ type ProcessorDependencies = {
   readJob: typeof getPostRagJob
   complete: typeof completePostRagJob
   fail: typeof failPostRagJob
+  renew: typeof renewPostRagJobLease
 }
 
 type BatchDependencies = ProcessorDependencies & {
@@ -151,6 +154,30 @@ async function sinkStep<T>(stage: PostRagJobErrorStage, operation: () => Promise
   try { return await operation() } catch { throw new PostRagJobProcessorError('ES_WRITE_FAILED', stage) }
 }
 
+async function withLeaseHeartbeat<T>(
+  job: PostRagJobDocument, workerId: string, leaseToken: string, now: ValidatedClock,
+  renew: typeof renewPostRagJobLease, operation: () => Promise<T>,
+): Promise<T> {
+  const renewOnce = async () => {
+    try { await renew(job._id, { workerId, leaseToken, now: now(), leaseSeconds: 120 }) }
+    catch { throw new PostRagJobLeaseError() }
+  }
+  await renewOnce()
+  let rejectLost!: (error: Error) => void
+  const lost = new Promise<never>((_resolve, reject) => { rejectLost = reject })
+  void lost.catch(() => undefined)
+  let stopped = false
+  let renewal = Promise.resolve()
+  const timer = setInterval(() => {
+    renewal = renewal.then(renewOnce).catch(() => {
+      if (!stopped) { stopped = true; clearInterval(timer); rejectLost(new PostRagJobLeaseError()) }
+    })
+  }, 40_000)
+  timer.unref?.()
+  try { return await Promise.race([operation(), lost]) }
+  finally { stopped = true; clearInterval(timer) }
+}
+
 function activationOrder(job: PostRagJobDocument): PostRagActivationOrder {
   return { contentVersion: job.contentVersion, jobId: job._id }
 }
@@ -178,9 +205,9 @@ export async function processClaimedPostRagJob(
     if (!storedPost) {
       if (!await hasCurrentLease(job, options.workerId, now(), dependencies.readJob, 'es_write')) return { jobId: job._id, status: 'lease_lost' }
       failureStage = 'es_write'
-      const removal = await sinkStep('es_write', () => dependencies.sink.remove({
+      const removal = await withLeaseHeartbeat(job, options.workerId, leaseToken, now, dependencies.renew, () => sinkStep('es_write', () => dependencies.sink.remove({
         postId: job.postId, sourceVersion: job.sourceVersion, activationOrder: activationOrder(job),
-      }))
+      })))
       if (!await hasCurrentLease(job, options.workerId, now(), dependencies.readJob, 'es_write')) return { jobId: job._id, status: 'lease_lost' }
       const outcome = removal.removed ? 'removed' : 'superseded'
       try {
@@ -219,7 +246,7 @@ export async function processClaimedPostRagJob(
       if (projection.eligible) throw new PostRagJobProcessorError('VALIDATION_FAILED', 'chunk')
       if (!await hasCurrentLease(job, options.workerId, now(), dependencies.readJob, 'es_write')) return { jobId: job._id, status: 'lease_lost' }
       failureStage = 'es_write'
-      const removal = await sinkStep('es_write', () => dependencies.sink.remove({ postId: job.postId, sourceVersion: job.sourceVersion, activationOrder: activationOrder(job) }))
+      const removal = await withLeaseHeartbeat(job, options.workerId, leaseToken, now, dependencies.renew, () => sinkStep('es_write', () => dependencies.sink.remove({ postId: job.postId, sourceVersion: job.sourceVersion, activationOrder: activationOrder(job) })))
       if (!await hasCurrentLease(job, options.workerId, now(), dependencies.readJob, 'es_write')) return { jobId: job._id, status: 'lease_lost' }
       const outcome = removal.removed ? 'removed' : 'superseded'
       try {
@@ -234,15 +261,15 @@ export async function processClaimedPostRagJob(
 
     if (!await hasCurrentLease(job, options.workerId, now(), dependencies.readJob, 'es_write')) return { jobId: job._id, status: 'lease_lost' }
     failureStage = 'es_write'
-    await sinkStep('es_write', () => dependencies.sink.stageUpsert({ projection, job, jobId: job._id, leaseToken }))
+    await withLeaseHeartbeat(job, options.workerId, leaseToken, now, dependencies.renew, () => sinkStep('es_write', () => dependencies.sink.stageUpsert({ projection, job, jobId: job._id, leaseToken })))
     if (!await hasCurrentLease(job, options.workerId, now(), dependencies.readJob, 'es_write')) return { jobId: job._id, status: 'lease_lost' }
-    const inspected = await sinkStep('es_write', () => dependencies.sink.inspectStaged({ postId: job.postId, sourceVersion: job.sourceVersion, jobId: job._id, leaseToken }))
+    const inspected = await withLeaseHeartbeat(job, options.workerId, leaseToken, now, dependencies.renew, () => sinkStep('es_write', () => dependencies.sink.inspectStaged({ postId: job.postId, sourceVersion: job.sourceVersion, jobId: job._id, leaseToken })))
     if (inspected.chunkCount !== projection.chunkCount || inspected.chunkChecksum !== projection.chunkChecksum) {
       throw new PostRagJobProcessorError('ES_WRITE_FAILED', 'es_write')
     }
     if (!await hasCurrentLease(job, options.workerId, now(), dependencies.readJob, 'activate')) return { jobId: job._id, status: 'lease_lost' }
     failureStage = 'activate'
-    const activation = await sinkStep('activate', () => dependencies.sink.activate({ postId: job.postId, sourceVersion: job.sourceVersion, activationOrder: activationOrder(job), jobId: job._id, leaseToken }))
+    const activation = await withLeaseHeartbeat(job, options.workerId, leaseToken, now, dependencies.renew, () => sinkStep('activate', () => dependencies.sink.activate({ postId: job.postId, sourceVersion: job.sourceVersion, activationOrder: activationOrder(job), jobId: job._id, leaseToken })))
     if (!activation.activated) {
       if (!await hasCurrentLease(job, options.workerId, now(), dependencies.readJob, 'activate')) return { jobId: job._id, status: 'lease_lost' }
       try {
@@ -255,9 +282,9 @@ export async function processClaimedPostRagJob(
     }
     if (!await hasCurrentLease(job, options.workerId, now(), dependencies.readJob, 'cleanup')) return { jobId: job._id, status: 'lease_lost' }
     failureStage = 'cleanup'
-    await sinkStep('cleanup', () => dependencies.sink.cleanupOldVersions({
+    await withLeaseHeartbeat(job, options.workerId, leaseToken, now, dependencies.renew, () => sinkStep('cleanup', () => dependencies.sink.cleanupOldVersions({
       postId: job.postId, keepSourceVersion: job.sourceVersion, activationOrder: activationOrder(job), jobId: job._id, leaseToken,
-    }))
+    })))
     if (!await hasCurrentLease(job, options.workerId, now(), dependencies.readJob, 'cleanup')) return { jobId: job._id, status: 'lease_lost' }
     try {
       await dependencies.complete(job._id, { workerId: options.workerId, leaseToken, now: now(), outcome: 'indexed' })
@@ -305,6 +332,7 @@ const defaultDependencies: BatchDependencies = {
   readJob: getPostRagJob,
   complete: completePostRagJob,
   fail: failPostRagJob,
+  renew: renewPostRagJobLease,
   listCandidates: listPostRagJobCandidates,
   claim: claimPostRagJob,
 }

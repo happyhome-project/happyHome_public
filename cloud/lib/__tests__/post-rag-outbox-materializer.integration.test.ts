@@ -117,13 +117,38 @@ test('section reindex fans out deterministically across pages without dead lette
   const event=await db.runTransaction(tx=>appendPostRagOutboxEvent(tx,{communityId:'community-1',aggregateId:'section-1',reasonCode:'section.widgets_changed',now:NOW}))
   let claimed=await claimPostRagOutboxEvent(event.outboxId,{workerId:'worker',now:'2026-07-12T04:00:01.000Z'})
   let page=await materializeClaimedPostRagOutboxEvent(event.outboxId,{workerId:'worker',leaseToken:claimed!.leaseToken!,now:'2026-07-12T04:00:02.000Z'})
-  expect(page.outbox).toMatchObject({status:'retry_wait',fanoutSkip:20})
+  expect(page.outbox).toMatchObject({status:'pending',attempts:0,fanoutSkip:20})
   await db.removeById('posts','post-20');await db.create('posts',{_id:'post-19a',communityId:'community-1',sectionId:'section-1',status:'active',auditStatus:'pass',content:{body:'插入'},createdAt:NOW,updatedAt:NOW})
   claimed=await claimPostRagOutboxEvent(event.outboxId,{workerId:'worker',now:'2026-07-12T04:00:03.000Z'})
   page=await materializeClaimedPostRagOutboxEvent(event.outboxId,{workerId:'worker',leaseToken:claimed!.leaseToken!,now:'2026-07-12T04:00:04.000Z'})
   expect(page.outbox).toMatchObject({status:'completed',fanoutSkip:25})
   expect((await db.query(POST_RAG_JOBS,{outboxId:event.outboxId},{limit:100}))).toHaveLength(25)
   expect((await db.query(POST_RAG_JOBS,{outboxId:event.outboxId},{limit:100})).some((job:any)=>job.postId==='post-24')).toBe(true)
+})
+
+test('community fanout completes seven continuation pages without consuming the failure budget', async () => {
+  await db.create('sections', { _id: 'section-1', communityId: 'community-1', name: '家风', status: 'active', widgets: [{ widgetId: 'body', fieldKey: 'body', label: '正文', type: 'short_text', visibility: 'public', order: 0 }] })
+  for (let index = 0; index < 125; index += 1) await db.create('posts', { _id: `bulk-${String(index).padStart(3, '0')}`, communityId: 'community-1', sectionId: 'section-1', status: 'active', auditStatus: 'pass', content: { body: `内容${index}` }, createdAt: NOW, updatedAt: NOW })
+  const event = await db.runTransaction(tx => appendPostRagOutboxEvent(tx, { communityId: 'community-1', aggregateId: 'community-1', reasonCode: 'community.status_changed', now: NOW }))
+  let page: any
+  for (let index = 0; index < 7; index += 1) {
+    const now = `2026-07-12T04:00:${String(index * 2 + 1).padStart(2, '0')}.000Z`
+    const claimed = await claimPostRagOutboxEvent(event.outboxId, { workerId: 'worker', now })
+    expect(claimed).not.toBeNull()
+    page = await materializeClaimedPostRagOutboxEvent(event.outboxId, { workerId: 'worker', leaseToken: claimed!.leaseToken!, now })
+    if (index < 6) expect(page.outbox).toMatchObject({ status: 'pending', attempts: 0 })
+  }
+  expect(page.outbox).toMatchObject({ status: 'completed', attempts: 1, fanoutSkip: 125 })
+})
+
+test('a crashed fanout claim remains in the failure budget after a successful continuation page', async () => {
+  await db.create('sections', { _id: 'section-1', communityId: 'community-1', name: '家风', status: 'active', widgets: [{ widgetId: 'body', fieldKey: 'body', label: '正文', type: 'short_text', visibility: 'public', order: 0 }] })
+  for (let index = 0; index < 25; index += 1) await db.create('posts', { _id: `crash-${String(index).padStart(2, '0')}`, communityId: 'community-1', sectionId: 'section-1', status: 'active', auditStatus: 'pass', content: { body: `内容${index}` }, createdAt: NOW, updatedAt: NOW })
+  const event = await db.runTransaction(tx => appendPostRagOutboxEvent(tx, { communityId: 'community-1', aggregateId: 'community-1', reasonCode: 'community.status_changed', now: NOW }))
+  await claimPostRagOutboxEvent(event.outboxId, { workerId: 'crashed', now: '2026-07-12T04:00:01.000Z' })
+  const reclaimed = await claimPostRagOutboxEvent(event.outboxId, { workerId: 'worker', now: '2026-07-12T04:02:01.000Z' })
+  const page = await materializeClaimedPostRagOutboxEvent(event.outboxId, { workerId: 'worker', leaseToken: reclaimed!.leaseToken!, now: '2026-07-12T04:02:02.000Z' })
+  expect(page.outbox).toMatchObject({ status: 'pending', attempts: 1, fanoutSkip: 20 })
 })
 
 test.each(['community.status_changed','community.acl_changed'] as const)('%s fans out to current post projections and completes',async reasonCode=>{
@@ -144,7 +169,7 @@ test('community projection fanout uses _id keysets across pages with intervening
   const event = await db.runTransaction(transaction => appendPostRagOutboxEvent(transaction, { communityId: 'community-1', aggregateId: 'community-1', reasonCode: 'community.status_changed', now: NOW }))
   let claimed = await claimPostRagOutboxEvent(event.outboxId, { workerId: 'worker', now: '2026-07-12T04:00:01.000Z' })
   let page = await materializeClaimedPostRagOutboxEvent(event.outboxId, { workerId: 'worker', leaseToken: claimed!.leaseToken!, now: '2026-07-12T04:00:02.000Z' })
-  expect(page).toMatchObject({ outbox: { status: 'retry_wait', fanoutAfterPostId: 'community-post-19' } })
+  expect(page).toMatchObject({ outbox: { status: 'pending', attempts: 0, fanoutAfterPostId: 'community-post-19' } })
   await db.removeById('posts', 'community-post-20')
   await db.create('posts', { _id: 'community-post-19a', communityId: 'community-1', sectionId: 'section-1', status: 'active', auditStatus: 'pass', content: { body: '页间插入' }, createdAt: NOW, updatedAt: NOW })
   claimed = await claimPostRagOutboxEvent(event.outboxId, { workerId: 'worker', now: '2026-07-12T04:00:03.000Z' })

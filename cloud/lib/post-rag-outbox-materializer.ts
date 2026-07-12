@@ -156,7 +156,6 @@ function validateOutbox(value: unknown, expectedId?: string): asserts value is P
   if (item.status === 'processing' && (!item.leaseOwner || !item.leaseToken || !item.leaseExpiresAt)) throw new Error('processing outbox must have a lease')
   if (item.status === 'completed' && (!item.leaseOwner || !item.leaseToken || item.leaseExpiresAt)) throw new Error('completed outbox must retain completion fencing')
   if (item.status !== 'processing' && item.status !== 'completed' && (item.leaseOwner || item.leaseToken || item.leaseExpiresAt)) throw new Error('inactive outbox must not have a lease')
-  if (item.status === 'pending' && item.attempts !== 0) throw new Error('pending attempts must be zero')
   if (item.status !== 'pending' && Number(item.attempts) < 1) throw new Error('non-pending attempts must be positive')
   if (item.status === 'completed' && item.aggregateType === 'post' && !item.materializedJobId) throw new Error('completed post outbox must reference a job')
   if (item.status !== 'completed' && item.materializedJobId) throw new Error('only completed outbox may reference a job')
@@ -295,7 +294,7 @@ export async function materializeClaimedPostRagOutboxEvent(outboxId: string, opt
         contentVersion: current.contentVersion, now: options.now }))
     }
     const done = posts.length < 20
-    const updated: PostRagOutboxDocument = { ...current, status: done ? 'completed' : 'retry_wait', fanoutSkip: current.fanoutSkip + posts.length,fanoutAfterPostId:posts[posts.length-1]?._id||current.fanoutAfterPostId,
+    const updated: PostRagOutboxDocument = { ...current, status: done ? 'completed' : 'pending', attempts: done ? current.attempts : current.attempts - 1, fanoutSkip: current.fanoutSkip + posts.length,fanoutAfterPostId:posts[posts.length-1]?._id||current.fanoutAfterPostId,
       leaseExpiresAt: null, ...(done ? {} : { leaseOwner: null, leaseToken: null }), updatedAt: options.now, nextAttemptAt: options.now }
     await transaction.collection(POST_RAG_OUTBOX).doc(outboxId).update({ data: withoutId(updated) })
     return { outbox: updated, job: jobs[0] || null, jobs }

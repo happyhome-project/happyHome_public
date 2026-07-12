@@ -21,6 +21,7 @@ import {
   completePostRagJob,
   createPostRagJobInTransaction,
   failPostRagJob,
+  renewPostRagJobLease,
   getPostRagJob,
   isPostRagJobLeaseError,
   listPostRagJobCandidates,
@@ -30,6 +31,15 @@ import {
   validateCreatePostRagJobInput,
   type PostRagJobDocument,
 } from '../post-rag-jobs'
+
+test('renewPostRagJobLease atomically extends only the matching live lease without changing attempts', async () => {
+  const state = transactionFor(job({ status: 'processing', attempts: 3, leaseOwner: 'worker-1', leaseToken: 'lease-a', leaseExpiresAt: '2026-07-12T01:02:00.000Z' }))
+  mockDb.runTransaction.mockImplementation(async callback => callback(state.transaction))
+  await expect(renewPostRagJobLease('job-1', { workerId: 'worker-1', leaseToken: 'lease-a', now: '2026-07-12T01:01:00.000Z' })).resolves.toMatchObject({
+    attempts: 3, leaseToken: 'lease-a', leaseExpiresAt: '2026-07-12T01:03:00.000Z', updatedAt: '2026-07-12T01:01:00.000Z',
+  })
+  await expect(renewPostRagJobLease('job-1', { workerId: 'worker-1', leaseToken: 'wrong', now: '2026-07-12T01:01:01.000Z' })).rejects.toThrow('token')
+})
 
 const NOW = '2026-07-12T01:00:00.000Z'
 

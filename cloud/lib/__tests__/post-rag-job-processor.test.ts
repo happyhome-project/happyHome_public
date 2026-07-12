@@ -35,6 +35,7 @@ function dependencies(overrides: Record<string, unknown> = {}) {
     buildProjection: jest.fn(() => projection()),
     complete: jest.fn(async (_id, options) => { calls.push(`complete:${options.outcome}`); return {} }),
     fail: jest.fn(async () => { calls.push('fail'); return {} }),
+    renew: jest.fn(async () => job()),
     ...overrides,
   } as any
 }
@@ -165,6 +166,38 @@ describe('processClaimedPostRagJob', () => {
     expect(result).toEqual({ jobId: JOB_ID, status: 'lease_lost' })
     expect(deps.calls).toEqual(['stage'])
     expect(deps.sink.inspectStaged).not.toHaveBeenCalled()
+  })
+
+  test('renews a lease throughout a sink promise longer than 120 seconds and clears heartbeat timers', async () => {
+    jest.useFakeTimers(); jest.setSystemTime(new Date(NOW))
+    let release!: () => void
+    const blocked = new Promise<void>((resolve) => { release = resolve })
+    const deps = dependencies()
+    deps.sink.stageUpsert.mockImplementation(async () => { deps.calls.push('stage'); await blocked })
+    const running = processClaimedPostRagJob(job({ leaseExpiresAt: '2026-07-12T04:10:00.000Z' }), {
+      workerId: 'worker-1', now: () => new Date().toISOString(),
+    }, deps)
+    await jest.advanceTimersByTimeAsync(130_000)
+    expect(deps.renew.mock.calls.length).toBeGreaterThanOrEqual(4)
+    release(); await running
+    expect(jest.getTimerCount()).toBe(0)
+    jest.useRealTimers()
+  })
+
+  test('heartbeat token mismatch returns lease_lost without completing and clears its timer', async () => {
+    jest.useFakeTimers(); jest.setSystemTime(new Date(NOW))
+    const { PostRagJobLeaseError } = jest.requireActual('../post-rag-jobs')
+    let release!: () => void
+    const blocked = new Promise<void>((resolve) => { release = resolve })
+    const deps = dependencies({ renew: jest.fn().mockResolvedValueOnce(job()).mockRejectedValue(new PostRagJobLeaseError('token')) })
+    deps.sink.stageUpsert.mockImplementation(async () => { deps.calls.push('stage'); await blocked })
+    const running = processClaimedPostRagJob(job({ leaseExpiresAt: '2026-07-12T04:10:00.000Z' }), {
+      workerId: 'worker-1', now: () => new Date().toISOString(),
+    }, deps)
+    await jest.advanceTimersByTimeAsync(40_000)
+    await expect(running).resolves.toEqual({ jobId: JOB_ID, status: 'lease_lost' })
+    expect(deps.complete).not.toHaveBeenCalled(); expect(jest.getTimerCount()).toBe(0)
+    release(); jest.useRealTimers()
   })
 
   test('returns a safe INTERNAL failure when the current-lease DB reload fails', async () => {

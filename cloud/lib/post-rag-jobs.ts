@@ -451,6 +451,24 @@ export async function getPostRagJob(jobId: string): Promise<PostRagJobDocument> 
   return current
 }
 
+export async function renewPostRagJobLease(
+  jobId: string,
+  options: { workerId: string; leaseToken: string; now: string; leaseSeconds?: number },
+): Promise<PostRagJobDocument> {
+  requireIdentifier('jobId', jobId); requireIdentifier('workerId', options?.workerId)
+  requireIdentifier('leaseToken', options?.leaseToken, 128); requireIsoTimestamp('now', options?.now)
+  const leaseSeconds = options.leaseSeconds ?? 120
+  if (!Number.isSafeInteger(leaseSeconds) || leaseSeconds < 1 || leaseSeconds > 3600) throw new Error('leaseSeconds must be an integer between 1 and 3600')
+  return db.runTransaction(async (transaction) => {
+    const current = await db.transactionGetByIdOrNull<PostRagJobDocument>(transaction, POST_RAG_JOBS, jobId)
+    if (!current) throw new Error('job does not exist')
+    validateStoredJob(current, jobId); assertCurrentLease(current, options.workerId, options.leaseToken, options.now)
+    const renewed = { ...current, leaseExpiresAt: addSeconds(options.now, leaseSeconds), updatedAt: options.now }
+    await transaction.collection(POST_RAG_JOBS).doc(jobId).update({ data: jobWithoutId(renewed) })
+    return renewed
+  })
+}
+
 export async function completePostRagJob(
   jobId: string,
   options: { workerId: string; leaseToken: string; now: string; outcome: PostRagJobOutcome },

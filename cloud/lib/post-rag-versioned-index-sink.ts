@@ -219,7 +219,7 @@ export function createVersionedTencentEsRagSink(options: {
     async stageUpsert({ projection, job, jobId, leaseToken }) {
       assertProjection(projection, job)
       const lease = await getActiveLease(jobId, leaseToken)
-      if (jobId !== job._id || !lease || job.updatedAt !== lease.updatedAt) fail('LEASE_LOST')
+      if (jobId !== job._id || !lease) fail('LEASE_LOST')
       const attemptId = derivePostRagIndexAttemptId(jobId, leaseToken)
       const stagedAt = lease.updatedAt
       const embeddings: number[][] = []
