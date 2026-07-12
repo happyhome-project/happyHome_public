@@ -90,9 +90,9 @@ Delete the `home-fixed-controls` block containing the duplicate search field and
 
 Remove `homeFixedControlsThresholdPx`, its timers/constants, `showHomeFixedControls`, `measureHomeFixedControlsThreshold`, scheduling/cleanup, and calls to that scheduler. Retain `homePageScrollTop`, `onPageScroll`, and `getCurrentPageScrollTop()` because archive-group switching uses them to preserve the user's current scroll position on both native and H5 surfaces.
 
-- [ ] **Step 3: Remove sticky-workaround height coupling**
+- [ ] **Step 3: Preserve scroll runway without fixed-control coupling**
 
-Delete the non-guide branch that returns `min-height: 100vh` only when `showHomeFixedControls` is true. Preserve the measured guide-feed minimum height behavior.
+Delete the dependency on `showHomeFixedControls`, but keep `min-height: 100vh` for an active non-guide group unconditionally. This preserves enough document runway to prevent native scroll clamping when a user switches from a tall archive to a short archive while the tabs are pinned. Preserve the measured guide-feed minimum height behavior.
 
 - [ ] **Step 4: Apply stable sticky styling to the single tabs control**
 
@@ -122,7 +122,7 @@ npm.cmd run test:mp:home-tabs-scroll-static
 node scripts/test-figma-mini-ui-static.mjs
 ```
 
-Expected: both commands print their PASS markers and exit 0.
+Expected: the focused command prints its PASS marker and exits 0. The broad Figma command is also run; this branch inherits a pre-existing failure in two stale image-key expectations, independently reproducible from `HEAD`, so do not expand this task into unrelated image-key test maintenance.
 
 ### Task 3: Verify compilation and rendered behavior
 

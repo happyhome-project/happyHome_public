@@ -59,6 +59,7 @@
     "test:admin:video-upload-ui": "node scripts/test-admin-video-upload-ui.mjs",
     "test:mp:detail-runtime-syntax": "node scripts/check-mp-detail-runtime-syntax.mjs",
     "test:mp:post-rag-search-static": "node scripts/test-mp-post-rag-search-static.mjs",
+    "test:mp:home-tabs-scroll-static": "node scripts/test-home-tabs-scroll-static.mjs",
     "test:mp:publish-ui-static": "node scripts/test-create-publish-ui-static.mjs",
     "test:mp:profile-critical-path": "node scripts/check-mp-profile-critical-path.mjs",
     "test:mp": "node scripts/test-mp.mjs",
