@@ -31,6 +31,7 @@ test('launcher injects only public CloudBase config, selects an available port, 
   })
   const running = await launcher.start()
   assert.equal(running.port, 54321)
+  assert.equal(running.pid, 4242)
   assert.deepEqual(Object.fromEntries(Object.entries(calls[0].options.env).filter(([key]) => key.startsWith('VITE_'))), {
     VITE_CLOUDBASE_ENV_ID: 'env-public', VITE_CLOUDBASE_ACCESS_KEY: 'key-public',
   })
@@ -101,8 +102,12 @@ test('write smoke propagates cleanup failure and still stops its own server', as
 test('cleanup intent locates and deletes an exact UUID post even when submit click throws', async () => {
   const calls = []
   const intent = { runId: 'uuid-1', content: 'H5 smoke uuid-1' }
-  await resolveCleanupIntent({ intent, locate: async (content) => { calls.push(`locate:${content}`); return 'post-1' }, remove: async (postId) => calls.push(`remove:${postId}`) })
-  assert.deepEqual(calls, ['locate:H5 smoke uuid-1', 'remove:post-1'])
+  await resolveCleanupIntent({ intent, capturedPostId: async () => 'post-captured', locate: async () => { calls.push('locator'); return '' }, remove: async (postId) => calls.push(`remove:${postId}`) })
+  assert.deepEqual(calls, ['remove:post-captured'])
+})
+
+test('cleanup intent fails closed when neither session capture nor UUID locator confirms an exact post', async () => {
+  await assert.rejects(() => resolveCleanupIntent({ intent: { content: 'H5 smoke uuid-2' }, capturedPostId: async () => '', locate: async () => '', remove: async () => {} }), /cleanup unconfirmed/)
 })
 
 test('evidence removes credentials, raw content, openids, and storage URLs', () => {

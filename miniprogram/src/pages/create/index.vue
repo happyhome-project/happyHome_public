@@ -792,6 +792,11 @@ async function handleSubmit() {
           sectionId,
           content,
         })
+    // #ifdef H5
+    if (import.meta.env.DEV && result?.postId) {
+      sessionStorage.setItem('hh-h5-smoke-last-created-post-id', String(result.postId))
+    }
+    // #endif
     if (isActivityInviteMode.value) {
       try {
         uni.removeStorageSync(ACTIVITY_INVITE_CREATE_INTENT_KEY)

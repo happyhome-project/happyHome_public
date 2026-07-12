@@ -11,6 +11,7 @@ import { loadTenantConfig, runCli as runTenantCli } from './h5-test-tenant.mjs'
 import { withValidationLease } from './lib/validation-lease.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const H5_SMOKE_LAST_CREATED_POST_ID_KEY = 'hh-h5-smoke-last-created-post-id'
 export const EXPECTED_HOME_VISIBLE_LONG = 20
 const SAFE_KEYS = new Set(['mode', 'runId', 'cwd', 'branch', 'head', 'port', 'counts', 'geometry', 'routes', 'cleanup', 'top', 'status', 'cleanupOk'])
 export function sanitizeEvidence(value) {
@@ -27,10 +28,10 @@ export function validateReadEvidence({ doctor, visible }) {
   if (visible?.empty !== 0) throw new Error(`unexpected visible empty count: ${visible?.empty}`)
 }
 
-export async function resolveCleanupIntent({ intent, locate, remove }) {
+export async function resolveCleanupIntent({ intent, capturedPostId = async () => '', locate, remove }) {
   if (!intent) return { found: false }
-  const postId = await locate(intent.content)
-  if (!postId) return { found: false }
+  const postId = String(await capturedPostId() || await locate(intent.content) || '').trim()
+  if (!postId) throw new Error(`cleanup unconfirmed for run ${intent.runId || 'unknown'}`)
   await remove(postId)
   return { found: true, postId }
 }
@@ -93,7 +94,7 @@ async function realWrite({ running, runId, home = homedir() }) {
   const cleanup = async () => {
     try {
       if (cleanupIntent && !deleted) {
-        await resolveCleanupIntent({ intent: cleanupIntent, locate: async () => {
+        await resolveCleanupIntent({ intent: cleanupIntent, capturedPostId: async () => String(await page.evaluate((key) => sessionStorage.getItem(key) || '', H5_SMOKE_LAST_CREATED_POST_ID_KEY)), locate: async () => {
           if (postId) return postId
           await page.goto(`${running.url}/#/pages/index/index`)
           await page.getByTestId(`home-section-tab-${SECTION_IDS.short}`).last().click()
@@ -113,6 +114,7 @@ async function realWrite({ running, runId, home = homedir() }) {
         } })
       }
     } finally {
+      await page?.evaluate((key) => sessionStorage.removeItem(key), H5_SMOKE_LAST_CREATED_POST_ID_KEY).catch(() => {})
       await browser?.close()
       await unlink(pngPath).catch(() => {})
     }
@@ -132,6 +134,7 @@ async function realWrite({ running, runId, home = homedir() }) {
     await page.getByTestId(`create-section-${SECTION_IDS.short}`).click()
     await page.getByTestId('widget-input-hh-web-h5-v1-widget-short').fill(content)
     await page.getByTestId('widget-image-input-hh-web-h5-v1-widget-short-image').setInputFiles(pngPath)
+    await page.evaluate((key) => sessionStorage.removeItem(key), H5_SMOKE_LAST_CREATED_POST_ID_KEY)
     cleanupIntent = { runId, content }
     await page.getByTestId('create-submit').click()
     await page.getByText(content, { exact: true }).waitFor()

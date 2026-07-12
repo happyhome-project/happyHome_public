@@ -86,8 +86,8 @@ export function createH5WebLauncher({ root = ROOT, home = homedir(), findPort = 
     let stopped = false
     const stop = async () => { if (!stopped) { stopped = true; await killTree(child.pid) } }
     try { await Promise.race([wait(url, child, tail), childFailure]) } catch (error) { await stop(); throw error }
-    log(JSON.stringify({ url, cwd: gitInfo.cwd, branch: gitInfo.branch, head: gitInfo.head }))
-    return { child, port, url, git: gitInfo, stop }
+    log(JSON.stringify({ url, pid: child.pid, cwd: gitInfo.cwd, branch: gitInfo.branch, head: gitInfo.head }))
+    return { child, pid: child.pid, port, url, git: gitInfo, stop }
   } }
 }
 
