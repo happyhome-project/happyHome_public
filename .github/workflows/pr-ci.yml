@@ -17,19 +17,32 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
+      - name: Pin and verify toolchain
+        run: |
+          npm.cmd install --global npm@11.11.0
+          $nodeVersion = node --version
+          if ($nodeVersion -notmatch '^v24\.') {
+            throw "Expected Node v24.x, got $nodeVersion"
+          }
+          $npmVersion = npm.cmd --version
+          if ($npmVersion -ne '11.11.0') {
+            throw "Expected npm 11.11.0, got $npmVersion"
+          }
+          Write-Output "node=$nodeVersion npm=$npmVersion"
+
       - name: Install dependencies
-        run: npm ci
+        run: npm.cmd ci
 
       - name: Test cloud
         run: npm --workspace cloud test
@@ -54,6 +67,12 @@ jobs:
 
       - name: Test deploy output policy
         run: npm run test:deploy-output
+
+      - name: Check docs
+        run: npm.cmd run docs:check
+
+      - name: Test governance
+        run: npm.cmd run test:governance
 
       - name: Check pull request whitespace
         if: github.event_name == 'pull_request'
