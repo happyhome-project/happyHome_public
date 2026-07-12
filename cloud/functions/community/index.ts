@@ -144,7 +144,7 @@ export async function handleList(params: { includeAll?: boolean }, openid = '') 
   const communities = await db.query('communities', { status: 'active' }, {
     orderBy: ['createdAt', 'desc'],
   })
-  return { communities }
+  return { communities: communities.filter((community: Community) => community.discoverable !== false) }
 }
 
 export async function handleGet(params: { communityId: string }) {
@@ -154,14 +154,14 @@ export async function handleGet(params: { communityId: string }) {
 }
 
 export async function handleListDiscoverable(openid: string) {
-  // 社区是否出现在小程序目录，只由社区审核状态决定。
+  // 社区是否出现在小程序目录，由审核状态和 discoverable 开关共同决定。
   // 成员记录仅用于渲染“已加入 / 审核中 / 我要加入”，不能让 pending 社区提前曝光。
   const activeList = await db.query('communities', { status: 'active' }, {
     orderBy: ['createdAt', 'desc'],
   })
 
   const result = []
-  for (const community of activeList) {
+  for (const community of activeList.filter((item: Community) => item.discoverable !== false)) {
     const viewerStatus = await getLatestViewerStatus(community._id, openid)
     result.push({ ...community, viewerStatus })
   }
