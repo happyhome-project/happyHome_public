@@ -6,7 +6,7 @@
 const store = new Map<string, Map<string, any>>()
 
 let idCounter = 0
-let transactionTail: Promise<void> = Promise.resolve()
+let mutationTail: Promise<void> = Promise.resolve()
 let resetGeneration = 0
 
 function collection(name: string): Map<string, any> {
@@ -53,6 +53,7 @@ export function _resetAll() {
   resetGeneration += 1
   store.clear()
   idCounter = 0
+  mutationTail = Promise.resolve()
 }
 
 /** 获取集合所有文档（调试用） */
@@ -70,16 +71,34 @@ export async function getById(collectionName: string, id: string) {
   return { ...doc }
 }
 
-export async function setById(collectionName: string, id: string, data: object) {
+function setByIdInternal(collectionName: string, id: string, data: object) {
   collection(collectionName).set(id, { _id: id, ...cloneValue(data) })
   return { stats: { updated: 1 } }
 }
 
-export async function create(collectionName: string, data: any) {
+function createInternal(collectionName: string, data: any) {
   const id = data._id || `auto-${++idCounter}`
   const doc = { _id: id, ...data }
   collection(collectionName).set(id, doc)
   return id
+}
+
+function enqueueMutation<T>(operation: () => T | Promise<T>): Promise<T> {
+  const generation = resetGeneration
+  const result = mutationTail.then(async () => {
+    if (generation !== resetGeneration) throw new Error('database reset before mutation')
+    return operation()
+  })
+  mutationTail = result.then(() => undefined, () => undefined)
+  return result
+}
+
+export function setById(collectionName: string, id: string, data: object) {
+  return enqueueMutation(() => setByIdInternal(collectionName, id, data))
+}
+
+export function create(collectionName: string, data: any) {
+  return enqueueMutation(() => createInternal(collectionName, data))
 }
 
 type LocalTransaction = {
@@ -120,7 +139,7 @@ export function runTransaction<T>(callback: (transaction: LocalTransaction) => P
   const assertActiveGeneration = () => {
     if (transactionGeneration !== resetGeneration) throw new Error('database reset during transaction')
   }
-  const result = transactionTail.then(async () => {
+  const result = mutationTail.then(async () => {
     assertActiveGeneration()
     const snapshot = snapshotStore()
     const transaction: LocalTransaction = {
@@ -132,21 +151,20 @@ export function runTransaction<T>(callback: (transaction: LocalTransaction) => P
           },
           set: async ({ data }) => {
             assertActiveGeneration()
-            collection(collectionName).set(id, { _id: id, ...cloneValue(data) })
-            return { stats: { updated: 1 } }
+            return setByIdInternal(collectionName, id, data)
           },
           update: async ({ data }) => {
             assertActiveGeneration()
-            return updateById(collectionName, id, data)
+            return updateByIdInternal(collectionName, id, data)
           },
           remove: async () => {
             assertActiveGeneration()
-            return removeById(collectionName, id)
+            return removeByIdInternal(collectionName, id)
           },
         }),
         add: async ({ data }) => {
           assertActiveGeneration()
-          return { _id: await create(collectionName, data) }
+          return { _id: createInternal(collectionName, data) }
         },
       }),
     }
@@ -161,7 +179,7 @@ export function runTransaction<T>(callback: (transaction: LocalTransaction) => P
       throw error
     }
   })
-  transactionTail = result.then(() => undefined, () => undefined)
+  mutationTail = result.then(() => undefined, () => undefined)
   return result
 }
 
@@ -187,7 +205,7 @@ export async function transactionGetByIdOrNull<T = any>(
   }
 }
 
-export async function updateById(
+function updateByIdInternal(
   collectionName: string,
   id: string,
   data: object
@@ -203,7 +221,11 @@ export async function updateById(
   return { stats: { updated: 1 } }
 }
 
-export async function updateWhere(
+export function updateById(collectionName: string, id: string, data: object) {
+  return enqueueMutation(() => updateByIdInternal(collectionName, id, data))
+}
+
+function updateWhereInternal(
   collectionName: string,
   where: Record<string, any>,
   data: object
@@ -219,17 +241,25 @@ export async function updateWhere(
   return { stats: { updated } }
 }
 
-export async function removeById(collectionName: string, id: string) {
+export function updateWhere(collectionName: string, where: Record<string, any>, data: object) {
+  return enqueueMutation(() => updateWhereInternal(collectionName, where, data))
+}
+
+function removeByIdInternal(collectionName: string, id: string) {
   const col = collection(collectionName)
   const existed = col.delete(id)
   return { stats: { removed: existed ? 1 : 0 } }
 }
 
-export async function softDelete(collectionName: string, id: string) {
-  return updateById(collectionName, id, { status: 'deleted' })
+export function removeById(collectionName: string, id: string) {
+  return enqueueMutation(() => removeByIdInternal(collectionName, id))
 }
 
-export async function increment(
+export function softDelete(collectionName: string, id: string) {
+  return enqueueMutation(() => updateByIdInternal(collectionName, id, { status: 'deleted' }))
+}
+
+function incrementInternal(
   collectionName: string,
   docId: string,
   field: string,
@@ -244,6 +274,10 @@ export async function increment(
   }
   col.set(docId, { ...existing, [field]: (existing[field] || 0) + delta })
   return { stats: { updated: 1 } }
+}
+
+export function increment(collectionName: string, docId: string, field: string, delta: number) {
+  return enqueueMutation(() => incrementInternal(collectionName, docId, field, delta))
 }
 
 export async function query(
@@ -278,7 +312,7 @@ export async function query(
 
   return results
 }
-export async function queryAfterId(collectionName:string,where:Record<string,any>,afterId:string|null,limit:number){const rows=await query(collectionName,where,{orderBy:['_id','asc'],limit:10000});return rows.filter(row=>!afterId||row._id>afterId).slice(0,limit)}
+export async function queryAfterId(collectionName:string,where:Record<string,any>,afterId:string|null,limit:number){const rows=await query(collectionName,where,{orderBy:['_id','asc']});return rows.filter(row=>!afterId||row._id>afterId).slice(0,limit)}
 
 // ---- 内部工具 ----
 

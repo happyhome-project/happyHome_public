@@ -162,6 +162,28 @@ test('transactions queued after reset still serialize without lost updates', asy
   await expect(dbLocal.getById('counters', 'after-reset')).resolves.toMatchObject({ value: 12 })
 })
 
+test('ordinary mutations serialize with transactions so rollback cannot erase a concurrent successful write', async () => {
+  let release!: () => void
+  let entered!: () => void
+  const enteredPromise = new Promise<void>((resolve) => { entered = resolve })
+  const releasePromise = new Promise<void>((resolve) => { release = resolve })
+  const transaction = dbLocal.runTransaction(async (tx) => {
+    await tx.collection('items').doc('temporary').set({ data: { value: 'temporary' } })
+    entered()
+    await releasePromise
+    throw new Error('rollback')
+  })
+  await enteredPromise
+
+  const concurrentCreate = dbLocal.create('items', { _id: 'survivor', value: 'survivor' })
+  release()
+
+  await expect(transaction).rejects.toThrow('rollback')
+  await expect(concurrentCreate).resolves.toBe('survivor')
+  await expect(dbLocal.getById('items', 'survivor')).resolves.toMatchObject({ value: 'survivor' })
+  await expect(dbLocal.getById('items', 'temporary')).rejects.toMatchObject({ errCode: -502001 })
+})
+
 test('query where 条件过滤', async () => {
   await dbLocal.create('items', { type: 'a', val: 1 })
   await dbLocal.create('items', { type: 'b', val: 2 })
@@ -226,6 +248,15 @@ test('queryAfterId 使用稳定 _id 游标分页', async () => {
   await dbLocal.create('items', { _id: 'b', type: 'x' })
   await expect(dbLocal.queryAfterId('items', { type: 'x' }, 'a', 1)).resolves.toEqual([
     expect.objectContaining({ _id: 'b' }),
+  ])
+})
+
+test('queryAfterId filters the complete local store before limiting beyond 10000 rows', async () => {
+  await Promise.all(Array.from({ length: 10005 }, (_, index) => dbLocal.setById('large', `id-${String(index).padStart(5, '0')}`, { type: 'x' })))
+  await expect(dbLocal.queryAfterId('large', { type: 'x' }, 'id-10001', 3)).resolves.toEqual([
+    expect.objectContaining({ _id: 'id-10002' }),
+    expect.objectContaining({ _id: 'id-10003' }),
+    expect.objectContaining({ _id: 'id-10004' }),
   ])
 })
 

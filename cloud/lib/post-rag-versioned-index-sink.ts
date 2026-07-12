@@ -1,4 +1,5 @@
 
+import { createHash } from 'node:crypto'
 import type { PostRagSourceProjection } from './post-rag-indexing'
 import type { PostRagJobDocument } from './post-rag-jobs'
 
@@ -12,9 +13,9 @@ export function comparePostRagActivationOrder(left: PostRagActivationOrder, righ
 
 export interface PostRagVersionedIndexSink {
   stageUpsert(input: { projection: PostRagSourceProjection; job: PostRagJobDocument; jobId: string; leaseToken: string }): Promise<void>
-  inspectStaged(input: { postId: string; sourceVersion: string }): Promise<{ chunkCount: number; chunkChecksum: string }>
+  inspectStaged(input: { postId: string; sourceVersion: string; jobId: string; leaseToken: string }): Promise<{ chunkCount: number; chunkChecksum: string }>
   activate(input: { postId: string; sourceVersion: string; activationOrder: PostRagActivationOrder; jobId: string; leaseToken: string }): Promise<{ activated: boolean }>
-  cleanupOldVersions(input: { postId: string; keepSourceVersion: string; activationOrder: PostRagActivationOrder }): Promise<void>
+  cleanupOldVersions(input: { postId: string; keepSourceVersion: string; activationOrder: PostRagActivationOrder; jobId: string; leaseToken: string }): Promise<void>
   remove(input: { postId: string; sourceVersion: string; activationOrder: PostRagActivationOrder }): Promise<{ removed: boolean }>
 }
 
@@ -69,13 +70,15 @@ type State = {
   postId: string
   state: 'active' | 'removed'
   sourceVersion: string
+  attemptId?: string
   activationOrder: PostRagActivationOrder
 }
 
 function parseState(value: JsonRecord | null, postId: string): State | null {
   if (!value) return null
   if (value.schemaVersion !== 2 || value.postId !== postId || (value.state !== 'active' && value.state !== 'removed')
-    || !safeIdentifier(value.sourceVersion) || !validOrder(value.activationOrder)) fail('STATE_INVALID')
+    || !safeIdentifier(value.sourceVersion) || !validOrder(value.activationOrder)
+    || (value.state === 'active' && !safeIdentifier(value.attemptId))) fail('STATE_INVALID')
   return value as State
 }
 
@@ -104,6 +107,11 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value)
 }
 
+export function derivePostRagIndexAttemptId(jobId: string, leaseToken: string): string {
+  if (!safeIdentifier(jobId) || !safeIdentifier(leaseToken)) fail('VALIDATION_FAILED')
+  return createHash('sha256').update(jobId).update('\0').update(leaseToken).digest('hex').slice(0, 32)
+}
+
 export function createVersionedTencentEsRagSink(options: {
   database: Database
   requestJson: RequestJson
@@ -123,7 +131,7 @@ export function createVersionedTencentEsRagSink(options: {
     || !Number.isSafeInteger(mirrorPageSize) || mirrorPageSize < 1 || mirrorPageSize > 500
     || !Number.isSafeInteger(deleteBatchSize) || deleteBatchSize < 1 || deleteBatchSize > 500) fail('VALIDATION_FAILED')
 
-  type Mirror = JsonRecord & { _id: string; esDocumentId: string; activationOrder: PostRagActivationOrder }
+  type Mirror = JsonRecord & { _id: string; esDocumentId: string; attemptId: string; activationOrder: PostRagActivationOrder }
 
   async function listMirrors(postId: string): Promise<Mirror[]> {
     const mirrors: Mirror[] = []
@@ -132,7 +140,7 @@ export function createVersionedTencentEsRagSink(options: {
       const page = await database.queryAfterId('post_rag_index_versions', { schemaVersion: 2, postId }, afterId, mirrorPageSize)
       for (const doc of page) {
         if (!safeIdentifier(doc._id) || !safeIdentifier(doc.esDocumentId) || doc.postId !== postId || doc.schemaVersion !== 2
-          || !safeIdentifier(doc.sourceVersion) || !validOrder(doc.activationOrder)) fail('STATE_INVALID')
+          || !safeIdentifier(doc.sourceVersion) || !safeIdentifier(doc.attemptId) || !validOrder(doc.activationOrder)) fail('STATE_INVALID')
         mirrors.push(doc as Mirror)
       }
       if (page.length < mirrorPageSize) return mirrors
@@ -176,16 +184,18 @@ export function createVersionedTencentEsRagSink(options: {
     for (const mirror of mirrors) await database.removeById('post_rag_index_versions', mirror._id)
   }
 
-  async function currentMatches(postId: string, sourceVersion: string, order: PostRagActivationOrder, state: State['state']) {
+  async function currentMatches(postId: string, sourceVersion: string, order: PostRagActivationOrder, state: State['state'], attemptId?: string) {
     const current = parseState(await database.runTransaction((tx) => tx.getById('post_rag_index_state_v2', postId)), postId)
     return Boolean(current && current.state === state && current.sourceVersion === sourceVersion
-      && comparePostRagActivationOrder(current.activationOrder, order) === 0)
+      && comparePostRagActivationOrder(current.activationOrder, order) === 0
+      && (state !== 'active' || current.attemptId === attemptId))
   }
 
   return {
     async stageUpsert({ projection, job, jobId, leaseToken }) {
       assertProjection(projection, job)
       if (jobId !== job._id || !await hasLease(jobId, leaseToken)) fail('LEASE_LOST')
+      const attemptId = derivePostRagIndexAttemptId(jobId, leaseToken)
       const embeddings: number[][] = []
       for (let offset = 0; offset < projection.chunks.length; offset += embeddingBatchSize) {
         if (!await hasLease(jobId, leaseToken)) fail('LEASE_LOST')
@@ -199,8 +209,8 @@ export function createVersionedTencentEsRagSink(options: {
       const lines: string[] = []
       const documents = new Map<string, JsonRecord>()
       projection.chunks.forEach((chunk, index) => {
-        const id = `${chunk.postId}:${projection.sourceVersion}:${chunk.chunkId}`
-        const document = { ...chunk, projectionChecksum: projection.chunkChecksum, embedding: embeddings[index] }
+        const id = `${chunk.postId}:${projection.sourceVersion}:${attemptId}:${chunk.chunkId}`
+        const document = { ...chunk, indexAttemptId: attemptId, projectionChecksum: projection.chunkChecksum, embedding: embeddings[index] }
         documents.set(id, document)
         lines.push(JSON.stringify({ create: { _id: id } }))
         lines.push(JSON.stringify(document))
@@ -214,12 +224,17 @@ export function createVersionedTencentEsRagSink(options: {
       const conflicts: string[] = []
       const createdIds: string[] = []
       const documentIds = [...documents.keys()]
+      let hasFailure = false
       for (let index = 0; index < response.items.length; index += 1) {
         const result = response.items[index]?.create
         if (!result || !Number.isSafeInteger(result.status)) fail('ES_BULK_FAILED')
         if (result.status === 409) conflicts.push(documentIds[index])
-        else if (result.status < 200 || result.status >= 300) fail('ES_BULK_FAILED')
+        else if (result.status < 200 || result.status >= 300) hasFailure = true
         else createdIds.push(documentIds[index])
+      }
+      if (hasFailure) {
+        await deleteExplicitIds(createdIds)
+        fail('ES_BULK_FAILED')
       }
       if (!await hasLease(jobId, leaseToken)) {
         await deleteExplicitIds(createdIds)
@@ -243,10 +258,11 @@ export function createVersionedTencentEsRagSink(options: {
         }
       }
       const mirrors = projection.chunks.map((chunk) => {
-        const id = `${chunk.postId}:${projection.sourceVersion}:${chunk.chunkId}`
+        const id = `${chunk.postId}:${projection.sourceVersion}:${attemptId}:${chunk.chunkId}`
         return {
           _id: id, esDocumentId: id, schemaVersion: 2, postId: chunk.postId, communityId: chunk.communityId,
           sectionId: chunk.sectionId, sourceVersion: projection.sourceVersion, chunkId: chunk.chunkId,
+          attemptId,
           chunkChecksum: chunk.chunkChecksum, projectionChecksum: projection.chunkChecksum,
           activationOrder: { contentVersion: job.contentVersion, jobId: job._id },
         }
@@ -271,13 +287,14 @@ export function createVersionedTencentEsRagSink(options: {
       }
     },
 
-    async inspectStaged({ postId, sourceVersion }) {
+    async inspectStaged({ postId, sourceVersion, jobId, leaseToken }) {
       requireIdentifier(postId); requireIdentifier(sourceVersion)
+      const attemptId = derivePostRagIndexAttemptId(jobId, leaseToken)
       let response: any
       try {
         response = await requestJson('POST', `${options.indexName}/_search`, {
           size: 10000, _source: ['postId', 'sourceVersion', 'projectionChecksum'],
-          query: { bool: { filter: [{ term: { postId } }, { term: { sourceVersion } }] } },
+           query: { bool: { filter: [{ term: { postId } }, { term: { sourceVersion } }, { term: { indexAttemptId: attemptId } }] } },
         })
       } catch { fail('ES_INSPECTION_FAILED') }
       const hits = response?.hits?.hits
@@ -297,6 +314,7 @@ export function createVersionedTencentEsRagSink(options: {
     async activate({ postId, sourceVersion, activationOrder, jobId, leaseToken }) {
       requireIdentifier(postId); requireIdentifier(sourceVersion)
       if (!validOrder(activationOrder) || jobId !== activationOrder.jobId) fail('VALIDATION_FAILED')
+      const attemptId = derivePostRagIndexAttemptId(jobId, leaseToken)
       return database.runTransaction(async (tx) => {
         if (!safeIdentifier(jobId) || !safeIdentifier(leaseToken)
           || !leaseMatches(await tx.getById('post_rag_jobs', jobId), jobId, leaseToken)) fail('LEASE_LOST')
@@ -305,23 +323,25 @@ export function createVersionedTencentEsRagSink(options: {
           const comparison = comparePostRagActivationOrder(activationOrder, current.activationOrder)
           if (comparison < 0) return { activated: false }
           if (comparison === 0) {
-            if (current.sourceVersion !== sourceVersion || current.state !== 'active') fail('ACTIVATION_CONFLICT')
+            if (current.sourceVersion !== sourceVersion || current.state !== 'active' || current.attemptId !== attemptId) fail('ACTIVATION_CONFLICT')
             return { activated: true }
           }
         }
-        await tx.setById('post_rag_index_state_v2', postId, { schemaVersion: 2, postId, state: 'active', sourceVersion, activationOrder })
+        await tx.setById('post_rag_index_state_v2', postId, { schemaVersion: 2, postId, state: 'active', sourceVersion, attemptId, activationOrder })
         return { activated: true }
       })
     },
 
-    async cleanupOldVersions({ postId, keepSourceVersion, activationOrder }) {
+    async cleanupOldVersions({ postId, keepSourceVersion, activationOrder, jobId, leaseToken }) {
       requireIdentifier(postId); requireIdentifier(keepSourceVersion)
-      if (!validOrder(activationOrder)) fail('VALIDATION_FAILED')
-      if (!await currentMatches(postId, keepSourceVersion, activationOrder, 'active')) return
+      if (!validOrder(activationOrder) || jobId !== activationOrder.jobId) fail('VALIDATION_FAILED')
+      const attemptId = derivePostRagIndexAttemptId(jobId, leaseToken)
+      if (!await currentMatches(postId, keepSourceVersion, activationOrder, 'active', attemptId)) return
       const mirrors = await listMirrors(postId)
-      const removable = mirrors.filter((mirror) => comparePostRagActivationOrder(mirror.activationOrder, activationOrder) < 0)
+      const removable = mirrors.filter((mirror) => comparePostRagActivationOrder(mirror.activationOrder, activationOrder) < 0
+        || (comparePostRagActivationOrder(mirror.activationOrder, activationOrder) === 0 && mirror.attemptId !== attemptId))
       await deleteMirrorsFromEs(removable)
-      if (!await currentMatches(postId, keepSourceVersion, activationOrder, 'active')) return
+      if (!await currentMatches(postId, keepSourceVersion, activationOrder, 'active', attemptId)) return
       await removeMirrorRows(removable)
     },
 
