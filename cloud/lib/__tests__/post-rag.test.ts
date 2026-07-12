@@ -8,6 +8,10 @@ const mockDb = {
 }
 
 jest.mock('../db', () => mockDb)
+jest.mock('../post-search', () => ({
+  ...jest.requireActual('../post-search'),
+  removePostSearchIndex: jest.fn(),
+}))
 
 import {
   backfillPostRagJobsForSectionBatch,

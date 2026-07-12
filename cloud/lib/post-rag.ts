@@ -7,6 +7,7 @@ import {
   buildPostSearchChunks,
   buildPostSearchDocument,
   normalizeSearchText,
+  removePostSearchIndex,
   type PostSearchResult,
   type PostSearchResultItem,
 } from './post-search'
@@ -2306,6 +2307,40 @@ export async function enqueuePostRagJob(input: {
   return { queued: true, jobId }
 }
 
+export async function enqueuePostRagDeleteJobInTransaction(
+  transaction: db.DbTransaction,
+  input: { postId: string; communityId?: string; sectionId?: string; reason?: string; now?: string },
+) {
+  const postId = String(input.postId || '').trim()
+  if (!postId) throw new Error('postId is required')
+  const now = input.now || new Date().toISOString()
+  const jobId = `prj_delete_${stableId(postId)}`
+  const existing = await db.transactionGetByIdOrNull<any>(transaction, POST_RAG_JOBS, jobId)
+  if (existing) {
+    if (existing.schemaVersion === 2 || existing.postId !== postId || existing.action !== 'delete') {
+      throw new Error('legacy delete job id collision')
+    }
+    if (existing.status === 'failed') {
+      await transaction.collection(POST_RAG_JOBS).doc(jobId).update({ data: { status: 'pending', updatedAt: now } })
+      return { ...existing, status: 'pending', updatedAt: now }
+    }
+    return existing
+  }
+  const job = {
+    postId,
+    communityId: input.communityId || '',
+    sectionId: input.sectionId || '',
+    action: 'delete' as const,
+    reason: input.reason || '',
+    status: 'pending',
+    attempts: 0,
+    createdAt: now,
+    updatedAt: now,
+  }
+  await transaction.collection(POST_RAG_JOBS).doc(jobId).set({ data: job })
+  return { _id: jobId, ...job }
+}
+
 export async function backfillPostRagJobsForSectionBatch(
   sectionId: string,
   options: { skip?: number; limit?: number } = {}
@@ -2653,6 +2688,18 @@ export async function processPostRagJobBatch(options: {
     jobs.push(...page.filter((job) => job?.schemaVersion !== 2).slice(0, limit - jobs.length))
     if (page.length < pageSize) break
   }
+  if (jobs.length < limit) {
+    const failed = await db.query(
+      POST_RAG_JOBS,
+      { status: 'failed', ...(postId ? { postId } : {}) },
+      { orderBy: ['updatedAt', 'asc'], limit: pageSize },
+    ) as any[]
+    jobs.push(...failed
+      .filter((job) => job?.schemaVersion !== 2
+        && Number(job?.attempts || 0) < 5
+        && (Boolean(postId) || (typeof job?.nextRetryAt === 'string' && job.nextRetryAt <= startedAt)))
+      .slice(0, limit - jobs.length))
+  }
   const results: Array<{ jobId: string; ok: boolean; error?: string }> = []
   let indexEnsured = false
   let okCount = 0
@@ -2662,6 +2709,7 @@ export async function processPostRagJobBatch(options: {
     try {
       if (!provider.isConfigured()) throw new Error('rag_provider_not_configured')
       if (job.action === 'delete') {
+        await removePostSearchIndex(job.postId)
         await provider.deletePostChunks?.(job.postId)
         await upsertPostRagIndexState(job.postId, removedRagIndexState(job, now))
       } else {
@@ -2727,9 +2775,11 @@ export async function processPostRagJobBatch(options: {
       results.push({ jobId: job._id, ok: true })
       okCount += 1
     } catch (error: any) {
+      const attempts = Number(job.attempts || 0) + 1
       await db.updateById(POST_RAG_JOBS, job._id, {
         status: 'failed',
-        attempts: Number(job.attempts || 0) + 1,
+        attempts,
+        nextRetryAt: new Date(new Date(now).getTime() + Math.min(600, 5 * (2 ** Math.max(0, attempts - 1))) * 1000).toISOString(),
         errorMessage: String(error?.message || error),
         updatedAt: now,
       })

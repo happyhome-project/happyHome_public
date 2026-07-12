@@ -24,6 +24,7 @@ import {
 } from '../../lib/post-search'
 import {
   backfillPostRagJobsForSectionBatch,
+  enqueuePostRagDeleteJobInTransaction,
   enqueuePostRagJob,
   getPostRagIndexHealthForCommunity,
   reconcilePostRagJobsForCommunityBatch,
@@ -1880,50 +1881,57 @@ async function hardDeleteCommunity(communityId: string, community: Community) {
     if (banner.coverImage) fileIDs.push(banner.coverImage)
   }
 
-  const posts = await db.query('posts', { communityId })
-  for (const post of posts) {
-    fileIDs.push(...extractCloudFileIDsFromContent((post as any).content))
-    fileIDs.push(...extractCloudFileIDsFromContent((post as any).pendingContent))
+  await db.runTransaction(async transaction => {
+    const persisted = await db.transactionGetByIdOrNull<any>(transaction, 'communities', communityId)
+    if (!persisted || persisted.status !== 'disabled') {
+      throw new Error('only disabled community can be hard-deleted. disable it first.')
+    }
+    await transaction.collection('communities').doc(communityId).update({ data: { status: 'disabled' } })
+  })
+
+  const drainByCommunity = async (
+    collectionName: string,
+    remove: (document: any) => Promise<void>,
+  ) => {
+    let afterId: string | null = null
+    while (true) {
+      const page = await db.queryAfterId(collectionName, { communityId }, afterId, 100) as any[]
+      if (page.length === 0) {
+        if (afterId === null) return
+        afterId = null
+        continue
+      }
+      for (const document of page) await remove(document)
+      afterId = String(page[page.length - 1]._id || '')
+    }
   }
 
-  for (const post of posts) {
+  await drainByCommunity('posts', async post => {
+    fileIDs.push(...extractCloudFileIDsFromContent((post as any).content))
+    fileIDs.push(...extractCloudFileIDsFromContent((post as any).pendingContent))
+    await removePostSearchIndex(String((post as any)._id || ''))
     await db.runTransaction(async transaction => {
       await transaction.collection('posts').doc((post as any)._id).remove()
       await appendPostRagOutboxEvent(transaction, { communityId, aggregateId: String((post as any)._id || ''), reasonCode: 'post.deleted' })
+      await enqueuePostRagDeleteJobInTransaction(transaction, {
+        postId: String((post as any)._id || ''),
+        communityId,
+        sectionId: String((post as any).sectionId || ''),
+        reason: 'community.hardDelete',
+      })
     })
-    await enqueuePostRagJob({
-      postId: String((post as any)._id || ''),
-      communityId,
-      sectionId: String((post as any).sectionId || ''),
-      action: 'delete',
-      reason: 'community.hardDelete',
+  })
+
+  for (const collectionName of [
+    ATTENDANCE_COLLECTION,
+    'sections',
+    'community_members',
+    MEMBER_STATE_COLLECTION,
+    'community_create_requests',
+  ]) {
+    await drainByCommunity(collectionName, async document => {
+      await db.removeById(collectionName, String(document._id || ''))
     })
-    await removePostSearchIndex((post as any)._id)
-  }
-
-  const attendanceRecords = await db.query(ATTENDANCE_COLLECTION, { communityId })
-  for (const record of attendanceRecords) {
-    await db.removeById(ATTENDANCE_COLLECTION, (record as any)._id)
-  }
-
-  const sections = await db.query('sections', { communityId })
-  for (const section of sections) {
-    await db.removeById('sections', (section as any)._id)
-  }
-
-  const members = await db.query('community_members', { communityId })
-  for (const member of members) {
-    await db.removeById('community_members', (member as any)._id)
-  }
-
-  const memberStates = await db.query(MEMBER_STATE_COLLECTION, { communityId })
-  for (const state of memberStates) {
-    await db.removeById(MEMBER_STATE_COLLECTION, (state as any)._id)
-  }
-
-  const createRequests = await db.query('community_create_requests', { communityId })
-  for (const request of createRequests) {
-    await db.removeById('community_create_requests', (request as any)._id)
   }
 
   await db.removeById('communities', communityId)

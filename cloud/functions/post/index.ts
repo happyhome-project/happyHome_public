@@ -15,7 +15,7 @@ import {
   isActivityInviteSection,
 } from '../../shared/activity-invite'
 import { removePostSearchIndex } from '../../lib/post-search'
-import { enqueuePostRagJob, searchPostsWithRag } from '../../lib/post-rag'
+import { enqueuePostRagDeleteJobInTransaction, enqueuePostRagJob, searchPostsWithRag } from '../../lib/post-rag'
 import { appendPostRagOutboxEvent } from '../../lib/post-rag-outbox'
 import type {
   AttendancePreviewUser,
@@ -755,8 +755,20 @@ export async function handleDelete(params: { postId: string }, openid: string) {
     communityId?: string
     sectionId?: string
   }
-  if (post.status === 'deleted') throw new Error('帖子已删除')
   if (post.authorId !== openid) throw new Error('无权删除')
+
+  if (post.status === 'deleted') {
+    await db.runTransaction(async transaction => {
+      await enqueuePostRagDeleteJobInTransaction(transaction, {
+        postId: params.postId,
+        communityId: post.communityId,
+        sectionId: post.sectionId,
+        reason: 'post.delete.compensate',
+      })
+    })
+    await removePostSearchIndex(params.postId)
+    return { success: true, alreadyDeleted: true }
+  }
 
   await db.runTransaction(async transaction => {
     await transaction.collection('posts').doc(params.postId).update({ data: {
@@ -764,13 +776,12 @@ export async function handleDelete(params: { postId: string }, openid: string) {
       isFeatured: false, featuredAt: '', featuredByAccountId: '',
     } })
     await appendPostRagOutboxEvent(transaction, { communityId: String(post.communityId || ''), aggregateId: params.postId, reasonCode: 'post.deleted', now: new Date().toISOString() })
-  })
-  await enqueuePostRagJob({
-    postId: params.postId,
-    communityId: post.communityId,
-    sectionId: post.sectionId,
-    action: 'delete',
-    reason: 'post.delete',
+    await enqueuePostRagDeleteJobInTransaction(transaction, {
+      postId: params.postId,
+      communityId: post.communityId,
+      sectionId: post.sectionId,
+      reason: 'post.delete',
+    })
   })
   await removePostSearchIndex(params.postId)
   return { success: true }

@@ -32,6 +32,7 @@ jest.mock('../../../lib/post-search', () => ({
 
 jest.mock('../../../lib/post-rag', () => ({
   enqueuePostRagJob: jest.fn(),
+  enqueuePostRagDeleteJobInTransaction: jest.fn(),
   searchPostsWithRag: jest.fn(),
 }))
 
@@ -1364,14 +1365,38 @@ test('delete: clears pin and featured flags', async () => {
     featuredByAccountId: '',
   })
   expect(result).toEqual({ success: true })
-  expect(postRag.enqueuePostRagJob).toHaveBeenCalledWith({
+  expect(postRag.enqueuePostRagDeleteJobInTransaction).toHaveBeenCalledWith(expect.anything(), {
     postId: 'post-flagged',
     communityId: 'community-1',
     sectionId: 'section-1',
-    action: 'delete',
     reason: 'post.delete',
   })
   expect(postSearch.removePostSearchIndex).toHaveBeenCalledWith('post-flagged')
+})
+
+test('delete: retries legacy cleanup for an authorized already-deleted post without repeating the v2 mutation', async () => {
+  const post = {
+    _id: 'post-retry',
+    authorId: 'test-openid',
+    status: 'active',
+    communityId: 'community-1',
+    sectionId: 'section-1',
+  }
+  ;(db.getById as jest.Mock)
+    .mockResolvedValueOnce(post)
+    .mockResolvedValueOnce({ ...post, status: 'deleted' })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+  ;(postSearch.removePostSearchIndex as jest.Mock)
+    .mockRejectedValueOnce(new Error('legacy search unavailable'))
+    .mockResolvedValueOnce({ removedDocumentCount: 1 })
+
+  await expect(handleDelete({ postId: 'post-retry' }, 'test-openid')).rejects.toThrow('legacy search unavailable')
+  await expect(handleDelete({ postId: 'post-retry' }, 'test-openid')).resolves.toEqual({ success: true, alreadyDeleted: true })
+
+  const { appendPostRagOutboxEvent } = require('../../../lib/post-rag-outbox')
+  expect(appendPostRagOutboxEvent).toHaveBeenCalledTimes(1)
+  expect(db.updateById).toHaveBeenCalledTimes(1)
+  expect(postSearch.removePostSearchIndex).toHaveBeenCalledTimes(2)
 })
 
 test('search: checks community readability and delegates to formal RAG search', async () => {

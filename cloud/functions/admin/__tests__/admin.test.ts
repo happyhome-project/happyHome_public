@@ -11,6 +11,7 @@ jest.mock('../../../lib/db', () => ({
   removeById: jest.fn(),
   softDelete: jest.fn(),
   query: jest.fn(),
+  queryAfterId: jest.fn(),
   increment: jest.fn(),
   runTransaction: jest.fn(),
   transactionGetByIdOrNull: jest.fn(async (transaction, collectionName, id) => {
@@ -38,6 +39,7 @@ jest.mock('../../../lib/post-search', () => ({
 
 jest.mock('../../../lib/post-rag', () => ({
   backfillPostRagJobsForSectionBatch: jest.fn(),
+  enqueuePostRagDeleteJobInTransaction: jest.fn(),
   enqueuePostRagJob: jest.fn(),
   getPostRagIndexHealthForCommunity: jest.fn(),
   reconcilePostRagJobsForCommunityBatch: jest.fn(),
@@ -993,24 +995,26 @@ test('post.removeAttendanceMemberAdmin: 可移除参与人并返回最新名单'
 })
 
 test('community.hardDelete: cleans cloud files from current and pending post content', async () => {
-  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+  const community = {
     _id: 'community-1',
     status: 'disabled',
     coverImage: 'cloud://env/community-cover.jpg',
-  })
-  ;(db.query as jest.Mock)
-    .mockResolvedValueOnce([
-      {
+  }
+  ;(db.getById as jest.Mock).mockResolvedValue(community)
+  let postsReturned = false
+  ;(db.queryAfterId as jest.Mock).mockImplementation(async (collectionName, _where, afterId) => {
+    if (collectionName === 'posts' && afterId === null && !postsReturned) {
+      postsReturned = true
+      return [{
         _id: 'post-1',
+        communityId: 'community-1',
+        sectionId: 'section-1',
         content: { images: ['cloud://env/current.jpg'] },
         pendingContent: { rich: { imageFileIDs: ['cloud://env/pending.jpg'] } },
-      },
-    ])
-    .mockResolvedValueOnce([])
-    .mockResolvedValueOnce([])
-    .mockResolvedValueOnce([])
-    .mockResolvedValueOnce([])
-    .mockResolvedValueOnce([])
+      }]
+    }
+    return []
+  })
   ;(db.removeById as jest.Mock).mockResolvedValue({})
   ;(storage.deleteFile as jest.Mock).mockResolvedValue({})
 
