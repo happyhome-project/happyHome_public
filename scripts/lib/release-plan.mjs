@@ -120,18 +120,19 @@ export function createReleasePlan({
   if (needsExternalManifest(changedPaths) && !manifests.length) {
     throw new Error('external release changes require a release/changes manifest')
   }
+  const fullCurrent = mode === 'full-current'
   const bootstrap = mode === 'main' && !baseSha
-  const planningStrategy = mode === 'full-current' ? 'full-current' : bootstrap ? 'bootstrap' : 'incremental'
+  const planningStrategy = fullCurrent ? 'full-current' : bootstrap ? 'bootstrap' : 'incremental'
   const targets = classifyReleaseImpact({ changedPaths, allFunctions, functionInputs })
   if (bootstrap) targets.cloud = allCloud(allFunctions, 'bootstrap:no-production-base')
-  if (mode === 'full-current') {
+  if (fullCurrent) {
     targets.adminWeb = true
     targets.cloud = allCloud(allFunctions, 'full-current:explicit')
     targets.miniprogram = true
   }
   const hasRuntimeTarget = targets.cloud.functions.length > 0 || targets.miniprogram || targets.adminWeb
   return {
-    baseSha: baseSha || null,
+    baseSha: fullCurrent ? null : baseSha || null,
     bootstrap,
     changeIds: manifestSummary.changeIds,
     changedPaths: changedPaths.map(normalizePath),

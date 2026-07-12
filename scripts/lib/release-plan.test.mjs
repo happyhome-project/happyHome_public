@@ -83,7 +83,7 @@ test('full-current plans explicitly publish every current runtime target and ret
     { schemaVersion: 1, changeId: 'network', actions: ['configure-rag-network'], migrations: [], smokeSuites: [] },
   ]
   const plan = createReleasePlan({
-    baseSha: '',
+    baseSha: 'unexpected-base',
     headSha: 'head',
     changedPaths: ['docs/guide.md'],
     allFunctions: ['post', 'user'],
