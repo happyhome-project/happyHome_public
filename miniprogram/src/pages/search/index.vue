@@ -118,6 +118,7 @@ import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
+import { createSemanticSearchSession, normalizeSemanticQuery, type SemanticSearchRequest } from '../../utils/semantic-search-session'
 
 interface SearchItem {
   postId: string
@@ -155,7 +156,7 @@ const generatedAvatarPalettes = [
   ['#F1D08A', '#7294B8'],
   ['#C9D6A3', '#C4867D'],
 ]
-let searchRequestSeq = 0
+const searchSession = createSemanticSearchSession()
 
 const communityName = computed(() => {
   if (communityStore.currentCommunityId === communityId.value && communityStore.currentCommunity?.name) {
@@ -192,6 +193,18 @@ watch(
   },
 )
 
+watch(query, (nextDraft) => {
+  const edit = searchSession.editDraft(nextDraft)
+  if (!edit.invalidated) return
+  loading.value = false
+  searched.value = false
+  items.value = []
+  total.value = 0
+  loadError.value = ''
+  resolvedResultCoverUrls.value = {}
+  resolvedResultAvatarUrls.value = {}
+})
+
 function decodeParam(value: unknown): string {
   let next = String(value || '')
   if (!next) return ''
@@ -212,7 +225,7 @@ function submitSearch() {
 }
 
 function clearQuery() {
-  searchRequestSeq += 1
+  searchSession.clear()
   loading.value = false
   query.value = ''
   searched.value = false
@@ -229,12 +242,16 @@ function goBack() {
 
 async function loadMore() {
   if (loading.value || items.value.length >= total.value) return
-  await runSearch({ reset: false })
+  const request = searchSession.nextPage(query.value, items.value.length)
+  if (request.kind === 'restart') {
+    await runSearch({ reset: true })
+    return
+  }
+  await runSearch({ reset: false, request })
 }
 
-async function runSearch(options: { reset: boolean; showShortToast?: boolean }) {
-  const requestSeq = ++searchRequestSeq
-  const normalizedQuery = query.value.trim()
+async function runSearch(options: { reset: boolean; showShortToast?: boolean; request?: SemanticSearchRequest }) {
+  const normalizedQuery = normalizeSemanticQuery(query.value)
   if (!communityId.value) {
     uni.showToast({ title: '请先选择社区', icon: 'none' })
     openOnboardingPreservingStack()
@@ -253,25 +270,32 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
     return
   }
 
+  const request = options.reset
+    ? searchSession.submit(normalizedQuery)
+    : options.request || searchSession.nextPage(query.value, items.value.length)
+  if (request.kind === 'restart') {
+    await runSearch({ reset: true, showShortToast: options.showShortToast })
+    return
+  }
+
   loading.value = true
   loadError.value = ''
-  const skip = options.reset ? 0 : items.value.length
   const asGuest = shouldSearchAsGuest(communityId.value)
   clientLog('info', 'search.load.start', {
     communityId: communityId.value,
-    skip,
+    skip: request.skip,
     reset: options.reset,
     asGuest,
   })
   try {
     const result = await postApi.search({
       communityId: communityId.value,
-      query: normalizedQuery,
-      skip,
+      query: request.query,
+      skip: request.skip,
       limit: Math.min(PAGE_SIZE, MAX_PAGE_SIZE),
       asGuest,
     })
-    if (requestSeq !== searchRequestSeq) return
+    if (!searchSession.isCurrent(request.requestSeq)) return
     const nextItems = result.items || []
     items.value = options.reset ? nextItems : items.value.concat(nextItems)
     total.value = Number(result.total || items.value.length)
@@ -283,7 +307,7 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
       returned: nextItems.length,
     })
   } catch (error: any) {
-    if (requestSeq !== searchRequestSeq) return
+    if (!searchSession.isCurrent(request.requestSeq)) return
     loadError.value = friendlySearchError(error)
     searched.value = true
     clientLog('error', 'search.load.fail', { communityId: communityId.value, error })
@@ -291,7 +315,7 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
       uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
     }
   } finally {
-    if (requestSeq === searchRequestSeq) {
+    if (searchSession.isCurrent(request.requestSeq)) {
       loading.value = false
     }
   }
