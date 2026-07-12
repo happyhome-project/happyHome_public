@@ -74,12 +74,24 @@ describe('public semantic post search contract', () => {
     const envelope = {
       took: 7,
       timed_out: false,
+      _shards: { total: 3, successful: 3, skipped: 0, failed: 0 },
       hits: { total: { value: 1, relation: 'eq' }, max_score: null, hits: [
         { _index: 'post-rag-v2', _id: 'post-1:source-1:chunk-1', _score: null, _rank: 1, _source: rawItem() },
       ] },
     }
-    expect(parsePostRagEsResponse(envelope).hits.hits).toHaveLength(1)
+    expect(parsePostRagEsResponse(envelope)).toMatchObject({
+      _shards: { total: 3, successful: 3, skipped: 0, failed: 0 },
+      hits: { hits: [expect.objectContaining({ _id: 'post-1:source-1:chunk-1' })] },
+    })
     expect(() => parsePostRagEsResponse({ ...envelope, secret: true })).toThrow('invalid Elasticsearch response')
+    expect(() => parsePostRagEsResponse({
+      ...envelope,
+      _shards: { total: 3, successful: 4, skipped: 0, failed: 0 },
+    })).toThrow('invalid Elasticsearch shards')
+    expect(() => parsePostRagEsResponse({
+      ...envelope,
+      _shards: { ...envelope._shards, failures: [] },
+    })).toThrow('invalid Elasticsearch shards')
     expect(() => parsePostRagEsResponse({ ...envelope, hits: { ...envelope.hits, hits: [
       envelope.hits.hits[0], { _id: 'bad', _source: { postId: 'post-1' } },
     ] } })).toThrow('invalid Elasticsearch hit')

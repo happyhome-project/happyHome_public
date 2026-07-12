@@ -42,6 +42,12 @@ export interface PostRagEsHit {
 export interface PostRagEsResponse {
   took: number
   timed_out: false
+  _shards: {
+    total: number
+    successful: number
+    skipped: number
+    failed: number
+  }
   hits: {
     total: { value: number; relation: 'eq' | 'gte' }
     max_score: number | null
@@ -173,9 +179,19 @@ function parseEsHit(value: unknown): PostRagEsHit {
 
 export function parsePostRagEsResponse(value: unknown): PostRagEsResponse {
   const raw = objectValue(value, 'invalid Elasticsearch response')
-  exactKeys(raw, ['took', 'timed_out', 'hits'], 'invalid Elasticsearch response')
+  exactKeys(raw, ['took', 'timed_out', '_shards', 'hits'], 'invalid Elasticsearch response')
   if (!Number.isInteger(raw.took) || (raw.took as number) < 0 || raw.timed_out !== false) {
     throw new Error('invalid Elasticsearch response')
+  }
+  const shards = objectValue(raw._shards, 'invalid Elasticsearch shards')
+  exactKeys(shards, ['total', 'successful', 'skipped', 'failed'], 'invalid Elasticsearch shards')
+  const totalShards = nonNegativeInteger(shards.total, 'Elasticsearch shards')
+  const successfulShards = nonNegativeInteger(shards.successful, 'Elasticsearch shards')
+  const skippedShards = nonNegativeInteger(shards.skipped, 'Elasticsearch shards')
+  const failedShards = nonNegativeInteger(shards.failed, 'Elasticsearch shards')
+  if (successfulShards > totalShards || skippedShards > successfulShards ||
+      failedShards > totalShards || successfulShards + failedShards > totalShards) {
+    throw new Error('invalid Elasticsearch shards')
   }
   const hits = objectValue(raw.hits, 'invalid Elasticsearch response')
   exactKeys(hits, ['total', 'max_score', 'hits'], 'invalid Elasticsearch response')
@@ -189,6 +205,12 @@ export function parsePostRagEsResponse(value: unknown): PostRagEsResponse {
   }
   return {
     took: raw.took as number, timed_out: false,
+    _shards: {
+      total: totalShards,
+      successful: successfulShards,
+      skipped: skippedShards,
+      failed: failedShards,
+    },
     hits: {
       total: { value: total.value as number, relation: total.relation },
       max_score: hits.max_score as number | null,
