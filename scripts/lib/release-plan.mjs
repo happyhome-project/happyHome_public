@@ -16,7 +16,22 @@ function normalizePath(value) {
 }
 
 function changeStatus(value) {
-  return String(value || '').match(/^([ADMR])\d*\t/)?.[1] || 'M'
+  return String(value || '').match(/^([ACDMR])\d*\t/)?.[1] || 'M'
+}
+
+function parseChangedPath(value) {
+  const raw = String(value || '')
+  const status = changeStatus(raw)
+  const fields = raw.split('\t')
+  if (/^[CR]\d*$/.test(fields[0] || '') && fields.length >= 3) {
+    return fields.slice(1, 3).map((path) => ({ path: normalizePath(path), status }))
+  }
+  return [{ path: normalizePath(raw), status }]
+}
+
+function isCloudTestOnly(path) {
+  return path.split('/').includes('__tests__')
+    || /(?:\.integration)?\.test\.ts$/i.test(path)
 }
 
 function unique(values) {
@@ -28,10 +43,10 @@ function allCloud(allFunctions, reason) {
 }
 
 export function classifyReleaseImpact({ changedPaths = [], allFunctions = ALL_CLOUD_FUNCTIONS, functionInputs = {} }) {
-  const paths = changedPaths.map((value) => ({ path: normalizePath(value), status: changeStatus(value) }))
+  const paths = changedPaths.flatMap(parseChangedPath)
   const miniprogram = paths.some(({ path }) => path.startsWith('miniprogram/'))
   const adminWeb = paths.some(({ path }) => path.startsWith('admin-web/'))
-  const cloudPaths = paths.filter(({ path }) => path.startsWith('cloud/'))
+  const cloudPaths = paths.filter(({ path }) => path.startsWith('cloud/') && !isCloudTestOnly(path))
   let cloud = { functions: [], mode: 'none', reasons: [] }
 
   const forceAll = cloudPaths.find(({ path, status }) => status === 'D' || status === 'R'
