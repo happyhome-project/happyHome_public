@@ -55,6 +55,26 @@ test('SCF timer polls long enough for a newly created trigger to become visible'
   assert.equal(listCount, 7)
 })
 
+test('SCF timer accepts the canonical JSON cron readback returned by SCF', async () => {
+  const cron = '0 * * * * * *'
+  const customArgument = 'secret'
+  const request = async action => action === 'ListTriggers' ? { Triggers: [{
+    TriggerName: 'post-rag-worker-every-minute',
+    TriggerDesc: JSON.stringify({ cron }),
+    CustomArgument: customArgument,
+  }] } : {}
+
+  const result = await reconcileOwnedScfTimer(request, {
+    functionName: 'post-rag-worker',
+    namespace: 'env',
+    cron,
+    customArgument,
+    wait: async () => {},
+  })
+
+  assert.equal(result.cron, cron)
+})
+
 test('SCF timer fails closed when readback omits CustomArgument', async () => {
   const request = async action => action === 'ListTriggers' ? { Triggers: [] } : {}
   await assert.rejects(() => reconcileOwnedScfTimer(request, { functionName: 'post-rag-worker', namespace: 'env', cron: '0 * * * * * *', customArgument: 'secret', wait: async () => {} }), /verification/)

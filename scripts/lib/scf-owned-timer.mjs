@@ -6,9 +6,24 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+function triggerCronMatches(triggerDesc, cron) {
+  if (triggerDesc === cron) return true
+  if (typeof triggerDesc !== 'string') return false
+  try {
+    const parsed = JSON.parse(triggerDesc)
+    return parsed !== null
+      && typeof parsed === 'object'
+      && !Array.isArray(parsed)
+      && Object.keys(parsed).length === 1
+      && parsed.cron === cron
+  } catch {
+    return false
+  }
+}
+
 function isDesiredTrigger(trigger, cron, customArgument) {
   return trigger.TriggerName === 'post-rag-worker-every-minute'
-    && trigger.TriggerDesc === cron
+    && triggerCronMatches(trigger.TriggerDesc, cron)
     && trigger.CustomArgument === customArgument
 }
 
