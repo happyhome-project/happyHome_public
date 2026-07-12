@@ -10,6 +10,14 @@ import { parseEnvFile } from './h5-test-tenant.mjs'
 
 const execFileAsync = promisify(execFile)
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const CHILD_ENV_ALLOWLIST = ['PATH', 'SystemRoot', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP', 'USERPROFILE', 'HOME', 'APPDATA', 'LOCALAPPDATA', 'HOMEDRIVE', 'HOMEPATH', 'NODE_ENV', 'CI']
+
+export function buildChildEnv(source, values) {
+  const env = Object.fromEntries(CHILD_ENV_ALLOWLIST.filter((key) => source[key] !== undefined).map((key) => [key, source[key]]))
+  env.VITE_CLOUDBASE_ENV_ID = values.HH_CLOUDBASE_ENV_ID.trim()
+  env.VITE_CLOUDBASE_ACCESS_KEY = values.HH_CLOUDBASE_ACCESS_KEY.trim()
+  return env
+}
 
 export async function availablePort() {
   return new Promise((resolvePort, reject) => {
@@ -56,7 +64,7 @@ export function createH5WebLauncher({ root = ROOT, home = homedir(), findPort = 
     const url = `http://127.0.0.1:${port}`
     const child = spawnChild('npm.cmd', ['--workspace', 'miniprogram', 'run', 'dev:h5', '--', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
       cwd: root, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
-      env: { ...process.env, VITE_CLOUDBASE_ENV_ID: values.HH_CLOUDBASE_ENV_ID.trim(), VITE_CLOUDBASE_ACCESS_KEY: values.HH_CLOUDBASE_ACCESS_KEY.trim() },
+      env: buildChildEnv(process.env, values),
     })
     let stopped = false
     const stop = async () => { if (!stopped) { stopped = true; await killTree(child.pid) } }

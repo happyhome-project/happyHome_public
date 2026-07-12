@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 
 export const FIXTURE_KEY = 'HH_WEB_H5_V1'
 export const COMMUNITY_ID = 'hh-web-h5-v1-community'
+export const SECTION_IDS = Object.freeze({ long: 'hh-web-h5-v1-section-long', short: 'hh-web-h5-v1-section-short', empty: 'hh-web-h5-v1-section-empty' })
 const CREATED_AT = '2026-01-01T00:00:00.000Z'
 
 function stable(value) {
@@ -42,7 +43,10 @@ export function buildManifest({ webUserId = null, wechatOpenid }) {
     enableLike: true,
     type: 'evergreen',
     status: 'active',
-    widgets: [{ widgetId: `hh-web-h5-v1-widget-${suffix}`, type: suffix === 'long' ? 'rich_text' : 'short_text', label: '内容', fieldKey: 'content', required: suffix !== 'empty', order: 0, showInList: suffix !== 'long' }],
+    widgets: [
+      { widgetId: `hh-web-h5-v1-widget-${suffix}`, type: suffix === 'long' ? 'rich_text' : 'short_text', label: '内容', fieldKey: 'content', required: suffix !== 'empty', order: 0, showInList: suffix !== 'long' },
+      ...(suffix === 'short' ? [{ widgetId: 'hh-web-h5-v1-widget-short-image', type: 'image_group', label: '图片', fieldKey: 'images', required: false, order: 1, showInList: true }] : []),
+    ],
     fixturePostCount,
     fixtureKey: FIXTURE_KEY,
     createdAt: CREATED_AT,

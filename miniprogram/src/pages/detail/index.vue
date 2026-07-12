@@ -1,6 +1,6 @@
 <template>
   <view class="detail-page" :class="{ 'detail-page--guide': isGuideNoteDetail }">
-    <view v-if="post && section" class="content" :class="{ 'guide-note-detail': isGuideNoteDetail }">
+    <view v-if="post && section" class="content" data-testid="detail-ready" :data-post-id="post._id" :class="{ 'guide-note-detail': isGuideNoteDetail }">
       <view v-if="post.isPinned || post.isFeatured" class="post-flag-row">
         <text v-if="post.isPinned" class="post-flag pin">置顶</text>
         <text v-if="post.isFeatured" class="post-flag feature">精华</text>

@@ -32,7 +32,7 @@ $env:HAPPYHOME_FIXTURE_PREFIX='hh-web-h5-v1'
 npm.cmd run h5:test-tenant -- apply --manifest=.codex-local/h5-test-tenant/prepare.json
 ```
 
-apply、`--mode=write` 以及 WeChat DevTools 自动化会获取同一台机器的 validation lease。write smoke 使用唯一 run ID，通过真实 H5 发布页只创建自己的临时记录，进入 exact detail 后用作者删除控件清理，再重新读取该 detail 验证记录已不存在；清理失败即非零退出。
+apply、`--mode=write` 以及 WeChat DevTools 自动化会获取同一台机器的 validation lease。固定 short section 含一个 deterministic、optional 的图片控件，31 条 baseline posts 保持该字段为空。write smoke 使用唯一 run ID，通过真实 H5 file chooser 上传脚本生成的 1×1 PNG 并只创建自己的临时记录，进入 exact detail 后验证该内容图片已解析为 HTTPS storage URL；随后用作者删除控件清理，再重新读取该 detail 验证记录已不存在。创建后的任意失败也会按唯一内容重新定位 exact post 并清理；无法定位或清理时非零退出。
 
 故障诊断：缺少配置时按报错补齐 machine file；doctor drift 时先重新 prepare 比对，禁止自动修复；端口启动失败时检查报错所列随机端口和当前 child PID，不要终止其他 worktree 服务；lease active/stale 时先运行 `npm.cmd run validation:lease:status`，未经原 owner 退出确认不得恢复。
 

@@ -53,6 +53,11 @@ test('fixed manifest contains one hidden approval community, three sections, and
   assert.deepEqual(manifest.sections.map((section) => section.order), [0, 1, 2])
   assert.deepEqual(manifest.sections.map((section) => section.fixturePostCount), [30, 1, 0])
   assert.equal(manifest.posts.length, 31)
+  assert.deepEqual(manifest.sections[1].widgets.map((widget) => [widget.type, widget.required]), [
+    ['short_text', true],
+    ['image_group', false],
+  ])
+  assert.ok(manifest.posts.every((post) => !Object.hasOwn(post.content, 'hh-web-h5-v1-widget-short-image')))
   assert.equal(new Set(manifest.posts.map((post) => post._id)).size, 31)
   assert.ok(manifest.posts.every((post) => post.auditStatus === 'pass' && post.fixtureKey === FIXTURE_KEY))
 })

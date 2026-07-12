@@ -1,6 +1,6 @@
 <template>
-  <view class="section-page">
-      <view v-if="!loading && section" class="section-head">
+  <view class="section-page" data-testid="section-page">
+      <view v-if="!loading && section" class="section-head" data-testid="section-ready" :data-section-id="section._id">
         <view class="title-row">
           <text class="section-title">{{ sectionName }}</text>
           <text v-if="posts.length" class="section-count">{{ posts.length }} 条</text>
@@ -37,6 +37,8 @@
           v-for="item in sectionItems"
           :key="item.postId"
           class="post-card"
+          data-testid="section-post-card"
+          :data-post-id="item.postId"
           :class="{ 'post-card--visual': !!item.coverImage }"
           @tap="openPost(item.postId)"
         >

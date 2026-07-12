@@ -32,6 +32,9 @@ test('launcher injects only public CloudBase config, selects an available port, 
   assert.deepEqual(Object.fromEntries(Object.entries(calls[0].options.env).filter(([key]) => key.startsWith('VITE_'))), {
     VITE_CLOUDBASE_ENV_ID: 'env-public', VITE_CLOUDBASE_ACCESS_KEY: 'key-public',
   })
+  assert.equal(calls[0].options.env.HH_H5_WEB_PASSWORD, undefined)
+  assert.equal(calls[0].options.env.TENCENT_SECRET_KEY, undefined)
+  assert.equal(calls[0].options.env.GH_TOKEN, undefined)
   assert.match(calls[0].args.join(' '), /--strictPort/)
   await running.stop()
   assert.deepEqual(calls.at(-1), { killed: 4242 })

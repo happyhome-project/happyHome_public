@@ -150,6 +150,8 @@
             v-for="(g, index) in archiveGroups"
             :key="`fixed-${g.id}`"
             class="section-tab"
+            :data-testid="`home-section-tab-${g.id}`"
+            :data-section-id="g.id"
             :class="{ active: index === activeArchiveIndex }"
             @tap="selectArchiveGroup(g)"
           >
@@ -247,6 +249,8 @@
           v-for="(g, index) in archiveGroups"
           :key="g.id"
           class="section-tab"
+          :data-testid="`home-section-tab-${g.id}`"
+          :data-section-id="g.id"
           :class="{ active: index === activeArchiveIndex }"
           @tap="selectArchiveGroup(g)"
         >
@@ -282,6 +286,8 @@
               v-for="(item, i) in column"
               :key="item.postId || columnIndex + '-' + i"
               class="guide-card"
+              data-testid="home-post-card"
+              :data-post-id="item.postId"
               @tap="onPostTap(item)"
             >
               <image
@@ -333,6 +339,8 @@
             v-for="(item, i) in activeArchiveGroup.items"
             :key="item.postId || i"
             class="arc-item"
+            data-testid="home-post-card"
+            :data-post-id="item.postId"
             @tap.stop="onPostTap(item)"
           >
             <!-- kicker 小标：当前装饰版固定 01/02/03；未来接真实档案号时仍走 item.k -->
