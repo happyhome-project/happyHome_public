@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createEvaluationIdentities, runLiveSemanticEvaluation } from './lib/live-semantic-evaluator.mjs'
 import { advanceV2Worker, cleanupFixtureRun, invokePostSemanticAdmin, parseArgs, readFixtureIndexState, searchPost, seedFixtureMember, seedFixtureRun } from './verify-post-rag-smoke.mjs'
+import { cleanupSemanticEvaluationFixtures } from './lib/semantic-eval-cleanup.mjs'
 
 const dataset=JSON.parse(readFileSync(new URL('./fixtures/post-semantic-search-eval.json',import.meta.url),'utf8'))
 const options=parseArgs(); const runId=process.env.HH_RELEASE_RUN_ID||`semantic-${Date.now().toString(36)}`
@@ -41,7 +42,7 @@ const report=await runLiveSemanticEvaluation({cases:dataset,environment:options.
   verifyPermissions:async(ctx)=>{const member=await searchPost(options,ctx.communityId,'会员专属内部互助内容',ctx.memberIdentity);const guest=await searchPost(options,ctx.communityId,'会员专属内部互助内容',ctx.guestIdentity);return{memberHit:(member.items||[]).some(x=>x.postId===ctx.memberOnlyId),guestLeak:(guest.items||[]).some(x=>x.postId===ctx.memberOnlyId)}},
   search:async(item,sample)=>{const start=Date.now();const result=await searchPost(options,fixtureContext.communityId,item.query,fixtureContext.guestIdentity);return{durationMs:Date.now()-start,items:result.items||[],cacheClass:sample.cacheClass}},
   writeEvidence:async(e)=>{const dir=resolve('.codex-local','release-evidence',runId);mkdirSync(dir,{recursive:true});const path=resolve(dir,'post-semantic-eval.json');writeFileSync(path,JSON.stringify(e,null,2));return path},
-  cleanup:async(ctx)=>{ctx ||= fixtureContext;if(!ctx)return;for(const id of ctx.runIds||[])await cleanupFixtureRun(id);for(const communityId of [ctx.communityId,ctx.crossCommunityId].filter(Boolean)){try{await invokePostSemanticAdmin('community.disable',{communityId},options)}catch{}await invokePostSemanticAdmin('community.hardDelete',{communityId},options)}},
+  cleanup:async(ctx)=>{ctx ||= fixtureContext;if(!ctx)return;await cleanupSemanticEvaluationFixtures({runIds:ctx.runIds||[],communityIds:[ctx.communityId,ctx.crossCommunityId].filter(Boolean)},{cleanupRun:cleanupFixtureRun,disable:id=>invokePostSemanticAdmin('community.disable',{communityId:id},options),hardDelete:id=>invokePostSemanticAdmin('community.hardDelete',{communityId:id},options)})},
 })
 console.log(`[post-semantic-eval] evidence=${report.evidencePath} recallAt5=${report.recallAt5.toFixed(3)} top3Precision=${report.top3Precision.toFixed(3)} p95Ms=${report.p95Ms} errorRate=${report.errorRate.toFixed(3)} forbidden=${report.forbiddenCount}`)
 if(!report.passed)process.exitCode=1

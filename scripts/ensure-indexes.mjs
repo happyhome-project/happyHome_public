@@ -494,6 +494,7 @@ const REQUIRED_COLLECTIONS = [
   'post_rag_jobs',            // 正式 RAG 异步索引任务
   'post_rag_index_state',     // 正式 RAG 每篇帖子索引状态
   'post_rag_worker_state',    // 正式 RAG worker 最近运行状态
+  'post_rag_release_probes',  // 正式发布 timer probe 的 run-bound 临时绑定
   'post_rag_chunks',          // RAG chunk 元数据镜像/排障用
   'post_rag_smoke_runs',      // 短期签名 smoke 身份的服务端 run 绑定
   'post_video_rag_assets',     // 视频 OCR/ASR/关键帧摘要缓存（按 cacheKey 复用）

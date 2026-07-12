@@ -44,6 +44,7 @@ import { approveMembership, kickMembership, rejectMembership } from '../../lib/m
 import { appendPostRagOutboxEvent } from '../../lib/post-rag-outbox'
 import { getPostRagV2Health } from '../../lib/post-rag-v2-health'
 import { listReleaseRagPage } from '../../lib/release-rag-pagination'
+import { cleanupPostRagReleaseProbe, createPostRagReleaseProbe, readPostRagReleaseProbeStatus, readPostRagReleaseTimerEvidence } from '../../lib/post-rag-release-probe'
 import type {
   AdminAccount,
   AdminCtx,
@@ -172,6 +173,7 @@ function resolveNonHttpAdminContext(event: any): AdminCtx {
 const SUPER_ADMIN_ONLY: Array<string | RegExp> = [
   'post.ragV2HealthAdmin',
   'community.listActivePageAdmin',
+  'post.ragTimerProbeCreateAdmin','post.ragTimerEvidenceAdmin','post.ragTimerProbeStatusAdmin','post.ragTimerProbeCleanupAdmin',
   'community.approve',
   'community.reject',
   'community.disable',
@@ -201,6 +203,7 @@ const COMMUNITY_SCOPED_ACTIONS = new Set([
   'post.ragIndexHealthAdmin',
   'post.reconcileRagIndexCommunityBatchAdmin',
 ])
+const INTERNAL_RELEASE_ONLY_ACTIONS=new Set(['post.ragTimerProbeCreateAdmin','post.ragTimerEvidenceAdmin','post.ragTimerProbeStatusAdmin','post.ragTimerProbeCleanupAdmin'])
 // 这些 action 只给了实体 id，需要先查出 communityId 再校验
 const ENTITY_TO_COMMUNITY_ACTIONS: Record<string, { collection: string; idParam: string }> = {
   'section.get': { collection: 'sections', idParam: 'sectionId' },
@@ -1444,6 +1447,10 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (!communityId) throw new Error('communityId 不能为空')
     return getPostRagV2Health(communityId)
   }
+  if(action==='post.ragTimerProbeCreateAdmin')return createPostRagReleaseProbe(params.runId)
+  if(action==='post.ragTimerEvidenceAdmin')return readPostRagReleaseTimerEvidence(params.runId)
+  if(action==='post.ragTimerProbeStatusAdmin')return readPostRagReleaseProbeStatus(params)
+  if(action==='post.ragTimerProbeCleanupAdmin')return cleanupPostRagReleaseProbe(params)
   if (action === 'post.pinAdmin' || action === 'post.unpinAdmin' || action === 'post.featureAdmin' || action === 'post.unfeatureAdmin') {
     const postId = String(params.postId || '').trim()
     if (!postId) throw new Error('postId 不能为空')
@@ -1987,6 +1994,7 @@ export const main = async (event: any) => {
         body = {}
       }
       const { action, ...params } = body
+      if(INTERNAL_RELEASE_ONLY_ACTIONS.has(action))return{statusCode:403,headers,body:JSON.stringify({error:'Unauthorized'})}
       const authHeader = String(event.headers?.authorization || event.headers?.Authorization || '')
 
       if (PUBLIC_ACTIONS.has(action)) {

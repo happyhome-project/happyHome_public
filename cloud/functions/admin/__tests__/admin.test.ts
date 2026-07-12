@@ -47,6 +47,7 @@ jest.mock('../../../lib/post-rag', () => ({
 
 jest.mock('../../../lib/post-rag-outbox', () => ({ appendPostRagOutboxEvent: jest.fn() }))
 jest.mock('../../../lib/post-rag-v2-health', () => ({ getPostRagV2Health: jest.fn() }))
+jest.mock('../../../lib/post-rag-release-probe',()=>({createPostRagReleaseProbe:jest.fn(),readPostRagReleaseTimerEvidence:jest.fn(),readPostRagReleaseProbeStatus:jest.fn(),cleanupPostRagReleaseProbe:jest.fn()}))
 
 jest.mock('uuid', () => ({
   v4: jest.fn().mockReturnValue('mocked-uuid'),
@@ -59,6 +60,7 @@ import { searchAmapPoi } from '../../../lib/amap'
 import * as postSearch from '../../../lib/post-search'
 import * as postRag from '../../../lib/post-rag'
 import { getPostRagV2Health } from '../../../lib/post-rag-v2-health'
+import * as releaseProbe from '../../../lib/post-rag-release-probe'
 import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
 
 const TEST_INTERNAL_TOKEN = 'admin-unit-internal-token'
@@ -1548,4 +1550,10 @@ test('post.ragV2HealthAdmin: is superAdmin-only and returns exact v2 coverage', 
   await expect(main({action:'post.ragV2HealthAdmin',communityId:'community-1'})).resolves.toMatchObject({eligibleActivePostCount:125,exactSourceVersionCount:125})
   await expect(main({action:'post.ragV2HealthAdmin',communityId:'community-1',_actAs:{accountId:'a',role:'communityAdmin',userId:'u',username:'n'}})).rejects.toThrow('权限不足')
   expect(getPostRagV2Health).toHaveBeenCalledWith('community-1')
+})
+
+test('release timer probe actions route only through internal superAdmin with run-bound params',async()=>{;(releaseProbe.createPostRagReleaseProbe as jest.Mock).mockResolvedValue({runId:'run-1',postId:'p1'});(releaseProbe.readPostRagReleaseTimerEvidence as jest.Mock).mockResolvedValue({evidence:null});(releaseProbe.readPostRagReleaseProbeStatus as jest.Mock).mockResolvedValue({complete:false});(releaseProbe.cleanupPostRagReleaseProbe as jest.Mock).mockResolvedValue({success:true})
+  await expect(main({action:'post.ragTimerProbeCreateAdmin',runId:'run-1'})).resolves.toMatchObject({runId:'run-1'});await main({action:'post.ragTimerEvidenceAdmin',runId:'run-1'});await main({action:'post.ragTimerProbeStatusAdmin',runId:'run-1',postId:'p1'});await main({action:'post.ragTimerProbeCleanupAdmin',runId:'run-1',postId:'p1'});expect(releaseProbe.readPostRagReleaseTimerEvidence).toHaveBeenCalledWith('run-1')
+  await expect(main({action:'post.ragTimerProbeCreateAdmin',runId:'run-1',_actAs:{accountId:'a',role:'communityAdmin',userId:'u',username:'n'}})).rejects.toThrow('权限不足')
+  const response:any=await rawMain({httpMethod:'POST',headers:{authorization:'Bearer ignored'},body:JSON.stringify({action:'post.ragTimerProbeCreateAdmin',runId:'run-1'})});expect(response.statusCode).toBe(403)
 })
