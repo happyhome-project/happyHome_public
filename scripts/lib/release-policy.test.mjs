@@ -100,51 +100,223 @@ test('release cloud smoke ensures required database collections before invoking 
   assert(runCloudSmokeBody.indexOf('ensure:indexes') < runCloudSmokeBody.indexOf('runCloudReleaseSmoke'))
 })
 
-test('formal release git state rejects non-main, dirty, and unsynchronized sources', () => {
+const PUBLIC_CANONICAL_WORKSPACE = 'C:\\Project\\Claude\\happyHome_public'
+const PUBLIC_ORIGIN_URL = 'https://github.com/happyhome-project/happyHome_public.git'
+
+function validPublicReleaseState(overrides = {}) {
+  return {
+    cwd: PUBLIC_CANONICAL_WORKSPACE,
+    originUrl: PUBLIC_ORIGIN_URL,
+    releaseStrategy: 'full-current',
+    fullCurrentExplicit: true,
+    branch: 'main',
+    headSha: 'a',
+    originMainSha: 'a',
+    changedPaths: [],
+    ...overrides,
+  }
+}
+
+test('formal release git state accepts an explicit full-current release from synchronized public main', () => {
+  assert.doesNotThrow(() => releasePolicyModule.assertFormalReleaseGitState(validPublicReleaseState()))
+})
+
+test('formal release git state treats Windows slash styles as the same canonical workspace', () => {
+  assert.doesNotThrow(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(), cwd: 'C:/Project/Claude/happyHome_public',
+  }))
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
-    cwd: 'X:\\Users\\<user>\\.codex\\worktrees\\feature\\happyHome',
-    canonicalPath: 'C:\\Project\\Claude\\happyHome',
-    branch: 'main', headSha: 'a', originMainSha: 'a', changedPaths: [],
+    ...validPublicReleaseState(), cwd: 'C:/Project/Claude/happyHome_public_other',
+  }), /canonical main workspace/i)
+})
+
+test('formal release git state accepts the canonical workspace with a Windows extended path prefix', () => {
+  assert.doesNotThrow(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(), cwd: '\\\\?\\C:\\Project\\Claude\\happyHome_public',
+  }))
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(), cwd: '\\\\?\\C:\\Project\\Claude\\happyHome_public_other',
   }), /canonical main workspace/i)
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
-    cwd: 'C:\\Project\\Claude\\happyHome', branch: 'feature', headSha: 'a', originMainSha: 'a', changedPaths: [],
+    ...validPublicReleaseState(), cwd: '\\\\server\\share\\happyHome_public',
+  }), /canonical main workspace/i)
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(), cwd: '.\\happyHome_public',
+  }), /canonical main workspace/i)
+})
+
+test('formal release git state rejects private cwd, wrong origin, feature, dirty, stale, and implicit full-current sources', () => {
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(), cwd: 'C:\\Project\\Claude\\happyHome',
+  }), /canonical main workspace/i)
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(), originUrl: 'git@github.com:happyhome-project/happyHome_public.git',
+  }), /origin/i)
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(), branch: 'feature',
   }), /main/)
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
-    cwd: 'C:\\Project\\Claude\\happyHome', branch: 'main', headSha: 'a', originMainSha: 'a', changedPaths: ['cloud/functions/admin/index.ts'],
+    ...validPublicReleaseState(), changedPaths: ['cloud/functions/admin/index.ts'],
   }), /clean/i)
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
-    cwd: 'C:\\Project\\Claude\\happyHome', branch: 'main', headSha: 'a', originMainSha: 'b', changedPaths: [],
+    ...validPublicReleaseState(), originMainSha: 'b',
   }), /origin\/main/)
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(), fullCurrentExplicit: false,
+  }), /explicit/i)
 })
 
 test('publish resume allows only its matching generated build-info change', () => {
   assert.doesNotThrow(() => releasePolicyModule.assertFormalReleaseGitState({
-    cwd: 'C:\\Project\\Claude\\happyHome',
-    branch: 'main',
-    headSha: 'a',
-    originMainSha: 'a',
+    ...validPublicReleaseState(),
     changedPaths: ['miniprogram/src/generated/build-info.ts'],
     publishOnly: true,
     generatedBuildInfoMatches: true,
   }))
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
-    cwd: 'C:\\Project\\Claude\\happyHome',
-    branch: 'main',
-    headSha: 'a',
-    originMainSha: 'a',
+    ...validPublicReleaseState(),
     changedPaths: ['miniprogram/src/generated/build-info.ts', 'cloud/functions/admin/index.ts'],
     publishOnly: true,
     generatedBuildInfoMatches: true,
   }), /unexpected/i)
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
-    cwd: 'C:\\Project\\Claude\\happyHome',
-    branch: 'main',
-    headSha: 'a',
-    originMainSha: 'a',
+    ...validPublicReleaseState(),
     changedPaths: ['miniprogram/src/generated/build-info.ts'],
     publishOnly: true,
     generatedBuildInfoMatches: false,
   }), /build-info/i)
+})
+
+test('publish resume preserves public origin and full-current release intent', () => {
+  const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
+  const gitState = extractFunctionBlock(deployScript, 'function getFormalReleaseGitState')
+  assert.match(gitState, /originUrl:/)
+  assert.match(gitState, /releaseStrategy/)
+  assert.match(gitState, /fullCurrentExplicit/)
+  assert.match(deployScript, /getFormalReleaseGitState\(\{[\s\S]*?releaseStrategy:[\s\S]*?\}\)/)
+})
+
+test('full-current planner fetches and validates exact public main HEAD before producing a plan', () => {
+  const planner = readFileSync(new URL('../release-plan.mjs', import.meta.url), 'utf8')
+  const fullCurrentBranch = planner.slice(planner.indexOf("mode === 'full-current'"))
+  const fetchIndex = fullCurrentBranch.indexOf("git(['fetch', '--quiet', 'origin', 'main']")
+  const headCheckIndex = fullCurrentBranch.indexOf('workspaceHead')
+  const policyIndex = fullCurrentBranch.indexOf('assertFormalReleaseGitState')
+  const changesIndex = fullCurrentBranch.indexOf('const changes =')
+  assert(fetchIndex >= 0)
+  assert(headCheckIndex > fetchIndex)
+  assert(policyIndex > headCheckIndex)
+  assert(changesIndex > policyIndex)
+  assert.match(fullCurrentBranch, /headSha[^\n]*workspaceHead|workspaceHead[^\n]*headSha/)
+  assert.match(fullCurrentBranch, /fullCurrentExplicit:\s*true/)
+})
+
+test('formal mutation revalidation refuses Git drift before invoking the production fence', async () => {
+  let state = validPublicReleaseState()
+  const events = []
+  const revalidate = releasePolicyModule.createFormalReleaseMutationRevalidator({
+    fetchOriginMain: async () => events.push('fetch'),
+    readGitState: () => state,
+    releaseStrategy: 'full-current',
+    fullCurrentExplicit: true,
+    beforeRemoteMutation: async (stage) => events.push(`fence:${stage}`),
+  })
+
+  await revalidate('cloud:user')
+  assert.deepEqual(events, ['fetch', 'fence:cloud:user'])
+
+  state = { ...state, changedPaths: ['cloud/functions/user/index.ts'] }
+  await assert.rejects(() => revalidate('cloud:user'), /clean/i)
+  assert.deepEqual(events, ['fetch', 'fence:cloud:user', 'fetch'])
+})
+
+test('formal mutation revalidation preserves the narrow publish-resume build-info exception', async () => {
+  const events = []
+  const revalidate = releasePolicyModule.createFormalReleaseMutationRevalidator({
+    fetchOriginMain: async () => events.push('fetch'),
+    readGitState: () => validPublicReleaseState({
+      changedPaths: ['miniprogram/src/generated/build-info.ts'],
+      publishOnly: true,
+      generatedBuildInfoMatches: true,
+    }),
+    releaseStrategy: 'full-current',
+    fullCurrentExplicit: true,
+    beforeRemoteMutation: async (stage) => events.push(`fence:${stage}`),
+  })
+
+  await revalidate('miniprogram-upload')
+  assert.deepEqual(events, ['fetch', 'fence:miniprogram-upload'])
+})
+
+test('formal mutation revalidation serializes concurrent Git fetch and fence checks', async () => {
+  let active = 0
+  let maxActive = 0
+  const revalidate = releasePolicyModule.createFormalReleaseMutationRevalidator({
+    fetchOriginMain: async () => {
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      await new Promise((resolve) => setImmediate(resolve))
+      active -= 1
+    },
+    readGitState: () => validPublicReleaseState(),
+    releaseStrategy: 'full-current',
+    fullCurrentExplicit: true,
+    beforeRemoteMutation: async () => {},
+  })
+
+  await Promise.all([revalidate('cloud:user'), revalidate('cloud:post')])
+  assert.equal(maxActive, 1)
+})
+
+test('one-shot formal release allows only its matching release-owned build-info after a successful build', async () => {
+  let buildPrepared = false
+  let matches = true
+  const state = () => validPublicReleaseState({
+    changedPaths: buildPrepared ? ['miniprogram/src/generated/build-info.ts'] : [],
+    allowReleaseBuildInfo: buildPrepared,
+    generatedBuildInfoMatches: matches,
+  })
+  const revalidate = releasePolicyModule.createFormalReleaseMutationRevalidator({
+    fetchOriginMain: async () => {},
+    readGitState: state,
+    releaseStrategy: 'full-current',
+    fullCurrentExplicit: true,
+    beforeRemoteMutation: async () => {},
+  })
+
+  await revalidate('artifact-build:miniprogram')
+  buildPrepared = true
+  await revalidate('cloud:user')
+
+  matches = false
+  await assert.rejects(() => revalidate('cloud:post'), /build-info/i)
+  matches = true
+  buildPrepared = false
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...state(),
+    changedPaths: ['miniprogram/src/generated/build-info.ts'],
+  }), /clean/i)
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...state(),
+    allowReleaseBuildInfo: true,
+    changedPaths: ['miniprogram/src/generated/build-info.ts', 'cloud/functions/user/index.ts'],
+  }), /unexpected/i)
+})
+
+test('one-shot build-info allowance is enabled after build evidence and before downstream release mutations', () => {
+  const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
+  const release = extractFunctionBlock(deployScript, 'async function runFormalRelease')
+  const buildIndex = release.indexOf('await buildAndGateMiniprogramUpload')
+  const evidenceIndex = release.indexOf('await collectMiniprogramBuildGateEvidence', buildIndex)
+  const allowanceIndex = release.indexOf('oneShotBuildInfoPrepared = true')
+  const operationsIndex = release.indexOf("'release-operations'")
+  const uploadIndex = release.indexOf('await uploadBuiltMiniprogram')
+
+  assert(buildIndex >= 0)
+  assert(evidenceIndex > buildIndex)
+  assert(allowanceIndex > evidenceIndex)
+  assert(allowanceIndex < operationsIndex)
+  assert(allowanceIndex < uploadIndex)
 })
 
 test('CloudBase CLI retry treats its known includes TypeError as transient', () => {
@@ -160,6 +332,7 @@ test('formal release path records resumable ledger stages before upload', () => 
   const releaseBlock = extractFunctionBlock(deployScript, 'async function runFormalRelease')
 
   assert.match(deployScript, /release-run-ledger\.mjs/)
+  assert.match(releaseBlock, /executeReleaseOperations\(\{[\s\S]*?manifests:\s*formalPlan\.manifests/)
   assert.match(deployScript, /completeProductionReleaseWithRemoteConfirmation/)
   assert.match(deployScript, /target === 'release-prepare'/)
   assert.match(deployScript, /target === 'release-publish'/)
@@ -171,6 +344,9 @@ test('formal release path records resumable ledger stages before upload', () => 
   assert.match(deployScript, /release-publish requires an explicit --release-run-id/)
   assert.match(deployScript, /function assertFormalReleaseCloudBasePath/)
   assert.match(releaseBlock, /assertFormalReleaseCloudBasePath\(\{ prepareOnly }\)/)
+  assert.match(releaseBlock, /releaseGuard\.acquire\(\)/)
+  assert.match(releaseBlock, /ensure-release-control-plane\.mjs --verify-only/)
+  assert.doesNotMatch(releaseBlock, /node scripts\/ensure-release-control-plane\.mjs['\"]/)
   assert.match(deployScript, /Formal release publish requires --use-tcb/)
   assert.match(releaseBlock, /deployCloud\(\{[\s\S]*?requireCloudBaseCli:\s*true/)
   assert.match(deployScript, /requireCloudBaseCli/)
@@ -178,15 +354,61 @@ test('formal release path records resumable ledger stages before upload', () => 
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'miniprogram-build-gate'/)
   assert.match(releaseBlock, /mustReuse: publishOnly/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-deploy'/)
+  assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-version-probes'/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-smoke'/)
+  assert.match(releaseBlock, /runCloudSmoke\(cloudDeploy\.fns,\s*releaseLedger\.runId/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'admin-web-deploy'/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'miniprogram-upload'/)
+  assert.match(releaseBlock, /preparedPackageDigest/)
+  assert.match(releaseBlock, /completeProductionReleaseWithRemoteConfirmation\(\{/)
   assert.match(deployScript, /inspectReleaseStageReuse/)
   assert.match(releaseBlock, /reuseCheck/)
 
-  assert(releaseBlock.indexOf("'cloud-smoke'") < releaseBlock.indexOf("'admin-web-deploy'"))
-  assert(releaseBlock.indexOf("'admin-web-deploy'") < releaseBlock.indexOf("'miniprogram-upload'"))
-  assert(releaseBlock.indexOf("'miniprogram-upload'") < releaseBlock.indexOf("complete('passed')"))
+  const orderedReleaseMarkers = [
+    'ensure-release-control-plane.mjs --verify-only',
+    'releaseGuard.acquire()',
+    'executeReleaseOperations({',
+    "runLedgerStage(releaseLedger, 'cloud-deploy'",
+    "runLedgerStage(releaseLedger, 'cloud-version-probes'",
+    "runLedgerStage(releaseLedger, 'cloud-smoke'",
+    "runLedgerStage(releaseLedger, 'admin-web-deploy'",
+    "runLedgerStage(releaseLedger, 'miniprogram-upload'",
+    'completeProductionReleaseWithRemoteConfirmation({',
+  ]
+  const orderedReleaseIndexes = orderedReleaseMarkers.map((marker) => releaseBlock.indexOf(marker))
+  assert(orderedReleaseIndexes.every((index) => index >= 0), 'formal release is missing a required release stage or call')
+  for (let index = 1; index < orderedReleaseIndexes.length; index += 1) {
+    assert(orderedReleaseIndexes[index - 1] < orderedReleaseIndexes[index], `${orderedReleaseMarkers[index - 1]} must precede ${orderedReleaseMarkers[index]}`)
+  }
+})
+
+test('formal release derives explicit full-current strategy before opening resume state and binds it everywhere', () => {
+  const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
+  const release = extractFunctionBlock(deployScript, 'async function runFormalRelease')
+  const strategyIndex = release.indexOf("const fullCurrentExplicit = hasFlag('full-current')")
+  const resumeIndex = release.indexOf('await getResumeRunState')
+
+  assert(strategyIndex >= 0)
+  assert(strategyIndex < resumeIndex)
+  assert.match(release, /const releaseStrategy = fullCurrentExplicit \? 'full-current' : 'main'/)
+  assert.match(release, /getFormalReleaseGitState\(\{[\s\S]*?releaseStrategy,[\s\S]*?fullCurrentExplicit/)
+  assert.match(release, /const releaseContext = \{[\s\S]*?releaseStrategy,/)
+  assert.match(release, /createReleaseRunLedger\(\{[\s\S]*?releaseStrategy,/)
+  assert.match(release, /createReleasePlanAfterResumeIdentityCheck\(\{[\s\S]*?resumeRunState,[\s\S]*?gitSha: releaseContext\.gitSha,[\s\S]*?releaseStrategy,[\s\S]*?createPlan:/)
+  assert.match(release, /createFormalReleaseMutationRevalidator\(\{[\s\S]*?releaseStrategy,[\s\S]*?fullCurrentExplicit,/)
+})
+
+test('formal release planner uses the selected mode and validates the exact strategy-bound plan', () => {
+  const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
+  const planner = extractFunctionBlock(deployScript, 'function createFormalReleasePlan')
+
+  assert.match(planner, /function createFormalReleasePlan\(gitSha, releaseStrategy\)/)
+  assert.match(planner, /`--mode=\$\{releaseStrategy\}`/)
+  assert.match(planner, /`--head=\$\{gitSha\}`/)
+  assert.match(planner, /plan\.mode !== releaseStrategy/)
+  assert.match(planner, /plan\.planningStrategy !== expectedPlanningStrategy/)
+  assert.match(planner, /plan\.headSha !== gitSha/)
+  assert.match(planner, /!plan\.releaseRequired/)
 })
 
 test('every direct production deployment is fenced to the canonical clean main workspace', () => {

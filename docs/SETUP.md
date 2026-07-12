@@ -66,7 +66,7 @@ npm.cmd run worktree:doctor
 npm.cmd run worktree:bootstrap       # 仅 clean、已同步的 codex/* 分支
 ```
 
-公开仓库集成 main 不是一个固定磁盘路径，而是一组实时校验：当前分支必须是 `main`，`origin` 必须精确指向 `happyhome-project/happyHome_public`，工作区 clean、无进行中的 Git operation、根目录不是 reparse point，并且显式刷新后 `HEAD` 与 `origin/main` 完全相同。fetch 使用校验时捕获的 verified remote URL，不再解析可变的 `origin` 名称。私有 `angrybirddd/happyHome`、本地/未知 origin、feature 分支以及 ahead、behind 或 stale 的 main 都会被拒绝。此角色只负责公开仓库开发 worktree 的 create/retire；生产 release/deploy 继续使用各自既有的私有 canonical 边界，不受这里的路径去硬编码影响。
+公开仓库集成 main 不是一个固定磁盘路径，而是一组实时校验：当前分支必须是 `main`，`origin` 必须精确指向 `happyhome-project/happyHome_public`，工作区 clean、无进行中的 Git operation、根目录不是 reparse point，并且显式刷新后 `HEAD` 与 `origin/main` 完全相同。fetch 使用校验时捕获的 verified remote URL，不再解析可变的 `origin` 名称。私有 `angrybirddd/happyHome`、本地/未知 origin、feature 分支以及 ahead、behind 或 stale 的 main 都会被拒绝。此角色只负责公开仓库开发 worktree 的 create/retire。
 
 `worktree:create` 从刷新后的 `origin/main` 创建安全的 `codex/*` 分支。它在锁外用有界、非交互 fetch 捕获 exact main SHA；进入共享锁后不再访问网络，只绑定同一 root、Git common dir、HEAD 与 main SHA 做本地 recheck，并以该不可变 SHA 作为 `git worktree add` 的 start point 和创建结果校验基准。随后检查真实 `AGENTS.md` 与 Git hooks，并自动在新目录运行根 `npm.cmd ci`。`worktree:doctor` 只报告状态；缺依赖、错误 Node/npm、hooks/AGENTS 异常或已落后 main 会显示为 `not_ready`。不要把其它 worktree 的 `node_modules` 复制、软链接或 junction 到当前目录。
 
@@ -106,7 +106,9 @@ git push origin HEAD           # 普通 push
 git pull --ff-only origin main
 ```
 
-当前 public 协作禁用 `integrate:pr`，因为该命令仍绑定私有 canonical 边界；公开仓库统一使用 GitHub Merge Queue。此协调流程不触发 release 或 deploy，也不改变私有生产发布边界。
+当前 public 协作禁用 `integrate:pr`，公开仓库统一使用 GitHub Merge Queue。此协调流程不触发 release 或 deploy。
+
+正式生产发布只能从 clean、已同步的公开 canonical main `C:\Project\Claude\happyHome_public` 执行：分支必须是 `main`，显式刷新后 `HEAD` 必须精确等于 `origin/main`，且 `origin` 必须精确派生为 `https://github.com/happyhome-project/happyHome_public.git`。feature、dirty、ahead/behind/stale main、路径或 origin 不匹配都会阻断。`full-current` 发布还必须在 prepare 与 publish 两阶段都显式传入 `--full-current`；该模式只在规划时忽略上次生产 SHA，不会清除、改写或伪造生产状态。生产锁缺失、DevTools UI 证据或 cloud smoke 失败、fixture cleanup 失败同样会阻断。完整命令及 UI、cloud、cleanup、digest 与上传门禁见 [release gate](./release-gate.md)。
 
 ### 2. 配置小程序
 
