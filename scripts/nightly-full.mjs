@@ -2,6 +2,12 @@ import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { ROOT, runLoggedCommand } from './lib/process-utils.mjs'
 import { ensureDir, sanitizeName, writeJson } from './lib/reporting.mjs'
+import {
+  REQUIRED_NIGHTLY_ENV,
+  deriveNightlyResult,
+  formatWorkflowWarning,
+  notificationStatusFromStage,
+} from './lib/nightly-notification-policy.mjs'
 
 const startedAt = new Date()
 const dateToken = startedAt.toISOString().replace(/[:.]/g, '-')
@@ -17,16 +23,6 @@ const sharedEnv = {
 
 const stageStatus = new Map()
 const stages = []
-const requiredEnvVars = [
-  'CLOUD_API_URL',
-  'GATEWAY_TOKEN',
-  'TEST_COMMUNITY_ID',
-  'VITE_CLOUD_API_URL',
-  'VITE_ADMIN_USERNAME',
-  'VITE_ADMIN_PASSWORD',
-  'WECOM_WEBHOOK_URL',
-]
-
 function shouldSkip(skipOnFailure = []) {
   return skipOnFailure.some((name) => {
     const status = stageStatus.get(name)
@@ -118,6 +114,8 @@ function renderMarkdown(summary) {
     '# HappyHome Nightly Summary',
     '',
     `- Status: ${summary.status}`,
+    `- Test status: ${summary.testStatus}`,
+    `- Notification status: ${summary.notificationStatus}`,
     `- Branch: ${summary.branch}`,
     `- Started: ${summary.startedAt}`,
     `- Finished: ${summary.finishedAt}`,
@@ -144,7 +142,7 @@ async function main() {
   await ensureDir(logDir)
   await ensureDir(reportDir)
 
-  const missingEnv = requiredEnvVars.filter((name) => !process.env[name])
+  const missingEnv = REQUIRED_NIGHTLY_ENV.filter((name) => !process.env[name])
   if (missingEnv.length > 0) {
     const preflight = {
       key: 'preflight-env',
@@ -161,6 +159,8 @@ async function main() {
     stages.push(preflight)
     await writeJson(summaryPath, {
       status: 'failed',
+      testStatus: 'failed',
+      notificationStatus: 'skipped',
       branch: process.env.GITHUB_REF_NAME || process.env.BRANCH_NAME || 'codex/cicd',
       startedAt: startedAt.toISOString(),
       finishedAt: new Date().toISOString(),
@@ -210,9 +210,10 @@ async function main() {
   await runStage({ key: 'mp-devtools', name: 'miniprogram DevTools automation capability', command: 'npm.cmd', args: ['run', 'test:mp:devtools'], skipOnFailure: ['install', 'mp-build'] })
 
   const cleanupIssues = await collectCleanupIssues(reportDir)
-  const hasFailures = stages.some((stage) => stage.status === 'failed' || stage.status === 'recovered_flaky')
+  const { status, testStatus } = deriveNightlyResult({ stages, cleanupIssues })
   const summary = {
-    status: hasFailures || cleanupIssues.length > 0 ? 'failed' : 'passed',
+    status,
+    testStatus,
     branch: process.env.GITHUB_REF_NAME || process.env.BRANCH_NAME || 'codex/cicd',
     startedAt: startedAt.toISOString(),
     finishedAt: new Date().toISOString(),
@@ -222,27 +223,37 @@ async function main() {
   }
 
   await writeJson(summaryPath, summary)
-  const markdown = renderMarkdown(summary)
-  await writeFile(summaryMarkdownPath, markdown, 'utf8')
-
-  if (process.env.GITHUB_STEP_SUMMARY) {
-    await writeFile(process.env.GITHUB_STEP_SUMMARY, markdown, 'utf8')
+  let notifyStage
+  if (!process.env.WECOM_WEBHOOK_URL) {
+    const timestamp = new Date().toISOString()
+    notifyStage = {
+      key: 'notify-wecom',
+      name: 'WeCom notification',
+      status: 'skipped',
+      startedAt: timestamp,
+      finishedAt: timestamp,
+      durationMs: 0,
+      command: '',
+      logPath: '',
+      notes: 'Skipped because no webhook is configured.',
+    }
+    stageStatus.set(notifyStage.key, notifyStage.status)
+    stages.push(notifyStage)
+    console.warn(formatWorkflowWarning('missing'))
+  } else {
+    notifyStage = await runStage({
+      key: 'notify-wecom',
+      name: 'WeCom notification',
+      command: process.execPath,
+      args: ['scripts/notify-wecom.mjs', summaryPath],
+      env: { HH_SUMMARY_PATH: summaryPath },
+    })
+    if (notifyStage.status !== 'passed') {
+      console.warn(formatWorkflowWarning('failed'))
+    }
   }
-
-  const notifyStage = await runStage({
-    key: 'notify-wecom',
-    name: 'WeCom notification',
-    command: process.execPath,
-    args: ['scripts/notify-wecom.mjs', summaryPath],
-    env: {
-      HH_SUMMARY_PATH: summaryPath,
-      HH_REQUIRE_WECOM: process.env.GITHUB_ACTIONS ? '1' : '0',
-    },
-  })
-
-  if (notifyStage.status !== 'passed') {
-    summary.status = 'failed'
-  }
+  summary.notificationStatus = notificationStatusFromStage(notifyStage)
+  summary.status = summary.testStatus
 
   await writeJson(summaryPath, summary)
   const finalMarkdown = renderMarkdown(summary)
@@ -250,7 +261,7 @@ async function main() {
   if (process.env.GITHUB_STEP_SUMMARY) {
     await writeFile(process.env.GITHUB_STEP_SUMMARY, finalMarkdown, 'utf8')
   }
-  if (summary.status !== 'passed') {
+  if (summary.testStatus !== 'passed') {
     process.exit(1)
   }
 }
@@ -260,6 +271,8 @@ main().catch(async (error) => {
   await ensureDir(artifactRoot)
   await writeJson(summaryPath, {
     status: 'failed',
+    testStatus: 'failed',
+    notificationStatus: 'skipped',
     branch: process.env.GITHUB_REF_NAME || 'codex/cicd',
     startedAt: startedAt.toISOString(),
     finishedAt: new Date().toISOString(),
