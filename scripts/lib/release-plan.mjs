@@ -98,7 +98,7 @@ export function selectChangeManifestsForDiff(manifests = [], changedPaths = []) 
 }
 
 export function selectChangeManifests(mode, manifests = [], changedPaths = []) {
-  return mode === 'full-current' ? manifests : selectChangeManifestsForDiff(manifests, changedPaths)
+  return mode === 'full-current' ? [...manifests] : selectChangeManifestsForDiff(manifests, changedPaths)
 }
 
 function needsExternalManifest(changedPaths) {

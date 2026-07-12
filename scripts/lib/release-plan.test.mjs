@@ -144,7 +144,9 @@ test('manifest selection includes all manifests only for full-current plans', ()
   ]
   const changedPaths = ['M\trelease/changes/20260711-current.json']
 
-  assert.deepEqual(selectChangeManifests('full-current', manifests, changedPaths), manifests)
+  const selected = selectChangeManifests('full-current', manifests, changedPaths)
+  assert.deepEqual(selected, manifests)
+  assert.notEqual(selected, manifests)
   assert.deepEqual(selectChangeManifests('main', manifests, changedPaths), [manifests[1]])
 })
 
