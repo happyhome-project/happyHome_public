@@ -1,3 +1,7 @@
+// #ifdef H5
+import Cloudbase from '@cloudbase/js-sdk'
+// #endif
+
 type PublicWebCloudbaseEnv = {
   envId: string
   accessKey: string
@@ -109,7 +113,7 @@ const singleton = createWebCloudbaseApi({
     envId: String(viteEnv.VITE_CLOUDBASE_ENV_ID || '').trim(),
     accessKey: String(viteEnv.VITE_CLOUDBASE_ACCESS_KEY || '').trim(),
   },
-  loadSdk: () => import('@cloudbase/js-sdk'),
+  loadSdk: async () => ({ default: Cloudbase }),
 })
 
 export const getLoginState = singleton.getLoginState

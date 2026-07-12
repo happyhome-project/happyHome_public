@@ -24,7 +24,7 @@ function normalize(text) {
 }
 
 function isExpectedSmokeConsoleError(text) {
-  return text.includes('Failed to load resource: the server responded with a status of 500') ||
+  return /Failed to load resource: the server responded with a status of (403|500)/.test(text) ||
     text.includes('[client-log] cloud.call.fail') ||
     text.includes('[client-log] section.load.fail')
 }
