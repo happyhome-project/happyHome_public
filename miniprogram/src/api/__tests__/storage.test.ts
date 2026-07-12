@@ -72,6 +72,29 @@ describe('storage API', () => {
     expect(webUploadFile.mock.calls[0][0].filePath).toBe(file)
   })
 
+  test.each([
+    ['image/png', 'posts/image.jpg', 'posts/image.png'],
+    ['image/webp', 'posts/image.jpg', 'posts/image.webp'],
+  ])('aligns an H5 Blob cloudPath extension with MIME %s', async (type, requestedPath, expectedPath) => {
+    const blob = new Blob(['image'], { type })
+    webUploadFile.mockResolvedValue({ fileID: `cloud://env/${expectedPath}` })
+    const { uploadCloudFile } = await import('../storage')
+
+    await uploadCloudFile({ cloudPath: requestedPath, source: blob })
+
+    expect(webUploadFile).toHaveBeenCalledWith(expect.objectContaining({ cloudPath: expectedPath }))
+  })
+
+  test('uses a safe File name extension when MIME is empty', async () => {
+    const file = new File(['image'], 'avatar.GIF', { type: '' })
+    webUploadFile.mockResolvedValue({ fileID: 'cloud://env/avatars/avatar.gif' })
+    const { uploadCloudFile } = await import('../storage')
+
+    await uploadCloudFile({ cloudPath: 'avatars/avatar.jpg', source: file })
+
+    expect(webUploadFile).toHaveBeenCalledWith(expect.objectContaining({ cloudPath: 'avatars/avatar.gif' }))
+  })
+
   test('fetches an H5 blob URL before uploading it through the Web SDK', async () => {
     const blob = new Blob(['image'], { type: 'image/png' })
     const fetch = vi.fn().mockResolvedValue({ ok: true, blob: async () => blob })
@@ -104,6 +127,34 @@ describe('storage API', () => {
     await expect(storage.getCloudTempFileURL(['cloud://env/a.mp3'])).resolves.toEqual([
       { fileID: 'cloud://env/a.mp3', tempFileURL: 'https://h5/a.mp3' },
     ])
+  })
+
+  test('rejects failed and missing temporary file URL entries', async () => {
+    webGetTempFileURL.mockResolvedValueOnce({
+      fileList: [{ fileID: 'cloud://env/failed.mp3', code: 'STORAGE_ERROR', message: 'internal detail' }],
+    })
+    const { getCloudTempFileURL } = await import('../storage')
+
+    await expect(getCloudTempFileURL(['cloud://env/failed.mp3']))
+      .rejects.toThrow('[storage] temporary URL failed for cloud://env/failed.mp3')
+
+    webGetTempFileURL.mockResolvedValueOnce({ fileList: [] })
+    await expect(getCloudTempFileURL(['cloud://env/missing.mp3']))
+      .rejects.toThrow('[storage] temporary URL missing for cloud://env/missing.mp3')
+
+    webGetTempFileURL.mockResolvedValueOnce({
+      fileList: [{ fileID: 'cloud://env/empty.mp3', code: 'SUCCESS', tempFileURL: '' }],
+    })
+    await expect(getCloudTempFileURL(['cloud://env/empty.mp3']))
+      .rejects.toThrow('[storage] temporary URL missing for cloud://env/empty.mp3')
+  })
+
+  test('rejects an upload result without a fileID', async () => {
+    webUploadFile.mockResolvedValue({ fileID: '', requestId: 'r-empty' })
+    const { uploadCloudFile } = await import('../storage')
+
+    await expect(uploadCloudFile({ cloudPath: 'posts/a.txt', source: new Blob(['a'], { type: 'text/plain' }) }))
+      .rejects.toThrow('[storage] upload returned an empty fileID')
   })
 
   test('rejects unsupported H5 upload sources with a clear error', async () => {

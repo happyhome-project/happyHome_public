@@ -25,7 +25,15 @@ type WebCloudbaseApp = {
     onUploadProgress?: (event: { loaded?: number; total?: number }) => void
   }): Promise<{ fileID: string; requestId?: string }>
   getTempFileURL(options: { fileList: string[] }): Promise<{
-    fileList?: Array<{ fileID: string; tempFileURL?: string; download_url?: string }>
+    code?: string
+    message?: string
+    fileList?: Array<{
+      fileID: string
+      tempFileURL?: string
+      download_url?: string
+      code?: string
+      message?: string
+    }>
   }>
 }
 

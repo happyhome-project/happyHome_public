@@ -28,6 +28,46 @@ function normalizeProgress(loadedValue: unknown, totalValue: unknown, progressVa
   return { progress, loaded, total }
 }
 
+const MIME_EXTENSIONS: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'image/bmp': 'bmp',
+  'image/avif': 'avif',
+  'image/svg+xml': 'svg',
+  'image/heic': 'heic',
+  'image/heif': 'heif',
+}
+
+function safeFileExtension(name: string): string {
+  const match = String(name || '').match(/\.([a-z0-9]{1,10})$/i)
+  return match ? match[1].toLowerCase() : ''
+}
+
+function replaceCloudPathExtension(cloudPath: string, extension: string): string {
+  if (!extension) return cloudPath
+  const slashIndex = cloudPath.lastIndexOf('/')
+  const dotIndex = cloudPath.lastIndexOf('.')
+  const stem = dotIndex > slashIndex ? cloudPath.slice(0, dotIndex) : cloudPath
+  return `${stem}.${extension}`
+}
+
+function normalizeWebCloudPath(cloudPath: string, source: Blob): string {
+  const mimeExtension = MIME_EXTENSIONS[String(source.type || '').toLowerCase()]
+  if (mimeExtension) return replaceCloudPathExtension(cloudPath, mimeExtension)
+  if (!source.type && typeof File !== 'undefined' && source instanceof File) {
+    return replaceCloudPathExtension(cloudPath, safeFileExtension(source.name))
+  }
+  return cloudPath
+}
+
+function requireFileID(result: any): { fileID: string } {
+  const fileID = String(result?.fileID || '').trim()
+  if (!fileID) throw new Error('[storage] upload returned an empty fileID')
+  return { fileID }
+}
+
 async function resolveWebSource(source: StorageUploadSource): Promise<Blob> {
   if (typeof Blob !== 'undefined' && source instanceof Blob) return source
   if (typeof source === 'string' && source.startsWith('blob:')) {
@@ -47,7 +87,9 @@ export async function uploadCloudFile(options: UploadOptions): Promise<{ fileID:
       const task = wxRuntime.cloud.uploadFile({
         cloudPath: options.cloudPath,
         filePath: options.source,
-        success: (result: any) => resolve({ fileID: String(result?.fileID || '') }),
+        success: (result: any) => {
+          try { resolve(requireFileID(result)) } catch (error) { reject(error) }
+        },
         fail: reject,
       })
       if (options.onProgress && task?.onProgressUpdate) {
@@ -64,13 +106,13 @@ export async function uploadCloudFile(options: UploadOptions): Promise<{ fileID:
   const filePath = await resolveWebSource(options.source)
   const { uploadFile } = await import('./web-cloudbase')
   const result = await uploadFile({
-    cloudPath: options.cloudPath,
+    cloudPath: normalizeWebCloudPath(options.cloudPath, filePath),
     filePath,
     onUploadProgress: options.onProgress
       ? (event) => options.onProgress?.(normalizeProgress(event?.loaded, event?.total))
       : undefined,
   })
-  return { fileID: String(result?.fileID || '') }
+  return requireFileID(result)
   // #endif
 }
 
@@ -88,8 +130,15 @@ export async function getCloudTempFileURL(fileIDs: string[]): Promise<StorageTem
     fileList = result?.fileList || []
     // #endif
   }
-  return fileList.map((item) => ({
-    fileID: String(item?.fileID || ''),
-    tempFileURL: String(item?.tempFileURL || item?.download_url || ''),
-  }))
+  const entries = new Map(fileList.map((item) => [String(item?.fileID || ''), item]))
+  return fileIDs.map((fileID) => {
+    const item: any = entries.get(fileID)
+    if (!item) throw new Error(`[storage] temporary URL missing for ${fileID}`)
+    if (item.code !== undefined && String(item.code).toUpperCase() !== 'SUCCESS') {
+      throw new Error(`[storage] temporary URL failed for ${fileID}`)
+    }
+    const tempFileURL = String(item.tempFileURL || item.download_url || '').trim()
+    if (!tempFileURL) throw new Error(`[storage] temporary URL missing for ${fileID}`)
+    return { fileID, tempFileURL }
+  })
 }
