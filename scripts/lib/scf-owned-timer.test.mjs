@@ -27,14 +27,14 @@ test('installed manager drops customArgument while owned SCF client sends and ve
   assert.equal(result.customArgumentHash.length, 64)
 })
 
-test('SCF timer retries readback while a newly created trigger is not yet visible', async () => {
+test('SCF timer polls long enough for a newly created trigger to become visible', async () => {
   let listCount = 0
   let created
   const waits = []
   const request = async (action, params) => {
     if (action === 'ListTriggers') {
       listCount += 1
-      return { Triggers: listCount < 3 || !created ? [] : [created] }
+      return { Triggers: listCount < 7 || !created ? [] : [created] }
     }
     if (action === 'CreateTrigger') {
       created = { TriggerName: params.TriggerName, TriggerDesc: params.TriggerDesc, CustomArgument: params.CustomArgument }
@@ -51,8 +51,8 @@ test('SCF timer retries readback while a newly created trigger is not yet visibl
   })
 
   assert.equal(result.triggerName, 'post-rag-worker-every-minute')
-  assert.deepEqual(waits, [250])
-  assert.equal(listCount, 3)
+  assert.deepEqual(waits, [1000, 1000, 1000, 1000, 1000])
+  assert.equal(listCount, 7)
 })
 
 test('SCF timer fails closed when readback omits CustomArgument', async () => {
