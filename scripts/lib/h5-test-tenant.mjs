@@ -14,6 +14,8 @@ function fingerprint(value) {
   return createHash('sha256').update(JSON.stringify(stable(value))).digest('hex')
 }
 
+export const canonicalFingerprint = fingerprint
+
 function documentEntries(manifest) {
   return [
     ...manifest.users.map((document) => ({ collection: 'users', id: document._id, document })),
@@ -109,7 +111,10 @@ export async function planTenant({ store, config }) {
   const observation = await store.inspect({ username: config.username, wechatOpenid: config.wechatOpenid, fixtureKey: FIXTURE_KEY })
   const manifest = buildManifest({ webUserId: accountUserId(observation.account), wechatOpenid: config.wechatOpenid })
   validateObservation(observation, manifest)
-  const sets = documentEntries(manifest).filter(({ collection, id, document }) => JSON.stringify(stable(observation.documents?.[`${collection}/${id}`] ?? null)) !== JSON.stringify(stable(document)))
+  const sets = documentEntries(manifest).filter(({ collection, id, document }) => JSON.stringify(stable(observation.documents?.[`${collection}/${id}`] ?? null)) !== JSON.stringify(stable(document))).map((operation) => ({
+    ...operation,
+    expectedCurrentHash: fingerprint(observation.documents?.[`${operation.collection}/${operation.id}`] ?? null),
+  }))
   return {
     envId: config.envId,
     observation,
@@ -158,7 +163,7 @@ export async function applyTenant({ store, config, prepare, env = process.env })
     await store.createEndUser({ username: config.username, password: config.password })
     planned = await planTenant({ store, config })
   }
-  for (const { collection, id, document } of planned.plan.sets) await store.setDocument(collection, id, document)
+  for (const { collection, id, document, expectedCurrentHash } of planned.plan.sets) await store.setDocument(collection, id, document, { expectedCurrentHash })
   return await doctorTenant({ store, config })
 }
 
@@ -174,6 +179,10 @@ export async function doctorTenant({ store, config }) {
     throw new Error('invalid fixture community membership set')
   }
   const sections = manifest.sections
+  const expectedSectionIds = new Set(sections.map((section) => section._id))
+  const communityPosts = Object.entries(observation.documents || {}).filter(([key, doc]) => key.startsWith('posts/') && doc.communityId === COMMUNITY_ID)
+  if (communityPosts.some(([, post]) => !expectedSectionIds.has(post.sectionId))) throw new Error('fixture community post has unexpected section')
+  if (communityPosts.length !== 31) throw new Error(`invalid fixture community total post counts: ${communityPosts.length}`)
   const observedSections = Object.entries(observation.documents || {}).filter(([key, doc]) => key.startsWith('sections/') && doc.communityId === COMMUNITY_ID)
   if (observedSections.length !== 3) throw new Error(`invalid section count: ${observedSections.length}`)
   const totalCounts = sections.map((section) => Object.entries(observation.documents || {}).filter(([key, doc]) => key.startsWith('posts/') && doc.sectionId === section._id).length)

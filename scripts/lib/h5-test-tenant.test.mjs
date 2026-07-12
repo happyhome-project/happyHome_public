@@ -29,8 +29,9 @@ class FakeStore {
     this.account = { uuid: 'web-uuid-1', username }
     return clone(this.account)
   }
-  async setDocument(collection, id, document) {
+  async setDocument(collection, id, document, options) {
     this.writes.push(`${collection}/${id}`)
+    this.lastWriteOptions = options
     this.documents.set(`${collection}/${id}`, clone(document))
     if (collection === 'community_members') this.memberships.push(clone(document))
   }
@@ -61,7 +62,36 @@ test('empty observation plans only deterministic set operations and no deletes',
   const result = await planTenant({ store, config })
   assert.equal(result.plan.createAccount, true)
   assert.ok(result.plan.sets.length > 31)
+  assert.ok(result.plan.sets.every((operation) => typeof operation.expectedCurrentHash === 'string'))
   assert.deepEqual(result.plan.deletes, [])
+})
+
+test('apply can converge after a partial write failure by preparing again', async () => {
+  const store = new FakeStore()
+  const originalSet = store.setDocument.bind(store)
+  let remaining = 3
+  store.setDocument = async (...args) => {
+    if (remaining-- === 0) throw new Error('injected partial write failure')
+    return await originalSet(...args)
+  }
+  await assert.rejects(applyTenant({ store, config, prepare: createPrepareRecord(await planTenant({ store, config })), env: { HAPPYHOME_FIXTURE_PREFIX: FIXTURE_KEY } }), /partial write failure/)
+  store.setDocument = originalSet
+  const retry = createPrepareRecord(await planTenant({ store, config }))
+  await assert.doesNotReject(applyTenant({ store, config, prepare: retry, env: { HAPPYHOME_FIXTURE_PREFIX: FIXTURE_KEY } }))
+})
+
+test('apply reuses an account created before an injected failure', async () => {
+  const store = new FakeStore()
+  const originalCreate = store.createEndUser.bind(store)
+  store.createEndUser = async (input) => {
+    await originalCreate(input)
+    throw new Error('injected post-create failure')
+  }
+  const prepare = createPrepareRecord(await planTenant({ store, config }))
+  await assert.rejects(applyTenant({ store, config, prepare, env: { HAPPYHOME_FIXTURE_PREFIX: FIXTURE_KEY } }), /post-create failure/)
+  store.createEndUser = originalCreate
+  await assert.doesNotReject(applyTenant({ store, config, prepare: createPrepareRecord(await planTenant({ store, config })), env: { HAPPYHOME_FIXTURE_PREFIX: FIXTURE_KEY } }))
+  assert.equal(store.createdAccounts, 1)
 })
 
 test('exact fixture state produces a no-op plan', async () => {
@@ -165,4 +195,7 @@ test('doctor rejects disabled account, extra membership, and extra inactive or n
     extraPost.documents.set('posts/extra-post', { _id: 'extra-post', communityId: 'hh-web-h5-v1-community', sectionId: 'hh-web-h5-v1-section-long', fixtureKey: FIXTURE_KEY, ...patch })
     await assert.rejects(doctorTenant({ store: extraPost, config }), /total post counts/)
   }
+  const foreignSection = await seed()
+  foreignSection.documents.set('posts/foreign-section-post', { _id: 'foreign-section-post', communityId: 'hh-web-h5-v1-community', sectionId: 'other-section', status: 'active', auditStatus: 'pass', fixtureKey: FIXTURE_KEY })
+  await assert.rejects(doctorTenant({ store: foreignSection, config }), /unexpected section|total post count/)
 })

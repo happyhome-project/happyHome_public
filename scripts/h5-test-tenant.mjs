@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 
 import CloudBase from '@cloudbase/manager-node'
 import { resolveCloudBaseReleaseCredentials } from './lib/cloudbase-release-store.mjs'
-import { COMMUNITY_ID, FIXTURE_KEY, applyTenant, buildManifest, createPrepareRecord, doctorTenant, planTenant, serializePrepareRecord } from './lib/h5-test-tenant.mjs'
+import { COMMUNITY_ID, FIXTURE_KEY, applyTenant, buildManifest, canonicalFingerprint, createPrepareRecord, doctorTenant, planTenant, serializePrepareRecord } from './lib/h5-test-tenant.mjs'
 import { withValidationLease } from './lib/validation-lease.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -45,7 +45,7 @@ function isMissing(error) {
   return /document(?:\.get)?:fail[\s\S]*(?:does not exist|not found)|document not found|db or table not exist/i.test(String(error?.message || error))
 }
 
-export async function createCloudBaseTenantStore({ config, root = ROOT, env = process.env, home = homedir(), manager: injectedManager, db: injectedDb }) {
+export async function createCloudBaseTenantStore({ config, root = ROOT, env = process.env, home = homedir(), manager: injectedManager, db: injectedDb, queryPageSize = 100 }) {
   let manager = injectedManager
   let db = injectedDb
   if (!manager || !db) {
@@ -79,6 +79,16 @@ export async function createCloudBaseTenantStore({ config, root = ROOT, env = pr
     }
   }
 
+  async function queryAll(collection, where) {
+    const rows = []
+    for (let offset = 0; ; offset += queryPageSize) {
+      const response = await db.collection(collection).where(where).skip(offset).limit(queryPageSize).get()
+      const page = response?.data || []
+      rows.push(...page)
+      if (page.length < queryPageSize) return rows
+    }
+  }
+
   return {
     async inspect({ username, wechatOpenid }) {
       const account = await findAccount(username)
@@ -96,17 +106,16 @@ export async function createCloudBaseTenantStore({ config, root = ROOT, env = pr
         const document = await getDocument(collection, id)
         if (document) documents[`${collection}/${id}`] = document
       }
-      const sectionResponse = await db.collection('sections').where({ communityId: COMMUNITY_ID }).limit(1000).get()
-      for (const section of sectionResponse?.data || []) documents[`sections/${section._id}`] = section
+      const allSections = await queryAll('sections', { communityId: COMMUNITY_ID })
+      for (const section of allSections) documents[`sections/${section._id}`] = section
+      const postById = new Map((await queryAll('posts', { communityId: COMMUNITY_ID })).map((post) => [post._id, post]))
       for (const section of manifest.sections) {
-        const postResponse = await db.collection('posts').where({ sectionId: section._id }).limit(1000).get()
-        for (const post of postResponse?.data || []) documents[`posts/${post._id}`] = post
+        for (const post of await queryAll('posts', { sectionId: section._id })) postById.set(post._id, post)
       }
-      const membershipResponse = await db.collection('community_members').where({ communityId: COMMUNITY_ID }).limit(1000).get()
-      const membershipById = new Map((membershipResponse?.data || []).map((member) => [member._id, member]))
+      for (const post of postById.values()) documents[`posts/${post._id}`] = post
+      const membershipById = new Map((await queryAll('community_members', { communityId: COMMUNITY_ID })).map((member) => [member._id, member]))
       if (account) {
-        const webMembershipResponse = await db.collection('community_members').where({ userId: `web:${account.uuid}` }).limit(1000).get()
-        for (const member of webMembershipResponse?.data || []) membershipById.set(member._id, member)
+        for (const member of await queryAll('community_members', { userId: `web:${account.uuid}` })) membershipById.set(member._id, member)
       }
       const memberships = [...membershipById.values()]
       return { account, documents, memberships }
@@ -115,7 +124,8 @@ export async function createCloudBaseTenantStore({ config, root = ROOT, env = pr
       const response = await manager.user.createEndUser({ username, password })
       return { uuid: response.User.UUId, username: response.User.UserName }
     },
-    async setDocument(collection, id, document) {
+    async setDocument(collection, id, document, { expectedCurrentHash } = {}) {
+      if (typeof expectedCurrentHash !== 'string') throw new Error('setDocument requires expectedCurrentHash')
       const data = structuredClone(document)
       delete data._id
       await db.runTransaction(async (transaction) => {
@@ -128,6 +138,7 @@ export async function createCloudBaseTenantStore({ config, root = ROOT, env = pr
           if (!isMissing(error)) throw error
         }
         if (current && current.fixtureKey !== FIXTURE_KEY) throw new Error(`fixture ownership changed before write: ${collection}/${id}`)
+        if (canonicalFingerprint(current) !== expectedCurrentHash) throw new Error(`current document changed before write: ${collection}/${id}`)
         await reference.set(data)
       })
     },
