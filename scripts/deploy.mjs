@@ -1206,7 +1206,7 @@ async function runFormalRelease(options = {}) {
 
   try {
     if (!prepareOnly) {
-      execSync('node scripts/ensure-release-control-plane.mjs', { cwd: ROOT, stdio: 'inherit' })
+      execSync('node scripts/ensure-release-control-plane.mjs --verify-only', { cwd: ROOT, stdio: 'inherit' })
       await releaseGuard.acquire()
     }
 

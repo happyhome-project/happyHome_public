@@ -321,6 +321,8 @@ test('formal release path records resumable ledger stages before upload', () => 
   assert.match(deployScript, /function assertFormalReleaseCloudBasePath/)
   assert.match(releaseBlock, /assertFormalReleaseCloudBasePath\(\{ prepareOnly }\)/)
   assert.match(releaseBlock, /releaseGuard\.acquire\(\)/)
+  assert.match(releaseBlock, /ensure-release-control-plane\.mjs --verify-only/)
+  assert.doesNotMatch(releaseBlock, /node scripts\/ensure-release-control-plane\.mjs['\"]/)
   assert.match(deployScript, /Formal release publish requires --use-tcb/)
   assert.match(releaseBlock, /deployCloud\(\{[\s\S]*?requireCloudBaseCli:\s*true/)
   assert.match(deployScript, /requireCloudBaseCli/)
@@ -339,6 +341,7 @@ test('formal release path records resumable ledger stages before upload', () => 
   assert.match(releaseBlock, /reuseCheck/)
 
   const orderedReleaseMarkers = [
+    'ensure-release-control-plane.mjs --verify-only',
     'releaseGuard.acquire()',
     'executeReleaseOperations({',
     "runLedgerStage(releaseLedger, 'cloud-deploy'",
