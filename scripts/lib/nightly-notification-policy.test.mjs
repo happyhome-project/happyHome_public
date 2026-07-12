@@ -140,6 +140,19 @@ const failureInput = (overrides = {}) => ({
   ...overrides,
 })
 
+function assertCompleteNotificationStage(result, expectedStatus) {
+  const stage = result.summary.stages.find(({ key }) => key === 'notify-wecom')
+  assert.deepEqual(Object.keys(stage).sort(), [
+    'command', 'durationMs', 'finishedAt', 'key', 'logPath', 'name', 'notes', 'startedAt', 'status',
+  ])
+  assert.equal(stage.name, 'WeCom notification')
+  assert.equal(stage.status, expectedStatus)
+  assert.equal(typeof stage.startedAt, 'string')
+  assert.equal(typeof stage.finishedAt, 'string')
+  assert.equal(typeof stage.durationMs, 'number')
+  assert.doesNotMatch(result.markdown, /undefined/)
+}
+
 test('configured failure completion calls sender and records a sent notification', async () => {
   let calls = 0
   let written
@@ -148,7 +161,7 @@ test('configured failure completion calls sender and records a sent notification
       calls += 1
       assert.equal(summary.testStatus, 'failed')
       assert.match(summary.error, /original nightly failure/)
-      return { key: 'notify-wecom', name: 'WeCom notification', status: 'passed', durationMs: 2 }
+      return { status: 'sent' }
     },
     writeOutcome: async (outcome) => { written = outcome },
   }))
@@ -158,6 +171,7 @@ test('configured failure completion calls sender and records a sent notification
   assert.equal(result.summary.notificationStatus, 'sent')
   assert.equal(result.exitCode, 1)
   assert.equal(written, result)
+  assertCompleteNotificationStage(result, 'passed')
 })
 
 test('configured failure completion maps sender rejection to failed notification and fixed warning', async () => {
@@ -172,6 +186,7 @@ test('configured failure completion maps sender rejection to failed notification
   assert.equal(result.summary.notificationStatus, 'failed')
   assert.equal(result.exitCode, 1)
   assert.deepEqual(warnings, ['::warning::WeCom notification failed'])
+  assertCompleteNotificationStage(result, 'failed')
 })
 
 test('missing webhook skips sender while preserving failed test outcome', async () => {
@@ -185,6 +200,7 @@ test('missing webhook skips sender while preserving failed test outcome', async 
   assert.equal(result.summary.notificationStatus, 'skipped')
   assert.equal(result.summary.testStatus, 'failed')
   assert.equal(result.exitCode, 1)
+  assertCompleteNotificationStage(result, 'skipped')
 })
 
 test('outcome writer sends identical summary and Markdown data to every destination', async () => {

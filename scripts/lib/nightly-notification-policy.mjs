@@ -122,22 +122,33 @@ export async function completeNightlyFailure({
       notificationStage = plan.stage
       if (plan.warning) warn(plan.warning)
     } else {
+      const notificationStartedAt = new Date()
       try {
-        notificationStage = await sendNotification(failureSummary)
-        if (notificationStage.status === 'sent') {
-          notificationStage = { ...notificationStage, status: 'passed' }
+        const delivery = await sendNotification(failureSummary)
+        notificationStage = {
+          key: 'notify-wecom',
+          name: 'WeCom notification',
+          status: delivery.status === 'sent' ? 'passed' : 'failed',
+          startedAt: notificationStartedAt.toISOString(),
+          finishedAt: new Date().toISOString(),
+          durationMs: Date.now() - notificationStartedAt.getTime(),
+          command: 'send configured WeCom notification',
+          logPath: '',
+          notes: delivery.status === 'sent'
+            ? 'Notification sent during failure completion.'
+            : 'Notification delivery did not report success.',
         }
       } catch {
-        const timestamp = new Date().toISOString()
         notificationStage = {
           key: 'notify-wecom',
           name: 'WeCom notification',
           status: 'failed',
-          startedAt: timestamp,
-          finishedAt: timestamp,
-          durationMs: 0,
-          command: '',
+          startedAt: notificationStartedAt.toISOString(),
+          finishedAt: new Date().toISOString(),
+          durationMs: Date.now() - notificationStartedAt.getTime(),
+          command: 'send configured WeCom notification',
           logPath: '',
+          notes: 'Notification delivery failed during failure completion.',
         }
       }
     }
