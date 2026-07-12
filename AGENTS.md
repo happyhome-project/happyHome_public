@@ -25,6 +25,11 @@
 - worktree 退役必须先 `worktree:retire -- --prepare <path> --confirm-no-owner`，再用生成 manifest apply；target 及其已存在 ancestor 不得为 reparse/junction，其真实 Git common dir 必须与公开 operator 完全一致。apply 在共享锁内用锁外捕获的 exact HEAD/main/PR snapshot 本地重验，并在 remove 紧前完成最后一次全量 probe。始终保留本地功能分支，`--delete-merged-local-branch` 已禁用；禁止 `git worktree remove --force`、批量 prune 或删除未进入 main 的本地分支。
 - 项目 hook 必须获客户端信任才会产生 heartbeat；缺失或超过 12 小时的 heartbeat 是 `unknown`，不是“无人使用”。`env:run` 仅为本地命令分类，不能授予生产权限。
 
+### 机器本地验证租约
+
+- DevTools 自动化与使用 `fixture-write` 的普通仓库命令共用同一个机器本地 `validation lease`；已有 lease 会阻止新的受保护命令。过期 lease 仍是 `unknown`，不得自动接管；先用 `npm.cmd run validation:lease:status` 查看状态，确认原 owner 已退出后才可使用 `npm.cmd run validation:lease:recover -- --expected-owner-token=<uuid> --confirm-no-owner --reason="..."` 显式恢复。
+- 该租约是协作护栏：原始 CLI/API 仍可能绕过它，因此不是安全隔离。不得终止或关闭另一 owner 的进程或 DevTools，也不得移动或删除另一 owner 的缓存；应由 owner 释放租约，或在明确确认无人持有后走显式恢复命令。
+
 ### 共享云环境边界
 
 - 功能会话不得部署或发布到生产环境，也不得上传小程序版本。
