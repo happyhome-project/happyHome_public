@@ -3,6 +3,7 @@ import { userApi } from '../api/cloud'
 import { useCommunityStore } from './community'
 
 const STORAGE_KEY = 'user_store'
+let webSessionGeneration = 0
 
 // uni-app exposes uni.getStorageSync in both H5 and miniprogram — safer than wx.*
 function storageGet(k: string): any {
@@ -29,6 +30,10 @@ function errorMessage(error: any): string {
   return String(error?.message || error || 'unknown error')
 }
 
+function supersededError() {
+  return new Error('Web session operation was superseded')
+}
+
 export const useUserStore = defineStore('user', {
   state: () => ({
     openId: '' as string,
@@ -41,6 +46,7 @@ export const useUserStore = defineStore('user', {
   }),
   actions: {
     clearLocalSession() {
+      webSessionGeneration += 1
       this.openId = ''
       this.nickName = ''
       this.avatarUrl = ''
@@ -135,10 +141,14 @@ export const useUserStore = defineStore('user', {
       const name = String(nickName || '').trim()
       if (!name) throw new Error('请填写昵称')
       this.clearLocalSession()
+      const generation = webSessionGeneration
       const webAuth = await loadWebAuth()
+      if (generation !== webSessionGeneration) throw supersededError()
       try {
         await webAuth.signIn({ username: String(username || '').trim(), password })
+        if (generation !== webSessionGeneration) throw supersededError()
         const result = await userApi.login({ nickName: name, avatarUrl: '' })
+        if (generation !== webSessionGeneration) throw supersededError()
         this.openId = result.user._id
         this.nickName = result.user.nickName || name
         this.avatarUrl = result.user.avatarUrl || ''
@@ -149,8 +159,10 @@ export const useUserStore = defineStore('user', {
         this.saveToStorage()
         this.syncBackgroundFetchToken()
       } catch (error) {
+        if (generation !== webSessionGeneration) throw error
         let rollbackError: any = null
         try { await webAuth.signOut() } catch (signOutError) { rollbackError = signOutError }
+        if (generation !== webSessionGeneration) throw error
         this.clearLocalSession()
         if (rollbackError) {
           const combined = new Error(`${errorMessage(error)}; Web signOut rollback failed: ${errorMessage(rollbackError)}`)
@@ -162,10 +174,13 @@ export const useUserStore = defineStore('user', {
       }
     },
     async restoreWebSession() {
+      const generation = ++webSessionGeneration
       const savedNickName = String(this.nickName || '').trim()
       try {
         const webAuth = await loadWebAuth()
+        if (generation !== webSessionGeneration) return false
         const session = await webAuth.getLoginState()
+        if (generation !== webSessionGeneration) return false
         if (!session) {
           this.clearLocalSession()
           return false
@@ -174,11 +189,12 @@ export const useUserStore = defineStore('user', {
           try {
             await webAuth.signOut()
           } finally {
-            this.clearLocalSession()
+            if (generation === webSessionGeneration) this.clearLocalSession()
           }
           return false
         }
         const result = await userApi.login({ nickName: savedNickName, avatarUrl: this.avatarUrl || '' })
+        if (generation !== webSessionGeneration) return false
         this.openId = result.user._id
         this.nickName = result.user.nickName || savedNickName
         this.avatarUrl = result.user.avatarUrl || this.avatarUrl || ''
@@ -188,9 +204,14 @@ export const useUserStore = defineStore('user', {
         this.backgroundFetchTokenExpiresAt = result.user.backgroundFetchTokenExpiresAt || ''
         this.saveToStorage()
         this.syncBackgroundFetchToken()
-        await useCommunityStore().loadMyCommunities({ loadSections: false })
+        await useCommunityStore().loadMyCommunities({
+          loadSections: false,
+          shouldApply: () => generation === webSessionGeneration,
+        })
+        if (generation !== webSessionGeneration) return false
         return true
       } catch (error) {
+        if (generation !== webSessionGeneration) return false
         this.clearLocalSession()
         throw error
       }
@@ -236,13 +257,15 @@ export const useUserStore = defineStore('user', {
       this.syncBackgroundFetchToken()
     },
     async logout() {
+      const generation = ++webSessionGeneration
       try {
         if (isWebRuntime()) {
           const webAuth = await loadWebAuth()
+          if (generation !== webSessionGeneration) return
           await webAuth.signOut()
         }
       } finally {
-        this.clearLocalSession()
+        if (generation === webSessionGeneration) this.clearLocalSession()
       }
     },
   },

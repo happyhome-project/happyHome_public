@@ -7,6 +7,7 @@ let loadingMyCommunities: Promise<void> | null = null
 
 interface LoadMyCommunitiesOptions {
   loadSections?: boolean
+  shouldApply?: () => boolean
 }
 
 export const useCommunityStore = defineStore('community', {
@@ -96,6 +97,7 @@ export const useCommunityStore = defineStore('community', {
     },
     async loadMyCommunitiesFresh(options: LoadMyCommunitiesOptions = {}) {
       const res = await memberApi.myCommunities()
+      if (options.shouldApply && !options.shouldApply()) return
       this.myCommunities = (res.communities as Community[]).filter(
         (community) => community?.status === 'active',
       )

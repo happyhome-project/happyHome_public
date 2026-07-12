@@ -9,6 +9,12 @@ const myCommunities = vi.fn()
 const calls: string[] = []
 const storage = new Map<string, any>()
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((next) => { resolve = next })
+  return { promise, resolve }
+}
+
 vi.mock('../../api/web-cloudbase', () => ({ signIn, signOut, getLoginState }))
 vi.mock('../../api/cloud', () => ({
   userApi: { login: userLogin },
@@ -170,5 +176,29 @@ describe('user store Web auth', () => {
     expect(store.isLoggedIn).toBe(false)
     expect(store.openId).toBe('')
     expect(storage.has('user_store')).toBe(false)
+  })
+
+  test('a restore waiting on user.login cannot revive the session after logout', async () => {
+    const pendingLogin = deferred<{ user: any; isNew: boolean }>()
+    getLoginState.mockResolvedValue({ user: { uid: 'sdk-user' } })
+    userLogin.mockReturnValueOnce(pendingLogin.promise)
+    const { useUserStore } = await import('../user')
+    const { useCommunityStore } = await import('../community')
+    const store = useUserStore()
+    const community = useCommunityStore()
+    store.nickName = '已存昵称'
+
+    const restoring = store.restoreWebSession()
+    await vi.waitFor(() => expect(userLogin).toHaveBeenCalledTimes(1))
+    await store.logout()
+    pendingLogin.resolve({ user: businessUser({ _id: 'stale-user' }), isNew: false })
+    await restoring
+
+    expect(store.openId).toBe('')
+    expect(store.isLoggedIn).toBe(false)
+    expect(storage.has('user_store')).toBe(false)
+    expect(community.currentCommunityId).toBe('')
+    expect(community.myCommunities).toEqual([])
+    expect(myCommunities).not.toHaveBeenCalled()
   })
 })
