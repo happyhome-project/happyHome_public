@@ -1,4 +1,4 @@
-import { createPostRagV2RuntimeFromEnv, createRawEsRequest } from '../post-rag-v2-runtime'
+import { createPostRagV2RuntimeFromEnv, createRawEsRequest, PostRagV2RuntimeError } from '../post-rag-v2-runtime'
 
 const env = {
   TENCENT_RAG_ES_ENDPOINT: 'https://es.example.test:9200', TENCENT_RAG_ES_USERNAME: 'elastic',
@@ -35,5 +35,47 @@ test('runtime sends one atomic batch and validates vector cardinality', async ()
   await expect(runtime.embedTexts(['一粥一饭', '勤俭持家'])).resolves.toEqual([[1, 2], [3, 4]])
   expect(atomic).toHaveBeenCalledWith(expect.objectContaining({ embeddingModel: 'bge-base-zh-v1.5' }), 'GetTextEmbedding', { ModelName: 'bge-base-zh-v1.5', Texts: ['一粥一饭', '勤俭持家'] })
   atomic.mockResolvedValueOnce({ Data: [{ Embedding: [1, 2] }] })
-  await expect(runtime.embedTexts(['a', 'b'])).rejects.toThrow('RAG embedding response is invalid')
+  await expect(runtime.embedTexts(['a', 'b'])).rejects.toThrow('RAG v2 embedding response is invalid')
+})
+
+function atomicRuntime(transport: any, options: Record<string, unknown> = {}) {
+  return createPostRagV2RuntimeFromEnv({
+    env,
+    database: database as any,
+    requestJson: jest.fn(),
+    atomicTransport: transport,
+    atomicTimeoutMs: 20,
+    atomicMaxResponseBytes: 64,
+    ...options,
+  } as any)
+}
+
+test('v2 atomic embedding aborts a slow transport with a sanitized typed timeout', async () => {
+  const transport = jest.fn((_url: string, init: { signal: AbortSignal }) => new Promise((_resolve, reject) => {
+    init.signal.addEventListener('abort', () => reject(new Error('secret transport timeout detail')), { once: true })
+  }))
+  const error = await atomicRuntime(transport).embedTexts(['勤俭持家']).catch((caught: unknown) => caught)
+  expect(error).toBeInstanceOf(PostRagV2RuntimeError)
+  expect(error).toMatchObject({ code: 'ATOMIC_TIMEOUT', message: 'RAG v2 embedding request timed out' })
+  expect(JSON.stringify(error)).not.toMatch(/secret|transport timeout detail/)
+})
+
+test('v2 atomic embedding rejects response bodies above the byte cap', async () => {
+  const transport = jest.fn(async () => ({ status: 200, body: (async function* () {
+    yield Buffer.alloc(40, 0x61)
+    yield Buffer.alloc(40, 0x62)
+  })() }))
+  const error = await atomicRuntime(transport).embedTexts(['勤俭持家']).catch((caught: unknown) => caught)
+  expect(error).toMatchObject({ code: 'ATOMIC_RESPONSE_TOO_LARGE', message: 'RAG v2 embedding response exceeded the size limit' })
+})
+
+test.each([
+  ['provider error', JSON.stringify({ Response: { Error: { Code: 'InternalError', Message: 'credential secret-id leaked by provider' } } }), 'ATOMIC_PROVIDER_ERROR'],
+  ['invalid JSON', '{"Response":', 'ATOMIC_INVALID_RESPONSE'],
+] as const)('v2 atomic embedding sanitizes %s responses', async (_label, body, code) => {
+  const transport = jest.fn(async () => ({ status: 200, body: (async function* () { yield Buffer.from(body) })() }))
+  const error = await atomicRuntime(transport, { atomicMaxResponseBytes: 1024 }).embedTexts(['勤俭持家']).catch((caught: unknown) => caught)
+  expect(error).toBeInstanceOf(PostRagV2RuntimeError)
+  expect(error).toMatchObject({ code })
+  expect(JSON.stringify(error)).not.toMatch(/credential secret-id|leaked by provider|Response/)
 })
