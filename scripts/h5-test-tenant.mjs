@@ -103,7 +103,12 @@ export async function createCloudBaseTenantStore({ config, root = ROOT, env = pr
         for (const post of postResponse?.data || []) documents[`posts/${post._id}`] = post
       }
       const membershipResponse = await db.collection('community_members').where({ communityId: COMMUNITY_ID }).limit(1000).get()
-      const memberships = membershipResponse?.data || []
+      const membershipById = new Map((membershipResponse?.data || []).map((member) => [member._id, member]))
+      if (account) {
+        const webMembershipResponse = await db.collection('community_members').where({ userId: `web:${account.uuid}` }).limit(1000).get()
+        for (const member of webMembershipResponse?.data || []) membershipById.set(member._id, member)
+      }
+      const memberships = [...membershipById.values()]
       return { account, documents, memberships }
     },
     async createEndUser({ username, password }) {
