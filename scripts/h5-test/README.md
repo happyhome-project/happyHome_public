@@ -34,10 +34,11 @@ for f in scripts/h5-test/[0-9]*.mjs; do node "$f" || exit 1; done
 
 ## Environment
 
-- `CLOUD_API_URL` — override the CloudBase HTTP base (default: prod host)
-- `ADMIN_TOKEN` — required bearer token supplied through the local environment; never commit its value.
+- `CLOUD_API_URL` — required CloudBase HTTP base URL.
+- `GATEWAY_TOKEN` — required bearer capability for `http-gateway`; never commit its value.
+- `VITE_ADMIN_USERNAME` and `VITE_ADMIN_PASSWORD` — required admin credentials. The helper calls `auth.login` once and reuses the returned session for `/admin` requests.
 
-The current H5/API test helper still has a legacy fallback, so a missing `ADMIN_TOKEN` does not fail closed. You must explicitly provide `ADMIN_TOKEN` through the local environment and must not rely on the fallback; never copy the fallback value into configuration or documentation.
+Gateway and admin credentials are deliberately separate. Missing credentials fail closed; the test helper does not use the legacy shared admin token fallback.
 
 ## When to reach for these vs `test-h5-e2e.mjs`
 
