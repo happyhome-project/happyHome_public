@@ -16,7 +16,7 @@ function projection() {
   }
 }
 
-function job() { return { schemaVersion: 2 as const, _id: 'job-2', postId: 'post-1', communityId: 'community-1', sectionId: 'section-1', sourceVersion: 'source-2', contentVersion: 2 } as any }
+function job() { return { schemaVersion: 2 as const, _id: 'job-2', postId: 'post-1', communityId: 'community-1', sectionId: 'section-1', sourceVersion: 'source-2', contentVersion: 2, updatedAt: '2026-07-12T00:00:01.000Z' } as any }
 const LEASE = { jobId: 'job-2', leaseToken: 'lease-a' }
 const ATTEMPT_A = derivePostRagIndexAttemptId(LEASE.jobId, LEASE.leaseToken)
 
@@ -29,13 +29,16 @@ function fakeDatabase(seed: Record<string, Doc> = {}) {
     if (collection === 'post_rag_index_state_v2' && document.state === 'active' && !document.attemptId) {
       document.attemptId = document.activationOrder?.jobId === 'job-2' ? ATTEMPT_A : `attempt-${document.activationOrder?.jobId}`
     }
+    if (collection === 'post_rag_index_state_v2' && document.state === 'active' && !document.activatedAt) document.activatedAt = '2026-07-12T00:00:01.000Z'
     if (collection === 'post_rag_index_versions' && !document.attemptId) {
       document.attemptId = document.activationOrder?.jobId === 'job-2' ? ATTEMPT_A : `attempt-${document.activationOrder?.jobId}`
     }
+    if (collection === 'post_rag_index_versions' && !document.stagedAt) document.stagedAt = '2026-07-12T00:00:00.000Z'
+    if (collection === 'post_rag_jobs' && !document.updatedAt) document.updatedAt = document.leaseToken === 'lease-b' ? '2026-07-12T00:00:02.000Z' : '2026-07-12T00:00:01.000Z'
     collections.get(collection)!.set(id, document)
   }
   const coll = (name: string) => { if (!collections.has(name)) collections.set(name, new Map()); return collections.get(name)! }
-  if (!coll('post_rag_jobs').has('job-2')) coll('post_rag_jobs').set('job-2', { schemaVersion: 2, _id: 'job-2', status: 'processing', leaseToken: 'lease-a', leaseExpiresAt: '2099-01-01T00:00:00.000Z' })
+  if (!coll('post_rag_jobs').has('job-2')) coll('post_rag_jobs').set('job-2', { schemaVersion: 2, _id: 'job-2', status: 'processing', leaseToken: 'lease-a', leaseExpiresAt: '2099-01-01T00:00:00.000Z', updatedAt: '2026-07-12T00:00:01.000Z' })
   const api = {
     collections,
     runTransaction: async (fn: any) => fn({
@@ -282,13 +285,13 @@ test('activate CAS rejects older and equal conflict, is idempotent for equal sou
   await expect(sink.activate({ postId: 'post-1', sourceVersion: 'source-3', activationOrder: { contentVersion: 3, jobId: 'job-3' }, jobId: 'job-3', leaseToken: 'lease-3' })).resolves.toEqual({ activated: true })
 })
 
-test('a reclaimed lease can replace the same job source attempt and cleanup the superseded attempt', async () => {
+test('cleanup fences a staged successor, then the reclaimed winner can remove only the old attempt', async () => {
   const attemptB = derivePostRagIndexAttemptId('job-2', 'lease-b')
   const oldId = `post-1:source-2:${ATTEMPT_A}:chunk-old`
   const database = fakeDatabase({
-    'post_rag_jobs/job-2': { schemaVersion: 2, _id: 'job-2', status: 'processing', leaseToken: 'lease-b', leaseExpiresAt: '2099-01-01T00:00:00.000Z' },
-    'post_rag_index_state_v2/post-1': { schemaVersion: 2, postId: 'post-1', state: 'active', sourceVersion: 'source-2', attemptId: ATTEMPT_A, activationOrder: { contentVersion: 2, jobId: 'job-2' } },
-    [`post_rag_index_versions/${oldId}`]: { _id: oldId, esDocumentId: oldId, schemaVersion: 2, postId: 'post-1', sourceVersion: 'source-2', attemptId: ATTEMPT_A, activationOrder: { contentVersion: 2, jobId: 'job-2' } },
+    'post_rag_jobs/job-2': { schemaVersion: 2, _id: 'job-2', status: 'processing', leaseToken: 'lease-b', leaseExpiresAt: '2099-01-01T00:00:00.000Z', updatedAt: '2026-07-12T00:00:02.000Z' },
+    'post_rag_index_state_v2/post-1': { schemaVersion: 2, postId: 'post-1', state: 'active', sourceVersion: 'source-2', attemptId: ATTEMPT_A, activatedAt: '2026-07-12T00:00:01.000Z', activationOrder: { contentVersion: 2, jobId: 'job-2' } },
+    [`post_rag_index_versions/${oldId}`]: { _id: oldId, esDocumentId: oldId, schemaVersion: 2, postId: 'post-1', sourceVersion: 'source-2', attemptId: ATTEMPT_A, stagedAt: '2026-07-12T00:00:00.000Z', activationOrder: { contentVersion: 2, jobId: 'job-2' } },
   })
   const deleted: string[] = []
   const { sink } = makeSink({ database, requestJson: async (_method: string, path: string, body: any) => {
@@ -298,7 +301,9 @@ test('a reclaimed lease can replace the same job source attempt and cleanup the 
   } })
   const leaseB = { jobId: 'job-2', leaseToken: 'lease-b' }
 
-  await sink.stageUpsert({ projection: projection() as any, job: job(), ...leaseB })
+  await sink.stageUpsert({ projection: projection() as any, job: { ...job(), updatedAt: '2026-07-12T00:00:02.000Z' }, ...leaseB })
+  await expect(sink.cleanupOldVersions({ postId: 'post-1', keepSourceVersion: 'source-2', activationOrder: { contentVersion: 2, jobId: 'job-2' }, ...LEASE })).rejects.toMatchObject({ code: 'LEASE_LOST' })
+  expect(deleted).toEqual([])
   await expect(sink.activate({ postId: 'post-1', sourceVersion: 'source-2', activationOrder: { contentVersion: 2, jobId: 'job-2' }, ...leaseB })).resolves.toEqual({ activated: true })
   await sink.cleanupOldVersions({ postId: 'post-1', keepSourceVersion: 'source-2', activationOrder: { contentVersion: 2, jobId: 'job-2' }, ...leaseB })
 
@@ -334,7 +339,7 @@ test('bulk cleanup failure explicitly preserves both the bulk and cleanup error 
   })
 })
 
-test('cleanup deletes only explicitly older IDs across stable pages and cannot delete a concurrently staged newer version', async () => {
+test('cleanup rechecks state before each delete batch and aborts after a concurrent newer activation', async () => {
   const database = fakeDatabase({
     'post_rag_index_state_v2/post-1': { schemaVersion: 2, postId: 'post-1', state: 'active', sourceVersion: 'source-2', activationOrder: { contentVersion: 2, jobId: 'job-2' } },
     'post_rag_index_versions/keep-a': { _id: 'keep-a', esDocumentId: 'keep-a', schemaVersion: 2, postId: 'post-1', sourceVersion: 'source-2', activationOrder: { contentVersion: 2, jobId: 'job-2' } },
@@ -344,18 +349,18 @@ test('cleanup deletes only explicitly older IDs across stable pages and cannot d
   })
   const calls: any[] = []
   const requestJson = async (method: string, path: string, body: any) => {
-    database.collections.get('post_rag_index_versions')!.set('newer', { _id: 'newer', esDocumentId: 'newer', schemaVersion: 2, postId: 'post-1', sourceVersion: 'source-3', activationOrder: { contentVersion: 3, jobId: 'job-3' } })
-    database.collections.get('post_rag_index_state_v2')!.set('post-1', { schemaVersion: 2, postId: 'post-1', state: 'active', sourceVersion: 'source-3', attemptId: 'attempt-job-3', activationOrder: { contentVersion: 3, jobId: 'job-3' } })
+    database.collections.get('post_rag_index_versions')!.set('newer', { _id: 'newer', esDocumentId: 'newer', schemaVersion: 2, postId: 'post-1', sourceVersion: 'source-3', attemptId: 'attempt-job-3', stagedAt: '2026-07-12T00:00:03.000Z', activationOrder: { contentVersion: 3, jobId: 'job-3' } })
+    database.collections.get('post_rag_index_state_v2')!.set('post-1', { schemaVersion: 2, postId: 'post-1', state: 'active', sourceVersion: 'source-3', attemptId: 'attempt-job-3', activatedAt: '2026-07-12T00:00:03.000Z', activationOrder: { contentVersion: 3, jobId: 'job-3' } })
     calls.push({ method, path, body })
     return { deleted: body.query.ids.values.length, timed_out: false, failures: [] }
   }
   const { sink } = makeSink({ database, requestJson, mirrorPageSize: 1, deleteBatchSize: 1 })
-  await sink.cleanupOldVersions({ postId: 'post-1', keepSourceVersion: 'source-2', activationOrder: { contentVersion: 2, jobId: 'job-2' }, ...LEASE })
-  expect(calls.flatMap((call) => call.body.query.ids.values).sort()).toEqual(['old-a', 'old-b'])
+  await expect(sink.cleanupOldVersions({ postId: 'post-1', keepSourceVersion: 'source-2', activationOrder: { contentVersion: 2, jobId: 'job-2' }, ...LEASE })).rejects.toMatchObject({ code: 'LEASE_LOST' })
+  expect(calls.flatMap((call) => call.body.query.ids.values)).toEqual(['old-a'])
   expect(calls.flatMap((call) => call.body.query.ids.values)).not.toContain('newer')
   expect([...database.collections.get('post_rag_index_versions')!.keys()].sort()).toEqual(['keep-a', 'keep-b', 'newer', 'old-a', 'old-b'])
-  await sink.cleanupOldVersions({ postId: 'post-1', keepSourceVersion: 'source-2', activationOrder: { contentVersion: 2, jobId: 'job-2' }, ...LEASE })
-  expect(calls).toHaveLength(2)
+  await expect(sink.cleanupOldVersions({ postId: 'post-1', keepSourceVersion: 'source-2', activationOrder: { contentVersion: 2, jobId: 'job-2' }, ...LEASE })).resolves.toBeUndefined()
+  expect(calls).toHaveLength(1)
 })
 
 test('remove writes tombstone before deleting explicit IDs at or below its order while preserving newer mirrors', async () => {
