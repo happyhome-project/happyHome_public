@@ -68,3 +68,29 @@ export function assertFormalReleaseGitState({
     throw new Error('Formal release resume build-info does not match the prepared version/desc')
   }
 }
+
+export function createFormalReleaseMutationRevalidator({
+  fetchOriginMain,
+  readGitState,
+  releaseStrategy,
+  fullCurrentExplicit = false,
+  beforeRemoteMutation,
+}) {
+  if (typeof fetchOriginMain !== 'function' || typeof readGitState !== 'function' || typeof beforeRemoteMutation !== 'function') {
+    throw new Error('Formal release mutation revalidation requires fetch, Git state, and production fence callbacks')
+  }
+  let pending = Promise.resolve()
+  return (stage) => {
+    const check = pending.then(async () => {
+      await fetchOriginMain()
+      assertFormalReleaseGitState({
+        ...readGitState(),
+        releaseStrategy,
+        fullCurrentExplicit,
+      })
+      await beforeRemoteMutation(stage)
+    })
+    pending = check.catch(() => {})
+    return check
+  }
+}

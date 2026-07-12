@@ -76,6 +76,7 @@ import { runDirectRemoteMutation } from './lib/direct-deploy-policy.mjs'
 import { parsePositiveIntOption } from './lib/release-concurrency.mjs'
 import {
   assertFormalReleaseGitState,
+  createFormalReleaseMutationRevalidator,
   mustRevalidateRemoteReleaseStage,
   shouldFallbackAfterDevtoolsFailure,
 } from './lib/release-policy.mjs'
@@ -1166,6 +1167,18 @@ async function runFormalRelease(options = {}) {
   const resume = forceResume || hasFlag('resume')
   const reuseCheck = releaseStageReuseCheck(releaseContext)
   const releaseGuard = prepareOnly ? null : createProductionReleaseGuard(releaseContext, formalPlan)
+  const revalidateFormalMutation = prepareOnly ? null : createFormalReleaseMutationRevalidator({
+    fetchOriginMain: async () => execSync('git fetch --quiet origin main', { cwd: ROOT, stdio: 'inherit' }),
+    readGitState: () => getFormalReleaseGitState({
+      releaseStrategy: 'full-current',
+      publishOnly,
+      version: miniprogramUpload.version,
+      desc: miniprogramUpload.desc,
+    }),
+    releaseStrategy: 'full-current',
+    fullCurrentExplicit: true,
+    beforeRemoteMutation: async (stage) => await releaseGuard.beforeRemoteMutation(stage),
+  })
 
   console.log(`[release-ledger] runId=${releaseLedger.runId}`)
   console.log(`[release-ledger] run=${releaseLedger.runPath}`)
@@ -1185,6 +1198,7 @@ async function runFormalRelease(options = {}) {
       reuseCheck,
       command: 'write build-info + npm run build:mp-weixin + npm run test:mp:release-gate -- --skip-mp-build',
     }, async () => {
+      if (revalidateFormalMutation) await revalidateFormalMutation('artifact-build:miniprogram')
       const preparedEvidence = await buildAndGateMiniprogramUpload({
         ...miniprogramUpload,
         releaseRunId: releaseLedger.runId,
@@ -1207,7 +1221,11 @@ async function runFormalRelease(options = {}) {
       const state = await releaseGuard.getProductionState()
       const result = await executeReleaseOperations({
         appliedMigrations: new Set(Object.keys(state?.appliedMigrations || {})),
-        guard: releaseGuard,
+        guard: {
+          beforeRemoteMutation: revalidateFormalMutation,
+          recordStage: async (...args) => await releaseGuard.recordStage(...args),
+          recordMigration: async (...args) => await releaseGuard.recordMigration(...args),
+        },
         manifests: formalPlan.manifests,
         runAction: runDeclaredReleaseAction,
         runMigration: async (migration) => await runDeclaredReleaseMigration(migration, releaseContext),
@@ -1222,9 +1240,10 @@ async function runFormalRelease(options = {}) {
       reuseCheck,
       command: `npm.cmd --workspace cloud run build && CloudBase CLI/COS fn deploy (concurrency=${getCloudDeployConcurrency()})`,
     }, async () => {
+      await revalidateFormalMutation('artifact-build:cloud')
       const result = await deployCloud({
         afterFunctionDeploy: async (fn, record) => await releaseGuard.recordStage(`cloud:${fn}`, { evidence: record }),
-        beforeFunctionDeploy: async (fn) => await releaseGuard.beforeRemoteMutation(`cloud:${fn}`),
+        beforeFunctionDeploy: async (fn) => await revalidateFormalMutation(`cloud:${fn}`),
         functions: formalPlan.targets.cloud.functions,
         requireCloudBaseCli: true,
         sourceSha: releaseContext.gitSha,
@@ -1252,8 +1271,8 @@ async function runFormalRelease(options = {}) {
       command: `npm.cmd run test:cloud:release-smoke (concurrency=${getCloudSmokeConcurrency()})`,
     }, async () => {
       const summary = await runCloudSmoke(cloudDeploy.fns, releaseLedger.runId, {
-        beforeEnsureIndexes: async () => await releaseGuard.beforeRemoteMutation('ensure-indexes'),
-        beforeSmokeCommand: async ({ stage }) => await releaseGuard.beforeRemoteMutation(`cloud-smoke:${stage}`),
+        beforeEnsureIndexes: async () => await revalidateFormalMutation('ensure-indexes'),
+        beforeSmokeCommand: async ({ stage }) => await revalidateFormalMutation(`cloud-smoke:${stage}`),
       })
       await releaseGuard.recordStage('cloud-smoke', { evidence: { summaryPath: resolve(summary.evidenceDir, 'summary.json') } })
       return {
@@ -1274,8 +1293,8 @@ async function runFormalRelease(options = {}) {
       reuseCheck,
       command: 'npm.cmd --workspace admin-web run build + admin-web deploy',
     }, async () => {
-      await releaseGuard.beforeRemoteMutation('admin-web-deploy')
-      await deployAdminWeb()
+      await revalidateFormalMutation('artifact-build:admin-web')
+      await deployAdminWeb({ beforeRemoteMutation: async () => await revalidateFormalMutation('admin-web-deploy') })
       await releaseGuard.recordStage('admin-web-deploy')
       return { result: { target: process.env.ADMIN_WEB_TARGET || 'aliyun' } }
     })
@@ -1294,8 +1313,10 @@ async function runFormalRelease(options = {}) {
       if (currentPackageDigest !== preparedPackageDigest) {
         throw new Error(`miniprogram package changed after release UI validation: expected ${preparedPackageDigest}, got ${currentPackageDigest}`)
       }
-      await releaseGuard.beforeRemoteMutation('miniprogram-upload')
-      const uploadResult = await uploadBuiltMiniprogram(miniprogramUpload)
+      const uploadResult = await uploadBuiltMiniprogram({
+        ...miniprogramUpload,
+        beforeRemoteMutation: async () => await revalidateFormalMutation('miniprogram-upload'),
+      })
       const uploadEvidence = writeMiniprogramUploadEvidence({
         releaseRunId: releaseLedger.runId,
         version: miniprogramUpload.version,

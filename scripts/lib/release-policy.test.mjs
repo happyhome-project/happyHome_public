@@ -187,6 +187,63 @@ test('full-current planner fetches and validates exact public main HEAD before p
   assert.match(fullCurrentBranch, /fullCurrentExplicit:\s*true/)
 })
 
+test('formal mutation revalidation refuses Git drift before invoking the production fence', async () => {
+  let state = validPublicReleaseState()
+  const events = []
+  const revalidate = releasePolicyModule.createFormalReleaseMutationRevalidator({
+    fetchOriginMain: async () => events.push('fetch'),
+    readGitState: () => state,
+    releaseStrategy: 'full-current',
+    fullCurrentExplicit: true,
+    beforeRemoteMutation: async (stage) => events.push(`fence:${stage}`),
+  })
+
+  await revalidate('cloud:user')
+  assert.deepEqual(events, ['fetch', 'fence:cloud:user'])
+
+  state = { ...state, changedPaths: ['cloud/functions/user/index.ts'] }
+  await assert.rejects(() => revalidate('cloud:user'), /clean/i)
+  assert.deepEqual(events, ['fetch', 'fence:cloud:user', 'fetch'])
+})
+
+test('formal mutation revalidation preserves the narrow publish-resume build-info exception', async () => {
+  const events = []
+  const revalidate = releasePolicyModule.createFormalReleaseMutationRevalidator({
+    fetchOriginMain: async () => events.push('fetch'),
+    readGitState: () => validPublicReleaseState({
+      changedPaths: ['miniprogram/src/generated/build-info.ts'],
+      publishOnly: true,
+      generatedBuildInfoMatches: true,
+    }),
+    releaseStrategy: 'full-current',
+    fullCurrentExplicit: true,
+    beforeRemoteMutation: async (stage) => events.push(`fence:${stage}`),
+  })
+
+  await revalidate('miniprogram-upload')
+  assert.deepEqual(events, ['fetch', 'fence:miniprogram-upload'])
+})
+
+test('formal mutation revalidation serializes concurrent Git fetch and fence checks', async () => {
+  let active = 0
+  let maxActive = 0
+  const revalidate = releasePolicyModule.createFormalReleaseMutationRevalidator({
+    fetchOriginMain: async () => {
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      await new Promise((resolve) => setImmediate(resolve))
+      active -= 1
+    },
+    readGitState: () => validPublicReleaseState(),
+    releaseStrategy: 'full-current',
+    fullCurrentExplicit: true,
+    beforeRemoteMutation: async () => {},
+  })
+
+  await Promise.all([revalidate('cloud:user'), revalidate('cloud:post')])
+  assert.equal(maxActive, 1)
+})
+
 test('CloudBase CLI retry treats its known includes TypeError as transient', () => {
   const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
   const retryClassifier = extractFunctionBlock(deployScript, 'function isTransientCloudBaseCliFailure')
