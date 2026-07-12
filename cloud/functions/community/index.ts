@@ -169,8 +169,8 @@ export async function handleListDiscoverable(openid: string) {
   return { communities: result }
 }
 
-export const main = async (event: any) => {
-  const openid = resolveOpenId(event)
+export const main = async (event: any, context?: any) => {
+  const openid = resolveOpenId(event, context)
   const { action, _testOpenid, ...params } = event
   if (action === 'create') return handleCreate(params, openid)
   if (action === 'approve') return handleApprove(params, openid)

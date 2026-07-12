@@ -240,8 +240,8 @@ export async function handleMyCommunities(openid: string) {
   return { communities }
 }
 
-export const main = async (event: any) => {
-  const openid = resolveOpenId(event)
+export const main = async (event: any, context?: any) => {
+  const openid = resolveOpenId(event, context)
   const { action, _testOpenid, ...params } = event
   if (action === 'apply') return handleApply(params, openid)
   if (action === 'leave') return handleLeave(params, openid)
