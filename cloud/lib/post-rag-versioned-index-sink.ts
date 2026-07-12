@@ -11,9 +11,9 @@ export function comparePostRagActivationOrder(left: PostRagActivationOrder, righ
 }
 
 export interface PostRagVersionedIndexSink {
-  stageUpsert(input: { projection: PostRagSourceProjection; job: PostRagJobDocument }): Promise<void>
+  stageUpsert(input: { projection: PostRagSourceProjection; job: PostRagJobDocument; jobId: string; leaseToken: string }): Promise<void>
   inspectStaged(input: { postId: string; sourceVersion: string }): Promise<{ chunkCount: number; chunkChecksum: string }>
-  activate(input: { postId: string; sourceVersion: string; activationOrder: PostRagActivationOrder }): Promise<{ activated: boolean }>
+  activate(input: { postId: string; sourceVersion: string; activationOrder: PostRagActivationOrder; jobId: string; leaseToken: string }): Promise<{ activated: boolean }>
   cleanupOldVersions(input: { postId: string; keepSourceVersion: string; activationOrder: PostRagActivationOrder }): Promise<void>
   remove(input: { postId: string; sourceVersion: string; activationOrder: PostRagActivationOrder }): Promise<{ removed: boolean }>
 }
@@ -25,8 +25,7 @@ type Database = {
     getById(collection: string, id: string): Promise<JsonRecord | null>
     setById(collection: string, id: string, data: JsonRecord): Promise<void>
   }) => Promise<T>): Promise<T>
-  setById(collection: string, id: string, data: JsonRecord): Promise<void>
-  query(collection: string, where: JsonRecord, options: { limit: number; skip?: number }): Promise<JsonRecord[]>
+  queryAfterId(collection: string, where: JsonRecord, afterId: string | null, limit: number): Promise<JsonRecord[]>
   removeById(collection: string, id: string): Promise<void>
 }
 
@@ -34,7 +33,7 @@ type RequestJson = (method: string, path: string, body?: unknown, options?: { co
 
 export type PostRagVersionedSinkErrorCode =
   | 'VALIDATION_FAILED' | 'EMBEDDING_INVALID' | 'ES_BULK_FAILED' | 'ES_INSPECTION_FAILED'
-  | 'ES_DELETE_FAILED' | 'STATE_INVALID' | 'ACTIVATION_CONFLICT'
+  | 'ES_DELETE_FAILED' | 'STATE_INVALID' | 'ACTIVATION_CONFLICT' | 'LEASE_LOST'
 
 const authenticatedErrors = new WeakSet<object>()
 
@@ -97,6 +96,14 @@ function validEmbedding(value: unknown): value is number[] {
   return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === 'number' && Number.isFinite(item))
 }
 
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson((value as JsonRecord)[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
 export function createVersionedTencentEsRagSink(options: {
   database: Database
   requestJson: RequestJson
@@ -120,14 +127,16 @@ export function createVersionedTencentEsRagSink(options: {
 
   async function listMirrors(postId: string): Promise<Mirror[]> {
     const mirrors: Mirror[] = []
-    for (let skip = 0; ; skip += mirrorPageSize) {
-      const page = await database.query('post_rag_index_versions', { schemaVersion: 2, postId }, { limit: mirrorPageSize, skip })
+    let afterId: string | null = null
+    for (;;) {
+      const page = await database.queryAfterId('post_rag_index_versions', { schemaVersion: 2, postId }, afterId, mirrorPageSize)
       for (const doc of page) {
         if (!safeIdentifier(doc._id) || !safeIdentifier(doc.esDocumentId) || doc.postId !== postId || doc.schemaVersion !== 2
           || !safeIdentifier(doc.sourceVersion) || !validOrder(doc.activationOrder)) fail('STATE_INVALID')
         mirrors.push(doc as Mirror)
       }
       if (page.length < mirrorPageSize) return mirrors
+      afterId = page[page.length - 1]._id
     }
   }
 
@@ -143,6 +152,26 @@ export function createVersionedTencentEsRagSink(options: {
     }
   }
 
+  async function deleteExplicitIds(ids: string[]) {
+    if (ids.length === 0) return
+    let response: any
+    try { response = await requestJson('POST', `${options.indexName}/_delete_by_query`, { query: { ids: { values: ids } } }) }
+    catch { fail('ES_DELETE_FAILED') }
+    if (!response || response.timed_out !== false || !Number.isSafeInteger(response.deleted) || response.deleted < 0
+      || !Array.isArray(response.failures) || response.failures.length !== 0) fail('ES_DELETE_FAILED')
+  }
+
+  function leaseMatches(value: JsonRecord | null, jobId: string, leaseToken: string) {
+    return Boolean(value && value.schemaVersion === 2 && value._id === jobId && value.status === 'processing'
+      && value.leaseToken === leaseToken && typeof value.leaseExpiresAt === 'string'
+      && Date.parse(value.leaseExpiresAt) > Date.now())
+  }
+
+  async function hasLease(jobId: string, leaseToken: string) {
+    if (!safeIdentifier(jobId) || !safeIdentifier(leaseToken)) return false
+    return database.runTransaction(async (tx) => leaseMatches(await tx.getById('post_rag_jobs', jobId), jobId, leaseToken))
+  }
+
   async function removeMirrorRows(mirrors: Mirror[]) {
     for (const mirror of mirrors) await database.removeById('post_rag_index_versions', mirror._id)
   }
@@ -154,36 +183,91 @@ export function createVersionedTencentEsRagSink(options: {
   }
 
   return {
-    async stageUpsert({ projection, job }) {
+    async stageUpsert({ projection, job, jobId, leaseToken }) {
       assertProjection(projection, job)
+      if (jobId !== job._id || !await hasLease(jobId, leaseToken)) fail('LEASE_LOST')
       const embeddings: number[][] = []
       for (let offset = 0; offset < projection.chunks.length; offset += embeddingBatchSize) {
+        if (!await hasLease(jobId, leaseToken)) fail('LEASE_LOST')
         const batch = projection.chunks.slice(offset, offset + embeddingBatchSize)
         let output: number[][]
         try { output = await embedTexts(batch.map((chunk) => chunk.text)) } catch { fail('EMBEDDING_INVALID') }
         if (!Array.isArray(output) || output.length !== batch.length || output.some((vector) => !validEmbedding(vector))) fail('EMBEDDING_INVALID')
         embeddings.push(...output)
+        if (!await hasLease(jobId, leaseToken)) fail('LEASE_LOST')
       }
       const lines: string[] = []
+      const documents = new Map<string, JsonRecord>()
       projection.chunks.forEach((chunk, index) => {
         const id = `${chunk.postId}:${projection.sourceVersion}:${chunk.chunkId}`
-        lines.push(JSON.stringify({ index: { _id: id } }))
-        lines.push(JSON.stringify({ ...chunk, projectionChecksum: projection.chunkChecksum, embedding: embeddings[index] }))
+        const document = { ...chunk, projectionChecksum: projection.chunkChecksum, embedding: embeddings[index] }
+        documents.set(id, document)
+        lines.push(JSON.stringify({ create: { _id: id } }))
+        lines.push(JSON.stringify(document))
       })
       let response: any
+      if (!await hasLease(jobId, leaseToken)) fail('LEASE_LOST')
       try {
         response = await requestJson('POST', `${options.indexName}/_bulk?refresh=wait_for`, `${lines.join('\n')}\n`, { contentType: 'application/x-ndjson' })
       } catch { fail('ES_BULK_FAILED') }
-      if (response?.errors !== false || !Array.isArray(response.items) || response.items.length !== projection.chunks.length
-        || response.items.some((item: any) => !item?.index || item.index.status < 200 || item.index.status >= 300)) fail('ES_BULK_FAILED')
-      for (const chunk of projection.chunks) {
+      if (!Array.isArray(response?.items) || response.items.length !== projection.chunks.length) fail('ES_BULK_FAILED')
+      const conflicts: string[] = []
+      const createdIds: string[] = []
+      const documentIds = [...documents.keys()]
+      for (let index = 0; index < response.items.length; index += 1) {
+        const result = response.items[index]?.create
+        if (!result || !Number.isSafeInteger(result.status)) fail('ES_BULK_FAILED')
+        if (result.status === 409) conflicts.push(documentIds[index])
+        else if (result.status < 200 || result.status >= 300) fail('ES_BULK_FAILED')
+        else createdIds.push(documentIds[index])
+      }
+      if (!await hasLease(jobId, leaseToken)) {
+        await deleteExplicitIds(createdIds)
+        fail('LEASE_LOST')
+      }
+      if (conflicts.length > 0) {
+        let existing: any
+        try { existing = await requestJson('POST', `${options.indexName}/_mget`, { ids: conflicts }) } catch { fail('ES_BULK_FAILED') }
+        if (!Array.isArray(existing?.docs) || existing.docs.length !== conflicts.length) fail('ES_BULK_FAILED')
+        for (let index = 0; index < conflicts.length; index += 1) {
+          const doc = existing.docs[index]
+          if (doc?._id !== conflicts[index] || doc?.found !== true
+            || canonicalJson(doc._source) !== canonicalJson(documents.get(conflicts[index]))) {
+            await deleteExplicitIds(createdIds)
+            fail('ACTIVATION_CONFLICT')
+          }
+        }
+        if (!await hasLease(jobId, leaseToken)) {
+          await deleteExplicitIds(createdIds)
+          fail('LEASE_LOST')
+        }
+      }
+      const mirrors = projection.chunks.map((chunk) => {
         const id = `${chunk.postId}:${projection.sourceVersion}:${chunk.chunkId}`
-        await database.setById('post_rag_index_versions', id, {
+        return {
           _id: id, esDocumentId: id, schemaVersion: 2, postId: chunk.postId, communityId: chunk.communityId,
           sectionId: chunk.sectionId, sourceVersion: projection.sourceVersion, chunkId: chunk.chunkId,
           chunkChecksum: chunk.chunkChecksum, projectionChecksum: projection.chunkChecksum,
           activationOrder: { contentVersion: job.contentVersion, jobId: job._id },
+        }
+      })
+      try {
+        await database.runTransaction(async (tx) => {
+          if (!leaseMatches(await tx.getById('post_rag_jobs', jobId), jobId, leaseToken)) fail('LEASE_LOST')
+          for (const mirror of mirrors) {
+            const existing = await tx.getById('post_rag_index_versions', mirror._id)
+            if (existing) {
+              if (canonicalJson(existing) !== canonicalJson(mirror)) fail('ACTIVATION_CONFLICT')
+              continue
+            }
+            await tx.setById('post_rag_index_versions', mirror._id, mirror)
+          }
         })
+      } catch (error) {
+        if (error instanceof PostRagVersionedSinkError && error.code === 'LEASE_LOST') {
+          await deleteExplicitIds(createdIds)
+        }
+        throw error
       }
     },
 
@@ -210,10 +294,12 @@ export function createVersionedTencentEsRagSink(options: {
       return { chunkCount: hits.length, chunkChecksum: [...checksums][0] }
     },
 
-    async activate({ postId, sourceVersion, activationOrder }) {
+    async activate({ postId, sourceVersion, activationOrder, jobId, leaseToken }) {
       requireIdentifier(postId); requireIdentifier(sourceVersion)
-      if (!validOrder(activationOrder)) fail('VALIDATION_FAILED')
+      if (!validOrder(activationOrder) || jobId !== activationOrder.jobId) fail('VALIDATION_FAILED')
       return database.runTransaction(async (tx) => {
+        if (!safeIdentifier(jobId) || !safeIdentifier(leaseToken)
+          || !leaseMatches(await tx.getById('post_rag_jobs', jobId), jobId, leaseToken)) fail('LEASE_LOST')
         const current = parseState(await tx.getById('post_rag_index_state_v2', postId), postId)
         if (current) {
           const comparison = comparePostRagActivationOrder(activationOrder, current.activationOrder)

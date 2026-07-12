@@ -7,6 +7,7 @@ const mockAdd = jest.fn().mockResolvedValue({ _id: 'new-id' })
 const mockRemove = jest.fn().mockResolvedValue({ stats: { removed: 1 } })
 const mockWhereUpdate = jest.fn().mockResolvedValue({ stats: { updated: 1 } })
 const mockRunTransaction = jest.fn()
+const mockWhereGet = jest.fn().mockResolvedValue({ data: [] })
 
 jest.mock('wx-server-sdk', () => ({
   init: jest.fn(),
@@ -23,7 +24,7 @@ jest.mock('wx-server-sdk', () => ({
         orderBy: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockReturnThis(),
-        get: jest.fn().mockResolvedValue({ data: [] }),
+        get: mockWhereGet,
       }),
       orderBy: jest.fn().mockReturnThis(),
       skip: jest.fn().mockReturnThis(),
@@ -32,6 +33,7 @@ jest.mock('wx-server-sdk', () => ({
     }),
     command: {
       inc: (n: number) => ({ __inc: n }),
+      in: (values: string[]) => ({ __in: values }),
       set: (value: unknown) => ({ __set: value }),
       remove: () => ({ __remove: true }),
     },
@@ -40,11 +42,16 @@ jest.mock('wx-server-sdk', () => ({
   DYNAMIC_CURRENT_ENV: 'test'
 }))
 
-import { getById, create, increment, replaceValue, removeField, runTransaction, transactionGetByIdOrNull } from '../db'
+import { getById, getByIds, create, increment, replaceValue, removeField, runTransaction, transactionGetByIdOrNull } from '../db'
 
 test('getById returns document data', async () => {
   const result = await getById('users', 'user-123')
   expect(result).toEqual({ _id: 'user-123', name: 'test' })
+})
+
+test('getByIds preserves unique caller order regardless of CloudBase response order', async () => {
+  mockWhereGet.mockResolvedValueOnce({ data: [{ _id: 'a' }, { _id: 'b' }] })
+  await expect(getByIds('users', ['b', 'missing', 'a', 'b'])).resolves.toEqual([{ _id: 'b' }, { _id: 'a' }])
 })
 
 test('create returns new document id', async () => {

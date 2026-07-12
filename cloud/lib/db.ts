@@ -53,7 +53,8 @@ export async function getByIds(collectionName: string, ids: string[]) {
   if (!Array.isArray(ids) || ids.length > 100 || ids.some(id => typeof id !== 'string' || !id)) throw new Error('invalid document ids')
   if (ids.length === 0) return []
   const res = await collection(collectionName).where({ _id: _.in([...new Set(ids)]) }).limit(100).get()
-  return res.data
+  const byId = new Map(res.data.map((document: any) => [document._id, document]))
+  return [...new Set(ids)].map(id => byId.get(id)).filter(Boolean)
 }
 export async function queryAfterId(collectionName:string,where:Record<string,any>,afterId:string|null,limit:number){let query:any=collection(collectionName).where(afterId?{...where,_id:_.gt(afterId)}:where).orderBy('_id','asc').limit(limit);const res=await query.get();return res.data}
 
