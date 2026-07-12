@@ -168,9 +168,16 @@ export async function doctorTenant({ store, config }) {
   if (observation.account.disabled) throw new Error('Web auth account is disabled')
   const manifest = buildManifest({ webUserId: accountUserId(observation.account), wechatOpenid: config.wechatOpenid })
   validateObservation(observation, manifest)
+  const expectedMemberships = manifest.memberships.map((member) => member._id).sort()
+  const observedMemberships = (observation.memberships || []).map((member) => member._id).sort()
+  if (JSON.stringify(observedMemberships) !== JSON.stringify(expectedMemberships) || (observation.memberships || []).some((member) => member.status !== 'active' || member.role !== 'member' || member.fixtureKey !== FIXTURE_KEY)) {
+    throw new Error('invalid fixture community membership set')
+  }
   const sections = manifest.sections
   const observedSections = Object.entries(observation.documents || {}).filter(([key, doc]) => key.startsWith('sections/') && doc.communityId === COMMUNITY_ID)
   if (observedSections.length !== 3) throw new Error(`invalid section count: ${observedSections.length}`)
+  const totalCounts = sections.map((section) => Object.entries(observation.documents || {}).filter(([key, doc]) => key.startsWith('posts/') && doc.sectionId === section._id).length)
+  if (JSON.stringify(totalCounts) !== JSON.stringify([30, 1, 0])) throw new Error(`invalid total post counts: ${totalCounts.join('/')}`)
   const counts = sections.map((section) => Object.entries(observation.documents || {}).filter(([key, doc]) => key.startsWith('posts/') && doc.sectionId === section._id && doc.status === 'active' && doc.auditStatus === 'pass').length)
   if (JSON.stringify(counts) !== JSON.stringify([30, 1, 0])) throw new Error(`invalid active post counts: ${counts.join('/')}`)
   const expected = documentEntries(manifest)

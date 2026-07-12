@@ -8,9 +8,9 @@ import { fileURLToPath } from 'node:url'
 import CloudBase from '@cloudbase/manager-node'
 import { resolveCloudBaseReleaseCredentials } from './lib/cloudbase-release-store.mjs'
 import { COMMUNITY_ID, FIXTURE_KEY, applyTenant, buildManifest, createPrepareRecord, doctorTenant, planTenant, serializePrepareRecord } from './lib/h5-test-tenant.mjs'
+import { withValidationLease } from './lib/validation-lease.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const PREPARE_PATH = join(ROOT, '.codex-local', 'h5-test-tenant', 'prepare.json')
 const REQUIRED_CONFIG = ['HH_CLOUDBASE_ENV_ID', 'HH_CLOUDBASE_ACCESS_KEY', 'HH_H5_WEB_USERNAME', 'HH_H5_WEB_PASSWORD', 'HH_WECHAT_TEST_OPENID']
 
 function parseEnvFile(path) {
@@ -45,13 +45,17 @@ function isMissing(error) {
   return /document(?:\.get)?:fail[\s\S]*(?:does not exist|not found)|document not found|db or table not exist/i.test(String(error?.message || error))
 }
 
-export async function createCloudBaseTenantStore({ config, root = ROOT, env = process.env, home = homedir() }) {
-  const credentials = resolveCloudBaseReleaseCredentials({ env: { ...env, TCB_ENV: config.envId }, home })
-  if (credentials.envId !== config.envId) throw new Error('CAM credential environment does not match HH_CLOUDBASE_ENV_ID')
-  const manager = new CloudBase({ envId: config.envId, secretId: credentials.secretId, secretKey: credentials.secretKey })
-  const workspaceRequire = createRequire(resolve(root, 'cloud', 'package.json'))
-  const sdk = workspaceRequire('@cloudbase/node-sdk')
-  const db = sdk.init({ env: config.envId, secretId: credentials.secretId, secretKey: credentials.secretKey }).database()
+export async function createCloudBaseTenantStore({ config, root = ROOT, env = process.env, home = homedir(), manager: injectedManager, db: injectedDb }) {
+  let manager = injectedManager
+  let db = injectedDb
+  if (!manager || !db) {
+    const credentials = resolveCloudBaseReleaseCredentials({ env: { ...env, TCB_ENV: config.envId }, home })
+    if (credentials.envId !== config.envId) throw new Error('CAM credential environment does not match HH_CLOUDBASE_ENV_ID')
+    manager ||= new CloudBase({ envId: config.envId, secretId: credentials.secretId, secretKey: credentials.secretKey })
+    const workspaceRequire = createRequire(resolve(root, 'cloud', 'package.json'))
+    const sdk = workspaceRequire('@cloudbase/node-sdk')
+    db ||= sdk.init({ env: config.envId, secretId: credentials.secretId, secretKey: credentials.secretKey }).database()
+  }
 
   async function getDocument(collection, id) {
     try {
@@ -94,15 +98,12 @@ export async function createCloudBaseTenantStore({ config, root = ROOT, env = pr
       }
       const sectionResponse = await db.collection('sections').where({ communityId: COMMUNITY_ID }).limit(1000).get()
       for (const section of sectionResponse?.data || []) documents[`sections/${section._id}`] = section
-      for (const section of sectionResponse?.data || []) {
+      for (const section of manifest.sections) {
         const postResponse = await db.collection('posts').where({ sectionId: section._id }).limit(1000).get()
         for (const post of postResponse?.data || []) documents[`posts/${post._id}`] = post
       }
-      let memberships = []
-      if (account) {
-        const response = await db.collection('community_members').where({ userId: `web:${account.uuid}` }).limit(1000).get()
-        memberships = response?.data || []
-      }
+      const membershipResponse = await db.collection('community_members').where({ communityId: COMMUNITY_ID }).limit(1000).get()
+      const memberships = membershipResponse?.data || []
       return { account, documents, memberships }
     },
     async createEndUser({ username, password }) {
@@ -112,19 +113,32 @@ export async function createCloudBaseTenantStore({ config, root = ROOT, env = pr
     async setDocument(collection, id, document) {
       const data = structuredClone(document)
       delete data._id
-      await db.collection(collection).doc(id).set(data)
+      await db.runTransaction(async (transaction) => {
+        const reference = transaction.collection(collection).doc(id)
+        let current = null
+        try {
+          const response = await reference.get()
+          current = Array.isArray(response?.data) ? response.data[0] : response?.data
+        } catch (error) {
+          if (!isMissing(error)) throw error
+        }
+        if (current && current.fixtureKey !== FIXTURE_KEY) throw new Error(`fixture ownership changed before write: ${collection}/${id}`)
+        await reference.set(data)
+      })
     },
   }
 }
 
-export async function runCli({ argv = process.argv.slice(2), env = process.env, home = homedir(), root = ROOT, stdout = console.log } = {}) {
+export async function runCli({ argv = process.argv.slice(2), env = process.env, home = homedir(), root = ROOT, stdout = console.log, storeFactory = createCloudBaseTenantStore, leaseWrapper = withValidationLease, operations = {} } = {}) {
   const command = argv[0]
   if (!['prepare', 'doctor', 'apply'].includes(command)) throw new Error('usage: npm run h5:test-tenant -- <prepare|apply|doctor>')
   const config = loadTenantConfig({ env, home })
-  const store = await createCloudBaseTenantStore({ config, root, env, home })
   switch (command) {
     case 'prepare': {
-      const prepare = createPrepareRecord(await planTenant({ store, config }))
+      const store = await storeFactory({ config, root, env, home })
+      const prepare = operations.prepare
+        ? await operations.prepare({ store, config })
+        : createPrepareRecord(await planTenant({ store, config }))
       const path = join(root, '.codex-local', 'h5-test-tenant', 'prepare.json')
       mkdirSync(dirname(path), { recursive: true })
       writeFileSync(path, serializePrepareRecord(prepare), { encoding: 'utf8', mode: 0o600 })
@@ -132,16 +146,24 @@ export async function runCli({ argv = process.argv.slice(2), env = process.env, 
       return prepare
     }
     case 'doctor': {
-      const result = await doctorTenant({ store, config })
+      const store = await storeFactory({ config, root, env, home })
+      const result = operations.doctor ? await operations.doctor({ store, config }) : await doctorTenant({ store, config })
       stdout(JSON.stringify(result))
       return result
     }
     case 'apply': {
       if (env.HAPPYHOME_FIXTURE_PREFIX !== FIXTURE_KEY) throw new Error(`apply requires HAPPYHOME_FIXTURE_PREFIX=${FIXTURE_KEY}`)
-      const path = root === ROOT ? PREPARE_PATH : join(root, '.codex-local', 'h5-test-tenant', 'prepare.json')
+      const argument = argv.slice(1).find((value) => value.startsWith('--manifest='))
+      if (!argument?.slice('--manifest='.length)) throw new Error('apply requires --manifest=<prepare.json>')
+      const path = resolve(argument.slice('--manifest='.length))
       if (!existsSync(path)) throw new Error(`apply requires prepare.json: run prepare first (${path})`)
       const prepare = JSON.parse(readFileSync(path, 'utf8'))
-      const result = await applyTenant({ store, config, prepare, env })
+      const result = await leaseWrapper({ command: 'h5-test-tenant:apply' }, async () => {
+        const store = await storeFactory({ config, root, env, home })
+        return operations.apply
+          ? await operations.apply({ store, config, prepare, env })
+          : await applyTenant({ store, config, prepare, env })
+      })
       stdout(JSON.stringify(result))
       return result
     }

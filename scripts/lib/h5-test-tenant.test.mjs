@@ -119,6 +119,19 @@ test('apply rejects changed observation and wrong fixture prefix', async () => {
   await assert.rejects(applyTenant({ store: new FakeStore(), config, prepare, env: {} }), /HAPPYHOME_FIXTURE_PREFIX/)
 })
 
+test('apply rejects tampered prepare env, record fingerprint, and plan fingerprint', async () => {
+  const store = new FakeStore()
+  const prepare = createPrepareRecord(await planTenant({ store, config }))
+  await assert.rejects(applyTenant({ store, config, prepare: { ...prepare, envId: 'other' }, env: { HAPPYHOME_FIXTURE_PREFIX: FIXTURE_KEY } }), /envId/)
+  await assert.rejects(applyTenant({ store, config, prepare: { ...prepare, fingerprint: '0'.repeat(64) }, env: { HAPPYHOME_FIXTURE_PREFIX: FIXTURE_KEY } }), /prepare fingerprint/)
+  const changedPlan = { ...prepare, planFingerprint: '1'.repeat(64) }
+  const body = { ...changedPlan }; delete body.fingerprint
+  const crypto = await import('node:crypto')
+  const stable = (value) => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])])) : value
+  changedPlan.fingerprint = crypto.createHash('sha256').update(JSON.stringify(stable(body))).digest('hex')
+  await assert.rejects(applyTenant({ store, config, prepare: changedPlan, env: { HAPPYHOME_FIXTURE_PREFIX: FIXTURE_KEY } }), /plan fingerprint/)
+})
+
 test('prepare serialization contains no password, access key, or openid', async () => {
   const serialized = serializePrepareRecord(createPrepareRecord(await planTenant({ store: new FakeStore(), config })))
   for (const secret of [config.password, config.accessKey, config.wechatOpenid]) assert.equal(serialized.includes(secret), false)
@@ -134,5 +147,22 @@ test('doctor reports sanitized counts and rejects wrong section post counts', as
   assert.equal(JSON.stringify(healthy).includes(config.wechatOpenid), false)
   const post = [...store.documents.entries()].find(([key]) => key.startsWith('posts/'))
   store.documents.delete(post[0])
-  await assert.rejects(doctorTenant({ store, config }), /active post counts/)
+  await assert.rejects(doctorTenant({ store, config }), /post counts/)
+})
+
+test('doctor rejects disabled account, extra membership, and extra inactive or non-pass posts', async () => {
+  const seed = async () => {
+    const store = new FakeStore()
+    await applyTenant({ store, config, prepare: createPrepareRecord(await planTenant({ store, config })), env: { HAPPYHOME_FIXTURE_PREFIX: FIXTURE_KEY } })
+    return store
+  }
+  const disabled = await seed(); disabled.account.disabled = true
+  await assert.rejects(doctorTenant({ store: disabled, config }), /disabled/)
+  const extraMember = await seed(); extraMember.memberships.push({ _id: 'extra', communityId: 'hh-web-h5-v1-community', userId: 'someone', role: 'member', status: 'active' })
+  await assert.rejects(doctorTenant({ store: extraMember, config }), /membership set/)
+  for (const patch of [{ status: 'deleted', auditStatus: 'pass' }, { status: 'active', auditStatus: 'review' }]) {
+    const extraPost = await seed()
+    extraPost.documents.set('posts/extra-post', { _id: 'extra-post', communityId: 'hh-web-h5-v1-community', sectionId: 'hh-web-h5-v1-section-long', fixtureKey: FIXTURE_KEY, ...patch })
+    await assert.rejects(doctorTenant({ store: extraPost, config }), /total post counts/)
+  }
 })
