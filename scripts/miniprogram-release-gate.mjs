@@ -5,7 +5,11 @@
  * of blank detail/profile pages before a development build is uploaded.
  */
 import { spawnSync } from 'node:child_process'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import process from 'node:process'
+import { buildChildEnv } from './h5-web.mjs'
+import { parseEnvFile } from './h5-test-tenant.mjs'
 
 const skipMpBuild = process.argv.includes('--skip-mp-build')
 const skipDevtools = process.argv.includes('--skip-devtools')
@@ -49,7 +53,10 @@ function main() {
   run('profile critical path guard', npmCmd, ['run', 'test:mp:profile-critical-path'])
   run('post RAG search static guard', npmCmd, ['run', 'test:mp:post-rag-search-static'])
 
-  run('build H5 for smoke tests', npmCmd, ['run', 'build:h5', '--workspace', 'miniprogram'])
+  const h5Values = parseEnvFile(join(homedir(), '.happyhome', 'h5-web.env'))
+  run('build H5 for smoke tests', npmCmd, ['run', 'build:h5', '--workspace', 'miniprogram'], {
+    env: buildChildEnv(process.env, h5Values),
+  })
   run('H5 profile blank-page smoke', npmCmd, ['run', 'test:h5:profile-smoke'])
   run('H5 detail blank-page smoke', npmCmd, ['run', 'test:h5:detail-smoke'])
   run('H5 section blank-page smoke', npmCmd, ['run', 'test:h5:section-smoke'])

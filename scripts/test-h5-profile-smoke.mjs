@@ -43,7 +43,7 @@ server.listen(0, '127.0.0.1', async () => {
     await runProfileCase(browser, port, {
       label: 'fallback-login',
       setup: null,
-      expectedTexts: ['确认登录', 'DEV 登录'],
+      expectedTexts: ['使用 CloudBase Web 账号登录', '用户名', '密码', '确认登录'],
     })
     await runProfileCase(browser, port, {
       label: 'choose-avatar-login',
@@ -52,7 +52,7 @@ server.listen(0, '127.0.0.1', async () => {
           window.__HH_TEST_CHOOSE_AVATAR__ = true
         })
       },
-      expectedTexts: ['微信登录', 'DEV 登录'],
+      expectedTexts: ['微信登录', '退出当前社区'],
     })
     console.log('H5 profile smoke passed')
   } finally {
