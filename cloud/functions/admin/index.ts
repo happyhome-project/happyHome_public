@@ -1105,10 +1105,17 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (typeof params.enableLike === 'boolean') updates.enableLike = params.enableLike
     if (updates.type === 'evergreen') updates.status = 'active'
     if (Object.keys(updates).length === 0) throw new Error('没有可更新字段')
-    const sectionBefore = await db.getById('sections', sectionId) as any
     await db.runTransaction(async transaction => {
+      const sectionBefore = await db.transactionGetByIdOrNull<any>(transaction, 'sections', sectionId)
+      if (!sectionBefore) throw new Error('section not found')
+      const effectiveStatus = Object.prototype.hasOwnProperty.call(updates, 'status')
+        ? updates.status
+        : sectionBefore.status
+      const reasonCode = effectiveStatus !== sectionBefore.status
+        ? 'section.status_changed'
+        : 'section.metadata_changed'
       await transaction.collection('sections').doc(sectionId).update({ data: updates })
-      await appendPostRagOutboxEvent(transaction, { communityId: String(sectionBefore?.communityId || params.communityId || ''), aggregateId: sectionId, reasonCode: 'section.metadata_changed' })
+      await appendPostRagOutboxEvent(transaction, { communityId: String(sectionBefore.communityId || params.communityId || ''), aggregateId: sectionId, reasonCode })
     })
     await enqueuePostRagJobsForSection(sectionId, 'section.updateMeta')
     await backfillPostSearchIndexesForSection(sectionId)

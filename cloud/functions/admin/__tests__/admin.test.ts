@@ -846,6 +846,12 @@ test('section.get: 旧图文攻略板块会补齐路线攻略固定控件', asyn
 })
 
 test('section.updateMeta: 展示模板只接受默认和图文攻略', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-1',
+    communityId: 'community-1',
+    type: 'realtime',
+    status: 'active',
+  })
   ;(db.updateById as jest.Mock).mockResolvedValue({})
 
   await main({
