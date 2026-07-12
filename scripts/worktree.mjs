@@ -6,7 +6,10 @@ import { basename, dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 
 import {
+  assessPublicIntegrationMain,
+  assessRetirementTargetBoundary,
   classifyWorktreeRetirement,
+  collectPinnedRetirementEvidence,
   confirmNoOwner,
   createWorktreePlan,
   createRetirementManifest,
@@ -16,8 +19,11 @@ import {
   findOpenPullRequest,
   githubRepositoryFromRemote,
   interpretAncestorExitStatus,
+  normalizeExternalCommandResult,
   validateOpenPullRequestInventory,
+  verifiedPublicOriginUrl,
   executeHeartbeatCriticalSection,
+  executePinnedWorktreeCreation,
   executeRetirementCriticalSection,
   verifyCreateTargetBoundary,
   verifyRetirementManifest,
@@ -29,11 +35,20 @@ function die(message) {
   throw new Error(message)
 }
 
-function git(args, { cwd = process.cwd(), allowFailure = false } = {}) {
-  const result = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true })
-  if (result.error) throw result.error
-  if (result.status !== 0 && !allowFailure) die(`git ${args.join(' ')} failed: ${String(result.stderr || '').trim() || `exit ${result.status}`}`)
-  return { ok: result.status === 0, status: result.status, stdout: String(result.stdout || '').trim(), stderr: String(result.stderr || '').trim() }
+const NETWORK_TIMEOUT_MS = 60_000
+
+function git(args, { cwd = process.cwd(), allowFailure = false, timeout = null } = {}) {
+  const options = {
+    cwd,
+    encoding: 'utf8',
+    windowsHide: true,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+  }
+  if (timeout !== null) options.timeout = timeout
+  const result = spawnSync('git', args, options)
+  const outcome = normalizeExternalCommandResult(result, { allowFailure })
+  if (!outcome.ok && !allowFailure) die(`git ${args.join(' ')} failed: ${outcome.stderr || `exit ${outcome.status}`}`)
+  return outcome
 }
 
 function parseFlags(argv) {
@@ -146,18 +161,23 @@ function pathKey(path) {
   return createHash('sha256').update(normalizePath(path)).digest('hex')
 }
 
-function currentIdentity(cwd = process.cwd()) {
+function currentIdentity(cwd = process.cwd(), { mainSha = null } = {}) {
   const root = git(['rev-parse', '--show-toplevel'], { cwd }).stdout
   const branch = git(['branch', '--show-current'], { cwd: root }).stdout || '(detached)'
   const head = git(['rev-parse', 'HEAD'], { cwd: root }).stdout
-  const main = git(['rev-parse', 'origin/main'], { cwd: root }).stdout
-  const [behind, ahead] = git(['rev-list', '--left-right', '--count', 'origin/main...HEAD'], { cwd: root }).stdout.split(/\s+/).map(Number)
+  if (mainSha !== null && !/^[0-9a-f]{40}$/i.test(String(mainSha))) die('currentIdentity requires an exact main SHA')
+  const main = mainSha === null ? git(['rev-parse', 'origin/main'], { cwd: root }).stdout : String(mainSha)
+  const [behind, ahead] = git(['rev-list', '--left-right', '--count', `${main}...${head}`], { cwd: root }).stdout.split(/\s+/).map(Number)
   const dirty = git(['status', '--porcelain=v1', '--untracked-files=all'], { cwd: root }).stdout.length > 0
   return { root, branch, head, main, behind, ahead, dirty }
 }
 
-function refreshOriginMain(cwd, { required = true } = {}) {
-  const result = git(['fetch', '--quiet', 'origin', '+refs/heads/main:refs/remotes/origin/main'], { cwd, allowFailure: true })
+function refreshOriginMain(cwd, { required = true, remoteUrl = 'origin' } = {}) {
+  const result = git(['fetch', '--quiet', remoteUrl, '+refs/heads/main:refs/remotes/origin/main'], {
+    cwd,
+    allowFailure: true,
+    timeout: NETWORK_TIMEOUT_MS,
+  })
   if (!result.ok && required) die(`unable to refresh origin/main: ${result.stderr || result.stdout || 'git fetch failed'}`)
   return result
 }
@@ -166,10 +186,6 @@ function hasGitOperation(cwd) {
   const directory = git(['rev-parse', '--absolute-git-dir'], { cwd }).stdout
   return ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'BISECT_LOG', 'rebase-merge', 'rebase-apply', 'sequencer']
     .some((name) => existsSync(join(directory, name)))
-}
-
-function isCanonicalMain(path, branch) {
-  return branch === 'main' && normalizePath(path) === normalizePath('C:\\Project\\Claude\\happyHome')
 }
 
 function isWithinPath(path, parent) {
@@ -214,13 +230,6 @@ function registeredWorktreePaths(root) {
   }).filter(Boolean)
 }
 
-function assertRegisteredWorktree(path, root) {
-  const requested = normalizePath(path)
-  if (!registeredWorktreePaths(root).some((candidate) => normalizePath(candidate) === requested)) {
-    die(`retire target is not a registered HappyHome worktree: ${path}`)
-  }
-}
-
 function ownerState(path, cwd = process.cwd()) {
   const lease = loadRegistry(cwd).leases[pathKey(path)]
   return { ...evaluateLeaseOwner(lease), lease: lease || null }
@@ -263,26 +272,54 @@ function ensureHooksAndAgents(root) {
   if (!repaired.ready) die(`bootstrap could not configure core.hooksPath; got ${repaired.configured || '(unset)'}`)
 }
 
-function isHeadInMain(cwd) {
-  const result = git(['merge-base', '--is-ancestor', 'HEAD', 'origin/main'], { cwd, allowFailure: true })
+function isHeadInMain(cwd, headSha = 'HEAD', mainSha = 'origin/main') {
+  const result = git(['merge-base', '--is-ancestor', headSha, mainSha], { cwd, allowFailure: true })
   return interpretAncestorExitStatus(result.status)
 }
 
-function uniqueCommitCount(cwd) {
-  return Number(git(['rev-list', '--count', 'HEAD', '--not', 'origin/main', '--remotes=origin'], { cwd }).stdout || '0')
+function uniqueCommitCount(cwd, headSha = 'HEAD', mainSha = null) {
+  const exclusions = mainSha === null ? ['origin/main', '--remotes=origin'] : [mainSha]
+  return Number(git(['rev-list', '--count', headSha, '--not', ...exclusions], { cwd }).stdout || '0')
 }
 
-function openPullRequestInventory(cwd) {
+function assertRetirementTargetBoundary(path, operator) {
+  const reparseAncestor = hasExistingReparseAncestor(path)
+  const registered = !reparseAncestor
+    && registeredWorktreePaths(operator.root).some((candidate) => normalizePath(candidate) === normalizePath(path))
+  let targetCommonDirectory = null
+  if (!reparseAncestor && registered) {
+    try {
+      targetCommonDirectory = realCommonGitDir(path)
+    } catch {
+      targetCommonDirectory = null
+    }
+  }
+  const assessment = assessRetirementTargetBoundary({
+    registered,
+    operatorCommonDirectory: operator.commonDirectory,
+    targetCommonDirectory,
+    hasReparseAncestor: reparseAncestor,
+  })
+  if (!assessment.eligible) die(`retire target boundary is blocked: ${assessment.reasons.join(', ')}`)
+}
+
+function realCommonGitDir(cwd = process.cwd()) {
+  return normalizePath(realpathSync.native(commonGitDir(cwd)))
+}
+
+function openPullRequestInventory(cwd, { repository: requestedRepository = null } = {}) {
   const limit = 1000
-  const remote = git(['remote', 'get-url', 'origin'], { cwd, allowFailure: true })
-  const repository = remote.ok ? githubRepositoryFromRemote(remote.stdout) : null
+  const remote = requestedRepository ? null : git(['remote', 'get-url', 'origin'], { cwd, allowFailure: true })
+  const repository = requestedRepository || (remote?.ok ? githubRepositoryFromRemote(remote.stdout) : null)
   if (!repository) {
-    return { pulls: null, error: remote.ok ? 'origin is not a GitHub repository' : (remote.stderr || 'origin unavailable') }
+    return { pulls: null, error: remote?.ok ? 'origin is not a GitHub repository' : (remote?.stderr || 'origin unavailable') }
   }
   const result = spawnSync('gh', ['pr', 'list', '--repo', repository, '--state', 'open', '--limit', String(limit), '--json', 'number,url,headRefName,headRefOid'], {
     cwd,
     encoding: 'utf8',
     windowsHide: true,
+    timeout: NETWORK_TIMEOUT_MS,
+    env: { ...process.env, GH_PROMPT_DISABLED: '1', GIT_TERMINAL_PROMPT: '0' },
   })
   if (result.error || result.status !== 0) {
     return { pulls: null, error: result.error?.message || String(result.stderr || '').trim() || `gh exited ${result.status}` }
@@ -320,10 +357,31 @@ function writeBootstrapMarker(identity) {
   }, null, 2)}\n`, 'utf8')
 }
 
-function requireCanonicalMain(identity, action) {
-  if (!isCanonicalMain(identity.root, identity.branch)) {
-    die(`${action} must run in the canonical main workspace C:\\Project\\Claude\\happyHome`)
+function publicIntegrationOperator(action, { refresh = true, expected = null } = {}) {
+  const cwd = process.cwd()
+  const remote = git(['remote', 'get-url', 'origin'], { cwd, allowFailure: true })
+  const verifiedOriginUrl = verifiedPublicOriginUrl(remote.ok ? remote.stdout : '')
+  const repository = 'happyhome-project/happyHome_public'
+  if (refresh) refreshOriginMain(cwd, { remoteUrl: verifiedOriginUrl })
+  const identity = { ...currentIdentity(cwd), commonDirectory: realCommonGitDir(cwd), originUrl: verifiedOriginUrl }
+  const assessment = assessPublicIntegrationMain({
+    root: identity.root,
+    commonDirectory: identity.commonDirectory,
+    repository,
+    branch: identity.branch,
+    head: identity.head,
+    main: identity.main,
+    behind: identity.behind,
+    ahead: identity.ahead,
+    isDirty: identity.dirty,
+    hasOperation: hasGitOperation(identity.root),
+    pathIsReparsePoint: isReparsePoint(identity.root),
+    expected,
+  })
+  if (!assessment.eligible) {
+    die(`${action} requires a clean synchronized main worktree for happyhome-project/happyHome_public: ${assessment.reasons.join(', ')}`)
   }
+  return identity
 }
 
 function runNpmCi(root) {
@@ -411,27 +469,32 @@ function bootstrap(root = process.cwd()) {
 function create({ flags }) {
   const requested = createWorktreePlan({ name: flags.get('name'), path: flags.get('path') })
   const plan = { ...requested, path: resolve(requested.path) }
-  const beforeFetch = currentIdentity()
-  requireCanonicalMain(beforeFetch, 'worktree:create')
-  if (beforeFetch.dirty) die('worktree:create requires a clean canonical main workspace')
-  const runtime = assessRuntime({ nodeVersion: process.versions.node, npmVersion: npmVersion(beforeFetch.root) })
-  if (!runtime.ready) die(`worktree:create requires Node 24 and npm 11; got Node ${process.versions.node}, npm ${npmVersion(beforeFetch.root) || '(unavailable)'}`)
-  if (isWithinPath(plan.path, beforeFetch.root)) die('worktree:create target must not be inside the canonical main workspace')
   const targetBoundary = captureCreateTargetBoundary(plan.path)
   verifyCreateTargetBoundary(targetBoundary, targetBoundary)
 
-  refreshOriginMain(beforeFetch.root)
-  const identity = currentIdentity(beforeFetch.root)
-  if (identity.head !== identity.main) die('worktree:create requires canonical main HEAD to equal origin/main after fetch')
-  const agents = git(['cat-file', '-e', 'origin/main:AGENTS.md'], { cwd: identity.root, allowFailure: true })
+  const identity = publicIntegrationOperator('worktree:create')
+  const runtime = assessRuntime({ nodeVersion: process.versions.node, npmVersion: npmVersion(identity.root) })
+  if (!runtime.ready) die(`worktree:create requires Node 24 and npm 11; got Node ${process.versions.node}, npm ${npmVersion(identity.root) || '(unavailable)'}`)
+  if (isWithinPath(plan.path, identity.root)) die('worktree:create target must not be inside the public integration main workspace')
+  const agents = git(['cat-file', '-e', `${identity.main}:AGENTS.md`], { cwd: identity.root, allowFailure: true })
   if (!agents.ok) die('worktree:create requires origin/main to contain AGENTS.md')
   verifyCreateTargetBoundary(targetBoundary, captureCreateTargetBoundary(plan.path))
 
-  git(['worktree', 'add', '-b', plan.branch, plan.path, 'origin/main'], { cwd: identity.root })
-  const created = currentIdentity(plan.path)
-  if (created.branch !== plan.branch || created.head !== identity.main) {
-    die('worktree:create verification failed; refusing automatic cleanup of the new worktree')
-  }
+  const refreshedOperator = publicIntegrationOperator('worktree:create', { refresh: true, expected: identity })
+  let created
+  withRegistryLock(identity.root, () => {
+    const liveOperator = publicIntegrationOperator('worktree:create', { refresh: false, expected: refreshedOperator })
+    verifyCreateTargetBoundary(targetBoundary, captureCreateTargetBoundary(plan.path))
+    created = executePinnedWorktreeCreation({
+      operator: liveOperator,
+      branch: plan.branch,
+      path: plan.path,
+      addWorktree: ({ root, branch, path, startPoint }) => {
+        git(['worktree', 'add', '-b', branch, path, startPoint], { cwd: root })
+      },
+      readCreated: (path, mainSha) => currentIdentity(path, { mainSha }),
+    })
+  })
   const agentsPath = join(created.root, 'AGENTS.md')
   if (!existsSync(agentsPath) || isReparsePoint(agentsPath)) {
     die('worktree:create requires a real AGENTS.md in the new worktree')
@@ -460,12 +523,19 @@ function sync({ flags }) {
   report({ status: 'synchronized', action: decision.action, identity: currentIdentity() })
 }
 
-function retirementProbe(path, { hasOwnerConfirmation = false } = {}) {
-  const identity = currentIdentity(path)
+function retirementProbe(path, { hasOwnerConfirmation = false, mainSha, prInventory, operator } = {}) {
+  assertRetirementTargetBoundary(path, operator)
+  const evidence = collectPinnedRetirementEvidence({
+    mainSha,
+    readIdentity: (pinnedMain) => currentIdentity(path, { mainSha: pinnedMain }),
+    readUniqueCommitCount: (pinnedHead, pinnedMain) => uniqueCommitCount(path, pinnedHead, pinnedMain),
+    readHeadInMain: (pinnedHead, pinnedMain) => isHeadInMain(path, pinnedHead, pinnedMain),
+  })
+  const identity = evidence.identity
   const owner = hasOwnerConfirmation
     ? confirmNoOwner(ownerState(identity.root, identity.root), true)
     : ownerState(identity.root, identity.root)
-  const pr = openPrForIdentity(identity, openPullRequestInventory(identity.root))
+  const pr = openPrForIdentity(identity, prInventory)
   const decision = classifyWorktreeRetirement({
     kind: 'worktree',
     branch: identity.branch,
@@ -474,22 +544,29 @@ function retirementProbe(path, { hasOwnerConfirmation = false } = {}) {
     hasOperation: hasGitOperation(identity.root),
     isDirty: identity.dirty,
     openPr: pr,
-    uniqueCommits: uniqueCommitCount(identity.root),
-    headInMain: isHeadInMain(identity.root),
+    uniqueCommits: evidence.uniqueCommits,
+    headInMain: evidence.headInMain,
     pathIsReparsePoint: isReparsePoint(identity.root),
   })
   return { identity, owner, pr, decision }
 }
 
 function retire({ flags, positionals }) {
-  const operator = currentIdentity()
-  requireCanonicalMain(operator, 'worktree:retire')
-  refreshOriginMain(operator.root)
+  if (flags.has('delete-merged-local-branch')) {
+    die('worktree:retire --delete-merged-local-branch is disabled; local branches are always retained')
+  }
+  const operator = publicIntegrationOperator('worktree:retire')
   if (flags.has('prepare')) {
     const path = flags.get('prepare') === true ? positionals[1] : flags.get('prepare')
     if (!path) die('retire --prepare requires a worktree path')
-    assertRegisteredWorktree(path, operator.root)
-    const probe = retirementProbe(path, { hasOwnerConfirmation: flags.has('confirm-no-owner') })
+    assertRetirementTargetBoundary(path, operator)
+    const prInventory = openPullRequestInventory(operator.root, { repository: 'happyhome-project/happyHome_public' })
+    const probe = retirementProbe(path, {
+      hasOwnerConfirmation: flags.has('confirm-no-owner'),
+      mainSha: operator.main,
+      prInventory,
+      operator,
+    })
     if (!probe.decision.eligible) return report({ status: 'blocked', ...probe })
     const manifest = createRetirementManifest({
       ...probe.identity,
@@ -497,10 +574,12 @@ function retire({ flags, positionals }) {
       provider: probe.owner.lease?.provider || 'manual',
       confirmNoOwner: flags.has('confirm-no-owner'),
     })
-    const directory = join(registryDir(probe.identity.root), 'retire')
+    const directory = join(registryDir(operator.root), 'retire')
     mkdirSync(directory, { recursive: true })
     const file = join(directory, `${new Date().toISOString().replace(/[:.]/g, '-')}-${basename(probe.identity.root)}.json`)
     withRegistryLock(operator.root, () => {
+      const liveOperator = publicIntegrationOperator('worktree:retire', { refresh: false, expected: operator })
+      assertRetirementTargetBoundary(path, liveOperator)
       const records = loadRetirementRecords(operator.root)
       const record = createRetirementRecord({ manifest, manifestPath: file })
       if (records.records[manifest.manifestId]) die(`retirement manifest id already exists: ${manifest.manifestId}`)
@@ -515,16 +594,23 @@ function retire({ flags, positionals }) {
   const manifestPath = resolve(String(flags.get('apply')))
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
   const managedDirectory = join(registryDir(operator.root), 'retire')
+  const refreshedOperator = publicIntegrationOperator('worktree:retire', { refresh: true, expected: operator })
+  assertRetirementTargetBoundary(manifest.path, refreshedOperator)
+  const prInventory = openPullRequestInventory(refreshedOperator.root, { repository: 'happyhome-project/happyHome_public' })
   executeRetirementCriticalSection({
     withLeaseLock: (action) => withRegistryLock(operator.root, action),
     probe: () => {
-      assertRegisteredWorktree(manifest.path, operator.root)
+      const liveOperator = publicIntegrationOperator('worktree:retire', { refresh: false, expected: refreshedOperator })
+      assertRetirementTargetBoundary(manifest.path, liveOperator)
       const records = loadRetirementRecords(operator.root)
       const record = records.records[manifest.manifestId]
-      const identity = currentIdentity(manifest.path)
       const verification = { manifestPath, managedDirectory, record }
-      verifyRetirementManifest(manifest, { ...identity, path: identity.root }, verification)
-      const liveProbe = retirementProbe(manifest.path, { hasOwnerConfirmation: manifest.confirmNoOwner })
+      const liveProbe = retirementProbe(manifest.path, {
+        hasOwnerConfirmation: manifest.confirmNoOwner,
+        mainSha: liveOperator.main,
+        prInventory,
+        operator: liveOperator,
+      })
       verifyRetirementManifest(manifest, { ...liveProbe.identity, path: liveProbe.identity.root }, verification)
       return { liveProbe, record, records }
     },
@@ -532,14 +618,25 @@ function retire({ flags, positionals }) {
       if (!liveProbe.decision.eligible) die(`retirement is blocked: ${liveProbe.decision.reasons.join(', ')}`)
     },
     remove: ({ record, records }) => {
+      const finalOperator = publicIntegrationOperator('worktree:retire', { refresh: false, expected: refreshedOperator })
+      assertRetirementTargetBoundary(manifest.path, finalOperator)
+      const finalProbe = retirementProbe(manifest.path, {
+        hasOwnerConfirmation: manifest.confirmNoOwner,
+        mainSha: finalOperator.main,
+        prInventory,
+        operator: finalOperator,
+      })
+      verifyRetirementManifest(manifest, { ...finalProbe.identity, path: finalProbe.identity.root }, {
+        manifestPath,
+        managedDirectory,
+        record,
+      })
+      if (!finalProbe.decision.eligible) die(`retirement is blocked at final remove: ${finalProbe.decision.reasons.join(', ')}`)
       git(['worktree', 'remove', manifest.path])
       record.consumedAt = new Date().toISOString()
       writeRetirementRecords(records, operator.root)
     },
   })
-  if (flags.has('delete-merged-local-branch') && manifest.branch !== '(detached)') {
-    git(['branch', '-d', manifest.branch], { cwd: 'C:\\Project\\Claude\\happyHome' })
-  }
   report({ status: 'retired', path: manifest.path, branch: manifest.branch })
 }
 

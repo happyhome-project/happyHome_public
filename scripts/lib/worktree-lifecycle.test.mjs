@@ -9,6 +9,9 @@ import test from 'node:test'
 import { acquireIntegrationLock } from './integrate-pr-policy.mjs'
 
 import {
+  assessPublicIntegrationMain,
+  assessRetirementTargetBoundary,
+  collectPinnedRetirementEvidence,
   confirmNoOwner,
   classifyWorktreeRetirement,
   createRetirementManifest,
@@ -19,13 +22,258 @@ import {
   evaluateRetirement,
   executeHeartbeatCriticalSection,
   executeRetirementCriticalSection,
+  executePinnedWorktreeCreation,
   findOpenPullRequest,
   githubRepositoryFromRemote,
   interpretAncestorExitStatus,
+  normalizeExternalCommandResult,
   validateOpenPullRequestInventory,
+  verifiedPublicOriginUrl,
   verifyCreateTargetBoundary,
   verifyRetirementManifest,
 } from './worktree-lifecycle.mjs'
+
+function publicIntegrationInput(overrides = {}) {
+  return {
+    root: 'X:/worktrees/public-main/happyHome',
+    commonDirectory: 'X:/git/public-candidate.git',
+    repository: 'happyhome-project/happyHome_public',
+    branch: 'main',
+    head: 'a'.repeat(40),
+    main: 'a'.repeat(40),
+    behind: 0,
+    ahead: 0,
+    isDirty: false,
+    hasOperation: false,
+    pathIsReparsePoint: false,
+    ...overrides,
+  }
+}
+
+test('only a clean synchronized public main is a worktree integration operator', () => {
+  assert.deepEqual(assessPublicIntegrationMain(publicIntegrationInput()), {
+    eligible: true,
+    reasons: [],
+  })
+})
+
+test('private, unknown, and non-GitHub origins cannot operate public worktrees', () => {
+  for (const repository of ['angrybirddd/happyHome', null, 'file:///x/public.git']) {
+    const result = assessPublicIntegrationMain(publicIntegrationInput({ repository }))
+    assert.equal(result.eligible, false)
+    assert.ok(result.reasons.includes('untrusted_origin'))
+  }
+})
+
+test('feature, dirty, stale, divergent, operation, and reparse operators fail closed', () => {
+  const cases = [
+    [{ branch: 'codex/task' }, 'not_main_branch'],
+    [{ isDirty: true }, 'dirty'],
+    [{ head: 'b'.repeat(40) }, 'head_not_origin_main'],
+    [{ behind: 1 }, 'diverged_from_origin_main'],
+    [{ ahead: 1 }, 'diverged_from_origin_main'],
+    [{ hasOperation: true }, 'git_operation'],
+    [{ pathIsReparsePoint: true }, 'reparse_point'],
+  ]
+  for (const [override, reason] of cases) {
+    const result = assessPublicIntegrationMain(publicIntegrationInput(override))
+    assert.equal(result.eligible, false, JSON.stringify(override))
+    assert.ok(result.reasons.includes(reason), JSON.stringify(result))
+  }
+})
+
+test('a mutation-time operator must match the refreshed root, common dir, and main identity', () => {
+  const expected = publicIntegrationInput()
+  assert.equal(assessPublicIntegrationMain(publicIntegrationInput({ expected })).eligible, true)
+  for (const override of [
+    { root: 'X:/worktrees/other/happyHome' },
+    { commonDirectory: 'X:/git/private.git' },
+    { head: 'b'.repeat(40), main: 'b'.repeat(40) },
+  ]) {
+    const result = assessPublicIntegrationMain(publicIntegrationInput({ ...override, expected }))
+    assert.equal(result.eligible, false)
+    assert.ok(result.reasons.includes('operator_changed'), JSON.stringify(result))
+  }
+})
+
+test('worktree creation pins add and verification to one immutable main SHA across ref drift', () => {
+  const first = 'a'.repeat(40)
+  const second = 'b'.repeat(40)
+  let mutableOriginMain = first
+  const events = []
+  const created = executePinnedWorktreeCreation({
+    operator: { root: 'X:/public-main', main: first },
+    branch: 'codex/new-task',
+    path: 'X:/worktrees/new-task',
+    addWorktree: ({ root, branch, path, startPoint }) => {
+      events.push({ root, branch, path, startPoint })
+      mutableOriginMain = second
+    },
+    readCreated: (path, mainSha) => ({
+      root: path,
+      branch: 'codex/new-task',
+      head: first,
+      main: mainSha,
+      observedMutableOriginMain: mutableOriginMain,
+    }),
+  })
+  assert.equal(events[0].startPoint, first)
+  assert.equal(created.main, first)
+  assert.equal(created.observedMutableOriginMain, second)
+})
+
+test('retirement evidence uses one immutable main SHA after origin/main moves', () => {
+  const first = 'a'.repeat(40)
+  const second = 'b'.repeat(40)
+  const originalHead = 'c'.repeat(40)
+  const movedHead = 'd'.repeat(40)
+  let mutableOriginMain = first
+  let mutableTargetHead = originalHead
+  const revisions = []
+  const evidence = collectPinnedRetirementEvidence({
+    mainSha: first,
+    readIdentity: (mainSha) => {
+      revisions.push({ mainSha })
+      mutableOriginMain = second
+      mutableTargetHead = movedHead
+      return { head: originalHead, main: mainSha }
+    },
+    readUniqueCommitCount: (headSha, mainSha) => {
+      revisions.push({ headSha, mainSha })
+      return 0
+    },
+    readHeadInMain: (headSha, mainSha) => {
+      revisions.push({ headSha, mainSha })
+      return true
+    },
+  })
+  assert.deepEqual(revisions, [
+    { mainSha: first },
+    { headSha: originalHead, mainSha: first },
+    { headSha: originalHead, mainSha: first },
+  ])
+  assert.deepEqual(evidence, {
+    identity: { head: originalHead, main: first },
+    uniqueCommits: 0,
+    headInMain: true,
+  })
+  assert.equal(mutableOriginMain, second)
+  assert.equal(mutableTargetHead, movedHead)
+})
+
+test('verified public origin URL stays pinned when origin config drifts before fetch', () => {
+  let configuredOrigin = 'git@github.com:happyhome-project/happyHome_public.git'
+  const captured = verifiedPublicOriginUrl(configuredOrigin)
+  configuredOrigin = 'git@github.com:angrybirddd/happyHome.git'
+  assert.equal(captured, 'git@github.com:happyhome-project/happyHome_public.git')
+  assert.notEqual(captured, configuredOrigin)
+  assert.throws(() => verifiedPublicOriginUrl(configuredOrigin), /untrusted origin/i)
+})
+
+test('retirement target boundary requires same real common dir and no reparse ancestor', () => {
+  assert.deepEqual(assessRetirementTargetBoundary({
+    registered: true,
+    operatorCommonDirectory: 'x:/git/public.git',
+    targetCommonDirectory: 'x:/git/public.git',
+    hasReparseAncestor: false,
+  }), { eligible: true, reasons: [] })
+  assert.deepEqual(assessRetirementTargetBoundary({
+    registered: true,
+    operatorCommonDirectory: 'x:/git/public.git',
+    targetCommonDirectory: 'x:/git/other.git',
+    hasReparseAncestor: false,
+  }), { eligible: false, reasons: ['common_directory_mismatch'] })
+  assert.deepEqual(assessRetirementTargetBoundary({
+    registered: true,
+    operatorCommonDirectory: 'x:/git/public.git',
+    targetCommonDirectory: 'x:/git/public.git',
+    hasReparseAncestor: true,
+  }), { eligible: false, reasons: ['reparse_ancestor'] })
+})
+
+test('pinned worktree operations reject symbolic refs instead of resolving them later', () => {
+  assert.throws(() => executePinnedWorktreeCreation({
+    operator: { root: 'X:/public-main', main: 'origin/main' },
+    branch: 'codex/new-task',
+    path: 'X:/worktrees/new-task',
+    addWorktree: () => {},
+    readCreated: () => ({}),
+  }), /exact main SHA/i)
+  assert.throws(() => collectPinnedRetirementEvidence({
+    mainSha: 'origin/main',
+    readIdentity: () => ({}),
+    readUniqueCommitCount: () => 0,
+    readHeadInMain: () => true,
+  }), /exact main SHA/i)
+})
+
+test('allow-failure external command timeouts become failed evidence instead of throwing', () => {
+  const timeout = Object.assign(new Error('spawnSync git ETIMEDOUT'), { code: 'ETIMEDOUT' })
+  assert.deepEqual(normalizeExternalCommandResult({
+    error: timeout,
+    status: null,
+    stdout: '',
+    stderr: '',
+  }, { allowFailure: true }), {
+    ok: false,
+    status: null,
+    stdout: '',
+    stderr: 'spawnSync git ETIMEDOUT',
+  })
+  assert.throws(() => normalizeExternalCommandResult({
+    error: timeout,
+    status: null,
+    stdout: '',
+    stderr: '',
+  }), /ETIMEDOUT/)
+})
+
+test('worktree operator source has no private canonical cwd or local branch deletion path', () => {
+  const source = readFileSync(fileURLToPath(new URL('../worktree.mjs', import.meta.url)), 'utf8')
+  assert.equal(source.includes('C:\\\\Project\\\\Claude\\\\happyHome'), false)
+  assert.equal(source.includes("git(['branch', '-d'"), false)
+  assert.match(source, /delete-merged-local-branch[\s\S]*?is disabled/)
+})
+
+test('operator trust is checked before fetch and network evidence stays outside locks', () => {
+  const source = readFileSync(fileURLToPath(new URL('../worktree.mjs', import.meta.url)), 'utf8')
+  const operatorBody = source.match(/function publicIntegrationOperator[\s\S]*?\r?\n}\r?\n\r?\nfunction runNpmCi/)?.[0] || ''
+  assert.ok(operatorBody.indexOf("remote', 'get-url', 'origin") < operatorBody.indexOf('refreshOriginMain(cwd,'))
+  assert.match(operatorBody, /refreshOriginMain\(cwd, \{ remoteUrl: verifiedOriginUrl \}\)/)
+
+  const createBody = source.match(/function create\([\s\S]*?\r?\n}\r?\n\r?\nfunction sync/)?.[0] || ''
+  const createLock = createBody.match(/withRegistryLock\([\s\S]*?\r?\n  }\)/)?.[0] || ''
+  assert.match(createBody, /publicIntegrationOperator\('worktree:create', \{ refresh: true, expected: identity \}\)[\s\S]*?withRegistryLock/)
+  assert.equal(createLock.includes('refresh: true'), false)
+  assert.equal(createLock.includes('openPullRequestInventory'), false)
+  assert.match(createLock, /executePinnedWorktreeCreation/)
+
+  const retireBody = source.match(/function retire\([\s\S]*?\r?\n}\r?\n\r?\nfunction status/)?.[0] || ''
+  const retirementCriticalSection = retireBody.match(/executeRetirementCriticalSection\([\s\S]*?\r?\n  }\)/)?.[0] || ''
+  assert.match(retireBody, /openPullRequestInventory[\s\S]*?executeRetirementCriticalSection/)
+  assert.match(retireBody, /openPullRequestInventory\([^)]*\{ repository: 'happyhome-project\/happyHome_public' \}\)/)
+  assert.equal(retirementCriticalSection.includes('refresh: true'), false)
+  assert.equal(retirementCriticalSection.includes('openPullRequestInventory'), false)
+  assert.match(retirementCriticalSection, /mainSha: liveOperator\.main/)
+  assert.equal(retirementCriticalSection.includes('currentIdentity(manifest.path)'), false)
+  assert.match(retirementCriticalSection, /remove: \([\s\S]*?retirementProbe\([\s\S]*?verifyRetirementManifest\([\s\S]*?decision\.eligible[\s\S]*?git\(\['worktree', 'remove'/)
+  assert.match(retireBody, /registryDir\(operator\.root\)/)
+  assert.equal(retireBody.includes('registryDir(probe.identity.root)'), false)
+  assert.match(retireBody, /assertRetirementTargetBoundary[\s\S]*?openPullRequestInventory/)
+  assert.match(retireBody, /withRegistryLock\(operator\.root[\s\S]*?assertRetirementTargetBoundary\(path,[\s\S]*?writeFileSync/)
+})
+
+test('git and gh calls are bounded and disable interactive credential prompts', () => {
+  const source = readFileSync(fileURLToPath(new URL('../worktree.mjs', import.meta.url)), 'utf8')
+  assert.match(source, /GIT_TERMINAL_PROMPT: '0'/)
+  assert.match(source, /GH_PROMPT_DISABLED: '1'/)
+  assert.match(source, /function git\(args,[\s\S]{0,150}timeout = null/)
+  assert.equal(source.includes('const GIT_TIMEOUT_MS'), false)
+  assert.match(source, /function refreshOriginMain[\s\S]*?timeout: NETWORK_TIMEOUT_MS/)
+  assert.match(source, /spawnSync\('gh',[\s\S]*?timeout:/)
+  assert.match(source, /git\(\['worktree', 'add'[\s\S]*?\{ cwd: root \}\)/)
+  assert.match(source, /git\(\['worktree', 'remove', manifest\.path\]\)/)
+})
 
 test('GitHub repository identity is derived from common remote URL forms', () => {
   assert.equal(githubRepositoryFromRemote('git@github.com:happyhome-project/happyHome_public.git'), 'happyhome-project/happyHome_public')
