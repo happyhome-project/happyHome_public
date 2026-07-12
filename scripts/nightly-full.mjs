@@ -19,12 +19,11 @@ const stageStatus = new Map()
 const stages = []
 const requiredEnvVars = [
   'CLOUD_API_URL',
-  'ADMIN_TOKEN',
+  'GATEWAY_TOKEN',
   'TEST_COMMUNITY_ID',
   'VITE_CLOUD_API_URL',
   'VITE_ADMIN_USERNAME',
   'VITE_ADMIN_PASSWORD',
-  'VITE_ADMIN_TOKEN',
   'WECOM_WEBHOOK_URL',
 ]
 

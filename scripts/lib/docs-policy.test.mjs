@@ -540,13 +540,11 @@ test('documentation map places machine-classified authorities in their matching 
   assert.deepEqual(missingOperational, [])
 })
 
-test('credential documentation warns that ADMIN_TOKEN still has a legacy non-fail-closed fallback', () => {
+test('credential documentation warns that set:superadmin still has a legacy non-fail-closed fallback', () => {
   const implementations = [
-    ['H5/API test helper', readFileSync(new URL('../../scripts/lib/test-api.mjs', import.meta.url), 'utf8')],
     ['set:superadmin', readFileSync(new URL('../../scripts/set-super-admin.mjs', import.meta.url), 'utf8')],
   ]
   const setup = readFileSync(new URL('../../docs/SETUP.md', import.meta.url), 'utf8')
-  const h5Readme = readFileSync(new URL('../../scripts/h5-test/README.md', import.meta.url), 'utf8')
   const fallbackValues = implementations.map(([name, implementation]) => {
     const fallback = implementation.match(/process\.env\.ADMIN_TOKEN\s*\|\|\s*(['"])([^'"]+)\1/)
     assert.ok(fallback, `${name} still exposes a legacy ADMIN_TOKEN fallback`)
@@ -555,7 +553,7 @@ test('credential documentation warns that ADMIN_TOKEN still has a legacy non-fai
   const setupWarning = setup.split(/\r?\n\r?\n/).find((paragraph) => /legacy fallback/i.test(paragraph)) || ''
 
   assert.match(setupWarning, /set:superadmin/i)
-  for (const [path, source] of [['docs/SETUP.md', setup], ['scripts/h5-test/README.md', h5Readme]]) {
+  for (const [path, source] of [['docs/SETUP.md', setup]]) {
     assert.match(source, /legacy fallback/i, path)
     assert.match(source, /(?:不会|does not) fail closed/i, path)
     assert.match(source, /(?:必须显式提供|must explicitly provide) `?ADMIN_TOKEN`?/i, path)
@@ -564,4 +562,26 @@ test('credential documentation warns that ADMIN_TOKEN still has a legacy non-fai
       assert.equal(source.includes(fallbackValue), false, `${path} must not repeat a fallback value`)
     }
   }
+})
+
+test('nightly authentication separates admin sessions from the HTTP gateway capability', () => {
+  const helper = readFileSync(new URL('../../scripts/lib/test-api.mjs', import.meta.url), 'utf8')
+  const orchestration = readFileSync(new URL('../../scripts/nightly-full.mjs', import.meta.url), 'utf8')
+  const workflow = readFileSync(new URL('../../.github/workflows/nightly-full.yml', import.meta.url), 'utf8')
+  const browser = readFileSync(new URL('../../admin-web/tests/nightly-admin.spec.mjs', import.meta.url), 'utf8')
+  const h5Readme = readFileSync(new URL('../../scripts/h5-test/README.md', import.meta.url), 'utf8')
+
+  assert.match(helper, /auth\.login/)
+  assert.match(helper, /GATEWAY_TOKEN/)
+  assert.doesNotMatch(helper, /process\.env\.ADMIN_TOKEN|happyhome-admin-2024/)
+  assert.match(orchestration, /'GATEWAY_TOKEN'/)
+  assert.doesNotMatch(orchestration, /'ADMIN_TOKEN'|'VITE_ADMIN_TOKEN'/)
+  assert.match(workflow, /GATEWAY_TOKEN:\s*\$\{\{ secrets\.GATEWAY_TOKEN \}\}/)
+  assert.match(workflow, /TEST_ADMIN_USERNAME:\s*\$\{\{ secrets\.VITE_ADMIN_USERNAME \}\}/)
+  assert.match(workflow, /TEST_ADMIN_PASSWORD:\s*\$\{\{ secrets\.VITE_ADMIN_PASSWORD \}\}/)
+  assert.doesNotMatch(workflow, /^\s+(?:ADMIN_TOKEN|VITE_ADMIN_TOKEN):/m)
+  assert.doesNotMatch(browser, /localStorage\.setItem\('token'|happyhome-admin-2024|process\.env\.ADMIN_TOKEN/)
+  assert.match(browser, /VITE_ADMIN_USERNAME and VITE_ADMIN_PASSWORD are required/)
+  assert.match(h5Readme, /GATEWAY_TOKEN/)
+  assert.match(h5Readme, /auth\.login/)
 })

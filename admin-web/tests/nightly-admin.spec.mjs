@@ -12,10 +12,6 @@ function passwordValue() {
   return process.env.VITE_ADMIN_PASSWORD || ''
 }
 
-function hasLoginCredentials() {
-  return !!usernameValue() && !!passwordValue()
-}
-
 async function fillInput(container, value) {
   await container.locator('input').fill(value)
 }
@@ -29,16 +25,8 @@ async function switchToPasswordLogin(page) {
 }
 
 async function login(page) {
-  if (!hasLoginCredentials()) {
-    await page.goto('/login')
-    await page.evaluate((token) => {
-      localStorage.setItem('token', token)
-      localStorage.setItem('admin_role', 'superAdmin')
-      localStorage.setItem('admin_username', 'legacy')
-    }, process.env.ADMIN_TOKEN || 'happyhome-admin-2024')
-    await page.goto('/approval')
-    await expect(page).toHaveURL(/\/approval$/)
-    return
+  if (!usernameValue() || !passwordValue()) {
+    throw new Error('VITE_ADMIN_USERNAME and VITE_ADMIN_PASSWORD are required for nightly admin UI login')
   }
 
   await page.goto('/login')

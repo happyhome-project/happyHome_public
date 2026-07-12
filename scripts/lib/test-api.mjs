@@ -1,11 +1,7 @@
 import http from 'node:http'
 import https from 'node:https'
 
-export const BASE = String(
-  process.env.CLOUD_API_URL || 'https://cloudbase-3gh862acb1505ff3-1307183045.ap-shanghai.app.tcloudbase.com'
-).replace(/\/+$/, '')
-
-export const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'happyhome-admin-2024'
+export const BASE = String(process.env.CLOUD_API_URL || '').replace(/\/+$/, '')
 
 export function makeRunId() {
   return Date.now().toString(36)
@@ -71,41 +67,88 @@ function request(url, body, headers = {}) {
   })
 }
 
-export async function callAs(openid, fnName, action, params = {}) {
-  const res = await request(
-    `${BASE}/http-gateway`,
-    { _fn: fnName, action, ...params },
-    { authorization: `Bearer ${ADMIN_TOKEN}`, 'x-test-openid': openid },
-  )
+export function createTestApi(env = process.env) {
+  const base = String(env.CLOUD_API_URL || '').replace(/\/+$/, '')
+  const username = String(env.TEST_ADMIN_USERNAME || env.VITE_ADMIN_USERNAME || '').trim()
+  const password = String(env.TEST_ADMIN_PASSWORD || env.VITE_ADMIN_PASSWORD || '')
+  const explicitSession = String(env.TEST_ADMIN_SESSION_TOKEN || '').trim()
+  const gatewayToken = String(env.GATEWAY_TOKEN || '').trim()
+  let sessionPromise = explicitSession ? Promise.resolve(explicitSession) : null
 
-  if (res.statusCode !== 200) {
-    const err = new Error(`[${fnName}/${action}] ${res.statusCode}: ${res.data?.error || JSON.stringify(res.data)}`)
-    err.statusCode = res.statusCode
-    err.data = res.data
-    throw err
+  function requireBase() {
+    if (!base) throw new Error('CLOUD_API_URL is required')
   }
 
-  return res.data
-}
+  async function getAdminSession() {
+    requireBase()
+    if (sessionPromise) return sessionPromise
+    if (!username || !password) {
+      throw new Error('VITE_ADMIN_USERNAME and VITE_ADMIN_PASSWORD are required for admin session login')
+    }
 
-export async function callAdmin(action, params = {}) {
-  const res = await request(
-    `${BASE}/admin`,
-    { action, ...params },
-    { authorization: `Bearer ${ADMIN_TOKEN}` },
-  )
-
-  if (res.statusCode !== 200) {
-    const err = new Error(`[admin/${action}] ${res.statusCode}: ${res.data?.error || JSON.stringify(res.data)}`)
-    err.statusCode = res.statusCode
-    err.data = res.data
-    throw err
+    sessionPromise = request(
+      `${base}/admin`,
+      { action: 'auth.login', username, password },
+    ).then((res) => {
+      if (res.statusCode !== 200) {
+        throw new Error(`[admin/auth.login] ${res.statusCode}: ${res.data?.error || JSON.stringify(res.data)}`)
+      }
+      const token = String(res.data?.token || '').trim()
+      if (!token) throw new Error('auth.login response did not include a session token')
+      return token
+    }).catch((error) => {
+      sessionPromise = null
+      throw error
+    })
+    return sessionPromise
   }
 
-  return res.data
+  async function callAs(openid, fnName, action, params = {}) {
+    requireBase()
+    if (!gatewayToken) throw new Error('GATEWAY_TOKEN is required for HTTP test gateway calls')
+    const res = await request(
+      `${base}/http-gateway`,
+      { _fn: fnName, action, ...params },
+      { authorization: `Bearer ${gatewayToken}`, 'x-test-openid': openid },
+    )
+
+    if (res.statusCode !== 200) {
+      const err = new Error(`[${fnName}/${action}] ${res.statusCode}: ${res.data?.error || JSON.stringify(res.data)}`)
+      err.statusCode = res.statusCode
+      err.data = res.data
+      throw err
+    }
+
+    return res.data
+  }
+
+  async function callAdmin(action, params = {}) {
+    const token = await getAdminSession()
+    const res = await request(
+      `${base}/admin`,
+      { action, ...params },
+      { authorization: `Bearer ${token}` },
+    )
+
+    if (res.statusCode !== 200) {
+      const err = new Error(`[admin/${action}] ${res.statusCode}: ${res.data?.error || JSON.stringify(res.data)}`)
+      err.statusCode = res.statusCode
+      err.data = res.data
+      throw err
+    }
+
+    return res.data
+  }
+
+  return { callAdmin, callAs }
 }
+
+const defaultApi = createTestApi()
+export const callAs = defaultApi.callAs
+export const callAdmin = defaultApi.callAdmin
 
 export async function callAdminRaw(token, action, params = {}) {
+  if (!BASE) throw new Error('CLOUD_API_URL is required')
   return request(
     `${BASE}/admin`,
     { action, ...params },
