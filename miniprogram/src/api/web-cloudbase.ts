@@ -18,6 +18,15 @@ type WebCloudbaseAuth = {
 type WebCloudbaseApp = {
   auth(): WebCloudbaseAuth
   callFunction(options: { name: string; data: object; parse: true }): Promise<{ result: any }>
+  uploadFile(options: {
+    cloudPath: string
+    // CloudBase 3.6.2's browser implementation accepts Blob/File although its public typing says string.
+    filePath: any
+    onUploadProgress?: (event: { loaded?: number; total?: number }) => void
+  }): Promise<{ fileID: string; requestId?: string }>
+  getTempFileURL(options: { fileList: string[] }): Promise<{
+    fileList?: Array<{ fileID: string; tempFileURL?: string; download_url?: string }>
+  }>
 }
 
 type WebCloudbaseDependencies = {
@@ -71,6 +80,18 @@ export function createWebCloudbaseApi(dependencies: WebCloudbaseDependencies) {
       }
       return response.result
     },
+    async uploadFile(options: {
+      cloudPath: string
+      filePath: string | Blob
+      onUploadProgress?: (event: { loaded?: number; total?: number }) => void
+    }) {
+      const { app } = await getInstances()
+      return app.uploadFile(options)
+    },
+    async getTempFileURL(fileList: string[]) {
+      const { app } = await getInstances()
+      return app.getTempFileURL({ fileList })
+    },
   }
 }
 
@@ -87,3 +108,5 @@ export const getLoginState = singleton.getLoginState
 export const signIn = singleton.signIn
 export const signOut = singleton.signOut
 export const callFunction = singleton.callFunction
+export const uploadFile = singleton.uploadFile
+export const getTempFileURL = singleton.getTempFileURL

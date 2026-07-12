@@ -13,6 +13,8 @@ describe('web CloudBase API', () => {
     const app = {
       auth: vi.fn(() => auth),
       callFunction: vi.fn().mockResolvedValue({ result: { ok: true } }),
+      uploadFile: vi.fn().mockResolvedValue({ fileID: 'cloud://env/a.txt', requestId: 'r1' }),
+      getTempFileURL: vi.fn().mockResolvedValue({ fileList: [{ fileID: 'cloud://env/a.txt', tempFileURL: 'https://temp/a.txt' }] }),
     }
     const init = vi.fn(() => app)
     const api = createWebCloudbaseApi({
@@ -24,6 +26,13 @@ describe('web CloudBase API', () => {
     await expect(api.signIn({ username: 'alice', password: 'secret' })).resolves.toBe(loginState)
     await expect(api.signOut()).resolves.toBeUndefined()
     await expect(api.callFunction('post', { action: 'get', postId: 'p1' })).resolves.toEqual({ ok: true })
+    const blob = new Blob(['hello'])
+    const onUploadProgress = vi.fn()
+    await expect(api.uploadFile({ cloudPath: 'a.txt', filePath: blob, onUploadProgress }))
+      .resolves.toEqual({ fileID: 'cloud://env/a.txt', requestId: 'r1' })
+    await expect(api.getTempFileURL(['cloud://env/a.txt'])).resolves.toEqual({
+      fileList: [{ fileID: 'cloud://env/a.txt', tempFileURL: 'https://temp/a.txt' }],
+    })
 
     expect(init).toHaveBeenCalledTimes(1)
     expect(init).toHaveBeenCalledWith({ env: 'test-env', accessKey: 'public-access-key' })
@@ -34,6 +43,8 @@ describe('web CloudBase API', () => {
       data: { action: 'get', postId: 'p1' },
       parse: true,
     })
+    expect(app.uploadFile).toHaveBeenCalledWith({ cloudPath: 'a.txt', filePath: blob, onUploadProgress })
+    expect(app.getTempFileURL).toHaveBeenCalledWith({ fileList: ['cloud://env/a.txt'] })
   })
 
   test('rejects a non-object function result instead of leaking a string as the typed result', async () => {

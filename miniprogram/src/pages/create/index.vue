@@ -188,6 +188,7 @@ import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi, postApi } from '../../api/cloud'
+import { uploadCloudFile } from '../../api/storage'
 import AppTabBar from '../../components/AppTabBar.vue'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
 import {
@@ -659,18 +660,12 @@ async function consumeActivityInviteIntent(options?: any) {
 }
 
 async function uploadImages(tempPaths: string[]): Promise<string[]> {
-  return Promise.all(tempPaths.map((path) => {
+  return Promise.all(tempPaths.map(async (path) => {
     if (path.startsWith('cloud://')) return Promise.resolve(path)
-    const ext = path.split('.').pop() ?? 'jpg'
+    const ext = path.startsWith('blob:') ? 'jpg' : (path.split('.').pop()?.split('?')[0] || 'jpg')
     const cloudPath = `posts/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
-    return new Promise<string>((resolve, reject) => {
-      wx.cloud.uploadFile({
-        cloudPath,
-        filePath: path,
-        success: (res: any) => resolve(res.fileID),
-        fail: reject,
-      })
-    })
+    const result = await uploadCloudFile({ cloudPath, source: path })
+    return result.fileID
   }))
 }
 

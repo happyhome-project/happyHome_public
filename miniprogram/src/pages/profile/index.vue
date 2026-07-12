@@ -439,6 +439,7 @@ import { onPullDownRefresh, onShareAppMessage, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { communityApi, memberApi, notificationApi, type ApprovalNotificationEventType } from '../../api/cloud'
+import { uploadCloudFile } from '../../api/storage'
 import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
@@ -690,21 +691,11 @@ function onNickBlur(e: any) {
 async function uploadAvatarIfAny(): Promise<string> {
   if (!formAvatarTempPath.value) return formAvatarCloudUrl.value || ''
   try {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore
-    if (typeof wx === 'undefined' || !wx.cloud?.uploadFile) return ''
-    const ext = formAvatarTempPath.value.split('.').pop()?.split('?')[0] || 'jpg'
+    const ext = formAvatarTempPath.value.startsWith('blob:')
+      ? 'jpg'
+      : (formAvatarTempPath.value.split('.').pop()?.split('?')[0] || 'jpg')
     const cloudPath = `avatars/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
-    const res: any = await new Promise((resolve, reject) => {
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      wx.cloud.uploadFile({
-        cloudPath,
-        filePath: formAvatarTempPath.value,
-        success: resolve,
-        fail: reject,
-      })
-    })
+    const res = await uploadCloudFile({ cloudPath, source: formAvatarTempPath.value })
     return String(res?.fileID || '')
   } catch (err) {
     console.warn('[profile] 头像上传失败，使用默认头像兜底', err)
