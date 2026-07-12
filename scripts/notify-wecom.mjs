@@ -3,31 +3,51 @@ import http from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 
-function postJson(urlString, body) {
+function postJson(urlString, body, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const url = new URL(urlString)
+    const fail = () => reject(new Error('WeCom webhook request failed'))
+    let url
+    try {
+      url = new URL(urlString)
+    } catch {
+      fail()
+      return
+    }
     const payload = JSON.stringify(body)
     const transport = url.protocol === 'https:' ? https : http
-    const req = transport.request(
-      {
-        method: 'POST',
-        hostname: url.hostname,
-        port: url.port || (url.protocol === 'https:' ? 443 : 80),
-        path: `${url.pathname}${url.search}`,
-        headers: {
-          'content-type': 'application/json',
-          'content-length': Buffer.byteLength(payload),
+    let req
+    try {
+      req = transport.request(
+        {
+          method: 'POST',
+          hostname: url.hostname,
+          port: url.port || (url.protocol === 'https:' ? 443 : 80),
+          path: `${url.pathname}${url.search}`,
+          headers: {
+            'content-type': 'application/json',
+            'content-length': Buffer.byteLength(payload),
+          },
         },
-      },
-      (res) => {
-        let raw = ''
-        res.on('data', (chunk) => { raw += chunk })
-        res.on('end', () => {
-          resolve({ statusCode: res.statusCode || 0, body: raw })
-        })
-      }
-    )
-    req.on('error', reject)
+        (res) => {
+          const statusCode = res.statusCode || 0
+          res.once('end', () => resolve({ statusCode }))
+          res.once('aborted', fail)
+          res.once('error', fail)
+          res.once('close', () => {
+            if (!res.complete) fail()
+          })
+          res.resume()
+        }
+      )
+    } catch {
+      fail()
+      return
+    }
+    req.setTimeout(timeoutMs, () => {
+      req.destroy()
+      fail()
+    })
+    req.once('error', fail)
     req.write(payload)
     req.end()
   })
@@ -71,7 +91,7 @@ function stageSummary(summary, env) {
   return lines.join('\n')
 }
 
-export async function sendWeComNotification({ webhook, summary, env }) {
+export async function sendWeComNotification({ webhook, summary, env = {}, timeoutMs = 10_000 }) {
   if (!webhook) {
     return { status: 'skipped' }
   }
@@ -81,7 +101,7 @@ export async function sendWeComNotification({ webhook, summary, env }) {
     markdown: {
       content: stageSummary(summary, env),
     },
-  })
+  }, timeoutMs)
 
   if (res.statusCode < 200 || res.statusCode >= 300) {
     throw new Error(`WeCom webhook failed with status ${res.statusCode}`)
