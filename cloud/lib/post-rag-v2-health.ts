@@ -37,7 +37,9 @@ export async function getPostRagV2Health(communityId:string,deps:Dependencies={.
     else staleSourceVersionCount+=1
   }
   const count=(status:string)=>jobs.filter((job:any)=>job.status===status).length
+  const canonicalJobStatuses=new Set(['pending','retry_wait','processing','completed','dead_letter'])
+  const unknownJobStatusCount=jobs.filter((job:any)=>!canonicalJobStatuses.has(String(job.status||''))).length
   const eligibleActivePostCount=eligible.length
   const missingExactSourceVersionCount=eligibleActivePostCount-exactSourceVersionCount
-  return {communityId:id,schemaVersion:2,sectionCount:sections.length,sourcePostCount:posts.length,eligibleActivePostCount,exactSourceVersionCount,missingExactSourceVersionCount,missingStateCount,staleSourceVersionCount,pendingJobCount:count('pending'),retryJobCount:count('retry'),processingJobCount:count('processing'),failedJobCount:count('failed'),coverageRatio:eligibleActivePostCount?exactSourceVersionCount/eligibleActivePostCount:1}
+  return {communityId:id,schemaVersion:2,sectionCount:sections.length,sourcePostCount:posts.length,eligibleActivePostCount,exactSourceVersionCount,missingExactSourceVersionCount,missingStateCount,staleSourceVersionCount,pendingJobCount:count('pending'),retryJobCount:count('retry_wait'),processingJobCount:count('processing'),failedJobCount:count('dead_letter'),unknownJobStatusCount,coverageRatio:eligibleActivePostCount?exactSourceVersionCount/eligibleActivePostCount:1}
 }

@@ -12,7 +12,9 @@ export async function executePostRagV2Backfill(deps, { maxAttempts = 20 } = {}) 
       && Number.isFinite(totals.missingExactSourceVersionCount)
       && Number.isFinite(totals.retryJobCount)
       && Number.isFinite(totals.processingJobCount)
+      && Number.isFinite(totals.unknownJobStatusCount)
     if (!exactContract) throw new Error('v2 backfill requires the exact source-version health contract')
+    if (totals.unknownJobStatusCount) throw new Error('v2 backfill health contains an unknown job status')
     if (!totals || totals.failedCommunityCount || totals.failedStateCount || totals.pendingJobCount || totals.failedJobCount) {
       if (attempt < maxAttempts) { await deps.wait?.(); continue }
       throw new Error('v2 backfill health has failed or pending work')
@@ -23,7 +25,7 @@ export async function executePostRagV2Backfill(deps, { maxAttempts = 20 } = {}) 
     }
     if (totals.missingExactSourceVersionCount === 0 && totals.exactSourceVersionCount === totals.eligibleActivePostCount && totals.coverageRatio === 1) {
       const evidence = { schemaVersion: 1, eligibleActivePostCount: totals.eligibleActivePostCount,
-        coveredPostCount: totals.exactSourceVersionCount, missingCoverageCount: 0, pendingJobCount: 0, retryJobCount:0, processingJobCount:0, failedJobCount: 0,
+        coveredPostCount: totals.exactSourceVersionCount, missingCoverageCount: 0, pendingJobCount: 0, retryJobCount:0, processingJobCount:0, failedJobCount: 0, unknownJobStatusCount:0,
         coverageRatio: 1, attempts: attempt }
       await deps.recordEvidence?.(evidence)
       return evidence

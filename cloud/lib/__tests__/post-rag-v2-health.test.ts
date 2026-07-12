@@ -18,12 +18,12 @@ test('v2 health paginates beyond 100 and proves exact current source versions', 
   expect(pageCalls.filter(x=>x.startsWith('posts:')).length).toBe(2)
 })
 
-test('v2 health distinguishes missing stale and failed work',async()=>{
+test('v2 health maps retry_wait to retryJobCount and dead_letter to failedJobCount, blocking unknown statuses',async()=>{
   const sections=[{_id:'s1',communityId:'c1',status:'active',widgets:[]}]
   const posts=[{_id:'p1',communityId:'c1',sectionId:'s1'},{_id:'p2',communityId:'c1',sectionId:'s1'}]
   const states=[{_id:'p1',schemaVersion:2,state:'active',sourceVersion:'old'}]
-  const jobs=[{_id:'j1',communityId:'c1',schemaVersion:2,status:'retry'},{_id:'j2',communityId:'c1',schemaVersion:2,status:'processing'},{_id:'j3',communityId:'c1',schemaVersion:2,status:'failed'}]
+  const jobs=[{_id:'j1',communityId:'c1',schemaVersion:2,status:'retry_wait'},{_id:'j2',communityId:'c1',schemaVersion:2,status:'processing'},{_id:'j3',communityId:'c1',schemaVersion:2,status:'dead_letter'},{_id:'j4',communityId:'c1',schemaVersion:2,status:'future_status'}]
   const collections:any={sections,posts,post_rag_jobs:jobs}
   const result=await getPostRagV2Health('c1',{queryAfterId:async(name,where,afterId,limit)=>collections[name].filter((x:any)=>Object.entries(where).every(([k,v])=>x[k]===v)&&(!afterId||x._id>afterId)).slice(0,limit),getByIds:async()=>states,buildProjection:(post:any)=>({eligible:true,sourceVersion:`new-${post._id}`})})
-  expect(result).toMatchObject({eligibleActivePostCount:2,exactSourceVersionCount:0,missingExactSourceVersionCount:2,missingStateCount:1,staleSourceVersionCount:1,retryJobCount:1,processingJobCount:1,failedJobCount:1,coverageRatio:0})
+  expect(result).toMatchObject({eligibleActivePostCount:2,exactSourceVersionCount:0,missingExactSourceVersionCount:2,missingStateCount:1,staleSourceVersionCount:1,retryJobCount:1,processingJobCount:1,failedJobCount:1,unknownJobStatusCount:1,coverageRatio:0})
 })

@@ -275,6 +275,7 @@ export async function runPostRagRebuild(options = parseRagRebuildArgs(), runner 
       acc.failedJobCount += Number(item.failedJobCount || 0)
       acc.retryJobCount += Number(item.retryJobCount || 0)
       acc.processingJobCount += Number(item.processingJobCount || 0)
+      acc.unknownJobStatusCount += Number(item.unknownJobStatusCount || 0)
       acc.eligibleActivePostCount += Number(item.eligibleActivePostCount || 0)
       acc.exactSourceVersionCount += Number(item.exactSourceVersionCount || 0)
       acc.missingExactSourceVersionCount += Number(item.missingExactSourceVersionCount || 0)
@@ -291,6 +292,7 @@ export async function runPostRagRebuild(options = parseRagRebuildArgs(), runner 
       failedJobCount: 0,
       retryJobCount: 0,
       processingJobCount: 0,
+      unknownJobStatusCount: 0,
       eligibleActivePostCount: 0,
       exactSourceVersionCount: 0,
       missingExactSourceVersionCount: 0,
