@@ -3,7 +3,8 @@ import type { Community, Section } from '../../../cloud/shared/types'
 import { memberApi, sectionApi } from '../api/cloud'
 
 const STORAGE_KEY = 'community_store'
-let loadingMyCommunities: Promise<void> | null = null
+let communityMutationEpoch = 0
+let loadingMyCommunities: { epoch: number; promise: Promise<void> } | null = null
 
 interface LoadMyCommunitiesOptions {
   loadSections?: boolean
@@ -28,10 +29,13 @@ export const useCommunityStore = defineStore('community', {
   },
   actions: {
     clearCommunityState() {
+      communityMutationEpoch += 1
       this.currentCommunityId = ''
+      this.myCommunities = []
       this.browsingCommunity = null
       this.currentSections = []
       this.currentSectionIndex = 0
+      this.membershipByCommunity = {}
       this.saveToStorage()
     },
     loadFromStorage() {
@@ -51,25 +55,28 @@ export const useCommunityStore = defineStore('community', {
         })
       } catch (_error) {}
     },
-    async switchCommunity(communityId: string) {
+    async switchCommunity(communityId: string, expectedEpoch = communityMutationEpoch) {
       const res = await sectionApi.list(communityId)
+      if (expectedEpoch !== communityMutationEpoch) return
       this.currentCommunityId = communityId
       this.currentSectionIndex = 0
       this.currentSections = res.sections as Section[]
-      this.refreshMembershipStatus(communityId).catch(() => {})
+      this.refreshMembershipStatus(communityId, expectedEpoch).catch(() => {})
       this.saveToStorage()
     },
-    async refreshMembershipStatus(communityId: string) {
+    async refreshMembershipStatus(communityId: string, expectedEpoch = communityMutationEpoch) {
       const id = String(communityId || '').trim()
       if (!id) return
       try {
         const res = await memberApi.myStatus(id)
+        if (expectedEpoch !== communityMutationEpoch) return
         this.membershipByCommunity[id] = {
           isMember: !!res.isMember,
           status: res.status,
           checkedAt: Date.now(),
         }
       } catch (_error) {
+        if (expectedEpoch !== communityMutationEpoch) return
         this.membershipByCommunity[id] = {
           isMember: false,
           status: null,
@@ -81,22 +88,30 @@ export const useCommunityStore = defineStore('community', {
       return this.membershipByCommunity[String(communityId || '').trim()] || null
     },
     async loadMyCommunities(options: LoadMyCommunitiesOptions = {}) {
-      if (loadingMyCommunities) {
-        await loadingMyCommunities
+      const epoch = communityMutationEpoch
+      if (loadingMyCommunities?.epoch === epoch) {
+        await loadingMyCommunities.promise
+        if (epoch !== communityMutationEpoch) return
+        if (options.shouldApply && !options.shouldApply()) return
         if (options.loadSections !== false && this.currentCommunityId && this.currentSections.length === 0) {
-          await this.switchCommunity(this.currentCommunityId)
+          await this.switchCommunity(this.currentCommunityId, epoch)
         }
         return
       }
-      loadingMyCommunities = this.loadMyCommunitiesFresh(options)
+      const holder = {
+        epoch,
+        promise: this.loadMyCommunitiesFresh(options, epoch),
+      }
+      loadingMyCommunities = holder
       try {
-        await loadingMyCommunities
+        await holder.promise
       } finally {
-        loadingMyCommunities = null
+        if (loadingMyCommunities === holder) loadingMyCommunities = null
       }
     },
-    async loadMyCommunitiesFresh(options: LoadMyCommunitiesOptions = {}) {
+    async loadMyCommunitiesFresh(options: LoadMyCommunitiesOptions = {}, expectedEpoch = communityMutationEpoch) {
       const res = await memberApi.myCommunities()
+      if (expectedEpoch !== communityMutationEpoch) return
       if (options.shouldApply && !options.shouldApply()) return
       this.myCommunities = (res.communities as Community[]).filter(
         (community) => community?.status === 'active',
@@ -113,7 +128,7 @@ export const useCommunityStore = defineStore('community', {
       this.currentSectionIndex = 0
       this.saveToStorage()
       if (options.loadSections !== false) {
-        await this.switchCommunity(targetId)
+        await this.switchCommunity(targetId, expectedEpoch)
       }
     },
   },
