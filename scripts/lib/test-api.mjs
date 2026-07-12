@@ -71,9 +71,8 @@ export function createTestApi(env = process.env) {
   const base = String(env.CLOUD_API_URL || '').replace(/\/+$/, '')
   const username = String(env.TEST_ADMIN_USERNAME || env.VITE_ADMIN_USERNAME || '').trim()
   const password = String(env.TEST_ADMIN_PASSWORD || env.VITE_ADMIN_PASSWORD || '')
-  const explicitSession = String(env.TEST_ADMIN_SESSION_TOKEN || '').trim()
   const gatewayToken = String(env.GATEWAY_TOKEN || '').trim()
-  let sessionPromise = explicitSession ? Promise.resolve(explicitSession) : null
+  let sessionPromise = null
 
   function requireBase() {
     if (!base) throw new Error('CLOUD_API_URL is required')

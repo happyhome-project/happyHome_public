@@ -570,10 +570,12 @@ test('nightly authentication separates admin sessions from the HTTP gateway capa
   const workflow = readFileSync(new URL('../../.github/workflows/nightly-full.yml', import.meta.url), 'utf8')
   const browser = readFileSync(new URL('../../admin-web/tests/nightly-admin.spec.mjs', import.meta.url), 'utf8')
   const h5Readme = readFileSync(new URL('../../scripts/h5-test/README.md', import.meta.url), 'utf8')
+  const packageJson = readFileSync(new URL('../../package.json', import.meta.url), 'utf8')
 
   assert.match(helper, /auth\.login/)
   assert.match(helper, /GATEWAY_TOKEN/)
   assert.doesNotMatch(helper, /process\.env\.ADMIN_TOKEN|happyhome-admin-2024/)
+  assert.doesNotMatch(helper, /TEST_ADMIN_SESSION_TOKEN/)
   assert.match(orchestration, /'GATEWAY_TOKEN'/)
   assert.doesNotMatch(orchestration, /'ADMIN_TOKEN'|'VITE_ADMIN_TOKEN'/)
   assert.match(workflow, /GATEWAY_TOKEN:\s*\$\{\{ secrets\.GATEWAY_TOKEN \}\}/)
@@ -584,4 +586,5 @@ test('nightly authentication separates admin sessions from the HTTP gateway capa
   assert.match(browser, /VITE_ADMIN_USERNAME and VITE_ADMIN_PASSWORD are required/)
   assert.match(h5Readme, /GATEWAY_TOKEN/)
   assert.match(h5Readme, /auth\.login/)
+  assert.match(packageJson, /test-api\.test\.mjs/)
 })

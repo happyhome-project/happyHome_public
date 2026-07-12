@@ -36,6 +36,7 @@ test('admin calls login once and reuse the issued session token', async () => {
       VITE_ADMIN_USERNAME: 'nightly-admin',
       VITE_ADMIN_PASSWORD: 'secret-password',
       GATEWAY_TOKEN: 'gateway-secret',
+      TEST_ADMIN_SESSION_TOKEN: 'stale-runner-session',
     })
 
     await api.callAdmin('community.list')
