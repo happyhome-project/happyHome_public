@@ -1,52 +1,95 @@
 import https from 'node:https'
 import http from 'node:http'
 import { readFile } from 'node:fs/promises'
+import { pathToFileURL } from 'node:url'
 
-const summaryPath = process.argv[2] || process.env.HH_SUMMARY_PATH || ''
-const webhook = process.env.WECOM_WEBHOOK_URL || ''
-const requireWebhook = process.env.HH_REQUIRE_WECOM === '1'
+const MAX_RESPONSE_BYTES = 64 * 1024
 
-function postJson(urlString, body) {
+function postJson(urlString, body, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const url = new URL(urlString)
+    const fail = () => reject(new Error('WeCom webhook request failed'))
+    const invalidResponse = () => reject(new Error('WeCom webhook response invalid'))
+    let url
+    try {
+      url = new URL(urlString)
+    } catch {
+      fail()
+      return
+    }
     const payload = JSON.stringify(body)
     const transport = url.protocol === 'https:' ? https : http
-    const req = transport.request(
-      {
-        method: 'POST',
-        hostname: url.hostname,
-        port: url.port || (url.protocol === 'https:' ? 443 : 80),
-        path: `${url.pathname}${url.search}`,
-        headers: {
-          'content-type': 'application/json',
-          'content-length': Buffer.byteLength(payload),
+    let req
+    try {
+      req = transport.request(
+        {
+          method: 'POST',
+          hostname: url.hostname,
+          port: url.port || (url.protocol === 'https:' ? 443 : 80),
+          path: `${url.pathname}${url.search}`,
+          headers: {
+            'content-type': 'application/json',
+            'content-length': Buffer.byteLength(payload),
+          },
         },
-      },
-      (res) => {
-        let raw = ''
-        res.on('data', (chunk) => { raw += chunk })
-        res.on('end', () => {
-          resolve({ statusCode: res.statusCode || 0, body: raw })
-        })
-      }
-    )
-    req.on('error', reject)
+        (res) => {
+          const statusCode = res.statusCode || 0
+          const contentLengthHeader = res.headers['content-length']
+          if (contentLengthHeader !== undefined) {
+            const contentLength = Number(contentLengthHeader)
+            if (!Number.isSafeInteger(contentLength) || contentLength < 0 || contentLength > MAX_RESPONSE_BYTES) {
+              invalidResponse()
+              res.destroy()
+              return
+            }
+          }
+
+          const chunks = []
+          let responseBytes = 0
+          res.on('data', (chunk) => {
+            responseBytes += chunk.length
+            if (responseBytes > MAX_RESPONSE_BYTES) {
+              invalidResponse()
+              res.destroy()
+              return
+            }
+            chunks.push(chunk)
+          })
+          res.once('end', () => resolve({
+            statusCode,
+            body: Buffer.concat(chunks, responseBytes).toString('utf8'),
+          }))
+          res.once('aborted', fail)
+          res.once('error', fail)
+          res.once('close', () => {
+            if (!res.complete) fail()
+          })
+        }
+      )
+    } catch {
+      fail()
+      return
+    }
+    req.setTimeout(timeoutMs, () => {
+      req.destroy()
+      fail()
+    })
+    req.once('error', fail)
     req.write(payload)
     req.end()
   })
 }
 
-function buildRunUrl() {
-  const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID } = process.env
+function buildRunUrl(env) {
+  const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID } = env
   if (!GITHUB_SERVER_URL || !GITHUB_REPOSITORY || !GITHUB_RUN_ID) return ''
   return `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`
 }
 
-function stageSummary(summary) {
+function stageSummary(summary, env) {
   const failedStages = summary.stages.filter((stage) => stage.status === 'failed')
   const flakyStages = summary.stages.filter((stage) => stage.status === 'recovered_flaky')
   const cleanupIssues = summary.cleanupIssues || []
-  const runUrl = buildRunUrl()
+  const runUrl = buildRunUrl(env)
 
   const lines = [
     `# HappyHome Nightly ${summary.status === 'passed' ? 'SUCCESS' : 'FAILED'}`,
@@ -74,35 +117,62 @@ function stageSummary(summary) {
   return lines.join('\n')
 }
 
+export async function sendWeComNotification({ webhook, summary, env = {}, timeoutMs = 10_000 }) {
+  if (!webhook) {
+    return { status: 'skipped' }
+  }
+
+  const res = await postJson(webhook, {
+    msgtype: 'markdown',
+    markdown: {
+      content: stageSummary(summary, env),
+    },
+  }, timeoutMs)
+
+  if (res.statusCode < 200 || res.statusCode >= 300) {
+    throw new Error(`WeCom webhook failed with status ${res.statusCode}`)
+  }
+
+  let responseBody
+  try {
+    responseBody = JSON.parse(res.body)
+  } catch {
+    throw new Error('WeCom webhook response invalid')
+  }
+  if (
+    responseBody === null
+    || typeof responseBody !== 'object'
+    || Array.isArray(responseBody)
+    || Number(responseBody.errcode) !== 0
+  ) {
+    throw new Error('WeCom webhook response invalid')
+  }
+
+  return { status: 'sent' }
+}
+
 async function main() {
+  const summaryPath = process.argv[2] || process.env.HH_SUMMARY_PATH || ''
+  const webhook = process.env.WECOM_WEBHOOK_URL || ''
+
   if (!summaryPath) {
     throw new Error('Missing summary path')
   }
 
   if (!webhook) {
-    if (requireWebhook) {
-      throw new Error('Missing WECOM_WEBHOOK_URL')
-    }
     console.log('Skipping WeCom notification because webhook is not configured.')
     return
   }
 
   const summary = JSON.parse(await readFile(summaryPath, 'utf8'))
-  const res = await postJson(webhook, {
-    msgtype: 'markdown',
-    markdown: {
-      content: stageSummary(summary),
-    },
-  })
-
-  if (res.statusCode < 200 || res.statusCode >= 300) {
-    throw new Error(`WeCom webhook failed with status ${res.statusCode}: ${res.body}`)
-  }
+  await sendWeComNotification({ webhook, summary, env: process.env })
 
   console.log('WeCom notification sent.')
 }
 
-main().catch((error) => {
-  console.error(error?.stack || error?.message || error)
-  process.exit(1)
-})
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  main().catch((error) => {
+    console.error(error?.stack || error?.message || error)
+    process.exit(1)
+  })
+}
