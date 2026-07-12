@@ -36,6 +36,10 @@ jest.mock('../../../lib/post-rag', () => ({
   searchPostsWithRag: jest.fn(),
 }))
 
+jest.mock('../../../lib/post-semantic-search', () => ({
+  createPostSemanticSearchServiceFromEnv: jest.fn(),
+}))
+
 import { createHmac } from 'crypto'
 import {
   handleBootstrap,
@@ -52,10 +56,12 @@ import {
   handleSearch,
   handleUpdate,
   main,
+  resetPostSemanticSearchServiceForTests,
 } from '../index'
 import * as db from '../../../lib/db'
 import * as postSearch from '../../../lib/post-search'
 import * as postRag from '../../../lib/post-rag'
+import * as postSemanticSearch from '../../../lib/post-semantic-search'
 import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
 
 const POST_RAG_SMOKE_SECRET = 'r'.repeat(48)
@@ -87,6 +93,7 @@ function createSignedPostRagSmokeIdentity(overrides: Partial<{
 
 beforeEach(() => {
   jest.clearAllMocks()
+  resetPostSemanticSearchServiceForTests()
   delete process.env.DEFAULT_PUBLIC_COMMUNITY_ID
   delete process.env.PUBLIC_READ_COMMUNITY_IDS
   delete process.env.POST_RAG_SMOKE_IDENTITY_SECRET
@@ -1374,6 +1381,12 @@ test('delete: clears pin and featured flags', async () => {
   expect(postSearch.removePostSearchIndex).toHaveBeenCalledWith('post-flagged')
 })
 
+function mockSemanticResult(result: Record<string, unknown>) {
+  const search = jest.fn().mockResolvedValue(result)
+  ;(postSemanticSearch.createPostSemanticSearchServiceFromEnv as jest.Mock).mockReturnValue({ search })
+  return search
+}
+
 test('delete: retries legacy cleanup for an authorized already-deleted post without repeating the v2 mutation', async () => {
   const post = {
     _id: 'post-retry',
@@ -1401,26 +1414,13 @@ test('delete: retries legacy cleanup for an authorized already-deleted post with
 
 test('search: checks community readability and delegates to formal RAG search', async () => {
   ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
-  ;(postRag.searchPostsWithRag as jest.Mock).mockResolvedValue({
+  const semanticSearch = mockSemanticResult({
     query: '鲲鹏',
     communityId: 'community-1',
     sectionId: '',
     total: 1,
     skip: 0,
     limit: 20,
-    answer: '找到 1 篇包含该视频的帖子。',
-    citations: [
-      {
-        postId: 'post-1',
-        chunkId: 'chunk-1',
-        title: '视频帖',
-        fieldLabel: '视频',
-        fieldType: 'video_group',
-        preview: '鲲鹏',
-        score: 0.92,
-      },
-    ],
-    mode: 'rag',
     items: [{ postId: 'post-1', title: '视频帖' }],
   })
   ;(db.query as jest.Mock)
@@ -1437,18 +1437,19 @@ test('search: checks community readability and delegates to formal RAG search', 
     limit: 20,
   }, 'member-openid')
 
-  expect(postRag.searchPostsWithRag).toHaveBeenCalledWith(expect.objectContaining({
+  expect(semanticSearch).toHaveBeenCalledWith(expect.objectContaining({
     communityId: 'community-1',
     query: '鲲鹏',
-    sectionId: '',
+    sectionId: undefined,
     skip: 0,
     limit: 20,
     includeMemberOnly: true,
   }))
   expect(postSearch.searchPostIndex).not.toHaveBeenCalled()
+  expect(postRag.searchPostsWithRag).not.toHaveBeenCalled()
   expect(result.mode).toBe('rag')
-  expect(result.answer).toContain('找到')
-  expect(result.citations[0]).toMatchObject({ postId: 'post-1', fieldLabel: '视频' })
+  expect(result.answer).toBe('')
+  expect(result.citations).toEqual([])
   expect(result.items).toEqual([{ postId: 'post-1', title: '视频帖' }])
 })
 
@@ -1478,11 +1479,9 @@ test('search: accepts a short-lived signed RAG smoke identity only for its fixtu
     }
     return []
   })
-  ;(postRag.searchPostsWithRag as jest.Mock).mockResolvedValue({
-    mode: 'rag',
-    answer: '找到讲勤俭持家的帖子。',
-    citations: [{ postId: 'fixture-post' }],
+  const semanticSearch = mockSemanticResult({
     items: [{ postId: 'fixture-post', title: '朱子治家格言' }],
+    query: '勤俭持家', communityId: identity.communityId, total: 1, skip: 0, limit: 20,
   })
 
   await expect(main({
@@ -1498,7 +1497,7 @@ test('search: accepts a short-lived signed RAG smoke identity only for its fixtu
     userId: identity.userId,
     status: 'active',
   }, { limit: 1 })
-  expect(postRag.searchPostsWithRag).toHaveBeenCalledWith(expect.objectContaining({
+  expect(semanticSearch).toHaveBeenCalledWith(expect.objectContaining({
     communityId: identity.communityId,
     query: '勤俭持家',
     includeMemberOnly: true,
@@ -1521,7 +1520,7 @@ test('search: smoke identity audit logs validation state without leaking signed 
     }
     return []
   })
-  ;(postRag.searchPostsWithRag as jest.Mock).mockResolvedValue({ mode: 'rag', answer: '命中', citations: [], items: [] })
+  mockSemanticResult({ query: '勤俭持家', communityId: identity.communityId, total: 0, skip: 0, limit: 20, items: [] })
 
   await main({
     action: 'search',
@@ -1586,16 +1585,13 @@ test('search: rejects a fixture run whose expiry differs from the signed identit
 test('search: public guest readers do not receive member-only RAG evidence', async () => {
   process.env.PUBLIC_READ_COMMUNITY_IDS = 'community-1'
   ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
-  ;(postRag.searchPostsWithRag as jest.Mock).mockResolvedValue({
+  const semanticSearch = mockSemanticResult({
     query: '联系方式',
     communityId: 'community-1',
     sectionId: '',
     total: 0,
     skip: 0,
     limit: 20,
-    answer: '没有找到足够相关的帖子。',
-    citations: [],
-    mode: 'no_answer',
     items: [],
   })
 
@@ -1605,7 +1601,7 @@ test('search: public guest readers do not receive member-only RAG evidence', asy
     asGuest: true,
   }, 'member-openid')
 
-  expect(postRag.searchPostsWithRag).toHaveBeenCalledWith(expect.objectContaining({
+  expect(semanticSearch).toHaveBeenCalledWith(expect.objectContaining({
     communityId: 'community-1',
     query: '联系方式',
     includeMemberOnly: false,

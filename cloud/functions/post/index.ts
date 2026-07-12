@@ -15,7 +15,8 @@ import {
   isActivityInviteSection,
 } from '../../shared/activity-invite'
 import { removePostSearchIndex } from '../../lib/post-search'
-import { enqueuePostRagDeleteJobInTransaction, enqueuePostRagJob, searchPostsWithRag } from '../../lib/post-rag'
+import { enqueuePostRagDeleteJobInTransaction, enqueuePostRagJob } from '../../lib/post-rag'
+import { createPostSemanticSearchServiceFromEnv, type PostSemanticSearchResponse } from '../../lib/post-semantic-search'
 import { appendPostRagOutboxEvent } from '../../lib/post-rag-outbox'
 import type {
   AttendancePreviewUser,
@@ -56,6 +57,16 @@ const ATTENDANCE_PREVIEW_LIMIT = 5
 const COMMUNITY_READ_ERROR = '需要先加入社区后查看内容'
 const HOME_POST_LIMIT_PER_SECTION = 20
 const DEFAULT_SEARCH_LIMIT = 20
+type PostSemanticSearchService = { search(input: {
+  communityId: string; query: string; sectionId?: string; skip?: number; limit?: number; includeMemberOnly: boolean
+}): Promise<PostSemanticSearchResponse> }
+let postSemanticSearchService: PostSemanticSearchService | null = null
+
+export function resetPostSemanticSearchServiceForTests() { postSemanticSearchService = null }
+function getPostSemanticSearchService() {
+  if (!postSemanticSearchService) postSemanticSearchService = createPostSemanticSearchServiceFromEnv()
+  return postSemanticSearchService
+}
 
 function resolvePostRagSmokeIdentity(event: any, action: string, communityId: string): PostRagSmokeIdentity | null {
   if (action !== 'search') return null
@@ -734,16 +745,17 @@ export async function handleSearch(params: {
   const viewerId = params.asGuest ? '' : (openid || '')
   await ensureCommunityReadable(communityId, viewerId, COMMUNITY_READ_ERROR)
   const canViewMemberOnly = await isActiveCommunityMember(communityId, viewerId)
-  return searchPostsWithRag({
-    communityId,
-    query: String(params.q ?? params.query ?? ''),
-    sectionId: String(params.sectionId || '').trim(),
-    skip: Number.isFinite(Number(params.skip)) ? Math.max(0, Math.floor(Number(params.skip))) : 0,
-    limit: Number.isFinite(Number(params.limit)) && Number(params.limit) > 0
-      ? Math.floor(Number(params.limit))
-      : DEFAULT_SEARCH_LIMIT,
-    includeMemberOnly: canViewMemberOnly,
-  })
+  try {
+    const result = await getPostSemanticSearchService().search({
+      communityId,
+      query: String(params.q ?? params.query ?? ''),
+      sectionId: String(params.sectionId || '').trim() || undefined,
+      skip: Number.isFinite(Number(params.skip)) ? Math.max(0, Math.floor(Number(params.skip))) : 0,
+      limit: Number.isFinite(Number(params.limit)) && Number(params.limit) > 0 ? Math.floor(Number(params.limit)) : DEFAULT_SEARCH_LIMIT,
+      includeMemberOnly: canViewMemberOnly,
+    })
+    return { ...result, answer: '', citations: [], mode: result.items.length ? 'rag' as const : 'no_answer' as const }
+  } catch { throw new Error('智能搜索暂不可用，请稍后重试') }
 }
 
 export async function handleDelete(params: { postId: string }, openid: string) {

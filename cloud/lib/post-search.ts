@@ -42,6 +42,7 @@ export interface PostSearchChunk {
   sectionId: string
   sectionName: string
   title: string
+  widgetId: string
   fieldKey: string
   fieldLabel: string
   fieldType: string
@@ -353,9 +354,10 @@ export function buildSearchQuery(raw: string): SearchQuery {
 }
 
 function chooseTitle(fields: PostSearchField[]): string {
+  const publicFields = fields.filter(field => field.visibility === 'public')
   return (
-    fields.find((field) => ['short_text', 'summary'].includes(field.fieldType))?.text ||
-    fields[0]?.text ||
+    publicFields.find((field) => ['short_text', 'summary'].includes(field.fieldType))?.text ||
+    publicFields[0]?.text ||
     'Untitled'
   )
 }
@@ -381,6 +383,7 @@ export function buildPostSearchChunks(document: PostSearchDocument): PostSearchC
         sectionId: document.sectionId,
         sectionName: document.sectionName,
         title: document.title,
+        widgetId: field.widgetId,
         fieldKey: field.fieldKey,
         fieldLabel: field.fieldLabel,
         fieldType: field.fieldType,
