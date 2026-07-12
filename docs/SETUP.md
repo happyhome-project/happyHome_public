@@ -68,6 +68,16 @@ npm.cmd run worktree:bootstrap       # 仅 clean、已同步的 codex/* 分支
 
 `worktree:create` 从刷新后的 `origin/main` 创建安全的 `codex/*` 分支，检查真实 `AGENTS.md` 与 Git hooks，并自动在新目录运行根 `npm.cmd ci`。`worktree:doctor` 只报告状态；缺依赖、错误 Node/npm、hooks/AGENTS 异常或已落后 main 会显示为 `not_ready`。不要把其它 worktree 的 `node_modules` 复制、软链接或 junction 到当前目录。
 
+退役前先运行对生命周期操作只读的 inventory（命令会 fetch 并更新本地 `origin/main` remote-tracking metadata）：
+
+```bash
+npm.cmd run worktree:status
+```
+
+每个真实 worktree 的 `retirement` 会显示 `classification`、`reasons` 与逐项 `checks`。`eligible` 要求 owner 明确为 inactive，且 dirty、开放 PR、独有提交、HEAD 是否已进入 main、Git 操作和 reparse point 等检查全部 known 且通过。`candidate_stale` 只表示唯一阻断是 `unknown_owner`，它是人工复核候选，不是删除许可；缺失或过期 heartbeat 仍是 unknown。PR 查询或 `origin/main` 刷新失败也会保留 unknown 并阻断，fetch 失败时命令仍输出本地 inventory，但以非零状态退出。
+
+这里的“只读”特指不会 retire、prune 或 remove worktree；刷新本地 Git remote-tracking metadata 是证据采集的一部分。实际退役仍必须走 `worktree:retire -- --prepare ...` 生成短期 manifest，人工复核后再 apply；apply 会在共享锁内重新检查实时状态，也没有后台清理路径。
+
 ### 2. 配置小程序
 
 - 确保 `miniprogram/src/manifest.json` 中 `appid` 为 `wx673b17363cd6b4a6`

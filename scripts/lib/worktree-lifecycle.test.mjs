@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,6 +10,7 @@ import { acquireIntegrationLock } from './integrate-pr-policy.mjs'
 
 import {
   confirmNoOwner,
+  classifyWorktreeRetirement,
   createRetirementManifest,
   createRetirementRecord,
   createWorktreePlan,
@@ -17,9 +19,293 @@ import {
   evaluateRetirement,
   executeHeartbeatCriticalSection,
   executeRetirementCriticalSection,
+  findOpenPullRequest,
+  githubRepositoryFromRemote,
+  interpretAncestorExitStatus,
+  validateOpenPullRequestInventory,
   verifyCreateTargetBoundary,
   verifyRetirementManifest,
 } from './worktree-lifecycle.mjs'
+
+test('GitHub repository identity is derived from common remote URL forms', () => {
+  assert.equal(githubRepositoryFromRemote('git@github.com:happyhome-project/happyHome_public.git'), 'happyhome-project/happyHome_public')
+  assert.equal(githubRepositoryFromRemote('https://github.com/happyhome-project/happyHome_public.git'), 'happyhome-project/happyHome_public')
+  assert.equal(githubRepositoryFromRemote('ssh://git@github.com/happyhome-project/happyHome_public.git'), 'happyhome-project/happyHome_public')
+  assert.equal(githubRepositoryFromRemote('X:/local/public-candidate.git'), null)
+})
+
+test('one open-PR inventory is matched by branch or exact head without inventing metadata', () => {
+  const pulls = [
+    { number: 8, url: 'https://github.test/pr/8', headRefName: 'codex/eight', headRefOid: 'a'.repeat(40) },
+  ]
+  assert.deepEqual(findOpenPullRequest(pulls, { branch: 'codex/eight', head: 'b'.repeat(40) }), {
+    known: true, open: true, number: 8, url: 'https://github.test/pr/8', error: null,
+  })
+  assert.deepEqual(findOpenPullRequest(pulls, { branch: '(detached)', head: 'a'.repeat(40) }), {
+    known: true, open: true, number: 8, url: 'https://github.test/pr/8', error: null,
+  })
+  assert.deepEqual(findOpenPullRequest(pulls, { branch: 'codex/none', head: 'c'.repeat(40) }), {
+    known: true, open: false, number: null, url: null, error: null,
+  })
+  assert.deepEqual(findOpenPullRequest(null, { branch: 'codex/eight', head: 'a'.repeat(40) }, { error: 'gh unavailable' }), {
+    known: false, open: null, number: null, url: null, error: 'gh unavailable',
+  })
+})
+
+test('git ancestor exit errors stay unknown instead of becoming false', () => {
+  assert.equal(interpretAncestorExitStatus(0), true)
+  assert.equal(interpretAncestorExitStatus(1), false)
+  assert.equal(interpretAncestorExitStatus(128), null)
+  assert.equal(interpretAncestorExitStatus(null), null)
+})
+
+test('a potentially truncated open-PR inventory fails closed', () => {
+  assert.deepEqual(validateOpenPullRequestInventory([{ number: 1 }], 2), {
+    pulls: [{ number: 1 }], error: null,
+  })
+  assert.deepEqual(validateOpenPullRequestInventory([{ number: 1 }, { number: 2 }], 2), {
+    pulls: null, error: 'open PR inventory may be truncated at 2 entries',
+  })
+  assert.deepEqual(validateOpenPullRequestInventory({}, 2), {
+    pulls: null, error: 'gh returned a non-array open PR inventory',
+  })
+})
+
+function run(command, args, cwd) {
+  const result = spawnSync(command, args, { cwd, encoding: 'utf8', windowsHide: true })
+  if (result.error) throw result.error
+  if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed: ${result.stderr}`)
+  return String(result.stdout || '').trim()
+}
+
+test('status keeps local inventory and fails closed when origin/main refresh fails', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'happyhome-status-fetch-'))
+  const repo = join(directory, 'repo')
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  run('git', ['init', '-b', 'main', repo], directory)
+  run('git', ['config', 'user.name', 'Test'], repo)
+  run('git', ['config', 'user.email', 'test@example.invalid'], repo)
+  run('git', ['commit', '--allow-empty', '-m', 'initial'], repo)
+  run('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], repo)
+  run('git', ['remote', 'add', 'origin', join(directory, 'missing.git')], repo)
+
+  const scriptPath = fileURLToPath(new URL('../worktree.mjs', import.meta.url))
+  const result = spawnSync(process.execPath, [scriptPath, 'status'], { cwd: repo, encoding: 'utf8', windowsHide: true })
+  assert.equal(result.status, 1)
+  const output = JSON.parse(result.stdout)
+  assert.equal(output.status, 'stale')
+  assert.equal(output.refresh.ok, false)
+  assert.equal(output.entries.length, 1)
+  assert.equal(output.entries[0].kind, 'worktree')
+  assert.equal(output.entries[0].retirement.classification, 'blocked')
+  assert.equal(output.entries[0].retirement.checks.headInMain.known, false)
+  assert.ok(output.entries[0].retirement.reasons.includes('head_in_main_unknown'))
+  assert.ok(output.entries[0].retirement.reasons.includes('unique_commits_unknown'))
+  assert.ok(output.entries[0].retirement.reasons.includes('main_branch'))
+})
+
+test('status refreshes origin/main to the exact remote main across advance and forced rewind', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'happyhome-status-refresh-'))
+  const remote = join(directory, 'remote.git')
+  const source = join(directory, 'source')
+  const observer = join(directory, 'observer')
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  run('git', ['init', '--bare', remote], directory)
+  run('git', ['init', '-b', 'main', source], directory)
+  run('git', ['config', 'user.name', 'Test'], source)
+  run('git', ['config', 'user.email', 'test@example.invalid'], source)
+  run('git', ['commit', '--allow-empty', '-m', 'first'], source)
+  const first = run('git', ['rev-parse', 'HEAD'], source)
+  run('git', ['remote', 'add', 'origin', remote], source)
+  run('git', ['push', '-u', 'origin', 'main'], source)
+  run('git', ['symbolic-ref', 'HEAD', 'refs/heads/main'], remote)
+  run('git', ['clone', remote, observer], directory)
+  run('git', ['config', '--unset-all', 'remote.origin.fetch'], observer)
+
+  run('git', ['commit', '--allow-empty', '-m', 'second'], source)
+  const second = run('git', ['rev-parse', 'HEAD'], source)
+  run('git', ['push', 'origin', 'main'], source)
+  assert.equal(run('git', ['rev-parse', 'origin/main'], observer), first)
+
+  const scriptPath = fileURLToPath(new URL('../worktree.mjs', import.meta.url))
+  let result = spawnSync(process.execPath, [scriptPath, 'status'], { cwd: observer, encoding: 'utf8', windowsHide: true })
+  assert.equal(result.status, 0, result.stderr)
+  let output = JSON.parse(result.stdout)
+  assert.equal(run('git', ['rev-parse', 'origin/main'], observer), second)
+  let observerEntries = output.entries.filter((entry) => entry.kind === 'worktree' && entry.branch === 'main')
+  assert.equal(observerEntries.length, 1)
+  assert.equal(observerEntries[0].identity.main, second)
+
+  run('git', ['reset', '--hard', first], source)
+  run('git', ['push', '--force', 'origin', 'main'], source)
+  result = spawnSync(process.execPath, [scriptPath, 'status'], { cwd: observer, encoding: 'utf8', windowsHide: true })
+  assert.equal(result.status, 0, result.stderr)
+  output = JSON.parse(result.stdout)
+  assert.equal(run('git', ['rev-parse', 'origin/main'], observer), first)
+  observerEntries = output.entries.filter((entry) => entry.kind === 'worktree' && entry.branch === 'main')
+  assert.equal(observerEntries.length, 1)
+  assert.equal(observerEntries[0].identity.main, first)
+})
+
+test('status identifies a common bare Git directory without fabricated worktree evidence', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'happyhome-status-bare-'))
+  const source = join(directory, 'source')
+  const bare = join(directory, 'common.git')
+  const linked = join(directory, 'linked')
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  run('git', ['init', '-b', 'main', source], directory)
+  run('git', ['config', 'user.name', 'Test'], source)
+  run('git', ['config', 'user.email', 'test@example.invalid'], source)
+  run('git', ['commit', '--allow-empty', '-m', 'initial'], source)
+  run('git', ['clone', '--bare', source, bare], directory)
+  run('git', ['--git-dir', bare, 'worktree', 'add', linked, 'main'], directory)
+
+  const scriptPath = fileURLToPath(new URL('../worktree.mjs', import.meta.url))
+  const result = spawnSync(process.execPath, [scriptPath, 'status'], { cwd: linked, encoding: 'utf8', windowsHide: true })
+  assert.equal(result.status, 0, result.stderr)
+  const output = JSON.parse(result.stdout)
+  const bareEntries = output.entries.filter((candidate) => candidate.kind === 'bare')
+  assert.equal(bareEntries.length, 1)
+  const [entry] = bareEntries
+  assert.equal(entry.kind, 'bare')
+  assert.equal(entry.retirement.classification, 'unprobeable')
+  assert.deepEqual(entry.retirement.reasons, ['not_work_tree'])
+  assert.equal('hooks' in entry, false)
+  assert.equal('agents' in entry, false)
+  assert.equal('lifecycle' in entry, false)
+})
+
+test('status keeps a missing registered path as unprobeable without fabricated evidence', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'happyhome-status-missing-'))
+  const repo = join(directory, 'repo')
+  const linked = join(directory, 'missing-linked')
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  run('git', ['init', '-b', 'main', repo], directory)
+  run('git', ['config', 'user.name', 'Test'], repo)
+  run('git', ['config', 'user.email', 'test@example.invalid'], repo)
+  run('git', ['commit', '--allow-empty', '-m', 'initial'], repo)
+  run('git', ['remote', 'add', 'origin', repo], repo)
+  run('git', ['fetch', 'origin', 'main'], repo)
+  run('git', ['worktree', 'add', '-b', 'codex/missing', linked, 'main'], repo)
+  rmSync(linked, { recursive: true, force: true })
+
+  const scriptPath = fileURLToPath(new URL('../worktree.mjs', import.meta.url))
+  const result = spawnSync(process.execPath, [scriptPath, 'status'], { cwd: repo, encoding: 'utf8', windowsHide: true })
+  assert.equal(result.status, 0, result.stderr)
+  const output = JSON.parse(result.stdout)
+  const entry = output.entries.find((candidate) => candidate.branch === 'codex/missing')
+  assert.equal(entry.kind, 'unprobeable')
+  assert.equal(entry.retirement.classification, 'unprobeable')
+  assert.deepEqual(entry.retirement.reasons, ['probe_error'])
+  assert.equal('hooks' in entry, false)
+  assert.equal('agents' in entry, false)
+  assert.equal('lifecycle' in entry, false)
+})
+
+function retirementInput(overrides = {}) {
+  return {
+    kind: 'worktree',
+    branch: 'codex/finished',
+    ownerState: 'inactive',
+    activeOwner: false,
+    hasOperation: false,
+    isDirty: false,
+    openPr: { known: true, open: false, number: null, url: null, error: null },
+    uniqueCommits: 0,
+    headInMain: true,
+    pathIsReparsePoint: false,
+    ...overrides,
+  }
+}
+
+test('status retirement classification requires explicit passing evidence', () => {
+  const result = classifyWorktreeRetirement(retirementInput())
+  assert.equal(result.classification, 'eligible')
+  assert.equal(result.candidateStale, false)
+  assert.equal(result.eligible, true)
+  assert.deepEqual(result.reasons, [])
+  assert.deepEqual(result.checks.openPr, {
+    known: true,
+    value: false,
+    number: null,
+    url: null,
+    error: null,
+  })
+})
+
+test('unknown owner is only a review candidate when every other gate explicitly passes', () => {
+  const result = classifyWorktreeRetirement(retirementInput({ ownerState: 'unknown' }))
+  assert.equal(result.classification, 'candidate_stale')
+  assert.equal(result.candidateStale, true)
+  assert.equal(result.eligible, false)
+  assert.deepEqual(result.reasons, ['unknown_owner'])
+
+  const active = classifyWorktreeRetirement(retirementInput({ ownerState: 'unknown', activeOwner: true }))
+  assert.equal(active.classification, 'blocked')
+  assert.deepEqual(active.reasons, ['unknown_owner', 'active_owner'])
+})
+
+test('contradictory owner evidence always blocks retirement', () => {
+  const stateActive = classifyWorktreeRetirement(retirementInput({ ownerState: 'active', activeOwner: false }))
+  assert.equal(stateActive.classification, 'blocked')
+  assert.equal(stateActive.eligible, false)
+  assert.deepEqual(stateActive.reasons, ['active_owner'])
+
+  const booleanActive = classifyWorktreeRetirement(retirementInput({ ownerState: 'inactive', activeOwner: true }))
+  assert.equal(booleanActive.classification, 'blocked')
+  assert.equal(booleanActive.eligible, false)
+  assert.deepEqual(booleanActive.reasons, ['active_owner'])
+})
+
+test('critical unknowns remain unknown and block retirement', () => {
+  for (const [field, value, reason] of [
+    ['hasOperation', null, 'git_operation_unknown'],
+    ['isDirty', null, 'dirty_unknown'],
+    ['openPr', { known: false, open: null, number: null, url: null, error: 'gh unavailable' }, 'open_pr_unknown'],
+    ['uniqueCommits', null, 'unique_commits_unknown'],
+    ['headInMain', null, 'head_in_main_unknown'],
+    ['pathIsReparsePoint', null, 'reparse_point_unknown'],
+  ]) {
+    const result = classifyWorktreeRetirement(retirementInput({ [field]: value }))
+    assert.equal(result.classification, 'blocked', field)
+    assert.equal(result.eligible, false, field)
+    assert.equal(result.candidateStale, false, field)
+    assert.deepEqual(result.reasons, [reason], field)
+  }
+})
+
+test('known blockers and every attached main branch are blocked', () => {
+  for (const [field, value, reason] of [
+    ['branch', 'main', 'main_branch'],
+    ['hasOperation', true, 'git_operation'],
+    ['isDirty', true, 'dirty'],
+    ['openPr', { known: true, open: true, number: 42, url: 'https://example.test/pr/42', error: null }, 'open_pr'],
+    ['uniqueCommits', 1, 'unique_commits'],
+    ['headInMain', false, 'head_not_in_main'],
+    ['pathIsReparsePoint', true, 'reparse_point'],
+  ]) {
+    const result = classifyWorktreeRetirement(retirementInput({ [field]: value }))
+    assert.equal(result.classification, 'blocked', field)
+    assert.deepEqual(result.reasons, [reason], field)
+  }
+})
+
+test('non-worktrees and identity failures are unprobeable', () => {
+  assert.deepEqual(classifyWorktreeRetirement({ kind: 'bare' }), {
+    classification: 'unprobeable',
+    candidateStale: false,
+    eligible: false,
+    reasons: ['not_work_tree'],
+    checks: {},
+  })
+  assert.deepEqual(classifyWorktreeRetirement({ kind: 'worktree', probeError: 'identity failed' }), {
+    classification: 'unprobeable',
+    candidateStale: false,
+    eligible: false,
+    reasons: ['probe_error'],
+    checks: {},
+  })
+})
 
 const cleanBase = {
   activeOwner: false,
