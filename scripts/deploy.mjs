@@ -76,6 +76,7 @@ import { runDirectRemoteMutation } from './lib/direct-deploy-policy.mjs'
 import { parsePositiveIntOption } from './lib/release-concurrency.mjs'
 import {
   assertFormalReleaseGitState,
+  createFormalReleaseMutationRevalidator,
   mustRevalidateRemoteReleaseStage,
   shouldFallbackAfterDevtoolsFailure,
 } from './lib/release-policy.mjs'
@@ -85,6 +86,7 @@ import {
 } from './lib/release-security-policy.mjs'
 import {
   createReleaseRunLedger,
+  createReleasePlanAfterResumeIdentityCheck,
   computeDirectoryDigest,
   findLatestReleaseUiEvidence,
   inspectReleaseStageReuse,
@@ -186,7 +188,7 @@ function getGitOutput(command) {
   return execSync(command, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
 }
 
-function getFormalReleaseGitState({ publishOnly, version, desc }) {
+function getFormalReleaseGitState({ publishOnly, version, desc, releaseStrategy, fullCurrentExplicit = false, allowReleaseBuildInfo = false }) {
   const changedPaths = new Set()
   for (const command of [
     'git diff --name-only --no-ext-diff',
@@ -199,11 +201,15 @@ function getFormalReleaseGitState({ publishOnly, version, desc }) {
   const buildInfo = existsSync(buildInfoPath) ? readFileSync(buildInfoPath, 'utf8') : ''
   return {
     cwd: ROOT,
+    originUrl: getGitOutput('git remote get-url origin'),
+    releaseStrategy,
+    fullCurrentExplicit,
     branch: getGitOutput('git branch --show-current'),
     headSha: getGitOutput('git rev-parse HEAD'),
     originMainSha: getGitOutput('git rev-parse origin/main'),
     changedPaths: [...changedPaths],
     publishOnly,
+    allowReleaseBuildInfo,
     generatedBuildInfoMatches: buildInfo.includes(version) && buildInfo.includes(desc),
   }
 }
@@ -993,8 +999,8 @@ function releaseStageReuseCheck(context) {
   }
 }
 
-function createFormalReleasePlan(gitSha) {
-  const result = spawnSync(process.execPath, ['scripts/release-plan.mjs', '--mode=main', `--head=${gitSha}`], {
+function createFormalReleasePlan(gitSha, releaseStrategy) {
+  const result = spawnSync(process.execPath, ['scripts/release-plan.mjs', `--mode=${releaseStrategy}`, `--head=${gitSha}`], {
     cwd: ROOT,
     encoding: 'utf8',
     windowsHide: true,
@@ -1007,7 +1013,10 @@ function createFormalReleasePlan(gitSha) {
   const planPath = resolve(ROOT, '.codex-local', 'release-plans', `${gitSha}.json`)
   if (!existsSync(planPath)) throw new Error(`Formal release plan did not write ${planPath}`)
   const plan = JSON.parse(readFileSync(planPath, 'utf8'))
-  if (plan.mode !== 'main' || plan.headSha !== gitSha || !plan.releaseRequired) {
+  const expectedPlanningStrategy = releaseStrategy === 'full-current'
+    ? 'full-current'
+    : plan.bootstrap ? 'bootstrap' : 'incremental'
+  if (plan.mode !== releaseStrategy || plan.planningStrategy !== expectedPlanningStrategy || plan.headSha !== gitSha || !plan.releaseRequired) {
     throw new Error('Formal release plan is missing, stale, or does not require a release')
   }
   return plan
@@ -1127,6 +1136,8 @@ async function runFormalRelease(options = {}) {
   assertFormalReleaseCloudBasePath({ prepareOnly })
 
   const publishOnly = options.publishOnly === true
+  const fullCurrentExplicit = hasFlag('full-current')
+  const releaseStrategy = fullCurrentExplicit ? 'full-current' : 'main'
   if (publishOnly && !getExplicitReleaseRunId()) {
     throw new Error('release-publish requires an explicit --release-run-id=<id> or HH_RELEASE_RUN_ID; refusing implicit latest.')
   }
@@ -1134,6 +1145,8 @@ async function runFormalRelease(options = {}) {
   const resumeRunState = await getResumeRunState(forceResume)
   const miniprogramUpload = resolveMiniprogramUploadMetadata(resumeRunState?.context || {})
   assertFormalReleaseGitState(getFormalReleaseGitState({
+    releaseStrategy,
+    fullCurrentExplicit,
     publishOnly,
     version: miniprogramUpload.version,
     desc: miniprogramUpload.desc,
@@ -1145,10 +1158,16 @@ async function runFormalRelease(options = {}) {
     desc: miniprogramUpload.desc,
     envId: getCloudEnvId(),
     appid: APPID,
+    releaseStrategy,
   }
   const releaseRunId = await resolveReleaseRunId(forceResume)
   releaseContext.runId = releaseRunId
-  const formalPlan = prepareOnly ? null : createFormalReleasePlan(releaseContext.gitSha)
+  const formalPlan = prepareOnly ? null : createReleasePlanAfterResumeIdentityCheck({
+    resumeRunState,
+    gitSha: releaseContext.gitSha,
+    releaseStrategy,
+    createPlan: createFormalReleasePlan,
+  })
   releaseContext.cloudFunctions = formalPlan?.targets.cloud.functions || []
   const releaseLedger = await createReleaseRunLedger({
     root: ROOT,
@@ -1158,10 +1177,26 @@ async function runFormalRelease(options = {}) {
     version: releaseContext.version,
     desc: releaseContext.desc,
     envId: releaseContext.envId,
+    releaseStrategy,
   })
   const resume = forceResume || hasFlag('resume')
   const reuseCheck = releaseStageReuseCheck(releaseContext)
   const releaseGuard = prepareOnly ? null : createProductionReleaseGuard(releaseContext, formalPlan)
+  let oneShotBuildInfoPrepared = false
+  const revalidateFormalMutation = prepareOnly ? null : createFormalReleaseMutationRevalidator({
+    fetchOriginMain: async () => execSync('git fetch --quiet origin main', { cwd: ROOT, stdio: 'inherit' }),
+    readGitState: () => getFormalReleaseGitState({
+      releaseStrategy,
+      fullCurrentExplicit,
+      publishOnly,
+      allowReleaseBuildInfo: oneShotBuildInfoPrepared,
+      version: miniprogramUpload.version,
+      desc: miniprogramUpload.desc,
+    }),
+    releaseStrategy,
+    fullCurrentExplicit,
+    beforeRemoteMutation: async (stage) => await releaseGuard.beforeRemoteMutation(stage),
+  })
 
   console.log(`[release-ledger] runId=${releaseLedger.runId}`)
   console.log(`[release-ledger] run=${releaseLedger.runPath}`)
@@ -1171,7 +1206,7 @@ async function runFormalRelease(options = {}) {
 
   try {
     if (!prepareOnly) {
-      execSync('node scripts/ensure-release-control-plane.mjs', { cwd: ROOT, stdio: 'inherit' })
+      execSync('node scripts/ensure-release-control-plane.mjs --verify-only', { cwd: ROOT, stdio: 'inherit' })
       await releaseGuard.acquire()
     }
 
@@ -1181,12 +1216,15 @@ async function runFormalRelease(options = {}) {
       reuseCheck,
       command: 'write build-info + npm run build:mp-weixin + npm run test:mp:release-gate -- --skip-mp-build',
     }, async () => {
+      if (revalidateFormalMutation) await revalidateFormalMutation('artifact-build:miniprogram')
       const preparedEvidence = await buildAndGateMiniprogramUpload({
         ...miniprogramUpload,
         releaseRunId: releaseLedger.runId,
       })
+      const evidence = await collectMiniprogramBuildGateEvidence(preparedEvidence)
+      if (!publishOnly) oneShotBuildInfoPrepared = true
       return {
-        evidence: await collectMiniprogramBuildGateEvidence(preparedEvidence),
+        evidence,
         result: { version: miniprogramUpload.version, desc: miniprogramUpload.desc },
       }
     })
@@ -1203,7 +1241,11 @@ async function runFormalRelease(options = {}) {
       const state = await releaseGuard.getProductionState()
       const result = await executeReleaseOperations({
         appliedMigrations: new Set(Object.keys(state?.appliedMigrations || {})),
-        guard: releaseGuard,
+        guard: {
+          beforeRemoteMutation: revalidateFormalMutation,
+          recordStage: async (...args) => await releaseGuard.recordStage(...args),
+          recordMigration: async (...args) => await releaseGuard.recordMigration(...args),
+        },
         manifests: formalPlan.manifests,
         runAction: runDeclaredReleaseAction,
         runMigration: async (migration) => await runDeclaredReleaseMigration(migration, releaseContext),
@@ -1218,9 +1260,10 @@ async function runFormalRelease(options = {}) {
       reuseCheck,
       command: `npm.cmd --workspace cloud run build && CloudBase CLI/COS fn deploy (concurrency=${getCloudDeployConcurrency()})`,
     }, async () => {
+      await revalidateFormalMutation('artifact-build:cloud')
       const result = await deployCloud({
         afterFunctionDeploy: async (fn, record) => await releaseGuard.recordStage(`cloud:${fn}`, { evidence: record }),
-        beforeFunctionDeploy: async (fn) => await releaseGuard.beforeRemoteMutation(`cloud:${fn}`),
+        beforeFunctionDeploy: async (fn) => await revalidateFormalMutation(`cloud:${fn}`),
         functions: formalPlan.targets.cloud.functions,
         requireCloudBaseCli: true,
         sourceSha: releaseContext.gitSha,
@@ -1248,8 +1291,8 @@ async function runFormalRelease(options = {}) {
       command: `npm.cmd run test:cloud:release-smoke (concurrency=${getCloudSmokeConcurrency()})`,
     }, async () => {
       const summary = await runCloudSmoke(cloudDeploy.fns, releaseLedger.runId, {
-        beforeEnsureIndexes: async () => await releaseGuard.beforeRemoteMutation('ensure-indexes'),
-        beforeSmokeCommand: async ({ stage }) => await releaseGuard.beforeRemoteMutation(`cloud-smoke:${stage}`),
+        beforeEnsureIndexes: async () => await revalidateFormalMutation('ensure-indexes'),
+        beforeSmokeCommand: async ({ stage }) => await revalidateFormalMutation(`cloud-smoke:${stage}`),
       })
       await releaseGuard.recordStage('cloud-smoke', { evidence: { summaryPath: resolve(summary.evidenceDir, 'summary.json') } })
       return {
@@ -1270,8 +1313,8 @@ async function runFormalRelease(options = {}) {
       reuseCheck,
       command: 'npm.cmd --workspace admin-web run build + admin-web deploy',
     }, async () => {
-      await releaseGuard.beforeRemoteMutation('admin-web-deploy')
-      await deployAdminWeb()
+      await revalidateFormalMutation('artifact-build:admin-web')
+      await deployAdminWeb({ beforeRemoteMutation: async () => await revalidateFormalMutation('admin-web-deploy') })
       await releaseGuard.recordStage('admin-web-deploy')
       return { result: { target: process.env.ADMIN_WEB_TARGET || 'aliyun' } }
     })
@@ -1290,8 +1333,10 @@ async function runFormalRelease(options = {}) {
       if (currentPackageDigest !== preparedPackageDigest) {
         throw new Error(`miniprogram package changed after release UI validation: expected ${preparedPackageDigest}, got ${currentPackageDigest}`)
       }
-      await releaseGuard.beforeRemoteMutation('miniprogram-upload')
-      const uploadResult = await uploadBuiltMiniprogram(miniprogramUpload)
+      const uploadResult = await uploadBuiltMiniprogram({
+        ...miniprogramUpload,
+        beforeRemoteMutation: async () => await revalidateFormalMutation('miniprogram-upload'),
+      })
       const uploadEvidence = writeMiniprogramUploadEvidence({
         releaseRunId: releaseLedger.runId,
         version: miniprogramUpload.version,
@@ -1383,6 +1428,7 @@ async function runFormalRelease(options = {}) {
 function assertDirectProductionDeployWorkspace({ publishOnly = false, version = '', desc = '' } = {}) {
   execSync('git fetch --quiet origin main', { cwd: ROOT, stdio: 'inherit' })
   assertFormalReleaseGitState(getFormalReleaseGitState({
+    releaseStrategy: 'main',
     publishOnly,
     version,
     desc,

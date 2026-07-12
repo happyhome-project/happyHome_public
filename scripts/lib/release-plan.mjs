@@ -97,6 +97,10 @@ export function selectChangeManifestsForDiff(manifests = [], changedPaths = []) 
   return manifests.filter((manifest) => changed.has(normalizePath(manifest?.source)))
 }
 
+export function selectChangeManifests(mode, manifests = [], changedPaths = []) {
+  return mode === 'full-current' ? [...manifests] : selectChangeManifestsForDiff(manifests, changedPaths)
+}
+
 function needsExternalManifest(changedPaths) {
   return changedPaths.map(normalizePath).some((path) => path.startsWith('scripts/ensure-')
     || path.startsWith('scripts/configure-')
@@ -115,23 +119,28 @@ export function createReleasePlan({
   mode,
 } = {}) {
   if (!headSha) throw new Error('release plan requires headSha')
-  if (!['main', 'pr'].includes(mode)) throw new Error(`release plan mode must be main or pr; got ${mode || '(missing)'}`)
+  if (!['main', 'pr', 'full-current'].includes(mode)) throw new Error(`release plan mode must be main, pr, or full-current; got ${mode || '(missing)'}`)
   const manifestSummary = validateChangeManifests(manifests)
   if (needsExternalManifest(changedPaths) && !manifests.length) {
     throw new Error('external release changes require a release/changes manifest')
   }
+  const fullCurrent = mode === 'full-current'
   const bootstrap = mode === 'main' && !baseSha
-  const targets = classifyReleaseImpact({ changedPaths, allFunctions, functionInputs })
+  const planningStrategy = fullCurrent ? 'full-current' : bootstrap ? 'bootstrap' : 'incremental'
+  const targets = fullCurrent
+    ? { adminWeb: true, cloud: allCloud(allFunctions, 'full-current:explicit'), miniprogram: true }
+    : classifyReleaseImpact({ changedPaths, allFunctions, functionInputs })
   if (bootstrap) targets.cloud = allCloud(allFunctions, 'bootstrap:no-production-base')
   const hasRuntimeTarget = targets.cloud.functions.length > 0 || targets.miniprogram || targets.adminWeb
   return {
-    baseSha: baseSha || null,
+    baseSha: fullCurrent ? null : baseSha || null,
     bootstrap,
     changeIds: manifestSummary.changeIds,
     changedPaths: changedPaths.map(normalizePath),
     headSha,
     manifests,
     mode,
+    planningStrategy,
     releaseRequired: bootstrap || hasRuntimeTarget || manifests.length > 0,
     targets,
   }
