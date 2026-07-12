@@ -1,5 +1,8 @@
 # Shared UI Validation Lease Design
 
+> **Historical / point-in-time:** This specification records the design accepted for the 2026-07-12 delivery. It does not override later implementation or validation-governance decisions.
+> **Current authority:** Use the [documentation authority map](../../README.md), current `AGENTS.md`, validation scripts, and tests.
+
 ## Goal
 
 Serialize HappyHome operations that use the machine-wide WeChat DevTools state or the shared `fixture-write` lane, while keeping validation ownership and evidence in the current task.
