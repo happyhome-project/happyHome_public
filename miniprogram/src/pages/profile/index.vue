@@ -103,6 +103,16 @@
       <template v-else-if="showManualLoginForm">
         <view class="login-form">
           <text class="form-title">登录</text>
+          <!-- #ifdef H5 -->
+          <text class="form-hint">使用 CloudBase Web 账号登录</text>
+          <view class="input-wrap">
+            <input v-model="webUsername" placeholder="用户名" placeholder-class="input-placeholder" class="input" />
+          </view>
+          <view class="input-wrap">
+            <input v-model="webPassword" password placeholder="密码" placeholder-class="input-placeholder" class="input" />
+          </view>
+          <!-- #endif -->
+          <!-- #ifndef H5 -->
           <text class="form-hint">当前环境不支持微信原生登录，请手动填写昵称后继续使用社区功能</text>
 
           <view class="avatar-row">
@@ -112,6 +122,7 @@
             />
             <text class="avatar-hint">默认头像</text>
           </view>
+          <!-- #endif -->
 
           <view class="input-wrap">
             <input
@@ -136,11 +147,13 @@
             >
               {{ submitFormLock.busy.value ? '登录中...' : '确认登录' }}
             </button>
+            <!-- #ifndef H5 -->
             <button
               size="mini"
               class="dev-btn"
               @tap="showDevLogin = true"
             >DEV 登录</button>
+            <!-- #endif -->
           </view>
         </view>
       </template>
@@ -160,7 +173,9 @@
           >微信登录</button>
           <view class="login-alt-row">
             <text class="login-alt-hint">使用其他账号？</text>
+            <!-- #ifndef H5 -->
             <text class="login-alt-link" @tap.stop="showDevLogin = true">DEV 登录</text>
+            <!-- #endif -->
           </view>
         </view>
         <button
@@ -314,6 +329,7 @@
       </view>
     </view>
 
+    <!-- #ifndef H5 -->
     <!-- DEV login modal -->
     <view v-if="showDevLogin" class="dev-modal-mask" @tap="showDevLogin = false">
       <view class="dev-modal" @tap.stop>
@@ -333,6 +349,7 @@
         </view>
       </view>
     </view>
+    <!-- #endif -->
 
     <!-- Pending approvals (admin only) -->
     <view v-if="pendingApprovalCount > 0" class="section approval-section">
@@ -524,6 +541,8 @@ const approvalReminderState = computed(() => buildApprovalReminderState({
 // ── 登录 / 编辑资料表单状态 ──
 const isEditingProfile = ref(false)
 const showManualLoginForm = ref(false)
+const webUsername = ref('')
+const webPassword = ref('')
 const showNickConfirm = ref(false)    // 登录流程：chooseAvatar 后弹出昵称确认浮层
 const formNickName = ref('')
 const formAvatarCloudUrl = ref('')    // 已上传到 COS 的 cloud://… URL（持久）
@@ -551,7 +570,12 @@ const supportsChooseAvatar = computed(() => {
 })
 
 // 表单是否可提交：至少要有昵称
-const canSubmitForm = computed(() => formNickName.value.trim().length > 0)
+const canSubmitForm = computed(() => {
+  if (isH5Runtime() && showManualLoginForm.value && !isEditingProfile.value) {
+    return webUsername.value.trim().length > 0 && webPassword.value.length > 0 && formNickName.value.trim().length > 0
+  }
+  return formNickName.value.trim().length > 0
+})
 const profileShellState = computed(() => {
   if (isEditingProfile.value) return 'editing'
   return userStore.isLoggedIn ? 'logged-in' : 'logged-out'
@@ -700,7 +724,15 @@ const submitFormLock = useBusyLock(async () => {
   try {
     const avatarUrl = await uploadAvatarIfAny()
     suppressNextLoginStateRefresh = true
-    await userStore.login({ nickName: formNickName.value, avatarUrl })
+    if (isH5Runtime() && !wasEditingProfile) {
+      await userStore.webLogin({
+        username: webUsername.value,
+        password: webPassword.value,
+        nickName: formNickName.value,
+      })
+    } else {
+      await userStore.login({ nickName: formNickName.value, avatarUrl })
+    }
     markCurrentLoginStateRefreshHandled()
     if (wasEditingProfile) await loadProfileDataAfterRoleResolved('profileSaved')
     else await loadProfileDataAfterRoleResolved('loginSaved')
@@ -709,6 +741,7 @@ const submitFormLock = useBusyLock(async () => {
     showNickConfirm.value = false
     formAvatarTempPath.value = ''
     formAvatarCloudUrl.value = ''
+    webPassword.value = ''
     const restoredShare = !wasEditingProfile && restorePendingShareCommunity()
     if (!restoredShare) {
       uni.showToast({ title: wasEditingProfile ? '已保存' : '登录成功', icon: 'success' })
@@ -720,6 +753,7 @@ const submitFormLock = useBusyLock(async () => {
       showCancel: false,
     })
     suppressNextLoginStateRefresh = false
+    webPassword.value = ''
   }
 })
 

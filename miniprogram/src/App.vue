@@ -44,7 +44,7 @@ async function refreshMyCommunitiesSilently() {
 }
 
 onLaunch(async () => {
-  // H5 环境没有 wx.cloud，跳过初始化（H5 通过 http-gateway 访问云函数）
+  // H5 环境没有 wx.cloud，跳过初始化（H5 通过 CloudBase Web SDK 访问云函数）
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore
   if (typeof wx !== 'undefined' && wx.cloud?.init) {
@@ -61,6 +61,9 @@ onLaunch(async () => {
   userStore.loadFromStorage()
   userStore.syncBackgroundFetchToken()
   communityStore.loadFromStorage()
+  // #ifdef H5
+  await userStore.restoreWebSession()
+  // #endif
   lastCommunityRefreshAt = Date.now()
   clientLog('info', 'app.storage.loaded', {
     loggedIn: userStore.isLoggedIn,
@@ -72,7 +75,7 @@ onLaunch(async () => {
   // 2022-10 微信策略变更后，真机上 wx.getUserProfile 强制返回 "微信用户"；
   // 老版本采集的用户昵称是这个假名 → 清掉让他们走新登录流程（选头像 + 输昵称）。
   if (userStore.isLoggedIn && userStore.nickName === '微信用户') {
-    userStore.logout()
+    await userStore.logout()
     clientLog('warn', 'app.legacyWechatUser.logout', {})
     // 延迟弹提示，等首页 mount 完再显示 toast，避免被生命周期覆盖
     setTimeout(() => {

@@ -15,6 +15,16 @@ function storageRemove(k: string): void {
   try { uni.removeStorageSync(k) } catch (_error) {}
 }
 
+function isWebRuntime(): boolean {
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore wx is injected by the mini-program runtime.
+  return typeof wx === 'undefined' || !wx?.cloud?.callFunction
+}
+
+function loadWebAuth() {
+  return import('../api/web-cloudbase')
+}
+
 export const useUserStore = defineStore('user', {
   state: () => ({
     openId: '' as string,
@@ -26,6 +36,25 @@ export const useUserStore = defineStore('user', {
     backgroundFetchTokenExpiresAt: '' as string,
   }),
   actions: {
+    clearLocalSession() {
+      this.openId = ''
+      this.nickName = ''
+      this.avatarUrl = ''
+      this.role = 'user'
+      this.isLoggedIn = false
+      this.backgroundFetchToken = ''
+      this.backgroundFetchTokenExpiresAt = ''
+      storageRemove(STORAGE_KEY)
+      this.clearBackgroundFetchToken()
+      storageRemove('dev-gateway')
+      storageRemove('test-openid')
+      try {
+        const cs = useCommunityStore()
+        cs.clearCommunityState()
+        cs.myCommunities = []
+        cs.membershipByCommunity = {}
+      } catch (_error) {}
+    },
     loadFromStorage() {
       const saved = storageGet(STORAGE_KEY)
       if (saved) Object.assign(this, saved)
@@ -98,6 +127,55 @@ export const useUserStore = defineStore('user', {
       this.saveToStorage()
       this.syncBackgroundFetchToken()
     },
+    async webLogin({ username, password, nickName }: { username: string; password: string; nickName: string }) {
+      const name = String(nickName || '').trim()
+      if (!name) throw new Error('请填写昵称')
+      this.clearLocalSession()
+      const webAuth = await loadWebAuth()
+      try {
+        await webAuth.signIn({ username: String(username || '').trim(), password })
+        const result = await userApi.login({ nickName: name, avatarUrl: '' })
+        this.openId = result.user._id
+        this.nickName = result.user.nickName || name
+        this.avatarUrl = result.user.avatarUrl || ''
+        this.role = result.user.role
+        this.isLoggedIn = true
+        this.backgroundFetchToken = result.user.backgroundFetchToken || ''
+        this.backgroundFetchTokenExpiresAt = result.user.backgroundFetchTokenExpiresAt || ''
+        this.saveToStorage()
+        this.syncBackgroundFetchToken()
+      } catch (error) {
+        try { await webAuth.signOut() } catch (_signOutError) {}
+        this.clearLocalSession()
+        throw error
+      }
+    },
+    async restoreWebSession() {
+      const savedNickName = String(this.nickName || '').trim()
+      try {
+        const webAuth = await loadWebAuth()
+        const session = await webAuth.getLoginState()
+        if (!session || !savedNickName) {
+          this.clearLocalSession()
+          return false
+        }
+        const result = await userApi.login({ nickName: savedNickName, avatarUrl: this.avatarUrl || '' })
+        this.openId = result.user._id
+        this.nickName = result.user.nickName || savedNickName
+        this.avatarUrl = result.user.avatarUrl || this.avatarUrl || ''
+        this.role = result.user.role
+        this.isLoggedIn = true
+        this.backgroundFetchToken = result.user.backgroundFetchToken || ''
+        this.backgroundFetchTokenExpiresAt = result.user.backgroundFetchTokenExpiresAt || ''
+        this.saveToStorage()
+        this.syncBackgroundFetchToken()
+        await useCommunityStore().loadMyCommunities({ loadSections: false })
+        return true
+      } catch (error) {
+        this.clearLocalSession()
+        throw error
+      }
+    },
     async refreshLoginRole() {
       if (!this.isLoggedIn) return
       const name = (this.nickName || '').trim()
@@ -138,30 +216,12 @@ export const useUserStore = defineStore('user', {
       this.saveToStorage()
       this.syncBackgroundFetchToken()
     },
-    logout() {
-      this.openId = ''
-      this.nickName = ''
-      this.avatarUrl = ''
-      this.role = 'user'
-      this.isLoggedIn = false
-      this.backgroundFetchToken = ''
-      this.backgroundFetchTokenExpiresAt = ''
-      storageRemove(STORAGE_KEY)
-      this.clearBackgroundFetchToken()
-      // Also clear DEV mode flags so next login path is clean
-      storageRemove('dev-gateway')
-      storageRemove('test-openid')
-      // 连带清掉社区 store —— 否则登出后其他页面可能读到旧的
-      // currentCommunityId / myCommunities 而继续对后端发请求
-      try {
-        const cs = useCommunityStore()
-        cs.clearCommunityState()
-        cs.myCommunities = []
-        cs.membershipByCommunity = {}
-      } catch (_error) {
-        /* Pinia root 还未初始化时 useCommunityStore() 会 throw，
-         * 这种情况下本来就没数据需要清，直接忽略 */
+    async logout() {
+      if (isWebRuntime()) {
+        const webAuth = await loadWebAuth()
+        await webAuth.signOut()
       }
+      this.clearLocalSession()
     },
   },
 })
