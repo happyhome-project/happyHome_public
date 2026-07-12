@@ -1,6 +1,20 @@
 # HappyHome Release Gate
 
-This is the single repository source for cross-component formal release orchestration, mandatory gates, evidence requirements, upload policy, and final production verification. Component guides may document component-specific build or deployment mechanics, but they do not define a formal HappyHome release. Release work must run from the authorized clean `main` checkout defined by [AGENTS.md](../AGENTS.md); feature worktrees may read this guide but must not publish.
+This is the single repository source for cross-component formal release orchestration, mandatory gates, evidence requirements, upload policy, and final production verification. Component guides may document component-specific build or deployment mechanics, but they do not define a formal HappyHome release. Formal production release work must run only from the clean, synchronized public canonical `main` checkout at `C:\Project\Claude\happyHome_public`, with `HEAD` exactly equal to freshly fetched `origin/main` and `origin` exactly derived from `https://github.com/happyhome-project/happyHome_public.git`. Feature branches, dirty worktrees, stale/ahead/behind main, path or origin mismatch, a missing production lock, failed UI or cloud smoke, and failed fixture cleanup all block publishing.
+
+## Full-Current Two-Stage Release
+
+`full-current` is an explicit planning strategy for releasing the exact current public `main`. It ignores the previous production SHA only when calculating the release plan; it never clears, rewrites, or fabricates production state. Both stages must carry the same explicit flag and pinned identity:
+
+```powershell
+$runId = '20260712T-full-current-public-main'
+$version = '2026.07.12.1'
+$desc = 'full-current public main'
+node X:\Users\86136\.codex\skills\happyhome-release\scripts\happyhome-release-guard.mjs prepare -- --full-current --release-run-id=$runId --version=$version --desc=$desc
+node X:\Users\86136\.codex\skills\happyhome-release\scripts\happyhome-release-guard.mjs publish -- --full-current --resume --release-run-id=$runId --cloud-deploy-concurrency=2 --cloud-smoke-concurrency=3
+```
+
+Prepare pins the run ID, version, description, exact Git SHA, build-info, package digest, and DevTools UI evidence without deploying or uploading. Publish must resume that exact ledger and strategy; omitting `--full-current`, changing the identity or digest, or losing any required evidence blocks the release. The existing production lock, CloudBase deployment, UI evidence, cloud smoke/log capture, fixture cleanup, admin-web deployment, digest verification, and mini-program upload rules below remain mandatory.
 
 ## Before Upload
 

@@ -19,7 +19,7 @@
 - 每台开发机首次使用仓库时必须在任一 HappyHome worktree 执行 `npm.cmd run hooks:install`。该配置使用共享 Git hooks，在后续 `git worktree add` 后执行预检。
 - 新 worktree 先运行 `npm.cmd run worktree:doctor`；只有 attached、clean、同步到 `origin/main` 的 `codex/*` 分支才可运行 `npm.cmd run worktree:bootstrap`。bootstrap 仅在仓库根执行 `npm.cmd ci`，不链接其它 worktree 的 `node_modules`。
 - `worktree:create` 与 `worktree:retire` 只能从公开仓库集成 main 执行：当前 worktree 必须是 `main`，`origin` 必须精确派生为 `happyhome-project/happyHome_public`，工作区 clean、无 Git operation、根目录不是 reparse point，且刷新后 `HEAD` 必须精确等于 `origin/main`。fetch 使用校验时捕获的 remote URL，不再解析可变 remote 名；私有仓库 main、feature 分支、ahead/behind/stale main 均不是这个角色。
-- 推荐从该公开仓库集成 main 使用 `npm.cmd run worktree:create -- --name=<task-name> --path=<absolute-path>` 创建；它会刷新 `origin/main`、在实际 mutation 前重验操作者身份、创建安全的 `codex/*` 分支、校验 AGENTS/hooks 并自动执行 bootstrap。这一角色只管理公开仓库同一 Git common dir 的开发 worktree，不改变 release/deploy 的私有生产 canonical 边界。
+- 推荐从该公开仓库集成 main 使用 `npm.cmd run worktree:create -- --name=<task-name> --path=<absolute-path>` 创建；它会刷新 `origin/main`、在实际 mutation 前重验操作者身份、创建安全的 `codex/*` 分支、校验 AGENTS/hooks 并自动执行 bootstrap。这一角色只管理公开仓库同一 Git common dir 的开发 worktree。
 - `npm.cmd run worktree:sync-main -- --prepare` 只报告同步方案；缺失或过期 heartbeat 时还必须由操作者显式带 `--confirm-no-owner`。apply 必须带 prepare 输出的 `--expected-head` 和 `--expected-main`。dirty、活跃所有权或分叉分支不得自动 stash、merge 或 rebase。
 - `npm.cmd run worktree:status` 对退役操作只读：不会 retire/prune/remove，但会 fetch 并更新本地 `origin/main` remote-tracking metadata。`candidate_stale` 仅表示除未知 owner 外的门禁已通过，不等于可退役；只有 owner 明确 inactive 且所有检查 known/pass 才会显示 `eligible`。
 - worktree 退役必须先 `worktree:retire -- --prepare <path> --confirm-no-owner`，再用生成 manifest apply；target 及其已存在 ancestor 不得为 reparse/junction，其真实 Git common dir 必须与公开 operator 完全一致。apply 在共享锁内用锁外捕获的 exact HEAD/main/PR snapshot 本地重验，并在 remove 紧前完成最后一次全量 probe。始终保留本地功能分支，`--delete-merged-local-branch` 已禁用；禁止 `git worktree remove --force`、批量 prune 或删除未进入 main 的本地分支。
@@ -29,7 +29,9 @@
 
 - 功能会话不得部署或发布到生产环境，也不得上传小程序版本。
 - 功能会话不得修改共享云环境的环境变量、数据库索引、触发器或迁移状态。
-- 生产部署、环境变量/索引/触发器/迁移变更和小程序上传，必须由主干发布角色在真实主工作区执行。
+- 正式生产发布只能由主干发布角色在 clean、已同步的公开 canonical main `C:\Project\Claude\happyHome_public` 执行；当前分支必须为 `main`，`HEAD` 必须精确等于刷新后的 `origin/main`，且 `origin` 必须精确派生为 `https://github.com/happyhome-project/happyHome_public.git`。feature、dirty、ahead/behind/stale main、路径或 origin 不匹配都必须阻断。
+- `full-current` 正式发布必须在 prepare 和 publish 两阶段都显式传入 `--full-current`。它只在发布规划时忽略上次生产 SHA，不得清除、改写或伪造生产状态；缺失生产锁、UI 或 cloud smoke 失败、fixture cleanup 失败也必须阻断。
+- 生产部署、环境变量/索引/触发器/迁移变更和小程序上传，必须由上述主干发布角色在真实主工作区执行。
 - `scripts/deploy.mjs` 的直接生产目标也会在运行时检查 canonical main、工作区干净和 `HEAD=origin/main`；不依赖 `env:run` 或 Git hook 作为该边界。
 - 跨组件正式发布编排、强制门禁、证据、上传策略和最终生产验证只在 [`docs/release-gate.md`](docs/release-gate.md) 维护；组件文档可保留自身构建或部署参考，本文件只定义权限和流程边界。
 
