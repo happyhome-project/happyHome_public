@@ -288,7 +288,7 @@ test('cloud smoke can be reused only with formal labels, env, runId, and functio
       functions: DEFAULT_FUNCTIONS,
       missingLabels: [],
       requiredLabels: [],
-      labels: REQUIRED_SMOKE_LABELS,
+      labels: REQUIRED_SMOKE_LABELS.filter((label) => label !== 'HH_CLOUD_FIXTURE_CLEANUP_OK'),
     })
 
     const ledger = await createReleaseRunLedger({
@@ -309,6 +309,26 @@ test('cloud smoke can be reused only with formal labels, env, runId, and functio
     })
 
     const runState = JSON.parse(await readFile(join(root, '.codex-local', 'release-runs', 'unit-run', 'run.json'), 'utf8'))
+    const missingCleanup = await inspectReleaseStageReuse(runState, 'cloud-smoke', {
+      root,
+      gitSha: 'abc123',
+      version: '1.0.1',
+      desc: 'trial-unit',
+      envId: 'env-a',
+      runId: 'unit-run',
+    })
+    assert.equal(missingCleanup.reusable, false)
+    assert.match(missingCleanup.reason, /HH_CLOUD_FIXTURE_CLEANUP_OK/)
+
+    await writeJson(summaryPath, {
+      status: 'passed',
+      runId: 'unit-run',
+      envId: 'env-a',
+      functions: DEFAULT_FUNCTIONS,
+      missingLabels: [],
+      requiredLabels: [],
+      labels: REQUIRED_SMOKE_LABELS,
+    })
     const reusable = await inspectReleaseStageReuse(runState, 'cloud-smoke', {
       root,
       gitSha: 'abc123',

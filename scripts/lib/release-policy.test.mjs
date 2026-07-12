@@ -305,9 +305,7 @@ test('CloudBase CLI retry treats its known includes TypeError as transient', () 
 
 test('formal release path records resumable ledger stages before upload', () => {
   const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
-  const releaseLedgerScript = readFileSync(new URL('./release-run-ledger.mjs', import.meta.url), 'utf8')
   const releaseBlock = extractFunctionBlock(deployScript, 'async function runFormalRelease')
-  const cloudSmokeEvidenceBlock = extractFunctionBlock(releaseLedgerScript, 'async function inspectCloudSmokeEvidence')
 
   assert.match(deployScript, /release-run-ledger\.mjs/)
   assert.match(releaseBlock, /executeReleaseOperations\(\{[\s\S]*?manifests:\s*formalPlan\.manifests/)
@@ -333,8 +331,6 @@ test('formal release path records resumable ledger stages before upload', () => 
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-version-probes'/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-smoke'/)
   assert.match(releaseBlock, /runCloudSmoke\(cloudDeploy\.fns,\s*releaseLedger\.runId/)
-  assert.match(cloudSmokeEvidenceBlock, /HH_CLOUD_FIXTURE_CLEANUP_OK/)
-  assert.match(cloudSmokeEvidenceBlock, /missingRequired[\s\S]*?reusable:\s*false/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'admin-web-deploy'/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'miniprogram-upload'/)
   assert.match(releaseBlock, /preparedPackageDigest/)
@@ -342,9 +338,21 @@ test('formal release path records resumable ledger stages before upload', () => 
   assert.match(deployScript, /inspectReleaseStageReuse/)
   assert.match(releaseBlock, /reuseCheck/)
 
-  assert(releaseBlock.indexOf("'cloud-smoke'") < releaseBlock.indexOf("'admin-web-deploy'"))
-  assert(releaseBlock.indexOf("'admin-web-deploy'") < releaseBlock.indexOf("'miniprogram-upload'"))
-  assert(releaseBlock.indexOf("'miniprogram-upload'") < releaseBlock.indexOf("complete('passed')"))
+  const orderedReleaseMarkers = [
+    'releaseGuard.acquire()',
+    'executeReleaseOperations({',
+    "runLedgerStage(releaseLedger, 'cloud-deploy'",
+    "runLedgerStage(releaseLedger, 'cloud-version-probes'",
+    "runLedgerStage(releaseLedger, 'cloud-smoke'",
+    "runLedgerStage(releaseLedger, 'admin-web-deploy'",
+    "runLedgerStage(releaseLedger, 'miniprogram-upload'",
+    'completeProductionReleaseWithRemoteConfirmation({',
+  ]
+  const orderedReleaseIndexes = orderedReleaseMarkers.map((marker) => releaseBlock.indexOf(marker))
+  assert(orderedReleaseIndexes.every((index) => index >= 0), 'formal release is missing a required release stage or call')
+  for (let index = 1; index < orderedReleaseIndexes.length; index += 1) {
+    assert(orderedReleaseIndexes[index - 1] < orderedReleaseIndexes[index], `${orderedReleaseMarkers[index - 1]} must precede ${orderedReleaseMarkers[index]}`)
+  }
 })
 
 test('formal release derives explicit full-current strategy before opening resume state and binds it everywhere', () => {
