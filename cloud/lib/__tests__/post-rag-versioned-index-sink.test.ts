@@ -139,7 +139,7 @@ test('stageUpsert fences a reclaimed lease and deletes only documents staged by 
   expect(database.collections.get('post_rag_index_state_v2').get('post-1').sourceVersion).toBe('removed-3')
 })
 
-test('lease-loss cleanup preserves immutable documents that already existed before this attempt', async () => {
+test('lease-loss cleanup removes every document owned by the stale attempt', async () => {
   const database: any = fakeDatabase()
   const calls: any[] = []
   const requestJson = async (method: string, path: string, body: any) => {
@@ -153,8 +153,8 @@ test('lease-loss cleanup preserves immutable documents that already existed befo
   const { sink } = makeSink({ database, requestJson })
 
   await expect(sink.stageUpsert({ projection: projection() as any, job: job(), ...LEASE })).rejects.toMatchObject({ code: 'LEASE_LOST' })
-  expect(calls.find((call) => call.path.includes('_delete_by_query')).body.query.ids.values).toEqual([
-    `post-1:source-2:${ATTEMPT_A}:chunk-1`,
+  expect(calls.find((call) => call.path.includes('_delete_by_query')).body.query.ids.values.sort()).toEqual([
+    `post-1:source-2:${ATTEMPT_A}:chunk-0`, `post-1:source-2:${ATTEMPT_A}:chunk-1`,
   ])
 })
 
@@ -245,7 +245,7 @@ test('stageUpsert rejects partial ES bulk failures with an authenticated typed e
   try { await sink.stageUpsert({ projection: projection() as any, job: job(), ...LEASE }) } catch (error) { expect(error).toBeInstanceOf(PostRagVersionedSinkError) }
 })
 
-test('partial bulk failure cleans successful creates from this attempt but preserves 409 documents', async () => {
+test('partial bulk failure cleans every ID exclusively owned by this attempt', async () => {
   const calls: any[] = []
   const { sink } = makeSink({ requestJson: async (_method: string, path: string, body: any) => {
     calls.push({ path, body })
@@ -257,8 +257,8 @@ test('partial bulk failure cleans successful creates from this attempt but prese
   value.chunkCount = 3
 
   await expect(sink.stageUpsert({ projection: value, job: job(), ...LEASE })).rejects.toMatchObject({ code: 'ES_BULK_FAILED' })
-  expect(calls.find((call) => call.path.includes('_delete_by_query')).body.query.ids.values).toEqual([
-    `post-1:source-2:${ATTEMPT_A}:chunk-1`,
+  expect(calls.find((call) => call.path.includes('_delete_by_query')).body.query.ids.values.sort()).toEqual([
+    `post-1:source-2:${ATTEMPT_A}:chunk-0`, `post-1:source-2:${ATTEMPT_A}:chunk-1`, `post-1:source-2:${ATTEMPT_A}:chunk-2`,
   ])
 })
 
@@ -280,6 +280,58 @@ test('activate CAS rejects older and equal conflict, is idempotent for equal sou
   await expect(sink.activate({ postId: 'post-1', sourceVersion: 'source-2', activationOrder: { contentVersion: 2, jobId: 'job-2' }, ...LEASE })).resolves.toEqual({ activated: true })
   await expect(sink.activate({ postId: 'post-1', sourceVersion: 'evil', activationOrder: { contentVersion: 2, jobId: 'job-2' }, ...LEASE })).rejects.toMatchObject({ code: 'ACTIVATION_CONFLICT' })
   await expect(sink.activate({ postId: 'post-1', sourceVersion: 'source-3', activationOrder: { contentVersion: 3, jobId: 'job-3' }, jobId: 'job-3', leaseToken: 'lease-3' })).resolves.toEqual({ activated: true })
+})
+
+test('a reclaimed lease can replace the same job source attempt and cleanup the superseded attempt', async () => {
+  const attemptB = derivePostRagIndexAttemptId('job-2', 'lease-b')
+  const oldId = `post-1:source-2:${ATTEMPT_A}:chunk-old`
+  const database = fakeDatabase({
+    'post_rag_jobs/job-2': { schemaVersion: 2, _id: 'job-2', status: 'processing', leaseToken: 'lease-b', leaseExpiresAt: '2099-01-01T00:00:00.000Z' },
+    'post_rag_index_state_v2/post-1': { schemaVersion: 2, postId: 'post-1', state: 'active', sourceVersion: 'source-2', attemptId: ATTEMPT_A, activationOrder: { contentVersion: 2, jobId: 'job-2' } },
+    [`post_rag_index_versions/${oldId}`]: { _id: oldId, esDocumentId: oldId, schemaVersion: 2, postId: 'post-1', sourceVersion: 'source-2', attemptId: ATTEMPT_A, activationOrder: { contentVersion: 2, jobId: 'job-2' } },
+  })
+  const deleted: string[] = []
+  const { sink } = makeSink({ database, requestJson: async (_method: string, path: string, body: any) => {
+    if (path.includes('_bulk')) return { errors: false, items: [{ create: { status: 201 } }, { create: { status: 201 } }] }
+    deleted.push(...body.query.ids.values)
+    return { deleted: body.query.ids.values.length, timed_out: false, failures: [] }
+  } })
+  const leaseB = { jobId: 'job-2', leaseToken: 'lease-b' }
+
+  await sink.stageUpsert({ projection: projection() as any, job: job(), ...leaseB })
+  await expect(sink.activate({ postId: 'post-1', sourceVersion: 'source-2', activationOrder: { contentVersion: 2, jobId: 'job-2' }, ...leaseB })).resolves.toEqual({ activated: true })
+  await sink.cleanupOldVersions({ postId: 'post-1', keepSourceVersion: 'source-2', activationOrder: { contentVersion: 2, jobId: 'job-2' }, ...leaseB })
+
+  expect(database.collections.get('post_rag_index_state_v2')!.get('post-1')!.attemptId).toBe(attemptB)
+  expect(deleted).toEqual([oldId])
+})
+
+test.each([
+  ['transport throw', async () => { throw new Error('socket reset') }],
+  ['missing items', async () => ({ errors: false })],
+  ['malformed item status', async () => ({ errors: true, items: [{ create: { status: '201' } }, { create: { status: 201 } }] })],
+])('bulk %s best-effort deletes every ID owned by the attempt and preserves the bulk error', async (_label, bulkResponse) => {
+  const calls: any[] = []
+  const { sink } = makeSink({ requestJson: async (method: string, path: string, body: any) => {
+    calls.push({ method, path, body })
+    if (path.includes('_bulk')) return bulkResponse()
+    return { deleted: body.query.ids.values.length, timed_out: false, failures: [] }
+  } })
+
+  await expect(sink.stageUpsert({ projection: projection() as any, job: job(), ...LEASE })).rejects.toMatchObject({ code: 'ES_BULK_FAILED' })
+  expect(calls.find((call) => call.path.includes('_delete_by_query')).body.query.ids.values.sort()).toEqual([
+    `post-1:source-2:${ATTEMPT_A}:chunk-0`, `post-1:source-2:${ATTEMPT_A}:chunk-1`,
+  ])
+})
+
+test('bulk cleanup failure explicitly preserves both the bulk and cleanup error codes', async () => {
+  const { sink } = makeSink({ requestJson: async (_method: string, path: string) => {
+    if (path.includes('_bulk')) throw new Error('socket reset')
+    throw new Error('delete unavailable')
+  } })
+  await expect(sink.stageUpsert({ projection: projection() as any, job: job(), ...LEASE })).rejects.toMatchObject({
+    code: 'ES_BULK_FAILED', cleanupCode: 'ES_DELETE_FAILED',
+  })
 })
 
 test('cleanup deletes only explicitly older IDs across stable pages and cannot delete a concurrently staged newer version', async () => {

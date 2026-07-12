@@ -39,7 +39,7 @@ export type PostRagVersionedSinkErrorCode =
 const authenticatedErrors = new WeakSet<object>()
 
 export class PostRagVersionedSinkError extends Error {
-  constructor(readonly code: PostRagVersionedSinkErrorCode) {
+  constructor(readonly code: PostRagVersionedSinkErrorCode, readonly cleanupCode?: PostRagVersionedSinkErrorCode) {
     super('Versioned RAG index operation failed')
     this.name = 'PostRagVersionedSinkError'
     authenticatedErrors.add(this)
@@ -169,6 +169,15 @@ export function createVersionedTencentEsRagSink(options: {
       || !Array.isArray(response.failures) || response.failures.length !== 0) fail('ES_DELETE_FAILED')
   }
 
+  async function cleanupAttemptAndFail(code: PostRagVersionedSinkErrorCode, ids: string[]): Promise<never> {
+    try { await deleteExplicitIds(ids) }
+    catch (cleanupError) {
+      const cleanupCode = cleanupError instanceof PostRagVersionedSinkError ? cleanupError.code : 'ES_DELETE_FAILED'
+      throw new PostRagVersionedSinkError(code, cleanupCode)
+    }
+    fail(code)
+  }
+
   function leaseMatches(value: JsonRecord | null, jobId: string, leaseToken: string) {
     return Boolean(value && value.schemaVersion === 2 && value._id === jobId && value.status === 'processing'
       && value.leaseToken === leaseToken && typeof value.leaseExpiresAt === 'string'
@@ -215,46 +224,45 @@ export function createVersionedTencentEsRagSink(options: {
         lines.push(JSON.stringify({ create: { _id: id } }))
         lines.push(JSON.stringify(document))
       })
+      const documentIds = [...documents.keys()]
       let response: any
       if (!await hasLease(jobId, leaseToken)) fail('LEASE_LOST')
       try {
         response = await requestJson('POST', `${options.indexName}/_bulk?refresh=wait_for`, `${lines.join('\n')}\n`, { contentType: 'application/x-ndjson' })
-      } catch { fail('ES_BULK_FAILED') }
-      if (!Array.isArray(response?.items) || response.items.length !== projection.chunks.length) fail('ES_BULK_FAILED')
+      } catch { await cleanupAttemptAndFail('ES_BULK_FAILED', documentIds) }
+      if (!Array.isArray(response?.items) || response.items.length !== projection.chunks.length) {
+        await cleanupAttemptAndFail('ES_BULK_FAILED', documentIds)
+      }
       const conflicts: string[] = []
-      const createdIds: string[] = []
-      const documentIds = [...documents.keys()]
       let hasFailure = false
       for (let index = 0; index < response.items.length; index += 1) {
         const result = response.items[index]?.create
-        if (!result || !Number.isSafeInteger(result.status)) fail('ES_BULK_FAILED')
+        if (!result || !Number.isSafeInteger(result.status)) { hasFailure = true; continue }
         if (result.status === 409) conflicts.push(documentIds[index])
         else if (result.status < 200 || result.status >= 300) hasFailure = true
-        else createdIds.push(documentIds[index])
       }
       if (hasFailure) {
-        await deleteExplicitIds(createdIds)
-        fail('ES_BULK_FAILED')
+        await cleanupAttemptAndFail('ES_BULK_FAILED', documentIds)
       }
       if (!await hasLease(jobId, leaseToken)) {
-        await deleteExplicitIds(createdIds)
-        fail('LEASE_LOST')
+        await cleanupAttemptAndFail('LEASE_LOST', documentIds)
       }
       if (conflicts.length > 0) {
         let existing: any
-        try { existing = await requestJson('POST', `${options.indexName}/_mget`, { ids: conflicts }) } catch { fail('ES_BULK_FAILED') }
-        if (!Array.isArray(existing?.docs) || existing.docs.length !== conflicts.length) fail('ES_BULK_FAILED')
+        try { existing = await requestJson('POST', `${options.indexName}/_mget`, { ids: conflicts }) }
+        catch { await cleanupAttemptAndFail('ES_BULK_FAILED', documentIds) }
+        if (!Array.isArray(existing?.docs) || existing.docs.length !== conflicts.length) {
+          await cleanupAttemptAndFail('ES_BULK_FAILED', documentIds)
+        }
         for (let index = 0; index < conflicts.length; index += 1) {
           const doc = existing.docs[index]
           if (doc?._id !== conflicts[index] || doc?.found !== true
             || canonicalJson(doc._source) !== canonicalJson(documents.get(conflicts[index]))) {
-            await deleteExplicitIds(createdIds)
-            fail('ACTIVATION_CONFLICT')
+            await cleanupAttemptAndFail('ACTIVATION_CONFLICT', documentIds)
           }
         }
         if (!await hasLease(jobId, leaseToken)) {
-          await deleteExplicitIds(createdIds)
-          fail('LEASE_LOST')
+          await cleanupAttemptAndFail('LEASE_LOST', documentIds)
         }
       }
       const mirrors = projection.chunks.map((chunk) => {
@@ -281,7 +289,7 @@ export function createVersionedTencentEsRagSink(options: {
         })
       } catch (error) {
         if (error instanceof PostRagVersionedSinkError && error.code === 'LEASE_LOST') {
-          await deleteExplicitIds(createdIds)
+          await cleanupAttemptAndFail('LEASE_LOST', documentIds)
         }
         throw error
       }
@@ -323,7 +331,10 @@ export function createVersionedTencentEsRagSink(options: {
           const comparison = comparePostRagActivationOrder(activationOrder, current.activationOrder)
           if (comparison < 0) return { activated: false }
           if (comparison === 0) {
-            if (current.sourceVersion !== sourceVersion || current.state !== 'active' || current.attemptId !== attemptId) fail('ACTIVATION_CONFLICT')
+            if (current.sourceVersion !== sourceVersion || current.state !== 'active') fail('ACTIVATION_CONFLICT')
+            if (current.attemptId !== attemptId) {
+              await tx.setById('post_rag_index_state_v2', postId, { schemaVersion: 2, postId, state: 'active', sourceVersion, attemptId, activationOrder })
+            }
             return { activated: true }
           }
         }
