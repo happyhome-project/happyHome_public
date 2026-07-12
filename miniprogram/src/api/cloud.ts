@@ -317,9 +317,9 @@ export const postApi = {
       total: number
       skip: number
       limit: number
-      answer: string
+      answer?: string
       mode: 'rag' | 'fallback' | 'no_answer'
-      citations: Array<{
+      citations?: Array<{
         postId: string
         chunkId: string
         title: string
@@ -340,6 +340,8 @@ export const postApi = {
         authorName?: string
         authorAvatarUrl?: string
         score: number
+        matchedSnippet: string
+        matchedField: string
         matchedFields: Array<{ fieldLabel: string; fieldType: string; preview: string }>
         createdAt: string
         updatedAt: string

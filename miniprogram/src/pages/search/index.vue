@@ -18,7 +18,7 @@
             placeholder-class="search-placeholder"
             @confirm="submitSearch"
           />
-          <text v-if="query && !isInitialSearchLayout" class="clear-icon" @tap="clearQuery">×</text>
+          <text v-if="query" class="clear-icon" @tap="clearQuery">×</text>
         </view>
         <button v-if="isInitialSearchLayout" class="search-submit" @tap="submitSearch">搜索</button>
       </view>
@@ -37,66 +37,9 @@
       <button class="retry-btn" size="mini" @tap="submitSearch">重试</button>
     </view>
 
-    <view v-else-if="!searched" class="search-discovery">
-      <view class="discovery-section">
-        <view class="discovery-title-row">
-          <text class="discovery-title">历史搜索</text>
-          <text class="discovery-action">⌫</text>
-        </view>
-        <view class="history-tags">
-          <text
-            v-for="term in historyTerms"
-            :key="term"
-            class="history-tag"
-            @tap="quickSearch(term)"
-          >
-            {{ term }}
-          </text>
-        </view>
-      </view>
-
-      <view class="discovery-section">
-        <view class="discovery-title-row">
-          <text class="discovery-title">猜你可能在找</text>
-          <text class="discovery-action">↻</text>
-        </view>
-        <view class="guess-grid">
-          <text
-            v-for="term in guessTerms"
-            :key="term"
-            class="guess-term"
-            @tap="quickSearch(term)"
-          >
-            {{ term }}<text v-if="hotTerms.includes(term)" class="hot-mark">⌁</text>
-          </text>
-        </view>
-      </view>
-    </view>
-
-    <view v-if="searched && !loadError && mode !== 'no_answer' && (answer || citations.length || mode === 'fallback')" class="rag-section">
-      <view v-if="answer" class="answer-card" :class="{ muted: mode !== 'rag' }">
-        <text class="answer-label">{{ mode === 'fallback' ? '普通搜索' : 'AI 回答' }}</text>
-        <text class="answer-text">{{ answer }}</text>
-      </view>
-      <view v-else-if="mode === 'fallback'" class="answer-card muted">
-        <text class="answer-label">智能检索暂不可用</text>
-        <text class="answer-text">智能检索暂不可用，请稍后重试。</text>
-      </view>
-
-      <view v-if="citations.length" class="citation-list">
-        <view
-          v-for="citation in citations"
-          :key="citation.chunkId || `${citation.postId}-${citation.fieldLabel}`"
-          class="citation-card"
-          @tap="openPost(citation.postId)"
-        >
-          <view class="citation-top">
-            <text class="citation-title">{{ citation.title || '相关帖子' }}</text>
-            <text class="citation-field">{{ citation.fieldLabel }}</text>
-          </view>
-          <text class="citation-preview">{{ citation.preview }}</text>
-        </view>
-      </view>
+    <view v-else-if="!searched" class="search-intro">
+      <text class="search-intro-title">搜索社区帖子</text>
+      <text class="search-intro-desc">语义搜索会按相关度返回社区中的真实帖子，不生成内容，也不会替帖子下结论。</text>
     </view>
 
     <view v-if="!loading && !loadError && searched && items.length === 0" class="empty-result">
@@ -105,11 +48,11 @@
         <view class="empty-folder"></view>
         <text class="empty-plane">↗</text>
       </view>
-      <text class="empty-title">{{ mode === 'no_answer' ? '没有找到足够相关的帖子' : '暂无相关结果' }}</text>
-      <text class="empty-desc">{{ mode === 'no_answer' ? '换个关键词，或试试搜索正文/视频内容' : '换个关键词试试' }}</text>
+      <text class="empty-title">暂无相关帖子</text>
+      <text class="empty-desc">换个关键词，或试试搜索帖子正文</text>
     </view>
 
-    <view v-if="items.length && mode !== 'fallback'" class="result-list">
+    <view v-if="items.length" class="result-list">
       <view
         v-for="item in items"
         :key="item.postId"
@@ -128,6 +71,10 @@
           </view>
         </view>
         <text class="result-title">{{ item.title || '无标题' }}</text>
+        <view class="result-match">
+          <text class="result-match-field">{{ item.matchedField }}</text>
+          <text class="result-preview">{{ item.matchedSnippet }}</text>
+        </view>
         <view class="result-meta">
           <view class="result-author">
             <image
@@ -189,21 +136,11 @@ interface SearchItem {
   authorAvatarUrl?: string
   avatarUrl?: string
   score: number
+  matchedSnippet: string
+  matchedField: string
   matchedFields: SearchField[]
   createdAt: string
   updatedAt: string
-}
-
-interface SearchCitation {
-  postId: string
-  chunkId: string
-  title: string
-  sectionId?: string
-  sectionName?: string
-  fieldLabel: string
-  fieldType: string
-  preview: string
-  score: number
 }
 
 const communityStore = useCommunityStore()
@@ -214,16 +151,11 @@ const searched = ref(false)
 const loading = ref(false)
 const loadError = ref('')
 const items = ref<SearchItem[]>([])
-const answer = ref('')
-const citations = ref<SearchCitation[]>([])
-const mode = ref<'rag' | 'fallback' | 'no_answer' | ''>('')
 const total = ref(0)
 const resolvedResultCoverUrls = ref<Record<string, string>>({})
 const resolvedResultAvatarUrls = ref<Record<string, string>>({})
-const limit = 20
-const historyTerms = ['龙门之巅', '视频', '归档', '滑草', '徒步', '故事书', '最新分类标准', '太平水库']
-const guessTerms = ['宜家落地灯', '亲子游路线', '太平水库', '云盖村', '龙门之巅', '邻里互助', '物业账单', '失物招领']
-const hotTerms = ['宜家落地灯', '龙门之巅']
+const PAGE_SIZE = 10
+const MAX_PAGE_SIZE = 20
 const generatedAvatarPalettes = [
   ['#F4C7B8', '#7FB099'],
   ['#BFD7EA', '#E5B183'],
@@ -283,21 +215,13 @@ function decodeParam(value: unknown): string {
   return next
 }
 
-function compactQuery(value: string): string {
-  return value.normalize('NFKC').replace(/\s+/g, '')
-}
-
 function submitSearch() {
   void runSearch({ reset: true, showShortToast: true })
 }
 
-function quickSearch(term: string) {
-  query.value = term
-  void runSearch({ reset: true })
-}
-
 function clearQuery() {
   searchRequestSeq += 1
+  loading.value = false
   query.value = ''
   searched.value = false
   items.value = []
@@ -324,15 +248,14 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
     openOnboardingPreservingStack()
     return
   }
-  if (compactQuery(normalizedQuery).length < 2) {
-    if (options.showShortToast && normalizedQuery) {
-      uni.showToast({ title: '请输入至少两个字', icon: 'none' })
+  const queryLength = splitUnicodeCharacters(normalizedQuery).length
+  if (queryLength < 1 || queryLength > 80) {
+    if (options.showShortToast) {
+      uni.showToast({ title: queryLength > 80 ? '最多输入80个字符' : '请输入搜索内容', icon: 'none' })
     }
-    searched.value = Boolean(normalizedQuery)
+    searched.value = queryLength > 0
+    loading.value = false
     items.value = []
-    answer.value = ''
-    citations.value = []
-    mode.value = ''
     total.value = 0
     loadError.value = ''
     return
@@ -353,15 +276,12 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean }) 
       communityId: communityId.value,
       query: normalizedQuery,
       skip,
-      limit,
+      limit: Math.min(PAGE_SIZE, MAX_PAGE_SIZE),
       asGuest,
     })
     if (requestSeq !== searchRequestSeq) return
     const nextItems = result.items || []
     items.value = options.reset ? nextItems : items.value.concat(nextItems)
-    answer.value = String(result.answer || '')
-    citations.value = result.citations || []
-    mode.value = result.mode || ''
     total.value = Number(result.total || items.value.length)
     searched.value = true
     void resolveResultCovers(items.value)
@@ -405,7 +325,7 @@ function shouldSearchAsGuest(targetCommunityId: string): boolean {
 
 function openPost(postId: string) {
   if (!postId) return
-  const url = `/pages/detail/index?postId=${postId}`
+  const url = `/pages/detail/index?postId=${encodeURIComponent(postId)}`
   clientLog('info', 'search.post.tap', { postId, url })
   uni.navigateTo({
     url,
@@ -416,11 +336,6 @@ function openPost(postId: string) {
 function resultCover(item: SearchItem): string {
   const raw = String(item.coverImage || '').trim()
   return resolvedResultCoverUrls.value[raw] || raw
-}
-
-function firstPreview(item: SearchItem): string {
-  const field = item.matchedFields?.find((entry) => String(entry.preview || '').trim())
-  return String(field?.preview || '').trim()
 }
 
 function coverFallbackText(item: SearchItem): string {
@@ -701,73 +616,25 @@ function formatDate(value: unknown): string {
   z-index: 2;
 }
 
-.search-discovery {
+.search-intro {
   display: flex;
   flex-direction: column;
-  gap: 48rpx;
-  padding: 24rpx 8rpx 0;
+  gap: 16rpx;
+  padding: 56rpx 16rpx 0;
 }
 
-.discovery-section {
-  display: flex;
-  flex-direction: column;
-  gap: 24rpx;
-}
-
-.discovery-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24rpx;
-}
-
-.discovery-title {
+.search-intro-title {
   color: var(--hh-color-text-primary);
   font-size: var(--hh-text-heading-sm-size);
   font-weight: $hh-font-weight-bold;
   line-height: var(--hh-text-heading-sm-line);
 }
 
-.discovery-action {
-  color: var(--hh-color-text-tertiary);
-  font-size: 36rpx;
-  line-height: 1;
-}
-
-.history-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16rpx;
-}
-
-.history-tag {
-  height: 64rpx;
-  padding: 0 24rpx;
-  border-radius: 16rpx;
-  background: #f7f7f7;
-  color: var(--hh-color-text-primary);
-  font-size: var(--hh-text-body-lg-size);
-  line-height: 64rpx;
-}
-
-.guess-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 16rpx;
-  row-gap: 24rpx;
-}
-
-.guess-term {
-  color: var(--hh-color-text-primary);
-  font-size: var(--hh-text-body-lg-size);
-  line-height: var(--hh-text-body-lg-line);
-}
-
-.hot-mark {
-  margin-left: 6rpx;
-  color: #ef3434;
-  font-size: 30rpx;
-  line-height: 1;
+.search-intro-desc {
+  max-width: 620rpx;
+  color: var(--hh-color-text-secondary);
+  font-size: var(--hh-text-body-base-size);
+  line-height: 1.6;
 }
 
 .state {
@@ -880,106 +747,6 @@ function formatDate(value: unknown): string {
   gap: 24rpx;
 }
 
-.rag-section {
-  margin-top: 24rpx;
-  display: flex;
-  flex-direction: column;
-  gap: 16rpx;
-}
-
-.answer-card,
-.citation-card {
-  border: 1rpx solid $hh-ink-line;
-  border-radius: 16rpx;
-  background: $hh-surface-1;
-  box-shadow: $hh-shadow-card;
-}
-
-.answer-card {
-  padding: 22rpx 24rpx;
-  border-left: 6rpx solid #375C79;
-}
-
-.answer-card.muted {
-  border-left-color: $hh-ink-line;
-}
-
-.answer-label {
-  display: block;
-  margin-bottom: 10rpx;
-  font-family: $hh-font-mono;
-  font-size: 20rpx;
-  letter-spacing: $hh-tracking-mono-sm;
-  color: $hh-ink-3;
-}
-
-.answer-text {
-  display: block;
-  color: $hh-ink-1;
-  font-size: 27rpx;
-  line-height: 1.55;
-}
-
-.citation-list {
-  display: flex;
-  flex-direction: column;
-  gap: 14rpx;
-}
-
-.citation-card {
-  padding: 18rpx 20rpx;
-}
-
-.citation-card:active {
-  transform: translateY(1rpx);
-  opacity: 0.92;
-}
-
-.citation-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16rpx;
-  margin-bottom: 8rpx;
-}
-
-.citation-title {
-  flex: 1;
-  min-width: 0;
-  color: $hh-ink-1;
-  font-size: 26rpx;
-  line-height: 1.35;
-  font-weight: $hh-font-weight-bold;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.citation-field {
-  flex-shrink: 0;
-  max-width: 180rpx;
-  padding: 4rpx 10rpx;
-  border-radius: 999rpx;
-  background: $hh-surface-2;
-  color: $hh-ink-3;
-  font-size: 20rpx;
-  line-height: 1.35;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.citation-preview {
-  display: -webkit-box;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  color: $hh-ink-2;
-  font-size: 24rpx;
-  line-height: 1.5;
-}
-
 .result-summary {
   padding: 0 4rpx 2rpx;
   font-size: var(--hh-text-caption-base-size);
@@ -1008,6 +775,19 @@ function formatDate(value: unknown): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.result-match {
+  padding: 10rpx 26rpx 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.result-match-field {
+  color: var(--hh-color-brand-strong);
+  font-size: var(--hh-text-caption-base-size);
+  line-height: var(--hh-text-caption-base-line);
 }
 
 .result-cover {
@@ -1041,7 +821,7 @@ function formatDate(value: unknown): string {
 
 .result-preview {
   display: -webkit-box;
-  padding: 8rpx 26rpx 0;
+  padding: 0;
   overflow: hidden;
   color: var(--hh-color-text-secondary);
   font-size: var(--hh-text-body-base-size);
