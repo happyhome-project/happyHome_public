@@ -818,7 +818,7 @@ test('remote release inspection can complete a local ledger only for the exact p
   const events = []
   const ledger = {
     runId: 'run-123',
-    state: { context: { gitSha: 'abc123' } },
+    state: { context: { gitSha: 'abc123', releaseStrategy: 'full-current' } },
     async appendEvent(event, payload) { events.push({ event, payload }) },
     async complete(status) { this.status = status },
   }
@@ -840,9 +840,10 @@ test('remote release inspection can complete a local ledger only for the exact p
   assert.equal(ledger.status, 'passed')
   assert.equal(events[0].event, 'remote_release_completion_confirmed')
 
+  const mismatchedShaLedger = { ...ledger, status: undefined }
   await assert.rejects(
     () => confirmReleaseLedgerAgainstProductionInspection({
-      ledger: { ...ledger, status: undefined },
+      ledger: mismatchedShaLedger,
       productionInspection: {
         lock: null,
         run: { gitSha: 'different', runId: 'run-123', status: 'passed' },
@@ -851,6 +852,7 @@ test('remote release inspection can complete a local ledger only for the exact p
     }),
     /does not prove completion/,
   )
+  assert.equal(mismatchedShaLedger.status, undefined)
 
   await assert.rejects(
     () => confirmReleaseLedgerAgainstProductionInspection({
@@ -881,13 +883,13 @@ test('production release completes the local ledger after a timed-out completion
   const events = []
   const ledger = {
     runId: 'run-123',
-    state: { context: { gitSha: 'abc123' } },
+    state: { context: { gitSha: 'abc123', releaseStrategy: 'full-current' } },
     async appendEvent(event, payload) { events.push({ event, payload }) },
     async complete(status) { this.status = status },
   }
   let remotelyMarked = false
   const guard = {
-    context: { gitSha: 'abc123', runId: 'run-123' },
+    context: { gitSha: 'abc123', runId: 'run-123', releaseStrategy: 'full-current' },
     complete: () => new Promise(() => {}),
     async getReleaseInspection() {
       return {
@@ -914,12 +916,12 @@ test('production release completes the local ledger after a timed-out completion
 test('production release leaves the ledger incomplete when timed-out completion lacks remote proof', async () => {
   const ledger = {
     runId: 'run-123',
-    state: { context: { gitSha: 'abc123' } },
+    state: { context: { gitSha: 'abc123', releaseStrategy: 'full-current' } },
     async appendEvent() {},
     async complete(status) { this.status = status },
   }
   const guard = {
-    context: { gitSha: 'abc123', runId: 'run-123' },
+    context: { gitSha: 'abc123', runId: 'run-123', releaseStrategy: 'full-current' },
     complete: () => new Promise(() => {}),
     async getReleaseInspection() {
       return {

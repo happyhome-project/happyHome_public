@@ -305,9 +305,11 @@ test('CloudBase CLI retry treats its known includes TypeError as transient', () 
 
 test('formal release path records resumable ledger stages before upload', () => {
   const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
+  const releaseLedgerScript = readFileSync(new URL('./release-run-ledger.mjs', import.meta.url), 'utf8')
   const releaseBlock = extractFunctionBlock(deployScript, 'async function runFormalRelease')
 
   assert.match(deployScript, /release-run-ledger\.mjs/)
+  assert.match(deployScript, /executeReleaseOperations/)
   assert.match(deployScript, /completeProductionReleaseWithRemoteConfirmation/)
   assert.match(deployScript, /target === 'release-prepare'/)
   assert.match(deployScript, /target === 'release-publish'/)
@@ -319,6 +321,7 @@ test('formal release path records resumable ledger stages before upload', () => 
   assert.match(deployScript, /release-publish requires an explicit --release-run-id/)
   assert.match(deployScript, /function assertFormalReleaseCloudBasePath/)
   assert.match(releaseBlock, /assertFormalReleaseCloudBasePath\(\{ prepareOnly }\)/)
+  assert.match(releaseBlock, /releaseGuard\.acquire\(\)/)
   assert.match(deployScript, /Formal release publish requires --use-tcb/)
   assert.match(releaseBlock, /deployCloud\(\{[\s\S]*?requireCloudBaseCli:\s*true/)
   assert.match(deployScript, /requireCloudBaseCli/)
@@ -326,9 +329,13 @@ test('formal release path records resumable ledger stages before upload', () => 
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'miniprogram-build-gate'/)
   assert.match(releaseBlock, /mustReuse: publishOnly/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-deploy'/)
+  assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-version-probes'/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-smoke'/)
+  assert.match(releaseLedgerScript, /HH_CLOUD_FIXTURE_CLEANUP_OK/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'admin-web-deploy'/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'miniprogram-upload'/)
+  assert.match(releaseBlock, /preparedPackageDigest/)
+  assert.match(releaseBlock, /completeProductionReleaseWithRemoteConfirmation\(\{/)
   assert.match(deployScript, /inspectReleaseStageReuse/)
   assert.match(releaseBlock, /reuseCheck/)
 
