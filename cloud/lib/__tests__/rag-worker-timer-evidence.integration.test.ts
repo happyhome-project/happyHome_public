@@ -10,7 +10,7 @@ test('authenticated timer evidence persists through the local database adapter w
     triggerName: 'post-rag-worker-every-minute',
     eventTime: '2026-07-12T00:00:00.000Z',
     invokedAt: '2026-07-12T00:00:01.000Z',
-    outbox: { results: [{ outboxId: 'outbox-1', hidden: 'private text' }] },
+    outbox: { processedCount: 1, results: [{ outboxId: 'outbox-1', status: 'completed', hidden: 'private text' }] },
     v2: { candidateCount: 1, results: [{ jobId: 'job-1', status: 'completed', hidden: 'credential secret' }] },
   })
   const rows = db._dump('post_rag_worker_timer_evidence')
