@@ -4,9 +4,9 @@ import { ROOT, runLoggedCommand } from './lib/process-utils.mjs'
 import { ensureDir, sanitizeName, writeJson } from './lib/reporting.mjs'
 import {
   REQUIRED_NIGHTLY_ENV,
+  createNotificationPlan,
   deriveNightlyResult,
-  formatWorkflowWarning,
-  notificationStatusFromStage,
+  finalizeNightlyRun,
 } from './lib/nightly-notification-policy.mjs'
 
 const startedAt = new Date()
@@ -109,33 +109,12 @@ async function collectCleanupIssues(dirPath) {
   return issues
 }
 
-function renderMarkdown(summary) {
-  const lines = [
-    '# HappyHome Nightly Summary',
-    '',
-    `- Status: ${summary.status}`,
-    `- Test status: ${summary.testStatus}`,
-    `- Notification status: ${summary.notificationStatus}`,
-    `- Branch: ${summary.branch}`,
-    `- Started: ${summary.startedAt}`,
-    `- Finished: ${summary.finishedAt}`,
-    `- Artifact root: ${summary.artifactRoot}`,
-    '',
-    '## Stages',
-  ]
-
-  for (const stage of summary.stages) {
-    lines.push(`- ${stage.name}: ${stage.status} (${stage.durationMs} ms)`)
+async function writeNightlyOutcome(outcome) {
+  await writeJson(summaryPath, outcome.summary)
+  await writeFile(summaryMarkdownPath, outcome.markdown, 'utf8')
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    await writeFile(process.env.GITHUB_STEP_SUMMARY, outcome.markdown, 'utf8')
   }
-
-  if (summary.cleanupIssues.length > 0) {
-    lines.push('', '## Cleanup Issues')
-    for (const issue of summary.cleanupIssues) {
-      lines.push(`- ${issue.communityId}: ${issue.message}`)
-    }
-  }
-
-  return `${lines.join('\n')}\n`
 }
 
 async function main() {
@@ -157,17 +136,6 @@ async function main() {
     }
     stageStatus.set(preflight.key, preflight.status)
     stages.push(preflight)
-    await writeJson(summaryPath, {
-      status: 'failed',
-      testStatus: 'failed',
-      notificationStatus: 'skipped',
-      branch: process.env.GITHUB_REF_NAME || process.env.BRANCH_NAME || 'codex/cicd',
-      startedAt: startedAt.toISOString(),
-      finishedAt: new Date().toISOString(),
-      artifactRoot,
-      cleanupIssues: [],
-      stages,
-    })
     throw new Error(preflight.notes)
   }
 
@@ -223,23 +191,12 @@ async function main() {
   }
 
   await writeJson(summaryPath, summary)
-  let notifyStage
-  if (!process.env.WECOM_WEBHOOK_URL) {
-    const timestamp = new Date().toISOString()
-    notifyStage = {
-      key: 'notify-wecom',
-      name: 'WeCom notification',
-      status: 'skipped',
-      startedAt: timestamp,
-      finishedAt: timestamp,
-      durationMs: 0,
-      command: '',
-      logPath: '',
-      notes: 'Skipped because no webhook is configured.',
-    }
+  const notificationPlan = createNotificationPlan({ webhook: process.env.WECOM_WEBHOOK_URL })
+  let notifyStage = notificationPlan.stage
+  if (!notificationPlan.shouldRun) {
     stageStatus.set(notifyStage.key, notifyStage.status)
     stages.push(notifyStage)
-    console.warn(formatWorkflowWarning('missing'))
+    console.warn(notificationPlan.warning)
   } else {
     notifyStage = await runStage({
       key: 'notify-wecom',
@@ -248,38 +205,33 @@ async function main() {
       args: ['scripts/notify-wecom.mjs', summaryPath],
       env: { HH_SUMMARY_PATH: summaryPath },
     })
-    if (notifyStage.status !== 'passed') {
-      console.warn(formatWorkflowWarning('failed'))
-    }
   }
-  summary.notificationStatus = notificationStatusFromStage(notifyStage)
-  summary.status = summary.testStatus
-
-  await writeJson(summaryPath, summary)
-  const finalMarkdown = renderMarkdown(summary)
-  await writeFile(summaryMarkdownPath, finalMarkdown, 'utf8')
-  if (process.env.GITHUB_STEP_SUMMARY) {
-    await writeFile(process.env.GITHUB_STEP_SUMMARY, finalMarkdown, 'utf8')
-  }
-  if (summary.testStatus !== 'passed') {
-    process.exit(1)
-  }
+  const outcome = finalizeNightlyRun({ summary, notificationStage: notifyStage })
+  if (outcome.warning) console.warn(outcome.warning)
+  await writeNightlyOutcome(outcome)
+  if (outcome.exitCode !== 0) process.exit(outcome.exitCode)
 }
 
 main().catch(async (error) => {
   console.error(error?.stack || error?.message || error)
   await ensureDir(artifactRoot)
-  await writeJson(summaryPath, {
-    status: 'failed',
-    testStatus: 'failed',
-    notificationStatus: 'skipped',
-    branch: process.env.GITHUB_REF_NAME || 'codex/cicd',
-    startedAt: startedAt.toISOString(),
-    finishedAt: new Date().toISOString(),
-    artifactRoot,
-    cleanupIssues: [],
-    stages,
-    error: error?.stack || error?.message || String(error),
+  const notificationStage = stages.find((stage) => stage.key === 'notify-wecom')
+    || createNotificationPlan({ webhook: '' }).stage
+  if (!stages.includes(notificationStage)) stages.push(notificationStage)
+  const outcome = finalizeNightlyRun({
+    notificationStage,
+    summary: {
+      status: 'failed',
+      testStatus: 'failed',
+      branch: process.env.GITHUB_REF_NAME || 'codex/cicd',
+      startedAt: startedAt.toISOString(),
+      finishedAt: new Date().toISOString(),
+      artifactRoot,
+      cleanupIssues: [],
+      stages,
+      error: error?.stack || error?.message || String(error),
+    },
   })
+  await writeNightlyOutcome(outcome)
   process.exit(1)
 })

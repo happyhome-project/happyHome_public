@@ -26,3 +26,66 @@ export function formatWorkflowWarning(kind, env = process.env) {
     : 'WeCom notification failed'
   return env.GITHUB_ACTIONS === 'true' ? `::warning::${message}` : `Warning: ${message}`
 }
+
+export function createNotificationPlan({ webhook, timestamp = new Date().toISOString(), env = process.env }) {
+  if (webhook) return { shouldRun: true, stage: null, warning: null }
+
+  return {
+    shouldRun: false,
+    stage: {
+      key: 'notify-wecom',
+      name: 'WeCom notification',
+      status: 'skipped',
+      startedAt: timestamp,
+      finishedAt: timestamp,
+      durationMs: 0,
+      command: '',
+      logPath: '',
+      notes: 'Skipped because no webhook is configured.',
+    },
+    warning: formatWorkflowWarning('missing', env),
+  }
+}
+
+export function renderNightlyMarkdown(summary) {
+  const lines = [
+    '# HappyHome Nightly Summary',
+    '',
+    `- Status: ${summary.status}`,
+    `- Test status: ${summary.testStatus}`,
+    `- Notification status: ${summary.notificationStatus}`,
+    `- Branch: ${summary.branch}`,
+    `- Started: ${summary.startedAt}`,
+    `- Finished: ${summary.finishedAt}`,
+    `- Artifact root: ${summary.artifactRoot}`,
+    '',
+    '## Stages',
+  ]
+
+  for (const stage of summary.stages) {
+    lines.push(`- ${stage.name}: ${stage.status} (${stage.durationMs} ms)`)
+  }
+
+  if (summary.cleanupIssues.length > 0) {
+    lines.push('', '## Cleanup Issues')
+    for (const issue of summary.cleanupIssues) {
+      lines.push(`- ${issue.communityId}: ${issue.message}`)
+    }
+  }
+
+  return `${lines.join('\n')}\n`
+}
+
+export function finalizeNightlyRun({ summary, notificationStage, env = process.env }) {
+  const finalSummary = {
+    ...summary,
+    status: summary.testStatus,
+    notificationStatus: notificationStatusFromStage(notificationStage),
+  }
+  return {
+    summary: finalSummary,
+    markdown: renderNightlyMarkdown(finalSummary),
+    warning: notificationStage.status === 'failed' ? formatWorkflowWarning('failed', env) : null,
+    exitCode: finalSummary.testStatus === 'passed' ? 0 : 1,
+  }
+}
