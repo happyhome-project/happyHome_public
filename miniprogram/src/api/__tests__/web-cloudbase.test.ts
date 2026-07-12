@@ -32,7 +32,72 @@ describe('web CloudBase API', () => {
     expect(app.callFunction).toHaveBeenCalledWith({
       name: 'post',
       data: { action: 'get', postId: 'p1' },
+      parse: true,
     })
+  })
+
+  test('rejects a non-object function result instead of leaking a string as the typed result', async () => {
+    const app = {
+      auth: vi.fn(() => ({
+        getLoginState: vi.fn(),
+        signIn: vi.fn(),
+        signOut: vi.fn(),
+      })),
+      callFunction: vi.fn().mockResolvedValue({ result: 'not-json' }),
+    }
+    const api = createWebCloudbaseApi({
+      env: { envId: 'test-env', accessKey: 'public-access-key' },
+      loadSdk: async () => ({ default: { init: () => app } }),
+    })
+
+    await expect(api.callFunction('post', { action: 'get' }))
+      .rejects.toThrow('[web-cloudbase] post returned a non-object result')
+  })
+
+  test('retries initialization after the current singleton promise rejects', async () => {
+    const auth = {
+      getLoginState: vi.fn().mockResolvedValue({ user: { uid: 'recovered' } }),
+      signIn: vi.fn(),
+      signOut: vi.fn(),
+    }
+    const app = { auth: vi.fn(() => auth), callFunction: vi.fn() }
+    const loadSdk = vi.fn()
+      .mockRejectedValueOnce(new Error('temporary SDK load failure'))
+      .mockResolvedValueOnce({ default: { init: () => app } })
+    const api = createWebCloudbaseApi({
+      env: { envId: 'test-env', accessKey: 'public-access-key' },
+      loadSdk,
+    })
+
+    await expect(api.getLoginState()).rejects.toThrow('temporary SDK load failure')
+    await expect(api.getLoginState()).resolves.toEqual({ user: { uid: 'recovered' } })
+    expect(loadSdk).toHaveBeenCalledTimes(2)
+  })
+
+  test('shares one initialization promise across concurrent callers', async () => {
+    let resolveSdk!: (sdk: any) => void
+    const loadSdk = vi.fn(() => new Promise<any>((resolve) => { resolveSdk = resolve }))
+    const auth = {
+      getLoginState: vi.fn().mockResolvedValue({ user: { uid: 'shared' } }),
+      signIn: vi.fn(),
+      signOut: vi.fn(),
+    }
+    const app = { auth: vi.fn(() => auth), callFunction: vi.fn() }
+    const api = createWebCloudbaseApi({
+      env: { envId: 'test-env', accessKey: 'public-access-key' },
+      loadSdk,
+    })
+
+    const first = api.getLoginState()
+    const second = api.getLoginState()
+    expect(loadSdk).toHaveBeenCalledTimes(1)
+    resolveSdk({ default: { init: () => app } })
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { user: { uid: 'shared' } },
+      { user: { uid: 'shared' } },
+    ])
+    expect(app.auth).toHaveBeenCalledTimes(1)
   })
 
   test.each([

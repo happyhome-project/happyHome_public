@@ -17,7 +17,7 @@ type WebCloudbaseAuth = {
 
 type WebCloudbaseApp = {
   auth(): WebCloudbaseAuth
-  callFunction(options: { name: string; data: object }): Promise<{ result: any }>
+  callFunction(options: { name: string; data: object; parse: true }): Promise<{ result: any }>
 }
 
 type WebCloudbaseDependencies = {
@@ -38,9 +38,13 @@ export function createWebCloudbaseApi(dependencies: WebCloudbaseDependencies) {
       if (missing.length) {
         throw new Error(`[web-cloudbase] missing public configuration: ${missing.join(', ')}`)
       }
-      instances = dependencies.loadSdk().then(({ default: Cloudbase }) => {
+      const current = dependencies.loadSdk().then(({ default: Cloudbase }) => {
         const app = Cloudbase.init({ env: envId, accessKey })
         return { app, auth: app.auth() }
+      })
+      instances = current
+      void current.catch(() => {
+        if (instances === current) instances = undefined
       })
     }
     return instances
@@ -61,7 +65,10 @@ export function createWebCloudbaseApi(dependencies: WebCloudbaseDependencies) {
     },
     async callFunction(name: string, data: object = {}) {
       const { app } = await getInstances()
-      const response = await app.callFunction({ name, data })
+      const response = await app.callFunction({ name, data, parse: true })
+      if (!response.result || typeof response.result !== 'object') {
+        throw new Error(`[web-cloudbase] ${name} returned a non-object result`)
+      }
       return response.result
     },
   }
