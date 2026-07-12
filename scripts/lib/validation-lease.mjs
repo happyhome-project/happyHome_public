@@ -3,6 +3,7 @@ import { mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { Worker } from 'node:worker_threads';
 
 const LEASE_TTL_MS = 90_000;
 const MUTATION_ABANDONED_MS = 30_000;
@@ -181,6 +182,7 @@ export async function acquireValidationLease({
   now,
   heartbeatIntervalMs = 0,
   fileSystem = DEFAULT_FILE_SYSTEM,
+  startHeartbeat = true,
 } = {}) {
   if (typeof command !== 'string' || !command.trim()) throw new TypeError('command is required');
   const { directory, leasePath } = pathsFor(homeDir);
@@ -271,11 +273,113 @@ export async function acquireValidationLease({
     },
   };
 
-  if (heartbeatIntervalMs > 0) {
+  if (startHeartbeat && heartbeatIntervalMs > 0) {
     interval = setInterval(() => { handle.heartbeat().catch(() => handle.stopHeartbeat()); }, heartbeatIntervalMs);
     interval.unref?.();
   }
   return handle;
+}
+
+export async function heartbeatValidationLeaseOwner({ homeDir, ownerToken, ttlMs }) {
+  const { directory, leasePath } = pathsFor(homeDir);
+  return withMutationLock(directory, async () => {
+    const heartbeatAt = new Date();
+    return replaceOwnedLease(leasePath, ownerToken, (current) => ({
+      ...current,
+      heartbeatAt: heartbeatAt.toISOString(),
+      expiresAt: new Date(heartbeatAt.getTime() + ttlMs).toISOString(),
+    }), DEFAULT_FILE_SYSTEM);
+  });
+}
+
+async function startHeartbeatWorker({ homeDir, ownerToken, heartbeatIntervalMs }) {
+  const worker = new Worker(new URL('./validation-lease-heartbeat-worker.mjs', import.meta.url), {
+    workerData: {
+      homeDir,
+      ownerToken,
+      heartbeatIntervalMs,
+      ttlMs: heartbeatIntervalMs * 3,
+    },
+  });
+  let workerError;
+  let exited = false;
+  let stopping = false;
+  worker.on('error', (error) => { workerError ??= error; });
+  worker.on('exit', (code) => {
+    exited = true;
+    if (!stopping) workerError ??= new Error(`Validation lease heartbeat worker exited unexpectedly with code ${code}`);
+  });
+  worker.on('message', (message) => {
+    if (message?.type === 'error') workerError ??= new Error(message.message);
+  });
+  const ready = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Validation lease heartbeat worker startup timed out')), 5_000);
+    const onMessage = (message) => {
+      if (message?.type === 'ready') {
+        clearTimeout(timeout);
+        resolve();
+      } else if (message?.type === 'error') {
+        clearTimeout(timeout);
+        reject(new Error(message.message));
+      }
+    };
+    worker.on('message', onMessage);
+    worker.once('error', (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    worker.once('exit', (code) => {
+      clearTimeout(timeout);
+      reject(workerError ?? new Error(`Validation lease heartbeat worker exited before ready with code ${code}`));
+    });
+  });
+  try {
+    await ready;
+  } catch (error) {
+    await worker.terminate();
+    throw error;
+  }
+  return {
+    async stop() {
+      let stopError;
+      stopping = true;
+      if (!workerError && !exited) {
+        try {
+          await new Promise((resolve, reject) => {
+            const timeout = setTimeout(
+              () => reject(new Error('Validation lease heartbeat worker stop timed out')),
+              1_000,
+            );
+            const onMessage = (message) => {
+              if (message?.type === 'stopped') {
+                clearTimeout(timeout);
+                resolve();
+              }
+              if (message?.type === 'error') {
+                clearTimeout(timeout);
+                reject(new Error(message.message));
+              }
+            };
+            worker.on('message', onMessage);
+            worker.once('error', (error) => {
+              clearTimeout(timeout);
+              reject(error);
+            });
+            worker.once('exit', (code) => {
+              clearTimeout(timeout);
+              reject(workerError ?? new Error(`Validation lease heartbeat worker exited during stop with code ${code}`));
+            });
+            worker.postMessage({ type: 'stop' });
+          });
+        } catch (error) {
+          stopError = error;
+        }
+      }
+      await worker.terminate();
+      if (workerError) throw workerError;
+      if (stopError) throw stopError;
+    },
+  };
 }
 
 export async function recoverValidationLease({
@@ -314,11 +418,43 @@ export async function recoverValidationLease({
 }
 
 export async function withValidationLease(options, fn) {
-  const handle = await acquireValidationLease({ ...options, heartbeatIntervalMs: options?.heartbeatIntervalMs ?? 30_000 });
+  const heartbeatIntervalMs = options?.heartbeatIntervalMs ?? 30_000;
+  const homeDir = options?.homeDir ?? os.homedir();
+  const handle = await acquireValidationLease({
+    ...options,
+    homeDir,
+    heartbeatIntervalMs,
+    startHeartbeat: false,
+  });
+  let worker;
+  let result;
+  let primaryError;
   try {
-    return await fn(handle);
-  } finally {
-    handle.stopHeartbeat();
-    await handle.release();
+    if (heartbeatIntervalMs > 0) {
+      worker = await startHeartbeatWorker({
+        homeDir,
+        ownerToken: handle.snapshot.ownerToken,
+        heartbeatIntervalMs,
+      });
+    }
+    result = await fn(handle);
+  } catch (error) {
+    primaryError = error;
   }
+  const cleanupErrors = [];
+  handle.stopHeartbeat();
+  try {
+    await worker?.stop();
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
+  try {
+    await handle.release();
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
+  if (primaryError) throwWithCleanupError(primaryError, cleanupErrors);
+  if (cleanupErrors.length === 1) throw cleanupErrors[0];
+  if (cleanupErrors.length > 1) throw new AggregateError(cleanupErrors, 'Validation lease cleanup failed');
+  return result;
 }
