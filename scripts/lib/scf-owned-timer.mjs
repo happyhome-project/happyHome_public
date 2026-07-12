@@ -1,6 +1,6 @@
 const OWNED = new Set(['post-rag-worker-every-5-min', 'post-rag-worker-every-minute'])
-const READBACK_ATTEMPTS = 5
-const READBACK_DELAY_MS = 250
+const READBACK_ATTEMPTS = 30
+const READBACK_DELAY_MS = 1000
 
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -64,7 +64,7 @@ export async function reconcileOwnedScfTimer(request, {
         customArgumentHash: await sha256(customArgument),
       }
     }
-    if (attempt < READBACK_ATTEMPTS) await wait(READBACK_DELAY_MS * attempt)
+    if (attempt < READBACK_ATTEMPTS) await wait(READBACK_DELAY_MS)
   }
 
   throw new Error('SCF timer verification failed')
