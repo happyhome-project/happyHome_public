@@ -123,13 +123,10 @@ export function createReleasePlan({
   const fullCurrent = mode === 'full-current'
   const bootstrap = mode === 'main' && !baseSha
   const planningStrategy = fullCurrent ? 'full-current' : bootstrap ? 'bootstrap' : 'incremental'
-  const targets = classifyReleaseImpact({ changedPaths, allFunctions, functionInputs })
+  const targets = fullCurrent
+    ? { adminWeb: true, cloud: allCloud(allFunctions, 'full-current:explicit'), miniprogram: true }
+    : classifyReleaseImpact({ changedPaths, allFunctions, functionInputs })
   if (bootstrap) targets.cloud = allCloud(allFunctions, 'bootstrap:no-production-base')
-  if (fullCurrent) {
-    targets.adminWeb = true
-    targets.cloud = allCloud(allFunctions, 'full-current:explicit')
-    targets.miniprogram = true
-  }
   const hasRuntimeTarget = targets.cloud.functions.length > 0 || targets.miniprogram || targets.adminWeb
   return {
     baseSha: fullCurrent ? null : baseSha || null,

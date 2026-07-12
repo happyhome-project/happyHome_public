@@ -107,6 +107,23 @@ test('full-current plans explicitly publish every current runtime target and ret
   assert.deepEqual(plan.changeIds, ['indexes', 'network'])
 })
 
+test('normal main plans remain incremental and classify only changed runtime targets', () => {
+  const plan = createReleasePlan({
+    baseSha: 'production-base',
+    headSha: 'head',
+    changedPaths: ['admin-web/src/App.vue'],
+    allFunctions: ['post'],
+    functionInputs: {},
+    manifests: [],
+    mode: 'main',
+  })
+
+  assert.equal(plan.planningStrategy, 'incremental')
+  assert.equal(plan.targets.adminWeb, true)
+  assert.equal(plan.targets.miniprogram, false)
+  assert.equal(plan.targets.cloud.mode, 'none')
+})
+
 test('release plan selects only manifests changed in the production diff', () => {
   const manifests = [
     { changeId: 'historical', source: 'release/changes/20260701-historical.json' },
