@@ -16,11 +16,12 @@ describe('post-rag-worker stages', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     process.env.POST_RAG_WORKER_TOKEN = 'worker-secret'
+    process.env.POST_RAG_TIMER_TOKEN = 'timer-secret'
     ;(processPostRagOutboxBatch as jest.Mock).mockResolvedValue({ candidateCount: 0, results: [] })
     ;(processPostRagJobV2Batch as jest.Mock).mockResolvedValue({ candidateCount: 0, results: [] })
     ;(processPostRagJobBatch as jest.Mock).mockResolvedValue({ scannedCount: 0, results: [] })
   })
-  afterEach(() => { delete process.env.POST_RAG_WORKER_TOKEN })
+  afterEach(() => { delete process.env.POST_RAG_WORKER_TOKEN; delete process.env.POST_RAG_TIMER_TOKEN })
 
   test('auth rejects before stage calls or v2 dependency construction', async () => {
     await expect(main({ limit: 1 })).rejects.toThrow('Unauthorized')
@@ -50,7 +51,7 @@ describe('post-rag-worker stages', () => {
   })
 
   test('authenticated Timer Message writes evidence but a manual token invocation does not', async () => {
-    const timer = { Type: 'Timer', TriggerName: 'post-rag-worker-every-minute', Time: '2026-07-12T00:00:00.000Z', Message: JSON.stringify({ workerToken: 'worker-secret' }) }
+    const timer = { Type: 'Timer', TriggerName: 'post-rag-worker-every-minute', Time: new Date().toISOString(), Message: JSON.stringify({ timerToken: 'timer-secret' }) }
     await main(timer)
     expect(recordPostRagTimerEvidence).toHaveBeenCalledWith(expect.objectContaining({ triggerName: timer.TriggerName, eventTime: timer.Time, outbox: expect.any(Object), v2: expect.any(Object) }))
     ;(recordPostRagTimerEvidence as jest.Mock).mockClear()
