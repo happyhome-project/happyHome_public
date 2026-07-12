@@ -617,3 +617,22 @@ test('agent guidance defines the feature PR feedback loop and Merge Queue handof
 
   assert.doesNotMatch(agents, /合并一个 PR 后，下一个 PR 必须重新同步最新 `main`/)
 })
+
+function levelThreeSection(source, heading) {
+  const marker = `### ${heading}`
+  const start = source.indexOf(marker)
+  assert.notEqual(start, -1, `missing section: ${heading}`)
+  const next = source.indexOf('\n### ', start + marker.length)
+  return source.slice(start, next === -1 ? source.length : next)
+}
+
+test('feature feedback invalidates old results after a push and follows the new exact HEAD', () => {
+  const agents = readFileSync(new URL('../../AGENTS.md', import.meta.url), 'utf8')
+  const prWorkflow = levelThreeSection(agents, 'PR 流程')
+  const setup = readFileSync(new URL('../../docs/SETUP.md', import.meta.url), 'utf8')
+  const featureFeedback = levelThreeSection(setup, '功能 PR 与 Merge Queue 协作')
+
+  assert.match(prWorkflow, /每次普通 push 后旧结果作废[^\n]*新的 exact HEAD/)
+  assert.match(featureFeedback, /push 新提交后旧检查结果作废/)
+  assert.match(featureFeedback, /轮询 PR exact HEAD 的 checks、review 和 comments/)
+})
