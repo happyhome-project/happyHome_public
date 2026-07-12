@@ -136,6 +136,59 @@ test('existing release ledger context rejects mismatched reopen metadata', async
   }
 })
 
+test('release ledger binds release strategy and git SHA across reopen, latest, status, and summary', async () => {
+  const root = await tempRoot()
+  try {
+    const ledger = await createReleaseRunLedger({
+      root,
+      runId: 'full-current-run',
+      command: 'deploy:release --full-current',
+      gitSha: 'abc123',
+      version: '1.0.1',
+      desc: 'trial-unit',
+      envId: 'env-a',
+      releaseStrategy: 'full-current',
+    })
+
+    assert.equal(ledger.state.context.releaseStrategy, 'full-current')
+    await assert.rejects(
+      () => createReleaseRunLedger({ root, runId: 'full-current-run', gitSha: 'abc123', releaseStrategy: 'main' }),
+      /releaseStrategy/,
+    )
+    await assert.rejects(
+      () => createReleaseRunLedger({ root, runId: 'full-current-run', gitSha: 'def456', releaseStrategy: 'full-current' }),
+      /gitSha/,
+    )
+
+    const latest = JSON.parse(await readFile(join(root, '.codex-local', 'release-runs', 'latest.json'), 'utf8'))
+    assert.equal(latest.releaseStrategy, 'full-current')
+    assert.match(formatReleaseRunStatus(ledger.state), /Strategy: full-current/)
+    assert.equal(summarizeReleaseRun(ledger.state).context.releaseStrategy, 'full-current')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('release ledger defaults omitted strategy to main and treats legacy context as main', async () => {
+  const root = await tempRoot()
+  try {
+    const ledger = await createReleaseRunLedger({ root, runId: 'main-run', gitSha: 'abc123' })
+    assert.equal(ledger.state.context.releaseStrategy, 'main')
+
+    const runPath = join(root, '.codex-local', 'release-runs', 'main-run', 'run.json')
+    const legacy = JSON.parse(await readFile(runPath, 'utf8'))
+    delete legacy.context.releaseStrategy
+    await writeFile(runPath, `${JSON.stringify(legacy, null, 2)}\n`, 'utf8')
+
+    await assert.rejects(
+      () => createReleaseRunLedger({ root, runId: 'main-run', gitSha: 'abc123', releaseStrategy: 'full-current' }),
+      /releaseStrategy/,
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('resume inspection refuses passed stages when the commit or version changed', async () => {
   const root = await tempRoot()
   try {

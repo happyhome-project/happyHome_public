@@ -337,6 +337,35 @@ test('formal release path records resumable ledger stages before upload', () => 
   assert(releaseBlock.indexOf("'miniprogram-upload'") < releaseBlock.indexOf("complete('passed')"))
 })
 
+test('formal release derives explicit full-current strategy before opening resume state and binds it everywhere', () => {
+  const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
+  const release = extractFunctionBlock(deployScript, 'async function runFormalRelease')
+  const strategyIndex = release.indexOf("const fullCurrentExplicit = hasFlag('full-current')")
+  const resumeIndex = release.indexOf('await getResumeRunState')
+
+  assert(strategyIndex >= 0)
+  assert(strategyIndex < resumeIndex)
+  assert.match(release, /const releaseStrategy = fullCurrentExplicit \? 'full-current' : 'main'/)
+  assert.match(release, /getFormalReleaseGitState\(\{[\s\S]*?releaseStrategy,[\s\S]*?fullCurrentExplicit/)
+  assert.match(release, /const releaseContext = \{[\s\S]*?releaseStrategy,/)
+  assert.match(release, /createReleaseRunLedger\(\{[\s\S]*?releaseStrategy,/)
+  assert.match(release, /createFormalReleasePlan\(releaseContext\.gitSha, releaseStrategy\)/)
+  assert.match(release, /createFormalReleaseMutationRevalidator\(\{[\s\S]*?releaseStrategy,[\s\S]*?fullCurrentExplicit,/)
+})
+
+test('formal release planner uses the selected mode and validates the exact strategy-bound plan', () => {
+  const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
+  const planner = extractFunctionBlock(deployScript, 'function createFormalReleasePlan')
+
+  assert.match(planner, /function createFormalReleasePlan\(gitSha, releaseStrategy\)/)
+  assert.match(planner, /`--mode=\$\{releaseStrategy\}`/)
+  assert.match(planner, /`--head=\$\{gitSha\}`/)
+  assert.match(planner, /plan\.mode !== releaseStrategy/)
+  assert.match(planner, /plan\.planningStrategy !== expectedPlanningStrategy/)
+  assert.match(planner, /plan\.headSha !== gitSha/)
+  assert.match(planner, /!plan\.releaseRequired/)
+})
+
 test('every direct production deployment is fenced to the canonical clean main workspace', () => {
   const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
   const dispatch = deployScript.slice(deployScript.lastIndexOf("const target = process.argv[2] || 'all'"))

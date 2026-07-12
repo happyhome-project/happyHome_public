@@ -187,7 +187,7 @@ function getGitOutput(command) {
   return execSync(command, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
 }
 
-function getFormalReleaseGitState({ publishOnly, version, desc, releaseStrategy, allowReleaseBuildInfo = false }) {
+function getFormalReleaseGitState({ publishOnly, version, desc, releaseStrategy, fullCurrentExplicit = false, allowReleaseBuildInfo = false }) {
   const changedPaths = new Set()
   for (const command of [
     'git diff --name-only --no-ext-diff',
@@ -202,7 +202,7 @@ function getFormalReleaseGitState({ publishOnly, version, desc, releaseStrategy,
     cwd: ROOT,
     originUrl: getGitOutput('git remote get-url origin'),
     releaseStrategy,
-    fullCurrentExplicit: releaseStrategy === 'full-current',
+    fullCurrentExplicit,
     branch: getGitOutput('git branch --show-current'),
     headSha: getGitOutput('git rev-parse HEAD'),
     originMainSha: getGitOutput('git rev-parse origin/main'),
@@ -998,8 +998,8 @@ function releaseStageReuseCheck(context) {
   }
 }
 
-function createFormalReleasePlan(gitSha) {
-  const result = spawnSync(process.execPath, ['scripts/release-plan.mjs', '--mode=full-current', `--head=${gitSha}`], {
+function createFormalReleasePlan(gitSha, releaseStrategy) {
+  const result = spawnSync(process.execPath, ['scripts/release-plan.mjs', `--mode=${releaseStrategy}`, `--head=${gitSha}`], {
     cwd: ROOT,
     encoding: 'utf8',
     windowsHide: true,
@@ -1012,7 +1012,10 @@ function createFormalReleasePlan(gitSha) {
   const planPath = resolve(ROOT, '.codex-local', 'release-plans', `${gitSha}.json`)
   if (!existsSync(planPath)) throw new Error(`Formal release plan did not write ${planPath}`)
   const plan = JSON.parse(readFileSync(planPath, 'utf8'))
-  if (plan.mode !== 'full-current' || plan.headSha !== gitSha || !plan.releaseRequired) {
+  const expectedPlanningStrategy = releaseStrategy === 'full-current'
+    ? 'full-current'
+    : plan.bootstrap ? 'bootstrap' : 'incremental'
+  if (plan.mode !== releaseStrategy || plan.planningStrategy !== expectedPlanningStrategy || plan.headSha !== gitSha || !plan.releaseRequired) {
     throw new Error('Formal release plan is missing, stale, or does not require a release')
   }
   return plan
@@ -1132,6 +1135,8 @@ async function runFormalRelease(options = {}) {
   assertFormalReleaseCloudBasePath({ prepareOnly })
 
   const publishOnly = options.publishOnly === true
+  const fullCurrentExplicit = hasFlag('full-current')
+  const releaseStrategy = fullCurrentExplicit ? 'full-current' : 'main'
   if (publishOnly && !getExplicitReleaseRunId()) {
     throw new Error('release-publish requires an explicit --release-run-id=<id> or HH_RELEASE_RUN_ID; refusing implicit latest.')
   }
@@ -1139,7 +1144,8 @@ async function runFormalRelease(options = {}) {
   const resumeRunState = await getResumeRunState(forceResume)
   const miniprogramUpload = resolveMiniprogramUploadMetadata(resumeRunState?.context || {})
   assertFormalReleaseGitState(getFormalReleaseGitState({
-    releaseStrategy: 'full-current',
+    releaseStrategy,
+    fullCurrentExplicit,
     publishOnly,
     version: miniprogramUpload.version,
     desc: miniprogramUpload.desc,
@@ -1151,10 +1157,11 @@ async function runFormalRelease(options = {}) {
     desc: miniprogramUpload.desc,
     envId: getCloudEnvId(),
     appid: APPID,
+    releaseStrategy,
   }
   const releaseRunId = await resolveReleaseRunId(forceResume)
   releaseContext.runId = releaseRunId
-  const formalPlan = prepareOnly ? null : createFormalReleasePlan(releaseContext.gitSha)
+  const formalPlan = prepareOnly ? null : createFormalReleasePlan(releaseContext.gitSha, releaseStrategy)
   releaseContext.cloudFunctions = formalPlan?.targets.cloud.functions || []
   const releaseLedger = await createReleaseRunLedger({
     root: ROOT,
@@ -1164,6 +1171,7 @@ async function runFormalRelease(options = {}) {
     version: releaseContext.version,
     desc: releaseContext.desc,
     envId: releaseContext.envId,
+    releaseStrategy,
   })
   const resume = forceResume || hasFlag('resume')
   const reuseCheck = releaseStageReuseCheck(releaseContext)
@@ -1172,14 +1180,15 @@ async function runFormalRelease(options = {}) {
   const revalidateFormalMutation = prepareOnly ? null : createFormalReleaseMutationRevalidator({
     fetchOriginMain: async () => execSync('git fetch --quiet origin main', { cwd: ROOT, stdio: 'inherit' }),
     readGitState: () => getFormalReleaseGitState({
-      releaseStrategy: 'full-current',
+      releaseStrategy,
+      fullCurrentExplicit,
       publishOnly,
       allowReleaseBuildInfo: oneShotBuildInfoPrepared,
       version: miniprogramUpload.version,
       desc: miniprogramUpload.desc,
     }),
-    releaseStrategy: 'full-current',
-    fullCurrentExplicit: true,
+    releaseStrategy,
+    fullCurrentExplicit,
     beforeRemoteMutation: async (stage) => await releaseGuard.beforeRemoteMutation(stage),
   })
 

@@ -23,7 +23,7 @@ const REQUIRED_RELEASE_UI_MARKERS = [
   'HH_RELEASE_PROFILE_LOGIN_CLEAN',
 ]
 
-const RELEASE_CONTEXT_KEYS = ['gitSha', 'version', 'desc', 'envId']
+const RELEASE_CONTEXT_KEYS = ['gitSha', 'version', 'desc', 'envId', 'releaseStrategy']
 
 function hasReusableColdStartEvidence(evidence = {}) {
   const coldStart = evidence.homeColdStart
@@ -135,12 +135,13 @@ function contextMismatch(stageContext = {}, expected = {}) {
 }
 
 function mergeExistingRunContext(existing = {}, next = {}) {
-  const merged = { ...existing }
+  const merged = { ...existing, releaseStrategy: existing.releaseStrategy || 'main' }
+  const requested = { ...next, releaseStrategy: next.releaseStrategy || 'main' }
   for (const key of RELEASE_CONTEXT_KEYS) {
-    if (existing[key] && next[key] && existing[key] !== next[key]) {
-      throw new Error(`release run context mismatch for ${key}: existing ${existing[key]}, requested ${next[key]}`)
+    if (merged[key] && requested[key] && merged[key] !== requested[key]) {
+      throw new Error(`release run context mismatch for ${key}: existing ${merged[key]}, requested ${requested[key]}`)
     }
-    merged[key] = existing[key] || next[key] || ''
+    merged[key] = merged[key] || requested[key] || ''
   }
   return merged
 }
@@ -359,6 +360,7 @@ export class ReleaseRunLedger {
       version: this.state.context?.version,
       desc: this.state.context?.desc,
       envId: this.state.context?.envId,
+      releaseStrategy: this.state.context?.releaseStrategy || 'main',
     })
   }
 
@@ -477,6 +479,7 @@ export async function createReleaseRunLedger(options) {
       version: options.version || '',
       desc: options.desc || '',
       envId: options.envId || '',
+      releaseStrategy: options.releaseStrategy || 'main',
     })
   } else {
     const createdAt = isoNow(options.now)
@@ -493,6 +496,7 @@ export async function createReleaseRunLedger(options) {
         version: options.version || '',
         desc: options.desc || '',
         envId: options.envId || '',
+        releaseStrategy: options.releaseStrategy || 'main',
       },
       stages: {},
     }
@@ -620,6 +624,7 @@ export function formatReleaseRunStatus(runState) {
     `HappyHome release run ${runState.runId}`,
     `Status: ${runState.status}`,
     `Git: ${runState.context?.gitSha || 'unknown'}`,
+    `Strategy: ${runState.context?.releaseStrategy || 'main'}`,
     `Version: ${runState.context?.version || 'unknown'}`,
     `Desc: ${runState.context?.desc || 'unknown'}`,
     'Stages:',
@@ -669,6 +674,7 @@ export function summarizeReleaseRun(runState) {
       version: runState?.context?.version || '',
       desc: runState?.context?.desc || '',
       envId: runState?.context?.envId || '',
+      releaseStrategy: runState?.context?.releaseStrategy || 'main',
     },
     stages,
   }
