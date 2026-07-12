@@ -244,6 +244,41 @@ test('formal mutation revalidation serializes concurrent Git fetch and fence che
   assert.equal(maxActive, 1)
 })
 
+test('one-shot formal release allows only its matching release-owned build-info after a successful build', async () => {
+  let buildPrepared = false
+  let matches = true
+  const state = () => validPublicReleaseState({
+    changedPaths: buildPrepared ? ['miniprogram/src/generated/build-info.ts'] : [],
+    allowReleaseBuildInfo: buildPrepared,
+    generatedBuildInfoMatches: matches,
+  })
+  const revalidate = releasePolicyModule.createFormalReleaseMutationRevalidator({
+    fetchOriginMain: async () => {},
+    readGitState: state,
+    releaseStrategy: 'full-current',
+    fullCurrentExplicit: true,
+    beforeRemoteMutation: async () => {},
+  })
+
+  await revalidate('artifact-build:miniprogram')
+  buildPrepared = true
+  await revalidate('cloud:user')
+
+  matches = false
+  await assert.rejects(() => revalidate('cloud:post'), /build-info/i)
+  matches = true
+  buildPrepared = false
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...state(),
+    changedPaths: ['miniprogram/src/generated/build-info.ts'],
+  }), /clean/i)
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...state(),
+    allowReleaseBuildInfo: true,
+    changedPaths: ['miniprogram/src/generated/build-info.ts', 'cloud/functions/user/index.ts'],
+  }), /unexpected/i)
+})
+
 test('CloudBase CLI retry treats its known includes TypeError as transient', () => {
   const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
   const retryClassifier = extractFunctionBlock(deployScript, 'function isTransientCloudBaseCliFailure')

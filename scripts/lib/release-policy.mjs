@@ -37,6 +37,7 @@ export function assertFormalReleaseGitState({
   originMainSha,
   changedPaths = [],
   publishOnly = false,
+  allowReleaseBuildInfo = false,
   generatedBuildInfoMatches = false,
 }) {
   if (normalizeWorkspacePath(cwd) !== normalizeWorkspacePath(CANONICAL_MAIN_WORKSPACE)) {
@@ -57,15 +58,15 @@ export function assertFormalReleaseGitState({
   }
 
   const changed = [...new Set(changedPaths.map((value) => String(value || '').replace(/\\/g, '/')).filter(Boolean))]
-  if (!publishOnly) {
+  if (!publishOnly && !allowReleaseBuildInfo) {
     if (changed.length > 0) throw new Error(`Formal release requires a clean worktree; changed: ${changed.join(', ')}`)
     return
   }
 
   const unexpected = changed.filter((path) => path !== GENERATED_BUILD_INFO_PATH)
-  if (unexpected.length > 0) throw new Error(`Formal release resume has unexpected worktree changes: ${unexpected.join(', ')}`)
+  if (unexpected.length > 0) throw new Error(`Formal release has unexpected worktree changes: ${unexpected.join(', ')}`)
   if (changed.includes(GENERATED_BUILD_INFO_PATH) && !generatedBuildInfoMatches) {
-    throw new Error('Formal release resume build-info does not match the prepared version/desc')
+    throw new Error('Formal release build-info does not match the prepared version/desc')
   }
 }
 

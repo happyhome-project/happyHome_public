@@ -187,7 +187,7 @@ function getGitOutput(command) {
   return execSync(command, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
 }
 
-function getFormalReleaseGitState({ publishOnly, version, desc, releaseStrategy }) {
+function getFormalReleaseGitState({ publishOnly, version, desc, releaseStrategy, allowReleaseBuildInfo = false }) {
   const changedPaths = new Set()
   for (const command of [
     'git diff --name-only --no-ext-diff',
@@ -208,6 +208,7 @@ function getFormalReleaseGitState({ publishOnly, version, desc, releaseStrategy 
     originMainSha: getGitOutput('git rev-parse origin/main'),
     changedPaths: [...changedPaths],
     publishOnly,
+    allowReleaseBuildInfo,
     generatedBuildInfoMatches: buildInfo.includes(version) && buildInfo.includes(desc),
   }
 }
@@ -1167,11 +1168,13 @@ async function runFormalRelease(options = {}) {
   const resume = forceResume || hasFlag('resume')
   const reuseCheck = releaseStageReuseCheck(releaseContext)
   const releaseGuard = prepareOnly ? null : createProductionReleaseGuard(releaseContext, formalPlan)
+  let oneShotBuildInfoPrepared = false
   const revalidateFormalMutation = prepareOnly ? null : createFormalReleaseMutationRevalidator({
     fetchOriginMain: async () => execSync('git fetch --quiet origin main', { cwd: ROOT, stdio: 'inherit' }),
     readGitState: () => getFormalReleaseGitState({
       releaseStrategy: 'full-current',
       publishOnly,
+      allowReleaseBuildInfo: oneShotBuildInfoPrepared,
       version: miniprogramUpload.version,
       desc: miniprogramUpload.desc,
     }),
@@ -1317,6 +1320,7 @@ async function runFormalRelease(options = {}) {
         ...miniprogramUpload,
         beforeRemoteMutation: async () => await revalidateFormalMutation('miniprogram-upload'),
       })
+      if (!publishOnly) oneShotBuildInfoPrepared = true
       const uploadEvidence = writeMiniprogramUploadEvidence({
         releaseRunId: releaseLedger.runId,
         version: miniprogramUpload.version,
