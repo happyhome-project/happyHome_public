@@ -119,12 +119,6 @@ import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
 
-interface SearchField {
-  fieldLabel: string
-  fieldType: string
-  preview: string
-}
-
 interface SearchItem {
   postId: string
   communityId: string
@@ -135,10 +129,8 @@ interface SearchItem {
   authorName?: string
   authorAvatarUrl?: string
   avatarUrl?: string
-  score: number
   matchedSnippet: string
   matchedField: string
-  matchedFields: SearchField[]
   createdAt: string
   updatedAt: string
 }

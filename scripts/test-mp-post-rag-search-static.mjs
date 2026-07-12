@@ -23,6 +23,7 @@ function assertNotIncludes(source, needle, label) {
 const homePage = readProjectFile('miniprogram', 'src', 'pages', 'index', 'index.vue')
 const searchPage = readProjectFile('miniprogram', 'src', 'pages', 'search', 'index.vue')
 const cloudApi = readProjectFile('miniprogram', 'src', 'api', 'cloud.ts')
+const searchApi = cloudApi.slice(cloudApi.indexOf('search: (params:'), cloudApi.indexOf('get: (postId:', cloudApi.indexOf('search: (params:')))
 
 assertIncludes(homePage, 'class="home-search home-search--primary"', 'home primary search entry')
 assertIncludes(homePage, 'class="home-search home-search--fixed"', 'home fixed search entry')
@@ -51,10 +52,19 @@ for (const forbidden of ['AI 回答', 'citations', 'citation-card', 'historyTerm
   assertNotIncludes(searchPage, forbidden, 'search page generated or fake discovery content')
 }
 
-assertIncludes(cloudApi, 'answer?: string', 'post.search optional answer compatibility type')
-assertIncludes(cloudApi, "mode: 'rag' | 'fallback' | 'no_answer'", 'post.search mode type')
-assertIncludes(cloudApi, 'citations?: Array<', 'post.search optional citations compatibility type')
-assertIncludes(cloudApi, 'matchedSnippet: string', 'post.search matched snippet type')
-assertIncludes(cloudApi, 'matchedField: string', 'post.search matched field type')
+assertIncludes(searchApi, 'protocolVersion: 2', 'post.search v2 protocol type')
+assertIncludes(searchApi, 'tookMs: number', 'post.search timing type')
+assertIncludes(searchApi, 'sectionId?: string', 'post.search optional section type')
+assertIncludes(searchApi, "mode?: 'rag' | 'no_answer'", 'post.search compatibility mode type')
+assertIncludes(searchApi, "answer?: ''", 'post.search deprecated empty answer type')
+assertIncludes(searchApi, 'citations?: []', 'post.search deprecated empty citations type')
+assertIncludes(searchApi, 'matchedSnippet: string', 'post.search matched snippet type')
+assertIncludes(searchApi, 'matchedField: string', 'post.search matched field type')
+for (const forbidden of ['fallback', 'score: number', 'matchedFields']) {
+  assertNotIncludes(searchApi, forbidden, 'post.search legacy result type')
+}
+for (const forbidden of ['interface SearchField', 'score: number', 'matchedFields']) {
+  assertNotIncludes(searchPage, forbidden, 'search page unused legacy item symbols')
+}
 
 console.log('[mp-post-rag-search-static] PASS')
