@@ -279,6 +279,22 @@ test('one-shot formal release allows only its matching release-owned build-info 
   }), /unexpected/i)
 })
 
+test('one-shot build-info allowance is enabled after build evidence and before downstream release mutations', () => {
+  const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
+  const release = extractFunctionBlock(deployScript, 'async function runFormalRelease')
+  const buildIndex = release.indexOf('await buildAndGateMiniprogramUpload')
+  const evidenceIndex = release.indexOf('await collectMiniprogramBuildGateEvidence', buildIndex)
+  const allowanceIndex = release.indexOf('oneShotBuildInfoPrepared = true')
+  const operationsIndex = release.indexOf("'release-operations'")
+  const uploadIndex = release.indexOf('await uploadBuiltMiniprogram')
+
+  assert(buildIndex >= 0)
+  assert(evidenceIndex > buildIndex)
+  assert(allowanceIndex > evidenceIndex)
+  assert(allowanceIndex < operationsIndex)
+  assert(allowanceIndex < uploadIndex)
+})
+
 test('CloudBase CLI retry treats its known includes TypeError as transient', () => {
   const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
   const retryClassifier = extractFunctionBlock(deployScript, 'function isTransientCloudBaseCliFailure')

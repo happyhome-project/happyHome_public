@@ -1206,8 +1206,10 @@ async function runFormalRelease(options = {}) {
         ...miniprogramUpload,
         releaseRunId: releaseLedger.runId,
       })
+      const evidence = await collectMiniprogramBuildGateEvidence(preparedEvidence)
+      if (!publishOnly) oneShotBuildInfoPrepared = true
       return {
-        evidence: await collectMiniprogramBuildGateEvidence(preparedEvidence),
+        evidence,
         result: { version: miniprogramUpload.version, desc: miniprogramUpload.desc },
       }
     })
@@ -1320,7 +1322,6 @@ async function runFormalRelease(options = {}) {
         ...miniprogramUpload,
         beforeRemoteMutation: async () => await revalidateFormalMutation('miniprogram-upload'),
       })
-      if (!publishOnly) oneShotBuildInfoPrepared = true
       const uploadEvidence = writeMiniprogramUploadEvidence({
         releaseRunId: releaseLedger.runId,
         version: miniprogramUpload.version,
