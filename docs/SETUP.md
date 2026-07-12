@@ -29,7 +29,7 @@ happyHome/
 │   └── .env.local              # 环境变量（VITE_CLOUD_API_URL / VITE_ADMIN_*）
 ├── cloudfunctions/       # 历史快照，不作为部署源
 ├── scripts/
-│   ├── deploy.mjs        # 一键部署（miniprogram-ci）
+│   ├── deploy.mjs        # 正式发布编排（CloudBase CLI/COS + DevTools upload）
 │   ├── test-mp.mjs       # 旧版小程序自动化测试（miniprogram-automator，需要 DevTools 支持 --auto-port）
 │   ├── check-devtools-automation.mjs # 当前 DevTools 自动化能力检查 + auto-replay
 │   └── set-super-admin.mjs # 初始化 superAdmin
@@ -39,6 +39,8 @@ happyHome/
 ```
 
 正式及手工云函数部署都必须使用 `cloud/dist/`。先运行 `npm.cmd --workspace cloud run build`，不要从历史 `cloudfunctions/` 目录部署。
+
+`miniprogram-ci` 只用于显式请求的 `--use-ci` 小程序上传 fallback，不是正式发布的默认路径。跨组件正式发布必须遵循 [release gate](./release-gate.md)。
 
 ---
 

@@ -55,6 +55,7 @@ Run `npm.cmd run docs:catalog` for the machine-readable catalog and `npm.cmd run
 
 ## Historical and delivery records
 
+- [2026-07-12 full-current public-main release](releases/2026-07-12-full-current-public-main.md): verified release identity and outcome; not an operational instruction.
 - [Adversarial testing preparation](adversarial-testing-prep.md): a point-in-time risk inventory; current commands remain in `TESTING.md` and `release-gate.md`.
 - `docs/superpowers/plans/` and `docs/superpowers/specs/`: point-in-time implementation plans and approved design specifications.
 - `docs/changes/`: change fragments describing individual branches or deliveries; status text must not be read as current branch state later.

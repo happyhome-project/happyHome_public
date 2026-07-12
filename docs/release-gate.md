@@ -7,19 +7,31 @@ This is the single repository source for cross-component formal release orchestr
 `full-current` is an explicit planning strategy for releasing the exact current public `main`. It ignores the previous production SHA only when calculating the release plan; it never clears, rewrites, or fabricates production state. Both stages must carry the same explicit flag and pinned identity:
 
 ```powershell
-$runId = '20260712T-full-current-public-main'
-$version = '2026.07.12.1'
-$desc = 'full-current public main'
+$runId = '<YYYYMMDDTHHMMSS>-full-current-public-main'
+$version = '1.0.<YYMMDDHHMM>'
+$desc = 'full-current-public-main-<short-sha>'
 node X:\Users\86136\.codex\skills\happyhome-release\scripts\happyhome-release-guard.mjs prepare -- --full-current --release-run-id=$runId --version=$version --desc=$desc
 node X:\Users\86136\.codex\skills\happyhome-release\scripts\happyhome-release-guard.mjs publish -- --full-current --resume --release-run-id=$runId --cloud-deploy-concurrency=2 --cloud-smoke-concurrency=3
 ```
 
-Prepare pins the run ID, version, description, exact Git SHA, build-info, package digest, and DevTools UI evidence without deploying or uploading. Publish must resume that exact ledger and strategy; omitting `--full-current`, changing the identity or digest, or losing any required evidence blocks the release. The existing production lock, CloudBase deployment, UI evidence, cloud smoke/log capture, fixture cleanup, admin-web deployment, digest verification, and mini-program upload rules below remain mandatory.
+Create a new run ID for every release attempt. The version and description must already match the checked-in `miniprogram/src/generated/build-info.ts` on clean public `main`; prepare and publish reuse the same values and run ID. Prepare pins that identity, the exact Git SHA, package digest, and DevTools UI evidence without deploying or uploading. Publish must resume that exact ledger and strategy; omitting `--full-current`, changing the identity or digest, or losing any required evidence blocks the release. The existing production lock, CloudBase deployment, UI evidence, cloud smoke/log capture, fixture cleanup, admin-web deployment, digest verification, and mini-program upload rules below remain mandatory.
 
 ## Before Upload
 
 - Review `main`, `origin/main`, recent commits, working tree status, and git author.
 - Fix risky changes before release, especially detail blank screens, login/profile first render, build-info, DevTools CLI, and deploy scripts.
+- Check the shared machine-local validation lease before running DevTools automation:
+
+```powershell
+npm.cmd run validation:lease:status
+```
+
+An existing lease blocks the protected command. An expired lease is still unknown, not abandoned. Do not stop another owner's process or DevTools, and do not move or delete its cache. Only after confirming the recorded owner process has exited may the release operator recover the exact stale owner explicitly:
+
+```powershell
+npm.cmd run validation:lease:recover -- --expected-owner-token=<uuid> --confirm-no-owner --reason="verified recorded owner process exited"
+```
+
 - Run the checked-in gates from the repository root:
 
 ```powershell
@@ -94,5 +106,18 @@ The admin fixture path invokes the `admin` function directly with a controlled `
 ## After Upload
 
 - Verify `miniprogram/src/generated/build-info.ts` and `mp-upload-info.json`.
+- Verify the completed release from the canonical main workspace:
+
+```powershell
+npm.cmd run release:status
+npm.cmd run release:lock -- status
+npm.cmd run release:pending
+```
+
+The remote production state shown by the lock status must match the exact run ID and Git SHA; the local ledger and upload evidence must be `passed` and match the version and description; the production lock must be absent; and `release:pending` must report `required=false`. If remote completion succeeded but the local ledger is incomplete, reconcile that exact run; never edit the ledger or production state by hand:
+
+```powershell
+npm.cmd run release:reconcile -- --run-id=$runId
+```
 - If WeChat public platform automation is unavailable, report that the uploaded development build still needs to be selected as the trial version in the WeChat backend.
 - Only claim true-device success when there is recorded replay evidence or user-provided phone test evidence.
