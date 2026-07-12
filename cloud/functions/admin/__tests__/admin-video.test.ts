@@ -14,7 +14,15 @@ jest.mock('../../../lib/db', () => ({
   increment: jest.fn(),
   replaceValue: jest.fn((value) => ({ __set: value })),
   removeField: jest.fn(() => ({ __remove: true })),
+  runTransaction: jest.fn(async callback => callback({
+    collection: (name: string) => ({
+      doc: (id: string) => ({ update: async ({ data }: any) => (require('../../../lib/db').updateById)(name, id, data) }),
+      add: async ({ data }: any) => ({ _id: await (require('../../../lib/db').create)(name, data) }),
+    }),
+  })),
 }))
+
+jest.mock('../../../lib/post-rag-outbox', () => ({ appendPostRagOutboxEvent: jest.fn() }))
 
 jest.mock('../../../lib/storage', () => ({
   deleteFile: jest.fn(),

@@ -13,7 +13,16 @@ jest.mock('../../../lib/db', () => ({
   softDelete: jest.fn(),
   replaceValue: jest.fn((value) => ({ __set: value })),
   removeField: jest.fn(() => ({ __remove: true })),
+  runTransaction: jest.fn(async (callback) => callback({
+    collection: (name: string) => ({
+      doc: (id: string) => ({ update: async ({ data }: any) => (require('../../../lib/db').updateById)(name, id, data) }),
+      add: async ({ data }: any) => ({ _id: await (require('../../../lib/db').create)(name, data) }),
+    }),
+  })),
+  transactionGetByIdOrNull: jest.fn(async (_transaction, name, id) => (require('../../../lib/db').getById)(name, id)),
 }))
+
+jest.mock('../../../lib/post-rag-outbox', () => ({ appendPostRagOutboxEvent: jest.fn() }))
 
 jest.mock('../../../lib/post-search', () => ({
   refreshPostSearchIndexById: jest.fn(),

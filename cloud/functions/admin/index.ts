@@ -40,6 +40,7 @@ import { syncMiniProgramUserRoleForAdminAccount } from '../../lib/admin-identity
 import { handleCreate as handleCommunityCreate } from '../community'
 import { MEMBER_STATE_COLLECTION } from '../../lib/membership-state'
 import { approveMembership, kickMembership, rejectMembership } from '../../lib/membership-transitions'
+import { appendPostRagOutboxEvent } from '../../lib/post-rag-outbox'
 import type {
   AdminAccount,
   AdminCtx,
@@ -953,7 +954,10 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
   if (action === 'community.approve') {
     const communityId = String(params.communityId || '').trim()
     if (!communityId) throw new Error('communityId 不能为空')
-    await db.updateById('communities', communityId, { status: 'active' })
+    await db.runTransaction(async transaction => {
+      await transaction.collection('communities').doc(communityId).update({ data: { status: 'active' } })
+      await appendPostRagOutboxEvent(transaction, { communityId, aggregateId: communityId, reasonCode: 'community.status_changed' })
+    })
 
     // ---- 自动给社区创建者发一个 communityAdmin 账号（按 userId=openId 去重）----
     // openId 在微信侧 per-app 永久稳定，重复"注册"不会变。同一个 creator 的多个社区
@@ -993,21 +997,30 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     return { success: true, adminAccount }
   }
   if (action === 'community.reject') {
-    await db.updateById('communities', params.communityId, { status: 'rejected' })
+    await db.runTransaction(async transaction => {
+      await transaction.collection('communities').doc(params.communityId).update({ data: { status: 'rejected' } })
+      await appendPostRagOutboxEvent(transaction, { communityId: params.communityId, aggregateId: params.communityId, reasonCode: 'community.status_changed' })
+    })
     return { success: true }
   }
   if (action === 'community.disable') {
     const community = await db.getById('communities', params.communityId) as Community | null
     if (!community) throw new Error('community not found')
     if (community.status !== 'active') throw new Error('only active community can be disabled')
-    await db.updateById('communities', params.communityId, { status: 'disabled' })
+    await db.runTransaction(async transaction => {
+      await transaction.collection('communities').doc(params.communityId).update({ data: { status: 'disabled' } })
+      await appendPostRagOutboxEvent(transaction, { communityId: params.communityId, aggregateId: params.communityId, reasonCode: 'community.status_changed' })
+    })
     return { success: true }
   }
   if (action === 'community.restore') {
     const community = await db.getById('communities', params.communityId) as Community | null
     if (!community) throw new Error('community not found')
     if (community.status !== 'disabled') throw new Error('only disabled community can be restored')
-    await db.updateById('communities', params.communityId, { status: 'active' })
+    await db.runTransaction(async transaction => {
+      await transaction.collection('communities').doc(params.communityId).update({ data: { status: 'active' } })
+      await appendPostRagOutboxEvent(transaction, { communityId: params.communityId, aggregateId: params.communityId, reasonCode: 'community.status_changed' })
+    })
     return { success: true }
   }
   if (action === 'community.listDisabled') {
@@ -1025,7 +1038,10 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (params.joinType === 'open' || params.joinType === 'approval') updates.joinType = params.joinType
     else if (typeof params.joinType !== 'undefined') throw new Error('joinType must be open or approval')
     if (Object.keys(updates).length === 0) throw new Error('没有可更新字段')
-    await db.updateById('communities', communityId, updates)
+    await db.runTransaction(async transaction => {
+      await transaction.collection('communities').doc(communityId).update({ data: updates })
+      await appendPostRagOutboxEvent(transaction, { communityId, aggregateId: communityId, reasonCode: 'community.metadata_changed' })
+    })
     return { success: true }
   }
   if (action === 'community.updateHomeBanners') {
@@ -1089,7 +1105,11 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (typeof params.enableLike === 'boolean') updates.enableLike = params.enableLike
     if (updates.type === 'evergreen') updates.status = 'active'
     if (Object.keys(updates).length === 0) throw new Error('没有可更新字段')
-    await db.updateById('sections', sectionId, updates)
+    const sectionBefore = await db.getById('sections', sectionId) as any
+    await db.runTransaction(async transaction => {
+      await transaction.collection('sections').doc(sectionId).update({ data: updates })
+      await appendPostRagOutboxEvent(transaction, { communityId: String(sectionBefore?.communityId || params.communityId || ''), aggregateId: sectionId, reasonCode: 'section.metadata_changed' })
+    })
     await enqueuePostRagJobsForSection(sectionId, 'section.updateMeta')
     await backfillPostSearchIndexesForSection(sectionId)
     return { success: true }
@@ -1105,7 +1125,10 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if ((section.type || 'evergreen') === 'evergreen' && params.status !== 'active') {
       throw new Error('evergreen 板块只能保持 active')
     }
-    await db.updateById('sections', sectionId, { status: params.status })
+    await db.runTransaction(async transaction => {
+      await transaction.collection('sections').doc(sectionId).update({ data: { status: params.status } })
+      await appendPostRagOutboxEvent(transaction, { communityId: String((section as any).communityId || ''), aggregateId: sectionId, reasonCode: 'section.status_changed' })
+    })
     await enqueuePostRagJobsForSection(sectionId, 'section.updateStatus')
     await backfillPostSearchIndexesForSection(sectionId)
     return { success: true }
@@ -1164,7 +1187,10 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       throw new Error('板块已有内容，本次结构变更需要确认')
     }
 
-    await db.updateById('sections', sectionId, { widgets })
+    await db.runTransaction(async transaction => {
+      await transaction.collection('sections').doc(sectionId).update({ data: { widgets } })
+      await appendPostRagOutboxEvent(transaction, { communityId: String(currentSection.communityId || ''), aggregateId: sectionId, reasonCode: 'section.widgets_changed' })
+    })
     if (shouldReindexExistingPosts) {
       await enqueuePostRagJobsForSection(sectionId, 'section.updateWidgets', activePosts)
     }
@@ -1339,14 +1365,12 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       await removePostSearchIndex(postId)
       return { success: true, alreadyDeleted: true }
     }
-    await db.updateById('posts', postId, {
-      status: 'deleted',
-      isPinned: false,
-      pinnedAt: '',
-      pinnedByAccountId: '',
-      isFeatured: false,
-      featuredAt: '',
-      featuredByAccountId: '',
+    await db.runTransaction(async transaction => {
+      await transaction.collection('posts').doc(postId).update({ data: {
+        status: 'deleted', isPinned: false, pinnedAt: '', pinnedByAccountId: '',
+        isFeatured: false, featuredAt: '', featuredByAccountId: '',
+      } })
+      await appendPostRagOutboxEvent(transaction, { communityId: String(post.communityId || ''), aggregateId: postId, reasonCode: 'post.deleted' })
     })
     await enqueuePostRagJob({
       postId,
@@ -1460,15 +1484,13 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
 
     const updatedAt = new Date().toISOString()
     if (post.auditStatus === 'pass' || !post.auditStatus) {
-      await db.updateById('posts', postId, {
-        pendingContent: db.replaceValue(merged),
-        pendingAuditStatus: 'pending',
-        pendingAuditReason: 'content audit pending',
-        pendingSubmittedAt: updatedAt,
-        updatedAt,
-        adminEditedAt: updatedAt,
-        adminEditedByAccountId: ctx.accountId,
-        adminEditedByUsername: ctx.username,
+      await db.runTransaction(async transaction => {
+        await transaction.collection('posts').doc(postId).update({ data: {
+          pendingContent: db.replaceValue(merged), pendingAuditStatus: 'pending', pendingAuditReason: 'content audit pending',
+          pendingSubmittedAt: updatedAt, updatedAt, adminEditedAt: updatedAt,
+          adminEditedByAccountId: ctx.accountId, adminEditedByUsername: ctx.username,
+        } })
+        await appendPostRagOutboxEvent(transaction, { communityId: post.communityId, aggregateId: postId, reasonCode: 'post.updated', now: updatedAt })
       })
       const audit = await auditAndApply({
         postId,
@@ -1479,19 +1501,18 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
         authorId: ctx.userId,
         source: 'admin',
         contentSlot: 'pendingContent',
+        postSnapshot: { ...post, pendingContent: merged } as any,
       })
       return { success: true, updatedAt, adminEditedAt: updatedAt, auditStatus: audit.status, auditReason: audit.reason }
     }
 
-    await db.updateById('posts', postId, {
-      content: db.replaceValue(merged),
-      auditStatus: 'pending',
-      auditReason: 'content audit pending',
-      auditUpdatedAt: updatedAt,
-      updatedAt,
-      adminEditedAt: updatedAt,
-      adminEditedByAccountId: ctx.accountId,
-      adminEditedByUsername: ctx.username,
+    await db.runTransaction(async transaction => {
+      await transaction.collection('posts').doc(postId).update({ data: {
+        content: db.replaceValue(merged), auditStatus: 'pending', auditReason: 'content audit pending',
+        auditUpdatedAt: updatedAt, updatedAt, adminEditedAt: updatedAt,
+        adminEditedByAccountId: ctx.accountId, adminEditedByUsername: ctx.username,
+      } })
+      await appendPostRagOutboxEvent(transaction, { communityId: post.communityId, aggregateId: postId, reasonCode: 'post.updated', now: updatedAt })
     })
     const audit = await auditAndApply({
       postId,
@@ -1502,6 +1523,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       authorId: ctx.userId,
       source: 'admin',
       contentSlot: 'content',
+      postSnapshot: { ...post, content: merged } as any,
     })
     return { success: true, updatedAt, adminEditedAt: updatedAt, auditStatus: audit.status, auditReason: audit.reason }
   }
@@ -1766,7 +1788,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     validateRequiredWidgets(section, sanitized, { allowAdminOnly: true })
     validateContentValues(section, sanitized, { allowAdminOnly: true })
     const now = new Date().toISOString()
-    const postId = await db.create('posts', {
+    const postData = {
       communityId,
       sectionId,
       authorId: ctx.userId,
@@ -1784,6 +1806,11 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       adminCreatedByUsername: ctx.username,
       createdAt: now,
       updatedAt: now,
+    }
+    const postId = await db.runTransaction(async transaction => {
+      const created = await transaction.collection('posts').add({ data: postData })
+      await appendPostRagOutboxEvent(transaction, { communityId, aggregateId: created._id, reasonCode: 'post.created', now })
+      return created._id
     })
     const audit = await auditAndApply({
       postId,
@@ -1794,6 +1821,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       authorId: ctx.userId,
       source: 'admin',
       contentSlot: 'content',
+      postSnapshot: { _id: postId, ...postData } as any,
     })
     return { postId, auditStatus: audit.status, auditReason: audit.reason }
   }
@@ -1852,6 +1880,10 @@ async function hardDeleteCommunity(communityId: string, community: Community) {
   }
 
   for (const post of posts) {
+    await db.runTransaction(async transaction => {
+      await transaction.collection('posts').doc((post as any)._id).remove()
+      await appendPostRagOutboxEvent(transaction, { communityId, aggregateId: String((post as any)._id || ''), reasonCode: 'post.deleted' })
+    })
     await enqueuePostRagJob({
       postId: String((post as any)._id || ''),
       communityId,
@@ -1860,7 +1892,6 @@ async function hardDeleteCommunity(communityId: string, community: Community) {
       reason: 'community.hardDelete',
     })
     await removePostSearchIndex((post as any)._id)
-    await db.removeById('posts', (post as any)._id)
   }
 
   const attendanceRecords = await db.query(ATTENDANCE_COLLECTION, { communityId })

@@ -16,6 +16,7 @@ import {
 } from '../../shared/activity-invite'
 import { removePostSearchIndex } from '../../lib/post-search'
 import { enqueuePostRagJob, searchPostsWithRag } from '../../lib/post-rag'
+import { appendPostRagOutboxEvent } from '../../lib/post-rag-outbox'
 import type {
   AttendancePreviewUser,
   AttendanceSummary,
@@ -522,7 +523,7 @@ export async function handleCreate(
   validateContentValues(section, sanitizedContent)
 
   const now = new Date().toISOString()
-  const postId = await db.create('posts', {
+  const postData = {
     communityId: params.communityId,
     sectionId: params.sectionId,
     authorId: openid,
@@ -537,6 +538,11 @@ export async function handleCreate(
     isFeatured: false,
     createdAt: now,
     updatedAt: now,
+  }
+  const postId = await db.runTransaction(async transaction => {
+    const created = await transaction.collection('posts').add({ data: postData })
+    await appendPostRagOutboxEvent(transaction, { communityId: params.communityId, aggregateId: created._id, reasonCode: 'post.created', now })
+    return created._id
   })
 
   const audit = await auditAndApply({
@@ -607,7 +613,7 @@ export async function handleCreateActivityInvite(
   const now = new Date().toISOString()
   const originTitle = resolveSourceTitle(sourcePost, sourceSection)
   const eventStartsAt = String(sanitizedContent[ACTIVITY_INVITE_WIDGET_IDS.startsAt] || '').trim()
-  const postId = await db.create('posts', {
+  const inviteData = {
     communityId: sourcePost.communityId,
     sectionId: targetSection._id,
     authorId: openid,
@@ -628,6 +634,11 @@ export async function handleCreateActivityInvite(
     eventStartsAt,
     createdAt: now,
     updatedAt: now,
+  }
+  const postId = await db.runTransaction(async transaction => {
+    const created = await transaction.collection('posts').add({ data: inviteData })
+    await appendPostRagOutboxEvent(transaction, { communityId: sourcePost.communityId, aggregateId: created._id, reasonCode: 'post.created', now })
+    return created._id
   })
 
   const audit = await auditAndApply({
@@ -747,14 +758,12 @@ export async function handleDelete(params: { postId: string }, openid: string) {
   if (post.status === 'deleted') throw new Error('帖子已删除')
   if (post.authorId !== openid) throw new Error('无权删除')
 
-  await db.updateById('posts', params.postId, {
-    status: 'deleted',
-    isPinned: false,
-    pinnedAt: '',
-    pinnedByAccountId: '',
-    isFeatured: false,
-    featuredAt: '',
-    featuredByAccountId: '',
+  await db.runTransaction(async transaction => {
+    await transaction.collection('posts').doc(params.postId).update({ data: {
+      status: 'deleted', isPinned: false, pinnedAt: '', pinnedByAccountId: '',
+      isFeatured: false, featuredAt: '', featuredByAccountId: '',
+    } })
+    await appendPostRagOutboxEvent(transaction, { communityId: String(post.communityId || ''), aggregateId: params.postId, reasonCode: 'post.deleted', now: new Date().toISOString() })
   })
   await enqueuePostRagJob({
     postId: params.postId,
@@ -793,12 +802,15 @@ export async function handleUpdate(
 
   const updatedAt = new Date().toISOString()
   if (post.auditStatus === 'pass' || !post.auditStatus) {
-    await db.updateById('posts', params.postId, {
+    await db.runTransaction(async transaction => {
+      await transaction.collection('posts').doc(params.postId).update({ data: {
       pendingContent: db.replaceValue(sanitizedContent),
       pendingAuditStatus: 'pending',
       pendingAuditReason: 'content audit pending',
       pendingSubmittedAt: updatedAt,
       updatedAt,
+      } })
+      await appendPostRagOutboxEvent(transaction, { communityId: post.communityId, aggregateId: params.postId, reasonCode: 'post.updated', now: updatedAt })
     })
     const audit = await auditAndApply({
       postId: params.postId,
@@ -813,12 +825,15 @@ export async function handleUpdate(
     return { success: true, updatedAt, auditStatus: audit.status, auditReason: audit.reason }
   }
 
-  await db.updateById('posts', params.postId, {
+  await db.runTransaction(async transaction => {
+    await transaction.collection('posts').doc(params.postId).update({ data: {
     content: db.replaceValue(sanitizedContent),
     auditStatus: 'pending',
     auditReason: 'content audit pending',
     auditUpdatedAt: updatedAt,
     updatedAt,
+    } })
+    await appendPostRagOutboxEvent(transaction, { communityId: post.communityId, aggregateId: params.postId, reasonCode: 'post.updated', now: updatedAt })
   })
   const audit = await auditAndApply({
     postId: params.postId,

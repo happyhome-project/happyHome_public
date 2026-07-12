@@ -43,6 +43,8 @@ jest.mock('../../../lib/post-rag', () => ({
   reconcilePostRagJobsForCommunityBatch: jest.fn(),
 }))
 
+jest.mock('../../../lib/post-rag-outbox', () => ({ appendPostRagOutboxEvent: jest.fn() }))
+
 jest.mock('uuid', () => ({
   v4: jest.fn().mockReturnValue('mocked-uuid'),
 }))
@@ -71,6 +73,16 @@ const main = (event: any) => rawMain({
 
 beforeEach(() => {
   jest.resetAllMocks()
+  ;(db.runTransaction as jest.Mock).mockImplementation(async (callback) => callback({
+    collection: (name: string) => ({
+      doc: (id: string) => ({
+        get: async () => ({ data: await (db.getById as jest.Mock)(name, id) }),
+        update: async ({ data }: any) => (db.updateById as jest.Mock)(name, id, data),
+        remove: async () => (db.removeById as jest.Mock)(name, id),
+      }),
+      add: async ({ data }: any) => ({ _id: await (db.create as jest.Mock)(name, data) }),
+    }),
+  }))
   ;(db.transactionGetByIdOrNull as jest.Mock).mockImplementation(async (transaction, collectionName, id) => {
     const response = await transaction.collection(collectionName).doc(id).get()
     return response?.data || null
