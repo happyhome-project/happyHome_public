@@ -1,9 +1,34 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
+const callWebFunction = vi.fn()
+
+vi.mock('../web-cloudbase', () => ({
+  callFunction: callWebFunction,
+}))
+
 describe('callCloud', () => {
   afterEach(() => {
+    callWebFunction.mockReset()
     vi.resetModules()
     vi.unstubAllGlobals()
+  })
+
+  test('routes H5 calls through the CloudBase Web SDK without gateway credentials', async () => {
+    callWebFunction.mockResolvedValue({ post: { _id: 'p1' } })
+    const fetch = vi.fn()
+    const request = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    vi.stubGlobal('uni', {
+      getStorageSync: vi.fn(() => 'legacy-test-openid'),
+      request,
+    })
+
+    const { callCloud } = await import('../cloud')
+
+    await expect(callCloud('post', 'get', { postId: 'p1' })).resolves.toEqual({ post: { _id: 'p1' } })
+    expect(callWebFunction).toHaveBeenCalledWith('post', { action: 'get', postId: 'p1' })
+    expect(fetch).not.toHaveBeenCalled()
+    expect(request).not.toHaveBeenCalled()
   })
 
   test('sends flat wx.cloud payload matching cloud function main()', async () => {

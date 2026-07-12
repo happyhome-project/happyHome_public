@@ -1,6 +1,7 @@
 <template>
   <view
     class="profile-page"
+    data-testid="profile-page"
     :class="{ 'profile-page--editing': isEditingProfile || showManualLoginForm }"
   >
     <view class="profile-custom-nav" :style="profileCustomNavStyle">
@@ -33,6 +34,11 @@
           <text>编辑</text>
           <image class="profile-edit-arrow" src="/static/profile/edit-arrow.svg" mode="aspectFit" />
         </view>
+        <!-- #ifdef H5 -->
+        <button class="profile-web-logout" :disabled="webLogoutLock.busy.value" @tap="webLogoutLock.run()">
+          {{ webLogoutLock.busy.value ? '退出中...' : '退出登录' }}
+        </button>
+        <!-- #endif -->
       </template>
 
       <!-- 编辑态：头像 + 昵称表单（chooseAvatar 明显可见） -->
@@ -103,6 +109,18 @@
       <template v-else-if="showManualLoginForm">
         <view class="login-form">
           <text class="form-title">登录</text>
+          <!-- #ifdef H5 -->
+          <text class="form-hint">使用 CloudBase Web 账号登录</text>
+          <view class="input-wrap">
+            <text class="input-label">用户名</text>
+            <input v-model="webUsername" data-testid="h5-login-username" autocomplete="username" aria-label="用户名" placeholder="请输入用户名" placeholder-class="input-placeholder" class="input" />
+          </view>
+          <view class="input-wrap">
+            <text class="input-label">密码</text>
+            <input v-model="webPassword" data-testid="h5-login-password" password autocomplete="current-password" aria-label="密码" placeholder="请输入密码" placeholder-class="input-placeholder" class="input" />
+          </view>
+          <!-- #endif -->
+          <!-- #ifndef H5 -->
           <text class="form-hint">当前环境不支持微信原生登录，请手动填写昵称后继续使用社区功能</text>
 
           <view class="avatar-row">
@@ -112,10 +130,12 @@
             />
             <text class="avatar-hint">默认头像</text>
           </view>
+          <!-- #endif -->
 
           <view class="input-wrap">
             <input
               type="nickname"
+              data-testid="h5-login-nickname"
               :value="formNickName"
               placeholder="请输入昵称"
               placeholder-class="input-placeholder"
@@ -127,20 +147,23 @@
           </view>
 
           <view class="form-actions">
-            <button size="mini" @tap="showManualLoginForm = false">取消</button>
+            <button size="mini" @tap="closeManualLoginForm">取消</button>
             <button
               size="mini"
               :disabled="!canSubmitForm || submitFormLock.busy.value"
               class="primary-btn"
+              data-testid="h5-login-submit"
               @tap="submitFormLock.run()"
             >
               {{ submitFormLock.busy.value ? '登录中...' : '确认登录' }}
             </button>
+            <!-- #ifndef H5 -->
             <button
               size="mini"
               class="dev-btn"
               @tap="showDevLogin = true"
             >DEV 登录</button>
+            <!-- #endif -->
           </view>
         </view>
       </template>
@@ -160,7 +183,9 @@
           >微信登录</button>
           <view class="login-alt-row">
             <text class="login-alt-hint">使用其他账号？</text>
+            <!-- #ifndef H5 -->
             <text class="login-alt-link" @tap.stop="showDevLogin = true">DEV 登录</text>
+            <!-- #endif -->
           </view>
         </view>
         <button
@@ -314,6 +339,7 @@
       </view>
     </view>
 
+    <!-- #ifndef H5 -->
     <!-- DEV login modal -->
     <view v-if="showDevLogin" class="dev-modal-mask" @tap="showDevLogin = false">
       <view class="dev-modal" @tap.stop>
@@ -333,6 +359,7 @@
         </view>
       </view>
     </view>
+    <!-- #endif -->
 
     <!-- Pending approvals (admin only) -->
     <view v-if="pendingApprovalCount > 0" class="section approval-section">
@@ -415,6 +442,7 @@ import { onPullDownRefresh, onShareAppMessage, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { communityApi, memberApi, notificationApi, type ApprovalNotificationEventType } from '../../api/cloud'
+import { uploadCloudFile } from '../../api/storage'
 import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
@@ -524,6 +552,8 @@ const approvalReminderState = computed(() => buildApprovalReminderState({
 // ── 登录 / 编辑资料表单状态 ──
 const isEditingProfile = ref(false)
 const showManualLoginForm = ref(false)
+const webUsername = ref('')
+const webPassword = ref('')
 const showNickConfirm = ref(false)    // 登录流程：chooseAvatar 后弹出昵称确认浮层
 const formNickName = ref('')
 const formAvatarCloudUrl = ref('')    // 已上传到 COS 的 cloud://… URL（持久）
@@ -551,7 +581,12 @@ const supportsChooseAvatar = computed(() => {
 })
 
 // 表单是否可提交：至少要有昵称
-const canSubmitForm = computed(() => formNickName.value.trim().length > 0)
+const canSubmitForm = computed(() => {
+  if (isH5Runtime() && showManualLoginForm.value && !isEditingProfile.value) {
+    return webUsername.value.trim().length > 0 && webPassword.value.length > 0 && formNickName.value.trim().length > 0
+  }
+  return formNickName.value.trim().length > 0
+})
 const profileShellState = computed(() => {
   if (isEditingProfile.value) return 'editing'
   return userStore.isLoggedIn ? 'logged-in' : 'logged-out'
@@ -659,21 +694,11 @@ function onNickBlur(e: any) {
 async function uploadAvatarIfAny(): Promise<string> {
   if (!formAvatarTempPath.value) return formAvatarCloudUrl.value || ''
   try {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore
-    if (typeof wx === 'undefined' || !wx.cloud?.uploadFile) return ''
-    const ext = formAvatarTempPath.value.split('.').pop()?.split('?')[0] || 'jpg'
+    const ext = formAvatarTempPath.value.startsWith('blob:')
+      ? 'jpg'
+      : (formAvatarTempPath.value.split('.').pop()?.split('?')[0] || 'jpg')
     const cloudPath = `avatars/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
-    const res: any = await new Promise((resolve, reject) => {
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      wx.cloud.uploadFile({
-        cloudPath,
-        filePath: formAvatarTempPath.value,
-        success: resolve,
-        fail: reject,
-      })
-    })
+    const res = await uploadCloudFile({ cloudPath, source: formAvatarTempPath.value })
     return String(res?.fileID || '')
   } catch (err) {
     console.warn('[profile] 头像上传失败，使用默认头像兜底', err)
@@ -700,7 +725,15 @@ const submitFormLock = useBusyLock(async () => {
   try {
     const avatarUrl = await uploadAvatarIfAny()
     suppressNextLoginStateRefresh = true
-    await userStore.login({ nickName: formNickName.value, avatarUrl })
+    if (isH5Runtime() && !wasEditingProfile) {
+      await userStore.webLogin({
+        username: webUsername.value,
+        password: webPassword.value,
+        nickName: formNickName.value,
+      })
+    } else {
+      await userStore.login({ nickName: formNickName.value, avatarUrl })
+    }
     markCurrentLoginStateRefreshHandled()
     if (wasEditingProfile) await loadProfileDataAfterRoleResolved('profileSaved')
     else await loadProfileDataAfterRoleResolved('loginSaved')
@@ -709,6 +742,7 @@ const submitFormLock = useBusyLock(async () => {
     showNickConfirm.value = false
     formAvatarTempPath.value = ''
     formAvatarCloudUrl.value = ''
+    webPassword.value = ''
     const restoredShare = !wasEditingProfile && restorePendingShareCommunity()
     if (!restoredShare) {
       uni.showToast({ title: wasEditingProfile ? '已保存' : '登录成功', icon: 'success' })
@@ -720,6 +754,20 @@ const submitFormLock = useBusyLock(async () => {
       showCancel: false,
     })
     suppressNextLoginStateRefresh = false
+    webPassword.value = ''
+  }
+})
+
+function closeManualLoginForm() {
+  showManualLoginForm.value = false
+  webPassword.value = ''
+}
+
+const webLogoutLock = useBusyLock(async () => {
+  try {
+    await userStore.logout()
+  } catch (e: any) {
+    uni.showModal({ title: '退出登录失败', content: e?.message || '请重试', showCancel: false })
   }
 })
 
@@ -783,6 +831,7 @@ function updateProfileNavMetrics() {
 function openLoginEntry() {
   if (userStore.isLoggedIn) return
   if (supportsChooseAvatar.value) return
+  webPassword.value = ''
   showManualLoginForm.value = true
 }
 
@@ -1916,6 +1965,24 @@ onShareAppMessage(() => {
   width: 36rpx;
   height: 36rpx;
   display: block;
+}
+
+.profile-web-logout {
+  position: absolute;
+  right: 0;
+  bottom: 12rpx;
+  height: 48rpx;
+  margin: 0;
+  padding: 0 16rpx;
+  border: 0;
+  background: transparent;
+  color: var(--hh-color-text-secondary);
+  font-size: var(--hh-text-body-base-size);
+  line-height: 48rpx;
+}
+
+.profile-web-logout::after {
+  border: 0;
 }
 
 .profile-login-actions {

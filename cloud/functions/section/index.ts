@@ -199,8 +199,8 @@ export async function handleUpdate(
   return { success: true }
 }
 
-export const main = async (event: any) => {
-  const openid = resolveOpenId(event)
+export const main = async (event: any, context?: any) => {
+  const openid = resolveOpenId(event, context)
   const { action, _testOpenid, ...params } = event
   if (action === 'create') return handleCreate(params, openid)
   if (action === 'get') return handleGet(params, openid)

@@ -3,6 +3,7 @@ import { userApi } from '../api/cloud'
 import { useCommunityStore } from './community'
 
 const STORAGE_KEY = 'user_store'
+let webSessionGeneration = 0
 
 // uni-app exposes uni.getStorageSync in both H5 and miniprogram — safer than wx.*
 function storageGet(k: string): any {
@@ -13,6 +14,29 @@ function storageSet(k: string, v: any): void {
 }
 function storageRemove(k: string): void {
   try { uni.removeStorageSync(k) } catch (_error) {}
+}
+
+function isWebRuntime(): boolean {
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore wx is injected by the mini-program runtime.
+  return typeof wx === 'undefined' || !wx?.cloud?.callFunction
+}
+
+function loadWebAuth() {
+  // #ifdef H5
+  return import('../api/web-cloudbase')
+  // #endif
+  // #ifndef H5
+  throw new Error('Web authentication is only available in the H5 build')
+  // #endif
+}
+
+function errorMessage(error: any): string {
+  return String(error?.message || error || 'unknown error')
+}
+
+function supersededError() {
+  return new Error('Web session operation was superseded')
 }
 
 export const useUserStore = defineStore('user', {
@@ -26,6 +50,26 @@ export const useUserStore = defineStore('user', {
     backgroundFetchTokenExpiresAt: '' as string,
   }),
   actions: {
+    clearLocalSession() {
+      webSessionGeneration += 1
+      this.openId = ''
+      this.nickName = ''
+      this.avatarUrl = ''
+      this.role = 'user'
+      this.isLoggedIn = false
+      this.backgroundFetchToken = ''
+      this.backgroundFetchTokenExpiresAt = ''
+      storageRemove(STORAGE_KEY)
+      this.clearBackgroundFetchToken()
+      storageRemove('dev-gateway')
+      storageRemove('test-openid')
+      try {
+        const cs = useCommunityStore()
+        cs.clearCommunityState()
+        cs.myCommunities = []
+        cs.membershipByCommunity = {}
+      } catch (_error) {}
+    },
     loadFromStorage() {
       const saved = storageGet(STORAGE_KEY)
       if (saved) Object.assign(this, saved)
@@ -98,6 +142,85 @@ export const useUserStore = defineStore('user', {
       this.saveToStorage()
       this.syncBackgroundFetchToken()
     },
+    async webLogin({ username, password, nickName }: { username: string; password: string; nickName: string }) {
+      const name = String(nickName || '').trim()
+      if (!name) throw new Error('请填写昵称')
+      this.clearLocalSession()
+      const generation = webSessionGeneration
+      const webAuth = await loadWebAuth()
+      if (generation !== webSessionGeneration) throw supersededError()
+      try {
+        await webAuth.signIn({ username: String(username || '').trim(), password })
+        if (generation !== webSessionGeneration) throw supersededError()
+        const result = await userApi.login({ nickName: name, avatarUrl: '' })
+        if (generation !== webSessionGeneration) throw supersededError()
+        this.openId = result.user._id
+        this.nickName = result.user.nickName || name
+        this.avatarUrl = result.user.avatarUrl || ''
+        this.role = result.user.role
+        this.isLoggedIn = true
+        this.backgroundFetchToken = result.user.backgroundFetchToken || ''
+        this.backgroundFetchTokenExpiresAt = result.user.backgroundFetchTokenExpiresAt || ''
+        this.saveToStorage()
+        this.syncBackgroundFetchToken()
+      } catch (error) {
+        if (generation !== webSessionGeneration) throw error
+        let rollbackError: any = null
+        try { await webAuth.signOut() } catch (signOutError) { rollbackError = signOutError }
+        if (generation !== webSessionGeneration) throw error
+        this.clearLocalSession()
+        if (rollbackError) {
+          const combined = new Error(`${errorMessage(error)}; Web signOut rollback failed: ${errorMessage(rollbackError)}`)
+          ;(combined as any).cause = error
+          ;(combined as any).rollbackError = rollbackError
+          throw combined
+        }
+        throw error
+      }
+    },
+    async restoreWebSession() {
+      const generation = ++webSessionGeneration
+      const savedNickName = String(this.nickName || '').trim()
+      try {
+        const webAuth = await loadWebAuth()
+        if (generation !== webSessionGeneration) return false
+        const session = await webAuth.getLoginState()
+        if (generation !== webSessionGeneration) return false
+        if (!session) {
+          this.clearLocalSession()
+          return false
+        }
+        if (!savedNickName) {
+          try {
+            await webAuth.signOut()
+          } finally {
+            if (generation === webSessionGeneration) this.clearLocalSession()
+          }
+          return false
+        }
+        const result = await userApi.login({ nickName: savedNickName, avatarUrl: this.avatarUrl || '' })
+        if (generation !== webSessionGeneration) return false
+        this.openId = result.user._id
+        this.nickName = result.user.nickName || savedNickName
+        this.avatarUrl = result.user.avatarUrl || this.avatarUrl || ''
+        this.role = result.user.role
+        this.isLoggedIn = true
+        this.backgroundFetchToken = result.user.backgroundFetchToken || ''
+        this.backgroundFetchTokenExpiresAt = result.user.backgroundFetchTokenExpiresAt || ''
+        this.saveToStorage()
+        this.syncBackgroundFetchToken()
+        await useCommunityStore().loadMyCommunities({
+          loadSections: false,
+          shouldApply: () => generation === webSessionGeneration,
+        })
+        if (generation !== webSessionGeneration) return false
+        return true
+      } catch (error) {
+        if (generation !== webSessionGeneration) return false
+        this.clearLocalSession()
+        throw error
+      }
+    },
     async refreshLoginRole() {
       if (!this.isLoggedIn) return
       const name = (this.nickName || '').trim()
@@ -138,29 +261,16 @@ export const useUserStore = defineStore('user', {
       this.saveToStorage()
       this.syncBackgroundFetchToken()
     },
-    logout() {
-      this.openId = ''
-      this.nickName = ''
-      this.avatarUrl = ''
-      this.role = 'user'
-      this.isLoggedIn = false
-      this.backgroundFetchToken = ''
-      this.backgroundFetchTokenExpiresAt = ''
-      storageRemove(STORAGE_KEY)
-      this.clearBackgroundFetchToken()
-      // Also clear DEV mode flags so next login path is clean
-      storageRemove('dev-gateway')
-      storageRemove('test-openid')
-      // 连带清掉社区 store —— 否则登出后其他页面可能读到旧的
-      // currentCommunityId / myCommunities 而继续对后端发请求
+    async logout() {
+      const generation = ++webSessionGeneration
       try {
-        const cs = useCommunityStore()
-        cs.clearCommunityState()
-        cs.myCommunities = []
-        cs.membershipByCommunity = {}
-      } catch (_error) {
-        /* Pinia root 还未初始化时 useCommunityStore() 会 throw，
-         * 这种情况下本来就没数据需要清，直接忽略 */
+        if (isWebRuntime()) {
+          const webAuth = await loadWebAuth()
+          if (generation !== webSessionGeneration) return
+          await webAuth.signOut()
+        }
+      } finally {
+        if (generation === webSessionGeneration) this.clearLocalSession()
       }
     },
   },

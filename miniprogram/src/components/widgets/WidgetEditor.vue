@@ -25,6 +25,7 @@
       class="input-wrap"
     >
       <input
+        :data-testid="`widget-input-${widget.widgetId}`"
         :value="modelValue as string"
         :placeholder="inputPlaceholder"
         placeholder-class="input-placeholder"
@@ -82,9 +83,19 @@
         <image :src="img" mode="aspectFill" class="thumb" />
         <view class="thumb-del" @tap="removeImage(i)">×</view>
       </view>
-      <view class="add-btn" @tap="addImage">
+      <!-- #ifdef H5 -->
+      <input
+        type="file"
+        accept="image/*"
+        :data-testid="`widget-image-input-${widget.widgetId}`"
+        @change="onH5ImageChange"
+      />
+      <!-- #endif -->
+      <!-- #ifndef H5 -->
+      <view class="add-btn" :data-testid="`widget-image-trigger-${widget.widgetId}`" @tap="addImage">
         <text class="add-icon">+</text>
       </view>
+      <!-- #endif -->
     </view>
 
     <view
@@ -140,6 +151,7 @@
 
     <view v-else-if="widget.type === 'rich_text'" class="textarea-wrap">
       <textarea
+        :data-testid="`widget-input-${widget.widgetId}`"
         :value="modelValue as string"
         :placeholder="inputPlaceholder"
         placeholder-class="input-placeholder"
@@ -306,6 +318,12 @@ function addImage() {
       emit('update:modelValue', current.concat(files.map((f: any) => f.tempFilePath)))
     },
   })
+}
+
+function onH5ImageChange(event: Event) {
+  const files = Array.from((event.target as HTMLInputElement)?.files || [])
+  const current = Array.isArray(props.modelValue) ? props.modelValue as string[] : []
+  emit('update:modelValue', current.concat(files.map((file) => URL.createObjectURL(file))))
 }
 
 function removeImage(index: number) {

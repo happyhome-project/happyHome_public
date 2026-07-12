@@ -209,6 +209,7 @@ export interface Community {
   joinType: JoinType
   creatorId: string
   status: CommunityStatus
+  discoverable?: boolean
   memberCount: number
   createdAt: string
   motto?: string
