@@ -94,11 +94,13 @@ git merge origin/main          # 仅当当前分支尚未包含最新 origin/mai
 git push origin HEAD           # 普通 push
 ```
 
-同步与修复不得自动 stash 或 rebase，不得 force-push，也不得合并其他功能分支。冲突只能在原功能 worktree 解决。PR 创建后，功能 AI 轮询 PR exact HEAD 的 checks、review 和 comments；push 新提交后旧检查结果作废。功能 AI 必须持续负责到 GitHub 终态 `MERGED` 或 `CLOSED`，不能在 `merge-ready` 或进入队列时结束。
+同步与修复不得自动 stash 或 rebase，不得 force-push，也不得合并其他功能分支。冲突只能在原功能 worktree 解决。PR 创建后，功能 AI 轮询 PR exact HEAD 的 checks、review 和 comments；push 新提交后旧检查结果作废。功能 AI 不执行 enqueue，但继续监控并负责到 terminal `MERGED` 或 `CLOSED`，不能在 `merge-ready` 或进入队列时结束。
 
 `merge-ready` 的完整含义是：PR 为 open、非 draft；exact HEAD 的全部必需 PR CI 成功，没有失败、排队、取消或缺失检查；没有未处理的 review/change request；GitHub 未报告文本冲突。多个 `merge-ready` PR 可以正常进入 Merge Queue。PR 创建后不要求功能分支持续追逐或同步前进的 main；GitHub 会用 `merge_group` CI 验证最新 main 与前序队列变更的组合。
 
-若 `merge_group` 失败或 PR 被踢出队列，修复责任返回原功能 AI 和原 worktree。协调者只有在 GitHub 返回真实 `MERGED` 且对应 `merge_group` 成功后才能报告 merged，然后在 clean、同步的 public main 执行：
+主干协调 AI 负责对每个 `merge-ready` PR 重新读取 exact HEAD 与 readiness，再执行 enqueue。`merge_group` 失败、取消或 PR 被移除队列时，协调者先做只读 triage。代码、测试、冲突、review 或 HEAD 变化导致的失败返回原功能 AI 和原功能 worktree；功能 AI push 后旧结果作废，修复后重新达到 `merge-ready`。若是瞬态基础设施失败、取消或队列状态变化，且 exact HEAD 未变、无代码失败，协调者重新验证 `merge-ready` 后重新 enqueue，不制造提交且无需 push。协调者永不修改功能代码。
+
+协调者只有在 GitHub 返回真实 `MERGED` 且对应 `merge_group` 成功后才能报告 merged，然后在 clean、同步的 public main 执行：
 
 ```bash
 git pull --ff-only origin main

@@ -43,6 +43,7 @@
 6. PR 创建后，功能 AI 必须轮询该 PR exact HEAD 对应的 checks、review 与 comments；每次普通 push 后旧结果作废，改为跟踪新的 exact HEAD。功能 AI 对该 PR 负责到 GitHub 终态 `MERGED` 或 `CLOSED`，不得在 `merge-ready` 或入队后提前结束。
 7. `merge-ready` 仅表示 PR 为 open、非 draft，exact HEAD 的全部必需 PR CI 成功且无失败、排队、取消或缺失检查，没有未处理的 review/change request，并且 GitHub 未报告文本冲突。
 8. PR 创建后不要求功能分支持续追逐或同步前进的 `main`；组合后的最新主干由 Merge Queue 的 `merge_group` CI 验证。
+9. 功能 AI 不执行 enqueue，但继续监控并负责到 terminal `MERGED` 或 `CLOSED`；enqueue 是主干协调 AI 的职责。
 
 ### CI 门禁
 
@@ -59,7 +60,8 @@
 
 - 所有公开仓库 PR 必须加入 Merge Queue；不得绕过队列直接调用 merge API。
 - 多个 `merge-ready` PR 允许正常进入 Merge Queue，由 GitHub 管理顺序，并对受前序合并影响的队列组合重新运行 `merge_group` CI。
-- `merge_group` 失败或 PR 被踢出队列时，修复责任返回原功能 AI 和原 worktree；不得在协调 worktree 修改功能代码。
+- 主干协调 AI 负责对每个 `merge-ready` PR 重新读取 exact HEAD 与 readiness，再执行 enqueue；功能 AI 不执行 enqueue。
+- `merge_group` 失败、取消或 PR 被移除队列时，协调者先做只读 triage。代码、测试、冲突、review 或 HEAD 变化导致的失败返回原功能 AI 和原功能 worktree；功能 AI push 后旧结果作废，修复后重新达到 `merge-ready`。若是瞬态基础设施失败、取消或队列状态变化，且 exact HEAD 未变、无代码失败，协调者重新验证 `merge-ready` 后重新 enqueue，不制造提交且无需 push。协调者永不修改功能代码。
 - 协调者只有在 GitHub 报告真实 `MERGED` 且对应 `merge_group` 检查成功后才能报告 merged；随后仅在 clean、同步的 public main 执行 `git pull --ff-only origin main`。
 - Public 协作暂时禁用当前 `integrate:pr`，因为该命令仍绑定私有 canonical 边界；统一使用 GitHub Merge Queue，此 public 协调流程不触发 release 或 deploy。
 - 合并前必须检查分支确有独有提交；无独有提交时按 no-op 结束，不重复测试、部署或发布。

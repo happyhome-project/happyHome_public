@@ -597,27 +597,6 @@ test('nightly authentication separates admin sessions from the HTTP gateway capa
   assert.match(packageManifest.scripts['test:governance'], /notify-wecom\.test\.mjs/)
 })
 
-test('agent guidance defines the feature PR feedback loop and Merge Queue handoff', () => {
-  const agents = readFileSync(new URL('../../AGENTS.md', import.meta.url), 'utf8')
-  const setup = readFileSync(new URL('../../docs/SETUP.md', import.meta.url), 'utf8')
-
-  for (const [path, source] of [['AGENTS.md', agents], ['docs/SETUP.md', setup]]) {
-    assert.match(source, /PR 前[\s\S]*工作区 clean[\s\S]*git fetch origin main[\s\S]*git merge origin\/main/, path)
-    assert.match(source, /不得[\s\S]*(?:stash|rebase)[\s\S]*(?:force-push|force push)[\s\S]*其他功能分支/, path)
-    assert.match(source, /exact HEAD[\s\S]*checks[\s\S]*review[\s\S]*comments/, path)
-    assert.match(source, /MERGED[\s\S]*CLOSED/, path)
-    assert.match(source, /merge-ready[\s\S]*open[\s\S]*非 draft[\s\S]*必需[^\n]*CI[\s\S]*review[\s\S]*文本冲突/, path)
-    assert.match(source, /多个[^\n]*merge-ready[^\n]*Merge Queue/, path)
-    assert.match(source, /PR 创建后[^\n]*(?:不要求|无需)[^\n]*持续[^\n]*(?:追逐|同步)[^\n]*main/, path)
-    assert.match(source, /merge_group[^\n]*(?:失败|被踢出)[\s\S]*原[^\n]*worktree/, path)
-    assert.match(source, /GitHub[^\n]*MERGED[\s\S]*merge_group[^\n]*成功[\s\S]*git pull --ff-only origin main/, path)
-    assert.match(source, /^(?=[^\n]*public)(?=[^\n]*integrate:pr)(?=[^\n]*(?:禁用|不使用)).+$/im, path)
-    assert.match(source, /不触发[^\n]*(?:release|deploy)[^\n]*(?:release|deploy)/i, path)
-  }
-
-  assert.doesNotMatch(agents, /合并一个 PR 后，下一个 PR 必须重新同步最新 `main`/)
-})
-
 function levelThreeSection(source, heading) {
   const marker = `### ${heading}`
   const start = source.indexOf(marker)
@@ -625,6 +604,36 @@ function levelThreeSection(source, heading) {
   const next = source.indexOf('\n### ', start + marker.length)
   return source.slice(start, next === -1 ? source.length : next)
 }
+
+test('agent guidance defines the feature PR feedback loop and Merge Queue handoff', () => {
+  const agents = readFileSync(new URL('../../AGENTS.md', import.meta.url), 'utf8')
+  const setup = readFileSync(new URL('../../docs/SETUP.md', import.meta.url), 'utf8')
+  const featureSections = [
+    ['AGENTS PR workflow', levelThreeSection(agents, 'PR 流程')],
+    ['SETUP feature collaboration', levelThreeSection(setup, '功能 PR 与 Merge Queue 协作')],
+  ]
+  const queueSections = [
+    ['AGENTS Merge Queue coordination', levelThreeSection(agents, 'Merge Queue 协调')],
+    ['SETUP feature collaboration', levelThreeSection(setup, '功能 PR 与 Merge Queue 协作')],
+  ]
+
+  for (const [path, source] of featureSections) {
+    assert.match(source, /PR 前[\s\S]*工作区 clean[\s\S]*git fetch origin main[\s\S]*git merge origin\/main/, path)
+    assert.match(source, /不得[\s\S]*(?:stash|rebase)[\s\S]*(?:force-push|force push)[\s\S]*其他功能分支/, path)
+    assert.match(source, /exact HEAD[\s\S]*checks[\s\S]*review[\s\S]*comments/, path)
+    assert.match(source, /MERGED[\s\S]*CLOSED/, path)
+    assert.match(source, /merge-ready[\s\S]*open[\s\S]*非 draft[\s\S]*必需[^\n]*CI[\s\S]*review[\s\S]*文本冲突/, path)
+    assert.match(source, /PR 创建后[^\n]*(?:不要求|无需)[^\n]*持续[^\n]*(?:追逐|同步)[^\n]*main/, path)
+  }
+  for (const [path, source] of queueSections) {
+    assert.match(source, /多个[^\n]*merge-ready[^\n]*Merge Queue/, path)
+    assert.match(source, /GitHub[^\n]*MERGED[\s\S]*merge_group[^\n]*成功[\s\S]*git pull --ff-only origin main/, path)
+    assert.match(source, /^(?=[^\n]*public)(?=[^\n]*integrate:pr)(?=[^\n]*(?:禁用|不使用)).+$/im, path)
+    assert.match(source, /不触发[^\n]*(?:release|deploy)[^\n]*(?:release|deploy)/i, path)
+  }
+
+  assert.doesNotMatch(agents, /合并一个 PR 后，下一个 PR 必须重新同步最新 `main`/)
+})
 
 test('feature feedback invalidates old results after a push and follows the new exact HEAD', () => {
   const agents = readFileSync(new URL('../../AGENTS.md', import.meta.url), 'utf8')
@@ -635,4 +644,36 @@ test('feature feedback invalidates old results after a push and follows the new 
   assert.match(prWorkflow, /每次普通 push 后旧结果作废[^\n]*新的 exact HEAD/)
   assert.match(featureFeedback, /push 新提交后旧检查结果作废/)
   assert.match(featureFeedback, /轮询 PR exact HEAD 的 checks、review 和 comments/)
+})
+
+test('Merge Queue transition ownership separates feature monitoring from coordinator enqueue', () => {
+  const agents = readFileSync(new URL('../../AGENTS.md', import.meta.url), 'utf8')
+  const prWorkflow = levelThreeSection(agents, 'PR 流程')
+  const queueCoordination = levelThreeSection(agents, 'Merge Queue 协调')
+  const setup = readFileSync(new URL('../../docs/SETUP.md', import.meta.url), 'utf8')
+  const featureFeedback = levelThreeSection(setup, '功能 PR 与 Merge Queue 协作')
+
+  for (const source of [prWorkflow, featureFeedback]) {
+    assert.match(source, /功能 AI[^\n]*(?:不执行|不得执行)[^\n]*enqueue/)
+    assert.match(source, /功能 AI[^\n]*(?:继续|持续)[^\n]*(?:监控|负责)[^\n]*(?:MERGED|terminal)/)
+  }
+  for (const source of [queueCoordination, featureFeedback]) {
+    assert.match(source, /协调[^\n]*每个[^\n]*merge-ready[^\n]*PR[^\n]*重新读取[^\n]*exact HEAD[^\n]*(?:readiness|就绪)[^\n]*enqueue/i)
+  }
+})
+
+test('Merge Queue failure triage routes code fixes back and retries unchanged infrastructure failures without pushes', () => {
+  const agents = readFileSync(new URL('../../AGENTS.md', import.meta.url), 'utf8')
+  const queueCoordination = levelThreeSection(agents, 'Merge Queue 协调')
+  const setup = readFileSync(new URL('../../docs/SETUP.md', import.meta.url), 'utf8')
+  const featureFeedback = levelThreeSection(setup, '功能 PR 与 Merge Queue 协作')
+
+  for (const source of [queueCoordination, featureFeedback]) {
+    assert.match(source, /只读 triage/i)
+    assert.match(source, /代码[^\n]*测试[^\n]*冲突[^\n]*review[^\n]*HEAD[^\n]*原功能[^\n]*worktree/i)
+    assert.match(source, /push[^\n]*旧结果作废[^\n]*重新[^\n]*merge-ready/i)
+    assert.match(source, /基础设施[^\n]*取消[^\n]*队列状态[^\n]*exact HEAD 未变[^\n]*无代码失败/i)
+    assert.match(source, /重新验证[^\n]*merge-ready[^\n]*重新 enqueue[^\n]*(?:不制造提交|无需 push)/i)
+    assert.match(source, /协调[^\n]*(?:永不|不得)[^\n]*修改[^\n]*功能代码/i)
+  }
 })
