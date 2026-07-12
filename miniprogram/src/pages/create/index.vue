@@ -37,6 +37,7 @@
           v-for="section in activeSections"
           :key="section._id"
           class="section-option"
+          :data-testid="`create-section-${section._id}`"
           @tap="selectSection(section)"
         >
           <text class="section-name">{{ section.name }}</text>
@@ -171,7 +172,7 @@
               />
               <text>存草稿</text>
             </button>
-            <button class="btn-primary" :disabled="submitting" @tap="handleSubmit">
+            <button class="btn-primary" data-testid="create-submit" :disabled="submitting" @tap="handleSubmit">
               {{ submitting ? '发布中...' : (isActivityInviteMode ? '发布邀约' : '发布') }}
             </button>
           </view>

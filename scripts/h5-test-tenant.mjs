@@ -13,7 +13,7 @@ import { withValidationLease } from './lib/validation-lease.mjs'
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const REQUIRED_CONFIG = ['HH_CLOUDBASE_ENV_ID', 'HH_CLOUDBASE_ACCESS_KEY', 'HH_H5_WEB_USERNAME', 'HH_H5_WEB_PASSWORD', 'HH_WECHAT_TEST_OPENID']
 
-function parseEnvFile(path) {
+export function parseEnvFile(path) {
   if (!existsSync(path)) throw new Error(`missing machine config: ${path}`)
   const values = {}
   for (const raw of readFileSync(path, 'utf8').split(/\r?\n/)) {

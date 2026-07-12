@@ -109,6 +109,7 @@
         <view v-if="isAuthor" class="actions">
           <text
             class="delete-btn"
+            data-testid="post-delete"
             :class="{ disabled: deleteLock.busy.value }"
             @tap="deleteLock.run()"
           >{{ deleteLock.busy.value ? '删除中...' : '删除' }}</text>

@@ -1,6 +1,40 @@
 # HappyHome H5 预览运行手册
 
-这份文档给新的 Codex/Claude session 使用：目标是把小程序 H5 预览真实跑起来，并用真实页面状态验证 UI 改动。
+这份文档给新的 Codex/Claude session 使用：目标是把小程序 H5 预览真实跑起来，并用真实页面状态验证 UI 改动。当前权威入口是 `npm.cmd run h5:web` 和 `npm.cmd run test:h5:web`；后文固定 `5183` 端口和 DEV openid 的内容仅用于诊断旧服务，不是通用 Web 登录流程。
+
+## 当前通用 Web 流程
+
+每台机器创建 `~/.happyhome/h5-web.env`，只填写本机值，不提交文件：
+
+```dotenv
+HH_CLOUDBASE_ENV_ID=<public-environment-id>
+HH_CLOUDBASE_ACCESS_KEY=<publishable-web-access-key>
+HH_H5_WEB_USERNAME=<dedicated-low-privilege-user>
+HH_H5_WEB_PASSWORD=<machine-local-password>
+HH_WECHAT_TEST_OPENID=<isolated-wechat-fixture-member>
+```
+
+启动器只把前两个公开值映射为浏览器构建变量；用户名、密码和 WeChat identity 不进入 Vite 子进程环境或日志。它在 `127.0.0.1` 自动选择空闲端口，打印脱敏后的 URL、cwd、branch、HEAD，并且退出时只终止自己创建的进程树，绝不按端口杀进程。
+
+```powershell
+npm.cmd run h5:web
+npm.cmd run h5:test-tenant -- doctor
+npm.cmd run test:h5:web -- --mode=read
+```
+
+`doctor` 和默认 read smoke 都是只读操作，不获取 validation lease，因此多个 worktree 可并发读取共享基线。read smoke 覆盖 homepage、30/1/0 长短空板块、section、detail、profile，并把不含密码、openid、正文和 storage URL 的 counts/geometry 写入 `.codex-local/h5-web-smoke/<run-id>/summary.json`。
+
+初始化或修复共享基线必须显式 prepare/apply：
+
+```powershell
+npm.cmd run h5:test-tenant -- prepare
+$env:HAPPYHOME_FIXTURE_PREFIX='hh-web-h5-v1'
+npm.cmd run h5:test-tenant -- apply --manifest=.codex-local/h5-test-tenant/prepare.json
+```
+
+apply、`--mode=write` 以及 WeChat DevTools 自动化会获取同一台机器的 validation lease。write smoke 使用唯一 run ID，通过真实 H5 发布页只创建自己的临时记录，进入 exact detail 后用作者删除控件清理，再重新读取该 detail 验证记录已不存在；清理失败即非零退出。
+
+故障诊断：缺少配置时按报错补齐 machine file；doctor drift 时先重新 prepare 比对，禁止自动修复；端口启动失败时检查报错所列随机端口和当前 child PID，不要终止其他 worktree 服务；lease active/stale 时先运行 `npm.cmd run validation:lease:status`，未经原 owner 退出确认不得恢复。
 
 核心原则：如果 H5 没显示出预期 UI，不要停在“代码和单测通过”。这通常是一个调试信号，需要继续追到 API 数据、页面运行态、或者 dev server 进程层。
 

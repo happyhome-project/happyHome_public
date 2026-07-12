@@ -1,6 +1,7 @@
 <template>
   <view
     class="profile-page"
+    data-testid="profile-page"
     :class="{ 'profile-page--editing': isEditingProfile || showManualLoginForm }"
   >
     <view class="profile-custom-nav" :style="profileCustomNavStyle">
@@ -112,11 +113,11 @@
           <text class="form-hint">使用 CloudBase Web 账号登录</text>
           <view class="input-wrap">
             <text class="input-label">用户名</text>
-            <input v-model="webUsername" autocomplete="username" aria-label="用户名" placeholder="请输入用户名" placeholder-class="input-placeholder" class="input" />
+            <input v-model="webUsername" data-testid="h5-login-username" autocomplete="username" aria-label="用户名" placeholder="请输入用户名" placeholder-class="input-placeholder" class="input" />
           </view>
           <view class="input-wrap">
             <text class="input-label">密码</text>
-            <input v-model="webPassword" password autocomplete="current-password" aria-label="密码" placeholder="请输入密码" placeholder-class="input-placeholder" class="input" />
+            <input v-model="webPassword" data-testid="h5-login-password" password autocomplete="current-password" aria-label="密码" placeholder="请输入密码" placeholder-class="input-placeholder" class="input" />
           </view>
           <!-- #endif -->
           <!-- #ifndef H5 -->
@@ -134,6 +135,7 @@
           <view class="input-wrap">
             <input
               type="nickname"
+              data-testid="h5-login-nickname"
               :value="formNickName"
               placeholder="请输入昵称"
               placeholder-class="input-placeholder"
@@ -150,6 +152,7 @@
               size="mini"
               :disabled="!canSubmitForm || submitFormLock.busy.value"
               class="primary-btn"
+              data-testid="h5-login-submit"
               @tap="submitFormLock.run()"
             >
               {{ submitFormLock.busy.value ? '登录中...' : '确认登录' }}

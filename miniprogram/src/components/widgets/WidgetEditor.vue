@@ -25,6 +25,7 @@
       class="input-wrap"
     >
       <input
+        :data-testid="`widget-input-${widget.widgetId}`"
         :value="modelValue as string"
         :placeholder="inputPlaceholder"
         placeholder-class="input-placeholder"
@@ -140,6 +141,7 @@
 
     <view v-else-if="widget.type === 'rich_text'" class="textarea-wrap">
       <textarea
+        :data-testid="`widget-input-${widget.widgetId}`"
         :value="modelValue as string"
         :placeholder="inputPlaceholder"
         placeholder-class="input-placeholder"
