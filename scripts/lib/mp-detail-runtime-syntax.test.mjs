@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
 
-import { scanCriticalRuntimeSyntax } from './mp-critical-runtime-syntax.mjs'
+import { hashNodeModulesDirectory, scanCriticalRuntimeSyntax } from './mp-critical-runtime-syntax.mjs'
 
 async function writeFixture(root, relativePath, content) {
   const target = join(root, relativePath)
@@ -385,6 +385,71 @@ test('rejects an unreviewed compiled third-party runtime change', async () => {
     )
   } finally {
     await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test('keeps compiled third-party runtime hashing stable across generated component scope ids', async () => {
+  const left = await createCriticalPageFixture()
+  const right = await createCriticalPageFixture()
+  try {
+    await writeFixture(left, 'node-modules/example/index.js', 'render({id:e.sr("left","8ebe68d0-0"),c:"8ebe68d0-1-"+index})')
+    await writeFixture(left, 'node-modules/example/index.wxml', '<view u-i="8ebe68d0-2" />')
+    await writeFixture(left, 'node-modules/example/index.json', '{"u-i":"8ebe68d0-3"}')
+    await writeFixture(right, 'node-modules/example/index.js', 'render({id:e.sr("left","4bc4639c-0"),c:"4bc4639c-1-"+index})')
+    await writeFixture(right, 'node-modules/example/index.wxml', '<view u-i="4bc4639c-2" />')
+    await writeFixture(right, 'node-modules/example/index.json', '{"u-i":"4bc4639c-3"}')
+
+    const expectedHash = hashNodeModulesDirectory(join(left, 'node-modules'))
+    assert.equal(hashNodeModulesDirectory(join(right, 'node-modules')), expectedHash)
+    assert.doesNotThrow(() => scanCriticalRuntimeSyntax(left, { expectedVendorHash: '', expectedNodeModulesHash: expectedHash }))
+    assert.doesNotThrow(() => scanCriticalRuntimeSyntax(right, { expectedVendorHash: '', expectedNodeModulesHash: expectedHash }))
+  } finally {
+    await rm(left, { recursive: true, force: true })
+    await rm(right, { recursive: true, force: true })
+  }
+})
+
+test('keeps real third-party runtime changes visible to hashing', async () => {
+  const baseline = await createCriticalPageFixture()
+  const codeChange = await createCriticalPageFixture()
+  const nonScopeChange = await createCriticalPageFixture()
+  try {
+    await writeFixture(baseline, 'node-modules/example/index.js', 'const value = "8ebe68d0-0"')
+    await writeFixture(codeChange, 'node-modules/example/index.js', 'const changed = "4bc4639c-0"')
+    await writeFixture(nonScopeChange, 'node-modules/example/index.js', 'const value = "different-token"')
+
+    const expectedHash = hashNodeModulesDirectory(join(baseline, 'node-modules'))
+    assert.notEqual(hashNodeModulesDirectory(join(codeChange, 'node-modules')), expectedHash)
+    assert.notEqual(hashNodeModulesDirectory(join(nonScopeChange, 'node-modules')), expectedHash)
+    assert.throws(
+      () => scanCriticalRuntimeSyntax(codeChange, { expectedVendorHash: '', expectedNodeModulesHash: expectedHash }),
+      /third-party runtime changed/i,
+    )
+    assert.throws(
+      () => scanCriticalRuntimeSyntax(nonScopeChange, { expectedVendorHash: '', expectedNodeModulesHash: expectedHash }),
+      /third-party runtime changed/i,
+    )
+  } finally {
+    await rm(baseline, { recursive: true, force: true })
+    await rm(codeChange, { recursive: true, force: true })
+    await rm(nonScopeChange, { recursive: true, force: true })
+  }
+})
+
+test('does not normalize an ordinary scope-shaped third-party token', async () => {
+  const left = await createCriticalPageFixture()
+  const right = await createCriticalPageFixture()
+  try {
+    await writeFixture(left, 'node-modules/example/index.js', 'const version = "deadbeef-123"')
+    await writeFixture(right, 'node-modules/example/index.js', 'const version = "feedface-123"')
+
+    assert.notEqual(
+      hashNodeModulesDirectory(join(left, 'node-modules')),
+      hashNodeModulesDirectory(join(right, 'node-modules')),
+    )
+  } finally {
+    await rm(left, { recursive: true, force: true })
+    await rm(right, { recursive: true, force: true })
   }
 })
 

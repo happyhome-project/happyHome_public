@@ -3,7 +3,7 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { parse } from 'acorn'
 
-export const KNOWN_NODE_MODULES_SHA256 = '62908539d813918af9bcb32a99b3dc24798213463fb4bb2c552dddcb815a7f2f'
+export const KNOWN_NODE_MODULES_SHA256 = '07be8ba73da09681b3bd94974b3a84cb34072738a315ea26438902798a533eb9'
 export const KNOWN_WECHAT_BASE_LIBRARY_VERSION = '3.15.1'
 
 function walk(node, visitor, parent = null) {
@@ -36,7 +36,32 @@ function isFrameworkRuntimeChunk(distRoot, chunkPath) {
   return path.relative(distRoot, chunkPath).replaceAll(path.sep, '/') === 'common/vendor.js'
 }
 
-function hashDirectory(directoryPath) {
+const COMPONENT_SCOPE_MARKER = 'SCOPEID'
+const PATH_STABLE_TEXT_EXTENSIONS = new Set(['.js', '.json', '.wxml'])
+
+function normalizeCompilerComponentScopes(filePath, source) {
+  const extension = path.extname(filePath).toLowerCase()
+  if (extension === '.wxml') {
+    return source.replace(/(\bu-i\s*=\s*["'])[0-9a-f]{8}(?=-\d+\b)/gi, `$1${COMPONENT_SCOPE_MARKER}`)
+  }
+  if (extension === '.json') {
+    return source.replace(/("u-i"\s*:\s*")[0-9a-f]{8}(?=-\d+\b)/gi, `$1${COMPONENT_SCOPE_MARKER}`)
+  }
+  if (extension === '.js') {
+    return source
+      .replace(/(\.sr\(\s*["'][^"']*["']\s*,\s*["'])[0-9a-f]{8}(?=-\d+\b)/gi, `$1${COMPONENT_SCOPE_MARKER}`)
+      .replace(/(\bc\s*:\s*["'])[0-9a-f]{8}(?=-\d+-["'])/gi, `$1${COMPONENT_SCOPE_MARKER}`)
+  }
+  return source
+}
+
+function pathStableNodeModulesContent(filePath) {
+  const content = fs.readFileSync(filePath)
+  if (!PATH_STABLE_TEXT_EXTENSIONS.has(path.extname(filePath).toLowerCase())) return content
+  return Buffer.from(normalizeCompilerComponentScopes(filePath, content.toString('utf8')))
+}
+
+export function hashNodeModulesDirectory(directoryPath) {
   const files = []
   const pending = [directoryPath]
   while (pending.length > 0) {
@@ -52,7 +77,7 @@ function hashDirectory(directoryPath) {
   for (const filePath of files) {
     hash.update(path.relative(directoryPath, filePath).replaceAll(path.sep, '/'))
     hash.update('\0')
-    hash.update(fs.readFileSync(filePath))
+    hash.update(pathStableNodeModulesContent(filePath))
     hash.update('\0')
   }
   return hash.digest('hex')
@@ -376,7 +401,7 @@ export function scanCriticalRuntimeSyntax(inputDistRoot, options = {}) {
     ? options.expectedNodeModulesHash
     : KNOWN_NODE_MODULES_SHA256
   if (expectedNodeModulesHash && fs.existsSync(nodeModulesPath)) {
-    const actualNodeModulesHash = hashDirectory(nodeModulesPath)
+    const actualNodeModulesHash = hashNodeModulesDirectory(nodeModulesPath)
     if (actualNodeModulesHash !== expectedNodeModulesHash) {
       throw new Error(`mp-weixin third-party runtime changed: expected ${expectedNodeModulesHash}, got ${actualNodeModulesHash}. Review trial-runtime compatibility before updating the baseline.`)
     }
