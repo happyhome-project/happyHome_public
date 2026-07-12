@@ -6,13 +6,17 @@ import { basename, dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 
 import {
+  classifyWorktreeRetirement,
   confirmNoOwner,
   createWorktreePlan,
   createRetirementManifest,
   createRetirementRecord,
   decideSync,
   evaluateLeaseOwner,
-  evaluateRetirement,
+  findOpenPullRequest,
+  githubRepositoryFromRemote,
+  interpretAncestorExitStatus,
+  validateOpenPullRequestInventory,
   executeHeartbeatCriticalSection,
   executeRetirementCriticalSection,
   verifyCreateTargetBoundary,
@@ -29,7 +33,7 @@ function git(args, { cwd = process.cwd(), allowFailure = false } = {}) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true })
   if (result.error) throw result.error
   if (result.status !== 0 && !allowFailure) die(`git ${args.join(' ')} failed: ${String(result.stderr || '').trim() || `exit ${result.status}`}`)
-  return { ok: result.status === 0, stdout: String(result.stdout || '').trim(), stderr: String(result.stderr || '').trim() }
+  return { ok: result.status === 0, status: result.status, stdout: String(result.stdout || '').trim(), stderr: String(result.stderr || '').trim() }
 }
 
 function parseFlags(argv) {
@@ -51,6 +55,15 @@ function parseFlags(argv) {
 
 function isReparsePoint(path) {
   return lstatSync(path).isSymbolicLink()
+}
+
+function isBareRepositoryPath(path) {
+  try {
+    const result = git(['rev-parse', '--is-bare-repository'], { cwd: path, allowFailure: true })
+    return result.ok && result.stdout === 'true'
+  } catch {
+    return false
+  }
 }
 
 function commonGitDir(cwd = process.cwd()) {
@@ -144,7 +157,7 @@ function currentIdentity(cwd = process.cwd()) {
 }
 
 function refreshOriginMain(cwd, { required = true } = {}) {
-  const result = git(['fetch', '--quiet', 'origin', 'main'], { cwd, allowFailure: true })
+  const result = git(['fetch', '--quiet', 'origin', '+refs/heads/main:refs/remotes/origin/main'], { cwd, allowFailure: true })
   if (!result.ok && required) die(`unable to refresh origin/main: ${result.stderr || result.stdout || 'git fetch failed'}`)
   return result
 }
@@ -251,26 +264,38 @@ function ensureHooksAndAgents(root) {
 }
 
 function isHeadInMain(cwd) {
-  return git(['merge-base', '--is-ancestor', 'HEAD', 'origin/main'], { cwd, allowFailure: true }).ok
+  const result = git(['merge-base', '--is-ancestor', 'HEAD', 'origin/main'], { cwd, allowFailure: true })
+  return interpretAncestorExitStatus(result.status)
 }
 
 function uniqueCommitCount(cwd) {
   return Number(git(['rev-list', '--count', 'HEAD', '--not', 'origin/main', '--remotes=origin'], { cwd }).stdout || '0')
 }
 
-function openPrForBranch(branch, cwd) {
-  if (!branch || branch === '(detached)') return { known: true, open: false }
-  const result = spawnSync('gh', ['pr', 'list', '--head', branch, '--state', 'open', '--json', 'number'], {
+function openPullRequestInventory(cwd) {
+  const limit = 1000
+  const remote = git(['remote', 'get-url', 'origin'], { cwd, allowFailure: true })
+  const repository = remote.ok ? githubRepositoryFromRemote(remote.stdout) : null
+  if (!repository) {
+    return { pulls: null, error: remote.ok ? 'origin is not a GitHub repository' : (remote.stderr || 'origin unavailable') }
+  }
+  const result = spawnSync('gh', ['pr', 'list', '--repo', repository, '--state', 'open', '--limit', String(limit), '--json', 'number,url,headRefName,headRefOid'], {
     cwd,
     encoding: 'utf8',
     windowsHide: true,
   })
-  if (result.error || result.status !== 0) return { known: false, open: true }
-  try {
-    return { known: true, open: JSON.parse(String(result.stdout || '[]')).length > 0 }
-  } catch {
-    return { known: false, open: true }
+  if (result.error || result.status !== 0) {
+    return { pulls: null, error: result.error?.message || String(result.stderr || '').trim() || `gh exited ${result.status}` }
   }
+  try {
+    return validateOpenPullRequestInventory(JSON.parse(String(result.stdout || '[]')), limit)
+  } catch (error) {
+    return { pulls: null, error: `unable to parse open PR inventory: ${error?.message || error}` }
+  }
+}
+
+function openPrForIdentity(identity, inventory) {
+  return findOpenPullRequest(inventory.pulls, identity, { error: inventory.error })
 }
 
 function report(value) {
@@ -440,13 +465,15 @@ function retirementProbe(path, { hasOwnerConfirmation = false } = {}) {
   const owner = hasOwnerConfirmation
     ? confirmNoOwner(ownerState(identity.root, identity.root), true)
     : ownerState(identity.root, identity.root)
-  const pr = openPrForBranch(identity.branch, identity.root)
-  const decision = evaluateRetirement({
-    ...owner,
+  const pr = openPrForIdentity(identity, openPullRequestInventory(identity.root))
+  const decision = classifyWorktreeRetirement({
+    kind: 'worktree',
+    branch: identity.branch,
+    ownerState: owner.ownerState,
+    activeOwner: owner.activeOwner,
     hasOperation: hasGitOperation(identity.root),
-    isCanonicalMain: isCanonicalMain(identity.root, identity.branch),
     isDirty: identity.dirty,
-    openPr: pr.open,
+    openPr: pr,
     uniqueCommits: uniqueCommitCount(identity.root),
     headInMain: isHeadInMain(identity.root),
     pathIsReparsePoint: isReparsePoint(identity.root),
@@ -518,40 +545,70 @@ function retire({ flags, positionals }) {
 
 function status() {
   const refreshed = refreshOriginMain(process.cwd(), { required: false })
-  if (!refreshed.ok) {
-    report({ status: 'stale', refresh: { ok: false, error: refreshed.stderr || refreshed.stdout || 'git fetch failed' }, entries: [] })
-    process.exitCode = 1
-    return
-  }
   const output = git(['worktree', 'list', '--porcelain']).stdout
+  const prInventory = openPullRequestInventory(process.cwd())
   const blocks = output.split(/\n\n/).filter(Boolean)
   const entries = blocks.map((block) => {
     const lines = block.split(/\r?\n/)
     const path = lines.find((line) => line.startsWith('worktree '))?.slice(9)
     const head = lines.find((line) => line.startsWith('HEAD '))?.slice(5)
     const branch = lines.find((line) => line.startsWith('branch refs/heads/'))?.slice('branch refs/heads/'.length) || '(detached)'
+    const kind = lines.includes('bare') || isBareRepositoryPath(path) ? 'bare' : 'worktree'
+    if (kind === 'bare') {
+      return {
+        kind,
+        path,
+        head: head || null,
+        branch,
+        retirement: classifyWorktreeRetirement({ kind }),
+      }
+    }
     try {
       const identity = currentIdentity(path)
+      const lifecycle = ownerState(path)
+      const pr = openPrForIdentity(identity, prInventory)
+      const retirement = classifyWorktreeRetirement({
+        kind,
+        branch: identity.branch,
+        ownerState: lifecycle.ownerState,
+        activeOwner: lifecycle.activeOwner,
+        hasOperation: hasGitOperation(identity.root),
+        isDirty: identity.dirty,
+        openPr: pr,
+        uniqueCommits: refreshed.ok ? uniqueCommitCount(identity.root) : null,
+        headInMain: refreshed.ok ? isHeadInMain(identity.root) : null,
+        pathIsReparsePoint: isReparsePoint(identity.root),
+      })
       return {
+        kind,
         path,
         head,
         branch,
         identity,
         ...safeMetadata(path),
-        lifecycle: ownerState(path),
+        lifecycle,
+        retirement,
       }
     } catch (error) {
+      const probeError = error?.message || String(error)
       return {
+        kind: 'unprobeable',
         path,
         head,
         branch,
-        ...safeMetadata(path),
-        lifecycle: { activeOwner: false, ownerState: 'unknown', stale: false, lease: null },
-        probeError: error?.message || String(error),
+        probeError,
+        retirement: classifyWorktreeRetirement({ kind: 'worktree', probeError }),
       }
     }
   })
-  report({ status: 'fresh', refresh: { ok: true }, entries })
+  report({
+    status: refreshed.ok ? 'fresh' : 'stale',
+    refresh: refreshed.ok
+      ? { ok: true }
+      : { ok: false, error: refreshed.stderr || refreshed.stdout || 'git fetch failed' },
+    entries,
+  })
+  if (!refreshed.ok) process.exitCode = 1
 }
 
 const { flags, positionals } = parseFlags(process.argv.slice(2))

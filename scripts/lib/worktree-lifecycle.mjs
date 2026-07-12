@@ -59,6 +59,145 @@ export function evaluateLeaseOwner(lease, { now = Date.now(), maxAgeMs = 12 * 60
   return { activeOwner: true, ownerState: 'active', stale: false }
 }
 
+export function githubRepositoryFromRemote(remote) {
+  const value = String(remote || '').trim()
+  const match = value.match(/^(?:git@github\.com:|https?:\/\/github\.com\/|ssh:\/\/git@github\.com\/)([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i)
+  return match ? `${match[1]}/${match[2]}` : null
+}
+
+export function findOpenPullRequest(pullRequests, { branch, head } = {}, { error = null } = {}) {
+  if (!Array.isArray(pullRequests)) {
+    return { known: false, open: null, number: null, url: null, error: error || 'open PR inventory unavailable' }
+  }
+  const match = pullRequests.find((pull) => (
+    (branch && branch !== '(detached)' && pull?.headRefName === branch)
+    || (head && pull?.headRefOid === head)
+  ))
+  return match
+    ? { known: true, open: true, number: match.number ?? null, url: match.url ?? null, error: null }
+    : { known: true, open: false, number: null, url: null, error: null }
+}
+
+export function interpretAncestorExitStatus(status) {
+  if (status === 0) return true
+  if (status === 1) return false
+  return null
+}
+
+export function validateOpenPullRequestInventory(value, limit) {
+  if (!Array.isArray(value)) return { pulls: null, error: 'gh returned a non-array open PR inventory' }
+  if (value.length >= limit) return { pulls: null, error: `open PR inventory may be truncated at ${limit} entries` }
+  return { pulls: value, error: null }
+}
+
+function booleanCheck(value) {
+  return typeof value === 'boolean'
+    ? { known: true, value }
+    : { known: false, value: null }
+}
+
+function numberCheck(value) {
+  return Number.isFinite(value) && Number(value) >= 0
+    ? { known: true, value: Number(value) }
+    : { known: false, value: null }
+}
+
+export function classifyWorktreeRetirement({
+  kind = 'worktree',
+  branch,
+  ownerState,
+  activeOwner,
+  hasOperation,
+  isDirty,
+  openPr,
+  uniqueCommits,
+  headInMain,
+  pathIsReparsePoint,
+  probeError,
+} = {}) {
+  if (kind !== 'worktree') {
+    return {
+      classification: 'unprobeable',
+      candidateStale: false,
+      eligible: false,
+      reasons: ['not_work_tree'],
+      checks: {},
+    }
+  }
+  if (probeError) {
+    return {
+      classification: 'unprobeable',
+      candidateStale: false,
+      eligible: false,
+      reasons: ['probe_error'],
+      checks: {},
+    }
+  }
+
+  const normalizedOpenPr = openPr?.known === true && typeof openPr?.open === 'boolean'
+    ? {
+        known: true,
+        value: openPr.open,
+        number: openPr.number ?? null,
+        url: openPr.url ?? null,
+        error: null,
+      }
+    : {
+        known: false,
+        value: null,
+        number: openPr?.number ?? null,
+        url: openPr?.url ?? null,
+        error: openPr?.error || null,
+      }
+  const checks = {
+    mainBranch: typeof branch === 'string'
+      ? { known: true, value: branch === 'main' }
+      : { known: false, value: null },
+    owner: ownerState === 'active' || ownerState === 'inactive'
+      ? { known: true, value: ownerState }
+      : { known: false, value: 'unknown' },
+    activeOwner: booleanCheck(activeOwner),
+    gitOperation: booleanCheck(hasOperation),
+    dirty: booleanCheck(isDirty),
+    openPr: normalizedOpenPr,
+    uniqueCommits: numberCheck(uniqueCommits),
+    headInMain: booleanCheck(headInMain),
+    reparsePoint: booleanCheck(pathIsReparsePoint),
+  }
+  const reasons = []
+  if (!checks.mainBranch.known) reasons.push('branch_unknown')
+  else if (checks.mainBranch.value) reasons.push('main_branch')
+  if (!checks.owner.known) reasons.push('unknown_owner')
+  else if (checks.owner.value === 'active') reasons.push('active_owner')
+  if (!checks.activeOwner.known) reasons.push('active_owner_unknown')
+  else if (checks.activeOwner.value && !reasons.includes('active_owner')) reasons.push('active_owner')
+  if (!checks.gitOperation.known) reasons.push('git_operation_unknown')
+  else if (checks.gitOperation.value) reasons.push('git_operation')
+  if (!checks.dirty.known) reasons.push('dirty_unknown')
+  else if (checks.dirty.value) reasons.push('dirty')
+  if (!checks.openPr.known) reasons.push('open_pr_unknown')
+  else if (checks.openPr.value) reasons.push('open_pr')
+  if (!checks.uniqueCommits.known) reasons.push('unique_commits_unknown')
+  else if (checks.uniqueCommits.value > 0) reasons.push('unique_commits')
+  if (!checks.headInMain.known) reasons.push('head_in_main_unknown')
+  else if (!checks.headInMain.value) reasons.push('head_not_in_main')
+  if (!checks.reparsePoint.known) reasons.push('reparse_point_unknown')
+  else if (checks.reparsePoint.value) reasons.push('reparse_point')
+
+  const candidateStale = reasons.length === 1
+    && reasons[0] === 'unknown_owner'
+    && checks.activeOwner.known
+    && checks.activeOwner.value === false
+  const eligible = reasons.length === 0
+  return {
+    classification: eligible ? 'eligible' : candidateStale ? 'candidate_stale' : 'blocked',
+    candidateStale,
+    eligible,
+    reasons,
+    checks,
+  }
+}
+
 export function evaluateRetirement({
   activeOwner = false,
   ownerState = 'unknown',
