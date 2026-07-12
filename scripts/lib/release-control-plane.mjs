@@ -1,19 +1,29 @@
 export const RELEASE_CONTROL_PLANE_COLLECTIONS = ['release_locks', 'release_runs', 'release_state']
 
-function isKnownMissingCollection(message) {
-  return /ResourceNotFound|TableNotExist|Table not exist|does not exist|\bnot exist\b|不存在|CollectionNotExists/i.test(message)
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function isAlreadyExistsError(error) {
+function mentionsCollection(message, collection) {
+  return new RegExp(`(?:^|\\W)${escapeRegExp(collection)}(?:$|\\W)`, 'i').test(message)
+}
+
+function isKnownMissingCollection(collection, message) {
+  if (!mentionsCollection(message, collection)) return false
+  return /Db or Table not exist|TableNotExist|CollectionNotExists|(?:Table|Collection|表|集合)[\s\S]*(?:not exist|does not exist|不存在)/i.test(message)
+}
+
+function isAlreadyExistsError(collection, error) {
   const message = String(error?.message || error)
   if (/not exist|does not exist|不存在|CollectionNotExists/i.test(message)) return false
+  if (!mentionsCollection(message, collection)) return false
   return /Table exist|already exists|collection .*exists|index .*exists|已存在/i.test(message)
 }
 
 function getCollectionStatus(collection, result) {
   if (result?.Exists === true) return 'exists'
   const message = String(result?.Msg || '').trim()
-  if (result?.Exists === false && isKnownMissingCollection(message)) return 'missing'
+  if (result?.Exists === false && isKnownMissingCollection(collection, message)) return 'missing'
   throw new Error(`Release control plane collection ${collection} has indeterminate verification: ${message || 'empty probe message'}`)
 }
 
@@ -45,7 +55,7 @@ export async function ensureReleaseControlPlane(db, { log = () => {} } = {}) {
       await db.createCollection(collection)
       log(`[release-control-plane] ${collection} created`)
     } catch (error) {
-      if (!isAlreadyExistsError(error)) throw error
+      if (!isAlreadyExistsError(collection, error)) throw error
       log(`[release-control-plane] ${collection} exists`)
     }
   }

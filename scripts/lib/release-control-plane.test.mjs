@@ -25,7 +25,7 @@ function createDb(existing = []) {
     async checkCollectionExists(collection) {
       return collections.has(collection)
         ? { Exists: true }
-        : { Exists: false, Msg: 'ResourceNotFound: Table not exist' }
+        : { Exists: false, Msg: `ResourceNotFound: Db or Table not exist: ${collection}` }
     },
     async createCollection(collection) {
       created.push(collection)
@@ -59,6 +59,20 @@ test('verify mode treats auth, network, service, and empty probe failures as ind
   }
 })
 
+test('missing classification requires collection-specific not-found evidence', async () => {
+  for (const Msg of [
+    'ResourceNotFound: environment does not exist',
+    'ResourceNotFound: database does not exist',
+    'ResourceNotFound: Db or Table not exist: unrelated_collection',
+  ]) {
+    const db = createDb()
+    db.checkCollectionExists = async () => ({ Exists: false, Msg })
+
+    await assert.rejects(() => ensureReleaseControlPlane(db), /indeterminate verification/i)
+    assert.deepEqual(db.created, [])
+  }
+})
+
 test('ensure mode creates only missing collections', async () => {
   const db = createDb(['release_locks'])
 
@@ -88,7 +102,12 @@ test('ensure mode tolerates an already-exists creation race', async () => {
 })
 
 test('ensure mode rethrows negative and ambiguous creation errors', async () => {
-  for (const message of ['Table does not exist', 'CollectionNotExists', 'permission denied']) {
+  for (const message of [
+    'Table does not exist',
+    'CollectionNotExists',
+    'permission denied',
+    'unrelated_collection already exists',
+  ]) {
     const db = createDb(['release_locks', 'release_runs'])
     db.createCollection = async (collection) => {
       db.created.push(collection)
