@@ -5,6 +5,13 @@ function configuredWorkerToken(env: NodeJS.ProcessEnv = process.env) {
 }
 
 function eventWorkerToken(event: any = {}) {
+  if (event.Type === 'Timer') {
+    if (typeof event.Message !== 'string') return ''
+    try {
+      const message = JSON.parse(event.Message)
+      return String(message && typeof message === 'object' ? message.workerToken || '' : '').trim()
+    } catch { return '' }
+  }
   const direct = event.workerToken || event.postRagWorkerToken || event.POST_RAG_WORKER_TOKEN
   if (direct) return String(direct).trim()
 
@@ -25,4 +32,5 @@ export function assertPostRagWorkerAuthorized(event: any = {}, env: NodeJS.Proce
   if (!expected) throw new Error('post RAG worker token is not configured')
   const actual = eventWorkerToken(event)
   if (!actual || !secureTokenEqual(actual, expected)) throw new Error('Unauthorized')
+  return { source: event.Type === 'Timer' ? 'timer' as const : 'manual' as const }
 }
