@@ -33,6 +33,11 @@
           <text>编辑</text>
           <image class="profile-edit-arrow" src="/static/profile/edit-arrow.svg" mode="aspectFit" />
         </view>
+        <!-- #ifdef H5 -->
+        <button class="profile-web-logout" :disabled="webLogoutLock.busy.value" @tap="webLogoutLock.run()">
+          {{ webLogoutLock.busy.value ? '退出中...' : '退出登录' }}
+        </button>
+        <!-- #endif -->
       </template>
 
       <!-- 编辑态：头像 + 昵称表单（chooseAvatar 明显可见） -->
@@ -106,10 +111,12 @@
           <!-- #ifdef H5 -->
           <text class="form-hint">使用 CloudBase Web 账号登录</text>
           <view class="input-wrap">
-            <input v-model="webUsername" placeholder="用户名" placeholder-class="input-placeholder" class="input" />
+            <text class="input-label">用户名</text>
+            <input v-model="webUsername" autocomplete="username" aria-label="用户名" placeholder="请输入用户名" placeholder-class="input-placeholder" class="input" />
           </view>
           <view class="input-wrap">
-            <input v-model="webPassword" password placeholder="密码" placeholder-class="input-placeholder" class="input" />
+            <text class="input-label">密码</text>
+            <input v-model="webPassword" password autocomplete="current-password" aria-label="密码" placeholder="请输入密码" placeholder-class="input-placeholder" class="input" />
           </view>
           <!-- #endif -->
           <!-- #ifndef H5 -->
@@ -138,7 +145,7 @@
           </view>
 
           <view class="form-actions">
-            <button size="mini" @tap="showManualLoginForm = false">取消</button>
+            <button size="mini" @tap="closeManualLoginForm">取消</button>
             <button
               size="mini"
               :disabled="!canSubmitForm || submitFormLock.busy.value"
@@ -757,6 +764,19 @@ const submitFormLock = useBusyLock(async () => {
   }
 })
 
+function closeManualLoginForm() {
+  showManualLoginForm.value = false
+  webPassword.value = ''
+}
+
+const webLogoutLock = useBusyLock(async () => {
+  try {
+    await userStore.logout()
+  } catch (e: any) {
+    uni.showModal({ title: '退出登录失败', content: e?.message || '请重试', showCancel: false })
+  }
+})
+
 // DEV login modal state
 const showDevLogin = ref(false)
 const devOpenid = ref('')
@@ -817,6 +837,7 @@ function updateProfileNavMetrics() {
 function openLoginEntry() {
   if (userStore.isLoggedIn) return
   if (supportsChooseAvatar.value) return
+  webPassword.value = ''
   showManualLoginForm.value = true
 }
 
@@ -1950,6 +1971,24 @@ onShareAppMessage(() => {
   width: 36rpx;
   height: 36rpx;
   display: block;
+}
+
+.profile-web-logout {
+  position: absolute;
+  right: 0;
+  bottom: 12rpx;
+  height: 48rpx;
+  margin: 0;
+  padding: 0 16rpx;
+  border: 0;
+  background: transparent;
+  color: var(--hh-color-text-secondary);
+  font-size: var(--hh-text-body-base-size);
+  line-height: 48rpx;
+}
+
+.profile-web-logout::after {
+  border: 0;
 }
 
 .profile-login-actions {

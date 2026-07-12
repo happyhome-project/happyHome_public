@@ -25,6 +25,10 @@ function loadWebAuth() {
   return import('../api/web-cloudbase')
 }
 
+function errorMessage(error: any): string {
+  return String(error?.message || error || 'unknown error')
+}
+
 export const useUserStore = defineStore('user', {
   state: () => ({
     openId: '' as string,
@@ -145,8 +149,15 @@ export const useUserStore = defineStore('user', {
         this.saveToStorage()
         this.syncBackgroundFetchToken()
       } catch (error) {
-        try { await webAuth.signOut() } catch (_signOutError) {}
+        let rollbackError: any = null
+        try { await webAuth.signOut() } catch (signOutError) { rollbackError = signOutError }
         this.clearLocalSession()
+        if (rollbackError) {
+          const combined = new Error(`${errorMessage(error)}; Web signOut rollback failed: ${errorMessage(rollbackError)}`)
+          ;(combined as any).cause = error
+          ;(combined as any).rollbackError = rollbackError
+          throw combined
+        }
         throw error
       }
     },
@@ -155,8 +166,16 @@ export const useUserStore = defineStore('user', {
       try {
         const webAuth = await loadWebAuth()
         const session = await webAuth.getLoginState()
-        if (!session || !savedNickName) {
+        if (!session) {
           this.clearLocalSession()
+          return false
+        }
+        if (!savedNickName) {
+          try {
+            await webAuth.signOut()
+          } finally {
+            this.clearLocalSession()
+          }
           return false
         }
         const result = await userApi.login({ nickName: savedNickName, avatarUrl: this.avatarUrl || '' })
@@ -217,11 +236,14 @@ export const useUserStore = defineStore('user', {
       this.syncBackgroundFetchToken()
     },
     async logout() {
-      if (isWebRuntime()) {
-        const webAuth = await loadWebAuth()
-        await webAuth.signOut()
+      try {
+        if (isWebRuntime()) {
+          const webAuth = await loadWebAuth()
+          await webAuth.signOut()
+        }
+      } finally {
+        this.clearLocalSession()
       }
-      this.clearLocalSession()
     },
   },
 })

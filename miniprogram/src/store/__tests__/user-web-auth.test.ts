@@ -101,6 +101,17 @@ describe('user store Web auth', () => {
     expect(store.isLoggedIn).toBe(true)
   })
 
+  test('restoreWebSession signs out an SDK session that has no saved nickname', async () => {
+    const { useUserStore } = await import('../user')
+    const store = useUserStore()
+    getLoginState.mockResolvedValue({ user: { uid: 'sdk-user' } })
+
+    await store.restoreWebSession()
+
+    expect(signOut).toHaveBeenCalledTimes(1)
+    expect(store.isLoggedIn).toBe(false)
+  })
+
   test.each([
     ['signIn', () => signIn.mockRejectedValueOnce(new Error('bad credentials'))],
     ['user.login', () => userLogin.mockRejectedValueOnce(new Error('business login failed'))],
@@ -132,5 +143,32 @@ describe('user store Web auth', () => {
     expect(calls).toEqual(['signOut'])
     expect(store.isLoggedIn).toBe(false)
     expect(store.openId).toBe('')
+  })
+
+  test('webLogin reports both failures and clears local state when rollback signOut fails', async () => {
+    userLogin.mockRejectedValueOnce(new Error('business login failed'))
+    signOut.mockRejectedValueOnce(new Error('rollback signOut failed'))
+    const { useUserStore } = await import('../user')
+    const store = useUserStore()
+
+    await expect(store.webLogin({ username: 'alice', password: 'secret', nickName: '新昵称' }))
+      .rejects.toThrow(/business login failed.*rollback signOut failed/)
+
+    expect(store.isLoggedIn).toBe(false)
+    expect(store.openId).toBe('')
+    expect(storage.has('user_store')).toBe(false)
+  })
+
+  test('logout clears local state even when Web signOut fails', async () => {
+    signOut.mockRejectedValueOnce(new Error('signOut unavailable'))
+    const { useUserStore } = await import('../user')
+    const store = useUserStore()
+    Object.assign(store, { openId: 'web-user-1', nickName: '青山用户', isLoggedIn: true })
+
+    await expect(store.logout()).rejects.toThrow('signOut unavailable')
+
+    expect(store.isLoggedIn).toBe(false)
+    expect(store.openId).toBe('')
+    expect(storage.has('user_store')).toBe(false)
   })
 })

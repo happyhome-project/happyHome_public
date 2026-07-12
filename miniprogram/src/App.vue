@@ -3,8 +3,10 @@ import { onLaunch, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from './store/community'
 import { useUserStore } from './store/user'
 import { clientLog, installRuntimeLogHooks } from './utils/client-log'
+import { refreshCommunitiesForCurrentSession } from './utils/app-session-lifecycle'
 
 let lastCommunityRefreshAt = 0
+let sessionReady: Promise<unknown> = Promise.resolve()
 const FOREGROUND_COMMUNITY_REFRESH_INTERVAL = 30 * 1000
 
 function getRuntimeDiagnostics() {
@@ -27,6 +29,7 @@ function getRuntimeDiagnostics() {
 }
 
 async function refreshMyCommunitiesSilently() {
+  await sessionReady
   const userStore = useUserStore()
   if (!userStore.isLoggedIn) return
   const now = Date.now()
@@ -35,7 +38,18 @@ async function refreshMyCommunitiesSilently() {
 
   try {
     clientLog('debug', 'app.communities.refresh.start', {})
-    await useCommunityStore().loadMyCommunities({ loadSections: false })
+    const communityStore = useCommunityStore()
+    await refreshCommunitiesForCurrentSession({
+      sessionReady,
+      isLoggedIn: () => userStore.isLoggedIn,
+      identity: () => String(userStore.openId || ''),
+      load: () => communityStore.loadMyCommunities({ loadSections: false }),
+      clear: () => {
+        communityStore.clearCommunityState()
+        communityStore.myCommunities = []
+        communityStore.membershipByCommunity = {}
+      },
+    })
     clientLog('debug', 'app.communities.refresh.success', {})
   } catch (e) {
     clientLog('error', 'app.communities.refresh.fail', { error: e })
@@ -62,7 +76,12 @@ onLaunch(async () => {
   userStore.syncBackgroundFetchToken()
   communityStore.loadFromStorage()
   // #ifdef H5
-  await userStore.restoreWebSession()
+  sessionReady = userStore.restoreWebSession().catch((error) => {
+    clientLog('error', 'app.webSession.restore.fail', { error })
+    console.error('Failed to restore Web session:', error)
+    userStore.clearLocalSession()
+  })
+  await sessionReady
   // #endif
   lastCommunityRefreshAt = Date.now()
   clientLog('info', 'app.storage.loaded', {
@@ -92,12 +111,13 @@ onLaunch(async () => {
   // 前台返回时仍会按阈值静默刷新，解决后台审批通过后用户无需杀进程的问题。
 })
 
-onShow(() => {
+onShow(async () => {
   clientLog('info', 'app.show', {})
   // The app may stay alive while an admin approves a membership in the backend.
   // Refresh active communities when returning to the foreground so users do not
   // need to kill and reopen the mini-program to see newly approved communities.
-  void refreshMyCommunitiesSilently()
+  await sessionReady
+  await refreshMyCommunitiesSilently()
 })
 </script>
 
