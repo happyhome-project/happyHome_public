@@ -1,5 +1,10 @@
 # Optional Nightly Notifications Implementation Plan
 
+> **Historical / point-in-time:** This delivery plan records the approved 2026-07-12 implementation sequence. Retain it for traceability; do not treat its task state as current repository status.
+> **Current authority:** Use the [documentation authority map](../../README.md), current nightly scripts, workflow, and tests.
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make WeCom delivery optional and non-blocking while preserving an explicit notification result for future Feishu integration.

@@ -1,5 +1,8 @@
 # Optional Nightly Notifications Design
 
+> **Historical / point-in-time:** This specification records the design accepted for the 2026-07-12 delivery. It does not override later implementation or notification-provider decisions.
+> **Current authority:** Use the [documentation authority map](../../README.md), current nightly scripts, workflow, and tests.
+
 ## Goal
 
 Keep HappyHome nightly test execution authoritative even when no notification provider is configured or a configured provider fails. Enterprise WeChat remains an optional delivery channel. A future Feishu provider should be addable without changing test-result semantics.
