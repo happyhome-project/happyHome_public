@@ -2,10 +2,12 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { EventEmitter } from 'node:events'
+import { PassThrough } from 'node:stream'
 import test from 'node:test'
 
 import { createH5WebLauncher } from '../h5-web.mjs'
-import { runH5WebSmoke, sanitizeEvidence, validateReadEvidence } from '../test-h5-web-smoke.mjs'
+import { resolveCleanupIntent, runH5WebSmoke, sanitizeEvidence, validateReadEvidence } from '../test-h5-web-smoke.mjs'
 
 async function machineHome(values = {}) {
   const home = await mkdtemp(join(tmpdir(), 'hh-h5-web-'))
@@ -45,6 +47,19 @@ test('launcher reports missing machine config precisely', async () => {
   await assert.rejects(() => createH5WebLauncher({ home }).start(), /missing machine config: .*h5-web\.env/)
 })
 
+test('launcher drains child pipes and reports sanitized bounded tail on early exit', async () => {
+  const home = await machineHome({ HH_CLOUDBASE_ENV_ID: 'env-public', HH_CLOUDBASE_ACCESS_KEY: 'secret-public-key' })
+  const child = new EventEmitter()
+  Object.assign(child, { pid: 4343, exitCode: null, stdout: new PassThrough(), stderr: new PassThrough() })
+  const launcher = createH5WebLauncher({ home, findPort: async () => 54322, inspectGit: async () => ({ cwd: 'C:/repo', branch: 'codex/test', head: 'abc' }), spawnChild: () => child, killTree: async () => {}, log() {} })
+  const started = launcher.start()
+  child.stderr.write(`${'x'.repeat(20_000)} compile failed secret-public-key`)
+  await new Promise((resolve) => setImmediate(resolve))
+  child.exitCode = 1
+  child.emit('exit', 1)
+  await assert.rejects(started, (error) => !error.message.includes('secret-public-key') && error.message.length < 10_000 && /compile failed/.test(error.message))
+})
+
 test('read smoke runs doctor and browser without a validation lease', async () => {
   const calls = []
   const result = await runH5WebSmoke({ mode: 'read', runId: 'read-1', deps: fakeDeps(calls) })
@@ -69,6 +84,8 @@ test('write smoke takes exactly one lease, uses a unique run id, and requires cl
   assert.match(result.runId, /^[0-9a-f-]{36}$/)
   assert.ok(calls.includes(`write:${result.runId}`))
   assert.ok(calls.includes(`cleanup:${result.runId}`))
+  assert.ok(calls.indexOf('lease') < calls.indexOf('doctor'))
+  assert.ok(calls.indexOf(`cleanup:${result.runId}`) < calls.indexOf('evidence:passed:true'))
 })
 
 test('write smoke propagates cleanup failure and still stops its own server', async () => {
@@ -78,6 +95,14 @@ test('write smoke propagates cleanup failure and still stops its own server', as
   await assert.rejects(() => runH5WebSmoke({ mode: 'write', deps }), /exact cleanup failed/)
   assert.equal(calls.filter((x) => x === 'lease').length, 1)
   assert.ok(calls.includes('stop'))
+  assert.ok(calls.includes('evidence:failed:false'))
+})
+
+test('cleanup intent locates and deletes an exact UUID post even when submit click throws', async () => {
+  const calls = []
+  const intent = { runId: 'uuid-1', content: 'H5 smoke uuid-1' }
+  await resolveCleanupIntent({ intent, locate: async (content) => { calls.push(`locate:${content}`); return 'post-1' }, remove: async (postId) => calls.push(`remove:${postId}`) })
+  assert.deepEqual(calls, ['locate:H5 smoke uuid-1', 'remove:post-1'])
 })
 
 test('evidence removes credentials, raw content, openids, and storage URLs', () => {
@@ -92,6 +117,6 @@ function fakeDeps(calls) {
     browseRead: async () => ({ counts: { long: 30, short: 1, empty: 0 }, geometry: { stickyTop: 0 } }),
     browseWrite: async ({ runId }) => { calls.push(`write:${runId}`); return { cleanup: async () => calls.push(`cleanup:${runId}`), counts: { created: 1 }, geometry: {} } },
     lease: async (_options, fn) => { calls.push('lease'); return fn() },
-    writeEvidence: async () => {},
+    writeEvidence: async (evidence) => calls.push(`evidence:${evidence.status}:${evidence.cleanupOk}`),
   }
 }

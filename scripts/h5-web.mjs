@@ -35,14 +35,26 @@ async function inspectGit(root) {
   return { cwd: root, branch: await run('branch', '--show-current'), head: await run('rev-parse', 'HEAD') }
 }
 
-async function waitUntilReady(url, child, timeoutMs = 45_000) {
+async function waitUntilReady(url, child, tail, timeoutMs = 45_000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`H5 dev server exited before ready (${child.exitCode})`)
+    if (child.exitCode !== null) throw new Error(`H5 dev server exited before ready (${child.exitCode})\n${tail()}`)
     try { const response = await fetch(url); if (response.ok) return } catch {}
     await new Promise((resolveWait) => setTimeout(resolveWait, 200))
   }
-  throw new Error(`H5 dev server did not become ready: ${url}`)
+  throw new Error(`H5 dev server did not become ready: ${url}\n${tail()}`)
+}
+
+function drainChild(child, secrets) {
+  let buffer = ''
+  const append = (chunk) => {
+    let text = String(chunk)
+    for (const secret of secrets.filter(Boolean)) text = text.split(secret).join('[redacted]')
+    buffer = `${buffer}${text}`.slice(-8192)
+  }
+  child.stdout?.on('data', append)
+  child.stderr?.on('data', append)
+  return () => buffer
 }
 
 async function killOwnTree(pid) {
@@ -66,9 +78,14 @@ export function createH5WebLauncher({ root = ROOT, home = homedir(), findPort = 
       cwd: root, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
       env: buildChildEnv(process.env, values),
     })
+    const tail = drainChild(child, [values.HH_CLOUDBASE_ENV_ID, values.HH_CLOUDBASE_ACCESS_KEY])
+    const childFailure = new Promise((_, reject) => {
+      child.once('error', (error) => reject(new Error(`H5 dev server spawn failed: ${error.message}\n${tail()}`)))
+      child.once('exit', (code) => reject(new Error(`H5 dev server exited before ready (${code})\n${tail()}`)))
+    })
     let stopped = false
     const stop = async () => { if (!stopped) { stopped = true; await killTree(child.pid) } }
-    try { await wait(url, child) } catch (error) { await stop(); throw error }
+    try { await Promise.race([wait(url, child, tail), childFailure]) } catch (error) { await stop(); throw error }
     log(JSON.stringify({ url, cwd: gitInfo.cwd, branch: gitInfo.branch, head: gitInfo.head }))
     return { child, port, url, git: gitInfo, stop }
   } }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { randomUUID } from 'node:crypto'
-import { mkdir, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, rename, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,7 +12,7 @@ import { withValidationLease } from './lib/validation-lease.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 export const EXPECTED_HOME_VISIBLE_LONG = 20
-const SAFE_KEYS = new Set(['mode', 'runId', 'cwd', 'branch', 'head', 'port', 'counts', 'geometry', 'routes', 'cleanup', 'top'])
+const SAFE_KEYS = new Set(['mode', 'runId', 'cwd', 'branch', 'head', 'port', 'counts', 'geometry', 'routes', 'cleanup', 'top', 'status', 'cleanupOk'])
 export function sanitizeEvidence(value) {
   if (Array.isArray(value)) return value.map(sanitizeEvidence)
   if (!value || typeof value !== 'object') return value
@@ -25,6 +25,14 @@ export function validateReadEvidence({ doctor, visible }) {
   if (visible?.long !== EXPECTED_HOME_VISIBLE_LONG) throw new Error(`unexpected visible long count: ${visible?.long}`)
   if (visible?.short !== 1) throw new Error(`unexpected visible short count: ${visible?.short}`)
   if (visible?.empty !== 0) throw new Error(`unexpected visible empty count: ${visible?.empty}`)
+}
+
+export async function resolveCleanupIntent({ intent, locate, remove }) {
+  if (!intent) return { found: false }
+  const postId = await locate(intent.content)
+  if (!postId) return { found: false }
+  await remove(postId)
+  return { found: true, postId }
 }
 
 async function realRead({ running, doctor, home = homedir() }) {
@@ -43,7 +51,9 @@ async function realRead({ running, doctor, home = homedir() }) {
     const counts = {}
     for (const [name, id] of [['long', SECTION_IDS.long], ['short', SECTION_IDS.short], ['empty', SECTION_IDS.empty]]) {
       await page.getByTestId(`home-section-tab-${id}`).last().click()
-      await page.waitForTimeout(100)
+      await page.waitForFunction((sectionId) => document.querySelector(`[data-testid="home-section-tab-${sectionId}"][data-active="true"]`), id)
+      const expected = name === 'long' ? EXPECTED_HOME_VISIBLE_LONG : name === 'short' ? 1 : 0
+      await page.waitForFunction((count) => document.querySelectorAll('[data-testid="home-post-card"]').length === count, expected)
       counts[name] = await page.getByTestId('home-post-card').count()
     }
     validateReadEvidence({ doctor, visible: counts })
@@ -72,44 +82,46 @@ async function realRead({ running, doctor, home = homedir() }) {
 
 async function realWrite({ running, runId, home = homedir() }) {
   const config = loadTenantConfig({ home })
-  const browser = await chromium.launch({ headless: true })
-  const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
+  let browser
+  let page
   const content = `H5 smoke ${runId}`
   const pngPath = join(ROOT, '.codex-local', 'h5-web-smoke', runId, 'pixel.png')
-  await mkdir(dirname(pngPath), { recursive: true })
-  await writeFile(pngPath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'))
   let postUrl = ''
   let postId = ''
-  let created = false
+  let cleanupIntent = null
   let deleted = false
   const cleanup = async () => {
     try {
-      if (created && !deleted) {
-        if (!postUrl) {
+      if (cleanupIntent && !deleted) {
+        await resolveCleanupIntent({ intent: cleanupIntent, locate: async () => {
+          if (postId) return postId
           await page.goto(`${running.url}/#/pages/index/index`)
           await page.getByTestId(`home-section-tab-${SECTION_IDS.short}`).last().click()
           const exact = page.getByText(content, { exact: true })
-          await exact.waitFor()
-          const card = exact.locator('xpath=ancestor::*[@data-post-id][1]')
-          postId = (await card.getAttribute('data-post-id')) || ''
-          if (!postId) throw new Error(`cleanup could not locate exact post id for ${runId}`)
-          await card.click()
-          postUrl = page.url()
-        } else await page.goto(postUrl)
-        await page.getByTestId('post-delete').click()
-        await page.getByText('确定', { exact: true }).click()
-        await page.waitForURL((url) => url.toString() !== postUrl)
-        deleted = true
-        await page.goto(postUrl)
-        await page.getByText(/详情加载失败|帖子不存在|已删除/).waitFor()
+          try { await exact.waitFor({ timeout: 5_000 }) } catch { return '' }
+          postId = (await exact.locator('xpath=ancestor::*[@data-post-id][1]').getAttribute('data-post-id')) || ''
+          return postId
+        }, remove: async (exactPostId) => {
+          postUrl ||= `${running.url}/#/pages/detail/index?postId=${encodeURIComponent(exactPostId)}`
+          await page.goto(postUrl)
+          await page.getByTestId('post-delete').click()
+          await page.getByText('确定', { exact: true }).click()
+          await page.waitForURL((url) => url.toString() !== postUrl)
+          deleted = true
+          await page.goto(postUrl)
+          await page.getByText(/详情加载失败|帖子不存在|已删除/).waitFor()
+        } })
       }
     } finally {
-      await browser.close()
+      await browser?.close()
       await unlink(pngPath).catch(() => {})
     }
-    if (created && !deleted) throw new Error(`write smoke cleanup failed for run ${runId}`)
   }
   try {
+    await mkdir(dirname(pngPath), { recursive: true })
+    await writeFile(pngPath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'))
+    browser = await chromium.launch({ headless: true })
+    page = await browser.newPage({ viewport: { width: 390, height: 844 } })
     await page.goto(`${running.url}/#/pages/profile/index`)
     if (!(await page.getByTestId('h5-login-username').isVisible())) await page.getByText('登录', { exact: true }).first().click()
     await page.getByTestId('h5-login-username').fill(config.username)
@@ -120,8 +132,8 @@ async function realWrite({ running, runId, home = homedir() }) {
     await page.getByTestId(`create-section-${SECTION_IDS.short}`).click()
     await page.getByTestId('widget-input-hh-web-h5-v1-widget-short').fill(content)
     await page.getByTestId('widget-image-input-hh-web-h5-v1-widget-short-image').setInputFiles(pngPath)
+    cleanupIntent = { runId, content }
     await page.getByTestId('create-submit').click()
-    created = true
     await page.getByText(content, { exact: true }).waitFor()
     const card = page.getByText(content, { exact: true }).locator('xpath=ancestor::*[@data-post-id][1]')
     postId = (await card.getAttribute('data-post-id')) || ''
@@ -134,7 +146,7 @@ async function realWrite({ running, runId, home = homedir() }) {
     if (!/^https:\/\//.test(imageUrl || '')) throw new Error(`created post image did not resolve to an HTTPS storage URL for run ${runId}`)
     return { counts: { created: 1 }, geometry: {}, cleanup, storageUrlVerified: true }
   } catch (error) {
-    try { await cleanup() } catch (cleanupError) { throw new AggregateError([error, cleanupError], `${error.message}; cleanup failed`) }
+    try { await cleanup(); error.cleanupOk = true } catch (cleanupError) { const aggregate = new AggregateError([error, cleanupError], `${error.message}; cleanup failed`); aggregate.cleanupOk = false; throw aggregate }
     throw error
   }
 }
@@ -142,25 +154,40 @@ async function realWrite({ running, runId, home = homedir() }) {
 async function writeEvidence(root, evidence) {
   const path = join(root, '.codex-local', 'h5-web-smoke', evidence.runId, 'summary.json')
   await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, `${JSON.stringify(sanitizeEvidence(evidence), null, 2)}\n`, { mode: 0o600 })
+  const temporary = `${path}.${randomUUID()}.tmp`
+  try {
+    await writeFile(temporary, `${JSON.stringify(sanitizeEvidence(evidence), null, 2)}\n`, { mode: 0o600 })
+    await rename(temporary, path)
+  } finally { await unlink(temporary).catch(() => {}) }
 }
 
 export async function runH5WebSmoke({ mode = 'read', runId = randomUUID(), root = ROOT, deps = {} } = {}) {
   if (!['read', 'write'].includes(mode)) throw new Error('mode must be read or write')
   const d = { doctor: () => runTenantCli({ argv: ['doctor'], root }), launcher: createH5WebLauncher({ root }), browseRead: realRead, browseWrite: realWrite, lease: withValidationLease, writeEvidence: (e) => writeEvidence(root, e), ...deps }
-  const doctor = await d.doctor()
-  const running = await d.launcher.start()
-  try {
-    const execute = async () => {
-      const result = mode === 'read' ? await d.browseRead({ running, runId, doctor }) : await d.browseWrite({ running, runId })
-      try {
-        const evidence = sanitizeEvidence({ mode, runId, cwd: running.git.cwd, branch: running.git.branch, head: running.git.head, port: running.port, ...result })
-        await d.writeEvidence(evidence)
-        return evidence
-      } finally { await result?.cleanup?.() }
-    }
-    return mode === 'write' ? await d.lease({ command: `h5-web-smoke:write:${runId}` }, execute) : await execute()
-  } finally { await running.stop() }
+  const execute = async () => {
+    let running
+    let result
+    let cleanupAttempted = false
+    let cleanupOk = mode === 'read' ? true : false
+    try {
+      const doctor = await d.doctor()
+      running = await d.launcher.start()
+      result = mode === 'read' ? await d.browseRead({ running, runId, doctor }) : await d.browseWrite({ running, runId })
+      if (result?.cleanup) { cleanupAttempted = true; await result.cleanup(); cleanupOk = true }
+      const evidence = sanitizeEvidence({ status: 'passed', cleanupOk, mode, runId, cwd: running.git.cwd, branch: running.git.branch, head: running.git.head, port: running.port, ...result })
+      await d.writeEvidence(evidence)
+      return evidence
+    } catch (error) {
+      if (result?.cleanup && !cleanupAttempted) {
+        cleanupAttempted = true
+        try { await result.cleanup(); cleanupOk = true } catch (cleanupError) { cleanupOk = false; error = new AggregateError([error, cleanupError], `${error.message}; cleanup failed`) }
+      } else if (error?.cleanupOk === true) cleanupOk = true
+      const failed = sanitizeEvidence({ status: 'failed', cleanupOk, mode, runId, ...(running ? { cwd: running.git.cwd, branch: running.git.branch, head: running.git.head, port: running.port } : {}) })
+      await d.writeEvidence(failed)
+      throw error
+    } finally { await running?.stop() }
+  }
+  return mode === 'write' ? await d.lease({ command: `h5-web-smoke:write:${runId}` }, execute) : await execute()
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

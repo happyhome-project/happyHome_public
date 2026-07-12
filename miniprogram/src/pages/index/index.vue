@@ -152,6 +152,8 @@
             class="section-tab"
             :data-testid="`home-section-tab-${g.id}`"
             :data-section-id="g.id"
+            :data-active="index === activeArchiveIndex ? 'true' : 'false'"
+            :aria-selected="index === activeArchiveIndex ? 'true' : 'false'"
             :class="{ active: index === activeArchiveIndex }"
             @tap="selectArchiveGroup(g)"
           >
@@ -251,6 +253,8 @@
           class="section-tab"
           :data-testid="`home-section-tab-${g.id}`"
           :data-section-id="g.id"
+          :data-active="index === activeArchiveIndex ? 'true' : 'false'"
+          :aria-selected="index === activeArchiveIndex ? 'true' : 'false'"
           :class="{ active: index === activeArchiveIndex }"
           @tap="selectArchiveGroup(g)"
         >
