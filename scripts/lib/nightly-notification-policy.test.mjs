@@ -3,11 +3,13 @@ import test from 'node:test'
 
 import {
   REQUIRED_NIGHTLY_ENV,
+  completeNightlyFailure,
   createNotificationPlan,
   deriveNightlyResult,
   finalizeNightlyRun,
   formatWorkflowWarning,
   notificationStatusFromStage,
+  writeNightlyOutcome,
 } from './nightly-notification-policy.mjs'
 
 test('nightly execution does not require a WeCom webhook', () => {
@@ -125,4 +127,97 @@ test('JSON summary fields and Markdown report expose the same three statuses', (
   assert.match(result.markdown, /- Status: passed/)
   assert.match(result.markdown, /- Test status: passed/)
   assert.match(result.markdown, /- Notification status: sent/)
+})
+
+const failureInput = (overrides = {}) => ({
+  error: new Error('original nightly failure'),
+  stages: [{ key: 'tests', name: 'tests', status: 'failed', durationMs: 1 }],
+  cleanupIssues: [],
+  webhook: 'https://example.invalid/webhook',
+  summary: baseSummary('failed'),
+  warn: () => {},
+  writeOutcome: async () => {},
+  ...overrides,
+})
+
+test('configured failure completion calls sender and records a sent notification', async () => {
+  let calls = 0
+  let written
+  const result = await completeNightlyFailure(failureInput({
+    sendNotification: async (summary) => {
+      calls += 1
+      assert.equal(summary.testStatus, 'failed')
+      assert.match(summary.error, /original nightly failure/)
+      return { key: 'notify-wecom', name: 'WeCom notification', status: 'passed', durationMs: 2 }
+    },
+    writeOutcome: async (outcome) => { written = outcome },
+  }))
+
+  assert.equal(calls, 1)
+  assert.equal(result.summary.testStatus, 'failed')
+  assert.equal(result.summary.notificationStatus, 'sent')
+  assert.equal(result.exitCode, 1)
+  assert.equal(written, result)
+})
+
+test('configured failure completion maps sender rejection to failed notification and fixed warning', async () => {
+  const warnings = []
+  const result = await completeNightlyFailure(failureInput({
+    sendNotification: async () => { throw new Error('sensitive transport detail') },
+    warn: (warning) => warnings.push(warning),
+    env: { GITHUB_ACTIONS: 'true' },
+  }))
+
+  assert.equal(result.summary.status, 'failed')
+  assert.equal(result.summary.notificationStatus, 'failed')
+  assert.equal(result.exitCode, 1)
+  assert.deepEqual(warnings, ['::warning::WeCom notification failed'])
+})
+
+test('missing webhook skips sender while preserving failed test outcome', async () => {
+  let called = false
+  const result = await completeNightlyFailure(failureInput({
+    webhook: '',
+    sendNotification: async () => { called = true },
+  }))
+
+  assert.equal(called, false)
+  assert.equal(result.summary.notificationStatus, 'skipped')
+  assert.equal(result.summary.testStatus, 'failed')
+  assert.equal(result.exitCode, 1)
+})
+
+test('outcome writer sends identical summary and Markdown data to every destination', async () => {
+  const writes = []
+  const outcome = finalizeNightlyRun({
+    summary: baseSummary('failed'),
+    notificationStage: { status: 'failed' },
+  })
+  await writeNightlyOutcome({
+    outcome,
+    writeJson: async (summary) => writes.push(['json', summary]),
+    writeMarkdown: async (markdown) => writes.push(['markdown', markdown]),
+    writeStepSummary: async (markdown) => writes.push(['github', markdown]),
+  })
+
+  assert.equal(writes[0][1], outcome.summary)
+  assert.equal(writes[1][1], outcome.markdown)
+  assert.equal(writes[2][1], outcome.markdown)
+})
+
+test('failure completion preserves the original error when outcome writing also fails', async () => {
+  const original = new Error('original nightly failure')
+  const writeError = new Error('summary disk full')
+  await assert.rejects(
+    completeNightlyFailure(failureInput({
+      error: original,
+      sendNotification: async () => ({ status: 'passed' }),
+      writeOutcome: async () => { throw writeError },
+    })),
+    (error) => {
+      assert.equal(error.cause, original)
+      assert.deepEqual(error.errors, [original, writeError])
+      return true
+    },
+  )
 })

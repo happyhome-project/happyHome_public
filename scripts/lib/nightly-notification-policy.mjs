@@ -89,3 +89,76 @@ export function finalizeNightlyRun({ summary, notificationStage, env = process.e
     exitCode: finalSummary.testStatus === 'passed' ? 0 : 1,
   }
 }
+
+export async function writeNightlyOutcome({ outcome, writeJson, writeMarkdown, writeStepSummary }) {
+  await writeJson(outcome.summary)
+  await writeMarkdown(outcome.markdown)
+  if (writeStepSummary) await writeStepSummary(outcome.markdown)
+}
+
+export async function completeNightlyFailure({
+  error,
+  stages,
+  cleanupIssues,
+  webhook,
+  summary,
+  sendNotification,
+  writeOutcome,
+  warn,
+  env = process.env,
+}) {
+  const failureSummary = {
+    ...summary,
+    status: 'failed',
+    testStatus: 'failed',
+    cleanupIssues,
+    stages,
+    error: error?.stack || error?.message || String(error),
+  }
+  let notificationStage = stages.find((stage) => stage.key === 'notify-wecom')
+  if (!notificationStage) {
+    const plan = createNotificationPlan({ webhook, env })
+    if (!plan.shouldRun) {
+      notificationStage = plan.stage
+      if (plan.warning) warn(plan.warning)
+    } else {
+      try {
+        notificationStage = await sendNotification(failureSummary)
+        if (notificationStage.status === 'sent') {
+          notificationStage = { ...notificationStage, status: 'passed' }
+        }
+      } catch {
+        const timestamp = new Date().toISOString()
+        notificationStage = {
+          key: 'notify-wecom',
+          name: 'WeCom notification',
+          status: 'failed',
+          startedAt: timestamp,
+          finishedAt: timestamp,
+          durationMs: 0,
+          command: '',
+          logPath: '',
+        }
+      }
+    }
+    if (!stages.includes(notificationStage)) stages.push(notificationStage)
+  }
+
+  const outcome = finalizeNightlyRun({
+    env,
+    notificationStage,
+    summary: failureSummary,
+  })
+  if (outcome.warning) warn(outcome.warning)
+
+  try {
+    await writeOutcome(outcome)
+  } catch (writeError) {
+    throw new AggregateError(
+      [error, writeError],
+      'Nightly failure reporting failed',
+      { cause: error },
+    )
+  }
+  return outcome
+}

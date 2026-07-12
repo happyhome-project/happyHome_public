@@ -2,11 +2,14 @@ import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { ROOT, runLoggedCommand } from './lib/process-utils.mjs'
 import { ensureDir, sanitizeName, writeJson } from './lib/reporting.mjs'
+import { sendWeComNotification } from './notify-wecom.mjs'
 import {
   REQUIRED_NIGHTLY_ENV,
+  completeNightlyFailure,
   createNotificationPlan,
   deriveNightlyResult,
   finalizeNightlyRun,
+  writeNightlyOutcome,
 } from './lib/nightly-notification-policy.mjs'
 
 const startedAt = new Date()
@@ -109,12 +112,15 @@ async function collectCleanupIssues(dirPath) {
   return issues
 }
 
-async function writeNightlyOutcome(outcome) {
-  await writeJson(summaryPath, outcome.summary)
-  await writeFile(summaryMarkdownPath, outcome.markdown, 'utf8')
-  if (process.env.GITHUB_STEP_SUMMARY) {
-    await writeFile(process.env.GITHUB_STEP_SUMMARY, outcome.markdown, 'utf8')
-  }
+async function persistNightlyOutcome(outcome) {
+  await writeNightlyOutcome({
+    outcome,
+    writeJson: (summary) => writeJson(summaryPath, summary),
+    writeMarkdown: (markdown) => writeFile(summaryMarkdownPath, markdown, 'utf8'),
+    writeStepSummary: process.env.GITHUB_STEP_SUMMARY
+      ? (markdown) => writeFile(process.env.GITHUB_STEP_SUMMARY, markdown, 'utf8')
+      : null,
+  })
 }
 
 async function main() {
@@ -208,18 +214,18 @@ async function main() {
   }
   const outcome = finalizeNightlyRun({ summary, notificationStage: notifyStage })
   if (outcome.warning) console.warn(outcome.warning)
-  await writeNightlyOutcome(outcome)
+  await persistNightlyOutcome(outcome)
   if (outcome.exitCode !== 0) process.exit(outcome.exitCode)
 }
 
 main().catch(async (error) => {
   console.error(error?.stack || error?.message || error)
   await ensureDir(artifactRoot)
-  const notificationStage = stages.find((stage) => stage.key === 'notify-wecom')
-    || createNotificationPlan({ webhook: '' }).stage
-  if (!stages.includes(notificationStage)) stages.push(notificationStage)
-  const outcome = finalizeNightlyRun({
-    notificationStage,
+  await completeNightlyFailure({
+    error,
+    stages,
+    cleanupIssues: [],
+    webhook: process.env.WECOM_WEBHOOK_URL,
     summary: {
       status: 'failed',
       testStatus: 'failed',
@@ -229,9 +235,13 @@ main().catch(async (error) => {
       artifactRoot,
       cleanupIssues: [],
       stages,
-      error: error?.stack || error?.message || String(error),
     },
+    sendNotification: (failureSummary) => sendWeComNotification({
+      webhook: process.env.WECOM_WEBHOOK_URL,
+      summary: failureSummary,
+    }),
+    writeOutcome: persistNightlyOutcome,
+    warn: (warning) => console.warn(warning),
   })
-  await writeNightlyOutcome(outcome)
   process.exit(1)
 })
