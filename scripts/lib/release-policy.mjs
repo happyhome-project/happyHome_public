@@ -17,7 +17,7 @@ export const CANONICAL_ORIGIN_URL = 'https://github.com/happyhome-project/happyH
 function normalizeWorkspacePath(value) {
   const normalized = String(value || '')
     .trim()
-    .replace(/^\\\\\\?\\/, '')
+    .replace(/^\\\\\?\\/, '')
     .replace(/\\/g, '/')
     .replace(/\/+$/, '')
   return /^[a-z]:\//i.test(normalized) ? normalized.toLowerCase() : normalized

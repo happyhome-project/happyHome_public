@@ -130,6 +130,21 @@ test('formal release git state treats Windows slash styles as the same canonical
   }), /canonical main workspace/i)
 })
 
+test('formal release git state accepts the canonical workspace with a Windows extended path prefix', () => {
+  assert.doesNotThrow(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(), cwd: '\\\\?\\C:\\Project\\Claude\\happyHome_public',
+  }))
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(), cwd: '\\\\?\\C:\\Project\\Claude\\happyHome_public_other',
+  }), /canonical main workspace/i)
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(), cwd: '\\\\server\\share\\happyHome_public',
+  }), /canonical main workspace/i)
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(), cwd: '.\\happyHome_public',
+  }), /canonical main workspace/i)
+})
+
 test('formal release git state rejects private cwd, wrong origin, feature, dirty, stale, and implicit full-current sources', () => {
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
     ...validPublicReleaseState(), cwd: 'C:\\Project\\Claude\\happyHome',
