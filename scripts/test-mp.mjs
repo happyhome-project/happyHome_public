@@ -13,6 +13,7 @@ import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
+import { withValidationLease } from './lib/validation-lease.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
@@ -214,4 +215,7 @@ async function runTests() {
   }
 }
 
-runTests()
+withValidationLease({ command: 'test-mp' }, runTests).catch((error) => {
+  console.error(`❌ ${error?.message || error}`)
+  process.exitCode = 1
+})

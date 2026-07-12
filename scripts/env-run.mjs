@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process'
 import process from 'node:process'
 
 import { assertEnvironmentProfile } from './lib/environment-profile.mjs'
+import { withValidationLease } from './lib/validation-lease.mjs'
 
 function git(args) {
   const result = spawnSync('git', args, { encoding: 'utf8', windowsHide: true })
@@ -20,7 +21,7 @@ function parse(argv) {
   return { profile, command }
 }
 
-try {
+async function main() {
   const { profile, command } = parse(process.argv.slice(2))
   const cwd = git(['rev-parse', '--show-toplevel'])
   assertEnvironmentProfile(profile, {
@@ -33,10 +34,16 @@ try {
   if (profile === 'fixture-write' && !process.env.HAPPYHOME_FIXTURE_PREFIX) {
     throw new Error('fixture-write requires HAPPYHOME_FIXTURE_PREFIX for isolated test data')
   }
-  const result = spawnSync(command[0], command.slice(1), { stdio: 'inherit', windowsHide: true })
-  if (result.error) throw result.error
-  process.exitCode = result.status || 0
-} catch (error) {
+  const run = () => {
+    const result = spawnSync(command[0], command.slice(1), { stdio: 'inherit', windowsHide: true })
+    if (result.error) throw result.error
+    process.exitCode = result.status || 0
+  }
+  if (profile === 'fixture-write') await withValidationLease({ command: 'env-run:fixture-write' }, run)
+  else run()
+}
+
+main().catch((error) => {
   console.error(`[env-run] ${error?.message || error}`)
   process.exitCode = 1
-}
+})
