@@ -42,6 +42,21 @@ test('validation lease CLI recovers only the expected stale owner', async () => 
   assert.equal(JSON.parse(result.stdout).snapshot.status, 'recovered')
 })
 
+test('repository governance documents and exercises the machine-local validation lease', async () => {
+  const agents = await readFile(path.join(root, 'AGENTS.md'), 'utf8')
+  const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'))
+
+  assert.match(agents, /DevTools[^\n]*fixture-write[^\n]*同一[^\n]*机器本地[^\n]*validation lease/i)
+  assert.match(agents, /已有[^\n]*lease[^\n]*阻止|lease[^\n]*存在[^\n]*阻止/i)
+  assert.match(agents, /过期[^\n]*(?:unknown|未知)[^\n]*不[^\n]*自动接管/i)
+  assert.match(agents, /validation:lease:status/)
+  assert.match(agents, /npm\.cmd run validation:lease:recover -- --expected-owner-token=<uuid> --confirm-no-owner --reason=["“]\.\.\.["”]/)
+  assert.match(agents, /(?:原始|raw)[^\n]*(?:CLI|API)[^\n]*(?:绕过|旁路)[^\n]*不是[^\n]*安全隔离/i)
+  assert.match(agents, /不得[^\n]*(?:终止|关闭)[^\n]*(?:进程|DevTools)|不得[^\n]*(?:移动|删除)[^\n]*缓存/i)
+  assert.match(manifest.scripts['test:governance'], /validation-lease\.test\.mjs/)
+  assert.match(manifest.scripts['test:governance'], /validation-lease-entrypoints\.test\.mjs/)
+})
+
 test('DevTools leaf entrypoints each acquire one distinct validation lease', async () => {
   const contracts = new Map([
     ['test-mp.mjs', 'test-mp'],
