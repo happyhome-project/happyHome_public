@@ -1,10 +1,7 @@
 import https from 'node:https'
 import http from 'node:http'
 import { readFile } from 'node:fs/promises'
-
-const summaryPath = process.argv[2] || process.env.HH_SUMMARY_PATH || ''
-const webhook = process.env.WECOM_WEBHOOK_URL || ''
-const requireWebhook = process.env.HH_REQUIRE_WECOM === '1'
+import { pathToFileURL } from 'node:url'
 
 function postJson(urlString, body) {
   return new Promise((resolve, reject) => {
@@ -36,17 +33,17 @@ function postJson(urlString, body) {
   })
 }
 
-function buildRunUrl() {
-  const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID } = process.env
+function buildRunUrl(env) {
+  const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID } = env
   if (!GITHUB_SERVER_URL || !GITHUB_REPOSITORY || !GITHUB_RUN_ID) return ''
   return `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`
 }
 
-function stageSummary(summary) {
+function stageSummary(summary, env) {
   const failedStages = summary.stages.filter((stage) => stage.status === 'failed')
   const flakyStages = summary.stages.filter((stage) => stage.status === 'recovered_flaky')
   const cleanupIssues = summary.cleanupIssues || []
-  const runUrl = buildRunUrl()
+  const runUrl = buildRunUrl(env)
 
   const lines = [
     `# HappyHome Nightly ${summary.status === 'passed' ? 'SUCCESS' : 'FAILED'}`,
@@ -74,35 +71,47 @@ function stageSummary(summary) {
   return lines.join('\n')
 }
 
+export async function sendWeComNotification({ webhook, summary, env }) {
+  if (!webhook) {
+    return { status: 'skipped' }
+  }
+
+  const res = await postJson(webhook, {
+    msgtype: 'markdown',
+    markdown: {
+      content: stageSummary(summary, env),
+    },
+  })
+
+  if (res.statusCode < 200 || res.statusCode >= 300) {
+    throw new Error(`WeCom webhook failed with status ${res.statusCode}`)
+  }
+
+  return { status: 'sent' }
+}
+
 async function main() {
+  const summaryPath = process.argv[2] || process.env.HH_SUMMARY_PATH || ''
+  const webhook = process.env.WECOM_WEBHOOK_URL || ''
+
   if (!summaryPath) {
     throw new Error('Missing summary path')
   }
 
   if (!webhook) {
-    if (requireWebhook) {
-      throw new Error('Missing WECOM_WEBHOOK_URL')
-    }
     console.log('Skipping WeCom notification because webhook is not configured.')
     return
   }
 
   const summary = JSON.parse(await readFile(summaryPath, 'utf8'))
-  const res = await postJson(webhook, {
-    msgtype: 'markdown',
-    markdown: {
-      content: stageSummary(summary),
-    },
-  })
-
-  if (res.statusCode < 200 || res.statusCode >= 300) {
-    throw new Error(`WeCom webhook failed with status ${res.statusCode}: ${res.body}`)
-  }
+  await sendWeComNotification({ webhook, summary, env: process.env })
 
   console.log('WeCom notification sent.')
 }
 
-main().catch((error) => {
-  console.error(error?.stack || error?.message || error)
-  process.exit(1)
-})
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  main().catch((error) => {
+    console.error(error?.stack || error?.message || error)
+    process.exit(1)
+  })
+}
