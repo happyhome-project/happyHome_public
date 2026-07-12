@@ -50,6 +50,7 @@ test('issues one bounded BM25+dense RRF request and returns a semantically relat
   expect(f.requestJson).toHaveBeenCalledTimes(1)
   expect(f.requestJson).toHaveBeenCalledWith('POST', 'rag-index/_search', expect.objectContaining({
     size: 40,
+    collapse: { field: 'postId' },
     _source: ['postId', 'communityId', 'sectionId', 'sourceVersion', 'chunkId', 'visibility', 'widgetId', 'fieldKey', 'title', 'text', 'preview', 'fieldLabel', 'sectionName'],
     query: { bool: { must: [{ multi_match: { query: '勤俭持家', fields: ['text^3', 'preview^2', 'title^4', 'fieldLabel', 'sectionName'], type: 'best_fields' } }], filter: [{ term: { communityId: 'c1' } }, { term: { visibility: 'public' } }] } },
     knn: { field: 'embedding', query_vector: [0.1, 0.2], k: 40, num_candidates: 100, filter: { bool: { filter: [{ term: { communityId: 'c1' } }, { term: { visibility: 'public' } }] } } },
@@ -58,6 +59,25 @@ test('issues one bounded BM25+dense RRF request and returns a semantically relat
   expect(result).toMatchObject({ protocolVersion: 2, query: '勤俭持家', total: 1, skip: 0, limit: 10, items: [{ postId: 'p1', title: '一粥一饭，当思来处不易', matchedField: '正文', sectionName: '家风' }] })
   expect(result.items[0].matchedSnippet).toContain('一粥一饭')
   expect(result.tookMs).toBeGreaterThanOrEqual(0)
+})
+
+test('ES postId collapse prevents forty chunks from one long post monopolizing candidates', async () => {
+  const docs: Record<string, any> = {
+    'rag_community_versions:c1': versions(),
+    'posts:p1': post(), 'sections:s1': section(), 'post_rag_index_state_v2:p1': state(),
+    'posts:p2': post({ _id: 'p2' }), 'post_rag_index_state_v2:p2': state({ _id: 'p2', postId: 'p2' }),
+  }
+  const f = fixture({ docs, hits: [] })
+  f.requestJson.mockImplementation(async (_method, _path, body) => {
+    const longPostHits = Array.from({ length: 40 }, (_, index) => hit({ chunkId: `long-${index}` }))
+    const secondPost = hit({ postId: 'p2', chunkId: 'p2-chunk', title: '勤俭家风', preview: '勤俭持家，从一粥一饭做起' })
+    return { hits: { hits: body.collapse?.field === 'postId' ? [longPostHits[0], secondPost] : longPostHits } }
+  })
+  const result = await f.service.search({ communityId: 'c1', query: '勤俭持家', includeMemberOnly: false })
+  expect(f.requestJson.mock.calls[0][2]).toMatchObject({ size: 40, collapse: { field: 'postId' } })
+  expect(result.total).toBe(2)
+  expect(result.items.map(item => item.postId)).toEqual(['p1', 'p2'])
+  expect(result.items[1].matchedSnippet).toContain('一粥一饭')
 })
 
 test('adds section filter and allows member chunks only for members', async () => {

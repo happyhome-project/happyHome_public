@@ -153,6 +153,7 @@ export function createPostSemanticSearchService(options: {
         if (!input.includeMemberOnly) filters.push({ term: { visibility: 'public' } })
         const response = await options.requestJson('POST', `${options.indexName}/_search`, {
           size: 40,
+          collapse: { field: 'postId' },
           _source: ['postId', 'communityId', 'sectionId', 'sourceVersion', 'chunkId', 'visibility', 'widgetId', 'fieldKey', 'title', 'text', 'preview', 'fieldLabel', 'sectionName'],
           query: { bool: { must: [{ multi_match: { query, fields: ['text^3', 'preview^2', 'title^4', 'fieldLabel', 'sectionName'], type: 'best_fields' } }], filter: filters } },
           knn: { field: options.vectorField, query_vector: vector, k: 40, num_candidates: 100, filter: { bool: { filter: filters } } },
