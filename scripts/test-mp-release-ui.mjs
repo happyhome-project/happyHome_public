@@ -5,6 +5,7 @@
  * websocket and proves the release-critical paths:
  *   - HH_RELEASE_HOME_COLD_START_NONEMPTY
  *   - HH_RELEASE_HOME_IMAGES_RENDERED
+ *   - HH_RELEASE_HOME_ARCHIVE_TABS_STICKY
  *   - HH_RELEASE_HOME_DETAIL_NONEMPTY
  *   - HH_RELEASE_LOGIN_VERSION
  *   - HH_RELEASE_PROFILE_LOGIN_CLEAN
@@ -878,7 +879,7 @@ async function createReleaseFixture(mp) {
   const runId = makeReleaseRunId()
   const adminCtx = makeFixtureAdminCtx(runId)
   const name = `${RELEASE_FIXTURE_PREFIX}${runId}`
-  const fixture = { runId, adminCtx, configured: false, communityId: '', sectionId: '', postId: '' }
+  const fixture = { runId, adminCtx, configured: false, communityId: '', sectionId: '', postId: '', sectionIds: [], postIds: [] }
 
   try {
     const community = await callMpCloud(mp, 'admin', {
@@ -893,61 +894,67 @@ async function createReleaseFixture(mp) {
     fixture.communityId = String(community.communityId || '')
     if (!fixture.communityId) throw new Error('community.createAdmin did not return communityId')
 
-    const section = await callMpCloud(mp, 'admin', {
-      action: 'section.create',
-      _actAs: adminCtx,
-      communityId: fixture.communityId,
-      name: 'Release UI',
-      icon: 'R',
-      order: 0,
-      type: 'realtime',
-    })
-    fixture.sectionId = String(section.sectionId || '')
-    if (!fixture.sectionId) throw new Error('section.create did not return sectionId')
-
-    const widgetsResult = await callMpCloud(mp, 'admin', {
-      action: 'section.updateWidgets',
-      _actAs: adminCtx,
-      sectionId: fixture.sectionId,
-      widgets: [
-        { type: 'short_text', label: 'Title', fieldKey: 'title', required: true, showInList: true, widgetId: '' },
-        { type: 'summary', label: 'Summary', fieldKey: 'summary', required: false, showInList: true, widgetId: '' },
-      ],
-    })
-    const widgets = Array.isArray(widgetsResult.widgets) ? widgetsResult.widgets : []
-    const titleWidget = widgets.find((widget) => widget.type === 'short_text') || widgets[0]
-    const summaryWidget = widgets.find((widget) => widget.type === 'summary')
-    if (!titleWidget?.widgetId) throw new Error('section.updateWidgets did not return a title widget')
-
-    const content = {
-      [titleWidget.widgetId]: `Release UI fixture ${runId}`,
-    }
-    if (summaryWidget?.widgetId) {
-      content[summaryWidget.widgetId] = 'Automated release validation post.'
-    }
-
-    const post = await callMpCloud(mp, 'admin', {
-      action: 'post.createAdmin',
-      _actAs: adminCtx,
-      communityId: fixture.communityId,
-      sectionId: fixture.sectionId,
-      content,
-    }, { timeoutMs: 90000 })
-    fixture.postId = String(post.postId || '')
-    if (!fixture.postId) throw new Error('post.createAdmin did not return postId')
-
-    if (post.auditStatus !== 'pass') {
-      await callMpCloud(mp, 'admin', {
-        action: 'audit.approveAdmin',
+    const createArchive = async ({ name: sectionName, order, postCount }) => {
+      const section = await callMpCloud(mp, 'admin', {
+        action: 'section.create',
         _actAs: adminCtx,
-        postId: fixture.postId,
+        communityId: fixture.communityId,
+        name: sectionName,
+        icon: sectionName.slice(0, 1),
+        order,
+        type: 'evergreen',
       })
+      const sectionId = String(section.sectionId || '')
+      if (!sectionId) throw new Error('section.create did not return sectionId')
+      fixture.sectionIds.push(sectionId)
+
+      const widgetsResult = await callMpCloud(mp, 'admin', {
+        action: 'section.updateWidgets',
+        _actAs: adminCtx,
+        sectionId,
+        widgets: [
+          { type: 'short_text', label: 'Title', fieldKey: 'title', required: true, showInList: true, widgetId: '' },
+          { type: 'summary', label: 'Summary', fieldKey: 'summary', required: false, showInList: true, widgetId: '' },
+        ],
+      })
+      const widgets = Array.isArray(widgetsResult.widgets) ? widgetsResult.widgets : []
+      const titleWidget = widgets.find((widget) => widget.type === 'short_text') || widgets[0]
+      const summaryWidget = widgets.find((widget) => widget.type === 'summary')
+      if (!titleWidget?.widgetId) throw new Error('section.updateWidgets did not return a title widget')
+
+      for (let index = 0; index < postCount; index += 1) {
+        const content = { [titleWidget.widgetId]: `${sectionName} ${index + 1} ${runId}` }
+        if (summaryWidget?.widgetId) content[summaryWidget.widgetId] = 'Automated release validation post.'
+        const post = await callMpCloud(mp, 'admin', {
+          action: 'post.createAdmin',
+          _actAs: adminCtx,
+          communityId: fixture.communityId,
+          sectionId,
+          content,
+        }, { timeoutMs: 90000 })
+        const postId = String(post.postId || '')
+        if (!postId) throw new Error('post.createAdmin did not return postId')
+        fixture.postIds.push(postId)
+        if (post.auditStatus !== 'pass') {
+          await callMpCloud(mp, 'admin', { action: 'audit.approveAdmin', _actAs: adminCtx, postId })
+        }
+      }
+      return sectionId
     }
+
+    fixture.sectionId = await createArchive({ name: '长内容', order: 0, postCount: 3 })
+    await createArchive({ name: '短内容', order: 1, postCount: 1 })
+    fixture.postId = fixture.postIds[0] || ''
 
     return fixture
   } catch (error) {
     if (fixture.communityId) {
-      try { await cleanupReleaseFixture(mp, fixture) } catch {}
+      try {
+        const cleanup = await cleanupReleaseFixture(mp, fixture)
+        if (!cleanup.ok) throw new Error(`fixture cleanup failed: ${JSON.stringify(cleanup)}`)
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], 'release fixture creation and cleanup both failed')
+      }
     }
     throw error
   }
@@ -1092,6 +1099,74 @@ async function findFirstPost(page) {
     if (nodes.length) return { selector, node: nodes[0], count: nodes.length }
   }
   return null
+}
+
+async function captureHomeTabsLayout(mp) {
+  return await withTimeout(mp.evaluate(() => new Promise((resolveLayout) => {
+    try {
+      const query = wx.createSelectorQuery()
+      query.selectAll('.section-tabs--sticky').boundingClientRect()
+      query.select('.home-search--primary').boundingClientRect()
+      query.selectAll('.arc-item').boundingClientRect()
+      query.selectAll('.section-tab.active').boundingClientRect()
+      query.selectViewport().scrollOffset()
+      query.exec((items) => {
+        const tabs = Array.isArray(items?.[0]) ? items[0] : []
+        const search = items?.[1] || null
+        const cards = Array.isArray(items?.[2]) ? items[2] : []
+        const activeTabs = Array.isArray(items?.[3]) ? items[3] : []
+        const viewport = items?.[4] || {}
+        const safeTop = Number(wx.getWindowInfo?.().safeArea?.top || 0)
+        resolveLayout({ tabs, search, cardCount: cards.length, activeTabCount: activeTabs.length, scrollTop: Number(viewport.scrollTop || 0), safeTop })
+      })
+    } catch (error) {
+      resolveLayout({ tabs: [], search: null, cardCount: 0, activeTabCount: 0, scrollTop: 0, safeTop: 0, error: String(error) })
+    }
+  })), 15000, 'capture home archive tabs layout')
+}
+
+async function scrollHomeTo(mp, scrollTop) {
+  await withTimeout(mp.evaluate((top) => new Promise((resolveScroll) => {
+    wx.pageScrollTo({ scrollTop: top, duration: 0, complete: resolveScroll })
+  }), scrollTop), 15000, 'scroll release home')
+  await sleep(500)
+}
+
+async function verifyHomeArchiveTabs(mp, context, evidenceDir) {
+  if (!context.releaseFixture) throw new Error('release archive tabs fixture was not provisioned')
+  await seedCurrentViewerIntoCommunity(mp, context.releaseFixture)
+  const home = await withTimeout(mp.reLaunch('/pages/index/index'), 30000, 'open release archive fixture home')
+  await sleep(7000)
+  await scrollHomeTo(mp, 0)
+  const before = await captureHomeTabsLayout(mp)
+  const targetScrollTop = before.scrollTop + Number(before.tabs?.[0]?.top || 0) + 40
+  await scrollHomeTo(mp, targetScrollTop)
+  const pinned = await captureHomeTabsLayout(mp)
+  const tabs = await withTimeout(home.$$('.section-tab'), 10000, 'find release archive tabs')
+  if (tabs.length === 2) {
+    await withTimeout(tabs[1].tap(), 15000, 'switch to short release archive')
+    await sleep(700)
+  }
+  const shortArchive = await captureHomeTabsLayout(mp)
+  await mp.screenshot({ path: resolve(evidenceDir, 'home-archive-tabs-sticky.png') })
+
+  const pinnedTop = Number(pinned.tabs?.[0]?.top || 0)
+  const passed = before.tabs?.length === 1 &&
+    pinned.tabs?.length === 1 &&
+    tabs.length === 2 &&
+    Number(before.search?.height || 0) > 1 &&
+    Number(before.tabs?.[0]?.top || 0) > before.safeTop + 16 &&
+    Number(before.tabs?.[0]?.top || 0) >= Number(before.search?.bottom || 0) &&
+    pinned.scrollTop > 0 &&
+    Number(pinned.search?.bottom || 0) <= pinned.safeTop + 2 &&
+    Math.abs(pinnedTop - pinned.safeTop) <= 8 &&
+    pinned.cardCount === 3 &&
+    shortArchive.cardCount === 1 &&
+    shortArchive.activeTabCount === 1 &&
+    Math.abs(shortArchive.scrollTop - pinned.scrollTop) <= 8 &&
+    Math.abs(Number(shortArchive.tabs?.[0]?.top || 0) - pinnedTop) <= 4
+
+  return { passed, before, pinned, shortArchive, tabCount: tabs.length }
 }
 
 async function verifyHomeDetail(mp, context = {}) {
@@ -1283,6 +1358,33 @@ async function main() {
     evidence.markers.push('HH_RELEASE_HOME_COLD_START_NONEMPTY')
     console.log('HH_RELEASE_HOME_COLD_START_NONEMPTY')
 
+    runContext.releaseFixture = await createReleaseFixture(mpState.mp)
+    const homeArchiveTabsRun = await runAutomatorTaskWithRetry({
+      state: mpState,
+      autoPort,
+      label: 'verify release home archive tabs',
+      attempts: envPositiveInt('HH_RELEASE_UI_HOME_ATTEMPTS', 3),
+      timeoutMs: envPositiveInt('HH_RELEASE_UI_HOME_TIMEOUT_MS', 90000),
+      task: async (currentMp) => {
+        const result = await verifyHomeArchiveTabs(currentMp, runContext, evidenceDir)
+        if (!result.passed) throw makeEvidenceRetryError('release home archive tabs evidence', result)
+        return result
+      },
+      recover: async ({ state, attempt }) => {
+        await disconnectMiniProgramQuietly(state.mp, `disconnect failed archive tabs attempt ${attempt}`)
+        await startAutomator({ cliPath, projectPath, idePort, autoPort })
+        state.mp = await connectMiniProgram(autoPort)
+      },
+    })
+    mp = mpState.mp
+    const homeArchiveTabs = homeArchiveTabsRun.result
+    evidence.homeArchiveTabs = homeArchiveTabs
+    if (!homeArchiveTabs.passed) {
+      throw makeEvidenceRetryError('release home archive tabs evidence', homeArchiveTabs)
+    }
+    evidence.markers.push('HH_RELEASE_HOME_ARCHIVE_TABS_STICKY')
+    console.log('HH_RELEASE_HOME_ARCHIVE_TABS_STICKY')
+
     const homeDetailRun = await runAutomatorTaskWithRetry({
       state: mpState,
       autoPort,
@@ -1353,6 +1455,7 @@ async function main() {
     assertReleaseUiEvidence({
       homeColdStartNonEmpty: coldStartHome.result.passed,
       homeImagesRendered: homeDetail.homeImagesRendered,
+      homeArchiveTabsSticky: homeArchiveTabs.passed,
       homeDetailNonEmpty: homeDetail.passed,
       loginVersionVisible: profileLoginClean.versionPassed,
       profileLoginClean: profileLoginClean.cleanPassed,
