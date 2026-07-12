@@ -1,3 +1,4 @@
+
 // cloud/lib/__tests__/db.contract.test.ts
 // 契约测试：验证 db.local.ts 与 db.ts 导出完全一致的函数签名
 // 确保内存适配器可以安全替代云端实现
@@ -6,7 +7,9 @@ import * as dbLocal from '../db.local'
 
 const expectedExports = [
   'getById',
+  'getByIds',
   'create',
+  'setById',
   'updateById',
   'updateWhere',
   'removeById',
@@ -15,6 +18,7 @@ const expectedExports = [
   'replaceValue',
   'removeField',
   'query',
+  'queryAfterId',
   'runTransaction',
   'transactionGetByIdOrNull',
 ]
@@ -111,6 +115,53 @@ test('runTransaction 在回调抛错时回滚已写入的数据', async () => {
   await expect(dbLocal.getById('items', 'temporary')).rejects.toMatchObject({ errCode: -502001 })
 })
 
+test('runTransaction serializes concurrent callbacks', async () => {
+  await dbLocal.create('counters', { _id: 'one', value: 0 })
+
+  await Promise.all(Array.from({ length: 8 }, () => dbLocal.runTransaction(async (transaction) => {
+    const current = await dbLocal.transactionGetByIdOrNull<any>(transaction, 'counters', 'one')
+    await Promise.resolve()
+    await transaction.collection('counters').doc('one').update({ data: { value: current.value + 1 } })
+  })))
+
+  await expect(dbLocal.getById('counters', 'one')).resolves.toMatchObject({ value: 8 })
+})
+
+test('reset fences an in-flight transaction from writing or rolling back the new generation', async () => {
+  let release!: () => void
+  let entered!: () => void
+  const enteredPromise = new Promise<void>((resolve) => { entered = resolve })
+  const releasePromise = new Promise<void>((resolve) => { release = resolve })
+  await dbLocal.create('items', { _id: 'old', value: 'old' })
+
+  const stale = dbLocal.runTransaction(async (transaction) => {
+    entered()
+    await releasePromise
+    await transaction.collection('items').doc('stale').set({ data: { value: 'stale' } })
+    throw new Error('stale rollback')
+  })
+  await enteredPromise
+
+  dbLocal._resetAll()
+  await dbLocal.create('items', { _id: 'new', value: 'new' })
+  release()
+
+  await expect(stale).rejects.toThrow('database reset during transaction')
+  await expect(dbLocal.getById('items', 'new')).resolves.toMatchObject({ value: 'new' })
+  await expect(dbLocal.getById('items', 'old')).rejects.toMatchObject({ errCode: -502001 })
+  await expect(dbLocal.getById('items', 'stale')).rejects.toMatchObject({ errCode: -502001 })
+})
+
+test('transactions queued after reset still serialize without lost updates', async () => {
+  await dbLocal.create('counters', { _id: 'after-reset', value: 0 })
+  await Promise.all(Array.from({ length: 12 }, () => dbLocal.runTransaction(async (transaction) => {
+    const current = await dbLocal.transactionGetByIdOrNull<any>(transaction, 'counters', 'after-reset')
+    await Promise.resolve()
+    await transaction.collection('counters').doc('after-reset').update({ data: { value: current.value + 1 } })
+  })))
+  await expect(dbLocal.getById('counters', 'after-reset')).resolves.toMatchObject({ value: 12 })
+})
+
 test('query where 条件过滤', async () => {
   await dbLocal.create('items', { type: 'a', val: 1 })
   await dbLocal.create('items', { type: 'b', val: 2 })
@@ -158,4 +209,28 @@ test('create 使用自定义 _id', async () => {
   expect(id).toBe('custom-id')
   const doc = await dbLocal.getById('users', 'custom-id')
   expect(doc.name).toBe('test')
+})
+
+test('getByIds 去重并只返回存在的文档', async () => {
+  await dbLocal.create('items', { _id: 'b', value: 2 })
+  await dbLocal.create('items', { _id: 'a', value: 1 })
+  await expect(dbLocal.getByIds('items', ['b', 'missing', 'b', 'a'])).resolves.toEqual([
+    expect.objectContaining({ _id: 'b', value: 2 }),
+    expect.objectContaining({ _id: 'a', value: 1 }),
+  ])
+})
+
+test('queryAfterId 使用稳定 _id 游标分页', async () => {
+  await dbLocal.create('items', { _id: 'c', type: 'x' })
+  await dbLocal.create('items', { _id: 'a', type: 'x' })
+  await dbLocal.create('items', { _id: 'b', type: 'x' })
+  await expect(dbLocal.queryAfterId('items', { type: 'x' }, 'a', 1)).resolves.toEqual([
+    expect.objectContaining({ _id: 'b' }),
+  ])
+})
+
+test('setById 以显式 ID 整体写入文档', async () => {
+  await dbLocal.setById('items', 'fixed', { value: 1, stale: true })
+  await dbLocal.setById('items', 'fixed', { value: 2 })
+  await expect(dbLocal.getById('items', 'fixed')).resolves.toEqual({ _id: 'fixed', value: 2 })
 })

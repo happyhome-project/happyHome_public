@@ -1,3 +1,4 @@
+
 // cloud/lib/db.local.ts
 // 内存数据库适配器，与 db.ts 签名完全一致
 // 用于 L2 本地集成测试，不依赖 wx-server-sdk
@@ -5,6 +6,8 @@
 const store = new Map<string, Map<string, any>>()
 
 let idCounter = 0
+let transactionTail: Promise<void> = Promise.resolve()
+let resetGeneration = 0
 
 function collection(name: string): Map<string, any> {
   if (!store.has(name)) store.set(name, new Map())
@@ -47,6 +50,7 @@ function applyUpdate(existing: any, data: Record<string, any>) {
 
 /** 清空所有数据，测试间隔调用 */
 export function _resetAll() {
+  resetGeneration += 1
   store.clear()
   idCounter = 0
 }
@@ -64,6 +68,11 @@ export async function getById(collectionName: string, id: string) {
     throw err
   }
   return { ...doc }
+}
+
+export async function setById(collectionName: string, id: string, data: object) {
+  collection(collectionName).set(id, { _id: id, ...cloneValue(data) })
+  return { stats: { updated: 1 } }
 }
 
 export async function create(collectionName: string, data: any) {
@@ -103,32 +112,63 @@ function restoreStore(snapshot: Map<string, Map<string, any>>) {
 
 /**
  * The integration adapter mirrors CloudBase's callback transaction contract.
- * Tests are single-threaded, so a snapshot is sufficient to assert all-or-
- * nothing behavior without bringing a database server into the test suite.
+ * Callbacks are serialized to mirror the conflict isolation callers rely on
+ * from CloudBase while retaining snapshot rollback for the in-memory adapter.
  */
-export async function runTransaction<T>(callback: (transaction: LocalTransaction) => Promise<T>): Promise<T> {
-  const snapshot = snapshotStore()
-  const transaction: LocalTransaction = {
-    collection: (collectionName) => ({
-      doc: (id) => ({
-        get: async () => ({ data: cloneValue(collection(collectionName).get(id) || null) }),
-        set: async ({ data }) => {
-          collection(collectionName).set(id, { _id: id, ...cloneValue(data) })
-          return { stats: { updated: 1 } }
+export function runTransaction<T>(callback: (transaction: LocalTransaction) => Promise<T>): Promise<T> {
+  const transactionGeneration = resetGeneration
+  const assertActiveGeneration = () => {
+    if (transactionGeneration !== resetGeneration) throw new Error('database reset during transaction')
+  }
+  const result = transactionTail.then(async () => {
+    assertActiveGeneration()
+    const snapshot = snapshotStore()
+    const transaction: LocalTransaction = {
+      collection: (collectionName) => ({
+        doc: (id) => ({
+          get: async () => {
+            assertActiveGeneration()
+            return { data: cloneValue(collection(collectionName).get(id) || null) }
+          },
+          set: async ({ data }) => {
+            assertActiveGeneration()
+            collection(collectionName).set(id, { _id: id, ...cloneValue(data) })
+            return { stats: { updated: 1 } }
+          },
+          update: async ({ data }) => {
+            assertActiveGeneration()
+            return updateById(collectionName, id, data)
+          },
+          remove: async () => {
+            assertActiveGeneration()
+            return removeById(collectionName, id)
+          },
+        }),
+        add: async ({ data }) => {
+          assertActiveGeneration()
+          return { _id: await create(collectionName, data) }
         },
-        update: async ({ data }) => updateById(collectionName, id, data),
-        remove: async () => removeById(collectionName, id),
       }),
-      add: async ({ data }) => ({ _id: await create(collectionName, data) }),
-    }),
-  }
+    }
 
-  try {
-    return await callback(transaction)
-  } catch (error) {
-    restoreStore(snapshot)
-    throw error
-  }
+    try {
+      const value = await callback(transaction)
+      assertActiveGeneration()
+      return value
+    } catch (error) {
+      assertActiveGeneration()
+      restoreStore(snapshot)
+      throw error
+    }
+  })
+  transactionTail = result.then(() => undefined, () => undefined)
+  return result
+}
+
+export async function getByIds(collectionName: string, ids: string[]) {
+  if (!Array.isArray(ids) || ids.length > 100 || ids.some(id => typeof id !== 'string' || !id)) throw new Error('invalid document ids')
+  const col = collection(collectionName)
+  return [...new Set(ids)].map(id => col.get(id)).filter(Boolean).map(doc => cloneValue(doc))
 }
 
 export async function transactionGetByIdOrNull<T = any>(
@@ -238,6 +278,7 @@ export async function query(
 
   return results
 }
+export async function queryAfterId(collectionName:string,where:Record<string,any>,afterId:string|null,limit:number){const rows=await query(collectionName,where,{orderBy:['_id','asc'],limit:10000});return rows.filter(row=>!afterId||row._id>afterId).slice(0,limit)}
 
 // ---- 内部工具 ----
 
