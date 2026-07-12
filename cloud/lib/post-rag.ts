@@ -576,7 +576,7 @@ function tencentEsAtomicHost(action: string) {
   return action === 'ChatCompletions' ? 'es.ai.tencentcloudapi.com' : 'es.tencentcloudapi.com'
 }
 
-const requestTencentEsAtomic: TencentRagAtomicRequestJson = async <T>(
+export const requestTencentEsAtomic: TencentRagAtomicRequestJson = async <T>(
   config: TencentRagConfig,
   action: string,
   body: unknown,
@@ -795,7 +795,7 @@ function extractCompletionText(value: any): string {
   return String(completion || result || '').trim()
 }
 
-function extractEmbeddingVector(value: any): number[] {
+export function extractEmbeddingVector(value: any): number[] {
   const response = value?.Response || value
   const direct = value?.embedding?.[0]?.result
     || value?.embedding?.[0]?.embedding
@@ -807,6 +807,16 @@ function extractEmbeddingVector(value: any): number[] {
     || value?.vector
   if (!Array.isArray(direct)) return []
   return direct.map((item) => Number(item)).filter((item) => Number.isFinite(item))
+}
+
+export function extractEmbeddingVectors(value: any): number[][] {
+  const response = value?.Response || value
+  const rows = response?.Data || response?.data || value?.embedding
+  if (!Array.isArray(rows)) return []
+  return rows.map((row: any) => {
+    const vector = row?.Embedding || row?.embedding || row?.result
+    return Array.isArray(vector) ? vector.map(Number) : []
+  })
 }
 
 function isTencentEsNotFoundError(error: any) {
@@ -2632,11 +2642,17 @@ export async function processPostRagJobBatch(options: {
   const limit = Math.max(1, Math.min(20, Math.floor(Number(options.limit || 5))))
   const postId = String(options.postId || '').trim()
   const startedAt = new Date().toISOString()
-  const jobs = await db.query(
-    POST_RAG_JOBS,
-    { status: 'pending', ...(postId ? { postId } : {}) },
-    { orderBy: ['createdAt', 'asc'], limit }
-  ) as any[]
+  const jobs: any[] = []
+  const pageSize = 20
+  for (let skip = 0; jobs.length < limit; skip += pageSize) {
+    const page = await db.query(
+      POST_RAG_JOBS,
+      { status: 'pending', ...(postId ? { postId } : {}) },
+      { orderBy: ['createdAt', 'asc'], limit: pageSize, skip }
+    ) as any[]
+    jobs.push(...page.filter((job) => job?.schemaVersion !== 2).slice(0, limit - jobs.length))
+    if (page.length < pageSize) break
+  }
   const results: Array<{ jobId: string; ok: boolean; error?: string }> = []
   let indexEnsured = false
   let okCount = 0
