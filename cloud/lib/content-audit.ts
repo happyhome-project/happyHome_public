@@ -6,6 +6,7 @@ import * as storage from './storage'
 import { postWxJson } from './wx-openapi'
 import { refreshPostSearchIndexById } from './post-search'
 import { enqueuePostRagJob } from './post-rag'
+import { appendPostRagOutboxEvent } from './post-rag-outbox'
 import type {
   AuditProvider,
   AuditTargetType,
@@ -481,7 +482,7 @@ export async function auditPostContent(params: {
   return summarizeResults(results)
 }
 
-export async function applyAuditSummary(postId: string, slot: 'content' | 'pendingContent', status: PostAuditStatus, reason = '') {
+export async function applyAuditSummary(postId: string, slot: 'content' | 'pendingContent', status: PostAuditStatus, reason = '', trustedPost?: Post) {
   const now = nowIso()
   const queueRagIndexJob = async (jobReason: string, action: 'upsert' | 'delete', postSnapshot?: Post) => {
     const post = postSnapshot || await db.getById('posts', postId) as Post
@@ -493,21 +494,29 @@ export async function applyAuditSummary(postId: string, slot: 'content' | 'pendi
       reason: jobReason,
     })
   }
-  if (slot === 'pendingContent') {
-    if (status === 'pass') {
-      const post = await db.getById('posts', postId) as Post
+  const updatePostWithV2 = async (data: Record<string, any>, postSnapshot?: Post) => {
+    await db.runTransaction(async transaction => {
+      const post = postSnapshot || await db.transactionGetByIdOrNull<Post>(transaction, 'posts', postId)
       if (!post) throw new Error('post not found')
+      await transaction.collection('posts').doc(postId).update({ data })
+      await appendPostRagOutboxEvent(transaction, { communityId: post.communityId, aggregateId: postId, reasonCode: 'post.audit_changed', now })
+    })
+  }
+  if (slot === 'pendingContent') {
+    const post = trustedPost || await db.getById('posts', postId) as Post
+    if (!post) throw new Error('post not found')
+    if (status === 'pass') {
       if (!post.pendingContent) {
-        await db.updateById('posts', postId, {
+        await updatePostWithV2({
           pendingAuditStatus: 'pass',
           pendingAuditReason: '',
           auditUpdatedAt: now,
-        })
+        }, post)
         await queueRagIndexJob('audit.pending.pass.no_content', 'upsert', post)
         await refreshPostSearchIndexById(postId)
         return
       }
-      await db.updateById('posts', postId, {
+      await updatePostWithV2({
         content: db.replaceValue(post.pendingContent),
         pendingContent: db.removeField(),
         pendingAuditStatus: 'pass',
@@ -516,25 +525,27 @@ export async function applyAuditSummary(postId: string, slot: 'content' | 'pendi
         auditReason: '',
         auditUpdatedAt: now,
         updatedAt: now,
-      })
+      }, post)
       await queueRagIndexJob('audit.pending.pass', 'upsert', post)
       await refreshPostSearchIndexById(postId)
       return
     }
-    await db.updateById('posts', postId, {
+    await updatePostWithV2({
       pendingAuditStatus: status,
       pendingAuditReason: reason,
       auditUpdatedAt: now,
-    })
+    }, post)
     await refreshPostSearchIndexById(postId)
     return
   }
 
-  await db.updateById('posts', postId, {
+  const post = trustedPost || await db.getById('posts', postId) as Post
+  if (!post) throw new Error('post not found')
+  await updatePostWithV2({
     auditStatus: status,
     auditReason: reason,
     auditUpdatedAt: now,
-  })
+  }, post)
   await queueRagIndexJob('audit.content.apply', status === 'pass' ? 'upsert' : 'delete')
   await refreshPostSearchIndexById(postId)
 }
@@ -548,9 +559,10 @@ export async function auditAndApply(params: {
   authorId: string
   source: 'user' | 'admin'
   contentSlot?: 'content' | 'pendingContent'
+  postSnapshot?: Post
 }) {
   const summary = await auditPostContent(params)
-  await applyAuditSummary(params.postId, params.contentSlot || 'content', summary.status, summary.reason)
+  await applyAuditSummary(params.postId, params.contentSlot || 'content', summary.status, summary.reason, params.postSnapshot)
   return summary
 }
 
@@ -606,8 +618,8 @@ export async function handleAuditCallback(params: any) {
 export async function approvePostAudit(postId: string) {
   const post = await db.getById('posts', postId) as Post
   if (!post) throw new Error('post not found')
-  if (post.pendingContent) await applyAuditSummary(postId, 'pendingContent', 'pass', '')
-  else await applyAuditSummary(postId, 'content', 'pass', '')
+  if (post.pendingContent) await applyAuditSummary(postId, 'pendingContent', 'pass', '', post)
+  else await applyAuditSummary(postId, 'content', 'pass', '', post)
   return { success: true }
 }
 
@@ -615,9 +627,9 @@ export async function rejectPostAudit(postId: string, reason: string) {
   const post = await db.getById('posts', postId) as Post
   if (!post) throw new Error('post not found')
   if (post.pendingContent) {
-    await applyAuditSummary(postId, 'pendingContent', 'rejected', reason || 'rejected by superAdmin')
+    await applyAuditSummary(postId, 'pendingContent', 'rejected', reason || 'rejected by superAdmin', post)
   } else {
-    await applyAuditSummary(postId, 'content', 'rejected', reason || 'rejected by superAdmin')
+    await applyAuditSummary(postId, 'content', 'rejected', reason || 'rejected by superAdmin', post)
   }
   return { success: true }
 }

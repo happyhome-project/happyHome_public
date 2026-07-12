@@ -9,6 +9,9 @@ export const RELEASE_ACTIONS = new Set([
   'configure-rag-network',
   'configure-rag-workers',
   'update-rag-env',
+  'backfill-post-rag-v2',
+  'verify-post-rag-timer',
+  'eval-post-semantic-search',
 ])
 
 function normalizePath(value) {

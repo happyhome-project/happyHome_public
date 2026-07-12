@@ -240,25 +240,20 @@ export const postApi = {
     asGuest?: boolean
   }) =>
     callCloud<{
+      protocolVersion: 2
       query: string
       communityId: string
-      sectionId: string
+      sectionId?: string
       total: number
       skip: number
       limit: number
-      answer: string
-      mode: 'rag' | 'fallback' | 'no_answer'
-      citations: Array<{
-        postId: string
-        chunkId: string
-        title: string
-        sectionId?: string
-        sectionName?: string
-        fieldLabel: string
-        fieldType: string
-        preview: string
-        score: number
-      }>
+      tookMs: number
+      /** @deprecated Semantic search never generates an answer; always empty when present. */
+      answer?: ''
+      /** @deprecated Compatibility only; semantic v2 returns rag or no_answer when present. */
+      mode?: 'rag' | 'no_answer'
+      /** @deprecated Semantic search returns items directly; always empty when present. */
+      citations?: []
       items: Array<{
         postId: string
         communityId: string
@@ -268,8 +263,8 @@ export const postApi = {
         coverImage?: string
         authorName?: string
         authorAvatarUrl?: string
-        score: number
-        matchedFields: Array<{ fieldLabel: string; fieldType: string; preview: string }>
+        matchedSnippet: string
+        matchedField: string
         createdAt: string
         updatedAt: string
       }>

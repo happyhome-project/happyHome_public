@@ -24,15 +24,14 @@ function createMockRunner(options = {}) {
   const runner = async (command, args, runnerOptions = {}) => {
     calls.push({ command, args, options: runnerOptions })
     const payload = payloadFromArgs(args)
-    if (payload.action === 'community.list') {
+    if (payload.action === 'community.listActivePageAdmin') {
       return {
         status: 0,
         stdout: JSON.stringify({
-          communities: [
+          items: [
             { _id: 'c-active-1', status: 'active' },
-            { _id: 'c-disabled', status: 'disabled' },
             { id: 'c-active-2', status: 'active' },
-          ],
+          ], hasMore: false, nextAfterId: null,
         }),
         stderr: '',
       }

@@ -5,7 +5,11 @@ jest.mock('../db', () => ({
   updateById: jest.fn(),
   replaceValue: jest.fn((value) => ({ __set: value })),
   removeField: jest.fn(() => ({ __remove: true })),
+  runTransaction: jest.fn(async (callback) => callback({ collection: (name: string) => ({ doc: (id: string) => ({ update: async ({ data }: any) => (require('../db').updateById)(name, id, data) }) }) })),
+  transactionGetByIdOrNull: jest.fn(async (_transaction, name, id) => (require('../db').getById)(name, id)),
 }))
+
+jest.mock('../post-rag-outbox', () => ({ appendPostRagOutboxEvent: jest.fn() }))
 
 jest.mock('../storage', () => ({
   getTempUrl: jest.fn(async (fileID: string) => `https://temp.example.com/${encodeURIComponent(fileID)}`),
@@ -156,7 +160,6 @@ test('auditPostContent submits independent audit targets concurrently', async ()
 test('approvePostAudit promotes pendingContent and marks the post as passed', async () => {
   ;(db.getById as jest.Mock)
     .mockResolvedValueOnce({ _id: 'post-1', pendingContent: { title: 'new title' } })
-    .mockResolvedValueOnce({ _id: 'post-1', pendingContent: { title: 'new title' } })
 
   await approvePostAudit('post-1')
 
@@ -176,7 +179,6 @@ test('approvePostAudit promotes pendingContent and marks the post as passed', as
 
 test('approvePostAudit replaces content and removes pendingContent atomically for CloudBase nested object updates', async () => {
   ;(db.getById as jest.Mock)
-    .mockResolvedValueOnce({ _id: 'post-guide', pendingContent: { guide_age: '8岁以上' } })
     .mockResolvedValueOnce({ _id: 'post-guide', pendingContent: { guide_age: '8岁以上' } })
 
   await approvePostAudit('post-guide')

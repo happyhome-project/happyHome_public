@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';import test from 'node:test'
+import{executeFormalSemanticReleaseStages}from'./formal-semantic-release-stages.mjs'
+
+test('post-deploy semantic gates run timer then exact backfill then smoke and 30-case evaluation with separate structured records',async()=>{
+  const calls=[];const stage=(name,action)=>{calls.push(`ledger:start:${name}`);return action().then(value=>{calls.push(`ledger:pass:${name}`);return value})}
+  await executeFormalSemanticReleaseStages({actions:['verify-post-rag-timer','backfill-post-rag-v2','eval-post-semantic-search'],smokeSuites:['post-rag','post-semantic-search'],requiredCases:30},{
+    runStage:stage,runTimer:async()=>{calls.push('timer');return{runId:'r',triggerName:'t',probeOutboxSeen:true,probeV2JobSeen:true}},runBackfill:async()=>{calls.push('backfill');return{eligibleActivePostCount:125,coveredPostCount:125,missingCoverageCount:0,pendingJobCount:0,retryJobCount:0,processingJobCount:0,failedJobCount:0,unknownJobStatusCount:0,coverageRatio:1}},runSmoke:async()=>{calls.push('smoke');return{protocolVersion:2,permissionLeaks:0,deleteState:'removed'}},runEvaluation:async n=>{calls.push(`eval:${n}`);return{passed:true,caseCount:30,recallAt5:.9,top3Precision:.8,p95Ms:100,errorRate:0,forbiddenCount:0,evidencePath:'e'}},recordGuard:async(name,e)=>calls.push(`guard:${name}:${e.caseCount||e.coveredPostCount||e.probeV2JobSeen}`),
+  })
+  assert.deepEqual(calls,['ledger:start:post-rag-timer-probe','timer','guard:post-rag-timer-probe:true','ledger:pass:post-rag-timer-probe','ledger:start:post-rag-v2-backfill','backfill','guard:post-rag-v2-backfill:125','ledger:pass:post-rag-v2-backfill','ledger:start:post-semantic-smoke','smoke','eval:30','guard:post-semantic-smoke:30','ledger:pass:post-semantic-smoke'])
+})
+
+test('a failed semantic gate records neither guard nor a passed ledger stage',async()=>{const calls=[];await assert.rejects(()=>executeFormalSemanticReleaseStages({actions:['verify-post-rag-timer','backfill-post-rag-v2','eval-post-semantic-search'],smokeSuites:['post-rag','post-semantic-search'],requiredCases:30},{runStage:async(name,action)=>{calls.push(`start:${name}`);const result=await action();calls.push(`pass:${name}`);return result},runTimer:async()=>{throw new Error('probe failed')},recordGuard:async()=>calls.push('guard')}),/probe failed/);assert.deepEqual(calls,['start:post-rag-timer-probe'])})

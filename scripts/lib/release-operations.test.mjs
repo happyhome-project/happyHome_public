@@ -23,7 +23,7 @@ test('release operations run only allowlisted actions and record idempotent migr
     runMigration: async (migration) => events.push(`migration:${migration.id}`),
   })
 
-  assert.deepEqual(result, { actions: ['ensure-indexes'], migrations: ['new-migration'] })
+  assert.deepEqual(result, { actions: ['ensure-indexes'], deferredActions: [], migrations: ['new-migration'] })
   assert.deepEqual(events, [
     'fence:action:ensure-indexes', 'action:ensure-indexes', 'record:action:ensure-indexes',
     'fence:migration:new-migration', 'migration:new-migration', 'state:new-migration', 'record:migration:new-migration',
@@ -46,6 +46,10 @@ test('release operations skip an already applied migration and reject unapproved
     manifests: [{ changeId: 'done', actions: [], migrations: [{ id: 'done', module: 'release/migrations/done.mjs' }] }],
     runAction: async () => {}, runMigration: async () => {},
   })
-  assert.deepEqual(result, { actions: [], migrations: [] })
+  assert.deepEqual(result, { actions: [], deferredActions: [], migrations: [] })
   assert.deepEqual(events, [])
 })
+
+test('semantic release actions are allowlisted but deferred until after cloud probes',async()=>{const events=[];const result=await executeReleaseOperations({guard:{beforeRemoteMutation:async()=>events.push('fence'),recordStage:async()=>events.push('record'),recordMigration:async()=>{}},manifests:[{actions:['ensure-indexes','verify-post-rag-timer','backfill-post-rag-v2','eval-post-semantic-search']}],runAction:async action=>events.push(action),runMigration:async()=>{}});assert.deepEqual(events,['fence','ensure-indexes','record']);assert.deepEqual(result.deferredActions,['verify-post-rag-timer','backfill-post-rag-v2','eval-post-semantic-search'])})
+
+test('predeploy semantic prerequisites deterministically end with timer configuration readback',async()=>{const actions=[];await executeReleaseOperations({guard:{beforeRemoteMutation:async()=>{},recordStage:async()=>{},recordMigration:async()=>{}},manifests:[{actions:['configure-rag-workers','update-rag-env','ensure-tencent-rag-index','ensure-indexes','configure-rag-network']}],runAction:async action=>actions.push(action),runMigration:async()=>{}});assert.deepEqual(actions,['ensure-indexes','ensure-tencent-rag-index','configure-rag-network','update-rag-env','configure-rag-workers'])})

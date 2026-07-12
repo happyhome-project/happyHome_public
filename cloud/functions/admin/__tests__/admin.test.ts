@@ -11,6 +11,7 @@ jest.mock('../../../lib/db', () => ({
   removeById: jest.fn(),
   softDelete: jest.fn(),
   query: jest.fn(),
+  queryAfterId: jest.fn(),
   increment: jest.fn(),
   runTransaction: jest.fn(),
   transactionGetByIdOrNull: jest.fn(async (transaction, collectionName, id) => {
@@ -38,10 +39,15 @@ jest.mock('../../../lib/post-search', () => ({
 
 jest.mock('../../../lib/post-rag', () => ({
   backfillPostRagJobsForSectionBatch: jest.fn(),
+  enqueuePostRagDeleteJobInTransaction: jest.fn(),
   enqueuePostRagJob: jest.fn(),
   getPostRagIndexHealthForCommunity: jest.fn(),
   reconcilePostRagJobsForCommunityBatch: jest.fn(),
 }))
+
+jest.mock('../../../lib/post-rag-outbox', () => ({ appendPostRagOutboxEvent: jest.fn() }))
+jest.mock('../../../lib/post-rag-v2-health', () => ({ getPostRagV2Health: jest.fn() }))
+jest.mock('../../../lib/post-rag-release-probe',()=>({createPostRagReleaseProbe:jest.fn(),readPostRagReleaseTimerEvidence:jest.fn(),readPostRagReleaseProbeStatus:jest.fn(),cleanupPostRagReleaseProbe:jest.fn()}))
 
 jest.mock('uuid', () => ({
   v4: jest.fn().mockReturnValue('mocked-uuid'),
@@ -53,6 +59,8 @@ import * as storage from '../../../lib/storage'
 import { searchAmapPoi } from '../../../lib/amap'
 import * as postSearch from '../../../lib/post-search'
 import * as postRag from '../../../lib/post-rag'
+import { getPostRagV2Health } from '../../../lib/post-rag-v2-health'
+import * as releaseProbe from '../../../lib/post-rag-release-probe'
 import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
 
 const TEST_INTERNAL_TOKEN = 'admin-unit-internal-token'
@@ -71,6 +79,16 @@ const main = (event: any) => rawMain({
 
 beforeEach(() => {
   jest.resetAllMocks()
+  ;(db.runTransaction as jest.Mock).mockImplementation(async (callback) => callback({
+    collection: (name: string) => ({
+      doc: (id: string) => ({
+        get: async () => ({ data: await (db.getById as jest.Mock)(name, id) }),
+        update: async ({ data }: any) => (db.updateById as jest.Mock)(name, id, data),
+        remove: async () => (db.removeById as jest.Mock)(name, id),
+      }),
+      add: async ({ data }: any) => ({ _id: await (db.create as jest.Mock)(name, data) }),
+    }),
+  }))
   ;(db.transactionGetByIdOrNull as jest.Mock).mockImplementation(async (transaction, collectionName, id) => {
     const response = await transaction.collection(collectionName).doc(id).get()
     return response?.data || null
@@ -834,6 +852,12 @@ test('section.get: 旧图文攻略板块会补齐路线攻略固定控件', asyn
 })
 
 test('section.updateMeta: 展示模板只接受默认和图文攻略', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-1',
+    communityId: 'community-1',
+    type: 'realtime',
+    status: 'active',
+  })
   ;(db.updateById as jest.Mock).mockResolvedValue({})
 
   await main({
@@ -975,24 +999,26 @@ test('post.removeAttendanceMemberAdmin: 可移除参与人并返回最新名单'
 })
 
 test('community.hardDelete: cleans cloud files from current and pending post content', async () => {
-  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+  const community = {
     _id: 'community-1',
     status: 'disabled',
     coverImage: 'cloud://env/community-cover.jpg',
-  })
-  ;(db.query as jest.Mock)
-    .mockResolvedValueOnce([
-      {
+  }
+  ;(db.getById as jest.Mock).mockResolvedValue(community)
+  let postsReturned = false
+  ;(db.queryAfterId as jest.Mock).mockImplementation(async (collectionName, _where, afterId) => {
+    if (collectionName === 'posts' && afterId === null && !postsReturned) {
+      postsReturned = true
+      return [{
         _id: 'post-1',
+        communityId: 'community-1',
+        sectionId: 'section-1',
         content: { images: ['cloud://env/current.jpg'] },
         pendingContent: { rich: { imageFileIDs: ['cloud://env/pending.jpg'] } },
-      },
-    ])
-    .mockResolvedValueOnce([])
-    .mockResolvedValueOnce([])
-    .mockResolvedValueOnce([])
-    .mockResolvedValueOnce([])
-    .mockResolvedValueOnce([])
+      }]
+    }
+    return []
+  })
   ;(db.removeById as jest.Mock).mockResolvedValue({})
   ;(storage.deleteFile as jest.Mock).mockResolvedValue({})
 
@@ -1517,4 +1543,17 @@ test('post.ragIndexHealthAdmin: returns RAG index health counts for a scoped com
     potentialMissingActiveCount: 2,
     coverageRatio: 4 / 6,
   })
+})
+
+test('post.ragV2HealthAdmin: is superAdmin-only and returns exact v2 coverage', async () => {
+  ;(getPostRagV2Health as jest.Mock).mockResolvedValue({ communityId:'community-1', schemaVersion:2, eligibleActivePostCount:125, exactSourceVersionCount:125, missingExactSourceVersionCount:0, pendingJobCount:0, retryJobCount:0, processingJobCount:0, failedJobCount:0, coverageRatio:1 })
+  await expect(main({action:'post.ragV2HealthAdmin',communityId:'community-1'})).resolves.toMatchObject({eligibleActivePostCount:125,exactSourceVersionCount:125})
+  await expect(main({action:'post.ragV2HealthAdmin',communityId:'community-1',_actAs:{accountId:'a',role:'communityAdmin',userId:'u',username:'n'}})).rejects.toThrow('权限不足')
+  expect(getPostRagV2Health).toHaveBeenCalledWith('community-1')
+})
+
+test('release timer probe actions route only through internal superAdmin with run-bound params',async()=>{;(releaseProbe.createPostRagReleaseProbe as jest.Mock).mockResolvedValue({runId:'run-1',postId:'p1'});(releaseProbe.readPostRagReleaseTimerEvidence as jest.Mock).mockResolvedValue({evidence:null});(releaseProbe.readPostRagReleaseProbeStatus as jest.Mock).mockResolvedValue({complete:false});(releaseProbe.cleanupPostRagReleaseProbe as jest.Mock).mockResolvedValue({success:true})
+  await expect(main({action:'post.ragTimerProbeCreateAdmin',runId:'run-1'})).resolves.toMatchObject({runId:'run-1'});await main({action:'post.ragTimerEvidenceAdmin',runId:'run-1'});await main({action:'post.ragTimerProbeStatusAdmin',runId:'run-1',postId:'p1'});await main({action:'post.ragTimerProbeCleanupAdmin',runId:'run-1',postId:'p1'});expect(releaseProbe.readPostRagReleaseTimerEvidence).toHaveBeenCalledWith('run-1')
+  await expect(main({action:'post.ragTimerProbeCreateAdmin',runId:'run-1',_actAs:{accountId:'a',role:'communityAdmin',userId:'u',username:'n'}})).rejects.toThrow('权限不足')
+  const response:any=await rawMain({httpMethod:'POST',headers:{authorization:'Bearer ignored'},body:JSON.stringify({action:'post.ragTimerProbeCreateAdmin',runId:'run-1'})});expect(response.statusCode).toBe(403)
 })

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "changeId": "public-semantic-search",
+  "actions": [
+    "ensure-indexes",
+    "ensure-tencent-rag-index",
+    "configure-rag-network",
+    "configure-rag-workers",
+    "update-rag-env",
+    "backfill-post-rag-v2",
+    "verify-post-rag-timer",
+    "eval-post-semantic-search"
+  ],
+  "cloudTargets": ["post", "post-rag-worker"],
+  "semantic": {
+    "vectorField": "embedding",
+    "timerToken": "POST_RAG_TIMER_TOKEN",
+    "requiredCases": 30,
+    "video": false,
+    "llm": false,
+    "rerank": false,
+    "featureWorktreeProductionMutation": false
+  },
+  "migrations": [],
+  "smokeSuites": ["post-rag", "post-semantic-search"]
+}

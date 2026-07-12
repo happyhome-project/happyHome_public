@@ -9,6 +9,7 @@ import {
 test('buildRagWorkerFunctionConfigs gives RAG workers enough time and scheduled triggers', () => {
   const configs = buildRagWorkerFunctionConfigs({
     workerToken: 'worker-secret',
+    timerToken: 'timer-secret',
     ragCron: '0 */5 * * * * *',
     videoCron: '0 */10 * * * * *',
   })
@@ -23,12 +24,14 @@ test('buildRagWorkerFunctionConfigs gives RAG workers enough time and scheduled 
     assert.equal(config.triggers[0].type, 'timer')
   }
   assert.equal(configs[0].triggers[0].config, '0 */5 * * * * *')
+  assert.equal(configs[0].triggers[0].name, 'post-rag-worker-every-minute')
+  assert.equal(configs[0].envVariables.POST_RAG_TIMER_TOKEN, 'timer-secret')
   assert.equal(configs[1].triggers[0].config, '0 */10 * * * * *')
 })
 
 test('buildRagWorkerFunctionConfigs defaults to minute-level CloudBase 7-field cron', () => {
-  const configs = buildRagWorkerFunctionConfigs({ workerToken: 'worker-secret' })
+  const configs = buildRagWorkerFunctionConfigs({ workerToken: 'worker-secret', timerToken: 'timer-secret' })
 
-  assert.equal(configs[0].triggers[0].config, '0 */5 * * * * *')
+  assert.equal(configs[0].triggers[0].config, '0 * * * * * *')
   assert.equal(configs[1].triggers[0].config, '0 */10 * * * * *')
 })

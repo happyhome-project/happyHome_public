@@ -16,6 +16,7 @@ jest.mock('../../../lib/db', () => ({
     return response?.data || null
   }),
 }))
+jest.mock('../../../lib/post-rag-outbox', () => ({ appendPostRagOutboxEvent: jest.fn() }))
 
 import {
   handleCreate,
@@ -41,13 +42,14 @@ function useCreateTransaction(existingCommunityId = '') {
     memberAdd,
     requestSet,
     collection: jest.fn((collectionName: string) => ({
-      doc: jest.fn(() => ({
+      doc: jest.fn((id: string) => ({
         get: jest.fn().mockResolvedValue({
           data: collectionName === 'community_create_requests' && existingCommunityId
             ? { communityId: existingCommunityId }
             : null,
         }),
         set: requestSet,
+        update: async ({ data }: any) => (db.updateById as jest.Mock)(collectionName, id, data),
       })),
       add: collectionName === 'communities' ? communityAdd : memberAdd,
     })),

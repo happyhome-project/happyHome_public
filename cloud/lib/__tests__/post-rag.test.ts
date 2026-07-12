@@ -8,6 +8,10 @@ const mockDb = {
 }
 
 jest.mock('../db', () => mockDb)
+jest.mock('../post-search', () => ({
+  ...jest.requireActual('../post-search'),
+  removePostSearchIndex: jest.fn(),
+}))
 
 import {
   backfillPostRagJobsForSectionBatch,
@@ -165,6 +169,29 @@ test('processPostRagJobBatch chunks approved post content and upserts through pr
   }))
 })
 
+test('legacy post RAG worker paginates past fenced schema-v2 jobs without mutating them', async () => {
+  const fenced = Array.from({ length: 20 }, (_, index) => ({
+    _id: `fenced-${index}`, schemaVersion: 2, postId: `post-${index}`, action: 'delete', status: 'pending', createdAt: `2026-07-12T00:00:${String(index).padStart(2, '0')}.000Z`,
+  }))
+  const legacy = { _id: 'legacy-1', postId: 'legacy-post', action: 'delete', status: 'pending', createdAt: '2026-07-12T00:01:00.000Z' }
+  mockDb.query.mockResolvedValueOnce(fenced).mockResolvedValueOnce([legacy])
+  mockDb.updateById.mockResolvedValue({ stats: { updated: 1 } })
+  const provider = {
+    name: 'legacy-only', isConfigured: () => true, search: jest.fn(),
+    deletePostChunks: jest.fn().mockResolvedValue(undefined), upsertChunks: jest.fn(),
+  }
+
+  await expect(processPostRagJobBatch({ provider, limit: 1 })).resolves.toMatchObject({ scannedCount: 1 })
+  expect(mockDb.query).toHaveBeenNthCalledWith(1, POST_RAG_JOBS, { status: 'pending' }, {
+    orderBy: ['createdAt', 'asc'], limit: 20, skip: 0,
+  })
+  expect(mockDb.query).toHaveBeenNthCalledWith(2, POST_RAG_JOBS, { status: 'pending' }, {
+    orderBy: ['createdAt', 'asc'], limit: 20, skip: 20,
+  })
+  expect(provider.deletePostChunks).toHaveBeenCalledWith('legacy-post')
+  expect(mockDb.updateById).not.toHaveBeenCalledWith(POST_RAG_JOBS, expect.stringMatching(/^fenced-/), expect.anything())
+})
+
 test('processPostRagJobBatch creates index state when CloudBase update misses the document', async () => {
   const provider = {
     name: 'fake-rag',
@@ -307,7 +334,8 @@ test('processPostRagJobBatch can target pending jobs for one post', async () => 
     postId: 'post-1',
   }, {
     orderBy: ['createdAt', 'asc'],
-    limit: 3,
+    limit: 20,
+    skip: 0,
   })
 })
 
