@@ -186,7 +186,7 @@ function getGitOutput(command) {
   return execSync(command, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
 }
 
-function getFormalReleaseGitState({ publishOnly, version, desc }) {
+function getFormalReleaseGitState({ publishOnly, version, desc, releaseStrategy }) {
   const changedPaths = new Set()
   for (const command of [
     'git diff --name-only --no-ext-diff',
@@ -199,6 +199,9 @@ function getFormalReleaseGitState({ publishOnly, version, desc }) {
   const buildInfo = existsSync(buildInfoPath) ? readFileSync(buildInfoPath, 'utf8') : ''
   return {
     cwd: ROOT,
+    originUrl: getGitOutput('git remote get-url origin'),
+    releaseStrategy,
+    fullCurrentExplicit: releaseStrategy === 'full-current',
     branch: getGitOutput('git branch --show-current'),
     headSha: getGitOutput('git rev-parse HEAD'),
     originMainSha: getGitOutput('git rev-parse origin/main'),
@@ -994,7 +997,7 @@ function releaseStageReuseCheck(context) {
 }
 
 function createFormalReleasePlan(gitSha) {
-  const result = spawnSync(process.execPath, ['scripts/release-plan.mjs', '--mode=main', `--head=${gitSha}`], {
+  const result = spawnSync(process.execPath, ['scripts/release-plan.mjs', '--mode=full-current', `--head=${gitSha}`], {
     cwd: ROOT,
     encoding: 'utf8',
     windowsHide: true,
@@ -1007,7 +1010,7 @@ function createFormalReleasePlan(gitSha) {
   const planPath = resolve(ROOT, '.codex-local', 'release-plans', `${gitSha}.json`)
   if (!existsSync(planPath)) throw new Error(`Formal release plan did not write ${planPath}`)
   const plan = JSON.parse(readFileSync(planPath, 'utf8'))
-  if (plan.mode !== 'main' || plan.headSha !== gitSha || !plan.releaseRequired) {
+  if (plan.mode !== 'full-current' || plan.headSha !== gitSha || !plan.releaseRequired) {
     throw new Error('Formal release plan is missing, stale, or does not require a release')
   }
   return plan
@@ -1134,6 +1137,7 @@ async function runFormalRelease(options = {}) {
   const resumeRunState = await getResumeRunState(forceResume)
   const miniprogramUpload = resolveMiniprogramUploadMetadata(resumeRunState?.context || {})
   assertFormalReleaseGitState(getFormalReleaseGitState({
+    releaseStrategy: 'full-current',
     publishOnly,
     version: miniprogramUpload.version,
     desc: miniprogramUpload.desc,
@@ -1383,6 +1387,7 @@ async function runFormalRelease(options = {}) {
 function assertDirectProductionDeployWorkspace({ publishOnly = false, version = '', desc = '' } = {}) {
   execSync('git fetch --quiet origin main', { cwd: ROOT, stdio: 'inherit' })
   assertFormalReleaseGitState(getFormalReleaseGitState({
+    releaseStrategy: 'main',
     publishOnly,
     version,
     desc,

@@ -100,51 +100,91 @@ test('release cloud smoke ensures required database collections before invoking 
   assert(runCloudSmokeBody.indexOf('ensure:indexes') < runCloudSmokeBody.indexOf('runCloudReleaseSmoke'))
 })
 
-test('formal release git state rejects non-main, dirty, and unsynchronized sources', () => {
+const PUBLIC_CANONICAL_WORKSPACE = 'C:\\Project\\Claude\\happyHome_public'
+const PUBLIC_ORIGIN_URL = 'https://github.com/happyhome-project/happyHome_public.git'
+
+function validPublicReleaseState(overrides = {}) {
+  return {
+    cwd: PUBLIC_CANONICAL_WORKSPACE,
+    originUrl: PUBLIC_ORIGIN_URL,
+    releaseStrategy: 'full-current',
+    fullCurrentExplicit: true,
+    branch: 'main',
+    headSha: 'a',
+    originMainSha: 'a',
+    changedPaths: [],
+    ...overrides,
+  }
+}
+
+test('formal release git state accepts an explicit full-current release from synchronized public main', () => {
+  assert.doesNotThrow(() => releasePolicyModule.assertFormalReleaseGitState(validPublicReleaseState()))
+})
+
+test('formal release git state rejects private cwd, wrong origin, feature, dirty, stale, and implicit full-current sources', () => {
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
-    cwd: 'X:\\Users\\<user>\\.codex\\worktrees\\feature\\happyHome',
-    canonicalPath: 'C:\\Project\\Claude\\happyHome',
-    branch: 'main', headSha: 'a', originMainSha: 'a', changedPaths: [],
+    ...validPublicReleaseState(), cwd: 'C:\\Project\\Claude\\happyHome',
   }), /canonical main workspace/i)
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
-    cwd: 'C:\\Project\\Claude\\happyHome', branch: 'feature', headSha: 'a', originMainSha: 'a', changedPaths: [],
+    ...validPublicReleaseState(), originUrl: 'git@github.com:happyhome-project/happyHome_public.git',
+  }), /origin/i)
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(), branch: 'feature',
   }), /main/)
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
-    cwd: 'C:\\Project\\Claude\\happyHome', branch: 'main', headSha: 'a', originMainSha: 'a', changedPaths: ['cloud/functions/admin/index.ts'],
+    ...validPublicReleaseState(), changedPaths: ['cloud/functions/admin/index.ts'],
   }), /clean/i)
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
-    cwd: 'C:\\Project\\Claude\\happyHome', branch: 'main', headSha: 'a', originMainSha: 'b', changedPaths: [],
+    ...validPublicReleaseState(), originMainSha: 'b',
   }), /origin\/main/)
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(), fullCurrentExplicit: false,
+  }), /explicit/i)
 })
 
 test('publish resume allows only its matching generated build-info change', () => {
   assert.doesNotThrow(() => releasePolicyModule.assertFormalReleaseGitState({
-    cwd: 'C:\\Project\\Claude\\happyHome',
-    branch: 'main',
-    headSha: 'a',
-    originMainSha: 'a',
+    ...validPublicReleaseState(),
     changedPaths: ['miniprogram/src/generated/build-info.ts'],
     publishOnly: true,
     generatedBuildInfoMatches: true,
   }))
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
-    cwd: 'C:\\Project\\Claude\\happyHome',
-    branch: 'main',
-    headSha: 'a',
-    originMainSha: 'a',
+    ...validPublicReleaseState(),
     changedPaths: ['miniprogram/src/generated/build-info.ts', 'cloud/functions/admin/index.ts'],
     publishOnly: true,
     generatedBuildInfoMatches: true,
   }), /unexpected/i)
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
-    cwd: 'C:\\Project\\Claude\\happyHome',
-    branch: 'main',
-    headSha: 'a',
-    originMainSha: 'a',
+    ...validPublicReleaseState(),
     changedPaths: ['miniprogram/src/generated/build-info.ts'],
     publishOnly: true,
     generatedBuildInfoMatches: false,
   }), /build-info/i)
+})
+
+test('publish resume preserves public origin and full-current release intent', () => {
+  const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
+  const gitState = extractFunctionBlock(deployScript, 'function getFormalReleaseGitState')
+  assert.match(gitState, /originUrl:/)
+  assert.match(gitState, /releaseStrategy/)
+  assert.match(gitState, /fullCurrentExplicit/)
+  assert.match(deployScript, /getFormalReleaseGitState\(\{[\s\S]*?releaseStrategy:[\s\S]*?\}\)/)
+})
+
+test('full-current planner fetches and validates exact public main HEAD before producing a plan', () => {
+  const planner = readFileSync(new URL('../release-plan.mjs', import.meta.url), 'utf8')
+  const fullCurrentBranch = planner.slice(planner.indexOf("mode === 'full-current'"))
+  const fetchIndex = fullCurrentBranch.indexOf("git(['fetch', '--quiet', 'origin', 'main']")
+  const headCheckIndex = fullCurrentBranch.indexOf('workspaceHead')
+  const policyIndex = fullCurrentBranch.indexOf('assertFormalReleaseGitState')
+  const changesIndex = fullCurrentBranch.indexOf('const changes =')
+  assert(fetchIndex >= 0)
+  assert(headCheckIndex > fetchIndex)
+  assert(policyIndex > headCheckIndex)
+  assert(changesIndex > policyIndex)
+  assert.match(fullCurrentBranch, /headSha[^\n]*workspaceHead|workspaceHead[^\n]*headSha/)
+  assert.match(fullCurrentBranch, /fullCurrentExplicit:\s*true/)
 })
 
 test('CloudBase CLI retry treats its known includes TypeError as transient', () => {

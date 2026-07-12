@@ -11,7 +11,8 @@ export function shouldFallbackAfterDevtoolsFailure({ target, reason, forceCi = f
 
 const GENERATED_BUILD_INFO_PATH = 'miniprogram/src/generated/build-info.ts'
 const REMOTE_REVALIDATE_STAGES = new Set(['cloud-deploy', 'cloud-smoke', 'admin-web-deploy'])
-const CANONICAL_MAIN_WORKSPACE = 'C:\\Project\\Claude\\happyHome'
+export const CANONICAL_MAIN_WORKSPACE = 'C:\\Project\\Claude\\happyHome_public'
+export const CANONICAL_ORIGIN_URL = 'https://github.com/happyhome-project/happyHome_public.git'
 
 function normalizeWorkspacePath(value) {
   const normalized = String(value || '')
@@ -28,7 +29,9 @@ export function mustRevalidateRemoteReleaseStage(stageName) {
 
 export function assertFormalReleaseGitState({
   cwd,
-  canonicalPath = CANONICAL_MAIN_WORKSPACE,
+  originUrl,
+  releaseStrategy,
+  fullCurrentExplicit = false,
   branch,
   headSha,
   originMainSha,
@@ -36,8 +39,17 @@ export function assertFormalReleaseGitState({
   publishOnly = false,
   generatedBuildInfoMatches = false,
 }) {
-  if (normalizeWorkspacePath(cwd) !== normalizeWorkspacePath(canonicalPath)) {
-    throw new Error(`Formal release must run in the canonical main workspace ${canonicalPath}; got ${cwd || '(missing)'}`)
+  if (normalizeWorkspacePath(cwd) !== normalizeWorkspacePath(CANONICAL_MAIN_WORKSPACE)) {
+    throw new Error(`Formal release must run in the canonical main workspace ${CANONICAL_MAIN_WORKSPACE}; got ${cwd || '(missing)'}`)
+  }
+  if (originUrl !== CANONICAL_ORIGIN_URL) {
+    throw new Error(`Formal release requires origin ${CANONICAL_ORIGIN_URL}; got ${originUrl || '(missing)'}`)
+  }
+  if (!['main', 'full-current'].includes(releaseStrategy)) {
+    throw new Error(`Formal release strategy must be main or full-current; got ${releaseStrategy || '(missing)'}`)
+  }
+  if (releaseStrategy === 'full-current' && !fullCurrentExplicit) {
+    throw new Error('Formal full-current release requires explicit intent')
   }
   if (branch !== 'main') throw new Error(`Formal release must run on main; got ${branch || '(detached)'}`)
   if (!headSha || !originMainSha || headSha !== originMainSha) {

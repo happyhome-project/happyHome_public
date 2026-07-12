@@ -8,6 +8,7 @@ import process from 'node:process'
 import { createProductionReleaseStore } from './lib/cloudbase-release-store.mjs'
 import { ALL_CLOUD_FUNCTIONS, createReleasePlan, selectChangeManifests } from './lib/release-plan.mjs'
 import { resolveMainReleasePlanBase } from './lib/release-plan-base.mjs'
+import { assertFormalReleaseGitState } from './lib/release-policy.mjs'
 
 const workspaceRequire = createRequire(new URL('../cloud/package.json', import.meta.url))
 const { build } = workspaceRequire('esbuild')
@@ -32,6 +33,18 @@ function changedPaths(root, baseSha, headSha) {
   return git(['diff', '--name-status', '--find-renames', baseSha, headSha], root)
     .split(/\r?\n/)
     .filter(Boolean)
+}
+
+function worktreeChangedPaths(root) {
+  const paths = new Set()
+  for (const args of [
+    ['diff', '--name-only', '--no-ext-diff'],
+    ['diff', '--cached', '--name-only', '--no-ext-diff'],
+    ['ls-files', '--others', '--exclude-standard'],
+  ]) {
+    for (const path of git(args, root).split(/\r?\n/).filter(Boolean)) paths.add(path)
+  }
+  return [...paths]
 }
 
 function readManifests(root) {
@@ -85,6 +98,21 @@ try {
     baseSha = resolved.baseSha
     baseSource = resolved.source
   } else {
+    git(['fetch', '--quiet', 'origin', 'main'], root)
+    const workspaceHead = git(['rev-parse', 'HEAD'], root)
+    if (!hasOption('head') || headSha !== workspaceHead) {
+      throw new Error(`Full-current release requires explicit --head to equal workspace HEAD; got --head=${hasOption('head') ? headSha : '(missing)'} HEAD=${workspaceHead}`)
+    }
+    assertFormalReleaseGitState({
+      cwd: root,
+      originUrl: git(['remote', 'get-url', 'origin'], root),
+      releaseStrategy: 'full-current',
+      fullCurrentExplicit: true,
+      branch: git(['branch', '--show-current'], root),
+      headSha: workspaceHead,
+      originMainSha: git(['rev-parse', 'origin/main'], root),
+      changedPaths: worktreeChangedPaths(root),
+    })
     baseSha = ''
     baseSource = 'full-current'
   }
