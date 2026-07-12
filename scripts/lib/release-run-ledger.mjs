@@ -508,6 +508,20 @@ export async function createReleaseRunLedger(options) {
   return ledger
 }
 
+export function createReleasePlanAfterResumeIdentityCheck({ resumeRunState, gitSha, releaseStrategy, createPlan }) {
+  if (resumeRunState) {
+    const existingGitSha = String(resumeRunState.context?.gitSha || '')
+    const existingReleaseStrategy = String(resumeRunState.context?.releaseStrategy || 'main')
+    if (existingGitSha !== gitSha) {
+      throw new Error(`release resume context mismatch for gitSha: existing ${existingGitSha || '(missing)'}, requested ${gitSha || '(missing)'}`)
+    }
+    if (existingReleaseStrategy !== releaseStrategy) {
+      throw new Error(`release resume context mismatch for releaseStrategy: existing ${existingReleaseStrategy}, requested ${releaseStrategy}`)
+    }
+  }
+  return createPlan(gitSha, releaseStrategy)
+}
+
 function releaseIdentityFromLedger(ledger) {
   const gitSha = String(ledger?.state?.context?.gitSha || '').trim()
   const runId = String(ledger?.runId || '').trim()

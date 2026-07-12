@@ -86,6 +86,7 @@ import {
 } from './lib/release-security-policy.mjs'
 import {
   createReleaseRunLedger,
+  createReleasePlanAfterResumeIdentityCheck,
   computeDirectoryDigest,
   findLatestReleaseUiEvidence,
   inspectReleaseStageReuse,
@@ -1161,7 +1162,12 @@ async function runFormalRelease(options = {}) {
   }
   const releaseRunId = await resolveReleaseRunId(forceResume)
   releaseContext.runId = releaseRunId
-  const formalPlan = prepareOnly ? null : createFormalReleasePlan(releaseContext.gitSha, releaseStrategy)
+  const formalPlan = prepareOnly ? null : createReleasePlanAfterResumeIdentityCheck({
+    resumeRunState,
+    gitSha: releaseContext.gitSha,
+    releaseStrategy,
+    createPlan: createFormalReleasePlan,
+  })
   releaseContext.cloudFunctions = formalPlan?.targets.cloud.functions || []
   const releaseLedger = await createReleaseRunLedger({
     root: ROOT,

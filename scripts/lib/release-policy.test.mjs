@@ -349,7 +349,7 @@ test('formal release derives explicit full-current strategy before opening resum
   assert.match(release, /getFormalReleaseGitState\(\{[\s\S]*?releaseStrategy,[\s\S]*?fullCurrentExplicit/)
   assert.match(release, /const releaseContext = \{[\s\S]*?releaseStrategy,/)
   assert.match(release, /createReleaseRunLedger\(\{[\s\S]*?releaseStrategy,/)
-  assert.match(release, /createFormalReleasePlan\(releaseContext\.gitSha, releaseStrategy\)/)
+  assert.match(release, /createReleasePlanAfterResumeIdentityCheck\(\{[\s\S]*?resumeRunState,[\s\S]*?gitSha: releaseContext\.gitSha,[\s\S]*?releaseStrategy,[\s\S]*?createPlan:/)
   assert.match(release, /createFormalReleaseMutationRevalidator\(\{[\s\S]*?releaseStrategy,[\s\S]*?fullCurrentExplicit,/)
 })
 

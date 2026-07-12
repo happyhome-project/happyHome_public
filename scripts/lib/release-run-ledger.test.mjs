@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto'
 
 import {
   confirmReleaseLedgerAgainstProductionInspection,
+  createReleasePlanAfterResumeIdentityCheck,
   createReleaseRunLedger,
   formatReleaseRunStatus,
   inspectReleaseStageReuse,
@@ -187,6 +188,45 @@ test('release ledger defaults omitted strategy to main and treats legacy context
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('resume identity mismatch rejects before the formal release planner is invoked', () => {
+  let plannerCalls = 0
+  const createPlan = () => {
+    plannerCalls += 1
+    return { releaseRequired: true }
+  }
+
+  assert.throws(
+    () => createReleasePlanAfterResumeIdentityCheck({
+      resumeRunState: { context: { gitSha: 'abc123', releaseStrategy: 'full-current' } },
+      gitSha: 'def456',
+      releaseStrategy: 'full-current',
+      createPlan,
+    }),
+    /resume context mismatch for gitSha: existing abc123, requested def456/,
+  )
+  assert.equal(plannerCalls, 0)
+
+  assert.throws(
+    () => createReleasePlanAfterResumeIdentityCheck({
+      resumeRunState: { context: { gitSha: 'abc123' } },
+      gitSha: 'abc123',
+      releaseStrategy: 'full-current',
+      createPlan,
+    }),
+    /resume context mismatch for releaseStrategy: existing main, requested full-current/,
+  )
+  assert.equal(plannerCalls, 0)
+
+  const plan = createReleasePlanAfterResumeIdentityCheck({
+    resumeRunState: { context: { gitSha: 'abc123', releaseStrategy: 'full-current' } },
+    gitSha: 'abc123',
+    releaseStrategy: 'full-current',
+    createPlan,
+  })
+  assert.equal(plan.releaseRequired, true)
+  assert.equal(plannerCalls, 1)
 })
 
 test('resume inspection refuses passed stages when the commit or version changed', async () => {
