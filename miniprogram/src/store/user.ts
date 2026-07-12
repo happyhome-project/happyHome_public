@@ -23,7 +23,12 @@ function isWebRuntime(): boolean {
 }
 
 function loadWebAuth() {
+  // #ifdef H5
   return import('../api/web-cloudbase')
+  // #endif
+  // #ifndef H5
+  throw new Error('Web authentication is only available in the H5 build')
+  // #endif
 }
 
 function errorMessage(error: any): string {
