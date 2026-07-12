@@ -198,14 +198,19 @@ export async function invokeAdmin(action, params, options, runner = defaultRunne
 }
 
 async function listActiveCommunityIds(options, runner) {
-  const record = await invokeAdmin('community.list', {}, options, runner)
-  const communities = Array.isArray(record.functionResult?.communities)
-    ? record.functionResult.communities
-    : []
-  const filtered = options.includeDisabled
-    ? communities
-    : communities.filter((community) => String(community?.status || 'active') === 'active')
-  return normalizeCommunityIds(filtered.map((community) => community?._id || community?.id))
+  if (options.includeDisabled) {
+    const record = await invokeAdmin('community.list', {}, options, runner)
+    return normalizeCommunityIds((record.functionResult?.communities || []).map((community) => community?._id || community?.id))
+  }
+  const communities=[]; let afterId=''
+  while (true) {
+    const record=await invokeAdmin('community.listActivePageAdmin',{afterId,limit:100},options,runner)
+    const result=record.functionResult||{}; communities.push(...(Array.isArray(result.items)?result.items:[]))
+    if(!result.hasMore) break
+    if(!result.nextAfterId||result.nextAfterId===afterId) throw new Error('community pagination did not advance')
+    afterId=String(result.nextAfterId)
+  }
+  return normalizeCommunityIds(communities.map((community) => community?._id || community?.id))
 }
 
 export async function resolveTargetCommunityIds(options, runner = defaultRunner) {

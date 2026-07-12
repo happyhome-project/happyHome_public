@@ -1,5 +1,8 @@
 # Public Semantic Post Search Migration Design
 
+> **Historical / point-in-time:** This specification records the semantic-search migration design accepted on 2026-07-12. It does not override later implementation or operational policy.
+> **Current authority:** Use the [formal release gate](../../release-gate.md), current repository rules, code, and tests.
+
 ## Objective
 
 Migrate the already validated semantic post-search outcome from the private HappyHome feature branch onto the current public repository baseline. The public mini-program must return accurate posts and matched snippets for semantic Chinese queries without generating an AI summary, silently falling back to lexical search, or weakening live authorization checks.

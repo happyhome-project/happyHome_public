@@ -46,6 +46,7 @@ jest.mock('../../../lib/post-rag', () => ({
 }))
 
 jest.mock('../../../lib/post-rag-outbox', () => ({ appendPostRagOutboxEvent: jest.fn() }))
+jest.mock('../../../lib/post-rag-v2-health', () => ({ getPostRagV2Health: jest.fn() }))
 
 jest.mock('uuid', () => ({
   v4: jest.fn().mockReturnValue('mocked-uuid'),
@@ -57,6 +58,7 @@ import * as storage from '../../../lib/storage'
 import { searchAmapPoi } from '../../../lib/amap'
 import * as postSearch from '../../../lib/post-search'
 import * as postRag from '../../../lib/post-rag'
+import { getPostRagV2Health } from '../../../lib/post-rag-v2-health'
 import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
 
 const TEST_INTERNAL_TOKEN = 'admin-unit-internal-token'
@@ -1539,4 +1541,11 @@ test('post.ragIndexHealthAdmin: returns RAG index health counts for a scoped com
     potentialMissingActiveCount: 2,
     coverageRatio: 4 / 6,
   })
+})
+
+test('post.ragV2HealthAdmin: is superAdmin-only and returns exact v2 coverage', async () => {
+  ;(getPostRagV2Health as jest.Mock).mockResolvedValue({ communityId:'community-1', schemaVersion:2, eligibleActivePostCount:125, exactSourceVersionCount:125, missingExactSourceVersionCount:0, pendingJobCount:0, retryJobCount:0, processingJobCount:0, failedJobCount:0, coverageRatio:1 })
+  await expect(main({action:'post.ragV2HealthAdmin',communityId:'community-1'})).resolves.toMatchObject({eligibleActivePostCount:125,exactSourceVersionCount:125})
+  await expect(main({action:'post.ragV2HealthAdmin',communityId:'community-1',_actAs:{accountId:'a',role:'communityAdmin',userId:'u',username:'n'}})).rejects.toThrow('权限不足')
+  expect(getPostRagV2Health).toHaveBeenCalledWith('community-1')
 })

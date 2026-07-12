@@ -101,6 +101,7 @@ import {
 } from './lib/production-release-guard.mjs'
 import { hasCloudReleaseProbeResponse } from './lib/cloud-release-probe.mjs'
 import { executeReleaseOperations } from './lib/release-operations.mjs'
+import { executeFormalSemanticReleaseStages } from './lib/formal-semantic-release-stages.mjs'
 import { ReleaseGovernance } from './lib/release-governance.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -1095,13 +1096,17 @@ const RELEASE_ACTION_SCRIPTS = Object.freeze({
   'ensure-indexes': 'ensure:indexes',
   'ensure-tencent-rag-index': 'ensure:tencent-rag-index',
   'update-rag-env': 'update:rag-env',
+  'backfill-post-rag-v2': 'backfill:post-rag-v2',
+  'verify-post-rag-timer': 'verify:post-rag-timer',
+  'eval-post-semantic-search': 'eval:post-semantic-search',
 })
 
-function runReleaseNpmScript(script) {
+function runReleaseNpmScript(script, env = {}) {
   return new Promise((resolve, reject) => {
     const isWindows = process.platform === 'win32'
     const child = spawn(isWindows ? 'npm.cmd' : 'npm', ['run', script], {
       cwd: ROOT,
+      env: { ...process.env, ...env },
       shell: isWindows,
       stdio: 'inherit',
       windowsHide: isWindows,
@@ -1112,6 +1117,12 @@ function runReleaseNpmScript(script) {
       else reject(new Error(`release action npm run ${script} failed with ${signal || `exit ${code}`}`))
     })
   })
+}
+
+function readSemanticReleaseEvidence(runId, fileName) {
+  const evidencePath=resolve(ROOT,'.codex-local','release-evidence',runId,fileName)
+  if(!existsSync(evidencePath)) throw new Error(`semantic release evidence missing: ${evidencePath}`)
+  return { ...JSON.parse(readFileSync(evidencePath,'utf8')), evidencePath }
 }
 
 async function runDeclaredReleaseAction(action) {
@@ -1284,6 +1295,19 @@ async function runFormalRelease(options = {}) {
       return verified
     })
     else await releaseLedger.skipStage('cloud-version-probes', { reason: 'release plan has no cloud function changes' })
+
+    const semanticActions=[...new Set(formalPlan.manifests.flatMap(manifest=>manifest.actions||[]))]
+    const semanticSmokeSuites=[...new Set(formalPlan.manifests.flatMap(manifest=>manifest.smokeSuites||[]))]
+    const semanticRequiredCases=Math.max(30,...formalPlan.manifests.map(manifest=>Number(manifest.semantic?.requiredCases||0)))
+    await executeFormalSemanticReleaseStages({actions:semanticActions,smokeSuites:semanticSmokeSuites,requiredCases:semanticRequiredCases},{
+      runStage:(name,action)=>runLedgerStage(releaseLedger,name,{command:`formal semantic gate: ${name}`},action),
+      skipStage:(name)=>releaseLedger.skipStage(name,{reason:'release plan has no semantic search gates'}),
+      runTimer:async()=>{await revalidateFormalMutation('post-rag-timer-probe');await runReleaseNpmScript('verify:post-rag-timer',{HH_RELEASE_RUN_ID:releaseLedger.runId,TCB_ENV:releaseContext.envId});return readSemanticReleaseEvidence(releaseLedger.runId,'post-rag-timer.json')},
+      runBackfill:async()=>{await revalidateFormalMutation('post-rag-v2-backfill');await runReleaseNpmScript('backfill:post-rag-v2',{HH_RELEASE_RUN_ID:releaseLedger.runId,TCB_ENV:releaseContext.envId});return readSemanticReleaseEvidence(releaseLedger.runId,'post-rag-v2-backfill.json')},
+      runSmoke:async()=>{await revalidateFormalMutation('post-semantic-smoke');await runReleaseNpmScript('verify:post-rag-smoke',{HH_RELEASE_RUN_ID:releaseLedger.runId,TCB_ENV:releaseContext.envId});return readSemanticReleaseEvidence(releaseLedger.runId,'post-rag-smoke.json')},
+      runEvaluation:async()=>{await runReleaseNpmScript('eval:post-semantic-search',{HH_RELEASE_RUN_ID:releaseLedger.runId,TCB_ENV:releaseContext.envId});return readSemanticReleaseEvidence(releaseLedger.runId,'post-semantic-eval.json')},
+      recordGuard:(name,evidence)=>releaseGuard.recordStage(name,{evidence}),
+    })
 
     if (cloudDeploy.fns.length) await runLedgerStage(releaseLedger, 'cloud-smoke', {
       resume,

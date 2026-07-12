@@ -5,6 +5,10 @@ import http from 'node:http'
 import https from 'node:https'
 import os from 'node:os'
 import path from 'node:path'
+import {
+  assertPostSemanticIndexCompatible,
+  buildPostSemanticIndexDefinition,
+} from './lib/tencent-rag-index-schema.mjs'
 
 function loadDotEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return {}
@@ -219,39 +223,19 @@ async function probeEmbedding() {
   })
 }
 
-const existing = await requestJson('HEAD', config.indexName, undefined, { allow404: true })
-if (existing?.statusCode !== 404) {
-  console.log(`[ensure-tencent-rag-index] ${config.indexName} already exists`)
-  process.exit(0)
-}
-
 const embedding = await probeEmbedding()
 const dims = embeddingLength(embedding)
 if (dims <= 0) throw new Error('embedding endpoint returned no vector; cannot create dense_vector mapping')
+const schemaOptions = { vectorField: config.vectorField, dims }
 
-await requestJson('PUT', config.indexName, {
-  mappings: {
-    properties: {
-      chunkId: { type: 'keyword' },
-      postId: { type: 'keyword' },
-      communityId: { type: 'keyword' },
-      sectionId: { type: 'keyword' },
-      sectionName: { type: 'text' },
-      title: { type: 'text' },
-      fieldLabel: { type: 'text' },
-      fieldType: { type: 'keyword' },
-      text: { type: 'text' },
-      preview: { type: 'text' },
-      sourceUpdatedAt: { type: 'date' },
-      visibility: { type: 'keyword' },
-      [config.vectorField]: {
-        type: 'dense_vector',
-        dims,
-        index: true,
-        similarity: 'cosine',
-      },
-    },
-  },
-})
+const existing = await requestJson('HEAD', config.indexName, undefined, { allow404: true })
+if (existing?.statusCode !== 404) {
+  const mapping = await requestJson('GET', `${config.indexName}/_mapping`)
+  assertPostSemanticIndexCompatible(mapping?.[config.indexName]?.mappings, schemaOptions)
+  console.log(`[ensure-tencent-rag-index] ${config.indexName} exists with compatible v2 mapping dims=${dims}`)
+  process.exit(0)
+}
+
+await requestJson('PUT', config.indexName, buildPostSemanticIndexDefinition({ vectorField: config.vectorField, dims }))
 
 console.log(`[ensure-tencent-rag-index] created ${config.indexName} with ${config.vectorField} dims=${dims}`)

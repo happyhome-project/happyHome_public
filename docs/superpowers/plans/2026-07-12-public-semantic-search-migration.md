@@ -1,5 +1,10 @@
 # Public Semantic Post Search Migration Implementation Plan
 
+> **Historical / point-in-time:** This delivery plan records the approved 2026-07-12 migration sequence. Retain it for traceability; do not treat its task state as current repository status.
+> **Current authority:** Use the [formal release gate](../../release-gate.md), current `AGENTS.md`, release code, and tests.
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Port the validated non-generative semantic post search onto the current public HappyHome baseline without replacing public governance, release, CI, or worktree behavior.

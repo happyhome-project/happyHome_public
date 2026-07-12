@@ -8,7 +8,12 @@ export const RELEASE_RUNS_DIR = '.codex-local/release-runs'
 
 export const RELEASE_STAGE_ORDER = [
   'miniprogram-build-gate',
+  'release-operations',
   'cloud-deploy',
+  'cloud-version-probes',
+  'post-rag-timer-probe',
+  'post-rag-v2-backfill',
+  'post-semantic-smoke',
   'cloud-smoke',
   'admin-web-deploy',
   'miniprogram-upload',

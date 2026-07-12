@@ -42,6 +42,8 @@ import { handleCreate as handleCommunityCreate } from '../community'
 import { MEMBER_STATE_COLLECTION } from '../../lib/membership-state'
 import { approveMembership, kickMembership, rejectMembership } from '../../lib/membership-transitions'
 import { appendPostRagOutboxEvent } from '../../lib/post-rag-outbox'
+import { getPostRagV2Health } from '../../lib/post-rag-v2-health'
+import { listReleaseRagPage } from '../../lib/release-rag-pagination'
 import type {
   AdminAccount,
   AdminCtx,
@@ -168,6 +170,8 @@ function resolveNonHttpAdminContext(event: any): AdminCtx {
   }
 }
 const SUPER_ADMIN_ONLY: Array<string | RegExp> = [
+  'post.ragV2HealthAdmin',
+  'community.listActivePageAdmin',
   'community.approve',
   'community.reject',
   'community.disable',
@@ -184,6 +188,7 @@ const COMMUNITY_SCOPED_ACTIONS = new Set([
   'community.updateMeta',
   'community.updateHomeBanners',
   'section.list',
+  'section.listPageAdmin',
   'section.create',
   'member.pendingList',
   'member.list',
@@ -1428,6 +1433,16 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const communityId = String(params.communityId || '').trim()
     if (!communityId) throw new Error('communityId 不能为空')
     return getPostRagIndexHealthForCommunity(communityId)
+  }
+  if (action === 'community.listActivePageAdmin') return listReleaseRagPage('communities', { status: 'active' }, params.afterId, params.limit)
+  if (action === 'section.listPageAdmin') {
+    const communityId=String(params.communityId||'').trim(); if(!communityId) throw new Error('communityId 不能为空')
+    return listReleaseRagPage('sections', { communityId }, params.afterId, params.limit)
+  }
+  if (action === 'post.ragV2HealthAdmin') {
+    const communityId = String(params.communityId || '').trim()
+    if (!communityId) throw new Error('communityId 不能为空')
+    return getPostRagV2Health(communityId)
   }
   if (action === 'post.pinAdmin' || action === 'post.unpinAdmin' || action === 'post.featureAdmin' || action === 'post.unfeatureAdmin') {
     const postId = String(params.postId || '').trim()
