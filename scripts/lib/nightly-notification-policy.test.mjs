@@ -25,6 +25,20 @@ test('nightly test status fails when a stage fails', () => {
   }).testStatus, 'failed')
 })
 
+test('nightly result fails when a stage recovered from flakiness', () => {
+  assert.deepEqual(deriveNightlyResult({
+    stages: [{ status: 'recovered_flaky' }],
+    cleanupIssues: [],
+  }), { status: 'failed', testStatus: 'failed' })
+})
+
+test('nightly result fails when cleanup has issues', () => {
+  assert.deepEqual(deriveNightlyResult({
+    stages: [],
+    cleanupIssues: ['temporary fixture remains'],
+  }), { status: 'failed', testStatus: 'failed' })
+})
+
 test('notification status distinguishes skipped, sent, and failed stages', () => {
   assert.equal(notificationStatusFromStage({ status: 'skipped' }), 'skipped')
   assert.equal(notificationStatusFromStage({ status: 'passed' }), 'sent')
