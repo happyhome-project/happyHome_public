@@ -12,6 +12,7 @@ import { readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
+import { withValidationLease } from './lib/validation-lease.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
@@ -214,7 +215,7 @@ async function main() {
   console.log('[OK] DevTools auto-replay finished via IDE HTTP service.')
 }
 
-main().catch((error) => {
+withValidationLease({ command: 'check-devtools-automation' }, main).catch((error) => {
   console.error(`[FAIL] ${error?.message || error}`)
   process.exit(1)
 })

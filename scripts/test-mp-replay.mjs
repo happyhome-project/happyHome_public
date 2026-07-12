@@ -13,6 +13,7 @@ import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
+import { withValidationLease } from './lib/validation-lease.mjs'
 import {
   assertAutoReplayFinished,
   assertReleaseReplayCoverage,
@@ -164,4 +165,7 @@ function main() {
   console.log('[OK] DevTools auto-replay completed.')
 }
 
-main()
+withValidationLease({ command: 'test-mp-replay' }, main).catch((error) => {
+  console.error(`[FAIL] ${error?.message || error}`)
+  process.exitCode = 1
+})

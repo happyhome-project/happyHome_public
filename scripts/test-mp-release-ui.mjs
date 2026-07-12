@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
+import { withValidationLease } from './lib/validation-lease.mjs'
 import Connection from 'miniprogram-automator/out/Connection.js'
 import MiniProgram from 'miniprogram-automator/out/MiniProgram.js'
 
@@ -1411,7 +1412,7 @@ async function main() {
   }
 }
 
-main().catch((error) => {
+withValidationLease({ command: 'test-mp-release-ui' }, main).catch((error) => {
   console.error(`[FAIL] ${error?.message || error}`)
   process.exit(1)
 })
