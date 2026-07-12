@@ -71,6 +71,14 @@ test('empty observation plans only deterministic set operations and no deletes',
   assert.deepEqual(result.plan.deletes, [])
 })
 
+test('existing real WeChat user stays outside fixture ownership', async () => {
+  const realUser = { _id: config.wechatOpenid, nickName: 'Real User', role: 'superAdmin' }
+  const store = new FakeStore({ documents: { [`users/${config.wechatOpenid}`]: realUser } })
+  const result = await planTenant({ store, config })
+  assert.deepEqual(store.documents.get(`users/${config.wechatOpenid}`), realUser)
+  assert.equal(result.plan.sets.some((operation) => operation.collection === 'users' && operation.id === config.wechatOpenid), false)
+})
+
 test('apply can converge after a partial write failure by preparing again', async () => {
   const store = new FakeStore()
   const originalSet = store.setDocument.bind(store)
