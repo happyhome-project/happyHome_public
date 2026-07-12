@@ -14,6 +14,18 @@ const RETIREMENT_MANIFEST_FIELDS = [
   'schemaVersion',
 ]
 
+const PUBLIC_INTEGRATION_REPOSITORY = 'happyhome-project/happyHome_public'
+
+export function normalizeExternalCommandResult(result = {}, { allowFailure = false } = {}) {
+  if (result.error && !allowFailure) throw result.error
+  return {
+    ok: !result.error && result.status === 0,
+    status: result.status ?? null,
+    stdout: String(result.stdout || '').trim(),
+    stderr: result.error?.message || String(result.stderr || '').trim(),
+  }
+}
+
 function normalizedBranch(value) {
   return String(value || '').trim() || '(detached)'
 }
@@ -63,6 +75,97 @@ export function githubRepositoryFromRemote(remote) {
   const value = String(remote || '').trim()
   const match = value.match(/^(?:git@github\.com:|https?:\/\/github\.com\/|ssh:\/\/git@github\.com\/)([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i)
   return match ? `${match[1]}/${match[2]}` : null
+}
+
+export function verifiedPublicOriginUrl(remote) {
+  const value = String(remote || '').trim()
+  if (githubRepositoryFromRemote(value) !== PUBLIC_INTEGRATION_REPOSITORY) {
+    throw new Error(`Untrusted origin; expected ${PUBLIC_INTEGRATION_REPOSITORY}`)
+  }
+  return value
+}
+
+export function assessRetirementTargetBoundary({
+  registered,
+  operatorCommonDirectory,
+  targetCommonDirectory,
+  hasReparseAncestor,
+} = {}) {
+  const reasons = []
+  if (hasReparseAncestor !== false) reasons.push(hasReparseAncestor === true ? 'reparse_ancestor' : 'reparse_ancestor_unknown')
+  if (registered !== true) reasons.push(registered === false ? 'not_registered' : 'registration_unknown')
+  if (!operatorCommonDirectory || !targetCommonDirectory) reasons.push('common_directory_unknown')
+  else if (operatorCommonDirectory !== targetCommonDirectory) reasons.push('common_directory_mismatch')
+  return { eligible: reasons.length === 0, reasons }
+}
+
+export function assessPublicIntegrationMain({
+  root,
+  commonDirectory,
+  repository,
+  branch,
+  head,
+  main,
+  behind,
+  ahead,
+  isDirty,
+  hasOperation,
+  pathIsReparsePoint,
+  expected,
+} = {}) {
+  const reasons = []
+  if (expected && (
+    root !== expected.root
+    || commonDirectory !== expected.commonDirectory
+    || head !== expected.head
+    || main !== expected.main
+  )) reasons.push('operator_changed')
+  if (repository !== PUBLIC_INTEGRATION_REPOSITORY) reasons.push('untrusted_origin')
+  if (branch !== 'main') reasons.push('not_main_branch')
+  if (isDirty !== false) reasons.push(isDirty === true ? 'dirty' : 'dirty_unknown')
+  if (hasOperation !== false) reasons.push(hasOperation === true ? 'git_operation' : 'git_operation_unknown')
+  if (pathIsReparsePoint !== false) reasons.push(pathIsReparsePoint === true ? 'reparse_point' : 'reparse_point_unknown')
+  if (!head || !main || head !== main) reasons.push('head_not_origin_main')
+  if (behind !== 0 || ahead !== 0) reasons.push('diverged_from_origin_main')
+  return { eligible: reasons.length === 0, reasons }
+}
+
+function requireExactCommitSha(value, label) {
+  const sha = String(value || '')
+  if (!/^[0-9a-f]{40}$/i.test(sha)) throw new Error(`Operation requires an exact ${label} SHA`)
+  return sha
+}
+
+export function executePinnedWorktreeCreation({
+  operator,
+  branch,
+  path,
+  addWorktree,
+  readCreated,
+} = {}) {
+  const mainSha = requireExactCommitSha(operator?.main, 'main')
+  addWorktree({ root: operator.root, branch, path, startPoint: mainSha })
+  const created = readCreated(path, mainSha)
+  if (created?.branch !== branch || created?.head !== mainSha || created?.main !== mainSha) {
+    throw new Error('Worktree creation did not match its pinned main SHA')
+  }
+  return created
+}
+
+export function collectPinnedRetirementEvidence({
+  mainSha,
+  readIdentity,
+  readUniqueCommitCount,
+  readHeadInMain,
+} = {}) {
+  const pinnedMain = requireExactCommitSha(mainSha, 'main')
+  const identity = readIdentity(pinnedMain)
+  const pinnedHead = requireExactCommitSha(identity?.head, 'head')
+  return {
+    identity,
+    uniqueCommits: readUniqueCommitCount(pinnedHead, pinnedMain),
+    headInMain: readHeadInMain(pinnedHead, pinnedMain),
+  }
 }
 
 export function findOpenPullRequest(pullRequests, { branch, head } = {}, { error = null } = {}) {

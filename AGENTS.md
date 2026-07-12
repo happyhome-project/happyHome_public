@@ -18,10 +18,11 @@
 - 新 worktree 必须由最新 `origin/main` 创建；`AGENTS.md` 必须是仓库内真实文件，禁止软链接或符号链接。
 - 每台开发机首次使用仓库时必须在任一 HappyHome worktree 执行 `npm.cmd run hooks:install`。该配置使用共享 Git hooks，在后续 `git worktree add` 后执行预检。
 - 新 worktree 先运行 `npm.cmd run worktree:doctor`；只有 attached、clean、同步到 `origin/main` 的 `codex/*` 分支才可运行 `npm.cmd run worktree:bootstrap`。bootstrap 仅在仓库根执行 `npm.cmd ci`，不链接其它 worktree 的 `node_modules`。
-- 推荐只从 canonical main 使用 `npm.cmd run worktree:create -- --name=<task-name> --path=<absolute-path>` 创建；它会刷新 `origin/main`、创建安全的 `codex/*` 分支、校验 AGENTS/hooks 并自动执行 bootstrap。
+- `worktree:create` 与 `worktree:retire` 只能从公开仓库集成 main 执行：当前 worktree 必须是 `main`，`origin` 必须精确派生为 `happyhome-project/happyHome_public`，工作区 clean、无 Git operation、根目录不是 reparse point，且刷新后 `HEAD` 必须精确等于 `origin/main`。fetch 使用校验时捕获的 remote URL，不再解析可变 remote 名；私有仓库 main、feature 分支、ahead/behind/stale main 均不是这个角色。
+- 推荐从该公开仓库集成 main 使用 `npm.cmd run worktree:create -- --name=<task-name> --path=<absolute-path>` 创建；它会刷新 `origin/main`、在实际 mutation 前重验操作者身份、创建安全的 `codex/*` 分支、校验 AGENTS/hooks 并自动执行 bootstrap。这一角色只管理公开仓库同一 Git common dir 的开发 worktree，不改变 release/deploy 的私有生产 canonical 边界。
 - `npm.cmd run worktree:sync-main -- --prepare` 只报告同步方案；缺失或过期 heartbeat 时还必须由操作者显式带 `--confirm-no-owner`。apply 必须带 prepare 输出的 `--expected-head` 和 `--expected-main`。dirty、活跃所有权或分叉分支不得自动 stash、merge 或 rebase。
 - `npm.cmd run worktree:status` 对退役操作只读：不会 retire/prune/remove，但会 fetch 并更新本地 `origin/main` remote-tracking metadata。`candidate_stale` 仅表示除未知 owner 外的门禁已通过，不等于可退役；只有 owner 明确 inactive 且所有检查 known/pass 才会显示 `eligible`。
-- worktree 退役必须先 `worktree:retire -- --prepare <path> --confirm-no-owner`，再用生成 manifest apply；禁止 `git worktree remove --force`、批量 prune 或删除未进入 main 的本地分支。
+- worktree 退役必须先 `worktree:retire -- --prepare <path> --confirm-no-owner`，再用生成 manifest apply；target 及其已存在 ancestor 不得为 reparse/junction，其真实 Git common dir 必须与公开 operator 完全一致。apply 在共享锁内用锁外捕获的 exact HEAD/main/PR snapshot 本地重验，并在 remove 紧前完成最后一次全量 probe。始终保留本地功能分支，`--delete-merged-local-branch` 已禁用；禁止 `git worktree remove --force`、批量 prune 或删除未进入 main 的本地分支。
 - 项目 hook 必须获客户端信任才会产生 heartbeat；缺失或超过 12 小时的 heartbeat 是 `unknown`，不是“无人使用”。`env:run` 仅为本地命令分类，不能授予生产权限。
 
 ### 共享云环境边界
