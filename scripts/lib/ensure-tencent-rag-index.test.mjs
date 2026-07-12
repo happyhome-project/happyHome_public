@@ -24,3 +24,7 @@ test('ensure-tencent-rag-index can probe dimensions through Tencent atomic embed
   assert.match(source, /TENCENT_RAG_HTTP_RETRIES/)
   assert.match(source, /ECONNRESET/)
 })
+
+test('ensure-tencent-rag-index retries when Node reports ECONNRESET as socket hang up', () => {
+  assert.match(source, /error\?\.code/)
+})

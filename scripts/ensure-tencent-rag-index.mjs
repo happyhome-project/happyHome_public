@@ -83,7 +83,7 @@ function authHeader() {
 }
 
 function isTransientNetworkError(error) {
-  const text = String(error?.message || error)
+  const text = [error?.code, error?.message, error].filter(Boolean).join(' ')
   return /ECONNRESET|fetch failed|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket disconnected/i.test(text)
 }
 

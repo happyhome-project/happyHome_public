@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "changeId": "tencent-rag-network-retry",
+  "actions": [
+    "ensure-tencent-rag-index"
+  ],
+  "migrations": [],
+  "smokeSuites": [
+    "post-rag"
+  ]
+}
