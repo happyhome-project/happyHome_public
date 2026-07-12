@@ -392,12 +392,12 @@ test('keeps compiled third-party runtime hashing stable across generated compone
   const left = await createCriticalPageFixture()
   const right = await createCriticalPageFixture()
   try {
-    await writeFixture(left, 'node-modules/example/index.js', 'Component({scope:"8ebe68d0-0"})')
-    await writeFixture(left, 'node-modules/example/index.wxml', '<view class="8ebe68d0-1" />')
-    await writeFixture(left, 'node-modules/example/index.json', '{"scope":"8ebe68d0-2"}')
-    await writeFixture(right, 'node-modules/example/index.js', 'Component({scope:"4bc4639c-0"})')
-    await writeFixture(right, 'node-modules/example/index.wxml', '<view class="4bc4639c-1" />')
-    await writeFixture(right, 'node-modules/example/index.json', '{"scope":"4bc4639c-2"}')
+    await writeFixture(left, 'node-modules/example/index.js', 'render({id:e.sr("left","8ebe68d0-0"),c:"8ebe68d0-1-"+index})')
+    await writeFixture(left, 'node-modules/example/index.wxml', '<view u-i="8ebe68d0-2" />')
+    await writeFixture(left, 'node-modules/example/index.json', '{"u-i":"8ebe68d0-3"}')
+    await writeFixture(right, 'node-modules/example/index.js', 'render({id:e.sr("left","4bc4639c-0"),c:"4bc4639c-1-"+index})')
+    await writeFixture(right, 'node-modules/example/index.wxml', '<view u-i="4bc4639c-2" />')
+    await writeFixture(right, 'node-modules/example/index.json', '{"u-i":"4bc4639c-3"}')
 
     const expectedHash = hashNodeModulesDirectory(join(left, 'node-modules'))
     assert.equal(hashNodeModulesDirectory(join(right, 'node-modules')), expectedHash)
@@ -433,6 +433,23 @@ test('keeps real third-party runtime changes visible to hashing', async () => {
     await rm(baseline, { recursive: true, force: true })
     await rm(codeChange, { recursive: true, force: true })
     await rm(nonScopeChange, { recursive: true, force: true })
+  }
+})
+
+test('does not normalize an ordinary scope-shaped third-party token', async () => {
+  const left = await createCriticalPageFixture()
+  const right = await createCriticalPageFixture()
+  try {
+    await writeFixture(left, 'node-modules/example/index.js', 'const version = "deadbeef-123"')
+    await writeFixture(right, 'node-modules/example/index.js', 'const version = "feedface-123"')
+
+    assert.notEqual(
+      hashNodeModulesDirectory(join(left, 'node-modules')),
+      hashNodeModulesDirectory(join(right, 'node-modules')),
+    )
+  } finally {
+    await rm(left, { recursive: true, force: true })
+    await rm(right, { recursive: true, force: true })
   }
 })
 

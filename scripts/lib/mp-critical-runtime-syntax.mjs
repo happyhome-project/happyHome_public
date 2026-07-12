@@ -36,14 +36,29 @@ function isFrameworkRuntimeChunk(distRoot, chunkPath) {
   return path.relative(distRoot, chunkPath).replaceAll(path.sep, '/') === 'common/vendor.js'
 }
 
-const PATH_DERIVED_COMPONENT_SCOPE_PATTERN = /\b[0-9a-f]{8}(?=-\d+\b)/gi
 const COMPONENT_SCOPE_MARKER = 'SCOPEID'
 const PATH_STABLE_TEXT_EXTENSIONS = new Set(['.js', '.json', '.wxml'])
+
+function normalizeCompilerComponentScopes(filePath, source) {
+  const extension = path.extname(filePath).toLowerCase()
+  if (extension === '.wxml') {
+    return source.replace(/(\bu-i\s*=\s*["'])[0-9a-f]{8}(?=-\d+\b)/gi, `$1${COMPONENT_SCOPE_MARKER}`)
+  }
+  if (extension === '.json') {
+    return source.replace(/("u-i"\s*:\s*")[0-9a-f]{8}(?=-\d+\b)/gi, `$1${COMPONENT_SCOPE_MARKER}`)
+  }
+  if (extension === '.js') {
+    return source
+      .replace(/(\.sr\(\s*["'][^"']*["']\s*,\s*["'])[0-9a-f]{8}(?=-\d+\b)/gi, `$1${COMPONENT_SCOPE_MARKER}`)
+      .replace(/(\bc\s*:\s*["'])[0-9a-f]{8}(?=-\d+-["'])/gi, `$1${COMPONENT_SCOPE_MARKER}`)
+  }
+  return source
+}
 
 function pathStableNodeModulesContent(filePath) {
   const content = fs.readFileSync(filePath)
   if (!PATH_STABLE_TEXT_EXTENSIONS.has(path.extname(filePath).toLowerCase())) return content
-  return Buffer.from(content.toString('utf8').replace(PATH_DERIVED_COMPONENT_SCOPE_PATTERN, COMPONENT_SCOPE_MARKER))
+  return Buffer.from(normalizeCompilerComponentScopes(filePath, content.toString('utf8')))
 }
 
 export function hashNodeModulesDirectory(directoryPath) {
