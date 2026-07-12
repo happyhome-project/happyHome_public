@@ -11,6 +11,7 @@ import { loadTenantConfig, runCli as runTenantCli } from './h5-test-tenant.mjs'
 import { withValidationLease } from './lib/validation-lease.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+export const EXPECTED_HOME_VISIBLE_LONG = 20
 const SAFE_KEYS = new Set(['mode', 'runId', 'cwd', 'branch', 'head', 'port', 'counts', 'geometry', 'routes', 'cleanup', 'top'])
 export function sanitizeEvidence(value) {
   if (Array.isArray(value)) return value.map(sanitizeEvidence)
@@ -18,7 +19,15 @@ export function sanitizeEvidence(value) {
   return Object.fromEntries(Object.entries(value).filter(([key]) => SAFE_KEYS.has(key) || ['long', 'short', 'empty', 'posts', 'created', 'stickyTop', 'searchTop', 'viewportHeight', 'ok'].includes(key)).map(([key, item]) => [key, sanitizeEvidence(item)]))
 }
 
-async function realRead({ running, home = homedir() }) {
+export function validateReadEvidence({ doctor, visible }) {
+  const stored = doctor?.counts?.activePostsBySection
+  if (JSON.stringify(stored) !== JSON.stringify([30, 1, 0])) throw new Error(`unexpected tenant doctor stored counts: ${JSON.stringify(stored)}`)
+  if (visible?.long !== EXPECTED_HOME_VISIBLE_LONG) throw new Error(`unexpected visible long count: ${visible?.long}`)
+  if (visible?.short !== 1) throw new Error(`unexpected visible short count: ${visible?.short}`)
+  if (visible?.empty !== 0) throw new Error(`unexpected visible empty count: ${visible?.empty}`)
+}
+
+async function realRead({ running, doctor, home = homedir() }) {
   const config = loadTenantConfig({ home })
   const browser = await chromium.launch({ headless: true })
   try {
@@ -32,23 +41,26 @@ async function realRead({ running, home = homedir() }) {
     await page.getByTestId('profile-page').waitFor()
     await page.goto(`${running.url}/#/pages/index/index`)
     const counts = {}
-    for (const [name, id, expected] of [['long', SECTION_IDS.long, 20], ['short', SECTION_IDS.short, 1], ['empty', SECTION_IDS.empty, 0]]) {
+    for (const [name, id] of [['long', SECTION_IDS.long], ['short', SECTION_IDS.short], ['empty', SECTION_IDS.empty]]) {
       await page.getByTestId(`home-section-tab-${id}`).last().click()
       await page.waitForTimeout(100)
       counts[name] = await page.getByTestId('home-post-card').count()
-      if (name === 'long' ? counts[name] < expected : counts[name] !== expected) throw new Error(`unexpected ${name} homepage count: ${counts[name]}`)
     }
+    validateReadEvidence({ doctor, visible: counts })
     await page.getByTestId(`home-section-tab-${SECTION_IDS.long}`).last().click()
     const firstCard = page.getByTestId('home-post-card').first()
     const postId = await firstCard.getAttribute('data-post-id')
     if (!postId) throw new Error('long homepage card is missing exact post id')
     await firstCard.click()
     await page.getByTestId('detail-ready').waitFor()
-    if (!(await page.getByTestId('detail-ready').getAttribute('data-post-id'))?.includes(postId)) throw new Error('detail did not open the exact homepage post')
+    const detailUrl = new URL(page.url())
+    const detailQuery = new URLSearchParams(detailUrl.hash.includes('?') ? detailUrl.hash.slice(detailUrl.hash.indexOf('?') + 1) : '')
+    if (detailQuery.get('postId') !== postId) throw new Error('detail URL did not contain the exact homepage postId')
+    if (await page.getByTestId('detail-ready').getAttribute('data-post-id') !== postId) throw new Error('detail did not render the exact homepage post')
     await page.goto(`${running.url}/#/pages/section/index?sectionId=${encodeURIComponent(SECTION_IDS.long)}`)
     await page.getByTestId('section-ready').waitFor()
     if (await page.getByTestId('section-ready').getAttribute('data-section-id') !== SECTION_IDS.long) throw new Error('section page loaded the wrong section')
-    if (await page.getByTestId('section-post-card').count() < 20) throw new Error('long section did not render its real posts')
+    if (await page.getByTestId('section-post-card').count() !== EXPECTED_HOME_VISIBLE_LONG) throw new Error('long section did not render exactly 20 posts')
     await page.goto(`${running.url}/#/pages/profile/index`)
     await page.getByTestId('profile-page').waitFor()
     const routes = ['home', `section:${SECTION_IDS.long}`, `detail:${postId}`, 'profile']
@@ -136,11 +148,11 @@ async function writeEvidence(root, evidence) {
 export async function runH5WebSmoke({ mode = 'read', runId = randomUUID(), root = ROOT, deps = {} } = {}) {
   if (!['read', 'write'].includes(mode)) throw new Error('mode must be read or write')
   const d = { doctor: () => runTenantCli({ argv: ['doctor'], root }), launcher: createH5WebLauncher({ root }), browseRead: realRead, browseWrite: realWrite, lease: withValidationLease, writeEvidence: (e) => writeEvidence(root, e), ...deps }
-  await d.doctor()
+  const doctor = await d.doctor()
   const running = await d.launcher.start()
   try {
     const execute = async () => {
-      const result = mode === 'read' ? await d.browseRead({ running, runId }) : await d.browseWrite({ running, runId })
+      const result = mode === 'read' ? await d.browseRead({ running, runId, doctor }) : await d.browseWrite({ running, runId })
       try {
         const evidence = sanitizeEvidence({ mode, runId, cwd: running.git.cwd, branch: running.git.branch, head: running.git.head, port: running.port, ...result })
         await d.writeEvidence(evidence)

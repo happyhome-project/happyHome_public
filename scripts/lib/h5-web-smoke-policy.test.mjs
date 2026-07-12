@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { createH5WebLauncher } from '../h5-web.mjs'
-import { runH5WebSmoke, sanitizeEvidence } from '../test-h5-web-smoke.mjs'
+import { runH5WebSmoke, sanitizeEvidence, validateReadEvidence } from '../test-h5-web-smoke.mjs'
 
 async function machineHome(values = {}) {
   const home = await mkdtemp(join(tmpdir(), 'hh-h5-web-'))
@@ -51,6 +51,15 @@ test('read smoke runs doctor and browser without a validation lease', async () =
   assert.equal(calls.filter((x) => x === 'lease').length, 0)
   assert.deepEqual(calls.slice(0, 2), ['doctor', 'start'])
   assert.equal(result.mode, 'read')
+})
+
+test('read evidence combines exact stored doctor counts 30/1/0 with exact visible counts 20/1/0', () => {
+  assert.doesNotThrow(() => validateReadEvidence({
+    doctor: { counts: { activePostsBySection: [30, 1, 0] } },
+    visible: { long: 20, short: 1, empty: 0 },
+  }))
+  assert.throws(() => validateReadEvidence({ doctor: { counts: { activePostsBySection: [30, 1, 0] } }, visible: { long: 21, short: 1, empty: 0 } }), /visible long count/)
+  assert.throws(() => validateReadEvidence({ doctor: { counts: { activePostsBySection: [29, 1, 0] } }, visible: { long: 20, short: 1, empty: 0 } }), /stored counts/)
 })
 
 test('write smoke takes exactly one lease, uses a unique run id, and requires cleanup', async () => {

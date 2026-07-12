@@ -22,7 +22,7 @@ npm.cmd run h5:test-tenant -- doctor
 npm.cmd run test:h5:web -- --mode=read
 ```
 
-`doctor` 和默认 read smoke 都是只读操作，不获取 validation lease，因此多个 worktree 可并发读取共享基线。read smoke 覆盖 homepage、30/1/0 长短空板块、section、detail、profile，并把不含密码、openid、正文和 storage URL 的 counts/geometry 写入 `.codex-local/h5-web-smoke/<run-id>/summary.json`。
+`doctor` 和默认 read smoke 都是只读操作，不获取 validation lease，因此多个 worktree 可并发读取共享基线。tenant doctor 精确验证数据库中的 long/short/empty active posts 为 `30/1/0`；H5 homepage 和 section 当前分页上限为 20，因此浏览器 smoke 精确验证首屏可见数量为 `20/1/0`，不会把 UI 强行扩展到 30。read smoke 还通过 exact section ID、post ID 覆盖 section、detail、profile，并把不含密码、openid、正文和 storage URL 的 counts/geometry 写入 `.codex-local/h5-web-smoke/<run-id>/summary.json`。
 
 初始化或修复共享基线必须显式 prepare/apply：
 
