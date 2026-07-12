@@ -90,6 +90,11 @@ export async function createCloudBaseTenantStore({ config, root = ROOT, env = pr
   }
 
   return {
+    async deleteFiles(fileIDs) {
+      const exact = [...new Set((fileIDs || []).map((value) => String(value || '').trim()).filter(Boolean))]
+      if (!exact.length) throw new Error('deleteFiles requires at least one exact fileID')
+      await manager.storage.deleteFile(exact)
+    },
     async inspect({ username, wechatOpenid }) {
       const account = await findAccount(username)
       const manifest = buildManifest({ webUserId: account ? `web:${account.uuid}` : null, wechatOpenid })

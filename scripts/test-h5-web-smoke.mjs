@@ -7,11 +7,12 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { createH5WebLauncher } from './h5-web.mjs'
 import { SECTION_IDS } from './lib/h5-test-tenant.mjs'
-import { loadTenantConfig, runCli as runTenantCli } from './h5-test-tenant.mjs'
+import { createCloudBaseTenantStore, loadTenantConfig, runCli as runTenantCli } from './h5-test-tenant.mjs'
 import { withValidationLease } from './lib/validation-lease.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const H5_SMOKE_LAST_CREATED_POST_ID_KEY = 'hh-h5-smoke-last-created-post-id'
+const H5_SMOKE_UPLOADED_FILE_IDS_KEY = 'hh-h5-smoke-uploaded-file-ids'
 export const EXPECTED_HOME_VISIBLE_LONG = 20
 const SAFE_KEYS = new Set(['mode', 'runId', 'cwd', 'branch', 'head', 'port', 'counts', 'geometry', 'routes', 'cleanup', 'top', 'status', 'cleanupOk'])
 export function sanitizeEvidence(value) {
@@ -28,12 +29,15 @@ export function validateReadEvidence({ doctor, visible }) {
   if (visible?.empty !== 0) throw new Error(`unexpected visible empty count: ${visible?.empty}`)
 }
 
-export async function resolveCleanupIntent({ intent, capturedPostId = async () => '', locate, remove }) {
+export async function resolveCleanupIntent({ intent, capturedPostId = async () => '', capturedFileIDs = async () => [], locate, remove, removeFiles }) {
   if (!intent) return { found: false }
   const postId = String(await capturedPostId() || await locate(intent.content) || '').trim()
   if (!postId) throw new Error(`cleanup unconfirmed for run ${intent.runId || 'unknown'}`)
+  const fileIDs = [...new Set((await capturedFileIDs()).map((value) => String(value || '').trim()).filter(Boolean))]
+  if (!fileIDs.length) throw new Error(`storage cleanup unconfirmed for run ${intent.runId || 'unknown'}`)
   await remove(postId)
-  return { found: true, postId }
+  await removeFiles(fileIDs)
+  return { found: true, postId, fileIDs }
 }
 
 async function realRead({ running, doctor, home = homedir() }) {
@@ -83,6 +87,7 @@ async function realRead({ running, doctor, home = homedir() }) {
 
 async function realWrite({ running, runId, home = homedir() }) {
   const config = loadTenantConfig({ home })
+  const tenantStore = await createCloudBaseTenantStore({ config, home })
   let browser
   let page
   const content = `H5 smoke ${runId}`
@@ -94,7 +99,10 @@ async function realWrite({ running, runId, home = homedir() }) {
   const cleanup = async () => {
     try {
       if (cleanupIntent && !deleted) {
-        await resolveCleanupIntent({ intent: cleanupIntent, capturedPostId: async () => String(await page.evaluate((key) => sessionStorage.getItem(key) || '', H5_SMOKE_LAST_CREATED_POST_ID_KEY)), locate: async () => {
+        await resolveCleanupIntent({ intent: cleanupIntent, capturedPostId: async () => String(await page.evaluate((key) => sessionStorage.getItem(key) || '', H5_SMOKE_LAST_CREATED_POST_ID_KEY)), capturedFileIDs: async () => {
+          const raw = await page.evaluate((key) => sessionStorage.getItem(key) || '[]', H5_SMOKE_UPLOADED_FILE_IDS_KEY)
+          try { return JSON.parse(raw) } catch { return [] }
+        }, locate: async () => {
           if (postId) return postId
           await page.goto(`${running.url}/#/pages/index/index`)
           await page.getByTestId(`home-section-tab-${SECTION_IDS.short}`).last().click()
@@ -111,10 +119,11 @@ async function realWrite({ running, runId, home = homedir() }) {
           deleted = true
           await page.goto(postUrl)
           await page.getByText(/详情加载失败|帖子不存在|已删除/).waitFor()
-        } })
+        }, removeFiles: async (fileIDs) => tenantStore.deleteFiles(fileIDs) })
       }
     } finally {
       await page?.evaluate((key) => sessionStorage.removeItem(key), H5_SMOKE_LAST_CREATED_POST_ID_KEY).catch(() => {})
+      await page?.evaluate((key) => sessionStorage.removeItem(key), H5_SMOKE_UPLOADED_FILE_IDS_KEY).catch(() => {})
       await browser?.close()
       await unlink(pngPath).catch(() => {})
     }
@@ -135,6 +144,7 @@ async function realWrite({ running, runId, home = homedir() }) {
     await page.getByTestId('widget-input-hh-web-h5-v1-widget-short').fill(content)
     await page.getByTestId('widget-image-input-hh-web-h5-v1-widget-short-image').setInputFiles(pngPath)
     await page.evaluate((key) => sessionStorage.removeItem(key), H5_SMOKE_LAST_CREATED_POST_ID_KEY)
+    await page.evaluate((key) => sessionStorage.removeItem(key), H5_SMOKE_UPLOADED_FILE_IDS_KEY)
     cleanupIntent = { runId, content }
     await page.getByTestId('create-submit').click()
     await page.getByText(content, { exact: true }).waitFor()

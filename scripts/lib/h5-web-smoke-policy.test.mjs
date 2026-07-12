@@ -102,12 +102,16 @@ test('write smoke propagates cleanup failure and still stops its own server', as
 test('cleanup intent locates and deletes an exact UUID post even when submit click throws', async () => {
   const calls = []
   const intent = { runId: 'uuid-1', content: 'H5 smoke uuid-1' }
-  await resolveCleanupIntent({ intent, capturedPostId: async () => 'post-captured', locate: async () => { calls.push('locator'); return '' }, remove: async (postId) => calls.push(`remove:${postId}`) })
-  assert.deepEqual(calls, ['remove:post-captured'])
+  await resolveCleanupIntent({ intent, capturedPostId: async () => 'post-captured', capturedFileIDs: async () => ['cloud://env/exact.png'], locate: async () => { calls.push('locator'); return '' }, remove: async (postId) => calls.push(`remove:${postId}`), removeFiles: async (fileIDs) => calls.push(`remove-files:${fileIDs.join(',')}`) })
+  assert.deepEqual(calls, ['remove:post-captured', 'remove-files:cloud://env/exact.png'])
 })
 
 test('cleanup intent fails closed when neither session capture nor UUID locator confirms an exact post', async () => {
-  await assert.rejects(() => resolveCleanupIntent({ intent: { content: 'H5 smoke uuid-2' }, capturedPostId: async () => '', locate: async () => '', remove: async () => {} }), /cleanup unconfirmed/)
+  await assert.rejects(() => resolveCleanupIntent({ intent: { content: 'H5 smoke uuid-2' }, capturedPostId: async () => '', locate: async () => '', remove: async () => {}, removeFiles: async () => {} }), /cleanup unconfirmed/)
+})
+
+test('cleanup intent fails closed when the exact uploaded storage object is missing', async () => {
+  await assert.rejects(() => resolveCleanupIntent({ intent: { runId: 'uuid-3', content: 'H5 smoke uuid-3' }, capturedPostId: async () => 'post-3', capturedFileIDs: async () => [], locate: async () => '', remove: async () => {}, removeFiles: async () => {} }), /storage cleanup unconfirmed/)
 })
 
 test('evidence removes credentials, raw content, openids, and storage URLs', () => {

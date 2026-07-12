@@ -666,6 +666,13 @@ async function uploadImages(tempPaths: string[]): Promise<string[]> {
     const ext = path.startsWith('blob:') ? 'jpg' : (path.split('.').pop()?.split('?')[0] || 'jpg')
     const cloudPath = `posts/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
     const result = await uploadCloudFile({ cloudPath, source: path })
+    // #ifdef H5
+    if ((import.meta as any).env?.DEV) {
+      const key = 'hh-h5-smoke-uploaded-file-ids'
+      const current = JSON.parse(sessionStorage.getItem(key) || '[]')
+      sessionStorage.setItem(key, JSON.stringify([...current, result.fileID]))
+    }
+    // #endif
     return result.fileID
   }))
 }
