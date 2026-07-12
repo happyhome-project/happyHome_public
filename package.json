@@ -40,6 +40,7 @@
     "test:h5:web": "node scripts/test-h5-web-smoke.mjs",
     "docs:check": "node scripts/docs.mjs check",
     "docs:catalog": "node scripts/docs.mjs catalog",
+    "ci:impact": "node scripts/ci-impact.mjs",
     "integrate:pr": "node scripts/integrate-pr.mjs",
     "integrate:workflow-pr": "node scripts/integrate-workflow-pr.mjs",
     "release:plan": "node scripts/release-plan.mjs",
