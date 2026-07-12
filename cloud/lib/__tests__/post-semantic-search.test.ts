@@ -20,7 +20,7 @@ async function expectSafeFailure(promise: Promise<unknown>) {
   expect(isPostSemanticSearchError(error)).toBe(true)
 }
 
-function fixture(options: { hits?: any[]; docs?: Record<string, any>; now?: () => number } = {}) {
+function fixture(options: { hits?: any[]; docs?: Record<string, any>; now?: () => number; resolveFinalMembership?: jest.Mock } = {}) {
   const docs = options.docs || { 'rag_community_versions:c1': versions(), 'posts:p1': post(), 'sections:s1': section(), 'post_rag_index_state_v2:p1': state() }
   const database = {
     getById: jest.fn(async (collection: string, id: string) => {
@@ -32,7 +32,8 @@ function fixture(options: { hits?: any[]; docs?: Record<string, any>; now?: () =
   }
   const requestJson = jest.fn(async (_method: string, _path: string, _body?: any) => ({ hits: { hits: options.hits || [hit()] } }))
   const embedTexts = jest.fn(async () => [[0.1, 0.2]])
-  return { database, requestJson, embedTexts, service: createPostSemanticSearchService({ database, requestJson, embedTexts, indexName: 'rag-index', vectorField: 'embedding', embeddingModel: 'bge-base-zh-v1.5', retrievalIndexVersion: 'post-rag-v2-c260-o40', now: options.now }) }
+  const resolveFinalMembership = options.resolveFinalMembership || jest.fn(async () => ({ active: true, aclVersion: 4 }))
+  return { database, requestJson, embedTexts, resolveFinalMembership, service: createPostSemanticSearchService({ database, requestJson, embedTexts, resolveFinalMembership, indexName: 'rag-index', vectorField: 'embedding', embeddingModel: 'bge-base-zh-v1.5', retrievalIndexVersion: 'post-rag-v2-c260-o40', now: options.now }) }
 }
 
 test('bounds a stalled provider request and returns a safe error', async () => {
@@ -61,10 +62,23 @@ test('issues one bounded BM25+dense RRF request and returns a semantically relat
 
 test('adds section filter and allows member chunks only for members', async () => {
   const f = fixture({ hits: [hit({ visibility: 'member' })] })
-  const result = await f.service.search({ communityId: 'c1', sectionId: 's1', query: '家风', includeMemberOnly: true })
+  const result = await f.service.search({ communityId: 'c1', sectionId: 's1', query: '家风', includeMemberOnly: true, viewerId: 'member-1' })
   const body = f.requestJson.mock.calls[0][2]
   expect(body.query.bool.filter).toEqual([{ term: { communityId: 'c1' } }, { term: { sectionId: 's1' } }])
   expect(result.total).toBe(1)
+})
+
+test('candidate cache cannot preserve member access after kick or aclVersion change', async () => {
+  const membership = jest.fn()
+    .mockResolvedValueOnce({ active: true, aclVersion: 4 })
+    .mockResolvedValueOnce({ active: false, aclVersion: 5 })
+  const f = fixture({ hits: [hit({ visibility: 'member' })], resolveFinalMembership: membership })
+  const input = { communityId: 'c1', query: '家风', includeMemberOnly: true, viewerId: 'member-1' }
+  await expect(f.service.search(input)).resolves.toMatchObject({ total: 1 })
+  await expect(f.service.search(input)).resolves.toMatchObject({ total: 0, items: [] })
+  expect(f.requestJson).toHaveBeenCalledTimes(1)
+  expect(membership).toHaveBeenCalledTimes(2)
+  expect(JSON.stringify(f.requestJson.mock.calls)).not.toContain('member-1')
 })
 
 test.each([
@@ -94,9 +108,9 @@ test('rechecks current widget identity and visibility even when public candidate
   docs['sections:s1'].widgets[0].visibility = 'member'
   await expect(f.service.search(guest)).resolves.toMatchObject({ total: 0 })
   expect(f.requestJson).toHaveBeenCalledTimes(1)
-  await expect(f.service.search({ ...guest, includeMemberOnly: true })).resolves.toMatchObject({ total: 1 })
+  await expect(f.service.search({ ...guest, includeMemberOnly: true, viewerId: 'member-1' })).resolves.toMatchObject({ total: 1 })
   docs['sections:s1'].widgets = []
-  await expect(f.service.search({ ...guest, includeMemberOnly: true })).resolves.toMatchObject({ total: 0 })
+  await expect(f.service.search({ ...guest, includeMemberOnly: true, viewerId: 'member-1' })).resolves.toMatchObject({ total: 0 })
 })
 
 test('accepts canonical repeated field suffixes for the authoritative widget', async () => {

@@ -8,6 +8,7 @@ type RequestJson = (method: string, path: string, body?: unknown, options?: { co
 type SearchDatabase = {
   getById(collection: string, id: string): Promise<JsonRecord>
   getByIds(collection: string, ids: string[]): Promise<JsonRecord[]>
+  query?(collection: string, where: JsonRecord, options?: JsonRecord): Promise<JsonRecord[]>
 }
 
 export type PostSemanticSearchRequest = {
@@ -17,6 +18,7 @@ export type PostSemanticSearchRequest = {
   skip?: number
   limit?: number
   includeMemberOnly: boolean
+  viewerId?: string
 }
 
 export type PostSemanticSearchItem = {
@@ -107,6 +109,7 @@ export function createPostSemanticSearchService(options: {
   database: SearchDatabase; requestJson: RequestJson; embedTexts(texts: string[]): Promise<number[][]>
   indexName: string; vectorField: string; embeddingModel: string; retrievalIndexVersion?: string; now?: () => number
   embeddingCacheSize?: number; candidateCacheSize?: number; operationTimeoutMs?: number
+  resolveFinalMembership?: (input: { communityId: string; viewerId: string }) => Promise<{ active: boolean; aclVersion: number }>
 }) {
   if (!/^[a-z0-9][a-z0-9._-]*$/.test(options.indexName) || !safeId(options.vectorField)
     || !safeId(options.embeddingModel) || !safeId(options.retrievalIndexVersion || POST_RAG_RETRIEVAL_INDEX_VERSION)) throw new PostSemanticSearchError('INVALID_REQUEST')
@@ -174,6 +177,12 @@ export function createPostSemanticSearchService(options: {
         options.database.getByIds('post_rag_index_state_v2', unique(scoped.map(item => item.postId))),
       ])
       assertDeadline(deadline)
+      let finalMemberAuthorized = false
+      if (input.includeMemberOnly && safeId(input.viewerId) && options.resolveFinalMembership) {
+        const membership = await options.resolveFinalMembership({ communityId: input.communityId, viewerId: input.viewerId })
+        assertDeadline(deadline)
+        finalMemberAuthorized = membership?.active === true && versionNumber(membership.aclVersion) === aclVersion
+      }
       const postMap = new Map<string, JsonRecord>(posts.map((item: JsonRecord) => [item._id, item])); const sectionMap = new Map<string, JsonRecord>(sections.map((item: JsonRecord) => [item._id, item])); const stateMap = new Map<string, JsonRecord>(states.map((item: JsonRecord) => [item._id, item]))
       const valid = scoped.filter(candidate => {
         const post = postMap.get(candidate.postId); const section = sectionMap.get(candidate.sectionId); const state = stateMap.get(candidate.postId)
@@ -181,7 +190,9 @@ export function createPostSemanticSearchService(options: {
         return post?.status === 'active' && (!post.auditStatus || post.auditStatus === 'pass')
           && post.communityId === input.communityId && post.sectionId === candidate.sectionId
           && section?.status === 'active' && section.communityId === input.communityId
-          && matchesWidgetFieldKey(candidate.fieldKey, widget?.fieldKey) && (input.includeMemberOnly || widget.visibility !== 'member')
+          && matchesWidgetFieldKey(candidate.fieldKey, widget?.fieldKey)
+          && (candidate.visibility === 'public' || finalMemberAuthorized)
+          && (widget.visibility !== 'member' || finalMemberAuthorized)
           && state?.schemaVersion === 2 && state.postId === candidate.postId && state.state === 'active' && state.sourceVersion === candidate.sourceVersion
       }).sort((a, b) => b.score - a.score)
       const grouped = new Map<string, Candidate[]>()
@@ -233,6 +244,15 @@ export function createPostSemanticSearchServiceFromEnv(options: {
     if (vectors.length !== texts.length || vectors.some(vector => !validVector(vector))) throw new PostSemanticSearchError('UNAVAILABLE')
     return vectors
   }
-  return createPostSemanticSearchService({ database: (options.database || db) as SearchDatabase, requestJson, embedTexts, indexName: config.indexName,
+  const database = (options.database || db) as SearchDatabase
+  const resolveFinalMembership = async ({ communityId, viewerId }: { communityId: string; viewerId: string }) => {
+    if (!database.query) return { active: false, aclVersion: -1 }
+    const [version, memberships] = await Promise.all([
+      database.getById('rag_community_versions', communityId),
+      database.query('community_members', { communityId, userId: viewerId, status: 'active' }, { limit: 1 }),
+    ])
+    return { active: memberships.length > 0, aclVersion: versionNumber(version?.aclVersion) ?? -1 }
+  }
+  return createPostSemanticSearchService({ database, requestJson, embedTexts, resolveFinalMembership, indexName: config.indexName,
     vectorField: config.vectorField!, embeddingModel: config.embeddingModel!, retrievalIndexVersion: POST_RAG_RETRIEVAL_INDEX_VERSION })
 }

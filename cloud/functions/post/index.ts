@@ -58,7 +58,7 @@ const COMMUNITY_READ_ERROR = '需要先加入社区后查看内容'
 const HOME_POST_LIMIT_PER_SECTION = 20
 const DEFAULT_SEARCH_LIMIT = 20
 type PostSemanticSearchService = { search(input: {
-  communityId: string; query: string; sectionId?: string; skip?: number; limit?: number; includeMemberOnly: boolean
+  communityId: string; query: string; sectionId?: string; skip?: number; limit?: number; includeMemberOnly: boolean; viewerId?: string
 }): Promise<PostSemanticSearchResponse> }
 let postSemanticSearchService: PostSemanticSearchService | null = null
 
@@ -753,6 +753,7 @@ export async function handleSearch(params: {
       skip: Number.isFinite(Number(params.skip)) ? Math.max(0, Math.floor(Number(params.skip))) : 0,
       limit: Number.isFinite(Number(params.limit)) && Number(params.limit) > 0 ? Math.floor(Number(params.limit)) : DEFAULT_SEARCH_LIMIT,
       includeMemberOnly: canViewMemberOnly,
+      ...(canViewMemberOnly ? { viewerId } : {}),
     })
     return { ...result, answer: '', citations: [], mode: result.items.length ? 'rag' as const : 'no_answer' as const }
   } catch { throw new Error('智能搜索暂不可用，请稍后重试') }
