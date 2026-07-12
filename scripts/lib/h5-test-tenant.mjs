@@ -72,7 +72,6 @@ export function buildManifest({ webUserId = null, wechatOpenid }) {
   })))
   const users = [
     ...(webUserId ? [{ _id: webUserId, nickName: 'H5 Web Test User', avatarUrl: '', role: 'user', fixtureKey: FIXTURE_KEY, createdAt: CREATED_AT }] : []),
-    { _id: wechatOpenid, nickName: 'WeChat Test User', avatarUrl: '', role: 'user', fixtureKey: FIXTURE_KEY, createdAt: CREATED_AT },
   ]
   const memberships = [
     ...(webUserId ? [{ _id: 'hh-web-h5-v1-member-web', communityId: COMMUNITY_ID, userId: webUserId, role: 'member', status: 'active', appliedAt: CREATED_AT, joinedAt: CREATED_AT, fixtureKey: FIXTURE_KEY }] : []),
