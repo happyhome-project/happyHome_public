@@ -58,6 +58,20 @@ describe('storage API', () => {
     expect(onProgress).toHaveBeenCalledWith({ progress: 60, loaded: 3, total: 5 })
   })
 
+  test('uploads an H5 File through the Web SDK without replacing the File object', async () => {
+    const file = new File(['avatar'], 'avatar.png', { type: 'image/png' })
+    webUploadFile.mockResolvedValue({ fileID: 'cloud://env/avatars/avatar.png', requestId: 'r-file' })
+    const { uploadCloudFile } = await import('../storage')
+
+    await expect(uploadCloudFile({ cloudPath: 'avatars/avatar.png', source: file }))
+      .resolves.toEqual({ fileID: 'cloud://env/avatars/avatar.png' })
+    expect(webUploadFile).toHaveBeenCalledWith(expect.objectContaining({
+      cloudPath: 'avatars/avatar.png',
+      filePath: file,
+    }))
+    expect(webUploadFile.mock.calls[0][0].filePath).toBe(file)
+  })
+
   test('fetches an H5 blob URL before uploading it through the Web SDK', async () => {
     const blob = new Blob(['image'], { type: 'image/png' })
     const fetch = vi.fn().mockResolvedValue({ ok: true, blob: async () => blob })
