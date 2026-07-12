@@ -10,23 +10,19 @@ import {
   assessRetirementTargetBoundary,
   classifyWorktreeRetirement,
   collectPinnedRetirementEvidence,
-  confirmNoOwner,
   createWorktreePlan,
-  createRetirementManifest,
-  createRetirementRecord,
   decideSync,
-  evaluateLeaseOwner,
+  decideBootstrap,
   findOpenPullRequest,
   githubRepositoryFromRemote,
   interpretAncestorExitStatus,
   normalizeExternalCommandResult,
   validateOpenPullRequestInventory,
   verifiedPublicOriginUrl,
-  executeHeartbeatCriticalSection,
+  verifySyncSnapshot,
   executePinnedWorktreeCreation,
-  executeRetirementCriticalSection,
+  executeWorktreeMutation,
   verifyCreateTargetBoundary,
-  verifyRetirementManifest,
 } from './lib/worktree-lifecycle.mjs'
 import { assessRuntime } from './lib/worktree-environment.mjs'
 import { acquireIntegrationLock } from './lib/integrate-pr-policy.mjs'
@@ -86,66 +82,10 @@ function commonGitDir(cwd = process.cwd()) {
   return resolve(cwd, value)
 }
 
-function registryDir(cwd = process.cwd()) {
-  return join(commonGitDir(cwd), 'happyhome-worktrees')
-}
-
-function registryPath(cwd = process.cwd()) {
-  return join(registryDir(cwd), 'leases.json')
-}
-
-function loadRegistry(cwd = process.cwd()) {
-  const path = registryPath(cwd)
-  if (!existsSync(path)) return { schemaVersion: 1, leases: {} }
-  try {
-    const value = JSON.parse(readFileSync(path, 'utf8'))
-    return value?.schemaVersion === 1 && value?.leases && typeof value.leases === 'object'
-      ? value
-      : { schemaVersion: 1, leases: {} }
-  } catch {
-    return { schemaVersion: 1, leases: {} }
-  }
-}
-
-function writeRegistry(value, cwd = process.cwd()) {
-  const directory = registryDir(cwd)
+function withWorktreeOperationLock(cwd, action) {
+  const directory = join(commonGitDir(cwd), 'happyhome-worktrees')
   mkdirSync(directory, { recursive: true })
-  const path = registryPath(cwd)
-  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`
-  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
-  renameSync(temporary, path)
-}
-
-function retirementRecordsPath(cwd = process.cwd()) {
-  return join(registryDir(cwd), 'retire-records.json')
-}
-
-function loadRetirementRecords(cwd = process.cwd()) {
-  const path = retirementRecordsPath(cwd)
-  if (!existsSync(path)) return { schemaVersion: 1, records: {} }
-  try {
-    const value = JSON.parse(readFileSync(path, 'utf8'))
-    return value?.schemaVersion === 1 && value?.records && typeof value.records === 'object'
-      ? value
-      : { schemaVersion: 1, records: {} }
-  } catch {
-    return { schemaVersion: 1, records: {} }
-  }
-}
-
-function writeRetirementRecords(value, cwd = process.cwd()) {
-  const directory = registryDir(cwd)
-  mkdirSync(directory, { recursive: true })
-  const path = retirementRecordsPath(cwd)
-  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`
-  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
-  renameSync(temporary, path)
-}
-
-function withRegistryLock(cwd, action) {
-  const directory = registryDir(cwd)
-  mkdirSync(directory, { recursive: true })
-  const release = acquireIntegrationLock(join(directory, 'leases.lock'), { prNumber: 'worktree-lease' })
+  const release = acquireIntegrationLock(join(directory, 'operations.lock'), { prNumber: 'worktree-operation' })
   try {
     return action()
   } finally {
@@ -155,10 +95,6 @@ function withRegistryLock(cwd, action) {
 
 function normalizePath(value) {
   return resolve(String(value)).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
-}
-
-function pathKey(path) {
-  return createHash('sha256').update(normalizePath(path)).digest('hex')
 }
 
 function currentIdentity(cwd = process.cwd(), { mainSha = null } = {}) {
@@ -228,11 +164,6 @@ function registeredWorktreePaths(root) {
     const line = block.split(/\r?\n/).find((value) => value.startsWith('worktree '))
     return line ? line.slice('worktree '.length) : ''
   }).filter(Boolean)
-}
-
-function ownerState(path, cwd = process.cwd()) {
-  const lease = loadRegistry(cwd).leases[pathKey(path)]
-  return { ...evaluateLeaseOwner(lease), lease: lease || null }
 }
 
 function hooksState(root) {
@@ -309,7 +240,7 @@ function realCommonGitDir(cwd = process.cwd()) {
 
 function openPullRequestInventory(cwd, { repository: requestedRepository = null } = {}) {
   const limit = 1000
-  const remote = requestedRepository ? null : git(['remote', 'get-url', 'origin'], { cwd, allowFailure: true })
+  const remote = requestedRepository ? null : git(['config', '--get', 'remote.origin.url'], { cwd, allowFailure: true })
   const repository = requestedRepository || (remote?.ok ? githubRepositoryFromRemote(remote.stdout) : null)
   if (!repository) {
     return { pulls: null, error: remote?.ok ? 'origin is not a GitHub repository' : (remote?.stderr || 'origin unavailable') }
@@ -339,22 +270,32 @@ function report(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
 }
 
-function writeBootstrapMarker(identity) {
-  const directory = join(identity.root, '.codex-local')
-  mkdirSync(directory, { recursive: true })
-  const packageJson = readFileSync(join(identity.root, 'package.json'), 'utf8')
-  const lock = readFileSync(join(identity.root, 'package-lock.json'), 'utf8')
-  writeFileSync(join(directory, 'bootstrap.json'), `${JSON.stringify({
-    schemaVersion: 1,
-    head: identity.head,
+function bootstrapFingerprint(identity, npm) {
+  return {
+    packageSha256: createHash('sha256').update(readFileSync(join(identity.root, 'package.json'), 'utf8')).digest('hex'),
+    lockSha256: createHash('sha256').update(readFileSync(join(identity.root, 'package-lock.json'), 'utf8')).digest('hex'),
     node: process.versions.node,
-    npmUserAgent: process.env.npm_config_user_agent || null,
-    packageSha256: createHash('sha256').update(packageJson).digest('hex'),
-    lockSha256: createHash('sha256').update(lock).digest('hex'),
+    npm,
     platform: process.platform,
     arch: process.arch,
+  }
+}
+
+function readBootstrapMarker(root) {
+  try { return JSON.parse(readFileSync(join(root, '.codex-local', 'bootstrap.json'), 'utf8')) } catch { return null }
+}
+
+function writeBootstrapMarker(identity, fingerprint) {
+  const directory = join(identity.root, '.codex-local')
+  mkdirSync(directory, { recursive: true })
+  const path = join(directory, 'bootstrap.json')
+  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`
+  writeFileSync(temporary, `${JSON.stringify({
+    schemaVersion: 2,
+    fingerprint,
     completedAt: new Date().toISOString(),
   }, null, 2)}\n`, 'utf8')
+  renameSync(temporary, path)
 }
 
 function publicIntegrationOperator(action, { refresh = true, expected = null } = {}) {
@@ -402,54 +343,25 @@ function npmVersion(root = process.cwd()) {
   return String(result.stdout || '').trim()
 }
 
-function heartbeat({ flags }) {
-  const raw = readFileSync(0, 'utf8').trim()
-  const input = raw ? JSON.parse(raw) : {}
-  const requestedCwd = input.worktree_path || input.worktreePath || input.cwd || process.cwd()
-  const identity = executeHeartbeatCriticalSection({
-    withLeaseLock: (action) => withRegistryLock(requestedCwd, action),
-    readIdentity: () => currentIdentity(requestedCwd),
-    writeLease: (liveIdentity) => {
-      const registry = loadRegistry(liveIdentity.root)
-      registry.leases[pathKey(liveIdentity.root)] = {
-        provider: flags.get('provider') || input.provider || 'codex',
-        ownerId: input.session_id || input.sessionId || null,
-        path: liveIdentity.root,
-        branch: liveIdentity.branch,
-        head: liveIdentity.head,
-        retention: input.retention || 'managed',
-        state: 'active',
-        lastSeenAt: new Date().toISOString(),
-      }
-      writeRegistry(registry, liveIdentity.root)
-    },
-  })
-  if (!flags.has('quiet')) report({ status: 'recorded', path: identity.root })
-}
-
 function doctor() {
   const root = git(['rev-parse', '--show-toplevel']).stdout
-  const refresh = refreshOriginMain(root, { required: false })
   const identity = currentIdentity(root)
   const nodeMajor = Number(process.versions.node.split('.')[0])
   const npm = npmVersion(identity.root)
   const runtime = assessRuntime({ nodeVersion: process.versions.node, npmVersion: npm })
   const modules = existsSync(join(identity.root, 'node_modules'))
-  const lifecycle = ownerState(identity.root, identity.root)
   const hooks = hooksState(identity.root)
   const agents = agentsState(identity.root)
   report({
-    status: refresh.ok && runtime.ready && modules && hooks.ready && agents.ready && !identity.dirty && identity.behind === 0 ? 'ready' : 'not_ready',
+    status: runtime.ready && modules && hooks.ready && agents.ready && !identity.dirty && identity.behind === 0 ? 'ready' : 'not_ready',
     identity,
     node: process.versions.node,
     nodeMajor,
     npm,
     runtime,
-    refresh: refresh.ok ? { ok: true } : { ok: false, error: refresh.stderr || refresh.stdout || 'git fetch failed' },
     nodeModulesPresent: modules,
     hooks,
     agents,
-    lifecycle,
   })
 }
 
@@ -458,12 +370,17 @@ function bootstrap(root = process.cwd()) {
   const identity = currentIdentity(root)
   if (!identity.branch.startsWith('codex/')) die('bootstrap requires an attached codex/* branch')
   if (identity.behind !== 0 || identity.dirty) die('bootstrap requires a clean worktree synchronized with origin/main')
-  const runtime = assessRuntime({ nodeVersion: process.versions.node, npmVersion: npmVersion(identity.root) })
-  if (!runtime.ready) die(`bootstrap requires Node 24 and npm 11; got Node ${process.versions.node}, npm ${npmVersion(identity.root) || '(unavailable)'}`)
+  const npm = npmVersion(identity.root)
+  const runtime = assessRuntime({ nodeVersion: process.versions.node, npmVersion: npm })
+  if (!runtime.ready) die(`bootstrap requires Node 24 and npm 11; got Node ${process.versions.node}, npm ${npm || '(unavailable)'}`)
   ensureHooksAndAgents(identity.root)
-  runNpmCi(identity.root)
-  writeBootstrapMarker(identity)
-  report({ status: 'bootstrapped', root: identity.root, head: identity.head })
+  const fingerprint = bootstrapFingerprint(identity, npm)
+  const decision = decideBootstrap({ fingerprint, marker: readBootstrapMarker(identity.root), nodeModulesPresent: existsSync(join(identity.root, 'node_modules')) })
+  if (decision.action === 'install') {
+    runNpmCi(identity.root)
+    writeBootstrapMarker(identity, fingerprint)
+  }
+  report({ status: 'ready', action: decision.action === 'skip' ? 'skipped' : 'installed', root: identity.root, head: identity.head, fingerprint })
 }
 
 function create({ flags }) {
@@ -482,7 +399,7 @@ function create({ flags }) {
 
   const refreshedOperator = publicIntegrationOperator('worktree:create', { refresh: true, expected: identity })
   let created
-  withRegistryLock(identity.root, () => {
+  withWorktreeOperationLock(identity.root, () => {
     const liveOperator = publicIntegrationOperator('worktree:create', { refresh: false, expected: refreshedOperator })
     verifyCreateTargetBoundary(targetBoundary, captureCreateTargetBoundary(plan.path))
     created = executePinnedWorktreeCreation({
@@ -503,27 +420,28 @@ function create({ flags }) {
 }
 
 function sync({ flags }) {
+  const legacy = ['prepare', 'apply', 'expected-head', 'expected-main', 'confirm-no-owner'].filter((flag) => flags.has(flag))
+  if (legacy.length) die(`legacy sync flags are not supported: ${legacy.map((flag) => `--${flag}`).join(', ')}`)
   refreshOriginMain(process.cwd())
   const identity = currentIdentity()
-  const owner = confirmNoOwner(ownerState(identity.root, identity.root), flags.has('confirm-no-owner'))
+  if (!identity.branch.startsWith('codex/')) die('sync requires an attached codex/* branch')
   const decision = decideSync({
-    activeOwner: owner.activeOwner,
-    ownerState: owner.ownerState,
     isDirty: identity.dirty,
+    hasOperation: hasGitOperation(identity.root),
     behind: identity.behind,
     ahead: identity.ahead,
-    detached: identity.branch === '(detached)',
+    main: identity.main,
   })
-  if (flags.has('prepare')) return report({ identity, decision })
-  if (!flags.has('apply')) die('sync requires --prepare or --apply --expected-head <sha> --expected-main <sha>')
-  if (flags.get('expected-head') !== identity.head || flags.get('expected-main') !== identity.main) die('sync expected head/main does not match live worktree')
-  if (decision.action === 'fast_forward') git(['merge', '--ff-only', 'origin/main'], { cwd: identity.root })
-  else if (decision.action === 'reset_detached') git(['checkout', '--detach', 'origin/main'], { cwd: identity.root })
-  else if (decision.action !== 'none') die(`sync requires manual resolution: ${decision.reason || decision.action}`)
+  if (decision.action === 'blocked') die(`sync is blocked: ${decision.reason}`)
+  if (decision.args) {
+    const live = currentIdentity(identity.root)
+    verifySyncSnapshot(identity, live, hasGitOperation(identity.root))
+    git(decision.args, { cwd: identity.root })
+  }
   report({ status: 'synchronized', action: decision.action, identity: currentIdentity() })
 }
 
-function retirementProbe(path, { hasOwnerConfirmation = false, mainSha, prInventory, operator } = {}) {
+function retirementProbe(path, { mainSha, prInventory, operator } = {}) {
   assertRetirementTargetBoundary(path, operator)
   const evidence = collectPinnedRetirementEvidence({
     mainSha,
@@ -532,15 +450,10 @@ function retirementProbe(path, { hasOwnerConfirmation = false, mainSha, prInvent
     readHeadInMain: (pinnedHead, pinnedMain) => isHeadInMain(path, pinnedHead, pinnedMain),
   })
   const identity = evidence.identity
-  const owner = hasOwnerConfirmation
-    ? confirmNoOwner(ownerState(identity.root, identity.root), true)
-    : ownerState(identity.root, identity.root)
   const pr = openPrForIdentity(identity, prInventory)
   const decision = classifyWorktreeRetirement({
     kind: 'worktree',
     branch: identity.branch,
-    ownerState: owner.ownerState,
-    activeOwner: owner.activeOwner,
     hasOperation: hasGitOperation(identity.root),
     isDirty: identity.dirty,
     openPr: pr,
@@ -548,102 +461,52 @@ function retirementProbe(path, { hasOwnerConfirmation = false, mainSha, prInvent
     headInMain: evidence.headInMain,
     pathIsReparsePoint: isReparsePoint(identity.root),
   })
-  return { identity, owner, pr, decision }
+  return { identity, pr, decision }
 }
 
 function retire({ flags, positionals }) {
-  if (flags.has('delete-merged-local-branch')) {
-    die('worktree:retire --delete-merged-local-branch is disabled; local branches are always retained')
-  }
+  const legacy = ['prepare', 'apply', 'confirm-no-owner', 'delete-merged-local-branch'].filter((flag) => flags.has(flag))
+  if (legacy.length) die(`legacy retire flags are not supported: ${legacy.map((flag) => `--${flag}`).join(', ')}`)
+  const targetPath = positionals[1]
+  if (!targetPath) die('worktree:retire requires a worktree path')
   const operator = publicIntegrationOperator('worktree:retire')
-  if (flags.has('prepare')) {
-    const path = flags.get('prepare') === true ? positionals[1] : flags.get('prepare')
-    if (!path) die('retire --prepare requires a worktree path')
-    assertRetirementTargetBoundary(path, operator)
-    const prInventory = openPullRequestInventory(operator.root, { repository: 'happyhome-project/happyHome_public' })
-    const probe = retirementProbe(path, {
-      hasOwnerConfirmation: flags.has('confirm-no-owner'),
-      mainSha: operator.main,
-      prInventory,
-      operator,
-    })
-    if (!probe.decision.eligible) return report({ status: 'blocked', ...probe })
-    const manifest = createRetirementManifest({
-      ...probe.identity,
-      path: probe.identity.root,
-      provider: probe.owner.lease?.provider || 'manual',
-      confirmNoOwner: flags.has('confirm-no-owner'),
-    })
-    const directory = join(registryDir(operator.root), 'retire')
-    mkdirSync(directory, { recursive: true })
-    const file = join(directory, `${new Date().toISOString().replace(/[:.]/g, '-')}-${basename(probe.identity.root)}.json`)
-    withRegistryLock(operator.root, () => {
-      const liveOperator = publicIntegrationOperator('worktree:retire', { refresh: false, expected: operator })
-      assertRetirementTargetBoundary(path, liveOperator)
-      const records = loadRetirementRecords(operator.root)
-      const record = createRetirementRecord({ manifest, manifestPath: file })
-      if (records.records[manifest.manifestId]) die(`retirement manifest id already exists: ${manifest.manifestId}`)
-      writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
-      records.records[manifest.manifestId] = record
-      writeRetirementRecords(records, operator.root)
-    })
-    return report({ status: 'prepared', manifestPath: file, manifest })
-  }
-
-  if (!flags.has('apply')) die('retire requires --prepare <path> or --apply <manifest>')
-  const manifestPath = resolve(String(flags.get('apply')))
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
-  const managedDirectory = join(registryDir(operator.root), 'retire')
-  const refreshedOperator = publicIntegrationOperator('worktree:retire', { refresh: true, expected: operator })
-  assertRetirementTargetBoundary(manifest.path, refreshedOperator)
-  const prInventory = openPullRequestInventory(refreshedOperator.root, { repository: 'happyhome-project/happyHome_public' })
-  executeRetirementCriticalSection({
-    withLeaseLock: (action) => withRegistryLock(operator.root, action),
+  assertRetirementTargetBoundary(targetPath, operator)
+  const prInventory = openPullRequestInventory(operator.root, { repository: 'happyhome-project/happyHome_public' })
+  if (!prInventory.pulls) die(`retirement is blocked: open PR inventory unavailable: ${prInventory.error}`)
+  executeWorktreeMutation({
+    withOperationLock: (action) => withWorktreeOperationLock(operator.root, action),
     probe: () => {
-      const liveOperator = publicIntegrationOperator('worktree:retire', { refresh: false, expected: refreshedOperator })
-      assertRetirementTargetBoundary(manifest.path, liveOperator)
-      const records = loadRetirementRecords(operator.root)
-      const record = records.records[manifest.manifestId]
-      const verification = { manifestPath, managedDirectory, record }
-      const liveProbe = retirementProbe(manifest.path, {
-        hasOwnerConfirmation: manifest.confirmNoOwner,
+      const liveOperator = publicIntegrationOperator('worktree:retire', { refresh: false, expected: operator })
+      assertRetirementTargetBoundary(targetPath, liveOperator)
+      return retirementProbe(targetPath, {
         mainSha: liveOperator.main,
         prInventory,
         operator: liveOperator,
       })
-      verifyRetirementManifest(manifest, { ...liveProbe.identity, path: liveProbe.identity.root }, verification)
-      return { liveProbe, record, records }
     },
-    verify: ({ liveProbe }) => {
+    verify: (liveProbe) => {
       if (!liveProbe.decision.eligible) die(`retirement is blocked: ${liveProbe.decision.reasons.join(', ')}`)
     },
-    remove: ({ record, records }) => {
-      const finalOperator = publicIntegrationOperator('worktree:retire', { refresh: false, expected: refreshedOperator })
-      assertRetirementTargetBoundary(manifest.path, finalOperator)
-      const finalProbe = retirementProbe(manifest.path, {
-        hasOwnerConfirmation: manifest.confirmNoOwner,
+    remove: () => {
+      const finalOperator = publicIntegrationOperator('worktree:retire', { refresh: false, expected: operator })
+      assertRetirementTargetBoundary(targetPath, finalOperator)
+      const finalProbe = retirementProbe(targetPath, {
         mainSha: finalOperator.main,
         prInventory,
         operator: finalOperator,
       })
-      verifyRetirementManifest(manifest, { ...finalProbe.identity, path: finalProbe.identity.root }, {
-        manifestPath,
-        managedDirectory,
-        record,
-      })
       if (!finalProbe.decision.eligible) die(`retirement is blocked at final remove: ${finalProbe.decision.reasons.join(', ')}`)
-      git(['worktree', 'remove', manifest.path])
-      record.consumedAt = new Date().toISOString()
-      writeRetirementRecords(records, operator.root)
+      git(['worktree', 'remove', targetPath])
     },
   })
-  report({ status: 'retired', path: manifest.path, branch: manifest.branch })
+  report({ status: 'retired', path: targetPath })
 }
 
-function status() {
-  const refreshed = refreshOriginMain(process.cwd(), { required: false })
+function status({ flags }) {
+  const fresh = flags.has('fresh')
+  const refreshed = fresh ? refreshOriginMain(process.cwd(), { required: false }) : { ok: true }
   const output = git(['worktree', 'list', '--porcelain']).stdout
-  const prInventory = openPullRequestInventory(process.cwd())
+  const prInventory = fresh && refreshed.ok ? openPullRequestInventory(process.cwd()) : { pulls: null, error: 'not_evaluated' }
   const blocks = output.split(/\n\n/).filter(Boolean)
   const entries = blocks.map((block) => {
     const lines = block.split(/\r?\n/)
@@ -662,18 +525,15 @@ function status() {
     }
     try {
       const identity = currentIdentity(path)
-      const lifecycle = ownerState(path)
-      const pr = openPrForIdentity(identity, prInventory)
+      const pr = fresh && refreshed.ok ? openPrForIdentity(identity, prInventory) : { known: false, open: null, error: 'not_evaluated' }
       const retirement = classifyWorktreeRetirement({
         kind,
         branch: identity.branch,
-        ownerState: lifecycle.ownerState,
-        activeOwner: lifecycle.activeOwner,
         hasOperation: hasGitOperation(identity.root),
         isDirty: identity.dirty,
         openPr: pr,
-        uniqueCommits: refreshed.ok ? uniqueCommitCount(identity.root) : null,
-        headInMain: refreshed.ok ? isHeadInMain(identity.root) : null,
+        uniqueCommits: fresh && refreshed.ok ? uniqueCommitCount(identity.root) : null,
+        headInMain: fresh && refreshed.ok ? isHeadInMain(identity.root) : null,
         pathIsReparsePoint: isReparsePoint(identity.root),
       })
       return {
@@ -683,7 +543,6 @@ function status() {
         branch,
         identity,
         ...safeMetadata(path),
-        lifecycle,
         retirement,
       }
     } catch (error) {
@@ -699,13 +558,16 @@ function status() {
     }
   })
   report({
-    status: refreshed.ok ? 'fresh' : 'stale',
-    refresh: refreshed.ok
+    status: fresh ? (refreshed.ok && prInventory.pulls !== null ? 'fresh' : 'stale') : 'local',
+    refresh: !fresh ? { status: 'not_evaluated' } : refreshed.ok
       ? { ok: true }
       : { ok: false, error: refreshed.stderr || refreshed.stdout || 'git fetch failed' },
     entries,
+    pullRequests: !fresh ? { status: 'not_evaluated' } : prInventory.pulls !== null
+      ? { ok: true, count: prInventory.pulls.length }
+      : { ok: false, error: prInventory.error || 'open PR inventory unavailable' },
   })
-  if (!refreshed.ok) process.exitCode = 1
+  if (fresh && (!refreshed.ok || prInventory.pulls === null)) process.exitCode = 1
 }
 
 const { flags, positionals } = parseFlags(process.argv.slice(2))
@@ -715,11 +577,10 @@ try {
   if (command === 'create') create({ flags })
   else if (command === 'doctor') doctor()
   else if (command === 'bootstrap') bootstrap()
-  else if (command === 'heartbeat') heartbeat({ flags })
-  else if (command === 'status') status()
+  else if (command === 'status') status({ flags })
   else if (command === 'sync-main') sync({ flags })
   else if (command === 'retire') retire({ flags, positionals })
-  else die('Usage: worktree.mjs <create|doctor|bootstrap|heartbeat|status|sync-main|retire>')
+  else die('Usage: worktree.mjs <create|doctor|bootstrap|status|sync-main|retire>')
 } catch (error) {
   console.error(`[worktree] ${error?.message || error}`)
   process.exitCode = 1
