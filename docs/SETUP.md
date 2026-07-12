@@ -82,6 +82,30 @@ npm.cmd run worktree:status
 
 退役只移除 worktree，始终保留它原来的本地功能分支，便于对应 branch owner 自行核对并推送。`--delete-merged-local-branch` 已禁用并会直接拒绝；工具中不存在触碰私有仓库路径的 branch deletion 路径。
 
+### 功能 PR 与 Merge Queue 协作
+
+PR 前先在原功能 worktree 确认工作区 clean，再同步一次主干并验证修改：
+
+```bash
+git status --short --branch
+git fetch origin main
+git merge origin/main          # 仅当当前分支尚未包含最新 origin/main
+# 运行受影响范围测试
+git push origin HEAD           # 普通 push
+```
+
+同步与修复不得自动 stash 或 rebase，不得 force-push，也不得合并其他功能分支。冲突只能在原功能 worktree 解决。PR 创建后，功能 AI 轮询 PR exact HEAD 的 checks、review 和 comments；push 新提交后旧检查结果作废。功能 AI 必须持续负责到 GitHub 终态 `MERGED` 或 `CLOSED`，不能在 `merge-ready` 或进入队列时结束。
+
+`merge-ready` 的完整含义是：PR 为 open、非 draft；exact HEAD 的全部必需 PR CI 成功，没有失败、排队、取消或缺失检查；没有未处理的 review/change request；GitHub 未报告文本冲突。多个 `merge-ready` PR 可以正常进入 Merge Queue。PR 创建后不要求功能分支持续追逐或同步前进的 main；GitHub 会用 `merge_group` CI 验证最新 main 与前序队列变更的组合。
+
+若 `merge_group` 失败或 PR 被踢出队列，修复责任返回原功能 AI 和原 worktree。协调者只有在 GitHub 返回真实 `MERGED` 且对应 `merge_group` 成功后才能报告 merged，然后在 clean、同步的 public main 执行：
+
+```bash
+git pull --ff-only origin main
+```
+
+当前 public 协作禁用 `integrate:pr`，因为该命令仍绑定私有 canonical 边界；公开仓库统一使用 GitHub Merge Queue。此协调流程不触发 release 或 deploy，也不改变私有生产发布边界。
+
 ### 2. 配置小程序
 
 - 确保 `miniprogram/src/manifest.json` 中 `appid` 为 `wx673b17363cd6b4a6`

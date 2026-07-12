@@ -36,10 +36,13 @@
 ### PR 流程
 
 1. 功能任务开始和交付前都必须确认并报告 `cwd`、branch、HEAD 和工作区状态。
-2. 发起 PR 前必须将最新 `origin/main` 同步到功能分支，解决文本与语义冲突，并重新运行受影响范围的测试。
+2. PR 前必须确认功能 worktree 工作区 clean，执行 `git fetch origin main`；若当前分支尚未包含最新 `origin/main`，只能在原功能 worktree 执行 `git merge origin/main`，解决文本与语义冲突后重新运行受影响范围的测试。
 3. 功能代码必须先提交并推送到远端功能分支，再通过 PR 进入 `main`；禁止把未提交文件当成交接手段。
 4. PR 必须准确记录修改范围、测试证据、部署目标、环境变量、数据迁移/索引任务、验收步骤和已知风险。
-5. 功能分支之间不得互相合并。存在依赖时，先将前置功能合入 `main`，后续功能再同步新的 `main`。
+5. 同步与修复不得自动 stash 或 rebase，不得 force-push，也不得合并其他功能分支。存在依赖时，先将前置功能合入 `main`，后续功能再同步新的 `main`。
+6. PR 创建后，功能 AI 必须轮询该 PR exact HEAD 对应的 checks、review 与 comments；每次普通 push 后旧结果作废，改为跟踪新的 exact HEAD。功能 AI 对该 PR 负责到 GitHub 终态 `MERGED` 或 `CLOSED`，不得在 `merge-ready` 或入队后提前结束。
+7. `merge-ready` 仅表示 PR 为 open、非 draft，exact HEAD 的全部必需 PR CI 成功且无失败、排队、取消或缺失检查，没有未处理的 review/change request，并且 GitHub 未报告文本冲突。
+8. PR 创建后不要求功能分支持续追逐或同步前进的 `main`；组合后的最新主干由 Merge Queue 的 `merge_group` CI 验证。
 
 ### CI 门禁
 
@@ -52,11 +55,13 @@
 - workflow 授权在 PR push/rebase、`origin/main` 前进、changed paths/binary diff、validator run/attestation 任一变化后立即失效，必须重新 prepare。候选 PR 自身 CI 只能作为补充证据，不能替代 validator attestation。
 - `.github/workflows/trusted-workflow-validator.yml`、integration CLI/policy、package script 或本节信任规则均属 trust root，不能通过候选 workflow PR 自我验证；这类变更必须走独立的信任根引导审查。
 
-### 串行合并
+### Merge Queue 协调
 
-- 主干集成任务一次只能处理一个 PR。
 - 所有公开仓库 PR 必须加入 Merge Queue；不得绕过队列直接调用 merge API。
-- 合并一个 PR 后，下一个 PR 必须重新同步最新 `main` 并重新通过 PR CI，才能继续合并。
+- 多个 `merge-ready` PR 允许正常进入 Merge Queue，由 GitHub 管理顺序，并对受前序合并影响的队列组合重新运行 `merge_group` CI。
+- `merge_group` 失败或 PR 被踢出队列时，修复责任返回原功能 AI 和原 worktree；不得在协调 worktree 修改功能代码。
+- 协调者只有在 GitHub 报告真实 `MERGED` 且对应 `merge_group` 检查成功后才能报告 merged；随后仅在 clean、同步的 public main 执行 `git pull --ff-only origin main`。
+- Public 协作暂时禁用当前 `integrate:pr`，因为该命令仍绑定私有 canonical 边界；统一使用 GitHub Merge Queue，此 public 协调流程不触发 release 或 deploy。
 - 合并前必须检查分支确有独有提交；无独有提交时按 no-op 结束，不重复测试、部署或发布。
 - `implemented`、`tested`、`committed`、`pushed`、`PR CI passed`、`merged`、`deployed`、`production verified` 是不同状态，任务只能报告已有证据支持的最高状态。
 

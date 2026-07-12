@@ -596,3 +596,24 @@ test('nightly authentication separates admin sessions from the HTTP gateway capa
   assert.match(packageManifest.scripts['test:governance'], /nightly-notification-policy\.test\.mjs/)
   assert.match(packageManifest.scripts['test:governance'], /notify-wecom\.test\.mjs/)
 })
+
+test('agent guidance defines the feature PR feedback loop and Merge Queue handoff', () => {
+  const agents = readFileSync(new URL('../../AGENTS.md', import.meta.url), 'utf8')
+  const setup = readFileSync(new URL('../../docs/SETUP.md', import.meta.url), 'utf8')
+
+  for (const [path, source] of [['AGENTS.md', agents], ['docs/SETUP.md', setup]]) {
+    assert.match(source, /PR 前[\s\S]*工作区 clean[\s\S]*git fetch origin main[\s\S]*git merge origin\/main/, path)
+    assert.match(source, /不得[\s\S]*(?:stash|rebase)[\s\S]*(?:force-push|force push)[\s\S]*其他功能分支/, path)
+    assert.match(source, /exact HEAD[\s\S]*checks[\s\S]*review[\s\S]*comments/, path)
+    assert.match(source, /MERGED[\s\S]*CLOSED/, path)
+    assert.match(source, /merge-ready[\s\S]*open[\s\S]*非 draft[\s\S]*必需[^\n]*CI[\s\S]*review[\s\S]*文本冲突/, path)
+    assert.match(source, /多个[^\n]*merge-ready[^\n]*Merge Queue/, path)
+    assert.match(source, /PR 创建后[^\n]*(?:不要求|无需)[^\n]*持续[^\n]*(?:追逐|同步)[^\n]*main/, path)
+    assert.match(source, /merge_group[^\n]*(?:失败|被踢出)[\s\S]*原[^\n]*worktree/, path)
+    assert.match(source, /GitHub[^\n]*MERGED[\s\S]*merge_group[^\n]*成功[\s\S]*git pull --ff-only origin main/, path)
+    assert.match(source, /^(?=[^\n]*public)(?=[^\n]*integrate:pr)(?=[^\n]*(?:禁用|不使用)).+$/im, path)
+    assert.match(source, /不触发[^\n]*(?:release|deploy)[^\n]*(?:release|deploy)/i, path)
+  }
+
+  assert.doesNotMatch(agents, /合并一个 PR 后，下一个 PR 必须重新同步最新 `main`/)
+})
