@@ -121,6 +121,15 @@ test('formal release git state accepts an explicit full-current release from syn
   assert.doesNotThrow(() => releasePolicyModule.assertFormalReleaseGitState(validPublicReleaseState()))
 })
 
+test('formal release git state treats Windows slash styles as the same canonical workspace', () => {
+  assert.doesNotThrow(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(), cwd: 'C:/Project/Claude/happyHome_public',
+  }))
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(), cwd: 'C:/Project/Claude/happyHome_public_other',
+  }), /canonical main workspace/i)
+})
+
 test('formal release git state rejects private cwd, wrong origin, feature, dirty, stale, and implicit full-current sources', () => {
   assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
     ...validPublicReleaseState(), cwd: 'C:\\Project\\Claude\\happyHome',

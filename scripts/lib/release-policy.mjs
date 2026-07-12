@@ -18,7 +18,7 @@ function normalizeWorkspacePath(value) {
   const normalized = String(value || '')
     .trim()
     .replace(/^\\\\\\?\\/, '')
-    .replace(/\\\\/g, '/')
+    .replace(/\\/g, '/')
     .replace(/\/+$/, '')
   return /^[a-z]:\//i.test(normalized) ? normalized.toLowerCase() : normalized
 }
