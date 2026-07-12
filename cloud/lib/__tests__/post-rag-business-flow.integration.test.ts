@@ -2,11 +2,13 @@ import * as db from '../db'
 import { buildPostRagSourceProjection } from '../post-rag-indexing'
 import { processClaimedPostRagJob } from '../post-rag-job-processor'
 import { claimPostRagJob, completePostRagJob, failPostRagJob, getPostRagJob, renewPostRagJobLease } from '../post-rag-jobs'
-import { appendPostRagOutboxEvent, POST_RAG_OUTBOX } from '../post-rag-outbox'
+import { POST_RAG_OUTBOX } from '../post-rag-outbox'
 import { claimPostRagOutboxEvent, materializeClaimedPostRagOutboxEvent } from '../post-rag-outbox-materializer'
+import { handleCreate, handleDelete } from '../../functions/post/index'
+import { approvePostAudit } from '../content-audit'
 
 const local = db as typeof db & { _resetAll(): void }
-const NOW = '2026-07-12T06:00:00.000Z'
+const NOW = '2099-07-12T06:00:00.000Z'
 
 beforeEach(() => local._resetAll())
 
@@ -26,27 +28,26 @@ async function processOutbox(outboxId: string, sink: any) {
   })
 }
 
-test('business mutation flows through outbox and v2 job to active, then delete to removed', async () => {
+test('real public post and audit handlers flow through outbox to active, then delete to removed', async () => {
+  await db.create('communities', { _id: 'community-1', status: 'active' })
+  await db.create('community_members', { _id: 'member-1', communityId: 'community-1', userId: 'user-1', role: 'member', status: 'active' })
   await db.create('sections', { _id: 'section-1', communityId: 'community-1', name: '家风', status: 'active', widgets: [{ widgetId: 'body', fieldKey: 'body', label: '正文', type: 'short_text', visibility: 'public', order: 0 }] })
-  const created = await db.runTransaction(async transaction => {
-    await transaction.collection('posts').doc('post-1').set({ data: { communityId: 'community-1', sectionId: 'section-1', authorId: 'user-1', status: 'active', auditStatus: 'pass', content: { body: '一粥一饭，当思来处不易' }, commentCount: 0, likeCount: 0, createdAt: NOW, updatedAt: NOW } })
-    return appendPostRagOutboxEvent(transaction, { communityId: 'community-1', aggregateId: 'post-1', reasonCode: 'post.created', now: NOW })
-  })
+  const createdPost = await handleCreate({ communityId: 'community-1', sectionId: 'section-1', content: { body: '一粥一饭，当思来处不易' } }, 'user-1')
+  await approvePostAudit(createdPost.postId)
+  const createdEvents = await db.query(POST_RAG_OUTBOX, { aggregateId: createdPost.postId, reasonCode: 'post.audit_changed' }, { orderBy: ['contentVersion', 'desc'], limit: 1 })
   const calls: string[] = []
   const sink = {
     stageUpsert: async () => { calls.push('stage') },
-    inspectStaged: async () => ({ chunkCount: 1, chunkChecksum: buildPostRagSourceProjection(await db.getById('posts', 'post-1') as any, await db.getById('sections', 'section-1') as any).chunkChecksum }),
+    inspectStaged: async () => ({ chunkCount: 1, chunkChecksum: buildPostRagSourceProjection(await db.getById('posts', createdPost.postId) as any, await db.getById('sections', 'section-1') as any).chunkChecksum }),
     activate: async () => { calls.push('active'); return { activated: true } },
     cleanupOldVersions: async () => undefined,
     remove: async () => { calls.push('removed'); return { removed: true } },
   }
-  await expect(processOutbox(created.outboxId, sink)).resolves.toMatchObject({ status: 'completed', outcome: 'indexed' })
+  await expect(processOutbox((createdEvents[0] as any)._id, sink)).resolves.toMatchObject({ status: 'completed', outcome: 'indexed' })
 
-  const deleted = await db.runTransaction(async transaction => {
-    await transaction.collection('posts').doc('post-1').update({ data: { status: 'deleted' } })
-    return appendPostRagOutboxEvent(transaction, { communityId: 'community-1', aggregateId: 'post-1', reasonCode: 'post.deleted', now: '2026-07-12T06:00:01.000Z' })
-  })
-  await expect(processOutbox(deleted.outboxId, sink)).resolves.toMatchObject({ status: 'completed', outcome: 'removed' })
+  await handleDelete({ postId: createdPost.postId }, 'user-1')
+  const deletedEvents = await db.query(POST_RAG_OUTBOX, { aggregateId: createdPost.postId, reasonCode: 'post.deleted' }, { limit: 1 })
+  await expect(processOutbox((deletedEvents[0] as any)._id, sink)).resolves.toMatchObject({ status: 'completed', outcome: 'removed' })
   expect(calls).toEqual(['stage', 'active', 'removed'])
-  expect(await db.query(POST_RAG_OUTBOX, {}, { limit: 10 })).toHaveLength(2)
+  expect((await db.query(POST_RAG_OUTBOX, {}, { limit: 10 })).length).toBeGreaterThanOrEqual(3)
 })

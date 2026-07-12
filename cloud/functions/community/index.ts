@@ -4,6 +4,7 @@ import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
 import { assertSuperAdmin } from '../../lib/auth'
 import { notifyCommunityCreatePending } from '../../lib/approval-notifications'
+import { appendPostRagOutboxEvent } from '../../lib/post-rag-outbox'
 import type { Community } from '../../shared/types'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
@@ -110,14 +111,20 @@ export async function handleCreate(
 export async function handleApprove(params: { communityId: string }, openid: string) {
   if (!openid) throw new Error('Missing OPENID')
   await assertSuperAdmin(openid)
-  await db.updateById('communities', params.communityId, { status: 'active' })
+  await db.runTransaction(async transaction => {
+    await transaction.collection('communities').doc(params.communityId).update({ data: { status: 'active' } })
+    await appendPostRagOutboxEvent(transaction, { communityId: params.communityId, aggregateId: params.communityId, reasonCode: 'community.status_changed' })
+  })
   return { success: true }
 }
 
 export async function handleReject(params: { communityId: string }, openid: string) {
   if (!openid) throw new Error('Missing OPENID')
   await assertSuperAdmin(openid)
-  await db.updateById('communities', params.communityId, { status: 'rejected' })
+  await db.runTransaction(async transaction => {
+    await transaction.collection('communities').doc(params.communityId).update({ data: { status: 'rejected' } })
+    await appendPostRagOutboxEvent(transaction, { communityId: params.communityId, aggregateId: params.communityId, reasonCode: 'community.status_changed' })
+  })
   return { success: true }
 }
 
