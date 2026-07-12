@@ -3,9 +3,12 @@ import http from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 
+const MAX_RESPONSE_BYTES = 64 * 1024
+
 function postJson(urlString, body, timeoutMs) {
   return new Promise((resolve, reject) => {
     const fail = () => reject(new Error('WeCom webhook request failed'))
+    const invalidResponse = () => reject(new Error('WeCom webhook response invalid'))
     let url
     try {
       url = new URL(urlString)
@@ -30,13 +33,36 @@ function postJson(urlString, body, timeoutMs) {
         },
         (res) => {
           const statusCode = res.statusCode || 0
-          res.once('end', () => resolve({ statusCode }))
+          const contentLengthHeader = res.headers['content-length']
+          if (contentLengthHeader !== undefined) {
+            const contentLength = Number(contentLengthHeader)
+            if (!Number.isSafeInteger(contentLength) || contentLength < 0 || contentLength > MAX_RESPONSE_BYTES) {
+              invalidResponse()
+              res.destroy()
+              return
+            }
+          }
+
+          const chunks = []
+          let responseBytes = 0
+          res.on('data', (chunk) => {
+            responseBytes += chunk.length
+            if (responseBytes > MAX_RESPONSE_BYTES) {
+              invalidResponse()
+              res.destroy()
+              return
+            }
+            chunks.push(chunk)
+          })
+          res.once('end', () => resolve({
+            statusCode,
+            body: Buffer.concat(chunks, responseBytes).toString('utf8'),
+          }))
           res.once('aborted', fail)
           res.once('error', fail)
           res.once('close', () => {
             if (!res.complete) fail()
           })
-          res.resume()
         }
       )
     } catch {
@@ -105,6 +131,21 @@ export async function sendWeComNotification({ webhook, summary, env = {}, timeou
 
   if (res.statusCode < 200 || res.statusCode >= 300) {
     throw new Error(`WeCom webhook failed with status ${res.statusCode}`)
+  }
+
+  let responseBody
+  try {
+    responseBody = JSON.parse(res.body)
+  } catch {
+    throw new Error('WeCom webhook response invalid')
+  }
+  if (
+    responseBody === null
+    || typeof responseBody !== 'object'
+    || Array.isArray(responseBody)
+    || Number(responseBody.errcode) !== 0
+  ) {
+    throw new Error('WeCom webhook response invalid')
   }
 
   return { status: 'sent' }

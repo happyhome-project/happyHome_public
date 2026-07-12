@@ -47,8 +47,8 @@ test('sends the summary to a successful webhook', async () => {
     req.on('data', (chunk) => { raw += chunk })
     req.on('end', () => {
       received = JSON.parse(raw)
-      res.writeHead(204)
-      res.end()
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ errcode: 0, errmsg: 'ok' }))
     })
   }, (webhook) => sendWeComNotification({ webhook, summary, env: {} }))
 
@@ -59,8 +59,8 @@ test('sends the summary to a successful webhook', async () => {
 
 test('uses an empty environment when env is omitted', async () => {
   const result = await withServer((_req, res) => {
-    res.writeHead(204)
-    res.end()
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ errcode: 0, errmsg: 'ok' }))
   }, (webhook) => sendWeComNotification({ webhook, summary }))
 
   assert.deepEqual(result, { status: 'sent' })
@@ -78,6 +78,71 @@ test('does not leak a failed webhook response body', async () => {
         assert.doesNotMatch(error.message, /sensitive upstream response/)
         return true
       }
+    )
+  })
+})
+
+test('rejects a successful HTTP response with a nonzero errcode', async () => {
+  await withServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ errcode: 40001, errmsg: 'sensitive token detail' }))
+  }, async (webhook) => {
+    await assert.rejects(
+      sendWeComNotification({ webhook, summary }),
+      { message: 'WeCom webhook response invalid' }
+    )
+  })
+})
+
+test('rejects malformed JSON in a successful HTTP response', async () => {
+  await withServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end('{not-json sensitive-token')
+  }, async (webhook) => {
+    await assert.rejects(
+      sendWeComNotification({ webhook, summary }),
+      { message: 'WeCom webhook response invalid' }
+    )
+  })
+})
+
+test('rejects an empty successful HTTP response', async () => {
+  await withServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end()
+  }, async (webhook) => {
+    await assert.rejects(
+      sendWeComNotification({ webhook, summary }),
+      { message: 'WeCom webhook response invalid' }
+    )
+  })
+})
+
+test('rejects an oversized response declared by content-length', async () => {
+  const oversizedBody = 'x'.repeat(65_537)
+  await withServer((_req, res) => {
+    res.writeHead(200, {
+      'content-type': 'application/json',
+      'content-length': Buffer.byteLength(oversizedBody),
+    })
+    res.end(oversizedBody)
+  }, async (webhook) => {
+    await assert.rejects(
+      sendWeComNotification({ webhook, summary }),
+      { message: 'WeCom webhook response invalid' }
+    )
+  })
+})
+
+test('rejects an oversized chunked response while streaming', async () => {
+  await withServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.write('x'.repeat(32_768))
+    res.end('x'.repeat(32_769))
+  }, async (webhook) => {
+    await assert.rejects(
+      sendWeComNotification({ webhook, summary }),
+      { message: 'WeCom webhook response invalid' }
     )
   })
 })
