@@ -98,6 +98,9 @@ test('release cloud smoke ensures required database collections before invoking 
   assert.match(ensureIndexesScript, /admin_notification_subscriptions/)
   assert.match(ensureIndexesScript, /admin_notifications/)
   assert.match(ensureIndexesScript, /rag_community_versions/)
+  for (const collection of ['post_rag_outbox', 'post_rag_index_state_v2', 'post_rag_index_versions', 'post_rag_worker_timer_evidence']) {
+    assert.match(ensureIndexesScript, new RegExp(collection))
+  }
   assert.match(runCloudSmokeBody, /ensure:indexes/)
   assert(runCloudSmokeBody.indexOf('ensure:indexes') < runCloudSmokeBody.indexOf('runCloudReleaseSmoke'))
 })
