@@ -40,9 +40,12 @@ test('local HTTP hybrid ES candidates become current posts while stale and delet
     })
     const service = createPostSemanticSearchService({ database, requestJson, embedTexts: async () => [[0.2, 0.4]], indexName: 'rag-index', vectorField: 'embedding', embeddingModel: 'bge-base-zh-v1.5' })
     const result = await service.search({ communityId: 'c1', query: '勤俭持家', includeMemberOnly: false })
-    expect(requests).toHaveLength(1)
+    expect(requests).toHaveLength(2)
     // This local boundary proves the payload shape; release still requires an isolated real Tencent ES smoke.
-    expect(requests[0]).toMatchObject({ knn: { query_vector: [0.2, 0.4] }, rank: { rrf: { rank_window_size: 40, rank_constant: 60 } } })
+    expect(requests[0]).toMatchObject({ query: { bool: { must: [expect.objectContaining({ multi_match: expect.any(Object) })] } } })
+    expect(requests[1]).toMatchObject({ query: { script_score: { script: { params: { query_vector: [0.2, 0.4] } } } } })
+    expect(JSON.stringify(requests)).not.toContain('"knn"')
+    expect(JSON.stringify(requests)).not.toContain('"rank"')
     expect(result.items).toEqual([expect.objectContaining({ postId: 'current', title: '一粥一饭' })])
   } finally {
     await new Promise<void>(resolve => server.close(() => resolve()))

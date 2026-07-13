@@ -25,6 +25,7 @@ import {
   readPostRagReleaseProbeStatus,
 } from '../../../cloud/lib/post-rag-release-probe'
 import { createPostRagV2RuntimeFromEnv } from '../../../cloud/lib/post-rag-v2-runtime'
+import { createPostSemanticSearchServiceFromEnv } from '../../../cloud/lib/post-semantic-search'
 import { assertPostRagWorkerAuthorized } from '../../../cloud/lib/rag-worker-auth'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
@@ -50,6 +51,8 @@ type Probe = {
 
 type HandlerDependencies = {
   diagnoseEs(): Promise<{ statusClass: string }>
+  diagnoseSearchDsl(): Promise<{ probes: Array<{ name: string; statusClass: string; errorType: string | null }> }>
+  searchProbe(probe: Probe): Promise<any>
   create(input: { runId: string; communityId: string }): Promise<any>
   status(input: any): Promise<any>
   cleanup(input: any): Promise<any>
@@ -138,6 +141,11 @@ function assertJobBinding(job: any, jobId: string, probe: Probe) {
 }
 
 const defaultDependencies: HandlerDependencies = {
+  async searchProbe(probe) {
+    return createPostSemanticSearchServiceFromEnv().search({
+      communityId: probe.communityId, query: `probe-${probe.runId}`, includeMemberOnly: false, limit: 5,
+    })
+  },
   async diagnoseEs() {
     const endpoint = new URL(String(process.env.TENCENT_RAG_ES_ENDPOINT || ''))
     const indexName = String(process.env.TENCENT_RAG_INDEX_NAME || '')
@@ -151,6 +159,49 @@ const defaultDependencies: HandlerDependencies = {
       req.once('error', () => fail('network'))
       req.end()
     })
+  },
+  async diagnoseSearchDsl() {
+    const endpoint = new URL(String(process.env.TENCENT_RAG_ES_ENDPOINT || ''))
+    const indexName = String(process.env.TENCENT_RAG_INDEX_NAME || '')
+    const vectorField = String(process.env.TENCENT_RAG_VECTOR_FIELD || 'embedding')
+    const authorization = `Basic ${Buffer.from(`${process.env.TENCENT_RAG_ES_USERNAME || ''}:${process.env.TENCENT_RAG_ES_PASSWORD || ''}`).toString('base64')}`
+    const vector = [1, ...Array.from({ length: 767 }, () => 0)]
+    const query = { match_all: {} }
+    const knn = { field: vectorField, query_vector: vector, k: 1, num_candidates: 10 }
+    const request = (body: any) => new Promise<{ statusClass: string; errorType: string | null }>(resolve => {
+      const payload = Buffer.from(JSON.stringify(body))
+      const req = https.request(new URL(`${indexName}/_search`, `${endpoint.toString().replace(/\/+$/, '')}/`), {
+        method: 'POST', headers: { Authorization: authorization, 'Content-Type': 'application/json', 'Content-Length': payload.length }, timeout: 10_000,
+      }, res => {
+        const chunks: Buffer[] = []; let size = 0
+        res.on('data', chunk => { size += chunk.length; if (size <= 65_536) chunks.push(Buffer.from(chunk)) })
+        res.once('end', () => {
+          let errorType: string | null = null
+          try {
+            const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+            const candidate = parsed?.error?.type || parsed?.error?.root_cause?.[0]?.type
+            if (typeof candidate === 'string' && /^[a-z0-9_]{1,64}$/.test(candidate)) errorType = candidate
+          } catch { /* diagnostics intentionally omit provider text */ }
+          resolve({ statusClass: `${Math.floor((res.statusCode || 500) / 100)}xx`, errorType })
+        })
+      })
+      const fail = (statusClass: string) => resolve({ statusClass, errorType: null })
+      req.once('timeout', () => { req.destroy(); fail('timeout') })
+      req.once('error', () => fail('network'))
+      req.end(payload)
+    })
+    const definitions = [
+      ['lexical', { size: 1, _source: false, query }],
+      ['topLevelKnn', { size: 1, _source: false, knn }],
+      ['queryKnn', { size: 1, _source: false, query: { knn } }],
+      ['fieldKnn', { size: 1, _source: false, query: { knn: { [vectorField]: { vector, k: 1 } } } }],
+      ['scriptScore', { size: 1, _source: false, query: { script_score: { query, script: {
+        source: `cosineSimilarity(params.query_vector, '${vectorField}') + 1.0`, params: { query_vector: vector },
+      } } } }],
+    ] as const
+    const probes = []
+    for (const [name, body] of definitions) probes.push({ name, ...await request(body) })
+    return { probes }
   },
   create: createPostRagReleaseProbe,
   status: readPostRagReleaseProbeStatus,
@@ -309,6 +360,22 @@ export function createExactIdValidationHandler(
       const statusClass = ['2xx', '3xx', '4xx', '5xx', 'timeout', 'network'].includes(diagnostic?.statusClass)
         ? diagnostic.statusClass : 'unknown'
       return { statusClass }
+    }
+    if (event.action === 'diagnoseSearchDsl') {
+      const diagnostic = await dependencies.diagnoseSearchDsl()
+      const names = new Set(['lexical', 'topLevelKnn', 'queryKnn', 'fieldKnn', 'scriptScore'])
+      const statusClasses = new Set(['2xx', '3xx', '4xx', '5xx', 'timeout', 'network', 'unknown'])
+      return { probes: (diagnostic?.probes || []).filter(item => names.has(item?.name)).slice(0, 5).map(item => ({
+        name: item.name,
+        statusClass: statusClasses.has(item?.statusClass) ? item.statusClass : 'unknown',
+        errorType: typeof item?.errorType === 'string' && /^[a-z0-9_]{1,64}$/.test(item.errorType) ? item.errorType : null,
+      })) }
+    }
+    if (event.action === 'searchProbe') {
+      const probe = await dependencies.readProbe(runId)
+      if (!probe) throw new Error('validation probe binding not found')
+      assertProbeBinding(probe, runId)
+      return dependencies.searchProbe(probe)
     }
     if (event.action === 'cleanup') return dependencies.cleanup(event)
     if (event.action === 'inspect') return inspect(runId)

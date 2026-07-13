@@ -22,6 +22,7 @@ import {
   acquireLocalValidationLock,
   assertExactTemporaryEnvironment,
   formatValidationFailure,
+  requireSearchDslCompatibility,
   normalizeValidationVpc,
   recoverExactProbe,
   resolveSharedValidationLockPath,
@@ -276,7 +277,7 @@ test('exposes the isolated validator package command', async () => {
   const pkg = JSON.parse(await readFile(resolve('package.json'), 'utf8'))
   assert.equal(pkg.scripts['validate:rag:isolated'], 'node scripts/validate-post-rag-isolated.mjs')
   const source = await readFile(resolve('scripts/validate-post-rag-isolated.mjs'), 'utf8')
-  assert.match(source, /const WAIT_MS = 10 \* 60_000/)
+  assert.match(source, /const WAIT_MS = 15 \* 60_000/)
 })
 
 function scenario(overrides = {}) {
@@ -482,6 +483,57 @@ function timerEvent(runId, overrides = {}) {
     Message: JSON.stringify({ runId, timerToken: 'timer-token-654321' }), ...overrides,
   }
 }
+
+test('temporary handler exposes only allowlisted ES search compatibility diagnostics', async () => {
+  const loaded = await loadFixtureHandler()
+  try {
+    const handler = loaded.module.createExactIdValidationHandler({
+      async diagnoseSearchDsl() {
+        return {
+          probes: [
+            { name: 'lexical', statusClass: '2xx', errorType: null },
+            { name: 'queryKnn', statusClass: '4xx', errorType: 'x_content_parse_exception' },
+          ],
+          raw: 'must-not-escape',
+        }
+      },
+    }, { validationToken: 'validation-token-123456', timerToken: 'timer-token-654321' })
+    const result = await handler({
+      action: 'diagnoseSearchDsl', runId: '20260713T210000', validationToken: 'validation-token-123456',
+    })
+    assert.deepEqual(result, {
+      probes: [
+        { name: 'lexical', statusClass: '2xx', errorType: null },
+        { name: 'queryKnn', statusClass: '4xx', errorType: 'x_content_parse_exception' },
+      ],
+    })
+    assert.doesNotMatch(JSON.stringify(result), /raw|must-not-escape/)
+  } finally { await loaded.cleanup() }
+})
+
+test('temporary handler searches only the deterministic bound probe', async () => {
+  const loaded = await loadFixtureHandler()
+  try {
+    const runId = '20260713T210000'; const ids = fixtureIds(runId)
+    const probe = { _id: runId, runId, status: 'active', communityId: 'community-a', ...ids, outboxId: 'outbox-a' }
+    const handler = loaded.module.createExactIdValidationHandler({
+      async readProbe() { return probe },
+      async searchProbe(value) { return { protocolVersion: 2, items: [{ postId: value.postId }] } },
+    }, { validationToken: 'validation-token-123456', timerToken: 'timer-token-654321' })
+    assert.deepEqual(await handler({ action: 'searchProbe', runId, validationToken: 'validation-token-123456' }),
+      { protocolVersion: 2, items: [{ postId: ids.postId }] })
+  } finally { await loaded.cleanup() }
+})
+
+test('search DSL preflight reports the exact safe compatibility matrix', () => {
+  assert.throws(() => requireSearchDslCompatibility({ probes: [
+    { name: 'lexical', statusClass: '2xx', errorType: null },
+    { name: 'topLevelKnn', statusClass: '4xx', errorType: 'parsing_exception' },
+    { name: 'queryKnn', statusClass: '2xx', errorType: null },
+    { name: 'fieldKnn', statusClass: '4xx', errorType: 'parsing_exception' },
+    { name: 'scriptScore', statusClass: '2xx', errorType: null },
+  ] }), /lexical=2xx:none,topLevelKnn=4xx:parsing_exception,queryKnn=2xx:none,fieldKnn=4xx:parsing_exception,scriptScore=2xx:none/)
+})
 
 test('temporary handler authenticates independently and processes only the bound outbox and job', async () => {
   const loaded = await loadFixtureHandler()

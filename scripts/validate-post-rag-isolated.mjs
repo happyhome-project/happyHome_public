@@ -24,7 +24,7 @@ import { isScfTriggerEnabled } from './lib/scf-owned-timer.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const POLL_MS = 3_000
-const WAIT_MS = 10 * 60_000
+const WAIT_MS = 15 * 60_000
 const TRIGGER_NAME = 'post-rag-worker-every-minute'
 const REPO_DEFAULT_PUBLIC_COMMUNITY_ID = '56ba808e69df985c046e3d4407e8c672'
 
@@ -42,6 +42,16 @@ export function formatValidationFailure(error) {
   }
   visit(error)
   return [...new Set(summary)].join('; ')
+}
+
+export function requireSearchDslCompatibility(diagnostic, required = ['current']) {
+  const probes = Array.isArray(diagnostic?.probes) ? diagnostic.probes : []
+  const matrix = probes.map(item => `${item.name}=${item.statusClass}:${item.errorType || 'none'}`).join(',')
+  const byName = new Map(probes.map(item => [item.name, item]))
+  if (required.some(name => byName.get(name)?.statusClass !== '2xx')) {
+    throw new Error(`ES search DSL incompatible matrix=${matrix || 'missing'}`)
+  }
+  return diagnostic
 }
 
 function readFlag(argv, name, fallback = '') {
@@ -396,7 +406,9 @@ export function createCloudValidationDependencies(options) {
     async assertEsReady(identity) {
       const result = await invokeTemporary(identity, { action: 'diagnoseEs', runId: identity.runId })
       if (result?.statusClass !== '2xx') throw new Error(`ES preflight failed statusClass=${result?.statusClass || 'unknown'}`)
-      return result
+      const searchDsl = await invokeTemporary(identity, { action: 'diagnoseSearchDsl', runId: identity.runId })
+      requireSearchDslCompatibility(searchDsl, ['lexical', 'scriptScore'])
+      return { ...result, searchDsl }
     },
     async createTrigger(identity) {
       await app.functions.scfService.request('CreateTrigger', {
@@ -418,10 +430,8 @@ export function createCloudValidationDependencies(options) {
           && evidence?.outboxMaterializedByTimer === true && evidence?.jobCompletedByTimer === true
       }).then(inspection => ({ jobId: inspection.job.jobId, outcome: inspection.job.outcome }))
     },
-    async assertSemanticHit(probe) {
-      const result = await invokeTcb('post', {
-        action: 'search', communityId: probe.communityId, q: `probe-${probe.runId}`, limit: 5, asGuest: true,
-      }, { ...options, envId: credentials.envId })
+    async assertSemanticHit(identity, probe) {
+      const result = await invokeTemporary(identity, { action: 'searchProbe', runId: probe.runId })
       const assertion = assertExactSemanticSearchResult(result, probe.postId)
       if (!assertion.exactHit || !assertion.sourceFieldsVerified) throw new Error('exact semantic fixture post was not returned')
       return assertion
@@ -435,10 +445,8 @@ export function createCloudValidationDependencies(options) {
           && evidence?.outboxMaterializedByTimer === true && evidence?.jobCompletedByTimer === true
       }).then(inspection => ({ jobId: inspection.job.jobId, outcome: inspection.job.outcome }))
     },
-    async assertSemanticAbsent(probe) {
-      const result = await invokeTcb('post', {
-        action: 'search', communityId: probe.communityId, q: `probe-${probe.runId}`, limit: 5, asGuest: true,
-      }, { ...options, envId: credentials.envId })
+    async assertSemanticAbsent(identity, probe) {
+      const result = await invokeTemporary(identity, { action: 'searchProbe', runId: probe.runId })
       if ((result?.items || []).some(item => item?.postId === probe.postId)) throw new Error('deleted semantic fixture post is still returned')
       return { exactAbsent: true }
     },
