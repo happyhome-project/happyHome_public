@@ -20,6 +20,7 @@ import {
   type PostRagActivationOrder,
   type PostRagVersionedIndexSink,
 } from './post-rag-versioned-index-sink'
+import { safeErrorDiagnostic } from './safe-error-diagnostic'
 export { type PostRagActivationOrder, type PostRagVersionedIndexSink } from './post-rag-versioned-index-sink'
 
 function requireSafeIdentifier(label: string, value: unknown, maxLength = 256): asserts value is string {
@@ -358,7 +359,11 @@ export async function processPostRagJobV2Batch(
     let claimed: PostRagJobDocument | null
     try {
       claimed = await dependencies.claim(jobId, { workerId: options.workerId, now: now() })
-    } catch {
+    } catch (error) {
+      console.warn('[post-rag-job-processor] claim failed', {
+        jobId,
+        ...safeErrorDiagnostic(error),
+      })
       results.push({ jobId, status: 'failed', errorCode: 'INTERNAL_ERROR', errorStage: 'claim' })
       continue
     }

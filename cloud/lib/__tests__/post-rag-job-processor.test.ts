@@ -331,6 +331,7 @@ test('processPostRagJobV2Batch isolates candidates and continues after one failu
 })
 
 test('processPostRagJobV2Batch isolates claim failures without aborting later candidates', async () => {
+  const warning = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
   const deps = dependencies({
     listCandidates: jest.fn(async () => [JOB_ID, JOB2_ID]),
     claim: jest.fn().mockRejectedValueOnce(new Error('secret db failure')).mockResolvedValueOnce(job({ outboxId: 'outbox-2', leaseToken: 'lease-2' })),
@@ -339,6 +340,14 @@ test('processPostRagJobV2Batch isolates claim failures without aborting later ca
   expect(result.results[0]).toEqual({ jobId: JOB_ID, status: 'failed', errorCode: 'INTERNAL_ERROR', errorStage: 'claim' })
   expect(result.results[1]).toMatchObject({ jobId: JOB2_ID, status: 'completed' })
   expect(JSON.stringify(result)).not.toContain('secret')
+  expect(warning).toHaveBeenCalledWith('[post-rag-job-processor] claim failed', {
+    jobId: JOB_ID,
+    name: 'Error',
+    code: 'UNKNOWN',
+    fingerprint: expect.stringMatching(/^[a-f0-9]{16}$/),
+  })
+  expect(JSON.stringify(warning.mock.calls)).not.toContain('secret')
+  warning.mockRestore()
 })
 
 test('processPostRagJobV2Batch does not let exhausted claim failures consume the batch capacity', async () => {
