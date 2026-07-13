@@ -22,6 +22,16 @@ export async function verifyPreflightIndex({ readMappings, dims, vectorField = '
   return { status: 'passed' }
 }
 
+export function resolvePreflightIndexOptions(env = {}) {
+  const indexName = String(env.TENCENT_RAG_INDEX_NAME || '').trim()
+  const region = String(env.TENCENT_RAG_ES_REGION || 'ap-shanghai').trim()
+  const dims = Number(env.TENCENT_RAG_EMBEDDING_DIMS || 768)
+  if (!/^[a-z0-9][a-z0-9._-]*$/.test(indexName)) throw new Error('RAG index name is unavailable')
+  if (!/^ap-[a-z]+(?:-[a-z]+)*$/.test(region)) throw new Error('RAG index region is unavailable')
+  if (!Number.isSafeInteger(dims) || dims < 1) throw new Error('RAG embedding dimensions are invalid')
+  return { indexName, region, dims }
+}
+
 function cronMatches(value, cron) {
   if (value === cron) return true
   try { const parsed = JSON.parse(value); return parsed && Object.keys(parsed).length === 1 && parsed.cron === cron } catch { return false }
@@ -69,4 +79,14 @@ export function verifyPreflightGitAndPlan({
 export function evaluateProbeEvidence({ state = {}, evidence, startedAt, outboxId, jobId, complete }) {
   const next = advanceProbeTimerEvidence(state, evidence, { startedAt, outboxId, jobId })
   return { ...next, complete: complete === true, passed: next.probeOutboxSeen && next.probeV2JobSeen && complete === true }
+}
+
+export function evaluatePreflightTimerEvidence({ evidence, startedAt, outboxId }) {
+  const passed = Boolean(evidence
+    && evidence.source === 'timer'
+    && evidence.triggerName === 'post-rag-worker-every-minute'
+    && String(evidence.invokedAt || '') > String(startedAt || '')
+    && Array.isArray(evidence.outboxIds)
+    && evidence.outboxIds.includes(outboxId))
+  return { passed }
 }

@@ -6,11 +6,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { runReleasePreflight } from './lib/release-preflight.mjs'
-import { verifyPreflightCollections, verifyPreflightGitAndPlan, verifyPreflightIndex, verifyPreflightTimers, evaluateProbeEvidence } from './lib/release-preflight-checks.mjs'
+import { verifyPreflightCollections, verifyPreflightGitAndPlan, verifyPreflightIndex, verifyPreflightTimers, evaluatePreflightTimerEvidence, resolvePreflightIndexOptions } from './lib/release-preflight-checks.mjs'
 import { buildRagWorkerFunctionConfigs, parseConfigureRagWorkersArgs } from './configure-rag-workers.mjs'
 import { invokeAdmin, parseRebuildArgs } from './rebuild-post-search-index.mjs'
 import { defaultRunner } from './cloud-release-smoke.mjs'
 import { createTimerProbeDeadline } from './lib/post-rag-timer-probe-policy.mjs'
+import { readTencentServerlessIndexMappings } from './lib/tencent-serverless-index-control.mjs'
 
 function readEnv(file) {
   if (!fs.existsSync(file)) return {}
@@ -23,22 +24,21 @@ function gitState(cwd) {
   return { cwd, originUrl: git(['remote', 'get-url', 'origin'], cwd), branch: git(['branch', '--show-current'], cwd), headSha: git(['rev-parse', 'HEAD'], cwd), originMainSha: git(['rev-parse', 'origin/main'], cwd), changedPaths }
 }
 
-export function createReleasePreflightChecks({ app, env, cwd, adminOptions, resumeRequested = false, resumeRunState = null, releaseStrategy = 'full-current', fullCurrentExplicit = releaseStrategy === 'full-current', forceRedeployCurrent = false, publishOnly = false, generatedBuildInfoMatches = false, invoke = invokeAdmin, runner = defaultRunner, readGitState = gitState, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
-  const endpoint = String(env.TENCENT_RAG_ES_ENDPOINT || '').replace(/\/+$/, '')
-  const index = String(env.TENCENT_RAG_ES_INDEX || 'happyhome-post-rag-v2')
-  const auth = () => `Basic ${Buffer.from(`${env.TENCENT_RAG_ES_USERNAME}:${env.TENCENT_RAG_ES_PASSWORD}`).toString('base64')}`
+export function createReleasePreflightChecks({ app, env, cwd, adminOptions, resumeRequested = false, resumeRunState = null, releaseStrategy = 'full-current', fullCurrentExplicit = releaseStrategy === 'full-current', forceRedeployCurrent = false, publishOnly = false, generatedBuildInfoMatches = false, invoke = invokeAdmin, runner = defaultRunner, readGitState = gitState, readServerlessIndexMappings = readTencentServerlessIndexMappings, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
   const configs = buildRagWorkerFunctionConfigs(parseConfigureRagWorkersArgs([], env))
   const runId = `pf_${crypto.randomUUID().replaceAll('-', '').slice(0, 32)}`
   const identity = { runId }
   return [
     { name: 'rag-collections', run: async () => { if (!app) throw new Error('credentials unavailable'); return verifyPreflightCollections(app.database) } },
     { name: 'rag-index', run: async () => {
-      if (!endpoint || !env.TENCENT_RAG_ES_USERNAME || !env.TENCENT_RAG_ES_PASSWORD) throw new Error('index credentials unavailable')
-      return verifyPreflightIndex({ dims: Number(env.TENCENT_RAG_EMBEDDING_DIMS || 768), readMappings: async () => {
-        const response = await fetch(`${endpoint}/${encodeURIComponent(index)}/_mapping`, { headers: { Authorization: auth() } })
-        if (!response.ok) throw new Error('index mapping unavailable')
-        const json = await response.json(); return json[index]?.mappings || Object.values(json)[0]?.mappings
-      } })
+      if (!env.TENCENTCLOUD_SECRETID || !env.TENCENTCLOUD_SECRETKEY) throw new Error('index control credentials unavailable')
+      const { indexName, region, dims } = resolvePreflightIndexOptions(env)
+      return verifyPreflightIndex({ dims, readMappings: () => readServerlessIndexMappings({
+        secretId: env.TENCENTCLOUD_SECRETID,
+        secretKey: env.TENCENTCLOUD_SECRETKEY,
+        indexName,
+        region,
+      }) })
     } },
     { name: 'worker-timers', run: async () => { if (!app) throw new Error('credentials unavailable'); return verifyPreflightTimers({ configs, listTriggers: async functionName => {
       const detail = await app.functions.getFunctionDetail(functionName)
@@ -49,15 +49,13 @@ export function createReleasePreflightChecks({ app, env, cwd, adminOptions, resu
     { name: 'timer-probe-document', mutation: true,
       fixture: identity,
       createFixture: async () => { if (!adminOptions.adminInternalToken) throw new Error('admin credential unavailable'); const created = (await invoke('post.ragTimerProbeCreateAdmin', identity, adminOptions, runner)).functionResult; Object.assign(identity, created); return identity },
-      run: async probe => { const startedAt = probe.baseline; const deadline = createTimerProbeDeadline(Date.now(), env); let state = {}
+      run: async probe => { const startedAt = probe.baseline; const deadline = createTimerProbeDeadline(Date.now(), env)
         while (Date.now() < deadline) {
           const evidence = (await invoke('post.ragTimerEvidenceAdmin', { runId }, adminOptions, runner)).functionResult?.evidence
-          const status = (await invoke('post.ragTimerProbeStatusAdmin', probe, adminOptions, runner)).functionResult
-          state = evaluateProbeEvidence({ state, evidence, startedAt, outboxId: probe.outboxId, jobId: status?.job?._id, complete: status?.complete })
-          if (state.passed) return { status: 'passed' }
+          if (evaluatePreflightTimerEvidence({ evidence, startedAt, outboxId: probe.outboxId }).passed) return { status: 'passed' }
           await wait(Math.min(5000, Math.max(0, deadline - Date.now())))
         }
-        return { status: 'failed', detail: state ? 'authenticated timer probe remained incomplete' : 'probe document is missing' }
+        return { status: 'failed', detail: 'authenticated timer did not consume the fixture outbox' }
       },
       cleanupFixture: async () => invoke('post.ragTimerProbeCleanupAdmin', identity, adminOptions, runner),
     },

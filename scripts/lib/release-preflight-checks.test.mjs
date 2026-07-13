@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   verifyPreflightCollections, verifyPreflightIndex, verifyPreflightTimers,
-  verifyPreflightGitAndPlan, evaluateProbeEvidence,
+  verifyPreflightGitAndPlan, evaluatePreflightTimerEvidence, evaluateProbeEvidence, resolvePreflightIndexOptions,
 } from './release-preflight-checks.mjs'
 import { buildPostSemanticIndexDefinition } from './tencent-rag-index-schema.mjs'
 
@@ -99,6 +99,24 @@ test('probe evidence requires authenticated timer outbox and v2 job evidence plu
   assert.equal(evaluateProbeEvidence({ ...input, evidence, complete: true }).passed, true)
   assert.equal(evaluateProbeEvidence({ ...input, evidence: { ...evidence, source: 'manual' }, complete: true }).passed, false)
   assert.equal(evaluateProbeEvidence({ ...input, evidence, complete: false }).passed, false)
+})
+
+test('index preflight resolves the real Serverless index name and public control-plane region', () => {
+  assert.deepEqual(resolvePreflightIndexOptions({
+    TENCENT_RAG_INDEX_NAME: 'real-index',
+    TENCENT_RAG_ATOMIC_REGION: 'ap-beijing',
+    TENCENT_RAG_EMBEDDING_DIMS: '768',
+  }), { indexName: 'real-index', region: 'ap-shanghai', dims: 768 })
+  assert.equal(resolvePreflightIndexOptions({ TENCENT_RAG_INDEX_NAME: 'real-index', TENCENT_RAG_ES_REGION: 'ap-nanjing' }).region, 'ap-nanjing')
+  assert.throws(() => resolvePreflightIndexOptions({ TENCENT_RAG_ES_INDEX: 'wrong-legacy-key' }), /index name/i)
+})
+
+test('preflight timer evidence proves the authenticated fixture outbox without duplicating semantic completion', () => {
+  const input = { startedAt: '2026-01-01T00:00:00Z', outboxId: 'o' }
+  const evidence = { source: 'timer', triggerName: 'post-rag-worker-every-minute', invokedAt: '2026-01-01T00:00:01Z', outboxIds: ['o'], v2JobIds: [], v2Attempted: true, v2Succeeded: false, v2CompletedCount: 0 }
+  assert.equal(evaluatePreflightTimerEvidence({ ...input, evidence }).passed, true)
+  assert.equal(evaluatePreflightTimerEvidence({ ...input, evidence: { ...evidence, source: 'manual' } }).passed, false)
+  assert.equal(evaluatePreflightTimerEvidence({ ...input, evidence: { ...evidence, outboxIds: [] } }).passed, false)
 })
 
 test('probe evidence accumulates outbox and v2 job observations across timer invocations', () => {
