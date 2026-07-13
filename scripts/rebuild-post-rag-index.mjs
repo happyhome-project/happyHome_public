@@ -52,6 +52,7 @@ export function parseRagRebuildArgs(argv = process.argv.slice(2), env = process.
     reconcile: argv.includes('--reconcile'),
     health: argv.includes('--health'),
     healthV2: argv.includes('--health-v2'),
+    ensureIndex: argv.includes('--ensure-index'),
     v2: argv.includes('--v2'),
     workerStage: getFlagValue(argv, 'worker-stage', 'combined'),
     workerRounds: Math.max(0, Math.floor(Number(getFlagValue(
@@ -234,6 +235,15 @@ async function processQueuedJobs(options, runner) {
 
 export async function runPostRagRebuild(options = parseRagRebuildArgs(), runner = defaultRunner) {
   if (options.help) return { help: true }
+  if (options.ensureIndex) {
+    const result = await invokeFunction(
+      'post-rag-worker',
+      withWorkerToken({ action: 'ensureIndex' }, options),
+      options,
+      runner,
+    )
+    return { ensureIndex: true, envId: options.envId, result }
+  }
   const communityIds = await resolveTargetCommunityIds(options, runner)
   if (options.dryRun) {
     return {
@@ -384,6 +394,7 @@ Options:
   --reconcile                   Queue only missing/stale/removable RAG jobs from post_rag_index_state.
   --health                      Read RAG source/state/job counts without queueing or processing jobs.
   --health-v2                   Read v2 semantic source/state/job coverage.
+  --ensure-index                Validate or initialize the ES index through the VPC worker.
   --v2                          Request v2 outbox backfill facts from admin batch actions.
   --worker-stage <stage>        combined (default), materialize, or v2.
   --dry-run                     Print target community ids without enqueueing.
@@ -397,6 +408,10 @@ Options:
 
 function printSummary(summary) {
   if (summary.help) return
+  if (summary.ensureIndex) {
+    console.log(`[post-rag-index] ${JSON.stringify(summary.result)}`)
+    return
+  }
   if (summary.dryRun) {
     console.log(`[post-rag-rebuild] dryRun env=${summary.envId} communities=${summary.communityIds.join(',')}`)
     return

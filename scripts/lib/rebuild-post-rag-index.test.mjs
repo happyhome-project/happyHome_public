@@ -109,6 +109,20 @@ function createMockRunner() {
   return runner
 }
 
+test('release index gate invokes authorized post-rag-worker ensureIndex inside the VPC', async () => {
+  const runner = createMockRunner()
+
+  await runPostRagRebuild({
+    ensureIndex: true,
+    envId: 'env-x',
+    commandTimeoutMs: 999,
+    workerToken: 'worker-secret',
+  }, runner)
+
+  assert.equal(runner.calls.length, 1)
+  assert.deepEqual(runner.calls[0].payload, { action: 'ensureIndex', workerToken: 'worker-secret' })
+})
+
 test('runPostRagRebuild sends the explicit worker token when processing queued jobs', async () => {
   const runner = createMockRunner()
 

@@ -14,3 +14,7 @@ test('declared release actions use a non-blocking child process so the productio
   assert.match(actionRunner, /await runReleaseNpmScript\(script\)/)
   assert.doesNotMatch(actionRunner, /execSync\(/)
 })
+
+test('formal Tencent RAG index gate uses the VPC worker instead of local private ES access', () => {
+  assert.match(source, /'ensure-tencent-rag-index': 'ensure:tencent-rag-index:release'/)
+})
