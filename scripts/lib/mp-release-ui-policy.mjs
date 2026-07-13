@@ -17,7 +17,7 @@ export const REQUIRED_RELEASE_UI_MARKERS = [
   {
     id: 'login-page-version',
     marker: 'HH_RELEASE_LOGIN_VERSION',
-    description: 'logged-out login/profile page renders and shows the build version',
+    description: 'logged-out login/profile page exposes the build version through data-build-version without visible version text',
   },
   {
     id: 'profile-login-clean',

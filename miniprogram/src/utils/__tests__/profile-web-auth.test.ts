@@ -12,10 +12,13 @@ describe('profile H5 Web auth UI', () => {
     expect(source).toMatch(/#ifndef H5[\s\S]*DEV 登录/)
   })
 
-  test('offers async logout and clears the password when closing the login form', () => {
+  test('offers async logout at the bottom and clears the password when closing the login form', () => {
     expect(source).toContain('退出登录')
     expect(source).toContain('await userStore.logout()')
     expect(source).toContain('closeManualLoginForm')
     expect(source).toMatch(/function closeManualLoginForm[\s\S]*webPassword\.value = ''/)
+    expect(source).not.toContain('profile-web-logout')
+    expect(source).toContain('data-testid="h5-logout"')
+    expect(source).toMatch(/退出当前社区[\s\S]*#ifdef H5[\s\S]*class="profile-secondary-action profile-secondary-action--logout"[\s\S]*webLogoutLock\.run\(\)/)
   })
 })

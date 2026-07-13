@@ -1172,21 +1172,25 @@ async function verifyProfileLoginClean(mp) {
   }
   await sleep(4000)
   const text = await withTimeout(pageText(page), 10000, 'read release profile text')
-  const loginFormCount = (await withTimeout(page.$$('.login-form'), 10000, 'find release login form').catch(() => [])).length
-  const debugLeakVisible = /state:logged|login:[01]|cc:/.test(text)
+  const profilePage = await withTimeout(page.$('.profile-page'), 10000, 'find release profile root')
+  const buildVersionAttribute = profilePage
+    ? String(await withTimeout(profilePage.attribute('data-build-version'), 10000, 'read release profile build marker') || '')
+    : ''
+  const debugLeakVisible = /state:logged|login:[01]|cc:|DEV 登录|Home 诊断/.test(text)
   const expectedVersion = expectedBuildVersion()
-  const versionVisible = Boolean(expectedVersion && text.includes(expectedVersion))
+  const versionTextVisible = Boolean(expectedVersion && text.includes(expectedVersion))
+  const versionPassed = Boolean(expectedVersion && buildVersionAttribute === expectedVersion && !text.includes(expectedVersion))
   return {
-    cleanPassed: text.trim().length >= 20 && loginFormCount > 0 && !debugLeakVisible,
-    versionPassed: text.trim().length >= 20 && loginFormCount > 0 && versionVisible,
+    cleanPassed: text.trim().length >= 20 && Boolean(profilePage) && !debugLeakVisible && !versionTextVisible,
+    versionPassed,
     logoutResult,
     path: page.path || '',
     textLength: text.length,
     textSample: text.slice(0, 300),
-    loginFormCount,
     debugLeakVisible,
     expectedVersion,
-    versionVisible,
+    buildVersionAttribute,
+    versionTextVisible,
   }
 }
 

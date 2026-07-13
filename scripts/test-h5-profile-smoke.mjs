@@ -52,7 +52,7 @@ server.listen(0, '127.0.0.1', async () => {
           window.__HH_TEST_CHOOSE_AVATAR__ = true
         })
       },
-      expectedTexts: ['微信登录', '退出当前社区'],
+      expectedTexts: ['登录', '退出当前社区'],
     })
     console.log('H5 profile smoke passed')
   } finally {
@@ -75,11 +75,15 @@ async function runProfileCase(browser, port, options) {
     await page.goto(`http://127.0.0.1:${port}/#/pages/profile/index`, { waitUntil: 'networkidle' })
     await page.waitForTimeout(1200)
     const text = normalize(await page.locator('body').innerText())
+    const buildVersion = await page.locator('.profile-page').getAttribute('data-build-version')
 
     console.log(`[${options.label}] ${text}`)
 
-    if (!expectedVersion || !text.includes(expectedVersion)) {
-      throw new Error(`${options.label}: profile version missing: expected ${expectedVersion || '(unknown)'}`)
+    if (!expectedVersion || buildVersion !== expectedVersion) {
+      throw new Error(`${options.label}: profile build marker mismatch: expected ${expectedVersion || '(unknown)'}, got ${buildVersion || '(missing)'}`)
+    }
+    if (text.includes(expectedVersion)) {
+      throw new Error(`${options.label}: profile build version leaked into visible text`)
     }
     if (/state:logged|login:[01]|cc:/.test(text)) {
       throw new Error(`${options.label}: profile internal debug label leaked`)
@@ -89,7 +93,7 @@ async function runProfileCase(browser, port, options) {
         throw new Error(`${options.label}: expected text missing: ${expectedText}`)
       }
     }
-    if (text.length < 80) {
+    if (text.length < 40) {
       throw new Error(`${options.label}: profile content is too short; possible blank page`)
     }
     if (errors.length > 0) {

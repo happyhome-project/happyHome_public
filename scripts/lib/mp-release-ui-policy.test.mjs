@@ -127,4 +127,15 @@ test('documents the release UI evidence markers used by the gate', () => {
     'HH_RELEASE_LOGIN_VERSION',
     'HH_RELEASE_PROFILE_LOGIN_CLEAN',
   ])
+  assert.match(
+    REQUIRED_RELEASE_UI_MARKERS.find((item) => item.marker === 'HH_RELEASE_LOGIN_VERSION')?.description || '',
+    /data-build-version/,
+  )
+})
+
+test('release profile validation reads the build marker attribute and rejects visible version text', () => {
+  const source = readFileSync(new URL('../test-mp-release-ui.mjs', import.meta.url), 'utf8')
+
+  assert.match(source, /attribute\('data-build-version'\)/)
+  assert.match(source, /!text\.includes\(expectedVersion\)/)
 })
