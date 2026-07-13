@@ -27,6 +27,12 @@ function assertBound(input: any, probe: any) {
   }
 }
 
+function assertCleanupBound(input: any, probe: any) {
+  const fields = ['communityId', 'sectionId', 'postId']
+  if (fields.every(field => input?.[field] == null || input?.[field] === '')) return
+  assertBound(input, probe)
+}
+
 export async function createPostRagReleaseProbe(value: unknown) {
   const id = validRunId(value)
   if (await readProbe(id)) throw new Error('release probe runId already exists')
@@ -73,7 +79,7 @@ export async function cleanupPostRagReleaseProbe(input: any) {
   const id = validRunId(input?.runId)
   const probe = await readProbe(id)
   if (!probe) throw new Error('release probe run binding not found')
-  assertBound(input, probe)
+  assertCleanupBound(input, probe)
   if (probe.status === 'cleaned') return { success: true, alreadyCleaned: true }
   const now = new Date().toISOString()
   const outbox = await db.runTransaction(async tx => {

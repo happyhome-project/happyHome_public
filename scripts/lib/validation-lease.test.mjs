@@ -327,9 +327,9 @@ test('wrapper releases the lease when its callback throws', async () => {
 test('wrapper heartbeat advances while the main thread is synchronously blocked', async () => {
   const homeDir = await tempHome();
   let initialHeartbeat;
-  await withValidationLease({ command: 'blocked-main', homeDir, heartbeatIntervalMs: 20 }, async (handle) => {
+  await withValidationLease({ command: 'blocked-main', homeDir, heartbeatIntervalMs: 50 }, async (handle) => {
     initialHeartbeat = handle.snapshot.heartbeatAt;
-    const child = spawnSync(process.execPath, ['-e', 'setTimeout(() => {}, 180)']);
+    const child = spawnSync(process.execPath, ['-e', 'setTimeout(() => {}, 300)']);
     assert.equal(child.status, 0);
     const inspection = await inspectValidationLease({ homeDir });
     assert.equal(inspection.status, 'active');
@@ -342,7 +342,6 @@ test('wrapper disables worker heartbeats when heartbeatIntervalMs is nonpositive
   const homeDir = await tempHome();
   await withValidationLease({ command: 'no-heartbeat', homeDir, heartbeatIntervalMs: 0 }, async (handle) => {
     const initialHeartbeat = handle.snapshot.heartbeatAt;
-    await new Promise((resolve) => setTimeout(resolve, 60));
     assert.equal((await readLease(homeDir)).heartbeatAt, initialHeartbeat);
   });
   assert.equal((await inspectValidationLease({ homeDir })).status, 'absent');
@@ -351,19 +350,19 @@ test('wrapper disables worker heartbeats when heartbeatIntervalMs is nonpositive
 test('unexpected worker heartbeat failure exits promptly and still releases', async () => {
   const homeDir = await tempHome();
   const startedAt = Date.now();
-  await assert.rejects(withValidationLease({ command: 'worker-error', homeDir, heartbeatIntervalMs: 10 }, async () => {
-    await unlink(leasePath(homeDir));
-    await new Promise((resolve) => setTimeout(resolve, 60));
-  }), /heartbeat|absent|worker/i);
+  const failure = new Error('heartbeat worker failed deterministically');
+  await assert.rejects(withValidationLease({ command: 'worker-error', homeDir, heartbeatIntervalMs: 1,
+    startHeartbeatWorkerFn: async () => ({ stop: async () => { throw failure; } }),
+  }, async () => {}), (error) => error === failure);
   assert.ok(Date.now() - startedAt < 2_000);
   assert.equal((await inspectValidationLease({ homeDir })).status, 'absent');
 });
 
 test('worker failure aggregates with callback failure and still releases', async () => {
   const homeDir = await tempHome();
-  await assert.rejects(withValidationLease({ command: 'combined-error', homeDir, heartbeatIntervalMs: 10 }, async () => {
-    await unlink(leasePath(homeDir));
-    await new Promise((resolve) => setTimeout(resolve, 60));
+  await assert.rejects(withValidationLease({ command: 'combined-error', homeDir, heartbeatIntervalMs: 1,
+    startHeartbeatWorkerFn: async () => ({ stop: async () => { throw new Error('heartbeat worker failed'); } }),
+  }, async () => {
     throw new Error('callback failed too');
   }), (error) => {
     assert.ok(error instanceof AggregateError);

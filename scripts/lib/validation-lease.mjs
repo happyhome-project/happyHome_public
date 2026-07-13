@@ -444,7 +444,8 @@ export async function withValidationLease(options, fn) {
   let primaryError;
   try {
     if (heartbeatIntervalMs > 0) {
-      worker = await startHeartbeatWorker({
+      const startWorker = options?.startHeartbeatWorkerFn ?? startHeartbeatWorker;
+      worker = await startWorker({
         homeDir,
         ownerToken: handle.snapshot.ownerToken,
         heartbeatIntervalMs,

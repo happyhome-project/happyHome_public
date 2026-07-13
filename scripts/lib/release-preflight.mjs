@@ -6,10 +6,10 @@ function normalizedOutcome(name, value) {
 export async function runReleasePreflight({ checks = [] } = {}) {
   const results = []
   for (const check of checks) {
-    let fixture
+    let fixture = check.fixture
     let outcome
     try {
-      fixture = check.createFixture ? await check.createFixture() : undefined
+      fixture = check.createFixture ? await check.createFixture(fixture) : fixture
       outcome = normalizedOutcome(check.name, await check.run(fixture))
     } catch {
       outcome = { name: check.name, status: 'indeterminate', detail: 'check could not be determined' }

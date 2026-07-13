@@ -1,84 +1,76 @@
 #!/usr/bin/env node
 import CloudBase from '@cloudbase/manager-node'
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { runReleasePreflight } from './lib/release-preflight.mjs'
-import { RELEASE_CONTROL_PLANE_COLLECTIONS } from './lib/release-control-plane.mjs'
-import { createReleasePlan } from './lib/release-plan.mjs'
-import { createReleasePlanAfterResumeIdentityCheck } from './lib/release-run-ledger.mjs'
+import { verifyPreflightCollections, verifyPreflightGitAndPlan, verifyPreflightIndex, verifyPreflightTimers, evaluateProbeEvidence } from './lib/release-preflight-checks.mjs'
+import { buildRagWorkerFunctionConfigs, parseConfigureRagWorkersArgs } from './configure-rag-workers.mjs'
 import { invokeAdmin, parseRebuildArgs } from './rebuild-post-search-index.mjs'
 import { defaultRunner } from './cloud-release-smoke.mjs'
 import { createTimerProbeDeadline } from './lib/post-rag-timer-probe-policy.mjs'
 
-const REQUIRED_RAG_COLLECTIONS = ['post_rag_outbox', 'post_rag_jobs', 'post_rag_index_state_v2', 'post_rag_index_versions', 'post_rag_worker_timer_evidence']
 function readEnv(file) {
   if (!fs.existsSync(file)) return {}
-  return Object.fromEntries(fs.readFileSync(file, 'utf8').split(/\r?\n/).map(line => {
-    const index = line.indexOf('='); return index > 0 ? [line.slice(0, index).trim(), line.slice(index + 1).trim().replace(/^['"]|['"]$/g, '')] : []
-  }).filter(([key]) => key))
+  return Object.fromEntries(fs.readFileSync(file, 'utf8').split(/\r?\n/).map(line => { const i = line.indexOf('='); return i > 0 ? [line.slice(0, i).trim(), line.slice(i + 1).trim().replace(/^['"]|['"]$/g, '')] : [] }).filter(([key]) => key))
 }
-const home = os.homedir()
-const env = { ...readEnv(path.join(home, '.happyhome', 'cam.env')), ...readEnv(path.join(home, '.happyhome', 'tencent-rag.env')), ...process.env }
-const secretId = env.TENCENTCLOUD_SECRETID
-const secretKey = env.TENCENTCLOUD_SECRETKEY
-const envId = env.TCB_ENV || 'cloudbase-3gh862acb1505ff3'
-const app = secretId && secretKey ? CloudBase.init({ secretId, secretKey, envId }) : null
-const headSha = String(env.HH_RELEASE_HEAD_SHA || '').trim()
-const runId = `preflight-${Date.now()}-${crypto.randomUUID()}`
-const adminOptions = { ...parseRebuildArgs([], env), envId, commandTimeoutMs: 180000, adminInvokeRetries: 3 }
+function git(args, cwd) { return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim() }
+function gitState(cwd) {
+  git(['fetch', '--quiet', 'origin', 'main'], cwd)
+  const changedPaths = [...new Set([['diff', '--name-only'], ['diff', '--cached', '--name-only'], ['ls-files', '--others', '--exclude-standard']].flatMap(args => git(args, cwd).split(/\r?\n/).filter(Boolean)))]
+  return { cwd, originUrl: git(['remote', 'get-url', 'origin'], cwd), branch: git(['branch', '--show-current'], cwd), headSha: git(['rev-parse', 'HEAD'], cwd), originMainSha: git(['rev-parse', 'origin/main'], cwd), changedPaths }
+}
 
-const checks = [
-  { name: 'rag-collections', run: async () => {
-    if (!app) throw new Error('credentials unavailable')
-    const missing = []
-    for (const name of [...RELEASE_CONTROL_PLANE_COLLECTIONS, ...REQUIRED_RAG_COLLECTIONS]) {
-      if ((await app.database.checkCollectionExists(name))?.Exists !== true) missing.push(name)
-    }
-    return missing.length ? { status: 'failed', detail: `${missing.length} required collections missing` } : { status: 'passed' }
-  } },
-  { name: 'rag-index', run: async () => {
-    const endpoint = String(env.TENCENT_RAG_ES_ENDPOINT || '').replace(/\/+$/, '')
-    const index = String(env.TENCENT_RAG_ES_INDEX || 'happyhome-post-rag-v2')
-    if (!endpoint || !env.TENCENT_RAG_ES_USERNAME || !env.TENCENT_RAG_ES_PASSWORD) throw new Error('index credentials unavailable')
-    const auth = Buffer.from(`${env.TENCENT_RAG_ES_USERNAME}:${env.TENCENT_RAG_ES_PASSWORD}`).toString('base64')
-    const response = await fetch(`${endpoint}/${encodeURIComponent(index)}`, { method: 'HEAD', headers: { Authorization: `Basic ${auth}` } })
-    return response.ok ? { status: 'passed' } : { status: 'failed', detail: 'required RAG index is unavailable' }
-  } },
-  { name: 'worker-timers', run: async () => {
-    if (!app) throw new Error('credentials unavailable')
-    for (const [functionName, triggerName] of [['post-rag-worker', 'post-rag-worker-every-minute'], ['post-video-rag-worker', 'post-video-rag-worker-every-10-min']]) {
+export function createReleasePreflightChecks({ app, env, cwd, adminOptions, resumeRequested = false, resumeRunState = null, invoke = invokeAdmin, runner = defaultRunner, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
+  const endpoint = String(env.TENCENT_RAG_ES_ENDPOINT || '').replace(/\/+$/, '')
+  const index = String(env.TENCENT_RAG_ES_INDEX || 'happyhome-post-rag-v2')
+  const auth = () => `Basic ${Buffer.from(`${env.TENCENT_RAG_ES_USERNAME}:${env.TENCENT_RAG_ES_PASSWORD}`).toString('base64')}`
+  const configs = buildRagWorkerFunctionConfigs(parseConfigureRagWorkersArgs([], env))
+  const runId = `pf_${crypto.randomUUID().replaceAll('-', '').slice(0, 32)}`
+  const identity = { runId }
+  return [
+    { name: 'rag-collections', run: async () => { if (!app) throw new Error('credentials unavailable'); return verifyPreflightCollections(app.database) } },
+    { name: 'rag-index', run: async () => {
+      if (!endpoint || !env.TENCENT_RAG_ES_USERNAME || !env.TENCENT_RAG_ES_PASSWORD) throw new Error('index credentials unavailable')
+      return verifyPreflightIndex({ dims: Number(env.TENCENT_RAG_EMBEDDING_DIMS || 768), readMappings: async () => {
+        const response = await fetch(`${endpoint}/${encodeURIComponent(index)}/_mapping`, { headers: { Authorization: auth() } })
+        if (!response.ok) throw new Error('index mapping unavailable')
+        const json = await response.json(); return json[index]?.mappings || Object.values(json)[0]?.mappings
+      } })
+    } },
+    { name: 'worker-timers', run: async () => { if (!app) throw new Error('credentials unavailable'); return verifyPreflightTimers({ configs, listTriggers: async functionName => {
       const detail = await app.functions.getFunctionDetail(functionName)
       const response = await app.functions.scfService.request('ListTriggers', { FunctionName: functionName, Namespace: detail?.Namespace || app.functions.getFunctionConfig?.().namespace })
-      if (!(response?.Triggers || []).some(item => item.TriggerName === triggerName)) return { status: 'failed', detail: 'required worker timer is missing' }
-    }
-    return { status: 'passed' }
-  } },
-  { name: 'full-current-plan-resume', run: async () => {
-    if (!/^[0-9a-f]{7,64}$/i.test(headSha)) return { status: 'failed', detail: 'HH_RELEASE_HEAD_SHA is required' }
-    const resumeRunState = env.HH_RELEASE_RESUME_CONTEXT_JSON ? JSON.parse(env.HH_RELEASE_RESUME_CONTEXT_JSON) : null
-    createReleasePlanAfterResumeIdentityCheck({ resumeRunState, gitSha: headSha, releaseStrategy: 'full-current', createPlan: (gitSha, mode) => createReleasePlan({ headSha: gitSha, mode }) })
-    return { status: 'passed' }
-  } },
-  { name: 'timer-probe-document',
-    createFixture: async () => {
-      if (!adminOptions.adminInternalToken) throw new Error('admin credential unavailable')
-      return (await invokeAdmin('post.ragTimerProbeCreateAdmin', { runId }, adminOptions, defaultRunner)).functionResult
+      return response?.Triggers || []
+    } }) } },
+    { name: 'full-current-plan-resume', run: async () => verifyPreflightGitAndPlan({ gitState: gitState(cwd), resumeRequested, resumeRunState }) },
+    { name: 'timer-probe-document',
+      fixture: identity,
+      createFixture: async () => { if (!adminOptions.adminInternalToken) throw new Error('admin credential unavailable'); const created = (await invoke('post.ragTimerProbeCreateAdmin', identity, adminOptions, runner)).functionResult; Object.assign(identity, created); return identity },
+      run: async probe => { const startedAt = probe.baseline; const deadline = createTimerProbeDeadline(Date.now(), env); let state
+        while (Date.now() < deadline) {
+          const evidence = (await invoke('post.ragTimerEvidenceAdmin', { runId }, adminOptions, runner)).functionResult?.evidence
+          const status = (await invoke('post.ragTimerProbeStatusAdmin', probe, adminOptions, runner)).functionResult
+          state = evaluateProbeEvidence({ evidence, startedAt, outboxId: probe.outboxId, jobId: status?.job?._id, complete: status?.complete })
+          if (state.passed) return { status: 'passed' }
+          await wait(Math.min(5000, Math.max(0, deadline - Date.now())))
+        }
+        return { status: 'failed', detail: state ? 'authenticated timer probe remained incomplete' : 'probe document is missing' }
+      },
+      cleanupFixture: async () => invoke('post.ragTimerProbeCleanupAdmin', identity, adminOptions, runner),
     },
-    run: async probe => {
-      const deadline = createTimerProbeDeadline(Date.now(), env)
-      let status
-      while (Date.now() < deadline) {
-        status = (await invokeAdmin('post.ragTimerProbeStatusAdmin', probe, adminOptions, defaultRunner)).functionResult
-        if (!status) return { status: 'failed', detail: 'probe document is missing' }
-        if (status.complete) return { status: 'passed' }
-        await new Promise(resolve => setTimeout(resolve, Math.min(5000, Math.max(0, deadline - Date.now()))))
-      }
-      return { status: 'failed', detail: 'probe document remained pending' }
-    },
-    cleanupFixture: async probe => invokeAdmin('post.ragTimerProbeCleanupAdmin', probe, adminOptions, defaultRunner),
-  },
-]
-const result = await runReleasePreflight({ checks })
-console.log(JSON.stringify(result, null, 2))
-if (!result.ok) process.exitCode = 1
+  ]
+}
+
+export async function main() {
+  const home = os.homedir(); const env = { ...readEnv(path.join(home, '.happyhome', 'cam.env')), ...readEnv(path.join(home, '.happyhome', 'tencent-rag.env')), ...process.env }
+  const envId = env.TCB_ENV || 'cloudbase-3gh862acb1505ff3'; const app = env.TENCENTCLOUD_SECRETID && env.TENCENTCLOUD_SECRETKEY ? CloudBase.init({ secretId: env.TENCENTCLOUD_SECRETID, secretKey: env.TENCENTCLOUD_SECRETKEY, envId }) : null
+  const adminOptions = { ...parseRebuildArgs([], env), envId, commandTimeoutMs: 180000, adminInvokeRetries: 3 }
+  const resumeRequested = process.argv.includes('--resume')
+  const resumeRunState = env.HH_RELEASE_RESUME_CONTEXT_JSON ? JSON.parse(env.HH_RELEASE_RESUME_CONTEXT_JSON) : null
+  const result = await runReleasePreflight({ checks: createReleasePreflightChecks({ app, env, cwd: process.cwd(), adminOptions, resumeRequested, resumeRunState }) })
+  console.log(JSON.stringify(result, null, 2)); if (!result.ok) process.exitCode = 1
+}
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main().catch(() => { console.error('[release-preflight] indeterminate'); process.exitCode = 1 })

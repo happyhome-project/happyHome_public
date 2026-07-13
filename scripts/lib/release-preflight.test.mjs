@@ -34,3 +34,14 @@ test('release preflight reports cleanup failure and fails closed', async () => {
   assert.equal(result.checks[0].status, 'failed')
   assert.equal(result.checks[0].cleanup, 'failed')
 })
+
+test('release preflight cleans a predeclared fixture identity when create throws after remote commit', async () => {
+  const cleaned = []
+  const identity = { runId: 'known-before-create' }
+  const result = await runReleasePreflight({ checks: [{ name: 'probe', fixture: identity,
+    createFixture: async () => { throw new Error('response lost') },
+    run: async () => ({ status: 'passed' }), cleanupFixture: async fixture => cleaned.push(fixture.runId),
+  }] })
+  assert.deepEqual(cleaned, ['known-before-create'])
+  assert.equal(result.ok, false)
+})

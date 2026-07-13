@@ -4,6 +4,8 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import './release-preflight.test.mjs'
+import './release-preflight-checks.test.mjs'
+import './release-preflight-command.test.mjs'
 import {
   ensureReleaseControlPlane,
   parseReleaseControlPlaneMode,

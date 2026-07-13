@@ -25,6 +25,7 @@ function isDesiredTrigger(trigger, cron, customArgument) {
   return trigger.TriggerName === 'post-rag-worker-every-minute'
     && triggerCronMatches(trigger.TriggerDesc, cron)
     && trigger.CustomArgument === customArgument
+    && (trigger.Enable === 'OPEN' || trigger.EnableStatus === 'OPEN' || trigger.Enable === true)
 }
 
 export async function reconcileOwnedScfTimer(request, {

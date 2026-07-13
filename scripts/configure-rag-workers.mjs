@@ -97,8 +97,13 @@ export async function applyRagWorkerConfig(app, configs) {
       const response = await app.functions.scfService.request('ListTriggers', { FunctionName: config.name, Namespace: detail?.Namespace || app.functions.getFunctionConfig?.().namespace })
       const current = Array.isArray(response?.Triggers) ? response.Triggers : []
       const desired = config.triggers[0]
-      const triggerChanged = !current.some(item => item.TriggerName === desired.name && (item.TriggerDesc === desired.config || item.TriggerDesc === JSON.stringify({ cron: desired.config })))
-      if (triggerChanged) await app.functions.createFunctionTriggers(config.name, config.triggers)
+      const owned = current.filter(item => item.TriggerName === desired.name || item.TriggerName?.startsWith(`${config.name}-every-`))
+      const matching = owned.filter(item => item.TriggerName === desired.name && (item.TriggerDesc === desired.config || item.TriggerDesc === JSON.stringify({ cron: desired.config })) && item.Enable === 'OPEN')
+      const triggerChanged = owned.length !== 1 || matching.length !== 1
+      if (triggerChanged) {
+        for (const item of owned) await app.functions.scfService.request('DeleteTrigger', { FunctionName: config.name, Namespace: detail?.Namespace || app.functions.getFunctionConfig?.().namespace, TriggerName: item.TriggerName, Type: 'timer' })
+        await app.functions.createFunctionTriggers(config.name, config.triggers)
+      }
       results.push({ name: config.name, changed: configChanged || triggerChanged, timeout: config.timeout, memorySize: config.memorySize, triggerNames: [desired.name] })
       continue
     }

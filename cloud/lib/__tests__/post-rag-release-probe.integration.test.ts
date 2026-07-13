@@ -10,3 +10,8 @@ test('release probe create evidence status cleanup is executable and strictly ru
   mockStore.set(mockKey('post_rag_outbox',probe.outboxId),{_id:probe.outboxId,schemaVersion:2,status:'completed',aggregateId:probe.postId,communityId:probe.communityId,materializedJobId:'job-1'});mockStore.set(mockKey('post_rag_jobs','job-1'),{_id:'job-1',schemaVersion:2,status:'completed',postId:probe.postId,sourceVersion:'sv1'});mockStore.set(mockKey('post_rag_index_state_v2',probe.postId),{_id:probe.postId,postId:probe.postId,schemaVersion:2,state:'active',sourceVersion:'sv1'});expect((await readPostRagReleaseProbeStatus(probe)).complete).toBe(true)
   await expect(readPostRagReleaseProbeStatus({...probe,postId:'cross-run'})).rejects.toThrow(/binding/);expect(await cleanupPostRagReleaseProbe(probe)).toMatchObject({success:true,alreadyCleaned:false});expect(await cleanupPostRagReleaseProbe(probe)).toMatchObject({success:true,alreadyCleaned:true});await expect(readPostRagReleaseTimerEvidence('unknown')).rejects.toThrow(/binding/)
 })
+
+test('cleanup can recover a committed probe using its predeclared run identity',async()=>{
+  const probe=await createPostRagReleaseProbe('run-lost-response')
+  expect(await cleanupPostRagReleaseProbe({runId:probe.runId})).toMatchObject({success:true,alreadyCleaned:false})
+})

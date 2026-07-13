@@ -20,7 +20,7 @@ function isAlreadyExistsError(collection, error) {
   return /Table exist|already exists|collection .*exists|index .*exists|已存在/i.test(message)
 }
 
-function getCollectionStatus(collection, result) {
+export function getCollectionStatus(collection, result) {
   if (result?.Exists === true) return 'exists'
   const message = String(result?.Msg || '').trim()
   if (result?.Exists === false && isKnownMissingCollection(collection, message)) return 'missing'
