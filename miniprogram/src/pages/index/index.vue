@@ -1709,6 +1709,7 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
     return
   }
 
+  homeLoading.value = true
   const refreshPromise = (async () => {
     let nextForce = force
     do {
@@ -1724,6 +1725,7 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
   } finally {
     if (activeHomeRefreshPromise === refreshPromise) {
       activeHomeRefreshPromise = null
+      homeLoading.value = false
     }
   }
 }
@@ -1779,8 +1781,6 @@ async function initializeHome() {
   } catch (error) {
     clientLog('error', 'home.mounted.fail', { error })
     probeHomeRender('mounted.fail')
-  } finally {
-    homeLoading.value = false
   }
 }
 

@@ -82,4 +82,14 @@ describe('Figma community directory pages', () => {
     expect(code).not.toMatch(/function openHomeEmptyPublish\(\)\s*\{[\s\S]*?setStorageSync[\s\S]*?\n\}/)
     expect(fs.existsSync(emptyAsset)).toBe(true)
   })
+
+  test('home resets the empty-state loading gate for every refresh owner lifecycle', () => {
+    const code = readPage('index')
+    const refreshHomeData = code.match(/async function refreshHomeData[\s\S]*?(?=\nfunction probeHomeRender)/)?.[0] ?? ''
+    const initializeHome = code.match(/async function initializeHome[\s\S]*?(?=\nonMounted)/)?.[0] ?? ''
+
+    expect(refreshHomeData).toMatch(/homeLoading\.value = true\s*const refreshPromise/)
+    expect(refreshHomeData).toMatch(/finally\s*\{[\s\S]*activeHomeRefreshPromise = null[\s\S]*homeLoading\.value = false/)
+    expect(initializeHome).not.toContain('homeLoading.value = false')
+  })
 })
