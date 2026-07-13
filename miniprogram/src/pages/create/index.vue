@@ -49,12 +49,6 @@
       </view>
 
       <view v-else class="form" :class="{ 'form--figma': isFigmaCreateMode }">
-        <view v-if="!isActivityInviteMode" class="create-form-nav">
-          <button class="create-back" aria-label="返回" @tap="handleBackToSectionPicker">
-            <text>‹</text>
-          </button>
-        </view>
-
         <view v-if="!isFigmaCreateMode" class="form-header">
           <text class="section-tag" @tap="handleBackToSectionPicker">← {{ selectedSection.name }}</text>
           <text v-if="isActivityInviteMode" class="invite-mode-tag">从攻略发起召集</text>
@@ -861,36 +855,6 @@ async function handleSubmit() {
   align-items: center;
   gap: $hh-space-sm;
   flex-wrap: wrap;
-}
-
-.create-form-nav {
-  height: 64rpx;
-  margin: -12rpx -32rpx 16rpx;
-  padding: 0 28rpx;
-  display: flex;
-  align-items: center;
-  background: transparent;
-  box-sizing: border-box;
-}
-
-.create-back {
-  width: 64rpx;
-  height: 64rpx;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--hh-color-text-primary);
-  font-size: 52rpx;
-  line-height: 64rpx;
-  text-align: left;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-}
-
-.create-back::after {
-  border: 0;
 }
 
 .invite-mode-tag {
