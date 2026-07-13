@@ -68,7 +68,7 @@ test('stageUpsert writes bounded embeddings, immutable bulk ids and idempotent v
   await sink.stageUpsert({ projection: projection() as any, job: job(), ...LEASE })
   expect(embedded).toEqual([['private text 0'], ['private text 1']])
   const bulk = calls[0]
-  expect(bulk).toMatchObject({ method: 'POST', path: 'rag-index/_bulk?refresh=wait_for', requestOptions: { contentType: 'application/x-ndjson' } })
+  expect(bulk).toMatchObject({ method: 'POST', path: 'rag-index/_bulk?refresh=true', requestOptions: { contentType: 'application/x-ndjson' } })
   const lines = bulk.body.trim().split('\n').map(JSON.parse)
   expect(lines[0]).toEqual({ create: { _id: `post-1:source-2:${ATTEMPT_A}:chunk-0` } })
   expect(lines[1]).toMatchObject({ postId: 'post-1', sourceVersion: 'source-2', chunkId: 'chunk-0', chunkChecksum: 'chunk-sum-0', projectionChecksum: 'projection-sum', embedding: [0.1, 0.2] })

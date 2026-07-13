@@ -245,7 +245,7 @@ export function createVersionedTencentEsRagSink(options: {
       let response: any
       if (!await hasLease(jobId, leaseToken)) fail('LEASE_LOST')
       try {
-        response = await requestJson('POST', `${options.indexName}/_bulk?refresh=wait_for`, `${lines.join('\n')}\n`, { contentType: 'application/x-ndjson' })
+        response = await requestJson('POST', `${options.indexName}/_bulk?refresh=true`, `${lines.join('\n')}\n`, { contentType: 'application/x-ndjson' })
       } catch { await cleanupAttemptAndFail('ES_BULK_FAILED', documentIds) }
       if (!Array.isArray(response?.items) || response.items.length !== projection.chunks.length) {
         await cleanupAttemptAndFail('ES_BULK_FAILED', documentIds)
