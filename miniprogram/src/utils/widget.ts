@@ -250,23 +250,30 @@ function htmlToPlainText(html: string): string {
   const namedEntities: Record<string, string> = {
     amp: '&',
     apos: "'",
+    hellip: '…',
     gt: '>',
     lt: '<',
+    ldquo: '“',
+    lsquo: '‘',
+    mdash: '—',
+    ndash: '–',
     nbsp: ' ',
     quot: '"',
+    rdquo: '”',
+    rsquo: '’',
   }
 
   return html
     .replace(/<\s*(script|style)\b[^>]*>[\s\S]*?(?:<\s*\/\s*\1\s*>|$)/gi, ' ')
     .replace(/<\s*br\b[^>]*\/?>/gi, ' ')
     .replace(/<\s*\/?\s*(?:address|article|aside|blockquote|dd|div|dl|dt|fieldset|figcaption|figure|footer|form|h[1-6]|header|hr|li|main|nav|ol|p|pre|section|table|tbody|td|tfoot|th|thead|tr|ul)\b[^>]*>/gi, ' ')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&(#x[0-9a-f]+|#\d+|amp|apos|gt|lt|nbsp|quot);/gi, (entity, code: string) => {
+    .replace(/<[^>]*>/g, '')
+    .replace(/&(#x[0-9a-f]+|#\d+|amp|apos|gt|hellip|ldquo|lsquo|lt|mdash|ndash|nbsp|quot|rdquo|rsquo);/gi, (entity, code: string) => {
       if (!code.startsWith('#')) return namedEntities[code.toLowerCase()] ?? entity
       const radix = code[1]?.toLowerCase() === 'x' ? 16 : 10
       const digits = radix === 16 ? code.slice(2) : code.slice(1)
       const codePoint = Number.parseInt(digits, radix)
-      if (!Number.isFinite(codePoint) || codePoint < 0 || codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) {
+      if (!Number.isFinite(codePoint) || codePoint <= 0 || codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) {
         return entity
       }
       return String.fromCodePoint(codePoint)

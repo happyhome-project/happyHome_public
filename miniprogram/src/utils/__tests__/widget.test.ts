@@ -47,6 +47,32 @@ describe('formatWidgetValue', () => {
   test('rich_text 对象不泄漏为对象字符串', () => {
     expect(formatWidgetValue({ nodes: [] }, 'rich_text')).toBe('')
   })
+
+  test('rich_text 移除行内格式标签时不插入空格', () => {
+    expect(formatWidgetValue(
+      '<p>第一<strong>段</strong><em>正文</em><span>补充</span><a href="#">链接</a></p>',
+      'rich_text',
+    )).toBe('第一段正文补充链接')
+  })
+
+  test('rich_text 保留块级和换行标签的文本边界', () => {
+    expect(formatWidgetValue(
+      '<div>第一段<span>连续</span></div><p>第二段<br>换行</p>',
+      'rich_text',
+    )).toBe('第一段连续 第二段 换行')
+  })
+
+  test('rich_text 解码常用排版和有效数字实体', () => {
+    expect(formatWidgetValue(
+      '&hellip;&mdash;&ndash;&lsquo;左&rsquo;&ldquo;右&rdquo; &#65; &#x1F600;',
+      'rich_text',
+    )).toBe('…—–‘左’“右” A 😀')
+  })
+
+  test('rich_text 保留无效或越界数字实体', () => {
+    expect(formatWidgetValue('&#0; &#xD800; &#x110000;', 'rich_text'))
+      .toBe('&#0; &#xD800; &#x110000;')
+  })
 })
 
 describe('getListPreview', () => {
