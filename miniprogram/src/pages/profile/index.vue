@@ -128,7 +128,7 @@
       </template>
     </view>
 
-    <view v-if="developerToolsEnabled && !showManualLoginForm" class="profile-diagnostics">
+    <view v-if="developerToolsEnabled && !isEditingProfile && !showManualLoginForm" class="profile-diagnostics">
       <view class="profile-diagnostics__header">
         <text>Home 诊断</text>
         <text class="profile-diagnostics__state">{{ diagnosticsState.enabled ? '已开启' : '未开启' }}</text>
@@ -1903,7 +1903,7 @@ onShareAppMessage(() => {
   z-index: $hh-z-modal;
   display: flex;
   align-items: flex-end;
-  background: rgba(24, 24, 24, 0.48);
+  background: rgba(0, 0, 0, 0.55);
   overscroll-behavior: contain;
 }
 

@@ -25,6 +25,7 @@ describe('profile edit bottom sheet', () => {
     expect(template).toMatch(/@tap="saveProfile"[\s\S]*保存中\.\.\./)
 
     expect(source).toMatch(/\.profile-edit-mask\s*\{[\s\S]*position:\s*fixed;[\s\S]*inset:\s*0;[\s\S]*z-index:\s*\$hh-z-modal;/)
+    expect(source).toMatch(/\.profile-edit-mask\s*\{[\s\S]*background:\s*rgba\(0, 0, 0, 0\.55\);/)
     expect(source).toMatch(/\.profile-edit-sheet\s*\{[\s\S]*border-radius:\s*32rpx 32rpx 0 0;[\s\S]*padding-bottom:\s*calc\([^)]*env\(safe-area-inset-bottom\)/)
   })
 
