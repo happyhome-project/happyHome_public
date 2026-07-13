@@ -13,7 +13,8 @@ test('preflight command builds every read/probe check without mutation entrypoin
   assert.match(source, /verifyPreflightIndex/)
   assert.match(source, /verifyPreflightTimers/)
   assert.match(source, /verifyPreflightGitAndPlan/)
-  assert.match(source, /evaluateProbeEvidence/)
+  assert.match(source, /evaluatePreflightTimerEvidence/)
+  assert.match(source, /readTencentServerlessIndexMappings/)
 })
 
 test('invalid canonical git state blocks probe creation while pure reads remain aggregated', async () => {

@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createRequire } from 'node:module'
-import { reconcileOwnedScfTimer } from './scf-owned-timer.mjs'
+import { isScfTriggerEnabled, reconcileOwnedScfTimer } from './scf-owned-timer.mjs'
 
 const require = createRequire(import.meta.url)
 const { FunctionService } = require('@cloudbase/manager-node/lib/function/index.js')
+
+test('SCF timer accepts the numeric enabled state returned by ListTriggers', () => {
+  assert.equal(isScfTriggerEnabled({ Enable: 1 }), true)
+  assert.equal(isScfTriggerEnabled({ EnableStatus: 1 }), true)
+})
 
 test('installed manager drops customArgument while owned SCF client sends and verifies it', async () => {
   let managerParams

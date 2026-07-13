@@ -22,7 +22,9 @@ function triggerCronMatches(triggerDesc, cron) {
 }
 
 export function isScfTriggerEnabled(trigger) {
-  return trigger?.EnableStatus === 'OPEN' || trigger?.Enable === 'OPEN' || trigger?.Enable === true
+  return trigger?.EnableStatus === 'OPEN' || trigger?.Enable === 'OPEN'
+    || trigger?.EnableStatus === true || trigger?.Enable === true
+    || trigger?.EnableStatus === 1 || trigger?.Enable === 1
 }
 
 function isDesiredTrigger(trigger, cron, customArgument) {
