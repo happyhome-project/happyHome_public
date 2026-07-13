@@ -107,7 +107,7 @@ export async function runIsolatedValidation(options, deps) {
   const communityId = requireSafeId('communityId', options?.communityId)
   let deployAttempted = false
   let baselineVerifiedAbsent = false
-  let triggerCreated = false
+  let triggerAttempted = false
   let createAttempted = false
   let probe
   let primaryError
@@ -120,8 +120,8 @@ export async function runIsolatedValidation(options, deps) {
     deployAttempted = true
     await requireDependency(deps, 'deploy')({ ...identity, artifact })
     await requireDependency(deps, 'copyRuntimeConfig')(identity)
+    triggerAttempted = true
     await requireDependency(deps, 'createTrigger')(identity)
-    triggerCreated = true
     createAttempted = true
     probe = await requireDependency(deps, 'invoke')(identity, { action: 'create', runId: identity.runId, communityId })
     const expected = createProbeFixtureIds(identity.runId)
@@ -148,7 +148,7 @@ export async function runIsolatedValidation(options, deps) {
     if (createAttempted) await cleanupStep(() => requireDependency(deps, 'recoverProbe')(identity, {
       runId: identity.runId, communityId, probe,
     }), cleanupErrors)
-    if (triggerCreated) await cleanupStep(() => requireDependency(deps, 'deleteTrigger')(identity), cleanupErrors)
+    if (triggerAttempted) await cleanupStep(() => requireDependency(deps, 'deleteTrigger')(identity), cleanupErrors)
     if (deployAttempted) await cleanupStep(() => requireDependency(deps, 'deleteFunction')(identity), cleanupErrors)
     await cleanupStep(() => requireDependency(deps, 'removeArtifact')(identity), cleanupErrors)
     await cleanupStep(() => requireDependency(deps, 'clearSecrets')(identity), cleanupErrors)

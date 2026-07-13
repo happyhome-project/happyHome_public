@@ -3,7 +3,7 @@ import CloudBase from '@cloudbase/manager-node'
 import { build } from 'esbuild'
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { mkdir, readFile, rm, writeFile, mkdtemp } from 'node:fs/promises'
+import { mkdir, open, readFile, rm, unlink, writeFile, mkdtemp } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -19,7 +19,7 @@ import {
 } from './cloud-release-smoke.mjs'
 import { createProductionReleaseStore, resolveCloudBaseReleaseCredentials } from './lib/cloudbase-release-store.mjs'
 import { buildPostSemanticFunctionEnvironments } from './lib/post-semantic-function-env.mjs'
-import { assertIndependentValidationTokens, runIsolatedValidation } from './lib/post-rag-isolated-validation.mjs'
+import { assertIndependentValidationTokens, createValidationIdentity, runIsolatedValidation } from './lib/post-rag-isolated-validation.mjs'
 import { isScfTriggerEnabled } from './lib/scf-owned-timer.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -90,6 +90,54 @@ export async function runCommandWithInput(command, args, options = {}) {
     child.on('exit', code => finish({ status: code ?? 1, stdout, stderr }))
     child.stdin.end(String(options.input ?? '\n'))
   })
+}
+
+export async function acquireLocalValidationLock(lockPath, owner) {
+  if (typeof owner !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(owner)) throw new Error('validation lock owner is invalid')
+  await mkdir(dirname(lockPath), { recursive: true })
+  let handle
+  try { handle = await open(lockPath, 'wx') } catch (error) {
+    if (error?.code === 'EEXIST') throw new Error('isolated validation already running for this identity')
+    throw error
+  }
+  await handle.writeFile(owner, 'utf8')
+  let released = false
+  return {
+    async release() {
+      if (released) return
+      released = true
+      let current = ''
+      try { current = await readFile(lockPath, 'utf8') } finally { await handle.close() }
+      if (current !== owner) throw new Error('validation lock ownership changed')
+      await unlink(lockPath)
+    },
+  }
+}
+
+// Two jobs may each consume 755s retry delays + a 120s lease/operation window.
+// 35 minutes leaves a further 350s margin: 2 * (755s + 120s) + 350s = 2100s.
+export async function recoverExactProbe(options, deps) {
+  const timeoutMs = Number(options?.timeoutMs || 35 * 60_000)
+  const pollMs = Number(options?.pollMs || 5000)
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 1 || !Number.isFinite(pollMs) || pollMs < 1) throw new Error('recovery timing is invalid')
+  const now = deps.now || Date.now
+  const wait = deps.sleep || sleep
+  const deadline = now() + timeoutMs
+  while (now() < deadline) {
+    const inspection = await deps.inspect(options.runId)
+    if (!inspection?.exists) return { status: 'absent' }
+    if (inspection.status === 'cleaned') {
+      await deps.verifyNoResidue(inspection)
+      return { status: 'cleaned' }
+    }
+    if (inspection.status === 'active' || inspection.status === 'cleaning') await deps.processExact(options.runId)
+    await deps.cleanup(inspection)
+    const remaining = Math.max(0, deadline - now())
+    if (remaining > 0) await wait(Math.min(pollMs, remaining))
+  }
+  const residue = await deps.inspectResidue(options.runId)
+  const count = Number(residue?.operationalResidueCount || 0)
+  throw new Error(`exact probe recovery timed out unresolvedResidueCount=${Number.isFinite(count) ? count : -1}`)
 }
 
 export function selectTemporaryWorkerEnvironment(source, tokens) {
@@ -199,7 +247,7 @@ export function createCloudValidationDependencies(options) {
     return (response?.Functions || []).some(item => item.FunctionName === functionName)
   }
 
-  const verifyNoResidue = async probe => {
+  const readExactResidue = async probe => {
     const audit = await getDocumentOrNull(db, 'post_rag_release_probes', probe.runId)
     const exact = await Promise.all([
       getDocumentOrNull(db, 'posts', probe.postId), getDocumentOrNull(db, 'sections', probe.sectionId),
@@ -209,8 +257,12 @@ export function createCloudValidationDependencies(options) {
     ])
     const operationalResidueCount = exact.slice(0, 3).filter(Boolean).length + exact.slice(3).reduce((sum, rows) => sum + rows.length, 0)
     const cleanedAuditCount = audit?.status === 'cleaned' && audit?.runId === probe.runId && audit?.postId === probe.postId ? 1 : 0
-    if (operationalResidueCount !== 0 || cleanedAuditCount !== 1) throw new Error('exact probe residue verification failed')
     return { operationalResidueCount, cleanedAuditCount, nonProbeCount: await observeNonProbeCount(db) }
+  }
+  const verifyNoResidue = async probe => {
+    const residue = await readExactResidue(probe)
+    if (residue.operationalResidueCount !== 0 || residue.cleanedAuditCount !== 1) throw new Error('exact probe residue verification failed')
+    return residue
   }
 
   return {
@@ -285,6 +337,7 @@ export function createCloudValidationDependencies(options) {
         return inspection?.job?.status === 'completed' && inspection.job.outcome === 'indexed'
           && evidence?.triggerName === TRIGGER_NAME && evidence?.outboxId === probe.outboxId
           && evidence?.jobId === inspection.job.jobId && evidence?.outcome === 'indexed' && evidence?.phase === 'create'
+          && evidence?.outboxMaterializedByTimer === true && evidence?.jobCompletedByTimer === true
       }).then(inspection => ({ jobId: inspection.job.jobId, outcome: inspection.job.outcome }))
     },
     async assertSemanticHit(probe) {
@@ -301,6 +354,7 @@ export function createCloudValidationDependencies(options) {
         return inspection?.job?.status === 'completed' && ['removed', 'superseded'].includes(inspection.job.outcome)
           && evidence?.triggerName === TRIGGER_NAME && evidence?.outboxId === inspection.outboxId
           && evidence?.jobId === inspection.job.jobId && evidence?.outcome === inspection.job.outcome && evidence?.phase === 'cleanup'
+          && evidence?.outboxMaterializedByTimer === true && evidence?.jobCompletedByTimer === true
       }).then(inspection => ({ jobId: inspection.job.jobId, outcome: inspection.job.outcome }))
     },
     async assertSemanticAbsent(probe) {
@@ -315,22 +369,20 @@ export function createCloudValidationDependencies(options) {
     },
     assertNoResidue: verifyNoResidue,
     async recoverProbe(identity, recovery) {
-      let inspection = await invokeTemporary(identity, { action: 'inspect', runId: recovery.runId })
-      if (!inspection?.exists) return { status: 'absent' }
-      const exactProbe = { runId: recovery.runId, communityId: inspection.communityId, sectionId: inspection.sectionId, postId: inspection.postId }
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        if (inspection.status === 'cleaned') {
-          await verifyNoResidue(exactProbe)
-          return { status: 'cleaned' }
-        }
-        if (inspection.status === 'active' || inspection.status === 'cleaning') {
-          await invokeTemporary(identity, { action: 'processExact', runId: recovery.runId })
-        }
-        await invokeTemporary(identity, { action: 'cleanup', ...exactProbe })
-        await sleep(1000)
-        inspection = await invokeTemporary(identity, { action: 'inspect', runId: recovery.runId })
-      }
-      throw new Error('exact probe recovery timed out')
+      return recoverExactProbe({ runId: recovery.runId }, {
+        inspect: () => invokeTemporary(identity, { action: 'inspect', runId: recovery.runId }),
+        processExact: () => invokeTemporary(identity, { action: 'processExact', runId: recovery.runId }),
+        cleanup: inspection => invokeTemporary(identity, {
+          action: 'cleanup', runId: recovery.runId, communityId: inspection.communityId,
+          sectionId: inspection.sectionId, postId: inspection.postId,
+        }),
+        verifyNoResidue,
+        inspectResidue: async () => {
+          const inspection = await invokeTemporary(identity, { action: 'inspect', runId: recovery.runId })
+          if (!inspection?.exists) return { operationalResidueCount: 0, cleanedAuditCount: 0 }
+          return readExactResidue(inspection)
+        },
+      })
     },
     async writeEvidence(evidence) {
       await mkdir(dirname(evidencePath), { recursive: true })
@@ -338,9 +390,14 @@ export function createCloudValidationDependencies(options) {
       return evidence
     },
     async deleteTrigger(identity) {
-      await app.functions.scfService.request('DeleteTrigger', {
-        FunctionName: identity.functionName, Namespace: state.namespace, TriggerName: TRIGGER_NAME, Type: 'timer',
-      })
+      try {
+        await app.functions.scfService.request('DeleteTrigger', {
+          FunctionName: identity.functionName, Namespace: state.namespace, TriggerName: TRIGGER_NAME, Type: 'timer',
+        })
+      } catch (error) {
+        const text = String(error?.code || error?.original?.Code || error?.message || error)
+        if (!/ResourceNotFound\.(?:Trigger|Function)|TriggerNotFound|trigger does not exist/i.test(text)) throw error
+      }
       await waitFor('temporary trigger deletion', async () => {
         const response = await app.functions.scfService.request('ListTriggers', { FunctionName: identity.functionName, Namespace: state.namespace })
         return !(response?.Triggers || []).some(trigger => trigger.TriggerName === TRIGGER_NAME)
@@ -367,9 +424,22 @@ export async function main(argv = process.argv.slice(2)) {
   const runId = readFlag(argv, 'run-id', makeRunId())
   const commandTimeoutMs = Math.max(60_000, Number(readFlag(argv, 'command-timeout-ms', '300000')) || 300_000)
   const head = readFlag(argv, 'head', await resolveHead())
-  const deps = createCloudValidationDependencies({ runId, commandTimeoutMs })
-  const communityId = await deps.resolvePublicCommunity()
-  const result = await runIsolatedValidation({ head, runId, communityId }, deps)
+  const identity = createValidationIdentity(head, runId)
+  const lock = await acquireLocalValidationLock(
+    resolve(ROOT, '.codex-local', 'rag-validation-locks', `${identity.functionName}.lock`),
+    randomBytes(16).toString('hex'),
+  )
+  let result
+  let primaryError
+  try {
+    const deps = createCloudValidationDependencies({ runId, commandTimeoutMs })
+    const communityId = await deps.resolvePublicCommunity()
+    result = await runIsolatedValidation({ head, runId, communityId }, deps)
+  } catch (error) { primaryError = error }
+  try { await lock.release() } catch (error) {
+    primaryError = primaryError ? new AggregateError([primaryError, error], 'isolated validation lock release failed') : error
+  }
+  if (primaryError) throw primaryError
   console.log(JSON.stringify(result, null, 2))
 }
 

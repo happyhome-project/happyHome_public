@@ -46,7 +46,7 @@ type HandlerDependencies = {
   readProbe(runId: string): Promise<Probe | null>
   readOutbox(outboxId: string): Promise<any>
   readOutboxOptional(outboxId: string): Promise<any | null>
-  materializeExact(outboxId: string, workerId: string): Promise<{ jobId: string | null }>
+  materializeExact(outboxId: string, workerId: string): Promise<{ jobId: string | null; materializedByThisInvocation: boolean }>
   readJob(jobId: string): Promise<any>
   processExactJob(jobId: string, workerId: string): Promise<any>
   recordTimerEvidence(runId: string, field: 'timerEvidenceCreate' | 'timerEvidenceCleanup', evidence: any): Promise<void>
@@ -149,10 +149,10 @@ const defaultDependencies: HandlerDependencies = {
       const result = await materializeClaimedPostRagOutboxEvent(outboxId, {
         workerId, leaseToken: String(claimed.leaseToken || ''), now: new Date().toISOString(),
       })
-      return { jobId: String(result?.job?._id || result?.outbox?.materializedJobId || '') || null }
+      return { jobId: String(result?.job?._id || result?.outbox?.materializedJobId || '') || null, materializedByThisInvocation: true }
     }
     const current = await db.getById('post_rag_outbox', outboxId) as any
-    return { jobId: current?.status === 'completed' ? String(current.materializedJobId || '') || null : null }
+    return { jobId: current?.status === 'completed' ? String(current.materializedJobId || '') || null : null, materializedByThisInvocation: false }
   },
   readJob: getPostRagJob,
   async processExactJob(jobId, workerId) {
@@ -221,6 +221,7 @@ export function createExactIdValidationHandler(
     const workerId = `rag-validation:${randomUUID()}`
     const materialized = await dependencies.materializeExact(outboxId, workerId)
     const jobId = String(materialized?.jobId || '')
+    let jobCompletedByThisInvocation = false
     let result: any = { runId, postId: probe.postId, outboxId, jobId: null, candidateCount: 0, completedCount: 0, outcome: null }
     if (jobId) {
       const job = await dependencies.readJob(jobId)
@@ -229,10 +230,13 @@ export function createExactIdValidationHandler(
         result = { runId, postId: probe.postId, outboxId, jobId, candidateCount: 1, completedCount: 1, outcome: job.outcome }
       } else {
         const batch = await dependencies.processExactJob(jobId, workerId)
+        const exactCompleted = Array.isArray(batch?.results)
+          && batch.results.filter((row: any) => row?.jobId === jobId && row?.status === 'completed').length === 1
         const stored = await dependencies.readJob(jobId)
         assertJobBinding(stored, jobId, probe)
         const completed = stored.status === 'completed' && ['indexed', 'removed', 'superseded'].includes(stored.outcome)
           ? stored : null
+        jobCompletedByThisInvocation = Boolean(exactCompleted && completed)
         result = {
           runId, postId: probe.postId, outboxId, jobId,
           candidateCount: Number(batch?.candidateCount || 0),
@@ -242,10 +246,13 @@ export function createExactIdValidationHandler(
       }
     }
     if (authenticTimer) {
+      const prior = phase === 'create' ? (probe as any).timerEvidenceCreate : (probe as any).timerEvidenceCleanup
       const evidence = {
         triggerName: authenticTimer.triggerName, eventTime: authenticTimer.eventTime,
         invokedAt: new Date(environment.now ? environment.now() : Date.now()).toISOString(),
         outboxId, jobId: result.jobId, outcome: result.outcome, phase,
+        outboxMaterializedByTimer: prior?.outboxMaterializedByTimer === true || materialized.materializedByThisInvocation === true,
+        jobCompletedByTimer: prior?.jobCompletedByTimer === true || jobCompletedByThisInvocation,
       }
       await dependencies.recordTimerEvidence(runId, phase === 'create' ? 'timerEvidenceCreate' : 'timerEvidenceCleanup', evidence)
     }

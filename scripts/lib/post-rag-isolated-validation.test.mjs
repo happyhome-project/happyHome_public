@@ -19,8 +19,10 @@ import {
 import {
   assertExactSemanticSearchResult,
   assertExactTimerReadback,
+  acquireLocalValidationLock,
   assertExactTemporaryEnvironment,
   normalizeValidationVpc,
+  recoverExactProbe,
   runCommandWithInput,
   selectTemporaryWorkerEnvironment,
 } from '../validate-post-rag-isolated.mjs'
@@ -125,6 +127,51 @@ test('noninteractive runner writes the requested blank confirmation to stdin', a
   assert.equal(result.stdout, '\n')
 })
 
+test('same validation identity uses one atomic local lock and removes only its own lock', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'happyhome-rag-lock-'))
+  const lockPath = join(directory, 'validation.lock')
+  try {
+    const first = await acquireLocalValidationLock(lockPath, 'owner-a')
+    await assert.rejects(acquireLocalValidationLock(lockPath, 'owner-b'), /already running/)
+    await first.release()
+    const second = await acquireLocalValidationLock(lockPath, 'owner-b')
+    await second.release()
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('35 minute recovery horizon does not tear down a 600 second retry_wait fixture early', async () => {
+  let now = 0
+  let verified = false
+  const result = await recoverExactProbe({ runId: 'run-a', timeoutMs: 35 * 60_000, pollMs: 5000 }, {
+    now: () => now,
+    sleep: async ms => { now += ms },
+    inspect: async () => now >= 605_000 ? { exists: true, status: 'cleaned' } : { exists: true, status: 'cleaning' },
+    processExact: async () => ({ status: 'retry_wait' }),
+    cleanup: async () => ({ pending: true }),
+    verifyNoResidue: async () => { verified = true; return { operationalResidueCount: 0 } },
+    inspectResidue: async () => ({ operationalResidueCount: 0 }),
+  })
+  assert.equal(result.status, 'cleaned')
+  assert.ok(now >= 605_000)
+  assert.equal(verified, true)
+})
+
+test('recovery timeout reports the exact unresolved operational residue count', async () => {
+  let now = 0
+  await assert.rejects(
+    recoverExactProbe({ runId: 'run-a', timeoutMs: 10_000, pollMs: 5000 }, {
+      now: () => now,
+      sleep: async ms => { now += ms },
+      inspect: async () => ({ exists: true, status: 'cleaning' }),
+      processExact: async () => ({ status: 'retry_wait' }),
+      cleanup: async () => ({ pending: true }),
+      verifyNoResidue: async () => ({ operationalResidueCount: 0 }),
+      inspectResidue: async () => ({ operationalResidueCount: 3 }),
+    }),
+    /exact probe recovery timed out unresolvedResidueCount=3/,
+  )
+})
+
 test('exposes the isolated validator package command', async () => {
   const pkg = JSON.parse(await readFile(resolve('package.json'), 'utf8'))
   assert.equal(pkg.scripts['validate:rag:isolated'], 'node scripts/validate-post-rag-isolated.mjs')
@@ -200,6 +247,14 @@ test('ambiguous deploy failure attempts exact function cleanup and still proves 
   assert.equal(calls.some(([name]) => name === 'deleteTrigger'), false)
   assert.equal(calls.some(([name]) => name === 'deleteFunction'), true)
   assert.deepEqual(calls.slice(-4).map(([name]) => name), ['deleteFunction', 'removeArtifact', 'clearSecrets', 'assertControlPlaneAbsent'])
+})
+
+test('ambiguous trigger creation failure attempts exact trigger cleanup', async () => {
+  const { calls, deps, probe } = scenario({
+    async createTrigger() { calls.push(['createTrigger']); throw new Error('trigger readback failed') },
+  })
+  await assert.rejects(runIsolatedValidation({ head: 'f16b88f', runId: probe.runId, communityId: 'community-a' }, deps), /trigger readback failed/)
+  assert.equal(calls.some(([name]) => name === 'deleteTrigger'), true)
 })
 
 test('pre-existing deterministic function stops before mutation and is never deleted', async () => {
@@ -331,7 +386,7 @@ test('temporary handler authenticates independently and processes only the bound
       async cleanup(input) { calls.push(['cleanup', input.postId]); return { pending: true, status: 'cleaning' } },
       async readProbe(runId) { calls.push(['readProbe', runId]); return probe },
       async readOutbox(id) { calls.push(['readOutbox', id]); return { _id: id, aggregateId: probe.postId, communityId: probe.communityId, status: 'pending' } },
-      async materializeExact(id) { calls.push(['materializeExact', id]); return { jobId: 'job-a' } },
+      async materializeExact(id) { calls.push(['materializeExact', id]); return { jobId: 'job-a', materializedByThisInvocation: true } },
       async readJob(id) {
         calls.push(['readJob', id]); jobReads += 1
         return { _id: id, postId: probe.postId, communityId: probe.communityId,
@@ -362,6 +417,7 @@ test('temporary handler authenticates independently and processes only the bound
     assert.deepEqual(evidence, {
       triggerName: 'post-rag-worker-every-minute', eventTime: '2026-07-13T13:00:00.000Z', invokedAt: TIMER_NOW,
       outboxId: 'outbox-a', jobId: 'job-a', outcome: 'indexed', phase: 'create',
+      outboxMaterializedByTimer: true, jobCompletedByTimer: true,
     })
     assert.doesNotMatch(JSON.stringify(evidence), /token/i)
   } finally {
@@ -396,13 +452,14 @@ test('temporary handler reports the exact already-completed delete job without s
     const ids = fixtureIds(runId)
     const probe = { _id: runId, runId, status: 'cleaning', communityId: 'community-a', ...ids, outboxId: 'outbox-create', cleanupOutboxId: 'outbox-delete' }
     let processed = false
+    let recorded
     const handler = loaded.module.createExactIdValidationHandler({
       async readProbe() { return probe },
       async readOutbox(id) { return { _id: id, aggregateId: probe.postId, communityId: probe.communityId } },
-      async materializeExact() { return { jobId: 'job-delete' } },
+      async materializeExact() { return { jobId: 'job-delete', materializedByThisInvocation: false } },
       async readJob(id) { return { _id: id, postId: probe.postId, communityId: probe.communityId, status: 'completed', outcome: 'removed' } },
       async processExactJob() { processed = true; throw new Error('must not process completed job') },
-      async recordTimerEvidence() {},
+      async recordTimerEvidence(_runId, _field, evidence) { recorded = evidence },
     }, { validationToken: 'validation-token-123456', timerToken: 'timer-token-654321', now: () => TIMER_NOW })
     const result = await handler(timerEvent(runId))
     assert.equal(processed, false)
@@ -410,9 +467,44 @@ test('temporary handler reports the exact already-completed delete job without s
       runId, postId: probe.postId, outboxId: probe.cleanupOutboxId, jobId: 'job-delete',
       candidateCount: 1, completedCount: 1, outcome: 'removed',
     })
+    assert.equal(recorded.outboxMaterializedByTimer, false)
+    assert.equal(recorded.jobCompletedByTimer, false)
   } finally {
     await loaded.cleanup()
   }
+})
+
+test('timer evidence cumulatively proves materialization then completion across two authentic timers', async () => {
+  const loaded = await loadFixtureHandler()
+  try {
+    const runId = '20260713T210000'
+    const ids = fixtureIds(runId)
+    const probe = { _id: runId, runId, status: 'active', communityId: 'community-a', ...ids, outboxId: 'outbox-create' }
+    let materializeCalls = 0
+    let processCalls = 0
+    let readCalls = 0
+    const handler = loaded.module.createExactIdValidationHandler({
+      async readProbe() { return probe },
+      async readOutbox(id) { return { _id: id, aggregateId: probe.postId, communityId: probe.communityId } },
+      async materializeExact() { materializeCalls += 1; return { jobId: 'job-create', materializedByThisInvocation: materializeCalls === 1 } },
+      async readJob(id) {
+        readCalls += 1
+        const completed = readCalls >= 4
+        return { _id: id, postId: probe.postId, communityId: probe.communityId, status: completed ? 'completed' : 'pending', outcome: completed ? 'indexed' : null }
+      },
+      async processExactJob(id) {
+        processCalls += 1
+        return { candidateCount: 1, results: [{ jobId: id, status: processCalls === 1 ? 'skipped' : 'completed', outcome: processCalls === 1 ? undefined : 'indexed' }] }
+      },
+      async recordTimerEvidence(_runId, field, evidence) { probe[field] = evidence },
+    }, { validationToken: 'validation-token-123456', timerToken: 'timer-token-654321', now: () => TIMER_NOW })
+    await handler(timerEvent(runId))
+    assert.equal(probe.timerEvidenceCreate.outboxMaterializedByTimer, true)
+    assert.equal(probe.timerEvidenceCreate.jobCompletedByTimer, false)
+    await handler(timerEvent(runId))
+    assert.equal(probe.timerEvidenceCreate.outboxMaterializedByTimer, true)
+    assert.equal(probe.timerEvidenceCreate.jobCompletedByTimer, true)
+  } finally { await loaded.cleanup() }
 })
 
 test('temporary handler rejects forged, stale, malformed, or overbroad timer shapes', async () => {
