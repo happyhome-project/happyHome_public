@@ -21,6 +21,7 @@ import {
   assertExactTimerReadback,
   acquireLocalValidationLock,
   assertExactTemporaryEnvironment,
+  formatValidationFailure,
   normalizeValidationVpc,
   recoverExactProbe,
   resolveSharedValidationLockPath,
@@ -384,9 +385,21 @@ test('preserves the primary failure and sanitized cleanup diagnostics', async ()
       const cleanupMessages = error.errors.slice(1).map(item => String(item?.message || item)).join('\n')
       assert.doesNotMatch(cleanupMessages, /secret|token=abc|9200/i)
       assert.match(cleanupMessages, /fingerprint/)
+      assert.match(cleanupMessages, /stage=delete-trigger/)
       return true
     },
   )
+})
+
+test('CLI failure summary exposes safe cleanup stages without provider details', () => {
+  const error = new AggregateError([
+    new Error('primary https://secret:9200 token=abc'),
+    new Error('cleanup failed stage=delete-trigger fingerprint=0123456789abcdef'),
+  ], 'isolated RAG validation cleanup failed')
+  const summary = formatValidationFailure(error)
+  assert.match(summary, /isolated RAG validation cleanup failed/)
+  assert.match(summary, /stage=delete-trigger fingerprint=0123456789abcdef/)
+  assert.doesNotMatch(summary, /secret|token=abc|9200/i)
 })
 
 test('sanitizes evidence to the fixed release-grade schema without secrets or provider details', () => {

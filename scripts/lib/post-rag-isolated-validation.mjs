@@ -94,11 +94,11 @@ function requireDependency(deps, name) {
   return deps[name]
 }
 
-async function cleanupStep(operation, errors) {
+async function cleanupStep(stage, operation, errors) {
   try { await operation() } catch (error) {
     const fingerprint = createHash('sha256')
       .update(String(error && typeof error === 'object' ? error.message || '' : error || '')).digest('hex').slice(0, 16)
-    errors.push(new Error(`cleanup failed fingerprint=${fingerprint}`))
+    errors.push(new Error(`cleanup failed stage=${stage} fingerprint=${fingerprint}`))
   }
 }
 
@@ -145,14 +145,14 @@ export async function runIsolatedValidation(options, deps) {
     primaryError = error
   } finally {
     const cleanupErrors = []
-    if (createAttempted) await cleanupStep(() => requireDependency(deps, 'recoverProbe')(identity, {
+    if (createAttempted) await cleanupStep('recover-probe', () => requireDependency(deps, 'recoverProbe')(identity, {
       runId: identity.runId, communityId, probe,
     }), cleanupErrors)
-    if (triggerAttempted) await cleanupStep(() => requireDependency(deps, 'deleteTrigger')(identity), cleanupErrors)
-    if (deployAttempted) await cleanupStep(() => requireDependency(deps, 'deleteFunction')(identity), cleanupErrors)
-    await cleanupStep(() => requireDependency(deps, 'removeArtifact')(identity), cleanupErrors)
-    await cleanupStep(() => requireDependency(deps, 'clearSecrets')(identity), cleanupErrors)
-    if (baselineVerifiedAbsent) await cleanupStep(() => requireDependency(deps, 'assertControlPlaneAbsent')(identity), cleanupErrors)
+    if (triggerAttempted) await cleanupStep('delete-trigger', () => requireDependency(deps, 'deleteTrigger')(identity), cleanupErrors)
+    if (deployAttempted) await cleanupStep('delete-function', () => requireDependency(deps, 'deleteFunction')(identity), cleanupErrors)
+    await cleanupStep('remove-artifact', () => requireDependency(deps, 'removeArtifact')(identity), cleanupErrors)
+    await cleanupStep('clear-secrets', () => requireDependency(deps, 'clearSecrets')(identity), cleanupErrors)
+    if (baselineVerifiedAbsent) await cleanupStep('assert-control-plane-absent', () => requireDependency(deps, 'assertControlPlaneAbsent')(identity), cleanupErrors)
     if (cleanupErrors.length > 0) primaryError = new AggregateError(
       primaryError ? [primaryError, ...cleanupErrors] : cleanupErrors,
       'isolated RAG validation cleanup failed',

@@ -30,6 +30,20 @@ const REPO_DEFAULT_PUBLIC_COMMUNITY_ID = '56ba808e69df985c046e3d4407e8c672'
 
 function sleep(ms) { return new Promise(resolveWait => setTimeout(resolveWait, ms)) }
 
+export function formatValidationFailure(error) {
+  const summary = [redactSensitive(error?.message || String(error))]
+  const visit = value => {
+    for (const child of Array.isArray(value?.errors) ? value.errors : []) {
+      const message = String(child?.message || child || '')
+      const safeCleanup = message.match(/^cleanup failed stage=[a-z-]+ fingerprint=[a-f0-9]{16}$/)
+      if (safeCleanup) summary.push(safeCleanup[0])
+      if (child instanceof AggregateError) visit(child)
+    }
+  }
+  visit(error)
+  return [...new Set(summary)].join('; ')
+}
+
 function readFlag(argv, name, fallback = '') {
   const exact = argv.find(value => value.startsWith(`--${name}=`))
   if (exact) return exact.slice(name.length + 3)
@@ -496,7 +510,7 @@ export async function main(argv = process.argv.slice(2)) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch(error => {
-    console.error(`[validate-post-rag-isolated] FAILED: ${redactSensitive(error?.message || String(error))}`)
+    console.error(`[validate-post-rag-isolated] FAILED: ${formatValidationFailure(error)}`)
     process.exit(1)
   })
 }
