@@ -294,7 +294,9 @@ export function createVersionedTencentEsRagSink(options: {
       })
       try {
         await database.runTransaction(async (tx) => {
-          if (!leaseMatches(await tx.getById('post_rag_jobs', jobId), jobId, leaseToken)) fail('LEASE_LOST')
+          const currentLease = await tx.getById('post_rag_jobs', jobId)
+          if (!currentLease || !leaseMatches(currentLease, jobId, leaseToken)) fail('LEASE_LOST')
+          await tx.setById('post_rag_jobs', jobId, currentLease)
           for (const mirror of mirrors) {
             const existing = await tx.getById('post_rag_index_versions', mirror._id)
             if (existing) {

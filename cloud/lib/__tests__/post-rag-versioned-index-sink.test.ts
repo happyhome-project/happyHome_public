@@ -242,6 +242,73 @@ test('stageUpsert atomically fences mirror writes when the lease is reclaimed af
   ])
 })
 
+test('stageUpsert writes the exact current job fence before mirror writes', async () => {
+  const database: any = fakeDatabase()
+  const currentLease = structuredClone(database.collections.get('post_rag_jobs').get('job-2'))
+  const writes: Array<{ name: string; id: string; data: Doc }> = []
+  const originalRunTransaction = database.runTransaction
+  database.runTransaction = async (fn: any) => originalRunTransaction(async (tx: any) => fn({
+    ...tx,
+    setById: async (name: string, id: string, data: Doc) => {
+      writes.push({ name, id, data: structuredClone(data) })
+      return tx.setById(name, id, data)
+    },
+  }))
+  const { sink } = makeSink({ database })
+
+  await sink.stageUpsert({ projection: projection() as any, job: job(), ...LEASE })
+
+  expect(writes[0]).toEqual({ name: 'post_rag_jobs', id: 'job-2', data: currentLease })
+  expect(writes.slice(1).map(write => write.name)).toEqual(['post_rag_index_versions', 'post_rag_index_versions'])
+})
+
+test('stageUpsert retries a cleanup write conflict, loses the deleted lease, and cleans bulked ES documents', async () => {
+  const database: any = fakeDatabase()
+  let bulkCompleted = false
+  let cleanupDeleteRaced = false
+  let cleanupDeleteRacedAfterBulk = false
+  database.runTransaction = async (fn: any) => {
+    const attempt = async (): Promise<any> => {
+      const writes: Array<{ name: string; id: string; data: Doc }> = []
+      const result = await fn({
+        getById: async (name: string, id: string) => structuredClone(database.collections.get(name)?.get(id) || null),
+        setById: async (name: string, id: string, data: Doc) => { writes.push({ name, id, data: structuredClone(data) }) },
+      })
+      if (!cleanupDeleteRaced && writes.some(write => write.name === 'post_rag_jobs' && write.id === 'job-2')) {
+        cleanupDeleteRaced = true
+        cleanupDeleteRacedAfterBulk = bulkCompleted
+        database.collections.get('post_rag_jobs').delete('job-2')
+        return attempt()
+      }
+      for (const write of writes) {
+        if (!database.collections.has(write.name)) database.collections.set(write.name, new Map())
+        database.collections.get(write.name).set(write.id, structuredClone(write.data))
+      }
+      return result
+    }
+    return attempt()
+  }
+  const calls: any[] = []
+  const requestJson = async (method: string, path: string, body: any) => {
+    calls.push({ method, path, body })
+    if (path.includes('_bulk')) {
+      bulkCompleted = true
+      return { errors: false, items: [{ create: { status: 201 } }, { create: { status: 201 } }] }
+    }
+    return { deleted: body.query.ids.values.length, timed_out: false, failures: [] }
+  }
+  const { sink } = makeSink({ database, requestJson })
+
+  await expect(sink.stageUpsert({ projection: projection() as any, job: job(), ...LEASE })).rejects.toMatchObject({ code: 'LEASE_LOST' })
+  expect(bulkCompleted).toBe(true)
+  expect(cleanupDeleteRaced).toBe(true)
+  expect(cleanupDeleteRacedAfterBulk).toBe(true)
+  expect(database.collections.get('post_rag_index_versions')?.size || 0).toBe(0)
+  expect(calls.find(call => call.path.includes('_delete_by_query')).body.query.ids.values.sort()).toEqual([
+    `post-1:source-2:${ATTEMPT_A}:chunk-0`, `post-1:source-2:${ATTEMPT_A}:chunk-1`,
+  ])
+})
+
 test('stageUpsert rejects partial ES bulk failures with an authenticated typed error', async () => {
   const { sink } = makeSink({ requestJson: async () => ({ errors: true, items: [{ index: { status: 429, error: { reason: 'secret' } } }] }) })
   await expect(sink.stageUpsert({ projection: projection() as any, job: job(), ...LEASE })).rejects.toMatchObject({ name: 'PostRagVersionedSinkError', code: 'ES_BULK_FAILED' })
