@@ -234,7 +234,42 @@ test('persistent temporary invoke failure reaches direct residue inspection with
       return true
     },
   )
-  assert.equal(directInspections, 1)
+  assert.ok(directInspections >= 2)
+})
+
+test('inspect failure accepts only exact zero residue with one cleaned audit', async () => {
+  let now = 0
+  const result = await recoverExactProbe({ runId: 'run-a', timeoutMs: 10_000, pollMs: 5000 }, {
+    now: () => now,
+    sleep: async ms => { now += ms },
+    inspect: async () => { throw new Error('temporary invoke failed token=secret-value') },
+    processExact: async () => { throw new Error('must not process after direct cleanup proof') },
+    cleanup: async () => { throw new Error('must not cleanup after direct cleanup proof') },
+    verifyNoResidue: async () => { throw new Error('inspect path is unavailable') },
+    inspectResidueDirect: async () => ({
+      operationalResidueCount: 0, cleanedAuditCount: 1, unresolvedResidueCount: 0,
+    }),
+  })
+  assert.equal(result.status, 'cleaned')
+  assert.equal(result.source, 'direct_exact_residue')
+  assert.match(result.lastErrorFingerprint, /^[a-f0-9]{16}$/)
+  assert.equal(now, 0)
+})
+
+test('inspect failure never treats an absent cleanup audit as cleaned', async () => {
+  let now = 0
+  await assert.rejects(recoverExactProbe({ runId: 'run-a', timeoutMs: 10_000, pollMs: 5000 }, {
+    now: () => now,
+    sleep: async ms => { now += ms },
+    inspect: async () => { throw new Error('temporary invoke unavailable') },
+    processExact: async () => ({ status: 'retry_wait' }),
+    cleanup: async () => ({ pending: true }),
+    verifyNoResidue: async () => ({ operationalResidueCount: 0 }),
+    inspectResidueDirect: async () => ({
+      operationalResidueCount: 0, cleanedAuditCount: 0, unresolvedResidueCount: 0,
+    }),
+  }), /recovery timed out/)
+  assert.equal(now, 10_000)
 })
 
 test('exposes the isolated validator package command', async () => {

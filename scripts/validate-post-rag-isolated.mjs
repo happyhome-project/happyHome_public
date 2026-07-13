@@ -167,6 +167,14 @@ export async function recoverExactProbe(options, deps) {
     let inspection
     try { inspection = await deps.inspect(options.runId) } catch (error) {
       retainError(error)
+      try {
+        const residue = await deps.inspectResidueDirect(options.runId)
+        if (residue?.operationalResidueCount === 0
+          && residue?.cleanedAuditCount === 1
+          && residue?.unresolvedResidueCount === 0) {
+          return { status: 'cleaned', source: 'direct_exact_residue', lastErrorFingerprint }
+        }
+      } catch (directError) { retainError(directError) }
       await waitRemaining()
       continue
     }
