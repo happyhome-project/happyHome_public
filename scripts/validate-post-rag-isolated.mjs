@@ -393,6 +393,11 @@ export function createCloudValidationDependencies(options) {
       if (readbackVpc.vpcId !== vpc.vpcId || readbackVpc.subnetId !== vpc.subnetId) throw new Error('temporary function VPC readback mismatch')
       assertExactTemporaryEnvironment(readback, envVariables)
     },
+    async assertEsReady(identity) {
+      const result = await invokeTemporary(identity, { action: 'diagnoseEs', runId: identity.runId })
+      if (result?.statusClass !== '2xx') throw new Error(`ES preflight failed statusClass=${result?.statusClass || 'unknown'}`)
+      return result
+    },
     async createTrigger(identity) {
       await app.functions.scfService.request('CreateTrigger', {
         FunctionName: identity.functionName, Namespace: state.namespace, TriggerName: TRIGGER_NAME,

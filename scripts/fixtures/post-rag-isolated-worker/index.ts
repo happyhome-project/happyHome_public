@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual, randomUUID } from 'node:crypto'
+import https from 'node:https'
 import cloud from 'wx-server-sdk'
 
 import * as db from '../../../cloud/lib/db'
@@ -48,6 +49,7 @@ type Probe = {
 }
 
 type HandlerDependencies = {
+  diagnoseEs(): Promise<{ statusClass: string }>
   create(input: { runId: string; communityId: string }): Promise<any>
   status(input: any): Promise<any>
   cleanup(input: any): Promise<any>
@@ -136,6 +138,20 @@ function assertJobBinding(job: any, jobId: string, probe: Probe) {
 }
 
 const defaultDependencies: HandlerDependencies = {
+  async diagnoseEs() {
+    const endpoint = new URL(String(process.env.TENCENT_RAG_ES_ENDPOINT || ''))
+    const indexName = String(process.env.TENCENT_RAG_INDEX_NAME || '')
+    const authorization = `Basic ${Buffer.from(`${process.env.TENCENT_RAG_ES_USERNAME || ''}:${process.env.TENCENT_RAG_ES_PASSWORD || ''}`).toString('base64')}`
+    return new Promise(resolve => {
+      const req = https.request(new URL(`${indexName}/_mapping`, `${endpoint.toString().replace(/\/+$/, '')}/`), {
+        method: 'GET', headers: { Authorization: authorization }, timeout: 10_000,
+      }, res => { res.resume(); res.once('end', () => resolve({ statusClass: `${Math.floor((res.statusCode || 500) / 100)}xx` })) })
+      const fail = (statusClass: string) => resolve({ statusClass })
+      req.once('timeout', () => { req.destroy(); fail('timeout') })
+      req.once('error', () => fail('network'))
+      req.end()
+    })
+  },
   create: createPostRagReleaseProbe,
   status: readPostRagReleaseProbeStatus,
   cleanup: cleanupPostRagReleaseProbe,
@@ -288,6 +304,12 @@ export function createExactIdValidationHandler(
       return created
     }
     if (event.action === 'status') return dependencies.status(event)
+    if (event.action === 'diagnoseEs') {
+      const diagnostic = await dependencies.diagnoseEs()
+      const statusClass = ['2xx', '3xx', '4xx', '5xx', 'timeout', 'network'].includes(diagnostic?.statusClass)
+        ? diagnostic.statusClass : 'unknown'
+      return { statusClass }
+    }
     if (event.action === 'cleanup') return dependencies.cleanup(event)
     if (event.action === 'inspect') return inspect(runId)
     if (event.action === 'processExact') return processBound(runId)

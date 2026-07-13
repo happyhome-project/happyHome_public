@@ -120,6 +120,7 @@ export async function runIsolatedValidation(options, deps) {
     deployAttempted = true
     await requireDependency(deps, 'deploy')({ ...identity, artifact })
     await requireDependency(deps, 'copyRuntimeConfig')(identity)
+    await requireDependency(deps, 'assertEsReady')(identity)
     triggerAttempted = true
     await requireDependency(deps, 'createTrigger')(identity)
     createAttempted = true

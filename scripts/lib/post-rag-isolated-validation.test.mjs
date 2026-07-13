@@ -289,6 +289,7 @@ function scenario(overrides = {}) {
     async build(identity) { calls.push(['build', identity.functionName]); return { directory: 'artifact' } },
     async deploy() { calls.push(['deploy']) },
     async copyRuntimeConfig() { calls.push(['copyRuntimeConfig']) },
+    async assertEsReady() { calls.push(['assertEsReady']); return { statusClass: '2xx' } },
     async createTrigger() { calls.push(['createTrigger']) },
     async invoke(_identity, event) { calls.push(['invoke', event.action]); return probe },
     async waitIndexed() { calls.push(['waitIndexed']); return { jobId: 'job-create', outcome: 'indexed' } },
@@ -319,7 +320,7 @@ test('runs exact semantic create/delete validation and proves final cleanup', as
   const result = await runIsolatedValidation({ head: 'f16b88f', runId: probe.runId, communityId: 'community-a' }, deps)
   assert.equal(result.status, 'passed')
   assert.deepEqual(calls.map(([name]) => name), [
-    'baseline', 'build', 'deploy', 'copyRuntimeConfig', 'createTrigger',
+    'baseline', 'build', 'deploy', 'copyRuntimeConfig', 'assertEsReady', 'createTrigger',
     'invoke', 'waitIndexed', 'assertSemanticHit', 'invoke', 'waitRemoved',
     'assertSemanticAbsent', 'waitCleaned', 'assertNoResidue', 'recoverProbe',
     'deleteTrigger', 'deleteFunction', 'removeArtifact', 'clearSecrets', 'assertControlPlaneAbsent', 'writeEvidence',
