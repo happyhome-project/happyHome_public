@@ -5,9 +5,9 @@
   "migrations": [],
   "smokeSuites": [],
   "releaseImpact": {
-    "cloudFunctions": "No runtime code change; formal release may skip exact same-run function artifacts after fresh probe attestation.",
-    "adminWeb": "No runtime code change; formal release may skip an exact Aliyun current publication identity.",
-    "miniprogram": "No runtime code change; formal release may reuse only an exact run-bound upload receipt.",
+    "cloudFunctions": "No runtime code change; formal release deploys only run-scoped immutable snapshots, selectively deploys fresh mismatches, and verifies all planned functions.",
+    "adminWeb": "No runtime code change; formal release deploys only the pinned snapshot unless the exact Aliyun current publication identity attests.",
+    "miniprogram": "No runtime code change; formal release may reuse only an exact identity derived from the fresh normalized actual upload receipt.",
     "environmentVariables": [],
     "databaseMigrations": []
   }

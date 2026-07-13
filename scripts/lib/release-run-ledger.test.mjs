@@ -17,6 +17,7 @@ import {
 } from './release-run-ledger.mjs'
 import { completeProductionReleaseWithRemoteConfirmation } from './production-release-guard.mjs'
 import { DEFAULT_FUNCTIONS, REQUIRED_SMOKE_LABELS } from '../cloud-release-smoke.mjs'
+import { createMiniprogramReceiptIdentity, normalizeMiniprogramUploadReceipt } from './miniprogram-receipt-identity.mjs'
 
 async function tempRoot() {
   return await mkdtemp(join(tmpdir(), 'happyhome-release-ledger-'))
@@ -52,13 +53,15 @@ test('prepare pins the formal plan and immutable artifact manifest without probe
   try {
     const ledger = await createReleaseRunLedger({ root, runId: 'pin-run', gitSha: 'abc', version: '1', desc: 'd', envId: 'env' })
     const formalPlan = { headSha: 'abc', targets: { cloud: { functions: ['admin'] }, adminWeb: false, miniprogram: false } }
+    const probeToken = 'known-plaintext-probe-token'
     const artifactManifest = { schemaVersion: 1, runId: 'pin-run', gitSha: 'abc', artifacts: { cloud: { admin: { probeTokenHash: 'hash' } } } }
     await ledger.pinReleaseArtifacts({ formalPlan, artifactManifest })
     const saved = await loadReleaseRun(root, 'pin-run')
     assert.equal(saved.schemaVersion, 2)
     assert.deepEqual(saved.formalPlan, formalPlan)
     assert.deepEqual(saved.artifactManifest, artifactManifest)
-    assert.doesNotMatch(JSON.stringify(saved), /probeToken\s*:/)
+    assert.doesNotMatch(JSON.stringify(saved), new RegExp(probeToken))
+    await assert.rejects(() => ledger.recordRemoteAttestations('cloud', [{ probeToken }]), /must not persist plaintext probeToken/)
     await assert.rejects(
       () => ledger.pinReleaseArtifacts({ formalPlan: { ...formalPlan, headSha: 'other' }, artifactManifest }),
       /already pinned/i,
@@ -97,6 +100,26 @@ test('release summary exposes structured component deployment and skip counts', 
   })
   assert.deepEqual(summary.componentSummary.counts, { deployed: 2, skipped: 2, total: 4 })
   assert.equal(summary.componentSummary.components['cloud:admin'].status, 'attested')
+})
+
+test('ledger sanitizes registered probe token values from stages events errors and summaries', async () => {
+  const root = await tempRoot()
+  const probeToken = 'secret-probe-token-value'
+  try {
+    const ledger = await createReleaseRunLedger({ root, runId: 'secret-run', gitSha: 'abc', version: '1', desc: 'd', envId: 'env' })
+    ledger.registerSecrets([probeToken])
+    await ledger.startStage('cloud-deploy', { evidence: { note: `evidence ${probeToken}` } })
+    await ledger.failStage('cloud-deploy', new Error(`failure ${probeToken}`), { reason: `reason ${probeToken}` })
+    await ledger.recordRemoteAttestations('cloud', [{ skipReason: `remote ${probeToken}` }])
+    const runText = await readFile(join(root, '.codex-local', 'release-runs', 'secret-run', 'run.json'), 'utf8')
+    const eventsText = await readFile(join(root, '.codex-local', 'release-runs', 'secret-run', 'events.jsonl'), 'utf8')
+    assert.doesNotMatch(runText, new RegExp(probeToken))
+    assert.doesNotMatch(eventsText, new RegExp(probeToken))
+    assert.doesNotMatch(JSON.stringify(summarizeReleaseRun(ledger.state)), new RegExp(probeToken))
+    assert.match(runText, /REDACTED_PROBE_TOKEN/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('release ledger records stage lifecycle, events, and latest pointer', async () => {
@@ -717,10 +740,13 @@ test('miniprogram upload is reused only with normalized release-owned evidence',
     assert.match(weak.reason, /upload evidence/)
 
     const uploadInfoStat = await stat(uploadInfoPath)
+    const normalizedReceipt = normalizeMiniprogramUploadReceipt({ method: 'devtools-cli', uploadInfoText: await readFile(uploadInfoPath, 'utf8') })
+    const receiptId = createMiniprogramReceiptIdentity({ receipt: normalizedReceipt, runId: 'unit-run', packageDigest, version: '1.0.1', desc: 'trial-unit' })
     await writeJson(uploadEvidencePath, {
       success: true,
       releaseRunId: 'wrong-run',
-      receiptId: 'receipt-1',
+      receiptId,
+      normalizedReceipt,
       appid: 'wx-unit',
       version: '1.0.1',
       desc: 'trial-unit',
@@ -750,6 +776,13 @@ test('miniprogram upload is reused only with normalized release-owned evidence',
     })
     assert.equal(exactReusable.reusable, true)
 
+    await writeJson(uploadInfoPath, { size: { total: 2 } })
+    const changedReceipt = await inspectReleaseStageReuse(runState, 'miniprogram-upload', {
+      root, runId: 'unit-run', gitSha: 'abc123', version: '1.0.1', desc: 'trial-unit', packageDigest,
+    })
+    assert.equal(changedReceipt.reusable, false)
+    assert.match(changedReceipt.reason, /receipt identity/i)
+
     await rm(uploadInfoPath)
     await writeJson(uploadEvidencePath, {
       success: true,
@@ -770,8 +803,8 @@ test('miniprogram upload is reused only with normalized release-owned evidence',
       desc: 'trial-unit',
       packageDigest,
     })
-    assert.equal(reusableCi.reusable, true)
-    assert.equal(reusableCi.evidence.uploadInfoPath, '')
+    assert.equal(reusableCi.reusable, false)
+    assert.match(reusableCi.reason, /fresh-attestable/i)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

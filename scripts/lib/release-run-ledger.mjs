@@ -3,6 +3,7 @@ import { constants } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { REQUIRED_SMOKE_LABELS } from '../cloud-release-smoke.mjs'
+import { createMiniprogramReceiptIdentity, normalizeMiniprogramUploadReceipt } from './miniprogram-receipt-identity.mjs'
 
 export const RELEASE_RUNS_DIR = '.codex-local/release-runs'
 
@@ -78,6 +79,15 @@ function assertNoPlaintextProbeToken(value) {
     if (key === 'probeToken') throw new Error('release ledger must not persist plaintext probeToken')
     assertNoPlaintextProbeToken(child)
   }
+}
+
+function sanitizeSecretValues(value, secrets = []) {
+  if (typeof value === 'string') return secrets.reduce((text, secret) => text.split(secret).join('[REDACTED_PROBE_TOKEN]'), value)
+  if (Array.isArray(value)) return value.map((item) => sanitizeSecretValues(item, secrets))
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, sanitizeSecretValues(child, secrets)]))
+  }
+  return value
 }
 
 function withAdditiveReleaseDefaults(state) {
@@ -320,6 +330,19 @@ async function inspectUploadEvidence(stage, context) {
     if (fileStat.mtimeMs + 5000 < uploadStartedAtMs) {
       return { reusable: false, reason: 'upload info predates the recorded upload attempt' }
     }
+    const normalizedReceipt = normalizeMiniprogramUploadReceipt({ method: evidence.method, uploadInfoText: await readFile(uploadInfoPath, 'utf8') })
+    const receiptId = createMiniprogramReceiptIdentity({
+      receipt: normalizedReceipt,
+      runId: context.runId,
+      packageDigest: context.packageDigest,
+      version: context.version,
+      desc: context.desc,
+    })
+    if (!evidence.receiptId || receiptId !== evidence.receiptId) {
+      return { reusable: false, reason: 'fresh normalized upload receipt identity does not match ledger evidence' }
+    }
+  } else {
+    return { reusable: false, reason: `${evidence.method} upload receipt is not fresh-attestable` }
   }
   return {
     reusable: true,
@@ -374,9 +397,20 @@ export class ReleaseRunLedger {
     this.eventsPath = join(this.runDir, 'events.jsonl')
     this.latestPath = resolve(this.root, RELEASE_RUNS_DIR, 'latest.json')
     this.state = options.state
+    this.secrets = []
+  }
+
+  registerSecrets(secrets = []) {
+    this.secrets = [...new Set([...this.secrets, ...secrets.map(String).filter(Boolean)])]
+    this.state = this.sanitize(this.state)
+  }
+
+  sanitize(value) {
+    return sanitizeSecretValues(value, this.secrets)
   }
 
   async save() {
+    this.state = this.sanitize(this.state)
     this.state.updatedAt = isoNow(this.now)
     await writeJson(this.runPath, this.state)
     await writeJson(this.latestPath, {
@@ -399,7 +433,7 @@ export class ReleaseRunLedger {
       at: isoNow(this.now),
       event,
       runId: this.runId,
-      ...payload,
+      ...this.sanitize(payload),
     }), 'utf8')
   }
 
@@ -422,15 +456,16 @@ export class ReleaseRunLedger {
   }
 
   async recordRemoteAttestations(name, attestations) {
+    assertNoPlaintextProbeToken(attestations)
     this.state.remoteAttestations ||= {}
-    this.state.remoteAttestations[name] = attestations
+    this.state.remoteAttestations[name] = this.sanitize(attestations)
     await this.appendEvent('remote_attestation_recorded', { component: name, attestations })
     await this.save()
   }
 
   async recordComponent(name, { status, skipReason = '', evidence = null } = {}) {
     this.state.components ||= {}
-    this.state.components[name] = { status, skipReason, evidence }
+    this.state.components[name] = this.sanitize({ status, skipReason, evidence })
     await this.save()
   }
 

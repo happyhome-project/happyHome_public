@@ -105,9 +105,16 @@ import { executeFormalSemanticReleaseStages } from './lib/formal-semantic-releas
 import { ReleaseGovernance } from './lib/release-governance.mjs'
 import {
   attestAdminWebArtifact,
-  attestCloudArtifacts,
+  attestMiniprogramReceipt,
+  createImmutableArtifactSnapshots,
   createReleaseArtifactManifest,
+  orchestrateCloudArtifactRelease,
+  toPublicCloudArtifactIdentity,
 } from './lib/release-artifact-attestation.mjs'
+import {
+  createMiniprogramReceiptIdentity,
+  normalizeMiniprogramUploadReceipt,
+} from './lib/miniprogram-receipt-identity.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
@@ -332,6 +339,14 @@ function runShellCapture(commandLine, options = {}) {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: true,
     })
+    const abort = () => {
+      if (process.platform === 'win32' && proc.pid) {
+        const killer = spawn('taskkill', ['/pid', String(proc.pid), '/t', '/f'], { stdio: 'ignore', windowsHide: true })
+        killer.on('error', () => proc.kill())
+      } else proc.kill('SIGTERM')
+    }
+    if (options.signal?.aborted) abort()
+    else options.signal?.addEventListener('abort', abort, { once: true })
 
     let stdout = ''
     let stderr = ''
@@ -346,10 +361,14 @@ function runShellCapture(commandLine, options = {}) {
       if (!options.silentOutput) process.stderr.write(text)
     })
     proc.on('exit', (code) => {
+      options.signal?.removeEventListener('abort', abort)
       const output = `${stdout}${stderr}`
-      res({ ok: code === 0, reason: code === 0 ? 'ok' : `exit code ${code}`, output })
+      res({ ok: code === 0, reason: options.signal?.aborted ? 'aborted' : code === 0 ? 'ok' : `exit code ${code}`, output })
     })
-    proc.on('error', (err) => res({ ok: false, reason: String(err?.message || err), output: `${stdout}${stderr}` }))
+    proc.on('error', (err) => {
+      options.signal?.removeEventListener('abort', abort)
+      res({ ok: false, reason: String(err?.message || err), output: `${stdout}${stderr}` })
+    })
   })
 }
 
@@ -487,7 +506,7 @@ async function deployCloudViaCloudBaseCli(fns, options = {}) {
       functions: fns,
       concurrency,
       deployOne: async (fn) => {
-        const fnDir = resolve(CLOUD_DIST, fn)
+        const fnDir = resolve(options.artifactRoot || CLOUD_DIST, fn)
         return await runCloudBaseCliCaptureWithRetry(
           confirmDefault(tcb('fn', 'deploy', fn, '--force', '--env-id', envId, '--deployMode', 'cos', '--json')),
           {
@@ -540,10 +559,23 @@ function getMiniprogramUploadEvidencePath(releaseRunId) {
 function writeMiniprogramUploadEvidence({ releaseRunId, version, desc, packageDigest, uploadResult }) {
   const evidencePath = getMiniprogramUploadEvidencePath(releaseRunId)
   const uploadInfoPath = uploadResult.uploadInfoPath || ''
+  const normalizedReceipt = normalizeMiniprogramUploadReceipt({
+    method: uploadResult.method,
+    uploadInfoText: uploadInfoPath && existsSync(uploadInfoPath) ? readFileSync(uploadInfoPath, 'utf8') : '',
+    receipt: uploadResult.receipt,
+  })
+  const receiptId = normalizedReceipt ? createMiniprogramReceiptIdentity({
+    receipt: normalizedReceipt,
+    runId: releaseRunId,
+    packageDigest,
+    version,
+    desc,
+  }) : ''
   const evidence = {
     success: true,
     releaseRunId,
-    receiptId: `${releaseRunId}:${packageDigest}:${version}`,
+    receiptId,
+    normalizedReceipt,
     appid: APPID,
     version,
     desc,
@@ -779,13 +811,14 @@ async function uploadMiniprogramViaDevtoolsCli(version, desc) {
 
 async function uploadMiniprogramViaMiniprogramCi(version, desc) {
   console.log('Uploading miniprogram via miniprogram-ci...')
-  await ci.upload({
+  const receipt = await ci.upload({
     project: getCiProject(),
     version,
     desc,
     setting: { es6: true, minified: false },
   })
   console.log('Miniprogram upload finished via miniprogram-ci')
+  return receipt
 }
 
 function resolveMiniprogramUploadMetadata(defaults = {}) {
@@ -852,9 +885,9 @@ async function uploadBuiltMiniprogram({ version, desc, forceCi, beforeRemoteMuta
     console.log('\n[--use-ci] Skipping DevTools CLI, using miniprogram-ci directly')
   }
 
-  await runOptionalDirectRemoteMutation(options, async () => await uploadMiniprogramViaMiniprogramCi(version, desc))
+  const receipt = await runOptionalDirectRemoteMutation(options, async () => await uploadMiniprogramViaMiniprogramCi(version, desc))
   console.log('[OK] Miniprogram uploaded via miniprogram-ci')
-  return { method: 'miniprogram-ci', uploadInfoPath: '' }
+  return { method: 'miniprogram-ci', uploadInfoPath: '', receipt }
 }
 
 // ── Fallback preview path: miniprogram-ci ──
@@ -970,6 +1003,7 @@ async function deployAdminWebToAliyun(options = {}) {
     sourceSha: options.artifact?.sourceSha || '',
     versionId: options.artifact?.versionId || '',
   })).toString('base64')
+  const artifactRoot = options.artifactRoot || ADMIN_WEB_DIST
 
   console.log('\nPacking admin-web dist...')
   // --force-local: 在 Windows + Git Bash 下，tar 会把 "X:\..." 当成 remote host:path 解析失败。
@@ -977,7 +1011,7 @@ async function deployAdminWebToAliyun(options = {}) {
   const tarHelp = execSync('tar --help', { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
   const forceLocalFlag = tarHelp.includes('--force-local') ? '--force-local ' : ''
   // Git Bash tar needs --force-local for Windows drive-letter paths; Windows tar rejects it.
-  execSync(`tar ${forceLocalFlag}-czf ${quote(archivePath)} -C ${quote(ADMIN_WEB_DIST)} .`, { cwd: ROOT, stdio: 'inherit' })
+  execSync(`tar ${forceLocalFlag}-czf ${quote(archivePath)} -C ${quote(artifactRoot)} .`, { cwd: ROOT, stdio: 'inherit' })
 
   const remoteScript = `#!/usr/bin/env bash
 set -euo pipefail
@@ -1082,7 +1116,7 @@ function createProductionReleaseGuard(releaseContext, plan) {
 function releaseComponents({ cloudDeploy, cloudReleaseProbes = [], miniprogramUpload, plan, releaseContext }) {
   const probeByFunction = new Map(cloudReleaseProbes.map((probe) => [probe.functionName, probe]))
   const functions = Object.fromEntries((cloudDeploy?.fns || []).map((name) => [name,
-    probeByFunction.get(name) || { sourceSha: releaseContext.gitSha, buildId: `cloud-${releaseContext.gitSha.slice(0, 12)}-${name}` },
+    toPublicCloudArtifactIdentity(probeByFunction.get(name) || { sourceSha: releaseContext.gitSha, buildId: `cloud-${releaseContext.gitSha.slice(0, 12)}-${name}`, functionName: name }),
   ]))
   return {
     adminWeb: plan.targets.adminWeb ? { sourceSha: releaseContext.gitSha } : null,
@@ -1134,7 +1168,7 @@ async function verifyCloudReleaseProbes(probes) {
   return verified
 }
 
-async function invokeCloudReleaseProbe({ artifact, functionName, probeToken }) {
+async function invokeCloudReleaseProbe({ artifact, functionName, probeToken, signal }) {
   const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
   const envId = getCloudEnvId()
   const payloadPath = join(tmpdir(), `happyhome-release-attestation-${functionName}-${Date.now()}.json`)
@@ -1144,6 +1178,7 @@ async function invokeCloudReleaseProbe({ artifact, functionName, probeToken }) {
       '-d', `"@${payloadPath}"`, '--env-id', envId, '--json'].map(quote).join(' ')
     const result = await runCloudBaseCliCaptureWithRetry(commandLine, {
       displayCommandLine: `tcb fn invoke ${functionName} <release-attestation> --env-id ${envId} --json`,
+      signal,
       silentOutput: true,
     })
     if (!result.ok) throw new Error(`fresh release probe failed for ${functionName}: ${result.reason}`)
@@ -1316,6 +1351,12 @@ async function runFormalRelease(options = {}) {
     if (!artifactManifest) {
       if (formalPlan.targets.cloud.mode !== 'none') buildCloudArtifacts(formalPlan.targets.cloud.functions, releaseContext.gitSha)
       if (formalPlan.targets.adminWeb) buildAdminWeb('history')
+      const snapshotPaths = await createImmutableArtifactSnapshots({
+        root: ROOT,
+        runId: releaseLedger.runId,
+        plan: formalPlan,
+        paths: { cloudRoot: CLOUD_DIST, adminWebRoot: ADMIN_WEB_DIST, miniprogramRoot: MP_DIST },
+      })
       artifactManifest = await createReleaseArtifactManifest({
         root: ROOT,
         runId: releaseLedger.runId,
@@ -1325,7 +1366,7 @@ async function runFormalRelease(options = {}) {
         desc: releaseContext.desc,
         plan: formalPlan,
         toolchain: releaseToolchainIdentity(),
-        paths: { cloudRoot: CLOUD_DIST, adminWebRoot: ADMIN_WEB_DIST, miniprogramRoot: MP_DIST },
+        paths: snapshotPaths,
       })
       await releaseLedger.pinReleaseArtifacts({ formalPlan, artifactManifest })
     }
@@ -1365,44 +1406,51 @@ async function runFormalRelease(options = {}) {
 
     let cloudDeploy = { fns: [] }
     let cloudReleaseProbes = []
-    const cloudAttestation = formalPlan.targets.cloud.mode === 'none'
-      ? { attestations: [], deployFunctions: [] }
-      : await attestCloudArtifacts({ root: ROOT, manifest: artifactManifest, invoke: invokeCloudReleaseProbe })
-    await releaseLedger.recordRemoteAttestations('cloud', cloudAttestation.attestations)
+    let cloudOrchestration = { attestations: [], deployFunctions: [], verified: [] }
     if (formalPlan.targets.cloud.mode !== 'none') cloudDeploy = await runLedgerStage(releaseLedger, 'cloud-deploy', {
       command: `fresh artifact attestation + selective CloudBase CLI/COS fn deploy (concurrency=${getCloudDeployConcurrency()})`,
     }, async () => {
-      if (cloudAttestation.deployFunctions.length === 0) {
-        for (const item of cloudAttestation.attestations) await releaseLedger.recordComponent(item.component, item)
-        return { result: { fns: formalPlan.targets.cloud.functions, deployedFns: [], path: 'attested', status: 'attested' } }
-      }
-      const result = await deployCloud({
-        afterFunctionDeploy: async (fn, record) => await releaseGuard.recordStage(`cloud:${fn}`, { evidence: record }),
-        beforeFunctionDeploy: async (fn) => await revalidateFormalMutation(`cloud:${fn}`),
-        functions: cloudAttestation.deployFunctions,
-        requireCloudBaseCli: true,
-        skipBuild: true,
-        sourceSha: releaseContext.gitSha,
+      cloudOrchestration = await orchestrateCloudArtifactRelease({
+        root: ROOT,
+        manifest: artifactManifest,
+        onSecrets: (secrets) => releaseLedger.registerSecrets(secrets),
+        timeoutMs: getPositiveIntFlag('cloud-attestation-timeout-ms', 30_000, { max: 120_000 }),
+        attest: invokeCloudReleaseProbe,
+        deploy: async ({ artifactRoot, functionName }) => {
+          const result = await deployCloud({
+            afterFunctionDeploy: async (fn, record) => await releaseGuard.recordStage(`cloud:${fn}`, { evidence: record }),
+            artifactRoot: dirname(artifactRoot),
+            beforeFunctionDeploy: async (fn) => await revalidateFormalMutation(`cloud:${fn}`),
+            functions: [functionName],
+            requireCloudBaseCli: true,
+            skipBuild: true,
+            sourceSha: releaseContext.gitSha,
+          })
+          if (result.path !== 'cloudbase-cli') throw new Error(`Formal release cloud deploy must use CloudBase CLI/COS; got ${result.path}`)
+        },
+        verify: invokeCloudReleaseProbe,
       })
-      if (result.path !== 'cloudbase-cli') {
-        throw new Error(`Formal release cloud deploy must use CloudBase CLI/COS before smoke; got ${result.path}. Rerun with --use-tcb.`)
-      }
-      return { result: { ...result, fns: formalPlan.targets.cloud.functions, deployedFns: result.fns, status: 'deployed' } }
+      await releaseLedger.recordRemoteAttestations('cloud', cloudOrchestration.attestations)
+      return { result: {
+        fns: formalPlan.targets.cloud.functions,
+        deployedFns: cloudOrchestration.deployFunctions,
+        path: cloudOrchestration.deployFunctions.length ? 'cloudbase-cli' : 'attested',
+        status: cloudOrchestration.deployFunctions.length ? 'deployed' : 'attested',
+      } }
     })
     else await releaseLedger.skipStage('cloud-deploy', { reason: 'release plan has no cloud function changes' })
 
     if (cloudDeploy.fns.length) cloudReleaseProbes = await runLedgerStage(releaseLedger, 'cloud-version-probes', {
-      command: 'invoke each deployed cloud function with its internal release probe token',
+      command: 'record bounded fresh verification for every planned immutable cloud artifact',
     }, async () => {
-      const probes = readCloudReleaseProbes(formalPlan.targets.cloud.functions)
-      const verified = await verifyCloudReleaseProbes(probes)
-      await releaseGuard.recordStage('cloud-version-probes', { evidence: { functions: verified.map((probe) => probe.functionName) } })
-      return verified
+      cloudReleaseProbes = formalPlan.targets.cloud.functions.map((functionName) => artifactManifest.artifacts.cloud[functionName])
+      await releaseGuard.recordStage('cloud-version-probes', { evidence: { functions: cloudOrchestration.verified } })
+      return cloudReleaseProbes
     })
     else await releaseLedger.skipStage('cloud-version-probes', { reason: 'release plan has no cloud function changes' })
 
     const deployedCloudFunctions = new Set(cloudDeploy.deployedFns || [])
-    for (const attestation of cloudAttestation.attestations) {
+    for (const attestation of cloudOrchestration.attestations) {
       const deployed = deployedCloudFunctions.has(attestation.functionName)
       await releaseLedger.recordComponent(attestation.component, deployed
         ? { status: 'verified', skipReason: attestation.skipReason, evidence: { deployed: true, freshProbeVerified: true } }
@@ -1458,6 +1506,7 @@ async function runFormalRelease(options = {}) {
       }, async () => {
         await deployAdminWeb({
           artifact: adminArtifact,
+          artifactRoot: resolve(ROOT, adminArtifact.artifactPath),
           skipBuild: true,
           beforeRemoteMutation: async () => await revalidateFormalMutation('admin-web-deploy'),
         })
@@ -1511,18 +1560,6 @@ async function runFormalRelease(options = {}) {
     })
     else await releaseLedger.skipStage('miniprogram-upload', { reason: 'release plan has no miniprogram changes' })
 
-    if (formalPlan.targets.miniprogram) {
-      const uploadStage = releaseLedger.state.stages['miniprogram-upload']
-      const miniprogramOutcome = {
-        component: 'miniprogram',
-        status: 'uploaded',
-        skipReason: uploadStage?.reused ? uploadStage.reason : '',
-        evidence: { receiptReused: uploadStage?.reused === true },
-      }
-      await releaseLedger.recordRemoteAttestations('miniprogram', [miniprogramOutcome])
-      await releaseLedger.recordComponent('miniprogram', miniprogramOutcome)
-    }
-
     if (formalPlan.targets.miniprogram) await runLedgerStage(releaseLedger, 'verify-upload', {
       resume,
       reuseCheck,
@@ -1546,10 +1583,23 @@ async function runFormalRelease(options = {}) {
         throw new Error('uploaded miniprogram package changed before verification')
       }
       const uploadInfoPath = uploadEvidence.uploadInfoPath || ''
+      let normalizedReceipt = null
       if (uploadEvidence.method === 'devtools-cli') {
         if (!uploadInfoPath) throw new Error('upload evidence uploadInfoPath is missing')
         if (!existsSync(uploadInfoPath)) throw new Error(`upload info file not found: ${uploadInfoPath}`)
+        normalizedReceipt = normalizeMiniprogramUploadReceipt({
+          method: uploadEvidence.method,
+          uploadInfoText: readFileSync(uploadInfoPath, 'utf8'),
+        })
+      } else if (uploadEvidence.method === 'miniprogram-ci') {
+        normalizedReceipt = uploadEvidence.normalizedReceipt || null
       }
+      const receiptAttestation = attestMiniprogramReceipt({
+        artifact: artifactManifest.artifacts.miniprogram,
+        receipt: normalizedReceipt,
+        expectedReceiptId: uploadEvidence.receiptId,
+      })
+      if (receiptAttestation.shouldUpload) throw new Error(receiptAttestation.skipReason)
       const buildInfoPath = resolve(ROOT, 'miniprogram/src/generated/build-info.ts')
       const buildInfo = readFileSync(buildInfoPath, 'utf8')
       if (!buildInfo.includes(miniprogramUpload.version) || !buildInfo.includes(miniprogramUpload.desc)) {
@@ -1562,10 +1612,25 @@ async function runFormalRelease(options = {}) {
           desc: miniprogramUpload.desc,
           method: uploadEvidence.method,
           packageDigest: currentPackageDigest,
+          receiptAttestation,
         },
       }
     })
     else await releaseLedger.skipStage('verify-upload', { reason: 'release plan has no miniprogram changes' })
+
+    if (formalPlan.targets.miniprogram) {
+      const uploadStage = releaseLedger.state.stages['miniprogram-upload']
+      const receiptAttestation = releaseLedger.state.stages['verify-upload']?.result?.receiptAttestation
+      const miniprogramOutcome = {
+        ...receiptAttestation,
+        component: 'miniprogram',
+        status: 'uploaded',
+        skipReason: uploadStage?.reused ? receiptAttestation?.skipReason || uploadStage.reason : '',
+        evidence: { receiptReused: uploadStage?.reused === true, receiptId: receiptAttestation?.receiptId || '' },
+      }
+      await releaseLedger.recordRemoteAttestations('miniprogram', [miniprogramOutcome])
+      await releaseLedger.recordComponent('miniprogram', miniprogramOutcome)
+    }
 
     if (releaseGuard) await completeProductionReleaseWithRemoteConfirmation({
       guard: releaseGuard,
