@@ -226,7 +226,8 @@ describe('home live card formatting', () => {
   test.each([
     ['rich_text', '<p>正文标题</p>', '正文标题'],
     ['number', 2026, '2026'],
-  ])('returns the actual %s fallback widget as the consumed title source', (type, value, text) => {
+    ['rich_note', { format: 'markdown', markdown: '完整正文', html: '<p>完整正文</p>', text: '完整正文', imageFileIDs: [], schemaVersion: 1 }, '完整正文'],
+  ])('keeps a generic %s fallback unconsumed so detail content is not lost', (type, value, text) => {
     const section = {
       name: '社区动态',
       type: 'evergreen',
@@ -234,7 +235,39 @@ describe('home live card formatting', () => {
     } as Section
     const post = { content: { fallback: value } } as Post
 
-    expect(resolveTitle(post, section)).toEqual({ text, sourceWidgetId: 'fallback' })
+    expect(resolveTitle(post, section)).toEqual({ text, sourceWidgetId: null })
+  })
+
+  test.each(['short_text', 'summary'])('keeps the legacy consumed-title behavior for generic %s fallback', (type) => {
+    const section = {
+      name: '社区动态',
+      type: 'evergreen',
+      widgets: [{ widgetId: 'fallback', type, label: '正文', fieldKey: 'body', order: 0 }],
+    } as Section
+    const post = { content: { fallback: '简短标题' } } as Post
+
+    expect(resolveTitle(post, section)).toEqual({ text: '简短标题', sourceWidgetId: 'fallback' })
+  })
+
+  test('does not broaden shared list/live title filtering with detail-only semantic labels', () => {
+    const section = {
+      name: '社区动态',
+      type: 'realtime',
+      widgets: [
+        { widgetId: 'activity', type: 'short_text', label: '活动说明', fieldKey: 'activity', order: 0, showInList: true },
+        { widgetId: 'doctor', type: 'short_text', label: '医生姓名', fieldKey: 'doctor', order: 1, showInList: true },
+      ],
+    } as Section
+    const post = {
+      content: { activity: '周六集合', doctor: '王医生' },
+      createdAt: '2026-07-14T08:00:00+08:00',
+    } as Post
+
+    expect(getListPreview(post, section)).toEqual([
+      { label: '活动说明', value: '周六集合', type: 'text' },
+      { label: '医生姓名', value: '王医生', type: 'text' },
+    ])
+    expect(getHomeLiveMeta(post, section)).toEqual(['周六集合', '王医生'])
   })
 
   test('marks a synthetic carpool route as having no consumed source widget', () => {

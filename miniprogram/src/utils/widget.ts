@@ -49,8 +49,7 @@ export function resolvePostHomeTitle(post: Post, section: Section): PostHomeTitl
 
   const widgets = (section.widgets || []).slice().sort((a, b) => a.order - b.order)
   const semanticTitleWidget = widgets.find((widget) =>
-    HOME_TITLE_WIDGET_TYPES.includes(widget.type) &&
-    isTitleLikeWidget(widget) &&
+    isResolverSemanticTitleWidget(widget) &&
     getWidgetValue(post, widget) !== ''
   )
   if (semanticTitleWidget) {
@@ -66,7 +65,9 @@ export function resolvePostHomeTitle(post: Post, section: Section): PostHomeTitl
   if (fallbackWidget) {
     return {
       text: getWidgetValue(post, fallbackWidget),
-      sourceWidgetId: fallbackWidget.widgetId,
+      sourceWidgetId: ['short_text', 'summary'].includes(fallbackWidget.type)
+        ? fallbackWidget.widgetId
+        : null,
     }
   }
 
@@ -148,6 +149,14 @@ export function getListPreview(post: Post, section: Section): ListPreviewItem[] 
 }
 
 function isTitleLikeWidget(widget: Section['widgets'][number]): boolean {
+  const fieldKey = String(widget.fieldKey || '').toLowerCase()
+  const label = String(widget.label || '').replace(/\s/g, '')
+  return fieldKey === 'title' ||
+    fieldKey.includes('title') ||
+    ['标题', '名称', '名字'].some((item) => label.includes(item))
+}
+
+function isResolverSemanticTitleWidget(widget: Section['widgets'][number]): boolean {
   if (!HOME_TITLE_WIDGET_TYPES.includes(widget.type)) return false
   const fieldKey = String(widget.fieldKey || '').toLowerCase()
   const label = String(widget.label || '').replace(/\s/g, '')
