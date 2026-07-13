@@ -62,10 +62,11 @@ import ci from 'miniprogram-ci'
 import { resolve, dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import { execSync, spawn, spawnSync } from 'child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { parseArgs as parseCloudSmokeArgs, runCloudReleaseSmoke } from './cloud-release-smoke.mjs'
 import { deployFunctionsWithConcurrency } from './lib/cloudbase-function-deploy.mjs'
+import { abortableDelay, runAbortableShellCapture } from './lib/abortable-process.mjs'
 import { createProductionReleaseStore } from './lib/cloudbase-release-store.mjs'
 import {
   analyzeDevtoolsCloudDeployOutput,
@@ -103,6 +104,23 @@ import { hasCloudReleaseProbeResponse } from './lib/cloud-release-probe.mjs'
 import { executeReleaseOperations } from './lib/release-operations.mjs'
 import { executeFormalSemanticReleaseStages } from './lib/formal-semantic-release-stages.mjs'
 import { ReleaseGovernance } from './lib/release-governance.mjs'
+import {
+  attestAdminWebArtifact,
+  attestMiniprogramReceipt,
+  computeFileSha256,
+  createDeterministicFileManifest,
+  createPinnedCloudDeployAttemptGuard,
+  createImmutableArtifactSnapshots,
+  createReleaseArtifactManifest,
+  orchestrateCloudArtifactRelease,
+  runPinnedAdminArtifactMutation,
+  runPinnedAdminArchiveMutation,
+  toPublicCloudArtifactIdentity,
+} from './lib/release-artifact-attestation.mjs'
+import {
+  createMiniprogramReceiptIdentity,
+  normalizeMiniprogramUploadReceipt,
+} from './lib/miniprogram-receipt-identity.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
@@ -113,6 +131,18 @@ const MP_DIST = resolve(ROOT, 'miniprogram/dist/build/mp-weixin')
 const CLOUD_DIST = resolve(ROOT, 'cloud/dist')
 const ADMIN_WEB_DIR = resolve(ROOT, 'admin-web')
 const ADMIN_WEB_DIST = resolve(ROOT, 'admin-web/dist')
+
+function releaseToolchainIdentity() {
+  const lock = JSON.parse(readFileSync(resolve(ROOT, 'package-lock.json'), 'utf8'))
+  const version = (path) => lock.packages?.[path]?.version || 'unknown'
+  return {
+    node: process.version,
+    npm: process.env.npm_config_user_agent || 'npm@unknown',
+    cloudBuilder: `cloud/build.mjs+esbuild@${version('node_modules/esbuild')}`,
+    adminBuilder: `vite@${version('admin-web/node_modules/vite')}`,
+    miniprogramBuilder: `@dcloudio/uni-app@${version('miniprogram/node_modules/@dcloudio/uni-app')}+WeChat-DevTools-release-gate`,
+  }
+}
 
 async function runOptionalDirectRemoteMutation(options, mutate) {
   if (typeof options?.beforeRemoteMutation !== 'function') return await mutate()
@@ -308,31 +338,12 @@ function runShell(commandLine, options = {}) {
 
 function runShellCapture(commandLine, options = {}) {
   console.log(options.displayCommandLine || commandLine)
-  return new Promise((res) => {
-    const proc = spawn(commandLine, {
-      cwd: options.cwd || ROOT,
-      env: options.env || process.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: true,
-    })
-
-    let stdout = ''
-    let stderr = ''
-    proc.stdout?.on('data', (chunk) => {
-      const text = String(chunk)
-      stdout += text
-      if (!options.silentOutput) process.stdout.write(text)
-    })
-    proc.stderr?.on('data', (chunk) => {
-      const text = String(chunk)
-      stderr += text
-      if (!options.silentOutput) process.stderr.write(text)
-    })
-    proc.on('exit', (code) => {
-      const output = `${stdout}${stderr}`
-      res({ ok: code === 0, reason: code === 0 ? 'ok' : `exit code ${code}`, output })
-    })
-    proc.on('error', (err) => res({ ok: false, reason: String(err?.message || err), output: `${stdout}${stderr}` }))
+  return runAbortableShellCapture(commandLine, {
+    ...options,
+    cwd: options.cwd || ROOT,
+    env: options.env || process.env,
+    stdout: (text) => process.stdout.write(text),
+    stderr: (text) => process.stderr.write(text),
   })
 }
 
@@ -356,10 +367,6 @@ function logCloudFunctionDetailSummary(functionName, output) {
   return data
 }
 
-function sleep(ms) {
-  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
-}
-
 function isTransientCloudBaseCliFailure(result) {
   const text = `${result?.reason || ''}\n${result?.output || ''}`
   return /ECONNRESET|ETIMEDOUT|TLS connection|socket disconnected|network timeout|ENOTFOUND|EAI_AGAIN|_a\.includes is not a function|e\.message\.includes is not a function/i.test(text)
@@ -369,7 +376,9 @@ async function runCloudBaseCliCaptureWithRetry(commandLine, options = {}, attemp
   const { beforeAttempt, ...shellOptions } = options
   let lastResult = null
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    if (shellOptions.signal?.aborted) throw new Error('operation aborted before CloudBase CLI attempt')
     if (typeof beforeAttempt === 'function') await beforeAttempt({ attempt, attempts })
+    if (shellOptions.signal?.aborted) throw new Error('operation aborted before CloudBase CLI process start')
     const result = await runShellCapture(commandLine, {
       ...shellOptions,
       displayCommandLine: attempt === 1
@@ -377,10 +386,11 @@ async function runCloudBaseCliCaptureWithRetry(commandLine, options = {}, attemp
         : `${shellOptions.displayCommandLine || commandLine} (retry ${attempt}/${attempts})`,
     })
     if (result.ok) return result
+    if (shellOptions.signal?.aborted || result.aborted) return result
     lastResult = result
     if (!isTransientCloudBaseCliFailure(result) || attempt >= attempts) break
     console.warn(`[CloudBase CLI] transient failure; retrying in ${attempt * 3000}ms`)
-    await sleep(attempt * 3000)
+    await abortableDelay(attempt * 3000, shellOptions.signal)
   }
   return lastResult
 }
@@ -470,7 +480,7 @@ async function deployCloudViaCloudBaseCli(fns, options = {}) {
       functions: fns,
       concurrency,
       deployOne: async (fn) => {
-        const fnDir = resolve(CLOUD_DIST, fn)
+        const fnDir = resolve(options.artifactRoot || CLOUD_DIST, fn)
         return await runCloudBaseCliCaptureWithRetry(
           confirmDefault(tcb('fn', 'deploy', fn, '--force', '--env-id', envId, '--deployMode', 'cos', '--json')),
           {
@@ -523,8 +533,23 @@ function getMiniprogramUploadEvidencePath(releaseRunId) {
 function writeMiniprogramUploadEvidence({ releaseRunId, version, desc, packageDigest, uploadResult }) {
   const evidencePath = getMiniprogramUploadEvidencePath(releaseRunId)
   const uploadInfoPath = uploadResult.uploadInfoPath || ''
+  const normalizedReceipt = normalizeMiniprogramUploadReceipt({
+    method: uploadResult.method,
+    uploadInfoText: uploadInfoPath && existsSync(uploadInfoPath) ? readFileSync(uploadInfoPath, 'utf8') : '',
+    receipt: uploadResult.receipt,
+  })
+  const receiptId = normalizedReceipt ? createMiniprogramReceiptIdentity({
+    receipt: normalizedReceipt,
+    runId: releaseRunId,
+    packageDigest,
+    version,
+    desc,
+  }) : ''
   const evidence = {
     success: true,
+    releaseRunId,
+    receiptId,
+    normalizedReceipt,
     appid: APPID,
     version,
     desc,
@@ -578,16 +603,7 @@ async function deployCloud(options = {}) {
   if (plannedFunctions) console.log(`Release plan selected: ${fns.join(', ')}`)
   if (onlyList) console.log(`Filtering to: ${fns.join(', ')}`)
 
-  console.log('\nBuilding cloud functions...')
-  execSync('node build.mjs', {
-    cwd: resolve(ROOT, 'cloud'),
-    stdio: 'inherit',
-    env: {
-      ...process.env,
-      HH_CLOUD_BUILD_ONLY: fns.length < CLOUD_FUNCTIONS.length ? fns.join(',') : '',
-      HH_RELEASE_SOURCE_SHA: options.sourceSha || process.env.HH_RELEASE_SOURCE_SHA || 'unknown',
-    },
-  })
+  if (!options.skipBuild) buildCloudArtifacts(fns, options.sourceSha || process.env.HH_RELEASE_SOURCE_SHA || 'unknown')
 
   const forceCi = process.argv.includes('--use-ci')
   const forceTcb = process.argv.includes('--use-tcb')
@@ -647,6 +663,19 @@ async function deployCloud(options = {}) {
   return { fns, path: 'miniprogram-ci' }
 }
 
+function buildCloudArtifacts(functions, sourceSha) {
+  console.log('\nBuilding cloud functions...')
+  execSync('node build.mjs', {
+    cwd: resolve(ROOT, 'cloud'),
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      HH_CLOUD_BUILD_ONLY: functions.length < CLOUD_FUNCTIONS.length ? functions.join(',') : '',
+      HH_RELEASE_SOURCE_SHA: sourceSha,
+    },
+  })
+}
+
 async function runCloudSmoke(fns, releaseRunId = '', options = {}) {
   const parsedSmokeArgs = parseCloudSmokeArgs(process.argv.slice(3))
   const smokeOptions = {
@@ -659,6 +688,7 @@ async function runCloudSmoke(fns, releaseRunId = '', options = {}) {
       : parsedSmokeArgs.evidenceDir,
     concurrency: getCloudSmokeConcurrency(),
     beforeCommand: options.beforeSmokeCommand,
+    beforeCleanupCommand: options.beforeFixtureCleanup,
   }
   console.log('\nEnsuring release database collections and indexes...')
   if (typeof options.beforeEnsureIndexes === 'function') await options.beforeEnsureIndexes()
@@ -755,13 +785,14 @@ async function uploadMiniprogramViaDevtoolsCli(version, desc) {
 
 async function uploadMiniprogramViaMiniprogramCi(version, desc) {
   console.log('Uploading miniprogram via miniprogram-ci...')
-  await ci.upload({
+  const receipt = await ci.upload({
     project: getCiProject(),
     version,
     desc,
     setting: { es6: true, minified: false },
   })
   console.log('Miniprogram upload finished via miniprogram-ci')
+  return receipt
 }
 
 function resolveMiniprogramUploadMetadata(defaults = {}) {
@@ -828,9 +859,9 @@ async function uploadBuiltMiniprogram({ version, desc, forceCi, beforeRemoteMuta
     console.log('\n[--use-ci] Skipping DevTools CLI, using miniprogram-ci directly')
   }
 
-  await runOptionalDirectRemoteMutation(options, async () => await uploadMiniprogramViaMiniprogramCi(version, desc))
+  const receipt = await runOptionalDirectRemoteMutation(options, async () => await uploadMiniprogramViaMiniprogramCi(version, desc))
   console.log('[OK] Miniprogram uploaded via miniprogram-ci')
-  return { method: 'miniprogram-ci', uploadInfoPath: '' }
+  return { method: 'miniprogram-ci', uploadInfoPath: '', receipt }
 }
 
 // ── Fallback preview path: miniprogram-ci ──
@@ -896,8 +927,19 @@ function buildAdminWeb(defaultRouterMode) {
   return env
 }
 
+async function inspectAdminWebPublication() {
+  const target = (process.env.ADMIN_WEB_TARGET || 'aliyun').toLowerCase()
+  if (target !== 'aliyun') throw new Error(`admin-web target ${target} has no reliable publication identity readback`)
+  const markerPath = `${ADMIN_WEB_ALIYUN_ROOT}/current/.happyhome-release.json`
+  const result = await runShellCapture(`ssh ${quote(ADMIN_WEB_ALIYUN_HOST)} ${quote(`cat ${markerPath}`)}`, { silentOutput: true })
+  if (!result.ok) throw new Error(`admin-web publication identity readback failed: ${result.reason}`)
+  return JSON.parse(result.output)
+}
+
 async function deployAdminWebToCloudBase(options = {}) {
-  const env = buildAdminWeb('hash')
+  const env = options.skipBuild ? process.env : buildAdminWeb('hash')
+  const artifactRoot = options.artifactRoot || ADMIN_WEB_DIST
+  const expectedDigest = options.artifact?.contentDigest || await computeDirectoryDigest(artifactRoot)
   const cloudPath = process.env.ADMIN_WEB_CLOUD_PATH || '/'
   const envId = getCloudEnvId()
   const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
@@ -909,14 +951,18 @@ async function deployAdminWebToCloudBase(options = {}) {
     'cloudbase',
     'hosting',
     'deploy',
-    ADMIN_WEB_DIST,
+    artifactRoot,
   ]
   if (cloudPath && cloudPath !== '/') args.push(cloudPath)
   args.push('-e', envId)
 
   console.log('\nDeploying admin-web dist to CloudBase static hosting...')
   console.log(`Using VITE_CLOUD_API_URL=${env.VITE_CLOUD_API_URL}`)
-  const result = await runOptionalDirectRemoteMutation(options, async () => await runShell(args.map(quote).join(' ')))
+  const [result] = await runOptionalDirectRemoteMutation(options, async () => await runPinnedAdminArtifactMutation({
+    artifactRoot,
+    expectedDigest,
+    runners: [async () => await runShell(args.map(quote).join(' '))],
+  }))
   if (!result.ok) {
     throw new Error(`Admin web deploy failed: ${result.reason}. Ensure CloudBase CLI is logged in and static hosting is enabled for ${envId}.`)
   }
@@ -925,12 +971,21 @@ async function deployAdminWebToCloudBase(options = {}) {
 }
 
 async function deployAdminWebToAliyun(options = {}) {
-  const env = buildAdminWeb('history')
+  const env = options.skipBuild ? process.env : buildAdminWeb('history')
   const stamp = Date.now()
   const archivePath = join(tmpdir(), `happyhome-admin-web-${stamp}.tgz`)
   const remoteArchivePath = `/tmp/happyhome-admin-web-${stamp}.tgz`
   const remoteScriptPath = `/tmp/deploy-happyhome-admin-${stamp}.sh`
   const localScriptPath = join(tmpdir(), `deploy-happyhome-admin-${stamp}.sh`)
+  const stagingRoot = join(tmpdir(), `happyhome-admin-web-${stamp}`)
+  const artifactMarker = Buffer.from(JSON.stringify({
+    contentDigest: options.artifact?.contentDigest || '',
+    runId: options.artifact?.runId || '',
+    sourceSha: options.artifact?.sourceSha || '',
+    versionId: options.artifact?.versionId || '',
+  })).toString('base64')
+  const artifactRoot = options.artifactRoot || ADMIN_WEB_DIST
+  const expectedDigest = options.artifact?.contentDigest || await computeDirectoryDigest(artifactRoot)
 
   console.log('\nPacking admin-web dist...')
   // --force-local: 在 Windows + Git Bash 下，tar 会把 "X:\..." 当成 remote host:path 解析失败。
@@ -938,18 +993,52 @@ async function deployAdminWebToAliyun(options = {}) {
   const tarHelp = execSync('tar --help', { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
   const forceLocalFlag = tarHelp.includes('--force-local') ? '--force-local ' : ''
   // Git Bash tar needs --force-local for Windows drive-letter paths; Windows tar rejects it.
-  execSync(`tar ${forceLocalFlag}-czf ${quote(archivePath)} -C ${quote(ADMIN_WEB_DIST)} .`, { cwd: ROOT, stdio: 'inherit' })
 
-  const remoteScript = `#!/usr/bin/env bash
+  console.log('\nDeploying admin-web dist to Aliyun Nginx host...')
+  console.log(`Using VITE_CLOUD_API_URL=${env.VITE_CLOUD_API_URL}`)
+  console.log(`Using VITE_ROUTER_MODE=${env.VITE_ROUTER_MODE}`)
+  console.log(`Using ADMIN_WEB_SSH_HOST=${ADMIN_WEB_ALIYUN_HOST}`)
+  let expectedArchiveDigest = ''
+  let expectedScriptDigest = ''
+  try {
+    await runOptionalDirectRemoteMutation(options, async () => await runPinnedAdminArtifactMutation({
+      artifactRoot,
+      expectedDigest,
+      runners: [async () => {
+        rmSync(stagingRoot, { recursive: true, force: true })
+        cpSync(artifactRoot, stagingRoot, { recursive: true, errorOnExist: true })
+        const stagedDigest = await computeDirectoryDigest(stagingRoot)
+        if (stagedDigest !== expectedDigest) throw new Error('immutable admin-web staging digest mismatch')
+        writeFileSync(join(stagingRoot, '.happyhome-file-manifest.sha256'), await createDeterministicFileManifest(stagingRoot), 'utf8')
+        execSync(`tar ${forceLocalFlag}-czf ${quote(archivePath)} -C ${quote(stagingRoot)} .`, { cwd: ROOT, stdio: 'inherit' })
+        expectedArchiveDigest = await computeFileSha256(archivePath)
+      }],
+    }))
+
+    const remoteScript = `#!/usr/bin/env bash
 set -euo pipefail
 root=${JSON.stringify(ADMIN_WEB_ALIYUN_ROOT)}
 archive=${JSON.stringify(remoteArchivePath)}
+expected_archive_sha=${JSON.stringify(expectedArchiveDigest)}
+actual_archive_sha="$(sha256sum "$archive" | awk '{print $1}')"
+test "$actual_archive_sha" = "$expected_archive_sha"
 release="$root/releases/$(date +%Y%m%d%H%M%S)"
 sudo mkdir -p "$release"
 sudo tar -xzf "$archive" -C "$release"
+manifest="$release/.happyhome-file-manifest.sha256"
+test -f "$manifest"
+expected_files="$(mktemp)"
+actual_files="$(mktemp)"
+sed -E 's/^[0-9a-f]{64}  //' "$manifest" | LC_ALL=C sort > "$expected_files"
+(cd "$release" && find . -type f ! -name '.happyhome-file-manifest.sha256' -printf '%P\\n' | LC_ALL=C sort) > "$actual_files"
+diff -u "$expected_files" "$actual_files"
+(cd "$release" && sha256sum -c '.happyhome-file-manifest.sha256')
+rm -f "$expected_files" "$actual_files"
+sudo rm -f "$manifest"
 sudo chown -R root:root "$release"
 sudo find "$release" -type d -exec chmod 755 {} \\;
 sudo find "$release" -type f -exec chmod 644 {} \\;
+echo ${JSON.stringify(artifactMarker)} | base64 -d | sudo tee "$release/.happyhome-release.json" >/dev/null
 sudo ln -sfn "$release" "$root/current"
 sudo nginx -t
 sudo systemctl reload nginx
@@ -957,19 +1046,35 @@ rm -f "$archive" ${JSON.stringify(remoteScriptPath)}
 echo "[OK] Admin web deployed to $release"
 readlink -f "$root/current"
 `
-  writeFileSync(localScriptPath, remoteScript, 'utf8')
+    writeFileSync(localScriptPath, remoteScript, 'utf8')
+    expectedScriptDigest = await computeFileSha256(localScriptPath)
+    const remoteLaunchCommand = [
+      `actual_script_sha=$(sha256sum ${quote(remoteScriptPath)} | awk '{print $1}')`,
+      `test "$actual_script_sha" = ${quote(expectedScriptDigest)}`,
+      `bash ${quote(remoteScriptPath)}`,
+    ].join(' && ')
 
-  console.log('\nDeploying admin-web dist to Aliyun Nginx host...')
-  console.log(`Using VITE_CLOUD_API_URL=${env.VITE_CLOUD_API_URL}`)
-  console.log(`Using VITE_ROUTER_MODE=${env.VITE_ROUTER_MODE}`)
-  console.log(`Using ADMIN_WEB_SSH_HOST=${ADMIN_WEB_ALIYUN_HOST}`)
-  const uploadArchive = await runOptionalDirectRemoteMutation(options, async () => await runShell(`scp ${quote(archivePath)} ${quote(`${ADMIN_WEB_ALIYUN_HOST}:${remoteArchivePath}`)}`))
-  if (!uploadArchive.ok) throw new Error(`Admin web archive upload failed: ${uploadArchive.reason}`)
-  const uploadScript = await runOptionalDirectRemoteMutation(options, async () => await runShell(`scp ${quote(localScriptPath)} ${quote(`${ADMIN_WEB_ALIYUN_HOST}:${remoteScriptPath}`)}`))
-  if (!uploadScript.ok) throw new Error(`Admin web deploy script upload failed: ${uploadScript.reason}`)
-  const deploy = await runOptionalDirectRemoteMutation(options, async () => await runShell(`ssh ${quote(ADMIN_WEB_ALIYUN_HOST)} ${quote(`bash ${remoteScriptPath}`)}`))
-  if (!deploy.ok) throw new Error(`Admin web Aliyun deploy failed: ${deploy.reason}`)
-  console.log('[OK] Admin web deployed to Aliyun Nginx host')
+    const [uploadArchive] = await runOptionalDirectRemoteMutation(options, async () => await runPinnedAdminArchiveMutation({
+      artifactRoot, expectedDigest, archivePath, expectedArchiveDigest, scriptPath: localScriptPath, expectedScriptDigest,
+      runners: [async () => await runShell(`scp ${quote(archivePath)} ${quote(`${ADMIN_WEB_ALIYUN_HOST}:${remoteArchivePath}`)}`)],
+    }))
+    if (!uploadArchive.ok) throw new Error(`Admin web archive upload failed: ${uploadArchive.reason}`)
+    const [uploadScript] = await runOptionalDirectRemoteMutation(options, async () => await runPinnedAdminArchiveMutation({
+      artifactRoot, expectedDigest, archivePath, expectedArchiveDigest, scriptPath: localScriptPath, expectedScriptDigest,
+      runners: [async () => await runShell(`scp ${quote(localScriptPath)} ${quote(`${ADMIN_WEB_ALIYUN_HOST}:${remoteScriptPath}`)}`)],
+    }))
+    if (!uploadScript.ok) throw new Error(`Admin web deploy script upload failed: ${uploadScript.reason}`)
+    const [deploy] = await runOptionalDirectRemoteMutation(options, async () => await runPinnedAdminArchiveMutation({
+      artifactRoot, expectedDigest, archivePath, expectedArchiveDigest, scriptPath: localScriptPath, expectedScriptDigest,
+      runners: [async () => await runShell(`ssh ${quote(ADMIN_WEB_ALIYUN_HOST)} ${quote(remoteLaunchCommand)}`)],
+    }))
+    if (!deploy.ok) throw new Error(`Admin web Aliyun deploy failed: ${deploy.reason}`)
+    console.log('[OK] Admin web deployed to Aliyun Nginx host')
+  } finally {
+    rmSync(archivePath, { force: true })
+    rmSync(localScriptPath, { force: true })
+    rmSync(stagingRoot, { recursive: true, force: true })
+  }
 }
 
 async function deployAdminWeb(options = {}) {
@@ -1042,7 +1147,7 @@ function createProductionReleaseGuard(releaseContext, plan) {
 function releaseComponents({ cloudDeploy, cloudReleaseProbes = [], miniprogramUpload, plan, releaseContext }) {
   const probeByFunction = new Map(cloudReleaseProbes.map((probe) => [probe.functionName, probe]))
   const functions = Object.fromEntries((cloudDeploy?.fns || []).map((name) => [name,
-    probeByFunction.get(name) || { sourceSha: releaseContext.gitSha, buildId: `cloud-${releaseContext.gitSha.slice(0, 12)}-${name}` },
+    toPublicCloudArtifactIdentity(probeByFunction.get(name) || { sourceSha: releaseContext.gitSha, buildId: `cloud-${releaseContext.gitSha.slice(0, 12)}-${name}`, functionName: name }),
   ]))
   return {
     adminWeb: plan.targets.adminWeb ? { sourceSha: releaseContext.gitSha } : null,
@@ -1092,6 +1197,28 @@ async function verifyCloudReleaseProbes(probes) {
     }
   }
   return verified
+}
+
+async function invokeCloudReleaseProbe({ artifact, functionName, probeToken, signal }) {
+  const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
+  const envId = getCloudEnvId()
+  const payloadPath = join(tmpdir(), `happyhome-release-attestation-${functionName}-${Date.now()}.json`)
+  writeFileSync(payloadPath, JSON.stringify({ __happyhomeReleaseProbe: probeToken }), 'utf8')
+  try {
+    const commandLine = [npx, '--yes', '--package', '@cloudbase/cli', 'tcb', 'fn', 'invoke', functionName,
+      '-d', `"@${payloadPath}"`, '--env-id', envId, '--json'].map(quote).join(' ')
+    const result = await runCloudBaseCliCaptureWithRetry(commandLine, {
+      displayCommandLine: `tcb fn invoke ${functionName} <release-attestation> --env-id ${envId} --json`,
+      signal,
+      silentOutput: true,
+    })
+    if (!result.ok) throw new Error(`fresh release probe failed for ${functionName}: ${result.reason}`)
+    const response = parseCliJson(result.output)
+    if (!hasCloudReleaseProbeResponse(response, artifact)) throw new Error(`fresh release probe response mismatch for ${functionName}`)
+    return artifact
+  } finally {
+    rmSync(payloadPath, { force: true })
+  }
 }
 
 const RELEASE_ACTION_SCRIPTS = Object.freeze({
@@ -1177,16 +1304,19 @@ async function runFormalRelease(options = {}) {
   }
   const releaseRunId = await resolveReleaseRunId(forceResume)
   releaseContext.runId = releaseRunId
-  const formalPlan = prepareOnly ? null : createReleasePlanAfterResumeIdentityCheck({
-    resumeRunState,
-    gitSha: releaseContext.gitSha,
-    releaseStrategy,
-    createPlan: (gitSha, strategy) => createFormalReleasePlan(gitSha, strategy, publishOnly ? {
-      version: releaseContext.version,
-      desc: releaseContext.desc,
-    } : null),
-  })
-  releaseContext.cloudFunctions = formalPlan?.targets.cloud.functions || []
+  const hasPinnedReleaseArtifacts = Boolean(resumeRunState?.formalPlan && resumeRunState?.artifactManifest)
+  const formalPlan = hasPinnedReleaseArtifacts
+    ? resumeRunState.formalPlan
+    : createReleasePlanAfterResumeIdentityCheck({
+        resumeRunState,
+        gitSha: releaseContext.gitSha,
+        releaseStrategy,
+        createPlan: (gitSha, strategy) => createFormalReleasePlan(gitSha, strategy),
+      })
+  if (!formalPlan || formalPlan.headSha !== releaseContext.gitSha || formalPlan.mode !== releaseStrategy) {
+    throw new Error('formal release plan is missing or does not match the pinned release identity')
+  }
+  releaseContext.cloudFunctions = formalPlan.targets.cloud.functions || []
   const releaseLedger = await createReleaseRunLedger({
     root: ROOT,
     runId: releaseRunId,
@@ -1220,7 +1350,7 @@ async function runFormalRelease(options = {}) {
   console.log(`[release-ledger] run=${releaseLedger.runPath}`)
   console.log(`[release-ledger] events=${releaseLedger.eventsPath}`)
   if (resume) console.log('[release-ledger] resume enabled; stages will be reused only after explicit evidence checks')
-  if (prepareOnly) console.log('[release-ledger] prepare only; stopping after miniprogram build/gate evidence')
+  if (prepareOnly) console.log('[release-ledger] prepare only; stopping after the formal plan and immutable artifacts are pinned')
 
   try {
     if (!prepareOnly) {
@@ -1228,9 +1358,9 @@ async function runFormalRelease(options = {}) {
       await releaseGuard.acquire()
     }
 
-    if (!formalPlan || formalPlan.targets.miniprogram) await runLedgerStage(releaseLedger, 'miniprogram-build-gate', {
+    if (formalPlan.targets.miniprogram) await runLedgerStage(releaseLedger, 'miniprogram-build-gate', {
       resume,
-      mustReuse: publishOnly,
+      mustReuse: publishOnly || hasPinnedReleaseArtifacts,
       reuseCheck,
       command: 'write build-info + npm run build:mp-weixin + npm run test:mp:release-gate -- --skip-mp-build',
     }, async () => {
@@ -1247,6 +1377,40 @@ async function runFormalRelease(options = {}) {
       }
     })
     else await releaseLedger.skipStage('miniprogram-build-gate', { reason: 'release plan has no miniprogram changes' })
+
+    let artifactManifest = releaseLedger.state.artifactManifest
+    if (!artifactManifest) {
+      if (formalPlan.targets.cloud.mode !== 'none') buildCloudArtifacts(formalPlan.targets.cloud.functions, releaseContext.gitSha)
+      if (formalPlan.targets.adminWeb) buildAdminWeb('history')
+      const snapshotPaths = await createImmutableArtifactSnapshots({
+        root: ROOT,
+        runId: releaseLedger.runId,
+        plan: formalPlan,
+        paths: { cloudRoot: CLOUD_DIST, adminWebRoot: ADMIN_WEB_DIST, miniprogramRoot: MP_DIST },
+      })
+      artifactManifest = await createReleaseArtifactManifest({
+        root: ROOT,
+        runId: releaseLedger.runId,
+        gitSha: releaseContext.gitSha,
+        envId: releaseContext.envId,
+        version: releaseContext.version,
+        desc: releaseContext.desc,
+        plan: formalPlan,
+        toolchain: releaseToolchainIdentity(),
+        paths: snapshotPaths,
+      })
+      await releaseLedger.pinReleaseArtifacts({ formalPlan, artifactManifest })
+    }
+    const artifactTargetsMatchPlan = JSON.stringify(artifactManifest?.targets || null) === JSON.stringify({
+      cloudFunctions: formalPlan.targets.cloud.functions || [],
+      adminWeb: Boolean(formalPlan.targets.adminWeb),
+      miniprogram: Boolean(formalPlan.targets.miniprogram),
+    })
+    if (!artifactManifest || artifactManifest.runId !== releaseLedger.runId || artifactManifest.gitSha !== releaseContext.gitSha ||
+      artifactManifest.envId !== releaseContext.envId || artifactManifest.version !== releaseContext.version ||
+      artifactManifest.desc !== releaseContext.desc || !artifactTargetsMatchPlan) {
+      throw new Error('immutable artifact manifest is missing or does not match this release run')
+    }
 
     if (prepareOnly) {
       await releaseLedger.complete('prepared')
@@ -1273,35 +1437,62 @@ async function runFormalRelease(options = {}) {
 
     let cloudDeploy = { fns: [] }
     let cloudReleaseProbes = []
+    let cloudOrchestration = { attestations: [], deployFunctions: [], verified: [] }
     if (formalPlan.targets.cloud.mode !== 'none') cloudDeploy = await runLedgerStage(releaseLedger, 'cloud-deploy', {
-      resume,
-      reuseCheck,
-      command: `npm.cmd --workspace cloud run build && CloudBase CLI/COS fn deploy (concurrency=${getCloudDeployConcurrency()})`,
+      command: `fresh artifact attestation + selective CloudBase CLI/COS fn deploy (concurrency=${getCloudDeployConcurrency()})`,
     }, async () => {
-      await revalidateFormalMutation('artifact-build:cloud')
-      const result = await deployCloud({
-        afterFunctionDeploy: async (fn, record) => await releaseGuard.recordStage(`cloud:${fn}`, { evidence: record }),
-        beforeFunctionDeploy: async (fn) => await revalidateFormalMutation(`cloud:${fn}`),
-        functions: formalPlan.targets.cloud.functions,
-        requireCloudBaseCli: true,
-        sourceSha: releaseContext.gitSha,
+      cloudOrchestration = await orchestrateCloudArtifactRelease({
+        root: ROOT,
+        manifest: artifactManifest,
+        onSecrets: (secrets) => releaseLedger.registerSecrets(secrets),
+        timeoutMs: getPositiveIntFlag('cloud-attestation-timeout-ms', 30_000, { max: 120_000 }),
+        attest: invokeCloudReleaseProbe,
+        deploy: async ({ artifactRoot, functionName }) => {
+          const artifact = artifactManifest.artifacts.cloud[functionName]
+          const result = await deployCloud({
+            afterFunctionDeploy: async (fn, record) => await releaseGuard.recordStage(`cloud:${fn}`, { evidence: record }),
+            artifactRoot: dirname(artifactRoot),
+            beforeFunctionDeploy: createPinnedCloudDeployAttemptGuard({
+              artifactRoot,
+              expectedDigest: artifact.contentDigest,
+              functionName,
+              beforeFence: async (fn) => await revalidateFormalMutation(`cloud:${fn}`),
+            }),
+            functions: [functionName],
+            requireCloudBaseCli: true,
+            skipBuild: true,
+            sourceSha: releaseContext.gitSha,
+          })
+          if (result.path !== 'cloudbase-cli') throw new Error(`Formal release cloud deploy must use CloudBase CLI/COS; got ${result.path}`)
+        },
+        verify: invokeCloudReleaseProbe,
       })
-      if (result.path !== 'cloudbase-cli') {
-        throw new Error(`Formal release cloud deploy must use CloudBase CLI/COS before smoke; got ${result.path}. Rerun with --use-tcb.`)
-      }
-      return result
+      await releaseLedger.recordRemoteAttestations('cloud', cloudOrchestration.attestations)
+      return { result: {
+        fns: formalPlan.targets.cloud.functions,
+        deployedFns: cloudOrchestration.deployFunctions,
+        path: cloudOrchestration.deployFunctions.length ? 'cloudbase-cli' : 'attested',
+        status: cloudOrchestration.deployFunctions.length ? 'deployed' : 'attested',
+      } }
     })
     else await releaseLedger.skipStage('cloud-deploy', { reason: 'release plan has no cloud function changes' })
 
     if (cloudDeploy.fns.length) cloudReleaseProbes = await runLedgerStage(releaseLedger, 'cloud-version-probes', {
-      command: 'invoke each deployed cloud function with its internal release probe token',
+      command: 'record bounded fresh verification for every planned immutable cloud artifact',
     }, async () => {
-      const probes = readCloudReleaseProbes(cloudDeploy.fns)
-      const verified = await verifyCloudReleaseProbes(probes)
-      await releaseGuard.recordStage('cloud-version-probes', { evidence: { functions: verified.map((probe) => probe.functionName) } })
-      return verified
+      cloudReleaseProbes = formalPlan.targets.cloud.functions.map((functionName) => artifactManifest.artifacts.cloud[functionName])
+      await releaseGuard.recordStage('cloud-version-probes', { evidence: { functions: cloudOrchestration.verified } })
+      return cloudReleaseProbes
     })
     else await releaseLedger.skipStage('cloud-version-probes', { reason: 'release plan has no cloud function changes' })
+
+    const deployedCloudFunctions = new Set(cloudDeploy.deployedFns || [])
+    for (const attestation of cloudOrchestration.attestations) {
+      const deployed = deployedCloudFunctions.has(attestation.functionName)
+      await releaseLedger.recordComponent(attestation.component, deployed
+        ? { status: 'verified', skipReason: attestation.skipReason, evidence: { deployed: true, freshProbeVerified: true } }
+        : attestation)
+    }
 
     const semanticActions=[...new Set(formalPlan.manifests.flatMap(manifest=>manifest.actions||[]))]
     const semanticSmokeSuites=[...new Set(formalPlan.manifests.flatMap(manifest=>manifest.smokeSuites||[]))]
@@ -1324,6 +1515,7 @@ async function runFormalRelease(options = {}) {
       const summary = await runCloudSmoke(cloudDeploy.fns, releaseLedger.runId, {
         beforeEnsureIndexes: async () => await revalidateFormalMutation('ensure-indexes'),
         beforeSmokeCommand: async ({ stage }) => await revalidateFormalMutation(`cloud-smoke:${stage}`),
+        beforeFixtureCleanup: async ({ stage }) => await releaseGuard.beforeRemoteMutation(`cloud-smoke-cleanup:${stage}`),
       })
       await releaseGuard.recordStage('cloud-smoke', { evidence: { summaryPath: resolve(summary.evidenceDir, 'summary.json') } })
       return {
@@ -1339,17 +1531,27 @@ async function runFormalRelease(options = {}) {
     })
     else await releaseLedger.skipStage('cloud-smoke', { reason: 'release plan has no cloud function changes' })
 
-    if (formalPlan.targets.adminWeb) await runLedgerStage(releaseLedger, 'admin-web-deploy', {
-      resume,
-      reuseCheck,
-      command: 'npm.cmd --workspace admin-web run build + admin-web deploy',
-    }, async () => {
-      await revalidateFormalMutation('artifact-build:admin-web')
-      await deployAdminWeb({ beforeRemoteMutation: async () => await revalidateFormalMutation('admin-web-deploy') })
-      await releaseGuard.recordStage('admin-web-deploy')
-      return { result: { target: process.env.ADMIN_WEB_TARGET || 'aliyun' } }
-    })
-    else await releaseLedger.skipStage('admin-web-deploy', { reason: 'release plan has no admin-web changes' })
+    if (formalPlan.targets.adminWeb) {
+      const adminArtifact = artifactManifest.artifacts.adminWeb
+      const adminAttestation = await attestAdminWebArtifact({ root: ROOT, artifact: adminArtifact, inspectRemote: inspectAdminWebPublication })
+      await releaseLedger.recordRemoteAttestations('admin-web', [adminAttestation])
+      if (!adminAttestation.shouldDeploy) {
+        await releaseLedger.skipStage('admin-web-deploy', { reason: adminAttestation.skipReason, result: { status: 'attested' } })
+        await releaseLedger.recordComponent('admin-web', adminAttestation)
+      } else await runLedgerStage(releaseLedger, 'admin-web-deploy', {
+        command: 'fresh publication attestation + admin-web deploy',
+      }, async () => {
+        await deployAdminWeb({
+          artifact: adminArtifact,
+          artifactRoot: resolve(ROOT, adminArtifact.artifactPath),
+          skipBuild: true,
+          beforeRemoteMutation: async () => await revalidateFormalMutation('admin-web-deploy'),
+        })
+        await releaseGuard.recordStage('admin-web-deploy')
+        await releaseLedger.recordComponent('admin-web', { status: 'deployed', skipReason: adminAttestation.skipReason })
+        return { result: { target: process.env.ADMIN_WEB_TARGET || 'aliyun', status: 'deployed' } }
+      })
+    } else await releaseLedger.skipStage('admin-web-deploy', { reason: 'release plan has no admin-web changes' })
 
     if (formalPlan.targets.miniprogram) await runLedgerStage(releaseLedger, 'miniprogram-upload', {
       resume,
@@ -1360,6 +1562,9 @@ async function runFormalRelease(options = {}) {
         releaseLedger.state.stages['miniprogram-build-gate']?.evidence?.packageDigest || '',
       )
       if (!preparedPackageDigest) throw new Error('prepared miniprogram package digest is missing before upload')
+      if (preparedPackageDigest !== artifactManifest.artifacts.miniprogram?.contentDigest) {
+        throw new Error('prepared miniprogram package digest does not match the immutable artifact manifest')
+      }
       const currentPackageDigest = await computeDirectoryDigest(MP_DIST)
       if (currentPackageDigest !== preparedPackageDigest) {
         throw new Error(`miniprogram package changed after release UI validation: expected ${preparedPackageDigest}, got ${currentPackageDigest}`)
@@ -1399,6 +1604,7 @@ async function runFormalRelease(options = {}) {
     }, async () => {
       const { evidencePath: uploadEvidencePath, evidence: uploadEvidence } = readMiniprogramUploadEvidence(releaseLedger.runId)
       if (uploadEvidence.success !== true) throw new Error('upload evidence is not successful')
+      if (uploadEvidence.releaseRunId !== releaseLedger.runId || !uploadEvidence.receiptId) throw new Error('upload evidence does not match release run receipt')
       if (uploadEvidence.appid !== APPID) throw new Error('upload evidence appid does not match')
       if (uploadEvidence.version !== miniprogramUpload.version || uploadEvidence.desc !== miniprogramUpload.desc) {
         throw new Error('upload evidence does not match uploaded version/desc')
@@ -1414,10 +1620,23 @@ async function runFormalRelease(options = {}) {
         throw new Error('uploaded miniprogram package changed before verification')
       }
       const uploadInfoPath = uploadEvidence.uploadInfoPath || ''
+      let normalizedReceipt = null
       if (uploadEvidence.method === 'devtools-cli') {
         if (!uploadInfoPath) throw new Error('upload evidence uploadInfoPath is missing')
         if (!existsSync(uploadInfoPath)) throw new Error(`upload info file not found: ${uploadInfoPath}`)
+        normalizedReceipt = normalizeMiniprogramUploadReceipt({
+          method: uploadEvidence.method,
+          uploadInfoText: readFileSync(uploadInfoPath, 'utf8'),
+        })
+      } else if (uploadEvidence.method === 'miniprogram-ci') {
+        normalizedReceipt = uploadEvidence.normalizedReceipt || null
       }
+      const receiptAttestation = attestMiniprogramReceipt({
+        artifact: artifactManifest.artifacts.miniprogram,
+        receipt: normalizedReceipt,
+        expectedReceiptId: uploadEvidence.receiptId,
+      })
+      if (receiptAttestation.shouldUpload) throw new Error(receiptAttestation.skipReason)
       const buildInfoPath = resolve(ROOT, 'miniprogram/src/generated/build-info.ts')
       const buildInfo = readFileSync(buildInfoPath, 'utf8')
       if (!buildInfo.includes(miniprogramUpload.version) || !buildInfo.includes(miniprogramUpload.desc)) {
@@ -1430,10 +1649,25 @@ async function runFormalRelease(options = {}) {
           desc: miniprogramUpload.desc,
           method: uploadEvidence.method,
           packageDigest: currentPackageDigest,
+          receiptAttestation,
         },
       }
     })
     else await releaseLedger.skipStage('verify-upload', { reason: 'release plan has no miniprogram changes' })
+
+    if (formalPlan.targets.miniprogram) {
+      const uploadStage = releaseLedger.state.stages['miniprogram-upload']
+      const receiptAttestation = releaseLedger.state.stages['verify-upload']?.result?.receiptAttestation
+      const miniprogramOutcome = {
+        ...receiptAttestation,
+        component: 'miniprogram',
+        status: 'uploaded',
+        skipReason: uploadStage?.reused ? receiptAttestation?.skipReason || uploadStage.reason : '',
+        evidence: { receiptReused: uploadStage?.reused === true, receiptId: receiptAttestation?.receiptId || '' },
+      }
+      await releaseLedger.recordRemoteAttestations('miniprogram', [miniprogramOutcome])
+      await releaseLedger.recordComponent('miniprogram', miniprogramOutcome)
+    }
 
     if (releaseGuard) await completeProductionReleaseWithRemoteConfirmation({
       guard: releaseGuard,

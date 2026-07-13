@@ -4,6 +4,8 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 
 import {
   confirmReleaseLedgerAgainstProductionInspection,
@@ -11,11 +13,13 @@ import {
   createReleaseRunLedger,
   formatReleaseRunStatus,
   inspectReleaseStageReuse,
+  loadReleaseRun,
   runLedgerStage,
   summarizeReleaseRun,
 } from './release-run-ledger.mjs'
 import { completeProductionReleaseWithRemoteConfirmation } from './production-release-guard.mjs'
 import { DEFAULT_FUNCTIONS, REQUIRED_SMOKE_LABELS } from '../cloud-release-smoke.mjs'
+import { createMiniprogramReceiptIdentity, normalizeMiniprogramUploadReceipt } from './miniprogram-receipt-identity.mjs'
 
 async function tempRoot() {
   return await mkdtemp(join(tmpdir(), 'happyhome-release-ledger-'))
@@ -45,6 +49,88 @@ async function directoryDigest(root) {
   await walk(root)
   return createHash('sha256').update(entries.join('\n')).digest('hex')
 }
+
+const execFileAsync = promisify(execFile)
+
+async function windowsShortPath(path) {
+  if (process.platform !== 'win32') return ''
+  const { stdout } = await execFileAsync('cmd.exe', ['/d', '/c', `for %I in ("${path}") do @echo %~sI`], { windowsVerbatimArguments: true })
+  return stdout.trim().replace(/^"|"$/g, '')
+}
+
+test('prepare pins the formal plan and immutable artifact manifest without probe token plaintext', async () => {
+  const root = await tempRoot()
+  try {
+    const ledger = await createReleaseRunLedger({ root, runId: 'pin-run', gitSha: 'abc', version: '1', desc: 'd', envId: 'env' })
+    const formalPlan = { headSha: 'abc', targets: { cloud: { functions: ['admin'] }, adminWeb: false, miniprogram: false } }
+    const probeToken = 'known-plaintext-probe-token'
+    const artifactManifest = { schemaVersion: 1, runId: 'pin-run', gitSha: 'abc', artifacts: { cloud: { admin: { probeTokenHash: 'hash' } } } }
+    await ledger.pinReleaseArtifacts({ formalPlan, artifactManifest })
+    const saved = await loadReleaseRun(root, 'pin-run')
+    assert.equal(saved.schemaVersion, 2)
+    assert.deepEqual(saved.formalPlan, formalPlan)
+    assert.deepEqual(saved.artifactManifest, artifactManifest)
+    assert.doesNotMatch(JSON.stringify(saved), new RegExp(probeToken))
+    await assert.rejects(() => ledger.recordRemoteAttestations('cloud', [{ probeToken }]), /must not persist plaintext probeToken/)
+    await assert.rejects(
+      () => ledger.pinReleaseArtifacts({ formalPlan: { ...formalPlan, headSha: 'other' }, artifactManifest }),
+      /already pinned/i,
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('legacy schema one release ledgers remain readable and gain additive defaults', async () => {
+  const root = await tempRoot()
+  try {
+    await writeJson(join(root, '.codex-local', 'release-runs', 'legacy', 'run.json'), {
+      schemaVersion: 1, runId: 'legacy', status: 'passed', context: { gitSha: 'abc' }, stages: {},
+    })
+    const run = await loadReleaseRun(root, 'legacy')
+    assert.equal(run.schemaVersion, 1)
+    assert.equal(run.formalPlan, null)
+    assert.equal(run.artifactManifest, null)
+    assert.deepEqual(run.remoteAttestations, {})
+    assert.deepEqual(run.components, {})
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('release summary exposes structured component deployment and skip counts', () => {
+  const summary = summarizeReleaseRun({
+    runId: 'run', status: 'passed', context: {}, stages: {},
+    components: {
+      'cloud:admin': { status: 'attested', skipReason: 'fresh exact match' },
+      'cloud:post': { status: 'verified', skipReason: '', evidence: { deployed: true } },
+      'admin-web': { status: 'deployed', skipReason: 'remote mismatch' },
+      miniprogram: { status: 'uploaded', skipReason: 'receipt exact match' },
+    },
+  })
+  assert.deepEqual(summary.componentSummary.counts, { deployed: 2, skipped: 2, total: 4 })
+  assert.equal(summary.componentSummary.components['cloud:admin'].status, 'attested')
+})
+
+test('ledger sanitizes registered probe token values from stages events errors and summaries', async () => {
+  const root = await tempRoot()
+  const probeToken = 'secret-probe-token-value'
+  try {
+    const ledger = await createReleaseRunLedger({ root, runId: 'secret-run', gitSha: 'abc', version: '1', desc: 'd', envId: 'env' })
+    ledger.registerSecrets([probeToken])
+    await ledger.startStage('cloud-deploy', { evidence: { note: `evidence ${probeToken}` } })
+    await ledger.failStage('cloud-deploy', new Error(`failure ${probeToken}`), { reason: `reason ${probeToken}` })
+    await ledger.recordRemoteAttestations('cloud', [{ skipReason: `remote ${probeToken}` }])
+    const runText = await readFile(join(root, '.codex-local', 'release-runs', 'secret-run', 'run.json'), 'utf8')
+    const eventsText = await readFile(join(root, '.codex-local', 'release-runs', 'secret-run', 'events.jsonl'), 'utf8')
+    assert.doesNotMatch(runText, new RegExp(probeToken))
+    assert.doesNotMatch(eventsText, new RegExp(probeToken))
+    assert.doesNotMatch(JSON.stringify(summarizeReleaseRun(ledger.state)), new RegExp(probeToken))
+    assert.match(runText, /REDACTED_PROBE_TOKEN/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 test('release ledger records stage lifecycle, events, and latest pointer', async () => {
   const root = await tempRoot()
@@ -414,10 +500,12 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
       },
       appTabBarCount: 1,
     }
+    const packageRoot = join(root, 'miniprogram', 'dist', 'build', 'mp-weixin')
+    const evidenceProjectPath = await windowsShortPath(packageRoot) || packageRoot
     await writeJson(uiEvidencePath, {
       releaseRunId: 'unit-run',
       packageDigest,
-      projectPath: join(root, 'miniprogram', 'dist', 'build', 'mp-weixin'),
+      projectPath: evidenceProjectPath,
       markers: [
         'HH_RELEASE_HOME_COLD_START_NONEMPTY',
         'HH_RELEASE_HOME_IMAGES_RENDERED',
@@ -465,6 +553,30 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
       runId: 'unit-run',
     })
     assert.equal(reusable.reusable, true)
+
+    await writeJson(uiEvidencePath, {
+      releaseRunId: 'unit-run',
+      packageDigest,
+      projectPath: join(root, 'missing-project-path'),
+      markers: [
+        'HH_RELEASE_HOME_COLD_START_NONEMPTY',
+        'HH_RELEASE_HOME_IMAGES_RENDERED',
+        'HH_RELEASE_HOME_DETAIL_NONEMPTY',
+        'HH_RELEASE_LOGIN_VERSION',
+        'HH_RELEASE_PROFILE_LOGIN_CLEAN',
+      ],
+      homeColdStart: coldStartEvidence,
+      profileLoginClean: { expectedVersion: '1.0.1' },
+    })
+    const missingProjectPath = await inspectReleaseStageReuse(runState, 'miniprogram-build-gate', {
+      root,
+      gitSha: 'abc123',
+      version: '1.0.1',
+      desc: 'trial-unit',
+      runId: 'unit-run',
+    })
+    assert.equal(missingProjectPath.reusable, false)
+    assert.match(missingProjectPath.reason, /project path/i)
 
     await writeJson(uiEvidencePath, {
       releaseRunId: 'unit-run',
@@ -664,8 +776,13 @@ test('miniprogram upload is reused only with normalized release-owned evidence',
     assert.match(weak.reason, /upload evidence/)
 
     const uploadInfoStat = await stat(uploadInfoPath)
+    const normalizedReceipt = normalizeMiniprogramUploadReceipt({ method: 'devtools-cli', uploadInfoText: await readFile(uploadInfoPath, 'utf8') })
+    const receiptId = createMiniprogramReceiptIdentity({ receipt: normalizedReceipt, runId: 'unit-run', packageDigest, version: '1.0.1', desc: 'trial-unit' })
     await writeJson(uploadEvidencePath, {
       success: true,
+      releaseRunId: 'wrong-run',
+      receiptId,
+      normalizedReceipt,
       appid: 'wx-unit',
       version: '1.0.1',
       desc: 'trial-unit',
@@ -679,16 +796,34 @@ test('miniprogram upload is reused only with normalized release-owned evidence',
     })
     const reusable = await inspectReleaseStageReuse(runState, 'miniprogram-upload', {
       root,
+      runId: 'unit-run',
       gitSha: 'abc123',
       version: '1.0.1',
       desc: 'trial-unit',
       packageDigest,
     })
-    assert.equal(reusable.reusable, true)
+    assert.equal(reusable.reusable, false)
+    assert.match(reusable.reason, /runId/i)
+
+    const devtoolsEvidence = JSON.parse(await readFile(uploadEvidencePath, 'utf8'))
+    await writeJson(uploadEvidencePath, { ...devtoolsEvidence, releaseRunId: 'unit-run' })
+    const exactReusable = await inspectReleaseStageReuse(runState, 'miniprogram-upload', {
+      root, runId: 'unit-run', gitSha: 'abc123', version: '1.0.1', desc: 'trial-unit', packageDigest,
+    })
+    assert.equal(exactReusable.reusable, true)
+
+    await writeJson(uploadInfoPath, { size: { total: 2 } })
+    const changedReceipt = await inspectReleaseStageReuse(runState, 'miniprogram-upload', {
+      root, runId: 'unit-run', gitSha: 'abc123', version: '1.0.1', desc: 'trial-unit', packageDigest,
+    })
+    assert.equal(changedReceipt.reusable, false)
+    assert.match(changedReceipt.reason, /receipt identity/i)
 
     await rm(uploadInfoPath)
     await writeJson(uploadEvidencePath, {
       success: true,
+      releaseRunId: 'unit-run',
+      receiptId: 'receipt-2',
       appid: 'wx-unit',
       version: '1.0.1',
       desc: 'trial-unit',
@@ -704,8 +839,8 @@ test('miniprogram upload is reused only with normalized release-owned evidence',
       desc: 'trial-unit',
       packageDigest,
     })
-    assert.equal(reusableCi.reusable, true)
-    assert.equal(reusableCi.evidence.uploadInfoPath, '')
+    assert.equal(reusableCi.reusable, false)
+    assert.match(reusableCi.reason, /fresh-attestable/i)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "changeId": "release-artifact-attestation",
+  "actions": [],
+  "migrations": [],
+  "smokeSuites": [],
+  "releaseImpact": {
+    "cloudFunctions": "No runtime code change; formal release deploys only canonical link-free run snapshots, rechecks every CLI attempt after its fence, and waits for confirmed invoke cleanup.",
+    "adminWeb": "No runtime code change; formal release deploys only the canonical pinned snapshot and verifies the Aliyun archive plus its complete per-file manifest before switching current.",
+    "miniprogram": "No runtime code change; formal release may reuse only an exact identity derived from the fresh normalized actual upload receipt.",
+    "environmentVariables": [],
+    "databaseMigrations": []
+  }
+}
