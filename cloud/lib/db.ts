@@ -49,6 +49,14 @@ export async function getById(collectionName: string, id: string) {
   const res = await collection(collectionName).doc(id).get()
   return res.data
 }
+export async function getByIdOrNull<T = any>(collectionName: string, id: string): Promise<T | null> {
+  try {
+    return await getById(collectionName, id) as T
+  } catch (error) {
+    if (isMissingDocumentError(error)) return null
+    throw error
+  }
+}
 export async function getByIds(collectionName: string, ids: string[]) {
   if (!Array.isArray(ids) || ids.length > 100 || ids.some(id => typeof id !== 'string' || !id)) throw new Error('invalid document ids')
   if (ids.length === 0) return []

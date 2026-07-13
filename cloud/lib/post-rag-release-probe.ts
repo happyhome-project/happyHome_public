@@ -63,8 +63,8 @@ export async function readPostRagReleaseProbeStatus(input: any) {
   const outbox = await db.getById('post_rag_outbox', probe.outboxId) as any
   const exactOutbox = outbox?.schemaVersion === 2 && outbox?._id === probe.outboxId && outbox?.aggregateId === probe.postId && outbox?.communityId === probe.communityId && outbox?.status === 'completed'
   if (!exactOutbox) return { outbox: { _id: outbox?._id, status: outbox?.status }, job: null, state: null, complete: false }
-  const job = outbox.materializedJobId ? await db.getById('post_rag_jobs', outbox.materializedJobId) as any : null
-  const state = await db.getById('post_rag_index_state_v2', probe.postId) as any
+  const job = outbox.materializedJobId ? await db.getByIdOrNull('post_rag_jobs', outbox.materializedJobId) as any : null
+  const state = await db.getByIdOrNull('post_rag_index_state_v2', probe.postId) as any
   const complete = Boolean(job?.schemaVersion === 2 && job?.status === 'completed' && job?.postId === probe.postId && state?.schemaVersion === 2 && state?.postId === probe.postId && state?.state === 'active' && state?.sourceVersion === job?.sourceVersion)
   return { outbox: { _id: outbox._id, status: outbox.status, materializedJobId: outbox.materializedJobId }, job: job ? { _id: job._id, schemaVersion: job.schemaVersion, status: job.status, postId: job.postId, sourceVersion: job.sourceVersion } : null, state: state ? { postId: state.postId, schemaVersion: state.schemaVersion, state: state.state, sourceVersion: state.sourceVersion } : null, complete }
 }
