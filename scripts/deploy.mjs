@@ -60,7 +60,7 @@ dns.lookup = function forcedIPv4Lookup(hostname, options, callback) {
 
 import ci from 'miniprogram-ci'
 import { resolve, dirname, join } from 'path'
-import { fileURLToPath } from 'url'
+import { fileURLToPath, pathToFileURL } from 'url'
 import { execSync, spawn, spawnSync } from 'child_process'
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
@@ -100,8 +100,12 @@ import {
   completeProductionReleaseWithRemoteConfirmation,
   ProductionReleaseGuard,
 } from './lib/production-release-guard.mjs'
-import { hasCloudReleaseProbeResponse } from './lib/cloud-release-probe.mjs'
+import { hasCloudReleaseComponentAttestationResponse, hasCloudReleaseProbeResponse } from './lib/cloud-release-probe.mjs'
+import { collectComponentSourcePaths, createReleaseBuildConfigurationDigest, createReleaseComponentDigest } from './lib/release-component-digest.mjs'
+import { selectCloudProductionBindings, selectStableProductionBinding } from './lib/release-component-state.mjs'
+import { attestCloudWithCurrentOrPrior, loadPriorCloudAttestationProbe } from './lib/release-prior-cloud-attestation.mjs'
 import { executeReleaseOperations } from './lib/release-operations.mjs'
+import { verifyMigrationInputFile } from './lib/release-component-registry.mjs'
 import { executeFormalSemanticReleaseStages } from './lib/formal-semantic-release-stages.mjs'
 import {
   assertRagBootstrapVerified,
@@ -124,7 +128,6 @@ import {
   orchestrateCloudArtifactRelease,
   runPinnedAdminArtifactMutation,
   runPinnedAdminArchiveMutation,
-  toPublicCloudArtifactIdentity,
 } from './lib/release-artifact-attestation.mjs'
 import {
   createMiniprogramReceiptIdentity,
@@ -141,16 +144,53 @@ const CLOUD_DIST = resolve(ROOT, 'cloud/dist')
 const ADMIN_WEB_DIR = resolve(ROOT, 'admin-web')
 const ADMIN_WEB_DIST = resolve(ROOT, 'admin-web/dist')
 
+function resolveAdminBuildEnvironment(defaultRouterMode = 'history') {
+  return {
+    VITE_CLOUD_API_URL: process.env.VITE_CLOUD_API_URL || ADMIN_WEB_DEFAULT_API_URL,
+    VITE_ROUTER_MODE: process.env.VITE_ROUTER_MODE || defaultRouterMode,
+    VITE_AMAP_JS_KEY: process.env.VITE_AMAP_JS_KEY || process.env.AMAP_JS_KEY || process.env.GAODE_JS_KEY || '',
+    VITE_AMAP_SECURITY_CODE: process.env.VITE_AMAP_SECURITY_CODE || process.env.AMAP_SECURITY_CODE || process.env.GAODE_SECURITY_CODE || '',
+  }
+}
+
 function releaseToolchainIdentity() {
   const lock = JSON.parse(readFileSync(resolve(ROOT, 'package-lock.json'), 'utf8'))
+  const rootPackage = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'))
   const version = (path) => lock.packages?.[path]?.version || 'unknown'
+  const npmVersion = String(rootPackage.packageManager || '').match(/^npm@(.+)$/)?.[1] || 'unknown'
+  const adminConfigurationDigest = createReleaseBuildConfigurationDigest(resolveAdminBuildEnvironment('history'))
   return {
     node: process.version,
-    npm: process.env.npm_config_user_agent || 'npm@unknown',
+    npm: `npm@${npmVersion}`,
     cloudBuilder: `cloud/build.mjs+esbuild@${version('node_modules/esbuild')}`,
-    adminBuilder: `vite@${version('admin-web/node_modules/vite')}`,
-    miniprogramBuilder: `@dcloudio/uni-app@${version('miniprogram/node_modules/@dcloudio/uni-app')}+WeChat-DevTools-release-gate`,
+    adminBuilder: `vite@${version('admin-web/node_modules/vite')}+node@${process.version}+npm@${npmVersion}+config@${adminConfigurationDigest}`,
+    miniprogramBuilder: `@dcloudio/uni-app@${version('miniprogram/node_modules/@dcloudio/uni-app')}+node@${process.version}+npm@${npmVersion}+WeChat-DevTools-release-gate`,
   }
+}
+
+async function createFrontendComponentDigests(plan, toolchain) {
+  const digests = {}
+  if (plan.targets.adminWeb) {
+    digests.adminWeb = await createReleaseComponentDigest({
+      root: ROOT,
+      component: 'admin-web',
+      sourcePaths: await collectComponentSourcePaths(ADMIN_WEB_DIR, { excludeDirectories: ['dist', 'node_modules'] }),
+      configPaths: ['package.json', 'project.config.json'],
+      lockfilePath: 'package-lock.json',
+      builderVersion: toolchain.adminBuilder,
+    })
+  }
+  if (plan.targets.miniprogram) {
+    digests.miniprogram = await createReleaseComponentDigest({
+      root: ROOT,
+      component: 'miniprogram',
+      sourcePaths: await collectComponentSourcePaths(resolve(ROOT, 'miniprogram'), { excludeDirectories: ['dist', 'node_modules'] }),
+      configPaths: ['package.json', 'project.config.json'],
+      lockfilePath: 'package-lock.json',
+      builderVersion: toolchain.miniprogramBuilder,
+    })
+  }
+  return digests
 }
 
 async function runOptionalDirectRemoteMutation(options, mutate) {
@@ -926,13 +966,7 @@ async function uploadMiniprogram(options = {}) {
 
 function buildAdminWeb(defaultRouterMode) {
   console.log('\nBuilding admin-web...')
-  const env = {
-    ...process.env,
-    VITE_CLOUD_API_URL: process.env.VITE_CLOUD_API_URL || ADMIN_WEB_DEFAULT_API_URL,
-    VITE_ROUTER_MODE: process.env.VITE_ROUTER_MODE || defaultRouterMode,
-    VITE_AMAP_JS_KEY: process.env.VITE_AMAP_JS_KEY || process.env.AMAP_JS_KEY || process.env.GAODE_JS_KEY || '',
-    VITE_AMAP_SECURITY_CODE: process.env.VITE_AMAP_SECURITY_CODE || process.env.AMAP_SECURITY_CODE || process.env.GAODE_SECURITY_CODE || '',
-  }
+  const env = { ...process.env, ...resolveAdminBuildEnvironment(defaultRouterMode) }
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
   execSync(`${npm} run build`, { cwd: ADMIN_WEB_DIR, stdio: 'inherit', env })
   return env
@@ -941,10 +975,25 @@ function buildAdminWeb(defaultRouterMode) {
 async function inspectAdminWebPublication() {
   const target = (process.env.ADMIN_WEB_TARGET || 'aliyun').toLowerCase()
   if (target !== 'aliyun') throw new Error(`admin-web target ${target} has no reliable publication identity readback`)
-  const markerPath = `${ADMIN_WEB_ALIYUN_ROOT}/current/.happyhome-release.json`
-  const result = await runShellCapture(`ssh ${quote(ADMIN_WEB_ALIYUN_HOST)} ${quote(`cat ${markerPath}`)}`, { silentOutput: true })
+  const script = `set -euo pipefail
+current=${JSON.stringify(`${ADMIN_WEB_ALIYUN_ROOT}/current`)}
+manifest="$current/.happyhome-file-manifest.sha256"
+marker="$current/.happyhome-release.json"
+test -f "$manifest" -a -f "$marker"
+expected_manifest_sha="$(sed -nE 's/.*"fileManifestDigest":"([0-9a-f]{64})".*/\\1/p' "$marker")"
+actual_manifest_sha="$(sha256sum "$manifest" | awk '{print $1}')"
+test -n "$expected_manifest_sha" -a "$actual_manifest_sha" = "$expected_manifest_sha"
+expected_files="$(mktemp)"
+actual_files="$(mktemp)"
+trap 'rm -f "$expected_files" "$actual_files"' EXIT
+sed -E 's/^[0-9a-f]{64}  //' "$manifest" | LC_ALL=C sort > "$expected_files"
+(cd "$current" && find . -type f ! -name '.happyhome-file-manifest.sha256' ! -name '.happyhome-release.json' -printf '%P\\n' | LC_ALL=C sort) > "$actual_files"
+diff -u "$expected_files" "$actual_files" >/dev/null
+(cd "$current" && sha256sum -c '.happyhome-file-manifest.sha256' >/dev/null)
+cat "$marker"`
+  const result = await runShellCapture(`ssh ${quote(ADMIN_WEB_ALIYUN_HOST)} ${quote(script)}`, { silentOutput: true })
   if (!result.ok) throw new Error(`admin-web publication identity readback failed: ${result.reason}`)
-  return JSON.parse(result.output)
+  return { ...JSON.parse(result.output), fileManifestDigestVerified: true, runtimeVerified: true }
 }
 
 async function deployAdminWebToCloudBase(options = {}) {
@@ -989,12 +1038,7 @@ async function deployAdminWebToAliyun(options = {}) {
   const remoteScriptPath = `/tmp/deploy-happyhome-admin-${stamp}.sh`
   const localScriptPath = join(tmpdir(), `deploy-happyhome-admin-${stamp}.sh`)
   const stagingRoot = join(tmpdir(), `happyhome-admin-web-${stamp}`)
-  const artifactMarker = Buffer.from(JSON.stringify({
-    contentDigest: options.artifact?.contentDigest || '',
-    runId: options.artifact?.runId || '',
-    sourceSha: options.artifact?.sourceSha || '',
-    versionId: options.artifact?.versionId || '',
-  })).toString('base64')
+  let artifactMarker = ''
   const artifactRoot = options.artifactRoot || ADMIN_WEB_DIST
   const expectedDigest = options.artifact?.contentDigest || await computeDirectoryDigest(artifactRoot)
 
@@ -1020,7 +1064,16 @@ async function deployAdminWebToAliyun(options = {}) {
         cpSync(artifactRoot, stagingRoot, { recursive: true, errorOnExist: true })
         const stagedDigest = await computeDirectoryDigest(stagingRoot)
         if (stagedDigest !== expectedDigest) throw new Error('immutable admin-web staging digest mismatch')
-        writeFileSync(join(stagingRoot, '.happyhome-file-manifest.sha256'), await createDeterministicFileManifest(stagingRoot), 'utf8')
+        const fileManifestPath = join(stagingRoot, '.happyhome-file-manifest.sha256')
+        writeFileSync(fileManifestPath, await createDeterministicFileManifest(stagingRoot), 'utf8')
+        artifactMarker = Buffer.from(JSON.stringify({
+          componentDigest: options.artifact?.componentDigest || '',
+          contentDigest: options.artifact?.contentDigest || '',
+          fileManifestDigest: await computeFileSha256(fileManifestPath),
+          runId: options.artifact?.runId || '',
+          sourceSha: options.artifact?.sourceSha || '',
+          versionId: options.artifact?.versionId || '',
+        })).toString('base64')
         execSync(`tar ${forceLocalFlag}-czf ${quote(archivePath)} -C ${quote(stagingRoot)} .`, { cwd: ROOT, stdio: 'inherit' })
         expectedArchiveDigest = await computeFileSha256(archivePath)
       }],
@@ -1045,7 +1098,6 @@ sed -E 's/^[0-9a-f]{64}  //' "$manifest" | LC_ALL=C sort > "$expected_files"
 diff -u "$expected_files" "$actual_files"
 (cd "$release" && sha256sum -c '.happyhome-file-manifest.sha256')
 rm -f "$expected_files" "$actual_files"
-sudo rm -f "$manifest"
 sudo chown -R root:root "$release"
 sudo find "$release" -type d -exec chmod 755 {} \\;
 sudo find "$release" -type f -exec chmod 644 {} \\;
@@ -1116,8 +1168,9 @@ function releaseStageReuseCheck(context) {
   }
 }
 
-function createFormalReleasePlan(gitSha, releaseStrategy, publishResume) {
+function createFormalReleasePlan(gitSha, releaseStrategy, publishResume, forceRedeployCurrent = false) {
   const args = ['scripts/release-plan.mjs', `--mode=${releaseStrategy}`, `--head=${gitSha}`]
+  if (forceRedeployCurrent) args.push('--force-redeploy-current')
   if (publishResume) {
     args.push('--publish-resume', `--version=${publishResume.version}`, `--desc=${publishResume.desc}`)
   }
@@ -1137,7 +1190,8 @@ function createFormalReleasePlan(gitSha, releaseStrategy, publishResume) {
   const expectedPlanningStrategy = releaseStrategy === 'full-current'
     ? 'full-current'
     : plan.bootstrap ? 'bootstrap' : 'incremental'
-  if (plan.mode !== releaseStrategy || plan.planningStrategy !== expectedPlanningStrategy || plan.headSha !== gitSha || !plan.releaseRequired) {
+  if (plan.mode !== releaseStrategy || plan.planningStrategy !== expectedPlanningStrategy || plan.headSha !== gitSha ||
+    plan.forceRedeployCurrent !== forceRedeployCurrent || !plan.releaseRequired) {
     throw new Error('Formal release plan is missing, stale, or does not require a release')
   }
   return plan
@@ -1155,19 +1209,42 @@ function createProductionReleaseGuard(releaseContext, plan) {
   })
 }
 
-function releaseComponents({ cloudDeploy, cloudReleaseProbes = [], miniprogramUpload, plan, releaseContext }) {
-  const probeByFunction = new Map(cloudReleaseProbes.map((probe) => [probe.functionName, probe]))
-  const functions = Object.fromEntries((cloudDeploy?.fns || []).map((name) => [name,
-    toPublicCloudArtifactIdentity(probeByFunction.get(name) || { sourceSha: releaseContext.gitSha, buildId: `cloud-${releaseContext.gitSha.slice(0, 12)}-${name}`, functionName: name }),
-  ]))
+function releaseComponents({ adminDeployed, artifactManifest, cloudDeploy, plan, productionComponents }) {
+  const plannedFunctions = cloudDeploy?.fns || []
+  const functions = selectCloudProductionBindings({
+    artifactManifest,
+    currentBoundFunctions: cloudDeploy?.currentBoundFns || [],
+    deployedFunctions: cloudDeploy?.deployedFns || [],
+    plannedFunctions,
+    priorFunctions: productionComponents?.cloud?.functions || {},
+  })
   return {
-    adminWeb: plan.targets.adminWeb ? { sourceSha: releaseContext.gitSha } : null,
+    adminWeb: plan.targets.adminWeb ? selectStableProductionBinding({
+      component: 'admin-web',
+      current: artifactManifest.artifacts.adminWeb,
+      mutated: adminDeployed,
+      prior: productionComponents?.adminWeb,
+      runId: artifactManifest.runId,
+    }) : null,
     cloud: { functions },
-    miniprogram: plan.targets.miniprogram ? {
-      buildId: `mp-${miniprogramUpload.version}`,
-      sourceSha: releaseContext.gitSha,
-      version: miniprogramUpload.version,
-    } : null,
+    miniprogram: plan.targets.miniprogram ? selectStableProductionBinding({
+      component: 'miniprogram',
+      current: artifactManifest.artifacts.miniprogram,
+      mutated: true,
+      prior: productionComponents?.miniprogram,
+      runId: artifactManifest.runId,
+    }) : null,
+  }
+}
+
+function cloudComponentLedgerOutcome({ artifact, attestation, deployed, prior, runId }) {
+  return {
+    ...attestation,
+    artifactRunId: attestation.bindingSource === 'prior' && !deployed ? prior?.artifactRunId || '' : runId,
+    componentDigest: artifact.componentDigest,
+    runtimeDigest: artifact.runtimeDigest,
+    status: deployed ? 'verified' : attestation.status,
+    evidence: { deployed, freshProbeVerified: true },
   }
 }
 
@@ -1210,7 +1287,7 @@ async function verifyCloudReleaseProbes(probes) {
   return verified
 }
 
-async function invokeCloudReleaseProbe({ artifact, functionName, probeToken, signal }) {
+async function invokeCloudReleaseProbe({ artifact, functionName, probeToken, signal, stableAttestation = false }) {
   const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
   const envId = getCloudEnvId()
   const payloadPath = join(tmpdir(), `happyhome-release-attestation-${functionName}-${Date.now()}.json`)
@@ -1225,8 +1302,11 @@ async function invokeCloudReleaseProbe({ artifact, functionName, probeToken, sig
     })
     if (!result.ok) throw new Error(`fresh release probe failed for ${functionName}: ${result.reason}`)
     const response = parseCliJson(result.output)
-    if (!hasCloudReleaseProbeResponse(response, artifact)) throw new Error(`fresh release probe response mismatch for ${functionName}`)
-    return artifact
+    const matches = stableAttestation
+      ? hasCloudReleaseComponentAttestationResponse(response, artifact)
+      : hasCloudReleaseProbeResponse(response, artifact)
+    if (!matches) throw new Error(`fresh release probe response mismatch for ${functionName}`)
+    return { ...artifact, runtimeVerified: true }
   } finally {
     rmSync(payloadPath, { force: true })
   }
@@ -1274,8 +1354,8 @@ async function runDeclaredReleaseAction(action) {
 }
 
 async function runDeclaredReleaseMigration(migration, releaseContext) {
-  const modulePath = resolve(ROOT, migration.module)
-  const migrationModule = await import(new URL(`file:///${modulePath.replace(/\\/g, '/')}`).href)
+  const modulePath = verifyMigrationInputFile({ root: ROOT, migration })
+  const migrationModule = await import(pathToFileURL(modulePath).href)
   const up = migrationModule.up || migrationModule.default
   if (typeof up !== 'function') throw new Error(`migration ${migration.id} must export up() or default()`)
   await up({ root: ROOT, releaseContext })
@@ -1291,6 +1371,8 @@ async function runFormalRelease(options = {}) {
   const publishOnly = options.publishOnly === true
   const fullCurrentExplicit = hasFlag('full-current')
   const releaseStrategy = fullCurrentExplicit ? 'full-current' : 'main'
+  const forceRedeployCurrent = hasFlag('force-redeploy-current')
+  if (forceRedeployCurrent && !fullCurrentExplicit) throw new Error('--force-redeploy-current requires explicit --full-current')
   if (publishOnly && !getExplicitReleaseRunId()) {
     throw new Error('release-publish requires an explicit --release-run-id=<id> or HH_RELEASE_RUN_ID; refusing implicit latest.')
   }
@@ -1312,6 +1394,7 @@ async function runFormalRelease(options = {}) {
     envId: getCloudEnvId(),
     appid: APPID,
     releaseStrategy,
+    forceRedeployCurrent,
   }
   const releaseRunId = await resolveReleaseRunId(forceResume)
   releaseContext.runId = releaseRunId
@@ -1323,9 +1406,10 @@ async function runFormalRelease(options = {}) {
         resumeRunState,
         gitSha: releaseContext.gitSha,
         releaseStrategy,
-        createPlan: (gitSha, strategy) => createFormalReleasePlan(gitSha, strategy),
+        forceRedeployCurrent,
+        createPlan: (gitSha, strategy, force) => createFormalReleasePlan(gitSha, strategy, null, force),
       })
-  if (!formalPlan || formalPlan.headSha !== releaseContext.gitSha || formalPlan.mode !== releaseStrategy) {
+  if (!formalPlan || formalPlan.headSha !== releaseContext.gitSha || formalPlan.mode !== releaseStrategy || formalPlan.forceRedeployCurrent !== forceRedeployCurrent) {
     throw new Error('formal release plan is missing or does not match the pinned release identity')
   }
   releaseContext.cloudFunctions = formalPlan.targets.cloud.functions || []
@@ -1339,6 +1423,7 @@ async function runFormalRelease(options = {}) {
     envId: releaseContext.envId,
     releaseStrategy,
     dagMode: selectedDagMode,
+    forceRedeployCurrent,
   })
   const resume = forceResume || hasFlag('resume')
   const reuseCheck = releaseStageReuseCheck(releaseContext)
@@ -1382,6 +1467,7 @@ async function runFormalRelease(options = {}) {
           HH_RELEASE_RESUME_CONTEXT_JSON: preflightResume ? JSON.stringify(resumeRunState) : '',
           HH_RELEASE_STRATEGY: releaseStrategy,
           HH_RELEASE_FULL_CURRENT_EXPLICIT: fullCurrentExplicit ? '1' : '0',
+          HH_RELEASE_FORCE_REDEPLOY_CURRENT: forceRedeployCurrent ? '1' : '0',
           HH_RELEASE_PUBLISH_ONLY: publishOnly ? '1' : '0',
           HH_RELEASE_VERSION: releaseContext.version,
           HH_RELEASE_DESC: releaseContext.desc,
@@ -1420,6 +1506,7 @@ async function runFormalRelease(options = {}) {
     else await releaseLedger.skipStage('miniprogram-build-gate', { reason: 'release plan has no miniprogram changes' })
 
     let artifactManifest = releaseLedger.state.artifactManifest
+    const toolchainIdentity = releaseToolchainIdentity()
     if (!artifactManifest) {
       if (formalPlan.targets.cloud.mode !== 'none') buildCloudArtifacts(formalPlan.targets.cloud.functions, releaseContext.gitSha)
       if (formalPlan.targets.adminWeb) buildAdminWeb('history')
@@ -1429,6 +1516,7 @@ async function runFormalRelease(options = {}) {
         plan: formalPlan,
         paths: { cloudRoot: CLOUD_DIST, adminWebRoot: ADMIN_WEB_DIST, miniprogramRoot: MP_DIST },
       })
+      const componentDigests = await createFrontendComponentDigests(formalPlan, toolchainIdentity)
       artifactManifest = await createReleaseArtifactManifest({
         root: ROOT,
         runId: releaseLedger.runId,
@@ -1437,11 +1525,13 @@ async function runFormalRelease(options = {}) {
         version: releaseContext.version,
         desc: releaseContext.desc,
         plan: formalPlan,
-        toolchain: releaseToolchainIdentity(),
+        componentDigests,
+        toolchain: toolchainIdentity,
         paths: snapshotPaths,
       })
       await releaseLedger.pinReleaseArtifacts({ formalPlan, artifactManifest })
     }
+    const currentFrontendDigests = await createFrontendComponentDigests(formalPlan, toolchainIdentity)
     const artifactTargetsMatchPlan = JSON.stringify(artifactManifest?.targets || null) === JSON.stringify({
       cloudFunctions: formalPlan.targets.cloud.functions || [],
       adminWeb: Boolean(formalPlan.targets.adminWeb),
@@ -1452,15 +1542,57 @@ async function runFormalRelease(options = {}) {
       artifactManifest.desc !== releaseContext.desc || !artifactTargetsMatchPlan) {
       throw new Error('immutable artifact manifest is missing or does not match this release run')
     }
+    for (const functionName of formalPlan.targets.cloud.functions || []) {
+      const artifact = artifactManifest.artifacts?.cloud?.[functionName]
+      if (!/^[a-f0-9]{64}$/i.test(String(artifact?.componentDigest || '')) || !/^[a-f0-9]{64}$/i.test(String(artifact?.runtimeDigest || ''))) {
+        throw new Error(`immutable component digest is missing for cloud:${functionName}`)
+      }
+    }
+    for (const [component, expected] of Object.entries(currentFrontendDigests)) {
+      const artifact = artifactManifest.artifacts?.[component]
+      if (!/^[a-f0-9]{64}$/i.test(String(artifact?.componentDigest || '')) || artifact.componentDigest !== expected) {
+        throw new Error(`immutable component digest mismatch for ${component}`)
+      }
+    }
 
     if (prepareOnly) {
       await releaseLedger.complete('prepared')
       return
     }
 
+    const productionState = await releaseGuard.getProductionState()
+    const priorCloudFunctions = productionState?.components?.cloud?.functions || {}
+    const priorProbeByFunction = new Map()
+    const attestationSourceByFunction = new Map()
+    const attestCloudWithPriorArtifact = async (input) => {
+      const result = await attestCloudWithCurrentOrPrior({
+        input,
+        invokeCurrent: async (current) => ({ ...await invokeCloudReleaseProbe(current), bindingSource: 'current' }),
+        loadPrior: async (current) => await loadPriorCloudAttestationProbe({
+          root: ROOT,
+          functionName: current.functionName,
+          productionComponent: priorCloudFunctions[current.functionName],
+          registerSecrets: (secrets) => releaseLedger.registerSecrets(secrets),
+        }),
+        invokePrior: async (current, prior) => {
+          priorProbeByFunction.set(current.functionName, prior)
+          return { ...await invokeCloudReleaseProbe({ ...current, probeToken: prior.probeToken, stableAttestation: true }), bindingSource: 'prior' }
+        },
+      })
+      attestationSourceByFunction.set(input.functionName, result.bindingSource)
+      return result
+    }
+    const verifyCloudDesiredState = async (input) => {
+      if (input.deployed || attestationSourceByFunction.get(input.functionName) === 'current') return await invokeCloudReleaseProbe(input)
+      const prior = priorProbeByFunction.get(input.functionName)
+      if (!prior?.available) throw new Error('prior immutable cloud attestation proof is unavailable during verification')
+      return await invokeCloudReleaseProbe({ ...input, probeToken: prior.probeToken, stableAttestation: true })
+    }
+
     let cloudDeploy = { fns: [] }
     let cloudReleaseProbes = []
     let cloudOrchestration = { attestations: [], deployFunctions: [], verified: [] }
+    let adminDeployed = false
     const semanticActions = [...new Set(formalPlan.manifests.flatMap((manifest) => manifest.actions || []))]
     const semanticSmokeSuites = [...new Set(formalPlan.manifests.flatMap((manifest) => manifest.smokeSuites || []))]
     const semanticRequiredCases = Math.max(30, ...formalPlan.manifests.map((manifest) => Number(manifest.semantic?.requiredCases || 0)))
@@ -1492,9 +1624,10 @@ async function runFormalRelease(options = {}) {
         return await orchestrateCloudArtifactRelease({
           root: ROOT,
           manifest: subsetManifest,
+          forceRedeployCurrent,
           onSecrets: (secrets) => releaseLedger.registerSecrets(secrets),
           timeoutMs: getPositiveIntFlag('cloud-attestation-timeout-ms', 30_000, { max: 120_000 }),
-          attest: async (input) => { await localExactShaFence(`attest:${input.functionName}`); return await invokeCloudReleaseProbe(input) },
+          attest: async (input) => { await localExactShaFence(`attest:${input.functionName}`); return await attestCloudWithPriorArtifact(input) },
           deploy: async ({ artifactRoot, functionName }) => {
             const artifact = artifactManifest.artifacts.cloud[functionName]
             const result = await deployCloud({
@@ -1513,7 +1646,7 @@ async function runFormalRelease(options = {}) {
             })
             if (result.path !== 'cloudbase-cli') throw new Error(`Formal release cloud deploy must use CloudBase CLI/COS; got ${result.path}`)
           },
-          verify: async (input) => { await localExactShaFence(`verify:${input.functionName}`); return await invokeCloudReleaseProbe(input) },
+          verify: async (input) => { await localExactShaFence(`verify:${input.functionName}`); return await verifyCloudDesiredState(input) },
         })
       }
 
@@ -1540,7 +1673,7 @@ async function runFormalRelease(options = {}) {
         }, async () => {
           const state = await releaseGuard.getProductionState()
           const result = await executeReleaseOperations({
-            appliedMigrations: new Set(Object.keys(state?.appliedMigrations || {})),
+            appliedMigrations: { ...(state?.appliedMigrations || {}) },
             completedActions: new Set(['ensure-indexes']),
             guard: {
               beforeRemoteMutation: revalidateFormalMutation,
@@ -1632,6 +1765,7 @@ async function runFormalRelease(options = {}) {
           if (plannedCloudFunctions.length) {
             cloudDeploy = {
                fns: plannedCloudFunctions,
+               currentBoundFns: cloudOrchestration.attestations.filter((item) => item.bindingSource === 'current' && item.status === 'attested').map((item) => item.functionName),
                deployedFns: cloudOrchestration.deployFunctions,
                path: cloudOrchestration.deployFunctions.length ? 'cloudbase-cli' : 'attested',
                status: cloudOrchestration.deployFunctions.length ? 'deployed' : 'attested',
@@ -1669,9 +1803,10 @@ async function runFormalRelease(options = {}) {
       const deployedCloudFunctions = new Set(cloudDeploy.deployedFns || [])
       for (const attestation of cloudOrchestration.attestations) {
         const deployed = deployedCloudFunctions.has(attestation.functionName)
-        await releaseLedger.recordComponent(attestation.component, deployed
-          ? { status: 'verified', skipReason: attestation.skipReason, evidence: { deployed: true, freshProbeVerified: true } }
-          : attestation)
+        await releaseLedger.recordComponent(attestation.component, cloudComponentLedgerOutcome({
+          artifact: artifactManifest.artifacts.cloud[attestation.functionName], attestation, deployed,
+          prior: priorCloudFunctions[attestation.functionName], runId: artifactManifest.runId,
+        }))
       }
     } else {
     await runLedgerStage(releaseLedger, 'release-operations', {
@@ -1679,7 +1814,7 @@ async function runFormalRelease(options = {}) {
     }, async () => {
       const state = await releaseGuard.getProductionState()
       const result = await executeReleaseOperations({
-        appliedMigrations: new Set(Object.keys(state?.appliedMigrations || {})),
+        appliedMigrations: { ...(state?.appliedMigrations || {}) },
         guard: {
           beforeRemoteMutation: revalidateFormalMutation,
           recordStage: async (...args) => await releaseGuard.recordStage(...args),
@@ -1701,9 +1836,10 @@ async function runFormalRelease(options = {}) {
       cloudOrchestration = await orchestrateCloudArtifactRelease({
         root: ROOT,
         manifest: artifactManifest,
+        forceRedeployCurrent,
         onSecrets: (secrets) => releaseLedger.registerSecrets(secrets),
         timeoutMs: getPositiveIntFlag('cloud-attestation-timeout-ms', 30_000, { max: 120_000 }),
-        attest: invokeCloudReleaseProbe,
+        attest: attestCloudWithPriorArtifact,
         deploy: async ({ artifactRoot, functionName }) => {
           const artifact = artifactManifest.artifacts.cloud[functionName]
           const result = await deployCloud({
@@ -1722,11 +1858,12 @@ async function runFormalRelease(options = {}) {
           })
           if (result.path !== 'cloudbase-cli') throw new Error(`Formal release cloud deploy must use CloudBase CLI/COS; got ${result.path}`)
         },
-        verify: invokeCloudReleaseProbe,
+        verify: verifyCloudDesiredState,
       })
       await releaseLedger.recordRemoteAttestations('cloud', cloudOrchestration.attestations)
       return { result: {
         fns: formalPlan.targets.cloud.functions,
+        currentBoundFns: cloudOrchestration.attestations.filter((item) => item.bindingSource === 'current' && item.status === 'attested').map((item) => item.functionName),
         deployedFns: cloudOrchestration.deployFunctions,
         path: cloudOrchestration.deployFunctions.length ? 'cloudbase-cli' : 'attested',
         status: cloudOrchestration.deployFunctions.length ? 'deployed' : 'attested',
@@ -1746,9 +1883,10 @@ async function runFormalRelease(options = {}) {
     const deployedCloudFunctions = new Set(cloudDeploy.deployedFns || [])
     for (const attestation of cloudOrchestration.attestations) {
       const deployed = deployedCloudFunctions.has(attestation.functionName)
-      await releaseLedger.recordComponent(attestation.component, deployed
-        ? { status: 'verified', skipReason: attestation.skipReason, evidence: { deployed: true, freshProbeVerified: true } }
-        : attestation)
+      await releaseLedger.recordComponent(attestation.component, cloudComponentLedgerOutcome({
+        artifact: artifactManifest.artifacts.cloud[attestation.functionName], attestation, deployed,
+        prior: priorCloudFunctions[attestation.functionName], runId: artifactManifest.runId,
+      }))
     }
 
     await executeFormalSemanticReleaseStages({actions:semanticActions,smokeSuites:semanticSmokeSuites,requiredCases:semanticRequiredCases},{
@@ -1788,11 +1926,21 @@ async function runFormalRelease(options = {}) {
 
     if (formalPlan.targets.adminWeb) {
       const adminArtifact = artifactManifest.artifacts.adminWeb
-      const adminAttestation = await attestAdminWebArtifact({ root: ROOT, artifact: adminArtifact, inspectRemote: inspectAdminWebPublication })
+      let adminAttestation = await attestAdminWebArtifact({
+        root: ROOT, artifact: adminArtifact, forceRedeployCurrent, inspectRemote: inspectAdminWebPublication,
+        priorBinding: productionState?.components?.adminWeb,
+      })
+      if (!adminAttestation.shouldDeploy) {
+        try {
+          selectStableProductionBinding({ component: 'admin-web', current: adminArtifact, mutated: false, prior: productionState?.components?.adminWeb, runId: artifactManifest.runId })
+        } catch {
+          adminAttestation = { component: 'admin-web', status: 'deploy-required', shouldDeploy: true, skipReason: 'prior deployed admin binding is unavailable' }
+        }
+      }
       await releaseLedger.recordRemoteAttestations('admin-web', [adminAttestation])
       if (!adminAttestation.shouldDeploy) {
         await releaseLedger.skipStage('admin-web-deploy', { reason: adminAttestation.skipReason, result: { status: 'attested' } })
-        await releaseLedger.recordComponent('admin-web', adminAttestation)
+        await releaseLedger.recordComponent('admin-web', { ...adminAttestation, artifactRunId: productionState?.components?.adminWeb?.artifactRunId || '', componentDigest: adminArtifact.componentDigest, evidence: { deployed: false, remoteBytesVerified: true } })
       } else await runLedgerStage(releaseLedger, 'admin-web-deploy', {
         command: 'fresh publication attestation + admin-web deploy',
       }, async () => {
@@ -1802,8 +1950,9 @@ async function runFormalRelease(options = {}) {
           skipBuild: true,
           beforeRemoteMutation: async () => await revalidateFormalMutation('admin-web-deploy'),
         })
+        adminDeployed = true
         await releaseGuard.recordStage('admin-web-deploy')
-        await releaseLedger.recordComponent('admin-web', { status: 'deployed', skipReason: adminAttestation.skipReason })
+        await releaseLedger.recordComponent('admin-web', { status: 'deployed', skipReason: adminAttestation.skipReason, artifactRunId: artifactManifest.runId, componentDigest: adminArtifact.componentDigest, evidence: { deployed: true, remoteBytesVerified: true } })
         return { result: { target: process.env.ADMIN_WEB_TARGET || 'aliyun', status: 'deployed' } }
       })
     } else await releaseLedger.skipStage('admin-web-deploy', { reason: 'release plan has no admin-web changes' })
@@ -1918,7 +2067,9 @@ async function runFormalRelease(options = {}) {
         component: 'miniprogram',
         status: 'uploaded',
         skipReason: uploadStage?.reused ? receiptAttestation?.skipReason || uploadStage.reason : '',
-        evidence: { receiptReused: uploadStage?.reused === true, receiptId: receiptAttestation?.receiptId || '' },
+        artifactRunId: artifactManifest.runId,
+        componentDigest: artifactManifest.artifacts.miniprogram.componentDigest,
+        evidence: { deployed: true, receiptReused: uploadStage?.reused === true, receiptId: receiptAttestation?.receiptId || '' },
       }
       await releaseLedger.recordRemoteAttestations('miniprogram', [miniprogramOutcome])
       await releaseLedger.recordComponent('miniprogram', miniprogramOutcome)
@@ -1927,7 +2078,7 @@ async function runFormalRelease(options = {}) {
     if (releaseGuard) await completeProductionReleaseWithRemoteConfirmation({
       guard: releaseGuard,
       ledger: releaseLedger,
-      components: releaseComponents({ cloudDeploy, cloudReleaseProbes, miniprogramUpload, plan: formalPlan, releaseContext }),
+      components: releaseComponents({ adminDeployed, artifactManifest, cloudDeploy, plan: formalPlan, productionComponents: productionState?.components || {} }),
       evidence: { localReleaseRunId: releaseLedger.runId, planBaseSha: formalPlan.baseSha || null },
     })
     else await releaseLedger.complete('passed')

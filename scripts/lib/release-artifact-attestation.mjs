@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { computeDirectoryDigest } from './release-run-ledger.mjs'
 import { createMiniprogramReceiptIdentity } from './miniprogram-receipt-identity.mjs'
 import { assertNoSymbolicLinkPath, pathsReferToSameEntry } from './filesystem-path-integrity.mjs'
+import { verifyRuntimeFileManifest } from './release-component-digest.mjs'
 export { createMiniprogramReceiptIdentity } from './miniprogram-receipt-identity.mjs'
 
 function sha256(value) {
@@ -21,7 +22,10 @@ function absolutePath(root, path) {
 }
 
 async function assertExactSnapshotPath({ root, runId, artifactPath, suffix, component }) {
-  if (!/^[a-zA-Z0-9._-]+$/.test(String(runId || '')) || suffix.some((part) => !part || part === '.' || part === '..' || /[\\/]/.test(part))) {
+  try {
+    assertSafeReleasePathSegment(runId, 'runId')
+    for (const part of suffix) assertSafeReleasePathSegment(part, 'artifact suffix')
+  } catch {
     throw new Error(`immutable ${component} artifact path is invalid`)
   }
   const expected = resolve(root, '.codex-local', 'release-artifacts', runId, ...suffix)
@@ -43,10 +47,13 @@ function assertIdentity(value, name) {
   if (!String(value || '').trim()) throw new Error(`release artifact manifest requires ${name}`)
 }
 
-function assertSafePathSegment(value, name) {
-  if (!/^[a-zA-Z0-9._-]+$/.test(String(value || '')) || value === '.' || value === '..') {
+export function assertSafeReleasePathSegment(value, name = 'path segment') {
+  const segment = String(value || '')
+  const reserved = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i
+  if (!/^[a-zA-Z0-9._-]+$/.test(segment) || segment === '.' || segment === '..' || /[. ]$/.test(segment) || reserved.test(segment)) {
     throw new Error(`release artifact requires safe ${name}`)
   }
+  return segment
 }
 
 async function assertNoPathRedirection(path, component) {
@@ -61,7 +68,7 @@ async function assertNoPathRedirection(path, component) {
 
 export async function createImmutableArtifactSnapshots({ root, runId, plan, paths = {} } = {}) {
   assertIdentity(root, 'root')
-  if (!/^[a-zA-Z0-9._-]+$/.test(String(runId || ''))) throw new Error('release artifact snapshot requires a safe runId')
+  assertSafeReleasePathSegment(runId, 'runId')
   const destination = resolve(root, '.codex-local', 'release-artifacts', runId)
   const temporary = resolve(dirname(destination), `.${runId}.tmp-${process.pid}-${Date.now()}`)
   await mkdir(dirname(destination), { recursive: true })
@@ -70,7 +77,7 @@ export async function createImmutableArtifactSnapshots({ root, runId, plan, path
   try {
     await mkdir(temporary, { recursive: true })
     for (const functionName of plan.targets?.cloud?.functions || []) {
-      assertSafePathSegment(functionName, 'cloud function name')
+      assertSafeReleasePathSegment(functionName, 'cloud function name')
       await computeDirectoryDigest(join(paths.cloudRoot, functionName))
       await cp(join(paths.cloudRoot, functionName), join(temporary, 'cloud', functionName), { recursive: true, errorOnExist: true })
     }
@@ -104,9 +111,11 @@ export function sanitizeKnownSecrets(value, secrets = []) {
 export function toPublicCloudArtifactIdentity(artifact = {}) {
   return {
     buildId: artifact.buildId || '',
+    componentDigest: artifact.componentDigest || '',
     contentDigest: artifact.contentDigest || '',
     functionName: artifact.functionName || '',
     probeTokenHash: artifact.probeTokenHash || '',
+    runtimeDigest: artifact.runtimeDigest || '',
     sourceSha: artifact.sourceSha || '',
   }
 }
@@ -124,7 +133,15 @@ async function validatePinnedCloudArtifacts({ root, manifest }) {
     try { digest = await computeDirectoryDigest(artifactRoot) } catch { throw new Error(`immutable cloud artifact is missing for ${functionName}`) }
     if (digest !== artifact.contentDigest) throw new Error(`immutable cloud artifact digest mismatch for ${functionName}`)
     const probe = JSON.parse(await readFile(join(artifactRoot, '__release.info.json'), 'utf8'))
+    if (artifact.runtimeDigest) {
+      const runtimeManifest = JSON.parse(await readFile(join(artifactRoot, '.happyhome-runtime-manifest.json'), 'utf8'))
+      if (runtimeManifest.runtimeDigest !== artifact.runtimeDigest || !(await verifyRuntimeFileManifest(artifactRoot, runtimeManifest))) {
+        throw new Error(`immutable cloud runtime digest mismatch for ${functionName}`)
+      }
+    }
     if (probe.functionName !== functionName || probe.buildId !== artifact.buildId || probe.sourceSha !== artifact.sourceSha ||
+      (artifact.componentDigest && probe.componentDigest !== artifact.componentDigest) ||
+      (artifact.runtimeDigest && probe.runtimeDigest !== artifact.runtimeDigest) ||
       sha256(String(probe.probeToken || '')) !== artifact.probeTokenHash) {
       throw new Error(`immutable cloud probe identity mismatch for ${functionName}`)
     }
@@ -166,7 +183,7 @@ export async function boundedOperation(operation, timeoutMs, { cleanupGraceMs = 
   throw taggedError(`operation timed out after ${timeoutMs}ms after cleanup settled`, 'ERR_RELEASE_ATTESTATION_TIMEOUT')
 }
 
-export async function orchestrateCloudArtifactRelease({ root, manifest, timeoutMs = 30_000, cleanupGraceMs = 5_000, attest, deploy, verify, onSecrets } = {}) {
+export async function orchestrateCloudArtifactRelease({ root, manifest, timeoutMs = 30_000, cleanupGraceMs = 5_000, attest, deploy, verify, onSecrets, forceRedeployCurrent = false } = {}) {
   if (![attest, deploy, verify].every((value) => typeof value === 'function')) throw new Error('cloud artifact orchestration requires attest, deploy, and verify')
   const pinned = await validatePinnedCloudArtifacts({ root, manifest })
   const secrets = pinned.map((item) => item.probeToken)
@@ -176,10 +193,19 @@ export async function orchestrateCloudArtifactRelease({ root, manifest, timeoutM
   for (const item of pinned) {
     try {
       const response = await boundedOperation((signal) => attest({ ...item, signal }), timeoutMs, { cleanupGraceMs })
-      if (response?.functionName !== item.artifact.functionName || response?.buildId !== item.artifact.buildId || response?.sourceSha !== item.artifact.sourceSha) {
+      const stableMatch = item.artifact.componentDigest
+        ? response?.functionName === item.artifact.functionName && response?.componentDigest === item.artifact.componentDigest &&
+          response?.runtimeDigest === item.artifact.runtimeDigest && response?.runtimeVerified === true
+        : response?.functionName === item.artifact.functionName && response?.buildId === item.artifact.buildId && response?.sourceSha === item.artifact.sourceSha
+      if (!stableMatch) {
         throw new Error('fresh probe response does not match artifact identity')
       }
-      attestations.push({ component: `cloud:${item.functionName}`, functionName: item.functionName, status: 'attested', skipReason: 'fresh remote probe matched immutable snapshot' })
+      if (forceRedeployCurrent) {
+        deployFunctions.push(item.functionName)
+        attestations.push({ bindingSource: response?.bindingSource || 'current', component: `cloud:${item.functionName}`, functionName: item.functionName, status: 'deploy-required', skipReason: 'force-redeploy-current explicitly requested mutation after fresh attestation' })
+      } else {
+        attestations.push({ bindingSource: response?.bindingSource || 'current', component: `cloud:${item.functionName}`, functionName: item.functionName, status: 'attested', skipReason: 'fresh remote probe matched stable component and runtime digests' })
+      }
     } catch (error) {
       if (error?.code === 'ERR_RELEASE_ATTESTATION_ABORT_CLEANUP') throw error
       deployFunctions.push(item.functionName)
@@ -202,7 +228,7 @@ export async function orchestrateCloudArtifactRelease({ root, manifest, timeoutM
     const digest = await computeDirectoryDigest(item.artifactRoot)
     if (digest !== item.artifact.contentDigest) throw new Error(`immutable cloud artifact digest changed before verify for ${item.functionName}`)
     try {
-      await boundedOperation((signal) => verify({ ...item, signal }), timeoutMs, { cleanupGraceMs })
+      await boundedOperation((signal) => verify({ ...item, deployed: deployFunctions.includes(item.functionName), signal }), timeoutMs, { cleanupGraceMs })
     } catch (error) {
       throw new Error(sanitizeKnownSecrets(error?.message || String(error), secrets))
     }
@@ -211,12 +237,12 @@ export async function orchestrateCloudArtifactRelease({ root, manifest, timeoutM
   return { attestations, deployFunctions, verified }
 }
 
-export async function createReleaseArtifactManifest({ root, runId, gitSha, envId, version, desc, plan, toolchain = {}, paths = {} } = {}) {
+export async function createReleaseArtifactManifest({ root, runId, gitSha, envId, version, desc, plan, componentDigests = {}, toolchain = {}, paths = {} } = {}) {
   for (const [name, value] of Object.entries({ root, runId, gitSha, envId, version, desc, plan })) assertIdentity(value, name)
   const cloudFunctions = [...(plan.targets?.cloud?.functions || [])]
   const artifacts = { cloud: {}, adminWeb: null, miniprogram: null }
   for (const functionName of cloudFunctions) {
-    assertSafePathSegment(functionName, 'cloud function name')
+    assertSafeReleasePathSegment(functionName, 'cloud function name')
     const artifactRoot = join(paths.cloudRoot, functionName)
     const probe = JSON.parse(await readFile(join(artifactRoot, '__release.info.json'), 'utf8'))
     if (probe.functionName !== functionName || probe.sourceSha !== gitSha || !probe.buildId || !/^[a-f0-9]{64}$/i.test(String(probe.probeToken || ''))) {
@@ -225,9 +251,11 @@ export async function createReleaseArtifactManifest({ root, runId, gitSha, envId
     artifacts.cloud[functionName] = {
       artifactPath: await localPath(root, artifactRoot),
       buildId: probe.buildId,
+      componentDigest: probe.componentDigest || '',
       contentDigest: await computeDirectoryDigest(artifactRoot),
       functionName,
       probeTokenHash: sha256(probe.probeToken),
+      runtimeDigest: probe.runtimeDigest || '',
       sourceSha: gitSha,
     }
   }
@@ -235,6 +263,7 @@ export async function createReleaseArtifactManifest({ root, runId, gitSha, envId
     const contentDigest = await computeDirectoryDigest(paths.adminWebRoot)
     artifacts.adminWeb = {
       artifactPath: await localPath(root, paths.adminWebRoot),
+      componentDigest: componentDigests.adminWeb || '',
       contentDigest,
       runId,
       sourceSha: gitSha,
@@ -245,6 +274,7 @@ export async function createReleaseArtifactManifest({ root, runId, gitSha, envId
     const contentDigest = await computeDirectoryDigest(paths.miniprogramRoot)
     artifacts.miniprogram = {
       artifactPath: await localPath(root, paths.miniprogramRoot),
+      componentDigest: componentDigests.miniprogram || '',
       contentDigest,
       desc,
       runId,
@@ -275,7 +305,11 @@ export async function attestCloudArtifacts({ root, manifest, invoke } = {}) {
       const probe = JSON.parse(await readFile(join(artifactRoot, '__release.info.json'), 'utf8'))
       if (sha256(String(probe.probeToken || '')) !== artifact.probeTokenHash) throw new Error('local probe token hash mismatch')
       const response = await invoke({ artifact, functionName, probeToken: probe.probeToken })
-      if (response?.functionName !== artifact.functionName || response?.buildId !== artifact.buildId || response?.sourceSha !== artifact.sourceSha) {
+      const stableMatch = artifact.componentDigest
+        ? response?.functionName === artifact.functionName && response?.componentDigest === artifact.componentDigest &&
+          response?.runtimeDigest === artifact.runtimeDigest && response?.runtimeVerified === true
+        : response?.functionName === artifact.functionName && response?.buildId === artifact.buildId && response?.sourceSha === artifact.sourceSha
+      if (!stableMatch) {
         throw new Error('fresh probe response does not match artifact identity')
       }
       attestations.push({ component: `cloud:${functionName}`, functionName, status: 'attested', skipReason: 'fresh remote probe matched immutable local artifact' })
@@ -289,7 +323,8 @@ export async function attestCloudArtifacts({ root, manifest, invoke } = {}) {
   return { attestations, deployFunctions }
 }
 
-export async function attestAdminWebArtifact({ root, artifact, inspectRemote } = {}) {
+export async function attestAdminWebArtifact({ root, artifact, inspectRemote, priorBinding, priorFileManifestDigest = '', forceRedeployCurrent = false } = {}) {
+  let expectedPriorFileManifestDigest = priorFileManifestDigest
   if (root) {
     const artifactRoot = await assertExactSnapshotPath({
       root, runId: artifact?.runId, artifactPath: artifact?.artifactPath,
@@ -300,13 +335,37 @@ export async function attestAdminWebArtifact({ root, artifact, inspectRemote } =
       throw new Error('immutable admin-web artifact is missing')
     }
     if (localDigest !== artifact.contentDigest) throw new Error('immutable admin-web artifact digest mismatch')
+    if (artifact.componentDigest && priorBinding?.artifactRunId) {
+      try {
+        const priorArtifactRoot = await assertExactSnapshotPath({
+          root,
+          runId: priorBinding.artifactRunId,
+          artifactPath: join(root, '.codex-local', 'release-artifacts', priorBinding.artifactRunId, 'admin-web'),
+          suffix: ['admin-web'],
+          component: 'prior admin-web',
+        })
+        if (await computeDirectoryDigest(priorArtifactRoot) !== priorBinding.contentDigest) throw new Error('prior immutable admin-web artifact digest mismatch')
+        expectedPriorFileManifestDigest = sha256(await createDeterministicFileManifest(priorArtifactRoot))
+      } catch {
+        expectedPriorFileManifestDigest = ''
+      }
+    }
   }
   try {
     const remote = await inspectRemote()
     if (!remote || !remote.contentDigest || !remote.runId || !remote.versionId) {
       return { component: 'admin-web', status: 'unattestable', shouldDeploy: true, skipReason: 'remote publication identity is unreadable' }
     }
-    if (remote.contentDigest === artifact.contentDigest && remote.runId === artifact.runId && remote.versionId === artifact.versionId) {
+    const stableMatch = artifact.componentDigest
+      ? remote.componentDigest === artifact.componentDigest && remote.runtimeVerified === true && remote.fileManifestDigestVerified === true &&
+        priorBinding?.artifactRunId && remote.runId === priorBinding.runId && remote.contentDigest === priorBinding.contentDigest &&
+        remote.versionId === priorBinding.versionId && priorBinding.componentDigest === artifact.componentDigest &&
+        /^[a-f0-9]{64}$/i.test(expectedPriorFileManifestDigest) && remote.fileManifestDigest === expectedPriorFileManifestDigest
+      : remote.contentDigest === artifact.contentDigest && remote.runId === artifact.runId && remote.versionId === artifact.versionId
+    if (stableMatch && forceRedeployCurrent) {
+      return { component: 'admin-web', status: 'deploy-required', shouldDeploy: true, skipReason: 'force-redeploy-current explicitly requested mutation after fresh attestation' }
+    }
+    if (stableMatch) {
       return { component: 'admin-web', status: 'attested', shouldDeploy: false, skipReason: 'fresh remote version and content digest matched' }
     }
     return { component: 'admin-web', status: 'deploy-required', shouldDeploy: true, skipReason: 'remote version or content digest mismatch' }
@@ -337,7 +396,7 @@ export async function createDeterministicFileManifest(artifactRoot) {
     for (const entry of entries) {
       const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name
       if (/[\\\r\n]/.test(relativePath)) throw new Error(`admin-web manifest rejects unsafe path: ${relativePath}`)
-      if (relativePath === '.happyhome-file-manifest.sha256') throw new Error('admin-web manifest rejects reserved manifest path')
+      if (['.happyhome-file-manifest.sha256', '.happyhome-release.json'].includes(relativePath)) throw new Error(`admin-web manifest rejects reserved path: ${relativePath}`)
       const path = join(directory, entry.name)
       if (entry.isSymbolicLink()) throw new Error(`admin-web manifest rejects symbolic link or reparse entry: ${relativePath}`)
       if (entry.isDirectory()) await walk(path, relativePath)

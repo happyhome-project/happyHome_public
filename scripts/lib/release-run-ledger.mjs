@@ -30,7 +30,7 @@ const REQUIRED_RELEASE_UI_MARKERS = [
   'HH_RELEASE_PROFILE_LOGIN_CLEAN',
 ]
 
-const RELEASE_CONTEXT_KEYS = ['gitSha', 'version', 'desc', 'envId', 'releaseStrategy', 'dagMode']
+const RELEASE_CONTEXT_KEYS = ['gitSha', 'version', 'desc', 'envId', 'releaseStrategy', 'dagMode', 'forceRedeployCurrent']
 
 function hasReusableColdStartEvidence(evidence = {}) {
   const coldStart = evidence.homeColdStart
@@ -94,6 +94,7 @@ function sanitizeSecretValues(value, secrets = []) {
 function withAdditiveReleaseDefaults(state) {
   return {
     ...state,
+    context: { ...(state?.context || {}), forceRedeployCurrent: state?.context?.forceRedeployCurrent === true },
     formalPlan: state?.formalPlan || null,
     artifactManifest: state?.artifactManifest || null,
     remoteAttestations: state?.remoteAttestations || {},
@@ -165,6 +166,10 @@ function durationMs(startedAt, finishedAt) {
 
 function contextMismatch(stageContext = {}, expected = {}) {
   for (const key of RELEASE_CONTEXT_KEYS) {
+    if (key === 'forceRedeployCurrent') {
+      if ((stageContext[key] === true) !== (expected[key] === true)) return `${key} mismatch`
+      continue
+    }
     if (expected[key] && !stageContext[key]) {
       return `${key} missing from reusable stage context`
     }
@@ -176,9 +181,13 @@ function contextMismatch(stageContext = {}, expected = {}) {
 }
 
 function mergeExistingRunContext(existing = {}, next = {}) {
-  const merged = { ...existing, releaseStrategy: existing.releaseStrategy || 'main', dagMode: existing.dagMode || 'legacy' }
-  const requested = { ...next, releaseStrategy: next.releaseStrategy || 'main', dagMode: next.dagMode || 'legacy' }
+  const merged = { ...existing, releaseStrategy: existing.releaseStrategy || 'main', dagMode: existing.dagMode || 'legacy', forceRedeployCurrent: existing.forceRedeployCurrent === true }
+  const requested = { ...next, releaseStrategy: next.releaseStrategy || 'main', dagMode: next.dagMode || 'legacy', forceRedeployCurrent: next.forceRedeployCurrent === true }
   for (const key of RELEASE_CONTEXT_KEYS) {
+    if (key === 'forceRedeployCurrent') {
+      if (merged[key] !== requested[key]) throw new Error(`release run context mismatch for ${key}: existing ${merged[key]}, requested ${requested[key]}`)
+      continue
+    }
     if (merged[key] && requested[key] && merged[key] !== requested[key]) {
       throw new Error(`release run context mismatch for ${key}: existing ${merged[key]}, requested ${requested[key]}`)
     }
@@ -468,7 +477,7 @@ export class ReleaseRunLedger {
       return
     }
     assertNoPlaintextProbeToken(artifactManifest)
-    this.state.schemaVersion = 2
+    this.state.schemaVersion = 3
     this.state.formalPlan = formalPlan
     this.state.artifactManifest = artifactManifest
     this.state.remoteAttestations ||= {}
@@ -488,10 +497,10 @@ export class ReleaseRunLedger {
     })
   }
 
-  async recordComponent(name, { status, skipReason = '', evidence = null } = {}) {
+  async recordComponent(name, details = {}) {
     return await this.serializeMutation(async () => {
     this.state.components ||= {}
-    this.state.components[name] = this.sanitize({ status, skipReason, evidence })
+    this.state.components[name] = this.sanitize({ ...details, skipReason: details.skipReason || '', evidence: details.evidence ?? null })
     await this.saveUnsafe()
     })
   }
@@ -613,11 +622,12 @@ export async function createReleaseRunLedger(options) {
       envId: options.envId || '',
       releaseStrategy: options.releaseStrategy || 'main',
       dagMode: options.dagMode || 'legacy',
+      forceRedeployCurrent: options.forceRedeployCurrent === true,
     })
   } else {
     const createdAt = isoNow(options.now)
     state = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       runId,
       command: options.command || '',
       status: 'running',
@@ -631,6 +641,7 @@ export async function createReleaseRunLedger(options) {
         envId: options.envId || '',
         releaseStrategy: options.releaseStrategy || 'main',
         dagMode: options.dagMode || 'legacy',
+        forceRedeployCurrent: options.forceRedeployCurrent === true,
       },
       stages: {},
       formalPlan: null,
@@ -646,7 +657,7 @@ export async function createReleaseRunLedger(options) {
   return ledger
 }
 
-export function createReleasePlanAfterResumeIdentityCheck({ resumeRunState, gitSha, releaseStrategy, createPlan }) {
+export function createReleasePlanAfterResumeIdentityCheck({ resumeRunState, gitSha, releaseStrategy, forceRedeployCurrent = false, createPlan }) {
   if (resumeRunState) {
     const existingGitSha = String(resumeRunState.context?.gitSha || '')
     const existingReleaseStrategy = String(resumeRunState.context?.releaseStrategy || 'main')
@@ -656,8 +667,12 @@ export function createReleasePlanAfterResumeIdentityCheck({ resumeRunState, gitS
     if (existingReleaseStrategy !== releaseStrategy) {
       throw new Error(`release resume context mismatch for releaseStrategy: existing ${existingReleaseStrategy}, requested ${releaseStrategy}`)
     }
+    const existingForceRedeployCurrent = resumeRunState.context?.forceRedeployCurrent === true
+    if (existingForceRedeployCurrent !== (forceRedeployCurrent === true)) {
+      throw new Error(`release resume context mismatch for forceRedeployCurrent: existing ${existingForceRedeployCurrent}, requested ${forceRedeployCurrent === true}`)
+    }
   }
-  return createPlan(gitSha, releaseStrategy)
+  return createPlan(gitSha, releaseStrategy, forceRedeployCurrent === true)
 }
 
 function releaseIdentityFromLedger(ledger) {

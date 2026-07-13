@@ -67,7 +67,7 @@ test('prepare pins the formal plan and immutable artifact manifest without probe
     const artifactManifest = { schemaVersion: 1, runId: 'pin-run', gitSha: 'abc', artifacts: { cloud: { admin: { probeTokenHash: 'hash' } } } }
     await ledger.pinReleaseArtifacts({ formalPlan, artifactManifest })
     const saved = await loadReleaseRun(root, 'pin-run')
-    assert.equal(saved.schemaVersion, 2)
+    assert.equal(saved.schemaVersion, 3)
     assert.deepEqual(saved.formalPlan, formalPlan)
     assert.deepEqual(saved.artifactManifest, artifactManifest)
     assert.doesNotMatch(JSON.stringify(saved), new RegExp(probeToken))
@@ -93,6 +93,24 @@ test('legacy schema one release ledgers remain readable and gain additive defaul
     assert.equal(run.artifactManifest, null)
     assert.deepEqual(run.remoteAttestations, {})
     assert.deepEqual(run.components, {})
+    assert.equal(run.context.forceRedeployCurrent, false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('force-redeploy-current is resume-bound and legacy schema two defaults it off', async () => {
+  const root = await tempRoot()
+  try {
+    const ledger = await createReleaseRunLedger({ root, runId: 'force-run', gitSha: 'abc', releaseStrategy: 'full-current', forceRedeployCurrent: true })
+    assert.equal(ledger.state.context.forceRedeployCurrent, true)
+    await assert.rejects(() => createReleaseRunLedger({ root, runId: 'force-run', gitSha: 'abc', releaseStrategy: 'full-current', forceRedeployCurrent: false }), /forceRedeployCurrent/i)
+    await writeJson(join(root, '.codex-local', 'release-runs', 'legacy-two', 'run.json'), {
+      schemaVersion: 2, runId: 'legacy-two', status: 'passed', context: { gitSha: 'abc', releaseStrategy: 'main' }, stages: {},
+    })
+    const legacy = await loadReleaseRun(root, 'legacy-two')
+    assert.equal(legacy.schemaVersion, 2)
+    assert.equal(legacy.context.forceRedeployCurrent, false)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -317,13 +335,15 @@ test('concurrent stage component and attestation mutations preserve one parseabl
     const ledger = await createReleaseRunLedger({ root, runId: 'parallel-ledger-writes', gitSha: 'abc', version: '1', desc: 'd', envId: 'env', dagMode: 'v2' })
     await Promise.all([
       ledger.passStage('post-rag-timer-probe', { result: { complete: true } }),
-      ledger.recordComponent('cloud:admin', { status: 'verified' }),
+      ledger.recordComponent('cloud:admin', { status: 'verified', componentDigest: 'a'.repeat(64), artifactRunId: 'prior-run' }),
       ledger.recordRemoteAttestations('cloud', [{ component: 'cloud:admin', status: 'verified' }]),
     ])
     const persisted = JSON.parse(await readFile(ledger.runPath, 'utf8'))
     const events = (await readFile(ledger.eventsPath, 'utf8')).trim().split(/\r?\n/).map(JSON.parse)
     assert.equal(persisted.stages['post-rag-timer-probe'].status, 'passed')
     assert.equal(persisted.components['cloud:admin'].status, 'verified')
+    assert.equal(persisted.components['cloud:admin'].componentDigest, 'a'.repeat(64))
+    assert.equal(persisted.components['cloud:admin'].artifactRunId, 'prior-run')
     assert.equal(persisted.remoteAttestations.cloud[0].status, 'verified')
     assert(events.some((event) => event.event === 'stage_passed'))
     assert(events.some((event) => event.event === 'remote_attestation_recorded'))
@@ -414,6 +434,28 @@ test('resume inspection refuses passed stages when the commit or version changed
     })
     assert.equal(changedEnv.reusable, false)
     assert.match(changedEnv.reason, /envId/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('force full-current prepared stages reuse only with the same force identity', async () => {
+  const root = await tempRoot()
+  try {
+    const ledger = await createReleaseRunLedger({
+      root, runId: 'force-reuse', gitSha: 'abc', version: '1', desc: 'd', envId: 'env',
+      releaseStrategy: 'full-current', forceRedeployCurrent: true,
+    })
+    await ledger.passStage('release-operations', { result: { status: 'passed' } })
+    const matching = await inspectReleaseStageReuse(ledger.state, 'release-operations', {
+      root, gitSha: 'abc', version: '1', desc: 'd', envId: 'env', releaseStrategy: 'full-current', forceRedeployCurrent: true,
+    })
+    assert.equal(matching.reusable, true)
+    const mismatch = await inspectReleaseStageReuse(ledger.state, 'release-operations', {
+      root, gitSha: 'abc', version: '1', desc: 'd', envId: 'env', releaseStrategy: 'full-current', forceRedeployCurrent: false,
+    })
+    assert.equal(mismatch.reusable, false)
+    assert.match(mismatch.reason, /forceRedeployCurrent/)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

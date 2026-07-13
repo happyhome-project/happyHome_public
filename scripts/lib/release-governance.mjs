@@ -131,14 +131,16 @@ export class ReleaseGovernance {
     })
   }
 
-  async recordMigration(lock, migrationId) {
-    if (!migrationId) throw new Error('migration id is required')
+  async recordMigration(lock, migration) {
+    const migrationId = migration?.id
+    if (!migrationId || !/^[a-f0-9]{64}$/i.test(String(migration?.inputDigest || ''))) throw new Error('migration id and inputDigest are required')
     return await this.store.transact({ runId: lock?.runId }, (model) => {
       this.assertOwner(model, lock)
       const appliedMigrations = { ...(model.state?.appliedMigrations || {}) }
-      if (!appliedMigrations[migrationId]) {
-        appliedMigrations[migrationId] = { appliedAt: this.now(), runId: lock.runId }
-      }
+      const existing = appliedMigrations[migrationId]
+      if (existing && !existing.inputDigest) throw new Error(`applied migration ${migrationId} has no inputDigest; refusing to guess or overwrite`)
+      if (existing && existing.inputDigest !== migration.inputDigest) throw new Error(`applied migration ${migrationId} inputDigest mismatch`)
+      if (!existing) appliedMigrations[migrationId] = { appliedAt: this.now(), inputDigest: migration.inputDigest, module: migration.module || '', runId: lock.runId }
       model.state = { ...model.state, appliedMigrations }
       return clone(model.state.appliedMigrations[migrationId])
     })
@@ -169,17 +171,18 @@ export class ReleaseGovernance {
     return await this.store.transact({ runId: lock?.runId }, (model) => {
       this.assertOwner(model, lock)
       const now = this.now()
+      const mergedComponents = mergeReleaseComponents(model.state?.components || {}, components)
       model.run = {
         ...model.run,
         completionEvidence: clone(evidence),
-        components: clone(components),
+        components: clone(mergedComponents),
         finishedAt: now,
         status: 'passed',
         updatedAt: now,
       }
       model.state = {
         ...model.state,
-        components: clone(components),
+        components: clone(mergedComponents),
         evidence: clone(evidence),
         gitSha: lock.gitSha,
         lastSuccessfulRunId: lock.runId,
@@ -259,3 +262,4 @@ export function startReleaseHeartbeat({ governance, intervalMs = HEARTBEAT_MS, l
 
 export const DEFAULT_RELEASE_HEARTBEAT_MS = HEARTBEAT_MS
 export const DEFAULT_RELEASE_LEASE_MS = LEASE_MS
+import { mergeReleaseComponents } from './release-component-state.mjs'

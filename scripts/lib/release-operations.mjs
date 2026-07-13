@@ -1,4 +1,5 @@
 import { RELEASE_ACTIONS } from './release-plan.mjs'
+import { classifyReleaseOperations, validateMigrationModulePath } from './release-component-registry.mjs'
 export const POST_DEPLOY_RELEASE_ACTIONS = new Set(['verify-post-rag-timer','backfill-post-rag-v2','eval-post-semantic-search'])
 
 function unique(values) {
@@ -12,7 +13,7 @@ function migrationEntries(manifests) {
 }
 
 export async function executeReleaseOperations({
-  appliedMigrations = new Set(),
+  appliedMigrations = {},
   completedActions = new Set(),
   guard,
   manifests = [],
@@ -34,14 +35,24 @@ export async function executeReleaseOperations({
   const migrations = []
   for (const migration of migrationEntries(manifests)) {
     if (!migration?.id || !migration?.module) throw new Error(`migration requires id and module in ${migration?.changeId || 'manifest'}`)
-    if (!String(migration.module).startsWith('release/migrations/') || !String(migration.module).endsWith('.mjs')) {
-      throw new Error(`migration module must be under release/migrations: ${migration.module}`)
+    validateMigrationModulePath(migration.module)
+    if (!/^[a-f0-9]{64}$/i.test(String(migration.inputDigest || ''))) throw new Error(`migration inputDigest is required for ${migration.id}`)
+    const applied = appliedMigrations instanceof Map
+      ? appliedMigrations.get(migration.id)
+      : appliedMigrations instanceof Set
+        ? (appliedMigrations.has(migration.id) ? {} : null)
+        : appliedMigrations?.[migration.id]
+    if (applied) {
+      if (!applied.inputDigest) throw new Error(`applied migration ${migration.id} has no inputDigest; refusing to guess or rerun`)
+      if (applied.inputDigest !== migration.inputDigest) throw new Error(`applied migration ${migration.id} inputDigest mismatch`)
+      continue
     }
-    if (appliedMigrations.has(migration.id)) continue
     await guard.beforeRemoteMutation(`migration:${migration.id}`)
     await runMigration(migration)
-    await guard.recordMigration(migration.id)
-    appliedMigrations.add(migration.id)
+    await guard.recordMigration({ id: migration.id, inputDigest: migration.inputDigest, module: migration.module })
+    const record = { inputDigest: migration.inputDigest, module: migration.module }
+    if (appliedMigrations instanceof Map) appliedMigrations.set(migration.id, record)
+    else if (!(appliedMigrations instanceof Set)) appliedMigrations[migration.id] = record
     await guard.recordStage(`migration:${migration.id}`)
     migrations.push(migration.id)
   }
@@ -49,6 +60,7 @@ export async function executeReleaseOperations({
     actions: actions.filter(action => !POST_DEPLOY_RELEASE_ACTIONS.has(action) && !completedActions.has(action)),
     deferredActions: actions.filter(action => POST_DEPLOY_RELEASE_ACTIONS.has(action)),
     migrations,
+    operationKinds: classifyReleaseOperations(manifests),
     ...(completedActions.size ? { completedActions: actions.filter(action => completedActions.has(action)) } : {}),
   }
 }

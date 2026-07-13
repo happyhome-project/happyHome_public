@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { mkdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
@@ -9,6 +9,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 
 import {
+  assertSafeReleasePathSegment,
   attestAdminWebArtifact,
   attestCloudArtifacts,
   attestMiniprogramReceipt,
@@ -25,8 +26,16 @@ import {
   summarizeArtifactOutcomes,
   toPublicCloudArtifactIdentity,
 } from './release-artifact-attestation.mjs'
+
+test('release artifact path segments reject traversal and Windows aliases', () => {
+  for (const value of ['.', '..', 'run.', 'run ', 'CON', 'aux.json', 'COM1']) {
+    assert.throws(() => assertSafeReleasePathSegment(value), /safe/i, value)
+  }
+  assert.equal(assertSafeReleasePathSegment('20260713-release_1'), '20260713-release_1')
+})
 import { normalizeMiniprogramUploadReceipt } from './miniprogram-receipt-identity.mjs'
 import { computeDirectoryDigest } from './release-run-ledger.mjs'
+import { createRuntimeFileManifest } from './release-component-digest.mjs'
 import { abortableDelay, runAbortableShellCapture } from './abortable-process.mjs'
 
 async function fixtureRoot() {
@@ -65,6 +74,7 @@ test('release artifact manifest binds the run identity and never serializes clou
       root,
       runId: 'run-1', gitSha: 'abcdef', envId: 'env-1', version: '1.2.3', desc: 'release',
       plan: { targets: { cloud: { functions: ['admin'] }, adminWeb: true, miniprogram: true } },
+      componentDigests: { adminWeb: 'b'.repeat(64), miniprogram: 'c'.repeat(64) },
       toolchain: { node: 'v24.0.0', npm: '11.0.0', cloudBuilder: 'esbuild', adminBuilder: 'vite', miniprogramBuilder: 'uni-app' },
       paths: { cloudRoot: join(root, 'cloud'), adminWebRoot: adminRoot, miniprogramRoot: miniRoot },
     })
@@ -76,6 +86,8 @@ test('release artifact manifest binds the run identity and never serializes clou
     assert.match(manifest.artifacts.cloud.admin.contentDigest, /^[a-f0-9]{64}$/)
     assert.match(manifest.artifacts.cloud.admin.probeTokenHash, /^[a-f0-9]{64}$/)
     assert.equal(manifest.artifacts.cloud.admin.buildId, 'cloud-abcdef-admin-build')
+    assert.equal(manifest.artifacts.adminWeb.componentDigest, 'b'.repeat(64))
+    assert.equal(manifest.artifacts.miniprogram.componentDigest, 'c'.repeat(64))
     assert.doesNotMatch(JSON.stringify(manifest), new RegExp(probeToken))
   } finally {
     await rm(root, { recursive: true, force: true })
@@ -130,6 +142,77 @@ test('fresh cloud attestation skips all exact artifacts and deploys only a tampe
   }
 })
 
+test('stable cloud component digests skip across release SHAs while mismatch and force redeploy only override mutation decisions', async () => {
+  const root = await fixtureRoot()
+  try {
+    const functions = ['post', 'user']
+    for (const functionName of functions) {
+      const fnRoot = join(root, '.codex-local', 'release-artifacts', 'new-run', 'cloud', functionName)
+      await mkdir(fnRoot, { recursive: true })
+      const componentDigest = functionName === 'post' ? 'a'.repeat(64) : 'b'.repeat(64)
+      await writeFile(join(fnRoot, 'index.js'), functionName)
+      const runtimeManifest = await createRuntimeFileManifest(fnRoot, { exclude: ['.happyhome-runtime-manifest.json', '__release.info.json'] })
+      const runtimeDigest = runtimeManifest.runtimeDigest
+      await writeFile(join(fnRoot, '.happyhome-runtime-manifest.json'), JSON.stringify(runtimeManifest))
+      await writeFile(join(fnRoot, '__release.info.json'), JSON.stringify({
+        buildId: `new-build-${functionName}`, componentDigest, functionName, probeToken: 'e'.repeat(64), runtimeDigest,
+        response: { buildId: `new-build-${functionName}`, componentDigest, functionName, runtimeDigest, runtimeVerified: true, sourceSha: 'new-sha' },
+        sourceSha: 'new-sha',
+      }))
+    }
+    const manifest = await createReleaseArtifactManifest({
+      root, runId: 'new-run', gitSha: 'new-sha', envId: 'env-1', version: '1', desc: 'd',
+      plan: { targets: { cloud: { functions }, adminWeb: false, miniprogram: false } },
+      toolchain: { node: 'v24', cloudBuilder: 'builder-v1' },
+      paths: { cloudRoot: join(root, '.codex-local', 'release-artifacts', 'new-run', 'cloud') },
+    })
+    assert.equal(manifest.artifacts.cloud.post.componentDigest, 'a'.repeat(64))
+
+    const calls = { attest: [], deploy: [], verify: [] }
+    const run = (overrides = {}) => orchestrateCloudArtifactRelease({
+      root, manifest,
+      attest: async ({ artifact, functionName }) => {
+        calls.attest.push(functionName)
+        return {
+          buildId: `old-build-${functionName}`,
+          componentDigest: overrides[functionName] || artifact.componentDigest,
+          functionName,
+          runtimeDigest: artifact.runtimeDigest,
+          runtimeVerified: true,
+          sourceSha: 'old-sha',
+        }
+      },
+      deploy: async ({ functionName }) => calls.deploy.push(functionName),
+      verify: async ({ functionName }) => calls.verify.push(functionName),
+    })
+    const exact = await run()
+    assert.deepEqual(exact.deployFunctions, [])
+    assert.deepEqual(calls, { attest: functions, deploy: [], verify: functions })
+
+    calls.attest.length = calls.deploy.length = calls.verify.length = 0
+    const mismatch = await run({ post: 'f'.repeat(64) })
+    assert.deepEqual(mismatch.deployFunctions, ['post'])
+    assert.deepEqual(calls.deploy, ['post'])
+    assert.deepEqual(calls.verify, functions)
+
+    calls.attest.length = calls.deploy.length = calls.verify.length = 0
+    const forced = await orchestrateCloudArtifactRelease({
+      root, manifest, forceRedeployCurrent: true,
+      attest: async ({ artifact }) => artifact.response || {
+        componentDigest: artifact.componentDigest, functionName: artifact.functionName,
+        runtimeDigest: artifact.runtimeDigest, runtimeVerified: true,
+      },
+      deploy: async ({ functionName }) => calls.deploy.push(functionName),
+      verify: async ({ functionName }) => calls.verify.push(functionName),
+    })
+    assert.deepEqual(forced.deployFunctions, functions)
+    assert.deepEqual(calls.deploy, functions)
+    assert.deepEqual(calls.verify, functions)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('admin exact match attests while mismatch and unreadable remote state deploy fail closed', async () => {
   const artifact = { contentDigest: 'digest', runId: 'run-1', versionId: 'release-1' }
   assert.equal((await attestAdminWebArtifact({ artifact, inspectRemote: async () => ({ contentDigest: 'digest', runId: 'run-1', versionId: 'release-1' }) })).status, 'attested')
@@ -138,6 +221,33 @@ test('admin exact match attests while mismatch and unreadable remote state deplo
   const unknown = await attestAdminWebArtifact({ artifact, inspectRemote: async () => { throw new Error('ssh unavailable') } })
   assert.equal(unknown.status, 'unattestable')
   assert.equal(unknown.shouldDeploy, true)
+})
+
+test('admin cross-run skip requires stable digest plus fresh remote byte verification and force only overrides mutation', async () => {
+  const artifact = { componentDigest: 'a'.repeat(64), contentDigest: 'new-content', runId: 'new-run', versionId: 'new-version' }
+  const priorRemote = {
+    componentDigest: artifact.componentDigest,
+    contentDigest: 'old-content',
+    fileManifestDigestVerified: true,
+    fileManifestDigest: 'f'.repeat(64),
+    runId: 'old-run',
+    runtimeVerified: true,
+    versionId: 'old-version',
+  }
+  const priorBinding = { artifactRunId: 'old-artifact-run', ...priorRemote }
+  const priorFileManifestDigest = priorRemote.fileManifestDigest
+  const exact = await attestAdminWebArtifact({ artifact, inspectRemote: async () => priorRemote, priorBinding, priorFileManifestDigest })
+  assert.equal(exact.status, 'attested')
+  assert.equal(exact.shouldDeploy, false)
+  assert.equal((await attestAdminWebArtifact({ artifact, inspectRemote: async () => ({ ...priorRemote, runtimeVerified: false }), priorBinding, priorFileManifestDigest })).shouldDeploy, true)
+  assert.equal((await attestAdminWebArtifact({ artifact, inspectRemote: async () => ({ ...priorRemote, fileManifestDigestVerified: false }), priorBinding, priorFileManifestDigest })).shouldDeploy, true)
+  assert.equal((await attestAdminWebArtifact({ artifact, inspectRemote: async () => ({ ...priorRemote, componentDigest: 'b'.repeat(64) }), priorBinding, priorFileManifestDigest })).shouldDeploy, true)
+  assert.equal((await attestAdminWebArtifact({ artifact, inspectRemote: async () => ({ ...priorRemote, contentDigest: 'unexpected' }), priorBinding, priorFileManifestDigest })).shouldDeploy, true)
+  assert.equal((await attestAdminWebArtifact({ artifact, inspectRemote: async () => ({ ...priorRemote, fileManifestDigest: 'e'.repeat(64) }), priorBinding, priorFileManifestDigest })).shouldDeploy, true)
+  assert.equal((await attestAdminWebArtifact({ artifact, inspectRemote: async () => priorRemote })).shouldDeploy, true)
+  const forced = await attestAdminWebArtifact({ artifact, forceRedeployCurrent: true, inspectRemote: async () => priorRemote, priorBinding, priorFileManifestDigest })
+  assert.equal(forced.status, 'deploy-required')
+  assert.equal(forced.shouldDeploy, true)
 })
 
 test('admin attestation rejects a changed local artifact before trusting remote identity', async () => {
@@ -162,6 +272,31 @@ test('admin attestation rejects a changed local artifact before trusting remote 
       },
     }), /immutable admin-web artifact digest mismatch/i)
     assert.equal(remoteReadCount, 0)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('missing prior admin snapshot makes cross-run proof deploy-required without weakening current snapshot validation', async () => {
+  const root = await fixtureRoot()
+  try {
+    const currentRoot = join(root, '.codex-local', 'release-artifacts', 'current-run', 'admin-web')
+    await mkdir(currentRoot, { recursive: true })
+    await writeFile(join(currentRoot, 'index.html'), 'current')
+    const artifact = {
+      artifactPath: relative(root, currentRoot), componentDigest: 'a'.repeat(64),
+      contentDigest: await computeDirectoryDigest(currentRoot), runId: 'current-run', versionId: 'current-version',
+    }
+    const priorBinding = {
+      artifactRunId: 'missing-prior', componentDigest: artifact.componentDigest,
+      contentDigest: 'b'.repeat(64), runId: 'prior-run', versionId: 'prior-version',
+    }
+    const result = await attestAdminWebArtifact({
+      root, artifact, priorBinding,
+      inspectRemote: async () => ({ ...priorBinding, fileManifestDigest: 'c'.repeat(64), fileManifestDigestVerified: true, runtimeVerified: true }),
+    })
+    assert.equal(result.shouldDeploy, true)
+    assert.equal(result.status, 'deploy-required')
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -424,11 +559,14 @@ test('Aliyun deployment rejects a replaced local deploy script before script scp
   }
 })
 
-test('admin file manifest rejects its reserved generated path', async () => {
+test('admin file manifest rejects reserved manifest and release marker paths', async () => {
   const root = await fixtureRoot()
   try {
-    await writeFile(join(root, '.happyhome-file-manifest.sha256'), 'user-owned')
-    await assert.rejects(() => createDeterministicFileManifest(root), /reserved manifest path/i)
+    for (const name of ['.happyhome-file-manifest.sha256', '.happyhome-release.json']) {
+      await writeFile(join(root, name), 'user-owned')
+      await assert.rejects(() => createDeterministicFileManifest(root), /reserved path/i)
+      await rm(join(root, name))
+    }
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -769,7 +907,7 @@ test('cloud orchestration and public production identity never expose the known 
     assert.match(result.attestations[0].skipReason, /REDACTED_PROBE_TOKEN/)
     const publicIdentity = toPublicCloudArtifactIdentity({ ...run.manifest.artifacts.cloud['fn-0'], probeToken, error: probeToken })
     assert.doesNotMatch(JSON.stringify(publicIdentity), new RegExp(probeToken))
-    assert.deepEqual(Object.keys(publicIdentity).sort(), ['buildId', 'contentDigest', 'functionName', 'probeTokenHash', 'sourceSha'])
+    assert.deepEqual(Object.keys(publicIdentity).sort(), ['buildId', 'componentDigest', 'contentDigest', 'functionName', 'probeTokenHash', 'runtimeDigest', 'sourceSha'])
   } finally {
     await rm(run.root, { recursive: true, force: true })
   }
