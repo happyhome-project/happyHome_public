@@ -27,6 +27,7 @@ describe('profile avatar resolution', () => {
     const avatarUrl = await resolveProfileAvatarUrl({
       selectedTempPath: '',
       existingAvatarUrl: 'cloud://existing-avatar',
+      strictReplacement: true,
       uploadSelectedAvatar: async () => {
         uploads += 1
         return { fileID: 'cloud://unexpected' }
@@ -41,6 +42,7 @@ describe('profile avatar resolution', () => {
     const avatarUrl = await resolveProfileAvatarUrl({
       selectedTempPath: 'wxfile://replacement.jpg',
       existingAvatarUrl: 'cloud://existing-avatar',
+      strictReplacement: true,
       uploadSelectedAvatar: async (source) => {
         expect(source).toBe('wxfile://replacement.jpg')
         return { fileID: 'cloud://replacement-avatar' }
@@ -54,13 +56,31 @@ describe('profile avatar resolution', () => {
     await expect(resolveProfileAvatarUrl({
       selectedTempPath: 'wxfile://replacement.jpg',
       existingAvatarUrl: 'cloud://existing-avatar',
+      strictReplacement: true,
       uploadSelectedAvatar: async () => { throw new Error('network failed') },
     })).rejects.toThrow('network failed')
 
     await expect(resolveProfileAvatarUrl({
       selectedTempPath: 'wxfile://replacement.jpg',
       existingAvatarUrl: 'cloud://existing-avatar',
+      strictReplacement: true,
       uploadSelectedAvatar: async () => ({ fileID: '' }),
     })).rejects.toThrow('头像上传失败')
+  })
+
+  test('keeps the login fallback when its selected avatar cannot be uploaded', async () => {
+    await expect(resolveProfileAvatarUrl({
+      selectedTempPath: 'wxfile://first-login.jpg',
+      existingAvatarUrl: '',
+      strictReplacement: false,
+      uploadSelectedAvatar: async () => { throw new Error('network failed') },
+    })).resolves.toBe('')
+
+    await expect(resolveProfileAvatarUrl({
+      selectedTempPath: 'wxfile://first-login.jpg',
+      existingAvatarUrl: '',
+      strictReplacement: false,
+      uploadSelectedAvatar: async () => ({ fileID: '' }),
+    })).resolves.toBe('')
   })
 })

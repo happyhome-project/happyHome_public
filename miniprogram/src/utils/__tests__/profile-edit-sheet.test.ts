@@ -37,6 +37,7 @@ describe('profile edit bottom sheet', () => {
     expect(source).toContain('function startEditProfile()')
     expect(source).toContain('function cancelEditProfile()')
     expect(source).toContain('function saveProfile()')
+    expect(source).toContain('uploadAvatarIfAny(submittedAvatarTempPath, submittedAvatarCloudUrl, wasEditingProfile)')
   })
 
   test('makes the H5 background inert and leaves initial focus inside the dialog', () => {

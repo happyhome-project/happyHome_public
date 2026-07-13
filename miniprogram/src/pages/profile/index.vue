@@ -708,10 +708,11 @@ function onNickBlur(e: any) {
   formNickName.value = String(e?.detail?.value || '').trim()
 }
 
-async function uploadAvatarIfAny(selectedTempPath: string, existingAvatarUrl: string): Promise<string> {
+async function uploadAvatarIfAny(selectedTempPath: string, existingAvatarUrl: string, strictReplacement: boolean): Promise<string> {
   return resolveProfileAvatarUrl({
     selectedTempPath,
     existingAvatarUrl,
+    strictReplacement,
     uploadSelectedAvatar: async (source) => {
       const ext = source.startsWith('blob:')
       ? 'jpg'
@@ -747,7 +748,7 @@ const submitFormLock = useBusyLock(async () => {
   const submittedAvatarTempPath = formAvatarTempPath.value
   const submittedAvatarCloudUrl = formAvatarCloudUrl.value
   try {
-    const avatarUrl = await uploadAvatarIfAny(submittedAvatarTempPath, submittedAvatarCloudUrl)
+    const avatarUrl = await uploadAvatarIfAny(submittedAvatarTempPath, submittedAvatarCloudUrl, wasEditingProfile)
     suppressNextLoginStateRefresh = true
     if (isH5Runtime() && !wasEditingProfile) {
       await userStore.webLogin({

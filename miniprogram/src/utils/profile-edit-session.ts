@@ -5,6 +5,7 @@ export interface ProfileAvatarUploadResult {
 export interface ResolveProfileAvatarOptions {
   selectedTempPath: string
   existingAvatarUrl: string
+  strictReplacement: boolean
   uploadSelectedAvatar: (source: string) => Promise<ProfileAvatarUploadResult>
 }
 
@@ -40,8 +41,13 @@ export function createProfileEditSessionGuard() {
 export async function resolveProfileAvatarUrl(options: ResolveProfileAvatarOptions): Promise<string> {
   if (!options.selectedTempPath) return options.existingAvatarUrl
 
-  const result = await options.uploadSelectedAvatar(options.selectedTempPath)
-  const uploadedFileId = String(result?.fileID || '').trim()
-  if (!uploadedFileId) throw new Error('头像上传失败，请重试')
-  return uploadedFileId
+  try {
+    const result = await options.uploadSelectedAvatar(options.selectedTempPath)
+    const uploadedFileId = String(result?.fileID || '').trim()
+    if (!uploadedFileId) throw new Error('头像上传失败，请重试')
+    return uploadedFileId
+  } catch (error) {
+    if (options.strictReplacement === false) return options.existingAvatarUrl
+    throw error
+  }
 }
