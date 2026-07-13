@@ -42,16 +42,19 @@ npm.cmd run test:cloud:release-smoke
 
 The release gate requires DevTools release UI evidence. The release operator must actively create or refresh that evidence when it is missing; it must not stop merely because another task did not provide it.
 
-The default evidence path is `npm.cmd run test:mp:release-ui`. It opens the built `mp-weixin` package through WeChat DevTools automator and must output both labels:
+The default evidence path is `npm.cmd run test:mp:release-ui`. It opens the built `mp-weixin` package through WeChat DevTools automator and must output all five labels:
 
+- `HH_RELEASE_HOME_COLD_START_NONEMPTY`: the cold-start home shell renders non-empty content.
+- `HH_RELEASE_HOME_IMAGES_RENDERED`: the home feed renders its required images.
 - `HH_RELEASE_HOME_DETAIL_NONEMPTY`: home feed tap opens a non-empty detail page.
-- `HH_RELEASE_LOGIN_VERSION`: login page renders and shows the build version.
+- `HH_RELEASE_LOGIN_VERSION`: the logged-out profile exposes and validates the build version through the non-visual `data-build-version` attribute; version text must not be visible.
+- `HH_RELEASE_PROFILE_LOGIN_CLEAN`: the logged-out profile has exactly one visible login identity entry and no visible build version or developer diagnostics.
 
 The script writes machine-readable evidence under `.codex-local/release-evidence/`. It first uses the current DevTools app state; if that has no tappable posts, it injects the release test fixture (`HH_RELEASE_TEST_OPENID` / `HH_RELEASE_TEST_COMMUNITY_ID`, defaulting to the existing QingShan test fixture), refreshes the Pinia stores, and retries.
 
 `auto-replay` is optional. If `HH_REQUIRE_RELEASE_REPLAY=1` or `HH_MP_REPLAY_CONFIG_PATH` is set, the gate also runs the recorded replay check. Replay is no longer the default proof because the DevTools CLI can directly expose an automator websocket with hidden `--auto-port`.
 
-Without the two release UI labels, the gate must fail and the mini-program must not be uploaded. If WeChat DevTools has no usable way to create or run the evidence, report that as a DevTools capability blocker instead of publishing.
+Without all five release UI labels, the gate must fail and the mini-program must not be uploaded. If WeChat DevTools has no usable way to create or run the evidence, report that as a DevTools capability blocker instead of publishing.
 
 ## Cloud Smoke And Logs
 
