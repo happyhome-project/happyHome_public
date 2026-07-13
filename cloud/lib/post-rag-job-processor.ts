@@ -326,8 +326,8 @@ const unavailableSink: PostRagVersionedIndexSink = {
 
 const defaultDependencies: BatchDependencies = {
   sink: unavailableSink,
-  loadPost: (postId) => db.getById('posts', postId),
-  loadSection: (sectionId) => db.getById('sections', sectionId),
+  loadPost: (postId) => db.getByIdOrNull('posts', postId),
+  loadSection: (sectionId) => db.getByIdOrNull('sections', sectionId),
   buildProjection: buildPostRagSourceProjection,
   readJob: getPostRagJob,
   complete: completePostRagJob,
