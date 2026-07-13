@@ -1,5 +1,6 @@
 const mockStore = new Map<string, any>()
 const mockRemoveFailures = new Map<string, number>()
+const mockTransactionReads = new Map<string, Array<any | (() => any)>>()
 const mockKey = (collection: string, id: string) => `${collection}/${id}`
 const matchesWhere = (document: any, where: Record<string, any>) => Object.entries(where).every(([field, value]) => document?.[field] === value)
 
@@ -24,8 +25,18 @@ jest.mock('../db', () => ({
     }
     mockStore.delete(key)
   }),
-  transactionGetByIdOrNull: jest.fn(async (_transaction, collection, id) => mockStore.get(mockKey(collection, id)) || null),
-  runTransaction: jest.fn(async callback => callback({
+  transactionGetByIdOrNull: jest.fn(async (_transaction, collection, id) => {
+    const key = mockKey(collection, id)
+    const queued = mockTransactionReads.get(key)
+    if (queued?.length) {
+      const value = queued.shift()
+      return (typeof value === 'function' ? value() : value) || null
+    }
+    return mockStore.get(key) || null
+  }),
+  runTransaction: jest.fn(async callback => {
+    const snapshot = structuredClone([...mockStore.entries()])
+    try { return await callback({
     collection: (collection: string) => ({
       doc: (id: string) => ({
         get: async () => ({ data: mockStore.get(mockKey(collection, id)) }),
@@ -33,10 +44,23 @@ jest.mock('../db', () => ({
           if ('_id' in data) throw new Error('document.set cannot update _id')
           mockStore.set(mockKey(collection, id), { _id: id, ...structuredClone(data) })
         },
-        remove: async () => mockStore.delete(mockKey(collection, id)),
+        remove: async () => {
+          const key = mockKey(collection, id)
+          const failures = mockRemoveFailures.get(key) || 0
+          if (failures > 0) {
+            mockRemoveFailures.set(key, failures - 1)
+            throw new Error(`remove failed: ${key}`)
+          }
+          mockStore.delete(key)
+        },
       }),
     }),
-  })),
+    }) } catch (error) {
+      mockStore.clear()
+      for (const [key, value] of snapshot) mockStore.set(key, value)
+      throw error
+    }
+  }),
 }))
 
 import {
@@ -97,9 +121,23 @@ function putRemovedState(probe: any, values: Record<string, any> = {}) {
   })
 }
 
+function queueTransactionReads(collection: string, id: string, ...values: Array<any | (() => any)>) {
+  mockTransactionReads.set(mockKey(collection, id), values)
+}
+
+async function readyForFinalization(runId: string) {
+  const probe = await beginCleanup(runId)
+  bindOutboxes(probe)
+  putJob(probe, 'create-job', { action: 'upsert', status: 'completed', outcome: 'indexed' })
+  putJob(probe, 'delete-job', { action: 'delete', status: 'completed', outcome: 'removed' })
+  putRemovedState(probe)
+  return probe
+}
+
 beforeEach(() => {
   mockStore.clear()
   mockRemoveFailures.clear()
+  mockTransactionReads.clear()
 })
 
 test('first cleanup call persists the delete outbox and remains pending', async () => {
@@ -132,7 +170,8 @@ test('cleanup remains pending until its bound delete job completes with a remova
   const probe = await beginCleanup('run-pending')
   expect(await cleanupPostRagReleaseProbe({ runId: probe.runId })).toMatchObject({ success: false, pending: true, status: 'cleaning' })
 
-  bindOutboxes(probe, { createJobId: null, createStatus: 'dead_letter' })
+  bindOutboxes(probe)
+  putJob(probe, 'create-job', { action: 'upsert', status: 'completed', outcome: 'indexed' })
   putJob(probe, 'delete-job', { action: 'delete', status: 'pending' })
   expect(await cleanupPostRagReleaseProbe({ runId: probe.runId })).toMatchObject({ success: false, pending: true, status: 'cleaning' })
   expect(mockStore.has(mockKey('post_rag_outbox', probe.cleanupOutboxId))).toBe(true)
@@ -144,7 +183,8 @@ test('cleanup remains pending until its bound delete job completes with a remova
 
 test.each(['removed', 'superseded'])('accepts completed delete outcome %s', async outcome => {
   const probe = await beginCleanup(`run-${outcome}`)
-  bindOutboxes(probe, { createJobId: null })
+  bindOutboxes(probe)
+  putJob(probe, 'create-job', { action: 'upsert', status: 'completed', outcome: 'indexed' })
   putJob(probe, 'delete-job', { action: 'delete', status: 'completed', outcome })
   putRemovedState(probe)
   await expect(cleanupPostRagReleaseProbe({ runId: probe.runId })).resolves.toMatchObject({ success: true, status: 'cleaned' })
@@ -155,7 +195,8 @@ test.each([
   ['superseded', 'missing'], ['superseded', 'active'], ['superseded', 'unknown'],
 ])('delete outcome %s remains pending while current index state is %s', async (outcome, stateKind) => {
   const probe = await beginCleanup(`run-${outcome}-${stateKind}`)
-  bindOutboxes(probe, { createJobId: null })
+  bindOutboxes(probe)
+  putJob(probe, 'create-job', { action: 'upsert', status: 'completed', outcome: 'indexed' })
   putJob(probe, 'delete-job', { action: 'delete', status: 'completed', outcome })
   if (stateKind !== 'missing') put('post_rag_index_state_v2', probe.postId, {
     schemaVersion: 2, postId: probe.postId, state: stateKind === 'active' ? 'active' : 'unknown',
@@ -165,7 +206,7 @@ test.each([
   expect(await cleanupPostRagReleaseProbe({ runId: probe.runId })).toMatchObject({ success: false, pending: true, status: 'cleaning' })
 })
 
-test.each(['pending', 'processing', 'retry_wait'])('create outbox status %s without a job is not proof that creation is absent', async createStatus => {
+test.each(['pending', 'processing', 'retry_wait', 'dead_letter'])('create outbox status %s without a job is not proof that creation is absent', async createStatus => {
   const probe = await beginCleanup(`run-create-outbox-${createStatus}`)
   bindOutboxes(probe, { createJobId: null, createStatus })
   putJob(probe, 'delete-job', { action: 'delete', status: 'completed', outcome: 'removed' })
@@ -180,7 +221,8 @@ test.each([
   ['equal order with another source', { sourceVersion: 'other-source' }],
 ])('removed state with %s does not prove the cleanup delete won', async (_label, stateValues) => {
   const probe = await beginCleanup(`run-order-${String(_label).startsWith('older') ? 'older' : 'source'}`)
-  bindOutboxes(probe, { createJobId: null })
+  bindOutboxes(probe)
+  putJob(probe, 'create-job', { action: 'upsert', status: 'completed', outcome: 'indexed' })
   putJob(probe, 'delete-job', { action: 'delete', status: 'completed', outcome: 'removed' })
   putRemovedState(probe, stateValues)
 
@@ -189,7 +231,8 @@ test.each([
 
 test('cross-run outbox and non-probe job bindings fail closed', async () => {
   const probe = await beginCleanup('run-binding')
-  bindOutboxes(probe, { createJobId: null })
+  bindOutboxes(probe)
+  putJob(probe, 'create-job', { action: 'upsert', status: 'completed', outcome: 'indexed' })
   put('post_rag_outbox', probe.cleanupOutboxId, {
     schemaVersion: 2, status: 'completed', aggregateId: 'other-post', communityId: probe.communityId, materializedJobId: 'delete-job',
   })
@@ -197,7 +240,8 @@ test('cross-run outbox and non-probe job bindings fail closed', async () => {
   await expect(cleanupPostRagReleaseProbe({ runId: probe.runId })).rejects.toThrow(/binding/)
   expect(getProbe(probe.runId).status).toBe('cleaning')
 
-  bindOutboxes(probe, { createJobId: null })
+  bindOutboxes(probe)
+  putJob(probe, 'create-job', { action: 'upsert', status: 'completed', outcome: 'indexed' })
   putJob(probe, 'delete-job', { action: 'upsert', status: 'completed', outcome: 'removed' })
   await expect(cleanupPostRagReleaseProbe({ runId: probe.runId })).rejects.toThrow(/binding/)
   expect(getProbe(probe.runId).status).toBe('cleaning')
@@ -229,22 +273,21 @@ test('a missing create outbox fails closed because create-job lease safety canno
 })
 
 test.each([
-  ['absent', null],
   ['completed', { action: 'upsert', status: 'completed', outcome: 'indexed' }],
   ['dead-letter', { action: 'upsert', status: 'dead_letter' }],
   ['expired lease', { action: 'upsert', status: 'processing', leaseExpiresAt: '2000-01-01T00:00:00.000Z' }],
 ])('removes an %s create job only after the higher-version delete job completes', async (_label, createJob) => {
   const probe = await beginCleanup(`run-create-${String(_label).replace(/\W/g, '-')}`)
-  bindOutboxes(probe, { createJobId: createJob ? 'create-job' : null })
-  if (createJob) putJob(probe, 'create-job', createJob)
+  bindOutboxes(probe)
+  putJob(probe, 'create-job', createJob)
   putJob(probe, 'delete-job', { action: 'delete', status: 'processing', leaseExpiresAt: '2999-01-01T00:00:00.000Z' })
   expect(await cleanupPostRagReleaseProbe({ runId: probe.runId })).toMatchObject({ success: false, pending: true })
-  if (createJob) expect(mockStore.has(mockKey('post_rag_jobs', 'create-job'))).toBe(true)
+  expect(mockStore.has(mockKey('post_rag_jobs', 'create-job'))).toBe(true)
 
   putJob(probe, 'delete-job', { action: 'delete', status: 'completed', outcome: 'superseded' })
   putRemovedState(probe)
   expect(await cleanupPostRagReleaseProbe({ runId: probe.runId })).toMatchObject({ success: true, status: 'cleaned' })
-  if (createJob) expect(mockStore.has(mockKey('post_rag_jobs', 'create-job'))).toBe(false)
+  expect(mockStore.has(mockKey('post_rag_jobs', 'create-job'))).toBe(false)
 })
 
 test('persists exact artifact ids before removals and resumes partial and final cleanup idempotently', async () => {
@@ -330,6 +373,63 @@ test('finalizing retry returns pending without deletion when the create job acqu
     ['post_rag_outbox', probe.outboxId], ['post_rag_outbox', probe.cleanupOutboxId],
     ['post_rag_index_state_v2', probe.postId],
   ]) expect(mockStore.has(mockKey(collection, id))).toBe(true)
+})
+
+test('destructive transaction observes a create lease acquired after preparation', async () => {
+  const probe = await readyForFinalization('run-tx-live-lease')
+  queueTransactionReads('post_rag_jobs', 'create-job', {
+    ...mockStore.get(mockKey('post_rag_jobs', 'create-job')),
+    status: 'processing', leaseExpiresAt: '2999-01-01T00:00:00.000Z',
+  })
+
+  expect(await cleanupPostRagReleaseProbe({ runId: probe.runId })).toMatchObject({ success: false, pending: true, status: 'finalizing' })
+  expect(mockStore.has(mockKey('post_rag_jobs', 'delete-job'))).toBe(true)
+  expect(mockStore.has(mockKey('post_rag_outbox', probe.cleanupOutboxId))).toBe(true)
+})
+
+test('destructive transaction rejects index state rebound to active after preparation', async () => {
+  const probe = await readyForFinalization('run-tx-active-state')
+  queueTransactionReads('post_rag_index_state_v2', probe.postId, {
+    ...mockStore.get(mockKey('post_rag_index_state_v2', probe.postId)), state: 'active',
+  })
+
+  expect(await cleanupPostRagReleaseProbe({ runId: probe.runId })).toMatchObject({ success: false, pending: true, status: 'finalizing' })
+  expect(mockStore.has(mockKey('post_rag_index_state_v2', probe.postId))).toBe(true)
+})
+
+test.each([
+  ['status', { status: 'processing' }],
+  ['job binding', { materializedJobId: 'other-job' }],
+])('destructive transaction fails closed when create outbox %s changes after preparation', async (_label, changed) => {
+  const probe = await readyForFinalization(`run-tx-outbox-${String(_label).replace(/\W/g, '-')}`)
+  queueTransactionReads('post_rag_outbox', probe.outboxId, {
+    ...mockStore.get(mockKey('post_rag_outbox', probe.outboxId)), ...changed,
+  })
+
+  await expect(cleanupPostRagReleaseProbe({ runId: probe.runId })).resolves.toMatchObject({ success: false, pending: true, status: 'finalizing' })
+  expect(mockStore.has(mockKey('post_rag_jobs', 'create-job'))).toBe(true)
+})
+
+test('finalizing retry rejects a new same-post index version not in the persisted artifact set', async () => {
+  const probe = await readyForFinalization('run-new-version')
+  mockRemoveFailures.set(mockKey('post_rag_jobs', 'create-job'), 1)
+  await expect(cleanupPostRagReleaseProbe({ runId: probe.runId })).rejects.toThrow(/remove failed/)
+  put('post_rag_index_versions', 'late-version', { schemaVersion: 2, postId: probe.postId })
+
+  expect(await cleanupPostRagReleaseProbe({ runId: probe.runId })).toMatchObject({ success: false, pending: true, status: 'finalizing' })
+  expect(mockStore.has(mockKey('post_rag_index_versions', 'late-version'))).toBe(true)
+})
+
+test('destructive transaction revalidates probe binding before removing artifacts', async () => {
+  const probe = await readyForFinalization('run-tx-probe-binding')
+  queueTransactionReads('post_rag_release_probes', probe.runId,
+    () => mockStore.get(mockKey('post_rag_release_probes', probe.runId)),
+    () => ({ ...mockStore.get(mockKey('post_rag_release_probes', probe.runId)), postId: 'business-post' }),
+  )
+
+  await expect(cleanupPostRagReleaseProbe({ runId: probe.runId })).rejects.toThrow(/binding/)
+  expect(mockStore.has(mockKey('post_rag_jobs', 'create-job'))).toBe(true)
+  expect(mockStore.has(mockKey('post_rag_outbox', probe.outboxId))).toBe(true)
 })
 
 test('release probe evidence and status remain strictly run-bound', async () => {

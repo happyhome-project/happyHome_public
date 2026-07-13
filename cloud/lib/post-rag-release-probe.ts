@@ -36,7 +36,7 @@ function assertCleanupBound(input: any, probe: any) {
 
 function assertProbeIdentity(id: string, probe: any) {
   const expected = fixtureIds(id)
-  if (probe?.runId !== id || probe?.postId !== expected.postId || probe?.sectionId !== expected.sectionId) {
+  if (probe?._id !== id || probe?.runId !== id || probe?.postId !== expected.postId || probe?.sectionId !== expected.sectionId) {
     throw new Error('release probe fixture binding does not match run binding')
   }
 }
@@ -137,6 +137,17 @@ function removedStateProvesDelete(state: any, cleanupJob: any) {
   return comparison > 0 || (comparison === 0 && state.sourceVersion === cleanupJob.sourceVersion)
 }
 
+function jobBinding(job: any) {
+  return {
+    id: job._id, outboxId: job.outboxId, postId: job.postId, communityId: job.communityId,
+    action: job.action, sourceVersion: job.sourceVersion, contentVersion: job.contentVersion,
+  }
+}
+
+function sameJobBinding(job: any, binding: any) {
+  return Boolean(binding && JSON.stringify(jobBinding(job)) === JSON.stringify(binding))
+}
+
 function validateFinalizingArtifacts(probe: any) {
   const artifacts = probe?.cleanupArtifactIds
   const validIds = (value: unknown, max: number) => Array.isArray(value)
@@ -146,55 +157,89 @@ function validateFinalizingArtifacts(probe: any) {
   if (!artifacts || !validIds(artifacts.jobIds, 2) || !validIds(artifacts.outboxIds, 2)
     || !validIds(artifacts.indexStateIds, 1) || !validIds(artifacts.indexVersionIds, MAX_PROBE_INDEX_VERSIONS)
     || artifacts.outboxIds.length !== 2 || artifacts.outboxIds[0] !== probe.outboxId || artifacts.outboxIds[1] !== probe.cleanupOutboxId
-    || (artifacts.createJobId !== null && (typeof artifacts.createJobId !== 'string' || !artifacts.jobIds.includes(artifacts.createJobId)))
+    || typeof artifacts.createJobId !== 'string' || typeof artifacts.cleanupJobId !== 'string'
+    || artifacts.jobIds.length !== 2 || artifacts.jobIds[0] !== artifacts.createJobId || artifacts.jobIds[1] !== artifacts.cleanupJobId
+    || artifacts.createJobBinding?.id !== artifacts.createJobId || artifacts.cleanupJobBinding?.id !== artifacts.cleanupJobId
     || artifacts.indexStateIds.some((id: string) => id !== probe.postId)
     || probe.cleanupArtifactDigest !== artifactDigest(probe, artifacts)) {
     throw new Error('release probe finalizing artifact binding is invalid')
   }
-  return artifacts as { createJobId: string | null; jobIds: string[]; outboxIds: string[]; indexStateIds: string[]; indexVersionIds: string[] }
+  return artifacts as {
+    createJobId: string; cleanupJobId: string; createJobBinding: any; cleanupJobBinding: any;
+    jobIds: string[]; outboxIds: string[]; indexStateIds: string[]; indexVersionIds: string[]
+  }
 }
 
-async function revalidateLiveFinalizingArtifacts(probe: any, artifacts: ReturnType<typeof validateFinalizingArtifacts>) {
-  const outboxes = await db.getByIds('post_rag_outbox', artifacts.outboxIds) as any[]
-  for (const outbox of outboxes) {
-    const id = String(outbox?._id || '')
-    if (!artifacts.outboxIds.includes(id)) throw new Error('release probe outbox binding does not match run binding')
-    assertArtifactBound(outbox, id, probe, 'outbox')
-  }
-  const jobs = await db.getByIds('post_rag_jobs', artifacts.jobIds) as any[]
-  for (const job of jobs) {
-    const id = String(job?._id || '')
-    if (!artifacts.jobIds.includes(id)) throw new Error('release probe job binding does not match run binding')
-    if (job?.outboxId === probe.outboxId) {
-      assertJobBound(job, id, probe.outboxId, 'upsert', probe)
-    }
-    else if (job?.outboxId === probe.cleanupOutboxId) assertJobBound(job, id, probe.cleanupOutboxId, 'delete', probe)
-    else throw new Error('release probe job binding does not match run binding')
-  }
-  const states = await db.getByIds('post_rag_index_state_v2', artifacts.indexStateIds) as any[]
-  for (const state of states) {
-    if (state?._id !== probe.postId || state?.postId !== probe.postId) throw new Error('release probe index state binding does not match run binding')
-  }
-  const versions = await db.getByIds('post_rag_index_versions', artifacts.indexVersionIds) as any[]
+async function exactCurrentVersionIds(probe: any) {
+  const versions = await db.query('post_rag_index_versions', { postId: probe.postId }, { limit: MAX_PROBE_INDEX_VERSIONS + 1 }) as any[]
+  if (versions.length > MAX_PROBE_INDEX_VERSIONS) throw new Error('release probe cleanup artifact limit exceeded')
   for (const version of versions) {
-    if (!artifacts.indexVersionIds.includes(String(version?._id || '')) || version?.postId !== probe.postId) {
+    if (typeof version?._id !== 'string' || !version._id || version.postId !== probe.postId) {
       throw new Error('release probe index version binding does not match run binding')
     }
   }
-  const latestCreateJob = artifacts.createJobId
-    ? await db.getByIdOrNull('post_rag_jobs', artifacts.createJobId) as any
-    : null
-  if (latestCreateJob) assertJobBound(latestCreateJob, artifacts.createJobId!, probe.outboxId, 'upsert', probe)
-  return createJobSafeToRemove(latestCreateJob, new Date().toISOString())
+  return versions.map(version => version._id).sort()
 }
 
 async function finalizeProbeCleanup(probe: any) {
   const artifacts = validateFinalizingArtifacts(probe)
-  if (!await revalidateLiveFinalizingArtifacts(probe, artifacts)) return pendingCleanup('finalizing')
-  for (const id of artifacts.jobIds) await db.removeById('post_rag_jobs', id)
-  for (const id of artifacts.outboxIds) await db.removeById('post_rag_outbox', id)
-  for (const id of artifacts.indexStateIds) await db.removeById('post_rag_index_state_v2', id)
-  for (const id of artifacts.indexVersionIds) await db.removeById('post_rag_index_versions', id)
+  if (!probe.artifactsRemovedAt) {
+    const currentVersionIds = await exactCurrentVersionIds(probe)
+    if (JSON.stringify(currentVersionIds) !== JSON.stringify(artifacts.indexVersionIds)) return pendingCleanup('finalizing')
+    const removedAt = new Date().toISOString()
+    const removal = await db.runTransaction(async tx => {
+      const current = await db.transactionGetByIdOrNull<any>(tx, PROBES, probe.runId)
+      if (!current) throw new Error('release probe run binding not found')
+      assertProbeIdentity(probe.runId, current)
+      if (current.communityId !== probe.communityId || current.sectionId !== probe.sectionId || current.postId !== probe.postId) {
+        throw new Error('release probe ids do not match run binding')
+      }
+      if (current.status !== 'finalizing') return { pending: current.status !== 'cleaned', removed: current.status === 'cleaned' }
+      const currentArtifacts = validateFinalizingArtifacts(current)
+      if (current.artifactsRemovedAt) return { pending: false, removed: true }
+
+      const createOutbox = await db.transactionGetByIdOrNull<any>(tx, 'post_rag_outbox', current.outboxId)
+      const cleanupOutbox = await db.transactionGetByIdOrNull<any>(tx, 'post_rag_outbox', current.cleanupOutboxId)
+      if (!createOutbox || !cleanupOutbox) return { pending: true, removed: false }
+      assertArtifactBound(createOutbox, current.outboxId, current, 'outbox')
+      assertArtifactBound(cleanupOutbox, current.cleanupOutboxId, current, 'outbox')
+      if (createOutbox.schemaVersion !== 2 || cleanupOutbox.schemaVersion !== 2
+        || createOutbox.status !== 'completed' || cleanupOutbox.status !== 'completed'
+        || createOutbox.materializedJobId !== currentArtifacts.createJobId
+        || cleanupOutbox.materializedJobId !== currentArtifacts.cleanupJobId) return { pending: true, removed: false }
+
+      const createJob = await db.transactionGetByIdOrNull<any>(tx, 'post_rag_jobs', currentArtifacts.createJobId)
+      const cleanupJob = await db.transactionGetByIdOrNull<any>(tx, 'post_rag_jobs', currentArtifacts.cleanupJobId)
+      if (!createJob || !cleanupJob) return { pending: true, removed: false }
+      assertJobBound(createJob, currentArtifacts.createJobId, current.outboxId, 'upsert', current)
+      assertJobBound(cleanupJob, currentArtifacts.cleanupJobId, current.cleanupOutboxId, 'delete', current)
+      if (!sameJobBinding(createJob, currentArtifacts.createJobBinding) || !sameJobBinding(cleanupJob, currentArtifacts.cleanupJobBinding)) {
+        throw new Error('release probe job binding does not match persisted artifact binding')
+      }
+      if (createJob.status === 'processing' && typeof createJob.leaseExpiresAt === 'string' && createJob.leaseExpiresAt > removedAt) {
+        return { pending: true, removed: false }
+      }
+      const state = await db.transactionGetByIdOrNull<any>(tx, 'post_rag_index_state_v2', current.postId)
+      if (!state || state._id !== current.postId || state.postId !== current.postId || !removedStateProvesDelete(state, cleanupJob)) {
+        return { pending: true, removed: false }
+      }
+      for (const versionId of currentArtifacts.indexVersionIds) {
+        const version = await db.transactionGetByIdOrNull<any>(tx, 'post_rag_index_versions', versionId)
+        if (!version || version._id !== versionId || version.postId !== current.postId) return { pending: true, removed: false }
+      }
+      await tx.collection('post_rag_jobs').doc(currentArtifacts.createJobId).remove()
+      await tx.collection('post_rag_jobs').doc(currentArtifacts.cleanupJobId).remove()
+      await tx.collection('post_rag_outbox').doc(current.outboxId).remove()
+      await tx.collection('post_rag_outbox').doc(current.cleanupOutboxId).remove()
+      await tx.collection('post_rag_index_state_v2').doc(current.postId).remove()
+      for (const versionId of currentArtifacts.indexVersionIds) await tx.collection('post_rag_index_versions').doc(versionId).remove()
+      await tx.collection(PROBES).doc(current.runId).set({ data: withoutId({ ...current, artifactsRemovedAt: removedAt }) })
+      return { pending: false, removed: true }
+    })
+    if (removal.pending) return pendingCleanup('finalizing')
+  }
+
+  if ((await exactCurrentVersionIds(probe)).length !== 0) return pendingCleanup('finalizing')
   const cleanupCounts = {
     jobs: artifacts.jobIds.length,
     outboxes: artifacts.outboxIds.length,
@@ -206,12 +251,21 @@ async function finalizeProbeCleanup(probe: any) {
     const current = await db.transactionGetByIdOrNull<any>(tx, PROBES, probe.runId)
     if (!current) throw new Error('release probe run binding not found')
     if (current.status === 'cleaned') return current
+    assertProbeIdentity(probe.runId, current)
     if (current.status !== 'finalizing') throw new Error('release probe cleanup state changed during finalization')
-    validateFinalizingArtifacts(current)
+    const currentArtifacts = validateFinalizingArtifacts(current)
+    if (!current.artifactsRemovedAt) return null
+    for (const [collection, ids] of [
+      ['post_rag_jobs', currentArtifacts.jobIds], ['post_rag_outbox', currentArtifacts.outboxIds],
+      ['post_rag_index_state_v2', currentArtifacts.indexStateIds], ['post_rag_index_versions', currentArtifacts.indexVersionIds],
+    ] as Array<[string, string[]]>) {
+      for (const artifactId of ids) if (await db.transactionGetByIdOrNull(tx, collection, artifactId)) return null
+    }
     const next = { ...current, status: 'cleaned', cleanedAt: now, cleanupCounts }
     await tx.collection(PROBES).doc(probe.runId).set({ data: withoutId(next) })
     return next
   })
+  if (!cleaned) return pendingCleanup('finalizing')
   return { success: true, alreadyCleaned: cleaned.cleanedAt !== probe.cleanedAt && probe.status !== 'cleaned' ? false : true, status: 'cleaned', cleanupCounts: cleaned.cleanupCounts }
 }
 
@@ -223,8 +277,7 @@ async function prepareProbeFinalization(probe: any) {
   if (!createOutbox) return null
   assertArtifactBound(createOutbox, probe.outboxId, probe, 'outbox')
   if (createOutbox.schemaVersion !== 2) return null
-  if (!createOutbox.materializedJobId && createOutbox.status !== 'dead_letter') return null
-  if (createOutbox.materializedJobId && createOutbox.status !== 'completed') return null
+  if (createOutbox.status !== 'completed' || !createOutbox.materializedJobId) return null
   if (!cleanupOutbox) return null
   assertArtifactBound(cleanupOutbox, probe.cleanupOutboxId, probe, 'outbox')
   if (cleanupOutbox.schemaVersion !== 2 || cleanupOutbox.status !== 'completed' || !cleanupOutbox.materializedJobId) return null
@@ -236,7 +289,8 @@ async function prepareProbeFinalization(probe: any) {
   const byJobId = new Map(jobs.map(job => [String(job?._id || ''), job]))
   const createJob = createJobId ? byJobId.get(createJobId) : null
   const cleanupJob = byJobId.get(cleanupJobId)
-  if (createJob) assertJobBound(createJob, createJobId!, probe.outboxId, 'upsert', probe)
+  if (!createJob) return null
+  assertJobBound(createJob, createJobId!, probe.outboxId, 'upsert', probe)
   if (!cleanupJob) return null
   assertJobBound(cleanupJob, cleanupJobId, probe.cleanupOutboxId, 'delete', probe)
   if (cleanupJob.status !== 'completed' || !['removed', 'superseded'].includes(cleanupJob.outcome)) return null
@@ -251,19 +305,14 @@ async function prepareProbeFinalization(probe: any) {
     throw new Error('release probe index state binding does not match run binding')
   }
   if (!removedStateProvesDelete(state, cleanupJob)) return null
-  const versions = await db.query('post_rag_index_versions', { postId: probe.postId }, { limit: MAX_PROBE_INDEX_VERSIONS + 1 }) as any[]
-  if (versions.length > MAX_PROBE_INDEX_VERSIONS) throw new Error('release probe cleanup artifact limit exceeded')
-  for (const version of versions) {
-    if (typeof version?._id !== 'string' || !version._id || String(version.postId || '') !== probe.postId) {
-      throw new Error('release probe index version binding does not match run binding')
-    }
-  }
+  const indexVersionIds = await exactCurrentVersionIds(probe)
   const cleanupArtifactIds = {
-    createJobId,
+    createJobId, cleanupJobId,
+    createJobBinding: jobBinding(createJob), cleanupJobBinding: jobBinding(cleanupJob),
     jobIds,
     outboxIds: [probe.outboxId, probe.cleanupOutboxId],
     indexStateIds: state ? [probe.postId] : [],
-    indexVersionIds: versions.map(version => version._id).sort(),
+    indexVersionIds,
   }
   return db.runTransaction(async tx => {
     const current = await db.transactionGetByIdOrNull<any>(tx, PROBES, probe.runId)
