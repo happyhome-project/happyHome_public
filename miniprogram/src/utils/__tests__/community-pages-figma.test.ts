@@ -88,8 +88,18 @@ describe('Figma community directory pages', () => {
     const refreshHomeData = code.match(/async function refreshHomeData[\s\S]*?(?=\nfunction probeHomeRender)/)?.[0] ?? ''
     const initializeHome = code.match(/async function initializeHome[\s\S]*?(?=\nonMounted)/)?.[0] ?? ''
 
-    expect(refreshHomeData).toMatch(/homeLoading\.value = true\s*const refreshPromise/)
-    expect(refreshHomeData).toMatch(/finally\s*\{[\s\S]*activeHomeRefreshPromise = null[\s\S]*homeLoading\.value = false/)
+    expect(refreshHomeData).toMatch(/const loadingOwner = homeLoadingGate\.beginRefresh\(\)\s*const refreshPromise/)
+    expect(refreshHomeData).toMatch(/finally\s*\{[\s\S]*activeHomeRefreshPromise = null[\s\S]*homeLoadingGate\.endRefresh\(loadingOwner\)/)
     expect(initializeHome).not.toContain('homeLoading.value = false')
+  })
+
+  test('home releases redirected initialization through the loading gate and wraps empty copy safely', () => {
+    const code = readPage('index')
+
+    expect(code).toContain("import { createHomeLoadingGate } from '../../utils/home-loading-gate'")
+    expect(code).toMatch(/const loadingOwner = homeLoadingGate\.beginRefresh\(\)[\s\S]*homeLoadingGate\.endRefresh\(loadingOwner\)/)
+    expect(code).toMatch(/if \(redirectedByShare\) \{[\s\S]*homeLoadingGate\.releaseInitial\(\)[\s\S]*return/)
+    expect(code).toMatch(/\.home-empty-description\s*\{[^}]*max-width:\s*100%[^}]*white-space:\s*normal[^}]*overflow-wrap:\s*break-word/s)
+    expect(code).not.toMatch(/\.home-empty-description\s*\{[^}]*white-space:\s*nowrap/s)
   })
 })

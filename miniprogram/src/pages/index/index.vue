@@ -444,6 +444,7 @@ import { clientLog, markClientDiagnosticStage, startHomeDiagnosticWatchdog } fro
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, normalizeHomeSnapshotShape, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
 import { formatHomeQuoteCite } from '../../utils/home-quote'
+import { createHomeLoadingGate } from '../../utils/home-loading-gate'
 import { resolveCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { resolveSectionIconGlyph } from '../../utils/section-icon'
 import {
@@ -479,6 +480,7 @@ markClientDiagnosticStage('home.stores.ready', {
 const showGuestIntro = ref(false)
 const guestIntroConfig = ref<GuestIntroConfig | null>(null)
 const homeLoading = ref(true)
+const homeLoadingGate = createHomeLoadingGate(homeLoading)
 const postsBySection = ref<Record<string, any[]>>({})
 const resolvedHomeBannerCoverUrls = ref<Record<string, string>>({})
 const resolvedHomeGuideCoverUrls = ref<Record<string, string>>({})
@@ -1709,7 +1711,7 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
     return
   }
 
-  homeLoading.value = true
+  const loadingOwner = homeLoadingGate.beginRefresh()
   const refreshPromise = (async () => {
     let nextForce = force
     do {
@@ -1725,7 +1727,7 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
   } finally {
     if (activeHomeRefreshPromise === refreshPromise) {
       activeHomeRefreshPromise = null
-      homeLoading.value = false
+      homeLoadingGate.endRefresh(loadingOwner)
     }
   }
 }
@@ -1771,6 +1773,7 @@ async function initializeHome() {
   try {
     const redirectedByShare = await handleInitialShareLanding()
     if (redirectedByShare) {
+      homeLoadingGate.releaseInitial()
       probeHomeRender('share.redirect')
       return
     }
@@ -1779,6 +1782,7 @@ async function initializeHome() {
     scheduleHomeFixedControlsMeasure()
     probeHomeRender('mounted')
   } catch (error) {
+    homeLoadingGate.releaseInitial()
     clientLog('error', 'home.mounted.fail', { error })
     probeHomeRender('mounted.fail')
   }
@@ -3396,11 +3400,14 @@ onShareAppMessage(() => {
 }
 
 .home-empty-description {
+  width: 100%;
+  max-width: 100%;
   color: rgba(0, 0, 0, 0.45);
   font-size: var(--hh-text-body-lg-size);
   line-height: var(--hh-text-body-lg-line);
   font-weight: $hh-font-weight-regular;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .home-empty-action {
