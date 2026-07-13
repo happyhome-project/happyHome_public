@@ -8,14 +8,17 @@ import {
   attestAdminWebArtifact,
   attestCloudArtifacts,
   attestMiniprogramReceipt,
+  assertPinnedAdminArtifact,
   createImmutableArtifactSnapshots,
   createMiniprogramReceiptIdentity,
   createReleaseArtifactManifest,
   orchestrateCloudArtifactRelease,
+  runPinnedAdminArtifactMutation,
   summarizeArtifactOutcomes,
   toPublicCloudArtifactIdentity,
 } from './release-artifact-attestation.mjs'
 import { normalizeMiniprogramUploadReceipt } from './miniprogram-receipt-identity.mjs'
+import { computeDirectoryDigest } from './release-run-ledger.mjs'
 
 async function fixtureRoot() {
   const root = join(tmpdir(), `happyhome-artifacts-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`)
@@ -142,6 +145,85 @@ test('admin attestation rejects a changed local artifact before trusting remote 
       },
     }), /immutable admin-web artifact digest mismatch/i)
     assert.equal(remoteReadCount, 0)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('pinned admin backend runners reject TOCTOU tampering before hosting tar or ssh mutation', async () => {
+  const root = await fixtureRoot()
+  try {
+    const artifactRoot = join(root, 'admin-snapshot')
+    await mkdir(artifactRoot, { recursive: true })
+    await writeFile(join(artifactRoot, 'index.html'), 'prepared')
+    const manifest = await createReleaseArtifactManifest({
+      root, runId: 'run-1', gitSha: 'abcdef', envId: 'env', version: '1', desc: 'd',
+      plan: { targets: { cloud: { functions: [] }, adminWeb: true, miniprogram: false } },
+      paths: { adminWebRoot: artifactRoot },
+    })
+    const artifact = manifest.artifacts.adminWeb
+    const attestation = await attestAdminWebArtifact({ root, artifact, inspectRemote: async () => ({ ...artifact, versionId: 'old' }) })
+    assert.equal(attestation.shouldDeploy, true)
+
+    await writeFile(join(artifactRoot, 'index.html'), 'tampered-after-attestation')
+    const calls = { hosting: 0, tar: 0, ssh: 0 }
+    await assert.rejects(() => runPinnedAdminArtifactMutation({
+      artifactRoot,
+      expectedDigest: artifact.contentDigest,
+      runners: [async () => { calls.hosting += 1 }],
+    }), /immutable admin-web artifact digest mismatch/i)
+    await assert.rejects(() => runPinnedAdminArtifactMutation({
+      artifactRoot,
+      expectedDigest: artifact.contentDigest,
+      runners: [async () => { calls.tar += 1 }, async () => { calls.ssh += 1 }],
+    }), /immutable admin-web artifact digest mismatch/i)
+    assert.deepEqual(calls, { hosting: 0, tar: 0, ssh: 0 })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('pinned admin backend runners execute in order for an exact snapshot', async () => {
+  const root = await fixtureRoot()
+  try {
+    const artifactRoot = join(root, 'admin-snapshot')
+    await mkdir(artifactRoot, { recursive: true })
+    await writeFile(join(artifactRoot, 'index.html'), 'prepared')
+    const expectedDigest = await computeDirectoryDigest(artifactRoot)
+    await assert.doesNotReject(() => assertPinnedAdminArtifact(artifactRoot, expectedDigest))
+    const calls = []
+    const results = await runPinnedAdminArtifactMutation({
+      artifactRoot,
+      expectedDigest,
+      runners: [async () => { calls.push('tar'); return 'tarred' }, async () => { calls.push('ssh'); return 'deployed' }],
+    })
+    assert.deepEqual(calls, ['tar', 'ssh'])
+    assert.deepEqual(results, ['tarred', 'deployed'])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('pinned admin backend rechecks the snapshot immediately before every injected runner', async () => {
+  const root = await fixtureRoot()
+  try {
+    const artifactRoot = join(root, 'admin-snapshot')
+    await mkdir(artifactRoot, { recursive: true })
+    await writeFile(join(artifactRoot, 'index.html'), 'prepared')
+    const expectedDigest = await computeDirectoryDigest(artifactRoot)
+    const calls = []
+    await assert.rejects(() => runPinnedAdminArtifactMutation({
+      artifactRoot,
+      expectedDigest,
+      runners: [
+        async () => {
+          calls.push('tar')
+          await writeFile(join(artifactRoot, 'index.html'), 'changed-between-runners')
+        },
+        async () => calls.push('ssh'),
+      ],
+    }), /immutable admin-web artifact digest mismatch/i)
+    assert.deepEqual(calls, ['tar'])
   } finally {
     await rm(root, { recursive: true, force: true })
   }

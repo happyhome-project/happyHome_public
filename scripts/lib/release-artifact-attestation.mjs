@@ -251,6 +251,27 @@ export async function attestAdminWebArtifact({ root, artifact, inspectRemote } =
   }
 }
 
+export async function assertPinnedAdminArtifact(artifactRoot, expectedDigest) {
+  if (!artifactRoot || !expectedDigest) throw new Error('pinned admin-web artifact root and digest are required')
+  let actualDigest
+  try { actualDigest = await computeDirectoryDigest(artifactRoot) } catch {
+    throw new Error('immutable admin-web artifact is missing')
+  }
+  if (actualDigest !== expectedDigest) throw new Error('immutable admin-web artifact digest mismatch')
+}
+
+export async function runPinnedAdminArtifactMutation({ artifactRoot, expectedDigest, runners = [] } = {}) {
+  if (!Array.isArray(runners) || runners.length === 0 || runners.some((runner) => typeof runner !== 'function')) {
+    throw new Error('pinned admin-web mutation runners must be functions')
+  }
+  const results = []
+  for (const runner of runners) {
+    await assertPinnedAdminArtifact(artifactRoot, expectedDigest)
+    results.push(await runner())
+  }
+  return results
+}
+
 export function attestMiniprogramReceipt({ artifact, receipt, expectedReceiptId } = {}) {
   const actualReceiptId = receipt && createMiniprogramReceiptIdentity({
     receipt,

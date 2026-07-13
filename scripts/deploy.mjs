@@ -109,6 +109,7 @@ import {
   createImmutableArtifactSnapshots,
   createReleaseArtifactManifest,
   orchestrateCloudArtifactRelease,
+  runPinnedAdminArtifactMutation,
   toPublicCloudArtifactIdentity,
 } from './lib/release-artifact-attestation.mjs'
 import {
@@ -965,6 +966,7 @@ async function inspectAdminWebPublication() {
 async function deployAdminWebToCloudBase(options = {}) {
   const env = options.skipBuild ? process.env : buildAdminWeb('hash')
   const artifactRoot = options.artifactRoot || ADMIN_WEB_DIST
+  const expectedDigest = options.artifact?.contentDigest || await computeDirectoryDigest(artifactRoot)
   const cloudPath = process.env.ADMIN_WEB_CLOUD_PATH || '/'
   const envId = getCloudEnvId()
   const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
@@ -983,7 +985,11 @@ async function deployAdminWebToCloudBase(options = {}) {
 
   console.log('\nDeploying admin-web dist to CloudBase static hosting...')
   console.log(`Using VITE_CLOUD_API_URL=${env.VITE_CLOUD_API_URL}`)
-  const result = await runOptionalDirectRemoteMutation(options, async () => await runShell(args.map(quote).join(' ')))
+  const [result] = await runOptionalDirectRemoteMutation(options, async () => await runPinnedAdminArtifactMutation({
+    artifactRoot,
+    expectedDigest,
+    runners: [async () => await runShell(args.map(quote).join(' '))],
+  }))
   if (!result.ok) {
     throw new Error(`Admin web deploy failed: ${result.reason}. Ensure CloudBase CLI is logged in and static hosting is enabled for ${envId}.`)
   }
@@ -1005,6 +1011,7 @@ async function deployAdminWebToAliyun(options = {}) {
     versionId: options.artifact?.versionId || '',
   })).toString('base64')
   const artifactRoot = options.artifactRoot || ADMIN_WEB_DIST
+  const expectedDigest = options.artifact?.contentDigest || await computeDirectoryDigest(artifactRoot)
 
   console.log('\nPacking admin-web dist...')
   // --force-local: 在 Windows + Git Bash 下，tar 会把 "X:\..." 当成 remote host:path 解析失败。
@@ -1012,7 +1019,6 @@ async function deployAdminWebToAliyun(options = {}) {
   const tarHelp = execSync('tar --help', { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
   const forceLocalFlag = tarHelp.includes('--force-local') ? '--force-local ' : ''
   // Git Bash tar needs --force-local for Windows drive-letter paths; Windows tar rejects it.
-  execSync(`tar ${forceLocalFlag}-czf ${quote(archivePath)} -C ${quote(artifactRoot)} .`, { cwd: ROOT, stdio: 'inherit' })
 
   const remoteScript = `#!/usr/bin/env bash
 set -euo pipefail
@@ -1038,11 +1044,28 @@ readlink -f "$root/current"
   console.log(`Using VITE_CLOUD_API_URL=${env.VITE_CLOUD_API_URL}`)
   console.log(`Using VITE_ROUTER_MODE=${env.VITE_ROUTER_MODE}`)
   console.log(`Using ADMIN_WEB_SSH_HOST=${ADMIN_WEB_ALIYUN_HOST}`)
-  const uploadArchive = await runOptionalDirectRemoteMutation(options, async () => await runShell(`scp ${quote(archivePath)} ${quote(`${ADMIN_WEB_ALIYUN_HOST}:${remoteArchivePath}`)}`))
+  await runOptionalDirectRemoteMutation(options, async () => await runPinnedAdminArtifactMutation({
+    artifactRoot,
+    expectedDigest,
+    runners: [async () => execSync(`tar ${forceLocalFlag}-czf ${quote(archivePath)} -C ${quote(artifactRoot)} .`, { cwd: ROOT, stdio: 'inherit' })],
+  }))
+  const [uploadArchive] = await runOptionalDirectRemoteMutation(options, async () => await runPinnedAdminArtifactMutation({
+    artifactRoot,
+    expectedDigest,
+    runners: [async () => await runShell(`scp ${quote(archivePath)} ${quote(`${ADMIN_WEB_ALIYUN_HOST}:${remoteArchivePath}`)}`)],
+  }))
   if (!uploadArchive.ok) throw new Error(`Admin web archive upload failed: ${uploadArchive.reason}`)
-  const uploadScript = await runOptionalDirectRemoteMutation(options, async () => await runShell(`scp ${quote(localScriptPath)} ${quote(`${ADMIN_WEB_ALIYUN_HOST}:${remoteScriptPath}`)}`))
+  const [uploadScript] = await runOptionalDirectRemoteMutation(options, async () => await runPinnedAdminArtifactMutation({
+    artifactRoot,
+    expectedDigest,
+    runners: [async () => await runShell(`scp ${quote(localScriptPath)} ${quote(`${ADMIN_WEB_ALIYUN_HOST}:${remoteScriptPath}`)}`)],
+  }))
   if (!uploadScript.ok) throw new Error(`Admin web deploy script upload failed: ${uploadScript.reason}`)
-  const deploy = await runOptionalDirectRemoteMutation(options, async () => await runShell(`ssh ${quote(ADMIN_WEB_ALIYUN_HOST)} ${quote(`bash ${remoteScriptPath}`)}`))
+  const [deploy] = await runOptionalDirectRemoteMutation(options, async () => await runPinnedAdminArtifactMutation({
+    artifactRoot,
+    expectedDigest,
+    runners: [async () => await runShell(`ssh ${quote(ADMIN_WEB_ALIYUN_HOST)} ${quote(`bash ${remoteScriptPath}`)}`)],
+  }))
   if (!deploy.ok) throw new Error(`Admin web Aliyun deploy failed: ${deploy.reason}`)
   console.log('[OK] Admin web deployed to Aliyun Nginx host')
 }

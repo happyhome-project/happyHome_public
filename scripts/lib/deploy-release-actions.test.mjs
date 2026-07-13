@@ -50,8 +50,10 @@ test('both admin backends deploy the caller-pinned artifact root instead of muta
   assert.match(cloudbase, /const artifactRoot = options\.artifactRoot \|\| ADMIN_WEB_DIST/)
   assert.match(cloudbase, /'deploy',\s*artifactRoot,/)
   assert.doesNotMatch(cloudbase, /'deploy',\s*ADMIN_WEB_DIST,/)
+  assert.match(cloudbase, /runOptionalDirectRemoteMutation\([\s\S]*runPinnedAdminArtifactMutation\(/)
   assert.match(aliyun, /const artifactRoot = options\.artifactRoot \|\| ADMIN_WEB_DIST/)
   assert.match(aliyun, /-C \$\{quote\(artifactRoot\)\}/)
+  assert.equal(aliyun.match(/runPinnedAdminArtifactMutation\(/g)?.length, 4)
 
   const formalStart = source.indexOf('async function runFormalRelease')
   const formal = source.slice(formalStart)
