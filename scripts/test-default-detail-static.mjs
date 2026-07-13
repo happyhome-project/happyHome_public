@@ -16,10 +16,10 @@ function assert(condition, message) {
 }
 
 assert(
-  defaultDetailView.includes('resolvePostHomeTitle') &&
+  defaultDetailView.includes('resolvePostDetailTitle') &&
     defaultDetailView.includes('titleResolution.value.sourceWidgetId') &&
     defaultDetailView.includes('{{ titleText }}'),
-  'default detail should derive its heading and consumed widget from one shared title resolution.',
+  'default detail should derive its heading and consumed widget from one detail-only title resolution.',
 )
 
 assert(

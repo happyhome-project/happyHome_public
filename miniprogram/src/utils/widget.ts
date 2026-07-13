@@ -36,12 +36,12 @@ export interface PostHomeTitleIssue {
 const HOME_TITLE_WIDGET_TYPES = ['short_text', 'summary', 'number', 'rich_text', 'rich_note']
 const HOME_TITLE_LABEL_NEEDLES = ['标题', '名称', '名字', '书名', '物品', '活动', '医生姓名', '音乐名称', '电影分类']
 
-export interface PostHomeTitleResolution {
+export interface PostDetailTitleResolution {
   text: string
   sourceWidgetId: string | null
 }
 
-export function resolvePostHomeTitle(post: Post, section: Section): PostHomeTitleResolution {
+export function resolvePostDetailTitle(post: Post, section: Section): PostDetailTitleResolution {
   const carpoolSummary = getCarpoolListSummary(post, section)
   if (carpoolSummary?.route) {
     return { text: carpoolSummary.route, sourceWidgetId: null }
@@ -77,7 +77,31 @@ export function resolvePostHomeTitle(post: Post, section: Section): PostHomeTitl
 }
 
 export function getPostHomeTitle(post: Post, section: Section): string {
-  return resolvePostHomeTitle(post, section).text
+  const carpoolSummary = getCarpoolListSummary(post, section)
+  if (carpoolSummary?.route) return carpoolSummary.route
+
+  const widgets = (section.widgets || []).slice().sort((a, b) => a.order - b.order)
+  const titleWidget = widgets.find((widget) => {
+    if (!['short_text', 'summary', 'number'].includes(widget.type)) return false
+    const fieldKey = String(widget.fieldKey || '').toLowerCase()
+    const label = String(widget.label || '').replace(/\s/g, '')
+    return fieldKey === 'title' ||
+      fieldKey.includes('title') ||
+      ['标题', '名称', '名字'].some((item) => label.includes(item))
+  }) || widgets.find((widget) => ['short_text', 'summary', 'number'].includes(widget.type))
+
+  if (titleWidget) {
+    const value = getWidgetValue(post, titleWidget)
+    if (value) return value
+  }
+
+  for (const widget of widgets.filter((item) => HOME_TITLE_WIDGET_TYPES.includes(item.type))) {
+    const value = getWidgetValue(post, widget)
+    if (value) return value
+  }
+
+  const attendanceWidget = widgets.find((widget) => widget.type === 'attendance' && String(widget.label || '').trim())
+  return String(attendanceWidget?.label || section.name || '无标题').trim()
 }
 
 export function getPostHomeTitleIssue(post: Post, section: Section): PostHomeTitleIssue | null {

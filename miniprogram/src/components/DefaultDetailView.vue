@@ -139,7 +139,7 @@ import { computed } from 'vue'
 import RichNoteRenderer from './widgets/RichNoteRenderer.vue'
 import NoteBlocksRenderer from './widgets/NoteBlocksRenderer.vue'
 import VideoPlayerCard from './widgets/VideoPlayerCard.vue'
-import { formatWidgetValue, resolvePostHomeTitle } from '../utils/widget'
+import { formatWidgetValue, resolvePostDetailTitle } from '../utils/widget'
 import { resolveWidgetLabel } from '../utils/widget-form'
 import { isRichNoteEmpty, normalizeRichNoteContent } from '../utils/rich-note'
 import { useAudioStore } from '../store/audio'
@@ -177,7 +177,7 @@ const authorInitial = computed(() => authorName.value.slice(0, 1) || '邻')
 const authorAvatarUrl = computed(() => String(props.post?.authorAvatarUrl || '').trim())
 const publishDate = computed(() => formatPostDate(props.post?.createdAt))
 
-const titleResolution = computed(() => resolvePostHomeTitle(props.post, props.section))
+const titleResolution = computed(() => resolvePostDetailTitle(props.post, props.section))
 const titleWidget = computed(() => {
   const sourceWidgetId = titleResolution.value.sourceWidgetId
   if (!sourceWidgetId) return null

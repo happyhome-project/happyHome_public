@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { formatWidgetValue, getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard, getHomeLiveMeta, getListPreview, getPostHomeTitle, getPostHomeTitleIssue, resolvePostHomeTitle } from '../widget'
+import { formatWidgetValue, getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard, getHomeLiveMeta, getListPreview, getPostHomeTitle, getPostHomeTitleIssue, resolvePostDetailTitle } from '../widget'
 import type { Section, Post } from '../../../../cloud/shared/types'
 
 afterEach(() => {
@@ -196,7 +196,7 @@ describe('getListPreview', () => {
 
 describe('home live card formatting', () => {
   function resolveTitle(post: Post, section: Section) {
-    return resolvePostHomeTitle(post, section)
+    return resolvePostDetailTitle(post, section)
   }
 
   test.each([
@@ -268,6 +268,24 @@ describe('home live card formatting', () => {
       { label: '医生姓名', value: '王医生', type: 'text' },
     ])
     expect(getHomeLiveMeta(post, section)).toEqual(['周六集合', '王医生'])
+  })
+
+  test('does not broaden the shared home title with detail-only semantic labels', () => {
+    const section = {
+      name: '社区动态',
+      type: 'realtime',
+      widgets: [
+        { widgetId: 'generic', type: 'short_text', label: '补充', fieldKey: 'extra', order: 0 },
+        { widgetId: 'activity', type: 'summary', label: '活动说明', fieldKey: 'activity', order: 1 },
+      ],
+    } as Section
+    const post = { content: { generic: '原首页标题', activity: '详情页活动标题' } } as Post
+
+    expect(getPostHomeTitle(post, section)).toBe('原首页标题')
+    expect(resolveTitle(post, section)).toEqual({
+      text: '详情页活动标题',
+      sourceWidgetId: 'activity',
+    })
   })
 
   test('marks a synthetic carpool route as having no consumed source widget', () => {
