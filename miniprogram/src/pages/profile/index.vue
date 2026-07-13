@@ -5,6 +5,11 @@
     :data-build-version="releaseVersion"
     :class="{ 'profile-page--editing': showManualLoginForm }"
   >
+    <view
+      class="profile-page-background"
+      :inert="isEditingProfile"
+      :aria-hidden="isEditingProfile ? 'true' : undefined"
+    >
     <view class="profile-custom-nav" :style="profileCustomNavStyle">
       <view class="profile-custom-nav-row">
         <text class="profile-custom-nav-title">我的</text>
@@ -241,65 +246,6 @@
     >{{ webLogoutLock.busy.value ? '退出中...' : '退出登录' }}</button>
     <!-- #endif -->
 
-    <view
-      v-if="isEditingProfile"
-      class="profile-edit-mask"
-      @tap="cancelEditProfile"
-      @touchmove.stop.prevent
-    >
-      <view class="profile-edit-sheet" @tap.stop @touchmove.stop>
-        <text class="profile-edit-sheet__title">编辑资料</text>
-
-        <view class="profile-edit-sheet__avatar-row">
-          <button
-            v-if="supportsChooseAvatar"
-            open-type="chooseAvatar"
-            class="avatar-picker-btn"
-            @chooseavatar="onChooseAvatar"
-          >
-            <view class="avatar-edit-wrap">
-              <image :src="formAvatarDisplay || profileAvatarSrc" class="avatar-preview" />
-              <view class="avatar-edit-badge" aria-hidden="true">
-                <view class="avatar-edit-camera">
-                  <view class="avatar-edit-camera-lens"></view>
-                </view>
-              </view>
-            </view>
-          </button>
-          <image v-else :src="formAvatarDisplay || profileAvatarSrc" class="avatar-preview" />
-          <text class="profile-edit-sheet__capability">
-            {{ supportsChooseAvatar ? '点击头像即可更换' : '当前基础库暂不支持修改头像' }}
-          </text>
-        </view>
-
-        <view class="profile-edit-sheet__field">
-          <text class="profile-edit-sheet__label">昵称</text>
-          <view class="profile-edit-sheet__input-wrap">
-            <input
-              type="nickname"
-              :focus="true"
-              :value="formNickName"
-              placeholder="请输入昵称"
-              placeholder-class="input-placeholder"
-              maxlength="20"
-              class="input"
-              @input="onNickInput"
-              @blur="onNickBlur"
-            />
-          </view>
-        </view>
-
-        <view class="profile-edit-sheet__actions">
-          <button class="profile-edit-sheet__cancel" @tap="cancelEditProfile">取消</button>
-          <button
-            class="profile-edit-sheet__save"
-            :disabled="!canSubmitForm || submitFormLock.busy.value"
-            @tap="saveProfile"
-          >{{ submitFormLock.busy.value ? '保存中...' : '保存' }}</button>
-        </view>
-      </view>
-    </view>
-
     <!-- 昵称确认浮层：chooseAvatar 回调后自动弹出 -->
     <view v-if="showNickConfirm" class="nick-modal-mask" @tap="cancelNickConfirm">
       <view class="nick-modal" @tap.stop>
@@ -430,6 +376,79 @@
       </view>
     </view>
     <AppTabBar current="profile" />
+    </view>
+
+    <view
+      v-if="isEditingProfile"
+      class="profile-edit-mask"
+      @tap="cancelEditProfile"
+      @touchmove.stop.prevent
+    >
+      <view
+        class="profile-edit-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="profile-edit-sheet-title"
+        @tap.stop
+        @touchmove.stop
+      >
+        <text id="profile-edit-sheet-title" class="profile-edit-sheet__title">编辑资料</text>
+
+        <view class="profile-edit-sheet__avatar-row">
+          <button
+            v-if="supportsChooseAvatar"
+            open-type="chooseAvatar"
+            class="avatar-picker-btn"
+            :disabled="submitFormLock.busy.value"
+            @chooseavatar="onChooseAvatar"
+          >
+            <view class="avatar-edit-wrap">
+              <image :src="formAvatarDisplay || profileAvatarSrc" class="avatar-preview" />
+              <view class="avatar-edit-badge" aria-hidden="true">
+                <view class="avatar-edit-camera">
+                  <view class="avatar-edit-camera-lens"></view>
+                </view>
+              </view>
+            </view>
+          </button>
+          <image v-else :src="formAvatarDisplay || profileAvatarSrc" class="avatar-preview" />
+          <text class="profile-edit-sheet__capability">
+            {{ supportsChooseAvatar ? '点击头像即可更换' : '当前基础库暂不支持修改头像' }}
+          </text>
+        </view>
+
+        <view class="profile-edit-sheet__field">
+          <text class="profile-edit-sheet__label">昵称</text>
+          <view class="profile-edit-sheet__input-wrap">
+            <input
+              type="nickname"
+              aria-label="昵称"
+              :focus="isEditingProfile"
+              :value="formNickName"
+              placeholder="请输入昵称"
+              placeholder-class="input-placeholder"
+              maxlength="20"
+              class="input"
+              @input="onNickInput"
+              @blur="onNickBlur"
+            />
+          </view>
+        </view>
+
+        <view class="profile-edit-sheet__actions">
+          <button
+            class="profile-edit-sheet__cancel"
+            :disabled="submitFormLock.busy.value"
+            @tap="cancelEditProfile"
+          >取消</button>
+          <button
+            class="profile-edit-sheet__save"
+            :disabled="!canSubmitForm || submitFormLock.busy.value"
+            @tap="saveProfile"
+          >{{ submitFormLock.busy.value ? '保存中...' : '保存' }}</button>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -443,6 +462,7 @@ import { uploadCloudFile } from '../../api/storage'
 import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
+import { createProfileEditSessionGuard, resolveProfileAvatarUrl } from '../../utils/profile-edit-session'
 import { clientLog, flushClientDiagnostics } from '../../utils/client-log'
 import {
   clearClientDiagnosticEvents,
@@ -556,6 +576,8 @@ const showNickConfirm = ref(false)    // 登录流程：chooseAvatar 后弹出�
 const formNickName = ref('')
 const formAvatarCloudUrl = ref('')    // 已上传到 COS 的 cloud://… URL（持久）
 const formAvatarTempPath = ref('')    // chooseAvatar 回传的临时路径（本次提交时上传 COS）
+const profileEditSessionGuard = createProfileEditSessionGuard()
+let activeProfileEditGeneration = 0
 
 // 同时显示临时路径（用户刚选完、还没点提交）或已确认的 cloud URL
 const formAvatarDisplay = computed(() => formAvatarTempPath.value || formAvatarCloudUrl.value)
@@ -686,25 +708,24 @@ function onNickBlur(e: any) {
   formNickName.value = String(e?.detail?.value || '').trim()
 }
 
-/**
- * 上传临时头像到 COS。失败时返回空串（调用方用默认灰头像兜底）。
- */
-async function uploadAvatarIfAny(): Promise<string> {
-  if (!formAvatarTempPath.value) return formAvatarCloudUrl.value || ''
-  try {
-    const ext = formAvatarTempPath.value.startsWith('blob:')
+async function uploadAvatarIfAny(selectedTempPath: string, existingAvatarUrl: string): Promise<string> {
+  return resolveProfileAvatarUrl({
+    selectedTempPath,
+    existingAvatarUrl,
+    uploadSelectedAvatar: async (source) => {
+      const ext = source.startsWith('blob:')
       ? 'jpg'
-      : (formAvatarTempPath.value.split('.').pop()?.split('?')[0] || 'jpg')
-    const cloudPath = `avatars/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
-    const res = await uploadCloudFile({ cloudPath, source: formAvatarTempPath.value })
-    return String(res?.fileID || '')
-  } catch (err) {
-    console.warn('[profile] 头像上传失败，使用默认头像兜底', err)
-    return ''
-  }
+        : (source.split('.').pop()?.split('?')[0] || 'jpg')
+      const cloudPath = `avatars/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
+      return uploadCloudFile({ cloudPath, source })
+    },
+  })
 }
 
 function startEditProfile() {
+  const generation = profileEditSessionGuard.tryStart(submitFormLock.busy.value)
+  if (generation === null) return
+  activeProfileEditGeneration = generation
   isEditingProfile.value = true
   formNickName.value = userStore.nickName || ''
   formAvatarCloudUrl.value = userStore.avatarUrl || ''
@@ -712,6 +733,7 @@ function startEditProfile() {
 }
 
 function cancelEditProfile() {
+  if (!profileEditSessionGuard.requestClose(submitFormLock.busy.value)) return
   isEditingProfile.value = false
   formNickName.value = ''
   formAvatarCloudUrl.value = ''
@@ -720,21 +742,26 @@ function cancelEditProfile() {
 
 const submitFormLock = useBusyLock(async () => {
   const wasEditingProfile = isEditingProfile.value
+  const editGeneration = activeProfileEditGeneration
+  const submittedNickName = formNickName.value
+  const submittedAvatarTempPath = formAvatarTempPath.value
+  const submittedAvatarCloudUrl = formAvatarCloudUrl.value
   try {
-    const avatarUrl = await uploadAvatarIfAny()
+    const avatarUrl = await uploadAvatarIfAny(submittedAvatarTempPath, submittedAvatarCloudUrl)
     suppressNextLoginStateRefresh = true
     if (isH5Runtime() && !wasEditingProfile) {
       await userStore.webLogin({
         username: webUsername.value,
         password: webPassword.value,
-        nickName: formNickName.value,
+        nickName: submittedNickName,
       })
     } else {
-      await userStore.login({ nickName: formNickName.value, avatarUrl })
+      await userStore.login({ nickName: submittedNickName, avatarUrl })
     }
     markCurrentLoginStateRefreshHandled()
     if (wasEditingProfile) await loadProfileDataAfterRoleResolved('profileSaved')
     else await loadProfileDataAfterRoleResolved('loginSaved')
+    if (wasEditingProfile && !profileEditSessionGuard.complete(editGeneration)) return
     isEditingProfile.value = false
     showManualLoginForm.value = false
     showNickConfirm.value = false

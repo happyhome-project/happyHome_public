@@ -16,12 +16,13 @@ describe('profile edit bottom sheet', () => {
 
   test('renders editing in a dismissible fixed bottom sheet above the tab bar', () => {
     expect(template).toMatch(/v-if="isEditingProfile"\s+class="profile-edit-mask"\s+@tap="cancelEditProfile"/)
-    expect(template).toMatch(/class="profile-edit-sheet" @tap\.stop @touchmove\.stop/)
-    expect(template).toContain('class="profile-edit-sheet__title">编辑资料')
+    expect(template).toMatch(/class="profile-edit-sheet"[\s\S]*role="dialog"[\s\S]*aria-modal="true"[\s\S]*aria-labelledby="profile-edit-sheet-title"/)
+    expect(template).toContain('id="profile-edit-sheet-title" class="profile-edit-sheet__title">编辑资料')
     expect(template).toContain('open-type="chooseAvatar"')
     expect(template).toContain('class="profile-edit-sheet__label">昵称')
+    expect(template).toMatch(/type="nickname"[\s\S]*aria-label="昵称"/)
     expect(template).toContain("当前基础库暂不支持修改头像")
-    expect(template).toMatch(/@tap="cancelEditProfile">取消<\/button>/)
+    expect(template).toMatch(/profile-edit-sheet__cancel"[\s\S]*:disabled="submitFormLock\.busy\.value"[\s\S]*@tap="cancelEditProfile"/)
     expect(template).toMatch(/@tap="saveProfile"[\s\S]*保存中\.\.\./)
 
     expect(source).toMatch(/\.profile-edit-mask\s*\{[\s\S]*position:\s*fixed;[\s\S]*inset:\s*0;[\s\S]*z-index:\s*\$hh-z-modal;/)
@@ -36,5 +37,11 @@ describe('profile edit bottom sheet', () => {
     expect(source).toContain('function startEditProfile()')
     expect(source).toContain('function cancelEditProfile()')
     expect(source).toContain('function saveProfile()')
+  })
+
+  test('makes the H5 background inert and leaves initial focus inside the dialog', () => {
+    expect(template).toMatch(/class="profile-page-background"[\s\S]*:inert="isEditingProfile"[\s\S]*:aria-hidden="isEditingProfile \? 'true' : undefined"/)
+    expect(template.indexOf('class="profile-page-background"')).toBeLessThan(template.indexOf('class="profile-edit-mask"'))
+    expect(template).toMatch(/type="nickname"[\s\S]*:focus="isEditingProfile"/)
   })
 })
