@@ -16,18 +16,17 @@ function readStringProperty(value: unknown, key: 'name' | 'code' | 'message'): s
   }
 }
 
-function safeToken(value: string, fallback: string): string {
-  return /^[A-Za-z0-9_.:-]{1,64}$/.test(value) ? value : fallback
-}
+const SAFE_ERROR_NAMES = new Set(['Error', 'CloudBaseError', 'DatabaseError', 'TimeoutError'])
+const SAFE_ERROR_CODES = new Set(['DATABASE_TRANSACTION_CONFLICT'])
 
 export function safeErrorDiagnostic(error: unknown): SafeErrorDiagnostic {
   const rawName = readStringProperty(error, 'name')
   const rawCode = readStringProperty(error, 'code')
   const rawMessage = readStringProperty(error, 'message')
-  const name = safeToken(rawName, 'Error')
-  const code = safeToken(rawCode, 'UNKNOWN')
+  const name = SAFE_ERROR_NAMES.has(rawName) ? rawName : 'Error'
+  const code = SAFE_ERROR_CODES.has(rawCode) ? rawCode : 'UNKNOWN'
   const fingerprint = createHash('sha256')
-    .update(`${name}\n${code}\n${rawMessage}`)
+    .update(`${rawName}\n${rawCode}\n${rawMessage}`)
     .digest('hex')
     .slice(0, 16)
   return { name, code, fingerprint }

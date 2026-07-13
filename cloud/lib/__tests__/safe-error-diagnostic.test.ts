@@ -32,4 +32,19 @@ describe('safeErrorDiagnostic', () => {
     expect(result).toMatchObject({ name: 'Error', code: 'UNKNOWN' })
     expect(JSON.stringify(result)).not.toMatch(/secret|token=abc|hunter2/)
   })
+
+  test('rejects plausible-looking alphanumeric secrets that are not explicitly allowlisted', () => {
+    const result = safeErrorDiagnostic({
+      name: 'AbcToken123',
+      code: 'hunter2',
+      message: 'opaque',
+    })
+
+    expect(result).toMatchObject({ name: 'Error', code: 'UNKNOWN' })
+    expect(JSON.stringify(result)).not.toMatch(/AbcToken123|hunter2/)
+  })
+
+  test.each(['CloudBaseError', 'DatabaseError', 'TimeoutError'])('allows the reviewed error name %s', (name) => {
+    expect(safeErrorDiagnostic({ name })).toMatchObject({ name })
+  })
 })

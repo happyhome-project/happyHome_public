@@ -350,6 +350,33 @@ test('processPostRagJobV2Batch isolates claim failures without aborting later ca
   warning.mockRestore()
 })
 
+test('processPostRagJobV2Batch fingerprints an invalid candidate ID without logging it', async () => {
+  const secretLookingJobId = 'AbcToken123hunter2'
+  const warning = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+  const deps = dependencies({
+    listCandidates: jest.fn(async () => [secretLookingJobId]),
+    claim: jest.fn().mockRejectedValue(new Error('secret database failure')),
+  })
+
+  const result = await processPostRagJobV2Batch({ workerId: 'worker-1', now: times(NOW), limit: 1 }, deps)
+
+  expect(result.results).toEqual([{
+    jobId: secretLookingJobId,
+    status: 'failed',
+    errorCode: 'INTERNAL_ERROR',
+    errorStage: 'claim',
+  }])
+  expect(warning).toHaveBeenCalledWith('[post-rag-job-processor] claim failed', {
+    jobId: 'INVALID',
+    jobIdFingerprint: expect.stringMatching(/^[a-f0-9]{16}$/),
+    name: 'Error',
+    code: 'UNKNOWN',
+    fingerprint: expect.stringMatching(/^[a-f0-9]{16}$/),
+  })
+  expect(JSON.stringify(warning.mock.calls)).not.toMatch(/AbcToken123|hunter2|secret/)
+  warning.mockRestore()
+})
+
 test('processPostRagJobV2Batch does not let exhausted claim failures consume the batch capacity', async () => {
   const poison1 = 'a'.repeat(64)
   const poison2 = 'b'.repeat(64)
