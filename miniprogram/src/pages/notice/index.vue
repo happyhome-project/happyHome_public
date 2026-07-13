@@ -1,16 +1,17 @@
 <template>
   <view class="notice-page">
-    <view v-if="notice" class="notice-detail-card" :style="cardStyle">
-      <view class="notice-head">
-        <view class="notice-mark">
+    <view v-if="notice" class="notice-detail">
+      <text class="notice-heading">{{ notice.label }}</text>
+      <view class="notice-author-row">
+        <view class="notice-author-avatar">
           <text>{{ notice.icon }}</text>
         </view>
-        <view class="notice-title-wrap">
-          <text class="notice-section">{{ notice.sectionName }}</text>
-          <text class="notice-label">{{ notice.label }}</text>
+        <view class="notice-author-copy">
+          <text class="notice-author-name">{{ notice.sectionName }}</text>
+          <text class="notice-publish-date">{{ notice.publishedAt }}</text>
         </view>
       </view>
-      <text class="notice-content">{{ notice.content }}</text>
+      <text class="notice-body">{{ notice.content }}</text>
     </view>
 
     <view v-else class="notice-empty">
@@ -22,7 +23,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
@@ -34,7 +35,7 @@ interface NoticeDetail {
   label: string
   content: string
   icon: string
-  accentColor: string
+  publishedAt: string
 }
 
 const communityStore = useCommunityStore()
@@ -42,10 +43,6 @@ const userStore = useUserStore()
 const notice = ref<NoticeDetail | null>(null)
 const sectionId = ref('')
 const widgetId = ref('')
-
-const cardStyle = computed(() => ({
-  '--notice-accent': notice.value?.accentColor || '#B35C3B',
-}))
 
 async function ensureSectionsLoaded() {
   if (communityStore.currentSections.length > 0) return
@@ -68,8 +65,18 @@ function resolveNotice() {
     label: widget.label || '公告',
     content,
     icon: resolveSectionIconGlyph(section.icon, '告'),
-    accentColor: section.accentColor || '',
+    publishedAt: formatNoticeDate(section.createdAt),
   }
+}
+
+function formatNoticeDate(value: unknown) {
+  if (!value) return ''
+  const date = new Date(String(value))
+  if (Number.isNaN(date.getTime())) return ''
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 function goHome() {
@@ -77,6 +84,7 @@ function goHome() {
 }
 
 onLoad(async (query) => {
+  uni.setNavigationBarTitle({ title: '公告详情' })
   if (ensureHierarchyStack('/pages/notice/index', query || {})) return
   sectionId.value = decodeURIComponent(String(query?.sectionId || ''))
   widgetId.value = decodeURIComponent(String(query?.widgetId || ''))
@@ -88,67 +96,70 @@ onLoad(async (query) => {
 <style lang="scss" scoped>
 .notice-page {
   min-height: 100vh;
-  padding: 28rpx 28rpx 80rpx;
-  background: $hh-surface-0;
+  padding: 36rpx 40rpx 80rpx;
+  background: $hh-surface-1;
   box-sizing: border-box;
 }
 
-.notice-detail-card {
-  padding: 32rpx 32rpx 38rpx;
-  border: 1rpx solid $hh-ink-line;
-  border-left: 8rpx solid var(--notice-accent);
-  border-radius: 28rpx;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(251, 247, 238, 0.92));
-  box-shadow: $hh-shadow-card;
+.notice-detail {
+  max-width: 100%;
 }
 
-.notice-head {
+.notice-heading {
+  display: block;
+  color: $hh-ink-1;
+  font-family: $hh-font-serif;
+  font-size: 42rpx;
+  font-weight: $hh-font-weight-bold;
+  line-height: 1.35;
+}
+
+.notice-author-row {
   display: flex;
   align-items: center;
   gap: 18rpx;
-  margin-bottom: 28rpx;
+  margin-top: 26rpx;
 }
 
-.notice-mark {
+.notice-author-avatar {
   width: 56rpx;
   height: 56rpx;
-  border-radius: 18rpx;
-  background: var(--notice-accent);
+  border-radius: 999rpx;
+  background: $hh-surface-2;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
 
-.notice-mark text {
-  color: $hh-surface-1;
+.notice-author-avatar text {
+  color: $hh-ink-2;
   font-size: 25rpx;
   font-weight: $hh-font-weight-heavy;
 }
 
-.notice-title-wrap {
+.notice-author-copy {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
 
-.notice-section {
-  font-size: 32rpx;
-  font-weight: $hh-font-weight-bold;
+.notice-author-name {
+  font-size: 26rpx;
+  font-weight: $hh-font-weight-medium;
   color: $hh-ink-1;
   line-height: 1.25;
 }
 
-.notice-label {
-  margin-top: 6rpx;
-  font-family: $hh-font-mono;
+.notice-publish-date {
+  margin-top: 4rpx;
   font-size: 22rpx;
-  letter-spacing: $hh-tracking-mono-sm;
   color: $hh-ink-3;
 }
 
-.notice-content {
+.notice-body {
   display: block;
+  margin-top: 40rpx;
   font-size: 30rpx;
   line-height: 1.82;
   color: $hh-ink-2;

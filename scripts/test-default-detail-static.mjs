@@ -16,19 +16,39 @@ function assert(condition, message) {
 }
 
 assert(
-  defaultDetailView.includes('{{ sectionName }}'),
-  'default detail header should keep the user-facing section name.',
+  defaultDetailView.includes('getPostHomeTitle') &&
+    defaultDetailView.includes('{{ titleText }}'),
+  'default detail should derive its primary heading from the shared post-title helper.',
+)
+
+const detailTitleIndex = defaultDetailView.indexOf('class="detail-title"')
+const detailAuthorIndex = defaultDetailView.indexOf('class="detail-author-row"')
+const sectionLabelIndex = defaultDetailView.indexOf('class="section-line"')
+const detailBodyIndex = defaultDetailView.indexOf('class="detail-body"')
+
+assert(
+  detailTitleIndex >= 0 &&
+    detailTitleIndex < detailAuthorIndex &&
+    detailAuthorIndex < detailBodyIndex,
+  'default detail should render the post title, then author/date metadata, then body content.',
+)
+
+assert(
+  sectionLabelIndex > detailTitleIndex,
+  'default detail section labels must remain secondary to the post title.',
+)
+
+assert(
+  defaultDetailView.includes('class="detail-author-avatar"') &&
+    defaultDetailView.includes('class="detail-author-name"') &&
+    defaultDetailView.includes('class="detail-publish-date"'),
+  'default detail metadata should expose the author avatar, name, and publish date.',
 )
 
 assert(
   !defaultDetailView.includes('contentShapeLabel') &&
     !defaultDetailView.includes('shape-label'),
   'default detail header must not expose automatic/internal content-shape labels.',
-)
-
-assert(
-  !defaultDetailView.includes('class="byline"'),
-  'default detail header must not reserve top space for the author byline.',
 )
 
 assert(
