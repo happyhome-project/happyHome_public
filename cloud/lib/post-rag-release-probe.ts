@@ -37,10 +37,10 @@ export async function createPostRagReleaseProbe(value: unknown) {
   const now = new Date().toISOString()
   const outbox = await db.runTransaction(async tx => {
     if (await db.transactionGetByIdOrNull(tx, PROBES, id)) throw new Error('release probe runId already exists')
-    await tx.collection('sections').doc(sectionId).set({ data: { _id: sectionId, communityId, name: 'RAG release probe', status: 'active', type: 'evergreen', widgets: [{ widgetId: 'probe', fieldKey: 'probe', label: 'Probe', type: 'short_text', visibility: 'public', order: 0 }] } })
-    await tx.collection('posts').doc(postId).set({ data: { _id: postId, communityId, sectionId, status: 'active', auditStatus: 'pass', authorId: 'release-probe', content: { probe: `probe-${id}` }, createdAt: now, updatedAt: now } })
+    await tx.collection('sections').doc(sectionId).set({ data: { communityId, name: 'RAG release probe', status: 'active', type: 'evergreen', widgets: [{ widgetId: 'probe', fieldKey: 'probe', label: 'Probe', type: 'short_text', visibility: 'public', order: 0 }] } })
+    await tx.collection('posts').doc(postId).set({ data: { communityId, sectionId, status: 'active', auditStatus: 'pass', authorId: 'release-probe', content: { probe: `probe-${id}` }, createdAt: now, updatedAt: now } })
     const created = await appendPostRagOutboxEvent(tx, { communityId, aggregateId: postId, reasonCode: 'post.created', now })
-    await tx.collection(PROBES).doc(id).set({ data: { _id: id, runId: id, communityId, sectionId, postId, outboxId: created.outboxId, contentVersion: created.contentVersion, triggerName: TRIGGER, triggerIdHash: TRIGGER_HASH, baseline: now, status: 'active', createdAt: now } })
+    await tx.collection(PROBES).doc(id).set({ data: { runId: id, communityId, sectionId, postId, outboxId: created.outboxId, contentVersion: created.contentVersion, triggerName: TRIGGER, triggerIdHash: TRIGGER_HASH, baseline: now, status: 'active', createdAt: now } })
     return created
   })
   return { runId: id, communityId, sectionId, postId, outboxId: outbox.outboxId, contentVersion: outbox.contentVersion, baseline: now, triggerName: TRIGGER }
@@ -83,7 +83,8 @@ export async function cleanupPostRagReleaseProbe(input: any) {
     if (await db.transactionGetByIdOrNull(tx, 'posts', probe.postId)) await tx.collection('posts').doc(probe.postId).remove()
     if (await db.transactionGetByIdOrNull(tx, 'sections', probe.sectionId)) await tx.collection('sections').doc(probe.sectionId).remove()
     const removed = await appendPostRagOutboxEvent(tx, { communityId: probe.communityId, aggregateId: probe.postId, reasonCode: 'post.deleted', now })
-    await tx.collection(PROBES).doc(id).set({ data: { ...probe, status: 'cleaned', cleanedAt: now, cleanupOutboxId: removed.outboxId } })
+    const { _id: _ignoredId, ...probeData } = probe
+    await tx.collection(PROBES).doc(id).set({ data: { ...probeData, status: 'cleaned', cleanedAt: now, cleanupOutboxId: removed.outboxId } })
     return removed
   })
   return outbox ? { success: true, alreadyCleaned: false, outboxId: outbox.outboxId, contentVersion: outbox.contentVersion } : { success: true, alreadyCleaned: true }
