@@ -71,6 +71,10 @@ export async function main() {
   const resumeRequested = process.argv.includes('--resume')
   const resumeRunState = env.HH_RELEASE_RESUME_CONTEXT_JSON ? JSON.parse(env.HH_RELEASE_RESUME_CONTEXT_JSON) : null
   const result = await runReleasePreflight({ checks: createReleasePreflightChecks({ app, env, cwd: process.cwd(), adminOptions, resumeRequested, resumeRunState }) })
+  if (env.HH_RELEASE_PREFLIGHT_EVIDENCE_PATH) {
+    fs.mkdirSync(path.dirname(env.HH_RELEASE_PREFLIGHT_EVIDENCE_PATH), { recursive: true })
+    fs.writeFileSync(env.HH_RELEASE_PREFLIGHT_EVIDENCE_PATH, `${JSON.stringify(result, null, 2)}\n`, 'utf8')
+  }
   console.log(JSON.stringify(result, null, 2)); if (!result.ok) process.exitCode = 1
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main().catch(() => { console.error('[release-preflight] indeterminate'); process.exitCode = 1 })

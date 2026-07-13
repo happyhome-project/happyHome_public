@@ -276,6 +276,62 @@ test('release ledger defaults omitted strategy to main and treats legacy context
   }
 })
 
+test('release ledger binds DAG mode across resume and rejects a rollback mode switch in the same run', async () => {
+  const root = await tempRoot()
+  try {
+    await createReleaseRunLedger({ root, runId: 'dag-mode', gitSha: 'abc', version: '1', desc: 'd', envId: 'env', dagMode: 'v2' })
+    await assert.rejects(() => createReleaseRunLedger({
+      root, runId: 'dag-mode', gitSha: 'abc', version: '1', desc: 'd', envId: 'env', dagMode: 'legacy',
+    }), /mismatch.*dagMode|dagMode.*mismatch/i)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('concurrent DAG stage writes are serialized inside one release ledger', async () => {
+  const root = await tempRoot()
+  try {
+    const ledger = await createReleaseRunLedger({ root, runId: 'parallel-stages', gitSha: 'abc', version: '1', desc: 'd', envId: 'env', dagMode: 'v2' })
+    let activeSaves = 0
+    let maxActiveSaves = 0
+    ledger.appendEventUnsafe = async () => {}
+    ledger.saveUnsafe = async () => {
+      activeSaves += 1
+      maxActiveSaves = Math.max(maxActiveSaves, activeSaves)
+      await new Promise((resolve) => setImmediate(resolve))
+      activeSaves -= 1
+    }
+    await Promise.all([
+      ledger.passStage('cloud-deploy', { result: { status: 'passed' } }),
+      ledger.passStage('post-rag-timer-probe', { result: { status: 'passed' } }),
+    ])
+    assert.equal(maxActiveSaves, 1)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('concurrent stage component and attestation mutations preserve one parseable ledger and event stream', async () => {
+  const root = await tempRoot()
+  try {
+    const ledger = await createReleaseRunLedger({ root, runId: 'parallel-ledger-writes', gitSha: 'abc', version: '1', desc: 'd', envId: 'env', dagMode: 'v2' })
+    await Promise.all([
+      ledger.passStage('post-rag-timer-probe', { result: { complete: true } }),
+      ledger.recordComponent('cloud:admin', { status: 'verified' }),
+      ledger.recordRemoteAttestations('cloud', [{ component: 'cloud:admin', status: 'verified' }]),
+    ])
+    const persisted = JSON.parse(await readFile(ledger.runPath, 'utf8'))
+    const events = (await readFile(ledger.eventsPath, 'utf8')).trim().split(/\r?\n/).map(JSON.parse)
+    assert.equal(persisted.stages['post-rag-timer-probe'].status, 'passed')
+    assert.equal(persisted.components['cloud:admin'].status, 'verified')
+    assert.equal(persisted.remoteAttestations.cloud[0].status, 'verified')
+    assert(events.some((event) => event.event === 'stage_passed'))
+    assert(events.some((event) => event.event === 'remote_attestation_recorded'))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('resume identity mismatch rejects before the formal release planner is invoked', () => {
   let plannerCalls = 0
   const createPlan = () => {
