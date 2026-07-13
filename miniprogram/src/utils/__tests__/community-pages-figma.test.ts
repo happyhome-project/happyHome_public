@@ -64,4 +64,22 @@ describe('Figma community directory pages', () => {
     expect(code).toMatch(/\.community-title\s*\{[^}]*flex:\s*1 1 0[^}]*text-overflow:\s*ellipsis/s)
     expect(code).toMatch(/\.community-switch\s*\{[^}]*flex:\s*0 0 auto/s)
   })
+
+  test('home shows the Figma empty state only after loading for an empty selected community section', () => {
+    const code = readPage('index')
+    const emptyAsset = path.join(srcRoot, 'static', 'home-empty.png')
+
+    expect(code).toContain('const homeLoading = ref(true)')
+    expect(code).toMatch(/const showHomeEmptyState = computed\(\(\) => \{\s*const group = activeArchiveGroup\.value\s*return \(\s*!homeLoading\.value\s*&&\s*Boolean\(communityStore\.currentCommunityId\)\s*&&\s*Boolean\(communityStore\.currentCommunity\)\s*&&\s*group !== null\s*&&\s*group\.items\.length === 0\s*\)\s*\}\)/s)
+    expect(code).toContain('Boolean(communityStore.currentCommunity)')
+    expect(code).not.toContain('.filter((g) => g.items.length > 0)')
+    expect(code).toContain('v-if="showHomeEmptyState"')
+    expect(code).toContain('src="/static/home-empty.png"')
+    expect(code).toContain('暂无社区内容')
+    expect(code).toContain('这里还没有帖子，成为第一个分享的人吧')
+    expect(code).toContain('@tap="openHomeEmptyPublish"')
+    expect(code).toMatch(/function openHomeEmptyPublish\(\)\s*\{[\s\S]*uni\.navigateTo\(\{\s*url: `\/pages\/create\/index\?returnTo=\$\{encodeURIComponent\(returnTo\)\}&sectionId=\$\{encodeURIComponent\(sectionId\)\}`/)
+    expect(code).not.toMatch(/function openHomeEmptyPublish\(\)\s*\{[\s\S]*?setStorageSync[\s\S]*?\n\}/)
+    expect(fs.existsSync(emptyAsset)).toBe(true)
+  })
 })
