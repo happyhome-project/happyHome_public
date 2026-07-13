@@ -1105,7 +1105,7 @@ async function captureHomeTabsLayout(mp) {
   return await withTimeout(mp.evaluate(() => new Promise((resolveLayout) => {
     try {
       const query = wx.createSelectorQuery()
-      query.selectAll('.section-tabs--sticky').boundingClientRect()
+      query.selectAll('.section-tabs-sticky-shell').boundingClientRect()
       query.select('.home-search--primary').boundingClientRect()
       query.selectAll('.arc-item').boundingClientRect()
       query.selectAll('.section-tab.active').boundingClientRect()

@@ -36,7 +36,7 @@ const guideDetail = read('miniprogram', 'src', 'components', 'GuideRouteDetailVi
 const defaultDetail = read('miniprogram', 'src', 'components', 'DefaultDetailView.vue')
 const detail = read('miniprogram', 'src', 'pages', 'detail', 'index.vue')
 const home = read('miniprogram', 'src', 'pages', 'index', 'index.vue')
-const homeStickyTabsRule = home.match(/\.section-tabs--sticky\s*\{([^}]*)\}/)?.[1] || ''
+const homeStickyTabsRule = home.match(/\.section-tabs-sticky-shell\s*\{([^}]*)\}/)?.[1] || ''
 const search = read('miniprogram', 'src', 'pages', 'search', 'index.vue')
 const create = read('miniprogram', 'src', 'pages', 'create', 'index.vue')
 const profile = read('miniprogram', 'src', 'pages', 'profile', 'index.vue')
@@ -258,7 +258,8 @@ assert(
     home.includes('rawHomeBannerCoverImages') &&
     home.includes('homeBannerActiveIndex') &&
     home.includes('class="home-search home-search--primary"') &&
-    (home.match(/class="section-tabs section-tabs--sticky"/g) || []).length === 1 &&
+    (home.match(/class="section-tabs-sticky-shell"/g) || []).length === 1 &&
+    (home.match(/class="section-tabs"/g) || []).length === 1 &&
     !home.includes('class="home-fixed-controls"') &&
     !home.includes('showHomeFixedControls') &&
     !home.includes('homeFixedControlsThresholdPx') &&

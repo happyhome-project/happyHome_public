@@ -188,27 +188,24 @@
       </scroll-view>
     </template>
 
-    <scroll-view
-      v-if="archiveGroups.length"
-      scroll-x
-      class="section-tabs section-tabs--sticky"
-      :show-scrollbar="false"
-    >
-      <view class="section-tabs-inner">
-        <view
-          v-for="(g, index) in archiveGroups"
-          :key="g.id"
-          class="section-tab"
-          :class="{ active: index === activeArchiveIndex }"
-          @tap="selectArchiveGroup(g)"
-        >
-          <view class="section-tab-icon">
-            <text>{{ g.icon }}</text>
+    <view v-if="archiveGroups.length" class="section-tabs-sticky-shell">
+      <scroll-view scroll-x class="section-tabs" :show-scrollbar="false">
+        <view class="section-tabs-inner">
+          <view
+            v-for="(g, index) in archiveGroups"
+            :key="g.id"
+            class="section-tab"
+            :class="{ active: index === activeArchiveIndex }"
+            @tap="selectArchiveGroup(g)"
+          >
+            <view class="section-tab-icon">
+              <text>{{ g.icon }}</text>
+            </view>
+            <text>{{ g.name }}</text>
           </view>
-          <text>{{ g.name }}</text>
         </view>
-      </view>
-    </scroll-view>
+      </scroll-view>
+    </view>
 
     <!-- Archive feed · Figma 0709_v2 选中板块内容区 -->
     <view
@@ -500,7 +497,6 @@ const activeArchiveStyle = computed(() => {
   }
   return ''
 })
-
 function onMastheadTap() {
   // 仅当用户有多个社区时才进入切换页；否则 tap 不做任何事（避免空页面困扰）
   if (hasMultipleCommunities.value) {
@@ -2793,10 +2789,17 @@ onShareAppMessage(() => {
 }
 
 .home-topbar {
-  min-height: 64rpx;
+  box-sizing: border-box;
+  position: sticky;
+  top: 0;
+  z-index: $hh-z-sticky + 1;
+  min-height: calc(150rpx + env(safe-area-inset-top));
+  margin-top: calc(-86rpx - env(safe-area-inset-top));
+  padding-top: calc(86rpx + env(safe-area-inset-top));
   display: flex;
   align-items: center;
   gap: 12px;
+  background: linear-gradient(180deg, #caeee7 0%, rgba(202, 238, 231, 0.98) 100%);
 }
 
 .community-identity {
@@ -3107,9 +3110,9 @@ onShareAppMessage(() => {
   overflow-anchor: none;
 }
 
-.section-tabs--sticky {
+.section-tabs-sticky-shell {
   position: sticky;
-  top: env(safe-area-inset-top);
+  top: calc(150rpx + env(safe-area-inset-top));
   z-index: $hh-z-sticky;
   margin: 34rpx 0 20rpx;
   padding: 12rpx 0;
