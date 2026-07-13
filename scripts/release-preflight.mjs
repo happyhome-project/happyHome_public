@@ -23,7 +23,7 @@ function gitState(cwd) {
   return { cwd, originUrl: git(['remote', 'get-url', 'origin'], cwd), branch: git(['branch', '--show-current'], cwd), headSha: git(['rev-parse', 'HEAD'], cwd), originMainSha: git(['rev-parse', 'origin/main'], cwd), changedPaths }
 }
 
-export function createReleasePreflightChecks({ app, env, cwd, adminOptions, resumeRequested = false, resumeRunState = null, invoke = invokeAdmin, runner = defaultRunner, readGitState = gitState, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
+export function createReleasePreflightChecks({ app, env, cwd, adminOptions, resumeRequested = false, resumeRunState = null, releaseStrategy = 'full-current', fullCurrentExplicit = releaseStrategy === 'full-current', publishOnly = false, generatedBuildInfoMatches = false, invoke = invokeAdmin, runner = defaultRunner, readGitState = gitState, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
   const endpoint = String(env.TENCENT_RAG_ES_ENDPOINT || '').replace(/\/+$/, '')
   const index = String(env.TENCENT_RAG_ES_INDEX || 'happyhome-post-rag-v2')
   const auth = () => `Basic ${Buffer.from(`${env.TENCENT_RAG_ES_USERNAME}:${env.TENCENT_RAG_ES_PASSWORD}`).toString('base64')}`
@@ -45,7 +45,7 @@ export function createReleasePreflightChecks({ app, env, cwd, adminOptions, resu
       const response = await app.functions.scfService.request('ListTriggers', { FunctionName: functionName, Namespace: detail?.Namespace || app.functions.getFunctionConfig?.().namespace })
       return response?.Triggers || []
     } }) } },
-    { name: 'full-current-plan-resume', gateForMutations: true, run: async () => verifyPreflightGitAndPlan({ gitState: readGitState(cwd), expectedHeadSha: env.HH_RELEASE_HEAD_SHA, resumeRequested, resumeRunState }) },
+    { name: 'full-current-plan-resume', gateForMutations: true, run: async () => verifyPreflightGitAndPlan({ gitState: readGitState(cwd), expectedHeadSha: env.HH_RELEASE_HEAD_SHA, resumeRequested, resumeRunState, releaseStrategy, fullCurrentExplicit, publishOnly, generatedBuildInfoMatches }) },
     { name: 'timer-probe-document', mutation: true,
       fixture: identity,
       createFixture: async () => { if (!adminOptions.adminInternalToken) throw new Error('admin credential unavailable'); const created = (await invoke('post.ragTimerProbeCreateAdmin', identity, adminOptions, runner)).functionResult; Object.assign(identity, created); return identity },
@@ -70,7 +70,13 @@ export async function main() {
   const adminOptions = { ...parseRebuildArgs([], env), envId, commandTimeoutMs: 180000, adminInvokeRetries: 3 }
   const resumeRequested = process.argv.includes('--resume')
   const resumeRunState = env.HH_RELEASE_RESUME_CONTEXT_JSON ? JSON.parse(env.HH_RELEASE_RESUME_CONTEXT_JSON) : null
-  const result = await runReleasePreflight({ checks: createReleasePreflightChecks({ app, env, cwd: process.cwd(), adminOptions, resumeRequested, resumeRunState }) })
+  const releaseStrategy = env.HH_RELEASE_STRATEGY || 'full-current'
+  const fullCurrentExplicit = releaseStrategy === 'full-current' && env.HH_RELEASE_FULL_CURRENT_EXPLICIT !== '0'
+  const publishOnly = env.HH_RELEASE_PUBLISH_ONLY === '1'
+  const buildInfoPath = path.resolve('miniprogram', 'src', 'generated', 'build-info.ts')
+  const buildInfo = fs.existsSync(buildInfoPath) ? fs.readFileSync(buildInfoPath, 'utf8') : ''
+  const generatedBuildInfoMatches = Boolean(env.HH_RELEASE_VERSION && env.HH_RELEASE_DESC && buildInfo.includes(env.HH_RELEASE_VERSION) && buildInfo.includes(env.HH_RELEASE_DESC))
+  const result = await runReleasePreflight({ checks: createReleasePreflightChecks({ app, env, cwd: process.cwd(), adminOptions, resumeRequested, resumeRunState, releaseStrategy, fullCurrentExplicit, publishOnly, generatedBuildInfoMatches }) })
   if (env.HH_RELEASE_PREFLIGHT_EVIDENCE_PATH) {
     fs.mkdirSync(path.dirname(env.HH_RELEASE_PREFLIGHT_EVIDENCE_PATH), { recursive: true })
     fs.writeFileSync(env.HH_RELEASE_PREFLIGHT_EVIDENCE_PATH, `${JSON.stringify(result, null, 2)}\n`, 'utf8')

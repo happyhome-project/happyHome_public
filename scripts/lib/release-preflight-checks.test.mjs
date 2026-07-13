@@ -50,6 +50,30 @@ test('git and full-current plan validation binds canonical current state and exp
   assert.throws(() => verifyPreflightGitAndPlan({ gitState: canonical, expectedHeadSha: actualHead, resumeRequested: true, resumeRunState: { context: { gitSha: 'deadbee', releaseStrategy: 'full-current' } } }), /resume context mismatch/i)
 })
 
+test('git preflight binds matching main resume and rejects main/full-current strategy mismatches', () => {
+  const actualHead = 'a'.repeat(40)
+  const canonical = { cwd: 'C:\\Project\\Claude\\happyHome_public', originUrl: 'https://github.com/happyhome-project/happyHome_public.git', branch: 'main', headSha: actualHead, originMainSha: actualHead, changedPaths: [] }
+  const mainResume = { context: { gitSha: actualHead, releaseStrategy: 'main' } }
+  const result = verifyPreflightGitAndPlan({
+    gitState: canonical, expectedHeadSha: actualHead, resumeRequested: true, resumeRunState: mainResume,
+    releaseStrategy: 'main', fullCurrentExplicit: false,
+  })
+  assert.equal(result.plan.mode, 'main')
+  assert.throws(() => verifyPreflightGitAndPlan({
+    gitState: canonical, expectedHeadSha: actualHead, resumeRequested: true, resumeRunState: mainResume,
+    releaseStrategy: 'full-current', fullCurrentExplicit: true,
+  }), /resume context mismatch.*releaseStrategy/i)
+})
+
+test('publish resume permits only matching generated build-info and rejects every unexpected dirty path', () => {
+  const actualHead = 'a'.repeat(40)
+  const canonical = { cwd: 'C:\\Project\\Claude\\happyHome_public', originUrl: 'https://github.com/happyhome-project/happyHome_public.git', branch: 'main', headSha: actualHead, originMainSha: actualHead, changedPaths: ['miniprogram/src/generated/build-info.ts'] }
+  const resumeRunState = { context: { gitSha: actualHead, releaseStrategy: 'full-current' } }
+  assert.doesNotThrow(() => verifyPreflightGitAndPlan({ gitState: canonical, expectedHeadSha: actualHead, resumeRequested: true, resumeRunState, releaseStrategy: 'full-current', fullCurrentExplicit: true, publishOnly: true, generatedBuildInfoMatches: true }))
+  assert.throws(() => verifyPreflightGitAndPlan({ gitState: canonical, expectedHeadSha: actualHead, resumeRequested: true, resumeRunState, releaseStrategy: 'full-current', fullCurrentExplicit: true, publishOnly: true, generatedBuildInfoMatches: false }), /build-info does not match/i)
+  assert.throws(() => verifyPreflightGitAndPlan({ gitState: { ...canonical, changedPaths: [...canonical.changedPaths, 'cloud/functions/post/index.js'] }, expectedHeadSha: actualHead, resumeRequested: true, resumeRunState, releaseStrategy: 'full-current', fullCurrentExplicit: true, publishOnly: true, generatedBuildInfoMatches: true }), /unexpected worktree changes/i)
+})
+
 test('probe evidence requires authenticated timer outbox and v2 job evidence plus completion', () => {
   const input = { startedAt: '2026-01-01T00:00:00Z', outboxId: 'o', jobId: 'j' }
   const evidence = { source: 'timer', triggerName: 'post-rag-worker-every-minute', invokedAt: '2026-01-01T00:00:01Z', outboxIds: ['o'], v2JobIds: ['j'], v2Attempted: true, v2Succeeded: true, v2CompletedCount: 1 }

@@ -41,14 +41,24 @@ export async function verifyPreflightTimers({ listTriggers, configs }) {
   return { status: 'passed' }
 }
 
-export function verifyPreflightGitAndPlan({ gitState, expectedHeadSha, resumeRequested, resumeRunState }) {
+export function verifyPreflightGitAndPlan({
+  gitState,
+  expectedHeadSha,
+  resumeRequested,
+  resumeRunState,
+  releaseStrategy = 'full-current',
+  fullCurrentExplicit = releaseStrategy === 'full-current',
+  publishOnly = false,
+  generatedBuildInfoMatches = false,
+}) {
   if (!/^[0-9a-f]{40}$/i.test(String(expectedHeadSha || ''))) throw new Error('expected release HEAD must be a full 40-hex SHA')
-  assertFormalReleaseGitState({ ...gitState, releaseStrategy: 'full-current', fullCurrentExplicit: true })
+  if (!['main', 'full-current'].includes(releaseStrategy)) throw new Error(`unsupported release strategy: ${releaseStrategy}`)
+  assertFormalReleaseGitState({ ...gitState, releaseStrategy, fullCurrentExplicit, publishOnly, generatedBuildInfoMatches })
   if (expectedHeadSha !== gitState.headSha) throw new Error(`expected HEAD ${expectedHeadSha} does not equal workspace HEAD ${gitState.headSha}`)
   if (resumeRequested && !resumeRunState) throw new Error('resume state is required when resume is requested')
   if (!resumeRequested && resumeRunState) throw new Error('resume state is forbidden without explicit resume mode')
   const plan = createReleasePlanAfterResumeIdentityCheck({
-    resumeRunState, gitSha: gitState.headSha, releaseStrategy: 'full-current',
+    resumeRunState, gitSha: gitState.headSha, releaseStrategy,
     createPlan: (headSha, mode) => createReleasePlan({ headSha, mode }),
   })
   return { status: 'passed', plan }

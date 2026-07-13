@@ -1373,11 +1373,16 @@ async function runFormalRelease(options = {}) {
         command: 'npm.cmd run release:preflight with exact release SHA and run-bound resume context',
       }, async () => {
         const evidencePath = resolve(dirname(releaseLedger.runPath), 'release-preflight.json')
-        const preflightResume = resume && fullCurrentExplicit
+        const preflightResume = resume
         await runReleaseNpmScript('release:preflight', {
           HH_RELEASE_HEAD_SHA: releaseContext.gitSha,
           HH_RELEASE_PREFLIGHT_EVIDENCE_PATH: evidencePath,
           HH_RELEASE_RESUME_CONTEXT_JSON: preflightResume ? JSON.stringify(resumeRunState) : '',
+          HH_RELEASE_STRATEGY: releaseStrategy,
+          HH_RELEASE_FULL_CURRENT_EXPLICIT: fullCurrentExplicit ? '1' : '0',
+          HH_RELEASE_PUBLISH_ONLY: publishOnly ? '1' : '0',
+          HH_RELEASE_VERSION: releaseContext.version,
+          HH_RELEASE_DESC: releaseContext.desc,
           TCB_ENV: releaseContext.envId,
         }, preflightResume ? ['--resume'] : [])
         const evidence = JSON.parse(readFileSync(evidencePath, 'utf8'))
