@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import test from 'node:test'
 
@@ -23,6 +23,7 @@ import {
   assertExactTemporaryEnvironment,
   normalizeValidationVpc,
   recoverExactProbe,
+  resolveSharedValidationLockPath,
   runCommandWithInput,
   selectTemporaryWorkerEnvironment,
 } from '../validate-post-rag-isolated.mjs'
@@ -139,6 +140,25 @@ test('same validation identity uses one atomic local lock and removes only its o
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
+test('separate worktree roots contend on the same git-common-dir validation lock', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'happyhome-rag-shared-lock-'))
+  const commonDir = join(directory, 'repo', '.git')
+  const rootA = join(directory, 'worktrees', 'a')
+  const rootB = join(directory, 'worktrees', 'b')
+  const identity = { environmentId: 'env-a', functionName: 'post-rag-validate-1234abcd' }
+  try {
+    const pathA = await resolveSharedValidationLockPath({ root: rootA, ...identity }, async () => ({ status: 0, stdout: commonDir }))
+    const pathB = await resolveSharedValidationLockPath({ root: rootB, ...identity }, async () => ({ status: 0, stdout: relative(rootB, commonDir) }))
+    assert.equal(pathA, pathB)
+    assert.equal(pathA.startsWith(resolve(commonDir)), true)
+    const first = await acquireLocalValidationLock(pathA, 'owner-a')
+    await assert.rejects(acquireLocalValidationLock(pathB, 'owner-b'), /already running/)
+    await first.release()
+    const second = await acquireLocalValidationLock(pathB, 'owner-b')
+    await second.release()
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
 test('35 minute recovery horizon does not tear down a 600 second retry_wait fixture early', async () => {
   let now = 0
   let verified = false
@@ -149,27 +169,71 @@ test('35 minute recovery horizon does not tear down a 600 second retry_wait fixt
     processExact: async () => ({ status: 'retry_wait' }),
     cleanup: async () => ({ pending: true }),
     verifyNoResidue: async () => { verified = true; return { operationalResidueCount: 0 } },
-    inspectResidue: async () => ({ operationalResidueCount: 0 }),
+    inspectResidueDirect: async () => ({ operationalResidueCount: 0 }),
   })
   assert.equal(result.status, 'cleaned')
   assert.ok(now >= 605_000)
   assert.equal(verified, true)
 })
 
-test('recovery timeout reports the exact unresolved operational residue count', async () => {
+test('recovery tolerates transient inspect, process, and cleanup invocation failures', async () => {
   let now = 0
+  let inspectCalls = 0
+  let processCalls = 0
+  let cleanupCalls = 0
+  const result = await recoverExactProbe({ runId: 'run-a', timeoutMs: 30_000, pollMs: 5000 }, {
+    now: () => now,
+    sleep: async ms => { now += ms },
+    inspect: async () => {
+      inspectCalls += 1
+      if (inspectCalls === 1) throw new Error('inspect leaked-secret-value')
+      return inspectCalls >= 4 ? { exists: true, status: 'cleaned' } : { exists: true, status: 'cleaning' }
+    },
+    processExact: async () => {
+      processCalls += 1
+      if (processCalls === 1) throw new Error('process leaked-secret-value')
+      return { status: 'retry_wait' }
+    },
+    cleanup: async () => {
+      cleanupCalls += 1
+      if (cleanupCalls === 1) throw new Error('cleanup leaked-secret-value')
+      return { pending: true }
+    },
+    verifyNoResidue: async () => ({ operationalResidueCount: 0 }),
+    inspectResidueDirect: async () => ({ operationalResidueCount: 0 }),
+  })
+  assert.equal(result.status, 'cleaned')
+  assert.match(result.lastErrorFingerprint, /^[a-f0-9]{16}$/)
+  assert.ok(inspectCalls >= 4)
+  assert.ok(processCalls >= 2)
+  assert.ok(cleanupCalls >= 2)
+})
+
+test('persistent temporary invoke failure reaches direct residue inspection with sanitized evidence', async () => {
+  let now = 0
+  let directInspections = 0
   await assert.rejects(
     recoverExactProbe({ runId: 'run-a', timeoutMs: 10_000, pollMs: 5000 }, {
       now: () => now,
       sleep: async ms => { now += ms },
-      inspect: async () => ({ exists: true, status: 'cleaning' }),
+      inspect: async () => { throw new Error('temporary invoke failed token=secret-value') },
       processExact: async () => ({ status: 'retry_wait' }),
       cleanup: async () => ({ pending: true }),
       verifyNoResidue: async () => ({ operationalResidueCount: 0 }),
-      inspectResidue: async () => ({ operationalResidueCount: 3 }),
+      inspectResidueDirect: async runId => {
+        directInspections += 1
+        assert.equal(runId, 'run-a')
+        return { unresolvedResidueCount: 3 }
+      },
     }),
-    /exact probe recovery timed out unresolvedResidueCount=3/,
+    error => {
+      assert.doesNotMatch(error.message, /secret-value|token=/)
+      assert.match(error.message, /"unresolvedResidueCount":3/)
+      assert.match(error.message, /"lastErrorFingerprint":"[a-f0-9]{16}"/)
+      return true
+    },
   )
+  assert.equal(directInspections, 1)
 })
 
 test('exposes the isolated validator package command', async () => {
