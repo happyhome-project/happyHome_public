@@ -1,6 +1,7 @@
 # Figma 0710 Visual Alignment Design
 
-> **Current task contract:** This specification records the user-approved scope for aligning the mini-program with Figma `社区资源共享_小程序_0710`. Search remains explicitly out of scope.
+> **Historical / point-in-time:** This specification records the visual-alignment design accepted for the 2026-07-13 delivery. It does not override later product or implementation decisions.
+> **Current authority:** Use the [documentation authority map](../../README.md), the Figma `社区资源共享_小程序_0710` source, current checked-in styles, code, and tests. Search remains explicitly out of scope for this delivery.
 
 ## Source of truth
 

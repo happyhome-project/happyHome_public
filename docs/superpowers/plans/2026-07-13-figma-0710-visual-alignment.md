@@ -1,5 +1,10 @@
 # Figma 0710 Visual Alignment Implementation Plan
 
+> **Historical / point-in-time:** This delivery plan records the approved 2026-07-13 implementation sequence. Retain it for traceability; do not treat its task state as current repository status.
+> **Current authority:** Use the [documentation authority map](../../README.md), the Figma `社区资源共享_小程序_0710` source, current checked-in styles, code, and tests. Search remains explicitly out of scope for this delivery.
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Align the approved home and profile surfaces with Figma `社区资源共享_小程序_0710` without changing search or business behavior.
