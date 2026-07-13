@@ -36,6 +36,51 @@ test('shared inputs use the dependency map and unknown mappings fall back to all
   assert.match(unknown.cloud.reasons[0], /unmapped/i)
 })
 
+test('cloud test-only files never create runtime cloud targets across path styles', () => {
+  for (const changedPath of [
+    'cloud/lib/__tests__/handoff.test.ts',
+    'cloud/functions/admin/index.test.ts',
+    'cloud/__tests__/integration/full-flow.integration.test.ts',
+    'M\tcloud\\functions\\post\\__tests__\\post.test.ts',
+    'D\tcloud/lib/__tests__/removed.test.ts',
+  ]) {
+    const impact = classifyReleaseImpact({
+      changedPaths: [changedPath],
+      allFunctions: ['admin', 'post'],
+      functionInputs: {},
+    })
+    assert.deepEqual(impact.cloud, { functions: [], mode: 'none', reasons: [] }, changedPath)
+  }
+})
+
+test('renames preserve both endpoints when deciding cloud runtime impact', () => {
+  const testOnlyUnix = 'cloud/lib/__tests__/handoff.test.ts'
+  const runtimeUnix = 'cloud/lib/community-approval-handoff.ts'
+  const testOnlyWindows = 'cloud\\functions\\admin\\__tests__\\admin.test.ts'
+  const runtimeWindows = 'cloud\\functions\\admin\\index.ts'
+
+  for (const changedPath of [
+    `R100\t${testOnlyUnix}\tcloud/lib/__tests__/renamed.test.ts`,
+    `R095\t${testOnlyWindows}\tcloud\\functions\\admin\\__tests__\\renamed.test.ts`,
+  ]) {
+    const impact = classifyReleaseImpact({ changedPaths: [changedPath], allFunctions: ['admin', 'post'], functionInputs: {} })
+    assert.deepEqual(impact.cloud, { functions: [], mode: 'none', reasons: [] }, changedPath)
+  }
+
+  for (const changedPath of [
+    `R100\t${runtimeUnix}\t${testOnlyUnix}`,
+    `R100\t${testOnlyUnix}\t${runtimeUnix}`,
+    `R100\t${runtimeUnix}\tcloud/lib/renamed-runtime.ts`,
+    `R100\t${runtimeUnix}\tdocs/retired-handoff.md`,
+    `R100\tdocs/new-handoff.md\t${runtimeUnix}`,
+    `R100\t${runtimeWindows}\t${testOnlyWindows}`,
+    `R100\t${testOnlyWindows}\t${runtimeWindows}`,
+  ]) {
+    const impact = classifyReleaseImpact({ changedPaths: [changedPath], allFunctions: ['admin', 'post'], functionInputs: {} })
+    assert.equal(impact.cloud.mode, 'all', changedPath)
+  }
+})
+
 test('deletions and build configuration changes conservatively deploy all cloud functions', () => {
   for (const changedPath of ['D\tcloud/lib/db.ts', 'R100\tcloud/lib/old.ts\tcloud/lib/new.ts', 'cloud/build.mjs', 'cloud/package-lock.json', 'cloud/tsconfig.json']) {
     const impact = classifyReleaseImpact({ changedPaths: [changedPath], allFunctions: ['post', 'user'], functionInputs: {} })
