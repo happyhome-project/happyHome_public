@@ -21,11 +21,15 @@ function triggerCronMatches(triggerDesc, cron) {
   }
 }
 
+export function isScfTriggerEnabled(trigger) {
+  return trigger?.EnableStatus === 'OPEN' || trigger?.Enable === 'OPEN' || trigger?.Enable === true
+}
+
 function isDesiredTrigger(trigger, cron, customArgument) {
   return trigger.TriggerName === 'post-rag-worker-every-minute'
     && triggerCronMatches(trigger.TriggerDesc, cron)
     && trigger.CustomArgument === customArgument
-    && (trigger.Enable === 'OPEN' || trigger.EnableStatus === 'OPEN' || trigger.Enable === true)
+    && isScfTriggerEnabled(trigger)
 }
 
 export async function reconcileOwnedScfTimer(request, {

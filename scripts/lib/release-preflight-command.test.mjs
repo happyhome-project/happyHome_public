@@ -28,3 +28,15 @@ test('invalid canonical git state blocks probe creation while pure reads remain 
   assert.equal(result.checks.find(item => item.name === 'full-current-plan-resume').status, 'indeterminate')
   assert.equal(result.checks.find(item => item.name === 'timer-probe-document').status, 'failed')
 })
+
+test('intended HEAD mismatch blocks fixture while an exact 40-hex match passes the git gate', async () => {
+  const actual = 'a'.repeat(40); let mutations = 0
+  const state = { cwd: 'C:\\Project\\Claude\\happyHome_public', originUrl: 'https://github.com/happyhome-project/happyHome_public.git', branch: 'main', headSha: actual, originMainSha: actual, changedPaths: [] }
+  const mismatch = createReleasePreflightChecks({ app: null, env: { HH_RELEASE_HEAD_SHA: 'b'.repeat(40) }, cwd: state.cwd, adminOptions: { adminInternalToken: 'x' }, readGitState: () => state, invoke: async () => { mutations += 1; return { functionResult: {} } } })
+  const bad = await runReleasePreflight({ checks: mismatch })
+  assert.equal(bad.checks.find(item => item.name === 'full-current-plan-resume').status, 'indeterminate')
+  assert.equal(mutations, 0)
+  const matching = createReleasePreflightChecks({ app: null, env: { HH_RELEASE_HEAD_SHA: actual }, cwd: state.cwd, adminOptions: {}, readGitState: () => state })
+  const gitCheck = matching.find(item => item.name === 'full-current-plan-resume')
+  assert.equal((await gitCheck.run()).status, 'passed')
+})

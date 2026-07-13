@@ -73,6 +73,21 @@ test('applyRagWorkerConfig removes duplicate and stale owned video timers before
   assert.equal(result.changed, true)
 })
 
+for (const enabledShape of [{ EnableStatus: 'OPEN' }, { Enable: 'OPEN' }, { Enable: true }]) {
+  test(`video timer treats ${JSON.stringify(enabledShape)} as enabled desired-state`, async () => {
+    const config = buildRagWorkerFunctionConfigs({ workerToken: 'worker', timerToken: 'timer' })[1]
+    const mutations = []
+    const app = { functions: {
+      async getFunctionDetail() { return { Timeout: config.timeout, MemorySize: config.memorySize, Namespace: 'env', Environment: { Variables: [{ Key: 'POST_RAG_WORKER_TOKEN', Value: 'worker' }] } } },
+      async createFunctionTriggers() { mutations.push('create') }, getFunctionConfig() { return { namespace: 'env' } },
+      scfService: { async request(action) { if (action === 'ListTriggers') return { Triggers: [{ TriggerName: config.triggers[0].name, TriggerDesc: config.triggers[0].config, ...enabledShape }] }; mutations.push(action); return {} } },
+    } }
+    const [result] = await applyRagWorkerConfig(app, [config])
+    assert.equal(result.changed, false)
+    assert.deepEqual(mutations, [])
+  })
+}
+
 test('buildRagWorkerFunctionConfigs defaults to minute-level CloudBase 7-field cron', () => {
   const configs = buildRagWorkerFunctionConfigs({ workerToken: 'worker-secret', timerToken: 'timer-secret' })
 

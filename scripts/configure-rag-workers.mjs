@@ -6,7 +6,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
-import { reconcileOwnedScfTimer } from './lib/scf-owned-timer.mjs'
+import { isScfTriggerEnabled, reconcileOwnedScfTimer } from './lib/scf-owned-timer.mjs'
 
 export const DEFAULT_RAG_WORKER_TIMEOUT_SECONDS = 120
 export const DEFAULT_RAG_WORKER_MEMORY_MB = 512
@@ -98,7 +98,7 @@ export async function applyRagWorkerConfig(app, configs) {
       const current = Array.isArray(response?.Triggers) ? response.Triggers : []
       const desired = config.triggers[0]
       const owned = current.filter(item => item.TriggerName === desired.name || item.TriggerName?.startsWith(`${config.name}-every-`))
-      const matching = owned.filter(item => item.TriggerName === desired.name && (item.TriggerDesc === desired.config || item.TriggerDesc === JSON.stringify({ cron: desired.config })) && item.Enable === 'OPEN')
+      const matching = owned.filter(item => item.TriggerName === desired.name && (item.TriggerDesc === desired.config || item.TriggerDesc === JSON.stringify({ cron: desired.config })) && isScfTriggerEnabled(item))
       const triggerChanged = owned.length !== 1 || matching.length !== 1
       if (triggerChanged) {
         for (const item of owned) await app.functions.scfService.request('DeleteTrigger', { FunctionName: config.name, Namespace: detail?.Namespace || app.functions.getFunctionConfig?.().namespace, TriggerName: item.TriggerName, Type: 'timer' })

@@ -39,12 +39,15 @@ test('timer validation requires unique enabled exact desired triggers and reject
 })
 
 test('git and full-current plan validation binds canonical current state and explicit resume mode', async () => {
-  const canonical = { cwd: 'C:\\Project\\Claude\\happyHome_public', originUrl: 'https://github.com/happyhome-project/happyHome_public.git', branch: 'main', headSha: 'abcdef1', originMainSha: 'abcdef1', changedPaths: [] }
-  const plan = verifyPreflightGitAndPlan({ gitState: canonical, resumeRequested: false })
-  assert.equal(plan.mode, 'full-current')
-  assert.throws(() => verifyPreflightGitAndPlan({ gitState: { ...canonical, cwd: 'C:\\feature' }, resumeRequested: false }), /canonical main workspace/i)
-  assert.throws(() => verifyPreflightGitAndPlan({ gitState: canonical, resumeRequested: true }), /resume state is required/i)
-  assert.throws(() => verifyPreflightGitAndPlan({ gitState: canonical, resumeRequested: true, resumeRunState: { context: { gitSha: 'deadbee', releaseStrategy: 'full-current' } } }), /resume context mismatch/i)
+  const actualHead = 'a'.repeat(40)
+  const canonical = { cwd: 'C:\\Project\\Claude\\happyHome_public', originUrl: 'https://github.com/happyhome-project/happyHome_public.git', branch: 'main', headSha: actualHead, originMainSha: actualHead, changedPaths: [] }
+  const plan = verifyPreflightGitAndPlan({ gitState: canonical, expectedHeadSha: actualHead, resumeRequested: false })
+  assert.equal(plan.plan.mode, 'full-current')
+  assert.throws(() => verifyPreflightGitAndPlan({ gitState: { ...canonical, cwd: 'C:\\feature' }, expectedHeadSha: actualHead, resumeRequested: false }), /canonical main workspace/i)
+  assert.throws(() => verifyPreflightGitAndPlan({ gitState: canonical, expectedHeadSha: '', resumeRequested: false }), /expected.*40/i)
+  assert.throws(() => verifyPreflightGitAndPlan({ gitState: canonical, expectedHeadSha: 'b'.repeat(40), resumeRequested: false }), /expected HEAD.*workspace HEAD/i)
+  assert.throws(() => verifyPreflightGitAndPlan({ gitState: canonical, expectedHeadSha: actualHead, resumeRequested: true }), /resume state is required/i)
+  assert.throws(() => verifyPreflightGitAndPlan({ gitState: canonical, expectedHeadSha: actualHead, resumeRequested: true, resumeRunState: { context: { gitSha: 'deadbee', releaseStrategy: 'full-current' } } }), /resume context mismatch/i)
 })
 
 test('probe evidence requires authenticated timer outbox and v2 job evidence plus completion', () => {

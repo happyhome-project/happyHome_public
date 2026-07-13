@@ -45,7 +45,7 @@ export function createReleasePreflightChecks({ app, env, cwd, adminOptions, resu
       const response = await app.functions.scfService.request('ListTriggers', { FunctionName: functionName, Namespace: detail?.Namespace || app.functions.getFunctionConfig?.().namespace })
       return response?.Triggers || []
     } }) } },
-    { name: 'full-current-plan-resume', gateForMutations: true, run: async () => verifyPreflightGitAndPlan({ gitState: readGitState(cwd), resumeRequested, resumeRunState }) },
+    { name: 'full-current-plan-resume', gateForMutations: true, run: async () => verifyPreflightGitAndPlan({ gitState: readGitState(cwd), expectedHeadSha: env.HH_RELEASE_HEAD_SHA, resumeRequested, resumeRunState }) },
     { name: 'timer-probe-document', mutation: true,
       fixture: identity,
       createFixture: async () => { if (!adminOptions.adminInternalToken) throw new Error('admin credential unavailable'); const created = (await invoke('post.ragTimerProbeCreateAdmin', identity, adminOptions, runner)).functionResult; Object.assign(identity, created); return identity },
