@@ -341,6 +341,27 @@ test('processPostRagJobV2Batch isolates claim failures without aborting later ca
   expect(JSON.stringify(result)).not.toContain('secret')
 })
 
+test('processPostRagJobV2Batch does not let exhausted claim failures consume the batch capacity', async () => {
+  const poison1 = 'a'.repeat(64)
+  const poison2 = 'b'.repeat(64)
+  const deps = dependencies({
+    listCandidates: jest.fn(async () => [poison1, poison2, JOB_ID]),
+    claim: jest.fn()
+      .mockRejectedValueOnce(new Error('exhausted job 1'))
+      .mockRejectedValueOnce(new Error('exhausted job 2'))
+      .mockResolvedValueOnce(job()),
+  })
+
+  const result = await processPostRagJobV2Batch({ workerId: 'worker-1', now: times(NOW), limit: 1 }, deps)
+
+  expect(deps.listCandidates).toHaveBeenCalledWith(NOW, 3)
+  expect(result.results).toEqual([
+    { jobId: poison1, status: 'failed', errorCode: 'INTERNAL_ERROR', errorStage: 'claim' },
+    { jobId: poison2, status: 'failed', errorCode: 'INTERNAL_ERROR', errorStage: 'claim' },
+    expect.objectContaining({ jobId: JOB_ID, status: 'completed' }),
+  ])
+})
+
 test('processPostRagJobV2Batch isolates an invalid claimed snapshot before later candidates', async () => {
   const malformed = job() as any; malformed.postId = 'tampered-post'
   const deps = dependencies({

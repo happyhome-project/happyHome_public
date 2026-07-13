@@ -350,9 +350,11 @@ export async function processPostRagJobV2Batch(
   const dependencies: BatchDependencies = injectedDependencies
     ? { ...injectedDependencies, ...(options.sink ? { sink: options.sink } : {}) }
     : { ...defaultDependencies, ...(options.sink ? { sink: options.sink } : {}) }
-  const candidateIds = await dependencies.listCandidates(now(), limit)
+  const candidateIds = await dependencies.listCandidates(now(), Math.min(100, limit * 3))
   const results: Array<ProcessorResult | { jobId: string; status: 'skipped' }> = []
+  let claimedCount = 0
   for (const jobId of candidateIds) {
+    if (claimedCount >= limit) break
     let claimed: PostRagJobDocument | null
     try {
       claimed = await dependencies.claim(jobId, { workerId: options.workerId, now: now() })
@@ -361,6 +363,7 @@ export async function processPostRagJobV2Batch(
       continue
     }
     if (!claimed) { results.push({ jobId, status: 'skipped' }); continue }
+    claimedCount += 1
     try {
       results.push(await processClaimedPostRagJob(claimed, { workerId: options.workerId, now }, dependencies))
     } catch (error) {
