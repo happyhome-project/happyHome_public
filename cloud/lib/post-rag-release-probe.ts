@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import * as db from './db'
 import { appendPostRagOutboxEvent } from './post-rag-outbox'
+import { validateStoredPostRagJob } from './post-rag-jobs'
 import { comparePostRagActivationOrder, type PostRagActivationOrder } from './post-rag-versioned-index-sink'
 
 const PROBES = 'post_rag_release_probes'
@@ -51,8 +52,8 @@ export async function createPostRagReleaseProbe(value: unknown) {
   const now = new Date().toISOString()
   const outbox = await db.runTransaction(async tx => {
     if (await db.transactionGetByIdOrNull(tx, PROBES, id)) throw new Error('release probe runId already exists')
-    await tx.collection('sections').doc(sectionId).set({ data: { communityId, name: 'RAG release probe', status: 'active', type: 'evergreen', widgets: [{ widgetId: 'probe', fieldKey: 'probe', label: 'Probe', type: 'short_text', visibility: 'public', order: 0 }] } })
-    await tx.collection('posts').doc(postId).set({ data: { communityId, sectionId, status: 'active', auditStatus: 'pass', authorId: 'release-probe', content: { probe: `probe-${id}` }, createdAt: now, updatedAt: now } })
+    await tx.collection('sections').doc(sectionId).set({ data: { probeRunId: id, communityId, name: 'RAG release probe', status: 'active', type: 'evergreen', widgets: [{ widgetId: 'probe', fieldKey: 'probe', label: 'Probe', type: 'short_text', visibility: 'public', order: 0 }] } })
+    await tx.collection('posts').doc(postId).set({ data: { probeRunId: id, communityId, sectionId, status: 'active', auditStatus: 'pass', authorId: 'release-probe', content: { probe: `probe-${id}` }, createdAt: now, updatedAt: now } })
     const created = await appendPostRagOutboxEvent(tx, { communityId, aggregateId: postId, reasonCode: 'post.created', now })
     await tx.collection(PROBES).doc(id).set({ data: { runId: id, communityId, sectionId, postId, outboxId: created.outboxId, contentVersion: created.contentVersion, triggerName: TRIGGER, triggerIdHash: TRIGGER_HASH, baseline: now, status: 'active', createdAt: now } })
     return created
@@ -83,7 +84,7 @@ export async function readPostRagReleaseProbeStatus(input: any) {
   return { outbox: { _id: outbox._id, status: outbox.status, materializedJobId: outbox.materializedJobId }, job: job ? { _id: job._id, schemaVersion: job.schemaVersion, status: job.status, postId: job.postId, sourceVersion: job.sourceVersion } : null, state: state ? { postId: state.postId, schemaVersion: state.schemaVersion, state: state.state, sourceVersion: state.sourceVersion } : null, complete }
 }
 
-const MAX_PROBE_INDEX_VERSIONS = 99
+const MAX_PROBE_INDEX_VERSIONS = 32
 
 function withoutId(document: any) {
   const { _id: _ignored, ...data } = document
@@ -114,6 +115,16 @@ function assertJobBound(job: any, expectedId: string, expectedOutboxId: string, 
   if (job?.schemaVersion !== 2 || job?.outboxId !== expectedOutboxId || job?.action !== expectedAction) {
     throw new Error('release probe job binding does not match run binding')
   }
+}
+
+function assertFixtureBound(kind: 'post' | 'section', fixture: any, probe: any) {
+  const valid = kind === 'section'
+    ? fixture?.probeRunId === probe.runId && fixture?.communityId === probe.communityId
+      && fixture?.name === 'RAG release probe' && fixture?.type === 'evergreen'
+    : fixture?.probeRunId === probe.runId && fixture?.communityId === probe.communityId
+      && fixture?.sectionId === probe.sectionId && fixture?.authorId === 'release-probe'
+      && fixture?.content?.probe === `probe-${probe.runId}`
+  if (!valid) throw new Error(`release probe ${kind} fixture binding does not match run binding`)
 }
 
 function validActivationOrder(value: any): value is PostRagActivationOrder {
@@ -158,14 +169,18 @@ function validateFinalizingArtifacts(probe: any) {
     || !validIds(artifacts.indexStateIds, 1) || !validIds(artifacts.indexVersionIds, MAX_PROBE_INDEX_VERSIONS)
     || artifacts.outboxIds.length !== 2 || artifacts.outboxIds[0] !== probe.outboxId || artifacts.outboxIds[1] !== probe.cleanupOutboxId
     || typeof artifacts.createJobId !== 'string' || typeof artifacts.cleanupJobId !== 'string'
-    || artifacts.jobIds.length !== 2 || artifacts.jobIds[0] !== artifacts.createJobId || artifacts.jobIds[1] !== artifacts.cleanupJobId
-    || artifacts.createJobBinding?.id !== artifacts.createJobId || artifacts.cleanupJobBinding?.id !== artifacts.cleanupJobId
+    || !['present', 'absent'].includes(artifacts.createJobState)
+    || artifacts.cleanupJobBinding?.id !== artifacts.cleanupJobId
+    || (artifacts.createJobState === 'present'
+      ? artifacts.createJobBinding?.id !== artifacts.createJobId || artifacts.jobIds.length !== 2
+        || artifacts.jobIds[0] !== artifacts.createJobId || artifacts.jobIds[1] !== artifacts.cleanupJobId
+      : artifacts.createJobBinding !== null || artifacts.jobIds.length !== 1 || artifacts.jobIds[0] !== artifacts.cleanupJobId)
     || artifacts.indexStateIds.some((id: string) => id !== probe.postId)
     || probe.cleanupArtifactDigest !== artifactDigest(probe, artifacts)) {
     throw new Error('release probe finalizing artifact binding is invalid')
   }
   return artifacts as {
-    createJobId: string; cleanupJobId: string; createJobBinding: any; cleanupJobBinding: any;
+    createJobId: string; cleanupJobId: string; createJobState: 'present' | 'absent'; createJobBinding: any; cleanupJobBinding: any;
     jobIds: string[]; outboxIds: string[]; indexStateIds: string[]; indexVersionIds: string[]
   }
 }
@@ -210,14 +225,19 @@ async function finalizeProbeCleanup(probe: any) {
 
       const createJob = await db.transactionGetByIdOrNull<any>(tx, 'post_rag_jobs', currentArtifacts.createJobId)
       const cleanupJob = await db.transactionGetByIdOrNull<any>(tx, 'post_rag_jobs', currentArtifacts.cleanupJobId)
-      if (!createJob || !cleanupJob) return { pending: true, removed: false }
-      assertJobBound(createJob, currentArtifacts.createJobId, current.outboxId, 'upsert', current)
+      if ((currentArtifacts.createJobState === 'present' && !createJob)
+        || (currentArtifacts.createJobState === 'absent' && createJob) || !cleanupJob) return { pending: true, removed: false }
+      if (createJob) {
+        validateStoredPostRagJob(createJob, currentArtifacts.createJobId)
+        assertJobBound(createJob, currentArtifacts.createJobId, current.outboxId, 'upsert', current)
+      }
+      validateStoredPostRagJob(cleanupJob, currentArtifacts.cleanupJobId)
       assertJobBound(cleanupJob, currentArtifacts.cleanupJobId, current.cleanupOutboxId, 'delete', current)
-      if (!sameJobBinding(createJob, currentArtifacts.createJobBinding) || !sameJobBinding(cleanupJob, currentArtifacts.cleanupJobBinding)) {
+      if ((createJob && !sameJobBinding(createJob, currentArtifacts.createJobBinding)) || !sameJobBinding(cleanupJob, currentArtifacts.cleanupJobBinding)) {
         throw new Error('release probe job binding does not match persisted artifact binding')
       }
       if (!createJobSafeToRemove(createJob, removedAt)) return { pending: true, removed: false }
-      if (cleanupJob.status !== 'completed' || !['removed', 'superseded'].includes(cleanupJob.outcome)) {
+      if (cleanupJob.status !== 'completed' || !['removed', 'superseded'].includes(String(cleanupJob.outcome))) {
         return { pending: true, removed: false }
       }
       const state = await db.transactionGetByIdOrNull<any>(tx, 'post_rag_index_state_v2', current.postId)
@@ -228,8 +248,7 @@ async function finalizeProbeCleanup(probe: any) {
         const version = await db.transactionGetByIdOrNull<any>(tx, 'post_rag_index_versions', versionId)
         if (!version || version._id !== versionId || version.postId !== current.postId) return { pending: true, removed: false }
       }
-      await tx.collection('post_rag_jobs').doc(currentArtifacts.createJobId).remove()
-      await tx.collection('post_rag_jobs').doc(currentArtifacts.cleanupJobId).remove()
+      for (const jobId of currentArtifacts.jobIds) await tx.collection('post_rag_jobs').doc(jobId).remove()
       await tx.collection('post_rag_outbox').doc(current.outboxId).remove()
       await tx.collection('post_rag_outbox').doc(current.cleanupOutboxId).remove()
       await tx.collection('post_rag_index_state_v2').doc(current.postId).remove()
@@ -251,28 +270,23 @@ async function finalizeProbeCleanup(probe: any) {
   const cleaned = await db.runTransaction(async tx => {
     const current = await db.transactionGetByIdOrNull<any>(tx, PROBES, probe.runId)
     if (!current) throw new Error('release probe run binding not found')
-    if (current.status === 'cleaned') return current
+    if (current.status === 'cleaned') return { document: current, transitioned: false }
     assertProbeIdentity(probe.runId, current)
     if (current.status !== 'finalizing') throw new Error('release probe cleanup state changed during finalization')
     const currentArtifacts = validateFinalizingArtifacts(current)
     if (!current.artifactsRemovedAt) return null
     for (const [collection, ids] of [
-      ['post_rag_jobs', currentArtifacts.jobIds], ['post_rag_outbox', currentArtifacts.outboxIds],
+      ['post_rag_jobs', [...new Set([currentArtifacts.createJobId, currentArtifacts.cleanupJobId])]], ['post_rag_outbox', currentArtifacts.outboxIds],
       ['post_rag_index_state_v2', currentArtifacts.indexStateIds], ['post_rag_index_versions', currentArtifacts.indexVersionIds],
     ] as Array<[string, string[]]>) {
       for (const artifactId of ids) if (await db.transactionGetByIdOrNull(tx, collection, artifactId)) return null
     }
-    const versionCollection = tx.collection('post_rag_index_versions') as unknown as {
-      where: (where: Record<string, any>) => { get: () => Promise<{ data: any[] }> }
-    }
-    const currentVersions = await versionCollection.where({ postId: current.postId }).get()
-    if (!Array.isArray(currentVersions?.data) || currentVersions.data.length !== 0) return null
     const next = { ...current, status: 'cleaned', cleanedAt: now, cleanupCounts }
     await tx.collection(PROBES).doc(probe.runId).set({ data: withoutId(next) })
-    return next
+    return { document: next, transitioned: true }
   })
   if (!cleaned) return pendingCleanup('finalizing')
-  return { success: true, alreadyCleaned: cleaned.cleanedAt !== probe.cleanedAt && probe.status !== 'cleaned' ? false : true, status: 'cleaned', cleanupCounts: cleaned.cleanupCounts }
+  return { success: true, alreadyCleaned: !cleaned.transitioned, transitioned: cleaned.transitioned, status: 'cleaned', cleanupCounts: cleaned.document.cleanupCounts }
 }
 
 async function prepareProbeFinalization(probe: any) {
@@ -295,11 +309,14 @@ async function prepareProbeFinalization(probe: any) {
   const byJobId = new Map(jobs.map(job => [String(job?._id || ''), job]))
   const createJob = createJobId ? byJobId.get(createJobId) : null
   const cleanupJob = byJobId.get(cleanupJobId)
-  if (!createJob) return null
-  assertJobBound(createJob, createJobId!, probe.outboxId, 'upsert', probe)
+  if (createJob) {
+    validateStoredPostRagJob(createJob, createJobId!)
+    assertJobBound(createJob, createJobId!, probe.outboxId, 'upsert', probe)
+  }
   if (!cleanupJob) return null
+  validateStoredPostRagJob(cleanupJob, cleanupJobId)
   assertJobBound(cleanupJob, cleanupJobId, probe.cleanupOutboxId, 'delete', probe)
-  if (cleanupJob.status !== 'completed' || !['removed', 'superseded'].includes(cleanupJob.outcome)) return null
+  if (cleanupJob.status !== 'completed' || !['removed', 'superseded'].includes(String(cleanupJob.outcome))) return null
   const createVersion = Number(createJob?.contentVersion ?? probe.contentVersion)
   if (!Number.isSafeInteger(createVersion) || !Number.isSafeInteger(cleanupJob.contentVersion) || cleanupJob.contentVersion <= createVersion) {
     throw new Error('release probe delete job binding is not a higher content version')
@@ -314,8 +331,9 @@ async function prepareProbeFinalization(probe: any) {
   const indexVersionIds = await exactCurrentVersionIds(probe)
   const cleanupArtifactIds = {
     createJobId, cleanupJobId,
-    createJobBinding: jobBinding(createJob), cleanupJobBinding: jobBinding(cleanupJob),
-    jobIds,
+    createJobState: createJob ? 'present' : 'absent',
+    createJobBinding: createJob ? jobBinding(createJob) : null, cleanupJobBinding: jobBinding(cleanupJob),
+    jobIds: createJob ? jobIds : [cleanupJobId],
     outboxIds: [probe.outboxId, probe.cleanupOutboxId],
     indexStateIds: state ? [probe.postId] : [],
     indexVersionIds,
@@ -326,6 +344,21 @@ async function prepareProbeFinalization(probe: any) {
     if (current.status === 'finalizing' || current.status === 'cleaned') return current
     if (current.status !== 'cleaning' || current.cleanupOutboxId !== probe.cleanupOutboxId) {
       throw new Error('release probe cleanup state changed during preparation')
+    }
+    const currentCreateOutbox = await db.transactionGetByIdOrNull<any>(tx, 'post_rag_outbox', current.outboxId)
+    if (!currentCreateOutbox) return null
+    assertArtifactBound(currentCreateOutbox, current.outboxId, current, 'outbox')
+    if (currentCreateOutbox.schemaVersion !== 2 || currentCreateOutbox.status !== 'completed'
+      || currentCreateOutbox.materializedJobId !== createJobId) return null
+    const currentCreateJob = await db.transactionGetByIdOrNull<any>(tx, 'post_rag_jobs', createJobId!)
+    if ((createJob && !currentCreateJob) || (!createJob && currentCreateJob)) return null
+    if (currentCreateJob) {
+      validateStoredPostRagJob(currentCreateJob, createJobId!)
+      assertJobBound(currentCreateJob, createJobId!, current.outboxId, 'upsert', current)
+      if (!sameJobBinding(currentCreateJob, cleanupArtifactIds.createJobBinding)) {
+        throw new Error('release probe job binding does not match prepared artifact binding')
+      }
+      if (!createJobSafeToRemove(currentCreateJob, new Date().toISOString())) return null
     }
     const next = { ...current, status: 'finalizing', cleanupArtifactIds, cleanupArtifactDigest: artifactDigest(current, cleanupArtifactIds) }
     await tx.collection(PROBES).doc(probe.runId).set({ data: withoutId(next) })
@@ -339,7 +372,7 @@ export async function cleanupPostRagReleaseProbe(input: any) {
   if (!probe) throw new Error('release probe run binding not found')
   assertProbeIdentity(id, probe)
   assertCleanupBound(input, probe)
-  if (probe.status === 'cleaned') return { success: true, alreadyCleaned: true, status: 'cleaned', cleanupCounts: probe.cleanupCounts }
+  if (probe.status === 'cleaned') return { success: true, alreadyCleaned: true, transitioned: false, status: 'cleaned', cleanupCounts: probe.cleanupCounts }
   if (probe.status === 'finalizing') return finalizeProbeCleanup(probe)
   if (probe.status === 'cleaning') {
     const finalizing = await prepareProbeFinalization(probe)
@@ -355,14 +388,18 @@ export async function cleanupPostRagReleaseProbe(input: any) {
       throw new Error('release probe ids do not match run binding')
     }
     if (current.status !== 'active') return current
-    if (await db.transactionGetByIdOrNull(tx, 'posts', current.postId)) await tx.collection('posts').doc(current.postId).remove()
-    if (await db.transactionGetByIdOrNull(tx, 'sections', current.sectionId)) await tx.collection('sections').doc(current.sectionId).remove()
+    const currentPost = await db.transactionGetByIdOrNull<any>(tx, 'posts', current.postId)
+    const currentSection = await db.transactionGetByIdOrNull<any>(tx, 'sections', current.sectionId)
+    if (currentPost) assertFixtureBound('post', currentPost, current)
+    if (currentSection) assertFixtureBound('section', currentSection, current)
+    if (currentPost) await tx.collection('posts').doc(current.postId).remove()
+    if (currentSection) await tx.collection('sections').doc(current.sectionId).remove()
     const removed = await appendPostRagOutboxEvent(tx, { communityId: current.communityId, aggregateId: current.postId, reasonCode: 'post.deleted', now })
     const next = { ...current, status: 'cleaning', cleanupStartedAt: now, cleanupOutboxId: removed.outboxId }
     await tx.collection(PROBES).doc(id).set({ data: withoutId(next) })
     return next
   })
-  if (started.status === 'cleaned') return { success: true, alreadyCleaned: true, status: 'cleaned', cleanupCounts: started.cleanupCounts }
+  if (started.status === 'cleaned') return { success: true, alreadyCleaned: true, transitioned: false, status: 'cleaned', cleanupCounts: started.cleanupCounts }
   if (started.status === 'finalizing') return finalizeProbeCleanup(started)
   return pendingCleanup()
 }
