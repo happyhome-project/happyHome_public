@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "changeId": "release-idempotent-preflight",
+  "actions": [
+    "configure-rag-network",
+    "update-rag-env",
+    "configure-rag-workers"
+  ],
+  "migrations": [],
+  "smokeSuites": [
+    "post-rag"
+  ]
+}
