@@ -9,6 +9,7 @@ const LEASE_TTL_MS = 90_000;
 const MUTATION_ABANDONED_MS = 30_000;
 const MUTATION_TIMEOUT_MS = 100;
 const DEFAULT_FILE_SYSTEM = { mkdir, open, readFile, rename, stat, unlink, writeFile };
+const WINDOWS_REPLACE_RETRY_CODES = new Set(['EPERM', 'EBUSY', 'ENOTEMPTY']);
 
 class CorruptLeaseError extends Error {}
 
@@ -148,7 +149,19 @@ async function replaceOwnedLease(leasePath, ownerToken, update, fileSystem) {
     await fileSystem.writeFile(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, { flag: 'wx' });
     const current = await readSnapshot(leasePath, fileSystem);
     assertOwner(current, ownerToken);
-    await fileSystem.rename(temporaryPath, leasePath);
+    let replaceError;
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      try {
+        await fileSystem.rename(temporaryPath, leasePath);
+        replaceError = undefined;
+        break;
+      } catch (error) {
+        replaceError = error;
+        if (!WINDOWS_REPLACE_RETRY_CODES.has(error?.code) || attempt === 5) throw error;
+        await delay(attempt * 5);
+      }
+    }
+    if (replaceError) throw replaceError;
   } catch (error) {
     await fileSystem.unlink(temporaryPath).catch((cleanupError) => {
       if (cleanupError?.code !== 'ENOENT') throw cleanupError;
@@ -431,7 +444,8 @@ export async function withValidationLease(options, fn) {
   let primaryError;
   try {
     if (heartbeatIntervalMs > 0) {
-      worker = await startHeartbeatWorker({
+      const startWorker = options?.startHeartbeatWorkerFn ?? startHeartbeatWorker;
+      worker = await startWorker({
         homeDir,
         ownerToken: handle.snapshot.ownerToken,
         heartbeatIntervalMs,

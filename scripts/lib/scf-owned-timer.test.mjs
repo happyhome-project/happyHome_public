@@ -19,7 +19,7 @@ test('installed manager drops customArgument while owned SCF client sends and ve
   const request = async (action, params) => {
     calls.push([action, params])
     if (action === 'ListTriggers') return { Triggers: triggers }
-    if (action === 'CreateTrigger') triggers = [{ TriggerName: params.TriggerName, TriggerDesc: params.TriggerDesc, CustomArgument: params.CustomArgument }]
+    if (action === 'CreateTrigger') triggers = [{ TriggerName: params.TriggerName, TriggerDesc: params.TriggerDesc, CustomArgument: params.CustomArgument, Enable: params.Enable }]
     return {}
   }
   const result = await reconcileOwnedScfTimer(request, { functionName: 'post-rag-worker', namespace: 'env', cron: '0 * * * * * *', customArgument: '{"workerToken":"secret"}' })
@@ -37,7 +37,7 @@ test('SCF timer polls long enough for a newly created trigger to become visible'
       return { Triggers: listCount < 7 || !created ? [] : [created] }
     }
     if (action === 'CreateTrigger') {
-      created = { TriggerName: params.TriggerName, TriggerDesc: params.TriggerDesc, CustomArgument: params.CustomArgument }
+      created = { TriggerName: params.TriggerName, TriggerDesc: params.TriggerDesc, CustomArgument: params.CustomArgument, Enable: params.Enable }
     }
     return {}
   }
@@ -62,6 +62,7 @@ test('SCF timer accepts the canonical JSON cron readback returned by SCF', async
     TriggerName: 'post-rag-worker-every-minute',
     TriggerDesc: JSON.stringify({ cron }),
     CustomArgument: customArgument,
+    Enable: 'OPEN',
   }] } : {}
 
   const result = await reconcileOwnedScfTimer(request, {
@@ -84,7 +85,7 @@ test('SCF timer deletes stale owned trigger and preserves exact desired and unre
   const calls = []
   let triggers = [
     { TriggerName: 'post-rag-worker-every-5-min', TriggerDesc: 'old' },
-    { TriggerName: 'post-rag-worker-every-minute', TriggerDesc: 'cron', CustomArgument: 'secret' },
+    { TriggerName: 'post-rag-worker-every-minute', TriggerDesc: 'cron', CustomArgument: 'secret', Enable: 'OPEN' },
     { TriggerName: 'unrelated', TriggerDesc: 'x' },
   ]
   const request = async (action, params) => {

@@ -21,10 +21,15 @@ function triggerCronMatches(triggerDesc, cron) {
   }
 }
 
+export function isScfTriggerEnabled(trigger) {
+  return trigger?.EnableStatus === 'OPEN' || trigger?.Enable === 'OPEN' || trigger?.Enable === true
+}
+
 function isDesiredTrigger(trigger, cron, customArgument) {
   return trigger.TriggerName === 'post-rag-worker-every-minute'
     && triggerCronMatches(trigger.TriggerDesc, cron)
     && trigger.CustomArgument === customArgument
+    && isScfTriggerEnabled(trigger)
 }
 
 export async function reconcileOwnedScfTimer(request, {
@@ -74,6 +79,7 @@ export async function reconcileOwnedScfTimer(request, {
       && trigger.TriggerName !== 'post-rag-worker-every-minute')
     if (matches.length === 1 && !hasStaleOwnedTrigger) {
       return {
+        changed: !keep,
         triggerName: 'post-rag-worker-every-minute',
         cron,
         customArgumentHash: await sha256(customArgument),

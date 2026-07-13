@@ -6,6 +6,7 @@ import path from 'node:path'
 import { ensurePostRagSmokeIdentitySecret } from './lib/post-rag-smoke-identity.mjs'
 import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
 import { buildPostSemanticFunctionEnvironments } from './lib/post-semantic-function-env.mjs'
+import { reconcileRagFunctionEnvironment } from './lib/rag-env-reconcile.mjs'
 
 function loadDotEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return {}
@@ -168,22 +169,15 @@ async function withTransientRetry(label, fn) {
 }
 
 for (const functionName of functionNames) {
-  const detail = await withTransientRetry(`${functionName}.getFunctionDetail`, () =>
-    app.functions.getFunctionDetail(functionName)
-  )
-  const existing = {}
-  for (const item of detail?.Environment?.Variables || []) existing[item.Key] = item.Value
-  for (const key of deprecatedEsEnvKeys) delete existing[key]
   const envForFunction = functionName === 'post' ? functionEnvironments.post : (
     functionName === 'post-video-rag-worker' ? { ...targetEnv, ...workerEnv, ...videoPolicyEnv, ...videoAnalyzerEnv } : (
       functionName === 'post-rag-worker' ? { ...functionEnvironments['post-rag-worker'], ...videoPolicyEnv } : targetEnv
     )
   )
-  const merged = { ...existing, ...envForFunction }
-  await withTransientRetry(`${functionName}.updateFunctionConfig`, () =>
-    app.functions.updateFunctionConfig({ name: functionName, envVariables: merged })
+  const result = await withTransientRetry(`${functionName}.reconcile`, () =>
+    reconcileRagFunctionEnvironment(app, functionName, envForFunction, { deprecatedKeys: deprecatedEsEnvKeys })
   )
-  console.log(`[rag-env] ${functionName} updated`)
+  console.log(`[rag-env] ${functionName} changed=${result.changed}`)
   console.table(Object.entries(envForFunction).map(([Key, Value]) => ({ Key, Value: redact(Value, Key) })))
 }
 

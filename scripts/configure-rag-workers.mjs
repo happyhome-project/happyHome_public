@@ -6,7 +6,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
-import { reconcileOwnedScfTimer } from './lib/scf-owned-timer.mjs'
+import { isScfTriggerEnabled, reconcileOwnedScfTimer } from './lib/scf-owned-timer.mjs'
 
 export const DEFAULT_RAG_WORKER_TIMEOUT_SECONDS = 120
 export const DEFAULT_RAG_WORKER_MEMORY_MB = 512
@@ -80,12 +80,10 @@ export async function applyRagWorkerConfig(app, configs) {
     const existing = {}
     for (const item of detail?.Environment?.Variables || []) existing[item.Key] = item.Value
     const envVariables = { ...existing, ...config.envVariables }
-    await app.functions.updateFunctionConfig({
-      name: config.name,
-      timeout: config.timeout,
-      memorySize: config.memorySize,
-      envVariables,
-    })
+    const configChanged = Number(detail?.Timeout ?? detail?.timeout) !== config.timeout
+      || Number(detail?.MemorySize ?? detail?.memorySize) !== config.memorySize
+      || JSON.stringify(Object.fromEntries(Object.entries(existing).sort())) !== JSON.stringify(Object.fromEntries(Object.entries(envVariables).sort()))
+    if (configChanged) await app.functions.updateFunctionConfig({ name: config.name, timeout: config.timeout, memorySize: config.memorySize, envVariables })
     if (config.name === 'post-rag-worker') {
       const trigger = config.triggers[0]
       const namespace = detail?.Namespace || app.functions.getFunctionConfig?.().namespace
@@ -93,13 +91,25 @@ export async function applyRagWorkerConfig(app, configs) {
         (action, payload) => app.functions.scfService.request(action, payload),
         { functionName: config.name, namespace, cron: trigger.config, customArgument: trigger.customArgument },
       )
-      results.push({ name: config.name, timeout: config.timeout, memorySize: config.memorySize, triggerNames: [timer.triggerName], timer })
+      results.push({ name: config.name, changed: configChanged || timer.changed, timeout: config.timeout, memorySize: config.memorySize, triggerNames: [timer.triggerName], timer })
       continue
     } else if (config.triggers?.length) {
-      await app.functions.createFunctionTriggers(config.name, config.triggers)
+      const response = await app.functions.scfService.request('ListTriggers', { FunctionName: config.name, Namespace: detail?.Namespace || app.functions.getFunctionConfig?.().namespace })
+      const current = Array.isArray(response?.Triggers) ? response.Triggers : []
+      const desired = config.triggers[0]
+      const owned = current.filter(item => item.TriggerName === desired.name || item.TriggerName?.startsWith(`${config.name}-every-`))
+      const matching = owned.filter(item => item.TriggerName === desired.name && (item.TriggerDesc === desired.config || item.TriggerDesc === JSON.stringify({ cron: desired.config })) && isScfTriggerEnabled(item))
+      const triggerChanged = owned.length !== 1 || matching.length !== 1
+      if (triggerChanged) {
+        for (const item of owned) await app.functions.scfService.request('DeleteTrigger', { FunctionName: config.name, Namespace: detail?.Namespace || app.functions.getFunctionConfig?.().namespace, TriggerName: item.TriggerName, Type: 'timer' })
+        await app.functions.createFunctionTriggers(config.name, config.triggers)
+      }
+      results.push({ name: config.name, changed: configChanged || triggerChanged, timeout: config.timeout, memorySize: config.memorySize, triggerNames: [desired.name] })
+      continue
     }
     results.push({
       name: config.name,
+      changed: configChanged,
       timeout: config.timeout,
       memorySize: config.memorySize,
       triggerNames: (config.triggers || []).map((trigger) => trigger.name),
