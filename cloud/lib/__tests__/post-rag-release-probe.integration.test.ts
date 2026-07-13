@@ -1,6 +1,7 @@
 const mockStore = new Map<string, any>()
 const mockRemoveFailures = new Map<string, number>()
 const mockTransactionReads = new Map<string, Array<any | (() => any)>>()
+const mockTransactionQueryHooks = new Map<string, Array<() => void>>()
 const mockKey = (collection: string, id: string) => `${collection}/${id}`
 const matchesWhere = (document: any, where: Record<string, any>) => Object.entries(where).every(([field, value]) => document?.[field] === value)
 
@@ -38,6 +39,15 @@ jest.mock('../db', () => ({
     const snapshot = structuredClone([...mockStore.entries()])
     try { return await callback({
     collection: (collection: string) => ({
+      where: (where: Record<string, any>) => ({
+        get: async () => {
+          const hooks = mockTransactionQueryHooks.get(collection)
+          if (hooks?.length) hooks.shift()!()
+          return { data: [...mockStore.entries()]
+            .filter(([key, document]) => key.startsWith(`${collection}/`) && matchesWhere(document, where))
+            .map(([, document]) => document) }
+        },
+      }),
       doc: (id: string) => ({
         get: async () => ({ data: mockStore.get(mockKey(collection, id)) }),
         set: async ({ data }: any) => {
@@ -125,6 +135,10 @@ function queueTransactionReads(collection: string, id: string, ...values: Array<
   mockTransactionReads.set(mockKey(collection, id), values)
 }
 
+function queueTransactionQueryHook(collection: string, hook: () => void) {
+  mockTransactionQueryHooks.set(collection, [...(mockTransactionQueryHooks.get(collection) || []), hook])
+}
+
 async function readyForFinalization(runId: string) {
   const probe = await beginCleanup(runId)
   bindOutboxes(probe)
@@ -138,6 +152,7 @@ beforeEach(() => {
   mockStore.clear()
   mockRemoveFailures.clear()
   mockTransactionReads.clear()
+  mockTransactionQueryHooks.clear()
 })
 
 test('first cleanup call persists the delete outbox and remains pending', async () => {
@@ -159,6 +174,19 @@ test('cleanup validates deterministic fixture and run identity before destructiv
   put('sections', 'business-section', { communityId: probe.communityId })
   put('post_rag_release_probes', probe.runId, {
     ...withoutTestId(getProbe(probe.runId)), postId: 'business-post', sectionId: 'business-section',
+  })
+
+  await expect(cleanupPostRagReleaseProbe({ runId: probe.runId })).rejects.toThrow(/binding/)
+  expect(mockStore.has(mockKey('posts', 'business-post'))).toBe(true)
+  expect(mockStore.has(mockKey('sections', 'business-section'))).toBe(true)
+})
+
+test('active cleanup transaction rejects probe binding rebound after the initial read', async () => {
+  const probe = await createPostRagReleaseProbe('run-active-tx-rebind')
+  put('posts', 'business-post', { communityId: probe.communityId })
+  put('sections', 'business-section', { communityId: probe.communityId })
+  queueTransactionReads('post_rag_release_probes', probe.runId, {
+    ...getProbe(probe.runId), postId: 'business-post', sectionId: 'business-section',
   })
 
   await expect(cleanupPostRagReleaseProbe({ runId: probe.runId })).rejects.toThrow(/binding/)
@@ -387,6 +415,29 @@ test('destructive transaction observes a create lease acquired after preparation
   expect(mockStore.has(mockKey('post_rag_outbox', probe.cleanupOutboxId))).toBe(true)
 })
 
+test.each(['pending', 'retry_wait'])('destructive transaction keeps current create job status %s pending', async status => {
+  const probe = await readyForFinalization(`run-tx-create-${status}`)
+  queueTransactionReads('post_rag_jobs', 'create-job', {
+    ...mockStore.get(mockKey('post_rag_jobs', 'create-job')), status, leaseExpiresAt: null,
+  })
+
+  expect(await cleanupPostRagReleaseProbe({ runId: probe.runId })).toMatchObject({ success: false, pending: true, status: 'finalizing' })
+  expect(mockStore.has(mockKey('post_rag_jobs', 'delete-job'))).toBe(true)
+})
+
+test.each([
+  ['status', { status: 'retry_wait', outcome: null }],
+  ['outcome', { status: 'completed', outcome: null }],
+])('destructive transaction requires cleanup job current %s readiness', async (_label, changed) => {
+  const probe = await readyForFinalization(`run-tx-delete-${_label}`)
+  queueTransactionReads('post_rag_jobs', 'delete-job', {
+    ...mockStore.get(mockKey('post_rag_jobs', 'delete-job')), ...changed,
+  })
+
+  expect(await cleanupPostRagReleaseProbe({ runId: probe.runId })).toMatchObject({ success: false, pending: true, status: 'finalizing' })
+  expect(mockStore.has(mockKey('post_rag_index_state_v2', probe.postId))).toBe(true)
+})
+
 test('destructive transaction rejects index state rebound to active after preparation', async () => {
   const probe = await readyForFinalization('run-tx-active-state')
   queueTransactionReads('post_rag_index_state_v2', probe.postId, {
@@ -430,6 +481,17 @@ test('destructive transaction revalidates probe binding before removing artifact
   await expect(cleanupPostRagReleaseProbe({ runId: probe.runId })).rejects.toThrow(/binding/)
   expect(mockStore.has(mockKey('post_rag_jobs', 'create-job'))).toBe(true)
   expect(mockStore.has(mockKey('post_rag_outbox', probe.outboxId))).toBe(true)
+})
+
+test('final mark transaction refuses a same-post version inserted after the outside zero check', async () => {
+  const probe = await readyForFinalization('run-final-query-race')
+  queueTransactionQueryHook('post_rag_index_versions', () => {
+    put('post_rag_index_versions', 'final-race-version', { schemaVersion: 2, postId: probe.postId })
+  })
+
+  expect(await cleanupPostRagReleaseProbe({ runId: probe.runId })).toMatchObject({ success: false, pending: true, status: 'finalizing' })
+  expect(getProbe(probe.runId)).toMatchObject({ status: 'finalizing', artifactsRemovedAt: expect.any(String) })
+  expect(mockStore.has(mockKey('post_rag_index_versions', 'final-race-version'))).toBe(true)
 })
 
 test('release probe evidence and status remain strictly run-bound', async () => {

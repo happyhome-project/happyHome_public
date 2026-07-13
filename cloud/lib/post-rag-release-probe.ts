@@ -216,7 +216,8 @@ async function finalizeProbeCleanup(probe: any) {
       if (!sameJobBinding(createJob, currentArtifacts.createJobBinding) || !sameJobBinding(cleanupJob, currentArtifacts.cleanupJobBinding)) {
         throw new Error('release probe job binding does not match persisted artifact binding')
       }
-      if (createJob.status === 'processing' && typeof createJob.leaseExpiresAt === 'string' && createJob.leaseExpiresAt > removedAt) {
+      if (!createJobSafeToRemove(createJob, removedAt)) return { pending: true, removed: false }
+      if (cleanupJob.status !== 'completed' || !['removed', 'superseded'].includes(cleanupJob.outcome)) {
         return { pending: true, removed: false }
       }
       const state = await db.transactionGetByIdOrNull<any>(tx, 'post_rag_index_state_v2', current.postId)
@@ -261,6 +262,11 @@ async function finalizeProbeCleanup(probe: any) {
     ] as Array<[string, string[]]>) {
       for (const artifactId of ids) if (await db.transactionGetByIdOrNull(tx, collection, artifactId)) return null
     }
+    const versionCollection = tx.collection('post_rag_index_versions') as unknown as {
+      where: (where: Record<string, any>) => { get: () => Promise<{ data: any[] }> }
+    }
+    const currentVersions = await versionCollection.where({ postId: current.postId }).get()
+    if (!Array.isArray(currentVersions?.data) || currentVersions.data.length !== 0) return null
     const next = { ...current, status: 'cleaned', cleanedAt: now, cleanupCounts }
     await tx.collection(PROBES).doc(probe.runId).set({ data: withoutId(next) })
     return next
@@ -344,6 +350,10 @@ export async function cleanupPostRagReleaseProbe(input: any) {
   const started = await db.runTransaction(async tx => {
     const current = await db.transactionGetByIdOrNull<any>(tx, PROBES, id)
     if (!current) throw new Error('release probe run binding not found')
+    assertProbeIdentity(id, current)
+    if (current.communityId !== probe.communityId || current.sectionId !== probe.sectionId || current.postId !== probe.postId) {
+      throw new Error('release probe ids do not match run binding')
+    }
     if (current.status !== 'active') return current
     if (await db.transactionGetByIdOrNull(tx, 'posts', current.postId)) await tx.collection('posts').doc(current.postId).remove()
     if (await db.transactionGetByIdOrNull(tx, 'sections', current.sectionId)) await tx.collection('sections').doc(current.sectionId).remove()
