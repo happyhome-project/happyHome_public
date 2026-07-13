@@ -62,10 +62,11 @@ import ci from 'miniprogram-ci'
 import { resolve, dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import { execSync, spawn, spawnSync } from 'child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { parseArgs as parseCloudSmokeArgs, runCloudReleaseSmoke } from './cloud-release-smoke.mjs'
 import { deployFunctionsWithConcurrency } from './lib/cloudbase-function-deploy.mjs'
+import { abortableDelay, runAbortableShellCapture } from './lib/abortable-process.mjs'
 import { createProductionReleaseStore } from './lib/cloudbase-release-store.mjs'
 import {
   analyzeDevtoolsCloudDeployOutput,
@@ -106,10 +107,14 @@ import { ReleaseGovernance } from './lib/release-governance.mjs'
 import {
   attestAdminWebArtifact,
   attestMiniprogramReceipt,
+  computeFileSha256,
+  createDeterministicFileManifest,
+  createPinnedCloudDeployAttemptGuard,
   createImmutableArtifactSnapshots,
   createReleaseArtifactManifest,
   orchestrateCloudArtifactRelease,
   runPinnedAdminArtifactMutation,
+  runPinnedAdminArchiveMutation,
   toPublicCloudArtifactIdentity,
 } from './lib/release-artifact-attestation.mjs'
 import {
@@ -333,43 +338,12 @@ function runShell(commandLine, options = {}) {
 
 function runShellCapture(commandLine, options = {}) {
   console.log(options.displayCommandLine || commandLine)
-  return new Promise((res) => {
-    const proc = spawn(commandLine, {
-      cwd: options.cwd || ROOT,
-      env: options.env || process.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: true,
-    })
-    const abort = () => {
-      if (process.platform === 'win32' && proc.pid) {
-        const killer = spawn('taskkill', ['/pid', String(proc.pid), '/t', '/f'], { stdio: 'ignore', windowsHide: true })
-        killer.on('error', () => proc.kill())
-      } else proc.kill('SIGTERM')
-    }
-    if (options.signal?.aborted) abort()
-    else options.signal?.addEventListener('abort', abort, { once: true })
-
-    let stdout = ''
-    let stderr = ''
-    proc.stdout?.on('data', (chunk) => {
-      const text = String(chunk)
-      stdout += text
-      if (!options.silentOutput) process.stdout.write(text)
-    })
-    proc.stderr?.on('data', (chunk) => {
-      const text = String(chunk)
-      stderr += text
-      if (!options.silentOutput) process.stderr.write(text)
-    })
-    proc.on('exit', (code) => {
-      options.signal?.removeEventListener('abort', abort)
-      const output = `${stdout}${stderr}`
-      res({ ok: code === 0, reason: options.signal?.aborted ? 'aborted' : code === 0 ? 'ok' : `exit code ${code}`, output })
-    })
-    proc.on('error', (err) => {
-      options.signal?.removeEventListener('abort', abort)
-      res({ ok: false, reason: String(err?.message || err), output: `${stdout}${stderr}` })
-    })
+  return runAbortableShellCapture(commandLine, {
+    ...options,
+    cwd: options.cwd || ROOT,
+    env: options.env || process.env,
+    stdout: (text) => process.stdout.write(text),
+    stderr: (text) => process.stderr.write(text),
   })
 }
 
@@ -393,10 +367,6 @@ function logCloudFunctionDetailSummary(functionName, output) {
   return data
 }
 
-function sleep(ms) {
-  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
-}
-
 function isTransientCloudBaseCliFailure(result) {
   const text = `${result?.reason || ''}\n${result?.output || ''}`
   return /ECONNRESET|ETIMEDOUT|TLS connection|socket disconnected|network timeout|ENOTFOUND|EAI_AGAIN|_a\.includes is not a function|e\.message\.includes is not a function/i.test(text)
@@ -406,7 +376,9 @@ async function runCloudBaseCliCaptureWithRetry(commandLine, options = {}, attemp
   const { beforeAttempt, ...shellOptions } = options
   let lastResult = null
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    if (shellOptions.signal?.aborted) throw new Error('operation aborted before CloudBase CLI attempt')
     if (typeof beforeAttempt === 'function') await beforeAttempt({ attempt, attempts })
+    if (shellOptions.signal?.aborted) throw new Error('operation aborted before CloudBase CLI process start')
     const result = await runShellCapture(commandLine, {
       ...shellOptions,
       displayCommandLine: attempt === 1
@@ -414,10 +386,11 @@ async function runCloudBaseCliCaptureWithRetry(commandLine, options = {}, attemp
         : `${shellOptions.displayCommandLine || commandLine} (retry ${attempt}/${attempts})`,
     })
     if (result.ok) return result
+    if (shellOptions.signal?.aborted || result.aborted) return result
     lastResult = result
     if (!isTransientCloudBaseCliFailure(result) || attempt >= attempts) break
     console.warn(`[CloudBase CLI] transient failure; retrying in ${attempt * 3000}ms`)
-    await sleep(attempt * 3000)
+    await abortableDelay(attempt * 3000, shellOptions.signal)
   }
   return lastResult
 }
@@ -1004,6 +977,7 @@ async function deployAdminWebToAliyun(options = {}) {
   const remoteArchivePath = `/tmp/happyhome-admin-web-${stamp}.tgz`
   const remoteScriptPath = `/tmp/deploy-happyhome-admin-${stamp}.sh`
   const localScriptPath = join(tmpdir(), `deploy-happyhome-admin-${stamp}.sh`)
+  const stagingRoot = join(tmpdir(), `happyhome-admin-web-${stamp}`)
   const artifactMarker = Buffer.from(JSON.stringify({
     contentDigest: options.artifact?.contentDigest || '',
     runId: options.artifact?.runId || '',
@@ -1020,13 +994,47 @@ async function deployAdminWebToAliyun(options = {}) {
   const forceLocalFlag = tarHelp.includes('--force-local') ? '--force-local ' : ''
   // Git Bash tar needs --force-local for Windows drive-letter paths; Windows tar rejects it.
 
-  const remoteScript = `#!/usr/bin/env bash
+  console.log('\nDeploying admin-web dist to Aliyun Nginx host...')
+  console.log(`Using VITE_CLOUD_API_URL=${env.VITE_CLOUD_API_URL}`)
+  console.log(`Using VITE_ROUTER_MODE=${env.VITE_ROUTER_MODE}`)
+  console.log(`Using ADMIN_WEB_SSH_HOST=${ADMIN_WEB_ALIYUN_HOST}`)
+  let expectedArchiveDigest = ''
+  let expectedScriptDigest = ''
+  try {
+    await runOptionalDirectRemoteMutation(options, async () => await runPinnedAdminArtifactMutation({
+      artifactRoot,
+      expectedDigest,
+      runners: [async () => {
+        rmSync(stagingRoot, { recursive: true, force: true })
+        cpSync(artifactRoot, stagingRoot, { recursive: true, errorOnExist: true })
+        const stagedDigest = await computeDirectoryDigest(stagingRoot)
+        if (stagedDigest !== expectedDigest) throw new Error('immutable admin-web staging digest mismatch')
+        writeFileSync(join(stagingRoot, '.happyhome-file-manifest.sha256'), await createDeterministicFileManifest(stagingRoot), 'utf8')
+        execSync(`tar ${forceLocalFlag}-czf ${quote(archivePath)} -C ${quote(stagingRoot)} .`, { cwd: ROOT, stdio: 'inherit' })
+        expectedArchiveDigest = await computeFileSha256(archivePath)
+      }],
+    }))
+
+    const remoteScript = `#!/usr/bin/env bash
 set -euo pipefail
 root=${JSON.stringify(ADMIN_WEB_ALIYUN_ROOT)}
 archive=${JSON.stringify(remoteArchivePath)}
+expected_archive_sha=${JSON.stringify(expectedArchiveDigest)}
+actual_archive_sha="$(sha256sum "$archive" | awk '{print $1}')"
+test "$actual_archive_sha" = "$expected_archive_sha"
 release="$root/releases/$(date +%Y%m%d%H%M%S)"
 sudo mkdir -p "$release"
 sudo tar -xzf "$archive" -C "$release"
+manifest="$release/.happyhome-file-manifest.sha256"
+test -f "$manifest"
+expected_files="$(mktemp)"
+actual_files="$(mktemp)"
+sed -E 's/^[0-9a-f]{64}  //' "$manifest" | LC_ALL=C sort > "$expected_files"
+(cd "$release" && find . -type f ! -name '.happyhome-file-manifest.sha256' -printf '%P\\n' | LC_ALL=C sort) > "$actual_files"
+diff -u "$expected_files" "$actual_files"
+(cd "$release" && sha256sum -c '.happyhome-file-manifest.sha256')
+rm -f "$expected_files" "$actual_files"
+sudo rm -f "$manifest"
 sudo chown -R root:root "$release"
 sudo find "$release" -type d -exec chmod 755 {} \\;
 sudo find "$release" -type f -exec chmod 644 {} \\;
@@ -1038,36 +1046,35 @@ rm -f "$archive" ${JSON.stringify(remoteScriptPath)}
 echo "[OK] Admin web deployed to $release"
 readlink -f "$root/current"
 `
-  writeFileSync(localScriptPath, remoteScript, 'utf8')
+    writeFileSync(localScriptPath, remoteScript, 'utf8')
+    expectedScriptDigest = await computeFileSha256(localScriptPath)
+    const remoteLaunchCommand = [
+      `actual_script_sha=$(sha256sum ${quote(remoteScriptPath)} | awk '{print $1}')`,
+      `test "$actual_script_sha" = ${quote(expectedScriptDigest)}`,
+      `bash ${quote(remoteScriptPath)}`,
+    ].join(' && ')
 
-  console.log('\nDeploying admin-web dist to Aliyun Nginx host...')
-  console.log(`Using VITE_CLOUD_API_URL=${env.VITE_CLOUD_API_URL}`)
-  console.log(`Using VITE_ROUTER_MODE=${env.VITE_ROUTER_MODE}`)
-  console.log(`Using ADMIN_WEB_SSH_HOST=${ADMIN_WEB_ALIYUN_HOST}`)
-  await runOptionalDirectRemoteMutation(options, async () => await runPinnedAdminArtifactMutation({
-    artifactRoot,
-    expectedDigest,
-    runners: [async () => execSync(`tar ${forceLocalFlag}-czf ${quote(archivePath)} -C ${quote(artifactRoot)} .`, { cwd: ROOT, stdio: 'inherit' })],
-  }))
-  const [uploadArchive] = await runOptionalDirectRemoteMutation(options, async () => await runPinnedAdminArtifactMutation({
-    artifactRoot,
-    expectedDigest,
-    runners: [async () => await runShell(`scp ${quote(archivePath)} ${quote(`${ADMIN_WEB_ALIYUN_HOST}:${remoteArchivePath}`)}`)],
-  }))
-  if (!uploadArchive.ok) throw new Error(`Admin web archive upload failed: ${uploadArchive.reason}`)
-  const [uploadScript] = await runOptionalDirectRemoteMutation(options, async () => await runPinnedAdminArtifactMutation({
-    artifactRoot,
-    expectedDigest,
-    runners: [async () => await runShell(`scp ${quote(localScriptPath)} ${quote(`${ADMIN_WEB_ALIYUN_HOST}:${remoteScriptPath}`)}`)],
-  }))
-  if (!uploadScript.ok) throw new Error(`Admin web deploy script upload failed: ${uploadScript.reason}`)
-  const [deploy] = await runOptionalDirectRemoteMutation(options, async () => await runPinnedAdminArtifactMutation({
-    artifactRoot,
-    expectedDigest,
-    runners: [async () => await runShell(`ssh ${quote(ADMIN_WEB_ALIYUN_HOST)} ${quote(`bash ${remoteScriptPath}`)}`)],
-  }))
-  if (!deploy.ok) throw new Error(`Admin web Aliyun deploy failed: ${deploy.reason}`)
-  console.log('[OK] Admin web deployed to Aliyun Nginx host')
+    const [uploadArchive] = await runOptionalDirectRemoteMutation(options, async () => await runPinnedAdminArchiveMutation({
+      artifactRoot, expectedDigest, archivePath, expectedArchiveDigest, scriptPath: localScriptPath, expectedScriptDigest,
+      runners: [async () => await runShell(`scp ${quote(archivePath)} ${quote(`${ADMIN_WEB_ALIYUN_HOST}:${remoteArchivePath}`)}`)],
+    }))
+    if (!uploadArchive.ok) throw new Error(`Admin web archive upload failed: ${uploadArchive.reason}`)
+    const [uploadScript] = await runOptionalDirectRemoteMutation(options, async () => await runPinnedAdminArchiveMutation({
+      artifactRoot, expectedDigest, archivePath, expectedArchiveDigest, scriptPath: localScriptPath, expectedScriptDigest,
+      runners: [async () => await runShell(`scp ${quote(localScriptPath)} ${quote(`${ADMIN_WEB_ALIYUN_HOST}:${remoteScriptPath}`)}`)],
+    }))
+    if (!uploadScript.ok) throw new Error(`Admin web deploy script upload failed: ${uploadScript.reason}`)
+    const [deploy] = await runOptionalDirectRemoteMutation(options, async () => await runPinnedAdminArchiveMutation({
+      artifactRoot, expectedDigest, archivePath, expectedArchiveDigest, scriptPath: localScriptPath, expectedScriptDigest,
+      runners: [async () => await runShell(`ssh ${quote(ADMIN_WEB_ALIYUN_HOST)} ${quote(remoteLaunchCommand)}`)],
+    }))
+    if (!deploy.ok) throw new Error(`Admin web Aliyun deploy failed: ${deploy.reason}`)
+    console.log('[OK] Admin web deployed to Aliyun Nginx host')
+  } finally {
+    rmSync(archivePath, { force: true })
+    rmSync(localScriptPath, { force: true })
+    rmSync(stagingRoot, { recursive: true, force: true })
+  }
 }
 
 async function deployAdminWeb(options = {}) {
@@ -1441,10 +1448,16 @@ async function runFormalRelease(options = {}) {
         timeoutMs: getPositiveIntFlag('cloud-attestation-timeout-ms', 30_000, { max: 120_000 }),
         attest: invokeCloudReleaseProbe,
         deploy: async ({ artifactRoot, functionName }) => {
+          const artifact = artifactManifest.artifacts.cloud[functionName]
           const result = await deployCloud({
             afterFunctionDeploy: async (fn, record) => await releaseGuard.recordStage(`cloud:${fn}`, { evidence: record }),
             artifactRoot: dirname(artifactRoot),
-            beforeFunctionDeploy: async (fn) => await revalidateFormalMutation(`cloud:${fn}`),
+            beforeFunctionDeploy: createPinnedCloudDeployAttemptGuard({
+              artifactRoot,
+              expectedDigest: artifact.contentDigest,
+              functionName,
+              beforeFence: async (fn) => await revalidateFormalMutation(`cloud:${fn}`),
+            }),
             functions: [functionName],
             requireCloudBaseCli: true,
             skipBuild: true,

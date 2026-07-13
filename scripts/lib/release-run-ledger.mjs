@@ -1,4 +1,4 @@
-import { access, appendFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { access, appendFile, lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -125,6 +125,10 @@ async function readJson(path) {
 
 export async function computeDirectoryDigest(inputRoot) {
   const root = resolve(inputRoot)
+  const realRoot = await realpath(root)
+  const pathKey = (path) => process.platform === 'win32' ? resolve(path).replace(/\//g, '\\').toLowerCase() : resolve(path)
+  if (pathKey(realRoot) !== pathKey(root)) throw new Error(`directory digest rejects symbolic link junction or reparse path: ${root}`)
+  if ((await lstat(root)).isSymbolicLink()) throw new Error(`directory digest rejects symbolic link or reparse root: ${root}`)
   const entries = []
   async function walk(directory, prefix = '') {
     const children = await readdir(directory, { withFileTypes: true })
@@ -132,12 +136,16 @@ export async function computeDirectoryDigest(inputRoot) {
     for (const child of children) {
       const relativePath = prefix ? `${prefix}/${child.name}` : child.name
       const absolutePath = join(directory, child.name)
-      if (child.isDirectory()) {
+      if (child.isSymbolicLink()) {
+        throw new Error(`directory digest rejects symbolic link or reparse entry: ${relativePath}`)
+      } else if (child.isDirectory()) {
         await walk(absolutePath, relativePath)
       } else if (child.isFile()) {
         const contents = await readFile(absolutePath)
         const fileStat = await stat(absolutePath)
         entries.push(`${relativePath}\0${fileStat.size}\0${createHash('sha256').update(contents).digest('hex')}`)
+      } else {
+        throw new Error(`directory digest rejects unsupported or reparse entry: ${relativePath}`)
       }
     }
   }

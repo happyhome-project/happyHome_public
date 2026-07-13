@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { cp, mkdir, readFile, rename, rm } from 'node:fs/promises'
+import { cp, mkdir, readFile, readdir, realpath, rename, rm } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import { computeDirectoryDigest } from './release-run-ledger.mjs'
@@ -19,8 +19,41 @@ function absolutePath(root, path) {
   return isAbsolute(path) ? path : resolve(root, path)
 }
 
+function canonicalPathKey(path) {
+  const normalized = resolve(path)
+  return process.platform === 'win32' ? normalized.replace(/\//g, '\\').toLowerCase() : normalized
+}
+
+async function assertExactSnapshotPath({ root, runId, artifactPath, suffix, component }) {
+  if (!/^[a-zA-Z0-9._-]+$/.test(String(runId || '')) || suffix.some((part) => !part || part === '.' || part === '..' || /[\\/]/.test(part))) {
+    throw new Error(`immutable ${component} artifact path is invalid`)
+  }
+  const expected = resolve(root, '.codex-local', 'release-artifacts', runId, ...suffix)
+  const actual = absolutePath(root, artifactPath)
+  if (canonicalPathKey(actual) !== canonicalPathKey(expected)) throw new Error(`immutable ${component} artifact path is invalid`)
+  const realRoot = await realpath(root)
+  const expectedRealPath = resolve(realRoot, '.codex-local', 'release-artifacts', runId, ...suffix)
+  let actualRealPath
+  try { actualRealPath = await realpath(actual) } catch { throw new Error(`immutable ${component} artifact is missing`) }
+  if (canonicalPathKey(actualRealPath) !== canonicalPathKey(expectedRealPath)) throw new Error(`immutable ${component} artifact path is invalid`)
+  return expected
+}
+
 function assertIdentity(value, name) {
   if (!String(value || '').trim()) throw new Error(`release artifact manifest requires ${name}`)
+}
+
+function assertSafePathSegment(value, name) {
+  if (!/^[a-zA-Z0-9._-]+$/.test(String(value || '')) || value === '.' || value === '..') {
+    throw new Error(`release artifact requires safe ${name}`)
+  }
+}
+
+async function assertNoPathRedirection(path, component) {
+  const resolved = resolve(path)
+  let real
+  try { real = await realpath(resolved) } catch { throw new Error(`immutable ${component} is missing`) }
+  if (canonicalPathKey(real) !== canonicalPathKey(resolved)) throw new Error(`immutable ${component} rejects symbolic link junction or reparse path`)
 }
 
 export async function createImmutableArtifactSnapshots({ root, runId, plan, paths = {} } = {}) {
@@ -29,13 +62,23 @@ export async function createImmutableArtifactSnapshots({ root, runId, plan, path
   const destination = resolve(root, '.codex-local', 'release-artifacts', runId)
   const temporary = resolve(dirname(destination), `.${runId}.tmp-${process.pid}-${Date.now()}`)
   await mkdir(dirname(destination), { recursive: true })
+  const realRoot = await realpath(root)
+  const realSnapshotParent = await realpath(dirname(destination))
+  if (canonicalPathKey(realSnapshotParent) !== canonicalPathKey(resolve(realRoot, '.codex-local', 'release-artifacts'))) {
+    throw new Error('immutable release artifact snapshot rejects symbolic link or reparse parent')
+  }
   await rm(temporary, { recursive: true, force: true })
   try {
     await mkdir(temporary, { recursive: true })
     for (const functionName of plan.targets?.cloud?.functions || []) {
+      assertSafePathSegment(functionName, 'cloud function name')
+      await computeDirectoryDigest(join(paths.cloudRoot, functionName))
       await cp(join(paths.cloudRoot, functionName), join(temporary, 'cloud', functionName), { recursive: true, errorOnExist: true })
     }
-    if (plan.targets?.adminWeb) await cp(paths.adminWebRoot, join(temporary, 'admin-web'), { recursive: true, errorOnExist: true })
+    if (plan.targets?.adminWeb) {
+      await computeDirectoryDigest(paths.adminWebRoot)
+      await cp(paths.adminWebRoot, join(temporary, 'admin-web'), { recursive: true, errorOnExist: true })
+    }
     await rename(temporary, destination)
   } catch (error) {
     await rm(temporary, { recursive: true, force: true })
@@ -74,9 +117,10 @@ async function validatePinnedCloudArtifacts({ root, manifest }) {
   for (const functionName of manifest.targets?.cloudFunctions || []) {
     const artifact = manifest.artifacts?.cloud?.[functionName]
     if (!artifact) throw new Error(`immutable cloud artifact is missing from manifest for ${functionName}`)
-    const artifactRoot = absolutePath(root, artifact.artifactPath)
-    const expectedRoot = resolve(root, '.codex-local', 'release-artifacts', manifest.runId, 'cloud', functionName)
-    if (resolve(artifactRoot) !== expectedRoot) throw new Error(`immutable cloud artifact path is invalid for ${functionName}`)
+    const artifactRoot = await assertExactSnapshotPath({
+      root, runId: manifest.runId, artifactPath: artifact.artifactPath,
+      suffix: ['cloud', functionName], component: `cloud artifact for ${functionName}`,
+    })
     let digest
     try { digest = await computeDirectoryDigest(artifactRoot) } catch { throw new Error(`immutable cloud artifact is missing for ${functionName}`) }
     if (digest !== artifact.contentDigest) throw new Error(`immutable cloud artifact digest mismatch for ${functionName}`)
@@ -90,25 +134,40 @@ async function validatePinnedCloudArtifacts({ root, manifest }) {
   return pinned
 }
 
-async function boundedOperation(operation, timeoutMs) {
-  const controller = new AbortController()
-  let timer
-  try {
-    return await Promise.race([
-      Promise.resolve().then(() => operation(controller.signal)),
-      new Promise((_, reject) => {
-        timer = setTimeout(() => {
-          controller.abort()
-          reject(new Error(`operation timed out after ${timeoutMs}ms`))
-        }, timeoutMs)
-      }),
-    ])
-  } finally {
-    clearTimeout(timer)
-  }
+function taggedError(message, code) {
+  const error = new Error(message)
+  error.code = code
+  return error
 }
 
-export async function orchestrateCloudArtifactRelease({ root, manifest, timeoutMs = 30_000, attest, deploy, verify, onSecrets } = {}) {
+export async function boundedOperation(operation, timeoutMs, { cleanupGraceMs = 5_000 } = {}) {
+  const controller = new AbortController()
+  const operationPromise = Promise.resolve().then(() => operation(controller.signal))
+  let timeoutTimer
+  const first = await Promise.race([
+    operationPromise.then((value) => ({ status: 'fulfilled', value }), (error) => ({ status: 'rejected', error })),
+    new Promise((resolveTimeout) => { timeoutTimer = setTimeout(() => resolveTimeout({ status: 'timeout' }), timeoutMs) }),
+  ])
+  clearTimeout(timeoutTimer)
+  if (first.status === 'fulfilled') return first.value
+  if (first.status === 'rejected') throw first.error
+
+  controller.abort()
+  let cleanupTimer
+  const cleanupOutcome = await Promise.race([
+    operationPromise.then(
+      () => ({ settled: true }),
+      (error) => ({ settled: true, error }),
+    ),
+    new Promise((resolveCleanup) => { cleanupTimer = setTimeout(() => resolveCleanup({ settled: false }), cleanupGraceMs) }),
+  ])
+  clearTimeout(cleanupTimer)
+  if (!cleanupOutcome.settled) throw taggedError(`timed out operation did not settle after abort within ${cleanupGraceMs}ms`, 'ERR_RELEASE_ATTESTATION_ABORT_CLEANUP')
+  if (cleanupOutcome.error?.code === 'ERR_RELEASE_ATTESTATION_ABORT_CLEANUP') throw cleanupOutcome.error
+  throw taggedError(`operation timed out after ${timeoutMs}ms after cleanup settled`, 'ERR_RELEASE_ATTESTATION_TIMEOUT')
+}
+
+export async function orchestrateCloudArtifactRelease({ root, manifest, timeoutMs = 30_000, cleanupGraceMs = 5_000, attest, deploy, verify, onSecrets } = {}) {
   if (![attest, deploy, verify].every((value) => typeof value === 'function')) throw new Error('cloud artifact orchestration requires attest, deploy, and verify')
   const pinned = await validatePinnedCloudArtifacts({ root, manifest })
   const secrets = pinned.map((item) => item.probeToken)
@@ -117,12 +176,13 @@ export async function orchestrateCloudArtifactRelease({ root, manifest, timeoutM
   const deployFunctions = []
   for (const item of pinned) {
     try {
-      const response = await boundedOperation((signal) => attest({ ...item, signal }), timeoutMs)
+      const response = await boundedOperation((signal) => attest({ ...item, signal }), timeoutMs, { cleanupGraceMs })
       if (response?.functionName !== item.artifact.functionName || response?.buildId !== item.artifact.buildId || response?.sourceSha !== item.artifact.sourceSha) {
         throw new Error('fresh probe response does not match artifact identity')
       }
       attestations.push({ component: `cloud:${item.functionName}`, functionName: item.functionName, status: 'attested', skipReason: 'fresh remote probe matched immutable snapshot' })
     } catch (error) {
+      if (error?.code === 'ERR_RELEASE_ATTESTATION_ABORT_CLEANUP') throw error
       deployFunctions.push(item.functionName)
       attestations.push({
         component: `cloud:${item.functionName}`,
@@ -143,7 +203,7 @@ export async function orchestrateCloudArtifactRelease({ root, manifest, timeoutM
     const digest = await computeDirectoryDigest(item.artifactRoot)
     if (digest !== item.artifact.contentDigest) throw new Error(`immutable cloud artifact digest changed before verify for ${item.functionName}`)
     try {
-      await boundedOperation((signal) => verify({ ...item, signal }), timeoutMs)
+      await boundedOperation((signal) => verify({ ...item, signal }), timeoutMs, { cleanupGraceMs })
     } catch (error) {
       throw new Error(sanitizeKnownSecrets(error?.message || String(error), secrets))
     }
@@ -157,6 +217,7 @@ export async function createReleaseArtifactManifest({ root, runId, gitSha, envId
   const cloudFunctions = [...(plan.targets?.cloud?.functions || [])]
   const artifacts = { cloud: {}, adminWeb: null, miniprogram: null }
   for (const functionName of cloudFunctions) {
+    assertSafePathSegment(functionName, 'cloud function name')
     const artifactRoot = join(paths.cloudRoot, functionName)
     const probe = JSON.parse(await readFile(join(artifactRoot, '__release.info.json'), 'utf8'))
     if (probe.functionName !== functionName || probe.sourceSha !== gitSha || !probe.buildId || !/^[a-f0-9]{64}$/i.test(String(probe.probeToken || ''))) {
@@ -230,9 +291,13 @@ export async function attestCloudArtifacts({ root, manifest, invoke } = {}) {
 }
 
 export async function attestAdminWebArtifact({ root, artifact, inspectRemote } = {}) {
-  if (root && artifact?.artifactPath) {
+  if (root) {
+    const artifactRoot = await assertExactSnapshotPath({
+      root, runId: artifact?.runId, artifactPath: artifact?.artifactPath,
+      suffix: ['admin-web'], component: 'admin-web',
+    })
     let localDigest
-    try { localDigest = await computeDirectoryDigest(absolutePath(root, artifact.artifactPath)) } catch {
+    try { localDigest = await computeDirectoryDigest(artifactRoot) } catch {
       throw new Error('immutable admin-web artifact is missing')
     }
     if (localDigest !== artifact.contentDigest) throw new Error('immutable admin-web artifact digest mismatch')
@@ -253,11 +318,89 @@ export async function attestAdminWebArtifact({ root, artifact, inspectRemote } =
 
 export async function assertPinnedAdminArtifact(artifactRoot, expectedDigest) {
   if (!artifactRoot || !expectedDigest) throw new Error('pinned admin-web artifact root and digest are required')
+  await assertNoPathRedirection(artifactRoot, 'admin-web artifact')
   let actualDigest
   try { actualDigest = await computeDirectoryDigest(artifactRoot) } catch {
     throw new Error('immutable admin-web artifact is missing')
   }
   if (actualDigest !== expectedDigest) throw new Error('immutable admin-web artifact digest mismatch')
+}
+
+export async function computeFileSha256(path) {
+  return sha256(await readFile(path))
+}
+
+export async function createDeterministicFileManifest(artifactRoot) {
+  const records = []
+  async function walk(directory, prefix = '') {
+    const entries = await readdir(directory, { withFileTypes: true })
+    entries.sort((left, right) => left.name.localeCompare(right.name))
+    for (const entry of entries) {
+      const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name
+      if (/[\\\r\n]/.test(relativePath)) throw new Error(`admin-web manifest rejects unsafe path: ${relativePath}`)
+      if (relativePath === '.happyhome-file-manifest.sha256') throw new Error('admin-web manifest rejects reserved manifest path')
+      const path = join(directory, entry.name)
+      if (entry.isSymbolicLink()) throw new Error(`admin-web manifest rejects symbolic link or reparse entry: ${relativePath}`)
+      if (entry.isDirectory()) await walk(path, relativePath)
+      else if (entry.isFile()) records.push(`${await computeFileSha256(path)}  ${relativePath}`)
+      else throw new Error(`admin-web manifest rejects unsupported or reparse entry: ${relativePath}`)
+    }
+  }
+  await walk(artifactRoot)
+  return `${records.join('\n')}\n`
+}
+
+export async function assertPinnedAdminArchive(archivePath, expectedDigest) {
+  if (!archivePath || !expectedDigest) throw new Error('pinned admin-web archive path and digest are required')
+  let actualDigest
+  try { actualDigest = await computeFileSha256(archivePath) } catch {
+    throw new Error('immutable admin-web archive is missing')
+  }
+  if (actualDigest !== expectedDigest) throw new Error('immutable admin-web archive digest mismatch')
+}
+
+export async function assertPinnedAdminScript(scriptPath, expectedDigest) {
+  if (!scriptPath || !expectedDigest) throw new Error('pinned admin-web script path and digest are required')
+  let actualDigest
+  try { actualDigest = await computeFileSha256(scriptPath) } catch {
+    throw new Error('immutable admin-web deploy script is missing')
+  }
+  if (actualDigest !== expectedDigest) throw new Error('immutable admin-web deploy script digest mismatch')
+}
+
+export async function runPinnedAdminArchiveMutation({
+  artifactRoot, expectedDigest, archivePath, expectedArchiveDigest,
+  scriptPath = '', expectedScriptDigest = '', runners = [],
+} = {}) {
+  if (!Array.isArray(runners) || runners.length === 0 || runners.some((runner) => typeof runner !== 'function')) {
+    throw new Error('pinned admin-web archive mutation runners must be functions')
+  }
+  const results = []
+  for (const runner of runners) {
+    await assertPinnedAdminArtifact(artifactRoot, expectedDigest)
+    await assertPinnedAdminArchive(archivePath, expectedArchiveDigest)
+    if (scriptPath || expectedScriptDigest) await assertPinnedAdminScript(scriptPath, expectedScriptDigest)
+    results.push(await runner())
+  }
+  return results
+}
+
+export async function assertPinnedCloudArtifact(artifactRoot, expectedDigest, functionName) {
+  if (!artifactRoot || !expectedDigest || !functionName) throw new Error('pinned cloud artifact root digest and function are required')
+  await assertNoPathRedirection(artifactRoot, `cloud artifact for ${functionName}`)
+  let actualDigest
+  try { actualDigest = await computeDirectoryDigest(artifactRoot) } catch {
+    throw new Error(`immutable cloud artifact is missing for ${functionName}`)
+  }
+  if (actualDigest !== expectedDigest) throw new Error(`immutable cloud artifact digest mismatch for ${functionName}`)
+}
+
+export function createPinnedCloudDeployAttemptGuard({ artifactRoot, expectedDigest, functionName, beforeFence } = {}) {
+  if (typeof beforeFence !== 'function') throw new Error('pinned cloud deploy attempt requires a fence callback')
+  return async () => {
+    await beforeFence(functionName)
+    await assertPinnedCloudArtifact(artifactRoot, expectedDigest, functionName)
+  }
 }
 
 export async function runPinnedAdminArtifactMutation({ artifactRoot, expectedDigest, runners = [] } = {}) {

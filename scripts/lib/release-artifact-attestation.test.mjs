@@ -1,24 +1,31 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
+import { EventEmitter } from 'node:events'
+import { PassThrough } from 'node:stream'
 
 import {
   attestAdminWebArtifact,
   attestCloudArtifacts,
   attestMiniprogramReceipt,
   assertPinnedAdminArtifact,
+  computeFileSha256,
+  createDeterministicFileManifest,
+  createPinnedCloudDeployAttemptGuard,
   createImmutableArtifactSnapshots,
   createMiniprogramReceiptIdentity,
   createReleaseArtifactManifest,
   orchestrateCloudArtifactRelease,
   runPinnedAdminArtifactMutation,
+  runPinnedAdminArchiveMutation,
   summarizeArtifactOutcomes,
   toPublicCloudArtifactIdentity,
 } from './release-artifact-attestation.mjs'
 import { normalizeMiniprogramUploadReceipt } from './miniprogram-receipt-identity.mjs'
 import { computeDirectoryDigest } from './release-run-ledger.mjs'
+import { abortableDelay, runAbortableShellCapture } from './abortable-process.mjs'
 
 async function fixtureRoot() {
   const root = join(tmpdir(), `happyhome-artifacts-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`)
@@ -126,7 +133,7 @@ test('admin exact match attests while mismatch and unreadable remote state deplo
 test('admin attestation rejects a changed local artifact before trusting remote identity', async () => {
   const root = await fixtureRoot()
   try {
-    const artifactRoot = join(root, 'admin-web')
+    const artifactRoot = join(root, '.codex-local', 'release-artifacts', 'run-1', 'admin-web')
     await mkdir(artifactRoot, { recursive: true })
     await writeFile(join(artifactRoot, 'index.html'), 'prepared')
     const manifest = await createReleaseArtifactManifest({
@@ -150,10 +157,64 @@ test('admin attestation rejects a changed local artifact before trusting remote 
   }
 })
 
+test('admin attestation rejects a digest-matching path outside the run snapshot before any remote read', async () => {
+  const root = await fixtureRoot()
+  try {
+    const outside = join(root, 'outside-admin')
+    await mkdir(outside, { recursive: true })
+    await writeFile(join(outside, 'index.html'), 'matching-but-outside')
+    const outsideDigest = await computeDirectoryDigest(outside)
+    let remoteReadCount = 0
+    await assert.rejects(() => attestAdminWebArtifact({
+      root,
+      artifact: {
+        artifactPath: outside,
+        contentDigest: outsideDigest,
+        runId: 'run-evil',
+        sourceSha: 'abcdef',
+        versionId: 'version',
+      },
+      inspectRemote: async () => {
+        remoteReadCount += 1
+        return {}
+      },
+    }), /immutable admin-web artifact path is invalid/i)
+    assert.equal(remoteReadCount, 0)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('directory digest and snapshot creation reject symlink or junction entries', async (t) => {
+  const root = await fixtureRoot()
+  try {
+    const source = join(root, 'admin-source')
+    const target = join(root, 'linked-target')
+    await mkdir(source, { recursive: true })
+    await mkdir(target, { recursive: true })
+    await writeFile(join(target, 'secret.txt'), 'outside')
+    try {
+      await symlink(target, join(source, 'linked'), process.platform === 'win32' ? 'junction' : 'dir')
+    } catch (error) {
+      if (['EPERM', 'EACCES'].includes(error.code)) return t.skip(`symlink unavailable: ${error.code}`)
+      throw error
+    }
+    await assert.rejects(() => computeDirectoryDigest(source), /symbolic link|reparse/i)
+    await assert.rejects(() => createImmutableArtifactSnapshots({
+      root,
+      runId: 'run-link',
+      plan: { targets: { cloud: { functions: [] }, adminWeb: true, miniprogram: false } },
+      paths: { adminWebRoot: source },
+    }), /symbolic link|reparse/i)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('pinned admin backend runners reject TOCTOU tampering before hosting tar or ssh mutation', async () => {
   const root = await fixtureRoot()
   try {
-    const artifactRoot = join(root, 'admin-snapshot')
+    const artifactRoot = join(root, '.codex-local', 'release-artifacts', 'run-1', 'admin-web')
     await mkdir(artifactRoot, { recursive: true })
     await writeFile(join(artifactRoot, 'index.html'), 'prepared')
     const manifest = await createReleaseArtifactManifest({
@@ -224,6 +285,96 @@ test('pinned admin backend rechecks the snapshot immediately before every inject
       ],
     }), /immutable admin-web artifact digest mismatch/i)
     assert.deepEqual(calls, ['tar'])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('Aliyun archive mutation rejects a replaced packed archive before scp or ssh', async () => {
+  const root = await fixtureRoot()
+  try {
+    const artifactRoot = join(root, 'admin-snapshot')
+    const archivePath = join(root, 'admin.tgz')
+    await mkdir(artifactRoot, { recursive: true })
+    await writeFile(join(artifactRoot, 'index.html'), 'prepared')
+    await writeFile(join(artifactRoot, 'assets.js'), 'asset')
+    const expectedDigest = await computeDirectoryDigest(artifactRoot)
+    const manifest = await createDeterministicFileManifest(artifactRoot)
+    assert.match(manifest, /^[a-f0-9]{64}  assets\.js\n[a-f0-9]{64}  index\.html\n$/)
+    await writeFile(archivePath, 'packed-archive')
+    const expectedArchiveDigest = await computeFileSha256(archivePath)
+    await writeFile(archivePath, 'replaced-after-pack')
+    const calls = { scp: 0, ssh: 0 }
+    await assert.rejects(() => runPinnedAdminArchiveMutation({
+      artifactRoot,
+      expectedDigest,
+      archivePath,
+      expectedArchiveDigest,
+      runners: [async () => { calls.scp += 1 }, async () => { calls.ssh += 1 }],
+    }), /immutable admin-web archive digest mismatch/i)
+    assert.deepEqual(calls, { scp: 0, ssh: 0 })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('Aliyun archive mutation rechecks the archive before every scp or ssh runner', async () => {
+  const root = await fixtureRoot()
+  try {
+    const artifactRoot = join(root, 'admin-snapshot')
+    const archivePath = join(root, 'admin.tgz')
+    await mkdir(artifactRoot, { recursive: true })
+    await writeFile(join(artifactRoot, 'index.html'), 'prepared')
+    await writeFile(archivePath, 'packed-archive')
+    const expectedDigest = await computeDirectoryDigest(artifactRoot)
+    const expectedArchiveDigest = await computeFileSha256(archivePath)
+    const calls = []
+    await assert.rejects(() => runPinnedAdminArchiveMutation({
+      artifactRoot, expectedDigest, archivePath, expectedArchiveDigest,
+      runners: [
+        async () => {
+          calls.push('scp')
+          await writeFile(archivePath, 'changed-between-scp-and-ssh')
+        },
+        async () => calls.push('ssh'),
+      ],
+    }), /immutable admin-web archive digest mismatch/i)
+    assert.deepEqual(calls, ['scp'])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('Aliyun deployment rejects a replaced local deploy script before script scp or ssh', async () => {
+  const root = await fixtureRoot()
+  try {
+    const artifactRoot = join(root, 'admin-snapshot')
+    const archivePath = join(root, 'admin.tgz')
+    const scriptPath = join(root, 'deploy.sh')
+    await mkdir(artifactRoot, { recursive: true })
+    await writeFile(join(artifactRoot, 'index.html'), 'prepared')
+    await writeFile(archivePath, 'packed-archive')
+    await writeFile(scriptPath, '#!/bin/sh\necho safe\n')
+    const expectedDigest = await computeDirectoryDigest(artifactRoot)
+    const expectedArchiveDigest = await computeFileSha256(archivePath)
+    const expectedScriptDigest = await computeFileSha256(scriptPath)
+    await writeFile(scriptPath, '#!/bin/sh\necho replaced\n')
+    const calls = { scriptScp: 0, ssh: 0 }
+    await assert.rejects(() => runPinnedAdminArchiveMutation({
+      artifactRoot, expectedDigest, archivePath, expectedArchiveDigest, scriptPath, expectedScriptDigest,
+      runners: [async () => { calls.scriptScp += 1 }, async () => { calls.ssh += 1 }],
+    }), /immutable admin-web deploy script digest mismatch/i)
+    assert.deepEqual(calls, { scriptScp: 0, ssh: 0 })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('admin file manifest rejects its reserved generated path', async () => {
+  const root = await fixtureRoot()
+  try {
+    await writeFile(join(root, '.happyhome-file-manifest.sha256'), 'user-owned')
+    await assert.rejects(() => createDeterministicFileManifest(root), /reserved manifest path/i)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -351,23 +502,182 @@ test('cloud orchestration never deploys mutable dist and hard-blocks a changed i
   }
 })
 
-test('cloud orchestration bounds a never-resolving invoke, aborts it, and deploys only that function', async () => {
+test('cloud orchestration rejects a digest-matching path outside the run snapshot before read or deploy', async () => {
+  const run = await preparedCloudRun(1)
+  try {
+    const outside = join(run.root, 'outside-cloud', 'fn-0')
+    await mkdir(outside, { recursive: true })
+    await writeFile(join(outside, '__release.info.json'), await readFile(join(run.snapshots.cloudRoot, 'fn-0', '__release.info.json')))
+    await writeFile(join(outside, 'index.js'), 'prepared-fn-0')
+    run.manifest.artifacts.cloud['fn-0'].artifactPath = outside
+    run.manifest.artifacts.cloud['fn-0'].contentDigest = await computeDirectoryDigest(outside)
+    let readCount = 0
+    let deployCount = 0
+    await assert.rejects(() => orchestrateCloudArtifactRelease({
+      root: run.root,
+      manifest: run.manifest,
+      attest: async () => { readCount += 1 },
+      deploy: async () => { deployCount += 1 },
+      verify: async () => { readCount += 1 },
+    }), /immutable cloud .*artifact path is invalid/i)
+    assert.deepEqual({ readCount, deployCount }, { readCount: 0, deployCount: 0 })
+  } finally {
+    await rm(run.root, { recursive: true, force: true })
+  }
+})
+
+test('cloud deploy attempt guard rechecks digest after the fence and before the CLI runner', async () => {
+  const run = await preparedCloudRun(1)
+  try {
+    const artifactRoot = join(run.snapshots.cloudRoot, 'fn-0')
+    const expectedDigest = run.manifest.artifacts.cloud['fn-0'].contentDigest
+    let deployCount = 0
+    const tamperedGuard = createPinnedCloudDeployAttemptGuard({
+      artifactRoot,
+      expectedDigest,
+      functionName: 'fn-0',
+      beforeFence: async () => await writeFile(join(artifactRoot, 'index.js'), 'tampered-after-auth-setup'),
+    })
+    await assert.rejects(async () => {
+      await tamperedGuard()
+      deployCount += 1
+    }, /immutable cloud artifact digest mismatch/i)
+    assert.equal(deployCount, 0)
+
+    await writeFile(join(artifactRoot, 'index.js'), 'prepared-fn-0')
+    const exactGuard = createPinnedCloudDeployAttemptGuard({ artifactRoot, expectedDigest, functionName: 'fn-0', beforeFence: async () => {} })
+    await exactGuard()
+    deployCount += 1
+    assert.equal(deployCount, 1)
+  } finally {
+    await rm(run.root, { recursive: true, force: true })
+  }
+})
+
+test('cloud orchestration waits for child close and token payload cleanup before timeout can deploy', async () => {
   const run = await preparedCloudRun(2)
   try {
-    let aborted = false
+    let payloadRemoved = false
     const result = await orchestrateCloudArtifactRelease({
-      root: run.root, manifest: run.manifest, timeoutMs: 10,
-      attest: ({ artifact, signal }) => artifact.functionName === 'fn-1'
-        ? new Promise(() => signal.addEventListener('abort', () => { aborted = true }, { once: true }))
-        : Promise.resolve({ functionName: artifact.functionName, buildId: artifact.buildId, sourceSha: artifact.sourceSha }),
-      deploy: async () => {}, verify: async () => {},
+      root: run.root, manifest: run.manifest, timeoutMs: 10, cleanupGraceMs: 50,
+      attest: async ({ artifact, signal }) => {
+        if (artifact.functionName !== 'fn-1') return { functionName: artifact.functionName, buildId: artifact.buildId, sourceSha: artifact.sourceSha }
+        try {
+          await new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(new Error('child closed')), { once: true }))
+        } finally {
+          payloadRemoved = true
+        }
+      },
+      deploy: async () => assert.equal(payloadRemoved, true), verify: async () => {},
     })
-    assert.equal(aborted, true)
+    assert.equal(payloadRemoved, true)
     assert.deepEqual(result.deployFunctions, ['fn-1'])
     assert.match(result.attestations[1].skipReason, /timed out/i)
   } finally {
     await rm(run.root, { recursive: true, force: true })
   }
+})
+
+test('cloud orchestration hard-blocks when an aborted operation never settles', async () => {
+  const run = await preparedCloudRun(1)
+  try {
+    let deployCount = 0
+    await assert.rejects(() => orchestrateCloudArtifactRelease({
+      root: run.root, manifest: run.manifest, timeoutMs: 5, cleanupGraceMs: 5,
+      attest: () => new Promise(() => {}),
+      deploy: async () => { deployCount += 1 }, verify: async () => {},
+    }), (error) => error.code === 'ERR_RELEASE_ATTESTATION_ABORT_CLEANUP')
+    assert.equal(deployCount, 0)
+  } finally {
+    await rm(run.root, { recursive: true, force: true })
+  }
+})
+
+function controllableProcess(pid) {
+  const child = new EventEmitter()
+  child.pid = pid
+  child.stdout = new PassThrough()
+  child.stderr = new PassThrough()
+  child.killCalls = []
+  child.kill = (signal) => {
+    child.killCalls.push(signal || 'default')
+    setTimeout(() => child.emit('close', null, signal || null), 0)
+    return true
+  }
+  return child
+}
+
+test('abortable Windows capture waits for child close after successful taskkill', async () => {
+  const child = controllableProcess(101)
+  const killer = controllableProcess(202)
+  const controller = new AbortController()
+  let childClosed = false
+  child.on('close', () => { childClosed = true })
+  const capture = runAbortableShellCapture('fake command', { signal: controller.signal, silentOutput: true, terminationGraceMs: 50 }, {
+    platform: 'win32',
+    spawn: (command) => {
+      if (command === 'taskkill') {
+        setTimeout(() => {
+          killer.emit('close', 0)
+          setTimeout(() => child.emit('close', 1), 0)
+        }, 0)
+        return killer
+      }
+      return child
+    },
+  })
+  controller.abort()
+  const result = await capture
+  assert.equal(childClosed, true)
+  assert.equal(result.aborted, true)
+  assert.deepEqual(child.killCalls, [])
+})
+
+test('abortable Windows capture falls back to child.kill but fails closed when taskkill exits nonzero', async () => {
+  const child = controllableProcess(303)
+  const killer = controllableProcess(404)
+  const controller = new AbortController()
+  const capture = runAbortableShellCapture('fake command', { signal: controller.signal, silentOutput: true, terminationGraceMs: 50 }, {
+    platform: 'win32',
+    spawn: (command) => {
+      if (command === 'taskkill') {
+        setTimeout(() => killer.emit('close', 1), 0)
+        return killer
+      }
+      return child
+    },
+  })
+  controller.abort()
+  await assert.rejects(capture, (error) => error.code === 'ERR_RELEASE_ATTESTATION_ABORT_CLEANUP')
+  assert.deepEqual(child.killCalls, ['default'])
+})
+
+test('abortable Windows capture reports fatal cleanup when the child never closes', async () => {
+  const child = controllableProcess(505)
+  child.kill = () => true
+  const killer = controllableProcess(606)
+  const controller = new AbortController()
+  const capture = runAbortableShellCapture('fake command', { signal: controller.signal, silentOutput: true, terminationGraceMs: 5 }, {
+    platform: 'win32',
+    spawn: (command) => {
+      if (command === 'taskkill') {
+        setTimeout(() => killer.emit('close', 0), 0)
+        return killer
+      }
+      return child
+    },
+  })
+  controller.abort()
+  await assert.rejects(capture, (error) => error.code === 'ERR_RELEASE_ATTESTATION_ABORT_CLEANUP')
+})
+
+test('abortable retry backoff settles immediately on abort', async () => {
+  const controller = new AbortController()
+  const startedAt = Date.now()
+  const delay = abortableDelay(1_000, controller.signal)
+  controller.abort()
+  await assert.rejects(delay, /aborted during retry backoff/i)
+  assert.ok(Date.now() - startedAt < 100)
 })
 
 test('miniprogram receipt identity hashes normalized receipt content and every release binding', () => {
