@@ -11,6 +11,7 @@ import {
   createReleaseRunLedger,
   formatReleaseRunStatus,
   inspectReleaseStageReuse,
+  loadReleaseRun,
   runLedgerStage,
   summarizeReleaseRun,
 } from './release-run-ledger.mjs'
@@ -45,6 +46,58 @@ async function directoryDigest(root) {
   await walk(root)
   return createHash('sha256').update(entries.join('\n')).digest('hex')
 }
+
+test('prepare pins the formal plan and immutable artifact manifest without probe token plaintext', async () => {
+  const root = await tempRoot()
+  try {
+    const ledger = await createReleaseRunLedger({ root, runId: 'pin-run', gitSha: 'abc', version: '1', desc: 'd', envId: 'env' })
+    const formalPlan = { headSha: 'abc', targets: { cloud: { functions: ['admin'] }, adminWeb: false, miniprogram: false } }
+    const artifactManifest = { schemaVersion: 1, runId: 'pin-run', gitSha: 'abc', artifacts: { cloud: { admin: { probeTokenHash: 'hash' } } } }
+    await ledger.pinReleaseArtifacts({ formalPlan, artifactManifest })
+    const saved = await loadReleaseRun(root, 'pin-run')
+    assert.equal(saved.schemaVersion, 2)
+    assert.deepEqual(saved.formalPlan, formalPlan)
+    assert.deepEqual(saved.artifactManifest, artifactManifest)
+    assert.doesNotMatch(JSON.stringify(saved), /probeToken\s*:/)
+    await assert.rejects(
+      () => ledger.pinReleaseArtifacts({ formalPlan: { ...formalPlan, headSha: 'other' }, artifactManifest }),
+      /already pinned/i,
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('legacy schema one release ledgers remain readable and gain additive defaults', async () => {
+  const root = await tempRoot()
+  try {
+    await writeJson(join(root, '.codex-local', 'release-runs', 'legacy', 'run.json'), {
+      schemaVersion: 1, runId: 'legacy', status: 'passed', context: { gitSha: 'abc' }, stages: {},
+    })
+    const run = await loadReleaseRun(root, 'legacy')
+    assert.equal(run.schemaVersion, 1)
+    assert.equal(run.formalPlan, null)
+    assert.equal(run.artifactManifest, null)
+    assert.deepEqual(run.remoteAttestations, {})
+    assert.deepEqual(run.components, {})
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('release summary exposes structured component deployment and skip counts', () => {
+  const summary = summarizeReleaseRun({
+    runId: 'run', status: 'passed', context: {}, stages: {},
+    components: {
+      'cloud:admin': { status: 'attested', skipReason: 'fresh exact match' },
+      'cloud:post': { status: 'verified', skipReason: '', evidence: { deployed: true } },
+      'admin-web': { status: 'deployed', skipReason: 'remote mismatch' },
+      miniprogram: { status: 'uploaded', skipReason: 'receipt exact match' },
+    },
+  })
+  assert.deepEqual(summary.componentSummary.counts, { deployed: 2, skipped: 2, total: 4 })
+  assert.equal(summary.componentSummary.components['cloud:admin'].status, 'attested')
+})
 
 test('release ledger records stage lifecycle, events, and latest pointer', async () => {
   const root = await tempRoot()
@@ -666,6 +719,8 @@ test('miniprogram upload is reused only with normalized release-owned evidence',
     const uploadInfoStat = await stat(uploadInfoPath)
     await writeJson(uploadEvidencePath, {
       success: true,
+      releaseRunId: 'wrong-run',
+      receiptId: 'receipt-1',
       appid: 'wx-unit',
       version: '1.0.1',
       desc: 'trial-unit',
@@ -679,16 +734,27 @@ test('miniprogram upload is reused only with normalized release-owned evidence',
     })
     const reusable = await inspectReleaseStageReuse(runState, 'miniprogram-upload', {
       root,
+      runId: 'unit-run',
       gitSha: 'abc123',
       version: '1.0.1',
       desc: 'trial-unit',
       packageDigest,
     })
-    assert.equal(reusable.reusable, true)
+    assert.equal(reusable.reusable, false)
+    assert.match(reusable.reason, /runId/i)
+
+    const devtoolsEvidence = JSON.parse(await readFile(uploadEvidencePath, 'utf8'))
+    await writeJson(uploadEvidencePath, { ...devtoolsEvidence, releaseRunId: 'unit-run' })
+    const exactReusable = await inspectReleaseStageReuse(runState, 'miniprogram-upload', {
+      root, runId: 'unit-run', gitSha: 'abc123', version: '1.0.1', desc: 'trial-unit', packageDigest,
+    })
+    assert.equal(exactReusable.reusable, true)
 
     await rm(uploadInfoPath)
     await writeJson(uploadEvidencePath, {
       success: true,
+      releaseRunId: 'unit-run',
+      receiptId: 'receipt-2',
       appid: 'wx-unit',
       version: '1.0.1',
       desc: 'trial-unit',

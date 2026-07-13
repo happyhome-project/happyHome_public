@@ -18,3 +18,14 @@ test('declared release actions use a non-blocking child process so the productio
 test('formal Tencent RAG index gate uses the VPC worker instead of local private ES access', () => {
   assert.match(source, /'ensure-tencent-rag-index': 'ensure:tencent-rag-index:release'/)
 })
+
+test('formal release prepares immutable artifacts and fresh-attests cloud functions before selective deployment', () => {
+  const start = source.indexOf('async function runFormalRelease')
+  const release = source.slice(start)
+  assert.doesNotMatch(release, /const formalPlan = prepareOnly \? null/)
+  assert.match(release, /pinReleaseArtifacts\(\{ formalPlan, artifactManifest \}\)/)
+  assert.match(release, /attestCloudArtifacts\(/)
+  assert.match(release, /functions: cloudAttestation\.deployFunctions/)
+  assert.match(release, /skipBuild: true/)
+  assert.match(release, /recordRemoteAttestations\('cloud'/)
+})

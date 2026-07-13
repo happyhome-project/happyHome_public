@@ -63,11 +63,31 @@ function isoNow(now) {
 }
 
 function safeJson(value) {
+  assertNoPlaintextProbeToken(value)
   return `${JSON.stringify(value, null, 2)}\n`
 }
 
 function oneLineJson(value) {
+  assertNoPlaintextProbeToken(value)
   return `${JSON.stringify(value)}\n`
+}
+
+function assertNoPlaintextProbeToken(value) {
+  if (!value || typeof value !== 'object') return
+  for (const [key, child] of Object.entries(value)) {
+    if (key === 'probeToken') throw new Error('release ledger must not persist plaintext probeToken')
+    assertNoPlaintextProbeToken(child)
+  }
+}
+
+function withAdditiveReleaseDefaults(state) {
+  return {
+    ...state,
+    formalPlan: state?.formalPlan || null,
+    artifactManifest: state?.artifactManifest || null,
+    remoteAttestations: state?.remoteAttestations || {},
+    components: state?.components || {},
+  }
 }
 
 function pathFromRoot(root, value) {
@@ -260,6 +280,10 @@ async function inspectUploadEvidence(stage, context) {
   if (!(await pathExists(uploadEvidencePath))) return { reusable: false, reason: `upload evidence missing: ${relativeToRoot(root, uploadEvidencePath)}` }
   const evidence = await readJson(uploadEvidencePath)
   if (evidence.success !== true) return { reusable: false, reason: 'upload evidence is not successful' }
+  if (context.runId && evidence.releaseRunId !== context.runId) {
+    return { reusable: false, reason: `upload evidence runId mismatch: expected ${context.runId}, got ${evidence.releaseRunId || 'missing'}` }
+  }
+  if (!evidence.receiptId) return { reusable: false, reason: 'upload evidence receiptId is missing' }
   if (evidence.version !== context.version) {
     return { reusable: false, reason: `upload evidence version mismatch: expected ${context.version}, got ${evidence.version || 'unknown'}` }
   }
@@ -379,6 +403,37 @@ export class ReleaseRunLedger {
     }), 'utf8')
   }
 
+  async pinReleaseArtifacts({ formalPlan, artifactManifest }) {
+    if (!formalPlan || !artifactManifest) throw new Error('formalPlan and artifactManifest are required')
+    if (this.state.formalPlan || this.state.artifactManifest) {
+      if (JSON.stringify(this.state.formalPlan) !== JSON.stringify(formalPlan) || JSON.stringify(this.state.artifactManifest) !== JSON.stringify(artifactManifest)) {
+        throw new Error('release plan and artifact manifest are already pinned for this run')
+      }
+      return
+    }
+    assertNoPlaintextProbeToken(artifactManifest)
+    this.state.schemaVersion = 2
+    this.state.formalPlan = formalPlan
+    this.state.artifactManifest = artifactManifest
+    this.state.remoteAttestations ||= {}
+    this.state.components ||= {}
+    await this.appendEvent('release_artifacts_pinned', { gitSha: artifactManifest.gitSha, targets: artifactManifest.targets })
+    await this.save()
+  }
+
+  async recordRemoteAttestations(name, attestations) {
+    this.state.remoteAttestations ||= {}
+    this.state.remoteAttestations[name] = attestations
+    await this.appendEvent('remote_attestation_recorded', { component: name, attestations })
+    await this.save()
+  }
+
+  async recordComponent(name, { status, skipReason = '', evidence = null } = {}) {
+    this.state.components ||= {}
+    this.state.components[name] = { status, skipReason, evidence }
+    await this.save()
+  }
+
   async startStage(name, details = {}) {
     const at = isoNow(this.now)
     this.state.status = 'running'
@@ -478,7 +533,7 @@ export async function createReleaseRunLedger(options) {
   const runPath = resolve(root, RELEASE_RUNS_DIR, runId, 'run.json')
   let state
   if (await pathExists(runPath)) {
-    state = await readJson(runPath)
+    state = withAdditiveReleaseDefaults(await readJson(runPath))
     state.context = mergeExistingRunContext(state.context || {}, {
       gitSha: options.gitSha || '',
       version: options.version || '',
@@ -489,7 +544,7 @@ export async function createReleaseRunLedger(options) {
   } else {
     const createdAt = isoNow(options.now)
     state = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId,
       command: options.command || '',
       status: 'running',
@@ -504,6 +559,10 @@ export async function createReleaseRunLedger(options) {
         releaseStrategy: options.releaseStrategy || 'main',
       },
       stages: {},
+      formalPlan: null,
+      artifactManifest: null,
+      remoteAttestations: {},
+      components: {},
     }
   }
 
@@ -564,7 +623,7 @@ export async function confirmReleaseLedgerAgainstProductionInspection({ ledger, 
 
 export async function loadReleaseRun(root, runId) {
   const absoluteRoot = resolve(root || process.cwd())
-  return await readJson(resolve(absoluteRoot, RELEASE_RUNS_DIR, runId, 'run.json'))
+  return withAdditiveReleaseDefaults(await readJson(resolve(absoluteRoot, RELEASE_RUNS_DIR, runId, 'run.json')))
 }
 
 export async function loadLatestReleaseRun(root) {
@@ -682,6 +741,16 @@ export function summarizeReleaseRun(runState) {
       reused: stage.reused === true,
     }
   }
+  const components = runState?.components || {}
+  const componentValues = Object.values(components)
+  const componentSummary = {
+    counts: {
+      deployed: componentValues.filter((component) => component.status === 'deployed' || component.evidence?.deployed === true).length,
+      skipped: componentValues.filter((component) => Boolean(component.skipReason) && ['attested', 'uploaded'].includes(component.status)).length,
+      total: componentValues.length,
+    },
+    components,
+  }
   return {
     runId: runState?.runId || '',
     status: runState?.status || 'unknown',
@@ -695,6 +764,10 @@ export function summarizeReleaseRun(runState) {
       envId: runState?.context?.envId || '',
       releaseStrategy: runState?.context?.releaseStrategy || 'main',
     },
+    artifactManifest: runState?.artifactManifest || null,
+    remoteAttestations: runState?.remoteAttestations || {},
+    components: runState?.components || {},
+    componentSummary,
     stages,
   }
 }

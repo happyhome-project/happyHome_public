@@ -264,6 +264,25 @@ test('cloud release smoke passes with generated invoke, log, fixture, and cleanu
   }
 })
 
+test('fixture cleanup uses its dedicated fence even when ordinary mutation revalidation would report main drift', async () => {
+  const evidenceDir = await tempEvidenceDir()
+  try {
+    const cleanupStages = []
+    const summary = await runCloudReleaseSmoke({
+      envId: 'env-x', only: ['admin'], logLimit: 1, logWaitMs: 0, noFixture: false,
+      evidenceDir, runId: 'unit-run', adminInternalToken: 'unit-token',
+      beforeCommand: ({ stage }) => {
+        if (/community\.(disable|hardDelete)/.test(stage)) throw new Error('main drift must not block cleanup')
+      },
+      beforeCleanupCommand: ({ stage }) => cleanupStages.push(stage),
+    }, createMockRunner({ runId: 'unit-run' }))
+    assert.equal(summary.cleanup.ok, true)
+    assert.equal(cleanupStages.length, 2)
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true })
+  }
+})
+
 test('cloud release smoke runs independent basic invokes with bounded concurrency', async () => {
   const evidenceDir = await tempEvidenceDir()
   try {
