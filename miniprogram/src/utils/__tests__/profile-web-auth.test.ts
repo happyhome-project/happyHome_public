@@ -5,6 +5,15 @@ import { describe, expect, test } from 'vitest'
 const source = readFileSync(resolve(process.cwd(), 'src/pages/profile/index.vue'), 'utf8')
 
 describe('profile H5 Web auth UI', () => {
+  test('keeps the logged-out Figma shell until the user activates the identity entry', () => {
+    const mountedBlock = source.slice(source.indexOf('onMounted(() => {'), source.indexOf('// tabBar 切回 Profile'))
+    const openLoginEntryBlock = source.slice(source.indexOf('function openLoginEntry()'), source.indexOf('function goOnboarding()'))
+
+    expect(mountedBlock).not.toContain('showManualLoginForm.value = true')
+    expect(source).toMatch(/data-testid="profile-login-entry"[\s\S]*@tap\.stop="openLoginEntry"/)
+    expect(openLoginEntryBlock).toContain('showManualLoginForm.value = true')
+  })
+
   test('has accessible persistent Web credentials without exposing DEV login on H5', () => {
     expect(source).toContain('autocomplete="username"')
     expect(source).toContain('autocomplete="current-password"')

@@ -181,11 +181,13 @@
           v-if="supportsChooseAvatar"
           open-type="chooseAvatar"
           class="profile-login-hit"
+          data-testid="profile-login-entry"
           @chooseavatar="onLoginChooseAvatar"
         ></button>
         <button
           v-else
           class="profile-login-hit"
+          data-testid="profile-login-entry"
           @tap.stop="openLoginEntry"
         ></button>
       </template>
@@ -1183,9 +1185,6 @@ onMounted(() => {
   hideNativeTabBar()
   refreshDiagnosticsState()
   updateProfileNavMetrics()
-  if (!userStore.isLoggedIn && isH5Runtime() && !supportsChooseAvatar.value) {
-    showManualLoginForm.value = true
-  }
   logProfile('info', 'profile.mounted', {})
   void nextTick(() => logProfile('info', 'profile.render.tick', { reason: 'mounted' }))
   void refreshProfileData('mounted')
