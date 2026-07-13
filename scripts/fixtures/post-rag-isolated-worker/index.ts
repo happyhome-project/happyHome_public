@@ -28,6 +28,14 @@ import { assertPostRagWorkerAuthorized } from '../../../cloud/lib/rag-worker-aut
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
+const SAFE_ERROR_CODES = new Set([
+  'MAX_ATTEMPTS', 'SOURCE_NOT_FOUND', 'SOURCE_SUPERSEDED', 'VALIDATION_FAILED', 'EMBEDDING_FAILED',
+  'ES_UNAVAILABLE', 'ES_WRITE_FAILED', 'MIRROR_WRITE_FAILED', 'TIMEOUT', 'INTERNAL_ERROR',
+])
+const SAFE_ERROR_STAGES = new Set([
+  'claim', 'load_source', 'chunk', 'embedding', 'es_write', 'mirror_write', 'activate', 'cleanup',
+])
+
 type Probe = {
   _id?: string
   runId: string
@@ -230,6 +238,12 @@ export function createExactIdValidationHandler(
         result = { runId, postId: probe.postId, outboxId, jobId, candidateCount: 1, completedCount: 1, outcome: job.outcome }
       } else {
         const batch = await dependencies.processExactJob(jobId, workerId)
+        const exactFailed = Array.isArray(batch?.results)
+          ? batch.results.find((row: any) => row?.jobId === jobId && row?.status === 'failed')
+          : null
+        const safeFailure = SAFE_ERROR_CODES.has(exactFailed?.errorCode) && SAFE_ERROR_STAGES.has(exactFailed?.errorStage)
+          ? { errorCode: exactFailed.errorCode, errorStage: exactFailed.errorStage }
+          : {}
         const exactCompleted = Array.isArray(batch?.results)
           && batch.results.filter((row: any) => row?.jobId === jobId && row?.status === 'completed').length === 1
         const stored = await dependencies.readJob(jobId)
@@ -242,6 +256,7 @@ export function createExactIdValidationHandler(
           candidateCount: Number(batch?.candidateCount || 0),
           completedCount: completed ? 1 : 0,
           outcome: completed?.outcome || null,
+          ...safeFailure,
         }
       }
     }
@@ -253,6 +268,7 @@ export function createExactIdValidationHandler(
         outboxId, jobId: result.jobId, outcome: result.outcome, phase,
         outboxMaterializedByTimer: prior?.outboxMaterializedByTimer === true || materialized.materializedByThisInvocation === true,
         jobCompletedByTimer: prior?.jobCompletedByTimer === true || jobCompletedByThisInvocation,
+        ...(result.errorCode && result.errorStage ? { errorCode: result.errorCode, errorStage: result.errorStage } : {}),
       }
       await dependencies.recordTimerEvidence(runId, phase === 'create' ? 'timerEvidenceCreate' : 'timerEvidenceCleanup', evidence)
     }

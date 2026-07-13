@@ -537,6 +537,34 @@ test('temporary handler authenticates independently and processes only the bound
   }
 })
 
+test('temporary timer evidence records only allowlisted processor failure diagnostics', async () => {
+  const loaded = await loadFixtureHandler()
+  try {
+    const runId = '20260713T210000'
+    const ids = fixtureIds(runId)
+    const probe = { _id: runId, runId, status: 'active', communityId: 'community-a', ...ids, outboxId: 'outbox-create' }
+    let reads = 0
+    let recorded
+    const handler = loaded.module.createExactIdValidationHandler({
+      async readProbe() { return probe },
+      async readOutbox(id) { return { _id: id, aggregateId: probe.postId, communityId: probe.communityId } },
+      async materializeExact() { return { jobId: 'job-create', materializedByThisInvocation: true } },
+      async readJob(id) { reads += 1; return { _id: id, postId: probe.postId, communityId: probe.communityId, status: 'processing' } },
+      async processExactJob(id) {
+        return { candidateCount: 1, results: [{ jobId: id, status: 'failed', errorCode: 'INTERNAL_ERROR', errorStage: 'claim', raw: 'secret' }] }
+      },
+      async recordTimerEvidence(_runId, _field, evidence) { recorded = evidence },
+    }, { validationToken: 'validation-token-123456', timerToken: 'timer-token-654321', now: () => TIMER_NOW })
+    const result = await handler(timerEvent(runId))
+    assert.equal(reads, 2)
+    assert.equal(result.errorCode, 'INTERNAL_ERROR')
+    assert.equal(result.errorStage, 'claim')
+    assert.equal(recorded.errorCode, 'INTERNAL_ERROR')
+    assert.equal(recorded.errorStage, 'claim')
+    assert.doesNotMatch(JSON.stringify({ result, recorded }), /secret|raw/i)
+  } finally { await loaded.cleanup() }
+})
+
 test('temporary handler rejects an exact outbox or job that escapes the probe binding', async () => {
   const loaded = await loadFixtureHandler()
   try {
