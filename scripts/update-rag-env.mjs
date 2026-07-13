@@ -5,6 +5,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { ensurePostRagSmokeIdentitySecret } from './lib/post-rag-smoke-identity.mjs'
 import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
+import { buildPostSemanticFunctionEnvironments } from './lib/post-semantic-function-env.mjs'
+import { reconcileRagFunctionEnvironment } from './lib/rag-env-reconcile.mjs'
 
 function loadDotEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return {}
@@ -66,6 +68,19 @@ const workerEnv = {
 const postSmokeIdentityEnv = {
   POST_RAG_SMOKE_IDENTITY_SECRET: ensurePostRagSmokeIdentitySecret(),
 }
+const semanticSource = {
+  ...camEnv,
+  ...ragEnv,
+  ...process.env,
+  POST_RAG_WORKER_TOKEN: workerEnv.POST_RAG_WORKER_TOKEN,
+  POST_RAG_TIMER_TOKEN: process.env.POST_RAG_TIMER_TOKEN || ragEnv.POST_RAG_TIMER_TOKEN,
+  POST_RAG_SMOKE_IDENTITY_SECRET: postSmokeIdentityEnv.POST_RAG_SMOKE_IDENTITY_SECRET,
+  TENCENT_RAG_ATOMIC_SECRET_ID: atomicEnv.TENCENT_RAG_ATOMIC_SECRET_ID,
+  TENCENT_RAG_ATOMIC_SECRET_KEY: atomicEnv.TENCENT_RAG_ATOMIC_SECRET_KEY,
+  TENCENT_RAG_ATOMIC_REGION: atomicEnv.TENCENT_RAG_ATOMIC_REGION,
+  TENCENT_RAG_EMBEDDING_MODEL: atomicEnv.TENCENT_RAG_EMBEDDING_MODEL,
+}
+const functionEnvironments = buildPostSemanticFunctionEnvironments(semanticSource)
 
 function configuredEnv(values) {
   return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined && value !== ''))
@@ -101,11 +116,6 @@ const functionNames = (process.argv.find((arg) => arg.startsWith('--only='))?.sl
 
 const workerFunctions = new Set(['post-rag-worker', 'post-video-rag-worker'])
 const deprecatedEsEnvKeys = new Set([
-  'TENCENT_RAG_ES_ENDPOINT',
-  'TENCENT_RAG_ES_USERNAME',
-  'TENCENT_RAG_ES_PASSWORD',
-  'TENCENT_RAG_INDEX_NAME',
-  'TENCENT_RAG_VECTOR_FIELD',
   'TENCENT_RAG_EMBEDDING_INFERENCE_ID',
   'TENCENT_RAG_RERANK_INFERENCE_ID',
   'TENCENT_RAG_LLM_INFERENCE_ID',
@@ -159,22 +169,15 @@ async function withTransientRetry(label, fn) {
 }
 
 for (const functionName of functionNames) {
-  const detail = await withTransientRetry(`${functionName}.getFunctionDetail`, () =>
-    app.functions.getFunctionDetail(functionName)
-  )
-  const existing = {}
-  for (const item of detail?.Environment?.Variables || []) existing[item.Key] = item.Value
-  for (const key of deprecatedEsEnvKeys) delete existing[key]
-  const envForFunction = functionName === 'post' ? { ...targetEnv, ...postSmokeIdentityEnv } : (
+  const envForFunction = functionName === 'post' ? functionEnvironments.post : (
     functionName === 'post-video-rag-worker' ? { ...targetEnv, ...workerEnv, ...videoPolicyEnv, ...videoAnalyzerEnv } : (
-      functionName === 'post-rag-worker' ? { ...targetEnv, ...workerEnv, ...videoPolicyEnv } : targetEnv
+      functionName === 'post-rag-worker' ? { ...functionEnvironments['post-rag-worker'], ...videoPolicyEnv } : targetEnv
     )
   )
-  const merged = { ...existing, ...envForFunction }
-  await withTransientRetry(`${functionName}.updateFunctionConfig`, () =>
-    app.functions.updateFunctionConfig({ name: functionName, envVariables: merged })
+  const result = await withTransientRetry(`${functionName}.reconcile`, () =>
+    reconcileRagFunctionEnvironment(app, functionName, envForFunction, { deprecatedKeys: deprecatedEsEnvKeys })
   )
-  console.log(`[rag-env] ${functionName} updated`)
+  console.log(`[rag-env] ${functionName} changed=${result.changed}`)
   console.table(Object.entries(envForFunction).map(([Key, Value]) => ({ Key, Value: redact(Value, Key) })))
 }
 

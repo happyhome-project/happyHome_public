@@ -23,6 +23,9 @@
  *   格式：每行一个 KEY=VALUE，# 开头为注释
  */
 import CloudBase from '@cloudbase/manager-node'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { dirname } from 'node:path'
+import { createEnsureIndexEvidence, readEnsureIndexState } from './lib/ensure-index-evidence.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -494,6 +497,12 @@ const REQUIRED_COLLECTIONS = [
   'post_rag_jobs',            // 正式 RAG 异步索引任务
   'post_rag_index_state',     // 正式 RAG 每篇帖子索引状态
   'post_rag_worker_state',    // 正式 RAG worker 最近运行状态
+  'rag_community_versions',   // v2 RAG 社区内容/ACL 版本游标
+  'post_rag_outbox',          // v2 RAG 事务 outbox
+  'post_rag_index_state_v2',  // v2 RAG 每篇帖子索引状态
+  'post_rag_index_versions',  // v2 RAG 版本化索引元数据
+  'post_rag_worker_timer_evidence', // 已认证 timer 调用证据
+  'post_rag_release_probes',  // 正式发布 timer probe 的 run-bound 临时绑定
   'post_rag_chunks',          // RAG chunk 元数据镜像/排障用
   'post_rag_smoke_runs',      // 短期签名 smoke 身份的服务端 run 绑定
   'post_video_rag_assets',     // 视频 OCR/ASR/关键帧摘要缓存（按 cacheKey 复用）
@@ -558,11 +567,18 @@ for (const idx of INDEXES) {
     }
     if (msg.includes('不存在') || msg.includes('not exist') || msg.includes('CollectionNotExists')) {
       console.error(`✗ ${idx.coll}.${idx.name}  collection "${idx.coll}" 不存在，跳过`)
+      hadError = true
       continue
     }
     console.error(`✗ ${idx.coll}.${idx.name}`, msg)
     hadError = true
   }
+}
+
+const readback = await readEnsureIndexState({ db, collections: REQUIRED_COLLECTIONS, indexes: INDEXES })
+if (readback.failures) {
+  console.error(`[ensure-indexes] final readback missing or indeterminate: ${readback.missing.join(', ')}`)
+  hadError = true
 }
 
 if (hadError) {
@@ -571,3 +587,8 @@ if (hadError) {
 }
 
 console.log('\n[ensure-indexes] Done.')
+if (process.env.HH_RELEASE_INDEX_EVIDENCE_PATH) {
+  const evidence = createEnsureIndexEvidence(readback)
+  await mkdir(dirname(process.env.HH_RELEASE_INDEX_EVIDENCE_PATH), { recursive: true })
+  await writeFile(process.env.HH_RELEASE_INDEX_EVIDENCE_PATH, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8')
+}

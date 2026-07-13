@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "changeId": "rag-v2-required-collections",
+  "actions": [
+    "ensure-indexes"
+  ],
+  "migrations": [],
+  "smokeSuites": [
+    "post-rag"
+  ]
+}

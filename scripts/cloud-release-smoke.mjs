@@ -330,7 +330,10 @@ export class CloudSmokeRun {
     const built = buildTcbCommand(tcbArgs(args, this.options.envId))
     const commandLine = formatCommand(built.command, built.args)
     console.log(`[cloud-smoke] ${stage}: ${commandLine}`)
-    if (typeof this.options.beforeCommand === 'function') await this.options.beforeCommand({ stage, command: built.command, args: built.args })
+    const beforeCommand = this.cleaningUp && typeof this.options.beforeCleanupCommand === 'function'
+      ? this.options.beforeCleanupCommand
+      : this.options.beforeCommand
+    if (typeof beforeCommand === 'function') await beforeCommand({ stage, command: built.command, args: built.args })
     const result = await this.runner(built.command, built.args, {
       cwd: ROOT,
       env: process.env,
@@ -628,15 +631,20 @@ export class CloudSmokeRun {
       return
     }
 
-    for (const action of ['community.disable', 'community.hardDelete']) {
-      const record = await this.adminInvoke(action, { communityId }, {
-        required: false,
-        label: `HH_CLOUD_CLEANUP_${action === 'community.disable' ? 'DISABLE' : 'HARD_DELETE'}`,
-      })
-      const ok = record.ok
-      this.cleanup.steps.push({ action, ok, status: record.status, communityId })
-      if (!ok) this.cleanup.ok = false
-      if (action === 'community.hardDelete' && ok) this.cleanup.ok = true
+    this.cleaningUp = true
+    try {
+      for (const action of ['community.disable', 'community.hardDelete']) {
+        const record = await this.adminInvoke(action, { communityId }, {
+          required: false,
+          label: `HH_CLOUD_CLEANUP_${action === 'community.disable' ? 'DISABLE' : 'HARD_DELETE'}`,
+        })
+        const ok = record.ok
+        this.cleanup.steps.push({ action, ok, status: record.status, communityId })
+        if (!ok) this.cleanup.ok = false
+        if (action === 'community.hardDelete' && ok) this.cleanup.ok = true
+      }
+    } finally {
+      this.cleaningUp = false
     }
     if (this.cleanup.ok) this.addLabel('HH_CLOUD_FIXTURE_CLEANUP_OK')
     else this.fail('admin fixture cleanup failed', { communityId })

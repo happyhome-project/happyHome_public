@@ -160,6 +160,13 @@ test('buildPostSearchDocument supports Chinese sentence and video-title retrieva
   expect(document.fields.some((field) => field.preview.includes('一粥一饭'))).toBe(true)
 })
 
+test('member-only title never leaks into public chunk metadata', () => {
+  const memberTitleSection = { ...section, widgets: section.widgets.map((widget: any) => widget.fieldKey === 'title' ? { ...widget, visibility: 'member' } : widget) }
+  const document = buildPostSearchDocument(post, memberTitleSection)
+  expect(document.title).not.toBe('明士课堂第一讲')
+  expect(buildPostSearchChunks(document).filter(chunk => chunk.visibility === 'public').every(chunk => chunk.title !== '明士课堂第一讲')).toBe(true)
+})
+
 test('buildPostSearchChunks creates RAG evidence chunks with stable ids and field metadata', () => {
   const document = buildPostSearchDocument(post, section, '2026-06-24T09:00:00.000Z')
   const chunks = buildPostSearchChunks(document)

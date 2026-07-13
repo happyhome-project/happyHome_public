@@ -16,6 +16,7 @@ jest.mock('../../../lib/db', () => ({
     return response?.data || null
   }),
 }))
+jest.mock('../../../lib/post-rag-outbox', () => ({ appendPostRagOutboxEvent: jest.fn() }))
 
 import {
   handleCreate,
@@ -41,13 +42,14 @@ function useCreateTransaction(existingCommunityId = '') {
     memberAdd,
     requestSet,
     collection: jest.fn((collectionName: string) => ({
-      doc: jest.fn(() => ({
+      doc: jest.fn((id: string) => ({
         get: jest.fn().mockResolvedValue({
           data: collectionName === 'community_create_requests' && existingCommunityId
             ? { communityId: existingCommunityId }
             : null,
         }),
         set: requestSet,
+        update: async ({ data }: any) => (db.updateById as jest.Mock)(collectionName, id, data),
       })),
       add: collectionName === 'communities' ? communityAdd : memberAdd,
     })),
@@ -186,23 +188,33 @@ test('待审批社区列表：superAdmin 按创建时间倒序返回 pending 社
 })
 
 test('list：默认只返回 active 社区', async () => {
-  ;(db.query as jest.Mock).mockResolvedValue([{ _id: 'c1', status: 'active' }])
+  ;(db.query as jest.Mock).mockResolvedValue([
+    { _id: 'c1', status: 'active' },
+    { _id: 'hidden', status: 'active', discoverable: false },
+  ])
 
   const result = await handleList({})
 
   expect(db.query).toHaveBeenCalledWith('communities', { status: 'active' }, expect.any(Object))
-  expect(result.communities).toHaveLength(1)
+  expect(result.communities).toEqual([{ _id: 'c1', status: 'active' }])
 })
 
 test('list：includeAll=true 只有 superAdmin 可查看 active 和 pending', async () => {
   ;(db.getById as jest.Mock).mockResolvedValue({ _id: 'super-openid', role: 'superAdmin' })
   ;(db.query as jest.Mock)
-    .mockResolvedValueOnce([{ _id: 'c1', status: 'active' }])
+    .mockResolvedValueOnce([
+      { _id: 'c1', status: 'active' },
+      { _id: 'hidden', status: 'active', discoverable: false },
+    ])
     .mockResolvedValueOnce([{ _id: 'c2', status: 'pending' }])
 
   const result = await handleList({ includeAll: true }, 'super-openid')
 
-  expect(result.communities).toHaveLength(2)
+  expect(result.communities).toEqual([
+    { _id: 'c1', status: 'active' },
+    { _id: 'hidden', status: 'active', discoverable: false },
+    { _id: 'c2', status: 'pending' },
+  ])
 })
 
 test('list：普通用户不能通过 includeAll 读取 pending 社区', async () => {
@@ -233,7 +245,10 @@ test('get：pending 社区不能通过公开接口提前读取', async () => {
 })
 
 test('listDiscoverable：未加入用户可见 active 社区且 viewerStatus 为 null', async () => {
-  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'c1', name: '青山村', status: 'active' }])
+  ;(db.query as jest.Mock).mockResolvedValueOnce([
+    { _id: 'c1', name: '青山村', status: 'active' },
+    { _id: 'hidden', name: '测试社区', status: 'active', discoverable: false },
+  ])
 
   const result = await handleListDiscoverable('')
 

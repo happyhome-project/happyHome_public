@@ -1,8 +1,15 @@
 <template>
   <view
     class="profile-page"
-    :class="{ 'profile-page--editing': isEditingProfile || showManualLoginForm }"
+    data-testid="profile-page"
+    :data-build-version="releaseVersion"
+    :class="{ 'profile-page--editing': showManualLoginForm }"
   >
+    <view
+      class="profile-page-background"
+      :inert="isEditingProfile"
+      :aria-hidden="isEditingProfile ? 'true' : undefined"
+    >
     <view class="profile-custom-nav" :style="profileCustomNavStyle">
       <view class="profile-custom-nav-row">
         <text class="profile-custom-nav-title">我的</text>
@@ -12,9 +19,9 @@
     <view v-if="profileError" class="profile-error">
       <text>{{ profileError }}</text>
     </view>
-    <view class="user-card" :class="{ 'user-card--form': isEditingProfile || showManualLoginForm }">
-      <!-- 已登录且非编辑态：显示头像+昵称+登出/编辑按钮 -->
-      <template v-if="userStore.isLoggedIn && !isEditingProfile">
+    <view class="user-card" :class="{ 'user-card--form': showManualLoginForm }">
+      <!-- 已登录：编辑时仍保留身份卡，表单由页面底部浮层承载 -->
+      <template v-if="userStore.isLoggedIn">
         <image :src="profileAvatarSrc" class="avatar" />
         <view class="user-info">
           <view class="name-row">
@@ -29,80 +36,27 @@
             </view>
           </view>
         </view>
-        <view class="profile-edit-link" @tap="openEditProfile">
+        <view class="profile-edit-link" @tap="startEditProfile">
           <text>编辑</text>
           <image class="profile-edit-arrow" src="/static/profile/edit-arrow.svg" mode="aspectFit" />
-        </view>
-      </template>
-
-      <!-- 编辑态：头像 + 昵称表单（chooseAvatar 明显可见） -->
-      <template v-else-if="isEditingProfile">
-        <view class="login-form">
-          <text class="form-title">编辑资料</text>
-          <text class="form-hint">修改头像和昵称后点击保存</text>
-
-          <!-- 头像按钮：微信原生 chooseAvatar，右下角相机徽标提示可点 -->
-          <view class="avatar-row">
-            <button
-              v-if="supportsChooseAvatar"
-              open-type="chooseAvatar"
-              class="avatar-picker-btn"
-              @chooseavatar="onChooseAvatar"
-            >
-              <view class="avatar-edit-wrap">
-                <image
-                  :src="formAvatarDisplay || profileAvatarSrc"
-                  class="avatar-preview"
-                />
-                <view class="avatar-edit-badge" aria-hidden="true">
-                  <view class="avatar-edit-camera">
-                    <view class="avatar-edit-camera-lens"></view>
-                  </view>
-                </view>
-              </view>
-            </button>
-            <image
-              v-else
-              :src="formAvatarDisplay || profileAvatarSrc"
-              class="avatar-preview"
-            />
-            <text class="avatar-hint">
-              {{ supportsChooseAvatar ? '点击更换头像' : '当前基础库暂不支持修改头像' }}
-            </text>
-          </view>
-
-          <!-- 昵称输入：进入编辑态自动 focus，键盘弹起即显示微信昵称候选 -->
-          <view class="input-wrap">
-            <input
-              type="nickname"
-              :focus="true"
-              :value="formNickName"
-              placeholder="请输入昵称"
-              placeholder-class="input-placeholder"
-              maxlength="20"
-              class="input"
-              @input="onNickInput"
-              @blur="onNickBlur"
-            />
-          </view>
-
-          <view class="form-actions">
-            <button size="mini" @tap="cancelEditProfile">取消</button>
-            <button
-              size="mini"
-              :disabled="!canSubmitForm || submitFormLock.busy.value"
-              class="primary-btn"
-              @tap="submitFormLock.run()"
-            >
-              {{ submitFormLock.busy.value ? '保存中...' : '保存' }}
-            </button>
-          </view>
         </view>
       </template>
 
       <template v-else-if="showManualLoginForm">
         <view class="login-form">
           <text class="form-title">登录</text>
+          <!-- #ifdef H5 -->
+          <text class="form-hint">使用 CloudBase Web 账号登录</text>
+          <view class="input-wrap">
+            <text class="input-label">用户名</text>
+            <input v-model="webUsername" data-testid="h5-login-username" autocomplete="username" aria-label="用户名" placeholder="请输入用户名" placeholder-class="input-placeholder" class="input" />
+          </view>
+          <view class="input-wrap">
+            <text class="input-label">密码</text>
+            <input v-model="webPassword" data-testid="h5-login-password" password autocomplete="current-password" aria-label="密码" placeholder="请输入密码" placeholder-class="input-placeholder" class="input" />
+          </view>
+          <!-- #endif -->
+          <!-- #ifndef H5 -->
           <text class="form-hint">当前环境不支持微信原生登录，请手动填写昵称后继续使用社区功能</text>
 
           <view class="avatar-row">
@@ -112,10 +66,12 @@
             />
             <text class="avatar-hint">默认头像</text>
           </view>
+          <!-- #endif -->
 
           <view class="input-wrap">
             <input
               type="nickname"
+              data-testid="h5-login-nickname"
               :value="formNickName"
               placeholder="请输入昵称"
               placeholder-class="input-placeholder"
@@ -127,20 +83,24 @@
           </view>
 
           <view class="form-actions">
-            <button size="mini" @tap="showManualLoginForm = false">取消</button>
+            <button size="mini" @tap="closeManualLoginForm">取消</button>
             <button
               size="mini"
               :disabled="!canSubmitForm || submitFormLock.busy.value"
               class="primary-btn"
+              data-testid="h5-login-submit"
               @tap="submitFormLock.run()"
             >
               {{ submitFormLock.busy.value ? '登录中...' : '确认登录' }}
             </button>
+            <!-- #ifndef H5 -->
             <button
+              v-if="developerToolsEnabled"
               size="mini"
               class="dev-btn"
               @tap="showDevLogin = true"
             >DEV 登录</button>
+            <!-- #endif -->
           </view>
         </view>
       </template>
@@ -152,30 +112,28 @@
             <text class="name">{{ profileDisplayName }}</text>
           </view>
         </view>
-        <view v-if="supportsChooseAvatar" class="login-form profile-login-actions">
-          <button
-            open-type="chooseAvatar"
-            class="login-hero-btn"
-            @chooseavatar="onLoginChooseAvatar"
-          >微信登录</button>
-          <view class="login-alt-row">
-            <text class="login-alt-hint">使用其他账号？</text>
-            <text class="login-alt-link" @tap.stop="showDevLogin = true">DEV 登录</text>
-          </view>
+        <!-- #ifndef H5 -->
+        <view v-if="developerToolsEnabled" class="login-alt-row">
+          <text class="login-alt-link" @tap.stop="showDevLogin = true">DEV 登录</text>
         </view>
+        <!-- #endif -->
+        <button
+          v-if="supportsChooseAvatar"
+          open-type="chooseAvatar"
+          class="profile-login-hit"
+          data-testid="profile-login-entry"
+          @chooseavatar="onLoginChooseAvatar"
+        ></button>
         <button
           v-else
           class="profile-login-hit"
+          data-testid="profile-login-entry"
           @tap.stop="openLoginEntry"
         ></button>
       </template>
     </view>
 
-    <view v-if="releaseVersion && !userStore.isLoggedIn && !isEditingProfile" class="profile-release-id">
-      <text>{{ releaseVersion }}</text>
-    </view>
-
-    <view v-if="showHomeDiagnostics && !isEditingProfile && !showManualLoginForm" class="profile-diagnostics">
+    <view v-if="developerToolsEnabled && !isEditingProfile && !showManualLoginForm" class="profile-diagnostics">
       <view class="profile-diagnostics__header">
         <text>Home 诊断</text>
         <text class="profile-diagnostics__state">{{ diagnosticsState.enabled ? '已开启' : '未开启' }}</text>
@@ -189,7 +147,7 @@
       <text v-if="diagnosticsStatus" class="profile-diagnostics__hint">{{ diagnosticsStatus }}</text>
     </view>
 
-    <view v-if="!isEditingProfile && !showManualLoginForm" class="profile-shortcuts">
+    <view v-if="!showManualLoginForm" class="profile-shortcuts">
       <view class="profile-shortcut create" @tap="goOnboarding">
         <image
           class="profile-shortcut-decoration"
@@ -228,7 +186,7 @@
       </view>
     </view>
 
-    <view v-if="!isEditingProfile && !showManualLoginForm" class="profile-tools-card">
+    <view v-if="!showManualLoginForm" class="profile-tools-card">
       <template v-for="item in profileToolItems" :key="item.key">
         <button
           v-if="item.kind === 'contact'"
@@ -263,20 +221,30 @@
     </view>
 
     <button
-      v-if="!isEditingProfile && !showManualLoginForm"
+      v-if="!showManualLoginForm"
       class="profile-primary-action"
       open-type="share"
       @tap="handleInviteTap"
     >邀请好友加入社区</button>
 
     <button
-      v-if="!isEditingProfile && !showManualLoginForm"
+      v-if="!showManualLoginForm"
       class="profile-secondary-action"
       :disabled="leaveCurrentCommunityLock.isBusy"
       @tap="handleLeaveCurrentCommunity"
     >
       {{ leaveCurrentCommunityLock.isBusy ? '退出中...' : '退出当前社区' }}
     </button>
+
+    <!-- #ifdef H5 -->
+    <button
+      v-if="userStore.isLoggedIn && !showManualLoginForm"
+      class="profile-secondary-action profile-secondary-action--logout"
+      data-testid="h5-logout"
+      :disabled="webLogoutLock.busy.value"
+      @tap="webLogoutLock.run()"
+    >{{ webLogoutLock.busy.value ? '退出中...' : '退出登录' }}</button>
+    <!-- #endif -->
 
     <!-- 昵称确认浮层：chooseAvatar 回调后自动弹出 -->
     <view v-if="showNickConfirm" class="nick-modal-mask" @tap="cancelNickConfirm">
@@ -314,8 +282,9 @@
       </view>
     </view>
 
+    <!-- #ifndef H5 -->
     <!-- DEV login modal -->
-    <view v-if="showDevLogin" class="dev-modal-mask" @tap="showDevLogin = false">
+    <view v-if="developerToolsEnabled && showDevLogin" class="dev-modal-mask" @tap="showDevLogin = false">
       <view class="dev-modal" @tap.stop>
         <text class="dev-title">DEV 模式登录</text>
         <text class="dev-desc">绕过微信登录，用指定 openid 登录（测试用，不要在正式环境使用）</text>
@@ -333,6 +302,7 @@
         </view>
       </view>
     </view>
+    <!-- #endif -->
 
     <!-- Pending approvals (admin only) -->
     <view v-if="pendingApprovalCount > 0" class="section approval-section">
@@ -406,6 +376,79 @@
       </view>
     </view>
     <AppTabBar current="profile" />
+    </view>
+
+    <view
+      v-if="isEditingProfile"
+      class="profile-edit-mask"
+      @tap="cancelEditProfile"
+      @touchmove.stop.prevent
+    >
+      <view
+        class="profile-edit-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="profile-edit-sheet-title"
+        @tap.stop
+        @touchmove.stop
+      >
+        <text id="profile-edit-sheet-title" class="profile-edit-sheet__title">编辑资料</text>
+
+        <view class="profile-edit-sheet__avatar-row">
+          <button
+            v-if="supportsChooseAvatar"
+            open-type="chooseAvatar"
+            class="avatar-picker-btn"
+            :disabled="submitFormLock.busy.value"
+            @chooseavatar="onChooseAvatar"
+          >
+            <view class="avatar-edit-wrap">
+              <image :src="formAvatarDisplay || profileAvatarSrc" class="avatar-preview" />
+              <view class="avatar-edit-badge" aria-hidden="true">
+                <view class="avatar-edit-camera">
+                  <view class="avatar-edit-camera-lens"></view>
+                </view>
+              </view>
+            </view>
+          </button>
+          <image v-else :src="formAvatarDisplay || profileAvatarSrc" class="avatar-preview" />
+          <text class="profile-edit-sheet__capability">
+            {{ supportsChooseAvatar ? '点击头像即可更换' : '当前基础库暂不支持修改头像' }}
+          </text>
+        </view>
+
+        <view class="profile-edit-sheet__field">
+          <text class="profile-edit-sheet__label">昵称</text>
+          <view class="profile-edit-sheet__input-wrap">
+            <input
+              type="nickname"
+              aria-label="昵称"
+              :focus="isEditingProfile"
+              :value="formNickName"
+              placeholder="请输入昵称"
+              placeholder-class="input-placeholder"
+              maxlength="20"
+              class="input"
+              @input="onNickInput"
+              @blur="onNickBlur"
+            />
+          </view>
+        </view>
+
+        <view class="profile-edit-sheet__actions">
+          <button
+            class="profile-edit-sheet__cancel"
+            :disabled="submitFormLock.busy.value"
+            @tap="cancelEditProfile"
+          >取消</button>
+          <button
+            class="profile-edit-sheet__save"
+            :disabled="!canSubmitForm || submitFormLock.busy.value"
+            @tap="saveProfile"
+          >{{ submitFormLock.busy.value ? '保存中...' : '保存' }}</button>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -415,9 +458,11 @@ import { onPullDownRefresh, onShareAppMessage, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { communityApi, memberApi, notificationApi, type ApprovalNotificationEventType } from '../../api/cloud'
+import { uploadCloudFile } from '../../api/storage'
 import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
+import { createProfileEditSessionGuard, resolveProfileAvatarUrl } from '../../utils/profile-edit-session'
 import { clientLog, flushClientDiagnostics } from '../../utils/client-log'
 import {
   clearClientDiagnosticEvents,
@@ -455,10 +500,11 @@ const profileError = ref('')
 const releaseVersion = getReleaseVersion()
 const diagnosticsState = ref(getClientDiagnosticsState())
 const diagnosticsStatus = ref('')
-const showHomeDiagnostics = computed(() => {
+const developerToolsEnabled = computed(() => {
   try {
     const envVersion = String((wx as any)?.getAccountInfoSync?.()?.miniProgram?.envVersion || '')
-    return envVersion === 'develop' || envVersion === 'trial'
+    const isDeveloperEnvironment = envVersion === 'develop' || envVersion === 'trial'
+    return isDeveloperEnvironment && uni.getStorageSync('hh-profile-developer-tools') === '1'
   } catch (_error) {
     return false
   }
@@ -524,10 +570,14 @@ const approvalReminderState = computed(() => buildApprovalReminderState({
 // ── 登录 / 编辑资料表单状态 ──
 const isEditingProfile = ref(false)
 const showManualLoginForm = ref(false)
+const webUsername = ref('')
+const webPassword = ref('')
 const showNickConfirm = ref(false)    // 登录流程：chooseAvatar 后弹出昵称确认浮层
 const formNickName = ref('')
 const formAvatarCloudUrl = ref('')    // 已上传到 COS 的 cloud://… URL（持久）
 const formAvatarTempPath = ref('')    // chooseAvatar 回传的临时路径（本次提交时上传 COS）
+const profileEditSessionGuard = createProfileEditSessionGuard()
+let activeProfileEditGeneration = 0
 
 // 同时显示临时路径（用户刚选完、还没点提交）或已确认的 cloud URL
 const formAvatarDisplay = computed(() => formAvatarTempPath.value || formAvatarCloudUrl.value)
@@ -551,7 +601,12 @@ const supportsChooseAvatar = computed(() => {
 })
 
 // 表单是否可提交：至少要有昵称
-const canSubmitForm = computed(() => formNickName.value.trim().length > 0)
+const canSubmitForm = computed(() => {
+  if (isH5Runtime() && showManualLoginForm.value && !isEditingProfile.value) {
+    return webUsername.value.trim().length > 0 && webPassword.value.length > 0 && formNickName.value.trim().length > 0
+  }
+  return formNickName.value.trim().length > 0
+})
 const profileShellState = computed(() => {
   if (isEditingProfile.value) return 'editing'
   return userStore.isLoggedIn ? 'logged-in' : 'logged-out'
@@ -629,7 +684,7 @@ function onChooseAvatar(e: any) {
   }
 }
 
-// 登录态点"微信登录"大按钮 → 微信弹 chooseAvatar → 回调后自动弹昵称确认浮层。
+// 未登录态点身份区 → 微信弹 chooseAvatar → 回调后自动弹昵称确认浮层。
 // 和编辑态的 onChooseAvatar 区分：编辑态只换头像，不弹浮层。
 function onLoginChooseAvatar(e: any) {
   const tempPath = e?.detail?.avatarUrl || ''
@@ -653,35 +708,25 @@ function onNickBlur(e: any) {
   formNickName.value = String(e?.detail?.value || '').trim()
 }
 
-/**
- * 上传临时头像到 COS。失败时返回空串（调用方用默认灰头像兜底）。
- */
-async function uploadAvatarIfAny(): Promise<string> {
-  if (!formAvatarTempPath.value) return formAvatarCloudUrl.value || ''
-  try {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore
-    if (typeof wx === 'undefined' || !wx.cloud?.uploadFile) return ''
-    const ext = formAvatarTempPath.value.split('.').pop()?.split('?')[0] || 'jpg'
-    const cloudPath = `avatars/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
-    const res: any = await new Promise((resolve, reject) => {
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      wx.cloud.uploadFile({
-        cloudPath,
-        filePath: formAvatarTempPath.value,
-        success: resolve,
-        fail: reject,
-      })
-    })
-    return String(res?.fileID || '')
-  } catch (err) {
-    console.warn('[profile] 头像上传失败，使用默认头像兜底', err)
-    return ''
-  }
+async function uploadAvatarIfAny(selectedTempPath: string, existingAvatarUrl: string, strictReplacement: boolean): Promise<string> {
+  return resolveProfileAvatarUrl({
+    selectedTempPath,
+    existingAvatarUrl,
+    strictReplacement,
+    uploadSelectedAvatar: async (source) => {
+      const ext = source.startsWith('blob:')
+      ? 'jpg'
+        : (source.split('.').pop()?.split('?')[0] || 'jpg')
+      const cloudPath = `avatars/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
+      return uploadCloudFile({ cloudPath, source })
+    },
+  })
 }
 
-function openEditProfile() {
+function startEditProfile() {
+  const generation = profileEditSessionGuard.tryStart(submitFormLock.busy.value)
+  if (generation === null) return
+  activeProfileEditGeneration = generation
   isEditingProfile.value = true
   formNickName.value = userStore.nickName || ''
   formAvatarCloudUrl.value = userStore.avatarUrl || ''
@@ -689,6 +734,7 @@ function openEditProfile() {
 }
 
 function cancelEditProfile() {
+  if (!profileEditSessionGuard.requestClose(submitFormLock.busy.value)) return
   isEditingProfile.value = false
   formNickName.value = ''
   formAvatarCloudUrl.value = ''
@@ -697,18 +743,32 @@ function cancelEditProfile() {
 
 const submitFormLock = useBusyLock(async () => {
   const wasEditingProfile = isEditingProfile.value
+  const editGeneration = activeProfileEditGeneration
+  const submittedNickName = formNickName.value
+  const submittedAvatarTempPath = formAvatarTempPath.value
+  const submittedAvatarCloudUrl = formAvatarCloudUrl.value
   try {
-    const avatarUrl = await uploadAvatarIfAny()
+    const avatarUrl = await uploadAvatarIfAny(submittedAvatarTempPath, submittedAvatarCloudUrl, wasEditingProfile)
     suppressNextLoginStateRefresh = true
-    await userStore.login({ nickName: formNickName.value, avatarUrl })
+    if (isH5Runtime() && !wasEditingProfile) {
+      await userStore.webLogin({
+        username: webUsername.value,
+        password: webPassword.value,
+        nickName: submittedNickName,
+      })
+    } else {
+      await userStore.login({ nickName: submittedNickName, avatarUrl })
+    }
     markCurrentLoginStateRefreshHandled()
     if (wasEditingProfile) await loadProfileDataAfterRoleResolved('profileSaved')
     else await loadProfileDataAfterRoleResolved('loginSaved')
+    if (wasEditingProfile && !profileEditSessionGuard.complete(editGeneration)) return
     isEditingProfile.value = false
     showManualLoginForm.value = false
     showNickConfirm.value = false
     formAvatarTempPath.value = ''
     formAvatarCloudUrl.value = ''
+    webPassword.value = ''
     const restoredShare = !wasEditingProfile && restorePendingShareCommunity()
     if (!restoredShare) {
       uni.showToast({ title: wasEditingProfile ? '已保存' : '登录成功', icon: 'success' })
@@ -720,6 +780,24 @@ const submitFormLock = useBusyLock(async () => {
       showCancel: false,
     })
     suppressNextLoginStateRefresh = false
+    webPassword.value = ''
+  }
+})
+
+function saveProfile() {
+  return submitFormLock.run()
+}
+
+function closeManualLoginForm() {
+  showManualLoginForm.value = false
+  webPassword.value = ''
+}
+
+const webLogoutLock = useBusyLock(async () => {
+  try {
+    await userStore.logout()
+  } catch (e: any) {
+    uni.showModal({ title: '退出登录失败', content: e?.message || '请重试', showCancel: false })
   }
 })
 
@@ -783,6 +861,7 @@ function updateProfileNavMetrics() {
 function openLoginEntry() {
   if (userStore.isLoggedIn) return
   if (supportsChooseAvatar.value) return
+  webPassword.value = ''
   showManualLoginForm.value = true
 }
 
@@ -1132,9 +1211,6 @@ onMounted(() => {
   hideNativeTabBar()
   refreshDiagnosticsState()
   updateProfileNavMetrics()
-  if (!userStore.isLoggedIn && isH5Runtime() && !supportsChooseAvatar.value) {
-    showManualLoginForm.value = true
-  }
   logProfile('info', 'profile.mounted', {})
   void nextTick(() => logProfile('info', 'profile.render.tick', { reason: 'mounted' }))
   void refreshProfileData('mounted')
@@ -1179,13 +1255,6 @@ onShareAppMessage(() => {
   color: #d93026;
   font-size: $hh-font-caption;
   line-height: 1.5;
-}
-.profile-release-id {
-  margin: -8rpx 0 $hh-space-md;
-  text-align: center;
-  color: var(--hh-color-text-tertiary);
-  font-size: var(--hh-text-caption-size);
-  line-height: var(--hh-text-caption-line-height);
 }
 .profile-diagnostics {
   margin: -4rpx 0 $hh-space-md;
@@ -1856,6 +1925,124 @@ onShareAppMessage(() => {
   color: #fff;
 }
 
+.profile-edit-mask {
+  position: fixed;
+  inset: 0;
+  z-index: $hh-z-modal;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(0, 0, 0, 0.55);
+  overscroll-behavior: contain;
+}
+
+.profile-edit-sheet {
+  box-sizing: border-box;
+  width: 100%;
+  max-height: 88vh;
+  overflow-y: auto;
+  border-radius: 32rpx 32rpx 0 0;
+  padding: 40rpx 40rpx 32rpx;
+  padding-bottom: calc(32rpx + env(safe-area-inset-bottom));
+  background: #fff;
+  box-shadow: 0 -16rpx 48rpx rgba(31, 35, 32, 0.16);
+}
+
+.profile-edit-sheet__title {
+  display: block;
+  color: #181818;
+  font-size: var(--hh-text-heading-lg-size);
+  line-height: var(--hh-text-heading-lg-line);
+  font-weight: $hh-font-weight-bold;
+  text-align: center;
+}
+
+.profile-edit-sheet__avatar-row {
+  padding: 40rpx 0 32rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.profile-edit-sheet .avatar-edit-wrap,
+.profile-edit-sheet .avatar-preview {
+  width: 176rpx;
+  height: 176rpx;
+}
+
+.profile-edit-sheet .avatar-edit-badge {
+  right: 0;
+  bottom: 0;
+  width: 48rpx;
+  height: 48rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.profile-edit-sheet__capability {
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-body-base-size);
+  line-height: var(--hh-text-body-base-line);
+}
+
+.profile-edit-sheet__field {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.profile-edit-sheet__label {
+  color: #292116;
+  font-size: var(--hh-text-body-lg-size);
+  line-height: var(--hh-text-body-lg-line);
+  font-weight: $hh-font-weight-bold;
+}
+
+.profile-edit-sheet__input-wrap {
+  box-sizing: border-box;
+  min-height: 104rpx;
+  padding: 0 24rpx;
+  border-radius: 16rpx;
+  display: flex;
+  align-items: center;
+  background: #f6f7f9;
+}
+
+.profile-edit-sheet__actions {
+  margin-top: 40rpx;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16rpx;
+}
+
+.profile-edit-sheet__actions button {
+  height: 88rpx;
+  margin: 0;
+  padding: 0;
+  border-radius: 999rpx;
+  font-size: var(--hh-text-body-lg-size);
+  line-height: 88rpx;
+}
+
+.profile-edit-sheet__actions button::after {
+  border: 0;
+}
+
+.profile-edit-sheet__cancel {
+  background: #f2f3f7;
+  color: #292116;
+}
+
+.profile-edit-sheet__save {
+  background: var(--hh-color-brand-primary);
+  color: #fff;
+}
+
+.profile-edit-sheet__save[disabled] {
+  opacity: $hh-opacity-disabled;
+}
+
 .avatar {
   width: 128rpx;
   height: 128rpx;
@@ -1916,27 +2103,6 @@ onShareAppMessage(() => {
   width: 36rpx;
   height: 36rpx;
   display: block;
-}
-
-.profile-login-actions {
-  flex: 0 0 224rpx;
-  width: 224rpx;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 8rpx;
-}
-
-.profile-login-actions .login-hero-btn {
-  width: 100%;
-  height: 64rpx;
-  line-height: 64rpx;
-  margin: 0;
-}
-
-.profile-login-actions .login-alt-row {
-  margin-top: 0;
-  justify-content: flex-end;
 }
 
 .profile-login-hit {

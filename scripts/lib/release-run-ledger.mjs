@@ -3,12 +3,19 @@ import { constants } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { REQUIRED_SMOKE_LABELS } from '../cloud-release-smoke.mjs'
+import { createMiniprogramReceiptIdentity, normalizeMiniprogramUploadReceipt } from './miniprogram-receipt-identity.mjs'
+import { assertNoSymbolicLinkPath, pathsReferToSameEntry } from './filesystem-path-integrity.mjs'
 
 export const RELEASE_RUNS_DIR = '.codex-local/release-runs'
 
 export const RELEASE_STAGE_ORDER = [
   'miniprogram-build-gate',
+  'release-operations',
   'cloud-deploy',
+  'cloud-version-probes',
+  'post-rag-timer-probe',
+  'post-rag-v2-backfill',
+  'post-semantic-smoke',
   'cloud-smoke',
   'admin-web-deploy',
   'miniprogram-upload',
@@ -23,7 +30,7 @@ const REQUIRED_RELEASE_UI_MARKERS = [
   'HH_RELEASE_PROFILE_LOGIN_CLEAN',
 ]
 
-const RELEASE_CONTEXT_KEYS = ['gitSha', 'version', 'desc', 'envId', 'releaseStrategy']
+const RELEASE_CONTEXT_KEYS = ['gitSha', 'version', 'desc', 'envId', 'releaseStrategy', 'dagMode', 'forceRedeployCurrent']
 
 function hasReusableColdStartEvidence(evidence = {}) {
   const coldStart = evidence.homeColdStart
@@ -58,11 +65,41 @@ function isoNow(now) {
 }
 
 function safeJson(value) {
+  assertNoPlaintextProbeToken(value)
   return `${JSON.stringify(value, null, 2)}\n`
 }
 
 function oneLineJson(value) {
+  assertNoPlaintextProbeToken(value)
   return `${JSON.stringify(value)}\n`
+}
+
+function assertNoPlaintextProbeToken(value) {
+  if (!value || typeof value !== 'object') return
+  for (const [key, child] of Object.entries(value)) {
+    if (key === 'probeToken') throw new Error('release ledger must not persist plaintext probeToken')
+    assertNoPlaintextProbeToken(child)
+  }
+}
+
+function sanitizeSecretValues(value, secrets = []) {
+  if (typeof value === 'string') return secrets.reduce((text, secret) => text.split(secret).join('[REDACTED_PROBE_TOKEN]'), value)
+  if (Array.isArray(value)) return value.map((item) => sanitizeSecretValues(item, secrets))
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, sanitizeSecretValues(child, secrets)]))
+  }
+  return value
+}
+
+function withAdditiveReleaseDefaults(state) {
+  return {
+    ...state,
+    context: { ...(state?.context || {}), forceRedeployCurrent: state?.context?.forceRedeployCurrent === true },
+    formalPlan: state?.formalPlan || null,
+    artifactManifest: state?.artifactManifest || null,
+    remoteAttestations: state?.remoteAttestations || {},
+    components: state?.components || {},
+  }
 }
 
 function pathFromRoot(root, value) {
@@ -90,6 +127,7 @@ async function readJson(path) {
 
 export async function computeDirectoryDigest(inputRoot) {
   const root = resolve(inputRoot)
+  await assertNoSymbolicLinkPath(root, `directory digest rejects symbolic link junction or reparse path: ${root}`)
   const entries = []
   async function walk(directory, prefix = '') {
     const children = await readdir(directory, { withFileTypes: true })
@@ -97,12 +135,16 @@ export async function computeDirectoryDigest(inputRoot) {
     for (const child of children) {
       const relativePath = prefix ? `${prefix}/${child.name}` : child.name
       const absolutePath = join(directory, child.name)
-      if (child.isDirectory()) {
+      if (child.isSymbolicLink()) {
+        throw new Error(`directory digest rejects symbolic link or reparse entry: ${relativePath}`)
+      } else if (child.isDirectory()) {
         await walk(absolutePath, relativePath)
       } else if (child.isFile()) {
         const contents = await readFile(absolutePath)
         const fileStat = await stat(absolutePath)
         entries.push(`${relativePath}\0${fileStat.size}\0${createHash('sha256').update(contents).digest('hex')}`)
+      } else {
+        throw new Error(`directory digest rejects unsupported or reparse entry: ${relativePath}`)
       }
     }
   }
@@ -124,6 +166,10 @@ function durationMs(startedAt, finishedAt) {
 
 function contextMismatch(stageContext = {}, expected = {}) {
   for (const key of RELEASE_CONTEXT_KEYS) {
+    if (key === 'forceRedeployCurrent') {
+      if ((stageContext[key] === true) !== (expected[key] === true)) return `${key} mismatch`
+      continue
+    }
     if (expected[key] && !stageContext[key]) {
       return `${key} missing from reusable stage context`
     }
@@ -135,9 +181,13 @@ function contextMismatch(stageContext = {}, expected = {}) {
 }
 
 function mergeExistingRunContext(existing = {}, next = {}) {
-  const merged = { ...existing, releaseStrategy: existing.releaseStrategy || 'main' }
-  const requested = { ...next, releaseStrategy: next.releaseStrategy || 'main' }
+  const merged = { ...existing, releaseStrategy: existing.releaseStrategy || 'main', dagMode: existing.dagMode || 'legacy', forceRedeployCurrent: existing.forceRedeployCurrent === true }
+  const requested = { ...next, releaseStrategy: next.releaseStrategy || 'main', dagMode: next.dagMode || 'legacy', forceRedeployCurrent: next.forceRedeployCurrent === true }
   for (const key of RELEASE_CONTEXT_KEYS) {
+    if (key === 'forceRedeployCurrent') {
+      if (merged[key] !== requested[key]) throw new Error(`release run context mismatch for ${key}: existing ${merged[key]}, requested ${requested[key]}`)
+      continue
+    }
     if (merged[key] && requested[key] && merged[key] !== requested[key]) {
       throw new Error(`release run context mismatch for ${key}: existing ${merged[key]}, requested ${requested[key]}`)
     }
@@ -177,7 +227,7 @@ async function inspectBuildInfoEvidence(stage, context) {
   if (!(await pathExists(absoluteUiEvidencePath))) return { reusable: false, reason: `release UI evidence missing: ${relativeToRoot(root, absoluteUiEvidencePath)}` }
   const evidence = await readJson(absoluteUiEvidencePath)
   const evidenceProjectPath = pathFromRoot(root, evidence.projectPath)
-  if (!evidenceProjectPath || resolve(evidenceProjectPath) !== resolve(packageRoot)) {
+  if (!evidenceProjectPath || !(await pathsReferToSameEntry(evidenceProjectPath, packageRoot))) {
     return { reusable: false, reason: 'release UI evidence project path does not match prepared package root' }
   }
   if (context.runId && evidence.releaseRunId !== context.runId) {
@@ -255,6 +305,10 @@ async function inspectUploadEvidence(stage, context) {
   if (!(await pathExists(uploadEvidencePath))) return { reusable: false, reason: `upload evidence missing: ${relativeToRoot(root, uploadEvidencePath)}` }
   const evidence = await readJson(uploadEvidencePath)
   if (evidence.success !== true) return { reusable: false, reason: 'upload evidence is not successful' }
+  if (context.runId && evidence.releaseRunId !== context.runId) {
+    return { reusable: false, reason: `upload evidence runId mismatch: expected ${context.runId}, got ${evidence.releaseRunId || 'missing'}` }
+  }
+  if (!evidence.receiptId) return { reusable: false, reason: 'upload evidence receiptId is missing' }
   if (evidence.version !== context.version) {
     return { reusable: false, reason: `upload evidence version mismatch: expected ${context.version}, got ${evidence.version || 'unknown'}` }
   }
@@ -291,6 +345,19 @@ async function inspectUploadEvidence(stage, context) {
     if (fileStat.mtimeMs + 5000 < uploadStartedAtMs) {
       return { reusable: false, reason: 'upload info predates the recorded upload attempt' }
     }
+    const normalizedReceipt = normalizeMiniprogramUploadReceipt({ method: evidence.method, uploadInfoText: await readFile(uploadInfoPath, 'utf8') })
+    const receiptId = createMiniprogramReceiptIdentity({
+      receipt: normalizedReceipt,
+      runId: context.runId,
+      packageDigest: context.packageDigest,
+      version: context.version,
+      desc: context.desc,
+    })
+    if (!evidence.receiptId || receiptId !== evidence.receiptId) {
+      return { reusable: false, reason: 'fresh normalized upload receipt identity does not match ledger evidence' }
+    }
+  } else {
+    return { reusable: false, reason: `${evidence.method} upload receipt is not fresh-attestable` }
   }
   return {
     reusable: true,
@@ -345,9 +412,31 @@ export class ReleaseRunLedger {
     this.eventsPath = join(this.runDir, 'events.jsonl')
     this.latestPath = resolve(this.root, RELEASE_RUNS_DIR, 'latest.json')
     this.state = options.state
+    this.secrets = []
+    this.mutationPending = Promise.resolve()
+  }
+
+  registerSecrets(secrets = []) {
+    this.secrets = [...new Set([...this.secrets, ...secrets.map(String).filter(Boolean)])]
+    this.state = this.sanitize(this.state)
+  }
+
+  sanitize(value) {
+    return sanitizeSecretValues(value, this.secrets)
+  }
+
+  serializeMutation(mutate) {
+    const operation = this.mutationPending.then(mutate)
+    this.mutationPending = operation.catch(() => {})
+    return operation
   }
 
   async save() {
+    return await this.serializeMutation(async () => await this.saveUnsafe())
+  }
+
+  async saveUnsafe() {
+    this.state = this.sanitize(this.state)
     this.state.updatedAt = isoNow(this.now)
     await writeJson(this.runPath, this.state)
     await writeJson(this.latestPath, {
@@ -365,16 +454,59 @@ export class ReleaseRunLedger {
   }
 
   async appendEvent(event, payload = {}) {
+    return await this.serializeMutation(async () => await this.appendEventUnsafe(event, payload))
+  }
+
+  async appendEventUnsafe(event, payload = {}) {
     await mkdir(this.runDir, { recursive: true })
     await appendFile(this.eventsPath, oneLineJson({
       at: isoNow(this.now),
       event,
       runId: this.runId,
-      ...payload,
+      ...this.sanitize(payload),
     }), 'utf8')
   }
 
+  async pinReleaseArtifacts({ formalPlan, artifactManifest }) {
+    return await this.serializeMutation(async () => {
+    if (!formalPlan || !artifactManifest) throw new Error('formalPlan and artifactManifest are required')
+    if (this.state.formalPlan || this.state.artifactManifest) {
+      if (JSON.stringify(this.state.formalPlan) !== JSON.stringify(formalPlan) || JSON.stringify(this.state.artifactManifest) !== JSON.stringify(artifactManifest)) {
+        throw new Error('release plan and artifact manifest are already pinned for this run')
+      }
+      return
+    }
+    assertNoPlaintextProbeToken(artifactManifest)
+    this.state.schemaVersion = 3
+    this.state.formalPlan = formalPlan
+    this.state.artifactManifest = artifactManifest
+    this.state.remoteAttestations ||= {}
+    this.state.components ||= {}
+    await this.appendEventUnsafe('release_artifacts_pinned', { gitSha: artifactManifest.gitSha, targets: artifactManifest.targets })
+    await this.saveUnsafe()
+    })
+  }
+
+  async recordRemoteAttestations(name, attestations) {
+    return await this.serializeMutation(async () => {
+    assertNoPlaintextProbeToken(attestations)
+    this.state.remoteAttestations ||= {}
+    this.state.remoteAttestations[name] = this.sanitize(attestations)
+    await this.appendEventUnsafe('remote_attestation_recorded', { component: name, attestations })
+    await this.saveUnsafe()
+    })
+  }
+
+  async recordComponent(name, details = {}) {
+    return await this.serializeMutation(async () => {
+    this.state.components ||= {}
+    this.state.components[name] = this.sanitize({ ...details, skipReason: details.skipReason || '', evidence: details.evidence ?? null })
+    await this.saveUnsafe()
+    })
+  }
+
   async startStage(name, details = {}) {
+    return await this.serializeMutation(async () => {
     const at = isoNow(this.now)
     this.state.status = 'running'
     this.state.stages[name] = {
@@ -390,11 +522,13 @@ export class ReleaseRunLedger {
       result: details.result || this.state.stages[name]?.result || null,
       reason: details.reason || '',
     }
-    await this.appendEvent('stage_started', { stage: name, command: this.state.stages[name].command })
-    await this.save()
+    await this.appendEventUnsafe('stage_started', { stage: name, command: this.state.stages[name].command })
+    await this.saveUnsafe()
+    })
   }
 
   async passStage(name, details = {}) {
+    return await this.serializeMutation(async () => {
     const at = isoNow(this.now)
     const existing = this.state.stages[name] || {}
     const startedAt = existing.startedAt || at
@@ -411,11 +545,13 @@ export class ReleaseRunLedger {
       result: details.result ?? existing.result ?? null,
       reason: '',
     }
-    await this.appendEvent('stage_passed', { stage: name, evidence: this.state.stages[name].evidence, result: this.state.stages[name].result })
-    await this.save()
+    await this.appendEventUnsafe('stage_passed', { stage: name, evidence: this.state.stages[name].evidence, result: this.state.stages[name].result })
+    await this.saveUnsafe()
+    })
   }
 
   async failStage(name, error, details = {}) {
+    return await this.serializeMutation(async () => {
     const at = isoNow(this.now)
     const existing = this.state.stages[name] || {}
     const startedAt = existing.startedAt || at
@@ -434,11 +570,13 @@ export class ReleaseRunLedger {
       error: String(error?.stack || error?.message || error),
       reason: details.reason || String(error?.message || error),
     }
-    await this.appendEvent('stage_failed', { stage: name, reason: this.state.stages[name].reason })
-    await this.save()
+    await this.appendEventUnsafe('stage_failed', { stage: name, reason: this.state.stages[name].reason })
+    await this.saveUnsafe()
+    })
   }
 
   async skipStage(name, details = {}) {
+    return await this.serializeMutation(async () => {
     const at = isoNow(this.now)
     const existing = this.state.stages[name] || {}
     this.state.stages[name] = {
@@ -454,15 +592,18 @@ export class ReleaseRunLedger {
       reason: details.reason || 'reused previous passed stage',
       reused: details.reused ?? true,
     }
-    await this.appendEvent('stage_reused', { stage: name, reason: this.state.stages[name].reason })
-    await this.save()
+    await this.appendEventUnsafe('stage_reused', { stage: name, reason: this.state.stages[name].reason })
+    await this.saveUnsafe()
+    })
   }
 
   async complete(status = 'passed') {
+    return await this.serializeMutation(async () => {
     this.state.status = status
     this.state.finishedAt = isoNow(this.now)
-    await this.appendEvent('run_completed', { status })
-    await this.save()
+    await this.appendEventUnsafe('run_completed', { status })
+    await this.saveUnsafe()
+    })
   }
 }
 
@@ -473,18 +614,20 @@ export async function createReleaseRunLedger(options) {
   const runPath = resolve(root, RELEASE_RUNS_DIR, runId, 'run.json')
   let state
   if (await pathExists(runPath)) {
-    state = await readJson(runPath)
+    state = withAdditiveReleaseDefaults(await readJson(runPath))
     state.context = mergeExistingRunContext(state.context || {}, {
       gitSha: options.gitSha || '',
       version: options.version || '',
       desc: options.desc || '',
       envId: options.envId || '',
       releaseStrategy: options.releaseStrategy || 'main',
+      dagMode: options.dagMode || 'legacy',
+      forceRedeployCurrent: options.forceRedeployCurrent === true,
     })
   } else {
     const createdAt = isoNow(options.now)
     state = {
-      schemaVersion: 1,
+      schemaVersion: 3,
       runId,
       command: options.command || '',
       status: 'running',
@@ -497,8 +640,14 @@ export async function createReleaseRunLedger(options) {
         desc: options.desc || '',
         envId: options.envId || '',
         releaseStrategy: options.releaseStrategy || 'main',
+        dagMode: options.dagMode || 'legacy',
+        forceRedeployCurrent: options.forceRedeployCurrent === true,
       },
       stages: {},
+      formalPlan: null,
+      artifactManifest: null,
+      remoteAttestations: {},
+      components: {},
     }
   }
 
@@ -508,7 +657,7 @@ export async function createReleaseRunLedger(options) {
   return ledger
 }
 
-export function createReleasePlanAfterResumeIdentityCheck({ resumeRunState, gitSha, releaseStrategy, createPlan }) {
+export function createReleasePlanAfterResumeIdentityCheck({ resumeRunState, gitSha, releaseStrategy, forceRedeployCurrent = false, createPlan }) {
   if (resumeRunState) {
     const existingGitSha = String(resumeRunState.context?.gitSha || '')
     const existingReleaseStrategy = String(resumeRunState.context?.releaseStrategy || 'main')
@@ -518,8 +667,12 @@ export function createReleasePlanAfterResumeIdentityCheck({ resumeRunState, gitS
     if (existingReleaseStrategy !== releaseStrategy) {
       throw new Error(`release resume context mismatch for releaseStrategy: existing ${existingReleaseStrategy}, requested ${releaseStrategy}`)
     }
+    const existingForceRedeployCurrent = resumeRunState.context?.forceRedeployCurrent === true
+    if (existingForceRedeployCurrent !== (forceRedeployCurrent === true)) {
+      throw new Error(`release resume context mismatch for forceRedeployCurrent: existing ${existingForceRedeployCurrent}, requested ${forceRedeployCurrent === true}`)
+    }
   }
-  return createPlan(gitSha, releaseStrategy)
+  return createPlan(gitSha, releaseStrategy, forceRedeployCurrent === true)
 }
 
 function releaseIdentityFromLedger(ledger) {
@@ -559,7 +712,7 @@ export async function confirmReleaseLedgerAgainstProductionInspection({ ledger, 
 
 export async function loadReleaseRun(root, runId) {
   const absoluteRoot = resolve(root || process.cwd())
-  return await readJson(resolve(absoluteRoot, RELEASE_RUNS_DIR, runId, 'run.json'))
+  return withAdditiveReleaseDefaults(await readJson(resolve(absoluteRoot, RELEASE_RUNS_DIR, runId, 'run.json')))
 }
 
 export async function loadLatestReleaseRun(root) {
@@ -677,6 +830,16 @@ export function summarizeReleaseRun(runState) {
       reused: stage.reused === true,
     }
   }
+  const components = runState?.components || {}
+  const componentValues = Object.values(components)
+  const componentSummary = {
+    counts: {
+      deployed: componentValues.filter((component) => component.status === 'deployed' || component.evidence?.deployed === true).length,
+      skipped: componentValues.filter((component) => Boolean(component.skipReason) && ['attested', 'uploaded'].includes(component.status)).length,
+      total: componentValues.length,
+    },
+    components,
+  }
   return {
     runId: runState?.runId || '',
     status: runState?.status || 'unknown',
@@ -690,6 +853,10 @@ export function summarizeReleaseRun(runState) {
       envId: runState?.context?.envId || '',
       releaseStrategy: runState?.context?.releaseStrategy || 'main',
     },
+    artifactManifest: runState?.artifactManifest || null,
+    remoteAttestations: runState?.remoteAttestations || {},
+    components: runState?.components || {},
+    componentSummary,
     stages,
   }
 }

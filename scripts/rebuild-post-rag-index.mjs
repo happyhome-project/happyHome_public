@@ -33,7 +33,7 @@ function getFlagValue(argv, name, fallback = '') {
   return fallback
 }
 
-function parseRagRebuildArgs(argv = process.argv.slice(2), env = process.env) {
+export function parseRagRebuildArgs(argv = process.argv.slice(2), env = process.env) {
   const base = parseRebuildArgs(argv, env)
   return {
     ...base,
@@ -51,6 +51,10 @@ function parseRagRebuildArgs(argv = process.argv.slice(2), env = process.env) {
     processJobs: !argv.includes('--no-process'),
     reconcile: argv.includes('--reconcile'),
     health: argv.includes('--health'),
+    healthV2: argv.includes('--health-v2'),
+    ensureIndex: argv.includes('--ensure-index'),
+    v2: argv.includes('--v2'),
+    workerStage: getFlagValue(argv, 'worker-stage', 'combined'),
     workerRounds: Math.max(0, Math.floor(Number(getFlagValue(
       argv,
       'worker-rounds',
@@ -110,8 +114,14 @@ async function invokeFunction(functionName, payload, options, runner = defaultRu
 }
 
 async function listCommunitySections(communityId, options, runner) {
-  const record = await invokeAdmin('section.list', { communityId }, options, runner)
-  const sections = Array.isArray(record.functionResult?.sections) ? record.functionResult.sections : []
+  const sections=[]; let afterId=''
+  while(true) {
+    const record=await invokeAdmin('section.listPageAdmin',{communityId,afterId,limit:100},options,runner)
+    const result=record.functionResult||{}; sections.push(...(Array.isArray(result.items)?result.items:[]))
+    if(!result.hasMore) break
+    if(!result.nextAfterId||result.nextAfterId===afterId) throw new Error('section pagination did not advance')
+    afterId=String(result.nextAfterId)
+  }
   return sections
     .map((section) => String(section?._id || section?.id || '').trim())
     .filter(Boolean)
@@ -132,7 +142,7 @@ async function enqueueCommunityRagJobs(communityId, options, runner) {
     while (true) {
       const record = await invokeAdmin(
         'post.rebuildRagIndexSectionBatchAdmin',
-        { sectionId, skip, limit: options.batchSize },
+        { sectionId, skip, limit: options.batchSize, ...(options.v2 ? { schemaVersion: 2 } : {}) },
         options,
         runner,
       )
@@ -150,7 +160,7 @@ async function enqueueCommunityRagJobs(communityId, options, runner) {
 
 async function loadCommunityRagHealth(communityId, options, runner) {
   const record = await invokeAdmin(
-    'post.ragIndexHealthAdmin',
+    options.healthV2 ? 'post.ragV2HealthAdmin' : 'post.ragIndexHealthAdmin',
     { communityId },
     options,
     runner,
@@ -203,13 +213,20 @@ async function processQueuedJobs(options, runner) {
   }
   const rounds = []
   for (let round = 0; round < options.workerRounds; round += 1) {
-    const result = await invokeFunction('post-rag-worker', withWorkerToken({ limit: 20 }, options), options, runner)
-    const scannedCount = Number(result?.scannedCount || 0)
+    const workerPayload = { limit: 20, ...(options.workerStage === 'materialize' ? { action: 'materializeOutbox' } : options.workerStage === 'v2' ? { action: 'indexV2' } : {}) }
+    const result = await invokeFunction('post-rag-worker', withWorkerToken(workerPayload, options), options, runner)
+    const stages = [result?.outbox, result?.v2, result?.legacy].filter(Boolean)
+    const scannedCount = stages.length
+      ? stages.reduce((total, stage) => total + Number(stage?.scannedCount || 0), 0)
+      : Number(result?.scannedCount || 0)
+    const stageResults = stages.flatMap(stage => Array.isArray(stage?.results) ? stage.results : [])
+    const errors = Array.isArray(result?.errors) ? result.errors : []
     rounds.push({
       round: round + 1,
       scannedCount,
-      okCount: Array.isArray(result?.results) ? result.results.filter((item) => item.ok).length : 0,
-      failedCount: Array.isArray(result?.results) ? result.results.filter((item) => !item.ok).length : 0,
+      okCount: stageResults.filter((item) => item.ok !== false).length,
+      failedCount: errors.length + stageResults.filter((item) => item.ok === false).length,
+      stageErrors: errors,
     })
     if (scannedCount === 0) break
   }
@@ -218,18 +235,27 @@ async function processQueuedJobs(options, runner) {
 
 export async function runPostRagRebuild(options = parseRagRebuildArgs(), runner = defaultRunner) {
   if (options.help) return { help: true }
+  if (options.ensureIndex) {
+    const result = await invokeFunction(
+      'post-rag-worker',
+      withWorkerToken({ action: 'ensureIndex' }, options),
+      options,
+      runner,
+    )
+    return { ensureIndex: true, envId: options.envId, result }
+  }
   const communityIds = await resolveTargetCommunityIds(options, runner)
   if (options.dryRun) {
     return {
       envId: options.envId,
       dryRun: true,
-      health: Boolean(options.health),
+      health: Boolean(options.health || options.healthV2),
       communityIds: normalizeCommunityIds(communityIds),
       results: [],
       workerRounds: [],
     }
   }
-  if (options.health) {
+  if (options.health || options.healthV2) {
     const results = []
     for (const communityId of communityIds) {
       try {
@@ -257,6 +283,12 @@ export async function runPostRagRebuild(options = parseRagRebuildArgs(), runner 
       acc.failedStateCount += Number(item.failedStateCount || 0)
       acc.pendingJobCount += Number(item.pendingJobCount || 0)
       acc.failedJobCount += Number(item.failedJobCount || 0)
+      acc.retryJobCount += Number(item.retryJobCount || 0)
+      acc.processingJobCount += Number(item.processingJobCount || 0)
+      acc.unknownJobStatusCount += Number(item.unknownJobStatusCount || 0)
+      acc.eligibleActivePostCount += Number(item.eligibleActivePostCount || 0)
+      acc.exactSourceVersionCount += Number(item.exactSourceVersionCount || 0)
+      acc.missingExactSourceVersionCount += Number(item.missingExactSourceVersionCount || 0)
       acc.potentialMissingActiveCount += Number(item.potentialMissingActiveCount || 0)
       if (!item.ok) acc.failedCommunityCount += 1
       return acc
@@ -268,16 +300,25 @@ export async function runPostRagRebuild(options = parseRagRebuildArgs(), runner 
       failedStateCount: 0,
       pendingJobCount: 0,
       failedJobCount: 0,
+      retryJobCount: 0,
+      processingJobCount: 0,
+      unknownJobStatusCount: 0,
+      eligibleActivePostCount: 0,
+      exactSourceVersionCount: 0,
+      missingExactSourceVersionCount: 0,
       potentialMissingActiveCount: 0,
       failedCommunityCount: 0,
     })
-    totals.coverageRatio = totals.activePostCount > 0
+    totals.coverageRatio = options.healthV2
+      ? (totals.eligibleActivePostCount > 0 ? totals.exactSourceVersionCount / totals.eligibleActivePostCount : 1)
+      : totals.activePostCount > 0
       ? totals.indexedStateCount / totals.activePostCount
       : 1
     return {
       envId: options.envId,
       dryRun: false,
       health: true,
+      healthV2: Boolean(options.healthV2),
       communityIds,
       results,
       totals,
@@ -352,6 +393,10 @@ Options:
   --community-ids <id1,id2>     Enqueue multiple communities.
   --reconcile                   Queue only missing/stale/removable RAG jobs from post_rag_index_state.
   --health                      Read RAG source/state/job counts without queueing or processing jobs.
+  --health-v2                   Read v2 semantic source/state/job coverage.
+  --ensure-index                Validate or initialize the ES index through the VPC worker.
+  --v2                          Request v2 outbox backfill facts from admin batch actions.
+  --worker-stage <stage>        combined (default), materialize, or v2.
   --dry-run                     Print target community ids without enqueueing.
   --batch-size <n>              Posts per admin invocation. Defaults to ${DEFAULT_BATCH_SIZE}.
   --no-process                  Only enqueue jobs; do not invoke post-rag-worker.
@@ -363,6 +408,10 @@ Options:
 
 function printSummary(summary) {
   if (summary.help) return
+  if (summary.ensureIndex) {
+    console.log(`[post-rag-index] ${JSON.stringify(summary.result)}`)
+    return
+  }
   if (summary.dryRun) {
     console.log(`[post-rag-rebuild] dryRun env=${summary.envId} communities=${summary.communityIds.join(',')}`)
     return

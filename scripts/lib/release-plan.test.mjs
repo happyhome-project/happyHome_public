@@ -67,6 +67,12 @@ test('change manifests reject unknown actions, duplicate ids, and missing declar
   assert.throws(() => validateChangeManifests([
     { schemaVersion: 1, changeId: 'migration', actions: [], migrations: [{ id: 'missing-module' }], smokeSuites: [] },
   ]), /id and module/i)
+  assert.throws(() => validateChangeManifests([
+    { schemaVersion: 1, changeId: 'traversal', actions: [], migrations: [{ id: 'escape', inputDigest: 'a'.repeat(64), module: 'release/migrations/../../escape.mjs' }], smokeSuites: [] },
+  ]), /confined/i)
+  assert.throws(() => validateChangeManifests([
+    { schemaVersion: 1, changeId: 'encoded-traversal', actions: [], migrations: [{ id: 'escape', inputDigest: 'a'.repeat(64), module: 'release/migrations/%2e%2e/escape.mjs' }], smokeSuites: [] },
+  ]), /confined/i)
 })
 
 test('main plans use production state base and bootstrap safely when it is unavailable', () => {
@@ -106,6 +112,36 @@ test('full-current plans explicitly publish every current runtime target and ret
   assert.equal(plan.targets.miniprogram, true)
   assert.deepEqual(plan.manifests, manifests)
   assert.deepEqual(plan.changeIds, ['indexes', 'network'])
+  assert.deepEqual(plan.operationKinds, {
+    'desired-state': ['configure-rag-network', 'ensure-indexes'],
+    migration: [],
+    verification: [],
+  })
+})
+
+test('shared root build inputs target every component whose digest depends on them', () => {
+  const lockImpact = classifyReleaseImpact({ changedPaths: ['package-lock.json'], allFunctions: ['post', 'user'], functionInputs: {} })
+  assert.equal(lockImpact.cloud.mode, 'all')
+  assert.equal(lockImpact.adminWeb, true)
+  assert.equal(lockImpact.miniprogram, true)
+
+  const projectImpact = classifyReleaseImpact({ changedPaths: ['project.config.json'], allFunctions: ['post'], functionInputs: {} })
+  assert.equal(projectImpact.cloud.mode, 'all')
+  assert.equal(projectImpact.adminWeb, true)
+  assert.equal(projectImpact.miniprogram, true)
+
+  const probeImpact = classifyReleaseImpact({ changedPaths: ['scripts/lib/cloud-release-probe.mjs'], allFunctions: ['post', 'user'], functionInputs: {} })
+  assert.equal(probeImpact.cloud.mode, 'all')
+  assert.equal(probeImpact.adminWeb, false)
+  assert.equal(probeImpact.miniprogram, false)
+})
+
+test('force-redeploy-current is valid only for explicit full-current and is pinned in the plan', () => {
+  assert.throws(() => createReleasePlan({
+    baseSha: 'base', forceRedeployCurrent: true, headSha: 'head', manifests: [], mode: 'main',
+  }), /force-redeploy-current.*full-current/i)
+  const plan = createReleasePlan({ forceRedeployCurrent: true, headSha: 'head', manifests: [], mode: 'full-current' })
+  assert.equal(plan.forceRedeployCurrent, true)
 })
 
 test('normal main plans remain incremental and classify only changed runtime targets', () => {

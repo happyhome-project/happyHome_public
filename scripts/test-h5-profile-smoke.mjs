@@ -43,7 +43,8 @@ server.listen(0, '127.0.0.1', async () => {
     await runProfileCase(browser, port, {
       label: 'fallback-login',
       setup: null,
-      expectedTexts: ['确认登录', 'DEV 登录'],
+      openManualLogin: true,
+      expectedTexts: ['使用 CloudBase Web 账号登录', '用户名', '密码', '确认登录'],
     })
     await runProfileCase(browser, port, {
       label: 'choose-avatar-login',
@@ -52,7 +53,7 @@ server.listen(0, '127.0.0.1', async () => {
           window.__HH_TEST_CHOOSE_AVATAR__ = true
         })
       },
-      expectedTexts: ['微信登录', 'DEV 登录'],
+      expectedTexts: ['登录', '退出当前社区'],
     })
     console.log('H5 profile smoke passed')
   } finally {
@@ -74,12 +75,36 @@ async function runProfileCase(browser, port, options) {
     if (options.setup) await options.setup(page)
     await page.goto(`http://127.0.0.1:${port}/#/pages/profile/index`, { waitUntil: 'networkidle' })
     await page.waitForTimeout(1200)
-    const text = normalize(await page.locator('body').innerText())
+    const initialText = normalize(await page.locator('body').innerText())
+    const buildVersion = await page.locator('.profile-page').getAttribute('data-build-version')
+    const loginEntry = page.locator('[data-testid="profile-login-entry"]')
 
+    if (!initialText.includes('登录')) {
+      throw new Error(`${options.label}: default profile shell is missing the 登录 identity label`)
+    }
+    if (await loginEntry.count() !== 1) {
+      throw new Error(`${options.label}: expected one profile login identity entry`)
+    }
+
+    if (options.openManualLogin) {
+      if (await page.locator('[data-testid="h5-login-username"] input').count()) {
+        throw new Error(`${options.label}: default profile shell unexpectedly opened the username form`)
+      }
+      await loginEntry.click({ force: true })
+      await page.locator('[data-testid="h5-login-username"] input').waitFor()
+      await page.locator('[data-testid="h5-login-username"] input').fill('profile-smoke-user')
+      await page.locator('[data-testid="h5-login-password"] input').fill('profile-smoke-password')
+      await page.locator('[data-testid="h5-login-nickname"] input').fill('Profile Smoke')
+    }
+
+    const text = normalize(await page.locator('body').innerText())
     console.log(`[${options.label}] ${text}`)
 
-    if (!expectedVersion || !text.includes(expectedVersion)) {
-      throw new Error(`${options.label}: profile version missing: expected ${expectedVersion || '(unknown)'}`)
+    if (!expectedVersion || buildVersion !== expectedVersion) {
+      throw new Error(`${options.label}: profile build marker mismatch: expected ${expectedVersion || '(unknown)'}, got ${buildVersion || '(missing)'}`)
+    }
+    if (text.includes(expectedVersion)) {
+      throw new Error(`${options.label}: profile build version leaked into visible text`)
     }
     if (/state:logged|login:[01]|cc:/.test(text)) {
       throw new Error(`${options.label}: profile internal debug label leaked`)
@@ -89,7 +114,7 @@ async function runProfileCase(browser, port, options) {
         throw new Error(`${options.label}: expected text missing: ${expectedText}`)
       }
     }
-    if (text.length < 80) {
+    if (text.length < 40) {
       throw new Error(`${options.label}: profile content is too short; possible blank page`)
     }
     if (errors.length > 0) {

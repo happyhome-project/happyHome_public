@@ -70,7 +70,8 @@ export function assertFormalReleaseGitState({
   }
 }
 
-export function createFormalReleaseMutationRevalidator({
+export function createFormalReleaseMutationFences({
+  expectedGitSha = '',
   fetchOriginMain,
   readGitState,
   releaseStrategy,
@@ -80,18 +81,34 @@ export function createFormalReleaseMutationRevalidator({
   if (typeof fetchOriginMain !== 'function' || typeof readGitState !== 'function' || typeof beforeRemoteMutation !== 'function') {
     throw new Error('Formal release mutation revalidation requires fetch, Git state, and production fence callbacks')
   }
+  const assertCurrentState = () => {
+    const state = readGitState()
+    assertFormalReleaseGitState({
+      ...state,
+      releaseStrategy,
+      fullCurrentExplicit,
+    })
+    if (expectedGitSha && state.headSha !== expectedGitSha) {
+      throw new Error(`Formal release local fence requires exact release SHA ${expectedGitSha}; got ${state.headSha || 'missing'}`)
+    }
+  }
   let pending = Promise.resolve()
-  return (stage) => {
+  const remoteBoundary = (stage) => {
     const check = pending.then(async () => {
       await fetchOriginMain()
-      assertFormalReleaseGitState({
-        ...readGitState(),
-        releaseStrategy,
-        fullCurrentExplicit,
-      })
+      assertCurrentState()
       await beforeRemoteMutation(stage)
     })
     pending = check.catch(() => {})
     return check
   }
+  const localExactShaFence = async (stage) => {
+    assertCurrentState()
+    await beforeRemoteMutation(stage)
+  }
+  return { localExactShaFence, remoteBoundary }
+}
+
+export function createFormalReleaseMutationRevalidator(options) {
+  return createFormalReleaseMutationFences(options).remoteBoundary
 }

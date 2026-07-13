@@ -34,6 +34,47 @@ export interface PostHomeTitleIssue {
 }
 
 const HOME_TITLE_WIDGET_TYPES = ['short_text', 'summary', 'number', 'rich_text', 'rich_note']
+const HOME_TITLE_LABEL_NEEDLES = ['标题', '名称', '名字', '书名', '物品', '活动', '医生姓名', '音乐名称', '电影分类']
+
+export interface PostDetailTitleResolution {
+  text: string
+  sourceWidgetId: string | null
+}
+
+export function resolvePostDetailTitle(post: Post, section: Section): PostDetailTitleResolution {
+  const carpoolSummary = getCarpoolListSummary(post, section)
+  if (carpoolSummary?.route) {
+    return { text: carpoolSummary.route, sourceWidgetId: null }
+  }
+
+  const widgets = (section.widgets || []).slice().sort((a, b) => a.order - b.order)
+  const semanticTitleWidget = widgets.find((widget) =>
+    isResolverSemanticTitleWidget(widget) &&
+    getWidgetValue(post, widget) !== ''
+  )
+  if (semanticTitleWidget) {
+    return {
+      text: getWidgetValue(post, semanticTitleWidget),
+      sourceWidgetId: consumedTitleSourceWidgetId(semanticTitleWidget),
+    }
+  }
+
+  const fallbackWidget = widgets.find((widget) =>
+    HOME_TITLE_WIDGET_TYPES.includes(widget.type) && getWidgetValue(post, widget) !== ''
+  )
+  if (fallbackWidget) {
+    return {
+      text: getWidgetValue(post, fallbackWidget),
+      sourceWidgetId: consumedTitleSourceWidgetId(fallbackWidget),
+    }
+  }
+
+  const attendanceWidget = widgets.find((widget) => widget.type === 'attendance' && String(widget.label || '').trim())
+  return {
+    text: String(attendanceWidget?.label || section.name || '无标题').trim(),
+    sourceWidgetId: null,
+  }
+}
 
 export function getPostHomeTitle(post: Post, section: Section): string {
   const carpoolSummary = getCarpoolListSummary(post, section)
@@ -137,6 +178,19 @@ function isTitleLikeWidget(widget: Section['widgets'][number]): boolean {
     ['标题', '名称', '名字'].some((item) => label.includes(item))
 }
 
+function isResolverSemanticTitleWidget(widget: Section['widgets'][number]): boolean {
+  if (!HOME_TITLE_WIDGET_TYPES.includes(widget.type)) return false
+  const fieldKey = String(widget.fieldKey || '').toLowerCase()
+  const label = String(widget.label || '').replace(/\s/g, '')
+  return fieldKey === 'title' ||
+    fieldKey.includes('title') ||
+    HOME_TITLE_LABEL_NEEDLES.some((item) => label.includes(item))
+}
+
+function consumedTitleSourceWidgetId(widget: Section['widgets'][number]): string | null {
+  return ['short_text', 'summary'].includes(widget.type) ? widget.widgetId : null
+}
+
 export function getArchiveHomeMeta(post: Post, section: Section): string {
   if (section?.enableLike !== false && Number(post?.likeCount || 0) > 0) {
     return `${post.likeCount} 赞`
@@ -232,6 +286,10 @@ export function formatWidgetValue(value: any, type: string): string {
   if (type === 'rich_note' && value && typeof value === 'object' && !Array.isArray(value)) {
     return getTextExcerpt(value)
   }
+  if (type === 'rich_text') {
+    if (typeof value === 'object') return ''
+    return htmlToPlainText(String(value))
+  }
   if (type === 'datetime') {
     const d = new Date(value as string)
     if (Number.isNaN(d.getTime())) return String(value)
@@ -240,6 +298,42 @@ export function formatWidgetValue(value: any, type: string): string {
   if (Array.isArray(value)) return ''
   if (typeof value === 'object') return ''
   return String(value)
+}
+
+function htmlToPlainText(html: string): string {
+  const namedEntities: Record<string, string> = {
+    amp: '&',
+    apos: "'",
+    hellip: '…',
+    gt: '>',
+    lt: '<',
+    ldquo: '“',
+    lsquo: '‘',
+    mdash: '—',
+    ndash: '–',
+    nbsp: ' ',
+    quot: '"',
+    rdquo: '”',
+    rsquo: '’',
+  }
+
+  return html
+    .replace(/<\s*(script|style)\b[^>]*>[\s\S]*?(?:<\s*\/\s*\1\s*>|$)/gi, ' ')
+    .replace(/<\s*br\b[^>]*\/?>/gi, ' ')
+    .replace(/<\s*\/?\s*(?:address|article|aside|blockquote|dd|div|dl|dt|fieldset|figcaption|figure|footer|form|h[1-6]|header|hr|li|main|nav|ol|p|pre|section|table|tbody|td|tfoot|th|thead|tr|ul)\b[^>]*>/gi, ' ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&(#x[0-9a-f]+|#\d+|amp|apos|gt|hellip|ldquo|lsquo|lt|mdash|ndash|nbsp|quot|rdquo|rsquo);/gi, (entity, code: string) => {
+      if (!code.startsWith('#')) return namedEntities[code.toLowerCase()] ?? entity
+      const radix = code[1]?.toLowerCase() === 'x' ? 16 : 10
+      const digits = radix === 16 ? code.slice(2) : code.slice(1)
+      const codePoint = Number.parseInt(digits, radix)
+      if (!Number.isFinite(codePoint) || codePoint <= 0 || codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) {
+        return entity
+      }
+      return String.fromCodePoint(codePoint)
+    })
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function isCarpoolSection(section: Section): boolean {

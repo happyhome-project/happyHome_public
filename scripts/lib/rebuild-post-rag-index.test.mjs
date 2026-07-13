@@ -26,23 +26,22 @@ function createMockRunner() {
   const runner = async (command, args, runnerOptions = {}) => {
     const payload = payloadFromArgs(args)
     calls.push({ command, args, options: runnerOptions, payload })
-    if (payload.action === 'community.list') {
+    if (payload.action === 'community.listActivePageAdmin') {
       return {
         status: 0,
         stdout: JSON.stringify({
-          communities: [
+          items: [
             { _id: 'c-active-1', status: 'active' },
-            { _id: 'c-disabled', status: 'disabled' },
             { id: 'c-active-2', status: 'active' },
-          ],
+          ], hasMore: false, nextAfterId: null,
         }),
         stderr: '',
       }
     }
-    if (payload.action === 'section.list') {
+    if (payload.action === 'section.listPageAdmin') {
       return {
         status: 0,
-        stdout: JSON.stringify({ sections: [{ _id: `${payload.communityId}-section-1` }] }),
+        stdout: JSON.stringify({ items: [{ _id: `${payload.communityId}-section-1` }], hasMore: false, nextAfterId: null }),
         stderr: '',
       }
     }
@@ -100,7 +99,7 @@ function createMockRunner() {
     if (payload.workerToken) {
       return {
         status: 0,
-        stdout: JSON.stringify({ scannedCount: 0, results: [] }),
+        stdout: JSON.stringify({ outbox: { scannedCount: 0, results: [] }, v2: { scannedCount: 0, results: [] }, legacy: { scannedCount: 0, results: [] }, errors: [] }),
         stderr: '',
       }
     }
@@ -109,6 +108,20 @@ function createMockRunner() {
   runner.calls = calls
   return runner
 }
+
+test('release index gate invokes authorized post-rag-worker ensureIndex inside the VPC', async () => {
+  const runner = createMockRunner()
+
+  await runPostRagRebuild({
+    ensureIndex: true,
+    envId: 'env-x',
+    commandTimeoutMs: 999,
+    workerToken: 'worker-secret',
+  }, runner)
+
+  assert.equal(runner.calls.length, 1)
+  assert.deepEqual(runner.calls[0].payload, { action: 'ensureIndex', workerToken: 'worker-secret' })
+})
 
 test('runPostRagRebuild sends the explicit worker token when processing queued jobs', async () => {
   const runner = createMockRunner()
@@ -124,6 +137,7 @@ test('runPostRagRebuild sends the explicit worker token when processing queued j
     processJobs: true,
     workerRounds: 1,
     workerToken: 'worker-secret',
+    adminInternalToken: 'admin-secret',
   }, runner)
 
   assert.equal(summary.totals.failedCommunityCount, 0)
@@ -145,6 +159,7 @@ test('runPostRagRebuild with --all-active enqueues every active community', asyn
     processJobs: false,
     workerRounds: 0,
     workerToken: '',
+    adminInternalToken: 'admin-secret',
     includeDisabled: false,
   }, runner)
 
@@ -154,7 +169,7 @@ test('runPostRagRebuild with --all-active enqueues every active community', asyn
   assert.equal(summary.totals.upsertQueuedCount, 2)
   assert.equal(summary.totals.deleteQueuedCount, 0)
   assert.equal(summary.totals.failedCommunityCount, 0)
-  const sectionListCalls = runner.calls.filter((call) => call.payload.action === 'section.list')
+  const sectionListCalls = runner.calls.filter((call) => call.payload.action === 'section.listPageAdmin')
   assert.deepEqual(sectionListCalls.map((call) => call.payload.communityId), ['c-active-1', 'c-active-2'])
   const backfillCalls = runner.calls.filter((call) => call.payload.action === 'post.rebuildRagIndexSectionBatchAdmin')
   assert.deepEqual(backfillCalls.map((call) => call.payload.sectionId), [
@@ -177,6 +192,7 @@ test('runPostRagRebuild with reconcile scans communities directly against index 
     processJobs: false,
     workerRounds: 0,
     workerToken: '',
+    adminInternalToken: 'admin-secret',
     includeDisabled: false,
     reconcile: true,
   }, runner)
@@ -187,7 +203,7 @@ test('runPostRagRebuild with reconcile scans communities directly against index 
   assert.equal(summary.totals.upsertQueuedCount, 2)
   assert.equal(summary.totals.deleteQueuedCount, 2)
   assert.equal(summary.totals.failedCommunityCount, 0)
-  const sectionListCalls = runner.calls.filter((call) => call.payload.action === 'section.list')
+  const sectionListCalls = runner.calls.filter((call) => call.payload.action === 'section.listPageAdmin')
   assert.equal(sectionListCalls.length, 0)
   const reconcileCalls = runner.calls.filter((call) => call.payload.action === 'post.reconcileRagIndexCommunityBatchAdmin')
   assert.deepEqual(reconcileCalls.map((call) => call.payload.communityId), ['c-active-1', 'c-active-2'])
@@ -207,6 +223,7 @@ test('runPostRagRebuild with health reads RAG health without queueing jobs', asy
     processJobs: true,
     workerRounds: 1,
     workerToken: 'worker-secret',
+    adminInternalToken: 'admin-secret',
     includeDisabled: false,
     reconcile: false,
     health: true,
@@ -232,14 +249,14 @@ test('runPostRagRebuild retries transient admin invoke failures before giving up
   let communityListAttempts = 0
   const runner = async (_command, args, runnerOptions = {}) => {
     const payload = payloadFromArgs(args)
-    if (payload.action === 'community.list') {
+    if (payload.action === 'community.listActivePageAdmin') {
       communityListAttempts += 1
       if (communityListAttempts === 1) {
         return { status: 1, stdout: '', stderr: '[object Object]', options: runnerOptions }
       }
       return {
         status: 0,
-        stdout: JSON.stringify({ communities: [{ _id: 'c-active-1', status: 'active' }] }),
+        stdout: JSON.stringify({ items: [{ _id: 'c-active-1', status: 'active' }], hasMore: false, nextAfterId: null }),
         stderr: '',
       }
     }
@@ -274,6 +291,7 @@ test('runPostRagRebuild retries transient admin invoke failures before giving up
     processJobs: false,
     workerRounds: 0,
     workerToken: '',
+    adminInternalToken: 'admin-secret',
     includeDisabled: false,
     reconcile: false,
     health: true,
@@ -283,4 +301,18 @@ test('runPostRagRebuild retries transient admin invoke failures before giving up
   assert.equal(communityListAttempts, 2)
   assert.equal(summary.totals.failedCommunityCount, 0)
   assert.deepEqual(summary.communityIds, ['c-active-1'])
+})
+
+test('release enumeration covers 102 communities and 103 sections without a 100-row cap', async()=>{
+  const communities=Array.from({length:102},(_,i)=>({_id:`c-${String(i+1).padStart(3,'0')}`,status:'active'}))
+  const sections=Array.from({length:103},(_,i)=>({_id:`s-${String(i+1).padStart(3,'0')}`}))
+  const runner=async(_command,args)=>{const payload=payloadFromArgs(args)
+    if(payload.action==='community.listActivePageAdmin'){const start=payload.afterId?communities.findIndex(x=>x._id===payload.afterId)+1:0;const items=communities.slice(start,start+100);return{status:0,stdout:JSON.stringify({items,hasMore:items.length===100,nextAfterId:items.length===100?items.at(-1)._id:null}),stderr:''}}
+    if(payload.action==='section.listPageAdmin'){const start=payload.afterId?sections.findIndex(x=>x._id===payload.afterId)+1:0;const items=sections.slice(start,start+100);return{status:0,stdout:JSON.stringify({items,hasMore:items.length===100,nextAfterId:items.length===100?items.at(-1)._id:null}),stderr:''}}
+    if(payload.action==='post.rebuildRagIndexSectionBatchAdmin')return{status:0,stdout:JSON.stringify({scannedCount:0,failedCount:0,hasMore:false,nextSkip:null}),stderr:''}
+    throw new Error(`unexpected ${payload.action}`)}
+  const all=await runPostRagRebuild({envId:'e',communityIds:[],allActive:true,dryRun:true,help:false,adminInternalToken:'t'},runner)
+  assert.equal(all.communityIds.length,102)
+  const one=await runPostRagRebuild({envId:'e',communityIds:['c-001'],allActive:false,dryRun:false,help:false,adminInternalToken:'t',batchSize:20,processJobs:false,workerRounds:0},runner)
+  assert.equal(one.totals.sectionCount,103)
 })

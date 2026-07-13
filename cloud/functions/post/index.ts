@@ -15,7 +15,9 @@ import {
   isActivityInviteSection,
 } from '../../shared/activity-invite'
 import { removePostSearchIndex } from '../../lib/post-search'
-import { enqueuePostRagJob, searchPostsWithRag } from '../../lib/post-rag'
+import { enqueuePostRagDeleteJobInTransaction, enqueuePostRagJob } from '../../lib/post-rag'
+import { createPostSemanticSearchServiceFromEnv, type PostSemanticSearchResponse } from '../../lib/post-semantic-search'
+import { appendPostRagOutboxEvent } from '../../lib/post-rag-outbox'
 import type {
   AttendancePreviewUser,
   AttendanceSummary,
@@ -55,6 +57,16 @@ const ATTENDANCE_PREVIEW_LIMIT = 5
 const COMMUNITY_READ_ERROR = '需要先加入社区后查看内容'
 const HOME_POST_LIMIT_PER_SECTION = 20
 const DEFAULT_SEARCH_LIMIT = 20
+type PostSemanticSearchService = { search(input: {
+  communityId: string; query: string; sectionId?: string; skip?: number; limit?: number; includeMemberOnly: boolean; viewerId?: string
+}): Promise<PostSemanticSearchResponse> }
+let postSemanticSearchService: PostSemanticSearchService | null = null
+
+export function resetPostSemanticSearchServiceForTests() { postSemanticSearchService = null }
+function getPostSemanticSearchService() {
+  if (!postSemanticSearchService) postSemanticSearchService = createPostSemanticSearchServiceFromEnv()
+  return postSemanticSearchService
+}
 
 function resolvePostRagSmokeIdentity(event: any, action: string, communityId: string): PostRagSmokeIdentity | null {
   if (action !== 'search') return null
@@ -522,7 +534,7 @@ export async function handleCreate(
   validateContentValues(section, sanitizedContent)
 
   const now = new Date().toISOString()
-  const postId = await db.create('posts', {
+  const postData = {
     communityId: params.communityId,
     sectionId: params.sectionId,
     authorId: openid,
@@ -537,6 +549,11 @@ export async function handleCreate(
     isFeatured: false,
     createdAt: now,
     updatedAt: now,
+  }
+  const postId = await db.runTransaction(async transaction => {
+    const created = await transaction.collection('posts').add({ data: postData })
+    await appendPostRagOutboxEvent(transaction, { communityId: params.communityId, aggregateId: created._id, reasonCode: 'post.created', now })
+    return created._id
   })
 
   const audit = await auditAndApply({
@@ -607,7 +624,7 @@ export async function handleCreateActivityInvite(
   const now = new Date().toISOString()
   const originTitle = resolveSourceTitle(sourcePost, sourceSection)
   const eventStartsAt = String(sanitizedContent[ACTIVITY_INVITE_WIDGET_IDS.startsAt] || '').trim()
-  const postId = await db.create('posts', {
+  const inviteData = {
     communityId: sourcePost.communityId,
     sectionId: targetSection._id,
     authorId: openid,
@@ -628,6 +645,11 @@ export async function handleCreateActivityInvite(
     eventStartsAt,
     createdAt: now,
     updatedAt: now,
+  }
+  const postId = await db.runTransaction(async transaction => {
+    const created = await transaction.collection('posts').add({ data: inviteData })
+    await appendPostRagOutboxEvent(transaction, { communityId: sourcePost.communityId, aggregateId: created._id, reasonCode: 'post.created', now })
+    return created._id
   })
 
   const audit = await auditAndApply({
@@ -723,16 +745,18 @@ export async function handleSearch(params: {
   const viewerId = params.asGuest ? '' : (openid || '')
   await ensureCommunityReadable(communityId, viewerId, COMMUNITY_READ_ERROR)
   const canViewMemberOnly = await isActiveCommunityMember(communityId, viewerId)
-  return searchPostsWithRag({
-    communityId,
-    query: String(params.q ?? params.query ?? ''),
-    sectionId: String(params.sectionId || '').trim(),
-    skip: Number.isFinite(Number(params.skip)) ? Math.max(0, Math.floor(Number(params.skip))) : 0,
-    limit: Number.isFinite(Number(params.limit)) && Number(params.limit) > 0
-      ? Math.floor(Number(params.limit))
-      : DEFAULT_SEARCH_LIMIT,
-    includeMemberOnly: canViewMemberOnly,
-  })
+  try {
+    const result = await getPostSemanticSearchService().search({
+      communityId,
+      query: String(params.q ?? params.query ?? ''),
+      sectionId: String(params.sectionId || '').trim() || undefined,
+      skip: Number.isFinite(Number(params.skip)) ? Math.max(0, Math.floor(Number(params.skip))) : 0,
+      limit: Number.isFinite(Number(params.limit)) && Number(params.limit) > 0 ? Math.floor(Number(params.limit)) : DEFAULT_SEARCH_LIMIT,
+      includeMemberOnly: canViewMemberOnly,
+      ...(canViewMemberOnly ? { viewerId } : {}),
+    })
+    return { ...result, answer: '', citations: [], mode: result.items.length ? 'rag' as const : 'no_answer' as const }
+  } catch { throw new Error('智能搜索暂不可用，请稍后重试') }
 }
 
 export async function handleDelete(params: { postId: string }, openid: string) {
@@ -744,24 +768,33 @@ export async function handleDelete(params: { postId: string }, openid: string) {
     communityId?: string
     sectionId?: string
   }
-  if (post.status === 'deleted') throw new Error('帖子已删除')
   if (post.authorId !== openid) throw new Error('无权删除')
 
-  await db.updateById('posts', params.postId, {
-    status: 'deleted',
-    isPinned: false,
-    pinnedAt: '',
-    pinnedByAccountId: '',
-    isFeatured: false,
-    featuredAt: '',
-    featuredByAccountId: '',
-  })
-  await enqueuePostRagJob({
-    postId: params.postId,
-    communityId: post.communityId,
-    sectionId: post.sectionId,
-    action: 'delete',
-    reason: 'post.delete',
+  if (post.status === 'deleted') {
+    await db.runTransaction(async transaction => {
+      await enqueuePostRagDeleteJobInTransaction(transaction, {
+        postId: params.postId,
+        communityId: post.communityId,
+        sectionId: post.sectionId,
+        reason: 'post.delete.compensate',
+      })
+    })
+    await removePostSearchIndex(params.postId)
+    return { success: true, alreadyDeleted: true }
+  }
+
+  await db.runTransaction(async transaction => {
+    await transaction.collection('posts').doc(params.postId).update({ data: {
+      status: 'deleted', isPinned: false, pinnedAt: '', pinnedByAccountId: '',
+      isFeatured: false, featuredAt: '', featuredByAccountId: '',
+    } })
+    await appendPostRagOutboxEvent(transaction, { communityId: String(post.communityId || ''), aggregateId: params.postId, reasonCode: 'post.deleted', now: new Date().toISOString() })
+    await enqueuePostRagDeleteJobInTransaction(transaction, {
+      postId: params.postId,
+      communityId: post.communityId,
+      sectionId: post.sectionId,
+      reason: 'post.delete',
+    })
   })
   await removePostSearchIndex(params.postId)
   return { success: true }
@@ -793,12 +826,15 @@ export async function handleUpdate(
 
   const updatedAt = new Date().toISOString()
   if (post.auditStatus === 'pass' || !post.auditStatus) {
-    await db.updateById('posts', params.postId, {
+    await db.runTransaction(async transaction => {
+      await transaction.collection('posts').doc(params.postId).update({ data: {
       pendingContent: db.replaceValue(sanitizedContent),
       pendingAuditStatus: 'pending',
       pendingAuditReason: 'content audit pending',
       pendingSubmittedAt: updatedAt,
       updatedAt,
+      } })
+      await appendPostRagOutboxEvent(transaction, { communityId: post.communityId, aggregateId: params.postId, reasonCode: 'post.updated', now: updatedAt })
     })
     const audit = await auditAndApply({
       postId: params.postId,
@@ -813,12 +849,15 @@ export async function handleUpdate(
     return { success: true, updatedAt, auditStatus: audit.status, auditReason: audit.reason }
   }
 
-  await db.updateById('posts', params.postId, {
+  await db.runTransaction(async transaction => {
+    await transaction.collection('posts').doc(params.postId).update({ data: {
     content: db.replaceValue(sanitizedContent),
     auditStatus: 'pending',
     auditReason: 'content audit pending',
     auditUpdatedAt: updatedAt,
     updatedAt,
+    } })
+    await appendPostRagOutboxEvent(transaction, { communityId: post.communityId, aggregateId: params.postId, reasonCode: 'post.updated', now: updatedAt })
   })
   const audit = await auditAndApply({
     postId: params.postId,
@@ -963,11 +1002,11 @@ export async function handleClientLog(params: any, openid?: string) {
   return { success: true, receivedAt: new Date().toISOString() }
 }
 
-export const main = async (event: any) => {
+export const main = async (event: any, context?: any) => {
   const { action, _testOpenid, __happyhomeSmokeIdentity, ...params } = event
   const smokeIdentity = resolvePostRagSmokeIdentity(event, action, String(params.communityId || '').trim())
   logPostRagSmokeIdentityAudit(event, action, String(params.communityId || '').trim(), smokeIdentity)
-  const openid = smokeIdentity?.userId || resolveOpenId(event)
+  const openid = smokeIdentity?.userId || resolveOpenId(event, context)
   if (smokeIdentity) await ensureActivePostRagSmokeRun(smokeIdentity)
   if (action === 'clientLog') return handleClientLog(params, openid)
   if (action === 'create') return handleCreate(params, openid)

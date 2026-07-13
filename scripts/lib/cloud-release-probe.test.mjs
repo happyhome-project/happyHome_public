@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { createCloudReleaseProbe, createCloudReleaseProbeWrapper, hasCloudReleaseProbeResponse } from './cloud-release-probe.mjs'
+import { createCloudReleaseProbe, createCloudReleaseProbeWrapper, hasCloudReleaseComponentAttestationResponse, hasCloudReleaseProbeResponse } from './cloud-release-probe.mjs'
 
 test('cloud release probes use a per-function strong token and do not expose it in the response payload', () => {
   const probe = createCloudReleaseProbe({
@@ -25,6 +25,20 @@ test('cloud release probe response validation accepts nested CloudBase invoke ou
 test('cloud release probe wrapper handles only the signed probe event and lazily loads the business handler', () => {
   const wrapper = createCloudReleaseProbeWrapper()
   assert.match(wrapper, /__happyhomeReleaseProbe/)
+  assert.doesNotMatch(wrapper, /__happyhomeReleaseComponentDigest|__happyhomeReleaseAttestation/)
+  assert.match(wrapper, /createHash\('sha256'\)/)
+  assert.match(wrapper, /\.happyhome-runtime-manifest\.json/)
   assert.match(wrapper, /require\('\.\/handler\.js'\)/)
   assert(wrapper.indexOf('require(\'./handler.js\')') > wrapper.indexOf('__happyhomeReleaseProbe'))
+})
+
+test('cross-run response comparison uses stable identity but never weakens the secret probe challenge', () => {
+  const desired = { componentDigest: 'a'.repeat(64), functionName: 'post', runtimeDigest: 'b'.repeat(64) }
+  const priorRunResponse = {
+    buildId: 'old-build', componentDigest: desired.componentDigest, functionName: 'post',
+    runtimeDigest: desired.runtimeDigest, runtimeVerified: true, sourceSha: 'old-sha',
+  }
+  assert.equal(hasCloudReleaseComponentAttestationResponse({ result: priorRunResponse }, desired), true)
+  assert.equal(hasCloudReleaseComponentAttestationResponse({ result: { ...priorRunResponse, runtimeVerified: false } }, desired), false)
+  assert.equal(hasCloudReleaseComponentAttestationResponse({ result: { ...priorRunResponse, componentDigest: 'c'.repeat(64) } }, desired), false)
 })

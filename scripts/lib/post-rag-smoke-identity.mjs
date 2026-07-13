@@ -7,7 +7,8 @@ import { join } from 'node:path'
 import { loadDotEnvFile } from './post-rag-worker-token.mjs'
 
 const require = createRequire(import.meta.url)
-const { signPostRagSmokeIdentity } = require('../../cloud/shared/post-rag-smoke-identity.cjs')
+const { signPostRagSmokeIdentity, MAX_POST_RAG_SMOKE_IDENTITY_TTL_MS } = require('../../cloud/shared/post-rag-smoke-identity.cjs')
+export { MAX_POST_RAG_SMOKE_IDENTITY_TTL_MS }
 
 const SECRET_KEY = 'POST_RAG_SMOKE_IDENTITY_SECRET'
 const SECRET_FILE_NAME = 'post-rag-smoke.env'

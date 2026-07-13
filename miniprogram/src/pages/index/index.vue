@@ -195,12 +195,13 @@
             v-for="(g, index) in archiveGroups"
             :key="g.id"
             class="section-tab"
+            :data-testid="`home-section-tab-${g.id}`"
+            :data-section-id="g.id"
+            :data-active="index === activeArchiveIndex ? 'true' : 'false'"
+            :aria-selected="index === activeArchiveIndex ? 'true' : 'false'"
             :class="{ active: index === activeArchiveIndex }"
             @tap="selectArchiveGroup(g)"
           >
-            <view class="section-tab-icon">
-              <text>{{ g.icon }}</text>
-            </view>
             <text>{{ g.name }}</text>
           </view>
         </view>
@@ -218,8 +219,22 @@
       :style="activeArchiveStyle"
     >
       <view class="active-archive-body">
+        <view v-if="showHomeEmptyState" class="home-empty-state">
+          <image
+            class="home-empty-image"
+            src="/static/home-empty.png"
+            mode="aspectFit"
+            aria-hidden="true"
+          />
+          <view class="home-empty-copy">
+            <text class="home-empty-title">暂无社区内容</text>
+            <text class="home-empty-description">这里还没有帖子，成为第一个分享的人吧</text>
+          </view>
+          <button class="home-empty-action" @tap="openHomeEmptyPublish">去发布帖子</button>
+        </view>
+
         <view
-          v-if="activeArchiveGroup.displayTemplate === 'guide_note'"
+          v-else-if="activeArchiveGroup.displayTemplate === 'guide_note'"
           class="guide-feed"
         >
           <view
@@ -231,6 +246,8 @@
               v-for="(item, i) in column"
               :key="item.postId || columnIndex + '-' + i"
               class="guide-card"
+              data-testid="home-post-card"
+              :data-post-id="item.postId"
               @tap="onPostTap(item)"
             >
               <image
@@ -282,6 +299,8 @@
             v-for="(item, i) in activeArchiveGroup.items"
             :key="item.postId || i"
             class="arc-item"
+            data-testid="home-post-card"
+            :data-post-id="item.postId"
             @tap.stop="onPostTap(item)"
           >
             <!-- kicker 小标：当前装饰版固定 01/02/03；未来接真实档案号时仍走 item.k -->
@@ -373,6 +392,7 @@ import { clientLog, markClientDiagnosticStage, startHomeDiagnosticWatchdog } fro
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, normalizeHomeSnapshotShape, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
 import { formatHomeQuoteCite } from '../../utils/home-quote'
+import { createHomeLoadingGate } from '../../utils/home-loading-gate'
 import { resolveCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { resolveSectionIconGlyph } from '../../utils/section-icon'
 import {
@@ -407,6 +427,8 @@ markClientDiagnosticStage('home.stores.ready', {
 })
 const showGuestIntro = ref(false)
 const guestIntroConfig = ref<GuestIntroConfig | null>(null)
+const homeLoading = ref(true)
+const homeLoadingGate = createHomeLoadingGate(homeLoading)
 const postsBySection = ref<Record<string, any[]>>({})
 const resolvedHomeBannerCoverUrls = ref<Record<string, string>>({})
 const resolvedHomeGuideCoverUrls = ref<Record<string, string>>({})
@@ -644,7 +666,7 @@ interface ArchiveItem {
   isPinned?: boolean
   isFeatured?: boolean
 }
-interface ArchiveGroup { id: string; name: string; icon: string; count: number; items: ArchiveItem[]; accentColor?: string; displayTemplate: 'default' | 'guide_note' }
+interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[]; accentColor?: string; displayTemplate: 'default' | 'guide_note' }
 
 function resolveArchiveDisplayTemplate(section: any): ArchiveGroup['displayTemplate'] {
   if (section?.displayTemplate === 'guide_note') return 'guide_note'
@@ -661,7 +683,6 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
       return {
         id: section._id,
         name: section.name,
-        icon: sectionIconGlyph(section, String(section.name || '').slice(0, 1) || '·'),
         count: posts.length,
         accentColor: section.accentColor || '',
         displayTemplate,
@@ -701,7 +722,6 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
         }),
       }
     })
-    .filter((g) => g.items.length > 0)
 })
 
 const rawHomeGuideCoverImages = computed(() => {
@@ -731,6 +751,17 @@ const rawHomeBannerCoverImages = computed(() => {
 const activeArchiveGroup = computed(() => {
   const index = activeArchiveIndex.value
   return index >= 0 ? archiveGroups.value[index] ?? null : null
+})
+
+const showHomeEmptyState = computed(() => {
+  const group = activeArchiveGroup.value
+  return (
+    !homeLoading.value &&
+    Boolean(communityStore.currentCommunityId) &&
+    Boolean(communityStore.currentCommunity) &&
+    group !== null &&
+    group.items.length === 0
+  )
 })
 
 const guideColumns = computed<ArchiveItem[][]>(() => {
@@ -1263,6 +1294,16 @@ function selectArchiveGroup(g: ArchiveGroup) {
   })
 }
 
+function openHomeEmptyPublish() {
+  const sectionId = activeArchiveGroup.value?.id || ''
+  if (!sectionId) return
+  const returnTo = '/pages/index/index'
+  uni.navigateTo({
+    url: `/pages/create/index?returnTo=${encodeURIComponent(returnTo)}&sectionId=${encodeURIComponent(sectionId)}`,
+    fail: (error) => clientLog('error', 'home.empty.publish.navigate.fail', { sectionId, error }),
+  })
+}
+
 function onGroupHeaderTap(g: ArchiveGroup) {
   if (!g.id) return
   const url = `/pages/section/index?sectionId=${encodeURIComponent(g.id)}`
@@ -1576,6 +1617,7 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
     return
   }
 
+  const loadingOwner = homeLoadingGate.beginRefresh()
   const refreshPromise = (async () => {
     let nextForce = force
     do {
@@ -1591,6 +1633,7 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
   } finally {
     if (activeHomeRefreshPromise === refreshPromise) {
       activeHomeRefreshPromise = null
+      homeLoadingGate.endRefresh(loadingOwner)
     }
   }
 }
@@ -1635,6 +1678,7 @@ async function initializeHome() {
   try {
     const redirectedByShare = await handleInitialShareLanding()
     if (redirectedByShare) {
+      homeLoadingGate.releaseInitial()
       probeHomeRender('share.redirect')
       return
     }
@@ -1642,6 +1686,7 @@ async function initializeHome() {
     await refreshHomeData()
     probeHomeRender('mounted')
   } catch (error) {
+    homeLoadingGate.releaseInitial()
     clientLog('error', 'home.mounted.fail', { error })
     probeHomeRender('mounted.fail')
   }
@@ -2803,8 +2848,9 @@ onShareAppMessage(() => {
 }
 
 .community-identity {
-  flex: 0 1 auto;
+  flex: 1 1 0;
   min-width: 0;
+  overflow: hidden;
   display: flex;
   align-items: center;
   gap: 16rpx;
@@ -2834,9 +2880,10 @@ onShareAppMessage(() => {
 }
 
 .community-title {
-  flex: 0 1 auto;
+  display: block;
+  flex: 1 1 0;
   min-width: 0;
-  max-width: 426rpx;
+  max-width: 100%;
   color: #111;
   font-size: var(--hh-text-heading-md-size);
   line-height: var(--hh-text-heading-md-line);
@@ -3144,23 +3191,6 @@ onShareAppMessage(() => {
   transition: background 160ms ease, color 160ms ease;
 }
 
-.section-tab-icon {
-  width: 40rpx;
-  height: 40rpx;
-  border-radius: 12rpx;
-  background: var(--hh-color-brand-soft);
-  color: var(--hh-color-brand-primary);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-}
-
-.section-tab-icon text {
-  font-size: 24rpx;
-  line-height: 1;
-}
-
 .section-tab.active {
   font-weight: $hh-font-weight-bold;
   background: rgba(61, 173, 125, 0.16);
@@ -3186,6 +3216,68 @@ onShareAppMessage(() => {
 
 .active-archive-body {
   min-height: inherit;
+}
+
+.home-empty-state {
+  width: 100%;
+  max-width: 576rpx;
+  margin: 64rpx auto 96rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 32rpx;
+  text-align: center;
+}
+
+.home-empty-image {
+  width: 364rpx;
+  height: 344rpx;
+}
+
+.home-empty-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.home-empty-title {
+  color: #181818;
+  font-size: var(--hh-text-heading-md-size);
+  line-height: var(--hh-text-heading-md-line);
+  font-weight: $hh-font-weight-bold;
+}
+
+.home-empty-description {
+  width: 100%;
+  max-width: 100%;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: var(--hh-text-body-lg-size);
+  line-height: var(--hh-text-body-lg-line);
+  font-weight: $hh-font-weight-regular;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.home-empty-action {
+  width: 100%;
+  height: 96rpx;
+  margin: 0;
+  padding: 0 40rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: $hh-radius-full;
+  background: var(--hh-color-brand-primary);
+  color: #fff;
+  font-size: var(--hh-text-heading-sm-size);
+  line-height: var(--hh-text-heading-sm-line);
+  font-weight: $hh-font-weight-bold;
+}
+
+.home-empty-action::after {
+  border: 0;
 }
 
 .active-archive--default .arc-card {

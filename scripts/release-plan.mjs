@@ -7,6 +7,7 @@ import process from 'node:process'
 
 import { createProductionReleaseStore } from './lib/cloudbase-release-store.mjs'
 import { ALL_CLOUD_FUNCTIONS, createReleasePlan, selectChangeManifests } from './lib/release-plan.mjs'
+import { createMigrationInputDigest, readVerifiedMigrationInputFile } from './lib/release-component-registry.mjs'
 import { resolveMainReleasePlanBase } from './lib/release-plan-base.mjs'
 import { assertFormalReleaseGitState } from './lib/release-policy.mjs'
 
@@ -50,10 +51,25 @@ function worktreeChangedPaths(root) {
 function readManifests(root) {
   const directory = join(root, 'release', 'changes')
   if (!existsSync(directory)) return []
-  return readdirSync(directory).filter((name) => name.endsWith('.json')).sort().map((name) => ({
-    ...JSON.parse(readFileSync(join(directory, name), 'utf8')),
-    source: `release/changes/${name}`,
-  }))
+  return readdirSync(directory).filter((name) => name.endsWith('.json')).sort().map((name) => {
+    const manifest = JSON.parse(readFileSync(join(directory, name), 'utf8'))
+    return {
+      ...manifest,
+      migrations: (manifest.migrations || []).map((migration) => {
+        const { module, moduleBytes } = readVerifiedMigrationInputFile({ root, migration })
+        return {
+          ...migration,
+          module,
+          inputDigest: createMigrationInputDigest({
+            id: migration.id,
+            module,
+            moduleBytes,
+          }),
+        }
+      }),
+      source: `release/changes/${name}`,
+    }
+  })
 }
 
 async function collectFunctionInputs(root) {
@@ -82,7 +98,9 @@ function printSummary(plan, baseSource) {
 try {
   const root = git(['rev-parse', '--show-toplevel'], process.cwd())
   const mode = option('mode') || (process.argv[2] === 'pending' ? 'main' : '')
+  const forceRedeployCurrent = hasOption('force-redeploy-current')
   if (!['main', 'pr', 'full-current'].includes(mode)) throw new Error('use --mode=pr, --mode=main, or --mode=full-current')
+  if (forceRedeployCurrent && mode !== 'full-current') throw new Error('--force-redeploy-current requires --mode=full-current')
   if (mode === 'full-current' && hasOption('base')) throw new Error('--base is not supported with --mode=full-current')
   const headSha = option('head') || git(['rev-parse', 'HEAD'], root)
   let baseSha = option('base') || ''
@@ -100,6 +118,14 @@ try {
   } else {
     git(['fetch', '--quiet', 'origin', 'main'], root)
     const workspaceHead = git(['rev-parse', 'HEAD'], root)
+    const publishResume = hasOption('publish-resume')
+    const version = option('version')
+    const desc = option('desc')
+    if (publishResume && (!version || !desc)) {
+      throw new Error('Full-current publish resume requires --version and --desc')
+    }
+    const buildInfoPath = join(root, 'miniprogram', 'src', 'generated', 'build-info.ts')
+    const buildInfo = existsSync(buildInfoPath) ? readFileSync(buildInfoPath, 'utf8') : ''
     if (!hasOption('head') || headSha !== workspaceHead) {
       throw new Error(`Full-current release requires explicit --head to equal workspace HEAD; got --head=${hasOption('head') ? headSha : '(missing)'} HEAD=${workspaceHead}`)
     }
@@ -112,6 +138,8 @@ try {
       headSha: workspaceHead,
       originMainSha: git(['rev-parse', 'origin/main'], root),
       changedPaths: worktreeChangedPaths(root),
+      publishOnly: hasOption('publish-resume'),
+      generatedBuildInfoMatches: buildInfo.includes(version) && buildInfo.includes(desc),
     })
     baseSha = ''
     baseSource = 'full-current'
@@ -125,6 +153,7 @@ try {
     baseSha,
     changedPaths: changes,
     functionInputs: await collectFunctionInputs(root),
+    forceRedeployCurrent,
     headSha,
     manifests: selectChangeManifests(mode, readManifests(root), changes),
     mode,

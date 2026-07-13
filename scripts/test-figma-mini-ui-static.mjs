@@ -145,15 +145,19 @@ assert(
     tabbar.includes('class="publish-icon-image"') &&
     tabbar.includes('CREATE_SECTION_INTENT_KEY') &&
     tabbar.includes('/static/publish-icons/family.svg') &&
+    tabbar.includes('/static/publish-icons/general.svg') &&
     tabbar.includes('rgba(0, 0, 0, 0.65)') &&
     tabbar.includes('isPublishableSection') &&
     tabbar.includes("systemKey === 'activity_invite'") &&
-    tabbar.includes('min-height: 648rpx') &&
-    tabbar.includes('padding: 48rpx 40rpx calc(64rpx + env(safe-area-inset-bottom))') &&
+    tabbar.includes('grid-template-columns: repeat(4, minmax(0, 1fr))') &&
+    !tabbar.includes('min-height: 648rpx') &&
+    tabbar.includes('padding: 48rpx 40rpx calc(40rpx + env(safe-area-inset-bottom))') &&
     tabbar.includes('width: 112rpx') &&
     tabbar.includes('width: 104rpx') &&
-    tabbar.includes('margin: 96rpx auto 0'),
-  'publish tab should open the Figma 3.1 bottom sheet, with 4-column section choices instead of directly switching to the old picker.'
+    tabbar.includes('margin: 40rpx auto 0') &&
+    !tabbar.includes('resolvePublishMeta(section?.name, index)') &&
+    !tabbar.includes('index % tones.length'),
+  'publish tab should open a content-driven, safe-area-aware 4-column sheet with one stable neutral fallback icon.'
 )
 
 assert(
@@ -161,10 +165,23 @@ assert(
     create.includes('consumeCreateSectionIntent') &&
     create.includes('happyhome:create-section-intent') &&
     create.includes('createReturnTo') &&
-    create.includes('class="create-form-nav"') &&
+    create.includes('class="section-picker"') &&
+    !create.includes('class="create-form-nav"') &&
+    !create.includes('class="create-back"') &&
     create.includes('openHierarchyParent(returnTo)') &&
     create.includes('selectSection(target, { returnTo: intent.returnTo })'),
-  'create page should consume the selected publish section intent, preserve its parent, and expose a real form-level back affordance.'
+  'create page should consume the selected publish section intent and preserve its parent without duplicating native navigation inside the form.'
+)
+
+assert(
+  widgetEditor.includes('/static/publish-icons/location.svg') &&
+    widgetEditor.includes('/static/publish-icons/location-map.png') &&
+    widgetEditor.includes('/static/publish-icons/location-pin.svg') &&
+    !widgetEditor.includes('location-map-ghost') &&
+    !widgetEditor.includes('repeating-linear-gradient') &&
+    !widgetEditor.includes('⌖') &&
+    !widgetEditor.includes('●'),
+  'Figma location fields should render exported source assets instead of glyphs or CSS map art.'
 )
 
 assert(
@@ -251,8 +268,8 @@ assert(
     home.includes('placeholder="试试搜周边亲子游路线"') &&
     home.includes('class="home-banner"') &&
     home.includes('homeBannerItems') &&
-    home.includes("imageKey: buildHomeImageKey('banner', coverImage || rawCover") &&
-    home.includes("imageKey: buildHomeImageKey('guide', resolvedCover || guide.coverImage") &&
+    home.includes("imageKey: buildHomeImageKey('banner', String(banner.bannerId || `${banner.postId}-${index}`))") &&
+    home.includes("imageKey: buildHomeImageKey('guide', `${section._id}:${p._id || idx}`)") &&
     home.includes('openHomeBanner') &&
     home.includes('resolvedHomeBannerCoverUrls') &&
     home.includes('rawHomeBannerCoverImages') &&

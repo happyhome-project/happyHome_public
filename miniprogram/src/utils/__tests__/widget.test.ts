@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { formatWidgetValue, getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard, getHomeLiveMeta, getListPreview, getPostHomeTitle, getPostHomeTitleIssue } from '../widget'
+import { formatWidgetValue, getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard, getHomeLiveMeta, getListPreview, getPostHomeTitle, getPostHomeTitleIssue, resolvePostDetailTitle } from '../widget'
 import type { Section, Post } from '../../../../cloud/shared/types'
 
 afterEach(() => {
@@ -37,6 +37,41 @@ describe('formatWidgetValue', () => {
 
   test('location 返回 address', () => {
     expect(formatWidgetValue({ address: '北京市海淀区', lat: 39.9, lng: 116.3 }, 'location')).toBe('北京市海淀区')
+  })
+
+  test('rich_text 返回解码后的纯文本摘要', () => {
+    expect(formatWidgetValue('<p>第一段</p><p>第二段 &amp; 补充</p>', 'rich_text'))
+      .toBe('第一段 第二段 & 补充')
+  })
+
+  test('rich_text 对象不泄漏为对象字符串', () => {
+    expect(formatWidgetValue({ nodes: [] }, 'rich_text')).toBe('')
+  })
+
+  test('rich_text 移除行内格式标签时不插入空格', () => {
+    expect(formatWidgetValue(
+      '<p>第一<strong>段</strong><em>正文</em><span>补充</span><a href="#">链接</a></p>',
+      'rich_text',
+    )).toBe('第一段正文补充链接')
+  })
+
+  test('rich_text 保留块级和换行标签的文本边界', () => {
+    expect(formatWidgetValue(
+      '<div>第一段<span>连续</span></div><p>第二段<br>换行</p>',
+      'rich_text',
+    )).toBe('第一段连续 第二段 换行')
+  })
+
+  test('rich_text 解码常用排版和有效数字实体', () => {
+    expect(formatWidgetValue(
+      '&hellip;&mdash;&ndash;&lsquo;左&rsquo;&ldquo;右&rdquo; &#65; &#x1F600;',
+      'rich_text',
+    )).toBe('…—–‘左’“右” A 😀')
+  })
+
+  test('rich_text 保留无效或越界数字实体', () => {
+    expect(formatWidgetValue('&#0; &#xD800; &#x110000;', 'rich_text'))
+      .toBe('&#0; &#xD800; &#x110000;')
   })
 })
 
@@ -160,6 +195,153 @@ describe('getListPreview', () => {
 })
 
 describe('home live card formatting', () => {
+  function resolveTitle(post: Post, section: Section) {
+    return resolvePostDetailTitle(post, section)
+  }
+
+  test.each([
+    ['short_text', '医生姓名', '王医生'],
+    ['summary', '活动', '周末徒步'],
+    ['number', '物品', 42],
+    ['rich_text', '书名', '<p>山野童年</p>'],
+    ['rich_note', '音乐名称', { format: 'markdown', markdown: '夏夜', html: '<p>夏夜</p>', text: '夏夜', imageFileIDs: [], schemaVersion: 1 }],
+    ['number', '电影分类', 7],
+  ])('resolves semantic detail title label %s/%s with type-safe consumption', (type, label, value) => {
+    const section = {
+      name: '板块名称',
+      type: 'evergreen',
+      widgets: [
+        { widgetId: 'generic', type: 'short_text', label: '补充', fieldKey: 'extra', order: 0 },
+        { widgetId: 'semantic', type, label, fieldKey: 'field_2', order: 1 },
+      ],
+    } as Section
+    const post = { content: { generic: '不能抢占标题', semantic: value } } as Post
+
+    expect(resolveTitle(post, section)).toEqual({
+      text: type === 'rich_text' ? '山野童年' : type === 'rich_note' ? '夏夜' : String(value),
+      sourceWidgetId: ['short_text', 'summary'].includes(String(type)) ? 'semantic' : null,
+    })
+  })
+
+  test.each([
+    ['rich_text', '<p>正文标题</p>', '正文标题'],
+    ['number', 2026, '2026'],
+    ['rich_note', { format: 'markdown', markdown: '完整正文', html: '<p>完整正文</p>', text: '完整正文', imageFileIDs: [], schemaVersion: 1 }, '完整正文'],
+  ])('keeps a generic %s fallback unconsumed so detail content is not lost', (type, value, text) => {
+    const section = {
+      name: '社区动态',
+      type: 'evergreen',
+      widgets: [{ widgetId: 'fallback', type, label: '正文', fieldKey: 'body', order: 0 }],
+    } as Section
+    const post = { content: { fallback: value } } as Post
+
+    expect(resolveTitle(post, section)).toEqual({ text, sourceWidgetId: null })
+  })
+
+  test.each(['short_text', 'summary'])('keeps the legacy consumed-title behavior for generic %s fallback', (type) => {
+    const section = {
+      name: '社区动态',
+      type: 'evergreen',
+      widgets: [{ widgetId: 'fallback', type, label: '正文', fieldKey: 'body', order: 0 }],
+    } as Section
+    const post = { content: { fallback: '简短标题' } } as Post
+
+    expect(resolveTitle(post, section)).toEqual({ text: '简短标题', sourceWidgetId: 'fallback' })
+  })
+
+  test('does not broaden shared list/live title filtering with detail-only semantic labels', () => {
+    const section = {
+      name: '社区动态',
+      type: 'realtime',
+      widgets: [
+        { widgetId: 'activity', type: 'short_text', label: '活动说明', fieldKey: 'activity', order: 0, showInList: true },
+        { widgetId: 'doctor', type: 'short_text', label: '医生姓名', fieldKey: 'doctor', order: 1, showInList: true },
+      ],
+    } as Section
+    const post = {
+      content: { activity: '周六集合', doctor: '王医生' },
+      createdAt: '2026-07-14T08:00:00+08:00',
+    } as Post
+
+    expect(getListPreview(post, section)).toEqual([
+      { label: '活动说明', value: '周六集合', type: 'text' },
+      { label: '医生姓名', value: '王医生', type: 'text' },
+    ])
+    expect(getHomeLiveMeta(post, section)).toEqual(['周六集合', '王医生'])
+  })
+
+  test('does not broaden the shared home title with detail-only semantic labels', () => {
+    const section = {
+      name: '社区动态',
+      type: 'realtime',
+      widgets: [
+        { widgetId: 'generic', type: 'short_text', label: '补充', fieldKey: 'extra', order: 0 },
+        { widgetId: 'activity', type: 'summary', label: '活动说明', fieldKey: 'activity', order: 1 },
+      ],
+    } as Section
+    const post = { content: { generic: '原首页标题', activity: '详情页活动标题' } } as Post
+
+    expect(getPostHomeTitle(post, section)).toBe('原首页标题')
+    expect(resolveTitle(post, section)).toEqual({
+      text: '详情页活动标题',
+      sourceWidgetId: 'activity',
+    })
+  })
+
+  test('marks a synthetic carpool route as having no consumed source widget', () => {
+    const section = {
+      name: '拼车出行',
+      type: 'realtime',
+      widgets: [
+        { widgetId: 'origin', type: 'short_text', label: '出发地', fieldKey: 'origin', order: 0 },
+        { widgetId: 'destination', type: 'short_text', label: '目的地', fieldKey: 'destination', order: 1 },
+        { widgetId: 'time', type: 'datetime', label: '出发时间', fieldKey: 'departureTime', order: 2 },
+      ],
+    } as Section
+    const post = {
+      content: { origin: '青山村', destination: '东阳', time: '2026-07-14T09:00:00+08:00' },
+    } as Post
+
+    expect(resolveTitle(post, section)).toEqual({
+      text: '青山村 -- 东阳',
+      sourceWidgetId: null,
+    })
+  })
+
+  test('marks section-name fallback as having no consumed source widget', () => {
+    const section = {
+      name: '羽毛球活动',
+      type: 'realtime',
+      widgets: [{ widgetId: 'attendance', type: 'attendance', label: '', fieldKey: 'attendance', order: 0 }],
+    } as Section
+
+    expect(resolveTitle({ content: {} } as Post, section)).toEqual({
+      text: '羽毛球活动',
+      sourceWidgetId: null,
+    })
+  })
+
+  test('uses plain text when the only usable home title widget is rich text', () => {
+    const section = {
+      _id: 's-rich-title',
+      communityId: 'c1',
+      name: '社区动态',
+      type: 'realtime',
+      status: 'active',
+      widgets: [
+        { widgetId: 'body', type: 'rich_text', label: '正文', fieldKey: 'body', required: false, order: 0, showInList: false },
+      ],
+    } as Section
+    const post = {
+      content: {
+        body: '<p>第一段</p><p>第二段 &amp; 补充</p>',
+      },
+    } as Post
+
+    expect(getPostHomeTitle(post, section)).toBe('第一段 第二段 & 补充')
+    expect(getPostHomeTitle(post, section)).not.toMatch(/<[^>]+>/)
+  })
+
   test('uses section name instead of object fallback when an activity has only attendance and location widgets', () => {
     const section: Section = {
       _id: 's-badminton',

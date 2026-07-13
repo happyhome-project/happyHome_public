@@ -21,6 +21,7 @@ jest.mock('../lib/db', () => ({
     return response?.data || null
   }),
 }))
+jest.mock('../lib/post-rag-outbox', () => ({ appendPostRagOutboxEvent: jest.fn() }))
 jest.mock('wx-server-sdk', () => ({
   init: jest.fn(),
   getWXContext: jest.fn().mockReturnValue({ OPENID: '' }),
@@ -64,6 +65,16 @@ const ADMIN_CTX_COMMUNITY = {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  ;(db.runTransaction as jest.Mock).mockImplementation(async callback => callback({
+    collection: (name: string) => ({
+      doc: (id: string) => ({
+        get: async () => ({ data: await (db.getById as jest.Mock)(name, id) }),
+        update: async ({ data }: any) => (db.updateById as jest.Mock)(name, id, data),
+        set: async () => ({}),
+      }),
+      add: async ({ data }: any) => ({ _id: await (db.create as jest.Mock)(name, data) }),
+    }),
+  }))
 })
 
 describe('superAdmin-only gate', () => {

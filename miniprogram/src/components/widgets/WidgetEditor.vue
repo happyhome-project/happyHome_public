@@ -25,6 +25,7 @@
       class="input-wrap"
     >
       <input
+        :data-testid="`widget-input-${widget.widgetId}`"
         :value="modelValue as string"
         :placeholder="inputPlaceholder"
         placeholder-class="input-placeholder"
@@ -82,9 +83,19 @@
         <image :src="img" mode="aspectFill" class="thumb" />
         <view class="thumb-del" @tap="removeImage(i)">×</view>
       </view>
-      <view class="add-btn" @tap="addImage">
+      <!-- #ifdef H5 -->
+      <input
+        type="file"
+        accept="image/*"
+        :data-testid="`widget-image-input-${widget.widgetId}`"
+        @change="onH5ImageChange"
+      />
+      <!-- #endif -->
+      <!-- #ifndef H5 -->
+      <view class="add-btn" :data-testid="`widget-image-trigger-${widget.widgetId}`" @tap="addImage">
         <text class="add-icon">+</text>
       </view>
+      <!-- #endif -->
     </view>
 
     <view
@@ -101,11 +112,11 @@
           </view>
           <view class="location-selected-actions">
             <text class="location-clear-text" @tap.stop="clearLocation">清除</text>
-            <text class="location-pin-mini">⌖</text>
+            <image class="location-icon" src="/static/publish-icons/location.svg" mode="aspectFit" />
           </view>
         </view>
         <view class="location-selected-card">
-          <view class="location-map-ghost"></view>
+          <image class="location-map-image" src="/static/publish-icons/location-map.png" mode="aspectFill" />
           <view class="location-selected-content">
             <text class="address">{{ locationValue.name || locationValue.address || '已选择位置' }}</text>
             <text
@@ -115,7 +126,7 @@
               {{ locationValue.address }}
             </text>
           </view>
-          <text class="location-card-pin">●</text>
+          <image class="location-card-pin-image" src="/static/publish-icons/location-pin.svg" mode="aspectFit" />
         </view>
       </template>
       <template v-else>
@@ -125,7 +136,7 @@
         </view>
         <view class="location-actions">
           <button class="loc-btn" size="mini" @tap.stop="chooseLocation">{{ locationValue ? '重新选择' : '去选择' }}</button>
-          <text v-if="variant === 'figma'" class="location-pin-mini">⌖</text>
+          <image v-if="variant === 'figma'" class="location-icon" src="/static/publish-icons/location.svg" mode="aspectFit" />
           <button
             v-if="locationValue"
             class="loc-btn clear"
@@ -140,6 +151,7 @@
 
     <view v-else-if="widget.type === 'rich_text'" class="textarea-wrap">
       <textarea
+        :data-testid="`widget-input-${widget.widgetId}`"
         :value="modelValue as string"
         :placeholder="inputPlaceholder"
         placeholder-class="input-placeholder"
@@ -306,6 +318,12 @@ function addImage() {
       emit('update:modelValue', current.concat(files.map((f: any) => f.tempFilePath)))
     },
   })
+}
+
+function onH5ImageChange(event: Event) {
+  const files = Array.from((event.target as HTMLInputElement)?.files || [])
+  const current = Array.isArray(props.modelValue) ? props.modelValue as string[] : []
+  emit('update:modelValue', current.concat(files.map((file) => URL.createObjectURL(file))))
 }
 
 function removeImage(index: number) {
@@ -615,10 +633,11 @@ function clearLocation() {
   color: var(--hh-color-brand-primary);
 }
 
-.location-pin-mini {
-  color: var(--hh-color-brand-primary);
-  font-size: 32rpx;
-  line-height: 1;
+.location-icon {
+  flex: 0 0 auto;
+  width: 40rpx;
+  height: 40rpx;
+  display: block;
 }
 
 .location-selected-card {
@@ -630,20 +649,17 @@ function clearLocation() {
   padding: 24rpx;
   border-radius: 16rpx;
   box-sizing: border-box;
-  background: linear-gradient(90deg, #edf9fd 0%, #f5fffb 62%, #fff 100%);
+  background: #edf9fd;
 }
 
-.location-map-ghost {
+.location-map-image {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
   width: 58%;
-  opacity: 0.55;
-  background:
-    radial-gradient(circle at 64% 34%, rgba(61, 173, 125, 0.18) 0 10rpx, transparent 11rpx),
-    linear-gradient(135deg, rgba(61, 173, 125, 0.05), rgba(93, 193, 234, 0.12)),
-    repeating-linear-gradient(26deg, transparent 0 22rpx, rgba(61, 173, 125, 0.12) 23rpx 25rpx);
+  height: 100%;
+  opacity: 0.5;
 }
 
 .location-selected-content {
@@ -674,14 +690,14 @@ function clearLocation() {
   white-space: nowrap;
 }
 
-.location-card-pin {
+.location-card-pin-image {
   position: absolute;
   z-index: 1;
   right: 108rpx;
   top: 40rpx;
-  color: #ef3434;
-  font-size: 28rpx;
-  line-height: 1;
+  width: 40rpx;
+  height: 40rpx;
+  display: block;
 }
 
 .widget-editor--figma .location-value {

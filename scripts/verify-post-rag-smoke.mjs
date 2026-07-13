@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import {
   DEFAULT_ENV_ID,
@@ -20,6 +21,7 @@ import {
   requirePostRagSmokeIdentitySecret,
 } from './lib/post-rag-smoke-identity.mjs'
 import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
+import { runSemanticSmokeScenario, runV2WorkerSequence } from './lib/post-semantic-smoke-orchestrator.mjs'
 
 const DEFAULT_TIMEOUT_MS = 180000
 const DEFAULT_ADMIN_INVOKE_RETRIES = 5
@@ -39,7 +41,7 @@ function getFlagValue(name, fallback = '') {
   return fallback
 }
 
-function parseArgs() {
+export function parseArgs() {
   return {
     envId: getFlagValue('env-id', process.env.TCB_ENV || DEFAULT_ENV_ID),
     commandTimeoutMs: Math.max(30000, Math.floor(Number(getFlagValue(
@@ -111,7 +113,7 @@ async function invokeFunction(functionName, payload, options) {
   return functionResult
 }
 
-async function searchPost(options, communityId, query, identity) {
+export async function searchPost(options, communityId, query, identity) {
   const result = await invokeFunction('post', {
     action: 'search',
     communityId,
@@ -124,7 +126,7 @@ async function searchPost(options, communityId, query, identity) {
   return result
 }
 
-async function seedFixtureMember(communityId, userId) {
+export async function seedFixtureMember(communityId, userId) {
   const db = createProductionReleaseStore({ root: process.cwd() }).db
   const now = new Date().toISOString()
   await db.collection('community_members').add({
@@ -132,7 +134,7 @@ async function seedFixtureMember(communityId, userId) {
   })
 }
 
-async function seedFixtureRun(identity) {
+export async function seedFixtureRun(identity) {
   const db = createProductionReleaseStore({ root: process.cwd() }).db
   await db.collection('post_rag_smoke_runs').doc(identity.runId).set({
     runId: identity.runId,
@@ -155,20 +157,29 @@ async function seedFixtureRun(identity) {
   }
 }
 
-async function cleanupFixtureRun(runId) {
+export async function cleanupFixtureRun(runId) {
   if (!runId) return
   const db = createProductionReleaseStore({ root: process.cwd() }).db
   await db.collection('post_rag_smoke_runs').doc(runId).remove()
 }
 
-function assertRagHit(result, postId, label) {
-  const citations = Array.isArray(result?.citations) ? result.citations : []
-  const items = Array.isArray(result?.items) ? result.items : []
-  const hitCitation = citations.some((item) => String(item?.postId || '') === postId)
-  const hitItem = items.some((item) => String(item?.postId || '') === postId)
-  if (result?.mode !== 'rag' || !result?.answer || (!hitCitation && !hitItem)) {
-    throw new Error(`${label} failed: mode=${result?.mode || ''} answerLen=${String(result?.answer || '').length} citations=${citations.length} items=${items.length}`)
-  }
+export async function invokePostSemanticAdmin(action, params, options) {
+  return invokeAdmin(action, params, options)
+}
+
+export async function readFixtureIndexState(postId) {
+  const db = createProductionReleaseStore({ root: process.cwd() }).db
+  const record = await db.collection('post_rag_index_state_v2').doc(postId).get()
+  return Array.isArray(record?.data) ? record.data[0] : record?.data
+}
+
+export async function advanceV2Worker(options, postId = '') {
+  const payload = (action) => withWorkerToken({ ...(action ? { action } : {}), limit: 20, ...(postId ? { postId } : {}) }, options)
+  return runV2WorkerSequence({
+    materialize: () => invokeFunction('post-rag-worker', payload('materializeOutbox'), options),
+    indexV2: () => invokeFunction('post-rag-worker', payload('indexV2'), options),
+    worker: () => invokeFunction('post-rag-worker', payload(''), options),
+  })
 }
 
 async function main() {
@@ -181,6 +192,7 @@ async function main() {
   let communityId = ''
   let sectionId = ''
   let postId = ''
+  let guestRunId = ''
 
   console.log(`[post-rag-smoke] env=${options.envId} actor=${options.actor}`)
   try {
@@ -206,6 +218,9 @@ async function main() {
     }, options.smokeIdentitySecret)
     await seedFixtureMember(communityId, ownerOpenid)
     await seedFixtureRun(identity)
+    guestRunId = `${runId}-guest-run`
+    const guestIdentity = createSignedPostRagSmokeIdentity({ version: 1, action: 'search', communityId, runId: guestRunId, userId: `${runId}-guest`, expiresAt: Date.now() + SMOKE_IDENTITY_TTL_MS }, options.smokeIdentitySecret)
+    await seedFixtureRun(guestIdentity)
 
     const section = await invokeAdmin('section.create', {
       communityId,
@@ -223,12 +238,14 @@ async function main() {
       widgets: [
         { type: 'short_text', label: '标题', fieldKey: 'title', required: true, showInList: true, order: 0, widgetId: '' },
         { type: 'rich_text', label: '正文', fieldKey: 'body', required: true, showInList: false, order: 1, widgetId: '' },
+        { type: 'short_text', label: '会员专属', fieldKey: 'memberNote', required: false, showInList: false, visibility: 'member', order: 2, widgetId: '' },
       ],
     }, options)
     const widgets = widgetsResult.functionResult?.widgets || []
     const titleWidget = widgets.find((widget) => widget.fieldKey === 'title')
     const bodyWidget = widgets.find((widget) => widget.fieldKey === 'body')
-    if (!titleWidget?.widgetId || !bodyWidget?.widgetId) {
+    const memberWidget = widgets.find((widget) => widget.fieldKey === 'memberNote')
+    if (!titleWidget?.widgetId || !bodyWidget?.widgetId || !memberWidget?.widgetId) {
       throw new Error('section.updateWidgets did not return required widget ids')
     }
 
@@ -238,6 +255,7 @@ async function main() {
       content: {
         [titleWidget.widgetId]: `朱子治家格言 ${options.actor}`,
         [bodyWidget.widgetId]: '《朱子治家格言》里说：一粥一饭，当思来处不易；半丝半缕，恒念物力维艰。这是在讲勤俭持家和节俭家风。',
+        [memberWidget.widgetId]: '会员专属内容',
       },
     }, options)
     postId = post.functionResult?.postId || ''
@@ -247,27 +265,23 @@ async function main() {
       await invokeAdmin('audit.approveAdmin', { postId }, options)
     }
 
-    const worker = await invokeFunction('post-rag-worker', withWorkerToken({ limit: 20, postId }, options), options)
-    if (!Array.isArray(worker?.results) || !worker.results.some((item) => item.ok)) {
-      throw new Error(`post-rag-worker did not index target post: ${JSON.stringify(worker)}`)
-    }
-
-    const thrift = await searchPost(options, communityId, '有没有讲节俭家风的帖子？', identity)
-    assertRagHit(thrift, postId, 'thrift-family query')
-
-    const thriftPhrase = await searchPost(options, communityId, '勤俭持家', identity)
-    assertRagHit(thriftPhrase, postId, 'thrift-family phrase query')
-
-    const quote = await searchPost(options, communityId, '一粥一饭当思来处不易', identity)
-    assertRagHit(quote, postId, 'quote query')
+    const evidence = await runSemanticSmokeScenario({ postId, memberIdentity: identity, guestIdentity, latencyRuns: 30 }, {
+      now: () => Date.now(), wait: (ms) => new Promise(resolve => setTimeout(resolve, ms)),
+      advanceV2: () => advanceV2Worker(options, postId), readState: () => readFixtureIndexState(postId),
+      search: (query, searchIdentity) => searchPost(options, communityId, query, searchIdentity),
+      updatePost: async () => { const updated = await invokePostSemanticAdmin('post.updateAdmin', { postId, content: { [titleWidget.widgetId]: `朱子治家格言 ${options.actor}`, [bodyWidget.widgetId]: '循环利用旧物，勤俭持家。', [memberWidget.widgetId]: '会员专属内容' } }, options); if (updated.functionResult?.auditStatus !== 'pass') await invokePostSemanticAdmin('audit.approveAdmin', { postId }, options) },
+      deletePost: () => invokePostSemanticAdmin('post.deleteAdmin', { postId }, options),
+    })
+    const evidencePath=join(process.cwd(),'.codex-local','release-evidence',String(process.env.HH_RELEASE_RUN_ID||runId),'post-rag-smoke.json')
+    mkdirSync(dirname(evidencePath),{recursive:true});writeFileSync(evidencePath,JSON.stringify({schemaVersion:1,protocolVersion:2,permissionLeaks:evidence.permissionLeaks,deleteState:evidence.deleteState,p95Ms:evidence.p95Ms,errorRate:evidence.errorRate},null,2))
 
     console.log(`[post-rag-smoke] PASS post=${postId} community=${communityId}`)
-    console.log(`[post-rag-smoke] answer=${String(thrift.answer || '').slice(0, 160)}`)
-    console.log(`[post-rag-smoke] citations=${thrift.citations.length} items=${thrift.items.length}`)
+    console.log(`[post-rag-smoke] protocolVersion=2 p95Ms=${evidence.p95Ms} errorRate=${evidence.errorRate}`)
   } finally {
     let cleanupError
     try {
       await cleanupFixtureRun(runId)
+      await cleanupFixtureRun(guestRunId)
     } catch (error) {
       console.warn(`[post-rag-smoke] cleanup run warning: ${error?.message || error}`)
       cleanupError = error
@@ -298,7 +312,7 @@ async function main() {
   }
 }
 
-main().catch((error) => {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main().catch((error) => {
   console.error(`[post-rag-smoke] FAILED: ${error?.stack || error?.message || error}`)
   process.exit(1)
 })
