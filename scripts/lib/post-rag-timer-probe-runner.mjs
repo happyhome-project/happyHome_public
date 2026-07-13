@@ -64,15 +64,23 @@ export async function startPostRagTimerProbeSession({ env = process.env, signal,
       if (remainingMs <= 0) {
         throw safeTimerError({ phase: 'cleanup', code: 'TIMEOUT', classification: 'timeout', cleanup: true })
       }
-      const response = await invokeSafe('post.ragTimerProbeCleanupAdmin', cleanupBinding, {
-        phase: 'cleanup',
-        cleanup: true,
-        invokeOptions: {
-          ...options,
-          commandTimeoutMs: Math.min(options.commandTimeoutMs, remainingMs),
-          adminInvokeRetries: 1,
-        },
-      })
+      let response
+      try {
+        response = await invokeSafe('post.ragTimerProbeCleanupAdmin', cleanupBinding, {
+          phase: 'cleanup',
+          cleanup: true,
+          invokeOptions: {
+            ...options,
+            commandTimeoutMs: Math.min(options.commandTimeoutMs, remainingMs),
+            adminInvokeRetries: 1,
+          },
+        })
+      } catch (error) {
+        if (runtime.now() >= cleanupDeadlineMs) {
+          throw safeTimerError({ phase: 'cleanup', code: 'TIMEOUT', classification: 'timeout', cleanup: true })
+        }
+        throw error
+      }
       if (response.functionResult?.success === true && response.functionResult?.status === 'cleaned') return response
       if (response.functionResult?.pending !== true) {
         throw safeTimerError({ phase: 'cleanup', code: 'INVALID_RESPONSE', classification: 'invalid-response', cleanup: true })
@@ -105,11 +113,14 @@ export async function startPostRagTimerProbeSession({ env = process.env, signal,
   if (!probe?.runId || !probe?.communityId || !probe?.sectionId || !probe?.postId || !probe?.outboxId) {
     const identityError = safeTimerError({ phase: 'create', code: 'INVALID_RESPONSE', classification: 'invalid-response' })
     try {
+      const hasTrustedIdentity = probe?.runId === runId && probe?.communityId && probe?.sectionId && probe?.postId
       await pollCleanup({
-        runId: probe?.runId || runId,
-        ...(probe?.communityId ? { communityId: probe.communityId } : {}),
-        ...(probe?.sectionId ? { sectionId: probe.sectionId } : {}),
-        ...(probe?.postId ? { postId: probe.postId } : {}),
+        runId,
+        ...(hasTrustedIdentity ? {
+          communityId: probe.communityId,
+          sectionId: probe.sectionId,
+          postId: probe.postId,
+        } : {}),
       })
     } catch (cleanupError) {
       throw createSafeAggregateError('post RAG timer invalid response and cleanup failed', [

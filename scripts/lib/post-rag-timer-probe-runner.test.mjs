@@ -117,6 +117,34 @@ test('cleanup caps every admin call to its remaining hard budget and disables in
   ])
 })
 
+test('cleanup classifies an invoke that consumes its remaining budget as timeout', async () => {
+  let nowMs = 0
+  const base = fakeDeps([])
+  const session = await startPostRagTimerProbeSession({
+    env: { ADMIN_INTERNAL_CALL_TOKEN: 'token', HH_RELEASE_RUN_ID: 'run' },
+    deps: {
+      ...base,
+      now: () => nowMs,
+      beforeCleanup: async () => { nowMs = 120_000 },
+      invoke: async (action, params, options, runner) => {
+        if (action === 'post.ragTimerProbeCleanupAdmin') {
+          nowMs += options.commandTimeoutMs
+          throw new Error('admin invoke timed out')
+        }
+        return base.invoke(action, params, options, runner)
+      },
+    },
+  })
+
+  await assert.rejects(() => session.cleanup(), (error) => {
+    assert.deepEqual(error.result.failureCauses, [{
+      branch: 'timer', phase: 'cleanup', action: 'unknown', code: 'TIMEOUT', classification: 'timeout', cleanup: true,
+    }])
+    return true
+  })
+  assert.equal(nowMs, 300_000)
+})
+
 test('cleanup uses an independent five minute budget and safely times out while pending', async () => {
   const events = []
   let nowMs = 0
@@ -338,6 +366,31 @@ test('null or missing-runId create results always use the requested runId for am
       env: { ADMIN_INTERNAL_CALL_TOKEN: 'token', HH_RELEASE_RUN_ID: 'requested-run' }, deps,
     }), /post RAG timer create failed/i)
     assert.deepEqual(cleanupRunIds, ['requested-run'])
+  }
+})
+
+test('invalid create response never trusts a mismatched response runId or a partial identity tuple', async () => {
+  const invalidResults = [
+    { runId: 'wrong-run', communityId: 'c', sectionId: 's', postId: 'p' },
+    { runId: 'requested-run', communityId: 'c', sectionId: 's' },
+  ]
+  for (const functionResult of invalidResults) {
+    const cleanupParams = []
+    const deps = fakeDeps([], {
+      invoke: async (action, params) => {
+        if (action === 'post.ragTimerProbeCreateAdmin') return { functionResult }
+        if (action === 'post.ragTimerProbeCleanupAdmin') {
+          cleanupParams.push(params)
+          return { functionResult: { success: true, pending: false, status: 'cleaned' } }
+        }
+        throw new Error(`unexpected ${action}`)
+      },
+    })
+
+    await assert.rejects(() => startPostRagTimerProbeSession({
+      env: { ADMIN_INTERNAL_CALL_TOKEN: 'token', HH_RELEASE_RUN_ID: 'requested-run' }, deps,
+    }), /post RAG timer create failed/i)
+    assert.deepEqual(cleanupParams, [{ runId: 'requested-run' }])
   }
 })
 
