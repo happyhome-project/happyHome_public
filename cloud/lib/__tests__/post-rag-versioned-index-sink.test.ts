@@ -441,13 +441,15 @@ test('remove writes tombstone before deleting explicit IDs at or below its order
   const deletedIds: string[][] = []
   const requestJson = jest.fn(async (_method: string, _path: string, body: any) => { deletedIds.push(body.query.ids.values); if (fails) throw new Error('ES unavailable'); return { deleted: 2, timed_out: false, failures: [] } })
   const { sink } = makeSink({ database, requestJson })
-  await expect(sink.remove({ postId: 'post-1', sourceVersion: 'removed-2', activationOrder: { contentVersion: 2, jobId: 'job-2' } })).rejects.toMatchObject({ code: 'ES_DELETE_FAILED' })
+  await expect(sink.remove({ postId: 'post-1', sourceVersion: 'removed-2', activationOrder: { contentVersion: 2, jobId: 'job-2' } })).resolves.toEqual({ removed: true })
   expect(database.collections.get('post_rag_index_state_v2')!.get('post-1')).toMatchObject({ state: 'removed', sourceVersion: 'removed-2' })
+  expect(database.collections.get('post_rag_index_versions')!.has('old')).toBe(false)
+  expect(database.collections.get('post_rag_index_versions')!.has('equal')).toBe(false)
   fails = false
   await expect(sink.remove({ postId: 'post-1', sourceVersion: 'removed-2', activationOrder: { contentVersion: 2, jobId: 'job-2' } })).resolves.toEqual({ removed: true })
   await expect(sink.remove({ postId: 'post-1', sourceVersion: 'old', activationOrder: { contentVersion: 1, jobId: 'old' } })).resolves.toEqual({ removed: false })
-  expect(requestJson).toHaveBeenCalledTimes(2)
-  expect(deletedIds).toEqual([['equal', 'old'], ['equal', 'old']])
+  expect(requestJson).toHaveBeenCalledTimes(1)
+  expect(deletedIds).toEqual([['equal', 'old']])
   expect(deletedIds.flat()).not.toContain('newer')
 })
 
@@ -472,7 +474,7 @@ test('rejects unsafe ES index paths and projections that do not belong to the cl
 test.each([
   ['timed out', { deleted: 0, timed_out: true, failures: [] }],
   ['reported failures', { deleted: 0, timed_out: false, failures: [{ shard: 0 }] }],
-])('retains mirrors when delete-by-query %s and equal-order retry can finish cleanup', async (_label, failedResponse) => {
+])('logically removes mirrors when best-effort delete-by-query %s', async (_label, failedResponse) => {
   const database = fakeDatabase({
     'post_rag_index_state_v2/post-1': { schemaVersion: 2, postId: 'post-1', state: 'active', sourceVersion: 'source-1', activationOrder: { contentVersion: 1, jobId: 'job-1' } },
     'post_rag_index_versions/old': { _id: 'old', esDocumentId: 'old', schemaVersion: 2, postId: 'post-1', sourceVersion: 'source-1', activationOrder: { contentVersion: 1, jobId: 'job-1' } },
@@ -480,8 +482,6 @@ test.each([
   const responses = [failedResponse, { deleted: 1, timed_out: false, failures: [] }]
   const { sink } = makeSink({ database, requestJson: async () => responses.shift() })
   const input = { postId: 'post-1', sourceVersion: 'removed-2', activationOrder: { contentVersion: 2, jobId: 'job-2' } }
-  await expect(sink.remove(input)).rejects.toMatchObject({ code: 'ES_DELETE_FAILED' })
-  expect(database.collections.get('post_rag_index_versions')!.has('old')).toBe(true)
   await expect(sink.remove(input)).resolves.toEqual({ removed: true })
   expect(database.collections.get('post_rag_index_versions')!.has('old')).toBe(false)
 })
@@ -507,16 +507,13 @@ test.each([
   ['unsafe deleted integer', { deleted: Number.MAX_SAFE_INTEGER + 1, timed_out: false, failures: [] }],
   ['missing failures', { deleted: 0, timed_out: false }],
   ['wrong failures type', { deleted: 0, timed_out: false, failures: 'none' }],
-])('rejects malformed delete response with %s, retains mirror, and permits equal-order retry', async (_label, malformedResponse) => {
+])('logically removes mirrors after malformed physical delete response with %s', async (_label, malformedResponse) => {
   const database = fakeDatabase({
     'post_rag_index_state_v2/post-1': { schemaVersion: 2, postId: 'post-1', state: 'active', sourceVersion: 'source-1', activationOrder: { contentVersion: 1, jobId: 'job-1' } },
     'post_rag_index_versions/old': { _id: 'old', esDocumentId: 'old', schemaVersion: 2, postId: 'post-1', sourceVersion: 'source-1', activationOrder: { contentVersion: 1, jobId: 'job-1' } },
   })
-  const responses = [malformedResponse, { deleted: 0, timed_out: false, failures: [] }]
-  const { sink } = makeSink({ database, requestJson: async () => responses.shift() })
+  const { sink } = makeSink({ database, requestJson: async () => malformedResponse })
   const input = { postId: 'post-1', sourceVersion: 'removed-2', activationOrder: { contentVersion: 2, jobId: 'job-2' } }
-  await expect(sink.remove(input)).rejects.toBeInstanceOf(PostRagVersionedSinkError)
-  expect(database.collections.get('post_rag_index_versions')!.has('old')).toBe(true)
   await expect(sink.remove(input)).resolves.toEqual({ removed: true })
   expect(database.collections.get('post_rag_index_versions')!.has('old')).toBe(false)
 })

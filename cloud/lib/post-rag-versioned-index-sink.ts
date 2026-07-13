@@ -405,7 +405,7 @@ export function createVersionedTencentEsRagSink(options: {
       if (!accepted) return { removed: false }
       const mirrors = await listMirrors(postId)
       const removable = mirrors.filter((mirror) => comparePostRagActivationOrder(mirror.activationOrder, activationOrder) <= 0)
-      await deleteMirrorsFromEs(removable)
+      try { await deleteMirrorsFromEs(removable) } catch { /* Serverless ES may reject physical deletes; tombstone is authoritative. */ }
       if (await currentMatches(postId, sourceVersion, activationOrder, 'removed')) await removeMirrorRows(removable)
       return { removed: true }
     },
