@@ -2,6 +2,7 @@
   <view
     class="profile-page"
     data-testid="profile-page"
+    :data-build-version="releaseVersion"
     :class="{ 'profile-page--editing': isEditingProfile || showManualLoginForm }"
   >
     <view class="profile-custom-nav" :style="profileCustomNavStyle">
@@ -14,7 +15,7 @@
       <text>{{ profileError }}</text>
     </view>
     <view class="user-card" :class="{ 'user-card--form': isEditingProfile || showManualLoginForm }">
-      <!-- 已登录且非编辑态：显示头像+昵称+登出/编辑按钮 -->
+      <!-- 已登录且非编辑态：显示头像、昵称与编辑入口 -->
       <template v-if="userStore.isLoggedIn && !isEditingProfile">
         <image :src="profileAvatarSrc" class="avatar" />
         <view class="user-info">
@@ -34,11 +35,6 @@
           <text>编辑</text>
           <image class="profile-edit-arrow" src="/static/profile/edit-arrow.svg" mode="aspectFit" />
         </view>
-        <!-- #ifdef H5 -->
-        <button class="profile-web-logout" :disabled="webLogoutLock.busy.value" @tap="webLogoutLock.run()">
-          {{ webLogoutLock.busy.value ? '退出中...' : '退出登录' }}
-        </button>
-        <!-- #endif -->
       </template>
 
       <!-- 编辑态：头像 + 昵称表单（chooseAvatar 明显可见） -->
@@ -159,6 +155,7 @@
             </button>
             <!-- #ifndef H5 -->
             <button
+              v-if="developerToolsEnabled"
               size="mini"
               class="dev-btn"
               @tap="showDevLogin = true"
@@ -175,32 +172,28 @@
             <text class="name">{{ profileDisplayName }}</text>
           </view>
         </view>
-        <view v-if="supportsChooseAvatar" class="login-form profile-login-actions">
-          <button
-            open-type="chooseAvatar"
-            class="login-hero-btn"
-            @chooseavatar="onLoginChooseAvatar"
-          >微信登录</button>
-          <view class="login-alt-row">
-            <text class="login-alt-hint">使用其他账号？</text>
-            <!-- #ifndef H5 -->
-            <text class="login-alt-link" @tap.stop="showDevLogin = true">DEV 登录</text>
-            <!-- #endif -->
-          </view>
+        <!-- #ifndef H5 -->
+        <view v-if="developerToolsEnabled" class="login-alt-row">
+          <text class="login-alt-link" @tap.stop="showDevLogin = true">DEV 登录</text>
         </view>
+        <!-- #endif -->
+        <button
+          v-if="supportsChooseAvatar"
+          open-type="chooseAvatar"
+          class="profile-login-hit"
+          data-testid="profile-login-entry"
+          @chooseavatar="onLoginChooseAvatar"
+        ></button>
         <button
           v-else
           class="profile-login-hit"
+          data-testid="profile-login-entry"
           @tap.stop="openLoginEntry"
         ></button>
       </template>
     </view>
 
-    <view v-if="releaseVersion && !userStore.isLoggedIn && !isEditingProfile" class="profile-release-id">
-      <text>{{ releaseVersion }}</text>
-    </view>
-
-    <view v-if="showHomeDiagnostics && !isEditingProfile && !showManualLoginForm" class="profile-diagnostics">
+    <view v-if="developerToolsEnabled && !isEditingProfile && !showManualLoginForm" class="profile-diagnostics">
       <view class="profile-diagnostics__header">
         <text>Home 诊断</text>
         <text class="profile-diagnostics__state">{{ diagnosticsState.enabled ? '已开启' : '未开启' }}</text>
@@ -303,6 +296,16 @@
       {{ leaveCurrentCommunityLock.isBusy ? '退出中...' : '退出当前社区' }}
     </button>
 
+    <!-- #ifdef H5 -->
+    <button
+      v-if="userStore.isLoggedIn && !isEditingProfile && !showManualLoginForm"
+      class="profile-secondary-action profile-secondary-action--logout"
+      data-testid="h5-logout"
+      :disabled="webLogoutLock.busy.value"
+      @tap="webLogoutLock.run()"
+    >{{ webLogoutLock.busy.value ? '退出中...' : '退出登录' }}</button>
+    <!-- #endif -->
+
     <!-- 昵称确认浮层：chooseAvatar 回调后自动弹出 -->
     <view v-if="showNickConfirm" class="nick-modal-mask" @tap="cancelNickConfirm">
       <view class="nick-modal" @tap.stop>
@@ -341,7 +344,7 @@
 
     <!-- #ifndef H5 -->
     <!-- DEV login modal -->
-    <view v-if="showDevLogin" class="dev-modal-mask" @tap="showDevLogin = false">
+    <view v-if="developerToolsEnabled && showDevLogin" class="dev-modal-mask" @tap="showDevLogin = false">
       <view class="dev-modal" @tap.stop>
         <text class="dev-title">DEV 模式登录</text>
         <text class="dev-desc">绕过微信登录，用指定 openid 登录（测试用，不要在正式环境使用）</text>
@@ -483,10 +486,11 @@ const profileError = ref('')
 const releaseVersion = getReleaseVersion()
 const diagnosticsState = ref(getClientDiagnosticsState())
 const diagnosticsStatus = ref('')
-const showHomeDiagnostics = computed(() => {
+const developerToolsEnabled = computed(() => {
   try {
     const envVersion = String((wx as any)?.getAccountInfoSync?.()?.miniProgram?.envVersion || '')
-    return envVersion === 'develop' || envVersion === 'trial'
+    const isDeveloperEnvironment = envVersion === 'develop' || envVersion === 'trial'
+    return isDeveloperEnvironment && uni.getStorageSync('hh-profile-developer-tools') === '1'
   } catch (_error) {
     return false
   }
@@ -664,7 +668,7 @@ function onChooseAvatar(e: any) {
   }
 }
 
-// 登录态点"微信登录"大按钮 → 微信弹 chooseAvatar → 回调后自动弹昵称确认浮层。
+// 未登录态点身份区 → 微信弹 chooseAvatar → 回调后自动弹昵称确认浮层。
 // 和编辑态的 onChooseAvatar 区分：编辑态只换头像，不弹浮层。
 function onLoginChooseAvatar(e: any) {
   const tempPath = e?.detail?.avatarUrl || ''
@@ -1181,9 +1185,6 @@ onMounted(() => {
   hideNativeTabBar()
   refreshDiagnosticsState()
   updateProfileNavMetrics()
-  if (!userStore.isLoggedIn && isH5Runtime() && !supportsChooseAvatar.value) {
-    showManualLoginForm.value = true
-  }
   logProfile('info', 'profile.mounted', {})
   void nextTick(() => logProfile('info', 'profile.render.tick', { reason: 'mounted' }))
   void refreshProfileData('mounted')
@@ -1228,13 +1229,6 @@ onShareAppMessage(() => {
   color: #d93026;
   font-size: $hh-font-caption;
   line-height: 1.5;
-}
-.profile-release-id {
-  margin: -8rpx 0 $hh-space-md;
-  text-align: center;
-  color: var(--hh-color-text-tertiary);
-  font-size: var(--hh-text-caption-size);
-  line-height: var(--hh-text-caption-line-height);
 }
 .profile-diagnostics {
   margin: -4rpx 0 $hh-space-md;
@@ -1965,45 +1959,6 @@ onShareAppMessage(() => {
   width: 36rpx;
   height: 36rpx;
   display: block;
-}
-
-.profile-web-logout {
-  position: absolute;
-  right: 0;
-  bottom: 12rpx;
-  height: 48rpx;
-  margin: 0;
-  padding: 0 16rpx;
-  border: 0;
-  background: transparent;
-  color: var(--hh-color-text-secondary);
-  font-size: var(--hh-text-body-base-size);
-  line-height: 48rpx;
-}
-
-.profile-web-logout::after {
-  border: 0;
-}
-
-.profile-login-actions {
-  flex: 0 0 224rpx;
-  width: 224rpx;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 8rpx;
-}
-
-.profile-login-actions .login-hero-btn {
-  width: 100%;
-  height: 64rpx;
-  line-height: 64rpx;
-  margin: 0;
-}
-
-.profile-login-actions .login-alt-row {
-  margin-top: 0;
-  justify-content: flex-end;
 }
 
 .profile-login-hit {

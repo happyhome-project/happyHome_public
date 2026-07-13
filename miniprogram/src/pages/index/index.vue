@@ -157,9 +157,6 @@
             :class="{ active: index === activeArchiveIndex }"
             @tap="selectArchiveGroup(g)"
           >
-            <view class="section-tab-icon">
-              <text>{{ g.icon }}</text>
-            </view>
             <text>{{ g.name }}</text>
           </view>
         </view>
@@ -258,9 +255,6 @@
           :class="{ active: index === activeArchiveIndex }"
           @tap="selectArchiveGroup(g)"
         >
-          <view class="section-tab-icon">
-            <text>{{ g.icon }}</text>
-          </view>
           <text>{{ g.name }}</text>
         </view>
       </view>
@@ -716,7 +710,7 @@ interface ArchiveItem {
   isPinned?: boolean
   isFeatured?: boolean
 }
-interface ArchiveGroup { id: string; name: string; icon: string; count: number; items: ArchiveItem[]; accentColor?: string; displayTemplate: 'default' | 'guide_note' }
+interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[]; accentColor?: string; displayTemplate: 'default' | 'guide_note' }
 
 function resolveArchiveDisplayTemplate(section: any): ArchiveGroup['displayTemplate'] {
   if (section?.displayTemplate === 'guide_note') return 'guide_note'
@@ -733,7 +727,6 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
       return {
         id: section._id,
         name: section.name,
-        icon: sectionIconGlyph(section, String(section.name || '').slice(0, 1) || '·'),
         count: posts.length,
         accentColor: section.accentColor || '',
         displayTemplate,
@@ -2963,8 +2956,9 @@ onShareAppMessage(() => {
 }
 
 .community-identity {
-  flex: 0 1 auto;
+  flex: 1 1 0;
   min-width: 0;
+  overflow: hidden;
   display: flex;
   align-items: center;
   gap: 16rpx;
@@ -2994,9 +2988,10 @@ onShareAppMessage(() => {
 }
 
 .community-title {
-  flex: 0 1 auto;
+  display: block;
+  flex: 1 1 0;
   min-width: 0;
-  max-width: 426rpx;
+  max-width: 100%;
   color: #111;
   font-size: var(--hh-text-heading-md-size);
   line-height: var(--hh-text-heading-md-line);
@@ -3304,23 +3299,6 @@ onShareAppMessage(() => {
   padding: 0 12rpx;
   border-radius: $hh-radius-full;
   transition: background 160ms ease, color 160ms ease;
-}
-
-.section-tab-icon {
-  width: 40rpx;
-  height: 40rpx;
-  border-radius: 12rpx;
-  background: var(--hh-color-brand-soft);
-  color: var(--hh-color-brand-primary);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-}
-
-.section-tab-icon text {
-  font-size: 24rpx;
-  line-height: 1;
 }
 
 .section-tab.active {

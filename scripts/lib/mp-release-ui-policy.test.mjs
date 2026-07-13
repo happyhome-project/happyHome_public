@@ -106,9 +106,17 @@ test('requires cold-start home, home images, home detail, login version, and cle
     homeColdStartNonEmpty: true,
     homeImagesRendered: true,
     homeDetailNonEmpty: true,
-    loginVersionVisible: false,
+    loginBuildIdentityVerified: false,
     profileLoginClean: true,
   }), /HH_RELEASE_LOGIN_VERSION/)
+
+  assert.doesNotThrow(() => assertReleaseUiEvidence({
+    homeColdStartNonEmpty: true,
+    homeImagesRendered: true,
+    homeDetailNonEmpty: true,
+    loginBuildIdentityVerified: true,
+    profileLoginClean: true,
+  }))
 
   assert.doesNotThrow(() => assertReleaseUiEvidence({
     homeColdStartNonEmpty: true,
@@ -127,4 +135,35 @@ test('documents the release UI evidence markers used by the gate', () => {
     'HH_RELEASE_LOGIN_VERSION',
     'HH_RELEASE_PROFILE_LOGIN_CLEAN',
   ])
+  assert.match(
+    REQUIRED_RELEASE_UI_MARKERS.find((item) => item.marker === 'HH_RELEASE_LOGIN_VERSION')?.description || '',
+    /data-build-version/,
+  )
+})
+
+test('release profile validation reads the build marker attribute and rejects visible version text', () => {
+  const source = readFileSync(new URL('../test-mp-release-ui.mjs', import.meta.url), 'utf8')
+
+  assert.match(source, /attribute\('data-build-version'\)/)
+  assert.match(source, /!text\.includes\(expectedVersion\)/)
+  assert.match(source, /const buildIdentityPassed =/)
+  assert.match(source, /loginBuildIdentityVerified: profileLoginClean\.buildIdentityPassed/)
+})
+
+test('native release profile validation requires one logged-out login identity entry', () => {
+  const source = readFileSync(new URL('../test-mp-release-ui.mjs', import.meta.url), 'utf8')
+
+  assert.match(source, /\$\$\('\[data-testid="profile-login-entry"\]'\)/)
+  assert.match(source, /loginEntryCount === 1/)
+  assert.match(source, /text\.includes\('登录'\)/)
+  assert.match(source, /loginEntryCount,/)
+})
+
+test('H5 profile smoke checks login-entry uniqueness before either login path branches', () => {
+  const source = readFileSync(new URL('../test-h5-profile-smoke.mjs', import.meta.url), 'utf8')
+  const uniquenessIndex = source.indexOf('expected one profile login identity entry')
+  const fallbackBranchIndex = source.indexOf('if (options.openManualLogin)')
+
+  assert.ok(uniquenessIndex > -1)
+  assert.ok(uniquenessIndex < fallbackBranchIndex)
 })

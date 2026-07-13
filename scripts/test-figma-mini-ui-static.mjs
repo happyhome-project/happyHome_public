@@ -250,8 +250,8 @@ assert(
     home.includes('placeholder="试试搜周边亲子游路线"') &&
     home.includes('class="home-banner"') &&
     home.includes('homeBannerItems') &&
-    home.includes("imageKey: buildHomeImageKey('banner', coverImage || rawCover") &&
-    home.includes("imageKey: buildHomeImageKey('guide', resolvedCover || guide.coverImage") &&
+    home.includes("imageKey: buildHomeImageKey('banner', String(banner.bannerId || `${banner.postId}-${index}`))") &&
+    home.includes("imageKey: buildHomeImageKey('guide', `${section._id}:${p._id || idx}`)") &&
     home.includes('openHomeBanner') &&
     home.includes('resolvedHomeBannerCoverUrls') &&
     home.includes('rawHomeBannerCoverImages') &&

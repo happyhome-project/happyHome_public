@@ -25,12 +25,14 @@ describe('Home diagnostics integration', () => {
     expect(home).toContain("clientLog('error', 'home.mounted.fail'")
   })
 
-  test('exposes the trial-only Profile Home diagnostics controls', () => {
+  test('exposes Profile Home diagnostics only after explicit local opt-in in develop or trial', () => {
     const profile = readSource('pages', 'profile', 'index.vue')
 
     expect(profile).toContain('Home 诊断')
     expect(profile).toContain('enableClientDiagnostics')
     expect(profile).toContain('flushClientDiagnostics')
+    expect(profile).toContain("uni.getStorageSync('hh-profile-developer-tools') === '1'")
     expect(profile).toContain("envVersion === 'develop' || envVersion === 'trial'")
+    expect(profile).toMatch(/v-if="developerToolsEnabled && !isEditingProfile && !showManualLoginForm"[^>]*class="profile-diagnostics"/)
   })
 })
