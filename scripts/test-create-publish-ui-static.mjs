@@ -24,10 +24,15 @@ const figmaIconNodes = {
   car: '20040:4559',
   calendar: '20023:1670',
   'save-draft': '20023:1552',
+  general: '20001:14807',
+  location: '20024:1714',
+  'location-pin': '20024:1731',
 }
 
 for (const [name, nodeId] of Object.entries(figmaIconNodes)) {
-  const svg = read('miniprogram', 'src', 'static', 'publish-icons', `${name}.svg`)
+  const assetPath = path.join(root, 'miniprogram', 'src', 'static', 'publish-icons', `${name}.svg`)
+  assert(fs.existsSync(assetPath), `${name}.svg should exist.`)
+  const svg = fs.readFileSync(assetPath, 'utf8')
   assert(
     svg.includes(`Figma node ${nodeId}`),
     `${name}.svg should be exported from Figma node ${nodeId}.`,
@@ -45,6 +50,22 @@ assert(
 )
 
 assert(
+  /grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/.test(tabbar) &&
+    /\.publish-sheet\s*\{[^}]*padding:[^;]*env\(safe-area-inset-bottom\)/s.test(tabbar) &&
+    !/\.publish-sheet\s*\{[^}]*min-height:/s.test(tabbar) &&
+    !tabbar.includes('min-height: 648rpx') &&
+    /\.publish-close\s*\{[^}]*margin:\s*40rpx auto 0;/s.test(tabbar),
+  'publish sheet height should follow one or two rows of content with safe-area padding and a compact close gap.',
+)
+
+assert(
+  tabbar.includes("iconSrc: '/static/publish-icons/general.svg'") &&
+    !tabbar.includes('resolvePublishMeta(section?.name, index)') &&
+    !tabbar.includes('index % tones.length'),
+  'unknown sections should use one stable neutral source icon independent of array position.',
+)
+
+assert(
   widgetEditor.includes('/static/publish-icons/calendar.svg') &&
     widgetEditor.includes('class="datetime-field-icon"') &&
     widgetEditor.includes('选择日期时间') &&
@@ -59,6 +80,42 @@ assert(
     createPage.includes('class="draft-icon"') &&
     !createPage.includes('<text class="draft-icon">▣</text>'),
   'the publish footer should use the exact Figma save-draft icon instead of a text glyph.',
+)
+
+assert(
+  createPage.includes('class="section-picker"') &&
+    !createPage.includes('class="create-back"') &&
+    !/\.create-back(?:\s|:|\{)/.test(createPage),
+  'create page should keep the initial section picker without duplicating native navigation inside the form.',
+)
+
+const locationMapPath = path.join(root, 'miniprogram', 'src', 'static', 'publish-icons', 'location-map.png')
+assert(
+  fs.existsSync(locationMapPath) && fs.statSync(locationMapPath).size > 0,
+  'selected location should include the exported Figma map asset.',
+)
+
+assert(
+  widgetEditor.includes('/static/publish-icons/location.svg') &&
+    widgetEditor.includes('/static/publish-icons/location-pin.svg') &&
+    widgetEditor.includes('/static/publish-icons/location-map.png') &&
+    widgetEditor.includes('class="location-icon"') &&
+    widgetEditor.includes('class="location-map-image"') &&
+    widgetEditor.includes('class="location-card-pin-image"') &&
+    !widgetEditor.includes('⌖') &&
+    !widgetEditor.includes('●') &&
+    !widgetEditor.includes('location-map-ghost') &&
+    !widgetEditor.includes('repeating-linear-gradient'),
+  'location widgets should use real Figma assets instead of text glyphs or CSS map art.',
+)
+
+assert(
+  widgetEditor.includes('@tap="chooseLocation"') &&
+    widgetEditor.includes('@tap.stop="clearLocation"') &&
+    widgetEditor.includes("emit('update:modelValue'") &&
+    widgetEditor.includes('name: res.name') &&
+    widgetEditor.includes('address: res.address'),
+  'location visual replacement must preserve selection, clearing, value shape, and update events.',
 )
 
 assert(

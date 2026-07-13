@@ -16,19 +16,45 @@ function assert(condition, message) {
 }
 
 assert(
-  defaultDetailView.includes('{{ sectionName }}'),
-  'default detail header should keep the user-facing section name.',
+  defaultDetailView.includes('resolvePostDetailTitle') &&
+    defaultDetailView.includes('titleResolution.value.sourceWidgetId') &&
+    defaultDetailView.includes('{{ titleText }}'),
+  'default detail should derive its heading and consumed widget from one detail-only title resolution.',
+)
+
+assert(
+  !defaultDetailView.includes('titleLabelNeedles'),
+  'default detail must not keep an independent title-widget recognition algorithm.',
+)
+
+const detailTitleIndex = defaultDetailView.indexOf('class="detail-title"')
+const detailAuthorIndex = defaultDetailView.indexOf('class="detail-author-row"')
+const sectionLabelIndex = defaultDetailView.indexOf('class="section-line"')
+const detailBodyIndex = defaultDetailView.indexOf('class="detail-body"')
+
+assert(
+  detailTitleIndex >= 0 &&
+    detailTitleIndex < detailAuthorIndex &&
+    detailAuthorIndex < detailBodyIndex,
+  'default detail should render the post title, then author/date metadata, then body content.',
+)
+
+assert(
+  sectionLabelIndex > detailTitleIndex,
+  'default detail section labels must remain secondary to the post title.',
+)
+
+assert(
+  defaultDetailView.includes('class="detail-author-avatar"') &&
+    defaultDetailView.includes('class="detail-author-name"') &&
+    defaultDetailView.includes('class="detail-publish-date"'),
+  'default detail metadata should expose the author avatar, name, and publish date.',
 )
 
 assert(
   !defaultDetailView.includes('contentShapeLabel') &&
     !defaultDetailView.includes('shape-label'),
   'default detail header must not expose automatic/internal content-shape labels.',
-)
-
-assert(
-  !defaultDetailView.includes('class="byline"'),
-  'default detail header must not reserve top space for the author byline.',
 )
 
 assert(
@@ -48,6 +74,12 @@ assert(
     detailPage.includes('authorAvatarUrl') &&
     detailPage.includes('resolvedAvatarUrl(detailAuthorAvatarUrl)'),
   'detail footer should render the real author avatar beside the publish date.',
+)
+
+assert(
+  detailPage.includes('authorAvatarUrl: currentPost.authorAvatarUrl') &&
+    detailPage.includes('resolvedAvatarUrl(currentPost.authorAvatarUrl)'),
+  'renderPost should pass the resolved author avatar URL to the top detail hierarchy on H5.',
 )
 
 console.log('[default-detail-static] PASS')

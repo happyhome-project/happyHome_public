@@ -41,3 +41,24 @@
 3. Final 402 x 874 H5 comparison and native mini-program release-state capture found no remaining P0, P1, or P2 issue within the approved scope.
 
 final result: passed
+
+## Full-page remediation follow-up (2026-07-13)
+
+The later full-file pass stayed on the same Figma 0710 source. Search and the
+`AI帮你写` affordance remained explicitly out of scope. The implementation fixes
+were limited to the visible discrepancies found in that pass:
+
+| Surface | Corrected visual behavior | Verification |
+| --- | --- | --- |
+| Home empty state | Shows the Figma empty illustration, explanation, and existing create CTA only after community and section loading have settled. | Focused state tests and the home static contract. |
+| Default detail | Leads with the resolved post title, then author/avatar/date, then section metadata and body. Rich semantic fields remain visible instead of being consumed as titles. | Detail formatter/component tests and H5 402 x 874 capture. |
+| Notice detail | Keeps the independent notice route and uses the white 0710 hierarchy without fabricating section creation metadata. | Notice component tests and static contract. |
+| Publish sheet | Uses content-driven height, four-column layout, safe-area spacing, and stable Figma-derived neutral/semantic icons. | Publish UI tests, static contracts, and H5 402 x 874 capture. |
+| Publish form | Uses only the native navigation header; the duplicate in-content back arrow was removed. | Static contract and H5 402 x 874 capture. |
+| Profile editing | Keeps the profile visible below a 55% mask and opens an accessible bottom sheet with avatar, nickname, cancel, save, and safe-area handling. | Profile session/race tests, static contract, and H5 402 x 874 capture. |
+
+Rendered comparison artifacts are under
+`output/figma-0710-full-audit/comparisons-after/`; green-framed left images are
+the corrected implementation and blue-framed right images are the corresponding
+Figma 0710 references. Fixture-dependent content and the intentionally excluded
+AI affordance are not treated as visual regressions.
