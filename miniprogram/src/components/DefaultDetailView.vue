@@ -139,7 +139,7 @@ import { computed } from 'vue'
 import RichNoteRenderer from './widgets/RichNoteRenderer.vue'
 import NoteBlocksRenderer from './widgets/NoteBlocksRenderer.vue'
 import VideoPlayerCard from './widgets/VideoPlayerCard.vue'
-import { formatWidgetValue, getPostHomeTitle } from '../utils/widget'
+import { formatWidgetValue, resolvePostHomeTitle } from '../utils/widget'
 import { resolveWidgetLabel } from '../utils/widget-form'
 import { isRichNoteEmpty, normalizeRichNoteContent } from '../utils/rich-note'
 import { useAudioStore } from '../store/audio'
@@ -163,7 +163,6 @@ type LocationItem = {
 }
 
 const audioStore = useAudioStore()
-const titleLabelNeedles = ['标题', '名称', '名字', '书名', '物品', '活动', '医生姓名', '音乐名称', '电影分类']
 
 const sortedWidgets = computed(() =>
   (props.widgets || [])
@@ -178,18 +177,11 @@ const authorInitial = computed(() => authorName.value.slice(0, 1) || '邻')
 const authorAvatarUrl = computed(() => String(props.post?.authorAvatarUrl || '').trim())
 const publishDate = computed(() => formatPostDate(props.post?.createdAt))
 
+const titleResolution = computed(() => resolvePostHomeTitle(props.post, props.section))
 const titleWidget = computed(() => {
-  const preferred = sortedWidgets.value.find((widget) =>
-    ['short_text', 'summary'].includes(widget.type) &&
-    labelLooksLike(resolveWidgetLabel(widget), titleLabelNeedles)
-  )
-  if (preferred) return preferred
-  const hasEmptyPreferredTitle = (props.widgets || []).some((widget) =>
-    ['short_text', 'summary'].includes(widget.type) &&
-    labelLooksLike(resolveWidgetLabel(widget), titleLabelNeedles)
-  )
-  if (hasEmptyPreferredTitle) return null
-  return sortedWidgets.value.find((widget) => ['short_text', 'summary'].includes(widget.type))
+  const sourceWidgetId = titleResolution.value.sourceWidgetId
+  if (!sourceWidgetId) return null
+  return sortedWidgets.value.find((widget) => widget.widgetId === sourceWidgetId) || null
 })
 
 const leadWidget = computed(() => {
@@ -203,7 +195,7 @@ const leadWidget = computed(() => {
 })
 
 const titleText = computed(() =>
-  getPostHomeTitle(props.post, props.section)
+  titleResolution.value.text
 )
 
 const leadText = computed(() =>

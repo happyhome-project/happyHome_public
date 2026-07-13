@@ -34,33 +34,51 @@ export interface PostHomeTitleIssue {
 }
 
 const HOME_TITLE_WIDGET_TYPES = ['short_text', 'summary', 'number', 'rich_text', 'rich_note']
+const HOME_TITLE_LABEL_NEEDLES = ['标题', '名称', '名字', '书名', '物品', '活动', '医生姓名', '音乐名称', '电影分类']
 
-export function getPostHomeTitle(post: Post, section: Section): string {
+export interface PostHomeTitleResolution {
+  text: string
+  sourceWidgetId: string | null
+}
+
+export function resolvePostHomeTitle(post: Post, section: Section): PostHomeTitleResolution {
   const carpoolSummary = getCarpoolListSummary(post, section)
-  if (carpoolSummary?.route) return carpoolSummary.route
-
-  const widgets = (section.widgets || []).slice().sort((a, b) => a.order - b.order)
-  const titleWidget = widgets.find((widget) => {
-    if (!['short_text', 'summary', 'number'].includes(widget.type)) return false
-    const fieldKey = String(widget.fieldKey || '').toLowerCase()
-    const label = String(widget.label || '').replace(/\s/g, '')
-    return fieldKey === 'title' ||
-      fieldKey.includes('title') ||
-      ['标题', '名称', '名字'].some((item) => label.includes(item))
-  }) || widgets.find((widget) => ['short_text', 'summary', 'number'].includes(widget.type))
-
-  if (titleWidget) {
-    const value = getWidgetValue(post, titleWidget)
-    if (value) return value
+  if (carpoolSummary?.route) {
+    return { text: carpoolSummary.route, sourceWidgetId: null }
   }
 
-  for (const widget of widgets.filter((item) => HOME_TITLE_WIDGET_TYPES.includes(item.type))) {
-    const value = getWidgetValue(post, widget)
-    if (value) return value
+  const widgets = (section.widgets || []).slice().sort((a, b) => a.order - b.order)
+  const semanticTitleWidget = widgets.find((widget) =>
+    HOME_TITLE_WIDGET_TYPES.includes(widget.type) &&
+    isTitleLikeWidget(widget) &&
+    getWidgetValue(post, widget) !== ''
+  )
+  if (semanticTitleWidget) {
+    return {
+      text: getWidgetValue(post, semanticTitleWidget),
+      sourceWidgetId: semanticTitleWidget.widgetId,
+    }
+  }
+
+  const fallbackWidget = widgets.find((widget) =>
+    HOME_TITLE_WIDGET_TYPES.includes(widget.type) && getWidgetValue(post, widget) !== ''
+  )
+  if (fallbackWidget) {
+    return {
+      text: getWidgetValue(post, fallbackWidget),
+      sourceWidgetId: fallbackWidget.widgetId,
+    }
   }
 
   const attendanceWidget = widgets.find((widget) => widget.type === 'attendance' && String(widget.label || '').trim())
-  return String(attendanceWidget?.label || section.name || '无标题').trim()
+  return {
+    text: String(attendanceWidget?.label || section.name || '无标题').trim(),
+    sourceWidgetId: null,
+  }
+}
+
+export function getPostHomeTitle(post: Post, section: Section): string {
+  return resolvePostHomeTitle(post, section).text
 }
 
 export function getPostHomeTitleIssue(post: Post, section: Section): PostHomeTitleIssue | null {
@@ -130,11 +148,12 @@ export function getListPreview(post: Post, section: Section): ListPreviewItem[] 
 }
 
 function isTitleLikeWidget(widget: Section['widgets'][number]): boolean {
+  if (!HOME_TITLE_WIDGET_TYPES.includes(widget.type)) return false
   const fieldKey = String(widget.fieldKey || '').toLowerCase()
   const label = String(widget.label || '').replace(/\s/g, '')
   return fieldKey === 'title' ||
     fieldKey.includes('title') ||
-    ['标题', '名称', '名字'].some((item) => label.includes(item))
+    HOME_TITLE_LABEL_NEEDLES.some((item) => label.includes(item))
 }
 
 export function getArchiveHomeMeta(post: Post, section: Section): string {

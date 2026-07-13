@@ -16,9 +16,15 @@ function assert(condition, message) {
 }
 
 assert(
-  defaultDetailView.includes('getPostHomeTitle') &&
+  defaultDetailView.includes('resolvePostHomeTitle') &&
+    defaultDetailView.includes('titleResolution.value.sourceWidgetId') &&
     defaultDetailView.includes('{{ titleText }}'),
-  'default detail should derive its primary heading from the shared post-title helper.',
+  'default detail should derive its heading and consumed widget from one shared title resolution.',
+)
+
+assert(
+  !defaultDetailView.includes('titleLabelNeedles'),
+  'default detail must not keep an independent title-widget recognition algorithm.',
 )
 
 const detailTitleIndex = defaultDetailView.indexOf('class="detail-title"')
@@ -68,6 +74,12 @@ assert(
     detailPage.includes('authorAvatarUrl') &&
     detailPage.includes('resolvedAvatarUrl(detailAuthorAvatarUrl)'),
   'detail footer should render the real author avatar beside the publish date.',
+)
+
+assert(
+  detailPage.includes('authorAvatarUrl: currentPost.authorAvatarUrl') &&
+    detailPage.includes('resolvedAvatarUrl(currentPost.authorAvatarUrl)'),
+  'renderPost should pass the resolved author avatar URL to the top detail hierarchy on H5.',
 )
 
 console.log('[default-detail-static] PASS')

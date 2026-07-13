@@ -239,9 +239,13 @@ const renderPost = computed(() => {
   const currentPost = post.value
   if (!currentPost) return currentPost
   const replacements = resolvedDetailMediaUrls
-  if (!Object.keys(replacements).length) return currentPost
   return Object.assign({}, currentPost, {
-    content: replaceResolvedMediaUrls(currentPost.content || {}, replacements),
+    content: Object.keys(replacements).length
+      ? replaceResolvedMediaUrls(currentPost.content || {}, replacements)
+      : currentPost.content,
+    authorAvatarUrl: currentPost.authorAvatarUrl
+      ? resolvedAvatarUrl(currentPost.authorAvatarUrl)
+      : '',
   })
 })
 const guideRouteDetail = computed(() => {

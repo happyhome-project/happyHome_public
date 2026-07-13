@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { formatWidgetValue, getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard, getHomeLiveMeta, getListPreview, getPostHomeTitle, getPostHomeTitleIssue } from '../widget'
+import { formatWidgetValue, getArchiveHomeMeta, getCarpoolListSummary, getCarpoolLiveMeta, getFamilyLetterListSummary, getGuideNoteCard, getHomeLiveMeta, getListPreview, getPostHomeTitle, getPostHomeTitleIssue, resolvePostHomeTitle } from '../widget'
 import type { Section, Post } from '../../../../cloud/shared/types'
 
 afterEach(() => {
@@ -195,6 +195,81 @@ describe('getListPreview', () => {
 })
 
 describe('home live card formatting', () => {
+  function resolveTitle(post: Post, section: Section) {
+    return resolvePostHomeTitle(post, section)
+  }
+
+  test.each([
+    ['short_text', '医生姓名', '王医生'],
+    ['summary', '活动', '周末徒步'],
+    ['number', '物品', 42],
+    ['rich_text', '书名', '<p>山野童年</p>'],
+    ['rich_note', '音乐名称', { format: 'markdown', markdown: '夏夜', html: '<p>夏夜</p>', text: '夏夜', imageFileIDs: [], schemaVersion: 1 }],
+    ['number', '电影分类', 7],
+  ])('resolves semantic detail title label %s/%s with its source widget', (type, label, value) => {
+    const section = {
+      name: '板块名称',
+      type: 'evergreen',
+      widgets: [
+        { widgetId: 'generic', type: 'short_text', label: '补充', fieldKey: 'extra', order: 0 },
+        { widgetId: 'semantic', type, label, fieldKey: 'field_2', order: 1 },
+      ],
+    } as Section
+    const post = { content: { generic: '不能抢占标题', semantic: value } } as Post
+
+    expect(resolveTitle(post, section)).toEqual({
+      text: type === 'rich_text' ? '山野童年' : type === 'rich_note' ? '夏夜' : String(value),
+      sourceWidgetId: 'semantic',
+    })
+  })
+
+  test.each([
+    ['rich_text', '<p>正文标题</p>', '正文标题'],
+    ['number', 2026, '2026'],
+  ])('returns the actual %s fallback widget as the consumed title source', (type, value, text) => {
+    const section = {
+      name: '社区动态',
+      type: 'evergreen',
+      widgets: [{ widgetId: 'fallback', type, label: '正文', fieldKey: 'body', order: 0 }],
+    } as Section
+    const post = { content: { fallback: value } } as Post
+
+    expect(resolveTitle(post, section)).toEqual({ text, sourceWidgetId: 'fallback' })
+  })
+
+  test('marks a synthetic carpool route as having no consumed source widget', () => {
+    const section = {
+      name: '拼车出行',
+      type: 'realtime',
+      widgets: [
+        { widgetId: 'origin', type: 'short_text', label: '出发地', fieldKey: 'origin', order: 0 },
+        { widgetId: 'destination', type: 'short_text', label: '目的地', fieldKey: 'destination', order: 1 },
+        { widgetId: 'time', type: 'datetime', label: '出发时间', fieldKey: 'departureTime', order: 2 },
+      ],
+    } as Section
+    const post = {
+      content: { origin: '青山村', destination: '东阳', time: '2026-07-14T09:00:00+08:00' },
+    } as Post
+
+    expect(resolveTitle(post, section)).toEqual({
+      text: '青山村 -- 东阳',
+      sourceWidgetId: null,
+    })
+  })
+
+  test('marks section-name fallback as having no consumed source widget', () => {
+    const section = {
+      name: '羽毛球活动',
+      type: 'realtime',
+      widgets: [{ widgetId: 'attendance', type: 'attendance', label: '', fieldKey: 'attendance', order: 0 }],
+    } as Section
+
+    expect(resolveTitle({ content: {} } as Post, section)).toEqual({
+      text: '羽毛球活动',
+      sourceWidgetId: null,
+    })
+  })
+
   test('uses plain text when the only usable home title widget is rich text', () => {
     const section = {
       _id: 's-rich-title',
