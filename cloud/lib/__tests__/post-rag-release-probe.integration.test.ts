@@ -145,6 +145,23 @@ function putRemovedState(probe: any, values: Record<string, any> = {}) {
   })
 }
 
+test('create binds an explicitly requested active public community without falling back', async () => {
+  put('communities', 'public-community', { status: 'active' })
+  const probe = await createPostRagReleaseProbe({ runId: 'run-public', communityId: 'public-community' })
+  expect(probe.communityId).toBe('public-community')
+  expect(getProbe('run-public')).toMatchObject({ communityId: 'public-community' })
+})
+
+test('create rejects a requested missing or inactive community instead of selecting another', async () => {
+  put('communities', 'inactive-community', { status: 'disabled' })
+  await expect(createPostRagReleaseProbe({ runId: 'run-inactive', communityId: 'inactive-community' }))
+    .rejects.toThrow(/active community required/)
+  await expect(createPostRagReleaseProbe({ runId: 'run-missing', communityId: 'missing-community' }))
+    .rejects.toThrow(/active community required/)
+  expect(getProbe('run-inactive')).toBeUndefined()
+  expect(getProbe('run-missing')).toBeUndefined()
+})
+
 function bindActiveCreate(probe: any, values: Record<string, any> | null, createJobId = 'create-job') {
   put('post_rag_outbox', probe.outboxId, {
     schemaVersion: 2, status: 'completed', aggregateId: probe.postId,

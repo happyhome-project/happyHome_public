@@ -16,6 +16,12 @@ export function createValidationIdentity(head, runId) {
   return Object.freeze({ functionName: `post-rag-validate-${digest}`, runId })
 }
 
+export function createProbeFixtureIds(runId) {
+  if (typeof runId !== 'string' || !RUN_ID.test(runId)) throw new Error('runId is invalid')
+  const suffix = createHash('sha256').update(runId).digest('hex').slice(0, 24)
+  return { sectionId: `rag_timer_section_${suffix}`, postId: `rag_timer_post_${suffix}` }
+}
+
 export function assertValidationIdentity(identity) {
   if (!identity || !FUNCTION_NAME.test(String(identity.functionName || '')) || !RUN_ID.test(String(identity.runId || ''))) {
     throw new Error('validation identity is invalid')
@@ -90,31 +96,38 @@ function requireDependency(deps, name) {
 
 async function cleanupStep(operation, errors) {
   try { await operation() } catch (error) {
-    const value = error && typeof error === 'object' ? error : {}
-    const name = /^[A-Za-z0-9_.:-]{1,64}$/.test(String(value.name || '')) ? String(value.name) : 'Error'
-    const code = /^[A-Za-z0-9_.:-]{1,64}$/.test(String(value.code || '')) ? String(value.code) : 'UNKNOWN'
     const fingerprint = createHash('sha256')
-      .update(`${name}\n${code}\n${String(value.message || error || '')}`).digest('hex').slice(0, 16)
-    errors.push(new Error(`cleanup failed name=${name} code=${code} fingerprint=${fingerprint}`))
+      .update(String(error && typeof error === 'object' ? error.message || '' : error || '')).digest('hex').slice(0, 16)
+    errors.push(new Error(`cleanup failed fingerprint=${fingerprint}`))
   }
 }
 
 export async function runIsolatedValidation(options, deps) {
   const identity = createValidationIdentity(options?.head, options?.runId)
-  let deployed = false
+  const communityId = requireSafeId('communityId', options?.communityId)
+  let deployAttempted = false
+  let baselineVerifiedAbsent = false
   let triggerCreated = false
+  let createAttempted = false
+  let probe
   let primaryError
   let evidence
   try {
     const baseline = await requireDependency(deps, 'baseline')(identity)
+    if (baseline?.functionAbsent !== true) throw new Error('temporary function already exists')
+    baselineVerifiedAbsent = true
     const artifact = await requireDependency(deps, 'build')(identity)
+    deployAttempted = true
     await requireDependency(deps, 'deploy')({ ...identity, artifact })
-    deployed = true
     await requireDependency(deps, 'copyRuntimeConfig')(identity)
     await requireDependency(deps, 'createTrigger')(identity)
     triggerCreated = true
-    const probe = await requireDependency(deps, 'invoke')(identity, { action: 'create', runId: identity.runId })
-    assertProbeOwnedId(probe?.postId, probe?.postId)
+    createAttempted = true
+    probe = await requireDependency(deps, 'invoke')(identity, { action: 'create', runId: identity.runId, communityId })
+    const expected = createProbeFixtureIds(identity.runId)
+    assertProbeOwnedId(probe?.postId, expected.postId)
+    assertProbeOwnedId(probe?.sectionId, expected.sectionId)
+    if (probe?.communityId !== communityId) throw new Error('validation community binding mismatch')
     const indexed = await requireDependency(deps, 'waitIndexed')(identity, probe)
     const semanticHit = await requireDependency(deps, 'assertSemanticHit')(probe, indexed)
     await requireDependency(deps, 'invoke')(identity, { action: 'cleanup', ...probe })
@@ -132,11 +145,14 @@ export async function runIsolatedValidation(options, deps) {
     primaryError = error
   } finally {
     const cleanupErrors = []
+    if (createAttempted) await cleanupStep(() => requireDependency(deps, 'recoverProbe')(identity, {
+      runId: identity.runId, communityId, probe,
+    }), cleanupErrors)
     if (triggerCreated) await cleanupStep(() => requireDependency(deps, 'deleteTrigger')(identity), cleanupErrors)
-    if (deployed) await cleanupStep(() => requireDependency(deps, 'deleteFunction')(identity), cleanupErrors)
+    if (deployAttempted) await cleanupStep(() => requireDependency(deps, 'deleteFunction')(identity), cleanupErrors)
     await cleanupStep(() => requireDependency(deps, 'removeArtifact')(identity), cleanupErrors)
     await cleanupStep(() => requireDependency(deps, 'clearSecrets')(identity), cleanupErrors)
-    await cleanupStep(() => requireDependency(deps, 'assertControlPlaneAbsent')(identity), cleanupErrors)
+    if (baselineVerifiedAbsent) await cleanupStep(() => requireDependency(deps, 'assertControlPlaneAbsent')(identity), cleanupErrors)
     if (cleanupErrors.length > 0) primaryError = new AggregateError(
       primaryError ? [primaryError, ...cleanupErrors] : cleanupErrors,
       'isolated RAG validation cleanup failed',

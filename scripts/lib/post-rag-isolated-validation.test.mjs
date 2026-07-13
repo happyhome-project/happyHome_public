@@ -10,6 +10,7 @@ import test from 'node:test'
 import {
   assertIndependentValidationTokens,
   assertProbeOwnedId,
+  createProbeFixtureIds,
   createValidationIdentity,
   runIsolatedValidation,
   sanitizeValidationEvidence,
@@ -17,7 +18,10 @@ import {
 } from './post-rag-isolated-validation.mjs'
 import {
   assertExactSemanticSearchResult,
+  assertExactTimerReadback,
+  assertExactTemporaryEnvironment,
   normalizeValidationVpc,
+  runCommandWithInput,
   selectTemporaryWorkerEnvironment,
 } from '../validate-post-rag-isolated.mjs'
 
@@ -51,6 +55,7 @@ test('rejects malformed runs and non-probe or mismatched identifiers', () => {
   assert.equal(assertProbeOwnedId('rag_timer_post_abcd', 'rag_timer_post_abcd'), true)
   assert.throws(() => assertProbeOwnedId('business-post', 'rag_timer_post_abcd'), /binding/)
   assert.throws(() => assertProbeOwnedId('rag_timer_post_other', 'rag_timer_post_abcd'), /binding/)
+  assert.deepEqual(createProbeFixtureIds('20260713T210000'), fixtureIds('20260713T210000'))
 })
 
 test('selects only exact bound candidates and rejects unrelated available ids', () => {
@@ -91,7 +96,33 @@ test('copies only the semantic RAG allowlist and independent temporary credentia
 
 test('normalizes only an exact VPC and subnet binding', () => {
   assert.deepEqual(normalizeValidationVpc({ VpcId: 'vpc-a', SubnetId: 'subnet-a' }), { vpcId: 'vpc-a', subnetId: 'subnet-a' })
+  assert.deepEqual(normalizeValidationVpc({ vpc: { vpcId: 'vpc-b' }, subnet: { subnetId: 'subnet-b' } }), { vpcId: 'vpc-b', subnetId: 'subnet-b' })
   assert.throws(() => normalizeValidationVpc({ VpcId: 'vpc-a' }), /VPC/)
+})
+
+test('requires exact environment key and value readback with no worker token or unrelated values', () => {
+  const expected = { A: '1', RAG_VALIDATION_TOKEN: 'v', POST_RAG_TIMER_TOKEN: 't' }
+  const variables = Object.entries(expected).map(([Key, Value]) => ({ Key, Value }))
+  assert.equal(assertExactTemporaryEnvironment({ Environment: { Variables: variables } }, expected), true)
+  assert.throws(() => assertExactTemporaryEnvironment({ Environment: { Variables: [...variables, { Key: 'EXTRA', Value: 'x' }] } }, expected), /environment/)
+  assert.throws(() => assertExactTemporaryEnvironment({ Environment: { Variables: [{ Key: 'A', Value: 'wrong' }] } }, expected), /environment/)
+  assert.throws(() => assertExactTemporaryEnvironment({ Environment: { Variables: [{ Key: 'POST_RAG_WORKER_TOKEN', Value: 'secret' }] } }, {}), /worker token/)
+  assert.throws(() => assertExactTemporaryEnvironment({ Environment: { Variables: [{ Key: 'A', Value: '1' }, { Key: 'A', Value: '1' }] } }, { A: '1' }), /environment/)
+})
+
+test('requires one exact enabled timer trigger with the exact custom argument', () => {
+  const expected = JSON.stringify({ runId: 'run-a', timerToken: 'secret' })
+  const trigger = { TriggerName: 'post-rag-worker-every-minute', CustomArgument: expected, Enable: 'OPEN' }
+  assert.equal(assertExactTimerReadback([trigger], expected), true)
+  assert.throws(() => assertExactTimerReadback([{ ...trigger, Enable: 0 }], expected), /trigger/)
+  assert.throws(() => assertExactTimerReadback([{ ...trigger, CustomArgument: '{}' }], expected), /trigger/)
+  assert.throws(() => assertExactTimerReadback([trigger, { ...trigger, TriggerName: 'extra' }], expected), /trigger/)
+})
+
+test('noninteractive runner writes the requested blank confirmation to stdin', async () => {
+  const result = await runCommandWithInput(process.execPath, ['-e', "process.stdin.once('data',d=>process.stdout.write(d))"], { input: '\n', timeoutMs: 5000 })
+  assert.equal(result.status, 0)
+  assert.equal(result.stdout, '\n')
 })
 
 test('exposes the isolated validator package command', async () => {
@@ -101,12 +132,13 @@ test('exposes the isolated validator package command', async () => {
 
 function scenario(overrides = {}) {
   const calls = []
+  const ids = fixtureIds('20260713T210000')
   const probe = {
     runId: '20260713T210000', communityId: 'community-a',
-    sectionId: 'rag_timer_section_a', postId: 'rag_timer_post_a', outboxId: 'outbox-a',
+    ...ids, outboxId: 'outbox-a',
   }
   const deps = {
-    async baseline(identity) { calls.push(['baseline', identity.functionName]); return { nonProbeCount: 7 } },
+    async baseline(identity) { calls.push(['baseline', identity.functionName]); return { functionAbsent: true, nonProbeCount: 7 } },
     async build(identity) { calls.push(['build', identity.functionName]); return { directory: 'artifact' } },
     async deploy() { calls.push(['deploy']) },
     async copyRuntimeConfig() { calls.push(['copyRuntimeConfig']) },
@@ -118,6 +150,7 @@ function scenario(overrides = {}) {
     async assertSemanticAbsent() { calls.push(['assertSemanticAbsent']); return { exactAbsent: true } },
     async waitCleaned() { calls.push(['waitCleaned']); return { status: 'cleaned' } },
     async assertNoResidue() { calls.push(['assertNoResidue']); return { operationalResidueCount: 0, cleanedAuditCount: 1, nonProbeCount: 7 } },
+    async recoverProbe() { calls.push(['recoverProbe']); return { status: 'cleaned' } },
     async writeEvidence(value) { calls.push(['writeEvidence']); return value },
     async deleteTrigger() { calls.push(['deleteTrigger']) },
     async deleteFunction() { calls.push(['deleteFunction']) },
@@ -136,12 +169,12 @@ function fixtureIds(runId) {
 
 test('runs exact semantic create/delete validation and proves final cleanup', async () => {
   const { calls, deps, probe } = scenario()
-  const result = await runIsolatedValidation({ head: 'f16b88f', runId: probe.runId }, deps)
+  const result = await runIsolatedValidation({ head: 'f16b88f', runId: probe.runId, communityId: 'community-a' }, deps)
   assert.equal(result.status, 'passed')
   assert.deepEqual(calls.map(([name]) => name), [
     'baseline', 'build', 'deploy', 'copyRuntimeConfig', 'createTrigger',
     'invoke', 'waitIndexed', 'assertSemanticHit', 'invoke', 'waitRemoved',
-    'assertSemanticAbsent', 'waitCleaned', 'assertNoResidue',
+    'assertSemanticAbsent', 'waitCleaned', 'assertNoResidue', 'recoverProbe',
     'deleteTrigger', 'deleteFunction', 'removeArtifact', 'clearSecrets', 'assertControlPlaneAbsent', 'writeEvidence',
   ])
 })
@@ -151,29 +184,69 @@ test('always deletes the trigger, function, artifacts and temporary secrets afte
     async assertSemanticHit() { throw new Error('semantic assertion failed') },
   })
   await assert.rejects(
-    runIsolatedValidation({ head: 'f16b88f', runId: probe.runId }, deps),
+    runIsolatedValidation({ head: 'f16b88f', runId: probe.runId, communityId: 'community-a' }, deps),
     /semantic assertion failed/,
   )
-  assert.deepEqual(calls.slice(-5).map(([name]) => name), [
-    'deleteTrigger', 'deleteFunction', 'removeArtifact', 'clearSecrets', 'assertControlPlaneAbsent',
+  assert.deepEqual(calls.slice(-6).map(([name]) => name), [
+    'recoverProbe', 'deleteTrigger', 'deleteFunction', 'removeArtifact', 'clearSecrets', 'assertControlPlaneAbsent',
   ])
 })
 
-test('does not delete resources that were never created and still proves absence', async () => {
+test('ambiguous deploy failure attempts exact function cleanup and still proves absence', async () => {
   const { calls, deps, probe } = scenario({
     async deploy() { throw new Error('deploy failed') },
   })
-  await assert.rejects(runIsolatedValidation({ head: 'f16b88f', runId: probe.runId }, deps), /deploy failed/)
+  await assert.rejects(runIsolatedValidation({ head: 'f16b88f', runId: probe.runId, communityId: 'community-a' }, deps), /deploy failed/)
   assert.equal(calls.some(([name]) => name === 'deleteTrigger'), false)
-  assert.equal(calls.some(([name]) => name === 'deleteFunction'), false)
-  assert.deepEqual(calls.slice(-3).map(([name]) => name), ['removeArtifact', 'clearSecrets', 'assertControlPlaneAbsent'])
+  assert.equal(calls.some(([name]) => name === 'deleteFunction'), true)
+  assert.deepEqual(calls.slice(-4).map(([name]) => name), ['deleteFunction', 'removeArtifact', 'clearSecrets', 'assertControlPlaneAbsent'])
+})
+
+test('pre-existing deterministic function stops before mutation and is never deleted', async () => {
+  const { calls, deps, probe } = scenario({
+    async baseline() { calls.push(['baseline']); throw new Error('temporary function already exists') },
+  })
+  await assert.rejects(runIsolatedValidation({ head: 'f16b88f', runId: probe.runId, communityId: 'community-a' }, deps), /already exists/)
+  assert.equal(calls.some(([name]) => ['build', 'deploy', 'deleteFunction'].includes(name)), false)
+  assert.equal(calls.some(([name]) => name === 'assertControlPlaneAbsent'), false)
+})
+
+test('a lost create response still recovers the exact run before infrastructure teardown', async () => {
+  const { calls, deps, probe } = scenario({
+    async invoke() { calls.push(['invoke']); throw new Error('create response lost') },
+  })
+  await assert.rejects(runIsolatedValidation({ head: 'f16b88f', runId: probe.runId, communityId: 'community-a' }, deps), /create response lost/)
+  assert.ok(calls.findIndex(([name]) => name === 'recoverProbe') < calls.findIndex(([name]) => name === 'deleteTrigger'))
+})
+
+test('a wait failure still recovers the exact run before infrastructure teardown', async () => {
+  const { calls, deps, probe } = scenario({
+    async waitIndexed() { calls.push(['waitIndexed']); throw new Error('timer wait failed') },
+  })
+  await assert.rejects(runIsolatedValidation({ head: 'f16b88f', runId: probe.runId, communityId: 'community-a' }, deps), /timer wait failed/)
+  assert.ok(calls.findIndex(([name]) => name === 'recoverProbe') < calls.findIndex(([name]) => name === 'deleteTrigger'))
+})
+
+test('recovery errors are fingerprinted without leaking alphanumeric secret text', async () => {
+  const { deps, probe } = scenario({
+    async waitIndexed() { throw new Error('timer wait failed') },
+    async recoverProbe() { throw new Error('ALPHANUMERICSECRET') },
+  })
+  await assert.rejects(runIsolatedValidation({ head: 'f16b88f', runId: probe.runId, communityId: 'community-a' }, deps), error => {
+    assert.ok(error instanceof AggregateError)
+    const text = error.errors.map(item => String(item?.message || item)).join('\n')
+    assert.match(text, /timer wait failed/)
+    assert.match(text, /fingerprint=/)
+    assert.doesNotMatch(text, /ALPHANUMERICSECRET/)
+    return true
+  })
 })
 
 test('records non-probe count drift as observation without treating shared traffic as a failure', async () => {
   const { deps, probe } = scenario({
     async assertNoResidue() { return { operationalResidueCount: 0, cleanedAuditCount: 1, nonProbeCount: 9 } },
   })
-  const result = await runIsolatedValidation({ head: 'f16b88f', runId: probe.runId }, deps)
+  const result = await runIsolatedValidation({ head: 'f16b88f', runId: probe.runId, communityId: 'community-a' }, deps)
   assert.equal(result.status, 'passed')
   assert.equal(result.nonProbeBaselineCount, 7)
   assert.equal(result.nonProbeFinalCount, 9)
@@ -185,7 +258,7 @@ test('preserves the primary failure and sanitized cleanup diagnostics', async ()
     async deleteTrigger() { throw new Error('https://secret:9200 token=abc') },
   })
   await assert.rejects(
-    runIsolatedValidation({ head: 'f16b88f', runId: probe.runId }, deps),
+    runIsolatedValidation({ head: 'f16b88f', runId: probe.runId, communityId: 'community-a' }, deps),
     (error) => {
       assert.ok(error instanceof AggregateError)
       assert.match(String(error.errors[0]?.message), /primary semantic failure/)
@@ -232,6 +305,14 @@ test('sanitizes evidence to the fixed release-grade schema without secrets or pr
   assert.doesNotMatch(serialized, /secret|token|embedding|endpoint|9200/i)
 })
 
+const TIMER_NOW = '2026-07-13T13:00:30.000Z'
+function timerEvent(runId, overrides = {}) {
+  return {
+    Type: 'Timer', TriggerName: 'post-rag-worker-every-minute', Time: '2026-07-13T13:00:00.000Z',
+    Message: JSON.stringify({ runId, timerToken: 'timer-token-654321' }), ...overrides,
+  }
+}
+
 test('temporary handler authenticates independently and processes only the bound outbox and job', async () => {
   const loaded = await loadFixtureHandler()
   try {
@@ -243,6 +324,7 @@ test('temporary handler authenticates independently and processes only the bound
       outboxId: 'outbox-a', cleanupOutboxId: null,
     }
     Object.assign(probe, ids)
+    let jobReads = 0
     const handler = loaded.module.createExactIdValidationHandler({
       async create(runId) { calls.push(['create', runId]); return probe },
       async status(input) { calls.push(['status', input.outboxId]); return { complete: false } },
@@ -250,15 +332,22 @@ test('temporary handler authenticates independently and processes only the bound
       async readProbe(runId) { calls.push(['readProbe', runId]); return probe },
       async readOutbox(id) { calls.push(['readOutbox', id]); return { _id: id, aggregateId: probe.postId, communityId: probe.communityId, status: 'pending' } },
       async materializeExact(id) { calls.push(['materializeExact', id]); return { jobId: 'job-a' } },
-      async readJob(id) { calls.push(['readJob', id]); return { _id: id, postId: probe.postId, communityId: probe.communityId } },
+      async readJob(id) {
+        calls.push(['readJob', id]); jobReads += 1
+        return { _id: id, postId: probe.postId, communityId: probe.communityId,
+          ...(jobReads > 1 ? { status: 'completed', outcome: 'indexed' } : {}) }
+      },
       async processExactJob(id) { calls.push(['processExactJob', id]); return { candidateCount: 1, results: [{ jobId: id, status: 'completed', outcome: 'indexed' }] } },
+      async recordTimerEvidence(_runId, _field, evidence) { calls.push(['recordTimerEvidence', evidence]); },
     }, {
       validationToken: 'validation-token-123456',
       timerToken: 'timer-token-654321',
+      now: () => TIMER_NOW,
     })
 
     await assert.rejects(handler({ action: 'create', runId: probe.runId, validationToken: 'wrong-token-123456' }), /unauthorized/)
-    const result = await handler({ action: 'timer', runId: probe.runId, timerToken: 'timer-token-654321' })
+    await assert.rejects(handler({ action: 'timer', runId: probe.runId, timerToken: 'timer-token-654321' }), /unauthorized|action/)
+    const result = await handler(timerEvent(probe.runId))
     assert.deepEqual(result, {
       runId: probe.runId,
       postId: probe.postId,
@@ -269,6 +358,12 @@ test('temporary handler authenticates independently and processes only the bound
       outcome: 'indexed',
     })
     assert.equal(calls.some(call => call.includes('job-b')), false)
+    const evidence = calls.find(([name]) => name === 'recordTimerEvidence')?.[1]
+    assert.deepEqual(evidence, {
+      triggerName: 'post-rag-worker-every-minute', eventTime: '2026-07-13T13:00:00.000Z', invokedAt: TIMER_NOW,
+      outboxId: 'outbox-a', jobId: 'job-a', outcome: 'indexed', phase: 'create',
+    })
+    assert.doesNotMatch(JSON.stringify(evidence), /token/i)
   } finally {
     await loaded.cleanup()
   }
@@ -287,8 +382,8 @@ test('temporary handler rejects an exact outbox or job that escapes the probe bi
       async readProbe() { return probe },
       async readOutbox(id) { return { _id: id, aggregateId: 'business-post', communityId: probe.communityId } },
       async materializeExact() { throw new Error('must not materialize') },
-    }, { validationToken: 'validation-token-123456', timerToken: 'timer-token-654321' })
-    await assert.rejects(handler({ action: 'timer', runId: probe.runId, timerToken: 'timer-token-654321' }), /binding/)
+    }, { validationToken: 'validation-token-123456', timerToken: 'timer-token-654321', now: () => TIMER_NOW })
+    await assert.rejects(handler(timerEvent(probe.runId)), /binding/)
   } finally {
     await loaded.cleanup()
   }
@@ -307,13 +402,32 @@ test('temporary handler reports the exact already-completed delete job without s
       async materializeExact() { return { jobId: 'job-delete' } },
       async readJob(id) { return { _id: id, postId: probe.postId, communityId: probe.communityId, status: 'completed', outcome: 'removed' } },
       async processExactJob() { processed = true; throw new Error('must not process completed job') },
-    }, { validationToken: 'validation-token-123456', timerToken: 'timer-token-654321' })
-    const result = await handler({ action: 'timer', runId, timerToken: 'timer-token-654321' })
+      async recordTimerEvidence() {},
+    }, { validationToken: 'validation-token-123456', timerToken: 'timer-token-654321', now: () => TIMER_NOW })
+    const result = await handler(timerEvent(runId))
     assert.equal(processed, false)
     assert.deepEqual(result, {
       runId, postId: probe.postId, outboxId: probe.cleanupOutboxId, jobId: 'job-delete',
       candidateCount: 1, completedCount: 1, outcome: 'removed',
     })
+  } finally {
+    await loaded.cleanup()
+  }
+})
+
+test('temporary handler rejects forged, stale, malformed, or overbroad timer shapes', async () => {
+  const loaded = await loadFixtureHandler()
+  try {
+    const handler = loaded.module.createExactIdValidationHandler({}, {
+      validationToken: 'validation-token-123456', timerToken: 'timer-token-654321', now: () => TIMER_NOW,
+    })
+    const runId = '20260713T210000'
+    await assert.rejects(handler({ action: 'timer', runId, timerToken: 'timer-token-654321' }), /unauthorized|action/)
+    await assert.rejects(handler(timerEvent(runId, { Time: '2026-07-13T12:50:00.000Z' })), /unauthorized/)
+    await assert.rejects(handler(timerEvent(runId, { Message: JSON.stringify({ runId, timerToken: 'timer-token-654321', workerToken: 'x' }) })), /unauthorized/)
+    await assert.rejects(handler(timerEvent(runId, { Message: JSON.stringify({ runId, timerToken: 'timer-token-654321', extra: true }) })), /unauthorized/)
+    await assert.rejects(handler(timerEvent(runId, { TriggerName: 'other-trigger' })), /unauthorized/)
+    await assert.rejects(handler({ ...timerEvent(runId), workerToken: 'worker-secret' }), /unauthorized/)
   } finally {
     await loaded.cleanup()
   }

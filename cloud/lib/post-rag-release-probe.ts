@@ -35,6 +35,16 @@ function assertCleanupBound(input: any, probe: any) {
   assertBound(input, probe)
 }
 
+function createInput(value: unknown) {
+  if (typeof value === 'string') return { runId: validRunId(value), communityId: '' }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid release probe runId')
+  const raw = value as Record<string, unknown>
+  if (Object.keys(raw).some(key => key !== 'runId' && key !== 'communityId')) throw new Error('invalid release probe create input')
+  const communityId = String(raw.communityId || '')
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(communityId)) throw new Error('invalid release probe communityId')
+  return { runId: validRunId(raw.runId), communityId }
+}
+
 function assertProbeIdentity(id: string, probe: any) {
   const expected = fixtureIds(id)
   if (probe?._id !== id || probe?.runId !== id || probe?.postId !== expected.postId || probe?.sectionId !== expected.sectionId) {
@@ -43,10 +53,17 @@ function assertProbeIdentity(id: string, probe: any) {
 }
 
 export async function createPostRagReleaseProbe(value: unknown) {
-  const id = validRunId(value)
+  const requested = createInput(value)
+  const id = requested.runId
   if (await readProbe(id)) throw new Error('release probe runId already exists')
-  const communities = await db.queryAfterId('communities', { status: 'active' }, null, 1) as any[]
-  if (!communities[0]) throw new Error('active community required')
+  const requestedCommunity = requested.communityId
+    ? await db.getByIdOrNull<any>('communities', requested.communityId)
+    : null
+  const communities = requested.communityId
+    ? (requestedCommunity ? [requestedCommunity] : [])
+    : await db.queryAfterId('communities', { status: 'active' }, null, 1) as any[]
+  if (!communities[0] || communities[0]._id !== (requested.communityId || communities[0]._id)
+    || communities[0].status !== 'active') throw new Error('active community required')
   const communityId = String(communities[0]._id)
   const { sectionId, postId } = fixtureIds(id)
   const now = new Date().toISOString()
