@@ -23,6 +23,9 @@
  *   格式：每行一个 KEY=VALUE，# 开头为注释
  */
 import CloudBase from '@cloudbase/manager-node'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { dirname } from 'node:path'
+import { createEnsureIndexEvidence, readEnsureIndexState } from './lib/ensure-index-evidence.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -564,11 +567,18 @@ for (const idx of INDEXES) {
     }
     if (msg.includes('不存在') || msg.includes('not exist') || msg.includes('CollectionNotExists')) {
       console.error(`✗ ${idx.coll}.${idx.name}  collection "${idx.coll}" 不存在，跳过`)
+      hadError = true
       continue
     }
     console.error(`✗ ${idx.coll}.${idx.name}`, msg)
     hadError = true
   }
+}
+
+const readback = await readEnsureIndexState({ db, collections: REQUIRED_COLLECTIONS, indexes: INDEXES })
+if (readback.failures) {
+  console.error(`[ensure-indexes] final readback missing or indeterminate: ${readback.missing.join(', ')}`)
+  hadError = true
 }
 
 if (hadError) {
@@ -577,3 +587,8 @@ if (hadError) {
 }
 
 console.log('\n[ensure-indexes] Done.')
+if (process.env.HH_RELEASE_INDEX_EVIDENCE_PATH) {
+  const evidence = createEnsureIndexEvidence(readback)
+  await mkdir(dirname(process.env.HH_RELEASE_INDEX_EVIDENCE_PATH), { recursive: true })
+  await writeFile(process.env.HH_RELEASE_INDEX_EVIDENCE_PATH, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8')
+}

@@ -13,6 +13,7 @@ function migrationEntries(manifests) {
 
 export async function executeReleaseOperations({
   appliedMigrations = new Set(),
+  completedActions = new Set(),
   guard,
   manifests = [],
   runAction,
@@ -24,7 +25,7 @@ export async function executeReleaseOperations({
   const actions = orderedActions(manifests.flatMap((manifest) => manifest.actions || []))
   for (const action of actions) {
     if (!RELEASE_ACTIONS.has(action)) throw new Error(`unknown action: ${action}`)
-    if (POST_DEPLOY_RELEASE_ACTIONS.has(action)) continue
+    if (POST_DEPLOY_RELEASE_ACTIONS.has(action) || completedActions.has(action)) continue
     await guard.beforeRemoteMutation(`action:${action}`)
     await runAction(action)
     await guard.recordStage(`action:${action}`)
@@ -44,5 +45,10 @@ export async function executeReleaseOperations({
     await guard.recordStage(`migration:${migration.id}`)
     migrations.push(migration.id)
   }
-  return { actions: actions.filter(action=>!POST_DEPLOY_RELEASE_ACTIONS.has(action)), deferredActions: actions.filter(action=>POST_DEPLOY_RELEASE_ACTIONS.has(action)), migrations }
+  return {
+    actions: actions.filter(action => !POST_DEPLOY_RELEASE_ACTIONS.has(action) && !completedActions.has(action)),
+    deferredActions: actions.filter(action => POST_DEPLOY_RELEASE_ACTIONS.has(action)),
+    migrations,
+    ...(completedActions.size ? { completedActions: actions.filter(action => completedActions.has(action)) } : {}),
+  }
 }

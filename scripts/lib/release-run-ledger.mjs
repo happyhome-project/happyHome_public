@@ -30,7 +30,7 @@ const REQUIRED_RELEASE_UI_MARKERS = [
   'HH_RELEASE_PROFILE_LOGIN_CLEAN',
 ]
 
-const RELEASE_CONTEXT_KEYS = ['gitSha', 'version', 'desc', 'envId', 'releaseStrategy']
+const RELEASE_CONTEXT_KEYS = ['gitSha', 'version', 'desc', 'envId', 'releaseStrategy', 'dagMode']
 
 function hasReusableColdStartEvidence(evidence = {}) {
   const coldStart = evidence.homeColdStart
@@ -176,8 +176,8 @@ function contextMismatch(stageContext = {}, expected = {}) {
 }
 
 function mergeExistingRunContext(existing = {}, next = {}) {
-  const merged = { ...existing, releaseStrategy: existing.releaseStrategy || 'main' }
-  const requested = { ...next, releaseStrategy: next.releaseStrategy || 'main' }
+  const merged = { ...existing, releaseStrategy: existing.releaseStrategy || 'main', dagMode: existing.dagMode || 'legacy' }
+  const requested = { ...next, releaseStrategy: next.releaseStrategy || 'main', dagMode: next.dagMode || 'legacy' }
   for (const key of RELEASE_CONTEXT_KEYS) {
     if (merged[key] && requested[key] && merged[key] !== requested[key]) {
       throw new Error(`release run context mismatch for ${key}: existing ${merged[key]}, requested ${requested[key]}`)
@@ -404,6 +404,7 @@ export class ReleaseRunLedger {
     this.latestPath = resolve(this.root, RELEASE_RUNS_DIR, 'latest.json')
     this.state = options.state
     this.secrets = []
+    this.mutationPending = Promise.resolve()
   }
 
   registerSecrets(secrets = []) {
@@ -415,7 +416,17 @@ export class ReleaseRunLedger {
     return sanitizeSecretValues(value, this.secrets)
   }
 
+  serializeMutation(mutate) {
+    const operation = this.mutationPending.then(mutate)
+    this.mutationPending = operation.catch(() => {})
+    return operation
+  }
+
   async save() {
+    return await this.serializeMutation(async () => await this.saveUnsafe())
+  }
+
+  async saveUnsafe() {
     this.state = this.sanitize(this.state)
     this.state.updatedAt = isoNow(this.now)
     await writeJson(this.runPath, this.state)
@@ -434,6 +445,10 @@ export class ReleaseRunLedger {
   }
 
   async appendEvent(event, payload = {}) {
+    return await this.serializeMutation(async () => await this.appendEventUnsafe(event, payload))
+  }
+
+  async appendEventUnsafe(event, payload = {}) {
     await mkdir(this.runDir, { recursive: true })
     await appendFile(this.eventsPath, oneLineJson({
       at: isoNow(this.now),
@@ -444,6 +459,7 @@ export class ReleaseRunLedger {
   }
 
   async pinReleaseArtifacts({ formalPlan, artifactManifest }) {
+    return await this.serializeMutation(async () => {
     if (!formalPlan || !artifactManifest) throw new Error('formalPlan and artifactManifest are required')
     if (this.state.formalPlan || this.state.artifactManifest) {
       if (JSON.stringify(this.state.formalPlan) !== JSON.stringify(formalPlan) || JSON.stringify(this.state.artifactManifest) !== JSON.stringify(artifactManifest)) {
@@ -457,25 +473,31 @@ export class ReleaseRunLedger {
     this.state.artifactManifest = artifactManifest
     this.state.remoteAttestations ||= {}
     this.state.components ||= {}
-    await this.appendEvent('release_artifacts_pinned', { gitSha: artifactManifest.gitSha, targets: artifactManifest.targets })
-    await this.save()
+    await this.appendEventUnsafe('release_artifacts_pinned', { gitSha: artifactManifest.gitSha, targets: artifactManifest.targets })
+    await this.saveUnsafe()
+    })
   }
 
   async recordRemoteAttestations(name, attestations) {
+    return await this.serializeMutation(async () => {
     assertNoPlaintextProbeToken(attestations)
     this.state.remoteAttestations ||= {}
     this.state.remoteAttestations[name] = this.sanitize(attestations)
-    await this.appendEvent('remote_attestation_recorded', { component: name, attestations })
-    await this.save()
+    await this.appendEventUnsafe('remote_attestation_recorded', { component: name, attestations })
+    await this.saveUnsafe()
+    })
   }
 
   async recordComponent(name, { status, skipReason = '', evidence = null } = {}) {
+    return await this.serializeMutation(async () => {
     this.state.components ||= {}
     this.state.components[name] = this.sanitize({ status, skipReason, evidence })
-    await this.save()
+    await this.saveUnsafe()
+    })
   }
 
   async startStage(name, details = {}) {
+    return await this.serializeMutation(async () => {
     const at = isoNow(this.now)
     this.state.status = 'running'
     this.state.stages[name] = {
@@ -491,11 +513,13 @@ export class ReleaseRunLedger {
       result: details.result || this.state.stages[name]?.result || null,
       reason: details.reason || '',
     }
-    await this.appendEvent('stage_started', { stage: name, command: this.state.stages[name].command })
-    await this.save()
+    await this.appendEventUnsafe('stage_started', { stage: name, command: this.state.stages[name].command })
+    await this.saveUnsafe()
+    })
   }
 
   async passStage(name, details = {}) {
+    return await this.serializeMutation(async () => {
     const at = isoNow(this.now)
     const existing = this.state.stages[name] || {}
     const startedAt = existing.startedAt || at
@@ -512,11 +536,13 @@ export class ReleaseRunLedger {
       result: details.result ?? existing.result ?? null,
       reason: '',
     }
-    await this.appendEvent('stage_passed', { stage: name, evidence: this.state.stages[name].evidence, result: this.state.stages[name].result })
-    await this.save()
+    await this.appendEventUnsafe('stage_passed', { stage: name, evidence: this.state.stages[name].evidence, result: this.state.stages[name].result })
+    await this.saveUnsafe()
+    })
   }
 
   async failStage(name, error, details = {}) {
+    return await this.serializeMutation(async () => {
     const at = isoNow(this.now)
     const existing = this.state.stages[name] || {}
     const startedAt = existing.startedAt || at
@@ -535,11 +561,13 @@ export class ReleaseRunLedger {
       error: String(error?.stack || error?.message || error),
       reason: details.reason || String(error?.message || error),
     }
-    await this.appendEvent('stage_failed', { stage: name, reason: this.state.stages[name].reason })
-    await this.save()
+    await this.appendEventUnsafe('stage_failed', { stage: name, reason: this.state.stages[name].reason })
+    await this.saveUnsafe()
+    })
   }
 
   async skipStage(name, details = {}) {
+    return await this.serializeMutation(async () => {
     const at = isoNow(this.now)
     const existing = this.state.stages[name] || {}
     this.state.stages[name] = {
@@ -555,15 +583,18 @@ export class ReleaseRunLedger {
       reason: details.reason || 'reused previous passed stage',
       reused: details.reused ?? true,
     }
-    await this.appendEvent('stage_reused', { stage: name, reason: this.state.stages[name].reason })
-    await this.save()
+    await this.appendEventUnsafe('stage_reused', { stage: name, reason: this.state.stages[name].reason })
+    await this.saveUnsafe()
+    })
   }
 
   async complete(status = 'passed') {
+    return await this.serializeMutation(async () => {
     this.state.status = status
     this.state.finishedAt = isoNow(this.now)
-    await this.appendEvent('run_completed', { status })
-    await this.save()
+    await this.appendEventUnsafe('run_completed', { status })
+    await this.saveUnsafe()
+    })
   }
 }
 
@@ -581,6 +612,7 @@ export async function createReleaseRunLedger(options) {
       desc: options.desc || '',
       envId: options.envId || '',
       releaseStrategy: options.releaseStrategy || 'main',
+      dagMode: options.dagMode || 'legacy',
     })
   } else {
     const createdAt = isoNow(options.now)
@@ -598,6 +630,7 @@ export async function createReleaseRunLedger(options) {
         desc: options.desc || '',
         envId: options.envId || '',
         releaseStrategy: options.releaseStrategy || 'main',
+        dagMode: options.dagMode || 'legacy',
       },
       stages: {},
       formalPlan: null,

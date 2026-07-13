@@ -103,12 +103,65 @@ test('release cloud smoke ensures required database collections before invoking 
   }
   assert.match(runCloudSmokeBody, /ensure:indexes/)
   assert(runCloudSmokeBody.indexOf('ensure:indexes') < runCloudSmokeBody.indexOf('runCloudReleaseSmoke'))
+  assert.match(runCloudSmokeBody, /options\.ensureIndexes\s*!==\s*false/)
+})
+
+test('mutation boundaries fetch once while repeated ordinary invoke and log fences stay local and exact-SHA bound', async () => {
+  const events = []
+  const state = validPublicReleaseState({ headSha: 'release-sha', originMainSha: 'release-sha' })
+  const fences = releasePolicyModule.createFormalReleaseMutationFences({
+    expectedGitSha: 'release-sha',
+    fetchOriginMain: async () => events.push('fetch'),
+    readGitState: () => { events.push('read'); return { ...state } },
+    releaseStrategy: 'full-current',
+    fullCurrentExplicit: true,
+    beforeRemoteMutation: async (stage) => events.push(`guard:${stage}`),
+  })
+  await fences.remoteBoundary('cloud:post')
+  await fences.localExactShaFence('invoke:post')
+  await fences.localExactShaFence('log:post')
+  assert.deepEqual(events, [
+    'fetch', 'read', 'guard:cloud:post',
+    'read', 'guard:invoke:post',
+    'read', 'guard:log:post',
+  ])
+})
+
+test('local exact-SHA fence rejects drift without fetching or advancing the remote mutation guard', async () => {
+  const events = []
+  const fences = releasePolicyModule.createFormalReleaseMutationFences({
+    expectedGitSha: 'release-sha',
+    fetchOriginMain: async () => events.push('fetch'),
+    readGitState: () => validPublicReleaseState({ headSha: 'drifted', originMainSha: 'drifted' }),
+    releaseStrategy: 'full-current',
+    fullCurrentExplicit: true,
+    beforeRemoteMutation: async () => events.push('guard'),
+  })
+  await assert.rejects(() => fences.localExactShaFence('invoke:post'), /exact release SHA/i)
+  assert.deepEqual(events, [])
+})
+
+test('bounded fetch does not weaken the production token fence on the next local mutation', async () => {
+  let fetches = 0
+  let guards = 0
+  const fences = releasePolicyModule.createFormalReleaseMutationFences({
+    expectedGitSha: 'release-sha',
+    fetchOriginMain: async () => { fetches += 1 },
+    readGitState: () => validPublicReleaseState({ headSha: 'release-sha', originMainSha: 'release-sha' }),
+    releaseStrategy: 'full-current', fullCurrentExplicit: true,
+    beforeRemoteMutation: async () => { guards += 1; if (guards === 3) throw new Error('production token invalidated') },
+  })
+  await fences.remoteBoundary('subset')
+  await fences.localExactShaFence('cloud:first')
+  await assert.rejects(() => fences.localExactShaFence('cloud:second'), /token invalidated/)
+  assert.equal(fetches, 1)
+  assert.equal(guards, 3)
 })
 
 test('timer probe waits on a bounded deadline instead of a fixed attempt count', () => {
-  const source = readFileSync(new URL('../verify-post-rag-timer.mjs', import.meta.url), 'utf8')
-  assert.match(source, /createTimerProbeDeadline/)
-  assert.match(source, /Date\.now\(\)\s*<\s*deadline/)
+  const source = readFileSync(new URL('./post-rag-timer-probe-runner.mjs', import.meta.url), 'utf8')
+  assert.match(source, /resolveTimerProbeTimeoutMs/)
+  assert.match(source, /runtime\.now\(\)\s*<\s*deadlineMs/)
   assert.doesNotMatch(source, /attempt\s*<\s*20/)
 })
 
@@ -357,6 +410,8 @@ test('formal release path records resumable ledger stages before upload', () => 
   assert.match(deployScript, /function assertFormalReleaseCloudBasePath/)
   assert.match(releaseBlock, /assertFormalReleaseCloudBasePath\(\{ prepareOnly }\)/)
   assert.match(releaseBlock, /releaseGuard\.acquire\(\)/)
+  assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'release-preflight'[\s\S]*?runReleaseNpmScript\('release:preflight'/)
+  assert.match(releaseBlock, /timerCheck\?\.cleanup\s*!==\s*'passed'/)
   assert.match(releaseBlock, /ensure-release-control-plane\.mjs --verify-only/)
   assert.doesNotMatch(releaseBlock, /node scripts\/ensure-release-control-plane\.mjs['\"]/)
   assert.match(deployScript, /Formal release publish requires --use-tcb/)
@@ -366,6 +421,8 @@ test('formal release path records resumable ledger stages before upload', () => 
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'miniprogram-build-gate'/)
   assert.match(releaseBlock, /mustReuse: publishOnly/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-deploy'/)
+  assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-deploy-rag-bootstrap'/)
+  assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-deploy-remaining'/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-version-probes'/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-smoke'/)
   assert.match(releaseBlock, /runCloudSmoke\(cloudDeploy\.fns,\s*releaseLedger\.runId/)
@@ -377,12 +434,10 @@ test('formal release path records resumable ledger stages before upload', () => 
   assert.match(releaseBlock, /reuseCheck/)
 
   const orderedReleaseMarkers = [
+    "runLedgerStage(releaseLedger, 'release-preflight'",
     'ensure-release-control-plane.mjs --verify-only',
     'releaseGuard.acquire()',
     'executeReleaseOperations({',
-    "runLedgerStage(releaseLedger, 'cloud-deploy'",
-    "runLedgerStage(releaseLedger, 'cloud-version-probes'",
-    "runLedgerStage(releaseLedger, 'cloud-smoke'",
     "runLedgerStage(releaseLedger, 'admin-web-deploy'",
     "runLedgerStage(releaseLedger, 'miniprogram-upload'",
     'completeProductionReleaseWithRemoteConfirmation({',
@@ -407,7 +462,7 @@ test('formal release derives explicit full-current strategy before opening resum
   assert.match(release, /const releaseContext = \{[\s\S]*?releaseStrategy,/)
   assert.match(release, /createReleaseRunLedger\(\{[\s\S]*?releaseStrategy,/)
   assert.match(release, /createReleasePlanAfterResumeIdentityCheck\(\{[\s\S]*?resumeRunState,[\s\S]*?gitSha: releaseContext\.gitSha,[\s\S]*?releaseStrategy,[\s\S]*?createPlan:/)
-  assert.match(release, /createFormalReleaseMutationRevalidator\(\{[\s\S]*?releaseStrategy,[\s\S]*?fullCurrentExplicit,/)
+  assert.match(release, /createFormalReleaseMutationFences\(\{[\s\S]*?expectedGitSha:\s*releaseContext\.gitSha,[\s\S]*?releaseStrategy,[\s\S]*?fullCurrentExplicit,/)
 })
 
 test('formal release planner uses the selected mode and validates the exact strategy-bound plan', () => {

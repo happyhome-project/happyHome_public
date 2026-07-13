@@ -26,6 +26,14 @@ Publish and same-run retry never skip a remote component from an old passed ledg
 
 Remote attestation is read-only and may run before a mutation fence. Every following production mutation still refreshes and validates canonical `main` through `ProductionReleaseGuard`; main drift therefore blocks the next deploy, reload, migration, or upload. Temporary fixture cleanup remains inside `finally` and is attempted even when later fetch or drift validation fails. The additive ledger schema preserves old run readability and reports per-component `attested`, `deployed`, `verified`, or `uploaded` status, skip reasons, remote attestations, and deployed/skipped totals without rewriting historical production success state.
 
+### Release DAG V2
+
+Formal release defaults to `HH_RELEASE_DAG_V2=v2`. The run first consumes the release preflight contract and immutable artifact attestation, executes `ensure:indexes` exactly once with structured readback, deploys and freshly verifies `admin` plus `post-rag-worker`, and only then starts the authenticated 12-minute timer probe. The timer wait and its cleanup overlap only the exact remaining cloud-function partition and basic cloud smoke. Backfill and semantic gates wait for both branches; admin-web and mini-program publication remain terminal nodes and cannot run after either branch fails.
+
+Remote Git fetch/revalidation occurs at named mutation boundaries rather than before every cloud invoke or CLI command. Every individual mutation still receives the production guard plus a local clean/exact-SHA fence, and immutable snapshots are rechecked immediately before deploy. Timer and cloud fixtures use dedicated cleanup fences: abort or Git drift cannot suppress cleanup, all cleanup promises settle before the ledger records terminal failure, and concurrent ledger stage writes are serialized.
+
+The selected DAG mode is bound into the release ledger. A resumed run cannot switch modes. For emergency rollback, start a new run with `HH_RELEASE_DAG_V2=0`; this restores the legacy ordering while retaining the preflight, immutable artifact, production fence, smoke, cleanup, and publication gates. Timing improvements are evaluated from the next real release ledger stage durations; deterministic tests enforce one index invocation, bounded Git-fetch boundary calls, unchanged mutation coverage, and cleanup on failure/abort without synthetic old/new benchmarks.
+
 ## Before Upload
 
 - Review `main`, `origin/main`, recent commits, working tree status, and git author.
