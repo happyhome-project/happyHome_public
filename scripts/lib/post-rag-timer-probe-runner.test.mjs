@@ -371,7 +371,7 @@ test('null or missing-runId create results always use the requested runId for am
 
 test('invalid create response never trusts a mismatched response runId or a partial identity tuple', async () => {
   const invalidResults = [
-    { runId: 'wrong-run', communityId: 'c', sectionId: 's', postId: 'p' },
+    { runId: 'wrong-run', communityId: 'c', sectionId: 's', postId: 'p', outboxId: 'o' },
     { runId: 'requested-run', communityId: 'c', sectionId: 's' },
   ]
   for (const functionResult of invalidResults) {

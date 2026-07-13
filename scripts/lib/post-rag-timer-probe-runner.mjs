@@ -110,7 +110,7 @@ export async function startPostRagTimerProbeSession({ env = process.env, signal,
     }
     throw createError
   }
-  if (!probe?.runId || !probe?.communityId || !probe?.sectionId || !probe?.postId || !probe?.outboxId) {
+  if (probe?.runId !== runId || !probe?.communityId || !probe?.sectionId || !probe?.postId || !probe?.outboxId) {
     const identityError = safeTimerError({ phase: 'create', code: 'INVALID_RESPONSE', classification: 'invalid-response' })
     try {
       const hasTrustedIdentity = probe?.runId === runId && probe?.communityId && probe?.sectionId && probe?.postId
