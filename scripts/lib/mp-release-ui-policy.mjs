@@ -69,10 +69,11 @@ export function buildDevToolsCacheArgs({ clean, projectPath, idePort }) {
 
 export function assertReleaseUiEvidence(evidence = {}) {
   const missing = []
+  const loginBuildIdentityVerified = evidence.loginBuildIdentityVerified ?? evidence.loginVersionVisible
   if (!evidence.homeColdStartNonEmpty) missing.push(REQUIRED_RELEASE_UI_MARKERS[0])
   if (!evidence.homeImagesRendered) missing.push(REQUIRED_RELEASE_UI_MARKERS[1])
   if (!evidence.homeDetailNonEmpty) missing.push(REQUIRED_RELEASE_UI_MARKERS[2])
-  if (!evidence.loginVersionVisible) missing.push(REQUIRED_RELEASE_UI_MARKERS[3])
+  if (!loginBuildIdentityVerified) missing.push(REQUIRED_RELEASE_UI_MARKERS[3])
   if (!evidence.profileLoginClean) missing.push(REQUIRED_RELEASE_UI_MARKERS[4])
   if (missing.length) {
     const details = missing.map(({ marker, description }) => `${marker} (${description})`).join(', ')

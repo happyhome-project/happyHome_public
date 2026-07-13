@@ -1176,18 +1176,32 @@ async function verifyProfileLoginClean(mp) {
   const buildVersionAttribute = profilePage
     ? String(await withTimeout(profilePage.attribute('data-build-version'), 10000, 'read release profile build marker') || '')
     : ''
+  const loginEntryCount = (await withTimeout(
+    page.$$('[data-testid="profile-login-entry"]'),
+    10000,
+    'find release profile login identity entry',
+  ).catch(() => [])).length
+  const loginIdentityVisible = text.includes('登录')
   const debugLeakVisible = /state:logged|login:[01]|cc:|DEV 登录|Home 诊断/.test(text)
   const expectedVersion = expectedBuildVersion()
   const versionTextVisible = Boolean(expectedVersion && text.includes(expectedVersion))
-  const versionPassed = Boolean(expectedVersion && buildVersionAttribute === expectedVersion && !text.includes(expectedVersion))
+  const buildIdentityPassed = Boolean(expectedVersion && buildVersionAttribute === expectedVersion && !text.includes(expectedVersion))
   return {
-    cleanPassed: text.trim().length >= 20 && Boolean(profilePage) && !debugLeakVisible && !versionTextVisible,
-    versionPassed,
+    cleanPassed: text.trim().length >= 20 &&
+      Boolean(profilePage) &&
+      loginEntryCount === 1 &&
+      loginIdentityVisible &&
+      !debugLeakVisible &&
+      !versionTextVisible,
+    buildIdentityPassed,
+    versionPassed: buildIdentityPassed,
     logoutResult,
     path: page.path || '',
     textLength: text.length,
     textSample: text.slice(0, 300),
     debugLeakVisible,
+    loginEntryCount,
+    loginIdentityVisible,
     expectedVersion,
     buildVersionAttribute,
     versionTextVisible,
@@ -1319,14 +1333,14 @@ async function main() {
         timeoutMs: envPositiveInt('HH_RELEASE_UI_PROFILE_TIMEOUT_MS', 70000),
         task: async (currentMp) => {
           const result = await verifyProfileLoginClean(currentMp)
-          if (!result.cleanPassed || !result.versionPassed) {
+          if (!result.cleanPassed || !result.buildIdentityPassed) {
             throw makeEvidenceRetryError('release profile/login evidence', result)
           }
           return result
         },
         recover: async ({ state, attempt, error }) => {
           await disconnectMiniProgramQuietly(state.mp, `disconnect stale automator after profile/login attempt ${attempt}`)
-          const shouldColdRestart = error?.releaseUiResult?.versionPassed === false
+          const shouldColdRestart = error?.releaseUiResult?.buildIdentityPassed === false
           if (shouldColdRestart) {
             console.warn('[release-ui] profile version mismatch; cold-restarting DevTools before retry')
             await startAutomator({ cliPath, projectPath, idePort, autoPort })
@@ -1345,7 +1359,7 @@ async function main() {
     evidence.profileLoginAttempt = profileLoginRun.attempt
     const profileLoginClean = profileLoginRun.result
     evidence.profileLoginClean = profileLoginClean
-    if (profileLoginClean.versionPassed) {
+    if (profileLoginClean.buildIdentityPassed) {
       evidence.markers.push('HH_RELEASE_LOGIN_VERSION')
       console.log('HH_RELEASE_LOGIN_VERSION')
     }
@@ -1358,7 +1372,7 @@ async function main() {
       homeColdStartNonEmpty: coldStartHome.result.passed,
       homeImagesRendered: homeDetail.homeImagesRendered,
       homeDetailNonEmpty: homeDetail.passed,
-      loginVersionVisible: profileLoginClean.versionPassed,
+      loginBuildIdentityVerified: profileLoginClean.buildIdentityPassed,
       profileLoginClean: profileLoginClean.cleanPassed,
     })
 

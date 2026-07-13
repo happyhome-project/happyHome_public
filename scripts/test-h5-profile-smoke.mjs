@@ -77,17 +77,18 @@ async function runProfileCase(browser, port, options) {
     await page.waitForTimeout(1200)
     const initialText = normalize(await page.locator('body').innerText())
     const buildVersion = await page.locator('.profile-page').getAttribute('data-build-version')
+    const loginEntry = page.locator('[data-testid="profile-login-entry"]')
+
+    if (!initialText.includes('登录')) {
+      throw new Error(`${options.label}: default profile shell is missing the 登录 identity label`)
+    }
+    if (await loginEntry.count() !== 1) {
+      throw new Error(`${options.label}: expected one profile login identity entry`)
+    }
 
     if (options.openManualLogin) {
-      const loginEntry = page.locator('[data-testid="profile-login-entry"]')
-      if (!initialText.includes('登录')) {
-        throw new Error(`${options.label}: default profile shell is missing the 登录 identity label`)
-      }
       if (await page.locator('[data-testid="h5-login-username"] input').count()) {
         throw new Error(`${options.label}: default profile shell unexpectedly opened the username form`)
-      }
-      if (await loginEntry.count() !== 1) {
-        throw new Error(`${options.label}: expected one profile login identity entry`)
       }
       await loginEntry.click({ force: true })
       await page.locator('[data-testid="h5-login-username"] input').waitFor()
