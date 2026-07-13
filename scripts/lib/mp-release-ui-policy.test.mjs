@@ -157,6 +157,14 @@ test('release profile validation reads the build marker attribute and rejects vi
   assert.match(source, /loginBuildIdentityVerified: profileLoginClean\.buildIdentityPassed/)
 })
 
+test('release home tabs evidence pins below the fixed masthead', () => {
+  const source = readFileSync(new URL('../test-mp-release-ui.mjs', import.meta.url), 'utf8')
+
+  assert.match(source, /query\.select\('\.home-topbar'\)\.boundingClientRect\(\)/)
+  assert.match(source, /Math\.abs\(pinnedTop - Number\(pinned\.topbar\?\.bottom \|\| 0\)\) <= 8/)
+  assert.doesNotMatch(source, /Math\.abs\(pinnedTop - pinned\.safeTop\) <= 8/)
+})
+
 test('native release profile validation requires one logged-out login identity entry', () => {
   const source = readFileSync(new URL('../test-mp-release-ui.mjs', import.meta.url), 'utf8')
 

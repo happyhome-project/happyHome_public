@@ -1106,18 +1106,20 @@ async function captureHomeTabsLayout(mp) {
     try {
       const query = wx.createSelectorQuery()
       query.selectAll('.section-tabs-sticky-shell').boundingClientRect()
+      query.select('.home-topbar').boundingClientRect()
       query.select('.home-search--primary').boundingClientRect()
       query.selectAll('.arc-item').boundingClientRect()
       query.selectAll('.section-tab.active').boundingClientRect()
       query.selectViewport().scrollOffset()
       query.exec((items) => {
         const tabs = Array.isArray(items?.[0]) ? items[0] : []
-        const search = items?.[1] || null
-        const cards = Array.isArray(items?.[2]) ? items[2] : []
-        const activeTabs = Array.isArray(items?.[3]) ? items[3] : []
-        const viewport = items?.[4] || {}
+        const topbar = items?.[1] || null
+        const search = items?.[2] || null
+        const cards = Array.isArray(items?.[3]) ? items[3] : []
+        const activeTabs = Array.isArray(items?.[4]) ? items[4] : []
+        const viewport = items?.[5] || {}
         const safeTop = Number(wx.getWindowInfo?.().safeArea?.top || 0)
-        resolveLayout({ tabs, search, cardCount: cards.length, activeTabCount: activeTabs.length, scrollTop: Number(viewport.scrollTop || 0), safeTop })
+        resolveLayout({ tabs, topbar, search, cardCount: cards.length, activeTabCount: activeTabs.length, scrollTop: Number(viewport.scrollTop || 0), safeTop })
       })
     } catch (error) {
       resolveLayout({ tabs: [], search: null, cardCount: 0, activeTabCount: 0, scrollTop: 0, safeTop: 0, error: String(error) })
@@ -1154,12 +1156,14 @@ async function verifyHomeArchiveTabs(mp, context, evidenceDir) {
   const passed = before.tabs?.length === 1 &&
     pinned.tabs?.length === 1 &&
     tabs.length === 2 &&
+    Number(before.topbar?.height || 0) > 1 &&
     Number(before.search?.height || 0) > 1 &&
-    Number(before.tabs?.[0]?.top || 0) > before.safeTop + 16 &&
+    Number(before.tabs?.[0]?.top || 0) > Number(before.topbar?.bottom || 0) + 16 &&
     Number(before.tabs?.[0]?.top || 0) >= Number(before.search?.bottom || 0) &&
     pinned.scrollTop > 0 &&
     Number(pinned.search?.bottom || 0) <= pinned.safeTop + 2 &&
-    Math.abs(pinnedTop - pinned.safeTop) <= 8 &&
+    Math.abs(Number(before.topbar?.top || 0) - Number(pinned.topbar?.top || 0)) <= 2 &&
+    Math.abs(pinnedTop - Number(pinned.topbar?.bottom || 0)) <= 8 &&
     pinned.cardCount === 3 &&
     shortArchive.cardCount === 1 &&
     shortArchive.activeTabCount === 1 &&

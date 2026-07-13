@@ -2827,7 +2827,7 @@ onShareAppMessage(() => {
 }
 
 .home-shell {
-  padding: calc(86rpx + env(safe-area-inset-top)) var(--hh-page-x) 24rpx;
+  padding: calc(150rpx + env(safe-area-inset-top)) var(--hh-page-x) 24rpx;
   background:
     radial-gradient(circle at 84% 0%, rgba(48, 91, 70, 0.22), transparent 34%),
     linear-gradient(170deg, #caeee7 0%, #f1f3ee 58%, var(--hh-color-page) 100%);
@@ -2835,12 +2835,13 @@ onShareAppMessage(() => {
 
 .home-topbar {
   box-sizing: border-box;
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
+  right: 0;
   z-index: $hh-z-sticky + 1;
   min-height: calc(150rpx + env(safe-area-inset-top));
-  margin-top: calc(-86rpx - env(safe-area-inset-top));
-  padding-top: calc(86rpx + env(safe-area-inset-top));
+  padding: calc(86rpx + env(safe-area-inset-top)) var(--hh-page-x) 0;
   display: flex;
   align-items: center;
   gap: 12px;

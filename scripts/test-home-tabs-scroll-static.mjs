@@ -3,6 +3,7 @@ import path from 'path'
 
 const homePath = path.join(process.cwd(), 'miniprogram', 'src', 'pages', 'index', 'index.vue')
 const home = fs.readFileSync(homePath, 'utf8')
+const homeShellRule = home.match(/\.home-shell\s*\{([^}]*)\}/)?.[1] || ''
 const homeTopbarRule = home.match(/\.home-topbar\s*\{([^}]*)\}/)?.[1] || ''
 const homeSearchRule = home.match(/\.home-shell \.home-search\s*\{([^}]*)\}/)?.[1] || ''
 const stickyTabsShellRule = home.match(/\.section-tabs-sticky-shell\s*\{([^}]*)\}/)?.[1] || ''
@@ -27,12 +28,18 @@ assert(!home.includes('scheduleHomeFixedControlsMeasure'), 'home should not sche
 assert(!home.includes('is-shadowed-by-fixed'), 'home should not reserve space for duplicated fixed controls.')
 assert(!home.includes('section-tabs--flow'), 'home should not retain the old flow tabs modifier.')
 assert(!home.includes('section-tabs--fixed'), 'home should not retain the old fixed tabs modifier.')
-assert(homeTopbarRule.includes('position: sticky'), 'home masthead should remain pinned throughout page scrolling.')
-assert(homeTopbarRule.includes('top: 0'), 'home masthead sticky region should begin at the viewport top.')
 assert(
-  homeTopbarRule.includes('padding-top: calc(86rpx + env(safe-area-inset-top))') &&
-    homeTopbarRule.includes('margin-top: calc(-86rpx - env(safe-area-inset-top))'),
-  'home masthead should absorb the existing top inset without shifting its first-frame content.',
+  homeShellRule.includes('padding: calc(150rpx + env(safe-area-inset-top))'),
+  'home content should reserve the fixed masthead height exactly once.',
+)
+assert(homeTopbarRule.includes('position: fixed'), 'home masthead should remain pinned beyond the hero shell boundary.')
+assert(
+  homeTopbarRule.includes('top: 0') && homeTopbarRule.includes('left: 0') && homeTopbarRule.includes('right: 0'),
+  'home masthead should cover the full viewport width from the top edge.',
+)
+assert(
+  homeTopbarRule.includes('padding: calc(86rpx + env(safe-area-inset-top)) var(--hh-page-x) 0'),
+  'home masthead content should retain the existing top and horizontal insets.',
 )
 assert(
   !homeSearchRule.includes('position: sticky') && !homeSearchRule.includes('position: fixed'),
