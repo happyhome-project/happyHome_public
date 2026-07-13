@@ -54,4 +54,14 @@ describe('Figma community directory pages', () => {
     expect(code).toContain('const acceptedSnapshot = applyHomeSnapshot')
     expect(code).toContain('if (!acceptedSnapshot)')
   })
+
+  test('home uses text-only tabs and keeps the switch visible beside long community names', () => {
+    const code = readPage('index')
+
+    expect(code).not.toContain('class="section-tab-icon"')
+    expect(code).not.toContain('{{ g.icon }}')
+    expect(code).toMatch(/\.community-identity\s*\{[^}]*flex:\s*1 1 0[^}]*overflow:\s*hidden/s)
+    expect(code).toMatch(/\.community-title\s*\{[^}]*flex:\s*1 1 0[^}]*text-overflow:\s*ellipsis/s)
+    expect(code).toMatch(/\.community-switch\s*\{[^}]*flex:\s*0 0 auto/s)
+  })
 })
