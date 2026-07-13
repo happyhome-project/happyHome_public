@@ -964,6 +964,7 @@ async function inspectAdminWebPublication() {
 
 async function deployAdminWebToCloudBase(options = {}) {
   const env = options.skipBuild ? process.env : buildAdminWeb('hash')
+  const artifactRoot = options.artifactRoot || ADMIN_WEB_DIST
   const cloudPath = process.env.ADMIN_WEB_CLOUD_PATH || '/'
   const envId = getCloudEnvId()
   const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
@@ -975,7 +976,7 @@ async function deployAdminWebToCloudBase(options = {}) {
     'cloudbase',
     'hosting',
     'deploy',
-    ADMIN_WEB_DIST,
+    artifactRoot,
   ]
   if (cloudPath && cloudPath !== '/') args.push(cloudPath)
   args.push('-e', envId)

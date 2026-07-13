@@ -40,3 +40,21 @@ test('formal miniprogram upload binds reuse and verification to a fresh normaliz
   assert.match(source, /createMiniprogramReceiptIdentity\(/)
   assert.match(source, /normalizeMiniprogramUploadReceipt\(/)
 })
+
+test('both admin backends deploy the caller-pinned artifact root instead of mutable admin-web dist', () => {
+  const cloudbaseStart = source.indexOf('async function deployAdminWebToCloudBase')
+  const aliyunStart = source.indexOf('async function deployAdminWebToAliyun', cloudbaseStart)
+  const dispatcherStart = source.indexOf('async function deployAdminWeb(', aliyunStart)
+  const cloudbase = source.slice(cloudbaseStart, aliyunStart)
+  const aliyun = source.slice(aliyunStart, dispatcherStart)
+  assert.match(cloudbase, /const artifactRoot = options\.artifactRoot \|\| ADMIN_WEB_DIST/)
+  assert.match(cloudbase, /'deploy',\s*artifactRoot,/)
+  assert.doesNotMatch(cloudbase, /'deploy',\s*ADMIN_WEB_DIST,/)
+  assert.match(aliyun, /const artifactRoot = options\.artifactRoot \|\| ADMIN_WEB_DIST/)
+  assert.match(aliyun, /-C \$\{quote\(artifactRoot\)\}/)
+
+  const formalStart = source.indexOf('async function runFormalRelease')
+  const formal = source.slice(formalStart)
+  assert.match(formal, /artifactRoot: resolve\(ROOT, adminArtifact\.artifactPath\)/)
+  assert.ok(formal.indexOf('attestAdminWebArtifact({') < formal.indexOf('await deployAdminWeb({'))
+})

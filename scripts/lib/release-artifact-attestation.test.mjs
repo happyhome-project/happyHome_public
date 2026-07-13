@@ -132,9 +132,16 @@ test('admin attestation rejects a changed local artifact before trusting remote 
       paths: { adminWebRoot: artifactRoot },
     })
     await writeFile(join(artifactRoot, 'index.html'), 'changed')
+    let remoteReadCount = 0
     await assert.rejects(() => attestAdminWebArtifact({
-      root, artifact: manifest.artifacts.adminWeb, inspectRemote: async () => manifest.artifacts.adminWeb,
+      root,
+      artifact: manifest.artifacts.adminWeb,
+      inspectRemote: async () => {
+        remoteReadCount += 1
+        return manifest.artifacts.adminWeb
+      },
     }), /immutable admin-web artifact digest mismatch/i)
+    assert.equal(remoteReadCount, 0)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
