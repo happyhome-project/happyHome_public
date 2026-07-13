@@ -60,8 +60,8 @@ export function buildRagNetworkFunctionConfigs(options = {}) {
 
 function normalizeVpcConfig(value) {
   return {
-    vpcId: String(value?.VpcId || value?.vpcId || value?.vpc || '').trim(),
-    subnetId: String(value?.SubnetId || value?.subnetId || value?.subnet || '').trim(),
+    vpcId: String(value?.VpcId || value?.vpcId || value?.Vpc?.VpcId || value?.Vpc?.vpcId || value?.vpc?.VpcId || value?.vpc?.vpcId || '').trim(),
+    subnetId: String(value?.SubnetId || value?.subnetId || value?.Subnet?.SubnetId || value?.Subnet?.subnetId || value?.subnet?.SubnetId || value?.subnet?.subnetId || '').trim(),
   }
 }
 

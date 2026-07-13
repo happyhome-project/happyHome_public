@@ -78,3 +78,19 @@ test('applyRagNetworkConfig updates only functions whose VPC differs', async () 
     },
   ])
 })
+
+test('applyRagNetworkConfig recognizes SDK nested VpcConfig without writing', async () => {
+  const calls = []
+  const app = { functions: {
+    async getFunctionDetail() {
+      return { VpcConfig: { Vpc: { VpcId: 'vpc-123' }, Subnet: { SubnetId: 'subnet-456' } } }
+    },
+    async updateFunctionConfig(payload) { calls.push(payload) },
+  } }
+  const [result] = await applyRagNetworkConfig(app, buildRagNetworkFunctionConfigs({
+    vpcId: 'vpc-123', subnetId: 'subnet-456', functions: ['post'],
+  }))
+  assert.equal(result.changed, false)
+  assert.deepEqual(result.previousVpc, { vpcId: 'vpc-123', subnetId: 'subnet-456' })
+  assert.deepEqual(calls, [])
+})

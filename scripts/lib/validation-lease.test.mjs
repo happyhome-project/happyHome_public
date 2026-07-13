@@ -187,6 +187,22 @@ test('failed heartbeat temp write is cleaned so a later heartbeat can succeed', 
   await handle.release();
 });
 
+test('heartbeat retries transient Windows atomic replace failures', async () => {
+  const homeDir = await tempHome();
+  let attempts = 0;
+  const fileSystem = {
+    ...realFs,
+    async rename(from, to) {
+      if (to === leasePath(homeDir) && attempts++ < 2) throw Object.assign(new Error('busy'), { code: attempts === 1 ? 'EPERM' : 'EBUSY' });
+      return realFs.rename(from, to);
+    },
+  };
+  const handle = await acquireValidationLease({ command: 'test', homeDir, fileSystem });
+  await handle.heartbeat();
+  assert.equal(attempts, 3);
+  await handle.release();
+});
+
 test('stale leases remain blocking and are never auto-taken over', async () => {
   const homeDir = await tempHome();
   const handle = await acquireValidationLease({ command: 'old', homeDir, now: 0 });

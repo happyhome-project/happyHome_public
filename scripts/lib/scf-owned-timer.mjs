@@ -74,6 +74,7 @@ export async function reconcileOwnedScfTimer(request, {
       && trigger.TriggerName !== 'post-rag-worker-every-minute')
     if (matches.length === 1 && !hasStaleOwnedTrigger) {
       return {
+        changed: !keep,
         triggerName: 'post-rag-worker-every-minute',
         cron,
         customArgumentHash: await sha256(customArgument),
