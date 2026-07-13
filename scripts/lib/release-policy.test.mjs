@@ -97,6 +97,7 @@ test('release cloud smoke ensures required database collections before invoking 
   assert.match(ensureIndexesScript, /content_audit_tasks/)
   assert.match(ensureIndexesScript, /admin_notification_subscriptions/)
   assert.match(ensureIndexesScript, /admin_notifications/)
+  assert.match(ensureIndexesScript, /rag_community_versions/)
   assert.match(runCloudSmokeBody, /ensure:indexes/)
   assert(runCloudSmokeBody.indexOf('ensure:indexes') < runCloudSmokeBody.indexOf('runCloudReleaseSmoke'))
 })
