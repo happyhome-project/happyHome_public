@@ -105,6 +105,13 @@ test('release cloud smoke ensures required database collections before invoking 
   assert(runCloudSmokeBody.indexOf('ensure:indexes') < runCloudSmokeBody.indexOf('runCloudReleaseSmoke'))
 })
 
+test('timer probe waits on a bounded deadline instead of a fixed attempt count', () => {
+  const source = readFileSync(new URL('../verify-post-rag-timer.mjs', import.meta.url), 'utf8')
+  assert.match(source, /createTimerProbeDeadline/)
+  assert.match(source, /Date\.now\(\)\s*<\s*deadline/)
+  assert.doesNotMatch(source, /attempt\s*<\s*20/)
+})
+
 const PUBLIC_CANONICAL_WORKSPACE = 'C:\\Project\\Claude\\happyHome_public'
 const PUBLIC_ORIGIN_URL = 'https://github.com/happyhome-project/happyHome_public.git'
 

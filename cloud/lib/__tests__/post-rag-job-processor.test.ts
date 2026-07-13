@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { comparePostRagActivationOrder, PostRagJobProcessorError, processClaimedPostRagJob, processPostRagJobV2Batch } from '../post-rag-job-processor'
 import { buildPostRagJobId, type PostRagJobDocument } from '../post-rag-jobs'
 import { PostRagSourceProjectionValidationError } from '../post-rag-indexing'
@@ -7,6 +8,12 @@ const NOW = '2026-07-12T04:00:00.000Z'
 const EXPIRY = '2026-07-12T04:02:00.000Z'
 const JOB_ID = buildPostRagJobId('outbox-1', 'post-1', 'upsert', 'source-1', 3)
 const JOB2_ID = buildPostRagJobId('outbox-2', 'post-1', 'upsert', 'source-1', 3)
+
+test('default worker treats posts or sections removed during cleanup as nullable source state', () => {
+  const source = readFileSync('lib/post-rag-job-processor.ts', 'utf8')
+  expect(source).toMatch(/loadPost:\s*\(postId\)\s*=>\s*db\.getByIdOrNull\('posts'/)
+  expect(source).toMatch(/loadSection:\s*\(sectionId\)\s*=>\s*db\.getByIdOrNull\('sections'/)
+})
 
 function job(overrides: Partial<PostRagJobDocument> = {}): PostRagJobDocument {
   const value = { schemaVersion: 2, _id: JOB_ID, outboxId: 'outbox-1', postId: 'post-1', communityId: 'community-1', sectionId: 'section-1', action: 'upsert', sourceVersion: 'source-1', contentVersion: 3, status: 'processing', attempts: 1, nextAttemptAt: NOW, leaseOwner: 'worker-1', leaseToken: 'lease-1', leaseExpiresAt: EXPIRY, createdAt: NOW, updatedAt: NOW, outcome: null, lastError: null, ...overrides } as PostRagJobDocument
