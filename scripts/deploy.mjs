@@ -110,6 +110,8 @@ import {
   releaseDagMode,
 } from './lib/release-dag-v2.mjs'
 import { startPostRagTimerProbeSession } from './lib/post-rag-timer-probe-runner.mjs'
+import { createSafeAggregateError, releaseFailureCauses } from './lib/release-failure-safety.mjs'
+import { persistFormalReleaseFailure } from './lib/release-terminal-failure.mjs'
 import { ReleaseGovernance } from './lib/release-governance.mjs'
 import {
   attestAdminWebArtifact,
@@ -1586,7 +1588,10 @@ async function runFormalRelease(options = {}) {
               } finally {
                 try { await rawSession.cleanup() }
                 catch (cleanupError) {
-                  if (primaryError) throw new AggregateError([primaryError, cleanupError], 'timer probe and cleanup failed')
+                  if (primaryError) throw createSafeAggregateError('post RAG timer wait and cleanup failed', [
+                    ...releaseFailureCauses(primaryError, { branch: 'timer', phase: 'wait' }),
+                    ...releaseFailureCauses(cleanupError, { branch: 'timer', phase: 'cleanup', cleanup: true }),
+                  ])
                   throw cleanupError
                 } finally { timerSettled = true }
               }
@@ -1927,15 +1932,9 @@ async function runFormalRelease(options = {}) {
     })
     else await releaseLedger.complete('passed')
   } catch (error) {
-    if (releaseGuard && releaseGuardAcquired && !releaseGuard.finished) {
-      try {
-        await releaseGuard.fail(error, { localReleaseRunId: releaseLedger.runId })
-      } catch (guardError) {
-        console.error(`[release-lock] failed to record release failure: ${guardError?.message || guardError}`)
-      }
-    }
-    if (!error?.releaseRemotelyCompleted) await releaseLedger.complete('failed')
-    else console.error('[release-ledger] remote production state already proves success; run release:reconcile to repair the local ledger')
+    const persistedFailure = await persistFormalReleaseFailure({ error, guard: releaseGuard, guardAcquired: releaseGuardAcquired, ledger: releaseLedger })
+    for (const persistenceError of persistedFailure.persistenceErrors) console.error(`[release-failure] ${persistenceError.target} ${persistenceError.code}`)
+    if (error?.releaseRemotelyCompleted) console.error('[release-ledger] remote production state already proves success; run release:reconcile to repair the local ledger')
     throw error
   }
 }

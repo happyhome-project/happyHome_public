@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import { runPostRagTimerProbe, startPostRagTimerProbeSession } from './post-rag-timer-probe-runner.mjs'
+import { createReleaseRunLedger } from './release-run-ledger.mjs'
+import { InMemoryReleaseStore, ReleaseGovernance } from './release-governance.mjs'
 
 function fakeDeps(events, overrides = {}) {
   let nowMs = 1_000_000
@@ -69,7 +74,11 @@ test('aborting a timer wait stops polling and run wrapper still cleans the fixtu
   })
   await assert.rejects(() => runPostRagTimerProbe({
     env: { ADMIN_INTERNAL_CALL_TOKEN: 'token', HH_RELEASE_RUN_ID: 'run' }, signal: controller.signal, deps,
-  }), /parallel cloud failed|aborted/i)
+  }), (error) => {
+    assert.match(error.message, /post RAG timer wait failed/i)
+    assert.deepEqual(error.result.failureCauses, [{ branch: 'timer', phase: 'wait', action: 'unknown', code: 'ABORTED', classification: 'aborted', cleanup: false }])
+    return true
+  })
   assert.equal(events.filter((event) => event === 'post.ragTimerProbeCleanupAdmin').length, 1)
   assert.equal(events.some((event) => event.startsWith('sleep:')), false)
 })
@@ -93,8 +102,10 @@ test('timer deadline failure retains cleanup failure instead of losing fixture c
     env: { ADMIN_INTERNAL_CALL_TOKEN: 'token', HH_RELEASE_RUN_ID: 'run', HH_POST_RAG_TIMER_PROBE_TIMEOUT_MS: '300000' }, deps,
   }), (error) => {
     assert(error instanceof AggregateError)
-    assert.match(error.errors.map((item) => item.message).join('\n'), /bounded deadline/)
-    assert.match(error.errors.map((item) => item.message).join('\n'), /cleanup failed/)
+    assert.deepEqual(error.result.failureCauses, [
+      { branch: 'timer', phase: 'wait', action: 'unknown', code: 'TIMEOUT', classification: 'timeout', cleanup: false },
+      { branch: 'timer', phase: 'cleanup', action: 'post.ragTimerProbeCleanupAdmin', code: 'REMOTE_CALL_FAILED', classification: 'remote-call-failed', cleanup: true },
+    ])
     return true
   })
 })
@@ -111,7 +122,7 @@ test('an incomplete create response still attempts cleanup for the committed par
   })
   await assert.rejects(() => startPostRagTimerProbeSession({
     env: { ADMIN_INTERNAL_CALL_TOKEN: 'token', HH_RELEASE_RUN_ID: 'run' }, deps,
-  }), /identity is incomplete/i)
+  }), /post RAG timer create failed/i)
   assert.deepEqual(events, ['post.ragTimerProbeCreateAdmin', 'post.ragTimerProbeCleanupAdmin'])
 })
 
@@ -127,7 +138,7 @@ test('a create transport failure still attempts run-bound cleanup for a remotely
   })
   await assert.rejects(() => startPostRagTimerProbeSession({
     env: { ADMIN_INTERNAL_CALL_TOKEN: 'token', HH_RELEASE_RUN_ID: 'run' }, deps,
-  }), /create response lost/)
+  }), /post RAG timer create failed/i)
   assert.deepEqual(events, ['post.ragTimerProbeCreateAdmin:run', 'post.ragTimerProbeCleanupAdmin:run'])
 })
 
@@ -143,7 +154,7 @@ test('null or missing-runId create results always use the requested runId for am
     })
     await assert.rejects(() => startPostRagTimerProbeSession({
       env: { ADMIN_INTERNAL_CALL_TOKEN: 'token', HH_RELEASE_RUN_ID: 'requested-run' }, deps,
-    }), /identity is incomplete/i)
+    }), /post RAG timer create failed/i)
     assert.deepEqual(cleanupRunIds, ['requested-run'])
   }
 })
@@ -167,4 +178,38 @@ test('ordinary timer observations use local fences while cleanup uses its drift-
   assert(events.indexOf('local:post.ragTimerEvidenceAdmin') < events.indexOf('post.ragTimerEvidenceAdmin'))
   assert(events.indexOf('local:post.ragTimerProbeStatusAdmin') < events.indexOf('post.ragTimerProbeStatusAdmin'))
   assert(events.indexOf('cleanup-fence') < events.indexOf('post.ragTimerProbeCleanupAdmin'))
+})
+
+test('create errors echoing the admin token are sanitized before error ledger and governance persistence', async () => {
+  const token = 'timer-secret-token-value'
+  const deps = fakeDeps([], {
+    invoke: async (action) => {
+      if (action === 'post.ragTimerProbeCreateAdmin') throw new Error(`runner stdout ADMIN_INTERNAL_CALL_TOKEN=${token}`)
+      if (action === 'post.ragTimerProbeCleanupAdmin') return { functionResult: { cleaned: true } }
+      throw new Error(`unexpected ${action}`)
+    },
+  })
+  let safeError
+  await assert.rejects(() => startPostRagTimerProbeSession({
+    env: { ADMIN_INTERNAL_CALL_TOKEN: token, HH_RELEASE_RUN_ID: 'safe-run' }, deps,
+  }), (error) => { safeError = error; return true })
+  assert.doesNotMatch(JSON.stringify({ message: safeError.message, stack: safeError.stack, result: safeError.result }), new RegExp(token))
+  assert.deepEqual(safeError.result.failureCauses, [{ branch: 'timer', phase: 'create', action: 'post.ragTimerProbeCreateAdmin', code: 'REMOTE_CALL_FAILED', classification: 'remote-call-failed', cleanup: false }])
+
+  const root = await mkdtemp(join(tmpdir(), 'happyhome-safe-error-'))
+  try {
+    const ledger = await createReleaseRunLedger({ root, runId: 'safe-run', gitSha: 'abc', version: '1', desc: 'd', envId: 'env' })
+    await ledger.failStage('post-rag-timer-probe', safeError, { result: safeError.result })
+    const persistedLedger = await readFile(ledger.runPath, 'utf8')
+    assert.doesNotMatch(persistedLedger, new RegExp(token))
+
+    const governance = new ReleaseGovernance({ store: new InMemoryReleaseStore(), now: () => 1000 })
+    const lock = await governance.acquire({ gitSha: 'abc', owner: 'unit', runId: 'safe-run' })
+    await governance.fail(lock, safeError, { failureCauses: safeError.result.failureCauses })
+    const persistedGovernance = JSON.stringify(await governance.inspect({ runId: 'safe-run' }))
+    assert.doesNotMatch(persistedGovernance, new RegExp(token))
+    assert.match(persistedGovernance, /REMOTE_CALL_FAILED/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })

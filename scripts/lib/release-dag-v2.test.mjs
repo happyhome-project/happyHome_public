@@ -98,7 +98,7 @@ test('a parallel cloud failure aborts timer waiting, awaits cleanup, and blocks 
       throw new Error('timer aborted')
     },
     deployRemainingCloud: async () => { events.push('deploy-other-cloud'); throw new Error('cloud deploy failed') },
-  })), (error) => error instanceof AggregateError && error.errors.some((item) => /cloud branch failed/.test(item?.message || '')))
+  })), (error) => error instanceof AggregateError && error.result.failureCauses.some((cause) => cause.branch === 'cloud'))
   assert.equal(timerSignal.aborted, true)
   assert(events.indexOf('timer-wait:aborted') < events.indexOf('timer-cleanup'))
   assert(!events.includes('backfill'))
@@ -109,14 +109,18 @@ test('a parallel cloud failure aborts timer waiting, awaits cleanup, and blocks 
 test('timer cleanup failure is retained with the primary timer failure and blocks publication', async () => {
   const events = []
   await assert.rejects(() => executeReleaseDagV2(successfulDeps(events, {
-    waitTimer: async () => { throw new Error('timer deadline exceeded') },
-    cleanupTimer: async () => { events.push('timer-cleanup'); throw new Error('timer cleanup failed') },
+    waitTimer: async () => { throw new Error('sensitive-deadline-detail') },
+    cleanupTimer: async () => { events.push('timer-cleanup'); throw new Error('sensitive-cleanup-detail') },
   })), (error) => {
     assert(error instanceof AggregateError)
     assert.match(String(error), /parallel phase failed/i)
     assert.equal(error.errors.length, 2)
-    assert(error.errors.every((item) => /timer branch failed/.test(item.message)))
-    assert.doesNotMatch(error.errors.map((item) => item.message).join('\n'), /deadline exceeded|cleanup failed/)
+    assert(error.errors.every((item) => /timer .* failed/.test(item.message)))
+    assert.doesNotMatch(error.errors.map((item) => item.message).join('\n'), /sensitive-deadline-detail|sensitive-cleanup-detail/)
+    assert.deepEqual(error.result.failureCauses, [
+      { branch: 'timer', phase: 'wait', action: 'unknown', code: 'BRANCH_FAILED', classification: 'branch-failed', cleanup: false },
+      { branch: 'timer', phase: 'cleanup', action: 'unknown', code: 'BRANCH_FAILED', classification: 'branch-failed', cleanup: true },
+    ])
     return true
   })
   assert.deepEqual(events.filter((event) => event === 'timer-cleanup'), ['timer-cleanup'])

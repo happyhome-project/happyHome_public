@@ -3,6 +3,7 @@ const REQUIRED_NODES = [
   'deployRemainingCloud', 'runBasicCloudSmoke', 'runBackfill', 'runSemanticGates',
   'publishAdmin', 'publishMiniprogram',
 ]
+import { createSafeAggregateError, releaseFailureCauses } from './release-failure-safety.mjs'
 
 export function isReleaseDagV2Enabled(env = process.env) {
   return String(env.HH_RELEASE_DAG_V2 ?? '1').trim() !== '0'
@@ -39,16 +40,22 @@ function flattenErrors(error) {
 }
 
 function parallelFailure(settled) {
-  const sanitized = []
+  const causes = []
   for (const [index, item] of settled.entries()) {
     if (item.status !== 'rejected') continue
     const branch = index === 0 ? 'timer' : 'cloud'
-    const count = Math.max(1, flattenErrors(item.reason).length)
-    for (let errorIndex = 0; errorIndex < count; errorIndex += 1) {
-      sanitized.push(new Error(`${branch} branch failed (${errorIndex + 1}/${count}); inspect sanitized ledger evidence`))
+    const errors = flattenErrors(item.reason)
+    for (let errorIndex = 0; errorIndex < errors.length; errorIndex += 1) {
+      const error = errors[errorIndex]
+      const fallbackPhase = branch === 'timer' && errorIndex > 0 ? 'cleanup' : (branch === 'timer' ? 'wait' : 'parallel')
+      causes.push(...releaseFailureCauses(error, {
+        branch,
+        phase: fallbackPhase,
+        cleanup: branch === 'timer' && errorIndex > 0,
+      }))
     }
   }
-  return new AggregateError(sanitized, 'release DAG V2 parallel phase failed; inspect sanitized ledger evidence')
+  return createSafeAggregateError('release DAG V2 parallel phase failed; inspect sanitized ledger evidence', causes)
 }
 
 function throwIfAborted(signal) {
