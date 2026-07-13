@@ -63,10 +63,10 @@ export class ProductionReleaseGuard {
     })
   }
 
-  async recordMigration(migrationId) {
+  async recordMigration(migration) {
     return await this.serialize(async () => {
       await this.renew()
-      return await this.governance.recordMigration(this.lock, migrationId)
+      return await this.governance.recordMigration(this.lock, migration)
     })
   }
 

@@ -1,18 +1,7 @@
-export const ALL_CLOUD_FUNCTIONS = [
-  'admin', 'community', 'home-prefetch', 'http-gateway', 'member',
-  'post', 'post-rag-worker', 'post-video-rag-worker', 'section', 'user',
-]
+import { CLOUD_RELEASE_COMPONENTS, RELEASE_ACTION_KINDS, classifyReleaseOperations, validateMigrationModulePath } from './release-component-registry.mjs'
 
-export const RELEASE_ACTIONS = new Set([
-  'ensure-indexes',
-  'ensure-tencent-rag-index',
-  'configure-rag-network',
-  'configure-rag-workers',
-  'update-rag-env',
-  'backfill-post-rag-v2',
-  'verify-post-rag-timer',
-  'eval-post-semantic-search',
-])
+export const ALL_CLOUD_FUNCTIONS = CLOUD_RELEASE_COMPONENTS
+export const RELEASE_ACTIONS = new Set(Object.keys(RELEASE_ACTION_KINDS))
 
 function normalizePath(value) {
   return String(value || '').replace(/\\/g, '/').replace(/^[ADMR]\d*\t(?:[^\t]+\t)?/, '')
@@ -32,12 +21,14 @@ function allCloud(allFunctions, reason) {
 
 export function classifyReleaseImpact({ changedPaths = [], allFunctions = ALL_CLOUD_FUNCTIONS, functionInputs = {} }) {
   const paths = changedPaths.map((value) => ({ path: normalizePath(value), status: changeStatus(value) }))
-  const miniprogram = paths.some(({ path }) => path.startsWith('miniprogram/'))
-  const adminWeb = paths.some(({ path }) => path.startsWith('admin-web/'))
+  const sharedRootInput = paths.find(({ path }) => path === 'package.json' || path === 'package-lock.json' || path === 'project.config.json')
+  const miniprogram = Boolean(sharedRootInput) || paths.some(({ path }) => path.startsWith('miniprogram/'))
+  const adminWeb = Boolean(sharedRootInput) || paths.some(({ path }) => path.startsWith('admin-web/'))
   const cloudPaths = paths.filter(({ path }) => path.startsWith('cloud/'))
   let cloud = { functions: [], mode: 'none', reasons: [] }
 
-  const forceAll = cloudPaths.find(({ path, status }) => status === 'D' || status === 'R'
+  const cloudReleaseInput = paths.find(({ path }) => path === 'scripts/lib/cloud-release-probe.mjs')
+  const forceAll = sharedRootInput || cloudReleaseInput || cloudPaths.find(({ path, status }) => status === 'D' || status === 'R'
     || path === 'cloud/build.mjs'
     || path === 'cloud/package.json'
     || path === 'cloud/package-lock.json'
@@ -85,8 +76,9 @@ export function validateChangeManifests(manifests = []) {
     for (const migration of manifest.migrations || []) {
       const id = migration?.id
       if (!id || !migration?.module) throw new Error(`migration requires an id and module in ${manifest.changeId}`)
-      if (!String(migration.module).startsWith('release/migrations/') || !String(migration.module).endsWith('.mjs')) {
-        throw new Error(`migration module must be under release/migrations: ${migration.module}`)
+      validateMigrationModulePath(migration.module)
+      if (!/^[a-f0-9]{64}$/i.test(String(migration.inputDigest || ''))) {
+        throw new Error(`migration inputDigest is required for ${id}`)
       }
       if (migrationIds.has(id)) throw new Error(`duplicate migration id: ${id}`)
       migrationIds.add(id)
@@ -115,6 +107,7 @@ function needsExternalManifest(changedPaths) {
 export function createReleasePlan({
   baseSha,
   changedPaths = [],
+  forceRedeployCurrent = false,
   allFunctions = ALL_CLOUD_FUNCTIONS,
   functionInputs = {},
   headSha,
@@ -123,6 +116,7 @@ export function createReleasePlan({
 } = {}) {
   if (!headSha) throw new Error('release plan requires headSha')
   if (!['main', 'pr', 'full-current'].includes(mode)) throw new Error(`release plan mode must be main, pr, or full-current; got ${mode || '(missing)'}`)
+  if (forceRedeployCurrent && mode !== 'full-current') throw new Error('force-redeploy-current requires full-current mode')
   const manifestSummary = validateChangeManifests(manifests)
   if (needsExternalManifest(changedPaths) && !manifests.length) {
     throw new Error('external release changes require a release/changes manifest')
@@ -140,9 +134,11 @@ export function createReleasePlan({
     bootstrap,
     changeIds: manifestSummary.changeIds,
     changedPaths: changedPaths.map(normalizePath),
+    forceRedeployCurrent: forceRedeployCurrent === true,
     headSha,
     manifests,
     mode,
+    operationKinds: classifyReleaseOperations(manifests),
     planningStrategy,
     releaseRequired: bootstrap || hasRuntimeTarget || manifests.length > 0,
     targets,

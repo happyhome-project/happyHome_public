@@ -58,6 +58,24 @@ test('only a successful locked release can prove the production version', async 
   assert.equal(inspection.run.status, 'passed')
 })
 
+test('incremental completion merges component identities and preserves untouched deployed provenance', async () => {
+  let now = 1000
+  const governance = new ReleaseGovernance({ store: new InMemoryReleaseStore(), now: () => now })
+  const first = await governance.acquire({ gitSha: 'a', owner: 'one', runId: 'run-1' })
+  await governance.complete(first, { components: { cloud: { functions: {
+    post: { artifactRunId: 'run-1', componentDigest: 'post-a' },
+    user: { artifactRunId: 'run-1', componentDigest: 'user-a' },
+  } } } })
+  now = 2000
+  const second = await governance.acquire({ gitSha: 'b', owner: 'two', runId: 'run-2' })
+  await governance.complete(second, { components: { cloud: { functions: {
+    post: { artifactRunId: 'run-2', componentDigest: 'post-b' },
+  } } } })
+  const state = await governance.getProductionState()
+  assert.equal(state.components.cloud.functions.post.artifactRunId, 'run-2')
+  assert.equal(state.components.cloud.functions.user.artifactRunId, 'run-1')
+})
+
 test('recovery records explicit verification evidence before a stale lock can be released', async () => {
   let now = 1000
   const governance = new ReleaseGovernance({ store: new InMemoryReleaseStore(), now: () => now })
@@ -81,9 +99,16 @@ test('recovery records explicit verification evidence before a stale lock can be
 })
 
 test('migration completion is persisted in production state under the active fencing token', async () => {
-  const governance = new ReleaseGovernance({ store: new InMemoryReleaseStore(), now: () => 1000 })
+  const store = new InMemoryReleaseStore()
+  const governance = new ReleaseGovernance({ store, now: () => 1000 })
   const lock = await governance.acquire({ gitSha: 'a', owner: 'one', runId: 'run-1' })
-  await governance.recordMigration(lock, 'post-index-v2')
+  const migration = { id: 'post-index-v2', inputDigest: 'a'.repeat(64), module: 'release/migrations/post-index-v2.mjs' }
+  await governance.recordMigration(lock, migration)
+  await governance.recordMigration(lock, migration)
   const state = await governance.getProductionState()
-  assert.deepEqual(state.appliedMigrations['post-index-v2'], { runId: 'run-1', appliedAt: 1000 })
+  assert.deepEqual(state.appliedMigrations['post-index-v2'], { runId: 'run-1', appliedAt: 1000, inputDigest: migration.inputDigest, module: migration.module })
+  await assert.rejects(() => governance.recordMigration(lock, { ...migration, inputDigest: 'b'.repeat(64) }), /inputDigest mismatch/i)
+
+  store.state.production.appliedMigrations.legacy = { runId: 'old-run', appliedAt: 1 }
+  await assert.rejects(() => governance.recordMigration(lock, { ...migration, id: 'legacy' }), /no inputDigest/i)
 })

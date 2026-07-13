@@ -65,6 +65,25 @@ test('git preflight binds matching main resume and rejects main/full-current str
   }), /resume context mismatch.*releaseStrategy/i)
 })
 
+test('preflight binds force-redeploy-current to explicit full-current resume identity', () => {
+  const actualHead = 'a'.repeat(40)
+  const canonical = { cwd: 'C:\\Project\\Claude\\happyHome_public', originUrl: 'https://github.com/happyhome-project/happyHome_public.git', branch: 'main', headSha: actualHead, originMainSha: actualHead, changedPaths: [] }
+  const resumeRunState = { context: { gitSha: actualHead, releaseStrategy: 'full-current', forceRedeployCurrent: true } }
+  const result = verifyPreflightGitAndPlan({
+    gitState: canonical, expectedHeadSha: actualHead, resumeRequested: true, resumeRunState,
+    releaseStrategy: 'full-current', fullCurrentExplicit: true, forceRedeployCurrent: true,
+  })
+  assert.equal(result.plan.forceRedeployCurrent, true)
+  assert.throws(() => verifyPreflightGitAndPlan({
+    gitState: canonical, expectedHeadSha: actualHead, resumeRequested: true, resumeRunState,
+    releaseStrategy: 'full-current', fullCurrentExplicit: true, forceRedeployCurrent: false,
+  }), /forceRedeployCurrent/i)
+  assert.throws(() => verifyPreflightGitAndPlan({
+    gitState: canonical, expectedHeadSha: actualHead, resumeRequested: false,
+    releaseStrategy: 'main', fullCurrentExplicit: false, forceRedeployCurrent: true,
+  }), /force-redeploy-current.*full-current/i)
+})
+
 test('publish resume permits only matching generated build-info and rejects every unexpected dirty path', () => {
   const actualHead = 'a'.repeat(40)
   const canonical = { cwd: 'C:\\Project\\Claude\\happyHome_public', originUrl: 'https://github.com/happyhome-project/happyHome_public.git', branch: 'main', headSha: actualHead, originMainSha: actualHead, changedPaths: ['miniprogram/src/generated/build-info.ts'] }
