@@ -100,6 +100,14 @@ try {
   } else {
     git(['fetch', '--quiet', 'origin', 'main'], root)
     const workspaceHead = git(['rev-parse', 'HEAD'], root)
+    const publishResume = hasOption('publish-resume')
+    const version = option('version')
+    const desc = option('desc')
+    if (publishResume && (!version || !desc)) {
+      throw new Error('Full-current publish resume requires --version and --desc')
+    }
+    const buildInfoPath = join(root, 'miniprogram', 'src', 'generated', 'build-info.ts')
+    const buildInfo = existsSync(buildInfoPath) ? readFileSync(buildInfoPath, 'utf8') : ''
     if (!hasOption('head') || headSha !== workspaceHead) {
       throw new Error(`Full-current release requires explicit --head to equal workspace HEAD; got --head=${hasOption('head') ? headSha : '(missing)'} HEAD=${workspaceHead}`)
     }
@@ -112,6 +120,8 @@ try {
       headSha: workspaceHead,
       originMainSha: git(['rev-parse', 'origin/main'], root),
       changedPaths: worktreeChangedPaths(root),
+      publishOnly: hasOption('publish-resume'),
+      generatedBuildInfoMatches: buildInfo.includes(version) && buildInfo.includes(desc),
     })
     baseSha = ''
     baseSource = 'full-current'
