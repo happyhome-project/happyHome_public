@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 
 import {
   attestAdminWebArtifact,
@@ -31,6 +33,14 @@ async function fixtureRoot() {
   const root = join(tmpdir(), `happyhome-artifacts-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`)
   await mkdir(root, { recursive: true })
   return root
+}
+
+const execFileAsync = promisify(execFile)
+
+async function windowsShortPath(path) {
+  if (process.platform !== 'win32') return ''
+  const { stdout } = await execFileAsync('cmd.exe', ['/d', '/c', `for %I in ("${path}") do @echo %~sI`], { windowsVerbatimArguments: true })
+  return stdout.trim().replace(/^"|"$/g, '')
 }
 
 test('release artifact manifest binds the run identity and never serializes cloud probe tokens', async () => {
@@ -200,12 +210,56 @@ test('directory digest and snapshot creation reject symlink or junction entries'
       throw error
     }
     await assert.rejects(() => computeDirectoryDigest(source), /symbolic link|reparse/i)
+    await assert.rejects(() => computeDirectoryDigest(join(source, 'linked')), /symbolic link|junction|reparse/i)
     await assert.rejects(() => createImmutableArtifactSnapshots({
       root,
       runId: 'run-link',
       plan: { targets: { cloud: { functions: [] }, adminWeb: true, miniprogram: false } },
       paths: { adminWebRoot: source },
     }), /symbolic link|reparse/i)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('directory digest accepts a Windows 8.3 alias for an ordinary directory', async (t) => {
+  if (process.platform !== 'win32') return t.skip('Windows 8.3 alias behavior')
+  const root = await fixtureRoot()
+  try {
+    await writeFile(join(root, 'index.html'), 'same-directory')
+    const shortRoot = await windowsShortPath(root)
+    if (!shortRoot || shortRoot.toLowerCase() === resolve(root).toLowerCase()) return t.skip('8.3 aliases are unavailable')
+    assert.equal(await computeDirectoryDigest(shortRoot), await computeDirectoryDigest(root))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('snapshot attestation accepts equivalent Windows aliases while retaining the exact run path', async (t) => {
+  if (process.platform !== 'win32') return t.skip('Windows 8.3 alias behavior')
+  const root = await fixtureRoot()
+  try {
+    const shortRoot = await windowsShortPath(root)
+    if (!shortRoot || shortRoot.toLowerCase() === resolve(root).toLowerCase()) return t.skip('8.3 aliases are unavailable')
+    const artifactRoot = join(root, '.codex-local', 'release-artifacts', 'run-alias', 'admin-web')
+    await mkdir(artifactRoot, { recursive: true })
+    await writeFile(join(artifactRoot, 'index.html'), 'pinned')
+    const contentDigest = await computeDirectoryDigest(artifactRoot)
+    await assert.doesNotReject(() => assertPinnedAdminArtifact(join(shortRoot, '.codex-local', 'release-artifacts', 'run-alias', 'admin-web'), contentDigest))
+    const manifest = await createReleaseArtifactManifest({
+      root: shortRoot,
+      runId: 'run-alias', gitSha: 'abcdef', envId: 'env', version: '1', desc: 'alias',
+      plan: { targets: { cloud: { functions: [] }, adminWeb: true, miniprogram: false } },
+      paths: { adminWebRoot: await realpath(artifactRoot) },
+    })
+    assert.equal(manifest.artifacts.adminWeb.artifactPath, '.codex-local/release-artifacts/run-alias/admin-web')
+    const artifact = { ...manifest.artifacts.adminWeb, artifactPath: await realpath(artifactRoot) }
+    const result = await attestAdminWebArtifact({
+      root: shortRoot,
+      artifact,
+      inspectRemote: async () => artifact,
+    })
+    assert.equal(result.status, 'attested')
   } finally {
     await rm(root, { recursive: true, force: true })
   }

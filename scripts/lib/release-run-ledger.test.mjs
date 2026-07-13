@@ -4,6 +4,8 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 
 import {
   confirmReleaseLedgerAgainstProductionInspection,
@@ -46,6 +48,14 @@ async function directoryDigest(root) {
   }
   await walk(root)
   return createHash('sha256').update(entries.join('\n')).digest('hex')
+}
+
+const execFileAsync = promisify(execFile)
+
+async function windowsShortPath(path) {
+  if (process.platform !== 'win32') return ''
+  const { stdout } = await execFileAsync('cmd.exe', ['/d', '/c', `for %I in ("${path}") do @echo %~sI`], { windowsVerbatimArguments: true })
+  return stdout.trim().replace(/^"|"$/g, '')
 }
 
 test('prepare pins the formal plan and immutable artifact manifest without probe token plaintext', async () => {
@@ -490,10 +500,12 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
       },
       appTabBarCount: 1,
     }
+    const packageRoot = join(root, 'miniprogram', 'dist', 'build', 'mp-weixin')
+    const evidenceProjectPath = await windowsShortPath(packageRoot) || packageRoot
     await writeJson(uiEvidencePath, {
       releaseRunId: 'unit-run',
       packageDigest,
-      projectPath: join(root, 'miniprogram', 'dist', 'build', 'mp-weixin'),
+      projectPath: evidenceProjectPath,
       markers: [
         'HH_RELEASE_HOME_COLD_START_NONEMPTY',
         'HH_RELEASE_HOME_IMAGES_RENDERED',
@@ -541,6 +553,30 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
       runId: 'unit-run',
     })
     assert.equal(reusable.reusable, true)
+
+    await writeJson(uiEvidencePath, {
+      releaseRunId: 'unit-run',
+      packageDigest,
+      projectPath: join(root, 'missing-project-path'),
+      markers: [
+        'HH_RELEASE_HOME_COLD_START_NONEMPTY',
+        'HH_RELEASE_HOME_IMAGES_RENDERED',
+        'HH_RELEASE_HOME_DETAIL_NONEMPTY',
+        'HH_RELEASE_LOGIN_VERSION',
+        'HH_RELEASE_PROFILE_LOGIN_CLEAN',
+      ],
+      homeColdStart: coldStartEvidence,
+      profileLoginClean: { expectedVersion: '1.0.1' },
+    })
+    const missingProjectPath = await inspectReleaseStageReuse(runState, 'miniprogram-build-gate', {
+      root,
+      gitSha: 'abc123',
+      version: '1.0.1',
+      desc: 'trial-unit',
+      runId: 'unit-run',
+    })
+    assert.equal(missingProjectPath.reusable, false)
+    assert.match(missingProjectPath.reason, /project path/i)
 
     await writeJson(uiEvidencePath, {
       releaseRunId: 'unit-run',

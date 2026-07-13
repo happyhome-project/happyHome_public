@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import { computeDirectoryDigest } from './release-run-ledger.mjs'
 import { createMiniprogramReceiptIdentity } from './miniprogram-receipt-identity.mjs'
+import { assertNoSymbolicLinkPath, pathsReferToSameEntry } from './filesystem-path-integrity.mjs'
 export { createMiniprogramReceiptIdentity } from './miniprogram-receipt-identity.mjs'
 
 function sha256(value) {
@@ -11,17 +12,12 @@ function sha256(value) {
 }
 
 
-function localPath(root, path) {
-  return relative(resolve(root), resolve(path)).replace(/\\/g, '/')
+async function localPath(root, path) {
+  return relative(await realpath(root), await realpath(path)).replace(/\\/g, '/')
 }
 
 function absolutePath(root, path) {
   return isAbsolute(path) ? path : resolve(root, path)
-}
-
-function canonicalPathKey(path) {
-  const normalized = resolve(path)
-  return process.platform === 'win32' ? normalized.replace(/\//g, '\\').toLowerCase() : normalized
 }
 
 async function assertExactSnapshotPath({ root, runId, artifactPath, suffix, component }) {
@@ -30,12 +26,16 @@ async function assertExactSnapshotPath({ root, runId, artifactPath, suffix, comp
   }
   const expected = resolve(root, '.codex-local', 'release-artifacts', runId, ...suffix)
   const actual = absolutePath(root, artifactPath)
-  if (canonicalPathKey(actual) !== canonicalPathKey(expected)) throw new Error(`immutable ${component} artifact path is invalid`)
-  const realRoot = await realpath(root)
-  const expectedRealPath = resolve(realRoot, '.codex-local', 'release-artifacts', runId, ...suffix)
-  let actualRealPath
-  try { actualRealPath = await realpath(actual) } catch { throw new Error(`immutable ${component} artifact is missing`) }
-  if (canonicalPathKey(actualRealPath) !== canonicalPathKey(expectedRealPath)) throw new Error(`immutable ${component} artifact path is invalid`)
+  try { await realpath(actual) } catch { throw new Error(`immutable ${component} artifact is missing`) }
+  try {
+    await assertNoSymbolicLinkPath(expected, `immutable ${component} artifact path is invalid`)
+    await assertNoSymbolicLinkPath(actual, `immutable ${component} artifact path is invalid`)
+    if (!(await pathsReferToSameEntry(actual, expected))) throw new Error(`immutable ${component} artifact path is invalid`)
+  } catch (error) {
+    if (/path is invalid/.test(error?.message || '')) throw error
+    if (error?.code === 'ENOENT') throw new Error(`immutable ${component} artifact path is invalid`)
+    throw new Error(`immutable ${component} artifact is missing`)
+  }
   return expected
 }
 
@@ -51,9 +51,12 @@ function assertSafePathSegment(value, name) {
 
 async function assertNoPathRedirection(path, component) {
   const resolved = resolve(path)
-  let real
-  try { real = await realpath(resolved) } catch { throw new Error(`immutable ${component} is missing`) }
-  if (canonicalPathKey(real) !== canonicalPathKey(resolved)) throw new Error(`immutable ${component} rejects symbolic link junction or reparse path`)
+  try {
+    await assertNoSymbolicLinkPath(resolved, `immutable ${component} rejects symbolic link junction or reparse path`)
+  } catch (error) {
+    if (/rejects symbolic link junction or reparse path/.test(error?.message || '')) throw error
+    throw new Error(`immutable ${component} is missing`)
+  }
 }
 
 export async function createImmutableArtifactSnapshots({ root, runId, plan, paths = {} } = {}) {
@@ -62,11 +65,7 @@ export async function createImmutableArtifactSnapshots({ root, runId, plan, path
   const destination = resolve(root, '.codex-local', 'release-artifacts', runId)
   const temporary = resolve(dirname(destination), `.${runId}.tmp-${process.pid}-${Date.now()}`)
   await mkdir(dirname(destination), { recursive: true })
-  const realRoot = await realpath(root)
-  const realSnapshotParent = await realpath(dirname(destination))
-  if (canonicalPathKey(realSnapshotParent) !== canonicalPathKey(resolve(realRoot, '.codex-local', 'release-artifacts'))) {
-    throw new Error('immutable release artifact snapshot rejects symbolic link or reparse parent')
-  }
+  await assertNoSymbolicLinkPath(dirname(destination), 'immutable release artifact snapshot rejects symbolic link or reparse parent')
   await rm(temporary, { recursive: true, force: true })
   try {
     await mkdir(temporary, { recursive: true })
@@ -224,7 +223,7 @@ export async function createReleaseArtifactManifest({ root, runId, gitSha, envId
       throw new Error(`cloud artifact identity is invalid for ${functionName}`)
     }
     artifacts.cloud[functionName] = {
-      artifactPath: localPath(root, artifactRoot),
+      artifactPath: await localPath(root, artifactRoot),
       buildId: probe.buildId,
       contentDigest: await computeDirectoryDigest(artifactRoot),
       functionName,
@@ -235,7 +234,7 @@ export async function createReleaseArtifactManifest({ root, runId, gitSha, envId
   if (plan.targets?.adminWeb) {
     const contentDigest = await computeDirectoryDigest(paths.adminWebRoot)
     artifacts.adminWeb = {
-      artifactPath: localPath(root, paths.adminWebRoot),
+      artifactPath: await localPath(root, paths.adminWebRoot),
       contentDigest,
       runId,
       sourceSha: gitSha,
@@ -245,7 +244,7 @@ export async function createReleaseArtifactManifest({ root, runId, gitSha, envId
   if (plan.targets?.miniprogram) {
     const contentDigest = await computeDirectoryDigest(paths.miniprogramRoot)
     artifacts.miniprogram = {
-      artifactPath: localPath(root, paths.miniprogramRoot),
+      artifactPath: await localPath(root, paths.miniprogramRoot),
       contentDigest,
       desc,
       runId,

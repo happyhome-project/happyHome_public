@@ -1,9 +1,10 @@
-import { access, appendFile, lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import { access, appendFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { REQUIRED_SMOKE_LABELS } from '../cloud-release-smoke.mjs'
 import { createMiniprogramReceiptIdentity, normalizeMiniprogramUploadReceipt } from './miniprogram-receipt-identity.mjs'
+import { assertNoSymbolicLinkPath, pathsReferToSameEntry } from './filesystem-path-integrity.mjs'
 
 export const RELEASE_RUNS_DIR = '.codex-local/release-runs'
 
@@ -125,10 +126,7 @@ async function readJson(path) {
 
 export async function computeDirectoryDigest(inputRoot) {
   const root = resolve(inputRoot)
-  const realRoot = await realpath(root)
-  const pathKey = (path) => process.platform === 'win32' ? resolve(path).replace(/\//g, '\\').toLowerCase() : resolve(path)
-  if (pathKey(realRoot) !== pathKey(root)) throw new Error(`directory digest rejects symbolic link junction or reparse path: ${root}`)
-  if ((await lstat(root)).isSymbolicLink()) throw new Error(`directory digest rejects symbolic link or reparse root: ${root}`)
+  await assertNoSymbolicLinkPath(root, `directory digest rejects symbolic link junction or reparse path: ${root}`)
   const entries = []
   async function walk(directory, prefix = '') {
     const children = await readdir(directory, { withFileTypes: true })
@@ -220,7 +218,7 @@ async function inspectBuildInfoEvidence(stage, context) {
   if (!(await pathExists(absoluteUiEvidencePath))) return { reusable: false, reason: `release UI evidence missing: ${relativeToRoot(root, absoluteUiEvidencePath)}` }
   const evidence = await readJson(absoluteUiEvidencePath)
   const evidenceProjectPath = pathFromRoot(root, evidence.projectPath)
-  if (!evidenceProjectPath || resolve(evidenceProjectPath) !== resolve(packageRoot)) {
+  if (!evidenceProjectPath || !(await pathsReferToSameEntry(evidenceProjectPath, packageRoot))) {
     return { reusable: false, reason: 'release UI evidence project path does not match prepared package root' }
   }
   if (context.runId && evidence.releaseRunId !== context.runId) {
