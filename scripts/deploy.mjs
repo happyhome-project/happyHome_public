@@ -1094,7 +1094,7 @@ const RELEASE_ACTION_SCRIPTS = Object.freeze({
   'configure-rag-network': 'configure:rag-network',
   'configure-rag-workers': 'configure:rag-workers',
   'ensure-indexes': 'ensure:indexes',
-  'ensure-tencent-rag-index': 'ensure:tencent-rag-index',
+  'ensure-tencent-rag-index': 'ensure:tencent-rag-index:release',
   'update-rag-env': 'update:rag-env',
   'backfill-post-rag-v2': 'backfill:post-rag-v2',
   'verify-post-rag-timer': 'verify:post-rag-timer',
