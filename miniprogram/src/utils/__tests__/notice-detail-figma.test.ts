@@ -18,13 +18,23 @@ describe('Figma notice detail hierarchy', () => {
     expect(bodyIndex).toBeGreaterThan(authorRowIndex)
     expect(noticeSource).toContain('class="notice-author-avatar"')
     expect(noticeSource).toContain('class="notice-author-name"')
-    expect(noticeSource).toContain('class="notice-publish-date"')
+    expect(noticeSource).toContain('class="notice-updated-date"')
   })
 
-  test('uses persisted section metadata instead of copied placeholder author content', () => {
-    expect(noticeSource).toContain('section.createdAt')
-    expect(noticeSource).toContain('section.name')
-    expect(noticeSource).toContain('resolveSectionIconGlyph')
+  test('uses controlled administrator metadata without presenting section identity as the author', () => {
+    expect(noticeSource).toContain('社区管理员')
+    expect(noticeSource).toContain('/static/ai-avatars/avatar-01.svg')
+    expect(fs.existsSync(path.resolve(__dirname, '../../static/ai-avatars/avatar-01.svg'))).toBe(true)
+    expect(noticeSource).not.toContain('section.createdAt')
+    expect(noticeSource).not.toContain('section.name')
+    expect(noticeSource).not.toContain('resolveSectionIconGlyph')
+  })
+
+  test('shows the notice configuration update date only when section updatedAt exists', () => {
+    expect(noticeSource).toContain('section as any).updatedAt')
+    expect(noticeSource).toContain('v-if="notice.updatedAt"')
+    expect(noticeSource).toContain('更新于 {{ notice.updatedAt }}')
+    expect(noticeSource).not.toContain('publishedAt')
   })
 
   test('keeps the loaded notice on a plain white page without the decorative card or accent strip', () => {

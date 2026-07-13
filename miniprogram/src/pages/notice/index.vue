@@ -3,12 +3,14 @@
     <view v-if="notice" class="notice-detail">
       <text class="notice-heading">{{ notice.label }}</text>
       <view class="notice-author-row">
-        <view class="notice-author-avatar">
-          <text>{{ notice.icon }}</text>
-        </view>
+        <image
+          class="notice-author-avatar"
+          src="/static/ai-avatars/avatar-01.svg"
+          mode="aspectFill"
+        />
         <view class="notice-author-copy">
-          <text class="notice-author-name">{{ notice.sectionName }}</text>
-          <text class="notice-publish-date">{{ notice.publishedAt }}</text>
+          <text class="notice-author-name">社区管理员</text>
+          <text v-if="notice.updatedAt" class="notice-updated-date">更新于 {{ notice.updatedAt }}</text>
         </view>
       </view>
       <text class="notice-body">{{ notice.content }}</text>
@@ -28,14 +30,11 @@ import { onLoad } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
-import { resolveSectionIconGlyph } from '../../utils/section-icon'
 
 interface NoticeDetail {
-  sectionName: string
   label: string
   content: string
-  icon: string
-  publishedAt: string
+  updatedAt: string
 }
 
 const communityStore = useCommunityStore()
@@ -61,11 +60,9 @@ function resolveNotice() {
     return
   }
   notice.value = {
-    sectionName: section.name,
     label: widget.label || '公告',
     content,
-    icon: resolveSectionIconGlyph(section.icon, '告'),
-    publishedAt: formatNoticeDate(section.createdAt),
+    updatedAt: formatNoticeDate((section as any).updatedAt),
   }
 }
 
@@ -126,16 +123,7 @@ onLoad(async (query) => {
   height: 56rpx;
   border-radius: 999rpx;
   background: $hh-surface-2;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   flex-shrink: 0;
-}
-
-.notice-author-avatar text {
-  color: $hh-ink-2;
-  font-size: 25rpx;
-  font-weight: $hh-font-weight-heavy;
 }
 
 .notice-author-copy {
@@ -151,7 +139,7 @@ onLoad(async (query) => {
   line-height: 1.25;
 }
 
-.notice-publish-date {
+.notice-updated-date {
   margin-top: 4rpx;
   font-size: 22rpx;
   color: $hh-ink-3;
