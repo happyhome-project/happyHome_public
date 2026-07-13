@@ -206,7 +206,7 @@ describe('home live card formatting', () => {
     ['rich_text', '书名', '<p>山野童年</p>'],
     ['rich_note', '音乐名称', { format: 'markdown', markdown: '夏夜', html: '<p>夏夜</p>', text: '夏夜', imageFileIDs: [], schemaVersion: 1 }],
     ['number', '电影分类', 7],
-  ])('resolves semantic detail title label %s/%s with its source widget', (type, label, value) => {
+  ])('resolves semantic detail title label %s/%s with type-safe consumption', (type, label, value) => {
     const section = {
       name: '板块名称',
       type: 'evergreen',
@@ -219,7 +219,7 @@ describe('home live card formatting', () => {
 
     expect(resolveTitle(post, section)).toEqual({
       text: type === 'rich_text' ? '山野童年' : type === 'rich_note' ? '夏夜' : String(value),
-      sourceWidgetId: 'semantic',
+      sourceWidgetId: ['short_text', 'summary'].includes(String(type)) ? 'semantic' : null,
     })
   })
 

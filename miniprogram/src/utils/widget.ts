@@ -55,7 +55,7 @@ export function resolvePostHomeTitle(post: Post, section: Section): PostHomeTitl
   if (semanticTitleWidget) {
     return {
       text: getWidgetValue(post, semanticTitleWidget),
-      sourceWidgetId: semanticTitleWidget.widgetId,
+      sourceWidgetId: consumedTitleSourceWidgetId(semanticTitleWidget),
     }
   }
 
@@ -65,9 +65,7 @@ export function resolvePostHomeTitle(post: Post, section: Section): PostHomeTitl
   if (fallbackWidget) {
     return {
       text: getWidgetValue(post, fallbackWidget),
-      sourceWidgetId: ['short_text', 'summary'].includes(fallbackWidget.type)
-        ? fallbackWidget.widgetId
-        : null,
+      sourceWidgetId: consumedTitleSourceWidgetId(fallbackWidget),
     }
   }
 
@@ -163,6 +161,10 @@ function isResolverSemanticTitleWidget(widget: Section['widgets'][number]): bool
   return fieldKey === 'title' ||
     fieldKey.includes('title') ||
     HOME_TITLE_LABEL_NEEDLES.some((item) => label.includes(item))
+}
+
+function consumedTitleSourceWidgetId(widget: Section['widgets'][number]): string | null {
+  return ['short_text', 'summary'].includes(widget.type) ? widget.widgetId : null
 }
 
 export function getArchiveHomeMeta(post: Post, section: Section): string {
