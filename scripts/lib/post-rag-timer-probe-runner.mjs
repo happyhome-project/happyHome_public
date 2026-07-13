@@ -49,11 +49,43 @@ export async function startPostRagTimerProbeSession({ env = process.env, signal,
   if (!options.adminInternalToken) throw new Error('ADMIN_INTERNAL_CALL_TOKEN is required')
   const aborted = abortError(signal)
   if (aborted) throw safeTimerError({ error: aborted, phase: 'create', code: 'ABORTED', classification: 'aborted' })
-  const invokeSafe = async (action, params, { cleanup = false, phase }) => {
+  const invokeSafe = async (action, params, { cleanup = false, invokeOptions = options, phase }) => {
     try {
-      return await runtime.invoke(action, params, options, runtime.runner)
+      return await runtime.invoke(action, params, invokeOptions, runtime.runner)
     } catch (error) {
       throw safeTimerError({ action, cleanup, error, phase })
+    }
+  }
+  const pollCleanup = async (cleanupBinding) => {
+    const cleanupDeadlineMs = runtime.now() + CLEANUP_TIMEOUT_MS
+    if (typeof runtime.beforeCleanup === 'function') await runtime.beforeCleanup('post.ragTimerProbeCleanupAdmin')
+    while (true) {
+      const remainingMs = cleanupDeadlineMs - runtime.now()
+      if (remainingMs <= 0) {
+        throw safeTimerError({ phase: 'cleanup', code: 'TIMEOUT', classification: 'timeout', cleanup: true })
+      }
+      const response = await invokeSafe('post.ragTimerProbeCleanupAdmin', cleanupBinding, {
+        phase: 'cleanup',
+        cleanup: true,
+        invokeOptions: {
+          ...options,
+          commandTimeoutMs: Math.min(options.commandTimeoutMs, remainingMs),
+          adminInvokeRetries: 1,
+        },
+      })
+      if (response.functionResult?.success === true && response.functionResult?.status === 'cleaned') return response
+      if (response.functionResult?.pending !== true) {
+        throw safeTimerError({ phase: 'cleanup', code: 'INVALID_RESPONSE', classification: 'invalid-response', cleanup: true })
+      }
+      const sleepMs = Math.min(CLEANUP_POLL_MS, Math.max(0, cleanupDeadlineMs - runtime.now()))
+      if (sleepMs > 0) {
+        try {
+          await runtime.sleep(sleepMs, signal)
+        } catch (error) {
+          if (signal?.aborted) throw safeTimerError({ error, phase: 'cleanup', code: 'ABORTED', classification: 'aborted', cleanup: true })
+          throw safeTimerError({ error, phase: 'cleanup', cleanup: true })
+        }
+      }
     }
   }
   let probe
@@ -61,8 +93,7 @@ export async function startPostRagTimerProbeSession({ env = process.env, signal,
     probe = (await invokeSafe('post.ragTimerProbeCreateAdmin', { runId }, { phase: 'create' })).functionResult
   } catch (createError) {
     try {
-      if (typeof runtime.beforeCleanup === 'function') await runtime.beforeCleanup('post.ragTimerProbeCleanupAdmin')
-      await invokeSafe('post.ragTimerProbeCleanupAdmin', { runId }, { phase: 'cleanup', cleanup: true })
+      await pollCleanup({ runId })
     } catch (cleanupError) {
       throw createSafeAggregateError('post RAG timer create and cleanup failed', [
         ...releaseFailureCauses(createError, { branch: 'timer', phase: 'create' }),
@@ -74,13 +105,12 @@ export async function startPostRagTimerProbeSession({ env = process.env, signal,
   if (!probe?.runId || !probe?.communityId || !probe?.sectionId || !probe?.postId || !probe?.outboxId) {
     const identityError = safeTimerError({ phase: 'create', code: 'INVALID_RESPONSE', classification: 'invalid-response' })
     try {
-      if (typeof runtime.beforeCleanup === 'function') await runtime.beforeCleanup('post.ragTimerProbeCleanupAdmin')
-      await invokeSafe('post.ragTimerProbeCleanupAdmin', {
+      await pollCleanup({
         runId: probe?.runId || runId,
-        communityId: probe?.communityId,
-        sectionId: probe?.sectionId,
-        postId: probe?.postId,
-      }, { phase: 'cleanup', cleanup: true })
+        ...(probe?.communityId ? { communityId: probe.communityId } : {}),
+        ...(probe?.sectionId ? { sectionId: probe.sectionId } : {}),
+        ...(probe?.postId ? { postId: probe.postId } : {}),
+      })
     } catch (cleanupError) {
       throw createSafeAggregateError('post RAG timer invalid response and cleanup failed', [
         ...releaseFailureCauses(identityError, { branch: 'timer', phase: 'create' }),
@@ -151,32 +181,12 @@ export async function startPostRagTimerProbeSession({ env = process.env, signal,
   }
 
   const cleanup = () => {
-    cleanupPromise ||= (async () => {
-      if (typeof runtime.beforeCleanup === 'function') await runtime.beforeCleanup('post.ragTimerProbeCleanupAdmin')
-      const cleanupDeadlineMs = runtime.now() + CLEANUP_TIMEOUT_MS
-      while (runtime.now() < cleanupDeadlineMs) {
-        const response = await invokeSafe('post.ragTimerProbeCleanupAdmin', {
-          runId: probe.runId,
-          communityId: probe.communityId,
-          sectionId: probe.sectionId,
-          postId: probe.postId,
-        }, { phase: 'cleanup', cleanup: true })
-        if (response.functionResult?.success === true && response.functionResult?.status === 'cleaned') return response
-        if (response.functionResult?.pending !== true) {
-          throw safeTimerError({ phase: 'cleanup', code: 'INVALID_RESPONSE', classification: 'invalid-response', cleanup: true })
-        }
-        const remainingMs = Math.max(0, cleanupDeadlineMs - runtime.now())
-        if (remainingMs > 0) {
-          try {
-            await runtime.sleep(Math.min(CLEANUP_POLL_MS, remainingMs), signal)
-          } catch (error) {
-            if (signal?.aborted) throw safeTimerError({ error, phase: 'cleanup', code: 'ABORTED', classification: 'aborted', cleanup: true })
-            throw safeTimerError({ error, phase: 'cleanup', cleanup: true })
-          }
-        }
-      }
-      throw safeTimerError({ phase: 'cleanup', code: 'TIMEOUT', classification: 'timeout', cleanup: true })
-    })()
+    cleanupPromise ||= pollCleanup({
+      runId: probe.runId,
+      communityId: probe.communityId,
+      sectionId: probe.sectionId,
+      postId: probe.postId,
+    })
     return cleanupPromise
   }
 

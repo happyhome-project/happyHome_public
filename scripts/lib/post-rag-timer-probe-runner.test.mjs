@@ -85,6 +85,38 @@ test('cleanup polls its bound fixture until the server reports cleaned', async (
   assert.deepEqual(events.filter((event) => event.startsWith('sleep:')), ['sleep:5000', 'sleep:5000'])
 })
 
+test('cleanup caps every admin call to its remaining hard budget and disables inner retries', async () => {
+  const cleanupOptions = []
+  let cleanupCalls = 0
+  let nowMs = 0
+  const base = fakeDeps([])
+  const session = await startPostRagTimerProbeSession({
+    env: { ADMIN_INTERNAL_CALL_TOKEN: 'token', HH_RELEASE_RUN_ID: 'run' },
+    deps: {
+      ...base,
+      now: () => nowMs,
+      sleep: async () => { nowMs = 299_000 },
+      invoke: async (action, params, options, runner) => {
+        if (action === 'post.ragTimerProbeCleanupAdmin') {
+          cleanupOptions.push(options)
+          cleanupCalls += 1
+          return cleanupCalls === 1
+            ? { functionResult: { success: false, pending: true, status: 'cleaning' } }
+            : { functionResult: { success: true, pending: false, status: 'cleaned' } }
+        }
+        return base.invoke(action, params, options, runner)
+      },
+    },
+  })
+
+  await session.cleanup()
+
+  assert.deepEqual(cleanupOptions.map(({ commandTimeoutMs, adminInvokeRetries }) => ({ commandTimeoutMs, adminInvokeRetries })), [
+    { commandTimeoutMs: 180_000, adminInvokeRetries: 1 },
+    { commandTimeoutMs: 1_000, adminInvokeRetries: 1 },
+  ])
+})
+
 test('cleanup uses an independent five minute budget and safely times out while pending', async () => {
   const events = []
   let nowMs = 0
@@ -199,36 +231,97 @@ test('timer deadline failure retains cleanup failure instead of losing fixture c
   })
 })
 
-test('an incomplete create response still attempts cleanup for the committed partial fixture', async () => {
+test('an incomplete create response polls cleanup using every available binding field', async () => {
   const events = []
+  const cleanupResults = [
+    { functionResult: { success: false, pending: true, status: 'cleaning' } },
+    { functionResult: { success: true, pending: false, status: 'cleaned' } },
+  ]
   const deps = fakeDeps(events, {
-    invoke: async (action) => {
-      events.push(action)
+    invoke: async (action, params) => {
+      events.push({ action, params })
       if (action === 'post.ragTimerProbeCreateAdmin') return { functionResult: { runId: 'run', communityId: 'c', sectionId: 's', postId: 'p' } }
-      if (action === 'post.ragTimerProbeCleanupAdmin') return { functionResult: { cleaned: true } }
+      if (action === 'post.ragTimerProbeCleanupAdmin') return cleanupResults.shift()
       throw new Error(`unexpected ${action}`)
     },
   })
   await assert.rejects(() => startPostRagTimerProbeSession({
     env: { ADMIN_INTERNAL_CALL_TOKEN: 'token', HH_RELEASE_RUN_ID: 'run' }, deps,
   }), /post RAG timer create failed/i)
-  assert.deepEqual(events, ['post.ragTimerProbeCreateAdmin', 'post.ragTimerProbeCleanupAdmin'])
+  assert.deepEqual(events.filter(({ action }) => action === 'post.ragTimerProbeCleanupAdmin').map(({ params }) => params), [
+    { runId: 'run', communityId: 'c', sectionId: 's', postId: 'p' },
+    { runId: 'run', communityId: 'c', sectionId: 's', postId: 'p' },
+  ])
 })
 
-test('a create transport failure still attempts run-bound cleanup for a remotely committed fixture', async () => {
+test('a create transport failure polls run-bound cleanup for a remotely committed fixture', async () => {
   const events = []
+  const cleanupResults = [
+    { functionResult: { success: false, pending: true, status: 'cleaning' } },
+    { functionResult: { success: true, pending: false, status: 'cleaned' } },
+  ]
   const deps = fakeDeps(events, {
     invoke: async (action, params) => {
       events.push(`${action}:${params.runId}`)
       if (action === 'post.ragTimerProbeCreateAdmin') throw new Error('create response lost')
-      if (action === 'post.ragTimerProbeCleanupAdmin') return { functionResult: { cleaned: true } }
+      if (action === 'post.ragTimerProbeCleanupAdmin') return cleanupResults.shift()
       throw new Error(`unexpected ${action}`)
     },
   })
   await assert.rejects(() => startPostRagTimerProbeSession({
     env: { ADMIN_INTERNAL_CALL_TOKEN: 'token', HH_RELEASE_RUN_ID: 'run' }, deps,
   }), /post RAG timer create failed/i)
-  assert.deepEqual(events, ['post.ragTimerProbeCreateAdmin:run', 'post.ragTimerProbeCleanupAdmin:run'])
+  assert.deepEqual(events.filter((event) => event.startsWith('post.ragTimer')), [
+    'post.ragTimerProbeCreateAdmin:run',
+    'post.ragTimerProbeCleanupAdmin:run',
+    'post.ragTimerProbeCleanupAdmin:run',
+  ])
+})
+
+test('a create failure aggregates an invalid cleanup response without losing either cause', async () => {
+  const deps = fakeDeps([], {
+    invoke: async (action) => {
+      if (action === 'post.ragTimerProbeCreateAdmin') throw new Error('create response lost')
+      if (action === 'post.ragTimerProbeCleanupAdmin') return { functionResult: { success: false, pending: false, status: 'cleaning' } }
+      throw new Error(`unexpected ${action}`)
+    },
+  })
+
+  await assert.rejects(() => startPostRagTimerProbeSession({
+    env: { ADMIN_INTERNAL_CALL_TOKEN: 'token', HH_RELEASE_RUN_ID: 'run' }, deps,
+  }), (error) => {
+    assert(error instanceof AggregateError)
+    assert.deepEqual(error.result.failureCauses, [
+      { branch: 'timer', phase: 'create', action: 'post.ragTimerProbeCreateAdmin', code: 'REMOTE_CALL_FAILED', classification: 'remote-call-failed', cleanup: false },
+      { branch: 'timer', phase: 'cleanup', action: 'unknown', code: 'INVALID_RESPONSE', classification: 'invalid-response', cleanup: true },
+    ])
+    return true
+  })
+})
+
+test('a create failure aggregates cleanup timeout without losing either cause', async () => {
+  let nowMs = 0
+  const deps = fakeDeps([], {
+    now: () => nowMs,
+    sleep: async (ms) => { nowMs += ms },
+    invoke: async (action) => {
+      if (action === 'post.ragTimerProbeCreateAdmin') throw new Error('create response lost')
+      if (action === 'post.ragTimerProbeCleanupAdmin') return { functionResult: { success: false, pending: true, status: 'cleaning' } }
+      throw new Error(`unexpected ${action}`)
+    },
+  })
+
+  await assert.rejects(() => startPostRagTimerProbeSession({
+    env: { ADMIN_INTERNAL_CALL_TOKEN: 'token', HH_RELEASE_RUN_ID: 'run' }, deps,
+  }), (error) => {
+    assert(error instanceof AggregateError)
+    assert.deepEqual(error.result.failureCauses, [
+      { branch: 'timer', phase: 'create', action: 'post.ragTimerProbeCreateAdmin', code: 'REMOTE_CALL_FAILED', classification: 'remote-call-failed', cleanup: false },
+      { branch: 'timer', phase: 'cleanup', action: 'unknown', code: 'TIMEOUT', classification: 'timeout', cleanup: true },
+    ])
+    return true
+  })
+  assert.equal(nowMs, 5 * 60 * 1000)
 })
 
 test('null or missing-runId create results always use the requested runId for ambiguous cleanup', async () => {
@@ -237,7 +330,7 @@ test('null or missing-runId create results always use the requested runId for am
     const deps = fakeDeps([], {
       invoke: async (action, params) => {
         if (action === 'post.ragTimerProbeCreateAdmin') return { functionResult }
-        if (action === 'post.ragTimerProbeCleanupAdmin') { cleanupRunIds.push(params.runId); return { functionResult: { cleaned: true } } }
+        if (action === 'post.ragTimerProbeCleanupAdmin') { cleanupRunIds.push(params.runId); return { functionResult: { success: true, pending: false, status: 'cleaned' } } }
         throw new Error(`unexpected ${action}`)
       },
     })
@@ -274,7 +367,7 @@ test('create errors echoing the admin token are sanitized before error ledger an
   const deps = fakeDeps([], {
     invoke: async (action) => {
       if (action === 'post.ragTimerProbeCreateAdmin') throw new Error(`runner stdout ADMIN_INTERNAL_CALL_TOKEN=${token}`)
-      if (action === 'post.ragTimerProbeCleanupAdmin') return { functionResult: { cleaned: true } }
+      if (action === 'post.ragTimerProbeCleanupAdmin') return { functionResult: { success: true, pending: false, status: 'cleaned' } }
       throw new Error(`unexpected ${action}`)
     },
   })
