@@ -1000,8 +1000,12 @@ function releaseStageReuseCheck(context) {
   }
 }
 
-function createFormalReleasePlan(gitSha, releaseStrategy) {
-  const result = spawnSync(process.execPath, ['scripts/release-plan.mjs', `--mode=${releaseStrategy}`, `--head=${gitSha}`], {
+function createFormalReleasePlan(gitSha, releaseStrategy, publishResume) {
+  const args = ['scripts/release-plan.mjs', `--mode=${releaseStrategy}`, `--head=${gitSha}`]
+  if (publishResume) {
+    args.push('--publish-resume', `--version=${publishResume.version}`, `--desc=${publishResume.desc}`)
+  }
+  const result = spawnSync(process.execPath, args, {
     cwd: ROOT,
     encoding: 'utf8',
     windowsHide: true,
@@ -1177,7 +1181,10 @@ async function runFormalRelease(options = {}) {
     resumeRunState,
     gitSha: releaseContext.gitSha,
     releaseStrategy,
-    createPlan: createFormalReleasePlan,
+    createPlan: (gitSha, strategy) => createFormalReleasePlan(gitSha, strategy, publishOnly ? {
+      version: releaseContext.version,
+      desc: releaseContext.desc,
+    } : null),
   })
   releaseContext.cloudFunctions = formalPlan?.targets.cloud.functions || []
   const releaseLedger = await createReleaseRunLedger({

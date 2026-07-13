@@ -406,10 +406,16 @@ test('formal release derives explicit full-current strategy before opening resum
 test('formal release planner uses the selected mode and validates the exact strategy-bound plan', () => {
   const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
   const planner = extractFunctionBlock(deployScript, 'function createFormalReleasePlan')
+  const planCli = readFileSync(new URL('../release-plan.mjs', import.meta.url), 'utf8')
 
-  assert.match(planner, /function createFormalReleasePlan\(gitSha, releaseStrategy\)/)
+  assert.match(planner, /function createFormalReleasePlan\(gitSha, releaseStrategy, publishResume\)/)
   assert.match(planner, /`--mode=\$\{releaseStrategy\}`/)
   assert.match(planner, /`--head=\$\{gitSha\}`/)
+  assert.match(planner, /--publish-resume/)
+  assert.match(planner, /--version=/)
+  assert.match(planner, /--desc=/)
+  assert.match(planCli, /publishOnly:\s*hasOption\('publish-resume'\)/)
+  assert.match(planCli, /generatedBuildInfoMatches:/)
   assert.match(planner, /plan\.mode !== releaseStrategy/)
   assert.match(planner, /plan\.planningStrategy !== expectedPlanningStrategy/)
   assert.match(planner, /plan\.headSha !== gitSha/)
