@@ -4,8 +4,8 @@ function normalizedOutcome(name, value) {
 }
 
 export async function runReleasePreflight({ checks = [] } = {}) {
-  const results = []
-  for (const check of checks) {
+  const byName = new Map()
+  const execute = async (check) => {
     let fixture = check.fixture
     let outcome
     try {
@@ -23,7 +23,14 @@ export async function runReleasePreflight({ checks = [] } = {}) {
         }
       }
     }
-    results.push(outcome)
+    byName.set(check.name, outcome)
   }
+  for (const check of checks.filter(item => !item.mutation)) await execute(check)
+  const mutationGatePassed = checks.filter(item => item.gateForMutations).every(item => byName.get(item.name)?.status === 'passed')
+  for (const check of checks.filter(item => item.mutation)) {
+    if (!mutationGatePassed) byName.set(check.name, { name: check.name, status: 'failed', detail: 'production fixture blocked by preflight gate' })
+    else await execute(check)
+  }
+  const results = checks.map(check => byName.get(check.name))
   return { schemaVersion: 1, ok: results.every(item => item.status === 'passed'), checks: results }
 }

@@ -54,7 +54,7 @@ export function verifyPreflightGitAndPlan({ gitState, resumeRequested, resumeRun
   })
 }
 
-export function evaluateProbeEvidence({ evidence, startedAt, outboxId, jobId, complete }) {
-  const state = advanceProbeTimerEvidence({}, evidence, { startedAt, outboxId, jobId })
-  return { ...state, complete: complete === true, passed: state.probeOutboxSeen && state.probeV2JobSeen && complete === true }
+export function evaluateProbeEvidence({ state = {}, evidence, startedAt, outboxId, jobId, complete }) {
+  const next = advanceProbeTimerEvidence(state, evidence, { startedAt, outboxId, jobId })
+  return { ...next, complete: complete === true, passed: next.probeOutboxSeen && next.probeV2JobSeen && complete === true }
 }

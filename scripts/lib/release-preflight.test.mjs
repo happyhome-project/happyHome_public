@@ -45,3 +45,15 @@ test('release preflight cleans a predeclared fixture identity when create throws
   assert.deepEqual(cleaned, ['known-before-create'])
   assert.equal(result.ok, false)
 })
+
+test('release preflight aggregates pure reads but never creates a fixture when the mutation gate fails', async () => {
+  let creates = 0
+  const result = await runReleasePreflight({ checks: [
+    { name: 'collections', run: async () => ({ status: 'failed', detail: 'missing' }) },
+    { name: 'git-plan', gateForMutations: true, run: async () => ({ status: 'failed', detail: 'invalid git' }) },
+    { name: 'probe', mutation: true, createFixture: async () => { creates += 1; return {} }, run: async () => ({ status: 'passed' }) },
+  ] })
+  assert.equal(creates, 0)
+  assert.deepEqual(result.checks.map(item => item.name), ['collections', 'git-plan', 'probe'])
+  assert.equal(result.checks[2].status, 'failed')
+})

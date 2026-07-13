@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { createReleasePreflightChecks } from '../release-preflight.mjs'
+import { runReleasePreflight } from './release-preflight.mjs'
 
 test('preflight command builds every read/probe check without mutation entrypoints', () => {
   const checks = createReleasePreflightChecks({ app: null, env: {}, cwd: 'C:\\x', adminOptions: {} })
@@ -13,4 +14,17 @@ test('preflight command builds every read/probe check without mutation entrypoin
   assert.match(source, /verifyPreflightTimers/)
   assert.match(source, /verifyPreflightGitAndPlan/)
   assert.match(source, /evaluateProbeEvidence/)
+})
+
+test('invalid canonical git state blocks probe creation while pure reads remain aggregated', async () => {
+  let mutations = 0
+  const checks = createReleasePreflightChecks({ app: null, env: {}, cwd: 'C:\\feature', adminOptions: { adminInternalToken: 'present' },
+    readGitState: () => ({ cwd: 'C:\\feature', originUrl: 'https://github.com/happyhome-project/happyHome_public.git', branch: 'main', headSha: 'abcdef1', originMainSha: 'abcdef1', changedPaths: [] }),
+    invoke: async () => { mutations += 1; return { functionResult: {} } },
+  })
+  const result = await runReleasePreflight({ checks })
+  assert.equal(mutations, 0)
+  assert.equal(result.checks.find(item => item.name === 'rag-collections').status, 'indeterminate')
+  assert.equal(result.checks.find(item => item.name === 'full-current-plan-resume').status, 'indeterminate')
+  assert.equal(result.checks.find(item => item.name === 'timer-probe-document').status, 'failed')
 })

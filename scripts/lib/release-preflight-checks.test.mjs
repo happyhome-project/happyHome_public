@@ -54,3 +54,10 @@ test('probe evidence requires authenticated timer outbox and v2 job evidence plu
   assert.equal(evaluateProbeEvidence({ ...input, evidence: { ...evidence, source: 'manual' }, complete: true }).passed, false)
   assert.equal(evaluateProbeEvidence({ ...input, evidence, complete: false }).passed, false)
 })
+
+test('probe evidence accumulates outbox and v2 job observations across timer invocations', () => {
+  const base = { startedAt: '2026-01-01T00:00:00Z', outboxId: 'o', jobId: 'j' }
+  const first = evaluateProbeEvidence({ ...base, evidence: { source: 'timer', triggerName: 'post-rag-worker-every-minute', invokedAt: '2026-01-01T00:00:01Z', outboxIds: ['o'], v2JobIds: [], v2Attempted: false, v2Succeeded: false, v2CompletedCount: 0 }, complete: false })
+  const second = evaluateProbeEvidence({ ...base, state: first, evidence: { source: 'timer', triggerName: 'post-rag-worker-every-minute', invokedAt: '2026-01-01T00:00:02Z', outboxIds: [], v2JobIds: ['j'], v2Attempted: true, v2Succeeded: true, v2CompletedCount: 1 }, complete: true })
+  assert.equal(second.passed, true)
+})

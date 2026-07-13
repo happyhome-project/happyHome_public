@@ -329,7 +329,18 @@ test('wrapper heartbeat advances while the main thread is synchronously blocked'
   let initialHeartbeat;
   await withValidationLease({ command: 'blocked-main', homeDir, heartbeatIntervalMs: 50 }, async (handle) => {
     initialHeartbeat = handle.snapshot.heartbeatAt;
-    const child = spawnSync(process.execPath, ['-e', 'setTimeout(() => {}, 300)']);
+    const observer = `
+      const fs = require('node:fs');
+      const leasePath = process.argv[1];
+      const initial = process.argv[2];
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        try { if (JSON.parse(fs.readFileSync(leasePath, 'utf8')).heartbeatAt !== initial) process.exit(0); } catch {}
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      }
+      process.exit(2);
+    `;
+    const child = spawnSync(process.execPath, ['-e', observer, leasePath(homeDir), initialHeartbeat]);
     assert.equal(child.status, 0);
     const inspection = await inspectValidationLease({ homeDir });
     assert.equal(inspection.status, 'active');

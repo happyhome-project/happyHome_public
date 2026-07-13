@@ -23,7 +23,7 @@ function gitState(cwd) {
   return { cwd, originUrl: git(['remote', 'get-url', 'origin'], cwd), branch: git(['branch', '--show-current'], cwd), headSha: git(['rev-parse', 'HEAD'], cwd), originMainSha: git(['rev-parse', 'origin/main'], cwd), changedPaths }
 }
 
-export function createReleasePreflightChecks({ app, env, cwd, adminOptions, resumeRequested = false, resumeRunState = null, invoke = invokeAdmin, runner = defaultRunner, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
+export function createReleasePreflightChecks({ app, env, cwd, adminOptions, resumeRequested = false, resumeRunState = null, invoke = invokeAdmin, runner = defaultRunner, readGitState = gitState, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
   const endpoint = String(env.TENCENT_RAG_ES_ENDPOINT || '').replace(/\/+$/, '')
   const index = String(env.TENCENT_RAG_ES_INDEX || 'happyhome-post-rag-v2')
   const auth = () => `Basic ${Buffer.from(`${env.TENCENT_RAG_ES_USERNAME}:${env.TENCENT_RAG_ES_PASSWORD}`).toString('base64')}`
@@ -45,15 +45,15 @@ export function createReleasePreflightChecks({ app, env, cwd, adminOptions, resu
       const response = await app.functions.scfService.request('ListTriggers', { FunctionName: functionName, Namespace: detail?.Namespace || app.functions.getFunctionConfig?.().namespace })
       return response?.Triggers || []
     } }) } },
-    { name: 'full-current-plan-resume', run: async () => verifyPreflightGitAndPlan({ gitState: gitState(cwd), resumeRequested, resumeRunState }) },
-    { name: 'timer-probe-document',
+    { name: 'full-current-plan-resume', gateForMutations: true, run: async () => verifyPreflightGitAndPlan({ gitState: readGitState(cwd), resumeRequested, resumeRunState }) },
+    { name: 'timer-probe-document', mutation: true,
       fixture: identity,
       createFixture: async () => { if (!adminOptions.adminInternalToken) throw new Error('admin credential unavailable'); const created = (await invoke('post.ragTimerProbeCreateAdmin', identity, adminOptions, runner)).functionResult; Object.assign(identity, created); return identity },
-      run: async probe => { const startedAt = probe.baseline; const deadline = createTimerProbeDeadline(Date.now(), env); let state
+      run: async probe => { const startedAt = probe.baseline; const deadline = createTimerProbeDeadline(Date.now(), env); let state = {}
         while (Date.now() < deadline) {
           const evidence = (await invoke('post.ragTimerEvidenceAdmin', { runId }, adminOptions, runner)).functionResult?.evidence
           const status = (await invoke('post.ragTimerProbeStatusAdmin', probe, adminOptions, runner)).functionResult
-          state = evaluateProbeEvidence({ evidence, startedAt, outboxId: probe.outboxId, jobId: status?.job?._id, complete: status?.complete })
+          state = evaluateProbeEvidence({ state, evidence, startedAt, outboxId: probe.outboxId, jobId: status?.job?._id, complete: status?.complete })
           if (state.passed) return { status: 'passed' }
           await wait(Math.min(5000, Math.max(0, deadline - Date.now())))
         }
