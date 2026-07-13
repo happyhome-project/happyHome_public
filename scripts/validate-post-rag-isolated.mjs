@@ -24,7 +24,7 @@ import { isScfTriggerEnabled } from './lib/scf-owned-timer.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const POLL_MS = 3_000
-const WAIT_MS = 5 * 60_000
+const WAIT_MS = 10 * 60_000
 const TRIGGER_NAME = 'post-rag-worker-every-minute'
 const REPO_DEFAULT_PUBLIC_COMMUNITY_ID = '56ba808e69df985c046e3d4407e8c672'
 

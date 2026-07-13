@@ -275,6 +275,8 @@ test('inspect failure never treats an absent cleanup audit as cleaned', async ()
 test('exposes the isolated validator package command', async () => {
   const pkg = JSON.parse(await readFile(resolve('package.json'), 'utf8'))
   assert.equal(pkg.scripts['validate:rag:isolated'], 'node scripts/validate-post-rag-isolated.mjs')
+  const source = await readFile(resolve('scripts/validate-post-rag-isolated.mjs'), 'utf8')
+  assert.match(source, /const WAIT_MS = 10 \* 60_000/)
 })
 
 function scenario(overrides = {}) {
