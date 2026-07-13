@@ -1,17 +1,33 @@
 <template>
   <view class="default-detail">
     <view class="detail-head">
+      <text class="detail-title">{{ titleText }}</text>
+      <view class="detail-author-row">
+        <image
+          v-if="authorAvatarUrl"
+          :src="authorAvatarUrl"
+          class="detail-author-avatar"
+          mode="aspectFill"
+        />
+        <view v-else class="detail-author-avatar detail-author-avatar--fallback">
+          <text>{{ authorInitial }}</text>
+        </view>
+        <view class="detail-author-copy">
+          <text class="detail-author-name">{{ authorName }}</text>
+          <text class="detail-publish-date">{{ publishDate }}</text>
+        </view>
+      </view>
+
       <view class="section-line">
         <text class="section-pill"><text class="section-dot"></text>{{ sectionName }}</text>
       </view>
-
-      <text class="detail-title">{{ titleText }}</text>
       <view v-if="leadText" class="lead-card">
         <text v-if="leadLabel" class="lead-label">{{ leadLabel }}:</text>
         <text class="lead-value">{{ leadText }}</text>
       </view>
     </view>
 
+    <view class="detail-body">
     <view v-if="imageItems.length" class="image-module">
       <image
         v-for="(image, index) in imageItems"
@@ -114,6 +130,7 @@
         </view>
       </view>
     </view>
+    </view>
   </view>
 </template>
 
@@ -122,7 +139,7 @@ import { computed } from 'vue'
 import RichNoteRenderer from './widgets/RichNoteRenderer.vue'
 import NoteBlocksRenderer from './widgets/NoteBlocksRenderer.vue'
 import VideoPlayerCard from './widgets/VideoPlayerCard.vue'
-import { formatWidgetValue } from '../utils/widget'
+import { formatWidgetValue, resolvePostDetailTitle } from '../utils/widget'
 import { resolveWidgetLabel } from '../utils/widget-form'
 import { isRichNoteEmpty, normalizeRichNoteContent } from '../utils/rich-note'
 import { useAudioStore } from '../store/audio'
@@ -146,7 +163,6 @@ type LocationItem = {
 }
 
 const audioStore = useAudioStore()
-const titleLabelNeedles = ['标题', '名称', '名字', '书名', '物品', '活动', '医生姓名', '音乐名称', '电影分类']
 
 const sortedWidgets = computed(() =>
   (props.widgets || [])
@@ -156,19 +172,16 @@ const sortedWidgets = computed(() =>
 )
 
 const sectionName = computed(() => String(props.section?.name || ''))
+const authorName = computed(() => String(props.post?.authorNickname || '社区邻居').trim() || '社区邻居')
+const authorInitial = computed(() => authorName.value.slice(0, 1) || '邻')
+const authorAvatarUrl = computed(() => String(props.post?.authorAvatarUrl || '').trim())
+const publishDate = computed(() => formatPostDate(props.post?.createdAt))
 
+const titleResolution = computed(() => resolvePostDetailTitle(props.post, props.section))
 const titleWidget = computed(() => {
-  const preferred = sortedWidgets.value.find((widget) =>
-    ['short_text', 'summary'].includes(widget.type) &&
-    labelLooksLike(resolveWidgetLabel(widget), titleLabelNeedles)
-  )
-  if (preferred) return preferred
-  const hasEmptyPreferredTitle = (props.widgets || []).some((widget) =>
-    ['short_text', 'summary'].includes(widget.type) &&
-    labelLooksLike(resolveWidgetLabel(widget), titleLabelNeedles)
-  )
-  if (hasEmptyPreferredTitle) return null
-  return sortedWidgets.value.find((widget) => ['short_text', 'summary'].includes(widget.type))
+  const sourceWidgetId = titleResolution.value.sourceWidgetId
+  if (!sourceWidgetId) return null
+  return sortedWidgets.value.find((widget) => widget.widgetId === sourceWidgetId) || null
 })
 
 const leadWidget = computed(() => {
@@ -182,7 +195,7 @@ const leadWidget = computed(() => {
 })
 
 const titleText = computed(() =>
-  (titleWidget.value ? textValue(titleWidget.value) : '').trim() || sectionName.value || '帖子'
+  titleResolution.value.text
 )
 
 const leadText = computed(() =>
@@ -367,6 +380,16 @@ function bodyBlockTitle(label: string) {
   return String(label || '').trim()
 }
 
+function formatPostDate(value: unknown) {
+  if (!value) return ''
+  const date = new Date(String(value))
+  if (Number.isNaN(date.getTime())) return ''
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 function parseLocation(value: any): { name: string; address: string; lat: number; lng: number } | null {
   if (!value || typeof value !== 'object') return null
   const lat = Number(value.lat)
@@ -447,11 +470,54 @@ function formatAudioDuration(value: unknown): string {
   padding: 0 0 $hh-space-md;
 }
 
+.detail-author-row {
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  margin-top: 22rpx;
+}
+
+.detail-author-avatar {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 999rpx;
+  flex: 0 0 auto;
+  background: var(--hh-color-card-soft);
+}
+
+.detail-author-avatar--fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--hh-color-brand-strong);
+  font-size: 25rpx;
+  font-weight: $hh-font-weight-bold;
+}
+
+.detail-author-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.detail-author-name {
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-body-base-size);
+  font-weight: $hh-font-weight-medium;
+}
+
+.detail-publish-date {
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-caption-lg-size);
+}
+
 .section-line {
   display: flex;
   align-items: center;
   gap: 12rpx;
   flex-wrap: wrap;
+  margin-top: 22rpx;
 }
 
 .section-pill {
@@ -477,7 +543,6 @@ function formatAudioDuration(value: unknown): string {
 
 .detail-title {
   display: block;
-  margin-top: 28rpx;
   font-family: $hh-font-serif;
   font-size: var(--hh-text-heading-lg-size);
   line-height: var(--hh-text-heading-lg-line);

@@ -73,8 +73,8 @@ const activePublishSections = computed(() =>
 )
 
 const publishOptions = computed(() =>
-  activePublishSections.value.slice(0, 8).map((section: any, index: number) => {
-    const meta = resolvePublishMeta(section?.name, index)
+  activePublishSections.value.slice(0, 8).map((section: any) => {
+    const meta = resolvePublishMeta(section?.name)
     return {
       section,
       label: displayPublishSectionName(section?.name),
@@ -168,7 +168,7 @@ function isPublishableSection(section: any) {
   })
 }
 
-function resolvePublishMeta(name: unknown, index: number) {
+function resolvePublishMeta(name: unknown) {
   const text = String(name || '').trim()
   if (/亲子|出游|攻略|路线/.test(text)) return { tone: 'family', iconSrc: '/static/publish-icons/family.svg' }
   if (/闲置|交易|二手|转让/.test(text)) return { tone: 'trade', iconSrc: '/static/publish-icons/trade.svg' }
@@ -176,19 +176,9 @@ function resolvePublishMeta(name: unknown, index: number) {
   if (/失物|招领|寻物/.test(text)) return { tone: 'lost', iconSrc: '/static/publish-icons/lost.svg' }
   if (/邻里|互助|求助|帮忙/.test(text)) return { tone: 'neighbor', iconSrc: '/static/publish-icons/neighbor.svg' }
   if (/拼车|顺风|车/.test(text)) return { tone: 'car', iconSrc: '/static/publish-icons/car.svg' }
-  const tones = ['family', 'trade', 'notice', 'lost', 'neighbor', 'car']
-  const iconByTone: Record<string, string> = {
-    family: '/static/publish-icons/family.svg',
-    trade: '/static/publish-icons/trade.svg',
-    notice: '/static/publish-icons/notice.svg',
-    lost: '/static/publish-icons/lost.svg',
-    neighbor: '/static/publish-icons/neighbor.svg',
-    car: '/static/publish-icons/car.svg',
-  }
-  const tone = tones[index % tones.length]
   return {
-    tone,
-    iconSrc: iconByTone[tone],
+    tone: 'general',
+    iconSrc: '/static/publish-icons/general.svg',
   }
 }
 
@@ -215,8 +205,7 @@ void APP_TABS
   left: 0;
   right: 0;
   bottom: 0;
-  min-height: 648rpx;
-  padding: 48rpx 40rpx calc(64rpx + env(safe-area-inset-bottom));
+  padding: 48rpx 40rpx calc(40rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
   border-radius: 32rpx 32rpx 0 0;
   background: #fff;
@@ -283,6 +272,10 @@ void APP_TABS
   background: #def7ec;
 }
 
+.publish-icon--general {
+  background: #f7f7f7;
+}
+
 .publish-label {
   width: 112rpx;
   color: var(--hh-color-text-secondary);
@@ -297,7 +290,7 @@ void APP_TABS
 .publish-close {
   width: 80rpx;
   height: 80rpx;
-  margin: 96rpx auto 0;
+  margin: 40rpx auto 0;
   padding: 0;
   border: 0;
   border-radius: $hh-radius-full;

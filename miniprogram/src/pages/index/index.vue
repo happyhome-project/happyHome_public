@@ -271,8 +271,22 @@
       :style="activeArchiveStyle"
     >
       <view class="active-archive-body">
+        <view v-if="showHomeEmptyState" class="home-empty-state">
+          <image
+            class="home-empty-image"
+            src="/static/home-empty.png"
+            mode="aspectFit"
+            aria-hidden="true"
+          />
+          <view class="home-empty-copy">
+            <text class="home-empty-title">暂无社区内容</text>
+            <text class="home-empty-description">这里还没有帖子，成为第一个分享的人吧</text>
+          </view>
+          <button class="home-empty-action" @tap="openHomeEmptyPublish">去发布帖子</button>
+        </view>
+
         <view
-          v-if="activeArchiveGroup.displayTemplate === 'guide_note'"
+          v-else-if="activeArchiveGroup.displayTemplate === 'guide_note'"
           class="guide-feed"
         >
           <view
@@ -430,6 +444,7 @@ import { clientLog, markClientDiagnosticStage, startHomeDiagnosticWatchdog } fro
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, normalizeHomeSnapshotShape, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
 import { formatHomeQuoteCite } from '../../utils/home-quote'
+import { createHomeLoadingGate } from '../../utils/home-loading-gate'
 import { resolveCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { resolveSectionIconGlyph } from '../../utils/section-icon'
 import {
@@ -464,6 +479,8 @@ markClientDiagnosticStage('home.stores.ready', {
 })
 const showGuestIntro = ref(false)
 const guestIntroConfig = ref<GuestIntroConfig | null>(null)
+const homeLoading = ref(true)
+const homeLoadingGate = createHomeLoadingGate(homeLoading)
 const postsBySection = ref<Record<string, any[]>>({})
 const resolvedHomeBannerCoverUrls = ref<Record<string, string>>({})
 const resolvedHomeGuideCoverUrls = ref<Record<string, string>>({})
@@ -766,7 +783,6 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
         }),
       }
     })
-    .filter((g) => g.items.length > 0)
 })
 
 const rawHomeGuideCoverImages = computed(() => {
@@ -796,6 +812,17 @@ const rawHomeBannerCoverImages = computed(() => {
 const activeArchiveGroup = computed(() => {
   const index = activeArchiveIndex.value
   return index >= 0 ? archiveGroups.value[index] ?? null : null
+})
+
+const showHomeEmptyState = computed(() => {
+  const group = activeArchiveGroup.value
+  return (
+    !homeLoading.value &&
+    Boolean(communityStore.currentCommunityId) &&
+    Boolean(communityStore.currentCommunity) &&
+    group !== null &&
+    group.items.length === 0
+  )
 })
 
 const guideColumns = computed<ArchiveItem[][]>(() => {
@@ -1361,6 +1388,16 @@ function selectArchiveGroup(g: ArchiveGroup) {
   })
 }
 
+function openHomeEmptyPublish() {
+  const sectionId = activeArchiveGroup.value?.id || ''
+  if (!sectionId) return
+  const returnTo = '/pages/index/index'
+  uni.navigateTo({
+    url: `/pages/create/index?returnTo=${encodeURIComponent(returnTo)}&sectionId=${encodeURIComponent(sectionId)}`,
+    fail: (error) => clientLog('error', 'home.empty.publish.navigate.fail', { sectionId, error }),
+  })
+}
+
 function onGroupHeaderTap(g: ArchiveGroup) {
   if (!g.id) return
   const url = `/pages/section/index?sectionId=${encodeURIComponent(g.id)}`
@@ -1674,6 +1711,7 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
     return
   }
 
+  const loadingOwner = homeLoadingGate.beginRefresh()
   const refreshPromise = (async () => {
     let nextForce = force
     do {
@@ -1689,6 +1727,7 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
   } finally {
     if (activeHomeRefreshPromise === refreshPromise) {
       activeHomeRefreshPromise = null
+      homeLoadingGate.endRefresh(loadingOwner)
     }
   }
 }
@@ -1734,6 +1773,7 @@ async function initializeHome() {
   try {
     const redirectedByShare = await handleInitialShareLanding()
     if (redirectedByShare) {
+      homeLoadingGate.releaseInitial()
       probeHomeRender('share.redirect')
       return
     }
@@ -1742,6 +1782,7 @@ async function initializeHome() {
     scheduleHomeFixedControlsMeasure()
     probeHomeRender('mounted')
   } catch (error) {
+    homeLoadingGate.releaseInitial()
     clientLog('error', 'home.mounted.fail', { error })
     probeHomeRender('mounted.fail')
   }
@@ -3326,6 +3367,68 @@ onShareAppMessage(() => {
 
 .active-archive-body {
   min-height: inherit;
+}
+
+.home-empty-state {
+  width: 100%;
+  max-width: 576rpx;
+  margin: 64rpx auto 96rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 32rpx;
+  text-align: center;
+}
+
+.home-empty-image {
+  width: 364rpx;
+  height: 344rpx;
+}
+
+.home-empty-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.home-empty-title {
+  color: #181818;
+  font-size: var(--hh-text-heading-md-size);
+  line-height: var(--hh-text-heading-md-line);
+  font-weight: $hh-font-weight-bold;
+}
+
+.home-empty-description {
+  width: 100%;
+  max-width: 100%;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: var(--hh-text-body-lg-size);
+  line-height: var(--hh-text-body-lg-line);
+  font-weight: $hh-font-weight-regular;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.home-empty-action {
+  width: 100%;
+  height: 96rpx;
+  margin: 0;
+  padding: 0 40rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: $hh-radius-full;
+  background: var(--hh-color-brand-primary);
+  color: #fff;
+  font-size: var(--hh-text-heading-sm-size);
+  line-height: var(--hh-text-heading-sm-line);
+  font-weight: $hh-font-weight-bold;
+}
+
+.home-empty-action::after {
+  border: 0;
 }
 
 .active-archive--default .arc-card {

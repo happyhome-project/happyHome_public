@@ -34,6 +34,47 @@ export interface PostHomeTitleIssue {
 }
 
 const HOME_TITLE_WIDGET_TYPES = ['short_text', 'summary', 'number', 'rich_text', 'rich_note']
+const HOME_TITLE_LABEL_NEEDLES = ['标题', '名称', '名字', '书名', '物品', '活动', '医生姓名', '音乐名称', '电影分类']
+
+export interface PostDetailTitleResolution {
+  text: string
+  sourceWidgetId: string | null
+}
+
+export function resolvePostDetailTitle(post: Post, section: Section): PostDetailTitleResolution {
+  const carpoolSummary = getCarpoolListSummary(post, section)
+  if (carpoolSummary?.route) {
+    return { text: carpoolSummary.route, sourceWidgetId: null }
+  }
+
+  const widgets = (section.widgets || []).slice().sort((a, b) => a.order - b.order)
+  const semanticTitleWidget = widgets.find((widget) =>
+    isResolverSemanticTitleWidget(widget) &&
+    getWidgetValue(post, widget) !== ''
+  )
+  if (semanticTitleWidget) {
+    return {
+      text: getWidgetValue(post, semanticTitleWidget),
+      sourceWidgetId: consumedTitleSourceWidgetId(semanticTitleWidget),
+    }
+  }
+
+  const fallbackWidget = widgets.find((widget) =>
+    HOME_TITLE_WIDGET_TYPES.includes(widget.type) && getWidgetValue(post, widget) !== ''
+  )
+  if (fallbackWidget) {
+    return {
+      text: getWidgetValue(post, fallbackWidget),
+      sourceWidgetId: consumedTitleSourceWidgetId(fallbackWidget),
+    }
+  }
+
+  const attendanceWidget = widgets.find((widget) => widget.type === 'attendance' && String(widget.label || '').trim())
+  return {
+    text: String(attendanceWidget?.label || section.name || '无标题').trim(),
+    sourceWidgetId: null,
+  }
+}
 
 export function getPostHomeTitle(post: Post, section: Section): string {
   const carpoolSummary = getCarpoolListSummary(post, section)
@@ -135,6 +176,19 @@ function isTitleLikeWidget(widget: Section['widgets'][number]): boolean {
   return fieldKey === 'title' ||
     fieldKey.includes('title') ||
     ['标题', '名称', '名字'].some((item) => label.includes(item))
+}
+
+function isResolverSemanticTitleWidget(widget: Section['widgets'][number]): boolean {
+  if (!HOME_TITLE_WIDGET_TYPES.includes(widget.type)) return false
+  const fieldKey = String(widget.fieldKey || '').toLowerCase()
+  const label = String(widget.label || '').replace(/\s/g, '')
+  return fieldKey === 'title' ||
+    fieldKey.includes('title') ||
+    HOME_TITLE_LABEL_NEEDLES.some((item) => label.includes(item))
+}
+
+function consumedTitleSourceWidgetId(widget: Section['widgets'][number]): string | null {
+  return ['short_text', 'summary'].includes(widget.type) ? widget.widgetId : null
 }
 
 export function getArchiveHomeMeta(post: Post, section: Section): string {
