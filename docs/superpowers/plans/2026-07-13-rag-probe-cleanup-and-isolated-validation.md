@@ -34,7 +34,7 @@ expect(mockStore.get(mockKey('post_rag_release_probes', probe.runId))).toMatchOb
 Run:
 
 ```powershell
-npm.cmd test -- --runInBand cloud/lib/__tests__/post-rag-release-probe.integration.test.ts
+npm.cmd --prefix cloud run test:integration -- --runInBand lib/__tests__/post-rag-release-probe.integration.test.ts
 ```
 
 Expected: FAIL because current cleanup immediately returns success and writes `status=cleaned`.
@@ -146,7 +146,7 @@ Rules:
 Run:
 
 ```powershell
-npm.cmd test -- --runInBand cloud/lib/__tests__/post-rag-release-probe.integration.test.ts cloud/functions/admin/__tests__/admin.test.ts
+npm.cmd --prefix cloud run test:integration -- --runInBand lib/__tests__/post-rag-release-probe.integration.test.ts functions/admin/__tests__/admin.test.ts
 ```
 
 Expected: PASS.
@@ -348,9 +348,9 @@ Return bounded counts and IDs only; never return tokens, embeddings, endpoints, 
 2. Deploy a unique function with `tcb fn deploy`.
 3. Copy the production worker's VPC and required RAG environment values, adding independent validation/timer tokens.
 4. Create a timer trigger named `post-rag-worker-every-minute` bound only to the temporary function.
-5. Invoke `create`, wait for exact create completion, call the real semantic-search cloud action with query `probe-<runId>`, and require the exact fixture post/citation.
+5. Invoke `create`, wait for exact create completion caused by the temporary authenticated timer, call the real semantic-search cloud action with query `probe-<runId>`, and require the exact fixture in `items[].postId` with its matched source fields. Do not require AI citations; the production contract intentionally returns `citations: []`.
 6. Invoke cleanup, wait for the exact delete job, verify an exact semantic lookup no longer returns the fixture, and poll cleanup to `cleaned`.
-7. Compare pre/post non-probe counts and assert zero probe-owned residue.
+7. Assert zero operational probe-owned residue and exactly one retained `cleaned` probe audit record. Record pre/post non-probe counts as observations rather than an equality gate in the shared environment.
 8. In `finally`, delete the timer trigger, temporary function, artifact directory, and temporary secrets; re-read control-plane state to prove absence.
 
 The command writes sanitized evidence to `.codex-local/rag-validation/<runId>/evidence.json`.
@@ -403,7 +403,8 @@ Run the Step 2 command. Expected: PASS.
 - [ ] **Step 1: Run affected cloud tests**
 
 ```powershell
-npm.cmd test -- --runInBand cloud/lib/__tests__/post-rag-release-probe.integration.test.ts cloud/lib/__tests__/safe-error-diagnostic.test.ts cloud/lib/__tests__/post-rag-job-processor.test.ts cloud/functions/admin/__tests__/admin.test.ts
+npm.cmd --prefix cloud run test:unit -- --runInBand lib/__tests__/safe-error-diagnostic.test.ts lib/__tests__/post-rag-job-processor.test.ts
+npm.cmd --prefix cloud run test:integration -- --runInBand lib/__tests__/post-rag-release-probe.integration.test.ts functions/admin/__tests__/admin.test.ts
 node --test scripts/lib/post-rag-timer-probe-runner.test.mjs scripts/lib/post-rag-isolated-validation.test.mjs
 ```
 
@@ -412,9 +413,9 @@ Expected: all pass.
 - [ ] **Step 2: Run full cloud unit/integration and builds**
 
 ```powershell
-npm.cmd run test:cloud
-npm.cmd run test:integration
-npm.cmd run build:cloud
+npm.cmd --prefix cloud run test:unit -- --runInBand
+npm.cmd --prefix cloud run test:integration -- --runInBand
+npm.cmd --prefix cloud run build
 git diff --check
 ```
 
@@ -430,12 +431,12 @@ Expected evidence:
 
 - create outbox consumed;
 - V2 job completed with `outcome=indexed`;
-- exact semantic result includes the fixture post and citation fields;
+- exact semantic result includes the fixture post in `items[].postId` and its matched source fields;
 - delete job completed with `outcome=removed` or `superseded`;
 - exact semantic result no longer includes the fixture;
 - probe status is `cleaned`;
-- probe-owned artifact counts are zero;
-- non-probe baseline counts are unchanged;
+- operational probe-owned artifact counts are zero and the retained audit record is `cleaned`;
+- non-probe baseline/final counts are recorded as observations;
 - temporary trigger/function/control-plane secrets are absent.
 
 - [ ] **Step 4: Commit and ordinary-push through PR control**

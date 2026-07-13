@@ -64,9 +64,9 @@ Validation steps:
 2. Deploy the temporary function with copied RAG network/environment configuration and independent temporary credentials.
 3. Create a uniquely named release probe fixture.
 4. Let the temporary timer process only that fixture's create outbox and V2 job.
-5. Verify job completion, ES document identity/vector mapping, and semantic retrieval returning the exact post with citation fields.
+5. Verify job completion, ES document identity/vector mapping, and semantic retrieval returning the exact post through the production `items[].postId` contract. The current product intentionally returns `citations: []`; this validation does not invent an AI answer or citation requirement.
 6. Start cleanup, process only the cleanup outbox/job, and verify the ES document is absent.
-7. Poll cleanup to `cleaned`; assert all probe-owned artifacts are absent and global non-probe records were unchanged.
+7. Poll cleanup to `cleaned`; assert all operational probe-owned artifacts are absent and exactly one `cleaned` probe audit record remains. Shared non-probe counts are recorded as observations because concurrent business traffic may legitimately change them.
 8. Repeat the lifecycle enough times to catch ordering/idempotency errors and record latency.
 9. Delete the temporary trigger/function and temporary secrets; verify cleanup from the control plane.
 
