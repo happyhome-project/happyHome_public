@@ -29,7 +29,7 @@ import type {
   PostContent,
   Post,
 } from '../../shared/types'
-import { normalizeGuideNoteSection } from '../../shared/guide-note-widgets'
+import { normalizeSectionTemplates } from '../../shared/section-templates'
 import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
 import { resolvePostAuthorNickname } from '../../shared/post-author'
 
@@ -130,7 +130,7 @@ function getAttendanceWidgets(section: Section): Widget[] {
 }
 
 function normalizePostSection(section: Section): Section {
-  return normalizeTextNoteSection(normalizeGuideNoteSection(section)) as Section
+  return normalizeSectionTemplates(section) as Section
 }
 
 function normalizeCapacityValue(value: unknown): number | undefined {
@@ -717,10 +717,12 @@ export async function handleBootstrap(params: {
   currentCommunityId?: string
   limitPerSection?: number
   asGuest?: boolean
+  _trace?: unknown
 }, openid?: string) {
   return buildHomeBootstrap(params.asGuest ? '' : (openid || ''), {
     currentCommunityId: params.currentCommunityId,
     limitPerSection: params.limitPerSection,
+    trace: params._trace,
   })
 }
 

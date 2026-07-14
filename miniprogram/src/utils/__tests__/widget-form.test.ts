@@ -18,6 +18,7 @@ describe('widget-form label helpers', () => {
   test('resolves widget label with type fallback', () => {
     expect(resolveWidgetLabel({ type: 'datetime', label: '新控件' })).toBe('日期时间')
     expect(resolveWidgetLabel({ type: 'location', label: '' })).toBe('位置')
+    expect(resolveWidgetLabel({ type: 'topic', label: '新控件' })).toBe('话题')
     expect(resolveWidgetLabel({ type: 'short_text', label: '目的地' })).toBe('目的地')
   })
 

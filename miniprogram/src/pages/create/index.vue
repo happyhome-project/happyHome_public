@@ -48,7 +48,7 @@
         </view>
       </view>
 
-      <view v-else class="form" :class="{ 'form--figma': isFigmaCreateMode }">
+      <view v-else class="form" :class="{ 'form--figma': isFigmaCreateMode, 'form--image-note': isImageNoteCreateMode }">
         <view v-if="!isFigmaCreateMode" class="form-header">
           <text class="section-tag" @tap="handleFormBack">← {{ selectedSection.name }}</text>
           <text v-if="isActivityInviteMode" class="invite-mode-tag">从攻略发起召集</text>
@@ -56,8 +56,10 @@
 
         <template v-if="isTextNoteCreateMode">
           <view v-if="textNoteStep === 'compose'" class="text-note-compose">
-            <WidgetEditor v-if="textNoteTitleWidget" :widget="textNoteTitleWidget" variant="figma" :allow-rich-note-images="false" v-model="formData[textNoteTitleWidget.widgetId]" />
-            <WidgetEditor v-if="textNoteBodyWidget" :widget="textNoteBodyWidget" variant="figma" :allow-rich-note-images="false" v-model="formData[textNoteBodyWidget.widgetId]" />
+            <view class="figma-guide-main-card text-note-editor-card">
+              <WidgetEditor v-if="textNoteTitleWidget" :widget="textNoteTitleWidget" variant="figma" embedded hide-label guide-role="title" placeholder="添加标题" :allow-rich-note-images="false" v-model="formData[textNoteTitleWidget.widgetId]" />
+              <WidgetEditor v-if="textNoteBodyWidget" :widget="textNoteBodyWidget" variant="figma" embedded hide-label guide-role="body" placeholder="添加正文内容" :allow-rich-note-images="false" v-model="formData[textNoteBodyWidget.widgetId]" />
+            </view>
             <view class="text-note-compose-actions">
               <button class="draft-btn" @tap="saveDraft">存草稿</button>
               <button class="btn-primary" data-testid="text-note-next" @tap="openTextNoteCover">下一步</button>
@@ -119,6 +121,62 @@
                 />
               </view>
 
+              <view v-else-if="block.type === 'imageNoteMain'" class="figma-image-note-main-card">
+                <WidgetEditor
+                  v-if="block.imageWidget"
+                  :widget="block.imageWidget"
+                  variant="figma"
+                  embedded
+                  hide-label
+                  guide-role="cover"
+                  :allow-rich-note-images="false"
+                  v-model="formData[block.imageWidget.widgetId]"
+                />
+                <WidgetEditor
+                  v-if="block.titleWidget"
+                  :widget="block.titleWidget"
+                  variant="figma"
+                  embedded
+                  hide-label
+                  guide-role="title"
+                  placeholder="添加主题"
+                  :allow-rich-note-images="false"
+                  v-model="formData[block.titleWidget.widgetId]"
+                />
+                <WidgetEditor
+                  v-if="block.bodyWidget"
+                  :widget="block.bodyWidget"
+                  variant="figma"
+                  embedded
+                  hide-label
+                  guide-role="body"
+                  placeholder="添加正文"
+                  :allow-rich-note-images="false"
+                  v-model="formData[block.bodyWidget.widgetId]"
+                />
+              </view>
+
+              <view v-else-if="block.type === 'imageNoteTools'" class="figma-image-note-tools">
+                <WidgetEditor
+                  v-if="block.topicWidget"
+                  :widget="block.topicWidget"
+                  variant="image-note-tool"
+                  embedded
+                  hide-label
+                  :allow-rich-note-images="false"
+                  v-model="formData[block.topicWidget.widgetId]"
+                />
+                <WidgetEditor
+                  v-if="block.locationWidget"
+                  :widget="block.locationWidget"
+                  variant="image-note-tool"
+                  embedded
+                  hide-label
+                  :allow-rich-note-images="false"
+                  v-model="formData[block.locationWidget.widgetId]"
+                />
+              </view>
+
               <view v-else-if="block.type === 'guideMain'" class="figma-guide-main-card">
                 <WidgetEditor
                   v-if="block.imageWidget"
@@ -152,10 +210,6 @@
                   :allow-rich-note-images="allowImagesForWidget(block.bodyWidget)"
                   v-model="formData[block.bodyWidget.widgetId]"
                 />
-                <view v-if="!isTextNoteCreateMode" class="figma-ai-write">
-                  <text class="figma-ai-icon">✣</text>
-                  <text>AI帮你写</text>
-                </view>
               </view>
 
               <view v-else-if="block.type === 'routeStats'" class="figma-route-stats-card">
@@ -222,6 +276,8 @@ import {
 } from '../../utils/app-tabbar'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { resolveActivityAnnouncementMain } from '../../utils/create-form-layout'
+import { buildImageNoteCreateBlocks } from '../../utils/image-note-create'
+import { isImageNoteSectionContract } from '../../utils/image-note'
 import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { ensureHierarchyStack, normalizeRouteUrl, openHierarchyParent } from '../../utils/hierarchy-nav'
@@ -292,10 +348,12 @@ const isGuideCreateMode = computed(() => {
   const name = String(section.name || '').replace(/\s/g, '')
   return GUIDE_CREATE_NAME_HINTS.some((hint) => name.includes(hint))
 })
+const isImageNoteCreateMode = computed(() => isImageNoteSectionContract(selectedSection.value))
 
 function allowImagesForWidget(widget: any) {
   if (isTextNoteCreateMode.value) return false
   if (isGuideCreateMode.value) return false
+  if (isGuideCreateMode.value || isImageNoteCreateMode.value) return false
   if (isActivityInviteMode.value && String(widget?.widgetId || '') === ACTIVITY_INVITE_WIDGET_IDS.note) return false
   return true
 }
@@ -303,6 +361,9 @@ function allowImagesForWidget(widget: any) {
 const createFormBlocks = computed(() => {
   const blocks: any[] = []
   const widgets = editableWidgets.value
+  if (isImageNoteCreateMode.value) {
+    return buildImageNoteCreateBlocks(selectedSection.value, widgets)
+  }
   const activityMain = selectedSection.value
     ? resolveActivityAnnouncementMain(selectedSection.value, widgets)
     : null
@@ -502,6 +563,11 @@ function selectSection(section: any, options: { returnTo?: string } = {}) {
   Object.keys(formData).forEach((key) => delete formData[key])
   textNoteStep.value = 'compose'
   textNoteTheme.value = 'paper'
+  for (const widget of section?.widgets || []) {
+    if (widget?.type === 'topic' && widget?.widgetId) {
+      formData[String(widget.widgetId)] = []
+    }
+  }
 }
 
 function handleFormBack() {
@@ -970,6 +1036,7 @@ async function handleSubmit() {
 }
 
 .figma-guide-main-card,
+.figma-image-note-main-card,
 .figma-activity-main-card {
   padding: 32rpx;
   border-radius: 24rpx;
@@ -978,6 +1045,25 @@ async function handleSubmit() {
   display: flex;
   flex-direction: column;
   gap: 32rpx;
+}
+
+.figma-image-note-tools {
+  min-width: 0;
+  padding: 24rpx 28rpx;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  border-radius: 24rpx;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.form--image-note :deep(.widget-editor--guide-cover .add-icon) {
+  color: #ff2442;
+}
+
+.form--image-note .btn-primary {
+  background: #ff2442;
 }
 
 .figma-ai-write {
@@ -1146,6 +1232,10 @@ async function handleSubmit() {
   gap: 24rpx;
 }
 
+.text-note-editor-card {
+  min-height: 620rpx;
+}
+
 .text-note-compose-actions,
 .text-note-cover-actions {
   display: flex;
@@ -1190,10 +1280,12 @@ async function handleSubmit() {
 
 .text-note-theme-option :deep(.text-note-cover-frame) { border-radius: 12rpx; }
 .text-note-theme-option :deep(.text-note-cover-content) { padding: 18rpx 14rpx; }
+.text-note-theme-option :deep(.text-note-cover-kicker) { margin-bottom: 6rpx; padding: 0; border-width: 0; font-size: 8rpx; letter-spacing: 1rpx; }
 .text-note-theme-option :deep(.text-note-cover-title) { margin-bottom: 8rpx; font-size: 15rpx; }
 .text-note-theme-option :deep(.text-note-cover-rule) { width: 24rpx; height: 2rpx; margin-bottom: 8rpx; }
 .text-note-theme-option :deep(.text-note-cover-body) { font-size: 11rpx; }
-.text-note-theme-option :deep(.text-note-cover-label) { margin-bottom: 6rpx; padding: 2rpx 5rpx; font-size: 8rpx; }
+.text-note-theme-option :deep(.text-note-cover-signature) { padding-top: 6rpx; font-size: 5rpx; letter-spacing: 0; }
+.text-note-theme-option :deep(.text-note-cover-decoration) { transform: scale(0.32); transform-origin: center; }
 .text-note-theme-option :deep(.text-note-cover-quote) { height: 20rpx; font-size: 28rpx; }
 
 .guard-state {

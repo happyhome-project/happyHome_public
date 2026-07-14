@@ -5,11 +5,11 @@
       <text class="page-subtitle">加入后即可浏览和发帖</text>
     </view>
 
-    <view v-if="loading" class="state-card">
-      <text>正在加载社区...</text>
+    <view v-if="loading && !communities.length" class="state-card">
+      <text>{{ slowLoading ? '加载较慢，请稍候...' : '正在加载社区...' }}</text>
     </view>
 
-    <view v-else-if="loadError" class="state-card">
+    <view v-else-if="loadError && !communities.length" class="state-card">
       <text>{{ loadError }}</text>
       <view class="state-action" @tap="loadCommunities">
         <text>重试</text>
@@ -17,6 +17,13 @@
     </view>
 
     <view v-else class="community-list">
+      <view v-if="loading || loadError" class="directory-refresh-state">
+        <text v-if="loading">{{ slowLoading ? '加载较慢，已保留现有社区' : '正在更新社区列表...' }}</text>
+        <text v-else>{{ loadError }}</text>
+        <view v-if="loadError" class="directory-refresh-action" @tap="loadCommunities">
+          <text>重试</text>
+        </view>
+      </view>
       <view v-if="!communities.length" class="state-card">
         <text>暂时没有可加入的社区</text>
       </view>
@@ -78,6 +85,8 @@ import {
 } from '../../utils/community-directory'
 import { useKeyedBusyLock } from '../../utils/useBusyLock'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
+import { clientLog } from '../../utils/client-log'
+import { createPerformanceRequestId } from '../../utils/performance-trace'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -85,36 +94,59 @@ const communities = ref<DirectoryCommunity[]>([])
 const resolvedCoverUrls = ref<Record<string, string>>({})
 const failedCoverIds = ref<Record<string, boolean>>({})
 const loading = ref(false)
+const slowLoading = ref(false)
 const loadError = ref('')
 const switchingId = ref('')
 const communityActionBusy = ref(false)
 let coverResolveVersion = 0
+let directoryLoadEpoch = 0
 
 async function loadCommunities() {
+  const epoch = ++directoryLoadEpoch
   if (!userStore.isLoggedIn) {
     communities.value = []
     loadError.value = ''
+    loading.value = false
+    slowLoading.value = false
+    coverResolveVersion += 1
     openOnboardingPreservingStack({ mode: 'discover' })
     return
   }
+  communities.value = mergeCommunityDirectory(
+    communityStore.myCommunities,
+    communities.value,
+  )
   loading.value = true
+  slowLoading.value = false
   loadError.value = ''
+  const slowTimer = setTimeout(() => {
+    if (epoch === directoryLoadEpoch && loading.value) slowLoading.value = true
+  }, 5000)
   try {
-    const results = await Promise.all([
-      communityStore.loadMyCommunities({ loadSections: false }),
-      communityApi.listDiscoverable(),
-    ])
-    const directory = results[1]
+    const directory = await communityApi.listDiscoverable({
+      requestId: createPerformanceRequestId('community-directory'),
+      stage: 'community.directory',
+      sample: communities.value.length > 0 ? 'warm' : 'cold',
+      counts: { cachedCommunityCount: communities.value.length },
+    })
+    if (epoch !== directoryLoadEpoch) return
     communities.value = mergeCommunityDirectory(
       communityStore.myCommunities,
       (directory.communities || []) as DirectoryCommunity[],
     )
-    await resolveCommunityCovers(communities.value)
+    loading.value = false
+    slowLoading.value = false
+    void resolveCommunityCovers(communities.value)
   } catch (error) {
+    if (epoch !== directoryLoadEpoch) return
     loadError.value = '社区列表加载失败'
     console.error('Failed to load communities:', error)
   } finally {
-    loading.value = false
+    clearTimeout(slowTimer)
+    if (epoch === directoryLoadEpoch) {
+      loading.value = false
+      slowLoading.value = false
+    }
   }
 }
 
@@ -169,19 +201,32 @@ function getStatusText(community: DirectoryCommunity) {
   return '我要加入'
 }
 
-async function selectCommunity(communityId: string) {
-  const id = String(communityId || '').trim()
+function selectCommunity(community: DirectoryCommunity | string) {
+  const shell = typeof community === 'string' ? undefined : community
+  const id = String(typeof community === 'string' ? community : community?._id || '').trim()
   if (!id || switchingId.value) return
+  const requestId = createPerformanceRequestId('community-switch')
   switchingId.value = id
-  try {
-    await communityStore.switchCommunity(id)
-    uni.switchTab({ url: '/pages/index/index' })
-  } catch (error) {
-    console.error('Failed to switch community:', error)
-    uni.showToast({ title: '切换失败，请重试', icon: 'none' })
-  } finally {
-    switchingId.value = ''
-  }
+  communityStore.selectCommunityShell(id, shell, requestId)
+  clientLog('info', 'community.switch.shell.commit', {
+    trace: {
+      requestId,
+      stage: 'community.switch',
+      counts: { cachedSectionCount: communityStore.currentSections.length },
+    },
+  })
+  uni.switchTab({
+    url: '/pages/index/index',
+    success: () => {
+      switchingId.value = ''
+    },
+    fail: (error) => {
+      communityStore.rollbackCommunitySelection(id)
+      switchingId.value = ''
+      console.error('Failed to switch community:', error)
+      uni.showToast({ title: '切换失败，请重试', icon: 'none' })
+    },
+  })
 }
 
 const applyLock = useKeyedBusyLock(
@@ -193,7 +238,7 @@ const applyLock = useKeyedBusyLock(
       if (community.joinType === 'open') {
         uni.showToast({ title: '加入成功！', icon: 'success' })
         await communityStore.loadMyCommunities({ loadSections: false })
-        await selectCommunity(community._id)
+        selectCommunity(community)
       } else {
         uni.showToast({ title: '申请已提交', icon: 'none' })
         await loadCommunities()
@@ -210,17 +255,17 @@ const applyLock = useKeyedBusyLock(
 function handleCommunityTap(community: DirectoryCommunity) {
   if (communityActionBusy.value || isCardDisabled(community) || switchingId.value || applyLock.isBusy(community._id)) return
   if (community.viewerStatus === 'active') {
-    void openJoinedCommunity(community._id)
+    void openJoinedCommunity(community)
     return
   }
   applyLock.run(community)
 }
 
-async function openJoinedCommunity(communityId: string) {
+async function openJoinedCommunity(community: DirectoryCommunity) {
   if (communityActionBusy.value) return
   communityActionBusy.value = true
   try {
-    await selectCommunity(communityId)
+    selectCommunity(community)
   } finally {
     communityActionBusy.value = false
   }
@@ -268,6 +313,26 @@ onShow(() => {
   display: flex;
   flex-direction: column;
   gap: 24rpx;
+}
+
+.directory-refresh-state {
+  min-height: 64rpx;
+  padding: 12rpx 24rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20rpx;
+  border-radius: 16rpx;
+  background: rgba(255, 255, 255, 0.72);
+  color: #777;
+  font-size: 24rpx;
+  line-height: 36rpx;
+}
+
+.directory-refresh-action {
+  flex: 0 0 auto;
+  color: #3dad7d;
+  font-weight: $hh-font-weight-bold;
 }
 
 .community-card {

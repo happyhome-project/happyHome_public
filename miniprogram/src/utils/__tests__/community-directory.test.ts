@@ -22,6 +22,23 @@ describe('mergeCommunityDirectory', () => {
     ])
   })
 
+  test('preserves viewer role returned by the directory for an already joined community', () => {
+    const joined = [
+      { _id: 'joined', name: '明士班', status: 'active' },
+    ] as any[]
+    const directory = [
+      { _id: 'joined', name: '明士班', status: 'active', viewerStatus: 'active', viewerRole: 'admin' },
+    ] as any[]
+
+    expect(mergeCommunityDirectory(joined, directory)).toEqual([
+      expect.objectContaining({
+        _id: 'joined',
+        viewerStatus: 'active',
+        viewerRole: 'admin',
+      }),
+    ])
+  })
+
   test('normalizes embedded newlines before one-line ellipsis rendering', () => {
     expect(singleLineCommunityText('第一行\n第二行\r\n第三行')).toBe('第一行 第二行 第三行')
   })

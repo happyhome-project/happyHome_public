@@ -14,13 +14,12 @@ export type AuditTargetType = 'text' | 'image' | 'audio' | 'video'
 
 export type SectionType = 'realtime' | 'evergreen'
 export type SectionStatus = 'active' | 'dormant' | 'archived'
-export type SectionDisplayTemplate = 'default' | 'guide_note' | 'text_note'
+export type SectionDisplayTemplate = 'default' | 'guide_note' | 'text_note' | 'image_note'
 export type TextNoteTheme = 'paper' | 'mint' | 'slate' | 'headline' | 'quote' | 'notice'
 
 export interface PostPresentation {
   textNoteTheme?: TextNoteTheme
 }
-
 export type WidgetType =
   | 'short_text'
   | 'summary'
@@ -31,6 +30,7 @@ export type WidgetType =
   | 'note_blocks'
   | 'rich_note'
   | 'location'
+  | 'topic'
   | 'activity_invite'
   | 'attendance'
   | 'video_group'
@@ -220,6 +220,10 @@ export interface Community {
   motto?: string
   mottoCite?: string
   homeBanners?: HomeBanner[]
+  /** 当前查看者的最新成员状态；目录和“我的社群”接口按需补充。 */
+  viewerStatus?: MemberStatus | null
+  /** 仅 active 成员返回角色，避免把历史申请角色误当作当前权限。 */
+  viewerRole?: MemberRole | null
 }
 
 export interface HomeBanner {

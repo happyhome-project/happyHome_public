@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "changeId": "performance-critical-path",
+  "actions": [
+    "ensure-indexes"
+  ],
+  "migrations": [],
+  "smokeSuites": []
+}

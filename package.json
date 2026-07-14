@@ -70,6 +70,7 @@
     "test:mp:detail-runtime-syntax": "node scripts/check-mp-detail-runtime-syntax.mjs",
     "test:mp:post-rag-search-static": "node scripts/test-mp-post-rag-search-static.mjs",
     "test:mp:home-tabs-scroll-static": "node scripts/test-home-tabs-scroll-static.mjs",
+    "test:mp:image-note-static": "node scripts/test-image-note-static.mjs",
     "test:mp:publish-ui-static": "node scripts/test-create-publish-ui-static.mjs",
     "test:mp:text-note-static": "node scripts/test-text-note-static.mjs",
     "test:mp:profile-critical-path": "node scripts/check-mp-profile-critical-path.mjs",

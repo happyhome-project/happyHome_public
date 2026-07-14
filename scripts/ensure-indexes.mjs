@@ -123,6 +123,45 @@ const INDEXES = [
       { Name: 'status', Direction: '1' },
     ],
   },
+  // 我的社群：按用户和 active 状态过滤，再按加入时间倒序。
+  {
+    coll: 'community_members',
+    name: 'idx_userId_status_joinedAt',
+    keys: [
+      { Name: 'userId', Direction: '1' },
+      { Name: 'status', Direction: '1' },
+      { Name: 'joinedAt', Direction: '-1' },
+    ],
+  },
+  // 社群目录：一次读取当前用户的全部申请记录，按申请时间取每个社群最新状态。
+  {
+    coll: 'community_members',
+    name: 'idx_userId_appliedAt',
+    keys: [
+      { Name: 'userId', Direction: '1' },
+      { Name: 'appliedAt', Direction: '-1' },
+    ],
+  },
+  // 单社群成员状态：按用户定位最新一条申请记录。
+  {
+    coll: 'community_members',
+    name: 'idx_communityId_userId_appliedAt',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'userId', Direction: '1' },
+      { Name: 'appliedAt', Direction: '-1' },
+    ],
+  },
+  // ACL：单社群、单用户、active 状态精确校验。
+  {
+    coll: 'community_members',
+    name: 'idx_communityId_userId_status',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'userId', Direction: '1' },
+      { Name: 'status', Direction: '1' },
+    ],
+  },
   // sections: section.list 按 communityId + order 排序
   {
     coll: 'sections',

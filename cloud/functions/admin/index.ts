@@ -71,6 +71,13 @@ import {
   normalizeTextNoteWidgets,
   TEXT_NOTE_LOCKED_WIDGETS,
 } from '../../shared/text-note-widgets'
+import {
+  buildDefaultImageNoteWidgets,
+  getImageNoteLockedWidget,
+  IMAGE_NOTE_LOCKED_WIDGETS,
+  isImageNoteSection,
+  normalizeImageNoteWidgets,
+} from '../../shared/image-note-widgets'
 import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
 import { resolvePostAuthorNickname } from '../../shared/post-author'
 
@@ -241,6 +248,7 @@ const ADMIN_POST_EDITABLE_WIDGET_TYPES = new Set([
   'rich_note',
   'image_group',
   'location',
+  'topic',
   'video_group',
   'audio_group',
 ])
@@ -258,25 +266,48 @@ function normalizeSection(section: any) {
     enableComment: section?.enableComment !== false,
     enableLike: section?.enableLike !== false,
   }
-  return {
+  const guideNormalized = {
     ...normalized,
     widgets: normalizeTextNoteWidgets({ ...normalized, widgets: normalizeGuideNoteWidgets(normalized) }),
   }
+  return {
+    ...guideNormalized,
+    widgets: normalizeImageNoteWidgets(guideNormalized),
+  }
 }
 
-function assertGuideNoteLockedWidgets(section: Section, widgets: Widget[]) {
-  if (!isGuideNoteSection(section)) return
+function getLockedTemplateDefinition(section: Section) {
+  if (isGuideNoteSection(section)) {
+    return {
+      label: '图文攻略',
+      widgets: GUIDE_NOTE_LOCKED_WIDGETS,
+      getLockedWidget: getGuideNoteLockedWidget,
+    }
+  }
+  if (isImageNoteSection(section)) {
+    return {
+      label: '图文_new',
+      widgets: IMAGE_NOTE_LOCKED_WIDGETS,
+      getLockedWidget: getImageNoteLockedWidget,
+    }
+  }
+  return null
+}
 
-  for (const lockedWidget of GUIDE_NOTE_LOCKED_WIDGETS) {
+function assertTemplateLockedWidgets(section: Section, widgets: Widget[]) {
+  const definition = getLockedTemplateDefinition(section)
+  if (!definition) return
+
+  for (const lockedWidget of definition.widgets) {
     const incoming = widgets.find((widget) => widget.widgetId === lockedWidget.widgetId)
     if (!incoming) {
-      throw new Error(`图文攻略固定控件「${lockedWidget.label}」不能删除`)
+      throw new Error(`${definition.label}固定控件「${lockedWidget.label}」不能删除`)
     }
 
     const immutableFields: Array<keyof Widget> = ['type', 'label', 'fieldKey', 'required', 'order', 'showInList']
     const changedField = immutableFields.find((field) => incoming[field] !== lockedWidget[field])
     if (changedField) {
-      throw new Error(`图文攻略固定控件「${lockedWidget.label}」不能修改`)
+      throw new Error(`${definition.label}固定控件「${lockedWidget.label}」不能修改`)
     }
   }
 }
@@ -300,6 +331,15 @@ function applyGuideNoteLockedFlags(section: Section, widgets: Widget[]) {
   if (!isGuideNoteSection(section)) return widgets
   return widgets.map((widget) => {
     const lockedWidget = getGuideNoteLockedWidget(widget.widgetId)
+    return lockedWidget ? { ...lockedWidget } : { ...widget, locked: false }
+  })
+}
+
+function applyTemplateLockedFlags(section: Section, widgets: Widget[]) {
+  const definition = getLockedTemplateDefinition(section)
+  if (!definition) return widgets
+  return widgets.map((widget) => {
+    const lockedWidget = definition.getLockedWidget(widget.widgetId)
     return lockedWidget ? { ...lockedWidget } : { ...widget, locked: false }
   })
 }
@@ -1119,7 +1159,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
   }
   if (action === 'section.create') {
     if (typeof params.displayTemplate !== 'undefined' &&
-        !['default', 'guide_note', 'text_note'].includes(params.displayTemplate)) {
+        !['default', 'guide_note', 'text_note', 'image_note'].includes(params.displayTemplate)) {
       throw new Error('不支持的展示模板')
     }
     const type = params.type === 'realtime' ? 'realtime' : 'evergreen'
@@ -1135,7 +1175,11 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       enableLike: params.enableLike !== false,
       widgets: displayTemplate === 'guide_note'
         ? buildDefaultGuideNoteWidgets()
-        : displayTemplate === 'text_note' ? buildDefaultTextNoteWidgets() : [],
+        : displayTemplate === 'image_note'
+          ? buildDefaultImageNoteWidgets()
+          : displayTemplate === 'text_note'
+            ? buildDefaultTextNoteWidgets()
+            : [],
       createdAt: new Date().toISOString(),
       type,
       status: 'active',
@@ -1158,7 +1202,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (params.type === 'realtime' || params.type === 'evergreen') updates.type = params.type
     if (params.status === 'active' || params.status === 'dormant' || params.status === 'archived') updates.status = params.status
     if (typeof params.displayTemplate !== 'undefined') {
-      if (!['default', 'guide_note', 'text_note'].includes(params.displayTemplate)) throw new Error('不支持的展示模板')
+      if (!['default', 'guide_note', 'text_note', 'image_note'].includes(params.displayTemplate)) throw new Error('不支持的展示模板')
       updates.displayTemplate = params.displayTemplate
     }
     if (typeof params.accentColor === 'string') updates.accentColor = params.accentColor
@@ -1215,10 +1259,10 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       ...widget,
       widgetId: widget.widgetId || uuidv4(),
     }))
-    assertGuideNoteLockedWidgets(currentSection, widgets)
     assertTextNoteLockedWidgets(currentSection, widgets)
-    widgets = applyGuideNoteLockedFlags(currentSection, widgets)
     widgets = applyTextNoteLockedFlags(currentSection, widgets)
+    assertTemplateLockedWidgets(currentSection, widgets)
+    widgets = applyTemplateLockedFlags(currentSection, widgets)
     validateSectionWidgets(currentSection.type, widgets)
 
     const currentWidgets = currentSection.widgets || []

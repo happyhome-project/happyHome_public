@@ -66,7 +66,7 @@ async function killOwnTree(pid) {
   } else process.kill(pid, 'SIGTERM')
 }
 
-export function createH5WebLauncher({ root = ROOT, home = homedir(), findPort = availablePort, spawnChild = spawn, waitUntilReady: wait = waitUntilReady, killTree = killOwnTree, inspectGit: git = () => inspectGit(root), log = console.log } = {}) {
+export function createH5WebLauncher({ root = ROOT, home = homedir(), platform = process.platform, findPort = availablePort, spawnChild = spawn, waitUntilReady: wait = waitUntilReady, killTree = killOwnTree, inspectGit: git = () => inspectGit(root), log = console.log } = {}) {
   return { async start() {
     const configPath = join(home, '.happyhome', 'h5-web.env')
     const values = parseEnvFile(configPath)
@@ -74,8 +74,11 @@ export function createH5WebLauncher({ root = ROOT, home = homedir(), findPort = 
     if (missing.length) throw new Error(`missing H5 Web public config: ${missing.join(', ')}`)
     const [port, gitInfo] = await Promise.all([findPort(), git()])
     const url = `http://127.0.0.1:${port}`
-    const child = spawnChild('npm.cmd', ['--workspace', 'miniprogram', 'run', 'dev:h5', '--', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+    const npmArgs = ['--workspace', 'miniprogram', 'run', 'dev:h5', '--', '--host', '127.0.0.1', '--port', String(port), '--strictPort']
+    const isWindows = platform === 'win32'
+    const child = spawnChild(isWindows ? 'cmd.exe' : 'npm', isWindows ? ['/d', '/s', '/c', 'npm.cmd', ...npmArgs] : npmArgs, {
       cwd: root, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+      shell: false,
       env: buildChildEnv(process.env, values),
     })
     const tail = drainChild(child, [values.HH_CLOUDBASE_ENV_ID, values.HH_CLOUDBASE_ACCESS_KEY])

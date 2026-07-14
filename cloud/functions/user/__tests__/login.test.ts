@@ -55,6 +55,54 @@ test('老用户登录：更新 nickName 和 avatarUrl', async () => {
   expect(result.isNew).toBe(false)
 })
 
+test('老用户登录：用户文档和管理员绑定并行读取', async () => {
+  let resolveUser!: (value: any) => void
+  const userPromise = new Promise((resolve) => { resolveUser = resolve })
+  ;(db.getById as jest.Mock).mockReturnValue(userPromise)
+  ;(db.query as jest.Mock).mockResolvedValue([])
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  const loginPromise = handleLogin({ nickName: '并行', avatarUrl: '' }, 'test-openid')
+  await Promise.resolve()
+
+  expect(db.getById).toHaveBeenCalledWith('users', 'test-openid')
+  expect(db.query).toHaveBeenCalledWith('admin_accounts', {
+    userId: 'test-openid',
+    status: 'active',
+  }, { limit: 20 })
+
+  resolveUser({
+    _id: 'test-openid',
+    role: 'user',
+    backgroundFetchToken: 'hhpf_existing',
+    backgroundFetchTokenExpiresAt: '2999-01-01T00:00:00.000Z',
+  })
+  await loginPromise
+})
+
+test('老用户 token 过期时与资料、角色合并为一次最终写入', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'test-openid',
+    nickName: '旧名',
+    role: 'user',
+    backgroundFetchToken: 'hhpf_expired',
+    backgroundFetchTokenExpiresAt: '2020-01-01T00:00:00.000Z',
+  })
+  ;(db.query as jest.Mock).mockResolvedValue([])
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  const result = await handleLogin({ nickName: '新名', avatarUrl: 'https://new' }, 'test-openid')
+
+  expect(db.updateById).toHaveBeenCalledTimes(1)
+  expect(db.updateById).toHaveBeenCalledWith('users', 'test-openid', expect.objectContaining({
+    nickName: '新名',
+    avatarUrl: 'https://new',
+    backgroundFetchToken: expect.stringMatching(/^hhpf_/),
+    backgroundFetchTokenExpiresAt: expect.any(String),
+  }))
+  expect(result.user.backgroundFetchToken).toMatch(/^hhpf_/)
+})
+
 test('后台 superAdmin 账号绑定的微信登录小程序时自动获得 superAdmin 角色', async () => {
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'admin-openid',
@@ -72,12 +120,13 @@ test('后台 superAdmin 账号绑定的微信登录小程序时自动获得 supe
     userId: 'admin-openid',
     status: 'active',
   }, { limit: 20 })
-  expect(db.updateById).toHaveBeenCalledWith('users', 'admin-openid', {
+  expect(db.updateById).toHaveBeenCalledWith('users', 'admin-openid', expect.objectContaining({
     nickName: '一年',
     avatarUrl: '',
     role: 'superAdmin',
     roleSource: 'admin_account',
-  })
+    backgroundFetchToken: expect.stringMatching(/^hhpf_/),
+  }))
   expect(result.user.role).toBe('superAdmin')
   expect(result.isNew).toBe(false)
 })

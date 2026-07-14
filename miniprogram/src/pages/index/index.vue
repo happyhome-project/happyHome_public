@@ -40,6 +40,9 @@
         </view>
       </view>
 
+    </view>
+
+    <view class="home-search-sticky-shell">
       <view class="home-search home-search--primary">
         <view class="home-search-box">
           <view class="home-search-icon" aria-hidden="true">
@@ -59,12 +62,18 @@
           </view>
         </view>
       </view>
+    </view>
 
-      <view v-if="showHomePullRefreshHint" class="home-refresh-hint">
-        <view class="home-refresh-spinner" aria-hidden="true"></view>
-        <text>用力加载中...</text>
+    <view v-if="showHomePullRefreshHint" class="home-refresh-hint">
+      <view class="home-refresh-spinner" aria-hidden="true"></view>
+      <text>用力加载中...</text>
+    </view>
+
+    <view v-if="homeRefreshSlow || homeRefreshError" class="home-refresh-status">
+      <text>{{ homeRefreshError || '加载较慢，社区框架已保留' }}</text>
+      <view v-if="homeRefreshError" class="home-refresh-retry" @tap="retryHomeRefresh">
+        <text>重试</text>
       </view>
-
     </view>
 
     <!-- Live strip · 实时脉冲区：有激活的实时协作板块时显示 -->
@@ -187,18 +196,21 @@
         </view>
 
         <view
-          v-else-if="activeArchiveGroup.displayTemplate === 'guide_note'"
+          v-else-if="activeArchiveGroup.displayTemplate === 'guide_note' || activeArchiveGroup.displayTemplate === 'image_note'"
           class="guide-feed"
+          :class="{ 'image-note-feed': activeArchiveGroup.displayTemplate === 'image_note' }"
         >
           <view
-            v-for="(column, columnIndex) in guideColumns"
+            v-for="(column, columnIndex) in activeArchiveGroup.displayTemplate === 'image_note' ? imageNoteColumns : guideColumns"
             :key="columnIndex"
             class="guide-feed-column"
+            :class="{ 'image-note-feed-column': activeArchiveGroup.displayTemplate === 'image_note' }"
           >
             <view
               v-for="(item, i) in column"
               :key="item.postId || columnIndex + '-' + i"
               class="guide-card"
+              :class="{ 'image-note-card': activeArchiveGroup.displayTemplate === 'image_note' }"
               data-testid="home-post-card"
               :data-post-id="item.postId"
               @tap="onPostTap(item)"
@@ -208,34 +220,65 @@
                 :src="item.coverImage"
                 mode="aspectFill"
                 class="guide-cover"
+                :class="{ 'image-note-cover': activeArchiveGroup.displayTemplate === 'image_note' }"
                 @load="onHomeGuideImageLoad(item)"
                 @error="onHomeGuideImageError(item, $event)"
               />
-              <view v-else class="guide-cover guide-cover-empty">
+              <view
+                v-else
+                class="guide-cover guide-cover-empty"
+                :class="{ 'image-note-cover image-note-cover-empty': activeArchiveGroup.displayTemplate === 'image_note' }"
+              >
                 <text>{{ activeArchiveGroup.name.slice(0, 2) }}</text>
               </view>
-              <view class="guide-main">
-                <text class="guide-title">{{ item.t }}</text>
-                <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
-                <view v-if="item.driveDuration" class="guide-stats">
-                  <text class="guide-stat">{{ item.driveDuration }}</text>
-                </view>
-                <view v-if="item.isPinned || item.isFeatured" class="post-badges guide-badges">
-                  <text v-if="item.isPinned" class="post-badge pin">置顶</text>
-                  <text v-if="item.isFeatured" class="post-badge feature">精华</text>
-                </view>
-                <view class="guide-meta">
-                  <view v-if="item.contentAuthor" class="guide-author">
-                    <view
-                      class="guide-author-avatar"
-                      :style="getGuideAuthorAvatarStyle(item.contentAuthor)"
-                    >
-                      <text>{{ getAuthorInitial(item.contentAuthor) }}</text>
+              <view class="guide-main" :class="{ 'image-note-main': activeArchiveGroup.displayTemplate === 'image_note' }">
+                <text class="guide-title" :class="{ 'image-note-title': activeArchiveGroup.displayTemplate === 'image_note' }">{{ item.t }}</text>
+                <template v-if="activeArchiveGroup.displayTemplate === 'image_note'">
+                  <view class="guide-meta image-note-meta">
+                    <view class="guide-author image-note-author">
+                      <image
+                        v-if="item.authorAvatar"
+                        :src="item.authorAvatar"
+                        mode="aspectFill"
+                        class="image-note-author-avatar"
+                      />
+                      <view
+                        v-else
+                        class="image-note-author-avatar image-note-author-avatar--generated"
+                        :style="getGuideAuthorAvatarStyle(item.contentAuthor)"
+                      >
+                        <text>{{ getAuthorInitial(item.contentAuthor) }}</text>
+                      </view>
+                      <text class="guide-author-name image-note-author-name">{{ item.contentAuthor }}</text>
                     </view>
-                    <text class="guide-author-name">{{ item.contentAuthor }}</text>
+                    <view class="image-note-like" :aria-label="`${item.likeCount || 0} 个赞`">
+                      <text class="image-note-like-icon" aria-hidden="true">♡</text>
+                      <text>{{ item.likeCount || 0 }}</text>
+                    </view>
                   </view>
-                  <text v-if="item.when" class="guide-when">{{ item.when }}</text>
-                </view>
+                </template>
+                <template v-else>
+                  <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
+                  <view v-if="item.driveDuration" class="guide-stats">
+                    <text class="guide-stat">{{ item.driveDuration }}</text>
+                  </view>
+                  <view v-if="item.isPinned || item.isFeatured" class="post-badges guide-badges">
+                    <text v-if="item.isPinned" class="post-badge pin">置顶</text>
+                    <text v-if="item.isFeatured" class="post-badge feature">精华</text>
+                  </view>
+                  <view class="guide-meta">
+                    <view v-if="item.contentAuthor" class="guide-author">
+                      <view
+                        class="guide-author-avatar"
+                        :style="getGuideAuthorAvatarStyle(item.contentAuthor)"
+                      >
+                        <text>{{ getAuthorInitial(item.contentAuthor) }}</text>
+                      </view>
+                      <text class="guide-author-name">{{ item.contentAuthor }}</text>
+                    </view>
+                    <text v-if="item.when" class="guide-when">{{ item.when }}</text>
+                  </view>
+                </template>
               </view>
             </view>
           </view>
@@ -361,6 +404,7 @@
             placeholder="请输入昵称"
             maxlength="20"
           />
+          <text v-if="guestIntroLoginSlow" class="guest-intro-login-slow">加载较慢，请稍候...</text>
           <text v-if="guestIntroLoginError" class="guest-intro-login-error">{{ guestIntroLoginError }}</text>
           <button
             class="guest-intro-primary"
@@ -385,7 +429,7 @@
 <script setup lang="ts">
 import '../../utils/home-entry-probe'
 import { computed, ref, nextTick, onMounted, onUnmounted, watch } from 'vue'
-import { onLoad, onPageScroll, onPullDownRefresh, onReady, onShareAppMessage, onShow } from '@dcloudio/uni-app'
+import { onHide, onLoad, onPageScroll, onPullDownRefresh, onReady, onShareAppMessage, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi, postApi } from '../../api/cloud'
@@ -395,9 +439,10 @@ import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getFamilyLetterListSummary, getGuideNoteCard, getHomeLiveMeta, getPostHomeTitle, getPostHomeTitleIssue } from '../../utils/widget'
 import TextNoteCover from '../../components/TextNoteCover.vue'
 import { getTextNoteCard, type TextNoteTheme } from '../../utils/text-note'
+import { getImageNoteCard, isImageNoteSectionContract } from '../../utils/image-note'
 import { clientLog, markClientDiagnosticStage, startHomeDiagnosticWatchdog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
-import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, normalizeHomeSnapshotShape, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
+import { clearHomeSnapshotCache, createHomeSnapshotShell, getBestBackgroundFetchSnapshot, normalizeHomeSnapshotShape, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
 import { formatHomeQuoteCite } from '../../utils/home-quote'
 import { createHomeLoadingGate } from '../../utils/home-loading-gate'
 import { resolveMenuSafeRightInset } from '../../utils/menu-safe-area'
@@ -422,6 +467,7 @@ import {
   savePendingShareCommunity,
 } from '../../utils/community-share'
 import { markGuestIntroSeen, shouldShowGuestIntro } from '../../utils/guest-intro'
+import { createAdaptiveAvatarUploader, createLatestEpoch, createPerformanceRequestId } from '../../utils/performance-trace'
 import type { HomeSnapshot } from '../../../../cloud/shared/types'
 import { normalizeGuestIntroConfig, type GuestIntroConfig } from '../../../../cloud/shared/guest-intro-config'
 
@@ -442,6 +488,7 @@ const guestIntroNickName = ref('')
 const guestIntroWebUsername = ref('')
 const guestIntroWebPassword = ref('')
 const guestIntroLoginBusy = ref(false)
+const guestIntroLoginSlow = ref(false)
 const guestIntroLoginError = ref('')
 const canSubmitGuestIntroLogin = computed(() => {
   if (!guestIntroNickName.value.trim()) return false
@@ -452,6 +499,8 @@ const canSubmitGuestIntroLogin = computed(() => {
 })
 const homeLoading = ref(true)
 const homeLoadingGate = createHomeLoadingGate(homeLoading)
+const homeRefreshSlow = ref(false)
+const homeRefreshError = ref('')
 const postsBySection = ref<Record<string, any[]>>({})
 const resolvedHomeGuideCoverUrls = ref<Record<string, string>>({})
 const homeImageProbeEntries = ref<Record<string, HomeImageProbeEntry>>({})
@@ -484,6 +533,8 @@ const GUIDE_AUTHOR_AVATAR_PALETTE = [
 ]
 const GUIDE_NOTE_NAME_HINTS = ['亲子出游', '周末遛娃', '村游攻略', '路线攻略', '出游攻略']
 let activeHomeRefreshPromise: Promise<void> | null = null
+let activeHomeRefreshCommunityId = ''
+const guestIntroLoginEpoch = createLatestEpoch()
 
 onPageScroll((event) => {
   const nextScrollTop = Number(event?.scrollTop || 0)
@@ -526,10 +577,13 @@ const activeArchiveIndex = computed(() => {
 })
 const activeArchiveStyle = computed(() => {
   const group = activeArchiveGroup.value
-  if (group?.displayTemplate === 'guide_note' && archivePreviewMinHeightPx.value > 0) {
+  if (
+    (group?.displayTemplate === 'guide_note' || group?.displayTemplate === 'image_note') &&
+    archivePreviewMinHeightPx.value > 0
+  ) {
     return `min-height: ${archivePreviewMinHeightPx.value}px;`
   }
-  if (group && group.displayTemplate !== 'guide_note') {
+  if (group && group.displayTemplate !== 'guide_note' && group.displayTemplate !== 'image_note') {
     return 'min-height: 100vh;'
   }
   return ''
@@ -603,6 +657,8 @@ interface ArchiveItem {
   excerpt?: string
   imageKey?: string
   coverImage?: string
+  authorAvatar?: string
+  likeCount?: number
   driveDuration?: string
   routeStats?: Array<{ label: string; value: string }>
   hot?: boolean
@@ -613,10 +669,11 @@ interface ArchiveItem {
   textNoteTheme?: TextNoteTheme
   likes?: number
 }
-interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[]; accentColor?: string; displayTemplate: 'default' | 'guide_note' | 'text_note' }
+interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[]; accentColor?: string; displayTemplate: 'default' | 'guide_note' | 'text_note' | 'image_note' }
 
 function resolveArchiveDisplayTemplate(section: any): ArchiveGroup['displayTemplate'] {
   if (section?.displayTemplate === 'text_note') return 'text_note'
+  if (isImageNoteSectionContract(section)) return 'image_note'
   if (section?.displayTemplate === 'guide_note') return 'guide_note'
   const sectionName = String(section?.name || '').trim()
   return GUIDE_NOTE_NAME_HINTS.some((hint) => sectionName.includes(hint)) ? 'guide_note' : 'default'
@@ -650,6 +707,27 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
               isFeatured: Boolean(p.isFeatured),
               textNoteTheme: note.theme,
               likes: Number(p.likeCount || p.likes || 0),
+            }
+          }
+          if (displayTemplate === 'image_note') {
+            const imageNote = getImageNoteCard(p, section)
+            const resolvedCover = resolvedHomeGuideCoverUrls.value[imageNote.coverImage] || imageNote.coverImage
+            const resolvedAvatar = resolvedHomeGuideCoverUrls.value[imageNote.authorAvatarUrl] || imageNote.authorAvatarUrl
+            return {
+              k: '',
+              t: imageNote.title,
+              contentAuthor: imageNote.authorName,
+              authorAvatar: resolvedAvatar,
+              likeCount: imageNote.likeCount,
+              meta: '',
+              excerpt: '',
+              imageKey: buildHomeImageKey('guide', `image-note:${section._id}:${p._id || idx}`),
+              coverImage: resolvedCover,
+              hot: false,
+              when: '',
+              postId: p._id,
+              isPinned: Boolean(p.isPinned),
+              isFeatured: Boolean(p.isFeatured),
             }
           }
           if (displayTemplate === 'guide_note') {
@@ -693,11 +771,19 @@ const rawHomeGuideCoverImages = computed(() => {
   const urls: string[] = []
   for (const section of communityStore.currentSections ?? []) {
     if (secType(section) !== 'evergreen' || secStatus(section) === 'archived') continue
-    if (resolveArchiveDisplayTemplate(section) !== 'guide_note') continue
+    const displayTemplate = resolveArchiveDisplayTemplate(section)
+    if (displayTemplate !== 'guide_note' && displayTemplate !== 'image_note') continue
     const posts = postsBySection.value[section._id] ?? []
     for (const post of posts.slice(0, 6)) {
-      const coverImage = getGuideNoteCard(post, section).coverImage
-      if (coverImage && !urls.includes(coverImage)) urls.push(coverImage)
+      const images = displayTemplate === 'image_note'
+        ? (() => {
+            const card = getImageNoteCard(post, section)
+            return [card.coverImage, card.authorAvatarUrl]
+          })()
+        : [getGuideNoteCard(post, section).coverImage]
+      for (const image of images) {
+        if (image && !urls.includes(image)) urls.push(image)
+      }
     }
   }
   return urls
@@ -737,11 +823,20 @@ const textNoteColumns = computed<ArchiveItem[][]>(() => {
   }, [[], []])
 })
 
+const imageNoteColumns = computed<ArchiveItem[][]>(() => {
+  const group = activeArchiveGroup.value
+  if (!group || group.displayTemplate !== 'image_note') return [[], []]
+  return group.items.reduce<ArchiveItem[][]>((columns, item, index) => {
+    columns[index % 2].push(item)
+    return columns
+  }, [[], []])
+})
+
 const currentHomeImageKeys = computed(() => {
   const keys: string[] = []
   if (homeHeroImage.value) keys.push(buildHomeImageKey('hero', homeHeroImage.value))
   const group = activeArchiveGroup.value
-  if (group?.displayTemplate === 'guide_note') {
+  if (group?.displayTemplate === 'guide_note' || group?.displayTemplate === 'image_note') {
     for (const item of group.items) {
       if (item.imageKey && item.coverImage) keys.push(item.imageKey)
     }
@@ -752,7 +847,7 @@ const currentHomeImageKeys = computed(() => {
 const expectedHomeImageCount = computed(() => {
   let count = String(communityStore.currentCommunity?.coverImage || '').trim() ? 1 : 0
   const group = activeArchiveGroup.value
-  if (group?.displayTemplate === 'guide_note') count += group.items.length
+  if (group?.displayTemplate === 'guide_note' || group?.displayTemplate === 'image_note') count += group.items.length
   return count
 })
 
@@ -1024,8 +1119,8 @@ function measureActiveArchiveHeight() {
       .boundingClientRect((rect) => {
         const height = getArchiveMeasuredHeight(rect)
         const group = activeArchiveGroup.value
-        // Only guide feeds reserve image-heavy height; text-only lists should hug their content.
-        const shouldCaptureHeight = group?.displayTemplate === 'guide_note'
+        // Image-heavy two-column feeds reserve their measured height; text lists hug their content.
+        const shouldCaptureHeight = group?.displayTemplate === 'guide_note' || group?.displayTemplate === 'image_note'
         if (shouldCaptureHeight && height > archivePreviewMinHeightPx.value) {
           archivePreviewMinHeightPx.value = height
         }
@@ -1246,7 +1341,9 @@ function handleGuestIntroChooseAvatar(event: any) {
 }
 
 function cancelGuestIntroLogin() {
-  if (guestIntroLoginBusy.value) return
+  guestIntroLoginEpoch.invalidate()
+  guestIntroLoginBusy.value = false
+  guestIntroLoginSlow.value = false
   guestIntroLoginMode.value = 'intro'
   guestIntroAvatarTempPath.value = ''
   guestIntroNickName.value = ''
@@ -1254,43 +1351,103 @@ function cancelGuestIntroLogin() {
   guestIntroLoginError.value = ''
 }
 
+function getGuestAvatarFileSize(source: string): Promise<number> {
+  // #ifdef MP-WEIXIN
+  return new Promise((resolve, reject) => {
+    try {
+      wx.getFileInfo({ filePath: source, success: (result: any) => resolve(Number(result?.size || 0)), fail: reject })
+    } catch (error) {
+      reject(error)
+    }
+  })
+  // #endif
+  // #ifndef MP-WEIXIN
+  return Promise.resolve(0)
+  // #endif
+}
+
+function compressGuestAvatar(source: string, quality: number): Promise<string> {
+  // #ifdef MP-WEIXIN
+  return new Promise((resolve, reject) => {
+    try {
+      wx.compressImage({ src: source, quality, success: (result: any) => resolve(String(result?.tempFilePath || source)), fail: reject })
+    } catch (error) {
+      reject(error)
+    }
+  })
+  // #endif
+  // #ifndef MP-WEIXIN
+  return Promise.resolve(source)
+  // #endif
+}
+
+const adaptiveGuestAvatarUploader = createAdaptiveAvatarUploader({
+  getSize: getGuestAvatarFileSize,
+  compress: compressGuestAvatar,
+  upload: async (source) => {
+    const ext = source.startsWith('blob:') ? 'jpg' : (source.split('.').pop()?.split('?')[0] || 'jpg')
+    return uploadCloudFile({
+      cloudPath: `avatars/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`,
+      source,
+      trace: {
+        requestId: createPerformanceRequestId('home-guest-avatar'),
+        stage: 'home.guest.avatar.upload',
+        sample: 'cold',
+      },
+    })
+  },
+})
+
 async function submitGuestIntroLogin() {
   if (!canSubmitGuestIntroLogin.value || guestIntroLoginBusy.value) return
+  const loginEpoch = guestIntroLoginEpoch.begin()
+  const requestId = createPerformanceRequestId('home-guest-login')
   guestIntroLoginBusy.value = true
+  guestIntroLoginSlow.value = false
   guestIntroLoginError.value = ''
+  const slowTimer = setTimeout(() => {
+    if (guestIntroLoginEpoch.isCurrent(loginEpoch)) guestIntroLoginSlow.value = true
+  }, 5000)
   try {
     if (guestIntroLoginMode.value === 'web') {
       await userStore.webLogin({
         username: guestIntroWebUsername.value,
         password: guestIntroWebPassword.value,
         nickName: guestIntroNickName.value,
+      }, { requestId, stage: 'home.guest.login', sample: 'cold' }, {
+        shouldApply: () => guestIntroLoginEpoch.isCurrent(loginEpoch),
       })
     } else {
       const source = guestIntroAvatarTempPath.value
-      const ext = source.startsWith('blob:') ? 'jpg' : (source.split('.').pop()?.split('?')[0] || 'jpg')
-      const uploadedAvatar = await uploadCloudFile({
-        cloudPath: `avatars/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`,
-        source,
-      })
-      await userStore.login({ nickName: guestIntroNickName.value, avatarUrl: uploadedAvatar.fileID })
+      const uploadedAvatar = await adaptiveGuestAvatarUploader.upload(source)
+      if (!guestIntroLoginEpoch.isCurrent(loginEpoch)) return
+      await userStore.login(
+        { nickName: guestIntroNickName.value, avatarUrl: uploadedAvatar.fileID },
+        { requestId, stage: 'home.guest.login', sample: 'cold' },
+        { shouldApply: () => guestIntroLoginEpoch.isCurrent(loginEpoch) },
+      )
     }
+    if (!guestIntroLoginEpoch.isCurrent(loginEpoch)) return
     guestIntroWebPassword.value = ''
     guestIntroAvatarTempPath.value = ''
     guestIntroNickName.value = ''
     guestIntroLoginMode.value = 'intro'
     markCurrentGuestIntroSeen()
     uni.showToast({ title: '登录成功', icon: 'success' })
-    try {
-      await refreshHomeData()
-    } catch (refreshError) {
+    void refreshHomeData().catch((refreshError) => {
       clientLog('warn', 'guestIntro.login.refresh.fail', { error: refreshError })
-    }
+    })
   } catch (error: any) {
+    if (!guestIntroLoginEpoch.isCurrent(loginEpoch)) return
     guestIntroLoginError.value = String(error?.message || '登录失败，请重试')
     guestIntroWebPassword.value = ''
     clientLog('warn', 'guestIntro.login.fail', { error })
   } finally {
-    guestIntroLoginBusy.value = false
+    clearTimeout(slowTimer)
+    if (guestIntroLoginEpoch.isCurrent(loginEpoch)) {
+      guestIntroLoginSlow.value = false
+      guestIntroLoginBusy.value = false
+    }
   }
 }
 
@@ -1305,24 +1462,26 @@ function applyHomeSnapshot(rawSnapshot: HomeSnapshot | null, source: 'prefetch' 
     clientLog('warn', 'home.snapshot.invalidShape', { source })
     return false
   }
+  const safeSnapshot = source === 'cloud' ? snapshot : createHomeSnapshotShell(snapshot)
+  if (!safeSnapshot) return false
   const expectedViewer = userStore.isLoggedIn ? userStore.openId : ''
-  if (snapshot.viewerOpenId !== expectedViewer) return false
-  const activeCommunities = (snapshot.communities || []).filter((community) => community?.status === 'active')
+  if (safeSnapshot.viewerOpenId !== expectedViewer) return false
+  const activeCommunities = (safeSnapshot.communities || []).filter((community) => community?.status === 'active')
   if (
-    userStore.isLoggedIn && snapshot.currentCommunityId && !activeCommunities.some(
-      (community) => community._id === snapshot.currentCommunityId,
+    userStore.isLoggedIn && safeSnapshot.currentCommunityId && !activeCommunities.some(
+      (community) => community._id === safeSnapshot.currentCommunityId,
     )
   ) return false
-  if (snapshot.currentCommunity && snapshot.currentCommunity.status !== 'active') return false
+  if (safeSnapshot.currentCommunity && safeSnapshot.currentCommunity.status !== 'active') return false
   communityStore.myCommunities = userStore.isLoggedIn ? activeCommunities : []
-  communityStore.currentCommunityId = snapshot.currentCommunityId || ''
-  communityStore.browsingCommunity = snapshot.currentCommunity || activeCommunities.find((item) => item._id === snapshot.currentCommunityId) || null
+  communityStore.currentCommunityId = safeSnapshot.currentCommunityId || ''
+  communityStore.browsingCommunity = safeSnapshot.currentCommunity || activeCommunities.find((item) => item._id === safeSnapshot.currentCommunityId) || null
   communityStore.currentSectionIndex = 0
-  communityStore.currentSections = snapshot.sections || []
-  postsBySection.value = snapshot.postsBySection || {}
+  communityStore.currentSections = safeSnapshot.sections || []
+  postsBySection.value = safeSnapshot.postsBySection || {}
   guestIntroConfig.value = userStore.isLoggedIn
     ? null
-    : normalizeGuestIntroConfig(snapshot.guestIntroConfig || null)
+    : normalizeGuestIntroConfig(safeSnapshot.guestIntroConfig || null)
   refreshGuestIntroVisibility()
   if (userStore.isLoggedIn) communityStore.saveToStorage()
   clientLog('info', 'home.snapshot.apply', {
@@ -1338,10 +1497,12 @@ function applyHomeSnapshot(rawSnapshot: HomeSnapshot | null, source: 'prefetch' 
 
 async function hydrateHomeFromFastPath() {
   if (!userStore.isLoggedIn || !userStore.openId) return false
+  const requestedCommunityId = communityStore.currentCommunityId || ''
   const prefetched = await getBestBackgroundFetchSnapshot({
     openId: userStore.openId,
-    communityId: communityStore.currentCommunityId || undefined,
+    communityId: requestedCommunityId || undefined,
   })
+  if (requestedCommunityId !== communityStore.currentCommunityId) return false
   if (applyHomeSnapshot(prefetched, 'prefetch')) {
     writeHomeSnapshotCache(prefetched as HomeSnapshot)
     return true
@@ -1354,9 +1515,45 @@ async function hydrateHomeFromFastPath() {
 }
 
 function applyLateBackgroundFetchSnapshot(snapshot: HomeSnapshot) {
+  if (snapshot.currentCommunityId !== communityStore.currentCommunityId) return
   if (applyHomeSnapshot(snapshot, 'prefetch')) {
     writeHomeSnapshotCache(snapshot)
   }
+}
+
+function applyCommunityShellFromCache(communityId: string) {
+  const id = String(communityId || '').trim()
+  if (!userStore.isLoggedIn || !userStore.openId || !id) return false
+  postsBySection.value = {}
+  const cached = readHomeSnapshotCache({
+    openId: userStore.openId,
+    communityId: id,
+  })
+  return applyHomeSnapshot(cached, 'cache')
+}
+
+function applySelectedCommunityShellFromCache() {
+  const selection = communityStore.pendingCommunitySelection
+  if (!selection || selection.targetCommunityId !== communityStore.currentCommunityId) return false
+  return applyCommunityShellFromCache(selection.targetCommunityId)
+}
+
+function handleExplicitCommunityAccessLoss(communityId: string, toastTitle = '') {
+  const rejectedCommunityId = String(communityId || '').trim()
+  if (!rejectedCommunityId) return ''
+  clearHomeSnapshotCache(userStore.openId, rejectedCommunityId)
+  postsBySection.value = {}
+  if (toastTitle) uni.showToast({ title: toastTitle, icon: 'none' })
+  const restoredCommunityId = communityStore.handleCommunityAccessLost(rejectedCommunityId)
+  if (restoredCommunityId) {
+    applyCommunityShellFromCache(restoredCommunityId)
+    // The restored snapshot may predate the revocation and still list the rejected target.
+    communityStore.handleCommunityAccessLost(rejectedCommunityId)
+    queuedForcedHomeRefresh = true
+    return restoredCommunityId
+  }
+  openOnboardingPreservingStack()
+  return ''
 }
 
 function getPendingHomeRefreshMarker() {
@@ -1392,24 +1589,57 @@ async function runSingleHomeRefresh(force: boolean) {
     currentCommunityId: communityStore.currentCommunityId || '',
   })
   refreshingHome = true
+  const requestedCommunityId = userStore.isLoggedIn
+    ? communityStore.currentCommunityId || undefined
+    : undefined
   try {
-    const requestedCommunityId = userStore.isLoggedIn
-      ? communityStore.currentCommunityId || undefined
-      : undefined
-    const result = await postApi.bootstrap(requestedCommunityId, 20, !userStore.isLoggedIn)
+    const pendingSelection = communityStore.pendingCommunitySelection
+    const pendingTraceRequestId = pendingSelection?.targetCommunityId === requestedCommunityId
+      ? String(pendingSelection?.traceRequestId || '')
+      : ''
+    const result = await postApi.bootstrap(requestedCommunityId, 20, !userStore.isLoggedIn, {
+      requestId: pendingTraceRequestId
+        ? pendingTraceRequestId
+        : createPerformanceRequestId('home-bootstrap'),
+      stage: 'post.bootstrap',
+      sample: communityStore.currentSections.length > 0 ? 'warm' : 'cold',
+      counts: { shellSectionCount: communityStore.currentSections.length },
+    })
+    if (
+      userStore.isLoggedIn &&
+      requestedCommunityId &&
+      requestedCommunityId !== communityStore.currentCommunityId
+    ) {
+      clientLog('debug', 'home.refresh.ignore.staleCommunity', {
+        requestedCommunityId,
+        currentCommunityId: communityStore.currentCommunityId || '',
+      })
+      return
+    }
+    if (
+      userStore.isLoggedIn &&
+      requestedCommunityId &&
+      String(result.currentCommunityId || '') !== requestedCommunityId
+    ) {
+      clientLog('warn', 'home.refresh.requestedCommunityUnavailable', {})
+      handleExplicitCommunityAccessLoss(requestedCommunityId, '该社区暂时无法访问')
+      return
+    }
     if (userStore.isLoggedIn && result.backgroundFetchToken) {
       userStore.setBackgroundFetchToken(result.backgroundFetchToken, result.backgroundFetchTokenExpiresAt)
     }
     const acceptedSnapshot = applyHomeSnapshot(result as HomeSnapshot, 'cloud')
     if (!acceptedSnapshot) {
       const rejectedCommunityId = String(result.currentCommunityId || requestedCommunityId || '')
-      clearHomeSnapshotCache(userStore.openId, rejectedCommunityId)
-      communityStore.clearCommunityState()
-      postsBySection.value = {}
       clientLog('warn', 'home.snapshot.rejected', { rejectedCommunityId })
-      if (userStore.isLoggedIn) openOnboardingPreservingStack()
+      if (userStore.isLoggedIn) handleExplicitCommunityAccessLoss(rejectedCommunityId)
+      else {
+        postsBySection.value = {}
+        communityStore.clearCommunityState()
+      }
       return
     }
+    communityStore.confirmCommunitySelection(result.currentCommunityId || requestedCommunityId || '')
     if (userStore.isLoggedIn && communityStore.currentCommunityId) {
       writeHomeSnapshotCache(result as HomeSnapshot)
     }
@@ -1430,13 +1660,11 @@ async function runSingleHomeRefresh(force: boolean) {
     clientLog('error', 'home.refresh.fail', { force, error })
     const message = String((error as any)?.message || error || '')
     if (message.includes('需要先加入社区后查看内容')) {
-      clearHomeSnapshotCache(userStore.openId, communityStore.currentCommunityId || '')
-      communityStore.clearCommunityState()
-      postsBySection.value = {}
-      uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
-      openOnboardingPreservingStack()
+      const rejectedCommunityId = String(requestedCommunityId || communityStore.currentCommunityId || '')
+      handleExplicitCommunityAccessLoss(rejectedCommunityId, '需要先加入社区后查看内容')
       return
     }
+    homeRefreshError.value = '加载失败，请点击重试'
     throw error
   } finally {
     refreshingHome = false
@@ -1446,7 +1674,8 @@ async function runSingleHomeRefresh(force: boolean) {
 async function refreshHomeData(options: { force?: boolean } = {}) {
   const force = options.force === true
   if (activeHomeRefreshPromise) {
-    if (force) queuedForcedHomeRefresh = true
+    const requestedCommunityId = userStore.isLoggedIn ? communityStore.currentCommunityId : ''
+    if (force || requestedCommunityId !== activeHomeRefreshCommunityId) queuedForcedHomeRefresh = true
     clientLog('warn', 'home.refresh.skip.busy', {
       force,
       queuedForcedHomeRefresh,
@@ -1455,10 +1684,17 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
     return
   }
 
+  homeRefreshError.value = ''
+  homeRefreshSlow.value = false
+  activeHomeRefreshCommunityId = userStore.isLoggedIn ? communityStore.currentCommunityId : ''
+  const slowTimer = setTimeout(() => {
+    homeRefreshSlow.value = true
+  }, 5000)
   const loadingOwner = homeLoadingGate.beginRefresh()
   const refreshPromise = (async () => {
     let nextForce = force
     do {
+      activeHomeRefreshCommunityId = userStore.isLoggedIn ? communityStore.currentCommunityId : ''
       const currentForce = nextForce
       queuedForcedHomeRefresh = false
       await runSingleHomeRefresh(currentForce)
@@ -1471,9 +1707,18 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
   } finally {
     if (activeHomeRefreshPromise === refreshPromise) {
       activeHomeRefreshPromise = null
+      activeHomeRefreshCommunityId = ''
+      clearTimeout(slowTimer)
+      homeRefreshSlow.value = false
       homeLoadingGate.endRefresh(loadingOwner)
     }
   }
+}
+
+function retryHomeRefresh() {
+  void refreshHomeData({ force: true }).catch((error) => {
+    clientLog('error', 'home.retry.refresh.fail', { error })
+  })
 }
 
 function probeHomeRender(reason: string) {
@@ -1560,7 +1805,15 @@ onReady(() => {
   probeHomeRender('ready')
 })
 
+onHide(() => {
+  if (!guestIntroLoginBusy.value) return
+  guestIntroLoginEpoch.invalidate()
+  guestIntroLoginBusy.value = false
+  guestIntroLoginSlow.value = false
+})
+
 onUnmounted(() => {
+  guestIntroLoginEpoch.invalidate()
   ;(uni as any).$off?.(HOME_TAB_RETAP_EVENT, scrollHomeToTop)
   clearArchiveSwitchScrollTimers()
   clearArchivePreviewMeasureTimers()
@@ -1581,7 +1834,13 @@ onShow(() => {
     hasPendingRefreshMarker: !!marker,
     marker,
   })
-  if (!marker && mountedAt && Date.now() - mountedAt < 1500) {
+  applySelectedCommunityShellFromCache()
+  if (
+    !marker &&
+    !communityStore.pendingCommunitySelection &&
+    mountedAt &&
+    Date.now() - mountedAt < 1500
+  ) {
     clientLog('debug', 'home.show.skip.afterMounted', {})
     return
   }
@@ -2407,7 +2666,7 @@ onShareAppMessage(() => {
 }
 
 .home-shell {
-  padding: calc(150rpx + env(safe-area-inset-top)) var(--hh-page-x) 24rpx;
+  padding: calc(150rpx + env(safe-area-inset-top)) var(--hh-page-x) 0;
   background:
     radial-gradient(circle at 84% 0%, rgba(48, 91, 70, 0.22), transparent 34%),
     linear-gradient(170deg, #caeee7 0%, #f1f3ee 58%, var(--hh-color-page) 100%);
@@ -2419,7 +2678,7 @@ onShareAppMessage(() => {
   top: 0;
   left: 0;
   right: 0;
-  z-index: $hh-z-sticky + 1;
+  z-index: $hh-z-sticky + 2;
   min-height: calc(150rpx + env(safe-area-inset-top));
   padding: calc(86rpx + env(safe-area-inset-top)) var(--hh-page-x) 0;
   display: flex;
@@ -2590,11 +2849,21 @@ onShareAppMessage(() => {
   line-height: var(--hh-text-caption-base-line);
 }
 
-.home-shell .home-search {
-  margin: 28rpx 0 24rpx;
+.home-search-sticky-shell {
+  box-sizing: border-box;
+  position: sticky;
+  top: calc(150rpx + env(safe-area-inset-top));
+  z-index: $hh-z-sticky + 1;
+  padding: 24rpx var(--hh-page-x);
+  background: rgba(250, 250, 249, 0.98);
+  box-shadow: 0 10rpx 24rpx rgba(15, 23, 42, 0.07);
 }
 
-.home-shell .home-search-box {
+.home-search-sticky-shell .home-search {
+  margin: 0;
+}
+
+.home-search-sticky-shell .home-search-box {
   min-height: 90rpx;
   padding: 0 8rpx 0 30rpx;
   border: 0;
@@ -2603,18 +2872,18 @@ onShareAppMessage(() => {
   gap: 15rpx;
 }
 
-.home-shell .home-search-input {
+.home-search-sticky-shell .home-search-input {
   height: 90rpx;
   font-size: 30rpx;
   line-height: 45rpx;
 }
 
-.home-shell .home-search-icon,
-.home-shell .home-search-placeholder {
+.home-search-sticky-shell .home-search-icon,
+.home-search-sticky-shell .home-search-placeholder {
   color: rgba(0, 0, 0, 0.45);
 }
 
-.home-shell .home-search-action {
+.home-search-sticky-shell .home-search-action {
   flex: 0 0 150rpx;
   width: 150rpx;
   min-width: 0;
@@ -2623,7 +2892,7 @@ onShareAppMessage(() => {
   background: var(--hh-color-brand-primary);
 }
 
-.home-shell .home-search-action text {
+.home-search-sticky-shell .home-search-action text {
   font-size: 30rpx;
   line-height: 45rpx;
   font-weight: $hh-font-weight-medium;
@@ -2656,6 +2925,27 @@ onShareAppMessage(() => {
   white-space: nowrap;
 }
 
+.home-refresh-status {
+  min-height: 64rpx;
+  margin-top: 16rpx;
+  padding: 10rpx 20rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20rpx;
+  border-radius: 16rpx;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--hh-color-text-secondary);
+  font-size: 24rpx;
+  line-height: 36rpx;
+}
+
+.home-refresh-retry {
+  flex: 0 0 auto;
+  color: var(--hh-color-brand-primary);
+  font-weight: $hh-font-weight-bold;
+}
+
 @keyframes homeRefreshSpin {
   to {
     transform: rotate(360deg);
@@ -2669,7 +2959,7 @@ onShareAppMessage(() => {
 
 .section-tabs-sticky-shell {
   position: sticky;
-  top: calc(150rpx + env(safe-area-inset-top));
+  top: calc(150rpx + env(safe-area-inset-top) + 138rpx);
   z-index: $hh-z-sticky;
   margin: 34rpx 0 20rpx;
   padding: 12rpx 0;
@@ -3010,6 +3300,47 @@ onShareAppMessage(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.image-note-author-avatar {
+  width: 32rpx;
+  height: 32rpx;
+  flex: 0 0 auto;
+  display: block;
+  overflow: hidden;
+  border-radius: $hh-radius-full;
+  background: var(--hh-color-brand-soft);
+}
+
+.image-note-author-avatar--generated {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--guide-avatar-start), var(--guide-avatar-end));
+}
+
+.image-note-author-avatar--generated text {
+  color: #fff;
+  font-size: 18rpx;
+  line-height: 1;
+  font-weight: $hh-font-weight-bold;
+}
+
+.image-note-author-name {
+  color: var(--hh-color-text-tertiary);
+}
+
+.image-note-like {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4rpx;
+  color: var(--hh-color-text-tertiary);
+}
+
+.image-note-like-icon {
+  font-size: 28rpx;
+  line-height: 1;
 }
 
 .guide-when {
@@ -3459,10 +3790,12 @@ onShareAppMessage(() => {
   border-radius: 18rpx;
   background: #fff;
 }
+.guest-intro-login-slow,
 .guest-intro-login-error {
-  color: #dc2626;
   font-size: 24rpx;
   line-height: 34rpx;
   text-align: center;
 }
+.guest-intro-login-slow { color: #777; }
+.guest-intro-login-error { color: #dc2626; }
 </style>

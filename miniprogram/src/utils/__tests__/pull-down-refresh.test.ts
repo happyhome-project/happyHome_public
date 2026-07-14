@@ -58,6 +58,6 @@ describe('mini-program pull-down refresh contract', () => {
     const code = readProjectFile('pages/index/index.vue')
 
     expect(code).toContain('normalizeGuestIntroConfig')
-    expect(code).toMatch(/guestIntroConfig\.value = userStore\.isLoggedIn[\s\S]*normalizeGuestIntroConfig\(snapshot\.guestIntroConfig \|\| null\)/)
+    expect(code).toMatch(/guestIntroConfig\.value = userStore\.isLoggedIn[\s\S]*normalizeGuestIntroConfig\(safeSnapshot\.guestIntroConfig \|\| null\)/)
   })
 })
