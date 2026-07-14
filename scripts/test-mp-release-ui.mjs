@@ -41,6 +41,7 @@ import {
 } from './cloud-release-smoke.mjs'
 import { computeDirectoryDigest } from './lib/release-run-ledger.mjs'
 import { runReleaseUiChecks } from './lib/release-ui-check-runner.mjs'
+import { readMiniprogramPackageIdentity } from './lib/miniprogram-package-identity.mjs'
 import { cleanupReleaseFixtureWithRetry } from './lib/release-ui-fixture-cleanup.mjs'
 import { applyAndWaitForReleaseFixtureSelection } from './lib/release-ui-fixture-selection.mjs'
 import { invokeTrustedAdminCloud } from './lib/trusted-admin-invoke.mjs'
@@ -53,15 +54,6 @@ const DEFAULT_AUTO_PORT = 9420
 const HOME_POST_SELECTORS = ['.live-row', '.guide-card', '.arc-item', '.post-card']
 const RELEASE_FIXTURE_PREFIX = 'HH_RELEASE_UI_'
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
-
-function expectedBuildVersion() {
-  try {
-    const source = readFileSync(resolve(ROOT, 'miniprogram', 'src', 'generated', 'build-info.ts'), 'utf8')
-    return source.match(/version:\s*["']([^"']+)["']/)?.[1] || ''
-  } catch {
-    return ''
-  }
-}
 
 function quoteForPowerShell(arg) {
   const str = String(arg)
@@ -1256,7 +1248,7 @@ async function verifyHomeDetail(mp, context = {}) {
   }
 }
 
-async function verifyProfileLoginClean(mp) {
+async function verifyProfileLoginClean(mp, expectedVersion) {
   console.log('[release-ui] force logged-out state')
   const logoutResult = await forceLogout(mp)
   console.log(`[release-ui] logout result: ${JSON.stringify(logoutResult)}`)
@@ -1281,7 +1273,6 @@ async function verifyProfileLoginClean(mp) {
   ).catch(() => [])).length
   const loginIdentityVisible = text.includes('登录')
   const debugLeakVisible = /state:logged|login:[01]|cc:|DEV 登录|Home 诊断/.test(text)
-  const expectedVersion = expectedBuildVersion()
   const versionTextVisible = Boolean(expectedVersion && text.includes(expectedVersion))
   const buildIdentityPassed = Boolean(expectedVersion && buildVersionAttribute === expectedVersion && !text.includes(expectedVersion))
   return {
@@ -1336,6 +1327,7 @@ async function main() {
 
   if (!cliPath) throw new Error('WeChat DevTools CLI was not found. Set WECHAT_DEVTOOLS_CLI_PATH.')
   if (!projectPath) throw new Error('mp-weixin build output was not found. Run the mp-weixin build first.')
+  const packageIdentity = await readMiniprogramPackageIdentity(projectPath)
   const packageDigest = await computeDirectoryDigest(projectPath)
   const expectedPackageDigest = String(process.env.HH_RELEASE_PACKAGE_DIGEST || '').trim()
   if (expectedPackageDigest && packageDigest !== expectedPackageDigest) {
@@ -1361,6 +1353,7 @@ async function main() {
     gitSha: String(process.env.HH_RELEASE_GIT_SHA || ''),
     devToolsVersion: String(process.env.HH_RELEASE_DEVTOOLS_VERSION || ''),
     packageDigest,
+    packageIdentity,
     cliPath,
     projectPath,
     idePort,
@@ -1469,7 +1462,7 @@ async function main() {
             attempts: envPositiveInt('HH_RELEASE_UI_PROFILE_ATTEMPTS', 3),
             timeoutMs: envPositiveInt('HH_RELEASE_UI_PROFILE_TIMEOUT_MS', 70000),
             task: async (currentMp) => {
-              const result = await verifyProfileLoginClean(currentMp)
+              const result = await verifyProfileLoginClean(currentMp, packageIdentity.version)
               if (!result.cleanPassed || !result.buildIdentityPassed) {
                 throw makeEvidenceRetryError('release profile/login evidence', result)
               }

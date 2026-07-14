@@ -153,6 +153,9 @@ test('documents the release UI evidence markers used by the gate', () => {
 test('release profile validation reads the build marker attribute and rejects visible version text', () => {
   const source = readFileSync(new URL('../test-mp-release-ui.mjs', import.meta.url), 'utf8')
 
+  assert.match(source, /readMiniprogramPackageIdentity\(projectPath\)/)
+  assert.match(source, /verifyProfileLoginClean\(currentMp, packageIdentity\.version\)/)
+  assert.doesNotMatch(source, /function expectedBuildVersion/)
   assert.match(source, /attribute\('data-build-version'\)/)
   assert.match(source, /!text\.includes\(expectedVersion\)/)
   assert.match(source, /const buildIdentityPassed =/)

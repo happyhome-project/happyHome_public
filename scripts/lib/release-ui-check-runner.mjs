@@ -38,23 +38,27 @@ export async function runReleaseUiChecks(checks = {}) {
   }
 
   const coldStartPassed = await run('coldStart', checks.coldStart)
+  const profilePassed = await run('profile', checks.profile)
   let fixturePassed = false
-  if (coldStartPassed) {
+  if (coldStartPassed && profilePassed) {
     fixturePassed = await run('provisionFixture', checks.provisionFixture)
   } else {
-    skip('provisionFixture', 'coldStart failed')
+    skip('provisionFixture', coldStartPassed ? 'profile failed' : 'coldStart failed')
   }
 
-  if (coldStartPassed && fixturePassed) {
+  if (coldStartPassed && profilePassed && fixturePassed) {
     await run('archiveTabs', checks.archiveTabs)
     await run('homeDetail', checks.homeDetail)
   } else {
-    const reason = coldStartPassed ? 'provisionFixture failed' : 'coldStart failed'
+    const reason = !coldStartPassed
+      ? 'coldStart failed'
+      : !profilePassed
+        ? 'profile failed'
+        : 'provisionFixture failed'
     skip('archiveTabs', reason)
     skip('homeDetail', reason)
   }
 
-  await run('profile', checks.profile)
   await run('cleanup', checks.cleanup)
 
   return { ok: failures.length === 0, stages, failures, skipped }

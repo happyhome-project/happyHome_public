@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 
 import { pathsReferToSameEntry } from './filesystem-path-integrity.mjs'
+import { parseMiniprogramPackageIdentity } from './miniprogram-package-identity.mjs'
 import { assertReleaseUiEvidence, REQUIRED_RELEASE_UI_MARKERS } from './mp-release-ui-policy.mjs'
 import { computeDirectoryDigest } from './release-run-ledger.mjs'
 
@@ -113,14 +114,26 @@ export async function inspectReleaseUiQualification({
   const uiEvidencePath = absoluteWithinRoot(root, qualification.uiEvidence?.path, 'uiEvidence.path')
 
   const sourceBuildInfo = await readFile(sourceBuildInfoPath, 'utf8')
-  if (!hasBuildIdentity(sourceBuildInfo, qualification.version, qualification.desc)) {
-    throw new Error('release UI qualification source build info identity mismatch')
+  const currentSourceBuildInfoSha256 = await sha256File(sourceBuildInfoPath)
+  const sourceBuildInfoStatus = {
+    ...qualification.sourceBuildInfo,
+    currentSha256: currentSourceBuildInfoSha256,
+    identityMatchesQualification: hasBuildIdentity(sourceBuildInfo, qualification.version, qualification.desc),
+    sha256MatchesQualification: currentSourceBuildInfoSha256 === qualification.sourceBuildInfo?.sha256,
   }
-  if (await sha256File(sourceBuildInfoPath) !== qualification.sourceBuildInfo?.sha256) {
-    throw new Error('release UI qualification source build info SHA-256 mismatch')
-  }
+  sourceBuildInfoStatus.matchesQualification = sourceBuildInfoStatus.identityMatchesQualification &&
+    sourceBuildInfoStatus.sha256MatchesQualification
+
   const distBuildInfo = await readFile(distBuildInfoPath, 'utf8')
-  if (!hasBuildIdentity(distBuildInfo, qualification.version, qualification.desc)) {
+  let distIdentity
+  try {
+    distIdentity = parseMiniprogramPackageIdentity(distBuildInfo)
+  } catch (error) {
+    throw new Error(`release UI qualification dist build info identity mismatch: ${error?.message || error}`)
+  }
+  if (distIdentity.version !== qualification.version ||
+      distIdentity.desc !== qualification.desc ||
+      distIdentity.buildId !== `mp-${qualification.version}`) {
     throw new Error('release UI qualification dist build info identity mismatch')
   }
   if (await sha256File(distBuildInfoPath) !== qualification.distBuildInfo?.sha256) {
@@ -161,6 +174,7 @@ export async function inspectReleaseUiQualification({
 
   return {
     ...qualification,
+    sourceBuildInfo: sourceBuildInfoStatus,
     qualificationPath: absoluteQualificationPath,
     packageRoot,
     sourceBuildInfoPath,
