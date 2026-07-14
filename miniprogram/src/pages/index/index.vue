@@ -345,6 +345,7 @@
           <text class="guest-intro-kicker">欢迎体验</text>
           <text class="guest-intro-title">{{ guestIntroConfig.title }}</text>
         </view>
+        <template v-if="guestIntroLoginMode === 'intro'">
         <text class="guest-intro-body">{{ guestIntroConfig.body }}</text>
         <view class="guest-intro-list">
           <view
@@ -361,16 +362,60 @@
             </view>
           </view>
         </view>
-        <view class="guest-intro-primary" @tap="handleGuestIntroPrimary">
+        <!-- #ifdef H5 -->
+        <button
+          class="guest-intro-primary"
+          data-testid="guest-intro-login-trigger"
+          @tap="handleGuestIntroPrimary"
+        >
           <view class="guest-intro-wechat-icon">
             <view class="guest-intro-wechat-bubble guest-intro-wechat-bubble--main"></view>
             <view class="guest-intro-wechat-bubble guest-intro-wechat-bubble--mini"></view>
           </view>
           <text>{{ guestIntroConfig.primaryActionText }}</text>
-        </view>
+        </button>
+        <!-- #endif -->
+        <!-- #ifndef H5 -->
+        <button
+          class="guest-intro-primary"
+          data-testid="guest-intro-login-trigger"
+          open-type="chooseAvatar"
+          @chooseavatar="handleGuestIntroChooseAvatar"
+        >
+          <view class="guest-intro-wechat-icon">
+            <view class="guest-intro-wechat-bubble guest-intro-wechat-bubble--main"></view>
+            <view class="guest-intro-wechat-bubble guest-intro-wechat-bubble--mini"></view>
+          </view>
+          <text>{{ guestIntroConfig.primaryActionText }}</text>
+        </button>
+        <!-- #endif -->
         <view class="guest-intro-secondary" @tap="handleGuestIntroSecondary">
           <text class="guest-intro-secondary-plus">＋</text>
           <text>{{ guestIntroConfig.secondaryActionText }}</text>
+        </view>
+        </template>
+
+        <view v-else class="guest-intro-login-form">
+          <text class="guest-intro-login-title">登录</text>
+          <!-- #ifdef H5 -->
+          <input v-model="guestIntroWebUsername" autocomplete="username" class="guest-intro-login-input" placeholder="用户名" />
+          <input v-model="guestIntroWebPassword" password autocomplete="current-password" class="guest-intro-login-input" placeholder="密码" />
+          <!-- #endif -->
+          <input
+            v-model="guestIntroNickName"
+            type="nickname"
+            class="guest-intro-login-input"
+            placeholder="请输入昵称"
+            maxlength="20"
+          />
+          <text v-if="guestIntroLoginError" class="guest-intro-login-error">{{ guestIntroLoginError }}</text>
+          <button
+            class="guest-intro-primary"
+            data-testid="guest-intro-login-submit"
+            :disabled="!canSubmitGuestIntroLogin || guestIntroLoginBusy"
+            @tap="submitGuestIntroLogin"
+          >{{ guestIntroLoginBusy ? '登录中...' : '确认登录' }}</button>
+          <view class="guest-intro-secondary" @tap="cancelGuestIntroLogin"><text>取消</text></view>
         </view>
       </view>
     </view>
@@ -394,6 +439,7 @@ import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, normalizeHomeSn
 import { formatHomeQuoteCite } from '../../utils/home-quote'
 import { createHomeLoadingGate } from '../../utils/home-loading-gate'
 import { resolveCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
+import { uploadCloudFile } from '../../api/storage'
 import { resolveSectionIconGlyph } from '../../utils/section-icon'
 import {
   buildHomeImageKey,
@@ -427,6 +473,20 @@ markClientDiagnosticStage('home.stores.ready', {
 })
 const showGuestIntro = ref(false)
 const guestIntroConfig = ref<GuestIntroConfig | null>(null)
+const guestIntroLoginMode = ref<'intro' | 'nickname' | 'web'>('intro')
+const guestIntroAvatarTempPath = ref('')
+const guestIntroNickName = ref('')
+const guestIntroWebUsername = ref('')
+const guestIntroWebPassword = ref('')
+const guestIntroLoginBusy = ref(false)
+const guestIntroLoginError = ref('')
+const canSubmitGuestIntroLogin = computed(() => {
+  if (!guestIntroNickName.value.trim()) return false
+  if (guestIntroLoginMode.value === 'web') {
+    return Boolean(guestIntroWebUsername.value.trim() && guestIntroWebPassword.value)
+  }
+  return Boolean(guestIntroAvatarTempPath.value)
+})
 const homeLoading = ref(true)
 const homeLoadingGate = createHomeLoadingGate(homeLoading)
 const postsBySection = ref<Record<string, any[]>>({})
@@ -1440,20 +1500,67 @@ function markCurrentGuestIntroSeen() {
   showGuestIntro.value = false
 }
 
-function openProfileLoginFromGuestIntro() {
-  const url = '/pages/profile/index'
-  uni.switchTab({
-    url,
-    fail: (error) => {
-      clientLog('warn', 'guestIntro.profile.switchTab.fail', { url, error })
-      uni.reLaunch({ url })
-    },
-  })
+function handleGuestIntroPrimary() {
+  guestIntroLoginError.value = ''
+  guestIntroLoginMode.value = 'web'
 }
 
-function handleGuestIntroPrimary() {
-  markCurrentGuestIntroSeen()
-  openProfileLoginFromGuestIntro()
+function handleGuestIntroChooseAvatar(event: any) {
+  const avatarUrl = String(event?.detail?.avatarUrl || '').trim()
+  if (!avatarUrl) return
+  guestIntroAvatarTempPath.value = avatarUrl
+  guestIntroNickName.value = ''
+  guestIntroLoginError.value = ''
+  guestIntroLoginMode.value = 'nickname'
+}
+
+function cancelGuestIntroLogin() {
+  if (guestIntroLoginBusy.value) return
+  guestIntroLoginMode.value = 'intro'
+  guestIntroAvatarTempPath.value = ''
+  guestIntroNickName.value = ''
+  guestIntroWebPassword.value = ''
+  guestIntroLoginError.value = ''
+}
+
+async function submitGuestIntroLogin() {
+  if (!canSubmitGuestIntroLogin.value || guestIntroLoginBusy.value) return
+  guestIntroLoginBusy.value = true
+  guestIntroLoginError.value = ''
+  try {
+    if (guestIntroLoginMode.value === 'web') {
+      await userStore.webLogin({
+        username: guestIntroWebUsername.value,
+        password: guestIntroWebPassword.value,
+        nickName: guestIntroNickName.value,
+      })
+    } else {
+      const source = guestIntroAvatarTempPath.value
+      const ext = source.startsWith('blob:') ? 'jpg' : (source.split('.').pop()?.split('?')[0] || 'jpg')
+      const uploadedAvatar = await uploadCloudFile({
+        cloudPath: `avatars/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`,
+        source,
+      })
+      await userStore.login({ nickName: guestIntroNickName.value, avatarUrl: uploadedAvatar.fileID })
+    }
+    guestIntroWebPassword.value = ''
+    guestIntroAvatarTempPath.value = ''
+    guestIntroNickName.value = ''
+    guestIntroLoginMode.value = 'intro'
+    markCurrentGuestIntroSeen()
+    uni.showToast({ title: '登录成功', icon: 'success' })
+    try {
+      await refreshHomeData()
+    } catch (refreshError) {
+      clientLog('warn', 'guestIntro.login.refresh.fail', { error: refreshError })
+    }
+  } catch (error: any) {
+    guestIntroLoginError.value = String(error?.message || '登录失败，请重试')
+    guestIntroWebPassword.value = ''
+    clientLog('warn', 'guestIntro.login.fail', { error })
+  } finally {
+    guestIntroLoginBusy.value = false
+  }
 }
 
 function handleGuestIntroSecondary() {
@@ -3820,7 +3927,10 @@ onShareAppMessage(() => {
   margin-top: 36rpx;
   border-radius: 999rpx;
   background: #07c160;
+  border: 0;
+  padding: 0;
 }
+.guest-intro-primary::after { border: 0; }
 .guest-intro-primary text {
   font-size: 32rpx;
   font-weight: 700;
@@ -3878,5 +3988,31 @@ onShareAppMessage(() => {
 .guest-intro-secondary .guest-intro-secondary-plus {
   font-size: 42rpx;
   line-height: 48rpx;
+}
+.guest-intro-login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
+  margin-top: 28rpx;
+}
+.guest-intro-login-title {
+  font-size: 40rpx;
+  font-weight: 600;
+  text-align: center;
+}
+.guest-intro-login-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 88rpx;
+  padding: 0 28rpx;
+  border: 2rpx solid #e5e7eb;
+  border-radius: 18rpx;
+  background: #fff;
+}
+.guest-intro-login-error {
+  color: #dc2626;
+  font-size: 24rpx;
+  line-height: 34rpx;
+  text-align: center;
 }
 </style>

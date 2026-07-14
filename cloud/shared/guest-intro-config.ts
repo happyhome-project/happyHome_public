@@ -35,12 +35,13 @@ export const DEFAULT_GUEST_INTRO_CONFIG: GuestIntroConfig = {
     { key: 'history', label: '翻历史', text: '以前整理过的有用内容' },
   ],
   primaryActionText: '微信一键登录',
-  secondaryActionText: '免费创建我的社群',
+  secondaryActionText: '创建我自己的社群',
 }
 
 const LEGACY_DEFAULT_GUEST_INTRO_VERSIONS = new Set([
   'guest-intro-default-v1',
 ])
+const LEGACY_DEFAULT_SECONDARY_ACTION_TEXT = '免费创建我的社群'
 
 function textOrDefault(value: unknown, fallback: string): string {
   const text = typeof value === 'string' ? value.trim() : ''
@@ -86,7 +87,9 @@ export function normalizeGuestIntroConfig(value: unknown): GuestIntroConfig {
     body: textOrDefault(raw.body, DEFAULT_GUEST_INTRO_CONFIG.body),
     features,
     primaryActionText: textOrDefault(raw.primaryActionText, DEFAULT_GUEST_INTRO_CONFIG.primaryActionText),
-    secondaryActionText: textOrDefault(raw.secondaryActionText, DEFAULT_GUEST_INTRO_CONFIG.secondaryActionText),
+    secondaryActionText: textOrDefault(raw.secondaryActionText, DEFAULT_GUEST_INTRO_CONFIG.secondaryActionText) === LEGACY_DEFAULT_SECONDARY_ACTION_TEXT
+      ? DEFAULT_GUEST_INTRO_CONFIG.secondaryActionText
+      : textOrDefault(raw.secondaryActionText, DEFAULT_GUEST_INTRO_CONFIG.secondaryActionText),
     ...copyMetaFields(raw),
   }
 }
