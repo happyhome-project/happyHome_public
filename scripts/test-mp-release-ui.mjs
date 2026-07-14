@@ -1138,6 +1138,21 @@ async function scrollHomeTo(mp, scrollTop) {
   await sleep(500)
 }
 
+async function captureOptionalReleaseUiScreenshot(mp, path) {
+  if (process.env.HH_RELEASE_UI_CAPTURE_SCREENSHOT !== '1') {
+    return { status: 'skipped', reason: 'structured layout evidence is authoritative for the release gate' }
+  }
+  const timeoutMs = envPositiveInt('HH_RELEASE_UI_SCREENSHOT_TIMEOUT_MS', 15000)
+  try {
+    await withTimeout(mp.screenshot({ path }), timeoutMs, 'capture optional release UI screenshot')
+    return { status: 'captured', path }
+  } catch (error) {
+    const message = String(error?.message || error)
+    console.warn(`[release-ui] optional screenshot unavailable: ${message}`)
+    return { status: 'warning', error: message }
+  }
+}
+
 async function verifyHomeArchiveTabs(mp, context, evidenceDir) {
   if (!context.releaseFixture) throw new Error('release archive tabs fixture was not provisioned')
   await seedCurrentViewerIntoCommunity(mp, context.releaseFixture)
@@ -1154,7 +1169,10 @@ async function verifyHomeArchiveTabs(mp, context, evidenceDir) {
     await sleep(700)
   }
   const shortArchive = await captureHomeTabsLayout(mp)
-  await mp.screenshot({ path: resolve(evidenceDir, 'home-archive-tabs-sticky.png') })
+  const screenshotEvidence = await captureOptionalReleaseUiScreenshot(
+    mp,
+    resolve(evidenceDir, 'home-archive-tabs-sticky.png'),
+  )
 
   const pinnedTop = Number(pinned.tabs?.[0]?.top || 0)
   const passed = before.tabs?.length === 1 &&
@@ -1174,7 +1192,7 @@ async function verifyHomeArchiveTabs(mp, context, evidenceDir) {
     Math.abs(shortArchive.scrollTop - pinned.scrollTop) <= 8 &&
     Math.abs(Number(shortArchive.tabs?.[0]?.top || 0) - pinnedTop) <= 4
 
-  return { passed, before, pinned, shortArchive, tabCount: tabs.length }
+  return { passed, before, pinned, shortArchive, tabCount: tabs.length, screenshotEvidence }
 }
 
 async function verifyHomeDetail(mp, context = {}) {
