@@ -482,10 +482,18 @@ export async function auditPostContent(params: {
   return summarizeResults(results)
 }
 
-export async function applyAuditSummary(postId: string, slot: 'content' | 'pendingContent', status: PostAuditStatus, reason = '', trustedPost?: Post) {
+export async function applyAuditSummary(
+  postId: string,
+  slot: 'content' | 'pendingContent',
+  status: PostAuditStatus,
+  reason = '',
+  trustedPost?: Post,
+) {
   const now = nowIso()
+  const skipsRag = (post?: Post | null) => post?.area === 'archive'
   const queueRagIndexJob = async (jobReason: string, action: 'upsert' | 'delete', postSnapshot?: Post) => {
     const post = postSnapshot || await db.getById('posts', postId) as Post
+    if (skipsRag(post)) return
     await enqueuePostRagJob({
       postId,
       communityId: post?.communityId,
@@ -499,7 +507,9 @@ export async function applyAuditSummary(postId: string, slot: 'content' | 'pendi
       const post = postSnapshot || await db.transactionGetByIdOrNull<Post>(transaction, 'posts', postId)
       if (!post) throw new Error('post not found')
       await transaction.collection('posts').doc(postId).update({ data })
-      await appendPostRagOutboxEvent(transaction, { communityId: post.communityId, aggregateId: postId, reasonCode: 'post.audit_changed', now })
+      if (!skipsRag(post)) {
+        await appendPostRagOutboxEvent(transaction, { communityId: post.communityId, aggregateId: postId, reasonCode: 'post.audit_changed', now })
+      }
     })
   }
   if (slot === 'pendingContent') {
@@ -546,7 +556,7 @@ export async function applyAuditSummary(postId: string, slot: 'content' | 'pendi
     auditReason: reason,
     auditUpdatedAt: now,
   }, post)
-  await queueRagIndexJob('audit.content.apply', status === 'pass' ? 'upsert' : 'delete')
+  await queueRagIndexJob('audit.content.apply', status === 'pass' ? 'upsert' : 'delete', post)
   await refreshPostSearchIndexById(postId)
 }
 
@@ -562,7 +572,13 @@ export async function auditAndApply(params: {
   postSnapshot?: Post
 }) {
   const summary = await auditPostContent(params)
-  await applyAuditSummary(params.postId, params.contentSlot || 'content', summary.status, summary.reason, params.postSnapshot)
+  await applyAuditSummary(
+    params.postId,
+    params.contentSlot || 'content',
+    summary.status,
+    summary.reason,
+    params.postSnapshot,
+  )
   return summary
 }
 

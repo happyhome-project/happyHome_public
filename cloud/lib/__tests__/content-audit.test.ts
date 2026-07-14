@@ -28,6 +28,8 @@ jest.mock('../post-rag', () => ({
 }))
 
 import {
+  applyAuditSummary,
+  auditAndApply,
   auditPostContent,
   approvePostAudit,
   buildCiHttpString,
@@ -85,6 +87,41 @@ test('isPostVisibleToMembers only exposes active posts that passed audit', () =>
   expect(isPostVisibleToMembers({ status: 'active', auditStatus: 'review' })).toBe(false)
   expect(isPostVisibleToMembers({ status: 'active', auditStatus: 'rejected' })).toBe(false)
   expect(isPostVisibleToMembers({ status: 'deleted', auditStatus: 'pass' })).toBe(false)
+})
+
+test('auditAndApply can keep archive posts searchable without enqueueing RAG work', async () => {
+  const post = {
+    _id: 'archive-1', communityId: 'community-1', area: 'archive', format: 'text',
+    content: { title: '标题' }, status: 'active', auditStatus: 'pending',
+  }
+  ;(db.getById as jest.Mock).mockResolvedValue(post)
+
+  await auditAndApply({
+    postId: 'archive-1', communityId: 'community-1', sectionId: '', authorId: 'openid-1', source: 'user',
+    section: { widgets: [] } as any,
+    content: post.content as any,
+    postSnapshot: post as any,
+  } as any)
+
+  expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('archive-1')
+  expect(postRag.enqueuePostRagJob).not.toHaveBeenCalled()
+  const { appendPostRagOutboxEvent } = require('../post-rag-outbox')
+  expect(appendPostRagOutboxEvent).not.toHaveBeenCalled()
+})
+
+test('applyAuditSummary automatically keeps later archive audit callbacks out of RAG', async () => {
+  const post = {
+    _id: 'archive-callback-1', communityId: 'community-1', area: 'archive', format: 'image_text',
+    content: { title: '标题', images: ['cloud://env/one.jpg'] }, status: 'active', auditStatus: 'pending',
+  }
+  ;(db.getById as jest.Mock).mockResolvedValue(post)
+
+  await applyAuditSummary('archive-callback-1', 'content', 'pass', '', post as any)
+
+  expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('archive-callback-1')
+  expect(postRag.enqueuePostRagJob).not.toHaveBeenCalled()
+  const { appendPostRagOutboxEvent } = require('../post-rag-outbox')
+  expect(appendPostRagOutboxEvent).not.toHaveBeenCalled()
 })
 
 test('buildCiHttpString follows Tencent CI XML signature newline format', () => {

@@ -286,6 +286,9 @@ export interface Post {
   _id: string
   communityId: string
   sectionId: string
+  area?: 'archive'
+  format?: 'image_text' | 'text'
+  topics?: string[]
   authorId: string
   authorNickname?: string
   authorAvatarUrl?: string
