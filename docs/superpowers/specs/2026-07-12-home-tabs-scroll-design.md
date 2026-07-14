@@ -1,5 +1,8 @@
 # Home Tabs Scroll Design
 
+> **Historical / point-in-time:** This specification records the home-tabs interaction accepted for the 2026-07-12 delivery. It does not override later product or implementation decisions.
+> **Current authority:** Use the [documentation authority map](../../README.md), current home-page code, release UI checks, and tests.
+
 ## Goal
 
 Make the mini-program home-page category tabs transition into their pinned state without a visible jump, duplicate-control handoff, or a search panel dropping in from above.
