@@ -156,7 +156,7 @@ test('release profile validation reads the build marker attribute and rejects vi
   assert.match(source, /attribute\('data-build-version'\)/)
   assert.match(source, /!text\.includes\(expectedVersion\)/)
   assert.match(source, /const buildIdentityPassed =/)
-  assert.match(source, /loginBuildIdentityVerified: profileLoginClean\.buildIdentityPassed/)
+  assert.match(source, /loginBuildIdentityVerified: evidence\.profileLoginClean\?\.buildIdentityPassed/)
 })
 
 test('release home tabs evidence pins below the fixed masthead', () => {
@@ -169,13 +169,17 @@ test('release home tabs evidence pins below the fixed masthead', () => {
 
 test('optional DevTools screenshot cannot block structured home tabs evidence', () => {
   const source = readFileSync(new URL('../test-mp-release-ui.mjs', import.meta.url), 'utf8')
+  const helperStart = source.indexOf('async function captureOptionalReleaseUiScreenshot')
+  const helperEnd = source.indexOf('async function verifyHomeArchiveTabs')
+  const outsideHelper = `${source.slice(0, helperStart)}${source.slice(helperEnd)}`
 
   assert.match(source, /async function captureOptionalReleaseUiScreenshot/)
   assert.match(source, /HH_RELEASE_UI_CAPTURE_SCREENSHOT !== '1'/)
   assert.match(source, /withTimeout\(mp\.screenshot/)
   assert.match(source, /HH_RELEASE_UI_SCREENSHOT_TIMEOUT_MS/)
   assert.match(source, /screenshotEvidence/)
-  assert.doesNotMatch(source, /await mp\.screenshot\(\{ path: resolve\(evidenceDir, 'home-archive-tabs-sticky\.png'\) \}\)/)
+  assert.ok(source.match(/captureOptionalReleaseUiScreenshot/g).length >= 3)
+  assert.doesNotMatch(outsideHelper, /\.screenshot\(/)
 })
 
 test('native release profile validation requires one logged-out login identity entry', () => {
