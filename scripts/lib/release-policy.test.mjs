@@ -547,3 +547,19 @@ test('explicit UI qualification builds only the miniprogram gate and writes exac
   assert.match(buildGate, /HH_RELEASE_DEVTOOLS_VERSION: devToolsVersion/)
   assert.match(dispatch, /target === 'release-ui-qualify'[\s\S]*await runReleaseUiQualification\(\)/)
 })
+
+test('formal prepare explicitly reuses a qualification without silently rebuilding UI', () => {
+  const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
+  const release = extractFunctionBlock(deployScript, 'async function runFormalRelease')
+  const resolver = extractFunctionBlock(deployScript, 'async function inspectExplicitUiQualification')
+  const collector = extractFunctionBlock(deployScript, 'async function collectMiniprogramBuildGateEvidence')
+
+  assert.match(release, /const uiQualificationPath = getFlagValue\('ui-qualification'\)/)
+  assert.match(release, /uiQualificationPath && !prepareOnly/)
+  assert.match(release, /uiQualificationPath[\s\S]*await inspectExplicitUiQualification[\s\S]*buildAndGateMiniprogramUpload/)
+  assert.doesNotMatch(resolver, /buildAndGateMiniprogramUpload|execSync|test:mp:release-gate/)
+  assert.match(resolver, /inspectReleaseUiQualification/)
+  assert.match(resolver, /qualificationDigest: await computeFileSha256/)
+  assert.match(collector, /qualificationPath: preparedEvidence\.qualificationPath/)
+  assert.match(collector, /qualificationDigest: preparedEvidence\.qualificationDigest/)
+})

@@ -118,7 +118,7 @@ import {
   releaseDagMode,
 } from './lib/release-dag-v2.mjs'
 import { startPostRagTimerProbeSession } from './lib/post-rag-timer-probe-runner.mjs'
-import { writeReleaseUiQualification } from './lib/release-ui-qualification.mjs'
+import { inspectReleaseUiQualification, writeReleaseUiQualification } from './lib/release-ui-qualification.mjs'
 import { createSafeAggregateError, releaseFailureCauses } from './lib/release-failure-safety.mjs'
 import { persistFormalReleaseFailure } from './lib/release-terminal-failure.mjs'
 import { ReleaseGovernance } from './lib/release-governance.mjs'
@@ -1211,7 +1211,33 @@ async function collectMiniprogramBuildGateEvidence(preparedEvidence = {}) {
     distBuildInfoPath: resolve(ROOT, 'miniprogram/dist/build/mp-weixin/generated/build-info.js'),
     packageRoot: preparedEvidence.packageRoot || MP_DIST,
     packageDigest: preparedEvidence.packageDigest || await computeDirectoryDigest(MP_DIST),
+    ...(preparedEvidence.qualificationPath ? {
+      qualificationPath: preparedEvidence.qualificationPath,
+      qualificationDigest: preparedEvidence.qualificationDigest,
+      devToolsVersion: preparedEvidence.devToolsVersion,
+    } : {}),
     ...(releaseUiEvidencePath ? { releaseUiEvidencePath } : {}),
+  }
+}
+
+async function inspectExplicitUiQualification(qualificationPath, releaseContext) {
+  const inspected = await inspectReleaseUiQualification({
+    qualificationPath,
+    root: ROOT,
+    expected: {
+      gitSha: releaseContext.gitSha,
+      version: releaseContext.version,
+      desc: releaseContext.desc,
+    },
+    currentDevToolsVersion: releaseContext.devToolsVersion,
+  })
+  return {
+    packageRoot: inspected.packageRoot,
+    packageDigest: inspected.packageDigest,
+    releaseUiEvidencePath: inspected.uiEvidencePath,
+    qualificationPath: inspected.qualificationPath,
+    qualificationDigest: await computeFileSha256(inspected.qualificationPath),
+    devToolsVersion: inspected.devToolsVersion,
   }
 }
 
@@ -1426,6 +1452,9 @@ async function runFormalRelease(options = {}) {
   assertFormalReleaseCloudBasePath({ prepareOnly })
 
   const publishOnly = options.publishOnly === true
+  const uiQualificationPath = getFlagValue('ui-qualification').trim()
+  if (uiQualificationPath && !isAbsolute(uiQualificationPath)) throw new Error('--ui-qualification must be an absolute path')
+  if (uiQualificationPath && !prepareOnly) throw new Error('--ui-qualification is accepted only by release-prepare')
   const fullCurrentExplicit = hasFlag('full-current')
   const releaseStrategy = fullCurrentExplicit ? 'full-current' : 'main'
   const forceRedeployCurrent = hasFlag('force-redeploy-current')
@@ -1453,6 +1482,8 @@ async function runFormalRelease(options = {}) {
     releaseStrategy,
     forceRedeployCurrent,
   }
+  const resumeQualificationPath = resumeRunState?.stages?.['miniprogram-build-gate']?.evidence?.qualificationPath || ''
+  if (uiQualificationPath || resumeQualificationPath) releaseContext.devToolsVersion = readWechatDevToolsVersion()
   const releaseRunId = await resolveReleaseRunId(forceResume)
   releaseContext.runId = releaseRunId
   const selectedDagMode = releaseDagMode(process.env)
@@ -1550,11 +1581,13 @@ async function runFormalRelease(options = {}) {
       command: 'write build-info + npm run build:mp-weixin + npm run test:mp:release-gate -- --skip-mp-build',
     }, async () => {
       if (revalidateFormalMutation) await revalidateFormalMutation('artifact-build:miniprogram')
-      const preparedEvidence = await buildAndGateMiniprogramUpload({
-        ...miniprogramUpload,
-        releaseRunId: releaseLedger.runId,
-        delegateRagVerification: true,
-      })
+      const preparedEvidence = uiQualificationPath
+        ? await inspectExplicitUiQualification(uiQualificationPath, releaseContext)
+        : await buildAndGateMiniprogramUpload({
+            ...miniprogramUpload,
+            releaseRunId: releaseLedger.runId,
+            delegateRagVerification: true,
+          })
       const evidence = await collectMiniprogramBuildGateEvidence(preparedEvidence)
       if (!publishOnly) oneShotBuildInfoPrepared = true
       return {

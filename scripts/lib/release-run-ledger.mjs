@@ -201,6 +201,45 @@ function textHasBuildInfo(text, version, desc) {
 }
 
 async function inspectBuildInfoEvidence(stage, context) {
+  if (stage.evidence?.qualificationPath) {
+    const qualificationPath = pathFromRoot(context.root, stage.evidence.qualificationPath)
+    const expectedDigest = String(stage.evidence.qualificationDigest || '')
+    if (!expectedDigest) return { reusable: false, reason: 'UI qualification digest is missing' }
+    if (!(await pathExists(qualificationPath))) return { reusable: false, reason: 'UI qualification file is missing' }
+    const actualDigest = createHash('sha256').update(await readFile(qualificationPath)).digest('hex')
+    if (actualDigest !== expectedDigest) return { reusable: false, reason: 'UI qualification digest mismatch' }
+    try {
+      const { inspectReleaseUiQualification } = await import('./release-ui-qualification.mjs')
+      const inspected = await inspectReleaseUiQualification({
+        qualificationPath,
+        root: context.root,
+        expected: {
+          gitSha: context.gitSha,
+          version: context.version,
+          desc: context.desc,
+        },
+        currentDevToolsVersion: context.devToolsVersion,
+      })
+      if (inspected.packageDigest !== stage.evidence.packageDigest) {
+        return { reusable: false, reason: 'UI qualification package digest does not match ledger evidence' }
+      }
+      if (!(await pathsReferToSameEntry(inspected.uiEvidencePath, pathFromRoot(context.root, stage.evidence.releaseUiEvidencePath)))) {
+        return { reusable: false, reason: 'UI qualification evidence path does not match ledger evidence' }
+      }
+      return {
+        reusable: true,
+        reason: 'exact UI qualification and current artifacts match',
+        evidence: {
+          qualificationPath: relativeToRoot(context.root, qualificationPath),
+          qualificationDigest: actualDigest,
+          packageDigest: inspected.packageDigest,
+          releaseUiEvidencePath: relativeToRoot(context.root, inspected.uiEvidencePath),
+        },
+      }
+    } catch (error) {
+      return { reusable: false, reason: `UI qualification is invalid: ${String(error?.message || error)}` }
+    }
+  }
   const root = context.root
   const sourcePath = pathFromRoot(root, stage.evidence?.buildInfoPath || 'miniprogram/src/generated/build-info.ts')
   const distPath = pathFromRoot(root, stage.evidence?.distBuildInfoPath || 'miniprogram/dist/build/mp-weixin/generated/build-info.js')

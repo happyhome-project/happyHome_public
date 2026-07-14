@@ -20,6 +20,7 @@ import {
 import { completeProductionReleaseWithRemoteConfirmation } from './production-release-guard.mjs'
 import { DEFAULT_FUNCTIONS, REQUIRED_SMOKE_LABELS } from '../cloud-release-smoke.mjs'
 import { createMiniprogramReceiptIdentity, normalizeMiniprogramUploadReceipt } from './miniprogram-receipt-identity.mjs'
+import { writeReleaseUiQualification } from './release-ui-qualification.mjs'
 
 async function tempRoot() {
   return await mkdtemp(join(tmpdir(), 'happyhome-release-ledger-'))
@@ -823,6 +824,76 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
     })
     assert.equal(wrongBuildInfo.reusable, false)
     assert.match(wrongBuildInfo.reason, /dist build info/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('qualification-backed prepare reuse freshly validates the wrapper and artifacts', async () => {
+  const root = await tempRoot()
+  try {
+    const gitSha = 'a'.repeat(40)
+    const version = '1.0.1'
+    const desc = 'trial-unit'
+    const devToolsVersion = '2.01.2510290'
+    const packageRoot = join(root, 'miniprogram', 'dist', 'build', 'mp-weixin')
+    const sourceBuildInfoPath = join(root, 'miniprogram', 'src', 'generated', 'build-info.ts')
+    const distBuildInfoPath = join(packageRoot, 'generated', 'build-info.js')
+    const uiEvidencePath = join(root, '.codex-local', 'release-ui-evidence.json')
+    const qualificationPath = join(root, '.codex-local', 'ui-qualification.json')
+    await mkdir(join(packageRoot, 'generated'), { recursive: true })
+    await mkdir(join(root, 'miniprogram', 'src', 'generated'), { recursive: true })
+    const buildInfo = `version=${version}\ndesc=${desc}\nbuildId=mp-${version}\n`
+    await writeFile(sourceBuildInfoPath, buildInfo)
+    await writeFile(distBuildInfoPath, buildInfo)
+    await writeFile(join(packageRoot, 'app.js'), 'App({})\n')
+    const markers = [
+      'HH_RELEASE_HOME_COLD_START_NONEMPTY',
+      'HH_RELEASE_HOME_IMAGES_RENDERED',
+      'HH_RELEASE_HOME_ARCHIVE_TABS_STICKY',
+      'HH_RELEASE_HOME_DETAIL_NONEMPTY',
+      'HH_RELEASE_LOGIN_VERSION',
+      'HH_RELEASE_PROFILE_LOGIN_CLEAN',
+    ]
+    await writeJson(uiEvidencePath, {
+      gitSha,
+      devToolsVersion,
+      projectPath: packageRoot,
+      markers,
+      homeColdStartNonEmpty: true,
+      homeImagesRendered: true,
+      homeArchiveTabsSticky: true,
+      homeDetailNonEmpty: true,
+      loginBuildIdentityVerified: true,
+      profileLoginClean: { expectedVersion: version },
+    })
+    const qualification = await writeReleaseUiQualification({
+      root, outputPath: qualificationPath, gitSha, version, desc, packageRoot,
+      devToolsVersion, sourceBuildInfoPath, distBuildInfoPath, uiEvidencePath,
+    })
+    const qualificationDigest = createHash('sha256').update(await readFile(qualificationPath)).digest('hex')
+    const ledger = await createReleaseRunLedger({ root, runId: 'qualified-run', command: 'prepare', gitSha, version, desc })
+    await ledger.passStage('miniprogram-build-gate', {
+      evidence: {
+        qualificationPath,
+        qualificationDigest,
+        devToolsVersion,
+        buildInfoPath: sourceBuildInfoPath,
+        distBuildInfoPath,
+        releaseUiEvidencePath: uiEvidencePath,
+        packageRoot,
+        packageDigest: qualification.packageDigest,
+      },
+      result: { version, desc },
+    })
+    const context = { root, runId: 'qualified-run', gitSha, version, desc, devToolsVersion }
+    const reusable = await inspectReleaseStageReuse(ledger.state, 'miniprogram-build-gate', context)
+    assert.equal(reusable.reusable, true)
+
+    await writeFile(qualificationPath, `${await readFile(qualificationPath, 'utf8')} `)
+    const changed = await inspectReleaseStageReuse(ledger.state, 'miniprogram-build-gate', context)
+    assert.equal(changed.reusable, false)
+    assert.match(changed.reason, /qualification digest mismatch/i)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
