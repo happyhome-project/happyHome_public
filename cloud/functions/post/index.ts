@@ -33,6 +33,7 @@ import { normalizeSectionTemplates } from '../../shared/section-templates'
 import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
 import { resolvePostAuthorNickname } from '../../shared/post-author'
 import { parseArchivePostCreateInput, type ArchivePostFormat } from '../../shared/archive-post'
+import { normalizeTopics } from '../../shared/topics'
 
 type PostRagSmokeIdentity = {
   version: number
@@ -779,6 +780,53 @@ export async function handleList(params: {
   return { posts: enrichedPosts }
 }
 
+export async function handleListArchive(params: {
+  communityId: string
+  topic?: string
+  skip?: number
+  limit?: number
+  asGuest?: boolean
+}, openid?: string) {
+  const communityId = String(params.communityId || '').trim()
+  if (!communityId) throw new Error('communityId 不能为空')
+  const viewerId = params.asGuest ? '' : (openid || '')
+  await ensureCommunityReadable(communityId, viewerId, COMMUNITY_READ_ERROR)
+
+  const normalizedTopic = params.topic === undefined || String(params.topic).trim() === ''
+    ? ''
+    : normalizeTopics([params.topic])[0] || ''
+  const topicKey = normalizedTopic.toLowerCase()
+  const skip = Number.isFinite(Number(params.skip)) ? Math.max(0, Math.floor(Number(params.skip))) : 0
+  const limit = Number.isFinite(Number(params.limit)) && Number(params.limit) > 0
+    ? Math.min(50, Math.floor(Number(params.limit)))
+    : 20
+  const requestedCount = skip + limit + 1
+  const visiblePosts: any[] = []
+  let databaseSkip = 0
+  const batchSize = 100
+  while (visiblePosts.length < requestedCount) {
+    const batch = await db.query('posts', {
+      communityId,
+      area: 'archive',
+      status: 'active',
+    }, {
+      orderBy: ['createdAt', 'desc'],
+      skip: databaseSkip,
+      limit: batchSize,
+    }) as any[]
+    visiblePosts.push(...batch
+      .filter(isPostVisibleToMembers)
+      .filter((post) => !topicKey || (Array.isArray(post.topics) && post.topics.some((topic: unknown) => (
+        typeof topic === 'string' && topic.normalize('NFKC').trim().toLowerCase() === topicKey
+      )))))
+    if (batch.length < batchSize) break
+    databaseSkip += batch.length
+  }
+  const slicedPosts = visiblePosts.slice(skip, skip + limit)
+  const enrichedPosts = await enrichPostsWithAuthor(slicedPosts)
+  return { posts: enrichedPosts, hasMore: visiblePosts.length > skip + limit }
+}
+
 export async function handleHome(params: {
   communityId: string
   limitPerSection?: number
@@ -807,6 +855,10 @@ export async function handleGet(params: { postId: string; asGuest?: boolean }, o
   if (!post || post.status === 'deleted' || !isPostVisibleToMembers(post)) throw new Error('帖子不存在')
   const viewerId = params.asGuest ? '' : (openid || '')
   await ensureCommunityReadable(post.communityId, viewerId, COMMUNITY_READ_ERROR)
+  if (post.area === 'archive') {
+    const [enrichedPost] = await enrichPostsWithAuthor([post])
+    return { post: enrichedPost }
+  }
   const section = normalizePostSection(await db.getById('sections', post.sectionId) as Section)
   const canViewMemberOnly = await isActiveCommunityMember(post.communityId, viewerId)
   const visiblePost = maskMemberOnlyContent(post, section, canViewMemberOnly)
@@ -1097,6 +1149,7 @@ export const main = async (event: any, context?: any) => {
   if (action === 'getActivityInviteState') return handleGetActivityInviteState(params, openid)
   if (action === 'createActivityInvite') return handleCreateActivityInvite(params, openid)
   if (action === 'list') return handleList(params, openid)
+  if (action === 'listArchive') return handleListArchive(params, openid)
   if (action === 'home') return handleHome(params, openid)
   if (action === 'bootstrap') return handleBootstrap(params, openid)
   if (action === 'get') return handleGet(params, openid)

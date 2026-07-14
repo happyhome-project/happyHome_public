@@ -181,6 +181,17 @@ const INDEXES = [
       { Name: 'createdAt', Direction: '-1' },
     ],
   },
+  // posts: 无板块沉淀流按社区、区域和状态筛选，按发布时间倒序。
+  {
+    coll: 'posts',
+    name: 'idx_communityId_area_status_createdAt',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'area', Direction: '1' },
+      { Name: 'status', Direction: '1' },
+      { Name: 'createdAt', Direction: '-1' },
+    ],
+  },
   // posts: hardDeleteCommunity 级联扫 posts by communityId
   {
     coll: 'posts',

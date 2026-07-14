@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "changeId": "archive-post-foundation",
+  "actions": [
+    "ensure-indexes"
+  ],
+  "migrations": [],
+  "smokeSuites": [],
+  "releaseImpact": {
+    "cloudFunctions": "Deploy post so archive posts can be created and read without a section.",
+    "adminWeb": "No runtime code change.",
+    "miniprogram": "No runtime code change in this backend foundation batch.",
+    "environmentVariables": [],
+    "databaseMigrations": [
+      "Create the posts communityId + area + status + createdAt compound index through ensure-indexes."
+    ]
+  }
+}
