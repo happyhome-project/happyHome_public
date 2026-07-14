@@ -19,10 +19,11 @@ test('release UI fixture capability stays in the trusted Node process', () => {
     source.indexOf('async function callMpCloud'),
     source.indexOf('async function callTrustedAdminCloud'),
   )
-  assert.match(callMpCloud, /action === 'community\.hardDelete'.*invokeTrustedAdminCloud\(data, \{ timeoutMs, attempts: 2 \}\)/s)
+  assert.match(callMpCloud, /action === 'community\.hardDelete'.*invokeTrustedAdminCloud\(data, \{ timeoutMs, attempts: Number\(options\.attempts \|\| 2\) \}\)/s)
   assert.match(callMpCloud, /name === 'admin'.*callTrustedAdminCloud/s)
   assert.doesNotMatch(callMpCloud, /ADMIN_INTERNAL_CALL_TOKEN|requireAdminInternalToken|_internalToken/)
   assert.match(source, /happyhome-release-admin-/)
+  assert.match(source, /cleanupReleaseFixtureWithRetry\([\s\S]*attempts: 1/)
 })
 
 test('builds DevTools auto args with hidden automator websocket port', () => {

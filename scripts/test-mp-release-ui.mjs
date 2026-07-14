@@ -40,6 +40,7 @@ import {
   parseFirstJson,
 } from './cloud-release-smoke.mjs'
 import { computeDirectoryDigest } from './lib/release-run-ledger.mjs'
+import { cleanupReleaseFixtureWithRetry } from './lib/release-ui-fixture-cleanup.mjs'
 import { applyAndWaitForReleaseFixtureSelection } from './lib/release-ui-fixture-selection.mjs'
 import { invokeTrustedAdminCloud } from './lib/trusted-admin-invoke.mjs'
 
@@ -789,7 +790,7 @@ async function callMpCloud(mp, name, data, options = {}) {
   const action = String(data?.action || '')
   const timeoutMs = Number(options.timeoutMs || 60000)
   if (name === 'admin' && action === 'community.hardDelete') {
-    return await invokeTrustedAdminCloud(data, { timeoutMs, attempts: 2 })
+    return await invokeTrustedAdminCloud(data, { timeoutMs, attempts: Number(options.attempts || 2) })
   }
   if (name === 'admin') return await callTrustedAdminCloud(data, { timeoutMs })
   const response = await withTimeout(
@@ -1046,24 +1047,17 @@ async function cleanupReleaseFixture(mp, fixture) {
   if (!fixture || fixture.configured || !fixture.communityId || !fixture.adminCtx) {
     return { ok: true, skipped: true, reason: 'no temporary fixture cleanup required' }
   }
-  const steps = []
-  for (const action of ['community.disable', 'community.hardDelete']) {
-    try {
-      await callMpCloud(mp, 'admin', {
+  const cleanup = await cleanupReleaseFixtureWithRetry({
+    actions: ['community.disable', 'community.hardDelete'],
+    invoke: async (action) => await callMpCloud(mp, 'admin', {
         action,
         _actAs: fixture.adminCtx,
         communityId: fixture.communityId,
-      }, { timeoutMs: 90000 })
-      steps.push({ action, ok: true })
-    } catch (error) {
-      steps.push({ action, ok: false, error: stringifyError(error) })
-      break
-    }
-  }
+      }, { timeoutMs: 90000, attempts: 1 }),
+  })
   return {
-    ok: steps.every((step) => step.ok),
+    ...cleanup,
     communityId: fixture.communityId,
-    steps,
   }
 }
 
@@ -1518,6 +1512,7 @@ async function main() {
   } catch (error) {
     mp = mpState.mp || mp
     evidence.error = String(error?.message || error)
+    let finalError = error
     if (runContext.releaseFixture) {
       try {
         evidence.releaseFixtureCleanup = await withTimeout(
@@ -1526,21 +1521,36 @@ async function main() {
           'cleanup failed release UI fixture',
         )
         runContext.releaseFixture = null
+        if (!evidence.releaseFixtureCleanup.ok) {
+          finalError = new AggregateError(
+            [error, new Error(`Release fixture cleanup failed: ${JSON.stringify(evidence.releaseFixtureCleanup)}`)],
+            'release UI gate and fixture cleanup both failed',
+          )
+        }
       } catch (cleanupError) {
         evidence.releaseFixtureCleanup = {
           ok: false,
           error: stringifyError(cleanupError),
         }
+        runContext.releaseFixture = null
+        finalError = new AggregateError([error, cleanupError], 'release UI gate and fixture cleanup both failed')
       }
     }
     const jsonPath = resolve(evidenceDir, 'release-ui-evidence.failed.json')
     writeFileSync(jsonPath, JSON.stringify(evidence, null, 2), 'utf8')
     console.error(`[release-ui] failed evidence saved: ${jsonPath}`)
-    throw error
+    throw finalError
   } finally {
+    let finalCleanupError = null
     if (runContext.releaseFixture) {
-      try { await withTimeout(cleanupReleaseFixture(mp, runContext.releaseFixture), 60000, 'cleanup leftover release UI fixture') } catch {}
-      runContext.releaseFixture = null
+      try {
+        const finalCleanup = await withTimeout(cleanupReleaseFixture(mp, runContext.releaseFixture), 60000, 'cleanup leftover release UI fixture')
+        if (!finalCleanup.ok) finalCleanupError = new Error(`Release fixture final cleanup failed: ${JSON.stringify(finalCleanup)}`)
+      } catch (cleanupError) {
+        finalCleanupError = cleanupError
+      } finally {
+        runContext.releaseFixture = null
+      }
     }
     try { await withTimeout(restoreStorage(mp, originalStorage), 15000, 'restore release UI storage') } catch {}
     try { await withTimeout(mpState.mp.disconnect(), 15000, 'disconnect release UI automator') } catch {}
@@ -1552,6 +1562,7 @@ async function main() {
         rmSync(evidenceDir, { recursive: true, force: true })
       }
     } catch {}
+    if (finalCleanupError) throw finalCleanupError
   }
 }
 
