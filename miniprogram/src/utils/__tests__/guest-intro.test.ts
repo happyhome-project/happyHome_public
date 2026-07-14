@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
-import { DEFAULT_GUEST_INTRO_CONFIG } from '../../../../cloud/shared/guest-intro-config'
+import fs from 'node:fs'
+import path from 'node:path'
+import { DEFAULT_GUEST_INTRO_CONFIG, normalizeGuestIntroConfig } from '../../../../cloud/shared/guest-intro-config'
 
 const storage = new Map<string, any>()
 
@@ -53,5 +55,32 @@ describe('guest intro popup visibility', () => {
       isLoggedIn: false,
       hasPublicCommunity: true,
     })).toBe(false)
+  })
+
+  test('starts login on home without routing through profile and uses the new create copy', () => {
+    const homeSource = fs.readFileSync(path.resolve(process.cwd(), 'src/pages/index/index.vue'), 'utf8')
+    const primaryStart = homeSource.indexOf('function handleGuestIntroPrimary')
+    const secondaryStart = homeSource.indexOf('function handleGuestIntroSecondary')
+    const primaryHandler = homeSource.slice(primaryStart, secondaryStart)
+
+    expect(primaryStart).toBeGreaterThan(-1)
+    expect(primaryHandler).not.toContain('/pages/profile/index')
+    expect(primaryHandler).not.toContain('switchTab')
+    expect(primaryHandler).not.toContain('reLaunch')
+    expect(homeSource).toContain('data-testid="guest-intro-login-trigger"')
+    expect(homeSource).toContain('open-type="chooseAvatar"')
+    expect(homeSource).toContain('data-testid="guest-intro-login-submit"')
+    expect(DEFAULT_GUEST_INTRO_CONFIG.secondaryActionText).toBe('创建我自己的社群')
+  })
+
+  test('upgrades the previous default create copy without overwriting custom copy', () => {
+    expect(normalizeGuestIntroConfig({
+      ...DEFAULT_GUEST_INTRO_CONFIG,
+      secondaryActionText: '免费创建我的社群',
+    }).secondaryActionText).toBe('创建我自己的社群')
+    expect(normalizeGuestIntroConfig({
+      ...DEFAULT_GUEST_INTRO_CONFIG,
+      secondaryActionText: '加入社区',
+    }).secondaryActionText).toBe('加入社区')
   })
 })
