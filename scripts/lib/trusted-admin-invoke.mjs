@@ -44,6 +44,19 @@ export async function invokeTrustedAdminWithManager(data, options = {}) {
   return functionResult
 }
 
+export async function invokeTrustedAdminWithRetry(data, options = {}) {
+  const attempts = Math.max(1, Math.min(3, Number(options.attempts || 1)))
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await invokeTrustedAdminWithManager(data, options)
+    } catch (error) {
+      const scfExecutionTimedOut = /Invoking task timed out after \d+ seconds/i.test(String(error?.message || error))
+      if (!scfExecutionTimedOut || attempt === attempts) throw error
+    }
+  }
+  throw new Error('trusted admin retry exhausted')
+}
+
 export async function invokeTrustedAdminCloud(data, options = {}) {
   const credentials = resolveCloudBaseReleaseCredentials({ env: options.env || process.env })
   const manager = CloudBase.init({
@@ -51,9 +64,10 @@ export async function invokeTrustedAdminCloud(data, options = {}) {
     secretKey: credentials.secretKey,
     envId: credentials.envId,
   })
-  return await invokeTrustedAdminWithManager(data, {
+  return await invokeTrustedAdminWithRetry(data, {
     manager,
     internalToken: options.internalToken,
     timeoutMs: options.timeoutMs,
+    attempts: options.attempts,
   })
 }
