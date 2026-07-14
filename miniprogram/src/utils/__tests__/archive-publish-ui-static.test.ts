@@ -5,6 +5,12 @@ import { describe, expect, test } from 'vitest'
 const read = (...parts: string[]) => readFileSync(join(process.cwd(), 'src', ...parts), 'utf8')
 
 describe('archive publishing entry', () => {
+  test('keeps archive topic navigation on the shared page background', () => {
+    const source = read('components', 'ArchiveTopicTabs.vue')
+    const rule = source.match(/\.archive-topic-tabs\s*\{([^}]*)\}/s)?.[1] || ''
+    expect(rule).not.toMatch(/(?:^|\s)background\s*:/)
+  })
+
   test('offers exactly the three product-level publishing choices', () => {
     const source = read('components', 'AppTabBar.vue')
     expect(source).toContain("{ key: 'image_text', label: '发图文'")

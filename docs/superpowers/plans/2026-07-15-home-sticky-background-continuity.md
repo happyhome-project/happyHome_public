@@ -19,15 +19,18 @@
 
 **Files:**
 - Modify: `miniprogram/src/utils/__tests__/home-sticky-layout-static.test.ts`
+- Modify: `miniprogram/src/utils/__tests__/archive-publish-ui-static.test.ts`
 - Modify: `scripts/test-h5-home-sticky-smoke.mjs`
 
 - [ ] **Step 1: Add failing static assertions**
 
 Extract the `.home-search-sticky-shell` and `.section-tabs-sticky-shell` rule bodies and assert that neither contains `background:`, `box-shadow:`, or `backdrop-filter:`. Keep the existing position and offset assertions.
 
+Assert that `.archive-topic-tabs` does not declare a background while retaining its horizontal scrolling and active-topic indicator.
+
 - [ ] **Step 2: Run the focused Vitest file and verify RED**
 
-Run: `npm.cmd run test:mp:unit -- miniprogram/src/utils/__tests__/home-sticky-layout-static.test.ts`
+Run: `npx.cmd vitest run miniprogram/src/utils/__tests__/home-sticky-layout-static.test.ts`
 
 Expected: FAIL because both wrappers currently define opaque backgrounds and shadows.
 
@@ -39,14 +42,15 @@ Read `getComputedStyle()` for both wrappers before scrolling and assert transpar
 
 **Files:**
 - Modify: `miniprogram/src/pages/index/index.vue`
+- Modify: `miniprogram/src/components/ArchiveTopicTabs.vue`
 
 - [ ] **Step 1: Make the minimal SCSS change**
 
-Remove `background` and `box-shadow` from `.home-search-sticky-shell`. Remove `background`, `box-shadow`, and `backdrop-filter` from `.section-tabs-sticky-shell`. Do not change sticky positioning, offsets, dimensions, spacing, z-index, input styling, or quote styling.
+Remove `background` and `box-shadow` from `.home-search-sticky-shell`. Remove `background`, `box-shadow`, and `backdrop-filter` from `.section-tabs-sticky-shell`. Remove the white background from `.archive-topic-tabs`. Do not change sticky positioning, offsets, dimensions, spacing, z-index, input styling, quote styling, or topic selection styling.
 
 - [ ] **Step 2: Run focused tests and verify GREEN**
 
-Run the focused Vitest file and `node scripts/test-h5-home-sticky-smoke.mjs` after building H5. Both must pass.
+Run the focused Vitest file, `npm.cmd -w miniprogram run build:h5`, and `node scripts/test-h5-home-sticky-smoke.mjs`. All must pass.
 
 - [ ] **Step 3: Commit the implementation**
 
