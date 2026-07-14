@@ -3,7 +3,10 @@ import { readFileSync } from 'node:fs'
 import { buildRichNoteContentFromMarkdown } from '../rich-note'
 import {
   extractTextNoteContent,
+  extractTextNoteFullBody,
   getTextNoteCard,
+  getTextNoteThemePresentation,
+  needsTextNoteFullBody,
   normalizeTextNoteTitle,
   normalizeTextNoteTheme,
   resolveTextNoteBodySize,
@@ -27,6 +30,14 @@ describe('text note presentation', () => {
     expect(normalizeTextNoteTheme('quote')).toBe('quote')
     expect(normalizeTextNoteTheme('unknown')).toBe('paper')
     expect(normalizeTextNoteTheme(undefined)).toBe('paper')
+  })
+
+  test('gives every theme a distinct typographic presentation, not only a color', () => {
+    const presentations = TEXT_NOTE_THEMES.map((theme) => getTextNoteThemePresentation(theme))
+
+    expect(new Set(presentations.map((item) => item.kicker)).size).toBe(TEXT_NOTE_THEMES.length)
+    expect(new Set(presentations.map((item) => `${item.layout}:${item.titleTone}:${item.ornament}`)).size)
+      .toBe(TEXT_NOTE_THEMES.length)
   })
 
   test('builds a card from content and presentation with paper fallback', () => {
@@ -106,5 +117,16 @@ describe('text note presentation', () => {
     expect(resolveTextNoteBodySize('字'.repeat(21))).toBe('medium')
     expect(resolveTextNoteBodySize('字'.repeat(40))).toBe('medium')
     expect(resolveTextNoteBodySize('字'.repeat(41))).toBe('small')
+  })
+
+  test('keeps the visual cover as the detail body and only adds full text when cover truncates', () => {
+    const shortBody = buildRichNoteContentFromMarkdown('短正文')
+    const longBody = buildRichNoteContentFromMarkdown(`${'完整正文'.repeat(20)}\n\n第二段也要保留`)
+
+    expect(extractTextNoteFullBody(shortBody)).toBe('短正文')
+    expect(needsTextNoteFullBody(shortBody)).toBe(false)
+    expect(extractTextNoteFullBody(longBody)).toContain('第二段也要保留')
+    expect(extractTextNoteFullBody(longBody)).toContain('\n\n第二段也要保留')
+    expect(needsTextNoteFullBody(longBody)).toBe(true)
   })
 })

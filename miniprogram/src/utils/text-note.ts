@@ -4,6 +4,23 @@ export const TEXT_NOTE_THEMES = ['paper', 'mint', 'slate', 'headline', 'quote', 
 
 export type TextNoteTheme = typeof TEXT_NOTE_THEMES[number]
 export type TextNoteBodySize = 'large' | 'medium' | 'small'
+export type TextNoteLayout = 'memo' | 'fresh' | 'night' | 'newspaper' | 'quotation' | 'bulletin'
+
+export interface TextNoteThemePresentation {
+  kicker: string
+  layout: TextNoteLayout
+  titleTone: 'handwritten' | 'friendly' | 'modern' | 'editorial' | 'literary' | 'official'
+  ornament: 'pin' | 'leaf' | 'stars' | 'rule' | 'quote' | 'stamp'
+}
+
+const TEXT_NOTE_THEME_PRESENTATIONS: Record<TextNoteTheme, TextNoteThemePresentation> = {
+  paper: { kicker: '社区便签', layout: 'memo', titleTone: 'handwritten', ornament: 'pin' },
+  mint: { kicker: '邻里日常', layout: 'fresh', titleTone: 'friendly', ornament: 'leaf' },
+  slate: { kicker: '今日记录', layout: 'night', titleTone: 'modern', ornament: 'stars' },
+  headline: { kicker: '社区小报', layout: 'newspaper', titleTone: 'editorial', ornament: 'rule' },
+  quote: { kicker: '一句话', layout: 'quotation', titleTone: 'literary', ornament: 'quote' },
+  notice: { kicker: '通知公告', layout: 'bulletin', titleTone: 'official', ornament: 'stamp' },
+}
 
 export interface PostPresentation {
   textNoteTheme?: TextNoteTheme
@@ -70,6 +87,37 @@ function richNoteText(value: unknown): string {
 
 export function normalizeTextNoteTheme(value: unknown): TextNoteTheme {
   return TEXT_NOTE_THEMES.includes(value as TextNoteTheme) ? value as TextNoteTheme : 'paper'
+}
+
+export function getTextNoteThemePresentation(value: unknown): TextNoteThemePresentation {
+  return TEXT_NOTE_THEME_PRESENTATIONS[normalizeTextNoteTheme(value)]
+}
+
+function richNotePlainTextWithBreaks(markdown: string): string {
+  return String(markdown || '')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => markdownToText(line))
+    .join('\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+export function extractTextNoteFullBody(value: unknown): string {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const note = value as { markdown?: unknown; html?: unknown; text?: unknown }
+    if (typeof note.markdown === 'string' && note.markdown.trim()) return richNotePlainTextWithBreaks(note.markdown)
+    if (typeof note.html === 'string' && note.html.trim()) return richNotePlainTextWithBreaks(htmlToMarkdown(note.html))
+    if (typeof note.text === 'string') return note.text.trim()
+  }
+  return normalizeText(value)
+}
+
+export function needsTextNoteFullBody(value: unknown): boolean {
+  const fullBody = extractTextNoteFullBody(value)
+  const coverBody = extractTextNoteFirstParagraph(value)
+  return textNoteCharacters(fullBody).length > 64 || fullBody !== coverBody
 }
 
 export function extractTextNoteFirstParagraph(value: unknown): string {
