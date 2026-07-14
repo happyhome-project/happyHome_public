@@ -146,7 +146,17 @@ export async function inspectReleaseUiQualification({
   const markers = new Set(Array.isArray(evidence.markers) ? evidence.markers : [])
   const missingMarker = REQUIRED_RELEASE_UI_MARKERS.find(({ marker }) => !markers.has(marker))
   if (missingMarker) throw new Error(`release UI qualification missing marker ${missingMarker.marker}`)
-  assertReleaseUiEvidence(evidence)
+  assertReleaseUiEvidence({
+    homeColdStartNonEmpty: evidence.homeColdStart?.passed,
+    homeImagesRendered: evidence.homeDetail?.homeImagesRendered,
+    homeArchiveTabsSticky: evidence.homeArchiveTabs?.passed,
+    homeDetailNonEmpty: evidence.homeDetail?.passed,
+    loginBuildIdentityVerified: evidence.profileLoginClean?.buildIdentityPassed,
+    profileLoginClean: evidence.profileLoginClean?.cleanPassed,
+  })
+  if (evidence.profileLoginClean?.expectedVersion !== qualification.version) {
+    throw new Error(`release UI qualification UI evidence version mismatch: expected ${qualification.version}, got ${evidence.profileLoginClean?.expectedVersion || 'missing'}`)
+  }
 
   return {
     ...qualification,

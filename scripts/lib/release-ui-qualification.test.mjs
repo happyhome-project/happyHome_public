@@ -44,12 +44,10 @@ async function createFixture() {
     devToolsVersion: IDENTITY.devToolsVersion,
     projectPath: packageRoot,
     markers: MARKERS,
-    homeColdStartNonEmpty: true,
-    homeImagesRendered: true,
-    homeArchiveTabsSticky: true,
-    homeDetailNonEmpty: true,
-    loginBuildIdentityVerified: true,
-    profileLoginClean: { expectedVersion: IDENTITY.version },
+    homeColdStart: { passed: true },
+    homeArchiveTabs: { passed: true },
+    homeDetail: { passed: true, homeImagesRendered: true },
+    profileLoginClean: { expectedVersion: IDENTITY.version, buildIdentityPassed: true, cleanPassed: true },
   }, null, 2)}\n`)
   return { root, packageRoot, sourceBuildInfoPath, distBuildInfoPath, uiEvidencePath, outputPath }
 }
@@ -126,7 +124,7 @@ const mutationCases = [
     mutate: async (fixture) => {
       const evidence = JSON.parse(await readFile(fixture.uiEvidencePath, 'utf8'))
       evidence.markers = evidence.markers.filter((marker) => marker !== 'HH_RELEASE_HOME_DETAIL_NONEMPTY')
-      evidence.homeDetailNonEmpty = false
+      evidence.homeDetail.passed = false
       await writeFile(fixture.uiEvidencePath, `${JSON.stringify(evidence, null, 2)}\n`)
       const qualification = JSON.parse(await readFile(fixture.outputPath, 'utf8'))
       qualification.uiEvidence.sha256 = await sha256File(fixture.uiEvidencePath)

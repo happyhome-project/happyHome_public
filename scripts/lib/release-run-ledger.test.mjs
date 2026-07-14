@@ -860,12 +860,10 @@ test('qualification-backed prepare reuse freshly validates the wrapper and artif
       devToolsVersion,
       projectPath: packageRoot,
       markers,
-      homeColdStartNonEmpty: true,
-      homeImagesRendered: true,
-      homeArchiveTabsSticky: true,
-      homeDetailNonEmpty: true,
-      loginBuildIdentityVerified: true,
-      profileLoginClean: { expectedVersion: version },
+      homeColdStart: { passed: true },
+      homeArchiveTabs: { passed: true },
+      homeDetail: { passed: true, homeImagesRendered: true },
+      profileLoginClean: { expectedVersion: version, buildIdentityPassed: true, cleanPassed: true },
     })
     const qualification = await writeReleaseUiQualification({
       root, outputPath: qualificationPath, gitSha, version, desc, packageRoot,
