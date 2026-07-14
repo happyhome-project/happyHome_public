@@ -36,5 +36,5 @@ test('ensure-indexes includes the membership critical-path compound indexes', ()
 })
 
 test('ensure-indexes includes the archive feed compound index', () => {
-  assert.match(source, /idx_communityId_area_status_createdAt[\s\S]*communityId[\s\S]*area[\s\S]*status[\s\S]*createdAt/)
+  assert.match(source, /idx_communityId_area_status_auditStatus_createdAt[\s\S]*communityId[\s\S]*area[\s\S]*status[\s\S]*auditStatus[\s\S]*createdAt/)
 })

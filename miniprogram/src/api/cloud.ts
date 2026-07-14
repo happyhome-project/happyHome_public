@@ -235,7 +235,6 @@ export type ArchivePostCreateParams = {
 
 export type ArchivePostListParams = {
   communityId: string
-  topic?: string
   skip?: number
   limit?: number
   asGuest?: boolean

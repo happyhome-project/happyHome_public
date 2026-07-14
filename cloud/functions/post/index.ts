@@ -33,7 +33,6 @@ import { normalizeSectionTemplates } from '../../shared/section-templates'
 import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
 import { resolvePostAuthorNickname } from '../../shared/post-author'
 import { parseArchivePostCreateInput, type ArchivePostFormat } from '../../shared/archive-post'
-import { normalizeTopics } from '../../shared/topics'
 
 type PostRagSmokeIdentity = {
   version: number
@@ -782,7 +781,6 @@ export async function handleList(params: {
 
 export async function handleListArchive(params: {
   communityId: string
-  topic?: string
   skip?: number
   limit?: number
   asGuest?: boolean
@@ -792,39 +790,22 @@ export async function handleListArchive(params: {
   const viewerId = params.asGuest ? '' : (openid || '')
   await ensureCommunityReadable(communityId, viewerId, COMMUNITY_READ_ERROR)
 
-  const normalizedTopic = params.topic === undefined || String(params.topic).trim() === ''
-    ? ''
-    : normalizeTopics([params.topic])[0] || ''
-  const topicKey = normalizedTopic.toLowerCase()
   const skip = Number.isFinite(Number(params.skip)) ? Math.max(0, Math.floor(Number(params.skip))) : 0
   const limit = Number.isFinite(Number(params.limit)) && Number(params.limit) > 0
     ? Math.min(50, Math.floor(Number(params.limit)))
     : 20
-  const requestedCount = skip + limit + 1
-  const visiblePosts: any[] = []
-  let databaseSkip = 0
-  const batchSize = 100
-  while (visiblePosts.length < requestedCount) {
-    const batch = await db.query('posts', {
-      communityId,
-      area: 'archive',
-      status: 'active',
-    }, {
-      orderBy: ['createdAt', 'desc'],
-      skip: databaseSkip,
-      limit: batchSize,
-    }) as any[]
-    visiblePosts.push(...batch
-      .filter(isPostVisibleToMembers)
-      .filter((post) => !topicKey || (Array.isArray(post.topics) && post.topics.some((topic: unknown) => (
-        typeof topic === 'string' && topic.normalize('NFKC').trim().toLowerCase() === topicKey
-      )))))
-    if (batch.length < batchSize) break
-    databaseSkip += batch.length
-  }
-  const slicedPosts = visiblePosts.slice(skip, skip + limit)
-  const enrichedPosts = await enrichPostsWithAuthor(slicedPosts)
-  return { posts: enrichedPosts, hasMore: visiblePosts.length > skip + limit }
+  const posts = await db.query('posts', {
+    communityId,
+    area: 'archive',
+    status: 'active',
+    auditStatus: 'pass',
+  }, {
+    orderBy: ['createdAt', 'desc'],
+    skip,
+    limit: limit + 1,
+  }) as any[]
+  const enrichedPosts = await enrichPostsWithAuthor(posts.slice(0, limit))
+  return { posts: enrichedPosts, hasMore: posts.length > limit }
 }
 
 export async function handleHome(params: {
@@ -903,18 +884,21 @@ export async function handleDelete(params: { postId: string }, openid: string) {
     status: string
     communityId?: string
     sectionId?: string
+    area?: string
   }
   if (post.authorId !== openid) throw new Error('无权删除')
 
   if (post.status === 'deleted') {
-    await db.runTransaction(async transaction => {
-      await enqueuePostRagDeleteJobInTransaction(transaction, {
-        postId: params.postId,
-        communityId: post.communityId,
-        sectionId: post.sectionId,
-        reason: 'post.delete.compensate',
+    if (post.area !== 'archive') {
+      await db.runTransaction(async transaction => {
+        await enqueuePostRagDeleteJobInTransaction(transaction, {
+          postId: params.postId,
+          communityId: post.communityId,
+          sectionId: post.sectionId,
+          reason: 'post.delete.compensate',
+        })
       })
-    })
+    }
     await removePostSearchIndex(params.postId)
     return { success: true, alreadyDeleted: true }
   }
@@ -924,13 +908,15 @@ export async function handleDelete(params: { postId: string }, openid: string) {
       status: 'deleted', isPinned: false, pinnedAt: '', pinnedByAccountId: '',
       isFeatured: false, featuredAt: '', featuredByAccountId: '',
     } })
-    await appendPostRagOutboxEvent(transaction, { communityId: String(post.communityId || ''), aggregateId: params.postId, reasonCode: 'post.deleted', now: new Date().toISOString() })
-    await enqueuePostRagDeleteJobInTransaction(transaction, {
-      postId: params.postId,
-      communityId: post.communityId,
-      sectionId: post.sectionId,
-      reason: 'post.delete',
-    })
+    if (post.area !== 'archive') {
+      await appendPostRagOutboxEvent(transaction, { communityId: String(post.communityId || ''), aggregateId: params.postId, reasonCode: 'post.deleted', now: new Date().toISOString() })
+      await enqueuePostRagDeleteJobInTransaction(transaction, {
+        postId: params.postId,
+        communityId: post.communityId,
+        sectionId: post.sectionId,
+        reason: 'post.delete',
+      })
+    }
   })
   await removePostSearchIndex(params.postId)
   return { success: true }

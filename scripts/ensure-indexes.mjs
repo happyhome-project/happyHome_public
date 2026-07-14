@@ -181,14 +181,15 @@ const INDEXES = [
       { Name: 'createdAt', Direction: '-1' },
     ],
   },
-  // posts: 无板块沉淀流按社区、区域和状态筛选，按发布时间倒序。
+  // posts: 无板块沉淀流按社区、区域、状态和审核结果筛选，按发布时间倒序。
   {
     coll: 'posts',
-    name: 'idx_communityId_area_status_createdAt',
+    name: 'idx_communityId_area_status_auditStatus_createdAt',
     keys: [
       { Name: 'communityId', Direction: '1' },
       { Name: 'area', Direction: '1' },
       { Name: 'status', Direction: '1' },
+      { Name: 'auditStatus', Direction: '1' },
       { Name: 'createdAt', Direction: '-1' },
     ],
   },

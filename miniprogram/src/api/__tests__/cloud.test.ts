@@ -58,13 +58,13 @@ describe('callCloud', () => {
       communityId: 'community-1', area: 'archive', format: 'text', topics: ['成长'],
       content: { title: '家风', body: { text: '正文' } }, presentation: { textNoteTheme: 'paper' },
     })
-    await (postApi as any).listArchive({ communityId: 'community-1', topic: '成长', skip: 20, limit: 20 })
+    await (postApi as any).listArchive({ communityId: 'community-1', skip: 20, limit: 20 })
 
     expect(callWebFunction).toHaveBeenNthCalledWith(1, 'post', expect.objectContaining({
       action: 'create', area: 'archive', format: 'text', communityId: 'community-1',
     }))
     expect(callWebFunction).toHaveBeenNthCalledWith(2, 'post', {
-      action: 'listArchive', communityId: 'community-1', topic: '成长', skip: 20, limit: 20,
+      action: 'listArchive', communityId: 'community-1', skip: 20, limit: 20,
     })
   })
 
