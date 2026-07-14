@@ -19,15 +19,7 @@ export function isTextNoteSection(section: Pick<Section, 'displayTemplate'> | nu
 export function normalizeTextNoteWidgets(section: Pick<Section, 'displayTemplate' | 'widgets'> | null | undefined): Widget[] {
   const widgets = Array.isArray(section?.widgets) ? section.widgets : []
   if (!isTextNoteSection(section)) return widgets
-
-  const lockedIds = new Set(TEXT_NOTE_LOCKED_WIDGETS.map((widget) => widget.widgetId))
-  const customWidgets = widgets
-    .filter((widget) => !lockedIds.has(String(widget?.widgetId || '')))
-    .slice()
-    .sort((a, b) => Number(a?.order || 0) - Number(b?.order || 0))
-    .map((widget, index) => ({ ...widget, order: TEXT_NOTE_LOCKED_WIDGETS.length + 1 + index, locked: false }))
-
-  return [...buildDefaultTextNoteWidgets(), ...customWidgets]
+  return buildDefaultTextNoteWidgets()
 }
 
 export function normalizeTextNoteSection<T extends { displayTemplate?: unknown; widgets?: Widget[] } | null | undefined>(section: T): T {

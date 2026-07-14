@@ -21,7 +21,7 @@ test('text note defaults contain the two required locked widgets', () => {
   ])
 })
 
-test('normalizeTextNoteWidgets restores locked definitions and keeps custom widgets after them', () => {
+test('normalizeTextNoteWidgets restores the exact fixed contract and discards custom widgets', () => {
   const section = {
     displayTemplate: 'text_note' as const,
     widgets: [
@@ -29,9 +29,6 @@ test('normalizeTextNoteWidgets restores locked definitions and keeps custom widg
       { widgetId: 'text_title', type: 'summary' as const, label: '篡改', fieldKey: 'bad', required: false, order: 99, showInList: false },
     ],
   }
-  expect(normalizeTextNoteWidgets(section)).toEqual([
-    ...buildDefaultTextNoteWidgets(),
-    expect.objectContaining({ widgetId: 'custom', order: 3, locked: false }),
-  ])
+  expect(normalizeTextNoteWidgets(section)).toEqual(buildDefaultTextNoteWidgets())
   expect(isTextNoteSection(section)).toBe(true)
 })
