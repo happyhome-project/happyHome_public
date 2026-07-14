@@ -1352,6 +1352,8 @@ async function main() {
   const evidence = {
     createdAt: new Date().toISOString(),
     releaseRunId: String(process.env.HH_RELEASE_RUN_ID || ''),
+    gitSha: String(process.env.HH_RELEASE_GIT_SHA || ''),
+    devToolsVersion: String(process.env.HH_RELEASE_DEVTOOLS_VERSION || ''),
     packageDigest,
     cliPath,
     projectPath,

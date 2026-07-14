@@ -45,6 +45,7 @@
     "integrate:workflow-pr": "node scripts/integrate-workflow-pr.mjs",
     "release:plan": "node scripts/release-plan.mjs",
     "release:preflight": "node scripts/release-preflight.mjs",
+    "release:ui-qualify": "node scripts/deploy.mjs release-ui-qualify",
     "release:pending": "node scripts/release-plan.mjs pending",
     "release:lock": "node scripts/release-lock.mjs",
     "test:release-preflight": "node --test scripts/lib/release-preflight.test.mjs",
