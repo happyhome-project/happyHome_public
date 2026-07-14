@@ -1,9 +1,9 @@
 import {
   ARCHIVE_POST_FORMATS,
-  MAX_ARCHIVE_TOPIC_IDS,
   ArchivePostContractError,
   parseArchivePostCreateInput,
 } from '../archive-post'
+import { MAX_TOPIC_COUNT } from '../topics'
 
 const richBody = (overrides: Record<string, unknown> = {}) => ({
   format: 'markdown',
@@ -28,7 +28,7 @@ function expectCode(input: unknown, code: string): void {
 describe('archive post create contract', () => {
   test('exports the supported formats and topic limit', () => {
     expect(ARCHIVE_POST_FORMATS).toEqual(['image_text', 'text'])
-    expect(MAX_ARCHIVE_TOPIC_IDS).toBe(5)
+    expect(MAX_TOPIC_COUNT).toBe(5)
   })
 
   test('parses an image-text archive post and passes optional structures through', () => {
@@ -37,12 +37,12 @@ describe('archive post create contract', () => {
     expect(parseArchivePostCreateInput({
       area: 'archive',
       format: 'image_text',
-      topicIds: ['topic-1'],
+      topics: ['亲子出游'],
       content: { title: '春游', images: ['cloud://one'], body, location },
     })).toEqual({
       area: 'archive',
       format: 'image_text',
-      topicIds: ['topic-1'],
+      topics: ['亲子出游'],
       content: { title: '春游', images: ['cloud://one'], body, location },
     })
   })
@@ -51,13 +51,13 @@ describe('archive post create contract', () => {
     expect(parseArchivePostCreateInput({
       area: 'archive',
       format: 'text',
-      topicIds: [],
+      topics: [],
       content: { title: '家风', body: richBody() },
       presentation: { textNoteTheme: 'mint' },
     })).toEqual({
       area: 'archive',
       format: 'text',
-      topicIds: [],
+      topics: [],
       content: { title: '家风', body: richBody() },
       presentation: { textNoteTheme: 'mint' },
     })
@@ -67,17 +67,17 @@ describe('archive post create contract', () => {
     expect(parseArchivePostCreateInput({
       area: 'archive',
       format: 'image_text',
-      topicIds: [' topic-2 ', 'topic-1', 'topic-2'],
+      topics: [' #亲子出游 ', 'ＰＥＴ', 'pet'],
       content: { title: '  标题  ', images: [' one ', 'two', 'one'] },
     })).toEqual({
       area: 'archive',
       format: 'image_text',
-      topicIds: ['topic-2', 'topic-1'],
+      topics: ['亲子出游', 'PET'],
       content: { title: '标题', images: ['one', 'two'] },
     })
     expect(parseArchivePostCreateInput({
       area: 'archive', format: 'text', content: { title: '标题', body: richBody() },
-    })).toMatchObject({ topicIds: [], presentation: { textNoteTheme: 'paper' } })
+    })).toMatchObject({ topics: [], presentation: { textNoteTheme: 'paper' } })
   })
 
   test('rejects non-archive inputs and supplied section identifiers', () => {
@@ -92,16 +92,21 @@ describe('archive post create contract', () => {
     expectCode({ area: 'archive', format: 'video' }, 'archive_format_invalid')
   })
 
-  test('validates topic identifiers and the deduplicated limit', () => {
-    expectCode({ area: 'archive', format: 'image_text', topicIds: 'topic', content: {} }, 'archive_topic_ids_invalid')
-    expectCode({ area: 'archive', format: 'image_text', topicIds: ['  '], content: {} }, 'archive_topic_ids_invalid')
+  test('uses the shared topic normalization and limits', () => {
     expectCode({
-      area: 'archive', format: 'image_text', topicIds: ['1', '2', '3', '4', '5', '6'], content: {},
+      area: 'archive', format: 'image_text', topicIds: ['legacy-topic'],
+      content: { title: '标题', images: ['one'] },
+    }, 'archive_topics_invalid')
+    expectCode({ area: 'archive', format: 'image_text', topics: 'topic', content: {} }, 'archive_topics_invalid')
+    expectCode({ area: 'archive', format: 'image_text', topics: [1], content: {} }, 'archive_topics_invalid')
+    expectCode({ area: 'archive', format: 'image_text', topics: ['一'.repeat(21)], content: {} }, 'archive_topics_invalid')
+    expectCode({
+      area: 'archive', format: 'image_text', topics: ['1', '2', '3', '4', '5', '6'], content: {},
     }, 'archive_topic_limit')
     expect(parseArchivePostCreateInput({
-      area: 'archive', format: 'image_text', topicIds: ['1', '2', '3', '4', '5', '5'],
+      area: 'archive', format: 'image_text', topics: ['1', '2', '3', '4', '5', '5'],
       content: { title: '标题', images: ['one'] },
-    }).topicIds).toHaveLength(5)
+    }).topics).toHaveLength(5)
   })
 
   test('requires a non-empty trimmed title', () => {
@@ -137,7 +142,7 @@ describe('archive post create contract', () => {
 
   test('does not mutate the caller input', () => {
     const input = {
-      area: 'archive', format: 'text', topicIds: [' topic '],
+      area: 'archive', format: 'text', topics: [' #话题 '],
       content: { title: ' 标题 ', body: richBody({ text: ' 正文 ' }) },
       presentation: { textNoteTheme: 'paper' },
     }
@@ -201,17 +206,17 @@ describe('archive post create contract', () => {
   })
 
   test('returns independent normalized topic and image arrays', () => {
-    const topicIds = [' topic-1 ']
+    const topics = [' #话题 ']
     const images = [' image-1 ']
     const parsed = parseArchivePostCreateInput({
-      area: 'archive', format: 'image_text', topicIds, content: { title: '标题', images },
+      area: 'archive', format: 'image_text', topics, content: { title: '标题', images },
     })
     if (parsed.format !== 'image_text') throw new Error('expected image-text result')
-    expect(parsed.topicIds).not.toBe(topicIds)
+    expect(parsed.topics).not.toBe(topics)
     expect(parsed.content.images).not.toBe(images)
-    parsed.topicIds.push('topic-2')
+    parsed.topics.push('另一个话题')
     parsed.content.images.push('image-2')
-    expect(topicIds).toEqual([' topic-1 '])
+    expect(topics).toEqual([' #话题 '])
     expect(images).toEqual([' image-1 '])
   })
 

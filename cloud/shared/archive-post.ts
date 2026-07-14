@@ -1,8 +1,8 @@
 import type { GeoLocation, RichNoteContent, TextNoteTheme } from './types'
 import { normalizeTextNoteTheme } from './text-note-widgets'
+import { normalizeTopics } from './topics'
 
 export const ARCHIVE_POST_FORMATS = ['image_text', 'text'] as const
-export const MAX_ARCHIVE_TOPIC_IDS = 5
 
 export type ArchivePostFormat = typeof ARCHIVE_POST_FORMATS[number]
 
@@ -26,14 +26,14 @@ export type ArchivePostCreateInput =
   | {
       area: 'archive'
       format: 'image_text'
-      topicIds: string[]
+      topics: string[]
       content: ArchiveImageTextContent
       presentation?: never
     }
   | {
       area: 'archive'
       format: 'text'
-      topicIds: string[]
+      topics: string[]
       content: ArchiveTextContent
       presentation: ArchivePostPresentation & { textNoteTheme: TextNoteTheme }
     }
@@ -57,14 +57,13 @@ function fail(code: string): never {
   throw new ArchivePostContractError(code)
 }
 
-function normalizeTopicIds(value: unknown): string[] {
-  if (value === undefined) return []
-  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || item.trim() === '')) {
-    return fail('archive_topic_ids_invalid')
+function parseTopics(value: unknown): string[] {
+  try {
+    return normalizeTopics(value === undefined ? [] : value)
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('最多添加')) return fail('archive_topic_limit')
+    return fail('archive_topics_invalid')
   }
-  const topicIds = [...new Set(value.map((item) => item.trim()))]
-  if (topicIds.length > MAX_ARCHIVE_TOPIC_IDS) return fail('archive_topic_limit')
-  return topicIds
 }
 
 function requireTitle(content: PlainObject): string {
@@ -113,7 +112,8 @@ export function parseArchivePostCreateInput(value: unknown): ArchivePostCreateIn
   }
   if (!ARCHIVE_POST_FORMATS.includes(value.format as ArchivePostFormat)) return fail('archive_format_invalid')
 
-  const topicIds = normalizeTopicIds(value.topicIds)
+  if (Object.prototype.hasOwnProperty.call(value, 'topicIds')) return fail('archive_topics_invalid')
+  const topics = parseTopics(value.topics)
   if (!isPlainObject(value.content)) return fail('invalid_input')
   const content = value.content
   const title = requireTitle(content)
@@ -136,7 +136,7 @@ export function parseArchivePostCreateInput(value: unknown): ArchivePostCreateIn
     }
     if (content.body !== undefined) parsedContent.body = content.body
     if (content.location !== undefined) parsedContent.location = content.location
-    return { area: 'archive', format: 'image_text', topicIds, content: parsedContent }
+    return { area: 'archive', format: 'image_text', topics, content: parsedContent }
   }
 
   if (!isRichNoteContent(content.body) || content.body.text.trim() === '') {
@@ -165,7 +165,7 @@ export function parseArchivePostCreateInput(value: unknown): ArchivePostCreateIn
   return {
     area: 'archive',
     format: 'text',
-    topicIds,
+    topics,
     content: { title, body: content.body },
     presentation: { textNoteTheme },
   }
