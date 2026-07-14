@@ -10,6 +10,11 @@ export const REQUIRED_RELEASE_UI_MARKERS = [
     description: 'home page image evidence is satisfied for current content',
   },
   {
+    id: 'home-archive-tabs-sticky',
+    marker: 'HH_RELEASE_HOME_ARCHIVE_TABS_STICKY',
+    description: 'one archive tabs control sticks while search scrolls away and archive switching stays stable',
+  },
+  {
     id: 'home-detail-nonempty',
     marker: 'HH_RELEASE_HOME_DETAIL_NONEMPTY',
     description: 'home feed tap opens a non-empty detail page',
@@ -72,9 +77,10 @@ export function assertReleaseUiEvidence(evidence = {}) {
   const loginBuildIdentityVerified = evidence.loginBuildIdentityVerified ?? evidence.loginVersionVisible
   if (!evidence.homeColdStartNonEmpty) missing.push(REQUIRED_RELEASE_UI_MARKERS[0])
   if (!evidence.homeImagesRendered) missing.push(REQUIRED_RELEASE_UI_MARKERS[1])
-  if (!evidence.homeDetailNonEmpty) missing.push(REQUIRED_RELEASE_UI_MARKERS[2])
-  if (!loginBuildIdentityVerified) missing.push(REQUIRED_RELEASE_UI_MARKERS[3])
-  if (!evidence.profileLoginClean) missing.push(REQUIRED_RELEASE_UI_MARKERS[4])
+  if (!evidence.homeArchiveTabsSticky) missing.push(REQUIRED_RELEASE_UI_MARKERS[2])
+  if (!evidence.homeDetailNonEmpty) missing.push(REQUIRED_RELEASE_UI_MARKERS[3])
+  if (!loginBuildIdentityVerified) missing.push(REQUIRED_RELEASE_UI_MARKERS[4])
+  if (!evidence.profileLoginClean) missing.push(REQUIRED_RELEASE_UI_MARKERS[5])
   if (missing.length) {
     const details = missing.map(({ marker, description }) => `${marker} (${description})`).join(', ')
     throw new Error(`Release UI evidence markers missing: ${details}`)

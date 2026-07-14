@@ -115,54 +115,6 @@
       </view>
     </view>
 
-    <view
-      v-if="archiveGroups.length"
-      class="home-fixed-controls"
-      :class="{ 'is-visible': showHomeFixedControls }"
-    >
-      <view class="home-search home-search--fixed">
-        <view class="home-search-box">
-          <view class="home-search-icon" aria-hidden="true">
-            <view class="home-search-icon-ring"></view>
-            <view class="home-search-icon-handle"></view>
-          </view>
-          <input
-            v-model="homeSearchQuery"
-            class="home-search-input"
-            confirm-type="search"
-            placeholder="试试搜周边亲子游路线"
-            placeholder-class="home-search-placeholder"
-            @confirm="submitHomeSearch"
-          />
-          <view class="home-search-action" @tap="submitHomeSearch">
-            <text>搜索</text>
-          </view>
-        </view>
-      </view>
-
-      <scroll-view
-        scroll-x
-        class="section-tabs section-tabs--fixed"
-        :show-scrollbar="false"
-      >
-        <view class="section-tabs-inner">
-          <view
-            v-for="(g, index) in archiveGroups"
-            :key="`fixed-${g.id}`"
-            class="section-tab"
-            :data-testid="`home-section-tab-${g.id}`"
-            :data-section-id="g.id"
-            :data-active="index === activeArchiveIndex ? 'true' : 'false'"
-            :aria-selected="index === activeArchiveIndex ? 'true' : 'false'"
-            :class="{ active: index === activeArchiveIndex }"
-            @tap="selectArchiveGroup(g)"
-          >
-            <text>{{ g.name }}</text>
-          </view>
-        </view>
-      </scroll-view>
-    </view>
-
     <!-- Admin notice · 管理员维护的固定公告 -->
     <view v-if="noticeRows.length > 0" class="notice-board">
       <image class="notice-kind-image" src="/static/home-notice-title.png" mode="aspectFit" />
@@ -236,29 +188,25 @@
       </scroll-view>
     </template>
 
-    <scroll-view
-      v-if="archiveGroups.length"
-      scroll-x
-      class="section-tabs section-tabs--flow"
-      :class="{ 'is-shadowed-by-fixed': showHomeFixedControls }"
-      :show-scrollbar="false"
-    >
-      <view class="section-tabs-inner">
-        <view
-          v-for="(g, index) in archiveGroups"
-          :key="g.id"
-          class="section-tab"
-          :data-testid="`home-section-tab-${g.id}`"
-          :data-section-id="g.id"
-          :data-active="index === activeArchiveIndex ? 'true' : 'false'"
-          :aria-selected="index === activeArchiveIndex ? 'true' : 'false'"
-          :class="{ active: index === activeArchiveIndex }"
-          @tap="selectArchiveGroup(g)"
-        >
-          <text>{{ g.name }}</text>
+    <view v-if="archiveGroups.length" class="section-tabs-sticky-shell">
+      <scroll-view scroll-x class="section-tabs" :show-scrollbar="false">
+        <view class="section-tabs-inner">
+          <view
+            v-for="(g, index) in archiveGroups"
+            :key="g.id"
+            class="section-tab"
+            :data-testid="`home-section-tab-${g.id}`"
+            :data-section-id="g.id"
+            :data-active="index === activeArchiveIndex ? 'true' : 'false'"
+            :aria-selected="index === activeArchiveIndex ? 'true' : 'false'"
+            :class="{ active: index === activeArchiveIndex }"
+            @tap="selectArchiveGroup(g)"
+          >
+            <text>{{ g.name }}</text>
+          </view>
         </view>
-      </view>
-    </scroll-view>
+      </scroll-view>
+    </view>
 
     <!-- Archive feed · Figma 0709_v2 选中板块内容区 -->
     <view
@@ -490,7 +438,6 @@ const shareImageUrl = ref(DEFAULT_COMMUNITY_SHARE_IMAGE)
 const homeSearchQuery = ref('')
 const selectedArchiveId = ref('')
 const homePageScrollTop = ref(0)
-const homeFixedControlsThresholdPx = ref(180)
 const archivePreviewMinHeightPx = ref(0)
 const homeBannerActiveIndex = ref(0)
 const homeBannerSwipeIntent = ref(false)
@@ -501,7 +448,6 @@ let mountedAt = 0
 let unsubscribeBackgroundFetchSnapshot: (() => void) | null = null
 let archiveSwitchScrollTimers: ReturnType<typeof setTimeout>[] = []
 let archivePreviewMeasureTimers: ReturnType<typeof setTimeout>[] = []
-let homeFixedControlsMeasureTimers: ReturnType<typeof setTimeout>[] = []
 let suppressNextHomeBannerTap = false
 let suppressHomeBannerTapTimer: ReturnType<typeof setTimeout> | null = null
 let homeBannerPointerStartX = 0
@@ -514,8 +460,6 @@ const HOME_BANNER_SWIPE_THRESHOLD_PX = 8
 const HOME_BANNER_TAP_SUPPRESS_MS = 320
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
-const HOME_FIXED_CONTROLS_MIN_SCROLL_PX = 80
-const HOME_FIXED_CONTROLS_OFFSET_PX = 8
 const HOME_TAB_RETAP_EVENT = 'happyhome:home-tab-retap'
 const HOME_PULL_REFRESH_HINT_MIN_MS = 480
 const GUIDE_AUTHOR_AVATAR_PALETTE = [
@@ -570,16 +514,11 @@ const activeArchiveStyle = computed(() => {
   if (group?.displayTemplate === 'guide_note' && archivePreviewMinHeightPx.value > 0) {
     return `min-height: ${archivePreviewMinHeightPx.value}px;`
   }
-  // Sticky tabs need transparent scroll runway when switching to short text-only lists.
-  if (group && group.displayTemplate !== 'guide_note' && showHomeFixedControls.value) {
+  if (group && group.displayTemplate !== 'guide_note') {
     return 'min-height: 100vh;'
   }
   return ''
 })
-const showHomeFixedControls = computed(() =>
-  archiveGroups.value.length > 0 && homePageScrollTop.value >= homeFixedControlsThresholdPx.value
-)
-
 function onMastheadTap() {
   // 仅当用户有多个社区时才进入切换页；否则 tap 不做任何事（避免空页面困扰）
   if (hasMultipleCommunities.value) {
@@ -1301,39 +1240,6 @@ function getCurrentPageScrollTop() {
   return Math.max(0, Math.round(Number(scrollTop) || 0))
 }
 
-function clearHomeFixedControlsMeasureTimers() {
-  homeFixedControlsMeasureTimers.forEach((timer) => clearTimeout(timer))
-  homeFixedControlsMeasureTimers = []
-}
-
-function measureHomeFixedControlsThreshold() {
-  try {
-    uni.createSelectorQuery()
-      .select('.home-search--primary')
-      .boundingClientRect((rect) => {
-        const top = Number(Array.isArray(rect) ? rect[0]?.top : rect?.top)
-        if (!Number.isFinite(top)) return
-        const nextThreshold = getCurrentPageScrollTop() + top - HOME_FIXED_CONTROLS_OFFSET_PX
-        homeFixedControlsThresholdPx.value = Math.max(
-          HOME_FIXED_CONTROLS_MIN_SCROLL_PX,
-          Math.round(nextThreshold),
-        )
-      })
-      .exec()
-  } catch (error) {
-    clientLog('warn', 'home.fixedControls.measure.fail', { error })
-  }
-}
-
-function scheduleHomeFixedControlsMeasure() {
-  clearHomeFixedControlsMeasureTimers()
-  nextTick(() => {
-    measureHomeFixedControlsThreshold()
-    homeFixedControlsMeasureTimers.push(setTimeout(measureHomeFixedControlsThreshold, 120))
-    homeFixedControlsMeasureTimers.push(setTimeout(measureHomeFixedControlsThreshold, 420))
-  })
-}
-
 function scrollHomeToTop() {
   try {
     uni.pageScrollTo({ scrollTop: 0, duration: 260 })
@@ -1761,7 +1667,6 @@ async function initializeHome() {
   mountedAt = Date.now()
   hideNativeTabBar()
   ;(uni as any).$on?.(HOME_TAB_RETAP_EVENT, scrollHomeToTop)
-  scheduleHomeFixedControlsMeasure()
   clientLog('info', 'home.mounted', {})
   unsubscribeBackgroundFetchSnapshot = subscribeBackgroundFetchSnapshot(
     () => ({
@@ -1779,7 +1684,6 @@ async function initializeHome() {
     }
     await hydrateHomeFromFastPath()
     await refreshHomeData()
-    scheduleHomeFixedControlsMeasure()
     probeHomeRender('mounted')
   } catch (error) {
     homeLoadingGate.releaseInitial()
@@ -1802,7 +1706,6 @@ onUnmounted(() => {
   ;(uni as any).$off?.(HOME_TAB_RETAP_EVENT, scrollHomeToTop)
   clearArchiveSwitchScrollTimers()
   clearArchivePreviewMeasureTimers()
-  clearHomeFixedControlsMeasureTimers()
   unsubscribeBackgroundFetchSnapshot?.()
   unsubscribeBackgroundFetchSnapshot = null
 })
@@ -1814,7 +1717,6 @@ onShow(() => {
   markClientDiagnosticStage('home.onShow')
   startHomeDiagnosticWatchdog()
   hideNativeTabBar()
-  scheduleHomeFixedControlsMeasure()
   const marker = getPendingHomeRefreshMarker()
   clientLog('info', 'home.show', {
     hasPendingRefreshMarker: !!marker,
@@ -1829,19 +1731,6 @@ onShow(() => {
   })
   probeHomeRender('show')
 })
-
-watch(
-  () => [
-    currentShareCommunityId.value,
-    archiveGroups.value.length,
-    homeBannerItems.value.length,
-    noticeRows.value.length,
-    liveItems.value.length,
-    quoteText.value,
-    quoteCite.value,
-  ],
-  () => scheduleHomeFixedControlsMeasure(),
-)
 
 onPullDownRefresh(async () => {
   clientLog('info', 'home.pullDownRefresh', {})
@@ -2176,51 +2065,6 @@ onShareAppMessage(() => {
   line-height: 45rpx;
   font-weight: $hh-font-weight-medium;
   color: $hh-surface-1;
-}
-
-.home-fixed-controls {
-  position: fixed;
-  left: 0;
-  right: 0;
-  top: 0;
-  z-index: 80;
-  box-sizing: border-box;
-  padding: calc(18rpx + env(safe-area-inset-top)) 0 12rpx;
-  background: rgba(250, 250, 249, 0.96);
-  box-shadow: 0 12rpx 28rpx rgba(15, 23, 42, 0.08);
-  backdrop-filter: blur(18rpx);
-  opacity: 0;
-  transform: translateY(-100%);
-  pointer-events: none;
-  transition: opacity 160ms ease, transform 180ms ease;
-  overflow: hidden;
-}
-
-.home-fixed-controls.is-visible {
-  opacity: 1;
-  transform: translateY(0);
-  pointer-events: auto;
-}
-
-.home-fixed-controls .home-search {
-  margin: 0 32rpx 16rpx;
-}
-
-.home-fixed-controls .home-search-box {
-  min-height: 82rpx;
-  padding-left: 28rpx;
-  border-radius: $hh-radius-full;
-  box-shadow: 0 6rpx 18rpx rgba(15, 23, 42, 0.05);
-}
-
-.home-fixed-controls .home-search-input {
-  height: 82rpx;
-}
-
-.home-fixed-controls .home-search-action {
-  flex: 0 0 132rpx;
-  width: 132rpx;
-  height: 68rpx;
 }
 
 /* ═══ Admin notices ═══ */
@@ -2983,17 +2827,25 @@ onShareAppMessage(() => {
 }
 
 .home-shell {
-  padding: calc(86rpx + env(safe-area-inset-top)) var(--hh-page-x) 24rpx;
+  padding: calc(150rpx + env(safe-area-inset-top)) var(--hh-page-x) 24rpx;
   background:
     radial-gradient(circle at 84% 0%, rgba(48, 91, 70, 0.22), transparent 34%),
     linear-gradient(170deg, #caeee7 0%, #f1f3ee 58%, var(--hh-color-page) 100%);
 }
 
 .home-topbar {
-  min-height: 64rpx;
+  box-sizing: border-box;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: $hh-z-sticky + 1;
+  min-height: calc(150rpx + env(safe-area-inset-top));
+  padding: calc(86rpx + env(safe-area-inset-top)) var(--hh-page-x) 0;
   display: flex;
   align-items: center;
   gap: 12px;
+  background: linear-gradient(180deg, #caeee7 0%, rgba(202, 238, 231, 0.98) 100%);
 }
 
 .community-identity {
@@ -3302,21 +3154,19 @@ onShareAppMessage(() => {
 }
 
 .section-tabs {
-  margin: 34rpx 0 20rpx;
   white-space: nowrap;
   overflow-anchor: none;
 }
 
-.section-tabs--fixed {
-  margin: 0;
-}
-
-.section-tabs--flow.is-shadowed-by-fixed {
-  height: 0;
-  margin: 0;
-  opacity: 0;
-  overflow: hidden;
-  pointer-events: none;
+.section-tabs-sticky-shell {
+  position: sticky;
+  top: calc(150rpx + env(safe-area-inset-top));
+  z-index: $hh-z-sticky;
+  margin: 34rpx 0 20rpx;
+  padding: 12rpx 0;
+  background: rgba(250, 250, 249, 0.96);
+  box-shadow: 0 10rpx 24rpx rgba(15, 23, 42, 0.07);
+  backdrop-filter: blur(18rpx);
 }
 
 .section-tabs-inner {
