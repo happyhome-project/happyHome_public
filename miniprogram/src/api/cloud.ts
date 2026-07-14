@@ -224,6 +224,23 @@ export const sectionApi = {
     callCloud<{ section: any }>('section', 'get', { sectionId, asGuest }),
 }
 
+export type ArchivePostCreateParams = {
+  communityId: string
+  area: 'archive'
+  format: 'image_text' | 'text'
+  topics?: string[]
+  content: Record<string, any>
+  presentation?: { textNoteTheme?: 'paper' | 'mint' | 'slate' | 'headline' | 'quote' | 'notice' }
+}
+
+export type ArchivePostListParams = {
+  communityId: string
+  topic?: string
+  skip?: number
+  limit?: number
+  asGuest?: boolean
+}
+
 export const postApi = {
   bootstrap: (currentCommunityId?: string, limitPerSection = 20, asGuest = false, trace?: PerformanceTrace) =>
     callCloud<any>(
@@ -240,6 +257,8 @@ export const postApi = {
     ),
   list: (sectionId: string, skip = 0, asGuest = false) =>
     callCloud<{ posts: any[] }>('post', 'list', { sectionId, skip, asGuest }),
+  listArchive: (params: ArchivePostListParams) =>
+    callCloud<{ posts: any[]; hasMore: boolean }>('post', 'listArchive', params),
   search: (params: {
     communityId: string
     query: string
@@ -282,6 +301,8 @@ export const postApi = {
     callCloud<{ post: any }>('post', 'get', { postId, asGuest }),
   create: (params: object) =>
     callCloud('post', 'create', params),
+  createArchive: (params: ArchivePostCreateParams) =>
+    callCloud<{ postId: string; auditStatus?: string; auditReason?: string }>('post', 'create', params),
   getActivityInviteState: (sourcePostId: string, asGuest = false) =>
     callCloud<{
       enabled: boolean

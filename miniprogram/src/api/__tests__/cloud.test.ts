@@ -46,6 +46,28 @@ describe('callCloud', () => {
     }))
   })
 
+  test('postApi exposes section-free archive create and list actions', async () => {
+    callWebFunction.mockResolvedValue({ posts: [], hasMore: false })
+    vi.stubGlobal('uni', {})
+
+    const { postApi } = await import('../cloud')
+    expect((postApi as any).createArchive).toBeInstanceOf(Function)
+    expect((postApi as any).listArchive).toBeInstanceOf(Function)
+
+    await (postApi as any).createArchive({
+      communityId: 'community-1', area: 'archive', format: 'text', topics: ['成长'],
+      content: { title: '家风', body: { text: '正文' } }, presentation: { textNoteTheme: 'paper' },
+    })
+    await (postApi as any).listArchive({ communityId: 'community-1', topic: '成长', skip: 20, limit: 20 })
+
+    expect(callWebFunction).toHaveBeenNthCalledWith(1, 'post', expect.objectContaining({
+      action: 'create', area: 'archive', format: 'text', communityId: 'community-1',
+    }))
+    expect(callWebFunction).toHaveBeenNthCalledWith(2, 'post', {
+      action: 'listArchive', communityId: 'community-1', topic: '成长', skip: 20, limit: 20,
+    })
+  })
+
   test('forwards only whitelisted performance trace fields to the cloud function', async () => {
     const callFunction = vi.fn(({ success }: { success: (value: any) => void }) => {
       success({ result: { ok: true }, requestId: 'server-request-1' })
