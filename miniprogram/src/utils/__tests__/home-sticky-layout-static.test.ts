@@ -16,5 +16,6 @@ describe('home progressive sticky navigation', () => {
     expect(shellClose).toBeGreaterThan(0)
     expect(search).toBeGreaterThan(shellClose)
     expect(search).toBeLessThan(live)
+    expect(page.indexOf('class="home-refresh-hint"')).toBeGreaterThan(search)
   })
 })

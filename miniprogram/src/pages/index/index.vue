@@ -40,11 +40,6 @@
         </view>
       </view>
 
-      <view v-if="showHomePullRefreshHint" class="home-refresh-hint">
-        <view class="home-refresh-spinner" aria-hidden="true"></view>
-        <text>用力加载中...</text>
-      </view>
-
     </view>
 
     <view class="home-search-sticky-shell">
@@ -67,6 +62,11 @@
           </view>
         </view>
       </view>
+    </view>
+
+    <view v-if="showHomePullRefreshHint" class="home-refresh-hint">
+      <view class="home-refresh-spinner" aria-hidden="true"></view>
+      <text>用力加载中...</text>
     </view>
 
     <!-- Live strip · 实时脉冲区：有激活的实时协作板块时显示 -->
