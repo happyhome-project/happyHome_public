@@ -2,7 +2,16 @@ export const MAX_TOPIC_COUNT = 5
 export const MAX_TOPIC_LENGTH = 20
 
 function topicLength(value: string): number {
-  return Array.from(value).length
+  let length = 0
+  for (let index = 0; index < value.length; index += 1) {
+    const high = value.charCodeAt(index)
+    if (high >= 0xd800 && high <= 0xdbff && index + 1 < value.length) {
+      const low = value.charCodeAt(index + 1)
+      if (low >= 0xdc00 && low <= 0xdfff) index += 1
+    }
+    length += 1
+  }
+  return length
 }
 
 export function normalizeTopics(value: unknown): string[] {

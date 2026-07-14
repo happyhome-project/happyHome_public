@@ -75,6 +75,15 @@
       <text v-else class="prose-text">{{ block.value }}</text>
     </view>
 
+    <view v-if="topicGroups.length" class="content-block topic-block">
+      <view v-for="group in topicGroups" :key="group.key" class="topic-group">
+        <text v-if="group.label" class="block-title">{{ group.label }}</text>
+        <view class="topic-chips">
+          <text v-for="topic in group.topics" :key="topic" class="topic-chip">#{{ topic }}</text>
+        </view>
+      </view>
+    </view>
+
     <view v-if="mediaWidgets.length" class="content-block">
       <text class="block-title">媒体资料</text>
       <view class="media-list">
@@ -153,6 +162,7 @@ const props = defineProps<{
 
 type FactItem = { key: string; label: string; value: string; style?: 'price' }
 type BodyBlock = { key: string; title: string; type: 'plain' | 'rich_text' | 'rich_note' | 'note_blocks'; value: any }
+type TopicGroup = { key: string; label: string; topics: string[] }
 type LocationItem = {
   key: string
   name: string
@@ -263,6 +273,25 @@ const bodyBlocks = computed<BodyBlock[]>(() => {
   })
   return blocks
 })
+
+const topicGroups = computed<TopicGroup[]>(() =>
+  sortedWidgets.value
+    .filter((widget) => widget.type === 'topic')
+    .map((widget) => {
+      const rawTopics = props.post?.content?.[widget.widgetId]
+      const topics = Array.isArray(rawTopics)
+        ? rawTopics
+            .map((topic) => String(topic || '').trim().replace(/^#+\s*/, ''))
+            .filter(Boolean)
+        : []
+      return {
+        key: widget.widgetId,
+        label: resolveWidgetLabel(widget),
+        topics,
+      }
+    })
+    .filter((group) => group.topics.length > 0)
+)
 
 const mediaWidgets = computed(() =>
   sortedWidgets.value
@@ -746,6 +775,36 @@ function formatAudioDuration(value: unknown): string {
   line-height: 1.82;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.topic-block,
+.topic-group {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.topic-group + .topic-group {
+  margin-top: 12rpx;
+}
+
+.topic-group .block-title {
+  margin-bottom: 0;
+}
+
+.topic-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14rpx;
+}
+
+.topic-chip {
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  color: #ff2442;
+  background: #fff1f3;
+  font-size: 25rpx;
+  line-height: 1.45;
 }
 
 .media-list {

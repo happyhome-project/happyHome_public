@@ -1,6 +1,6 @@
 import type { Post, Section, Widget } from '../shared/types'
 import { createHash } from 'crypto'
-import { normalizeGuideNoteSection } from '../shared/guide-note-widgets'
+import { normalizeSectionTemplates } from '../shared/section-templates'
 
 export interface PostSearchField {
   widgetId: string
@@ -436,7 +436,7 @@ function getDb() {
 }
 
 function normalizeSectionForSearch(section: Section): Section {
-  return normalizeGuideNoteSection({
+  return normalizeSectionTemplates({
     ...section,
     type: section?.type || 'evergreen',
     status: section?.status || 'active',

@@ -18,7 +18,7 @@
         </div>
       </div>
       <div>
-        <el-button @click="addWidget">+ 添加控件</el-button>
+        <el-button v-if="!isImageNoteTemplate" @click="addWidget">+ 添加控件</el-button>
         <el-button type="primary" @click="save" :loading="saving" :disabled="listCount > 3">保存</el-button>
       </div>
     </div>
@@ -27,7 +27,7 @@
         <strong>{{ sectionName || '当前板块' }}</strong>
         <span>使用低代码方式配置字段、列表展示和控件属性。</span>
       </div>
-      <el-button size="small" @click="addWidget">+ 添加控件</el-button>
+      <el-button v-if="!isImageNoteTemplate" size="small" @click="addWidget">+ 添加控件</el-button>
     </div>
 
     <el-alert
@@ -67,7 +67,7 @@
             <h4>控件列表</h4>
             <p>从上到下就是发帖/详情页的字段顺序。</p>
           </div>
-          <el-button size="small" @click="addWidget">+ 添加一行控件</el-button>
+          <el-button v-if="!isImageNoteTemplate" size="small" @click="addWidget">+ 添加一行控件</el-button>
         </div>
         <el-table
           :data="widgets"
@@ -402,6 +402,7 @@ onMounted(async () => {
 })
 
 function addWidget() {
+  if (isImageNoteTemplate.value) return
   const nextType = 'short_text'
   const widget = {
     widgetId: uuidv4(),

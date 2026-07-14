@@ -214,7 +214,7 @@
       class="active-archive"
       :class="{
         'active-archive--guide': activeArchiveGroup.displayTemplate === 'guide_note',
-        'active-archive--default': activeArchiveGroup.displayTemplate !== 'guide_note',
+        'active-archive--default': activeArchiveGroup.displayTemplate === 'default',
       }"
       :style="activeArchiveStyle"
     >
@@ -234,18 +234,21 @@
         </view>
 
         <view
-          v-else-if="activeArchiveGroup.displayTemplate === 'guide_note'"
+          v-else-if="activeArchiveGroup.displayTemplate === 'guide_note' || activeArchiveGroup.displayTemplate === 'image_note'"
           class="guide-feed"
+          :class="{ 'image-note-feed': activeArchiveGroup.displayTemplate === 'image_note' }"
         >
           <view
-            v-for="(column, columnIndex) in guideColumns"
+            v-for="(column, columnIndex) in activeArchiveGroup.displayTemplate === 'image_note' ? imageNoteColumns : guideColumns"
             :key="columnIndex"
             class="guide-feed-column"
+            :class="{ 'image-note-feed-column': activeArchiveGroup.displayTemplate === 'image_note' }"
           >
             <view
               v-for="(item, i) in column"
               :key="item.postId || columnIndex + '-' + i"
               class="guide-card"
+              :class="{ 'image-note-card': activeArchiveGroup.displayTemplate === 'image_note' }"
               data-testid="home-post-card"
               :data-post-id="item.postId"
               @tap="onPostTap(item)"
@@ -255,34 +258,65 @@
                 :src="item.coverImage"
                 mode="aspectFill"
                 class="guide-cover"
+                :class="{ 'image-note-cover': activeArchiveGroup.displayTemplate === 'image_note' }"
                 @load="onHomeGuideImageLoad(item)"
                 @error="onHomeGuideImageError(item, $event)"
               />
-              <view v-else class="guide-cover guide-cover-empty">
+              <view
+                v-else
+                class="guide-cover guide-cover-empty"
+                :class="{ 'image-note-cover image-note-cover-empty': activeArchiveGroup.displayTemplate === 'image_note' }"
+              >
                 <text>{{ activeArchiveGroup.name.slice(0, 2) }}</text>
               </view>
-              <view class="guide-main">
-                <text class="guide-title">{{ item.t }}</text>
-                <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
-                <view v-if="item.driveDuration" class="guide-stats">
-                  <text class="guide-stat">{{ item.driveDuration }}</text>
-                </view>
-                <view v-if="item.isPinned || item.isFeatured" class="post-badges guide-badges">
-                  <text v-if="item.isPinned" class="post-badge pin">置顶</text>
-                  <text v-if="item.isFeatured" class="post-badge feature">精华</text>
-                </view>
-                <view class="guide-meta">
-                  <view v-if="item.contentAuthor" class="guide-author">
-                    <view
-                      class="guide-author-avatar"
-                      :style="getGuideAuthorAvatarStyle(item.contentAuthor)"
-                    >
-                      <text>{{ getAuthorInitial(item.contentAuthor) }}</text>
+              <view class="guide-main" :class="{ 'image-note-main': activeArchiveGroup.displayTemplate === 'image_note' }">
+                <text class="guide-title" :class="{ 'image-note-title': activeArchiveGroup.displayTemplate === 'image_note' }">{{ item.t }}</text>
+                <template v-if="activeArchiveGroup.displayTemplate === 'image_note'">
+                  <view class="guide-meta image-note-meta">
+                    <view class="guide-author image-note-author">
+                      <image
+                        v-if="item.authorAvatar"
+                        :src="item.authorAvatar"
+                        mode="aspectFill"
+                        class="image-note-author-avatar"
+                      />
+                      <view
+                        v-else
+                        class="image-note-author-avatar image-note-author-avatar--generated"
+                        :style="getGuideAuthorAvatarStyle(item.contentAuthor)"
+                      >
+                        <text>{{ getAuthorInitial(item.contentAuthor) }}</text>
+                      </view>
+                      <text class="guide-author-name image-note-author-name">{{ item.contentAuthor }}</text>
                     </view>
-                    <text class="guide-author-name">{{ item.contentAuthor }}</text>
+                    <view class="image-note-like" :aria-label="`${item.likeCount || 0} 个赞`">
+                      <text class="image-note-like-icon" aria-hidden="true">♡</text>
+                      <text>{{ item.likeCount || 0 }}</text>
+                    </view>
                   </view>
-                  <text v-if="item.when" class="guide-when">{{ item.when }}</text>
-                </view>
+                </template>
+                <template v-else>
+                  <text v-if="item.excerpt" class="guide-excerpt">{{ item.excerpt }}</text>
+                  <view v-if="item.driveDuration" class="guide-stats">
+                    <text class="guide-stat">{{ item.driveDuration }}</text>
+                  </view>
+                  <view v-if="item.isPinned || item.isFeatured" class="post-badges guide-badges">
+                    <text v-if="item.isPinned" class="post-badge pin">置顶</text>
+                    <text v-if="item.isFeatured" class="post-badge feature">精华</text>
+                  </view>
+                  <view class="guide-meta">
+                    <view v-if="item.contentAuthor" class="guide-author">
+                      <view
+                        class="guide-author-avatar"
+                        :style="getGuideAuthorAvatarStyle(item.contentAuthor)"
+                      >
+                        <text>{{ getAuthorInitial(item.contentAuthor) }}</text>
+                      </view>
+                      <text class="guide-author-name">{{ item.contentAuthor }}</text>
+                    </view>
+                    <text v-if="item.when" class="guide-when">{{ item.when }}</text>
+                  </view>
+                </template>
               </view>
             </view>
           </view>
@@ -433,6 +467,7 @@ import { memberApi, postApi } from '../../api/cloud'
 import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getFamilyLetterListSummary, getGuideNoteCard, getHomeLiveMeta, getPostHomeTitle, getPostHomeTitleIssue } from '../../utils/widget'
+import { getImageNoteCard } from '../../utils/image-note'
 import { clientLog, markClientDiagnosticStage, startHomeDiagnosticWatchdog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, normalizeHomeSnapshotShape, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
@@ -576,10 +611,13 @@ const activeArchiveIndex = computed(() => {
 })
 const activeArchiveStyle = computed(() => {
   const group = activeArchiveGroup.value
-  if (group?.displayTemplate === 'guide_note' && archivePreviewMinHeightPx.value > 0) {
+  if (
+    (group?.displayTemplate === 'guide_note' || group?.displayTemplate === 'image_note') &&
+    archivePreviewMinHeightPx.value > 0
+  ) {
     return `min-height: ${archivePreviewMinHeightPx.value}px;`
   }
-  if (group && group.displayTemplate !== 'guide_note') {
+  if (group && group.displayTemplate !== 'guide_note' && group.displayTemplate !== 'image_note') {
     return 'min-height: 100vh;'
   }
   return ''
@@ -723,6 +761,8 @@ interface ArchiveItem {
   excerpt?: string
   imageKey?: string
   coverImage?: string
+  authorAvatar?: string
+  likeCount?: number
   driveDuration?: string
   routeStats?: Array<{ label: string; value: string }>
   hot?: boolean
@@ -731,9 +771,10 @@ interface ArchiveItem {
   isPinned?: boolean
   isFeatured?: boolean
 }
-interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[]; accentColor?: string; displayTemplate: 'default' | 'guide_note' }
+interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[]; accentColor?: string; displayTemplate: 'default' | 'guide_note' | 'image_note' }
 
 function resolveArchiveDisplayTemplate(section: any): ArchiveGroup['displayTemplate'] {
+  if (section?.displayTemplate === 'image_note') return 'image_note'
   if (section?.displayTemplate === 'guide_note') return 'guide_note'
   const sectionName = String(section?.name || '').trim()
   return GUIDE_NOTE_NAME_HINTS.some((hint) => sectionName.includes(hint)) ? 'guide_note' : 'default'
@@ -751,7 +792,28 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
         count: posts.length,
         accentColor: section.accentColor || '',
         displayTemplate,
-        items: posts.slice(0, displayTemplate === 'guide_note' ? 6 : 3).map((p, idx) => {
+        items: posts.slice(0, displayTemplate === 'default' ? 3 : 6).map((p, idx) => {
+          if (displayTemplate === 'image_note') {
+            const imageNote = getImageNoteCard(p, section)
+            const resolvedCover = resolvedHomeGuideCoverUrls.value[imageNote.coverImage] || imageNote.coverImage
+            const resolvedAvatar = resolvedHomeGuideCoverUrls.value[imageNote.authorAvatarUrl] || imageNote.authorAvatarUrl
+            return {
+              k: '',
+              t: imageNote.title,
+              contentAuthor: imageNote.authorName,
+              authorAvatar: resolvedAvatar,
+              likeCount: imageNote.likeCount,
+              meta: '',
+              excerpt: '',
+              imageKey: buildHomeImageKey('guide', `image-note:${section._id}:${p._id || idx}`),
+              coverImage: resolvedCover,
+              hot: false,
+              when: '',
+              postId: p._id,
+              isPinned: Boolean(p.isPinned),
+              isFeatured: Boolean(p.isFeatured),
+            }
+          }
           if (displayTemplate === 'guide_note') {
             const guide = getGuideNoteCard(p, section)
             const resolvedCover = resolvedHomeGuideCoverUrls.value[guide.coverImage] || guide.coverImage
@@ -793,11 +855,19 @@ const rawHomeGuideCoverImages = computed(() => {
   const urls: string[] = []
   for (const section of communityStore.currentSections ?? []) {
     if (secType(section) !== 'evergreen' || secStatus(section) === 'archived') continue
-    if (resolveArchiveDisplayTemplate(section) !== 'guide_note') continue
+    const displayTemplate = resolveArchiveDisplayTemplate(section)
+    if (displayTemplate !== 'guide_note' && displayTemplate !== 'image_note') continue
     const posts = postsBySection.value[section._id] ?? []
     for (const post of posts.slice(0, 6)) {
-      const coverImage = getGuideNoteCard(post, section).coverImage
-      if (coverImage && !urls.includes(coverImage)) urls.push(coverImage)
+      const images = displayTemplate === 'image_note'
+        ? (() => {
+            const card = getImageNoteCard(post, section)
+            return [card.coverImage, card.authorAvatarUrl]
+          })()
+        : [getGuideNoteCard(post, section).coverImage]
+      for (const image of images) {
+        if (image && !urls.includes(image)) urls.push(image)
+      }
     }
   }
   return urls
@@ -838,6 +908,15 @@ const guideColumns = computed<ArchiveItem[][]>(() => {
   }, [[], []])
 })
 
+const imageNoteColumns = computed<ArchiveItem[][]>(() => {
+  const group = activeArchiveGroup.value
+  if (!group || group.displayTemplate !== 'image_note') return [[], []]
+  return group.items.reduce<ArchiveItem[][]>((columns, item, index) => {
+    columns[index % 2].push(item)
+    return columns
+  }, [[], []])
+})
+
 const currentHomeImageKeys = computed(() => {
   const keys: string[] = []
   if (homeHeroImage.value) keys.push(buildHomeImageKey('hero', homeHeroImage.value))
@@ -845,7 +924,7 @@ const currentHomeImageKeys = computed(() => {
     if (item.imageKey) keys.push(item.imageKey)
   }
   const group = activeArchiveGroup.value
-  if (group?.displayTemplate === 'guide_note') {
+  if (group?.displayTemplate === 'guide_note' || group?.displayTemplate === 'image_note') {
     for (const item of group.items) {
       if (item.imageKey && item.coverImage) keys.push(item.imageKey)
     }
@@ -858,7 +937,7 @@ const expectedHomeImageCount = computed(() => {
   const banners = ((communityStore.currentCommunity as any)?.homeBanners || []) as HomeBanner[]
   count += banners.filter((banner) => banner && banner.enabled !== false).length
   const group = activeArchiveGroup.value
-  if (group?.displayTemplate === 'guide_note') count += group.items.length
+  if (group?.displayTemplate === 'guide_note' || group?.displayTemplate === 'image_note') count += group.items.length
   return count
 })
 
@@ -1264,8 +1343,8 @@ function measureActiveArchiveHeight() {
       .boundingClientRect((rect) => {
         const height = getArchiveMeasuredHeight(rect)
         const group = activeArchiveGroup.value
-        // Only guide feeds reserve image-heavy height; text-only lists should hug their content.
-        const shouldCaptureHeight = group?.displayTemplate === 'guide_note'
+        // Image-heavy two-column feeds reserve their measured height; text lists hug their content.
+        const shouldCaptureHeight = group?.displayTemplate === 'guide_note' || group?.displayTemplate === 'image_note'
         if (shouldCaptureHeight && height > archivePreviewMinHeightPx.value) {
           archivePreviewMinHeightPx.value = height
         }
@@ -3582,6 +3661,47 @@ onShareAppMessage(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.image-note-author-avatar {
+  width: 32rpx;
+  height: 32rpx;
+  flex: 0 0 auto;
+  display: block;
+  overflow: hidden;
+  border-radius: $hh-radius-full;
+  background: var(--hh-color-brand-soft);
+}
+
+.image-note-author-avatar--generated {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--guide-avatar-start), var(--guide-avatar-end));
+}
+
+.image-note-author-avatar--generated text {
+  color: #fff;
+  font-size: 18rpx;
+  line-height: 1;
+  font-weight: $hh-font-weight-bold;
+}
+
+.image-note-author-name {
+  color: var(--hh-color-text-tertiary);
+}
+
+.image-note-like {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4rpx;
+  color: var(--hh-color-text-tertiary);
+}
+
+.image-note-like-icon {
+  font-size: 28rpx;
+  line-height: 1;
 }
 
 .guide-when {

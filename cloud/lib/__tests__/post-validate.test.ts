@@ -103,3 +103,28 @@ test('validateContentValues: topic values must already be canonical arrays', () 
     image_note_topics: ['一', '二', '三', '四', '五', '六'],
   })).toThrow('最多添加 5 个话题')
 })
+
+test('validateContentValues: 图文_new 正文图片只能放在添加图片控件', () => {
+  const section = imageNoteSection()
+  section.widgets.push({
+    widgetId: 'image_note_body',
+    type: 'rich_note',
+    label: '正文',
+    fieldKey: 'body',
+    required: false,
+    order: 2,
+    showInList: false,
+    locked: true,
+  })
+
+  expect(() => validateContentValues(section, {
+    image_note_body: {
+      format: 'markdown',
+      markdown: '![照片](cloud://env/image.jpg)',
+      html: '<p><img src="cloud://env/image.jpg"></p>',
+      text: '',
+      imageFileIDs: ['cloud://env/image.jpg'],
+      schemaVersion: 1,
+    },
+  })).toThrow('图文_new 正文不支持插入图片')
+})

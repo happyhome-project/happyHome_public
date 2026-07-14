@@ -6,6 +6,7 @@ import {
 } from '../image-note-widgets'
 import { normalizeSectionDisplayTemplate } from '../guide-note-widgets'
 import { normalizeTopics } from '../topics'
+import { normalizeSectionTemplates } from '../section-templates'
 
 describe('normalizeTopics', () => {
   test('normalizes hashes and Unicode, then deduplicates case-insensitively', () => {
@@ -18,6 +19,8 @@ describe('normalizeTopics', () => {
 
   test('rejects malformed, overlong, and overflowing topic values', () => {
     expect(() => normalizeTopics('周末遛娃')).toThrow('话题必须是数组')
+    expect(normalizeTopics(['😀'.repeat(20)])).toEqual(['😀'.repeat(20)])
+    expect(() => normalizeTopics(['😀'.repeat(21)])).toThrow('每个话题不能超过 20 个字符')
     expect(() => normalizeTopics(['一'.repeat(21)])).toThrow('每个话题不能超过 20 个字符')
     expect(() => normalizeTopics(['一', '二', '三', '四', '五', '六'])).toThrow('最多添加 5 个话题')
   })
@@ -87,7 +90,7 @@ describe('image-note template contract', () => {
     expect(buildDefaultImageNoteWidgets()).not.toBe(IMAGE_NOTE_LOCKED_WIDGETS)
   })
 
-  test('restores locked widgets and places custom widgets after them', () => {
+  test('restores exactly the five locked widgets and removes custom fields', () => {
     const section = {
       displayTemplate: 'image_note',
       widgets: [
@@ -110,16 +113,23 @@ describe('image-note template contract', () => {
     } as any
 
     const normalized = normalizeImageNoteWidgets(section)
-    expect(normalized.slice(0, 5)).toEqual(IMAGE_NOTE_LOCKED_WIDGETS)
-    expect(normalized[5]).toEqual({
-      widgetId: 'custom_summary',
-      type: 'summary',
-      label: '补充说明',
-      fieldKey: 'customSummary',
-      required: false,
-      order: 5,
-      showInList: true,
-      locked: false,
-    })
+    expect(normalized).toEqual(IMAGE_NOTE_LOCKED_WIDGETS)
+  })
+
+  test('the public section normalizer restores image-note widgets for member APIs', () => {
+    const section = normalizeSectionTemplates({
+      displayTemplate: 'image_note',
+      widgets: [{
+        widgetId: 'legacy-extra',
+        type: 'summary',
+        label: '补充说明',
+        fieldKey: 'summary',
+        required: false,
+        order: 0,
+        showInList: false,
+      }],
+    } as any)
+
+    expect(section.widgets).toEqual(IMAGE_NOTE_LOCKED_WIDGETS)
   })
 })

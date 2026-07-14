@@ -13,7 +13,9 @@ function assert(condition, message) {
 
 const tabbar = read('miniprogram', 'src', 'components', 'AppTabBar.vue')
 const widgetEditor = read('miniprogram', 'src', 'components', 'widgets', 'WidgetEditor.vue')
+const topicPicker = read('miniprogram', 'src', 'components', 'widgets', 'TopicPicker.vue')
 const createPage = read('miniprogram', 'src', 'pages', 'create', 'index.vue')
+const imageNoteCreate = read('miniprogram', 'src', 'utils', 'image-note-create.ts')
 
 const figmaIconNodes = {
   family: '20040:4379',
@@ -124,6 +126,40 @@ assert(
     createPage.includes("block.type === 'activityMain'") &&
     createPage.includes('class="figma-activity-main-card"'),
   'activity announcement title and detail should render in one semantic main-content card.',
+)
+
+assert(
+  createPage.includes("selectedSection.value?.displayTemplate === 'image_note'") &&
+    createPage.includes("block.type === 'imageNoteMain'") &&
+    createPage.includes("block.type === 'imageNoteTools'") &&
+    createPage.includes('variant="image-note-tool"') &&
+    createPage.includes('placeholder="添加主题"') &&
+    createPage.includes('placeholder="添加正文"'),
+  'image_note should use the approved image/title/body canvas and compact topic/location tool row.',
+)
+
+assert(
+  imageNoteCreate.includes("widgetId === 'image_note_topics'") ||
+    imageNoteCreate.includes("findWidget(widgets, 'image_note_topics')"),
+  'image-note publishing should resolve the fixed topic control by its stable widget ID.',
+)
+
+assert(
+  !imageNoteCreate.includes("type: 'routeStats'") &&
+    !imageNoteCreate.includes('altitude') &&
+    !imageNoteCreate.includes('totalClimb'),
+  'image_note must not inherit route distance, altitude, climb, or route-stat groups.',
+)
+
+assert(
+  widgetEditor.includes("widget.type === 'topic'") &&
+    widgetEditor.includes('TopicPicker') &&
+    topicPicker.includes('v-if="pickerOpen"') &&
+    topicPicker.includes('class="topic-picker-overlay"') &&
+    topicPicker.includes('MAX_TOPIC_COUNT') &&
+    topicPicker.includes('#{{ topic }}') &&
+    topicPicker.includes('最多20个字'),
+  'the reusable topic control should provide #话题 chips and a five-topic bottom picker.',
 )
 
 console.log('create publish UI static checks passed')

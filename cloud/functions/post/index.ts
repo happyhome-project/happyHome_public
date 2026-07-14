@@ -28,7 +28,7 @@ import type {
   PostContent,
   Post,
 } from '../../shared/types'
-import { normalizeGuideNoteSection } from '../../shared/guide-note-widgets'
+import { normalizeSectionTemplates } from '../../shared/section-templates'
 import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
 import { resolvePostAuthorNickname } from '../../shared/post-author'
 
@@ -129,7 +129,7 @@ function getAttendanceWidgets(section: Section): Widget[] {
 }
 
 function normalizePostSection(section: Section): Section {
-  return normalizeGuideNoteSection(section) as Section
+  return normalizeSectionTemplates(section) as Section
 }
 
 function normalizeCapacityValue(value: unknown): number | undefined {

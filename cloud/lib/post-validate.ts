@@ -1,6 +1,7 @@
 import { AUDIO_ALLOWED_EXTS, AUDIO_MAX_SIZE_BYTES } from '../shared/types'
 import type { PostContent, Section, Widget, WidgetType } from '../shared/types'
 import { isGuideNoteSection } from '../shared/guide-note-widgets'
+import { isImageNoteSection } from '../shared/image-note-widgets'
 import { normalizeTopics } from '../shared/topics'
 
 // 永远不进 post.content 的控件类型（无论 user 还是 admin 路径）：
@@ -307,9 +308,11 @@ function validateRichNoteContent(value: unknown, widgetLabel: string): void {
   }
 }
 
-function isGuideNoteBodyWidget(section: Section, widget: Widget): boolean {
-  if (!isGuideNoteSection(section)) return false
-  return widget.widgetId === 'guide_body' || widget.fieldKey === 'body' || widget.label === '正文'
+function getFixedImageCanvasBodyTemplate(section: Section, widget: Widget): 'guide_note' | 'image_note' | null {
+  const isBody = widget.fieldKey === 'body' || widget.label === '正文'
+  if (isGuideNoteSection(section) && (widget.widgetId === 'guide_body' || isBody)) return 'guide_note'
+  if (isImageNoteSection(section) && (widget.widgetId === 'image_note_body' || isBody)) return 'image_note'
+  return null
 }
 
 function richNoteHasImages(value: unknown): boolean {
@@ -390,8 +393,11 @@ export function validateContentValues(
 
     if (widget.type === 'rich_note') {
       validateRichNoteContent(value, widget.label)
-      if (isGuideNoteBodyWidget(section, widget) && richNoteHasImages(value)) {
-        throw new Error('图文攻略正文不支持插入图片，请将图片上传到「封面/图片」')
+      const fixedImageCanvasTemplate = getFixedImageCanvasBodyTemplate(section, widget)
+      if (fixedImageCanvasTemplate && richNoteHasImages(value)) {
+        throw new Error(fixedImageCanvasTemplate === 'guide_note'
+          ? '图文攻略正文不支持插入图片，请将图片上传到「封面/图片」'
+          : '图文_new 正文不支持插入图片，请将图片上传到「添加图片」')
       }
       continue
     }

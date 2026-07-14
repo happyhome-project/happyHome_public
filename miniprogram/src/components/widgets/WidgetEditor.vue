@@ -98,6 +98,25 @@
       <!-- #endif -->
     </view>
 
+    <TopicPicker
+      v-else-if="widget.type === 'topic'"
+      :model-value="modelValue"
+      @update:model-value="emit('update:modelValue', $event)"
+    />
+
+    <view
+      v-else-if="widget.type === 'location' && variant === 'image-note-tool'"
+      class="image-note-location-tool"
+      data-testid="image-note-location-tool"
+      @tap="chooseLocation"
+    >
+      <image class="image-note-tool-icon" src="/static/publish-icons/location.svg" mode="aspectFit" />
+      <text class="image-note-location-text">
+        {{ locationValue?.name || locationValue?.address || '设置地点' }}
+      </text>
+      <text v-if="locationValue" class="image-note-location-clear" @tap.stop="clearLocation">×</text>
+    </view>
+
     <view
       v-else-if="widget.type === 'location'"
       class="location-picker"
@@ -189,12 +208,13 @@ import { computed } from 'vue'
 import { resolveWidgetLabel } from '../../utils/widget-form'
 import NoteBlocksEditor from './NoteBlocksEditor.vue'
 import RichNoteEditor from './RichNoteEditor.vue'
+import TopicPicker from './TopicPicker.vue'
 
 const props = withDefaults(defineProps<{
   widget: any
   modelValue: any
   allowRichNoteImages?: boolean
-  variant?: 'default' | 'figma'
+  variant?: 'default' | 'figma' | 'image-note-tool'
   embedded?: boolean
   hideLabel?: boolean
   placeholder?: string
@@ -254,6 +274,7 @@ const isLineWidget = computed(() =>
 )
 const editorClasses = computed(() => ({
   'widget-editor--figma': variant.value === 'figma',
+  'widget-editor--image-note-tool': variant.value === 'image-note-tool',
   'widget-editor--embedded': props.embedded,
   'widget-editor--hide-label': props.hideLabel,
   'widget-editor--line': isLineWidget.value,
@@ -456,6 +477,47 @@ function clearLocation() {
 .textarea { font-size: var(--hh-text-body-base-size); width: 100%; min-height: 240rpx; background: transparent; color: var(--hh-color-text-primary); }
 .video-readonly { background: var(--hh-color-card); border: 1rpx solid var(--hh-color-line); border-radius: var(--hh-radius-card); padding: $hh-space-md; }
 .readonly-hint { font-size: var(--hh-text-caption-lg-size); color: var(--hh-color-text-tertiary); }
+
+.widget-editor--image-note-tool {
+  min-width: 0;
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.image-note-location-tool {
+  min-width: 0;
+  min-height: 64rpx;
+  padding: 0 24rpx;
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  border: 1rpx solid #e8e8e8;
+  border-radius: 999rpx;
+  color: #333;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.image-note-tool-icon {
+  flex: 0 0 auto;
+  width: 32rpx;
+  height: 32rpx;
+}
+
+.image-note-location-text {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 28rpx;
+  line-height: 44rpx;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-note-location-clear {
+  flex: 0 0 auto;
+  color: #999;
+  font-size: 30rpx;
+}
 
 .widget-editor--figma {
   width: 100%;

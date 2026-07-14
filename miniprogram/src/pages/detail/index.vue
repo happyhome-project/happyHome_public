@@ -1,6 +1,21 @@
 <template>
-  <view class="detail-page" :class="{ 'detail-page--guide': isGuideNoteDetail }">
-    <view v-if="post && section" class="content" data-testid="detail-ready" :data-post-id="post._id" :class="{ 'guide-note-detail': isGuideNoteDetail }">
+  <view
+    class="detail-page"
+    :class="{
+      'detail-page--guide': isGuideNoteDetail,
+      'detail-page--image-note': isImageNoteDetail,
+    }"
+  >
+    <view
+      v-if="post && section"
+      class="content"
+      data-testid="detail-ready"
+      :data-post-id="post._id"
+      :class="{
+        'guide-note-detail': isGuideNoteDetail,
+        'image-note-detail': isImageNoteDetail,
+      }"
+    >
       <view v-if="post.isPinned || post.isFeatured" class="post-flag-row">
         <text v-if="post.isPinned" class="post-flag pin">置顶</text>
         <text v-if="post.isFeatured" class="post-flag feature">精华</text>
@@ -10,19 +25,25 @@
         <text class="origin-title">{{ post.originTitle || '原帖' }}</text>
         <text class="origin-action">查看原帖 ›</text>
       </view>
+      <ImageNoteDetailView
+        v-if="isImageNoteDetail && imageNoteDetail"
+        :detail="imageNoteDetail"
+        @open-location="openImageNoteLocation"
+      />
       <GuideRouteDetailView
-        v-if="isGuideNoteDetail && guideRouteDetail"
+        v-else-if="isGuideNoteDetail && guideRouteDetail"
         :detail="guideRouteDetail"
       />
 
-      <view v-else>
-        <DefaultDetailView
-          :post="renderPost"
-          :section="section"
-          :widgets="regularWidgets"
-          :post-meta="postMeta"
-        />
+      <DefaultDetailView
+        v-else
+        :post="renderPost"
+        :section="section"
+        :widgets="regularWidgets"
+        :post-meta="postMeta"
+      />
 
+      <template v-if="!isGuideNoteDetail">
         <view
           v-for="widget in attendanceWidgets"
           :key="widget.widgetId"
@@ -69,7 +90,7 @@
             <view v-if="!getAttendanceSummary(widget).previewUsers.length && !emptySlotCount(widget)" class="hh-avatar-empty-text">暂无</view>
           </view>
         </view>
-      </view>
+      </template>
 
       <view v-if="activityInviteWidgets.length" class="activity-invite-card">
         <view class="activity-invite-main">
@@ -87,8 +108,8 @@
         </button>
       </view>
 
-      <view class="meta">
-        <view class="meta-main">
+      <view v-if="!isImageNoteDetail || isAuthor" class="meta">
+        <view v-if="!isImageNoteDetail" class="meta-main">
           <view class="meta-author">
             <image
               v-if="detailAuthorAvatarUrl"
@@ -173,6 +194,7 @@ import { postApi, sectionApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import GuideRouteDetailView from '../../components/GuideRouteDetailView.vue'
+import ImageNoteDetailView from '../../components/ImageNoteDetailView.vue'
 import DefaultDetailView from '../../components/DefaultDetailView.vue'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
@@ -180,6 +202,7 @@ import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { buildGuideRouteDetail } from '../../utils/guide-detail'
+import { buildImageNoteDetail, type ImageNoteLocation } from '../../utils/image-note'
 import { extractRichNoteImageSources } from '../../utils/rich-note'
 import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
 
@@ -234,7 +257,10 @@ const postMeta = computed(() => ({
   communityId: String(post.value?.communityId || section.value?.communityId || ''),
 }))
 const detailSectionTitle = computed(() => section.value?.name || '')
-const isGuideNoteDetail = computed(() => resolveGuideNoteDetailTemplate(section.value))
+const isImageNoteDetail = computed(() => section.value?.displayTemplate === 'image_note')
+const isGuideNoteDetail = computed(() =>
+  !isImageNoteDetail.value && resolveGuideNoteDetailTemplate(section.value)
+)
 const renderPost = computed(() => {
   const currentPost = post.value
   if (!currentPost) return currentPost
@@ -251,6 +277,10 @@ const renderPost = computed(() => {
 const guideRouteDetail = computed(() => {
   if (!renderPost.value || !section.value || !isGuideNoteDetail.value) return null
   return buildGuideRouteDetail(renderPost.value, section.value)
+})
+const imageNoteDetail = computed(() => {
+  if (!renderPost.value || !section.value || !isImageNoteDetail.value) return null
+  return buildImageNoteDetail(renderPost.value, section.value)
 })
 const regularWidgets = computed(() =>
   (section.value?.widgets || []).filter((widget: any) => !['attendance', 'admin_notice', 'activity_invite'].includes(widget.type))
@@ -280,6 +310,16 @@ function resolveGuideNoteDetailTemplate(currentSection: any): boolean {
   if (currentSection?.displayTemplate === 'guide_note') return true
   const sectionName = String(currentSection?.name || '').trim()
   return GUIDE_NOTE_NAME_HINTS.some((hint) => sectionName.includes(hint))
+}
+
+function openImageNoteLocation(location: ImageNoteLocation) {
+  uni.openLocation({
+    latitude: location.lat,
+    longitude: location.lng,
+    address: location.address,
+    name: location.name || location.address || '设置地点',
+    scale: 16,
+  })
 }
 
 onErrorCaptured((error, _instance, info) => {
@@ -850,6 +890,10 @@ function formatDateTime(iso: string): string {
   padding: 0;
 }
 
+.detail-page--image-note {
+  padding: 0;
+}
+
 .detail-page--guide :deep(.guide-route) {
   border-radius: 0;
 }
@@ -858,6 +902,15 @@ function formatDateTime(iso: string): string {
 .detail-page--guide .origin-card,
 .detail-page--guide .activity-invite-card,
 .detail-page--guide .meta {
+  margin-left: var(--hh-page-x);
+  margin-right: var(--hh-page-x);
+}
+
+.detail-page--image-note .post-flag-row,
+.detail-page--image-note .origin-card,
+.detail-page--image-note .attendance-card,
+.detail-page--image-note .activity-invite-card,
+.detail-page--image-note .meta {
   margin-left: var(--hh-page-x);
   margin-right: var(--hh-page-x);
 }

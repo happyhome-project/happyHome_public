@@ -277,6 +277,14 @@ export function getFamilyLetterListSummary(post: Post, section: Section): Family
 
 export function formatWidgetValue(value: any, type: string): string {
   if (value === undefined || value === null || value === '') return ''
+  if (type === 'topic') {
+    if (!Array.isArray(value)) return ''
+    return value
+      .map((item) => String(item || '').trim().replace(/^#+\s*/, ''))
+      .filter(Boolean)
+      .map((topic) => `#${topic}`)
+      .join(' ')
+  }
   if (type === 'location') {
     if (typeof value === 'object' && value !== null) {
       return String(value.address || '')
