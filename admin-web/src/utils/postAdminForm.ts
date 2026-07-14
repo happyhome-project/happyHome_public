@@ -1,6 +1,7 @@
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { hasValidLocationCoordinate, isRequiredLocationComplete } from './locationValidation'
 import { emptyRichNoteContent, isRichNoteEmpty } from './rich-note'
+import { validateAndNormalizeTopics } from './topics'
 
 export const ADMIN_POST_EDITABLE_WIDGET_TYPES = new Set([
   'short_text',
@@ -11,6 +12,7 @@ export const ADMIN_POST_EDITABLE_WIDGET_TYPES = new Set([
   'note_blocks',
   'rich_note',
   'image_group',
+  'topic',
   'location',
   'video_group',
   'audio_group',
@@ -40,6 +42,7 @@ export function widgetHint(type: string) {
   if (type === 'note_blocks') return '按顺序添加文字和图片，适合家书、笔记、课程材料'
   if (type === 'rich_note') return '支持基础排版和图片混排'
   if (type === 'image_group') return '支持上传多张图片，第一张会作为列表封面'
+  if (type === 'topic') return '最多添加 5 个话题，每个不超过 20 个字符'
   if (type === 'location') return '搜索真实目的地，可在地图上微调点位'
   if (type === 'attendance') return '活动参与控件由成员点击参与产生数据，不在帖子内容中填写'
   return ''
@@ -63,9 +66,12 @@ export function hydrateAdminPostFormData(formData: Record<string, any>, widgets:
   Object.keys(formData).forEach((key) => delete formData[key])
   for (const widget of widgets) {
     const existing = content?.[widget.widgetId]
-    if (existing !== undefined) {
+    if (existing !== undefined && widget.type === 'topic') {
+      const result = validateAndNormalizeTopics(existing)
+      formData[widget.widgetId] = result.ok ? result.topics : []
+    } else if (existing !== undefined) {
       formData[widget.widgetId] = JSON.parse(JSON.stringify(existing))
-    } else if (widget.type === 'video_group' || widget.type === 'audio_group' || widget.type === 'note_blocks' || widget.type === 'image_group') {
+    } else if (widget.type === 'video_group' || widget.type === 'audio_group' || widget.type === 'note_blocks' || widget.type === 'image_group' || widget.type === 'topic') {
       formData[widget.widgetId] = []
     } else if (widget.type === 'location') {
       formData[widget.widgetId] = { address: '', lat: 0, lng: 0 }
@@ -89,6 +95,7 @@ export function validateAdminPostForm(widgets: any[], formData: Record<string, a
     if (widget.type === 'audio_group' && !validateAudioItems(widget, formData)) return false
     if (widget.type === 'note_blocks' && !validateNoteBlocks(widget, formData)) return false
     if (widget.type === 'image_group' && !validateImageGroup(widget, formData)) return false
+    if (widget.type === 'topic' && !validateTopics(widget, formData)) return false
     if (widget.type === 'location' && !validateLocation(widget, formData)) return false
     if (widget.type === 'rich_note' && widget.required && isRichNoteEmpty(formData[widget.widgetId])) {
       ElMessage.error(`请填写「${widget.label}」`)
@@ -159,6 +166,16 @@ function validateImageGroup(widget: any, formData: Record<string, any>) {
     return !value || (!value.startsWith('cloud://') && !/^https?:\/\//.test(value))
   })
   if (invalidIndex >= 0) return fail(widget, invalidIndex, '图片地址不正确')
+  return true
+}
+
+function validateTopics(widget: any, formData: Record<string, any>) {
+  const result = validateAndNormalizeTopics(formData[widget.widgetId])
+  if (!result.ok) {
+    ElMessage.error(`「${widget.label}」${result.message}`)
+    return false
+  }
+  formData[widget.widgetId] = result.topics
   return true
 }
 

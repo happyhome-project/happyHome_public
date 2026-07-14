@@ -51,6 +51,14 @@
       title="图文攻略固定控件"
       description="标题、封面/图片、距离、最高海拔、累计爬升、参考用时、正文、两步路轨迹编号、目的地位置为固定结构；正文使用富图文排版能力，支持换行和基础格式，但不支持插图。图片请上传到封面/图片。固定控件不能删除、改类型或调整顺序。"
     />
+    <el-alert
+      v-if="isImageNoteTemplate"
+      type="info"
+      :closable="false"
+      style="margin-bottom: 16px;"
+      title="图文_new 固定控件"
+      description="添加图片、主题、正文、话题、设置地点为固定结构；固定控件不能删除、改类型或调整顺序。"
+    />
 
     <div class="low-code-workbench">
       <section class="widget-list-panel">
@@ -87,6 +95,7 @@
                 <el-option label="数字" value="number" />
                 <el-option label="图片组" value="image_group" />
                 <el-option label="富图文" value="rich_note" />
+                <el-option label="话题" value="topic" />
                 <el-option v-if="row.type === 'note_blocks'" label="图文笔记（旧）" value="note_blocks" />
                 <el-option label="视频组" value="video_group" />
                 <el-option label="音频组" value="audio_group" />
@@ -150,6 +159,7 @@
                 <el-option label="数字" value="number" />
                 <el-option label="图片组" value="image_group" />
                 <el-option label="富图文" value="rich_note" />
+                <el-option label="话题" value="topic" />
                 <el-option v-if="selectedWidget.type === 'note_blocks'" label="图文笔记（旧）" value="note_blocks" />
                 <el-option label="视频组" value="video_group" />
                 <el-option label="音频组" value="audio_group" />
@@ -220,6 +230,7 @@
             <template v-else-if="selectedWidget.type === 'admin_notice'">公告内容显示在小程序首页板块区域，不需要普通成员发帖。</template>
             <template v-else-if="selectedWidget.type === 'activity_invite'">活动召集只在沉淀帖详情中显示入口，会联动到实时邀约帖子。</template>
             <template v-else-if="selectedWidget.type === 'audio_group'">音频只在帖子详情页播放，不进入列表摘要。</template>
+            <template v-else-if="selectedWidget.type === 'topic'">话题以 # 标签形式填写，最多 5 个，每个不超过 20 个字符。</template>
             <template v-else-if="!isListDisplayable(selectedWidget.type)">该类型只在详情页展示。</template>
             <template v-else>建议只把最关键字段展示到列表，最多 3 个，避免卡片过高。</template>
           </div>
@@ -243,7 +254,6 @@ import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ArrowLeft, WarningFilled } from '@element-plus/icons-vue'
 import { communityApi, sectionApi } from '../../api/cloud'
-import { LIST_DISPLAYABLE_TYPES } from '../../../../cloud/shared/types'
 
 const props = withDefaults(defineProps<{
   sectionId?: string
@@ -269,7 +279,7 @@ const selectedWidgetId = ref('')
 const communityName = ref('')
 const sectionName = ref('')
 const sectionType = ref<'realtime' | 'evergreen'>('evergreen')
-const sectionDisplayTemplate = ref<'default' | 'guide_note'>('default')
+const sectionDisplayTemplate = ref<'default' | 'guide_note' | 'image_note'>('default')
 const GUIDE_NOTE_LOCKED_WIDGET_IDS = new Set([
   'guide_title',
   'guide_images',
@@ -283,6 +293,20 @@ const GUIDE_NOTE_LOCKED_WIDGET_IDS = new Set([
   'guide_location',
   'guide_activity_invite',
 ])
+const IMAGE_NOTE_LOCKED_WIDGET_IDS = new Set([
+  'image_note_images',
+  'image_note_title',
+  'image_note_body',
+  'image_note_topics',
+  'image_note_location',
+])
+const LIST_DISPLAYABLE_TYPES = [
+  'short_text',
+  'summary',
+  'datetime',
+  'number',
+  'attendance',
+] as const
 const DEFAULT_LABELS: Record<string, string> = {
   rich_note: '富图文',
   short_text: '短文字',
@@ -294,6 +318,7 @@ const DEFAULT_LABELS: Record<string, string> = {
   video_group: '视频列表',
   audio_group: '音频列表',
   rich_text: '正文',
+  topic: '话题',
   location: '位置',
   activity_invite: '活动召集',
   attendance: '活动参与',
@@ -302,10 +327,11 @@ const DEFAULT_LABELS: Record<string, string> = {
 
 const listCount = computed(() => widgets.value.filter((widget) => widget.showInList).length)
 const isGuideNoteTemplate = computed(() => sectionDisplayTemplate.value === 'guide_note')
+const isImageNoteTemplate = computed(() => sectionDisplayTemplate.value === 'image_note')
 const selectedWidget = computed(() => widgets.value.find((widget) => String(widget.widgetId || '') === selectedWidgetId.value) || null)
 
 function isListDisplayable(type: string) {
-  return LIST_DISPLAYABLE_TYPES.includes(type as any)
+  return (LIST_DISPLAYABLE_TYPES as readonly string[]).includes(type)
 }
 
 function defaultLabel(type: string) {
@@ -327,10 +353,14 @@ function shouldClearAttendanceLabel(label: unknown) {
 }
 
 function isLockedWidget(widget: any) {
-  return isGuideNoteTemplate.value && (
-    widget?.locked === true ||
-    GUIDE_NOTE_LOCKED_WIDGET_IDS.has(String(widget?.widgetId || ''))
-  )
+  const widgetId = String(widget?.widgetId || '')
+  if (isGuideNoteTemplate.value) {
+    return widget?.locked === true || GUIDE_NOTE_LOCKED_WIDGET_IDS.has(widgetId)
+  }
+  if (isImageNoteTemplate.value) {
+    return widget?.locked === true || IMAGE_NOTE_LOCKED_WIDGET_IDS.has(widgetId)
+  }
+  return false
 }
 
 onMounted(async () => {
@@ -344,7 +374,11 @@ onMounted(async () => {
     const res = await sectionApi.get(sectionId) as any
     sectionName.value = String(res.section?.name || '')
     sectionType.value = res.section?.type === 'realtime' ? 'realtime' : 'evergreen'
-    sectionDisplayTemplate.value = res.section?.displayTemplate === 'guide_note' ? 'guide_note' : 'default'
+    sectionDisplayTemplate.value = res.section?.displayTemplate === 'guide_note'
+      ? 'guide_note'
+      : res.section?.displayTemplate === 'image_note'
+        ? 'image_note'
+        : 'default'
     widgets.value = (res.section?.widgets ?? []).map((widget: any, index: number) => ({
       ...widget,
       label: widget?.type === 'attendance' && shouldClearAttendanceLabel(widget?.label)
@@ -411,7 +445,7 @@ function moveWidget(index: number, delta: number) {
   const current = widgets.value[index]
   const next = widgets.value[nextIndex]
   if (isLockedWidget(current) || isLockedWidget(next)) {
-    ElMessage.warning('图文攻略固定控件不能调整顺序')
+    ElMessage.warning('固定模板控件不能调整顺序')
     return
   }
   const [widget] = widgets.value.splice(index, 1)
@@ -463,7 +497,7 @@ function handleTypeChange(widget: any) {
 
 function removeWidget(widget: any) {
   if (isLockedWidget(widget)) {
-    ElMessage.warning('图文攻略固定控件不能删除')
+    ElMessage.warning('固定模板控件不能删除')
     return
   }
   const index = widgets.value.findIndex((item) => item.widgetId === widget.widgetId)

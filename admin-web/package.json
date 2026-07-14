@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test:unit": "node --test tests/topics.test.mjs tests/image-note-admin-contract.test.mjs",
     "type-check": "vue-tsc --noEmit",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview"
