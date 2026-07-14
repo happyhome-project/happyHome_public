@@ -63,7 +63,7 @@ test('release plans exclude RAG workers and actions by default', () => {
     functionInputs: {},
     manifests: [{
       schemaVersion: 1,
-      changeId: 'rag-default-off',
+      changeId: 'default-off',
       actions: ['configure-rag-workers', 'ensure-indexes', 'verify-post-rag-timer'],
       migrations: [],
       smokeSuites: ['post-rag', 'business-smoke'],
@@ -112,6 +112,20 @@ test('RAG-only manifests do not require a release by default', () => {
   assert.equal(plan.releaseRequired, false)
   assert.deepEqual(plan.changeIds, [])
   assert.deepEqual(plan.manifests, [])
+})
+
+test('RAG manifests with generic index actions are removed by identity', () => {
+  const plan = createReleasePlan({
+    baseSha: 'base',
+    headSha: 'head',
+    changedPaths: [],
+    allFunctions: ALL_CLOUD_FUNCTIONS,
+    functionInputs: {},
+    manifests: [{ schemaVersion: 1, changeId: 'rag-community-version-collection', actions: ['ensure-indexes'], migrations: [], smokeSuites: [] }],
+    mode: 'main',
+  })
+  assert.equal(plan.releaseRequired, false)
+  assert.deepEqual(plan.changeIds, [])
 })
 
 test('change manifests reject unknown actions, duplicate ids, and missing declarations for external changes', () => {
