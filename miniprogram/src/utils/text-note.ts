@@ -22,8 +22,24 @@ function normalizeText(value: unknown): string {
   return String(value ?? '').trim()
 }
 
+function textNoteCharacters(value: unknown): string[] {
+  const text = String(value || '')
+  const characters: string[] = []
+  for (let index = 0; index < text.length; index += 1) {
+    let character = text.charAt(index)
+    const code = text.charCodeAt(index)
+    const nextCode = text.charCodeAt(index + 1)
+    if (code >= 0xd800 && code <= 0xdbff && nextCode >= 0xdc00 && nextCode <= 0xdfff) {
+      character += text.charAt(index + 1)
+      index += 1
+    }
+    characters.push(character)
+  }
+  return characters
+}
+
 export function normalizeTextNoteTitle(value: unknown, maxLength = 48): string {
-  return Array.from(normalizeText(value)).slice(0, maxLength).join('')
+  return textNoteCharacters(normalizeText(value)).slice(0, maxLength).join('')
 }
 
 function firstVisibleMarkdownParagraph(markdown: string): string {
@@ -70,20 +86,22 @@ export function extractTextNoteContent(content: Record<string, unknown> | null |
 }
 
 export function getTextNoteCard(post: { content?: Record<string, unknown>; presentation?: PostPresentation } | null | undefined): TextNoteCard {
+  const content = extractTextNoteContent(post?.content)
   return {
-    ...extractTextNoteContent(post?.content),
+    title: content.title,
+    body: content.body,
     theme: normalizeTextNoteTheme(post?.presentation?.textNoteTheme),
   }
 }
 
 export function truncateTextNoteBody(value: string, maxLength = 64): string {
-  const characters = Array.from(String(value || ''))
+  const characters = textNoteCharacters(value)
   if (characters.length <= maxLength) return characters.join('')
   return `${characters.slice(0, Math.max(0, maxLength - 1)).join('')}…`
 }
 
 export function resolveTextNoteBodySize(value: string): TextNoteBodySize {
-  const length = Array.from(String(value || '')).length
+  const length = textNoteCharacters(value).length
   if (length <= 20) return 'large'
   if (length <= 40) return 'medium'
   return 'small'
