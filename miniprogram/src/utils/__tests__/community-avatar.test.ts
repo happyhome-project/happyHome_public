@@ -26,6 +26,7 @@ describe('community avatar', () => {
   it.each([
     ['👨‍👩‍👧‍👦家庭', '👨‍👩‍👧‍👦'],
     ['👍🏽认可', '👍🏽'],
+    ['✈️出行', '✈️'],
     ['e\u0301lan', 'e\u0301'],
   ])('keeps %j intact with the fallback segmenter', (value, expected) => {
     expect(communityInitial(value, { segmenter: null })).toBe(expected)
