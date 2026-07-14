@@ -16,13 +16,6 @@ export function buildImageNoteCreateBlocks(
   const bodyWidget = findWidget(widgets, 'image_note_body')
   const topicWidget = findWidget(widgets, 'image_note_topics')
   const locationWidget = findWidget(widgets, 'image_note_location')
-  const fixedIds = new Set([
-    imageWidget?.widgetId,
-    titleWidget?.widgetId,
-    bodyWidget?.widgetId,
-    topicWidget?.widgetId,
-    locationWidget?.widgetId,
-  ].filter(Boolean))
 
   const blocks: Array<Record<string, any>> = []
   if (imageWidget || titleWidget || bodyWidget) {
@@ -41,10 +34,6 @@ export function buildImageNoteCreateBlocks(
       topicWidget,
       locationWidget,
     })
-  }
-  for (const widget of widgets) {
-    if (fixedIds.has(widget.widgetId)) continue
-    blocks.push({ type: 'widget', key: String(widget.widgetId), widget })
   }
   return blocks
 }

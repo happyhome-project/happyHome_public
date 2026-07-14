@@ -45,9 +45,13 @@ const IMAGE_NOTE_FIELDS: Record<ImageNoteField, ImageNoteFieldContract> = {
   location: { widgetId: 'image_note_location', fieldKey: 'location', type: 'location' },
 }
 
-export const IMAGE_NOTE_WIDGET_IDS = Object.freeze(
-  Object.values(IMAGE_NOTE_FIELDS).map((field) => field.widgetId),
-)
+export const IMAGE_NOTE_WIDGET_IDS = Object.freeze([
+  IMAGE_NOTE_FIELDS.images.widgetId,
+  IMAGE_NOTE_FIELDS.title.widgetId,
+  IMAGE_NOTE_FIELDS.body.widgetId,
+  IMAGE_NOTE_FIELDS.topics.widgetId,
+  IMAGE_NOTE_FIELDS.location.widgetId,
+])
 
 type ImageNoteSectionLike = {
   displayTemplate?: unknown

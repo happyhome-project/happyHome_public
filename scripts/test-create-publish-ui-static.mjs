@@ -137,13 +137,20 @@ assert(
 )
 
 assert(
-  createPage.includes("selectedSection.value?.displayTemplate === 'image_note'") &&
+  createPage.includes('isImageNoteSectionContract(selectedSection.value)') &&
     createPage.includes("block.type === 'imageNoteMain'") &&
     createPage.includes("block.type === 'imageNoteTools'") &&
     createPage.includes('variant="image-note-tool"') &&
     createPage.includes('placeholder="添加主题"') &&
     createPage.includes('placeholder="添加正文"'),
   'image_note should use the approved image/title/body canvas and compact topic/location tool row.',
+)
+
+assert(
+  imageNoteCreate.includes("type: 'imageNoteMain'") &&
+    imageNoteCreate.includes("type: 'imageNoteTools'") &&
+    !imageNoteCreate.includes('customWidgets'),
+  'image_note publishing should render only the two approved fixed-control blocks.',
 )
 
 assert(

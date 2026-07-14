@@ -90,7 +90,7 @@ describe('image-note template contract', () => {
     expect(buildDefaultImageNoteWidgets()).not.toBe(IMAGE_NOTE_LOCKED_WIDGETS)
   })
 
-  test('restores exactly the five locked widgets and removes custom fields', () => {
+  test('restores the five locked widgets and preserves custom fields after them', () => {
     const section = {
       displayTemplate: 'image_note',
       widgets: [
@@ -113,7 +113,12 @@ describe('image-note template contract', () => {
     } as any
 
     const normalized = normalizeImageNoteWidgets(section)
-    expect(normalized).toEqual(IMAGE_NOTE_LOCKED_WIDGETS)
+    expect(normalized.slice(0, 5)).toEqual(IMAGE_NOTE_LOCKED_WIDGETS)
+    expect(normalized[5]).toEqual(expect.objectContaining({
+      widgetId: 'custom_summary',
+      order: 5,
+      locked: false,
+    }))
   })
 
   test('the public section normalizer restores image-note widgets for member APIs', () => {
@@ -130,6 +135,11 @@ describe('image-note template contract', () => {
       }],
     } as any)
 
-    expect(section.widgets).toEqual(IMAGE_NOTE_LOCKED_WIDGETS)
+    expect(section.widgets.slice(0, 5)).toEqual(IMAGE_NOTE_LOCKED_WIDGETS)
+    expect(section.widgets[5]).toEqual(expect.objectContaining({
+      widgetId: 'legacy-extra',
+      order: 5,
+      locked: false,
+    }))
   })
 })

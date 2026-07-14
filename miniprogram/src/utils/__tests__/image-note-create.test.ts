@@ -36,7 +36,6 @@ describe('buildImageNoteCreateBlocks', () => {
     expect(blocks.map((block) => block.type)).toEqual([
       'imageNoteMain',
       'imageNoteTools',
-      'widget',
     ])
     expect(blocks[0]).toEqual(expect.objectContaining({
       imageWidget: widgets[0],
@@ -48,6 +47,7 @@ describe('buildImageNoteCreateBlocks', () => {
       locationWidget: widgets[4],
     }))
     expect(blocks.some((block) => block.type === 'routeStats')).toBe(false)
+    expect(blocks.some((block) => block.widget?.widgetId === 'custom-distance')).toBe(false)
   })
 
   test('supports a stale displayTemplate only when the fixed widget contract is complete', () => {

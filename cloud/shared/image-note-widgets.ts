@@ -26,7 +26,22 @@ export function isImageNoteSection(section: Pick<Section, 'displayTemplate'> | n
 export function normalizeImageNoteWidgets(section: Pick<Section, 'displayTemplate' | 'widgets'> | null | undefined): Widget[] {
   const widgets = Array.isArray(section?.widgets) ? section.widgets : []
   if (!isImageNoteSection(section)) return widgets
-  return buildDefaultImageNoteWidgets()
+
+  const lockedIds = new Set(IMAGE_NOTE_LOCKED_WIDGETS.map((widget) => widget.widgetId))
+  const customWidgets = widgets
+    .filter((widget: any) => !lockedIds.has(String(widget?.widgetId || '')))
+    .slice()
+    .sort((a: any, b: any) => Number(a?.order || 0) - Number(b?.order || 0))
+    .map((widget: any, index: number) => ({
+      ...widget,
+      order: IMAGE_NOTE_LOCKED_WIDGETS.length + index,
+      locked: false,
+    }))
+
+  return [
+    ...buildDefaultImageNoteWidgets(),
+    ...customWidgets,
+  ]
 }
 
 export function normalizeImageNoteSection<T extends { displayTemplate?: unknown; widgets?: Widget[] } | null | undefined>(section: T): T {
