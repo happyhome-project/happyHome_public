@@ -114,6 +114,8 @@ Hard release labels:
 
 The admin fixture path invokes the `admin` function directly with a controlled `_actAs` superAdmin identity, creates an `HH_RELEASE_SMOKE_*` community/section/post, verifies it through admin list APIs, then runs `community.disable` and `community.hardDelete`. Cleanup failure blocks release.
 
+RAG deployment remains part of the formal release: its configuration, immutable cloud artifacts, remote digest attestation and function version probes must pass. Timer, ES write/backfill and semantic retrieval/evaluation are not release-stage tests; they are explicitly delegated to the RAG development session after deployment. Formal cloud smoke therefore excludes `post-rag-worker` and `post-video-rag-worker`, while retaining real smoke coverage for admin, community, home-prefetch, http-gateway, member, post, section and user so RAG changes cannot hide regressions in the rest of the product.
+
 `user` and `section` direct invokes intentionally record OPENID/membership guard evidence instead of forcing production `ALLOW_TEST_OPENID`. Real user OPENID flows remain covered by the mini-program release UI evidence. CloudBase `fn log` can intermittently return `GetFunctionLogDetail InternalError` for non-critical functions; those failures are stored as warnings. The `post.clientLog` runId log is the required log gate and still blocks release if missing.
 
 ## Upload Policy

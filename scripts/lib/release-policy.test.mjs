@@ -425,7 +425,7 @@ test('formal release path records resumable ledger stages before upload', () => 
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-deploy-remaining'/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-version-probes'/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-smoke'/)
-  assert.match(releaseBlock, /runCloudSmoke\(cloudDeploy\.fns,\s*releaseLedger\.runId/)
+  assert.match(releaseBlock, /runCloudSmoke\(releaseCloudSmokeFunctions,\s*releaseLedger\.runId/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'admin-web-deploy'/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'miniprogram-upload'/)
   assert.match(releaseBlock, /preparedPackageDigest/)
