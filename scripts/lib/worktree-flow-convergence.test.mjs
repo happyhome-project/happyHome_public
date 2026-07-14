@@ -1,12 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
-import { collectStatusMode, decideBootstrap, decideSync, executeBootstrap, executeRetirement, verifySyncSnapshot } from './worktree-lifecycle.mjs'
+import { collectStatusMode, decideBootstrap, decideSync, executeBootstrap, executeRetirement, executeWorktreeRemoval, verifySyncSnapshot } from './worktree-lifecycle.mjs'
 
 function git(args, cwd, allowFailure = false) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true })
@@ -91,6 +91,34 @@ test('eligible retirement removes a temporary linked worktree nonforce while ret
   for (const flag of ['--prepare','--apply','--confirm-no-owner']) assert.match(spawnSync(process.execPath,[script,'retire',flag,linked],{cwd:repo,encoding:'utf8',windowsHide:true}).stderr,/legacy retire flags/i)
 })
 
+test('retirement clears workspace junctions before nonforce Git removal', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'happyhome-retire-junction-')); t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const repo = join(dir, 'repo'), linked = join(dir, 'linked')
+  git(['init','-b','main',repo],dir); git(['config','user.name','Test'],repo); git(['config','user.email','test@example.invalid'],repo); git(['commit','--allow-empty','-m','base'],repo)
+  git(['worktree','add','-b','codex/junction',linked,'main'],repo)
+  const workspace = join(linked, 'workspace'), modules = join(linked, 'node_modules')
+  mkdirSync(workspace); mkdirSync(modules); symlinkSync(workspace, join(modules, 'workspace'), process.platform === 'win32' ? 'junction' : 'dir')
+
+  let gitArgs
+  const result = executeWorktreeRemoval({
+    path: linked,
+    removeInstallArtifacts: () => rmSync(modules, { recursive: true, force: true }),
+    removeWorktree: (args) => {
+      gitArgs = args
+      const outcome = git(args, repo, true)
+      return { ok: outcome.status === 0, status: outcome.status, stderr: outcome.stderr }
+    },
+    isRegistered: () => git(['worktree','list','--porcelain'],repo).stdout.includes(linked.replaceAll('\\','/')),
+    removeResidual: () => rmSync(linked, { recursive: true, force: true }),
+    inspectResidual: () => ({ exists: existsSync(linked), empty: existsSync(linked) ? readdirSync(linked).length === 0 : true }),
+  })
+
+  assert.deepEqual(gitArgs, ['worktree', 'remove', linked])
+  assert.equal(result.status, 'retired')
+  assert.equal(existsSync(linked), false)
+  assert.equal(git(['show-ref','--verify','refs/heads/codex/junction'],repo).status, 0)
+})
+
 test('sync CLI executes no-op, fast-forward, divergent merge, blockers, and preserves conflict evidence', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'happyhome-sync-flow-')); t.after(() => rmSync(dir, { recursive: true, force: true }))
   const remote = join(dir, 'remote.git'), seed = join(dir, 'seed'), work = join(dir, 'work')
@@ -133,7 +161,9 @@ test('CLI source rejects legacy flags, local status is network-free, fresh statu
   const source = readFileSync(fileURLToPath(new URL('../worktree.mjs', import.meta.url)), 'utf8')
   assert.match(source, /status[^]*flags\.has\('fresh'\)/)
   assert.match(source, /legacy[^]*(?:prepare|apply|expected-head|confirm-no-owner)/i)
-  assert.match(source, /\['worktree', 'remove', targetPath\]/)
+  assert.match(source, /executeWorktreeRemoval/)
+  assert.match(source, /removeRetirementInstallArtifacts/)
+  assert.match(source, /removeWorktree:[^]*allowFailure:\s*true/)
   assert.doesNotMatch(source, /worktree', 'remove', '--force'/)
   assert.doesNotMatch(source, /function heartbeat\(|registryPath|retirementRecords|ownerState/)
 })

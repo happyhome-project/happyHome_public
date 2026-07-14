@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 
@@ -21,6 +21,7 @@ import {
   verifiedPublicOriginUrl,
   verifySyncSnapshot,
   executePinnedWorktreeCreation,
+  executeWorktreeRemoval,
   executeWorktreeMutation,
   verifyCreateTargetBoundary,
 } from './lib/worktree-lifecycle.mjs'
@@ -164,6 +165,21 @@ function registeredWorktreePaths(root) {
     const line = block.split(/\r?\n/).find((value) => value.startsWith('worktree '))
     return line ? line.slice('worktree '.length) : ''
   }).filter(Boolean)
+}
+
+function removeRetirementInstallArtifacts(path) {
+  rmSync(join(path, 'node_modules'), { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+}
+
+function inspectRetirementResidual(path) {
+  if (!existsSync(path)) return { exists: false, empty: true }
+  const stats = lstatSync(path)
+  if (!stats.isDirectory() || stats.isSymbolicLink()) return { exists: true, empty: false }
+  return { exists: true, empty: readdirSync(path).length === 0 }
+}
+
+function removeRetirementResidual(path) {
+  rmSync(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
 }
 
 function hooksState(root) {
@@ -473,6 +489,7 @@ function retire({ flags, positionals }) {
   assertRetirementTargetBoundary(targetPath, operator)
   const prInventory = openPullRequestInventory(operator.root, { repository: 'happyhome-project/happyHome_public' })
   if (!prInventory.pulls) die(`retirement is blocked: open PR inventory unavailable: ${prInventory.error}`)
+  let removalResult = null
   executeWorktreeMutation({
     withOperationLock: (action) => withWorktreeOperationLock(operator.root, action),
     probe: () => {
@@ -496,10 +513,18 @@ function retire({ flags, positionals }) {
         operator: finalOperator,
       })
       if (!finalProbe.decision.eligible) die(`retirement is blocked at final remove: ${finalProbe.decision.reasons.join(', ')}`)
-      git(['worktree', 'remove', targetPath])
+      removalResult = executeWorktreeRemoval({
+        path: targetPath,
+        removeInstallArtifacts: removeRetirementInstallArtifacts,
+        removeWorktree: (args) => git(args, { cwd: finalOperator.root, allowFailure: true }),
+        isRegistered: (path) => registeredWorktreePaths(finalOperator.root)
+          .some((candidate) => normalizePath(candidate) === normalizePath(path)),
+        removeResidual: removeRetirementResidual,
+        inspectResidual: inspectRetirementResidual,
+      })
     },
   })
-  report({ status: 'retired', path: targetPath })
+  report({ status: removalResult.status, path: targetPath, ...(removalResult.warning ? { warning: removalResult.warning } : {}) })
 }
 
 function status({ flags }) {

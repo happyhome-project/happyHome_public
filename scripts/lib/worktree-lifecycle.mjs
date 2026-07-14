@@ -284,6 +284,59 @@ export function executeRetirement({ probe, remove }) {
   return { status: 'retired', branch: evidence.branch }
 }
 
+export function finalizeWorktreeRemoval({
+  gitResult,
+  registered,
+  removeResidual,
+  inspectResidual,
+} = {}) {
+  if (typeof gitResult?.ok !== 'boolean') throw new Error('Worktree removal Git result is unknown')
+  if (gitResult?.ok === true) return { status: 'retired' }
+  if (registered !== false) {
+    throw new Error(`Worktree removal failed and target remains registered: ${gitResult?.stderr || 'unknown Git error'}`)
+  }
+  if (typeof removeResidual !== 'function' || typeof inspectResidual !== 'function') {
+    throw new Error('Worktree removal recovery requires residual filesystem inspection')
+  }
+
+  let removalError = null
+  try {
+    removeResidual()
+  } catch (error) {
+    removalError = error
+  }
+  const residual = inspectResidual()
+  if (residual?.exists === false) return { status: 'retired' }
+  if (residual?.exists === true && residual?.empty === true && removalError && ['EBUSY', 'EPERM', 'EACCES'].includes(removalError.code)) {
+    return { status: 'retired_with_locked_empty_shell', warning: removalError.message }
+  }
+  if (residual?.exists === true && residual?.empty === false) {
+    throw new Error(`Worktree removal left a non-empty residual directory: ${removalError?.message || gitResult?.stderr || 'unknown error'}`)
+  }
+  throw removalError || new Error('Worktree removal residual state is unknown')
+}
+
+export function executeWorktreeRemoval({
+  path,
+  removeInstallArtifacts,
+  removeWorktree,
+  isRegistered,
+  removeResidual,
+  inspectResidual,
+} = {}) {
+  if (!path || typeof removeInstallArtifacts !== 'function' || typeof removeWorktree !== 'function') {
+    throw new Error('Worktree removal requires a target path and removal operations')
+  }
+  removeInstallArtifacts(path)
+  const gitResult = removeWorktree(['worktree', 'remove', path])
+  return finalizeWorktreeRemoval({
+    gitResult,
+    registered: gitResult?.ok === true ? false : isRegistered?.(path),
+    removeResidual: () => removeResidual(path),
+    inspectResidual: () => inspectResidual(path),
+  })
+}
+
 export function decideSync({ isDirty = false, hasOperation = false, behind = 0, ahead = 0, main = null } = {}) {
   if (isDirty) return { action: 'blocked', reason: 'dirty' }
   if (hasOperation) return { action: 'blocked', reason: 'git_operation' }
