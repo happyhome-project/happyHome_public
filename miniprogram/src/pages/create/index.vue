@@ -50,13 +50,41 @@
 
       <view v-else class="form" :class="{ 'form--figma': isFigmaCreateMode }">
         <view v-if="!isFigmaCreateMode" class="form-header">
-          <text class="section-tag" @tap="handleBackToSectionPicker">← {{ selectedSection.name }}</text>
+          <text class="section-tag" @tap="handleFormBack">← {{ selectedSection.name }}</text>
           <text v-if="isActivityInviteMode" class="invite-mode-tag">从攻略发起召集</text>
         </view>
 
+        <template v-if="isTextNoteCreateMode">
+          <view v-if="textNoteStep === 'compose'" class="text-note-compose">
+            <WidgetEditor v-if="textNoteTitleWidget" :widget="textNoteTitleWidget" variant="figma" :allow-rich-note-images="false" v-model="formData[textNoteTitleWidget.widgetId]" />
+            <WidgetEditor v-if="textNoteBodyWidget" :widget="textNoteBodyWidget" variant="figma" :allow-rich-note-images="false" v-model="formData[textNoteBodyWidget.widgetId]" />
+            <view class="text-note-compose-actions">
+              <button class="draft-btn" @tap="saveDraft">存草稿</button>
+              <button class="btn-primary" data-testid="text-note-next" @tap="openTextNoteCover">下一步</button>
+            </view>
+          </view>
+          <view v-else class="text-note-cover-step">
+            <view class="text-note-preview">
+              <TextNoteCover :title="textNoteContent.title" :body="textNoteContent.body" :theme="textNoteTheme" />
+            </view>
+            <text class="text-note-theme-heading">选择封面风格</text>
+            <scroll-view class="text-note-theme-scroll" scroll-x :show-scrollbar="false">
+              <view class="text-note-theme-list">
+                <view v-for="theme in TEXT_NOTE_THEMES" :key="theme" class="text-note-theme-option" :class="{ 'text-note-theme-option--active': textNoteTheme === theme }" @tap="textNoteTheme = theme">
+                  <TextNoteCover :title="textNoteContent.title" :body="textNoteContent.body" :theme="theme" />
+                </view>
+              </view>
+            </scroll-view>
+            <view class="text-note-cover-actions">
+              <button class="draft-btn" @tap="textNoteStep = 'compose'">返回修改</button>
+              <button class="btn-primary" data-testid="create-submit" :disabled="submitting" @tap="handleSubmit">{{ submitting ? '发布中...' : '发布' }}</button>
+            </view>
+          </view>
+        </template>
+
         <!-- 未配置控件的板块：提示并禁用发布，避免空帖 -->
         <view
-          v-if="editableWidgets.length === 0 && attendanceWidgets.length === 0"
+          v-else-if="editableWidgets.length === 0 && attendanceWidgets.length === 0"
           class="empty-widgets-hint"
         >
           <text class="empty-widgets-title">{{ adminNoticeWidgets.length > 0 ? '该板块由管理员维护' : '该板块尚未配置内容模板' }}</text>
@@ -124,7 +152,7 @@
                   :allow-rich-note-images="allowImagesForWidget(block.bodyWidget)"
                   v-model="formData[block.bodyWidget.widgetId]"
                 />
-                <view class="figma-ai-write">
+                <view v-if="!isTextNoteCreateMode" class="figma-ai-write">
                   <text class="figma-ai-icon">✣</text>
                   <text>AI帮你写</text>
                 </view>
@@ -186,6 +214,7 @@ import { memberApi, postApi } from '../../api/cloud'
 import { uploadCloudFile } from '../../api/storage'
 import AppTabBar from '../../components/AppTabBar.vue'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
+import TextNoteCover from '../../components/TextNoteCover.vue'
 import {
   CREATE_SECTION_INTENT_KEY,
   CREATE_SECTION_INTENT_TTL_MS,
@@ -196,6 +225,7 @@ import { resolveActivityAnnouncementMain } from '../../utils/create-form-layout'
 import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { ensureHierarchyStack, normalizeRouteUrl, openHierarchyParent } from '../../utils/hierarchy-nav'
+import { extractTextNoteContent, TEXT_NOTE_THEMES, type TextNoteTheme } from '../../utils/text-note'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -223,6 +253,8 @@ const isActivityInviteMode = ref(false)
 const activityInviteSourcePostId = ref('')
 const activityInviteLoading = ref(false)
 const createReturnTo = ref('')
+const textNoteStep = ref<'compose' | 'cover'>('compose')
+const textNoteTheme = ref<TextNoteTheme>('paper')
 
 // 只允许在 active 板块发帖。dormant / archived 板块既无法发帖也无处展示（首页已过滤）。
 const activeSections = computed(() =>
@@ -242,6 +274,17 @@ const adminNoticeWidgets = computed(() =>
 )
 
 const isFigmaCreateMode = computed(() => !!selectedSection.value)
+const isTextNoteCreateMode = computed(() => {
+  const section = selectedSection.value
+  return !!section && section.displayTemplate === 'text_note'
+})
+const textNoteTitleWidget = computed(() =>
+  editableWidgets.value.find((widget: any) => String(widget?.widgetId || '') === 'text_title') || null
+)
+const textNoteBodyWidget = computed(() =>
+  editableWidgets.value.find((widget: any) => String(widget?.widgetId || '') === 'text_body') || null
+)
+const textNoteContent = computed(() => extractTextNoteContent(formData))
 const isGuideCreateMode = computed(() => {
   const section = selectedSection.value
   if (!section) return false
@@ -251,6 +294,7 @@ const isGuideCreateMode = computed(() => {
 })
 
 function allowImagesForWidget(widget: any) {
+  if (isTextNoteCreateMode.value) return false
   if (isGuideCreateMode.value) return false
   if (isActivityInviteMode.value && String(widget?.widgetId || '') === ACTIVITY_INVITE_WIDGET_IDS.note) return false
   return true
@@ -356,8 +400,11 @@ watch(() => communityStore.currentCommunityId, async () => {
   await consumeCreateSectionIntent()
 })
 
-watch(selectedSection, (section) => {
-  uni.setNavigationBarTitle({ title: section?.name || '发布' })
+watch([selectedSection, textNoteStep], ([section, step]) => {
+  const title = section?.displayTemplate === 'text_note' && step === 'cover'
+    ? '选择文字封面'
+    : section?.name || '发布'
+  uni.setNavigationBarTitle({ title })
 }, { immediate: true })
 
 try {
@@ -451,6 +498,28 @@ function selectSection(section: any, options: { returnTo?: string } = {}) {
   selectedSection.value = section
   createReturnTo.value = normalizeRouteUrl(options.returnTo)
   Object.keys(formData).forEach((key) => delete formData[key])
+  textNoteStep.value = 'compose'
+  textNoteTheme.value = 'paper'
+}
+
+function handleFormBack() {
+  if (isTextNoteCreateMode.value && textNoteStep.value === 'cover') {
+    textNoteStep.value = 'compose'
+    return
+  }
+  handleBackToSectionPicker()
+}
+
+function openTextNoteCover() {
+  if (!textNoteContent.value.title) {
+    uni.showToast({ title: '请填写标题', icon: 'none' })
+    return
+  }
+  if (!textNoteContent.value.body) {
+    uni.showToast({ title: '请填写正文', icon: 'none' })
+    return
+  }
+  textNoteStep.value = 'cover'
 }
 
 function handleBackToSectionPicker() {
@@ -735,6 +804,7 @@ function saveDraft() {
       sectionId: selectedSection.value._id,
       sectionName: selectedSection.value.name,
       content: JSON.parse(JSON.stringify(formData)),
+      presentation: isTextNoteCreateMode.value ? { textNoteTheme: textNoteTheme.value } : undefined,
       savedAt: Date.now(),
     })
     uni.showToast({ title: '已保存草稿', icon: 'success' })
@@ -792,6 +862,9 @@ async function handleSubmit() {
           communityId: communityStore.currentCommunityId,
           sectionId,
           content,
+          presentation: isTextNoteCreateMode.value
+            ? { textNoteTheme: textNoteTheme.value }
+            : undefined,
         })
     // #ifdef H5
     if (import.meta.env.DEV && result?.postId) {
@@ -1058,6 +1131,68 @@ async function handleSubmit() {
 .btn-primary-plain[disabled] {
   opacity: $hh-opacity-disabled;
 }
+
+.text-note-compose,
+.text-note-cover-step {
+  padding: 32rpx 32rpx calc(156rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+
+.text-note-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
+}
+
+.text-note-compose-actions,
+.text-note-cover-actions {
+  display: flex;
+  align-items: center;
+  gap: 32rpx;
+  margin-top: 36rpx;
+}
+
+.text-note-preview {
+  width: min(100%, 620rpx);
+  margin: 0 auto 40rpx;
+}
+
+.text-note-theme-heading {
+  display: block;
+  margin-bottom: 20rpx;
+  font-size: 30rpx;
+  font-weight: 700;
+  color: var(--hh-color-text-primary);
+}
+
+.text-note-theme-scroll { width: 100%; }
+
+.text-note-theme-list {
+  display: inline-flex;
+  gap: 20rpx;
+  padding: 4rpx 4rpx 16rpx;
+}
+
+.text-note-theme-option {
+  width: 176rpx;
+  flex: 0 0 176rpx;
+  padding: 6rpx;
+  border: 4rpx solid transparent;
+  border-radius: 20rpx;
+  box-sizing: border-box;
+}
+
+.text-note-theme-option--active {
+  border-color: var(--hh-color-brand-primary);
+}
+
+.text-note-theme-option :deep(.text-note-cover-frame) { border-radius: 12rpx; }
+.text-note-theme-option :deep(.text-note-cover-content) { padding: 18rpx 14rpx; }
+.text-note-theme-option :deep(.text-note-cover-title) { margin-bottom: 8rpx; font-size: 15rpx; }
+.text-note-theme-option :deep(.text-note-cover-rule) { width: 24rpx; height: 2rpx; margin-bottom: 8rpx; }
+.text-note-theme-option :deep(.text-note-cover-body) { font-size: 11rpx; }
+.text-note-theme-option :deep(.text-note-cover-label) { margin-bottom: 6rpx; padding: 2rpx 5rpx; font-size: 8rpx; }
+.text-note-theme-option :deep(.text-note-cover-quote) { height: 20rpx; font-size: 28rpx; }
 
 .guard-state {
   display: flex;

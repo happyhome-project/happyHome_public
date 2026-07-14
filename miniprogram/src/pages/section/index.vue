@@ -32,6 +32,27 @@
         <button class="empty-action" @tap="goCreatePost">去发布帖子</button>
       </view>
 
+      <view v-else-if="isTextNote" class="text-note-section-grid">
+        <view
+          v-for="item in sectionItems"
+          :key="item.postId"
+          class="text-note-section-card"
+          data-testid="section-post-card"
+          :data-post-id="item.postId"
+          @tap="openPost(item.postId)"
+        >
+          <TextNoteCover :title="item.title" :body="item.preview" :theme="item.textNoteTheme" />
+          <view class="text-note-section-main">
+            <text class="text-note-section-title">{{ item.title }}</text>
+            <view class="text-note-section-meta">
+              <text class="text-note-section-author">{{ item.authorName }}</text>
+              <text>{{ item.when }}</text>
+              <text>赞 {{ item.likes }}</text>
+            </view>
+          </view>
+        </view>
+      </view>
+
       <view v-else class="post-list">
         <view
           v-for="item in sectionItems"
@@ -101,6 +122,8 @@ import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { ensureHierarchyStack } from '../../utils/hierarchy-nav'
+import TextNoteCover from '../../components/TextNoteCover.vue'
+import { getTextNoteCard, type TextNoteTheme } from '../../utils/text-note'
 
 const userStore = useUserStore()
 const sectionId = ref('')
@@ -125,6 +148,8 @@ interface SectionListItem {
   authorAvatar: string
   when: string
   hasVisualPlaceholder: boolean
+  textNoteTheme?: TextNoteTheme
+  likes: number
 }
 
 const sectionName = computed(() => String(section.value?.name || '板块'))
@@ -133,10 +158,29 @@ const isGuideNote = computed(() => {
   const name = String(section.value?.name || '').trim()
   return GUIDE_NOTE_NAME_HINTS.some((hint) => name.includes(hint))
 })
+const isTextNote = computed(() => section.value?.displayTemplate === 'text_note')
 
 const sectionItems = computed<SectionListItem[]>(() => {
   if (!section.value) return []
   return posts.value.map((post) => {
+    if (isTextNote.value) {
+      const card = getTextNoteCard(post)
+      return {
+        postId: post._id,
+        title: card.title,
+        coverImage: '',
+        preview: card.body,
+        previewLines: [],
+        highlight: '',
+        meta: '',
+        authorName: resolveAuthorName(post),
+        authorAvatar: '',
+        when: formatShortDate(post.createdAt),
+        hasVisualPlaceholder: false,
+        textNoteTheme: card.theme,
+        likes: Number(post.likeCount || post.likes || 0),
+      }
+    }
     if (isGuideNote.value) {
       const card = getGuideNoteCard(post, section.value)
       const rawCover = String(card.coverImage || '').trim()
@@ -153,6 +197,7 @@ const sectionItems = computed<SectionListItem[]>(() => {
         authorAvatar: resolvedAuthorAvatarUrls.value[rawAvatar] || rawAvatar,
         when: card.when || formatShortDate(post.createdAt),
         hasVisualPlaceholder: true,
+        likes: Number(post.likeCount || post.likes || 0),
       }
     }
 
@@ -172,6 +217,7 @@ const sectionItems = computed<SectionListItem[]>(() => {
       authorAvatar: resolvedAuthorAvatarUrls.value[rawAvatar] || rawAvatar,
       when: formatShortDate(post.createdAt),
       hasVisualPlaceholder: false,
+      likes: Number(post.likeCount || post.likes || 0),
     }
   })
 })
@@ -615,6 +661,52 @@ function extractText(value: any): string {
   display: flex;
   flex-direction: column;
   gap: 24rpx;
+}
+
+.text-note-section-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18rpx;
+  padding: 0 24rpx 40rpx;
+}
+
+.text-note-section-card {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 24rpx;
+  background: #fff;
+  box-shadow: 0 10rpx 28rpx rgba(34, 70, 53, 0.08);
+}
+
+.text-note-section-card:active { transform: scale(0.99); }
+.text-note-section-main { padding: 18rpx; }
+.text-note-section-title {
+  display: -webkit-box;
+  min-height: 72rpx;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: #1f2823;
+  font-size: 27rpx;
+  font-weight: 700;
+  line-height: 36rpx;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.text-note-section-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8rpx;
+  margin-top: 14rpx;
+  color: #8b948f;
+  font-size: 19rpx;
+}
+.text-note-section-author {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .post-card {
