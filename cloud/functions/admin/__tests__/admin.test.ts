@@ -689,6 +689,79 @@ test('section.create: 图文攻略展示模板可保存到板块', async () => {
   }))
 })
 
+test('section.create: 纯文字笔记创建时写入精确的两个固定控件', async () => {
+  ;(db.create as jest.Mock).mockResolvedValue('section-text')
+
+  await main({ action: 'section.create', communityId: 'community-1', name: '随手记', type: 'evergreen', displayTemplate: 'text_note' })
+
+  expect(db.create).toHaveBeenCalledWith('sections', expect.objectContaining({
+    displayTemplate: 'text_note',
+    widgets: [
+      { widgetId: 'text_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 1, showInList: true, locked: true },
+      { widgetId: 'text_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: true, order: 2, showInList: false, locked: true },
+    ],
+  }))
+})
+
+test('section.create: 未知展示模板不会静默降级', async () => {
+  await expect(main({ action: 'section.create', communityId: 'community-1', name: '错误模板', type: 'evergreen', displayTemplate: 'unknown' }))
+    .rejects.toThrow('展示模板')
+  expect(db.create).not.toHaveBeenCalled()
+})
+
+test.each(['section.get', 'section.list'])('%s: 纯文字笔记会修复缺失或篡改的固定控件', async (action) => {
+  const section = {
+    _id: 'section-text', communityId: 'community-1', type: 'evergreen', displayTemplate: 'text_note',
+    widgets: [
+      { widgetId: 'text_title', type: 'summary', label: '被篡改', fieldKey: 'oops', required: false, order: 99, showInList: false },
+      { widgetId: 'custom', type: 'short_text', label: '自定义', fieldKey: 'custom', required: false, order: 4, showInList: false },
+    ],
+  }
+  if (action === 'section.get') (db.getById as jest.Mock).mockResolvedValue(section)
+  else (db.query as jest.Mock).mockResolvedValue([section])
+
+  const result: any = await main(action === 'section.get'
+    ? { action, sectionId: 'section-text' }
+    : { action, communityId: 'community-1' })
+  const normalized = action === 'section.get' ? result.section : result.sections[0]
+
+  expect(normalized.widgets).toEqual([
+    { widgetId: 'text_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 1, showInList: true, locked: true },
+    { widgetId: 'text_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: true, order: 2, showInList: false, locked: true },
+    expect.objectContaining({ widgetId: 'custom', locked: false }),
+  ])
+})
+
+test('section.updateWidgets: section.get 归一化的纯文字固定结构可原样保存', async () => {
+  const rawSection = {
+    _id: 'section-text', communityId: 'community-1', type: 'evergreen', displayTemplate: 'text_note',
+    widgets: [{ widgetId: 'text_title', type: 'summary', label: '旧标题', order: 0 }],
+  }
+  ;(db.getById as jest.Mock).mockResolvedValue(rawSection)
+  const getResult: any = await main({ action: 'section.get', sectionId: 'section-text' })
+
+  ;(db.getById as jest.Mock).mockResolvedValue(rawSection)
+  await expect(main({
+    action: 'section.updateWidgets',
+    sectionId: 'section-text',
+    widgets: getResult.section.widgets,
+  })).resolves.toEqual(expect.objectContaining({ widgets: getResult.section.widgets }))
+})
+
+test('section.updateWidgets: 纯文字笔记固定控件不能删除或修改', async () => {
+  const section = { _id: 'section-text', type: 'evergreen', displayTemplate: 'text_note', widgets: [] }
+  ;(db.getById as jest.Mock).mockResolvedValue(section)
+
+  await expect(main({ action: 'section.updateWidgets', sectionId: 'section-text', widgets: [
+    { widgetId: 'text_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 1, showInList: true, locked: true },
+  ] })).rejects.toThrow('固定控件')
+
+  await expect(main({ action: 'section.updateWidgets', sectionId: 'section-text', widgets: [
+    { widgetId: 'text_title', type: 'summary', label: '标题', fieldKey: 'title', required: true, order: 1, showInList: true, locked: true },
+    { widgetId: 'text_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: true, order: 2, showInList: false, locked: true },
+  ] })).rejects.toThrow('固定控件')
+})
+
 test('section.updateWidgets: activity_invite 只能配置到 evergreen 板块', async () => {
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-1',
@@ -851,7 +924,7 @@ test('section.get: 旧图文攻略板块会补齐路线攻略固定控件', asyn
   }))
 })
 
-test('section.updateMeta: 展示模板只接受默认和图文攻略', async () => {
+test('section.updateMeta: 已创建板块拒绝切换或传入未知展示模板', async () => {
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-1',
     communityId: 'community-1',
@@ -860,27 +933,42 @@ test('section.updateMeta: 展示模板只接受默认和图文攻略', async () 
   })
   ;(db.updateById as jest.Mock).mockResolvedValue({})
 
-  await main({
+  await expect(main({
     action: 'section.updateMeta',
     sectionId: 'section-1',
     displayTemplate: 'guide_note',
-  })
+  })).rejects.toThrow('展示模板')
 
-  expect(db.updateById).toHaveBeenLastCalledWith('sections', 'section-1', {
-    displayTemplate: 'guide_note',
-  })
-  expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledWith('section-1')
-
-  await main({
+  await expect(main({
     action: 'section.updateMeta',
     sectionId: 'section-1',
     displayTemplate: 'unexpected-template',
-  })
+  })).rejects.toThrow('展示模板')
+  expect(db.updateById).not.toHaveBeenCalled()
+})
 
-  expect(db.updateById).toHaveBeenLastCalledWith('sections', 'section-1', {
-    displayTemplate: 'default',
+test.each(['guide_note', 'text_note'])('section.updateMeta: 已创建 %s 板块允许回传相同展示模板', async (displayTemplate) => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-1',
+    communityId: 'community-1',
+    type: 'evergreen',
+    status: 'active',
+    displayTemplate,
   })
-  expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledTimes(2)
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  await expect(main({
+    action: 'section.updateMeta',
+    sectionId: 'section-1',
+    name: '更新名称',
+    displayTemplate,
+  })).resolves.toEqual({ success: true })
+
+  expect(db.updateById).toHaveBeenCalledWith('sections', 'section-1', {
+    name: '更新名称',
+    displayTemplate,
+  })
+  expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledWith('section-1')
 })
 
 test('section.updateStatus: refreshes search and queues RAG jobs for existing posts', async () => {

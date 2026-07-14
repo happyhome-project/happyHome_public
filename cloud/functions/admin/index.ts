@@ -65,6 +65,12 @@ import {
   normalizeGuideNoteWidgets,
   normalizeSectionDisplayTemplate,
 } from '../../shared/guide-note-widgets'
+import {
+  buildDefaultTextNoteWidgets,
+  isTextNoteSection,
+  normalizeTextNoteWidgets,
+  TEXT_NOTE_LOCKED_WIDGETS,
+} from '../../shared/text-note-widgets'
 import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
 import { resolvePostAuthorNickname } from '../../shared/post-author'
 
@@ -253,7 +259,7 @@ function normalizeSection(section: any) {
   }
   return {
     ...normalized,
-    widgets: normalizeGuideNoteWidgets(normalized),
+    widgets: normalizeTextNoteWidgets({ ...normalized, widgets: normalizeGuideNoteWidgets(normalized) }),
   }
 }
 
@@ -274,12 +280,32 @@ function assertGuideNoteLockedWidgets(section: Section, widgets: Widget[]) {
   }
 }
 
+function assertTextNoteLockedWidgets(section: Section, widgets: Widget[]) {
+  if (!isTextNoteSection(section)) return
+  for (const lockedWidget of TEXT_NOTE_LOCKED_WIDGETS) {
+    const incoming = widgets.find((widget) => widget.widgetId === lockedWidget.widgetId)
+    if (!incoming) throw new Error(`纯文字笔记固定控件「${lockedWidget.label}」不能删除`)
+    const immutableFields: Array<keyof Widget> = ['type', 'label', 'fieldKey', 'required', 'order', 'showInList']
+    if (immutableFields.some((field) => incoming[field] !== lockedWidget[field])) {
+      throw new Error(`纯文字笔记固定控件「${lockedWidget.label}」不能修改`)
+    }
+  }
+}
+
 function applyGuideNoteLockedFlags(section: Section, widgets: Widget[]) {
   if (!isGuideNoteSection(section)) return widgets
   return widgets.map((widget) => {
     const lockedWidget = getGuideNoteLockedWidget(widget.widgetId)
     return lockedWidget ? { ...lockedWidget } : { ...widget, locked: false }
   })
+}
+
+function applyTextNoteLockedFlags(section: Section, widgets: Widget[]) {
+  if (!isTextNoteSection(section)) return widgets
+  const lockedById = new Map(TEXT_NOTE_LOCKED_WIDGETS.map((widget) => [widget.widgetId, widget]))
+  return widgets.map((widget) => lockedById.has(widget.widgetId)
+    ? { ...lockedById.get(widget.widgetId)! }
+    : { ...widget, locked: false })
 }
 
 function normalizeKeyword(value: unknown) {
@@ -1075,6 +1101,10 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     return { sections: raw.map((section: any) => normalizeSection(section)) }
   }
   if (action === 'section.create') {
+    if (typeof params.displayTemplate !== 'undefined' &&
+        !['default', 'guide_note', 'text_note'].includes(params.displayTemplate)) {
+      throw new Error('不支持的展示模板')
+    }
     const type = params.type === 'realtime' ? 'realtime' : 'evergreen'
     const displayTemplate = type === 'evergreen'
       ? normalizeSectionDisplayTemplate(params.displayTemplate)
@@ -1086,7 +1116,9 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       order: params.order ?? 0,
       enableComment: params.enableComment !== false,
       enableLike: params.enableLike !== false,
-      widgets: displayTemplate === 'guide_note' ? buildDefaultGuideNoteWidgets() : [],
+      widgets: displayTemplate === 'guide_note'
+        ? buildDefaultGuideNoteWidgets()
+        : displayTemplate === 'text_note' ? buildDefaultTextNoteWidgets() : [],
       createdAt: new Date().toISOString(),
       type,
       status: 'active',
@@ -1108,7 +1140,10 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (typeof params.order === 'number') updates.order = params.order
     if (params.type === 'realtime' || params.type === 'evergreen') updates.type = params.type
     if (params.status === 'active' || params.status === 'dormant' || params.status === 'archived') updates.status = params.status
-    if (typeof params.displayTemplate !== 'undefined') updates.displayTemplate = normalizeSectionDisplayTemplate(params.displayTemplate)
+    if (typeof params.displayTemplate !== 'undefined') {
+      if (!['default', 'guide_note', 'text_note'].includes(params.displayTemplate)) throw new Error('不支持的展示模板')
+      updates.displayTemplate = params.displayTemplate
+    }
     if (typeof params.accentColor === 'string') updates.accentColor = params.accentColor
     if (typeof params.enableComment === 'boolean') updates.enableComment = params.enableComment
     if (typeof params.enableLike === 'boolean') updates.enableLike = params.enableLike
@@ -1117,6 +1152,10 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     await db.runTransaction(async transaction => {
       const sectionBefore = await db.transactionGetByIdOrNull<any>(transaction, 'sections', sectionId)
       if (!sectionBefore) throw new Error('section not found')
+      if (Object.prototype.hasOwnProperty.call(updates, 'displayTemplate') &&
+          updates.displayTemplate !== normalizeSectionDisplayTemplate(sectionBefore.displayTemplate)) {
+        throw new Error('已创建板块不允许切换展示模板')
+      }
       const effectiveStatus = Object.prototype.hasOwnProperty.call(updates, 'status')
         ? updates.status
         : sectionBefore.status
@@ -1160,7 +1199,9 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       widgetId: widget.widgetId || uuidv4(),
     }))
     assertGuideNoteLockedWidgets(currentSection, widgets)
+    assertTextNoteLockedWidgets(currentSection, widgets)
     widgets = applyGuideNoteLockedFlags(currentSection, widgets)
+    widgets = applyTextNoteLockedFlags(currentSection, widgets)
     validateSectionWidgets(currentSection.type, widgets)
 
     const currentWidgets = currentSection.widgets || []
