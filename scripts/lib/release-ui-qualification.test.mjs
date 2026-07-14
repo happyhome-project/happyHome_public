@@ -8,6 +8,7 @@ import {
   inspectReleaseUiQualification,
   writeReleaseUiQualification,
 } from './release-ui-qualification.mjs'
+import { computeDirectoryDigest } from './release-run-ledger.mjs'
 
 const IDENTITY = {
   gitSha: 'a'.repeat(40),
@@ -39,10 +40,12 @@ async function createFixture() {
   await writeFile(sourceBuildInfoPath, buildInfo)
   await writeFile(distBuildInfoPath, buildInfo)
   await writeFile(join(packageRoot, 'app.js'), 'App({})\n')
+  const packageDigest = await computeDirectoryDigest(packageRoot)
   await writeFile(uiEvidencePath, `${JSON.stringify({
     gitSha: IDENTITY.gitSha,
     devToolsVersion: IDENTITY.devToolsVersion,
     projectPath: packageRoot,
+    packageDigest,
     markers: MARKERS,
     homeColdStart: { passed: true },
     homeArchiveTabs: { passed: true },
@@ -138,6 +141,45 @@ const mutationCases = [
     mutate: async (fixture) => {
       const qualification = JSON.parse(await readFile(fixture.outputPath, 'utf8'))
       qualification.uiEvidence.sha256 = '0'.repeat(64)
+      await writeFile(fixture.outputPath, `${JSON.stringify(qualification, null, 2)}\n`)
+      return inspectFixture(fixture)
+    },
+  },
+  {
+    name: 'evidence package digest',
+    pattern: /UI evidence package digest mismatch/i,
+    mutate: async (fixture) => {
+      const evidence = JSON.parse(await readFile(fixture.uiEvidencePath, 'utf8'))
+      evidence.packageDigest = 'f'.repeat(64)
+      await writeFile(fixture.uiEvidencePath, `${JSON.stringify(evidence, null, 2)}\n`)
+      const qualification = JSON.parse(await readFile(fixture.outputPath, 'utf8'))
+      qualification.uiEvidence.sha256 = await sha256File(fixture.uiEvidencePath)
+      await writeFile(fixture.outputPath, `${JSON.stringify(qualification, null, 2)}\n`)
+      return inspectFixture(fixture)
+    },
+  },
+  {
+    name: 'nested UI result',
+    pattern: /HH_RELEASE_HOME_DETAIL_NONEMPTY/i,
+    mutate: async (fixture) => {
+      const evidence = JSON.parse(await readFile(fixture.uiEvidencePath, 'utf8'))
+      evidence.homeDetail.passed = false
+      await writeFile(fixture.uiEvidencePath, `${JSON.stringify(evidence, null, 2)}\n`)
+      const qualification = JSON.parse(await readFile(fixture.outputPath, 'utf8'))
+      qualification.uiEvidence.sha256 = await sha256File(fixture.uiEvidencePath)
+      await writeFile(fixture.outputPath, `${JSON.stringify(qualification, null, 2)}\n`)
+      return inspectFixture(fixture)
+    },
+  },
+  {
+    name: 'evidence expected version',
+    pattern: /UI evidence version mismatch/i,
+    mutate: async (fixture) => {
+      const evidence = JSON.parse(await readFile(fixture.uiEvidencePath, 'utf8'))
+      evidence.profileLoginClean.expectedVersion = '1.0.stale'
+      await writeFile(fixture.uiEvidencePath, `${JSON.stringify(evidence, null, 2)}\n`)
+      const qualification = JSON.parse(await readFile(fixture.outputPath, 'utf8'))
+      qualification.uiEvidence.sha256 = await sha256File(fixture.uiEvidencePath)
       await writeFile(fixture.outputPath, `${JSON.stringify(qualification, null, 2)}\n`)
       return inspectFixture(fixture)
     },

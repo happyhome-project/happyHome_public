@@ -9,6 +9,7 @@ import { promisify } from 'node:util'
 
 import {
   confirmReleaseLedgerAgainstProductionInspection,
+  computeDirectoryDigest,
   createReleasePlanAfterResumeIdentityCheck,
   createReleaseRunLedger,
   formatReleaseRunStatus,
@@ -847,6 +848,7 @@ test('qualification-backed prepare reuse freshly validates the wrapper and artif
     await writeFile(sourceBuildInfoPath, buildInfo)
     await writeFile(distBuildInfoPath, buildInfo)
     await writeFile(join(packageRoot, 'app.js'), 'App({})\n')
+    const packageDigest = await computeDirectoryDigest(packageRoot)
     const markers = [
       'HH_RELEASE_HOME_COLD_START_NONEMPTY',
       'HH_RELEASE_HOME_IMAGES_RENDERED',
@@ -859,6 +861,7 @@ test('qualification-backed prepare reuse freshly validates the wrapper and artif
       gitSha,
       devToolsVersion,
       projectPath: packageRoot,
+      packageDigest,
       markers,
       homeColdStart: { passed: true },
       homeArchiveTabs: { passed: true },

@@ -1,4 +1,4 @@
-const TRANSIENT_CLEANUP_PATTERN = /ResourceUnavailable\.TransactionBusy|\bECONNRESET\b|socket hang up|connection reset|\btime(?:d)?\s*out\b/i
+const TRANSIENT_CLEANUP_PATTERN = /ResourceUnavailable\.TransactionBusy|\bDATABASE_TRANSACTION_FAIL\b|\bECONNRESET\b|socket hang up|connection reset|\btime(?:d)?\s*out\b/i
 const SECRET_VALUE_PATTERN = /\b(token|openid)\s*[:=]\s*[^\s,;]+/gi
 
 function errorMessage(error) {

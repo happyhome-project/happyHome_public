@@ -143,6 +143,7 @@ export async function inspectReleaseUiQualification({
   }
   if (evidence.gitSha !== qualification.gitSha) throw new Error('release UI qualification UI evidence gitSha mismatch')
   if (evidence.devToolsVersion !== qualification.devToolsVersion) throw new Error('release UI qualification UI evidence DevTools version mismatch')
+  if (evidence.packageDigest !== qualification.packageDigest) throw new Error('release UI qualification UI evidence package digest mismatch')
   const markers = new Set(Array.isArray(evidence.markers) ? evidence.markers : [])
   const missingMarker = REQUIRED_RELEASE_UI_MARKERS.find(({ marker }) => !markers.has(marker))
   if (missingMarker) throw new Error(`release UI qualification missing marker ${missingMarker.marker}`)

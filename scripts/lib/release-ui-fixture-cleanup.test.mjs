@@ -28,7 +28,7 @@ test('retries TransactionBusy once and attempts every cleanup action', async () 
 })
 
 test('retries only observed transient cleanup failures', () => {
-  for (const message of ['request timeout', 'operation timed out', 'ECONNRESET', 'socket hang up', 'ResourceUnavailable.TransactionBusy']) {
+  for (const message of ['request timeout', 'operation timed out', 'ECONNRESET', 'socket hang up', 'ResourceUnavailable.TransactionBusy', 'DATABASE_TRANSACTION_FAIL']) {
     assert.equal(isTransientReleaseUiCleanupError(new Error(message)), true, message)
   }
   for (const message of ['permission denied', 'invalid parameter', 'member error', 'community not found']) {
