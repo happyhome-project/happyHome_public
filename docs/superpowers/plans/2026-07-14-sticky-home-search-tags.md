@@ -1,5 +1,10 @@
 # Sticky Home Search and Tags Implementation Plan
 
+> **Historical / point-in-time:** This delivery plan records the approved 2026-07-14 implementation sequence. Retain it for traceability; do not treat its task state as current repository status.
+> **Current authority:** Use the [documentation authority map](../../README.md), current home-page code, release UI checks, and tests.
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the home search bar stick below the fixed community masthead, then make section tags stick below the search bar as scrolling continues.
