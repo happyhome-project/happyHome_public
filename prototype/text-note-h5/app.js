@@ -3,6 +3,9 @@ const themes = [
   { id: 'paper', name: '社区便签', sample: '慢一点，也很好' },
   { id: 'mint', name: '清新绿', sample: '今天的小确幸' },
   { id: 'slate', name: '雾蓝小报', sample: '邻里新鲜事' },
+  { id: 'headline', name: '大字标题', sample: '今天想说' },
+  { id: 'quote', name: '邻里引语', sample: '生活有回声' },
+  { id: 'notice', name: '通知公告', sample: '停水提醒' },
 ]
 
 const seedPosts = [
@@ -190,8 +193,13 @@ function renderThemePicker() {
           data-testid="theme-${theme.id}"
           role="radio"
           aria-checked="${state.draft.theme === theme.id}"
+          tabindex="${state.draft.theme === theme.id ? '0' : '-1'}"
         >
-          <span class="theme-swatch text-theme--${theme.id}"><span>${theme.sample}</span></span>
+          <span class="theme-swatch text-theme--${theme.id}">
+            ${theme.id === 'notice' ? '<span class="cover-notice-label">通知公告</span>' : ''}
+            ${theme.id === 'quote' ? '<span class="theme-quote-mark">“</span>' : ''}
+            <span>${theme.sample}</span>
+          </span>
           <span class="theme-name">${theme.name}</span>
         </button>
       `).join('')}
@@ -201,10 +209,14 @@ function renderThemePicker() {
 
 function renderTextCover(post, className = '') {
   const theme = normalizeTheme(post.theme)
+  const title = String(post.title || '').trim() || '邻里随手记'
   const text = coverText(post.body) || '把想说的话写在这里'
   return `
     <div class="text-cover text-theme--${theme} ${className}" data-testid="text-cover">
       <div class="text-cover-rule" aria-hidden="true"></div>
+      ${theme === 'notice' ? '<span class="cover-notice-label">通知公告</span>' : ''}
+      ${theme === 'quote' ? '<span class="cover-quote-mark" aria-hidden="true">“</span>' : ''}
+      <strong class="cover-title">${escapeHtml(title)}</strong>
       <p class="cover-text ${coverSize(post.body)}">${escapeHtml(text)}</p>
       <span class="cover-signature">邻里随手记</span>
     </div>
@@ -227,6 +239,10 @@ function renderCompose() {
     <div class="app-frame app-frame--compose">
       ${renderTopbar({ title: '邻里随手记', leftLabel: '取消', leftAction: 'feed' })}
       <main class="compose-content">
+        <div class="compose-intro">
+          <span>第一步</span>
+          <p>先把想说的话写完整，下一步再选择文字封面。</p>
+        </div>
         <section class="writing-surface">
           <label class="sr-only" for="title-input">标题</label>
           <input
@@ -249,13 +265,6 @@ function renderCompose() {
           <div class="body-count"><span data-testid="body-count">${bodyText(state.draft.body).length}</span> 字</div>
         </section>
 
-        <section class="theme-section">
-          <div class="section-heading">
-            <h2>选择文字封面</h2>
-            <span>发布后可在双列流中保持整齐</span>
-          </div>
-          ${renderThemePicker()}
-        </section>
       </main>
 
       <footer class="action-dock">
@@ -294,20 +303,21 @@ function renderPreview() {
   }
   return `
     <div class="app-frame app-frame--preview">
-      ${renderTopbar({ title: '发布预览', leftLabel: '返回修改', leftAction: 'compose' })}
+      ${renderTopbar({ title: '选择文字封面', leftLabel: '返回修改', leftAction: 'compose' })}
       <main class="preview-content">
         <div class="preview-heading">
-          <h2>发布后会这样显示</h2>
-          <p>正文完整保留，首页只展示首段文字封面。</p>
+          <span>第二步</span>
+          <h2>挑一个适合这段文字的封面</h2>
+          <p>下面就是发布后的真实效果，点击样式即可切换。</p>
         </div>
         <div class="preview-card-wrap">${renderCard(previewPost, { preview: true })}</div>
         <section class="theme-section theme-section--preview">
-          <div class="section-heading"><h2>换一种封面</h2></div>
+          <div class="section-heading"><h2>封面样式</h2><span>左右滑动查看更多</span></div>
           ${renderThemePicker()}
         </section>
       </main>
       <footer class="action-dock">
-        <button type="button" class="button button--secondary" data-action="compose">继续修改</button>
+        <button type="button" class="button button--secondary" data-action="compose">返回修改</button>
         <button type="button" class="button button--primary" data-action="publish" data-testid="publish-button">发布</button>
       </footer>
     </div>
@@ -407,6 +417,14 @@ function bindInteractions() {
       saveDraft()
       render()
       document.querySelector(`[data-theme="${state.draft.theme}"]`)?.focus()
+    })
+    element.addEventListener('keydown', (event) => {
+      if (!['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'].includes(event.key)) return
+      event.preventDefault()
+      const currentIndex = themes.findIndex((theme) => theme.id === element.dataset.theme)
+      const direction = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1
+      const nextTheme = themes[(currentIndex + direction + themes.length) % themes.length]
+      document.querySelector(`[data-theme="${nextTheme.id}"]`)?.click()
     })
   })
 
