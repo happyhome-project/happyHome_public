@@ -104,6 +104,8 @@ export function selectChangeManifests(mode, manifests = [], changedPaths = []) {
 
 export function filterRagReleaseManifest(manifest, includeRag = false) {
   if (includeRag) return manifest
+  const identity = `${manifest.changeId || ''} ${manifest.source || ''}`
+  if (/rag|semantic-search/i.test(identity)) return { ...manifest, actions: [], migrations: [], smokeSuites: [] }
   return {
     ...manifest,
     actions: (manifest.actions || []).filter((action) => !RAG_RELEASE_ACTIONS.has(action)),
