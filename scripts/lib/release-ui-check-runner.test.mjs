@@ -7,20 +7,35 @@ function failure(message) {
   return async () => { throw new Error(message) }
 }
 
-test('collects independent archive and profile failures before returning', async () => {
+test('runs profile identity before provisioning fixture-dependent checks', async () => {
   const calls = []
   const pass = (stage, result = {}) => async () => { calls.push(stage); return result }
-  const fail = (stage) => async () => { calls.push(stage); throw new Error(stage) }
   const result = await runReleaseUiChecks({
     coldStart: pass('coldStart'),
     provisionFixture: pass('fixture'),
-    archiveTabs: fail('archiveTabs'),
+    archiveTabs: pass('archiveTabs'),
     homeDetail: pass('homeDetail'),
-    profile: fail('profile'),
+    profile: pass('profile'),
     cleanup: pass('cleanup'),
   })
-  assert.deepEqual(calls, ['coldStart', 'fixture', 'archiveTabs', 'homeDetail', 'profile', 'cleanup'])
-  assert.deepEqual(result.failures.map((item) => item.stage), ['archiveTabs', 'profile'])
+  assert.deepEqual(calls, ['coldStart', 'profile', 'fixture', 'archiveTabs', 'homeDetail', 'cleanup'])
+  assert.equal(result.ok, true)
+})
+
+test('profile identity failure skips fixture work and still runs cleanup', async () => {
+  const calls = []
+  const mark = (stage) => async () => { calls.push(stage) }
+  const result = await runReleaseUiChecks({
+    coldStart: mark('coldStart'),
+    profile: async () => { calls.push('profile'); throw new Error('package identity mismatch') },
+    provisionFixture: mark('fixture'),
+    archiveTabs: mark('archiveTabs'),
+    homeDetail: mark('homeDetail'),
+    cleanup: mark('cleanup'),
+  })
+  assert.deepEqual(calls, ['coldStart', 'profile', 'cleanup'])
+  assert.deepEqual(result.failures.map((item) => item.stage), ['profile'])
+  assert.deepEqual(result.skipped.map((item) => item.stage), ['provisionFixture', 'archiveTabs', 'homeDetail'])
 })
 
 test('cold-start failure skips fixture-dependent checks but still runs profile and cleanup', async () => {
@@ -38,7 +53,7 @@ test('cold-start failure skips fixture-dependent checks but still runs profile a
   assert.deepEqual(result.skipped.map((item) => item.stage), ['provisionFixture', 'archiveTabs', 'homeDetail'])
 })
 
-test('fixture failure still runs profile and cleanup', async () => {
+test('fixture failure after profile still runs cleanup', async () => {
   const calls = []
   const mark = (stage) => async () => { calls.push(stage) }
   const result = await runReleaseUiChecks({
@@ -49,7 +64,7 @@ test('fixture failure still runs profile and cleanup', async () => {
     profile: mark('profile'),
     cleanup: mark('cleanup'),
   })
-  assert.deepEqual(calls, ['coldStart', 'fixture', 'profile', 'cleanup'])
+  assert.deepEqual(calls, ['coldStart', 'profile', 'fixture', 'cleanup'])
   assert.deepEqual(result.failures.map((item) => item.stage), ['provisionFixture'])
 })
 

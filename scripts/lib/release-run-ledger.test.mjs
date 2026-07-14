@@ -844,9 +844,10 @@ test('qualification-backed prepare reuse freshly validates the wrapper and artif
     const qualificationPath = join(root, '.codex-local', 'ui-qualification.json')
     await mkdir(join(packageRoot, 'generated'), { recursive: true })
     await mkdir(join(root, 'miniprogram', 'src', 'generated'), { recursive: true })
-    const buildInfo = `version=${version}\ndesc=${desc}\nbuildId=mp-${version}\n`
-    await writeFile(sourceBuildInfoPath, buildInfo)
-    await writeFile(distBuildInfoPath, buildInfo)
+    const sourceBuildInfo = `export const BUILD_INFO = { version: "${version}", desc: "${desc}", buildId: "mp-${version}" }\n`
+    const distBuildInfo = `"use strict";exports.BUILD_INFO={version:"${version}",desc:"${desc}",buildId:"mp-${version}"};\n`
+    await writeFile(sourceBuildInfoPath, sourceBuildInfo)
+    await writeFile(distBuildInfoPath, distBuildInfo)
     await writeFile(join(packageRoot, 'app.js'), 'App({})\n')
     const packageDigest = await computeDirectoryDigest(packageRoot)
     const markers = [

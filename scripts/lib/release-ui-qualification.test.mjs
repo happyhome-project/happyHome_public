@@ -36,9 +36,10 @@ async function createFixture() {
   await mkdir(join(packageRoot, 'generated'), { recursive: true })
   await mkdir(join(root, 'miniprogram', 'src', 'generated'), { recursive: true })
   await mkdir(join(root, '.codex-local'), { recursive: true })
-  const buildInfo = `export const version = '${IDENTITY.version}'\nexport const desc = '${IDENTITY.desc}'\nexport const build = 'mp-${IDENTITY.version}'\n`
-  await writeFile(sourceBuildInfoPath, buildInfo)
-  await writeFile(distBuildInfoPath, buildInfo)
+  const sourceBuildInfo = `export const version = '${IDENTITY.version}'\nexport const desc = '${IDENTITY.desc}'\nexport const build = 'mp-${IDENTITY.version}'\n`
+  const distBuildInfo = `"use strict";exports.BUILD_INFO={version:"${IDENTITY.version}",desc:"${IDENTITY.desc}",buildId:"mp-${IDENTITY.version}"};\n`
+  await writeFile(sourceBuildInfoPath, sourceBuildInfo)
+  await writeFile(distBuildInfoPath, distBuildInfo)
   await writeFile(join(packageRoot, 'app.js'), 'App({})\n')
   const packageDigest = await computeDirectoryDigest(packageRoot)
   await writeFile(uiEvidencePath, `${JSON.stringify({
@@ -97,14 +98,6 @@ const mutationCases = [
     pattern: /package digest mismatch/i,
     mutate: async (fixture) => {
       await writeFile(join(fixture.packageRoot, 'app.js'), 'App({changed: true})\n')
-      return inspectFixture(fixture)
-    },
-  },
-  {
-    name: 'source build info',
-    pattern: /source build info.*mismatch/i,
-    mutate: async (fixture) => {
-      await writeFile(fixture.sourceBuildInfoPath, 'stale source build info\n')
       return inspectFixture(fixture)
     },
   },
@@ -200,6 +193,17 @@ const mutationCases = [
     },
   },
 ]
+
+test('reports restored source build info without invalidating immutable package evidence', async () => {
+  const fixture = await createFixture()
+  await writeFixtureQualification(fixture)
+  await writeFile(fixture.sourceBuildInfoPath, 'restored checked-in source marker\n')
+
+  const inspected = await inspectFixture(fixture)
+  assert.equal(inspected.sourceBuildInfo.matchesQualification, false)
+  assert.equal(inspected.sourceBuildInfo.identityMatchesQualification, false)
+  assert.equal(inspected.sourceBuildInfo.sha256MatchesQualification, false)
+})
 
 for (const mutationCase of mutationCases) {
   test(`rejects changed ${mutationCase.name}`, async () => {
