@@ -13,6 +13,7 @@ function assert(condition, message) {
 
 const home = read('miniprogram', 'src', 'pages', 'index', 'index.vue')
 const section = read('miniprogram', 'src', 'pages', 'section', 'index.vue')
+const topicPicker = read('miniprogram', 'src', 'components', 'widgets', 'TopicPicker.vue')
 
 assert(
   home.includes("import { getImageNoteCard, isImageNoteSectionContract } from '../../utils/image-note'") &&
@@ -78,6 +79,12 @@ assert(
   home.includes('@error="onHomeGuideImageError(item, $event)"') &&
     section.includes('@error="onSectionImageError(item.coverImage)"'),
   'image-note covers should fall back cleanly when resolved images fail.',
+)
+
+assert(
+  topicPicker.includes('topics.slice(0, 1)') &&
+    topicPicker.includes('topics.length - 1'),
+  'the compact topic trigger should summarize extra topics instead of clipping a bare hash.',
 )
 
 console.log('[image-note-static] PASS')

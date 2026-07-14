@@ -2,7 +2,8 @@
   <view class="topic-picker">
     <view class="topic-trigger" data-testid="topic-picker-trigger" @tap="openPicker">
       <view v-if="topics.length > 0" class="topic-trigger-chips">
-        <text v-for="topic in topics" :key="topic" class="topic-trigger-chip">#{{ topic }}</text>
+        <text v-for="topic in topics.slice(0, 1)" :key="topic" class="topic-trigger-chip">#{{ topic }}</text>
+        <text v-if="topics.length > 1" class="topic-trigger-more">+{{ topics.length - 1 }}</text>
       </view>
       <view class="topic-trigger-action">
         <text class="topic-hash">#</text>
@@ -154,6 +155,14 @@ function remove(index: number) {
   font-size: 28rpx;
   line-height: 44rpx;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topic-trigger-more {
+  flex: 0 0 auto;
+  color: #999;
+  font-size: 24rpx;
+  line-height: 44rpx;
   white-space: nowrap;
 }
 
