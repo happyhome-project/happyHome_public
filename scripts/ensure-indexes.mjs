@@ -181,16 +181,54 @@ const INDEXES = [
       { Name: 'createdAt', Direction: '-1' },
     ],
   },
-  // posts: 无板块沉淀流按社区、区域、状态和审核结果筛选，按发布时间倒序。
+  // posts: 无板块沉淀流按社区、区域、状态和审核结果筛选，按稳定游标倒序。
   {
     coll: 'posts',
-    name: 'idx_communityId_area_status_auditStatus_createdAt',
+    name: 'idx_communityId_area_status_auditStatus_sortKey',
     keys: [
       { Name: 'communityId', Direction: '1' },
       { Name: 'area', Direction: '1' },
       { Name: 'status', Direction: '1' },
       { Name: 'auditStatus', Direction: '1' },
-      { Name: 'createdAt', Direction: '-1' },
+      { Name: 'sortKey', Direction: '-1' },
+    ],
+  },
+  {
+    coll: 'archive_topics',
+    name: 'idx_communityId_enabled_legacyOrder',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'enabled', Direction: '1' },
+      { Name: 'legacyOrder', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'archive_topics',
+    name: 'idx_communityId_enabled_adminOrder',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'enabled', Direction: '1' },
+      { Name: 'adminOrder', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'archive_topics',
+    name: 'idx_communityId_enabled_recentScore',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'enabled', Direction: '1' },
+      { Name: 'recentScore', Direction: '-1' },
+    ],
+  },
+  {
+    coll: 'archive_post_topics',
+    name: 'idx_communityId_topicKey_status_auditStatus_sortKey',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'topicKey', Direction: '1' },
+      { Name: 'status', Direction: '1' },
+      { Name: 'auditStatus', Direction: '1' },
+      { Name: 'sortKey', Direction: '-1' },
     ],
   },
   // posts: hardDeleteCommunity 级联扫 posts by communityId
@@ -530,6 +568,8 @@ const INDEXES = [
 
 const REQUIRED_COLLECTIONS = [
   'app_configs',
+  'archive_topics',
+  'archive_post_topics',
   'post_attendance_members',
   'admin_accounts',
   'admin_sessions',
