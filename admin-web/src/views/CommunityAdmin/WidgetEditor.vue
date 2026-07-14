@@ -423,7 +423,7 @@ onMounted(async () => {
 })
 
 function addWidget() {
-  if (isImageNoteTemplate.value) return
+  if (isFixedTemplate.value) return
   const nextType = 'short_text'
   const widget = {
     widgetId: uuidv4(),

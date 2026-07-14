@@ -65,4 +65,3 @@ export function appendTopic(value: unknown, rawTopic: unknown): AppendTopicResul
 
   return { ok: true, topics: [...current.topics, topic], duplicate: false }
 }
-
