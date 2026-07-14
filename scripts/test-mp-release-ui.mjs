@@ -40,6 +40,8 @@ import {
   parseFirstJson,
 } from './cloud-release-smoke.mjs'
 import { computeDirectoryDigest } from './lib/release-run-ledger.mjs'
+import { runReleaseUiChecks } from './lib/release-ui-check-runner.mjs'
+import { cleanupReleaseFixtureWithRetry } from './lib/release-ui-fixture-cleanup.mjs'
 import { applyAndWaitForReleaseFixtureSelection } from './lib/release-ui-fixture-selection.mjs'
 import { invokeTrustedAdminCloud } from './lib/trusted-admin-invoke.mjs'
 
@@ -789,7 +791,7 @@ async function callMpCloud(mp, name, data, options = {}) {
   const action = String(data?.action || '')
   const timeoutMs = Number(options.timeoutMs || 60000)
   if (name === 'admin' && action === 'community.hardDelete') {
-    return await invokeTrustedAdminCloud(data, { timeoutMs, attempts: 2 })
+    return await invokeTrustedAdminCloud(data, { timeoutMs, attempts: Number(options.attempts || 2) })
   }
   if (name === 'admin') return await callTrustedAdminCloud(data, { timeoutMs })
   const response = await withTimeout(
@@ -1046,24 +1048,17 @@ async function cleanupReleaseFixture(mp, fixture) {
   if (!fixture || fixture.configured || !fixture.communityId || !fixture.adminCtx) {
     return { ok: true, skipped: true, reason: 'no temporary fixture cleanup required' }
   }
-  const steps = []
-  for (const action of ['community.disable', 'community.hardDelete']) {
-    try {
-      await callMpCloud(mp, 'admin', {
+  const cleanup = await cleanupReleaseFixtureWithRetry({
+    actions: ['community.disable', 'community.hardDelete'],
+    invoke: async (action) => await callMpCloud(mp, 'admin', {
         action,
         _actAs: fixture.adminCtx,
         communityId: fixture.communityId,
-      }, { timeoutMs: 90000 })
-      steps.push({ action, ok: true })
-    } catch (error) {
-      steps.push({ action, ok: false, error: stringifyError(error) })
-      break
-    }
-  }
+      }, { timeoutMs: 90000, attempts: 1 }),
+  })
   return {
-    ok: steps.every((step) => step.ok),
+    ...cleanup,
     communityId: fixture.communityId,
-    steps,
   }
 }
 
@@ -1135,7 +1130,7 @@ async function scrollHomeTo(mp, scrollTop) {
 }
 
 async function captureOptionalReleaseUiScreenshot(mp, path) {
-  if (process.env.HH_RELEASE_UI_CAPTURE_SCREENSHOT !== '1') {
+  if (process.env.HH_RELEASE_UI_CAPTURE_SCREENSHOT !== '1' && process.env.HH_CAPTURE_RELEASE_SCREENSHOT !== '1') {
     return { status: 'skipped', reason: 'structured layout evidence is authoritative for the release gate' }
   }
   const timeoutMs = envPositiveInt('HH_RELEASE_UI_SCREENSHOT_TIMEOUT_MS', 15000)
@@ -1319,12 +1314,8 @@ async function writeEvidence({ mp, evidenceDir, evidence }) {
   const jsonPath = resolve(evidenceDir, 'release-ui-evidence.json')
   writeFileSync(jsonPath, JSON.stringify(evidence, null, 2), 'utf8')
   if (process.env.HH_CAPTURE_RELEASE_SCREENSHOT === '1') {
-    try {
-      await mp.screenshot({ path: resolve(evidenceDir, 'last-page.png') })
-    } catch (error) {
-      evidence.screenshotError = String(error?.message || error)
-      writeFileSync(jsonPath, JSON.stringify(evidence, null, 2), 'utf8')
-    }
+    evidence.finalScreenshot = await captureOptionalReleaseUiScreenshot(mp, resolve(evidenceDir, 'last-page.png'))
+    writeFileSync(jsonPath, JSON.stringify(evidence, null, 2), 'utf8')
   }
   return jsonPath
 }
@@ -1361,6 +1352,8 @@ async function main() {
   const evidence = {
     createdAt: new Date().toISOString(),
     releaseRunId: String(process.env.HH_RELEASE_RUN_ID || ''),
+    gitSha: String(process.env.HH_RELEASE_GIT_SHA || ''),
+    devToolsVersion: String(process.env.HH_RELEASE_DEVTOOLS_VERSION || ''),
     packageDigest,
     cliPath,
     projectPath,
@@ -1375,149 +1368,175 @@ async function main() {
     mp = mpState.mp
     originalStorage = storageCapture.storage
 
-    const coldStartHome = await runAutomatorTaskWithRetry({
-      state: mpState,
-      autoPort,
-      label: 'verify cold-start release home UI',
-      attempts: envPositiveInt('HH_RELEASE_UI_HOME_ATTEMPTS', 3),
-      timeoutMs: envPositiveInt('HH_RELEASE_UI_HOME_TIMEOUT_MS', 90000),
-      task: async (currentMp) => {
-        const result = await verifyHomeColdStart(currentMp)
-        if (!result.passed) throw makeEvidenceRetryError('cold-start release home evidence', result)
-        return result
+    const uiChecks = await runReleaseUiChecks({
+      coldStart: async () => {
+        try {
+          const run = await runAutomatorTaskWithRetry({
+            state: mpState,
+            autoPort,
+            label: 'verify cold-start release home UI',
+            attempts: envPositiveInt('HH_RELEASE_UI_HOME_ATTEMPTS', 3),
+            timeoutMs: envPositiveInt('HH_RELEASE_UI_HOME_TIMEOUT_MS', 90000),
+            task: async (currentMp) => {
+              const result = await verifyHomeColdStart(currentMp)
+              if (!result.passed) throw makeEvidenceRetryError('cold-start release home evidence', result)
+              return result
+            },
+            recover: async ({ state, attempt }) => {
+              await disconnectMiniProgramQuietly(state.mp, `disconnect failed cold-start attempt ${attempt}`)
+              await startAutomator({ cliPath, projectPath, idePort, autoPort })
+              state.mp = await connectMiniProgram(autoPort)
+            },
+          })
+          mp = mpState.mp
+          evidence.homeColdStartAttempt = run.attempt
+          evidence.homeColdStart = run.result
+          evidence.markers.push('HH_RELEASE_HOME_COLD_START_NONEMPTY')
+          console.log('HH_RELEASE_HOME_COLD_START_NONEMPTY')
+        } catch (error) {
+          if (error?.releaseUiResult) evidence.homeColdStart = error.releaseUiResult
+          throw error
+        }
       },
-      recover: async ({ state, attempt }) => {
-        await disconnectMiniProgramQuietly(state.mp, `disconnect failed cold-start attempt ${attempt}`)
-        await startAutomator({ cliPath, projectPath, idePort, autoPort })
-        state.mp = await connectMiniProgram(autoPort)
+      provisionFixture: async () => {
+        runContext.releaseFixture = await createReleaseFixture(mpState.mp)
       },
-    })
-    mp = mpState.mp
-    evidence.homeColdStartAttempt = coldStartHome.attempt
-    evidence.homeColdStart = coldStartHome.result
-    evidence.markers.push('HH_RELEASE_HOME_COLD_START_NONEMPTY')
-    console.log('HH_RELEASE_HOME_COLD_START_NONEMPTY')
-
-    runContext.releaseFixture = await createReleaseFixture(mpState.mp)
-    const homeArchiveTabsRun = await runAutomatorTaskWithRetry({
-      state: mpState,
-      autoPort,
-      label: 'verify release home archive tabs',
-      attempts: envPositiveInt('HH_RELEASE_UI_HOME_ATTEMPTS', 3),
-      timeoutMs: envPositiveInt('HH_RELEASE_UI_HOME_TIMEOUT_MS', 90000),
-      task: async (currentMp) => {
-        const result = await verifyHomeArchiveTabs(currentMp, runContext, evidenceDir)
-        if (!result.passed) throw makeEvidenceRetryError('release home archive tabs evidence', result)
-        return result
+      archiveTabs: async () => {
+        try {
+          const run = await runAutomatorTaskWithRetry({
+            state: mpState,
+            autoPort,
+            label: 'verify release home archive tabs',
+            attempts: envPositiveInt('HH_RELEASE_UI_HOME_ATTEMPTS', 3),
+            timeoutMs: envPositiveInt('HH_RELEASE_UI_HOME_TIMEOUT_MS', 90000),
+            task: async (currentMp) => {
+              const result = await verifyHomeArchiveTabs(currentMp, runContext, evidenceDir)
+              if (!result.passed) throw makeEvidenceRetryError('release home archive tabs evidence', result)
+              return result
+            },
+            recover: async ({ state, attempt }) => {
+              await disconnectMiniProgramQuietly(state.mp, `disconnect failed archive tabs attempt ${attempt}`)
+              await startAutomator({ cliPath, projectPath, idePort, autoPort })
+              state.mp = await connectMiniProgram(autoPort)
+            },
+          })
+          mp = mpState.mp
+          evidence.homeArchiveTabs = run.result
+          evidence.markers.push('HH_RELEASE_HOME_ARCHIVE_TABS_STICKY')
+          console.log('HH_RELEASE_HOME_ARCHIVE_TABS_STICKY')
+        } catch (error) {
+          if (error?.releaseUiResult) evidence.homeArchiveTabs = error.releaseUiResult
+          throw error
+        }
       },
-      recover: async ({ state, attempt }) => {
-        await disconnectMiniProgramQuietly(state.mp, `disconnect failed archive tabs attempt ${attempt}`)
-        await startAutomator({ cliPath, projectPath, idePort, autoPort })
-        state.mp = await connectMiniProgram(autoPort)
+      homeDetail: async () => {
+        const run = await runAutomatorTaskWithRetry({
+          state: mpState,
+          autoPort,
+          label: 'verify release home/detail UI',
+          attempts: envPositiveInt('HH_RELEASE_UI_HOME_ATTEMPTS', 3),
+          timeoutMs: envPositiveInt('HH_RELEASE_UI_HOME_TIMEOUT_MS', 90000),
+          task: (currentMp) => verifyHomeDetail(currentMp, runContext),
+        })
+        mp = mpState.mp
+        evidence.homeDetailAttempt = run.attempt
+        evidence.homeDetail = run.result
+        evidence.homeImages = run.result.homeImages
+        if (run.result.homeImagesRendered) {
+          evidence.markers.push('HH_RELEASE_HOME_IMAGES_RENDERED')
+          console.log('HH_RELEASE_HOME_IMAGES_RENDERED')
+        }
+        if (run.result.passed) {
+          evidence.markers.push('HH_RELEASE_HOME_DETAIL_NONEMPTY')
+          console.log('HH_RELEASE_HOME_DETAIL_NONEMPTY')
+        }
+        if (!run.result.homeImagesRendered || !run.result.passed) {
+          throw makeEvidenceRetryError('release home/detail evidence', run.result)
+        }
       },
-    })
-    mp = mpState.mp
-    const homeArchiveTabs = homeArchiveTabsRun.result
-    evidence.homeArchiveTabs = homeArchiveTabs
-    if (!homeArchiveTabs.passed) {
-      throw makeEvidenceRetryError('release home archive tabs evidence', homeArchiveTabs)
-    }
-    evidence.markers.push('HH_RELEASE_HOME_ARCHIVE_TABS_STICKY')
-    console.log('HH_RELEASE_HOME_ARCHIVE_TABS_STICKY')
-
-    const homeDetailRun = await runAutomatorTaskWithRetry({
-      state: mpState,
-      autoPort,
-      label: 'verify release home/detail UI',
-      attempts: envPositiveInt('HH_RELEASE_UI_HOME_ATTEMPTS', 3),
-      timeoutMs: envPositiveInt('HH_RELEASE_UI_HOME_TIMEOUT_MS', 90000),
-      task: (currentMp) => verifyHomeDetail(currentMp, runContext),
-    })
-    mp = mpState.mp
-    evidence.homeDetailAttempt = homeDetailRun.attempt
-    const homeDetail = homeDetailRun.result
-    evidence.homeDetail = homeDetail
-    evidence.homeImages = homeDetail.homeImages
-    if (homeDetail.homeImagesRendered) {
-      evidence.markers.push('HH_RELEASE_HOME_IMAGES_RENDERED')
-      console.log('HH_RELEASE_HOME_IMAGES_RENDERED')
-    }
-    if (homeDetail.passed) {
-      evidence.markers.push('HH_RELEASE_HOME_DETAIL_NONEMPTY')
-      console.log('HH_RELEASE_HOME_DETAIL_NONEMPTY')
-    }
-
-    let profileLoginRun
-    try {
-      profileLoginRun = await runAutomatorTaskWithRetry({
-        state: mpState,
-        autoPort,
-        label: 'verify release profile/login UI',
-        attempts: envPositiveInt('HH_RELEASE_UI_PROFILE_ATTEMPTS', 3),
-        timeoutMs: envPositiveInt('HH_RELEASE_UI_PROFILE_TIMEOUT_MS', 70000),
-        task: async (currentMp) => {
-          const result = await verifyProfileLoginClean(currentMp)
-          if (!result.cleanPassed || !result.buildIdentityPassed) {
-            throw makeEvidenceRetryError('release profile/login evidence', result)
+      profile: async () => {
+        try {
+          const run = await runAutomatorTaskWithRetry({
+            state: mpState,
+            autoPort,
+            label: 'verify release profile/login UI',
+            attempts: envPositiveInt('HH_RELEASE_UI_PROFILE_ATTEMPTS', 3),
+            timeoutMs: envPositiveInt('HH_RELEASE_UI_PROFILE_TIMEOUT_MS', 70000),
+            task: async (currentMp) => {
+              const result = await verifyProfileLoginClean(currentMp)
+              if (!result.cleanPassed || !result.buildIdentityPassed) {
+                throw makeEvidenceRetryError('release profile/login evidence', result)
+              }
+              return result
+            },
+            recover: async ({ state, attempt, error }) => {
+              await disconnectMiniProgramQuietly(state.mp, `disconnect stale automator after profile/login attempt ${attempt}`)
+              if (error?.releaseUiResult?.buildIdentityPassed === false) {
+                console.warn('[release-ui] profile version mismatch; cold-restarting DevTools before retry')
+                await startAutomator({ cliPath, projectPath, idePort, autoPort })
+                state.mp = await connectMiniProgram(autoPort)
+                return
+              }
+              await sleep(2500)
+              state.mp = await connectMiniProgram(autoPort)
+            },
+          })
+          mp = mpState.mp
+          evidence.profileLoginAttempt = run.attempt
+          evidence.profileLoginClean = run.result
+          if (run.result.buildIdentityPassed) {
+            evidence.markers.push('HH_RELEASE_LOGIN_VERSION')
+            console.log('HH_RELEASE_LOGIN_VERSION')
           }
-          return result
-        },
-        recover: async ({ state, attempt, error }) => {
-          await disconnectMiniProgramQuietly(state.mp, `disconnect stale automator after profile/login attempt ${attempt}`)
-          const shouldColdRestart = error?.releaseUiResult?.buildIdentityPassed === false
-          if (shouldColdRestart) {
-            console.warn('[release-ui] profile version mismatch; cold-restarting DevTools before retry')
-            await startAutomator({ cliPath, projectPath, idePort, autoPort })
-            state.mp = await connectMiniProgram(autoPort)
-            return
+          if (run.result.cleanPassed) {
+            evidence.markers.push('HH_RELEASE_PROFILE_LOGIN_CLEAN')
+            console.log('HH_RELEASE_PROFILE_LOGIN_CLEAN')
           }
-          await sleep(2500)
-          state.mp = await connectMiniProgram(autoPort)
-        },
-      })
-    } catch (error) {
-      if (error?.releaseUiResult) evidence.profileLoginClean = error.releaseUiResult
-      throw error
-    }
-    mp = mpState.mp
-    evidence.profileLoginAttempt = profileLoginRun.attempt
-    const profileLoginClean = profileLoginRun.result
-    evidence.profileLoginClean = profileLoginClean
-    if (profileLoginClean.buildIdentityPassed) {
-      evidence.markers.push('HH_RELEASE_LOGIN_VERSION')
-      console.log('HH_RELEASE_LOGIN_VERSION')
-    }
-    if (profileLoginClean.cleanPassed) {
-      evidence.markers.push('HH_RELEASE_PROFILE_LOGIN_CLEAN')
-      console.log('HH_RELEASE_PROFILE_LOGIN_CLEAN')
+        } catch (error) {
+          if (error?.releaseUiResult) evidence.profileLoginClean = error.releaseUiResult
+          throw error
+        }
+      },
+      cleanup: async () => {
+        if (!runContext.releaseFixture) return
+        const fixture = runContext.releaseFixture
+        try {
+          evidence.releaseFixtureCleanup = await withTimeout(
+            cleanupReleaseFixture(mpState.mp, fixture),
+            60000,
+            'cleanup release UI fixture',
+          )
+          if (!evidence.releaseFixtureCleanup.ok) {
+            throw new Error(`Release fixture cleanup failed: ${JSON.stringify(evidence.releaseFixtureCleanup)}`)
+          }
+        } finally {
+          runContext.releaseFixture = null
+        }
+      },
+    })
+    evidence.uiChecks = uiChecks.stages
+    if (!uiChecks.ok) {
+      throw new AggregateError(
+        uiChecks.failures.map((failure) => new Error(`${failure.stage}: ${failure.error}`)),
+        `Release UI checks failed: ${uiChecks.failures.map((failure) => failure.stage).join(', ')}`,
+      )
     }
 
     assertReleaseUiEvidence({
-      homeColdStartNonEmpty: coldStartHome.result.passed,
-      homeImagesRendered: homeDetail.homeImagesRendered,
-      homeArchiveTabsSticky: homeArchiveTabs.passed,
-      homeDetailNonEmpty: homeDetail.passed,
-      loginBuildIdentityVerified: profileLoginClean.buildIdentityPassed,
-      profileLoginClean: profileLoginClean.cleanPassed,
+      homeColdStartNonEmpty: evidence.homeColdStart?.passed,
+      homeImagesRendered: evidence.homeDetail?.homeImagesRendered,
+      homeArchiveTabsSticky: evidence.homeArchiveTabs?.passed,
+      homeDetailNonEmpty: evidence.homeDetail?.passed,
+      loginBuildIdentityVerified: evidence.profileLoginClean?.buildIdentityPassed,
+      profileLoginClean: evidence.profileLoginClean?.cleanPassed,
     })
-
-    if (runContext.releaseFixture) {
-      evidence.releaseFixtureCleanup = await withTimeout(
-        cleanupReleaseFixture(mp, runContext.releaseFixture),
-        60000,
-        'cleanup release UI fixture',
-      )
-      runContext.releaseFixture = null
-      if (!evidence.releaseFixtureCleanup.ok) {
-        throw new Error(`Release fixture cleanup failed: ${JSON.stringify(evidence.releaseFixtureCleanup)}`)
-      }
-    }
 
     const jsonPath = await writeEvidence({ mp: mpState.mp, evidenceDir, evidence })
     console.log(`[OK] DevTools release UI evidence passed: ${jsonPath}`)
   } catch (error) {
     mp = mpState.mp || mp
     evidence.error = String(error?.message || error)
+    let finalError = error
     if (runContext.releaseFixture) {
       try {
         evidence.releaseFixtureCleanup = await withTimeout(
@@ -1526,21 +1545,36 @@ async function main() {
           'cleanup failed release UI fixture',
         )
         runContext.releaseFixture = null
+        if (!evidence.releaseFixtureCleanup.ok) {
+          finalError = new AggregateError(
+            [error, new Error(`Release fixture cleanup failed: ${JSON.stringify(evidence.releaseFixtureCleanup)}`)],
+            'release UI gate and fixture cleanup both failed',
+          )
+        }
       } catch (cleanupError) {
         evidence.releaseFixtureCleanup = {
           ok: false,
           error: stringifyError(cleanupError),
         }
+        runContext.releaseFixture = null
+        finalError = new AggregateError([error, cleanupError], 'release UI gate and fixture cleanup both failed')
       }
     }
     const jsonPath = resolve(evidenceDir, 'release-ui-evidence.failed.json')
     writeFileSync(jsonPath, JSON.stringify(evidence, null, 2), 'utf8')
     console.error(`[release-ui] failed evidence saved: ${jsonPath}`)
-    throw error
+    throw finalError
   } finally {
+    let finalCleanupError = null
     if (runContext.releaseFixture) {
-      try { await withTimeout(cleanupReleaseFixture(mp, runContext.releaseFixture), 60000, 'cleanup leftover release UI fixture') } catch {}
-      runContext.releaseFixture = null
+      try {
+        const finalCleanup = await withTimeout(cleanupReleaseFixture(mp, runContext.releaseFixture), 60000, 'cleanup leftover release UI fixture')
+        if (!finalCleanup.ok) finalCleanupError = new Error(`Release fixture final cleanup failed: ${JSON.stringify(finalCleanup)}`)
+      } catch (cleanupError) {
+        finalCleanupError = cleanupError
+      } finally {
+        runContext.releaseFixture = null
+      }
     }
     try { await withTimeout(restoreStorage(mp, originalStorage), 15000, 'restore release UI storage') } catch {}
     try { await withTimeout(mpState.mp.disconnect(), 15000, 'disconnect release UI automator') } catch {}
@@ -1552,6 +1586,7 @@ async function main() {
         rmSync(evidenceDir, { recursive: true, force: true })
       }
     } catch {}
+    if (finalCleanupError) throw finalCleanupError
   }
 }
 
