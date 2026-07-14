@@ -1,5 +1,8 @@
 # HappyHome UI Release Qualification Design
 
+> **Historical / point-in-time:** This design records the approved 2026-07-14 UI qualification approach. Retain it for traceability; do not treat it as current operational evidence.
+> **Current authority:** Use the [formal release gate](../../release-gate.md), current release code, and tests.
+
 ## Goal
 
 在正式 `prepare` 之前，用一个明确命令完成一次完整的小程序发布候选 UI 验收；验收证据与不可变构建身份严格绑定，正式 `prepare` 可显式复用，避免每次失败都重新构建、清理 DevTools 缓存并逐个发现下一个问题。

@@ -1,5 +1,10 @@
 # UI Release Qualification Implementation Plan
 
+> **Historical / point-in-time:** This delivery plan records the approved 2026-07-14 implementation sequence. Retain it for traceability; do not treat its task state as current repository status.
+> **Current authority:** Use the [formal release gate](../../release-gate.md), current release code, and tests.
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add one reusable, exact-identity UI qualification so formal prepare does not repeatedly rebuild and rediscover release UI failures one at a time.
