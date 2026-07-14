@@ -177,8 +177,46 @@ function validateSearchableInputs(post: Post, section: Section | null | undefine
   })
 }
 
+export function resolvePostRagProjectionInputs(post: Post, section: Section | null | undefined): { post: Post; section: Section | null } {
+  if (section || post.area !== 'archive' || String(post.sectionId || '').trim()) return { post, section: section || null }
+  const topicText = Array.isArray(post.topics) ? post.topics.map(String).filter(Boolean).join(' ') : ''
+  return {
+    post: {
+      ...post,
+      sectionId: '',
+      content: { ...post.content, __archive_topics: topicText },
+    },
+    section: {
+      _id: '',
+      communityId: post.communityId,
+      name: '沉淀区',
+      icon: '',
+      order: 0,
+      enableComment: true,
+      enableLike: true,
+      createdAt: String(post.createdAt || ''),
+      type: 'evergreen',
+      status: 'active',
+      widgets: [
+        { widgetId: 'title', fieldKey: 'title', type: 'short_text', label: '标题', required: false, order: 0, showInList: true, visibility: 'public' },
+        { widgetId: 'body', fieldKey: 'body', type: 'rich_note', label: '正文', required: false, order: 1, showInList: true, visibility: 'public' },
+        { widgetId: '__archive_topics', fieldKey: '__archive_topics', type: 'topic', label: '话题', required: false, order: 2, showInList: true, visibility: 'public' },
+      ],
+    },
+  }
+}
+
 export function isPostEligibleForTrustedRag(post: Post | null | undefined, section: Section | null | undefined): boolean {
-  if (!post || !section) return false
+  if (!post) return false
+  if (post.area === 'archive' && !String(post.sectionId || '').trim()) {
+    return Boolean(
+      String(post._id || '').trim() &&
+      String(post.communityId || '').trim() &&
+      post.status === 'active' &&
+      (!post.auditStatus || post.auditStatus === 'pass')
+    )
+  }
+  if (!section) return false
   return Boolean(
     String(post._id || '').trim() &&
     String(post.communityId || '').trim() &&
@@ -224,10 +262,12 @@ export function buildPostRagSourceProjection(
     }
   }
 
-  const activeSection = section as Section
-  validateSearchableInputs(post, activeSection)
-  const sourceUpdatedAt = normalizedSourceUpdatedAt(post)
-  const document = buildPostSearchDocument(post, activeSection, sourceUpdatedAt)
+  const resolved = resolvePostRagProjectionInputs(post, section)
+  const activeSection = resolved.section as Section
+  const searchablePost = resolved.post
+  validateSearchableInputs(searchablePost, activeSection)
+  const sourceUpdatedAt = normalizedSourceUpdatedAt(searchablePost)
+  const document = buildPostSearchDocument(searchablePost, activeSection, sourceUpdatedAt)
   const searchChunks = buildPostSearchChunks(document)
   const sourceFacts = {
     postId: document.postId,
@@ -235,6 +275,8 @@ export function buildPostRagSourceProjection(
     sectionId: document.sectionId,
     sectionName: document.sectionName,
     sectionStatus: activeSection.status,
+    area: post.area || null,
+    topics: post.topics || [],
     title: document.title,
     sourceUpdatedAt,
     retrievalIndexVersion,

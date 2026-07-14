@@ -936,16 +936,14 @@ export async function handleDelete(params: { postId: string }, openid: string) {
 
   if (post.status === 'deleted') {
     if (post.area === 'archive') await updateArchivePostTopicLinks(params.postId, { status: 'deleted' })
-    if (post.area !== 'archive') {
-      await db.runTransaction(async transaction => {
-        await enqueuePostRagDeleteJobInTransaction(transaction, {
-          postId: params.postId,
-          communityId: post.communityId,
-          sectionId: post.sectionId,
-          reason: 'post.delete.compensate',
-        })
+    await db.runTransaction(async transaction => {
+      await enqueuePostRagDeleteJobInTransaction(transaction, {
+        postId: params.postId,
+        communityId: post.communityId,
+        sectionId: post.sectionId,
+        reason: 'post.delete.compensate',
       })
-    }
+    })
     await removePostSearchIndex(params.postId)
     return { success: true, alreadyDeleted: true }
   }
@@ -955,15 +953,13 @@ export async function handleDelete(params: { postId: string }, openid: string) {
       status: 'deleted', isPinned: false, pinnedAt: '', pinnedByAccountId: '',
       isFeatured: false, featuredAt: '', featuredByAccountId: '',
     } })
-    if (post.area !== 'archive') {
-      await appendPostRagOutboxEvent(transaction, { communityId: String(post.communityId || ''), aggregateId: params.postId, reasonCode: 'post.deleted', now: new Date().toISOString() })
-      await enqueuePostRagDeleteJobInTransaction(transaction, {
-        postId: params.postId,
-        communityId: post.communityId,
-        sectionId: post.sectionId,
-        reason: 'post.delete',
-      })
-    }
+    await appendPostRagOutboxEvent(transaction, { communityId: String(post.communityId || ''), aggregateId: params.postId, reasonCode: 'post.deleted', now: new Date().toISOString() })
+    await enqueuePostRagDeleteJobInTransaction(transaction, {
+      postId: params.postId,
+      communityId: post.communityId,
+      sectionId: post.sectionId,
+      reason: 'post.delete',
+    })
   })
   await removePostSearchIndex(params.postId)
   if (post.area === 'archive') await updateArchivePostTopicLinks(params.postId, { status: 'deleted' })

@@ -11,6 +11,7 @@ import {
   type PostSearchResult,
   type PostSearchResultItem,
 } from './post-search'
+import { resolvePostRagProjectionInputs } from './post-rag-indexing'
 
 export const POST_RAG_JOBS = 'post_rag_jobs'
 export const POST_RAG_INDEX_STATE = 'post_rag_index_state'
@@ -2733,15 +2734,21 @@ export async function processPostRagJobBatch(options: {
           okCount += 1
           continue
         }
-        const section = await db.getById('sections', post.sectionId) as Section
+        const storedSection = String(post.sectionId || '').trim()
+          ? await db.getById('sections', post.sectionId) as Section
+          : null
+        const resolved = resolvePostRagProjectionInputs(post, storedSection)
+        if (!resolved.section) throw new Error('post_rag_section_not_found')
+        const searchablePost = resolved.post
+        const section = resolved.section
         const {
           chunks,
           videoAssetsByCacheKey,
           videoMetadataChunkCount,
           videoAnalysisChunkCount,
-        } = await buildRagChunkDocumentsForPost(post, section, now)
+        } = await buildRagChunkDocumentsForPost(searchablePost, section, now)
         const videoPolicy = options.videoPolicy || readVideoRagCostPolicyFromEnv()
-        const videoAnalysisJobs = planVideoRagAnalysisJobsForPost(post, section, {
+        const videoAnalysisJobs = planVideoRagAnalysisJobsForPost(searchablePost, section, {
           now,
           assetsByCacheKey: videoAssetsByCacheKey,
           policy: videoPolicy,

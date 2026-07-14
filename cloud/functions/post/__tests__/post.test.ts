@@ -2066,7 +2066,7 @@ test('create: ignores presentation for non-text templates', async () => {
   expect(db.create).toHaveBeenCalledWith('posts', expect.not.objectContaining({ presentation: expect.anything() }))
 })
 
-test.each(['active', 'deleted'])('delete: archive post with status %s never enters the RAG delete pipeline', async status => {
+test.each(['active', 'deleted'])('delete: searchable archive post with status %s stays in the RAG delete lifecycle', async status => {
   ;(db.getById as jest.Mock).mockResolvedValueOnce({
     _id: 'archive-post',
     authorId: 'test-openid',
@@ -2078,8 +2078,11 @@ test.each(['active', 'deleted'])('delete: archive post with status %s never ente
   const result = await handleDelete({ postId: 'archive-post' }, 'test-openid')
 
   const { appendPostRagOutboxEvent } = require('../../../lib/post-rag-outbox')
-  expect(appendPostRagOutboxEvent).not.toHaveBeenCalled()
-  expect(postRag.enqueuePostRagDeleteJobInTransaction).not.toHaveBeenCalled()
+  expect(postRag.enqueuePostRagDeleteJobInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+    postId: 'archive-post', communityId: 'community-1', sectionId: undefined,
+  }))
+  if (status === 'active') expect(appendPostRagOutboxEvent).toHaveBeenCalled()
+  else expect(appendPostRagOutboxEvent).not.toHaveBeenCalled()
   expect(postSearch.removePostSearchIndex).toHaveBeenCalledWith('archive-post')
   if (status === 'active') {
     expect(db.updateById).toHaveBeenCalledWith('posts', 'archive-post', expect.objectContaining({ status: 'deleted' }))
@@ -2122,8 +2125,11 @@ test('create: persists an image-text archive post without loading or storing a s
   expect((db.create as jest.Mock).mock.calls[0][1]).not.toHaveProperty('sectionId')
 
   const { appendPostRagOutboxEvent } = require('../../../lib/post-rag-outbox')
-  expect(appendPostRagOutboxEvent).not.toHaveBeenCalled()
-  expect(postRag.enqueuePostRagJob).not.toHaveBeenCalled()
+  expect(appendPostRagOutboxEvent).toHaveBeenCalled()
+  expect(postRag.enqueuePostRagJob).toHaveBeenCalledWith(expect.objectContaining({
+    postId: 'archive-image-1', communityId: 'community-1', sectionId: '',
+    action: result.auditStatus === 'pass' ? 'upsert' : 'delete',
+  }))
   expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('archive-image-1')
   expect(db.setById).toHaveBeenCalledWith('archive_post_topics', expect.stringMatching(/^apt_/), expect.objectContaining({
     communityId: 'community-1', postId: 'archive-image-1', topicKey: '亲子出游', auditStatus: result.auditStatus,

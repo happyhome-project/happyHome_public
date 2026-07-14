@@ -491,14 +491,12 @@ export async function applyAuditSummary(
   trustedPost?: Post,
 ) {
   const now = nowIso()
-  const skipsRag = (post?: Post | null) => post?.area === 'archive'
   const queueRagIndexJob = async (jobReason: string, action: 'upsert' | 'delete', postSnapshot?: Post) => {
     const post = postSnapshot || await db.getById('posts', postId) as Post
-    if (skipsRag(post)) return
     await enqueuePostRagJob({
       postId,
       communityId: post?.communityId,
-      sectionId: post?.sectionId,
+      sectionId: post?.sectionId || '',
       action,
       reason: jobReason,
     })
@@ -510,9 +508,7 @@ export async function applyAuditSummary(
       if (!post) throw new Error('post not found')
       resolvedPost = post
       await transaction.collection('posts').doc(postId).update({ data })
-      if (!skipsRag(post)) {
-        await appendPostRagOutboxEvent(transaction, { communityId: post.communityId, aggregateId: postId, reasonCode: 'post.audit_changed', now })
-      }
+      await appendPostRagOutboxEvent(transaction, { communityId: post.communityId, aggregateId: postId, reasonCode: 'post.audit_changed', now })
     })
     if (resolvedPost?.area === 'archive' && Object.prototype.hasOwnProperty.call(data, 'auditStatus')) {
       await updateArchivePostTopicLinks(postId, { auditStatus: data.auditStatus })

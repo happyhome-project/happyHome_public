@@ -90,7 +90,7 @@ test('isPostVisibleToMembers only exposes active posts that passed audit', () =>
   expect(isPostVisibleToMembers({ status: 'deleted', auditStatus: 'pass' })).toBe(false)
 })
 
-test('auditAndApply can keep archive posts searchable without enqueueing RAG work', async () => {
+test('auditAndApply enqueues section-free archive posts for formal RAG search', async () => {
   const post = {
     _id: 'archive-1', communityId: 'community-1', area: 'archive', format: 'text',
     content: { title: '标题' }, status: 'active', auditStatus: 'pending',
@@ -105,13 +105,15 @@ test('auditAndApply can keep archive posts searchable without enqueueing RAG wor
   } as any)
 
   expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('archive-1')
-  expect(postRag.enqueuePostRagJob).not.toHaveBeenCalled()
+  expect(postRag.enqueuePostRagJob).toHaveBeenCalledWith(expect.objectContaining({
+    postId: 'archive-1', communityId: 'community-1', sectionId: '', action: 'upsert',
+  }))
   const { appendPostRagOutboxEvent } = require('../post-rag-outbox')
-  expect(appendPostRagOutboxEvent).not.toHaveBeenCalled()
+  expect(appendPostRagOutboxEvent).toHaveBeenCalled()
   expect(db.updateWhere).toHaveBeenCalledWith('archive_post_topics', { postId: 'archive-1' }, expect.objectContaining({ auditStatus: 'pass' }))
 })
 
-test('applyAuditSummary automatically keeps later archive audit callbacks out of RAG', async () => {
+test('applyAuditSummary keeps later archive audit callbacks in RAG lifecycle', async () => {
   const post = {
     _id: 'archive-callback-1', communityId: 'community-1', area: 'archive', format: 'image_text',
     content: { title: '标题', images: ['cloud://env/one.jpg'] }, status: 'active', auditStatus: 'pending',
@@ -121,9 +123,11 @@ test('applyAuditSummary automatically keeps later archive audit callbacks out of
   await applyAuditSummary('archive-callback-1', 'content', 'pass', '', post as any)
 
   expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('archive-callback-1')
-  expect(postRag.enqueuePostRagJob).not.toHaveBeenCalled()
+  expect(postRag.enqueuePostRagJob).toHaveBeenCalledWith(expect.objectContaining({
+    postId: 'archive-callback-1', sectionId: '', action: 'upsert',
+  }))
   const { appendPostRagOutboxEvent } = require('../post-rag-outbox')
-  expect(appendPostRagOutboxEvent).not.toHaveBeenCalled()
+  expect(appendPostRagOutboxEvent).toHaveBeenCalled()
   expect(db.updateWhere).toHaveBeenCalledWith('archive_post_topics', { postId: 'archive-callback-1' }, expect.objectContaining({ auditStatus: 'pass' }))
 })
 

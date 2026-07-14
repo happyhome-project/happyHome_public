@@ -70,6 +70,28 @@ describe('trusted RAG source projection', () => {
     expect(isPostEligibleForTrustedRag(post(), null as any)).toBe(false)
   })
 
+  test('projects a section-free archive post with topics through a virtual archive schema', () => {
+    const archivePost = post({
+      sectionId: '',
+      area: 'archive',
+      origin: 'native_archive',
+      format: 'text',
+      topics: ['亲子出游', '成长'],
+      content: {
+        title: '周末记录',
+        body: { format: 'markdown', markdown: '一起去湖边', html: '<p>一起去湖边</p>', text: '一起去湖边', imageFileIDs: [], schemaVersion: 1 },
+      },
+    })
+
+    const projection = buildPostRagSourceProjection(archivePost, null)
+
+    expect(projection.eligible).toBe(true)
+    expect(projection.chunks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ postId: 'post-1', communityId: 'community-1', sectionId: '', sectionName: '沉淀区', text: expect.stringContaining('亲子出游') }),
+      expect.objectContaining({ text: '一起去湖边' }),
+    ]))
+  })
+
   test('produces deterministic versioned chunks with exact metadata checksums', () => {
     const projection = buildPostRagSourceProjection(post(), section())
     const repeated = buildPostRagSourceProjection(post(), section())
