@@ -1102,7 +1102,7 @@ async function captureHomeTabsLayout(mp) {
       const query = wx.createSelectorQuery()
       query.selectAll('.section-tabs-sticky-shell').boundingClientRect()
       query.select('.home-topbar').boundingClientRect()
-      query.select('.home-search--primary').boundingClientRect()
+      query.select('.home-search-sticky-shell').boundingClientRect()
       query.selectAll('.arc-item').boundingClientRect()
       query.selectAll('.section-tab.active').boundingClientRect()
       query.selectViewport().scrollOffset()
@@ -1151,9 +1151,12 @@ async function verifyHomeArchiveTabs(mp, context, evidenceDir) {
   await sleep(7000)
   await scrollHomeTo(mp, 0)
   const before = await captureHomeTabsLayout(mp)
-  const targetScrollTop = before.scrollTop + Number(before.tabs?.[0]?.top || 0) + 40
-  await scrollHomeTo(mp, targetScrollTop)
-  const pinned = await captureHomeTabsLayout(mp)
+  const searchScrollTop = before.scrollTop + Math.max(0, Number(before.search?.top || 0) - Number(before.topbar?.bottom || 0)) + 40
+  await scrollHomeTo(mp, searchScrollTop)
+  const searchPinned = await captureHomeTabsLayout(mp)
+  const tagsScrollTop = searchPinned.scrollTop + Math.max(0, Number(searchPinned.tabs?.[0]?.top || 0) - Number(searchPinned.search?.bottom || 0)) + 40
+  await scrollHomeTo(mp, tagsScrollTop)
+  const tagsPinned = await captureHomeTabsLayout(mp)
   const tabs = await withTimeout(home.$$('.section-tab'), 10000, 'find release archive tabs')
   if (tabs.length === 2) {
     await withTimeout(tabs[1].tap(), 15000, 'switch to short release archive')
@@ -1165,25 +1168,28 @@ async function verifyHomeArchiveTabs(mp, context, evidenceDir) {
     resolve(evidenceDir, 'home-archive-tabs-sticky.png'),
   )
 
-  const pinnedTop = Number(pinned.tabs?.[0]?.top || 0)
+  const pinnedTop = Number(tagsPinned.tabs?.[0]?.top || 0)
   const passed = before.tabs?.length === 1 &&
-    pinned.tabs?.length === 1 &&
+    searchPinned.tabs?.length === 1 &&
+    tagsPinned.tabs?.length === 1 &&
     tabs.length === 2 &&
     Number(before.topbar?.height || 0) > 1 &&
     Number(before.search?.height || 0) > 1 &&
     Number(before.tabs?.[0]?.top || 0) > Number(before.topbar?.bottom || 0) + 16 &&
     Number(before.tabs?.[0]?.top || 0) >= Number(before.search?.bottom || 0) &&
-    pinned.scrollTop > 0 &&
-    Number(pinned.search?.bottom || 0) <= pinned.safeTop + 2 &&
-    Math.abs(Number(before.topbar?.top || 0) - Number(pinned.topbar?.top || 0)) <= 2 &&
-    Math.abs(pinnedTop - Number(pinned.topbar?.bottom || 0)) <= 8 &&
-    pinned.cardCount === 3 &&
+    searchPinned.scrollTop > 0 &&
+    tagsPinned.scrollTop > searchPinned.scrollTop &&
+    Math.abs(Number(searchPinned.search?.top || 0) - Number(searchPinned.topbar?.bottom || 0)) <= 8 &&
+    Math.abs(Number(tagsPinned.search?.top || 0) - Number(tagsPinned.topbar?.bottom || 0)) <= 8 &&
+    Math.abs(pinnedTop - Number(tagsPinned.search?.bottom || 0)) <= 8 &&
+    Math.abs(Number(before.topbar?.top || 0) - Number(tagsPinned.topbar?.top || 0)) <= 2 &&
+    tagsPinned.cardCount === 3 &&
     shortArchive.cardCount === 1 &&
     shortArchive.activeTabCount === 1 &&
-    Math.abs(shortArchive.scrollTop - pinned.scrollTop) <= 8 &&
+    Math.abs(shortArchive.scrollTop - tagsPinned.scrollTop) <= 8 &&
     Math.abs(Number(shortArchive.tabs?.[0]?.top || 0) - pinnedTop) <= 4
 
-  return { passed, before, pinned, shortArchive, tabCount: tabs.length, screenshotEvidence }
+  return { passed, before, searchPinned, tagsPinned, shortArchive, tabCount: tabs.length, screenshotEvidence }
 }
 
 async function verifyHomeDetail(mp, context = {}) {

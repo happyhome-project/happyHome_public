@@ -40,6 +40,9 @@
         </view>
       </view>
 
+    </view>
+
+    <view class="home-search-sticky-shell">
       <view class="home-search home-search--primary">
         <view class="home-search-box">
           <view class="home-search-icon" aria-hidden="true">
@@ -59,19 +62,18 @@
           </view>
         </view>
       </view>
+    </view>
 
-      <view v-if="showHomePullRefreshHint" class="home-refresh-hint">
-        <view class="home-refresh-spinner" aria-hidden="true"></view>
-        <text>用力加载中...</text>
+    <view v-if="showHomePullRefreshHint" class="home-refresh-hint">
+      <view class="home-refresh-spinner" aria-hidden="true"></view>
+      <text>用力加载中...</text>
+    </view>
+
+    <view v-if="homeRefreshSlow || homeRefreshError" class="home-refresh-status">
+      <text>{{ homeRefreshError || '加载较慢，社区框架已保留' }}</text>
+      <view v-if="homeRefreshError" class="home-refresh-retry" @tap="retryHomeRefresh">
+        <text>重试</text>
       </view>
-
-      <view v-if="homeRefreshSlow || homeRefreshError" class="home-refresh-status">
-        <text>{{ homeRefreshError || '加载较慢，社区框架已保留' }}</text>
-        <view v-if="homeRefreshError" class="home-refresh-retry" @tap="retryHomeRefresh">
-          <text>重试</text>
-        </view>
-      </view>
-
     </view>
 
     <!-- Live strip · 实时脉冲区：有激活的实时协作板块时显示 -->
@@ -2585,7 +2587,7 @@ onShareAppMessage(() => {
 }
 
 .home-shell {
-  padding: calc(150rpx + env(safe-area-inset-top)) var(--hh-page-x) 24rpx;
+  padding: calc(150rpx + env(safe-area-inset-top)) var(--hh-page-x) 0;
   background:
     radial-gradient(circle at 84% 0%, rgba(48, 91, 70, 0.22), transparent 34%),
     linear-gradient(170deg, #caeee7 0%, #f1f3ee 58%, var(--hh-color-page) 100%);
@@ -2597,7 +2599,7 @@ onShareAppMessage(() => {
   top: 0;
   left: 0;
   right: 0;
-  z-index: $hh-z-sticky + 1;
+  z-index: $hh-z-sticky + 2;
   min-height: calc(150rpx + env(safe-area-inset-top));
   padding: calc(86rpx + env(safe-area-inset-top)) var(--hh-page-x) 0;
   display: flex;
@@ -2768,11 +2770,21 @@ onShareAppMessage(() => {
   line-height: var(--hh-text-caption-base-line);
 }
 
-.home-shell .home-search {
-  margin: 28rpx 0 24rpx;
+.home-search-sticky-shell {
+  box-sizing: border-box;
+  position: sticky;
+  top: calc(150rpx + env(safe-area-inset-top));
+  z-index: $hh-z-sticky + 1;
+  padding: 24rpx var(--hh-page-x);
+  background: rgba(250, 250, 249, 0.98);
+  box-shadow: 0 10rpx 24rpx rgba(15, 23, 42, 0.07);
 }
 
-.home-shell .home-search-box {
+.home-search-sticky-shell .home-search {
+  margin: 0;
+}
+
+.home-search-sticky-shell .home-search-box {
   min-height: 90rpx;
   padding: 0 8rpx 0 30rpx;
   border: 0;
@@ -2781,18 +2793,18 @@ onShareAppMessage(() => {
   gap: 15rpx;
 }
 
-.home-shell .home-search-input {
+.home-search-sticky-shell .home-search-input {
   height: 90rpx;
   font-size: 30rpx;
   line-height: 45rpx;
 }
 
-.home-shell .home-search-icon,
-.home-shell .home-search-placeholder {
+.home-search-sticky-shell .home-search-icon,
+.home-search-sticky-shell .home-search-placeholder {
   color: rgba(0, 0, 0, 0.45);
 }
 
-.home-shell .home-search-action {
+.home-search-sticky-shell .home-search-action {
   flex: 0 0 150rpx;
   width: 150rpx;
   min-width: 0;
@@ -2801,7 +2813,7 @@ onShareAppMessage(() => {
   background: var(--hh-color-brand-primary);
 }
 
-.home-shell .home-search-action text {
+.home-search-sticky-shell .home-search-action text {
   font-size: 30rpx;
   line-height: 45rpx;
   font-weight: $hh-font-weight-medium;
@@ -2868,7 +2880,7 @@ onShareAppMessage(() => {
 
 .section-tabs-sticky-shell {
   position: sticky;
-  top: calc(150rpx + env(safe-area-inset-top));
+  top: calc(150rpx + env(safe-area-inset-top) + 138rpx);
   z-index: $hh-z-sticky;
   margin: 34rpx 0 20rpx;
   padding: 12rpx 0;
