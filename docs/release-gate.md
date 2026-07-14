@@ -68,6 +68,16 @@ The release gate requires DevTools release UI evidence. The release operator mus
 
 The default evidence path is `npm.cmd run test:mp:release-ui`. It opens the built `mp-weixin` package through WeChat DevTools automator and must output all five labels:
 
+To build and validate the mini-program UI once before formal prepare, write an exact reusable qualification explicitly:
+
+```powershell
+npm.cmd run release:ui-qualify -- --version=<version> --desc=<description> --ui-qualification=<absolute-json-path>
+```
+
+This command only writes build-info, builds the mini-program, runs the existing release gate and writes the qualification after the full UI gate passes. It does not deploy cloud functions or admin-web, upload the mini-program, acquire the production release lock, or create a production release run. The qualification is bound to the exact Git SHA, version, description, package digest, build-info files, UI evidence and installed WeChat DevTools version.
+
+Pass that same absolute file explicitly to formal prepare with `--ui-qualification=<absolute-json-path>`. A valid qualification skips the duplicate mini-program build and DevTools UI run while the normal cloud/admin artifact pinning continues. An invalid or changed qualification hard-blocks prepare; it never falls back to rebuilding. Publish does not accept this flag and instead freshly revalidates the qualification already pinned in the prepare ledger.
+
 - `HH_RELEASE_HOME_COLD_START_NONEMPTY`: the cold-start home shell renders non-empty content.
 - `HH_RELEASE_HOME_IMAGES_RENDERED`: the home feed renders its required images.
 - `HH_RELEASE_HOME_DETAIL_NONEMPTY`: home feed tap opens a non-empty detail page.
