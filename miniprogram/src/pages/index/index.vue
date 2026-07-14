@@ -65,77 +65,6 @@
         <text>用力加载中...</text>
       </view>
 
-      <view class="home-banner">
-        <swiper
-          v-if="homeBannerItems.length > 0"
-          class="home-banner-swiper"
-          :current="homeBannerActiveIndex"
-          :circular="homeBannerItems.length > 1"
-          :duration="260"
-          @change="onHomeBannerChange"
-          @touchstart="onHomeBannerGestureStart"
-          @touchmove="onHomeBannerGestureMove"
-          @touchend="onHomeBannerGestureEnd"
-          @mousedown="onHomeBannerGestureStart"
-          @mousemove="onHomeBannerGestureMove"
-          @mouseup="onHomeBannerGestureEnd"
-        >
-          <swiper-item
-            v-for="(banner, i) in homeBannerItems"
-            :key="banner.bannerId"
-            class="home-banner-slide"
-            @tap="openHomeBanner(banner)"
-          >
-            <image
-              v-if="!isHomeBannerImageFailed(banner.imageKey)"
-              :src="banner.coverImage"
-              class="home-banner-image"
-              mode="aspectFill"
-              @load="onHomeBannerImageLoad(banner)"
-              @error="onHomeBannerImageError(banner, $event)"
-            />
-            <view v-else class="home-banner-art"></view>
-            <view class="home-banner-shade"></view>
-            <text class="home-banner-title">{{ banner.title }}</text>
-          </swiper-item>
-        </swiper>
-        <template v-else>
-          <view class="home-banner-art"></view>
-          <view class="home-banner-shade"></view>
-          <text class="home-banner-title">新人必看</text>
-        </template>
-        <view v-if="homeBannerItems.length > 1" class="home-banner-dots">
-          <text
-            v-for="(banner, i) in homeBannerItems"
-            :key="`${banner.bannerId}-dot`"
-            class="home-banner-dot"
-            :class="{ active: i === homeBannerActiveIndex }"
-          ></text>
-        </view>
-      </view>
-    </view>
-
-    <!-- Admin notice · 管理员维护的固定公告 -->
-    <view v-if="noticeRows.length > 0" class="notice-board">
-      <image class="notice-kind-image" src="/static/home-notice-title.png" mode="aspectFit" />
-      <view class="notice-lines">
-        <view
-          v-for="(notice, i) in noticeRows"
-          :key="notice.id"
-          class="notice-row"
-          :class="{ 'is-long': notice.isLong }"
-          :style="getNoticeCardStyle(notice, i)"
-          @tap="openNotice(notice)"
-        >
-          <view class="notice-main">
-            <view class="notice-line">
-              <text class="notice-badge">{{ i === 0 ? '置顶' : '最新' }}</text>
-              <text class="notice-content">{{ notice.preview }}</text>
-            </view>
-          </view>
-          <text v-if="notice.when" class="notice-time">{{ notice.when }}</text>
-        </view>
-      </view>
     </view>
 
     <!-- Live strip · 实时脉冲区：有激活的实时协作板块时显示 -->
@@ -460,7 +389,7 @@ import {
   savePendingShareCommunity,
 } from '../../utils/community-share'
 import { markGuestIntroSeen, shouldShowGuestIntro } from '../../utils/guest-intro'
-import type { HomeBanner, HomeSnapshot } from '../../../../cloud/shared/types'
+import type { HomeSnapshot } from '../../../../cloud/shared/types'
 import { normalizeGuestIntroConfig, type GuestIntroConfig } from '../../../../cloud/shared/guest-intro-config'
 
 markClientDiagnosticStage('home.module.dependencies.ready')
@@ -491,7 +420,6 @@ const canSubmitGuestIntroLogin = computed(() => {
 const homeLoading = ref(true)
 const homeLoadingGate = createHomeLoadingGate(homeLoading)
 const postsBySection = ref<Record<string, any[]>>({})
-const resolvedHomeBannerCoverUrls = ref<Record<string, string>>({})
 const resolvedHomeGuideCoverUrls = ref<Record<string, string>>({})
 const homeImageProbeEntries = ref<Record<string, HomeImageProbeEntry>>({})
 const incomingShareCommunityId = ref('')
@@ -500,8 +428,6 @@ const homeSearchQuery = ref('')
 const selectedArchiveId = ref('')
 const homePageScrollTop = ref(0)
 const archivePreviewMinHeightPx = ref(0)
-const homeBannerActiveIndex = ref(0)
-const homeBannerSwipeIntent = ref(false)
 const showHomePullRefreshHint = ref(false)
 const homeMenuSafeRightInset = ref(0)
 let refreshingHome = false
@@ -510,16 +436,7 @@ let mountedAt = 0
 let unsubscribeBackgroundFetchSnapshot: (() => void) | null = null
 let archiveSwitchScrollTimers: ReturnType<typeof setTimeout>[] = []
 let archivePreviewMeasureTimers: ReturnType<typeof setTimeout>[] = []
-let suppressNextHomeBannerTap = false
-let suppressHomeBannerTapTimer: ReturnType<typeof setTimeout> | null = null
-let homeBannerPointerStartX = 0
-let homeBannerPointerStartY = 0
-let homeBannerHasPointerStart = false
-let homeBannerResolveToken = 0
 const reportedMissingHomeTitle = new Set<string>()
-const NOTICE_PREVIEW_LIMIT = 68
-const HOME_BANNER_SWIPE_THRESHOLD_PX = 8
-const HOME_BANNER_TAP_SUPPRESS_MS = 320
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 const HOME_REFRESH_MARKER_TTL = 5 * 60 * 1000
 const HOME_TAB_RETAP_EVENT = 'happyhome:home-tab-retap'
@@ -595,34 +512,6 @@ function onMastheadTap() {
 const kind = computed(() => '社群')
 const currentShareCommunityId = computed(() => communityStore.currentCommunityId || communityStore.currentCommunity?._id || '')
 
-interface HomeBannerItem {
-  bannerId: string
-  postId: string
-  title: string
-  imageKey: string
-  coverImage: string
-}
-
-const homeBannerItems = computed<HomeBannerItem[]>(() => {
-  const banners = ((communityStore.currentCommunity as any)?.homeBanners || []) as HomeBanner[]
-  return banners
-    .filter((banner) => banner && banner.enabled !== false)
-    .slice()
-    .sort((a, b) => Number(a?.order || 0) - Number(b?.order || 0))
-    .map((banner, index) => {
-      const rawCover = String(banner.coverImage || '').trim()
-      const coverImage = resolvedHomeBannerCoverUrls.value[rawCover] || rawCover
-      return {
-        bannerId: String(banner.bannerId || `${banner.postId}-${index}`),
-        postId: String(banner.postId || '').trim(),
-        title: String(banner.title || '').trim() || '新人必看',
-        imageKey: buildHomeImageKey('banner', String(banner.bannerId || `${banner.postId}-${index}`)),
-        coverImage,
-      }
-    })
-    .filter((banner) => banner.postId && banner.coverImage)
-})
-
 // 辅助：归一化 section 的 type/status（应对老数据）
 function secType(s: any): 'realtime' | 'evergreen' {
   return s?.type === 'realtime' ? 'realtime' : 'evergreen'
@@ -633,48 +522,6 @@ function secStatus(s: any): 'active' | 'dormant' | 'archived' {
 function sectionIconGlyph(section: any, fallback = '·'): string {
   return resolveSectionIconGlyph(section?.icon, fallback)
 }
-
-interface SectionNotice {
-  id: string
-  sectionId: string
-  widgetId: string
-  sectionName: string
-  label: string
-  content: string
-  preview: string
-  isLong: boolean
-  icon: string
-  accentColor?: string
-  when: string
-}
-
-const sectionNotices = computed<SectionNotice[]>(() => {
-  const notices: SectionNotice[] = []
-  for (const section of communityStore.currentSections ?? []) {
-    if (secStatus(section) !== 'active') continue
-    for (const widget of section.widgets || []) {
-      if (widget.type !== 'admin_notice') continue
-      const content = String(widget.noticeContent || '').trim()
-      if (!content) continue
-      const preview = makeNoticePreview(content)
-      notices.push({
-        id: `${section._id}_${widget.widgetId}`,
-        sectionId: section._id,
-        widgetId: widget.widgetId,
-        sectionName: section.name,
-        label: widget.label || '公告',
-        content,
-        preview,
-        isLong: splitUnicodeCharacters(content).length > NOTICE_PREVIEW_LIMIT,
-        icon: sectionIconGlyph(section, '告'),
-        accentColor: section.accentColor || '',
-        when: formatHomeRelativeTime((section as any).updatedAt || section.createdAt),
-      })
-    }
-  }
-  return notices
-})
-const noticeRows = computed(() => sectionNotices.value.slice(0, 2))
 
 // ── 实时协作区：type='realtime' && status='active' 的板块，按帖子逐条展示 ──
 interface LiveItem {
@@ -803,16 +650,6 @@ const rawHomeGuideCoverImages = computed(() => {
   return urls
 })
 
-const rawHomeBannerCoverImages = computed(() => {
-  const banners = ((communityStore.currentCommunity as any)?.homeBanners || []) as HomeBanner[]
-  const urls: string[] = []
-  for (const banner of banners) {
-    const coverImage = String(banner?.coverImage || '').trim()
-    if (coverImage && !urls.includes(coverImage)) urls.push(coverImage)
-  }
-  return urls
-})
-
 const activeArchiveGroup = computed(() => {
   const index = activeArchiveIndex.value
   return index >= 0 ? archiveGroups.value[index] ?? null : null
@@ -841,9 +678,6 @@ const guideColumns = computed<ArchiveItem[][]>(() => {
 const currentHomeImageKeys = computed(() => {
   const keys: string[] = []
   if (homeHeroImage.value) keys.push(buildHomeImageKey('hero', homeHeroImage.value))
-  for (const item of homeBannerItems.value) {
-    if (item.imageKey) keys.push(item.imageKey)
-  }
   const group = activeArchiveGroup.value
   if (group?.displayTemplate === 'guide_note') {
     for (const item of group.items) {
@@ -855,8 +689,6 @@ const currentHomeImageKeys = computed(() => {
 
 const expectedHomeImageCount = computed(() => {
   let count = String(communityStore.currentCommunity?.coverImage || '').trim() ? 1 : 0
-  const banners = ((communityStore.currentCommunity as any)?.homeBanners || []) as HomeBanner[]
-  count += banners.filter((banner) => banner && banner.enabled !== false).length
   const group = activeArchiveGroup.value
   if (group?.displayTemplate === 'guide_note') count += group.items.length
   return count
@@ -883,10 +715,6 @@ watch(archiveGroups, (groups) => {
   }
   if (selectedArchiveId.value && groups.some((group) => group.id === selectedArchiveId.value)) return
   selectedArchiveId.value = groups.find((group) => group.displayTemplate === 'guide_note')?.id || groups[0].id
-}, { immediate: true })
-
-watch(homeBannerItems, (items) => {
-  if (homeBannerActiveIndex.value >= items.length) homeBannerActiveIndex.value = 0
 }, { immediate: true })
 
 watch(
@@ -972,11 +800,7 @@ function updateHomeImageProbe(
     updatedAt: new Date().toISOString(),
   })
   if (status === 'failed' && previous?.status !== 'failed') {
-    const eventName = kind === 'hero'
-      ? 'home.hero.image.fail'
-      : kind === 'banner'
-        ? 'home.banner.image.fail'
-        : 'home.guide.image.fail'
+    const eventName = kind === 'hero' ? 'home.hero.image.fail' : 'home.guide.image.fail'
     clientLog('warn', eventName, {
       imageKey: safeKey,
       src: String(src || '').trim(),
@@ -986,16 +810,8 @@ function updateHomeImageProbe(
   }
 }
 
-function isHomeBannerImageFailed(imageKey: string): boolean {
-  return homeImageProbeEntries.value[String(imageKey || '').trim()]?.status === 'failed'
-}
-
 function isHomeGuideImageFailed(imageKey?: string): boolean {
   return homeImageProbeEntries.value[String(imageKey || '').trim()]?.status === 'failed'
-}
-
-function onHomeBannerImageLoad(item: HomeBannerItem) {
-  updateHomeImageProbe('banner', item.imageKey, item.coverImage, item.title, 'loaded')
 }
 
 function onHomeHeroImageLoad() {
@@ -1014,17 +830,6 @@ function onHomeHeroImageError(event?: any) {
     buildHomeImageKey('hero', homeHeroImage.value),
     homeHeroImage.value,
     communityName.value,
-    'failed',
-    event?.detail?.errMsg || event,
-  )
-}
-
-function onHomeBannerImageError(item: HomeBannerItem, event?: any) {
-  updateHomeImageProbe(
-    'banner',
-    item.imageKey,
-    item.coverImage,
-    item.title,
     'failed',
     event?.detail?.errMsg || event,
   )
@@ -1099,35 +904,6 @@ function getArchiveCardStyle(group: ArchiveGroup, index: number) {
   }
 }
 
-function getNoticeCardStyle(notice: SectionNotice, index: number) {
-  const fallbackPalette = ['#B35C3B', '#4F6D8A', '#6C8A4E', '#8C6A4E', '#5E7F76']
-  return {
-    '--notice-accent': notice.accentColor || fallbackPalette[index % fallbackPalette.length],
-  }
-}
-
-function makeNoticePreview(content: string) {
-  const normalized = content.trim().replace(/\s+/g, ' ')
-  const chars = splitUnicodeCharacters(normalized)
-  if (chars.length <= NOTICE_PREVIEW_LIMIT) return normalized
-  return `${chars.slice(0, NOTICE_PREVIEW_LIMIT).join('').trimEnd()}…`
-}
-
-function formatHomeRelativeTime(value: unknown): string {
-  if (!value) return ''
-  const date = new Date(String(value))
-  if (Number.isNaN(date.getTime())) return ''
-  const diffMinutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000))
-  if (diffMinutes < 1) return '刚刚'
-  if (diffMinutes < 60) return `${diffMinutes}分钟前`
-  const diffHours = Math.floor(diffMinutes / 60)
-  if (diffHours < 24) return `${diffHours}小时前`
-  const sameYear = date.getFullYear() === new Date().getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return sameYear ? `${month}-${day}` : `${date.getFullYear()}-${month}-${day}`
-}
-
 function getAuthorInitial(author?: string): string {
   const chars = splitUnicodeCharacters(String(author || '').trim())
   return chars[0] || '邻'
@@ -1146,84 +922,6 @@ function getGuideAuthorAvatarStyle(author?: string) {
 }
 
 // ── Actions ──
-function onHomeBannerChange(event: any) {
-  const next = Number(event?.detail?.current ?? 0)
-  if (Number.isFinite(next)) homeBannerActiveIndex.value = next
-  if (event?.detail?.source === 'touch') {
-    suppressHomeBannerTapTemporarily()
-  }
-}
-
-function onHomeBannerGestureStart(event: any) {
-  const point = getHomeBannerGesturePoint(event)
-  homeBannerPointerStartX = point.x
-  homeBannerPointerStartY = point.y
-  homeBannerHasPointerStart = true
-  homeBannerSwipeIntent.value = false
-  if (suppressHomeBannerTapTimer) {
-    clearTimeout(suppressHomeBannerTapTimer)
-    suppressHomeBannerTapTimer = null
-  }
-  suppressNextHomeBannerTap = false
-}
-
-function onHomeBannerGestureMove(event: any) {
-  if (!homeBannerHasPointerStart) return
-  const point = getHomeBannerGesturePoint(event)
-  const dx = Math.abs(point.x - homeBannerPointerStartX)
-  const dy = Math.abs(point.y - homeBannerPointerStartY)
-  if (Math.max(dx, dy) >= HOME_BANNER_SWIPE_THRESHOLD_PX) {
-    homeBannerSwipeIntent.value = true
-    suppressHomeBannerTapTemporarily()
-  }
-}
-
-function onHomeBannerGestureEnd() {
-  if (homeBannerSwipeIntent.value) suppressHomeBannerTapTemporarily()
-  homeBannerHasPointerStart = false
-  homeBannerSwipeIntent.value = false
-}
-
-function getHomeBannerGesturePoint(event: any) {
-  const touch = event?.touches?.[0] || event?.changedTouches?.[0]
-  const x = Number(touch?.clientX ?? touch?.pageX ?? event?.clientX ?? event?.pageX ?? 0)
-  const y = Number(touch?.clientY ?? touch?.pageY ?? event?.clientY ?? event?.pageY ?? 0)
-  return { x, y }
-}
-
-function suppressHomeBannerTapTemporarily() {
-  suppressNextHomeBannerTap = true
-  if (suppressHomeBannerTapTimer) clearTimeout(suppressHomeBannerTapTimer)
-  suppressHomeBannerTapTimer = setTimeout(() => {
-    suppressNextHomeBannerTap = false
-    suppressHomeBannerTapTimer = null
-  }, HOME_BANNER_TAP_SUPPRESS_MS)
-}
-
-function openHomeBanner(item: HomeBannerItem) {
-  if (suppressNextHomeBannerTap) {
-    suppressNextHomeBannerTap = false
-    if (suppressHomeBannerTapTimer) {
-      clearTimeout(suppressHomeBannerTapTimer)
-      suppressHomeBannerTapTimer = null
-    }
-    return
-  }
-  if (!item.postId) return
-  const url = `/pages/detail/index?postId=${encodeURIComponent(item.postId)}`
-  clientLog('info', 'home.banner.tap', {
-    bannerId: item.bannerId,
-    postId: item.postId,
-    title: item.title,
-    url,
-  })
-  uni.navigateTo({
-    url,
-    success: () => clientLog('info', 'home.banner.navigate.success', { postId: item.postId, url }),
-    fail: (error) => clientLog('error', 'home.banner.navigate.fail', { postId: item.postId, url, error }),
-  })
-}
-
 function onLiveTap(item: LiveItem) {
   if (item.postId) {
     const url = `/pages/detail/index?postId=${item.postId}`
@@ -1398,19 +1096,6 @@ function onPostTap(item: ArchiveItem) {
       fail: (error) => clientLog('error', 'home.archive.navigate.fail', { postId: item.postId, url, error }),
     })
   }
-}
-
-function openNotice(notice: SectionNotice) {
-  const url = `/pages/notice/index?sectionId=${encodeURIComponent(notice.sectionId)}&widgetId=${encodeURIComponent(notice.widgetId)}`
-  clientLog('info', 'home.notice.tap', {
-    sectionId: notice.sectionId,
-    widgetId: notice.widgetId,
-    url,
-  })
-  uni.navigateTo({
-    url,
-    fail: (error) => clientLog('error', 'home.notice.navigate.fail', { sectionId: notice.sectionId, widgetId: notice.widgetId, error }),
-  })
 }
 
 function submitHomeSearch() {
@@ -1883,39 +1568,6 @@ onPullDownRefresh(async () => {
 })
 
 watch(
-  rawHomeBannerCoverImages,
-  async (images) => {
-    const token = ++homeBannerResolveToken
-    if (!images.length) {
-      resolvedHomeBannerCoverUrls.value = {}
-      homeBannerActiveIndex.value = 0
-      return
-    }
-    homeImageProbeEntries.value = clearFailedHomeImageProbeEntries(
-      homeImageProbeEntries.value,
-      Object.keys(homeImageProbeEntries.value).filter((key) =>
-        homeImageProbeEntries.value[key]?.kind === 'banner' &&
-        homeImageProbeEntries.value[key]?.status === 'failed'),
-    )
-    const next: Record<string, string> = {}
-    await Promise.all(images.map(async (image) => {
-      try {
-        next[image] = await resolveCloudFileUrl(image)
-      } catch (error) {
-        next[image] = image
-        clientLog('warn', 'home.bannerCover.resolve.fail', { image, error })
-      }
-    }))
-    if (token !== homeBannerResolveToken) return
-    resolvedHomeBannerCoverUrls.value = next
-    if (homeBannerActiveIndex.value >= homeBannerItems.value.length) {
-      homeBannerActiveIndex.value = 0
-    }
-  },
-  { immediate: true },
-)
-
-watch(
   () => communityStore.currentCommunity?.coverImage,
   () => {
     void prepareCommunityShareImage()
@@ -2062,71 +1714,6 @@ onShareAppMessage(() => {
   text-transform: uppercase;
 }
 
-/* ═══ Home Banner ═══ */
-.home-banner {
-  position: relative;
-  margin: 0 32rpx 28rpx;
-  height: 260rpx;
-  border-radius: 24rpx;
-  overflow: hidden;
-  background: $hh-surface-2;
-  box-shadow: $hh-shadow-card;
-}
-.home-banner-swiper,
-.home-banner-slide,
-.home-banner-image {
-  width: 100%;
-  height: 100%;
-}
-.home-banner-image {
-  display: block;
-}
-.home-banner-shade {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 58%;
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.56));
-  pointer-events: none;
-}
-.home-banner-title {
-  position: absolute;
-  left: 28rpx;
-  right: 28rpx;
-  bottom: 34rpx;
-  font-size: 31rpx;
-  font-weight: $hh-font-weight-bold;
-  line-height: 1.28;
-  color: #fff;
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  text-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.24);
-}
-.home-banner-dots {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 14rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10rpx;
-  pointer-events: none;
-}
-.home-banner-dot {
-  width: 10rpx;
-  height: 10rpx;
-  border-radius: 999rpx;
-  background: rgba(255, 255, 255, 0.55);
-}
-.home-banner-dot.active {
-  width: 24rpx;
-  background: #e84f5f;
-}
-
 /* ═══ Search ═══ */
 .home-search {
   margin: 0 32rpx 28rpx;
@@ -2198,91 +1785,6 @@ onShareAppMessage(() => {
   line-height: 45rpx;
   font-weight: $hh-font-weight-medium;
   color: $hh-surface-1;
-}
-
-/* ═══ Admin notices ═══ */
-.notice-list {
-  margin: 0 32rpx 30rpx;
-  display: flex;
-  flex-direction: column;
-  gap: 14rpx;
-}
-.notice-card {
-  padding: 22rpx 26rpx 20rpx;
-  border: 1rpx solid $hh-ink-line;
-  border-left: 8rpx solid var(--notice-accent);
-  border-radius: 24rpx;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(251, 247, 238, 0.9));
-  box-shadow: $hh-shadow-card;
-  position: relative;
-}
-.notice-card.is-long:active {
-  transform: translateY(1rpx);
-  opacity: 0.9;
-}
-.notice-head {
-  display: flex;
-  align-items: center;
-  gap: 14rpx;
-  margin-bottom: 12rpx;
-}
-.notice-mark {
-  width: 46rpx;
-  height: 46rpx;
-  border-radius: 14rpx;
-  background: var(--notice-accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.notice-mark text {
-  color: $hh-surface-1;
-  font-size: 22rpx;
-  font-weight: $hh-font-weight-heavy;
-}
-.notice-title-wrap {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.notice-section {
-  font-size: 26rpx;
-  font-weight: $hh-font-weight-bold;
-  color: $hh-ink-1;
-  line-height: 1.25;
-}
-.notice-label {
-  margin-top: 2rpx;
-  font-family: $hh-font-mono;
-  font-size: 20rpx;
-  letter-spacing: $hh-tracking-mono-sm;
-  color: $hh-ink-3;
-}
-.notice-content {
-  display: block;
-  font-size: 27rpx;
-  line-height: 1.52;
-  color: $hh-ink-2;
-  white-space: pre-wrap;
-}
-.notice-foot {
-  margin-top: 10rpx;
-  padding-top: 10rpx;
-  border-top: 1rpx dashed $hh-ink-line-2;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8rpx;
-  font-family: $hh-font-mono;
-  font-size: 21rpx;
-  font-weight: $hh-font-weight-heavy;
-  letter-spacing: $hh-tracking-mono-sm;
-  color: var(--notice-accent);
-}
-.notice-arrow {
-  font-size: 28rpx;
-  line-height: 1;
 }
 
 /* ═══ Live strip ═══ */
@@ -2406,92 +1908,6 @@ onShareAppMessage(() => {
   background: $hh-ink-1;
 }
 .live-cta text { color: $hh-surface-1; }
-
-/* ═══ Figma home notice + group cards ═══ */
-.notice-board {
-  margin: 24rpx var(--hh-page-x) 30rpx;
-  padding: 18rpx 22rpx;
-  border: 1rpx solid $hh-ink-line;
-  border-radius: 16rpx;
-  background: $hh-surface-1;
-  display: flex;
-  align-items: center;
-  gap: 18rpx;
-  box-shadow: $hh-shadow-card;
-}
-
-.notice-lines {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8rpx;
-}
-
-.notice-row {
-  min-height: 44rpx;
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-}
-
-.notice-row.is-long:active {
-  opacity: 0.9;
-}
-
-.notice-kind-image {
-  width: 80rpx;
-  height: 72rpx;
-  flex-shrink: 0;
-}
-
-.notice-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.notice-line {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8rpx;
-}
-
-.notice-badge {
-  flex: 0 0 auto;
-  padding: 1rpx 8rpx;
-  border-radius: 6rpx;
-  border: 1rpx solid rgba(61, 173, 125, 0.42);
-  color: var(--hh-color-brand-primary);
-  background: rgba(61, 173, 125, 0.08);
-  font-size: var(--hh-text-caption-base-size);
-  line-height: 30rpx;
-  font-weight: $hh-font-weight-bold;
-}
-
-.notice-row:nth-child(2) .notice-badge {
-  color: #f0942b;
-  border-color: rgba(240, 148, 43, 0.36);
-  background: rgba(240, 148, 43, 0.08);
-}
-
-.notice-board .notice-content {
-  min-width: 0;
-  display: block;
-  color: var(--hh-color-text-secondary);
-  font-size: var(--hh-text-body-base-size);
-  line-height: var(--hh-text-body-base-line);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.notice-time {
-  flex: 0 0 auto;
-  color: var(--hh-color-text-tertiary);
-  font-size: var(--hh-text-caption-lg-size);
-  line-height: var(--hh-text-caption-lg-line);
-}
 
 .group-section {
   margin: 0 32rpx 34rpx;
@@ -3214,78 +2630,6 @@ onShareAppMessage(() => {
   }
 }
 
-.home-banner {
-  position: relative;
-  margin: 0;
-  height: 310rpx;
-  overflow: hidden;
-  border-radius: var(--hh-radius-card);
-  background: #cecece;
-}
-
-.home-banner-swiper,
-.home-banner-slide {
-  width: 100%;
-  height: 100%;
-}
-
-.home-banner-slide {
-  position: relative;
-  overflow: hidden;
-}
-
-.home-banner-image,
-.home-banner-art,
-.home-banner-shade {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-
-.home-banner-art {
-  background:
-    linear-gradient(130deg, rgba(36, 77, 54, 0.2), rgba(61, 173, 125, 0.06)),
-    radial-gradient(circle at 24% 24%, #eaf6de 0, #b9ddc8 28%, transparent 29%),
-    linear-gradient(155deg, #385b44 0%, #7ea67f 48%, #d0b78a 100%);
-}
-
-.home-banner-shade {
-  background: linear-gradient(180deg, transparent 45%, rgba(0, 0, 0, 0.56) 100%);
-}
-
-.home-banner-title {
-  position: absolute;
-  left: 30rpx;
-  bottom: 44rpx;
-  color: #fff;
-  font-size: var(--hh-text-heading-sm-size);
-  line-height: var(--hh-text-heading-sm-line);
-  font-weight: $hh-font-weight-bold;
-}
-
-.home-banner-dots {
-  position: absolute;
-  left: 30rpx;
-  right: 30rpx;
-  bottom: 16rpx;
-  display: flex;
-  gap: 10rpx;
-  z-index: 3;
-}
-
-.home-banner-dot {
-  width: 18rpx;
-  height: 6rpx;
-  border-radius: 999rpx;
-  background: rgba(255, 255, 255, 0.45);
-}
-
-.home-banner-dot.active {
-  width: 42rpx;
-  background: #ef4444;
-}
-
 .section-tabs {
   white-space: nowrap;
   overflow-anchor: none;
@@ -3644,7 +2988,6 @@ onShareAppMessage(() => {
 }
 
 .home-search,
-.notice-list,
 .s1-live,
 .arc-group,
 .dormant {
@@ -3674,7 +3017,6 @@ onShareAppMessage(() => {
   color: var(--hh-color-text-tertiary);
 }
 
-.notice-board,
 .group-card,
 .sch-card,
 .arc-card,
@@ -3700,7 +3042,6 @@ onShareAppMessage(() => {
 .arc-nm,
 .arc-title,
 .guide-title,
-.notice-section,
 .live-t,
 .sch-head-b,
 .sec-head-b {
@@ -3727,7 +3068,6 @@ onShareAppMessage(() => {
 }
 
 .guide-excerpt,
-.notice-content,
 .q-text {
   color: var(--hh-color-text-secondary);
 }

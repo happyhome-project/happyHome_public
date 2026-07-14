@@ -173,6 +173,7 @@ function resolveNonHttpAdminContext(event: any): AdminCtx {
 const SUPER_ADMIN_ONLY: Array<string | RegExp> = [
   'post.ragV2HealthAdmin',
   'community.listActivePageAdmin',
+  'community.listAllPageAdmin',
   'post.ragTimerProbeCreateAdmin','post.ragTimerEvidenceAdmin','post.ragTimerProbeStatusAdmin','post.ragTimerProbeCleanupAdmin',
   'community.approve',
   'community.reject',
@@ -1057,7 +1058,20 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const communityId = String(params.communityId || '').trim()
     if (!communityId) throw new Error('communityId 不能为空')
     const banners = await normalizeCommunityHomeBanners(communityId, params.banners)
-    await db.updateById('communities', communityId, { homeBanners: banners })
+    if (params.expectedBanners !== undefined) {
+      const expectedBanners = canonicalCommunityHomeBanners(params.expectedBanners)
+      await db.runTransaction(async (transaction) => {
+        const community = await db.transactionGetByIdOrNull<any>(transaction, 'communities', communityId)
+        if (!community) throw new Error('community not found')
+        const currentBanners = canonicalCommunityHomeBanners(community.homeBanners)
+        if (JSON.stringify(currentBanners) !== JSON.stringify(expectedBanners)) {
+          throw new Error('Banner 配置已变化，请重新 dry-run')
+        }
+        await transaction.collection('communities').doc(communityId).update({ data: { homeBanners: banners } })
+      })
+    } else {
+      await db.updateById('communities', communityId, { homeBanners: banners })
+    }
     return { success: true }
   }
   if (action === 'community.hardDelete') {
@@ -1438,6 +1452,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     return getPostRagIndexHealthForCommunity(communityId)
   }
   if (action === 'community.listActivePageAdmin') return listReleaseRagPage('communities', { status: 'active' }, params.afterId, params.limit)
+  if (action === 'community.listAllPageAdmin') return listReleaseRagPage('communities', {}, params.afterId, params.limit)
   if (action === 'section.listPageAdmin') {
     const communityId=String(params.communityId||'').trim(); if(!communityId) throw new Error('communityId 不能为空')
     return listReleaseRagPage('sections', { communityId }, params.afterId, params.limit)
@@ -1894,6 +1909,17 @@ async function normalizeCommunityHomeBanners(communityId: string, input: unknown
   }
 
   return normalized
+}
+
+function canonicalCommunityHomeBanners(input: unknown) {
+  return (Array.isArray(input) ? input : []).map((banner: any) => ({
+    bannerId: String(banner?.bannerId || '').trim(),
+    postId: String(banner?.postId || '').trim(),
+    title: String(banner?.title || '').trim(),
+    coverImage: String(banner?.coverImage || '').trim(),
+    enabled: banner?.enabled !== false,
+    order: Number(banner?.order || 0),
+  }))
 }
 
 async function hardDeleteCommunity(communityId: string, community: Community) {

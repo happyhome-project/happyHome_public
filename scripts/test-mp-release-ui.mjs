@@ -832,7 +832,7 @@ async function captureHomeImageLayout(mp) {
   return await withTimeout(mp.evaluate(() => new Promise((resolveLayout) => {
     try {
       wx.createSelectorQuery()
-        .selectAll('.community-avatar-image, .home-banner-image, .guide-cover')
+        .selectAll('.community-avatar-image, .guide-cover')
         .boundingClientRect((rects) => {
           const items = (Array.isArray(rects) ? rects : []).map((rect) => ({
             width: Number(rect?.width || 0),
