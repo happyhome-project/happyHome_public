@@ -21,6 +21,7 @@ const router = createRouter({
         { path: 'communities', name: 'communities', component: () => import('../views/CommunityAdmin/CommunityList.vue') },
         { path: 'communities/new', name: 'community-create', component: () => import('../views/CommunityAdmin/CommunityCreate.vue') },
         { path: 'sections/:communityId', name: 'sections', component: () => import('../views/CommunityAdmin/SectionList.vue') },
+        { path: 'archive-topics/:communityId', name: 'archive-topics', component: () => import('../views/CommunityAdmin/ArchiveTopics.vue') },
         { path: 'widgets/:sectionId', name: 'widgets', component: () => import('../views/CommunityAdmin/WidgetEditor.vue') },
         { path: 'members/:communityId', name: 'members', component: () => import('../views/CommunityAdmin/MemberApproval.vue') },
         { path: 'posts/:communityId', name: 'posts', component: () => import('../views/CommunityAdmin/PostManagement.vue') },

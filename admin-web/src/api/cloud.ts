@@ -151,6 +151,22 @@ export const sectionApi = {
     callAdmin('section.updateStatus', { sectionId, status }),
 }
 
+export type ArchiveTopicConfig = {
+  topicKey: string
+  displayName: string
+  origins: Array<'legacy' | 'admin' | 'organic'>
+  enabled: boolean
+  legacyOrder?: number
+  adminOrder?: number
+  recentPostCount?: number
+}
+
+export const archiveTopicApi = {
+  list: (communityId: string) => callAdmin('archiveTopic.list', { communityId }) as Promise<{ topics: ArchiveTopicConfig[] }>,
+  save: (params: { communityId: string; topicKey?: string; displayName: string; enabled?: boolean; adminOrder?: number; removeAdmin?: boolean }) =>
+    callAdmin('archiveTopic.save', params) as Promise<{ success: true; topicKey?: string }>,
+}
+
 export const memberApi = {
   pendingList: (communityId: string) => callAdmin('member.pendingList', { communityId }),
   list: (params: { communityId: string; q?: string; status?: string }) => callAdmin('member.list', params),

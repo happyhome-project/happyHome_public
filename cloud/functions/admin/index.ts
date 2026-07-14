@@ -80,6 +80,8 @@ import {
 } from '../../shared/image-note-widgets'
 import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
 import { resolvePostAuthorNickname } from '../../shared/post-author'
+import { normalizeArchiveTopic } from '../../shared/archive-topics'
+import { archiveTopicId } from '../../lib/archive-topic-index'
 
 cloud.init({ env: process.env.TCB_ENV || cloud.DYNAMIC_CURRENT_ENV })
 
@@ -216,6 +218,8 @@ const COMMUNITY_SCOPED_ACTIONS = new Set([
   'post.rebuildSearchIndexAdmin',
   'post.ragIndexHealthAdmin',
   'post.reconcileRagIndexCommunityBatchAdmin',
+  'archiveTopic.list',
+  'archiveTopic.save',
 ])
 const INTERNAL_RELEASE_ONLY_ACTIONS=new Set(['post.ragTimerProbeCreateAdmin','post.ragTimerEvidenceAdmin','post.ragTimerProbeStatusAdmin','post.ragTimerProbeCleanupAdmin'])
 // 这些 action 只给了实体 id，需要先查出 communityId 再校验
@@ -1156,6 +1160,49 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
   if (action === 'section.list') {
     const raw = await db.query('sections', { communityId: params.communityId }, { orderBy: ['order', 'asc'] })
     return { sections: raw.map((section: any) => normalizeSection(section)) }
+  }
+  if (action === 'archiveTopic.list') {
+    const communityId = String(params.communityId || '').trim()
+    const topics = await db.query('archive_topics', { communityId }) as any[]
+    return {
+      topics: topics.slice().sort((left, right) =>
+        Number(left.legacyOrder ?? Number.MAX_SAFE_INTEGER) - Number(right.legacyOrder ?? Number.MAX_SAFE_INTEGER)
+        || Number(left.adminOrder ?? Number.MAX_SAFE_INTEGER) - Number(right.adminOrder ?? Number.MAX_SAFE_INTEGER)
+        || String(left.displayName || '').localeCompare(String(right.displayName || ''), 'zh-CN')
+      ),
+    }
+  }
+  if (action === 'archiveTopic.save') {
+    const communityId = String(params.communityId || '').trim()
+    const normalized = normalizeArchiveTopic(params.topicKey || params.displayName)
+    if (!normalized.topicKey || normalized.displayName.length > 24) throw new Error('话题名称应为 1 到 24 个字符')
+    const id = archiveTopicId(communityId, normalized.topicKey)
+    const existing = await db.getByIdOrNull<any>('archive_topics', id)
+    const now = new Date().toISOString()
+    if (params.removeAdmin === true) {
+      if (!existing) return { success: true }
+      const origins = (existing.origins || []).filter((origin: string) => origin !== 'admin')
+      if (origins.length === 0) await db.removeById('archive_topics', id)
+      else await db.setById('archive_topics', id, { ...existing, origins, updatedAt: now })
+      return { success: true }
+    }
+    const display = normalizeArchiveTopic(params.displayName || existing?.displayName || normalized.displayName).displayName
+    const origins = Array.from(new Set([...(existing?.origins || []), 'admin']))
+    await db.setById('archive_topics', id, {
+      ...(existing || {}),
+      communityId,
+      topicKey: normalized.topicKey,
+      displayName: display,
+      origins,
+      enabled: params.enabled !== false,
+      adminOrder: Number.isFinite(Number(params.adminOrder)) ? Math.max(0, Math.floor(Number(params.adminOrder))) : Number(existing?.adminOrder || 0),
+      recentScore: Number(existing?.recentScore || 0),
+      recentPostCount: Number(existing?.recentPostCount || 0),
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      updatedByAccountId: ctx.accountId,
+    })
+    return { success: true, topicKey: normalized.topicKey }
   }
   if (action === 'section.create') {
     if (typeof params.displayTemplate !== 'undefined' &&

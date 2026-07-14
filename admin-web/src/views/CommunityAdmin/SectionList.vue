@@ -21,7 +21,10 @@
           </div>
         </div>
       </div>
-      <el-button data-testid="section-create-button" type="primary" @click="openCreate">新建板块</el-button>
+      <div>
+        <el-button data-testid="archive-topic-button" @click="$router.push({ name: 'archive-topics', params: { communityId } })">沉淀区话题</el-button>
+        <el-button data-testid="section-create-button" type="primary" @click="openCreate">新建实时板块</el-button>
+      </div>
     </div>
 
     <el-alert
@@ -200,7 +203,7 @@
         </el-form-item>
         <el-form-item label="类型">
           <el-radio-group v-model="form.type" :disabled="!!editingId">
-            <el-radio value="evergreen">沉淀展示</el-radio>
+            <el-radio v-if="form.type === 'evergreen'" value="evergreen">历史沉淀板块</el-radio>
             <el-radio value="realtime">实时协作</el-radio>
           </el-radio-group>
         </el-form-item>
@@ -462,7 +465,7 @@ const form = ref<{
   name: '',
   icon: '',
   order: 0,
-  type: 'evergreen',
+  type: 'realtime',
   status: 'active',
   displayTemplate: 'default',
   accentColor: '',
@@ -557,7 +560,7 @@ function openCreate() {
     name: '',
     icon: '',
     order: sections.value.length,
-    type: 'evergreen',
+    type: 'realtime',
     status: 'active',
     displayTemplate: 'default',
     accentColor: '',
