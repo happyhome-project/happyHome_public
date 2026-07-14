@@ -1,5 +1,10 @@
 # Archive User-Visible Experience Implementation Plan
 
+> **Historical / point-in-time:** This file records the approved 2026-07-14 implementation sequence. Retain it for traceability; do not execute its task state as current work.
+> **Current authority:** Use the [documentation authority map](../../README.md), current code, release manifests, and tests.
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace evergreen section navigation with an indexed topic-driven archive feed, expose Xiaohongshu-style image/text publishing plus realtime collaboration, migrate legacy evergreen posts safely, and add administrator topic controls.
