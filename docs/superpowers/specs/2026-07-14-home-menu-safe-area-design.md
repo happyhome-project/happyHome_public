@@ -1,5 +1,8 @@
 # Home Menu Safe Area Design
 
+> **Historical / point-in-time:** This specification records the home-menu safe-area behavior accepted for the 2026-07-14 delivery. It does not override later product or implementation decisions.
+> **Current authority:** Use the [documentation authority map](../../README.md), current home-page code, WeChat runtime behavior, and tests.
+
 ## Goal
 
 Prevent the home-page “切换” control from entering the WeChat mini-program capsule area on devices with different status-bar and menu-button geometry.
