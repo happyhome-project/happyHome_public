@@ -1,5 +1,10 @@
 # Windows Worktree Retirement Junction Recovery Implementation Plan
 
+> **Historical / point-in-time:** This delivery plan records the approved 2026-07-15 implementation sequence. Retain it for traceability; do not treat its task state as current repository status.
+> **Current authority:** Use the [worktree setup and lifecycle guide](../../SETUP.md), current worktree code, and tests.
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make `worktree:retire` safely complete Windows worktree removal when npm workspace junctions or a locked empty directory cause Git to return a partial-success error.

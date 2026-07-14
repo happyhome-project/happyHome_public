@@ -1,5 +1,8 @@
 # Windows Worktree Retirement Junction Recovery Design
 
+> **Historical / point-in-time:** This specification records the worktree retirement recovery design approved on 2026-07-15. It does not replace current code or operational evidence.
+> **Current authority:** Use the [worktree setup and lifecycle guide](../../SETUP.md), current worktree code, and tests.
+
 ## Problem
 
 On Windows, `npm ci` for this npm-workspace repository creates junctions inside the root `node_modules`. `git worktree remove <path>` can unregister an eligible worktree and delete part of its contents, then return a non-zero status such as `Directory not empty` or `Permission denied`. The current retirement command treats that partial success as a generic failure and leaves installation artifacts behind.

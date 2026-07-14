@@ -7,12 +7,54 @@ import {
   createWorktreePlan,
   decideSync,
   executeWorktreeMutation,
+  finalizeWorktreeRemoval,
   githubRepositoryFromRemote,
   interpretAncestorExitStatus,
   normalizeExternalCommandResult,
   verifiedPublicOriginUrl,
   verifyCreateTargetBoundary,
 } from './worktree-lifecycle.mjs'
+
+test('worktree removal finalization accepts only proven retired postconditions', () => {
+  assert.deepEqual(finalizeWorktreeRemoval({ gitResult: { ok: true } }), { status: 'retired' })
+
+  assert.throws(() => finalizeWorktreeRemoval({
+    gitResult: null,
+    registered: false,
+    removeResidual: () => {},
+    inspectResidual: () => ({ exists: false, empty: true }),
+  }), /Git result is unknown/)
+
+  assert.throws(() => finalizeWorktreeRemoval({
+    gitResult: { ok: false, stderr: 'Directory not empty' },
+    registered: true,
+  }), /remains registered/)
+
+  let removed = false
+  assert.deepEqual(finalizeWorktreeRemoval({
+    gitResult: { ok: false, stderr: 'Directory not empty' },
+    registered: false,
+    removeResidual: () => { removed = true },
+    inspectResidual: () => ({ exists: false, empty: true }),
+  }), { status: 'retired' })
+  assert.equal(removed, true)
+
+  const locked = Object.assign(new Error('directory is in use'), { code: 'EBUSY' })
+  assert.deepEqual(finalizeWorktreeRemoval({
+    gitResult: { ok: false, stderr: 'Permission denied' },
+    registered: false,
+    removeResidual: () => { throw locked },
+    inspectResidual: () => ({ exists: true, empty: true }),
+  }), { status: 'retired_with_locked_empty_shell', warning: 'directory is in use' })
+
+  const blocked = Object.assign(new Error('cannot remove residue'), { code: 'EPERM' })
+  assert.throws(() => finalizeWorktreeRemoval({
+    gitResult: { ok: false, stderr: 'Directory not empty' },
+    registered: false,
+    removeResidual: () => { throw blocked },
+    inspectResidual: () => ({ exists: true, empty: false }),
+  }), /non-empty residual/)
+})
 
 test('public integration operator requires clean synchronized public main', () => {
   const base = { root: 'C:/public', commonDirectory: 'C:/public/.git', repository: 'happyhome-project/happyHome_public', branch: 'main', head: 'a', main: 'a', behind: 0, ahead: 0, isDirty: false, hasOperation: false, pathIsReparsePoint: false }
