@@ -1,6 +1,10 @@
 import { AUDIO_ALLOWED_EXTS, AUDIO_MAX_SIZE_BYTES } from '../shared/types'
 import type { PostContent, Section, Widget, WidgetType } from '../shared/types'
 import { isGuideNoteSection } from '../shared/guide-note-widgets'
+import { isTextNoteSection } from '../shared/text-note-widgets'
+
+const MarkdownIt = require('markdown-it')
+const markdownParser = new MarkdownIt({ html: true })
 
 // 永远不进 post.content 的控件类型（无论 user 还是 admin 路径）：
 //   attendance: 用户报名记录写在独立集合
@@ -235,14 +239,37 @@ function extractImageSrcs(html: string): string[] {
   return srcs
 }
 
+function markdownTokens(markdown: string): any[] {
+  return markdownParser.parse(markdown, {})
+}
+
 function extractMarkdownImageSrcs(markdown: string): string[] {
   const srcs: string[] = []
-  const imgPattern = /!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
-  let match: RegExpExecArray | null
-  while ((match = imgPattern.exec(markdown))) {
-    srcs.push(String(match[1] || '').trim())
+  const visit = (tokens: any[]) => {
+    for (const token of tokens) {
+      if (token.type === 'image') {
+        const src = String(token.attrGet?.('src') || '').trim()
+        if (src) srcs.push(src)
+      }
+      if (Array.isArray(token.children)) visit(token.children)
+    }
   }
+  visit(markdownTokens(markdown))
   return srcs
+}
+
+function markdownHasImage(markdown: string): boolean {
+  const visit = (tokens: any[]): boolean => {
+    for (const token of tokens) {
+      if (token.type === 'image') return true
+      if ((token.type === 'html_inline' || token.type === 'html_block') && /<\s*img\b/i.test(String(token.content || ''))) {
+        return true
+      }
+      if (Array.isArray(token.children) && visit(token.children)) return true
+    }
+    return false
+  }
+  return visit(markdownTokens(markdown))
 }
 
 function validateRichNoteContent(value: unknown, widgetLabel: string): void {
@@ -303,13 +330,22 @@ function isGuideNoteBodyWidget(section: Section, widget: Widget): boolean {
   return widget.widgetId === 'guide_body' || widget.fieldKey === 'body' || widget.label === '正文'
 }
 
+function isTextNoteBodyWidget(section: Section, widget: Widget): boolean {
+  if (!isTextNoteSection(section)) return false
+  return widget.widgetId === 'text_body' || widget.fieldKey === 'body' || widget.label === '正文'
+}
+
 function richNoteHasImages(value: unknown): boolean {
   if (!isRecord(value)) return false
   const imageFileIDs = Array.isArray(value.imageFileIDs) ? value.imageFileIDs.filter(Boolean) : []
   if (imageFileIDs.length > 0) return true
   const markdown = typeof value.markdown === 'string' ? value.markdown : ''
   const html = typeof value.html === 'string' ? value.html : ''
-  return extractMarkdownImageSrcs(markdown).length > 0 || extractImageSrcs(html).length > 0
+  return (
+    /<\s*img\b/i.test(html) ||
+    markdownHasImage(markdown) ||
+    extractImageSrcs(html).length > 0
+  )
 }
 
 const HOME_TITLE_WIDGET_TYPES = new Set<WidgetType>([
@@ -369,10 +405,13 @@ export function validateContentValues(
     }
 
     if (widget.type === 'rich_note') {
-      validateRichNoteContent(value, widget.label)
       if (isGuideNoteBodyWidget(section, widget) && richNoteHasImages(value)) {
         throw new Error('图文攻略正文不支持插入图片，请将图片上传到「封面/图片」')
       }
+      if (isTextNoteBodyWidget(section, widget) && richNoteHasImages(value)) {
+        throw new Error('纯文字笔记正文不支持插入图片')
+      }
+      validateRichNoteContent(value, widget.label)
       continue
     }
 
