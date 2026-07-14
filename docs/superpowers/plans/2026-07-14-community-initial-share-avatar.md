@@ -1,5 +1,10 @@
 # Community Initial Share Avatar Implementation Plan
 
+> **Historical / point-in-time:** This delivery plan records the approved 2026-07-14 implementation sequence. Retain it for traceability; do not treat its task state as current repository status.
+> **Current authority:** Use the [documentation authority map](../../README.md), current `AGENTS.md`, checked-in code, and tests.
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the default Logo used by avatarless communities with an elegant brand-green initial avatar in all community-avatar surfaces and native WeChat share cards.
