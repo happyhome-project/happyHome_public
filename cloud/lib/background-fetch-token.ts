@@ -19,6 +19,21 @@ function isUsableToken(user: Partial<User> | null | undefined, now = nowMs()) {
     expiresAt - now > TOKEN_REFRESH_WINDOW_MS
 }
 
+export function resolveBackgroundFetchTokenState(
+  existingUser?: Partial<User> | null,
+  now = nowMs(),
+) {
+  if (isUsableToken(existingUser, now)) {
+    return {
+      backgroundFetchToken: String(existingUser?.backgroundFetchToken || ''),
+      backgroundFetchTokenExpiresAt: String(existingUser?.backgroundFetchTokenExpiresAt || ''),
+      patch: {},
+    }
+  }
+  const patch = buildBackgroundFetchTokenPatch()
+  return { ...patch, patch }
+}
+
 function isValidToken(user: Partial<User> | null | undefined, now = nowMs()) {
   const token = String(user?.backgroundFetchToken || '')
   const expiresAt = Date.parse(String(user?.backgroundFetchTokenExpiresAt || ''))
@@ -45,19 +60,11 @@ export async function ensureBackgroundFetchToken(
   existingUser?: Partial<User> | null,
 ) {
   if (!openid) throw new Error('Missing OPENID')
-  if (isUsableToken(existingUser)) {
-    return {
-      backgroundFetchToken: String(existingUser?.backgroundFetchToken || ''),
-      backgroundFetchTokenExpiresAt: String(existingUser?.backgroundFetchTokenExpiresAt || ''),
-      patch: {},
-    }
+  const state = resolveBackgroundFetchTokenState(existingUser)
+  if (existingUser && Object.keys(state.patch).length > 0) {
+    await db.updateById('users', openid, state.patch)
   }
-
-  const patch = buildBackgroundFetchTokenPatch()
-  if (existingUser) {
-    await db.updateById('users', openid, patch)
-  }
-  return { ...patch, patch }
+  return state
 }
 
 export async function resolveOpenIdByBackgroundFetchToken(token: string): Promise<string> {

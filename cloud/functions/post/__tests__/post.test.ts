@@ -6,6 +6,11 @@ jest.mock('wx-server-sdk', () => ({
 
 jest.mock('../../../lib/db', () => ({
   getById: jest.fn(),
+  getByIds: jest.fn(async (collectionName: string, ids: string[]) => {
+    const getById = require('../../../lib/db').getById as jest.Mock
+    const values = await Promise.all(ids.map((id) => getById(collectionName, id).catch(() => null)))
+    return values.filter(Boolean)
+  }),
   create: jest.fn(),
   updateById: jest.fn(),
   query: jest.fn(),

@@ -40,6 +40,30 @@ describe('storage API', () => {
     expect(onProgress).toHaveBeenCalledWith({ progress: 42, loaded: 21, total: 50 })
   })
 
+  test('accepts a sanitized optional performance trace without changing the upload request', async () => {
+    const uploadFile = vi.fn(({ success }) => {
+      success({ fileID: 'cloud://env/avatars/a.jpg' })
+      return { onProgressUpdate: vi.fn() }
+    })
+    vi.stubGlobal('wx', { cloud: { uploadFile } })
+    const { uploadCloudFile } = await import('../storage')
+
+    await uploadCloudFile({
+      cloudPath: 'avatars/a.jpg',
+      source: 'wxfile://tmp/a.jpg',
+      trace: {
+        requestId: 'avatar-1',
+        stage: 'avatar.upload',
+        sample: 'cold',
+        counts: { bytes: 600_000 },
+      },
+    })
+
+    expect(uploadFile).toHaveBeenCalledTimes(1)
+    expect(uploadFile.mock.calls[0][0]).not.toHaveProperty('trace')
+    expect(uploadFile.mock.calls[0][0]).not.toHaveProperty('_trace')
+  })
+
   test('uploads an H5 Blob through the Web SDK and normalizes progress', async () => {
     const blob = new Blob(['hello'], { type: 'text/plain' })
     webUploadFile.mockImplementation(async ({ onUploadProgress }) => {

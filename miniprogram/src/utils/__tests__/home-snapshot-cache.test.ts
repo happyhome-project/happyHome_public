@@ -114,6 +114,26 @@ describe('home snapshot cache', () => {
     expect(snapshot?.currentCommunity).toEqual({ _id: 'community-1', homeBanners: [] })
   })
 
+  test('creates a cached home shell without exposing cached posts before bootstrap revalidates access', async () => {
+    const { createHomeSnapshotShell } = await import('../home-snapshot-cache')
+    const snapshot = {
+      schemaVersion: 1,
+      generatedAt: '2026-06-12T00:00:00.000Z',
+      viewerOpenId: 'user-1',
+      currentCommunityId: 'community-1',
+      currentCommunity: { _id: 'community-1', name: '青山村', status: 'active' },
+      communities: [{ _id: 'community-1', name: '青山村', status: 'active' }],
+      sections: [{ _id: 'section-1', communityId: 'community-1', name: '邻里' }],
+      postsBySection: { 'section-1': [{ _id: 'secret-post' }] },
+    }
+
+    expect(createHomeSnapshotShell(snapshot as any)).toEqual(expect.objectContaining({
+      currentCommunityId: 'community-1',
+      sections: [expect.objectContaining({ _id: 'section-1' })],
+      postsBySection: {},
+    }))
+  })
+
   test('listens for late wx pre-fetch data and supports unsubscribe', async () => {
     let callback: ((res: any) => void) | null = null
     vi.stubGlobal('wx', {

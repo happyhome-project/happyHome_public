@@ -2,10 +2,15 @@ import * as db from './db'
 import { ensureBackgroundFetchToken } from './background-fetch-token'
 import { isPostVisibleToMembers } from './content-audit'
 import { getGuestIntroConfig } from './guest-intro-config'
-import { ensureCommunityReadable, getActivePublicCommunity, getDefaultPublicCommunityId } from './public-community'
+import { getActivePublicCommunity, getDefaultPublicCommunityId, getPublicReadCommunityIds } from './public-community'
 import { normalizeGuideNoteSection } from '../shared/guide-note-widgets'
 import { resolveAuthorAvatarUrl } from '../shared/simulated-author-avatars'
 import { resolvePostAuthorNickname } from '../shared/post-author'
+import {
+  parsePerformanceTrace,
+  recordDatabaseStage,
+  type PerformanceTrace,
+} from './performance-trace'
 import type {
   AttendancePreviewUser,
   AttendanceSummary,
@@ -121,14 +126,15 @@ function comparePostListOrder(a: any, b: any): number {
 
 async function getUsersByIds(userIds: string[]) {
   const uniqueIds = Array.from(new Set(userIds.filter(Boolean)))
-  const entries = await Promise.all(uniqueIds.map(async (userId) => {
-    try {
-      return [userId, await db.getById('users', userId)] as const
-    } catch {
-      return [userId, null] as const
-    }
-  }))
-  return Object.fromEntries(entries)
+  if (uniqueIds.length === 0) return {}
+  const batches: string[][] = []
+  for (let index = 0; index < uniqueIds.length; index += 100) {
+    batches.push(uniqueIds.slice(index, index + 100))
+  }
+  const users = (await Promise.all(
+    batches.map((batch) => db.getByIds('users', batch)),
+  )).flat()
+  return Object.fromEntries(users.map((user: any) => [user._id, user]))
 }
 
 async function getAttendanceRecords(postId: string, widgetId: string) {
@@ -265,15 +271,36 @@ function slimPostForHome(post: any, section: Section): Post {
 export async function buildHomeFeed(
   communityId: string,
   openid: string,
-  options: { limitPerSection?: number; skipMembershipCheck?: boolean } = {},
+  options: {
+    limitPerSection?: number
+    skipMembershipCheck?: boolean
+    viewerIsMember?: boolean
+    trace?: unknown
+  } = {},
 ) {
+  const trace = parsePerformanceTrace(options.trace)
   const normalizedCommunityId = String(communityId || '').trim()
   if (!normalizedCommunityId) throw new Error('communityId 不能为空')
+  let verifiedMembership = options.viewerIsMember
   if (!options.skipMembershipCheck) {
-    await ensureCommunityReadable(normalizedCommunityId, openid || '', COMMUNITY_READ_ERROR)
+    const [community, isMember] = await Promise.all([
+      db.getById('communities', normalizedCommunityId).catch(() => null) as Promise<Community | null>,
+      verifiedMembership === undefined
+        ? isActiveCommunityMember(normalizedCommunityId, openid || '')
+        : Promise.resolve(verifiedMembership),
+    ])
+    if (!community || community.status !== 'active') throw new Error(COMMUNITY_READ_ERROR)
+    if (!isMember && !getPublicReadCommunityIds().includes(normalizedCommunityId)) {
+      throw new Error(COMMUNITY_READ_ERROR)
+    }
+    verifiedMembership = isMember
   }
 
+  const sectionsStartedAt = Date.now()
   const rawSections = await db.query('sections', { communityId: normalizedCommunityId }, { orderBy: ['order', 'asc'] })
+  recordDatabaseStage(trace, 'post.bootstrap', 'sections', sectionsStartedAt, {
+    sections: rawSections.length,
+  })
   const sections = (rawSections as Section[]).map(normalizeSectionForClient)
   const sectionById: Record<string, Section | null> = Object.fromEntries(
     sections.map((section) => [section._id, section])
@@ -285,6 +312,7 @@ export async function buildHomeFeed(
   )
 
   const slicedBySection: Record<string, any[]> = {}
+  const postsStartedAt = Date.now()
   await Promise.all(sections.map(async (section) => {
     const sectionPosts = await db.query('posts', {
       sectionId: section._id,
@@ -300,22 +328,30 @@ export async function buildHomeFeed(
       .sort(comparePostListOrder)
       .slice(0, limitPerSection)
   }))
+  recordDatabaseStage(trace, 'post.bootstrap', 'posts_by_section', postsStartedAt, {
+    sectionQueries: sections.length,
+    posts: Object.values(slicedBySection).reduce((sum, posts) => sum + posts.length, 0),
+  })
 
   const slicedPosts = Object.values(slicedBySection).flat()
   const withAttendance = await enrichPostsWithAttendance(slicedPosts, sectionById, openid)
-  const membershipByCommunity = new Map<string, boolean>()
-  const membershipAlreadyVerified = Boolean(openid) && !options.skipMembershipCheck
+  const membershipByCommunity = new Map<string, Promise<boolean>>()
+  if (verifiedMembership !== undefined) {
+    membershipByCommunity.set(normalizedCommunityId, Promise.resolve(verifiedMembership))
+  }
+  const resolveMembership = (targetCommunityId: string) => {
+    const existing = membershipByCommunity.get(targetCommunityId)
+    if (existing) return existing
+    const pending = isActiveCommunityMember(targetCommunityId, openid)
+    membershipByCommunity.set(targetCommunityId, pending)
+    return pending
+  }
   const visiblePosts = await Promise.all(withAttendance.map(async (post: any) => {
     const section = sectionById[post.sectionId]
     if (!section) return post
     const communityId = String(post.communityId || section.communityId || '')
-    if (!membershipByCommunity.has(communityId)) {
-      membershipByCommunity.set(
-        communityId,
-        membershipAlreadyVerified ? true : await isActiveCommunityMember(communityId, openid),
-      )
-    }
-    return maskMemberOnlyContent(post, section, membershipByCommunity.get(communityId) === true)
+    const canViewMemberOnly = await resolveMembership(communityId)
+    return maskMemberOnlyContent(post, section, canViewMemberOnly)
   }))
   const enrichedPosts = await enrichPostsWithAuthor(visiblePosts)
   const enrichedById = new Map(enrichedPosts.map((post: any) => [post._id, post]))
@@ -342,29 +378,42 @@ export function emptyHomeSnapshot(viewerOpenId = ''): HomeSnapshot {
   }
 }
 
-async function getActiveCommunitiesForUser(openid: string): Promise<Community[]> {
+async function getActiveCommunitiesForUser(
+  openid: string,
+  trace: PerformanceTrace | null,
+): Promise<Community[]> {
   if (!openid) return []
+  const membershipsStartedAt = Date.now()
   const memberships = await db.query('community_members', {
     userId: openid,
     status: 'active',
   }, {
     orderBy: ['joinedAt', 'desc'],
+    limit: 100,
   })
-  const communities = await Promise.all((memberships as any[]).map(async (membership) => {
-    try {
-      const community = await db.getById('communities', membership.communityId) as Community | null
-      return community && community.status === 'active' ? community : null
-    } catch {
-      return null
-    }
-  }))
-  return communities.filter(Boolean) as Community[]
+  recordDatabaseStage(trace, 'post.bootstrap', 'active_memberships', membershipsStartedAt, {
+    memberships: memberships.length,
+  })
+  const communityIds = (memberships as any[]).map((membership) => String(membership.communityId || ''))
+  const communitiesStartedAt = Date.now()
+  const communities = await db.getByIds('communities', communityIds) as Community[]
+  recordDatabaseStage(trace, 'post.bootstrap', 'community_batch', communitiesStartedAt, {
+    requested: communityIds.length,
+    communities: communities.length,
+  })
+  return communities.filter((community) => community.status === 'active')
 }
 
 export async function buildHomeSnapshot(
   openid: string,
-  options: { currentCommunityId?: string; limitPerSection?: number; user?: Partial<User> | null } = {},
+  options: {
+    currentCommunityId?: string
+    limitPerSection?: number
+    user?: Partial<User> | null
+    trace?: unknown
+  } = {},
 ): Promise<HomeSnapshot> {
+  const trace = parsePerformanceTrace(options.trace)
   const publicCommunityId = getDefaultPublicCommunityId()
   const publicCommunity = publicCommunityId ? await getActivePublicCommunity(publicCommunityId) : null
   if (!openid) {
@@ -372,6 +421,8 @@ export async function buildHomeSnapshot(
     const feed = await buildHomeFeed(publicCommunity._id, '', {
       limitPerSection: options.limitPerSection,
       skipMembershipCheck: true,
+      viewerIsMember: false,
+      trace,
     })
     return {
       schemaVersion: HOME_SNAPSHOT_SCHEMA_VERSION,
@@ -383,7 +434,7 @@ export async function buildHomeSnapshot(
       ...feed,
     }
   }
-  const communities = await getActiveCommunitiesForUser(openid)
+  const communities = await getActiveCommunitiesForUser(openid, trace)
   const user = options.user !== undefined
     ? options.user
     : await db.getById('users', openid).catch(() => null) as User | null
@@ -403,6 +454,8 @@ export async function buildHomeSnapshot(
   const feed = await buildHomeFeed(currentCommunity, openid, {
     limitPerSection: options.limitPerSection,
     skipMembershipCheck: true,
+    viewerIsMember: Boolean(preferredJoinedCommunity || communities.some((community) => community._id === currentCommunity)),
+    trace,
   })
   return {
     schemaVersion: HOME_SNAPSHOT_SCHEMA_VERSION,
@@ -417,7 +470,7 @@ export async function buildHomeSnapshot(
 
 export async function buildHomeBootstrap(
   openid: string,
-  options: { currentCommunityId?: string; limitPerSection?: number } = {},
+  options: { currentCommunityId?: string; limitPerSection?: number; trace?: unknown } = {},
 ): Promise<HomeBootstrapResponse> {
   if (!openid) {
     const snapshot = await buildHomeSnapshot('', options)

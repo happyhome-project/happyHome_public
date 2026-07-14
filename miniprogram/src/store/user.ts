@@ -1,9 +1,14 @@
 import { defineStore } from 'pinia'
 import { userApi } from '../api/cloud'
+import type { PerformanceTrace } from '../utils/performance-trace'
 import { useCommunityStore } from './community'
 
 const STORAGE_KEY = 'user_store'
 let webSessionGeneration = 0
+
+type LoginApplyOptions = {
+  shouldApply?: () => boolean
+}
 
 // uni-app exposes uni.getStorageSync in both H5 and miniprogram — safer than wx.*
 function storageGet(k: string): any {
@@ -128,10 +133,15 @@ export const useUserStore = defineStore('user', {
      * 这个方法也用于"编辑资料"（user.login 云函数是 upsert 语义），登录态下再调
      * 一次会覆盖 nickName + avatarUrl。
      */
-    async login({ nickName, avatarUrl }: { nickName: string; avatarUrl: string }) {
+    async login(
+      { nickName, avatarUrl }: { nickName: string; avatarUrl: string },
+      trace?: PerformanceTrace,
+      options: LoginApplyOptions = {},
+    ) {
       const name = (nickName || '').trim()
       if (!name) throw new Error('请填写昵称')
-      const result = await userApi.login({ nickName: name, avatarUrl: avatarUrl || '' })
+      const result = await userApi.login({ nickName: name, avatarUrl: avatarUrl || '' }, trace)
+      if (options.shouldApply && !options.shouldApply()) return
       this.openId = result.user._id
       this.nickName = name
       this.avatarUrl = avatarUrl || ''
@@ -142,18 +152,38 @@ export const useUserStore = defineStore('user', {
       this.saveToStorage()
       this.syncBackgroundFetchToken()
     },
-    async webLogin({ username, password, nickName }: { username: string; password: string; nickName: string }) {
+    async webLogin(
+      { username, password, nickName }: { username: string; password: string; nickName: string },
+      trace?: PerformanceTrace,
+      options: LoginApplyOptions = {},
+    ) {
       const name = String(nickName || '').trim()
       if (!name) throw new Error('请填写昵称')
       this.clearLocalSession()
       const generation = webSessionGeneration
       const webAuth = await loadWebAuth()
       if (generation !== webSessionGeneration) throw supersededError()
+      const canceled = () => !!options.shouldApply && !options.shouldApply()
+      const rollbackCanceledLogin = async () => {
+        try { await webAuth.signOut() } catch (_error) {
+          console.warn('[web-login] canceled login signOut failed')
+        } finally {
+          if (generation === webSessionGeneration) this.clearLocalSession()
+        }
+      }
       try {
         await webAuth.signIn({ username: String(username || '').trim(), password })
         if (generation !== webSessionGeneration) throw supersededError()
-        const result = await userApi.login({ nickName: name, avatarUrl: '' })
+        if (canceled()) {
+          await rollbackCanceledLogin()
+          return
+        }
+        const result = await userApi.login({ nickName: name, avatarUrl: '' }, trace)
         if (generation !== webSessionGeneration) throw supersededError()
+        if (canceled()) {
+          await rollbackCanceledLogin()
+          return
+        }
         this.openId = result.user._id
         this.nickName = result.user.nickName || name
         this.avatarUrl = result.user.avatarUrl || ''

@@ -201,4 +201,48 @@ describe('user store Web auth', () => {
     expect(community.myCommunities).toEqual([])
     expect(myCommunities).not.toHaveBeenCalled()
   })
+
+  test('a canceled direct login does not apply a late user.login result', async () => {
+    const pendingLogin = deferred<{ user: any; isNew: boolean }>()
+    userLogin.mockReturnValueOnce(pendingLogin.promise)
+    const { useUserStore } = await import('../user')
+    const store = useUserStore()
+    let current = true
+
+    const loggingIn = store.login(
+      { nickName: '本轮昵称', avatarUrl: '' },
+      undefined,
+      { shouldApply: () => current },
+    )
+    current = false
+    pendingLogin.resolve({ user: businessUser({ _id: 'late-user' }), isNew: false })
+    await loggingIn
+
+    expect(store.isLoggedIn).toBe(false)
+    expect(store.openId).toBe('')
+    expect(storage.has('user_store')).toBe(false)
+  })
+
+  test('a canceled web login rolls back the SDK session and ignores a late business user', async () => {
+    const pendingLogin = deferred<{ user: any; isNew: boolean }>()
+    userLogin.mockReturnValueOnce(pendingLogin.promise)
+    const { useUserStore } = await import('../user')
+    const store = useUserStore()
+    let current = true
+
+    const loggingIn = store.webLogin(
+      { username: 'alice', password: 'secret', nickName: '本轮昵称' },
+      undefined,
+      { shouldApply: () => current },
+    )
+    await vi.waitFor(() => expect(userLogin).toHaveBeenCalledTimes(1))
+    current = false
+    pendingLogin.resolve({ user: businessUser({ _id: 'late-web-user' }), isNew: false })
+    await loggingIn
+
+    expect(signOut).toHaveBeenCalledTimes(1)
+    expect(store.isLoggedIn).toBe(false)
+    expect(store.openId).toBe('')
+    expect(storage.has('user_store')).toBe(false)
+  })
 })

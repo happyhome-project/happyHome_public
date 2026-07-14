@@ -12,13 +12,14 @@ import {
   type ApprovalNotificationEventType,
   type SubscriptionStatus,
 } from '../../lib/approval-notifications'
-import type { Community } from '../../shared/types'
+import type { Community, CommunityMember } from '../../shared/types'
 import {
   MEMBER_STATE_COLLECTION,
   membershipStateId,
   type MembershipStateStatus,
 } from '../../lib/membership-state'
 import { approveMembership, leaveMembership, rejectMembership } from '../../lib/membership-transitions'
+import { parsePerformanceTrace, recordDatabaseStage } from '../../lib/performance-trace'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
@@ -216,40 +217,63 @@ export async function handleMyStatus(params: { communityId: string }, openid: st
   return { isMember: latest.status === 'active', status: latest.status }
 }
 
-export async function handleMyCommunities(openid: string) {
+export async function handleMyCommunities(openid: string, traceInput?: unknown) {
   // 未登录时返回空列表，而不是抛错。前端应该用 isLoggedIn 前置守门，
   // 这里做后端兜底——万一前端忘守（或新页面接入）不至于让用户看到 "Missing OPENID" 原始错误。
   // 语义：没有 openid = 没有身份 = 没有社区归属，return [] 符合 user mental model。
   if (!openid) return { communities: [] }
 
+  const trace = parsePerformanceTrace(traceInput)
+  const membershipsStartedAt = Date.now()
   const memberships = await db.query('community_members', {
     userId: openid,
     status: 'active',
   }, {
     orderBy: ['joinedAt', 'desc'],
+    limit: 100,
+  })
+  recordDatabaseStage(trace, 'member.myCommunities', 'active_memberships', membershipsStartedAt, {
+    memberships: memberships.length,
   })
 
-  const communities = []
-  for (const membership of memberships) {
-    const community = await db.getById('communities', membership.communityId) as Community | null
-    if (community && community.status === 'active') {
-      communities.push(community)
+  const activeMemberships = memberships as CommunityMember[]
+  const communityIds = activeMemberships.map((membership) => membership.communityId)
+  const communitiesStartedAt = Date.now()
+  const communityList = await db.getByIds('communities', communityIds) as Community[]
+  recordDatabaseStage(trace, 'member.myCommunities', 'community_batch', communitiesStartedAt, {
+    requested: communityIds.length,
+    communities: communityList.length,
+  })
+  const membershipByCommunity = new Map<string, CommunityMember>()
+  for (const membership of activeMemberships) {
+    if (!membershipByCommunity.has(membership.communityId)) {
+      membershipByCommunity.set(membership.communityId, membership)
     }
   }
+  const communities = communityList
+    .filter((community) => community.status === 'active')
+    .map((community) => {
+      const membership = membershipByCommunity.get(community._id)
+      return {
+        ...community,
+        viewerStatus: 'active' as const,
+        viewerRole: membership?.role || null,
+      }
+    })
 
   return { communities }
 }
 
 export const main = async (event: any, context?: any) => {
   const openid = resolveOpenId(event, context)
-  const { action, _testOpenid, ...params } = event
+  const { action, _testOpenid, _trace, ...params } = event
   if (action === 'apply') return handleApply(params, openid)
   if (action === 'leave') return handleLeave(params, openid)
   if (action === 'memberApprove') return handleMemberApprove(params, openid)
   if (action === 'memberReject') return handleMemberReject(params, openid)
   if (action === 'pendingList') return handlePendingList(params, openid)
   if (action === 'myStatus') return handleMyStatus(params, openid)
-  if (action === 'myCommunities') return handleMyCommunities(openid)
+  if (action === 'myCommunities') return handleMyCommunities(openid, _trace)
   if (action === 'saveNotificationSubscription') {
     return saveNotificationSubscription(
       openid,
