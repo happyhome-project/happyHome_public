@@ -26,7 +26,10 @@ const cloudApi = readProjectFile('miniprogram', 'src', 'api', 'cloud.ts')
 const searchApi = cloudApi.slice(cloudApi.indexOf('search: (params:'), cloudApi.indexOf('get: (postId:', cloudApi.indexOf('search: (params:')))
 
 assertIncludes(homePage, 'class="home-search home-search--primary"', 'home primary search entry')
-assertIncludes(homePage, 'class="home-search home-search--fixed"', 'home fixed search entry')
+if ((homePage.match(/class="home-search /g) || []).length !== 1) {
+  throw new Error('home must render exactly one search entry')
+}
+assertNotIncludes(homePage, 'home-search--fixed', 'home duplicate fixed search entry')
 assertIncludes(homePage, 'placeholder="试试搜周边亲子游路线"', 'home search placeholder')
 assertIncludes(homePage, '@confirm="submitHomeSearch"', 'home search confirm')
 assertIncludes(homePage, '/pages/search/index', 'home search navigation')
