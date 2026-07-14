@@ -414,7 +414,7 @@ async function loadPost(postId: string) {
     if (!res?.post) {
       throw new Error('帖子数据为空，请稍后重试')
     }
-    post.value = res.post
+    post.value = normalizeNativeArchiveDetailPost(res.post)
     section.value = post.value?.area === 'archive' && !post.value?.sectionId
       ? buildNativeArchiveDetailSection(post.value)
       : communityStore.currentSections.find((item: any) => item._id === post.value?.sectionId) || null
@@ -499,6 +499,22 @@ function buildNativeArchiveDetailSection(currentPost: any) {
       { widgetId: 'title', fieldKey: 'title', type: 'short_text', label: '标题', required: true, order: 0, showInList: true },
       { widgetId: 'body', fieldKey: 'body', type: 'rich_note', label: '正文', required: true, order: 1, showInList: false },
     ],
+  }
+}
+
+function normalizeNativeArchiveDetailPost(currentPost: any) {
+  if (currentPost?.area !== 'archive' || currentPost?.sectionId || currentPost?.format !== 'image_text') return currentPost
+  const content = currentPost.content || {}
+  return {
+    ...currentPost,
+    content: {
+      ...content,
+      image_note_images: content.images,
+      image_note_title: content.title,
+      image_note_body: content.body,
+      image_note_topics: currentPost.topics || [],
+      image_note_location: content.location,
+    },
   }
 }
 

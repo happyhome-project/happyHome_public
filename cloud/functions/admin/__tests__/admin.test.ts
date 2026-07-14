@@ -1862,4 +1862,10 @@ test('archive topics: community-scoped admins can list and add manual origin wit
   expect(db.setById).toHaveBeenCalledWith('archive_topics', expect.stringMatching(/^at_/), expect.objectContaining({
     topicKey: '亲子出游', displayName: '周末亲子游', origins: ['legacy', 'admin'], adminOrder: 2,
   }))
+
+  ;(db.getByIdOrNull as jest.Mock).mockResolvedValueOnce({
+    topicKey: '亲子出游', displayName: '周末亲子游', origins: ['legacy', 'admin'], enabled: false,
+  })
+  await main({ action: 'archiveTopic.save', communityId: 'community-1', topicKey: '亲子出游', displayName: '周末亲子游', adminOrder: 4 })
+  expect(db.setById).toHaveBeenLastCalledWith('archive_topics', expect.stringMatching(/^at_/), expect.objectContaining({ enabled: false, adminOrder: 4 }))
 })

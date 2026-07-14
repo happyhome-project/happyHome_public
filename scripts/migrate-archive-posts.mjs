@@ -28,8 +28,9 @@ async function readAll(collectionName, where) {
 
 const sections = await readAll('sections', { communityId })
 const posts = await readAll('posts', { communityId })
+const archiveTopics = await readAll('archive_topics', { communityId })
 const result = await executeArchiveMigration({
   set: (collectionName, id, data) => database.collection(collectionName).doc(id).set({ data }),
   update: (collectionName, id, data) => database.collection(collectionName).doc(id).update({ data }),
-}, { communityId, sections, posts }, { apply })
+}, { communityId, sections, posts, archiveTopics }, { apply })
 console.log(JSON.stringify(result, null, 2))

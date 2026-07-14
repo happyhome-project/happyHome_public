@@ -2,13 +2,9 @@
   "schemaVersion": 1,
   "changeId": "archive-user-visible",
   "actions": [
-    "ensure-indexes",
-    "migrate-archive-posts",
-    "rebuild-post-rag-index"
+    "ensure-indexes"
   ],
-  "migrations": [
-    "migrate-archive-posts"
-  ],
+  "migrations": [],
   "smokeSuites": [],
   "releaseImpact": {
     "cloudFunctions": "Deploy post and admin for indexed archive feeds, topic management, and section-free search indexing.",

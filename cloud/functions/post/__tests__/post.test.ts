@@ -2134,6 +2134,10 @@ test('create: persists an image-text archive post without loading or storing a s
   expect(db.setById).toHaveBeenCalledWith('archive_post_topics', expect.stringMatching(/^apt_/), expect.objectContaining({
     communityId: 'community-1', postId: 'archive-image-1', topicKey: '亲子出游', auditStatus: result.auditStatus,
   }))
+  expect(db.setById).toHaveBeenCalledWith('archive_topics', expect.stringMatching(/^at_/), expect.objectContaining({
+    recentScore: result.auditStatus === 'pass' ? 1 : 0,
+    recentPostCount: result.auditStatus === 'pass' ? 1 : 0,
+  }))
 })
 
 test('create: persists a text archive post with its normalized cover theme', async () => {

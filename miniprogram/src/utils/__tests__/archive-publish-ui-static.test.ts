@@ -25,6 +25,14 @@ describe('archive publishing entry', () => {
     const detail = read('pages', 'detail', 'index.vue')
     expect(detail).toContain("post.value?.area === 'archive' && !post.value?.sectionId")
     expect(detail).toContain('buildNativeArchiveDetailSection')
+    expect(detail).toContain('image_note_images: content.images')
+    expect(detail).toContain('image_note_topics: currentPost.topics || []')
     expect(detail).toContain("sectionApi.get(post.value.sectionId")
+  })
+
+  test('topic switching invalidates stale archive requests', () => {
+    const home = read('pages', 'index', 'index.vue')
+    expect(home).toContain('const requestEpoch = ++archiveRequestEpoch')
+    expect(home).toContain('requestEpoch !== archiveRequestEpoch')
   })
 })

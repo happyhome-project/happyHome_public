@@ -42,13 +42,14 @@ export function selectArchiveTabs(records: ArchiveTopicRecord[], limit = 7): Arc
 
   append(enabled
     .filter((record) => record.origins.includes('legacy'))
-    .sort((left, right) => finiteOrder(left.legacyOrder) - finiteOrder(right.legacyOrder)))
+    .sort((left, right) => finiteOrder(left.legacyOrder) - finiteOrder(right.legacyOrder) || left.topicKey.localeCompare(right.topicKey)))
   append(enabled
     .filter((record) => record.origins.includes('admin'))
-    .sort((left, right) => finiteOrder(left.adminOrder) - finiteOrder(right.adminOrder)))
+    .sort((left, right) => finiteOrder(left.adminOrder) - finiteOrder(right.adminOrder) || left.topicKey.localeCompare(right.topicKey)))
   append(enabled.slice().sort((left, right) => (
     Number(right.recentScore || 0) - Number(left.recentScore || 0)
       || Number(right.recentPostCount || 0) - Number(left.recentPostCount || 0)
+      || left.topicKey.localeCompare(right.topicKey)
   )))
   return selected
 }

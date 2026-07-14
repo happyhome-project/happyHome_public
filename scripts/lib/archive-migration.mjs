@@ -27,26 +27,32 @@ function mergeLegacyTopic(existing, legacyName) {
   return [...values.filter((value) => value !== legacy).slice(0, MAX_TOPICS - 1), legacy]
 }
 
-export function planArchiveMigration({ communityId, sections, posts }) {
+export function planArchiveMigration({ communityId, sections, posts, archiveTopics = [] }) {
   const evergreen = (sections || [])
     .filter((section) => section.communityId === communityId && section.type !== 'realtime')
     .sort((left, right) => Number(left.order || 0) - Number(right.order || 0) || String(left._id).localeCompare(String(right._id)))
   const sectionById = new Map(evergreen.map((section) => [section._id, section]))
   const topicUpserts = []
+  const existingTopics = new Map((archiveTopics || []).map((topic) => [String(topic.topicKey || ''), topic]))
   for (const section of evergreen) {
     const topic = normalizeTopic(section.name)
     if (!topic) continue
+    const existing = existingTopics.get(topic.topicKey) || {}
+    const { _id: _existingId, ...existingData } = existing
     topicUpserts.push({
+      ...existingData,
       _id: digestId('at', communityId, topic.topicKey),
       communityId,
       topicKey: topic.topicKey,
-      displayName: topic.displayName,
-      origins: ['legacy'],
-      enabled: true,
+      displayName: existing.displayName || topic.displayName,
+      origins: Array.from(new Set([...(existing.origins || []), 'legacy'])),
+      enabled: existing.enabled !== false,
       legacyOrder: Number(section.order || 0),
       legacySectionId: section._id,
-      recentScore: 0,
-      recentPostCount: 0,
+      recentScore: Number(existing.recentScore || 0),
+      recentPostCount: Number(existing.recentPostCount || 0),
+      createdAt: existing.createdAt || section.createdAt || '1970-01-01T00:00:00.000Z',
+      updatedAt: section.updatedAt || section.createdAt || existing.updatedAt || '1970-01-01T00:00:00.000Z',
     })
   }
 
@@ -94,9 +100,15 @@ export function planArchiveMigration({ communityId, sections, posts }) {
 export async function executeArchiveMigration(deps, input, { apply = false } = {}) {
   const plan = planArchiveMigration(input)
   if (apply) {
-    for (const topic of plan.topicUpserts) await deps.set('archive_topics', topic._id, topic)
+    for (const topic of plan.topicUpserts) {
+      const { _id, ...data } = topic
+      await deps.set('archive_topics', _id, data)
+    }
     for (const update of plan.postUpdates) await deps.update('posts', update.postId, update.data)
-    for (const link of plan.topicLinks) await deps.set('archive_post_topics', link._id, link)
+    for (const link of plan.topicLinks) {
+      const { _id, ...data } = link
+      await deps.set('archive_post_topics', _id, data)
+    }
   }
   return {
     applied: apply,

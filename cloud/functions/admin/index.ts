@@ -1198,7 +1198,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       topicKey: normalized.topicKey,
       displayName: display,
       origins,
-      enabled: params.enabled !== false,
+      enabled: typeof params.enabled === 'undefined' ? existing?.enabled !== false : params.enabled !== false,
       adminOrder: Number.isFinite(Number(params.adminOrder)) ? Math.max(0, Math.floor(Number(params.adminOrder))) : Number(existing?.adminOrder || 0),
       recentScore: Number(existing?.recentScore || 0),
       recentPostCount: Number(existing?.recentPostCount || 0),

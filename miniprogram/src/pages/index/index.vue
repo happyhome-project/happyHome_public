@@ -539,6 +539,7 @@ const archivePreviewMinHeightPx = ref(0)
 const showHomePullRefreshHint = ref(false)
 const homeMenuSafeRightInset = ref(0)
 let refreshingHome = false
+let archiveRequestEpoch = 0
 let queuedForcedHomeRefresh = false
 let mountedAt = 0
 let unsubscribeBackgroundFetchSnapshot: (() => void) | null = null
@@ -1252,7 +1253,8 @@ function openHomeEmptyPublish() {
 
 async function loadArchiveFeed(reset = false) {
   const communityId = communityStore.currentCommunityId || ''
-  if (!communityId || archiveLoading.value || (!reset && !archiveHasMore.value)) return
+  if (!communityId || (!reset && (archiveLoading.value || !archiveHasMore.value))) return
+  const requestEpoch = ++archiveRequestEpoch
   archiveLoading.value = true
   archiveError.value = ''
   try {
@@ -1260,7 +1262,7 @@ async function loadArchiveFeed(reset = false) {
       archiveColumns.value = [[], []]
       archiveCursor.value = ''
       const tabResult = await postApi.listArchiveTabs({ communityId, asGuest: !userStore.isLoggedIn })
-      if (communityId !== communityStore.currentCommunityId) return
+      if (requestEpoch !== archiveRequestEpoch || communityId !== communityStore.currentCommunityId) return
       archiveTabs.value = Array.isArray(tabResult.tabs) && tabResult.tabs.length
         ? tabResult.tabs.slice(0, 8)
         : [{ topicKey: '', displayName: '全部' }]
@@ -1273,15 +1275,16 @@ async function loadArchiveFeed(reset = false) {
       limit: 20,
       asGuest: !userStore.isLoggedIn,
     })
-    if (communityId !== communityStore.currentCommunityId) return
+    if (requestEpoch !== archiveRequestEpoch || communityId !== communityStore.currentCommunityId) return
     archiveColumns.value = appendArchivePage(reset ? [[], []] : archiveColumns.value, result.posts || [])
     archiveCursor.value = String(result.nextCursor || '')
     archiveHasMore.value = Boolean(result.hasMore)
   } catch (error) {
+    if (requestEpoch !== archiveRequestEpoch) return
     archiveError.value = '加载失败，请重试'
     clientLog('error', 'home.archive.feed.fail', { communityId, topicKey: selectedArchiveTopic.value, error })
   } finally {
-    archiveLoading.value = false
+    if (requestEpoch === archiveRequestEpoch) archiveLoading.value = false
   }
 }
 

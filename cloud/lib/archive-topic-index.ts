@@ -29,6 +29,9 @@ export async function syncArchivePostTopics(post: {
     const { topicKey, displayName } = normalizeArchiveTopic(rawTopic)
     const topicId = archiveTopicId(post.communityId, topicKey)
     const existing = await db.getByIdOrNull<any>('archive_topics', topicId)
+    const linkId = archivePostTopicId(post._id, topicKey)
+    const existingLink = await db.getByIdOrNull<any>('archive_post_topics', linkId)
+    const countsAsRecent = !existingLink && post.status === 'active' && post.auditStatus === 'pass'
     const { _id: _existingId, ...existingData } = existing || {}
     const origins = Array.from(new Set([...(existing?.origins || []), 'organic']))
     await db.setById('archive_topics', topicId, {
@@ -38,12 +41,12 @@ export async function syncArchivePostTopics(post: {
       displayName: existing?.displayName || displayName,
       origins,
       enabled: existing?.enabled !== false,
-      recentScore: Number(existing?.recentScore || 0),
-      recentPostCount: Number(existing?.recentPostCount || 0),
+      recentScore: Number(existing?.recentScore || 0) + (countsAsRecent ? 1 : 0),
+      recentPostCount: Number(existing?.recentPostCount || 0) + (countsAsRecent ? 1 : 0),
       createdAt: existing?.createdAt || now,
       updatedAt: now,
     })
-    await db.setById('archive_post_topics', archivePostTopicId(post._id, topicKey), {
+    await db.setById('archive_post_topics', linkId, {
       communityId: post.communityId,
       topicKey,
       postId: post._id,
