@@ -34,7 +34,7 @@ archivePostTopicId('post-1', '亲子出游') // stable across retries
 
 - [ ] **Step 2: Run tests and verify RED**
 
-Run: `npm.cmd --workspace cloud run test:unit -- --runInBand shared/__tests__/archive-topics.test.ts lib/__tests__/archive-topic-index.test.ts lib/__tests__/db.test.ts`  
+Run: `npm.cmd --workspace cloud run test:unit -- --runInBand shared/__tests__/archive-topics.test.ts lib/__tests__/archive-topic-index.test.ts lib/__tests__/db.test.ts`
 Expected: FAIL because the new modules and cursor query helper do not exist.
 
 - [ ] **Step 3: Implement the domain and DB boundary**
@@ -71,7 +71,7 @@ export async function queryBefore(
 
 - [ ] **Step 4: Run focused tests and verify GREEN**
 
-Run the Step 2 command.  
+Run the Step 2 command.
 Expected: all selected suites pass.
 
 - [ ] **Step 5: Commit**
@@ -107,7 +107,7 @@ For native archive create, audit pass/reject, delete, and already-deleted compen
 
 - [ ] **Step 3: Run focused tests and verify RED**
 
-Run: `npm.cmd --workspace cloud run test:unit -- --runInBand functions/post/__tests__/post.test.ts lib/__tests__/content-audit.test.ts`  
+Run: `npm.cmd --workspace cloud run test:unit -- --runInBand functions/post/__tests__/post.test.ts lib/__tests__/content-audit.test.ts`
 Expected: FAIL on missing actions and projection writes.
 
 - [ ] **Step 4: Implement tabs and cursor feed**
@@ -138,7 +138,7 @@ Native create upserts organic topics and pending/pass projection rows. Audit cal
 
 - [ ] **Step 6: Run focused tests and verify GREEN**
 
-Run Step 3.  
+Run Step 3.
 Expected: pass.
 
 - [ ] **Step 7: Commit**
@@ -176,7 +176,7 @@ Require collections `archive_topics` and `archive_post_topics`, plus compound in
 
 - [ ] **Step 3: Run tests and verify RED**
 
-Run: `node --test scripts/lib/archive-migration.test.mjs scripts/lib/ensure-indexes.test.mjs scripts/lib/release-plan.test.mjs`  
+Run: `node --test scripts/lib/archive-migration.test.mjs scripts/lib/ensure-indexes.test.mjs scripts/lib/release-plan.test.mjs`
 Expected: FAIL because migration and declarations are absent.
 
 - [ ] **Step 4: Implement dry-run-first migration**
@@ -196,7 +196,7 @@ Declare at least:
 
 - [ ] **Step 6: Run tests and verify GREEN**
 
-Run Step 3.  
+Run Step 3.
 Expected: pass.
 
 - [ ] **Step 7: Commit**
@@ -221,7 +221,7 @@ Assert an audit-passed native archive post produces an index document with `comm
 
 - [ ] **Step 2: Run focused RAG tests and verify RED**
 
-Run: `npm.cmd --workspace cloud run test:unit -- --runInBand lib/__tests__/post-rag-indexing.test.ts lib/__tests__/post-rag.test.ts lib/__tests__/content-audit.test.ts functions/post/__tests__/post.test.ts`  
+Run: `npm.cmd --workspace cloud run test:unit -- --runInBand lib/__tests__/post-rag-indexing.test.ts lib/__tests__/post-rag.test.ts lib/__tests__/content-audit.test.ts functions/post/__tests__/post.test.ts`
 Expected: FAIL because archive indexing is currently skipped.
 
 - [ ] **Step 3: Implement section-optional indexing**
@@ -230,7 +230,7 @@ Remove the blanket archive skip. Make `sectionId` optional for archive index doc
 
 - [ ] **Step 4: Run focused tests and verify GREEN**
 
-Run Step 2.  
+Run Step 2.
 Expected: pass.
 
 - [ ] **Step 5: Commit**
@@ -260,7 +260,7 @@ Also cover deterministic legacy text-cover fallback and duplicate post suppressi
 
 - [ ] **Step 2: Run tests and verify RED**
 
-Run: `npm.cmd --workspace miniprogram run test:unit -- --run src/api/__tests__/cloud.test.ts src/utils/__tests__/archive-feed.test.ts`  
+Run: `npm.cmd --workspace miniprogram run test:unit -- --run src/api/__tests__/cloud.test.ts src/utils/__tests__/archive-feed.test.ts`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement typed API and feed helpers**
@@ -269,7 +269,7 @@ Export `ArchiveTab`, `ArchiveFeedCard`, `ArchiveFeedPage`, `normalizeArchiveCard
 
 - [ ] **Step 4: Run tests and verify GREEN**
 
-Run Step 2.  
+Run Step 2.
 Expected: pass.
 
 - [ ] **Step 5: Commit**
@@ -293,7 +293,7 @@ Assert the home no longer renders evergreen section tabs or template-selected ar
 
 - [ ] **Step 2: Run focused tests and verify RED**
 
-Run: `npm.cmd --workspace miniprogram run test:unit -- --run` plus the exact new static test script.  
+Run: `npm.cmd --workspace miniprogram run test:unit -- --run` plus the exact new static test script.
 Expected: the new selectors/components are missing.
 
 - [ ] **Step 3: Implement topic tabs and waterfall components**
@@ -337,7 +337,7 @@ Assert the `+` sheet has exactly `发图文`, `写文字`, and `发起协作`; n
 
 - [ ] **Step 2: Run tests and verify RED**
 
-Run focused mini-program tests and `npm.cmd run test:mp:publish-ui-static`.  
+Run focused mini-program tests and `npm.cmd run test:mp:publish-ui-static`.
 Expected: FAIL because the sheet still maps publishable sections.
 
 - [ ] **Step 3: Implement the three-entry sheet**
@@ -354,7 +354,7 @@ Route `origin === 'legacy_section'` through the existing section-aware renderer 
 
 - [ ] **Step 6: Verify full mini-program suite and commit**
 
-Run the three commands from Task 6 Step 5 and publish UI static tests.  
+Run the three commands from Task 6 Step 5 and publish UI static tests.
 Expected: pass.
 
 ```powershell
@@ -379,7 +379,7 @@ Cover list, add, rename, enable/hide, reorder, and delete-admin-origin behavior.
 
 - [ ] **Step 2: Run focused Cloud tests and verify RED**
 
-Run: `npm.cmd --workspace cloud run test:unit -- --runInBand functions/admin/__tests__/admin.test.ts`  
+Run: `npm.cmd --workspace cloud run test:unit -- --runInBand functions/admin/__tests__/admin.test.ts`
 Expected: FAIL on missing actions.
 
 - [ ] **Step 3: Implement scoped admin actions**
