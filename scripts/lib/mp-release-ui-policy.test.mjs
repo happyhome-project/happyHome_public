@@ -77,10 +77,11 @@ test('builds DevTools maintenance args bound to one IDE port', () => {
   ])
 })
 
-test('requires cold-start home, home images, home detail, login version, and clean profile login release UI evidence', () => {
+test('requires cold-start home, home images, sticky archive tabs, home detail, login version, and clean profile login release UI evidence', () => {
   assert.throws(() => assertReleaseUiEvidence({
     homeColdStartNonEmpty: false,
     homeImagesRendered: true,
+    homeArchiveTabsSticky: true,
     homeDetailNonEmpty: true,
     loginVersionVisible: true,
     profileLoginClean: true,
@@ -88,15 +89,17 @@ test('requires cold-start home, home images, home detail, login version, and cle
 
   assert.throws(() => assertReleaseUiEvidence({
     homeColdStartNonEmpty: true,
-    homeImagesRendered: false,
+    homeImagesRendered: true,
+    homeArchiveTabsSticky: false,
     homeDetailNonEmpty: true,
     loginVersionVisible: true,
     profileLoginClean: true,
-  }), /HH_RELEASE_HOME_IMAGES_RENDERED/)
+  }), /HH_RELEASE_HOME_ARCHIVE_TABS_STICKY/)
 
   assert.throws(() => assertReleaseUiEvidence({
     homeColdStartNonEmpty: true,
     homeImagesRendered: true,
+    homeArchiveTabsSticky: true,
     homeDetailNonEmpty: true,
     loginVersionVisible: true,
     profileLoginClean: false,
@@ -105,6 +108,7 @@ test('requires cold-start home, home images, home detail, login version, and cle
   assert.throws(() => assertReleaseUiEvidence({
     homeColdStartNonEmpty: true,
     homeImagesRendered: true,
+    homeArchiveTabsSticky: true,
     homeDetailNonEmpty: true,
     loginBuildIdentityVerified: false,
     profileLoginClean: true,
@@ -113,6 +117,7 @@ test('requires cold-start home, home images, home detail, login version, and cle
   assert.doesNotThrow(() => assertReleaseUiEvidence({
     homeColdStartNonEmpty: true,
     homeImagesRendered: true,
+    homeArchiveTabsSticky: true,
     homeDetailNonEmpty: true,
     loginBuildIdentityVerified: true,
     profileLoginClean: true,
@@ -121,6 +126,7 @@ test('requires cold-start home, home images, home detail, login version, and cle
   assert.doesNotThrow(() => assertReleaseUiEvidence({
     homeColdStartNonEmpty: true,
     homeImagesRendered: true,
+    homeArchiveTabsSticky: true,
     homeDetailNonEmpty: true,
     loginVersionVisible: true,
     profileLoginClean: true,
@@ -131,6 +137,7 @@ test('documents the release UI evidence markers used by the gate', () => {
   assert.deepEqual(REQUIRED_RELEASE_UI_MARKERS.map((item) => item.marker), [
     'HH_RELEASE_HOME_COLD_START_NONEMPTY',
     'HH_RELEASE_HOME_IMAGES_RENDERED',
+    'HH_RELEASE_HOME_ARCHIVE_TABS_STICKY',
     'HH_RELEASE_HOME_DETAIL_NONEMPTY',
     'HH_RELEASE_LOGIN_VERSION',
     'HH_RELEASE_PROFILE_LOGIN_CLEAN',
@@ -148,6 +155,14 @@ test('release profile validation reads the build marker attribute and rejects vi
   assert.match(source, /!text\.includes\(expectedVersion\)/)
   assert.match(source, /const buildIdentityPassed =/)
   assert.match(source, /loginBuildIdentityVerified: profileLoginClean\.buildIdentityPassed/)
+})
+
+test('release home tabs evidence pins below the fixed masthead', () => {
+  const source = readFileSync(new URL('../test-mp-release-ui.mjs', import.meta.url), 'utf8')
+
+  assert.match(source, /query\.select\('\.home-topbar'\)\.boundingClientRect\(\)/)
+  assert.match(source, /Math\.abs\(pinnedTop - Number\(pinned\.topbar\?\.bottom \|\| 0\)\) <= 8/)
+  assert.doesNotMatch(source, /Math\.abs\(pinnedTop - pinned\.safeTop\) <= 8/)
 })
 
 test('native release profile validation requires one logged-out login identity entry', () => {
