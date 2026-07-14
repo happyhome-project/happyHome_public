@@ -43,9 +43,29 @@ server.listen(0, '127.0.0.1', async () => {
 
     const rects = () => page.evaluate(() => {
       const topbar = document.querySelector('.home-topbar').getBoundingClientRect()
-      const search = document.querySelector('.home-search-sticky-shell').getBoundingClientRect()
-      const tabs = document.querySelector('.section-tabs-sticky-shell').getBoundingClientRect()
-      return { topbar, search, tabs, scrollY: window.scrollY }
+      const searchElement = document.querySelector('.home-search-sticky-shell')
+      const tabsElement = document.querySelector('.section-tabs-sticky-shell')
+      const archiveTabsElement = document.querySelector('.archive-topic-tabs')
+      const search = searchElement.getBoundingClientRect()
+      const tabs = tabsElement.getBoundingClientRect()
+      const surface = (element) => {
+        const style = getComputedStyle(element)
+        return {
+          backgroundColor: style.backgroundColor,
+          backgroundImage: style.backgroundImage,
+          boxShadow: style.boxShadow,
+          backdropFilter: style.backdropFilter || style.webkitBackdropFilter || 'none',
+        }
+      }
+      return {
+        topbar,
+        search,
+        tabs,
+        searchSurface: surface(searchElement),
+        tabsSurface: surface(tabsElement),
+        archiveTabsSurface: archiveTabsElement ? surface(archiveTabsElement) : null,
+        scrollY: window.scrollY,
+      }
     })
     const before = await rects()
     await page.evaluate(() => window.scrollTo(0, document.querySelector('.home-search-sticky-shell').offsetTop + 40))
@@ -59,6 +79,15 @@ server.listen(0, '127.0.0.1', async () => {
     const restored = await rects()
 
     const close = (a, b, tolerance = 3) => Math.abs(a - b) <= tolerance
+    const transparent = (surface) => (
+      surface.backgroundColor === 'rgba(0, 0, 0, 0)'
+      && surface.backgroundImage === 'none'
+      && surface.boxShadow === 'none'
+      && surface.backdropFilter === 'none'
+    )
+    if (!transparent(before.searchSurface)) throw new Error(`search sticky wrapper owns a surface: ${JSON.stringify(before.searchSurface)}`)
+    if (!transparent(before.tabsSurface)) throw new Error(`tags sticky wrapper owns a surface: ${JSON.stringify(before.tabsSurface)}`)
+    if (before.archiveTabsSurface && !transparent(before.archiveTabsSurface)) throw new Error(`archive topic tabs own a surface: ${JSON.stringify(before.archiveTabsSurface)}`)
     if (!(before.search.top > before.topbar.bottom + 20)) throw new Error('search is not initially in document flow')
     if (!close(searchPinned.search.top, searchPinned.topbar.bottom)) throw new Error('search did not pin below masthead')
     if (!close(tagsPinned.search.top, tagsPinned.topbar.bottom)) throw new Error('search moved during tags pin')

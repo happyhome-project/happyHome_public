@@ -4,6 +4,13 @@ import { describe, expect, test } from 'vitest'
 
 const page = readFileSync(resolve(__dirname, '../../pages/index/index.vue'), 'utf8')
 
+function ruleBody(selector: string) {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const match = page.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`, 's'))
+  expect(match, `missing style rule for ${selector}`).toBeTruthy()
+  return match?.[1] || ''
+}
+
 describe('home progressive sticky navigation', () => {
   test('stacks search below masthead and tags below search', () => {
     expect(page).toContain('class="home-search-sticky-shell"')
@@ -15,5 +22,14 @@ describe('home progressive sticky navigation', () => {
     const live = page.indexOf('<!-- Live strip')
     expect(search).toBeLessThan(live)
     expect(page.indexOf('class="home-refresh-hint"')).toBeGreaterThan(search)
+  })
+
+  test('keeps sticky wrappers visually transparent', () => {
+    for (const selector of ['.home-search-sticky-shell', '.section-tabs-sticky-shell']) {
+      const body = ruleBody(selector)
+      expect(body).not.toMatch(/(?:^|\s)background\s*:/)
+      expect(body).not.toMatch(/box-shadow\s*:/)
+      expect(body).not.toMatch(/backdrop-filter\s*:/)
+    }
   })
 })

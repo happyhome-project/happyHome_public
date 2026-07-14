@@ -2936,8 +2936,6 @@ onShareAppMessage(() => {
   top: calc(150rpx + env(safe-area-inset-top));
   z-index: $hh-z-sticky + 1;
   padding: 24rpx var(--hh-page-x);
-  background: rgba(250, 250, 249, 0.98);
-  box-shadow: 0 10rpx 24rpx rgba(15, 23, 42, 0.07);
 }
 
 .home-search-sticky-shell .home-search {
@@ -3044,9 +3042,6 @@ onShareAppMessage(() => {
   z-index: $hh-z-sticky;
   margin: 34rpx 0 20rpx;
   padding: 12rpx 0;
-  background: rgba(250, 250, 249, 0.96);
-  box-shadow: 0 10rpx 24rpx rgba(15, 23, 42, 0.07);
-  backdrop-filter: blur(18rpx);
 }
 
 .section-tabs-inner {
