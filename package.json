@@ -96,6 +96,7 @@
     "verify:post-rag-smoke": "node scripts/verify-post-rag-smoke.mjs",
     "backfill:post-rag-v2": "node scripts/backfill-post-rag-v2.mjs",
     "verify:post-rag-timer": "node scripts/verify-post-rag-timer.mjs",
+    "validate:rag:isolated": "node scripts/validate-post-rag-isolated.mjs",
     "eval:post-semantic-search": "node scripts/eval-post-semantic-search.mjs",
     "rebuild:post-search-index": "node scripts/rebuild-post-search-index.mjs",
     "test:post-rag-rebuild": "node --test scripts/lib/rebuild-post-rag-index.test.mjs scripts/lib/configure-rag-workers.test.mjs scripts/lib/configure-rag-network.test.mjs scripts/lib/update-rag-env.test.mjs scripts/lib/ensure-tencent-rag-index.test.mjs scripts/lib/verify-tencent-rag.test.mjs",

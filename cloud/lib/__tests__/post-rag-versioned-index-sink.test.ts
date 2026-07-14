@@ -68,7 +68,7 @@ test('stageUpsert writes bounded embeddings, immutable bulk ids and idempotent v
   await sink.stageUpsert({ projection: projection() as any, job: job(), ...LEASE })
   expect(embedded).toEqual([['private text 0'], ['private text 1']])
   const bulk = calls[0]
-  expect(bulk).toMatchObject({ method: 'POST', path: 'rag-index/_bulk?refresh=wait_for', requestOptions: { contentType: 'application/x-ndjson' } })
+  expect(bulk).toMatchObject({ method: 'POST', path: 'rag-index/_bulk?refresh=true', requestOptions: { contentType: 'application/x-ndjson' } })
   const lines = bulk.body.trim().split('\n').map(JSON.parse)
   expect(lines[0]).toEqual({ create: { _id: `post-1:source-2:${ATTEMPT_A}:chunk-0` } })
   expect(lines[1]).toMatchObject({ postId: 'post-1', sourceVersion: 'source-2', chunkId: 'chunk-0', chunkChecksum: 'chunk-sum-0', projectionChecksum: 'projection-sum', embedding: [0.1, 0.2] })
@@ -242,6 +242,73 @@ test('stageUpsert atomically fences mirror writes when the lease is reclaimed af
   ])
 })
 
+test('stageUpsert writes the exact current job fence before mirror writes', async () => {
+  const database: any = fakeDatabase()
+  const currentLease = structuredClone(database.collections.get('post_rag_jobs').get('job-2'))
+  const writes: Array<{ name: string; id: string; data: Doc }> = []
+  const originalRunTransaction = database.runTransaction
+  database.runTransaction = async (fn: any) => originalRunTransaction(async (tx: any) => fn({
+    ...tx,
+    setById: async (name: string, id: string, data: Doc) => {
+      writes.push({ name, id, data: structuredClone(data) })
+      return tx.setById(name, id, data)
+    },
+  }))
+  const { sink } = makeSink({ database })
+
+  await sink.stageUpsert({ projection: projection() as any, job: job(), ...LEASE })
+
+  expect(writes[0]).toEqual({ name: 'post_rag_jobs', id: 'job-2', data: currentLease })
+  expect(writes.slice(1).map(write => write.name)).toEqual(['post_rag_index_versions', 'post_rag_index_versions'])
+})
+
+test('stageUpsert retries a cleanup write conflict, loses the deleted lease, and cleans bulked ES documents', async () => {
+  const database: any = fakeDatabase()
+  let bulkCompleted = false
+  let cleanupDeleteRaced = false
+  let cleanupDeleteRacedAfterBulk = false
+  database.runTransaction = async (fn: any) => {
+    const attempt = async (): Promise<any> => {
+      const writes: Array<{ name: string; id: string; data: Doc }> = []
+      const result = await fn({
+        getById: async (name: string, id: string) => structuredClone(database.collections.get(name)?.get(id) || null),
+        setById: async (name: string, id: string, data: Doc) => { writes.push({ name, id, data: structuredClone(data) }) },
+      })
+      if (!cleanupDeleteRaced && writes.some(write => write.name === 'post_rag_jobs' && write.id === 'job-2')) {
+        cleanupDeleteRaced = true
+        cleanupDeleteRacedAfterBulk = bulkCompleted
+        database.collections.get('post_rag_jobs').delete('job-2')
+        return attempt()
+      }
+      for (const write of writes) {
+        if (!database.collections.has(write.name)) database.collections.set(write.name, new Map())
+        database.collections.get(write.name).set(write.id, structuredClone(write.data))
+      }
+      return result
+    }
+    return attempt()
+  }
+  const calls: any[] = []
+  const requestJson = async (method: string, path: string, body: any) => {
+    calls.push({ method, path, body })
+    if (path.includes('_bulk')) {
+      bulkCompleted = true
+      return { errors: false, items: [{ create: { status: 201 } }, { create: { status: 201 } }] }
+    }
+    return { deleted: body.query.ids.values.length, timed_out: false, failures: [] }
+  }
+  const { sink } = makeSink({ database, requestJson })
+
+  await expect(sink.stageUpsert({ projection: projection() as any, job: job(), ...LEASE })).rejects.toMatchObject({ code: 'LEASE_LOST' })
+  expect(bulkCompleted).toBe(true)
+  expect(cleanupDeleteRaced).toBe(true)
+  expect(cleanupDeleteRacedAfterBulk).toBe(true)
+  expect(database.collections.get('post_rag_index_versions')?.size || 0).toBe(0)
+  expect(calls.find(call => call.path.includes('_delete_by_query')).body.query.ids.values.sort()).toEqual([
+    `post-1:source-2:${ATTEMPT_A}:chunk-0`, `post-1:source-2:${ATTEMPT_A}:chunk-1`,
+  ])
+})
+
 test('stageUpsert rejects partial ES bulk failures with an authenticated typed error', async () => {
   const { sink } = makeSink({ requestJson: async () => ({ errors: true, items: [{ index: { status: 429, error: { reason: 'secret' } } }] }) })
   await expect(sink.stageUpsert({ projection: projection() as any, job: job(), ...LEASE })).rejects.toMatchObject({ name: 'PostRagVersionedSinkError', code: 'ES_BULK_FAILED' })
@@ -376,6 +443,8 @@ test('remove writes tombstone before deleting explicit IDs at or below its order
   const { sink } = makeSink({ database, requestJson })
   await expect(sink.remove({ postId: 'post-1', sourceVersion: 'removed-2', activationOrder: { contentVersion: 2, jobId: 'job-2' } })).rejects.toMatchObject({ code: 'ES_DELETE_FAILED' })
   expect(database.collections.get('post_rag_index_state_v2')!.get('post-1')).toMatchObject({ state: 'removed', sourceVersion: 'removed-2' })
+  expect(database.collections.get('post_rag_index_versions')!.has('old')).toBe(true)
+  expect(database.collections.get('post_rag_index_versions')!.has('equal')).toBe(true)
   fails = false
   await expect(sink.remove({ postId: 'post-1', sourceVersion: 'removed-2', activationOrder: { contentVersion: 2, jobId: 'job-2' } })).resolves.toEqual({ removed: true })
   await expect(sink.remove({ postId: 'post-1', sourceVersion: 'old', activationOrder: { contentVersion: 1, jobId: 'old' } })).resolves.toEqual({ removed: false })
@@ -405,18 +474,16 @@ test('rejects unsafe ES index paths and projections that do not belong to the cl
 test.each([
   ['timed out', { deleted: 0, timed_out: true, failures: [] }],
   ['reported failures', { deleted: 0, timed_out: false, failures: [{ shard: 0 }] }],
-])('retains mirrors when delete-by-query %s and equal-order retry can finish cleanup', async (_label, failedResponse) => {
+])('keeps mirrors retryable when delete-by-query %s', async (_label, failedResponse) => {
   const database = fakeDatabase({
     'post_rag_index_state_v2/post-1': { schemaVersion: 2, postId: 'post-1', state: 'active', sourceVersion: 'source-1', activationOrder: { contentVersion: 1, jobId: 'job-1' } },
     'post_rag_index_versions/old': { _id: 'old', esDocumentId: 'old', schemaVersion: 2, postId: 'post-1', sourceVersion: 'source-1', activationOrder: { contentVersion: 1, jobId: 'job-1' } },
   })
-  const responses = [failedResponse, { deleted: 1, timed_out: false, failures: [] }]
-  const { sink } = makeSink({ database, requestJson: async () => responses.shift() })
+  const { sink } = makeSink({ database, requestJson: async () => failedResponse })
   const input = { postId: 'post-1', sourceVersion: 'removed-2', activationOrder: { contentVersion: 2, jobId: 'job-2' } }
   await expect(sink.remove(input)).rejects.toMatchObject({ code: 'ES_DELETE_FAILED' })
   expect(database.collections.get('post_rag_index_versions')!.has('old')).toBe(true)
-  await expect(sink.remove(input)).resolves.toEqual({ removed: true })
-  expect(database.collections.get('post_rag_index_versions')!.has('old')).toBe(false)
+  expect(database.collections.get('post_rag_index_state_v2')!.get('post-1')).toMatchObject({ state: 'removed' })
 })
 test('keeps legacy index state untouched while activating and removing through isolated v2 state', async () => {
   const legacy = { _id: 'post-1', postId: 'post-1', status: 'indexed', indexedAt: '2026-01-01T00:00:00.000Z', chunkCount: 7 }
@@ -440,16 +507,14 @@ test.each([
   ['unsafe deleted integer', { deleted: Number.MAX_SAFE_INTEGER + 1, timed_out: false, failures: [] }],
   ['missing failures', { deleted: 0, timed_out: false }],
   ['wrong failures type', { deleted: 0, timed_out: false, failures: 'none' }],
-])('rejects malformed delete response with %s, retains mirror, and permits equal-order retry', async (_label, malformedResponse) => {
+])('keeps mirrors retryable after malformed physical delete response with %s', async (_label, malformedResponse) => {
   const database = fakeDatabase({
     'post_rag_index_state_v2/post-1': { schemaVersion: 2, postId: 'post-1', state: 'active', sourceVersion: 'source-1', activationOrder: { contentVersion: 1, jobId: 'job-1' } },
     'post_rag_index_versions/old': { _id: 'old', esDocumentId: 'old', schemaVersion: 2, postId: 'post-1', sourceVersion: 'source-1', activationOrder: { contentVersion: 1, jobId: 'job-1' } },
   })
-  const responses = [malformedResponse, { deleted: 0, timed_out: false, failures: [] }]
-  const { sink } = makeSink({ database, requestJson: async () => responses.shift() })
+  const { sink } = makeSink({ database, requestJson: async () => malformedResponse })
   const input = { postId: 'post-1', sourceVersion: 'removed-2', activationOrder: { contentVersion: 2, jobId: 'job-2' } }
-  await expect(sink.remove(input)).rejects.toBeInstanceOf(PostRagVersionedSinkError)
+  await expect(sink.remove(input)).rejects.toMatchObject({ code: 'ES_DELETE_FAILED' })
   expect(database.collections.get('post_rag_index_versions')!.has('old')).toBe(true)
-  await expect(sink.remove(input)).resolves.toEqual({ removed: true })
-  expect(database.collections.get('post_rag_index_versions')!.has('old')).toBe(false)
+  expect(database.collections.get('post_rag_index_state_v2')!.get('post-1')).toMatchObject({ state: 'removed' })
 })

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { Post, Section } from '../shared/types'
 import * as db from './db'
 import { buildPostRagSourceProjection, isPostRagSourceProjectionValidationError, type PostRagSourceProjection } from './post-rag-indexing'
@@ -20,6 +21,7 @@ import {
   type PostRagActivationOrder,
   type PostRagVersionedIndexSink,
 } from './post-rag-versioned-index-sink'
+import { safeErrorDiagnostic } from './safe-error-diagnostic'
 export { type PostRagActivationOrder, type PostRagVersionedIndexSink } from './post-rag-versioned-index-sink'
 
 function requireSafeIdentifier(label: string, value: unknown, maxLength = 256): asserts value is string {
@@ -121,6 +123,15 @@ type ProcessorDependencies = {
 type BatchDependencies = ProcessorDependencies & {
   listCandidates: typeof listPostRagJobCandidates
   claim: typeof claimPostRagJob
+}
+
+function safeClaimJobIdDiagnostic(jobId: unknown): { jobId: string; jobIdFingerprint?: string } {
+  if (typeof jobId === 'string' && /^[a-f0-9]{64}$/.test(jobId)) return { jobId }
+  const fingerprintInput = typeof jobId === 'string' ? jobId : `[${typeof jobId}]`
+  return {
+    jobId: 'INVALID',
+    jobIdFingerprint: createHash('sha256').update(fingerprintInput).digest('hex').slice(0, 16),
+  }
 }
 
 function leaseIsCurrent(job: PostRagJobDocument, workerId: string, now: string) {
@@ -350,17 +361,24 @@ export async function processPostRagJobV2Batch(
   const dependencies: BatchDependencies = injectedDependencies
     ? { ...injectedDependencies, ...(options.sink ? { sink: options.sink } : {}) }
     : { ...defaultDependencies, ...(options.sink ? { sink: options.sink } : {}) }
-  const candidateIds = await dependencies.listCandidates(now(), limit)
+  const candidateIds = await dependencies.listCandidates(now(), Math.min(100, limit * 3))
   const results: Array<ProcessorResult | { jobId: string; status: 'skipped' }> = []
+  let claimedCount = 0
   for (const jobId of candidateIds) {
+    if (claimedCount >= limit) break
     let claimed: PostRagJobDocument | null
     try {
       claimed = await dependencies.claim(jobId, { workerId: options.workerId, now: now() })
-    } catch {
+    } catch (error) {
+      console.warn('[post-rag-job-processor] claim failed', {
+        ...safeClaimJobIdDiagnostic(jobId),
+        ...safeErrorDiagnostic(error),
+      })
       results.push({ jobId, status: 'failed', errorCode: 'INTERNAL_ERROR', errorStage: 'claim' })
       continue
     }
     if (!claimed) { results.push({ jobId, status: 'skipped' }); continue }
+    claimedCount += 1
     try {
       results.push(await processClaimedPostRagJob(claimed, { workerId: options.workerId, now }, dependencies))
     } catch (error) {
