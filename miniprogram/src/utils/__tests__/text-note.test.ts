@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 import { buildRichNoteContentFromMarkdown } from '../rich-note'
 import {
   extractTextNoteContent,
+  getTextNoteCard,
   normalizeTextNoteTitle,
   normalizeTextNoteTheme,
   resolveTextNoteBodySize,
@@ -18,6 +19,11 @@ describe('text note presentation', () => {
     expect(normalizeTextNoteTheme('quote')).toBe('quote')
     expect(normalizeTextNoteTheme('unknown')).toBe('paper')
     expect(normalizeTextNoteTheme(undefined)).toBe('paper')
+  })
+
+  test('builds a card from content and presentation with paper fallback', () => {
+    expect(getTextNoteCard({ content: { text_title: '标题', text_body: { text: '正文' } }, presentation: { textNoteTheme: 'notice' } })).toEqual({ title: '标题', body: '正文', theme: 'notice' })
+    expect(getTextNoteCard({ content: { text_title: '标题', text_body: { text: '正文' } } }).theme).toBe('paper')
   })
 
   test('extracts the fixed title and rich-note text first paragraph', () => {

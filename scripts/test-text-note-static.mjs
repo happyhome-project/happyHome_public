@@ -9,6 +9,9 @@ const assert = (condition, message) => {
 
 const createPage = read('miniprogram', 'src', 'pages', 'create', 'index.vue')
 const cover = read('miniprogram', 'src', 'components', 'TextNoteCover.vue')
+const homePage = read('miniprogram', 'src', 'pages', 'index', 'index.vue')
+const sectionPage = read('miniprogram', 'src', 'pages', 'section', 'index.vue')
+const detailPage = read('miniprogram', 'src', 'pages', 'detail', 'index.vue')
 
 assert(createPage.includes("section.displayTemplate === 'text_note'"), 'text_note must be selected by displayTemplate.')
 assert(createPage.includes("const textNoteStep = ref<'compose' | 'cover'>('compose')"), 'text_note must use explicit compose and cover steps.')
@@ -21,5 +24,9 @@ assert(createPage.includes("section.displayTemplate === 'guide_note'") && create
 assert(/\.text-note-cover-frame\s*\{[^}]*aspect-ratio:\s*4\s*\/\s*5;/s.test(cover), 'TextNoteCover must keep a fixed 4:5 ratio.')
 assert(['paper', 'mint', 'slate', 'headline', 'quote', 'notice'].every((theme) => cover.includes(`text-note-cover--${theme}`)), 'TextNoteCover must define all six themes.')
 assert(cover.includes('通知公告') && cover.includes('overflow-wrap: anywhere'), 'notice label and overflow-safe text are required.')
+assert(homePage.includes("displayTemplate === 'text_note'") && homePage.includes('class="text-note-feed"') && homePage.includes('<TextNoteCover'), 'home must use a dedicated text-note two-column cover feed.')
+assert(sectionPage.includes("displayTemplate === 'text_note'") && sectionPage.includes('class="text-note-section-grid"') && sectionPage.includes('<TextNoteCover'), 'section page must use a dedicated text-note grid.')
+assert(!/text_note[\s\S]{0,160}guide-cover/.test(homePage), 'text-note home cards must not enter guide image rendering.')
+assert(detailPage.includes("displayTemplate === 'text_note'") && detailPage.includes('return false'), 'text-note detail must explicitly use the complete default rich-note path.')
 
 console.log('text note authoring static checks passed')

@@ -14,6 +14,10 @@ export interface TextNoteContent {
   body: string
 }
 
+export interface TextNoteCard extends TextNoteContent {
+  theme: TextNoteTheme
+}
+
 function normalizeText(value: unknown): string {
   return String(value ?? '').trim()
 }
@@ -62,6 +66,13 @@ export function extractTextNoteContent(content: Record<string, unknown> | null |
   return {
     title: normalizeTextNoteTitle(content?.text_title),
     body: extractTextNoteFirstParagraph(content?.text_body),
+  }
+}
+
+export function getTextNoteCard(post: { content?: Record<string, unknown>; presentation?: PostPresentation } | null | undefined): TextNoteCard {
+  return {
+    ...extractTextNoteContent(post?.content),
+    theme: normalizeTextNoteTheme(post?.presentation?.textNoteTheme),
   }
 }
 

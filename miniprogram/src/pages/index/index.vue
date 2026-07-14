@@ -214,7 +214,8 @@
       class="active-archive"
       :class="{
         'active-archive--guide': activeArchiveGroup.displayTemplate === 'guide_note',
-        'active-archive--default': activeArchiveGroup.displayTemplate !== 'guide_note',
+        'active-archive--text-note': activeArchiveGroup.displayTemplate === 'text_note',
+        'active-archive--default': activeArchiveGroup.displayTemplate === 'default',
       }"
       :style="activeArchiveStyle"
     >
@@ -231,6 +232,29 @@
             <text class="home-empty-description">这里还没有帖子，成为第一个分享的人吧</text>
           </view>
           <button class="home-empty-action" @tap="openHomeEmptyPublish">去发布帖子</button>
+        </view>
+
+        <view v-else-if="activeArchiveGroup.displayTemplate === 'text_note'" class="text-note-feed">
+          <view v-for="(column, columnIndex) in textNoteColumns" :key="columnIndex" class="text-note-feed-column">
+            <view
+              v-for="item in column"
+              :key="item.postId"
+              class="text-note-card"
+              data-testid="home-post-card"
+              :data-post-id="item.postId"
+              @tap="onPostTap(item)"
+            >
+              <TextNoteCover :title="item.t" :body="item.excerpt || ''" :theme="item.textNoteTheme" />
+              <view class="text-note-card-main">
+                <text class="text-note-card-title">{{ item.t }}</text>
+                <view class="text-note-card-meta">
+                  <text class="text-note-card-author">{{ item.contentAuthor || '邻居' }}</text>
+                  <text>{{ item.when }}</text>
+                  <text>赞 {{ item.likes || 0 }}</text>
+                </view>
+              </view>
+            </view>
+          </view>
         </view>
 
         <view
@@ -433,6 +457,8 @@ import { memberApi, postApi } from '../../api/cloud'
 import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getFamilyLetterListSummary, getGuideNoteCard, getHomeLiveMeta, getPostHomeTitle, getPostHomeTitleIssue } from '../../utils/widget'
+import TextNoteCover from '../../components/TextNoteCover.vue'
+import { getTextNoteCard, type TextNoteTheme } from '../../utils/text-note'
 import { clientLog, markClientDiagnosticStage, startHomeDiagnosticWatchdog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, normalizeHomeSnapshotShape, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
@@ -730,10 +756,13 @@ interface ArchiveItem {
   postId?: string
   isPinned?: boolean
   isFeatured?: boolean
+  textNoteTheme?: TextNoteTheme
+  likes?: number
 }
-interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[]; accentColor?: string; displayTemplate: 'default' | 'guide_note' }
+interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[]; accentColor?: string; displayTemplate: 'default' | 'guide_note' | 'text_note' }
 
 function resolveArchiveDisplayTemplate(section: any): ArchiveGroup['displayTemplate'] {
+  if (section?.displayTemplate === 'text_note') return 'text_note'
   if (section?.displayTemplate === 'guide_note') return 'guide_note'
   const sectionName = String(section?.name || '').trim()
   return GUIDE_NOTE_NAME_HINTS.some((hint) => sectionName.includes(hint)) ? 'guide_note' : 'default'
@@ -751,7 +780,24 @@ const archiveGroups = computed<ArchiveGroup[]>(() => {
         count: posts.length,
         accentColor: section.accentColor || '',
         displayTemplate,
-        items: posts.slice(0, displayTemplate === 'guide_note' ? 6 : 3).map((p, idx) => {
+        items: posts.slice(0, displayTemplate === 'default' ? 3 : 6).map((p, idx) => {
+          if (displayTemplate === 'text_note') {
+            const note = getTextNoteCard(p)
+            return {
+              k: '',
+              t: note.title,
+              excerpt: note.body,
+              contentAuthor: String(p.authorName || p.authorNickname || p.authorNickName || '邻居'),
+              meta: '',
+              hot: false,
+              when: formatArchiveWhen(p.createdAt),
+              postId: p._id,
+              isPinned: Boolean(p.isPinned),
+              isFeatured: Boolean(p.isFeatured),
+              textNoteTheme: note.theme,
+              likes: Number(p.likeCount || p.likes || 0),
+            }
+          }
           if (displayTemplate === 'guide_note') {
             const guide = getGuideNoteCard(p, section)
             const resolvedCover = resolvedHomeGuideCoverUrls.value[guide.coverImage] || guide.coverImage
@@ -832,6 +878,15 @@ const showHomeEmptyState = computed(() => {
 const guideColumns = computed<ArchiveItem[][]>(() => {
   const group = activeArchiveGroup.value
   if (!group || group.displayTemplate !== 'guide_note') return [[], []]
+  return group.items.reduce<ArchiveItem[][]>((columns, item, index) => {
+    columns[index % 2].push(item)
+    return columns
+  }, [[], []])
+})
+
+const textNoteColumns = computed<ArchiveItem[][]>(() => {
+  const group = activeArchiveGroup.value
+  if (!group || group.displayTemplate !== 'text_note') return [[], []]
   return group.items.reduce<ArchiveItem[][]>((columns, item, index) => {
     columns[index % 2].push(item)
     return columns
@@ -3458,6 +3513,58 @@ onShareAppMessage(() => {
   display: flex;
   align-items: flex-start;
   gap: 16rpx;
+}
+
+.text-note-feed {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18rpx;
+}
+
+.text-note-feed-column {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 18rpx;
+}
+
+.text-note-card {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 24rpx;
+  background: #ffffff;
+  box-shadow: 0 10rpx 28rpx rgba(34, 70, 53, 0.08);
+}
+
+.text-note-card:active { transform: scale(0.99); }
+.text-note-card-main { padding: 18rpx 18rpx 20rpx; }
+.text-note-card-title {
+  display: -webkit-box;
+  min-height: 72rpx;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: #1f2823;
+  font-size: 27rpx;
+  font-weight: 700;
+  line-height: 36rpx;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.text-note-card-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10rpx;
+  margin-top: 14rpx;
+  color: #8b948f;
+  font-size: 19rpx;
+}
+.text-note-card-author {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .guide-feed-column {
