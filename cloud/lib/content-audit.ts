@@ -7,6 +7,7 @@ import { postWxJson } from './wx-openapi'
 import { refreshPostSearchIndexById } from './post-search'
 import { enqueuePostRagJob } from './post-rag'
 import { appendPostRagOutboxEvent } from './post-rag-outbox'
+import { updateArchivePostTopicLinks } from './archive-topic-index'
 import type {
   AuditProvider,
   AuditTargetType,
@@ -503,14 +504,19 @@ export async function applyAuditSummary(
     })
   }
   const updatePostWithV2 = async (data: Record<string, any>, postSnapshot?: Post) => {
+    let resolvedPost: Post | null = postSnapshot || null
     await db.runTransaction(async transaction => {
       const post = postSnapshot || await db.transactionGetByIdOrNull<Post>(transaction, 'posts', postId)
       if (!post) throw new Error('post not found')
+      resolvedPost = post
       await transaction.collection('posts').doc(postId).update({ data })
       if (!skipsRag(post)) {
         await appendPostRagOutboxEvent(transaction, { communityId: post.communityId, aggregateId: postId, reasonCode: 'post.audit_changed', now })
       }
     })
+    if (resolvedPost?.area === 'archive' && Object.prototype.hasOwnProperty.call(data, 'auditStatus')) {
+      await updateArchivePostTopicLinks(postId, { auditStatus: data.auditStatus })
+    }
   }
   if (slot === 'pendingContent') {
     const post = trustedPost || await db.getById('posts', postId) as Post

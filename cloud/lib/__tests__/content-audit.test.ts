@@ -3,6 +3,7 @@ jest.mock('../db', () => ({
   getById: jest.fn(),
   query: jest.fn(),
   updateById: jest.fn(),
+  updateWhere: jest.fn(),
   replaceValue: jest.fn((value) => ({ __set: value })),
   removeField: jest.fn(() => ({ __remove: true })),
   runTransaction: jest.fn(async (callback) => callback({ collection: (name: string) => ({ doc: (id: string) => ({ update: async ({ data }: any) => (require('../db').updateById)(name, id, data) }) }) })),
@@ -107,6 +108,7 @@ test('auditAndApply can keep archive posts searchable without enqueueing RAG wor
   expect(postRag.enqueuePostRagJob).not.toHaveBeenCalled()
   const { appendPostRagOutboxEvent } = require('../post-rag-outbox')
   expect(appendPostRagOutboxEvent).not.toHaveBeenCalled()
+  expect(db.updateWhere).toHaveBeenCalledWith('archive_post_topics', { postId: 'archive-1' }, expect.objectContaining({ auditStatus: 'pass' }))
 })
 
 test('applyAuditSummary automatically keeps later archive audit callbacks out of RAG', async () => {
@@ -122,6 +124,7 @@ test('applyAuditSummary automatically keeps later archive audit callbacks out of
   expect(postRag.enqueuePostRagJob).not.toHaveBeenCalled()
   const { appendPostRagOutboxEvent } = require('../post-rag-outbox')
   expect(appendPostRagOutboxEvent).not.toHaveBeenCalled()
+  expect(db.updateWhere).toHaveBeenCalledWith('archive_post_topics', { postId: 'archive-callback-1' }, expect.objectContaining({ auditStatus: 'pass' }))
 })
 
 test('buildCiHttpString follows Tencent CI XML signature newline format', () => {
