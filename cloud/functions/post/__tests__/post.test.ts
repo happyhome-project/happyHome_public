@@ -2007,3 +2007,55 @@ test('create: required rich_note rejects empty editor content', async () => {
   } as any, 'test-openid')).rejects.toThrow()
   expect(db.create).not.toHaveBeenCalled()
 })
+
+const textNoteContent = {
+  text_title: '山间随笔',
+  text_body: { format: 'markdown', markdown: '今天很好。', html: '<p>今天很好。</p>', text: '今天很好。', imageFileIDs: [], schemaVersion: 1 },
+}
+
+function mockTextNoteSection() {
+  return {
+    ...mockSection,
+    type: 'evergreen',
+    displayTemplate: 'text_note',
+    widgets: [
+      { widgetId: 'text_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 1, showInList: true, locked: true },
+      { widgetId: 'text_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: true, order: 2, showInList: false, locked: true },
+    ],
+  }
+}
+
+test.each(['paper', 'mint', 'slate', 'headline', 'quote', 'notice'])(
+  'create: persists text note theme %s',
+  async (theme) => {
+    ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+    ;(db.getById as jest.Mock).mockResolvedValue(mockTextNoteSection())
+    ;(db.create as jest.Mock).mockResolvedValue('post-text-note')
+    await handleCreate({ communityId: 'community-1', sectionId: 'section-1', content: textNoteContent, presentation: { textNoteTheme: theme } } as any, 'test-openid')
+    expect(db.create).toHaveBeenCalledWith('posts', expect.objectContaining({ content: textNoteContent, presentation: { textNoteTheme: theme } }))
+  },
+)
+
+test('create: defaults missing text note theme to paper', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValue(mockTextNoteSection())
+  ;(db.create as jest.Mock).mockResolvedValue('post-text-note')
+  await handleCreate({ communityId: 'community-1', sectionId: 'section-1', content: textNoteContent } as any, 'test-openid')
+  expect(db.create).toHaveBeenCalledWith('posts', expect.objectContaining({ presentation: { textNoteTheme: 'paper' } }))
+})
+
+test('create: rejects an explicitly invalid text note theme', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValue(mockTextNoteSection())
+  await expect(handleCreate({ communityId: 'community-1', sectionId: 'section-1', content: textNoteContent, presentation: { textNoteTheme: 'neon' } } as any, 'test-openid'))
+    .rejects.toThrow('不支持的纯文字笔记主题')
+  expect(db.create).not.toHaveBeenCalled()
+})
+
+test('create: ignores presentation for non-text templates', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValue(mockSection)
+  ;(db.create as jest.Mock).mockResolvedValue('post-1')
+  await handleCreate({ communityId: 'community-1', sectionId: 'section-1', content: { 'title-widget': '活动' }, presentation: { textNoteTheme: 'quote' } } as any, 'test-openid')
+  expect(db.create).toHaveBeenCalledWith('posts', expect.not.objectContaining({ presentation: expect.anything() }))
+})

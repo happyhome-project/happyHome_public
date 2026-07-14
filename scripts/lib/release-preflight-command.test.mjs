@@ -17,9 +17,9 @@ test('preflight command builds every read/probe check without mutation entrypoin
   assert.match(source, /readTencentServerlessIndexMappings/)
 })
 
-test('formal release delegation omits the functional RAG timer fixture but keeps desired-state reads', () => {
+test('formal release delegation omits all RAG preflight checks', () => {
   const checks = createReleasePreflightChecks({ app: null, env: {}, cwd: 'C:\\x', adminOptions: {}, delegateRagVerification: true })
-  assert.deepEqual(checks.map(check => check.name), ['rag-collections', 'rag-index', 'worker-timers', 'full-current-plan-resume'])
+  assert.deepEqual(checks.map(check => check.name), ['full-current-plan-resume'])
 })
 
 test('invalid canonical git state blocks probe creation while pure reads remain aggregated', async () => {

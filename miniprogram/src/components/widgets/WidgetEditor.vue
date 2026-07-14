@@ -30,6 +30,7 @@
         :placeholder="inputPlaceholder"
         placeholder-class="input-placeholder"
         class="input"
+        :maxlength="widget.widgetId === 'text_title' ? 48 : -1"
         @input="emit('update:modelValue', ($event as any).detail.value)"
       />
     </view>

@@ -2,6 +2,34 @@ export const COMMUNITY_SHARE_FROM = 'community'
 export const DEFAULT_COMMUNITY_SHARE_IMAGE = '/static/logo.png'
 export const PENDING_SHARE_COMMUNITY_KEY = 'pending_share_community_v1'
 export const PENDING_SHARE_COMMUNITY_TTL_MS = 30 * 60 * 1000
+export const COMMUNITY_SHARE_IMAGE_VERSION = 'v1'
+
+export interface CommunityShareImageIdentity {
+  id: unknown
+  name: unknown
+  coverImage: unknown
+}
+
+export interface PreparedCommunityShareImage {
+  key: string
+  imageUrl: string
+}
+
+export function buildCommunityShareImageKey(identity: CommunityShareImageIdentity): string {
+  return [
+    COMMUNITY_SHARE_IMAGE_VERSION,
+    String(identity.id || '').trim(),
+    String(identity.name || '').trim(),
+    String(identity.coverImage || '').trim(),
+  ].join('|')
+}
+
+export function selectPreparedCommunityShareImage(
+  currentKey: string,
+  prepared?: PreparedCommunityShareImage | null,
+): string {
+  return prepared?.key === currentKey ? String(prepared.imageUrl || '').trim() : ''
+}
 
 export interface PendingShareCommunityIntent {
   communityId: string

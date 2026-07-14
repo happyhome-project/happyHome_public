@@ -42,7 +42,7 @@
           @error="handleAvatarError(community)"
         />
         <view v-else class="community-avatar avatar-fallback">
-          <text>{{ communityInitial(community) }}</text>
+          <text>{{ communityInitial(communityName(community)) }}</text>
         </view>
         <view class="community-main">
           <text class="community-name">{{ communityName(community) }}</text>
@@ -76,6 +76,7 @@ import { communityApi, memberApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
+import { communityInitial } from '../../utils/community-avatar'
 import {
   mergeCommunityDirectory,
   resolvedCommunityCoverUrl,
@@ -180,10 +181,6 @@ function communityAvatar(community: DirectoryCommunity) {
 function handleAvatarError(community: DirectoryCommunity) {
   const id = String(community?._id || '')
   if (id) failedCoverIds.value = Object.assign({}, failedCoverIds.value, { [id]: true })
-}
-
-function communityInitial(community: DirectoryCommunity) {
-  return communityName(community).charAt(0) || '社'
 }
 
 function communityName(community: DirectoryCommunity) {
@@ -367,6 +364,7 @@ onShow(() => {
 .avatar-fallback {
   background: $hh-accent-wash;
   color: $hh-accent-ink;
+  font-family: $hh-font-sans;
   font-size: 32rpx;
   font-weight: $hh-font-weight-bold;
 }
