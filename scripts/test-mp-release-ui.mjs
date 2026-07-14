@@ -40,6 +40,7 @@ import {
   parseFirstJson,
 } from './cloud-release-smoke.mjs'
 import { computeDirectoryDigest } from './lib/release-run-ledger.mjs'
+import { applyAndWaitForReleaseFixtureSelection } from './lib/release-ui-fixture-selection.mjs'
 import { invokeTrustedAdminCloud } from './lib/trusted-admin-invoke.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -965,23 +966,18 @@ async function createReleaseFixture(mp) {
 }
 
 async function seedCurrentViewerIntoCommunity(mp, fixture) {
-  try {
-    await callMpCloud(mp, 'member', { action: 'apply', communityId: fixture.communityId })
-  } catch (error) {
-    const message = stringifyError(error)
-    if (!/already|active|member|成员|宸叉槸/.test(message)) throw error
-  }
-
-  const snapshot = await callMpCloud(mp, 'post', {
-    action: 'bootstrap',
-    currentCommunityId: fixture.communityId,
-    limitPerSection: 20,
+  const selection = await applyAndWaitForReleaseFixtureSelection({
+    communityId: fixture.communityId,
+    apply: () => callMpCloud(mp, 'member', { action: 'apply', communityId: fixture.communityId }),
+    bootstrap: () => callMpCloud(mp, 'post', {
+      action: 'bootstrap',
+      currentCommunityId: fixture.communityId,
+      limitPerSection: 20,
+    }),
   })
+  const snapshot = selection.snapshot
   const viewerOpenId = String(snapshot.viewerOpenId || '')
   if (!viewerOpenId) throw new Error('post.bootstrap did not return viewerOpenId')
-  if (String(snapshot.currentCommunityId || '') !== fixture.communityId) {
-    throw new Error(`post.bootstrap did not select release fixture community ${fixture.communityId}`)
-  }
 
   await withTimeout(mp.evaluate((seed) => {
     wx.setStorageSync('user_store', {
