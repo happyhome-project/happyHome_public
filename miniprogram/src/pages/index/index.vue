@@ -1,7 +1,7 @@
 <template>
   <view class="phone-inner">
     <view class="home-shell">
-      <view class="home-topbar">
+      <view class="home-topbar" :style="homeTopbarStyle">
         <view class="community-identity" @tap="onMastheadTap">
           <view class="community-avatar">
             <image
@@ -393,6 +393,7 @@ import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, normalizeHomeSnapshotShape, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
 import { formatHomeQuoteCite } from '../../utils/home-quote'
 import { createHomeLoadingGate } from '../../utils/home-loading-gate'
+import { resolveMenuSafeRightInset } from '../../utils/menu-safe-area'
 import { resolveCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { resolveSectionIconGlyph } from '../../utils/section-icon'
 import {
@@ -442,6 +443,7 @@ const archivePreviewMinHeightPx = ref(0)
 const homeBannerActiveIndex = ref(0)
 const homeBannerSwipeIntent = ref(false)
 const showHomePullRefreshHint = ref(false)
+const homeMenuSafeRightInset = ref(0)
 let refreshingHome = false
 let queuedForcedHomeRefresh = false
 let mountedAt = 0
@@ -488,6 +490,9 @@ onLoad((options?: Record<string, any>) => {
 })
 
 // ── Computed: masthead ──
+const homeTopbarStyle = computed(() => ({
+  paddingRight: `calc(var(--hh-page-x) + ${homeMenuSafeRightInset.value}px)`,
+}))
 const communityName = computed(() => communityStore.currentCommunity?.name ?? '选择社区')
 const avatarLetter = computed(() => {
   const name = communityStore.currentCommunity?.name ?? ''
@@ -1692,8 +1697,28 @@ async function initializeHome() {
   }
 }
 
+function updateHomeMenuSafeArea() {
+  let nextInset = 0
+
+  try {
+    if (typeof wx !== 'undefined' && typeof wx.getMenuButtonBoundingClientRect === 'function') {
+      const systemInfo = uni.getSystemInfoSync?.()
+      const menuRect = wx.getMenuButtonBoundingClientRect()
+      nextInset = resolveMenuSafeRightInset({
+        windowWidth: Number(systemInfo?.windowWidth || systemInfo?.screenWidth || 0),
+        menuLeft: Number(menuRect?.left || 0),
+        pageRightPadding: Number(uni.upx2px?.(24) || 12),
+        gap: Number(uni.upx2px?.(16) || 8),
+      })
+    }
+  } catch (_error) {}
+
+  homeMenuSafeRightInset.value = nextInset
+}
+
 onMounted(() => {
   markClientDiagnosticStage('home.onMounted')
+  updateHomeMenuSafeArea()
   void initializeHome()
 })
 
@@ -1715,6 +1740,7 @@ onUnmounted(() => {
 // 首次 onShow 发生在 onMounted 之后，会二次拉取（可接受：代价低、换取数据新鲜度）。
 onShow(() => {
   markClientDiagnosticStage('home.onShow')
+  updateHomeMenuSafeArea()
   startHomeDiagnosticWatchdog()
   hideNativeTabBar()
   const marker = getPendingHomeRefreshMarker()

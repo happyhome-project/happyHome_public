@@ -65,6 +65,17 @@ describe('Figma community directory pages', () => {
     expect(code).toMatch(/\.community-switch\s*\{[^}]*flex:\s*0 0 auto/s)
   })
 
+  test('home keeps the community switch outside the WeChat capsule safe area', () => {
+    const code = readPage('index')
+
+    expect(code).toContain("import { resolveMenuSafeRightInset } from '../../utils/menu-safe-area'")
+    expect(code).toContain(':style="homeTopbarStyle"')
+    expect(code).toContain('paddingRight: `calc(var(--hh-page-x) + ${homeMenuSafeRightInset.value}px)`')
+    expect(code).toContain('wx.getMenuButtonBoundingClientRect()')
+    expect(code).toMatch(/onMounted\(\(\) => \{[\s\S]*?updateHomeMenuSafeArea\(\)/)
+    expect(code).toMatch(/onShow\(\(\) => \{[\s\S]*?updateHomeMenuSafeArea\(\)/)
+  })
+
   test('home shows the Figma empty state only after loading for an empty selected community section', () => {
     const code = readPage('index')
     const emptyAsset = path.join(srcRoot, 'static', 'home-empty.png')
