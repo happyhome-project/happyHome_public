@@ -112,6 +112,14 @@ assert(
 )
 
 assert(
+  widgetEditor.includes('uni.chooseImage({') &&
+  widgetEditor.includes('// #ifdef H5') &&
+  !widgetEditor.includes('type="file"') &&
+  !widgetEditor.includes('onH5ImageChange'),
+  'H5 image widgets must use uni.chooseImage so the runtime creates a real native file chooser.'
+)
+
+assert(
   widgetEditor.includes('@tap="chooseLocation"') &&
     widgetEditor.includes('@tap.stop="clearLocation"') &&
     widgetEditor.includes("emit('update:modelValue'") &&

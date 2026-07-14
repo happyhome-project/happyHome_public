@@ -83,19 +83,9 @@
         <image :src="img" mode="aspectFill" class="thumb" />
         <view class="thumb-del" @tap="removeImage(i)">×</view>
       </view>
-      <!-- #ifdef H5 -->
-      <input
-        type="file"
-        accept="image/*"
-        :data-testid="`widget-image-input-${widget.widgetId}`"
-        @change="onH5ImageChange"
-      />
-      <!-- #endif -->
-      <!-- #ifndef H5 -->
       <view class="add-btn" :data-testid="`widget-image-trigger-${widget.widgetId}`" @tap="addImage">
         <text class="add-icon">+</text>
       </view>
-      <!-- #endif -->
     </view>
 
     <TopicPicker
@@ -330,21 +320,31 @@ function onDatetimeChange(value: any) {
 }
 
 function addImage() {
+  // #ifdef H5
+  uni.chooseImage({
+    count: 9,
+    sourceType: ['album', 'camera'],
+    success: (res: any) => appendSelectedImages(res.tempFilePaths || []),
+  })
+  return
+  // #endif
+
+  // #ifndef H5
   wx.chooseMedia({
     count: 9,
     mediaType: ['image'],
     success: (res: any) => {
-      const current = Array.isArray(props.modelValue) ? props.modelValue as string[] : []
       const files = Array.isArray(res.tempFiles) ? res.tempFiles : []
-      emit('update:modelValue', current.concat(files.map((f: any) => f.tempFilePath)))
+      appendSelectedImages(files.map((file: any) => file.tempFilePath))
     },
   })
+  // #endif
 }
 
-function onH5ImageChange(event: Event) {
-  const files = Array.from((event.target as HTMLInputElement)?.files || [])
+function appendSelectedImages(paths: unknown[]) {
   const current = Array.isArray(props.modelValue) ? props.modelValue as string[] : []
-  emit('update:modelValue', current.concat(files.map((file) => URL.createObjectURL(file))))
+  const selected = paths.map((path) => String(path || '').trim()).filter(Boolean)
+  emit('update:modelValue', current.concat(selected))
 }
 
 function removeImage(index: number) {
