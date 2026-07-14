@@ -1,7 +1,7 @@
 import type { Section, SectionDisplayTemplate, Widget } from './types'
 
 export function normalizeSectionDisplayTemplate(value: unknown): SectionDisplayTemplate {
-  if (value === 'guide_note' || value === 'image_note') return value
+  if (value === 'guide_note' || value === 'text_note' || value === 'image_note') return value
   return 'default'
 }
 

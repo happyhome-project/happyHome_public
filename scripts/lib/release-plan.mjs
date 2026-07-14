@@ -2,6 +2,12 @@ import { CLOUD_RELEASE_COMPONENTS, RELEASE_ACTION_KINDS, classifyReleaseOperatio
 
 export const ALL_CLOUD_FUNCTIONS = CLOUD_RELEASE_COMPONENTS
 export const RELEASE_ACTIONS = new Set(Object.keys(RELEASE_ACTION_KINDS))
+export const RAG_RELEASE_FUNCTIONS = new Set(['post-rag-worker', 'post-video-rag-worker'])
+export const RAG_RELEASE_ACTIONS = new Set([
+  'configure-rag-network', 'configure-rag-workers', 'ensure-tencent-rag-index',
+  'update-rag-env', 'backfill-post-rag-v2', 'verify-post-rag-timer', 'eval-post-semantic-search',
+])
+export const RAG_RELEASE_SMOKE_SUITES = new Set(['post-rag', 'post-semantic-search'])
 
 function normalizePath(value) {
   return String(value || '').replace(/\\/g, '/').replace(/^[ADMR]\d*\t(?:[^\t]+\t)?/, '')
@@ -96,6 +102,17 @@ export function selectChangeManifests(mode, manifests = [], changedPaths = []) {
   return mode === 'full-current' ? [...manifests] : selectChangeManifestsForDiff(manifests, changedPaths)
 }
 
+export function filterRagReleaseManifest(manifest, includeRag = false) {
+  if (includeRag) return manifest
+  const identity = `${manifest.changeId || ''} ${manifest.source || ''}`
+  if (/rag|semantic-search/i.test(identity)) return { ...manifest, actions: [], migrations: [], smokeSuites: [] }
+  return {
+    ...manifest,
+    actions: (manifest.actions || []).filter((action) => !RAG_RELEASE_ACTIONS.has(action)),
+    smokeSuites: (manifest.smokeSuites || []).filter((suite) => !RAG_RELEASE_SMOKE_SUITES.has(suite)),
+  }
+}
+
 function needsExternalManifest(changedPaths) {
   return changedPaths.map(normalizePath).some((path) => path.startsWith('scripts/ensure-')
     || path.startsWith('scripts/configure-')
@@ -113,11 +130,17 @@ export function createReleasePlan({
   headSha,
   manifests = [],
   mode,
+  includeRag = false,
 } = {}) {
   if (!headSha) throw new Error('release plan requires headSha')
   if (!['main', 'pr', 'full-current'].includes(mode)) throw new Error(`release plan mode must be main, pr, or full-current; got ${mode || '(missing)'}`)
   if (forceRedeployCurrent && mode !== 'full-current') throw new Error('force-redeploy-current requires full-current mode')
-  const manifestSummary = validateChangeManifests(manifests)
+  validateChangeManifests(manifests)
+  const selectedManifests = manifests
+    .map((manifest) => filterRagReleaseManifest(manifest, includeRag))
+    .filter((manifest) => (manifest.actions || []).length || (manifest.migrations || []).length || (manifest.smokeSuites || []).length)
+  const manifestSummary = validateChangeManifests(selectedManifests)
+  const selectedFunctions = includeRag ? allFunctions : allFunctions.filter((name) => !RAG_RELEASE_FUNCTIONS.has(name))
   if (needsExternalManifest(changedPaths) && !manifests.length) {
     throw new Error('external release changes require a release/changes manifest')
   }
@@ -125,9 +148,9 @@ export function createReleasePlan({
   const bootstrap = mode === 'main' && !baseSha
   const planningStrategy = fullCurrent ? 'full-current' : bootstrap ? 'bootstrap' : 'incremental'
   const targets = fullCurrent
-    ? { adminWeb: true, cloud: allCloud(allFunctions, 'full-current:explicit'), miniprogram: true }
-    : classifyReleaseImpact({ changedPaths, allFunctions, functionInputs })
-  if (bootstrap) targets.cloud = allCloud(allFunctions, 'bootstrap:no-production-base')
+    ? { adminWeb: true, cloud: allCloud(selectedFunctions, 'full-current:explicit'), miniprogram: true }
+    : classifyReleaseImpact({ changedPaths, allFunctions: selectedFunctions, functionInputs })
+  if (bootstrap) targets.cloud = allCloud(selectedFunctions, 'bootstrap:no-production-base')
   const hasRuntimeTarget = targets.cloud.functions.length > 0 || targets.miniprogram || targets.adminWeb
   return {
     baseSha: fullCurrent ? null : baseSha || null,
@@ -136,11 +159,11 @@ export function createReleasePlan({
     changedPaths: changedPaths.map(normalizePath),
     forceRedeployCurrent: forceRedeployCurrent === true,
     headSha,
-    manifests,
+    manifests: selectedManifests,
     mode,
-    operationKinds: classifyReleaseOperations(manifests),
+    operationKinds: classifyReleaseOperations(selectedManifests),
     planningStrategy,
-    releaseRequired: bootstrap || hasRuntimeTarget || manifests.length > 0,
+    releaseRequired: bootstrap || hasRuntimeTarget || selectedManifests.length > 0,
     targets,
   }
 }

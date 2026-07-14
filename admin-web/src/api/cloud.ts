@@ -118,7 +118,7 @@ export const sectionApi = {
     icon: string
     order: number
     type?: 'realtime' | 'evergreen'
-    displayTemplate?: 'default' | 'guide_note' | 'image_note'
+    displayTemplate?: 'default' | 'guide_note' | 'text_note' | 'image_note'
     accentColor?: string
     enableComment?: boolean
     enableLike?: boolean
@@ -141,7 +141,7 @@ export const sectionApi = {
     order?: number
     type?: 'realtime' | 'evergreen'
     status?: 'active' | 'dormant' | 'archived'
-    displayTemplate?: 'default' | 'guide_note' | 'image_note'
+    displayTemplate?: 'default' | 'guide_note' | 'text_note' | 'image_note'
     accentColor?: string
     enableComment?: boolean
     enableLike?: boolean

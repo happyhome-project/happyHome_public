@@ -199,19 +199,21 @@
           </div>
         </el-form-item>
         <el-form-item label="类型">
-          <el-radio-group v-model="form.type">
+          <el-radio-group v-model="form.type" :disabled="!!editingId">
             <el-radio value="evergreen">沉淀展示</el-radio>
             <el-radio value="realtime">实时协作</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item v-if="form.type === 'evergreen'" label="展示模板">
-          <el-radio-group v-model="form.displayTemplate">
+          <el-radio-group v-model="form.displayTemplate" :disabled="!!editingId">
             <el-radio value="default">默认列表</el-radio>
             <el-radio value="guide_note">图文攻略</el-radio>
+            <el-radio value="text_note">纯文字笔记</el-radio>
             <el-radio value="image_note">图文_new</el-radio>
           </el-radio-group>
-          <div v-if="form.displayTemplate === 'guide_note'" class="field-hint">图文攻略适合亲子出游、村游路线等沉淀板块；会固定路线数据、顶部图片和富图文正文，不启用标签归类。</div>
+          <div v-if="form.displayTemplate === 'text_note'" class="field-hint">纯文字笔记固定标题和正文，适合公告、随笔和简洁的文字内容。</div>
           <div v-else-if="form.displayTemplate === 'image_note'" class="field-hint">图文_new 使用固定控件：添加图片、主题、正文、话题、设置地点；适合简洁的社区图文分享。</div>
+          <div v-else class="field-hint">图文攻略适合亲子出游、村游路线等沉淀板块；会固定路线数据、顶部图片和富图文正文，不启用标签归类。</div>
         </el-form-item>
         <el-form-item>
           <template #label>
@@ -329,7 +331,7 @@ import WidgetEditor from './WidgetEditor.vue'
 
 type SectionType = 'realtime' | 'evergreen'
 type SectionStatus = 'active' | 'dormant' | 'archived'
-type SectionDisplayTemplate = 'default' | 'guide_note' | 'image_note'
+type SectionDisplayTemplate = 'default' | 'guide_note' | 'text_note' | 'image_note'
 type SectionTableColumnKey =
   | 'name'
   | 'type'
@@ -532,6 +534,8 @@ async function loadSections() {
       _id: String(section?._id || section?.id || ''),
       displayTemplate: section?.displayTemplate === 'guide_note'
         ? 'guide_note'
+        : section?.displayTemplate === 'text_note'
+          ? 'text_note'
         : section?.displayTemplate === 'image_note'
           ? 'image_note'
           : 'default',
@@ -578,6 +582,8 @@ function openEdit(row: SectionRow) {
     status: row.status || 'active',
     displayTemplate: row.displayTemplate === 'guide_note'
       ? 'guide_note'
+      : row.displayTemplate === 'text_note'
+        ? 'text_note'
       : row.displayTemplate === 'image_note'
         ? 'image_note'
         : 'default',

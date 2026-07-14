@@ -311,6 +311,7 @@ const activityInviteButtonText = computed(() => {
 })
 
 function resolveGuideNoteDetailTemplate(currentSection: any): boolean {
+  if (currentSection?.displayTemplate === 'text_note') return false
   if (currentSection?.displayTemplate === 'guide_note') return true
   const sectionName = String(currentSection?.name || '').trim()
   return GUIDE_NOTE_NAME_HINTS.some((hint) => sectionName.includes(hint))

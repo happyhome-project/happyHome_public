@@ -54,6 +54,80 @@ test('frontend-only changes leave cloud deployment empty', () => {
   assert.equal(impact.adminWeb, true)
 })
 
+test('release plans exclude RAG workers and actions by default', () => {
+  const plan = createReleasePlan({
+    baseSha: '',
+    headSha: 'head',
+    changedPaths: [],
+    allFunctions: ALL_CLOUD_FUNCTIONS,
+    functionInputs: {},
+    manifests: [{
+      schemaVersion: 1,
+      changeId: 'default-off',
+      actions: ['configure-rag-workers', 'ensure-indexes', 'verify-post-rag-timer'],
+      migrations: [],
+      smokeSuites: ['post-rag', 'business-smoke'],
+    }],
+    mode: 'full-current',
+  })
+  assert.equal(plan.targets.cloud.functions.includes('post-rag-worker'), false)
+  assert.equal(plan.targets.cloud.functions.includes('post-video-rag-worker'), false)
+  assert.deepEqual(plan.manifests[0].actions, ['ensure-indexes'])
+  assert.deepEqual(plan.manifests[0].smokeSuites, ['business-smoke'])
+  assert.deepEqual(plan.operationKinds.verification, [])
+})
+
+test('explicit includeRag keeps RAG workers and actions in the plan', () => {
+  const plan = createReleasePlan({
+    baseSha: '',
+    headSha: 'head',
+    changedPaths: [],
+    allFunctions: ALL_CLOUD_FUNCTIONS,
+    functionInputs: {},
+    includeRag: true,
+    manifests: [{
+      schemaVersion: 1,
+      changeId: 'rag-explicit-on',
+      actions: ['configure-rag-workers'],
+      migrations: [],
+      smokeSuites: ['post-rag'],
+    }],
+    mode: 'full-current',
+  })
+  assert.equal(plan.targets.cloud.functions.includes('post-rag-worker'), true)
+  assert.deepEqual(plan.manifests[0].actions, ['configure-rag-workers'])
+  assert.deepEqual(plan.manifests[0].smokeSuites, ['post-rag'])
+})
+
+test('RAG-only manifests do not require a release by default', () => {
+  const plan = createReleasePlan({
+    baseSha: 'base',
+    headSha: 'head',
+    changedPaths: [],
+    allFunctions: ALL_CLOUD_FUNCTIONS,
+    functionInputs: {},
+    manifests: [{ schemaVersion: 1, changeId: 'rag-only', actions: ['configure-rag-workers'], migrations: [], smokeSuites: ['post-rag'] }],
+    mode: 'main',
+  })
+  assert.equal(plan.releaseRequired, false)
+  assert.deepEqual(plan.changeIds, [])
+  assert.deepEqual(plan.manifests, [])
+})
+
+test('RAG manifests with generic index actions are removed by identity', () => {
+  const plan = createReleasePlan({
+    baseSha: 'base',
+    headSha: 'head',
+    changedPaths: [],
+    allFunctions: ALL_CLOUD_FUNCTIONS,
+    functionInputs: {},
+    manifests: [{ schemaVersion: 1, changeId: 'rag-community-version-collection', actions: ['ensure-indexes'], migrations: [], smokeSuites: [] }],
+    mode: 'main',
+  })
+  assert.equal(plan.releaseRequired, false)
+  assert.deepEqual(plan.changeIds, [])
+})
+
 test('change manifests reject unknown actions, duplicate ids, and missing declarations for external changes', () => {
   assert.throws(() => validateChangeManifests([{ schemaVersion: 1, changeId: 'a', actions: ['shell-anything'], migrations: [], smokeSuites: [] }]), /unknown action/i)
   assert.throws(() => validateChangeManifests([
@@ -96,6 +170,7 @@ test('full-current plans explicitly publish every current runtime target and ret
     allFunctions: ['post', 'user'],
     functionInputs: {},
     manifests,
+    includeRag: true,
     mode: 'full-current',
   })
 

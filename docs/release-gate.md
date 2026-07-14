@@ -68,6 +68,16 @@ The release gate requires DevTools release UI evidence. The release operator mus
 
 The default evidence path is `npm.cmd run test:mp:release-ui`. It opens the built `mp-weixin` package through WeChat DevTools automator and must output all five labels:
 
+To build and validate the mini-program UI once before formal prepare, write an exact reusable qualification explicitly:
+
+```powershell
+npm.cmd run release:ui-qualify -- --version=<version> --desc=<description> --ui-qualification=<absolute-json-path>
+```
+
+This command only writes build-info, builds the mini-program, runs the existing release gate and writes the qualification after the full UI gate passes. It does not deploy cloud functions or admin-web, upload the mini-program, acquire the production release lock, or create a production release run. The qualification is bound to the exact Git SHA, version, description, package digest, build-info files, UI evidence and installed WeChat DevTools version.
+
+Pass that same absolute file explicitly to formal prepare with `--ui-qualification=<absolute-json-path>`. A valid qualification skips the duplicate mini-program build and DevTools UI run while the normal cloud/admin artifact pinning continues. An invalid or changed qualification hard-blocks prepare; it never falls back to rebuilding. Publish does not accept this flag and instead freshly revalidates the qualification already pinned in the prepare ledger.
+
 - `HH_RELEASE_HOME_COLD_START_NONEMPTY`: the cold-start home shell renders non-empty content.
 - `HH_RELEASE_HOME_IMAGES_RENDERED`: the home feed renders its required images.
 - `HH_RELEASE_HOME_DETAIL_NONEMPTY`: home feed tap opens a non-empty detail page.
@@ -114,7 +124,7 @@ Hard release labels:
 
 The admin fixture path invokes the `admin` function directly with a controlled `_actAs` superAdmin identity, creates an `HH_RELEASE_SMOKE_*` community/section/post, verifies it through admin list APIs, then runs `community.disable` and `community.hardDelete`. Cleanup failure blocks release.
 
-RAG deployment remains part of the formal release: its configuration, immutable cloud artifacts, remote digest attestation and function version probes must pass. Timer, ES write/backfill and semantic retrieval/evaluation are not release-stage tests; they are explicitly delegated to the RAG development session after deployment. Formal cloud smoke therefore excludes `post-rag-worker` and `post-video-rag-worker`, while retaining real smoke coverage for admin, community, home-prefetch, http-gateway, member, post, section and user so RAG changes cannot hide regressions in the rest of the product.
+RAG is excluded from the default formal release plan: its workers, configuration, indexes, timer, ES write/backfill and semantic retrieval/evaluation are delegated to the RAG development session after deployment. Default formal cloud smoke excludes `post-rag-worker` and `post-video-rag-worker`, while retaining real smoke coverage for admin, community, home-prefetch, http-gateway, member, post, section and user. To intentionally include RAG in a release, set `HH_RELEASE_INCLUDE_RAG=1` (or pass `--include-rag` to the release planner); only that explicit mode makes RAG failures release-blocking.
 
 `user` and `section` direct invokes intentionally record OPENID/membership guard evidence instead of forcing production `ALLOW_TEST_OPENID`. Real user OPENID flows remain covered by the mini-program release UI evidence. CloudBase `fn log` can intermittently return `GetFunctionLogDetail InternalError` for non-critical functions; those failures are stored as warnings. The `post.clientLog` runId log is the required log gate and still blocks release if missing.
 

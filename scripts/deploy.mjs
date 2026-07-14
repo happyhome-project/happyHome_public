@@ -59,7 +59,7 @@ dns.lookup = function forcedIPv4Lookup(hostname, options, callback) {
 }
 
 import ci from 'miniprogram-ci'
-import { resolve, dirname, join } from 'path'
+import { resolve, dirname, isAbsolute, join } from 'path'
 import { fileURLToPath, pathToFileURL } from 'url'
 import { execSync, spawn, spawnSync } from 'child_process'
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
@@ -118,6 +118,7 @@ import {
   releaseDagMode,
 } from './lib/release-dag-v2.mjs'
 import { startPostRagTimerProbeSession } from './lib/post-rag-timer-probe-runner.mjs'
+import { inspectReleaseUiQualification, writeReleaseUiQualification } from './lib/release-ui-qualification.mjs'
 import { createSafeAggregateError, releaseFailureCauses } from './lib/release-failure-safety.mjs'
 import { persistFormalReleaseFailure } from './lib/release-terminal-failure.mjs'
 import { ReleaseGovernance } from './lib/release-governance.mjs'
@@ -236,6 +237,12 @@ function getFlagValue(name) {
   return ''
 }
 
+function getRequiredFlagValue(name, purpose) {
+  const value = getFlagValue(name).trim()
+  if (!value) throw new Error(`${purpose} requires explicit --${name}=<value>`)
+  return value
+}
+
 function getPositiveIntFlag(name, fallback, options = {}) {
   return parsePositiveIntOption(getFlagValue(name) || process.env[`HH_${name.toUpperCase().replace(/-/g, '_')}`], fallback, options)
 }
@@ -266,6 +273,16 @@ function getGitSha() {
   } catch {
     return 'unknown'
   }
+}
+
+function readWechatDevToolsVersion() {
+  const cli = findDevtoolsCli()
+  if (!cli) throw new Error('WeChat DevTools CLI was not found; cannot bind UI qualification to a DevTools version')
+  const packagePath = resolve(dirname(cli), 'code', 'package.nw', 'package.json')
+  if (!existsSync(packagePath)) throw new Error(`WeChat DevTools package metadata was not found: ${packagePath}`)
+  const version = String(JSON.parse(readFileSync(packagePath, 'utf8')).version || '').trim()
+  if (!version) throw new Error('WeChat DevTools version is missing from package metadata')
+  return version
 }
 
 function getGitOutput(command) {
@@ -860,7 +877,7 @@ function resolveMiniprogramUploadMetadata(defaults = {}) {
   }
 }
 
-async function buildAndGateMiniprogramUpload({ version, desc, releaseRunId, delegateRagVerification = false }) {
+async function buildAndGateMiniprogramUpload({ version, desc, releaseRunId, delegateRagVerification = false, gitSha = '', devToolsVersion = '' }) {
   writeMiniprogramBuildInfo(version, desc)
 
   console.log('\nBuilding miniprogram...')
@@ -878,6 +895,8 @@ async function buildAndGateMiniprogramUpload({ version, desc, releaseRunId, dele
       HH_RELEASE_RUN_ID: releaseRunId,
       HH_RELEASE_PACKAGE_DIGEST: packageDigest,
       HH_RELEASE_UI_EVIDENCE_DIR: releaseUiEvidenceDir,
+      HH_RELEASE_GIT_SHA: gitSha,
+      HH_RELEASE_DEVTOOLS_VERSION: devToolsVersion,
       ...(delegateRagVerification ? { HH_RELEASE_DELEGATE_RAG_VERIFICATION: '1' } : {}),
       WECHAT_DEVTOOLS_PROJECT_PATH: MP_DIST,
     },
@@ -887,6 +906,39 @@ async function buildAndGateMiniprogramUpload({ version, desc, releaseRunId, dele
     packageDigest,
     releaseUiEvidencePath: resolve(releaseUiEvidenceDir, 'release-ui-evidence.json'),
   }
+}
+
+async function runReleaseUiQualification() {
+  const purpose = 'release-ui-qualify'
+  const version = getRequiredFlagValue('version', purpose)
+  const desc = getRequiredFlagValue('desc', purpose)
+  const qualificationPath = getRequiredFlagValue('ui-qualification', purpose)
+  if (!isAbsolute(qualificationPath)) throw new Error('release-ui-qualify requires an absolute --ui-qualification path')
+  const gitSha = getGitSha()
+  if (!/^[0-9a-f]{40}$/i.test(gitSha)) throw new Error('release-ui-qualify could not resolve the exact Git SHA')
+  const devToolsVersion = readWechatDevToolsVersion()
+  const prepared = await buildAndGateMiniprogramUpload({
+    version,
+    desc,
+    releaseRunId: `ui-qualification-${makeReleaseRunId()}`,
+    delegateRagVerification: true,
+    gitSha,
+    devToolsVersion,
+  })
+  const qualification = await writeReleaseUiQualification({
+    root: ROOT,
+    outputPath: qualificationPath,
+    gitSha,
+    version,
+    desc,
+    packageRoot: prepared.packageRoot,
+    devToolsVersion,
+    sourceBuildInfoPath: resolve(ROOT, 'miniprogram', 'src', 'generated', 'build-info.ts'),
+    distBuildInfoPath: resolve(prepared.packageRoot, 'generated', 'build-info.js'),
+    uiEvidencePath: prepared.releaseUiEvidencePath,
+  })
+  console.log(`[OK] release UI qualification written: ${qualificationPath}`)
+  return qualification
 }
 
 async function uploadBuiltMiniprogram({ version, desc, forceCi, beforeRemoteMutation }) {
@@ -1159,7 +1211,33 @@ async function collectMiniprogramBuildGateEvidence(preparedEvidence = {}) {
     distBuildInfoPath: resolve(ROOT, 'miniprogram/dist/build/mp-weixin/generated/build-info.js'),
     packageRoot: preparedEvidence.packageRoot || MP_DIST,
     packageDigest: preparedEvidence.packageDigest || await computeDirectoryDigest(MP_DIST),
+    ...(preparedEvidence.qualificationPath ? {
+      qualificationPath: preparedEvidence.qualificationPath,
+      qualificationDigest: preparedEvidence.qualificationDigest,
+      devToolsVersion: preparedEvidence.devToolsVersion,
+    } : {}),
     ...(releaseUiEvidencePath ? { releaseUiEvidencePath } : {}),
+  }
+}
+
+async function inspectExplicitUiQualification(qualificationPath, releaseContext) {
+  const inspected = await inspectReleaseUiQualification({
+    qualificationPath,
+    root: ROOT,
+    expected: {
+      gitSha: releaseContext.gitSha,
+      version: releaseContext.version,
+      desc: releaseContext.desc,
+    },
+    currentDevToolsVersion: releaseContext.devToolsVersion,
+  })
+  return {
+    packageRoot: inspected.packageRoot,
+    packageDigest: inspected.packageDigest,
+    releaseUiEvidencePath: inspected.uiEvidencePath,
+    qualificationPath: inspected.qualificationPath,
+    qualificationDigest: await computeFileSha256(inspected.qualificationPath),
+    devToolsVersion: inspected.devToolsVersion,
   }
 }
 
@@ -1176,6 +1254,7 @@ function releaseStageReuseCheck(context) {
 function createFormalReleasePlan(gitSha, releaseStrategy, publishResume, forceRedeployCurrent = false) {
   const args = ['scripts/release-plan.mjs', `--mode=${releaseStrategy}`, `--head=${gitSha}`]
   if (forceRedeployCurrent) args.push('--force-redeploy-current')
+  if (process.env.HH_RELEASE_INCLUDE_RAG === '1') args.push('--include-rag')
   if (publishResume) {
     args.push('--publish-resume', `--version=${publishResume.version}`, `--desc=${publishResume.desc}`)
   }
@@ -1374,6 +1453,9 @@ async function runFormalRelease(options = {}) {
   assertFormalReleaseCloudBasePath({ prepareOnly })
 
   const publishOnly = options.publishOnly === true
+  const uiQualificationPath = getFlagValue('ui-qualification').trim()
+  if (uiQualificationPath && !isAbsolute(uiQualificationPath)) throw new Error('--ui-qualification must be an absolute path')
+  if (uiQualificationPath && !prepareOnly) throw new Error('--ui-qualification is accepted only by release-prepare')
   const fullCurrentExplicit = hasFlag('full-current')
   const releaseStrategy = fullCurrentExplicit ? 'full-current' : 'main'
   const forceRedeployCurrent = hasFlag('force-redeploy-current')
@@ -1388,6 +1470,7 @@ async function runFormalRelease(options = {}) {
     releaseStrategy,
     fullCurrentExplicit,
     publishOnly,
+    allowReleaseBuildInfo: Boolean(uiQualificationPath),
     version: miniprogramUpload.version,
     desc: miniprogramUpload.desc,
   }))
@@ -1401,6 +1484,8 @@ async function runFormalRelease(options = {}) {
     releaseStrategy,
     forceRedeployCurrent,
   }
+  const resumeQualificationPath = resumeRunState?.stages?.['miniprogram-build-gate']?.evidence?.qualificationPath || ''
+  if (uiQualificationPath || resumeQualificationPath) releaseContext.devToolsVersion = readWechatDevToolsVersion()
   const releaseRunId = await resolveReleaseRunId(forceResume)
   releaseContext.runId = releaseRunId
   const selectedDagMode = releaseDagMode(process.env)
@@ -1498,11 +1583,13 @@ async function runFormalRelease(options = {}) {
       command: 'write build-info + npm run build:mp-weixin + npm run test:mp:release-gate -- --skip-mp-build',
     }, async () => {
       if (revalidateFormalMutation) await revalidateFormalMutation('artifact-build:miniprogram')
-      const preparedEvidence = await buildAndGateMiniprogramUpload({
-        ...miniprogramUpload,
-        releaseRunId: releaseLedger.runId,
-        delegateRagVerification: true,
-      })
+      const preparedEvidence = uiQualificationPath
+        ? await inspectExplicitUiQualification(uiQualificationPath, releaseContext)
+        : await buildAndGateMiniprogramUpload({
+            ...miniprogramUpload,
+            releaseRunId: releaseLedger.runId,
+            delegateRagVerification: true,
+          })
       const evidence = await collectMiniprogramBuildGateEvidence(preparedEvidence)
       if (!publishOnly) oneShotBuildInfoPrepared = true
       return {
@@ -2124,6 +2211,8 @@ function assertDirectProductionDeployWorkspace({ publishOnly = false, version = 
 const target = process.argv[2] || 'all'
 if (target === 'release') {
   await runFormalRelease()
+} else if (target === 'release-ui-qualify') {
+  await runReleaseUiQualification()
 } else if (target === 'release-prepare') {
   await runFormalRelease({ prepareOnly: true })
 } else if (target === 'release-publish') {

@@ -17,6 +17,7 @@ import {
 import { removePostSearchIndex } from '../../lib/post-search'
 import { enqueuePostRagDeleteJobInTransaction, enqueuePostRagJob } from '../../lib/post-rag'
 import { createPostSemanticSearchServiceFromEnv, type PostSemanticSearchResponse } from '../../lib/post-semantic-search'
+import { isTextNoteSection, normalizeTextNoteSection, normalizeTextNoteTheme } from '../../shared/text-note-widgets'
 import { appendPostRagOutboxEvent } from '../../lib/post-rag-outbox'
 import type {
   AttendancePreviewUser,
@@ -515,7 +516,7 @@ async function listAttendanceMembersInternal(postId: string, widgetId?: string) 
 }
 
 export async function handleCreate(
-  params: { communityId: string; sectionId: string; content: PostContent },
+  params: { communityId: string; sectionId: string; content: PostContent; presentation?: unknown },
   openid: string,
 ) {
   if (!openid) throw new Error('Missing OPENID')
@@ -533,6 +534,10 @@ export async function handleCreate(
   validateRequiredWidgets(section, sanitizedContent)
   validateContentValues(section, sanitizedContent)
 
+  const presentation = isTextNoteSection(section)
+    ? { textNoteTheme: normalizeTextNoteTheme((params.presentation as any)?.textNoteTheme) }
+    : undefined
+
   const now = new Date().toISOString()
   const postData = {
     communityId: params.communityId,
@@ -543,6 +548,7 @@ export async function handleCreate(
     auditReason: 'content audit pending',
     auditUpdatedAt: now,
     content: sanitizedContent,
+    ...(presentation ? { presentation } : {}),
     commentCount: 0,
     likeCount: 0,
     isPinned: false,

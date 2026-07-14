@@ -252,6 +252,27 @@ test('publish resume allows only its matching generated build-info change', () =
   }), /build-info/i)
 })
 
+test('prepare with an explicit qualification allows only its matching generated build-info change', () => {
+  assert.doesNotThrow(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(),
+    changedPaths: ['miniprogram/src/generated/build-info.ts'],
+    allowReleaseBuildInfo: true,
+    generatedBuildInfoMatches: true,
+  }))
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(),
+    changedPaths: ['miniprogram/src/generated/build-info.ts'],
+    allowReleaseBuildInfo: true,
+    generatedBuildInfoMatches: false,
+  }), /build-info/i)
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(),
+    changedPaths: ['miniprogram/src/generated/build-info.ts', 'cloud/functions/admin/index.ts'],
+    allowReleaseBuildInfo: true,
+    generatedBuildInfoMatches: true,
+  }), /unexpected/i)
+})
+
 test('publish resume preserves public origin and full-current release intent', () => {
   const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
   const gitState = extractFunctionBlock(deployScript, 'function getFormalReleaseGitState')
@@ -523,4 +544,44 @@ test('package exposes a release status command for the latest ledger', () => {
   const packageJson = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
   assert.equal(packageJson.scripts['release:status'], 'node scripts/release-status.mjs')
   assert.equal(packageJson.scripts['release:reconcile'], 'node scripts/release-reconcile.mjs')
+})
+
+test('explicit UI qualification builds only the miniprogram gate and writes exact evidence', () => {
+  const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
+  const packageJson = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
+  const qualify = extractFunctionBlock(deployScript, 'async function runReleaseUiQualification')
+  const buildGate = extractFunctionBlock(deployScript, 'async function buildAndGateMiniprogramUpload')
+  const dispatch = deployScript.slice(deployScript.lastIndexOf("const target = process.argv[2] || 'all'"))
+
+  assert.equal(packageJson.scripts['release:ui-qualify'], 'node scripts/deploy.mjs release-ui-qualify')
+  assert.match(qualify, /getRequiredFlagValue\('version'/)
+  assert.match(qualify, /getRequiredFlagValue\('desc'/)
+  assert.match(qualify, /getRequiredFlagValue\('ui-qualification'/)
+  assert.match(qualify, /isAbsolute\(qualificationPath\)/)
+  assert.match(qualify, /const gitSha = getGitSha\(\)/)
+  assert.match(qualify, /const devToolsVersion = readWechatDevToolsVersion\(\)/)
+  assert.match(qualify, /await buildAndGateMiniprogramUpload\(/)
+  assert.match(qualify, /await writeReleaseUiQualification\(/)
+  assert.ok(qualify.indexOf('await buildAndGateMiniprogramUpload(') < qualify.indexOf('await writeReleaseUiQualification('))
+  assert.doesNotMatch(qualify, /deployCloud|deployAdminWeb|uploadBuiltMiniprogram|releaseGuard|createReleaseRunLedger/)
+  assert.match(buildGate, /HH_RELEASE_GIT_SHA: gitSha/)
+  assert.match(buildGate, /HH_RELEASE_DEVTOOLS_VERSION: devToolsVersion/)
+  assert.match(dispatch, /target === 'release-ui-qualify'[\s\S]*await runReleaseUiQualification\(\)/)
+})
+
+test('formal prepare explicitly reuses a qualification without silently rebuilding UI', () => {
+  const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
+  const release = extractFunctionBlock(deployScript, 'async function runFormalRelease')
+  const resolver = extractFunctionBlock(deployScript, 'async function inspectExplicitUiQualification')
+  const collector = extractFunctionBlock(deployScript, 'async function collectMiniprogramBuildGateEvidence')
+
+  assert.match(release, /const uiQualificationPath = getFlagValue\('ui-qualification'\)/)
+  assert.match(release, /uiQualificationPath && !prepareOnly/)
+  assert.match(release, /allowReleaseBuildInfo:\s*Boolean\(uiQualificationPath\)/)
+  assert.match(release, /uiQualificationPath[\s\S]*await inspectExplicitUiQualification[\s\S]*buildAndGateMiniprogramUpload/)
+  assert.doesNotMatch(resolver, /buildAndGateMiniprogramUpload|execSync|test:mp:release-gate/)
+  assert.match(resolver, /inspectReleaseUiQualification/)
+  assert.match(resolver, /qualificationDigest: await computeFileSha256/)
+  assert.match(collector, /qualificationPath: preparedEvidence\.qualificationPath/)
+  assert.match(collector, /qualificationDigest: preparedEvidence\.qualificationDigest/)
 })

@@ -14,8 +14,12 @@ export type AuditTargetType = 'text' | 'image' | 'audio' | 'video'
 
 export type SectionType = 'realtime' | 'evergreen'
 export type SectionStatus = 'active' | 'dormant' | 'archived'
-export type SectionDisplayTemplate = 'default' | 'guide_note' | 'image_note'
+export type SectionDisplayTemplate = 'default' | 'guide_note' | 'text_note' | 'image_note'
+export type TextNoteTheme = 'paper' | 'mint' | 'slate' | 'headline' | 'quote' | 'notice'
 
+export interface PostPresentation {
+  textNoteTheme?: TextNoteTheme
+}
 export type WidgetType =
   | 'short_text'
   | 'summary'
@@ -290,6 +294,7 @@ export interface Post {
   pendingAuditReason?: string
   pendingSubmittedAt?: string
   content: PostContent
+  presentation?: PostPresentation
   commentCount: number
   likeCount: number
   createdAt: string

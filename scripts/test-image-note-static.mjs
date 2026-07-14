@@ -35,7 +35,7 @@ assert(
 )
 
 assert(
-  home.includes("displayTemplate: 'default' | 'guide_note' | 'image_note'") &&
+  home.includes("displayTemplate: 'default' | 'guide_note' | 'text_note' | 'image_note'") &&
     home.includes("activeArchiveGroup.displayTemplate === 'image_note'") &&
     home.includes("'image-note-feed': activeArchiveGroup.displayTemplate === 'image_note'") &&
     home.includes('const imageNoteColumns = computed<ArchiveItem[][]>'),

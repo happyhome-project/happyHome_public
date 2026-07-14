@@ -66,6 +66,12 @@ import {
   normalizeSectionDisplayTemplate,
 } from '../../shared/guide-note-widgets'
 import {
+  buildDefaultTextNoteWidgets,
+  isTextNoteSection,
+  normalizeTextNoteWidgets,
+  TEXT_NOTE_LOCKED_WIDGETS,
+} from '../../shared/text-note-widgets'
+import {
   buildDefaultImageNoteWidgets,
   getImageNoteLockedWidget,
   IMAGE_NOTE_LOCKED_WIDGETS,
@@ -180,6 +186,7 @@ function resolveNonHttpAdminContext(event: any): AdminCtx {
 const SUPER_ADMIN_ONLY: Array<string | RegExp> = [
   'post.ragV2HealthAdmin',
   'community.listActivePageAdmin',
+  'community.listAllPageAdmin',
   'post.ragTimerProbeCreateAdmin','post.ragTimerEvidenceAdmin','post.ragTimerProbeStatusAdmin','post.ragTimerProbeCleanupAdmin',
   'community.approve',
   'community.reject',
@@ -261,7 +268,7 @@ function normalizeSection(section: any) {
   }
   const guideNormalized = {
     ...normalized,
-    widgets: normalizeGuideNoteWidgets(normalized),
+    widgets: normalizeTextNoteWidgets({ ...normalized, widgets: normalizeGuideNoteWidgets(normalized) }),
   }
   return {
     ...guideNormalized,
@@ -305,6 +312,29 @@ function assertTemplateLockedWidgets(section: Section, widgets: Widget[]) {
   }
 }
 
+function assertTextNoteLockedWidgets(section: Section, widgets: Widget[]) {
+  if (!isTextNoteSection(section)) return
+  if (widgets.length !== TEXT_NOTE_LOCKED_WIDGETS.length || widgets.some((widget) => !TEXT_NOTE_LOCKED_WIDGETS.some((locked) => locked.widgetId === widget.widgetId))) {
+    throw new Error('纯文字笔记只能包含标题和正文固定控件')
+  }
+  for (const lockedWidget of TEXT_NOTE_LOCKED_WIDGETS) {
+    const incoming = widgets.find((widget) => widget.widgetId === lockedWidget.widgetId)
+    if (!incoming) throw new Error(`纯文字笔记固定控件「${lockedWidget.label}」不能删除`)
+    const immutableFields: Array<keyof Widget> = ['type', 'label', 'fieldKey', 'required', 'order', 'showInList']
+    if (immutableFields.some((field) => incoming[field] !== lockedWidget[field])) {
+      throw new Error(`纯文字笔记固定控件「${lockedWidget.label}」不能修改`)
+    }
+  }
+}
+
+function applyGuideNoteLockedFlags(section: Section, widgets: Widget[]) {
+  if (!isGuideNoteSection(section)) return widgets
+  return widgets.map((widget) => {
+    const lockedWidget = getGuideNoteLockedWidget(widget.widgetId)
+    return lockedWidget ? { ...lockedWidget } : { ...widget, locked: false }
+  })
+}
+
 function applyTemplateLockedFlags(section: Section, widgets: Widget[]) {
   const definition = getLockedTemplateDefinition(section)
   if (!definition) return widgets
@@ -312,6 +342,14 @@ function applyTemplateLockedFlags(section: Section, widgets: Widget[]) {
     const lockedWidget = definition.getLockedWidget(widget.widgetId)
     return lockedWidget ? { ...lockedWidget } : { ...widget, locked: false }
   })
+}
+
+function applyTextNoteLockedFlags(section: Section, widgets: Widget[]) {
+  if (!isTextNoteSection(section)) return widgets
+  const lockedById = new Map(TEXT_NOTE_LOCKED_WIDGETS.map((widget) => [widget.widgetId, widget]))
+  return widgets.map((widget) => lockedById.has(widget.widgetId)
+    ? { ...lockedById.get(widget.widgetId)! }
+    : { ...widget, locked: false })
 }
 
 function normalizeKeyword(value: unknown) {
@@ -1089,7 +1127,20 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const communityId = String(params.communityId || '').trim()
     if (!communityId) throw new Error('communityId 不能为空')
     const banners = await normalizeCommunityHomeBanners(communityId, params.banners)
-    await db.updateById('communities', communityId, { homeBanners: banners })
+    if (params.expectedBanners !== undefined) {
+      const expectedBanners = canonicalCommunityHomeBanners(params.expectedBanners)
+      await db.runTransaction(async (transaction) => {
+        const community = await db.transactionGetByIdOrNull<any>(transaction, 'communities', communityId)
+        if (!community) throw new Error('community not found')
+        const currentBanners = canonicalCommunityHomeBanners(community.homeBanners)
+        if (JSON.stringify(currentBanners) !== JSON.stringify(expectedBanners)) {
+          throw new Error('Banner 配置已变化，请重新 dry-run')
+        }
+        await transaction.collection('communities').doc(communityId).update({ data: { homeBanners: banners } })
+      })
+    } else {
+      await db.updateById('communities', communityId, { homeBanners: banners })
+    }
     return { success: true }
   }
   if (action === 'community.hardDelete') {
@@ -1107,6 +1158,10 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     return { sections: raw.map((section: any) => normalizeSection(section)) }
   }
   if (action === 'section.create') {
+    if (typeof params.displayTemplate !== 'undefined' &&
+        !['default', 'guide_note', 'text_note', 'image_note'].includes(params.displayTemplate)) {
+      throw new Error('不支持的展示模板')
+    }
     const type = params.type === 'realtime' ? 'realtime' : 'evergreen'
     const displayTemplate = type === 'evergreen'
       ? normalizeSectionDisplayTemplate(params.displayTemplate)
@@ -1122,7 +1177,9 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
         ? buildDefaultGuideNoteWidgets()
         : displayTemplate === 'image_note'
           ? buildDefaultImageNoteWidgets()
-          : [],
+          : displayTemplate === 'text_note'
+            ? buildDefaultTextNoteWidgets()
+            : [],
       createdAt: new Date().toISOString(),
       type,
       status: 'active',
@@ -1144,7 +1201,10 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (typeof params.order === 'number') updates.order = params.order
     if (params.type === 'realtime' || params.type === 'evergreen') updates.type = params.type
     if (params.status === 'active' || params.status === 'dormant' || params.status === 'archived') updates.status = params.status
-    if (typeof params.displayTemplate !== 'undefined') updates.displayTemplate = normalizeSectionDisplayTemplate(params.displayTemplate)
+    if (typeof params.displayTemplate !== 'undefined') {
+      if (!['default', 'guide_note', 'text_note', 'image_note'].includes(params.displayTemplate)) throw new Error('不支持的展示模板')
+      updates.displayTemplate = params.displayTemplate
+    }
     if (typeof params.accentColor === 'string') updates.accentColor = params.accentColor
     if (typeof params.enableComment === 'boolean') updates.enableComment = params.enableComment
     if (typeof params.enableLike === 'boolean') updates.enableLike = params.enableLike
@@ -1153,6 +1213,10 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     await db.runTransaction(async transaction => {
       const sectionBefore = await db.transactionGetByIdOrNull<any>(transaction, 'sections', sectionId)
       if (!sectionBefore) throw new Error('section not found')
+      if (Object.prototype.hasOwnProperty.call(updates, 'displayTemplate') &&
+          updates.displayTemplate !== normalizeSectionDisplayTemplate(sectionBefore.displayTemplate)) {
+        throw new Error('已创建板块不允许切换展示模板')
+      }
       const effectiveStatus = Object.prototype.hasOwnProperty.call(updates, 'status')
         ? updates.status
         : sectionBefore.status
@@ -1195,6 +1259,8 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       ...widget,
       widgetId: widget.widgetId || uuidv4(),
     }))
+    assertTextNoteLockedWidgets(currentSection, widgets)
+    widgets = applyTextNoteLockedFlags(currentSection, widgets)
     assertTemplateLockedWidgets(currentSection, widgets)
     widgets = applyTemplateLockedFlags(currentSection, widgets)
     validateSectionWidgets(currentSection.type, widgets)
@@ -1474,6 +1540,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     return getPostRagIndexHealthForCommunity(communityId)
   }
   if (action === 'community.listActivePageAdmin') return listReleaseRagPage('communities', { status: 'active' }, params.afterId, params.limit)
+  if (action === 'community.listAllPageAdmin') return listReleaseRagPage('communities', {}, params.afterId, params.limit)
   if (action === 'section.listPageAdmin') {
     const communityId=String(params.communityId||'').trim(); if(!communityId) throw new Error('communityId 不能为空')
     return listReleaseRagPage('sections', { communityId }, params.afterId, params.limit)
@@ -1930,6 +1997,17 @@ async function normalizeCommunityHomeBanners(communityId: string, input: unknown
   }
 
   return normalized
+}
+
+function canonicalCommunityHomeBanners(input: unknown) {
+  return (Array.isArray(input) ? input : []).map((banner: any) => ({
+    bannerId: String(banner?.bannerId || '').trim(),
+    postId: String(banner?.postId || '').trim(),
+    title: String(banner?.title || '').trim(),
+    coverImage: String(banner?.coverImage || '').trim(),
+    enabled: banner?.enabled !== false,
+    order: Number(banner?.order || 0),
+  }))
 }
 
 async function hardDeleteCommunity(communityId: string, community: Community) {

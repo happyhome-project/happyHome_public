@@ -259,6 +259,18 @@ assert(
 )
 
 assert(
+  !home.includes('class="home-banner"') &&
+    !home.includes('homeBannerItems') &&
+    !home.includes('class="notice-board"') &&
+    !home.includes('noticeRows') &&
+    !home.includes('<text class="home-banner-title">新人必看</text>') &&
+    home.includes(expectedLiveSectionHeading) &&
+    home.includes('class="section-tabs-sticky-shell"') &&
+    home.includes('class="active-archive-body"'),
+  'home should remove banner and notice display regions while preserving live and archive content.'
+)
+
+assert(
     home.includes('class="home-shell"') &&
     !home.includes('class="home-brandbar"') &&
     !home.includes('class="home-brand-title"') &&
@@ -266,14 +278,7 @@ assert(
     home.includes('quoteText') &&
     home.includes("'Source Han Serif SC', 'Noto Serif CJK SC', '思源宋体'") &&
     home.includes('placeholder="试试搜周边亲子游路线"') &&
-    home.includes('class="home-banner"') &&
-    home.includes('homeBannerItems') &&
-    home.includes("imageKey: buildHomeImageKey('banner', String(banner.bannerId || `${banner.postId}-${index}`))") &&
     home.includes("imageKey: buildHomeImageKey('guide', `${section._id}:${p._id || idx}`)") &&
-    home.includes('openHomeBanner') &&
-    home.includes('resolvedHomeBannerCoverUrls') &&
-    home.includes('rawHomeBannerCoverImages') &&
-    home.includes('homeBannerActiveIndex') &&
     home.includes('class="home-search home-search--primary"') &&
     (home.match(/class="section-tabs-sticky-shell"/g) || []).length === 1 &&
     (home.match(/class="section-tabs"/g) || []).length === 1 &&
@@ -289,38 +294,6 @@ assert(
     !home.includes('section-tabs--fixed') &&
     homeStickyTabsRule.includes('position: sticky') &&
     homeStickyTabsRule.includes('env(safe-area-inset-top)') &&
-    home.includes('<swiper') &&
-    home.includes('<swiper-item') &&
-    home.includes('class="home-banner-swiper"') &&
-    home.includes('class="home-banner-slide"') &&
-    home.includes(':current="homeBannerActiveIndex"') &&
-    home.includes(':circular="homeBannerItems.length > 1"') &&
-    home.includes(':duration="260"') &&
-    home.includes('@change="onHomeBannerChange"') &&
-    home.includes('@touchstart="onHomeBannerGestureStart"') &&
-    home.includes('@touchmove="onHomeBannerGestureMove"') &&
-    home.includes('@touchend="onHomeBannerGestureEnd"') &&
-    home.includes('HOME_BANNER_SWIPE_THRESHOLD_PX') &&
-    home.includes('HOME_BANNER_TAP_SUPPRESS_MS') &&
-    home.includes('Math.max(dx, dy)') &&
-    home.includes('suppressHomeBannerTapTemporarily') &&
-    home.includes('event?.detail?.source === \'touch\'') &&
-    home.includes('suppressNextHomeBannerTap') &&
-    !home.includes('onHomeBannerPointerMove') &&
-    !home.includes('homeBannerPointerMoved') &&
-    !home.includes('const step = deltaX < 0 ? 1 : -1') &&
-    !home.includes('homeBannerActiveIndex.value = (homeBannerActiveIndex.value + step + length) % length') &&
-    !/class="home-banner-slide"[\s\S]{0,120}:class="\{ active: i === homeBannerActiveIndex \}"/.test(home) &&
-    !home.includes('.home-banner-slide.active') &&
-    home.includes('class="notice-board"') &&
-    home.includes('class="notice-kind-image"') &&
-    home.includes('src="/static/home-notice-title.png"') &&
-    home.includes('class="notice-lines"') &&
-    home.includes('noticeRows') &&
-    !home.includes('{{ notice.kind }}') &&
-    !home.includes('notice.sectionName || notice.label') &&
-    home.includes("padStart(2, '0')") &&
-    home.includes('`${month}-${day}`') &&
     home.includes(expectedLiveSectionHeading) &&
     home.includes('class="group-card"') &&
     home.includes('class="home-search-box"') &&
@@ -363,7 +336,7 @@ assert(
     home.includes('rawHomeGuideCoverImages') &&
     home.includes('resolveCloudFileUrls') &&
     !home.includes(`<template v-if="g.displayTemplate === 'guide_note'">`),
-  'home should use the custom continuous Figma-style top area, tabs plus two-column guide feed, keep tab switching height/scroll stable, and keep notice-board short labels controlled instead of binding long section names.'
+  'home should use the custom continuous Figma-style top area and tabs plus two-column guide feed while keeping tab switching height and scroll stable.'
 )
 
 assert(

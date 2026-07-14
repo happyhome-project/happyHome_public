@@ -25,7 +25,7 @@ function gitState(cwd) {
 }
 
 export function createReleasePreflightChecks({ app, env, cwd, adminOptions, delegateRagVerification = false, resumeRequested = false, resumeRunState = null, releaseStrategy = 'full-current', fullCurrentExplicit = releaseStrategy === 'full-current', forceRedeployCurrent = false, publishOnly = false, generatedBuildInfoMatches = false, invoke = invokeAdmin, runner = defaultRunner, readGitState = gitState, readServerlessIndexMappings = readTencentServerlessIndexMappings, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
-  const configs = buildRagWorkerFunctionConfigs(parseConfigureRagWorkersArgs([], env))
+  const configs = delegateRagVerification ? null : buildRagWorkerFunctionConfigs(parseConfigureRagWorkersArgs([], env))
   const runId = `pf_${crypto.randomUUID().replaceAll('-', '').slice(0, 32)}`
   const identity = { runId }
   const checks = [
@@ -60,7 +60,7 @@ export function createReleasePreflightChecks({ app, env, cwd, adminOptions, dele
       cleanupFixture: async () => invoke('post.ragTimerProbeCleanupAdmin', identity, adminOptions, runner),
     },
   ]
-  return delegateRagVerification ? checks.filter(check => check.name !== 'timer-probe-document') : checks
+  return delegateRagVerification ? checks.filter(check => check.name === 'full-current-plan-resume') : checks
 }
 
 export async function main() {

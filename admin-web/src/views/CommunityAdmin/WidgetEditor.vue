@@ -18,7 +18,7 @@
         </div>
       </div>
       <div>
-        <el-button v-if="!isImageNoteTemplate" @click="addWidget">+ 添加控件</el-button>
+        <el-button v-if="!isFixedTemplate" @click="addWidget">+ 添加控件</el-button>
         <el-button type="primary" @click="save" :loading="saving" :disabled="listCount > 3">保存</el-button>
       </div>
     </div>
@@ -27,7 +27,7 @@
         <strong>{{ sectionName || '当前板块' }}</strong>
         <span>使用低代码方式配置字段、列表展示和控件属性。</span>
       </div>
-      <el-button v-if="!isImageNoteTemplate" size="small" @click="addWidget">+ 添加控件</el-button>
+      <el-button v-if="!isFixedTemplate" size="small" @click="addWidget">+ 添加控件</el-button>
     </div>
 
     <el-alert
@@ -52,6 +52,14 @@
       description="标题、封面/图片、距离、最高海拔、累计爬升、参考用时、正文、两步路轨迹编号、目的地位置为固定结构；正文使用富图文排版能力，支持换行和基础格式，但不支持插图。图片请上传到封面/图片。固定控件不能删除、改类型或调整顺序。"
     />
     <el-alert
+      v-if="isTextNoteTemplate"
+      type="info"
+      :closable="false"
+      style="margin-bottom: 16px;"
+      title="纯文字笔记固定控件"
+      description="标题和正文是纯文字笔记的完整固定结构；不能新增、删除、改类型或调整顺序。"
+    />
+    <el-alert
       v-if="isImageNoteTemplate"
       type="info"
       :closable="false"
@@ -67,7 +75,7 @@
             <h4>控件列表</h4>
             <p>从上到下就是发帖/详情页的字段顺序。</p>
           </div>
-          <el-button v-if="!isImageNoteTemplate" size="small" @click="addWidget">+ 添加一行控件</el-button>
+          <el-button v-if="!isFixedTemplate" size="small" @click="addWidget">+ 添加一行控件</el-button>
         </div>
         <el-table
           :data="widgets"
@@ -279,7 +287,7 @@ const selectedWidgetId = ref('')
 const communityName = ref('')
 const sectionName = ref('')
 const sectionType = ref<'realtime' | 'evergreen'>('evergreen')
-const sectionDisplayTemplate = ref<'default' | 'guide_note' | 'image_note'>('default')
+const sectionDisplayTemplate = ref<'default' | 'guide_note' | 'text_note' | 'image_note'>('default')
 const GUIDE_NOTE_LOCKED_WIDGET_IDS = new Set([
   'guide_title',
   'guide_images',
@@ -293,6 +301,7 @@ const GUIDE_NOTE_LOCKED_WIDGET_IDS = new Set([
   'guide_location',
   'guide_activity_invite',
 ])
+const TEXT_NOTE_LOCKED_WIDGET_IDS = new Set(['text_title', 'text_body'])
 const IMAGE_NOTE_LOCKED_WIDGET_IDS = new Set([
   'image_note_images',
   'image_note_title',
@@ -327,7 +336,9 @@ const DEFAULT_LABELS: Record<string, string> = {
 
 const listCount = computed(() => widgets.value.filter((widget) => widget.showInList).length)
 const isGuideNoteTemplate = computed(() => sectionDisplayTemplate.value === 'guide_note')
+const isTextNoteTemplate = computed(() => sectionDisplayTemplate.value === 'text_note')
 const isImageNoteTemplate = computed(() => sectionDisplayTemplate.value === 'image_note')
+const isFixedTemplate = computed(() => isTextNoteTemplate.value || isImageNoteTemplate.value)
 const selectedWidget = computed(() => widgets.value.find((widget) => String(widget.widgetId || '') === selectedWidgetId.value) || null)
 
 function isListDisplayable(type: string) {
@@ -354,13 +365,21 @@ function shouldClearAttendanceLabel(label: unknown) {
 
 function isLockedWidget(widget: any) {
   const widgetId = String(widget?.widgetId || '')
-  if (isGuideNoteTemplate.value) {
-    return widget?.locked === true || GUIDE_NOTE_LOCKED_WIDGET_IDS.has(widgetId)
-  }
-  if (isImageNoteTemplate.value) {
-    return widget?.locked === true || IMAGE_NOTE_LOCKED_WIDGET_IDS.has(widgetId)
-  }
-  return false
+  return (isGuideNoteTemplate.value && (widget?.locked === true || GUIDE_NOTE_LOCKED_WIDGET_IDS.has(widgetId))) ||
+    (isTextNoteTemplate.value && (widget?.locked === true || TEXT_NOTE_LOCKED_WIDGET_IDS.has(widgetId))) ||
+    (isImageNoteTemplate.value && (widget?.locked === true || IMAGE_NOTE_LOCKED_WIDGET_IDS.has(widgetId)))
+}
+
+function resolveWidgetOrder(widget: any, index: number) {
+  if (isLockedWidget(widget)) return Number(widget.order)
+  const nextCustomIndex = widgets.value
+    .slice(0, index)
+    .filter((candidate) => !isLockedWidget(candidate))
+    .length
+  const lastLockedOrder = widgets.value
+    .filter((candidate) => isLockedWidget(candidate))
+    .reduce((max, candidate) => Math.max(max, Number(candidate.order)), -1)
+  return lastLockedOrder + 1 + nextCustomIndex
 }
 
 onMounted(async () => {
@@ -374,7 +393,9 @@ onMounted(async () => {
     const res = await sectionApi.get(sectionId) as any
     sectionName.value = String(res.section?.name || '')
     sectionType.value = res.section?.type === 'realtime' ? 'realtime' : 'evergreen'
-    sectionDisplayTemplate.value = res.section?.displayTemplate === 'guide_note'
+    sectionDisplayTemplate.value = res.section?.displayTemplate === 'text_note'
+      ? 'text_note'
+      : res.section?.displayTemplate === 'guide_note'
       ? 'guide_note'
       : res.section?.displayTemplate === 'image_note'
         ? 'image_note'
@@ -446,6 +467,7 @@ function moveWidget(index: number, delta: number) {
   const current = widgets.value[index]
   const next = widgets.value[nextIndex]
   if (isLockedWidget(current) || isLockedWidget(next)) {
+    ElMessage.warning('固定控件不能调整顺序')
     ElMessage.warning('固定模板控件不能调整顺序')
     return
   }
@@ -498,6 +520,7 @@ function handleTypeChange(widget: any) {
 
 function removeWidget(widget: any) {
   if (isLockedWidget(widget)) {
+    ElMessage.warning('固定控件不能删除')
     ElMessage.warning('固定模板控件不能删除')
     return
   }
@@ -547,7 +570,7 @@ async function save() {
       showInList: widget.type === 'activity_invite' ? false : (isListDisplayable(widget.type) ? !!widget.showInList : false),
       capacity: widget.type === 'attendance' && widget.capacity ? Number(widget.capacity) : undefined,
       noticeContent: widget.type === 'admin_notice' ? String(widget.noticeContent || '').trim() : undefined,
-      order: index,
+      order: resolveWidgetOrder(widget, index),
     }))
     const needsImpactPreview = hasStructuralWidgetChanges(orderedWidgets)
 
