@@ -53,6 +53,63 @@
         </view>
       </view>
 
+      <view v-else-if="isImageNote" class="image-note-feed">
+        <view
+          v-for="(column, columnIndex) in imageNoteColumns"
+          :key="columnIndex"
+          class="image-note-feed-column"
+        >
+          <view
+            v-for="item in column"
+            :key="item.postId"
+            class="post-card image-note-card"
+            data-testid="section-post-card"
+            :data-post-id="item.postId"
+            @tap="openPost(item.postId)"
+          >
+            <view
+              v-if="item.coverImage && !isSectionImageFailed(item.coverImage)"
+              class="post-cover image-note-cover"
+            >
+              <image
+                :src="item.coverImage"
+                mode="aspectFill"
+                class="post-cover-image"
+                @error="onSectionImageError(item.coverImage)"
+              />
+            </view>
+            <view v-else class="post-cover post-cover-empty image-note-cover image-note-cover-empty">
+              <text>{{ coverFallbackText(item) }}</text>
+            </view>
+            <view class="post-body image-note-main">
+              <text class="post-title image-note-title">{{ item.title }}</text>
+              <view class="post-meta image-note-meta">
+                <view class="post-author image-note-author">
+                  <image
+                    v-if="item.authorAvatar"
+                    :src="item.authorAvatar"
+                    mode="aspectFill"
+                    class="post-avatar image-note-author-avatar"
+                  />
+                  <view
+                    v-else
+                    class="post-avatar post-avatar--generated image-note-author-avatar"
+                    :style="generatedAvatarStyle(item.postId)"
+                  >
+                    <text>{{ authorInitial(item.authorName) }}</text>
+                  </view>
+                  <text class="post-author-name image-note-author-name">{{ item.authorName }}</text>
+                </view>
+                <view class="image-note-like" :aria-label="`${item.likeCount || 0} 个赞`">
+                  <text class="image-note-like-icon" aria-hidden="true">♡</text>
+                  <text>{{ item.likeCount || 0 }}</text>
+                </view>
+              </view>
+            </view>
+          </view>
+        </view>
+      </view>
+
       <view v-else class="post-list">
         <view
           v-for="item in sectionItems"
@@ -118,6 +175,7 @@ import { postApi, sectionApi } from '../../api/cloud'
 import { useUserStore } from '../../store/user'
 import { CREATE_SECTION_INTENT_KEY } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getGuideNoteCard, getListPreview, getPostHomeTitle, getPostHomeTitleIssue } from '../../utils/widget'
+import { getImageNoteCard, isImageNoteSectionContract } from '../../utils/image-note'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
@@ -134,6 +192,7 @@ const loadError = ref('')
 const reportedMissingHomeTitle = new Set<string>()
 const resolvedGuideCoverUrls = ref<Record<string, string>>({})
 const resolvedAuthorAvatarUrls = ref<Record<string, string>>({})
+const failedSectionImageUrls = ref<Record<string, true>>({})
 const GUIDE_NOTE_NAME_HINTS = ['亲子出游', '周末遛娃', '村游攻略', '路线攻略', '出游攻略']
 
 interface SectionListItem {
@@ -150,9 +209,11 @@ interface SectionListItem {
   hasVisualPlaceholder: boolean
   textNoteTheme?: TextNoteTheme
   likes: number
+  likeCount?: number
 }
 
 const sectionName = computed(() => String(section.value?.name || '板块'))
+const isImageNote = computed(() => isImageNoteSectionContract(section.value))
 const isGuideNote = computed(() => {
   if (section.value?.displayTemplate === 'guide_note') return true
   const name = String(section.value?.name || '').trim()
@@ -179,6 +240,26 @@ const sectionItems = computed<SectionListItem[]>(() => {
         hasVisualPlaceholder: false,
         textNoteTheme: card.theme,
         likes: Number(post.likeCount || post.likes || 0),
+      }
+    }
+    if (isImageNote.value) {
+      const card = getImageNoteCard(post, section.value)
+      const rawCover = String(card.coverImage || '').trim()
+      const rawAvatar = String(card.authorAvatarUrl || '').trim()
+      return {
+        postId: post._id,
+        title: card.title,
+        coverImage: resolvedGuideCoverUrls.value[rawCover] || rawCover,
+        preview: '',
+        previewLines: [],
+        highlight: '',
+        meta: '',
+        authorName: card.authorName,
+        authorAvatar: resolvedAuthorAvatarUrls.value[rawAvatar] || rawAvatar,
+        when: '',
+        hasVisualPlaceholder: true,
+        likes: card.likeCount,
+        likeCount: card.likeCount,
       }
     }
     if (isGuideNote.value) {
@@ -222,10 +303,21 @@ const sectionItems = computed<SectionListItem[]>(() => {
   })
 })
 
+const imageNoteColumns = computed<SectionListItem[][]>(() => {
+  if (!isImageNote.value) return [[], []]
+  return sectionItems.value.reduce<SectionListItem[][]>((columns, item, index) => {
+    columns[index % 2].push(item)
+    return columns
+  }, [[], []])
+})
+
 const rawGuideCoverImages = computed(() => {
   if (!section.value) return []
   return posts.value
-    .map((post) => isGuideNote.value ? getGuideNoteCard(post, section.value).coverImage : resolvePostCover(post, section.value))
+    .map((post) => {
+      if (isImageNote.value) return getImageNoteCard(post, section.value).coverImage
+      return isGuideNote.value ? getGuideNoteCard(post, section.value).coverImage : resolvePostCover(post, section.value)
+    })
     .filter((url) => String(url || '').trim())
 })
 
@@ -310,6 +402,7 @@ async function loadSectionData() {
   loadError.value = ''
   resolvedGuideCoverUrls.value = {}
   resolvedAuthorAvatarUrls.value = {}
+  failedSectionImageUrls.value = {}
   clientLog('info', 'section.load.start', { sectionId: sectionId.value })
   try {
     const results = await Promise.all([
@@ -346,6 +439,16 @@ function openPost(postId: string) {
     url,
     fail: (error) => clientLog('error', 'section.post.navigate.fail', { sectionId: sectionId.value, postId, url, error }),
   })
+}
+
+function isSectionImageFailed(url: string): boolean {
+  return Boolean(failedSectionImageUrls.value[String(url || '').trim()])
+}
+
+function onSectionImageError(url: string) {
+  const normalized = String(url || '').trim()
+  if (!normalized) return
+  failedSectionImageUrls.value = Object.assign({}, failedSectionImageUrls.value, { [normalized]: true as const })
 }
 
 function goCreatePost() {
@@ -707,6 +810,69 @@ function extractText(value: any): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.image-note-feed {
+  display: flex;
+  align-items: flex-start;
+  gap: 16rpx;
+}
+
+.image-note-feed-column {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.image-note-card {
+  width: 100%;
+  box-shadow: var(--hh-shadow-soft);
+}
+
+.image-note-cover {
+  height: 286rpx;
+}
+
+.image-note-feed-column:first-child .image-note-card:nth-child(2n) .image-note-cover {
+  height: 238rpx;
+}
+
+.image-note-feed-column:nth-child(2) .image-note-card:nth-child(2n + 1) .image-note-cover {
+  height: 248rpx;
+}
+
+.image-note-feed-column:nth-child(2) .image-note-card:nth-child(2n) .image-note-cover {
+  height: 306rpx;
+}
+
+.image-note-title {
+  display: -webkit-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.image-note-meta {
+  gap: 10rpx;
+}
+
+.image-note-like {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4rpx;
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-caption-base-size);
+  line-height: var(--hh-text-caption-base-line);
+}
+
+.image-note-like-icon {
+  font-size: 28rpx;
+  line-height: 1;
 }
 
 .post-card {

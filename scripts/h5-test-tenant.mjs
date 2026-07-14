@@ -45,6 +45,16 @@ function isMissing(error) {
   return /document(?:\.get)?:fail[\s\S]*(?:does not exist|not found)|document not found|db or table not exist/i.test(String(error?.message || error))
 }
 
+function normalizeManagerCloudPath(value) {
+  const raw = String(value || '').trim()
+  if (!raw.startsWith('cloud://')) return raw
+  const pathStart = raw.indexOf('/', 'cloud://'.length)
+  if (pathStart < 0 || pathStart === raw.length - 1) {
+    throw new Error('deleteFiles received an invalid CloudBase fileID')
+  }
+  return raw.slice(pathStart + 1)
+}
+
 export async function createCloudBaseTenantStore({ config, root = ROOT, env = process.env, home = homedir(), manager: injectedManager, db: injectedDb, queryPageSize = 100 }) {
   let manager = injectedManager
   let db = injectedDb
@@ -91,7 +101,7 @@ export async function createCloudBaseTenantStore({ config, root = ROOT, env = pr
 
   return {
     async deleteFiles(fileIDs) {
-      const exact = [...new Set((fileIDs || []).map((value) => String(value || '').trim()).filter(Boolean))]
+      const exact = [...new Set((fileIDs || []).map(normalizeManagerCloudPath).filter(Boolean))]
       if (!exact.length) throw new Error('deleteFiles requires at least one exact fileID')
       await manager.storage.deleteFile(exact)
     },

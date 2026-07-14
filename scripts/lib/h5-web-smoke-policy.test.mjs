@@ -43,6 +43,29 @@ test('launcher injects only public CloudBase config, selects an available port, 
   assert.deepEqual(calls.at(-1), { killed: 4242 })
 })
 
+test('launcher runs npm.cmd through cmd.exe on Windows', async () => {
+  const home = await machineHome({ HH_CLOUDBASE_ENV_ID: 'env-public', HH_CLOUDBASE_ACCESS_KEY: 'key-public' })
+  const calls = []
+  const child = { pid: 4243, once() {}, stdout: { on() {} }, stderr: { on() {} } }
+  const launcher = createH5WebLauncher({
+    home,
+    platform: 'win32',
+    inspectGit: async () => ({ cwd: 'C:/repo', branch: 'codex/test', head: 'abc' }),
+    findPort: async () => 54323,
+    spawnChild: (command, args, options) => { calls.push({ command, args, options }); return child },
+    waitUntilReady: async () => {},
+    killTree: async () => {},
+    log() {},
+  })
+
+  await launcher.start()
+
+  assert.equal(calls[0].command, 'cmd.exe')
+  assert.deepEqual(calls[0].args.slice(0, 4), ['/d', '/s', '/c', 'npm.cmd'])
+  assert.match(calls[0].args.join(' '), /--workspace miniprogram run dev:h5/)
+  assert.equal(calls[0].options.shell, false)
+})
+
 test('launcher reports missing machine config precisely', async () => {
   const home = await mkdtemp(join(tmpdir(), 'hh-h5-web-missing-'))
   await assert.rejects(() => createH5WebLauncher({ home }).start(), /missing machine config: .*h5-web\.env/)

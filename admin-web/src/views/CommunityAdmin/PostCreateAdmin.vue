@@ -69,9 +69,10 @@
             <RichNoteAdminEditor
               v-else-if="widget.type === 'rich_note'"
               v-model="formData[widget.widgetId] as any"
-              :allow-images="!isGuideNoteTemplate"
+              :allow-images="!isFixedImageCanvasTemplate"
             />
             <ImageGroupAdminEditor v-else-if="widget.type === 'image_group'" v-model="formData[widget.widgetId] as any" />
+            <TopicAdminEditor v-else-if="widget.type === 'topic'" v-model="formData[widget.widgetId] as any" />
             <LocationAdminEditor v-else-if="widget.type === 'location'" v-model="formData[widget.widgetId] as any" />
 
             <el-input
@@ -135,6 +136,7 @@ import ImageGroupAdminEditor from '../../components/ImageGroupAdminEditor.vue'
 import LocationAdminEditor from '../../components/LocationAdminEditor.vue'
 import NoteBlocksAdminEditor from '../../components/NoteBlocksAdminEditor.vue'
 import RichNoteAdminEditor from '../../components/RichNoteAdminEditor.vue'
+import TopicAdminEditor from '../../components/TopicAdminEditor.vue'
 import VideoItemEditor from '../../components/VideoItemEditor.vue'
 import {
   createDefaultVideoItem,
@@ -161,7 +163,7 @@ const communityName = ref('')
 const authReady = computed(() => Boolean(auth.userId))
 
 const editableWidgets = computed(() => editableWidgetsFor(section.value))
-const isGuideNoteTemplate = computed(() => section.value?.displayTemplate === 'guide_note')
+const isFixedImageCanvasTemplate = computed(() => ['guide_note', 'image_note'].includes(String(section.value?.displayTemplate || '')))
 
 onMounted(async () => {
   await Promise.all([loadCommunityName(), loadSections()])

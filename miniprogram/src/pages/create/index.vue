@@ -48,7 +48,7 @@
         </view>
       </view>
 
-      <view v-else class="form" :class="{ 'form--figma': isFigmaCreateMode }">
+      <view v-else class="form" :class="{ 'form--figma': isFigmaCreateMode, 'form--image-note': isImageNoteCreateMode }">
         <view v-if="!isFigmaCreateMode" class="form-header">
           <text class="section-tag" @tap="handleFormBack">← {{ selectedSection.name }}</text>
           <text v-if="isActivityInviteMode" class="invite-mode-tag">从攻略发起召集</text>
@@ -116,6 +116,62 @@
                   placeholder="添加活动详情"
                   :allow-rich-note-images="allowImagesForWidget(block.bodyWidget)"
                   v-model="formData[block.bodyWidget.widgetId]"
+                />
+              </view>
+
+              <view v-else-if="block.type === 'imageNoteMain'" class="figma-image-note-main-card">
+                <WidgetEditor
+                  v-if="block.imageWidget"
+                  :widget="block.imageWidget"
+                  variant="figma"
+                  embedded
+                  hide-label
+                  guide-role="cover"
+                  :allow-rich-note-images="false"
+                  v-model="formData[block.imageWidget.widgetId]"
+                />
+                <WidgetEditor
+                  v-if="block.titleWidget"
+                  :widget="block.titleWidget"
+                  variant="figma"
+                  embedded
+                  hide-label
+                  guide-role="title"
+                  placeholder="添加主题"
+                  :allow-rich-note-images="false"
+                  v-model="formData[block.titleWidget.widgetId]"
+                />
+                <WidgetEditor
+                  v-if="block.bodyWidget"
+                  :widget="block.bodyWidget"
+                  variant="figma"
+                  embedded
+                  hide-label
+                  guide-role="body"
+                  placeholder="添加正文"
+                  :allow-rich-note-images="false"
+                  v-model="formData[block.bodyWidget.widgetId]"
+                />
+              </view>
+
+              <view v-else-if="block.type === 'imageNoteTools'" class="figma-image-note-tools">
+                <WidgetEditor
+                  v-if="block.topicWidget"
+                  :widget="block.topicWidget"
+                  variant="image-note-tool"
+                  embedded
+                  hide-label
+                  :allow-rich-note-images="false"
+                  v-model="formData[block.topicWidget.widgetId]"
+                />
+                <WidgetEditor
+                  v-if="block.locationWidget"
+                  :widget="block.locationWidget"
+                  variant="image-note-tool"
+                  embedded
+                  hide-label
+                  :allow-rich-note-images="false"
+                  v-model="formData[block.locationWidget.widgetId]"
                 />
               </view>
 
@@ -218,6 +274,8 @@ import {
 } from '../../utils/app-tabbar'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { resolveActivityAnnouncementMain } from '../../utils/create-form-layout'
+import { buildImageNoteCreateBlocks } from '../../utils/image-note-create'
+import { isImageNoteSectionContract } from '../../utils/image-note'
 import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { ensureHierarchyStack, normalizeRouteUrl, openHierarchyParent } from '../../utils/hierarchy-nav'
@@ -288,10 +346,12 @@ const isGuideCreateMode = computed(() => {
   const name = String(section.name || '').replace(/\s/g, '')
   return GUIDE_CREATE_NAME_HINTS.some((hint) => name.includes(hint))
 })
+const isImageNoteCreateMode = computed(() => isImageNoteSectionContract(selectedSection.value))
 
 function allowImagesForWidget(widget: any) {
   if (isTextNoteCreateMode.value) return false
   if (isGuideCreateMode.value) return false
+  if (isGuideCreateMode.value || isImageNoteCreateMode.value) return false
   if (isActivityInviteMode.value && String(widget?.widgetId || '') === ACTIVITY_INVITE_WIDGET_IDS.note) return false
   return true
 }
@@ -299,6 +359,9 @@ function allowImagesForWidget(widget: any) {
 const createFormBlocks = computed(() => {
   const blocks: any[] = []
   const widgets = editableWidgets.value
+  if (isImageNoteCreateMode.value) {
+    return buildImageNoteCreateBlocks(selectedSection.value, widgets)
+  }
   const activityMain = selectedSection.value
     ? resolveActivityAnnouncementMain(selectedSection.value, widgets)
     : null
@@ -498,6 +561,11 @@ function selectSection(section: any, options: { returnTo?: string } = {}) {
   Object.keys(formData).forEach((key) => delete formData[key])
   textNoteStep.value = 'compose'
   textNoteTheme.value = 'paper'
+  for (const widget of section?.widgets || []) {
+    if (widget?.type === 'topic' && widget?.widgetId) {
+      formData[String(widget.widgetId)] = []
+    }
+  }
 }
 
 function handleFormBack() {
@@ -966,6 +1034,7 @@ async function handleSubmit() {
 }
 
 .figma-guide-main-card,
+.figma-image-note-main-card,
 .figma-activity-main-card {
   padding: 32rpx;
   border-radius: 24rpx;
@@ -974,6 +1043,40 @@ async function handleSubmit() {
   display: flex;
   flex-direction: column;
   gap: 32rpx;
+}
+
+.figma-image-note-tools {
+  min-width: 0;
+  padding: 24rpx 28rpx;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  border-radius: 24rpx;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.form--image-note :deep(.widget-editor--guide-cover .add-icon) {
+  color: #ff2442;
+}
+
+.form--image-note .btn-primary {
+  background: #ff2442;
+}
+
+.figma-ai-write {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  color: var(--hh-color-brand-primary);
+  font-size: var(--hh-text-body-lg-size);
+  font-weight: $hh-font-weight-bold;
+  line-height: var(--hh-text-body-lg-line);
+}
+
+.figma-ai-icon {
+  font-size: 32rpx;
+  line-height: 1;
 }
 
 .figma-route-stats-card {

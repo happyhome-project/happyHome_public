@@ -90,3 +90,18 @@ test('store rejects a same-owner content race using the expected canonical hash'
   await assert.rejects(store.setDocument('posts', previouslyObserved._id, { fixtureKey: 'HH_WEB_H5_V1', value: 'desired' }, { expectedCurrentHash: canonicalFingerprint(previouslyObserved) }), /current document changed/)
   assert.deepEqual(db.transactionSets, [])
 })
+
+test('store converts captured CloudBase file IDs back to manager cloud paths before cleanup', async () => {
+  const manager = managerWithPages([])
+  const deleted = []
+  manager.storage = { async deleteFile(paths) { deleted.push(paths) } }
+  const store = await createCloudBaseTenantStore({ config: { envId: 'env-test' }, manager, db: fakeDb() })
+
+  await store.deleteFiles([
+    'cloud://env-test.bucket-name/posts/image-a.png',
+    'posts/image-b.png',
+    'cloud://env-test.bucket-name/posts/image-a.png',
+  ])
+
+  assert.deepEqual(deleted, [['posts/image-a.png', 'posts/image-b.png']])
+})

@@ -7,7 +7,7 @@ import { isPostVisibleToMembers } from '../../lib/content-audit'
 import { ensureCommunityReadable } from '../../lib/public-community'
 import type { Widget, Section, SectionType, SectionStatus } from '../../shared/types'
 import { LIST_DISPLAYABLE_TYPES } from '../../shared/types'
-import { normalizeGuideNoteSection } from '../../shared/guide-note-widgets'
+import { normalizeSectionTemplates } from '../../shared/section-templates'
 
 const COMMUNITY_READ_ERROR = '需要先加入社区后查看内容'
 
@@ -16,7 +16,7 @@ function normalizeNoticeContent(value: unknown) {
 }
 
 function normalizeSection(s: any): Section {
-  return normalizeGuideNoteSection({
+  return normalizeSectionTemplates({
     ...s,
     type: (s.type as SectionType) || 'evergreen',
     status: (s.status as SectionStatus) || 'active',

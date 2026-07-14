@@ -35,6 +35,10 @@ describe('formatWidgetValue', () => {
     expect(formatWidgetValue(['img1.png', 'img2.png'], 'image_group')).toBe('')
   })
 
+  test('topic 以井号文本展示', () => {
+    expect(formatWidgetValue(['亲子出游', '成都周末'], 'topic')).toBe('#亲子出游 #成都周末')
+  })
+
   test('location 返回 address', () => {
     expect(formatWidgetValue({ address: '北京市海淀区', lat: 39.9, lng: 116.3 }, 'location')).toBe('北京市海淀区')
   })

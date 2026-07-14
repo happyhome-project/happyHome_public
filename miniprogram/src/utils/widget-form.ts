@@ -8,6 +8,7 @@ export const DEFAULT_WIDGET_LABELS: Record<string, string> = {
   note_blocks: '图文笔记',
   rich_text: '正文',
   location: '位置',
+  topic: '话题',
   activity_invite: '活动召集',
   attendance: '活动参与',
   admin_notice: '公告',

@@ -3,7 +3,7 @@ import { ensureBackgroundFetchToken } from './background-fetch-token'
 import { isPostVisibleToMembers } from './content-audit'
 import { getGuestIntroConfig } from './guest-intro-config'
 import { getActivePublicCommunity, getDefaultPublicCommunityId, getPublicReadCommunityIds } from './public-community'
-import { normalizeGuideNoteSection } from '../shared/guide-note-widgets'
+import { normalizeSectionTemplates } from '../shared/section-templates'
 import { resolveAuthorAvatarUrl } from '../shared/simulated-author-avatars'
 import { resolvePostAuthorNickname } from '../shared/post-author'
 import {
@@ -34,7 +34,7 @@ export const HOME_SNAPSHOT_SCHEMA_VERSION = 1
 export const HOME_PREFETCH_MAX_BYTES = 256 * 1024
 
 function normalizePostSection(section: Section): Section {
-  return normalizeGuideNoteSection(section) as Section
+  return normalizeSectionTemplates(section) as Section
 }
 
 function normalizeSectionForClient(section: Section): Section {
