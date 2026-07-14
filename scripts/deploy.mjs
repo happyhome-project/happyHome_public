@@ -860,7 +860,7 @@ function resolveMiniprogramUploadMetadata(defaults = {}) {
   }
 }
 
-async function buildAndGateMiniprogramUpload({ version, desc, releaseRunId }) {
+async function buildAndGateMiniprogramUpload({ version, desc, releaseRunId, delegateRagVerification = false }) {
   writeMiniprogramBuildInfo(version, desc)
 
   console.log('\nBuilding miniprogram...')
@@ -878,6 +878,7 @@ async function buildAndGateMiniprogramUpload({ version, desc, releaseRunId }) {
       HH_RELEASE_RUN_ID: releaseRunId,
       HH_RELEASE_PACKAGE_DIGEST: packageDigest,
       HH_RELEASE_UI_EVIDENCE_DIR: releaseUiEvidenceDir,
+      ...(delegateRagVerification ? { HH_RELEASE_DELEGATE_RAG_VERIFICATION: '1' } : {}),
       WECHAT_DEVTOOLS_PROJECT_PATH: MP_DIST,
     },
   })
@@ -957,7 +958,7 @@ async function deployMiniprogram(options = {}) {
 
 async function uploadMiniprogram(options = {}) {
   const upload = resolveMiniprogramUploadMetadata()
-  await buildAndGateMiniprogramUpload({ ...upload, releaseRunId: makeReleaseRunId() })
+  await buildAndGateMiniprogramUpload({ ...upload, releaseRunId: makeReleaseRunId(), delegateRagVerification: true })
   const beforeRemoteMutation = typeof options.beforeRemoteMutation === 'function'
     ? () => assertDirectProductionDeployWorkspace({
         publishOnly: true,
@@ -1500,6 +1501,7 @@ async function runFormalRelease(options = {}) {
       const preparedEvidence = await buildAndGateMiniprogramUpload({
         ...miniprogramUpload,
         releaseRunId: releaseLedger.runId,
+        delegateRagVerification: true,
       })
       const evidence = await collectMiniprogramBuildGateEvidence(preparedEvidence)
       if (!publishOnly) oneShotBuildInfoPrepared = true

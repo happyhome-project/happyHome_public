@@ -5,7 +5,14 @@ import test from 'node:test'
 import {
   applyReleaseRagVerificationPolicy,
   selectNonRagReleaseSmokeFunctions,
+  shouldRunRagSpecialistVerification,
 } from './release-rag-verification-policy.mjs'
+
+test('formal release delegation disables RAG specialist tests only for the explicit release environment', () => {
+  assert.equal(shouldRunRagSpecialistVerification({}), true)
+  assert.equal(shouldRunRagSpecialistVerification({ HH_RELEASE_DELEGATE_RAG_VERIFICATION: '0' }), true)
+  assert.equal(shouldRunRagSpecialistVerification({ HH_RELEASE_DELEGATE_RAG_VERIFICATION: '1' }), false)
+})
 
 test('release smoke keeps business functions and excludes RAG specialist workers', () => {
   assert.deepEqual(
@@ -36,7 +43,14 @@ test('formal release consumes the delegated policy for DAG and legacy smoke path
   const formalRelease = source.slice(source.indexOf('async function runFormalRelease'), source.indexOf("const target = process.argv[2]"))
   assert.match(formalRelease, /applyReleaseRagVerificationPolicy\(/)
   assert.match(formalRelease, /HH_RELEASE_DELEGATE_RAG_VERIFICATION: '1'/)
+  assert.match(formalRelease, /delegateRagVerification: true/)
   assert.match(formalRelease, /selectNonRagReleaseSmokeFunctions\(formalPlan\.targets\.cloud\.functions/)
   assert.match(formalRelease, /runCloudSmoke\(releaseCloudSmokeFunctions,/)
   assert.doesNotMatch(formalRelease, /runCloudSmoke\(plannedCloudFunctions,|runCloudSmoke\(cloudDeploy\.fns,/)
+})
+
+test('direct mini-program upload uses the same release-stage RAG delegation', () => {
+  const source = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
+  const uploadBlock = source.slice(source.indexOf('async function uploadMiniprogram'), source.indexOf('function buildAdminWeb'))
+  assert.match(uploadBlock, /buildAndGateMiniprogramUpload\(\{[\s\S]*?delegateRagVerification: true/)
 })

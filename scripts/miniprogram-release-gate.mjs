@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import process from 'node:process'
 import { buildChildEnv } from './h5-web.mjs'
 import { parseEnvFile } from './h5-test-tenant.mjs'
+import { shouldRunRagSpecialistVerification } from './lib/release-rag-verification-policy.mjs'
 
 const skipMpBuild = process.argv.includes('--skip-mp-build')
 const skipDevtools = process.argv.includes('--skip-devtools')
@@ -51,7 +52,11 @@ function main() {
 
   run('detail/profile compiled runtime syntax guard', npmCmd, ['run', 'test:mp:detail-runtime-syntax'])
   run('profile critical path guard', npmCmd, ['run', 'test:mp:profile-critical-path'])
-  run('post RAG search static guard', npmCmd, ['run', 'test:mp:post-rag-search-static'])
+  if (shouldRunRagSpecialistVerification(process.env)) {
+    run('post RAG search static guard', npmCmd, ['run', 'test:mp:post-rag-search-static'])
+  } else {
+    console.log('[release-gate] RAG specialist static verification delegated until after deployment')
+  }
 
   const h5Values = parseEnvFile(join(homedir(), '.happyhome', 'h5-web.env'))
   run('build H5 for smoke tests', npmCmd, ['run', 'build:h5', '--workspace', 'miniprogram'], {

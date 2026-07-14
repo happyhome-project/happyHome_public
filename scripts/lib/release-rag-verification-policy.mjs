@@ -16,6 +16,10 @@ const RAG_SPECIALIST_FUNCTIONS = new Set([
 
 export const RAG_VERIFICATION_DELEGATION_REASON = 'RAG specialist verification is delegated to the RAG development session after deployment'
 
+export function shouldRunRagSpecialistVerification(env = {}) {
+  return env.HH_RELEASE_DELEGATE_RAG_VERIFICATION !== '1'
+}
+
 export function selectNonRagReleaseSmokeFunctions(functions = []) {
   return [...functions].filter((name) => !RAG_SPECIALIST_FUNCTIONS.has(name))
 }
