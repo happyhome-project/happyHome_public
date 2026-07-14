@@ -14,7 +14,7 @@ export type AuditTargetType = 'text' | 'image' | 'audio' | 'video'
 
 export type SectionType = 'realtime' | 'evergreen'
 export type SectionStatus = 'active' | 'dormant' | 'archived'
-export type SectionDisplayTemplate = 'default' | 'guide_note'
+export type SectionDisplayTemplate = 'default' | 'guide_note' | 'image_note'
 
 export type WidgetType =
   | 'short_text'
@@ -26,6 +26,7 @@ export type WidgetType =
   | 'note_blocks'
   | 'rich_note'
   | 'location'
+  | 'topic'
   | 'activity_invite'
   | 'attendance'
   | 'video_group'

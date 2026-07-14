@@ -1,6 +1,7 @@
 import { AUDIO_ALLOWED_EXTS, AUDIO_MAX_SIZE_BYTES } from '../shared/types'
 import type { PostContent, Section, Widget, WidgetType } from '../shared/types'
 import { isGuideNoteSection } from '../shared/guide-note-widgets'
+import { normalizeTopics } from '../shared/topics'
 
 // 永远不进 post.content 的控件类型（无论 user 还是 admin 路径）：
 //   attendance: 用户报名记录写在独立集合
@@ -38,14 +39,22 @@ export function sanitizeContent(
 ): PostContent {
   const allowedIds = getEditableWidgetIds(section, options.allowAdminOnly === true)
   const widgetById = new Map((section.widgets || []).map((widget) => [widget.widgetId, widget]))
-  return Object.fromEntries(
-    Object.entries(content || {}).filter(([key, value]) => {
-      if (!allowedIds.has(key)) return false
-      const widget = widgetById.get(key)
-      if (widget?.type === 'rich_note' && isEmptyRichNoteContent(value)) return false
-      return true
-    })
-  ) as PostContent
+  const sanitizedEntries: Array<[string, PostContent[string]]> = []
+
+  for (const [key, value] of Object.entries(content || {})) {
+    if (!allowedIds.has(key)) continue
+    const widget = widgetById.get(key)
+    if (widget?.type === 'rich_note' && isEmptyRichNoteContent(value)) continue
+    if (widget?.type === 'topic') {
+      const normalizedTopics = normalizeTopics(value)
+      if (normalizedTopics.length === 0) continue
+      sanitizedEntries.push([key, normalizedTopics])
+      continue
+    }
+    sanitizedEntries.push([key, value])
+  }
+
+  return Object.fromEntries(sanitizedEntries) as PostContent
 }
 
 export function isEmptyValue(value: unknown): boolean {
@@ -359,6 +368,17 @@ export function validateContentValues(
   for (const widget of (section.widgets || []) as Widget[]) {
     const value = content[widget.widgetId]
     if (value === undefined || value === null || value === '') continue
+
+    if (widget.type === 'topic') {
+      const normalizedTopics = normalizeTopics(value)
+      const isCanonical = Array.isArray(value) &&
+        value.length === normalizedTopics.length &&
+        value.every((topic, index) => topic === normalizedTopics[index])
+      if (!isCanonical) {
+        throw new Error(`话题控件「${widget.label || '未命名'}」的话题格式未规范化`)
+      }
+      continue
+    }
 
     if (widget.type === 'note_blocks') {
       if (!Array.isArray(value)) {

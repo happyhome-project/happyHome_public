@@ -1,7 +1,8 @@
 import type { Section, SectionDisplayTemplate, Widget } from './types'
 
 export function normalizeSectionDisplayTemplate(value: unknown): SectionDisplayTemplate {
-  return value === 'guide_note' ? 'guide_note' : 'default'
+  if (value === 'guide_note' || value === 'image_note') return value
+  return 'default'
 }
 
 export const GUIDE_NOTE_LOCKED_WIDGETS: Widget[] = [
