@@ -6,7 +6,7 @@ import { join, relative, resolve } from 'node:path'
 import process from 'node:process'
 
 import { createProductionReleaseStore } from './lib/cloudbase-release-store.mjs'
-import { ALL_CLOUD_FUNCTIONS, createReleasePlan, selectChangeManifests } from './lib/release-plan.mjs'
+import { ALL_CLOUD_FUNCTIONS, createReleasePlan, selectChangeManifests, filterRagReleaseManifest } from './lib/release-plan.mjs'
 import { createMigrationInputDigest, readVerifiedMigrationInputFile } from './lib/release-component-registry.mjs'
 import { resolveMainReleasePlanBase } from './lib/release-plan-base.mjs'
 import { assertFormalReleaseGitState } from './lib/release-policy.mjs'
@@ -27,6 +27,10 @@ function option(name) {
 
 function hasOption(name) {
   return process.argv.some((arg) => arg === `--${name}` || arg.startsWith(`--${name}=`))
+}
+
+function includeRag() {
+  return hasOption('include-rag') || process.env.HH_RELEASE_INCLUDE_RAG === '1'
 }
 
 function changedPaths(root, baseSha, headSha) {
@@ -155,7 +159,8 @@ try {
     functionInputs: await collectFunctionInputs(root),
     forceRedeployCurrent,
     headSha,
-    manifests: selectChangeManifests(mode, readManifests(root), changes),
+    manifests: selectChangeManifests(mode, readManifests(root), changes).map((manifest) => filterRagReleaseManifest(manifest, includeRag())),
+    includeRag: includeRag(),
     mode,
   })
   const destination = join(root, '.codex-local', 'release-plans')

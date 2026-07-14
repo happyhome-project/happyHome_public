@@ -2,12 +2,14 @@ import { describe, expect, test } from 'vitest'
 import {
   buildCommunityOnboardingPath,
   buildCommunitySharePath,
+  buildCommunityShareImageKey,
   buildCommunityShareTitle,
   consumePendingShareCommunity,
   PENDING_SHARE_COMMUNITY_TTL_MS,
   prioritizeShareTargetCommunities,
   readPendingShareCommunity,
   savePendingShareCommunity,
+  selectPreparedCommunityShareImage,
 } from '../community-share'
 
 function createStorage() {
@@ -33,6 +35,22 @@ describe('community share helpers', () => {
   test('formats the native share title from current community name', () => {
     expect(buildCommunityShareTitle('明士班')).toBe('邀请你加入「明士班」')
     expect(buildCommunityShareTitle('')).toBe('邀请你加入「社群助手」')
+  })
+
+  test('keys prepared share images by the complete community identity', () => {
+    expect(buildCommunityShareImageKey({ id: ' c1 ', name: ' 明士班 ', coverImage: ' cloud://cover ' }))
+      .toBe('v1|c1|明士班|cloud://cover')
+  })
+
+  test('never reuses a prepared image from another community state', () => {
+    expect(selectPreparedCommunityShareImage('v1|c1|明士班|', {
+      key: 'v1|c2|青山|',
+      imageUrl: '/tmp/old.png',
+    })).toBe('')
+    expect(selectPreparedCommunityShareImage('v1|c1|明士班|', {
+      key: 'v1|c1|明士班|',
+      imageUrl: '/tmp/current.png',
+    })).toBe('/tmp/current.png')
   })
 
   test('stores a pending share intent for 30 minutes and consumes it once', () => {

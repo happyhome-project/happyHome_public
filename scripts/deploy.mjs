@@ -1254,6 +1254,7 @@ function releaseStageReuseCheck(context) {
 function createFormalReleasePlan(gitSha, releaseStrategy, publishResume, forceRedeployCurrent = false) {
   const args = ['scripts/release-plan.mjs', `--mode=${releaseStrategy}`, `--head=${gitSha}`]
   if (forceRedeployCurrent) args.push('--force-redeploy-current')
+  if (process.env.HH_RELEASE_INCLUDE_RAG === '1') args.push('--include-rag')
   if (publishResume) {
     args.push('--publish-resume', `--version=${publishResume.version}`, `--desc=${publishResume.desc}`)
   }

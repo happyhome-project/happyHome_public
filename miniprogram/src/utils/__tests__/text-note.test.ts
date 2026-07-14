@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { buildRichNoteContentFromMarkdown } from '../rich-note'
 import {
   extractTextNoteContent,
@@ -11,6 +12,13 @@ import {
 } from '../text-note'
 
 describe('text note presentation', () => {
+  test('avoids runtime APIs forbidden in critical mini-program chunks', () => {
+    const source = readFileSync(new URL('../text-note.ts', import.meta.url), 'utf8')
+
+    expect(source).not.toContain('Array.from')
+    expect(source).not.toContain('...extractTextNoteContent')
+  })
+
   test('bounds a continuous long title for a stable two-line cover', () => {
     expect(Array.from(normalizeTextNoteTitle('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'))).toHaveLength(48)
   })

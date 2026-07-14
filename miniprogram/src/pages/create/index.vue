@@ -400,7 +400,9 @@ watch(() => communityStore.currentCommunityId, async () => {
   await consumeCreateSectionIntent()
 })
 
-watch([selectedSection, textNoteStep], ([section, step]) => {
+watch([selectedSection, textNoteStep], (values) => {
+  const section = values[0]
+  const step = values[1]
   const title = section?.displayTemplate === 'text_note' && step === 'cover'
     ? '选择文字封面'
     : section?.name || '发布'
