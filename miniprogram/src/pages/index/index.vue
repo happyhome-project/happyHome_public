@@ -467,7 +467,7 @@ import { memberApi, postApi } from '../../api/cloud'
 import AppTabBar from '../../components/AppTabBar.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getFamilyLetterListSummary, getGuideNoteCard, getHomeLiveMeta, getPostHomeTitle, getPostHomeTitleIssue } from '../../utils/widget'
-import { getImageNoteCard } from '../../utils/image-note'
+import { getImageNoteCard, isImageNoteSectionContract } from '../../utils/image-note'
 import { clientLog, markClientDiagnosticStage, startHomeDiagnosticWatchdog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, normalizeHomeSnapshotShape, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
@@ -774,7 +774,7 @@ interface ArchiveItem {
 interface ArchiveGroup { id: string; name: string; count: number; items: ArchiveItem[]; accentColor?: string; displayTemplate: 'default' | 'guide_note' | 'image_note' }
 
 function resolveArchiveDisplayTemplate(section: any): ArchiveGroup['displayTemplate'] {
-  if (section?.displayTemplate === 'image_note') return 'image_note'
+  if (isImageNoteSectionContract(section)) return 'image_note'
   if (section?.displayTemplate === 'guide_note') return 'guide_note'
   const sectionName = String(section?.name || '').trim()
   return GUIDE_NOTE_NAME_HINTS.some((hint) => sectionName.includes(hint)) ? 'guide_note' : 'default'

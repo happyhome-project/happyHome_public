@@ -154,7 +154,7 @@ import { postApi, sectionApi } from '../../api/cloud'
 import { useUserStore } from '../../store/user'
 import { CREATE_SECTION_INTENT_KEY } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getGuideNoteCard, getListPreview, getPostHomeTitle, getPostHomeTitleIssue } from '../../utils/widget'
-import { getImageNoteCard } from '../../utils/image-note'
+import { getImageNoteCard, isImageNoteSectionContract } from '../../utils/image-note'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
@@ -188,7 +188,7 @@ interface SectionListItem {
 }
 
 const sectionName = computed(() => String(section.value?.name || '板块'))
-const isImageNote = computed(() => section.value?.displayTemplate === 'image_note')
+const isImageNote = computed(() => isImageNoteSectionContract(section.value))
 const isGuideNote = computed(() => {
   if (section.value?.displayTemplate === 'guide_note') return true
   const name = String(section.value?.name || '').trim()

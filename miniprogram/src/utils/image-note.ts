@@ -45,6 +45,30 @@ const IMAGE_NOTE_FIELDS: Record<ImageNoteField, ImageNoteFieldContract> = {
   location: { widgetId: 'image_note_location', fieldKey: 'location', type: 'location' },
 }
 
+export const IMAGE_NOTE_WIDGET_IDS = Object.freeze(
+  Object.values(IMAGE_NOTE_FIELDS).map((field) => field.widgetId),
+)
+
+type ImageNoteSectionLike = {
+  displayTemplate?: unknown
+  widgets?: Array<{ widgetId?: unknown }> | null
+} | null | undefined
+
+/**
+ * During a rolling deployment an older member API can downgrade the new
+ * displayTemplate to "default" while still returning the complete namespaced
+ * widget contract. The fixed IDs are a safe compatibility signal; section
+ * names deliberately are not.
+ */
+export function isImageNoteSectionContract(
+  section: ImageNoteSectionLike,
+  widgets: Array<{ widgetId?: unknown }> | null | undefined = section?.widgets,
+): boolean {
+  if (section?.displayTemplate === 'image_note') return true
+  const widgetIds = new Set((widgets || []).map((widget) => String(widget?.widgetId || '').trim()))
+  return IMAGE_NOTE_WIDGET_IDS.every((widgetId) => widgetIds.has(widgetId))
+}
+
 export function getImageNoteCard(post: Post, section: Section): ImageNoteCard {
   const images = normalizeImages(readImageNoteValue(post, section, IMAGE_NOTE_FIELDS.images))
 
@@ -88,7 +112,7 @@ function readImageNoteValue(
     return content[contract.widgetId]
   }
 
-  if (section.displayTemplate !== 'image_note') return undefined
+  if (!isImageNoteSectionContract(section)) return undefined
 
   const legacyWidget = (section.widgets || [])
     .slice()

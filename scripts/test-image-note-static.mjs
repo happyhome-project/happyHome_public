@@ -15,15 +15,17 @@ const home = read('miniprogram', 'src', 'pages', 'index', 'index.vue')
 const section = read('miniprogram', 'src', 'pages', 'section', 'index.vue')
 
 assert(
-  home.includes("import { getImageNoteCard } from '../../utils/image-note'") &&
-    section.includes("import { getImageNoteCard } from '../../utils/image-note'"),
+  home.includes("import { getImageNoteCard, isImageNoteSectionContract } from '../../utils/image-note'") &&
+    section.includes("import { getImageNoteCard, isImageNoteSectionContract } from '../../utils/image-note'"),
   'home and section feeds should consume the shared image-note card view model.',
 )
 
 assert(
-  home.includes("section?.displayTemplate === 'image_note'") &&
-    section.includes("section.value?.displayTemplate === 'image_note'"),
-  'image-note feed selection must use the explicit displayTemplate contract.',
+  home.includes("import { getImageNoteCard, isImageNoteSectionContract } from '../../utils/image-note'") &&
+    section.includes("import { getImageNoteCard, isImageNoteSectionContract } from '../../utils/image-note'") &&
+    home.includes('isImageNoteSectionContract(section)') &&
+    section.includes('isImageNoteSectionContract(section.value)'),
+  'image-note feed selection must use the shared template and fixed-widget contract.',
 )
 
 assert(

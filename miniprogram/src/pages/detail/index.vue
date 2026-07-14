@@ -202,7 +202,11 @@ import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { buildGuideRouteDetail } from '../../utils/guide-detail'
-import { buildImageNoteDetail, type ImageNoteLocation } from '../../utils/image-note'
+import {
+  buildImageNoteDetail,
+  isImageNoteSectionContract,
+  type ImageNoteLocation,
+} from '../../utils/image-note'
 import { extractRichNoteImageSources } from '../../utils/rich-note'
 import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
 
@@ -257,7 +261,7 @@ const postMeta = computed(() => ({
   communityId: String(post.value?.communityId || section.value?.communityId || ''),
 }))
 const detailSectionTitle = computed(() => section.value?.name || '')
-const isImageNoteDetail = computed(() => section.value?.displayTemplate === 'image_note')
+const isImageNoteDetail = computed(() => isImageNoteSectionContract(section.value))
 const isGuideNoteDetail = computed(() =>
   !isImageNoteDetail.value && resolveGuideNoteDetailTemplate(section.value)
 )

@@ -50,9 +50,16 @@ describe('buildImageNoteCreateBlocks', () => {
     expect(blocks.some((block) => block.type === 'routeStats')).toBe(false)
   })
 
-  test('activates only from the explicit image_note template', () => {
-    expect(buildImageNoteCreateBlocks(section('default'), widgets)).toEqual([])
-    expect(buildImageNoteCreateBlocks({ ...section('default'), name: '图文_new' }, widgets)).toEqual([])
+  test('supports a stale displayTemplate only when the fixed widget contract is complete', () => {
+    expect(buildImageNoteCreateBlocks(section('default'), widgets)).not.toEqual([])
+    expect(buildImageNoteCreateBlocks(
+      { ...section('default'), name: '图文_new' },
+      widgets.slice(0, 4),
+    )).toEqual([])
+    expect(buildImageNoteCreateBlocks(
+      { ...section('default'), name: '图文_new' },
+      [],
+    )).toEqual([])
   })
 })
 

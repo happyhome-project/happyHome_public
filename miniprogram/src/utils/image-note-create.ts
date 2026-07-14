@@ -1,4 +1,5 @@
 import type { Section, Widget } from '../../../cloud/shared/types'
+import { isImageNoteSectionContract } from './image-note'
 
 function findWidget(widgets: Widget[], widgetId: string): Widget | null {
   return widgets.find((widget) => widget.widgetId === widgetId) || null
@@ -8,7 +9,7 @@ export function buildImageNoteCreateBlocks(
   section: Pick<Section, 'displayTemplate'> | null | undefined,
   widgets: Widget[],
 ): Array<Record<string, any>> {
-  if (section?.displayTemplate !== 'image_note') return []
+  if (!isImageNoteSectionContract(section, widgets)) return []
 
   const imageWidget = findWidget(widgets, 'image_note_images')
   const titleWidget = findWidget(widgets, 'image_note_title')

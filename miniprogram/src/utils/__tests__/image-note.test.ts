@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'vitest'
 import type { Post, Section } from '../../../../cloud/shared/types'
-import { buildImageNoteDetail, getImageNoteCard } from '../image-note'
+import {
+  buildImageNoteDetail,
+  getImageNoteCard,
+  isImageNoteSectionContract,
+} from '../image-note'
 
 function imageNoteSection(overrides: Partial<Section> = {}): Section {
   return {
@@ -45,6 +49,21 @@ function imageNotePost(content: Post['content'], overrides: Partial<Post> = {}):
 }
 
 describe('image-note view models', () => {
+  test('recognizes explicit templates and the fixed widget contract during rolling deployments', () => {
+    expect(isImageNoteSectionContract(imageNoteSection())).toBe(true)
+    expect(isImageNoteSectionContract(imageNoteSection({ displayTemplate: 'default' }))).toBe(true)
+    expect(isImageNoteSectionContract(imageNoteSection({
+      displayTemplate: 'default',
+      name: '图文_new',
+      widgets: imageNoteSection().widgets.slice(0, 4),
+    }))).toBe(false)
+    expect(isImageNoteSectionContract(imageNoteSection({
+      displayTemplate: 'default',
+      name: '图文_new',
+      widgets: [],
+    }))).toBe(false)
+  })
+
   test('extracts the fixed five widgets plus feed metadata', () => {
     const body = {
       format: 'markdown' as const,

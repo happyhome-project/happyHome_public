@@ -250,6 +250,7 @@ import {
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { resolveActivityAnnouncementMain } from '../../utils/create-form-layout'
 import { buildImageNoteCreateBlocks } from '../../utils/image-note-create'
+import { isImageNoteSectionContract } from '../../utils/image-note'
 import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { ensureHierarchyStack, normalizeRouteUrl, openHierarchyParent } from '../../utils/hierarchy-nav'
@@ -306,7 +307,7 @@ const isGuideCreateMode = computed(() => {
   const name = String(section.name || '').replace(/\s/g, '')
   return GUIDE_CREATE_NAME_HINTS.some((hint) => name.includes(hint))
 })
-const isImageNoteCreateMode = computed(() => selectedSection.value?.displayTemplate === 'image_note')
+const isImageNoteCreateMode = computed(() => isImageNoteSectionContract(selectedSection.value))
 
 function allowImagesForWidget(widget: any) {
   if (isGuideCreateMode.value || isImageNoteCreateMode.value) return false
