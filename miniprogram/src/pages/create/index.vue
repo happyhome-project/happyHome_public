@@ -152,10 +152,6 @@
                   :allow-rich-note-images="allowImagesForWidget(block.bodyWidget)"
                   v-model="formData[block.bodyWidget.widgetId]"
                 />
-                <view v-if="!isTextNoteCreateMode" class="figma-ai-write">
-                  <text class="figma-ai-icon">✣</text>
-                  <text>AI帮你写</text>
-                </view>
               </view>
 
               <view v-else-if="block.type === 'routeStats'" class="figma-route-stats-card">
@@ -978,21 +974,6 @@ async function handleSubmit() {
   display: flex;
   flex-direction: column;
   gap: 32rpx;
-}
-
-.figma-ai-write {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-  color: var(--hh-color-brand-primary);
-  font-size: var(--hh-text-body-lg-size);
-  font-weight: $hh-font-weight-bold;
-  line-height: var(--hh-text-body-lg-line);
-}
-
-.figma-ai-icon {
-  font-size: 32rpx;
-  line-height: 1;
 }
 
 .figma-route-stats-card {
