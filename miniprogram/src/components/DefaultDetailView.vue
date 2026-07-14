@@ -27,6 +27,15 @@
       </view>
     </view>
 
+    <view v-if="isTextNoteDetail" class="text-note-detail-cover">
+      <TextNoteCover :title="textNoteCard.title" :body="textNoteCard.body" :theme="textNoteCard.theme" />
+    </view>
+
+    <view v-if="textNoteHasFullBody" class="text-note-full-body">
+      <text class="text-note-full-body-label">全文</text>
+      <text class="text-note-full-body-copy">{{ textNoteFullBody }}</text>
+    </view>
+
     <view class="detail-body">
     <view v-if="imageItems.length" class="image-module">
       <image
@@ -146,11 +155,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import RichNoteRenderer from './widgets/RichNoteRenderer.vue'
+import TextNoteCover from './TextNoteCover.vue'
 import NoteBlocksRenderer from './widgets/NoteBlocksRenderer.vue'
 import VideoPlayerCard from './widgets/VideoPlayerCard.vue'
 import { formatWidgetValue, resolvePostDetailTitle } from '../utils/widget'
 import { resolveWidgetLabel } from '../utils/widget-form'
 import { isRichNoteEmpty, normalizeRichNoteContent } from '../utils/rich-note'
+import { extractTextNoteFullBody, getTextNoteCard, needsTextNoteFullBody } from '../utils/text-note'
 import { useAudioStore } from '../store/audio'
 
 const props = defineProps<{
@@ -186,6 +197,10 @@ const authorName = computed(() => String(props.post?.authorNickname || '社区�
 const authorInitial = computed(() => authorName.value.slice(0, 1) || '邻')
 const authorAvatarUrl = computed(() => String(props.post?.authorAvatarUrl || '').trim())
 const publishDate = computed(() => formatPostDate(props.post?.createdAt))
+const isTextNoteDetail = computed(() => props.section?.displayTemplate === 'text_note')
+const textNoteCard = computed(() => getTextNoteCard(props.post))
+const textNoteFullBody = computed(() => extractTextNoteFullBody(props.post?.content?.text_body))
+const textNoteHasFullBody = computed(() => isTextNoteDetail.value && needsTextNoteFullBody(props.post?.content?.text_body))
 
 const titleResolution = computed(() => resolvePostDetailTitle(props.post, props.section))
 const titleWidget = computed(() => {
@@ -256,6 +271,7 @@ const detailFacts = computed(() => splitFacts(factCandidates.value).detail)
 const bodyBlocks = computed<BodyBlock[]>(() => {
   const blocks: BodyBlock[] = []
   sortedWidgets.value.forEach((widget) => {
+    if (isTextNoteDetail.value && widget.widgetId === 'text_body') return
     if ([titleWidget.value?.widgetId, leadWidget.value?.widgetId].includes(widget.widgetId)) return
     const label = resolveWidgetLabel(widget)
     const title = bodyBlockTitle(label)
@@ -497,6 +513,39 @@ function formatAudioDuration(value: unknown): string {
 
 .detail-head {
   padding: 0 0 $hh-space-md;
+}
+
+.text-note-detail-cover {
+  width: min(100%, 620rpx);
+  margin: 16rpx auto 40rpx;
+}
+
+.text-note-full-body {
+  margin: 0 0 $hh-space-xl;
+  padding: 28rpx 30rpx;
+  border: 1rpx solid var(--hh-color-line-soft);
+  border-radius: var(--hh-radius-card);
+  background: var(--hh-color-card);
+}
+
+.text-note-full-body-label,
+.text-note-full-body-copy {
+  display: block;
+}
+
+.text-note-full-body-label {
+  margin-bottom: 18rpx;
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-caption-lg-size);
+  font-weight: $hh-font-weight-bold;
+}
+
+.text-note-full-body-copy {
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-body-lg-size);
+  line-height: 1.82;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .detail-author-row {

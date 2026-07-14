@@ -56,8 +56,10 @@
 
         <template v-if="isTextNoteCreateMode">
           <view v-if="textNoteStep === 'compose'" class="text-note-compose">
-            <WidgetEditor v-if="textNoteTitleWidget" :widget="textNoteTitleWidget" variant="figma" :allow-rich-note-images="false" v-model="formData[textNoteTitleWidget.widgetId]" />
-            <WidgetEditor v-if="textNoteBodyWidget" :widget="textNoteBodyWidget" variant="figma" :allow-rich-note-images="false" v-model="formData[textNoteBodyWidget.widgetId]" />
+            <view class="figma-guide-main-card text-note-editor-card">
+              <WidgetEditor v-if="textNoteTitleWidget" :widget="textNoteTitleWidget" variant="figma" embedded hide-label guide-role="title" placeholder="添加标题" :allow-rich-note-images="false" v-model="formData[textNoteTitleWidget.widgetId]" />
+              <WidgetEditor v-if="textNoteBodyWidget" :widget="textNoteBodyWidget" variant="figma" embedded hide-label guide-role="body" placeholder="添加正文内容" :allow-rich-note-images="false" v-model="formData[textNoteBodyWidget.widgetId]" />
+            </view>
             <view class="text-note-compose-actions">
               <button class="draft-btn" @tap="saveDraft">存草稿</button>
               <button class="btn-primary" data-testid="text-note-next" @tap="openTextNoteCover">下一步</button>
@@ -1230,6 +1232,10 @@ async function handleSubmit() {
   gap: 24rpx;
 }
 
+.text-note-editor-card {
+  min-height: 620rpx;
+}
+
 .text-note-compose-actions,
 .text-note-cover-actions {
   display: flex;
@@ -1274,10 +1280,12 @@ async function handleSubmit() {
 
 .text-note-theme-option :deep(.text-note-cover-frame) { border-radius: 12rpx; }
 .text-note-theme-option :deep(.text-note-cover-content) { padding: 18rpx 14rpx; }
+.text-note-theme-option :deep(.text-note-cover-kicker) { margin-bottom: 6rpx; padding: 0; border-width: 0; font-size: 8rpx; letter-spacing: 1rpx; }
 .text-note-theme-option :deep(.text-note-cover-title) { margin-bottom: 8rpx; font-size: 15rpx; }
 .text-note-theme-option :deep(.text-note-cover-rule) { width: 24rpx; height: 2rpx; margin-bottom: 8rpx; }
 .text-note-theme-option :deep(.text-note-cover-body) { font-size: 11rpx; }
-.text-note-theme-option :deep(.text-note-cover-label) { margin-bottom: 6rpx; padding: 2rpx 5rpx; font-size: 8rpx; }
+.text-note-theme-option :deep(.text-note-cover-signature) { padding-top: 6rpx; font-size: 5rpx; letter-spacing: 0; }
+.text-note-theme-option :deep(.text-note-cover-decoration) { transform: scale(0.32); transform-origin: center; }
 .text-note-theme-option :deep(.text-note-cover-quote) { height: 20rpx; font-size: 28rpx; }
 
 .guard-state {
