@@ -24,11 +24,11 @@ function gitState(cwd) {
   return { cwd, originUrl: git(['remote', 'get-url', 'origin'], cwd), branch: git(['branch', '--show-current'], cwd), headSha: git(['rev-parse', 'HEAD'], cwd), originMainSha: git(['rev-parse', 'origin/main'], cwd), changedPaths }
 }
 
-export function createReleasePreflightChecks({ app, env, cwd, adminOptions, resumeRequested = false, resumeRunState = null, releaseStrategy = 'full-current', fullCurrentExplicit = releaseStrategy === 'full-current', forceRedeployCurrent = false, publishOnly = false, generatedBuildInfoMatches = false, invoke = invokeAdmin, runner = defaultRunner, readGitState = gitState, readServerlessIndexMappings = readTencentServerlessIndexMappings, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
+export function createReleasePreflightChecks({ app, env, cwd, adminOptions, delegateRagVerification = false, resumeRequested = false, resumeRunState = null, releaseStrategy = 'full-current', fullCurrentExplicit = releaseStrategy === 'full-current', forceRedeployCurrent = false, publishOnly = false, generatedBuildInfoMatches = false, invoke = invokeAdmin, runner = defaultRunner, readGitState = gitState, readServerlessIndexMappings = readTencentServerlessIndexMappings, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
   const configs = buildRagWorkerFunctionConfigs(parseConfigureRagWorkersArgs([], env))
   const runId = `pf_${crypto.randomUUID().replaceAll('-', '').slice(0, 32)}`
   const identity = { runId }
-  return [
+  const checks = [
     { name: 'rag-collections', run: async () => { if (!app) throw new Error('credentials unavailable'); return verifyPreflightCollections(app.database) } },
     { name: 'rag-index', run: async () => {
       if (!env.TENCENTCLOUD_SECRETID || !env.TENCENTCLOUD_SECRETKEY) throw new Error('index control credentials unavailable')
@@ -60,6 +60,7 @@ export function createReleasePreflightChecks({ app, env, cwd, adminOptions, resu
       cleanupFixture: async () => invoke('post.ragTimerProbeCleanupAdmin', identity, adminOptions, runner),
     },
   ]
+  return delegateRagVerification ? checks.filter(check => check.name !== 'timer-probe-document') : checks
 }
 
 export async function main() {
@@ -75,7 +76,7 @@ export async function main() {
   const buildInfoPath = path.resolve('miniprogram', 'src', 'generated', 'build-info.ts')
   const buildInfo = fs.existsSync(buildInfoPath) ? fs.readFileSync(buildInfoPath, 'utf8') : ''
   const generatedBuildInfoMatches = Boolean(env.HH_RELEASE_VERSION && env.HH_RELEASE_DESC && buildInfo.includes(env.HH_RELEASE_VERSION) && buildInfo.includes(env.HH_RELEASE_DESC))
-  const result = await runReleasePreflight({ checks: createReleasePreflightChecks({ app, env, cwd: process.cwd(), adminOptions, resumeRequested, resumeRunState, releaseStrategy, fullCurrentExplicit, forceRedeployCurrent, publishOnly, generatedBuildInfoMatches }) })
+  const result = await runReleasePreflight({ checks: createReleasePreflightChecks({ app, env, cwd: process.cwd(), adminOptions, delegateRagVerification: env.HH_RELEASE_DELEGATE_RAG_VERIFICATION === '1', resumeRequested, resumeRunState, releaseStrategy, fullCurrentExplicit, forceRedeployCurrent, publishOnly, generatedBuildInfoMatches }) })
   if (env.HH_RELEASE_PREFLIGHT_EVIDENCE_PATH) {
     fs.mkdirSync(path.dirname(env.HH_RELEASE_PREFLIGHT_EVIDENCE_PATH), { recursive: true })
     fs.writeFileSync(env.HH_RELEASE_PREFLIGHT_EVIDENCE_PATH, `${JSON.stringify(result, null, 2)}\n`, 'utf8')
