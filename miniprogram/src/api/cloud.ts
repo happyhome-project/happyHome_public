@@ -4,6 +4,7 @@
 //   2. H5: use the CloudBase Web SDK.
 // Do not let stale DEV gateway flags affect real mini-program users.
 import { clientLog } from '../utils/client-log'
+import { sanitizePerformanceTrace, type PerformanceTrace } from '../utils/performance-trace'
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore 鈥?wx is injected by the miniprogram runtime; absent in H5 build
@@ -64,27 +65,32 @@ function summarizeParams(params: any) {
 }
 
 export async function callCloud<T = any>(
-  name: string, action: string, params: object = {}
+  name: string, action: string, params: object = {}, trace?: PerformanceTrace
 ): Promise<T> {
   const startedAt = Date.now()
   const source = IS_H5 ? 'web-cloudbase' : 'wx.cloud'
+  const safeTrace = sanitizePerformanceTrace(trace)
+  const data = copyParams({ action }, params)
+  if (safeTrace) data._trace = safeTrace
   clientLog('debug', 'cloud.call.start', {
     name,
     action,
     source,
     params: summarizeParams(params),
+    trace: safeTrace,
   })
   if (IS_H5) {
     // #ifdef H5
     try {
       const { callFunction } = await import('./web-cloudbase')
-      const data = await callFunction(name, copyParams({ action }, params))
-      const result = normalizeCloudResult<T>(data, name, action, 'web-cloudbase')
+      const response = await callFunction(name, data)
+      const result = normalizeCloudResult<T>(response, name, action, 'web-cloudbase')
       clientLog('debug', 'cloud.call.success', {
         name,
         action,
         source,
         durationMs: Date.now() - startedAt,
+        trace: safeTrace,
       })
       return result
     } catch (error) {
@@ -103,7 +109,7 @@ export async function callCloud<T = any>(
   return new Promise((resolve, reject) => {
     _wx.cloud.callFunction({
       name,
-      data: copyParams({ action }, params),
+      data,
       success: (res: any) => {
         try {
           const result = normalizeCloudResult<T>(res.result, name, action, 'wx.cloud')
@@ -112,6 +118,8 @@ export async function callCloud<T = any>(
             action,
             source,
             durationMs: Date.now() - startedAt,
+            requestId: res?.requestId || res?.requestID || '',
+            trace: safeTrace,
           })
           resolve(result)
         } catch (error) {
@@ -141,8 +149,8 @@ export async function callCloud<T = any>(
 }
 
 export const userApi = {
-  login: (params: { nickName: string; avatarUrl: string }) =>
-    callCloud<{ user: any; isNew: boolean }>('user', 'login', params)
+  login: (params: { nickName: string; avatarUrl: string }, trace?: PerformanceTrace) =>
+    callCloud<{ user: any; isNew: boolean }>('user', 'login', params, trace)
 }
 
 export const communityApi = {
@@ -150,8 +158,8 @@ export const communityApi = {
     callCloud<{ communities: any[] }>('community', 'list', { includeAll }),
   pendingList: () =>
     callCloud<{ communities: any[] }>('community', 'pendingList', {}),
-  listDiscoverable: () =>
-    callCloud<{ communities: any[] }>('community', 'listDiscoverable', {}),
+  listDiscoverable: (trace?: PerformanceTrace) =>
+    callCloud<{ communities: any[] }>('community', 'listDiscoverable', {}, trace),
   get: (communityId: string) =>
     callCloud<{ community: any }>('community', 'get', { communityId }),
   create: (params: object) =>
@@ -175,8 +183,8 @@ export const memberApi = {
     callCloud('member', 'memberReject', { communityId, memberId }),
   pendingList: (communityId: string) =>
     callCloud<{ members: any[] }>('member', 'pendingList', { communityId }),
-  myCommunities: () =>
-    callCloud<{ communities: any[] }>('member', 'myCommunities', {}),
+  myCommunities: (trace?: PerformanceTrace) =>
+    callCloud<{ communities: any[] }>('member', 'myCommunities', {}, trace),
 }
 
 export type ApprovalNotificationEventType = 'member_join_pending' | 'community_create_pending'
@@ -217,11 +225,12 @@ export const sectionApi = {
 }
 
 export const postApi = {
-  bootstrap: (currentCommunityId?: string, limitPerSection = 20, asGuest = false) =>
+  bootstrap: (currentCommunityId?: string, limitPerSection = 20, asGuest = false, trace?: PerformanceTrace) =>
     callCloud<any>(
       'post',
       'bootstrap',
       { currentCommunityId, limitPerSection, asGuest },
+      trace,
     ),
   home: (communityId: string, limitPerSection = 20, asGuest = false) =>
     callCloud<{ sections: any[]; postsBySection: Record<string, any[]> }>(

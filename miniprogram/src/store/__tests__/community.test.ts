@@ -92,6 +92,122 @@ describe('community store', () => {
     expect(store.currentSectionIndex).toBe(1)
   })
 
+  test('selectCommunityShell commits the target synchronously without loading sections or membership', async () => {
+    const { useCommunityStore } = await import('../community')
+    const store = useCommunityStore()
+    store.myCommunities = [
+      { _id: 'old-community', name: '旧社区', status: 'active' },
+      { _id: 'new-community', name: '新社区', status: 'active' },
+    ] as any[]
+    store.currentCommunityId = 'old-community'
+    store.currentSections = [{ _id: 'old-section', communityId: 'old-community' }] as any[]
+    store.currentSectionIndex = 1
+
+    const selection = store.selectCommunityShell('new-community')
+
+    expect(selection).toMatchObject({
+      targetCommunityId: 'new-community',
+      previousCommunityId: 'old-community',
+    })
+    expect(store.currentCommunityId).toBe('new-community')
+    expect(store.currentSections).toEqual([])
+    expect(store.browsingCommunity?._id).toBe('new-community')
+    expect(sectionList).not.toHaveBeenCalled()
+    expect(myStatus).not.toHaveBeenCalled()
+  })
+
+  test('selectCommunityShell can render a directory-only joined community before hydration finishes', async () => {
+    const { useCommunityStore } = await import('../community')
+    const store = useCommunityStore()
+    store.currentCommunityId = 'old-community'
+
+    store.selectCommunityShell('directory-community', {
+      _id: 'directory-community',
+      name: '目录里的新社区',
+      status: 'active',
+    } as any, 'switch-trace-1')
+
+    expect(store.currentCommunity?.name).toBe('目录里的新社区')
+    expect(store.pendingCommunitySelection?.traceRequestId).toBe('switch-trace-1')
+    expect(sectionList).not.toHaveBeenCalled()
+    expect(myStatus).not.toHaveBeenCalled()
+  })
+
+  test('handleCommunityAccessLost removes the rejected target and restores a still-active previous shell', async () => {
+    const { useCommunityStore } = await import('../community')
+    const store = useCommunityStore()
+    store.myCommunities = [
+      { _id: 'old-community', name: '旧社区', status: 'active' },
+      { _id: 'new-community', name: '新社区', status: 'active' },
+    ] as any[]
+    store.currentCommunityId = 'old-community'
+    store.currentSections = [{ _id: 'old-section', communityId: 'old-community' }] as any[]
+    store.currentSectionIndex = 1
+    store.selectCommunityShell('new-community')
+
+    const restored = store.handleCommunityAccessLost('new-community')
+
+    expect(restored).toBe('old-community')
+    expect(store.myCommunities.map((community) => community._id)).toEqual(['old-community'])
+    expect(store.currentCommunityId).toBe('old-community')
+    expect(store.currentSections.map((section) => section._id)).toEqual(['old-section'])
+    expect(store.currentSectionIndex).toBe(1)
+  })
+
+  test('a second unverified target keeps the original verified rollback shell', async () => {
+    const { useCommunityStore } = await import('../community')
+    const store = useCommunityStore()
+    store.myCommunities = [
+      { _id: 'verified-community', status: 'active' },
+      { _id: 'first-target', status: 'active' },
+      { _id: 'second-target', status: 'active' },
+    ] as any[]
+    store.currentCommunityId = 'verified-community'
+    store.currentSections = [{ _id: 'verified-section' }] as any[]
+    store.currentSectionIndex = 1
+
+    store.selectCommunityShell('first-target', undefined, 'trace-first')
+    store.selectCommunityShell('second-target', undefined, 'trace-second')
+
+    expect(store.pendingCommunitySelection).toMatchObject({
+      targetCommunityId: 'second-target',
+      traceRequestId: 'trace-second',
+      previousCommunityId: 'verified-community',
+      previousSectionIndex: 1,
+      previousSections: [{ _id: 'verified-section' }],
+    })
+  })
+
+  test('reselecting the current pending target does not discard its rollback proof', async () => {
+    const { useCommunityStore } = await import('../community')
+    const store = useCommunityStore()
+    store.myCommunities = [
+      { _id: 'verified-community', status: 'active' },
+      { _id: 'pending-target', status: 'active' },
+    ] as any[]
+    store.currentCommunityId = 'verified-community'
+    store.currentSections = [{ _id: 'verified-section' }] as any[]
+    store.selectCommunityShell('pending-target', undefined, 'trace-first')
+
+    store.selectCommunityShell('pending-target', undefined, 'trace-second')
+
+    expect(store.pendingCommunitySelection).toMatchObject({
+      targetCommunityId: 'pending-target',
+      traceRequestId: 'trace-first',
+      previousCommunityId: 'verified-community',
+    })
+  })
+
+  test('a target chain without a verified previous community keeps an empty rollback anchor', async () => {
+    const { useCommunityStore } = await import('../community')
+    const store = useCommunityStore()
+
+    store.selectCommunityShell('first-target')
+    store.selectCommunityShell('second-target')
+
+    expect(store.pendingCommunitySelection?.previousCommunityId).toBe('')
+  })
+
   test('clearCommunityState fences an in-flight myCommunities response', async () => {
     const pending = makeDeferred<{ communities: any[] }>()
     myCommunities.mockReturnValueOnce(pending.promise)

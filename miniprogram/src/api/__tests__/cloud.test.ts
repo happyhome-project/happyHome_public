@@ -46,6 +46,37 @@ describe('callCloud', () => {
     }))
   })
 
+  test('forwards only whitelisted performance trace fields to the cloud function', async () => {
+    const callFunction = vi.fn(({ success }: { success: (value: any) => void }) => {
+      success({ result: { ok: true }, requestId: 'server-request-1' })
+    })
+    vi.stubGlobal('wx', { cloud: { callFunction } })
+
+    const { callCloud } = await import('../cloud')
+
+    await callCloud('user', 'login', {}, {
+      requestId: 'login-123',
+      stage: 'login.submit',
+      sample: 'warm',
+      counts: { communityCount: 2, invalid: Number.NaN },
+      nickName: '不得透传',
+      openid: '不得透传',
+    } as any)
+
+    expect(callFunction).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'user',
+      data: {
+        action: 'login',
+        _trace: {
+          requestId: 'login-123',
+          stage: 'login.submit',
+          sample: 'warm',
+          counts: { communityCount: 2 },
+        },
+      },
+    }))
+  })
+
   test('ignores stale dev-gateway flag for normal miniprogram calls', async () => {
     const callFunction = vi.fn(({ success }: { success: (value: any) => void }) => {
       success({ result: { user: { _id: 'real-openid', role: 'user' }, isNew: true } })

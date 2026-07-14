@@ -18,6 +18,12 @@
 
     <view v-if="profileError" class="profile-error">
       <text>{{ profileError }}</text>
+      <button
+        v-if="profileHydrationSlow || profileHydrationFailed"
+        size="mini"
+        class="profile-error__retry"
+        @tap="retryProfileHydration"
+      >重试</button>
     </view>
     <view class="user-card" :class="{ 'user-card--form': showManualLoginForm }">
       <!-- 已登录：编辑时仍保留身份卡，表单由页面底部浮层承载 -->
@@ -81,6 +87,7 @@
               @blur="onNickBlur"
             />
           </view>
+          <text v-if="profileLoginSlow" class="profile-login-slow">登录较慢，请稍候</text>
 
           <view class="form-actions">
             <button size="mini" @tap="closeManualLoginForm">取消</button>
@@ -279,6 +286,7 @@
             {{ submitFormLock.busy.value ? '登录中...' : '确认登录' }}
           </button>
         </view>
+        <text v-if="profileLoginSlow" class="profile-login-slow">登录较慢，请稍候</text>
       </view>
     </view>
 
@@ -453,6 +461,7 @@
             @tap="saveProfile"
           >{{ submitFormLock.busy.value ? '保存中...' : '保存' }}</button>
         </view>
+        <text v-if="profileLoginSlow" class="profile-login-slow">登录较慢，请稍候</text>
       </view>
     </view>
   </view>
@@ -470,6 +479,12 @@ import CommunityShareImageCanvas from '../../components/CommunityShareImageCanva
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { createProfileEditSessionGuard, resolveProfileAvatarUrl } from '../../utils/profile-edit-session'
+import {
+  createAdaptiveAvatarUploader,
+  createLatestEpoch,
+  createPerformanceRequestId,
+  type PerformanceSample,
+} from '../../utils/performance-trace'
 import { clientLog, flushClientDiagnostics } from '../../utils/client-log'
 import {
   clearClientDiagnosticEvents,
@@ -503,6 +518,9 @@ const notificationTemplates = ref<ApprovalNotificationTemplate[]>([])
 const notificationSubscriptions = ref<Array<{ eventType: ApprovalNotificationEventType; templateId: string; status: string }>>([])
 const notificationNeedsAuthorization = ref(false)
 const profileError = ref('')
+const profileHydrationSlow = ref(false)
+const profileHydrationFailed = ref(false)
+const profileLoginSlow = ref(false)
 const shareImageUrl = ref('')
 const releaseVersion = getReleaseVersion()
 const diagnosticsState = ref(getClientDiagnosticsState())
@@ -524,6 +542,10 @@ const profileCustomNavStyle = computed(() => (
 let refreshingProfile = false
 let lastLoginStateRefreshKey = ''
 let suppressNextLoginStateRefresh = false
+const PROFILE_SLOW_THRESHOLD_MS = 5000
+const profileHydrationEpoch = createLatestEpoch()
+const PROFILE_LOGIN_SLOW_THRESHOLD_MS = 5000
+const profileLoginEpoch = createLatestEpoch()
 
 type ProfileToolItem = {
   key: string
@@ -703,6 +725,7 @@ function onLoginChooseAvatar(e: any) {
 }
 
 function cancelNickConfirm() {
+  invalidateProfileLoginRequest()
   showNickConfirm.value = false
   formAvatarTempPath.value = ''
   formNickName.value = ''
@@ -716,18 +739,71 @@ function onNickBlur(e: any) {
   formNickName.value = String(e?.detail?.value || '').trim()
 }
 
+function getAvatarFileSize(source: string): Promise<number> {
+  // #ifdef MP-WEIXIN
+  return new Promise((resolve, reject) => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore wx is injected by the miniprogram runtime.
+      wx.getFileInfo({ filePath: source, success: (result: any) => resolve(Number(result?.size || 0)), fail: reject })
+    } catch (error) {
+      reject(error)
+    }
+  })
+  // #endif
+  // #ifndef MP-WEIXIN
+  return Promise.resolve(0)
+  // #endif
+}
+
+function invalidateProfileLoginRequest() {
+  profileLoginEpoch.invalidate()
+  profileLoginSlow.value = false
+}
+
+function compressAvatar(source: string, quality: number): Promise<string> {
+  // #ifdef MP-WEIXIN
+  return new Promise((resolve, reject) => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore wx is injected by the miniprogram runtime.
+      wx.compressImage({ src: source, quality, success: (result: any) => resolve(String(result?.tempFilePath || source)), fail: reject })
+    } catch (error) {
+      reject(error)
+    }
+  })
+  // #endif
+  // #ifndef MP-WEIXIN
+  return Promise.resolve(source)
+  // #endif
+}
+
+const adaptiveAvatarUploader = createAdaptiveAvatarUploader({
+  getSize: getAvatarFileSize,
+  compress: compressAvatar,
+  upload: async (source) => {
+    const ext = source.startsWith('blob:')
+      ? 'jpg'
+      : (source.split('.').pop()?.split('?')[0] || 'jpg')
+    const cloudPath = `avatars/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
+    return uploadCloudFile({
+      cloudPath,
+      source,
+      trace: {
+        requestId: createPerformanceRequestId('avatar'),
+        stage: 'profile.avatar.upload',
+        sample: userStore.isLoggedIn ? 'warm' : 'cold',
+      },
+    })
+  },
+})
+
 async function uploadAvatarIfAny(selectedTempPath: string, existingAvatarUrl: string, strictReplacement: boolean): Promise<string> {
   return resolveProfileAvatarUrl({
     selectedTempPath,
     existingAvatarUrl,
     strictReplacement,
-    uploadSelectedAvatar: async (source) => {
-      const ext = source.startsWith('blob:')
-      ? 'jpg'
-        : (source.split('.').pop()?.split('?')[0] || 'jpg')
-      const cloudPath = `avatars/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
-      return uploadCloudFile({ cloudPath, source })
-    },
+    uploadSelectedAvatar: (source) => adaptiveAvatarUploader.upload(source),
   })
 }
 
@@ -755,21 +831,42 @@ const submitFormLock = useBusyLock(async () => {
   const submittedNickName = formNickName.value
   const submittedAvatarTempPath = formAvatarTempPath.value
   const submittedAvatarCloudUrl = formAvatarCloudUrl.value
+  const loginRequestId = createPerformanceRequestId('profile-login')
+  const sample: PerformanceSample = userStore.isLoggedIn ? 'warm' : 'cold'
+  const loginEpoch = profileLoginEpoch.begin()
+  const isLoginRequestCurrent = () => (
+    profileLoginEpoch.isCurrent(loginEpoch) &&
+    (!wasEditingProfile || profileEditSessionGuard.isCurrent(editGeneration))
+  )
+  profileLoginSlow.value = false
+  const loginSlowTimer = setTimeout(() => {
+    if (!isLoginRequestCurrent()) return
+    profileLoginSlow.value = true
+  }, PROFILE_LOGIN_SLOW_THRESHOLD_MS)
   try {
     const avatarUrl = await uploadAvatarIfAny(submittedAvatarTempPath, submittedAvatarCloudUrl, wasEditingProfile)
+    if (!isLoginRequestCurrent()) return
     suppressNextLoginStateRefresh = true
     if (isH5Runtime() && !wasEditingProfile) {
       await userStore.webLogin({
         username: webUsername.value,
         password: webPassword.value,
         nickName: submittedNickName,
+      }, { requestId: loginRequestId, stage: 'profile.login', sample }, {
+        shouldApply: isLoginRequestCurrent,
       })
     } else {
-      await userStore.login({ nickName: submittedNickName, avatarUrl })
+      await userStore.login(
+        { nickName: submittedNickName, avatarUrl },
+        { requestId: loginRequestId, stage: 'profile.login', sample },
+        { shouldApply: isLoginRequestCurrent },
+      )
+    }
+    if (!isLoginRequestCurrent()) {
+      suppressNextLoginStateRefresh = false
+      return
     }
     markCurrentLoginStateRefreshHandled()
-    if (wasEditingProfile) await loadProfileDataAfterRoleResolved('profileSaved')
-    else await loadProfileDataAfterRoleResolved('loginSaved')
     if (wasEditingProfile && !profileEditSessionGuard.complete(editGeneration)) return
     isEditingProfile.value = false
     showManualLoginForm.value = false
@@ -781,7 +878,10 @@ const submitFormLock = useBusyLock(async () => {
     if (!restoredShare) {
       uni.showToast({ title: wasEditingProfile ? '已保存' : '登录成功', icon: 'success' })
     }
+    if (wasEditingProfile) void hydrateProfileInBackground('profileSaved')
+    else void hydrateProfileInBackground('loginSaved')
   } catch (e: any) {
+    if (!isLoginRequestCurrent()) return
     uni.showModal({
       title: wasEditingProfile ? '保存失败' : '登录失败',
       content: e?.message || '请重试',
@@ -789,6 +889,9 @@ const submitFormLock = useBusyLock(async () => {
     })
     suppressNextLoginStateRefresh = false
     webPassword.value = ''
+  } finally {
+    clearTimeout(loginSlowTimer)
+    if (profileLoginEpoch.isCurrent(loginEpoch)) profileLoginSlow.value = false
   }
 })
 
@@ -797,6 +900,7 @@ function saveProfile() {
 }
 
 function closeManualLoginForm() {
+  invalidateProfileLoginRequest()
   showManualLoginForm.value = false
   webPassword.value = ''
 }
@@ -1062,11 +1166,11 @@ const notificationSubscribeLock = useBusyLock(async () => {
   }
 })
 
-async function loadPendingMembers() {
+async function loadPendingMembers(shouldApply: () => boolean = () => true) {
   if (!userStore.isLoggedIn) return
-  const nextPendingMembers: any[] = []
-  const nextAdminCommunityIds: string[] = []
-  let communitiesToCheck = communityStore.myCommunities
+  let communitiesToCheck = communityStore.myCommunities.filter(
+    (community: any) => community?.viewerRole === 'admin',
+  )
 
   if (userStore.role === 'superAdmin') {
     try {
@@ -1077,49 +1181,53 @@ async function loadPendingMembers() {
     }
   }
 
-  for (const community of communitiesToCheck) {
+  const nextAdminCommunityIds = communitiesToCheck
+    .map((community: any) => String(community?._id || ''))
+    .filter(Boolean)
+  const memberGroups = await Promise.all(communitiesToCheck.map(async (community: any) => {
     const communityId = String(community?._id || '')
-    if (!communityId) continue
+    if (!communityId) return []
     try {
       const res = await memberApi.pendingList(communityId)
-      nextAdminCommunityIds.push(communityId)
-      if (Array.isArray(res.members) && res.members.length > 0) {
-        for (const member of res.members) {
-          const normalized = Object.assign({}, member)
-          normalized.communityId = communityId
-          normalized.communityName = community?.name || ''
-          nextPendingMembers.push(normalized)
-        }
-      }
+      if (!Array.isArray(res.members)) return []
+      return res.members.map((member: any) => Object.assign({}, member, {
+        communityId,
+        communityName: community?.name || '',
+      }))
     } catch (_error) {
-      // pendingList only succeeds for communities this user can administer.
+      return []
     }
-  }
+  }))
 
-  pendingMembers.value = nextPendingMembers
+  if (!shouldApply()) return
+  pendingMembers.value = memberGroups.flat()
   adminCommunityIds.value = nextAdminCommunityIds
 }
 
-async function loadPendingCommunities() {
+async function loadPendingCommunities(shouldApply: () => boolean = () => true) {
   if (!userStore.isLoggedIn || userStore.role !== 'superAdmin') {
-    pendingCommunities.value = []
+    if (shouldApply()) pendingCommunities.value = []
     return
   }
   try {
     const res = await communityApi.pendingList()
-    pendingCommunities.value = Array.isArray(res.communities) ? res.communities : []
+    if (shouldApply()) pendingCommunities.value = Array.isArray(res.communities) ? res.communities : []
   } catch (_error) {
-    pendingCommunities.value = []
+    if (shouldApply()) pendingCommunities.value = []
   }
 }
 
-async function loadNotificationSubscriptions(options: { preserveOnFailure?: boolean } = {}) {
+async function loadNotificationSubscriptions(
+  options: { preserveOnFailure?: boolean; shouldApply?: () => boolean } = {},
+) {
   if (!userStore.isLoggedIn) return
   try {
     const res = await notificationApi.status()
+    if (options.shouldApply && !options.shouldApply()) return
     notificationSubscriptions.value = Array.isArray(res.subscriptions) ? res.subscriptions : []
     notificationNeedsAuthorization.value = !!res.needsAuthorization
   } catch (_error) {
+    if (options.shouldApply && !options.shouldApply()) return
     if (!options.preserveOnFailure) {
       notificationSubscriptions.value = []
       notificationNeedsAuthorization.value = false
@@ -1131,24 +1239,25 @@ async function loadNotificationStatus() {
   return loadNotificationSubscriptions()
 }
 
-async function loadNotificationConfig() {
+async function loadNotificationConfig(shouldApply: () => boolean = () => true) {
   if (!userStore.isLoggedIn) return
   try {
     const res = await notificationApi.config()
-    notificationTemplates.value = Array.isArray(res.templates) ? res.templates : []
+    if (shouldApply()) notificationTemplates.value = Array.isArray(res.templates) ? res.templates : []
   } catch (_error) {
-    notificationTemplates.value = []
+    if (shouldApply()) notificationTemplates.value = []
   }
 }
 
-async function loadProfileDataAfterRoleResolved(reason: string) {
-  await communityStore.loadMyCommunities()
+async function loadProfileDataAfterRoleResolved(reason: string, shouldApply: () => boolean = () => true) {
+  await communityStore.loadMyCommunities({ loadSections: false, shouldApply })
+  if (!shouldApply()) return
   logProfile('info', 'profile.communities.load.success', {
     reason,
     loadedCommunityCount: communityStore.myCommunities.length,
   })
-  await loadPendingCommunities()
-  await loadPendingMembers()
+  await Promise.all([loadPendingCommunities(shouldApply), loadPendingMembers(shouldApply)])
+  if (!shouldApply()) return
   logProfile('info', 'profile.pending.load.success', {
     reason,
     pendingCommunityCount: pendingCommunities.value.length,
@@ -1157,8 +1266,11 @@ async function loadProfileDataAfterRoleResolved(reason: string) {
     adminCommunityCount: adminCommunityIds.value.length,
   })
   if (hasAdminTools.value) {
-    await loadNotificationConfig()
-    await loadNotificationSubscriptions()
+    await Promise.all([
+      loadNotificationConfig(shouldApply),
+      loadNotificationSubscriptions({ shouldApply }),
+    ])
+    if (!shouldApply()) return
     logProfile('info', 'profile.notifications.load.success', {
       reason,
       templateCount: configuredNotificationTemplates.value.length,
@@ -1169,6 +1281,41 @@ async function loadProfileDataAfterRoleResolved(reason: string) {
     notificationSubscriptions.value = []
     notificationNeedsAuthorization.value = false
   }
+}
+
+async function hydrateProfileInBackground(reason: string) {
+  const epoch = profileHydrationEpoch.begin()
+  profileHydrationSlow.value = false
+  profileHydrationFailed.value = false
+  if (profileError.value.startsWith('加载较慢') || profileError.value.startsWith('资料加载失败')) {
+    profileError.value = ''
+  }
+  const slowTimer = setTimeout(() => {
+    if (!profileHydrationEpoch.isCurrent(epoch)) return
+    profileHydrationSlow.value = true
+    profileError.value = '加载较慢，可点击重试'
+  }, PROFILE_SLOW_THRESHOLD_MS)
+  try {
+    await loadProfileDataAfterRoleResolved(reason, () => profileHydrationEpoch.isCurrent(epoch))
+    if (!profileHydrationEpoch.isCurrent(epoch)) return
+    profileHydrationSlow.value = false
+    profileHydrationFailed.value = false
+    if (profileError.value.startsWith('加载较慢') || profileError.value.startsWith('资料加载失败')) {
+      profileError.value = ''
+    }
+  } catch (error: any) {
+    if (!profileHydrationEpoch.isCurrent(epoch)) return
+    profileHydrationSlow.value = false
+    profileHydrationFailed.value = true
+    profileError.value = '资料加载失败，可点击重试'
+    logProfile('error', 'profile.hydration.fail', { reason, error })
+  } finally {
+    clearTimeout(slowTimer)
+  }
+}
+
+function retryProfileHydration() {
+  void hydrateProfileInBackground('manualRetry')
 }
 
 async function refreshProfileData(reason = 'manual') {
@@ -1186,7 +1333,7 @@ async function refreshProfileData(reason = 'manual') {
   logProfile('info', 'profile.refresh.start', { reason })
   try {
     await userStore.refreshLoginRole()
-    await loadProfileDataAfterRoleResolved(reason)
+    await hydrateProfileInBackground(reason)
   } catch (error: any) {
     profileError.value = error?.message || 'profile refresh failed'
     logProfile('error', 'profile.refresh.fail', { reason, error })
@@ -1200,6 +1347,9 @@ watch(
   () => getLoginStateRefreshKey(),
   (key) => {
     if (!key) {
+      profileHydrationEpoch.invalidate()
+      profileHydrationSlow.value = false
+      profileHydrationFailed.value = false
       lastLoginStateRefreshKey = ''
       suppressNextLoginStateRefresh = false
       return
@@ -1262,6 +1412,8 @@ onShareAppMessage(() => {
   font-size: $hh-font-caption;
   line-height: 1.5;
 }
+.profile-error__retry { margin: 8rpx 0 0; font-size: var(--hh-text-caption-size); }
+.profile-login-slow { display: block; color: var(--hh-color-text-secondary); font-size: var(--hh-text-caption-size); text-align: center; }
 .profile-diagnostics {
   margin: -4rpx 0 $hh-space-md;
   padding: $hh-space-md;

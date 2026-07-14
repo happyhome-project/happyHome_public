@@ -1,6 +1,9 @@
 import type { Community } from '../../../cloud/shared/types'
 
-export type DirectoryCommunity = Community & { viewerStatus?: string | null }
+export type DirectoryCommunity = Community & {
+  viewerStatus?: string | null
+  viewerRole?: string | null
+}
 
 export function singleLineCommunityText(value: unknown, fallback = ''): string {
   return String(value || '').replace(/\s+/g, ' ').trim() || fallback
@@ -27,11 +30,21 @@ export function mergeCommunityDirectory(
 ): DirectoryCommunity[] {
   const result: DirectoryCommunity[] = []
   const joinedIds = new Set<string>()
+  const directoryById = new Map(
+    (directoryCommunities || [])
+      .filter((community) => community?._id)
+      .map((community) => [community._id, community]),
+  )
 
   for (const community of joinedCommunities || []) {
     if (!community?._id || community.status !== 'active') continue
     joinedIds.add(community._id)
-    result.push(Object.assign({}, community, { viewerStatus: 'active' }))
+    result.push(Object.assign(
+      {},
+      directoryById.get(community._id) || {},
+      community,
+      { viewerStatus: 'active' },
+    ))
   }
 
   for (const community of directoryCommunities || []) {

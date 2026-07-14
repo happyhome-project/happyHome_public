@@ -69,6 +69,13 @@
       <text>用力加载中...</text>
     </view>
 
+    <view v-if="homeRefreshSlow || homeRefreshError" class="home-refresh-status">
+      <text>{{ homeRefreshError || '加载较慢，社区框架已保留' }}</text>
+      <view v-if="homeRefreshError" class="home-refresh-retry" @tap="retryHomeRefresh">
+        <text>重试</text>
+      </view>
+    </view>
+
     <!-- Live strip · 实时脉冲区：有激活的实时协作板块时显示 -->
     <view v-if="liveItems.length > 0" class="group-section">
       <text class="group-section-title">活动召集</text>
@@ -363,6 +370,7 @@
             placeholder="请输入昵称"
             maxlength="20"
           />
+          <text v-if="guestIntroLoginSlow" class="guest-intro-login-slow">加载较慢，请稍候...</text>
           <text v-if="guestIntroLoginError" class="guest-intro-login-error">{{ guestIntroLoginError }}</text>
           <button
             class="guest-intro-primary"
@@ -387,7 +395,7 @@
 <script setup lang="ts">
 import '../../utils/home-entry-probe'
 import { computed, ref, nextTick, onMounted, onUnmounted, watch } from 'vue'
-import { onLoad, onPageScroll, onPullDownRefresh, onReady, onShareAppMessage, onShow } from '@dcloudio/uni-app'
+import { onHide, onLoad, onPageScroll, onPullDownRefresh, onReady, onShareAppMessage, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi, postApi } from '../../api/cloud'
@@ -399,7 +407,7 @@ import TextNoteCover from '../../components/TextNoteCover.vue'
 import { getTextNoteCard, type TextNoteTheme } from '../../utils/text-note'
 import { clientLog, markClientDiagnosticStage, startHomeDiagnosticWatchdog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
-import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, normalizeHomeSnapshotShape, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
+import { clearHomeSnapshotCache, createHomeSnapshotShell, getBestBackgroundFetchSnapshot, normalizeHomeSnapshotShape, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
 import { formatHomeQuoteCite } from '../../utils/home-quote'
 import { createHomeLoadingGate } from '../../utils/home-loading-gate'
 import { resolveMenuSafeRightInset } from '../../utils/menu-safe-area'
@@ -424,6 +432,7 @@ import {
   savePendingShareCommunity,
 } from '../../utils/community-share'
 import { markGuestIntroSeen, shouldShowGuestIntro } from '../../utils/guest-intro'
+import { createAdaptiveAvatarUploader, createLatestEpoch, createPerformanceRequestId } from '../../utils/performance-trace'
 import type { HomeSnapshot } from '../../../../cloud/shared/types'
 import { normalizeGuestIntroConfig, type GuestIntroConfig } from '../../../../cloud/shared/guest-intro-config'
 
@@ -444,6 +453,7 @@ const guestIntroNickName = ref('')
 const guestIntroWebUsername = ref('')
 const guestIntroWebPassword = ref('')
 const guestIntroLoginBusy = ref(false)
+const guestIntroLoginSlow = ref(false)
 const guestIntroLoginError = ref('')
 const canSubmitGuestIntroLogin = computed(() => {
   if (!guestIntroNickName.value.trim()) return false
@@ -454,6 +464,8 @@ const canSubmitGuestIntroLogin = computed(() => {
 })
 const homeLoading = ref(true)
 const homeLoadingGate = createHomeLoadingGate(homeLoading)
+const homeRefreshSlow = ref(false)
+const homeRefreshError = ref('')
 const postsBySection = ref<Record<string, any[]>>({})
 const resolvedHomeGuideCoverUrls = ref<Record<string, string>>({})
 const homeImageProbeEntries = ref<Record<string, HomeImageProbeEntry>>({})
@@ -486,6 +498,8 @@ const GUIDE_AUTHOR_AVATAR_PALETTE = [
 ]
 const GUIDE_NOTE_NAME_HINTS = ['亲子出游', '周末遛娃', '村游攻略', '路线攻略', '出游攻略']
 let activeHomeRefreshPromise: Promise<void> | null = null
+let activeHomeRefreshCommunityId = ''
+const guestIntroLoginEpoch = createLatestEpoch()
 
 onPageScroll((event) => {
   const nextScrollTop = Number(event?.scrollTop || 0)
@@ -1248,7 +1262,9 @@ function handleGuestIntroChooseAvatar(event: any) {
 }
 
 function cancelGuestIntroLogin() {
-  if (guestIntroLoginBusy.value) return
+  guestIntroLoginEpoch.invalidate()
+  guestIntroLoginBusy.value = false
+  guestIntroLoginSlow.value = false
   guestIntroLoginMode.value = 'intro'
   guestIntroAvatarTempPath.value = ''
   guestIntroNickName.value = ''
@@ -1256,43 +1272,103 @@ function cancelGuestIntroLogin() {
   guestIntroLoginError.value = ''
 }
 
+function getGuestAvatarFileSize(source: string): Promise<number> {
+  // #ifdef MP-WEIXIN
+  return new Promise((resolve, reject) => {
+    try {
+      wx.getFileInfo({ filePath: source, success: (result: any) => resolve(Number(result?.size || 0)), fail: reject })
+    } catch (error) {
+      reject(error)
+    }
+  })
+  // #endif
+  // #ifndef MP-WEIXIN
+  return Promise.resolve(0)
+  // #endif
+}
+
+function compressGuestAvatar(source: string, quality: number): Promise<string> {
+  // #ifdef MP-WEIXIN
+  return new Promise((resolve, reject) => {
+    try {
+      wx.compressImage({ src: source, quality, success: (result: any) => resolve(String(result?.tempFilePath || source)), fail: reject })
+    } catch (error) {
+      reject(error)
+    }
+  })
+  // #endif
+  // #ifndef MP-WEIXIN
+  return Promise.resolve(source)
+  // #endif
+}
+
+const adaptiveGuestAvatarUploader = createAdaptiveAvatarUploader({
+  getSize: getGuestAvatarFileSize,
+  compress: compressGuestAvatar,
+  upload: async (source) => {
+    const ext = source.startsWith('blob:') ? 'jpg' : (source.split('.').pop()?.split('?')[0] || 'jpg')
+    return uploadCloudFile({
+      cloudPath: `avatars/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`,
+      source,
+      trace: {
+        requestId: createPerformanceRequestId('home-guest-avatar'),
+        stage: 'home.guest.avatar.upload',
+        sample: 'cold',
+      },
+    })
+  },
+})
+
 async function submitGuestIntroLogin() {
   if (!canSubmitGuestIntroLogin.value || guestIntroLoginBusy.value) return
+  const loginEpoch = guestIntroLoginEpoch.begin()
+  const requestId = createPerformanceRequestId('home-guest-login')
   guestIntroLoginBusy.value = true
+  guestIntroLoginSlow.value = false
   guestIntroLoginError.value = ''
+  const slowTimer = setTimeout(() => {
+    if (guestIntroLoginEpoch.isCurrent(loginEpoch)) guestIntroLoginSlow.value = true
+  }, 5000)
   try {
     if (guestIntroLoginMode.value === 'web') {
       await userStore.webLogin({
         username: guestIntroWebUsername.value,
         password: guestIntroWebPassword.value,
         nickName: guestIntroNickName.value,
+      }, { requestId, stage: 'home.guest.login', sample: 'cold' }, {
+        shouldApply: () => guestIntroLoginEpoch.isCurrent(loginEpoch),
       })
     } else {
       const source = guestIntroAvatarTempPath.value
-      const ext = source.startsWith('blob:') ? 'jpg' : (source.split('.').pop()?.split('?')[0] || 'jpg')
-      const uploadedAvatar = await uploadCloudFile({
-        cloudPath: `avatars/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`,
-        source,
-      })
-      await userStore.login({ nickName: guestIntroNickName.value, avatarUrl: uploadedAvatar.fileID })
+      const uploadedAvatar = await adaptiveGuestAvatarUploader.upload(source)
+      if (!guestIntroLoginEpoch.isCurrent(loginEpoch)) return
+      await userStore.login(
+        { nickName: guestIntroNickName.value, avatarUrl: uploadedAvatar.fileID },
+        { requestId, stage: 'home.guest.login', sample: 'cold' },
+        { shouldApply: () => guestIntroLoginEpoch.isCurrent(loginEpoch) },
+      )
     }
+    if (!guestIntroLoginEpoch.isCurrent(loginEpoch)) return
     guestIntroWebPassword.value = ''
     guestIntroAvatarTempPath.value = ''
     guestIntroNickName.value = ''
     guestIntroLoginMode.value = 'intro'
     markCurrentGuestIntroSeen()
     uni.showToast({ title: '登录成功', icon: 'success' })
-    try {
-      await refreshHomeData()
-    } catch (refreshError) {
+    void refreshHomeData().catch((refreshError) => {
       clientLog('warn', 'guestIntro.login.refresh.fail', { error: refreshError })
-    }
+    })
   } catch (error: any) {
+    if (!guestIntroLoginEpoch.isCurrent(loginEpoch)) return
     guestIntroLoginError.value = String(error?.message || '登录失败，请重试')
     guestIntroWebPassword.value = ''
     clientLog('warn', 'guestIntro.login.fail', { error })
   } finally {
-    guestIntroLoginBusy.value = false
+    clearTimeout(slowTimer)
+    if (guestIntroLoginEpoch.isCurrent(loginEpoch)) {
+      guestIntroLoginSlow.value = false
+      guestIntroLoginBusy.value = false
+    }
   }
 }
 
@@ -1307,24 +1383,26 @@ function applyHomeSnapshot(rawSnapshot: HomeSnapshot | null, source: 'prefetch' 
     clientLog('warn', 'home.snapshot.invalidShape', { source })
     return false
   }
+  const safeSnapshot = source === 'cloud' ? snapshot : createHomeSnapshotShell(snapshot)
+  if (!safeSnapshot) return false
   const expectedViewer = userStore.isLoggedIn ? userStore.openId : ''
-  if (snapshot.viewerOpenId !== expectedViewer) return false
-  const activeCommunities = (snapshot.communities || []).filter((community) => community?.status === 'active')
+  if (safeSnapshot.viewerOpenId !== expectedViewer) return false
+  const activeCommunities = (safeSnapshot.communities || []).filter((community) => community?.status === 'active')
   if (
-    userStore.isLoggedIn && snapshot.currentCommunityId && !activeCommunities.some(
-      (community) => community._id === snapshot.currentCommunityId,
+    userStore.isLoggedIn && safeSnapshot.currentCommunityId && !activeCommunities.some(
+      (community) => community._id === safeSnapshot.currentCommunityId,
     )
   ) return false
-  if (snapshot.currentCommunity && snapshot.currentCommunity.status !== 'active') return false
+  if (safeSnapshot.currentCommunity && safeSnapshot.currentCommunity.status !== 'active') return false
   communityStore.myCommunities = userStore.isLoggedIn ? activeCommunities : []
-  communityStore.currentCommunityId = snapshot.currentCommunityId || ''
-  communityStore.browsingCommunity = snapshot.currentCommunity || activeCommunities.find((item) => item._id === snapshot.currentCommunityId) || null
+  communityStore.currentCommunityId = safeSnapshot.currentCommunityId || ''
+  communityStore.browsingCommunity = safeSnapshot.currentCommunity || activeCommunities.find((item) => item._id === safeSnapshot.currentCommunityId) || null
   communityStore.currentSectionIndex = 0
-  communityStore.currentSections = snapshot.sections || []
-  postsBySection.value = snapshot.postsBySection || {}
+  communityStore.currentSections = safeSnapshot.sections || []
+  postsBySection.value = safeSnapshot.postsBySection || {}
   guestIntroConfig.value = userStore.isLoggedIn
     ? null
-    : normalizeGuestIntroConfig(snapshot.guestIntroConfig || null)
+    : normalizeGuestIntroConfig(safeSnapshot.guestIntroConfig || null)
   refreshGuestIntroVisibility()
   if (userStore.isLoggedIn) communityStore.saveToStorage()
   clientLog('info', 'home.snapshot.apply', {
@@ -1340,10 +1418,12 @@ function applyHomeSnapshot(rawSnapshot: HomeSnapshot | null, source: 'prefetch' 
 
 async function hydrateHomeFromFastPath() {
   if (!userStore.isLoggedIn || !userStore.openId) return false
+  const requestedCommunityId = communityStore.currentCommunityId || ''
   const prefetched = await getBestBackgroundFetchSnapshot({
     openId: userStore.openId,
-    communityId: communityStore.currentCommunityId || undefined,
+    communityId: requestedCommunityId || undefined,
   })
+  if (requestedCommunityId !== communityStore.currentCommunityId) return false
   if (applyHomeSnapshot(prefetched, 'prefetch')) {
     writeHomeSnapshotCache(prefetched as HomeSnapshot)
     return true
@@ -1356,9 +1436,45 @@ async function hydrateHomeFromFastPath() {
 }
 
 function applyLateBackgroundFetchSnapshot(snapshot: HomeSnapshot) {
+  if (snapshot.currentCommunityId !== communityStore.currentCommunityId) return
   if (applyHomeSnapshot(snapshot, 'prefetch')) {
     writeHomeSnapshotCache(snapshot)
   }
+}
+
+function applyCommunityShellFromCache(communityId: string) {
+  const id = String(communityId || '').trim()
+  if (!userStore.isLoggedIn || !userStore.openId || !id) return false
+  postsBySection.value = {}
+  const cached = readHomeSnapshotCache({
+    openId: userStore.openId,
+    communityId: id,
+  })
+  return applyHomeSnapshot(cached, 'cache')
+}
+
+function applySelectedCommunityShellFromCache() {
+  const selection = communityStore.pendingCommunitySelection
+  if (!selection || selection.targetCommunityId !== communityStore.currentCommunityId) return false
+  return applyCommunityShellFromCache(selection.targetCommunityId)
+}
+
+function handleExplicitCommunityAccessLoss(communityId: string, toastTitle = '') {
+  const rejectedCommunityId = String(communityId || '').trim()
+  if (!rejectedCommunityId) return ''
+  clearHomeSnapshotCache(userStore.openId, rejectedCommunityId)
+  postsBySection.value = {}
+  if (toastTitle) uni.showToast({ title: toastTitle, icon: 'none' })
+  const restoredCommunityId = communityStore.handleCommunityAccessLost(rejectedCommunityId)
+  if (restoredCommunityId) {
+    applyCommunityShellFromCache(restoredCommunityId)
+    // The restored snapshot may predate the revocation and still list the rejected target.
+    communityStore.handleCommunityAccessLost(rejectedCommunityId)
+    queuedForcedHomeRefresh = true
+    return restoredCommunityId
+  }
+  openOnboardingPreservingStack()
+  return ''
 }
 
 function getPendingHomeRefreshMarker() {
@@ -1394,24 +1510,57 @@ async function runSingleHomeRefresh(force: boolean) {
     currentCommunityId: communityStore.currentCommunityId || '',
   })
   refreshingHome = true
+  const requestedCommunityId = userStore.isLoggedIn
+    ? communityStore.currentCommunityId || undefined
+    : undefined
   try {
-    const requestedCommunityId = userStore.isLoggedIn
-      ? communityStore.currentCommunityId || undefined
-      : undefined
-    const result = await postApi.bootstrap(requestedCommunityId, 20, !userStore.isLoggedIn)
+    const pendingSelection = communityStore.pendingCommunitySelection
+    const pendingTraceRequestId = pendingSelection?.targetCommunityId === requestedCommunityId
+      ? String(pendingSelection?.traceRequestId || '')
+      : ''
+    const result = await postApi.bootstrap(requestedCommunityId, 20, !userStore.isLoggedIn, {
+      requestId: pendingTraceRequestId
+        ? pendingTraceRequestId
+        : createPerformanceRequestId('home-bootstrap'),
+      stage: 'post.bootstrap',
+      sample: communityStore.currentSections.length > 0 ? 'warm' : 'cold',
+      counts: { shellSectionCount: communityStore.currentSections.length },
+    })
+    if (
+      userStore.isLoggedIn &&
+      requestedCommunityId &&
+      requestedCommunityId !== communityStore.currentCommunityId
+    ) {
+      clientLog('debug', 'home.refresh.ignore.staleCommunity', {
+        requestedCommunityId,
+        currentCommunityId: communityStore.currentCommunityId || '',
+      })
+      return
+    }
+    if (
+      userStore.isLoggedIn &&
+      requestedCommunityId &&
+      String(result.currentCommunityId || '') !== requestedCommunityId
+    ) {
+      clientLog('warn', 'home.refresh.requestedCommunityUnavailable', {})
+      handleExplicitCommunityAccessLoss(requestedCommunityId, '该社区暂时无法访问')
+      return
+    }
     if (userStore.isLoggedIn && result.backgroundFetchToken) {
       userStore.setBackgroundFetchToken(result.backgroundFetchToken, result.backgroundFetchTokenExpiresAt)
     }
     const acceptedSnapshot = applyHomeSnapshot(result as HomeSnapshot, 'cloud')
     if (!acceptedSnapshot) {
       const rejectedCommunityId = String(result.currentCommunityId || requestedCommunityId || '')
-      clearHomeSnapshotCache(userStore.openId, rejectedCommunityId)
-      communityStore.clearCommunityState()
-      postsBySection.value = {}
       clientLog('warn', 'home.snapshot.rejected', { rejectedCommunityId })
-      if (userStore.isLoggedIn) openOnboardingPreservingStack()
+      if (userStore.isLoggedIn) handleExplicitCommunityAccessLoss(rejectedCommunityId)
+      else {
+        postsBySection.value = {}
+        communityStore.clearCommunityState()
+      }
       return
     }
+    communityStore.confirmCommunitySelection(result.currentCommunityId || requestedCommunityId || '')
     if (userStore.isLoggedIn && communityStore.currentCommunityId) {
       writeHomeSnapshotCache(result as HomeSnapshot)
     }
@@ -1432,13 +1581,11 @@ async function runSingleHomeRefresh(force: boolean) {
     clientLog('error', 'home.refresh.fail', { force, error })
     const message = String((error as any)?.message || error || '')
     if (message.includes('需要先加入社区后查看内容')) {
-      clearHomeSnapshotCache(userStore.openId, communityStore.currentCommunityId || '')
-      communityStore.clearCommunityState()
-      postsBySection.value = {}
-      uni.showToast({ title: '需要先加入社区后查看内容', icon: 'none' })
-      openOnboardingPreservingStack()
+      const rejectedCommunityId = String(requestedCommunityId || communityStore.currentCommunityId || '')
+      handleExplicitCommunityAccessLoss(rejectedCommunityId, '需要先加入社区后查看内容')
       return
     }
+    homeRefreshError.value = '加载失败，请点击重试'
     throw error
   } finally {
     refreshingHome = false
@@ -1448,7 +1595,8 @@ async function runSingleHomeRefresh(force: boolean) {
 async function refreshHomeData(options: { force?: boolean } = {}) {
   const force = options.force === true
   if (activeHomeRefreshPromise) {
-    if (force) queuedForcedHomeRefresh = true
+    const requestedCommunityId = userStore.isLoggedIn ? communityStore.currentCommunityId : ''
+    if (force || requestedCommunityId !== activeHomeRefreshCommunityId) queuedForcedHomeRefresh = true
     clientLog('warn', 'home.refresh.skip.busy', {
       force,
       queuedForcedHomeRefresh,
@@ -1457,10 +1605,17 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
     return
   }
 
+  homeRefreshError.value = ''
+  homeRefreshSlow.value = false
+  activeHomeRefreshCommunityId = userStore.isLoggedIn ? communityStore.currentCommunityId : ''
+  const slowTimer = setTimeout(() => {
+    homeRefreshSlow.value = true
+  }, 5000)
   const loadingOwner = homeLoadingGate.beginRefresh()
   const refreshPromise = (async () => {
     let nextForce = force
     do {
+      activeHomeRefreshCommunityId = userStore.isLoggedIn ? communityStore.currentCommunityId : ''
       const currentForce = nextForce
       queuedForcedHomeRefresh = false
       await runSingleHomeRefresh(currentForce)
@@ -1473,9 +1628,18 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
   } finally {
     if (activeHomeRefreshPromise === refreshPromise) {
       activeHomeRefreshPromise = null
+      activeHomeRefreshCommunityId = ''
+      clearTimeout(slowTimer)
+      homeRefreshSlow.value = false
       homeLoadingGate.endRefresh(loadingOwner)
     }
   }
+}
+
+function retryHomeRefresh() {
+  void refreshHomeData({ force: true }).catch((error) => {
+    clientLog('error', 'home.retry.refresh.fail', { error })
+  })
 }
 
 function probeHomeRender(reason: string) {
@@ -1562,7 +1726,15 @@ onReady(() => {
   probeHomeRender('ready')
 })
 
+onHide(() => {
+  if (!guestIntroLoginBusy.value) return
+  guestIntroLoginEpoch.invalidate()
+  guestIntroLoginBusy.value = false
+  guestIntroLoginSlow.value = false
+})
+
 onUnmounted(() => {
+  guestIntroLoginEpoch.invalidate()
   ;(uni as any).$off?.(HOME_TAB_RETAP_EVENT, scrollHomeToTop)
   clearArchiveSwitchScrollTimers()
   clearArchivePreviewMeasureTimers()
@@ -1583,7 +1755,13 @@ onShow(() => {
     hasPendingRefreshMarker: !!marker,
     marker,
   })
-  if (!marker && mountedAt && Date.now() - mountedAt < 1500) {
+  applySelectedCommunityShellFromCache()
+  if (
+    !marker &&
+    !communityStore.pendingCommunitySelection &&
+    mountedAt &&
+    Date.now() - mountedAt < 1500
+  ) {
     clientLog('debug', 'home.show.skip.afterMounted', {})
     return
   }
@@ -2668,6 +2846,27 @@ onShareAppMessage(() => {
   white-space: nowrap;
 }
 
+.home-refresh-status {
+  min-height: 64rpx;
+  margin-top: 16rpx;
+  padding: 10rpx 20rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20rpx;
+  border-radius: 16rpx;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--hh-color-text-secondary);
+  font-size: 24rpx;
+  line-height: 36rpx;
+}
+
+.home-refresh-retry {
+  flex: 0 0 auto;
+  color: var(--hh-color-brand-primary);
+  font-weight: $hh-font-weight-bold;
+}
+
 @keyframes homeRefreshSpin {
   to {
     transform: rotate(360deg);
@@ -3471,10 +3670,12 @@ onShareAppMessage(() => {
   border-radius: 18rpx;
   background: #fff;
 }
+.guest-intro-login-slow,
 .guest-intro-login-error {
-  color: #dc2626;
   font-size: 24rpx;
   line-height: 34rpx;
   text-align: center;
 }
+.guest-intro-login-slow { color: #777; }
+.guest-intro-login-error { color: #dc2626; }
 </style>
