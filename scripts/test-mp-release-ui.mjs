@@ -40,6 +40,7 @@ import {
   parseFirstJson,
 } from './cloud-release-smoke.mjs'
 import { computeDirectoryDigest } from './lib/release-run-ledger.mjs'
+import { invokeTrustedAdminCloud } from './lib/trusted-admin-invoke.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
@@ -786,6 +787,9 @@ function summarizeReleaseFixture(fixture) {
 async function callMpCloud(mp, name, data, options = {}) {
   const action = String(data?.action || '')
   const timeoutMs = Number(options.timeoutMs || 60000)
+  if (name === 'admin' && action === 'community.hardDelete') {
+    return await invokeTrustedAdminCloud(data, { timeoutMs })
+  }
   if (name === 'admin') return await callTrustedAdminCloud(data, { timeoutMs })
   const response = await withTimeout(
     mp.evaluate(async (fnName, payload) => {

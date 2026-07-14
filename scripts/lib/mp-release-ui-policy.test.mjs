@@ -19,6 +19,7 @@ test('release UI fixture capability stays in the trusted Node process', () => {
     source.indexOf('async function callMpCloud'),
     source.indexOf('async function callTrustedAdminCloud'),
   )
+  assert.match(callMpCloud, /action === 'community\.hardDelete'.*invokeTrustedAdminCloud/s)
   assert.match(callMpCloud, /name === 'admin'.*callTrustedAdminCloud/s)
   assert.doesNotMatch(callMpCloud, /ADMIN_INTERNAL_CALL_TOKEN|requireAdminInternalToken|_internalToken/)
   assert.match(source, /happyhome-release-admin-/)
