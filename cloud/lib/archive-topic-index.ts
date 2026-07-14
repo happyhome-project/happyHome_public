@@ -29,9 +29,10 @@ export async function syncArchivePostTopics(post: {
     const { topicKey, displayName } = normalizeArchiveTopic(rawTopic)
     const topicId = archiveTopicId(post.communityId, topicKey)
     const existing = await db.getByIdOrNull<any>('archive_topics', topicId)
+    const { _id: _existingId, ...existingData } = existing || {}
     const origins = Array.from(new Set([...(existing?.origins || []), 'organic']))
     await db.setById('archive_topics', topicId, {
-      ...(existing || {}),
+      ...existingData,
       communityId: post.communityId,
       topicKey,
       displayName: existing?.displayName || displayName,

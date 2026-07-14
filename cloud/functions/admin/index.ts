@@ -1183,13 +1183,17 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       if (!existing) return { success: true }
       const origins = (existing.origins || []).filter((origin: string) => origin !== 'admin')
       if (origins.length === 0) await db.removeById('archive_topics', id)
-      else await db.setById('archive_topics', id, { ...existing, origins, updatedAt: now })
+      else {
+        const { _id: _existingId, ...existingData } = existing
+        await db.setById('archive_topics', id, { ...existingData, origins, updatedAt: now })
+      }
       return { success: true }
     }
     const display = normalizeArchiveTopic(params.displayName || existing?.displayName || normalized.displayName).displayName
     const origins = Array.from(new Set([...(existing?.origins || []), 'admin']))
+    const { _id: _existingId, ...existingData } = existing || {}
     await db.setById('archive_topics', id, {
-      ...(existing || {}),
+      ...existingData,
       communityId,
       topicKey: normalized.topicKey,
       displayName: display,
