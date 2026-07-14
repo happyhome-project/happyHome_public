@@ -166,6 +166,17 @@ test('release home tabs evidence pins below the fixed masthead', () => {
   assert.doesNotMatch(source, /Math\.abs\(pinnedTop - pinned\.safeTop\) <= 8/)
 })
 
+test('optional DevTools screenshot cannot block structured home tabs evidence', () => {
+  const source = readFileSync(new URL('../test-mp-release-ui.mjs', import.meta.url), 'utf8')
+
+  assert.match(source, /async function captureOptionalReleaseUiScreenshot/)
+  assert.match(source, /HH_RELEASE_UI_CAPTURE_SCREENSHOT !== '1'/)
+  assert.match(source, /withTimeout\(mp\.screenshot/)
+  assert.match(source, /HH_RELEASE_UI_SCREENSHOT_TIMEOUT_MS/)
+  assert.match(source, /screenshotEvidence/)
+  assert.doesNotMatch(source, /await mp\.screenshot\(\{ path: resolve\(evidenceDir, 'home-archive-tabs-sticky\.png'\) \}\)/)
+})
+
 test('native release profile validation requires one logged-out login identity entry', () => {
   const source = readFileSync(new URL('../test-mp-release-ui.mjs', import.meta.url), 'utf8')
 
