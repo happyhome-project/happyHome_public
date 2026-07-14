@@ -375,6 +375,12 @@
         </view>
       </view>
     </view>
+    <CommunityShareImageCanvas
+      :community-id="currentShareCommunityId"
+      :community-name="currentCommunityName"
+      :cover-image="currentCommunityCoverImage"
+      @update:image-url="shareImageUrl = $event"
+    />
     <AppTabBar current="profile" />
     </view>
 
@@ -460,6 +466,7 @@ import { useUserStore } from '../../store/user'
 import { communityApi, memberApi, notificationApi, type ApprovalNotificationEventType } from '../../api/cloud'
 import { uploadCloudFile } from '../../api/storage'
 import AppTabBar from '../../components/AppTabBar.vue'
+import CommunityShareImageCanvas from '../../components/CommunityShareImageCanvas.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { createProfileEditSessionGuard, resolveProfileAvatarUrl } from '../../utils/profile-edit-session'
@@ -482,7 +489,6 @@ import {
   type ApprovalNotificationTemplate,
 } from '../../utils/approval-notification'
 import {
-  DEFAULT_COMMUNITY_SHARE_IMAGE,
   buildCommunitySharePath,
   buildCommunityShareTitle,
   consumePendingShareCommunity,
@@ -497,6 +503,7 @@ const notificationTemplates = ref<ApprovalNotificationTemplate[]>([])
 const notificationSubscriptions = ref<Array<{ eventType: ApprovalNotificationEventType; templateId: string; status: string }>>([])
 const notificationNeedsAuthorization = ref(false)
 const profileError = ref('')
+const shareImageUrl = ref('')
 const releaseVersion = getReleaseVersion()
 const diagnosticsState = ref(getClientDiagnosticsState())
 const diagnosticsStatus = ref('')
@@ -547,6 +554,7 @@ const currentCommunity = computed(() => {
 })
 const currentShareCommunityId = computed(() => String(currentCommunity.value?._id || communityStore.currentCommunityId || ''))
 const currentCommunityName = computed(() => currentCommunity.value?.name || '暂无社区')
+const currentCommunityCoverImage = computed(() => String(currentCommunity.value?.coverImage || '').trim())
 const profileAvatarSrc = computed(() => userStore.avatarUrl || '/static/ai-avatars/avatar-01.svg')
 const profileDisplayName = computed(() => userStore.isLoggedIn ? (userStore.nickName || '未命名') : '登录')
 const isCurrentCommunityAdmin = computed(() => {
@@ -1237,11 +1245,11 @@ onPullDownRefresh(async () => {
 
 onShareAppMessage(() => {
   const communityId = currentShareCommunityId.value
-  return {
+  const share = {
     title: buildCommunityShareTitle(currentCommunityName.value),
     path: communityId ? buildCommunitySharePath(communityId) : '/pages/index/index',
-    imageUrl: DEFAULT_COMMUNITY_SHARE_IMAGE,
   }
+  return shareImageUrl.value ? { ...share, imageUrl: shareImageUrl.value } : share
 })
 </script>
 

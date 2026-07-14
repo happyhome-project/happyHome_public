@@ -29,7 +29,7 @@
             @error="handleAvatarError(community)"
           />
           <view v-else class="cover cover-fallback">
-            <text>{{ communityInitial(community) }}</text>
+            <text>{{ communityInitial(communityName(community)) }}</text>
           </view>
           <view class="info">
             <text class="name">{{ communityName(community) }}</text>
@@ -78,6 +78,7 @@ import {
 import LoginGuard from '../../components/LoginGuard.vue'
 import { ensureHierarchyStack } from '../../utils/hierarchy-nav'
 import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
+import { communityInitial } from '../../utils/community-avatar'
 import {
   mergeCommunityDirectory,
   resolvedCommunityCoverUrl,
@@ -164,10 +165,6 @@ function communityAvatar(community: any) {
 function handleAvatarError(community: any) {
   const id = String(community?._id || '')
   if (id) failedCoverIds.value = Object.assign({}, failedCoverIds.value, { [id]: true })
-}
-
-function communityInitial(community: any) {
-  return communityName(community).charAt(0) || '社'
 }
 
 function communityName(community: any) {
@@ -374,6 +371,7 @@ onPullDownRefresh(async () => {
 .cover-fallback {
   background: $hh-accent-wash;
   color: $hh-accent-ink;
+  font-family: $hh-font-sans;
   font-size: 32rpx;
   font-weight: $hh-font-weight-bold;
 }

@@ -372,6 +372,12 @@
         </view>
       </view>
     </view>
+    <CommunityShareImageCanvas
+      :community-id="currentShareCommunityId"
+      :community-name="communityName"
+      :cover-image="communityStore.currentCommunity?.coverImage || ''"
+      @update:image-url="shareImageUrl = $event"
+    />
     <AppTabBar current="home" />
   </view>
 </template>
@@ -384,6 +390,7 @@ import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi, postApi } from '../../api/cloud'
 import AppTabBar from '../../components/AppTabBar.vue'
+import CommunityShareImageCanvas from '../../components/CommunityShareImageCanvas.vue'
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getFamilyLetterListSummary, getGuideNoteCard, getHomeLiveMeta, getPostHomeTitle, getPostHomeTitleIssue } from '../../utils/widget'
 import TextNoteCover from '../../components/TextNoteCover.vue'
@@ -394,7 +401,8 @@ import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, normalizeHomeSn
 import { formatHomeQuoteCite } from '../../utils/home-quote'
 import { createHomeLoadingGate } from '../../utils/home-loading-gate'
 import { resolveMenuSafeRightInset } from '../../utils/menu-safe-area'
-import { resolveCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
+import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
+import { communityInitial } from '../../utils/community-avatar'
 import { uploadCloudFile } from '../../api/storage'
 import { resolveSectionIconGlyph } from '../../utils/section-icon'
 import {
@@ -409,7 +417,6 @@ import {
 import {
   buildCommunitySharePath,
   buildCommunityShareTitle,
-  DEFAULT_COMMUNITY_SHARE_IMAGE,
   isCommunityShareQuery,
   normalizeCommunityShareId,
   savePendingShareCommunity,
@@ -449,7 +456,7 @@ const postsBySection = ref<Record<string, any[]>>({})
 const resolvedHomeGuideCoverUrls = ref<Record<string, string>>({})
 const homeImageProbeEntries = ref<Record<string, HomeImageProbeEntry>>({})
 const incomingShareCommunityId = ref('')
-const shareImageUrl = ref(DEFAULT_COMMUNITY_SHARE_IMAGE)
+const shareImageUrl = ref('')
 const homeSearchQuery = ref('')
 const selectedArchiveId = ref('')
 const homePageScrollTop = ref(0)
@@ -499,7 +506,7 @@ const homeTopbarStyle = computed(() => ({
 const communityName = computed(() => communityStore.currentCommunity?.name ?? '选择社区')
 const avatarLetter = computed(() => {
   const name = communityStore.currentCommunity?.name ?? ''
-  return name.charAt(0) || '?'
+  return communityInitial(name)
 })
 const hasMultipleCommunities = computed(() => (communityStore.myCommunities?.length ?? 0) > 1)
 const homeHeroImage = computed(() =>
@@ -1210,27 +1217,6 @@ async function handleInitialShareLanding(): Promise<boolean> {
   }
 }
 
-async function prepareCommunityShareImage() {
-  const coverImage = String(communityStore.currentCommunity?.coverImage || '').trim()
-  if (!coverImage) {
-    shareImageUrl.value = DEFAULT_COMMUNITY_SHARE_IMAGE
-    return
-  }
-
-  const expectedCoverImage = coverImage
-  try {
-    const resolved = await resolveCloudFileUrl(coverImage)
-    if (String(communityStore.currentCommunity?.coverImage || '').trim() === expectedCoverImage) {
-      shareImageUrl.value = resolved || DEFAULT_COMMUNITY_SHARE_IMAGE
-    }
-  } catch (error) {
-    clientLog('warn', 'home.share.image.resolve.fail', { coverImage, error })
-    if (String(communityStore.currentCommunity?.coverImage || '').trim() === expectedCoverImage) {
-      shareImageUrl.value = DEFAULT_COMMUNITY_SHARE_IMAGE
-    }
-  }
-}
-
 function refreshGuestIntroVisibility() {
   showGuestIntro.value = shouldShowGuestIntro(guestIntroConfig.value, {
     isLoggedIn: userStore.isLoggedIn,
@@ -1622,21 +1608,13 @@ onPullDownRefresh(async () => {
   }
 })
 
-watch(
-  () => communityStore.currentCommunity?.coverImage,
-  () => {
-    void prepareCommunityShareImage()
-  },
-  { immediate: true },
-)
-
 onShareAppMessage(() => {
   const communityId = currentShareCommunityId.value
-  return {
+  const share = {
     title: buildCommunityShareTitle(communityName.value),
     path: communityId ? buildCommunitySharePath(communityId) : '/pages/index/index',
-    imageUrl: shareImageUrl.value || DEFAULT_COMMUNITY_SHARE_IMAGE,
   }
+  return shareImageUrl.value ? { ...share, imageUrl: shareImageUrl.value } : share
 })
 </script>
 
@@ -2480,6 +2458,7 @@ onShareAppMessage(() => {
 
 .community-avatar text {
   color: var(--hh-color-brand-strong);
+  font-family: $hh-font-sans;
   font-size: var(--hh-text-body-base-size);
   font-weight: $hh-font-weight-bold;
 }

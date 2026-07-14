@@ -17,6 +17,37 @@ describe('community share page integration contract', () => {
     expect(code).toContain('buildCommunitySharePath')
     expect(code).toContain('resolveCloudFileUrl')
     expect(code).toContain('handleInitialShareLanding')
+    expect(code).toContain('CommunityShareImageCanvas')
+    expect(code).toContain('communityInitial')
+    expect(code).not.toContain('imageUrl: shareImageUrl.value || DEFAULT_COMMUNITY_SHARE_IMAGE')
+  })
+
+  test('share canvas prepares a probed cover or an offscreen initial png', () => {
+    const code = readSource('components/CommunityShareImageCanvas.vue')
+
+    expect(code).toContain('uni.getImageInfo')
+    expect(code).toContain('uni.createCanvasContext')
+    expect(code).toContain('uni.canvasToTempFilePath')
+    expect(code).toContain('width="500"')
+    expect(code).toContain('height="400"')
+    expect(code).toContain('position: fixed')
+    expect(code).not.toContain('display: none')
+  })
+
+  test('profile shares the current community with the prepared image', () => {
+    const code = readSource('pages/profile/index.vue')
+
+    expect(code).toContain('CommunityShareImageCanvas')
+    expect(code).toContain(':cover-image="currentCommunityCoverImage"')
+    expect(code).not.toContain('imageUrl: DEFAULT_COMMUNITY_SHARE_IMAGE')
+  })
+
+  test.each([
+    'pages/index/index.vue',
+    'pages/community-switch/index.vue',
+    'pages/onboarding/index.vue',
+  ])('%s uses the shared grapheme-safe community initial', (page) => {
+    expect(readSource(page)).toContain('communityInitial')
   })
 
   test('onboarding page keeps shared target community visible and highlighted', () => {
