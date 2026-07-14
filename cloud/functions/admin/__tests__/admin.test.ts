@@ -689,6 +689,112 @@ test('section.create: 图文攻略展示模板可保存到板块', async () => {
   }))
 })
 
+const imageNoteWidgetsFixture = [
+  { widgetId: 'image_note_images', type: 'image_group', label: '添加图片', fieldKey: 'images', required: true, order: 0, showInList: false, locked: true },
+  { widgetId: 'image_note_title', type: 'short_text', label: '主题', fieldKey: 'title', required: true, order: 1, showInList: true, locked: true },
+  { widgetId: 'image_note_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false, locked: true },
+  { widgetId: 'image_note_topics', type: 'topic', label: '话题', fieldKey: 'topics', required: false, order: 3, showInList: false, locked: true },
+  { widgetId: 'image_note_location', type: 'location', label: '设置地点', fieldKey: 'location', required: false, order: 4, showInList: false, locked: true },
+]
+
+test('section.create: 图文_new 对所有社区提供五个固定控件', async () => {
+  ;(db.create as jest.Mock).mockResolvedValue('section-image-note')
+
+  const result: any = await main({
+    action: 'section.create',
+    communityId: 'community-any',
+    name: '图文_new',
+    type: 'evergreen',
+    displayTemplate: 'image_note',
+  })
+
+  expect(result.sectionId).toBe('section-image-note')
+  expect(db.create).toHaveBeenCalledWith('sections', expect.objectContaining({
+    communityId: 'community-any',
+    name: '图文_new',
+    type: 'evergreen',
+    displayTemplate: 'image_note',
+    widgets: imageNoteWidgetsFixture,
+  }))
+})
+
+test('section.get: 旧图文_new 板块会恢复五个固定控件并保留附加控件', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-image-note',
+    communityId: 'community-1',
+    type: 'evergreen',
+    displayTemplate: 'image_note',
+    widgets: [
+      { ...imageNoteWidgetsFixture[1], label: '旧标题', required: false },
+      { widgetId: 'custom_summary', type: 'summary', label: '补充说明', fieldKey: 'summary', required: false, order: 0, showInList: false },
+    ],
+  })
+
+  const result: any = await main({
+    action: 'section.get',
+    sectionId: 'section-image-note',
+  })
+
+  expect(result.section.displayTemplate).toBe('image_note')
+  expect(result.section.widgets.slice(0, 5)).toEqual(imageNoteWidgetsFixture)
+  expect(result.section.widgets[5]).toEqual(expect.objectContaining({
+    widgetId: 'custom_summary',
+    order: 5,
+    locked: false,
+  }))
+})
+
+test('section.updateWidgets: 图文_new 固定控件不能删除或修改', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-image-note',
+    communityId: 'community-1',
+    type: 'evergreen',
+    displayTemplate: 'image_note',
+    widgets: imageNoteWidgetsFixture,
+  })
+  ;(db.query as jest.Mock).mockResolvedValue([])
+
+  await expect(main({
+    action: 'section.updateWidgets',
+    sectionId: 'section-image-note',
+    widgets: imageNoteWidgetsFixture.filter((widget) => widget.widgetId !== 'image_note_topics'),
+  })).rejects.toThrow('固定控件')
+
+  await expect(main({
+    action: 'section.updateWidgets',
+    sectionId: 'section-image-note',
+    widgets: imageNoteWidgetsFixture.map((widget) => (
+      widget.widgetId === 'image_note_location'
+        ? { ...widget, required: true }
+        : widget
+    )),
+  })).rejects.toThrow('固定控件')
+})
+
+test('section.updateWidgets: 普通板块可配置可复用话题控件', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-default',
+    communityId: 'community-1',
+    type: 'evergreen',
+    displayTemplate: 'default',
+    widgets: [],
+  })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+  ;(db.query as jest.Mock).mockResolvedValue([])
+
+  const result: any = await main({
+    action: 'section.updateWidgets',
+    sectionId: 'section-default',
+    widgets: [
+      { widgetId: 'topics-custom', type: 'topic', label: '话题', fieldKey: 'topics', required: false, order: 0, showInList: false },
+    ],
+  })
+
+  expect(result.widgets).toEqual([
+    expect.objectContaining({ widgetId: 'topics-custom', type: 'topic', required: false }),
+  ])
+})
+
 test('section.updateWidgets: activity_invite 只能配置到 evergreen 板块', async () => {
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-1',
@@ -851,7 +957,7 @@ test('section.get: 旧图文攻略板块会补齐路线攻略固定控件', asyn
   }))
 })
 
-test('section.updateMeta: 展示模板只接受默认和图文攻略', async () => {
+test('section.updateMeta: 展示模板只接受默认、图文攻略和图文_new', async () => {
   ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'section-1',
     communityId: 'community-1',
@@ -874,13 +980,23 @@ test('section.updateMeta: 展示模板只接受默认和图文攻略', async () 
   await main({
     action: 'section.updateMeta',
     sectionId: 'section-1',
+    displayTemplate: 'image_note',
+  })
+
+  expect(db.updateById).toHaveBeenLastCalledWith('sections', 'section-1', {
+    displayTemplate: 'image_note',
+  })
+
+  await main({
+    action: 'section.updateMeta',
+    sectionId: 'section-1',
     displayTemplate: 'unexpected-template',
   })
 
   expect(db.updateById).toHaveBeenLastCalledWith('sections', 'section-1', {
     displayTemplate: 'default',
   })
-  expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledTimes(2)
+  expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledTimes(3)
 })
 
 test('section.updateStatus: refreshes search and queues RAG jobs for existing posts', async () => {

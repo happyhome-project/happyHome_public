@@ -65,6 +65,13 @@ import {
   normalizeGuideNoteWidgets,
   normalizeSectionDisplayTemplate,
 } from '../../shared/guide-note-widgets'
+import {
+  buildDefaultImageNoteWidgets,
+  getImageNoteLockedWidget,
+  IMAGE_NOTE_LOCKED_WIDGETS,
+  isImageNoteSection,
+  normalizeImageNoteWidgets,
+} from '../../shared/image-note-widgets'
 import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
 import { resolvePostAuthorNickname } from '../../shared/post-author'
 
@@ -234,6 +241,7 @@ const ADMIN_POST_EDITABLE_WIDGET_TYPES = new Set([
   'rich_note',
   'image_group',
   'location',
+  'topic',
   'video_group',
   'audio_group',
 ])
@@ -251,33 +259,57 @@ function normalizeSection(section: any) {
     enableComment: section?.enableComment !== false,
     enableLike: section?.enableLike !== false,
   }
-  return {
+  const guideNormalized = {
     ...normalized,
     widgets: normalizeGuideNoteWidgets(normalized),
   }
+  return {
+    ...guideNormalized,
+    widgets: normalizeImageNoteWidgets(guideNormalized),
+  }
 }
 
-function assertGuideNoteLockedWidgets(section: Section, widgets: Widget[]) {
-  if (!isGuideNoteSection(section)) return
+function getLockedTemplateDefinition(section: Section) {
+  if (isGuideNoteSection(section)) {
+    return {
+      label: '图文攻略',
+      widgets: GUIDE_NOTE_LOCKED_WIDGETS,
+      getLockedWidget: getGuideNoteLockedWidget,
+    }
+  }
+  if (isImageNoteSection(section)) {
+    return {
+      label: '图文_new',
+      widgets: IMAGE_NOTE_LOCKED_WIDGETS,
+      getLockedWidget: getImageNoteLockedWidget,
+    }
+  }
+  return null
+}
 
-  for (const lockedWidget of GUIDE_NOTE_LOCKED_WIDGETS) {
+function assertTemplateLockedWidgets(section: Section, widgets: Widget[]) {
+  const definition = getLockedTemplateDefinition(section)
+  if (!definition) return
+
+  for (const lockedWidget of definition.widgets) {
     const incoming = widgets.find((widget) => widget.widgetId === lockedWidget.widgetId)
     if (!incoming) {
-      throw new Error(`图文攻略固定控件「${lockedWidget.label}」不能删除`)
+      throw new Error(`${definition.label}固定控件「${lockedWidget.label}」不能删除`)
     }
 
     const immutableFields: Array<keyof Widget> = ['type', 'label', 'fieldKey', 'required', 'order', 'showInList']
     const changedField = immutableFields.find((field) => incoming[field] !== lockedWidget[field])
     if (changedField) {
-      throw new Error(`图文攻略固定控件「${lockedWidget.label}」不能修改`)
+      throw new Error(`${definition.label}固定控件「${lockedWidget.label}」不能修改`)
     }
   }
 }
 
-function applyGuideNoteLockedFlags(section: Section, widgets: Widget[]) {
-  if (!isGuideNoteSection(section)) return widgets
+function applyTemplateLockedFlags(section: Section, widgets: Widget[]) {
+  const definition = getLockedTemplateDefinition(section)
+  if (!definition) return widgets
   return widgets.map((widget) => {
-    const lockedWidget = getGuideNoteLockedWidget(widget.widgetId)
+    const lockedWidget = definition.getLockedWidget(widget.widgetId)
     return lockedWidget ? { ...lockedWidget } : { ...widget, locked: false }
   })
 }
@@ -1086,7 +1118,11 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       order: params.order ?? 0,
       enableComment: params.enableComment !== false,
       enableLike: params.enableLike !== false,
-      widgets: displayTemplate === 'guide_note' ? buildDefaultGuideNoteWidgets() : [],
+      widgets: displayTemplate === 'guide_note'
+        ? buildDefaultGuideNoteWidgets()
+        : displayTemplate === 'image_note'
+          ? buildDefaultImageNoteWidgets()
+          : [],
       createdAt: new Date().toISOString(),
       type,
       status: 'active',
@@ -1159,8 +1195,8 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       ...widget,
       widgetId: widget.widgetId || uuidv4(),
     }))
-    assertGuideNoteLockedWidgets(currentSection, widgets)
-    widgets = applyGuideNoteLockedFlags(currentSection, widgets)
+    assertTemplateLockedWidgets(currentSection, widgets)
+    widgets = applyTemplateLockedFlags(currentSection, widgets)
     validateSectionWidgets(currentSection.type, widgets)
 
     const currentWidgets = currentSection.widgets || []
