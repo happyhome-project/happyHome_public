@@ -54,7 +54,7 @@ export function appendArchivePage(
   columns: ArchiveFeedColumns,
   posts: Record<string, any>[],
 ): ArchiveFeedColumns {
-  const result: ArchiveFeedColumns = [[...columns[0]], [...columns[1]]]
+  const result: ArchiveFeedColumns = [columns[0].slice(), columns[1].slice()]
   const seen = new Set(result.flat().map(card => card.postId))
   for (const post of posts) {
     const card = normalizeArchiveCard(post)

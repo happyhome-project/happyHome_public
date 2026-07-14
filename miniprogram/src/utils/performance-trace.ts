@@ -25,7 +25,8 @@ export function sanitizePerformanceTrace(value: unknown): PerformanceTrace | und
 
   if (source.counts && typeof source.counts === 'object') {
     const counts: Record<string, number> = {}
-    for (const [rawKey, rawValue] of Object.entries(source.counts)) {
+    for (const rawKey of Object.keys(source.counts)) {
+      const rawValue = source.counts[rawKey]
       const key = safeText(rawKey, 40)
       const value = Number(rawValue)
       if (!key || !Number.isFinite(value) || value < 0) continue

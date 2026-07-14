@@ -460,17 +460,15 @@ onLoad(async (options: any) => {
 
 function buildArchiveEditorSection(format: 'image_text' | 'text') {
   const common = { _id: `archive-${format}`, communityId: communityStore.currentCommunityId, name: format === 'text' ? '写文字' : '发图文', type: 'evergreen', status: 'active' }
-  if (format === 'text') return {
-    ...common,
+  if (format === 'text') return Object.assign({}, common, {
     displayTemplate: 'text_note',
     widgets: [
       { widgetId: 'text_title', fieldKey: 'title', type: 'short_text', label: '标题', required: true, order: 0, showInList: true },
       { widgetId: 'text_body', fieldKey: 'body', type: 'rich_note', label: '正文', required: true, order: 1, showInList: false },
       { widgetId: 'archive_text_topics', fieldKey: 'topics', type: 'topic', label: '添加话题', required: false, order: 2, showInList: false },
     ],
-  }
-  return {
-    ...common,
+  })
+  return Object.assign({}, common, {
     displayTemplate: 'image_note',
     widgets: [
       { widgetId: 'image_note_images', fieldKey: 'images', type: 'image_group', label: '图片', required: true, order: 0, showInList: false },
@@ -479,7 +477,7 @@ function buildArchiveEditorSection(format: 'image_text' | 'text') {
       { widgetId: 'image_note_topics', fieldKey: 'topics', type: 'topic', label: '添加话题', required: false, order: 3, showInList: false },
       { widgetId: 'image_note_location', fieldKey: 'location', type: 'location', label: '添加地点', required: false, order: 4, showInList: false },
     ],
-  }
+  })
 }
 
 function enterArchiveEditor(format: 'image_text' | 'text', returnTo?: string) {
@@ -968,11 +966,14 @@ async function handleSubmit() {
       }
     }
 
-    const archiveContent = archiveFormat.value
-      ? Object.fromEntries(editableWidgets.value
-          .filter((widget: any) => String(widget.fieldKey || '') !== 'topics')
-          .map((widget: any) => [String(widget.fieldKey || widget.widgetId), content[widget.widgetId]]))
-      : null
+    let archiveContent: Record<string, any> | null = null
+    if (archiveFormat.value) {
+      archiveContent = {}
+      for (const widget of editableWidgets.value) {
+        if (String(widget.fieldKey || '') === 'topics') continue
+        archiveContent[String(widget.fieldKey || widget.widgetId)] = content[widget.widgetId]
+      }
+    }
     const archiveTopics = archiveFormat.value
       ? editableWidgets.value
           .filter((widget: any) => String(widget.fieldKey || '') === 'topics')
