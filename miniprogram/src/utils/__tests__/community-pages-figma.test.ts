@@ -32,6 +32,64 @@ describe('Figma community directory pages', () => {
     expect(code).toContain('env(safe-area-inset-bottom)')
   })
 
+  test('switch page renders cached joined communities immediately and refreshes through one directory request', () => {
+    const code = readPage('community-switch')
+    const loader = code.match(/async function loadCommunities[\s\S]*?(?=\nasync function resolveCommunityCovers)/)?.[0] ?? ''
+
+    expect(loader).toContain('communityStore.myCommunities')
+    expect(loader).toContain('communityApi.listDiscoverable({')
+    expect(loader).not.toContain('communityStore.loadMyCommunities')
+    expect(loader).not.toContain('await resolveCommunityCovers')
+    expect(loader).toContain('directoryLoadEpoch')
+    expect(loader.indexOf('const epoch = ++directoryLoadEpoch')).toBeLessThan(
+      loader.indexOf('if (!userStore.isLoggedIn)'),
+    )
+    expect(code).toContain('加载较慢')
+    expect(code).toContain('communityStore.selectCommunityShell(id, shell, requestId)')
+    expect(code).toContain('createPerformanceRequestId')
+    expect(code).toContain("stage: 'community.directory'")
+    expect(code).toContain("stage: 'community.switch'")
+  })
+
+  test('home applies cached snapshots as shell-only data and hydrates guest login in the background', () => {
+    const code = readPage('index')
+    const login = code.match(/async function submitGuestIntroLogin[\s\S]*?(?=\nfunction handleGuestIntroSecondary)/)?.[0] ?? ''
+    const cancel = code.match(/function cancelGuestIntroLogin[\s\S]*?(?=\nfunction getGuestAvatarFileSize)/)?.[0] ?? ''
+
+    expect(code).toContain('createHomeSnapshotShell')
+    expect(code).toContain('createAdaptiveAvatarUploader')
+    expect(code).toContain('adaptiveGuestAvatarUploader.upload(source)')
+    expect(code).toContain('guestIntroLoginSlow')
+    expect(login).toContain('guestIntroLoginEpoch.isCurrent(loginEpoch)')
+    expect(login).toContain('}, 5000)')
+    expect(login).toContain("stage: 'home.guest.login'")
+    expect(login).toContain('shouldApply: () => guestIntroLoginEpoch.isCurrent(loginEpoch)')
+    expect(cancel).toContain('guestIntroLoginEpoch.invalidate()')
+    expect(cancel).not.toContain('if (guestIntroLoginBusy.value) return')
+    expect(code).toMatch(/onHide\(\(\) => \{[\s\S]*guestIntroLoginEpoch\.invalidate\(\)/)
+    expect(login).toContain('void refreshHomeData()')
+    expect(login).not.toContain('await refreshHomeData()')
+    expect(code).toContain("stage: 'post.bootstrap'")
+  })
+
+  test('home fences stale switch responses and keeps a manual retry path for network failures', () => {
+    const code = readPage('index')
+    const onShowIndex = code.lastIndexOf('onShow(() => {')
+    const pullRefreshIndex = code.indexOf('onPullDownRefresh(', onShowIndex)
+    const onShowBlock = code.slice(onShowIndex, pullRefreshIndex)
+
+    expect(code).toContain('homeRefreshError')
+    expect(code).toContain('@tap="retryHomeRefresh"')
+    expect(code).toContain('requestedCommunityId !== communityStore.currentCommunityId')
+    expect(code).toContain("String(result.currentCommunityId || '') !== requestedCommunityId")
+    expect(code).toContain('communityStore.handleCommunityAccessLost')
+    expect(code).toContain('communityStore.confirmCommunitySelection')
+    expect(onShowBlock).toContain('applySelectedCommunityShellFromCache()')
+    expect(onShowBlock).toContain('void refreshHomeData')
+    expect(onShowBlock).toContain('!communityStore.pendingCommunitySelection')
+    expect(code).toMatch(/do \{\s*activeHomeRefreshCommunityId = userStore\.isLoggedIn/)
+  })
+
   test('create page uses three independent modules and a bottom action area', () => {
     const code = readPage('createCommunity')
 
@@ -50,7 +108,7 @@ describe('Figma community directory pages', () => {
     const code = readPage('index')
 
     expect(code).toContain("filter((community) => community?.status === 'active')")
-    expect(code).toContain('userStore.isLoggedIn && snapshot.currentCommunityId && !activeCommunities.some')
+    expect(code).toContain('userStore.isLoggedIn && safeSnapshot.currentCommunityId && !activeCommunities.some')
     expect(code).toContain('const acceptedSnapshot = applyHomeSnapshot')
     expect(code).toContain('if (!acceptedSnapshot)')
   })

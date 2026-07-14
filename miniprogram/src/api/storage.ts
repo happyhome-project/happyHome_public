@@ -1,3 +1,6 @@
+import { clientLog } from '../utils/client-log'
+import { sanitizePerformanceTrace, type PerformanceTrace } from '../utils/performance-trace'
+
 export type StorageUploadProgress = {
   progress: number
   loaded: number
@@ -15,6 +18,7 @@ type UploadOptions = {
   cloudPath: string
   source: StorageUploadSource
   onProgress?: (progress: StorageUploadProgress) => void
+  trace?: PerformanceTrace
 }
 
 // @ts-ignore wx is injected only by the mini-program runtime.
@@ -79,6 +83,9 @@ async function resolveWebSource(source: StorageUploadSource): Promise<Blob> {
 }
 
 export async function uploadCloudFile(options: UploadOptions): Promise<{ fileID: string }> {
+  const startedAt = Date.now()
+  const trace = sanitizePerformanceTrace(options.trace)
+  clientLog('debug', 'storage.upload.start', { trace })
   if (wxRuntime?.cloud?.uploadFile) {
     if (typeof options.source !== 'string') {
       throw new Error('[storage] unsupported mini-program upload source; expected a local file path')
@@ -88,9 +95,24 @@ export async function uploadCloudFile(options: UploadOptions): Promise<{ fileID:
         cloudPath: options.cloudPath,
         filePath: options.source,
         success: (result: any) => {
-          try { resolve(requireFileID(result)) } catch (error) { reject(error) }
+          try {
+            const normalized = requireFileID(result)
+            clientLog('debug', 'storage.upload.success', {
+              durationMs: Date.now() - startedAt,
+              requestId: result?.requestId || result?.requestID || '',
+              trace,
+            })
+            resolve(normalized)
+          } catch (error) { reject(error) }
         },
-        fail: reject,
+        fail: (error: any) => {
+          clientLog('error', 'storage.upload.fail', {
+            durationMs: Date.now() - startedAt,
+            errorCode: error?.errCode || error?.code || '',
+            trace,
+          })
+          reject(error)
+        },
       })
       if (options.onProgress && task?.onProgressUpdate) {
         task.onProgressUpdate((event: any) => options.onProgress?.(normalizeProgress(
@@ -112,7 +134,13 @@ export async function uploadCloudFile(options: UploadOptions): Promise<{ fileID:
       ? (event) => options.onProgress?.(normalizeProgress(event?.loaded, event?.total))
       : undefined,
   })
-  return requireFileID(result)
+  const normalized = requireFileID(result)
+  clientLog('debug', 'storage.upload.success', {
+    durationMs: Date.now() - startedAt,
+    requestId: (result as any)?.requestId || (result as any)?.requestID || '',
+    trace,
+  })
+  return normalized
   // #endif
 }
 

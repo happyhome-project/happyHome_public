@@ -73,6 +73,12 @@ export function normalizeHomeSnapshotShape(raw: any): HomeSnapshot | null {
   }) as HomeSnapshot
 }
 
+export function createHomeSnapshotShell(raw: HomeSnapshot | null): HomeSnapshot | null {
+  const snapshot = normalizeHomeSnapshotShape(raw)
+  if (!snapshot) return null
+  return Object.assign({}, snapshot, { postsBySection: {} })
+}
+
 function normalizeSnapshot(raw: any, options: SnapshotReadOptions): HomeSnapshot | null {
   if (!raw || typeof raw !== 'object') return null
   if (raw.schemaVersion !== HOME_SNAPSHOT_SCHEMA_VERSION) return null

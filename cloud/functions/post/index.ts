@@ -717,10 +717,12 @@ export async function handleBootstrap(params: {
   currentCommunityId?: string
   limitPerSection?: number
   asGuest?: boolean
+  _trace?: unknown
 }, openid?: string) {
   return buildHomeBootstrap(params.asGuest ? '' : (openid || ''), {
     currentCommunityId: params.currentCommunityId,
     limitPerSection: params.limitPerSection,
+    trace: params._trace,
   })
 }
 

@@ -11,6 +11,15 @@ interface LoadMyCommunitiesOptions {
   shouldApply?: () => boolean
 }
 
+interface PendingCommunitySelection {
+  targetCommunityId: string
+  traceRequestId: string
+  previousCommunityId: string
+  previousBrowsingCommunity: Community | null
+  previousSections: Section[]
+  previousSectionIndex: number
+}
+
 export const useCommunityStore = defineStore('community', {
   state: () => ({
     currentCommunityId: '' as string,
@@ -19,6 +28,7 @@ export const useCommunityStore = defineStore('community', {
     currentSections: [] as Section[],
     currentSectionIndex: 0,
     membershipByCommunity: {} as Record<string, { isMember: boolean; status: string | null; checkedAt: number }>,
+    pendingCommunitySelection: null as PendingCommunitySelection | null,
   }),
   getters: {
     currentCommunity: (state): Community | undefined =>
@@ -36,6 +46,7 @@ export const useCommunityStore = defineStore('community', {
       this.currentSections = []
       this.currentSectionIndex = 0
       this.membershipByCommunity = {}
+      this.pendingCommunitySelection = null
       this.saveToStorage()
     },
     loadFromStorage() {
@@ -63,6 +74,89 @@ export const useCommunityStore = defineStore('community', {
       this.currentSections = res.sections as Section[]
       this.refreshMembershipStatus(communityId, expectedEpoch).catch(() => {})
       this.saveToStorage()
+    },
+    selectCommunityShell(communityId: string, communityShell?: Community, traceRequestId = '') {
+      const targetCommunityId = String(communityId || '').trim()
+      if (!targetCommunityId) return null
+      if (targetCommunityId === this.currentCommunityId) {
+        return this.pendingCommunitySelection?.targetCommunityId === targetCommunityId
+          ? this.pendingCommunitySelection
+          : null
+      }
+      communityMutationEpoch += 1
+      const previousSelection = this.pendingCommunitySelection
+      const selection: PendingCommunitySelection = {
+        targetCommunityId,
+        traceRequestId: String(traceRequestId || '').trim(),
+        previousCommunityId: previousSelection
+          ? previousSelection.previousCommunityId
+          : this.currentCommunityId,
+        previousBrowsingCommunity: previousSelection
+          ? previousSelection.previousBrowsingCommunity
+          : this.browsingCommunity,
+        previousSections: previousSelection
+          ? previousSelection.previousSections.slice()
+          : this.currentSections.slice(),
+        previousSectionIndex: previousSelection?.previousSectionIndex ?? this.currentSectionIndex,
+      }
+      this.pendingCommunitySelection = selection
+      this.currentCommunityId = targetCommunityId
+      this.browsingCommunity = this.myCommunities.find(
+        (community) => community._id === targetCommunityId,
+      ) || (communityShell?._id === targetCommunityId ? communityShell : null)
+      this.currentSections = []
+      this.currentSectionIndex = 0
+      this.saveToStorage()
+      return selection
+    },
+    confirmCommunitySelection(communityId: string) {
+      const id = String(communityId || '').trim()
+      if (this.pendingCommunitySelection?.targetCommunityId === id) {
+        this.pendingCommunitySelection = null
+      }
+    },
+    rollbackCommunitySelection(communityId: string) {
+      const id = String(communityId || '').trim()
+      const selection = this.pendingCommunitySelection
+      if (!selection || selection.targetCommunityId !== id) return ''
+      communityMutationEpoch += 1
+      const previousStillActive = this.myCommunities.some(
+        (community) => community._id === selection.previousCommunityId && community.status === 'active',
+      )
+      if (!previousStillActive) {
+        this.currentCommunityId = ''
+        this.browsingCommunity = null
+        this.currentSections = []
+        this.currentSectionIndex = 0
+        this.pendingCommunitySelection = null
+        this.saveToStorage()
+        return ''
+      }
+      this.currentCommunityId = selection.previousCommunityId
+      this.browsingCommunity = selection.previousBrowsingCommunity
+      this.currentSections = selection.previousSections
+      this.currentSectionIndex = selection.previousSectionIndex
+      this.pendingCommunitySelection = null
+      this.saveToStorage()
+      return this.currentCommunityId
+    },
+    handleCommunityAccessLost(communityId: string) {
+      const id = String(communityId || '').trim()
+      if (!id) return ''
+      this.myCommunities = this.myCommunities.filter((community) => community._id !== id)
+      delete this.membershipByCommunity[id]
+      const restoredId = this.rollbackCommunitySelection(id)
+      if (restoredId) return restoredId
+      if (this.currentCommunityId === id) {
+        communityMutationEpoch += 1
+        this.currentCommunityId = ''
+        this.browsingCommunity = null
+        this.currentSections = []
+        this.currentSectionIndex = 0
+        this.pendingCommunitySelection = null
+        this.saveToStorage()
+      }
+      return ''
     },
     async refreshMembershipStatus(communityId: string, expectedEpoch = communityMutationEpoch) {
       const id = String(communityId || '').trim()

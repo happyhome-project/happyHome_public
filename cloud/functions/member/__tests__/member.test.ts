@@ -10,6 +10,7 @@ jest.mock('wx-server-sdk', () => ({
 }))
 jest.mock('../../../lib/db', () => ({
   getById: jest.fn(),
+  getByIds: jest.fn(),
   create: jest.fn(),
   updateById: jest.fn(),
   updateWhere: jest.fn(),
@@ -606,25 +607,35 @@ test('myCommunities：只返回 active 成员且社区状态为 active 的社区
     { communityId: 'c1', status: 'active', joinedAt: '2026-04-24T10:00:00.000Z' },
     { communityId: 'c2', status: 'active', joinedAt: '2026-04-23T10:00:00.000Z' },
   ])
-  ;(db.getById as jest.Mock)
-    .mockResolvedValueOnce({ _id: 'c1', name: '青山村', status: 'active' })
-    .mockResolvedValueOnce({ _id: 'c2', name: '旧社区', status: 'disabled' })
+  ;(db.getByIds as jest.Mock).mockResolvedValue([
+    { _id: 'c1', name: '青山村', status: 'active' },
+    { _id: 'c2', name: '旧社区', status: 'disabled' },
+  ])
 
   const result = await handleMyCommunities('test-openid')
 
-  expect(result.communities).toEqual([{ _id: 'c1', name: '青山村', status: 'active' }])
+  expect(result.communities).toEqual([{
+    _id: 'c1',
+    name: '青山村',
+    status: 'active',
+    viewerStatus: 'active',
+    viewerRole: null,
+  }])
+  expect(db.getByIds).toHaveBeenCalledTimes(1)
+  expect(db.getByIds).toHaveBeenCalledWith('communities', ['c1', 'c2'])
+  expect(db.getById).not.toHaveBeenCalledWith('communities', expect.any(String))
 })
 
 test('myCommunities：成员仍可通过 main 看到 discoverable=false 的 active 社区', async () => {
   ;(db.query as jest.Mock).mockResolvedValue([
     { communityId: 'hidden', status: 'active', joinedAt: '2026-07-13T10:00:00.000Z' },
   ])
-  ;(db.getById as jest.Mock).mockResolvedValue({
+  ;(db.getByIds as jest.Mock).mockResolvedValue([{
     _id: 'hidden',
     name: '测试社区',
     status: 'active',
     discoverable: false,
-  })
+  }])
 
   const result = await main({ action: 'myCommunities' })
 
@@ -634,8 +645,74 @@ test('myCommunities：成员仍可通过 main 看到 discoverable=false 的 acti
       name: '测试社区',
       status: 'active',
       discoverable: false,
+      viewerStatus: 'active',
+      viewerRole: null,
     }],
   })
+})
+
+test('myCommunities：保留成员顺序并暴露管理员角色', async () => {
+  ;(db.query as jest.Mock).mockResolvedValue([
+    { communityId: 'c2', status: 'active', role: 'admin', joinedAt: '2026-07-14T10:00:00.000Z' },
+    { communityId: 'c1', status: 'active', role: 'member', joinedAt: '2026-07-13T10:00:00.000Z' },
+  ])
+  ;(db.getByIds as jest.Mock).mockResolvedValue([
+    { _id: 'c2', name: '管理社区', status: 'active' },
+    { _id: 'c1', name: '普通社区', status: 'active' },
+  ])
+
+  const result = await handleMyCommunities('test-openid')
+
+  expect(result.communities).toEqual([
+    expect.objectContaining({ _id: 'c2', viewerStatus: 'active', viewerRole: 'admin' }),
+    expect.objectContaining({ _id: 'c1', viewerStatus: 'active', viewerRole: 'member' }),
+  ])
+  expect(db.getByIds).toHaveBeenCalledTimes(1)
+})
+
+test('myCommunities：同一社群存在重复 active 记录时保留 joinedAt 最新的一条', async () => {
+  ;(db.query as jest.Mock).mockResolvedValue([
+    { communityId: 'c1', status: 'active', role: 'admin', joinedAt: '2026-07-14T10:00:00.000Z' },
+    { communityId: 'c1', status: 'active', role: 'member', joinedAt: '2026-07-13T10:00:00.000Z' },
+  ])
+  ;(db.getByIds as jest.Mock).mockResolvedValue([
+    { _id: 'c1', name: '管理社区', status: 'active' },
+  ])
+
+  const result = await handleMyCommunities('viewer')
+
+  expect(result.communities).toEqual([
+    expect.objectContaining({ _id: 'c1', viewerRole: 'admin' }),
+  ])
+})
+
+test.each([0, 1, 5, 20])('myCommunities：%i 个已加入社群仍保持一次成员查询和一次批量读取', async (count) => {
+  const memberships = Array.from({ length: count }, (_, index) => ({
+    communityId: `c${index}`,
+    status: 'active',
+    role: 'member',
+    joinedAt: `2026-07-14T10:${String(index).padStart(2, '0')}:00.000Z`,
+  }))
+  const communities = memberships.map((membership, index) => ({
+    _id: membership.communityId,
+    name: `社区${index}`,
+    status: 'active',
+  }))
+  ;(db.query as jest.Mock).mockResolvedValue(memberships)
+  ;(db.getByIds as jest.Mock).mockResolvedValue(communities)
+
+  const result = await handleMyCommunities('viewer')
+
+  expect(result.communities).toHaveLength(count)
+  expect(db.query).toHaveBeenCalledTimes(1)
+  expect(db.query).toHaveBeenCalledWith('community_members', {
+    userId: 'viewer',
+    status: 'active',
+  }, {
+    orderBy: ['joinedAt', 'desc'],
+    limit: 100,
+  })
+  expect(db.getByIds).toHaveBeenCalledTimes(1)
 })
 
 test('myCommunities：未登录（openid 空）时返回空列表，不抛错（后端兜底）', async () => {

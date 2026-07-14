@@ -27,3 +27,10 @@ test('ensure-indexes treats CloudBase already-exists races as idempotent success
   assert.match(source, /already exists/)
   assert.match(source, /= collection \$\{coll\} \(already exists\)/)
 })
+
+test('ensure-indexes includes the membership critical-path compound indexes', () => {
+  assert.match(source, /idx_userId_status_joinedAt[\s\S]*userId[\s\S]*status[\s\S]*joinedAt/)
+  assert.match(source, /idx_userId_appliedAt[\s\S]*userId[\s\S]*appliedAt/)
+  assert.match(source, /idx_communityId_userId_appliedAt[\s\S]*communityId[\s\S]*userId[\s\S]*appliedAt/)
+  assert.match(source, /idx_communityId_userId_status[\s\S]*communityId[\s\S]*userId[\s\S]*status/)
+})
