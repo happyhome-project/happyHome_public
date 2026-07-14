@@ -2059,3 +2059,65 @@ test('create: ignores presentation for non-text templates', async () => {
   await handleCreate({ communityId: 'community-1', sectionId: 'section-1', content: { 'title-widget': '活动' }, presentation: { textNoteTheme: 'quote' } } as any, 'test-openid')
   expect(db.create).toHaveBeenCalledWith('posts', expect.not.objectContaining({ presentation: expect.anything() }))
 })
+
+test('create: persists an image-text archive post without loading or storing a section', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.create as jest.Mock).mockResolvedValue('archive-image-1')
+
+  const result = await handleCreate({
+    communityId: 'community-1',
+    area: 'archive',
+    format: 'image_text',
+    topics: [' #亲子出游 ', 'ＰＥＴ', 'pet'],
+    content: {
+      title: ' 春游 ',
+      images: [' cloud://env/one.jpg '],
+      body: { format: 'markdown', markdown: '正文', html: '<p>正文</p>', text: '正文', imageFileIDs: [], schemaVersion: 1 },
+      location: { address: '湖畔', lat: 30, lng: 120 },
+    },
+  } as any, 'test-openid')
+
+  expect(result).toEqual(expect.objectContaining({ postId: 'archive-image-1' }))
+  expect(db.getById).not.toHaveBeenCalledWith('sections', expect.anything())
+  expect(db.create).toHaveBeenCalledWith('posts', expect.objectContaining({
+    communityId: 'community-1',
+    area: 'archive',
+    format: 'image_text',
+    topics: ['亲子出游', 'PET'],
+    content: expect.objectContaining({
+      title: '春游',
+      images: ['cloud://env/one.jpg'],
+    }),
+  }))
+  expect((db.create as jest.Mock).mock.calls[0][1]).not.toHaveProperty('sectionId')
+
+  const { appendPostRagOutboxEvent } = require('../../../lib/post-rag-outbox')
+  expect(appendPostRagOutboxEvent).not.toHaveBeenCalled()
+  expect(postRag.enqueuePostRagJob).not.toHaveBeenCalled()
+  expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('archive-image-1')
+})
+
+test('create: persists a text archive post with its normalized cover theme', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.create as jest.Mock).mockResolvedValue('archive-text-1')
+
+  await handleCreate({
+    communityId: 'community-1',
+    area: 'archive',
+    format: 'text',
+    topics: ['成长'],
+    content: {
+      title: '家风',
+      body: { format: 'markdown', markdown: '正文', html: '<p>正文</p>', text: '正文', imageFileIDs: [], schemaVersion: 1 },
+    },
+    presentation: { textNoteTheme: 'quote' },
+  } as any, 'test-openid')
+
+  expect(db.create).toHaveBeenCalledWith('posts', expect.objectContaining({
+    area: 'archive',
+    format: 'text',
+    topics: ['成长'],
+    presentation: { textNoteTheme: 'quote' },
+  }))
+  expect((db.create as jest.Mock).mock.calls[0][1]).not.toHaveProperty('sectionId')
+})

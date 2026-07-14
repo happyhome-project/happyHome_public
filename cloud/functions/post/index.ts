@@ -32,6 +32,7 @@ import type {
 import { normalizeSectionTemplates } from '../../shared/section-templates'
 import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
 import { resolvePostAuthorNickname } from '../../shared/post-author'
+import { parseArchivePostCreateInput, type ArchivePostFormat } from '../../shared/archive-post'
 
 type PostRagSmokeIdentity = {
   version: number
@@ -515,14 +516,89 @@ async function listAttendanceMembersInternal(postId: string, widgetId?: string) 
   }
 }
 
+function buildArchiveContentSection(communityId: string, format: ArchivePostFormat): Section {
+  const common = {
+    _id: '', communityId, name: '沉淀区', icon: '', order: 0,
+    enableComment: true, enableLike: true, createdAt: '', type: 'evergreen', status: 'active',
+  } as const
+  const widgets: Widget[] = format === 'image_text'
+    ? [
+        { widgetId: 'images', type: 'image_group', label: '图片', fieldKey: 'images', required: true, order: 0, showInList: false },
+        { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 1, showInList: true },
+        { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false },
+        { widgetId: 'location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false },
+      ]
+    : [
+        { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
+        { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', required: true, order: 1, showInList: false },
+      ]
+  return { ...common, widgets } as Section
+}
+
+type CreatePostParams = {
+  communityId: string
+  sectionId?: string
+  area?: unknown
+  format?: unknown
+  topics?: unknown
+  content: PostContent
+  presentation?: unknown
+}
+
 export async function handleCreate(
-  params: { communityId: string; sectionId: string; content: PostContent; presentation?: unknown },
+  params: CreatePostParams,
   openid: string,
 ) {
   if (!openid) throw new Error('Missing OPENID')
   await ensureActiveCommunityMember(params.communityId, openid)
 
-  const section = normalizePostSection(await db.getById('sections', params.sectionId) as Section)
+  if (params.area === 'archive') {
+    const archive = parseArchivePostCreateInput(params)
+    const section = buildArchiveContentSection(params.communityId, archive.format)
+    const content = archive.content as unknown as PostContent
+    validateRequiredWidgets(section, content)
+    validateContentValues(section, content)
+
+    const now = new Date().toISOString()
+    const postData = {
+      communityId: params.communityId,
+      area: archive.area,
+      format: archive.format,
+      topics: archive.topics,
+      authorId: openid,
+      status: 'active',
+      auditStatus: 'pending',
+      auditReason: 'content audit pending',
+      auditUpdatedAt: now,
+      content,
+      ...(archive.format === 'text' ? { presentation: archive.presentation } : {}),
+      commentCount: 0,
+      likeCount: 0,
+      isPinned: false,
+      isFeatured: false,
+      createdAt: now,
+      updatedAt: now,
+    }
+    const postId = await db.runTransaction(async transaction => {
+      const created = await transaction.collection('posts').add({ data: postData })
+      return created._id
+    })
+    const audit = await auditAndApply({
+      postId,
+      communityId: params.communityId,
+      sectionId: '',
+      section,
+      content,
+      authorId: openid,
+      source: 'user',
+      contentSlot: 'content',
+      postSnapshot: { _id: postId, ...postData } as unknown as Post,
+    })
+    return { postId, auditStatus: audit.status, auditReason: audit.reason }
+  }
+
+  const sectionId = String(params.sectionId || '').trim()
+  const section = normalizePostSection(await db.getById('sections', sectionId) as Section)
   // 板块尚未配置控件时，禁止发帖（否则会产生无任何字段的空 post）
   if (!section || !Array.isArray(section.widgets) || section.widgets.length === 0) {
     throw new Error('该板块尚未配置内容模板，请联系管理员完善板块设置后再发布')
@@ -541,7 +617,7 @@ export async function handleCreate(
   const now = new Date().toISOString()
   const postData = {
     communityId: params.communityId,
-    sectionId: params.sectionId,
+    sectionId,
     authorId: openid,
     status: 'active',
     auditStatus: 'pending',
@@ -565,7 +641,7 @@ export async function handleCreate(
   const audit = await auditAndApply({
     postId,
     communityId: params.communityId,
-    sectionId: params.sectionId,
+    sectionId,
     section,
     content: sanitizedContent,
     authorId: openid,
