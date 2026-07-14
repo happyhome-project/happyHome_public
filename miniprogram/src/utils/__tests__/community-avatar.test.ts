@@ -31,4 +31,22 @@ describe('community avatar', () => {
   ])('keeps %j intact with the fallback segmenter', (value, expected) => {
     expect(communityInitial(value, { segmenter: null })).toBe(expected)
   })
+
+  it('falls back when Intl.Segmenter construction fails', () => {
+    let constructions = 0
+    class ThrowingSegmenter {
+      constructor() {
+        constructions += 1
+        throw new Error('Segmenter unavailable')
+      }
+
+      segment(): Iterable<{ segment: string }> {
+        return []
+      }
+    }
+
+    expect(communityInitial('👍🏽认可', { intl: { Segmenter: ThrowingSegmenter } })).toBe('👍🏽')
+    expect(constructions).toBe(1)
+    expect(communityInitial('e\u0301lan', { intl: null })).toBe('e\u0301')
+  })
 })
