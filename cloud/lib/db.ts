@@ -142,3 +142,19 @@ export async function query(
   const res = await q.get()
   return res.data
 }
+
+export async function queryBefore(
+  collectionName: string,
+  where: Record<string, unknown>,
+  field: string,
+  before: string | null,
+  limit: number,
+) {
+  const rangeWhere = before ? { ...where, [field]: _.lt(before) } : where
+  const res = await collection(collectionName)
+    .where(rangeWhere)
+    .orderBy(field, 'desc')
+    .limit(limit)
+    .get()
+  return res.data
+}
