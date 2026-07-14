@@ -58,4 +58,3 @@
 - [ ] Run `npm.cmd run test:mp:replay-policy`.
 - [ ] Run `npm.cmd run test:governance` and `git diff --check`.
 - [ ] Review the diff for scope, commit as AngryBird, push, open one PR, and track `pr-ci / offline` plus Merge Queue to `MERGED`.
-

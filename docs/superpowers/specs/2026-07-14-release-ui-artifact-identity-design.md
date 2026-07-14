@@ -31,4 +31,3 @@ No business API, cloud function, database, deployment target, UI behavior, RAG b
 - A test proves changing only source build-info preserves qualification reuse and reports drift.
 - Existing package-byte, dist-identity, UI-marker, UI-result, project-path, Git-SHA, and DevTools-version tamper tests remain blocking.
 - `npm.cmd run test:mp:replay-policy` and release governance tests pass.
-
