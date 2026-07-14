@@ -20,6 +20,7 @@ describe('community share page integration contract', () => {
     expect(code).toContain('CommunityShareImageCanvas')
     expect(code).toContain('communityInitial')
     expect(code).not.toContain('imageUrl: shareImageUrl.value || DEFAULT_COMMUNITY_SHARE_IMAGE')
+    expect(code).not.toContain('{ ...share, imageUrl: shareImageUrl.value }')
   })
 
   test('share canvas prepares a probed cover or an offscreen initial png', () => {
@@ -40,6 +41,7 @@ describe('community share page integration contract', () => {
     expect(code).toContain('CommunityShareImageCanvas')
     expect(code).toContain(':cover-image="currentCommunityCoverImage"')
     expect(code).not.toContain('imageUrl: DEFAULT_COMMUNITY_SHARE_IMAGE')
+    expect(code).not.toContain('{ ...share, imageUrl: shareImageUrl.value }')
   })
 
   test.each([

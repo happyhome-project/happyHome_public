@@ -1610,11 +1610,9 @@ onPullDownRefresh(async () => {
 
 onShareAppMessage(() => {
   const communityId = currentShareCommunityId.value
-  const share = {
-    title: buildCommunityShareTitle(communityName.value),
-    path: communityId ? buildCommunitySharePath(communityId) : '/pages/index/index',
-  }
-  return shareImageUrl.value ? { ...share, imageUrl: shareImageUrl.value } : share
+  const title = buildCommunityShareTitle(communityName.value)
+  const path = communityId ? buildCommunitySharePath(communityId) : '/pages/index/index'
+  return shareImageUrl.value ? { title, path, imageUrl: shareImageUrl.value } : { title, path }
 })
 </script>
 
