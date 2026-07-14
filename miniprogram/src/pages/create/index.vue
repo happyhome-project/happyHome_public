@@ -208,10 +208,6 @@
                   :allow-rich-note-images="allowImagesForWidget(block.bodyWidget)"
                   v-model="formData[block.bodyWidget.widgetId]"
                 />
-                <view v-if="!isTextNoteCreateMode" class="figma-ai-write">
-                  <text class="figma-ai-icon">✣</text>
-                  <text>AI帮你写</text>
-                </view>
               </view>
 
               <view v-else-if="block.type === 'routeStats'" class="figma-route-stats-card">

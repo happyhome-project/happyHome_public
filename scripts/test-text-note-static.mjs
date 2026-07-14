@@ -18,7 +18,7 @@ assert(createPage.includes("const textNoteStep = ref<'compose' | 'cover'>('compo
 assert(createPage.includes('class="text-note-compose"') && createPage.includes('class="text-note-cover-step"'), 'both text-note steps must render.')
 assert(createPage.includes('<TextNoteCover') && createPage.includes('v-for="theme in TEXT_NOTE_THEMES"'), 'cover preview and six theme choices must use TextNoteCover.')
 assert(/isTextNoteCreateMode\.value[\s\S]{0,120}return false/.test(createPage), 'rich-note images must be disabled in text-note mode.')
-assert(/v-if="!isTextNoteCreateMode"[\s\S]{0,500}AI帮你写/.test(createPage), 'AI affordance must not render in the text-note branch.')
+assert(!createPage.includes('AI帮你写') && !createPage.includes('figma-ai-write'), 'unavailable AI writing affordance must not render in any authoring mode.')
 assert(createPage.includes('presentation: isTextNoteCreateMode.value') && createPage.includes('textNoteTheme: textNoteTheme.value'), 'text-note theme must be submitted as top-level presentation.')
 assert(createPage.includes("section.displayTemplate === 'guide_note'") && createPage.includes("type: 'guideMain'") && createPage.includes("type: 'widget'"), 'default and guide authoring paths must remain present.')
 assert(/\.text-note-cover-frame\s*\{[^}]*aspect-ratio:\s*4\s*\/\s*5;/s.test(cover), 'TextNoteCover must keep a fixed 4:5 ratio.')
