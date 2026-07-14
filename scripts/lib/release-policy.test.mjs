@@ -252,6 +252,27 @@ test('publish resume allows only its matching generated build-info change', () =
   }), /build-info/i)
 })
 
+test('prepare with an explicit qualification allows only its matching generated build-info change', () => {
+  assert.doesNotThrow(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(),
+    changedPaths: ['miniprogram/src/generated/build-info.ts'],
+    allowReleaseBuildInfo: true,
+    generatedBuildInfoMatches: true,
+  }))
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(),
+    changedPaths: ['miniprogram/src/generated/build-info.ts'],
+    allowReleaseBuildInfo: true,
+    generatedBuildInfoMatches: false,
+  }), /build-info/i)
+  assert.throws(() => releasePolicyModule.assertFormalReleaseGitState({
+    ...validPublicReleaseState(),
+    changedPaths: ['miniprogram/src/generated/build-info.ts', 'cloud/functions/admin/index.ts'],
+    allowReleaseBuildInfo: true,
+    generatedBuildInfoMatches: true,
+  }), /unexpected/i)
+})
+
 test('publish resume preserves public origin and full-current release intent', () => {
   const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
   const gitState = extractFunctionBlock(deployScript, 'function getFormalReleaseGitState')
@@ -556,6 +577,7 @@ test('formal prepare explicitly reuses a qualification without silently rebuildi
 
   assert.match(release, /const uiQualificationPath = getFlagValue\('ui-qualification'\)/)
   assert.match(release, /uiQualificationPath && !prepareOnly/)
+  assert.match(release, /allowReleaseBuildInfo:\s*Boolean\(uiQualificationPath\)/)
   assert.match(release, /uiQualificationPath[\s\S]*await inspectExplicitUiQualification[\s\S]*buildAndGateMiniprogramUpload/)
   assert.doesNotMatch(resolver, /buildAndGateMiniprogramUpload|execSync|test:mp:release-gate/)
   assert.match(resolver, /inspectReleaseUiQualification/)

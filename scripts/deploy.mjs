@@ -1469,6 +1469,7 @@ async function runFormalRelease(options = {}) {
     releaseStrategy,
     fullCurrentExplicit,
     publishOnly,
+    allowReleaseBuildInfo: Boolean(uiQualificationPath),
     version: miniprogramUpload.version,
     desc: miniprogramUpload.desc,
   }))
