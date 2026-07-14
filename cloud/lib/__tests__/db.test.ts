@@ -8,6 +8,14 @@ const mockRemove = jest.fn().mockResolvedValue({ stats: { removed: 1 } })
 const mockWhereUpdate = jest.fn().mockResolvedValue({ stats: { updated: 1 } })
 const mockRunTransaction = jest.fn()
 const mockWhereGet = jest.fn().mockResolvedValue({ data: [] })
+const mockWhere = jest.fn().mockReturnValue({
+  update: mockWhereUpdate,
+  orderBy: jest.fn().mockReturnThis(),
+  skip: jest.fn().mockReturnThis(),
+  limit: jest.fn().mockReturnThis(),
+  get: mockWhereGet,
+})
+const mockLt = jest.fn((value: string) => ({ __lt: value }))
 
 jest.mock('wx-server-sdk', () => ({
   init: jest.fn(),
@@ -19,13 +27,7 @@ jest.mock('wx-server-sdk', () => ({
         remove: mockRemove,
       }),
       add: mockAdd,
-      where: jest.fn().mockReturnValue({
-        update: mockWhereUpdate,
-        orderBy: jest.fn().mockReturnThis(),
-        skip: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        get: mockWhereGet,
-      }),
+      where: mockWhere,
       orderBy: jest.fn().mockReturnThis(),
       skip: jest.fn().mockReturnThis(),
       limit: jest.fn().mockReturnThis(),
@@ -36,13 +38,14 @@ jest.mock('wx-server-sdk', () => ({
       in: (values: string[]) => ({ __in: values }),
       set: (value: unknown) => ({ __set: value }),
       remove: () => ({ __remove: true }),
+      lt: mockLt,
     },
     runTransaction: mockRunTransaction,
   }),
   DYNAMIC_CURRENT_ENV: 'test'
 }))
 
-import { getById, getByIds, create, increment, replaceValue, removeField, runTransaction, transactionGetByIdOrNull } from '../db'
+import { getById, getByIds, create, increment, queryBefore, replaceValue, removeField, runTransaction, transactionGetByIdOrNull } from '../db'
 
 test('getById returns document data', async () => {
   const result = await getById('users', 'user-123')
@@ -183,4 +186,16 @@ test('query applies where/orderBy/skip/limit', async () => {
   })
   // query returns res.data which is [] from the top-level mock
   expect(result).toEqual([])
+})
+
+test('queryBefore applies an adapter-owned range condition and descending order', async () => {
+  mockWhere.mockClear()
+  mockLt.mockClear()
+  mockWhereGet.mockResolvedValueOnce({ data: [{ _id: 'older' }] })
+
+  await expect(queryBefore('archive_post_topics', { communityId: 'c1' }, 'sortKey', 'cursor-key', 21))
+    .resolves.toEqual([{ _id: 'older' }])
+
+  expect(mockLt).toHaveBeenCalledWith('cursor-key')
+  expect(mockWhere).toHaveBeenCalledWith({ communityId: 'c1', sortKey: { __lt: 'cursor-key' } })
 })

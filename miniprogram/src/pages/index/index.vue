@@ -126,7 +126,21 @@
       </scroll-view>
     </template>
 
-    <view v-if="archiveGroups.length" class="section-tabs-sticky-shell">
+    <view class="archive-topic-shell">
+      <ArchiveTopicTabs :tabs="archiveTabs" :model-value="selectedArchiveTopic" @update:model-value="selectArchiveTopic" />
+      <ArchiveWaterfall
+        :columns="archiveColumns"
+        :loading="archiveLoading"
+        :error="archiveError"
+        :has-more="archiveHasMore"
+        @post="onArchiveCardTap"
+        @publish="openArchivePublish"
+        @retry="loadArchiveFeed(true)"
+        @load-more="loadArchiveFeed(false)"
+      />
+    </view>
+
+    <view v-if="archiveGroups.length" v-show="false" class="section-tabs-sticky-shell">
       <scroll-view scroll-x class="section-tabs" :show-scrollbar="false">
         <view class="section-tabs-inner">
           <view
@@ -149,6 +163,7 @@
     <!-- Archive feed · Figma 0709_v2 选中板块内容区 -->
     <view
       v-if="activeArchiveGroup"
+      v-show="false"
       class="active-archive"
       :class="{
         'active-archive--guide': activeArchiveGroup.displayTemplate === 'guide_note',
@@ -438,6 +453,10 @@ import CommunityShareImageCanvas from '../../components/CommunityShareImageCanva
 import { hideNativeTabBar } from '../../utils/app-tabbar'
 import { getArchiveHomeMeta, getFamilyLetterListSummary, getGuideNoteCard, getHomeLiveMeta, getPostHomeTitle, getPostHomeTitleIssue } from '../../utils/widget'
 import TextNoteCover from '../../components/TextNoteCover.vue'
+import ArchiveTopicTabs from '../../components/ArchiveTopicTabs.vue'
+import ArchiveWaterfall from '../../components/ArchiveWaterfall.vue'
+import type { ArchiveTab } from '../../api/cloud'
+import { appendArchivePage, type ArchiveFeedCard, type ArchiveFeedColumns } from '../../utils/archive-feed'
 import { getTextNoteCard, type TextNoteTheme } from '../../utils/text-note'
 import { getImageNoteCard, isImageNoteSectionContract } from '../../utils/image-note'
 import { clientLog, markClientDiagnosticStage, startHomeDiagnosticWatchdog } from '../../utils/client-log'
@@ -508,11 +527,19 @@ const incomingShareCommunityId = ref('')
 const shareImageUrl = ref('')
 const homeSearchQuery = ref('')
 const selectedArchiveId = ref('')
+const archiveTabs = ref<ArchiveTab[]>([{ topicKey: '', displayName: '全部' }])
+const selectedArchiveTopic = ref('')
+const archiveColumns = ref<ArchiveFeedColumns>([[], []])
+const archiveCursor = ref('')
+const archiveHasMore = ref(false)
+const archiveLoading = ref(false)
+const archiveError = ref('')
 const homePageScrollTop = ref(0)
 const archivePreviewMinHeightPx = ref(0)
 const showHomePullRefreshHint = ref(false)
 const homeMenuSafeRightInset = ref(0)
 let refreshingHome = false
+let archiveRequestEpoch = 0
 let queuedForcedHomeRefresh = false
 let mountedAt = 0
 let unsubscribeBackgroundFetchSnapshot: (() => void) | null = null
@@ -1224,6 +1251,58 @@ function openHomeEmptyPublish() {
   })
 }
 
+async function loadArchiveFeed(reset = false) {
+  const communityId = communityStore.currentCommunityId || ''
+  if (!communityId || (!reset && (archiveLoading.value || !archiveHasMore.value))) return
+  const requestEpoch = ++archiveRequestEpoch
+  archiveLoading.value = true
+  archiveError.value = ''
+  try {
+    if (reset) {
+      archiveColumns.value = [[], []]
+      archiveCursor.value = ''
+      const tabResult = await postApi.listArchiveTabs({ communityId, asGuest: !userStore.isLoggedIn })
+      if (requestEpoch !== archiveRequestEpoch || communityId !== communityStore.currentCommunityId) return
+      archiveTabs.value = Array.isArray(tabResult.tabs) && tabResult.tabs.length
+        ? tabResult.tabs.slice(0, 8)
+        : [{ topicKey: '', displayName: '全部' }]
+      if (!archiveTabs.value.some(tab => tab.topicKey === selectedArchiveTopic.value)) selectedArchiveTopic.value = ''
+    }
+    const result = await postApi.listArchive({
+      communityId,
+      topicKey: selectedArchiveTopic.value || undefined,
+      cursor: reset ? undefined : archiveCursor.value || undefined,
+      limit: 20,
+      asGuest: !userStore.isLoggedIn,
+    })
+    if (requestEpoch !== archiveRequestEpoch || communityId !== communityStore.currentCommunityId) return
+    archiveColumns.value = appendArchivePage(reset ? [[], []] : archiveColumns.value, result.posts || [])
+    archiveCursor.value = String(result.nextCursor || '')
+    archiveHasMore.value = Boolean(result.hasMore)
+  } catch (error) {
+    if (requestEpoch !== archiveRequestEpoch) return
+    archiveError.value = '加载失败，请重试'
+    clientLog('error', 'home.archive.feed.fail', { communityId, topicKey: selectedArchiveTopic.value, error })
+  } finally {
+    if (requestEpoch === archiveRequestEpoch) archiveLoading.value = false
+  }
+}
+
+function selectArchiveTopic(topicKey: string) {
+  if (topicKey === selectedArchiveTopic.value) return
+  selectedArchiveTopic.value = topicKey
+  archiveHasMore.value = true
+  void loadArchiveFeed(true)
+}
+
+function onArchiveCardTap(card: ArchiveFeedCard) {
+  uni.navigateTo({ url: `/pages/detail/index?postId=${encodeURIComponent(card.postId)}` })
+}
+
+function openArchivePublish() {
+  uni.navigateTo({ url: '/pages/create/index?archiveFormat=image_text&returnTo=%2Fpages%2Findex%2Findex' })
+}
+
 function onGroupHeaderTap(g: ArchiveGroup) {
   if (!g.id) return
   const url = `/pages/section/index?sectionId=${encodeURIComponent(g.id)}`
@@ -1651,6 +1730,8 @@ async function runSingleHomeRefresh(force: boolean) {
       if (userStore.isLoggedIn) openOnboardingPreservingStack()
       return
     }
+    archiveHasMore.value = true
+    await loadArchiveFeed(true)
     if (force) clearHomeRefreshMarker()
     clientLog('info', 'home.refresh.success', {
       force,

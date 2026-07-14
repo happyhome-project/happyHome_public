@@ -1,0 +1,28 @@
+<template>
+  <scroll-view scroll-x class="archive-topic-tabs" :show-scrollbar="false">
+    <view class="archive-topic-tabs__inner">
+      <view
+        v-for="tab in tabs"
+        :key="tab.topicKey || '__all__'"
+        class="archive-topic-tab"
+        :class="{ 'archive-topic-tab--active': tab.topicKey === modelValue }"
+        :aria-selected="tab.topicKey === modelValue ? 'true' : 'false'"
+        @tap="$emit('update:modelValue', tab.topicKey)"
+      ><text>{{ tab.displayName }}</text></view>
+    </view>
+  </scroll-view>
+</template>
+
+<script setup lang="ts">
+import type { ArchiveTab } from '../api/cloud'
+defineProps<{ tabs: ArchiveTab[]; modelValue: string }>()
+defineEmits<{ (event: 'update:modelValue', value: string): void }>()
+</script>
+
+<style scoped>
+.archive-topic-tabs { width: 100%; white-space: nowrap; background: #fff; }
+.archive-topic-tabs__inner { display: flex; gap: 38rpx; padding: 20rpx var(--hh-page-x) 18rpx; }
+.archive-topic-tab { position: relative; flex: 0 0 auto; color: #7a7a7a; font-size: 28rpx; line-height: 40rpx; }
+.archive-topic-tab--active { color: #111; font-weight: 650; }
+.archive-topic-tab--active::after { content: ''; position: absolute; left: 50%; bottom: -12rpx; width: 28rpx; height: 5rpx; border-radius: 99rpx; background: #ff2442; transform: translateX(-50%); }
+</style>

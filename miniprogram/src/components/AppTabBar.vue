@@ -5,13 +5,11 @@
         <view class="publish-grid">
           <button
             v-for="option in publishOptions"
-            :key="option.section._id"
+            :key="option.key"
             class="publish-option"
-            @tap="handlePublishOption(option.section)"
+            @tap="handlePublishOption(option.key)"
           >
-            <view class="publish-icon" :class="`publish-icon--${option.tone}`">
-              <image class="publish-icon-image" :src="option.iconSrc" mode="aspectFit" />
-            </view>
+            <view class="publish-icon"><text class="publish-icon-glyph">{{ option.glyph }}</text></view>
             <text class="publish-label">{{ option.label }}</text>
           </button>
         </view>
@@ -51,38 +49,21 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useCommunityStore } from '../store/community'
 import {
   APP_TABS,
-  CREATE_SECTION_INTENT_KEY,
   type AppTabKey,
   getTabByKey,
   hideNativeTabBar,
 } from '../utils/app-tabbar'
 
 const props = defineProps<{ current: AppTabKey }>()
-const communityStore = useCommunityStore()
 const showPublishSheet = ref(false)
 const HOME_TAB_RETAP_EVENT = 'happyhome:home-tab-retap'
-const RETIRED_ACTIVITY_INVITE_NAME = ['我的', '组局'].join('')
-
-const activePublishSections = computed(() =>
-  (communityStore.currentSections || []).filter((section: any) => (
-    (section?.status || 'active') === 'active' && isPublishableSection(section)
-  ))
-)
-
-const publishOptions = computed(() =>
-  activePublishSections.value.slice(0, 8).map((section: any) => {
-    const meta = resolvePublishMeta(section?.name)
-    return {
-      section,
-      label: displayPublishSectionName(section?.name),
-      tone: meta.tone,
-      iconSrc: meta.iconSrc,
-    }
-  })
-)
+const publishOptions = computed(() => [
+  { key: 'image_text', label: '发图文', glyph: '▧' },
+  { key: 'text', label: '写文字', glyph: '文' },
+  { key: 'collaboration', label: '发起协作', glyph: '⌁' },
+])
 
 onMounted(() => {
   hideNativeTabBar()
@@ -114,10 +95,6 @@ function tabIconSrc(key: 'home' | 'profile') {
 
 function openPublishSheet() {
   hideNativeTabBar()
-  if (publishOptions.value.length === 0) {
-    openCreatePage()
-    return
-  }
   showPublishSheet.value = true
 }
 
@@ -125,23 +102,12 @@ function closePublishSheet() {
   showPublishSheet.value = false
 }
 
-function handlePublishOption(section: any) {
-  const sectionId = String(section?._id || '')
-  if (!sectionId) return
+function handlePublishOption(key: string) {
   const returnTo = props.current === 'create' ? '' : (getTabByKey(props.current)?.path || '')
-  try {
-    uni.setStorageSync(CREATE_SECTION_INTENT_KEY, {
-      sectionId,
-      createdAt: Date.now(),
-      returnTo,
-      source: 'tabbar.publish',
-    })
-  } catch (_error) {}
   closePublishSheet()
-  ;(uni as any).$emit?.('happyhome:create-section-intent', { sectionId, returnTo })
-  if (props.current !== 'create') {
-    openCreatePage(returnTo)
-  }
+  const params = returnTo ? [`returnTo=${encodeURIComponent(returnTo)}`] : []
+  params.push(key === 'collaboration' ? 'mode=collaboration' : `archiveFormat=${encodeURIComponent(key)}`)
+  uni.navigateTo({ url: `/pages/create/index?${params.join('&')}` })
 }
 
 function currentReturnTo() {
@@ -153,40 +119,6 @@ function currentReturnTo() {
 function openCreatePage(returnTo = currentReturnTo()) {
   const query = returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ''
   uni.navigateTo({ url: `/pages/create/index${query}` })
-}
-
-function isPublishableSection(section: any) {
-  const name = String(section?.name || '').trim()
-  const systemKey = String(section?.systemKey || '')
-  if (systemKey === 'activity_invite' || name === '出游邀约' || name === '活动召集') return false
-
-  const widgets = Array.isArray(section?.widgets) ? section.widgets : []
-  if (widgets.length === 0) return false
-  return widgets.some((widget: any) => {
-    const type = String(widget?.type || '')
-    return !['admin_notice', 'video_group', 'audio_group'].includes(type)
-  })
-}
-
-function resolvePublishMeta(name: unknown) {
-  const text = String(name || '').trim()
-  if (/亲子|出游|攻略|路线/.test(text)) return { tone: 'family', iconSrc: '/static/publish-icons/family.svg' }
-  if (/闲置|交易|二手|转让/.test(text)) return { tone: 'trade', iconSrc: '/static/publish-icons/trade.svg' }
-  if (/活动|公告|通知|组局/.test(text)) return { tone: 'notice', iconSrc: '/static/publish-icons/notice.svg' }
-  if (/失物|招领|寻物/.test(text)) return { tone: 'lost', iconSrc: '/static/publish-icons/lost.svg' }
-  if (/邻里|互助|求助|帮忙/.test(text)) return { tone: 'neighbor', iconSrc: '/static/publish-icons/neighbor.svg' }
-  if (/拼车|顺风|车/.test(text)) return { tone: 'car', iconSrc: '/static/publish-icons/car.svg' }
-  return {
-    tone: 'general',
-    iconSrc: '/static/publish-icons/general.svg',
-  }
-}
-
-function displayPublishSectionName(name: unknown) {
-  const text = String(name || '').trim()
-  if (!text) return '发布'
-  if (text === RETIRED_ACTIVITY_INVITE_NAME || text === '组局') return '活动召集'
-  return text
 }
 
 void APP_TABS
@@ -214,7 +146,7 @@ void APP_TABS
 
 .publish-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   column-gap: 18rpx;
   row-gap: 32rpx;
   width: 100%;
@@ -240,7 +172,10 @@ void APP_TABS
   display: flex;
   align-items: center;
   justify-content: center;
+  background: #f4f4f4;
 }
+
+.publish-icon-glyph { color: #111; font-size: 42rpx; font-weight: 500; line-height: 1; }
 
 .publish-icon-image {
   width: 72rpx;

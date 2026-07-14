@@ -33,6 +33,8 @@ import { normalizeSectionTemplates } from '../../shared/section-templates'
 import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
 import { resolvePostAuthorNickname } from '../../shared/post-author'
 import { parseArchivePostCreateInput, type ArchivePostFormat } from '../../shared/archive-post'
+import { decodeArchiveCursor, encodeArchiveCursor, normalizeArchiveTopic, selectArchiveTabs } from '../../shared/archive-topics'
+import { buildArchiveSortKey, syncArchivePostTopics, updateArchivePostTopicLinks } from '../../lib/archive-topic-index'
 
 type PostRagSmokeIdentity = {
   version: number
@@ -563,6 +565,7 @@ export async function handleCreate(
     const postData = {
       communityId: params.communityId,
       area: archive.area,
+      origin: 'native_archive',
       format: archive.format,
       topics: archive.topics,
       authorId: openid,
@@ -583,6 +586,8 @@ export async function handleCreate(
       const created = await transaction.collection('posts').add({ data: postData })
       return created._id
     })
+    const sortKey = buildArchiveSortKey(now, postId)
+    await db.updateById('posts', postId, { sortKey })
     const audit = await auditAndApply({
       postId,
       communityId: params.communityId,
@@ -593,6 +598,14 @@ export async function handleCreate(
       source: 'user',
       contentSlot: 'content',
       postSnapshot: { _id: postId, ...postData } as unknown as Post,
+    })
+    await syncArchivePostTopics({
+      _id: postId,
+      communityId: params.communityId,
+      topics: archive.topics,
+      createdAt: now,
+      status: 'active',
+      auditStatus: audit.status,
     })
     return { postId, auditStatus: audit.status, auditReason: audit.reason }
   }
@@ -781,7 +794,8 @@ export async function handleList(params: {
 
 export async function handleListArchive(params: {
   communityId: string
-  skip?: number
+  topicKey?: string
+  cursor?: string
   limit?: number
   asGuest?: boolean
 }, openid?: string) {
@@ -790,22 +804,54 @@ export async function handleListArchive(params: {
   const viewerId = params.asGuest ? '' : (openid || '')
   await ensureCommunityReadable(communityId, viewerId, COMMUNITY_READ_ERROR)
 
-  const skip = Number.isFinite(Number(params.skip)) ? Math.max(0, Math.floor(Number(params.skip))) : 0
   const limit = Number.isFinite(Number(params.limit)) && Number(params.limit) > 0
     ? Math.min(50, Math.floor(Number(params.limit)))
     : 20
-  const posts = await db.query('posts', {
-    communityId,
-    area: 'archive',
-    status: 'active',
-    auditStatus: 'pass',
-  }, {
-    orderBy: ['createdAt', 'desc'],
-    skip,
-    limit: limit + 1,
-  }) as any[]
-  const enrichedPosts = await enrichPostsWithAuthor(posts.slice(0, limit))
-  return { posts: enrichedPosts, hasMore: posts.length > limit }
+  const cursor = decodeArchiveCursor(params.cursor)
+  if (params.cursor && !cursor) throw new Error('无效的分页游标')
+  const rawTopic = String(params.topicKey || '').trim()
+  if (!rawTopic) {
+    const rows = await db.queryBefore('posts', {
+      communityId, area: 'archive', status: 'active', auditStatus: 'pass',
+    }, 'sortKey', cursor?.sortKey || null, limit + 1) as any[]
+    const page = rows.slice(0, limit)
+    const enrichedPosts = await enrichPostsWithAuthor(page)
+    const last = page[page.length - 1]
+    return {
+      posts: enrichedPosts,
+      hasMore: rows.length > limit,
+      nextCursor: last ? encodeArchiveCursor({ sortKey: last.sortKey, postId: last._id }) : '',
+    }
+  }
+
+  const { topicKey } = normalizeArchiveTopic(rawTopic)
+  const links = await db.queryBefore('archive_post_topics', {
+    communityId, topicKey, status: 'active', auditStatus: 'pass',
+  }, 'sortKey', cursor?.sortKey || null, limit + 1) as any[]
+  const pageLinks = links.slice(0, limit)
+  const loaded = await db.getByIds('posts', pageLinks.map((link) => link.postId)) as any[]
+  const byId = new Map(loaded.map((post) => [post._id, post]))
+  const posts = pageLinks.map((link) => byId.get(link.postId)).filter(Boolean)
+  const enrichedPosts = await enrichPostsWithAuthor(posts)
+  const last = pageLinks[pageLinks.length - 1]
+  return {
+    posts: enrichedPosts,
+    hasMore: links.length > limit,
+    nextCursor: last ? encodeArchiveCursor({ sortKey: last.sortKey, postId: last.postId }) : '',
+  }
+}
+
+export async function handleListArchiveTabs(params: { communityId: string; asGuest?: boolean }, openid?: string) {
+  const communityId = String(params.communityId || '').trim()
+  if (!communityId) throw new Error('communityId 不能为空')
+  await ensureCommunityReadable(communityId, params.asGuest ? '' : (openid || ''), COMMUNITY_READ_ERROR)
+  const records = await db.query('archive_topics', { communityId, enabled: true }) as any[]
+  return {
+    tabs: [
+      { topicKey: '', displayName: '全部' },
+      ...selectArchiveTabs(records, 7).map(({ topicKey, displayName }) => ({ topicKey, displayName })),
+    ],
+  }
 }
 
 export async function handleHome(params: {
@@ -889,16 +935,15 @@ export async function handleDelete(params: { postId: string }, openid: string) {
   if (post.authorId !== openid) throw new Error('无权删除')
 
   if (post.status === 'deleted') {
-    if (post.area !== 'archive') {
-      await db.runTransaction(async transaction => {
-        await enqueuePostRagDeleteJobInTransaction(transaction, {
-          postId: params.postId,
-          communityId: post.communityId,
-          sectionId: post.sectionId,
-          reason: 'post.delete.compensate',
-        })
+    if (post.area === 'archive') await updateArchivePostTopicLinks(params.postId, { status: 'deleted' })
+    await db.runTransaction(async transaction => {
+      await enqueuePostRagDeleteJobInTransaction(transaction, {
+        postId: params.postId,
+        communityId: post.communityId,
+        sectionId: post.sectionId,
+        reason: 'post.delete.compensate',
       })
-    }
+    })
     await removePostSearchIndex(params.postId)
     return { success: true, alreadyDeleted: true }
   }
@@ -908,17 +953,16 @@ export async function handleDelete(params: { postId: string }, openid: string) {
       status: 'deleted', isPinned: false, pinnedAt: '', pinnedByAccountId: '',
       isFeatured: false, featuredAt: '', featuredByAccountId: '',
     } })
-    if (post.area !== 'archive') {
-      await appendPostRagOutboxEvent(transaction, { communityId: String(post.communityId || ''), aggregateId: params.postId, reasonCode: 'post.deleted', now: new Date().toISOString() })
-      await enqueuePostRagDeleteJobInTransaction(transaction, {
-        postId: params.postId,
-        communityId: post.communityId,
-        sectionId: post.sectionId,
-        reason: 'post.delete',
-      })
-    }
+    await appendPostRagOutboxEvent(transaction, { communityId: String(post.communityId || ''), aggregateId: params.postId, reasonCode: 'post.deleted', now: new Date().toISOString() })
+    await enqueuePostRagDeleteJobInTransaction(transaction, {
+      postId: params.postId,
+      communityId: post.communityId,
+      sectionId: post.sectionId,
+      reason: 'post.delete',
+    })
   })
   await removePostSearchIndex(params.postId)
+  if (post.area === 'archive') await updateArchivePostTopicLinks(params.postId, { status: 'deleted' })
   return { success: true }
 }
 
@@ -1136,6 +1180,7 @@ export const main = async (event: any, context?: any) => {
   if (action === 'createActivityInvite') return handleCreateActivityInvite(params, openid)
   if (action === 'list') return handleList(params, openid)
   if (action === 'listArchive') return handleListArchive(params, openid)
+  if (action === 'listArchiveTabs') return handleListArchiveTabs(params, openid)
   if (action === 'home') return handleHome(params, openid)
   if (action === 'bootstrap') return handleBootstrap(params, openid)
   if (action === 'get') return handleGet(params, openid)

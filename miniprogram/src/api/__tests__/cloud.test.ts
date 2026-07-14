@@ -46,25 +46,30 @@ describe('callCloud', () => {
     }))
   })
 
-  test('postApi exposes section-free archive create and list actions', async () => {
+  test('postApi exposes section-free archive create, tabs, and cursor list actions', async () => {
     callWebFunction.mockResolvedValue({ posts: [], hasMore: false })
     vi.stubGlobal('uni', {})
 
     const { postApi } = await import('../cloud')
     expect((postApi as any).createArchive).toBeInstanceOf(Function)
     expect((postApi as any).listArchive).toBeInstanceOf(Function)
+    expect((postApi as any).listArchiveTabs).toBeInstanceOf(Function)
 
     await (postApi as any).createArchive({
       communityId: 'community-1', area: 'archive', format: 'text', topics: ['成长'],
       content: { title: '家风', body: { text: '正文' } }, presentation: { textNoteTheme: 'paper' },
     })
-    await (postApi as any).listArchive({ communityId: 'community-1', skip: 20, limit: 20 })
+    await (postApi as any).listArchiveTabs({ communityId: 'community-1' })
+    await (postApi as any).listArchive({ communityId: 'community-1', topicKey: '成长', cursor: 'cursor-1', limit: 20 })
 
     expect(callWebFunction).toHaveBeenNthCalledWith(1, 'post', expect.objectContaining({
       action: 'create', area: 'archive', format: 'text', communityId: 'community-1',
     }))
     expect(callWebFunction).toHaveBeenNthCalledWith(2, 'post', {
-      action: 'listArchive', communityId: 'community-1', skip: 20, limit: 20,
+      action: 'listArchiveTabs', communityId: 'community-1',
+    })
+    expect(callWebFunction).toHaveBeenNthCalledWith(3, 'post', {
+      action: 'listArchive', communityId: 'community-1', topicKey: '成长', cursor: 'cursor-1', limit: 20,
     })
   })
 

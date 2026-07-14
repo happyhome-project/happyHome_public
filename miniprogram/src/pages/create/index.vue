@@ -59,6 +59,7 @@
             <view class="figma-guide-main-card text-note-editor-card">
               <WidgetEditor v-if="textNoteTitleWidget" :widget="textNoteTitleWidget" variant="figma" embedded hide-label guide-role="title" placeholder="添加标题" :allow-rich-note-images="false" v-model="formData[textNoteTitleWidget.widgetId]" />
               <WidgetEditor v-if="textNoteBodyWidget" :widget="textNoteBodyWidget" variant="figma" embedded hide-label guide-role="body" placeholder="添加正文内容" :allow-rich-note-images="false" v-model="formData[textNoteBodyWidget.widgetId]" />
+              <WidgetEditor v-if="textNoteTopicWidget" :widget="textNoteTopicWidget" variant="image-note-tool" embedded hide-label :allow-rich-note-images="false" v-model="formData[textNoteTopicWidget.widgetId]" />
             </view>
             <view class="text-note-compose-actions">
               <button class="draft-btn" @tap="saveDraft">存草稿</button>
@@ -311,10 +312,14 @@ const activityInviteLoading = ref(false)
 const createReturnTo = ref('')
 const textNoteStep = ref<'compose' | 'cover'>('compose')
 const textNoteTheme = ref<TextNoteTheme>('paper')
+const archiveFormat = ref<'image_text' | 'text' | ''>('')
+const collaborationOnly = ref(false)
 
 // 只允许在 active 板块发帖。dormant / archived 板块既无法发帖也无处展示（首页已过滤）。
 const activeSections = computed(() =>
-  (communityStore.currentSections ?? []).filter((section: any) => (section?.status ?? 'active') === 'active')
+  (communityStore.currentSections ?? []).filter((section: any) =>
+    (section?.status ?? 'active') === 'active' && (!collaborationOnly.value || section?.type === 'realtime')
+  )
 )
 
 const editableWidgets = computed(() =>
@@ -339,6 +344,9 @@ const textNoteTitleWidget = computed(() =>
 )
 const textNoteBodyWidget = computed(() =>
   editableWidgets.value.find((widget: any) => String(widget?.widgetId || '') === 'text_body') || null
+)
+const textNoteTopicWidget = computed(() =>
+  editableWidgets.value.find((widget: any) => String(widget?.fieldKey || '') === 'topics') || null
 )
 const textNoteContent = computed(() => extractTextNoteContent(formData))
 const isGuideCreateMode = computed(() => {
@@ -440,9 +448,45 @@ onLoad(async (options: any) => {
   hideNativeTabBar()
   await ensureSectionsLoaded()
   await checkMembership({ silent: false })
+  collaborationOnly.value = String(options?.mode || '') === 'collaboration'
+  const requestedArchiveFormat = String(options?.archiveFormat || '')
+  if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text') {
+    enterArchiveEditor(requestedArchiveFormat, options?.returnTo)
+    return
+  }
   await consumeCreateSectionIntent(options)
   await consumeActivityInviteIntent(options)
 })
+
+function buildArchiveEditorSection(format: 'image_text' | 'text') {
+  const common = { _id: `archive-${format}`, communityId: communityStore.currentCommunityId, name: format === 'text' ? '写文字' : '发图文', type: 'evergreen', status: 'active' }
+  if (format === 'text') return {
+    ...common,
+    displayTemplate: 'text_note',
+    widgets: [
+      { widgetId: 'text_title', fieldKey: 'title', type: 'short_text', label: '标题', required: true, order: 0, showInList: true },
+      { widgetId: 'text_body', fieldKey: 'body', type: 'rich_note', label: '正文', required: true, order: 1, showInList: false },
+      { widgetId: 'archive_text_topics', fieldKey: 'topics', type: 'topic', label: '添加话题', required: false, order: 2, showInList: false },
+    ],
+  }
+  return {
+    ...common,
+    displayTemplate: 'image_note',
+    widgets: [
+      { widgetId: 'image_note_images', fieldKey: 'images', type: 'image_group', label: '图片', required: true, order: 0, showInList: false },
+      { widgetId: 'image_note_title', fieldKey: 'title', type: 'short_text', label: '标题', required: true, order: 1, showInList: true },
+      { widgetId: 'image_note_body', fieldKey: 'body', type: 'rich_note', label: '正文', required: false, order: 2, showInList: false },
+      { widgetId: 'image_note_topics', fieldKey: 'topics', type: 'topic', label: '添加话题', required: false, order: 3, showInList: false },
+      { widgetId: 'image_note_location', fieldKey: 'location', type: 'location', label: '添加地点', required: false, order: 4, showInList: false },
+    ],
+  }
+}
+
+function enterArchiveEditor(format: 'image_text' | 'text', returnTo?: string) {
+  archiveFormat.value = format
+  collaborationOnly.value = false
+  selectSection(buildArchiveEditorSection(format), { returnTo: String(returnTo || '') })
+}
 
 onShow(() => {
   hideNativeTabBar()
@@ -924,8 +968,27 @@ async function handleSubmit() {
       }
     }
 
+    const archiveContent = archiveFormat.value
+      ? Object.fromEntries(editableWidgets.value
+          .filter((widget: any) => String(widget.fieldKey || '') !== 'topics')
+          .map((widget: any) => [String(widget.fieldKey || widget.widgetId), content[widget.widgetId]]))
+      : null
+    const archiveTopics = archiveFormat.value
+      ? editableWidgets.value
+          .filter((widget: any) => String(widget.fieldKey || '') === 'topics')
+          .flatMap((widget: any) => Array.isArray(content[widget.widgetId]) ? content[widget.widgetId] : [])
+      : []
     const result: any = isActivityInviteMode.value
       ? await postApi.createActivityInvite(activityInviteSourcePostId.value, content)
+      : archiveFormat.value
+        ? await postApi.createArchive({
+            communityId: communityStore.currentCommunityId,
+            area: 'archive',
+            format: archiveFormat.value,
+            topics: archiveTopics,
+            content: archiveContent || {},
+            presentation: archiveFormat.value === 'text' ? { textNoteTheme: textNoteTheme.value } : undefined,
+          })
       : await postApi.create({
           communityId: communityStore.currentCommunityId,
           sectionId,

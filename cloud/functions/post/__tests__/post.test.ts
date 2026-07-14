@@ -12,8 +12,12 @@ jest.mock('../../../lib/db', () => ({
     return values.filter(Boolean)
   }),
   create: jest.fn(),
+  setById: jest.fn(),
+  getByIdOrNull: jest.fn().mockResolvedValue(null),
   updateById: jest.fn(),
+  updateWhere: jest.fn(),
   query: jest.fn(),
+  queryBefore: jest.fn(),
   removeById: jest.fn(),
   softDelete: jest.fn(),
   replaceValue: jest.fn((value) => ({ __set: value })),
@@ -57,6 +61,8 @@ import {
   handleJoinAttendance,
   handleListAttendanceMembers,
   handleList,
+  handleListArchive,
+  handleListArchiveTabs,
   handleCreateActivityInvite,
   handleSearch,
   handleUpdate,
@@ -2060,7 +2066,7 @@ test('create: ignores presentation for non-text templates', async () => {
   expect(db.create).toHaveBeenCalledWith('posts', expect.not.objectContaining({ presentation: expect.anything() }))
 })
 
-test.each(['active', 'deleted'])('delete: archive post with status %s never enters the RAG delete pipeline', async status => {
+test.each(['active', 'deleted'])('delete: searchable archive post with status %s stays in the RAG delete lifecycle', async status => {
   ;(db.getById as jest.Mock).mockResolvedValueOnce({
     _id: 'archive-post',
     authorId: 'test-openid',
@@ -2072,8 +2078,11 @@ test.each(['active', 'deleted'])('delete: archive post with status %s never ente
   const result = await handleDelete({ postId: 'archive-post' }, 'test-openid')
 
   const { appendPostRagOutboxEvent } = require('../../../lib/post-rag-outbox')
-  expect(appendPostRagOutboxEvent).not.toHaveBeenCalled()
-  expect(postRag.enqueuePostRagDeleteJobInTransaction).not.toHaveBeenCalled()
+  expect(postRag.enqueuePostRagDeleteJobInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+    postId: 'archive-post', communityId: 'community-1', sectionId: undefined,
+  }))
+  if (status === 'active') expect(appendPostRagOutboxEvent).toHaveBeenCalled()
+  else expect(appendPostRagOutboxEvent).not.toHaveBeenCalled()
   expect(postSearch.removePostSearchIndex).toHaveBeenCalledWith('archive-post')
   if (status === 'active') {
     expect(db.updateById).toHaveBeenCalledWith('posts', 'archive-post', expect.objectContaining({ status: 'deleted' }))
@@ -2116,9 +2125,19 @@ test('create: persists an image-text archive post without loading or storing a s
   expect((db.create as jest.Mock).mock.calls[0][1]).not.toHaveProperty('sectionId')
 
   const { appendPostRagOutboxEvent } = require('../../../lib/post-rag-outbox')
-  expect(appendPostRagOutboxEvent).not.toHaveBeenCalled()
-  expect(postRag.enqueuePostRagJob).not.toHaveBeenCalled()
+  expect(appendPostRagOutboxEvent).toHaveBeenCalled()
+  expect(postRag.enqueuePostRagJob).toHaveBeenCalledWith(expect.objectContaining({
+    postId: 'archive-image-1', communityId: 'community-1', sectionId: '',
+    action: result.auditStatus === 'pass' ? 'upsert' : 'delete',
+  }))
   expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('archive-image-1')
+  expect(db.setById).toHaveBeenCalledWith('archive_post_topics', expect.stringMatching(/^apt_/), expect.objectContaining({
+    communityId: 'community-1', postId: 'archive-image-1', topicKey: '亲子出游', auditStatus: result.auditStatus,
+  }))
+  expect(db.setById).toHaveBeenCalledWith('archive_topics', expect.stringMatching(/^at_/), expect.objectContaining({
+    recentScore: result.auditStatus === 'pass' ? 1 : 0,
+    recentPostCount: result.auditStatus === 'pass' ? 1 : 0,
+  }))
 })
 
 test('create: persists a text archive post with its normalized cover theme', async () => {
@@ -2146,26 +2165,65 @@ test('create: persists a text archive post with its normalized cover theme', asy
   expect((db.create as jest.Mock).mock.calls[0][1]).not.toHaveProperty('sectionId')
 })
 
-test('listArchive: returns a database-paginated archive feed without section reads', async () => {
-  const handleListArchive = (require('../index') as any).handleListArchive
-  expect(handleListArchive).toBeInstanceOf(Function)
+test('listArchiveTabs: returns All plus legacy, admin, then active topics', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
   ;(db.query as jest.Mock)
     .mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
     .mockResolvedValueOnce([
-      { _id: 'archive-2', communityId: 'community-1', area: 'archive', format: 'text', topics: ['成长'], authorId: 'author-2', status: 'active', auditStatus: 'pass', content: { title: '二' }, createdAt: '2026-07-14T11:00:00.000Z' },
-      { _id: 'archive-1', communityId: 'community-1', area: 'archive', format: 'image_text', topics: ['亲子出游', 'PET'], authorId: 'author-1', status: 'active', auditStatus: 'pass', content: { title: '一', images: ['cloud://one'] }, createdAt: '2026-07-14T10:00:00.000Z' },
+      { communityId: 'community-1', topicKey: 'hot', displayName: '热门', origins: ['organic'], enabled: true, recentScore: 99, recentPostCount: 9 },
+      { communityId: 'community-1', topicKey: 'manual', displayName: '手动', origins: ['admin'], enabled: true, adminOrder: 1, recentScore: 0, recentPostCount: 0 },
+      { communityId: 'community-1', topicKey: 'legacy', displayName: '历史', origins: ['legacy'], enabled: true, legacyOrder: 1, recentScore: 0, recentPostCount: 0 },
     ])
+
+  await expect(handleListArchiveTabs({ communityId: 'community-1' }, 'test-openid')).resolves.toEqual({
+    tabs: [
+      { topicKey: '', displayName: '全部' },
+      { topicKey: 'legacy', displayName: '历史' },
+      { topicKey: 'manual', displayName: '手动' },
+      { topicKey: 'hot', displayName: '热门' },
+    ],
+  })
+})
+
+test('listArchive: returns a cursor-paginated archive feed without section reads', async () => {
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
   ;(db.getById as jest.Mock)
     .mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
-    .mockResolvedValue(null)
+  ;(db.queryBefore as jest.Mock).mockResolvedValueOnce([
+    { _id: 'archive-2', communityId: 'community-1', area: 'archive', format: 'text', topics: ['成长'], authorId: 'author-2', status: 'active', auditStatus: 'pass', content: { title: '二' }, createdAt: '2026-07-14T11:00:00.000Z', sortKey: '2026-07-14T11:00:00.000Z_archive-2' },
+    { _id: 'archive-1', communityId: 'community-1', area: 'archive', format: 'image_text', topics: ['亲子出游', 'PET'], authorId: 'author-1', status: 'active', auditStatus: 'pass', content: { title: '一', images: ['cloud://one'] }, createdAt: '2026-07-14T10:00:00.000Z', sortKey: '2026-07-14T10:00:00.000Z_archive-1' },
+  ])
+  const result = await handleListArchive({ communityId: 'community-1', limit: 1 }, 'test-openid')
 
-  const result = await handleListArchive({ communityId: 'community-1', skip: 0, limit: 20 }, 'test-openid')
+  expect(result.posts.map((post: any) => post._id)).toEqual(['archive-2'])
+  expect(result).toEqual(expect.objectContaining({ hasMore: true, nextCursor: expect.any(String) }))
+  expect(db.queryBefore).toHaveBeenCalledWith('posts', {
+    communityId: 'community-1', area: 'archive', status: 'active', auditStatus: 'pass',
+  }, 'sortKey', null, 2)
+  expect(db.getById).not.toHaveBeenCalledWith('sections', expect.anything())
+})
+
+test('listArchive: hydrates a topic page in projection order', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.queryBefore as jest.Mock).mockResolvedValueOnce([
+    { postId: 'archive-2', sortKey: '2026-07-14T11:00:00.000Z_archive-2' },
+    { postId: 'archive-1', sortKey: '2026-07-14T10:00:00.000Z_archive-1' },
+  ])
+  ;(db.getByIds as jest.Mock)
+    .mockResolvedValueOnce([
+      { _id: 'archive-1', authorId: 'author-1', status: 'active', auditStatus: 'pass' },
+      { _id: 'archive-2', authorId: 'author-2', status: 'active', auditStatus: 'pass' },
+    ])
+    .mockResolvedValueOnce([])
+
+  const result = await handleListArchive({ communityId: 'community-1', topicKey: ' #成长 ', limit: 20 }, 'test-openid')
 
   expect(result.posts.map((post: any) => post._id)).toEqual(['archive-2', 'archive-1'])
-  expect(db.query).toHaveBeenCalledWith('posts', {
-    communityId: 'community-1', area: 'archive', status: 'active', auditStatus: 'pass',
-  }, { orderBy: ['createdAt', 'desc'], skip: 0, limit: 21 })
-  expect(db.getById).not.toHaveBeenCalledWith('sections', expect.anything())
+  expect(db.queryBefore).toHaveBeenCalledWith('archive_post_topics', {
+    communityId: 'community-1', topicKey: '成长', status: 'active', auditStatus: 'pass',
+  }, 'sortKey', null, 21)
 })
 
 test('get: reads an archive post without loading a section', async () => {

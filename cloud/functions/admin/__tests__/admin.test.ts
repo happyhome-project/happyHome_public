@@ -5,9 +5,11 @@ jest.mock('wx-server-sdk', () => ({
 
 jest.mock('../../../lib/db', () => ({
   getById: jest.fn(),
+  getByIdOrNull: jest.fn(),
   create: jest.fn(),
   updateById: jest.fn(),
   updateWhere: jest.fn(),
+  setById: jest.fn(),
   removeById: jest.fn(),
   softDelete: jest.fn(),
   query: jest.fn(),
@@ -1844,4 +1846,26 @@ test('community.listAllPageAdmin: is superAdmin-only and paginates every communi
     action: 'community.listAllPageAdmin',
     _actAs: { accountId: 'a', role: 'communityAdmin', userId: 'u', username: 'n' },
   })).rejects.toThrow('权限不足')
+})
+
+test('archive topics: community-scoped admins can list and add manual origin without losing legacy origin', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([
+    { topicKey: '亲子出游', displayName: '亲子出游', origins: ['legacy'], enabled: true, legacyOrder: 0 },
+  ])
+  const listed: any = await main({ action: 'archiveTopic.list', communityId: 'community-1' })
+  expect(listed.topics).toHaveLength(1)
+
+  ;(db.getByIdOrNull as jest.Mock).mockResolvedValueOnce({
+    topicKey: '亲子出游', displayName: '亲子出游', origins: ['legacy'], enabled: true, createdAt: '2026-01-01T00:00:00.000Z',
+  })
+  await main({ action: 'archiveTopic.save', communityId: 'community-1', topicKey: '亲子出游', displayName: '周末亲子游', adminOrder: 2 })
+  expect(db.setById).toHaveBeenCalledWith('archive_topics', expect.stringMatching(/^at_/), expect.objectContaining({
+    topicKey: '亲子出游', displayName: '周末亲子游', origins: ['legacy', 'admin'], adminOrder: 2,
+  }))
+
+  ;(db.getByIdOrNull as jest.Mock).mockResolvedValueOnce({
+    topicKey: '亲子出游', displayName: '周末亲子游', origins: ['legacy', 'admin'], enabled: false,
+  })
+  await main({ action: 'archiveTopic.save', communityId: 'community-1', topicKey: '亲子出游', displayName: '周末亲子游', adminOrder: 4 })
+  expect(db.setById).toHaveBeenLastCalledWith('archive_topics', expect.stringMatching(/^at_/), expect.objectContaining({ enabled: false, adminOrder: 4 }))
 })

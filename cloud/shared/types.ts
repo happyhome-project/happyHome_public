@@ -287,8 +287,10 @@ export interface Post {
   communityId: string
   sectionId: string
   area?: 'archive'
+  origin?: 'native_archive' | 'legacy_section'
   format?: 'image_text' | 'text'
   topics?: string[]
+  sortKey?: string
   authorId: string
   authorNickname?: string
   authorAvatarUrl?: string

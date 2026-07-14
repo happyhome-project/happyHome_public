@@ -235,9 +235,16 @@ export type ArchivePostCreateParams = {
 
 export type ArchivePostListParams = {
   communityId: string
-  skip?: number
+  topicKey?: string
+  cursor?: string
   limit?: number
   asGuest?: boolean
+}
+
+export type ArchiveTab = {
+  topicKey: string
+  displayName: string
+  origin?: 'all' | 'legacy' | 'admin' | 'organic'
 }
 
 export const postApi = {
@@ -257,7 +264,9 @@ export const postApi = {
   list: (sectionId: string, skip = 0, asGuest = false) =>
     callCloud<{ posts: any[] }>('post', 'list', { sectionId, skip, asGuest }),
   listArchive: (params: ArchivePostListParams) =>
-    callCloud<{ posts: any[]; hasMore: boolean }>('post', 'listArchive', params),
+    callCloud<{ posts: any[]; nextCursor: string; hasMore: boolean }>('post', 'listArchive', params),
+  listArchiveTabs: (params: { communityId: string; asGuest?: boolean }) =>
+    callCloud<{ tabs: ArchiveTab[] }>('post', 'listArchiveTabs', params),
   search: (params: {
     communityId: string
     query: string

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "changeId": "archive-user-visible",
+  "actions": [
+    "ensure-indexes"
+  ],
+  "migrations": [],
+  "smokeSuites": [],
+  "releaseImpact": {
+    "cloudFunctions": "Deploy post and admin for indexed archive feeds, topic management, and section-free search indexing.",
+    "adminWeb": "Publish archive topic management UI.",
+    "miniprogram": "Upload the topic-driven waterfall and three-path publishing UI.",
+    "environmentVariables": [],
+    "databaseMigrations": [
+      "Ensure archive_topics and archive_post_topics collections and indexes.",
+      "Run migrate-archive-posts in dry-run mode, review counts, then apply per community.",
+      "Rebuild the formal post RAG index after migration."
+    ]
+  }
+}

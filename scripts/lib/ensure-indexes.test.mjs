@@ -36,5 +36,11 @@ test('ensure-indexes includes the membership critical-path compound indexes', ()
 })
 
 test('ensure-indexes includes the archive feed compound index', () => {
-  assert.match(source, /idx_communityId_area_status_auditStatus_createdAt[\s\S]*communityId[\s\S]*area[\s\S]*status[\s\S]*auditStatus[\s\S]*createdAt/)
+  assert.match(source, /idx_communityId_area_status_auditStatus_sortKey[\s\S]*communityId[\s\S]*area[\s\S]*status[\s\S]*auditStatus[\s\S]*sortKey/)
+  assert.match(source, /archive_topics/)
+  assert.match(source, /idx_communityId_enabled_legacyOrder/)
+  assert.match(source, /idx_communityId_enabled_adminOrder/)
+  assert.match(source, /idx_communityId_enabled_recentScore/)
+  assert.match(source, /archive_post_topics/)
+  assert.match(source, /idx_communityId_topicKey_status_auditStatus_sortKey/)
 })
