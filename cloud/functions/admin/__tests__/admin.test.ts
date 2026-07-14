@@ -340,6 +340,50 @@ test('community.updateHomeBanners: rejects posts from other communities', async 
   expect(db.updateById).not.toHaveBeenCalled()
 })
 
+test('community.updateHomeBanners: compare-and-set prevents clearing concurrently changed banners', async () => {
+  const expectedBanners = [{
+    bannerId: 'banner-1',
+    postId: 'post-1',
+    title: '原 Banner',
+    coverImage: 'cloud://cover-1',
+    order: 0,
+    enabled: true,
+  }]
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'community-1',
+    homeBanners: [...expectedBanners, { ...expectedBanners[0], bannerId: 'banner-2', postId: 'post-2' }],
+  })
+
+  await expect(main({
+    action: 'community.updateHomeBanners',
+    communityId: 'community-1',
+    banners: [],
+    expectedBanners,
+  })).rejects.toThrow('Banner 配置已变化，请重新 dry-run')
+  expect(db.updateById).not.toHaveBeenCalled()
+})
+
+test('community.updateHomeBanners: compare-and-set clears an unchanged Banner snapshot', async () => {
+  const expectedBanners = [{
+    bannerId: 'banner-1',
+    postId: 'post-1',
+    title: '原 Banner',
+    coverImage: 'cloud://cover-1',
+    order: 0,
+    enabled: true,
+  }]
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', homeBanners: expectedBanners })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  await expect(main({
+    action: 'community.updateHomeBanners',
+    communityId: 'community-1',
+    banners: [],
+    expectedBanners,
+  })).resolves.toEqual({ success: true })
+  expect(db.updateById).toHaveBeenCalledWith('communities', 'community-1', { homeBanners: [] })
+})
+
 test('admin.approvalSummary: superAdmin 返回社区创建和成员加入待办数', async () => {
   ;(db.query as jest.Mock)
     .mockResolvedValueOnce([
@@ -1556,4 +1600,42 @@ test('release timer probe actions route only through internal superAdmin with ru
   await expect(main({action:'post.ragTimerProbeCreateAdmin',runId:'run-1'})).resolves.toMatchObject({runId:'run-1'});await main({action:'post.ragTimerEvidenceAdmin',runId:'run-1'});await main({action:'post.ragTimerProbeStatusAdmin',runId:'run-1',postId:'p1'});await main({action:'post.ragTimerProbeCleanupAdmin',runId:'run-1',postId:'p1'});expect(releaseProbe.readPostRagReleaseTimerEvidence).toHaveBeenCalledWith('run-1')
   await expect(main({action:'post.ragTimerProbeCreateAdmin',runId:'run-1',_actAs:{accountId:'a',role:'communityAdmin',userId:'u',username:'n'}})).rejects.toThrow('权限不足')
   const response:any=await rawMain({httpMethod:'POST',headers:{authorization:'Bearer ignored'},body:JSON.stringify({action:'post.ragTimerProbeCreateAdmin',runId:'run-1'})});expect(response.statusCode).toBe(403)
+})
+
+test('community.listAllPageAdmin: is superAdmin-only and paginates every community status', async () => {
+  const statuses = ['active', 'pending', 'rejected', 'disabled']
+  const all = Array.from({ length: 125 }, (_, index) => ({
+    _id: `community-${String(index + 1).padStart(3, '0')}`,
+    status: statuses[index % statuses.length],
+  }))
+  ;(db.queryAfterId as jest.Mock).mockImplementation(async (
+    _collection: string,
+    _where: Record<string, unknown>,
+    afterId: string | null,
+    limit: number,
+  ) => all.filter((item) => !afterId || item._id > afterId).slice(0, limit))
+
+  const first: any = await main({
+    action: 'community.listAllPageAdmin',
+    afterId: '',
+    limit: 100,
+  })
+  const second: any = await main({
+    action: 'community.listAllPageAdmin',
+    afterId: first.nextAfterId,
+    limit: 100,
+  })
+  const items = [...first.items, ...second.items]
+
+  expect(items).toHaveLength(125)
+  expect(first.hasMore).toBe(true)
+  expect(second.hasMore).toBe(false)
+  expect(new Set(items.map((item: any) => item.status))).toEqual(new Set(statuses))
+  expect(db.queryAfterId).toHaveBeenNthCalledWith(1, 'communities', {}, null, 100)
+  expect(db.queryAfterId).toHaveBeenNthCalledWith(2, 'communities', {}, 'community-100', 100)
+
+  await expect(main({
+    action: 'community.listAllPageAdmin',
+    _actAs: { accountId: 'a', role: 'communityAdmin', userId: 'u', username: 'n' },
+  })).rejects.toThrow('权限不足')
 })
