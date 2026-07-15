@@ -1,5 +1,10 @@
 # Home Gradient Color Continuity Implementation Plan
 
+> **Historical / point-in-time:** This plan records the approved 2026-07-15 implementation sequence and is retained only for traceability.
+> **Current authority:** Use the [documentation authority map](../../README.md), current home-page code, release UI checks, and tests.
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Keep the existing mint hero gradient visibly present through the quote and transparent search surface before it transitions to the page background.
@@ -73,4 +78,3 @@ Commit as `AngryBird <48046333+angrybirddd@users.noreply.github.com>` on `codex/
 - [ ] **Step 3: Complete the PR feedback loop**
 
 Create a ready PR, monitor exact-head PR CI and review feedback, arm Merge Queue, and continue until GitHub reports terminal `MERGED` or `CLOSED`. Do not deploy or upload from the feature worktree.
-

@@ -63,6 +63,7 @@ server.listen(0, '127.0.0.1', async () => {
         hero,
         search,
         tabs,
+        heroSurface: surface(document.querySelector('.home-shell')),
         searchSurface: surface(searchElement),
         tabsSurface: surface(tabsElement),
         archiveTabsSurface: archiveTabsElement ? surface(archiveTabsElement) : null,
@@ -91,6 +92,9 @@ server.listen(0, '127.0.0.1', async () => {
     if (!transparent(before.tabsSurface)) throw new Error(`tags sticky wrapper owns a surface: ${JSON.stringify(before.tabsSurface)}`)
     if (before.archiveTabsSurface && !transparent(before.archiveTabsSurface)) throw new Error(`archive topic tabs own a surface: ${JSON.stringify(before.archiveTabsSurface)}`)
     if (!close(before.hero.bottom, before.search.bottom)) throw new Error(`hero gradient does not cover the search surface: hero=${before.hero.bottom}, search=${before.search.bottom}`)
+    if (!before.heroSurface.backgroundImage.includes('rgb(220, 239, 232)') || !before.heroSurface.backgroundImage.includes('rgb(237, 244, 237)')) {
+      throw new Error(`hero gradient loses its mint color before the search surface: ${before.heroSurface.backgroundImage}`)
+    }
     if (!(before.search.top > before.topbar.bottom + 20)) throw new Error('search is not initially in document flow')
     if (!close(searchPinned.search.top, searchPinned.topbar.bottom)) throw new Error('search did not pin below masthead')
     if (!close(tagsPinned.search.top, tagsPinned.topbar.bottom)) throw new Error('search moved during tags pin')
