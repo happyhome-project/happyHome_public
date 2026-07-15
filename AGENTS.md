@@ -41,15 +41,17 @@
 
 ### PR 流程
 
+GitHub 上 PR 的 exact HEAD 是 push、CI、review 和合并状态的权威事实源。Webhook 只能作为可选加速通知，控制面未收到 `synchronize`、处于 paused 或 `record-push` 未登记，都不得阻止功能 AI 直接向 GitHub 核验 exact HEAD 后继续。正常流程不需要集中轮询或 orphan watchdog；创建 PR 的原功能 AI 自己负责到终态。
+
 1. 功能任务开始和交付前都必须确认并报告 `cwd`、branch、HEAD 和工作区状态。
 2. PR 前确认功能 worktree clean；不要求无条件追逐 main。仅在真实冲突、显式依赖或 `merge_group` 代码失败时，回到原功能 worktree 同步并修复。
 3. 功能代码必须先提交并推送到远端功能分支，再通过 PR 进入 `main`；禁止把未提交文件当成交接手段。
 4. PR 必须准确记录修改范围、测试证据、部署目标、环境变量、数据迁移/索引任务、验收步骤和已知风险。
 5. 同步与修复不得自动 stash 或 rebase，不得 force-push，也不得合并其他功能分支。存在依赖时，先将前置功能合入 `main`，后续功能再同步新的 `main`。
-6. PR 创建后，功能 AI 必须轮询该 PR exact HEAD 对应的 checks、review 与 comments；每次普通 push 后旧结果作废，改为跟踪新的 exact HEAD。功能 AI 对该 PR 负责到 GitHub 终态 `MERGED` 或 `CLOSED`，不得在 `merge-ready` 或入队后提前结束。
+6. 每次普通 push 后旧结果作废，功能 AI 立即读取 GitHub PR 并确认 repo、head branch 和新的 exact HEAD 等于刚推送的 SHA；不得等待 webhook 或反复轮询 `record-push`。确认后轮询该 exact HEAD 对应的 checks、review 与 comments。功能 AI 对该 PR 负责到 GitHub 终态 `MERGED` 或 `CLOSED`，不得在 `merge-ready` 或入队后提前结束。
 7. `merge-ready` 仅表示 PR 为 open、非 draft，exact HEAD 的全部必需 PR CI 成功且无失败、排队、取消或缺失检查，没有未处理的 review/change request，并且 GitHub 未报告文本冲突。
 8. PR 创建后不要求功能分支持续追逐或同步前进的 `main`；组合后的最新主干由 Merge Queue 的 `merge_group` CI 验证。
-9. 功能 AI 使用 `gh pr merge <N> --auto --merge` arm Merge Queue，并继续监控到 terminal `MERGED` 或 `CLOSED`。
+9. exact HEAD 的 CI 和 review 门禁满足后，功能 AI立即使用 `gh pr merge <N> --auto --merge` arm Merge Queue，并继续监控 `merge_group` CI，直到 terminal `MERGED` 或 `CLOSED`。
 
 ### CI 门禁
 

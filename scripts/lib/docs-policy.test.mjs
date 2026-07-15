@@ -656,6 +656,20 @@ test('feature agent arms Merge Queue and retains terminal ownership', () => {
   for (const source of [prWorkflow, queueCoordination, featureFeedback]) assert.match(source, /功能 AI[\s\S]*gh pr merge <N> --auto --merge[\s\S]*(?:MERGED|terminal)[\s\S]*CLOSED/)
 })
 
+test('feature PR lifecycle uses GitHub exact HEAD without webhook or watchdog dependency', () => {
+  const agents = readFileSync(new URL('../../AGENTS.md', import.meta.url), 'utf8')
+  const prWorkflow = levelThreeSection(agents, 'PR 流程')
+  const setup = readFileSync(new URL('../../docs/SETUP.md', import.meta.url), 'utf8')
+  const featureFeedback = levelThreeSection(setup, '功能 PR 与 Merge Queue 协作')
+
+  for (const source of [prWorkflow, featureFeedback]) {
+    assert.match(source, /GitHub[^\n]*exact HEAD[^\n]*事实源/)
+    assert.match(source, /不得等待[^\n]*(?:webhook|Webhook)/)
+    assert.match(source, /不需要[^\n]*(?:watchdog|集中轮询)/)
+    assert.match(source, /CI[^\n]*gh pr merge <N> --auto --merge/)
+  }
+})
+
 test('feature agent fixes code failures and rearms unchanged transient queue failures', () => {
   const agents = readFileSync(new URL('../../AGENTS.md', import.meta.url), 'utf8')
   const queueCoordination = levelThreeSection(agents, 'Merge Queue 协调')
