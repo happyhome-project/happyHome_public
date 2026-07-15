@@ -1,5 +1,10 @@
 # WeChat Media Audit Callback Implementation Plan
 
+> **Historical / point-in-time:** This delivery plan records the approved 2026-07-15 implementation sequence. Retain it for traceability; do not treat its task state as current repository status.
+> **Current authority:** Use the [formal release gate](../../release-gate.md), current code, production configuration, and tests.
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Deliver verified WeChat image/audio audit callbacks so pending user posts automatically become visible, rejected, or manually reviewable.

@@ -1,5 +1,8 @@
 # WeChat Media Audit Callback Design
 
+> **Historical / point-in-time:** This specification records the media-audit callback design accepted on 2026-07-15. It does not override later implementation or operational policy.
+> **Current authority:** Use the [formal release gate](../../release-gate.md), current code, production configuration, and tests.
+
 ## Goal
 
 Complete the production content-safety loop for user posts containing images or audio. Text checks remain synchronous. Media checks remain asynchronous: the mini program tells the author that review is in progress, and a verified WeChat callback automatically publishes, rejects, or routes the post to manual review.
