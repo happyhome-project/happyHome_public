@@ -382,7 +382,9 @@ export class CloudSmokeRun {
     } finally {
       await rm(tempDir, { recursive: true, force: true })
     }
-    const ok = opts.expectedFailure ? true : record.ok
+    const expectedStatusCode = Number(opts.expectedStatusCode || 0)
+    const expectedFailure = opts.expectedFailure && (!expectedStatusCode || Number(record.functionResult?.statusCode || 0) === expectedStatusCode)
+    const ok = expectedFailure ? true : record.ok
     if (ok && opts.label) this.addLabel(opts.label)
     if (!ok && opts.required !== false) this.fail(`${fn} invoke failed`, { stage, status: record.status })
     return record
@@ -532,6 +534,8 @@ export class CloudSmokeRun {
     if (this.options.only.includes('wechat-audit-callback')) {
       tasks.push(() => this.invoke('wechat-audit-callback', {}, {
         name: 'http-only-guard',
+        expectedFailure: true,
+        expectedStatusCode: 404,
         label: 'HH_CLOUD_INVOKE_SMOKE_WECHAT_AUDIT_CALLBACK',
       }))
     }
