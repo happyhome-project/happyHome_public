@@ -1640,9 +1640,25 @@ function applyCommunityShellFromCache(communityId: string) {
   return applyHomeSnapshot(cached, 'cache')
 }
 
+function invalidateArchiveForCommunityTransition(nextCommunityId: string) {
+  const nextId = String(nextCommunityId || '').trim()
+  if (!archiveCommunityId.value || archiveCommunityId.value === nextId) return
+  archiveRequestEpoch += 1
+  archiveRequestPending = false
+  archiveLoading.value = false
+  archiveError.value = ''
+  archiveTabs.value = [{ topicKey: '', displayName: '全部' }]
+  selectedArchiveTopic.value = ''
+  archiveColumns.value = [[], []]
+  archiveCursor.value = ''
+  archiveHasMore.value = false
+  archiveCommunityId.value = ''
+}
+
 function applySelectedCommunityShellFromCache() {
   const selection = communityStore.pendingCommunitySelection
   if (!selection || selection.targetCommunityId !== communityStore.currentCommunityId) return false
+  invalidateArchiveForCommunityTransition(selection.targetCommunityId)
   return applyCommunityShellFromCache(selection.targetCommunityId)
 }
 
