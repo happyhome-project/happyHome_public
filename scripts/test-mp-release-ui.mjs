@@ -905,25 +905,6 @@ async function createReleaseFixture(mp) {
     await applyReleaseFixtureMembership({
       apply: () => callMpCloud(mp, 'member', { action: 'apply', communityId: fixture.communityId }),
     })
-    const livePost = await callMpCloud(mp, 'post', {
-      action: 'createCollaboration',
-      communityId: fixture.communityId,
-      collaborationTemplateId: 'collaboration-template-carpool',
-      content: {
-        carpool_origin: '青山村',
-        carpool_destination: '发布验收终点',
-        carpool_departure_time: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        carpool_location: { address: '青山村东门', lat: 30.1, lng: 104.1 },
-        carpool_note: [{ blockId: `release-${runId}`, type: 'text', text: '用于验证搜索与标签分阶段吸顶。' }],
-      },
-    }, { timeoutMs: 90000 })
-    const livePostId = String(livePost.postId || '')
-    if (!livePostId) throw new Error('post.createCollaboration did not return postId')
-    fixture.postIds.push(livePostId)
-    if (livePost.auditStatus !== 'pass') {
-      await callMpCloud(mp, 'admin', { action: 'audit.approveAdmin', _actAs: adminCtx, postId: livePostId })
-    }
-
     for (let index = 0; index < 3; index += 1) {
       const post = await callMpCloud(mp, 'post', {
         action: 'create',
