@@ -288,7 +288,7 @@ export const postApi = {
       { skip, limit },
     ),
   listArchive: (params: ArchivePostListParams) =>
-    callCloud<{ posts: any[]; nextCursor: string; hasMore: boolean }>('post', 'listArchive', params),
+    callCloud<{ posts: any[]; nextCursor: string; hasMore: boolean; topicUnavailable?: boolean }>('post', 'listArchive', params),
   listArchiveTabs: (params: { communityId: string; asGuest?: boolean }) =>
     callCloud<{ tabs: ArchiveTab[] }>('post', 'listArchiveTabs', params),
   search: (params: {

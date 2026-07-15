@@ -8,7 +8,10 @@ jest.mock('../db', () => ({
   updateWhere: jest.fn(),
   replaceValue: jest.fn((value) => ({ __set: value })),
   removeField: jest.fn(() => ({ __remove: true })),
-  runTransaction: jest.fn(async (callback) => callback({ collection: (name: string) => ({ doc: (id: string) => ({ update: async ({ data }: any) => (require('../db').updateById)(name, id, data) }) }) })),
+  runTransaction: jest.fn(async (callback) => callback({ collection: (name: string) => ({ doc: (id: string) => ({
+    set: async ({ data }: any) => (require('../db').setById)(name, id, data),
+    update: async ({ data }: any) => (require('../db').updateById)(name, id, data),
+  }) }) })),
   transactionGetByIdOrNull: jest.fn(async (_transaction, name, id) => (require('../db').getById)(name, id)),
 }))
 

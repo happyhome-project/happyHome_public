@@ -1253,7 +1253,7 @@ function openHomeEmptyPublish() {
   })
 }
 
-async function loadArchiveFeed(reset = false) {
+async function loadArchiveFeed(reset = false): Promise<void> {
   const communityId = communityStore.currentCommunityId || ''
   if (!communityId || (!reset && (archiveLoading.value || !archiveHasMore.value))) return
   const requestEpoch = ++archiveRequestEpoch
@@ -1278,6 +1278,11 @@ async function loadArchiveFeed(reset = false) {
       asGuest: !userStore.isLoggedIn,
     })
     if (requestEpoch !== archiveRequestEpoch || communityId !== communityStore.currentCommunityId) return
+    if (result.topicUnavailable && selectedArchiveTopic.value) {
+      selectedArchiveTopic.value = ''
+      archiveHasMore.value = true
+      return loadArchiveFeed(true)
+    }
     archiveColumns.value = appendArchivePage(reset ? [[], []] : archiveColumns.value, result.posts || [])
     archiveCursor.value = String(result.nextCursor || '')
     archiveHasMore.value = Boolean(result.hasMore)

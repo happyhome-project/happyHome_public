@@ -25,13 +25,14 @@ import type {
   Widget,
   PostContent,
   Post,
+  Community,
 } from '../../shared/types'
 import { normalizeSectionTemplates } from '../../shared/section-templates'
 import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
 import { resolvePostAuthorNickname } from '../../shared/post-author'
 import { parseArchivePostCreateInput, type ArchivePostFormat } from '../../shared/archive-post'
 import { decodeArchiveCursor, encodeArchiveCursor, normalizeArchiveTopic, selectArchiveTabs } from '../../shared/archive-topics'
-import { buildArchiveSortKey, syncArchivePostTopics, updateArchivePostTopicLinks } from '../../lib/archive-topic-index'
+import { archiveTopicId, buildArchiveSortKey, syncArchivePostTopics, updateArchivePostTopicLinks } from '../../lib/archive-topic-index'
 import {
   ACTIVITY_INVITE_TEMPLATE_ID,
   collaborationTemplateAsSection,
@@ -985,6 +986,10 @@ export async function handleListArchive(params: {
   }
 
   const { topicKey } = normalizeArchiveTopic(rawTopic)
+  const topic = await db.getByIdOrNull<any>('archive_topics', archiveTopicId(communityId, topicKey))
+  if (!topic || topic.status === 'deleted') {
+    return { topicUnavailable: true, posts: [], hasMore: false, nextCursor: '' }
+  }
   const links = await db.queryBefore('archive_post_topics', {
     communityId, topicKey, status: 'active', auditStatus: 'pass',
   }, 'sortKey', cursor?.sortKey || null, limit + 1) as any[]
@@ -1005,11 +1010,14 @@ export async function handleListArchiveTabs(params: { communityId: string; asGue
   const communityId = String(params.communityId || '').trim()
   if (!communityId) throw new Error('communityId 不能为空')
   await ensureCommunityReadable(communityId, params.asGuest ? '' : (openid || ''), COMMUNITY_READ_ERROR)
-  const records = await db.query('archive_topics', { communityId, enabled: true }) as any[]
+  const [community, records] = await Promise.all([
+    db.getById('communities', communityId) as Promise<Community>,
+    db.query('archive_topics', { communityId, enabled: true }) as Promise<any[]>,
+  ])
   return {
     tabs: [
       { topicKey: '', displayName: '全部' },
-      ...selectArchiveTabs(records, 7).map(({ topicKey, displayName }) => ({ topicKey, displayName })),
+      ...selectArchiveTabs(records, 7, community.archiveTopicOrder).map(({ topicKey, displayName }) => ({ topicKey, displayName })),
     ],
   }
 }

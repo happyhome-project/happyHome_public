@@ -85,6 +85,7 @@ beforeEach(() => {
     collection: (name: string) => ({
       doc: (id: string) => ({
         get: async () => ({ data: await (db.getById as jest.Mock)(name, id) }),
+        set: async ({ data }: any) => (db.setById as jest.Mock)(name, id, data),
         update: async ({ data }: any) => (db.updateById as jest.Mock)(name, id, data),
         remove: async () => (db.removeById as jest.Mock)(name, id),
       }),
@@ -2131,4 +2132,69 @@ test('archive topics: community-scoped admins can list and add manual origin wit
   })
   await main({ action: 'archiveTopic.save', communityId: 'community-1', topicKey: '亲子出游', displayName: '周末亲子游', adminOrder: 4 })
   expect(db.setById).toHaveBeenLastCalledWith('archive_topics', expect.stringMatching(/^at_/), expect.objectContaining({ enabled: false, adminOrder: 4 }))
+})
+
+test('archive topics: list uses explicit order and excludes logical deletes', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'community-1', archiveTopicOrder: ['second', 'first'], archiveTopicOrderRevision: 3,
+  })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([
+    { topicKey: 'first', displayName: '第一', status: 'active' },
+    { topicKey: 'deleted', displayName: '删除', status: 'deleted' },
+    { topicKey: 'second', displayName: '第二' },
+  ])
+
+  const listed: any = await main({ action: 'archiveTopic.list', communityId: 'community-1' })
+  expect(listed.orderRevision).toBe(3)
+  expect(listed.topics.map((item: any) => item.topicKey)).toEqual(['second', 'first'])
+})
+
+test('archive topics: reorder rejects stale revisions and atomically increments the revision', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'community-1', archiveTopicOrder: ['first', 'second'], archiveTopicOrderRevision: 2,
+  })
+
+  await expect(main({
+    action: 'archiveTopic.reorder', communityId: 'community-1',
+    orderedTopicKeys: ['second', 'first'], expectedRevision: 1,
+  })).rejects.toThrow('话题顺序已更新')
+
+  await main({
+    action: 'archiveTopic.reorder', communityId: 'community-1',
+    orderedTopicKeys: ['second', 'first'], expectedRevision: 2,
+  })
+  expect(db.updateById).toHaveBeenLastCalledWith('communities', 'community-1', {
+    archiveTopicOrder: ['second', 'first'], archiveTopicOrderRevision: 3,
+  })
+})
+
+test('archive topics: logical delete preserves post data and can be reactivated by create', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'community-1', archiveTopicOrder: ['第一'], archiveTopicOrderRevision: 4,
+  })
+  ;(db.getByIdOrNull as jest.Mock).mockResolvedValue({
+    _id: 'topic-id', communityId: 'community-1', topicKey: '第一', displayName: '第一',
+    origins: ['organic'], enabled: true, status: 'active', createdAt: '2026-01-01T00:00:00.000Z',
+  })
+
+  await main({ action: 'archiveTopic.delete', communityId: 'community-1', topicKey: '第一', expectedRevision: 4 })
+  expect(db.setById).toHaveBeenCalledWith('archive_topics', expect.any(String), expect.objectContaining({ status: 'deleted' }))
+  expect(db.removeById).not.toHaveBeenCalled()
+  expect(db.updateWhere).not.toHaveBeenCalled()
+
+  await main({ action: 'archiveTopic.create', communityId: 'community-1', displayName: '第一' })
+  expect(db.setById).toHaveBeenLastCalledWith('archive_topics', expect.any(String), expect.objectContaining({
+    topicKey: '第一', status: 'active', enabled: true,
+  }))
+})
+
+test('archive topics: repeating an already completed delete is idempotent after revision advances', async () => {
+  ;(db.getById as jest.Mock).mockImplementation(async (collection: string) => collection === 'communities'
+    ? { _id: 'community-1', archiveTopicOrder: [], archiveTopicOrderRevision: 6 }
+    : { topicKey: '第一', status: 'deleted' })
+
+  await expect(main({
+    action: 'archiveTopic.delete', communityId: 'community-1', topicKey: '第一', expectedRevision: 5,
+  })).resolves.toEqual({ success: true, orderRevision: 6 })
+  expect(db.updateById).not.toHaveBeenCalled()
 })

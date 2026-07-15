@@ -8,6 +8,9 @@ export type ArchiveTopicRecord = {
   displayName: string
   origins: ArchiveTopicOrigin[]
   enabled: boolean
+  status?: 'active' | 'deleted'
+  deletedAt?: string
+  deletedByAccountId?: string
   legacyOrder?: number
   adminOrder?: number
   recentScore: number
@@ -27,8 +30,8 @@ function finiteOrder(value: unknown): number {
   return Number.isFinite(Number(value)) ? Number(value) : Number.MAX_SAFE_INTEGER
 }
 
-export function selectArchiveTabs(records: ArchiveTopicRecord[], limit = 7): ArchiveTopicRecord[] {
-  const enabled = records.filter((record) => record.enabled)
+export function selectArchiveTabs(records: ArchiveTopicRecord[], limit = 7, explicitOrder?: string[]): ArchiveTopicRecord[] {
+  const enabled = records.filter((record) => record.enabled && record.status !== 'deleted')
   const selected: ArchiveTopicRecord[] = []
   const seen = new Set<string>()
   const append = (items: ArchiveTopicRecord[]) => {
@@ -38,6 +41,13 @@ export function selectArchiveTabs(records: ArchiveTopicRecord[], limit = 7): Arc
       seen.add(key)
       selected.push(item)
     }
+  }
+
+  if (explicitOrder) {
+    const byKey = new Map(enabled.map((record) => [record.topicKey, record]))
+    append(explicitOrder.map((key) => byKey.get(key)).filter((record): record is ArchiveTopicRecord => Boolean(record)))
+    append(enabled.filter((record) => !seen.has(record.topicKey)))
+    return selected
   }
 
   append(enabled
