@@ -174,6 +174,32 @@ test('release smoke requires home-prefetch invoke evidence', async () => {
   }
 })
 
+test('release smoke requires the WeChat audit callback trust guard', async () => {
+  assert(DEFAULT_FUNCTIONS.includes('wechat-audit-callback'))
+  assert(REQUIRED_SMOKE_LABELS.includes('HH_CLOUD_INVOKE_SMOKE_WECHAT_AUDIT_CALLBACK'))
+
+  const evidenceDir = await tempEvidenceDir()
+  try {
+    const summary = await runCloudReleaseSmoke({
+      envId: 'env-x',
+      only: ['wechat-audit-callback'],
+      logLimit: 3,
+      logWaitMs: 0,
+      noFixture: true,
+      evidenceDir,
+      runId: 'unit-run',
+    }, createMockRunner({
+      invokeResponses: {
+        'wechat-audit-callback': [{ status: 0, stdout: JSON.stringify({ statusCode: 404 }), stderr: '' }],
+      },
+    }))
+    assert.equal(summary.status, 'passed')
+    assert(summary.labels.includes('HH_CLOUD_INVOKE_SMOKE_WECHAT_AUDIT_CALLBACK'))
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true })
+  }
+})
+
 test('release smoke revalidates immediately before every remote command', async () => {
   const evidenceDir = await tempEvidenceDir()
   let remoteCommandRan = false

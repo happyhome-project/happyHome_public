@@ -12,6 +12,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { buildWechatAuditFunctionEnvs, redactFunctionEnvRows } from './lib/wechat-audit-env.mjs'
 
 function loadDotEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return {}
@@ -112,4 +113,21 @@ await app.functions.updateFunctionConfig({
   envVariables: merged,
 })
 
-console.log('\n✓ admin 函数 env 已更新。下次冷启动生效。')
+const wxSource = {
+  WX_APPID: process.env.WX_APPID || fileEnv.WX_APPID || existing.WX_APPID || '',
+  WX_APPSECRET: process.env.WX_APPSECRET || fileEnv.WX_APPSECRET || existing.WX_APPSECRET || '',
+  WX_MESSAGE_TOKEN: process.env.WX_MESSAGE_TOKEN || fileEnv.WX_MESSAGE_TOKEN || '',
+}
+
+for (const functionName of ['post', 'wechat-audit-callback']) {
+  const functionDetail = await app.functions.getFunctionDetail(functionName)
+  const functionExisting = Object.fromEntries(
+    (functionDetail?.Environment?.Variables || []).map(({ Key, Value }) => [Key, Value]),
+  )
+  const functionMerged = buildWechatAuditFunctionEnvs(functionName, functionExisting, wxSource)
+  console.log(`[update-env] ${functionName} 目标 env (合并后):`)
+  console.table(redactFunctionEnvRows(functionMerged))
+  await app.functions.updateFunctionConfig({ name: functionName, envVariables: functionMerged })
+}
+
+console.log('\n✓ admin/post/wechat-audit-callback 函数 env 已更新。下次冷启动生效。')
