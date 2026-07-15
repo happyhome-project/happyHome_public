@@ -2751,7 +2751,7 @@ onShareAppMessage(() => {
   margin-bottom: -138rpx;
   background:
     radial-gradient(circle at 84% 0%, rgba(48, 91, 70, 0.22), transparent 34%),
-    linear-gradient(170deg, #caeee7 0%, #f1f3ee 58%, var(--hh-color-page) 100%);
+    linear-gradient(170deg, #caeee7 0%, #dcefe8 58%, #edf4ed 84%, var(--hh-color-page) 100%);
 }
 
 .home-topbar {
