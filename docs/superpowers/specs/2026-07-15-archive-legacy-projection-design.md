@@ -1,5 +1,8 @@
 # Historical Archive Display Projection Design
 
+> **Historical / point-in-time:** This completed design record is retained for traceability and does not represent current release status.
+> **Current authority:** Use the [documentation authority index](../../README.md), current code, release declarations, and tests.
+
 ## Problem
 
 The archive migration preserved legacy post records and topic links, but it only added archive metadata. Legacy content remains keyed by section widget IDs such as `guide_title` and `guide_images`, while the archive waterfall reads canonical `content.title`, `content.images`, `content.body`, `content.location`, and top-level `format`. As a result, valid historical posts are returned by production APIs but render as generic or apparently empty cards.

@@ -1,5 +1,10 @@
 # Historical Archive Display Projection Implementation Plan
 
+> **Historical / point-in-time:** This completed implementation plan is retained for traceability; do not execute it directly.
+> **Current authority:** Use the [documentation authority index](../../README.md), current code, release declarations, and tests.
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make every migrated legacy archive post render through the current waterfall without losing its original section content or detail behavior.
