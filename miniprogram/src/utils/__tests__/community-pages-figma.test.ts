@@ -52,6 +52,31 @@ describe('Figma community directory pages', () => {
     expect(code).toContain("stage: 'community.switch'")
   })
 
+  test('Profile routes creation directly and keeps discovery on the join entry', () => {
+    const profile = readPage('profile')
+    const createHandler = profile.match(/function goCreateCommunity\(\)[\s\S]*?(?=\nfunction )/)?.[0] ?? ''
+
+    expect(profile).toMatch(/class="profile-shortcut create" @tap="goCreateCommunity"/)
+    expect(profile).toMatch(/class="profile-shortcut join" @tap="goOnboarding"/)
+    expect(createHandler).toContain("uni.navigateTo({ url: '/pages/createCommunity/index' })")
+  })
+
+  test('join page seeds cached cards before one directory load and redirects from latest viewer status', () => {
+    const source = readPage('onboarding')
+    const refresh = source.match(/async function refreshOnboardingData[\s\S]*?(?=\nfunction resolveEntryMode)/)?.[0] ?? ''
+
+    expect(refresh).toContain('readCommunityDirectoryCache')
+    expect(refresh).toContain('communityStore.myCommunities')
+    expect(refresh).toContain('loadCommunityDirectory({')
+    expect(refresh).not.toContain('communityStore.loadMyCommunities')
+    expect(refresh).not.toContain('await resolveCommunityCovers')
+    expect(refresh).toContain('directoryLoadEpoch')
+    expect(refresh).toContain("community.viewerStatus === 'active'")
+    expect(refresh).toContain('activeViewerCount')
+    expect(source).toContain('加载较慢')
+    expect(source).toContain('@tap="retryDirectoryLoad"')
+  })
+
   test('app foreground and Profile show prewarm the directory without awaiting it', () => {
     const app = readSource('App.vue')
     const appOnShow = app.slice(app.lastIndexOf('onShow(async () => {'))

@@ -155,7 +155,7 @@
     </view>
 
     <view v-if="!showManualLoginForm" class="profile-shortcuts">
-      <view class="profile-shortcut create" @tap="goOnboarding">
+      <view class="profile-shortcut create" @tap="goCreateCommunity">
         <image
           class="profile-shortcut-decoration"
           src="/static/profile/shortcut-create-bg.svg"
@@ -980,6 +980,10 @@ function openLoginEntry() {
 
 function goOnboarding() {
   openOnboardingPreservingStack({ mode: 'discover' })
+}
+
+function goCreateCommunity() {
+  uni.navigateTo({ url: '/pages/createCommunity/index' })
 }
 
 function handleProfileTool(item: ProfileToolItem) {

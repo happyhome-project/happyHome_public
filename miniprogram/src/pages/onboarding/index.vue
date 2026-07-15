@@ -10,6 +10,11 @@
         <text class="title">请选择你的社区</text>
         <text class="subtitle">加入后即可浏览和发帖</text>
       </view>
+      <view v-if="loading && communities.length === 0" class="directory-state">正在加载社区...</view>
+      <view v-if="slowLoading" class="directory-state directory-state--slow">加载较慢，请稍候</view>
+      <view v-if="loadError" class="directory-state directory-state--error" @tap="retryDirectoryLoad">
+        {{ loadError }}，点击重试
+      </view>
       <view class="community-list">
         <view
           v-for="community in communities"
@@ -58,7 +63,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { onLoad, onPullDownRefresh, onShow } from '@dcloudio/uni-app'
-import { communityApi, memberApi } from '../../api/cloud'
+import { memberApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { useKeyedBusyLock } from '../../utils/useBusyLock'
@@ -84,6 +89,10 @@ import {
   resolvedCommunityCoverUrl,
   singleLineCommunityText,
 } from '../../utils/community-directory'
+import {
+  loadCommunityDirectory,
+  readCommunityDirectoryCache,
+} from '../../utils/community-directory-cache'
 
 const communities = ref<any[]>([])
 const resolvedCoverUrls = ref<Record<string, string>>({})
@@ -94,9 +103,12 @@ const userStore = useUserStore()
 const entryMode = ref<OnboardingEntryMode>('auto')
 const targetCommunityId = ref('')
 const fromCommunityShare = ref(false)
-let refreshingOnboarding = false
+const loading = ref(false)
+const slowLoading = ref(false)
+const loadError = ref('')
 let targetUnavailableNotified = false
 let coverResolveVersion = 0
+let directoryLoadEpoch = 0
 
 onLoad((query?: Record<string, any>) => {
   if (ensureHierarchyStack('/pages/onboarding/index', query || {})) return
@@ -113,26 +125,9 @@ onLoad((query?: Record<string, any>) => {
   }
 })
 
-onMounted(async () => {
-  await refreshOnboardingData()
+onMounted(() => {
+  void refreshOnboardingData()
 })
-
-async function loadCommunities() {
-  const res = await communityApi.listDiscoverable()
-  const directory = mergeCommunityDirectory(
-    communityStore.myCommunities,
-    (res.communities || []) as any[],
-  )
-  communities.value = prioritizeShareTargetCommunities(directory, targetCommunityId.value)
-  await resolveCommunityCovers(communities.value)
-  if (targetCommunityId.value && fromCommunityShare.value) {
-    const found = communities.value.some((community) => String(community?._id || '') === targetCommunityId.value)
-    if (!found && !targetUnavailableNotified) {
-      targetUnavailableNotified = true
-      uni.showToast({ title: '分享的社群暂不可加入', icon: 'none' })
-    }
-  }
-}
 
 async function resolveCommunityCovers(items: any[]) {
   const version = ++coverResolveVersion
@@ -175,29 +170,88 @@ function communityDescription(community: any) {
   return singleLineCommunityText(community?.description, '社区内容与活动')
 }
 
-async function refreshOnboardingData() {
-  if (refreshingOnboarding) return
-  refreshingOnboarding = true
+async function refreshOnboardingData(force = false) {
+  const epoch = ++directoryLoadEpoch
+  loading.value = false
+  slowLoading.value = false
+  loadError.value = ''
+  if (!userStore.isLoggedIn) {
+    communities.value = []
+    coverResolveVersion += 1
+    return
+  }
+
+  const requestedOpenId = String(userStore.openId || '')
+  const cached = readCommunityDirectoryCache(requestedOpenId)
+  communities.value = prioritizeShareTargetCommunities(
+    mergeCommunityDirectory(
+      communityStore.myCommunities,
+      cached?.communities || communities.value,
+    ),
+    targetCommunityId.value,
+  )
+  void resolveCommunityCovers(communities.value)
+  loading.value = true
+  const slowTimer = setTimeout(() => {
+    if (epoch === directoryLoadEpoch && loading.value) slowLoading.value = true
+  }, 5000)
+
   try {
-    if (!userStore.isLoggedIn) {
-      communities.value = []
-      return
-    }
-    await communityStore.loadMyCommunities()
-    if (targetCommunityId.value && communityStore.myCommunities.some((community) => community._id === targetCommunityId.value)) {
+    const result = await loadCommunityDirectory({
+      openId: requestedOpenId,
+      force,
+      traceStage: 'community.directory.onboarding',
+    })
+    if (epoch !== directoryLoadEpoch || String(userStore.openId || '') !== requestedOpenId) return
+
+    const latest = (result.communities || []) as any[]
+    communities.value = prioritizeShareTargetCommunities(
+      mergeCommunityDirectory(communityStore.myCommunities, latest),
+      targetCommunityId.value,
+    )
+    loading.value = false
+    slowLoading.value = false
+    void resolveCommunityCovers(communities.value)
+
+    const joinedTarget = !!targetCommunityId.value && latest.some(
+      (community) => (
+        String(community?._id || '') === targetCommunityId.value &&
+        community.viewerStatus === 'active'
+      ),
+    )
+    if (joinedTarget && fromCommunityShare.value) {
       communityStore.currentCommunityId = targetCommunityId.value
       communityStore.currentSectionIndex = 0
       communityStore.saveToStorage()
       uni.reLaunch({ url: buildCommunitySharePath(targetCommunityId.value) })
       return
     }
-    if (shouldRedirectJoinedUserFromOnboarding(resolveEntryMode(), communityStore.myCommunities.length)) {
+
+    const activeViewerCount = latest.filter(
+      (community) => community.viewerStatus === 'active',
+    ).length
+    if (shouldRedirectJoinedUserFromOnboarding(resolveEntryMode(), activeViewerCount)) {
       uni.reLaunch({ url: '/pages/index/index' })
       return
     }
-    await loadCommunities()
+
+    if (targetCommunityId.value && fromCommunityShare.value) {
+      const found = latest.some((community) => String(community?._id || '') === targetCommunityId.value)
+      if (!found && !targetUnavailableNotified) {
+        targetUnavailableNotified = true
+        uni.showToast({ title: '分享的社群暂不可加入', icon: 'none' })
+      }
+    }
+  } catch (error) {
+    if (epoch !== directoryLoadEpoch || String(userStore.openId || '') !== requestedOpenId) return
+    loadError.value = '社区列表刷新失败'
+    console.error('Failed to load communities:', error)
   } finally {
-    refreshingOnboarding = false
+    clearTimeout(slowTimer)
+    if (epoch === directoryLoadEpoch) {
+      loading.value = false
+      slowLoading.value = false
+    }
   }
 }
 
@@ -222,6 +276,10 @@ function resolveEntryMode(query?: Record<string, any>): 'auto' | 'discover' {
   })
 }
 
+function retryDirectoryLoad() {
+  void refreshOnboardingData(true)
+}
+
 const applyLock = useKeyedBusyLock(
   async (community: any) => {
     if (communityActionBusy.value) return
@@ -234,7 +292,7 @@ const applyLock = useKeyedBusyLock(
         uni.reLaunch({ url: '/pages/index/index' })
       } else {
         uni.showToast({ title: '申请已提交', icon: 'none' })
-        await loadCommunities()
+        await refreshOnboardingData(true)
       }
     } catch (e: any) {
       uni.showToast({ title: e?.message || '操作失败', icon: 'none' })
@@ -293,7 +351,7 @@ onShow(() => {
 
 onPullDownRefresh(async () => {
   try {
-    await refreshOnboardingData()
+    await refreshOnboardingData(true)
   } catch {
     uni.showToast({ title: '刷新失败，请重试', icon: 'none' })
   } finally {
@@ -330,6 +388,28 @@ onPullDownRefresh(async () => {
   color: #777;
   font-size: 28rpx;
   line-height: 44rpx;
+}
+
+.directory-state {
+  box-sizing: border-box;
+  margin-bottom: 24rpx;
+  padding: 20rpx 24rpx;
+  border-radius: 16rpx;
+  background: #fff;
+  color: #777;
+  font-size: 26rpx;
+  line-height: 40rpx;
+  text-align: center;
+}
+
+.directory-state--slow {
+  color: #8a6416;
+  background: #fff8e7;
+}
+
+.directory-state--error {
+  color: #9b2c2c;
+  background: #fff1f1;
 }
 
 .community-list {
