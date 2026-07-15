@@ -139,13 +139,11 @@
         column-key="actions"
         label="操作"
         :width="columnWidths.actions"
-        min-width="520"
+        min-width="180"
         :resizable="true"
       >
         <template #default="{ row }">
           <template v-if="row.status === 'active'">
-            <el-button data-testid="community-sections-button" :data-community-id="getCommunityId(row)" size="small" @click="goSections(getCommunityId(row))">板块管理</el-button>
-            <el-button size="small" @click="goPosts(getCommunityId(row))">帖子管理</el-button>
             <el-button
               v-if="authStore.isSuperAdmin"
               data-testid="community-disable-button"
@@ -157,30 +155,6 @@
             >
               禁用
             </el-button>
-            <el-dropdown
-              data-testid="community-more-actions"
-              trigger="click"
-              style="margin-left: 8px;"
-              @command="(command: any) => handleCommunityCommand(row, command)"
-            >
-              <el-button size="small">
-                更多<el-icon style="margin-left: 4px;"><ArrowDown /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item data-testid="community-members-button" command="members">成员管理</el-dropdown-item>
-                  <el-dropdown-item data-testid="community-motto-button" command="motto">格言</el-dropdown-item>
-                  <el-dropdown-item data-testid="community-banner-button" command="banner">首页 Banner</el-dropdown-item>
-                  <el-dropdown-item
-                    data-testid="community-join-type-toggle"
-                    command="joinType"
-                    :disabled="updatingJoinTypeId === getCommunityId(row)"
-                  >
-                    {{ normalizeJoinType(row.joinType) === 'open' ? '改为申请加入' : '改为直接加入' }}
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
           </template>
           <template v-else-if="row.status === 'disabled'">
             <el-button
@@ -335,11 +309,13 @@ import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ArrowDown } from '@element-plus/icons-vue'
 import { approvalApi, communityApi, postAdminApi } from '../../api/cloud'
 import { useAuthStore } from '../../stores/auth'
+import { useCommunityNavigationStore } from '../../stores/communityNavigation'
 import { usePersistedTableColumns } from '../../utils/persistedTableColumns'
 import ImageGroupAdminEditor from '../../components/ImageGroupAdminEditor.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const navigation = useCommunityNavigationStore()
 const loading = ref(false)
 const communities = ref<any[]>([])
 const disablingId = ref('')
@@ -502,28 +478,12 @@ async function goCreate() {
   await router.push({ name: 'community-create' })
 }
 
-async function goSections(communityId: string) {
-  if (!communityId) {
-    ElMessage.error('社区 ID 缺失，无法进入板块管理')
-    return
-  }
-  await router.push({ name: 'sections', params: { communityId } })
-}
-
 async function goMembers(communityId: string, tab?: 'pending') {
   if (!communityId) {
     ElMessage.error('社区 ID 缺失，无法进入成员管理')
     return
   }
   await router.push({ name: 'members', params: { communityId }, query: tab ? { tab } : {} })
-}
-
-async function goPosts(communityId: string) {
-  if (!communityId) {
-    ElMessage.error('社区 ID 缺失，无法进入帖子管理')
-    return
-  }
-  await router.push({ name: 'posts', params: { communityId } })
 }
 
 async function handleCommunityCommand(row: any, command: string) {
@@ -792,6 +752,7 @@ async function disableCommunity(row: any) {
     await communityApi.disable(communityId)
     ElMessage.success('已禁用')
     await loadCommunities()
+    await navigation.refresh()
     communityTab.value = 'disabled'
   } catch (e: any) {
     ElMessage.error(e.message || '禁用失败')
@@ -812,6 +773,7 @@ async function restoreCommunity(row: any) {
     await communityApi.restore(communityId)
     ElMessage.success('已恢复')
     await loadCommunities()
+    await navigation.refresh()
     communityTab.value = 'active'
   } catch (e: any) {
     ElMessage.error(e.message || '恢复失败')
@@ -842,6 +804,7 @@ async function hardDeleteCommunity(row: any) {
     await communityApi.hardDelete(communityId)
     ElMessage.success('已永久删除')
     communities.value = communities.value.filter((community) => getCommunityId(community) !== communityId)
+    await navigation.refresh()
   } catch (e: any) {
     ElMessage.error(e.message || '永久删除失败')
   } finally {
