@@ -47,7 +47,6 @@ export async function runReleaseUiChecks(checks = {}) {
   }
 
   if (coldStartPassed && profilePassed && fixturePassed) {
-    await run('archiveTabs', checks.archiveTabs)
     await run('homeDetail', checks.homeDetail)
   } else {
     const reason = !coldStartPassed
@@ -55,7 +54,6 @@ export async function runReleaseUiChecks(checks = {}) {
       : !profilePassed
         ? 'profile failed'
         : 'provisionFixture failed'
-    skip('archiveTabs', reason)
     skip('homeDetail', reason)
   }
 

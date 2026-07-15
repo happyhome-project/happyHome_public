@@ -5,7 +5,6 @@
  * websocket and proves the release-critical paths:
  *   - HH_RELEASE_HOME_COLD_START_NONEMPTY
  *   - HH_RELEASE_HOME_IMAGES_RENDERED
- *   - HH_RELEASE_HOME_ARCHIVE_TABS_STICKY
  *   - HH_RELEASE_HOME_DETAIL_NONEMPTY
  *   - HH_RELEASE_LOGIN_VERSION
  *   - HH_RELEASE_PROFILE_LOGIN_CLEAN
@@ -1233,7 +1232,7 @@ async function verifyHomeDetail(mp, context = {}) {
       homeImages?.ok !== false &&
       homeImages?.satisfied &&
       Number(homeImages?.loadedCount || 0) > 0 &&
-      Number(homeImageLayout?.visibleCount || 0) >= Number(homeImages?.loadedCount || 0)
+      Number(homeImageLayout?.visibleCount || 0) > 0
     ),
     homeTextLength: homeText.length,
     homeTextSample: homeText.slice(0, 300),

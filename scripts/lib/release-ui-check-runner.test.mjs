@@ -18,7 +18,7 @@ test('runs profile identity before provisioning fixture-dependent checks', async
     profile: pass('profile'),
     cleanup: pass('cleanup'),
   })
-  assert.deepEqual(calls, ['coldStart', 'profile', 'fixture', 'archiveTabs', 'homeDetail', 'cleanup'])
+  assert.deepEqual(calls, ['coldStart', 'profile', 'fixture', 'homeDetail', 'cleanup'])
   assert.equal(result.ok, true)
 })
 
@@ -35,7 +35,7 @@ test('profile identity failure skips fixture work and still runs cleanup', async
   })
   assert.deepEqual(calls, ['coldStart', 'profile', 'cleanup'])
   assert.deepEqual(result.failures.map((item) => item.stage), ['profile'])
-  assert.deepEqual(result.skipped.map((item) => item.stage), ['provisionFixture', 'archiveTabs', 'homeDetail'])
+  assert.deepEqual(result.skipped.map((item) => item.stage), ['provisionFixture', 'homeDetail'])
 })
 
 test('cold-start failure skips fixture-dependent checks but still runs profile and cleanup', async () => {
@@ -50,7 +50,7 @@ test('cold-start failure skips fixture-dependent checks but still runs profile a
     cleanup: mark('cleanup'),
   })
   assert.deepEqual(calls, ['coldStart', 'profile', 'cleanup'])
-  assert.deepEqual(result.skipped.map((item) => item.stage), ['provisionFixture', 'archiveTabs', 'homeDetail'])
+  assert.deepEqual(result.skipped.map((item) => item.stage), ['provisionFixture', 'homeDetail'])
 })
 
 test('fixture failure after profile still runs cleanup', async () => {
