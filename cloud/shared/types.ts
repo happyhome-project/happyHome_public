@@ -358,6 +358,8 @@ export interface HomeSnapshot {
   communities: Community[]
   sections: Section[]
   postsBySection: Record<string, Post[]>
+  collaborationTemplates: CollaborationTemplate[]
+  collaborationPostsByTemplate: Record<string, Post[]>
   guestIntroConfig?: GuestIntroConfig
 }
 
