@@ -1326,7 +1326,8 @@ async function verifyHomeArchiveTabs(mp, context, evidenceDir) {
     searchPinned.scrollTop > 0 &&
     tagsPinned.scrollTop > searchPinned.scrollTop &&
     Math.abs(Number(searchPinned.search?.top || 0) - Number(searchPinned.topbar?.bottom || 0)) <= 8 &&
-    searchPinnedTabsTop > Number(searchPinned.search?.bottom || 0) + 8 &&
+    Math.abs(searchPinnedTabsTop - Number(searchPinned.search?.bottom || 0)) <= 8 &&
+    searchPinnedTabsTop >= Number(searchPinned.search?.bottom || 0) - 2 &&
     Math.abs(Number(tagsPinned.search?.top || 0) - Number(tagsPinned.topbar?.bottom || 0)) <= 8 &&
     Math.abs(pinnedTop - Number(tagsPinned.search?.bottom || 0)) <= 8 &&
     Math.abs(Number(before.topbar?.top || 0) - Number(tagsPinned.topbar?.top || 0)) <= 2 &&
