@@ -38,7 +38,8 @@ describe('home progressive sticky navigation', () => {
   })
 
   test('builds the current H5 source before running the sticky smoke', () => {
-    expect(rootPackage.scripts['test:h5:home-sticky']).toBe('node scripts/test-h5-home-sticky-smoke.mjs')
+    expect(rootPackage.scripts['test:h5:home-sticky']).toBeUndefined()
+    expect(miniprogramPackage.scripts['test:unit']).toContain('node scripts/test-h5-home-sticky-smoke.mjs')
     expect(h5Smoke).toMatch(/import \{ spawnSync \} from 'node:child_process'/)
     expect(h5Smoke).toContain("['--workspace', 'miniprogram', 'run', 'build:h5']")
     expect(h5Smoke).toMatch(/const build = spawnSync\(buildCommand, buildArgs,/)
@@ -49,9 +50,10 @@ describe('home progressive sticky navigation', () => {
 
   test('runs sticky runtime and release policy checks in the existing miniprogram CI lane', () => {
     const command = miniprogramPackage.scripts['test:unit']
-    expect(command).toContain('npm run test:mp:replay-policy')
-    expect(command).toContain('npm run test:mp:home-tabs-scroll-static')
-    expect(command).toContain('npm run test:h5:home-sticky')
+    expect(command).toContain('node --test scripts/lib/mp-replay-policy.test.mjs')
+    expect(command).toContain('scripts/lib/release-ui-fixture-membership.test.mjs')
+    expect(command).toContain('node scripts/test-home-tabs-scroll-static.mjs')
+    expect(command).toContain('node scripts/test-h5-home-sticky-smoke.mjs')
   })
 
   test('keeps sticky wrappers visually transparent', () => {
