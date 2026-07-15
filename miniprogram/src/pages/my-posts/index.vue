@@ -135,7 +135,7 @@ function openPost(postId: string) {
 }
 
 function goPublish() {
-  uni.navigateTo({ url: '/pages/create/index' })
+  uni.navigateTo({ url: '/pages/create/index?mode=collaboration' })
 }
 
 function auditLabel(status: string) {

@@ -218,7 +218,7 @@
 <script setup lang="ts">
 import { computed, onErrorCaptured, reactive, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
-import { postApi, sectionApi } from '../../api/cloud'
+import { collaborationTemplateApi, postApi, sectionApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import GuideRouteDetailView from '../../components/GuideRouteDetailView.vue'
@@ -237,6 +237,7 @@ import {
 } from '../../utils/image-note'
 import { extractRichNoteImageSources } from '../../utils/rich-note'
 import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
+import { asCollaborationSection } from '../../utils/collaboration-template'
 
 const fallbackAvatar = '/static/default-avatar.png'
 const ATTENDANCE_SLOT_DISPLAY_MAX = 6
@@ -469,9 +470,20 @@ async function loadPost(postId: string) {
       throw new Error('帖子数据为空，请稍后重试')
     }
     post.value = normalizeNativeArchiveDetailPost(res.post)
-    section.value = post.value?.area === 'archive' && !post.value?.sectionId
-      ? buildNativeArchiveDetailSection(post.value)
-      : communityStore.currentSections.find((item: any) => item._id === post.value?.sectionId) || null
+    if (post.value?.area === 'collaboration') {
+      let template = res?.collaborationTemplate
+      if (!template && post.value?.collaborationTemplateId) {
+        const templateResponse = await collaborationTemplateApi.get(post.value.collaborationTemplateId)
+        template = templateResponse?.template
+      }
+      section.value = template
+        ? asCollaborationSection(template, post.value?.communityId)
+        : null
+    } else {
+      section.value = post.value?.area === 'archive' && !post.value?.sectionId
+        ? buildNativeArchiveDetailSection(post.value)
+        : communityStore.currentSections.find((item: any) => item._id === post.value?.sectionId) || null
+    }
     clientLog('debug', 'detail.section.cache.lookup', {
       postId,
       sectionId: post.value?.sectionId || '',
@@ -479,7 +491,7 @@ async function loadPost(postId: string) {
       cachedSectionCount: communityStore.currentSections.length,
     })
 
-    if (!section.value && post.value?.sectionId) {
+    if (post.value?.area !== 'collaboration' && !section.value && post.value?.sectionId) {
       clientLog('info', 'detail.section.get.start', {
         sectionId: post.value.sectionId,
       })

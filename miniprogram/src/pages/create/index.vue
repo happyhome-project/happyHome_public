@@ -265,7 +265,7 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
-import { memberApi, postApi, sectionApi } from '../../api/cloud'
+import { collaborationTemplateApi, memberApi, postApi, sectionApi } from '../../api/cloud'
 import { uploadCloudFile } from '../../api/storage'
 import AppTabBar from '../../components/AppTabBar.vue'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
@@ -283,6 +283,7 @@ import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { ensureHierarchyStack, normalizeRouteUrl, openHierarchyParent } from '../../utils/hierarchy-nav'
 import { extractTextNoteContent, TEXT_NOTE_THEMES, type TextNoteTheme } from '../../utils/text-note'
+import { asCollaborationSection, isCollaborationSection } from '../../utils/collaboration-template'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -316,13 +317,18 @@ const textNoteStep = ref<'compose' | 'cover'>('compose')
 const textNoteTheme = ref<TextNoteTheme>('paper')
 const archiveFormat = ref<'image_text' | 'text' | ''>('')
 const collaborationOnly = ref(false)
+const collaborationTemplates = ref<any[]>([])
 const isEditMode = computed(() => !!editPostId.value)
 
 // 只允许在 active 板块发帖。dormant / archived 板块既无法发帖也无处展示（首页已过滤）。
 const activeSections = computed(() =>
-  (communityStore.currentSections ?? []).filter((section: any) =>
-    (section?.status ?? 'active') === 'active' && (!collaborationOnly.value || section?.type === 'realtime')
-  )
+  collaborationOnly.value
+    ? collaborationTemplates.value.map((template) =>
+        asCollaborationSection(template, communityStore.currentCommunityId)
+      )
+    : (communityStore.currentSections ?? []).filter((section: any) =>
+        (section?.status ?? 'active') === 'active' && (!collaborationOnly.value || section?.type === 'realtime')
+      )
 )
 
 const editableWidgets = computed(() =>
@@ -457,7 +463,10 @@ onLoad(async (options: any) => {
     // membership refresh can commit the legacy section picker for one frame.
     enterArchiveEditor(requestedArchiveFormat, options?.returnTo)
   }
-  await ensureSectionsLoaded()
+  await Promise.all([
+    ensureSectionsLoaded(),
+    collaborationOnly.value ? ensureCollaborationTemplatesLoaded() : Promise.resolve(),
+  ])
   await checkMembership({ silent: false })
   if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text') {
     return
@@ -528,6 +537,17 @@ async function loadPostForEdit(postId: string) {
       if (format === 'text') {
         textNoteTheme.value = currentPost.presentation?.textNoteTheme || 'paper'
       }
+    } else if (currentPost.area === 'collaboration') {
+      collaborationOnly.value = true
+      let template = response?.collaborationTemplate
+      if (!template && currentPost.collaborationTemplateId) {
+        const templateResponse = await collaborationTemplateApi.get(currentPost.collaborationTemplateId)
+        template = templateResponse?.template
+      }
+      if (!template) throw new Error('协作模板已不可用，暂时无法编辑')
+      const collaborationSection = asCollaborationSection(template, communityId)
+      selectSection(collaborationSection, { returnTo: createReturnTo.value })
+      Object.assign(formData, JSON.parse(JSON.stringify(currentPost.content || {})))
     } else {
       let editSection = communityStore.currentSections.find((item: any) => item._id === currentPost.sectionId)
       if (!editSection && currentPost.sectionId) {
@@ -561,6 +581,7 @@ onShow(() => {
   if (editPostId.value) return
   // 返回页面（例如地图选择返回）时静默刷新，不再打断表单操作。
   void ensureSectionsLoaded()
+  if (collaborationOnly.value) void ensureCollaborationTemplatesLoaded()
   void checkMembership({ silent: true })
   if (!archiveFormat.value) {
     void consumeCreateSectionIntent()
@@ -574,6 +595,7 @@ watch(() => communityStore.currentCommunityId, async () => {
   else selectedSection.value = null
   membershipReady.value = false
   await ensureSectionsLoaded()
+  if (collaborationOnly.value) await ensureCollaborationTemplatesLoaded()
   await checkMembership({ silent: false, forceRefresh: true })
   if (!archiveFormat.value) await consumeCreateSectionIntent()
 })
@@ -814,6 +836,17 @@ async function ensureSectionsLoaded() {
   } catch (_error) {}
 }
 
+async function ensureCollaborationTemplatesLoaded(force = false) {
+  if (!force && collaborationTemplates.value.length > 0) return
+  try {
+    const response = await collaborationTemplateApi.listActive()
+    collaborationTemplates.value = Array.isArray(response?.templates) ? response.templates : []
+  } catch (error: any) {
+    collaborationTemplates.value = []
+    uni.showToast({ title: error?.message || '协作模板加载失败', icon: 'none' })
+  }
+}
+
 function handleCreateSectionIntentEvent(payload?: { sectionId?: string; returnTo?: string }) {
   void consumeCreateSectionIntent(payload)
 }
@@ -1015,6 +1048,9 @@ function saveDraft() {
     uni.setStorageSync(CREATE_DRAFT_KEY, {
       communityId: communityStore.currentCommunityId,
       sectionId: selectedSection.value._id,
+      collaborationTemplateId: isCollaborationSection(selectedSection.value)
+        ? selectedSection.value.collaborationTemplateId
+        : undefined,
       sectionName: selectedSection.value.name,
       content: JSON.parse(JSON.stringify(formData)),
       presentation: isTextNoteCreateMode.value ? { textNoteTheme: textNoteTheme.value } : undefined,
@@ -1102,6 +1138,12 @@ async function handleSubmit() {
             topics: archiveTopics,
             content: archiveContent || {},
             presentation: archiveFormat.value === 'text' ? { textNoteTheme: textNoteTheme.value } : undefined,
+          })
+      : isCollaborationSection(selectedSection.value)
+        ? await postApi.createCollaboration({
+            communityId: communityStore.currentCommunityId,
+            collaborationTemplateId: selectedSection.value.collaborationTemplateId,
+            content,
           })
       : await postApi.create({
           communityId: communityStore.currentCommunityId,
