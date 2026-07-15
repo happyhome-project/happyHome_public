@@ -1,5 +1,10 @@
 # Global Collaboration Templates Implementation Plan
 
+> **Historical / point-in-time:** This delivery plan records the approved 2026-07-15 implementation sequence. Retain it for traceability; do not treat its task state as current repository status.
+> **Current authority:** Use the [formal release gate](../../release-gate.md), repository rules, current code, and tests.
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace community-scoped realtime sections with globally managed collaboration templates and section-free collaboration posts, initially preserving only `拼车出行` and `出游邀约`.
