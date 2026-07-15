@@ -13,7 +13,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
 
 export const DEFAULT_ENV_ID = 'cloudbase-3gh862acb1505ff3'
-export const DEFAULT_FUNCTIONS = ['user', 'community', 'member', 'section', 'post', 'post-rag-worker', 'post-video-rag-worker', 'admin', 'http-gateway', 'home-prefetch']
+export const DEFAULT_FUNCTIONS = ['user', 'community', 'member', 'section', 'post', 'post-rag-worker', 'post-video-rag-worker', 'admin', 'http-gateway', 'home-prefetch', 'wechat-audit-callback']
 export const REQUIRED_SMOKE_LABELS = [
   'HH_CLOUD_INVOKE_SMOKE_COMMUNITY',
   'HH_CLOUD_INVOKE_SMOKE_MEMBER',
@@ -22,6 +22,7 @@ export const REQUIRED_SMOKE_LABELS = [
   'HH_CLOUD_INVOKE_SMOKE_POST_VIDEO_RAG_WORKER',
   'HH_CLOUD_INVOKE_SMOKE_HTTP_GATEWAY',
   'HH_CLOUD_INVOKE_SMOKE_HOME_PREFETCH',
+  'HH_CLOUD_INVOKE_SMOKE_WECHAT_AUDIT_CALLBACK',
   'HH_CLOUD_INVOKE_SMOKE_ADMIN_FIXTURE',
   'HH_CLOUD_LOG_CAPTURE_POST',
   'HH_CLOUD_FIXTURE_CLEANUP_OK',
@@ -519,6 +520,12 @@ export class CloudSmokeRun {
       }, {
         name: 'missing-token-fallback',
         label: 'HH_CLOUD_INVOKE_SMOKE_HOME_PREFETCH',
+      }))
+    }
+    if (this.options.only.includes('wechat-audit-callback')) {
+      tasks.push(() => this.invoke('wechat-audit-callback', {}, {
+        name: 'http-only-guard',
+        label: 'HH_CLOUD_INVOKE_SMOKE_WECHAT_AUDIT_CALLBACK',
       }))
     }
     if (this.options.only.includes('user')) {
