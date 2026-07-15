@@ -8,6 +8,7 @@ import { refreshPostSearchIndexById } from './post-search'
 import { enqueuePostRagJob } from './post-rag'
 import { appendPostRagOutboxEvent } from './post-rag-outbox'
 import { syncArchivePostTopics, updateArchivePostTopicLinks } from './archive-topic-index'
+import type { WechatMediaAuditResult } from './wechat-callback'
 import type {
   AuditProvider,
   AuditTargetType,
@@ -616,8 +617,51 @@ async function refreshPostAuditFromTasks(postId: string, slot: 'content' | 'pend
     label: task.label,
     reason: task.reason,
   })))
-  await applyAuditSummary(postId, slot, summary.status, summary.reason)
+  const post = await db.getById('posts', postId) as Post
+  if (!post) throw new Error('post not found')
+  const currentStatus = slot === 'pendingContent' ? post.pendingAuditStatus : post.auditStatus
+  const currentReason = slot === 'pendingContent' ? post.pendingAuditReason : post.auditReason
+  if (currentStatus !== summary.status || String(currentReason || '') !== summary.reason) {
+    await applyAuditSummary(postId, slot, summary.status, summary.reason, post)
+  }
   return summary
+}
+
+export async function applyWechatMediaAuditResult(result: WechatMediaAuditResult) {
+  const traceId = String(result.traceId || '').trim()
+  if (!traceId) throw new Error('wechat media audit traceId is required')
+  const now = nowIso()
+  const reason = result.suggest === 'rejected'
+    ? 'wechat media rejected'
+    : result.suggest === 'review'
+      ? 'wechat media needs manual review'
+      : ''
+  const tasks = await db.query(AUDIT_TASKS, { traceId }) as ContentAuditTask[]
+  if (tasks.length === 0) {
+    return { success: true, matched: 0, status: result.suggest, refreshed: 0 }
+  }
+
+  for (const task of tasks) {
+    await db.updateById(AUDIT_TASKS, task._id, {
+      status: result.suggest,
+      suggest: result.suggest,
+      label: result.label ?? '',
+      reason,
+      raw: {
+        source: 'wechat_callback',
+        suggest: result.suggest,
+        label: result.label ?? '',
+      },
+      updatedAt: now,
+    })
+  }
+
+  const pairs = Array.from(new Set(tasks.map((task) => `${task.postId}\u0001${task.contentSlot}`)))
+  for (const pair of pairs) {
+    const [postId, slot] = pair.split('\u0001') as [string, 'content' | 'pendingContent']
+    await refreshPostAuditFromTasks(postId, slot)
+  }
+  return { success: true, matched: tasks.length, status: result.suggest, refreshed: pairs.length }
 }
 
 export async function handleAuditCallback(params: any) {
