@@ -85,6 +85,23 @@ test('archive tabs failure still runs independent detail evidence and cleanup', 
   assert.equal(result.ok, false)
 })
 
+test('missing required archive tabs check fails closed and still runs detail and cleanup', async () => {
+  const calls = []
+  const mark = (stage) => async () => { calls.push(stage) }
+  const result = await runReleaseUiChecks({
+    coldStart: mark('coldStart'),
+    profile: mark('profile'),
+    provisionFixture: mark('fixture'),
+    homeDetail: mark('homeDetail'),
+    cleanup: mark('cleanup'),
+  })
+
+  assert.deepEqual(calls, ['coldStart', 'profile', 'fixture', 'homeDetail', 'cleanup'])
+  assert.equal(result.ok, false)
+  assert.deepEqual(result.failures.map((item) => item.stage), ['archiveTabs'])
+  assert.match(result.failures[0].error, /required check not configured/)
+})
+
 test('sanitizes stage errors and always reports cleanup failures last', async () => {
   const result = await runReleaseUiChecks({
     coldStart: failure('bad token=secret\nstack'),

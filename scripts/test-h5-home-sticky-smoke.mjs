@@ -29,9 +29,26 @@ const server = createServer((req, res) => {
   res.end(readFileSync(filePath))
 })
 
+async function launchSmokeBrowser() {
+  const candidates = [
+    { label: 'Playwright Chromium', options: { headless: true } },
+    { label: 'system Edge', options: { headless: true, channel: 'msedge' } },
+    { label: 'system Chrome', options: { headless: true, channel: 'chrome' } },
+  ]
+  const failures = []
+  for (const candidate of candidates) {
+    try {
+      return await chromium.launch(candidate.options)
+    } catch (error) {
+      failures.push(`${candidate.label}: ${String(error?.message || error).split(/\r?\n/, 1)[0]}`)
+    }
+  }
+  throw new Error(`No Chromium-compatible browser is available for the H5 sticky smoke. ${failures.join(' | ')}`)
+}
+
 server.listen(0, '127.0.0.1', async () => {
   const port = server.address().port
-  const browser = await chromium.launch({ headless: true })
+  const browser = await launchSmokeBrowser()
   try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
     await page.goto(`http://127.0.0.1:${port}/#/`, { waitUntil: 'networkidle' })

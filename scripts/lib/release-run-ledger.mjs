@@ -3,6 +3,10 @@ import { constants } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { REQUIRED_SMOKE_LABELS } from '../cloud-release-smoke.mjs'
+import {
+  assertReleaseUiEvidence,
+  REQUIRED_RELEASE_UI_MARKERS as RELEASE_UI_MARKER_DEFINITIONS,
+} from './mp-release-ui-policy.mjs'
 import { createMiniprogramReceiptIdentity, normalizeMiniprogramUploadReceipt } from './miniprogram-receipt-identity.mjs'
 import { assertNoSymbolicLinkPath, pathsReferToSameEntry } from './filesystem-path-integrity.mjs'
 
@@ -22,13 +26,7 @@ export const RELEASE_STAGE_ORDER = [
   'verify-upload',
 ]
 
-const REQUIRED_RELEASE_UI_MARKERS = [
-  'HH_RELEASE_HOME_COLD_START_NONEMPTY',
-  'HH_RELEASE_HOME_IMAGES_RENDERED',
-  'HH_RELEASE_HOME_DETAIL_NONEMPTY',
-  'HH_RELEASE_LOGIN_VERSION',
-  'HH_RELEASE_PROFILE_LOGIN_CLEAN',
-]
+const REQUIRED_RELEASE_UI_MARKERS = RELEASE_UI_MARKER_DEFINITIONS.map(({ marker }) => marker)
 
 const RELEASE_CONTEXT_KEYS = ['gitSha', 'version', 'desc', 'envId', 'releaseStrategy', 'dagMode', 'forceRedeployCurrent']
 
@@ -278,6 +276,18 @@ async function inspectBuildInfoEvidence(stage, context) {
   const markers = new Set(evidence.markers || [])
   const missingMarker = REQUIRED_RELEASE_UI_MARKERS.find((marker) => !markers.has(marker))
   if (missingMarker) return { reusable: false, reason: `release UI evidence missing marker ${missingMarker}` }
+  try {
+    assertReleaseUiEvidence({
+      homeColdStartNonEmpty: evidence.homeColdStart?.passed,
+      homeImagesRendered: evidence.homeDetail?.homeImagesRendered,
+      homeArchiveTabsSticky: evidence.homeArchiveTabs?.passed,
+      homeDetailNonEmpty: evidence.homeDetail?.passed,
+      loginBuildIdentityVerified: evidence.profileLoginClean?.buildIdentityPassed,
+      profileLoginClean: evidence.profileLoginClean?.cleanPassed,
+    })
+  } catch (error) {
+    return { reusable: false, reason: String(error?.message || error) }
+  }
   if (!hasReusableColdStartEvidence(evidence)) {
     return { reusable: false, reason: 'release UI evidence cold-start result is missing or invalid' }
   }

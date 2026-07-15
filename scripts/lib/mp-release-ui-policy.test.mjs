@@ -79,7 +79,7 @@ test('builds DevTools maintenance args bound to one IDE port', () => {
   ])
 })
 
-test('requires cold-start home, home images, home detail, login version, and clean profile login release UI evidence', () => {
+test('requires cold-start home, home images, archive tabs, home detail, login version, and clean profile login release UI evidence', () => {
   assert.throws(() => assertReleaseUiEvidence({
     homeColdStartNonEmpty: false,
     homeImagesRendered: true,
@@ -89,14 +89,22 @@ test('requires cold-start home, home images, home detail, login version, and cle
     profileLoginClean: true,
   }), /HH_RELEASE_HOME_COLD_START_NONEMPTY/)
 
-  assert.doesNotThrow(() => assertReleaseUiEvidence({
+  assert.throws(() => assertReleaseUiEvidence({
     homeColdStartNonEmpty: true,
     homeImagesRendered: true,
     homeArchiveTabsSticky: false,
     homeDetailNonEmpty: true,
     loginVersionVisible: true,
     profileLoginClean: true,
-  }))
+  }), /HH_RELEASE_HOME_ARCHIVE_TABS_STICKY/)
+
+  assert.throws(() => assertReleaseUiEvidence({
+    homeColdStartNonEmpty: true,
+    homeImagesRendered: true,
+    homeDetailNonEmpty: true,
+    loginVersionVisible: true,
+    profileLoginClean: true,
+  }), /HH_RELEASE_HOME_ARCHIVE_TABS_STICKY/)
 
   assert.throws(() => assertReleaseUiEvidence({
     homeColdStartNonEmpty: true,
@@ -139,6 +147,7 @@ test('documents the release UI evidence markers used by the gate', () => {
   assert.deepEqual(REQUIRED_RELEASE_UI_MARKERS.map((item) => item.marker), [
     'HH_RELEASE_HOME_COLD_START_NONEMPTY',
     'HH_RELEASE_HOME_IMAGES_RENDERED',
+    'HH_RELEASE_HOME_ARCHIVE_TABS_STICKY',
     'HH_RELEASE_HOME_DETAIL_NONEMPTY',
     'HH_RELEASE_LOGIN_VERSION',
     'HH_RELEASE_PROFILE_LOGIN_CLEAN',
@@ -170,16 +179,53 @@ test('release home tabs evidence pins below the fixed masthead', () => {
   assert.match(source, /topicTabsHost\.\$\$\('\.archive-topic-tab'\)/)
   assert.match(source, /topicTabsHost\.\$\$\('\.archive-topic-tab--active'\)/)
   assert.match(source, /async function waitForHomeArchiveContent/)
+  assert.match(source, /satisfied: true/)
+  assert.match(source, /satisfied: false/)
   assert.match(source, /activeTabTexts/)
+  assert.match(source, /topicTabsGeometry/)
+  assert.match(source, /firstCardGeometry/)
+  assert.match(source, /function toViewportGeometry/)
+  assert.match(source, /function combineHomeArchiveEvidence/)
+  assert.match(source, /Number\(geometry\.top \|\| 0\) - scrollTop/)
+  assert.match(source, /\.archive-topic-tabs/)
+  assert.match(source, /\.offset\(\)/)
+  assert.match(source, /\.size\(\)/)
   assert.match(source, /page\.\$\('archive-waterfall'\)/)
   assert.match(source, /waterfallHost\.\$\$\('\.archive-waterfall__card'\)/)
   assert.doesNotMatch(source, /['"]\.section-tab(?:\.active)?['"]/)
   assert.doesNotMatch(source, /\.arc-item/)
   assert.match(source, /searchPinned/)
   assert.match(source, /tagsPinned/)
+  assert.match(source, /const restored =/)
+  assert.match(source, /tagsPinned\.satisfied/)
+  assert.match(source, /tagsPinned\.activeTabCount === 1/)
+  assert.match(source, /shortArchive\.satisfied/)
+  assert.match(source, /shortArchive\.tabCount === 2/)
+  assert.match(source, /restored\.scrollTop/)
+  assert.match(source, /beforeSearchTop > beforeTopbarBottom \+ 16/)
+  assert.match(source, /beforeTabsTop > tabsStickyTop \+ 16/)
+  assert.match(source, /searchPinnedTabsTop > Number\(searchPinned\.search\?\.bottom \|\| 0\) \+ 8/)
+  assert.match(source, /restoredSearchTop > Number\(restored\.topbar\?\.bottom \|\| 0\) \+ 16/)
+  assert.match(source, /tagsPinned\.firstCardGeometry\?\.bottom/)
+  assert.doesNotMatch(source, /tagsPinned\.firstCardGeometry\?\.top[^\n]*>=/)
   assert.doesNotMatch(source, /Math\.abs\(shortArchive\.scrollTop - tagsPinned\.scrollTop\)/)
+  assert.match(source, /function expectedStickyViewportTop/)
+  assert.match(source, /shortExpectedSearchTop = expectedStickyViewportTop/)
+  assert.match(source, /shortExpectedTabsTop = expectedStickyViewportTop/)
+  assert.match(source, /shortArchiveSearchTop - shortExpectedSearchTop/)
+  assert.match(source, /shortArchiveTabsTop - shortExpectedTabsTop/)
+  assert.doesNotMatch(source, /shortArchive\.search\?\.top[^\n]*shortArchive\.topbar\?\.bottom/)
+  assert.doesNotMatch(source, /shortArchive\.tabs\?\.\[0\]\?\.top[^\n]*pinnedTop/)
   assert.ok((source.match(/applyReleaseFixtureMembership/g) || []).length >= 3)
   assert.doesNotMatch(source, /Math\.abs\(pinnedTop - pinned\.safeTop\) <= 8/)
+})
+
+test('release build reuse requires native archive tabs evidence', () => {
+  const ledgerSource = readFileSync(new URL('./release-run-ledger.mjs', import.meta.url), 'utf8')
+  assert.match(ledgerSource, /REQUIRED_RELEASE_UI_MARKERS as RELEASE_UI_MARKER_DEFINITIONS/)
+  assert.match(ledgerSource, /RELEASE_UI_MARKER_DEFINITIONS\.map\(\(\{ marker \}\) => marker\)/)
+  assert.match(ledgerSource, /assertReleaseUiEvidence\(\{/)
+  assert.match(ledgerSource, /homeArchiveTabsSticky: evidence\.homeArchiveTabs\?\.passed/)
 })
 
 test('release home tabs fixture populates the visible native archive feed', () => {
@@ -191,6 +237,12 @@ test('release home tabs fixture populates the visible native archive feed', () =
 
   assert.match(source, /import \{ applyReleaseFixtureMembership \} from '\.\/lib\/release-ui-fixture-membership\.mjs'/)
   assert.match(fixture, /await applyReleaseFixtureMembership\(/)
+  assert.match(fixture, /action: 'community\.updateMeta'/)
+  assert.match(fixture, /motto: '风来疏竹，风过而竹不留声。'/)
+  assert.match(fixture, /action: 'section\.create'/)
+  assert.match(fixture, /type: 'realtime'/)
+  assert.match(fixture, /action: 'post\.createAdmin'/)
+  assert.doesNotMatch(fixture, /type: 'evergreen'/)
   assert.match(fixture, /action: 'apply', communityId: fixture\.communityId/)
   assert.match(fixture, /for \(let index = 0; index < 3; index \+= 1\)/)
   assert.match(fixture, /action: 'create'/)
@@ -200,8 +252,6 @@ test('release home tabs fixture populates the visible native archive feed', () =
   assert.match(fixture, /format: 'markdown'/)
   assert.match(fixture, /markdown: 'Automated release validation post\.'/)
   assert.match(fixture, /html: '<p>Automated release validation post\.<\/p>'/)
-  assert.doesNotMatch(fixture, /action: 'section\.create'/)
-  assert.doesNotMatch(fixture, /action: 'post\.createAdmin'/)
 })
 
 test('release home image evidence requires loaded images and one visible viewport image', () => {

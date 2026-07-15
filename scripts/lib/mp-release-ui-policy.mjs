@@ -10,6 +10,11 @@ export const REQUIRED_RELEASE_UI_MARKERS = [
     description: 'home page image evidence is satisfied for current content',
   },
   {
+    id: 'home-archive-tabs-sticky',
+    marker: 'HH_RELEASE_HOME_ARCHIVE_TABS_STICKY',
+    description: 'visible archive topic tabs pin below the search surface and preserve their filtered feed',
+  },
+  {
     id: 'home-detail-nonempty',
     marker: 'HH_RELEASE_HOME_DETAIL_NONEMPTY',
     description: 'home feed tap opens a non-empty detail page',
@@ -69,12 +74,14 @@ export function buildDevToolsCacheArgs({ clean, projectPath, idePort }) {
 
 export function assertReleaseUiEvidence(evidence = {}) {
   const missing = []
+  const required = Object.fromEntries(REQUIRED_RELEASE_UI_MARKERS.map((item) => [item.id, item]))
   const loginBuildIdentityVerified = evidence.loginBuildIdentityVerified ?? evidence.loginVersionVisible
-  if (!evidence.homeColdStartNonEmpty) missing.push(REQUIRED_RELEASE_UI_MARKERS[0])
-  if (!evidence.homeImagesRendered) missing.push(REQUIRED_RELEASE_UI_MARKERS[1])
-  if (!evidence.homeDetailNonEmpty) missing.push(REQUIRED_RELEASE_UI_MARKERS[2])
-  if (!loginBuildIdentityVerified) missing.push(REQUIRED_RELEASE_UI_MARKERS[3])
-  if (!evidence.profileLoginClean) missing.push(REQUIRED_RELEASE_UI_MARKERS[4])
+  if (!evidence.homeColdStartNonEmpty) missing.push(required['home-cold-start-nonempty'])
+  if (!evidence.homeImagesRendered) missing.push(required['home-images-rendered'])
+  if (!evidence.homeArchiveTabsSticky) missing.push(required['home-archive-tabs-sticky'])
+  if (!evidence.homeDetailNonEmpty) missing.push(required['home-detail-nonempty'])
+  if (!loginBuildIdentityVerified) missing.push(required['login-page-version'])
+  if (!evidence.profileLoginClean) missing.push(required['profile-login-clean'])
   if (missing.length) {
     const details = missing.map(({ marker, description }) => `${marker} (${description})`).join(', ')
     throw new Error(`Release UI evidence markers missing: ${details}`)

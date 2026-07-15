@@ -71,6 +71,10 @@ The command must build current source before inspecting `miniprogram/dist/build/
 
 Update the existing home-tabs static script and WeChat release UI gate to query `archive-topic-tabs .archive-topic-tab` and `archive-waterfall .archive-waterfall__card` through their custom-component hosts. Remove all evidence queries for the hidden legacy `.section-tab` and `.arc-item` nodes. Provision three valid native `area: archive` RichNote posts in the isolated release fixture, with exactly one post carrying the filter topic, so the gate proves the visible 3-to-1 switch instead of populating the removed legacy feed. The release runner must actually execute the `archiveTabs` stage, retry only the idempotent membership apply on `TransactionBusy`, and wait for the observable active-label/card-count state rather than a fixed delay.
 
+- [ ] **Step 6: Make the release evidence fail closed and CI-enforced**
+
+Require `HH_RELEASE_HOME_ARCHIVE_TABS_STICKY` in direct qualification and release-ledger reuse. Treat a missing `archiveTabs` callback as a failed required stage. Recheck the full responsive tuple after polling, measure the real component/card geometry, and prove reverse release in WeChat. Chain the policy/static/H5 commands through the existing miniprogram unit entrypoint used by `pr-ci / offline`; do not modify the protected workflow in this feature PR.
+
 ### Task 2: Attach sticky behavior to the real component
 
 **Files:**

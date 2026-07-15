@@ -572,6 +572,14 @@ test('cloud smoke can be reused only with formal labels, env, runId, and functio
 test('miniprogram prepare evidence is reused only when build-info and UI version match', async () => {
   const root = await tempRoot()
   try {
+    const releaseUiMarkers = [
+      'HH_RELEASE_HOME_COLD_START_NONEMPTY',
+      'HH_RELEASE_HOME_IMAGES_RENDERED',
+      'HH_RELEASE_HOME_ARCHIVE_TABS_STICKY',
+      'HH_RELEASE_HOME_DETAIL_NONEMPTY',
+      'HH_RELEASE_LOGIN_VERSION',
+      'HH_RELEASE_PROFILE_LOGIN_CLEAN',
+    ]
     const sourceBuildInfoPath = join(root, 'miniprogram', 'src', 'generated', 'build-info.ts')
     const distBuildInfoPath = join(root, 'miniprogram', 'dist', 'build', 'mp-weixin', 'generated', 'build-info.js')
     const uiEvidencePath = join(root, '.codex-local', 'release-evidence', 'unit', 'release-ui-evidence.json')
@@ -600,29 +608,20 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
       },
       appTabBarCount: 1,
     }
+    const releaseUiResults = {
+      homeColdStart: coldStartEvidence,
+      homeArchiveTabs: { passed: true },
+      homeDetail: { passed: true, homeImagesRendered: true },
+      profileLoginClean: { expectedVersion: '1.0.1', buildIdentityPassed: true, cleanPassed: true },
+    }
     const packageRoot = join(root, 'miniprogram', 'dist', 'build', 'mp-weixin')
     const evidenceProjectPath = await windowsShortPath(packageRoot) || packageRoot
     await writeJson(uiEvidencePath, {
       releaseRunId: 'unit-run',
       packageDigest,
       projectPath: evidenceProjectPath,
-      markers: [
-        'HH_RELEASE_HOME_COLD_START_NONEMPTY',
-        'HH_RELEASE_HOME_IMAGES_RENDERED',
-        'HH_RELEASE_HOME_DETAIL_NONEMPTY',
-        'HH_RELEASE_LOGIN_VERSION',
-        'HH_RELEASE_PROFILE_LOGIN_CLEAN',
-      ],
-      homeColdStart: {
-        passed: true,
-        path: 'pages/index/index',
-        layout: {
-          phoneInner: { width: 375, height: 700 },
-          homeShell: { width: 375, height: 600 },
-        },
-        appTabBarCount: 1,
-      },
-      profileLoginClean: { expectedVersion: '1.0.1' },
+      markers: releaseUiMarkers,
+      ...releaseUiResults,
     })
 
     const ledger = await createReleaseRunLedger({
@@ -657,16 +656,46 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
     await writeJson(uiEvidencePath, {
       releaseRunId: 'unit-run',
       packageDigest,
+      projectPath: evidenceProjectPath,
+      markers: releaseUiMarkers.filter((marker) => marker !== 'HH_RELEASE_HOME_ARCHIVE_TABS_STICKY'),
+      ...releaseUiResults,
+    })
+    const missingArchiveTabsMarker = await inspectReleaseStageReuse(runState, 'miniprogram-build-gate', {
+      root,
+      gitSha: 'abc123',
+      version: '1.0.1',
+      desc: 'trial-unit',
+      runId: 'unit-run',
+    })
+    assert.equal(missingArchiveTabsMarker.reusable, false)
+    assert.match(missingArchiveTabsMarker.reason, /HH_RELEASE_HOME_ARCHIVE_TABS_STICKY/)
+
+    for (const [name, homeArchiveTabs] of [['missing', undefined], ['failed', { passed: false }]]) {
+      await writeJson(uiEvidencePath, {
+        releaseRunId: 'unit-run',
+        packageDigest,
+        projectPath: evidenceProjectPath,
+        markers: releaseUiMarkers,
+        ...releaseUiResults,
+        homeArchiveTabs,
+      })
+      const invalidArchiveTabsResult = await inspectReleaseStageReuse(runState, 'miniprogram-build-gate', {
+        root,
+        gitSha: 'abc123',
+        version: '1.0.1',
+        desc: 'trial-unit',
+        runId: 'unit-run',
+      })
+      assert.equal(invalidArchiveTabsResult.reusable, false, `${name} archive tabs result must not be reusable`)
+      assert.match(invalidArchiveTabsResult.reason, /HH_RELEASE_HOME_ARCHIVE_TABS_STICKY/)
+    }
+
+    await writeJson(uiEvidencePath, {
+      releaseRunId: 'unit-run',
+      packageDigest,
       projectPath: join(root, 'missing-project-path'),
-      markers: [
-        'HH_RELEASE_HOME_COLD_START_NONEMPTY',
-        'HH_RELEASE_HOME_IMAGES_RENDERED',
-        'HH_RELEASE_HOME_DETAIL_NONEMPTY',
-        'HH_RELEASE_LOGIN_VERSION',
-        'HH_RELEASE_PROFILE_LOGIN_CLEAN',
-      ],
-      homeColdStart: coldStartEvidence,
-      profileLoginClean: { expectedVersion: '1.0.1' },
+      markers: releaseUiMarkers,
+      ...releaseUiResults,
     })
     const missingProjectPath = await inspectReleaseStageReuse(runState, 'miniprogram-build-gate', {
       root,
@@ -682,14 +711,9 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
       releaseRunId: 'unit-run',
       packageDigest,
       projectPath: join(root, 'miniprogram', 'dist', 'build', 'mp-weixin'),
-      markers: [
-        'HH_RELEASE_HOME_COLD_START_NONEMPTY',
-        'HH_RELEASE_HOME_IMAGES_RENDERED',
-        'HH_RELEASE_HOME_DETAIL_NONEMPTY',
-        'HH_RELEASE_LOGIN_VERSION',
-        'HH_RELEASE_PROFILE_LOGIN_CLEAN',
-      ],
-      profileLoginClean: { expectedVersion: '1.0.1' },
+      markers: releaseUiMarkers,
+      ...releaseUiResults,
+      homeColdStart: undefined,
     })
     const missingColdStartResult = await inspectReleaseStageReuse(runState, 'miniprogram-build-gate', {
       root,
@@ -705,23 +729,8 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
       releaseRunId: 'unit-run',
       packageDigest,
       projectPath: join(root, 'miniprogram', 'dist', 'build', 'mp-weixin'),
-      markers: [
-        'HH_RELEASE_HOME_COLD_START_NONEMPTY',
-        'HH_RELEASE_HOME_IMAGES_RENDERED',
-        'HH_RELEASE_HOME_DETAIL_NONEMPTY',
-        'HH_RELEASE_LOGIN_VERSION',
-        'HH_RELEASE_PROFILE_LOGIN_CLEAN',
-      ],
-      homeColdStart: {
-        passed: true,
-        path: 'pages/index/index',
-        layout: {
-          phoneInner: { width: 375, height: 700 },
-          homeShell: { width: 375, height: 600 },
-        },
-        appTabBarCount: 1,
-      },
-      profileLoginClean: { expectedVersion: '1.0.1' },
+      markers: releaseUiMarkers,
+      ...releaseUiResults,
     })
 
     await writeFile(pagePath, 'module.exports = { version: 2 }\n', 'utf8')
@@ -739,14 +748,9 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
       releaseRunId: 'unit-run',
       packageDigest,
       projectPath: join(root, 'miniprogram', 'dist', 'build', 'mp-weixin'),
-      markers: [
-        'HH_RELEASE_HOME_COLD_START_NONEMPTY',
-        'HH_RELEASE_HOME_IMAGES_RENDERED',
-        'HH_RELEASE_HOME_DETAIL_NONEMPTY',
-        'HH_RELEASE_LOGIN_VERSION',
-        'HH_RELEASE_PROFILE_LOGIN_CLEAN',
-      ],
-      homeColdStart: coldStartEvidence,
+      markers: releaseUiMarkers,
+      ...releaseUiResults,
+      profileLoginClean: { buildIdentityPassed: true, cleanPassed: true },
     })
     const missingUiVersion = await inspectReleaseStageReuse(runState, 'miniprogram-build-gate', {
       root,
@@ -762,14 +766,8 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
       releaseRunId: 'unit-run',
       packageDigest,
       projectPath: join(root, 'miniprogram', 'dist', 'build', 'mp-weixin'),
-      markers: [
-        'HH_RELEASE_HOME_COLD_START_NONEMPTY',
-        'HH_RELEASE_HOME_IMAGES_RENDERED',
-        'HH_RELEASE_HOME_DETAIL_NONEMPTY',
-        'HH_RELEASE_LOGIN_VERSION',
-      ],
-      homeColdStart: coldStartEvidence,
-      profileLoginClean: { expectedVersion: '1.0.1' },
+      markers: releaseUiMarkers.filter((marker) => marker !== 'HH_RELEASE_PROFILE_LOGIN_CLEAN'),
+      ...releaseUiResults,
     })
     const missingCleanProfileMarker = await inspectReleaseStageReuse(runState, 'miniprogram-build-gate', {
       root,
@@ -785,15 +783,9 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
       releaseRunId: 'unit-run',
       packageDigest,
       projectPath: join(root, 'miniprogram', 'dist', 'build', 'mp-weixin'),
-      markers: [
-        'HH_RELEASE_HOME_COLD_START_NONEMPTY',
-        'HH_RELEASE_HOME_IMAGES_RENDERED',
-        'HH_RELEASE_HOME_DETAIL_NONEMPTY',
-        'HH_RELEASE_LOGIN_VERSION',
-        'HH_RELEASE_PROFILE_LOGIN_CLEAN',
-      ],
-      homeColdStart: coldStartEvidence,
-      profileLoginClean: { expectedVersion: '1.0.2' },
+      markers: releaseUiMarkers,
+      ...releaseUiResults,
+      profileLoginClean: { expectedVersion: '1.0.2', buildIdentityPassed: true, cleanPassed: true },
     })
     const wrongUiVersion = await inspectReleaseStageReuse(runState, 'miniprogram-build-gate', {
       root,
@@ -806,15 +798,8 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
     assert.match(wrongUiVersion.reason, /version mismatch/)
 
     await writeJson(uiEvidencePath, {
-      markers: [
-        'HH_RELEASE_HOME_COLD_START_NONEMPTY',
-        'HH_RELEASE_HOME_IMAGES_RENDERED',
-        'HH_RELEASE_HOME_DETAIL_NONEMPTY',
-        'HH_RELEASE_LOGIN_VERSION',
-        'HH_RELEASE_PROFILE_LOGIN_CLEAN',
-      ],
-      homeColdStart: coldStartEvidence,
-      profileLoginClean: { expectedVersion: '1.0.1' },
+      markers: releaseUiMarkers,
+      ...releaseUiResults,
     })
     await writeFile(distBuildInfoPath, buildInfoText.replace('trial-unit', 'trial-other'), 'utf8')
     const wrongBuildInfo = await inspectReleaseStageReuse(runState, 'miniprogram-build-gate', {
@@ -891,6 +876,37 @@ test('qualification-backed prepare reuse freshly validates the wrapper and artif
     const context = { root, runId: 'qualified-run', gitSha, version, desc, devToolsVersion }
     const reusable = await inspectReleaseStageReuse(ledger.state, 'miniprogram-build-gate', context)
     assert.equal(reusable.reusable, true)
+
+    const validUiEvidenceText = await readFile(uiEvidencePath, 'utf8')
+    const validQualificationText = await readFile(qualificationPath, 'utf8')
+    for (const [name, homeArchiveTabs] of [['missing', undefined], ['failed', { passed: false }]]) {
+      const invalidUiEvidence = JSON.parse(validUiEvidenceText)
+      if (homeArchiveTabs === undefined) delete invalidUiEvidence.homeArchiveTabs
+      else invalidUiEvidence.homeArchiveTabs = homeArchiveTabs
+      await writeJson(uiEvidencePath, invalidUiEvidence)
+
+      const invalidQualification = JSON.parse(validQualificationText)
+      invalidQualification.uiEvidence.sha256 = createHash('sha256').update(await readFile(uiEvidencePath)).digest('hex')
+      await writeJson(qualificationPath, invalidQualification)
+      const invalidQualificationDigest = createHash('sha256').update(await readFile(qualificationPath)).digest('hex')
+      const invalidRunState = structuredClone(ledger.state)
+      invalidRunState.stages['miniprogram-build-gate'].evidence.qualificationDigest = invalidQualificationDigest
+
+      const invalidArchiveTabsResult = await inspectReleaseStageReuse(
+        invalidRunState,
+        'miniprogram-build-gate',
+        context,
+      )
+      assert.equal(
+        invalidArchiveTabsResult.reusable,
+        false,
+        `${name} qualified archive tabs result must not be reusable`,
+      )
+      assert.match(invalidArchiveTabsResult.reason, /HH_RELEASE_HOME_ARCHIVE_TABS_STICKY/)
+    }
+
+    await writeFile(uiEvidencePath, validUiEvidenceText)
+    await writeFile(qualificationPath, validQualificationText)
 
     await writeFile(qualificationPath, `${await readFile(qualificationPath, 'utf8')} `)
     const changed = await inspectReleaseStageReuse(ledger.state, 'miniprogram-build-gate', context)

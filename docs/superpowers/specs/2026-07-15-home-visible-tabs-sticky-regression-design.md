@@ -58,7 +58,13 @@
 - 微信发布 UI 门禁从 `archive-topic-tabs` 与 `archive-waterfall` 自定义组件内部读取真实 Tabs、激活态和卡片，禁止再查询隐藏的 `.section-tab` / `.arc-item`。
 - 门禁 fixture 创建当前瀑布流实际消费的原生归档帖子，并用 3 条“全部”数据和 1 条带话题数据验证筛选后的 3→1 变化；不再用旧板块帖子伪装目标数据。
 - 发布检查编排必须实际运行 `archiveTabs` 阶段；fixture 加入社区遇到 `TransactionBusy` 时只重试幂等申请，筛选后则轮询“激活标签=短内容、卡片数=1”的可观察状态，不用固定睡眠冒充收敛。
-- 几何快照与 Automator 元素句柄分离，避免组件内 Tabs 句柄覆盖 sticky 外壳的 `top/bottom` 证据；筛选列表变短导致滚动值被系统夹紧时，以搜索框和 Tabs 的实际固定坐标为准。
+- `archiveTabs` 是必需检查而不是可选扩展：回调缺失、结果为 false、资格 marker 缺失，或历史证据复用缺少 marker，都必须 fail closed。
+- 轮询结果携带明确的 `satisfied` 状态；“全部”和“短内容”两个阶段都必须重新核对 tab 数、唯一激活项、激活文案与卡片数，禁止用切换前的元素句柄证明切换后的 DOM。
+- 几何快照与 Automator 元素句柄分离，避免组件内 Tabs 句柄覆盖 sticky 外壳的 `top/bottom` 证据；筛选列表变短导致滚动值被系统夹紧时，搜索框和 Tabs 应遵循 `max(吸顶阈值, 初始自然位置 - 当前 scrollTop)`，不能强求内容变短后仍停在吸顶坐标。
+- 微信原生证据同时读取真实 `.archive-topic-tabs` 与首张 `.archive-waterfall__card` 的 offset/size，验证它们有可见几何；反向滚到顶部后重新核对搜索、外壳和真实 Tabs 恢复初始坐标。
+- 原生 fixture 同时提供格言与一条 realtime 活动，使“初始流式位置 → 仅搜索吸顶 → 搜索与 Tabs 同时吸顶 → 回到初始流式位置”四个快照在坐标上可区分，避免以恰好同位的初始布局冒充释放证据。
+- 无 qualification 的历史发布证据复用不仅检查 marker，还复用统一结果策略核对每个嵌套 `passed` 状态；marker 存在但结果缺失或失败一律不可复用。
+- 现有 PR CI 的 miniprogram unit 入口串联 release policy、静态 sticky 契约和当前源码 H5 smoke；不修改受信任 workflow 文件，也不让这些检查只停留在本机。
 - 验证搜索框固定在社区栏下方、真实 Tabs 固定在搜索框下方、Tabs 内部与外壳顶边一致，并在反向滚动时释放。
 - 微信小程序构建和运行时验证作为最终平台证据；H5 只用于隔离复现和几何预检。
 

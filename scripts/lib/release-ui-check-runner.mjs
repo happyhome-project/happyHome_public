@@ -12,8 +12,14 @@ export async function runReleaseUiChecks(checks = {}) {
   const failures = []
   const skipped = []
 
-  async function run(stage, check) {
+  async function run(stage, check, { required = false } = {}) {
     if (typeof check !== 'function') {
+      if (required) {
+        const item = { stage, status: 'failed', error: 'required check not configured' }
+        stages.push(item)
+        failures.push(item)
+        return false
+      }
       const item = { stage, status: 'skipped', reason: 'check not configured' }
       stages.push(item)
       skipped.push(item)
@@ -47,7 +53,7 @@ export async function runReleaseUiChecks(checks = {}) {
   }
 
   if (coldStartPassed && profilePassed && fixturePassed) {
-    await run('archiveTabs', checks.archiveTabs)
+    await run('archiveTabs', checks.archiveTabs, { required: true })
     await run('homeDetail', checks.homeDetail)
   } else {
     const reason = !coldStartPassed

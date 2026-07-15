@@ -6,6 +6,7 @@ const page = readFileSync(resolve(__dirname, '../../pages/index/index.vue'), 'ut
 const template = page.slice(0, page.indexOf('<script'))
 const repositoryRoot = resolve(__dirname, '../../../..')
 const rootPackage = JSON.parse(readFileSync(resolve(repositoryRoot, 'package.json'), 'utf8'))
+const miniprogramPackage = JSON.parse(readFileSync(resolve(repositoryRoot, 'miniprogram/package.json'), 'utf8'))
 const h5Smoke = readFileSync(resolve(repositoryRoot, 'scripts/test-h5-home-sticky-smoke.mjs'), 'utf8')
 
 function ruleBody(selector: string) {
@@ -44,6 +45,13 @@ describe('home progressive sticky navigation', () => {
     expect(h5Smoke.indexOf('const build = spawnSync(buildCommand, buildArgs,')).toBeLessThan(
       h5Smoke.indexOf("const root = join(process.cwd(), 'miniprogram', 'dist', 'build', 'h5')"),
     )
+  })
+
+  test('runs sticky runtime and release policy checks in the existing miniprogram CI lane', () => {
+    const command = miniprogramPackage.scripts['test:unit']
+    expect(command).toContain('npm run test:mp:replay-policy')
+    expect(command).toContain('npm run test:mp:home-tabs-scroll-static')
+    expect(command).toContain('npm run test:h5:home-sticky')
   })
 
   test('keeps sticky wrappers visually transparent', () => {
