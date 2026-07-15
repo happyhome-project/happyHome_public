@@ -8,7 +8,7 @@
     {
       "id": "archive-posts-v1",
       "module": "release/migrations/20260715-archive-posts-v1.mjs",
-      "inputDigest": "45b90f88149a1a5bdf9c89d0ed0ba8f593d6931211f56d1dcd054f4c6eb86758"
+      "inputDigest": "22a3cf5d7d121c63e73b6f684dbcd686a3d1a7998c145becad7e467fe5af0280"
     }
   ],
   "smokeSuites": [],

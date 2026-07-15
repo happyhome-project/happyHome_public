@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "changeId": "archive-posts-wrapper-repair",
+  "actions": [],
+  "migrations": [
+    {
+      "id": "archive-posts-v2-wrapper-repair",
+      "module": "release/migrations/20260715-archive-posts-v2.mjs",
+      "inputDigest": "f8d8b18ed301837b4b05efe08f9e8cef7e0d9448652bf83e486c195dd3c75e40"
+    }
+  ],
+  "smokeSuites": [],
+  "releaseImpact": {
+    "cloudFunctions": "No deployment required.",
+    "adminWeb": "No deployment required.",
+    "miniprogram": "No upload required.",
+    "environmentVariables": [],
+    "databaseMigrations": [
+      "Lift deterministic archive migration records out of the malformed data wrapper and verify every repaired document."
+    ]
+  }
+}

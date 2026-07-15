@@ -4,6 +4,9 @@ import { tmpdir } from 'node:os'
 import { join, win32 } from 'node:path'
 import test from 'node:test'
 
+import './archive-migration.test.mjs'
+import './archive-migration-node-sdk.test.mjs'
+
 import {
   CLOUD_COMPONENT_CONFIG_INPUTS,
   CLOUD_RELEASE_COMPONENTS,
