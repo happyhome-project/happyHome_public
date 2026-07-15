@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, test } from 'vitest'
 
 const page = readFileSync(resolve(__dirname, '../../pages/index/index.vue'), 'utf8')
+const template = page.slice(0, page.indexOf('<script'))
 
 function ruleBody(selector: string) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -22,6 +23,14 @@ describe('home progressive sticky navigation', () => {
     const live = page.indexOf('<!-- Live strip')
     expect(search).toBeLessThan(live)
     expect(page.indexOf('class="home-refresh-hint"')).toBeGreaterThan(search)
+  })
+
+  test('attaches the second sticky stage to the single visible archive topic tabs', () => {
+    expect(template).toMatch(
+      /<view class="archive-topic-shell">\s*<view class="section-tabs-sticky-shell section-tabs-sticky-shell--archive">\s*<ArchiveTopicTabs/,
+    )
+    expect(template).not.toMatch(/v-show="false"[^>]*class="section-tabs-sticky-shell"/)
+    expect(template.match(/class="section-tabs-sticky-shell(?: [^"]*)?"/g) || []).toHaveLength(1)
   })
 
   test('keeps sticky wrappers visually transparent', () => {

@@ -26,18 +26,19 @@ server.listen(0, '127.0.0.1', async () => {
       document.querySelectorAll('.guest-intro-mask').forEach((node) => node.remove())
       const shell = document.querySelector('.home-shell')
       const search = document.querySelector('.home-search-sticky-shell')
-      if (!shell || !search) throw new Error('home sticky fixture anchors missing')
+      const archive = document.querySelector('.archive-topic-shell')
+      const tabs = document.querySelector('.section-tabs-sticky-shell')
+      const topicTabs = document.querySelector('.archive-topic-tabs')
+      if (!shell || !search || !archive || !tabs || !topicTabs) {
+        throw new Error('visible home sticky fixture anchors missing')
+      }
       shell.style.minHeight = '420px'
       const scope = [...search.attributes].find((attr) => attr.name.startsWith('data-v-'))?.name || ''
       const spacer = document.createElement('div')
       spacer.style.height = '520px'
       if (scope) spacer.setAttribute(scope, '')
-      const tabs = document.createElement('div')
-      tabs.className = 'section-tabs-sticky-shell'
-      tabs.innerHTML = '<div class="section-tabs"><div class="section-tabs-inner"><div class="section-tab active"><span>全部</span></div><div class="section-tab"><span>邻里</span></div></div></div>'
-      if (scope) tabs.querySelectorAll('*').forEach((node) => node.setAttribute(scope, ''))
-      if (scope) tabs.setAttribute(scope, '')
-      search.after(spacer, tabs)
+      search.after(spacer)
+      archive.style.minHeight = '900px'
       document.body.style.minHeight = '1800px'
     })
 
@@ -46,9 +47,10 @@ server.listen(0, '127.0.0.1', async () => {
       const hero = document.querySelector('.home-shell').getBoundingClientRect()
       const searchElement = document.querySelector('.home-search-sticky-shell')
       const tabsElement = document.querySelector('.section-tabs-sticky-shell')
-      const archiveTabsElement = document.querySelector('.archive-topic-tabs')
+      const topicTabsElement = document.querySelector('.archive-topic-tabs')
       const search = searchElement.getBoundingClientRect()
       const tabs = tabsElement.getBoundingClientRect()
+      const topicTabs = topicTabsElement.getBoundingClientRect()
       const surface = (element) => {
         const style = getComputedStyle(element)
         return {
@@ -63,18 +65,25 @@ server.listen(0, '127.0.0.1', async () => {
         hero,
         search,
         tabs,
+        topicTabs,
         heroSurface: surface(document.querySelector('.home-shell')),
         searchSurface: surface(searchElement),
         tabsSurface: surface(tabsElement),
-        archiveTabsSurface: archiveTabsElement ? surface(archiveTabsElement) : null,
+        topicTabsSurface: surface(topicTabsElement),
         scrollY: window.scrollY,
       }
     })
     const before = await rects()
-    await page.evaluate(() => window.scrollTo(0, document.querySelector('.home-search-sticky-shell').offsetTop + 40))
+    await page.evaluate(() => {
+      const element = document.querySelector('.home-search-sticky-shell')
+      window.scrollTo(0, element.getBoundingClientRect().top + window.scrollY + 40)
+    })
     await page.waitForTimeout(100)
     const searchPinned = await rects()
-    await page.evaluate(() => window.scrollTo(0, document.querySelector('.section-tabs-sticky-shell').offsetTop + 40))
+    await page.evaluate(() => {
+      const element = document.querySelector('.section-tabs-sticky-shell')
+      window.scrollTo(0, element.getBoundingClientRect().top + window.scrollY + 40)
+    })
     await page.waitForTimeout(100)
     const tagsPinned = await rects()
     await page.evaluate(() => window.scrollTo(0, 0))
@@ -90,7 +99,7 @@ server.listen(0, '127.0.0.1', async () => {
     )
     if (!transparent(before.searchSurface)) throw new Error(`search sticky wrapper owns a surface: ${JSON.stringify(before.searchSurface)}`)
     if (!transparent(before.tabsSurface)) throw new Error(`tags sticky wrapper owns a surface: ${JSON.stringify(before.tabsSurface)}`)
-    if (before.archiveTabsSurface && !transparent(before.archiveTabsSurface)) throw new Error(`archive topic tabs own a surface: ${JSON.stringify(before.archiveTabsSurface)}`)
+    if (!transparent(before.topicTabsSurface)) throw new Error(`archive topic tabs own a surface: ${JSON.stringify(before.topicTabsSurface)}`)
     if (!close(before.hero.bottom, before.search.bottom)) throw new Error(`hero gradient does not cover the search surface: hero=${before.hero.bottom}, search=${before.search.bottom}`)
     if (!before.heroSurface.backgroundImage.includes('rgb(220, 239, 232)') || !before.heroSurface.backgroundImage.includes('rgb(237, 244, 237)')) {
       throw new Error(`hero gradient loses its mint color before the search surface: ${before.heroSurface.backgroundImage}`)
@@ -99,7 +108,9 @@ server.listen(0, '127.0.0.1', async () => {
     if (!close(searchPinned.search.top, searchPinned.topbar.bottom)) throw new Error('search did not pin below masthead')
     if (!close(tagsPinned.search.top, tagsPinned.topbar.bottom)) throw new Error('search moved during tags pin')
     if (!close(tagsPinned.tabs.top, tagsPinned.search.bottom)) throw new Error('tags did not pin below search')
+    if (!close(tagsPinned.topicTabs.top, tagsPinned.tabs.top)) throw new Error('visible archive topic tabs escaped the sticky shell')
     if (!close(restored.search.top, before.search.top)) throw new Error('reverse scroll did not release search sticky state')
+    if (!close(restored.tabs.top, before.tabs.top)) throw new Error('reverse scroll did not release visible topic tabs')
     console.log('[h5-home-sticky-smoke] PASS')
   } finally {
     await browser.close()
