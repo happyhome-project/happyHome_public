@@ -23,7 +23,6 @@
       </div>
       <div>
         <el-button data-testid="archive-topic-button" @click="$router.push({ name: 'archive-topics', params: { communityId } })">沉淀区话题</el-button>
-        <el-button data-testid="section-create-button" type="primary" @click="openCreate">新建实时板块</el-button>
       </div>
     </div>
 
@@ -537,8 +536,7 @@ async function loadSections() {
       _id: String(section?._id || section?.id || ''),
       displayTemplate: section?.displayTemplate === 'guide_note'
         ? 'guide_note'
-        : section?.displayTemplate === 'text_note'
-          ? 'text_note'
+        : section?.displayTemplate === 'text_note' ? 'text_note'
         : section?.displayTemplate === 'image_note'
           ? 'image_note'
           : 'default',
@@ -552,22 +550,6 @@ async function loadSections() {
 
 function getSectionId(row: any): string {
   return String(row?._id || row?.id || '')
-}
-
-function openCreate() {
-  editingId.value = ''
-  form.value = {
-    name: '',
-    icon: '',
-    order: sections.value.length,
-    type: 'realtime',
-    status: 'active',
-    displayTemplate: 'default',
-    accentColor: '',
-    enableComment: true,
-    enableLike: true,
-  }
-  showDialog.value = true
 }
 
 function openEdit(row: SectionRow) {

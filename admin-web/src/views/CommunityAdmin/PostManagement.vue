@@ -31,12 +31,32 @@
     </div>
 
     <div class="filters">
-      <el-select v-model="filters.sectionId" clearable placeholder="按板块筛选" style="width: 220px;">
+      <el-select v-model="filters.area" style="width: 180px;" @change="handleAreaChange">
+        <el-option label="全部内容" value="all" />
+        <el-option label="实时协作" value="collaboration" />
+        <el-option label="沉淀图文/文字" value="archive" />
+        <el-option label="原板块帖子" value="legacy" />
+      </el-select>
+      <el-select v-if="filters.area === 'legacy'" v-model="filters.sectionId" clearable placeholder="按原板块筛选" style="width: 220px;">
         <el-option
           v-for="section in sections"
           :key="section._id"
           :label="section.name"
           :value="section._id"
+        />
+      </el-select>
+      <el-select
+        v-if="filters.area === 'collaboration'"
+        v-model="filters.collaborationTemplateId"
+        clearable
+        placeholder="按协作模板筛选"
+        style="width: 220px;"
+      >
+        <el-option
+          v-for="template in collaborationTemplates"
+          :key="template._id"
+          :label="template.name"
+          :value="template._id"
         />
       </el-select>
       <el-input
@@ -393,7 +413,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ArrowLeft } from '@element-plus/icons-vue'
-import { communityApi, mediaApi, postAdminApi, sectionApi } from '../../api/cloud'
+import { collaborationTemplateApi, communityApi, mediaApi, postAdminApi, sectionApi } from '../../api/cloud'
 import { formatAdminDateTime } from '../../utils/datetime'
 import RichNoteAdminPreview from '../../components/RichNoteAdminPreview.vue'
 import { normalizeRichNoteContent } from '../../utils/rich-note'
@@ -405,6 +425,7 @@ const communityId = ref(String(route.params.communityId || ''))
 const loading = ref(false)
 const posts = ref<any[]>([])
 const sections = ref<any[]>([])
+const collaborationTemplates = ref<any[]>([])
 const showDetail = ref(false)
 const detailPost = ref<any>(null)
 const detailSection = ref<any>(null)
@@ -413,7 +434,9 @@ const detailImageUrlMap = ref<Record<string, string>>({})
 const dateRange = ref<string[]>([])
 const communityName = ref('')
 const filters = ref({
+  area: 'all' as 'all' | 'collaboration' | 'archive' | 'legacy',
   sectionId: '',
+  collaborationTemplateId: '',
   authorQuery: '',
   status: 'active' as 'active' | 'deleted' | 'all',
   auditStatus: 'all' as 'pending' | 'pass' | 'review' | 'rejected' | 'all',
@@ -507,8 +530,12 @@ async function loadCommunityContext() {
 }
 
 async function loadSections() {
-  const res = await sectionApi.list(communityId.value) as any
-  sections.value = res.sections ?? []
+  const [sectionResponse, templateResponse] = await Promise.all([
+    sectionApi.list(communityId.value) as Promise<any>,
+    collaborationTemplateApi.listAdmin(),
+  ])
+  sections.value = sectionResponse.sections ?? []
+  collaborationTemplates.value = templateResponse.templates ?? []
 }
 
 async function loadPosts() {
@@ -516,7 +543,11 @@ async function loadPosts() {
   try {
     const res = await postAdminApi.list({
       communityId: communityId.value,
-      sectionId: filters.value.sectionId || undefined,
+      area: filters.value.area,
+      sectionId: filters.value.area === 'legacy' ? filters.value.sectionId || undefined : undefined,
+      collaborationTemplateId: filters.value.area === 'collaboration'
+        ? filters.value.collaborationTemplateId || undefined
+        : undefined,
       authorQuery: filters.value.authorQuery || undefined,
       status: filters.value.status,
       auditStatus: filters.value.auditStatus,
@@ -531,6 +562,11 @@ async function loadPosts() {
   } finally {
     loading.value = false
   }
+}
+
+function handleAreaChange() {
+  filters.value.sectionId = ''
+  filters.value.collaborationTemplateId = ''
 }
 
 function parseFlagFilter(value: 'all' | 'true' | 'false') {

@@ -224,6 +224,13 @@ export const sectionApi = {
     callCloud<{ section: any }>('section', 'get', { sectionId, asGuest }),
 }
 
+export const collaborationTemplateApi = {
+  listActive: () =>
+    callCloud<{ templates: any[] }>('collaboration-template', 'listActive', {}),
+  get: (templateId: string) =>
+    callCloud<{ template: any }>('collaboration-template', 'get', { templateId }),
+}
+
 export type ArchivePostCreateParams = {
   communityId: string
   area: 'archive'
@@ -256,13 +263,24 @@ export const postApi = {
       trace,
     ),
   home: (communityId: string, limitPerSection = 20, asGuest = false) =>
-    callCloud<{ sections: any[]; postsBySection: Record<string, any[]> }>(
+    callCloud<{
+      sections: any[]
+      postsBySection: Record<string, any[]>
+      collaborationTemplates: any[]
+      collaborationPostsByTemplate: Record<string, any[]>
+    }>(
       'post',
       'home',
       { communityId, limitPerSection, asGuest },
     ),
   list: (sectionId: string, skip = 0, asGuest = false) =>
     callCloud<{ posts: any[] }>('post', 'list', { sectionId, skip, asGuest }),
+  listCollaboration: (communityId: string, collaborationTemplateId: string, skip = 0, asGuest = false) =>
+    callCloud<{ template: any; posts: any[]; total: number; skip: number; limit: number; hasMore: boolean }>(
+      'post',
+      'listCollaboration',
+      { communityId, collaborationTemplateId, skip, asGuest },
+    ),
   listMine: (skip = 0, limit = 20) =>
     callCloud<{ posts: any[]; total: number; skip: number; limit: number; hasMore: boolean }>(
       'post',
@@ -312,11 +330,20 @@ export const postApi = {
       }>
     }>('post', 'search', params),
   get: (postId: string, asGuest = false) =>
-    callCloud<{ post: any }>('post', 'get', { postId, asGuest }),
+    callCloud<{ post: any; collaborationTemplate?: any }>('post', 'get', { postId, asGuest }),
   create: (params: object) =>
     callCloud('post', 'create', params),
   createArchive: (params: ArchivePostCreateParams) =>
     callCloud<{ postId: string; auditStatus?: string; auditReason?: string }>('post', 'create', params),
+  createCollaboration: (params: {
+    communityId: string
+    collaborationTemplateId: string
+    content: Record<string, any>
+  }) => callCloud<{ postId: string; auditStatus?: string; auditReason?: string }>(
+    'post',
+    'createCollaboration',
+    params,
+  ),
   getActivityInviteState: (sourcePostId: string, asGuest = false) =>
     callCloud<{
       enabled: boolean

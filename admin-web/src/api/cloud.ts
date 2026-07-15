@@ -151,6 +151,33 @@ export const sectionApi = {
     callAdmin('section.updateStatus', { sectionId, status }),
 }
 
+export const collaborationTemplateApi = {
+  listAdmin: () => callAdmin('collaborationTemplate.listAdmin') as Promise<{ templates: any[] }>,
+  getAdmin: (templateId: string) =>
+    callAdmin('collaborationTemplate.getAdmin', { templateId }) as Promise<{ template: any | null }>,
+  createAdmin: (params: {
+    name: string
+    icon?: string
+    order?: number
+    enableComment?: boolean
+    enableLike?: boolean
+  }) => callAdmin('collaborationTemplate.createAdmin', params) as Promise<{ templateId: string }>,
+  updateAdmin: (params: {
+    templateId: string
+    name?: string
+    icon?: string
+    order?: number
+    enableComment?: boolean
+    enableLike?: boolean
+    widgets?: any[]
+    preview?: boolean
+  }) => callAdmin('collaborationTemplate.updateAdmin', params),
+  disableAdmin: (templateId: string, disabled = true) =>
+    callAdmin('collaborationTemplate.disableAdmin', { templateId, disabled }),
+  deleteAdmin: (templateId: string) =>
+    callAdmin('collaborationTemplate.deleteAdmin', { templateId }),
+}
+
 export type ArchiveTopicConfig = {
   topicKey: string
   displayName: string
@@ -190,6 +217,8 @@ export const postAdminApi = {
   list: (params: {
     communityId: string
     sectionId?: string
+    collaborationTemplateId?: string
+    area?: 'all' | 'collaboration' | 'archive' | 'legacy'
     authorQuery?: string
     status?: 'active' | 'deleted' | 'all'
     auditStatus?: 'pending' | 'pass' | 'review' | 'rejected' | 'all'

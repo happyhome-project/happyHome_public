@@ -261,14 +261,16 @@ import { v4 as uuidv4 } from 'uuid'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ArrowLeft, WarningFilled } from '@element-plus/icons-vue'
-import { communityApi, sectionApi } from '../../api/cloud'
+import { collaborationTemplateApi, communityApi, sectionApi } from '../../api/cloud'
 
 const props = withDefaults(defineProps<{
   sectionId?: string
+  collaborationTemplateId?: string
   communityId?: string
   embedded?: boolean
 }>(), {
   sectionId: '',
+  collaborationTemplateId: '',
   communityId: '',
   embedded: false,
 })
@@ -278,6 +280,8 @@ const emit = defineEmits<{
 const route = useRoute()
 const router = useRouter()
 const resolvedSectionId = computed(() => props.sectionId || String(route.params.sectionId || ''))
+const resolvedCollaborationTemplateId = computed(() => String(props.collaborationTemplateId || ''))
+const isCollaborationTemplateMode = computed(() => Boolean(resolvedCollaborationTemplateId.value))
 const resolvedCommunityId = computed(() => props.communityId || String(route.query.communityId || ''))
 const embedded = computed(() => props.embedded)
 const widgets = ref<any[]>([])
@@ -384,23 +388,28 @@ function resolveWidgetOrder(widget: any, index: number) {
 
 onMounted(async () => {
   try {
-    await loadCommunityContext()
-    const sectionId = resolvedSectionId.value
-    if (!sectionId) {
-      ElMessage.error('缺少 sectionId，无法加载控件')
+    if (!isCollaborationTemplateMode.value) await loadCommunityContext()
+    const contractId = isCollaborationTemplateMode.value
+      ? resolvedCollaborationTemplateId.value
+      : resolvedSectionId.value
+    if (!contractId) {
+      ElMessage.error('缺少模板 ID，无法加载控件')
       return
     }
-    const res = await sectionApi.get(sectionId) as any
-    sectionName.value = String(res.section?.name || '')
-    sectionType.value = res.section?.type === 'realtime' ? 'realtime' : 'evergreen'
-    sectionDisplayTemplate.value = res.section?.displayTemplate === 'text_note'
+    const res = isCollaborationTemplateMode.value
+      ? await collaborationTemplateApi.getAdmin(contractId) as any
+      : await sectionApi.get(contractId) as any
+    const contract = isCollaborationTemplateMode.value ? res.template : res.section
+    sectionName.value = String(contract?.name || '')
+    sectionType.value = isCollaborationTemplateMode.value || contract?.type === 'realtime' ? 'realtime' : 'evergreen'
+    sectionDisplayTemplate.value = contract?.displayTemplate === 'text_note'
       ? 'text_note'
-      : res.section?.displayTemplate === 'guide_note'
+      : contract?.displayTemplate === 'guide_note'
       ? 'guide_note'
-      : res.section?.displayTemplate === 'image_note'
+      : contract?.displayTemplate === 'image_note'
         ? 'image_note'
         : 'default'
-    widgets.value = (res.section?.widgets ?? []).map((widget: any, index: number) => ({
+    widgets.value = (contract?.widgets ?? []).map((widget: any, index: number) => ({
       ...widget,
       label: widget?.type === 'attendance' && shouldClearAttendanceLabel(widget?.label)
         ? ''
@@ -477,6 +486,10 @@ function moveWidget(index: number, delta: number) {
 }
 
 function goBackToSections() {
+  if (isCollaborationTemplateMode.value) {
+    router.push({ name: 'collaboration-templates' })
+    return
+  }
   if (resolvedCommunityId.value) {
     router.push({ name: 'sections', params: { communityId: resolvedCommunityId.value } })
     return
@@ -546,13 +559,15 @@ function hasStructuralWidgetChanges(nextWidgets: any[]) {
 }
 
 async function save() {
-  const sectionId = resolvedSectionId.value
+  const contractId = isCollaborationTemplateMode.value
+    ? resolvedCollaborationTemplateId.value
+    : resolvedSectionId.value
   const communityId = resolvedCommunityId.value
-  if (!sectionId) {
-    ElMessage.error('缺少 sectionId，无法保存')
+  if (!contractId) {
+    ElMessage.error('缺少模板 ID，无法保存')
     return
   }
-  if (!communityId) {
+  if (!isCollaborationTemplateMode.value && !communityId) {
     ElMessage.error('缺少 communityId，无法保存')
     return
   }
@@ -574,9 +589,19 @@ async function save() {
     }))
     const needsImpactPreview = hasStructuralWidgetChanges(orderedWidgets)
 
-    if (needsImpactPreview) {
+    if (isCollaborationTemplateMode.value) {
+      const preview = await collaborationTemplateApi.updateAdmin({
+        templateId: contractId,
+        widgets: orderedWidgets,
+        preview: true,
+      }) as any
+      if (preview.requireMigration) {
+        ElMessage.error(`该全局模板已有 ${preview.activePostCount} 条帖子，本次结构变更必须通过数据迁移完成`)
+        return
+      }
+    } else if (needsImpactPreview) {
       const preview = await sectionApi.updateWidgets({
-        sectionId,
+        sectionId: contractId,
         communityId,
         widgets: orderedWidgets,
         preview: true,
@@ -592,12 +617,19 @@ async function save() {
       }
     }
 
-    await sectionApi.updateWidgets({
-      sectionId,
-      communityId,
-      widgets: orderedWidgets,
-      confirmStructureChange: true,
-    })
+    if (isCollaborationTemplateMode.value) {
+      await collaborationTemplateApi.updateAdmin({
+        templateId: contractId,
+        widgets: orderedWidgets,
+      })
+    } else {
+      await sectionApi.updateWidgets({
+        sectionId: contractId,
+        communityId,
+        widgets: orderedWidgets,
+        confirmStructureChange: true,
+      })
+    }
     widgets.value = widgets.value.map((widget, index) => ({
       ...widget,
       ...orderedWidgets[index],

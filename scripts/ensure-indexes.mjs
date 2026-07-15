@@ -171,6 +171,23 @@ const INDEXES = [
       { Name: 'order', Direction: '1' },
     ],
   },
+  // collaboration_templates: 全局稳定键唯一，启用目录按 order 排序。
+  {
+    coll: 'collaboration_templates',
+    name: 'idx_collaboration_systemKey_unique',
+    unique: true,
+    keys: [
+      { Name: 'systemKey', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'collaboration_templates',
+    name: 'idx_collaboration_status_order',
+    keys: [
+      { Name: 'status', Direction: '1' },
+      { Name: 'order', Direction: '1' },
+    ],
+  },
   // posts: post.list 按 sectionId + status 查，createdAt 倒序
   {
     coll: 'posts',
@@ -191,6 +208,18 @@ const INDEXES = [
       { Name: 'status', Direction: '1' },
       { Name: 'auditStatus', Direction: '1' },
       { Name: 'sortKey', Direction: '-1' },
+    ],
+  },
+  // posts: 无 section 实时协作流按社区和全局模板读取。
+  {
+    coll: 'posts',
+    name: 'idx_communityId_area_template_status_createdAt',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'area', Direction: '1' },
+      { Name: 'collaborationTemplateId', Direction: '1' },
+      { Name: 'status', Direction: '1' },
+      { Name: 'createdAt', Direction: '-1' },
     ],
   },
   {
@@ -568,6 +597,7 @@ const INDEXES = [
 
 const REQUIRED_COLLECTIONS = [
   'app_configs',
+  'collaboration_templates',
   'archive_topics',
   'archive_post_topics',
   'post_attendance_members',

@@ -61,7 +61,7 @@ test.beforeAll(async () => {
     name: `Playwright-${runId}`,
     icon: 'book',
     order: 0,
-    type: 'realtime',
+    type: 'evergreen',
   })
   state.sectionId = sectionId
 

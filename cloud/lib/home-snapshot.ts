@@ -7,6 +7,10 @@ import { normalizeSectionTemplates } from '../shared/section-templates'
 import { resolveAuthorAvatarUrl } from '../shared/simulated-author-avatars'
 import { resolvePostAuthorNickname } from '../shared/post-author'
 import {
+  collaborationTemplateAsSection,
+  normalizeCollaborationTemplate,
+} from '../shared/collaboration-templates'
+import {
   parsePerformanceTrace,
   recordDatabaseStage,
   type PerformanceTrace,
@@ -16,6 +20,7 @@ import type {
   AttendanceSummary,
   AttendanceSummaryByWidget,
   Community,
+  CollaborationTemplate,
   HomeBootstrapResponse,
   HomeSnapshot,
   Post,
@@ -297,11 +302,23 @@ export async function buildHomeFeed(
   }
 
   const sectionsStartedAt = Date.now()
-  const rawSections = await db.query('sections', { communityId: normalizedCommunityId }, { orderBy: ['order', 'asc'] })
+  const [rawSections, rawCollaborationTemplates] = await Promise.all([
+    db.query('sections', { communityId: normalizedCommunityId }, { orderBy: ['order', 'asc'] }),
+    db.query('collaboration_templates', { status: 'active' }, { orderBy: ['order', 'asc'] }),
+  ])
   recordDatabaseStage(trace, 'post.bootstrap', 'sections', sectionsStartedAt, {
     sections: rawSections.length,
+    collaborationTemplates: rawCollaborationTemplates.length,
   })
   const sections = (rawSections as Section[]).map(normalizeSectionForClient)
+  const collaborationTemplates = (rawCollaborationTemplates as CollaborationTemplate[])
+    .map(normalizeCollaborationTemplate)
+  const collaborationSectionByTemplate: Record<string, Section> = Object.fromEntries(
+    collaborationTemplates.map((template) => [
+      template._id,
+      collaborationTemplateAsSection(template, normalizedCommunityId),
+    ]),
+  )
   const sectionById: Record<string, Section | null> = Object.fromEntries(
     sections.map((section) => [section._id, section])
   )
@@ -312,29 +329,66 @@ export async function buildHomeFeed(
   )
 
   const slicedBySection: Record<string, any[]> = {}
+  const slicedByCollaborationTemplate: Record<string, any[]> = {}
   const postsStartedAt = Date.now()
-  await Promise.all(sections.map(async (section) => {
-    const sectionPosts = await db.query('posts', {
-      sectionId: section._id,
-      status: 'active',
-    }, {
-      orderBy: ['createdAt', 'desc'],
-      limit: 100,
-    })
-    slicedBySection[section._id] = (sectionPosts as any[])
-      .filter((post) => sectionIdSet.has(post.sectionId))
-      .filter(isPostVisibleToMembers)
-      .slice()
-      .sort(comparePostListOrder)
-      .slice(0, limitPerSection)
-  }))
+  await Promise.all([
+    ...sections.map(async (section) => {
+      const sectionPosts = await db.query('posts', {
+        sectionId: section._id,
+        status: 'active',
+      }, {
+        orderBy: ['createdAt', 'desc'],
+        limit: 100,
+      })
+      slicedBySection[section._id] = (sectionPosts as any[])
+        .filter((post) => sectionIdSet.has(post.sectionId))
+        .filter(isPostVisibleToMembers)
+        .slice()
+        .sort(comparePostListOrder)
+        .slice(0, limitPerSection)
+    }),
+    ...collaborationTemplates.map(async (template) => {
+      const collaborationPosts = await db.query('posts', {
+        communityId: normalizedCommunityId,
+        area: 'collaboration',
+        collaborationTemplateId: template._id,
+        status: 'active',
+      }, {
+        orderBy: ['createdAt', 'desc'],
+        limit: 100,
+      })
+      slicedByCollaborationTemplate[template._id] = (collaborationPosts as any[])
+        .filter((post) => (
+          post.communityId === normalizedCommunityId
+          && post.area === 'collaboration'
+          && post.collaborationTemplateId === template._id
+        ))
+        .filter(isPostVisibleToMembers)
+        .slice()
+        .sort(comparePostListOrder)
+        .slice(0, limitPerSection)
+    }),
+  ])
   recordDatabaseStage(trace, 'post.bootstrap', 'posts_by_section', postsStartedAt, {
     sectionQueries: sections.length,
-    posts: Object.values(slicedBySection).reduce((sum, posts) => sum + posts.length, 0),
+    collaborationTemplateQueries: collaborationTemplates.length,
+    posts: [slicedBySection, slicedByCollaborationTemplate]
+      .flatMap((group) => Object.values(group))
+      .reduce((sum, posts) => sum + posts.length, 0),
   })
 
   const slicedPosts = Object.values(slicedBySection).flat()
   const withAttendance = await enrichPostsWithAttendance(slicedPosts, sectionById, openid)
+  const collaborationPosts = Object.values(slicedByCollaborationTemplate).flat()
+  const collaborationWithAttendance = await Promise.all(collaborationPosts.map(async (post: any) => {
+    const section = collaborationSectionByTemplate[String(post.collaborationTemplateId || '')]
+    return {
+      ...post,
+      attendanceSummaryByWidget: section
+        ? await buildAttendanceSummaryByWidget(post, section, openid)
+        : {},
+    }
+  }))
   const membershipByCommunity = new Map<string, Promise<boolean>>()
   if (verifiedMembership !== undefined) {
     membershipByCommunity.set(normalizedCommunityId, Promise.resolve(verifiedMembership))
@@ -346,8 +400,10 @@ export async function buildHomeFeed(
     membershipByCommunity.set(targetCommunityId, pending)
     return pending
   }
-  const visiblePosts = await Promise.all(withAttendance.map(async (post: any) => {
-    const section = sectionById[post.sectionId]
+  const visiblePosts = await Promise.all([...withAttendance, ...collaborationWithAttendance].map(async (post: any) => {
+    const section = post.area === 'collaboration'
+      ? collaborationSectionByTemplate[String(post.collaborationTemplateId || '')]
+      : sectionById[post.sectionId]
     if (!section) return post
     const communityId = String(post.communityId || section.communityId || '')
     const canViewMemberOnly = await resolveMembership(communityId)
@@ -362,7 +418,20 @@ export async function buildHomeFeed(
       .map((post) => slimPostForHome(post, section))
   }
 
-  return { sections, postsBySection }
+  const collaborationPostsByTemplate: Record<string, Post[]> = {}
+  for (const template of collaborationTemplates) {
+    const section = collaborationSectionByTemplate[template._id]
+    collaborationPostsByTemplate[template._id] = (slicedByCollaborationTemplate[template._id] || [])
+      .map((post) => enrichedById.get(post._id) || post)
+      .map((post) => slimPostForHome(post, section))
+  }
+
+  return {
+    sections,
+    postsBySection,
+    collaborationTemplates,
+    collaborationPostsByTemplate,
+  }
 }
 
 export function emptyHomeSnapshot(viewerOpenId = ''): HomeSnapshot {
@@ -375,6 +444,8 @@ export function emptyHomeSnapshot(viewerOpenId = ''): HomeSnapshot {
     communities: [],
     sections: [],
     postsBySection: {},
+    collaborationTemplates: [],
+    collaborationPostsByTemplate: {},
   }
 }
 

@@ -73,6 +73,39 @@ describe('callCloud', () => {
     })
   })
 
+  test('exposes global collaboration templates and section-free collaboration post actions', async () => {
+    callWebFunction.mockResolvedValue({ templates: [] })
+    vi.stubGlobal('uni', {})
+
+    const { collaborationTemplateApi, postApi } = await import('../cloud')
+    await collaborationTemplateApi.listActive()
+    await collaborationTemplateApi.get('collaboration-template-carpool')
+    await postApi.createCollaboration({
+      communityId: 'community-1',
+      collaborationTemplateId: 'collaboration-template-carpool',
+      content: { carpool_origin: '青山村' },
+    })
+    await postApi.listCollaboration('community-1', 'collaboration-template-carpool', 0)
+
+    expect(callWebFunction).toHaveBeenNthCalledWith(1, 'collaboration-template', { action: 'listActive' })
+    expect(callWebFunction).toHaveBeenNthCalledWith(2, 'collaboration-template', {
+      action: 'get', templateId: 'collaboration-template-carpool',
+    })
+    expect(callWebFunction).toHaveBeenNthCalledWith(3, 'post', {
+      action: 'createCollaboration',
+      communityId: 'community-1',
+      collaborationTemplateId: 'collaboration-template-carpool',
+      content: { carpool_origin: '青山村' },
+    })
+    expect(callWebFunction).toHaveBeenNthCalledWith(4, 'post', {
+      action: 'listCollaboration',
+      communityId: 'community-1',
+      collaborationTemplateId: 'collaboration-template-carpool',
+      skip: 0,
+      asGuest: false,
+    })
+  })
+
   test('forwards only whitelisted performance trace fields to the cloud function', async () => {
     const callFunction = vi.fn(({ success }: { success: (value: any) => void }) => {
       success({ result: { ok: true }, requestId: 'server-request-1' })

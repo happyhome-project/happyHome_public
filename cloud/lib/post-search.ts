@@ -1,6 +1,7 @@
 import type { Post, Section, Widget } from '../shared/types'
 import { createHash } from 'crypto'
 import { normalizeSectionTemplates } from '../shared/section-templates'
+import { loadPostContentSection } from './post-content-contract'
 
 export interface PostSearchField {
   widgetId: string
@@ -415,7 +416,7 @@ export function buildPostSearchDocument(post: Post, section: Section, now = new 
     _id: post._id,
     postId: post._id,
     communityId: post.communityId,
-    sectionId: post.sectionId,
+    sectionId: String(post.sectionId || ''),
     sectionName: normalizedSection.name,
     title,
     fields,
@@ -652,12 +653,13 @@ export async function refreshPostSearchIndexById(postId: string) {
     return { indexed: false, postId: normalizedPostId, termCount: 0, reason: 'post_missing' }
   }
 
-  let section: Section | null = null
-  try {
-    section = await db.getById('sections', post.sectionId) as Section
-  } catch {
-    section = null
-  }
+  const section = await loadPostContentSection(post, async (collectionName, id) => {
+    try {
+      return await db.getById(collectionName, id)
+    } catch {
+      return null
+    }
+  })
   if (!section) {
     await removePostSearchIndex(normalizedPostId)
     return { indexed: false, postId: normalizedPostId, termCount: 0, reason: 'section_missing' }
@@ -670,23 +672,27 @@ export async function backfillPostSearchIndexesForCommunity(communityId: string)
   const normalizedCommunityId = String(communityId || '').trim()
   if (!normalizedCommunityId) throw new Error('communityId is required')
   const posts = await queryAll<Post>('posts', { communityId: normalizedCommunityId }, ['updatedAt', 'desc'])
-  const sectionById = new Map<string, Section | null>()
+  const sectionByContract = new Map<string, Section | null>()
   let indexedCount = 0
   let removedCount = 0
   let failedCount = 0
 
   for (const post of posts) {
     try {
-      if (!sectionById.has(post.sectionId)) {
-        let section: Section | null = null
-        try {
-          section = await getDb().getById('sections', post.sectionId) as Section
-        } catch {
-          section = null
-        }
-        sectionById.set(post.sectionId, section)
+      const contractKey = post.area === 'collaboration'
+        ? `collaboration:${String(post.collaborationTemplateId || '')}`
+        : `section:${String(post.sectionId || '')}`
+      if (!sectionByContract.has(contractKey)) {
+        const section = await loadPostContentSection(post, async (collectionName, id) => {
+          try {
+            return await getDb().getById(collectionName, id)
+          } catch {
+            return null
+          }
+        })
+        sectionByContract.set(contractKey, section)
       }
-      const section = sectionById.get(post.sectionId)
+      const section = sectionByContract.get(contractKey)
       if (!section) {
         await removePostSearchIndex(post._id)
         removedCount += 1

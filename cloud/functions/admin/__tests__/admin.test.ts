@@ -133,6 +133,241 @@ test('production non-HTTP calls accept the configured internal capability', asyn
   }
 })
 
+describe('global collaboration template administration', () => {
+  test('listAdmin returns global templates ordered independently of community', async () => {
+    ;(db.query as jest.Mock).mockResolvedValueOnce([
+      {
+        _id: 'template-1',
+        systemKey: 'carpool',
+        name: '拼车出行',
+        icon: '🚗',
+        order: 0,
+        status: 'active',
+        widgets: [],
+      },
+    ])
+
+    const result: any = await main({ action: 'collaborationTemplate.listAdmin' })
+
+    expect(db.query).toHaveBeenCalledWith('collaboration_templates', {}, { orderBy: ['order', 'asc'] })
+    expect(result.templates).toEqual([
+      expect.objectContaining({ _id: 'template-1', name: '拼车出行', status: 'active' }),
+    ])
+  })
+
+  test('createAdmin creates an active global template without communityId', async () => {
+    ;(db.query as jest.Mock).mockResolvedValue([])
+    ;(db.create as jest.Mock).mockResolvedValue('template-new')
+
+    const result: any = await main({
+      action: 'collaborationTemplate.createAdmin',
+      name: '邻里互助',
+      icon: '🤝',
+      order: 2,
+    })
+
+    expect(result.templateId).toBe('template-new')
+    expect(db.create).toHaveBeenCalledWith('collaboration_templates', expect.objectContaining({
+      name: '邻里互助',
+      status: 'active',
+      widgets: [],
+      protectedSystemKey: false,
+    }))
+    expect((db.create as jest.Mock).mock.calls[0][1]).not.toHaveProperty('communityId')
+  })
+
+  test('updateAdmin blocks incompatible widget changes when posts exist', async () => {
+    ;(db.getById as jest.Mock).mockResolvedValueOnce({
+      _id: 'template-1',
+      systemKey: 'carpool',
+      name: '拼车出行',
+      status: 'active',
+      widgets: [
+        { widgetId: 'origin', fieldKey: 'origin', type: 'short_text', label: '出发地', required: true, order: 0 },
+      ],
+    })
+    ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'post-1' }])
+
+    await expect(main({
+      action: 'collaborationTemplate.updateAdmin',
+      templateId: 'template-1',
+      widgets: [],
+    })).rejects.toThrow(/数据迁移/)
+
+    expect(db.updateById).not.toHaveBeenCalledWith('collaboration_templates', 'template-1', expect.anything())
+  })
+
+  test('deleteAdmin protects built-in templates and templates with posts', async () => {
+    ;(db.getById as jest.Mock).mockResolvedValueOnce({
+      _id: 'template-protected',
+      protectedSystemKey: true,
+      name: '拼车出行',
+    })
+    await expect(main({
+      action: 'collaborationTemplate.deleteAdmin',
+      templateId: 'template-protected',
+    })).rejects.toThrow(/内置模板/)
+
+    ;(db.getById as jest.Mock).mockResolvedValueOnce({
+      _id: 'template-custom',
+      protectedSystemKey: false,
+      name: '临时协作',
+    })
+    ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'post-1' }])
+    await expect(main({
+      action: 'collaborationTemplate.deleteAdmin',
+      templateId: 'template-custom',
+    })).rejects.toThrow(/已有帖子/)
+  })
+})
+
+describe('admin collaboration post management', () => {
+  test('community admin can soft-delete a collaboration post in an owned community', async () => {
+    const post = {
+      _id: 'post-owned',
+      communityId: 'community-owned',
+      area: 'collaboration',
+      collaborationTemplateId: 'template-1',
+      authorId: 'user-1',
+      status: 'active',
+      content: {},
+    }
+    ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string) => {
+      if (collectionName === 'posts') return post
+      if (collectionName === 'communities') return { _id: 'community-owned', creatorId: 'owner-openid' }
+      throw new Error('not found')
+    })
+    ;(db.query as jest.Mock).mockResolvedValue([])
+
+    await expect(main({
+      action: 'post.deleteAdmin',
+      postId: 'post-owned',
+      _actAs: {
+        accountId: 'community-admin',
+        role: 'communityAdmin',
+        userId: 'owner-openid',
+        username: 'owner',
+      },
+    })).resolves.toEqual({ success: true })
+
+    expect(db.updateById).toHaveBeenCalledWith('posts', 'post-owned', expect.objectContaining({ status: 'deleted' }))
+  })
+
+  test('community admin cannot delete a collaboration post in another community', async () => {
+    ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string) => {
+      if (collectionName === 'posts') return {
+        _id: 'post-foreign',
+        communityId: 'community-foreign',
+        area: 'collaboration',
+        collaborationTemplateId: 'template-1',
+        status: 'active',
+      }
+      if (collectionName === 'communities') return { _id: 'community-foreign', creatorId: 'somebody-else' }
+      throw new Error('not found')
+    })
+    ;(db.query as jest.Mock).mockResolvedValue([])
+
+    await expect(main({
+      action: 'post.deleteAdmin',
+      postId: 'post-foreign',
+      _actAs: {
+        accountId: 'community-admin',
+        role: 'communityAdmin',
+        userId: 'owner-openid',
+        username: 'owner',
+      },
+    })).rejects.toThrow(/权限不足/)
+
+    expect(db.updateById).not.toHaveBeenCalledWith('posts', 'post-foreign', expect.anything())
+  })
+
+  test('listAdmin resolves and filters section-free collaboration posts by global template', async () => {
+    ;(db.query as jest.Mock).mockImplementation(async (collectionName: string) => {
+      if (collectionName === 'posts') return [
+        {
+          _id: 'post-1',
+          communityId: 'community-1',
+          area: 'collaboration',
+          collaborationTemplateId: 'template-1',
+          authorId: 'user-1',
+          status: 'active',
+          content: { origin: 'A' },
+        },
+        {
+          _id: 'post-2',
+          communityId: 'community-1',
+          area: 'collaboration',
+          collaborationTemplateId: 'template-2',
+          authorId: 'user-1',
+          status: 'active',
+          content: {},
+        },
+      ]
+      if (collectionName === 'audit_tasks') return []
+      return []
+    })
+    ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+      if (collectionName === 'users') return { _id: id, nickName: '成员' }
+      if (collectionName === 'collaboration_templates') return {
+        _id: id,
+        systemKey: id === 'template-1' ? 'carpool' : 'other',
+        name: id === 'template-1' ? '拼车出行' : '其他协作',
+        status: 'active',
+        widgets: [],
+      }
+      throw new Error('not found')
+    })
+
+    const result: any = await main({
+      action: 'post.listAdmin',
+      communityId: 'community-1',
+      area: 'collaboration',
+      collaborationTemplateId: 'template-1',
+    })
+
+    expect(result.posts).toHaveLength(1)
+    expect(result.posts[0]).toEqual(expect.objectContaining({
+      _id: 'post-1',
+      sectionName: '拼车出行',
+      sectionType: 'realtime',
+      collaborationTemplateId: 'template-1',
+    }))
+  })
+
+  test('getAdmin returns a section-shaped global template for collaboration post editing', async () => {
+    ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+      if (collectionName === 'posts') return {
+        _id: id,
+        communityId: 'community-1',
+        area: 'collaboration',
+        collaborationTemplateId: 'template-1',
+        authorId: 'user-1',
+        content: {},
+      }
+      if (collectionName === 'users') return { _id: id, nickName: '成员' }
+      if (collectionName === 'collaboration_templates') return {
+        _id: id,
+        systemKey: 'carpool',
+        name: '拼车出行',
+        status: 'active',
+        widgets: [],
+      }
+      throw new Error('not found')
+    })
+    ;(db.query as jest.Mock).mockResolvedValue([])
+
+    const result: any = await main({ action: 'post.getAdmin', postId: 'post-1' })
+
+    expect(result.section).toEqual(expect.objectContaining({
+      _id: 'template-1',
+      communityId: 'community-1',
+      name: '拼车出行',
+      type: 'realtime',
+    }))
+    expect(result.collaborationTemplate).toEqual(expect.objectContaining({ _id: 'template-1' }))
+  })
+})
+
 function useAdminMembershipTransaction(options: {
   community?: Record<string, any>
   member?: Record<string, any>
@@ -735,6 +970,17 @@ test('section.create: 图文攻略展示模板可保存到板块', async () => {
   }))
 })
 
+test('section.create: 旧社区接口拒绝创建 realtime 板块', async () => {
+  await expect(main({
+    action: 'section.create',
+    communityId: 'community-1',
+    name: '局部拼车',
+    type: 'realtime',
+  })).rejects.toThrow('全局协作模板')
+
+  expect(db.create).not.toHaveBeenCalled()
+})
+
 test('section.create: 纯文字笔记创建时写入精确的两个固定控件', async () => {
   ;(db.create as jest.Mock).mockResolvedValue('section-text')
 
@@ -1107,6 +1353,23 @@ test('section.updateMeta: 已创建板块拒绝切换或传入未知展示模板
     sectionId: 'section-1',
     displayTemplate: 'unexpected-template',
   })).rejects.toThrow('展示模板')
+  expect(db.updateById).not.toHaveBeenCalled()
+})
+
+test('section.updateMeta: 已创建板块不允许切换为 realtime', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-1',
+    communityId: 'community-1',
+    type: 'evergreen',
+    status: 'active',
+  })
+
+  await expect(main({
+    action: 'section.updateMeta',
+    sectionId: 'section-1',
+    type: 'realtime',
+  })).rejects.toThrow('不允许切换为 realtime')
+
   expect(db.updateById).not.toHaveBeenCalled()
 })
 

@@ -21,6 +21,7 @@ jest.mock('../public-community', () => ({
 
 import * as db from '../db'
 import { buildHomeFeed, buildHomeSnapshot } from '../home-snapshot'
+import { buildInitialCollaborationTemplates } from '../../shared/collaboration-templates'
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -150,4 +151,45 @@ test('buildHomeFeed 将 101 位作者按每批最多 100 条读取，而不是�
     .filter(([collection]) => collection === 'users')
     .map(([, ids]) => ids.length)
   expect(userBatches).toEqual([100, 1])
+})
+
+test('buildHomeFeed 为所有社群返回同一组全局协作模板及当前社群帖子', async () => {
+  const templates = buildInitialCollaborationTemplates()
+  ;(db.query as jest.Mock).mockImplementation(async (collection: string, where: any) => {
+    if (collection === 'sections') return []
+    if (collection === 'collaboration_templates') return templates
+    if (collection === 'posts' && where.area === 'collaboration') {
+      return [{
+        _id: `post-${where.collaborationTemplateId}`,
+        communityId: 'community-1',
+        area: 'collaboration',
+        collaborationTemplateId: where.collaborationTemplateId,
+        collaborationSystemKey: templates.find((template) => template._id === where.collaborationTemplateId)?.systemKey,
+        authorId: '',
+        status: 'active',
+        auditStatus: 'pass',
+        content: where.collaborationTemplateId === templates[0]._id
+          ? { carpool_origin: '青山村', carpool_destination: '成都软件园' }
+          : { activity_invite_title: '周末徒步' },
+        createdAt: '2026-07-15T10:00:00.000Z',
+      }]
+    }
+    return []
+  })
+
+  const result = await buildHomeFeed('community-1', 'viewer', {
+    skipMembershipCheck: true,
+    viewerIsMember: true,
+  })
+
+  expect(result.collaborationTemplates.map((template) => template.name)).toEqual(['拼车出行', '出游邀约'])
+  expect(Object.keys(result.collaborationPostsByTemplate)).toEqual(templates.map((template) => template._id))
+  expect(result.collaborationPostsByTemplate[templates[0]._id][0]).toEqual(expect.objectContaining({
+    area: 'collaboration',
+    collaborationTemplateId: templates[0]._id,
+  }))
+  expect(result.collaborationPostsByTemplate[templates[0]._id][0]).not.toHaveProperty('sectionId')
+  expect((db.query as jest.Mock).mock.calls.filter(([collection, where]) => (
+    collection === 'posts' && where.area === 'collaboration'
+  ))).toHaveLength(2)
 })

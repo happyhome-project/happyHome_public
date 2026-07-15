@@ -105,12 +105,21 @@ describe('home snapshot cache', () => {
       communities: [{ _id: 'community-1' }, null],
       sections: [{ _id: 'section-1', widgets: 'invalid' }, null],
       postsBySection: { 'section-1': [{ _id: 'post-1' }], broken: 'invalid' },
+      collaborationTemplates: [{ _id: 'collaboration-template-carpool', widgets: 'invalid' }, null],
+      collaborationPostsByTemplate: {
+        'collaboration-template-carpool': [{ _id: 'carpool-post-1' }],
+        broken: 'invalid',
+      },
       currentCommunity: { _id: 'community-1', homeBanners: 'invalid' },
     })
 
     expect(snapshot?.communities).toEqual([{ _id: 'community-1' }])
     expect(snapshot?.sections).toEqual([{ _id: 'section-1', widgets: [] }])
     expect(snapshot?.postsBySection).toEqual({ 'section-1': [{ _id: 'post-1' }] })
+    expect(snapshot?.collaborationTemplates).toEqual([{ _id: 'collaboration-template-carpool', widgets: [] }])
+    expect(snapshot?.collaborationPostsByTemplate).toEqual({
+      'collaboration-template-carpool': [{ _id: 'carpool-post-1' }],
+    })
     expect(snapshot?.currentCommunity).toEqual({ _id: 'community-1', homeBanners: [] })
   })
 
@@ -125,12 +134,16 @@ describe('home snapshot cache', () => {
       communities: [{ _id: 'community-1', name: '青山村', status: 'active' }],
       sections: [{ _id: 'section-1', communityId: 'community-1', name: '邻里' }],
       postsBySection: { 'section-1': [{ _id: 'secret-post' }] },
+      collaborationTemplates: [{ _id: 'collaboration-template-carpool', widgets: [] }],
+      collaborationPostsByTemplate: { 'collaboration-template-carpool': [{ _id: 'secret-carpool' }] },
     }
 
     expect(createHomeSnapshotShell(snapshot as any)).toEqual(expect.objectContaining({
       currentCommunityId: 'community-1',
       sections: [expect.objectContaining({ _id: 'section-1' })],
       postsBySection: {},
+      collaborationTemplates: [expect.objectContaining({ _id: 'collaboration-template-carpool' })],
+      collaborationPostsByTemplate: {},
     }))
   })
 

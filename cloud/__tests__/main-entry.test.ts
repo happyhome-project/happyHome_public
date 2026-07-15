@@ -45,6 +45,7 @@ import { main as _communityMain } from '../functions/community/index'
 import { main as _memberMain } from '../functions/member/index'
 import { main as _sectionMain } from '../functions/section/index'
 import { main as _postMain } from '../functions/post/index'
+import { main as _collaborationTemplateMain } from '../functions/collaboration-template/index'
 
 // Cast all mains to uniform signature — integration tests exercise the routing
 // layer, not the per-action return shape.
@@ -54,6 +55,7 @@ const communityMain = _communityMain as AnyMain
 const memberMain = _memberMain as AnyMain
 const sectionMain = _sectionMain as AnyMain
 const postMain = _postMain as AnyMain
+const collaborationTemplateMain = _collaborationTemplateMain as AnyMain
 
 function mockCommunityCreateTransaction(communityId = 'c-new') {
   const communityAdd = jest.fn().mockResolvedValue({ _id: communityId })
@@ -139,6 +141,7 @@ describe('Action routing', () => {
     ['member', memberMain],
     ['section', sectionMain],
     ['post', postMain],
+    ['collaboration-template', collaborationTemplateMain],
   ])('%s.main throws on unknown action', async (_name, main) => {
     await expect(main(fe('bogusAction'))).rejects.toThrow(/Unknown action/)
   })

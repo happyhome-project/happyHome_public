@@ -82,7 +82,7 @@ async function main() {
     name: `Nightly-${runId}`,
     icon: 'book',
     order: 0,
-    type: 'realtime',
+    type: 'evergreen',
   })
   assert(!!sectionId, `section created: ${sectionId}`)
 

@@ -53,13 +53,13 @@ async function main() {
     communityId, name: '未配置控件板块', icon: '❓', order: 0, type: 'evergreen',
   })
   const { sectionId: requiredOnlyId } = await callAdmin('section.create', {
-    communityId, name: '全必填板块', icon: '📋', order: 1, type: 'realtime',
+    communityId, name: '全必填板块', icon: '📋', order: 1, type: 'evergreen',
   })
   const { sectionId: optionalOnlyId } = await callAdmin('section.create', {
     communityId, name: '全选填板块', icon: '✏️', order: 2, type: 'evergreen',
   })
   const { sectionId: mixedId } = await callAdmin('section.create', {
-    communityId, name: '混合板块', icon: '🔀', order: 3, type: 'realtime',
+    communityId, name: '混合板块', icon: '🔀', order: 3, type: 'evergreen',
   })
 
   // 给 requiredOnly 配 2 个必填

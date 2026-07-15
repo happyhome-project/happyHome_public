@@ -469,6 +469,7 @@ import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { communityInitial } from '../../utils/community-avatar'
 import { uploadCloudFile } from '../../api/storage'
 import { resolveSectionIconGlyph } from '../../utils/section-icon'
+import { asCollaborationSection } from '../../utils/collaboration-template'
 import {
   buildHomeImageKey,
   clearFailedHomeImageProbeEntries,
@@ -521,6 +522,8 @@ const homeLoadingGate = createHomeLoadingGate(homeLoading)
 const homeRefreshSlow = ref(false)
 const homeRefreshError = ref('')
 const postsBySection = ref<Record<string, any[]>>({})
+const collaborationTemplates = ref<any[]>([])
+const collaborationPostsByTemplate = ref<Record<string, any[]>>({})
 const resolvedHomeGuideCoverUrls = ref<Record<string, string>>({})
 const homeImageProbeEntries = ref<Record<string, HomeImageProbeEntry>>({})
 const incomingShareCommunityId = ref('')
@@ -637,7 +640,7 @@ function sectionIconGlyph(section: any, fallback = '·'): string {
   return resolveSectionIconGlyph(section?.icon, fallback)
 }
 
-// ── 实时协作区：type='realtime' && status='active' 的板块，按帖子逐条展示 ──
+// ── 实时协作区：全局协作模板，按当前社区的帖子逐条展示 ──
 interface LiveItem {
   ic: string
   t: string
@@ -649,11 +652,10 @@ interface LiveItem {
   isFeatured?: boolean
 }
 const liveItems = computed<LiveItem[]>(() => {
-  const sections = communityStore.currentSections ?? []
   const items: LiveItem[] = []
-  for (const section of sections) {
-    if (secType(section) !== 'realtime' || secStatus(section) !== 'active') continue
-    const posts = postsBySection.value[section._id] ?? []
+  for (const template of collaborationTemplates.value) {
+    const section = asCollaborationSection(template, communityStore.currentCommunityId)
+    const posts = collaborationPostsByTemplate.value[template._id] ?? []
     for (const post of posts) {
       reportMissingHomeTitle(post, section, 'home.live')
       items.push({
@@ -1558,6 +1560,8 @@ function applyHomeSnapshot(rawSnapshot: HomeSnapshot | null, source: 'prefetch' 
   communityStore.currentSectionIndex = 0
   communityStore.currentSections = safeSnapshot.sections || []
   postsBySection.value = safeSnapshot.postsBySection || {}
+  collaborationTemplates.value = safeSnapshot.collaborationTemplates || []
+  collaborationPostsByTemplate.value = safeSnapshot.collaborationPostsByTemplate || {}
   guestIntroConfig.value = userStore.isLoggedIn
     ? null
     : normalizeGuestIntroConfig(safeSnapshot.guestIntroConfig || null)
@@ -1569,7 +1573,12 @@ function applyHomeSnapshot(rawSnapshot: HomeSnapshot | null, source: 'prefetch' 
     communityCount: communityStore.myCommunities.length,
     currentCommunityId: communityStore.currentCommunityId || '',
     sectionCount: communityStore.currentSections.length,
-    totalPosts: Object.keys(postsBySection.value).reduce((sum, key) => sum + (postsBySection.value[key]?.length || 0), 0),
+    totalPosts:
+      Object.keys(postsBySection.value).reduce((sum, key) => sum + (postsBySection.value[key]?.length || 0), 0)
+      + Object.keys(collaborationPostsByTemplate.value).reduce(
+        (sum, key) => sum + (collaborationPostsByTemplate.value[key]?.length || 0),
+        0,
+      ),
   })
   return true
 }
@@ -1604,6 +1613,7 @@ function applyCommunityShellFromCache(communityId: string) {
   const id = String(communityId || '').trim()
   if (!userStore.isLoggedIn || !userStore.openId || !id) return false
   postsBySection.value = {}
+  collaborationPostsByTemplate.value = {}
   const cached = readHomeSnapshotCache({
     openId: userStore.openId,
     communityId: id,
@@ -1622,6 +1632,8 @@ function handleExplicitCommunityAccessLoss(communityId: string, toastTitle = '')
   if (!rejectedCommunityId) return ''
   clearHomeSnapshotCache(userStore.openId, rejectedCommunityId)
   postsBySection.value = {}
+  collaborationTemplates.value = []
+  collaborationPostsByTemplate.value = {}
   if (toastTitle) uni.showToast({ title: toastTitle, icon: 'none' })
   const restoredCommunityId = communityStore.handleCommunityAccessLost(rejectedCommunityId)
   if (restoredCommunityId) {
@@ -1714,6 +1726,8 @@ async function runSingleHomeRefresh(force: boolean) {
       if (userStore.isLoggedIn) handleExplicitCommunityAccessLoss(rejectedCommunityId)
       else {
         postsBySection.value = {}
+        collaborationTemplates.value = []
+        collaborationPostsByTemplate.value = {}
         communityStore.clearCommunityState()
       }
       return
@@ -1724,6 +1738,8 @@ async function runSingleHomeRefresh(force: boolean) {
     }
     if (!communityStore.currentCommunityId) {
       postsBySection.value = {}
+      collaborationTemplates.value = []
+      collaborationPostsByTemplate.value = {}
       clientLog('warn', 'home.community.empty.openOnboarding', {
         loggedIn: userStore.isLoggedIn,
       })

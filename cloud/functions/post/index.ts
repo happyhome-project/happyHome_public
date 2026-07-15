@@ -7,12 +7,9 @@ import { auditAndApply, isPostVisibleToMembers } from '../../lib/content-audit'
 import { buildHomeBootstrap, buildHomeFeed } from '../../lib/home-snapshot'
 import { ensureCommunityReadable } from '../../lib/public-community'
 import {
-  ACTIVITY_INVITE_SECTION_NAME,
   ACTIVITY_INVITE_SYSTEM_KEY,
   ACTIVITY_INVITE_WIDGET_IDS,
-  buildActivityInviteSectionWidgets,
   isActivityInviteInProgress,
-  isActivityInviteSection,
 } from '../../shared/activity-invite'
 import { removePostSearchIndex } from '../../lib/post-search'
 import { enqueuePostRagDeleteJobInTransaction, enqueuePostRagJob } from '../../lib/post-rag'
@@ -35,6 +32,12 @@ import { resolvePostAuthorNickname } from '../../shared/post-author'
 import { parseArchivePostCreateInput, type ArchivePostFormat } from '../../shared/archive-post'
 import { decodeArchiveCursor, encodeArchiveCursor, normalizeArchiveTopic, selectArchiveTabs } from '../../shared/archive-topics'
 import { buildArchiveSortKey, syncArchivePostTopics, updateArchivePostTopicLinks } from '../../lib/archive-topic-index'
+import {
+  ACTIVITY_INVITE_TEMPLATE_ID,
+  collaborationTemplateAsSection,
+  normalizeCollaborationTemplate,
+} from '../../shared/collaboration-templates'
+import type { CollaborationTemplate } from '../../shared/types'
 
 type PostRagSmokeIdentity = {
   version: number
@@ -117,23 +120,50 @@ async function ensureActivePostRagSmokeRun(identity: PostRagSmokeIdentity) {
   }
 }
 
-function normalizeSectionForClient(section: Section): Section {
-  const normalized = normalizePostSection(section)
-  return {
-    ...normalized,
-    type: normalized.type || 'evergreen',
-    status: normalized.status || 'active',
-    enableComment: normalized.enableComment !== false,
-    enableLike: normalized.enableLike !== false,
-  } as Section
-}
-
 function getAttendanceWidgets(section: Section): Widget[] {
   return (section.widgets || []).filter((widget) => widget.type === 'attendance')
 }
 
 function normalizePostSection(section: Section): Section {
   return normalizeSectionTemplates(section) as Section
+}
+
+async function loadCollaborationTemplate(
+  templateId: string,
+  options: { activeOnly?: boolean } = {},
+): Promise<CollaborationTemplate> {
+  const normalizedId = String(templateId || '').trim()
+  if (!normalizedId) throw new Error('collaborationTemplateId 不能为空')
+  const template = await db.getById('collaboration_templates', normalizedId) as CollaborationTemplate | null
+  if (!template) throw new Error('协作板块不存在')
+  const normalized = normalizeCollaborationTemplate(template)
+  if (options.activeOnly && normalized.status !== 'active') throw new Error('协作板块已停用')
+  return normalized
+}
+
+async function resolvePostContentContract(post: {
+  communityId: string
+  sectionId?: string
+  area?: string
+  format?: ArchivePostFormat
+  collaborationTemplateId?: string
+}) {
+  if (post.area === 'archive') {
+    const section = buildArchiveContentSection(
+      post.communityId,
+      post.format === 'text' ? 'text' : 'image_text',
+    )
+    return { section, collaborationTemplate: null as CollaborationTemplate | null }
+  }
+  if (post.area === 'collaboration') {
+    const collaborationTemplate = await loadCollaborationTemplate(String(post.collaborationTemplateId || ''))
+    return {
+      section: collaborationTemplateAsSection(collaborationTemplate, post.communityId),
+      collaborationTemplate,
+    }
+  }
+  const section = normalizePostSection(await db.getById('sections', String(post.sectionId || '')) as Section)
+  return { section, collaborationTemplate: null as CollaborationTemplate | null }
 }
 
 function normalizeCapacityValue(value: unknown): number | undefined {
@@ -363,62 +393,6 @@ function buildActivityInvitePrefill(sourcePost: Post, sourceSection: Section) {
   }
 }
 
-async function findActivityInviteSection(communityId: string): Promise<Section | null> {
-  const sections = await db.query('sections', { communityId }, { orderBy: ['order', 'asc'] }) as Section[]
-  const found = sections.find((section) => isActivityInviteSection(section))
-  if (!found) return null
-  return normalizeSectionForClient({
-    ...found,
-    systemKey: ACTIVITY_INVITE_SYSTEM_KEY,
-    widgets: found.widgets?.length ? found.widgets : buildActivityInviteSectionWidgets(),
-  } as Section)
-}
-
-async function ensureActivityInviteSection(communityId: string): Promise<Section> {
-  const existing = await findActivityInviteSection(communityId)
-  if (existing) return {
-    ...existing,
-    systemKey: ACTIVITY_INVITE_SYSTEM_KEY,
-    widgets: existing.widgets?.length ? existing.widgets : buildActivityInviteSectionWidgets(),
-  }
-
-  const now = new Date().toISOString()
-  const sectionData = {
-    communityId,
-    name: ACTIVITY_INVITE_SECTION_NAME,
-    icon: '👣',
-    order: 999,
-    enableComment: true,
-    enableLike: true,
-    widgets: buildActivityInviteSectionWidgets(),
-    createdAt: now,
-    type: 'realtime',
-    status: 'active',
-    displayTemplate: 'default',
-    systemKey: ACTIVITY_INVITE_SYSTEM_KEY,
-  }
-  const sectionId = await db.create('sections', sectionData)
-  return normalizeSectionForClient({ ...sectionData, _id: sectionId } as Section)
-}
-
-function buildVirtualActivityInviteSection(communityId: string): Section {
-  return normalizeSectionForClient({
-    _id: '',
-    communityId,
-    name: ACTIVITY_INVITE_SECTION_NAME,
-    icon: '👣',
-    order: 999,
-    enableComment: true,
-    enableLike: true,
-    widgets: buildActivityInviteSectionWidgets(),
-    createdAt: new Date().toISOString(),
-    type: 'realtime',
-    status: 'active',
-    displayTemplate: 'default',
-    systemKey: ACTIVITY_INVITE_SYSTEM_KEY,
-  } as Section)
-}
-
 async function findCurrentActivityInvite(
   sourcePostId: string,
   options: { visibleOnly?: boolean } = {},
@@ -484,7 +458,7 @@ function isActivityInviteTimeInProgress(post: { status?: string; eventStartsAt?:
 async function getAttendanceWidgetForPost(postId: string, widgetId?: string) {
   const post = await db.getById('posts', postId) as any
   if (!post || post.status === 'deleted' || !isPostVisibleToMembers(post)) throw new Error('帖子不存在')
-  const section = await db.getById('sections', post.sectionId) as Section
+  const { section } = await resolvePostContentContract(post)
   const attendanceWidgets = getAttendanceWidgets(section)
   if (attendanceWidgets.length === 0) throw new Error('该板块下没有可以报名的控件')
   const widget = widgetId
@@ -664,6 +638,67 @@ export async function handleCreate(
   return { postId, auditStatus: audit.status, auditReason: audit.reason }
 }
 
+export async function handleCreateCollaboration(
+  params: {
+    communityId: string
+    collaborationTemplateId: string
+    content: PostContent
+  },
+  openid: string,
+) {
+  if (!openid) throw new Error('Missing OPENID')
+  const communityId = String(params.communityId || '').trim()
+  if (!communityId) throw new Error('communityId 不能为空')
+  await ensureActiveCommunityMember(communityId, openid)
+
+  const template = await loadCollaborationTemplate(params.collaborationTemplateId, { activeOnly: true })
+  const section = collaborationTemplateAsSection(template, communityId)
+  const sanitizedContent = sanitizeContent(params.content, section)
+  validateRequiredWidgets(section, sanitizedContent)
+  validateContentValues(section, sanitizedContent)
+
+  const now = new Date().toISOString()
+  const postData = {
+    communityId,
+    area: 'collaboration',
+    collaborationTemplateId: template._id,
+    collaborationSystemKey: template.systemKey,
+    authorId: openid,
+    status: 'active',
+    auditStatus: 'pending',
+    auditReason: 'content audit pending',
+    auditUpdatedAt: now,
+    content: sanitizedContent,
+    commentCount: 0,
+    likeCount: 0,
+    isPinned: false,
+    isFeatured: false,
+    createdAt: now,
+    updatedAt: now,
+  }
+  const postId = await db.runTransaction(async transaction => {
+    const created = await transaction.collection('posts').add({ data: postData })
+    await appendPostRagOutboxEvent(transaction, {
+      communityId,
+      aggregateId: created._id,
+      reasonCode: 'post.created',
+      now,
+    })
+    return created._id
+  })
+  const audit = await auditAndApply({
+    postId,
+    communityId,
+    sectionId: '',
+    section,
+    content: sanitizedContent,
+    authorId: openid,
+    source: 'user',
+    contentSlot: 'content',
+  })
+  return { postId, auditStatus: audit.status, auditReason: audit.reason }
+}
+
 export async function handleGetActivityInviteState(
   params: { sourcePostId: string; asGuest?: boolean },
   openid?: string,
@@ -671,9 +706,10 @@ export async function handleGetActivityInviteState(
   const viewerId = params.asGuest ? '' : (openid || '')
   const { sourcePost, sourceSection } = await loadActivityInviteSource(params.sourcePostId, viewerId)
   const invitePost = await findCurrentActivityInvite(sourcePost._id)
-  const inviteSection = invitePost?.sectionId
-    ? normalizeSectionForClient(await db.getById('sections', invitePost.sectionId) as Section)
-    : (await findActivityInviteSection(sourcePost.communityId) || buildVirtualActivityInviteSection(sourcePost.communityId))
+  const inviteTemplate = await loadCollaborationTemplate(
+    String(invitePost?.collaborationTemplateId || ACTIVITY_INVITE_TEMPLATE_ID),
+  )
+  const inviteSection = collaborationTemplateAsSection(inviteTemplate, sourcePost.communityId)
   const invite = invitePost
     ? await buildActivityInviteSummary(invitePost, inviteSection, viewerId)
     : null
@@ -685,7 +721,8 @@ export async function handleGetActivityInviteState(
     targetSection: inviteSection
       ? {
           ...inviteSection,
-          sectionId: inviteSection._id,
+          sectionId: '',
+          collaborationTemplateId: inviteTemplate._id,
           name: inviteSection.name,
           systemKey: inviteSection.systemKey || ACTIVITY_INVITE_SYSTEM_KEY,
         }
@@ -710,7 +747,8 @@ export async function handleCreateActivityInvite(
     }
   }
 
-  const targetSection = await ensureActivityInviteSection(sourcePost.communityId)
+  const targetTemplate = await loadCollaborationTemplate(ACTIVITY_INVITE_TEMPLATE_ID, { activeOnly: true })
+  const targetSection = collaborationTemplateAsSection(targetTemplate, sourcePost.communityId)
   const sanitizedContent = sanitizeContent(params.content, targetSection)
   validateRequiredWidgets(targetSection, sanitizedContent)
   validateContentValues(targetSection, sanitizedContent)
@@ -721,7 +759,9 @@ export async function handleCreateActivityInvite(
   const eventStartsAt = String(sanitizedContent[ACTIVITY_INVITE_WIDGET_IDS.startsAt] || '').trim()
   const inviteData = {
     communityId: sourcePost.communityId,
-    sectionId: targetSection._id,
+    area: 'collaboration',
+    collaborationTemplateId: targetTemplate._id,
+    collaborationSystemKey: targetTemplate.systemKey,
     authorId: openid,
     status: 'active',
     auditStatus: 'pending',
@@ -750,7 +790,7 @@ export async function handleCreateActivityInvite(
   const audit = await auditAndApply({
     postId,
     communityId: sourcePost.communityId,
-    sectionId: targetSection._id,
+    sectionId: '',
     section: targetSection,
     content: sanitizedContent,
     authorId: openid,
@@ -761,7 +801,7 @@ export async function handleCreateActivityInvite(
   return {
     postId,
     alreadyExists: false,
-    sectionId: targetSection._id,
+    collaborationTemplateId: targetTemplate._id,
     eventStartsAt,
     auditStatus: audit.status,
     auditReason: audit.reason,
@@ -790,6 +830,45 @@ export async function handleList(params: {
   const visiblePosts = withAttendance.map((post) => maskMemberOnlyContent(post, section, canViewMemberOnly))
   const enrichedPosts = await enrichPostsWithAuthor(visiblePosts)
   return { posts: enrichedPosts }
+}
+
+export async function handleListCollaboration(params: {
+  communityId: string
+  collaborationTemplateId: string
+  skip?: number
+  limit?: number
+  asGuest?: boolean
+}, openid?: string) {
+  const communityId = String(params.communityId || '').trim()
+  if (!communityId) throw new Error('communityId 不能为空')
+  const viewerId = params.asGuest ? '' : (openid || '')
+  await ensureCommunityReadable(communityId, viewerId, COMMUNITY_READ_ERROR)
+  const template = await loadCollaborationTemplate(params.collaborationTemplateId)
+  const section = collaborationTemplateAsSection(template, communityId)
+  const posts = await db.query('posts', {
+    communityId,
+    area: 'collaboration',
+    collaborationTemplateId: template._id,
+    status: 'active',
+  }, { orderBy: ['createdAt', 'desc'] }) as any[]
+  const orderedPosts = posts.filter(isPostVisibleToMembers).slice().sort(comparePostListOrder)
+  const skip = Math.max(0, Math.floor(Number(params.skip) || 0))
+  const limit = Math.min(50, Math.max(1, Math.floor(Number(params.limit) || 20)))
+  const page = orderedPosts.slice(skip, skip + limit)
+  const canViewMemberOnly = await isActiveCommunityMember(communityId, viewerId)
+  const withAttendance = await Promise.all(page.map(async (post) => ({
+    ...post,
+    attendanceSummaryByWidget: await buildAttendanceSummaryByWidget(post, section, viewerId),
+  })))
+  const visiblePosts = withAttendance.map((post) => maskMemberOnlyContent(post, section, canViewMemberOnly))
+  return {
+    template,
+    posts: await enrichPostsWithAuthor(visiblePosts),
+    total: orderedPosts.length,
+    skip,
+    limit,
+    hasMore: skip + page.length < orderedPosts.length,
+  }
 }
 
 async function getDocumentsByIdsInBatches(collectionName: string, ids: string[]) {
@@ -826,15 +905,29 @@ export async function handleListMine(
 
   const communityIds = [...new Set(authoredPosts.map((post) => String(post?.communityId || '')).filter(Boolean))]
   const sectionIds = [...new Set(authoredPosts.map((post) => String(post?.sectionId || '')).filter(Boolean))]
-  const [communities, sections] = await Promise.all([
+  const collaborationTemplateIds = [...new Set(authoredPosts
+    .filter((post) => post?.area === 'collaboration')
+    .map((post) => String(post?.collaborationTemplateId || ''))
+    .filter(Boolean))]
+  const [communities, sections, collaborationTemplates] = await Promise.all([
     getDocumentsByIdsInBatches('communities', communityIds),
     getDocumentsByIdsInBatches('sections', sectionIds),
+    getDocumentsByIdsInBatches('collaboration_templates', collaborationTemplateIds),
   ])
   const communitiesById = new Map(communities.map((community) => [String(community?._id || ''), community]))
   const sectionsById = new Map(sections.map((section) => [String(section?._id || ''), section]))
+  const collaborationTemplatesById = new Map(collaborationTemplates.map((template) => {
+    const normalized = normalizeCollaborationTemplate(template as CollaborationTemplate)
+    return [String(normalized._id || ''), normalized]
+  }))
   const enriched = authoredPosts.map((post) => {
-    const section = sectionsById.get(String(post?.sectionId || ''))
     const isArchive = post?.area === 'archive'
+    const collaborationTemplate = post?.area === 'collaboration'
+      ? collaborationTemplatesById.get(String(post?.collaborationTemplateId || ''))
+      : undefined
+    const section = collaborationTemplate
+      ? collaborationTemplateAsSection(collaborationTemplate, String(post?.communityId || ''))
+      : sectionsById.get(String(post?.sectionId || ''))
     return {
       ...post,
       communityName: String(communitiesById.get(String(post?.communityId || ''))?.name || '社区'),
@@ -844,6 +937,7 @@ export async function handleListMine(
       displayTemplate: isArchive
         ? (post?.format === 'text' ? 'text_note' : 'image_note')
         : String(section?.displayTemplate || 'default'),
+      ...(collaborationTemplate ? { collaborationTemplate } : {}),
       section: section ? {
         _id: section._id,
         name: section.name,
@@ -956,12 +1050,15 @@ export async function handleGet(params: { postId: string; asGuest?: boolean }, o
     const [enrichedPost] = await enrichPostsWithAuthor([post])
     return { post: enrichedPost }
   }
-  const section = normalizePostSection(await db.getById('sections', post.sectionId) as Section)
+  const { section, collaborationTemplate } = await resolvePostContentContract(post)
   const canViewMemberOnly = await isActiveCommunityMember(post.communityId, viewerId)
   const visiblePost = maskMemberOnlyContent(post, section, canViewMemberOnly)
   const attendanceSummaryByWidget = await buildAttendanceSummaryByWidget(post, section, viewerId)
   const [enrichedPost] = await enrichPostsWithAuthor([{ ...visiblePost, attendanceSummaryByWidget }])
-  return { post: enrichedPost }
+  return {
+    post: enrichedPost,
+    ...(collaborationTemplate ? { collaborationTemplate } : {}),
+  }
 }
 
 export async function handleSearch(params: {
@@ -1044,7 +1141,7 @@ export async function handleUpdate(
 
   const post = await db.getById('posts', params.postId) as {
     communityId: string
-    sectionId: string
+    sectionId?: string
     authorId: string
     status: string
     auditStatus?: string
@@ -1053,6 +1150,7 @@ export async function handleUpdate(
     topics?: string[]
     presentation?: unknown
     createdAt?: string
+    collaborationTemplateId?: string
   }
   if (post.status === 'deleted') throw new Error('帖子已删除')
   if (post.authorId !== openid) throw new Error('无权修改')
@@ -1070,7 +1168,7 @@ export async function handleUpdate(
     : null
   const section = archive
     ? buildArchiveContentSection(post.communityId, archive.format)
-    : normalizePostSection(await db.getById('sections', post.sectionId) as Section)
+    : (await resolvePostContentContract(post)).section
   if (!section || !Array.isArray(section.widgets) || section.widgets.length === 0) {
     throw new Error('该板块尚未配置内容模板，无法编辑')
   }
@@ -1291,9 +1389,11 @@ export const main = async (event: any, context?: any) => {
   if (smokeIdentity) await ensureActivePostRagSmokeRun(smokeIdentity)
   if (action === 'clientLog') return handleClientLog(params, openid)
   if (action === 'create') return handleCreate(params, openid)
+  if (action === 'createCollaboration') return handleCreateCollaboration(params, openid)
   if (action === 'getActivityInviteState') return handleGetActivityInviteState(params, openid)
   if (action === 'createActivityInvite') return handleCreateActivityInvite(params, openid)
   if (action === 'list') return handleList(params, openid)
+  if (action === 'listCollaboration') return handleListCollaboration(params, openid)
   if (action === 'listMine') return handleListMine(params, openid)
   if (action === 'listArchive') return handleListArchive(params, openid)
   if (action === 'listArchiveTabs') return handleListArchiveTabs(params, openid)

@@ -22,9 +22,9 @@ import {
   verifyMigrationInputFile,
 } from './release-component-registry.mjs'
 
-test('release component registry contains the formal cloud functions plus admin and miniprogram', () => {
+test('release component registry contains all formal cloud functions plus admin and miniprogram', () => {
   assert.deepEqual(CLOUD_RELEASE_COMPONENTS, [
-    'admin', 'community', 'home-prefetch', 'http-gateway', 'member',
+    'admin', 'collaboration-template', 'community', 'home-prefetch', 'http-gateway', 'member',
     'post', 'post-rag-worker', 'post-video-rag-worker', 'section', 'user', 'wechat-audit-callback',
   ])
   assert.deepEqual(RELEASE_COMPONENTS, [...CLOUD_RELEASE_COMPONENTS.map((name) => `cloud:${name}`), 'admin-web', 'miniprogram'])

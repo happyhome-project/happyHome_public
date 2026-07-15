@@ -91,6 +91,10 @@ describe('superAdmin-only gate', () => {
     ['admin.deleteAccount', { accountId: 'a' }],
     ['appConfig.getGuestIntro', {}],
     ['appConfig.updateGuestIntro', { config: { title: 'x' } }],
+    ['collaborationTemplate.createAdmin', { name: '临时协作' }],
+    ['collaborationTemplate.updateAdmin', { templateId: 'template-1', name: '改名' }],
+    ['collaborationTemplate.disableAdmin', { templateId: 'template-1', disabled: true }],
+    ['collaborationTemplate.deleteAdmin', { templateId: 'template-1' }],
   ]
   test.each(blockedActions)('communityAdmin cannot call %s', async (action, params) => {
     await expect(internalCall(action, params, ADMIN_CTX_COMMUNITY)).rejects.toThrow(/权限不足/)

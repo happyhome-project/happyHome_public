@@ -44,3 +44,10 @@ test('ensure-indexes includes the archive feed compound index', () => {
   assert.match(source, /archive_post_topics/)
   assert.match(source, /idx_communityId_topicKey_status_auditStatus_sortKey/)
 })
+
+test('ensure-indexes provisions global collaboration templates and section-free post indexes', () => {
+  assert.match(source, /const REQUIRED_COLLECTIONS = \[[\s\S]*'collaboration_templates'/)
+  assert.match(source, /idx_collaboration_systemKey_unique[\s\S]*systemKey/)
+  assert.match(source, /idx_collaboration_status_order[\s\S]*status[\s\S]*order/)
+  assert.match(source, /idx_communityId_area_template_status_createdAt[\s\S]*communityId[\s\S]*area[\s\S]*collaborationTemplateId[\s\S]*status[\s\S]*createdAt/)
+})

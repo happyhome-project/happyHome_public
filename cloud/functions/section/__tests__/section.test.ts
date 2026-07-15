@@ -70,6 +70,20 @@ test('创建板块：非管理员无权创建', async () => {
     .rejects.toThrow('权限不足')
 })
 
+test('创建板块：社区接口拒绝创建 realtime 板块', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ role: 'admin', status: 'active' }])
+
+  await expect(handleCreate({
+    communityId: 'c1',
+    name: '局部拼车',
+    icon: 'car',
+    order: 1,
+    type: 'realtime',
+  }, 'test-openid')).rejects.toThrow('全局协作模板')
+
+  expect(db.create).not.toHaveBeenCalled()
+})
+
 test('get：返回板块信息', async () => {
   ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string) => {
     if (collectionName === 'sections') return { _id: 'section-1', communityId: 'c1', name: '日记' }
@@ -253,6 +267,23 @@ test('update：不会把 sectionId/communityId 写入更新数据', async () => 
   expect(updateData).not.toHaveProperty('sectionId')
   expect(updateData).not.toHaveProperty('communityId')
   expect(updateData).toEqual({ icon: 'star', enableComment: false })
+})
+
+test('update：不允许把已创建板块切换为 realtime', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ role: 'admin', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 's1',
+    communityId: 'c1',
+    type: 'evergreen',
+  })
+
+  await expect(handleUpdate({
+    sectionId: 's1',
+    communityId: 'c1',
+    type: 'realtime',
+  }, 'test-openid')).rejects.toThrow('不允许切换为 realtime')
+
+  expect(db.updateById).not.toHaveBeenCalled()
 })
 
 test('update：缺少 OPENID 时抛出错误', async () => {

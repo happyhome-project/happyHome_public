@@ -12,6 +12,7 @@ import {
   type PostSearchResultItem,
 } from './post-search'
 import { resolvePostRagProjectionInputs } from './post-rag-indexing'
+import { loadPostContentSection } from './post-content-contract'
 
 export const POST_RAG_JOBS = 'post_rag_jobs'
 export const POST_RAG_INDEX_STATE = 'post_rag_index_state'
@@ -1549,7 +1550,7 @@ export function buildVideoRagChunksForPost(
         chunkId: `prv_${stableId(`${post._id}\u0001${entry.cacheKey}\u0001metadata\u0001${text}`)}`,
         postId: post._id,
         communityId: post.communityId,
-        sectionId: post.sectionId,
+        sectionId: String(post.sectionId || ''),
         sectionName,
         title,
         fieldLabel: String(entry.widget.label || '视频'),
@@ -1580,7 +1581,7 @@ export function buildVideoRagChunksForPost(
           chunkId: `prv_${stableId(`${post._id}\u0001${entry.cacheKey}\u0001analysis\u0001${asset.updatedAt || ''}\u0001${text}`)}`,
           postId: post._id,
           communityId: post.communityId,
-          sectionId: post.sectionId,
+          sectionId: String(post.sectionId || ''),
           sectionName,
           title,
           fieldLabel: `${String(entry.widget.label || '视频')}理解`,
@@ -1668,7 +1669,7 @@ export function planVideoRagAnalysisJobsForPost(
       _id: `vrj_${stableId(`${post._id}\u0001${entry.cacheKey}`)}`,
       postId: post._id,
       communityId: post.communityId,
-      sectionId: post.sectionId,
+      sectionId: String(post.sectionId || ''),
       cacheKey: entry.cacheKey,
       status: 'pending',
       attempts: 0,
@@ -2734,9 +2735,13 @@ export async function processPostRagJobBatch(options: {
           okCount += 1
           continue
         }
-        const storedSection = String(post.sectionId || '').trim()
-          ? await db.getById('sections', post.sectionId) as Section
-          : null
+        const storedSection = await loadPostContentSection(post, async (collectionName, id) => {
+          try {
+            return await db.getById(collectionName, id)
+          } catch {
+            return null
+          }
+        })
         const resolved = resolvePostRagProjectionInputs(post, storedSection)
         if (!resolved.section) throw new Error('post_rag_section_not_found')
         const searchablePost = resolved.post
@@ -2763,7 +2768,7 @@ export async function processPostRagJobBatch(options: {
         await upsertPostRagIndexState(job.postId, {
           status: 'indexed',
           communityId: post.communityId,
-          sectionId: post.sectionId,
+          sectionId: String(post.sectionId || ''),
           sourceUpdatedAt: post.updatedAt || post.createdAt || now,
           indexedAt: now,
           chunkCount: chunks.length,

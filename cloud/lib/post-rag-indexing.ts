@@ -216,6 +216,20 @@ export function isPostEligibleForTrustedRag(post: Post | null | undefined, secti
       (!post.auditStatus || post.auditStatus === 'pass')
     )
   }
+  if (post.area === 'collaboration' && !String(post.sectionId || '').trim()) {
+    const templateId = String(post.collaborationTemplateId || '').trim()
+    return Boolean(
+      section &&
+      String(post._id || '').trim() &&
+      String(post.communityId || '').trim() &&
+      templateId &&
+      post.status === 'active' &&
+      (!post.auditStatus || post.auditStatus === 'pass') &&
+      section.status === 'active' &&
+      section._id === templateId &&
+      section.communityId === post.communityId
+    )
+  }
   if (!section) return false
   return Boolean(
     String(post._id || '').trim() &&

@@ -42,6 +42,7 @@ import {
   reconcilePostRagJobsForCommunityBatch,
   searchPostsWithRag,
 } from '../post-rag'
+import { buildInitialCollaborationTemplates } from '../../shared/collaboration-templates'
 
 beforeEach(() => {
   jest.resetAllMocks()
@@ -167,6 +168,46 @@ test('processPostRagJobBatch chunks approved post content and upserts through pr
   expect(mockDb.updateById).toHaveBeenCalledWith(POST_RAG_JOBS, 'job-1', expect.objectContaining({
     status: 'completed',
   }))
+})
+
+test('processPostRagJobBatch resolves a section-free collaboration post from its global template', async () => {
+  const template = buildInitialCollaborationTemplates()[0]
+  const provider = {
+    name: 'fake-rag',
+    isConfigured: jest.fn(() => true),
+    ensureIndex: jest.fn().mockResolvedValue({ created: false, indexName: 'test-index' }),
+    search: jest.fn(),
+    upsertChunks: jest.fn().mockResolvedValue(undefined),
+    deletePostChunks: jest.fn(),
+  }
+  mockDb.query.mockResolvedValue([{ _id: 'job-carpool', postId: 'post-carpool', action: 'upsert', attempts: 0 }])
+  mockDb.getById
+    .mockResolvedValueOnce({
+      _id: 'post-carpool', communityId: 'community-1', area: 'collaboration',
+      collaborationTemplateId: template._id, collaborationSystemKey: template.systemKey,
+      authorId: 'user-1', status: 'active', auditStatus: 'pass',
+      content: { carpool_origin: '青山村', carpool_destination: '成都软件园' },
+      createdAt: '2026-07-15T00:00:00.000Z', updatedAt: '2026-07-15T00:00:00.000Z',
+    })
+    .mockResolvedValueOnce(template)
+  mockDb.updateById.mockResolvedValue({ stats: { updated: 1 } })
+
+  const result = await processPostRagJobBatch({ provider, limit: 1 })
+
+  expect(result).toMatchObject({
+    scannedCount: 1,
+    results: [{ jobId: 'job-carpool', ok: true }],
+  })
+  expect(mockDb.getById).toHaveBeenNthCalledWith(2, 'collaboration_templates', template._id)
+  expect(provider.upsertChunks).toHaveBeenCalledWith(expect.arrayContaining([
+    expect.objectContaining({
+      postId: 'post-carpool',
+      communityId: 'community-1',
+      sectionId: '',
+      sectionName: '拼车出行',
+      text: '青山村',
+    }),
+  ]))
 })
 
 test('legacy post RAG worker paginates past fenced schema-v2 jobs without mutating them', async () => {

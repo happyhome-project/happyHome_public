@@ -54,6 +54,7 @@ import { createHmac } from 'crypto'
 import {
   handleBootstrap,
   handleCreate,
+  handleCreateCollaboration,
   handleClientLog,
   handleDelete,
   handleGet,
@@ -62,6 +63,7 @@ import {
   handleJoinAttendance,
   handleListAttendanceMembers,
   handleList,
+  handleListCollaboration,
   handleListMine,
   handleListArchive,
   handleListArchiveTabs,
@@ -76,8 +78,30 @@ import * as postSearch from '../../../lib/post-search'
 import * as postRag from '../../../lib/post-rag'
 import * as postSemanticSearch from '../../../lib/post-semantic-search'
 import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
+import { buildInitialCollaborationTemplates } from '../../../shared/collaboration-templates'
 
 const POST_RAG_SMOKE_SECRET = 'r'.repeat(48)
+
+const carpoolTemplate = {
+  _id: 'collaboration-template-carpool',
+  systemKey: 'carpool',
+  name: '拼车出行',
+  icon: '🚗',
+  order: 0,
+  status: 'active',
+  enableComment: true,
+  enableLike: true,
+  createdAt: '2026-07-15T00:00:00.000Z',
+  updatedAt: '2026-07-15T00:00:00.000Z',
+  widgets: [
+    { widgetId: 'carpool_origin', type: 'short_text', label: '出发地', fieldKey: 'origin', required: true, order: 0, showInList: true },
+    { widgetId: 'carpool_destination', type: 'short_text', label: '目的地', fieldKey: 'destination', required: true, order: 1, showInList: true },
+    { widgetId: 'carpool_departure_time', type: 'datetime', label: '出发时间', fieldKey: 'departureTime', required: true, order: 2, showInList: true },
+    { widgetId: 'carpool_location', type: 'location', label: '地图位置', fieldKey: 'location', required: true, order: 3, showInList: false },
+    { widgetId: 'carpool_note', type: 'note_blocks', label: '补充说明', fieldKey: 'note', required: false, order: 4, showInList: false },
+  ],
+}
+const activityInviteTemplate = buildInitialCollaborationTemplates().find((template) => template.systemKey === 'activity_invite')!
 
 function createSignedPostRagSmokeIdentity(overrides: Partial<{
   version: number
@@ -112,30 +136,187 @@ beforeEach(() => {
   delete process.env.POST_RAG_SMOKE_IDENTITY_SECRET
 })
 
+test('createCollaboration writes a community-owned post without sectionId and accepts optional note images', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string) => {
+    if (collectionName === 'collaboration_templates') return carpoolTemplate
+    if (collectionName === 'posts') return {
+      _id: 'collaboration-post-1',
+      communityId: 'community-1',
+      area: 'collaboration',
+      collaborationTemplateId: carpoolTemplate._id,
+      collaborationSystemKey: 'carpool',
+      authorId: 'test-openid',
+      status: 'active',
+      content: {},
+    }
+    return null
+  })
+  ;(db.create as jest.Mock).mockResolvedValue('collaboration-post-1')
+
+  const result = await handleCreateCollaboration({
+    communityId: 'community-1',
+    collaborationTemplateId: carpoolTemplate._id,
+    content: {
+      carpool_origin: '青山村',
+      carpool_destination: '成都软件园',
+      carpool_departure_time: '2026-07-16T08:30:00.000Z',
+      carpool_location: { address: '青山村东门', lat: 30.1, lng: 104.1 },
+      carpool_note: [
+        { blockId: 'text-1', type: 'text', text: '可带一人' },
+        { blockId: 'image-1', type: 'image', fileID: 'cloud://env/posts/carpool-note.jpg' },
+      ],
+    },
+  }, 'test-openid')
+
+  expect(result.postId).toBe('collaboration-post-1')
+  expect(db.create).toHaveBeenCalledWith('posts', expect.objectContaining({
+    area: 'collaboration',
+    communityId: 'community-1',
+    collaborationTemplateId: carpoolTemplate._id,
+    collaborationSystemKey: 'carpool',
+  }))
+  const stored = (db.create as jest.Mock).mock.calls.find(([collection]) => collection === 'posts')?.[1]
+  expect(stored).not.toHaveProperty('sectionId')
+  expect(stored.content.carpool_note).toHaveLength(2)
+})
+
+test('createCollaboration rejects disabled templates before writing', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ ...carpoolTemplate, status: 'disabled' })
+
+  await expect(handleCreateCollaboration({
+    communityId: 'community-1',
+    collaborationTemplateId: carpoolTemplate._id,
+    content: {},
+  }, 'test-openid')).rejects.toThrow('协作板块已停用')
+  expect(db.create).not.toHaveBeenCalled()
+})
+
+test('listCollaboration is scoped by community and template without querying sections', async () => {
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'communities') return { _id: 'community-1', status: 'active' }
+    if (collectionName === 'collaboration_templates' && id === carpoolTemplate._id) return carpoolTemplate
+    if (collectionName === 'users') return { _id: id, nickName: '小明', avatarUrl: '' }
+    return null
+  })
+  ;(db.query as jest.Mock)
+    .mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+    .mockResolvedValueOnce([{ _id: 'post-1', communityId: 'community-1', area: 'collaboration', collaborationTemplateId: carpoolTemplate._id, authorId: 'user-1', status: 'active', auditStatus: 'pass', content: {}, createdAt: '2026-07-15T00:00:00.000Z' }])
+    .mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+
+  const result = await handleListCollaboration({
+    communityId: 'community-1',
+    collaborationTemplateId: carpoolTemplate._id,
+  }, 'test-openid')
+
+  expect(db.query).toHaveBeenCalledWith('posts', {
+    communityId: 'community-1',
+    area: 'collaboration',
+    collaborationTemplateId: carpoolTemplate._id,
+    status: 'active',
+  }, { orderBy: ['createdAt', 'desc'] })
+  expect((db.getById as jest.Mock).mock.calls.some(([collection]) => collection === 'sections')).toBe(false)
+  expect(result.posts.map((post: any) => post._id)).toEqual(['post-1'])
+})
+
+test('get resolves a collaboration post through its global template without reading sections', async () => {
+  const collaborationPost = {
+    _id: 'collaboration-post-1',
+    communityId: 'community-1',
+    area: 'collaboration',
+    collaborationTemplateId: carpoolTemplate._id,
+    collaborationSystemKey: 'carpool',
+    authorId: 'user-1',
+    status: 'active',
+    auditStatus: 'pass',
+    content: { carpool_origin: '青山村' },
+  }
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'posts') return collaborationPost
+    if (collectionName === 'communities') return { _id: 'community-1', status: 'active' }
+    if (collectionName === 'collaboration_templates') return carpoolTemplate
+    if (collectionName === 'users') return { _id: id, nickName: '小明', avatarUrl: '' }
+    return null
+  })
+  ;(db.query as jest.Mock).mockImplementation(async (collectionName: string) => {
+    if (collectionName === 'community_members') return [{ _id: 'member-1', status: 'active' }]
+    if (collectionName === 'post_attendance_members') return []
+    return []
+  })
+
+  const result: any = await handleGet({ postId: collaborationPost._id }, 'user-1')
+
+  expect(result.post._id).toBe(collaborationPost._id)
+  expect(result.collaborationTemplate).toEqual(expect.objectContaining({ systemKey: 'carpool' }))
+  expect((db.getById as jest.Mock).mock.calls.some(([collection]) => collection === 'sections')).toBe(false)
+})
+
+test('update validates a collaboration post against the global template without reading sections', async () => {
+  const collaborationPost = {
+    _id: 'collaboration-post-1',
+    communityId: 'community-1',
+    area: 'collaboration',
+    collaborationTemplateId: carpoolTemplate._id,
+    authorId: 'test-openid',
+    status: 'active',
+    auditStatus: 'review',
+    content: {},
+  }
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string) => {
+    if (collectionName === 'posts') return collaborationPost
+    if (collectionName === 'collaboration_templates') return carpoolTemplate
+    return null
+  })
+
+  await handleUpdate({
+    postId: collaborationPost._id,
+    content: {
+      carpool_origin: '青山村',
+      carpool_destination: '成都软件园',
+      carpool_departure_time: '2026-07-16T08:30:00.000Z',
+      carpool_location: { address: '青山村东门', lat: 30.1, lng: 104.1 },
+    },
+  }, 'test-openid')
+
+  expect(db.updateById).toHaveBeenCalledWith('posts', collaborationPost._id, expect.objectContaining({
+    content: { __set: expect.objectContaining({ carpool_origin: '青山村' }) },
+  }))
+  expect((db.getById as jest.Mock).mock.calls.some(([collection]) => collection === 'sections')).toBe(false)
+})
+
 test('listMine: only returns the caller owned non-deleted posts newest first with display metadata', async () => {
   ;(db.queryAfterId as jest.Mock)
     .mockResolvedValueOnce([
       { _id: 'mine-old', authorId: 'author-1', communityId: 'community-1', sectionId: 'section-1', status: 'active', auditStatus: 'pass', content: { title: '旧帖' }, createdAt: '2026-07-10T08:00:00.000Z' },
       { _id: 'mine-new', authorId: 'author-1', communityId: 'community-2', sectionId: 'section-2', status: 'active', auditStatus: 'pending', content: { title: '新帖' }, createdAt: '2026-07-15T08:00:00.000Z' },
+      { _id: 'mine-carpool', authorId: 'author-1', communityId: 'community-1', area: 'collaboration', collaborationTemplateId: carpoolTemplate._id, status: 'active', auditStatus: 'pass', content: { carpool_origin: '青山村' }, createdAt: '2026-07-16T08:00:00.000Z' },
       { _id: 'mine-deleted', authorId: 'author-1', communityId: 'community-1', sectionId: 'section-1', status: 'deleted', content: { title: '已删除' }, createdAt: '2026-07-14T08:00:00.000Z' },
     ])
     .mockResolvedValueOnce([])
   ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
     if (collectionName === 'communities') return { _id: id, name: id === 'community-1' ? '阳光花园' : '河畔社区' }
     if (collectionName === 'sections') return { _id: id, name: id === 'section-1' ? '通知公告' : '图文_new', displayTemplate: id === 'section-2' ? 'image_note' : 'default', widgets: [] }
+    if (collectionName === 'collaboration_templates' && id === carpoolTemplate._id) return carpoolTemplate
     throw new Error('missing fixture')
   })
 
   const result = await handleListMine({ skip: 0, limit: 20 }, 'author-1')
 
   expect(db.queryAfterId).toHaveBeenNthCalledWith(1, 'posts', { authorId: 'author-1' }, null, 100)
-  expect(result.posts.map((post: any) => post._id)).toEqual(['mine-new', 'mine-old'])
+  expect(result.posts.map((post: any) => post._id)).toEqual(['mine-carpool', 'mine-new', 'mine-old'])
   expect(result.posts[0]).toEqual(expect.objectContaining({
+    communityName: '阳光花园',
+    sectionName: '拼车出行',
+    displayTemplate: 'default',
+    collaborationTemplate: expect.objectContaining({ _id: carpoolTemplate._id, systemKey: 'carpool' }),
+  }))
+  expect(result.posts[1]).toEqual(expect.objectContaining({
     communityName: '河畔社区',
     sectionName: '图文_new',
     displayTemplate: 'image_note',
   }))
-  expect(result).toEqual(expect.objectContaining({ total: 2, skip: 0, limit: 20, hasMore: false }))
+  expect(result).toEqual(expect.objectContaining({ total: 3, skip: 0, limit: 20, hasMore: false }))
 })
 
 test('listMine: requires an authenticated identity', async () => {
@@ -476,7 +657,7 @@ test('update: archive image note updates content and normalized topics without l
   expect(db.updateById).not.toHaveBeenCalledWith('posts', 'archive-post-1', { topics: ['新话题', 'NEW'] })
 })
 
-test('createActivityInvite: 自动创建系统实时邀约板块并创建关联帖子', async () => {
+test('createActivityInvite: 使用全局出游邀约模板创建无 section 关联帖子', async () => {
   const sourcePost = {
     _id: 'source-post-1',
     communityId: 'community-1',
@@ -501,17 +682,28 @@ test('createActivityInvite: 自动创建系统实时邀约板块并创建关联�
       { widgetId: 'guide_activity_invite', type: 'activity_invite', label: '活动召集', fieldKey: 'activityInvite', required: false, order: 10, showInList: false, locked: true },
     ],
   }
-  ;(db.getById as jest.Mock)
-    .mockResolvedValueOnce(sourcePost)
-    .mockResolvedValueOnce(sourceSection)
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'posts' && id === 'source-post-1') return sourcePost
+    if (collectionName === 'posts' && id === 'activity-post-1') return {
+      _id: 'activity-post-1',
+      communityId: 'community-1',
+      area: 'collaboration',
+      collaborationTemplateId: activityInviteTemplate._id,
+      authorId: 'test-openid',
+      status: 'active',
+      content: {},
+    }
+    if (collectionName === 'communities' && id === 'community-1') return { _id: 'community-1', status: 'active' }
+    if (collectionName === 'sections' && id === 'guide-section-1') return sourceSection
+    if (collectionName === 'collaboration_templates' && id === activityInviteTemplate._id) return activityInviteTemplate
+    return null
+  })
   ;(db.query as jest.Mock).mockImplementation(async (collectionName: string, where: any) => {
     if (collectionName === 'community_members') return [{ _id: 'member-1', status: 'active' }]
     if (collectionName === 'posts' && where.originPostId === 'source-post-1') return []
-    if (collectionName === 'sections') return []
     return []
   })
   ;(db.create as jest.Mock).mockImplementation(async (collectionName: string) => {
-    if (collectionName === 'sections') return 'activity-section-1'
     if (collectionName === 'posts') return 'activity-post-1'
     return 'audit-task-1'
   })
@@ -529,19 +721,12 @@ test('createActivityInvite: 自动创建系统实时邀约板块并创建关联�
   } as any, 'test-openid')
 
   expect(result).toEqual(expect.objectContaining({ postId: 'activity-post-1', alreadyExists: false }))
-  expect(db.create).toHaveBeenCalledWith('sections', expect.objectContaining({
-    communityId: 'community-1',
-    name: '出游邀约',
-    type: 'realtime',
-    systemKey: 'activity_invite',
-    widgets: expect.arrayContaining([
-      expect.objectContaining({ widgetId: 'activity_invite_contact', visibility: 'member' }),
-      expect.objectContaining({ widgetId: 'activity_invite_attendance', type: 'attendance', capacityWidgetId: 'activity_invite_capacity' }),
-    ]),
-  }))
+  expect((db.create as jest.Mock).mock.calls.some(([collection]) => collection === 'sections')).toBe(false)
   expect(db.create).toHaveBeenCalledWith('posts', expect.objectContaining({
     communityId: 'community-1',
-    sectionId: 'activity-section-1',
+    area: 'collaboration',
+    collaborationTemplateId: activityInviteTemplate._id,
+    collaborationSystemKey: 'activity_invite',
     authorId: 'test-openid',
     originPostId: 'source-post-1',
     originSectionId: 'guide-section-1',
@@ -555,6 +740,8 @@ test('createActivityInvite: 自动创建系统实时邀约板块并创建关联�
       activity_invite_capacity: 6,
     }),
   }))
+  const stored = (db.create as jest.Mock).mock.calls.find(([collection]) => collection === 'posts')?.[1]
+  expect(stored).not.toHaveProperty('sectionId')
   expect((db.create as jest.Mock).mock.calls.some(([collection]) => collection === 'post_attendance_members')).toBe(false)
 })
 
@@ -607,8 +794,7 @@ test('createActivityInvite: 同一源帖存在未过期邀约时直接返回现�
 })
 
 test('getActivityInviteState: 返回源帖预填信息和当前进行中邀约', async () => {
-  ;(db.getById as jest.Mock)
-    .mockResolvedValueOnce({
+  const sourcePost = {
       _id: 'source-post-1',
       communityId: 'community-1',
       sectionId: 'guide-section-1',
@@ -618,8 +804,8 @@ test('getActivityInviteState: 返回源帖预填信息和当前进行中邀约',
         guide_title: '云盖村亲子游',
         guide_location: { name: '云盖村', address: '云盖村游客中心', lat: 31.1, lng: 104.2 },
       },
-    })
-    .mockResolvedValueOnce({
+    }
+  const sourceSection = {
       ...mockSection,
       _id: 'guide-section-1',
       type: 'evergreen',
@@ -629,7 +815,15 @@ test('getActivityInviteState: 返回源帖预填信息和当前进行中邀约',
         { widgetId: 'guide_location', type: 'location', label: '目的地位置', fieldKey: 'location', required: true, order: 9, showInList: false, locked: true },
         { widgetId: 'guide_activity_invite', type: 'activity_invite', label: '活动召集', fieldKey: 'activityInvite', required: false, order: 10, showInList: false, locked: true },
       ],
-    })
+    }
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'posts' && id === 'source-post-1') return sourcePost
+    if (collectionName === 'communities' && id === 'community-1') return { _id: 'community-1', status: 'active' }
+    if (collectionName === 'sections' && id === 'guide-section-1') return sourceSection
+    if (collectionName === 'collaboration_templates' && id === activityInviteTemplate._id) return activityInviteTemplate
+    if (collectionName === 'users') return { _id: id, nickName: '成员', avatarUrl: '' }
+    return null
+  })
   ;(db.query as jest.Mock).mockImplementation(async (collectionName: string, where: any) => {
     if (collectionName === 'community_members') return [{ _id: 'member-1', status: 'active' }]
     if (collectionName === 'posts' && where.originPostId === 'source-post-1') {
@@ -641,7 +835,6 @@ test('getActivityInviteState: 返回源帖预填信息和当前进行中邀约',
         content: { activity_invite_title: '已有邀约', activity_invite_capacity: 6 },
       }]
     }
-    if (collectionName === 'sections') return [{ _id: 'activity-section-1', systemKey: 'activity_invite' }]
     if (collectionName === 'post_attendance_members') return [{ _id: 'a1', userId: 'u1', seatCount: 2 }]
     return []
   })
@@ -658,7 +851,12 @@ test('getActivityInviteState: 返回源帖预填信息和当前进行中邀约',
     occupiedSeats: 2,
     capacity: 6,
   }))
-  expect(result.targetSection).toEqual(expect.objectContaining({ sectionId: 'activity-section-1' }))
+  expect(result.targetSection).toEqual(expect.objectContaining({
+    sectionId: '',
+    collaborationTemplateId: activityInviteTemplate._id,
+    systemKey: 'activity_invite',
+  }))
+  expect((db.query as jest.Mock).mock.calls.some(([collection]) => collection === 'sections')).toBe(false)
 })
 
 test('home: returns sections and grouped posts with one membership check', async () => {

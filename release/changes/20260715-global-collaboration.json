@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "changeId": "global-collaboration-templates",
+  "actions": [],
+  "migrations": [],
+  "smokeSuites": [],
+  "releaseImpact": {
+    "cloudFunctions": "Deploy collaboration-template and the updated admin, home-prefetch, post, and search/RAG consumers.",
+    "adminWeb": "Deploy global collaboration-template management and collaboration post filters.",
+    "miniprogram": "Upload the section-free collaboration publishing, listing, detail, edit, and delete flows.",
+    "environmentVariables": [],
+    "databaseMigrations": [
+      "After the formal release smoke succeeds, run migrate:global-collaboration --prepare and the reviewed --apply from the clean canonical main workspace; do not run the destructive migration inside the pre-deploy release stage."
+    ]
+  }
+}

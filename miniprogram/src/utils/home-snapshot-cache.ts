@@ -53,10 +53,22 @@ export function normalizeHomeSnapshotShape(raw: any): HomeSnapshot | null {
     const posts = raw.postsBySection[sectionId]
     if (Array.isArray(posts)) postsBySection[sectionId] = posts.filter((post) => isRecord(post))
   })
+  const collaborationPostsByTemplate: Record<string, any[]> = {}
+  if (isRecord(raw.collaborationPostsByTemplate)) {
+    Object.keys(raw.collaborationPostsByTemplate).forEach((templateId) => {
+      const posts = raw.collaborationPostsByTemplate[templateId]
+      if (Array.isArray(posts)) collaborationPostsByTemplate[templateId] = posts.filter((post) => isRecord(post))
+    })
+  }
   const sections = raw.sections
     .filter((section: any) => isRecord(section))
     .map((section: any) => Object.assign({}, section, {
       widgets: Array.isArray(section.widgets) ? section.widgets.filter((widget: any) => isRecord(widget)) : [],
+    }))
+  const collaborationTemplates = (Array.isArray(raw.collaborationTemplates) ? raw.collaborationTemplates : [])
+    .filter((template: any) => isRecord(template))
+    .map((template: any) => Object.assign({}, template, {
+      widgets: Array.isArray(template.widgets) ? template.widgets.filter((widget: any) => isRecord(widget)) : [],
     }))
   const currentCommunity = isRecord(raw.currentCommunity)
     ? Object.assign({}, raw.currentCommunity, {
@@ -69,6 +81,8 @@ export function normalizeHomeSnapshotShape(raw: any): HomeSnapshot | null {
     communities: raw.communities.filter((community: any) => isRecord(community)),
     sections,
     postsBySection,
+    collaborationTemplates,
+    collaborationPostsByTemplate,
     currentCommunity,
   }) as HomeSnapshot
 }
@@ -76,7 +90,7 @@ export function normalizeHomeSnapshotShape(raw: any): HomeSnapshot | null {
 export function createHomeSnapshotShell(raw: HomeSnapshot | null): HomeSnapshot | null {
   const snapshot = normalizeHomeSnapshotShape(raw)
   if (!snapshot) return null
-  return Object.assign({}, snapshot, { postsBySection: {} })
+  return Object.assign({}, snapshot, { postsBySection: {}, collaborationPostsByTemplate: {} })
 }
 
 function normalizeSnapshot(raw: any, options: SnapshotReadOptions): HomeSnapshot | null {
@@ -116,6 +130,8 @@ export function writeHomeSnapshotCache(snapshot: HomeSnapshot) {
       communities: snapshot.communities || [],
       sections: snapshot.sections || [],
       postsBySection: snapshot.postsBySection || {},
+      collaborationTemplates: snapshot.collaborationTemplates || [],
+      collaborationPostsByTemplate: snapshot.collaborationPostsByTemplate || {},
     })
   } catch {
     // Cache must never affect product behavior.
