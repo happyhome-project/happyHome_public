@@ -54,6 +54,11 @@
 
 - 静态契约要求 `ArchiveTopicTabs` 位于唯一的 `.section-tabs-sticky-shell` 内，并禁止 `v-show="false"` 的 sticky Tabs。
 - H5 smoke 不再创建假 Tabs；只给真实页面补充纵向 fixture 空间，然后测量真实 sticky 外壳和 `ArchiveTopicTabs`。
+- H5 sticky smoke 自己先构建当前源码，再读取构建产物，禁止旧 `dist` 让回归假绿。
+- 微信发布 UI 门禁从 `archive-topic-tabs` 与 `archive-waterfall` 自定义组件内部读取真实 Tabs、激活态和卡片，禁止再查询隐藏的 `.section-tab` / `.arc-item`。
+- 门禁 fixture 创建当前瀑布流实际消费的原生归档帖子，并用 3 条“全部”数据和 1 条带话题数据验证筛选后的 3→1 变化；不再用旧板块帖子伪装目标数据。
+- 发布检查编排必须实际运行 `archiveTabs` 阶段；fixture 加入社区遇到 `TransactionBusy` 时只重试幂等申请，筛选后则轮询“激活标签=短内容、卡片数=1”的可观察状态，不用固定睡眠冒充收敛。
+- 几何快照与 Automator 元素句柄分离，避免组件内 Tabs 句柄覆盖 sticky 外壳的 `top/bottom` 证据；筛选列表变短导致滚动值被系统夹紧时，以搜索框和 Tabs 的实际固定坐标为准。
 - 验证搜索框固定在社区栏下方、真实 Tabs 固定在搜索框下方、Tabs 内部与外壳顶边一致，并在反向滚动时释放。
 - 微信小程序构建和运行时验证作为最终平台证据；H5 只用于隔离复现和几何预检。
 

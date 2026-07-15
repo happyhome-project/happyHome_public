@@ -4,6 +4,9 @@ import { describe, expect, test } from 'vitest'
 
 const page = readFileSync(resolve(__dirname, '../../pages/index/index.vue'), 'utf8')
 const template = page.slice(0, page.indexOf('<script'))
+const repositoryRoot = resolve(__dirname, '../../../..')
+const rootPackage = JSON.parse(readFileSync(resolve(repositoryRoot, 'package.json'), 'utf8'))
+const h5Smoke = readFileSync(resolve(repositoryRoot, 'scripts/test-h5-home-sticky-smoke.mjs'), 'utf8')
 
 function ruleBody(selector: string) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -31,6 +34,16 @@ describe('home progressive sticky navigation', () => {
     )
     expect(template).not.toMatch(/v-show="false"[^>]*class="section-tabs-sticky-shell"/)
     expect(template.match(/class="section-tabs-sticky-shell(?: [^"]*)?"/g) || []).toHaveLength(1)
+  })
+
+  test('builds the current H5 source before running the sticky smoke', () => {
+    expect(rootPackage.scripts['test:h5:home-sticky']).toBe('node scripts/test-h5-home-sticky-smoke.mjs')
+    expect(h5Smoke).toMatch(/import \{ spawnSync \} from 'node:child_process'/)
+    expect(h5Smoke).toContain("['--workspace', 'miniprogram', 'run', 'build:h5']")
+    expect(h5Smoke).toMatch(/const build = spawnSync\(buildCommand, buildArgs,/)
+    expect(h5Smoke.indexOf('const build = spawnSync(buildCommand, buildArgs,')).toBeLessThan(
+      h5Smoke.indexOf("const root = join(process.cwd(), 'miniprogram', 'dist', 'build', 'h5')"),
+    )
   })
 
   test('keeps sticky wrappers visually transparent', () => {

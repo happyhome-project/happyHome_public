@@ -3,9 +3,10 @@ import path from 'path'
 
 const homePath = path.join(process.cwd(), 'miniprogram', 'src', 'pages', 'index', 'index.vue')
 const home = fs.readFileSync(homePath, 'utf8')
+const template = home.slice(0, home.indexOf('<script'))
 const homeShellRule = home.match(/\.home-shell\s*\{([^}]*)\}/)?.[1] || ''
 const homeTopbarRule = home.match(/\.home-topbar\s*\{([^}]*)\}/)?.[1] || ''
-const homeSearchRule = home.match(/\.home-shell \.home-search\s*\{([^}]*)\}/)?.[1] || ''
+const homeSearchRule = home.match(/\.home-search-sticky-shell\s*\{([^}]*)\}/)?.[1] || ''
 const stickyTabsShellRule = home.match(/\.section-tabs-sticky-shell\s*\{([^}]*)\}/)?.[1] || ''
 
 function assert(condition, message) {
@@ -13,13 +14,18 @@ function assert(condition, message) {
 }
 
 assert(
-  (home.match(/class="section-tabs-sticky-shell"/g) || []).length === 1,
-  'home should render exactly one sticky shell around the tabs control.'
+  (template.match(/class="section-tabs-sticky-shell(?: [^"]*)?"/g) || []).length === 1,
+  'home should render exactly one sticky shell around the visible topic tabs control.'
 )
 assert(
-  (home.match(/class="section-tabs"/g) || []).length === 1,
-  'home should render exactly one horizontal section tabs control.'
+  (template.match(/<ArchiveTopicTabs\b/g) || []).length === 1,
+  'home should render exactly one visible archive topic tabs control.'
 )
+assert(
+  /<view class="section-tabs-sticky-shell section-tabs-sticky-shell--archive">\s*<ArchiveTopicTabs/.test(template),
+  'the visible archive topic tabs should be the direct content of the sticky shell.'
+)
+assert(!/v-show="false"[^>]*class="section-tabs-sticky-shell"/.test(template), 'home should not keep a hidden sticky tabs control.')
 assert(!home.includes('class="home-fixed-controls"'), 'home should not duplicate controls in a fixed wrapper.')
 assert(!home.includes('showHomeFixedControls'), 'home should not track fixed-controls visibility.')
 assert(!home.includes('homeFixedControlsThresholdPx'), 'home should not track a fixed-controls threshold.')
@@ -42,13 +48,17 @@ assert(
   'home masthead content should retain the existing top and horizontal insets.',
 )
 assert(
-  !homeSearchRule.includes('position: sticky') && !homeSearchRule.includes('position: fixed'),
-  'home search should remain in normal flow and scroll away.',
+  homeSearchRule.includes('position: sticky'),
+  'home search should pin after reaching the masthead.',
+)
+assert(
+  homeSearchRule.includes('top: calc(150rpx + env(safe-area-inset-top))'),
+  'home search should pin directly below the masthead.',
 )
 assert(stickyTabsShellRule.includes('position: sticky'), 'home sticky shell should use sticky positioning.')
 assert(
-  stickyTabsShellRule.includes('top: calc(150rpx + env(safe-area-inset-top))'),
-  'home tabs should pin directly below the 86rpx inset and 64rpx masthead.',
+  stickyTabsShellRule.includes('top: calc(150rpx + env(safe-area-inset-top) + 138rpx)'),
+  'home tabs should pin directly below the masthead and pinned search surface.',
 )
 
 console.log('[home-tabs-scroll-static] PASS')

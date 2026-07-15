@@ -9,7 +9,7 @@
 
 **Goal:** Restore the second-stage sticky behavior on the single user-visible `ArchiveTopicTabs` control and make regressions fail against the production DOM.
 
-**Architecture:** Keep native CSS sticky positioning at the home-page level. Wrap the visible topic component in the existing sticky shell inside the long archive parent, remove the hidden legacy tabs copy, and change the H5 smoke from a synthetic tabs fixture to the real rendered component.
+**Architecture:** Keep native CSS sticky positioning at the home-page level. Wrap the visible topic component in the existing sticky shell inside the long archive parent, remove the hidden legacy tabs copy, and change the H5 smoke from a synthetic tabs fixture to the real rendered component. The H5 command builds current source before reading `dist`, while the WeChat release gate queries the visible custom components instead of removed legacy classes.
 
 **Tech Stack:** Vue 3, uni-app, TypeScript, SCSS, Vitest, Playwright Chromium, WeChat mini-program build.
 
@@ -20,6 +20,10 @@
 **Files:**
 - Modify: `miniprogram/src/utils/__tests__/home-sticky-layout-static.test.ts`
 - Modify: `scripts/test-h5-home-sticky-smoke.mjs`
+- Modify: `scripts/test-home-tabs-scroll-static.mjs`
+- Modify: `scripts/test-mp-release-ui.mjs`
+- Modify: `scripts/lib/mp-release-ui-policy.test.mjs`
+- Modify: `package.json`
 
 - [ ] **Step 1: Add the failing static production-DOM contract**
 
@@ -55,14 +59,17 @@ In `scripts/test-h5-home-sticky-smoke.mjs`:
 - Never create a `.section-tabs-sticky-shell` or tab markup in the test.
 - Measure both the real sticky shell and the real topic component; require their top edges to match after the second threshold.
 
-- [ ] **Step 4: Build H5 and verify the real-DOM smoke is RED**
+- [ ] **Step 4: Make the smoke own its current H5 build and verify the real-DOM smoke is RED**
 
 ```powershell
-npm.cmd -w miniprogram run build:h5
-node scripts/test-h5-home-sticky-smoke.mjs
+npm.cmd run test:h5:home-sticky
 ```
 
-Expected: FAIL because the production template has no rendered `.section-tabs-sticky-shell` around the visible topic component.
+The command must build current source before inspecting `miniprogram/dist/build/h5`, so a stale artifact can never produce a false pass. Expected before the production fix: FAIL because the production template has no rendered `.section-tabs-sticky-shell` around the visible topic component.
+
+- [ ] **Step 5: Move native release evidence to the visible custom components**
+
+Update the existing home-tabs static script and WeChat release UI gate to query `archive-topic-tabs .archive-topic-tab` and `archive-waterfall .archive-waterfall__card` through their custom-component hosts. Remove all evidence queries for the hidden legacy `.section-tab` and `.arc-item` nodes. Provision three valid native `area: archive` RichNote posts in the isolated release fixture, with exactly one post carrying the filter topic, so the gate proves the visible 3-to-1 switch instead of populating the removed legacy feed. The release runner must actually execute the `archiveTabs` stage, retry only the idempotent membership apply on `TransactionBusy`, and wait for the observable active-label/card-count state rather than a fixed delay.
 
 ### Task 2: Attach sticky behavior to the real component
 
@@ -114,8 +121,9 @@ Do not change the base sticky top, z-index, transparent surface, search geometry
 
 ```powershell
 npx.cmd vitest run src/utils/__tests__/home-sticky-layout-static.test.ts
-npm.cmd -w miniprogram run build:h5
-node scripts/test-h5-home-sticky-smoke.mjs
+npm.cmd run test:h5:home-sticky
+node scripts/test-home-tabs-scroll-static.mjs
+node --test scripts/lib/mp-release-ui-policy.test.mjs
 ```
 
 Expected: the static production-DOM contract and real rendered two-stage sticky geometry both pass.
@@ -134,9 +142,9 @@ Commit the production and test files as `AngryBird <48046333+angrybirddd@users.n
 ```powershell
 npm.cmd -w miniprogram run type-check
 npm.cmd -w miniprogram run test:unit
-npm.cmd -w miniprogram run build:h5
-node scripts/test-h5-home-sticky-smoke.mjs
+npm.cmd run test:h5:home-sticky
 npm.cmd -w miniprogram run build:mp-weixin
+node scripts/test-home-tabs-scroll-static.mjs
 node --test scripts/lib/mp-release-ui-policy.test.mjs
 npm.cmd run docs:check
 git diff --check 055502ad25fcb93aa61ead13e5465f0a6450233f..HEAD

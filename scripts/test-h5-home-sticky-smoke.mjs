@@ -1,7 +1,21 @@
+import { spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { existsSync, readFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { chromium } from 'playwright'
+
+const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+const buildCommand = process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : npmCommand
+const buildArgs = process.platform === 'win32'
+  ? ['/d', '/s', '/c', `${npmCommand} --workspace miniprogram run build:h5`]
+  : ['--workspace', 'miniprogram', 'run', 'build:h5']
+const build = spawnSync(buildCommand, buildArgs, {
+  cwd: process.cwd(),
+  stdio: 'inherit',
+  windowsHide: true,
+})
+if (build.error) throw build.error
+if (build.status !== 0) throw new Error(`Current H5 build failed with exit code ${build.status}`)
 
 const root = join(process.cwd(), 'miniprogram', 'dist', 'build', 'h5')
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css' }

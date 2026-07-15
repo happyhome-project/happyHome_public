@@ -42,6 +42,7 @@ import { computeDirectoryDigest } from './lib/release-run-ledger.mjs'
 import { runReleaseUiChecks } from './lib/release-ui-check-runner.mjs'
 import { readMiniprogramPackageIdentity } from './lib/miniprogram-package-identity.mjs'
 import { cleanupReleaseFixtureWithRetry } from './lib/release-ui-fixture-cleanup.mjs'
+import { applyReleaseFixtureMembership } from './lib/release-ui-fixture-membership.mjs'
 import { applyAndWaitForReleaseFixtureSelection } from './lib/release-ui-fixture-selection.mjs'
 import { invokeTrustedAdminCloud } from './lib/trusted-admin-invoke.mjs'
 
@@ -50,7 +51,7 @@ const ROOT = resolve(__dirname, '..')
 const DEFAULT_PROJECT_PATH = resolve(ROOT, 'miniprogram', 'dist', 'build', 'mp-weixin')
 const DEFAULT_IDE_PORT = 21929
 const DEFAULT_AUTO_PORT = 9420
-const HOME_POST_SELECTORS = ['.live-row', '.guide-card', '.arc-item', '.post-card']
+const HOME_POST_SELECTORS = ['.live-row', '.guide-card', '.post-card']
 const RELEASE_FIXTURE_PREFIX = 'HH_RELEASE_UI_'
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
 
@@ -892,56 +893,35 @@ async function createReleaseFixture(mp) {
     fixture.communityId = String(community.communityId || '')
     if (!fixture.communityId) throw new Error('community.createAdmin did not return communityId')
 
-    const createArchive = async ({ name: sectionName, order, postCount }) => {
-      const section = await callMpCloud(mp, 'admin', {
-        action: 'section.create',
-        _actAs: adminCtx,
+    await applyReleaseFixtureMembership({
+      apply: () => callMpCloud(mp, 'member', { action: 'apply', communityId: fixture.communityId }),
+    })
+    for (let index = 0; index < 3; index += 1) {
+      const post = await callMpCloud(mp, 'post', {
+        action: 'create',
         communityId: fixture.communityId,
-        name: sectionName,
-        icon: sectionName.slice(0, 1),
-        order,
-        type: 'evergreen',
-      })
-      const sectionId = String(section.sectionId || '')
-      if (!sectionId) throw new Error('section.create did not return sectionId')
-      fixture.sectionIds.push(sectionId)
-
-      const widgetsResult = await callMpCloud(mp, 'admin', {
-        action: 'section.updateWidgets',
-        _actAs: adminCtx,
-        sectionId,
-        widgets: [
-          { type: 'short_text', label: 'Title', fieldKey: 'title', required: true, showInList: true, widgetId: '' },
-          { type: 'summary', label: 'Summary', fieldKey: 'summary', required: false, showInList: true, widgetId: '' },
-        ],
-      })
-      const widgets = Array.isArray(widgetsResult.widgets) ? widgetsResult.widgets : []
-      const titleWidget = widgets.find((widget) => widget.type === 'short_text') || widgets[0]
-      const summaryWidget = widgets.find((widget) => widget.type === 'summary')
-      if (!titleWidget?.widgetId) throw new Error('section.updateWidgets did not return a title widget')
-
-      for (let index = 0; index < postCount; index += 1) {
-        const content = { [titleWidget.widgetId]: `${sectionName} ${index + 1} ${runId}` }
-        if (summaryWidget?.widgetId) content[summaryWidget.widgetId] = 'Automated release validation post.'
-        const post = await callMpCloud(mp, 'admin', {
-          action: 'post.createAdmin',
-          _actAs: adminCtx,
-          communityId: fixture.communityId,
-          sectionId,
-          content,
-        }, { timeoutMs: 90000 })
-        const postId = String(post.postId || '')
-        if (!postId) throw new Error('post.createAdmin did not return postId')
-        fixture.postIds.push(postId)
-        if (post.auditStatus !== 'pass') {
-          await callMpCloud(mp, 'admin', { action: 'audit.approveAdmin', _actAs: adminCtx, postId })
-        }
+        area: 'archive',
+        format: 'text',
+        topics: index === 2 ? ['短内容'] : [],
+        content: {
+          title: `归档内容 ${index + 1} ${runId}`,
+          body: {
+            format: 'markdown',
+            markdown: 'Automated release validation post.',
+            html: '<p>Automated release validation post.</p>',
+            text: 'Automated release validation post.',
+            imageFileIDs: [],
+            schemaVersion: 1,
+          },
+        },
+      }, { timeoutMs: 90000 })
+      const postId = String(post.postId || '')
+      if (!postId) throw new Error('post.create did not return postId')
+      fixture.postIds.push(postId)
+      if (post.auditStatus !== 'pass') {
+        await callMpCloud(mp, 'admin', { action: 'audit.approveAdmin', _actAs: adminCtx, postId })
       }
-      return sectionId
     }
-
-    fixture.sectionId = await createArchive({ name: '长内容', order: 0, postCount: 3 })
-    await createArchive({ name: '短内容', order: 1, postCount: 1 })
     fixture.postId = fixture.postIds[0] || ''
 
     return fixture
@@ -961,7 +941,9 @@ async function createReleaseFixture(mp) {
 async function seedCurrentViewerIntoCommunity(mp, fixture) {
   const selection = await applyAndWaitForReleaseFixtureSelection({
     communityId: fixture.communityId,
-    apply: () => callMpCloud(mp, 'member', { action: 'apply', communityId: fixture.communityId }),
+    apply: () => applyReleaseFixtureMembership({
+      apply: () => callMpCloud(mp, 'member', { action: 'apply', communityId: fixture.communityId }),
+    }),
     bootstrap: () => callMpCloud(mp, 'post', {
       action: 'bootstrap',
       currentCommunityId: fixture.communityId,
@@ -1080,6 +1062,17 @@ async function forceLogout(mp) {
 }
 
 async function findFirstPost(page) {
+  const waterfallHost = await page.$('archive-waterfall').catch(() => null)
+  if (waterfallHost) {
+    const archiveCards = await waterfallHost.$$('.archive-waterfall__card').catch(() => [])
+    if (archiveCards.length) {
+      return {
+        selector: 'archive-waterfall .archive-waterfall__card',
+        node: archiveCards[0],
+        count: archiveCards.length,
+      }
+    }
+  }
   for (const selector of HOME_POST_SELECTORS) {
     const nodes = await page.$$(selector).catch(() => [])
     if (nodes.length) return { selector, node: nodes[0], count: nodes.length }
@@ -1094,23 +1087,61 @@ async function captureHomeTabsLayout(mp) {
       query.selectAll('.section-tabs-sticky-shell').boundingClientRect()
       query.select('.home-topbar').boundingClientRect()
       query.select('.home-search-sticky-shell').boundingClientRect()
-      query.selectAll('.arc-item').boundingClientRect()
-      query.selectAll('.section-tab.active').boundingClientRect()
       query.selectViewport().scrollOffset()
       query.exec((items) => {
         const tabs = Array.isArray(items?.[0]) ? items[0] : []
         const topbar = items?.[1] || null
         const search = items?.[2] || null
-        const cards = Array.isArray(items?.[3]) ? items[3] : []
-        const activeTabs = Array.isArray(items?.[4]) ? items[4] : []
-        const viewport = items?.[5] || {}
+        const viewport = items?.[3] || {}
         const safeTop = Number(wx.getWindowInfo?.().safeArea?.top || 0)
-        resolveLayout({ tabs, topbar, search, cardCount: cards.length, activeTabCount: activeTabs.length, scrollTop: Number(viewport.scrollTop || 0), safeTop })
+        resolveLayout({ tabs, topbar, search, scrollTop: Number(viewport.scrollTop || 0), safeTop })
       })
     } catch (error) {
-      resolveLayout({ tabs: [], search: null, cardCount: 0, activeTabCount: 0, scrollTop: 0, safeTop: 0, error: String(error) })
+      resolveLayout({ tabs: [], topbar: null, search: null, scrollTop: 0, safeTop: 0, error: String(error) })
     }
   })), 15000, 'capture home archive tabs layout')
+}
+
+async function captureHomeArchiveContent(home) {
+  const topicTabsHost = await withTimeout(home.$('archive-topic-tabs'), 10000, 'find visible archive topic tabs host')
+  const waterfallHost = await withTimeout(home.$('archive-waterfall'), 10000, 'find visible archive waterfall host')
+  const tabs = topicTabsHost
+    ? await withTimeout(topicTabsHost.$$('.archive-topic-tab'), 10000, 'find visible archive topic tabs')
+    : []
+  const activeTabs = topicTabsHost
+    ? await withTimeout(topicTabsHost.$$('.archive-topic-tab--active'), 10000, 'find active archive topic tab')
+    : []
+  const cards = waterfallHost
+    ? await withTimeout(waterfallHost.$$('.archive-waterfall__card'), 10000, 'find visible archive waterfall cards')
+    : []
+  const activeTabTexts = await Promise.all(activeTabs.map(async (tab) =>
+    String(await tab.text().catch(() => '') || '').trim()
+  ))
+  return {
+    tabCount: tabs.length,
+    activeTabCount: activeTabs.length,
+    activeTabTexts,
+    cardCount: cards.length,
+  }
+}
+
+async function waitForHomeArchiveContent(home, {
+  expectedCardCount,
+  expectedActiveText,
+  attempts = 12,
+  delayMs = 500,
+}) {
+  let content = null
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    content = await captureHomeArchiveContent(home)
+    if (
+      content.cardCount === expectedCardCount &&
+      content.activeTabCount === 1 &&
+      content.activeTabTexts.includes(expectedActiveText)
+    ) return content
+    if (attempt < attempts) await sleep(delayMs)
+  }
+  return content || { tabCount: 0, activeTabCount: 0, activeTabTexts: [], cardCount: 0 }
 }
 
 async function scrollHomeTo(mp, scrollTop) {
@@ -1147,13 +1178,27 @@ async function verifyHomeArchiveTabs(mp, context, evidenceDir) {
   const searchPinned = await captureHomeTabsLayout(mp)
   const tagsScrollTop = searchPinned.scrollTop + Math.max(0, Number(searchPinned.tabs?.[0]?.top || 0) - Number(searchPinned.search?.bottom || 0)) + 40
   await scrollHomeTo(mp, tagsScrollTop)
-  const tagsPinned = await captureHomeTabsLayout(mp)
-  const tabs = await withTimeout(home.$$('.section-tab'), 10000, 'find release archive tabs')
+  const tagsPinnedLayout = await captureHomeTabsLayout(mp)
+  const fullArchiveContent = await waitForHomeArchiveContent(home, {
+    expectedCardCount: 3,
+    expectedActiveText: '全部',
+  })
+  const tagsPinned = { ...tagsPinnedLayout, ...fullArchiveContent }
+  const topicTabsHost = await withTimeout(home.$('archive-topic-tabs'), 10000, 'find release archive topic tabs host')
+  const tabs = topicTabsHost
+    ? await withTimeout(topicTabsHost.$$('.archive-topic-tab'), 10000, 'find release archive topic tabs')
+    : []
   if (tabs.length === 2) {
     await withTimeout(tabs[1].tap(), 15000, 'switch to short release archive')
-    await sleep(700)
   }
-  const shortArchive = await captureHomeTabsLayout(mp)
+  const shortArchiveContent = await waitForHomeArchiveContent(home, {
+    expectedCardCount: 1,
+    expectedActiveText: '短内容',
+  })
+  const shortArchive = {
+    ...await captureHomeTabsLayout(mp),
+    ...shortArchiveContent,
+  }
   const screenshotEvidence = await captureOptionalReleaseUiScreenshot(
     mp,
     resolve(evidenceDir, 'home-archive-tabs-sticky.png'),
@@ -1177,7 +1222,9 @@ async function verifyHomeArchiveTabs(mp, context, evidenceDir) {
     tagsPinned.cardCount === 3 &&
     shortArchive.cardCount === 1 &&
     shortArchive.activeTabCount === 1 &&
-    Math.abs(shortArchive.scrollTop - tagsPinned.scrollTop) <= 8 &&
+    tagsPinned.activeTabTexts.includes('全部') &&
+    shortArchive.activeTabTexts.includes('短内容') &&
+    Math.abs(Number(shortArchive.search?.top || 0) - Number(shortArchive.topbar?.bottom || 0)) <= 8 &&
     Math.abs(Number(shortArchive.tabs?.[0]?.top || 0) - pinnedTop) <= 4
 
   return { passed, before, searchPinned, tagsPinned, shortArchive, tabCount: tabs.length, screenshotEvidence }

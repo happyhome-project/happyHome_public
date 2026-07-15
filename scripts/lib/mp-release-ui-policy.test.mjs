@@ -166,9 +166,42 @@ test('release home tabs evidence pins below the fixed masthead', () => {
 
   assert.match(source, /query\.select\('\.home-topbar'\)\.boundingClientRect\(\)/)
   assert.match(source, /query\.select\('\.home-search-sticky-shell'\)\.boundingClientRect\(\)/)
+  assert.match(source, /home\.\$\('archive-topic-tabs'\)/)
+  assert.match(source, /topicTabsHost\.\$\$\('\.archive-topic-tab'\)/)
+  assert.match(source, /topicTabsHost\.\$\$\('\.archive-topic-tab--active'\)/)
+  assert.match(source, /async function waitForHomeArchiveContent/)
+  assert.match(source, /activeTabTexts/)
+  assert.match(source, /page\.\$\('archive-waterfall'\)/)
+  assert.match(source, /waterfallHost\.\$\$\('\.archive-waterfall__card'\)/)
+  assert.doesNotMatch(source, /['"]\.section-tab(?:\.active)?['"]/)
+  assert.doesNotMatch(source, /\.arc-item/)
   assert.match(source, /searchPinned/)
   assert.match(source, /tagsPinned/)
+  assert.doesNotMatch(source, /Math\.abs\(shortArchive\.scrollTop - tagsPinned\.scrollTop\)/)
+  assert.ok((source.match(/applyReleaseFixtureMembership/g) || []).length >= 3)
   assert.doesNotMatch(source, /Math\.abs\(pinnedTop - pinned\.safeTop\) <= 8/)
+})
+
+test('release home tabs fixture populates the visible native archive feed', () => {
+  const source = readFileSync(new URL('../test-mp-release-ui.mjs', import.meta.url), 'utf8')
+  const fixture = source.slice(
+    source.indexOf('async function createReleaseFixture'),
+    source.indexOf('async function seedCurrentViewerIntoCommunity'),
+  )
+
+  assert.match(source, /import \{ applyReleaseFixtureMembership \} from '\.\/lib\/release-ui-fixture-membership\.mjs'/)
+  assert.match(fixture, /await applyReleaseFixtureMembership\(/)
+  assert.match(fixture, /action: 'apply', communityId: fixture\.communityId/)
+  assert.match(fixture, /for \(let index = 0; index < 3; index \+= 1\)/)
+  assert.match(fixture, /action: 'create'/)
+  assert.match(fixture, /area: 'archive'/)
+  assert.match(fixture, /format: 'text'/)
+  assert.match(fixture, /topics: index === 2 \? \['短内容'\] : \[\]/)
+  assert.match(fixture, /format: 'markdown'/)
+  assert.match(fixture, /markdown: 'Automated release validation post\.'/)
+  assert.match(fixture, /html: '<p>Automated release validation post\.<\/p>'/)
+  assert.doesNotMatch(fixture, /action: 'section\.create'/)
+  assert.doesNotMatch(fixture, /action: 'post\.createAdmin'/)
 })
 
 test('release home image evidence requires loaded images and one visible viewport image', () => {
