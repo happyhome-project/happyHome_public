@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { executeArchiveMigration } from '../../scripts/lib/archive-migration.mjs'
 
 const PAGE_SIZE = 100
-const ARCHIVE_MIGRATION_LOGIC_SHA256 = 'f46bccd8795565e7d511a0587178ed29ea28aa1497e8ff6669054b4a4a695b71'
+const ARCHIVE_MIGRATION_LOGIC_SHA256 = 'a94a0033872e7c0491bd70c2f47372aabec9a4fed41c21267901f0eaa615ea2b'
 
 async function readAll(database, collectionName, where = {}) {
   const rows = []

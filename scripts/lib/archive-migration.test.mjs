@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
@@ -56,6 +57,15 @@ test('archive release manifest uses only executable release operations', async (
     root: fileURLToPath(new URL('../..', import.meta.url)),
     migration: manifest.migrations[0],
   }))
+})
+
+test('archive migration pins the current migration logic digest', async () => {
+  const migrationSource = await readFile(new URL('../../release/migrations/20260715-archive-posts-v1.mjs', import.meta.url), 'utf8')
+  const logicBytes = await readFile(new URL('./archive-migration.mjs', import.meta.url))
+  const pinnedDigest = migrationSource.match(/ARCHIVE_MIGRATION_LOGIC_SHA256 = '([a-f0-9]{64})'/)?.[1]
+  const actualDigest = createHash('sha256').update(logicBytes).digest('hex')
+
+  assert.equal(pinnedDigest, actualDigest)
 })
 
 test('migration preserves administrator topic fields and never writes document ids as data', async () => {
