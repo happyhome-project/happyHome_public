@@ -316,7 +316,6 @@ button::after {
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 16rpx 34rpx rgba(61, 173, 125, 0.28);
 }
 
 .fab-plus {
