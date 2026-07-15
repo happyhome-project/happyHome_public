@@ -902,49 +902,28 @@ async function createReleaseFixture(mp) {
       mottoCite: '《菜根谭》',
     })
 
-    const liveSection = await callMpCloud(mp, 'admin', {
-      action: 'section.create',
-      _actAs: adminCtx,
-      communityId: fixture.communityId,
-      name: '活动召集验证',
-      icon: '·',
-      order: 0,
-      type: 'realtime',
+    await applyReleaseFixtureMembership({
+      apply: () => callMpCloud(mp, 'member', { action: 'apply', communityId: fixture.communityId }),
     })
-    fixture.sectionId = String(liveSection.sectionId || '')
-    if (!fixture.sectionId) throw new Error('section.create did not return realtime sectionId')
-    fixture.sectionIds.push(fixture.sectionId)
-    const liveWidgets = await callMpCloud(mp, 'admin', {
-      action: 'section.updateWidgets',
-      _actAs: adminCtx,
-      sectionId: fixture.sectionId,
-      widgets: [
-        { type: 'short_text', label: '活动名称', fieldKey: 'title', required: true, showInList: true, widgetId: '' },
-        { type: 'summary', label: '活动说明', fieldKey: 'summary', required: false, showInList: true, widgetId: '' },
-      ],
-    })
-    const titleWidget = liveWidgets.widgets?.find((widget) => widget.type === 'short_text')
-    const summaryWidget = liveWidgets.widgets?.find((widget) => widget.type === 'summary')
-    if (!titleWidget?.widgetId) throw new Error('section.updateWidgets did not return realtime title widget')
-    const liveContent = { [titleWidget.widgetId]: `活动召集 ${runId}` }
-    if (summaryWidget?.widgetId) liveContent[summaryWidget.widgetId] = '用于验证搜索与标签分阶段吸顶。'
-    const livePost = await callMpCloud(mp, 'admin', {
-      action: 'post.createAdmin',
-      _actAs: adminCtx,
+    const livePost = await callMpCloud(mp, 'post', {
+      action: 'createCollaboration',
       communityId: fixture.communityId,
-      sectionId: fixture.sectionId,
-      content: liveContent,
+      collaborationTemplateId: 'collaboration-template-carpool',
+      content: {
+        carpool_origin: '青山村',
+        carpool_destination: '发布验收终点',
+        carpool_departure_time: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        carpool_location: { address: '青山村东门', lat: 30.1, lng: 104.1 },
+        carpool_note: [{ blockId: `release-${runId}`, type: 'text', text: '用于验证搜索与标签分阶段吸顶。' }],
+      },
     }, { timeoutMs: 90000 })
     const livePostId = String(livePost.postId || '')
-    if (!livePostId) throw new Error('post.createAdmin did not return realtime postId')
+    if (!livePostId) throw new Error('post.createCollaboration did not return postId')
     fixture.postIds.push(livePostId)
     if (livePost.auditStatus !== 'pass') {
       await callMpCloud(mp, 'admin', { action: 'audit.approveAdmin', _actAs: adminCtx, postId: livePostId })
     }
 
-    await applyReleaseFixtureMembership({
-      apply: () => callMpCloud(mp, 'member', { action: 'apply', communityId: fixture.communityId }),
-    })
     for (let index = 0; index < 3; index += 1) {
       const post = await callMpCloud(mp, 'post', {
         action: 'create',
