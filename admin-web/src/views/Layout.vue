@@ -39,6 +39,11 @@
         >内容审核</el-menu-item>
         <el-menu-item
           v-if="authStore.isSuperAdmin"
+          data-testid="menu-collaboration-templates"
+          index="/collaboration-templates"
+        >协作模板</el-menu-item>
+        <el-menu-item
+          v-if="authStore.isSuperAdmin"
           data-testid="menu-guest-intro-config"
           index="/guest-intro-config"
         >样板社群引导</el-menu-item>

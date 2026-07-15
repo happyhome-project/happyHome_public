@@ -19,6 +19,7 @@ import {
   backfillPostSearchIndexesForCommunity,
   backfillPostSearchIndexesForSection,
   backfillPostSearchIndexesForSectionBatch,
+  refreshPostSearchIndexById,
   removePostSearchIndex,
   removePostSearchIndexesForSection,
 } from '../../lib/post-search'
@@ -50,6 +51,7 @@ import type {
   AdminCtx,
   AdminRole,
   AdminSession,
+  CollaborationTemplate,
   Community,
   HomeBanner,
   Section,
@@ -82,6 +84,11 @@ import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
 import { resolvePostAuthorNickname } from '../../shared/post-author'
 import { normalizeArchiveTopic } from '../../shared/archive-topics'
 import { archiveTopicId } from '../../lib/archive-topic-index'
+import {
+  collaborationTemplateAsSection,
+  findUnsafeCollaborationTemplateChanges,
+  normalizeCollaborationTemplate,
+} from '../../shared/collaboration-templates'
 
 cloud.init({ env: process.env.TCB_ENV || cloud.DYNAMIC_CURRENT_ENV })
 
@@ -200,6 +207,10 @@ const SUPER_ADMIN_ONLY: Array<string | RegExp> = [
   /^audit\./,
   /^admin\.(?!approvalSummary$)/,
   /^appConfig\./,
+  'collaborationTemplate.createAdmin',
+  'collaborationTemplate.updateAdmin',
+  'collaborationTemplate.disableAdmin',
+  'collaborationTemplate.deleteAdmin',
 ]
 // 这些 action 需要校验对 communityId 的归属（superAdmin 自动放行）
 const COMMUNITY_SCOPED_ACTIONS = new Set([
@@ -528,6 +539,68 @@ async function getSectionsByIds(sectionIds: string[]) {
     }
   }
   return sectionsById
+}
+
+async function getCollaborationTemplatesByIds(templateIds: string[]) {
+  const templatesById: Record<string, CollaborationTemplate | null> = {}
+  for (const templateId of Array.from(new Set(templateIds.filter(Boolean)))) {
+    try {
+      const template = await db.getById('collaboration_templates', templateId) as CollaborationTemplate
+      templatesById[templateId] = template ? normalizeCollaborationTemplate(template) : null
+    } catch {
+      templatesById[templateId] = null
+    }
+  }
+  return templatesById
+}
+
+async function resolveAdminPostContentContract(post: any): Promise<{
+  section: Section | null
+  collaborationTemplate: CollaborationTemplate | null
+}> {
+  if (post?.area === 'collaboration') {
+    const templateId = String(post.collaborationTemplateId || '').trim()
+    if (!templateId) return { section: null, collaborationTemplate: null }
+    const raw = await db.getById('collaboration_templates', templateId).catch(() => null) as CollaborationTemplate | null
+    const collaborationTemplate = raw ? normalizeCollaborationTemplate(raw) : null
+    return {
+      section: collaborationTemplate
+        ? collaborationTemplateAsSection(collaborationTemplate, String(post.communityId || ''))
+        : null,
+      collaborationTemplate,
+    }
+  }
+
+  const sectionId = String(post?.sectionId || '').trim()
+  if (!sectionId) return { section: null, collaborationTemplate: null }
+  const raw = await db.getById('sections', sectionId).catch(() => null) as Section | null
+  return {
+    section: raw ? normalizeSection(raw) as Section : null,
+    collaborationTemplate: null,
+  }
+}
+
+async function reindexCollaborationTemplatePosts(posts: any[], reason: string) {
+  for (const post of posts) {
+    const postId = String(post?._id || '').trim()
+    const communityId = String(post?.communityId || '').trim()
+    if (!postId || !communityId) continue
+    await db.runTransaction(async transaction => {
+      await appendPostRagOutboxEvent(transaction, {
+        communityId,
+        aggregateId: postId,
+        reasonCode: 'post.updated',
+      })
+    })
+    await enqueuePostRagJob({
+      postId,
+      communityId,
+      sectionId: '',
+      action: 'upsert',
+      reason,
+    })
+    await refreshPostSearchIndexById(postId)
+  }
 }
 
 async function getAttendanceRecords(postId: string, widgetId: string) {
@@ -1157,6 +1230,146 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     return { success: true }
   }
 
+  if (action === 'collaborationTemplate.listAdmin') {
+    const templates = await db.query(
+      'collaboration_templates',
+      {},
+      { orderBy: ['order', 'asc'] },
+    ) as CollaborationTemplate[]
+    return { templates: templates.map(normalizeCollaborationTemplate) }
+  }
+  if (action === 'collaborationTemplate.getAdmin') {
+    const templateId = String(params.templateId || '').trim()
+    if (!templateId) throw new Error('templateId 不能为空')
+    const raw = await db.getById('collaboration_templates', templateId).catch(() => null) as CollaborationTemplate | null
+    return { template: raw ? normalizeCollaborationTemplate(raw) : null }
+  }
+  if (action === 'collaborationTemplate.createAdmin') {
+    const name = String(params.name || '').trim()
+    if (!name || name.length > 40) throw new Error('模板名称应为 1 到 40 个字符')
+    const existingNames = await db.query('collaboration_templates', { name }, { limit: 1 }) as CollaborationTemplate[]
+    if (existingNames.length > 0) throw new Error('模板名称已存在')
+    const requestedSystemKey = String(params.systemKey || '').trim()
+    if (requestedSystemKey && !/^[a-z][a-z0-9_]{1,63}$/.test(requestedSystemKey)) {
+      throw new Error('systemKey 格式不正确')
+    }
+    const systemKey = requestedSystemKey || `custom_${crypto.randomUUID().replace(/-/g, '')}`
+    const existingKeys = await db.query('collaboration_templates', { systemKey }, { limit: 1 }) as CollaborationTemplate[]
+    if (existingKeys.length > 0) throw new Error('systemKey 已存在')
+    const now = new Date().toISOString()
+    const templateId = await db.create('collaboration_templates', {
+      systemKey,
+      name,
+      icon: String(params.icon || '').trim(),
+      order: Number.isFinite(Number(params.order)) ? Number(params.order) : 0,
+      status: 'active',
+      enableComment: params.enableComment !== false,
+      enableLike: params.enableLike !== false,
+      widgets: [],
+      protectedSystemKey: false,
+      createdAt: now,
+      updatedAt: now,
+      createdByAccountId: ctx.accountId,
+      updatedByAccountId: ctx.accountId,
+    })
+    return { templateId }
+  }
+  if (action === 'collaborationTemplate.updateAdmin') {
+    const templateId = String(params.templateId || '').trim()
+    if (!templateId) throw new Error('templateId 不能为空')
+    const raw = await db.getById('collaboration_templates', templateId).catch(() => null) as CollaborationTemplate | null
+    if (!raw) throw new Error('协作模板不存在')
+    const current = normalizeCollaborationTemplate(raw)
+    const updates: Record<string, any> = {}
+    if (typeof params.name === 'string') {
+      const name = params.name.trim()
+      if (!name || name.length > 40) throw new Error('模板名称应为 1 到 40 个字符')
+      if (name !== current.name) {
+        const duplicates = await db.query('collaboration_templates', { name }, { limit: 1 }) as CollaborationTemplate[]
+        if (duplicates.some((template) => template._id !== templateId)) throw new Error('模板名称已存在')
+      }
+      updates.name = name
+    }
+    if (typeof params.icon === 'string') updates.icon = params.icon.trim()
+    if (Number.isFinite(Number(params.order))) updates.order = Number(params.order)
+    if (typeof params.enableComment === 'boolean') updates.enableComment = params.enableComment
+    if (typeof params.enableLike === 'boolean') updates.enableLike = params.enableLike
+
+    let activePosts: any[] = []
+    let unsafeChanges: string[] = []
+    if (Array.isArray(params.widgets)) {
+      const { v4: uuidv4 } = await import('uuid')
+      const widgets = params.widgets.map((widget: any) => normalizeWidgetForSave({
+        ...widget,
+        widgetId: widget.widgetId || uuidv4(),
+      })) as Widget[]
+      validateSectionWidgets('realtime', widgets)
+      unsafeChanges = findUnsafeCollaborationTemplateChanges(current.widgets || [], widgets)
+      activePosts = await db.query('posts', {
+        area: 'collaboration',
+        collaborationTemplateId: templateId,
+        status: 'active',
+      }) as any[]
+      const impact = {
+        activePostCount: activePosts.length,
+        unsafeChanges,
+        requireMigration: activePosts.length > 0 && unsafeChanges.length > 0,
+      }
+      if (params.preview === true) return { template: current, ...impact }
+      if (impact.requireMigration) {
+        throw new Error('模板已有历史帖子，不兼容的控件结构变更必须通过数据迁移')
+      }
+      updates.widgets = widgets
+    }
+    if (!Array.isArray(params.widgets) && updates.name && updates.name !== current.name) {
+      activePosts = await db.query('posts', {
+        area: 'collaboration',
+        collaborationTemplateId: templateId,
+        status: 'active',
+      }) as any[]
+    }
+    if (Object.keys(updates).length === 0) throw new Error('没有可更新字段')
+    updates.updatedAt = new Date().toISOString()
+    updates.updatedByAccountId = ctx.accountId
+    await db.updateById('collaboration_templates', templateId, updates)
+    if (activePosts.length > 0) {
+      await reindexCollaborationTemplatePosts(activePosts, 'collaborationTemplate.updateAdmin')
+    }
+    return {
+      success: true,
+      activePostCount: activePosts.length,
+      unsafeChanges,
+      requireMigration: false,
+    }
+  }
+  if (action === 'collaborationTemplate.disableAdmin') {
+    const templateId = String(params.templateId || '').trim()
+    if (!templateId) throw new Error('templateId 不能为空')
+    const template = await db.getById('collaboration_templates', templateId).catch(() => null) as CollaborationTemplate | null
+    if (!template) throw new Error('协作模板不存在')
+    const status = params.disabled === false ? 'active' : 'disabled'
+    await db.updateById('collaboration_templates', templateId, {
+      status,
+      updatedAt: new Date().toISOString(),
+      updatedByAccountId: ctx.accountId,
+    })
+    return { success: true, status }
+  }
+  if (action === 'collaborationTemplate.deleteAdmin') {
+    const templateId = String(params.templateId || '').trim()
+    if (!templateId) throw new Error('templateId 不能为空')
+    const template = await db.getById('collaboration_templates', templateId).catch(() => null) as CollaborationTemplate | null
+    if (!template) throw new Error('协作模板不存在')
+    if (template.protectedSystemKey) throw new Error('内置模板不能删除，可以停用')
+    const posts = await db.query('posts', {
+      area: 'collaboration',
+      collaborationTemplateId: templateId,
+    }, { limit: 1 }) as any[]
+    if (posts.length > 0) throw new Error('该模板已有帖子，只能停用，不能删除')
+    await db.removeById('collaboration_templates', templateId)
+    return { success: true }
+  }
+
   if (action === 'section.list') {
     const raw = await db.query('sections', { communityId: params.communityId }, { orderBy: ['order', 'asc'] })
     return { sections: raw.map((section: any) => normalizeSection(section)) }
@@ -1442,6 +1655,8 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const communityId = String(params.communityId || '').trim()
     if (!communityId) throw new Error('communityId 不能为空')
     const sectionId = String(params.sectionId || '').trim()
+    const collaborationTemplateId = String(params.collaborationTemplateId || '').trim()
+    const areaFilter = String(params.area || 'all').trim()
     const authorKeyword = normalizeKeyword(params.authorQuery)
     const statusFilter = String(params.status || 'active').trim()
     const auditStatusFilter = String(params.auditStatus || 'all').trim()
@@ -1452,6 +1667,14 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
 
     let posts = await db.query('posts', { communityId }, { orderBy: ['createdAt', 'desc'] })
     if (sectionId) posts = posts.filter((post: any) => post.sectionId === sectionId)
+    if (collaborationTemplateId) {
+      posts = posts.filter((post: any) =>
+        post.area === 'collaboration' && post.collaborationTemplateId === collaborationTemplateId
+      )
+    }
+    if (areaFilter === 'collaboration') posts = posts.filter((post: any) => post.area === 'collaboration')
+    if (areaFilter === 'archive') posts = posts.filter((post: any) => post.area === 'archive')
+    if (areaFilter === 'legacy') posts = posts.filter((post: any) => !post.area)
     if (statusFilter !== 'all') posts = posts.filter((post: any) => post.status === statusFilter)
     if (auditStatusFilter !== 'all') {
       posts = posts.filter((post: any) => (post.auditStatus || 'pass') === auditStatusFilter || post.pendingAuditStatus === auditStatusFilter)
@@ -1467,10 +1690,18 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
 
     const usersById = await getUsersByIds(posts.map((post: any) => String(post.authorId || '')))
     const sectionsById = await getSectionsByIds(posts.map((post: any) => String(post.sectionId || '')))
+    const templatesById = await getCollaborationTemplatesByIds(
+      posts.map((post: any) => String(post.collaborationTemplateId || '')),
+    )
 
     const list = await Promise.all(posts.map(async (post: any) => {
       const author = usersById[post.authorId]
-      const section = sectionsById[post.sectionId]
+      const template = post.area === 'collaboration'
+        ? templatesById[String(post.collaborationTemplateId || '')]
+        : null
+      const section = template
+        ? collaborationTemplateAsSection(template, String(post.communityId || ''))
+        : sectionsById[post.sectionId]
       return {
         ...post,
         authorNickname: resolvePostAuthorNickname(post, author?.nickName, { audience: 'admin' }),
@@ -1489,11 +1720,11 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const postId = String(params.postId || '').trim()
     if (!postId) throw new Error('postId 不能为空')
     const post = await db.getById('posts', postId) as any
-    const [author, section] = await Promise.all([
+    const [author, contract] = await Promise.all([
       post.authorId ? db.getById('users', post.authorId).catch(() => null) : null,
-      post.sectionId ? db.getById('sections', post.sectionId).catch(() => null) : null,
+      resolveAdminPostContentContract(post),
     ])
-    const normalizedSection = section ? normalizeSection(section) : null
+    const normalizedSection = contract.section
     const auditTasks = postId ? await db.query(AUDIT_TASKS, { postId }, { orderBy: ['createdAt', 'desc'] }).catch(() => []) : []
     const attendanceSummaryByWidget = normalizedSection ? await buildAttendanceSummaryByWidget(post, normalizedSection) : {}
     const attendanceMembersByWidget = normalizedSection
@@ -1514,6 +1745,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
         attendanceSummaryByWidget,
       },
       section: normalizedSection,
+      collaborationTemplate: contract.collaborationTemplate,
       attendanceMembersByWidget,
       auditTasks,
     }
@@ -1651,8 +1883,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (!post) throw new Error('post not found')
     if (post.status === 'deleted') throw new Error('post is deleted')
 
-    const rawSection = await db.getById('sections', post.sectionId) as Section | null
-    const section = rawSection ? normalizeSection(rawSection) as Section : null
+    const { section } = await resolveAdminPostContentContract(post)
     if (!section || !Array.isArray(section.widgets) || section.widgets.length === 0) {
       throw new Error('该板块尚未配置内容模板，无法编辑')
     }
@@ -1679,7 +1910,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       const audit = await auditAndApply({
         postId,
         communityId: post.communityId,
-        sectionId: post.sectionId,
+        sectionId: post.area === 'collaboration' ? '' : post.sectionId,
         section,
         content: merged,
         authorId: ctx.userId,
@@ -1701,7 +1932,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const audit = await auditAndApply({
       postId,
       communityId: post.communityId,
-      sectionId: post.sectionId,
+      sectionId: post.area === 'collaboration' ? '' : post.sectionId,
       section,
       content: merged,
       authorId: ctx.userId,
@@ -1738,12 +1969,19 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     }
     const usersById = await getUsersByIds(posts.map((post: any) => String(post.authorId || '')))
     const sectionsById = await getSectionsByIds(posts.map((post: any) => String(post.sectionId || '')))
+    const templatesById = await getCollaborationTemplatesByIds(
+      posts.map((post: any) => String(post.collaborationTemplateId || '')),
+    )
     const rows = posts.map((post: any) => ({
       ...post,
       authorNickname: usersById[post.authorId]?.nickName || '',
       authorAvatarUrl: resolveAuthorAvatarUrl(usersById[post.authorId]?.avatarUrl, post._id || post.authorId || ''),
-      sectionName: sectionsById[post.sectionId]?.name || '',
-      sectionType: sectionsById[post.sectionId]?.type || '',
+      sectionName: post.area === 'collaboration'
+        ? templatesById[String(post.collaborationTemplateId || '')]?.name || ''
+        : sectionsById[post.sectionId]?.name || '',
+      sectionType: post.area === 'collaboration'
+        ? 'realtime'
+        : sectionsById[post.sectionId]?.type || '',
       isVisibleToMembers: isPostVisibleToMembers(post),
     }))
     return { posts: rows, total: rows.length }
@@ -1754,9 +1992,9 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (!postId) throw new Error('postId cannot be empty')
     const post = await db.getById('posts', postId) as any
     if (!post) throw new Error('post not found')
-    const [author, section, auditTasks] = await Promise.all([
+    const [author, contract, auditTasks] = await Promise.all([
       post.authorId ? db.getById('users', post.authorId).catch(() => null) : null,
-      post.sectionId ? db.getById('sections', post.sectionId).catch(() => null) : null,
+      resolveAdminPostContentContract(post),
       db.query(AUDIT_TASKS, { postId }, { orderBy: ['createdAt', 'desc'] }).catch(() => []),
     ])
     return {
@@ -1766,7 +2004,8 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
         authorAvatarUrl: resolveAuthorAvatarUrl((author as any)?.avatarUrl, post._id || post.authorId || ''),
         isVisibleToMembers: isPostVisibleToMembers(post),
       },
-      section: section ? normalizeSection(section) : null,
+      section: contract.section,
+      collaborationTemplate: contract.collaborationTemplate,
       auditTasks,
     }
   }
@@ -1788,7 +2027,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (!postId) throw new Error('postId cannot be empty')
     const post = await db.getById('posts', postId) as any
     if (!post) throw new Error('post not found')
-    const section = await db.getById('sections', post.sectionId) as Section
+    const { section } = await resolveAdminPostContentContract(post)
     if (!section) throw new Error('section not found')
     const slot = post.pendingContent ? 'pendingContent' : 'content'
     const oldTasks = await db.query(AUDIT_TASKS, { postId, contentSlot: slot }).catch(() => []) as any[]
@@ -1796,7 +2035,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const audit = await auditAndApply({
       postId,
       communityId: post.communityId,
-      sectionId: post.sectionId,
+      sectionId: post.area === 'collaboration' ? '' : post.sectionId,
       section,
       content: slot === 'pendingContent' ? post.pendingContent : post.content,
       authorId: post.authorId,
