@@ -1,12 +1,17 @@
 # Author Post Management Implementation Plan
 
+> **Historical / point-in-time:** This delivery plan records the approved 2026-07-15 implementation sequence. Retain it for traceability; do not treat its task state as current repository status.
+> **Current authority:** Use the [documentation authority map](../../README.md), current checked-in code, cloud contracts, and tests.
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add Xiaohongshu-style author edit/delete controls and a real two-column “我发布的” experience.
 
 **Architecture:** Extend the authenticated post cloud function with an identity-scoped `listMine` query and archive-aware update handling. Reuse the existing create page as the single editor, then add a focused profile-post card adapter and page so visual presentation stays separate from data access.
 
-**Tech Stack:** Vue 3, uni-app, TypeScript, CloudBase functions, Jest/Vitest, Wot Design Uni icons.
+**Tech Stack:** Vue 3, uni-app, TypeScript, CloudBase functions, Jest/Vitest, local SVG icon assets.
 
 ---
 
@@ -30,7 +35,7 @@
 - Modify: `miniprogram/src/pages/detail/index.vue`
 - Modify: `miniprogram/src/pages/create/index.vue`
 
-- [ ] Add static assertions for `data-testid="post-settings-trigger"`, `data-testid="post-settings-sheet"`, horizontal `post-settings-actions`, Wot icons `edit-outline` and `delete-thin`, and edit navigation containing `editPostId`.
+- [ ] Add static assertions for `data-testid="post-settings-trigger"`, `data-testid="post-settings-sheet"`, horizontal `post-settings-actions`, local edit/delete SVG assets, and edit navigation containing `editPostId`.
 - [ ] Add static assertions that create page reads `editPostId`, calls `postApi.get`, pre-fills `formData`, displays `保存`, and calls `postApi.update`.
 - [ ] Run `npm.cmd --prefix miniprogram test -- --run miniprogram/src/utils/__tests__/author-post-management.test.ts` and confirm the missing contracts fail.
 - [ ] Replace the old delete row with the author-only trigger and rounded bottom sheet; keep the existing confirmation lock as the only delete executor.
@@ -72,4 +77,3 @@
 - [ ] Start this worktree's H5 server and verify at 390 × 844: profile → 我发布的 → detail → author settings sheet → edit prefill/save; inspect console and capture screenshots.
 - [ ] Confirm temporary fixture cleanup, validation lease absence, clean git diff, branch, HEAD, and author identity.
 - [ ] Commit with `AngryBird <48046333+angrybirddd@users.noreply.github.com>`, push `codex/image-note-author-tools`, create a PR with test evidence, arm Merge Queue, and monitor exact HEAD until `MERGED` or `CLOSED`.
-

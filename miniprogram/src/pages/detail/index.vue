@@ -129,11 +129,10 @@
         </view>
         <view v-if="isAuthor" class="actions">
           <text
-            class="delete-btn"
-            data-testid="post-delete"
-            :class="{ disabled: deleteLock.busy.value }"
-            @tap="deleteLock.run()"
-          >{{ deleteLock.busy.value ? '删除中...' : '删除' }}</text>
+            class="post-settings-trigger"
+            data-testid="post-settings-trigger"
+            @tap="openPostSettings"
+          >编辑和设置 ›</text>
         </view>
       </view>
     </view>
@@ -182,6 +181,35 @@
           </view>
           <view v-if="rosterMembers.length === 0" class="roster-empty">还没有人参与</view>
         </scroll-view>
+      </view>
+    </view>
+
+    <view v-if="showPostSettings" class="post-settings-mask" @tap="closePostSettings">
+      <view class="post-settings-sheet" data-testid="post-settings-sheet" @tap.stop>
+        <view class="post-settings-header">
+          <text class="post-settings-title">笔记设置</text>
+          <text class="post-settings-close" @tap="closePostSettings">×</text>
+        </view>
+        <view class="post-settings-actions">
+          <view class="post-settings-action" data-testid="post-settings-edit" @tap="openPostEditor">
+            <view class="post-settings-icon">
+              <image class="post-settings-icon-image" src="/static/post-settings/edit.svg" mode="aspectFit" />
+            </view>
+            <text class="post-settings-label">编辑</text>
+          </view>
+          <view
+            class="post-settings-action"
+            data-testid="post-settings-delete"
+            data-testid-legacy="post-delete"
+            :class="{ disabled: deleteLock.busy.value }"
+            @tap="handleSettingsDelete"
+          >
+            <view class="post-settings-icon">
+              <image class="post-settings-icon-image" src="/static/post-settings/delete.svg" mode="aspectFit" />
+            </view>
+            <text class="post-settings-label">删除</text>
+          </view>
+        </view>
       </view>
     </view>
   </view>
@@ -233,6 +261,7 @@ const resolvedDetailMediaUrls = reactive<Record<string, string>>({})
 const cancelBusy = ref(false)
 const activityInviteState = ref<any>(null)
 const activityInviteLoading = ref(false)
+const showPostSettings = ref(false)
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
 const GUIDE_NOTE_NAME_HINTS = ['亲子出游', '周末遛娃', '村游攻略', '路线攻略', '出游攻略']
@@ -325,6 +354,31 @@ function openImageNoteLocation(location: ImageNoteLocation) {
     name: location.name || location.address || '设置地点',
     scale: 16,
   })
+}
+
+function openPostSettings() {
+  if (!isAuthor.value) return
+  showPostSettings.value = true
+}
+
+function closePostSettings() {
+  showPostSettings.value = false
+}
+
+function openPostEditor() {
+  const postId = String(post.value?._id || '')
+  if (!postId) return
+  closePostSettings()
+  const returnTo = `/pages/detail/index?postId=${encodeURIComponent(postId)}`
+  uni.navigateTo({
+    url: `/pages/create/index?editPostId=${encodeURIComponent(postId)}&returnTo=${encodeURIComponent(returnTo)}`,
+  })
+}
+
+function handleSettingsDelete() {
+  if (deleteLock.busy.value) return
+  closePostSettings()
+  void deleteLock.run()
 }
 
 onErrorCaptured((error, _instance, info) => {
@@ -1350,21 +1404,11 @@ function formatDateTime(iso: string): string {
   gap: $hh-space-md;
 }
 
-.edit-btn {
+.post-settings-trigger {
   font-size: $hh-font-caption;
-  color: $hh-color-info;
-  padding: $hh-space-xs $hh-space-md;
-}
-
-.delete-btn {
-  font-size: $hh-font-caption;
-  color: $hh-color-danger;
-  padding: $hh-space-xs $hh-space-md;
-}
-
-.delete-btn.disabled {
-  color: $hh-color-text-mute;
-  pointer-events: none;
+  color: var(--hh-color-text-tertiary);
+  line-height: 1.5;
+  padding: 10rpx 0 10rpx 20rpx;
 }
 
 .cancel-btn {
@@ -1377,6 +1421,90 @@ function formatDateTime(iso: string): string {
   font-size: $hh-font-caption;
   color: $hh-color-success;
   padding: $hh-space-xs $hh-space-md;
+}
+
+.post-settings-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(0, 0, 0, 0.48);
+}
+
+.post-settings-sheet {
+  width: 100%;
+  padding: 30rpx 28rpx calc(48rpx + env(safe-area-inset-bottom));
+  border-radius: 32rpx 32rpx 0 0;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.post-settings-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 58rpx;
+}
+
+.post-settings-title {
+  color: #222;
+  font-size: 32rpx;
+  font-weight: 600;
+}
+
+.post-settings-close {
+  position: absolute;
+  right: 4rpx;
+  top: -8rpx;
+  padding: 8rpx;
+  color: #333;
+  font-size: 48rpx;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.post-settings-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 42rpx;
+  margin-top: 34rpx;
+  padding: 0 8rpx;
+}
+
+.post-settings-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16rpx;
+  min-width: 112rpx;
+}
+
+.post-settings-action.disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.post-settings-icon {
+  width: 104rpx;
+  height: 104rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #f5f5f5;
+}
+
+.post-settings-icon-image {
+  width: 52rpx;
+  height: 52rpx;
+}
+
+.post-settings-label {
+  color: #555;
+  font-size: 24rpx;
+  line-height: 1.4;
 }
 
 .roster-mask {

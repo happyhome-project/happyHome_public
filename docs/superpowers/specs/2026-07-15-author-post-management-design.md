@@ -1,5 +1,8 @@
 # Author Post Management Design
 
+> **Historical / point-in-time:** This specification records the author-post management design accepted for the 2026-07-15 delivery. It does not override later product or implementation decisions.
+> **Current authority:** Use the [documentation authority map](../../README.md), current checked-in code, cloud contracts, and tests.
+
 ## Goal
 
 Give post authors a Xiaohongshu-inspired management flow and make the existing “我发布的” profile shortcut real. The flow must support actual edit/delete operations and a visual, cover-first view of the author's posts rather than placeholder controls.
@@ -8,8 +11,8 @@ Give post authors a Xiaohongshu-inspired management flow and make the existing �
 
 Only the post author sees a quiet lower-left entry labelled `编辑和设置 ›`. Tapping it opens a bottom sheet with a white surface, large rounded top corners, centered `笔记设置` title, and two horizontally arranged actions:
 
-- `编辑`: a neutral circular icon button using the existing Wot icon font's `edit-outline` glyph.
-- `删除`: a neutral circular icon button using `delete-thin`; destructive red is reserved for the existing confirmation dialog.
+- `编辑`: a neutral circular icon button using the local outline edit asset.
+- `删除`: a neutral circular icon button using the local outline delete asset; destructive red is reserved for the existing confirmation dialog.
 
 The old full-width delete area is removed. The sheet closes by tapping the mask, the close button, or an action.
 
@@ -37,4 +40,3 @@ The page follows Xiaohongshu's profile-note presentation: two cover-first masonr
 - Cloud unit tests cover identity scoping, sorting/pagination, deleted filtering, and metadata enrichment.
 - Static/UI tests cover the horizontal icon sheet, profile navigation, edit-mode routing, and two-column page contract.
 - H5 verification covers profile → 我发布的 → detail → settings sheet and edit prefill/save against isolated temporary fixture data, followed by cleanup.
-

@@ -263,6 +263,12 @@ export const postApi = {
     ),
   list: (sectionId: string, skip = 0, asGuest = false) =>
     callCloud<{ posts: any[] }>('post', 'list', { sectionId, skip, asGuest }),
+  listMine: (skip = 0, limit = 20) =>
+    callCloud<{ posts: any[]; total: number; skip: number; limit: number; hasMore: boolean }>(
+      'post',
+      'listMine',
+      { skip, limit },
+    ),
   listArchive: (params: ArchivePostListParams) =>
     callCloud<{ posts: any[]; nextCursor: string; hasMore: boolean }>('post', 'listArchive', params),
   listArchiveTabs: (params: { communityId: string; asGuest?: boolean }) =>
@@ -325,8 +331,11 @@ export const postApi = {
       'createActivityInvite',
       { sourcePostId, content },
     ),
-  update: (postId: string, content: Record<string, any>) =>
-    callCloud('post', 'update', { postId, content }),
+  update: (
+    postId: string,
+    content: Record<string, any>,
+    options: { topics?: string[]; presentation?: Record<string, any> } = {},
+  ) => callCloud('post', 'update', Object.assign({ postId, content }, options)),
   delete: (postId: string) =>
     callCloud('post', 'delete', { postId }),
   joinAttendance: (postId: string, widgetId: string, seatCount?: number) =>

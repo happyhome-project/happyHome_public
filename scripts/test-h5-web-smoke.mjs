@@ -113,7 +113,8 @@ async function realWrite({ running, runId, home = homedir() }) {
         }, remove: async (exactPostId) => {
           postUrl ||= `${running.url}/#/pages/detail/index?postId=${encodeURIComponent(exactPostId)}`
           await page.goto(postUrl)
-          await page.getByTestId('post-delete').click()
+          await page.getByTestId('post-settings-trigger').click()
+          await page.getByTestId('post-settings-delete').click()
           await page.getByText('确定', { exact: true }).click()
           await page.waitForURL((url) => url.toString() !== postUrl)
           deleted = true
@@ -152,7 +153,7 @@ async function realWrite({ running, runId, home = homedir() }) {
     postId = (await card.getAttribute('data-post-id')) || ''
     if (!postId) throw new Error('created post card is missing exact post id')
     await card.click()
-    await page.getByTestId('post-delete').waitFor()
+    await page.getByTestId('post-settings-trigger').waitFor()
     postUrl = page.url()
     if (!postUrl.includes(encodeURIComponent(postId)) && !postUrl.includes(postId)) throw new Error('detail URL is missing exact created post id')
     const imageUrl = await page.getByTestId('detail-content-image').getAttribute('src')
