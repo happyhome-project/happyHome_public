@@ -1,5 +1,8 @@
 # Direct PR lifecycle design
 
+> **Historical / point-in-time:** This design records the PR lifecycle decision approved on 2026-07-15 for traceability; it does not override later repository policy.
+> **Current authority:** Use [AGENTS.md](../../../AGENTS.md) and the current [setup guide](../../SETUP.md).
+
 ## Goal
 
 Make the feature session that creates a PR own it through exact-head CI, Merge Queue, and terminal `MERGED` or `CLOSED`, without depending on webhook delivery or a centralized watchdog.

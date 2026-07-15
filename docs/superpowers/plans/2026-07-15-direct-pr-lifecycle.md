@@ -1,5 +1,10 @@
 # Direct PR Lifecycle Implementation Plan
 
+> **Historical / point-in-time:** This delivery plan records the approved 2026-07-15 implementation sequence; its checkbox state is not current repository status.
+> **Current authority:** Use [AGENTS.md](../../../AGENTS.md) and the current [setup guide](../../SETUP.md).
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Make each feature session directly own its GitHub PR through Merge Queue terminal state without webhook or watchdog dependency.
