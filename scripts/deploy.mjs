@@ -915,6 +915,7 @@ async function buildAndGateMiniprogramUpload({ version, desc, releaseRunId, dele
       HH_RELEASE_UI_EVIDENCE_DIR: releaseUiEvidenceDir,
       HH_RELEASE_GIT_SHA: gitSha,
       HH_RELEASE_DEVTOOLS_VERSION: devToolsVersion,
+      HH_RELEASE_VERSION: version,
       ...(delegateRagVerification ? { HH_RELEASE_DELEGATE_RAG_VERIFICATION: '1' } : {}),
       WECHAT_DEVTOOLS_PROJECT_PATH: MP_DIST,
     },

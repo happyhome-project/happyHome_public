@@ -293,3 +293,9 @@ test('H5 profile smoke checks login-entry uniqueness before either login path br
   assert.ok(uniquenessIndex > -1)
   assert.ok(uniquenessIndex < fallbackBranchIndex)
 })
+
+test('H5 profile smoke prefers the pinned release version over mutable source build info', () => {
+  const source = readFileSync(new URL('../test-h5-profile-smoke.mjs', import.meta.url), 'utf8')
+
+  assert.match(source, /process\.env\.HH_RELEASE_VERSION[\s\S]*\|\|[\s\S]*buildInfoText\.match/)
+})
