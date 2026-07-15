@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { comparePostRagActivationOrder, PostRagJobProcessorError, processClaimedPostRagJob, processPostRagJobV2Batch } from '../post-rag-job-processor'
 import { buildPostRagJobId, type PostRagJobDocument } from '../post-rag-jobs'
 import { PostRagSourceProjectionValidationError } from '../post-rag-indexing'
+import { buildInitialCollaborationTemplates } from '../../shared/collaboration-templates'
 
 const times = (...values: string[]) => { const queue = [...values]; return () => queue.shift() || values[values.length - 1] }
 const NOW = '2026-07-12T04:00:00.000Z'
@@ -39,6 +40,7 @@ function dependencies(overrides: Record<string, unknown> = {}) {
     readJob: jest.fn(async (jobId: string) => job({ _id: jobId, leaseToken: jobId === JOB2_ID ? 'lease-2' : 'lease-1' })),
     loadPost: jest.fn(async () => ({ _id: 'post-1', communityId: 'community-1', sectionId: 'section-1', status: 'active' })),
     loadSection: jest.fn(async () => ({ _id: 'section-1', communityId: 'community-1', status: 'active' })),
+    loadCollaborationTemplate: jest.fn(async () => null),
     buildProjection: jest.fn(() => projection()),
     complete: jest.fn(async (_id, options) => { calls.push(`complete:${options.outcome}`); return {} }),
     fail: jest.fn(async () => { calls.push('fail'); return {} }),
@@ -48,6 +50,34 @@ function dependencies(overrides: Record<string, unknown> = {}) {
 }
 
 describe('processClaimedPostRagJob', () => {
+  test('loads the global template when projecting a section-free collaboration post', async () => {
+    const template = buildInitialCollaborationTemplates()[0]
+    const deps = dependencies({
+      loadPost: jest.fn(async () => ({
+        _id: 'post-1', communityId: 'community-1', sectionId: '', area: 'collaboration',
+        collaborationTemplateId: template._id, status: 'active', auditStatus: 'pass', content: {},
+      })),
+      loadSection: jest.fn(async () => { throw new Error('must not load sections') }),
+      loadCollaborationTemplate: jest.fn(async () => template),
+      buildProjection: jest.fn((_post, section) => {
+        expect(section).toEqual(expect.objectContaining({
+          _id: template._id,
+          communityId: 'community-1',
+          name: '拼车出行',
+        }))
+        return projection()
+      }),
+    })
+
+    await expect(processClaimedPostRagJob(
+      job({ sectionId: null }),
+      { workerId: 'worker-1', now: times(NOW) },
+      deps,
+    )).resolves.toEqual({ jobId: expect.any(String), status: 'completed', outcome: 'indexed' })
+    expect(deps.loadCollaborationTemplate).toHaveBeenCalledWith(template._id)
+    expect(deps.loadSection).not.toHaveBeenCalled()
+  })
+
   test('strictly validates even completed fast-path jobs before calling dependencies', async () => {
     const deps = dependencies()
     const malformed = job({ status: 'completed', outcome: 'indexed', leaseOwner: null, leaseToken: null, leaseExpiresAt: null }) as any

@@ -1,4 +1,5 @@
 import * as db from '../db'
+import { buildInitialCollaborationTemplates } from '../../shared/collaboration-templates'
 import { POST_RAG_JOBS } from '../post-rag-jobs'
 import { appendPostRagOutboxEvent, POST_RAG_OUTBOX } from '../post-rag-outbox'
 import {
@@ -45,6 +46,34 @@ test('atomically materializes an eligible post event and completes its outbox le
     status: 'completed', leaseOwner: 'worker-1', leaseToken: claimed!.leaseToken, leaseExpiresAt: null,
   })
   expect(localDb._dump(POST_RAG_JOBS)).toHaveLength(1)
+})
+
+test('materializes an eligible section-free collaboration post from its global template', async () => {
+  const template = buildInitialCollaborationTemplates()[0]
+  const { _id: templateId, ...templateData } = template
+  const event = await db.runTransaction(async (transaction) => {
+    await transaction.collection('collaboration_templates').doc(templateId).set({ data: templateData })
+    await transaction.collection('posts').doc('collaboration-post-1').set({ data: {
+      communityId: 'community-1', area: 'collaboration', collaborationTemplateId: templateId,
+      collaborationSystemKey: template.systemKey, authorId: 'author-1', status: 'active', auditStatus: 'pass',
+      content: { carpool_origin: '青山村', carpool_destination: '成都软件园' }, commentCount: 0, likeCount: 0,
+      createdAt: '2026-07-01T00:00:00.000Z', updatedAt: '2026-07-02T00:00:00.000Z',
+    } })
+    return appendPostRagOutboxEvent(transaction, {
+      communityId: 'community-1', aggregateId: 'collaboration-post-1', reasonCode: 'post.created', now: NOW,
+    })
+  })
+  const claimed = await claimPostRagOutboxEvent(event.outboxId, { workerId: 'worker-1', now: NOW })
+
+  const result = await materializeClaimedPostRagOutboxEvent(event.outboxId, {
+    workerId: 'worker-1', leaseToken: claimed!.leaseToken!, now: '2026-07-12T04:00:01.000Z',
+  })
+
+  expect(result.job).toMatchObject({
+    postId: 'collaboration-post-1',
+    sectionId: null,
+    action: 'upsert',
+  })
 })
 
 test.each([

@@ -1,6 +1,7 @@
 import type { Post, Section } from '../shared/types'
 import * as db from './db'
 import { buildPostRagSourceProjection, isPostRagSourceProjectionValidationError, type PostRagSourceProjection } from './post-rag-indexing'
+import { loadPostContentSection } from './post-content-contract'
 import {
   claimPostRagJob,
   completePostRagJob,
@@ -111,6 +112,7 @@ type ProcessorDependencies = {
   sink: PostRagVersionedIndexSink
   loadPost(postId: string): Promise<Post | null>
   loadSection(sectionId: string): Promise<Section | null>
+  loadCollaborationTemplate?(templateId: string): Promise<unknown | null>
   buildProjection: typeof buildPostRagSourceProjection
   readJob: typeof getPostRagJob
   complete: typeof completePostRagJob
@@ -220,9 +222,13 @@ export async function processClaimedPostRagJob(
     }
     const post = storedPost
     let section: Section | null = null
-    if (post.sectionId) {
-      try { section = await dependencies.loadSection(post.sectionId) } catch { throw new PostRagJobProcessorError('INTERNAL_ERROR', 'load_source') }
-    }
+    try {
+      section = await loadPostContentSection(post, (collectionName, id) => (
+        collectionName === 'sections'
+          ? dependencies.loadSection(id)
+          : (dependencies.loadCollaborationTemplate?.(id) || Promise.resolve(null))
+      ))
+    } catch { throw new PostRagJobProcessorError('INTERNAL_ERROR', 'load_source') }
 
     failureStage = 'chunk'
     let projection: PostRagSourceProjection
@@ -328,6 +334,7 @@ const defaultDependencies: BatchDependencies = {
   sink: unavailableSink,
   loadPost: (postId) => db.getByIdOrNull('posts', postId),
   loadSection: (sectionId) => db.getByIdOrNull('sections', sectionId),
+  loadCollaborationTemplate: (templateId) => db.getByIdOrNull('collaboration_templates', templateId),
   buildProjection: buildPostRagSourceProjection,
   readJob: getPostRagJob,
   complete: completePostRagJob,

@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto'
 
-import type { Post, Section } from '../shared/types'
+import type { Post } from '../shared/types'
 import * as db from './db'
 import { buildPostRagSourceProjection, isPostRagSourceProjectionValidationError } from './post-rag-indexing'
+import { loadPostContentSection } from './post-content-contract'
 import { createPostRagJobInTransaction, isPostRagJobValidationError, POST_RAG_JOBS, validateCreatePostRagJobInput, validateStoredPostRagJob, type CreatePostRagJobInput, type PostRagJobDocument } from './post-rag-jobs'
 import {
   POST_RAG_OUTBOX,
@@ -250,7 +251,9 @@ export async function materializeClaimedPostRagOutboxEventInTransaction(
   const storedPost = await db.transactionGetByIdOrNull<Post>(transaction, 'posts', current.aggregateId)
   if (storedPost && (storedPost._id !== current.aggregateId || storedPost.communityId !== current.communityId)) throw new PostRagOutboxMaterializationError('VALIDATION_FAILED')
   const post = storedPost || missingPost(current)
-  const section = post.sectionId ? await db.transactionGetByIdOrNull<Section>(transaction, 'sections', post.sectionId) : null
+  const section = await loadPostContentSection(post, (collectionName, id) => (
+    db.transactionGetByIdOrNull(transaction, collectionName, id)
+  ))
   let projection: ReturnType<typeof buildPostRagSourceProjection>
   try {
     projection = dependencies.buildProjection(post, section)
@@ -287,7 +290,9 @@ export async function materializeClaimedPostRagOutboxEvent(outboxId: string, opt
     for (const listed of posts) {
       const storedPost = await db.transactionGetByIdOrNull<Post>(transaction, 'posts', listed._id)
       if (!storedPost || storedPost.communityId !== current.communityId) continue
-      const section = storedPost.sectionId ? await db.transactionGetByIdOrNull<Section>(transaction, 'sections', storedPost.sectionId) : null
+      const section = await loadPostContentSection(storedPost, (collectionName, id) => (
+        db.transactionGetByIdOrNull(transaction, collectionName, id)
+      ))
       const projection = buildPostRagSourceProjection(storedPost, section)
       jobs.push(await createPostRagJobInTransaction(transaction, { outboxId, postId: storedPost._id, communityId: current.communityId,
         sectionId: storedPost.sectionId || null, action: projection.eligible ? 'upsert' : 'delete', sourceVersion: projection.sourceVersion,

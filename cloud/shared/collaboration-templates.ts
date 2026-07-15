@@ -7,6 +7,8 @@ import type { CollaborationTemplate, Section, Widget } from './types'
 
 export const CARPOOL_SYSTEM_KEY = 'carpool'
 export const CARPOOL_TEMPLATE_NAME = '拼车出行'
+export const CARPOOL_TEMPLATE_ID = 'collaboration-template-carpool'
+export const ACTIVITY_INVITE_TEMPLATE_ID = 'collaboration-template-activity-invite'
 
 export const CARPOOL_WIDGET_IDS = {
   origin: 'carpool_origin',

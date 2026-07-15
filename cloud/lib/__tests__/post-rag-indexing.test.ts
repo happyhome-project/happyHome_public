@@ -1,6 +1,10 @@
 
 import type { Post, Section } from '../../shared/types'
 import {
+  buildInitialCollaborationTemplates,
+  collaborationTemplateAsSection,
+} from '../../shared/collaboration-templates'
+import {
   POST_RAG_RETRIEVAL_INDEX_VERSION,
   buildPostRagSourceProjection,
   isPostEligibleForTrustedRag,
@@ -89,6 +93,38 @@ describe('trusted RAG source projection', () => {
     expect(projection.chunks).toEqual(expect.arrayContaining([
       expect.objectContaining({ postId: 'post-1', communityId: 'community-1', sectionId: '', sectionName: '沉淀区', text: expect.stringContaining('亲子出游') }),
       expect.objectContaining({ text: '一起去湖边' }),
+    ]))
+  })
+
+  test('projects a section-free collaboration post through its global template schema', () => {
+    const template = buildInitialCollaborationTemplates()[0]
+    const collaborationPost = post({
+      sectionId: '',
+      area: 'collaboration',
+      collaborationTemplateId: template._id,
+      collaborationSystemKey: template.systemKey,
+      content: {
+        carpool_origin: '青山村东门',
+        carpool_destination: '成都软件园',
+        carpool_departure_time: '2026-07-16T08:30:00.000Z',
+        carpool_location: { address: '青山村东门', lat: 30.1, lng: 104.1 },
+        carpool_note: [{ blockId: 'note-1', type: 'text', text: '可带一件行李' }],
+      },
+    })
+    const templateSection = collaborationTemplateAsSection(template, 'community-1')
+
+    const projection = buildPostRagSourceProjection(collaborationPost, templateSection)
+
+    expect(projection.eligible).toBe(true)
+    expect(projection.chunks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        postId: 'post-1',
+        communityId: 'community-1',
+        sectionId: '',
+        sectionName: '拼车出行',
+        text: '青山村东门',
+      }),
+      expect.objectContaining({ text: '可带一件行李' }),
     ]))
   })
 
