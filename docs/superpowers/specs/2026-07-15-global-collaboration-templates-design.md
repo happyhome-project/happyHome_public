@@ -233,7 +233,7 @@ Admin API：
 7. 验证出游邀约来源联动与报名；
 8. 清理临时帖子、模板和社群。
 
-生产数据迁移必须在 clean、fresh 的公开 canonical main 发布角色执行，并保留 prepare/apply 证据；不得从功能分支或当前 worktree 运行。
+正式发布阶段只执行必要 smoke。生产数据迁移在代码发布成功后，由 clean、fresh 的公开 canonical main 发布角色执行，并保留 prepare/apply 证据；随后再做完整真实业务验收。不得从功能分支或当前 worktree 运行。
 
 ## 非目标
 

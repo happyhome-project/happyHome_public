@@ -271,7 +271,6 @@ Commit as `feat: manage collaboration templates globally`.
 - Create: `scripts/lib/global-collaboration-migration.test.mjs`
 - Create: `scripts/migrate-global-collaboration.mjs`
 - Modify: `package.json`
-- Add: `release/migrations/20260715-global-collaboration-v1.mjs`
 - Add: `release/changes/20260715-global-collaboration.json`
 
 - [ ] **Step 1: Write failing pure migration tests**
@@ -292,7 +291,7 @@ Apply requires the immutable manifest and matching environment/HEAD. Seed templa
 
 - [ ] **Step 5: Wire release metadata and governance**
 
-Add the migration to the release component registry/plan as required by repository policy. The feature worktree only runs pure tests and dry-run fixture tests.
+Declare the deployment impact in release metadata. Because the repository executes declared migrations before cloud deployment, do not put this destructive conversion in the pre-deploy migration list: deploy the backward-compatible code with smoke-only release gates, then run the reviewed prepare/apply command from clean canonical main before post-release acceptance. The feature worktree only runs pure tests and dry-run fixture tests.
 
 - [ ] **Step 6: Verify migration and governance tests**
 

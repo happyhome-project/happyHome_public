@@ -90,6 +90,7 @@
     "set:superadmin": "node scripts/set-super-admin.mjs",
     "ensure:indexes": "node scripts/ensure-indexes.mjs",
     "migrate:archive-posts": "node scripts/migrate-archive-posts.mjs",
+    "migrate:global-collaboration": "node scripts/migrate-global-collaboration.mjs",
     "ensure:tencent-rag-index": "node scripts/ensure-tencent-rag-index.mjs",
     "ensure:tencent-rag-index:release": "node scripts/rebuild-post-rag-index.mjs --ensure-index",
     "verify:tencent-lkeap": "node scripts/verify-tencent-lkeap.mjs",
