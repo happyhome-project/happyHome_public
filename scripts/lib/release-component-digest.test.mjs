@@ -105,3 +105,22 @@ test('component source collection excludes generated and dependency directories'
   assert.equal(paths.some((path) => path.includes('dist')), false)
   assert.equal(paths.some((path) => path.includes('node_modules')), false)
 })
+
+test('component source collection can exclude a release-owned generated marker without excluding its directory', async () => {
+  const root = await fixture()
+  await mkdir(join(root, 'src', 'generated'), { recursive: true })
+  await writeFile(join(root, 'src', 'generated', 'build-info.ts'), 'export const version = "release-owned"\n')
+  await writeFile(join(root, 'src', 'generated', 'business.ts'), 'export const value = 1\n')
+  const paths = await collectComponentSourcePaths(root, {
+    excludeDirectories: ['dist', 'node_modules'],
+    excludeFiles: ['src/generated/build-info.ts'],
+  })
+  assert.equal(paths.some((path) => path.endsWith('src\\generated\\build-info.ts') || path.endsWith('src/generated/build-info.ts')), false)
+  assert(paths.some((path) => path.endsWith('src\\generated\\business.ts') || path.endsWith('src/generated/business.ts')))
+  const input = { ...digestInput(root), sourcePaths: paths }
+  const original = await createReleaseComponentDigest(input)
+  await writeFile(join(root, 'src', 'generated', 'build-info.ts'), 'export const version = "next-release"\n')
+  assert.equal(await createReleaseComponentDigest(input), original)
+  await writeFile(join(root, 'src', 'generated', 'business.ts'), 'export const value = 2\n')
+  assert.notEqual(await createReleaseComponentDigest(input), original)
+})

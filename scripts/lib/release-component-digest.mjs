@@ -68,9 +68,10 @@ async function runtimeRecords(root, directory = root, prefix = '', excluded = ne
   return records
 }
 
-export async function collectComponentSourcePaths(inputRoot, { excludeDirectories = [] } = {}) {
+export async function collectComponentSourcePaths(inputRoot, { excludeDirectories = [], excludeFiles = [] } = {}) {
   const root = resolve(inputRoot)
   const excluded = new Set(excludeDirectories)
+  const excludedFiles = new Set(excludeFiles.map(canonicalPath))
   const files = []
   async function walk(directory) {
     const entries = await readdir(directory, { withFileTypes: true })
@@ -80,7 +81,9 @@ export async function collectComponentSourcePaths(inputRoot, { excludeDirectorie
       const path = resolve(directory, entry.name)
       if (entry.isSymbolicLink()) throw new Error(`component source collection rejects symbolic link or reparse entry: ${inside(root, path)}`)
       if (entry.isDirectory()) await walk(path)
-      else if (entry.isFile()) files.push(path)
+      else if (entry.isFile()) {
+        if (!excludedFiles.has(canonicalPath(inside(root, path)))) files.push(path)
+      }
       else throw new Error(`component source collection rejects unsupported entry: ${inside(root, path)}`)
     }
   }
