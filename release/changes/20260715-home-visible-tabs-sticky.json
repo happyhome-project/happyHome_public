@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "changeId": "home-visible-tabs-sticky",
+  "actions": [],
+  "migrations": [],
+  "smokeSuites": [],
+  "releaseImpact": {
+    "cloudFunctions": "No runtime code change.",
+    "adminWeb": "No runtime code change.",
+    "miniprogram": "Rebuild and upload the mini-program so the visible archive topic tabs pin below the sticky search bar and release correctly during reverse scrolling or filtered-content height changes.",
+    "environmentVariables": [],
+    "databaseMigrations": []
+  }
+}

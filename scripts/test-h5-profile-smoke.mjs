@@ -6,7 +6,9 @@ import { chromium } from 'playwright'
 const root = join(process.cwd(), 'miniprogram', 'dist', 'build', 'h5')
 const buildInfoPath = join(process.cwd(), 'miniprogram', 'src', 'generated', 'build-info.ts')
 const buildInfoText = existsSync(buildInfoPath) ? readFileSync(buildInfoPath, 'utf8') : ''
-const expectedVersion = buildInfoText.match(/version:\s*["']([^"']+)["']/)?.[1] || ''
+const expectedVersion = process.env.HH_RELEASE_VERSION?.trim()
+  || buildInfoText.match(/version:\s*["']([^"']+)["']/)?.[1]
+  || ''
 
 const contentTypes = {
   '.html': 'text/html; charset=utf-8',

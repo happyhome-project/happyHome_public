@@ -2,7 +2,6 @@
   <div data-testid="member-approval-page">
     <div class="page-header">
       <div class="header-left">
-        <el-button :icon="ArrowLeft" circle title="返回社区管理" @click="goBackToCommunities" />
         <div>
           <el-breadcrumb separator="/">
             <el-breadcrumb-item :to="{ name: 'communities' }">社区管理</el-breadcrumb-item>
@@ -217,7 +216,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { communityApi, memberApi } from '../../api/cloud'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
-import { ArrowLeft } from '@element-plus/icons-vue'
 import { formatAdminDateTime } from '../../utils/datetime'
 import { usePersistedTableColumns } from '../../utils/persistedTableColumns'
 
@@ -317,9 +315,6 @@ async function loadCommunityContext() {
   }
 }
 
-function goBackToCommunities() {
-  router.push({ name: 'communities' })
-}
 
 async function loadMembers() {
   loading.value = true

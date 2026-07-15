@@ -2,13 +2,6 @@
   <div data-testid="section-list-page">
     <div class="page-header">
       <div class="header-left">
-        <el-button
-          data-testid="section-back-button"
-          :icon="ArrowLeft"
-          circle
-          title="返回社区管理"
-          @click="goBackToCommunities"
-        />
         <div>
           <el-breadcrumb separator="/">
             <el-breadcrumb-item :to="{ name: 'communities' }">社区管理</el-breadcrumb-item>
@@ -327,7 +320,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { communityApi, sectionApi } from '../../api/cloud'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
-import { ArrowDown, ArrowLeft, WarningFilled } from '@element-plus/icons-vue'
+import { ArrowDown, WarningFilled } from '@element-plus/icons-vue'
 import { usePersistedTableColumns } from '../../utils/persistedTableColumns'
 import WidgetEditor from './WidgetEditor.vue'
 
@@ -623,9 +616,6 @@ async function submit() {
   }
 }
 
-function goBackToCommunities() {
-  router.push({ name: 'communities' })
-}
 
 function openWidgetEditor(sectionId: string) {
   if (!sectionId) {

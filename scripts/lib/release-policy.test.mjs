@@ -566,6 +566,7 @@ test('explicit UI qualification builds only the miniprogram gate and writes exac
   assert.doesNotMatch(qualify, /deployCloud|deployAdminWeb|uploadBuiltMiniprogram|releaseGuard|createReleaseRunLedger/)
   assert.match(buildGate, /HH_RELEASE_GIT_SHA: gitSha/)
   assert.match(buildGate, /HH_RELEASE_DEVTOOLS_VERSION: devToolsVersion/)
+  assert.match(buildGate, /HH_RELEASE_VERSION: version/)
   assert.match(dispatch, /target === 'release-ui-qualify'[\s\S]*await runReleaseUiQualification\(\)/)
 })
 

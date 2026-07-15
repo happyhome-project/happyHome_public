@@ -35,7 +35,7 @@
     "build:quickapp-webview-huawei": "uni build -p quickapp-webview-huawei",
     "build:quickapp-webview-union": "uni build -p quickapp-webview-union",
     "type-check": "vue-tsc --noEmit",
-    "test:unit": "vitest run --pool=forks --maxWorkers=1",
+    "test:unit": "vitest run --pool=forks --maxWorkers=1 && cd .. && node --test scripts/lib/mp-replay-policy.test.mjs scripts/lib/mp-release-ui-policy.test.mjs scripts/lib/release-ui-fixture-membership.test.mjs scripts/lib/release-ui-fixture-selection.test.mjs scripts/lib/release-ui-fixture-cleanup.test.mjs scripts/lib/release-ui-check-runner.test.mjs scripts/lib/release-ui-qualification.test.mjs scripts/lib/release-policy.test.mjs scripts/lib/mp-detail-runtime-syntax.test.mjs && node scripts/test-home-tabs-scroll-static.mjs && node scripts/test-h5-home-sticky-smoke.mjs",
     "postinstall": "node -e \"const f=require('fs'),p=require('path');for(const n of ['wot-design-uni','@dcloudio/uni-ui']){const s='../node_modules/'+n,t='node_modules/'+n;if(!f.existsSync(t)&&f.existsSync(s)){f.mkdirSync(p.dirname(t),{recursive:true});f.cpSync(s,t,{recursive:true});console.log(n+': copied to local node_modules (workspace hoist fix)')}}\""
   },
   "dependencies": {

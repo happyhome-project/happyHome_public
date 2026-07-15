@@ -127,7 +127,13 @@
     </template>
 
     <view class="archive-topic-shell">
-      <ArchiveTopicTabs :tabs="archiveTabs" :model-value="selectedArchiveTopic" @update:model-value="selectArchiveTopic" />
+      <view class="section-tabs-sticky-shell section-tabs-sticky-shell--archive">
+        <ArchiveTopicTabs
+          :tabs="archiveTabs"
+          :model-value="selectedArchiveTopic"
+          @update:model-value="selectArchiveTopic"
+        />
+      </view>
       <ArchiveWaterfall
         :columns="archiveColumns"
         :loading="archiveLoading"
@@ -138,26 +144,6 @@
         @retry="loadArchiveFeed(true)"
         @load-more="loadArchiveFeed(false)"
       />
-    </view>
-
-    <view v-if="archiveGroups.length" v-show="false" class="section-tabs-sticky-shell">
-      <scroll-view scroll-x class="section-tabs" :show-scrollbar="false">
-        <view class="section-tabs-inner">
-          <view
-            v-for="(g, index) in archiveGroups"
-            :key="g.id"
-            class="section-tab"
-            :data-testid="`home-section-tab-${g.id}`"
-            :data-section-id="g.id"
-            :data-active="index === activeArchiveIndex ? 'true' : 'false'"
-            :aria-selected="index === activeArchiveIndex ? 'true' : 'false'"
-            :class="{ active: index === activeArchiveIndex }"
-            @tap="selectArchiveGroup(g)"
-          >
-            <text>{{ g.name }}</text>
-          </view>
-        </view>
-      </scroll-view>
     </view>
 
     <!-- Archive feed · Figma 0709_v2 选中板块内容区 -->
@@ -3064,6 +3050,11 @@ onShareAppMessage(() => {
   z-index: $hh-z-sticky;
   margin: 34rpx 0 20rpx;
   padding: 12rpx 0;
+}
+
+.section-tabs-sticky-shell--archive {
+  margin: 0;
+  padding: 0;
 }
 
 .section-tabs-inner {
