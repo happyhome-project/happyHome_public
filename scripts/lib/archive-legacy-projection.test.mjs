@@ -83,6 +83,22 @@ test('projects image-less legacy content as a text archive post', () => {
   assert.deepEqual(result.after.content.images, [])
 })
 
+test('corrects a stale text format when legacy widgets contain images', () => {
+  const post = {
+    _id: 'post-stale-format',
+    area: 'archive',
+    origin: 'legacy_section',
+    sectionId: section._id,
+    format: 'text',
+    content: { guide_title: '有图旧帖', guide_images: ['cloud://cover'] },
+  }
+
+  const result = projectLegacyArchivePost(post, section)
+
+  assert.equal(result.changed, true)
+  assert.equal(result.after.format, 'image_text')
+})
+
 test('rejects posts outside the deterministic legacy archive scope', () => {
   assert.equal(projectLegacyArchivePost({ area: 'archive', origin: 'native' }, section), null)
   assert.equal(projectLegacyArchivePost({ area: 'archive', origin: 'legacy_section' }, { ...section, type: 'realtime' }), null)

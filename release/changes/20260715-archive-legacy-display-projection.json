@@ -6,7 +6,7 @@
     {
       "id": "archive-posts-v3-display-projection",
       "module": "release/migrations/20260715-archive-posts-v3-display-projection.mjs",
-      "inputDigest": "117e606af89b1f7105f6084e9fabbf4103347877a1085cd80f7ce96c1548fb70"
+      "inputDigest": "cd6bd6171dc41922b42a940972654c75d6e6fe46a4b067a639fc17fc89f2ae1e"
     }
   ],
   "smokeSuites": [],

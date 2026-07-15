@@ -99,9 +99,7 @@ export function projectLegacyArchivePost(post, section) {
   const body = meaningful(originalContent.body) ? clone(originalContent.body) : clone(legacyBody)
   const location = meaningful(originalContent.location) ? clone(originalContent.location) : clone(legacyLocation)
   if (!title && !images.length && !meaningful(body) && !meaningful(location)) return null
-  const format = post.format === 'image_text' || post.format === 'text'
-    ? post.format
-    : images.length ? 'image_text' : 'text'
+  const format = images.length ? 'image_text' : 'text'
   const content = {
     ...clone(originalContent),
     title,

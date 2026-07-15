@@ -6,11 +6,16 @@ const PAGE_SIZE = 100
 
 async function readAll(database, collectionName) {
   const rows = []
-  for (let skip = 0; ; skip += PAGE_SIZE) {
-    const page = await database.collection(collectionName).where({}).skip(skip).limit(PAGE_SIZE).get()
+  let lastId = ''
+  for (;;) {
+    const where = lastId ? { _id: database.command.gt(lastId) } : {}
+    const page = await database.collection(collectionName).where(where).orderBy('_id', 'asc').limit(PAGE_SIZE).get()
     const data = Array.isArray(page?.data) ? page.data : []
     rows.push(...data)
     if (data.length < PAGE_SIZE) return rows
+    const nextLastId = String(data[data.length - 1]?._id || '')
+    if (!nextLastId || nextLastId <= lastId) throw new Error(`${collectionName} id cursor did not advance`)
+    lastId = nextLastId
   }
 }
 
@@ -34,11 +39,12 @@ function equalValue(left, right) {
 }
 
 function planDigest(changes) {
-  const records = changes.map(({ before, after }) => ({
+  const records = changes.map(({ before, after, sectionBefore }) => ({
     collection: 'posts',
     id: before._id,
     before: canonical(before),
     after: canonical(after),
+    sectionBefore: canonical(sectionBefore),
   }))
   return createHash('sha256').update(JSON.stringify({ schemaVersion: 1, records })).digest('hex')
 }
@@ -61,7 +67,11 @@ export async function planArchiveLegacyProjectionRepair(database) {
       skippedPostCount += 1
       continue
     }
-    changes.push({ before: structuredClone(post), after: projection.after })
+    changes.push({
+      before: structuredClone(post),
+      after: projection.after,
+      sectionBefore: structuredClone(sectionById.get(String(post?.sectionId || ''))),
+    })
     if (!String(projection.after.content?.title || '').trim()) emptyTitleCount += 1
     if (projection.after.format === 'image_text') imageTextCount += 1
     else textCount += 1
@@ -83,11 +93,15 @@ export async function planArchiveLegacyProjectionRepair(database) {
   }
 }
 
-async function mutateExact(database, before, after) {
+async function mutateExact(database, before, after, sectionBefore) {
   if (typeof database.runTransaction !== 'function') {
     throw new Error('CloudBase runTransaction is required for archive legacy projection repair')
   }
   await database.runTransaction(async (transaction) => {
+    const currentSection = await readDocument(transaction, 'sections', sectionBefore._id)
+    if (!equalValue(currentSection, sectionBefore)) {
+      throw new Error(`sections/${sectionBefore._id} section schema changed after archive legacy projection dry-run`)
+    }
     const current = await readDocument(transaction, 'posts', before._id)
     if (!equalValue(current, before)) {
       throw new Error(`posts/${before._id} changed after archive legacy projection dry-run`)
@@ -101,7 +115,7 @@ async function mutateExact(database, before, after) {
 
 export async function applyArchiveLegacyProjectionRepair(database, plan) {
   if (!plan || !Array.isArray(plan.work)) throw new Error('A reviewed archive legacy projection plan is required')
-  for (const { before, after } of plan.work) await mutateExact(database, before, after)
+  for (const { before, after, sectionBefore } of plan.work) await mutateExact(database, before, after, sectionBefore)
 
   for (const { before, after } of plan.work) {
     const actual = await readDocument(database, 'posts', before._id)

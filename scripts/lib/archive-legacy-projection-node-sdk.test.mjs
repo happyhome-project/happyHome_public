@@ -8,20 +8,28 @@ import {
 
 function fakeDatabase(seed) {
   const collections = new Map(Object.entries(seed).map(([name, rows]) => [name, new Map(rows.map((row) => [row._id, structuredClone(row)]))]))
+  const queryEvents = []
   const database = {
+    command: { gt(value) { return { __operator: 'gt', value } } },
     async runTransaction(callback) { return callback(database) },
     collection(name) {
       const rows = collections.get(name) || new Map()
       collections.set(name, rows)
-      const query = (where = {}, offset = 0, limit = 100) => ({
-        where(nextWhere) { return query(nextWhere, offset, limit) },
-        skip(nextOffset) { return query(where, nextOffset, limit) },
-        limit(nextLimit) { return query(where, offset, nextLimit) },
+      const query = (where = {}, limit = 100, orderField = '') => ({
+        where(nextWhere) { return query(nextWhere, limit, orderField) },
+        orderBy(nextField, direction) {
+          queryEvents.push({ name, field: nextField, direction })
+          return query(where, limit, nextField)
+        },
+        limit(nextLimit) { return query(where, nextLimit, orderField) },
         async get() {
           return {
             data: [...rows.values()]
-              .filter((row) => Object.entries(where).every(([key, value]) => row[key] === value))
-              .slice(offset, offset + limit)
+              .filter((row) => Object.entries(where).every(([key, value]) => (
+                value?.__operator === 'gt' ? String(row[key]) > String(value.value) : row[key] === value
+              )))
+              .sort((left, right) => orderField ? String(left[orderField]).localeCompare(String(right[orderField])) : 0)
+              .slice(0, limit)
               .map((row) => structuredClone(row)),
           }
         },
@@ -37,7 +45,7 @@ function fakeDatabase(seed) {
       }
     },
   }
-  return { database, collections }
+  return { database, collections, queryEvents }
 }
 
 const guideSection = {
@@ -104,6 +112,29 @@ test('transaction compare-and-set rejects a post changed after dry-run', async (
     () => applyArchiveLegacyProjectionRepair(database, plan),
     /changed after archive legacy projection dry-run/i,
   )
+})
+
+test('transaction compare-and-set rejects a section schema changed after dry-run', async () => {
+  const { database, collections } = fakeDatabase({ sections: [guideSection], posts: [legacyPost('post-section-race')] })
+  const plan = await planArchiveLegacyProjectionRepair(database)
+  collections.get('sections').get(guideSection._id).widgets[0].fieldKey = 'renamed-title'
+
+  await assert.rejects(
+    () => applyArchiveLegacyProjectionRepair(database, plan),
+    /section schema changed after archive legacy projection dry-run/i,
+  )
+})
+
+test('uses ordered id cursor pagination instead of offset pagination', async () => {
+  const { database, queryEvents } = fakeDatabase({
+    sections: [guideSection],
+    posts: Array.from({ length: 101 }, (_, index) => legacyPost(`post-${String(index).padStart(3, '0')}`)),
+  })
+  const plan = await planArchiveLegacyProjectionRepair(database)
+
+  assert.equal(plan.summary.changedPostCount, 101)
+  assert.ok(queryEvents.length >= 3)
+  assert.ok(queryEvents.every(({ field, direction }) => field === '_id' && direction === 'asc'))
 })
 
 test('skips realtime, native archive, and missing-section records', async () => {

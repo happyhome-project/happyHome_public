@@ -9,8 +9,8 @@ import {
   planArchiveLegacyProjectionRepair,
 } from '../../scripts/lib/archive-legacy-projection-node-sdk.mjs'
 
-const ARCHIVE_LEGACY_PROJECTION_SHA256 = '9a7f480c9aacd7b54b1a204e88851c9a59ddde44e9343e4f828741f98c08917c'
-const ARCHIVE_LEGACY_PROJECTION_NODE_SDK_SHA256 = 'eb4431a25de7197814495e13b1c3642578559e7d216659926b1572791d7b1501'
+const ARCHIVE_LEGACY_PROJECTION_SHA256 = '98c1ee3c09a83d1af9ddc7a96a0c1fb69af378cea89000be1436225f2963cbd1'
+const ARCHIVE_LEGACY_PROJECTION_NODE_SDK_SHA256 = 'ada25cbda1875873c43d1ee67c01419570468aaa8810cc1d3e9d5ed4a64219ac'
 
 function normalizedTextDigest(url) {
   const text = readFileSync(url, 'utf8').replace(/\r\n/g, '\n')
