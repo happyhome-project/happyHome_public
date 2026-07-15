@@ -970,6 +970,17 @@ test('section.create: 图文攻略展示模板可保存到板块', async () => {
   }))
 })
 
+test('section.create: 旧社区接口拒绝创建 realtime 板块', async () => {
+  await expect(main({
+    action: 'section.create',
+    communityId: 'community-1',
+    name: '局部拼车',
+    type: 'realtime',
+  })).rejects.toThrow('全局协作模板')
+
+  expect(db.create).not.toHaveBeenCalled()
+})
+
 test('section.create: 纯文字笔记创建时写入精确的两个固定控件', async () => {
   ;(db.create as jest.Mock).mockResolvedValue('section-text')
 
@@ -1342,6 +1353,23 @@ test('section.updateMeta: 已创建板块拒绝切换或传入未知展示模板
     sectionId: 'section-1',
     displayTemplate: 'unexpected-template',
   })).rejects.toThrow('展示模板')
+  expect(db.updateById).not.toHaveBeenCalled()
+})
+
+test('section.updateMeta: 已创建板块不允许切换为 realtime', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-1',
+    communityId: 'community-1',
+    type: 'evergreen',
+    status: 'active',
+  })
+
+  await expect(main({
+    action: 'section.updateMeta',
+    sectionId: 'section-1',
+    type: 'realtime',
+  })).rejects.toThrow('不允许切换为 realtime')
+
   expect(db.updateById).not.toHaveBeenCalled()
 })
 

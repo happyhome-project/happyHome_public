@@ -108,6 +108,9 @@ export async function handleCreate(
 ) {
   if (!openid) throw new Error('Missing OPENID')
   await assertCommunityAdmin(openid, params.communityId)
+  if (params.type === 'realtime') {
+    throw new Error('实时协作已改为全局协作模板，请在全局协作模板中创建')
+  }
 
   const sectionId = await db.create('sections', {
     communityId: params.communityId,
@@ -194,6 +197,13 @@ export async function handleUpdate(
   await assertCommunityAdmin(openid, params.communityId)
 
   const { sectionId, communityId, ...updates } = params
+  if (updates.type) {
+    const sectionBefore = await db.getById('sections', sectionId)
+    if (!sectionBefore) throw new Error('section not found')
+    if (updates.type === 'realtime' && (sectionBefore.type || 'evergreen') !== 'realtime') {
+      throw new Error('沉淀板块不允许切换为 realtime')
+    }
+  }
   if (updates.type === 'evergreen') updates.status = 'active'
   await db.updateById('sections', sectionId, updates)
   return { success: true }

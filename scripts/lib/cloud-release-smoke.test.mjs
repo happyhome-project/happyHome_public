@@ -80,6 +80,7 @@ function createMockRunner(options = {}) {
     }
     if (fn === 'community') return { status: 0, stdout: JSON.stringify({ communities: [] }), stderr: '' }
     if (fn === 'member') return { status: 0, stdout: JSON.stringify({ communities: [] }), stderr: '' }
+    if (fn === 'collaboration-template') return { status: 0, stdout: JSON.stringify({ templates: [] }), stderr: '' }
     if (fn === 'post') {
       return options.missingPostInvokeRunId
         ? { status: 0, stdout: JSON.stringify({ success: true, receivedAt: 'now' }), stderr: '' }
@@ -169,6 +170,33 @@ test('release smoke requires home-prefetch invoke evidence', async () => {
 
     assert.equal(summary.status, 'failed')
     assert(summary.missingLabels.includes('HH_CLOUD_INVOKE_SMOKE_HOME_PREFETCH'))
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true })
+  }
+})
+
+test('release smoke requires the global collaboration template read probe', async () => {
+  assert(DEFAULT_FUNCTIONS.includes('collaboration-template'))
+  assert(REQUIRED_SMOKE_LABELS.includes('HH_CLOUD_INVOKE_SMOKE_COLLABORATION_TEMPLATE'))
+
+  const evidenceDir = await tempEvidenceDir()
+  try {
+    const summary = await runCloudReleaseSmoke({
+      envId: 'env-x',
+      only: ['collaboration-template'],
+      logLimit: 3,
+      logWaitMs: 0,
+      noFixture: true,
+      evidenceDir,
+      runId: 'unit-run',
+    }, createMockRunner({
+      invokeResponses: {
+        'collaboration-template': [{ status: 1, stdout: '', stderr: 'template read failed' }],
+      },
+    }))
+
+    assert.equal(summary.status, 'failed')
+    assert(summary.missingLabels.includes('HH_CLOUD_INVOKE_SMOKE_COLLABORATION_TEMPLATE'))
   } finally {
     await rm(evidenceDir, { recursive: true, force: true })
   }

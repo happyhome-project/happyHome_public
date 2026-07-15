@@ -13,10 +13,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
 
 export const DEFAULT_ENV_ID = 'cloudbase-3gh862acb1505ff3'
-export const DEFAULT_FUNCTIONS = ['user', 'community', 'member', 'section', 'post', 'post-rag-worker', 'post-video-rag-worker', 'admin', 'http-gateway', 'home-prefetch', 'wechat-audit-callback']
+export const DEFAULT_FUNCTIONS = ['user', 'community', 'member', 'section', 'collaboration-template', 'post', 'post-rag-worker', 'post-video-rag-worker', 'admin', 'http-gateway', 'home-prefetch', 'wechat-audit-callback']
 export const REQUIRED_SMOKE_LABELS = [
   'HH_CLOUD_INVOKE_SMOKE_COMMUNITY',
   'HH_CLOUD_INVOKE_SMOKE_MEMBER',
+  'HH_CLOUD_INVOKE_SMOKE_COLLABORATION_TEMPLATE',
   'HH_CLOUD_INVOKE_SMOKE_POST',
   'HH_CLOUD_INVOKE_SMOKE_POST_RAG_WORKER',
   'HH_CLOUD_INVOKE_SMOKE_POST_VIDEO_RAG_WORKER',
@@ -466,6 +467,12 @@ export class CloudSmokeRun {
         label: 'HH_CLOUD_INVOKE_SMOKE_MEMBER',
       }))
     }
+    if (this.options.only.includes('collaboration-template')) {
+      tasks.push(() => this.invoke('collaboration-template', { action: 'listActive' }, {
+        name: 'list-active',
+        label: 'HH_CLOUD_INVOKE_SMOKE_COLLABORATION_TEMPLATE',
+      }))
+    }
     if (this.options.only.includes('post')) {
       const payload = {
         action: 'clientLog',
@@ -593,7 +600,7 @@ export class CloudSmokeRun {
         name: `Release Smoke ${this.options.runId}`,
         icon: 'test',
         order: 0,
-        type: 'realtime',
+        type: 'evergreen',
       }, { label: 'HH_CLOUD_INVOKE_SMOKE_ADMIN_SECTION' })
       const sectionId = section.functionResult?.sectionId || ''
       if (!sectionId) throw new Error('section.create did not return sectionId')

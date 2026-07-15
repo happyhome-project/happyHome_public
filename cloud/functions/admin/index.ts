@@ -1422,6 +1422,9 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     return { success: true, topicKey: normalized.topicKey }
   }
   if (action === 'section.create') {
+    if (params.type === 'realtime') {
+      throw new Error('实时协作已改为全局协作模板，请在全局协作模板中创建')
+    }
     if (typeof params.displayTemplate !== 'undefined' &&
         !['default', 'guide_note', 'text_note', 'image_note'].includes(params.displayTemplate)) {
       throw new Error('不支持的展示模板')
@@ -1477,6 +1480,9 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     await db.runTransaction(async transaction => {
       const sectionBefore = await db.transactionGetByIdOrNull<any>(transaction, 'sections', sectionId)
       if (!sectionBefore) throw new Error('section not found')
+      if (updates.type === 'realtime' && (sectionBefore.type || 'evergreen') !== 'realtime') {
+        throw new Error('沉淀板块不允许切换为 realtime')
+      }
       if (Object.prototype.hasOwnProperty.call(updates, 'displayTemplate') &&
           updates.displayTemplate !== normalizeSectionDisplayTemplate(sectionBefore.displayTemplate)) {
         throw new Error('已创建板块不允许切换展示模板')
