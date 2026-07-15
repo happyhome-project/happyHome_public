@@ -2,7 +2,6 @@
   <div>
     <div class="page-header">
       <div class="header-left">
-        <el-button :icon="ArrowLeft" circle title="返回社区管理" @click="goBackToCommunities" />
         <div>
           <el-breadcrumb separator="/">
             <el-breadcrumb-item :to="{ name: 'communities' }">社区管理</el-breadcrumb-item>
@@ -412,7 +411,6 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
-import { ArrowLeft } from '@element-plus/icons-vue'
 import { collaborationTemplateApi, communityApi, mediaApi, postAdminApi, sectionApi } from '../../api/cloud'
 import { formatAdminDateTime } from '../../utils/datetime'
 import RichNoteAdminPreview from '../../components/RichNoteAdminPreview.vue'
@@ -444,9 +442,6 @@ const filters = ref({
   featuredStatus: 'all' as 'all' | 'true' | 'false',
 })
 
-function goBackToCommunities() {
-  router.push({ name: 'communities' })
-}
 type PostTableColumnKey =
   | 'section'
   | 'author'
