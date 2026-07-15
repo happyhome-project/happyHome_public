@@ -2747,7 +2747,8 @@ onShareAppMessage(() => {
 }
 
 .home-shell {
-  padding: calc(150rpx + env(safe-area-inset-top)) var(--hh-page-x) 0;
+  padding: calc(150rpx + env(safe-area-inset-top)) var(--hh-page-x) 138rpx;
+  margin-bottom: -138rpx;
   background:
     radial-gradient(circle at 84% 0%, rgba(48, 91, 70, 0.22), transparent 34%),
     linear-gradient(170deg, #caeee7 0%, #f1f3ee 58%, var(--hh-color-page) 100%);
