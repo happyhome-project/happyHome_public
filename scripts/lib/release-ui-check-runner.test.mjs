@@ -18,7 +18,7 @@ test('runs profile identity before provisioning fixture-dependent checks', async
     profile: pass('profile'),
     cleanup: pass('cleanup'),
   })
-  assert.deepEqual(calls, ['coldStart', 'profile', 'fixture', 'homeDetail', 'cleanup'])
+  assert.deepEqual(calls, ['coldStart', 'profile', 'fixture', 'archiveTabs', 'homeDetail', 'cleanup'])
   assert.equal(result.ok, true)
 })
 
@@ -35,7 +35,7 @@ test('profile identity failure skips fixture work and still runs cleanup', async
   })
   assert.deepEqual(calls, ['coldStart', 'profile', 'cleanup'])
   assert.deepEqual(result.failures.map((item) => item.stage), ['profile'])
-  assert.deepEqual(result.skipped.map((item) => item.stage), ['provisionFixture', 'homeDetail'])
+  assert.deepEqual(result.skipped.map((item) => item.stage), ['provisionFixture', 'archiveTabs', 'homeDetail'])
 })
 
 test('cold-start failure skips fixture-dependent checks but still runs profile and cleanup', async () => {
@@ -50,7 +50,7 @@ test('cold-start failure skips fixture-dependent checks but still runs profile a
     cleanup: mark('cleanup'),
   })
   assert.deepEqual(calls, ['coldStart', 'profile', 'cleanup'])
-  assert.deepEqual(result.skipped.map((item) => item.stage), ['provisionFixture', 'homeDetail'])
+  assert.deepEqual(result.skipped.map((item) => item.stage), ['provisionFixture', 'archiveTabs', 'homeDetail'])
 })
 
 test('fixture failure after profile still runs cleanup', async () => {
@@ -66,6 +66,40 @@ test('fixture failure after profile still runs cleanup', async () => {
   })
   assert.deepEqual(calls, ['coldStart', 'profile', 'fixture', 'cleanup'])
   assert.deepEqual(result.failures.map((item) => item.stage), ['provisionFixture'])
+  assert.deepEqual(result.skipped.map((item) => item.stage), ['archiveTabs', 'homeDetail'])
+})
+
+test('archive tabs failure still runs independent detail evidence and cleanup', async () => {
+  const calls = []
+  const mark = (stage) => async () => { calls.push(stage) }
+  const result = await runReleaseUiChecks({
+    coldStart: mark('coldStart'),
+    profile: mark('profile'),
+    provisionFixture: mark('fixture'),
+    archiveTabs: async () => { calls.push('archiveTabs'); throw new Error('tabs failed') },
+    homeDetail: mark('homeDetail'),
+    cleanup: mark('cleanup'),
+  })
+  assert.deepEqual(calls, ['coldStart', 'profile', 'fixture', 'archiveTabs', 'homeDetail', 'cleanup'])
+  assert.deepEqual(result.failures.map((item) => item.stage), ['archiveTabs'])
+  assert.equal(result.ok, false)
+})
+
+test('missing required archive tabs check fails closed and still runs detail and cleanup', async () => {
+  const calls = []
+  const mark = (stage) => async () => { calls.push(stage) }
+  const result = await runReleaseUiChecks({
+    coldStart: mark('coldStart'),
+    profile: mark('profile'),
+    provisionFixture: mark('fixture'),
+    homeDetail: mark('homeDetail'),
+    cleanup: mark('cleanup'),
+  })
+
+  assert.deepEqual(calls, ['coldStart', 'profile', 'fixture', 'homeDetail', 'cleanup'])
+  assert.equal(result.ok, false)
+  assert.deepEqual(result.failures.map((item) => item.stage), ['archiveTabs'])
+  assert.match(result.failures[0].error, /required check not configured/)
 })
 
 test('sanitizes stage errors and always reports cleanup failures last', async () => {

@@ -5,6 +5,7 @@
  * websocket and proves the release-critical paths:
  *   - HH_RELEASE_HOME_COLD_START_NONEMPTY
  *   - HH_RELEASE_HOME_IMAGES_RENDERED
+ *   - HH_RELEASE_HOME_ARCHIVE_TABS_STICKY
  *   - HH_RELEASE_HOME_DETAIL_NONEMPTY
  *   - HH_RELEASE_LOGIN_VERSION
  *   - HH_RELEASE_PROFILE_LOGIN_CLEAN
@@ -42,6 +43,7 @@ import { computeDirectoryDigest } from './lib/release-run-ledger.mjs'
 import { runReleaseUiChecks } from './lib/release-ui-check-runner.mjs'
 import { readMiniprogramPackageIdentity } from './lib/miniprogram-package-identity.mjs'
 import { cleanupReleaseFixtureWithRetry } from './lib/release-ui-fixture-cleanup.mjs'
+import { applyReleaseFixtureMembership } from './lib/release-ui-fixture-membership.mjs'
 import { applyAndWaitForReleaseFixtureSelection } from './lib/release-ui-fixture-selection.mjs'
 import { invokeTrustedAdminCloud } from './lib/trusted-admin-invoke.mjs'
 
@@ -50,7 +52,7 @@ const ROOT = resolve(__dirname, '..')
 const DEFAULT_PROJECT_PATH = resolve(ROOT, 'miniprogram', 'dist', 'build', 'mp-weixin')
 const DEFAULT_IDE_PORT = 21929
 const DEFAULT_AUTO_PORT = 9420
-const HOME_POST_SELECTORS = ['.live-row', '.guide-card', '.arc-item', '.post-card']
+const HOME_POST_SELECTORS = ['.live-row', '.guide-card', '.post-card']
 const RELEASE_FIXTURE_PREFIX = 'HH_RELEASE_UI_'
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
 
@@ -892,56 +894,83 @@ async function createReleaseFixture(mp) {
     fixture.communityId = String(community.communityId || '')
     if (!fixture.communityId) throw new Error('community.createAdmin did not return communityId')
 
-    const createArchive = async ({ name: sectionName, order, postCount }) => {
-      const section = await callMpCloud(mp, 'admin', {
-        action: 'section.create',
-        _actAs: adminCtx,
-        communityId: fixture.communityId,
-        name: sectionName,
-        icon: sectionName.slice(0, 1),
-        order,
-        type: 'evergreen',
-      })
-      const sectionId = String(section.sectionId || '')
-      if (!sectionId) throw new Error('section.create did not return sectionId')
-      fixture.sectionIds.push(sectionId)
+    await callMpCloud(mp, 'admin', {
+      action: 'community.updateMeta',
+      _actAs: adminCtx,
+      communityId: fixture.communityId,
+      motto: '风来疏竹，风过而竹不留声。',
+      mottoCite: '《菜根谭》',
+    })
 
-      const widgetsResult = await callMpCloud(mp, 'admin', {
-        action: 'section.updateWidgets',
-        _actAs: adminCtx,
-        sectionId,
-        widgets: [
-          { type: 'short_text', label: 'Title', fieldKey: 'title', required: true, showInList: true, widgetId: '' },
-          { type: 'summary', label: 'Summary', fieldKey: 'summary', required: false, showInList: true, widgetId: '' },
-        ],
-      })
-      const widgets = Array.isArray(widgetsResult.widgets) ? widgetsResult.widgets : []
-      const titleWidget = widgets.find((widget) => widget.type === 'short_text') || widgets[0]
-      const summaryWidget = widgets.find((widget) => widget.type === 'summary')
-      if (!titleWidget?.widgetId) throw new Error('section.updateWidgets did not return a title widget')
-
-      for (let index = 0; index < postCount; index += 1) {
-        const content = { [titleWidget.widgetId]: `${sectionName} ${index + 1} ${runId}` }
-        if (summaryWidget?.widgetId) content[summaryWidget.widgetId] = 'Automated release validation post.'
-        const post = await callMpCloud(mp, 'admin', {
-          action: 'post.createAdmin',
-          _actAs: adminCtx,
-          communityId: fixture.communityId,
-          sectionId,
-          content,
-        }, { timeoutMs: 90000 })
-        const postId = String(post.postId || '')
-        if (!postId) throw new Error('post.createAdmin did not return postId')
-        fixture.postIds.push(postId)
-        if (post.auditStatus !== 'pass') {
-          await callMpCloud(mp, 'admin', { action: 'audit.approveAdmin', _actAs: adminCtx, postId })
-        }
-      }
-      return sectionId
+    const liveSection = await callMpCloud(mp, 'admin', {
+      action: 'section.create',
+      _actAs: adminCtx,
+      communityId: fixture.communityId,
+      name: '活动召集验证',
+      icon: '·',
+      order: 0,
+      type: 'realtime',
+    })
+    fixture.sectionId = String(liveSection.sectionId || '')
+    if (!fixture.sectionId) throw new Error('section.create did not return realtime sectionId')
+    fixture.sectionIds.push(fixture.sectionId)
+    const liveWidgets = await callMpCloud(mp, 'admin', {
+      action: 'section.updateWidgets',
+      _actAs: adminCtx,
+      sectionId: fixture.sectionId,
+      widgets: [
+        { type: 'short_text', label: '活动名称', fieldKey: 'title', required: true, showInList: true, widgetId: '' },
+        { type: 'summary', label: '活动说明', fieldKey: 'summary', required: false, showInList: true, widgetId: '' },
+      ],
+    })
+    const titleWidget = liveWidgets.widgets?.find((widget) => widget.type === 'short_text')
+    const summaryWidget = liveWidgets.widgets?.find((widget) => widget.type === 'summary')
+    if (!titleWidget?.widgetId) throw new Error('section.updateWidgets did not return realtime title widget')
+    const liveContent = { [titleWidget.widgetId]: `活动召集 ${runId}` }
+    if (summaryWidget?.widgetId) liveContent[summaryWidget.widgetId] = '用于验证搜索与标签分阶段吸顶。'
+    const livePost = await callMpCloud(mp, 'admin', {
+      action: 'post.createAdmin',
+      _actAs: adminCtx,
+      communityId: fixture.communityId,
+      sectionId: fixture.sectionId,
+      content: liveContent,
+    }, { timeoutMs: 90000 })
+    const livePostId = String(livePost.postId || '')
+    if (!livePostId) throw new Error('post.createAdmin did not return realtime postId')
+    fixture.postIds.push(livePostId)
+    if (livePost.auditStatus !== 'pass') {
+      await callMpCloud(mp, 'admin', { action: 'audit.approveAdmin', _actAs: adminCtx, postId: livePostId })
     }
 
-    fixture.sectionId = await createArchive({ name: '长内容', order: 0, postCount: 3 })
-    await createArchive({ name: '短内容', order: 1, postCount: 1 })
+    await applyReleaseFixtureMembership({
+      apply: () => callMpCloud(mp, 'member', { action: 'apply', communityId: fixture.communityId }),
+    })
+    for (let index = 0; index < 3; index += 1) {
+      const post = await callMpCloud(mp, 'post', {
+        action: 'create',
+        communityId: fixture.communityId,
+        area: 'archive',
+        format: 'text',
+        topics: index === 2 ? ['短内容'] : [],
+        content: {
+          title: `归档内容 ${index + 1} ${runId}`,
+          body: {
+            format: 'markdown',
+            markdown: 'Automated release validation post.',
+            html: '<p>Automated release validation post.</p>',
+            text: 'Automated release validation post.',
+            imageFileIDs: [],
+            schemaVersion: 1,
+          },
+        },
+      }, { timeoutMs: 90000 })
+      const postId = String(post.postId || '')
+      if (!postId) throw new Error('post.create did not return postId')
+      fixture.postIds.push(postId)
+      if (post.auditStatus !== 'pass') {
+        await callMpCloud(mp, 'admin', { action: 'audit.approveAdmin', _actAs: adminCtx, postId })
+      }
+    }
     fixture.postId = fixture.postIds[0] || ''
 
     return fixture
@@ -961,7 +990,9 @@ async function createReleaseFixture(mp) {
 async function seedCurrentViewerIntoCommunity(mp, fixture) {
   const selection = await applyAndWaitForReleaseFixtureSelection({
     communityId: fixture.communityId,
-    apply: () => callMpCloud(mp, 'member', { action: 'apply', communityId: fixture.communityId }),
+    apply: () => applyReleaseFixtureMembership({
+      apply: () => callMpCloud(mp, 'member', { action: 'apply', communityId: fixture.communityId }),
+    }),
     bootstrap: () => callMpCloud(mp, 'post', {
       action: 'bootstrap',
       currentCommunityId: fixture.communityId,
@@ -1080,6 +1111,17 @@ async function forceLogout(mp) {
 }
 
 async function findFirstPost(page) {
+  const waterfallHost = await page.$('archive-waterfall').catch(() => null)
+  if (waterfallHost) {
+    const archiveCards = await waterfallHost.$$('.archive-waterfall__card').catch(() => [])
+    if (archiveCards.length) {
+      return {
+        selector: 'archive-waterfall .archive-waterfall__card',
+        node: archiveCards[0],
+        count: archiveCards.length,
+      }
+    }
+  }
   for (const selector of HOME_POST_SELECTORS) {
     const nodes = await page.$$(selector).catch(() => [])
     if (nodes.length) return { selector, node: nodes[0], count: nodes.length }
@@ -1094,23 +1136,127 @@ async function captureHomeTabsLayout(mp) {
       query.selectAll('.section-tabs-sticky-shell').boundingClientRect()
       query.select('.home-topbar').boundingClientRect()
       query.select('.home-search-sticky-shell').boundingClientRect()
-      query.selectAll('.arc-item').boundingClientRect()
-      query.selectAll('.section-tab.active').boundingClientRect()
       query.selectViewport().scrollOffset()
       query.exec((items) => {
         const tabs = Array.isArray(items?.[0]) ? items[0] : []
         const topbar = items?.[1] || null
         const search = items?.[2] || null
-        const cards = Array.isArray(items?.[3]) ? items[3] : []
-        const activeTabs = Array.isArray(items?.[4]) ? items[4] : []
-        const viewport = items?.[5] || {}
-        const safeTop = Number(wx.getWindowInfo?.().safeArea?.top || 0)
-        resolveLayout({ tabs, topbar, search, cardCount: cards.length, activeTabCount: activeTabs.length, scrollTop: Number(viewport.scrollTop || 0), safeTop })
+        const viewport = items?.[3] || {}
+        const windowInfo = wx.getWindowInfo?.() || wx.getSystemInfoSync?.() || {}
+        const safeTop = Number(windowInfo.safeArea?.top || 0)
+        const viewportHeight = Number(windowInfo.windowHeight || 0)
+        resolveLayout({ tabs, topbar, search, scrollTop: Number(viewport.scrollTop || 0), safeTop, viewportHeight })
       })
     } catch (error) {
-      resolveLayout({ tabs: [], search: null, cardCount: 0, activeTabCount: 0, scrollTop: 0, safeTop: 0, error: String(error) })
+      resolveLayout({ tabs: [], topbar: null, search: null, scrollTop: 0, safeTop: 0, viewportHeight: 0, error: String(error) })
     }
   })), 15000, 'capture home archive tabs layout')
+}
+
+async function captureAutomatorElementGeometry(element, label) {
+  if (!element) return null
+  const [offset, size] = await Promise.all([
+    withTimeout(element.offset(), 10000, `${label} offset`),
+    withTimeout(element.size(), 10000, `${label} size`),
+  ])
+  const left = Number(offset?.left ?? offset?.x ?? 0)
+  const top = Number(offset?.top ?? offset?.y ?? 0)
+  const width = Number(size?.width || 0)
+  const height = Number(size?.height || 0)
+  return { left, top, width, height, right: left + width, bottom: top + height }
+}
+
+async function captureHomeArchiveContent(home) {
+  const topicTabsHost = await withTimeout(home.$('archive-topic-tabs'), 10000, 'find visible archive topic tabs host')
+  const waterfallHost = await withTimeout(home.$('archive-waterfall'), 10000, 'find visible archive waterfall host')
+  const topicTabsSurface = topicTabsHost
+    ? await withTimeout(topicTabsHost.$('.archive-topic-tabs'), 10000, 'find archive topic tabs surface')
+    : null
+  const tabs = topicTabsHost
+    ? await withTimeout(topicTabsHost.$$('.archive-topic-tab'), 10000, 'find visible archive topic tabs')
+    : []
+  const activeTabs = topicTabsHost
+    ? await withTimeout(topicTabsHost.$$('.archive-topic-tab--active'), 10000, 'find active archive topic tab')
+    : []
+  const cards = waterfallHost
+    ? await withTimeout(waterfallHost.$$('.archive-waterfall__card'), 10000, 'find visible archive waterfall cards')
+    : []
+  const activeTabTexts = await Promise.all(activeTabs.map(async (tab) =>
+    String(await tab.text().catch(() => '') || '').trim()
+  ))
+  const [topicTabsGeometry, firstCardGeometry] = await Promise.all([
+    captureAutomatorElementGeometry(topicTabsSurface, 'archive topic tabs surface'),
+    captureAutomatorElementGeometry(cards[0] || null, 'first archive waterfall card'),
+  ])
+  return {
+    tabCount: tabs.length,
+    activeTabCount: activeTabs.length,
+    activeTabTexts,
+    cardCount: cards.length,
+    topicTabsGeometry,
+    firstCardGeometry,
+  }
+}
+
+async function waitForHomeArchiveContent(home, {
+  expectedCardCount,
+  expectedActiveText,
+  expectedTabCount = 2,
+  attempts = 12,
+  delayMs = 500,
+}) {
+  let content = null
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    content = await captureHomeArchiveContent(home)
+    if (
+      content.tabCount === expectedTabCount &&
+      content.cardCount === expectedCardCount &&
+      content.activeTabCount === 1 &&
+      content.activeTabTexts.includes(expectedActiveText)
+    ) return { ...content, satisfied: true }
+    if (attempt < attempts) await sleep(delayMs)
+  }
+  return {
+    tabCount: 0,
+    activeTabCount: 0,
+    activeTabTexts: [],
+    cardCount: 0,
+    topicTabsGeometry: null,
+    firstCardGeometry: null,
+    ...content,
+    satisfied: false,
+  }
+}
+
+function isVisibleGeometry(geometry, viewportHeight) {
+  return Number(geometry?.width || 0) > 1 &&
+    Number(geometry?.height || 0) > 1 &&
+    Number(geometry?.bottom || 0) > 0 &&
+    Number(geometry?.top || 0) < Number(viewportHeight || 0)
+}
+
+function toViewportGeometry(geometry, scrollTop) {
+  if (!geometry) return null
+  const top = Number(geometry.top || 0) - scrollTop
+  const bottom = Number(geometry.bottom || 0) - scrollTop
+  return { ...geometry, top, bottom }
+}
+
+function combineHomeArchiveEvidence(layout, content) {
+  const scrollTop = Number(layout?.scrollTop || 0)
+  return {
+    ...layout,
+    ...content,
+    topicTabsGeometry: toViewportGeometry(content?.topicTabsGeometry, scrollTop),
+    firstCardGeometry: toViewportGeometry(content?.firstCardGeometry, scrollTop),
+  }
+}
+
+function expectedStickyViewportTop(naturalTop, scrollTop, stickyTop) {
+  return Math.max(
+    Number(stickyTop || 0),
+    Number(naturalTop || 0) - Math.max(0, Number(scrollTop || 0)),
+  )
 }
 
 async function scrollHomeTo(mp, scrollTop) {
@@ -1141,46 +1287,119 @@ async function verifyHomeArchiveTabs(mp, context, evidenceDir) {
   const home = await withTimeout(mp.reLaunch('/pages/index/index'), 30000, 'open release archive fixture home')
   await sleep(7000)
   await scrollHomeTo(mp, 0)
-  const before = await captureHomeTabsLayout(mp)
+  const before = combineHomeArchiveEvidence(
+    await captureHomeTabsLayout(mp),
+    await waitForHomeArchiveContent(home, {
+      expectedCardCount: 3,
+      expectedActiveText: '全部',
+    }),
+  )
   const searchScrollTop = before.scrollTop + Math.max(0, Number(before.search?.top || 0) - Number(before.topbar?.bottom || 0)) + 40
   await scrollHomeTo(mp, searchScrollTop)
   const searchPinned = await captureHomeTabsLayout(mp)
   const tagsScrollTop = searchPinned.scrollTop + Math.max(0, Number(searchPinned.tabs?.[0]?.top || 0) - Number(searchPinned.search?.bottom || 0)) + 40
   await scrollHomeTo(mp, tagsScrollTop)
-  const tagsPinned = await captureHomeTabsLayout(mp)
-  const tabs = await withTimeout(home.$$('.section-tab'), 10000, 'find release archive tabs')
+  const tagsPinnedLayout = await captureHomeTabsLayout(mp)
+  const fullArchiveContent = await waitForHomeArchiveContent(home, {
+    expectedCardCount: 3,
+    expectedActiveText: '全部',
+  })
+  const tagsPinned = combineHomeArchiveEvidence(tagsPinnedLayout, fullArchiveContent)
+  const topicTabsHost = await withTimeout(home.$('archive-topic-tabs'), 10000, 'find release archive topic tabs host')
+  const tabs = topicTabsHost
+    ? await withTimeout(topicTabsHost.$$('.archive-topic-tab'), 10000, 'find release archive topic tabs')
+    : []
   if (tabs.length === 2) {
     await withTimeout(tabs[1].tap(), 15000, 'switch to short release archive')
-    await sleep(700)
   }
-  const shortArchive = await captureHomeTabsLayout(mp)
+  const shortArchiveContent = await waitForHomeArchiveContent(home, {
+    expectedCardCount: 1,
+    expectedActiveText: '短内容',
+  })
+  const shortArchive = combineHomeArchiveEvidence(
+    await captureHomeTabsLayout(mp),
+    shortArchiveContent,
+  )
   const screenshotEvidence = await captureOptionalReleaseUiScreenshot(
     mp,
     resolve(evidenceDir, 'home-archive-tabs-sticky.png'),
   )
+  await scrollHomeTo(mp, 0)
+  const restored = combineHomeArchiveEvidence(
+    await captureHomeTabsLayout(mp),
+    await waitForHomeArchiveContent(home, {
+      expectedCardCount: 1,
+      expectedActiveText: '短内容',
+    }),
+  )
 
   const pinnedTop = Number(tagsPinned.tabs?.[0]?.top || 0)
-  const passed = before.tabs?.length === 1 &&
+  const beforeTopbarBottom = Number(before.topbar?.bottom || 0)
+  const beforeSearchTop = Number(before.search?.top || 0)
+  const beforeTabsTop = Number(before.tabs?.[0]?.top || 0)
+  const tabsStickyTop = beforeTopbarBottom + Number(before.search?.height || 0)
+  const searchPinnedTabsTop = Number(searchPinned.tabs?.[0]?.top || 0)
+  const restoredSearchTop = Number(restored.search?.top || 0)
+  const shortArchiveSearchTop = Number(shortArchive.search?.top || 0)
+  const shortArchiveTabsTop = Number(shortArchive.tabs?.[0]?.top || 0)
+  const shortExpectedSearchTop = expectedStickyViewportTop(
+    beforeSearchTop,
+    shortArchive.scrollTop,
+    beforeTopbarBottom,
+  )
+  const shortExpectedTabsTop = expectedStickyViewportTop(
+    beforeTabsTop,
+    shortArchive.scrollTop,
+    pinnedTop,
+  )
+  const passed = before.satisfied &&
+    before.tabs?.length === 1 &&
     searchPinned.tabs?.length === 1 &&
     tagsPinned.tabs?.length === 1 &&
     tabs.length === 2 &&
     Number(before.topbar?.height || 0) > 1 &&
     Number(before.search?.height || 0) > 1 &&
+    beforeSearchTop > beforeTopbarBottom + 16 &&
+    beforeTabsTop > tabsStickyTop + 16 &&
     Number(before.tabs?.[0]?.top || 0) > Number(before.topbar?.bottom || 0) + 16 &&
     Number(before.tabs?.[0]?.top || 0) >= Number(before.search?.bottom || 0) &&
     searchPinned.scrollTop > 0 &&
     tagsPinned.scrollTop > searchPinned.scrollTop &&
     Math.abs(Number(searchPinned.search?.top || 0) - Number(searchPinned.topbar?.bottom || 0)) <= 8 &&
+    searchPinnedTabsTop > Number(searchPinned.search?.bottom || 0) + 8 &&
     Math.abs(Number(tagsPinned.search?.top || 0) - Number(tagsPinned.topbar?.bottom || 0)) <= 8 &&
     Math.abs(pinnedTop - Number(tagsPinned.search?.bottom || 0)) <= 8 &&
     Math.abs(Number(before.topbar?.top || 0) - Number(tagsPinned.topbar?.top || 0)) <= 2 &&
+    tagsPinned.satisfied &&
+    tagsPinned.tabCount === 2 &&
     tagsPinned.cardCount === 3 &&
+    tagsPinned.activeTabCount === 1 &&
+    tagsPinned.activeTabTexts.length === 1 &&
+    tagsPinned.activeTabTexts[0] === '全部' &&
+    isVisibleGeometry(tagsPinned.topicTabsGeometry, tagsPinned.viewportHeight) &&
+    isVisibleGeometry(tagsPinned.firstCardGeometry, tagsPinned.viewportHeight) &&
+    Math.abs(Number(tagsPinned.topicTabsGeometry?.top || 0) - pinnedTop) <= 4 &&
+    Number(tagsPinned.firstCardGeometry?.bottom || 0) > Number(tagsPinned.topicTabsGeometry?.bottom || 0) + 2 &&
+    shortArchive.satisfied &&
+    shortArchive.tabCount === 2 &&
     shortArchive.cardCount === 1 &&
     shortArchive.activeTabCount === 1 &&
-    Math.abs(shortArchive.scrollTop - tagsPinned.scrollTop) <= 8 &&
-    Math.abs(Number(shortArchive.tabs?.[0]?.top || 0) - pinnedTop) <= 4
+    shortArchive.activeTabTexts.length === 1 &&
+    shortArchive.activeTabTexts[0] === '短内容' &&
+    isVisibleGeometry(shortArchive.topicTabsGeometry, shortArchive.viewportHeight) &&
+    isVisibleGeometry(shortArchive.firstCardGeometry, shortArchive.viewportHeight) &&
+    Math.abs(Number(shortArchive.topicTabsGeometry?.top || 0) - Number(shortArchive.tabs?.[0]?.top || 0)) <= 4 &&
+    Number(shortArchive.firstCardGeometry?.bottom || 0) > Number(shortArchive.topicTabsGeometry?.bottom || 0) + 2 &&
+    Math.abs(shortArchiveSearchTop - shortExpectedSearchTop) <= 8 &&
+    Math.abs(shortArchiveTabsTop - shortExpectedTabsTop) <= 8 &&
+    restored.satisfied &&
+    restored.scrollTop <= 2 &&
+    restoredSearchTop > Number(restored.topbar?.bottom || 0) + 16 &&
+    Math.abs(Number(restored.search?.top || 0) - Number(before.search?.top || 0)) <= 4 &&
+    Math.abs(Number(restored.tabs?.[0]?.top || 0) - Number(before.tabs?.[0]?.top || 0)) <= 4 &&
+    Math.abs(Number(restored.topicTabsGeometry?.top || 0) - Number(before.topicTabsGeometry?.top || 0)) <= 4
 
-  return { passed, before, searchPinned, tagsPinned, shortArchive, tabCount: tabs.length, screenshotEvidence }
+  return { passed, before, searchPinned, tagsPinned, shortArchive, restored, tabCount: tabs.length, screenshotEvidence }
 }
 
 async function verifyHomeDetail(mp, context = {}) {
