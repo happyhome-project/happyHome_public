@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "changeId": "wechat-media-audit-callback",
+  "actions": [],
+  "cloudTargets": [
+    "post",
+    "wechat-audit-callback"
+  ],
+  "migrations": [],
+  "smokeSuites": [],
+  "releaseImpact": {
+    "cloudFunctions": "Deploy post and the new wechat-audit-callback HTTP function, provision /wechat-audit-callback, and run the callback trust-guard smoke.",
+    "adminWeb": "No runtime code change.",
+    "miniprogram": "Rebuild and upload the mini-program so pending media review explicitly promises automatic publication after passing.",
+    "environmentVariables": [
+      "Set WX_APPID and WX_APPSECRET on post.",
+      "Set WX_APPID and a strong WX_MESSAGE_TOKEN on wechat-audit-callback without logging secret values."
+    ],
+    "databaseMigrations": []
+  }
+}

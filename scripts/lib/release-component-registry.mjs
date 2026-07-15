@@ -4,7 +4,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 export const CLOUD_RELEASE_COMPONENTS = Object.freeze([
   'admin', 'collaboration-template', 'community', 'home-prefetch', 'http-gateway', 'member',
-  'post', 'post-rag-worker', 'post-video-rag-worker', 'section', 'user',
+  'post', 'post-rag-worker', 'post-video-rag-worker', 'section', 'user', 'wechat-audit-callback',
 ])
 
 export const RELEASE_COMPONENTS = Object.freeze([

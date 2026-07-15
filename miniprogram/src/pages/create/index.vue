@@ -998,7 +998,7 @@ async function handleAuditSubmitResult(result: any) {
       title: '已提交审核',
       content: auditStatus === 'review'
         ? '内容需要人工复核，通过后会展示在社区里。'
-        : '内容正在审核，通过后会展示在社区里。',
+        : '图片或音频正在安全审核，通过后将自动发布。',
     })
   } else {
     try {
@@ -1033,7 +1033,7 @@ async function handleEditSubmitResult(result: any) {
       title: '修改已提交审核',
       content: auditStatus === 'review'
         ? '修改内容需要人工复核，通过后会更新。'
-        : '修改内容正在审核，通过后会更新。',
+        : '图片或音频正在安全审核，通过后将自动更新。',
     })
   } else {
     uni.showToast({ title: '保存成功', icon: 'success' })

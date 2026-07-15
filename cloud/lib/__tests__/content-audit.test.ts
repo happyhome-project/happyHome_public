@@ -32,6 +32,7 @@ jest.mock('../post-rag', () => ({
 
 import {
   applyAuditSummary,
+  applyWechatMediaAuditResult,
   auditAndApply,
   auditPostContent,
   approvePostAudit,
@@ -293,4 +294,73 @@ test('handleAuditCallback rejects public callback when callback token is not con
 
   expect(db.query).not.toHaveBeenCalled()
   expect(db.updateById).not.toHaveBeenCalled()
+})
+
+test('applyWechatMediaAuditResult updates exact trace tasks and refreshes each post slot once', async () => {
+  const traceTasks = [
+    { _id: 'task-1', postId: 'post-1', contentSlot: 'content', provider: 'wechat', status: 'pending' },
+    { _id: 'task-2', postId: 'post-1', contentSlot: 'content', provider: 'wechat', status: 'pending' },
+    { _id: 'task-3', postId: 'post-2', contentSlot: 'pendingContent', provider: 'wechat', status: 'pending' },
+  ]
+  ;(db.query as jest.Mock).mockImplementation(async (_collection: string, where: any) => {
+    if (where.traceId === 'trace-pass') return traceTasks
+    if (where.postId === 'post-1') return [{ ...traceTasks[0], status: 'pass' }, { ...traceTasks[1], status: 'pass' }]
+    if (where.postId === 'post-2') return [{ ...traceTasks[2], status: 'pass' }]
+    return []
+  })
+  ;(db.getById as jest.Mock).mockImplementation(async (_collection: string, id: string) => ({
+    _id: id,
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    status: 'active',
+    content: { title: 'existing' },
+    ...(id === 'post-2' ? { pendingContent: { title: 'pending' } } : {}),
+  }))
+
+  const result = await applyWechatMediaAuditResult({ traceId: 'trace-pass', suggest: 'pass', label: 100 })
+
+  expect(result).toEqual({ success: true, matched: 3, status: 'pass', refreshed: 2 })
+  expect(db.updateById).toHaveBeenCalledWith('content_audit_tasks', 'task-1', expect.objectContaining({
+    status: 'pass', suggest: 'pass', label: 100,
+  }))
+  expect((db.query as jest.Mock).mock.calls.filter(([, where]) => where.postId === 'post-1')).toHaveLength(1)
+  expect((db.query as jest.Mock).mock.calls.filter(([, where]) => where.postId === 'post-2')).toHaveLength(1)
+  expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({ auditStatus: 'pass' }))
+  expect(db.updateById).toHaveBeenCalledWith('posts', 'post-2', expect.objectContaining({ auditStatus: 'pass' }))
+})
+
+test('applyWechatMediaAuditResult acknowledges unknown traces without mutation', async () => {
+  ;(db.query as jest.Mock).mockResolvedValue([])
+
+  await expect(applyWechatMediaAuditResult({ traceId: 'unknown', suggest: 'review', label: undefined }))
+    .resolves.toEqual({ success: true, matched: 0, status: 'review', refreshed: 0 })
+
+  expect(db.updateById).not.toHaveBeenCalled()
+  expect(postSearch.refreshPostSearchIndexById).not.toHaveBeenCalled()
+})
+
+test('applyWechatMediaAuditResult is idempotent for duplicate rejected delivery', async () => {
+  const task = { _id: 'task-1', postId: 'post-1', contentSlot: 'content', provider: 'wechat', status: 'pending' }
+  ;(db.query as jest.Mock).mockImplementation(async (_collection: string, where: any) => {
+    if (where.traceId === 'trace-rejected') return [task]
+    if (where.postId === 'post-1') return [{ ...task, status: 'rejected', reason: 'wechat media rejected' }]
+    return []
+  })
+  let postStatus = 'pending'
+  ;(db.getById as jest.Mock).mockImplementation(async () => ({
+    _id: 'post-1', communityId: 'community-1', sectionId: 'section-1', status: 'active', content: {},
+    auditStatus: postStatus, auditReason: postStatus === 'rejected' ? 'wechat media rejected' : 'media audit is pending',
+  }))
+  ;(db.updateById as jest.Mock).mockImplementation(async (collection: string, _id: string, data: any) => {
+    if (collection === 'posts' && data.auditStatus) postStatus = data.auditStatus
+  })
+
+  await applyWechatMediaAuditResult({ traceId: 'trace-rejected', suggest: 'rejected', label: 20001 })
+  await applyWechatMediaAuditResult({ traceId: 'trace-rejected', suggest: 'rejected', label: 20001 })
+
+  expect(db.create).not.toHaveBeenCalled()
+  expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({ auditStatus: 'rejected' }))
+  expect((db.updateById as jest.Mock).mock.calls.filter(([collection]) => collection === 'posts')).toHaveLength(1)
+  expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledTimes(1)
+  expect(postRag.enqueuePostRagJob).toHaveBeenCalledTimes(1)
 })

@@ -25,7 +25,7 @@ import {
 test('release component registry contains all formal cloud functions plus admin and miniprogram', () => {
   assert.deepEqual(CLOUD_RELEASE_COMPONENTS, [
     'admin', 'collaboration-template', 'community', 'home-prefetch', 'http-gateway', 'member',
-    'post', 'post-rag-worker', 'post-video-rag-worker', 'section', 'user',
+    'post', 'post-rag-worker', 'post-video-rag-worker', 'section', 'user', 'wechat-audit-callback',
   ])
   assert.deepEqual(RELEASE_COMPONENTS, [...CLOUD_RELEASE_COMPONENTS.map((name) => `cloud:${name}`), 'admin-web', 'miniprogram'])
   assert.equal(RELEASE_COMPONENTS.some((name) => name.includes('cloudfunctions')), false)
