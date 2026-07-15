@@ -1,7 +1,6 @@
 export function asCollaborationSection(template: any, communityId = '') {
   const templateId = String(template?._id || template?.collaborationTemplateId || '').trim()
-  return {
-    ...template,
+  return Object.assign({}, template, {
     _id: templateId,
     collaborationTemplateId: templateId,
     communityId: String(communityId || template?.communityId || '').trim(),
@@ -15,10 +14,10 @@ export function asCollaborationSection(template: any, communityId = '') {
     enableComment: template?.enableComment !== false,
     enableLike: template?.enableLike !== false,
     widgets: Array.isArray(template?.widgets)
-      ? template.widgets.map((widget: any) => ({ ...widget }))
+      ? template.widgets.map((widget: any) => Object.assign({}, widget))
       : [],
     isCollaborationTemplate: true,
-  }
+  })
 }
 
 export function isCollaborationSection(value: any): boolean {
