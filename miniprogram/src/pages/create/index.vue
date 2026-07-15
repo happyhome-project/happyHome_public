@@ -446,12 +446,16 @@ const createFormBlocks = computed(() => {
 onLoad(async (options: any) => {
   if (ensureHierarchyStack('/pages/create/index', options || {}, options?.returnTo)) return
   hideNativeTabBar()
-  await ensureSectionsLoaded()
-  await checkMembership({ silent: false })
   collaborationOnly.value = String(options?.mode || '') === 'collaboration'
   const requestedArchiveFormat = String(options?.archiveFormat || '')
   if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text') {
+    // Resolve the product-level publishing route before the first await. Otherwise
+    // membership refresh can commit the legacy section picker for one frame.
     enterArchiveEditor(requestedArchiveFormat, options?.returnTo)
+  }
+  await ensureSectionsLoaded()
+  await checkMembership({ silent: false })
+  if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text') {
     return
   }
   await consumeCreateSectionIntent(options)
@@ -491,16 +495,19 @@ onShow(() => {
   // 返回页面（例如地图选择返回）时静默刷新，不再打断表单操作。
   void ensureSectionsLoaded()
   void checkMembership({ silent: true })
-  void consumeCreateSectionIntent()
-  void consumeActivityInviteIntent()
+  if (!archiveFormat.value) {
+    void consumeCreateSectionIntent()
+    void consumeActivityInviteIntent()
+  }
 })
 
 watch(() => communityStore.currentCommunityId, async () => {
-  selectedSection.value = null
+  if (archiveFormat.value) enterArchiveEditor(archiveFormat.value, createReturnTo.value)
+  else selectedSection.value = null
   membershipReady.value = false
   await ensureSectionsLoaded()
   await checkMembership({ silent: false, forceRefresh: true })
-  await consumeCreateSectionIntent()
+  if (!archiveFormat.value) await consumeCreateSectionIntent()
 })
 
 watch([selectedSection, textNoteStep], (values) => {

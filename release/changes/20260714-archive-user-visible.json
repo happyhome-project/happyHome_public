@@ -4,7 +4,13 @@
   "actions": [
     "ensure-indexes"
   ],
-  "migrations": [],
+  "migrations": [
+    {
+      "id": "archive-posts-v1",
+      "module": "release/migrations/20260715-archive-posts-v1.mjs",
+      "inputDigest": "3c7d332a03ef81da8c0d5984f613d8769fa43baaccdb6ab167ed39e67950adbd"
+    }
+  ],
   "smokeSuites": [],
   "releaseImpact": {
     "cloudFunctions": "Deploy post and admin for indexed archive feeds, topic management, and section-free search indexing.",

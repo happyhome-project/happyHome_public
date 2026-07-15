@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { executeArchiveMigration, planArchiveMigration } from './archive-migration.mjs'
 import { validateChangeManifests } from './release-plan.mjs'
+import { verifyMigrationInputFile } from './release-component-registry.mjs'
 
 test('plans only evergreen sections and preserves existing topics', () => {
   const input = {
@@ -40,6 +42,7 @@ test('migration plan is deterministic and warns instead of dropping media-less l
 
   assert.deepEqual(first, second)
   assert.equal(first.postUpdates.length, 1)
+  assert.equal(first.postUpdates[0].data.auditStatus, 'pass')
   assert.equal(first.warnings[0].postId, 'post-1')
   assert.match(first.topicLinks[0]._id, /^apt_[a-f0-9]{40}$/)
 })
@@ -47,6 +50,12 @@ test('migration plan is deterministic and warns instead of dropping media-less l
 test('archive release manifest uses only executable release operations', async () => {
   const manifest = JSON.parse(await readFile(new URL('../../release/changes/20260714-archive-user-visible.json', import.meta.url), 'utf8'))
   assert.doesNotThrow(() => validateChangeManifests([manifest]))
+  assert.equal(manifest.migrations.length, 1)
+  assert.equal(manifest.migrations[0].id, 'archive-posts-v1')
+  assert.doesNotThrow(() => verifyMigrationInputFile({
+    root: fileURLToPath(new URL('../..', import.meta.url)),
+    migration: manifest.migrations[0],
+  }))
 })
 
 test('migration preserves administrator topic fields and never writes document ids as data', async () => {

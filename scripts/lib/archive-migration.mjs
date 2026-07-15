@@ -78,7 +78,14 @@ export function planArchiveMigration({ communityId, sections, posts, archiveTopi
     const sortKey = `${createdAt}_${post._id}`
     postUpdates.push({
       postId: post._id,
-      data: { area: 'archive', origin: 'legacy_section', topics, sortKey },
+      data: {
+        area: 'archive',
+        origin: 'legacy_section',
+        topics,
+        sortKey,
+        status: post.status || 'active',
+        auditStatus: post.auditStatus || 'pass',
+      },
     })
     for (const rawTopic of topics) {
       const topic = normalizeTopic(rawTopic)

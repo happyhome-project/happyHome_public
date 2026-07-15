@@ -27,6 +27,17 @@ describe('archive publishing entry', () => {
     expect(create).toContain("section?.type === 'realtime'")
   })
 
+  test('enters an archive editor before the first asynchronous create-page load', () => {
+    const create = read('pages', 'create', 'index.vue')
+    const onLoadStart = create.indexOf('onLoad(async (options: any) => {')
+    const firstAwait = create.indexOf('await ensureSectionsLoaded()', onLoadStart)
+    const archiveEditor = create.indexOf('enterArchiveEditor(requestedArchiveFormat', onLoadStart)
+
+    expect(onLoadStart).toBeGreaterThanOrEqual(0)
+    expect(archiveEditor).toBeGreaterThan(onLoadStart)
+    expect(archiveEditor).toBeLessThan(firstAwait)
+  })
+
   test('native archive detail builds a virtual renderer while legacy section posts keep section loading', () => {
     const detail = read('pages', 'detail', 'index.vue')
     expect(detail).toContain("post.value?.area === 'archive' && !post.value?.sectionId")
