@@ -11,12 +11,25 @@ const nonce = 'nonce-42'
 const signature = createHash('sha1').update([token, timestamp, nonce].sort().join('')).digest('hex')
 
 describe('verifyWechatSignature', () => {
+  test('matches an independently fixed signature vector', () => {
+    expect(verifyWechatSignature(
+      'known-token',
+      '1700000000',
+      'fixed-nonce',
+      '4c4557fc5328df1f1df71113d7115a97216e6403',
+    )).toBe(true)
+  })
+
   test('accepts a valid WeChat SHA-1 signature', () => {
     expect(verifyWechatSignature(token, timestamp, nonce, signature)).toBe(true)
   })
 
   test('rejects a wrong signature', () => {
     expect(verifyWechatSignature(token, timestamp, nonce, '0'.repeat(40))).toBe(false)
+  })
+
+  test('rejects a malformed equal-length non-hex signature', () => {
+    expect(verifyWechatSignature(token, timestamp, nonce, 'z'.repeat(40))).toBe(false)
   })
 
   test.each([
@@ -36,6 +49,14 @@ describe('parseWechatVerification', () => {
     expect(() => parseWechatVerification({ signature: 'bad', timestamp, nonce, echostr: 'verified' }, token))
       .toThrow('Invalid WeChat signature')
   })
+
+  test.each([
+    { query: { signature, nonce, echostr: 'verified' }, field: 'timestamp' },
+    { query: { signature, timestamp, echostr: 'verified' }, field: 'nonce' },
+    { query: { signature, timestamp, nonce }, field: 'echostr' },
+  ])('rejects a verification request missing $field', ({ query }) => {
+    expect(() => parseWechatVerification(query, token)).toThrow('Malformed WeChat verification request')
+  })
 })
 
 describe('parseWechatMediaAuditEvent', () => {
@@ -47,6 +68,20 @@ describe('parseWechatMediaAuditEvent', () => {
 
   test('normalizes a top-level pass result', () => {
     expect(parseWechatMediaAuditEvent({ ...base, result: { suggest: 'pass', label: 100 } }, 'wx-app-id'))
+      .toEqual({ traceId: 'trace-1', suggest: 'pass', label: 100 })
+  })
+
+  test('treats top-level result as authoritative when detail is also present', () => {
+    expect(parseWechatMediaAuditEvent({
+      ...base,
+      result: { suggest: 'pass', label: 100 },
+      detail: [{ suggest: 'risky', label: 20001 }],
+    }, 'wx-app-id')).toEqual({ traceId: 'trace-1', suggest: 'pass', label: 100 })
+  })
+
+  test('accepts a callback when appid is absent', () => {
+    const { ToUserName: _appId, ...withoutAppId } = base
+    expect(parseWechatMediaAuditEvent({ ...withoutAppId, result: { suggest: 'pass', label: 100 } }, 'wx-app-id'))
       .toEqual({ traceId: 'trace-1', suggest: 'pass', label: 100 })
   })
 
@@ -83,6 +118,20 @@ describe('parseWechatMediaAuditEvent', () => {
   test('rejects malformed detail results', () => {
     expect(() => parseWechatMediaAuditEvent({ ...base, detail: [{ label: 100 }] }, 'wx-app-id'))
       .toThrow('Malformed WeChat media audit result')
+  })
+
+  test.each([null, 'raw-json', [], 42])('rejects a malformed or non-object payload', (payload) => {
+    expect(() => parseWechatMediaAuditEvent(payload, 'wx-app-id')).toThrow('Malformed WeChat callback payload')
+  })
+
+  test('rejects a missing trace_id', () => {
+    const { trace_id: _traceId, ...withoutTraceId } = base
+    expect(() => parseWechatMediaAuditEvent({ ...withoutTraceId, result: { suggest: 'pass' } }, 'wx-app-id'))
+      .toThrow('Malformed WeChat media audit trace_id')
+  })
+
+  test('rejects a callback missing both result and detail', () => {
+    expect(() => parseWechatMediaAuditEvent(base, 'wx-app-id')).toThrow('Malformed WeChat media audit result')
   })
 
   test('rejects encrypted callback payloads', () => {
