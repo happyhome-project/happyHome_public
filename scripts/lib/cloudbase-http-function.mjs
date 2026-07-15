@@ -19,7 +19,16 @@ function accessEntries(payload) {
       data = JSON.parse(payload)
     } catch (error) {
       if (/HTTP 访问服务为空|HTTP access services? (?:are )?empty/i.test(payload)) return []
-      throw error
+      const lines = payload.split(/\r?\n/)
+      for (let index = 1; index < lines.length; index += 1) {
+        const progressLines = lines.slice(index).filter((line) => line.trim())
+        if (!progressLines.length || !progressLines.every((line) => /^\s*-\s+.+\.\.\.\s*$/u.test(line))) continue
+        try {
+          data = JSON.parse(lines.slice(0, index).join('\n'))
+          break
+        } catch {}
+      }
+      if (data === payload) throw error
     }
   }
   return Array.isArray(data?.data)
