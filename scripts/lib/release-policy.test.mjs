@@ -544,6 +544,15 @@ test('package exposes a release status command for the latest ledger', () => {
   const packageJson = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
   assert.equal(packageJson.scripts['release:status'], 'node scripts/release-status.mjs')
   assert.equal(packageJson.scripts['release:reconcile'], 'node scripts/release-reconcile.mjs')
+  assert.equal(packageJson.scripts['release:session'], 'node scripts/release-session.mjs')
+})
+
+test('release session keeps operator aliases out of prepare and publish identity', () => {
+  const sessionScript = readFileSync(new URL('../release-session.mjs', import.meta.url), 'utf8')
+  assert.match(sessionScript, /session\.identity\.releaseRunId/)
+  assert.match(sessionScript, /session\.release\.version/)
+  assert.match(sessionScript, /session\.release\.desc/)
+  assert.doesNotMatch(sessionScript.slice(sessionScript.indexOf('export function buildReleaseSessionInvocation'), sessionScript.indexOf('function assertSessionPathInsideRoot')), /session\.aliases/)
 })
 
 test('explicit UI qualification builds only the miniprogram gate and writes exact evidence', () => {

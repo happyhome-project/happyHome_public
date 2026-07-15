@@ -6,17 +6,25 @@ Before any production mutation, run `npm.cmd run release:preflight` with `HH_REL
 
 ## Full-Current Two-Stage Release
 
-`full-current` is an explicit planning strategy for releasing the exact current public `main`. It ignores the previous production SHA only when calculating the release plan; it never clears, rewrites, or fabricates production state. Both stages must carry the same explicit flag and pinned identity:
+`full-current` is an explicit planning strategy for releasing the exact current public `main`. It ignores the previous production SHA only when calculating the release plan; it never clears, rewrites, or fabricates production state.
+
+The recommended interface generates all operator labels once and reuses one session file:
 
 ```powershell
-$runId = '<YYYYMMDDTHHMMSS>-full-current-public-main'
-$version = '1.0.<YYMMDDHHMM>'
-$desc = 'full-current-public-main-<short-sha>'
-node X:\Users\86136\.codex\skills\happyhome-release\scripts\happyhome-release-guard.mjs prepare -- --full-current --release-run-id=$runId --version=$version --desc=$desc
-node X:\Users\86136\.codex\skills\happyhome-release\scripts\happyhome-release-guard.mjs publish -- --full-current --resume --release-run-id=$runId --cloud-deploy-concurrency=2 --cloud-smoke-concurrency=3
+npm.cmd run release:session -- create --full-current
+npm.cmd run release:session -- prepare
+npm.cmd run release:session -- publish
 ```
 
-Create a new run ID for every release attempt. The version and description must already match the checked-in `miniprogram/src/generated/build-info.ts` on clean public `main`; prepare and publish reuse the same values and run ID. Prepare pins that identity, the exact Git SHA, package digest, and DevTools UI evidence without deploying or uploading. Publish must resume that exact ledger and strategy; omitting `--full-current`, changing the identity or digest, or losing any required evidence blocks the release. The existing production lock, CloudBase deployment, UI evidence, cloud smoke/log capture, fixture cleanup, admin-web deployment, digest verification, and mini-program upload rules below remain mandatory.
+The session contains a machine UUID plus the exact Git SHA, environment, strategy, generated run ID, version and description. Prepare and publish read the same values; operators do not repeat them. Prepare pins the exact Git SHA, package digest and DevTools UI evidence without deploying or uploading. Publish resumes that exact ledger and strategy. The existing production lock, CloudBase deployment, UI evidence, cloud smoke/log capture, fixture cleanup, admin-web deployment, digest verification and mini-program upload rules remain mandatory.
+
+Before prepare, a mistaken human-readable value can be corrected locally without PR, build or deployment:
+
+```powershell
+npm.cmd run release:session -- repair --version=1.0.260716103000 --desc=current-main-abc123 --reason="correct generated labels before prepare"
+```
+
+After the formal run exists, its actual run ID/version/description are historical facts. The same repair command records requested values as aliases instead of rewriting package bytes, upload receipts, ledgers or production state. `--repair-latest` may restore only the local latest-run pointer after the run ledger exactly matches the session security identity. Git SHA, environment, component/package digests, upload receipt and cleanup evidence are never repairable labels. Existing manual prepare/publish arguments remain temporarily compatible, but the session entrypoint is the default workflow.
 
 By default, `full-current` ensures the desired current state: every one of the twelve cloud functions plus admin-web is freshly remotely attested and matching stable component digests skip mutation, while every planned cloud function is still freshly verified and included in smoke. The mini-program is still uploaded because the platform does not expose an equivalent safe cross-run package attestation. A true all-component mutation is an exceptional operator choice: add `--force-redeploy-current` to both prepare and publish. That flag is valid only with explicit `--full-current`, is pinned in preflight, plan, ledger, and resume identity, and does not weaken any Git, lock, snapshot, verification, smoke, cleanup, or upload gate.
 
