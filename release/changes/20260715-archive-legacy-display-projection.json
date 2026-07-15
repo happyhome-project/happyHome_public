@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "changeId": "archive-legacy-display-projection",
+  "actions": [],
+  "migrations": [
+    {
+      "id": "archive-posts-v3-display-projection",
+      "module": "release/migrations/20260715-archive-posts-v3-display-projection.mjs",
+      "inputDigest": "e48218028b9f6765b6d79b6a4cb4898d5ee707547043317114eed2a9cbdb4405"
+    }
+  ],
+  "smokeSuites": [],
+  "releaseImpact": {
+    "cloudFunctions": "No deployment required.",
+    "adminWeb": "No deployment required.",
+    "miniprogram": "No upload required.",
+    "environmentVariables": [],
+    "databaseMigrations": [
+      "Materialize canonical archive display fields from legacy section widget schemas without removing original content."
+    ]
+  }
+}

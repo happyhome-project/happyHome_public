@@ -6,6 +6,8 @@ import test from 'node:test'
 
 import './archive-migration.test.mjs'
 import './archive-migration-node-sdk.test.mjs'
+import './archive-legacy-projection.test.mjs'
+import './archive-legacy-projection-node-sdk.test.mjs'
 
 import {
   CLOUD_COMPONENT_CONFIG_INPUTS,
