@@ -10,7 +10,7 @@ import {
 } from '../../scripts/lib/archive-legacy-projection-node-sdk.mjs'
 
 const ARCHIVE_LEGACY_PROJECTION_SHA256 = '98c1ee3c09a83d1af9ddc7a96a0c1fb69af378cea89000be1436225f2963cbd1'
-const ARCHIVE_LEGACY_PROJECTION_NODE_SDK_SHA256 = 'ada25cbda1875873c43d1ee67c01419570468aaa8810cc1d3e9d5ed4a64219ac'
+const ARCHIVE_LEGACY_PROJECTION_NODE_SDK_SHA256 = '682bbed4a0db261d71e6fcf6a184939cabd8271a71477d434e03e5300fd0e163'
 
 function normalizedTextDigest(url) {
   const text = readFileSync(url, 'utf8').replace(/\r\n/g, '\n')

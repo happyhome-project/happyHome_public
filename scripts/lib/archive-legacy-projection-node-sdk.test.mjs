@@ -6,11 +6,14 @@ import {
   planArchiveLegacyProjectionRepair,
 } from './archive-legacy-projection-node-sdk.mjs'
 
-function fakeDatabase(seed) {
+function fakeDatabase(seed, hooks = {}) {
   const collections = new Map(Object.entries(seed).map(([name, rows]) => [name, new Map(rows.map((row) => [row._id, structuredClone(row)]))]))
   const queryEvents = []
   const database = {
-    command: { gt(value) { return { __operator: 'gt', value } } },
+    command: {
+      gt(value) { return { __operator: 'gt', value } },
+      remove() { return { __operator: 'remove' } },
+    },
     async runTransaction(callback) { return callback(database) },
     collection(name) {
       const rows = collections.get(name) || new Map()
@@ -39,7 +42,15 @@ function fakeDatabase(seed) {
         doc(id) {
           return {
             async get() { return { data: rows.has(id) ? [structuredClone(rows.get(id))] : [] } },
-            async update(payload) { rows.set(id, { ...rows.get(id), ...structuredClone(payload) }) },
+            async update(payload) {
+              const next = { ...rows.get(id) }
+              for (const [key, value] of Object.entries(structuredClone(payload))) {
+                if (value?.__operator === 'remove') delete next[key]
+                else next[key] = value
+              }
+              rows.set(id, next)
+              await hooks.onUpdate?.({ name, id, payload: structuredClone(payload), collections })
+            },
           }
         },
       }
@@ -123,6 +134,31 @@ test('transaction compare-and-set rejects a section schema changed after dry-run
     () => applyArchiveLegacyProjectionRepair(database, plan),
     /section schema changed after archive legacy projection dry-run/i,
   )
+})
+
+test('rolls back earlier posts when a section schema changes midway through the batch', async () => {
+  let changed = false
+  const first = legacyPost('post-a')
+  const second = legacyPost('post-b')
+  const { database, collections } = fakeDatabase(
+    { sections: [guideSection], posts: [first, second] },
+    {
+      onUpdate({ name, id, collections: current }) {
+        if (!changed && name === 'posts' && id === first._id) {
+          changed = true
+          current.get('sections').get(guideSection._id).widgets[0].fieldKey = 'renamed-title'
+        }
+      },
+    },
+  )
+  const plan = await planArchiveLegacyProjectionRepair(database)
+
+  await assert.rejects(
+    () => applyArchiveLegacyProjectionRepair(database, plan),
+    /section schema changed after archive legacy projection dry-run/i,
+  )
+  assert.deepEqual(collections.get('posts').get(first._id), first)
+  assert.deepEqual(collections.get('posts').get(second._id), second)
 })
 
 test('uses ordered id cursor pagination instead of offset pagination', async () => {

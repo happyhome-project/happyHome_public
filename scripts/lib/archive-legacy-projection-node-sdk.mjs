@@ -113,23 +113,69 @@ async function mutateExact(database, before, after, sectionBefore) {
   })
 }
 
+function uniqueSectionSnapshots(work) {
+  return [...new Map(work.map(({ sectionBefore }) => [String(sectionBefore?._id || ''), sectionBefore])).values()]
+}
+
+async function verifySectionSnapshots(database, work) {
+  for (const sectionBefore of uniqueSectionSnapshots(work)) {
+    const current = await readDocument(database, 'sections', sectionBefore._id)
+    if (!equalValue(current, sectionBefore)) {
+      throw new Error(`sections/${sectionBefore._id} section schema changed after archive legacy projection dry-run`)
+    }
+  }
+}
+
+async function rollbackExact(database, before, after) {
+  await database.runTransaction(async (transaction) => {
+    const current = await readDocument(transaction, 'posts', before._id)
+    if (!equalValue(current, after)) {
+      throw new Error(`posts/${before._id} changed before archive legacy projection rollback`)
+    }
+    await transaction.collection('posts').doc(before._id).update({
+      format: Object.hasOwn(before, 'format') ? before.format : database.command.remove(),
+      content: before.content,
+    })
+  })
+  const restored = await readDocument(database, 'posts', before._id)
+  if (!equalValue(restored, before)) throw new Error(`posts/${before._id} failed archive legacy projection rollback verification`)
+}
+
 export async function applyArchiveLegacyProjectionRepair(database, plan) {
   if (!plan || !Array.isArray(plan.work)) throw new Error('A reviewed archive legacy projection plan is required')
-  for (const { before, after, sectionBefore } of plan.work) await mutateExact(database, before, after, sectionBefore)
+  const applied = []
+  try {
+    await verifySectionSnapshots(database, plan.work)
+    for (const item of plan.work) {
+      await mutateExact(database, item.before, item.after, item.sectionBefore)
+      applied.push(item)
+    }
+    await verifySectionSnapshots(database, plan.work)
 
-  for (const { before, after } of plan.work) {
-    const actual = await readDocument(database, 'posts', before._id)
-    if (!equalValue(actual, after)) throw new Error(`posts/${before._id} failed archive legacy projection verification`)
-  }
+    for (const { before, after } of plan.work) {
+      const actual = await readDocument(database, 'posts', before._id)
+      if (!equalValue(actual, after)) throw new Error(`posts/${before._id} failed archive legacy projection verification`)
+    }
 
-  const residual = await planArchiveLegacyProjectionRepair(database)
-  if (residual.summary.changedPostCount !== 0) {
-    throw new Error(`archive legacy projection residual scan found ${residual.summary.changedPostCount} posts`)
-  }
-  return {
-    ...plan.summary,
-    applied: true,
-    verifiedPostCount: plan.summary.changedPostCount,
-    residualPlanDigest: residual.summary.planDigest,
+    const residual = await planArchiveLegacyProjectionRepair(database)
+    await verifySectionSnapshots(database, plan.work)
+    if (residual.summary.changedPostCount !== 0) {
+      throw new Error(`archive legacy projection residual scan found ${residual.summary.changedPostCount} posts`)
+    }
+    return {
+      ...plan.summary,
+      applied: true,
+      verifiedPostCount: plan.summary.changedPostCount,
+      residualPlanDigest: residual.summary.planDigest,
+    }
+  } catch (error) {
+    const rollbackErrors = []
+    for (const { before, after } of applied.reverse()) {
+      try { await rollbackExact(database, before, after) } catch (rollbackError) { rollbackErrors.push(rollbackError) }
+    }
+    if (rollbackErrors.length) {
+      throw new AggregateError([error, ...rollbackErrors], 'archive legacy projection failed and rollback was incomplete')
+    }
+    throw error
   }
 }
