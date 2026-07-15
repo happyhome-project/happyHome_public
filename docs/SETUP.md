@@ -87,6 +87,8 @@ npm.cmd run worktree:status -- --fresh
 
 ### 功能 PR 与 Merge Queue 协作
 
+GitHub 上 PR 的 exact HEAD 是 push、CI、review 和合并状态的权威事实源。Webhook 只可加速通知，不是继续流程的前置门禁；不得等待 webhook，也不得因为 PR-control paused 或 `record-push` 尚未登记而重复空轮询。正常流程不需要集中轮询或 orphan watchdog，原功能 AI 负责自己的 PR 到终态。
+
 PR 前先在原功能 worktree 确认工作区 clean 并验证修改；不要求无条件 fetch/merge main：
 
 ```bash
@@ -95,11 +97,11 @@ git status --short --branch
 git push origin HEAD           # 普通 push
 ```
 
-同步与修复不得自动 stash 或 rebase，不得 force-push，也不得合并其他功能分支。仅在真实冲突、显式依赖或 `merge_group` 代码失败时回原功能 worktree 修复。PR 创建后，功能 AI 轮询 PR exact HEAD 的 checks、review 和 comments；push 新提交后旧检查结果作废，并负责到 terminal `MERGED` 或 `CLOSED`。
+同步与修复不得自动 stash 或 rebase，不得 force-push，也不得合并其他功能分支。仅在真实冲突、显式依赖或 `merge_group` 代码失败时回原功能 worktree 修复。PR 创建后，功能 AI 轮询 PR exact HEAD 的 checks、review 和 comments；push 新提交后旧检查结果作废，并先直接向 GitHub 核验 repo、branch 和新 SHA，再负责到 terminal `MERGED` 或 `CLOSED`。
 
 `merge-ready` 的完整含义是：PR 为 open、非 draft；exact HEAD 的全部必需 PR CI 成功，没有失败、排队、取消或缺失检查；没有未处理的 review/change request；GitHub 未报告文本冲突。多个 `merge-ready` PR 可以正常进入 Merge Queue。PR 创建后不要求功能分支持续追逐或同步前进的 main；GitHub 会用 `merge_group` CI 验证最新 main 与前序队列变更的组合。
 
-功能 AI 自审、push 并达到 `merge-ready` 后运行 `gh pr merge <N> --auto --merge`，继续处理评论与失败并负责到 `MERGED` 或 `CLOSED`。真实冲突、显式依赖或 `merge_group` 代码失败回到原 worktree 修复；瞬态 Queue 失败且 exact HEAD 未变时，同一功能 AI 复核后重新 arm，不制造提交。依赖 PR 保持 draft，直到前置进入 main。
+功能 AI 自审、push 后等待 exact HEAD CI；CI 与 review 门禁满足后立即运行 `gh pr merge <N> --auto --merge`，继续处理 `merge_group` CI、评论与失败并负责到 `MERGED` 或 `CLOSED`。真实冲突、显式依赖或 `merge_group` 代码失败回到原 worktree 修复；瞬态 Queue 失败且 exact HEAD 未变时，同一功能 AI 复核后重新 arm，不制造提交。依赖 PR 保持 draft，直到前置进入 main。
 
 当前 public 协作禁用 `integrate:pr`，公开仓库统一使用 GitHub Merge Queue。此协调流程不触发 release 或 deploy。
 
