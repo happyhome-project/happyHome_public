@@ -56,4 +56,3 @@
 - [ ] Acquire the machine validation lease, re-run the exact plan, and apply with expected digest/counts plus an exclusive backup directory.
 - [ ] Verify zero residual changes, compare preserved fields, execute the production indexed topic queries, and invoke the deployed public-community archive APIs.
 - [ ] Commit as AngryBird, push the feature branch, open a ready PR, and follow exact-head PR CI plus Merge Queue to `MERGED` or `CLOSED`.
-

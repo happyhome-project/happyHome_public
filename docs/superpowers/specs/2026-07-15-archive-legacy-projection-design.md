@@ -22,4 +22,3 @@ This is preferable to client-only special cases because it works for every legac
 ## Verification
 
 Unit tests cover widget-field resolution, canonical-field precedence, media-less posts, idempotency, plan-digest identity, and concurrent-change rejection. Production validation compares before/after records, runs the same indexed queries as `listArchive`, and invokes the public community's deployed `listArchiveTabs` and `listArchive` actions.
-
