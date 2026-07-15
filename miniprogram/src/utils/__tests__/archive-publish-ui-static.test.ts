@@ -20,6 +20,13 @@ describe('archive publishing entry', () => {
     expect(source).not.toContain('option.section')
   })
 
+  test('keeps the publish button free of a tinted outer shadow', () => {
+    const source = read('components', 'AppTabBar.vue')
+    const pillRule = source.match(/\.fab-pill\s*\{([^}]*)\}/s)?.[1] || ''
+
+    expect(pillRule).not.toMatch(/box-shadow\s*:/)
+  })
+
   test('archive editors submit without a section while collaboration filters realtime sections', () => {
     const create = read('pages', 'create', 'index.vue')
     expect(create).toContain('postApi.createArchive({')
