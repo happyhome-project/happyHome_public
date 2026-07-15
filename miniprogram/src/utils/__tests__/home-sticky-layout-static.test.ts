@@ -32,4 +32,15 @@ describe('home progressive sticky navigation', () => {
       expect(body).not.toMatch(/backdrop-filter\s*:/)
     }
   })
+
+  test('extends the hero gradient beneath the complete search surface', () => {
+    const hero = ruleBody('.home-shell')
+    const search = ruleBody('.home-search-sticky-shell')
+    const searchBox = ruleBody('.home-search-sticky-shell .home-search-box')
+
+    expect(hero).toMatch(/padding:\s*calc\(150rpx \+ env\(safe-area-inset-top\)\)\s+var\(--hh-page-x\)\s+138rpx;/)
+    expect(hero).toMatch(/margin-bottom:\s*-138rpx;/)
+    expect(search).toMatch(/padding:\s*24rpx\s+var\(--hh-page-x\);/)
+    expect(searchBox).toMatch(/min-height:\s*90rpx;/)
+  })
 })
