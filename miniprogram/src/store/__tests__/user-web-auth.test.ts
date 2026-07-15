@@ -6,6 +6,8 @@ const signOut = vi.fn()
 const getLoginState = vi.fn()
 const userLogin = vi.fn()
 const myCommunities = vi.fn()
+const primeCommunityDirectory = vi.fn()
+const clearCommunityDirectoryCache = vi.fn()
 const calls: string[] = []
 const storage = new Map<string, any>()
 
@@ -20,6 +22,10 @@ vi.mock('../../api/cloud', () => ({
   userApi: { login: userLogin },
   memberApi: { myCommunities },
   sectionApi: { list: vi.fn() },
+}))
+vi.mock('../../utils/community-directory-cache', () => ({
+  primeCommunityDirectory,
+  clearCommunityDirectoryCache,
 }))
 
 function businessUser(overrides: Record<string, any> = {}) {
@@ -54,6 +60,11 @@ describe('user store Web auth', () => {
       return { user: businessUser({ nickName }), isNew: false }
     })
     myCommunities.mockResolvedValue({ communities: [] })
+    primeCommunityDirectory.mockResolvedValue({
+      communities: [],
+      fetchedAt: Date.now(),
+      freshness: 'fresh',
+    })
   })
 
   test('webLogin signs into Web SDK before user.login and never persists the password', async () => {
@@ -67,6 +78,25 @@ describe('user store Web auth', () => {
     expect(store.isLoggedIn).toBe(true)
     expect('password' in store.$state).toBe(false)
     expect(JSON.stringify([...storage.entries()])).not.toContain('secret')
+    expect(primeCommunityDirectory).toHaveBeenCalledWith(
+      'web-user-1',
+      'community.directory.login-prefetch',
+    )
+  })
+
+  test('direct login commits the session without waiting for directory prefetch', async () => {
+    primeCommunityDirectory.mockReturnValueOnce(new Promise(() => {}))
+    const { useUserStore } = await import('../user')
+    const store = useUserStore()
+
+    await store.login({ nickName: '青山用户', avatarUrl: '' })
+
+    expect(store.isLoggedIn).toBe(true)
+    expect(store.openId).toBe('web-user-1')
+    expect(primeCommunityDirectory).toHaveBeenCalledWith(
+      'web-user-1',
+      'community.directory.login-prefetch',
+    )
   })
 
   test('restoreWebSession clears stale user and community state without an SDK session', async () => {
@@ -147,6 +177,7 @@ describe('user store Web auth', () => {
     await store.logout()
 
     expect(calls).toEqual(['signOut'])
+    expect(clearCommunityDirectoryCache).toHaveBeenCalledWith('web-user-1')
     expect(store.isLoggedIn).toBe(false)
     expect(store.openId).toBe('')
   })

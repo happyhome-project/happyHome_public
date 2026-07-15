@@ -494,6 +494,7 @@ import {
 } from '../../utils/client-diagnostics'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { getReleaseVersion } from '../../utils/release-version'
+import { primeCommunityDirectory } from '../../utils/community-directory-cache'
 import {
   buildApprovalReminderState,
   buildSubscriptionSaves,
@@ -1380,6 +1381,11 @@ onShow(() => {
   updateProfileNavMetrics()
   logProfile('info', 'profile.show', {})
   void nextTick(() => logProfile('info', 'profile.render.tick', { reason: 'show' }))
+  if (userStore.isLoggedIn && userStore.openId) {
+    void primeCommunityDirectory(userStore.openId, 'community.directory.profile-prefetch').catch((error) => {
+      logProfile('warn', 'profile.communityDirectory.prefetch.fail', { error })
+    })
+  }
   void refreshProfileData('show')
 })
 
