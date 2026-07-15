@@ -28,33 +28,47 @@ export async function syncArchivePostTopics(post: {
   for (const rawTopic of post.topics || []) {
     const { topicKey, displayName } = normalizeArchiveTopic(rawTopic)
     const topicId = archiveTopicId(post.communityId, topicKey)
-    const existing = await db.getByIdOrNull<any>('archive_topics', topicId)
     const linkId = archivePostTopicId(post._id, topicKey)
-    const existingLink = await db.getByIdOrNull<any>('archive_post_topics', linkId)
-    const countsAsRecent = !existingLink && post.status === 'active' && post.auditStatus === 'pass'
-    const { _id: _existingId, ...existingData } = existing || {}
-    const origins = Array.from(new Set([...(existing?.origins || []), 'organic']))
-    await db.setById('archive_topics', topicId, {
-      ...existingData,
-      communityId: post.communityId,
-      topicKey,
-      displayName: existing?.displayName || displayName,
-      origins,
-      enabled: existing?.enabled !== false,
-      recentScore: Number(existing?.recentScore || 0) + (countsAsRecent ? 1 : 0),
-      recentPostCount: Number(existing?.recentPostCount || 0) + (countsAsRecent ? 1 : 0),
-      createdAt: existing?.createdAt || now,
-      updatedAt: now,
-    })
-    await db.setById('archive_post_topics', linkId, {
-      communityId: post.communityId,
-      topicKey,
-      postId: post._id,
-      sortKey,
-      createdAt: post.createdAt,
-      status: post.status,
-      auditStatus: post.auditStatus,
-      updatedAt: now,
+    await db.runTransaction(async transaction => {
+      const [existing, existingLink, community] = await Promise.all([
+        db.transactionGetByIdOrNull<any>(transaction, 'archive_topics', topicId),
+        db.transactionGetByIdOrNull<any>(transaction, 'archive_post_topics', linkId),
+        db.transactionGetByIdOrNull<any>(transaction, 'communities', post.communityId),
+      ])
+      const countsAsRecent = !existingLink && post.status === 'active' && post.auditStatus === 'pass'
+      const reactivating = existing?.status === 'deleted'
+      const { _id: _existingId, deletedAt: _deletedAt, deletedByAccountId: _deletedBy, ...existingData } = existing || {}
+      const origins = Array.from(new Set([...(existing?.origins || []), 'organic']))
+      await transaction.collection('archive_topics').doc(topicId).set({ data: {
+        ...existingData,
+        communityId: post.communityId,
+        topicKey,
+        displayName: existing?.displayName || displayName,
+        origins,
+        enabled: reactivating ? true : existing?.enabled !== false,
+        status: 'active',
+        recentScore: Number(existing?.recentScore || 0) + (countsAsRecent ? 1 : 0),
+        recentPostCount: Number(existing?.recentPostCount || 0) + (countsAsRecent ? 1 : 0),
+        createdAt: existing?.createdAt || now,
+        updatedAt: now,
+      } })
+      await transaction.collection('archive_post_topics').doc(linkId).set({ data: {
+        communityId: post.communityId,
+        topicKey,
+        postId: post._id,
+        sortKey,
+        createdAt: post.createdAt,
+        status: post.status,
+        auditStatus: post.auditStatus,
+        updatedAt: now,
+      } })
+      if (community && (reactivating || (!existing && Array.isArray(community.archiveTopicOrder)))) {
+        const order = (community.archiveTopicOrder || []).filter((key: string) => key !== topicKey)
+        await transaction.collection('communities').doc(post.communityId).update({ data: {
+          archiveTopicOrder: [...order, topicKey],
+          archiveTopicOrderRevision: Number(community.archiveTopicOrderRevision || 0) + 1,
+        } })
+      }
     })
   }
 }

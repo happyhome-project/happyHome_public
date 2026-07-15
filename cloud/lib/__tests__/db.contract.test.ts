@@ -7,6 +7,7 @@ import * as dbLocal from '../db.local'
 
 const expectedExports = [
   'getById',
+  'getByIdOrNull',
   'getByIds',
   'create',
   'setById',

@@ -183,15 +183,21 @@ export type ArchiveTopicConfig = {
   displayName: string
   origins: Array<'legacy' | 'admin' | 'organic'>
   enabled: boolean
+  status?: 'active' | 'deleted'
   legacyOrder?: number
   adminOrder?: number
   recentPostCount?: number
 }
 
 export const archiveTopicApi = {
-  list: (communityId: string) => callAdmin('archiveTopic.list', { communityId }) as Promise<{ topics: ArchiveTopicConfig[] }>,
-  save: (params: { communityId: string; topicKey?: string; displayName: string; enabled?: boolean; adminOrder?: number; removeAdmin?: boolean }) =>
-    callAdmin('archiveTopic.save', params) as Promise<{ success: true; topicKey?: string }>,
+  list: (communityId: string) => callAdmin('archiveTopic.list', { communityId }) as Promise<{ topics: ArchiveTopicConfig[]; orderRevision: number }>,
+  create: (params: { communityId: string; displayName: string }) => callAdmin('archiveTopic.create', params),
+  rename: (params: { communityId: string; topicKey: string; displayName: string }) => callAdmin('archiveTopic.rename', params),
+  setEnabled: (params: { communityId: string; topicKey: string; enabled: boolean }) => callAdmin('archiveTopic.setEnabled', params),
+  reorder: (params: { communityId: string; orderedTopicKeys: string[]; expectedRevision: number }) =>
+    callAdmin('archiveTopic.reorder', params) as Promise<{ success: true; orderRevision: number }>,
+  delete: (params: { communityId: string; topicKey: string; expectedRevision: number }) =>
+    callAdmin('archiveTopic.delete', params) as Promise<{ success: true; orderRevision: number }>,
 }
 
 export const memberApi = {

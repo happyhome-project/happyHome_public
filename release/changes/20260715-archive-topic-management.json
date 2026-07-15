@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "changeId": "archive-topic-management",
+  "actions": [],
+  "migrations": [
+    {
+      "id": "archive-topic-order-v1",
+      "module": "release/migrations/20260715-archive-topic-order-v1.mjs",
+      "inputDigest": "9544339bce707a5a1bd28f5f5e7a7189b97c161dc613d35b522b9a3c6d7e0080"
+    }
+  ],
+  "smokeSuites": [],
+  "releaseImpact": {
+    "cloudFunctions": "Deploy admin and post functions with logical archive-topic management.",
+    "adminWeb": "Deploy drag ordering and logical delete controls.",
+    "miniprogram": "Upload deleted-topic fallback behavior.",
+    "environmentVariables": [],
+    "databaseMigrations": ["Backfill explicit archive topic order for communities that do not have one; reruns are no-ops."]
+  }
+}

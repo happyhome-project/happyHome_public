@@ -71,6 +71,15 @@ export async function getById(collectionName: string, id: string) {
   return { ...doc }
 }
 
+export async function getByIdOrNull<T = any>(collectionName: string, id: string): Promise<T | null> {
+  try {
+    return await getById(collectionName, id) as T
+  } catch (error: any) {
+    if (Number(error?.errCode) === -502001) return null
+    throw error
+  }
+}
+
 function setByIdInternal(collectionName: string, id: string, data: object) {
   collection(collectionName).set(id, { _id: id, ...cloneValue(data) })
   return { stats: { updated: 1 } }

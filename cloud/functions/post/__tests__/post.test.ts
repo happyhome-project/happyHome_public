@@ -25,7 +25,10 @@ jest.mock('../../../lib/db', () => ({
   removeField: jest.fn(() => ({ __remove: true })),
   runTransaction: jest.fn(async (callback) => callback({
     collection: (name: string) => ({
-      doc: (id: string) => ({ update: async ({ data }: any) => (require('../../../lib/db').updateById)(name, id, data) }),
+      doc: (id: string) => ({
+        set: async ({ data }: any) => (require('../../../lib/db').setById)(name, id, data),
+        update: async ({ data }: any) => (require('../../../lib/db').updateById)(name, id, data),
+      }),
       add: async ({ data }: any) => ({ _id: await (require('../../../lib/db').create)(name, data) }),
     }),
   })),
@@ -2495,6 +2498,7 @@ test('listArchive: returns a cursor-paginated archive feed without section reads
 test('listArchive: hydrates a topic page in projection order', async () => {
   ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
   ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getByIdOrNull as jest.Mock).mockResolvedValueOnce({ topicKey: '成长', status: 'active' })
   ;(db.queryBefore as jest.Mock).mockResolvedValueOnce([
     { postId: 'archive-2', sortKey: '2026-07-14T11:00:00.000Z_archive-2' },
     { postId: 'archive-1', sortKey: '2026-07-14T10:00:00.000Z_archive-1' },
@@ -2512,6 +2516,17 @@ test('listArchive: hydrates a topic page in projection order', async () => {
   expect(db.queryBefore).toHaveBeenCalledWith('archive_post_topics', {
     communityId: 'community-1', topicKey: '成长', status: 'active', auditStatus: 'pass',
   }, 'sortKey', null, 21)
+})
+
+test('listArchive: reports topicUnavailable before reading links for a deleted topic', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getByIdOrNull as jest.Mock).mockResolvedValueOnce({ topicKey: '成长', status: 'deleted' })
+
+  await expect(handleListArchive({ communityId: 'community-1', topicKey: '成长' }, 'test-openid')).resolves.toEqual({
+    topicUnavailable: true, posts: [], hasMore: false, nextCursor: '',
+  })
+  expect(db.queryBefore).not.toHaveBeenCalled()
 })
 
 test('get: reads an archive post without loading a section', async () => {

@@ -221,6 +221,8 @@ export interface Community {
   motto?: string
   mottoCite?: string
   homeBanners?: HomeBanner[]
+  archiveTopicOrder?: string[]
+  archiveTopicOrderRevision?: number
   /** 当前查看者的最新成员状态；目录和“我的社群”接口按需补充。 */
   viewerStatus?: MemberStatus | null
   /** 仅 active 成员返回角色，避免把历史申请角色误当作当前权限。 */

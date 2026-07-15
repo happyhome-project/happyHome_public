@@ -40,6 +40,18 @@ test('selectArchiveTabs uses legacy then admin then activity and deduplicates no
   expect(selected.map((item) => item.displayName)).toEqual(['路线', '亲子', '闲置', 'PET'])
 })
 
+test('selectArchiveTabs follows explicit community order and skips hidden or deleted topics', () => {
+  const selected = selectArchiveTabs([
+    topic({ topicKey: 'third', displayName: '第三', recentScore: 99 }),
+    topic({ topicKey: 'first', displayName: '第一', recentScore: 1 }),
+    topic({ topicKey: 'hidden', displayName: '隐藏', enabled: false, recentScore: 999 }),
+    topic({ topicKey: 'deleted', displayName: '已删除', status: 'deleted', recentScore: 999 }),
+    topic({ topicKey: 'second', displayName: '第二', recentScore: 5 }),
+  ], 7, ['first', 'hidden', 'deleted', 'second', 'third'])
+
+  expect(selected.map((item) => item.topicKey)).toEqual(['first', 'second', 'third'])
+})
+
 test('archive cursor round-trips and rejects malformed input', () => {
   const cursor = encodeArchiveCursor({ sortKey: '2026-07-14T12:00:00.000Z_post-1', postId: 'post-1' })
   expect(decodeArchiveCursor(cursor)).toEqual({ sortKey: '2026-07-14T12:00:00.000Z_post-1', postId: 'post-1' })

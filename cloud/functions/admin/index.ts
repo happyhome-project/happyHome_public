@@ -231,6 +231,11 @@ const COMMUNITY_SCOPED_ACTIONS = new Set([
   'post.reconcileRagIndexCommunityBatchAdmin',
   'archiveTopic.list',
   'archiveTopic.save',
+  'archiveTopic.create',
+  'archiveTopic.rename',
+  'archiveTopic.setEnabled',
+  'archiveTopic.reorder',
+  'archiveTopic.delete',
 ])
 const INTERNAL_RELEASE_ONLY_ACTIONS=new Set(['post.ragTimerProbeCreateAdmin','post.ragTimerEvidenceAdmin','post.ragTimerProbeStatusAdmin','post.ragTimerProbeCleanupAdmin'])
 // 这些 action 只给了实体 id，需要先查出 communityId 再校验
@@ -1376,14 +1381,105 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
   }
   if (action === 'archiveTopic.list') {
     const communityId = String(params.communityId || '').trim()
-    const topics = await db.query('archive_topics', { communityId }) as any[]
+    const [community, topics] = await Promise.all([
+      db.getById('communities', communityId) as Promise<Community>,
+      db.query('archive_topics', { communityId }) as Promise<any[]>,
+    ])
+    const activeTopics = topics.filter((topic) => topic.status !== 'deleted')
+    const order = Array.isArray(community?.archiveTopicOrder) ? community.archiveTopicOrder : []
+    const byKey = new Map(activeTopics.map((topic) => [String(topic.topicKey), topic]))
+    const ordered = order.map((key) => byKey.get(key)).filter(Boolean)
+    const included = new Set(ordered.map((topic: any) => String(topic.topicKey)))
+    ordered.push(...activeTopics.filter((topic) => !included.has(String(topic.topicKey))).sort((left, right) =>
+      Number(left.legacyOrder ?? Number.MAX_SAFE_INTEGER) - Number(right.legacyOrder ?? Number.MAX_SAFE_INTEGER)
+      || Number(left.adminOrder ?? Number.MAX_SAFE_INTEGER) - Number(right.adminOrder ?? Number.MAX_SAFE_INTEGER)
+      || String(left.displayName || '').localeCompare(String(right.displayName || ''), 'zh-CN')
+    ))
     return {
-      topics: topics.slice().sort((left, right) =>
-        Number(left.legacyOrder ?? Number.MAX_SAFE_INTEGER) - Number(right.legacyOrder ?? Number.MAX_SAFE_INTEGER)
-        || Number(left.adminOrder ?? Number.MAX_SAFE_INTEGER) - Number(right.adminOrder ?? Number.MAX_SAFE_INTEGER)
-        || String(left.displayName || '').localeCompare(String(right.displayName || ''), 'zh-CN')
-      ),
+      topics: ordered,
+      orderRevision: Number(community?.archiveTopicOrderRevision || 0),
     }
+  }
+  if (action === 'archiveTopic.reorder') {
+    const communityId = String(params.communityId || '').trim()
+    const orderedTopicKeys = Array.isArray(params.orderedTopicKeys)
+      ? params.orderedTopicKeys.map((key: unknown) => normalizeArchiveTopic(key).topicKey)
+      : []
+    if (new Set(orderedTopicKeys).size !== orderedTopicKeys.length) throw new Error('话题顺序不能包含重复项')
+    const expectedRevision = Number(params.expectedRevision)
+    return db.runTransaction(async transaction => {
+      const community = await db.transactionGetByIdOrNull<Community>(transaction, 'communities', communityId)
+      if (!community) throw new Error('社区不存在')
+      const revision = Number(community.archiveTopicOrderRevision || 0)
+      if (expectedRevision !== revision) throw new Error('话题顺序已更新，请刷新后重试')
+      await transaction.collection('communities').doc(communityId).update({ data: {
+        archiveTopicOrder: orderedTopicKeys,
+        archiveTopicOrderRevision: revision + 1,
+      } })
+      return { success: true, orderRevision: revision + 1 }
+    })
+  }
+  if (action === 'archiveTopic.delete') {
+    const communityId = String(params.communityId || '').trim()
+    const { topicKey } = normalizeArchiveTopic(params.topicKey)
+    const expectedRevision = Number(params.expectedRevision)
+    const id = archiveTopicId(communityId, topicKey)
+    return db.runTransaction(async transaction => {
+      const community = await db.transactionGetByIdOrNull<Community>(transaction, 'communities', communityId)
+      if (!community) throw new Error('社区不存在')
+      const revision = Number(community.archiveTopicOrderRevision || 0)
+      const existing = await db.transactionGetByIdOrNull<any>(transaction, 'archive_topics', id)
+      if (!existing || existing.status === 'deleted') return { success: true, orderRevision: revision }
+      if (expectedRevision !== revision) throw new Error('话题顺序已更新，请刷新后重试')
+      const now = new Date().toISOString()
+      const { _id: _existingId, ...existingData } = existing
+      await transaction.collection('archive_topics').doc(id).set({ data: {
+        ...existingData, status: 'deleted', deletedAt: now, deletedByAccountId: ctx.accountId, updatedAt: now,
+      } })
+      await transaction.collection('communities').doc(communityId).update({ data: {
+        archiveTopicOrder: (community.archiveTopicOrder || []).filter((key) => key !== topicKey),
+        archiveTopicOrderRevision: revision + 1,
+      } })
+      return { success: true, orderRevision: revision + 1 }
+    })
+  }
+  if (action === 'archiveTopic.create' || action === 'archiveTopic.rename' || action === 'archiveTopic.setEnabled') {
+    const communityId = String(params.communityId || '').trim()
+    const normalized = normalizeArchiveTopic(params.topicKey || params.displayName)
+    const id = archiveTopicId(communityId, normalized.topicKey)
+    const existing = await db.getByIdOrNull<any>('archive_topics', id)
+    if (action !== 'archiveTopic.create' && !existing) throw new Error('话题不存在')
+    const now = new Date().toISOString()
+    const displayName = action === 'archiveTopic.rename'
+      ? normalizeArchiveTopic(params.displayName).displayName
+      : String(existing?.displayName || normalized.displayName)
+    const { _id: _existingId, deletedAt: _deletedAt, deletedByAccountId: _deletedBy, ...existingData } = existing || {}
+    await db.setById('archive_topics', id, {
+      ...existingData,
+      communityId,
+      topicKey: normalized.topicKey,
+      displayName,
+      origins: Array.from(new Set([...(existing?.origins || []), ...(action === 'archiveTopic.create' ? ['admin'] : [])])),
+      enabled: action === 'archiveTopic.setEnabled' ? params.enabled !== false : (action === 'archiveTopic.create' ? true : existing?.enabled !== false),
+      status: 'active',
+      recentScore: Number(existing?.recentScore || 0),
+      recentPostCount: Number(existing?.recentPostCount || 0),
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      updatedByAccountId: ctx.accountId,
+    })
+    if (action === 'archiveTopic.create' && (!existing || existing.status === 'deleted')) {
+      await db.runTransaction(async transaction => {
+        const community = await db.transactionGetByIdOrNull<Community>(transaction, 'communities', communityId)
+        if (!community) throw new Error('社区不存在')
+        const order = (community.archiveTopicOrder || []).filter((key) => key !== normalized.topicKey)
+        await transaction.collection('communities').doc(communityId).update({ data: {
+          archiveTopicOrder: [...order, normalized.topicKey],
+          archiveTopicOrderRevision: Number(community.archiveTopicOrderRevision || 0) + 1,
+        } })
+      })
+    }
+    return { success: true, topicKey: normalized.topicKey }
   }
   if (action === 'archiveTopic.save') {
     const communityId = String(params.communityId || '').trim()
