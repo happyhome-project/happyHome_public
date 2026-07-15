@@ -70,7 +70,9 @@ import {
   WECHAT_AUDIT_CALLBACK,
   WECHAT_AUDIT_CALLBACK_PATH,
   assertWechatAuditHttpAccess,
+  cloudBaseCreateServiceArgs,
   cloudBaseDeployArgs,
+  ensureWechatAuditHttpAccess,
 } from './lib/cloudbase-http-function.mjs'
 import { abortableDelay, runAbortableShellCapture } from './lib/abortable-process.mjs'
 import { createProductionReleaseStore } from './lib/cloudbase-release-store.mjs'
@@ -557,7 +559,7 @@ async function deployCloudViaCloudBaseCli(fns, options = {}) {
       concurrency,
       deployOne: async (fn) => {
         const fnDir = resolve(options.artifactRoot || CLOUD_DIST, fn)
-        return await runCloudBaseCliCaptureWithRetry(
+        const deployResult = await runCloudBaseCliCaptureWithRetry(
           confirmDefault(tcb(...cloudBaseDeployArgs(fn, envId))),
           {
             cwd: fnDir,
@@ -569,6 +571,30 @@ async function deployCloudViaCloudBaseCli(fns, options = {}) {
               : undefined,
           }
         )
+        if (!deployResult.ok || fn !== WECHAT_AUDIT_CALLBACK) return deployResult
+
+        const readAccess = async () => {
+          const result = await runCloudBaseCliCaptureWithRetry(
+            tcb('service', 'list', '--service-path', WECHAT_AUDIT_CALLBACK_PATH, '--json', '--env-id', envId),
+            { displayCommandLine: `tcb service list --service-path ${WECHAT_AUDIT_CALLBACK_PATH} --json`, silentOutput: true }
+          )
+          if (!result.ok) throw new Error(`HTTP access readback failed: ${result.reason}`)
+          return result.output
+        }
+        await ensureWechatAuditHttpAccess({
+          readAccess,
+          beforeCreate: async () => {
+            if (typeof options.beforeFunctionDeploy === 'function') await options.beforeFunctionDeploy(fn)
+          },
+          createAccess: async () => {
+            const result = await runCloudBaseCliCaptureWithRetry(
+              tcb(...cloudBaseCreateServiceArgs(envId)),
+              { displayCommandLine: `tcb service create --service-path ${WECHAT_AUDIT_CALLBACK_PATH} --function ${WECHAT_AUDIT_CALLBACK} --json` }
+            )
+            if (!result.ok) throw new Error(`HTTP access create failed: ${result.reason}`)
+          },
+        })
+        return deployResult
       },
       detailOne: async (fn) => {
         const detail = await runCloudBaseCliCaptureWithRetry(
