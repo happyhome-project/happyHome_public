@@ -991,6 +991,10 @@ function handleProfileTool(item: ProfileToolItem) {
     openLoginEntry()
     return
   }
+  if (item.key === 'posts') {
+    uni.navigateTo({ url: '/pages/my-posts/index' })
+    return
+  }
   uni.showToast({ title: `${item.label}暂未开放`, icon: 'none' })
 }
 

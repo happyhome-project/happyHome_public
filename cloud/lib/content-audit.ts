@@ -7,7 +7,7 @@ import { postWxJson } from './wx-openapi'
 import { refreshPostSearchIndexById } from './post-search'
 import { enqueuePostRagJob } from './post-rag'
 import { appendPostRagOutboxEvent } from './post-rag-outbox'
-import { updateArchivePostTopicLinks } from './archive-topic-index'
+import { syncArchivePostTopics, updateArchivePostTopicLinks } from './archive-topic-index'
 import type {
   AuditProvider,
   AuditTargetType,
@@ -528,9 +528,21 @@ export async function applyAuditSummary(
         await refreshPostSearchIndexById(postId)
         return
       }
+      const pendingTopics = Array.isArray((post as any).pendingTopics)
+        ? (post as any).pendingTopics.map(String)
+        : null
+      const pendingPresentation = (post as any).pendingPresentation
       await updatePostWithV2({
         content: db.replaceValue(post.pendingContent),
         pendingContent: db.removeField(),
+        ...(pendingTopics ? {
+          topics: db.replaceValue(pendingTopics),
+          pendingTopics: db.removeField(),
+        } : {}),
+        ...(pendingPresentation ? {
+          presentation: db.replaceValue(pendingPresentation),
+          pendingPresentation: db.removeField(),
+        } : {}),
         pendingAuditStatus: 'pass',
         pendingAuditReason: '',
         auditStatus: 'pass',
@@ -538,6 +550,17 @@ export async function applyAuditSummary(
         auditUpdatedAt: now,
         updatedAt: now,
       }, post)
+      if (post.area === 'archive' && pendingTopics) {
+        await updateArchivePostTopicLinks(postId, { status: 'deleted' })
+        await syncArchivePostTopics({
+          _id: postId,
+          communityId: post.communityId,
+          topics: pendingTopics,
+          createdAt: String(post.createdAt || now),
+          status: String(post.status || 'active'),
+          auditStatus: 'pass',
+        })
+      }
       await queueRagIndexJob('audit.pending.pass', 'upsert', post)
       await refreshPostSearchIndexById(postId)
       return

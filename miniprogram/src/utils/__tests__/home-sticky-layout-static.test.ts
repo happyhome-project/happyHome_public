@@ -43,4 +43,12 @@ describe('home progressive sticky navigation', () => {
     expect(search).toMatch(/padding:\s*24rpx\s+var\(--hh-page-x\);/)
     expect(searchBox).toMatch(/min-height:\s*90rpx;/)
   })
+
+  test('keeps the mint gradient visible through the quote and search surface', () => {
+    const hero = ruleBody('.home-shell')
+
+    expect(hero).toMatch(
+      /linear-gradient\(170deg,\s*#caeee7 0%,\s*#dcefe8 58%,\s*#edf4ed 84%,\s*var\(--hh-color-page\) 100%\)/,
+    )
+  })
 })

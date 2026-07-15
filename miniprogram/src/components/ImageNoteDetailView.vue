@@ -30,6 +30,15 @@
       <text>图片暂不可用</text>
     </view>
 
+    <view v-if="detail.images.length > 1" class="image-note-dots" aria-hidden="true">
+      <text
+        v-for="(_image, index) in detail.images"
+        :key="`image-note-dot-${index}`"
+        class="image-note-dot"
+        :class="{ active: index === currentImageIndex }"
+      />
+    </view>
+
     <view class="image-note-content">
       <view class="image-note-author">
         <image
@@ -68,20 +77,10 @@
         aria-label="打开设置地点"
         @tap="openLocation"
       >
-        <view class="image-note-location-icon" aria-hidden="true">
-          <text>⌖</text>
-        </view>
-        <view class="image-note-location-copy">
-          <text class="image-note-location-label">设置地点</text>
-          <text class="image-note-location-name">
-            {{ detail.location.name || detail.location.address || '查看地点' }}
-          </text>
-          <text
-            v-if="detail.location.name && detail.location.address"
-            class="image-note-location-address"
-          >{{ detail.location.address }}</text>
-        </view>
-        <text class="image-note-location-action">›</text>
+        <text class="image-note-location-pin" aria-hidden="true">⌖</text>
+        <text class="image-note-location-label">地点</text>
+        <text class="image-note-location-divider">|</text>
+        <text class="image-note-location-text">{{ detail.location.name || detail.location.address || '查看地点' }}</text>
       </view>
     </view>
   </view>
@@ -189,6 +188,28 @@ function formatPostDate(value: string): string {
   font-size: var(--hh-text-caption-lg-size);
 }
 
+.image-note-dots {
+  height: 46rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  background: #fff;
+}
+
+.image-note-dot {
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 999rpx;
+  background: #d7d7d7;
+  transition: width 160ms ease, background-color 160ms ease;
+}
+
+.image-note-dot.active {
+  width: 14rpx;
+  background: #ff2442;
+}
+
 .image-note-content {
   padding: 30rpx var(--hh-page-x) 8rpx;
 }
@@ -252,7 +273,7 @@ function formatPostDate(value: string): string {
 }
 
 .image-note-body {
-  margin-top: 20rpx;
+  margin-top: 10rpx;
   color: var(--hh-color-text-secondary);
 }
 
@@ -280,67 +301,42 @@ function formatPostDate(value: string): string {
 }
 
 .image-note-location {
-  margin-top: 30rpx;
-  min-height: 104rpx;
-  padding: 18rpx 20rpx;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 26rpx;
+  min-height: 64rpx;
+  padding: 12rpx 18rpx;
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 16rpx;
-  border: 1rpx solid var(--hh-color-line-soft);
-  border-radius: var(--hh-radius-card);
-  background: var(--hh-color-page);
+  gap: 10rpx;
+  border: 1rpx solid #e7e7e7;
+  border-radius: 12rpx;
+  background: #fff;
 }
 
-.image-note-location-icon {
-  width: 56rpx;
-  height: 56rpx;
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999rpx;
-  background: var(--hh-color-brand-soft);
-  color: var(--hh-color-brand-strong);
-  font-size: 30rpx;
-}
-
-.image-note-location-copy {
-  min-width: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2rpx;
-}
+.image-note-location-pin { color: #333; font-size: 27rpx; line-height: 1; }
 
 .image-note-location-label {
-  color: var(--hh-color-text-tertiary);
-  font-size: 21rpx;
-  line-height: 1.3;
-}
-
-.image-note-location-name {
-  color: var(--hh-color-text-primary);
-  font-size: 27rpx;
-  line-height: 1.4;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.image-note-location-address {
-  color: var(--hh-color-text-tertiary);
-  font-size: 21rpx;
-  line-height: 1.35;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.image-note-location-action {
   flex: 0 0 auto;
-  color: var(--hh-color-text-tertiary);
-  font-size: 40rpx;
-  line-height: 1;
+  color: #333;
+  font-size: 25rpx;
+  line-height: 1.4;
+}
+
+.image-note-location-divider {
+  flex: 0 0 auto;
+  color: #d8d8d8;
+  font-size: 22rpx;
+}
+
+.image-note-location-text {
+  min-width: 0;
+  overflow: hidden;
+  color: #555;
+  font-size: 25rpx;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

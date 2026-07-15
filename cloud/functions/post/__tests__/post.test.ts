@@ -17,6 +17,7 @@ jest.mock('../../../lib/db', () => ({
   updateById: jest.fn(),
   updateWhere: jest.fn(),
   query: jest.fn(),
+  queryAfterId: jest.fn(),
   queryBefore: jest.fn(),
   removeById: jest.fn(),
   softDelete: jest.fn(),
@@ -61,6 +62,7 @@ import {
   handleJoinAttendance,
   handleListAttendanceMembers,
   handleList,
+  handleListMine,
   handleListArchive,
   handleListArchiveTabs,
   handleCreateActivityInvite,
@@ -108,6 +110,37 @@ beforeEach(() => {
   delete process.env.DEFAULT_PUBLIC_COMMUNITY_ID
   delete process.env.PUBLIC_READ_COMMUNITY_IDS
   delete process.env.POST_RAG_SMOKE_IDENTITY_SECRET
+})
+
+test('listMine: only returns the caller owned non-deleted posts newest first with display metadata', async () => {
+  ;(db.queryAfterId as jest.Mock)
+    .mockResolvedValueOnce([
+      { _id: 'mine-old', authorId: 'author-1', communityId: 'community-1', sectionId: 'section-1', status: 'active', auditStatus: 'pass', content: { title: '旧帖' }, createdAt: '2026-07-10T08:00:00.000Z' },
+      { _id: 'mine-new', authorId: 'author-1', communityId: 'community-2', sectionId: 'section-2', status: 'active', auditStatus: 'pending', content: { title: '新帖' }, createdAt: '2026-07-15T08:00:00.000Z' },
+      { _id: 'mine-deleted', authorId: 'author-1', communityId: 'community-1', sectionId: 'section-1', status: 'deleted', content: { title: '已删除' }, createdAt: '2026-07-14T08:00:00.000Z' },
+    ])
+    .mockResolvedValueOnce([])
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'communities') return { _id: id, name: id === 'community-1' ? '阳光花园' : '河畔社区' }
+    if (collectionName === 'sections') return { _id: id, name: id === 'section-1' ? '通知公告' : '图文_new', displayTemplate: id === 'section-2' ? 'image_note' : 'default', widgets: [] }
+    throw new Error('missing fixture')
+  })
+
+  const result = await handleListMine({ skip: 0, limit: 20 }, 'author-1')
+
+  expect(db.queryAfterId).toHaveBeenNthCalledWith(1, 'posts', { authorId: 'author-1' }, null, 100)
+  expect(result.posts.map((post: any) => post._id)).toEqual(['mine-new', 'mine-old'])
+  expect(result.posts[0]).toEqual(expect.objectContaining({
+    communityName: '河畔社区',
+    sectionName: '图文_new',
+    displayTemplate: 'image_note',
+  }))
+  expect(result).toEqual(expect.objectContaining({ total: 2, skip: 0, limit: 20, hasMore: false }))
+})
+
+test('listMine: requires an authenticated identity', async () => {
+  await expect(handleListMine({}, '')).rejects.toThrow('Missing OPENID')
+  expect(db.queryAfterId).not.toHaveBeenCalled()
 })
 
 test('clientLog: accepts diagnostic payload without touching data collections', async () => {
@@ -405,6 +438,42 @@ test('update: 保存时会清理无效字段、attendance、公告和音频字�
     pendingAuditStatus: 'pending',
   }))
   expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
+})
+
+test('update: archive image note updates content and normalized topics without loading a section', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'archive-post-1',
+    communityId: 'community-1',
+    authorId: 'test-openid',
+    status: 'active',
+    auditStatus: 'pass',
+    area: 'archive',
+    format: 'image_text',
+    topics: ['旧话题'],
+    createdAt: '2026-07-15T01:00:00.000Z',
+  })
+  ;(db.query as jest.Mock).mockResolvedValue([])
+
+  const result = await handleUpdate({
+    postId: 'archive-post-1',
+    topics: [' #新话题 ', 'ＮＥＷ', 'new'],
+    content: {
+      title: ' 更新后的图文 ',
+      images: [' cloud://env/updated.jpg '],
+      body: { format: 'markdown', markdown: '正文', html: '<p>正文</p>', text: '正文', imageFileIDs: [], schemaVersion: 1 },
+    } as any,
+  }, 'test-openid')
+
+  expect(result.auditStatus).toBe('review')
+  expect(db.getById).not.toHaveBeenCalledWith('sections', expect.anything())
+  expect(db.updateById).toHaveBeenCalledWith('posts', 'archive-post-1', expect.objectContaining({
+    pendingContent: { __set: expect.objectContaining({
+      title: '更新后的图文',
+      images: ['cloud://env/updated.jpg'],
+    }) },
+    pendingTopics: { __set: ['新话题', 'NEW'] },
+  }))
+  expect(db.updateById).not.toHaveBeenCalledWith('posts', 'archive-post-1', { topics: ['新话题', 'NEW'] })
 })
 
 test('createActivityInvite: 自动创建系统实时邀约板块并创建关联帖子', async () => {
@@ -1629,6 +1698,27 @@ test('get：非 active 成员不可查看帖子详情', async () => {
   ;(db.query as jest.Mock).mockResolvedValueOnce([])
 
   await expect(handleGet({ postId: 'post-1' }, '')).rejects.toThrow('需要先加入社区后查看内容')
+})
+
+test('get: author can open their own post while it is still under audit', async () => {
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.query as jest.Mock).mockReset()
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'posts' && id === 'pending-mine') return {
+      _id: 'pending-mine', communityId: 'community-1', area: 'archive', format: 'text',
+      authorId: 'author-1', status: 'active', auditStatus: 'review',
+      content: { title: '待审核内容', body: { text: '正文' } },
+      createdAt: '2026-07-15T01:00:00.000Z',
+    }
+    if (collectionName === 'communities') return { _id: id, status: 'active' }
+    if (collectionName === 'users') return { _id: id, nickName: '作者一' }
+    return null
+  })
+  ;(db.query as jest.Mock).mockResolvedValue([{ _id: 'member-1', status: 'active' }])
+
+  const result = await handleGet({ postId: 'pending-mine' }, 'author-1')
+
+  expect(result.post).toEqual(expect.objectContaining({ _id: 'pending-mine', auditStatus: 'review' }))
 })
 
 test('get: unauthenticated viewer can read post detail in an active public community', async () => {

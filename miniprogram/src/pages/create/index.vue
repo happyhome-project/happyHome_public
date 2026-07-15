@@ -62,7 +62,7 @@
               <WidgetEditor v-if="textNoteTopicWidget" :widget="textNoteTopicWidget" variant="image-note-tool" embedded hide-label :allow-rich-note-images="false" v-model="formData[textNoteTopicWidget.widgetId]" />
             </view>
             <view class="text-note-compose-actions">
-              <button class="draft-btn" @tap="saveDraft">存草稿</button>
+              <button v-if="!isEditMode" class="draft-btn" @tap="saveDraft">存草稿</button>
               <button class="btn-primary" data-testid="text-note-next" @tap="openTextNoteCover">下一步</button>
             </view>
           </view>
@@ -80,7 +80,7 @@
             </scroll-view>
             <view class="text-note-cover-actions">
               <button class="draft-btn" @tap="textNoteStep = 'compose'">返回修改</button>
-              <button class="btn-primary" data-testid="create-submit" :disabled="submitting" @tap="handleSubmit">{{ submitting ? '发布中...' : '发布' }}</button>
+              <button class="btn-primary" data-testid="create-submit" :disabled="submitting" @tap="handleSubmit">{{ submitting ? (isEditMode ? '保存中...' : '发布中...') : (isEditMode ? '保存' : '发布') }}</button>
             </view>
           </view>
         </template>
@@ -241,7 +241,7 @@
           </view>
 
           <view class="submit-dock">
-            <button class="draft-btn" @tap="saveDraft">
+            <button v-if="!isEditMode" class="draft-btn" @tap="saveDraft">
               <image
                 class="draft-icon"
                 src="/static/publish-icons/save-draft.svg"
@@ -250,7 +250,7 @@
               <text>存草稿</text>
             </button>
             <button class="btn-primary" data-testid="create-submit" :disabled="submitting" @tap="handleSubmit">
-              {{ submitting ? '发布中...' : (isActivityInviteMode ? '发布邀约' : '发布') }}
+              {{ submitting ? (isEditMode ? '保存中...' : '发布中...') : (isEditMode ? '保存' : (isActivityInviteMode ? '发布邀约' : '发布')) }}
             </button>
           </view>
         </template>
@@ -265,7 +265,7 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
-import { memberApi, postApi } from '../../api/cloud'
+import { memberApi, postApi, sectionApi } from '../../api/cloud'
 import { uploadCloudFile } from '../../api/storage'
 import AppTabBar from '../../components/AppTabBar.vue'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
@@ -288,6 +288,8 @@ const communityStore = useCommunityStore()
 const userStore = useUserStore()
 const selectedSection = ref<any>(null)
 const formData = reactive<Record<string, any>>({})
+const editPostId = ref('')
+const editPostSnapshot = ref<any>(null)
 const submitting = ref(false)
 const membershipChecking = ref(false)
 const membershipReady = ref(false)
@@ -314,6 +316,7 @@ const textNoteStep = ref<'compose' | 'cover'>('compose')
 const textNoteTheme = ref<TextNoteTheme>('paper')
 const archiveFormat = ref<'image_text' | 'text' | ''>('')
 const collaborationOnly = ref(false)
+const isEditMode = computed(() => !!editPostId.value)
 
 // 只允许在 active 板块发帖。dormant / archived 板块既无法发帖也无处展示（首页已过滤）。
 const activeSections = computed(() =>
@@ -446,6 +449,7 @@ const createFormBlocks = computed(() => {
 onLoad(async (options: any) => {
   if (ensureHierarchyStack('/pages/create/index', options || {}, options?.returnTo)) return
   hideNativeTabBar()
+  if (await loadPostForEdit(String(options?.editPostId || ''))) return
   collaborationOnly.value = String(options?.mode || '') === 'collaboration'
   const requestedArchiveFormat = String(options?.archiveFormat || '')
   if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text') {
@@ -490,8 +494,71 @@ function enterArchiveEditor(format: 'image_text' | 'text', returnTo?: string) {
   selectSection(buildArchiveEditorSection(format), { returnTo: String(returnTo || '') })
 }
 
+async function loadPostForEdit(postId: string) {
+  if (!postId) return false
+  editPostId.value = postId
+  createReturnTo.value = `/pages/detail/index?postId=${encodeURIComponent(postId)}`
+  try {
+    const response = await postApi.get(editPostId.value)
+    const currentPost = response?.post
+    if (!currentPost || String(currentPost.authorId || '') !== String(userStore.openId || '')) {
+      throw new Error('只能编辑自己发布的内容')
+    }
+    editPostSnapshot.value = currentPost
+    const communityId = String(currentPost.communityId || '')
+    if (communityId && communityId !== String(communityStore.currentCommunityId || '')) {
+      await communityStore.switchCommunity(communityId)
+    }
+    await ensureSectionsLoaded()
+    await checkMembership({ silent: false, forceRefresh: true })
+
+    if (currentPost.area === 'archive') {
+      const format = currentPost.format === 'text' ? 'text' : 'image_text'
+      archiveFormat.value = format
+      const archiveSection = buildArchiveEditorSection(format)
+      selectSection(archiveSection, { returnTo: createReturnTo.value })
+      const archiveValues: Record<string, any> = {}
+      for (const widget of archiveSection.widgets || []) {
+        const fieldKey = String(widget.fieldKey || widget.widgetId)
+        archiveValues[widget.widgetId] = fieldKey === 'topics'
+          ? (Array.isArray(currentPost.topics) ? currentPost.topics : [])
+          : currentPost.content?.[fieldKey]
+      }
+      Object.assign(formData, archiveValues)
+      if (format === 'text') {
+        textNoteTheme.value = currentPost.presentation?.textNoteTheme || 'paper'
+      }
+    } else {
+      let editSection = communityStore.currentSections.find((item: any) => item._id === currentPost.sectionId)
+      if (!editSection && currentPost.sectionId) {
+        const sectionResponse = await sectionApi.get(currentPost.sectionId)
+        editSection = sectionResponse?.section
+      }
+      if (!editSection) throw new Error('原板块已不可用，暂时无法编辑')
+      selectSection(editSection, { returnTo: createReturnTo.value })
+      Object.assign(formData, JSON.parse(JSON.stringify(currentPost.content || {})))
+      if (editSection.displayTemplate === 'text_note') {
+        textNoteTheme.value = currentPost.presentation?.textNoteTheme || 'paper'
+      }
+    }
+    uni.setNavigationBarTitle({ title: '编辑内容' })
+    return true
+  } catch (error: any) {
+    editPostId.value = ''
+    editPostSnapshot.value = null
+    uni.showModal({
+      title: '无法编辑',
+      content: error?.message || '内容加载失败，请稍后重试',
+      showCancel: false,
+      success: () => openHierarchyParent(createReturnTo.value),
+    })
+    return true
+  }
+}
+
 onShow(() => {
   hideNativeTabBar()
+  if (editPostId.value) return
   // 返回页面（例如地图选择返回）时静默刷新，不再打断表单操作。
   void ensureSectionsLoaded()
   void checkMembership({ silent: true })
@@ -502,6 +569,7 @@ onShow(() => {
 })
 
 watch(() => communityStore.currentCommunityId, async () => {
+  if (editPostId.value) return
   if (archiveFormat.value) enterArchiveEditor(archiveFormat.value, createReturnTo.value)
   else selectedSection.value = null
   membershipReady.value = false
@@ -620,6 +688,10 @@ function selectSection(section: any, options: { returnTo?: string } = {}) {
 }
 
 function handleFormBack() {
+  if (isEditMode.value) {
+    openHierarchyParent(createReturnTo.value)
+    return
+  }
   if (isTextNoteCreateMode.value && textNoteStep.value === 'cover') {
     textNoteStep.value = 'compose'
     return
@@ -913,6 +985,30 @@ async function handleAuditSubmitResult(result: any) {
   uni.switchTab({ url: '/pages/index/index' })
 }
 
+async function handleEditSubmitResult(result: any) {
+  const auditStatus = String(result?.auditStatus || 'pass')
+  const auditReason = String(result?.auditReason || '')
+  if (auditStatus === 'rejected') {
+    await showModalAsync({
+      title: '修改未通过',
+      content: auditReason || '内容未通过审核，请修改后再保存。',
+    })
+    return
+  }
+  if (auditStatus === 'pending' || auditStatus === 'review') {
+    await showModalAsync({
+      title: '修改已提交审核',
+      content: auditStatus === 'review'
+        ? '修改内容需要人工复核，通过后会更新。'
+        : '修改内容正在审核，通过后会更新。',
+    })
+  } else {
+    uni.showToast({ title: '保存成功', icon: 'success' })
+  }
+  const returnTo = createReturnTo.value || `/pages/detail/index?postId=${encodeURIComponent(editPostId.value)}`
+  setTimeout(() => openHierarchyParent(returnTo), 350)
+}
+
 function saveDraft() {
   if (!selectedSection.value) return
   try {
@@ -986,7 +1082,17 @@ async function handleSubmit() {
           .filter((widget: any) => String(widget.fieldKey || '') === 'topics')
           .flatMap((widget: any) => Array.isArray(content[widget.widgetId]) ? content[widget.widgetId] : [])
       : []
-    const result: any = isActivityInviteMode.value
+    const updateOptions = archiveFormat.value
+      ? {
+          topics: archiveTopics,
+          presentation: archiveFormat.value === 'text' ? { textNoteTheme: textNoteTheme.value } : undefined,
+        }
+      : {
+          presentation: isTextNoteCreateMode.value ? { textNoteTheme: textNoteTheme.value } : undefined,
+        }
+    const result: any = isEditMode.value
+      ? await postApi.update(editPostId.value, archiveContent || content, updateOptions)
+      : isActivityInviteMode.value
       ? await postApi.createActivityInvite(activityInviteSourcePostId.value, content)
       : archiveFormat.value
         ? await postApi.createArchive({
@@ -1010,14 +1116,15 @@ async function handleSubmit() {
       sessionStorage.setItem('hh-h5-smoke-last-created-post-id', String(result.postId))
     }
     // #endif
-    if (isActivityInviteMode.value) {
+    if (!isEditMode.value && isActivityInviteMode.value) {
       try {
         uni.removeStorageSync(ACTIVITY_INVITE_CREATE_INTENT_KEY)
       } catch {}
     }
-    await handleAuditSubmitResult(result)
+    if (isEditMode.value) await handleEditSubmitResult(result)
+    else await handleAuditSubmitResult(result)
   } catch (error: any) {
-    uni.showModal({ title: '发布失败', content: error?.message ?? '请重试' })
+    uni.showModal({ title: isEditMode.value ? '保存失败' : '发布失败', content: error?.message ?? '请重试' })
   } finally {
     submitting.value = false
   }
