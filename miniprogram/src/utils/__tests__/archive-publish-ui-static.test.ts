@@ -13,9 +13,13 @@ describe('archive publishing entry', () => {
 
   test('offers exactly the three product-level publishing choices', () => {
     const source = read('components', 'AppTabBar.vue')
-    expect(source).toContain("{ key: 'image_text', label: '发图文'")
-    expect(source).toContain("{ key: 'text', label: '写文字'")
-    expect(source).toContain("{ key: 'collaboration', label: '发起协作'")
+    expect(source).toContain("{ key: 'image_text', label: '发图文', icon: '/static/publish-icons/trade.svg', tone: 'image-text' }")
+    expect(source).toContain("{ key: 'text', label: '写文字', icon: '/static/publish-icons/lost.svg', tone: 'text' }")
+    expect(source).toContain("{ key: 'collaboration', label: '发起协作', icon: '/static/publish-icons/neighbor.svg', tone: 'collaboration' }")
+    expect(source).toContain(':src="option.icon"')
+    expect(source).toContain(':class="`publish-icon--${option.tone}`"')
+    expect(source).not.toContain('publish-icon-glyph')
+    expect(source).not.toContain('option.glyph')
     expect(source).not.toContain('activePublishSections')
     expect(source).not.toContain('option.section')
   })

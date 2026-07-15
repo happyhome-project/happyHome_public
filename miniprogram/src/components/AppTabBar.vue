@@ -9,7 +9,9 @@
             class="publish-option"
             @tap="handlePublishOption(option.key)"
           >
-            <view class="publish-icon"><text class="publish-icon-glyph">{{ option.glyph }}</text></view>
+            <view class="publish-icon" :class="`publish-icon--${option.tone}`">
+              <image class="publish-icon-image" :src="option.icon" mode="aspectFit" />
+            </view>
             <text class="publish-label">{{ option.label }}</text>
           </button>
         </view>
@@ -60,9 +62,9 @@ const props = defineProps<{ current: AppTabKey }>()
 const showPublishSheet = ref(false)
 const HOME_TAB_RETAP_EVENT = 'happyhome:home-tab-retap'
 const publishOptions = computed(() => [
-  { key: 'image_text', label: '发图文', glyph: '▧' },
-  { key: 'text', label: '写文字', glyph: '文' },
-  { key: 'collaboration', label: '发起协作', glyph: '⌁' },
+  { key: 'image_text', label: '发图文', icon: '/static/publish-icons/trade.svg', tone: 'image-text' },
+  { key: 'text', label: '写文字', icon: '/static/publish-icons/lost.svg', tone: 'text' },
+  { key: 'collaboration', label: '发起协作', icon: '/static/publish-icons/neighbor.svg', tone: 'collaboration' },
 ])
 
 onMounted(() => {
@@ -175,12 +177,22 @@ void APP_TABS
   background: #f4f4f4;
 }
 
-.publish-icon-glyph { color: #111; font-size: 42rpx; font-weight: 500; line-height: 1; }
-
 .publish-icon-image {
   width: 72rpx;
   height: 72rpx;
   display: block;
+}
+
+.publish-icon--image-text {
+  background: #e3f0fb;
+}
+
+.publish-icon--text {
+  background: #fef6e3;
+}
+
+.publish-icon--collaboration {
+  background: #ddf6fc;
 }
 
 .publish-icon--family {
