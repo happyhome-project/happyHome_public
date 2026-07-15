@@ -792,6 +792,72 @@ export async function handleList(params: {
   return { posts: enrichedPosts }
 }
 
+async function getDocumentsByIdsInBatches(collectionName: string, ids: string[]) {
+  const uniqueIds = [...new Set(ids.filter(Boolean))]
+  const batches: string[][] = []
+  for (let index = 0; index < uniqueIds.length; index += 100) {
+    batches.push(uniqueIds.slice(index, index + 100))
+  }
+  const loaded = await Promise.all(batches.map((batch) => db.getByIds(collectionName, batch) as Promise<any[]>))
+  return loaded.flat()
+}
+
+export async function handleListMine(
+  params: { skip?: number; limit?: number },
+  openid: string,
+) {
+  if (!openid) throw new Error('Missing OPENID')
+
+  const authoredPosts: any[] = []
+  let afterId: string | null = null
+  const batchSize = 100
+  for (let batch = 0; batch < 20; batch += 1) {
+    const rows = await db.queryAfterId('posts', { authorId: openid }, afterId, batchSize) as any[]
+    authoredPosts.push(...rows.filter((post) => post?.status !== 'deleted'))
+    if (rows.length < batchSize) break
+    afterId = String(rows[rows.length - 1]?._id || '')
+    if (!afterId) break
+  }
+
+  authoredPosts.sort((left, right) => {
+    const created = String(right?.createdAt || '').localeCompare(String(left?.createdAt || ''))
+    return created || String(right?._id || '').localeCompare(String(left?._id || ''))
+  })
+
+  const communityIds = [...new Set(authoredPosts.map((post) => String(post?.communityId || '')).filter(Boolean))]
+  const sectionIds = [...new Set(authoredPosts.map((post) => String(post?.sectionId || '')).filter(Boolean))]
+  const [communities, sections] = await Promise.all([
+    getDocumentsByIdsInBatches('communities', communityIds),
+    getDocumentsByIdsInBatches('sections', sectionIds),
+  ])
+  const communitiesById = new Map(communities.map((community) => [String(community?._id || ''), community]))
+  const sectionsById = new Map(sections.map((section) => [String(section?._id || ''), section]))
+  const enriched = authoredPosts.map((post) => {
+    const section = sectionsById.get(String(post?.sectionId || ''))
+    const isArchive = post?.area === 'archive'
+    return {
+      ...post,
+      communityName: String(communitiesById.get(String(post?.communityId || ''))?.name || '社区'),
+      sectionName: isArchive
+        ? (post?.format === 'text' ? '文字' : '图文')
+        : String(section?.name || '已下线板块'),
+      displayTemplate: isArchive
+        ? (post?.format === 'text' ? 'text_note' : 'image_note')
+        : String(section?.displayTemplate || 'default'),
+      section: section ? {
+        _id: section._id,
+        name: section.name,
+        displayTemplate: section.displayTemplate,
+        widgets: section.widgets || [],
+      } : null,
+    }
+  })
+  const skip = Math.max(0, Math.floor(Number(params?.skip) || 0))
+  const limit = Math.min(50, Math.max(1, Math.floor(Number(params?.limit) || 20)))
+  const posts = enriched.slice(skip, skip + limit)
+  return { posts, total: enriched.length, skip, limit, hasMore: skip + posts.length < enriched.length }
+}
+
 export async function handleListArchive(params: {
   communityId: string
   topicKey?: string
@@ -879,8 +945,12 @@ export async function handleBootstrap(params: {
 
 export async function handleGet(params: { postId: string; asGuest?: boolean }, openid?: string) {
   const post = await db.getById('posts', params.postId) as any
-  if (!post || post.status === 'deleted' || !isPostVisibleToMembers(post)) throw new Error('帖子不存在')
   const viewerId = params.asGuest ? '' : (openid || '')
+  if (
+    !post
+    || post.status === 'deleted'
+    || (!isPostVisibleToMembers(post) && String(post.authorId || '') !== viewerId)
+  ) throw new Error('帖子不存在')
   await ensureCommunityReadable(post.communityId, viewerId, COMMUNITY_READ_ERROR)
   if (post.area === 'archive') {
     const [enrichedPost] = await enrichPostsWithAuthor([post])
@@ -967,7 +1037,7 @@ export async function handleDelete(params: { postId: string }, openid: string) {
 }
 
 export async function handleUpdate(
-  params: { postId: string; content: PostContent },
+  params: { postId: string; content: PostContent; topics?: unknown; presentation?: unknown },
   openid: string,
 ) {
   if (!openid) throw new Error('Missing OPENID')
@@ -978,23 +1048,66 @@ export async function handleUpdate(
     authorId: string
     status: string
     auditStatus?: string
+    area?: string
+    format?: ArchivePostFormat
+    topics?: string[]
+    presentation?: unknown
+    createdAt?: string
   }
   if (post.status === 'deleted') throw new Error('帖子已删除')
   if (post.authorId !== openid) throw new Error('无权修改')
 
-  const section = normalizePostSection(await db.getById('sections', post.sectionId) as Section)
+  const archive = post.area === 'archive'
+    ? parseArchivePostCreateInput({
+        area: 'archive',
+        format: post.format,
+        topics: params.topics === undefined ? (post.topics || []) : params.topics,
+        content: params.content,
+        ...(post.format === 'text'
+          ? { presentation: params.presentation === undefined ? post.presentation : params.presentation }
+          : {}),
+      })
+    : null
+  const section = archive
+    ? buildArchiveContentSection(post.communityId, archive.format)
+    : normalizePostSection(await db.getById('sections', post.sectionId) as Section)
   if (!section || !Array.isArray(section.widgets) || section.widgets.length === 0) {
     throw new Error('该板块尚未配置内容模板，无法编辑')
   }
-  const sanitizedContent = sanitizeContent(params.content, section)
+  const sanitizedContent = archive
+    ? archive.content as unknown as PostContent
+    : sanitizeContent(params.content, section)
   validateRequiredWidgets(section, sanitizedContent)
   validateContentValues(section, sanitizedContent)
+  const presentation = archive?.format === 'text'
+    ? archive.presentation
+    : (!archive && isTextNoteSection(section)
+        ? { textNoteTheme: normalizeTextNoteTheme((params.presentation as any)?.textNoteTheme) }
+        : undefined)
+
+  const applyAcceptedMetadata = async (auditStatus: string) => {
+    if (auditStatus !== 'pass') return
+    if (presentation) await db.updateById('posts', params.postId, { presentation })
+    if (!archive) return
+    await db.updateById('posts', params.postId, { topics: archive.topics })
+    await updateArchivePostTopicLinks(params.postId, { status: 'deleted' })
+    await syncArchivePostTopics({
+      _id: params.postId,
+      communityId: post.communityId,
+      topics: archive.topics,
+      createdAt: String(post.createdAt || updatedAt),
+      status: 'active',
+      auditStatus: 'pass',
+    })
+  }
 
   const updatedAt = new Date().toISOString()
   if (post.auditStatus === 'pass' || !post.auditStatus) {
     await db.runTransaction(async transaction => {
       await transaction.collection('posts').doc(params.postId).update({ data: {
       pendingContent: db.replaceValue(sanitizedContent),
+      ...(archive ? { pendingTopics: db.replaceValue(archive.topics) } : {}),
+      ...(presentation ? { pendingPresentation: db.replaceValue(presentation) } : {}),
       pendingAuditStatus: 'pending',
       pendingAuditReason: 'content audit pending',
       pendingSubmittedAt: updatedAt,
@@ -1005,13 +1118,14 @@ export async function handleUpdate(
     const audit = await auditAndApply({
       postId: params.postId,
       communityId: post.communityId,
-      sectionId: post.sectionId,
+      sectionId: post.sectionId || '',
       section,
       content: sanitizedContent,
       authorId: openid,
       source: 'user',
       contentSlot: 'pendingContent',
     })
+    await applyAcceptedMetadata(audit.status)
     return { success: true, updatedAt, auditStatus: audit.status, auditReason: audit.reason }
   }
 
@@ -1028,13 +1142,14 @@ export async function handleUpdate(
   const audit = await auditAndApply({
     postId: params.postId,
     communityId: post.communityId,
-    sectionId: post.sectionId,
+    sectionId: post.sectionId || '',
     section,
     content: sanitizedContent,
     authorId: openid,
     source: 'user',
     contentSlot: 'content',
   })
+  await applyAcceptedMetadata(audit.status)
   return { success: true, updatedAt, auditStatus: audit.status, auditReason: audit.reason }
 }
 
@@ -1179,6 +1294,7 @@ export const main = async (event: any, context?: any) => {
   if (action === 'getActivityInviteState') return handleGetActivityInviteState(params, openid)
   if (action === 'createActivityInvite') return handleCreateActivityInvite(params, openid)
   if (action === 'list') return handleList(params, openid)
+  if (action === 'listMine') return handleListMine(params, openid)
   if (action === 'listArchive') return handleListArchive(params, openid)
   if (action === 'listArchiveTabs') return handleListArchiveTabs(params, openid)
   if (action === 'home') return handleHome(params, openid)

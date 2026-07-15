@@ -1,7 +1,9 @@
 jest.mock('../db', () => ({
   create: jest.fn(),
   getById: jest.fn(),
+  getByIdOrNull: jest.fn().mockResolvedValue(null),
   query: jest.fn(),
+  setById: jest.fn(),
   updateById: jest.fn(),
   updateWhere: jest.fn(),
   replaceValue: jest.fn((value) => ({ __set: value })),
@@ -236,6 +238,31 @@ test('approvePostAudit replaces content and removes pendingContent atomically fo
     postId: 'post-guide',
     action: 'upsert',
     reason: 'audit.pending.pass',
+  }))
+})
+
+test('approvePostAudit promotes pending archive topics and retires removed topic links', async () => {
+  const post = {
+    _id: 'archive-edit-1', communityId: 'community-1', area: 'archive', format: 'text',
+    status: 'active', auditStatus: 'pass', createdAt: '2026-07-15T01:00:00.000Z',
+    pendingContent: { title: '更新', body: { text: '正文' } },
+    pendingTopics: ['新话题'], pendingPresentation: { textNoteTheme: 'mint' },
+  }
+  ;(db.getById as jest.Mock).mockResolvedValue(post)
+
+  await approvePostAudit('archive-edit-1')
+
+  expect(db.updateById).toHaveBeenCalledWith('posts', 'archive-edit-1', expect.objectContaining({
+    content: { __set: post.pendingContent },
+    pendingContent: { __remove: true },
+    topics: { __set: ['新话题'] },
+    pendingTopics: { __remove: true },
+    presentation: { __set: { textNoteTheme: 'mint' } },
+    pendingPresentation: { __remove: true },
+  }))
+  expect(db.updateWhere).toHaveBeenCalledWith('archive_post_topics', { postId: 'archive-edit-1' }, expect.objectContaining({ status: 'deleted' }))
+  expect(db.setById).toHaveBeenCalledWith('archive_post_topics', expect.any(String), expect.objectContaining({
+    postId: 'archive-edit-1', topicKey: '新话题', status: 'active', auditStatus: 'pass',
   }))
 })
 
