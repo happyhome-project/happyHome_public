@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest'
 
 const srcRoot = path.resolve(process.cwd(), 'src')
 const readPage = (page: string) => fs.readFileSync(path.join(srcRoot, 'pages', page, 'index.vue'), 'utf8')
+const readSource = (relativePath: string) => fs.readFileSync(path.join(srcRoot, relativePath), 'utf8')
 
 describe('Figma community directory pages', () => {
   test('join page renders real community avatars, one-line copy, and joined/join actions', () => {
@@ -49,6 +50,53 @@ describe('Figma community directory pages', () => {
     expect(code).toContain('createPerformanceRequestId')
     expect(code).toContain("stage: 'community.directory'")
     expect(code).toContain("stage: 'community.switch'")
+  })
+
+  test('Profile routes creation directly and keeps discovery on the join entry', () => {
+    const profile = readPage('profile')
+    const createHandler = profile.match(/function goCreateCommunity\(\)[\s\S]*?(?=\nfunction )/)?.[0] ?? ''
+
+    expect(profile).toMatch(/class="profile-shortcut create" @tap="goCreateCommunity"/)
+    expect(profile).toMatch(/class="profile-shortcut join" @tap="goOnboarding"/)
+    expect(createHandler).toContain("uni.navigateTo({ url: '/pages/createCommunity/index' })")
+  })
+
+  test('join page seeds cached cards before one directory load and redirects from latest viewer status', () => {
+    const source = readPage('onboarding')
+    const refresh = source.match(/async function refreshOnboardingData[\s\S]*?(?=\nfunction resolveEntryMode)/)?.[0] ?? ''
+
+    expect(refresh).toContain('readCommunityDirectoryCache')
+    expect(refresh).toContain('communityStore.myCommunities')
+    expect(refresh).toContain('loadCommunityDirectory({')
+    expect(refresh).not.toContain('communityStore.loadMyCommunities')
+    expect(refresh).not.toContain('await resolveCommunityCovers')
+    expect(refresh).toContain('directoryLoadEpoch')
+    expect(refresh).toContain("community.viewerStatus === 'active'")
+    expect(refresh).toContain('activeViewerCount')
+    expect(source).toContain('加载较慢')
+    expect(source).toContain('@tap="retryDirectoryLoad"')
+  })
+
+  test('app foreground and Profile show prewarm the directory without awaiting it', () => {
+    const app = readSource('App.vue')
+    const appOnShow = app.slice(app.lastIndexOf('onShow(async () => {'))
+    const profile = readPage('profile')
+    const profileOnShowStart = profile.lastIndexOf('onShow(() => {')
+    const profileOnShow = profile.slice(profileOnShowStart, profile.indexOf('onPullDownRefresh', profileOnShowStart))
+
+    expect(app).toContain("from './utils/community-directory-cache'")
+    expect(appOnShow).toContain('void primeCommunityDirectory(')
+    expect(appOnShow).toContain("'community.directory.app-prefetch'")
+    expect(appOnShow).toContain('.catch(')
+    expect(appOnShow).not.toContain('await primeCommunityDirectory(')
+    expect(appOnShow).not.toContain('showToast')
+
+    expect(profile).toContain("from '../../utils/community-directory-cache'")
+    expect(profileOnShow).toContain('void primeCommunityDirectory(')
+    expect(profileOnShow).toContain("'community.directory.profile-prefetch'")
+    expect(profileOnShow).toContain('.catch(')
+    expect(profileOnShow).not.toContain('await primeCommunityDirectory(')
+    expect(profileOnShow).not.toContain('showToast')
   })
 
   test('home applies cached snapshots as shell-only data and hydrates guest login in the background', () => {

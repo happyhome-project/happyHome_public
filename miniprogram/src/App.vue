@@ -4,6 +4,7 @@ import { useCommunityStore } from './store/community'
 import { useUserStore } from './store/user'
 import { clientLog, installRuntimeLogHooks } from './utils/client-log'
 import { refreshCommunitiesForCurrentSession } from './utils/app-session-lifecycle'
+import { primeCommunityDirectory } from './utils/community-directory-cache'
 
 let lastCommunityRefreshAt = 0
 let sessionReady: Promise<unknown> = Promise.resolve()
@@ -117,6 +118,12 @@ onShow(async () => {
   // Refresh active communities when returning to the foreground so users do not
   // need to kill and reopen the mini-program to see newly approved communities.
   await sessionReady
+  const userStore = useUserStore()
+  if (userStore.isLoggedIn && userStore.openId) {
+    void primeCommunityDirectory(userStore.openId, 'community.directory.app-prefetch').catch((error) => {
+      clientLog('warn', 'app.communityDirectory.prefetch.fail', { error })
+    })
+  }
   await refreshMyCommunitiesSilently()
 })
 </script>

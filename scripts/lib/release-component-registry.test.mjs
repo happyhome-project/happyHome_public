@@ -6,6 +6,8 @@ import test from 'node:test'
 
 import './archive-migration.test.mjs'
 import './archive-migration-node-sdk.test.mjs'
+import './archive-legacy-projection.test.mjs'
+import './archive-legacy-projection-node-sdk.test.mjs'
 
 import {
   CLOUD_COMPONENT_CONFIG_INPUTS,
@@ -20,10 +22,10 @@ import {
   verifyMigrationInputFile,
 } from './release-component-registry.mjs'
 
-test('release component registry contains exactly ten formal cloud functions plus admin and miniprogram', () => {
+test('release component registry contains the formal cloud functions plus admin and miniprogram', () => {
   assert.deepEqual(CLOUD_RELEASE_COMPONENTS, [
     'admin', 'community', 'home-prefetch', 'http-gateway', 'member',
-    'post', 'post-rag-worker', 'post-video-rag-worker', 'section', 'user',
+    'post', 'post-rag-worker', 'post-video-rag-worker', 'section', 'user', 'wechat-audit-callback',
   ])
   assert.deepEqual(RELEASE_COMPONENTS, [...CLOUD_RELEASE_COMPONENTS.map((name) => `cloud:${name}`), 'admin-web', 'miniprogram'])
   assert.equal(RELEASE_COMPONENTS.some((name) => name.includes('cloudfunctions')), false)

@@ -1,6 +1,10 @@
 import { defineStore } from 'pinia'
 import { userApi } from '../api/cloud'
 import type { PerformanceTrace } from '../utils/performance-trace'
+import {
+  clearCommunityDirectoryCache,
+  primeCommunityDirectory,
+} from '../utils/community-directory-cache'
 import { useCommunityStore } from './community'
 
 const STORAGE_KEY = 'user_store'
@@ -44,6 +48,14 @@ function supersededError() {
   return new Error('Web session operation was superseded')
 }
 
+function primeDirectoryAfterLogin(openId: string) {
+  const id = String(openId || '').trim()
+  if (!id) return
+  void primeCommunityDirectory(id, 'community.directory.login-prefetch').catch((error) => {
+    console.warn('[community-directory] login prefetch failed', error)
+  })
+}
+
 export const useUserStore = defineStore('user', {
   state: () => ({
     openId: '' as string,
@@ -56,7 +68,9 @@ export const useUserStore = defineStore('user', {
   }),
   actions: {
     clearLocalSession() {
+      const previousOpenId = String(this.openId || '').trim()
       webSessionGeneration += 1
+      if (previousOpenId) clearCommunityDirectoryCache(previousOpenId)
       this.openId = ''
       this.nickName = ''
       this.avatarUrl = ''
@@ -151,6 +165,7 @@ export const useUserStore = defineStore('user', {
       this.backgroundFetchTokenExpiresAt = result.user.backgroundFetchTokenExpiresAt || ''
       this.saveToStorage()
       this.syncBackgroundFetchToken()
+      primeDirectoryAfterLogin(this.openId)
     },
     async webLogin(
       { username, password, nickName }: { username: string; password: string; nickName: string },
@@ -193,6 +208,7 @@ export const useUserStore = defineStore('user', {
         this.backgroundFetchTokenExpiresAt = result.user.backgroundFetchTokenExpiresAt || ''
         this.saveToStorage()
         this.syncBackgroundFetchToken()
+        primeDirectoryAfterLogin(this.openId)
       } catch (error) {
         if (generation !== webSessionGeneration) throw error
         let rollbackError: any = null
@@ -239,6 +255,7 @@ export const useUserStore = defineStore('user', {
         this.backgroundFetchTokenExpiresAt = result.user.backgroundFetchTokenExpiresAt || ''
         this.saveToStorage()
         this.syncBackgroundFetchToken()
+        primeDirectoryAfterLogin(this.openId)
         await useCommunityStore().loadMyCommunities({
           loadSections: false,
           shouldApply: () => generation === webSessionGeneration,
@@ -265,6 +282,7 @@ export const useUserStore = defineStore('user', {
       this.backgroundFetchTokenExpiresAt = result.user.backgroundFetchTokenExpiresAt || this.backgroundFetchTokenExpiresAt || ''
       this.saveToStorage()
       this.syncBackgroundFetchToken()
+      primeDirectoryAfterLogin(this.openId)
     },
     /**
      * DEV 模式登录：绕过 wx.login，直接用指定 openid 通过 http-gateway 调
@@ -290,6 +308,7 @@ export const useUserStore = defineStore('user', {
       this.backgroundFetchTokenExpiresAt = result.user.backgroundFetchTokenExpiresAt || ''
       this.saveToStorage()
       this.syncBackgroundFetchToken()
+      primeDirectoryAfterLogin(this.openId)
     },
     async logout() {
       const generation = ++webSessionGeneration

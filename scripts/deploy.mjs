@@ -66,6 +66,12 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFil
 import { tmpdir } from 'os'
 import { parseArgs as parseCloudSmokeArgs, runCloudReleaseSmoke } from './cloud-release-smoke.mjs'
 import { deployFunctionsWithConcurrency } from './lib/cloudbase-function-deploy.mjs'
+import {
+  WECHAT_AUDIT_CALLBACK,
+  WECHAT_AUDIT_CALLBACK_PATH,
+  assertWechatAuditHttpAccess,
+  cloudBaseDeployArgs,
+} from './lib/cloudbase-http-function.mjs'
 import { abortableDelay, runAbortableShellCapture } from './lib/abortable-process.mjs'
 import { createProductionReleaseStore } from './lib/cloudbase-release-store.mjs'
 import {
@@ -105,7 +111,7 @@ import { collectComponentSourcePaths, createReleaseBuildConfigurationDigest, cre
 import { selectCloudProductionBindings, selectStableProductionBinding } from './lib/release-component-state.mjs'
 import { attestCloudWithCurrentOrPrior, loadPriorCloudAttestationProbe } from './lib/release-prior-cloud-attestation.mjs'
 import { executeReleaseOperations } from './lib/release-operations.mjs'
-import { verifyMigrationInputFile } from './lib/release-component-registry.mjs'
+import { CLOUD_RELEASE_COMPONENTS, verifyMigrationInputFile } from './lib/release-component-registry.mjs'
 import { executeFormalSemanticReleaseStages } from './lib/formal-semantic-release-stages.mjs'
 import {
   applyReleaseRagVerificationPolicy,
@@ -208,7 +214,7 @@ const CLOUD_ENV = process.env.TCB_ENV || DEFAULT_CLOUD_ENV
 const ADMIN_WEB_DEFAULT_API_URL = 'https://cloudbase-3gh862acb1505ff3-1307183045.ap-shanghai.app.tcloudbase.com'
 const ADMIN_WEB_ALIYUN_HOST = process.env.ADMIN_WEB_SSH_HOST || 'aliyun'
 const ADMIN_WEB_ALIYUN_ROOT = process.env.ADMIN_WEB_REMOTE_ROOT || '/var/www/happyhome-admin'
-const CLOUD_FUNCTIONS = ['user', 'community', 'member', 'section', 'post', 'post-rag-worker', 'post-video-rag-worker', 'admin', 'http-gateway', 'home-prefetch']
+const CLOUD_FUNCTIONS = [...CLOUD_RELEASE_COMPONENTS]
 
 // Common DevTools install locations on Windows
 const DEVTOOLS_CLI_CANDIDATES = [
@@ -552,7 +558,7 @@ async function deployCloudViaCloudBaseCli(fns, options = {}) {
       deployOne: async (fn) => {
         const fnDir = resolve(options.artifactRoot || CLOUD_DIST, fn)
         return await runCloudBaseCliCaptureWithRetry(
-          confirmDefault(tcb('fn', 'deploy', fn, '--force', '--env-id', envId, '--deployMode', 'cos', '--json')),
+          confirmDefault(tcb(...cloudBaseDeployArgs(fn, envId))),
           {
             cwd: fnDir,
             displayCommandLine: `cd ${fnDir} && <confirm default> | tcb fn deploy ${fn} --force --env-id ${envId} --deployMode cos --json`,
@@ -574,6 +580,18 @@ async function deployCloudViaCloudBaseCli(fns, options = {}) {
           const environmentVariables = data.Environment?.Variables || []
           assertReleaseFunctionSecurityConfig(fn, environmentVariables)
           securityConfigByFunction[fn] = environmentVariables
+        }
+        if (detail.ok && fn === WECHAT_AUDIT_CALLBACK) {
+          const access = await runCloudBaseCliCaptureWithRetry(
+            tcb('service', 'list', '--service-path', WECHAT_AUDIT_CALLBACK_PATH, '--json', '--env-id', envId),
+            { displayCommandLine: `tcb service list --service-path ${WECHAT_AUDIT_CALLBACK_PATH} --json`, silentOutput: true }
+          )
+          if (!access.ok) return access
+          try {
+            assertWechatAuditHttpAccess(access.output)
+          } catch (error) {
+            return { ok: false, reason: error.message }
+          }
         }
         return detail
       },

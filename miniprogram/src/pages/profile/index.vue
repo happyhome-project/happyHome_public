@@ -155,7 +155,7 @@
     </view>
 
     <view v-if="!showManualLoginForm" class="profile-shortcuts">
-      <view class="profile-shortcut create" @tap="goOnboarding">
+      <view class="profile-shortcut create" @tap="goCreateCommunity">
         <image
           class="profile-shortcut-decoration"
           src="/static/profile/shortcut-create-bg.svg"
@@ -494,6 +494,7 @@ import {
 } from '../../utils/client-diagnostics'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { getReleaseVersion } from '../../utils/release-version'
+import { primeCommunityDirectory } from '../../utils/community-directory-cache'
 import {
   buildApprovalReminderState,
   buildSubscriptionSaves,
@@ -981,6 +982,10 @@ function goOnboarding() {
   openOnboardingPreservingStack({ mode: 'discover' })
 }
 
+function goCreateCommunity() {
+  uni.navigateTo({ url: '/pages/createCommunity/index' })
+}
+
 function handleProfileTool(item: ProfileToolItem) {
   if (!userStore.isLoggedIn) {
     openLoginEntry()
@@ -1384,6 +1389,11 @@ onShow(() => {
   updateProfileNavMetrics()
   logProfile('info', 'profile.show', {})
   void nextTick(() => logProfile('info', 'profile.render.tick', { reason: 'show' }))
+  if (userStore.isLoggedIn && userStore.openId) {
+    void primeCommunityDirectory(userStore.openId, 'community.directory.profile-prefetch').catch((error) => {
+      logProfile('warn', 'profile.communityDirectory.prefetch.fail', { error })
+    })
+  }
   void refreshProfileData('show')
 })
 
