@@ -197,7 +197,13 @@ async function createFrontendComponentDigests(plan, toolchain) {
     digests.miniprogram = await createReleaseComponentDigest({
       root: ROOT,
       component: 'miniprogram',
-      sourcePaths: await collectComponentSourcePaths(resolve(ROOT, 'miniprogram'), { excludeDirectories: ['dist', 'node_modules'] }),
+      // This marker is written by the release run itself. The compiled package digest,
+      // UI qualification and upload receipt bind its value; treating it as source input
+      // would make a successful upload impossible to resume after final verification.
+      sourcePaths: await collectComponentSourcePaths(resolve(ROOT, 'miniprogram'), {
+        excludeDirectories: ['dist', 'node_modules'],
+        excludeFiles: ['src/generated/build-info.ts'],
+      }),
       configPaths: ['package.json', 'project.config.json'],
       lockfilePath: 'package-lock.json',
       builderVersion: toolchain.miniprogramBuilder,
