@@ -16,6 +16,7 @@ export type SectionType = 'realtime' | 'evergreen'
 export type SectionStatus = 'active' | 'dormant' | 'archived'
 export type SectionDisplayTemplate = 'default' | 'guide_note' | 'text_note' | 'image_note'
 export type TextNoteTheme = 'paper' | 'mint' | 'slate' | 'headline' | 'quote' | 'notice'
+export type CollaborationTemplateStatus = 'active' | 'disabled'
 
 export interface PostPresentation {
   textNoteTheme?: TextNoteTheme
@@ -261,7 +262,7 @@ export interface Section {
   status: SectionStatus
   displayTemplate?: SectionDisplayTemplate
   accentColor?: string
-  systemKey?: 'activity_invite'
+  systemKey?: string
 }
 
 export interface SectionWithPostCount extends Section {
@@ -270,6 +271,23 @@ export interface SectionWithPostCount extends Section {
 
 export type PostContentValue = string | number | string[] | GeoLocation | VideoItem[] | AudioTrack[] | NoteBlock[] | RichNoteContent
 export type PostContent = Record<string, PostContentValue>
+
+export interface CollaborationTemplate {
+  _id: string
+  systemKey: string
+  name: string
+  icon: string
+  order: number
+  status: CollaborationTemplateStatus
+  enableComment: boolean
+  enableLike: boolean
+  widgets: Widget[]
+  protectedSystemKey?: boolean
+  createdAt: string
+  updatedAt: string
+  createdByAccountId?: string
+  updatedByAccountId?: string
+}
 
 export interface PostAttendanceMember {
   _id: string
@@ -286,7 +304,9 @@ export interface Post {
   _id: string
   communityId: string
   sectionId: string
-  area?: 'archive'
+  area?: 'archive' | 'collaboration'
+  collaborationTemplateId?: string
+  collaborationSystemKey?: string
   origin?: 'native_archive' | 'legacy_section'
   format?: 'image_text' | 'text'
   topics?: string[]
