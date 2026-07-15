@@ -519,6 +519,7 @@ const selectedArchiveId = ref('')
 const archiveTabs = ref<ArchiveTab[]>([{ topicKey: '', displayName: '全部' }])
 const selectedArchiveTopic = ref('')
 const archiveColumns = ref<ArchiveFeedColumns>([[], []])
+const archiveCommunityId = ref('')
 const archiveCursor = ref('')
 const archiveHasMore = ref(false)
 const archiveLoading = ref(false)
@@ -529,6 +530,7 @@ const showHomePullRefreshHint = ref(false)
 const homeMenuSafeRightInset = ref(0)
 let refreshingHome = false
 let archiveRequestEpoch = 0
+let archiveRequestPending = false
 let queuedForcedHomeRefresh = false
 let mountedAt = 0
 let unsubscribeBackgroundFetchSnapshot: (() => void) | null = null
@@ -1239,45 +1241,71 @@ function openHomeEmptyPublish() {
   })
 }
 
-async function loadArchiveFeed(reset = false): Promise<void> {
+async function loadArchiveFeed(
+  reset = false,
+  options: { preserveVisible?: boolean } = {},
+): Promise<void> {
   const communityId = communityStore.currentCommunityId || ''
-  if (!communityId || (!reset && (archiveLoading.value || !archiveHasMore.value))) return
+  if (!communityId || (!reset && (archiveRequestPending || !archiveHasMore.value))) return
   const requestEpoch = ++archiveRequestEpoch
-  archiveLoading.value = true
+  const preserveVisibleArchive = Boolean(
+    reset &&
+    options.preserveVisible &&
+    archiveCommunityId.value === communityId &&
+    archiveColumns.value.some(column => column.length > 0),
+  )
+  archiveRequestPending = true
+  archiveLoading.value = !preserveVisibleArchive
   archiveError.value = ''
   try {
+    let nextArchiveTabs = archiveTabs.value
+    let nextArchiveTopic = selectedArchiveTopic.value
     if (reset) {
-      archiveColumns.value = [[], []]
-      archiveCursor.value = ''
+      if (!preserveVisibleArchive) {
+        archiveColumns.value = [[], []]
+        archiveCursor.value = ''
+      }
       const tabResult = await postApi.listArchiveTabs({ communityId, asGuest: !userStore.isLoggedIn })
       if (requestEpoch !== archiveRequestEpoch || communityId !== communityStore.currentCommunityId) return
-      archiveTabs.value = Array.isArray(tabResult.tabs) && tabResult.tabs.length
+      nextArchiveTabs = Array.isArray(tabResult.tabs) && tabResult.tabs.length
         ? tabResult.tabs.slice(0, 8)
         : [{ topicKey: '', displayName: '全部' }]
-      if (!archiveTabs.value.some(tab => tab.topicKey === selectedArchiveTopic.value)) selectedArchiveTopic.value = ''
+      if (!nextArchiveTabs.some(tab => tab.topicKey === nextArchiveTopic)) nextArchiveTopic = ''
     }
-    const result = await postApi.listArchive({
+    let result = await postApi.listArchive({
       communityId,
-      topicKey: selectedArchiveTopic.value || undefined,
+      topicKey: nextArchiveTopic || undefined,
       cursor: reset ? undefined : archiveCursor.value || undefined,
       limit: 20,
       asGuest: !userStore.isLoggedIn,
     })
     if (requestEpoch !== archiveRequestEpoch || communityId !== communityStore.currentCommunityId) return
-    if (result.topicUnavailable && selectedArchiveTopic.value) {
-      selectedArchiveTopic.value = ''
-      archiveHasMore.value = true
-      return loadArchiveFeed(true)
+    if (result.topicUnavailable && nextArchiveTopic) {
+      if (!reset) return loadArchiveFeed(true, { preserveVisible: true })
+      nextArchiveTopic = ''
+      result = await postApi.listArchive({
+        communityId,
+        cursor: undefined,
+        limit: 20,
+        asGuest: !userStore.isLoggedIn,
+      })
+      if (requestEpoch !== archiveRequestEpoch || communityId !== communityStore.currentCommunityId) return
     }
+    if (reset) archiveTabs.value = nextArchiveTabs
+    selectedArchiveTopic.value = nextArchiveTopic
     archiveColumns.value = appendArchivePage(reset ? [[], []] : archiveColumns.value, result.posts || [])
     archiveCursor.value = String(result.nextCursor || '')
     archiveHasMore.value = Boolean(result.hasMore)
+    archiveCommunityId.value = communityId
   } catch (error) {
     if (requestEpoch !== archiveRequestEpoch) return
     archiveError.value = '加载失败，请重试'
     clientLog('error', 'home.archive.feed.fail', { communityId, topicKey: selectedArchiveTopic.value, error })
   } finally {
-    if (requestEpoch === archiveRequestEpoch) archiveLoading.value = false
+    if (requestEpoch === archiveRequestEpoch) {
+      archiveRequestPending = false
+      archiveLoading.value = false
+    }
   }
 }
 
@@ -1664,7 +1692,7 @@ function waitForHomeRefreshHint(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms))
 }
 
-async function runSingleHomeRefresh(force: boolean) {
+async function runSingleHomeRefresh(force: boolean, preserveArchive: boolean) {
   clientLog('info', 'home.refresh.start', {
     force,
     loggedIn: userStore.isLoggedIn,
@@ -1738,7 +1766,7 @@ async function runSingleHomeRefresh(force: boolean) {
       return
     }
     archiveHasMore.value = true
-    await loadArchiveFeed(true)
+    await loadArchiveFeed(true, { preserveVisible: preserveArchive })
     if (force) clearHomeRefreshMarker()
     clientLog('info', 'home.refresh.success', {
       force,
@@ -1759,8 +1787,9 @@ async function runSingleHomeRefresh(force: boolean) {
   }
 }
 
-async function refreshHomeData(options: { force?: boolean } = {}) {
+async function refreshHomeData(options: { force?: boolean; preserveArchive?: boolean } = {}) {
   const force = options.force === true
+  const preserveArchive = options.preserveArchive === true
   if (activeHomeRefreshPromise) {
     const requestedCommunityId = userStore.isLoggedIn ? communityStore.currentCommunityId : ''
     if (force || requestedCommunityId !== activeHomeRefreshCommunityId) queuedForcedHomeRefresh = true
@@ -1781,12 +1810,14 @@ async function refreshHomeData(options: { force?: boolean } = {}) {
   const loadingOwner = homeLoadingGate.beginRefresh()
   const refreshPromise = (async () => {
     let nextForce = force
+    let nextPreserveArchive = preserveArchive
     do {
       activeHomeRefreshCommunityId = userStore.isLoggedIn ? communityStore.currentCommunityId : ''
       const currentForce = nextForce
       queuedForcedHomeRefresh = false
-      await runSingleHomeRefresh(currentForce)
+      await runSingleHomeRefresh(currentForce, nextPreserveArchive)
       nextForce = queuedForcedHomeRefresh
+      nextPreserveArchive = false
     } while (nextForce)
   })()
   activeHomeRefreshPromise = refreshPromise
@@ -1910,8 +1941,8 @@ onUnmounted(() => {
 })
 
 // tabBar 页面切回首页时（如发帖后 switchTab 返回）不会重新 mount，只触发 onShow。
-// 这里 onShow 统一刷新帖子数据，确保新发/新删的内容能实时反映。
-// 首次 onShow 发生在 onMounted 之后，会二次拉取（可接受：代价低、换取数据新鲜度）。
+// 返回首页时保留同社区的现有帖子和滚动位置，在后台刷新完成后再原子替换。
+// 首次进入或社区切换没有可复用内容，仍使用骨架屏表达冷加载状态。
 onShow(() => {
   markClientDiagnosticStage('home.onShow')
   updateHomeMenuSafeArea()
@@ -1932,7 +1963,7 @@ onShow(() => {
     clientLog('debug', 'home.show.skip.afterMounted', {})
     return
   }
-  void refreshHomeData({ force: !!marker }).catch((error) => {
+  void refreshHomeData({ force: !!marker, preserveArchive: true }).catch((error) => {
     clientLog('error', 'home.show.refresh.fail', { error })
   })
   probeHomeRender('show')
