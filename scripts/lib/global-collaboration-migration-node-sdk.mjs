@@ -162,6 +162,11 @@ function outboxDescendsFromEvent(current, event) {
   return immutableFields.every((field) => equalCanonical(current[field], event.afterOutbox[field]))
 }
 
+export function outboxedPostOperationApplied({ currentPost, currentOutbox, currentVersion, operation, event }) {
+  if (!equalCanonical(currentPost, operation.after) || !versionAdvancedPast(currentVersion, event)) return false
+  return currentOutbox == null || outboxDescendsFromEvent(currentOutbox, event)
+}
+
 async function applyOutboxedPostOperation(database, operation, event) {
   let result = 'skipped'
   await runTransactionWithBusyRetry(database, async (transaction) => {
@@ -170,9 +175,7 @@ async function applyOutboxedPostOperation(database, operation, event) {
       versionId: event.versionId,
       outboxId: event.outboxId,
     })
-    if (equalCanonical(currentPost, operation.after)
-      && outboxDescendsFromEvent(currentOutbox, event)
-      && versionAdvancedPast(currentVersion, event)) return
+    if (outboxedPostOperationApplied({ currentPost, currentOutbox, currentVersion, operation, event })) return
     if (!equalCanonical(currentPost, operation.before)
       || !equalCanonical(currentVersion, event.beforeVersion)
       || currentOutbox != null) {
@@ -200,7 +203,13 @@ async function applyOutboxedPostOperation(database, operation, event) {
     readDocument(database, 'post_rag_outbox', event.outboxId),
     readDocument(database, 'rag_community_versions', event.versionId),
   ])
-  if (!equalCanonical(actualPost, operation.after) || !outboxDescendsFromEvent(actualOutbox, event) || !versionAdvancedPast(actualVersion, event)) {
+  if (!outboxedPostOperationApplied({
+    currentPost: actualPost,
+    currentOutbox: actualOutbox,
+    currentVersion: actualVersion,
+    operation,
+    event,
+  })) {
     throw new Error(`posts/${operation.id} failed post/outbox verification`)
   }
   return result
