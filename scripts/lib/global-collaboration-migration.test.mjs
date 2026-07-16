@@ -5,12 +5,25 @@ import {
   applyPlanToSnapshot,
   buildGlobalCollaborationTemplates,
   buildWidgetMapping,
+  legacyMergedUpdateState,
   classifyRealtimeSection,
   createGlobalCollaborationManifest,
   executeVerifiedGlobalCollaborationPlan,
   planGlobalCollaborationMigration,
   verifyGlobalCollaborationManifest,
 } from './global-collaboration-migration.mjs'
+
+test('derives only the exact legacy nested-merge residue from reviewed before and after states', () => {
+  const operation = {
+    before: { _id: 'post-1', content: { legacy_origin: '村口', untouched: 'keep' }, sectionId: 'section-1' },
+    after: { _id: 'post-1', content: { carpool_origin: '村口', untouched: 'keep' }, area: 'collaboration' },
+  }
+  assert.deepEqual(legacyMergedUpdateState(operation), {
+    _id: 'post-1',
+    content: { legacy_origin: '村口', carpool_origin: '村口', untouched: 'keep' },
+    area: 'collaboration',
+  })
+})
 
 const NOW = '2026-07-15T08:00:00.000Z'
 const HEAD = 'a'.repeat(40)

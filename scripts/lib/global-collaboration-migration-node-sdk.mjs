@@ -6,6 +6,7 @@ import {
   createGlobalCollaborationManifest,
   equalCanonical,
   executeVerifiedGlobalCollaborationPlan,
+  legacyMergedUpdateState,
   planGlobalCollaborationMigration,
 } from './global-collaboration-migration.mjs'
 
@@ -110,15 +111,8 @@ function stripId(document) {
   return data
 }
 
-function topLevelPatch(before, after, removeCommand) {
-  const patch = {}
-  const keys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})])
-  keys.delete('_id')
-  for (const key of keys) {
-    if (!Object.prototype.hasOwnProperty.call(after || {}, key)) patch[key] = removeCommand
-    else if (!equalCanonical(before?.[key], after?.[key])) patch[key] = after[key]
-  }
-  return patch
+export async function writeExactDocument(database, collection, id, document) {
+  await database.collection(collection).doc(id).set(stripId(document))
 }
 
 async function applyDocumentOperation(database, operation) {
@@ -126,16 +120,13 @@ async function applyDocumentOperation(database, operation) {
   await runTransactionWithBusyRetry(database, async (transaction) => {
     const current = await readDocument(transaction, operation.collection, operation.id)
     if (equalCanonical(current, operation.after)) return
-    if (!equalCanonical(current, operation.before)) {
+    if (!equalCanonical(current, operation.before) && !equalCanonical(current, legacyMergedUpdateState(operation))) {
       throw new Error(`${operation.collection}/${operation.id} changed outside the reviewed migration state`)
     }
     if (operation.after == null) {
       await transaction.collection(operation.collection).doc(operation.id).remove()
-    } else if (operation.before == null) {
-      await transaction.collection(operation.collection).doc(operation.id).set(stripId(operation.after))
     } else {
-      const patch = topLevelPatch(operation.before, operation.after, database.command.remove())
-      if (Object.keys(patch).length) await transaction.collection(operation.collection).doc(operation.id).update(patch)
+      await writeExactDocument(transaction, operation.collection, operation.id, operation.after)
     }
     result = 'applied'
   })
@@ -162,9 +153,14 @@ function outboxDescendsFromEvent(current, event) {
   return immutableFields.every((field) => equalCanonical(current[field], event.afterOutbox[field]))
 }
 
-export function outboxedPostOperationApplied({ currentPost, currentOutbox, currentVersion, operation, event }) {
-  if (!equalCanonical(currentPost, operation.after) || !versionAdvancedPast(currentVersion, event)) return false
+function outboxEventAppliedOrConsumed({ currentOutbox, currentVersion, event }) {
+  if (!versionAdvancedPast(currentVersion, event)) return false
   return currentOutbox == null || outboxDescendsFromEvent(currentOutbox, event)
+}
+
+export function outboxedPostOperationApplied({ currentPost, currentOutbox, currentVersion, operation, event }) {
+  return equalCanonical(currentPost, operation.after)
+    && outboxEventAppliedOrConsumed({ currentOutbox, currentVersion, event })
 }
 
 async function applyOutboxedPostOperation(database, operation, event) {
@@ -176,6 +172,12 @@ async function applyOutboxedPostOperation(database, operation, event) {
       outboxId: event.outboxId,
     })
     if (outboxedPostOperationApplied({ currentPost, currentOutbox, currentVersion, operation, event })) return
+    if (equalCanonical(currentPost, legacyMergedUpdateState(operation))
+      && outboxEventAppliedOrConsumed({ currentOutbox, currentVersion, event })) {
+      await writeExactDocument(transaction, 'posts', operation.id, operation.after)
+      result = 'applied'
+      return
+    }
     if (!equalCanonical(currentPost, operation.before)
       || !equalCanonical(currentVersion, event.beforeVersion)
       || currentOutbox != null) {
@@ -185,14 +187,12 @@ async function applyOutboxedPostOperation(database, operation, event) {
     if (operation.after == null) {
       await transaction.collection('posts').doc(operation.id).remove()
     } else {
-      const patch = topLevelPatch(operation.before, operation.after, database.command.remove())
-      if (Object.keys(patch).length) await transaction.collection('posts').doc(operation.id).update(patch)
+      await writeExactDocument(transaction, 'posts', operation.id, operation.after)
     }
     if (event.beforeVersion == null) {
-      await transaction.collection('rag_community_versions').doc(event.versionId).set(stripId(event.afterVersion))
+      await writeExactDocument(transaction, 'rag_community_versions', event.versionId, event.afterVersion)
     } else {
-      const patch = topLevelPatch(event.beforeVersion, event.afterVersion, database.command.remove())
-      await transaction.collection('rag_community_versions').doc(event.versionId).update(patch)
+      await writeExactDocument(transaction, 'rag_community_versions', event.versionId, event.afterVersion)
     }
     await transaction.collection('post_rag_outbox').doc(event.outboxId).set(stripId(event.afterOutbox))
     result = 'applied'

@@ -3,9 +3,22 @@ import test from 'node:test'
 
 import {
   outboxedPostOperationApplied,
+  writeExactDocument,
   readOutboxedPostTransactionState,
   runTransactionWithBusyRetry,
 } from './global-collaboration-migration-node-sdk.mjs'
+
+test('replaces a reviewed document exactly instead of merging nested objects', async () => {
+  const calls = []
+  const transaction = { collection: (collection) => ({ doc: (id) => ({
+    set: async (value) => calls.push({ method: 'set', collection, id, value }),
+    update: async () => calls.push({ method: 'update' }),
+  }) }) }
+
+  await writeExactDocument(transaction, 'posts', 'post-1', { _id: 'post-1', content: { stable: 'value' } })
+
+  assert.deepEqual(calls, [{ method: 'set', collection: 'posts', id: 'post-1', value: { content: { stable: 'value' } } }])
+})
 
 test('accepts an atomically applied post event after the worker consumes its outbox', () => {
   const operation = { after: { _id: 'post-1', area: 'collaboration' } }
