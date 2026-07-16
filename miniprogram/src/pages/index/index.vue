@@ -111,7 +111,13 @@
         @tap="onLiveTap(item)"
       >
         <view class="group-icon">
-          <text>{{ item.ic }}</text>
+          <image
+            v-if="item.iconSrc"
+            class="group-icon-image"
+            :src="item.iconSrc"
+            mode="aspectFit"
+          />
+          <text v-else>{{ item.ic }}</text>
         </view>
         <view class="group-body">
           <text class="group-title">{{ item.t }}</text>
@@ -669,6 +675,7 @@ function sectionIconGlyph(section: any, fallback = '·'): string {
 // ── 实时协作区：全局协作模板，按当前社区的帖子逐条展示 ──
 interface LiveItem {
   ic: string
+  iconSrc?: string
   t: string
   m: string[]
   cta: string
@@ -686,6 +693,7 @@ const liveItems = computed<LiveItem[]>(() => {
       reportMissingHomeTitle(post, section, 'home.live')
       items.push({
         ic: sectionIconGlyph(section),
+        iconSrc: section.systemKey === 'carpool' ? '/static/publish-icons/car.svg' : '',
         t: getPostHomeTitle(post, section) || section.name,
         m: getHomeLiveMeta(post, section),
         cta: '进入',
@@ -2563,6 +2571,11 @@ onShareAppMessage(() => {
 .group-icon text {
   font-size: 34rpx;
   line-height: 1;
+}
+
+.group-icon-image {
+  width: 38rpx;
+  height: 32rpx;
 }
 
 .group-body {
