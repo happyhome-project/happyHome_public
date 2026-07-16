@@ -12,7 +12,7 @@
       <button class="btn-primary-plain" size="mini" @tap="goOnboarding">去加入</button>
     </view>
 
-    <view v-else-if="!membershipReady && membershipChecking" class="guard-state">
+    <view v-else-if="!membershipReady" class="guard-state">
       <text class="guard-desc">检查社区成员身份中...</text>
     </view>
 
@@ -31,7 +31,11 @@
     </view>
 
     <template v-else>
-      <view v-if="!selectedSection" class="section-picker">
+      <view v-if="!activeSectionsReady" class="guard-state">
+        <text class="guard-desc">加载协作类型中...</text>
+      </view>
+
+      <view v-else-if="!selectedSection" class="section-picker">
         <text class="title">选择板块</text>
         <view
           v-for="section in activeSections"
@@ -43,8 +47,8 @@
           <text class="section-name">{{ section.name }}</text>
           <text class="arrow">→</text>
         </view>
-        <view v-if="activeSections.length === 0" class="empty-hint">
-          <text class="guard-desc">该社区还没有可发布的板块</text>
+        <view v-if="activeSectionsReady && activeSections.length === 0" class="empty-hint">
+          <text class="guard-desc">{{ collaborationOnly ? '暂时没有可发起的协作类型' : '该社区还没有可发布的板块' }}</text>
         </view>
       </view>
 
@@ -292,7 +296,6 @@ const formData = reactive<Record<string, any>>({})
 const editPostId = ref('')
 const editPostSnapshot = ref<any>(null)
 const submitting = ref(false)
-const membershipChecking = ref(false)
 const membershipReady = ref(false)
 const isMember = ref(false)
 const memberStatus = ref<string | null>(null)
@@ -318,6 +321,9 @@ const textNoteTheme = ref<TextNoteTheme>('paper')
 const archiveFormat = ref<'image_text' | 'text' | ''>('')
 const collaborationOnly = ref(false)
 const collaborationTemplates = ref<any[]>([])
+const collaborationTemplatesReady = ref(false)
+const initialLoadPending = ref(true)
+let collaborationTemplatesLoad: Promise<void> | null = null
 const isEditMode = computed(() => !!editPostId.value)
 
 // 只允许在 active 板块发帖。dormant / archived 板块既无法发帖也无处展示（首页已过滤）。
@@ -330,6 +336,7 @@ const activeSections = computed(() =>
         (section?.status ?? 'active') === 'active' && (!collaborationOnly.value || section?.type === 'realtime')
       )
 )
+const activeSectionsReady = computed(() => !collaborationOnly.value || collaborationTemplatesReady.value)
 
 const editableWidgets = computed(() =>
   (selectedSection.value?.widgets || []).filter((widget: any) => !['attendance', 'admin_notice', 'activity_invite'].includes(widget.type))
@@ -455,24 +462,28 @@ const createFormBlocks = computed(() => {
 onLoad(async (options: any) => {
   if (ensureHierarchyStack('/pages/create/index', options || {}, options?.returnTo)) return
   hideNativeTabBar()
-  if (await loadPostForEdit(String(options?.editPostId || ''))) return
   collaborationOnly.value = String(options?.mode || '') === 'collaboration'
-  const requestedArchiveFormat = String(options?.archiveFormat || '')
-  if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text') {
-    // Resolve the product-level publishing route before the first await. Otherwise
-    // membership refresh can commit the legacy section picker for one frame.
-    enterArchiveEditor(requestedArchiveFormat, options?.returnTo)
+  try {
+    if (await loadPostForEdit(String(options?.editPostId || ''))) return
+    const requestedArchiveFormat = String(options?.archiveFormat || '')
+    if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text') {
+      // Resolve the product-level publishing route before the first await. Otherwise
+      // membership refresh can commit the legacy section picker for one frame.
+      enterArchiveEditor(requestedArchiveFormat, options?.returnTo)
+    }
+    await Promise.all([
+      ensureSectionsLoaded(),
+      collaborationOnly.value ? ensureCollaborationTemplatesLoaded() : Promise.resolve(),
+    ])
+    await checkMembership({ silent: false })
+    if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text') {
+      return
+    }
+    await consumeCreateSectionIntent(options)
+    await consumeActivityInviteIntent(options)
+  } finally {
+    initialLoadPending.value = false
   }
-  await Promise.all([
-    ensureSectionsLoaded(),
-    collaborationOnly.value ? ensureCollaborationTemplatesLoaded() : Promise.resolve(),
-  ])
-  await checkMembership({ silent: false })
-  if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text') {
-    return
-  }
-  await consumeCreateSectionIntent(options)
-  await consumeActivityInviteIntent(options)
 })
 
 function buildArchiveEditorSection(format: 'image_text' | 'text') {
@@ -578,7 +589,7 @@ async function loadPostForEdit(postId: string) {
 
 onShow(() => {
   hideNativeTabBar()
-  if (editPostId.value) return
+  if (editPostId.value || initialLoadPending.value) return
   // 返回页面（例如地图选择返回）时静默刷新，不再打断表单操作。
   void ensureSectionsLoaded()
   if (collaborationOnly.value) void ensureCollaborationTemplatesLoaded()
@@ -639,10 +650,6 @@ async function checkMembership(options: { silent: boolean; forceRefresh?: boolea
     if (silent) return
   }
 
-  if (!silent && !membershipReady.value) {
-    membershipChecking.value = true
-  }
-
   try {
     await communityStore.refreshMembershipStatus(communityId)
     const latest = communityStore.getMembershipStatus(communityId)
@@ -663,7 +670,6 @@ async function checkMembership(options: { silent: boolean; forceRefresh?: boolea
   } finally {
     if (seq !== checkSeq) return
     membershipReady.value = true
-    membershipChecking.value = false
   }
 }
 
@@ -837,13 +843,25 @@ async function ensureSectionsLoaded() {
 }
 
 async function ensureCollaborationTemplatesLoaded(force = false) {
-  if (!force && collaborationTemplates.value.length > 0) return
+  if (!force && collaborationTemplatesReady.value) return
+  if (collaborationTemplatesLoad) return collaborationTemplatesLoad
+
+  collaborationTemplatesLoad = (async () => {
+    try {
+      const response = await collaborationTemplateApi.listActive()
+      collaborationTemplates.value = Array.isArray(response?.templates) ? response.templates : []
+    } catch (error: any) {
+      collaborationTemplates.value = []
+      uni.showToast({ title: error?.message || '协作模板加载失败', icon: 'none' })
+    } finally {
+      collaborationTemplatesReady.value = true
+    }
+  })()
+
   try {
-    const response = await collaborationTemplateApi.listActive()
-    collaborationTemplates.value = Array.isArray(response?.templates) ? response.templates : []
-  } catch (error: any) {
-    collaborationTemplates.value = []
-    uni.showToast({ title: error?.message || '协作模板加载失败', icon: 'none' })
+    await collaborationTemplatesLoad
+  } finally {
+    collaborationTemplatesLoad = null
   }
 }
 
