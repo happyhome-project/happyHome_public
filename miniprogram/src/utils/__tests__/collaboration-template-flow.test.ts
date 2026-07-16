@@ -20,6 +20,21 @@ describe('global collaboration template mini-program flow', () => {
     expect(createSource).toContain('collaborationTemplateId: selectedSection.value.collaborationTemplateId')
   })
 
+  test('the collaboration picker keeps unresolved membership and templates in loading states', () => {
+    expect(createSource).toContain('v-else-if="!membershipReady"')
+    expect(createSource).not.toContain('v-else-if="!membershipReady && membershipChecking"')
+    expect(createSource).toContain('v-if="!activeSectionsReady"')
+    expect(createSource).toContain('!collaborationOnly.value || collaborationTemplatesReady.value')
+    expect(createSource).toContain('v-if="activeSectionsReady && activeSections.length === 0"')
+    expect(createSource).toContain('if (collaborationTemplatesLoad) return collaborationTemplatesLoad')
+    expect(createSource).toContain('if (editPostId.value || initialLoadPending.value) return')
+  })
+
+  test('the collaboration route mode is resolved before edit loading can yield to onShow', () => {
+    expect(createSource.indexOf("collaborationOnly.value = String(options?.mode || '') === 'collaboration'"))
+      .toBeLessThan(createSource.indexOf("await loadPostForEdit(String(options?.editPostId || ''))"))
+  })
+
   test('detail and edit resolve the global template returned with a collaboration post', () => {
     expect(detailSource).toContain('res?.collaborationTemplate')
     expect(detailSource).toContain('asCollaborationSection')
