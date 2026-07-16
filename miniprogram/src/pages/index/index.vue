@@ -1,5 +1,30 @@
 <template>
   <view class="phone-inner">
+    <view v-if="showAuthenticatedHomeEntryLoading" class="home-entry-loading" @touchmove.stop.prevent>
+      <view class="home-entry-loading-shell">
+        <view class="home-entry-loading-brand">
+          <view class="home-entry-loading-avatar"></view>
+          <view class="home-entry-loading-title"></view>
+        </view>
+        <view class="home-entry-loading-search"></view>
+        <view class="home-entry-loading-tabs">
+          <view class="home-entry-loading-tab home-entry-loading-tab--active"></view>
+          <view class="home-entry-loading-tab"></view>
+          <view class="home-entry-loading-tab"></view>
+        </view>
+        <view class="home-entry-loading-grid">
+          <view class="home-entry-loading-card"></view>
+          <view class="home-entry-loading-card home-entry-loading-card--short"></view>
+        </view>
+        <view class="home-entry-loading-copy">
+          <text class="home-entry-loading-heading">{{ homeRefreshError || '正在进入社区' }}</text>
+          <text class="home-entry-loading-description">{{ homeRefreshError ? '请检查网络后重试' : '正在准备社区内容…' }}</text>
+          <view v-if="homeRefreshError" class="home-entry-loading-retry" @tap="retryHomeRefresh">
+            <text>重新加载</text>
+          </view>
+        </view>
+      </view>
+    </view>
     <view class="home-shell">
       <view class="home-topbar" :style="homeTopbarStyle">
         <view class="community-identity" @tap="onMastheadTap">
@@ -401,9 +426,11 @@
           <input
             v-model="guestIntroNickName"
             type="nickname"
+            :focus="guestIntroNicknameFocused"
             class="guest-intro-login-input"
             placeholder="请输入昵称"
             maxlength="20"
+            @blur="guestIntroNicknameFocused = false"
           />
           <text v-if="guestIntroLoginSlow" class="guest-intro-login-slow">加载较慢，请稍候...</text>
           <text v-if="guestIntroLoginError" class="guest-intro-login-error">{{ guestIntroLoginError }}</text>
@@ -472,10 +499,10 @@ import {
   normalizeCommunityShareId,
   savePendingShareCommunity,
 } from '../../utils/community-share'
-import { markGuestIntroSeen, shouldShowGuestIntro } from '../../utils/guest-intro'
+import { markGuestIntroSeen, shouldShowGuestIntro, shouldShowGuestIntroOnFirstPaint } from '../../utils/guest-intro'
 import { createAdaptiveAvatarUploader, createLatestEpoch, createPerformanceRequestId } from '../../utils/performance-trace'
 import type { HomeSnapshot } from '../../../../cloud/shared/types'
-import { normalizeGuestIntroConfig, type GuestIntroConfig } from '../../../../cloud/shared/guest-intro-config'
+import { DEFAULT_GUEST_INTRO_CONFIG, normalizeGuestIntroConfig, type GuestIntroConfig } from '../../../../cloud/shared/guest-intro-config'
 
 markClientDiagnosticStage('home.module.dependencies.ready')
 markClientDiagnosticStage('home.setup.enter')
@@ -486,11 +513,16 @@ markClientDiagnosticStage('home.stores.ready', {
   loggedIn: userStore.isLoggedIn,
   currentCommunityId: userStore.isLoggedIn ? communityStore.currentCommunityId || '' : '',
 })
-const showGuestIntro = ref(false)
-const guestIntroConfig = ref<GuestIntroConfig | null>(null)
+const guestIntroConfig = ref<GuestIntroConfig | null>(
+  userStore.isLoggedIn ? null : DEFAULT_GUEST_INTRO_CONFIG,
+)
+const showGuestIntro = ref(shouldShowGuestIntroOnFirstPaint(guestIntroConfig.value, {
+  isLoggedIn: userStore.isLoggedIn,
+}))
 const guestIntroLoginMode = ref<'intro' | 'nickname' | 'web'>('intro')
 const guestIntroAvatarTempPath = ref('')
 const guestIntroNickName = ref('')
+const guestIntroNicknameFocused = ref(false)
 const guestIntroWebUsername = ref('')
 const guestIntroWebPassword = ref('')
 const guestIntroLoginBusy = ref(false)
@@ -505,6 +537,7 @@ const canSubmitGuestIntroLogin = computed(() => {
 })
 const homeLoading = ref(true)
 const homeLoadingGate = createHomeLoadingGate(homeLoading)
+const homeSnapshotViewerOpenId = ref<string | null>(null)
 const homeRefreshSlow = ref(false)
 const homeRefreshError = ref('')
 const postsBySection = ref<Record<string, any[]>>({})
@@ -573,6 +606,11 @@ const homeTopbarStyle = computed(() => ({
   paddingRight: `calc(var(--hh-page-x) + ${homeMenuSafeRightInset.value}px)`,
 }))
 const communityName = computed(() => communityStore.currentCommunity?.name ?? '选择社区')
+const showAuthenticatedHomeEntryLoading = computed(() => (
+  userStore.isLoggedIn
+  && Boolean(userStore.openId)
+  && homeSnapshotViewerOpenId.value !== userStore.openId
+))
 const avatarLetter = computed(() => {
   const name = communityStore.currentCommunity?.name ?? ''
   return communityInitial(name)
@@ -1434,16 +1472,23 @@ function handleGuestIntroPrimary() {
 function handleGuestIntroChooseAvatar(event: any) {
   const avatarUrl = String(event?.detail?.avatarUrl || '').trim()
   if (!avatarUrl) return
+  guestIntroNicknameFocused.value = false
   guestIntroAvatarTempPath.value = avatarUrl
   guestIntroNickName.value = ''
   guestIntroLoginError.value = ''
   guestIntroLoginMode.value = 'nickname'
+  void nextTick(() => {
+    if (guestIntroLoginMode.value === 'nickname' && guestIntroAvatarTempPath.value) {
+      guestIntroNicknameFocused.value = true
+    }
+  })
 }
 
 function cancelGuestIntroLogin() {
   guestIntroLoginEpoch.invalidate()
   guestIntroLoginBusy.value = false
   guestIntroLoginSlow.value = false
+  guestIntroNicknameFocused.value = false
   guestIntroLoginMode.value = 'intro'
   guestIntroAvatarTempPath.value = ''
   guestIntroNickName.value = ''
@@ -1500,6 +1545,7 @@ const adaptiveGuestAvatarUploader = createAdaptiveAvatarUploader({
 
 async function submitGuestIntroLogin() {
   if (!canSubmitGuestIntroLogin.value || guestIntroLoginBusy.value) return
+  guestIntroNicknameFocused.value = false
   const loginEpoch = guestIntroLoginEpoch.begin()
   const requestId = createPerformanceRequestId('home-guest-login')
   guestIntroLoginBusy.value = true
@@ -1534,7 +1580,9 @@ async function submitGuestIntroLogin() {
     guestIntroLoginMode.value = 'intro'
     markCurrentGuestIntroSeen()
     uni.showToast({ title: '登录成功', icon: 'success' })
-    void refreshHomeData().catch((refreshError) => {
+    // A guest bootstrap may still be in flight. Force queues an authenticated
+    // bootstrap behind it instead of reusing the guest request.
+    void refreshHomeData({ force: true }).catch((refreshError) => {
       clientLog('warn', 'guestIntro.login.refresh.fail', { error: refreshError })
     })
   } catch (error: any) {
@@ -1573,6 +1621,7 @@ function applyHomeSnapshot(rawSnapshot: HomeSnapshot | null, source: 'prefetch' 
     )
   ) return false
   if (safeSnapshot.currentCommunity && safeSnapshot.currentCommunity.status !== 'active') return false
+  homeSnapshotViewerOpenId.value = expectedViewer
   communityStore.myCommunities = userStore.isLoggedIn ? activeCommunities : []
   communityStore.currentCommunityId = safeSnapshot.currentCommunityId || ''
   communityStore.browsingCommunity = safeSnapshot.currentCommunity || activeCommunities.find((item) => item._id === safeSnapshot.currentCommunityId) || null
@@ -1941,6 +1990,7 @@ onReady(() => {
 })
 
 onHide(() => {
+  guestIntroNicknameFocused.value = false
   if (!guestIntroLoginBusy.value) return
   guestIntroLoginEpoch.invalidate()
   guestIntroLoginBusy.value = false
@@ -1948,6 +1998,7 @@ onHide(() => {
 })
 
 onUnmounted(() => {
+  guestIntroNicknameFocused.value = false
   guestIntroLoginEpoch.invalidate()
   ;(uni as any).$off?.(HOME_TAB_RETAP_EVENT, scrollHomeToTop)
   clearArchiveSwitchScrollTimers()
@@ -2016,6 +2067,137 @@ onShareAppMessage(() => {
   background: $hh-surface-0;
   min-height: 100vh;
   position: relative;
+}
+
+.home-entry-loading {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 110;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: calc(24rpx + env(safe-area-inset-top)) var(--hh-page-x) calc(40rpx + env(safe-area-inset-bottom));
+  background: var(--hh-color-page);
+}
+
+.home-entry-loading-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.home-entry-loading-brand,
+.home-entry-loading-tabs,
+.home-entry-loading-grid {
+  display: flex;
+  align-items: center;
+}
+
+.home-entry-loading-brand {
+  gap: 20rpx;
+  height: 88rpx;
+}
+
+.home-entry-loading-avatar,
+.home-entry-loading-title,
+.home-entry-loading-search,
+.home-entry-loading-tab,
+.home-entry-loading-card {
+  background: linear-gradient(100deg, #e9eeeb 20%, #f7f9f8 42%, #e9eeeb 64%);
+  background-size: 240% 100%;
+  animation: homeEntryLoadingShimmer 1.4s ease-in-out infinite;
+}
+
+.home-entry-loading-avatar {
+  width: 68rpx;
+  height: 68rpx;
+  border-radius: 50%;
+}
+
+.home-entry-loading-title {
+  width: 278rpx;
+  height: 38rpx;
+  border-radius: 14rpx;
+}
+
+.home-entry-loading-search {
+  height: 96rpx;
+  margin-top: 28rpx;
+  border-radius: 48rpx;
+}
+
+.home-entry-loading-tabs {
+  gap: 22rpx;
+  margin-top: 42rpx;
+}
+
+.home-entry-loading-tab {
+  width: 100rpx;
+  height: 32rpx;
+  border-radius: 12rpx;
+}
+
+.home-entry-loading-tab--active {
+  width: 128rpx;
+}
+
+.home-entry-loading-grid {
+  align-items: flex-start;
+  gap: 18rpx;
+  margin-top: 26rpx;
+}
+
+.home-entry-loading-card {
+  flex: 1 1 0;
+  height: 420rpx;
+  border-radius: var(--hh-radius-card);
+}
+
+.home-entry-loading-card--short {
+  height: 350rpx;
+}
+
+.home-entry-loading-copy {
+  position: absolute;
+  right: 0;
+  bottom: 8%;
+  left: 0;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 10rpx;
+  text-align: center;
+}
+
+.home-entry-loading-heading {
+  color: var(--hh-color-text-primary);
+  font-size: var(--hh-text-heading-sm-size);
+  line-height: var(--hh-text-heading-sm-line);
+  font-weight: $hh-font-weight-bold;
+}
+
+.home-entry-loading-description {
+  color: var(--hh-color-text-tertiary);
+  font-size: var(--hh-text-body-base-size);
+  line-height: var(--hh-text-body-base-line);
+}
+
+.home-entry-loading-retry {
+  margin-top: 18rpx;
+  padding: 16rpx 34rpx;
+  border-radius: $hh-radius-full;
+  background: var(--hh-color-brand-primary);
+  color: #fff;
+  font-size: var(--hh-text-body-base-size);
+  line-height: var(--hh-text-body-base-line);
+  font-weight: $hh-font-weight-bold;
+}
+
+@keyframes homeEntryLoadingShimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
 }
 
 /* ═══ Masthead ═══ */

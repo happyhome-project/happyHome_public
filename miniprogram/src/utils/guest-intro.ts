@@ -7,6 +7,10 @@ interface GuestIntroVisibilityOptions {
   hasPublicCommunity: boolean
 }
 
+interface GuestIntroFirstPaintOptions {
+  isLoggedIn: boolean
+}
+
 function readStorage(key: string): string {
   try {
     if (typeof uni !== 'undefined' && typeof uni.getStorageSync === 'function') {
@@ -34,6 +38,16 @@ export function shouldShowGuestIntro(
   const version = String(config.version || '').trim()
   if (!version) return false
   return readStorage(GUEST_INTRO_SEEN_VERSION_KEY) !== version
+}
+
+export function shouldShowGuestIntroOnFirstPaint(
+  config: GuestIntroConfig | null | undefined,
+  options: GuestIntroFirstPaintOptions,
+): boolean {
+  if (options.isLoggedIn) return false
+  if (!config?.enabled) return false
+  if (!String(config.version || '').trim()) return false
+  return !readStorage(GUEST_INTRO_SEEN_VERSION_KEY)
 }
 
 export function markGuestIntroSeen(version: string) {

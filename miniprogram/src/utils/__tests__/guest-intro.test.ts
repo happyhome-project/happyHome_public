@@ -57,6 +57,22 @@ describe('guest intro popup visibility', () => {
     })).toBe(false)
   })
 
+  test('shows the compiled intro on the first signed-out paint without waiting for community data', async () => {
+    const { markGuestIntroSeen, shouldShowGuestIntroOnFirstPaint } = await loadGuestIntro()
+
+    expect(shouldShowGuestIntroOnFirstPaint(DEFAULT_GUEST_INTRO_CONFIG, {
+      isLoggedIn: false,
+    })).toBe(true)
+    expect(shouldShowGuestIntroOnFirstPaint(DEFAULT_GUEST_INTRO_CONFIG, {
+      isLoggedIn: true,
+    })).toBe(false)
+
+    markGuestIntroSeen('a-server-version-that-is-not-the-compiled-default')
+    expect(shouldShowGuestIntroOnFirstPaint(DEFAULT_GUEST_INTRO_CONFIG, {
+      isLoggedIn: false,
+    })).toBe(false)
+  })
+
   test('starts login on home without routing through profile and uses the new create copy', () => {
     const homeSource = fs.readFileSync(path.resolve(process.cwd(), 'src/pages/index/index.vue'), 'utf8')
     const primaryStart = homeSource.indexOf('function handleGuestIntroPrimary')
@@ -70,6 +86,9 @@ describe('guest intro popup visibility', () => {
     expect(homeSource).toContain('data-testid="guest-intro-login-trigger"')
     expect(homeSource).toContain('open-type="chooseAvatar"')
     expect(homeSource).toContain('data-testid="guest-intro-login-submit"')
+    expect(homeSource).toContain(':focus="guestIntroNicknameFocused"')
+    expect(homeSource).toMatch(/handleGuestIntroChooseAvatar[\s\S]*guestIntroLoginMode\.value = 'nickname'[\s\S]*nextTick[\s\S]*guestIntroNicknameFocused\.value = true/)
+    expect(homeSource).not.toContain('showKeyboard')
     expect(DEFAULT_GUEST_INTRO_CONFIG.secondaryActionText).toBe('创建我自己的社群')
   })
 
