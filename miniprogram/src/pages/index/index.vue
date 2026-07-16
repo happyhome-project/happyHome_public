@@ -1622,13 +1622,14 @@ function applyHomeSnapshot(rawSnapshot: HomeSnapshot | null, source: 'prefetch' 
   ) return false
   if (safeSnapshot.currentCommunity && safeSnapshot.currentCommunity.status !== 'active') return false
   homeSnapshotViewerOpenId.value = expectedViewer
-  communityStore.myCommunities = userStore.isLoggedIn ? activeCommunities : []
+  communityStore.setActiveCommunities(userStore.isLoggedIn ? activeCommunities : [])
   communityStore.currentCommunityId = safeSnapshot.currentCommunityId || ''
   communityStore.browsingCommunity = safeSnapshot.currentCommunity || activeCommunities.find((item) => item._id === safeSnapshot.currentCommunityId) || null
   communityStore.currentSectionIndex = 0
   communityStore.currentSections = safeSnapshot.sections || []
   postsBySection.value = safeSnapshot.postsBySection || {}
   collaborationTemplates.value = safeSnapshot.collaborationTemplates || []
+  communityStore.setCollaborationTemplates(safeSnapshot.collaborationTemplates || [])
   collaborationPostsByTemplate.value = safeSnapshot.collaborationPostsByTemplate || {}
   guestIntroConfig.value = userStore.isLoggedIn
     ? null

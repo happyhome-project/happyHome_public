@@ -75,6 +75,38 @@ describe('community store', () => {
 
     expect(store.myCommunities.map((community) => community._id)).toEqual(['active-community'])
     expect(store.currentCommunityId).toBe('active-community')
+    expect(store.getMembershipStatus('active-community')).toMatchObject({
+      isMember: true,
+      status: 'active',
+    })
+    expect(store.getMembershipStatus('pending-community')).toBeNull()
+  })
+
+  test('active community snapshots replace stale positive membership claims', async () => {
+    const { useCommunityStore } = await import('../community')
+    const store = useCommunityStore()
+    store.membershipByCommunity = {
+      stale: { isMember: true, status: 'active', checkedAt: 1 },
+      pending: { isMember: false, status: 'pending', checkedAt: 2 },
+    }
+
+    store.setActiveCommunities([
+      { _id: 'current', name: '当前社区', status: 'active' },
+    ] as any[])
+
+    expect(store.getMembershipStatus('current')).toMatchObject({ isMember: true, status: 'active' })
+    expect(store.getMembershipStatus('stale')).toBeNull()
+    expect(store.getMembershipStatus('pending')).toMatchObject({ isMember: false, status: 'pending' })
+  })
+
+  test('collaboration template snapshots are shared with publishing routes', async () => {
+    const { useCommunityStore } = await import('../community')
+    const store = useCommunityStore()
+
+    store.setCollaborationTemplates([{ _id: 'carpool', name: '拼车' }] as any[])
+
+    expect(store.collaborationTemplates).toEqual([{ _id: 'carpool', name: '拼车' }])
+    expect(store.collaborationTemplatesReady).toBe(true)
   })
 
   test('switchCommunity keeps the previous state when loading the new community fails', async () => {
