@@ -79,6 +79,7 @@ server.listen(0, '127.0.0.1', async () => {
       const searchElement = document.querySelector('.home-search-sticky-shell')
       const tabsElement = document.querySelector('.section-tabs-sticky-shell')
       const topicTabsElement = document.querySelector('.archive-topic-tabs')
+      const activeTopicTabElement = document.querySelector('.archive-topic-tab--active')
       const search = searchElement.getBoundingClientRect()
       const tabs = tabsElement.getBoundingClientRect()
       const topicTabs = topicTabsElement.getBoundingClientRect()
@@ -102,6 +103,11 @@ server.listen(0, '127.0.0.1', async () => {
         searchSurface: surface(searchElement),
         tabsSurface: surface(tabsElement),
         topicTabsSurface: surface(topicTabsElement),
+        activeTopicTabColor: getComputedStyle(activeTopicTabElement).color,
+        activeTopicTabHighlight: (() => {
+          const style = getComputedStyle(activeTopicTabElement, '::after')
+          return { backgroundImage: style.backgroundImage, width: style.width, height: style.height }
+        })(),
         scrollY: window.scrollY,
       }
     })
@@ -131,11 +137,15 @@ server.listen(0, '127.0.0.1', async () => {
     if (!flatSurface(before.searchSurface) || before.searchSurface.backgroundColor !== 'rgb(230, 244, 246)') {
       throw new Error(`search sticky wrapper has the wrong surface: ${JSON.stringify(before.searchSurface)}`)
     }
-    if (!flatSurface(before.tabsSurface) || before.tabsSurface.backgroundColor !== before.searchSurface.backgroundColor) {
-      throw new Error(`tags sticky wrapper does not share the quote surface: ${JSON.stringify(before.tabsSurface)}`)
+    if (!flatSurface(before.tabsSurface) || before.tabsSurface.backgroundColor !== 'rgb(242, 243, 247)') {
+      throw new Error(`tags sticky wrapper does not use the Figma content surface: ${JSON.stringify(before.tabsSurface)}`)
     }
     if (!flatSurface(before.topicTabsSurface) || before.topicTabsSurface.backgroundColor !== 'rgba(0, 0, 0, 0)') {
       throw new Error(`archive topic tabs should leave its wrapper surface visible: ${JSON.stringify(before.topicTabsSurface)}`)
+    }
+    if (before.activeTopicTabColor !== 'rgb(41, 33, 22)') throw new Error(`active topic tab has the wrong Figma text color: ${before.activeTopicTabColor}`)
+    if (!before.activeTopicTabHighlight.backgroundImage.includes('rgba(61, 173, 125, 0.3)') || !before.activeTopicTabHighlight.backgroundImage.includes('rgba(61, 173, 125, 0)')) {
+      throw new Error(`active topic tab is missing the Figma green fade: ${JSON.stringify(before.activeTopicTabHighlight)}`)
     }
     if (!close(before.hero.bottom, before.search.bottom)) throw new Error(`hero gradient does not cover the search surface: hero=${before.hero.bottom}, search=${before.search.bottom}`)
     const sharedHighlight = 'rgba(84, 211, 160, 0.21)'

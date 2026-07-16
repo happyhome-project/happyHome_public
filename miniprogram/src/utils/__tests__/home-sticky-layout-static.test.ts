@@ -57,14 +57,27 @@ describe('home progressive sticky navigation', () => {
     expect(command).toContain('node scripts/test-h5-home-sticky-smoke.mjs')
   })
 
-  test('gives both sticky wrappers the quote surface without elevation', () => {
-    for (const selector of ['.home-search-sticky-shell', '.section-tabs-sticky-shell']) {
-      const body = ruleBody(selector)
-      expect(body).toMatch(/background:\s*var\(--home-sticky-surface\);/)
+  test('separates the Figma tabs surface from the quote-colored search without elevation', () => {
+    const search = ruleBody('.home-search-sticky-shell')
+    const tabs = ruleBody('.section-tabs-sticky-shell')
+
+    expect(search).toMatch(/background:\s*var\(--home-sticky-surface\);/)
+    expect(tabs).toMatch(/background:\s*var\(--home-tabs-surface\);/)
+    for (const body of [search, tabs]) {
       expect(body).not.toMatch(/box-shadow\s*:/)
       expect(body).not.toMatch(/backdrop-filter\s*:/)
     }
     expect(page).toMatch(/--home-sticky-surface:\s*#e6f4f6;/)
+    expect(page).toMatch(/--home-tabs-surface:\s*#f2f3f7;/)
+  })
+
+  test('uses the Figma tab text and selected green fade without changing text geometry', () => {
+    expect(archiveTopicTabs).toMatch(/\.archive-topic-tab\s*\{[^}]*color:\s*#292116;/s)
+    expect(archiveTopicTabs).toMatch(/\.archive-topic-tab--active\s*\{[^}]*color:\s*#292116;[^}]*font-weight:\s*650;/s)
+    expect(archiveTopicTabs).toMatch(
+      /\.archive-topic-tab--active::after\s*\{[^}]*width:\s*102rpx;[^}]*height:\s*28rpx;[^}]*background:\s*linear-gradient\(90deg,\s*rgba\(61, 173, 125, 0\.3\) 0%,\s*rgba\(61, 173, 125, 0\) 100%\);/s,
+    )
+    expect(archiveTopicTabs).not.toContain('#ff2442')
   })
 
   test('extends the hero gradient beneath the complete search surface', () => {
