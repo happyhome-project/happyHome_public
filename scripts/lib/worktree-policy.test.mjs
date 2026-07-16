@@ -23,6 +23,21 @@ test('worktree policy requires the repository AGENTS.md', () => {
   }), /AGENTS\.md/)
 })
 
+test('PR lifecycle requires the originating task to retire its own merged worktree', () => {
+  const agents = readFileSync(new URL('../../AGENTS.md', import.meta.url), 'utf8')
+  const setup = readFileSync(new URL('../../docs/SETUP.md', import.meta.url), 'utf8')
+
+  for (const document of [agents, setup]) {
+    assert.match(document, /MERGED/)
+    assert.match(document, /C:\\Project\\Claude\\happyHome_public/)
+    assert.match(document, /worktree:retire/)
+    assert.match(document, /保留本地功能分支/)
+  }
+  assert.match(agents, /自己创建的 worktree/)
+  assert.match(agents, /禁止.*force remove/)
+  assert.match(setup, /Test-Path -LiteralPath \$featureWorktree/)
+})
+
 test('worktree policy rejects a symbolic-link AGENTS.md', () => {
   assert.throws(() => assertWorktreePolicy({
     agentsExists: true,
