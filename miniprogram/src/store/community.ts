@@ -191,11 +191,14 @@ export const useCommunityStore = defineStore('community', {
       )
       const activeIds = new Set(activeCommunities.map((community) => community._id))
       const checkedAt = Date.now()
-      const nextMemberships = Object.fromEntries(
-        Object.entries(this.membershipByCommunity).filter(
-          ([communityId, membership]) => !membership.isMember && !activeIds.has(communityId),
-        ),
-      ) as typeof this.membershipByCommunity
+      const nextMemberships = {} as typeof this.membershipByCommunity
+      for (const communityId in this.membershipByCommunity) {
+        if (!Object.prototype.hasOwnProperty.call(this.membershipByCommunity, communityId)) continue
+        const membership = this.membershipByCommunity[communityId]
+        if (!membership.isMember && !activeIds.has(communityId)) {
+          nextMemberships[communityId] = membership
+        }
+      }
       for (const community of activeCommunities) {
         nextMemberships[community._id] = { isMember: true, status: 'active', checkedAt }
       }
