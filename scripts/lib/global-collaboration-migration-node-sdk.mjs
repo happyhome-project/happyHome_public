@@ -12,6 +12,23 @@ import {
 const PAGE_SIZE = 100
 const FILE_DELETE_BATCH_SIZE = 50
 const COMPLETION_DOCUMENT_ID = 'migration_global_collaboration_v1'
+const TRANSACTION_BUSY_PATTERN = /ResourceUnavailable\.TransactionBusy|Transaction is busy/i
+
+export async function runTransactionWithBusyRetry(
+  database,
+  callback,
+  { attempts = 4, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {},
+) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await database.runTransaction(callback)
+    } catch (error) {
+      if (!TRANSACTION_BUSY_PATTERN.test(String(error?.message || error)) || attempt >= attempts) throw error
+      await sleep(attempt * 250)
+    }
+  }
+  throw new Error('global collaboration transaction retry exhausted')
+}
 
 export const GLOBAL_COLLABORATION_DEPENDENT_COLLECTIONS = Object.freeze([
   'post_attendance_members',
@@ -98,7 +115,7 @@ function topLevelPatch(before, after, removeCommand) {
 
 async function applyDocumentOperation(database, operation) {
   let result = 'skipped'
-  await database.runTransaction(async (transaction) => {
+  await runTransactionWithBusyRetry(database, async (transaction) => {
     const current = await readDocument(transaction, operation.collection, operation.id)
     if (equalCanonical(current, operation.after)) return
     if (!equalCanonical(current, operation.before)) {
@@ -139,7 +156,7 @@ function outboxDescendsFromEvent(current, event) {
 
 async function applyOutboxedPostOperation(database, operation, event) {
   let result = 'skipped'
-  await database.runTransaction(async (transaction) => {
+  await runTransactionWithBusyRetry(database, async (transaction) => {
     const [currentPost, currentVersion, currentOutbox] = await Promise.all([
       readDocument(transaction, 'posts', operation.id),
       readDocument(transaction, 'rag_community_versions', event.versionId),
@@ -192,7 +209,7 @@ async function recordCompletion(database, manifest, appliedAt) {
     summary: manifest.summary,
     appliedAt,
   }
-  await database.runTransaction(async (transaction) => {
+  await runTransactionWithBusyRetry(database, async (transaction) => {
     const current = await readDocument(transaction, 'app_configs', COMPLETION_DOCUMENT_ID)
     if (current) {
       if (current.status !== 'complete' || current.manifestSha256 !== manifest.manifestSha256 || current.planDigest !== manifest.planDigest) {
