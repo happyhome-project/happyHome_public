@@ -2978,6 +2978,10 @@ onShareAppMessage(() => {
 
 /* ═══ Figma 0709_v2 visual pass ═══ */
 .phone-inner {
+  --home-hero-title-top: #d1f5f2;
+  --home-hero-title-edge: #d9f5f4;
+  --home-hero-quote: #def4f4;
+  --home-hero-highlight: radial-gradient(ellipse 300rpx 240rpx at 84% 0%, rgba(116, 220, 185, 0.22), transparent 100%);
   --home-sticky-surface: #e6f4f6;
   background: var(--hh-color-page);
   padding-top: 0;
@@ -2987,8 +2991,13 @@ onShareAppMessage(() => {
   padding: calc(150rpx + env(safe-area-inset-top)) var(--hh-page-x) 98rpx;
   margin-bottom: -98rpx;
   background:
-    radial-gradient(circle at 84% 0%, rgba(116, 220, 185, 0.36), transparent 34%),
-    linear-gradient(170deg, #d5f4f3 0%, #def4f4 58%, var(--home-sticky-surface) 84%, var(--hh-color-page) 100%);
+    var(--home-hero-highlight),
+    linear-gradient(180deg,
+      var(--home-hero-title-top) 0,
+      var(--home-hero-title-edge) calc(150rpx + env(safe-area-inset-top)),
+      var(--home-hero-quote) calc(280rpx + env(safe-area-inset-top)),
+      var(--home-sticky-surface) 84%,
+      var(--hh-color-page) 100%);
 }
 
 .home-topbar {
@@ -3003,7 +3012,11 @@ onShareAppMessage(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: linear-gradient(180deg, #d5f4f3 0%, rgba(213, 244, 243, 0.98) 100%);
+  background:
+    var(--home-hero-highlight),
+    linear-gradient(180deg,
+      var(--home-hero-title-top) 0,
+      var(--home-hero-title-edge) 100%);
 }
 
 .community-identity {
