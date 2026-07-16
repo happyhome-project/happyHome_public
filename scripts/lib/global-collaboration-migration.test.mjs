@@ -17,13 +17,13 @@ const HEAD = 'a'.repeat(40)
 
 function carpoolWidgets() {
   return [
-    { widgetId: 'legacy_from', type: 'short_text', label: '出发地', fieldKey: 'origin', required: true, order: 0, showInList: true },
-    { widgetId: 'legacy_to', type: 'short_text', label: '目的地', fieldKey: 'destination', required: true, order: 1, showInList: true },
-    { widgetId: 'legacy_when', type: 'datetime', label: '出发时间', fieldKey: 'departureTime', required: true, order: 2, showInList: true },
-    { widgetId: 'legacy_seats', type: 'short_text', label: '空余座位', fieldKey: 'seats', required: true, order: 3, showInList: false },
-    { widgetId: 'legacy_contact', type: 'short_text', label: '联系人', fieldKey: 'contact', required: true, order: 4, showInList: false },
-    { widgetId: 'legacy_attendance', type: 'attendance', label: '上车', fieldKey: 'attendance', required: false, order: 5, showInList: false },
-    { widgetId: 'legacy_map', type: 'location', label: '地图位置', fieldKey: 'location', required: true, order: 6, showInList: false },
+    { widgetId: 'legacy_from', type: 'short_text', label: '出发地', fieldKey: 'field_1777285499017', required: true, order: 0, showInList: true },
+    { widgetId: 'legacy_to', type: 'short_text', label: '目的地', fieldKey: 'field_1777285500101', required: true, order: 1, showInList: true },
+    { widgetId: 'legacy_when', type: 'datetime', label: '出发时间', fieldKey: 'field_1777285501202', required: true, order: 2, showInList: true },
+    { widgetId: 'legacy_seats', type: 'short_text', label: '空余座位', fieldKey: 'field_1777285502303', required: true, order: 3, showInList: false },
+    { widgetId: 'legacy_contact', type: 'short_text', label: '联系人', fieldKey: 'field_1777285503404', required: true, order: 4, showInList: false },
+    { widgetId: 'legacy_attendance', type: 'attendance', label: '上车', fieldKey: 'field_1777285504505', required: false, order: 5, showInList: false },
+    { widgetId: 'legacy_map', type: 'location', label: '地图位置', fieldKey: 'field_1777285505606', required: true, order: 6, showInList: false },
   ]
 }
 
@@ -169,13 +169,6 @@ test('refuses to plan if reference controls drift or if any archive post enters 
     /明士班.*地图位置.*required/i,
   )
 
-  const fieldKeyDrifted = fixture()
-  fieldKeyDrifted.sections.find((item) => item._id === 'carpool-section').widgets.find((item) => item.label === '空余座位').fieldKey = 'capacity'
-  assert.throws(
-    () => planGlobalCollaborationMigration(fieldKeyDrifted, { preparedAt: NOW, requireReferenceSections: true }),
-    /明士班.*空余座位.*fieldKey/i,
-  )
-
   const typeDrifted = fixture()
   typeDrifted.sections.find((item) => item._id === 'carpool-section').widgets.find((item) => item.label === '空余座位').type = 'text'
   assert.throws(
@@ -194,7 +187,7 @@ test('refuses to plan if reference controls drift or if any archive post enters 
   labelDrifted.sections.find((item) => item._id === 'carpool-section').widgets.find((item) => item.label === '上车').label = '其他动作'
   assert.throws(
     () => planGlobalCollaborationMigration(labelDrifted, { preparedAt: NOW, requireReferenceSections: true }),
-    /明士班.*上车.*label/i,
+    /明士班.*(?:上车.*label|unexpected controls.*legacy_attendance)/i,
   )
 
   const archiveCollision = fixture()

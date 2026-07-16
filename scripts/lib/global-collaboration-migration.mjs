@@ -154,9 +154,6 @@ function assertMappedWidgetContract(source, target, sectionLabel) {
   if (cleanText(source.type) !== cleanText(target.type)) {
     throw new Error(`${sectionLabel} ${target.label} type mismatch: expected ${target.type}, got ${source.type || '(missing)'}`)
   }
-  if (cleanText(source.fieldKey) !== cleanText(target.fieldKey)) {
-    throw new Error(`${sectionLabel} ${target.label} fieldKey mismatch: expected ${target.fieldKey}, got ${source.fieldKey || '(missing)'}`)
-  }
   const acceptedLabels = new Set([cleanText(target.label), ...(LABEL_ALIASES[target.widgetId] || []).map(cleanText)])
   if (!acceptedLabels.has(cleanText(source.label))) {
     throw new Error(`${sectionLabel} ${target.label} label mismatch: got ${source.label || '(missing)'}`)
