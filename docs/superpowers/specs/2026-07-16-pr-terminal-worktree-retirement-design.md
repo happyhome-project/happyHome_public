@@ -29,4 +29,3 @@ If a PR is `CLOSED` without merge and still has unique commits, retirement remai
 - Successful retirement removes the worktree directory but preserves the local branch.
 - A blocked retirement reports the exact reason and never falls back to force removal.
 - No task scans or removes worktrees it did not create.
-
