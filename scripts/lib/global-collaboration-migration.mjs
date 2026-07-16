@@ -48,6 +48,21 @@ function clone(value) {
   return value == null ? value : structuredClone(value)
 }
 
+function isPlainRecord(value) {
+  return value != null && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)
+}
+
+export function legacyMergedUpdateState(operation) {
+  if (!isPlainRecord(operation?.before) || !isPlainRecord(operation?.after)) return null
+  const merged = clone(operation.after)
+  for (const key of Object.keys(operation.after)) {
+    if (isPlainRecord(operation.before[key]) && isPlainRecord(operation.after[key])) {
+      merged[key] = { ...clone(operation.before[key]), ...clone(operation.after[key]) }
+    }
+  }
+  return merged
+}
+
 export function canonicalize(value) {
   if (value instanceof Date) return value.toISOString()
   if (Array.isArray(value)) return value.map(canonicalize)
@@ -637,7 +652,8 @@ function restoreOperationsToBefore(rows, operations, label) {
     const current = byId.get(operation.id) || null
     const beforeMatches = equalCanonical(current, operation.before)
     const afterMatches = equalCanonical(current, operation.after)
-    if (!beforeMatches && !afterMatches) {
+    const legacyMergedMatches = equalCanonical(current, legacyMergedUpdateState(operation))
+    if (!beforeMatches && !afterMatches && !legacyMergedMatches) {
       throw new Error(`${label}/${operation.id} is neither the reviewed before nor after state`)
     }
     if (operation.before == null) byId.delete(operation.id)
