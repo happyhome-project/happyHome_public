@@ -138,14 +138,14 @@ server.listen(0, '127.0.0.1', async () => {
       throw new Error(`archive topic tabs should leave its wrapper surface visible: ${JSON.stringify(before.topicTabsSurface)}`)
     }
     if (!close(before.hero.bottom, before.search.bottom)) throw new Error(`hero gradient does not cover the search surface: hero=${before.hero.bottom}, search=${before.search.bottom}`)
-    const sharedHighlight = 'rgba(116, 220, 185, 0.22)'
-    if (!before.topbarSurface.backgroundImage.includes('rgb(209, 245, 242)') || !before.topbarSurface.backgroundImage.includes('rgb(217, 245, 244)')) {
+    const sharedHighlight = 'rgba(84, 211, 160, 0.21)'
+    if (!before.topbarSurface.backgroundImage.includes('rgb(207, 245, 242)') || !before.topbarSurface.backgroundImage.includes('rgb(221, 244, 244)')) {
       throw new Error(`masthead does not use the continuous hero palette: ${before.topbarSurface.backgroundImage}`)
     }
     if (!before.topbarSurface.backgroundImage.includes(sharedHighlight) || !before.heroSurface.backgroundImage.includes(sharedHighlight)) {
       throw new Error(`masthead and hero do not share one highlight: topbar=${before.topbarSurface.backgroundImage}, hero=${before.heroSurface.backgroundImage}`)
     }
-    if (!before.heroSurface.backgroundImage.includes('rgb(217, 245, 244)') || !before.heroSurface.backgroundImage.includes('rgb(222, 244, 244)') || !before.heroSurface.backgroundImage.includes('rgb(230, 244, 246)')) {
+    if (!before.heroSurface.backgroundImage.includes('rgb(221, 244, 244)') || !before.heroSurface.backgroundImage.includes('rgb(222, 244, 244)') || !before.heroSurface.backgroundImage.includes('rgb(230, 244, 246)')) {
       throw new Error(`hero gradient loses its mint color before the search surface: ${before.heroSurface.backgroundImage}`)
     }
     if (!close(before.search.height, 51, 2)) throw new Error(`search surface height is not compact: ${before.search.height}`)

@@ -2978,10 +2978,10 @@ onShareAppMessage(() => {
 
 /* ═══ Figma 0709_v2 visual pass ═══ */
 .phone-inner {
-  --home-hero-title-top: #d1f5f2;
-  --home-hero-title-edge: #d9f5f4;
+  --home-hero-title-top: #cff5f2;
+  --home-hero-title-edge: #ddf4f4;
   --home-hero-quote: #def4f4;
-  --home-hero-highlight: radial-gradient(ellipse 300rpx 240rpx at 84% 0%, rgba(116, 220, 185, 0.22), transparent 100%);
+  --home-hero-highlight: radial-gradient(ellipse 270rpx 244rpx at 79% 59rpx, rgba(84, 211, 160, 0.212) 0%, rgba(84, 211, 160, 0.212) 20%, rgba(84, 211, 160, 0.16) 40%, rgba(84, 211, 160, 0.056) 68%, rgba(84, 211, 160, 0) 100%);
   --home-sticky-surface: #e6f4f6;
   background: var(--hh-color-page);
   padding-top: 0;

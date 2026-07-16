@@ -82,9 +82,12 @@ describe('home progressive sticky navigation', () => {
     const hero = ruleBody('.home-shell')
     const topbar = ruleBody('.home-topbar')
 
-    expect(page).toMatch(/--home-hero-title-top:\s*#d1f5f2;/)
-    expect(page).toMatch(/--home-hero-title-edge:\s*#d9f5f4;/)
+    expect(page).toMatch(/--home-hero-title-top:\s*#cff5f2;/)
+    expect(page).toMatch(/--home-hero-title-edge:\s*#ddf4f4;/)
     expect(page).toMatch(/--home-hero-quote:\s*#def4f4;/)
+    expect(page).toMatch(
+      /--home-hero-highlight:\s*radial-gradient\(ellipse 270rpx 244rpx at 79% 59rpx,\s*rgba\(84, 211, 160, 0\.212\) 0%,\s*rgba\(84, 211, 160, 0\.212\) 20%,\s*rgba\(84, 211, 160, 0\.16\) 40%,\s*rgba\(84, 211, 160, 0\.056\) 68%,\s*rgba\(84, 211, 160, 0\) 100%\);/,
+    )
     expect(page.match(/var\(--home-hero-highlight\)/g) || []).toHaveLength(2)
     expect(hero).toMatch(
       /linear-gradient\(180deg,\s*var\(--home-hero-title-top\) 0,\s*var\(--home-hero-title-edge\) calc\(150rpx \+ env\(safe-area-inset-top\)\),\s*var\(--home-hero-quote\) calc\(280rpx \+ env\(safe-area-inset-top\)\),\s*var\(--home-sticky-surface\) 84%,\s*var\(--hh-color-page\) 100%\)/,
