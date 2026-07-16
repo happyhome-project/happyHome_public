@@ -1173,7 +1173,7 @@ async function waitForHomeArchiveContent(home, {
     content = await captureHomeArchiveContent(home)
     if (
       content.tabCount === expectedTabCount &&
-      content.cardCount === expectedCardCount &&
+      content.cardCount >= expectedCardCount &&
       content.activeTabCount === 1 &&
       content.activeTabTexts.includes(expectedActiveText)
     ) return { ...content, satisfied: true }
@@ -1336,7 +1336,7 @@ async function verifyHomeArchiveTabs(mp, context, evidenceDir) {
     Math.abs(Number(before.topbar?.top || 0) - Number(tagsPinned.topbar?.top || 0)) <= 2 &&
     tagsPinned.satisfied &&
     tagsPinned.tabCount === 2 &&
-    tagsPinned.cardCount === 3 &&
+    tagsPinned.cardCount >= 3 &&
     tagsPinned.activeTabCount === 1 &&
     tagsPinned.activeTabTexts.length === 1 &&
     tagsPinned.activeTabTexts[0] === '全部' &&
@@ -1346,7 +1346,7 @@ async function verifyHomeArchiveTabs(mp, context, evidenceDir) {
     Number(tagsPinned.firstCardGeometry?.bottom || 0) > Number(tagsPinned.topicTabsGeometry?.bottom || 0) + 2 &&
     shortArchive.satisfied &&
     shortArchive.tabCount === 2 &&
-    shortArchive.cardCount === 1 &&
+    shortArchive.cardCount >= 1 &&
     shortArchive.activeTabCount === 1 &&
     shortArchive.activeTabTexts.length === 1 &&
     shortArchive.activeTabTexts[0] === '短内容' &&

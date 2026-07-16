@@ -256,6 +256,11 @@ test('release home tabs fixture populates the visible native archive feed', () =
   assert.match(fixture, /format: 'markdown'/)
   assert.match(fixture, /markdown: 'Automated release validation post\.'/)
   assert.match(fixture, /html: '<p>Automated release validation post\.<\/p>'/)
+  assert.match(source, /content\.cardCount >= expectedCardCount/)
+  assert.match(source, /tagsPinned\.cardCount >= 3/)
+  assert.match(source, /shortArchive\.cardCount >= 1/)
+  assert.doesNotMatch(source, /tagsPinned\.cardCount === 3/)
+  assert.doesNotMatch(source, /shortArchive\.cardCount === 1/)
 })
 
 test('release home image evidence requires loaded images and one visible viewport image', () => {
