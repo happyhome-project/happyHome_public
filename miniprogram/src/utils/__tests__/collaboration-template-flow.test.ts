@@ -11,6 +11,8 @@ describe('global collaboration template mini-program flow', () => {
     expect(homeSource).toContain('collaborationTemplates')
     expect(homeSource).toContain('collaborationPostsByTemplate')
     expect(homeSource).toContain('asCollaborationSection')
+    expect(homeSource).toContain('communityStore.setActiveCommunities(')
+    expect(homeSource).toContain('communityStore.setCollaborationTemplates(safeSnapshot.collaborationTemplates || [])')
   })
 
   test('the collaboration picker loads global templates and creates a section-free post', () => {
@@ -18,16 +20,26 @@ describe('global collaboration template mini-program flow', () => {
     expect(createSource).toContain('asCollaborationSection')
     expect(createSource).toContain('postApi.createCollaboration')
     expect(createSource).toContain('collaborationTemplateId: selectedSection.value.collaborationTemplateId')
+    expect(createSource).toContain('communityStore.collaborationTemplates')
+    expect(createSource).toContain('communityStore.setCollaborationTemplates(')
   })
 
-  test('the collaboration picker keeps unresolved membership and templates in loading states', () => {
-    expect(createSource).toContain('v-else-if="!membershipReady"')
-    expect(createSource).not.toContain('v-else-if="!membershipReady && membershipChecking"')
-    expect(createSource).toContain('v-if="!activeSectionsReady"')
-    expect(createSource).toContain('!collaborationOnly.value || collaborationTemplatesReady.value')
+  test('publishing consumes session membership without a blocking page-level recheck', () => {
+    expect(createSource).not.toContain('检查社区成员身份中')
+    expect(createSource).not.toContain('memberApi.myStatus(')
+    expect(createSource).not.toContain('checkMembership(')
+    expect(createSource).toContain('communityStore.getMembershipStatus(')
+    expect(createSource).toContain('communityStore.myCommunities.some(')
+  })
+
+  test('the collaboration picker keeps unresolved templates in a loading state', () => {
+    expect(createSource).toContain('v-else-if="!activeSectionsReady"')
+    expect(createSource).toContain('!collaborationOnly.value || communityStore.collaborationTemplatesReady')
     expect(createSource).toContain('v-if="activeSectionsReady && activeSections.length === 0"')
     expect(createSource).toContain('if (collaborationTemplatesLoad) return collaborationTemplatesLoad')
     expect(createSource).toContain('if (editPostId.value || initialLoadPending.value) return')
+    expect(createSource).toContain('协作类型加载失败')
+    expect(createSource).toContain('@tap="retryCollaborationTemplates"')
   })
 
   test('the collaboration route mode is resolved before edit loading can yield to onShow', () => {

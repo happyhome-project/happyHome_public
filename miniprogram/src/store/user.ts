@@ -56,6 +56,14 @@ function primeDirectoryAfterLogin(openId: string) {
   })
 }
 
+async function hydrateMembershipsAfterLogin(shouldApply?: () => boolean) {
+  try {
+    await useCommunityStore().loadMyCommunities({ loadSections: false, shouldApply })
+  } catch (error) {
+    console.warn('[membership] login hydration failed', error)
+  }
+}
+
 export const useUserStore = defineStore('user', {
   state: () => ({
     openId: '' as string,
@@ -166,6 +174,7 @@ export const useUserStore = defineStore('user', {
       this.saveToStorage()
       this.syncBackgroundFetchToken()
       primeDirectoryAfterLogin(this.openId)
+      await hydrateMembershipsAfterLogin(options.shouldApply)
     },
     async webLogin(
       { username, password, nickName }: { username: string; password: string; nickName: string },
@@ -209,6 +218,12 @@ export const useUserStore = defineStore('user', {
         this.saveToStorage()
         this.syncBackgroundFetchToken()
         primeDirectoryAfterLogin(this.openId)
+        await hydrateMembershipsAfterLogin(() => generation === webSessionGeneration && !canceled())
+        if (generation !== webSessionGeneration) throw supersededError()
+        if (canceled()) {
+          await rollbackCanceledLogin()
+          return
+        }
       } catch (error) {
         if (generation !== webSessionGeneration) throw error
         let rollbackError: any = null

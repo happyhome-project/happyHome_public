@@ -28,6 +28,8 @@ export const useCommunityStore = defineStore('community', {
     currentSections: [] as Section[],
     currentSectionIndex: 0,
     membershipByCommunity: {} as Record<string, { isMember: boolean; status: string | null; checkedAt: number }>,
+    collaborationTemplates: [] as any[],
+    collaborationTemplatesReady: false,
     pendingCommunitySelection: null as PendingCommunitySelection | null,
   }),
   getters: {
@@ -46,6 +48,8 @@ export const useCommunityStore = defineStore('community', {
       this.currentSections = []
       this.currentSectionIndex = 0
       this.membershipByCommunity = {}
+      this.collaborationTemplates = []
+      this.collaborationTemplatesReady = false
       this.pendingCommunitySelection = null
       this.saveToStorage()
     },
@@ -181,6 +185,27 @@ export const useCommunityStore = defineStore('community', {
     getMembershipStatus(communityId: string) {
       return this.membershipByCommunity[String(communityId || '').trim()] || null
     },
+    setActiveCommunities(communities: Community[]) {
+      const activeCommunities = (communities || []).filter(
+        (community) => community?.status === 'active',
+      )
+      const activeIds = new Set(activeCommunities.map((community) => community._id))
+      const checkedAt = Date.now()
+      const nextMemberships = Object.fromEntries(
+        Object.entries(this.membershipByCommunity).filter(
+          ([communityId, membership]) => !membership.isMember && !activeIds.has(communityId),
+        ),
+      ) as typeof this.membershipByCommunity
+      for (const community of activeCommunities) {
+        nextMemberships[community._id] = { isMember: true, status: 'active', checkedAt }
+      }
+      this.myCommunities = activeCommunities
+      this.membershipByCommunity = nextMemberships
+    },
+    setCollaborationTemplates(templates: any[]) {
+      this.collaborationTemplates = Array.isArray(templates) ? templates : []
+      this.collaborationTemplatesReady = true
+    },
     async loadMyCommunities(options: LoadMyCommunitiesOptions = {}) {
       const epoch = communityMutationEpoch
       if (loadingMyCommunities?.epoch === epoch) {
@@ -207,9 +232,7 @@ export const useCommunityStore = defineStore('community', {
       const res = await memberApi.myCommunities()
       if (expectedEpoch !== communityMutationEpoch) return
       if (options.shouldApply && !options.shouldApply()) return
-      this.myCommunities = (res.communities as Community[]).filter(
-        (community) => community?.status === 'active',
-      )
+      this.setActiveCommunities(res.communities as Community[])
       if (this.myCommunities.length === 0) {
         this.clearCommunityState()
         return

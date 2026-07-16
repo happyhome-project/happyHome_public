@@ -47,6 +47,8 @@ describe('archive publishing entry', () => {
     expect(onLoadStart).toBeGreaterThanOrEqual(0)
     expect(archiveEditor).toBeGreaterThan(onLoadStart)
     expect(archiveEditor).toBeLessThan(firstAwait)
+    expect(create).not.toContain('检查社区成员身份中')
+    expect(create).not.toContain('memberApi.myStatus(')
   })
 
   test('native archive detail builds a virtual renderer while legacy section posts keep section loading', () => {

@@ -68,7 +68,11 @@ describe('user store Web auth', () => {
   })
 
   test('webLogin signs into Web SDK before user.login and never persists the password', async () => {
+    myCommunities.mockResolvedValueOnce({
+      communities: [{ _id: 'community-web', name: '网页社区', status: 'active' }],
+    })
     const { useUserStore } = await import('../user')
+    const { useCommunityStore } = await import('../community')
     const store = useUserStore()
 
     await store.webLogin({ username: 'alice', password: 'secret', nickName: '青山用户' })
@@ -82,11 +86,20 @@ describe('user store Web auth', () => {
       'web-user-1',
       'community.directory.login-prefetch',
     )
+    expect(myCommunities).toHaveBeenCalledTimes(1)
+    expect(useCommunityStore().getMembershipStatus('community-web')).toMatchObject({
+      isMember: true,
+      status: 'active',
+    })
   })
 
   test('direct login commits the session without waiting for directory prefetch', async () => {
     primeCommunityDirectory.mockReturnValueOnce(new Promise(() => {}))
+    myCommunities.mockResolvedValueOnce({
+      communities: [{ _id: 'community-1', name: '明士班', status: 'active' }],
+    })
     const { useUserStore } = await import('../user')
+    const { useCommunityStore } = await import('../community')
     const store = useUserStore()
 
     await store.login({ nickName: '青山用户', avatarUrl: '' })
@@ -97,6 +110,11 @@ describe('user store Web auth', () => {
       'web-user-1',
       'community.directory.login-prefetch',
     )
+    expect(myCommunities).toHaveBeenCalledTimes(1)
+    expect(useCommunityStore().getMembershipStatus('community-1')).toMatchObject({
+      isMember: true,
+      status: 'active',
+    })
   })
 
   test('restoreWebSession clears stale user and community state without an SDK session', async () => {
@@ -135,6 +153,11 @@ describe('user store Web auth', () => {
     expect(myCommunities).toHaveBeenCalledTimes(1)
     expect(store.nickName).toBe('服务端昵称')
     expect(store.isLoggedIn).toBe(true)
+    const { useCommunityStore } = await import('../community')
+    expect(useCommunityStore().getMembershipStatus('community-1')).toMatchObject({
+      isMember: true,
+      status: 'active',
+    })
   })
 
   test('restoreWebSession signs out an SDK session that has no saved nickname', async () => {

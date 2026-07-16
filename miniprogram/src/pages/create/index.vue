@@ -12,10 +12,6 @@
       <button class="btn-primary-plain" size="mini" @tap="goOnboarding">去加入</button>
     </view>
 
-    <view v-else-if="!membershipReady" class="guard-state">
-      <text class="guard-desc">检查社区成员身份中...</text>
-    </view>
-
     <view v-else-if="!isMember" class="guard-state">
       <text class="guard-title">你还不是“{{ communityStore.currentCommunity?.name }}”的成员</text>
       <text class="guard-desc">{{ memberStatus === 'pending' ? '你的加入申请正在审批中，请耐心等待' : '加入社区后才能发布' }}</text>
@@ -31,7 +27,13 @@
     </view>
 
     <template v-else>
-      <view v-if="!activeSectionsReady" class="guard-state">
+      <view v-if="collaborationTemplatesError" class="guard-state">
+        <text class="guard-title">协作类型加载失败</text>
+        <text class="guard-desc">{{ collaborationTemplatesError }}</text>
+        <button class="btn-primary-plain" size="mini" @tap="retryCollaborationTemplates">重新加载</button>
+      </view>
+
+      <view v-else-if="!activeSectionsReady" class="guard-state">
         <text class="guard-desc">加载协作类型中...</text>
       </view>
 
@@ -296,11 +298,7 @@ const formData = reactive<Record<string, any>>({})
 const editPostId = ref('')
 const editPostSnapshot = ref<any>(null)
 const submitting = ref(false)
-const membershipReady = ref(false)
-const isMember = ref(false)
-const memberStatus = ref<string | null>(null)
 const joining = ref(false)
-let checkSeq = 0
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
 const CREATE_DRAFT_KEY = 'create_draft_v1'
 const ACTIVITY_INVITE_CREATE_INTENT_KEY = 'activity_invite_create_intent_v1'
@@ -320,23 +318,31 @@ const textNoteStep = ref<'compose' | 'cover'>('compose')
 const textNoteTheme = ref<TextNoteTheme>('paper')
 const archiveFormat = ref<'image_text' | 'text' | ''>('')
 const collaborationOnly = ref(false)
-const collaborationTemplates = ref<any[]>([])
-const collaborationTemplatesReady = ref(false)
+const collaborationTemplatesError = ref('')
 const initialLoadPending = ref(true)
 let collaborationTemplatesLoad: Promise<void> | null = null
 const isEditMode = computed(() => !!editPostId.value)
+const currentMembership = computed(() =>
+  communityStore.getMembershipStatus(communityStore.currentCommunityId)
+)
+const isMember = computed(() =>
+  communityStore.myCommunities.some(
+    (community: any) => community?._id === communityStore.currentCommunityId && community?.status === 'active',
+  ) || !!currentMembership.value?.isMember
+)
+const memberStatus = computed(() => isMember.value ? 'active' : currentMembership.value?.status ?? null)
 
 // 只允许在 active 板块发帖。dormant / archived 板块既无法发帖也无处展示（首页已过滤）。
 const activeSections = computed(() =>
   collaborationOnly.value
-    ? collaborationTemplates.value.map((template) =>
+    ? communityStore.collaborationTemplates.map((template) =>
         asCollaborationSection(template, communityStore.currentCommunityId)
       )
     : (communityStore.currentSections ?? []).filter((section: any) =>
         (section?.status ?? 'active') === 'active' && (!collaborationOnly.value || section?.type === 'realtime')
       )
 )
-const activeSectionsReady = computed(() => !collaborationOnly.value || collaborationTemplatesReady.value)
+const activeSectionsReady = computed(() => !collaborationOnly.value || communityStore.collaborationTemplatesReady)
 
 const editableWidgets = computed(() =>
   (selectedSection.value?.widgets || []).filter((widget: any) => !['attendance', 'admin_notice', 'activity_invite'].includes(widget.type))
@@ -475,7 +481,6 @@ onLoad(async (options: any) => {
       ensureSectionsLoaded(),
       collaborationOnly.value ? ensureCollaborationTemplatesLoaded() : Promise.resolve(),
     ])
-    await checkMembership({ silent: false })
     if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text') {
       return
     }
@@ -530,8 +535,6 @@ async function loadPostForEdit(postId: string) {
       await communityStore.switchCommunity(communityId)
     }
     await ensureSectionsLoaded()
-    await checkMembership({ silent: false, forceRefresh: true })
-
     if (currentPost.area === 'archive') {
       const format = currentPost.format === 'text' ? 'text' : 'image_text'
       archiveFormat.value = format
@@ -593,7 +596,6 @@ onShow(() => {
   // 返回页面（例如地图选择返回）时静默刷新，不再打断表单操作。
   void ensureSectionsLoaded()
   if (collaborationOnly.value) void ensureCollaborationTemplatesLoaded()
-  void checkMembership({ silent: true })
   if (!archiveFormat.value) {
     void consumeCreateSectionIntent()
     void consumeActivityInviteIntent()
@@ -604,10 +606,8 @@ watch(() => communityStore.currentCommunityId, async () => {
   if (editPostId.value) return
   if (archiveFormat.value) enterArchiveEditor(archiveFormat.value, createReturnTo.value)
   else selectedSection.value = null
-  membershipReady.value = false
   await ensureSectionsLoaded()
   if (collaborationOnly.value) await ensureCollaborationTemplatesLoaded()
-  await checkMembership({ silent: false, forceRefresh: true })
   if (!archiveFormat.value) await consumeCreateSectionIntent()
 })
 
@@ -630,62 +630,17 @@ onBeforeUnmount(() => {
   } catch (_error) {}
 })
 
-async function checkMembership(options: { silent: boolean; forceRefresh?: boolean }) {
-  const { silent, forceRefresh = false } = options
-  const communityId = String(communityStore.currentCommunityId || '')
-  const seq = ++checkSeq
-
-  if (!communityId || !userStore.isLoggedIn) {
-    isMember.value = false
-    memberStatus.value = null
-    membershipReady.value = true
-    return
-  }
-
-  const cached = communityStore.getMembershipStatus(communityId)
-  if (cached && !forceRefresh) {
-    isMember.value = cached.isMember
-    memberStatus.value = cached.status
-    membershipReady.value = true
-    if (silent) return
-  }
-
-  try {
-    await communityStore.refreshMembershipStatus(communityId)
-    const latest = communityStore.getMembershipStatus(communityId)
-    if (seq !== checkSeq) return
-    isMember.value = !!latest?.isMember
-    memberStatus.value = latest?.status ?? null
-  } catch {
-    if (seq !== checkSeq) return
-    // 兜底到直接请求，避免 store 未更新时页面卡住。
-    try {
-      const res = await memberApi.myStatus(communityId)
-      isMember.value = !!res.isMember
-      memberStatus.value = res.status
-    } catch {
-      isMember.value = false
-      memberStatus.value = null
-    }
-  } finally {
-    if (seq !== checkSeq) return
-    membershipReady.value = true
-  }
-}
-
 async function handleJoin() {
   joining.value = true
   try {
     const res = await memberApi.apply(communityStore.currentCommunityId)
     if ((res as any).status === 'active') {
-      isMember.value = true
-      memberStatus.value = 'active'
+      await communityStore.loadMyCommunities({ loadSections: false })
       uni.showToast({ title: '加入成功', icon: 'success' })
     } else {
-      memberStatus.value = 'pending'
+      await communityStore.refreshMembershipStatus(communityStore.currentCommunityId)
       uni.showToast({ title: '申请已提交，等待审批', icon: 'none' })
     }
-    await checkMembership({ silent: true, forceRefresh: true })
   } catch (error: any) {
     uni.showModal({ title: '加入失败', content: error?.message ?? '请重试' })
   } finally {
@@ -843,18 +798,18 @@ async function ensureSectionsLoaded() {
 }
 
 async function ensureCollaborationTemplatesLoaded(force = false) {
-  if (!force && collaborationTemplatesReady.value) return
+  if (!force && communityStore.collaborationTemplatesReady) return
   if (collaborationTemplatesLoad) return collaborationTemplatesLoad
 
+  collaborationTemplatesError.value = ''
   collaborationTemplatesLoad = (async () => {
     try {
       const response = await collaborationTemplateApi.listActive()
-      collaborationTemplates.value = Array.isArray(response?.templates) ? response.templates : []
+      communityStore.setCollaborationTemplates(
+        Array.isArray(response?.templates) ? response.templates : [],
+      )
     } catch (error: any) {
-      collaborationTemplates.value = []
-      uni.showToast({ title: error?.message || '协作模板加载失败', icon: 'none' })
-    } finally {
-      collaborationTemplatesReady.value = true
+      collaborationTemplatesError.value = error?.message || '请稍后重试'
     }
   })()
 
@@ -863,6 +818,10 @@ async function ensureCollaborationTemplatesLoaded(force = false) {
   } finally {
     collaborationTemplatesLoad = null
   }
+}
+
+function retryCollaborationTemplates() {
+  void ensureCollaborationTemplatesLoaded(true)
 }
 
 function handleCreateSectionIntentEvent(payload?: { sectionId?: string; returnTo?: string }) {
