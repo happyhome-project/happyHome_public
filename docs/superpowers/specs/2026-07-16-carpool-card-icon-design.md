@@ -1,5 +1,8 @@
 # Carpool Card Icon Design
 
+> **Historical / point-in-time:** This specification records the carpool-card icon design accepted for the 2026-07-16 delivery. It does not override later product or implementation decisions.
+> **Current authority:** Use the [documentation authority map](../../README.md), current home-page code, release UI checks, and tests.
+
 ## Problem
 
 The home live-collaboration card renders the collaboration template icon as text. Production data for the affected post is correct: it references the protected `carpool` template, whose icon is the standard `🚗` code point (`U+1F697`). In the reported mini-program runtime that glyph is unavailable and renders as a missing-glyph box.
