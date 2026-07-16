@@ -57,7 +57,7 @@ assert(
 )
 assert(stickyTabsShellRule.includes('position: sticky'), 'home sticky shell should use sticky positioning.')
 assert(
-  stickyTabsShellRule.includes('top: calc(150rpx + env(safe-area-inset-top) + 138rpx)'),
+  stickyTabsShellRule.includes('top: calc(150rpx + env(safe-area-inset-top) + 98rpx)'),
   'home tabs should pin directly below the masthead and pinned search surface.',
 )
 

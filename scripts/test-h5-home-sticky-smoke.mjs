@@ -122,19 +122,26 @@ server.listen(0, '127.0.0.1', async () => {
     const restored = await rects()
 
     const close = (a, b, tolerance = 3) => Math.abs(a - b) <= tolerance
-    const transparent = (surface) => (
-      surface.backgroundColor === 'rgba(0, 0, 0, 0)'
-      && surface.backgroundImage === 'none'
+    const flatSurface = (surface) => (
+      surface.backgroundImage === 'none'
       && surface.boxShadow === 'none'
       && surface.backdropFilter === 'none'
     )
-    if (!transparent(before.searchSurface)) throw new Error(`search sticky wrapper owns a surface: ${JSON.stringify(before.searchSurface)}`)
-    if (!transparent(before.tabsSurface)) throw new Error(`tags sticky wrapper owns a surface: ${JSON.stringify(before.tabsSurface)}`)
-    if (!transparent(before.topicTabsSurface)) throw new Error(`archive topic tabs own a surface: ${JSON.stringify(before.topicTabsSurface)}`)
+    if (!flatSurface(before.searchSurface) || before.searchSurface.backgroundColor !== 'rgb(230, 244, 246)') {
+      throw new Error(`search sticky wrapper has the wrong surface: ${JSON.stringify(before.searchSurface)}`)
+    }
+    if (!flatSurface(before.tabsSurface) || before.tabsSurface.backgroundColor !== before.searchSurface.backgroundColor) {
+      throw new Error(`tags sticky wrapper does not share the quote surface: ${JSON.stringify(before.tabsSurface)}`)
+    }
+    if (!flatSurface(before.topicTabsSurface) || before.topicTabsSurface.backgroundColor !== 'rgba(0, 0, 0, 0)') {
+      throw new Error(`archive topic tabs should leave its wrapper surface visible: ${JSON.stringify(before.topicTabsSurface)}`)
+    }
     if (!close(before.hero.bottom, before.search.bottom)) throw new Error(`hero gradient does not cover the search surface: hero=${before.hero.bottom}, search=${before.search.bottom}`)
-    if (!before.heroSurface.backgroundImage.includes('rgb(220, 239, 232)') || !before.heroSurface.backgroundImage.includes('rgb(237, 244, 237)')) {
+    if (!before.heroSurface.backgroundImage.includes('rgb(222, 244, 244)') || !before.heroSurface.backgroundImage.includes('rgb(230, 244, 246)')) {
       throw new Error(`hero gradient loses its mint color before the search surface: ${before.heroSurface.backgroundImage}`)
     }
+    if (!close(before.search.height, 51, 2)) throw new Error(`search surface height is not compact: ${before.search.height}`)
+    if (!(before.topicTabs.height < 36)) throw new Error(`topic tabs top inset is still too tall: ${before.topicTabs.height}`)
     if (!(before.search.top > before.topbar.bottom + 20)) throw new Error('search is not initially in document flow')
     if (!close(searchPinned.search.top, searchPinned.topbar.bottom)) throw new Error('search did not pin below masthead')
     if (!close(tagsPinned.search.top, tagsPinned.topbar.bottom)) throw new Error('search moved during tags pin')

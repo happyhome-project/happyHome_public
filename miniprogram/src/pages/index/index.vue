@@ -2796,16 +2796,17 @@ onShareAppMessage(() => {
 
 /* ═══ Figma 0709_v2 visual pass ═══ */
 .phone-inner {
+  --home-sticky-surface: #e6f4f6;
   background: var(--hh-color-page);
   padding-top: 0;
 }
 
 .home-shell {
-  padding: calc(150rpx + env(safe-area-inset-top)) var(--hh-page-x) 138rpx;
-  margin-bottom: -138rpx;
+  padding: calc(150rpx + env(safe-area-inset-top)) var(--hh-page-x) 98rpx;
+  margin-bottom: -98rpx;
   background:
-    radial-gradient(circle at 84% 0%, rgba(48, 91, 70, 0.22), transparent 34%),
-    linear-gradient(170deg, #caeee7 0%, #dcefe8 58%, #edf4ed 84%, var(--hh-color-page) 100%);
+    radial-gradient(circle at 84% 0%, rgba(116, 220, 185, 0.36), transparent 34%),
+    linear-gradient(170deg, #d5f4f3 0%, #def4f4 58%, var(--home-sticky-surface) 84%, var(--hh-color-page) 100%);
 }
 
 .home-topbar {
@@ -2820,7 +2821,7 @@ onShareAppMessage(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: linear-gradient(180deg, #caeee7 0%, rgba(202, 238, 231, 0.98) 100%);
+  background: linear-gradient(180deg, #d5f4f3 0%, rgba(213, 244, 243, 0.98) 100%);
 }
 
 .community-identity {
@@ -2990,7 +2991,8 @@ onShareAppMessage(() => {
   position: sticky;
   top: calc(150rpx + env(safe-area-inset-top));
   z-index: $hh-z-sticky + 1;
-  padding: 24rpx var(--hh-page-x);
+  padding: 4rpx var(--hh-page-x);
+  background: var(--home-sticky-surface);
 }
 
 .home-search-sticky-shell .home-search {
@@ -3093,10 +3095,11 @@ onShareAppMessage(() => {
 
 .section-tabs-sticky-shell {
   position: sticky;
-  top: calc(150rpx + env(safe-area-inset-top) + 138rpx);
+  top: calc(150rpx + env(safe-area-inset-top) + 98rpx);
   z-index: $hh-z-sticky;
   margin: 34rpx 0 20rpx;
   padding: 12rpx 0;
+  background: var(--home-sticky-surface);
 }
 
 .section-tabs-sticky-shell--archive {
