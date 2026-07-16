@@ -44,6 +44,7 @@ import { runReleaseUiChecks } from './lib/release-ui-check-runner.mjs'
 import { readMiniprogramPackageIdentity } from './lib/miniprogram-package-identity.mjs'
 import { cleanupReleaseFixtureWithRetry } from './lib/release-ui-fixture-cleanup.mjs'
 import { applyReleaseFixtureMembership } from './lib/release-ui-fixture-membership.mjs'
+import { createReleaseFixturePostWithRetry } from './lib/release-ui-fixture-post.mjs'
 import { applyAndWaitForReleaseFixtureSelection } from './lib/release-ui-fixture-selection.mjs'
 import { invokeTrustedAdminCloud } from './lib/trusted-admin-invoke.mjs'
 
@@ -906,24 +907,26 @@ async function createReleaseFixture(mp) {
       apply: () => callMpCloud(mp, 'member', { action: 'apply', communityId: fixture.communityId }),
     })
     for (let index = 0; index < 3; index += 1) {
-      const post = await callMpCloud(mp, 'post', {
-        action: 'create',
-        communityId: fixture.communityId,
-        area: 'archive',
-        format: 'text',
-        topics: index === 2 ? ['短内容'] : [],
-        content: {
-          title: `归档内容 ${index + 1} ${runId}`,
-          body: {
-            format: 'markdown',
-            markdown: 'Automated release validation post.',
-            html: '<p>Automated release validation post.</p>',
-            text: 'Automated release validation post.',
-            imageFileIDs: [],
-            schemaVersion: 1,
+      const post = await createReleaseFixturePostWithRetry({
+        create: () => callMpCloud(mp, 'post', {
+          action: 'create',
+          communityId: fixture.communityId,
+          area: 'archive',
+          format: 'text',
+          topics: index === 2 ? ['短内容'] : [],
+          content: {
+            title: `归档内容 ${index + 1} ${runId}`,
+            body: {
+              format: 'markdown',
+              markdown: 'Automated release validation post.',
+              html: '<p>Automated release validation post.</p>',
+              text: 'Automated release validation post.',
+              imageFileIDs: [],
+              schemaVersion: 1,
+            },
           },
-        },
-      }, { timeoutMs: 90000 })
+        }, { timeoutMs: 90000 }),
+      })
       const postId = String(post.postId || '')
       if (!postId) throw new Error('post.create did not return postId')
       fixture.postIds.push(postId)
