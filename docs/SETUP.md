@@ -83,6 +83,17 @@ npm.cmd run worktree:status -- --fresh
 
 实际退役从公开仓库集成 main 使用 `npm.cmd run worktree:retire -- <path>`。命令一次刷新 main 与开放 PR snapshot，要求 registered、同一真实 common dir、无 reparse ancestor、非 main、clean、无 Git operation、无开放 PR、无独有提交且 HEAD 已进入 pinned main，并在非 force `git worktree remove` 紧前再次本地重验；本地分支始终保留。
 
+创建 PR 的原功能任务在 GitHub 报告 `MERGED` 后必须立即退役自己的 worktree。即使任务当前 shell 仍位于功能目录，也应把绝对路径保存为变量，并从 canonical main 执行：
+
+```powershell
+$featureWorktree = 'C:\absolute\path\to\the-feature-worktree'
+Set-Location C:\Project\Claude\happyHome_public
+npm.cmd run worktree:retire -- $featureWorktree
+Test-Path -LiteralPath $featureWorktree  # 必须为 False
+```
+
+成功退役会移除工作目录和其中体积最大的依赖/构建产物，但保留本地功能分支。命令阻断时只报告原因；不得使用 `--force`、递归删除或顺手清理其他任务的 worktree。`CLOSED` 未合入且仍有独有提交的 worktree不会自动退役。
+
 退役只移除 worktree，始终保留它原来的本地功能分支，便于对应 branch owner 自行核对并推送。`--delete-merged-local-branch` 已禁用并会直接拒绝；工具中不存在触碰私有仓库路径的 branch deletion 路径。
 
 ### 功能 PR 与 Merge Queue 协作
