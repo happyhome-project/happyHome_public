@@ -26,6 +26,9 @@ const LABEL_ALIASES = Object.freeze({
   carpool_origin: ['出发地', '起点', '出发地点'],
   carpool_destination: ['目的地', '终点', '到达地点'],
   carpool_departure_time: ['出发时间', '时间'],
+  carpool_seats: ['空余座位', '剩余座位', '座位'],
+  carpool_contact: ['联系人', '联系方式'],
+  carpool_attendance: ['上车', '我要上车', '报名'],
   carpool_location: ['地图位置', '位置'],
   carpool_note: ['补充说明', '说明', '备注'],
   activity_invite_title: ['邀约主题', '活动主题', '标题'],
@@ -89,8 +92,11 @@ export function buildGlobalCollaborationTemplates(now = new Date().toISOString()
         widget('carpool_origin', 'short_text', '出发地', 'origin', true, 0, true),
         widget('carpool_destination', 'short_text', '目的地', 'destination', true, 1, true),
         widget('carpool_departure_time', 'datetime', '出发时间', 'departureTime', true, 2, true),
-        widget('carpool_location', 'location', '地图位置', 'location', true, 3, false),
-        widget('carpool_note', 'note_blocks', '补充说明', 'note', false, 4, false),
+        widget('carpool_seats', 'short_text', '空余座位', 'seats', true, 3, false),
+        widget('carpool_contact', 'short_text', '联系人', 'contact', true, 4, false),
+        widget('carpool_attendance', 'attendance', '上车', 'attendance', false, 5, false),
+        widget('carpool_location', 'location', '地图位置', 'location', true, 6, false),
+        widget('carpool_note', 'note_blocks', '补充说明', 'note', false, 7, false),
       ],
       createdAt: now,
       updatedAt: now,
@@ -145,14 +151,24 @@ function candidateScore(source, target) {
 }
 
 function assertMappedWidgetContract(source, target, sectionLabel) {
-  if (!typeCompatible(cleanText(source.type), cleanText(target.type))) {
+  if (cleanText(source.type) !== cleanText(target.type)) {
     throw new Error(`${sectionLabel} ${target.label} type mismatch: expected ${target.type}, got ${source.type || '(missing)'}`)
+  }
+  if (cleanText(source.fieldKey) !== cleanText(target.fieldKey)) {
+    throw new Error(`${sectionLabel} ${target.label} fieldKey mismatch: expected ${target.fieldKey}, got ${source.fieldKey || '(missing)'}`)
+  }
+  const acceptedLabels = new Set([cleanText(target.label), ...(LABEL_ALIASES[target.widgetId] || []).map(cleanText)])
+  if (!acceptedLabels.has(cleanText(source.label))) {
+    throw new Error(`${sectionLabel} ${target.label} label mismatch: got ${source.label || '(missing)'}`)
   }
   if (source.required === true !== (target.required === true)) {
     throw new Error(`${sectionLabel} ${target.label} required mismatch: expected ${target.required === true}, got ${source.required === true}`)
   }
   if (source.showInList === true !== (target.showInList === true)) {
     throw new Error(`${sectionLabel} ${target.label} showInList mismatch: expected ${target.showInList === true}, got ${source.showInList === true}`)
+  }
+  if (Number(source.order) !== Number(target.order)) {
+    throw new Error(`${sectionLabel} ${target.label} order mismatch: expected ${target.order}, got ${source.order ?? '(missing)'}`)
   }
 }
 
@@ -302,7 +318,7 @@ function assertReferenceSections(snapshot, realtimeSections, desiredByKey) {
   if (!realtimeSections.length) return
   const communities = new Map((snapshot.communities || []).map((community) => [cleanText(community._id), community]))
   const references = [
-    { communityName: '名师班', classification: 'carpool' },
+    { communityName: '明士班', classification: 'carpool' },
     { communityName: '青山村', classification: 'activity_invite' },
   ]
   for (const expected of references) {
@@ -342,19 +358,23 @@ function planDependents(snapshot, retainedById, deletedPostIds, mappingsBySectio
       // the post-release community backfill refreshes their stable widget IDs.
       // RAG rows are versioned and can be safely replaced by the outbox event.
       const deleteDerivedForRetained = Boolean(retained) && RAG_REBUILD_COLLECTIONS.has(collection)
-      const deleteAttendanceForCarpool = collection === 'post_attendance_members' && retained?.classification === 'carpool'
-      if (deleteForRemovedPost || deleteDerivedForRetained || deleteAttendanceForCarpool) {
+      if (deleteForRemovedPost || deleteDerivedForRetained) {
         deletes.push({ collection, id: cleanText(row._id), before: clone(row), after: null })
         continue
       }
-      if (collection === 'post_attendance_members' && retained?.classification === 'activity_invite') {
-        const sourceAttendanceId = mappingsBySection.get(retained.sectionId)?.targetToSource?.activity_invite_attendance
-        if (sourceAttendanceId && cleanText(row.widgetId) === sourceAttendanceId && sourceAttendanceId !== 'activity_invite_attendance') {
+      if (collection === 'post_attendance_members' && retained) {
+        const targetAttendanceId = retained.classification === 'carpool'
+          ? 'carpool_attendance'
+          : retained.classification === 'activity_invite'
+            ? 'activity_invite_attendance'
+            : ''
+        const sourceAttendanceId = mappingsBySection.get(retained.sectionId)?.targetToSource?.[targetAttendanceId]
+        if (targetAttendanceId && sourceAttendanceId && cleanText(row.widgetId) === sourceAttendanceId && sourceAttendanceId !== targetAttendanceId) {
           updates.push({
             collection,
             id: cleanText(row._id),
             before: clone(row),
-            after: { ...clone(row), widgetId: 'activity_invite_attendance' },
+            after: { ...clone(row), widgetId: targetAttendanceId },
           })
         }
       }

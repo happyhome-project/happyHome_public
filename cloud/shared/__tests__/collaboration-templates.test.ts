@@ -17,11 +17,21 @@ describe('global collaboration template contract', () => {
     expect(templates.every((template) => template.protectedSystemKey)).toBe(true)
   })
 
-  test('adds an optional image-capable note immediately after carpool location', () => {
+  test('preserves the production carpool controls and adds an optional image-capable note last', () => {
     const carpool = buildInitialCollaborationTemplates()[0]
     const locationIndex = carpool.widgets.findIndex((widget) => widget.widgetId === CARPOOL_WIDGET_IDS.location)
 
     expect(carpool.name).toBe('拼车出行')
+    expect(carpool.widgets.map((widget) => widget.widgetId)).toEqual([
+      CARPOOL_WIDGET_IDS.origin,
+      CARPOOL_WIDGET_IDS.destination,
+      CARPOOL_WIDGET_IDS.departureTime,
+      CARPOOL_WIDGET_IDS.seats,
+      CARPOOL_WIDGET_IDS.contact,
+      CARPOOL_WIDGET_IDS.attendance,
+      CARPOOL_WIDGET_IDS.location,
+      CARPOOL_WIDGET_IDS.note,
+    ])
     expect(carpool.widgets[locationIndex + 1]).toEqual({
       widgetId: CARPOOL_WIDGET_IDS.note,
       type: 'note_blocks',
