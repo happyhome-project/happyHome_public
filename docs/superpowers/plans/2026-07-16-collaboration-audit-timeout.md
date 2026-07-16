@@ -1,5 +1,10 @@
 # Collaboration Audit Timeout Implementation Plan
 
+> **Historical / point-in-time:** This plan records the implementation sequence used on 2026-07-16. Retain it for traceability; do not execute it as current work.
+> **Current authority:** Use the [documentation authority map](../../README.md), current code, tests, and GitHub PR state.
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Prevent a stalled WeChat content-audit request from consuming the 15-second `createCollaboration` cloud-function budget and surfacing a false publish failure.
