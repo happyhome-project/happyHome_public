@@ -153,7 +153,10 @@ server.listen(0, '127.0.0.1', async () => {
     if (!(before.search.top > before.topbar.bottom + 20)) throw new Error('search is not initially in document flow')
     if (!close(searchPinned.search.top, searchPinned.topbar.bottom)) throw new Error('search did not pin below masthead')
     if (!close(tagsPinned.search.top, tagsPinned.topbar.bottom)) throw new Error('search moved during tags pin')
-    if (!close(tagsPinned.tabs.top, tagsPinned.search.bottom)) throw new Error('tags did not pin below search')
+    const stickySeamOverlap = tagsPinned.search.bottom - tagsPinned.tabs.top
+    if (!(stickySeamOverlap >= 0.75 && stickySeamOverlap <= 1.25)) {
+      throw new Error(`tags should cover the search compositor seam by 1px: overlap=${stickySeamOverlap}`)
+    }
     if (!close(tagsPinned.topicTabs.top, tagsPinned.tabs.top)) throw new Error('visible archive topic tabs escaped the sticky shell')
     if (!close(restored.search.top, before.search.top)) throw new Error('reverse scroll did not release search sticky state')
     if (!close(restored.tabs.top, before.tabs.top)) throw new Error('reverse scroll did not release visible topic tabs')

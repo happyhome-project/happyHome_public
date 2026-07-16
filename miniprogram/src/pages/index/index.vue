@@ -3290,7 +3290,7 @@ onShareAppMessage(() => {
 
 .section-tabs-sticky-shell {
   position: sticky;
-  top: calc(150rpx + env(safe-area-inset-top) + 98rpx);
+  top: calc(150rpx + env(safe-area-inset-top) + 98rpx - 1px);
   z-index: $hh-z-sticky;
   margin: 34rpx 0 20rpx;
   padding: 12rpx 0;

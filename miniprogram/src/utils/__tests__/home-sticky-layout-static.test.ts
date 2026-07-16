@@ -22,7 +22,7 @@ describe('home progressive sticky navigation', () => {
     expect(page).toContain('class="home-search-sticky-shell"')
     expect(page).toMatch(/\.home-search-sticky-shell\s*\{[^}]*position:\s*sticky;/s)
     expect(page).toMatch(/\.home-search-sticky-shell\s*\{[^}]*top:\s*calc\(150rpx \+ env\(safe-area-inset-top\)\);/s)
-    expect(page).toMatch(/\.section-tabs-sticky-shell\s*\{[^}]*top:\s*calc\(150rpx \+ env\(safe-area-inset-top\) \+ 98rpx\);/s)
+    expect(page).toMatch(/\.section-tabs-sticky-shell\s*\{[^}]*top:\s*calc\(150rpx \+ env\(safe-area-inset-top\) \+ 98rpx - 1px\);/s)
     expect(page).toMatch(/<\/view>\r?\n\r?\n    <view class="home-search-sticky-shell"/)
     const search = page.indexOf('class="home-search-sticky-shell"')
     const live = page.indexOf('<!-- Live strip')
