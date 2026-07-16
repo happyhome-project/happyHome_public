@@ -78,11 +78,19 @@ describe('home progressive sticky navigation', () => {
     expect(searchBox).toMatch(/min-height:\s*90rpx;/)
   })
 
-  test('keeps the mint gradient visible through the quote and search surface', () => {
+  test('uses one continuous color field from masthead through the quote and search surface', () => {
     const hero = ruleBody('.home-shell')
+    const topbar = ruleBody('.home-topbar')
 
+    expect(page).toMatch(/--home-hero-title-top:\s*#d1f5f2;/)
+    expect(page).toMatch(/--home-hero-title-edge:\s*#d9f5f4;/)
+    expect(page).toMatch(/--home-hero-quote:\s*#def4f4;/)
+    expect(page.match(/var\(--home-hero-highlight\)/g) || []).toHaveLength(2)
     expect(hero).toMatch(
-      /linear-gradient\(170deg,\s*#d5f4f3 0%,\s*#def4f4 58%,\s*var\(--home-sticky-surface\) 84%,\s*var\(--hh-color-page\) 100%\)/,
+      /linear-gradient\(180deg,\s*var\(--home-hero-title-top\) 0,\s*var\(--home-hero-title-edge\) calc\(150rpx \+ env\(safe-area-inset-top\)\),\s*var\(--home-hero-quote\) calc\(280rpx \+ env\(safe-area-inset-top\)\),\s*var\(--home-sticky-surface\) 84%,\s*var\(--hh-color-page\) 100%\)/,
+    )
+    expect(topbar).toMatch(
+      /linear-gradient\(180deg,\s*var\(--home-hero-title-top\) 0,\s*var\(--home-hero-title-edge\) 100%\)/,
     )
   })
 
