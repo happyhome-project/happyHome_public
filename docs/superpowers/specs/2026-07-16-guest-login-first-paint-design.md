@@ -1,5 +1,8 @@
 # Guest Login First Paint Design
 
+> **Historical / point-in-time:** This specification records the design accepted for the 2026-07-16 delivery. It does not override later product or implementation decisions.
+> **Current authority:** Use the [documentation authority map](../../README.md), current home-page code, and tests.
+
 ## Goal
 
 For a signed-out cold start, show the existing guest login introduction on the first rendered frame instead of briefly exposing the uninitialized "选择社区" or empty-feed page. Home data loading begins at app startup in parallel with the login flow.
