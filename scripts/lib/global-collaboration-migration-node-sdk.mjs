@@ -96,6 +96,14 @@ async function readDocument(database, collectionName, id) {
   }
 }
 
+export async function readOutboxedPostTransactionState(transaction, { postId, versionId, outboxId }) {
+  // CloudBase transactions reject overlapping document reads with TransactionBusy.
+  const currentPost = await readDocument(transaction, 'posts', postId)
+  const currentVersion = await readDocument(transaction, 'rag_community_versions', versionId)
+  const currentOutbox = await readDocument(transaction, 'post_rag_outbox', outboxId)
+  return { currentPost, currentVersion, currentOutbox }
+}
+
 function stripId(document) {
   if (!document) return document
   const { _id: _id, ...data } = document
@@ -157,11 +165,11 @@ function outboxDescendsFromEvent(current, event) {
 async function applyOutboxedPostOperation(database, operation, event) {
   let result = 'skipped'
   await runTransactionWithBusyRetry(database, async (transaction) => {
-    const [currentPost, currentVersion, currentOutbox] = await Promise.all([
-      readDocument(transaction, 'posts', operation.id),
-      readDocument(transaction, 'rag_community_versions', event.versionId),
-      readDocument(transaction, 'post_rag_outbox', event.outboxId),
-    ])
+    const { currentPost, currentVersion, currentOutbox } = await readOutboxedPostTransactionState(transaction, {
+      postId: operation.id,
+      versionId: event.versionId,
+      outboxId: event.outboxId,
+    })
     if (equalCanonical(currentPost, operation.after)
       && outboxDescendsFromEvent(currentOutbox, event)
       && versionAdvancedPast(currentVersion, event)) return

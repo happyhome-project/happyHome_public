@@ -1,7 +1,44 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { runTransactionWithBusyRetry } from './global-collaboration-migration-node-sdk.mjs'
+import {
+  readOutboxedPostTransactionState,
+  runTransactionWithBusyRetry,
+} from './global-collaboration-migration-node-sdk.mjs'
+
+test('reads post, version, and outbox sequentially inside one CloudBase transaction', async () => {
+  let activeReads = 0
+  let maxActiveReads = 0
+  const values = {
+    'posts/post-1': { _id: 'post-1' },
+    'rag_community_versions/community-1': { _id: 'community-1' },
+    'post_rag_outbox/outbox-1': { _id: 'outbox-1' },
+  }
+  const transaction = {
+    collection(collection) {
+      return { doc(id) { return { async get() {
+        activeReads += 1
+        maxActiveReads = Math.max(maxActiveReads, activeReads)
+        await new Promise((resolve) => setTimeout(resolve, 1))
+        activeReads -= 1
+        return { data: [values[`${collection}/${id}`]] }
+      } } } }
+    },
+  }
+
+  const state = await readOutboxedPostTransactionState(transaction, {
+    postId: 'post-1',
+    versionId: 'community-1',
+    outboxId: 'outbox-1',
+  })
+
+  assert.deepEqual(state, {
+    currentPost: values['posts/post-1'],
+    currentVersion: values['rag_community_versions/community-1'],
+    currentOutbox: values['post_rag_outbox/outbox-1'],
+  })
+  assert.equal(maxActiveReads, 1)
+})
 
 test('retries transient CloudBase TransactionBusy failures with bounded backoff', async () => {
   let attempts = 0
