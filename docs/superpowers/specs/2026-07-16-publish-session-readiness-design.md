@@ -1,5 +1,8 @@
 # Publish Session Readiness Design
 
+> **Historical / point-in-time:** This specification records the publish-session design accepted for the 2026-07-16 delivery. It does not override later product or implementation decisions.
+> **Current authority:** Use the [documentation authority map](../../README.md), current publishing code, cloud authorization checks, and tests.
+
 ## Goal
 
 Opening 发图文, 写文字, or 发起协作 must use session data that was already established by login and home bootstrap. The create page must not repeat a blocking membership request or interpret an unresolved template request as an empty result.
