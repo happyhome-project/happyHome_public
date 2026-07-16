@@ -57,8 +57,8 @@ assert(
 )
 assert(stickyTabsShellRule.includes('position: sticky'), 'home sticky shell should use sticky positioning.')
 assert(
-  stickyTabsShellRule.includes('top: calc(150rpx + env(safe-area-inset-top) + 98rpx)'),
-  'home tabs should pin directly below the masthead and pinned search surface.',
+  stickyTabsShellRule.includes('top: calc(150rpx + env(safe-area-inset-top) + 98rpx - 1px)'),
+  'home tabs should overlap the pinned search surface by 1px to cover the compositor seam.',
 )
 
 console.log('[home-tabs-scroll-static] PASS')
