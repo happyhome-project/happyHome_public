@@ -393,11 +393,11 @@ function versionDocument(current, communityId, preparedAt) {
   }
 }
 
-function buildOutboxEvents(postUpdates, postsToDelete, versions, preparedAt) {
+function buildOutboxEvents(postUpdates, postsToDelete, versions, preparedAt, deletedPostCommunityById = new Map()) {
   const currentByCommunity = new Map((versions || []).map((item) => [cleanText(item.communityId || item._id), clone(item)]))
   const changes = [
     ...postUpdates.map((operation) => ({ postId: operation.id, communityId: cleanText(operation.after.communityId), reasonCode: 'post.updated', eventType: 'post.upsert' })),
-    ...postsToDelete.map((operation) => ({ postId: operation.id, communityId: cleanText(operation.before.communityId), reasonCode: 'post.deleted', eventType: 'post.delete' })),
+    ...postsToDelete.map((operation) => ({ postId: operation.id, communityId: cleanText(operation.before.communityId) || cleanText(deletedPostCommunityById.get(operation.id)), reasonCode: 'post.deleted', eventType: 'post.delete' })),
   ].sort((left, right) => left.communityId.localeCompare(right.communityId) || left.postId.localeCompare(right.postId) || left.eventType.localeCompare(right.eventType))
   const events = []
   for (const change of changes) {
@@ -509,6 +509,7 @@ export function planGlobalCollaborationMigration(snapshot, { preparedAt = new Da
   }
 
   const retainedById = new Map()
+  const deletedPostCommunityById = new Map()
   const postUpdates = []
   const postsToDelete = []
   for (const post of snapshot.posts || []) {
@@ -519,6 +520,7 @@ export function planGlobalCollaborationMigration(snapshot, { preparedAt = new Da
       throw new Error(`archive post ${post._id} entered realtime migration mutation set`)
     }
     if (classification === 'delete') {
+      deletedPostCommunityById.set(cleanText(post._id), cleanText(post.communityId) || cleanText(section.communityId))
       postsToDelete.push({ collection: 'posts', id: cleanText(post._id), before: clone(post), after: null })
       continue
     }
@@ -537,7 +539,7 @@ export function planGlobalCollaborationMigration(snapshot, { preparedAt = new Da
   const deletedPostIds = new Set(postsToDelete.map((operation) => operation.id))
   const dependents = planDependents(snapshot, retainedById, deletedPostIds, mappingsBySection)
   const files = planFiles(snapshot, postsToDelete, sectionsToDelete, dependents.deletes, desiredTemplates)
-  const outboxEvents = buildOutboxEvents(postUpdates, postsToDelete, snapshot.ragCommunityVersions || [], preparedAt)
+  const outboxEvents = buildOutboxEvents(postUpdates, postsToDelete, snapshot.ragCommunityVersions || [], preparedAt, deletedPostCommunityById)
   const guard = buildArchiveMutationGuard(snapshot)
   const mutationIds = {
     posts: [...postUpdates.map((item) => item.id), ...postsToDelete.map((item) => item.id)].sort(),
