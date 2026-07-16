@@ -161,6 +161,37 @@ test('plans retained conversion, dependent cleanup, attendance remap, outbox eve
   assert.equal(plan.mutationIds.posts.includes('archive-post'), false)
 })
 
+test('derives a legacy post community from its realtime section for the delete outbox only', () => {
+  const snapshot = fixture()
+  delete snapshot.posts.find((item) => item._id === 'discard-post').communityId
+
+  const plan = planGlobalCollaborationMigration(snapshot, { preparedAt: NOW, requireReferenceSections: true })
+
+  assert.equal(Object.hasOwn(plan.postsToDelete.find((item) => item.id === 'discard-post').before, 'communityId'), false)
+  assert.equal(plan.outboxEvents.find((item) => item.postId === 'discard-post').communityId, 'community-other')
+})
+
+test('fails closed when a deleted post and its section both lack community ownership', () => {
+  const snapshot = fixture()
+  delete snapshot.posts.find((item) => item._id === 'discard-post').communityId
+  delete snapshot.sections.find((item) => item._id === 'discard-section').communityId
+
+  assert.throws(
+    () => planGlobalCollaborationMigration(snapshot, { preparedAt: NOW, requireReferenceSections: true }),
+    /discard-post.*no communityId/i,
+  )
+})
+
+test('does not derive community ownership for retained post updates', () => {
+  const snapshot = fixture()
+  delete snapshot.posts.find((item) => item._id === 'carpool-post').communityId
+
+  assert.throws(
+    () => planGlobalCollaborationMigration(snapshot, { preparedAt: NOW, requireReferenceSections: true }),
+    /carpool-post.*no communityId/i,
+  )
+})
+
 test('refuses to plan if reference controls drift or if any archive post enters the mutation set', () => {
   const drifted = fixture()
   drifted.sections.find((item) => item._id === 'carpool-section').widgets.find((item) => item.label === '地图位置').required = false
