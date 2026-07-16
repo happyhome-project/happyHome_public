@@ -20,7 +20,10 @@ function carpoolWidgets() {
     { widgetId: 'legacy_from', type: 'short_text', label: '出发地', fieldKey: 'origin', required: true, order: 0, showInList: true },
     { widgetId: 'legacy_to', type: 'short_text', label: '目的地', fieldKey: 'destination', required: true, order: 1, showInList: true },
     { widgetId: 'legacy_when', type: 'datetime', label: '出发时间', fieldKey: 'departureTime', required: true, order: 2, showInList: true },
-    { widgetId: 'legacy_map', type: 'location', label: '地图位置', fieldKey: 'location', required: true, order: 3, showInList: false },
+    { widgetId: 'legacy_seats', type: 'short_text', label: '空余座位', fieldKey: 'seats', required: true, order: 3, showInList: false },
+    { widgetId: 'legacy_contact', type: 'short_text', label: '联系人', fieldKey: 'contact', required: true, order: 4, showInList: false },
+    { widgetId: 'legacy_attendance', type: 'attendance', label: '上车', fieldKey: 'attendance', required: false, order: 5, showInList: false },
+    { widgetId: 'legacy_map', type: 'location', label: '地图位置', fieldKey: 'location', required: true, order: 6, showInList: false },
   ]
 }
 
@@ -39,7 +42,7 @@ function activityWidgets() {
 function fixture() {
   return {
     communities: [
-      { _id: 'community-teacher', name: '名师班', coverImage: 'cloud://env/shared.jpg' },
+      { _id: 'community-teacher', name: '明士班', coverImage: 'cloud://env/shared.jpg' },
       { _id: 'community-qingshan', name: '青山村' },
       { _id: 'community-other', name: '其他社群' },
     ],
@@ -56,8 +59,8 @@ function fixture() {
       },
       {
         _id: 'carpool-post', communityId: 'community-teacher', sectionId: 'carpool-section', status: 'active',
-        content: { legacy_from: '青山村', legacy_to: '成都', legacy_when: '2026-07-16T00:00:00.000Z', legacy_map: { address: '东门' }, untouched: 'keep' },
-        pendingContent: { legacy_from: '西门', legacy_to: '绵竹', legacy_when: '2026-07-17T00:00:00.000Z', legacy_map: { address: '西门' } },
+        content: { legacy_from: '青山村', legacy_to: '成都', legacy_when: '2026-07-16T00:00:00.000Z', legacy_seats: '3', legacy_contact: '王师傅', legacy_map: { address: '东门' }, untouched: 'keep' },
+        pendingContent: { legacy_from: '西门', legacy_to: '绵竹', legacy_when: '2026-07-17T00:00:00.000Z', legacy_seats: '2', legacy_contact: '李师傅', legacy_map: { address: '西门' } },
       },
       {
         _id: 'activity-post', communityId: 'community-qingshan', sectionId: 'activity-section', status: 'active', originPostId: 'archive-post',
@@ -77,6 +80,7 @@ function fixture() {
     ],
     dependents: {
       post_attendance_members: [
+        { _id: 'attendance-carpool', postId: 'carpool-post', widgetId: 'legacy_attendance', userId: 'member-0' },
         { _id: 'attendance-retained', postId: 'activity-post', widgetId: 'old_attendance', userId: 'member-1' },
         { _id: 'attendance-deleted', postId: 'discard-post', widgetId: 'old_attendance', userId: 'member-2' },
       ],
@@ -103,13 +107,16 @@ test('classifies only realtime carpool and activity sections; all other realtime
   assert.equal(classifyRealtimeSection({ type: 'realtime', name: '其他' }), 'delete')
 })
 
-test('maps legacy widgets semantically and allows the new optional carpool note to be absent', () => {
+test('maps the complete production carpool contract and allows the new optional note to be absent', () => {
   const templates = buildGlobalCollaborationTemplates(NOW)
   const mapping = buildWidgetMapping({ _id: 'legacy', widgets: carpoolWidgets() }, templates[0], { strict: true })
   assert.deepEqual(mapping.targetToSource, {
     carpool_origin: 'legacy_from',
     carpool_destination: 'legacy_to',
     carpool_departure_time: 'legacy_when',
+    carpool_seats: 'legacy_seats',
+    carpool_contact: 'legacy_contact',
+    carpool_attendance: 'legacy_attendance',
     carpool_location: 'legacy_map',
   })
   assert.deepEqual(mapping.unmappedRequired, [])
@@ -125,7 +132,7 @@ test('plans retained conversion, dependent cleanup, attendance remap, outbox eve
     retainedPostCount: 2,
     deletedPostCount: 1,
     dependentDeleteCount: 7,
-    dependentUpdateCount: 1,
+    dependentUpdateCount: 2,
     fileDeleteCount: 2,
     fileProtectedCount: 1,
     templateCreateCount: 2,
@@ -137,10 +144,13 @@ test('plans retained conversion, dependent cleanup, attendance remap, outbox eve
   assert.equal(Object.hasOwn(carpool, 'sectionId'), false)
   assert.deepEqual(carpool.content, {
     carpool_origin: '青山村', carpool_destination: '成都', carpool_departure_time: '2026-07-16T00:00:00.000Z',
-    carpool_location: { address: '东门' }, untouched: 'keep',
+    carpool_seats: '3', carpool_contact: '王师傅', carpool_location: { address: '东门' }, untouched: 'keep',
   })
   assert.equal(plan.postUpdates.find((item) => item.id === 'activity-post').after.eventStartsAt, '2026-07-20T01:00:00.000Z')
-  assert.deepEqual(plan.dependentUpdates[0].after, { _id: 'attendance-retained', postId: 'activity-post', widgetId: 'activity_invite_attendance', userId: 'member-1' })
+  assert.deepEqual(plan.dependentUpdates.map((item) => item.after), [
+    { _id: 'attendance-carpool', postId: 'carpool-post', widgetId: 'carpool_attendance', userId: 'member-0' },
+    { _id: 'attendance-retained', postId: 'activity-post', widgetId: 'activity_invite_attendance', userId: 'member-1' },
+  ])
   assert.equal(plan.dependentDeletes.some((item) => item.collection === 'post_search_documents' && item.id === 'carpool-post'), false)
   assert.equal(plan.dependentDeletes.some((item) => item.collection === 'post_search_documents' && item.id === 'discard-post'), true)
   assert.deepEqual(plan.files.delete, ['cloud://env/orphan.jpg', 'cloud://env/pending-orphan.jpg'])
@@ -153,10 +163,38 @@ test('plans retained conversion, dependent cleanup, attendance remap, outbox eve
 
 test('refuses to plan if reference controls drift or if any archive post enters the mutation set', () => {
   const drifted = fixture()
-  drifted.sections.find((item) => item._id === 'carpool-section').widgets[3].required = false
+  drifted.sections.find((item) => item._id === 'carpool-section').widgets.find((item) => item.label === '地图位置').required = false
   assert.throws(
     () => planGlobalCollaborationMigration(drifted, { preparedAt: NOW, requireReferenceSections: true }),
-    /名师班.*地图位置.*required/i,
+    /明士班.*地图位置.*required/i,
+  )
+
+  const fieldKeyDrifted = fixture()
+  fieldKeyDrifted.sections.find((item) => item._id === 'carpool-section').widgets.find((item) => item.label === '空余座位').fieldKey = 'capacity'
+  assert.throws(
+    () => planGlobalCollaborationMigration(fieldKeyDrifted, { preparedAt: NOW, requireReferenceSections: true }),
+    /明士班.*空余座位.*fieldKey/i,
+  )
+
+  const typeDrifted = fixture()
+  typeDrifted.sections.find((item) => item._id === 'carpool-section').widgets.find((item) => item.label === '空余座位').type = 'text'
+  assert.throws(
+    () => planGlobalCollaborationMigration(typeDrifted, { preparedAt: NOW, requireReferenceSections: true }),
+    /明士班.*空余座位.*type/i,
+  )
+
+  const orderDrifted = fixture()
+  orderDrifted.sections.find((item) => item._id === 'carpool-section').widgets.find((item) => item.label === '联系人').order = 9
+  assert.throws(
+    () => planGlobalCollaborationMigration(orderDrifted, { preparedAt: NOW, requireReferenceSections: true }),
+    /明士班.*联系人.*order/i,
+  )
+
+  const labelDrifted = fixture()
+  labelDrifted.sections.find((item) => item._id === 'carpool-section').widgets.find((item) => item.label === '上车').label = '其他动作'
+  assert.throws(
+    () => planGlobalCollaborationMigration(labelDrifted, { preparedAt: NOW, requireReferenceSections: true }),
+    /明士班.*上车.*label/i,
   )
 
   const archiveCollision = fixture()
