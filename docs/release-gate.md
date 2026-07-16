@@ -175,16 +175,7 @@ The remote production state shown by the lock status must match the exact run ID
 npm.cmd run release:reconcile -- --run-id=$runId
 ```
 
-For the `global-collaboration-templates` change only, keep the formal release window to its normal smoke gates. After the new cloud/admin/mini-program code is published, prepare the destructive realtime cleanup from the same clean canonical `main`, review its exact IDs, counts, mappings, protected files, source digest, and archive digest, then apply that immutable manifest:
-
-```powershell
-$manifest = ".codex-local/release-evidence/global-collaboration-v1.json"
-npm.cmd run migrate:global-collaboration -- --prepare --manifest=$manifest
-$manifestSha = (Get-Content -Raw -Encoding utf8 $manifest | ConvertFrom-Json).manifestSha256
-npm.cmd run migrate:global-collaboration -- --apply --manifest=$manifest --manifest-sha256=$manifestSha --confirm-apply=global-collaboration-v1
-```
-
-Do not run these commands from a feature worktree or before the compatible code is deployed. After apply succeeds, run the full cross-community/member/admin acceptance separately; the release-stage smoke is not that acceptance.
+The one-time `global-collaboration-templates` production data transition is complete. Its repository migration command and executor were retired after verification; future releases have no global-collaboration data migration step. Historical design and implementation records remain under `docs/superpowers/` and Git history.
 
 - If WeChat public platform automation is unavailable, report that the uploaded development build still needs to be selected as the trial version in the WeChat backend.
 - Only claim true-device success when there is recorded replay evidence or user-provided phone test evidence.
