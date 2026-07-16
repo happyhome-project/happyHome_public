@@ -22,6 +22,7 @@ import * as db from './db'
 const RUNTIME_COLLECTION = 'admin_runtime'
 const ACCESS_TOKEN_DOC_ID = 'wx_access_token'
 const REFRESH_AHEAD_MS = 5 * 60 * 1000  // 提前 5 分钟续期
+const WX_OPENAPI_REQUEST_TIMEOUT_MS = 4_000
 
 interface AccessTokenDoc {
   _id: string
@@ -60,6 +61,9 @@ function httpsRequest(method: 'GET' | 'POST', urlStr: string, body?: string): Pr
       }))
     })
     req.on('error', reject)
+    req.setTimeout(WX_OPENAPI_REQUEST_TIMEOUT_MS, () => {
+      req.destroy(new Error(`WeChat OpenAPI request timed out after ${WX_OPENAPI_REQUEST_TIMEOUT_MS}ms`))
+    })
     if (body !== undefined) req.write(body)
     req.end()
   })
