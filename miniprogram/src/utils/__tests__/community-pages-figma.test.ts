@@ -115,9 +115,31 @@ describe('Figma community directory pages', () => {
     expect(cancel).toContain('guestIntroLoginEpoch.invalidate()')
     expect(cancel).not.toContain('if (guestIntroLoginBusy.value) return')
     expect(code).toMatch(/onHide\(\(\) => \{[\s\S]*guestIntroLoginEpoch\.invalidate\(\)/)
-    expect(login).toContain('void refreshHomeData()')
+    expect(login).toContain('void refreshHomeData({ force: true })')
     expect(login).not.toContain('await refreshHomeData()')
     expect(code).toContain("stage: 'post.bootstrap'")
+  })
+
+  test('home renders the signed-out intro on first paint while bootstrap runs independently', () => {
+    const code = readPage('index')
+    const initializeHome = code.match(/async function initializeHome[\s\S]*?(?=\nonMounted)/)?.[0] ?? ''
+
+    expect(code).toContain('DEFAULT_GUEST_INTRO_CONFIG')
+    expect(code).toContain('shouldShowGuestIntroOnFirstPaint')
+    expect(code).toMatch(/const guestIntroConfig = ref<GuestIntroConfig \| null>\(\s*userStore\.isLoggedIn \? null : DEFAULT_GUEST_INTRO_CONFIG/)
+    expect(code).toMatch(/const showGuestIntro = ref\(shouldShowGuestIntroOnFirstPaint\(/)
+    expect(initializeHome).toContain('await refreshHomeData()')
+    expect(initializeHome.indexOf('await refreshHomeData()')).toBeGreaterThan(-1)
+  })
+
+  test('home covers unresolved authenticated data with a dedicated entry state', () => {
+    const code = readPage('index')
+
+    expect(code).toContain('class="home-entry-loading"')
+    expect(code).toContain('正在进入社区')
+    expect(code).toMatch(/showAuthenticatedHomeEntryLoading[\s\S]*userStore\.isLoggedIn[\s\S]*homeSnapshotViewerOpenId\.value !== userStore\.openId/)
+    expect(code).toMatch(/applyHomeSnapshot[\s\S]*homeSnapshotViewerOpenId\.value = expectedViewer/)
+    expect(code).toContain('@tap="retryHomeRefresh"')
   })
 
   test('home fences stale switch responses and keeps a manual retry path for network failures', () => {
