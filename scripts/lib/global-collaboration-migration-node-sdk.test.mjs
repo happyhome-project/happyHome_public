@@ -2,9 +2,48 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  outboxedPostOperationApplied,
   readOutboxedPostTransactionState,
   runTransactionWithBusyRetry,
 } from './global-collaboration-migration-node-sdk.mjs'
+
+test('accepts an atomically applied post event after the worker consumes its outbox', () => {
+  const operation = { after: { _id: 'post-1', area: 'collaboration' } }
+  const event = { communityId: 'community-1', afterVersion: { communityId: 'community-1', contentVersion: 4, aclVersion: 2 } }
+
+  assert.equal(outboxedPostOperationApplied({
+    currentPost: operation.after,
+    currentOutbox: null,
+    currentVersion: { communityId: 'community-1', contentVersion: 4, aclVersion: 2 },
+    operation,
+    event,
+  }), true)
+})
+
+test('does not accept a missing outbox while the post is still before the operation', () => {
+  const operation = { before: { _id: 'post-1', sectionId: 'section-1' }, after: { _id: 'post-1', area: 'collaboration' } }
+  const event = { communityId: 'community-1', afterVersion: { communityId: 'community-1', contentVersion: 4, aclVersion: 2 } }
+
+  assert.equal(outboxedPostOperationApplied({
+    currentPost: operation.before,
+    currentOutbox: null,
+    currentVersion: { communityId: 'community-1', contentVersion: 4, aclVersion: 2 },
+    operation,
+    event,
+  }), false)
+})
+
+test('does not accept a consumed outbox before the community version advances', () => {
+  const operation = { after: { _id: 'post-1', area: 'collaboration' } }
+  const event = { communityId: 'community-1', afterVersion: { communityId: 'community-1', contentVersion: 4, aclVersion: 2 } }
+  assert.equal(outboxedPostOperationApplied({ currentPost: operation.after, currentOutbox: null, currentVersion: { communityId: 'community-1', contentVersion: 3, aclVersion: 2 }, operation, event }), false)
+})
+
+test('does not accept a present outbox that belongs to another event', () => {
+  const operation = { after: { _id: 'post-1', area: 'collaboration' } }
+  const event = { communityId: 'community-1', afterVersion: { communityId: 'community-1', contentVersion: 4, aclVersion: 2 }, afterOutbox: { _id: 'expected', communityId: 'community-1' } }
+  assert.equal(outboxedPostOperationApplied({ currentPost: operation.after, currentOutbox: { _id: 'other', communityId: 'community-1' }, currentVersion: event.afterVersion, operation, event }), false)
+})
 
 test('reads post, version, and outbox sequentially inside one CloudBase transaction', async () => {
   let activeReads = 0
