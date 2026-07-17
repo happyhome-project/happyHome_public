@@ -61,6 +61,18 @@ export class ArchivePostContractError extends Error {
 
 type PlainObject = Record<string, unknown>
 
+const COS_VIDEO_FIELDS = new Set([
+  'source',
+  'itemId',
+  'title',
+  'cover',
+  'duration',
+  'description',
+  'fileID',
+  'allowDownload',
+  'allowShare',
+])
+
 function isPlainObject(value: unknown): value is PlainObject {
   if (value === null || typeof value !== 'object') return false
   const prototype = Object.getPrototypeOf(value)
@@ -117,6 +129,7 @@ function isGeoLocation(value: unknown): value is GeoLocation {
 function parseCosVideo(value: unknown): VideoItemCos {
   if (
     !isPlainObject(value)
+    || Object.keys(value).some((field) => !COS_VIDEO_FIELDS.has(field))
     || value.source !== 'cos'
     || typeof value.itemId !== 'string'
     || value.itemId.trim() === ''

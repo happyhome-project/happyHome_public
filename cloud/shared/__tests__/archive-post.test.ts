@@ -155,6 +155,19 @@ describe('archive post create contract', () => {
     }
   })
 
+  test('rejects unknown video item fields', () => {
+    expectCode({
+      area: 'archive',
+      format: 'video',
+      content: {
+        title: '标题',
+        videos: [{
+          source: 'cos', itemId: 'one', title: '视频', fileID: 'cloud://one.mp4', unexpected: true,
+        }],
+      },
+    }, 'archive_video_invalid')
+  })
+
   test('rejects forbidden and unknown video content fields', () => {
     const video = { source: 'cos', itemId: 'one', title: '视频', fileID: 'cloud://one.mp4' }
     for (const forbidden of [
