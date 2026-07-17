@@ -328,6 +328,30 @@ test('listMine: requires an authenticated identity', async () => {
   expect(db.queryAfterId).not.toHaveBeenCalled()
 })
 
+test('listMine: resolves archive video metadata without degrading it to image-text', async () => {
+  const previousQueryAfterId = (db.queryAfterId as jest.Mock).getMockImplementation()
+  const previousGetById = (db.getById as jest.Mock).getMockImplementation()
+  ;(db.queryAfterId as jest.Mock).mockReset()
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.queryAfterId as jest.Mock)
+    .mockResolvedValueOnce([{
+      _id: 'archive-video-1', authorId: 'author-1', communityId: 'community-1', area: 'archive',
+      format: 'video', status: 'active', auditStatus: 'pass', content: { title: '家庭影像' },
+      createdAt: '2026-07-17T08:00:00.000Z',
+    }])
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', name: '阳光花园' })
+
+  const result = await handleListMine({}, 'author-1')
+
+  expect(result.posts[0]).toEqual(expect.objectContaining({
+    format: 'video',
+    sectionName: '视频',
+    displayTemplate: 'video_note',
+  }))
+  ;(db.queryAfterId as jest.Mock).mockReset().mockImplementation(previousQueryAfterId)
+  ;(db.getById as jest.Mock).mockReset().mockImplementation(previousGetById)
+})
+
 test('listMyActivities merges authored and joined collaboration posts, dedupes, and sorts newest first', async () => {
   ;(db.queryAfterId as jest.Mock).mockReset()
   const authored = {
@@ -2518,6 +2542,91 @@ test('create: persists an image-text archive post without loading or storing a s
     recentScore: result.auditStatus === 'pass' ? 1 : 0,
     recentPostCount: result.auditStatus === 'pass' ? 1 : 0,
   }))
+})
+
+test('create: persists and audits one archive video through the synthetic video section', async () => {
+  const previousQuery = (db.query as jest.Mock).getMockImplementation()
+  const previousCreate = (db.create as jest.Mock).getMockImplementation()
+  ;(db.query as jest.Mock).mockReset()
+  ;(db.create as jest.Mock).mockReset()
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.create as jest.Mock).mockImplementation(async (collectionName: string) => (
+    collectionName === 'posts' ? 'archive-video-1' : 'audit-task-1'
+  ))
+  const video = {
+    source: 'cos', itemId: 'video-1', title: '家庭影像',
+    fileID: 'cloud://env/archive/video-1.mp4', description: '湖畔散步',
+  }
+
+  const result = await handleCreate({
+    communityId: 'community-1',
+    area: 'archive',
+    format: 'video',
+    topics: ['成长'],
+    content: {
+      title: '周末记录',
+      body: { format: 'markdown', markdown: '正文', html: '<p>正文</p>', text: '正文', imageFileIDs: [], schemaVersion: 1 },
+      videos: [video],
+      location: { address: '湖畔', lat: 30, lng: 120 },
+    },
+  } as any, 'test-openid')
+
+  expect(result).toEqual(expect.objectContaining({ postId: 'archive-video-1' }))
+  expect(db.create).toHaveBeenCalledWith('posts', expect.objectContaining({
+    area: 'archive',
+    format: 'video',
+    content: expect.objectContaining({ videos: [video] }),
+  }))
+  expect(db.create).toHaveBeenCalledWith('content_audit_tasks', expect.objectContaining({
+    postId: 'archive-video-1',
+    widgetId: 'videos',
+    targetType: 'video',
+    targetRef: video.fileID,
+  }))
+  ;(db.query as jest.Mock).mockReset().mockImplementation(previousQuery)
+  ;(db.create as jest.Mock).mockReset().mockImplementation(previousCreate)
+})
+
+test('update: keeps the stored archive video format and audits pending video content', async () => {
+  const post = {
+    _id: 'archive-video-1', communityId: 'community-1', authorId: 'test-openid',
+    status: 'active', auditStatus: 'pass', area: 'archive', format: 'video', topics: ['成长'],
+    createdAt: '2026-07-15T01:00:00.000Z',
+  }
+  const previousGetById = (db.getById as jest.Mock).getMockImplementation()
+  const previousQuery = (db.query as jest.Mock).getMockImplementation()
+  const previousCreate = (db.create as jest.Mock).getMockImplementation()
+  ;(db.getById as jest.Mock).mockReset()
+  ;(db.query as jest.Mock).mockReset()
+  ;(db.create as jest.Mock).mockReset()
+  ;(db.getById as jest.Mock).mockResolvedValueOnce(post).mockResolvedValueOnce(post)
+  ;(db.query as jest.Mock).mockResolvedValue([])
+  ;(db.create as jest.Mock).mockResolvedValue('audit-task-1')
+  const video = {
+    source: 'cos', itemId: 'video-2', title: '更新影像', fileID: 'cloud://env/archive/video-2.mp4',
+  }
+
+  await handleUpdate({
+    postId: 'archive-video-1',
+    format: 'image_text',
+    topics: ['新话题'],
+    content: { title: '更新记录', videos: [video] },
+  } as any, 'test-openid')
+
+  expect(db.updateById).toHaveBeenCalledWith('posts', 'archive-video-1', expect.objectContaining({
+    pendingContent: { __set: { title: '更新记录', videos: [video] } },
+    pendingTopics: { __set: ['新话题'] },
+  }))
+  const pendingWrite = (db.updateById as jest.Mock).mock.calls.find(([, id, data]) => (
+    id === 'archive-video-1' && data?.pendingContent
+  ))?.[2]
+  expect(pendingWrite).not.toHaveProperty('format')
+  expect(db.create).toHaveBeenCalledWith('content_audit_tasks', expect.objectContaining({
+    postId: 'archive-video-1', contentSlot: 'pendingContent', widgetId: 'videos', targetType: 'video',
+  }))
+  ;(db.getById as jest.Mock).mockReset().mockImplementation(previousGetById)
+  ;(db.query as jest.Mock).mockReset().mockImplementation(previousQuery)
+  ;(db.create as jest.Mock).mockReset().mockImplementation(previousCreate)
 })
 
 test('create: persists a text archive post with its normalized cover theme', async () => {

@@ -1,5 +1,6 @@
 import { buildInitialCollaborationTemplates } from '../../shared/collaboration-templates'
 import { loadPostContentSection } from '../post-content-contract'
+import { validateContentValues } from '../post-validate'
 
 const carpoolTemplate = buildInitialCollaborationTemplates()[0]
 
@@ -53,4 +54,29 @@ test('returns null for a malformed section-free collaboration post without issui
     _id: 'post-1', communityId: 'community-1', area: 'collaboration',
   }, loadDocument)).resolves.toBeNull()
   expect(loadDocument).not.toHaveBeenCalled()
+})
+
+test('validates only the explicitly member-editable admin widget', () => {
+  const section = {
+    _id: 'archive-video',
+    communityId: 'community-1',
+    name: '沉淀区视频',
+    widgets: [
+      { widgetId: 'videos', type: 'video_group', label: '视频' },
+      { widgetId: 'admin-videos', type: 'video_group', label: '管理员视频' },
+      { widgetId: 'audio', type: 'audio_group', label: '音频' },
+    ],
+  } as any
+
+  expect(() => validateContentValues(section, {
+    videos: 'invalid video value',
+    'admin-videos': 'still ignored',
+    audio: 'still ignored',
+  } as any, { memberEditableVideoWidgetIds: ['videos'] } as any)).toThrow('视频控件「视频」必须是视频条目数组')
+
+  expect(() => validateContentValues(section, {
+    videos: [{ source: 'cos', title: '家庭影像', fileID: 'cloud://env/video.mp4' }],
+    'admin-videos': 'still ignored',
+    audio: 'still ignored',
+  } as any, { memberEditableVideoWidgetIds: ['videos'] } as any)).not.toThrow()
 })

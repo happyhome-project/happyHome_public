@@ -152,7 +152,7 @@ async function resolvePostContentContract(post: {
   if (post.area === 'archive') {
     const section = buildArchiveContentSection(
       post.communityId,
-      post.format === 'text' ? 'text' : 'image_text',
+      resolveArchivePostFormat(post.format),
     )
     return { section, collaborationTemplate: null as CollaborationTemplate | null }
   }
@@ -498,18 +498,39 @@ function buildArchiveContentSection(communityId: string, format: ArchivePostForm
     _id: '', communityId, name: '沉淀区', icon: '', order: 0,
     enableComment: true, enableLike: true, createdAt: '', type: 'evergreen', status: 'active',
   } as const
-  const widgets: Widget[] = format === 'image_text'
-    ? [
+  let widgets: Widget[]
+  if (format === 'image_text') {
+    widgets = [
         { widgetId: 'images', type: 'image_group', label: '图片', fieldKey: 'images', required: true, order: 0, showInList: false },
         { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 1, showInList: true },
         { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false },
         { widgetId: 'location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false },
       ]
-    : [
+  } else if (format === 'video') {
+    widgets = [
+      { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
+      { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 1, showInList: false },
+      { widgetId: 'videos', type: 'video_group', label: '视频', fieldKey: 'videos', required: true, order: 2, showInList: false },
+      { widgetId: 'location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false },
+    ]
+  } else {
+    widgets = [
         { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
         { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', required: true, order: 1, showInList: false },
       ]
+  }
   return { ...common, widgets } as Section
+}
+
+function resolveArchivePostFormat(format: unknown): ArchivePostFormat {
+  if (format === 'text' || format === 'video') return format
+  return 'image_text'
+}
+
+function archiveDisplayMetadata(format: unknown): { sectionName: string; displayTemplate: string } {
+  if (format === 'text') return { sectionName: '文字', displayTemplate: 'text_note' }
+  if (format === 'video') return { sectionName: '视频', displayTemplate: 'video_note' }
+  return { sectionName: '图文', displayTemplate: 'image_note' }
 }
 
 type CreatePostParams = {
@@ -533,8 +554,11 @@ export async function handleCreate(
     const archive = parseArchivePostCreateInput(params)
     const section = buildArchiveContentSection(params.communityId, archive.format)
     const content = archive.content as unknown as PostContent
-    validateRequiredWidgets(section, content)
-    validateContentValues(section, content)
+    const validationOptions = archive.format === 'video'
+      ? { memberEditableVideoWidgetIds: ['videos'] }
+      : undefined
+    validateRequiredWidgets(section, content, validationOptions)
+    validateContentValues(section, content, validationOptions)
 
     const now = new Date().toISOString()
     const postData = {
@@ -929,14 +953,15 @@ async function enrichPersonalPosts(posts: any[]) {
     const section = collaborationTemplate
       ? collaborationTemplateAsSection(collaborationTemplate, String(post?.communityId || ''))
       : sectionsById.get(String(post?.sectionId || ''))
+    const archiveMetadata = isArchive ? archiveDisplayMetadata(post?.format) : null
     return {
       ...post,
       communityName: String(communitiesById.get(String(post?.communityId || ''))?.name || '社区'),
       sectionName: isArchive
-        ? (post?.format === 'text' ? '文字' : '图文')
+        ? archiveMetadata!.sectionName
         : String(section?.name || '已下线板块'),
       displayTemplate: isArchive
-        ? (post?.format === 'text' ? 'text_note' : 'image_note')
+        ? archiveMetadata!.displayTemplate
         : String(section?.displayTemplate || 'default'),
       ...(collaborationTemplate ? { collaborationTemplate } : {}),
       section: section ? {
@@ -1223,8 +1248,11 @@ export async function handleUpdate(
   const sanitizedContent = archive
     ? archive.content as unknown as PostContent
     : sanitizeContent(params.content, section)
-  validateRequiredWidgets(section, sanitizedContent)
-  validateContentValues(section, sanitizedContent)
+  const validationOptions = archive?.format === 'video'
+    ? { memberEditableVideoWidgetIds: ['videos'] }
+    : undefined
+  validateRequiredWidgets(section, sanitizedContent, validationOptions)
+  validateContentValues(section, sanitizedContent, validationOptions)
   const presentation = archive?.format === 'text'
     ? archive.presentation
     : (!archive && isTextNoteSection(section)
