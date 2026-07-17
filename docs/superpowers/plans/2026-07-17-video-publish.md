@@ -120,21 +120,20 @@
 - [ ] Run the focused feed/detail tests and mini-program type-check.
 - [ ] Commit the display change.
 
-### Task 8: Connect audit, file extraction, and search coverage
+### Task 8: Verify audit and file extraction coverage
 
 **Files:**
-- Modify: `cloud/lib/content-audit.ts`
-- Modify: `cloud/lib/extract-file-ids.ts`
-- Modify: `cloud/lib/post-search.ts`
+- Review: `cloud/lib/content-audit.ts`
+- Review: `cloud/lib/extract-file-ids.ts`
+- Test: `cloud/lib/__tests__/extract-file-ids.test.ts`
 - Test: `cloud/lib/__tests__/content-audit.test.ts`
-- Test: `cloud/lib/__tests__/post-search.test.ts`
 - Test: `cloud/functions/post/__tests__/post.test.ts`
 
-- [ ] Write failing tests proving archive video and cover become audit/file-cleanup targets and video title/hint become searchable.
-- [ ] Run the focused cloud tests and confirm the archive projection is missing.
-- [ ] Route the synthetic video archive widget through existing video audit, extraction, and search logic without changing RAG enablement or budgets.
-- [ ] Run the focused cloud tests.
-- [ ] Commit the audit/search integration.
+- [x] Confirm the archive video create/update tests prove the synthetic `video_group` produces video audit targets.
+- [x] Confirm `extractCloudFileIDsFromContent` already extracts a video item's `fileID` and `cover` from the one-element `videos` array.
+- [x] Confirm no search or RAG source, index, worker, job, budget, or backfill file changed.
+- [ ] Run the focused audit and file-extraction tests during final verification.
+- [ ] Commit the user-requested scope correction to the specification and plan.
 
 ### Task 9: Regression verification and release metadata
 

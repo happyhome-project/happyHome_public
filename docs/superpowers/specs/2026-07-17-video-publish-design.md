@@ -94,12 +94,12 @@ video/audio widgets in ordinary sections.
 
 The upload UI validates size and extension before upload, reports progress, supports retry, and does not submit until upload completes. Abandoned or failed submissions record uploaded temporary files for best-effort cleanup using the existing storage cleanup mechanisms where available.
 
-## Audit, Search, and RAG
+## Audit and File Lifecycle
 
 - Feed the video file and cover into the existing content-audit target extraction.
 - Preserve the existing audit-status visibility rules: content that has not passed the required audit must not appear as a normal public post.
-- Reuse existing video title/hint search extraction.
-- Reuse the existing video RAG worker and its cost controls; this feature does not change RAG enablement or production budgets.
+- Feed the video file and cover into existing post file-reference extraction so delete and cleanup paths do not orphan published media.
+- Search and RAG integration are explicitly deferred because those product paths are not complete yet. This change must not modify search indexes, RAG workers, RAG jobs, enablement, budgets, or backfill behavior.
 
 ## Feed and Detail Presentation
 
@@ -141,4 +141,5 @@ Browser or DevTools validation should exercise a temporary video post only when 
 - multiple videos in one archive post;
 - external H5, app-link, mini-program, live, or Channels sources for member posts;
 - new video editing, transcoding, or RAG pricing behavior;
+- video search or RAG integration;
 - production deployment or mini-program upload from the feature worktree.
