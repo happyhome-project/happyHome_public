@@ -1,6 +1,6 @@
 <template>
   <view class="phone-inner">
-    <view v-if="showAuthenticatedHomeEntryLoading" class="home-entry-loading" @touchmove.stop.prevent>
+    <view v-if="showHomeEntryLoading" class="home-entry-loading" @touchmove.stop.prevent>
       <view class="home-entry-loading-shell">
         <view class="home-entry-loading-brand">
           <view class="home-entry-loading-avatar"></view>
@@ -419,7 +419,6 @@
         </button>
         <!-- #endif -->
         <view class="guest-intro-secondary" @tap="handleGuestIntroSecondary">
-          <text class="guest-intro-secondary-plus">＋</text>
           <text>{{ guestIntroConfig.secondaryActionText }}</text>
         </view>
         </template>
@@ -622,10 +621,18 @@ const homeTopbarStyle = computed(() => ({
   paddingRight: `calc(var(--hh-page-x) + ${homeMenuSafeRightInset.value}px)`,
 }))
 const communityName = computed(() => communityStore.currentCommunity?.name ?? '选择社区')
-const showAuthenticatedHomeEntryLoading = computed(() => (
-  userStore.isLoggedIn
-  && Boolean(userStore.openId)
-  && homeSnapshotViewerOpenId.value !== userStore.openId
+const showHomeEntryLoading = computed(() => (
+  (
+    userStore.isLoggedIn
+    && Boolean(userStore.openId)
+    && homeSnapshotViewerOpenId.value !== userStore.openId
+  )
+  || (
+    !userStore.isLoggedIn
+    && !showGuestIntro.value
+    && homeLoading.value
+    && !communityStore.currentCommunityId
+  )
 ))
 const avatarLetter = computed(() => {
   const name = communityStore.currentCommunity?.name ?? ''
@@ -1655,7 +1662,6 @@ async function submitGuestIntroLogin() {
 
 function handleGuestIntroSecondary() {
   markCurrentGuestIntroSeen()
-  openOnboardingPreservingStack({ mode: 'discover' })
 }
 
 function applyHomeSnapshot(rawSnapshot: HomeSnapshot | null, source: 'prefetch' | 'cache' | 'cloud') {
@@ -4181,10 +4187,6 @@ onShareAppMessage(() => {
   font-weight: 400;
   line-height: 48rpx;
   color: #181818;
-}
-.guest-intro-secondary .guest-intro-secondary-plus {
-  font-size: 42rpx;
-  line-height: 48rpx;
 }
 .guest-intro-login-form {
   display: flex;

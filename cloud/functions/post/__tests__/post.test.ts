@@ -1237,7 +1237,7 @@ test('bootstrap: unauthenticated viewer lands on the configured public community
   expect(result.backgroundFetchToken).toBe('')
   expect((result as any).guestIntroConfig).toEqual(expect.objectContaining({
     title: '样板弹窗标题',
-    secondaryActionText: '创建我自己的社群',
+    secondaryActionText: '先随便看看',
   }))
   expect((db.query as jest.Mock).mock.calls.some(([collection]) => collection === 'community_members')).toBe(false)
 })
