@@ -1,5 +1,10 @@
 # Realtime Collaboration Figma Layout Implementation Plan
 
+> **Historical / point-in-time:** This plan records the approved 2026-07-16 implementation sequence and is retained only for traceability.
+> **Current authority:** Use the [documentation authority map](../../README.md), current home-page code, and automated tests.
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the home-page realtime collaboration card use the Figma card proportions and full horizontal content width, without letting an optional corner ribbon compress every card.
