@@ -25,6 +25,18 @@ export const ADMIN_ONLY_WIDGET_TYPES: Set<WidgetType> = new Set([
   'audio_group',
 ])
 
+type ContentValidationOptions = {
+  allowAdminOnly?: boolean
+  memberEditableVideoWidgetIds?: readonly string[]
+}
+
+function isAdminOnlyWidgetEnabled(widget: Widget, options: ContentValidationOptions): boolean {
+  if (!ADMIN_ONLY_WIDGET_TYPES.has(widget.type)) return true
+  if (options.allowAdminOnly === true) return true
+  return widget.type === 'video_group'
+    && new Set(options.memberEditableVideoWidgetIds || []).has(widget.widgetId)
+}
+
 export function getEditableWidgetIds(section: Section, allowAdminOnly = false): Set<string> {
   return new Set(
     (section.widgets || [])
@@ -98,12 +110,11 @@ function isEmptyRequiredLocation(value: unknown): boolean {
 export function validateRequiredWidgets(
   section: Section,
   content: PostContent,
-  options: { allowAdminOnly?: boolean } = {}
+  options: ContentValidationOptions = {}
 ): void {
-  const allowAdminOnly = options.allowAdminOnly === true
   for (const widget of (section.widgets || []) as Widget[]) {
     if (NEVER_IN_POST_CONTENT.has(widget.type)) continue
-    if (!allowAdminOnly && ADMIN_ONLY_WIDGET_TYPES.has(widget.type)) continue
+    if (!isAdminOnlyWidgetEnabled(widget, options)) continue
     if (!widget.required) continue
     const value = content[widget.widgetId]
     if (
@@ -401,9 +412,8 @@ function validateRealtimeHomeTitle(section: Section, content: PostContent): void
 export function validateContentValues(
   section: Section,
   content: PostContent,
-  options: { allowAdminOnly?: boolean } = {}
+  options: ContentValidationOptions = {}
 ): void {
-  const allowAdminOnly = options.allowAdminOnly === true
   for (const widget of (section.widgets || []) as Widget[]) {
     const value = content[widget.widgetId]
     if (value === undefined || value === null || value === '') continue
@@ -448,7 +458,7 @@ export function validateContentValues(
       continue
     }
 
-    if (!allowAdminOnly) continue
+    if (!isAdminOnlyWidgetEnabled(widget, options)) continue
 
     if (widget.type === 'video_group') {
       if (!Array.isArray(value)) {

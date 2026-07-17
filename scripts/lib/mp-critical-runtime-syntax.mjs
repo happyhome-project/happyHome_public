@@ -3,7 +3,7 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { parse } from 'acorn'
 
-export const KNOWN_NODE_MODULES_SHA256 = '07be8ba73da09681b3bd94974b3a84cb34072738a315ea26438902798a533eb9'
+export const KNOWN_NODE_MODULES_SHA256 = '94d87d9569f6eaef3dad96942f5f3c7857f132d3cd191d5fc263a482b1001eb8'
 export const KNOWN_WECHAT_BASE_LIBRARY_VERSION = '3.15.1'
 
 function walk(node, visitor, parent = null) {

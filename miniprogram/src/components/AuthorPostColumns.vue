@@ -9,8 +9,18 @@
         :data-post-id="card.postId"
         @tap="emit('open', card.postId)"
       >
+        <view v-if="card.cover.kind === 'video'" class="author-post-video-cover">
+          <image
+            v-if="card.cover.src"
+            class="author-post-cover"
+            :src="card.cover.src"
+            mode="aspectFill"
+          />
+          <view v-else class="author-post-video-placeholder video-placeholder"><text>视频</text></view>
+          <view class="author-post-video-play video-play"><text>▶</text></view>
+        </view>
         <image
-          v-if="card.cover.kind === 'image'"
+          v-else-if="card.cover.kind === 'image'"
           class="author-post-cover"
           :src="card.cover.src"
           mode="widthFix"
@@ -76,6 +86,46 @@ function auditLabel(status: string) {
   min-height: 230rpx;
   border-radius: 12rpx;
   background: #f2f2f2;
+}
+.author-post-video-cover {
+  position: relative;
+  width: 100%;
+  height: 300rpx;
+  overflow: hidden;
+  border-radius: 12rpx;
+  background: #171923;
+}
+.author-post-video-cover .author-post-cover { width: 100%; height: 100%; min-height: 0; }
+.author-post-video-placeholder {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(145deg, #272b3d, #11131c);
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 34rpx;
+  letter-spacing: 8rpx;
+}
+.author-post-video-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.author-post-video-play text {
+  display: flex;
+  width: 68rpx;
+  height: 68rpx;
+  align-items: center;
+  justify-content: center;
+  padding-left: 4rpx;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  color: #222;
+  font-size: 28rpx;
+  box-shadow: 0 4rpx 18rpx rgba(0, 0, 0, 0.2);
 }
 .author-post-card :deep(.text-note-cover-frame) { border-radius: 12rpx; }
 .author-post-card-main { padding: 14rpx 4rpx 0; }

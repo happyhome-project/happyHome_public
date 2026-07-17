@@ -1,5 +1,12 @@
 <template>
   <view class="create-page">
+    <view class="create-custom-nav" :style="createCustomNavStyle">
+      <view class="create-custom-nav__row">
+        <button class="create-custom-nav__back" aria-label="返回" @tap="handlePageExit">‹</button>
+        <text class="create-custom-nav__title">{{ createNavTitle }}</text>
+        <view class="create-custom-nav__spacer" />
+      </view>
+    </view>
     <view v-if="!userStore.isLoggedIn" class="guard-state">
       <text class="guard-title">请先登录</text>
       <text class="guard-desc">登录后才能发布内容</text>
@@ -231,6 +238,21 @@
                 />
               </view>
 
+              <VideoPublishEditor
+                v-else-if="archiveFormat === 'video' && block.widget.type === 'video_group'"
+                :key="archiveVideoIntentGeneration"
+                :community-id="communityStore.currentCommunityId"
+                :model-value="formData[block.widget.widgetId]"
+                :initial-file="archiveInitialMedia"
+                :initial-state="archiveVideoIntentState"
+                :initial-generation="archiveVideoIntentGeneration"
+                @update:model-value="formData[block.widget.widgetId] = $event"
+                @upload-state="videoUploading = $event"
+                @navigation-blocked="videoNavigationBlocked = $event"
+                @readiness="videoPublishReady = $event.ready"
+                @initial-state="handleVideoInitialState"
+                @selected-file="handleVideoSelectedFile"
+              />
               <WidgetEditor
                 v-else
                 :widget="block.widget"
@@ -255,26 +277,27 @@
               />
               <text>存草稿</text>
             </button>
-            <button class="btn-primary" data-testid="create-submit" :disabled="submitting" @tap="handleSubmit">
+            <button class="btn-primary" data-testid="create-submit" :disabled="submitting || !videoPublishReady" @tap="handleSubmit">
               {{ submitting ? (isEditMode ? '保存中...' : '发布中...') : (isEditMode ? '保存' : (isActivityInviteMode ? '发布邀约' : '发布')) }}
             </button>
           </view>
         </template>
       </view>
     </template>
-    <AppTabBar v-if="!selectedSection" current="create" />
+    <AppTabBar v-if="!selectedSection" current="create" @media-selected="handleInlineMediaIntent" />
   </view>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { onLoad, onShow } from '@dcloudio/uni-app'
+import { onBackPress, onLoad, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
-import { collaborationTemplateApi, memberApi, postApi, sectionApi } from '../../api/cloud'
+import { collaborationTemplateApi, memberApi, postApi, sectionApi, type ArchivePostCreateParams } from '../../api/cloud'
 import { uploadCloudFile } from '../../api/storage'
 import AppTabBar from '../../components/AppTabBar.vue'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
+import VideoPublishEditor from '../../components/widgets/VideoPublishEditor.vue'
 import TextNoteCover from '../../components/TextNoteCover.vue'
 import {
   CREATE_SECTION_INTENT_KEY,
@@ -284,12 +307,20 @@ import {
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { resolveActivityAnnouncementMain } from '../../utils/create-form-layout'
 import { buildImageNoteCreateBlocks } from '../../utils/image-note-create'
+import { computeCreateNavMetrics, resolveCreateNavTitle } from '../../utils/create-nav'
 import { isImageNoteSectionContract } from '../../utils/image-note'
 import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
-import { ensureHierarchyStack, normalizeRouteUrl, openHierarchyParent } from '../../utils/hierarchy-nav'
+import { ensureHierarchyStack, navigateBackOrHome, normalizeRouteUrl, openHierarchyParent } from '../../utils/hierarchy-nav'
 import { extractTextNoteContent, TEXT_NOTE_THEMES, type TextNoteTheme } from '../../utils/text-note'
 import { asCollaborationSection, isCollaborationSection } from '../../utils/collaboration-template'
+import {
+  consumeArchiveMediaIntent,
+  createDraftStorageKey,
+  peekArchiveMediaIntent,
+  type ArchiveMediaIntentFile,
+} from '../../utils/archive-media-intent'
+import { reduceArchiveVideoRetention, shouldBlockVideoNavigation, transitionArchiveMediaEditorState, type ArchiveMediaEditorState, type ArchiveVideoIntentState, type ArchiveVideoRetentionState, type PublishMediaType } from '../../utils/video-publish'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -300,7 +331,6 @@ const editPostSnapshot = ref<any>(null)
 const submitting = ref(false)
 const joining = ref(false)
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
-const CREATE_DRAFT_KEY = 'create_draft_v1'
 const ACTIVITY_INVITE_CREATE_INTENT_KEY = 'activity_invite_create_intent_v1'
 const ACTIVITY_INVITE_INTENT_TTL_MS = 30 * 60 * 1000
 const ACTIVITY_INVITE_WIDGET_IDS = {
@@ -316,7 +346,20 @@ const activityInviteLoading = ref(false)
 const createReturnTo = ref('')
 const textNoteStep = ref<'compose' | 'cover'>('compose')
 const textNoteTheme = ref<TextNoteTheme>('paper')
-const archiveFormat = ref<'image_text' | 'text' | ''>('')
+const archiveFormat = ref<'image_text' | 'text' | 'video' | ''>('')
+const archiveInitialMedia = ref<ArchiveMediaIntentFile | null>(null)
+const archiveVideoIntentState = ref<ArchiveVideoIntentState>('idle')
+const archiveVideoIntentGeneration = ref(0)
+const videoUploading = ref(false)
+const videoNavigationBlocked = ref(false)
+const videoPublishReady = ref(true)
+const initialCreateNavMetrics = computeCreateNavMetrics({ isH5: typeof window !== 'undefined' && typeof document !== 'undefined' })
+const createStatusBarHeight = ref(initialCreateNavMetrics.statusBarHeight)
+const createNavRowHeight = ref(initialCreateNavMetrics.navRowHeight)
+const createCustomNavStyle = computed(() => (
+  `padding-top: ${createStatusBarHeight.value}px; --create-nav-row-height: ${createNavRowHeight.value}px;`
+))
+const archiveObjectUrls = new Set<string>()
 const collaborationOnly = ref(false)
 const collaborationTemplatesError = ref('')
 const initialLoadPending = ref(true)
@@ -379,7 +422,6 @@ const isGuideCreateMode = computed(() => {
   return GUIDE_CREATE_NAME_HINTS.some((hint) => name.includes(hint))
 })
 const isImageNoteCreateMode = computed(() => isImageNoteSectionContract(selectedSection.value))
-
 function allowImagesForWidget(widget: any) {
   if (isTextNoteCreateMode.value) return false
   if (isGuideCreateMode.value) return false
@@ -466,22 +508,24 @@ const createFormBlocks = computed(() => {
 })
 
 onLoad(async (options: any) => {
+  updateCreateNavMetrics()
   if (ensureHierarchyStack('/pages/create/index', options || {}, options?.returnTo)) return
   hideNativeTabBar()
   collaborationOnly.value = String(options?.mode || '') === 'collaboration'
   try {
     if (await loadPostForEdit(String(options?.editPostId || ''))) return
     const requestedArchiveFormat = String(options?.archiveFormat || '')
-    if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text') {
+    if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text' || requestedArchiveFormat === 'video') {
       // Resolve the product-level publishing route before the first await. Otherwise
       // membership refresh can commit the legacy section picker for one frame.
       enterArchiveEditor(requestedArchiveFormat, options?.returnTo)
+      applyArchiveMediaIntent(options?.mediaIntent)
     }
     await Promise.all([
       ensureSectionsLoaded(),
       collaborationOnly.value ? ensureCollaborationTemplatesLoaded() : Promise.resolve(),
     ])
-    if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text') {
+    if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text' || requestedArchiveFormat === 'video') {
       return
     }
     await consumeCreateSectionIntent(options)
@@ -491,14 +535,24 @@ onLoad(async (options: any) => {
   }
 })
 
-function buildArchiveEditorSection(format: 'image_text' | 'text') {
-  const common = { _id: `archive-${format}`, communityId: communityStore.currentCommunityId, name: format === 'text' ? '写文字' : '发图文', type: 'evergreen', status: 'active' }
+function buildArchiveEditorSection(format: 'image_text' | 'text' | 'video') {
+  const common = { _id: `archive-${format}`, communityId: communityStore.currentCommunityId, name: format === 'text' ? '写文字' : (format === 'video' ? '发视频' : '发图文'), type: 'evergreen', status: 'active' }
   if (format === 'text') return Object.assign({}, common, {
     displayTemplate: 'text_note',
     widgets: [
       { widgetId: 'text_title', fieldKey: 'title', type: 'short_text', label: '标题', required: true, order: 0, showInList: true },
       { widgetId: 'text_body', fieldKey: 'body', type: 'rich_note', label: '正文', required: true, order: 1, showInList: false },
       { widgetId: 'archive_text_topics', fieldKey: 'topics', type: 'topic', label: '添加话题', required: false, order: 2, showInList: false },
+    ],
+  })
+  if (format === 'video') return Object.assign({}, common, {
+    displayTemplate: 'video_note',
+    widgets: [
+      { widgetId: 'archive_video_videos', fieldKey: 'videos', type: 'video_group', label: '视频', required: true, order: 0, showInList: false },
+      { widgetId: 'archive_video_title', fieldKey: 'title', type: 'short_text', label: '标题', required: true, order: 1, showInList: true },
+      { widgetId: 'archive_video_body', fieldKey: 'body', type: 'rich_note', label: '正文', required: false, order: 2, showInList: false },
+      { widgetId: 'archive_video_topics', fieldKey: 'topics', type: 'topic', label: '添加话题', required: false, order: 3, showInList: false },
+      { widgetId: 'archive_video_location', fieldKey: 'location', type: 'location', label: '添加地点', required: false, order: 4, showInList: false },
     ],
   })
   return Object.assign({}, common, {
@@ -513,10 +567,146 @@ function buildArchiveEditorSection(format: 'image_text' | 'text') {
   })
 }
 
-function enterArchiveEditor(format: 'image_text' | 'text', returnTo?: string) {
+function enterArchiveEditor(format: 'image_text' | 'text' | 'video', returnTo?: string, preserveForm = false) {
   archiveFormat.value = format
+  if (!preserveForm) {
+    archiveInitialMedia.value = null
+    archiveVideoIntentState.value = 'idle'
+  }
+  videoUploading.value = false
+  videoNavigationBlocked.value = false
+  videoPublishReady.value = format !== 'video'
   collaborationOnly.value = false
-  selectSection(buildArchiveEditorSection(format), { returnTo: String(returnTo || '') })
+  selectSection(buildArchiveEditorSection(format), { returnTo: String(returnTo || ''), preserveForm })
+}
+
+function archiveMediaSource(file: ArchiveMediaIntentFile): string | Blob {
+  if (typeof file.source === 'string') return file.source
+  const url = URL.createObjectURL(file.source)
+  archiveObjectUrls.add(url)
+  return url
+}
+
+function releaseArchiveObjectUrls() {
+  archiveObjectUrls.forEach((url) => URL.revokeObjectURL(url))
+  archiveObjectUrls.clear()
+}
+
+function applyArchiveMediaIntent(token: unknown) {
+  const intent = consumeArchiveMediaIntent(token)
+  if (!intent) return
+  if (intent.mediaType === 'video' && archiveFormat.value === 'video') {
+    const file = intent.files[0] || null
+    if (file) handleVideoSelectedFile(file, archiveVideoIntentGeneration.value + 1)
+    formData.archive_video_videos = []
+    return
+  }
+  if (intent.mediaType === 'image' && archiveFormat.value === 'image_text') {
+    releaseArchiveObjectUrls()
+    formData.image_note_images = intent.files.map(archiveMediaSource)
+  }
+}
+
+function hasArchiveMedia(format: PublishMediaType | null): boolean {
+  if (format === 'image') return Array.isArray(formData.image_note_images) && formData.image_note_images.length > 0
+  if (format === 'video') {
+    return (Array.isArray(formData.archive_video_videos) && formData.archive_video_videos.length > 0) || Boolean(archiveInitialMedia.value)
+  }
+  return false
+}
+
+function currentPublishMediaType(): PublishMediaType | null {
+  if (archiveFormat.value === 'image_text') return 'image'
+  if (archiveFormat.value === 'video') return 'video'
+  return null
+}
+
+function confirmMediaFormatSwitch(): Promise<boolean> {
+  return new Promise((resolve) => {
+    uni.showModal({
+      title: '切换发布格式',
+      content: '切换后将清空当前素材，是否继续？',
+      success: (result: any) => resolve(Boolean(result.confirm)),
+      fail: () => resolve(false),
+    })
+  })
+}
+
+function clearArchiveMediaState() {
+  releaseArchiveObjectUrls()
+  Object.keys(formData).forEach((key) => delete formData[key])
+  archiveInitialMedia.value = null
+  archiveVideoIntentState.value = 'idle'
+  videoUploading.value = false
+  videoNavigationBlocked.value = false
+  videoPublishReady.value = true
+}
+
+function currentVideoRetention(): ArchiveVideoRetentionState {
+  return {
+    file: archiveInitialMedia.value,
+    generation: archiveVideoIntentGeneration.value,
+    status: archiveVideoIntentState.value,
+  }
+}
+
+function applyVideoRetention(state: ArchiveVideoRetentionState) {
+  archiveInitialMedia.value = state.file as ArchiveMediaIntentFile | null
+  archiveVideoIntentGeneration.value = state.generation
+  archiveVideoIntentState.value = state.status
+}
+
+function handleVideoSelectedFile(file: ArchiveMediaIntentFile, generation: number) {
+  applyVideoRetention(reduceArchiveVideoRetention(currentVideoRetention(), {
+    type: 'selected', file, generation,
+  }))
+}
+
+function handleVideoInitialState(
+  state: 'pending' | 'failed' | 'resolved',
+  file: ArchiveMediaIntentFile,
+  generation: number,
+) {
+  applyVideoRetention(reduceArchiveVideoRetention(currentVideoRetention(), {
+    type: state, file, generation,
+  }))
+}
+
+async function handleInlineMediaIntent(token: string) {
+  const intent = peekArchiveMediaIntent(token)
+  if (!intent) {
+    restoreArchiveMediaEditor()
+    return
+  }
+  const currentType = currentPublishMediaType()
+  const currentState: ArchiveMediaEditorState | null = currentType
+    ? {
+        format: archiveFormat.value as 'image_text' | 'video',
+        formData,
+        initialMedia: archiveInitialMedia.value,
+        hasSelectedMedia: hasArchiveMedia(currentType),
+      }
+    : null
+  let transition = currentState
+    ? transitionArchiveMediaEditorState(currentState, intent.mediaType, null)
+    : null
+  if (transition?.status === 'confirm') {
+    transition = transitionArchiveMediaEditorState(currentState!, intent.mediaType, await confirmMediaFormatSwitch())
+  }
+  if (transition?.status === 'cancelled') {
+    consumeArchiveMediaIntent(token)
+    restoreArchiveMediaEditor()
+    return
+  }
+  if (transition?.status === 'switched') clearArchiveMediaState()
+  const nextFormat = intent.mediaType === 'video' ? 'video' : 'image_text'
+  enterArchiveEditor(nextFormat, createReturnTo.value, transition?.status === 'replaced')
+  applyArchiveMediaIntent(token)
+}
+
+function restoreArchiveMediaEditor() {
+  if (archiveFormat.value !== 'image_text' && archiveFormat.value !== 'video') return
+  selectedSection.value = buildArchiveEditorSection(archiveFormat.value)
 }
 
 async function loadPostForEdit(postId: string) {
@@ -536,7 +726,7 @@ async function loadPostForEdit(postId: string) {
     }
     await ensureSectionsLoaded()
     if (currentPost.area === 'archive') {
-      const format = currentPost.format === 'text' ? 'text' : 'image_text'
+      const format = currentPost.format === 'text' ? 'text' : (currentPost.format === 'video' ? 'video' : 'image_text')
       archiveFormat.value = format
       const archiveSection = buildArchiveEditorSection(format)
       selectSection(archiveSection, { returnTo: createReturnTo.value })
@@ -592,6 +782,7 @@ async function loadPostForEdit(postId: string) {
 
 onShow(() => {
   hideNativeTabBar()
+  updateCreateNavMetrics()
   if (editPostId.value || initialLoadPending.value) return
   // 返回页面（例如地图选择返回）时静默刷新，不再打断表单操作。
   void ensureSectionsLoaded()
@@ -611,14 +802,39 @@ watch(() => communityStore.currentCommunityId, async () => {
   if (!archiveFormat.value) await consumeCreateSectionIntent()
 })
 
-watch([selectedSection, textNoteStep], (values) => {
-  const section = values[0]
-  const step = values[1]
-  const title = section?.displayTemplate === 'text_note' && step === 'cover'
-    ? '选择文字封面'
-    : section?.name || '发布'
+const createNavTitle = computed(() => resolveCreateNavTitle({
+  isEditMode: isEditMode.value,
+  sectionName: selectedSection.value?.name,
+  isTextCoverStep: selectedSection.value?.displayTemplate === 'text_note' && textNoteStep.value === 'cover',
+}))
+
+watch(createNavTitle, (title) => {
   uni.setNavigationBarTitle({ title })
 }, { immediate: true })
+
+function updateCreateNavMetrics() {
+  let systemInfo: any = null
+  let menuRect: any = null
+  try { systemInfo = uni.getSystemInfoSync?.() || null } catch (_error) {}
+  try {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore wx is injected by the mini-program runtime.
+    if (typeof wx !== 'undefined' && typeof wx.getMenuButtonBoundingClientRect === 'function') {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore wx is injected by the mini-program runtime.
+      menuRect = wx.getMenuButtonBoundingClientRect()
+    }
+  } catch (_error) {}
+  const metrics = computeCreateNavMetrics({
+    isH5: typeof window !== 'undefined' && typeof document !== 'undefined',
+    statusBarHeight: Number(systemInfo?.statusBarHeight || 0),
+    safeAreaTop: Number(systemInfo?.safeArea?.top || 0),
+    menuTop: Number(menuRect?.top || 0),
+    menuHeight: Number(menuRect?.height || 0),
+  })
+  createStatusBarHeight.value = metrics.statusBarHeight
+  createNavRowHeight.value = metrics.navRowHeight
+}
 
 try {
   ;(uni as any).$on?.(CREATE_SECTION_EVENT, handleCreateSectionIntentEvent)
@@ -628,6 +844,8 @@ onBeforeUnmount(() => {
   try {
     ;(uni as any).$off?.(CREATE_SECTION_EVENT, handleCreateSectionIntentEvent)
   } catch (_error) {}
+  releaseArchiveObjectUrls()
+  removeH5BeforeUnload()
 })
 
 async function handleJoin() {
@@ -656,18 +874,21 @@ function goOnboarding() {
   openOnboardingPreservingStack({ mode: 'discover' })
 }
 
-function selectSection(section: any, options: { returnTo?: string } = {}) {
+function selectSection(section: any, options: { returnTo?: string; preserveForm?: boolean } = {}) {
   if (isActivityInviteMode.value) return
   selectedSection.value = section
   createReturnTo.value = normalizeRouteUrl(options.returnTo)
-  Object.keys(formData).forEach((key) => delete formData[key])
+  if (!options.preserveForm) Object.keys(formData).forEach((key) => delete formData[key])
   textNoteStep.value = 'compose'
   textNoteTheme.value = 'paper'
-  for (const widget of section?.widgets || []) {
-    if (widget?.type === 'topic' && widget?.widgetId) {
-      formData[String(widget.widgetId)] = []
+  if (!options.preserveForm) {
+    for (const widget of section?.widgets || []) {
+      if (widget?.type === 'topic' && widget?.widgetId) {
+        formData[String(widget.widgetId)] = []
+      }
     }
   }
+  if (!options.preserveForm) restoreDraft()
 }
 
 function handleFormBack() {
@@ -695,6 +916,14 @@ function openTextNoteCover() {
 }
 
 function handleBackToSectionPicker() {
+  if (archiveFormat.value === 'video' && shouldBlockVideoNavigation({ navigationBlocked: videoNavigationBlocked.value, uploading: videoUploading.value })) {
+    showVideoNavigationBlockedToast()
+    return
+  }
+  if (archiveFormat.value === 'image_text' || archiveFormat.value === 'video') {
+    selectedSection.value = null
+    return
+  }
   const returnTo = createReturnTo.value
   if (returnTo) {
     if (isActivityInviteMode.value) {
@@ -1022,8 +1251,9 @@ async function handleEditSubmitResult(result: any) {
 function saveDraft() {
   if (!selectedSection.value) return
   try {
-    uni.setStorageSync(CREATE_DRAFT_KEY, {
+    uni.setStorageSync(currentDraftStorageKey(), {
       communityId: communityStore.currentCommunityId,
+      format: archiveFormat.value || '',
       sectionId: selectedSection.value._id,
       collaborationTemplateId: isCollaborationSection(selectedSection.value)
         ? selectedSection.value.collaborationTemplateId
@@ -1039,14 +1269,84 @@ function saveDraft() {
   }
 }
 
+function handlePageExit() {
+  if (archiveFormat.value === 'video' && shouldBlockVideoNavigation({ navigationBlocked: videoNavigationBlocked.value, uploading: videoUploading.value })) {
+    showVideoNavigationBlockedToast()
+    return
+  }
+  const returnTo = createReturnTo.value
+  if (returnTo) {
+    openHierarchyParent(returnTo)
+    return
+  }
+  navigateBackOrHome()
+}
+
+function showVideoNavigationBlockedToast() {
+  uni.showToast({
+    title: videoNavigationBlocked.value ? '请重试或移除失败封面' : '视频正在上传，请稍候或取消后返回',
+    icon: 'none',
+  })
+}
+
+onBackPress(() => {
+  handlePageExit()
+  return true
+})
+
+let h5BeforeUnloadInstalled = false
+function handleH5BeforeUnload(event: BeforeUnloadEvent) {
+  event.preventDefault()
+  event.returnValue = ''
+}
+function removeH5BeforeUnload() {
+  // #ifdef H5
+  if (h5BeforeUnloadInstalled) window.removeEventListener('beforeunload', handleH5BeforeUnload)
+  // #endif
+  h5BeforeUnloadInstalled = false
+}
+watch([archiveFormat, videoNavigationBlocked, videoUploading], () => {
+  // #ifdef H5
+  const blocked = archiveFormat.value === 'video' && shouldBlockVideoNavigation({ navigationBlocked: videoNavigationBlocked.value, uploading: videoUploading.value })
+  if (blocked && !h5BeforeUnloadInstalled) {
+    window.addEventListener('beforeunload', handleH5BeforeUnload)
+    h5BeforeUnloadInstalled = true
+  } else if (!blocked) removeH5BeforeUnload()
+  // #endif
+}, { immediate: true })
+
+function currentDraftStorageKey() {
+  const scope = archiveFormat.value || (isCollaborationSection(selectedSection.value)
+    ? `collaboration:${selectedSection.value?.collaborationTemplateId || ''}`
+    : `section:${selectedSection.value?._id || ''}`)
+  return createDraftStorageKey(communityStore.currentCommunityId, scope)
+}
+
+function restoreDraft() {
+  if (!selectedSection.value || isEditMode.value) return
+  try {
+    const draft = uni.getStorageSync(currentDraftStorageKey())
+    if (!draft || String(draft.communityId || '') !== String(communityStore.currentCommunityId || '')) return
+    if (String(draft.format || '') !== String(archiveFormat.value || '')) return
+    Object.assign(formData, JSON.parse(JSON.stringify(draft.content || {})))
+    if (archiveFormat.value === 'text' && draft.presentation?.textNoteTheme) {
+      textNoteTheme.value = draft.presentation.textNoteTheme
+    }
+  } catch {}
+}
+
 function clearDraft() {
   try {
-    uni.removeStorageSync(CREATE_DRAFT_KEY)
+    uni.removeStorageSync(currentDraftStorageKey())
   } catch (_error) {}
 }
 
 async function handleSubmit() {
   if (!selectedSection.value || submitting.value) return
+  if (archiveFormat.value === 'video' && !videoPublishReady.value) {
+    uni.showToast({ title: videoUploading.value ? '视频仍在上传，请稍候' : '请先完成视频和封面处理', icon: 'none' })
+    return
+  }
   submitting.value = true
   try {
     const sectionId = selectedSection.value._id
@@ -1064,7 +1364,7 @@ async function handleSubmit() {
         return
       }
       // 媒体组由 admin 后台维护，普通用户发帖不携带该字段
-      if (widget.type === 'video_group' || widget.type === 'audio_group') {
+      if ((widget.type === 'video_group' && archiveFormat.value !== 'video') || widget.type === 'audio_group') {
         delete content[widget.widgetId]
         continue
       }
@@ -1115,7 +1415,7 @@ async function handleSubmit() {
             topics: archiveTopics,
             content: archiveContent || {},
             presentation: archiveFormat.value === 'text' ? { textNoteTheme: textNoteTheme.value } : undefined,
-          })
+          } as ArchivePostCreateParams)
       : isCollaborationSection(selectedSection.value)
         ? await postApi.createCollaboration({
             communityId: communityStore.currentCommunityId,
@@ -1157,6 +1457,41 @@ async function handleSubmit() {
   min-height: 100vh;
   overflow-x: hidden;
 }
+
+.create-custom-nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  padding-top: env(safe-area-inset-top);
+  background: rgba(244, 245, 249, 0.96);
+}
+
+.create-custom-nav__row {
+  height: var(--create-nav-row-height, 54px);
+  padding: 0 24rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.create-custom-nav__back,
+.create-custom-nav__spacer {
+  width: 72rpx;
+  height: 72rpx;
+  margin: 0;
+}
+
+.create-custom-nav__back {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--hh-color-text-primary);
+  font-size: 64rpx;
+  line-height: 64rpx;
+}
+
+.create-custom-nav__back::after { border: 0; }
+.create-custom-nav__title { font-size: 34rpx; font-weight: 600; color: var(--hh-color-text-primary); }
 
 .title {
   font-size: var(--hh-text-heading-md-size);

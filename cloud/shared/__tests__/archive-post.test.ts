@@ -27,7 +27,7 @@ function expectCode(input: unknown, code: string): void {
 
 describe('archive post create contract', () => {
   test('exports the supported formats and topic limit', () => {
-    expect(ARCHIVE_POST_FORMATS).toEqual(['image_text', 'text'])
+    expect(ARCHIVE_POST_FORMATS).toEqual(['image_text', 'text', 'video'])
     expect(MAX_TOPIC_COUNT).toBe(5)
   })
 
@@ -89,7 +89,112 @@ describe('archive post create contract', () => {
   })
 
   test('rejects invalid formats', () => {
-    expectCode({ area: 'archive', format: 'video' }, 'archive_format_invalid')
+    expectCode({ area: 'archive', format: 'audio' }, 'archive_format_invalid')
+  })
+
+  test('parses one COS video and normalizes its string fields', () => {
+    const body = richBody()
+    const location = { address: '湖畔', lat: 30, lng: 120 }
+    expect(parseArchivePostCreateInput({
+      area: 'archive',
+      format: 'video',
+      topics: [' 社区活动 '],
+      content: {
+        title: '  夏日记录  ',
+        body,
+        videos: [{
+          source: 'cos',
+          itemId: ' video-1 ',
+          title: ' 夏日视频 ',
+          fileID: ' cloud://video.mp4 ',
+          cover: ' cloud://cover.jpg ',
+        }],
+        location,
+      },
+    })).toEqual({
+      area: 'archive',
+      format: 'video',
+      topics: ['社区活动'],
+      content: {
+        title: '夏日记录',
+        body,
+        videos: [{
+          source: 'cos',
+          itemId: 'video-1',
+          title: '夏日视频',
+          fileID: 'cloud://video.mp4',
+          cover: 'cloud://cover.jpg',
+        }],
+        location,
+      },
+    })
+  })
+
+  test('requires exactly one video', () => {
+    for (const videos of [undefined, [], [
+      { source: 'cos', itemId: 'one', title: '视频一', fileID: 'cloud://one.mp4' },
+      { source: 'cos', itemId: 'two', title: '视频二', fileID: 'cloud://two.mp4' },
+    ]]) {
+      expectCode({
+        area: 'archive', format: 'video', content: { title: '标题', videos },
+      }, 'archive_videos_required')
+    }
+  })
+
+  test('requires a COS video with non-empty itemId, title, and fileID', () => {
+    for (const video of [
+      { source: 'channels_feed', itemId: 'one', title: '视频', fileID: 'cloud://one.mp4' },
+      { source: 'cos', itemId: ' ', title: '视频', fileID: 'cloud://one.mp4' },
+      { source: 'cos', itemId: 'one', title: '', fileID: 'cloud://one.mp4' },
+      { source: 'cos', itemId: 'one', title: '视频', fileID: ' ' },
+      { source: 'cos', itemId: 'one', title: '视频', fileID: 'cloud://one.mp4', cover: '' },
+    ]) {
+      expectCode({
+        area: 'archive', format: 'video', content: { title: '标题', videos: [video] },
+      }, 'archive_video_invalid')
+    }
+  })
+
+  test('rejects unknown video item fields', () => {
+    expectCode({
+      area: 'archive',
+      format: 'video',
+      content: {
+        title: '标题',
+        videos: [{
+          source: 'cos', itemId: 'one', title: '视频', fileID: 'cloud://one.mp4', unexpected: true,
+        }],
+      },
+    }, 'archive_video_invalid')
+  })
+
+  test('rejects forbidden and unknown video content fields', () => {
+    const video = { source: 'cos', itemId: 'one', title: '视频', fileID: 'cloud://one.mp4' }
+    for (const forbidden of [
+      { images: ['cloud://image'] },
+      { audio: [] },
+      { presentation: {} },
+      { extra: true },
+    ]) {
+      expectCode({
+        area: 'archive', format: 'video', content: { title: '标题', videos: [video], ...forbidden },
+      }, 'invalid_input')
+    }
+    expectCode({
+      area: 'archive', format: 'video', content: { title: '标题', videos: [video] }, presentation: {},
+    }, 'archive_presentation_invalid')
+  })
+
+  test('validates optional video body and location', () => {
+    const video = { source: 'cos', itemId: 'one', title: '视频', fileID: 'cloud://one.mp4' }
+    expectCode({
+      area: 'archive', format: 'video', content: { title: '标题', videos: [video], body: {} },
+    }, 'archive_body_required')
+    expectCode({
+      area: 'archive', format: 'video', content: {
+        title: '标题', videos: [video], location: { address: '湖畔', lat: Number.NaN, lng: 120 },
+      },
+    }, 'invalid_input')
   })
 
   test('uses the shared topic normalization and limits', () => {

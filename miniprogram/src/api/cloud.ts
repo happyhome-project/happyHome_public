@@ -5,6 +5,7 @@
 // Do not let stale DEV gateway flags affect real mini-program users.
 import { clientLog } from '../utils/client-log'
 import { sanitizePerformanceTrace, type PerformanceTrace } from '../utils/performance-trace'
+import type { VideoItemCos } from '../../../cloud/shared/types'
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore 鈥?wx is injected by the miniprogram runtime; absent in H5 build
@@ -231,14 +232,27 @@ export const collaborationTemplateApi = {
     callCloud<{ template: any }>('collaboration-template', 'get', { templateId }),
 }
 
-export type ArchivePostCreateParams = {
+type ArchivePostCreateBase = {
   communityId: string
   area: 'archive'
-  format: 'image_text' | 'text'
   topics?: string[]
-  content: Record<string, any>
-  presentation?: { textNoteTheme?: 'paper' | 'mint' | 'slate' | 'headline' | 'quote' | 'notice' }
 }
+
+export type ArchivePostCreateParams = ArchivePostCreateBase & ({
+  format: 'image_text'
+  content: { title: string; body?: unknown; images: string[]; location?: unknown }
+  presentation?: undefined
+} | {
+  format: 'text'
+  content: { title: string; body: unknown }
+  presentation?: { textNoteTheme?: 'paper' | 'mint' | 'slate' | 'headline' | 'quote' | 'notice' }
+} | {
+  format: 'video'
+  content: { title: string; body?: unknown; videos: [VideoItemCos]; location?: unknown }
+  presentation?: undefined
+})
+
+export type MemberVideoUploadMetadata = { cloudPath: string; fileId: string }
 
 export type ArchivePostListParams = {
   communityId: string
@@ -341,6 +355,12 @@ export const postApi = {
     callCloud('post', 'create', params),
   createArchive: (params: ArchivePostCreateParams) =>
     callCloud<{ postId: string; auditStatus?: string; auditReason?: string }>('post', 'create', params),
+  requestMemberVideoUpload: (params: { communityId: string; fileName: string }) =>
+    callCloud<MemberVideoUploadMetadata>('post', 'requestMemberVideoUpload', params),
+  requestMemberVideoCoverUpload: (params: { communityId: string; fileName: string }) =>
+    callCloud<MemberVideoUploadMetadata>('post', 'requestMemberVideoCoverUpload', params),
+  deleteMemberVideoUpload: (params: { communityId: string; fileID: string; kind: 'video' | 'cover' }) =>
+    callCloud<{ success: true; deleted: boolean; reason?: 'referenced' }>('post', 'deleteMemberVideoUpload', params),
   createCollaboration: (params: {
     communityId: string
     collaborationTemplateId: string

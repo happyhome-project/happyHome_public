@@ -44,4 +44,38 @@ describe('author post feed', () => {
     ])
     expect(result.flat().map(card => card.postId).sort()).toEqual(['one', 'two'])
   })
+
+  test('keeps archive video cover semantics and ownership metadata', () => {
+    const card = normalizeAuthorPostCard({
+      _id: 'video-1', area: 'archive', format: 'video',
+      content: {
+        title: '运动会', body: { text: '冲线时刻' },
+        videos: [{ source: 'cos', itemId: 'clip-1', title: '运动会', fileID: 'cloud://video.mp4', cover: 'cloud://cover.jpg' }],
+      },
+      communityName: '阳光花园', sectionName: '视频', likeCount: 8, commentCount: 5, auditStatus: 'review',
+    })
+
+    expect(card.format).toBe('video')
+    expect(card.cover).toEqual({ kind: 'video', src: 'cloud://cover.jpg' })
+    expect(card.bodyText).toBe('冲线时刻')
+    expect(card.communityLabel).toBe('阳光花园 · 视频')
+    expect({ likeCount: card.likeCount, commentCount: card.commentCount, auditStatus: card.auditStatus })
+      .toEqual({ likeCount: 8, commentCount: 5, auditStatus: 'review' })
+  })
+
+  test('uses a stable video placeholder and safely leaves unknown formats as text cards', () => {
+    const input = {
+      _id: 'video-placeholder', area: 'archive', format: 'video',
+      content: { title: '无封面', videos: [{ source: 'cos', itemId: 'clip-1', title: '无封面', fileID: 'cloud://video.mp4' }] },
+    }
+    const first = normalizeAuthorPostCard(input)
+    const second = normalizeAuthorPostCard(input)
+    const unknown = normalizeAuthorPostCard({ _id: 'future', area: 'archive', format: 'future', content: { title: '未来格式' } })
+
+    expect(first.cover).toEqual(second.cover)
+    expect(first.cover.kind).toBe('video')
+    expect(first.cover.src).toBe('')
+    expect(unknown.format).toBe('text')
+    expect(unknown.cover.kind).toBe('text')
+  })
 })

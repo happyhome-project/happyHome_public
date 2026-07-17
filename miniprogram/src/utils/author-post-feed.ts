@@ -4,10 +4,14 @@ import { getPostHomeTitle } from './widget'
 
 export type AuthorPostCard = {
   postId: string
+  format: 'image_text' | 'text' | 'video'
   title: string
   bodyText: string
   communityLabel: string
-  cover: { kind: 'image'; src: string } | { kind: 'text'; theme: string }
+  cover:
+    | { kind: 'image'; src: string }
+    | { kind: 'text'; theme: string }
+    | { kind: 'video'; src: string }
   likeCount: number
   commentCount: number
   auditStatus: string
@@ -35,13 +39,20 @@ export function normalizeAuthorPostCard(post: Record<string, any>): AuthorPostCa
   let title = ''
   let bodyText = ''
   let coverImage = ''
+  let isVideo = false
   let theme = normalizeTextNoteTheme(post?.presentation?.textNoteTheme)
 
   if (isArchive) {
     title = String(post?.content?.title || '').trim()
     bodyText = textFromRichNote(post?.content?.body)
-    const images = Array.isArray(post?.content?.images) ? post.content.images : []
-    coverImage = String(images.find(Boolean) || '')
+    if (post?.format === 'video') {
+      isVideo = true
+      const videos = Array.isArray(post?.content?.videos) ? post.content.videos : []
+      coverImage = String(videos.find((item: any) => item && typeof item === 'object')?.cover || '').trim()
+    } else if (post?.format === 'image_text') {
+      const images = Array.isArray(post?.content?.images) ? post.content.images : []
+      coverImage = String(images.find(Boolean) || '')
+    }
   } else if (isImageNoteSectionContract(section)) {
     const card = getImageNoteCard(post as any, section as any)
     title = card.title
@@ -60,16 +71,19 @@ export function normalizeAuthorPostCard(post: Record<string, any>): AuthorPostCa
   const sectionName = String(post?.sectionName || section?.name || '').trim()
   return {
     postId,
+    format: isVideo ? 'video' : coverImage ? 'image_text' : 'text',
     title: title || '无标题',
     bodyText,
     communityLabel: [communityName, sectionName].filter(Boolean).join(' · '),
-    cover: coverImage
-      ? { kind: 'image', src: coverImage }
-      : { kind: 'text', theme },
+    cover: isVideo
+      ? { kind: 'video', src: coverImage }
+      : coverImage
+        ? { kind: 'image', src: coverImage }
+        : { kind: 'text', theme },
     likeCount: Math.max(0, Number(post?.likeCount || 0)),
     commentCount: Math.max(0, Number(post?.commentCount || 0)),
     auditStatus: String(post?.auditStatus || 'pass'),
-    estimatedHeight: coverImage ? 330 : 260,
+    estimatedHeight: isVideo || coverImage ? 330 : 260,
     post,
   }
 }

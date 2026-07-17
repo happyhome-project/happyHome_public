@@ -1,8 +1,8 @@
-import type { GeoLocation, RichNoteContent, TextNoteTheme } from './types'
+import type { GeoLocation, RichNoteContent, TextNoteTheme, VideoItemCos } from './types'
 import { normalizeTextNoteTheme } from './text-note-widgets'
 import { normalizeTopics } from './topics'
 
-export const ARCHIVE_POST_FORMATS = ['image_text', 'text'] as const
+export const ARCHIVE_POST_FORMATS = ['image_text', 'text', 'video'] as const
 
 export type ArchivePostFormat = typeof ARCHIVE_POST_FORMATS[number]
 
@@ -16,6 +16,13 @@ export interface ArchiveImageTextContent {
 export interface ArchiveTextContent {
   title: string
   body: RichNoteContent
+}
+
+export interface ArchiveVideoContent {
+  title: string
+  body?: RichNoteContent
+  videos: [VideoItemCos]
+  location?: GeoLocation
 }
 
 export interface ArchivePostPresentation {
@@ -37,6 +44,13 @@ export type ArchivePostCreateInput =
       content: ArchiveTextContent
       presentation: ArchivePostPresentation & { textNoteTheme: TextNoteTheme }
     }
+  | {
+      area: 'archive'
+      format: 'video'
+      topics: string[]
+      content: ArchiveVideoContent
+      presentation?: never
+    }
 
 export class ArchivePostContractError extends Error {
   constructor(public readonly code: string) {
@@ -46,6 +60,18 @@ export class ArchivePostContractError extends Error {
 }
 
 type PlainObject = Record<string, unknown>
+
+const COS_VIDEO_FIELDS = new Set([
+  'source',
+  'itemId',
+  'title',
+  'cover',
+  'duration',
+  'description',
+  'fileID',
+  'allowDownload',
+  'allowShare',
+])
 
 function isPlainObject(value: unknown): value is PlainObject {
   if (value === null || typeof value !== 'object') return false
@@ -100,6 +126,38 @@ function isGeoLocation(value: unknown): value is GeoLocation {
   return true
 }
 
+function parseCosVideo(value: unknown): VideoItemCos {
+  if (
+    !isPlainObject(value)
+    || Object.keys(value).some((field) => !COS_VIDEO_FIELDS.has(field))
+    || value.source !== 'cos'
+    || typeof value.itemId !== 'string'
+    || value.itemId.trim() === ''
+    || typeof value.title !== 'string'
+    || value.title.trim() === ''
+    || typeof value.fileID !== 'string'
+    || value.fileID.trim() === ''
+    || (value.cover !== undefined && (typeof value.cover !== 'string' || value.cover.trim() === ''))
+    || (value.duration !== undefined && (typeof value.duration !== 'number' || !Number.isFinite(value.duration)))
+    || (value.description !== undefined && typeof value.description !== 'string')
+    || (value.allowDownload !== undefined && typeof value.allowDownload !== 'boolean')
+    || (value.allowShare !== undefined && typeof value.allowShare !== 'boolean')
+  ) return fail('archive_video_invalid')
+
+  const video: VideoItemCos = {
+    source: 'cos',
+    itemId: value.itemId.trim(),
+    title: value.title.trim(),
+    fileID: value.fileID.trim(),
+  }
+  if (value.cover !== undefined) video.cover = value.cover.trim()
+  if (value.duration !== undefined) video.duration = value.duration
+  if (value.description !== undefined) video.description = value.description.trim()
+  if (value.allowDownload !== undefined) video.allowDownload = value.allowDownload
+  if (value.allowShare !== undefined) video.allowShare = value.allowShare
+  return video
+}
+
 export function parseArchivePostCreateInput(value: unknown): ArchivePostCreateInput {
   if (!isPlainObject(value) || value.area !== 'archive') return fail('invalid_input')
   if (
@@ -137,6 +195,25 @@ export function parseArchivePostCreateInput(value: unknown): ArchivePostCreateIn
     if (content.body !== undefined) parsedContent.body = content.body
     if (content.location !== undefined) parsedContent.location = content.location
     return { area: 'archive', format: 'image_text', topics, content: parsedContent }
+  }
+
+  if (value.format === 'video') {
+    if (value.presentation !== undefined) return fail('archive_presentation_invalid')
+    const allowedContentFields = new Set(['title', 'body', 'videos', 'location'])
+    if (Object.keys(content).some((field) => !allowedContentFields.has(field))) return fail('invalid_input')
+    if (!Array.isArray(content.videos) || content.videos.length !== 1) {
+      return fail('archive_videos_required')
+    }
+    if (content.body !== undefined && !isRichNoteContent(content.body)) return fail('archive_body_required')
+    if (content.location !== undefined && !isGeoLocation(content.location)) return fail('invalid_input')
+
+    const parsedContent: ArchiveVideoContent = {
+      title,
+      videos: [parseCosVideo(content.videos[0])],
+    }
+    if (content.body !== undefined) parsedContent.body = content.body
+    if (content.location !== undefined) parsedContent.location = content.location
+    return { area: 'archive', format: 'video', topics, content: parsedContent }
   }
 
   if (!isRichNoteContent(content.body) || content.body.text.trim() === '') {

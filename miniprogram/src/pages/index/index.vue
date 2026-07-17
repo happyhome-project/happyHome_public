@@ -486,6 +486,7 @@ import { formatHomeQuoteCite } from '../../utils/home-quote'
 import { createHomeLoadingGate } from '../../utils/home-loading-gate'
 import { resolveMenuSafeRightInset } from '../../utils/menu-safe-area'
 import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
+import { resolveFeedCovers } from '../../utils/feed-cover-url'
 import { communityInitial } from '../../utils/community-avatar'
 import { uploadCloudFile } from '../../api/storage'
 import { resolveSectionIconGlyph } from '../../utils/section-icon'
@@ -1379,9 +1380,12 @@ async function loadArchiveFeed(
       })
       if (requestEpoch !== archiveRequestEpoch || communityId !== communityStore.currentCommunityId) return
     }
+    const nextArchiveColumns = appendArchivePage(reset ? [[], []] : archiveColumns.value, result.posts || [])
+    await resolveFeedCovers(nextArchiveColumns, resolveCloudFileUrls)
+    if (requestEpoch !== archiveRequestEpoch || communityId !== communityStore.currentCommunityId) return
     if (reset) archiveTabs.value = nextArchiveTabs
     selectedArchiveTopic.value = nextArchiveTopic
-    archiveColumns.value = appendArchivePage(reset ? [[], []] : archiveColumns.value, result.posts || [])
+    archiveColumns.value = nextArchiveColumns
     archiveCursor.value = String(result.nextCursor || '')
     archiveHasMore.value = Boolean(result.hasMore)
     archiveCommunityId.value = communityId

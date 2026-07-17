@@ -36,6 +36,7 @@ import AuthorPostColumns from '../../components/AuthorPostColumns.vue'
 import { useUserStore } from '../../store/user'
 import { appendAuthorPosts, type AuthorPostColumns as AuthorPostColumnsType } from '../../utils/author-post-feed'
 import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
+import { resolveFeedCovers } from '../../utils/feed-cover-url'
 
 const userStore = useUserStore()
 const columns = ref<AuthorPostColumnsType>([[], []])
@@ -76,15 +77,7 @@ async function loadPosts(reset: boolean) {
     const skip = reset ? 0 : columns.value[0].length + columns.value[1].length
     const result = await postApi.listMine(skip, pageSize)
     const nextColumns = appendAuthorPosts(reset ? [[], []] : columns.value, result.posts || [])
-    const coverFileIds = nextColumns
-      .flat()
-      .filter(card => card.cover.kind === 'image')
-      .map(card => card.cover.kind === 'image' ? card.cover.src : '')
-      .filter(Boolean)
-    const resolved = await resolveCloudFileUrls(coverFileIds)
-    nextColumns.flat().forEach((card) => {
-      if (card.cover.kind === 'image') card.cover.src = resolved[card.cover.src] || card.cover.src
-    })
+    await resolveFeedCovers(nextColumns, resolveCloudFileUrls)
     columns.value = nextColumns
     total.value = Number(result.total || 0)
     hasMore.value = Boolean(result.hasMore)

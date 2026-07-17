@@ -238,6 +238,7 @@ import {
 import { extractRichNoteImageSources } from '../../utils/rich-note'
 import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
 import { asCollaborationSection } from '../../utils/collaboration-template'
+import { buildNativeArchiveDetailSection, normalizeNativeArchiveDetailPost } from '../../utils/archive-detail'
 
 const fallbackAvatar = '/static/default-avatar.png'
 const ATTENDANCE_SLOT_DISPLAY_MAX = 6
@@ -540,44 +541,6 @@ async function loadPost(postId: string) {
       loadError: loadError.value,
     })
   }
-}
-
-function buildNativeArchiveDetailSection(currentPost: any) {
-  const common = {
-    _id: '', communityId: currentPost.communityId, name: '沉淀区', type: 'evergreen', status: 'active',
-    icon: '', order: 0, enableComment: true, enableLike: true, createdAt: currentPost.createdAt || '',
-  }
-  if (currentPost.format === 'image_text') return Object.assign({}, common, {
-    displayTemplate: 'image_note',
-    widgets: [
-      { widgetId: 'image_note_images', fieldKey: 'images', type: 'image_group', label: '图片', required: true, order: 0, showInList: false },
-      { widgetId: 'image_note_title', fieldKey: 'title', type: 'short_text', label: '标题', required: true, order: 1, showInList: true },
-      { widgetId: 'image_note_body', fieldKey: 'body', type: 'rich_note', label: '正文', required: false, order: 2, showInList: false },
-      { widgetId: 'image_note_topics', fieldKey: 'topics', type: 'topic', label: '话题', required: false, order: 3, showInList: false },
-      { widgetId: 'image_note_location', fieldKey: 'location', type: 'location', label: '地点', required: false, order: 4, showInList: false },
-    ],
-  })
-  return Object.assign({}, common, {
-    displayTemplate: 'text_note',
-    widgets: [
-      { widgetId: 'title', fieldKey: 'title', type: 'short_text', label: '标题', required: true, order: 0, showInList: true },
-      { widgetId: 'body', fieldKey: 'body', type: 'rich_note', label: '正文', required: true, order: 1, showInList: false },
-    ],
-  })
-}
-
-function normalizeNativeArchiveDetailPost(currentPost: any) {
-  if (currentPost?.area !== 'archive' || currentPost?.sectionId || currentPost?.format !== 'image_text') return currentPost
-  const content = currentPost.content || {}
-  return Object.assign({}, currentPost, {
-    content: Object.assign({}, content, {
-      image_note_images: content.images,
-      image_note_title: content.title,
-      image_note_body: content.body,
-      image_note_topics: currentPost.topics || [],
-      image_note_location: content.location,
-    }),
-  })
 }
 
 function clearRecord(record: Record<string, string>) {

@@ -73,6 +73,26 @@ describe('callCloud', () => {
     })
   })
 
+  test('postApi requests server-owned upload paths for member videos and covers', async () => {
+    callWebFunction.mockResolvedValue({ cloudPath: 'posts/member-videos/scope/video.mp4', fileId: 'cloud://env/posts/member-videos/scope/video.mp4' })
+    vi.stubGlobal('uni', {})
+
+    const { postApi } = await import('../cloud')
+    await (postApi as any).requestMemberVideoUpload({ communityId: 'community-1', fileName: 'family.mp4' })
+    await (postApi as any).requestMemberVideoCoverUpload({ communityId: 'community-1', fileName: 'cover.jpg' })
+    await (postApi as any).deleteMemberVideoUpload({ communityId: 'community-1', fileID: 'cloud://env/pending.mp4', kind: 'video' })
+
+    expect(callWebFunction).toHaveBeenNthCalledWith(1, 'post', {
+      action: 'requestMemberVideoUpload', communityId: 'community-1', fileName: 'family.mp4',
+    })
+    expect(callWebFunction).toHaveBeenNthCalledWith(2, 'post', {
+      action: 'requestMemberVideoCoverUpload', communityId: 'community-1', fileName: 'cover.jpg',
+    })
+    expect(callWebFunction).toHaveBeenNthCalledWith(3, 'post', {
+      action: 'deleteMemberVideoUpload', communityId: 'community-1', fileID: 'cloud://env/pending.mp4', kind: 'video',
+    })
+  })
+
   test('exposes global collaboration templates and section-free collaboration post actions', async () => {
     callWebFunction.mockResolvedValue({ templates: [] })
     vi.stubGlobal('uni', {})

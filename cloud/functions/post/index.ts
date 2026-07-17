@@ -1,7 +1,8 @@
 import cloud from 'wx-server-sdk'
 import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
-import { getTempUrl } from '../../lib/storage'
+import { deleteFile, getTempUrl, inspectRemoteObject, materializeFile, requestUploadMetadata } from '../../lib/storage'
+import { assertOwnedMemberVideoUpload, finalizeMemberArchiveVideoContent, requestMemberVideoUpload } from '../../lib/member-video-upload'
 import { sanitizeContent, validateContentValues, validateRequiredWidgets } from '../../lib/post-validate'
 import { auditAndApply, isPostVisibleToMembers } from '../../lib/content-audit'
 import { buildHomeBootstrap, buildHomeFeed } from '../../lib/home-snapshot'
@@ -152,7 +153,7 @@ async function resolvePostContentContract(post: {
   if (post.area === 'archive') {
     const section = buildArchiveContentSection(
       post.communityId,
-      post.format === 'text' ? 'text' : 'image_text',
+      resolveArchivePostFormat(post.format),
     )
     return { section, collaborationTemplate: null as CollaborationTemplate | null }
   }
@@ -498,18 +499,39 @@ function buildArchiveContentSection(communityId: string, format: ArchivePostForm
     _id: '', communityId, name: '沉淀区', icon: '', order: 0,
     enableComment: true, enableLike: true, createdAt: '', type: 'evergreen', status: 'active',
   } as const
-  const widgets: Widget[] = format === 'image_text'
-    ? [
+  let widgets: Widget[]
+  if (format === 'image_text') {
+    widgets = [
         { widgetId: 'images', type: 'image_group', label: '图片', fieldKey: 'images', required: true, order: 0, showInList: false },
         { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 1, showInList: true },
         { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false },
         { widgetId: 'location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false },
       ]
-    : [
+  } else if (format === 'video') {
+    widgets = [
+      { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
+      { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 1, showInList: false },
+      { widgetId: 'videos', type: 'video_group', label: '视频', fieldKey: 'videos', required: true, order: 2, showInList: false },
+      { widgetId: 'location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false },
+    ]
+  } else {
+    widgets = [
         { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
         { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', required: true, order: 1, showInList: false },
       ]
+  }
   return { ...common, widgets } as Section
+}
+
+function resolveArchivePostFormat(format: unknown): ArchivePostFormat {
+  if (format === 'text' || format === 'video') return format
+  return 'image_text'
+}
+
+function archiveDisplayMetadata(format: unknown): { sectionName: string; displayTemplate: string } {
+  if (format === 'text') return { sectionName: '文字', displayTemplate: 'text_note' }
+  if (format === 'video') return { sectionName: '视频', displayTemplate: 'video_note' }
+  return { sectionName: '图文', displayTemplate: 'image_note' }
 }
 
 type CreatePostParams = {
@@ -532,9 +554,17 @@ export async function handleCreate(
   if (params.area === 'archive') {
     const archive = parseArchivePostCreateInput(params)
     const section = buildArchiveContentSection(params.communityId, archive.format)
-    const content = archive.content as unknown as PostContent
-    validateRequiredWidgets(section, content)
-    validateContentValues(section, content)
+    let content = archive.content as unknown as PostContent
+    const validationOptions = archive.format === 'video'
+      ? { memberEditableVideoWidgetIds: ['videos'] }
+      : undefined
+    validateRequiredWidgets(section, content, validationOptions)
+    validateContentValues(section, content, validationOptions)
+    if (archive.format === 'video') {
+      content = await finalizeMemberArchiveVideoContent(content, openid, params.communityId, {
+        requestUploadMetadata, getTempUrl, inspectRemoteObject, materializeFile, deleteFile,
+      })
+    }
 
     const now = new Date().toISOString()
     const postData = {
@@ -929,14 +959,15 @@ async function enrichPersonalPosts(posts: any[]) {
     const section = collaborationTemplate
       ? collaborationTemplateAsSection(collaborationTemplate, String(post?.communityId || ''))
       : sectionsById.get(String(post?.sectionId || ''))
+    const archiveMetadata = isArchive ? archiveDisplayMetadata(post?.format) : null
     return {
       ...post,
       communityName: String(communitiesById.get(String(post?.communityId || ''))?.name || '社区'),
       sectionName: isArchive
-        ? (post?.format === 'text' ? '文字' : '图文')
+        ? archiveMetadata!.sectionName
         : String(section?.name || '已下线板块'),
       displayTemplate: isArchive
-        ? (post?.format === 'text' ? 'text_note' : 'image_note')
+        ? archiveMetadata!.displayTemplate
         : String(section?.displayTemplate || 'default'),
       ...(collaborationTemplate ? { collaborationTemplate } : {}),
       section: section ? {
@@ -1199,6 +1230,8 @@ export async function handleUpdate(
     presentation?: unknown
     createdAt?: string
     collaborationTemplateId?: string
+    content?: PostContent
+    pendingContent?: PostContent
   }
   if (post.status === 'deleted') throw new Error('帖子已删除')
   if (post.authorId !== openid) throw new Error('无权修改')
@@ -1220,11 +1253,31 @@ export async function handleUpdate(
   if (!section || !Array.isArray(section.widgets) || section.widgets.length === 0) {
     throw new Error('该板块尚未配置内容模板，无法编辑')
   }
-  const sanitizedContent = archive
+  let sanitizedContent = archive
     ? archive.content as unknown as PostContent
     : sanitizeContent(params.content, section)
-  validateRequiredWidgets(section, sanitizedContent)
-  validateContentValues(section, sanitizedContent)
+  const validationOptions = archive?.format === 'video'
+    ? { memberEditableVideoWidgetIds: ['videos'] }
+    : undefined
+  validateRequiredWidgets(section, sanitizedContent, validationOptions)
+  validateContentValues(section, sanitizedContent, validationOptions)
+  if (archive?.format === 'video') {
+    await ensureActiveCommunityMember(post.communityId, openid)
+    const existingFinalizedFileIDs = {
+      video: new Set<string>(),
+      cover: new Set<string>(),
+    }
+    for (const existingContent of [post.content, post.pendingContent]) {
+      const existingVideo = Array.isArray((existingContent as any)?.videos)
+        ? (existingContent as any).videos[0]
+        : null
+      if (typeof existingVideo?.fileID === 'string') existingFinalizedFileIDs.video.add(existingVideo.fileID)
+      if (typeof existingVideo?.cover === 'string') existingFinalizedFileIDs.cover.add(existingVideo.cover)
+    }
+    sanitizedContent = await finalizeMemberArchiveVideoContent(sanitizedContent, openid, post.communityId, {
+      requestUploadMetadata, getTempUrl, inspectRemoteObject, materializeFile, deleteFile, existingFinalizedFileIDs,
+    })
+  }
   const presentation = archive?.format === 'text'
     ? archive.presentation
     : (!archive && isTextNoteSection(section)
@@ -1394,6 +1447,62 @@ export async function handleGetMediaUrl(params: { fileID?: string }) {
   return { url }
 }
 
+export async function handleRequestMemberVideoUpload(
+  params: { communityId?: string; fileName?: string },
+  openid: string,
+  kind: 'video' | 'cover',
+) {
+  const communityId = String(params?.communityId || '').trim()
+  if (!communityId) throw new Error('communityId 不能为空')
+  await ensureActiveCommunityMember(communityId, openid)
+  return requestMemberVideoUpload(
+    { kind, communityId, fileName: String(params?.fileName || '').trim() },
+    openid,
+    { requestUploadMetadata },
+  )
+}
+
+function containsExactFileID(value: unknown, fileID: string): boolean {
+  if (value === fileID) return true
+  if (Array.isArray(value)) return value.some(item => containsExactFileID(item, fileID))
+  if (!value || typeof value !== 'object') return false
+  return Object.values(value as Record<string, unknown>).some(item => containsExactFileID(item, fileID))
+}
+
+async function isMemberUploadReferenced(openid: string, fileID: string): Promise<boolean> {
+  let afterId: string | null = null
+  for (;;) {
+    const posts = await db.queryAfterId('posts', { authorId: openid }, afterId, 100)
+    for (const post of posts) {
+      if (post?.status === 'deleted') continue
+      if (containsExactFileID(post?.content, fileID) || containsExactFileID(post?.pendingContent, fileID)) return true
+    }
+    if (posts.length < 100) return false
+    afterId = String(posts[posts.length - 1]?._id || '')
+    if (!afterId) throw new Error('无法确认上传文件引用状态')
+  }
+}
+
+export async function handleDeleteMemberVideoUpload(
+  params: { communityId?: string; fileID?: string; kind?: string },
+  openid: string,
+) {
+  const communityId = String(params?.communityId || '').trim()
+  if (!communityId) throw new Error('communityId 不能为空')
+  await ensureActiveCommunityMember(communityId, openid)
+  const kind = params?.kind
+  if (kind !== 'video' && kind !== 'cover') throw new Error('上传文件类型无效')
+  const fileID = String(params?.fileID || '').trim()
+  const { cloudPath } = assertOwnedMemberVideoUpload(fileID, openid, communityId, kind)
+  const expected = await requestUploadMetadata(cloudPath)
+  if (String(expected?.fileId || '') !== fileID) throw new Error('上传文件不属于当前应用')
+  if (await isMemberUploadReferenced(openid, fileID)) {
+    return { success: true as const, deleted: false as const, reason: 'referenced' as const }
+  }
+  await deleteFile([fileID])
+  return { success: true as const, deleted: true as const }
+}
+
 function sanitizeClientLogValue(value: any, depth = 0): any {
   if (value === null || value === undefined) return value
   const valueType = typeof value
@@ -1436,6 +1545,9 @@ export const main = async (event: any, context?: any) => {
   const openid = smokeIdentity?.userId || resolveOpenId(event, context)
   if (smokeIdentity) await ensureActivePostRagSmokeRun(smokeIdentity)
   if (action === 'clientLog') return handleClientLog(params, openid)
+  if (action === 'requestMemberVideoUpload') return handleRequestMemberVideoUpload(params, openid, 'video')
+  if (action === 'requestMemberVideoCoverUpload') return handleRequestMemberVideoUpload(params, openid, 'cover')
+  if (action === 'deleteMemberVideoUpload') return handleDeleteMemberVideoUpload(params, openid)
   if (action === 'create') return handleCreate(params, openid)
   if (action === 'createCollaboration') return handleCreateCollaboration(params, openid)
   if (action === 'getActivityInviteState') return handleGetActivityInviteState(params, openid)
