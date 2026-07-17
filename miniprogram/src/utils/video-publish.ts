@@ -48,8 +48,10 @@ function fileExtension(nameOrPath: string): string {
   return match ? match[1].toLowerCase() : ''
 }
 
-function declaredMediaType(file: Record<string, any>, result?: Record<string, any> | null): string {
-  return String(file.fileType || file.type || result?.type || '').trim().toLowerCase()
+function declaredMediaTypes(file: Record<string, any>, result?: Record<string, any> | null): string[] {
+  return [file.fileType, file.type, result?.type]
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean)
 }
 
 function classifyDeclaredMediaType(type: string): PublishMediaType | null {
@@ -59,10 +61,13 @@ function classifyDeclaredMediaType(type: string): PublishMediaType | null {
 }
 
 function classifyFile(file: Record<string, any>, result?: Record<string, any> | null): PublishMediaType | null {
-  const type = declaredMediaType(file, result)
-  const declared = classifyDeclaredMediaType(type)
-  if (declared) return declared
-  if (type) return null
+  const declarations = declaredMediaTypes(file, result)
+  if (declarations.length > 0) {
+    const classified = declarations.map(classifyDeclaredMediaType)
+    if (classified.some((type) => type === null)) return null
+    const mediaTypes = new Set(classified as PublishMediaType[])
+    return mediaTypes.size === 1 ? Array.from(mediaTypes)[0] : null
+  }
 
   const extension = fileExtension(String(file.name || file.tempFilePath || file.path || ''))
   if (VIDEO_EXTENSION_SET.has(extension)) return 'video'
@@ -116,6 +121,7 @@ export function buildCosVideoItems(options: BuildCosVideoItemsOptions): [VideoIt
   if (!fileID) throw new Error('Video fileID is required')
 
   const title = String(options.title || '').trim()
+  if (!title) throw new Error('Video title is required')
   const itemId = String(options.itemId || options.createItemId?.() || createDefaultItemId()).trim()
   if (!itemId) throw new Error('Video itemId is required')
 

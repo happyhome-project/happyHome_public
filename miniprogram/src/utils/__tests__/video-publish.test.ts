@@ -64,6 +64,7 @@ describe('member video selection', () => {
     [{ tempFiles: [{ tempFilePath: 'wxfile://large.mp4', size: VIDEO_MAX_SIZE_BYTES + 1, fileType: 'video' }] }, '200 MiB'],
     [{ tempFiles: [{ tempFilePath: 'wxfile://clip.avi', size: 1, fileType: 'video' }] }, 'unsupported'],
     [{ tempFiles: [{ tempFilePath: 'wxfile://song.mp4', size: 1, fileType: 'audio' }] }, 'video'],
+    [{ tempFiles: [{ tempFilePath: 'wxfile://song.mp4', size: 1, fileType: 'video', type: 'audio/mp4' }] }, 'video'],
     [{ tempFiles: [{ tempFilePath: '', name: 'clip.mp4', size: 1, fileType: 'video' }] }, 'path'],
   ])('rejects an invalid chooseMedia result %#', (result, message) => {
     expect(() => normalizeChosenVideo(result)).toThrow(message)
@@ -108,6 +109,14 @@ describe('VideoItemCos construction', () => {
       fileID: '  ',
       title: '标题',
     })).toThrow('fileID')
+  })
+
+  test('rejects a title that is empty after trimming', () => {
+    expect(() => buildCosVideoItems({
+      itemId: 'video-item-fixed',
+      fileID: 'cloud://env/video.mp4',
+      title: '   ',
+    })).toThrow('title')
   })
 })
 
