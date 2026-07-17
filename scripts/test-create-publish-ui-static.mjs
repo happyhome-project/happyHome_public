@@ -79,6 +79,9 @@ assert(
     videoPublishEditor.includes('onProgress') &&
     videoPublishEditor.includes('移除失败封面') &&
     videoPublishEditor.includes("emit('readiness'") &&
+    videoPublishEditor.includes('shouldConsumeInitialVideo') &&
+    videoPublishEditor.includes("emit('initial-acknowledged')") &&
+    createPage.includes('@initial-acknowledged="archiveInitialMedia = null"') &&
     createPage.includes('@readiness="videoPublishReady = $event.ready"') &&
     createPage.includes(':disabled="submitting || !videoPublishReady"'),
   'archive video publishing must have its own upload editor and server-owned upload paths.',

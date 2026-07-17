@@ -238,6 +238,7 @@
                 @update:model-value="formData[block.widget.widgetId] = $event"
                 @upload-state="videoUploading = $event"
                 @readiness="videoPublishReady = $event.ready"
+                @initial-acknowledged="archiveInitialMedia = null"
               />
               <WidgetEditor
                 v-else

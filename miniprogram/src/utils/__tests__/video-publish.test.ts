@@ -230,3 +230,26 @@ describe('archive media editor transition state', () => {
     })
   })
 })
+
+describe('one-shot initial video intent', () => {
+  test('never consumes stale initial media when a valid uploaded model already exists', () => {
+    const shouldConsume = (videoPublish as any).shouldConsumeInitialVideo
+    expect(typeof shouldConsume).toBe('function')
+    if (!shouldConsume) return
+    expect(shouldConsume(
+      [{ source: 'cos', fileID: 'cloud://env/current.mp4', itemId: 'video-1', title: '当前视频' }],
+      { source: 'wxfile://stale.mp4' },
+      false,
+    )).toBe(false)
+  })
+
+  test('consumes an initial file exactly once while the model is empty', () => {
+    const shouldConsume = (videoPublish as any).shouldConsumeInitialVideo
+    expect(typeof shouldConsume).toBe('function')
+    if (!shouldConsume) return
+    const initial = { source: 'wxfile://new.mp4' }
+    expect(shouldConsume([], initial, false)).toBe(true)
+    expect(shouldConsume([], initial, true)).toBe(false)
+    expect(shouldConsume([], null, false)).toBe(false)
+  })
+})

@@ -27,7 +27,7 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import type { VideoItemCos } from '../../../../cloud/shared/types'
 import { postApi } from '../../api/cloud'
 import { uploadCloudFile, type StorageUploadSource } from '../../api/storage'
-import { buildCosVideoItems, normalizeChosenVideo, resolveVideoPublishReadiness, type VideoPublishReadiness } from '../../utils/video-publish'
+import { buildCosVideoItems, hasValidUploadedVideo, normalizeChosenVideo, resolveVideoPublishReadiness, shouldConsumeInitialVideo, type VideoPublishReadiness } from '../../utils/video-publish'
 import type { ArchiveMediaIntentFile } from '../../utils/archive-media-intent'
 
 const props = defineProps<{
@@ -38,6 +38,7 @@ const emit = defineEmits<{
   (event: 'update:modelValue', value: VideoItemCos[]): void
   (event: 'upload-state', value: boolean): void
   (event: 'readiness', value: VideoPublishReadiness): void
+  (event: 'initial-acknowledged'): void
 }>()
 
 const h5VideoInput = ref<HTMLInputElement | null>(null)
@@ -53,6 +54,7 @@ const uploadedVideoFileID = ref('')
 const uploadedCoverFileID = ref('')
 const coverPending = ref(false)
 const failedOperation = ref<'' | 'video' | 'cover'>('')
+const initialAcknowledged = ref(false)
 let retryAction: (() => Promise<void>) | null = null
 const objectUrls = new Set<string>()
 
@@ -74,7 +76,18 @@ watch(() => props.modelValue, (items) => {
 }, { immediate: true, deep: true })
 
 watch(() => props.initialFile, (file) => {
-  if (!file) return
+  if (!file) {
+    initialAcknowledged.value = false
+    return
+  }
+  if (hasValidUploadedVideo(props.modelValue)) {
+    initialAcknowledged.value = true
+    emit('initial-acknowledged')
+    return
+  }
+  if (!shouldConsumeInitialVideo(props.modelValue, file, initialAcknowledged.value)) return
+  initialAcknowledged.value = true
+  emit('initial-acknowledged')
   void acceptVideo(file)
 }, { immediate: true })
 

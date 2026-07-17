@@ -212,3 +212,17 @@ export function transitionArchiveMediaEditorState(
     },
   }
 }
+
+export function hasValidUploadedVideo(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length !== 1) return false
+  const item = asRecord(value[0])
+  return Boolean(item && item.source === 'cos' && String(item.fileID || '').trim())
+}
+
+export function shouldConsumeInitialVideo(
+  modelValue: unknown,
+  initialFile: unknown,
+  alreadyAcknowledged: boolean,
+): boolean {
+  return Boolean(initialFile) && !alreadyAcknowledged && !hasValidUploadedVideo(modelValue)
+}
