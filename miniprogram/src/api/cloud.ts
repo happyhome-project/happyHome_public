@@ -355,10 +355,12 @@ export const postApi = {
     callCloud('post', 'create', params),
   createArchive: (params: ArchivePostCreateParams) =>
     callCloud<{ postId: string; auditStatus?: string; auditReason?: string }>('post', 'create', params),
-  requestMemberVideoUpload: (params: { fileName: string }) =>
+  requestMemberVideoUpload: (params: { communityId: string; fileName: string }) =>
     callCloud<MemberVideoUploadMetadata>('post', 'requestMemberVideoUpload', params),
-  requestMemberVideoCoverUpload: (params: { fileName: string }) =>
+  requestMemberVideoCoverUpload: (params: { communityId: string; fileName: string }) =>
     callCloud<MemberVideoUploadMetadata>('post', 'requestMemberVideoCoverUpload', params),
+  deleteMemberVideoUpload: (params: { communityId: string; fileID: string; kind: 'video' | 'cover' }) =>
+    callCloud<{ success: true; deleted: boolean; reason?: 'referenced' }>('post', 'deleteMemberVideoUpload', params),
   createCollaboration: (params: {
     communityId: string
     collaborationTemplateId: string

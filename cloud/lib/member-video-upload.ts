@@ -48,6 +48,14 @@ type VerificationDependencies = {
   inspectRemoteObject(url: string): Promise<RemoteObjectMetadata>
 }
 
+type FinalizationDependencies = VerificationDependencies & {
+  materializeFile(sourceFileID: string, destinationPath: string): Promise<string>
+  deleteFile?(fileIDs: string[]): Promise<void>
+  now?: () => number
+  randomId?: (kind: 'video' | 'cover') => string
+  existingFinalizedFileIDs?: Partial<Record<'video' | 'cover', ReadonlySet<string>>>
+}
+
 type MemberVideoContent = {
   videos?: Array<{
     source?: unknown
@@ -56,10 +64,12 @@ type MemberVideoContent = {
   }>
 }
 
-export function deriveMemberVideoScope(openid: string): string {
+export function deriveMemberVideoScope(openid: string, communityId: string): string {
   const identity = String(openid || '').trim()
   if (!identity) throw new Error('Missing OPENID')
-  return createHash('sha256').update(identity, 'utf8').digest('hex').slice(0, 24)
+  const community = String(communityId || '').trim()
+  if (!community) throw new Error('communityId 不能为空')
+  return createHash('sha256').update(`${community}\u0000${identity}`, 'utf8').digest('hex').slice(0, 24)
 }
 
 function extensionOf(fileName: string): string {
@@ -68,7 +78,7 @@ function extensionOf(fileName: string): string {
 }
 
 export async function requestMemberVideoUpload(
-  input: { kind: 'video' | 'cover'; fileName: string },
+  input: { kind: 'video' | 'cover'; communityId: string; fileName: string },
   openid: string,
   dependencies: UploadDependencies,
 ): Promise<UploadMetadata> {
@@ -76,7 +86,7 @@ export async function requestMemberVideoUpload(
   const allowed = input.kind === 'video' ? VIDEO_EXTENSIONS : COVER_EXTENSIONS
   if (!allowed.has(extension)) throw new Error('不支持的文件类型')
 
-  const scope = deriveMemberVideoScope(openid)
+  const scope = deriveMemberVideoScope(openid, input.communityId)
   const directory = input.kind === 'video' ? 'member-videos' : 'member-video-covers'
   const now = dependencies.now?.() ?? Date.now()
   const randomId = dependencies.randomId?.() ?? randomBytes(6).toString('hex')
@@ -93,12 +103,13 @@ function cloudFileParts(fileID: string): { environmentId: string; path: string }
   return { environmentId, path }
 }
 
-function assertOwnedFile(
+export function assertOwnedMemberVideoUpload(
   fileID: string,
   openid: string,
+  communityId: string,
   kind: 'video' | 'cover',
 ): { cloudPath: string; extension: string } {
-  const scope = deriveMemberVideoScope(openid)
+  const scope = deriveMemberVideoScope(openid, communityId)
   const directory = kind === 'video' ? 'member-videos' : 'member-video-covers'
   const prefix = `posts/${directory}/${scope}/`
   const parts = cloudFileParts(fileID)
@@ -113,6 +124,17 @@ function assertOwnedFile(
     throw new Error(kind === 'video' ? '视频文件类型不受支持' : '封面图片类型不受支持')
   }
   return { cloudPath, extension }
+}
+
+function isOwnedFinalizedFile(fileID: string, openid: string, communityId: string, kind: 'video' | 'cover'): boolean {
+  const scope = deriveMemberVideoScope(openid, communityId)
+  const directory = kind === 'video' ? 'member-videos-finalized' : 'member-video-covers-finalized'
+  const prefix = `posts/${directory}/${scope}/`
+  const path = cloudFileParts(fileID)?.path || ''
+  const relativePath = path.startsWith(prefix) ? path.slice(prefix.length) : ''
+  if (!relativePath || relativePath.includes('/')) return false
+  const extension = extensionOf(relativePath)
+  return (kind === 'video' ? VIDEO_EXTENSIONS : COVER_EXTENSIONS).has(extension)
 }
 
 function normalizedContentType(value: string): string {
@@ -178,14 +200,22 @@ export async function inspectRemoteObjectWithFetch(
 async function verifyObject(
   fileID: string,
   openid: string,
+  communityId: string,
   kind: 'video' | 'cover',
   dependencies: VerificationDependencies,
 ): Promise<void> {
-  const { cloudPath, extension } = assertOwnedFile(fileID, openid, kind)
-  const expected = await dependencies.requestUploadMetadata(cloudPath)
-  if (String(expected?.fileId || '') !== fileID) {
-    throw new Error(kind === 'video' ? '视频文件不属于当前应用' : '封面图片不属于当前应用')
-  }
+  const { cloudPath, extension } = assertOwnedMemberVideoUpload(fileID, openid, communityId, kind)
+  await verifyObjectAtPath(fileID, cloudPath, extension, kind, dependencies)
+}
+
+async function verifyObjectAtPath(
+  fileID: string,
+  cloudPath: string,
+  extension: string,
+  kind: 'video' | 'cover',
+  dependencies: VerificationDependencies,
+): Promise<void> {
+  await assertCanonicalFileID(fileID, cloudPath, kind, dependencies)
   const url = await dependencies.getTempUrl(fileID)
   const metadata = await dependencies.inspectRemoteObject(url)
   const contentLength = Number(metadata.contentLength)
@@ -206,18 +236,88 @@ async function verifyObject(
   }
 }
 
+async function assertCanonicalFileID(
+  fileID: string,
+  cloudPath: string,
+  kind: 'video' | 'cover',
+  dependencies: Pick<VerificationDependencies, 'requestUploadMetadata'>,
+): Promise<void> {
+  const expected = await dependencies.requestUploadMetadata(cloudPath)
+  if (String(expected?.fileId || '') !== fileID) {
+    throw new Error(kind === 'video' ? '视频文件不属于当前应用' : '封面图片不属于当前应用')
+  }
+}
+
+async function materializeObject(
+  fileID: string,
+  openid: string,
+  communityId: string,
+  kind: 'video' | 'cover',
+  dependencies: FinalizationDependencies,
+): Promise<{ fileID: string; created: boolean }> {
+  if (dependencies.existingFinalizedFileIDs?.[kind]?.has(fileID) && isOwnedFinalizedFile(fileID, openid, communityId, kind)) {
+    return { fileID, created: false }
+  }
+  const { cloudPath: sourcePath, extension } = assertOwnedMemberVideoUpload(fileID, openid, communityId, kind)
+  await assertCanonicalFileID(fileID, sourcePath, kind, dependencies)
+  const scope = deriveMemberVideoScope(openid, communityId)
+  const directory = kind === 'video' ? 'member-videos-finalized' : 'member-video-covers-finalized'
+  const now = dependencies.now?.() ?? Date.now()
+  const randomId = dependencies.randomId?.(kind) ?? randomBytes(12).toString('hex')
+  const cloudPath = `posts/${directory}/${scope}/${now}_${randomId}.${extension}`
+  const finalizedFileID = await dependencies.materializeFile(fileID, cloudPath)
+  await verifyObjectAtPath(finalizedFileID, cloudPath, extension, kind, dependencies)
+  return { fileID: finalizedFileID, created: true }
+}
+
+export async function finalizeMemberArchiveVideoContent<T extends MemberVideoContent>(
+  content: T,
+  openid: string,
+  communityId: string,
+  dependencies: FinalizationDependencies,
+): Promise<T> {
+  const videos = content?.videos
+  if (!Array.isArray(videos) || videos.length !== 1) throw new Error('视频内容无效')
+  const video = videos[0]
+  if (video?.source !== 'cos' || typeof video.fileID !== 'string') throw new Error('视频内容无效')
+
+  const finalized: string[] = []
+  try {
+    const finalizedVideo = await materializeObject(video.fileID, openid, communityId, 'video', dependencies)
+    const videoFileID = finalizedVideo.fileID
+    if (finalizedVideo.created) finalized.push(videoFileID)
+    let coverFileID: string | undefined
+    if (video.cover !== undefined) {
+      if (typeof video.cover !== 'string') throw new Error('封面图片无效')
+      const finalizedCover = await materializeObject(video.cover, openid, communityId, 'cover', dependencies)
+      coverFileID = finalizedCover.fileID
+      if (finalizedCover.created) finalized.push(coverFileID)
+    }
+    return {
+      ...content,
+      videos: [{ ...video, fileID: videoFileID, ...(coverFileID ? { cover: coverFileID } : {}) }],
+    } as T
+  } catch (error) {
+    if (finalized.length > 0 && dependencies.deleteFile) {
+      await dependencies.deleteFile(finalized).catch(() => undefined)
+    }
+    throw error
+  }
+}
+
 export async function validateMemberArchiveVideoContent(
   content: MemberVideoContent,
   openid: string,
+  communityId: string,
   dependencies: VerificationDependencies,
 ): Promise<void> {
   const videos = content?.videos
   if (!Array.isArray(videos) || videos.length !== 1) throw new Error('视频内容无效')
   const video = videos[0]
   if (video?.source !== 'cos' || typeof video.fileID !== 'string') throw new Error('视频内容无效')
-  await verifyObject(video.fileID, openid, 'video', dependencies)
+  await verifyObject(video.fileID, openid, communityId, 'video', dependencies)
   if (video.cover !== undefined) {
     if (typeof video.cover !== 'string') throw new Error('封面图片无效')
-    await verifyObject(video.cover, openid, 'cover', dependencies)
+    await verifyObject(video.cover, openid, communityId, 'cover', dependencies)
   }
 }

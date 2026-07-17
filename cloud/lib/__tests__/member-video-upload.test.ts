@@ -2,13 +2,15 @@ import { createHash } from 'crypto'
 import {
   MAX_MEMBER_VIDEO_BYTES,
   deriveMemberVideoScope,
+  finalizeMemberArchiveVideoContent,
   inspectRemoteObjectWithFetch,
   requestMemberVideoUpload,
   validateMemberArchiveVideoContent,
 } from '../member-video-upload'
 
 const openid = 'member-openid-123'
-const scope = createHash('sha256').update(openid, 'utf8').digest('hex').slice(0, 24)
+const communityId = 'community-1'
+const scope = createHash('sha256').update(`${communityId}\u0000${openid}`, 'utf8').digest('hex').slice(0, 24)
 const videoFileID = `cloud://test-env/posts/member-videos/${scope}/clip.mp4`
 const coverFileID = `cloud://test-env/posts/member-video-covers/${scope}/cover.jpg`
 
@@ -24,12 +26,12 @@ describe('member video upload authorization', () => {
     }))
 
     const result = await requestMemberVideoUpload(
-      { kind: 'video', fileName: 'Family.MP4' },
+      { kind: 'video', communityId, fileName: 'Family.MP4' },
       openid,
       { requestUploadMetadata, now: () => 1234, randomId: () => 'abc123' },
     )
 
-    expect(deriveMemberVideoScope(openid)).toBe(scope)
+    expect(deriveMemberVideoScope(openid, communityId)).toBe(scope)
     expect(scope).not.toContain(openid)
     expect(requestUploadMetadata).toHaveBeenCalledWith(
       `posts/member-videos/${scope}/1234_abc123.mp4`,
@@ -44,7 +46,7 @@ describe('member video upload authorization', () => {
     const requestUploadMetadata = jest.fn(async (cloudPath: string) => ({ cloudPath }))
 
     await requestMemberVideoUpload(
-      { kind: 'cover', fileName: 'Cover.WEBP' },
+      { kind: 'cover', communityId, fileName: 'Cover.WEBP' },
       openid,
       { requestUploadMetadata: requestUploadMetadata as any, now: () => 5678, randomId: () => 'cover1' },
     )
@@ -63,7 +65,7 @@ describe('member video upload authorization', () => {
     const requestUploadMetadata = jest.fn()
 
     await expect(requestMemberVideoUpload(
-      { kind, fileName },
+      { kind, communityId, fileName },
       openid,
       { requestUploadMetadata, now: () => 1, randomId: () => 'x' },
     )).rejects.toThrow('不支持的文件类型')
@@ -101,7 +103,7 @@ describe('member archive video object verification', () => {
 
     await expect(validateMemberArchiveVideoContent({
       videos: [{ source: 'cos', fileID: videoFileID, cover: coverFileID }],
-    }, openid, deps)).resolves.toBeUndefined()
+    }, openid, communityId, deps)).resolves.toBeUndefined()
 
     expect(deps.getTempUrl).toHaveBeenCalledTimes(2)
     expect(deps.inspectRemoteObject).toHaveBeenCalledTimes(2)
@@ -119,7 +121,7 @@ describe('member archive video object verification', () => {
 
     await expect(validateMemberArchiveVideoContent({
       videos: [{ source: 'cos', fileID }],
-    }, openid, deps)).resolves.toBeUndefined()
+    }, openid, communityId, deps)).resolves.toBeUndefined()
   })
 
   test('accepts the CloudBase authority form envId.bucket for the current application', async () => {
@@ -130,16 +132,26 @@ describe('member archive video object verification', () => {
 
     await expect(validateMemberArchiveVideoContent({
       videos: [{ source: 'cos', fileID: bucketFileID }],
-    }, openid, deps)).resolves.toBeUndefined()
+    }, openid, communityId, deps)).resolves.toBeUndefined()
   })
 
   test('rejects a file from another member before resolving any URL', async () => {
-    const otherScope = deriveMemberVideoScope('another-member')
+    const otherScope = deriveMemberVideoScope('another-member', communityId)
     const deps = dependencies({})
 
     await expect(validateMemberArchiveVideoContent({
       videos: [{ source: 'cos', fileID: `cloud://test-env/posts/member-videos/${otherScope}/clip.mp4` }],
-    }, openid, deps)).rejects.toThrow('视频文件不属于当前用户')
+    }, openid, communityId, deps)).rejects.toThrow('视频文件不属于当前用户')
+    expect(deps.getTempUrl).not.toHaveBeenCalled()
+  })
+
+  test('rejects the same member upload when it was authorized for another community', async () => {
+    const otherCommunityScope = deriveMemberVideoScope(openid, 'community-2')
+    const deps = dependencies({})
+
+    await expect(validateMemberArchiveVideoContent({
+      videos: [{ source: 'cos', fileID: `cloud://test-env/posts/member-videos/${otherCommunityScope}/clip.mp4` }],
+    }, openid, communityId, deps)).rejects.toThrow('视频文件不属于当前用户')
     expect(deps.getTempUrl).not.toHaveBeenCalled()
   })
 
@@ -148,7 +160,7 @@ describe('member archive video object verification', () => {
 
     await expect(validateMemberArchiveVideoContent({
       videos: [{ source: 'cos', fileID: `cloud://other-env.bucket/posts/member-videos/${scope}/clip.mp4` }],
-    }, openid, deps)).rejects.toThrow('视频文件不属于当前应用')
+    }, openid, communityId, deps)).rejects.toThrow('视频文件不属于当前应用')
     expect(deps.getTempUrl).not.toHaveBeenCalled()
   })
 
@@ -158,7 +170,7 @@ describe('member archive video object verification', () => {
 
     await expect(validateMemberArchiveVideoContent({
       videos: [{ source: 'cos', fileID: forgedFileID }],
-    }, openid, deps)).rejects.toThrow('视频文件不属于当前应用')
+    }, openid, communityId, deps)).rejects.toThrow('视频文件不属于当前应用')
     expect(deps.getTempUrl).not.toHaveBeenCalled()
   })
 
@@ -172,7 +184,7 @@ describe('member archive video object verification', () => {
 
     await expect(validateMemberArchiveVideoContent({
       videos: [{ source: 'cos', fileID: videoFileID }],
-    }, openid, deps)).rejects.toThrow(message)
+    }, openid, communityId, deps)).rejects.toThrow(message)
   })
 
   test.each([0, 1.5, Number.MAX_SAFE_INTEGER + 1])(
@@ -184,7 +196,7 @@ describe('member archive video object verification', () => {
 
       await expect(validateMemberArchiveVideoContent({
         videos: [{ source: 'cos', fileID: videoFileID }],
-      }, openid, deps)).rejects.toThrow('无法确认上传文件大小')
+      }, openid, communityId, deps)).rejects.toThrow('无法确认上传文件大小')
     },
   )
 
@@ -200,7 +212,123 @@ describe('member archive video object verification', () => {
 
     await expect(validateMemberArchiveVideoContent({
       videos: [{ source: 'cos', fileID: videoFileID, cover: coverFileID }],
-    }, openid, deps)).rejects.toThrow(message)
+    }, openid, communityId, deps)).rejects.toThrow(message)
+  })
+})
+
+describe('member archive video finalization', () => {
+  test('reuses only an explicitly allowed finalized object during post updates', async () => {
+    const existing = `cloud://test-env/posts/member-videos-finalized/${scope}/existing.mp4`
+    const materializeFile = jest.fn()
+    const content = await finalizeMemberArchiveVideoContent({
+      videos: [{ source: 'cos', fileID: existing }],
+    }, openid, communityId, {
+      requestUploadMetadata: jest.fn(),
+      materializeFile,
+      getTempUrl: jest.fn(),
+      inspectRemoteObject: jest.fn(),
+      existingFinalizedFileIDs: { video: new Set([existing]) },
+    })
+
+    expect(content.videos?.[0].fileID).toBe(existing)
+    expect(materializeFile).not.toHaveBeenCalled()
+  })
+
+  test('does not accept a finalized object that was not already bound to the updated post', async () => {
+    const borrowed = `cloud://test-env/posts/member-videos-finalized/${scope}/borrowed.mp4`
+    await expect(finalizeMemberArchiveVideoContent({
+      videos: [{ source: 'cos', fileID: borrowed }],
+    }, openid, communityId, {
+      requestUploadMetadata: jest.fn(),
+      materializeFile: jest.fn(),
+      getTempUrl: jest.fn(),
+      inspectRemoteObject: jest.fn(),
+      existingFinalizedFileIDs: { video: new Set() },
+    })).rejects.toThrow('视频文件不属于当前用户')
+  })
+
+  test('does not delete a reused published video when finalizing a replacement cover fails', async () => {
+    const existing = `cloud://test-env/posts/member-videos-finalized/${scope}/existing.mp4`
+    const deleteFile = jest.fn(async () => undefined)
+    await expect(finalizeMemberArchiveVideoContent({
+      videos: [{ source: 'cos', fileID: existing, cover: coverFileID }],
+    }, openid, communityId, {
+      requestUploadMetadata: jest.fn(async (cloudPath: string) => ({
+        cloudPath,
+        fileId: `cloud://test-env/${cloudPath}`,
+        url: '', token: '', authorization: '', cosFileId: '',
+      })),
+      materializeFile: jest.fn(async () => { throw new Error('copy failed') }),
+      deleteFile,
+      getTempUrl: jest.fn(),
+      inspectRemoteObject: jest.fn(),
+      existingFinalizedFileIDs: { video: new Set([existing]) },
+    })).rejects.toThrow('copy failed')
+
+    expect(deleteFile).not.toHaveBeenCalled()
+  })
+
+  test('materializes video and cover to finalized paths and verifies only the finalized objects', async () => {
+    const finalizedVideo = `cloud://test-env/posts/member-videos-finalized/${scope}/1234_final-video.mp4`
+    const finalizedCover = `cloud://test-env/posts/member-video-covers-finalized/${scope}/1234_final-cover.jpg`
+    const requestUploadMetadata = jest.fn(async (cloudPath: string) => ({
+      cloudPath,
+      fileId: `cloud://test-env/${cloudPath}`,
+      url: '', token: '', authorization: '', cosFileId: '',
+    }))
+    const materializeFile = jest.fn(async (sourceFileID: string, destinationPath: string) => {
+      expect([videoFileID, coverFileID]).toContain(sourceFileID)
+      return `cloud://test-env/${destinationPath}`
+    })
+    const getTempUrl = jest.fn(async (fileID: string) => `https://download.example/${encodeURIComponent(fileID)}`)
+    const inspectRemoteObject = jest.fn(async (url: string) => {
+      const fileID = decodeURIComponent(url.slice(url.lastIndexOf('/') + 1))
+      expect([finalizedVideo, finalizedCover]).toContain(fileID)
+      return fileID === finalizedVideo
+        ? { contentLength: 1024, contentType: 'video/mp4' }
+        : { contentLength: 512, contentType: 'image/jpeg' }
+    })
+
+    const content = await finalizeMemberArchiveVideoContent({
+      videos: [{ source: 'cos', fileID: videoFileID, cover: coverFileID }],
+    }, openid, communityId, {
+      requestUploadMetadata,
+      materializeFile,
+      getTempUrl,
+      inspectRemoteObject,
+      now: () => 1234,
+      randomId: (kind: 'video' | 'cover') => kind === 'video' ? 'final-video' : 'final-cover',
+    })
+
+    expect(content).toEqual({ videos: [{ source: 'cos', fileID: finalizedVideo, cover: finalizedCover }] })
+    expect(materializeFile).toHaveBeenNthCalledWith(1, videoFileID, `posts/member-videos-finalized/${scope}/1234_final-video.mp4`)
+    expect(materializeFile).toHaveBeenNthCalledWith(2, coverFileID, `posts/member-video-covers-finalized/${scope}/1234_final-cover.jpg`)
+    expect(inspectRemoteObject).toHaveBeenCalledTimes(2)
+  })
+
+  test('rejects a finalized object whose metadata changed before persistence', async () => {
+    const requestUploadMetadata = jest.fn(async (cloudPath: string) => ({
+      cloudPath,
+      fileId: `cloud://test-env/${cloudPath}`,
+      url: '', token: '', authorization: '', cosFileId: '',
+    }))
+    const materializeFile = jest.fn(async (_sourceFileID: string, destinationPath: string) => `cloud://test-env/${destinationPath}`)
+
+    await expect(finalizeMemberArchiveVideoContent({
+      videos: [{ source: 'cos', fileID: videoFileID }],
+    }, openid, communityId, {
+      requestUploadMetadata,
+      materializeFile,
+      getTempUrl: jest.fn(async () => 'https://download.example/finalized'),
+      inspectRemoteObject: jest.fn(async () => ({
+        contentLength: MAX_MEMBER_VIDEO_BYTES + 1,
+        contentType: 'video/mp4',
+      })),
+      now: () => 1,
+      randomId: () => 'final',
+    })).rejects.toThrow('视频文件不能超过 200MiB')
+
+    expect(materializeFile).toHaveBeenCalledTimes(1)
   })
 })
 

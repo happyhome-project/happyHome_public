@@ -1,8 +1,8 @@
 import cloud from 'wx-server-sdk'
 import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
-import { getTempUrl, inspectRemoteObject, requestUploadMetadata } from '../../lib/storage'
-import { requestMemberVideoUpload, validateMemberArchiveVideoContent } from '../../lib/member-video-upload'
+import { deleteFile, getTempUrl, inspectRemoteObject, materializeFile, requestUploadMetadata } from '../../lib/storage'
+import { assertOwnedMemberVideoUpload, finalizeMemberArchiveVideoContent, requestMemberVideoUpload } from '../../lib/member-video-upload'
 import { sanitizeContent, validateContentValues, validateRequiredWidgets } from '../../lib/post-validate'
 import { auditAndApply, isPostVisibleToMembers } from '../../lib/content-audit'
 import { buildHomeBootstrap, buildHomeFeed } from '../../lib/home-snapshot'
@@ -554,15 +554,15 @@ export async function handleCreate(
   if (params.area === 'archive') {
     const archive = parseArchivePostCreateInput(params)
     const section = buildArchiveContentSection(params.communityId, archive.format)
-    const content = archive.content as unknown as PostContent
+    let content = archive.content as unknown as PostContent
     const validationOptions = archive.format === 'video'
       ? { memberEditableVideoWidgetIds: ['videos'] }
       : undefined
     validateRequiredWidgets(section, content, validationOptions)
     validateContentValues(section, content, validationOptions)
     if (archive.format === 'video') {
-      await validateMemberArchiveVideoContent(content, openid, {
-        requestUploadMetadata, getTempUrl, inspectRemoteObject,
+      content = await finalizeMemberArchiveVideoContent(content, openid, params.communityId, {
+        requestUploadMetadata, getTempUrl, inspectRemoteObject, materializeFile, deleteFile,
       })
     }
 
@@ -1230,6 +1230,8 @@ export async function handleUpdate(
     presentation?: unknown
     createdAt?: string
     collaborationTemplateId?: string
+    content?: PostContent
+    pendingContent?: PostContent
   }
   if (post.status === 'deleted') throw new Error('帖子已删除')
   if (post.authorId !== openid) throw new Error('无权修改')
@@ -1251,7 +1253,7 @@ export async function handleUpdate(
   if (!section || !Array.isArray(section.widgets) || section.widgets.length === 0) {
     throw new Error('该板块尚未配置内容模板，无法编辑')
   }
-  const sanitizedContent = archive
+  let sanitizedContent = archive
     ? archive.content as unknown as PostContent
     : sanitizeContent(params.content, section)
   const validationOptions = archive?.format === 'video'
@@ -1260,8 +1262,20 @@ export async function handleUpdate(
   validateRequiredWidgets(section, sanitizedContent, validationOptions)
   validateContentValues(section, sanitizedContent, validationOptions)
   if (archive?.format === 'video') {
-    await validateMemberArchiveVideoContent(sanitizedContent, openid, {
-      requestUploadMetadata, getTempUrl, inspectRemoteObject,
+    await ensureActiveCommunityMember(post.communityId, openid)
+    const existingFinalizedFileIDs = {
+      video: new Set<string>(),
+      cover: new Set<string>(),
+    }
+    for (const existingContent of [post.content, post.pendingContent]) {
+      const existingVideo = Array.isArray((existingContent as any)?.videos)
+        ? (existingContent as any).videos[0]
+        : null
+      if (typeof existingVideo?.fileID === 'string') existingFinalizedFileIDs.video.add(existingVideo.fileID)
+      if (typeof existingVideo?.cover === 'string') existingFinalizedFileIDs.cover.add(existingVideo.cover)
+    }
+    sanitizedContent = await finalizeMemberArchiveVideoContent(sanitizedContent, openid, post.communityId, {
+      requestUploadMetadata, getTempUrl, inspectRemoteObject, materializeFile, deleteFile, existingFinalizedFileIDs,
     })
   }
   const presentation = archive?.format === 'text'
@@ -1434,15 +1448,59 @@ export async function handleGetMediaUrl(params: { fileID?: string }) {
 }
 
 export async function handleRequestMemberVideoUpload(
-  params: { fileName?: string },
+  params: { communityId?: string; fileName?: string },
   openid: string,
   kind: 'video' | 'cover',
 ) {
+  const communityId = String(params?.communityId || '').trim()
+  if (!communityId) throw new Error('communityId 不能为空')
+  await ensureActiveCommunityMember(communityId, openid)
   return requestMemberVideoUpload(
-    { kind, fileName: String(params?.fileName || '').trim() },
+    { kind, communityId, fileName: String(params?.fileName || '').trim() },
     openid,
     { requestUploadMetadata },
   )
+}
+
+function containsExactFileID(value: unknown, fileID: string): boolean {
+  if (value === fileID) return true
+  if (Array.isArray(value)) return value.some(item => containsExactFileID(item, fileID))
+  if (!value || typeof value !== 'object') return false
+  return Object.values(value as Record<string, unknown>).some(item => containsExactFileID(item, fileID))
+}
+
+async function isMemberUploadReferenced(openid: string, fileID: string): Promise<boolean> {
+  let afterId: string | null = null
+  for (;;) {
+    const posts = await db.queryAfterId('posts', { authorId: openid }, afterId, 100)
+    for (const post of posts) {
+      if (post?.status === 'deleted') continue
+      if (containsExactFileID(post?.content, fileID) || containsExactFileID(post?.pendingContent, fileID)) return true
+    }
+    if (posts.length < 100) return false
+    afterId = String(posts[posts.length - 1]?._id || '')
+    if (!afterId) throw new Error('无法确认上传文件引用状态')
+  }
+}
+
+export async function handleDeleteMemberVideoUpload(
+  params: { communityId?: string; fileID?: string; kind?: string },
+  openid: string,
+) {
+  const communityId = String(params?.communityId || '').trim()
+  if (!communityId) throw new Error('communityId 不能为空')
+  await ensureActiveCommunityMember(communityId, openid)
+  const kind = params?.kind
+  if (kind !== 'video' && kind !== 'cover') throw new Error('上传文件类型无效')
+  const fileID = String(params?.fileID || '').trim()
+  const { cloudPath } = assertOwnedMemberVideoUpload(fileID, openid, communityId, kind)
+  const expected = await requestUploadMetadata(cloudPath)
+  if (String(expected?.fileId || '') !== fileID) throw new Error('上传文件不属于当前应用')
+  if (await isMemberUploadReferenced(openid, fileID)) {
+    return { success: true as const, deleted: false as const, reason: 'referenced' as const }
+  }
+  await deleteFile([fileID])
+  return { success: true as const, deleted: true as const }
 }
 
 function sanitizeClientLogValue(value: any, depth = 0): any {
@@ -1489,6 +1547,7 @@ export const main = async (event: any, context?: any) => {
   if (action === 'clientLog') return handleClientLog(params, openid)
   if (action === 'requestMemberVideoUpload') return handleRequestMemberVideoUpload(params, openid, 'video')
   if (action === 'requestMemberVideoCoverUpload') return handleRequestMemberVideoUpload(params, openid, 'cover')
+  if (action === 'deleteMemberVideoUpload') return handleDeleteMemberVideoUpload(params, openid)
   if (action === 'create') return handleCreate(params, openid)
   if (action === 'createCollaboration') return handleCreateCollaboration(params, openid)
   if (action === 'getActivityInviteState') return handleGetActivityInviteState(params, openid)

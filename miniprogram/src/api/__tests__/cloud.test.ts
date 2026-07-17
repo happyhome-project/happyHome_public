@@ -78,14 +78,18 @@ describe('callCloud', () => {
     vi.stubGlobal('uni', {})
 
     const { postApi } = await import('../cloud')
-    await (postApi as any).requestMemberVideoUpload({ fileName: 'family.mp4' })
-    await (postApi as any).requestMemberVideoCoverUpload({ fileName: 'cover.jpg' })
+    await (postApi as any).requestMemberVideoUpload({ communityId: 'community-1', fileName: 'family.mp4' })
+    await (postApi as any).requestMemberVideoCoverUpload({ communityId: 'community-1', fileName: 'cover.jpg' })
+    await (postApi as any).deleteMemberVideoUpload({ communityId: 'community-1', fileID: 'cloud://env/pending.mp4', kind: 'video' })
 
     expect(callWebFunction).toHaveBeenNthCalledWith(1, 'post', {
-      action: 'requestMemberVideoUpload', fileName: 'family.mp4',
+      action: 'requestMemberVideoUpload', communityId: 'community-1', fileName: 'family.mp4',
     })
     expect(callWebFunction).toHaveBeenNthCalledWith(2, 'post', {
-      action: 'requestMemberVideoCoverUpload', fileName: 'cover.jpg',
+      action: 'requestMemberVideoCoverUpload', communityId: 'community-1', fileName: 'cover.jpg',
+    })
+    expect(callWebFunction).toHaveBeenNthCalledWith(3, 'post', {
+      action: 'deleteMemberVideoUpload', communityId: 'community-1', fileID: 'cloud://env/pending.mp4', kind: 'video',
     })
   })
 
