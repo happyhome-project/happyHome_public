@@ -28,4 +28,34 @@ describe('archive feed state', () => {
     expect(normalizeArchiveCard(post('legacy')).cover).toEqual(normalizeArchiveCard(post('legacy')).cover)
     expect(normalizeArchiveCard(post('legacy')).cover.kind).toBe('text')
   })
+
+  test('keeps native video cards distinct and uses their explicit cover', () => {
+    const card = normalizeArchiveCard(post('video-cover', {
+      format: 'video',
+      content: {
+        title: '夏夜电影',
+        videos: [{ source: 'cos', itemId: 'video-1', title: '夏夜电影', fileID: 'cloud://video.mp4', cover: 'cloud://cover.jpg' }],
+      },
+    }))
+
+    expect(card.format).toBe('video')
+    expect(card.cover).toEqual({ kind: 'video', src: 'cloud://cover.jpg' })
+  })
+
+  test('uses a deterministic video placeholder without treating unknown formats as video', () => {
+    const withoutCover = post('video-placeholder', {
+      format: 'video',
+      content: { title: '没有封面', videos: [{ source: 'cos', itemId: 'video-1', title: '没有封面', fileID: 'cloud://video.mp4' }] },
+    })
+    const first = normalizeArchiveCard(withoutCover)
+    const second = normalizeArchiveCard(withoutCover)
+    const unknown = normalizeArchiveCard(post('future-format', { format: 'future' }))
+
+    expect(first.format).toBe('video')
+    expect(first.cover).toEqual(second.cover)
+    expect(first.cover.kind).toBe('video')
+    expect(first.cover.src).toBe('')
+    expect(unknown.format).toBe('text')
+    expect(unknown.cover.kind).toBe('text')
+  })
 })

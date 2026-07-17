@@ -14,7 +14,12 @@
     <view v-else class="archive-waterfall__columns">
       <view v-for="(column, index) in columns" :key="index" class="archive-waterfall__column">
         <view v-for="card in column" :key="card.postId" class="archive-waterfall__card" @tap="$emit('post', card)">
-          <image v-if="card.cover.kind === 'image'" :src="card.cover.src" mode="widthFix" class="archive-waterfall__cover" />
+          <view v-if="card.cover.kind === 'video'" class="archive-waterfall__video-cover">
+            <image v-if="card.cover.src" :src="card.cover.src" mode="aspectFill" class="archive-waterfall__cover" />
+            <view v-else class="archive-waterfall__video-placeholder"><text>视频</text></view>
+            <view class="archive-waterfall__video-play"><text>▶</text></view>
+          </view>
+          <image v-else-if="card.cover.kind === 'image'" :src="card.cover.src" mode="widthFix" class="archive-waterfall__cover" />
           <TextNoteCover v-else :title="card.title" :body="String(card.post?.content?.body?.text || '')" :theme="card.cover.theme as any" />
           <view class="archive-waterfall__main">
             <text class="archive-waterfall__title">{{ card.title }}</text>
@@ -44,6 +49,11 @@ const hasCards = computed(() => props.columns[0].length + props.columns[1].lengt
 .archive-waterfall__column { display: flex; flex-direction: column; gap: 14rpx; min-width: 0; }
 .archive-waterfall__card { overflow: hidden; border-radius: 16rpx; background: #fff; }
 .archive-waterfall__cover { display: block; width: 100%; min-height: 220rpx; background: #eee; }
+.archive-waterfall__video-cover { position: relative; width: 100%; height: 300rpx; overflow: hidden; background: #171923; }
+.archive-waterfall__video-cover .archive-waterfall__cover { width: 100%; height: 100%; min-height: 0; }
+.archive-waterfall__video-placeholder { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; background: linear-gradient(145deg,#272b3d,#11131c); color: rgba(255,255,255,.48); font-size: 34rpx; letter-spacing: 8rpx; }
+.archive-waterfall__video-play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.archive-waterfall__video-play text { display: flex; width: 68rpx; height: 68rpx; align-items: center; justify-content: center; padding-left: 4rpx; border-radius: 50%; background: rgba(255,255,255,.92); color: #222; font-size: 28rpx; box-shadow: 0 4rpx 18rpx rgba(0,0,0,.2); }
 .archive-waterfall__main { padding: 16rpx 16rpx 18rpx; }
 .archive-waterfall__title { display: -webkit-box; overflow: hidden; color: #151515; font-size: 28rpx; font-weight: 600; line-height: 40rpx; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .archive-waterfall__topics { margin-top: 8rpx; color: #666; font-size: 22rpx; }

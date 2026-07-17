@@ -1,11 +1,14 @@
 export type ArchiveFeedCard = {
   postId: string
-  format: 'image_text' | 'text'
+  format: 'image_text' | 'text' | 'video'
   title: string
   topics: string[]
   authorName: string
   createdAt: string
-  cover: { kind: 'image'; src: string } | { kind: 'text'; theme: string }
+  cover:
+    | { kind: 'image'; src: string }
+    | { kind: 'text'; theme: string }
+    | { kind: 'video'; src: string }
   estimatedHeight: number
   post: Record<string, any>
 }
@@ -29,10 +32,18 @@ function stableTheme(postId: string): string {
 export function normalizeArchiveCard(post: Record<string, any>): ArchiveFeedCard {
   const postId = String(post?._id || '')
   const images = Array.isArray(post?.content?.images) ? post.content.images.filter(Boolean).map(String) : []
-  const format = post?.format === 'image_text' && images.length ? 'image_text' : 'text'
-  const cover = format === 'image_text'
-    ? { kind: 'image' as const, src: images[0] }
-    : { kind: 'text' as const, theme: String(post?.presentation?.textNoteTheme || stableTheme(postId)) }
+  const videos = Array.isArray(post?.content?.videos) ? post.content.videos : []
+  const videoCover = String(videos.find((item: any) => item && typeof item === 'object')?.cover || '').trim()
+  const format: ArchiveFeedCard['format'] = post?.format === 'video'
+    ? 'video'
+    : post?.format === 'image_text' && images.length
+      ? 'image_text'
+      : 'text'
+  const cover: ArchiveFeedCard['cover'] = format === 'video'
+    ? { kind: 'video', src: videoCover }
+    : format === 'image_text'
+      ? { kind: 'image', src: images[0] }
+      : { kind: 'text', theme: String(post?.presentation?.textNoteTheme || stableTheme(postId)) }
   return {
     postId,
     format,
@@ -41,7 +52,7 @@ export function normalizeArchiveCard(post: Record<string, any>): ArchiveFeedCard
     authorName: String(post?.author?.nickName || post?.authorName || '邻居'),
     createdAt: String(post?.createdAt || ''),
     cover,
-    estimatedHeight: cover.kind === 'image' ? 300 : 220,
+    estimatedHeight: cover.kind === 'text' ? 220 : 300,
     post,
   }
 }
