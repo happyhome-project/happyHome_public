@@ -108,6 +108,7 @@
         v-for="(item, i) in liveItems"
         :key="i"
         class="group-card"
+        :class="{ 'group-card--with-ribbon': item.isPinned || item.isFeatured }"
         @tap="onLiveTap(item)"
       >
         <view class="group-icon">
@@ -2526,30 +2527,35 @@ onShareAppMessage(() => {
 .live-cta text { color: $hh-surface-1; }
 
 .group-section {
-  margin: 0 32rpx 34rpx;
+  margin: 0 24rpx 34rpx;
 }
 
 .group-section-title {
   display: block;
-  margin-bottom: 16rpx;
+  margin-bottom: 32rpx;
   color: var(--hh-color-text-primary);
-  font-size: var(--hh-text-heading-sm-size);
-  line-height: var(--hh-text-heading-sm-line);
+  font-size: var(--hh-text-heading-md-size);
+  line-height: var(--hh-text-heading-md-line);
   font-weight: $hh-font-weight-bold;
 }
 
 .group-card {
   position: relative;
-  min-height: 104rpx;
-  padding: 18rpx 104rpx 18rpx 18rpx;
-  border: 1rpx solid $hh-ink-line;
-  border-radius: 16rpx;
+  box-sizing: border-box;
+  min-height: 160rpx;
+  padding: 32rpx;
+  border: 0;
+  border-radius: 24rpx;
   background: $hh-surface-1;
   display: flex;
   align-items: center;
-  gap: 18rpx;
+  gap: 24rpx;
   overflow: hidden;
-  box-shadow: $hh-shadow-card;
+  box-shadow: none;
+}
+
+.group-card--with-ribbon {
+  padding-right: 104rpx;
 }
 
 .group-card + .group-card {
@@ -2557,9 +2563,9 @@ onShareAppMessage(() => {
 }
 
 .group-icon {
-  width: 64rpx;
-  height: 64rpx;
-  border-radius: 16rpx;
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 24rpx;
   background: var(--hh-color-brand-soft);
   color: var(--hh-color-brand-primary);
   display: flex;
@@ -2574,20 +2580,23 @@ onShareAppMessage(() => {
 }
 
 .group-icon-image {
-  width: 38rpx;
-  height: 32rpx;
+  width: 70rpx;
+  height: 56rpx;
 }
 
 .group-body {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
 }
 
 .group-title {
   display: block;
   color: var(--hh-color-text-primary);
   font-size: var(--hh-text-body-lg-size);
-  line-height: var(--hh-text-body-lg-line);
+  line-height: var(--hh-text-body-base-line);
   font-weight: $hh-font-weight-bold;
   white-space: nowrap;
   overflow: hidden;
@@ -2595,13 +2604,12 @@ onShareAppMessage(() => {
 }
 
 .group-meta {
-  margin-top: 4rpx;
   display: flex;
   flex-wrap: wrap;
   gap: 8rpx 16rpx;
   color: var(--hh-color-text-tertiary);
-  font-size: var(--hh-text-caption-lg-size);
-  line-height: var(--hh-text-caption-lg-line);
+  font-size: var(--hh-text-body-base-size);
+  line-height: var(--hh-text-body-base-line);
 }
 
 .group-ribbon {
@@ -3781,7 +3789,6 @@ onShareAppMessage(() => {
   color: var(--hh-color-text-tertiary);
 }
 
-.group-card,
 .sch-card,
 .arc-card,
 .dormant {
