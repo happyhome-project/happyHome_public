@@ -3,6 +3,7 @@ import {
   VIDEO_ALLOWED_EXTENSIONS,
   VIDEO_MAX_SIZE_BYTES,
   buildCosVideoItems,
+  buildPlatformThumbnailFile,
   decideMediaTypeSwitch,
   detectFirstMediaType,
   normalizeChosenVideo,
@@ -10,6 +11,22 @@ import {
 import * as videoPublish from '../video-publish'
 
 describe('member video selection', () => {
+  test('turns a platform video thumbnail into an uploadable image cover', () => {
+    expect(buildPlatformThumbnailFile('wxfile://tmp/video-thumb.PNG')).toEqual({
+      source: 'wxfile://tmp/video-thumb.PNG',
+      name: 'video-thumb.PNG',
+      type: 'image/png',
+      size: 1,
+    })
+    expect(buildPlatformThumbnailFile('wxfile://tmp/no-extension')).toEqual({
+      source: 'wxfile://tmp/no-extension',
+      name: 'video-thumbnail.jpg',
+      type: 'image/jpeg',
+      size: 1,
+    })
+    expect(buildPlatformThumbnailFile('')).toBeNull()
+  })
+
   test('supports mp4, mov, m4v, and webm up to 200 MiB', () => {
     expect(VIDEO_ALLOWED_EXTENSIONS).toEqual(['mp4', 'mov', 'm4v', 'webm'])
     expect(VIDEO_MAX_SIZE_BYTES).toBe(200 * 1024 * 1024)

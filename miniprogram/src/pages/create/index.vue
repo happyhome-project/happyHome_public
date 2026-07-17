@@ -241,6 +241,7 @@
               <VideoPublishEditor
                 v-else-if="archiveFormat === 'video' && block.widget.type === 'video_group'"
                 :key="archiveVideoIntentGeneration"
+                :community-id="communityStore.currentCommunityId"
                 :model-value="formData[block.widget.widgetId]"
                 :initial-file="archiveInitialMedia"
                 :initial-state="archiveVideoIntentState"

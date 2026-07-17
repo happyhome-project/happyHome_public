@@ -15,6 +15,13 @@ export interface ChosenVideo {
   type: 'video'
 }
 
+export interface PlatformThumbnailFile {
+  source: string
+  name: string
+  type: 'image/jpeg' | 'image/png' | 'image/webp'
+  size: number
+}
+
 export interface BuildCosVideoItemsOptions {
   fileID: string
   title: string
@@ -97,6 +104,24 @@ function fileNameFromPath(path: string): string {
 function fileExtension(nameOrPath: string): string {
   const match = String(nameOrPath || '').match(/\.([a-z0-9]+)(?:[?#].*)?$/i)
   return match ? match[1].toLowerCase() : ''
+}
+
+export function buildPlatformThumbnailFile(path: string): PlatformThumbnailFile | null {
+  const source = String(path || '').trim()
+  if (!source) return null
+  const originalName = fileNameFromPath(source)
+  const extension = fileExtension(originalName)
+  const normalizedExtension = extension === 'png' || extension === 'webp' ? extension : 'jpg'
+  const name = extension === normalizedExtension && originalName
+    ? originalName
+    : 'video-thumbnail.jpg'
+  return {
+    source,
+    name,
+    type: normalizedExtension === 'png' ? 'image/png' : (normalizedExtension === 'webp' ? 'image/webp' : 'image/jpeg'),
+    // chooseMedia does not report thumbnail size. The upload service verifies the actual object.
+    size: 1,
+  }
 }
 
 function declaredMediaTypes(file: Record<string, any>, result?: Record<string, any> | null): string[] {

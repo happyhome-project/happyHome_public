@@ -76,6 +76,12 @@ describe('archive publishing entry', () => {
     expect(widgetEditor).toContain("widget.type === 'video_group' || widget.type === 'audio_group'")
     expect(videoEditor).toContain('requestMemberVideoUpload')
     expect(videoEditor).toContain('requestMemberVideoCoverUpload')
+    expect(videoEditor).toContain('deleteMemberVideoUpload')
+    expect(videoEditor).toContain('buildPlatformThumbnailFile')
+    expect(videoEditor).toMatch(/requestMemberVideoUpload\(\{\s*communityId:\s*props\.communityId,\s*fileName:/)
+    expect(videoEditor).toMatch(/requestMemberVideoCoverUpload\(\{\s*communityId:\s*props\.communityId,\s*fileName:/)
+    expect(videoEditor).toMatch(/onBeforeUnmount\([\s\S]*cleanupPendingUploads/)
+    expect(create).toContain(':community-id="communityStore.currentCommunityId"')
     expect(videoEditor).toContain('uploadCloudFile')
     expect(videoEditor).toContain('onProgress')
     expect(videoEditor).toContain('重试')
@@ -92,7 +98,7 @@ describe('archive publishing entry', () => {
       videoEditor.indexOf('async function acceptVideo'),
       videoEditor.indexOf('function startVideoUpload'),
     )
-    expect(acceptVideoBlock).toMatch(/uploadGeneration \+= 1[\s\S]*coverPending\.value = false[\s\S]*emit\('navigation-blocked', false\)/)
+    expect(acceptVideoBlock).toMatch(/uploadGeneration \+= 1[\s\S]*cleanupPendingUploads[\s\S]*buildPlatformThumbnailFile[\s\S]*coverPending\.value = Boolean\(platformCover\)/)
     expect(videoEditor).toContain('isVideoUploadResultCurrent')
     expect(videoEditor).toContain('releasePreview(previewSource.value)')
     expect(videoEditor).toContain('releasePreview(coverPreview.value)')

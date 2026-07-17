@@ -98,6 +98,12 @@ assert(
     createPage.includes('<VideoPublishEditor') &&
     videoPublishEditor.includes('requestMemberVideoUpload') &&
     videoPublishEditor.includes('requestMemberVideoCoverUpload') &&
+    videoPublishEditor.includes('deleteMemberVideoUpload') &&
+    videoPublishEditor.includes('buildPlatformThumbnailFile') &&
+    /requestMemberVideoUpload\(\{\s*communityId:\s*props\.communityId,\s*fileName:/.test(videoPublishEditor) &&
+    /requestMemberVideoCoverUpload\(\{\s*communityId:\s*props\.communityId,\s*fileName:/.test(videoPublishEditor) &&
+    /onBeforeUnmount\([\s\S]*cleanupPendingUploads/.test(videoPublishEditor) &&
+    createPage.includes(':community-id="communityStore.currentCommunityId"') &&
     videoPublishEditor.includes('uploadCloudFile') &&
     videoPublishEditor.includes('onProgress') &&
     videoPublishEditor.includes('移除失败封面') &&
@@ -109,7 +115,7 @@ assert(
     videoPublishEditor.includes("emit('selected-file'") &&
     videoPublishEditor.includes("emit('navigation-blocked', true)") &&
     videoPublishEditor.includes("emit('navigation-blocked', false)") &&
-    /uploadGeneration \+= 1[\s\S]*coverPending\.value = false[\s\S]*emit\('navigation-blocked', false\)/.test(acceptVideoBlock) &&
+    /uploadGeneration \+= 1[\s\S]*cleanupPendingUploads[\s\S]*buildPlatformThumbnailFile[\s\S]*coverPending\.value = Boolean\(platformCover\)/.test(acceptVideoBlock) &&
     videoPublishEditor.includes('isVideoUploadResultCurrent') &&
     videoPublishEditor.includes('releasePreview(previewSource.value)') &&
     videoPublishEditor.includes('releasePreview(coverPreview.value)') &&
