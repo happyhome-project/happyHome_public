@@ -14,6 +14,9 @@ describe('archive publishing entry', () => {
     expect(create).toContain('@tap="handlePageExit"')
     expect(create).toContain('env(safe-area-inset-top)')
     expect(create).toContain('navigateBackOrHome')
+    expect(create).toContain(':style="createCustomNavStyle"')
+    expect(create).toContain('{{ createNavTitle }}')
+    expect(create).toContain('computeCreateNavMetrics')
   })
   test('keeps archive topic navigation on the shared page background', () => {
     const source = read('components', 'ArchiveTopicTabs.vue')

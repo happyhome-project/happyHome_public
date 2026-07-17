@@ -1,9 +1,9 @@
 <template>
   <view class="create-page">
-    <view class="create-custom-nav">
+    <view class="create-custom-nav" :style="createCustomNavStyle">
       <view class="create-custom-nav__row">
         <button class="create-custom-nav__back" aria-label="返回" @tap="handlePageExit">‹</button>
-        <text class="create-custom-nav__title">发帖</text>
+        <text class="create-custom-nav__title">{{ createNavTitle }}</text>
         <view class="create-custom-nav__spacer" />
       </view>
     </view>
@@ -306,6 +306,7 @@ import {
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { resolveActivityAnnouncementMain } from '../../utils/create-form-layout'
 import { buildImageNoteCreateBlocks } from '../../utils/image-note-create'
+import { computeCreateNavMetrics } from '../../utils/create-nav'
 import { isImageNoteSectionContract } from '../../utils/image-note'
 import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
@@ -351,6 +352,12 @@ const archiveVideoIntentGeneration = ref(0)
 const videoUploading = ref(false)
 const videoNavigationBlocked = ref(false)
 const videoPublishReady = ref(true)
+const initialCreateNavMetrics = computeCreateNavMetrics({ isH5: typeof window !== 'undefined' && typeof document !== 'undefined' })
+const createStatusBarHeight = ref(initialCreateNavMetrics.statusBarHeight)
+const createNavRowHeight = ref(initialCreateNavMetrics.navRowHeight)
+const createCustomNavStyle = computed(() => (
+  `padding-top: ${createStatusBarHeight.value}px; --create-nav-row-height: ${createNavRowHeight.value}px;`
+))
 const archiveObjectUrls = new Set<string>()
 const collaborationOnly = ref(false)
 const collaborationTemplatesError = ref('')
@@ -500,6 +507,7 @@ const createFormBlocks = computed(() => {
 })
 
 onLoad(async (options: any) => {
+  updateCreateNavMetrics()
   if (ensureHierarchyStack('/pages/create/index', options || {}, options?.returnTo)) return
   hideNativeTabBar()
   collaborationOnly.value = String(options?.mode || '') === 'collaboration'
@@ -773,6 +781,7 @@ async function loadPostForEdit(postId: string) {
 
 onShow(() => {
   hideNativeTabBar()
+  updateCreateNavMetrics()
   if (editPostId.value || initialLoadPending.value) return
   // 返回页面（例如地图选择返回）时静默刷新，不再打断表单操作。
   void ensureSectionsLoaded()
@@ -792,14 +801,39 @@ watch(() => communityStore.currentCommunityId, async () => {
   if (!archiveFormat.value) await consumeCreateSectionIntent()
 })
 
-watch([selectedSection, textNoteStep], (values) => {
-  const section = values[0]
-  const step = values[1]
-  const title = section?.displayTemplate === 'text_note' && step === 'cover'
+const createNavTitle = computed(() => (
+  selectedSection.value?.displayTemplate === 'text_note' && textNoteStep.value === 'cover'
     ? '选择文字封面'
-    : section?.name || '发布'
+    : selectedSection.value?.name || '发帖'
+))
+
+watch(createNavTitle, (title) => {
   uni.setNavigationBarTitle({ title })
 }, { immediate: true })
+
+function updateCreateNavMetrics() {
+  let systemInfo: any = null
+  let menuRect: any = null
+  try { systemInfo = uni.getSystemInfoSync?.() || null } catch (_error) {}
+  try {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore wx is injected by the mini-program runtime.
+    if (typeof wx !== 'undefined' && typeof wx.getMenuButtonBoundingClientRect === 'function') {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore wx is injected by the mini-program runtime.
+      menuRect = wx.getMenuButtonBoundingClientRect()
+    }
+  } catch (_error) {}
+  const metrics = computeCreateNavMetrics({
+    isH5: typeof window !== 'undefined' && typeof document !== 'undefined',
+    statusBarHeight: Number(systemInfo?.statusBarHeight || 0),
+    safeAreaTop: Number(systemInfo?.safeArea?.top || 0),
+    menuTop: Number(menuRect?.top || 0),
+    menuHeight: Number(menuRect?.height || 0),
+  })
+  createStatusBarHeight.value = metrics.statusBarHeight
+  createNavRowHeight.value = metrics.navRowHeight
+}
 
 try {
   ;(uni as any).$on?.(CREATE_SECTION_EVENT, handleCreateSectionIntentEvent)
@@ -1432,7 +1466,7 @@ async function handleSubmit() {
 }
 
 .create-custom-nav__row {
-  height: 88rpx;
+  height: var(--create-nav-row-height, 54px);
   padding: 0 24rpx;
   display: flex;
   align-items: center;

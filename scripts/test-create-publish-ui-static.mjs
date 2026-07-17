@@ -63,6 +63,9 @@ assert(
     createPage.includes('class="create-custom-nav"') &&
     createPage.includes('@tap="handlePageExit"') &&
     createPage.includes('navigateBackOrHome') &&
+    createPage.includes(':style="createCustomNavStyle"') &&
+    createPage.includes('{{ createNavTitle }}') &&
+    createPage.includes('computeCreateNavMetrics') &&
     createPage.includes('env(safe-area-inset-top)'),
   'create must use a controlled safe-area custom navigation bar.',
 )
