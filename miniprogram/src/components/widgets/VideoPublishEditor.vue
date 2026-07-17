@@ -129,7 +129,9 @@ async function cleanupPendingUpload(fileID: string) {
 }
 
 async function cleanupPendingUploads() {
-  await Promise.allSettled([...pendingUploads.keys()].map(cleanupPendingUpload))
+  const fileIDs: string[] = []
+  pendingUploads.forEach((_kind, fileID) => fileIDs.push(fileID))
+  await Promise.allSettled(fileIDs.map(cleanupPendingUpload))
 }
 
 function previewFor(source: string | Blob): string {
