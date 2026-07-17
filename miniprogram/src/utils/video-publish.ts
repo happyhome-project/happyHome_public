@@ -28,6 +28,18 @@ export interface MediaTypeSwitchDecision {
   shouldClear: boolean
 }
 
+export interface VideoPublishReadinessState {
+  uploading: boolean
+  videoReady: boolean
+  coverPending: boolean
+  error?: string
+}
+
+export interface VideoPublishReadiness {
+  ready: boolean
+  reason: '' | 'uploading' | 'video-missing' | 'cover-pending'
+}
+
 const VIDEO_EXTENSION_SET = new Set<string>(VIDEO_ALLOWED_EXTENSIONS)
 const IMAGE_EXTENSION_SET = new Set([
   'jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'heic', 'heif',
@@ -158,4 +170,11 @@ export function decideMediaTypeSwitch(
     requiresConfirmation: changesSelectedType,
     shouldClear: changesSelectedType,
   }
+}
+
+export function resolveVideoPublishReadiness(state: VideoPublishReadinessState): VideoPublishReadiness {
+  if (state.uploading) return { ready: false, reason: 'uploading' }
+  if (state.coverPending) return { ready: false, reason: 'cover-pending' }
+  if (!state.videoReady) return { ready: false, reason: 'video-missing' }
+  return { ready: true, reason: '' }
 }

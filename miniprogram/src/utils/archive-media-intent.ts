@@ -53,12 +53,19 @@ export function storeArchiveMediaIntent(
 export function consumeArchiveMediaIntent(tokenValue: unknown): ArchiveMediaIntent | null {
   const token = String(tokenValue || '').trim()
   if (!token) return null
-  let intent = volatileIntents.get(token) || null
+  const intent = peekArchiveMediaIntent(token)
   volatileIntents.delete(token)
+  try { uni.removeStorageSync(storageKey(token)) } catch {}
+  return intent
+}
+
+export function peekArchiveMediaIntent(tokenValue: unknown): ArchiveMediaIntent | null {
+  const token = String(tokenValue || '').trim()
+  if (!token) return null
+  let intent = volatileIntents.get(token) || null
   if (!intent) {
     try { intent = uni.getStorageSync(storageKey(token)) || null } catch {}
   }
-  try { uni.removeStorageSync(storageKey(token)) } catch {}
   if (!intent || intent.version !== ARCHIVE_MEDIA_INTENT_VERSION || intent.token !== token) return null
   if (intent.mediaType !== 'image' && intent.mediaType !== 'video') return null
   if (!Array.isArray(intent.files) || intent.files.length === 0) return null

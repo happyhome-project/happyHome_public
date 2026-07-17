@@ -57,7 +57,13 @@ assert(
   tabbar.includes("{ key: 'media', label: '发图片/视频'") &&
     tabbar.includes("mediaType: ['image', 'video']") &&
     tabbar.includes('accept="image/*,video/*"') &&
-    tabbar.includes('storeArchiveMediaIntent'),
+    tabbar.includes('storeArchiveMediaIntent') &&
+    tabbar.includes("if (props.current === 'create')") &&
+    tabbar.includes("emit('media-selected', token)") &&
+    createPage.includes('@media-selected="handleInlineMediaIntent"') &&
+    createPage.includes('decideMediaTypeSwitch') &&
+    createPage.includes('hasArchiveMedia') &&
+    createPage.includes('切换后将清空当前素材'),
   'the first publishing choice must select real image/video media and route it through local intent storage.',
 )
 
@@ -68,7 +74,11 @@ assert(
     videoPublishEditor.includes('requestMemberVideoUpload') &&
     videoPublishEditor.includes('requestMemberVideoCoverUpload') &&
     videoPublishEditor.includes('uploadCloudFile') &&
-    videoPublishEditor.includes('onProgress'),
+    videoPublishEditor.includes('onProgress') &&
+    videoPublishEditor.includes('移除失败封面') &&
+    videoPublishEditor.includes("emit('readiness'") &&
+    createPage.includes('@readiness="videoPublishReady = $event.ready"') &&
+    createPage.includes(':disabled="submitting || !videoPublishReady"'),
   'archive video publishing must have its own upload editor and server-owned upload paths.',
 )
 

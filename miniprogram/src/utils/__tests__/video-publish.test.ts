@@ -7,6 +7,7 @@ import {
   detectFirstMediaType,
   normalizeChosenVideo,
 } from '../video-publish'
+import * as videoPublish from '../video-publish'
 
 describe('member video selection', () => {
   test('supports mp4, mov, m4v, and webm up to 200 MiB', () => {
@@ -174,5 +175,17 @@ describe('publish media routing', () => {
       requiresConfirmation: false,
       shouldClear: false,
     })
+  })
+})
+
+describe('video publish readiness', () => {
+  test('blocks submission while video or cover work is unresolved', () => {
+    expect(typeof (videoPublish as any).resolveVideoPublishReadiness).toBe('function')
+    const resolve = (videoPublish as any).resolveVideoPublishReadiness
+    if (!resolve) return
+    expect(resolve({ uploading: true, videoReady: false, coverPending: false, error: '' })).toEqual({ ready: false, reason: 'uploading' })
+    expect(resolve({ uploading: false, videoReady: true, coverPending: true, error: '封面上传失败' })).toEqual({ ready: false, reason: 'cover-pending' })
+    expect(resolve({ uploading: false, videoReady: false, coverPending: false, error: '' })).toEqual({ ready: false, reason: 'video-missing' })
+    expect(resolve({ uploading: false, videoReady: true, coverPending: false, error: '' })).toEqual({ ready: true, reason: '' })
   })
 })

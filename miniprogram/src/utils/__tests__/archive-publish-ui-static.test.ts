@@ -20,12 +20,24 @@ describe('archive publishing entry', () => {
     expect(source).toContain('accept="image/*,video/*"')
     expect(source).toContain('detectFirstMediaType')
     expect(source).toContain('storeArchiveMediaIntent')
+    expect(source).toContain("if (props.current === 'create')")
+    expect(source).toContain("emit('media-selected', token)")
     expect(source).toContain(':src="option.icon"')
     expect(source).toContain(':class="`publish-icon--${option.tone}`"')
     expect(source).not.toContain('publish-icon-glyph')
     expect(source).not.toContain('option.glyph')
     expect(source).not.toContain('activePublishSections')
     expect(source).not.toContain('option.section')
+  })
+
+  test('confirms and clears an existing media format before an inline create-page switch', () => {
+    const create = read('pages', 'create', 'index.vue')
+    expect(create).toContain('@media-selected="handleInlineMediaIntent"')
+    expect(create).toContain('decideMediaTypeSwitch')
+    expect(create).toContain('hasArchiveMedia')
+    expect(create).toContain('切换后将清空当前素材')
+    expect(create).toContain('enterArchiveEditor(nextFormat')
+    expect(create).toContain('applyArchiveMediaIntent(token)')
   })
 
   test('create page owns a video archive editor without unlocking ordinary admin media widgets', () => {
@@ -45,6 +57,10 @@ describe('archive publishing entry', () => {
     expect(videoEditor).toContain('uploadCloudFile')
     expect(videoEditor).toContain('onProgress')
     expect(videoEditor).toContain('重试')
+    expect(videoEditor).toContain('移除失败封面')
+    expect(videoEditor).toContain("emit('readiness'")
+    expect(create).toContain('@readiness="videoPublishReady = $event.ready"')
+    expect(create).toContain(':disabled="submitting || !videoPublishReady"')
   })
 
   test('isolates archive drafts by community and format', () => {

@@ -64,6 +64,7 @@ import { detectFirstMediaType, type PublishMediaType } from '../utils/video-publ
 import { storeArchiveMediaIntent, type ArchiveMediaIntentFile } from '../utils/archive-media-intent'
 
 const props = defineProps<{ current: AppTabKey }>()
+const emit = defineEmits<{ (event: 'media-selected', token: string): void }>()
 const showPublishSheet = ref(false)
 const h5MediaInput = ref<HTMLInputElement | null>(null)
 const HOME_TAB_RETAP_EVENT = 'happyhome:home-tab-retap'
@@ -161,6 +162,11 @@ function routeSelectedMedia(result: any) {
   const intentFiles = normalizeIntentFiles(files, mediaType)
   if (intentFiles.length === 0) return
   const token = storeArchiveMediaIntent(mediaType, intentFiles)
+  if (props.current === 'create') {
+    closePublishSheet()
+    emit('media-selected', token)
+    return
+  }
   const returnTo = props.current === 'create' ? '' : (getTabByKey(props.current)?.path || '')
   closePublishSheet()
   const params = [`archiveFormat=${mediaType === 'video' ? 'video' : 'image_text'}`, `mediaIntent=${encodeURIComponent(token)}`]

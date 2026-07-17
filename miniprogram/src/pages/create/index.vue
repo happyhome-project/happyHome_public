@@ -237,6 +237,7 @@
                 :initial-file="archiveInitialMedia"
                 @update:model-value="formData[block.widget.widgetId] = $event"
                 @upload-state="videoUploading = $event"
+                @readiness="videoPublishReady = $event.ready"
               />
               <WidgetEditor
                 v-else
@@ -262,14 +263,14 @@
               />
               <text>存草稿</text>
             </button>
-            <button class="btn-primary" data-testid="create-submit" :disabled="submitting || videoUploading" @tap="handleSubmit">
+            <button class="btn-primary" data-testid="create-submit" :disabled="submitting || !videoPublishReady" @tap="handleSubmit">
               {{ submitting ? (isEditMode ? '保存中...' : '发布中...') : (isEditMode ? '保存' : (isActivityInviteMode ? '发布邀约' : '发布')) }}
             </button>
           </view>
         </template>
       </view>
     </template>
-    <AppTabBar v-if="!selectedSection" current="create" />
+    <AppTabBar v-if="!selectedSection" current="create" @media-selected="handleInlineMediaIntent" />
   </view>
 </template>
 
@@ -301,8 +302,10 @@ import { asCollaborationSection, isCollaborationSection } from '../../utils/coll
 import {
   consumeArchiveMediaIntent,
   createDraftStorageKey,
+  peekArchiveMediaIntent,
   type ArchiveMediaIntentFile,
 } from '../../utils/archive-media-intent'
+import { decideMediaTypeSwitch, type PublishMediaType } from '../../utils/video-publish'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -331,6 +334,7 @@ const textNoteTheme = ref<TextNoteTheme>('paper')
 const archiveFormat = ref<'image_text' | 'text' | 'video' | ''>('')
 const archiveInitialMedia = ref<ArchiveMediaIntentFile | null>(null)
 const videoUploading = ref(false)
+const videoPublishReady = ref(true)
 const collaborationOnly = ref(false)
 const collaborationTemplatesError = ref('')
 const initialLoadPending = ref(true)
@@ -541,6 +545,7 @@ function enterArchiveEditor(format: 'image_text' | 'text' | 'video', returnTo?: 
   archiveFormat.value = format
   archiveInitialMedia.value = null
   videoUploading.value = false
+  videoPublishReady.value = format !== 'video'
   collaborationOnly.value = false
   selectSection(buildArchiveEditorSection(format), { returnTo: String(returnTo || '') })
 }
@@ -556,6 +561,53 @@ function applyArchiveMediaIntent(token: unknown) {
   if (intent.mediaType === 'image' && archiveFormat.value === 'image_text') {
     formData.image_note_images = intent.files.map((file) => file.source)
   }
+}
+
+function hasArchiveMedia(format: PublishMediaType | null): boolean {
+  if (format === 'image') return Array.isArray(formData.image_note_images) && formData.image_note_images.length > 0
+  if (format === 'video') {
+    return (Array.isArray(formData.archive_video_videos) && formData.archive_video_videos.length > 0) || Boolean(archiveInitialMedia.value)
+  }
+  return false
+}
+
+function currentPublishMediaType(): PublishMediaType | null {
+  if (archiveFormat.value === 'image_text') return 'image'
+  if (archiveFormat.value === 'video') return 'video'
+  return null
+}
+
+function confirmMediaFormatSwitch(): Promise<boolean> {
+  return new Promise((resolve) => {
+    uni.showModal({
+      title: '切换发布格式',
+      content: '切换后将清空当前素材，是否继续？',
+      success: (result: any) => resolve(Boolean(result.confirm)),
+      fail: () => resolve(false),
+    })
+  })
+}
+
+function clearArchiveMediaState() {
+  Object.keys(formData).forEach((key) => delete formData[key])
+  archiveInitialMedia.value = null
+  videoUploading.value = false
+  videoPublishReady.value = true
+}
+
+async function handleInlineMediaIntent(token: string) {
+  const intent = peekArchiveMediaIntent(token)
+  if (!intent) return
+  const currentType = currentPublishMediaType()
+  const decision = decideMediaTypeSwitch(currentType, intent.mediaType, hasArchiveMedia(currentType))
+  if (decision.requiresConfirmation && !(await confirmMediaFormatSwitch())) {
+    consumeArchiveMediaIntent(token)
+    return
+  }
+  if (decision.shouldClear) clearArchiveMediaState()
+  const nextFormat = intent.mediaType === 'video' ? 'video' : 'image_text'
+  enterArchiveEditor(nextFormat, createReturnTo.value)
+  applyArchiveMediaIntent(token)
 }
 
 async function loadPostForEdit(postId: string) {
@@ -1108,8 +1160,8 @@ function clearDraft() {
 
 async function handleSubmit() {
   if (!selectedSection.value || submitting.value) return
-  if (videoUploading.value) {
-    uni.showToast({ title: '视频仍在上传，请稍候', icon: 'none' })
+  if (archiveFormat.value === 'video' && !videoPublishReady.value) {
+    uni.showToast({ title: videoUploading.value ? '视频仍在上传，请稍候' : '请先完成视频和封面处理', icon: 'none' })
     return
   }
   submitting.value = true

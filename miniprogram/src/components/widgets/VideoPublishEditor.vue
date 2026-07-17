@@ -12,6 +12,7 @@
       <button v-if="previewSource" :disabled="uploading" @tap="chooseCover">选择封面</button>
       <button v-if="previewSource" :disabled="uploading" @tap="removeVideo">删除</button>
       <button v-if="errorMessage" @tap="retryUpload">重试</button>
+      <button v-if="failedOperation === 'cover' && coverPending" :disabled="uploading" @tap="removeFailedCover">移除失败封面</button>
     </view>
 
     <!-- #ifdef H5 -->
@@ -26,7 +27,7 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import type { VideoItemCos } from '../../../../cloud/shared/types'
 import { postApi } from '../../api/cloud'
 import { uploadCloudFile, type StorageUploadSource } from '../../api/storage'
-import { buildCosVideoItems, normalizeChosenVideo } from '../../utils/video-publish'
+import { buildCosVideoItems, normalizeChosenVideo, resolveVideoPublishReadiness, type VideoPublishReadiness } from '../../utils/video-publish'
 import type { ArchiveMediaIntentFile } from '../../utils/archive-media-intent'
 
 const props = defineProps<{
@@ -36,6 +37,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: 'update:modelValue', value: VideoItemCos[]): void
   (event: 'upload-state', value: boolean): void
+  (event: 'readiness', value: VideoPublishReadiness): void
 }>()
 
 const h5VideoInput = ref<HTMLInputElement | null>(null)
@@ -49,6 +51,8 @@ const selectedVideo = ref<ArchiveMediaIntentFile | null>(null)
 const selectedCover = ref<ArchiveMediaIntentFile | null>(null)
 const uploadedVideoFileID = ref('')
 const uploadedCoverFileID = ref('')
+const coverPending = ref(false)
+const failedOperation = ref<'' | 'video' | 'cover'>('')
 let retryAction: (() => Promise<void>) | null = null
 const objectUrls = new Set<string>()
 
@@ -66,6 +70,7 @@ watch(() => props.modelValue, (items) => {
     size: 1,
     duration: item.duration,
   }
+  emitReadiness()
 }, { immediate: true, deep: true })
 
 watch(() => props.initialFile, (file) => {
@@ -87,6 +92,16 @@ function previewFor(source: string | Blob): string {
 function setUploading(value: boolean) {
   uploading.value = value
   emit('upload-state', value)
+  emitReadiness()
+}
+
+function emitReadiness() {
+  emit('readiness', resolveVideoPublishReadiness({
+    uploading: uploading.value,
+    videoReady: Boolean(uploadedVideoFileID.value),
+    coverPending: coverPending.value,
+    error: errorMessage.value,
+  }))
 }
 
 async function confirmReplacement(): Promise<boolean> {
@@ -107,6 +122,8 @@ async function acceptVideo(file: ArchiveMediaIntentFile) {
   selectedCover.value = null
   uploadedVideoFileID.value = ''
   uploadedCoverFileID.value = ''
+  coverPending.value = false
+  failedOperation.value = ''
   previewSource.value = previewFor(file.source)
   coverPreview.value = file.thumbTempFilePath || ''
   emit('update:modelValue', [])
@@ -135,9 +152,12 @@ async function uploadVideo(file: ArchiveMediaIntentFile) {
     })
     if (selectedVideo.value !== file) return
     uploadedVideoFileID.value = result.fileID
+    failedOperation.value = ''
     publishModel()
+    emitReadiness()
   } catch (error: any) {
     errorMessage.value = error?.message || '视频上传失败'
+    failedOperation.value = 'video'
   } finally {
     setUploading(false)
   }
@@ -156,9 +176,13 @@ async function uploadCover(file: ArchiveMediaIntentFile) {
     })
     if (selectedCover.value !== file || !selectedVideo.value) return
     uploadedCoverFileID.value = result.fileID
+    coverPending.value = false
+    failedOperation.value = ''
     publishModel()
+    emitReadiness()
   } catch (error: any) {
     errorMessage.value = error?.message || '封面上传失败'
+    failedOperation.value = 'cover'
   } finally {
     setUploading(false)
   }
@@ -197,10 +221,7 @@ function chooseCover() {
     const file = result?.tempFiles?.[0]
     if (!file) return
     const selected = { source: file.tempFilePath, name: String(file.name || file.tempFilePath.split('/').pop() || 'cover.jpg'), type: String(file.type || 'image'), size: Number(file.size) || 0 }
-    selectedCover.value = selected
-    coverPreview.value = previewFor(selected.source)
-    retryAction = () => uploadCover(selected)
-    void retryAction()
+    acceptCover(selected)
   } })
   // #endif
 }
@@ -217,27 +238,50 @@ function onH5CoverChange(event: Event) {
   const file = input.files?.[0]
   if (file) {
     const selected = { source: file, name: file.name, type: file.type, size: file.size }
-    selectedCover.value = selected
-    coverPreview.value = previewFor(file)
-    retryAction = () => uploadCover(selected)
-    void retryAction()
+    acceptCover(selected)
   }
   input.value = ''
 }
 
 function retryUpload() { void retryAction?.() }
 
+function acceptCover(selected: ArchiveMediaIntentFile) {
+  selectedCover.value = selected
+  coverPreview.value = previewFor(selected.source)
+  coverPending.value = true
+  failedOperation.value = ''
+  errorMessage.value = ''
+  emitReadiness()
+  retryAction = () => uploadCover(selected)
+  void retryAction()
+}
+
+function removeFailedCover() {
+  if (failedOperation.value !== 'cover') return
+  selectedCover.value = null
+  coverPending.value = false
+  failedOperation.value = ''
+  errorMessage.value = ''
+  coverPreview.value = uploadedCoverFileID.value
+  retryAction = null
+  publishModel()
+  emitReadiness()
+}
+
 function removeVideo() {
   selectedVideo.value = null
   selectedCover.value = null
   uploadedVideoFileID.value = ''
   uploadedCoverFileID.value = ''
+  coverPending.value = false
+  failedOperation.value = ''
   previewSource.value = ''
   coverPreview.value = ''
   errorMessage.value = ''
   progress.value = 0
   retryAction = null
   emit('update:modelValue', [])
+  emitReadiness()
 }
 </script>
 

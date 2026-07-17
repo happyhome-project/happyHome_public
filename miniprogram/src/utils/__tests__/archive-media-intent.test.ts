@@ -24,6 +24,8 @@ describe('archive media intent', () => {
     const token = (module as any).storeArchiveMediaIntent('video', [file])
     expect(token).toMatch(/^media-/)
     expect(JSON.stringify(storage)).not.toContain('blob:')
+    expect((module as any).peekArchiveMediaIntent(token)).toMatchObject({ mediaType: 'video' })
+    expect((module as any).peekArchiveMediaIntent(token)).toMatchObject({ mediaType: 'video' })
     expect((module as any).consumeArchiveMediaIntent(token)).toMatchObject({
       version: 1, mediaType: 'video', files: [file],
     })
