@@ -6,6 +6,12 @@ export const MAX_MEMBER_VIDEO_COVER_BYTES = 10 * 1024 * 1024
 
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'm4v', 'webm'])
 const COVER_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp'])
+const VIDEO_CONTENT_TYPES: Record<string, Set<string>> = {
+  mp4: new Set(['video/mp4']),
+  m4v: new Set(['video/mp4', 'video/x-m4v']),
+  mov: new Set(['video/quicktime']),
+  webm: new Set(['video/webm']),
+}
 const COVER_CONTENT_TYPES: Record<string, Set<string>> = {
   jpg: new Set(['image/jpeg', 'image/jpg']),
   jpeg: new Set(['image/jpeg', 'image/jpg']),
@@ -182,7 +188,7 @@ async function verifyObject(
   const contentType = normalizedContentType(metadata.contentType)
   if (kind === 'video') {
     if (contentLength > MAX_MEMBER_VIDEO_BYTES) throw new Error('视频文件不能超过 200MiB')
-    if (!contentType.startsWith('video/')) {
+    if (!VIDEO_CONTENT_TYPES[extension]?.has(contentType)) {
       throw new Error('视频文件类型不受支持')
     }
     return

@@ -99,13 +99,18 @@ describe('member archive video object verification', () => {
     expect(deps.inspectRemoteObject).toHaveBeenCalledTimes(2)
   })
 
-  test('accepts an actual video/* response for an allowed video extension', async () => {
-    const deps = dependencies({
-      [videoFileID]: { contentLength: 1024, contentType: 'video/vendor-specific' },
-    })
+  test.each([
+    ['clip.mp4', 'video/mp4'],
+    ['clip.m4v', 'video/x-m4v'],
+    ['clip.m4v', 'video/mp4'],
+    ['clip.mov', 'video/quicktime'],
+    ['clip.webm', 'video/webm'],
+  ])('accepts %s only with its allowlisted MIME %s', async (fileName, contentType) => {
+    const fileID = `cloud://test-env/posts/member-videos/${scope}/${fileName}`
+    const deps = dependencies({ [fileID]: { contentLength: 1024, contentType } })
 
     await expect(validateMemberArchiveVideoContent({
-      videos: [{ source: 'cos', fileID: videoFileID }],
+      videos: [{ source: 'cos', fileID }],
     }, openid, deps)).resolves.toBeUndefined()
   })
 
@@ -142,6 +147,8 @@ describe('member archive video object verification', () => {
   test.each([
     [{ contentLength: MAX_MEMBER_VIDEO_BYTES + 1, contentType: 'video/mp4' }, '视频文件不能超过 200MiB'],
     [{ contentLength: 1024, contentType: 'application/pdf' }, '视频文件类型不受支持'],
+    [{ contentLength: 1024, contentType: 'video/webm' }, '视频文件类型不受支持'],
+    [{ contentLength: 1024, contentType: 'video/vendor-specific' }, '视频文件类型不受支持'],
   ])('rejects untrusted actual video metadata %#', async (actual, message) => {
     const deps = dependencies({ [videoFileID]: actual })
 
