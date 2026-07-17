@@ -46,4 +46,3 @@
 - [ ] Run `npm.cmd run type-check` and `npm.cmd run test:unit` from `miniprogram`.
 - [ ] Run `npm.cmd run build:mp-weixin` from `miniprogram` and `npm.cmd run docs:check` from the repository root.
 - [ ] Commit as AngryBird, push the feature branch, open a PR, follow exact-HEAD CI and Merge Queue to `MERGED`, then retire this worktree through the guarded command.
-

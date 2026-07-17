@@ -20,4 +20,3 @@ Replace the guest introduction's community-creation action with “先随便看�
 
 - Unit/static tests cover default copy, legacy-copy normalization, absence of the plus icon, and the secondary handler's no-navigation behavior.
 - Run type checking, focused tests, the full mini-program suite, and the WeChat mini-program build.
-
