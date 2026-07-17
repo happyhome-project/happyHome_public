@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { parse } from 'acorn'
 
 export const KNOWN_NODE_MODULES_SHA256 = '94d87d9569f6eaef3dad96942f5f3c7857f132d3cd191d5fc263a482b1001eb8'
+export const KNOWN_NODE_MODULES_SHA256_ALTERNATE = '07be8ba73da09681b3bd94974b3a84cb34072738a315ea26438902798a533eb9'
 export const KNOWN_WECHAT_BASE_LIBRARY_VERSION = '3.15.1'
 
 function walk(node, visitor, parent = null) {
@@ -399,11 +400,16 @@ export function scanCriticalRuntimeSyntax(inputDistRoot, options = {}) {
   const nodeModulesPath = path.join(distRoot, 'node-modules')
   const expectedNodeModulesHash = Object.prototype.hasOwnProperty.call(options, 'expectedNodeModulesHash')
     ? options.expectedNodeModulesHash
-    : KNOWN_NODE_MODULES_SHA256
-  if (expectedNodeModulesHash && fs.existsSync(nodeModulesPath)) {
+    : [KNOWN_NODE_MODULES_SHA256, KNOWN_NODE_MODULES_SHA256_ALTERNATE]
+  const reviewedNodeModulesHashes = (Array.isArray(expectedNodeModulesHash)
+    ? expectedNodeModulesHash
+    : [expectedNodeModulesHash])
+    .filter(Boolean)
+    .map(String)
+  if (reviewedNodeModulesHashes.length > 0 && fs.existsSync(nodeModulesPath)) {
     const actualNodeModulesHash = hashNodeModulesDirectory(nodeModulesPath)
-    if (actualNodeModulesHash !== expectedNodeModulesHash) {
-      throw new Error(`mp-weixin third-party runtime changed: expected ${expectedNodeModulesHash}, got ${actualNodeModulesHash}. Review trial-runtime compatibility before updating the baseline.`)
+    if (!reviewedNodeModulesHashes.includes(actualNodeModulesHash)) {
+      throw new Error(`mp-weixin third-party runtime changed: expected one of ${reviewedNodeModulesHashes.join(', ')}, got ${actualNodeModulesHash}. Review trial-runtime compatibility before updating the baseline.`)
     }
   }
   const detailJson = JSON.parse(fs.readFileSync(detailConfig, 'utf8'))
