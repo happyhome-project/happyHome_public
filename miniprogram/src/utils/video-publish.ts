@@ -54,6 +54,9 @@ export type ArchiveMediaEditorTransition =
   | { status: 'cancelled'; state: ArchiveMediaEditorState }
   | { status: 'switched'; state: ArchiveMediaEditorState }
 
+export type ArchiveVideoIntentState = 'idle' | 'selected' | 'pending' | 'failed'
+export type ArchiveVideoIntentEvent = 'selected' | 'started' | 'failed' | 'resolved'
+
 const VIDEO_EXTENSION_SET = new Set<string>(VIDEO_ALLOWED_EXTENSIONS)
 const IMAGE_EXTENSION_SET = new Set([
   'jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'heic', 'heif',
@@ -223,6 +226,25 @@ export function shouldConsumeInitialVideo(
   modelValue: unknown,
   initialFile: unknown,
   alreadyAcknowledged: boolean,
+  intentState: ArchiveVideoIntentState = 'selected',
 ): boolean {
-  return Boolean(initialFile) && !alreadyAcknowledged && !hasValidUploadedVideo(modelValue)
+  return Boolean(initialFile) && !alreadyAcknowledged && intentState === 'selected' && !hasValidUploadedVideo(modelValue)
+}
+
+export function reduceArchiveVideoIntentState(
+  _state: ArchiveVideoIntentState,
+  event: ArchiveVideoIntentEvent,
+): ArchiveVideoIntentState {
+  if (event === 'selected') return 'selected'
+  if (event === 'started') return 'pending'
+  if (event === 'failed') return 'failed'
+  return 'idle'
+}
+
+export function isVideoUploadResultCurrent(
+  operationGeneration: number,
+  currentGeneration: number,
+  unmounted: boolean,
+): boolean {
+  return !unmounted && operationGeneration === currentGeneration
 }

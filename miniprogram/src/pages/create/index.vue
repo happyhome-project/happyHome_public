@@ -235,10 +235,11 @@
                 v-else-if="archiveFormat === 'video' && block.widget.type === 'video_group'"
                 :model-value="formData[block.widget.widgetId]"
                 :initial-file="archiveInitialMedia"
+                :initial-state="archiveVideoIntentState"
                 @update:model-value="formData[block.widget.widgetId] = $event"
                 @upload-state="videoUploading = $event"
                 @readiness="videoPublishReady = $event.ready"
-                @initial-acknowledged="archiveInitialMedia = null"
+                @initial-state="handleVideoInitialState"
               />
               <WidgetEditor
                 v-else
@@ -306,7 +307,7 @@ import {
   peekArchiveMediaIntent,
   type ArchiveMediaIntentFile,
 } from '../../utils/archive-media-intent'
-import { transitionArchiveMediaEditorState, type ArchiveMediaEditorState, type PublishMediaType } from '../../utils/video-publish'
+import { reduceArchiveVideoIntentState, transitionArchiveMediaEditorState, type ArchiveMediaEditorState, type ArchiveVideoIntentState, type PublishMediaType } from '../../utils/video-publish'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -334,6 +335,7 @@ const textNoteStep = ref<'compose' | 'cover'>('compose')
 const textNoteTheme = ref<TextNoteTheme>('paper')
 const archiveFormat = ref<'image_text' | 'text' | 'video' | ''>('')
 const archiveInitialMedia = ref<ArchiveMediaIntentFile | null>(null)
+const archiveVideoIntentState = ref<ArchiveVideoIntentState>('idle')
 const videoUploading = ref(false)
 const videoPublishReady = ref(true)
 const collaborationOnly = ref(false)
@@ -545,6 +547,7 @@ function buildArchiveEditorSection(format: 'image_text' | 'text' | 'video') {
 function enterArchiveEditor(format: 'image_text' | 'text' | 'video', returnTo?: string) {
   archiveFormat.value = format
   archiveInitialMedia.value = null
+  archiveVideoIntentState.value = 'idle'
   videoUploading.value = false
   videoPublishReady.value = format !== 'video'
   collaborationOnly.value = false
@@ -556,6 +559,7 @@ function applyArchiveMediaIntent(token: unknown) {
   if (!intent) return
   if (intent.mediaType === 'video' && archiveFormat.value === 'video') {
     archiveInitialMedia.value = intent.files[0] || null
+    archiveVideoIntentState.value = reduceArchiveVideoIntentState(archiveVideoIntentState.value, 'selected')
     formData.archive_video_videos = []
     return
   }
@@ -592,8 +596,17 @@ function confirmMediaFormatSwitch(): Promise<boolean> {
 function clearArchiveMediaState() {
   Object.keys(formData).forEach((key) => delete formData[key])
   archiveInitialMedia.value = null
+  archiveVideoIntentState.value = 'idle'
   videoUploading.value = false
   videoPublishReady.value = true
+}
+
+function handleVideoInitialState(state: 'pending' | 'failed' | 'resolved') {
+  archiveVideoIntentState.value = reduceArchiveVideoIntentState(
+    archiveVideoIntentState.value,
+    state === 'pending' ? 'started' : state,
+  )
+  if (state === 'resolved') archiveInitialMedia.value = null
 }
 
 async function handleInlineMediaIntent(token: string) {
@@ -810,6 +823,10 @@ function openTextNoteCover() {
 }
 
 function handleBackToSectionPicker() {
+  if (archiveFormat.value === 'video' && videoUploading.value) {
+    uni.showToast({ title: '视频正在上传，请稍候或取消后返回', icon: 'none' })
+    return
+  }
   if (archiveFormat.value === 'image_text' || archiveFormat.value === 'video') {
     selectedSection.value = null
     return

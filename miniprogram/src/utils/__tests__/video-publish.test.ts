@@ -250,6 +250,41 @@ describe('one-shot initial video intent', () => {
     const initial = { source: 'wxfile://new.mp4' }
     expect(shouldConsume([], initial, false)).toBe(true)
     expect(shouldConsume([], initial, true)).toBe(false)
+    expect(shouldConsume([], initial, false, 'failed')).toBe(false)
+    expect(shouldConsume([], initial, false, 'pending')).toBe(false)
     expect(shouldConsume([], null, false)).toBe(false)
+  })
+})
+
+describe('pending video intent lifecycle', () => {
+  test.each(['pending', 'failed'] as const)('%s marker still requires confirmation before switching to image', (marker) => {
+    const transition = (videoPublish as any).transitionArchiveMediaEditorState
+    const state = {
+      format: 'video',
+      formData: {},
+      initialMedia: { source: 'wxfile://pending.mp4' },
+      hasSelectedMedia: marker !== 'idle',
+    }
+    expect(transition(state, 'image', null)).toEqual({ status: 'confirm', state })
+    expect(transition(state, 'image', false)).toEqual({ status: 'cancelled', state })
+  })
+
+  test('explicit removal is the only non-success path that clears a failed marker', () => {
+    const reduce = (videoPublish as any).reduceArchiveVideoIntentState
+    expect(typeof reduce).toBe('function')
+    if (!reduce) return
+    expect(reduce('selected', 'started')).toBe('pending')
+    expect(reduce('pending', 'failed')).toBe('failed')
+    expect(reduce('failed', 'failed')).toBe('failed')
+    expect(reduce('failed', 'resolved')).toBe('idle')
+  })
+
+  test('rejects async upload completion after unmount or generation replacement', () => {
+    const current = (videoPublish as any).isVideoUploadResultCurrent
+    expect(typeof current).toBe('function')
+    if (!current) return
+    expect(current(2, 2, false)).toBe(true)
+    expect(current(1, 2, false)).toBe(false)
+    expect(current(2, 2, true)).toBe(false)
   })
 })

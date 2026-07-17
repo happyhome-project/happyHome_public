@@ -27,18 +27,19 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import type { VideoItemCos } from '../../../../cloud/shared/types'
 import { postApi } from '../../api/cloud'
 import { uploadCloudFile, type StorageUploadSource } from '../../api/storage'
-import { buildCosVideoItems, hasValidUploadedVideo, normalizeChosenVideo, resolveVideoPublishReadiness, shouldConsumeInitialVideo, type VideoPublishReadiness } from '../../utils/video-publish'
+import { buildCosVideoItems, hasValidUploadedVideo, isVideoUploadResultCurrent, normalizeChosenVideo, resolveVideoPublishReadiness, shouldConsumeInitialVideo, type ArchiveVideoIntentState, type VideoPublishReadiness } from '../../utils/video-publish'
 import type { ArchiveMediaIntentFile } from '../../utils/archive-media-intent'
 
 const props = defineProps<{
   modelValue?: VideoItemCos[]
   initialFile?: ArchiveMediaIntentFile | null
+  initialState?: ArchiveVideoIntentState
 }>()
 const emit = defineEmits<{
   (event: 'update:modelValue', value: VideoItemCos[]): void
   (event: 'upload-state', value: boolean): void
   (event: 'readiness', value: VideoPublishReadiness): void
-  (event: 'initial-acknowledged'): void
+  (event: 'initial-state', value: 'pending' | 'failed' | 'resolved'): void
 }>()
 
 const h5VideoInput = ref<HTMLInputElement | null>(null)
@@ -55,8 +56,11 @@ const uploadedCoverFileID = ref('')
 const coverPending = ref(false)
 const failedOperation = ref<'' | 'video' | 'cover'>('')
 const initialAcknowledged = ref(false)
+const activeInitialFile = ref<ArchiveMediaIntentFile | null>(null)
 let retryAction: (() => Promise<void>) | null = null
 const objectUrls = new Set<string>()
+let uploadGeneration = 0
+let unmounted = false
 
 watch(() => props.modelValue, (items) => {
   const item = items?.[0]
@@ -82,16 +86,23 @@ watch(() => props.initialFile, (file) => {
   }
   if (hasValidUploadedVideo(props.modelValue)) {
     initialAcknowledged.value = true
-    emit('initial-acknowledged')
+    activeInitialFile.value = null
+    emit('initial-state', 'resolved')
     return
   }
-  if (!shouldConsumeInitialVideo(props.modelValue, file, initialAcknowledged.value)) return
+  const intentState = props.initialState || 'selected'
+  if (!shouldConsumeInitialVideo(props.modelValue, file, initialAcknowledged.value, intentState)) {
+    if (intentState === 'failed' || intentState === 'pending') restoreInitialForRetry(file, intentState)
+    return
+  }
   initialAcknowledged.value = true
-  emit('initial-acknowledged')
+  activeInitialFile.value = file
   void acceptVideo(file)
 }, { immediate: true })
 
 onBeforeUnmount(() => {
+  unmounted = true
+  uploadGeneration += 1
   objectUrls.forEach((url) => URL.revokeObjectURL(url))
 })
 
@@ -131,6 +142,7 @@ async function confirmReplacement(): Promise<boolean> {
 
 async function acceptVideo(file: ArchiveMediaIntentFile) {
   if (!(await confirmReplacement())) return
+  if (unmounted) return
   selectedVideo.value = file
   selectedCover.value = null
   uploadedVideoFileID.value = ''
@@ -145,6 +157,8 @@ async function acceptVideo(file: ArchiveMediaIntentFile) {
 }
 
 async function uploadVideo(file: ArchiveMediaIntentFile) {
+  const generation = ++uploadGeneration
+  if (activeInitialFile.value === file) emit('initial-state', 'pending')
   setUploading(true)
   progress.value = 0
   errorMessage.value = ''
@@ -158,35 +172,50 @@ async function uploadVideo(file: ArchiveMediaIntentFile) {
       fileType: 'video',
     }] })
     const metadata = await postApi.requestMemberVideoUpload({ fileName: file.name })
+    if (!isVideoUploadResultCurrent(generation, uploadGeneration, unmounted)) return
     const result = await uploadCloudFile({
       cloudPath: metadata.cloudPath,
       source: file.source as StorageUploadSource,
-      onProgress: (event) => { progress.value = Math.round(event.progress) },
+      onProgress: (event) => {
+        if (isVideoUploadResultCurrent(generation, uploadGeneration, unmounted)) progress.value = Math.round(event.progress)
+      },
     })
+    if (!isVideoUploadResultCurrent(generation, uploadGeneration, unmounted)) return
     if (selectedVideo.value !== file) return
     uploadedVideoFileID.value = result.fileID
     failedOperation.value = ''
     publishModel()
+    if (activeInitialFile.value === file) {
+      activeInitialFile.value = null
+      emit('initial-state', 'resolved')
+    }
     emitReadiness()
   } catch (error: any) {
+    if (!isVideoUploadResultCurrent(generation, uploadGeneration, unmounted)) return
     errorMessage.value = error?.message || '视频上传失败'
     failedOperation.value = 'video'
+    if (activeInitialFile.value === file) emit('initial-state', 'failed')
   } finally {
-    setUploading(false)
+    if (isVideoUploadResultCurrent(generation, uploadGeneration, unmounted)) setUploading(false)
   }
 }
 
 async function uploadCover(file: ArchiveMediaIntentFile) {
+  const generation = ++uploadGeneration
   setUploading(true)
   progress.value = 0
   errorMessage.value = ''
   try {
     const metadata = await postApi.requestMemberVideoCoverUpload({ fileName: file.name })
+    if (!isVideoUploadResultCurrent(generation, uploadGeneration, unmounted)) return
     const result = await uploadCloudFile({
       cloudPath: metadata.cloudPath,
       source: file.source as StorageUploadSource,
-      onProgress: (event) => { progress.value = Math.round(event.progress) },
+      onProgress: (event) => {
+        if (isVideoUploadResultCurrent(generation, uploadGeneration, unmounted)) progress.value = Math.round(event.progress)
+      },
     })
+    if (!isVideoUploadResultCurrent(generation, uploadGeneration, unmounted)) return
     if (selectedCover.value !== file || !selectedVideo.value) return
     uploadedCoverFileID.value = result.fileID
     coverPending.value = false
@@ -194,10 +223,11 @@ async function uploadCover(file: ArchiveMediaIntentFile) {
     publishModel()
     emitReadiness()
   } catch (error: any) {
+    if (!isVideoUploadResultCurrent(generation, uploadGeneration, unmounted)) return
     errorMessage.value = error?.message || '封面上传失败'
     failedOperation.value = 'cover'
   } finally {
-    setUploading(false)
+    if (isVideoUploadResultCurrent(generation, uploadGeneration, unmounted)) setUploading(false)
   }
 }
 
@@ -258,6 +288,21 @@ function onH5CoverChange(event: Event) {
 
 function retryUpload() { void retryAction?.() }
 
+function restoreInitialForRetry(file: ArchiveMediaIntentFile, state: 'pending' | 'failed') {
+  uploading.value = false
+  emit('upload-state', false)
+  initialAcknowledged.value = true
+  activeInitialFile.value = file
+  selectedVideo.value = file
+  previewSource.value = previewFor(file.source)
+  coverPreview.value = file.thumbTempFilePath || ''
+  errorMessage.value = state === 'pending' ? '上次上传已中断，请重试' : '视频上传失败，请重试'
+  failedOperation.value = 'video'
+  retryAction = () => uploadVideo(file)
+  if (state === 'pending') emit('initial-state', 'failed')
+  emitReadiness()
+}
+
 function acceptCover(selected: ArchiveMediaIntentFile) {
   selectedCover.value = selected
   coverPreview.value = previewFor(selected.source)
@@ -282,6 +327,7 @@ function removeFailedCover() {
 }
 
 function removeVideo() {
+  const resolvesInitial = Boolean(activeInitialFile.value || props.initialFile)
   selectedVideo.value = null
   selectedCover.value = null
   uploadedVideoFileID.value = ''
@@ -293,7 +339,9 @@ function removeVideo() {
   errorMessage.value = ''
   progress.value = 0
   retryAction = null
+  activeInitialFile.value = null
   emit('update:modelValue', [])
+  if (resolvesInitial) emit('initial-state', 'resolved')
   emitReadiness()
 }
 </script>
