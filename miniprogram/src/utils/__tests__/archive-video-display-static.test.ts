@@ -29,4 +29,13 @@ describe('archive video card rendering', () => {
     expect(defaultDetail).toContain('<VideoPlayerCard')
     expect(defaultDetail).toContain("widget.type === 'video_group'")
   })
+
+  test('home archive and my-posts resolve image and video covers through the shared assembler', () => {
+    const home = source('../../pages/index/index.vue')
+    const myPosts = source('../../pages/my-posts/index.vue')
+    for (const component of [home, myPosts]) {
+      expect(component).toContain("from '../../utils/feed-cover-url'")
+      expect(component).toContain('resolveFeedCovers(')
+    }
+  })
 })
