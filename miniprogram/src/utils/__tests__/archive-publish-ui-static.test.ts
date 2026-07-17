@@ -17,6 +17,8 @@ describe('archive publishing entry', () => {
     expect(create).toContain(':style="createCustomNavStyle"')
     expect(create).toContain('{{ createNavTitle }}')
     expect(create).toContain('computeCreateNavMetrics')
+    expect(create).toContain('resolveCreateNavTitle')
+    expect(create).toContain('isEditMode: isEditMode.value')
   })
   test('keeps archive topic navigation on the shared page background', () => {
     const source = read('components', 'ArchiveTopicTabs.vue')

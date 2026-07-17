@@ -306,7 +306,7 @@ import {
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { resolveActivityAnnouncementMain } from '../../utils/create-form-layout'
 import { buildImageNoteCreateBlocks } from '../../utils/image-note-create'
-import { computeCreateNavMetrics } from '../../utils/create-nav'
+import { computeCreateNavMetrics, resolveCreateNavTitle } from '../../utils/create-nav'
 import { isImageNoteSectionContract } from '../../utils/image-note'
 import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
@@ -801,11 +801,11 @@ watch(() => communityStore.currentCommunityId, async () => {
   if (!archiveFormat.value) await consumeCreateSectionIntent()
 })
 
-const createNavTitle = computed(() => (
-  selectedSection.value?.displayTemplate === 'text_note' && textNoteStep.value === 'cover'
-    ? '选择文字封面'
-    : selectedSection.value?.name || '发帖'
-))
+const createNavTitle = computed(() => resolveCreateNavTitle({
+  isEditMode: isEditMode.value,
+  sectionName: selectedSection.value?.name,
+  isTextCoverStep: selectedSection.value?.displayTemplate === 'text_note' && textNoteStep.value === 'cover',
+}))
 
 watch(createNavTitle, (title) => {
   uni.setNavigationBarTitle({ title })

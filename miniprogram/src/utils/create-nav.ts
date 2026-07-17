@@ -11,6 +11,12 @@ export interface CreateNavMetrics {
   navRowHeight: number
 }
 
+export interface CreateNavTitleInput {
+  isEditMode: boolean
+  sectionName?: string
+  isTextCoverStep: boolean
+}
+
 export function computeCreateNavMetrics(input: CreateNavMetricInput = {}): CreateNavMetrics {
   const fallbackStatusBar = input.isH5 ? 44 : 20
   const measuredStatusBar = Number(input.statusBarHeight)
@@ -29,4 +35,10 @@ export function computeCreateNavMetrics(input: CreateNavMetricInput = {}): Creat
     statusBarHeight: Math.max(0, Math.round(statusBarHeight)),
     navRowHeight: Math.max(44, Math.round(navRowHeight)),
   }
+}
+
+export function resolveCreateNavTitle(input: CreateNavTitleInput): string {
+  if (input.isEditMode) return '编辑内容'
+  if (input.isTextCoverStep) return '选择文字封面'
+  return String(input.sectionName || '').trim() || '发帖'
 }

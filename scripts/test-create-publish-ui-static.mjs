@@ -66,6 +66,8 @@ assert(
     createPage.includes(':style="createCustomNavStyle"') &&
     createPage.includes('{{ createNavTitle }}') &&
     createPage.includes('computeCreateNavMetrics') &&
+    createPage.includes('resolveCreateNavTitle') &&
+    createPage.includes('isEditMode: isEditMode.value') &&
     createPage.includes('env(safe-area-inset-top)'),
   'create must use a controlled safe-area custom navigation bar.',
 )
