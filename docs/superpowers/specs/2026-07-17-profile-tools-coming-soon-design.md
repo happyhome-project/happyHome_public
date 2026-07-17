@@ -20,7 +20,6 @@ The profile tool item model owns availability. The template derives one disabled
 
 ## Verification
 
-- Static/unit contract verifies exact item order, exact unavailable keys, disabled class binding, and guarded interaction.
+- Static/unit contract verifies exact item order, exact unavailable keys, disabled class binding, and guarded event wiring.
 - H5 mobile rendering at 390 x 844 verifies the first row is visibly muted while the second row stays unchanged.
-- Clicking an unavailable item leaves the route and visible page state unchanged; clicking a working entry still navigates.
-
+- H5 browser interaction verifies that clicking an unavailable item leaves the route and visible page state unchanged, while clicking a working entry still enters its existing flow.

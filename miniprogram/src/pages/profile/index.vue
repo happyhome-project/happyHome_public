@@ -213,7 +213,13 @@
           </view>
           <text class="profile-tool-label">{{ item.label }}</text>
         </button>
-        <view v-else class="profile-tool" @tap="handleProfileTool(item)">
+        <view
+          v-else
+          class="profile-tool"
+          :class="{ 'profile-tool--disabled': item.disabled }"
+          :aria-disabled="item.disabled ? 'true' : undefined"
+          @tap="item.disabled ? undefined : handleProfileTool(item)"
+        >
           <view class="profile-tool-icon">
             <image
               class="profile-tool-icon-image"
@@ -553,16 +559,17 @@ type ProfileToolItem = {
   label: string
   iconSrc: string
   tone: 'heart' | 'like' | 'archive' | 'activity' | 'post' | 'checkin' | 'service'
+  disabled?: boolean
   kind?: 'contact'
 }
 
 const profileToolItems: ProfileToolItem[] = [
-  { key: 'favorite', label: '我的收藏', iconSrc: '/static/profile/favorite.svg', tone: 'heart' },
-  { key: 'like', label: '我的点赞', iconSrc: '/static/profile/like.svg', tone: 'like' },
-  { key: 'archive', label: '我的归档', iconSrc: '/static/profile/archive.svg', tone: 'archive' },
-  { key: 'activity', label: '我的活动', iconSrc: '/static/profile/activity.svg', tone: 'activity' },
+  { key: 'favorite', label: '我的收藏', iconSrc: '/static/profile/favorite.svg', tone: 'heart', disabled: true },
+  { key: 'like', label: '我的点赞', iconSrc: '/static/profile/like.svg', tone: 'like', disabled: true },
+  { key: 'archive', label: '我的归档', iconSrc: '/static/profile/archive.svg', tone: 'archive', disabled: true },
+  { key: 'checkin', label: '打卡记录', iconSrc: '/static/profile/checkin.svg', tone: 'checkin', disabled: true },
   { key: 'posts', label: '我发布的', iconSrc: '/static/profile/posts.svg', tone: 'post' },
-  { key: 'checkin', label: '打卡记录', iconSrc: '/static/profile/checkin.svg', tone: 'checkin' },
+  { key: 'activity', label: '我的活动', iconSrc: '/static/profile/activity.svg', tone: 'activity' },
   { key: 'service', label: '联系客服', iconSrc: '/static/profile/service.svg', tone: 'service', kind: 'contact' },
 ]
 
@@ -2431,11 +2438,20 @@ onShareAppMessage(() => {
 .profile-tool-icon-image--checkin { width: 50rpx; height: 55rpx; }
 .profile-tool-icon-image--service { width: 56rpx; height: 56rpx; }
 
+.profile-tool--disabled .profile-tool-icon-image {
+  filter: grayscale(1);
+  opacity: 0.38;
+}
+
 .profile-tool-label {
   color: #292116;
   font-size: var(--hh-text-body-base-size);
   line-height: var(--hh-text-body-base-line);
   white-space: nowrap;
+}
+
+.profile-tool--disabled .profile-tool-label {
+  color: #a8a8a8;
 }
 
 .profile-primary-action,
