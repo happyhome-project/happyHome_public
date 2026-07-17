@@ -259,7 +259,7 @@ async function materializeObject(
     return { fileID, created: false }
   }
   const { cloudPath: sourcePath, extension } = assertOwnedMemberVideoUpload(fileID, openid, communityId, kind)
-  await assertCanonicalFileID(fileID, sourcePath, kind, dependencies)
+  await verifyObjectAtPath(fileID, sourcePath, extension, kind, dependencies)
   const scope = deriveMemberVideoScope(openid, communityId)
   const directory = kind === 'video' ? 'member-videos-finalized' : 'member-video-covers-finalized'
   const now = dependencies.now?.() ?? Date.now()

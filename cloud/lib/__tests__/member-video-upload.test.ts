@@ -260,15 +260,15 @@ describe('member archive video finalization', () => {
       })),
       materializeFile: jest.fn(async () => { throw new Error('copy failed') }),
       deleteFile,
-      getTempUrl: jest.fn(),
-      inspectRemoteObject: jest.fn(),
+      getTempUrl: jest.fn(async () => 'https://download.example/staging-cover'),
+      inspectRemoteObject: jest.fn(async () => ({ contentLength: 512, contentType: 'image/jpeg' })),
       existingFinalizedFileIDs: { video: new Set([existing]) },
     })).rejects.toThrow('copy failed')
 
     expect(deleteFile).not.toHaveBeenCalled()
   })
 
-  test('materializes video and cover to finalized paths and verifies only the finalized objects', async () => {
+  test('verifies staging objects before materializing and re-verifies the finalized objects', async () => {
     const finalizedVideo = `cloud://test-env/posts/member-videos-finalized/${scope}/1234_final-video.mp4`
     const finalizedCover = `cloud://test-env/posts/member-video-covers-finalized/${scope}/1234_final-cover.jpg`
     const requestUploadMetadata = jest.fn(async (cloudPath: string) => ({
@@ -283,8 +283,8 @@ describe('member archive video finalization', () => {
     const getTempUrl = jest.fn(async (fileID: string) => `https://download.example/${encodeURIComponent(fileID)}`)
     const inspectRemoteObject = jest.fn(async (url: string) => {
       const fileID = decodeURIComponent(url.slice(url.lastIndexOf('/') + 1))
-      expect([finalizedVideo, finalizedCover]).toContain(fileID)
-      return fileID === finalizedVideo
+      expect([videoFileID, coverFileID, finalizedVideo, finalizedCover]).toContain(fileID)
+      return fileID === videoFileID || fileID === finalizedVideo
         ? { contentLength: 1024, contentType: 'video/mp4' }
         : { contentLength: 512, contentType: 'image/jpeg' }
     })
@@ -303,7 +303,28 @@ describe('member archive video finalization', () => {
     expect(content).toEqual({ videos: [{ source: 'cos', fileID: finalizedVideo, cover: finalizedCover }] })
     expect(materializeFile).toHaveBeenNthCalledWith(1, videoFileID, `posts/member-videos-finalized/${scope}/1234_final-video.mp4`)
     expect(materializeFile).toHaveBeenNthCalledWith(2, coverFileID, `posts/member-video-covers-finalized/${scope}/1234_final-cover.jpg`)
-    expect(inspectRemoteObject).toHaveBeenCalledTimes(2)
+    expect(inspectRemoteObject).toHaveBeenCalledTimes(4)
+  })
+
+  test('rejects an oversized staging object before writing it to temporary storage', async () => {
+    const materializeFile = jest.fn()
+
+    await expect(finalizeMemberArchiveVideoContent({
+      videos: [{ source: 'cos', fileID: videoFileID }],
+    }, openid, communityId, {
+      requestUploadMetadata: jest.fn(async (cloudPath: string) => ({
+        cloudPath, fileId: `cloud://test-env/${cloudPath}`,
+        url: '', token: '', authorization: '', cosFileId: '',
+      })),
+      materializeFile,
+      getTempUrl: jest.fn(async () => 'https://download.example/staging'),
+      inspectRemoteObject: jest.fn(async () => ({
+        contentLength: MAX_MEMBER_VIDEO_BYTES + 1,
+        contentType: 'video/mp4',
+      })),
+    })).rejects.toThrow('视频文件不能超过 200MiB')
+
+    expect(materializeFile).not.toHaveBeenCalled()
   })
 
   test('rejects a finalized object whose metadata changed before persistence', async () => {
@@ -320,10 +341,9 @@ describe('member archive video finalization', () => {
       requestUploadMetadata,
       materializeFile,
       getTempUrl: jest.fn(async () => 'https://download.example/finalized'),
-      inspectRemoteObject: jest.fn(async () => ({
-        contentLength: MAX_MEMBER_VIDEO_BYTES + 1,
-        contentType: 'video/mp4',
-      })),
+      inspectRemoteObject: jest.fn()
+        .mockResolvedValueOnce({ contentLength: 1024, contentType: 'video/mp4' })
+        .mockResolvedValueOnce({ contentLength: MAX_MEMBER_VIDEO_BYTES + 1, contentType: 'video/mp4' }),
       now: () => 1,
       randomId: () => 'final',
     })).rejects.toThrow('视频文件不能超过 200MiB')
