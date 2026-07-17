@@ -1359,7 +1359,7 @@ function selectArchiveTopic(topicKey: string) {
   if (topicKey === selectedArchiveTopic.value) return
   selectedArchiveTopic.value = topicKey
   archiveHasMore.value = true
-  void loadArchiveFeed(true)
+  void loadArchiveFeed(true, { preserveVisible: true })
 }
 
 function onArchiveCardTap(card: ArchiveFeedCard) {
