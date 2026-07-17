@@ -47,12 +47,14 @@ The normalized archive video content is:
 interface ArchiveVideoContent {
   title: string
   body?: RichNoteContent
-  video: VideoItemCos
+  videos: [VideoItemCos]
   location?: GeoLocation
 }
 ```
 
-The stored COS item uses the existing `VideoItemCos` contract and represents one video:
+The stored `videos` field deliberately remains a one-element array because every existing
+`video_group` consumer (audit, search, RAG, file extraction, and rendering) already uses that
+contract. The archive parser enforces exactly one element. The stored COS item is:
 
 ```ts
 {
@@ -69,7 +71,10 @@ Archive topics remain top-level archive metadata, consistent with existing image
 
 ## Upload and Validation
 
-Member video upload is separate from the admin upload endpoint. It must not grant ordinary users access to admin actions or external video sources.
+Member video upload is separate from the admin upload endpoint. The post function issues a
+member-scoped cloud path and upload metadata; it must not grant ordinary users access to admin
+actions or external video sources. Before create/update, the server resolves the uploaded object
+and verifies its actual response metadata rather than trusting client-supplied size or MIME values.
 
 First-release limits are HappyHome product limits:
 
@@ -77,12 +82,15 @@ First-release limits are HappyHome product limits:
 - extensions: `mp4`, `mov`, `m4v`, `webm`;
 - maximum size: 200 MB;
 - source must be `cos`;
-- stored video path must belong to the member-video prefix for this application;
+- stored video path must belong to the authenticated member's member-video prefix for this application;
 - cover, when present, must be an uploaded image belonging to the application;
 - title is required;
 - video file ID is required.
 
-The server validates the archive input before persistence. Unknown fields, external URLs, non-COS sources, additional video items, and audio fields are rejected rather than silently ignored.
+The server validates the archive input before persistence. Unknown fields, external URLs, non-COS
+sources, zero or multiple video items, additional media fields, and audio fields are rejected rather
+than silently ignored. This scoped validation must not enable member writes to administrator-only
+video/audio widgets in ordinary sections.
 
 The upload UI validates size and extension before upload, reports progress, supports retry, and does not submit until upload completes. Abandoned or failed submissions record uploaded temporary files for best-effort cleanup using the existing storage cleanup mechanisms where available.
 
