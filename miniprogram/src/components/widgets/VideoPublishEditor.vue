@@ -27,7 +27,7 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import type { VideoItemCos } from '../../../../cloud/shared/types'
 import { postApi } from '../../api/cloud'
 import { uploadCloudFile, type StorageUploadSource } from '../../api/storage'
-import { buildCosVideoItems, hasValidUploadedVideo, isVideoUploadResultCurrent, normalizeChosenVideo, resolveVideoPublishReadiness, shouldConsumeInitialVideo, type ArchiveVideoIntentState, type VideoPublishReadiness } from '../../utils/video-publish'
+import { buildCosVideoItems, hasValidUploadedVideo, isVideoUploadResultCurrent, normalizeChosenVideo, resolveVideoPublishReadiness, shouldConsumeInitialVideo, validateVideoCoverFile, type ArchiveVideoIntentState, type VideoPublishReadiness } from '../../utils/video-publish'
 import type { ArchiveMediaIntentFile } from '../../utils/archive-media-intent'
 
 const props = defineProps<{
@@ -116,6 +116,11 @@ function previewFor(source: string | Blob): string {
   return url
 }
 
+function releasePreview(url: string) {
+  if (!objectUrls.delete(url)) return
+  try { URL.revokeObjectURL(url) } catch {}
+}
+
 function setUploading(value: boolean) {
   uploading.value = value
   emit('upload-state', value)
@@ -147,6 +152,8 @@ async function acceptVideo(file: ArchiveMediaIntentFile) {
   if (!(await confirmReplacement())) return
   if (unmounted) return
   uploadGeneration += 1
+  releasePreview(previewSource.value)
+  releasePreview(coverPreview.value)
   selectedVideo.value = file
   selectedCover.value = null
   uploadedVideoFileID.value = ''
@@ -210,6 +217,15 @@ async function uploadVideo(file: ArchiveMediaIntentFile, generation: number) {
 }
 
 async function uploadCover(file: ArchiveMediaIntentFile) {
+  const validationError = validateVideoCoverFile(file)
+  if (validationError) {
+    errorMessage.value = validationError
+    failedOperation.value = 'cover'
+    coverPending.value = true
+    emit('navigation-blocked', true)
+    emitReadiness()
+    return
+  }
   const generation = ++uploadGeneration
   setUploading(true)
   progress.value = 0
@@ -228,6 +244,8 @@ async function uploadCover(file: ArchiveMediaIntentFile) {
     if (selectedCover.value !== file || !selectedVideo.value) return
     uploadedCoverFileID.value = result.fileID
     coverPending.value = false
+    releasePreview(coverPreview.value)
+    coverPreview.value = result.fileID
     emit('navigation-blocked', false)
     failedOperation.value = ''
     publishModel()
@@ -315,6 +333,7 @@ function restoreInitialForRetry(file: ArchiveMediaIntentFile, state: 'pending' |
 }
 
 function acceptCover(selected: ArchiveMediaIntentFile) {
+  releasePreview(coverPreview.value)
   selectedCover.value = selected
   coverPreview.value = previewFor(selected.source)
   coverPending.value = true
@@ -329,6 +348,7 @@ function acceptCover(selected: ArchiveMediaIntentFile) {
 function removeFailedCover() {
   if (failedOperation.value !== 'cover') return
   selectedCover.value = null
+  releasePreview(coverPreview.value)
   coverPending.value = false
   emit('navigation-blocked', false)
   failedOperation.value = ''
@@ -342,6 +362,8 @@ function removeFailedCover() {
 function removeVideo() {
   const retainedFile = activeInitialFile.value || props.initialFile || null
   const resolvesInitial = Boolean(retainedFile)
+  releasePreview(previewSource.value)
+  releasePreview(coverPreview.value)
   selectedVideo.value = null
   selectedCover.value = null
   uploadedVideoFileID.value = ''

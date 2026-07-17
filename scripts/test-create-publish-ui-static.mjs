@@ -64,6 +64,9 @@ assert(
     tabbar.includes('storeArchiveMediaIntent') &&
     tabbar.includes("if (props.current === 'create')") &&
     tabbar.includes("emit('media-selected', token)") &&
+    tabbar.includes('source: file') &&
+    !tabbar.includes('source: URL.createObjectURL(file)') &&
+    tabbar.includes('discardArchiveMediaIntent(token)') &&
     createPage.includes('@media-selected="handleInlineMediaIntent"') &&
     createPage.includes('transitionArchiveMediaEditorState') &&
     createPage.includes('hasArchiveMedia') &&
@@ -92,6 +95,8 @@ assert(
     videoPublishEditor.includes("emit('navigation-blocked', false)") &&
     /uploadGeneration \+= 1[\s\S]*coverPending\.value = false[\s\S]*emit\('navigation-blocked', false\)/.test(acceptVideoBlock) &&
     videoPublishEditor.includes('isVideoUploadResultCurrent') &&
+    videoPublishEditor.includes('releasePreview(previewSource.value)') &&
+    videoPublishEditor.includes('releasePreview(coverPreview.value)') &&
     createPage.includes('archiveVideoIntentState') &&
     createPage.includes('@initial-state="handleVideoInitialState"') &&
     createPage.includes('@selected-file="handleVideoSelectedFile"') &&
@@ -101,6 +106,13 @@ assert(
     createPage.includes('@readiness="videoPublishReady = $event.ready"') &&
     createPage.includes(':disabled="submitting || !videoPublishReady"'),
   'archive video publishing must have its own upload editor and server-owned upload paths.',
+)
+assert(
+  createPage.includes("requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text' || requestedArchiveFormat === 'video'") &&
+    createPage.includes('onBackPress(') &&
+    createPage.includes("window.addEventListener('beforeunload'") &&
+    videoPublishEditor.indexOf('validateVideoCoverFile', videoPublishEditor.indexOf('async function uploadCover')) < videoPublishEditor.indexOf('requestMemberVideoCoverUpload'),
+  'archive routes, native back, H5 unload, and cover validation must be guarded.',
 )
 
 assert(

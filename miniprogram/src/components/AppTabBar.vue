@@ -53,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   APP_TABS,
   type AppTabKey,
@@ -61,12 +61,13 @@ import {
   hideNativeTabBar,
 } from '../utils/app-tabbar'
 import { detectFirstMediaType, type PublishMediaType } from '../utils/video-publish'
-import { storeArchiveMediaIntent, type ArchiveMediaIntentFile } from '../utils/archive-media-intent'
+import { discardArchiveMediaIntent, storeArchiveMediaIntent, sweepArchiveMediaIntents, type ArchiveMediaIntentFile } from '../utils/archive-media-intent'
 
 const props = defineProps<{ current: AppTabKey }>()
 const emit = defineEmits<{ (event: 'media-selected', token: string): void }>()
 const showPublishSheet = ref(false)
 const h5MediaInput = ref<HTMLInputElement | null>(null)
+const pendingMediaIntents = new Set<string>()
 const HOME_TAB_RETAP_EVENT = 'happyhome:home-tab-retap'
 const publishOptions = computed(() => [
   { key: 'media', label: '发图片/视频', icon: '/static/publish-icons/trade.svg', tone: 'image-text' },
@@ -162,6 +163,7 @@ function routeSelectedMedia(result: any) {
   const intentFiles = normalizeIntentFiles(files, mediaType)
   if (intentFiles.length === 0) return
   const token = storeArchiveMediaIntent(mediaType, intentFiles)
+  pendingMediaIntents.add(token)
   if (props.current === 'create') {
     closePublishSheet()
     emit('media-selected', token)
@@ -171,7 +173,14 @@ function routeSelectedMedia(result: any) {
   closePublishSheet()
   const params = [`archiveFormat=${mediaType === 'video' ? 'video' : 'image_text'}`, `mediaIntent=${encodeURIComponent(token)}`]
   if (returnTo) params.push(`returnTo=${encodeURIComponent(returnTo)}`)
-  uni.navigateTo({ url: `/pages/create/index?${params.join('&')}` })
+  uni.navigateTo({
+    url: `/pages/create/index?${params.join('&')}`,
+    success: () => pendingMediaIntents.delete(token),
+    fail: () => {
+      pendingMediaIntents.delete(token)
+      discardArchiveMediaIntent(token)
+    },
+  })
 }
 
 function onH5MediaChange(event: Event) {
@@ -180,7 +189,7 @@ function onH5MediaChange(event: Event) {
   routeSelectedMedia({
     type: 'mix',
     tempFiles: files.map((file) => ({
-      source: URL.createObjectURL(file),
+      source: file,
       name: file.name,
       type: file.type,
       size: file.size,
@@ -188,6 +197,12 @@ function onH5MediaChange(event: Event) {
   })
   input.value = ''
 }
+
+onBeforeUnmount(() => {
+  pendingMediaIntents.forEach((token) => discardArchiveMediaIntent(token))
+  pendingMediaIntents.clear()
+  sweepArchiveMediaIntents()
+})
 
 function currentReturnTo() {
   if (props.current === 'profile') return '/pages/profile/index'

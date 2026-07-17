@@ -2,6 +2,7 @@ import type { VideoItemCos } from '../../../cloud/shared/types'
 
 export const VIDEO_ALLOWED_EXTENSIONS = ['mp4', 'mov', 'm4v', 'webm'] as const
 export const VIDEO_MAX_SIZE_BYTES = 200 * 1024 * 1024
+export const VIDEO_COVER_MAX_SIZE_BYTES = 10 * 1024 * 1024
 
 export type PublishMediaType = 'image' | 'video'
 
@@ -52,6 +53,7 @@ export interface ArchiveMediaEditorState {
 export type ArchiveMediaEditorTransition =
   | { status: 'confirm'; state: ArchiveMediaEditorState }
   | { status: 'cancelled'; state: ArchiveMediaEditorState }
+  | { status: 'replaced'; state: ArchiveMediaEditorState }
   | { status: 'switched'; state: ArchiveMediaEditorState }
 
 export type ArchiveVideoIntentState = 'idle' | 'selected' | 'pending' | 'failed'
@@ -216,12 +218,32 @@ export function resolveVideoPublishReadiness(state: VideoPublishReadinessState):
   return { ready: true, reason: '' }
 }
 
+export function shouldBlockVideoNavigation(state: { navigationBlocked: boolean; uploading: boolean }): boolean {
+  return state.navigationBlocked || state.uploading
+}
+
+export function validateVideoCoverFile(file: { name?: string; type?: string; size?: number }): string | null {
+  const size = Number(file.size)
+  if (!Number.isFinite(size) || size <= 0) return '封面图片为空'
+  if (size > VIDEO_COVER_MAX_SIZE_BYTES) return '封面图片不能超过 10 MiB'
+  const extension = fileExtension(String(file.name || ''))
+  const allowed = new Set(['jpg', 'jpeg', 'png', 'webp'])
+  if (!allowed.has(extension)) return '封面仅支持 JPG、PNG 或 WebP 格式'
+  const mime = String(file.type || '').toLowerCase()
+  if (mime && mime !== 'image') {
+    const expected = extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg' : `image/${extension}`
+    if (mime !== expected) return '封面 MIME 类型与文件扩展名不一致'
+  }
+  return null
+}
+
 export function transitionArchiveMediaEditorState(
   state: ArchiveMediaEditorState,
   nextType: PublishMediaType,
   confirmation: boolean | null,
 ): ArchiveMediaEditorTransition {
   const currentType: PublishMediaType = state.format === 'video' ? 'video' : 'image'
+  if (currentType === nextType) return { status: 'replaced', state }
   const decision = decideMediaTypeSwitch(currentType, nextType, state.hasSelectedMedia)
   if (decision.requiresConfirmation && confirmation === null) return { status: 'confirm', state }
   if (decision.requiresConfirmation && confirmation === false) return { status: 'cancelled', state }

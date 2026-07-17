@@ -31,4 +31,16 @@ describe('archive media intent', () => {
     })
     expect((module as any).consumeArchiveMediaIntent(token)).toBeNull()
   })
+
+  test('expires volatile files and revokes owned preview URLs', async () => {
+    vi.resetModules()
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', { revokeObjectURL })
+    vi.stubGlobal('uni', { setStorageSync: vi.fn(), getStorageSync: vi.fn(), removeStorageSync: vi.fn() })
+    const module = await import('../archive-media-intent')
+    const token = module.storeArchiveMediaIntent('image', [{ source: {} as Blob, objectUrl: 'blob:owned', name: 'a.jpg', type: 'image/jpeg', size: 1 } as any], 100)
+    expect(module.sweepArchiveMediaIntents(100 + module.ARCHIVE_MEDIA_INTENT_TTL_MS + 1)).toBe(1)
+    expect(module.peekArchiveMediaIntent(token, 100 + module.ARCHIVE_MEDIA_INTENT_TTL_MS + 1)).toBeNull()
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:owned')
+  })
 })

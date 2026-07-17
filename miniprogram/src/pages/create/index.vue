@@ -233,6 +233,7 @@
 
               <VideoPublishEditor
                 v-else-if="archiveFormat === 'video' && block.widget.type === 'video_group'"
+                :key="archiveVideoIntentGeneration"
                 :model-value="formData[block.widget.widgetId]"
                 :initial-file="archiveInitialMedia"
                 :initial-state="archiveVideoIntentState"
@@ -281,7 +282,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { onLoad, onShow } from '@dcloudio/uni-app'
+import { onBackPress, onLoad, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { collaborationTemplateApi, memberApi, postApi, sectionApi, type ArchivePostCreateParams } from '../../api/cloud'
@@ -310,7 +311,7 @@ import {
   peekArchiveMediaIntent,
   type ArchiveMediaIntentFile,
 } from '../../utils/archive-media-intent'
-import { reduceArchiveVideoRetention, transitionArchiveMediaEditorState, type ArchiveMediaEditorState, type ArchiveVideoIntentState, type ArchiveVideoRetentionState, type PublishMediaType } from '../../utils/video-publish'
+import { reduceArchiveVideoRetention, shouldBlockVideoNavigation, transitionArchiveMediaEditorState, type ArchiveMediaEditorState, type ArchiveVideoIntentState, type ArchiveVideoRetentionState, type PublishMediaType } from '../../utils/video-publish'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -343,6 +344,7 @@ const archiveVideoIntentGeneration = ref(0)
 const videoUploading = ref(false)
 const videoNavigationBlocked = ref(false)
 const videoPublishReady = ref(true)
+const archiveObjectUrls = new Set<string>()
 const collaborationOnly = ref(false)
 const collaborationTemplatesError = ref('')
 const initialLoadPending = ref(true)
@@ -507,7 +509,7 @@ onLoad(async (options: any) => {
       ensureSectionsLoaded(),
       collaborationOnly.value ? ensureCollaborationTemplatesLoaded() : Promise.resolve(),
     ])
-    if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text') {
+    if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text' || requestedArchiveFormat === 'video') {
       return
     }
     await consumeCreateSectionIntent(options)
@@ -549,15 +551,29 @@ function buildArchiveEditorSection(format: 'image_text' | 'text' | 'video') {
   })
 }
 
-function enterArchiveEditor(format: 'image_text' | 'text' | 'video', returnTo?: string) {
+function enterArchiveEditor(format: 'image_text' | 'text' | 'video', returnTo?: string, preserveForm = false) {
   archiveFormat.value = format
-  archiveInitialMedia.value = null
-  archiveVideoIntentState.value = 'idle'
+  if (!preserveForm) {
+    archiveInitialMedia.value = null
+    archiveVideoIntentState.value = 'idle'
+  }
   videoUploading.value = false
   videoNavigationBlocked.value = false
   videoPublishReady.value = format !== 'video'
   collaborationOnly.value = false
-  selectSection(buildArchiveEditorSection(format), { returnTo: String(returnTo || '') })
+  selectSection(buildArchiveEditorSection(format), { returnTo: String(returnTo || ''), preserveForm })
+}
+
+function archiveMediaSource(file: ArchiveMediaIntentFile): string | Blob {
+  if (typeof file.source === 'string') return file.source
+  const url = URL.createObjectURL(file.source)
+  archiveObjectUrls.add(url)
+  return url
+}
+
+function releaseArchiveObjectUrls() {
+  archiveObjectUrls.forEach((url) => URL.revokeObjectURL(url))
+  archiveObjectUrls.clear()
 }
 
 function applyArchiveMediaIntent(token: unknown) {
@@ -570,7 +586,8 @@ function applyArchiveMediaIntent(token: unknown) {
     return
   }
   if (intent.mediaType === 'image' && archiveFormat.value === 'image_text') {
-    formData.image_note_images = intent.files.map((file) => file.source)
+    releaseArchiveObjectUrls()
+    formData.image_note_images = intent.files.map(archiveMediaSource)
   }
 }
 
@@ -600,6 +617,7 @@ function confirmMediaFormatSwitch(): Promise<boolean> {
 }
 
 function clearArchiveMediaState() {
+  releaseArchiveObjectUrls()
   Object.keys(formData).forEach((key) => delete formData[key])
   archiveInitialMedia.value = null
   archiveVideoIntentState.value = 'idle'
@@ -666,7 +684,7 @@ async function handleInlineMediaIntent(token: string) {
   }
   if (transition?.status === 'switched') clearArchiveMediaState()
   const nextFormat = intent.mediaType === 'video' ? 'video' : 'image_text'
-  enterArchiveEditor(nextFormat, createReturnTo.value)
+  enterArchiveEditor(nextFormat, createReturnTo.value, transition?.status === 'replaced')
   applyArchiveMediaIntent(token)
 }
 
@@ -784,6 +802,8 @@ onBeforeUnmount(() => {
   try {
     ;(uni as any).$off?.(CREATE_SECTION_EVENT, handleCreateSectionIntentEvent)
   } catch (_error) {}
+  releaseArchiveObjectUrls()
+  removeH5BeforeUnload()
 })
 
 async function handleJoin() {
@@ -812,19 +832,21 @@ function goOnboarding() {
   openOnboardingPreservingStack({ mode: 'discover' })
 }
 
-function selectSection(section: any, options: { returnTo?: string } = {}) {
+function selectSection(section: any, options: { returnTo?: string; preserveForm?: boolean } = {}) {
   if (isActivityInviteMode.value) return
   selectedSection.value = section
   createReturnTo.value = normalizeRouteUrl(options.returnTo)
-  Object.keys(formData).forEach((key) => delete formData[key])
+  if (!options.preserveForm) Object.keys(formData).forEach((key) => delete formData[key])
   textNoteStep.value = 'compose'
   textNoteTheme.value = 'paper'
-  for (const widget of section?.widgets || []) {
-    if (widget?.type === 'topic' && widget?.widgetId) {
-      formData[String(widget.widgetId)] = []
+  if (!options.preserveForm) {
+    for (const widget of section?.widgets || []) {
+      if (widget?.type === 'topic' && widget?.widgetId) {
+        formData[String(widget.widgetId)] = []
+      }
     }
   }
-  restoreDraft()
+  if (!options.preserveForm) restoreDraft()
 }
 
 function handleFormBack() {
@@ -852,12 +874,8 @@ function openTextNoteCover() {
 }
 
 function handleBackToSectionPicker() {
-  if (archiveFormat.value === 'video' && videoNavigationBlocked.value) {
-    uni.showToast({ title: '请重试或移除失败封面', icon: 'none' })
-    return
-  }
-  if (archiveFormat.value === 'video' && videoUploading.value) {
-    uni.showToast({ title: '视频正在上传，请稍候或取消后返回', icon: 'none' })
+  if (archiveFormat.value === 'video' && shouldBlockVideoNavigation({ navigationBlocked: videoNavigationBlocked.value, uploading: videoUploading.value })) {
+    showVideoNavigationBlockedToast()
     return
   }
   if (archiveFormat.value === 'image_text' || archiveFormat.value === 'video') {
@@ -1208,6 +1226,40 @@ function saveDraft() {
     uni.showToast({ title: '保存失败', icon: 'none' })
   }
 }
+
+function showVideoNavigationBlockedToast() {
+  uni.showToast({
+    title: videoNavigationBlocked.value ? '请重试或移除失败封面' : '视频正在上传，请稍候或取消后返回',
+    icon: 'none',
+  })
+}
+
+onBackPress(() => {
+  if (archiveFormat.value !== 'video' || !shouldBlockVideoNavigation({ navigationBlocked: videoNavigationBlocked.value, uploading: videoUploading.value })) return false
+  showVideoNavigationBlockedToast()
+  return true
+})
+
+let h5BeforeUnloadInstalled = false
+function handleH5BeforeUnload(event: BeforeUnloadEvent) {
+  event.preventDefault()
+  event.returnValue = ''
+}
+function removeH5BeforeUnload() {
+  // #ifdef H5
+  if (h5BeforeUnloadInstalled) window.removeEventListener('beforeunload', handleH5BeforeUnload)
+  // #endif
+  h5BeforeUnloadInstalled = false
+}
+watch([archiveFormat, videoNavigationBlocked, videoUploading], () => {
+  // #ifdef H5
+  const blocked = archiveFormat.value === 'video' && shouldBlockVideoNavigation({ navigationBlocked: videoNavigationBlocked.value, uploading: videoUploading.value })
+  if (blocked && !h5BeforeUnloadInstalled) {
+    window.addEventListener('beforeunload', handleH5BeforeUnload)
+    h5BeforeUnloadInstalled = true
+  } else if (!blocked) removeH5BeforeUnload()
+  // #endif
+}, { immediate: true })
 
 function currentDraftStorageKey() {
   const scope = archiveFormat.value || (isCollaborationSection(selectedSection.value)

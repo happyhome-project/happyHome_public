@@ -229,6 +229,37 @@ describe('archive media editor transition state', () => {
       state: { format: 'image_text', formData: {}, initialMedia: null, hasSelectedMedia: false },
     })
   })
+
+  test('same-format replacement preserves non-media form state', () => {
+    const transition = (videoPublish as any).transitionArchiveMediaEditorState
+    const formData = { image_note_images: ['old'], image_note_title: 'title', image_note_body: 'body', image_note_topics: ['topic'], image_note_location: { name: 'park' } }
+    const state = { format: 'image_text', formData, initialMedia: null, hasSelectedMedia: true }
+    const result = transition(state, 'image', null)
+    expect(result).toEqual({ status: 'replaced', state })
+    expect(result.state.formData).toBe(formData)
+  })
+})
+
+describe('video navigation and cover validation', () => {
+  test('blocks native navigation only while video work is unresolved', () => {
+    const shouldBlock = (videoPublish as any).shouldBlockVideoNavigation
+    expect(shouldBlock({ navigationBlocked: true, uploading: false })).toBe(true)
+    expect(shouldBlock({ navigationBlocked: false, uploading: true })).toBe(true)
+    expect(shouldBlock({ navigationBlocked: false, uploading: false })).toBe(false)
+  })
+
+  test.each([
+    [{ name: 'cover.jpg', type: 'image/jpeg', size: 1 }, null],
+    [{ name: 'cover.webp', type: 'image/webp', size: 10 * 1024 * 1024 }, null],
+    [{ name: 'cover.gif', type: 'image/gif', size: 1 }, '格式'],
+    [{ name: 'cover.png', type: 'image/jpeg', size: 1 }, '不一致'],
+    [{ name: 'cover.jpg', type: 'image/jpeg', size: 0 }, '为空'],
+    [{ name: 'cover.jpg', type: 'image/jpeg', size: 10 * 1024 * 1024 + 1 }, '10 MiB'],
+  ])('validates cover before upload: %o', (file, error) => {
+    const validate = (videoPublish as any).validateVideoCoverFile
+    if (error === null) expect(validate(file)).toBeNull()
+    else expect(validate(file)).toContain(error)
+  })
 })
 
 describe('one-shot initial video intent', () => {
