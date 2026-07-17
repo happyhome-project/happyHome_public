@@ -361,6 +361,7 @@ test('processPostRagJobV2Batch isolates candidates and continues after one failu
 })
 
 test('processPostRagJobV2Batch isolates claim failures without aborting later candidates', async () => {
+  const warning = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
   const deps = dependencies({
     listCandidates: jest.fn(async () => [JOB_ID, JOB2_ID]),
     claim: jest.fn().mockRejectedValueOnce(new Error('secret db failure')).mockResolvedValueOnce(job({ outboxId: 'outbox-2', leaseToken: 'lease-2' })),
@@ -369,6 +370,62 @@ test('processPostRagJobV2Batch isolates claim failures without aborting later ca
   expect(result.results[0]).toEqual({ jobId: JOB_ID, status: 'failed', errorCode: 'INTERNAL_ERROR', errorStage: 'claim' })
   expect(result.results[1]).toMatchObject({ jobId: JOB2_ID, status: 'completed' })
   expect(JSON.stringify(result)).not.toContain('secret')
+  expect(warning).toHaveBeenCalledWith('[post-rag-job-processor] claim failed', {
+    jobId: JOB_ID,
+    name: 'Error',
+    code: 'UNKNOWN',
+    fingerprint: expect.stringMatching(/^[a-f0-9]{16}$/),
+  })
+  expect(JSON.stringify(warning.mock.calls)).not.toContain('secret')
+  warning.mockRestore()
+})
+
+test('processPostRagJobV2Batch fingerprints an invalid candidate ID without logging it', async () => {
+  const secretLookingJobId = 'AbcToken123hunter2'
+  const warning = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+  const deps = dependencies({
+    listCandidates: jest.fn(async () => [secretLookingJobId]),
+    claim: jest.fn().mockRejectedValue(new Error('secret database failure')),
+  })
+
+  const result = await processPostRagJobV2Batch({ workerId: 'worker-1', now: times(NOW), limit: 1 }, deps)
+
+  expect(result.results).toEqual([{
+    jobId: secretLookingJobId,
+    status: 'failed',
+    errorCode: 'INTERNAL_ERROR',
+    errorStage: 'claim',
+  }])
+  expect(warning).toHaveBeenCalledWith('[post-rag-job-processor] claim failed', {
+    jobId: 'INVALID',
+    jobIdFingerprint: expect.stringMatching(/^[a-f0-9]{16}$/),
+    name: 'Error',
+    code: 'UNKNOWN',
+    fingerprint: expect.stringMatching(/^[a-f0-9]{16}$/),
+  })
+  expect(JSON.stringify(warning.mock.calls)).not.toMatch(/AbcToken123|hunter2|secret/)
+  warning.mockRestore()
+})
+
+test('processPostRagJobV2Batch does not let exhausted claim failures consume the batch capacity', async () => {
+  const poison1 = 'a'.repeat(64)
+  const poison2 = 'b'.repeat(64)
+  const deps = dependencies({
+    listCandidates: jest.fn(async () => [poison1, poison2, JOB_ID]),
+    claim: jest.fn()
+      .mockRejectedValueOnce(new Error('exhausted job 1'))
+      .mockRejectedValueOnce(new Error('exhausted job 2'))
+      .mockResolvedValueOnce(job()),
+  })
+
+  const result = await processPostRagJobV2Batch({ workerId: 'worker-1', now: times(NOW), limit: 1 }, deps)
+
+  expect(deps.listCandidates).toHaveBeenCalledWith(NOW, 3)
+  expect(result.results).toEqual([
+    { jobId: poison1, status: 'failed', errorCode: 'INTERNAL_ERROR', errorStage: 'claim' },
+    { jobId: poison2, status: 'failed', errorCode: 'INTERNAL_ERROR', errorStage: 'claim' },
+    expect.objectContaining({ jobId: JOB_ID, status: 'completed' }),
+  ])
 })
 
 test('processPostRagJobV2Batch isolates an invalid claimed snapshot before later candidates', async () => {

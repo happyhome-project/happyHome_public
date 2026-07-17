@@ -95,6 +95,17 @@ function parseCandidate(value: any): Candidate | null {
     text: source.text, preview: source.preview, fieldLabel: source.fieldLabel, sectionName: source.sectionName }
 }
 function unique(values: string[]) { return [...new Set(values)] }
+function fuseCandidateRanks(candidateLists: Candidate[][], rankConstant = 60): Candidate[] {
+  const fused = new Map<string, { candidate: Candidate; score: number }>()
+  for (const candidates of candidateLists) candidates.forEach((candidate, index) => {
+    const key = `${candidate.postId}\u0000${candidate.sourceVersion}`
+    const current = fused.get(key)
+    const score = (current?.score || 0) + 1 / (rankConstant + index + 1)
+    const representative = !current || candidate.score > current.candidate.score ? candidate : current.candidate
+    fused.set(key, { candidate: representative, score })
+  })
+  return [...fused.values()].map(item => ({ ...item.candidate, score: item.score })).sort((a, b) => b.score - a.score)
+}
 function versionNumber(value: unknown) { return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : null }
 function matchesWidgetFieldKey(candidateFieldKey: string, widgetFieldKey: unknown) {
   if (!safeId(widgetFieldKey)) return false
@@ -111,7 +122,7 @@ export function createPostSemanticSearchService(options: {
   embeddingCacheSize?: number; candidateCacheSize?: number; operationTimeoutMs?: number
   resolveFinalMembership?: (input: { communityId: string; viewerId: string }) => Promise<{ active: boolean; aclVersion: number }>
 }) {
-  if (!/^[a-z0-9][a-z0-9._-]*$/.test(options.indexName) || !safeId(options.vectorField)
+  if (!/^[a-z0-9][a-z0-9._-]*$/.test(options.indexName) || !/^[A-Za-z0-9_.-]+$/.test(options.vectorField)
     || !safeId(options.embeddingModel) || !safeId(options.retrievalIndexVersion || POST_RAG_RETRIEVAL_INDEX_VERSION)) throw new PostSemanticSearchError('INVALID_REQUEST')
   const now = options.now || Date.now
   const retrievalIndexVersion = options.retrievalIndexVersion || POST_RAG_RETRIEVAL_INDEX_VERSION
@@ -151,21 +162,33 @@ export function createPostSemanticSearchService(options: {
         const filters: JsonRecord[] = [{ term: { communityId: input.communityId } }]
         if (input.sectionId) filters.push({ term: { sectionId: input.sectionId } })
         if (!input.includeMemberOnly) filters.push({ term: { visibility: 'public' } })
-        const response = await options.requestJson('POST', `${options.indexName}/_search`, {
+        const sourceFields = ['postId', 'communityId', 'sectionId', 'sourceVersion', 'chunkId', 'visibility', 'widgetId', 'fieldKey', 'title', 'text', 'preview', 'fieldLabel', 'sectionName']
+        const [lexicalResponse, vectorResponse] = await Promise.all([
+          options.requestJson('POST', `${options.indexName}/_search`, {
           size: 40,
           collapse: { field: 'postId' },
-          _source: ['postId', 'communityId', 'sectionId', 'sourceVersion', 'chunkId', 'visibility', 'widgetId', 'fieldKey', 'title', 'text', 'preview', 'fieldLabel', 'sectionName'],
+          _source: sourceFields,
           query: { bool: { must: [{ multi_match: { query, fields: ['text^3', 'preview^2', 'title^4', 'fieldLabel', 'sectionName'], type: 'best_fields' } }], filter: filters } },
-          knn: { field: options.vectorField, query_vector: vector, k: 40, num_candidates: 100, filter: { bool: { filter: filters } } },
-          rank: { rrf: { rank_window_size: 40, rank_constant: 60 } },
-        })
+          }),
+          options.requestJson('POST', `${options.indexName}/_search`, {
+            size: 40,
+            collapse: { field: 'postId' },
+            _source: sourceFields,
+            query: { script_score: {
+              query: { bool: { filter: filters } },
+              script: { source: `cosineSimilarity(params.query_vector, '${options.vectorField}') + 1.0`, params: { query_vector: vector } },
+            } },
+          }),
+        ])
         assertDeadline(deadline)
-        const hits = response?.hits?.hits
-        if (!Array.isArray(hits)) throw new Error('invalid hits')
-        const boundedHits = hits.slice(0, 40)
-        const parsed = boundedHits.map(parseCandidate)
-        if (parsed.some(candidate => candidate === null)) throw new Error('invalid hits')
-        candidates = parsed as Candidate[]
+        const parseResponse = (response: any) => {
+          const hits = response?.hits?.hits
+          if (!Array.isArray(hits)) throw new Error('invalid hits')
+          const parsed = hits.slice(0, 40).map(parseCandidate)
+          if (parsed.some(candidate => candidate === null)) throw new Error('invalid hits')
+          return parsed as Candidate[]
+        }
+        candidates = fuseCandidateRanks([parseResponse(lexicalResponse), parseResponse(vectorResponse)])
         candidateCache.set(candidateKey, candidates)
       }
 
