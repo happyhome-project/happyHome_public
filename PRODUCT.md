@@ -1,36 +1,198 @@
-# Product
+# HappyHome 产品定位
 
-## Register
+> 状态：当前产品定位基线
+>
+> 更新日期：2026-07-17
+>
+> 适用范围：后续产品、设计、内容运营和开发讨论
+>
+> 本文定义“为什么做、为谁做、聚焦什么和不做什么”。已经实现的具体行为仍以当前代码、测试和仓库文档权威索引为准。
 
-product
+## 一句话定位
 
-## Users
+> **HappyHome 是每个长期社群自己的小红书：成员共同记录真实经验，通过浏览发现，通过搜索长期复用。**
 
-HappyHome serves residents, parents, neighbors, community organizers, teachers, and group administrators. Members browse or publish useful local content in short mobile sessions; organizers need to create and manage that content at least as quickly as sending a message in a chat group.
+这里的“小红书”指内容生产、浏览发现和经验搜索形成的循环，不是复制小红书的品牌、视觉、推荐算法或泛社交机制。
 
-## Product Purpose
+更准确的内部定义是：
 
-HappyHome gives each community configurable sections for publishing, finding, and retaining both timely updates and durable local knowledge. Success means members can understand what is happening, find useful past content, and publish through the right section template without learning a complex system.
+> **一个长期共同体，一个独立生长的内容空间。**
 
-## Brand Personality
+HappyHome 不是城市级或区域级内容平台。即使某个社群允许公开浏览，也不把其中的内容汇聚成跨社群 Feed、区域热榜、统一推荐或统一搜索。用户可以加入和切换多个社群，但每次都在一个边界清楚的社群内浏览、搜索、发布和互动。
 
-Warm, clear, and grounded. The member experience should feel human and image-friendly while remaining calm enough for community information that must still be useful later.
+## 什么样的组织才是“社群”
 
-## Anti-references
+HappyHome 只适合能够长期产生内容的稳定共同体。一个合适的社群通常同时具备：
 
-- Do not turn the member experience into a generic enterprise dashboard.
-- Do not copy a social app's identity, colors, or engagement mechanics wholesale; borrow only interaction patterns that improve the current community task.
-- Do not add ornamental cards, motion, or controls that slow down publishing or obscure information.
-- Do not hard-code one community's section names or assume every community has the same content structure.
+- 相对稳定的成员身份和共同背景；
+- 持续数月或数年的共同生活、学习或兴趣活动；
+- 会反复出现、值得积累的经验和问题；
+- 能够维持基本秩序和内容治理的组织者。
 
-## Design Principles
+典型例子包括小区、学校班级、村庄和长期兴趣组织。
 
-- Speed is clarity: show immediate, legible state changes and keep common publishing paths short.
-- Serve the community task first: visual expression supports publishing, browsing, and retrieval rather than competing with them.
-- Keep templates composable: specialized experiences must remain data-driven and available to any community that chooses them.
-- Be warm without becoming verbose: use familiar language, restrained feedback, and explicit recovery when something fails.
-- Preserve identity while learning from references: adopt useful layout and control patterns inside HappyHome's established visual system.
+一次活动群、一次性拼车群、临时项目群、纯广告群不应被创建为独立社群。临时协作可以发生在一个长期社群内部，但不能反过来定义社群本身。
 
-## Accessibility & Inclusion
+## 用户与角色
 
-Target WCAG AA contrast for essential text and controls, provide touch targets suitable for one-handed mobile use, never rely on color alone to communicate state, preserve readable type at system scaling, and keep nonessential motion removable or absent. Validation and error messages must identify the problem in plain language and remain visible to users who cannot perceive subtle visual cues.
+### 组织者
+
+群主、老师、社区组织者和管理员是社群的创建者、冷启动者和治理者。他们建立内容方向、策划初始话题、贡献种子内容、精选优质内容并维护秩序。
+
+组织者是产品进入一个社群的关键切入点，但不能成为长期唯一的内容供给者。产品应帮助他们减少重复通知、重复查找和重复答疑，同时把普通成员带入内容循环。
+
+### 普通成员
+
+普通成员既是内容消费者，也是长期的主要内容生产者。他们分享亲身经历、实用答案和共同生活记录，并在需要时搜索、补充或纠正其他成员的经验。
+
+如果成员只浏览而不持续贡献，HappyHome 最终会退化成由管理员维护的低频资料库，无法形成“社群自己的小红书”。
+
+### 访客
+
+社群创建者可以选择“公开浏览”或“仅成员可见”。允许公开浏览的社群可以让外部访客通过分享进入阅读；发布和成员互动仍属于社群成员。公开或私密是社群自己的访问策略，不意味着内容会被平台跨社群聚合。
+
+## 要解决的根本问题
+
+公开内容平台的信息很多，但对一个具体社群往往不够相关，作者身份、适用范围和真实背景也较弱。微信群足够即时，却会让重要信息被聊天刷走，难以结构化浏览、长期搜索和持续修正。传统资料库虽然能保存信息，又通常缺少生活感、成员表达和日常浏览动力。
+
+HappyHome 要把三种价值放在同一个社群边界内：
+
+1. **像内容社区一样愿意看、愿意发；**
+2. **像共同体内部经验一样相关、可信、少噪音；**
+3. **像知识资产一样能够在数月或数年后重新找到和使用。**
+
+微信群继续承担即时聊天和消息触达。HappyHome 承担值得脱离聊天上下文、单独保留、浏览和搜索的内容。它不以替代微信群为目标。
+
+## 内容边界
+
+判断一条信息是否应该进入主内容区，只问一个问题：
+
+> **它是否值得脱离聊天上下文，被社群成员再次浏览或搜索？**
+
+主内容区重点保留三类内容：
+
+1. **真实经验**：成员亲自体验过的地点、路线、商家、课程、育儿、维修、办事或兴趣心得。内容应具体、可参考，不要求伪装成权威答案。
+2. **实用答案**：社群中会被反复询问的资料、流程、联系方式、避坑建议和问题解答。
+3. **共同生活记录**：活动回顾、人物故事、社区变化、作品和照片。它们未必解决一个具体问题，但能形成共同体文化和持续表达的动力。
+
+有明确期限的事项进入独立协作区，例如临时通知、拼车、活动邀约与报名、一次性人员确认。协作结束后，真正有长期价值的照片、路线、结果和经验可以再沉淀为内容帖。
+
+主内容区不应收纳寒暄、接龙、依赖即时上下文的随手一句话、重复广告、纯营销、未经证实的敏感消息、未授权的他人隐私，以及已经过期且没有历史价值的通知。
+
+边界的目标不是把内容都做成“有用资料”。HappyHome 既不能成为更难用的聊天记录，也不能成为冷冰冰的知识库。主内容区应当同时具备真实、具体、有人味和以后值得再看的特征。
+
+## 核心循环
+
+> **组织者建立方向和秩序 → 成员发布真实经验 → Feed 帮助新内容被发现 → 话题帮助内容形成结构 → 搜索让旧内容重新有用 → 追问、补充、纠正或实际参与验证内容 → 更多成员继续贡献。**
+
+Feed 和搜索承担不同任务：
+
+- Feed 让成员在没有明确目的时也愿意打开、浏览和表达，是日常内容供给的入口；
+- 搜索让成员在有明确需要时找到过去的真实原帖，是长期价值兑现的关键时刻。
+
+互动和协作必须服务于这个循环。评论用于追问、补充和纠正，收藏或“有帮助”用于找回和质量判断；从内容发起活动可以延长内容价值。关注数、粉丝体系、热度竞赛和刺激停留时长的互动机制不是当前重点。
+
+## 核心竞争力
+
+HappyHome 的护城河不是双列瀑布流、图文编辑器、AI、RAG、可配置模板或公开／私密开关。这些都是可以复制的产品能力或基础设施。
+
+真正能够随时间积累的竞争力是：
+
+1. **共同背景带来的高相关性**：同一小区、班级、村庄或兴趣组织的经验天然更贴近成员的真实处境。
+2. **真实身份与治理带来的信任**：作者、成员关系、适用地点和组织秩序让内容比公开平台更容易判断。
+3. **持续沉淀带来的内容密度**：一个社群独有的地点、人物、流程、历史和经验会逐年变厚。
+4. **搜索复用带来的时间复利**：旧内容被反复找到、补充和使用，价值不随 Feed 下沉而消失。
+5. **内容与行动的连接**：经验不仅能看，还能自然延伸为邀约、报名或其他轻协作，并把结果再次沉淀回来。
+
+因此，核心判断不是“功能是否比别人多”，而是：
+
+> **在一个有真实身份和共同生活背景的长期社群里，成员能否获得比公开平台更相关、更可信、更少噪音的真实经验。**
+
+## 当前聚焦顺序
+
+1. **先让一个真实社群拥有合适的内容供给。** 话题和种子帖子必须来自该共同体真实、反复出现的需求，不能用泛化演示数据填充。
+2. **降低高质量发布成本。** 图文和文字发布要足够简单；结构化字段只在确实提高内容可用性时出现。
+3. **让内容容易被发现和组织。** Feed、精选和少量话题共同解决日常浏览，不依赖内容量不足时的复杂推荐算法。
+4. **让旧内容准确找回。** 搜索应限定在当前社群，优先返回真实原帖，并帮助用户判断作者、时间、地点、话题和是否可能过时。
+5. **建立可信度和内容质量机制。** 作者身份、适用范围、更新时间、补充纠错和组织者治理比单纯点赞数更重要。
+6. **只保留能强化内容循环的轻协作。** 拼车、邀约、报名等能力应接在内容之后，不能重新把首页变成活动门户或工具箱。
+
+## 明确不做
+
+- 不把公开社群内容汇聚成区域内容层；
+- 不做跨社群 Feed、统一热榜、统一推荐或统一搜索；
+- 不以城市级“本地小红书”作为当前产品；
+- 不用复杂个性化算法掩盖社群内容密度不足；
+- 不复制小红书的品牌、配色、文案或泛社交增长机制；
+- 不优先建设关注／粉丝体系、热度竞赛和纯粹刺激互动的功能；
+- 不为增加功能数量而扩张模板和协作场景；
+- 不把 HappyHome 做成微信群聊天备份或微信群替代品；
+- 不为兼容所有临时群体而放松“长期稳定共同体”的社群定义。
+
+## 首页与核心体验的当前原则
+
+当前首页已经具备社群身份、搜索、话题、双列内容流和发布入口等“社群小红书”骨架。后续不应因为定位变化而盲目重做首页，重点是校正内容和信息主次。
+
+当前工作原则是：
+
+> **社群身份 → 易发现的搜索 → 话题与内容 Feed；即时协作使用紧凑入口或流内特殊内容表达。**
+
+Feed 应是日常打开后的视觉主角，搜索是关键价值入口，但不必压过内容成为首页主体。活动召集、日程和氛围性装饰不能长期把内容流推到首屏之外。
+
+这部分属于仍需结合真实社区内容继续验证的体验原则，不是已经锁死的页面规格。具体排序、占比、卡片样式和推荐规则应另行设计，不从本文直接推导实现。
+
+## 产品决策检查表
+
+任何新需求进入设计或开发前，先回答：
+
+1. 它是否帮助稳定共同体持续产生更真实、更具体的内容？
+2. 它是否帮助成员发现或重新找到已有内容？
+3. 它是否提高内容的可信度、适用性或可修正性？
+4. 它是否强化当前社群内部的内容循环，而不是制造跨社群扩张？
+5. 它带来的长期内容价值，是否明显高于新增复杂度和运营成本？
+
+如果大多数答案是否定的，该需求不属于当前核心，即使它看起来像成熟内容平台的标准功能。
+
+## 持续有效的体验约束
+
+- 产品气质保持温暖、清楚、朴实和有人味；视觉表达可以丰富，但不能遮蔽信息。
+- 常见发布路径必须足够短。对组织者而言，真实竞争对手仍是“直接在微信群发一句话”。
+- 失败原因和恢复方式要明确，成功反馈应轻量，不用复杂交互打断用户。
+- 不硬编码某个小区、班级或兴趣组织的专属话题和板块名称；具体内容结构由各社群根据真实需求形成。
+- 重要文字和控件以 WCAG AA 对比度为目标，触控区域适合单手操作，不能只依赖颜色表达状态，非必要动效应当可移除或不使用。
+
+## 如何判断方向是否成立
+
+现阶段不应只看 DAU、浏览量或发帖总量。更有意义的验证信号包括：
+
+- 除组织者外，是否有越来越多普通成员持续贡献合格内容；
+- 新成员能否迅速理解“这里值得发什么”；
+- 30 天、90 天甚至更早的帖子是否仍会被搜索、打开、补充或用于实际决策；
+- 成员是否认为这里的结果比公开平台更相关、更可信；
+- 组织者的重复通知、重复查找和重复答疑是否减少；
+- 一个社群的内容是否随着时间变得更厚，而不是只在活动发生时短暂活跃。
+
+上述是方向验证框架，具体指标定义和目标值尚未确定，不应被其他会话当成已经拍板的 KPI。
+
+## 已确认与仍待验证
+
+### 已确认
+
+- 产品中心是“每个长期社群自己的小红书”；
+- 社群必须是能够长期产生内容的稳定共同体；
+- 每个社群独立生长，不做跨社群区域聚合；
+- 社群可由创建者选择公开浏览或仅成员可见；
+- 组织者负责进入、冷启动和治理，普通成员必须成为长期内容主体；
+- 主 Feed 承载长期内容，有期限事项进入独立协作区；
+- Feed 负责日常发现、搜索负责长期复用的总体分工已经基本成立，协作不能淹没长期内容。
+
+### 仍待验证或另行设计
+
+- 首页搜索、精选、话题、Feed 和协作入口的最终视觉比例与排序；
+- Feed 与搜索在不同使用场景中的具体主次和入口强度；
+- Feed 的具体排序规则，以及何时才需要个性化推荐；
+- 不同类型社群的冷启动方法和最低可持续内容密度；
+- 具体社区应建立哪些话题、种子帖子和运营节奏；
+- 内容质量、搜索成功和长期复用的精确指标与目标值。
+
+其他会话讨论具体页面、功能或社区内容时，应先引用本文的已确认定位，再把仍待验证事项当作问题处理，不能自行把假设写成既定结论。
