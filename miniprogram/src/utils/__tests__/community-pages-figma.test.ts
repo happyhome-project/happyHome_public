@@ -142,6 +142,28 @@ describe('Figma community directory pages', () => {
     expect(code).toContain('@tap="retryHomeRefresh"')
   })
 
+  test('cold restart never exposes the archive empty state before access revalidation finishes', () => {
+    const code = readPage('index')
+    const hydrateFastPath = code.match(/async function hydrateHomeFromFastPath[\s\S]*?(?=\nfunction applyLateBackgroundFetchSnapshot)/)?.[0] ?? ''
+
+    expect(code).toContain(':loading="archiveLoading || homeLoading"')
+    expect(hydrateFastPath.indexOf('readHomeSnapshotCache(')).toBeGreaterThan(-1)
+    expect(hydrateFastPath.indexOf('getBestBackgroundFetchSnapshot(')).toBeGreaterThan(-1)
+    expect(hydrateFastPath.indexOf('readHomeSnapshotCache(')).toBeLessThan(
+      hydrateFastPath.indexOf('getBestBackgroundFetchSnapshot('),
+    )
+    expect(hydrateFastPath).not.toContain('await getBestBackgroundFetchSnapshot(')
+    expect(hydrateFastPath).toContain('void getBestBackgroundFetchSnapshot(')
+    expect(code).toContain("markHomeStartupStage('home.fastPath.cache.read'")
+    expect(code).toContain("markHomeStartupStage('home.fastPath.prefetch.read'")
+    expect(code).toContain("markHomeStartupStage('home.bootstrap.received'")
+    expect(code).toContain("markHomeStartupStage('home.archive.firstPage.received'")
+    const loadArchiveFeed = code.match(/async function loadArchiveFeed[\s\S]*?(?=\nfunction selectArchiveTopic)/)?.[0] ?? ''
+    expect(loadArchiveFeed).toContain('await Promise.all([')
+    expect(loadArchiveFeed).toContain('postApi.listArchiveTabs(')
+    expect(loadArchiveFeed).toContain('postApi.listArchive({')
+  })
+
   test('home fences stale switch responses and keeps a manual retry path for network failures', () => {
     const code = readPage('index')
     const onShowIndex = code.lastIndexOf('onShow(() => {')
