@@ -388,6 +388,21 @@ test('rejects an unreviewed compiled third-party runtime change', async () => {
   }
 })
 
+test('accepts any explicitly reviewed compiled third-party runtime hash', async () => {
+  const fixture = await createCriticalPageFixture()
+  try {
+    await writeFixture(fixture, 'pages/search/index.js', 'require("/node-modules/example/index.js")')
+    await writeFixture(fixture, 'node-modules/example/index.js', 'const thirdPartyRuntime = true')
+    const actualHash = hashNodeModulesDirectory(join(fixture, 'node-modules'))
+    assert.doesNotThrow(() => scanCriticalRuntimeSyntax(fixture, {
+      expectedVendorHash: '',
+      expectedNodeModulesHash: ['another-reviewed-runtime', actualHash],
+    }))
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
 test('keeps compiled third-party runtime hashing stable across generated component scope ids', async () => {
   const left = await createCriticalPageFixture()
   const right = await createCriticalPageFixture()
