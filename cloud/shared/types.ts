@@ -310,7 +310,7 @@ export interface Post {
   collaborationTemplateId?: string
   collaborationSystemKey?: string
   origin?: 'native_archive' | 'legacy_section'
-  format?: 'image_text' | 'text'
+  format?: 'image_text' | 'text' | 'video'
   topics?: string[]
   sortKey?: string
   authorId: string
