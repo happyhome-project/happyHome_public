@@ -995,6 +995,10 @@ function handleProfileTool(item: ProfileToolItem) {
     uni.navigateTo({ url: '/pages/my-posts/index' })
     return
   }
+  if (item.key === 'activity') {
+    uni.navigateTo({ url: '/pages/my-activities/index' })
+    return
+  }
   uni.showToast({ title: `${item.label}暂未开放`, icon: 'none' })
 }
 

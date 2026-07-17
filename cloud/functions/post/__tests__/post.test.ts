@@ -67,6 +67,7 @@ import {
   handleListAttendanceMembers,
   handleList,
   handleListCollaboration,
+  handleListMyActivities,
   handleListMine,
   handleListArchive,
   handleListArchiveTabs,
@@ -325,6 +326,94 @@ test('listMine: only returns the caller owned non-deleted posts newest first wit
 test('listMine: requires an authenticated identity', async () => {
   await expect(handleListMine({}, '')).rejects.toThrow('Missing OPENID')
   expect(db.queryAfterId).not.toHaveBeenCalled()
+})
+
+test('listMyActivities merges authored and joined collaboration posts, dedupes, and sorts newest first', async () => {
+  ;(db.queryAfterId as jest.Mock).mockReset()
+  const authored = {
+    _id: 'authored-activity',
+    authorId: 'user-1',
+    communityId: 'community-1',
+    area: 'collaboration',
+    collaborationTemplateId: carpoolTemplate._id,
+    status: 'active',
+    auditStatus: 'review',
+    createdAt: '2026-07-16T08:00:00.000Z',
+    content: { carpool_origin: '青山村' },
+  }
+  const joined = {
+    _id: 'joined-activity',
+    authorId: 'user-2',
+    communityId: 'community-1',
+    area: 'collaboration',
+    collaborationTemplateId: carpoolTemplate._id,
+    status: 'active',
+    auditStatus: 'pass',
+    createdAt: '2026-07-17T08:00:00.000Z',
+    content: { carpool_origin: '画匠村' },
+  }
+  ;(db.queryAfterId as jest.Mock)
+    .mockResolvedValueOnce([
+        authored,
+        { _id: 'ordinary-post', authorId: 'user-1', area: 'archive', status: 'active' },
+      ])
+    .mockResolvedValueOnce([
+        { _id: 'attendance-1', userId: 'user-1', postId: joined._id },
+        { _id: 'attendance-2', userId: 'user-1', postId: authored._id },
+      ])
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'posts') return id === joined._id ? joined : authored
+    if (collectionName === 'communities') return { _id: id, name: '阳光花园' }
+    if (collectionName === 'collaboration_templates') return carpoolTemplate
+    throw new Error('missing fixture')
+  })
+
+  const result = await handleListMyActivities({ skip: 0, limit: 20 }, 'user-1')
+
+  expect(result.posts.map((post: any) => post._id)).toEqual(['joined-activity', 'authored-activity'])
+  expect(result.posts[0]).toEqual(expect.objectContaining({
+    communityName: '阳光花园',
+    sectionName: '拼车出行',
+    collaborationTemplate: expect.objectContaining({ systemKey: 'carpool' }),
+  }))
+  expect(result).toEqual(expect.objectContaining({ total: 2, hasMore: false }))
+})
+
+test('listMyActivities excludes deleted or unapproved joined posts while retaining the author own pending activity', async () => {
+  ;(db.queryAfterId as jest.Mock).mockReset()
+  const ownPending = {
+    _id: 'own-pending', authorId: 'user-1', communityId: 'community-1', area: 'collaboration',
+    collaborationTemplateId: carpoolTemplate._id, status: 'active', auditStatus: 'pending',
+    createdAt: '2026-07-17T08:00:00.000Z', content: {},
+  }
+  const joinedReview = {
+    _id: 'joined-review', authorId: 'user-2', communityId: 'community-1', area: 'collaboration',
+    collaborationTemplateId: carpoolTemplate._id, status: 'active', auditStatus: 'review',
+    createdAt: '2026-07-18T08:00:00.000Z', content: {},
+  }
+  const joinedDeleted = { ...joinedReview, _id: 'joined-deleted', status: 'deleted', auditStatus: 'pass' }
+  ;(db.queryAfterId as jest.Mock).mockImplementation(async (collectionName: string) => {
+    if (collectionName === 'posts') return [ownPending]
+    if (collectionName === 'post_attendance_members') return [
+      { _id: 'a-1', postId: joinedReview._id, userId: 'user-1' },
+      { _id: 'a-2', postId: joinedDeleted._id, userId: 'user-1' },
+    ]
+    return []
+  })
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'posts') return id === joinedReview._id ? joinedReview : joinedDeleted
+    if (collectionName === 'communities') return { _id: id, name: '阳光花园' }
+    if (collectionName === 'collaboration_templates') return carpoolTemplate
+    throw new Error('missing fixture')
+  })
+
+  const result = await handleListMyActivities({}, 'user-1')
+
+  expect(result.posts.map((post: any) => post._id)).toEqual(['own-pending'])
+})
+
+test('listMyActivities requires an authenticated identity', async () => {
+  await expect(handleListMyActivities({}, '')).rejects.toThrow('Missing OPENID')
 })
 
 test('clientLog: accepts diagnostic payload without touching data collections', async () => {

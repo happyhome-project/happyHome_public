@@ -7,6 +7,10 @@ const createSource = readFileSync(resolve(process.cwd(), 'src/pages/create/index
 const profileSource = readFileSync(resolve(process.cwd(), 'src/pages/profile/index.vue'), 'utf8')
 const pagesSource = readFileSync(resolve(process.cwd(), 'src/pages.json'), 'utf8')
 const myPostsSource = readFileSync(resolve(process.cwd(), 'src/pages/my-posts/index.vue'), 'utf8')
+const myActivitiesSource = readFileSync(resolve(process.cwd(), 'src/pages/my-activities/index.vue'), 'utf8')
+const authorPostColumnsSource = readFileSync(resolve(process.cwd(), 'src/components/AuthorPostColumns.vue'), 'utf8')
+const cloudApiSource = readFileSync(resolve(process.cwd(), 'src/api/cloud.ts'), 'utf8')
+const emptyIllustrationSource = readFileSync(resolve(process.cwd(), 'src/static/profile/my-activities-empty.svg'), 'utf8')
 const imageNoteDetailSource = readFileSync(resolve(process.cwd(), 'src/components/ImageNoteDetailView.vue'), 'utf8')
 
 describe('author post management UI contract', () => {
@@ -36,11 +40,35 @@ describe('my posts entry and Xiaohongshu-style feed contract', () => {
 
   test('loads authored posts into two cover-first columns', () => {
     expect(myPostsSource).toContain('await postApi.listMine(')
-    expect(myPostsSource).toContain('class="my-posts-columns"')
-    expect(myPostsSource).toContain('class="my-posts-column"')
-    expect(myPostsSource).toContain('<TextNoteCover')
+    expect(myPostsSource).toContain('<AuthorPostColumns')
+    expect(authorPostColumnsSource).toContain('class="author-post-columns"')
+    expect(authorPostColumnsSource).toContain('<TextNoteCover')
     expect(myPostsSource).toContain('data-testid="my-posts-page"')
-    expect(myPostsSource).toContain('data-testid="my-post-card"')
+    expect(authorPostColumnsSource).toContain('data-testid="author-post-card"')
+  })
+})
+
+describe('my activities participation contract', () => {
+  test('opens a real activity route and loads the server-composed activity relationship', () => {
+    expect(profileSource).toContain("item.key === 'activity'")
+    expect(profileSource).toContain('/pages/my-activities/index')
+    expect(pagesSource).toContain('pages/my-activities/index')
+    expect(cloudApiSource).toContain('listMyActivities')
+    expect(myActivitiesSource).toContain('await postApi.listMyActivities(')
+    expect(myActivitiesSource).toContain('<AuthorPostColumns')
+  })
+
+  test('renders the requested warm illustrated empty state with both discovery and creation actions', () => {
+    expect(myActivitiesSource).toContain('您还没参加任何活动')
+    expect(myActivitiesSource).toContain('独乐乐不如众乐乐，快去参加或者发起活动吧~')
+    expect(myActivitiesSource).toContain('/static/profile/my-activities-empty.svg')
+    expect(myActivitiesSource).toContain('去看看活动')
+    expect(myActivitiesSource).toContain('发起活动')
+    expect(myActivitiesSource).toContain("uni.switchTab({ url: '/pages/index/index' })")
+    expect(myActivitiesSource).toContain("uni.navigateTo({ url: '/pages/create/index?mode=collaboration' })")
+    expect(emptyIllustrationSource).toContain('#FF6B4A')
+    expect(emptyIllustrationSource).toContain('#FFC53D')
+    expect(emptyIllustrationSource).toContain('#20C997')
   })
 })
 

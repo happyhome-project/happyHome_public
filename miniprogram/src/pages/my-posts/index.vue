@@ -21,42 +21,7 @@
       <button class="my-posts-state-button" @tap="goPublish">去发布</button>
     </view>
 
-    <view v-else class="my-posts-columns">
-      <view v-for="(column, columnIndex) in columns" :key="columnIndex" class="my-posts-column">
-        <view
-          v-for="card in column"
-          :key="card.postId"
-          class="my-post-card"
-          data-testid="my-post-card"
-          :data-post-id="card.postId"
-          @tap="openPost(card.postId)"
-        >
-          <image
-            v-if="card.cover.kind === 'image'"
-            class="my-post-cover"
-            :src="card.cover.src"
-            mode="widthFix"
-          />
-          <TextNoteCover
-            v-else
-            :title="card.title"
-            :body="card.bodyText"
-            :theme="card.cover.theme as any"
-          />
-          <view class="my-post-card-main">
-            <text class="my-post-card-title">{{ card.title }}</text>
-            <text v-if="card.communityLabel" class="my-post-community">{{ card.communityLabel }}</text>
-            <view class="my-post-card-meta">
-              <text v-if="card.auditStatus !== 'pass'" class="my-post-status">{{ auditLabel(card.auditStatus) }}</text>
-              <view class="my-post-metrics">
-                <text>♡ {{ card.likeCount }}</text>
-                <text>◌ {{ card.commentCount }}</text>
-              </view>
-            </view>
-          </view>
-        </view>
-      </view>
-    </view>
+    <AuthorPostColumns v-else :columns="columns" @open="openPost" />
 
     <view v-if="loading && hasCards" class="my-posts-footer">加载中...</view>
     <view v-else-if="hasCards && !hasMore" class="my-posts-footer">已经到底了</view>
@@ -67,13 +32,13 @@
 import { computed, ref } from 'vue'
 import { onPullDownRefresh, onReachBottom, onShow } from '@dcloudio/uni-app'
 import { postApi } from '../../api/cloud'
-import TextNoteCover from '../../components/TextNoteCover.vue'
+import AuthorPostColumns from '../../components/AuthorPostColumns.vue'
 import { useUserStore } from '../../store/user'
-import { appendAuthorPosts, type AuthorPostColumns } from '../../utils/author-post-feed'
+import { appendAuthorPosts, type AuthorPostColumns as AuthorPostColumnsType } from '../../utils/author-post-feed'
 import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
 
 const userStore = useUserStore()
-const columns = ref<AuthorPostColumns>([[], []])
+const columns = ref<AuthorPostColumnsType>([[], []])
 const loading = ref(false)
 const error = ref('')
 const total = ref(0)
@@ -138,11 +103,6 @@ function goPublish() {
   uni.navigateTo({ url: '/pages/create/index?mode=collaboration' })
 }
 
-function auditLabel(status: string) {
-  if (status === 'rejected') return '未通过'
-  if (status === 'review') return '复核中'
-  return '审核中'
-}
 </script>
 
 <style lang="scss" scoped>
@@ -163,81 +123,11 @@ function auditLabel(status: string) {
 .my-posts-title { color: #171717; font-size: 36rpx; font-weight: 650; }
 .my-posts-count { color: #999; font-size: 22rpx; }
 
-.my-posts-columns,
 .my-posts-skeletons {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
   gap: 12rpx;
-}
-
-.my-posts-column {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 24rpx;
-}
-
-.my-post-card {
-  min-width: 0;
-  overflow: hidden;
-  border-radius: 12rpx;
-  background: #fff;
-}
-
-.my-post-cover {
-  display: block;
-  width: 100%;
-  min-height: 230rpx;
-  border-radius: 12rpx;
-  background: #f2f2f2;
-}
-
-.my-post-card :deep(.text-note-cover-frame) { border-radius: 12rpx; }
-
-.my-post-card-main { padding: 14rpx 4rpx 0; }
-.my-post-card-title {
-  display: -webkit-box;
-  overflow: hidden;
-  color: #1c1c1c;
-  font-size: 27rpx;
-  font-weight: 600;
-  line-height: 38rpx;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-.my-post-community {
-  display: block;
-  overflow: hidden;
-  margin-top: 8rpx;
-  color: #999;
-  font-size: 21rpx;
-  line-height: 30rpx;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.my-post-card-meta {
-  min-height: 36rpx;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8rpx;
-  margin-top: 10rpx;
-}
-.my-post-status {
-  padding: 3rpx 9rpx;
-  border-radius: 999rpx;
-  color: #a66a00;
-  background: #fff5de;
-  font-size: 19rpx;
-  line-height: 28rpx;
-}
-.my-post-metrics {
-  display: flex;
-  gap: 12rpx;
-  margin-left: auto;
-  color: #777;
-  font-size: 21rpx;
 }
 
 .my-posts-skeleton { height: 420rpx; border-radius: 12rpx; background: #f3f3f3; }
