@@ -165,35 +165,41 @@ export async function inspectRemoteObjectWithFetch(
     throw new Error('临时文件地址无效')
   }
 
-  const signal = AbortSignal.timeout(5_000)
-  let head: MetadataFetchResponse | undefined
-
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 5_000)
   try {
-    head = await fetchImpl(url, { method: 'HEAD', redirect: 'manual', signal })
-  } catch {
-    // Some object endpoints reject HEAD; the bounded range request below is the safe fallback.
-  }
-  if (head && head.status >= 300 && head.status < 400) throw new Error('上传文件地址不允许重定向')
-  if (head?.ok) {
-    const metadata = metadataFromResponse(head, false)
-    if (metadata) return metadata
-  }
+    const signal = controller.signal
+    let head: MetadataFetchResponse | undefined
 
-  const ranged = await fetchImpl(url, {
-    method: 'GET',
-    headers: { Range: 'bytes=0-0' },
-    redirect: 'manual',
-    signal,
-  })
-  try {
-    if (ranged.status >= 300 && ranged.status < 400) throw new Error('上传文件地址不允许重定向')
-    if (!ranged.ok) throw new Error(`无法读取上传文件元数据 (${ranged.status})`)
-    if (ranged.status !== 206) throw new Error('上传文件地址不支持安全的分段读取')
-    const metadata = metadataFromResponse(ranged, true)
-    if (!metadata) throw new Error('无法确认上传文件元数据')
-    return metadata
+    try {
+      head = await fetchImpl(url, { method: 'HEAD', redirect: 'manual', signal })
+    } catch {
+      // Some object endpoints reject HEAD; the bounded range request below is the safe fallback.
+    }
+    if (head && head.status >= 300 && head.status < 400) throw new Error('上传文件地址不允许重定向')
+    if (head?.ok) {
+      const metadata = metadataFromResponse(head, false)
+      if (metadata) return metadata
+    }
+
+    const ranged = await fetchImpl(url, {
+      method: 'GET',
+      headers: { Range: 'bytes=0-0' },
+      redirect: 'manual',
+      signal,
+    })
+    try {
+      if (ranged.status >= 300 && ranged.status < 400) throw new Error('上传文件地址不允许重定向')
+      if (!ranged.ok) throw new Error(`无法读取上传文件元数据 (${ranged.status})`)
+      if (ranged.status !== 206) throw new Error('上传文件地址不支持安全的分段读取')
+      const metadata = metadataFromResponse(ranged, true)
+      if (!metadata) throw new Error('无法确认上传文件元数据')
+      return metadata
+    } finally {
+      await ranged.body?.cancel().catch(() => undefined)
+    }
   } finally {
-    await ranged.body?.cancel().catch(() => undefined)
+    clearTimeout(timeout)
   }
 }
 

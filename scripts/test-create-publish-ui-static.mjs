@@ -73,7 +73,7 @@ assert(
 )
 
 assert(
-  tabbar.includes("{ key: 'media', label: '发图片/视频'") &&
+  tabbar.includes("{ key: 'media', label: '发图文 / 视频'") &&
     tabbar.includes("mediaType: ['image', 'video']") &&
     tabbar.includes('accept="image/*,video/*"') &&
     tabbar.includes('storeArchiveMediaIntent') &&
