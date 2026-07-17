@@ -28,7 +28,7 @@ describe('archive publishing entry', () => {
 
   test('offers one image/video media choice plus text and collaboration', () => {
     const source = read('components', 'AppTabBar.vue')
-    expect(source).toContain("{ key: 'media', label: '发图片/视频', icon: '/static/publish-icons/trade.svg', tone: 'image-text' }")
+    expect(source).toContain("{ key: 'media', label: '发图文 / 视频', icon: '/static/publish-icons/trade.svg', tone: 'image-text' }")
     expect(source).toContain("{ key: 'text', label: '写文字', icon: '/static/publish-icons/lost.svg', tone: 'text' }")
     expect(source).toContain("{ key: 'collaboration', label: '发起协作', icon: '/static/publish-icons/neighbor.svg', tone: 'collaboration' }")
     expect(source).toContain("mediaType: ['image', 'video']")

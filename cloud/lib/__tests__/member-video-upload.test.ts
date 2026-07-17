@@ -378,6 +378,29 @@ describe('remote object metadata inspection', () => {
     expect(fetch).toHaveBeenCalledTimes(1)
   })
 
+  test('works when the cloud runtime does not provide AbortSignal.timeout', async () => {
+    const timeoutDescriptor = Object.getOwnPropertyDescriptor(AbortSignal, 'timeout')
+    Object.defineProperty(AbortSignal, 'timeout', {
+      configurable: true,
+      value: undefined,
+    })
+    const fetch = jest.fn(async () => response(200, {
+      'content-length': '4096',
+      'content-type': 'video/mp4',
+    }))
+
+    try {
+      await expect(inspectRemoteObjectWithFetch(trustedDownloadUrl, fetch))
+        .resolves.toEqual({ contentLength: 4096, contentType: 'video/mp4' })
+    } finally {
+      if (timeoutDescriptor) {
+        Object.defineProperty(AbortSignal, 'timeout', timeoutDescriptor)
+      } else {
+        delete (AbortSignal as unknown as Record<string, unknown>).timeout
+      }
+    }
+  })
+
   test('falls back to a one-byte range GET when HEAD metadata is unavailable', async () => {
     const head = response(405, {})
     const get = response(206, {
