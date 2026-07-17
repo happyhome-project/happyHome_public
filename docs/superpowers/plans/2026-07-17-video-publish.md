@@ -1,5 +1,10 @@
 # Member Video Publishing Implementation Plan
 
+> **Historical / point-in-time:** This delivery plan records the approved 2026-07-17 implementation sequence. Retain it for traceability; do not treat its task state as current repository status.
+> **Current authority:** Use the [documentation authority map](../../README.md), current publishing code, cloud authorization checks, and tests.
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a first-class single-video archive post flow selected from the unified member publish entry, without changing audio or allowing mixed image/video posts.

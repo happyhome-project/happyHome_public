@@ -118,7 +118,7 @@ function classifyFile(file: Record<string, any>, result?: Record<string, any> | 
     const classified = declarations.map(classifyDeclaredMediaType)
     if (classified.some((type) => type === null)) return null
     const mediaTypes = new Set(classified as PublishMediaType[])
-    return mediaTypes.size === 1 ? Array.from(mediaTypes)[0] : null
+    return mediaTypes.size === 1 ? mediaTypes.values().next().value || null : null
   }
 
   const extension = fileExtension(String(file.name || file.tempFilePath || file.path || ''))

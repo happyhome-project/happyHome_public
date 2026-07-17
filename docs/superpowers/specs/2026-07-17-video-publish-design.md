@@ -1,5 +1,8 @@
 # Video Publish Design
 
+> **Historical / point-in-time:** This specification records the member-video publishing design accepted for the 2026-07-17 delivery. It does not override later product or implementation decisions.
+> **Current authority:** Use the [documentation authority map](../../README.md), current publishing code, cloud authorization checks, and tests.
+
 ## Objective
 
 Add first-class member video publishing to the existing unified publish entry. The first selected media determines whether the member creates an image post or a video post. Audio publishing and mixed image/video posts are out of scope.

@@ -148,10 +148,12 @@ describe('archive publishing entry', () => {
 
   test('native archive detail builds a virtual renderer while legacy section posts keep section loading', () => {
     const detail = read('pages', 'detail', 'index.vue')
+    const adapter = read('utils', 'archive-detail.ts')
     expect(detail).toContain("post.value?.area === 'archive' && !post.value?.sectionId")
     expect(detail).toContain('buildNativeArchiveDetailSection')
-    expect(detail).toContain('image_note_images: content.images')
-    expect(detail).toContain('image_note_topics: currentPost.topics || []')
+    expect(detail).toContain("from '../../utils/archive-detail'")
+    expect(adapter).toContain('image_note_images: content.images')
+    expect(adapter).toContain('image_note_topics: currentPost.topics || []')
     expect(detail).toContain("sectionApi.get(post.value.sectionId")
   })
 

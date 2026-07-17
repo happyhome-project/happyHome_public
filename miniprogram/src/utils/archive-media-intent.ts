@@ -119,7 +119,9 @@ export function discardArchiveMediaIntent(tokenValue: unknown): boolean {
 export function sweepArchiveMediaIntents(now = Date.now()): number {
   const removedTokens = new Set<string>()
   const retainedVolatile: StoredIntentIndexEntry[] = []
-  for (const [token, intent] of volatileIntents) {
+  for (const entry of volatileIntents) {
+    const token = entry[0]
+    const intent = entry[1]
     if (now - intent.createdAt <= ARCHIVE_MEDIA_INTENT_TTL_MS) {
       retainedVolatile.push({ token, expiresAt: intent.createdAt + ARCHIVE_MEDIA_INTENT_TTL_MS })
       continue
