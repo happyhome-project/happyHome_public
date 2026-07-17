@@ -305,7 +305,7 @@ import {
   peekArchiveMediaIntent,
   type ArchiveMediaIntentFile,
 } from '../../utils/archive-media-intent'
-import { decideMediaTypeSwitch, type PublishMediaType } from '../../utils/video-publish'
+import { transitionArchiveMediaEditorState, type ArchiveMediaEditorState, type PublishMediaType } from '../../utils/video-publish'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -597,17 +597,39 @@ function clearArchiveMediaState() {
 
 async function handleInlineMediaIntent(token: string) {
   const intent = peekArchiveMediaIntent(token)
-  if (!intent) return
-  const currentType = currentPublishMediaType()
-  const decision = decideMediaTypeSwitch(currentType, intent.mediaType, hasArchiveMedia(currentType))
-  if (decision.requiresConfirmation && !(await confirmMediaFormatSwitch())) {
-    consumeArchiveMediaIntent(token)
+  if (!intent) {
+    restoreArchiveMediaEditor()
     return
   }
-  if (decision.shouldClear) clearArchiveMediaState()
+  const currentType = currentPublishMediaType()
+  const currentState: ArchiveMediaEditorState | null = currentType
+    ? {
+        format: archiveFormat.value as 'image_text' | 'video',
+        formData,
+        initialMedia: archiveInitialMedia.value,
+        hasSelectedMedia: hasArchiveMedia(currentType),
+      }
+    : null
+  let transition = currentState
+    ? transitionArchiveMediaEditorState(currentState, intent.mediaType, null)
+    : null
+  if (transition?.status === 'confirm') {
+    transition = transitionArchiveMediaEditorState(currentState!, intent.mediaType, await confirmMediaFormatSwitch())
+  }
+  if (transition?.status === 'cancelled') {
+    consumeArchiveMediaIntent(token)
+    restoreArchiveMediaEditor()
+    return
+  }
+  if (transition?.status === 'switched') clearArchiveMediaState()
   const nextFormat = intent.mediaType === 'video' ? 'video' : 'image_text'
   enterArchiveEditor(nextFormat, createReturnTo.value)
   applyArchiveMediaIntent(token)
+}
+
+function restoreArchiveMediaEditor() {
+  if (archiveFormat.value !== 'image_text' && archiveFormat.value !== 'video') return
+  selectedSection.value = buildArchiveEditorSection(archiveFormat.value)
 }
 
 async function loadPostForEdit(postId: string) {
@@ -787,6 +809,10 @@ function openTextNoteCover() {
 }
 
 function handleBackToSectionPicker() {
+  if (archiveFormat.value === 'image_text' || archiveFormat.value === 'video') {
+    selectedSection.value = null
+    return
+  }
   const returnTo = createReturnTo.value
   if (returnTo) {
     if (isActivityInviteMode.value) {

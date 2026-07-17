@@ -33,11 +33,13 @@ describe('archive publishing entry', () => {
   test('confirms and clears an existing media format before an inline create-page switch', () => {
     const create = read('pages', 'create', 'index.vue')
     expect(create).toContain('@media-selected="handleInlineMediaIntent"')
-    expect(create).toContain('decideMediaTypeSwitch')
+    expect(create).toContain('transitionArchiveMediaEditorState')
     expect(create).toContain('hasArchiveMedia')
     expect(create).toContain('切换后将清空当前素材')
     expect(create).toContain('enterArchiveEditor(nextFormat')
     expect(create).toContain('applyArchiveMediaIntent(token)')
+    expect(create).toContain('restoreArchiveMediaEditor')
+    expect(create).toMatch(/handleBackToSectionPicker[\s\S]*archiveFormat\.value === 'image_text'[\s\S]*selectedSection\.value = null[\s\S]*return/)
   })
 
   test('create page owns a video archive editor without unlocking ordinary admin media widgets', () => {

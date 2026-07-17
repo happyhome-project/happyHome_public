@@ -40,6 +40,20 @@ export interface VideoPublishReadiness {
   reason: '' | 'uploading' | 'video-missing' | 'cover-pending'
 }
 
+export type ArchiveMediaEditorFormat = 'image_text' | 'video'
+
+export interface ArchiveMediaEditorState {
+  format: ArchiveMediaEditorFormat
+  formData: Record<string, unknown>
+  initialMedia: unknown
+  hasSelectedMedia: boolean
+}
+
+export type ArchiveMediaEditorTransition =
+  | { status: 'confirm'; state: ArchiveMediaEditorState }
+  | { status: 'cancelled'; state: ArchiveMediaEditorState }
+  | { status: 'switched'; state: ArchiveMediaEditorState }
+
 const VIDEO_EXTENSION_SET = new Set<string>(VIDEO_ALLOWED_EXTENSIONS)
 const IMAGE_EXTENSION_SET = new Set([
   'jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'heic', 'heif',
@@ -177,4 +191,24 @@ export function resolveVideoPublishReadiness(state: VideoPublishReadinessState):
   if (state.coverPending) return { ready: false, reason: 'cover-pending' }
   if (!state.videoReady) return { ready: false, reason: 'video-missing' }
   return { ready: true, reason: '' }
+}
+
+export function transitionArchiveMediaEditorState(
+  state: ArchiveMediaEditorState,
+  nextType: PublishMediaType,
+  confirmation: boolean | null,
+): ArchiveMediaEditorTransition {
+  const currentType: PublishMediaType = state.format === 'video' ? 'video' : 'image'
+  const decision = decideMediaTypeSwitch(currentType, nextType, state.hasSelectedMedia)
+  if (decision.requiresConfirmation && confirmation === null) return { status: 'confirm', state }
+  if (decision.requiresConfirmation && confirmation === false) return { status: 'cancelled', state }
+  return {
+    status: 'switched',
+    state: {
+      format: nextType === 'video' ? 'video' : 'image_text',
+      formData: {},
+      initialMedia: null,
+      hasSelectedMedia: false,
+    },
+  }
 }

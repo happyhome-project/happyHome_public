@@ -61,8 +61,10 @@ assert(
     tabbar.includes("if (props.current === 'create')") &&
     tabbar.includes("emit('media-selected', token)") &&
     createPage.includes('@media-selected="handleInlineMediaIntent"') &&
-    createPage.includes('decideMediaTypeSwitch') &&
+    createPage.includes('transitionArchiveMediaEditorState') &&
     createPage.includes('hasArchiveMedia') &&
+    createPage.includes('restoreArchiveMediaEditor') &&
+    /handleBackToSectionPicker[\s\S]*archiveFormat\.value === 'image_text'[\s\S]*selectedSection\.value = null[\s\S]*return/.test(createPage) &&
     createPage.includes('切换后将清空当前素材'),
   'the first publishing choice must select real image/video media and route it through local intent storage.',
 )

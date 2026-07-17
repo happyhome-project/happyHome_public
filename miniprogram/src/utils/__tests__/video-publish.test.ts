@@ -189,3 +189,44 @@ describe('video publish readiness', () => {
     expect(resolve({ uploading: false, videoReady: true, coverPending: false, error: '' })).toEqual({ ready: true, reason: '' })
   })
 })
+
+describe('archive media editor transition state', () => {
+  test.each([
+    ['image_text', 'video'],
+    ['video', 'image'],
+  ] as const)('requires confirmation before switching %s to %s with retained media', (format, nextType) => {
+    const transition = (videoPublish as any).transitionArchiveMediaEditorState
+    expect(typeof transition).toBe('function')
+    if (!transition) return
+    const state = {
+      format,
+      formData: { retained: ['cloud://old-media'] },
+      initialMedia: { source: 'wxfile://old.mp4' },
+      hasSelectedMedia: true,
+    }
+    const result = transition(state, nextType, null)
+    expect(result).toEqual({ status: 'confirm', state })
+    expect(result.state.formData).toBe(state.formData)
+  })
+
+  test('cancel preserves the previous editor state while confirm clears it', () => {
+    const transition = (videoPublish as any).transitionArchiveMediaEditorState
+    expect(typeof transition).toBe('function')
+    if (!transition) return
+    const state = {
+      format: 'video',
+      formData: { archive_video_videos: [{ fileID: 'cloud://old-video' }] },
+      initialMedia: { source: 'wxfile://old.mp4' },
+      hasSelectedMedia: true,
+    }
+    const cancelled = transition(state, 'image', false)
+    expect(cancelled).toEqual({ status: 'cancelled', state })
+    expect(cancelled.state.formData).toBe(state.formData)
+    expect(cancelled.state.initialMedia).toBe(state.initialMedia)
+
+    expect(transition(state, 'image', true)).toEqual({
+      status: 'switched',
+      state: { format: 'image_text', formData: {}, initialMedia: null, hasSelectedMedia: false },
+    })
+  })
+})
