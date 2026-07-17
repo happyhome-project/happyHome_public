@@ -1,7 +1,8 @@
 import cloud from 'wx-server-sdk'
 import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
-import { getTempUrl } from '../../lib/storage'
+import { getCurrentEnvironmentId, getTempUrl, inspectRemoteObject, requestUploadMetadata } from '../../lib/storage'
+import { requestMemberVideoUpload, validateMemberArchiveVideoContent } from '../../lib/member-video-upload'
 import { sanitizeContent, validateContentValues, validateRequiredWidgets } from '../../lib/post-validate'
 import { auditAndApply, isPostVisibleToMembers } from '../../lib/content-audit'
 import { buildHomeBootstrap, buildHomeFeed } from '../../lib/home-snapshot'
@@ -559,6 +560,11 @@ export async function handleCreate(
       : undefined
     validateRequiredWidgets(section, content, validationOptions)
     validateContentValues(section, content, validationOptions)
+    if (archive.format === 'video') {
+      await validateMemberArchiveVideoContent(content, openid, {
+        environmentId: getCurrentEnvironmentId(), getTempUrl, inspectRemoteObject,
+      })
+    }
 
     const now = new Date().toISOString()
     const postData = {
@@ -1253,6 +1259,11 @@ export async function handleUpdate(
     : undefined
   validateRequiredWidgets(section, sanitizedContent, validationOptions)
   validateContentValues(section, sanitizedContent, validationOptions)
+  if (archive?.format === 'video') {
+    await validateMemberArchiveVideoContent(sanitizedContent, openid, {
+      environmentId: getCurrentEnvironmentId(), getTempUrl, inspectRemoteObject,
+    })
+  }
   const presentation = archive?.format === 'text'
     ? archive.presentation
     : (!archive && isTextNoteSection(section)
@@ -1422,6 +1433,18 @@ export async function handleGetMediaUrl(params: { fileID?: string }) {
   return { url }
 }
 
+export async function handleRequestMemberVideoUpload(
+  params: { fileName?: string },
+  openid: string,
+  kind: 'video' | 'cover',
+) {
+  return requestMemberVideoUpload(
+    { kind, fileName: String(params?.fileName || '').trim() },
+    openid,
+    { requestUploadMetadata },
+  )
+}
+
 function sanitizeClientLogValue(value: any, depth = 0): any {
   if (value === null || value === undefined) return value
   const valueType = typeof value
@@ -1464,6 +1487,8 @@ export const main = async (event: any, context?: any) => {
   const openid = smokeIdentity?.userId || resolveOpenId(event, context)
   if (smokeIdentity) await ensureActivePostRagSmokeRun(smokeIdentity)
   if (action === 'clientLog') return handleClientLog(params, openid)
+  if (action === 'requestMemberVideoUpload') return handleRequestMemberVideoUpload(params, openid, 'video')
+  if (action === 'requestMemberVideoCoverUpload') return handleRequestMemberVideoUpload(params, openid, 'cover')
   if (action === 'create') return handleCreate(params, openid)
   if (action === 'createCollaboration') return handleCreateCollaboration(params, openid)
   if (action === 'getActivityInviteState') return handleGetActivityInviteState(params, openid)

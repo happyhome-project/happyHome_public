@@ -53,6 +53,13 @@ jest.mock('../../../lib/post-semantic-search', () => ({
   createPostSemanticSearchServiceFromEnv: jest.fn(),
 }))
 
+jest.mock('../../../lib/storage', () => ({
+  getCurrentEnvironmentId: jest.fn(() => 'env'),
+  getTempUrl: jest.fn(),
+  inspectRemoteObject: jest.fn(),
+  requestUploadMetadata: jest.fn(),
+}))
+
 import { createHmac } from 'crypto'
 import {
   handleBootstrap,
@@ -81,6 +88,8 @@ import * as db from '../../../lib/db'
 import * as postSearch from '../../../lib/post-search'
 import * as postRag from '../../../lib/post-rag'
 import * as postSemanticSearch from '../../../lib/post-semantic-search'
+import * as storage from '../../../lib/storage'
+import { deriveMemberVideoScope, MAX_MEMBER_VIDEO_BYTES } from '../../../lib/member-video-upload'
 import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
 import { buildInitialCollaborationTemplates } from '../../../shared/collaboration-templates'
 
@@ -134,10 +143,14 @@ function createSignedPostRagSmokeIdentity(overrides: Partial<{
 
 beforeEach(() => {
   jest.clearAllMocks()
+  require('wx-server-sdk').getWXContext.mockReturnValue({ OPENID: 'test-openid' })
   resetPostSemanticSearchServiceForTests()
   delete process.env.DEFAULT_PUBLIC_COMMUNITY_ID
   delete process.env.PUBLIC_READ_COMMUNITY_IDS
   delete process.env.POST_RAG_SMOKE_IDENTITY_SECRET
+  delete process.env.ALLOW_TEST_OPENID
+  ;(storage.getTempUrl as jest.Mock).mockResolvedValue('https://download.example/object')
+  ;(storage.inspectRemoteObject as jest.Mock).mockResolvedValue({ contentLength: 1024, contentType: 'video/mp4' })
 })
 
 test('createCollaboration writes a community-owned post without sectionId and accepts optional note images', async () => {
@@ -2497,6 +2510,84 @@ test.each(['active', 'deleted'])('delete: searchable archive post with status %s
   }
 })
 
+test.each([
+  ['requestMemberVideoUpload', 'Family.MP4', 'member-videos'],
+  ['requestMemberVideoCoverUpload', 'Cover.PNG', 'member-video-covers'],
+])('%s issues upload metadata in the authenticated member scope', async (action, fileName, directory) => {
+  process.env.ALLOW_TEST_OPENID = 'true'
+  ;(storage.requestUploadMetadata as jest.Mock).mockImplementation(async (cloudPath: string) => ({
+    cloudPath,
+    fileId: `cloud://test-env/${cloudPath}`,
+    url: 'https://upload.example',
+    token: 'token',
+    authorization: 'authorization',
+    cosFileId: 'cos-file-id',
+  }))
+
+  const result = await main({ action, fileName, _testOpenid: 'test-openid' })
+  const scope = deriveMemberVideoScope('test-openid')
+  expect(result).toEqual(expect.objectContaining({
+    cloudPath: expect.stringMatching(new RegExp(`^posts/${directory}/${scope}/`)),
+    fileId: expect.stringMatching(new RegExp(`^cloud://test-env/posts/${directory}/${scope}/`)),
+  }))
+})
+
+test('create: rejects an archive video outside the authenticated member scope before DB or audit writes', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  const otherScope = deriveMemberVideoScope('another-member')
+
+  await expect(handleCreate({
+    communityId: 'community-1', area: 'archive', format: 'video', topics: [],
+    content: {
+      title: '越权视频',
+      videos: [{ source: 'cos', itemId: 'video-1', title: '越权视频', fileID: `cloud://env/posts/member-videos/${otherScope}/clip.mp4` }],
+    },
+  } as any, 'test-openid')).rejects.toThrow('视频文件不属于当前用户')
+
+  expect(db.create).not.toHaveBeenCalled()
+  expect(db.updateById).not.toHaveBeenCalled()
+  expect(storage.getTempUrl).not.toHaveBeenCalled()
+})
+
+test('create: rejects actual oversized archive video metadata before DB or audit writes', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(storage.inspectRemoteObject as jest.Mock).mockResolvedValueOnce({
+    contentLength: MAX_MEMBER_VIDEO_BYTES + 1,
+    contentType: 'video/mp4',
+  })
+  const scope = deriveMemberVideoScope('test-openid')
+
+  await expect(handleCreate({
+    communityId: 'community-1', area: 'archive', format: 'video', topics: [],
+    content: {
+      title: '超大视频',
+      videos: [{ source: 'cos', itemId: 'video-1', title: '超大视频', fileID: `cloud://env/posts/member-videos/${scope}/clip.mp4` }],
+    },
+  } as any, 'test-openid')).rejects.toThrow('视频文件不能超过 200MiB')
+
+  expect(db.create).not.toHaveBeenCalled()
+  expect(db.updateById).not.toHaveBeenCalled()
+})
+
+test('update: rejects an archive video outside the authenticated member scope before pending/audit writes', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'archive-video-1', communityId: 'community-1', authorId: 'test-openid',
+    status: 'active', auditStatus: 'pass', area: 'archive', format: 'video', topics: [],
+  })
+  const otherScope = deriveMemberVideoScope('another-member')
+
+  await expect(handleUpdate({
+    postId: 'archive-video-1', topics: [],
+    content: {
+      title: '越权更新',
+      videos: [{ source: 'cos', itemId: 'video-1', title: '越权更新', fileID: `cloud://env/posts/member-videos/${otherScope}/clip.mp4` }],
+    },
+  } as any, 'test-openid')).rejects.toThrow('视频文件不属于当前用户')
+
+  expect(db.updateById).not.toHaveBeenCalled()
+  expect(db.create).not.toHaveBeenCalled()
+})
+
 test('create: persists an image-text archive post without loading or storing a section', async () => {
   ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
   ;(db.create as jest.Mock).mockResolvedValue('archive-image-1')
@@ -2555,7 +2646,7 @@ test('create: persists and audits one archive video through the synthetic video 
   ))
   const video = {
     source: 'cos', itemId: 'video-1', title: '家庭影像',
-    fileID: 'cloud://env/archive/video-1.mp4', description: '湖畔散步',
+    fileID: `cloud://env/posts/member-videos/${deriveMemberVideoScope('test-openid')}/video-1.mp4`, description: '湖畔散步',
   }
 
   const result = await handleCreate({
@@ -2603,7 +2694,8 @@ test('update: keeps the stored archive video format and audits pending video con
   ;(db.query as jest.Mock).mockResolvedValue([])
   ;(db.create as jest.Mock).mockResolvedValue('audit-task-1')
   const video = {
-    source: 'cos', itemId: 'video-2', title: '更新影像', fileID: 'cloud://env/archive/video-2.mp4',
+    source: 'cos', itemId: 'video-2', title: '更新影像',
+    fileID: `cloud://env/posts/member-videos/${deriveMemberVideoScope('test-openid')}/video-2.mp4`,
   }
 
   await handleUpdate({
