@@ -56,6 +56,7 @@ export type ArchiveMediaEditorTransition =
 
 export type ArchiveVideoIntentState = 'idle' | 'selected' | 'pending' | 'failed'
 export type ArchiveVideoIntentEvent = 'selected' | 'started' | 'failed' | 'resolved'
+export type CoverNavigationEvent = 'selected' | 'failed' | 'resolved' | 'removed'
 
 export interface ArchiveVideoRetentionState {
   file: unknown
@@ -67,6 +68,13 @@ export interface ArchiveVideoRetentionEvent {
   type: 'selected' | 'pending' | 'failed' | 'resolved'
   file: unknown
   generation: number
+}
+
+export function reduceCoverNavigationBlock(
+  _blocked: boolean,
+  event: CoverNavigationEvent,
+): boolean {
+  return event === 'selected' || event === 'failed'
 }
 
 const VIDEO_EXTENSION_SET = new Set<string>(VIDEO_ALLOWED_EXTENSIONS)

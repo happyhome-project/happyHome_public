@@ -317,3 +317,15 @@ describe('editor-selected video retention', () => {
     })
   })
 })
+
+describe('cover navigation blocking', () => {
+  test('failed cover blocks back until retry success or explicit removal', () => {
+    const reduce = (videoPublish as any).reduceCoverNavigationBlock
+    expect(typeof reduce).toBe('function')
+    if (!reduce) return
+    expect(reduce(false, 'selected')).toBe(true)
+    expect(reduce(true, 'failed')).toBe(true)
+    expect(reduce(true, 'resolved')).toBe(false)
+    expect(reduce(true, 'removed')).toBe(false)
+  })
+})

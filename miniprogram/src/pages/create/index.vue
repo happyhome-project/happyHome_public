@@ -239,6 +239,7 @@
                 :initial-generation="archiveVideoIntentGeneration"
                 @update:model-value="formData[block.widget.widgetId] = $event"
                 @upload-state="videoUploading = $event"
+                @navigation-blocked="videoNavigationBlocked = $event"
                 @readiness="videoPublishReady = $event.ready"
                 @initial-state="handleVideoInitialState"
                 @selected-file="handleVideoSelectedFile"
@@ -340,6 +341,7 @@ const archiveInitialMedia = ref<ArchiveMediaIntentFile | null>(null)
 const archiveVideoIntentState = ref<ArchiveVideoIntentState>('idle')
 const archiveVideoIntentGeneration = ref(0)
 const videoUploading = ref(false)
+const videoNavigationBlocked = ref(false)
 const videoPublishReady = ref(true)
 const collaborationOnly = ref(false)
 const collaborationTemplatesError = ref('')
@@ -552,6 +554,7 @@ function enterArchiveEditor(format: 'image_text' | 'text' | 'video', returnTo?: 
   archiveInitialMedia.value = null
   archiveVideoIntentState.value = 'idle'
   videoUploading.value = false
+  videoNavigationBlocked.value = false
   videoPublishReady.value = format !== 'video'
   collaborationOnly.value = false
   selectSection(buildArchiveEditorSection(format), { returnTo: String(returnTo || '') })
@@ -601,6 +604,7 @@ function clearArchiveMediaState() {
   archiveInitialMedia.value = null
   archiveVideoIntentState.value = 'idle'
   videoUploading.value = false
+  videoNavigationBlocked.value = false
   videoPublishReady.value = true
 }
 
@@ -848,6 +852,10 @@ function openTextNoteCover() {
 }
 
 function handleBackToSectionPicker() {
+  if (archiveFormat.value === 'video' && videoNavigationBlocked.value) {
+    uni.showToast({ title: '请重试或移除失败封面', icon: 'none' })
+    return
+  }
   if (archiveFormat.value === 'video' && videoUploading.value) {
     uni.showToast({ title: '视频正在上传，请稍候或取消后返回', icon: 'none' })
     return

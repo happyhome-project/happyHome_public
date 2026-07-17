@@ -39,6 +39,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: 'update:modelValue', value: VideoItemCos[]): void
   (event: 'upload-state', value: boolean): void
+  (event: 'navigation-blocked', value: boolean): void
   (event: 'readiness', value: VideoPublishReadiness): void
   (event: 'selected-file', file: ArchiveMediaIntentFile, generation: number): void
   (event: 'initial-state', value: 'pending' | 'failed' | 'resolved', file: ArchiveMediaIntentFile, generation: number): void
@@ -225,6 +226,7 @@ async function uploadCover(file: ArchiveMediaIntentFile) {
     if (selectedCover.value !== file || !selectedVideo.value) return
     uploadedCoverFileID.value = result.fileID
     coverPending.value = false
+    emit('navigation-blocked', false)
     failedOperation.value = ''
     publishModel()
     emitReadiness()
@@ -232,6 +234,7 @@ async function uploadCover(file: ArchiveMediaIntentFile) {
     if (!isVideoUploadResultCurrent(generation, uploadGeneration, unmounted)) return
     errorMessage.value = error?.message || '封面上传失败'
     failedOperation.value = 'cover'
+    emit('navigation-blocked', true)
   } finally {
     if (isVideoUploadResultCurrent(generation, uploadGeneration, unmounted)) setUploading(false)
   }
@@ -313,6 +316,7 @@ function acceptCover(selected: ArchiveMediaIntentFile) {
   selectedCover.value = selected
   coverPreview.value = previewFor(selected.source)
   coverPending.value = true
+  emit('navigation-blocked', true)
   failedOperation.value = ''
   errorMessage.value = ''
   emitReadiness()
@@ -324,6 +328,7 @@ function removeFailedCover() {
   if (failedOperation.value !== 'cover') return
   selectedCover.value = null
   coverPending.value = false
+  emit('navigation-blocked', false)
   failedOperation.value = ''
   errorMessage.value = ''
   coverPreview.value = uploadedCoverFileID.value
@@ -340,6 +345,7 @@ function removeVideo() {
   uploadedVideoFileID.value = ''
   uploadedCoverFileID.value = ''
   coverPending.value = false
+  emit('navigation-blocked', false)
   failedOperation.value = ''
   previewSource.value = ''
   coverPreview.value = ''
