@@ -49,7 +49,8 @@ function fileExtension(nameOrPath: string): string {
 }
 
 function declaredMediaTypes(file: Record<string, any>, result?: Record<string, any> | null): string[] {
-  return [file.fileType, file.type, result?.type]
+  const aggregateType = String(result?.type || '').trim().toLowerCase()
+  return [file.fileType, file.type, aggregateType === 'mix' ? '' : aggregateType]
     .map((value) => String(value || '').trim().toLowerCase())
     .filter(Boolean)
 }

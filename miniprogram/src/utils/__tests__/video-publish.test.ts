@@ -126,6 +126,20 @@ describe('publish media routing', () => {
     [{ tempFiles: [{ type: 'image/png', tempFilePath: 'blob:photo' }] }, 'image'],
     [{ tempFiles: [{ fileType: 'video', tempFilePath: 'wxfile://clip.mp4' }] }, 'video'],
     [{ tempFiles: [{ type: 'video/webm', tempFilePath: 'blob:video' }] }, 'video'],
+    [{
+      type: 'mix',
+      tempFiles: [
+        { fileType: 'video', tempFilePath: 'wxfile://clip.mp4' },
+        { fileType: 'image', tempFilePath: 'wxfile://photo.jpg' },
+      ],
+    }, 'video'],
+    [{
+      type: 'mix',
+      tempFiles: [
+        { fileType: 'image', tempFilePath: 'wxfile://photo.jpg' },
+        { fileType: 'video', tempFilePath: 'wxfile://clip.mp4' },
+      ],
+    }, 'image'],
   ])('uses the first selected image/video as the publish media type', (result, expected) => {
     expect(detectFirstMediaType(result)).toBe(expected)
   })
