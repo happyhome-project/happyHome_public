@@ -18,7 +18,7 @@ describe('guest intro config', () => {
       { key: 'history', label: '翻历史', text: '以前整理过的有用内容' },
     ])
     expect(config.primaryActionText).toBe('微信一键登录')
-    expect(config.secondaryActionText).toBe('创建我自己的社群')
+    expect(config.secondaryActionText).toBe('先随便看看')
   })
 
   test('trims editable fields and fills missing feature rows from defaults', () => {
