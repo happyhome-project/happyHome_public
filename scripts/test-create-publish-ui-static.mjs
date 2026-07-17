@@ -22,6 +22,8 @@ const acceptVideoBlock = videoPublishEditor.slice(
 )
 const createPage = read('miniprogram', 'src', 'pages', 'create', 'index.vue')
 const imageNoteCreate = read('miniprogram', 'src', 'utils', 'image-note-create.ts')
+const pagesJson = read('miniprogram', 'src', 'pages.json')
+const createPageManifest = JSON.parse(pagesJson).pages.find((page) => page.path === 'pages/create/index')
 
 const figmaIconNodes = {
   family: '20040:4379',
@@ -55,6 +57,14 @@ assert(
     ['#fdf6e6', '#e3f0fb', '#e0fbf7', '#fef6e3', '#ddf6fc', '#def7ec']
       .every((color) => tabbar.toLowerCase().includes(color)),
   'publish sheet should keep the Figma 52px icon slot and 36px foreground asset.',
+)
+assert(
+  createPageManifest?.style?.navigationStyle === 'custom' &&
+    createPage.includes('class="create-custom-nav"') &&
+    createPage.includes('@tap="handlePageExit"') &&
+    createPage.includes('navigateBackOrHome') &&
+    createPage.includes('env(safe-area-inset-top)'),
+  'create must use a controlled safe-area custom navigation bar.',
 )
 
 assert(

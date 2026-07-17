@@ -43,4 +43,27 @@ describe('archive media intent', () => {
     expect(module.peekArchiveMediaIntent(token, 100 + module.ARCHIVE_MEDIA_INTENT_TTL_MS + 1)).toBeNull()
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:owned')
   })
+
+  test('sweeps persisted intents after a simulated process restart', async () => {
+    vi.resetModules()
+    const storage = new Map<string, any>()
+    vi.stubGlobal('uni', {
+      setStorageSync: (key: string, value: any) => storage.set(key, value),
+      getStorageSync: (key: string) => storage.get(key),
+      removeStorageSync: (key: string) => storage.delete(key),
+    })
+    let module = await import('../archive-media-intent')
+    const token = module.storeArchiveMediaIntent('image', [{ source: 'wxfile://a.jpg', name: 'a.jpg', type: 'image/jpeg', size: 1 }], 100)
+    expect(storage.has(module.ARCHIVE_MEDIA_INTENT_INDEX_KEY)).toBe(true)
+    expect(storage.has(`${module.ARCHIVE_MEDIA_INTENT_STORAGE_PREFIX}${token}`)).toBe(true)
+
+    vi.resetModules()
+    module = await import('../archive-media-intent')
+    expect(module.sweepArchiveMediaIntents(100 + module.ARCHIVE_MEDIA_INTENT_TTL_MS + 1)).toBe(1)
+    expect(storage.has(`${module.ARCHIVE_MEDIA_INTENT_STORAGE_PREFIX}${token}`)).toBe(false)
+    expect(storage.get(module.ARCHIVE_MEDIA_INTENT_INDEX_KEY)).toEqual([])
+
+    storage.set(module.ARCHIVE_MEDIA_INTENT_INDEX_KEY, { malformed: true })
+    expect(() => module.sweepArchiveMediaIntents()).not.toThrow()
+  })
 })

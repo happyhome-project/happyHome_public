@@ -1,5 +1,12 @@
 <template>
   <view class="create-page">
+    <view class="create-custom-nav">
+      <view class="create-custom-nav__row">
+        <button class="create-custom-nav__back" aria-label="返回" @tap="handlePageExit">‹</button>
+        <text class="create-custom-nav__title">发帖</text>
+        <view class="create-custom-nav__spacer" />
+      </view>
+    </view>
     <view v-if="!userStore.isLoggedIn" class="guard-state">
       <text class="guard-title">请先登录</text>
       <text class="guard-desc">登录后才能发布内容</text>
@@ -302,7 +309,7 @@ import { buildImageNoteCreateBlocks } from '../../utils/image-note-create'
 import { isImageNoteSectionContract } from '../../utils/image-note'
 import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
-import { ensureHierarchyStack, normalizeRouteUrl, openHierarchyParent } from '../../utils/hierarchy-nav'
+import { ensureHierarchyStack, navigateBackOrHome, normalizeRouteUrl, openHierarchyParent } from '../../utils/hierarchy-nav'
 import { extractTextNoteContent, TEXT_NOTE_THEMES, type TextNoteTheme } from '../../utils/text-note'
 import { asCollaborationSection, isCollaborationSection } from '../../utils/collaboration-template'
 import {
@@ -1227,6 +1234,19 @@ function saveDraft() {
   }
 }
 
+function handlePageExit() {
+  if (archiveFormat.value === 'video' && shouldBlockVideoNavigation({ navigationBlocked: videoNavigationBlocked.value, uploading: videoUploading.value })) {
+    showVideoNavigationBlockedToast()
+    return
+  }
+  const returnTo = createReturnTo.value
+  if (returnTo) {
+    openHierarchyParent(returnTo)
+    return
+  }
+  navigateBackOrHome()
+}
+
 function showVideoNavigationBlockedToast() {
   uni.showToast({
     title: videoNavigationBlocked.value ? '请重试或移除失败封面' : '视频正在上传，请稍候或取消后返回',
@@ -1235,8 +1255,7 @@ function showVideoNavigationBlockedToast() {
 }
 
 onBackPress(() => {
-  if (archiveFormat.value !== 'video' || !shouldBlockVideoNavigation({ navigationBlocked: videoNavigationBlocked.value, uploading: videoUploading.value })) return false
-  showVideoNavigationBlockedToast()
+  handlePageExit()
   return true
 })
 
@@ -1403,6 +1422,41 @@ async function handleSubmit() {
   min-height: 100vh;
   overflow-x: hidden;
 }
+
+.create-custom-nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  padding-top: env(safe-area-inset-top);
+  background: rgba(244, 245, 249, 0.96);
+}
+
+.create-custom-nav__row {
+  height: 88rpx;
+  padding: 0 24rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.create-custom-nav__back,
+.create-custom-nav__spacer {
+  width: 72rpx;
+  height: 72rpx;
+  margin: 0;
+}
+
+.create-custom-nav__back {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--hh-color-text-primary);
+  font-size: 64rpx;
+  line-height: 64rpx;
+}
+
+.create-custom-nav__back::after { border: 0; }
+.create-custom-nav__title { font-size: 34rpx; font-weight: 600; color: var(--hh-color-text-primary); }
 
 .title {
   font-size: var(--hh-text-heading-md-size);

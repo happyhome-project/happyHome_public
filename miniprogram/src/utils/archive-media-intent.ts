@@ -2,6 +2,7 @@ import type { PublishMediaType } from './video-publish'
 
 export const ARCHIVE_MEDIA_INTENT_VERSION = 1 as const
 export const ARCHIVE_MEDIA_INTENT_STORAGE_PREFIX = 'archive_media_intent_v1:'
+export const ARCHIVE_MEDIA_INTENT_INDEX_KEY = 'archive_media_intent_v1:index'
 export const ARCHIVE_MEDIA_INTENT_TTL_MS = 10 * 60 * 1000
 
 export type ArchiveMediaIntentFile = {
@@ -23,6 +24,33 @@ export type ArchiveMediaIntent = {
 }
 
 const volatileIntents = new Map<string, ArchiveMediaIntent>()
+type StoredIntentIndexEntry = { token: string; expiresAt: number }
+
+function readIntentIndex(): StoredIntentIndexEntry[] {
+  try {
+    const value = uni.getStorageSync(ARCHIVE_MEDIA_INTENT_INDEX_KEY)
+    if (!Array.isArray(value)) return []
+    return value.filter((entry): entry is StoredIntentIndexEntry => (
+      Boolean(entry) && typeof entry.token === 'string' && Number.isFinite(Number(entry.expiresAt))
+    )).map((entry) => ({ token: entry.token, expiresAt: Number(entry.expiresAt) }))
+  } catch {
+    return []
+  }
+}
+
+function writeIntentIndex(entries: StoredIntentIndexEntry[]) {
+  try { uni.setStorageSync(ARCHIVE_MEDIA_INTENT_INDEX_KEY, entries) } catch {}
+}
+
+function upsertIntentIndex(token: string, expiresAt: number) {
+  const entries = readIntentIndex().filter((entry) => entry.token !== token)
+  entries.push({ token, expiresAt })
+  writeIntentIndex(entries)
+}
+
+function removeIntentIndexToken(token: string) {
+  writeIntentIndex(readIntentIndex().filter((entry) => entry.token !== token))
+}
 
 function revokeIntentUrls(intent: ArchiveMediaIntent | null) {
   for (const file of intent?.files || []) {
@@ -61,6 +89,7 @@ export function storeArchiveMediaIntent(
   if (persistable) {
     try { uni.setStorageSync(storageKey(token), intent) } catch {}
   }
+  upsertIntentIndex(token, now + ARCHIVE_MEDIA_INTENT_TTL_MS)
   return token
 }
 
@@ -70,6 +99,7 @@ export function consumeArchiveMediaIntent(tokenValue: unknown): ArchiveMediaInte
   const intent = peekArchiveMediaIntent(token)
   volatileIntents.delete(token)
   try { uni.removeStorageSync(storageKey(token)) } catch {}
+  removeIntentIndexToken(token)
   revokeIntentUrls(intent)
   return intent
 }
@@ -80,20 +110,42 @@ export function discardArchiveMediaIntent(tokenValue: unknown): boolean {
   const intent = volatileIntents.get(token) || null
   volatileIntents.delete(token)
   try { uni.removeStorageSync(storageKey(token)) } catch {}
+  const indexed = readIntentIndex().some((entry) => entry.token === token)
+  removeIntentIndexToken(token)
   revokeIntentUrls(intent)
-  return Boolean(intent)
+  return Boolean(intent) || indexed
 }
 
 export function sweepArchiveMediaIntents(now = Date.now()): number {
-  let removed = 0
+  const removedTokens = new Set<string>()
+  const retainedVolatile: StoredIntentIndexEntry[] = []
   for (const [token, intent] of volatileIntents) {
-    if (now - intent.createdAt <= ARCHIVE_MEDIA_INTENT_TTL_MS) continue
+    if (now - intent.createdAt <= ARCHIVE_MEDIA_INTENT_TTL_MS) {
+      retainedVolatile.push({ token, expiresAt: intent.createdAt + ARCHIVE_MEDIA_INTENT_TTL_MS })
+      continue
+    }
     volatileIntents.delete(token)
     try { uni.removeStorageSync(storageKey(token)) } catch {}
     revokeIntentUrls(intent)
-    removed += 1
+    removedTokens.add(token)
   }
-  return removed
+  const retainedIndex: StoredIntentIndexEntry[] = []
+  for (const entry of readIntentIndex()) {
+    if (entry.expiresAt >= now) {
+      retainedIndex.push(entry)
+      continue
+    }
+    const intent = volatileIntents.get(entry.token) || null
+    volatileIntents.delete(entry.token)
+    try { uni.removeStorageSync(storageKey(entry.token)) } catch {}
+    revokeIntentUrls(intent)
+    removedTokens.add(entry.token)
+  }
+  for (const entry of retainedVolatile) {
+    if (!retainedIndex.some((indexed) => indexed.token === entry.token)) retainedIndex.push(entry)
+  }
+  writeIntentIndex(retainedIndex)
+  return removedTokens.size
 }
 
 export function peekArchiveMediaIntent(tokenValue: unknown, now = Date.now()): ArchiveMediaIntent | null {
@@ -107,6 +159,7 @@ export function peekArchiveMediaIntent(tokenValue: unknown, now = Date.now()): A
   if (now - Number(intent.createdAt || 0) > ARCHIVE_MEDIA_INTENT_TTL_MS) {
     volatileIntents.delete(token)
     try { uni.removeStorageSync(storageKey(token)) } catch {}
+    removeIntentIndexToken(token)
     revokeIntentUrls(intent)
     return null
   }

@@ -5,6 +5,16 @@ import { describe, expect, test } from 'vitest'
 const read = (...parts: string[]) => readFileSync(join(process.cwd(), 'src', ...parts), 'utf8')
 
 describe('archive publishing entry', () => {
+  test('uses a controlled custom navigation bar on create', () => {
+    const pages = read('pages.json')
+    const create = read('pages', 'create', 'index.vue')
+    const createPage = JSON.parse(pages).pages.find((page: any) => page.path === 'pages/create/index')
+    expect(createPage?.style?.navigationStyle).toBe('custom')
+    expect(create).toContain('class="create-custom-nav"')
+    expect(create).toContain('@tap="handlePageExit"')
+    expect(create).toContain('env(safe-area-inset-top)')
+    expect(create).toContain('navigateBackOrHome')
+  })
   test('keeps archive topic navigation on the shared page background', () => {
     const source = read('components', 'ArchiveTopicTabs.vue')
     const rule = source.match(/\.archive-topic-tabs\s*\{([^}]*)\}/s)?.[1] || ''
