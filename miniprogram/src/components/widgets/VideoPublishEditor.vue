@@ -34,12 +34,14 @@ const props = defineProps<{
   modelValue?: VideoItemCos[]
   initialFile?: ArchiveMediaIntentFile | null
   initialState?: ArchiveVideoIntentState
+  initialGeneration?: number
 }>()
 const emit = defineEmits<{
   (event: 'update:modelValue', value: VideoItemCos[]): void
   (event: 'upload-state', value: boolean): void
   (event: 'readiness', value: VideoPublishReadiness): void
-  (event: 'initial-state', value: 'pending' | 'failed' | 'resolved'): void
+  (event: 'selected-file', file: ArchiveMediaIntentFile, generation: number): void
+  (event: 'initial-state', value: 'pending' | 'failed' | 'resolved', file: ArchiveMediaIntentFile, generation: number): void
 }>()
 
 const h5VideoInput = ref<HTMLInputElement | null>(null)
@@ -59,7 +61,7 @@ const initialAcknowledged = ref(false)
 const activeInitialFile = ref<ArchiveMediaIntentFile | null>(null)
 let retryAction: (() => Promise<void>) | null = null
 const objectUrls = new Set<string>()
-let uploadGeneration = 0
+let uploadGeneration = Number(props.initialGeneration) || 0
 let unmounted = false
 
 watch(() => props.modelValue, (items) => {
@@ -87,7 +89,7 @@ watch(() => props.initialFile, (file) => {
   if (hasValidUploadedVideo(props.modelValue)) {
     initialAcknowledged.value = true
     activeInitialFile.value = null
-    emit('initial-state', 'resolved')
+    emit('initial-state', 'resolved', file, Number(props.initialGeneration) || uploadGeneration)
     return
   }
   const intentState = props.initialState || 'selected'
@@ -152,13 +154,19 @@ async function acceptVideo(file: ArchiveMediaIntentFile) {
   previewSource.value = previewFor(file.source)
   coverPreview.value = file.thumbTempFilePath || ''
   emit('update:modelValue', [])
-  retryAction = () => uploadVideo(file)
+  retryAction = () => startVideoUpload(file)
   await retryAction()
 }
 
-async function uploadVideo(file: ArchiveMediaIntentFile) {
+function startVideoUpload(file: ArchiveMediaIntentFile): Promise<void> {
   const generation = ++uploadGeneration
-  if (activeInitialFile.value === file) emit('initial-state', 'pending')
+  activeInitialFile.value = file
+  emit('selected-file', file, generation)
+  return uploadVideo(file, generation)
+}
+
+async function uploadVideo(file: ArchiveMediaIntentFile, generation: number) {
+  emit('initial-state', 'pending', file, generation)
   setUploading(true)
   progress.value = 0
   errorMessage.value = ''
@@ -185,16 +193,14 @@ async function uploadVideo(file: ArchiveMediaIntentFile) {
     uploadedVideoFileID.value = result.fileID
     failedOperation.value = ''
     publishModel()
-    if (activeInitialFile.value === file) {
-      activeInitialFile.value = null
-      emit('initial-state', 'resolved')
-    }
+    activeInitialFile.value = null
+    emit('initial-state', 'resolved', file, generation)
     emitReadiness()
   } catch (error: any) {
     if (!isVideoUploadResultCurrent(generation, uploadGeneration, unmounted)) return
     errorMessage.value = error?.message || '视频上传失败'
     failedOperation.value = 'video'
-    if (activeInitialFile.value === file) emit('initial-state', 'failed')
+    emit('initial-state', 'failed', file, generation)
   } finally {
     if (isVideoUploadResultCurrent(generation, uploadGeneration, unmounted)) setUploading(false)
   }
@@ -298,8 +304,8 @@ function restoreInitialForRetry(file: ArchiveMediaIntentFile, state: 'pending' |
   coverPreview.value = file.thumbTempFilePath || ''
   errorMessage.value = state === 'pending' ? '上次上传已中断，请重试' : '视频上传失败，请重试'
   failedOperation.value = 'video'
-  retryAction = () => uploadVideo(file)
-  if (state === 'pending') emit('initial-state', 'failed')
+  retryAction = () => startVideoUpload(file)
+  if (state === 'pending') emit('initial-state', 'failed', file, Number(props.initialGeneration) || uploadGeneration)
   emitReadiness()
 }
 
@@ -327,7 +333,8 @@ function removeFailedCover() {
 }
 
 function removeVideo() {
-  const resolvesInitial = Boolean(activeInitialFile.value || props.initialFile)
+  const retainedFile = activeInitialFile.value || props.initialFile || null
+  const resolvesInitial = Boolean(retainedFile)
   selectedVideo.value = null
   selectedCover.value = null
   uploadedVideoFileID.value = ''
@@ -341,7 +348,7 @@ function removeVideo() {
   retryAction = null
   activeInitialFile.value = null
   emit('update:modelValue', [])
-  if (resolvesInitial) emit('initial-state', 'resolved')
+  if (resolvesInitial) emit('initial-state', 'resolved', retainedFile!, Number(props.initialGeneration) || uploadGeneration)
   emitReadiness()
 }
 </script>

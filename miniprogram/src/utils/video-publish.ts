@@ -57,6 +57,18 @@ export type ArchiveMediaEditorTransition =
 export type ArchiveVideoIntentState = 'idle' | 'selected' | 'pending' | 'failed'
 export type ArchiveVideoIntentEvent = 'selected' | 'started' | 'failed' | 'resolved'
 
+export interface ArchiveVideoRetentionState {
+  file: unknown
+  generation: number
+  status: ArchiveVideoIntentState
+}
+
+export interface ArchiveVideoRetentionEvent {
+  type: 'selected' | 'pending' | 'failed' | 'resolved'
+  file: unknown
+  generation: number
+}
+
 const VIDEO_EXTENSION_SET = new Set<string>(VIDEO_ALLOWED_EXTENSIONS)
 const IMAGE_EXTENSION_SET = new Set([
   'jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'heic', 'heif',
@@ -247,4 +259,17 @@ export function isVideoUploadResultCurrent(
   unmounted: boolean,
 ): boolean {
   return !unmounted && operationGeneration === currentGeneration
+}
+
+export function reduceArchiveVideoRetention(
+  state: ArchiveVideoRetentionState,
+  event: ArchiveVideoRetentionEvent,
+): ArchiveVideoRetentionState {
+  if (event.type === 'selected') {
+    return { file: event.file, generation: event.generation, status: 'selected' }
+  }
+  if (event.generation !== state.generation) return state
+  if (event.type === 'pending') return { file: state.file, generation: state.generation, status: 'pending' }
+  if (event.type === 'failed') return { file: state.file, generation: state.generation, status: 'failed' }
+  return { file: null, generation: state.generation, status: 'idle' }
 }

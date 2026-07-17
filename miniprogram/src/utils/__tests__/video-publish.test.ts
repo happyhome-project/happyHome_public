@@ -288,3 +288,32 @@ describe('pending video intent lifecycle', () => {
     expect(current(2, 2, true)).toBe(false)
   })
 })
+
+describe('editor-selected video retention', () => {
+  test('replacement failure remains retained through back, cancel, retry, and stale completion', () => {
+    const reduce = (videoPublish as any).reduceArchiveVideoRetention
+    expect(typeof reduce).toBe('function')
+    if (!reduce) return
+    const replacement = { source: 'wxfile://replacement.mp4', name: 'replacement.mp4' }
+    let retained = reduce({ file: null, generation: 0, status: 'idle' }, {
+      type: 'selected', file: replacement, generation: 2,
+    })
+    retained = reduce(retained, { type: 'pending', file: replacement, generation: 2 })
+    retained = reduce(retained, { type: 'failed', file: replacement, generation: 2 })
+    expect(retained).toEqual({ file: replacement, generation: 2, status: 'failed' })
+
+    const editorState = { format: 'video', formData: {}, initialMedia: retained.file, hasSelectedMedia: true }
+    expect((videoPublish as any).transitionArchiveMediaEditorState(editorState, 'image', null).status).toBe('confirm')
+    const cancelled = (videoPublish as any).transitionArchiveMediaEditorState(editorState, 'image', false)
+    expect(cancelled).toEqual({ status: 'cancelled', state: editorState })
+
+    retained = reduce(retained, { type: 'selected', file: replacement, generation: 3 })
+    retained = reduce(retained, { type: 'pending', file: replacement, generation: 3 })
+    expect(retained.status).toBe('pending')
+    expect(reduce(retained, { type: 'resolved', file: replacement, generation: 2 })).toBe(retained)
+    expect(reduce(retained, { type: 'failed', file: replacement, generation: 2 })).toBe(retained)
+    expect(reduce(retained, { type: 'resolved', file: replacement, generation: 3 })).toEqual({
+      file: null, generation: 3, status: 'idle',
+    })
+  })
+})

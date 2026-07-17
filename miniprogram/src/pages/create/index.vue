@@ -236,10 +236,12 @@
                 :model-value="formData[block.widget.widgetId]"
                 :initial-file="archiveInitialMedia"
                 :initial-state="archiveVideoIntentState"
+                :initial-generation="archiveVideoIntentGeneration"
                 @update:model-value="formData[block.widget.widgetId] = $event"
                 @upload-state="videoUploading = $event"
                 @readiness="videoPublishReady = $event.ready"
                 @initial-state="handleVideoInitialState"
+                @selected-file="handleVideoSelectedFile"
               />
               <WidgetEditor
                 v-else
@@ -307,7 +309,7 @@ import {
   peekArchiveMediaIntent,
   type ArchiveMediaIntentFile,
 } from '../../utils/archive-media-intent'
-import { reduceArchiveVideoIntentState, transitionArchiveMediaEditorState, type ArchiveMediaEditorState, type ArchiveVideoIntentState, type PublishMediaType } from '../../utils/video-publish'
+import { reduceArchiveVideoRetention, transitionArchiveMediaEditorState, type ArchiveMediaEditorState, type ArchiveVideoIntentState, type ArchiveVideoRetentionState, type PublishMediaType } from '../../utils/video-publish'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -336,6 +338,7 @@ const textNoteTheme = ref<TextNoteTheme>('paper')
 const archiveFormat = ref<'image_text' | 'text' | 'video' | ''>('')
 const archiveInitialMedia = ref<ArchiveMediaIntentFile | null>(null)
 const archiveVideoIntentState = ref<ArchiveVideoIntentState>('idle')
+const archiveVideoIntentGeneration = ref(0)
 const videoUploading = ref(false)
 const videoPublishReady = ref(true)
 const collaborationOnly = ref(false)
@@ -558,8 +561,8 @@ function applyArchiveMediaIntent(token: unknown) {
   const intent = consumeArchiveMediaIntent(token)
   if (!intent) return
   if (intent.mediaType === 'video' && archiveFormat.value === 'video') {
-    archiveInitialMedia.value = intent.files[0] || null
-    archiveVideoIntentState.value = reduceArchiveVideoIntentState(archiveVideoIntentState.value, 'selected')
+    const file = intent.files[0] || null
+    if (file) handleVideoSelectedFile(file, archiveVideoIntentGeneration.value + 1)
     formData.archive_video_videos = []
     return
   }
@@ -601,12 +604,34 @@ function clearArchiveMediaState() {
   videoPublishReady.value = true
 }
 
-function handleVideoInitialState(state: 'pending' | 'failed' | 'resolved') {
-  archiveVideoIntentState.value = reduceArchiveVideoIntentState(
-    archiveVideoIntentState.value,
-    state === 'pending' ? 'started' : state,
-  )
-  if (state === 'resolved') archiveInitialMedia.value = null
+function currentVideoRetention(): ArchiveVideoRetentionState {
+  return {
+    file: archiveInitialMedia.value,
+    generation: archiveVideoIntentGeneration.value,
+    status: archiveVideoIntentState.value,
+  }
+}
+
+function applyVideoRetention(state: ArchiveVideoRetentionState) {
+  archiveInitialMedia.value = state.file as ArchiveMediaIntentFile | null
+  archiveVideoIntentGeneration.value = state.generation
+  archiveVideoIntentState.value = state.status
+}
+
+function handleVideoSelectedFile(file: ArchiveMediaIntentFile, generation: number) {
+  applyVideoRetention(reduceArchiveVideoRetention(currentVideoRetention(), {
+    type: 'selected', file, generation,
+  }))
+}
+
+function handleVideoInitialState(
+  state: 'pending' | 'failed' | 'resolved',
+  file: ArchiveMediaIntentFile,
+  generation: number,
+) {
+  applyVideoRetention(reduceArchiveVideoRetention(currentVideoRetention(), {
+    type: state, file, generation,
+  }))
 }
 
 async function handleInlineMediaIntent(token: string) {

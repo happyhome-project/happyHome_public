@@ -80,12 +80,15 @@ assert(
     videoPublishEditor.includes('移除失败封面') &&
     videoPublishEditor.includes("emit('readiness'") &&
     videoPublishEditor.includes('shouldConsumeInitialVideo') &&
-    videoPublishEditor.includes("emit('initial-state', 'pending')") &&
-    videoPublishEditor.includes("emit('initial-state', 'failed')") &&
-    videoPublishEditor.includes("emit('initial-state', 'resolved')") &&
+    videoPublishEditor.includes("emit('initial-state', 'pending',") &&
+    videoPublishEditor.includes("emit('initial-state', 'failed',") &&
+    videoPublishEditor.includes("emit('initial-state', 'resolved',") &&
+    videoPublishEditor.includes("emit('selected-file'") &&
     videoPublishEditor.includes('isVideoUploadResultCurrent') &&
     createPage.includes('archiveVideoIntentState') &&
     createPage.includes('@initial-state="handleVideoInitialState"') &&
+    createPage.includes('@selected-file="handleVideoSelectedFile"') &&
+    createPage.includes('reduceArchiveVideoRetention') &&
     createPage.includes('@readiness="videoPublishReady = $event.ready"') &&
     createPage.includes(':disabled="submitting || !videoPublishReady"'),
   'archive video publishing must have its own upload editor and server-owned upload paths.',
