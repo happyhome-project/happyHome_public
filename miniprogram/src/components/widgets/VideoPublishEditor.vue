@@ -146,11 +146,13 @@ async function confirmReplacement(): Promise<boolean> {
 async function acceptVideo(file: ArchiveMediaIntentFile) {
   if (!(await confirmReplacement())) return
   if (unmounted) return
+  uploadGeneration += 1
   selectedVideo.value = file
   selectedCover.value = null
   uploadedVideoFileID.value = ''
   uploadedCoverFileID.value = ''
   coverPending.value = false
+  emit('navigation-blocked', false)
   failedOperation.value = ''
   previewSource.value = previewFor(file.source)
   coverPreview.value = file.thumbTempFilePath || ''

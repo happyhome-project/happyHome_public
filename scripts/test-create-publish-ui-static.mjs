@@ -16,6 +16,10 @@ const widgetEditor = read('miniprogram', 'src', 'components', 'widgets', 'Widget
 const topicPicker = read('miniprogram', 'src', 'components', 'widgets', 'TopicPicker.vue')
 const videoPublishEditorPath = path.join(root, 'miniprogram', 'src', 'components', 'widgets', 'VideoPublishEditor.vue')
 const videoPublishEditor = fs.existsSync(videoPublishEditorPath) ? fs.readFileSync(videoPublishEditorPath, 'utf8') : ''
+const acceptVideoBlock = videoPublishEditor.slice(
+  videoPublishEditor.indexOf('async function acceptVideo'),
+  videoPublishEditor.indexOf('function startVideoUpload'),
+)
 const createPage = read('miniprogram', 'src', 'pages', 'create', 'index.vue')
 const imageNoteCreate = read('miniprogram', 'src', 'utils', 'image-note-create.ts')
 
@@ -86,6 +90,7 @@ assert(
     videoPublishEditor.includes("emit('selected-file'") &&
     videoPublishEditor.includes("emit('navigation-blocked', true)") &&
     videoPublishEditor.includes("emit('navigation-blocked', false)") &&
+    /uploadGeneration \+= 1[\s\S]*coverPending\.value = false[\s\S]*emit\('navigation-blocked', false\)/.test(acceptVideoBlock) &&
     videoPublishEditor.includes('isVideoUploadResultCurrent') &&
     createPage.includes('archiveVideoIntentState') &&
     createPage.includes('@initial-state="handleVideoInitialState"') &&

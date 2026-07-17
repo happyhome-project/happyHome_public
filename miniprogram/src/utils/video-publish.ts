@@ -56,7 +56,7 @@ export type ArchiveMediaEditorTransition =
 
 export type ArchiveVideoIntentState = 'idle' | 'selected' | 'pending' | 'failed'
 export type ArchiveVideoIntentEvent = 'selected' | 'started' | 'failed' | 'resolved'
-export type CoverNavigationEvent = 'selected' | 'failed' | 'resolved' | 'removed'
+export type CoverNavigationEvent = 'selected' | 'failed' | 'resolved' | 'removed' | 'replaced'
 
 export interface ArchiveVideoRetentionState {
   file: unknown

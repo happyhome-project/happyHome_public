@@ -68,6 +68,11 @@ describe('archive publishing entry', () => {
     expect(videoEditor).toContain("emit('selected-file'")
     expect(videoEditor).toContain("emit('navigation-blocked', true)")
     expect(videoEditor).toContain("emit('navigation-blocked', false)")
+    const acceptVideoBlock = videoEditor.slice(
+      videoEditor.indexOf('async function acceptVideo'),
+      videoEditor.indexOf('function startVideoUpload'),
+    )
+    expect(acceptVideoBlock).toMatch(/uploadGeneration \+= 1[\s\S]*coverPending\.value = false[\s\S]*emit\('navigation-blocked', false\)/)
     expect(videoEditor).toContain('isVideoUploadResultCurrent')
     expect(create).toContain('archiveVideoIntentState')
     expect(create).toContain('@initial-state="handleVideoInitialState"')

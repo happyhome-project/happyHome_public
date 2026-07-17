@@ -328,4 +328,17 @@ describe('cover navigation blocking', () => {
     expect(reduce(true, 'resolved')).toBe(false)
     expect(reduce(true, 'removed')).toBe(false)
   })
+
+  test('failed cover is cleared by video replacement and stale cover completion stays ignored', () => {
+    const reduce = (videoPublish as any).reduceCoverNavigationBlock
+    const isCurrent = (videoPublish as any).isVideoUploadResultCurrent
+    let blocked = reduce(false, 'selected')
+    blocked = reduce(blocked, 'failed')
+    expect(blocked).toBe(true)
+
+    blocked = reduce(blocked, 'replaced')
+    expect(blocked).toBe(false)
+    expect(isCurrent(1, 2, false)).toBe(false)
+    expect(blocked).toBe(false)
+  })
 })
