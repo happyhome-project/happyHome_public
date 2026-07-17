@@ -24,7 +24,7 @@
       <text class="my-activities-state-title">您还没参加任何活动</text>
       <text class="my-activities-state-copy">独乐乐不如众乐乐，快去参加或者发起活动吧~</text>
       <view class="my-activities-actions">
-        <button class="my-activities-primary" @tap="goDiscover">去看看活动</button>
+        <button class="my-activities-primary" @tap="goDiscover">去首页看看</button>
         <button class="my-activities-secondary" @tap="goPublish">发起活动</button>
       </view>
     </view>
