@@ -1,7 +1,7 @@
 import cloud from 'wx-server-sdk'
 import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
-import { getCurrentEnvironmentId, getTempUrl, inspectRemoteObject, requestUploadMetadata } from '../../lib/storage'
+import { getTempUrl, inspectRemoteObject, requestUploadMetadata } from '../../lib/storage'
 import { requestMemberVideoUpload, validateMemberArchiveVideoContent } from '../../lib/member-video-upload'
 import { sanitizeContent, validateContentValues, validateRequiredWidgets } from '../../lib/post-validate'
 import { auditAndApply, isPostVisibleToMembers } from '../../lib/content-audit'
@@ -562,7 +562,7 @@ export async function handleCreate(
     validateContentValues(section, content, validationOptions)
     if (archive.format === 'video') {
       await validateMemberArchiveVideoContent(content, openid, {
-        environmentId: getCurrentEnvironmentId(), getTempUrl, inspectRemoteObject,
+        requestUploadMetadata, getTempUrl, inspectRemoteObject,
       })
     }
 
@@ -1261,7 +1261,7 @@ export async function handleUpdate(
   validateContentValues(section, sanitizedContent, validationOptions)
   if (archive?.format === 'video') {
     await validateMemberArchiveVideoContent(sanitizedContent, openid, {
-      environmentId: getCurrentEnvironmentId(), getTempUrl, inspectRemoteObject,
+      requestUploadMetadata, getTempUrl, inspectRemoteObject,
     })
   }
   const presentation = archive?.format === 'text'

@@ -23,11 +23,6 @@ export function getTempUrl(fileID: string): Promise<string> {
     .then((res: { fileList: Array<{ tempFileURL: string }> }) => res.fileList[0].tempFileURL)
 }
 
-export function getCurrentEnvironmentId(): string {
-  const wxContext = cloud.getWXContext() as { ENV?: string }
-  return String(wxContext?.ENV || process.env.TCB_ENV || process.env.SCF_NAMESPACE || '').trim()
-}
-
 export function inspectRemoteObject(url: string): Promise<RemoteObjectMetadata> {
   return inspectRemoteObjectWithFetch(url, globalThis.fetch as any)
 }

@@ -72,9 +72,17 @@ describe('member video upload authorization', () => {
 })
 
 describe('member archive video object verification', () => {
-  function dependencies(metadata: Record<string, { contentLength: number; contentType: string }>) {
+  function dependencies(
+    metadata: Record<string, { contentLength: number; contentType: string }>,
+    canonicalAuthority = 'test-env',
+  ) {
     return {
       environmentId: 'test-env',
+      requestUploadMetadata: jest.fn(async (cloudPath: string) => ({
+        cloudPath,
+        fileId: `cloud://${canonicalAuthority}/${cloudPath}`,
+        url: '', token: '', authorization: '', cosFileId: '',
+      })),
       getTempUrl: jest.fn(async (fileID: string) => `https://download.example/${encodeURIComponent(fileID)}`),
       inspectRemoteObject: jest.fn(async (url: string) => {
         const fileID = decodeURIComponent(url.slice(url.lastIndexOf('/') + 1))
@@ -118,7 +126,7 @@ describe('member archive video object verification', () => {
     const bucketFileID = `cloud://test-env.bucket-name/posts/member-videos/${scope}/clip.mp4`
     const deps = dependencies({
       [bucketFileID]: { contentLength: 1024, contentType: 'video/mp4' },
-    })
+    }, 'test-env.bucket-name')
 
     await expect(validateMemberArchiveVideoContent({
       videos: [{ source: 'cos', fileID: bucketFileID }],
@@ -144,6 +152,16 @@ describe('member archive video object verification', () => {
     expect(deps.getTempUrl).not.toHaveBeenCalled()
   })
 
+  test('rejects an arbitrary bucket authority even when its env prefix looks valid', async () => {
+    const forgedFileID = `cloud://test-env.attacker-bucket/posts/member-videos/${scope}/clip.mp4`
+    const deps = dependencies({}, 'test-env.real-bucket')
+
+    await expect(validateMemberArchiveVideoContent({
+      videos: [{ source: 'cos', fileID: forgedFileID }],
+    }, openid, deps)).rejects.toThrow('视频文件不属于当前应用')
+    expect(deps.getTempUrl).not.toHaveBeenCalled()
+  })
+
   test.each([
     [{ contentLength: MAX_MEMBER_VIDEO_BYTES + 1, contentType: 'video/mp4' }, '视频文件不能超过 200MiB'],
     [{ contentLength: 1024, contentType: 'application/pdf' }, '视频文件类型不受支持'],
@@ -156,6 +174,19 @@ describe('member archive video object verification', () => {
       videos: [{ source: 'cos', fileID: videoFileID }],
     }, openid, deps)).rejects.toThrow(message)
   })
+
+  test.each([0, 1.5, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects a non-positive or unsafe actual content length: %s',
+    async (contentLength) => {
+      const deps = dependencies({
+        [videoFileID]: { contentLength, contentType: 'video/mp4' },
+      })
+
+      await expect(validateMemberArchiveVideoContent({
+        videos: [{ source: 'cos', fileID: videoFileID }],
+      }, openid, deps)).rejects.toThrow('无法确认上传文件大小')
+    },
+  )
 
   test.each([
     [{ contentLength: 10 * 1024 * 1024 + 1, contentType: 'image/jpeg' }, '封面图片不能超过 10MiB'],
@@ -174,6 +205,8 @@ describe('member archive video object verification', () => {
 })
 
 describe('remote object metadata inspection', () => {
+  const trustedDownloadUrl = 'https://bucket.cos.ap-shanghai.myqcloud.com/video'
+
   function response(status: number, headers: Record<string, string>) {
     return {
       ok: status >= 200 && status < 300,
@@ -189,9 +222,11 @@ describe('remote object metadata inspection', () => {
       'content-type': 'video/mp4',
     }))
 
-    await expect(inspectRemoteObjectWithFetch('https://download.example/video', fetch))
+    await expect(inspectRemoteObjectWithFetch(trustedDownloadUrl, fetch))
       .resolves.toEqual({ contentLength: 4096, contentType: 'video/mp4' })
-    expect(fetch).toHaveBeenCalledWith('https://download.example/video', expect.objectContaining({ method: 'HEAD' }))
+    expect(fetch).toHaveBeenCalledWith(trustedDownloadUrl, expect.objectContaining({
+      method: 'HEAD', redirect: 'manual', signal: expect.any(AbortSignal),
+    }))
     expect(fetch).toHaveBeenCalledTimes(1)
   })
 
@@ -206,12 +241,15 @@ describe('remote object metadata inspection', () => {
       .mockResolvedValueOnce(head)
       .mockResolvedValueOnce(get)
 
-    await expect(inspectRemoteObjectWithFetch('https://download.example/video', fetch))
+    await expect(inspectRemoteObjectWithFetch(trustedDownloadUrl, fetch))
       .resolves.toEqual({ contentLength: 8192, contentType: 'video/webm' })
-    expect(fetch).toHaveBeenNthCalledWith(2, 'https://download.example/video', expect.objectContaining({
+    expect(fetch).toHaveBeenNthCalledWith(2, trustedDownloadUrl, expect.objectContaining({
       method: 'GET',
       headers: { Range: 'bytes=0-0' },
+      redirect: 'manual',
+      signal: expect.any(AbortSignal),
     }))
+    expect(fetch.mock.calls[0][1].signal).toBe(fetch.mock.calls[1][1].signal)
     expect(get.body.cancel).toHaveBeenCalled()
   })
 
@@ -224,7 +262,7 @@ describe('remote object metadata inspection', () => {
       .mockRejectedValueOnce(new Error('HEAD refused'))
       .mockResolvedValueOnce(get)
 
-    await expect(inspectRemoteObjectWithFetch('https://download.example/video', fetch))
+    await expect(inspectRemoteObjectWithFetch(trustedDownloadUrl, fetch))
       .resolves.toEqual({ contentLength: 2048, contentType: 'video/mp4' })
     expect(fetch).toHaveBeenCalledTimes(2)
   })
@@ -237,7 +275,7 @@ describe('remote object metadata inspection', () => {
         'content-type': 'video/mp4',
       }))
 
-    await expect(inspectRemoteObjectWithFetch('https://download.example/video', fetch))
+    await expect(inspectRemoteObjectWithFetch(trustedDownloadUrl, fetch))
       .rejects.toThrow('无法确认上传文件元数据')
   })
 
@@ -250,8 +288,48 @@ describe('remote object metadata inspection', () => {
       .mockResolvedValueOnce(response(405, {}))
       .mockResolvedValueOnce(ignoredRange)
 
-    await expect(inspectRemoteObjectWithFetch('https://download.example/video', fetch))
+    await expect(inspectRemoteObjectWithFetch(trustedDownloadUrl, fetch))
       .rejects.toThrow('不支持安全的分段读取')
     expect(ignoredRange.body.cancel).toHaveBeenCalled()
   })
+
+  test.each([
+    'https://localhost/video',
+    'https://127.0.0.1/video',
+    'https://10.0.0.1/video',
+    'https://evil.example/video',
+    'http://bucket.cos.ap-shanghai.myqcloud.com/video',
+  ])('rejects an untrusted temporary URL before fetch: %s', async (url) => {
+    const fetch = jest.fn()
+
+    await expect(inspectRemoteObjectWithFetch(url, fetch)).rejects.toThrow('临时文件地址无效')
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  test('fails closed on redirects without following or attempting GET', async () => {
+    const fetch = jest.fn(async () => response(302, { location: 'https://evil.example/video' }))
+
+    await expect(inspectRemoteObjectWithFetch(trustedDownloadUrl, fetch)).rejects.toThrow('不允许重定向')
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fetch).toHaveBeenCalledWith(trustedDownloadUrl, expect.objectContaining({ redirect: 'manual' }))
+  })
+
+  test.each(['0', '1e3', '9007199254740992'])(
+    'rejects a malformed or unsafe Content-Length header: %s',
+    async (contentLength) => {
+      const fetch = jest.fn()
+        .mockResolvedValueOnce(response(200, {
+          'content-length': contentLength,
+          'content-type': 'video/mp4',
+        }))
+        .mockResolvedValueOnce(response(206, {
+          'content-range': `bytes 0-0/${contentLength}`,
+          'content-length': '1',
+          'content-type': 'video/mp4',
+        }))
+
+      await expect(inspectRemoteObjectWithFetch(trustedDownloadUrl, fetch))
+        .rejects.toThrow('无法确认上传文件元数据')
+    },
+  )
 })

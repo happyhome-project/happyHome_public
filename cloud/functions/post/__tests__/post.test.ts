@@ -54,7 +54,6 @@ jest.mock('../../../lib/post-semantic-search', () => ({
 }))
 
 jest.mock('../../../lib/storage', () => ({
-  getCurrentEnvironmentId: jest.fn(() => 'env'),
   getTempUrl: jest.fn(),
   inspectRemoteObject: jest.fn(),
   requestUploadMetadata: jest.fn(),
@@ -151,6 +150,11 @@ beforeEach(() => {
   delete process.env.ALLOW_TEST_OPENID
   ;(storage.getTempUrl as jest.Mock).mockResolvedValue('https://download.example/object')
   ;(storage.inspectRemoteObject as jest.Mock).mockResolvedValue({ contentLength: 1024, contentType: 'video/mp4' })
+  ;(storage.requestUploadMetadata as jest.Mock).mockImplementation(async (cloudPath: string) => ({
+    cloudPath,
+    fileId: `cloud://env/${cloudPath}`,
+    url: '', token: '', authorization: '', cosFileId: '',
+  }))
 })
 
 test('createCollaboration writes a community-owned post without sectionId and accepts optional note images', async () => {

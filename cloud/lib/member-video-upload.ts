@@ -39,11 +39,11 @@ type MetadataFetchResponse = {
 
 export type MetadataFetch = (
   url: string,
-  init: { method: 'HEAD' | 'GET'; headers?: Record<string, string>; redirect?: 'follow' },
+  init: { method: 'HEAD' | 'GET'; headers?: Record<string, string>; redirect: 'manual'; signal: AbortSignal },
 ) => Promise<MetadataFetchResponse>
 
 type VerificationDependencies = {
-  environmentId: string
+  requestUploadMetadata(cloudPath: string): Promise<UploadMetadata>
   getTempUrl(fileID: string): Promise<string>
   inspectRemoteObject(url: string): Promise<RemoteObjectMetadata>
 }
@@ -97,21 +97,11 @@ function assertOwnedFile(
   fileID: string,
   openid: string,
   kind: 'video' | 'cover',
-  environmentId: string,
-): { extension: string } {
+): { cloudPath: string; extension: string } {
   const scope = deriveMemberVideoScope(openid)
   const directory = kind === 'video' ? 'member-videos' : 'member-video-covers'
   const prefix = `posts/${directory}/${scope}/`
   const parts = cloudFileParts(fileID)
-  const trustedEnvironmentId = String(environmentId || '').trim()
-  if (!trustedEnvironmentId) throw new Error('无法确认当前应用环境')
-  const belongsToEnvironment = parts && (
-    parts.environmentId === trustedEnvironmentId
-    || parts.environmentId.startsWith(`${trustedEnvironmentId}.`)
-  )
-  if (parts && !belongsToEnvironment) {
-    throw new Error(kind === 'video' ? '视频文件不属于当前应用' : '封面图片不属于当前应用')
-  }
   const cloudPath = parts?.path || ''
   const relativePath = cloudPath.startsWith(prefix) ? cloudPath.slice(prefix.length) : ''
   if (!relativePath || relativePath.includes('/')) {
@@ -122,7 +112,7 @@ function assertOwnedFile(
   if (!allowed.has(extension)) {
     throw new Error(kind === 'video' ? '视频文件类型不受支持' : '封面图片类型不受支持')
   }
-  return { extension }
+  return { cloudPath, extension }
 }
 
 function normalizedContentType(value: string): string {
@@ -135,8 +125,9 @@ function metadataFromResponse(response: MetadataFetchResponse, allowContentRange
   const rangeMatch = range.match(/^bytes\s+0-0\/(\d+)$/i)
   if (allowContentRange && (response.status !== 206 || !rangeMatch)) return null
   const lengthValue = rangeMatch?.[1] || response.headers.get('content-length') || ''
+  if (!/^[1-9]\d*$/.test(lengthValue)) return null
   const contentLength = Number(lengthValue)
-  if (!contentType || !Number.isFinite(contentLength) || contentLength < 0) return null
+  if (!contentType || !Number.isSafeInteger(contentLength) || contentLength <= 0) return null
   return { contentLength, contentType }
 }
 
@@ -145,24 +136,35 @@ export async function inspectRemoteObjectWithFetch(
   fetchImpl: MetadataFetch,
 ): Promise<RemoteObjectMetadata> {
   const parsed = new URL(url)
-  if (parsed.protocol !== 'https:') throw new Error('临时文件地址无效')
+  const host = parsed.hostname.toLowerCase()
+  const trustedCosHost = /^[a-z0-9][a-z0-9.-]*\.cos(?:-[a-z0-9-]+|\.[a-z0-9-]+)\.myqcloud\.com$/.test(host)
+  const trustedCloudBaseHost = /^[a-z0-9][a-z0-9.-]*\.(?:tcb\.qcloud\.la|cloudbase\.net|tcloudbaseapp\.com)$/.test(host)
+  if (parsed.protocol !== 'https:' || (!trustedCosHost && !trustedCloudBaseHost)) {
+    throw new Error('临时文件地址无效')
+  }
+
+  const signal = AbortSignal.timeout(5_000)
+  let head: MetadataFetchResponse | undefined
 
   try {
-    const head = await fetchImpl(url, { method: 'HEAD', redirect: 'follow' })
-    if (head.ok) {
-      const metadata = metadataFromResponse(head, false)
-      if (metadata) return metadata
-    }
+    head = await fetchImpl(url, { method: 'HEAD', redirect: 'manual', signal })
   } catch {
     // Some object endpoints reject HEAD; the bounded range request below is the safe fallback.
+  }
+  if (head && head.status >= 300 && head.status < 400) throw new Error('上传文件地址不允许重定向')
+  if (head?.ok) {
+    const metadata = metadataFromResponse(head, false)
+    if (metadata) return metadata
   }
 
   const ranged = await fetchImpl(url, {
     method: 'GET',
     headers: { Range: 'bytes=0-0' },
-    redirect: 'follow',
+    redirect: 'manual',
+    signal,
   })
   try {
+    if (ranged.status >= 300 && ranged.status < 400) throw new Error('上传文件地址不允许重定向')
     if (!ranged.ok) throw new Error(`无法读取上传文件元数据 (${ranged.status})`)
     if (ranged.status !== 206) throw new Error('上传文件地址不支持安全的分段读取')
     const metadata = metadataFromResponse(ranged, true)
@@ -179,11 +181,15 @@ async function verifyObject(
   kind: 'video' | 'cover',
   dependencies: VerificationDependencies,
 ): Promise<void> {
-  const { extension } = assertOwnedFile(fileID, openid, kind, dependencies.environmentId)
+  const { cloudPath, extension } = assertOwnedFile(fileID, openid, kind)
+  const expected = await dependencies.requestUploadMetadata(cloudPath)
+  if (String(expected?.fileId || '') !== fileID) {
+    throw new Error(kind === 'video' ? '视频文件不属于当前应用' : '封面图片不属于当前应用')
+  }
   const url = await dependencies.getTempUrl(fileID)
   const metadata = await dependencies.inspectRemoteObject(url)
   const contentLength = Number(metadata.contentLength)
-  if (!Number.isFinite(contentLength) || contentLength < 0) throw new Error('无法确认上传文件大小')
+  if (!Number.isSafeInteger(contentLength) || contentLength <= 0) throw new Error('无法确认上传文件大小')
 
   const contentType = normalizedContentType(metadata.contentType)
   if (kind === 'video') {
