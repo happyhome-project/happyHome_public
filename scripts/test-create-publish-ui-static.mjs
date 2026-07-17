@@ -14,6 +14,8 @@ function assert(condition, message) {
 const tabbar = read('miniprogram', 'src', 'components', 'AppTabBar.vue')
 const widgetEditor = read('miniprogram', 'src', 'components', 'widgets', 'WidgetEditor.vue')
 const topicPicker = read('miniprogram', 'src', 'components', 'widgets', 'TopicPicker.vue')
+const videoPublishEditorPath = path.join(root, 'miniprogram', 'src', 'components', 'widgets', 'VideoPublishEditor.vue')
+const videoPublishEditor = fs.existsSync(videoPublishEditorPath) ? fs.readFileSync(videoPublishEditorPath, 'utf8') : ''
 const createPage = read('miniprogram', 'src', 'pages', 'create', 'index.vue')
 const imageNoteCreate = read('miniprogram', 'src', 'utils', 'image-note-create.ts')
 
@@ -52,7 +54,33 @@ assert(
 )
 
 assert(
-  /grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/.test(tabbar) &&
+  tabbar.includes("{ key: 'media', label: '发图片/视频'") &&
+    tabbar.includes("mediaType: ['image', 'video']") &&
+    tabbar.includes('accept="image/*,video/*"') &&
+    tabbar.includes('storeArchiveMediaIntent'),
+  'the first publishing choice must select real image/video media and route it through local intent storage.',
+)
+
+assert(
+  createPage.includes("const archiveFormat = ref<'image_text' | 'text' | 'video' | ''>('')") &&
+    createPage.includes("widgetId: 'archive_video_videos'") &&
+    createPage.includes('<VideoPublishEditor') &&
+    videoPublishEditor.includes('requestMemberVideoUpload') &&
+    videoPublishEditor.includes('requestMemberVideoCoverUpload') &&
+    videoPublishEditor.includes('uploadCloudFile') &&
+    videoPublishEditor.includes('onProgress'),
+  'archive video publishing must have its own upload editor and server-owned upload paths.',
+)
+
+assert(
+  createPage.includes('createDraftStorageKey') &&
+    createPage.includes('restoreDraft') &&
+    createPage.includes('archiveFormat.value'),
+  'create drafts must be isolated and restored by community plus archive format.',
+)
+
+assert(
+  /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/.test(tabbar) &&
     /\.publish-sheet\s*\{[^}]*padding:[^;]*env\(safe-area-inset-bottom\)/s.test(tabbar) &&
     !/\.publish-sheet\s*\{[^}]*min-height:/s.test(tabbar) &&
     !tabbar.includes('min-height: 648rpx') &&
@@ -61,10 +89,10 @@ assert(
 )
 
 assert(
-  tabbar.includes("iconSrc: '/static/publish-icons/general.svg'") &&
-    !tabbar.includes('resolvePublishMeta(section?.name, index)') &&
-    !tabbar.includes('index % tones.length'),
-  'unknown sections should use one stable neutral source icon independent of array position.',
+  tabbar.includes("icon: '/static/publish-icons/trade.svg'") &&
+    tabbar.includes("icon: '/static/publish-icons/lost.svg'") &&
+    tabbar.includes("icon: '/static/publish-icons/neighbor.svg'"),
+  'the three product-level choices should keep stable source icons.',
 )
 
 assert(

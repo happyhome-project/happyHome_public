@@ -1,0 +1,253 @@
+<template>
+  <view class="video-publish-editor">
+    <video v-if="previewSource" class="video-preview" :src="previewSource" controls />
+    <view v-else class="video-empty"><text>还没有选择视频</text></view>
+
+    <image v-if="coverPreview" class="cover-preview" :src="coverPreview" mode="aspectFill" />
+    <progress v-if="uploading" :percent="progress" show-info active />
+    <text v-if="errorMessage" class="upload-error">{{ errorMessage }}</text>
+
+    <view class="video-actions">
+      <button :disabled="uploading" @tap="chooseVideo">{{ previewSource ? '替换视频' : '选择视频' }}</button>
+      <button v-if="previewSource" :disabled="uploading" @tap="chooseCover">选择封面</button>
+      <button v-if="previewSource" :disabled="uploading" @tap="removeVideo">删除</button>
+      <button v-if="errorMessage" @tap="retryUpload">重试</button>
+    </view>
+
+    <!-- #ifdef H5 -->
+    <input ref="h5VideoInput" class="native-file-input" type="file" accept="video/mp4,video/quicktime,video/webm,.m4v" @change="onH5VideoChange" />
+    <input ref="h5CoverInput" class="native-file-input" type="file" accept="image/jpeg,image/png,image/webp" @change="onH5CoverChange" />
+    <!-- #endif -->
+  </view>
+</template>
+
+<script setup lang="ts">
+import { onBeforeUnmount, ref, watch } from 'vue'
+import type { VideoItemCos } from '../../../../cloud/shared/types'
+import { postApi } from '../../api/cloud'
+import { uploadCloudFile, type StorageUploadSource } from '../../api/storage'
+import { buildCosVideoItems, normalizeChosenVideo } from '../../utils/video-publish'
+import type { ArchiveMediaIntentFile } from '../../utils/archive-media-intent'
+
+const props = defineProps<{
+  modelValue?: VideoItemCos[]
+  initialFile?: ArchiveMediaIntentFile | null
+}>()
+const emit = defineEmits<{
+  (event: 'update:modelValue', value: VideoItemCos[]): void
+  (event: 'upload-state', value: boolean): void
+}>()
+
+const h5VideoInput = ref<HTMLInputElement | null>(null)
+const h5CoverInput = ref<HTMLInputElement | null>(null)
+const previewSource = ref('')
+const coverPreview = ref('')
+const uploading = ref(false)
+const progress = ref(0)
+const errorMessage = ref('')
+const selectedVideo = ref<ArchiveMediaIntentFile | null>(null)
+const selectedCover = ref<ArchiveMediaIntentFile | null>(null)
+const uploadedVideoFileID = ref('')
+const uploadedCoverFileID = ref('')
+let retryAction: (() => Promise<void>) | null = null
+const objectUrls = new Set<string>()
+
+watch(() => props.modelValue, (items) => {
+  const item = items?.[0]
+  if (!item || selectedVideo.value) return
+  previewSource.value = item.fileID
+  coverPreview.value = item.cover || ''
+  uploadedVideoFileID.value = item.fileID
+  uploadedCoverFileID.value = item.cover || ''
+  selectedVideo.value = {
+    source: item.fileID,
+    name: `${item.title || '视频'}.mp4`,
+    type: 'video/mp4',
+    size: 1,
+    duration: item.duration,
+  }
+}, { immediate: true, deep: true })
+
+watch(() => props.initialFile, (file) => {
+  if (!file) return
+  void acceptVideo(file)
+}, { immediate: true })
+
+onBeforeUnmount(() => {
+  objectUrls.forEach((url) => URL.revokeObjectURL(url))
+})
+
+function previewFor(source: string | Blob): string {
+  if (typeof source === 'string') return source
+  const url = URL.createObjectURL(source)
+  objectUrls.add(url)
+  return url
+}
+
+function setUploading(value: boolean) {
+  uploading.value = value
+  emit('upload-state', value)
+}
+
+async function confirmReplacement(): Promise<boolean> {
+  if (!previewSource.value) return true
+  return new Promise((resolve) => {
+    uni.showModal({
+      title: '替换已有视频',
+      content: '替换后将清空当前视频和封面，是否继续？',
+      success: (result: any) => resolve(Boolean(result.confirm)),
+      fail: () => resolve(false),
+    })
+  })
+}
+
+async function acceptVideo(file: ArchiveMediaIntentFile) {
+  if (!(await confirmReplacement())) return
+  selectedVideo.value = file
+  selectedCover.value = null
+  uploadedVideoFileID.value = ''
+  uploadedCoverFileID.value = ''
+  previewSource.value = previewFor(file.source)
+  coverPreview.value = file.thumbTempFilePath || ''
+  emit('update:modelValue', [])
+  retryAction = () => uploadVideo(file)
+  await retryAction()
+}
+
+async function uploadVideo(file: ArchiveMediaIntentFile) {
+  setUploading(true)
+  progress.value = 0
+  errorMessage.value = ''
+  try {
+    normalizeChosenVideo({ tempFiles: [{
+      tempFilePath: typeof file.source === 'string' ? file.source : 'blob:video',
+      name: file.name,
+      size: file.size,
+      duration: file.duration,
+      type: file.type || 'video',
+      fileType: 'video',
+    }] })
+    const metadata = await postApi.requestMemberVideoUpload({ fileName: file.name })
+    const result = await uploadCloudFile({
+      cloudPath: metadata.cloudPath,
+      source: file.source as StorageUploadSource,
+      onProgress: (event) => { progress.value = Math.round(event.progress) },
+    })
+    if (selectedVideo.value !== file) return
+    uploadedVideoFileID.value = result.fileID
+    publishModel()
+  } catch (error: any) {
+    errorMessage.value = error?.message || '视频上传失败'
+  } finally {
+    setUploading(false)
+  }
+}
+
+async function uploadCover(file: ArchiveMediaIntentFile) {
+  setUploading(true)
+  progress.value = 0
+  errorMessage.value = ''
+  try {
+    const metadata = await postApi.requestMemberVideoCoverUpload({ fileName: file.name })
+    const result = await uploadCloudFile({
+      cloudPath: metadata.cloudPath,
+      source: file.source as StorageUploadSource,
+      onProgress: (event) => { progress.value = Math.round(event.progress) },
+    })
+    if (selectedCover.value !== file || !selectedVideo.value) return
+    uploadedCoverFileID.value = result.fileID
+    publishModel()
+  } catch (error: any) {
+    errorMessage.value = error?.message || '封面上传失败'
+  } finally {
+    setUploading(false)
+  }
+}
+
+function publishModel() {
+  if (!uploadedVideoFileID.value || !selectedVideo.value) return
+  emit('update:modelValue', buildCosVideoItems({
+    fileID: uploadedVideoFileID.value,
+    title: selectedVideo.value.name.replace(/\.[^.]+$/, '') || '视频',
+    cover: uploadedCoverFileID.value || undefined,
+    duration: selectedVideo.value.duration,
+  }))
+}
+
+function chooseVideo() {
+  // #ifdef H5
+  h5VideoInput.value?.click()
+  return
+  // #endif
+  // #ifndef H5
+  wx.chooseMedia({ count: 1, mediaType: ['video'], sourceType: ['album', 'camera'], success: (result: any) => {
+    const normalized = normalizeChosenVideo(result)
+    void acceptVideo({ source: normalized.tempFilePath, name: normalized.name, type: 'video', size: normalized.size, duration: normalized.duration, thumbTempFilePath: normalized.thumbTempFilePath })
+  } })
+  // #endif
+}
+
+function chooseCover() {
+  // #ifdef H5
+  h5CoverInput.value?.click()
+  return
+  // #endif
+  // #ifndef H5
+  wx.chooseMedia({ count: 1, mediaType: ['image'], sourceType: ['album', 'camera'], success: (result: any) => {
+    const file = result?.tempFiles?.[0]
+    if (!file) return
+    const selected = { source: file.tempFilePath, name: String(file.name || file.tempFilePath.split('/').pop() || 'cover.jpg'), type: String(file.type || 'image'), size: Number(file.size) || 0 }
+    selectedCover.value = selected
+    coverPreview.value = previewFor(selected.source)
+    retryAction = () => uploadCover(selected)
+    void retryAction()
+  } })
+  // #endif
+}
+
+function onH5VideoChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (file) void acceptVideo({ source: file, name: file.name, type: file.type, size: file.size })
+  input.value = ''
+}
+
+function onH5CoverChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (file) {
+    const selected = { source: file, name: file.name, type: file.type, size: file.size }
+    selectedCover.value = selected
+    coverPreview.value = previewFor(file)
+    retryAction = () => uploadCover(selected)
+    void retryAction()
+  }
+  input.value = ''
+}
+
+function retryUpload() { void retryAction?.() }
+
+function removeVideo() {
+  selectedVideo.value = null
+  selectedCover.value = null
+  uploadedVideoFileID.value = ''
+  uploadedCoverFileID.value = ''
+  previewSource.value = ''
+  coverPreview.value = ''
+  errorMessage.value = ''
+  progress.value = 0
+  retryAction = null
+  emit('update:modelValue', [])
+}
+</script>
+
+<style lang="scss" scoped>
+.video-publish-editor { padding: 24rpx; border-radius: 24rpx; background: #fff; }
+.video-preview, .video-empty { width: 100%; height: 360rpx; border-radius: 18rpx; background: #111; }
+.video-empty { display: flex; align-items: center; justify-content: center; color: #fff; }
+.cover-preview { width: 160rpx; height: 100rpx; margin-top: 16rpx; border-radius: 12rpx; }
+.video-actions { display: flex; flex-wrap: wrap; gap: 12rpx; margin-top: 18rpx; }
+.video-actions button { margin: 0; padding: 0 20rpx; font-size: 24rpx; }
+.upload-error { display: block; margin-top: 12rpx; color: #c62828; }
+.native-file-input { display: none; }
+</style>

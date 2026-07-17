@@ -231,6 +231,13 @@
                 />
               </view>
 
+              <VideoPublishEditor
+                v-else-if="archiveFormat === 'video' && block.widget.type === 'video_group'"
+                :model-value="formData[block.widget.widgetId]"
+                :initial-file="archiveInitialMedia"
+                @update:model-value="formData[block.widget.widgetId] = $event"
+                @upload-state="videoUploading = $event"
+              />
               <WidgetEditor
                 v-else
                 :widget="block.widget"
@@ -255,7 +262,7 @@
               />
               <text>存草稿</text>
             </button>
-            <button class="btn-primary" data-testid="create-submit" :disabled="submitting" @tap="handleSubmit">
+            <button class="btn-primary" data-testid="create-submit" :disabled="submitting || videoUploading" @tap="handleSubmit">
               {{ submitting ? (isEditMode ? '保存中...' : '发布中...') : (isEditMode ? '保存' : (isActivityInviteMode ? '发布邀约' : '发布')) }}
             </button>
           </view>
@@ -271,10 +278,11 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
-import { collaborationTemplateApi, memberApi, postApi, sectionApi } from '../../api/cloud'
+import { collaborationTemplateApi, memberApi, postApi, sectionApi, type ArchivePostCreateParams } from '../../api/cloud'
 import { uploadCloudFile } from '../../api/storage'
 import AppTabBar from '../../components/AppTabBar.vue'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
+import VideoPublishEditor from '../../components/widgets/VideoPublishEditor.vue'
 import TextNoteCover from '../../components/TextNoteCover.vue'
 import {
   CREATE_SECTION_INTENT_KEY,
@@ -290,6 +298,11 @@ import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { ensureHierarchyStack, normalizeRouteUrl, openHierarchyParent } from '../../utils/hierarchy-nav'
 import { extractTextNoteContent, TEXT_NOTE_THEMES, type TextNoteTheme } from '../../utils/text-note'
 import { asCollaborationSection, isCollaborationSection } from '../../utils/collaboration-template'
+import {
+  consumeArchiveMediaIntent,
+  createDraftStorageKey,
+  type ArchiveMediaIntentFile,
+} from '../../utils/archive-media-intent'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -300,7 +313,6 @@ const editPostSnapshot = ref<any>(null)
 const submitting = ref(false)
 const joining = ref(false)
 const HOME_REFRESH_AFTER_POST_KEY = 'home_refresh_after_post'
-const CREATE_DRAFT_KEY = 'create_draft_v1'
 const ACTIVITY_INVITE_CREATE_INTENT_KEY = 'activity_invite_create_intent_v1'
 const ACTIVITY_INVITE_INTENT_TTL_MS = 30 * 60 * 1000
 const ACTIVITY_INVITE_WIDGET_IDS = {
@@ -316,7 +328,9 @@ const activityInviteLoading = ref(false)
 const createReturnTo = ref('')
 const textNoteStep = ref<'compose' | 'cover'>('compose')
 const textNoteTheme = ref<TextNoteTheme>('paper')
-const archiveFormat = ref<'image_text' | 'text' | ''>('')
+const archiveFormat = ref<'image_text' | 'text' | 'video' | ''>('')
+const archiveInitialMedia = ref<ArchiveMediaIntentFile | null>(null)
+const videoUploading = ref(false)
 const collaborationOnly = ref(false)
 const collaborationTemplatesError = ref('')
 const initialLoadPending = ref(true)
@@ -379,7 +393,6 @@ const isGuideCreateMode = computed(() => {
   return GUIDE_CREATE_NAME_HINTS.some((hint) => name.includes(hint))
 })
 const isImageNoteCreateMode = computed(() => isImageNoteSectionContract(selectedSection.value))
-
 function allowImagesForWidget(widget: any) {
   if (isTextNoteCreateMode.value) return false
   if (isGuideCreateMode.value) return false
@@ -472,10 +485,11 @@ onLoad(async (options: any) => {
   try {
     if (await loadPostForEdit(String(options?.editPostId || ''))) return
     const requestedArchiveFormat = String(options?.archiveFormat || '')
-    if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text') {
+    if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text' || requestedArchiveFormat === 'video') {
       // Resolve the product-level publishing route before the first await. Otherwise
       // membership refresh can commit the legacy section picker for one frame.
       enterArchiveEditor(requestedArchiveFormat, options?.returnTo)
+      applyArchiveMediaIntent(options?.mediaIntent)
     }
     await Promise.all([
       ensureSectionsLoaded(),
@@ -491,14 +505,24 @@ onLoad(async (options: any) => {
   }
 })
 
-function buildArchiveEditorSection(format: 'image_text' | 'text') {
-  const common = { _id: `archive-${format}`, communityId: communityStore.currentCommunityId, name: format === 'text' ? '写文字' : '发图文', type: 'evergreen', status: 'active' }
+function buildArchiveEditorSection(format: 'image_text' | 'text' | 'video') {
+  const common = { _id: `archive-${format}`, communityId: communityStore.currentCommunityId, name: format === 'text' ? '写文字' : (format === 'video' ? '发视频' : '发图文'), type: 'evergreen', status: 'active' }
   if (format === 'text') return Object.assign({}, common, {
     displayTemplate: 'text_note',
     widgets: [
       { widgetId: 'text_title', fieldKey: 'title', type: 'short_text', label: '标题', required: true, order: 0, showInList: true },
       { widgetId: 'text_body', fieldKey: 'body', type: 'rich_note', label: '正文', required: true, order: 1, showInList: false },
       { widgetId: 'archive_text_topics', fieldKey: 'topics', type: 'topic', label: '添加话题', required: false, order: 2, showInList: false },
+    ],
+  })
+  if (format === 'video') return Object.assign({}, common, {
+    displayTemplate: 'video_note',
+    widgets: [
+      { widgetId: 'archive_video_videos', fieldKey: 'videos', type: 'video_group', label: '视频', required: true, order: 0, showInList: false },
+      { widgetId: 'archive_video_title', fieldKey: 'title', type: 'short_text', label: '标题', required: true, order: 1, showInList: true },
+      { widgetId: 'archive_video_body', fieldKey: 'body', type: 'rich_note', label: '正文', required: false, order: 2, showInList: false },
+      { widgetId: 'archive_video_topics', fieldKey: 'topics', type: 'topic', label: '添加话题', required: false, order: 3, showInList: false },
+      { widgetId: 'archive_video_location', fieldKey: 'location', type: 'location', label: '添加地点', required: false, order: 4, showInList: false },
     ],
   })
   return Object.assign({}, common, {
@@ -513,10 +537,25 @@ function buildArchiveEditorSection(format: 'image_text' | 'text') {
   })
 }
 
-function enterArchiveEditor(format: 'image_text' | 'text', returnTo?: string) {
+function enterArchiveEditor(format: 'image_text' | 'text' | 'video', returnTo?: string) {
   archiveFormat.value = format
+  archiveInitialMedia.value = null
+  videoUploading.value = false
   collaborationOnly.value = false
   selectSection(buildArchiveEditorSection(format), { returnTo: String(returnTo || '') })
+}
+
+function applyArchiveMediaIntent(token: unknown) {
+  const intent = consumeArchiveMediaIntent(token)
+  if (!intent) return
+  if (intent.mediaType === 'video' && archiveFormat.value === 'video') {
+    archiveInitialMedia.value = intent.files[0] || null
+    formData.archive_video_videos = []
+    return
+  }
+  if (intent.mediaType === 'image' && archiveFormat.value === 'image_text') {
+    formData.image_note_images = intent.files.map((file) => file.source)
+  }
 }
 
 async function loadPostForEdit(postId: string) {
@@ -536,7 +575,7 @@ async function loadPostForEdit(postId: string) {
     }
     await ensureSectionsLoaded()
     if (currentPost.area === 'archive') {
-      const format = currentPost.format === 'text' ? 'text' : 'image_text'
+      const format = currentPost.format === 'text' ? 'text' : (currentPost.format === 'video' ? 'video' : 'image_text')
       archiveFormat.value = format
       const archiveSection = buildArchiveEditorSection(format)
       selectSection(archiveSection, { returnTo: createReturnTo.value })
@@ -668,6 +707,7 @@ function selectSection(section: any, options: { returnTo?: string } = {}) {
       formData[String(widget.widgetId)] = []
     }
   }
+  restoreDraft()
 }
 
 function handleFormBack() {
@@ -1022,8 +1062,9 @@ async function handleEditSubmitResult(result: any) {
 function saveDraft() {
   if (!selectedSection.value) return
   try {
-    uni.setStorageSync(CREATE_DRAFT_KEY, {
+    uni.setStorageSync(currentDraftStorageKey(), {
       communityId: communityStore.currentCommunityId,
+      format: archiveFormat.value || '',
       sectionId: selectedSection.value._id,
       collaborationTemplateId: isCollaborationSection(selectedSection.value)
         ? selectedSection.value.collaborationTemplateId
@@ -1039,14 +1080,38 @@ function saveDraft() {
   }
 }
 
+function currentDraftStorageKey() {
+  const scope = archiveFormat.value || (isCollaborationSection(selectedSection.value)
+    ? `collaboration:${selectedSection.value?.collaborationTemplateId || ''}`
+    : `section:${selectedSection.value?._id || ''}`)
+  return createDraftStorageKey(communityStore.currentCommunityId, scope)
+}
+
+function restoreDraft() {
+  if (!selectedSection.value || isEditMode.value) return
+  try {
+    const draft = uni.getStorageSync(currentDraftStorageKey())
+    if (!draft || String(draft.communityId || '') !== String(communityStore.currentCommunityId || '')) return
+    if (String(draft.format || '') !== String(archiveFormat.value || '')) return
+    Object.assign(formData, JSON.parse(JSON.stringify(draft.content || {})))
+    if (archiveFormat.value === 'text' && draft.presentation?.textNoteTheme) {
+      textNoteTheme.value = draft.presentation.textNoteTheme
+    }
+  } catch {}
+}
+
 function clearDraft() {
   try {
-    uni.removeStorageSync(CREATE_DRAFT_KEY)
+    uni.removeStorageSync(currentDraftStorageKey())
   } catch (_error) {}
 }
 
 async function handleSubmit() {
   if (!selectedSection.value || submitting.value) return
+  if (videoUploading.value) {
+    uni.showToast({ title: '视频仍在上传，请稍候', icon: 'none' })
+    return
+  }
   submitting.value = true
   try {
     const sectionId = selectedSection.value._id
@@ -1064,7 +1129,7 @@ async function handleSubmit() {
         return
       }
       // 媒体组由 admin 后台维护，普通用户发帖不携带该字段
-      if (widget.type === 'video_group' || widget.type === 'audio_group') {
+      if ((widget.type === 'video_group' && archiveFormat.value !== 'video') || widget.type === 'audio_group') {
         delete content[widget.widgetId]
         continue
       }
@@ -1115,7 +1180,7 @@ async function handleSubmit() {
             topics: archiveTopics,
             content: archiveContent || {},
             presentation: archiveFormat.value === 'text' ? { textNoteTheme: textNoteTheme.value } : undefined,
-          })
+          } as ArchivePostCreateParams)
       : isCollaborationSection(selectedSection.value)
         ? await postApi.createCollaboration({
             communityId: communityStore.currentCommunityId,

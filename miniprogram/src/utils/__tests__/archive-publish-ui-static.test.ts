@@ -11,17 +11,48 @@ describe('archive publishing entry', () => {
     expect(rule).not.toMatch(/(?:^|\s)background\s*:/)
   })
 
-  test('offers exactly the three product-level publishing choices', () => {
+  test('offers one image/video media choice plus text and collaboration', () => {
     const source = read('components', 'AppTabBar.vue')
-    expect(source).toContain("{ key: 'image_text', label: '发图文', icon: '/static/publish-icons/trade.svg', tone: 'image-text' }")
+    expect(source).toContain("{ key: 'media', label: '发图片/视频', icon: '/static/publish-icons/trade.svg', tone: 'image-text' }")
     expect(source).toContain("{ key: 'text', label: '写文字', icon: '/static/publish-icons/lost.svg', tone: 'text' }")
     expect(source).toContain("{ key: 'collaboration', label: '发起协作', icon: '/static/publish-icons/neighbor.svg', tone: 'collaboration' }")
+    expect(source).toContain("mediaType: ['image', 'video']")
+    expect(source).toContain('accept="image/*,video/*"')
+    expect(source).toContain('detectFirstMediaType')
+    expect(source).toContain('storeArchiveMediaIntent')
     expect(source).toContain(':src="option.icon"')
     expect(source).toContain(':class="`publish-icon--${option.tone}`"')
     expect(source).not.toContain('publish-icon-glyph')
     expect(source).not.toContain('option.glyph')
     expect(source).not.toContain('activePublishSections')
     expect(source).not.toContain('option.section')
+  })
+
+  test('create page owns a video archive editor without unlocking ordinary admin media widgets', () => {
+    const create = read('pages', 'create', 'index.vue')
+    const widgetEditor = read('components', 'widgets', 'WidgetEditor.vue')
+    const videoEditor = read('components', 'widgets', 'VideoPublishEditor.vue')
+
+    expect(create).toContain("const archiveFormat = ref<'image_text' | 'text' | 'video' | ''>('')")
+    expect(create).toContain("widgetId: 'archive_video_videos'")
+    expect(create).toContain("fieldKey: 'videos'")
+    expect(create).toContain("type: 'video_group'")
+    expect(create).toContain('<VideoPublishEditor')
+    expect(create).toContain("archiveFormat.value === 'video'")
+    expect(widgetEditor).toContain("widget.type === 'video_group' || widget.type === 'audio_group'")
+    expect(videoEditor).toContain('requestMemberVideoUpload')
+    expect(videoEditor).toContain('requestMemberVideoCoverUpload')
+    expect(videoEditor).toContain('uploadCloudFile')
+    expect(videoEditor).toContain('onProgress')
+    expect(videoEditor).toContain('重试')
+  })
+
+  test('isolates archive drafts by community and format', () => {
+    const create = read('pages', 'create', 'index.vue')
+    expect(create).toContain('createDraftStorageKey')
+    expect(create).toContain('communityStore.currentCommunityId')
+    expect(create).toContain('archiveFormat.value')
+    expect(create).toContain('restoreDraft')
   })
 
   test('keeps the publish button free of a tinted outer shadow', () => {

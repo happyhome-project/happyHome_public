@@ -20,6 +20,9 @@
         </button>
       </view>
     </view>
+    <!-- #ifdef H5 -->
+    <input ref="h5MediaInput" class="native-media-input" type="file" accept="image/*,video/*" multiple @change="onH5MediaChange" />
+    <!-- #endif -->
 
     <view class="app-tabbar" aria-label="主导航">
       <button
@@ -57,12 +60,15 @@ import {
   getTabByKey,
   hideNativeTabBar,
 } from '../utils/app-tabbar'
+import { detectFirstMediaType, type PublishMediaType } from '../utils/video-publish'
+import { storeArchiveMediaIntent, type ArchiveMediaIntentFile } from '../utils/archive-media-intent'
 
 const props = defineProps<{ current: AppTabKey }>()
 const showPublishSheet = ref(false)
+const h5MediaInput = ref<HTMLInputElement | null>(null)
 const HOME_TAB_RETAP_EVENT = 'happyhome:home-tab-retap'
 const publishOptions = computed(() => [
-  { key: 'image_text', label: '发图文', icon: '/static/publish-icons/trade.svg', tone: 'image-text' },
+  { key: 'media', label: '发图片/视频', icon: '/static/publish-icons/trade.svg', tone: 'image-text' },
   { key: 'text', label: '写文字', icon: '/static/publish-icons/lost.svg', tone: 'text' },
   { key: 'collaboration', label: '发起协作', icon: '/static/publish-icons/neighbor.svg', tone: 'collaboration' },
 ])
@@ -105,11 +111,76 @@ function closePublishSheet() {
 }
 
 function handlePublishOption(key: string) {
+  if (key === 'media') {
+    choosePublishMedia()
+    return
+  }
   const returnTo = props.current === 'create' ? '' : (getTabByKey(props.current)?.path || '')
   closePublishSheet()
   const params = returnTo ? [`returnTo=${encodeURIComponent(returnTo)}`] : []
   params.push(key === 'collaboration' ? 'mode=collaboration' : `archiveFormat=${encodeURIComponent(key)}`)
   uni.navigateTo({ url: `/pages/create/index?${params.join('&')}` })
+}
+
+function choosePublishMedia() {
+  // #ifdef H5
+  h5MediaInput.value?.click()
+  return
+  // #endif
+
+  // #ifndef H5
+  wx.chooseMedia({
+    count: 9,
+    mediaType: ['image', 'video'],
+    sourceType: ['album', 'camera'],
+    success: (result: any) => routeSelectedMedia(result),
+  })
+  // #endif
+}
+
+function normalizeIntentFiles(files: any[], mediaType: PublishMediaType): ArchiveMediaIntentFile[] {
+  const matching = files.filter((file) => detectFirstMediaType({ tempFiles: [file] }) === mediaType)
+  const selected = mediaType === 'video' ? matching.slice(0, 1) : matching
+  return selected.map((file) => ({
+    source: file.source || file.tempFilePath || file.path,
+    name: String(file.name || (file.tempFilePath || file.path || '').split(/[\\/]/).pop() || ''),
+    type: String(file.type || file.fileType || mediaType),
+    size: Number(file.size) || 0,
+    duration: Number(file.duration) || 0,
+    thumbTempFilePath: String(file.thumbTempFilePath || ''),
+  }))
+}
+
+function routeSelectedMedia(result: any) {
+  const mediaType = detectFirstMediaType(result)
+  const files = Array.isArray(result?.tempFiles) ? result.tempFiles : []
+  if (!mediaType) {
+    uni.showToast({ title: '请选择图片或视频', icon: 'none' })
+    return
+  }
+  const intentFiles = normalizeIntentFiles(files, mediaType)
+  if (intentFiles.length === 0) return
+  const token = storeArchiveMediaIntent(mediaType, intentFiles)
+  const returnTo = props.current === 'create' ? '' : (getTabByKey(props.current)?.path || '')
+  closePublishSheet()
+  const params = [`archiveFormat=${mediaType === 'video' ? 'video' : 'image_text'}`, `mediaIntent=${encodeURIComponent(token)}`]
+  if (returnTo) params.push(`returnTo=${encodeURIComponent(returnTo)}`)
+  uni.navigateTo({ url: `/pages/create/index?${params.join('&')}` })
+}
+
+function onH5MediaChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  routeSelectedMedia({
+    type: 'mix',
+    tempFiles: files.map((file) => ({
+      source: URL.createObjectURL(file),
+      name: file.name,
+      type: file.type,
+      size: file.size,
+    })),
+  })
+  input.value = ''
 }
 
 function currentReturnTo() {
@@ -133,6 +204,8 @@ void APP_TABS
   z-index: $hh-z-sticky + 20;
   background: rgba(0, 0, 0, 0.65);
 }
+
+.native-media-input { display: none; }
 
 .publish-sheet {
   position: absolute;
