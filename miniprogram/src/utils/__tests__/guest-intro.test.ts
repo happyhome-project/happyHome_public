@@ -73,11 +73,15 @@ describe('guest intro popup visibility', () => {
     })).toBe(false)
   })
 
-  test('starts login on home without routing through profile and uses the new create copy', () => {
+  test('starts login on home and lets guests browse without opening onboarding', () => {
     const homeSource = fs.readFileSync(path.resolve(process.cwd(), 'src/pages/index/index.vue'), 'utf8')
     const primaryStart = homeSource.indexOf('function handleGuestIntroPrimary')
     const secondaryStart = homeSource.indexOf('function handleGuestIntroSecondary')
     const primaryHandler = homeSource.slice(primaryStart, secondaryStart)
+    const secondaryHandler = homeSource.slice(
+      secondaryStart,
+      homeSource.indexOf('\nfunction ', secondaryStart + 1),
+    )
 
     expect(primaryStart).toBeGreaterThan(-1)
     expect(primaryHandler).not.toContain('/pages/profile/index')
@@ -89,14 +93,21 @@ describe('guest intro popup visibility', () => {
     expect(homeSource).toContain(':focus="guestIntroNicknameFocused"')
     expect(homeSource).toMatch(/handleGuestIntroChooseAvatar[\s\S]*guestIntroLoginMode\.value = 'nickname'[\s\S]*nextTick[\s\S]*guestIntroNicknameFocused\.value = true/)
     expect(homeSource).not.toContain('showKeyboard')
-    expect(DEFAULT_GUEST_INTRO_CONFIG.secondaryActionText).toBe('创建我自己的社群')
+    expect(homeSource).not.toContain('guest-intro-secondary-plus')
+    expect(secondaryHandler).toContain('markCurrentGuestIntroSeen()')
+    expect(secondaryHandler).not.toContain('openOnboardingPreservingStack')
+    expect(DEFAULT_GUEST_INTRO_CONFIG.secondaryActionText).toBe('先随便看看')
   })
 
-  test('upgrades the previous default create copy without overwriting custom copy', () => {
+  test('upgrades previous default creation copy without overwriting custom copy', () => {
     expect(normalizeGuestIntroConfig({
       ...DEFAULT_GUEST_INTRO_CONFIG,
       secondaryActionText: '免费创建我的社群',
-    }).secondaryActionText).toBe('创建我自己的社群')
+    }).secondaryActionText).toBe('先随便看看')
+    expect(normalizeGuestIntroConfig({
+      ...DEFAULT_GUEST_INTRO_CONFIG,
+      secondaryActionText: '创建我自己的社群',
+    }).secondaryActionText).toBe('先随便看看')
     expect(normalizeGuestIntroConfig({
       ...DEFAULT_GUEST_INTRO_CONFIG,
       secondaryActionText: '加入社区',

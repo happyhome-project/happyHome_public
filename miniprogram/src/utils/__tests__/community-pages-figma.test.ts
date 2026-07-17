@@ -132,12 +132,13 @@ describe('Figma community directory pages', () => {
     expect(initializeHome.indexOf('await refreshHomeData()')).toBeGreaterThan(-1)
   })
 
-  test('home covers unresolved authenticated data with a dedicated entry state', () => {
+  test('home covers unresolved authenticated or dismissed-guest data with a dedicated entry state', () => {
     const code = readPage('index')
 
     expect(code).toContain('class="home-entry-loading"')
     expect(code).toContain('正在进入社区')
-    expect(code).toMatch(/showAuthenticatedHomeEntryLoading[\s\S]*userStore\.isLoggedIn[\s\S]*homeSnapshotViewerOpenId\.value !== userStore\.openId/)
+    expect(code).toMatch(/showHomeEntryLoading[\s\S]*userStore\.isLoggedIn[\s\S]*homeSnapshotViewerOpenId\.value !== userStore\.openId/)
+    expect(code).toMatch(/showHomeEntryLoading[\s\S]*!userStore\.isLoggedIn[\s\S]*!showGuestIntro\.value[\s\S]*homeLoading\.value[\s\S]*!communityStore\.currentCommunityId/)
     expect(code).toMatch(/applyHomeSnapshot[\s\S]*homeSnapshotViewerOpenId\.value = expectedViewer/)
     expect(code).toContain('@tap="retryHomeRefresh"')
   })
