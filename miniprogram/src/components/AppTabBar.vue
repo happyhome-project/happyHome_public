@@ -63,7 +63,8 @@ import {
 import { detectFirstMediaType, type PublishMediaType } from '../utils/video-publish'
 import { discardArchiveMediaIntent, storeArchiveMediaIntent, sweepArchiveMediaIntents, type ArchiveMediaIntentFile } from '../utils/archive-media-intent'
 
-const props = defineProps<{ current: AppTabKey }>()
+type AppTabBarCurrent = AppTabKey | 'create'
+const props = defineProps<{ current: AppTabBarCurrent }>()
 const emit = defineEmits<{ (event: 'media-selected', token: string): void }>()
 const showPublishSheet = ref(false)
 const h5MediaInput = ref<HTMLInputElement | null>(null)
@@ -169,7 +170,7 @@ function routeSelectedMedia(result: any) {
     emit('media-selected', token)
     return
   }
-  const returnTo = props.current === 'create' ? '' : (getTabByKey(props.current)?.path || '')
+  const returnTo = getTabByKey(props.current)?.path || ''
   closePublishSheet()
   const params = [`archiveFormat=${mediaType === 'video' ? 'video' : 'image_text'}`, `mediaIntent=${encodeURIComponent(token)}`]
   if (returnTo) params.push(`returnTo=${encodeURIComponent(returnTo)}`)

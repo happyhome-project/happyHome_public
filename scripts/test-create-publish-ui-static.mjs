@@ -78,6 +78,7 @@ assert(
     tabbar.includes('accept="image/*,video/*"') &&
     tabbar.includes('storeArchiveMediaIntent') &&
     tabbar.includes("if (props.current === 'create')") &&
+    tabbar.includes("type AppTabBarCurrent = AppTabKey | 'create'") &&
     tabbar.includes("emit('media-selected', token)") &&
     tabbar.includes('source: file') &&
     !tabbar.includes('source: URL.createObjectURL(file)') &&

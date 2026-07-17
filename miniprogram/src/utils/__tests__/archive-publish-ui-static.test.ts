@@ -36,6 +36,7 @@ describe('archive publishing entry', () => {
     expect(source).toContain('detectFirstMediaType')
     expect(source).toContain('storeArchiveMediaIntent')
     expect(source).toContain("if (props.current === 'create')")
+    expect(source).toContain("type AppTabBarCurrent = AppTabKey | 'create'")
     expect(source).toContain("emit('media-selected', token)")
     expect(source).toContain('source: file')
     expect(source).not.toContain('source: URL.createObjectURL(file)')
