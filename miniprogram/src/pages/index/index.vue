@@ -1326,7 +1326,7 @@ async function loadArchiveFeed(
         archiveCursor.value = ''
       }
       const requestedTopic = nextArchiveTopic
-      const [tabResult, initialResult] = await Promise.all([
+      const archiveResults = await Promise.all([
         postApi.listArchiveTabs({ communityId, asGuest: !userStore.isLoggedIn }),
         postApi.listArchive({
           communityId,
@@ -1336,6 +1336,8 @@ async function loadArchiveFeed(
           asGuest: !userStore.isLoggedIn,
         }),
       ])
+      const tabResult = archiveResults[0]
+      const initialResult = archiveResults[1]
       markHomeStartupStage('home.archive.tabs.received', {
         tabCount: Array.isArray(tabResult.tabs) ? tabResult.tabs.length : 0,
       })
