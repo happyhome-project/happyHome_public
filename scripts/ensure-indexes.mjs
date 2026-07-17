@@ -296,6 +296,15 @@ const INDEXES = [
       { Name: 'communityId', Direction: '1' },
     ],
   },
+  // post_attendance_members: “我的活动”按当前用户稳定分页反查参与记录
+  {
+    coll: 'post_attendance_members',
+    name: 'idx_userId_id',
+    keys: [
+      { Name: 'userId', Direction: '1' },
+      { Name: '_id', Direction: '1' },
+    ],
+  },
   // admin_accounts: auth.login 按 username 查，且需要唯一约束
   {
     coll: 'admin_accounts',

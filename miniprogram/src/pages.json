@@ -32,6 +32,10 @@
       "style": { "navigationBarTitleText": "我发布的", "enablePullDownRefresh": true }
     },
     {
+      "path": "pages/my-activities/index",
+      "style": { "navigationBarTitleText": "我的活动", "enablePullDownRefresh": true }
+    },
+    {
       "path": "pages/detail/index",
       "style": { "navigationBarTitleText": "详情" }
     },

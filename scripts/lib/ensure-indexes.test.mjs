@@ -51,3 +51,7 @@ test('ensure-indexes provisions global collaboration templates and section-free 
   assert.match(source, /idx_collaboration_status_order[\s\S]*status[\s\S]*order/)
   assert.match(source, /idx_communityId_area_template_status_createdAt[\s\S]*communityId[\s\S]*area[\s\S]*collaborationTemplateId[\s\S]*status[\s\S]*createdAt/)
 })
+
+test('ensure-indexes supports reverse attendance lookup for my activities', () => {
+  assert.match(source, /post_attendance_members[\s\S]*idx_userId_id[\s\S]*userId[\s\S]*_id/)
+})

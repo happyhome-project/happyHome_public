@@ -882,31 +882,31 @@ async function getDocumentsByIdsInBatches(collectionName: string, ids: string[])
   return loaded.flat()
 }
 
-export async function handleListMine(
-  params: { skip?: number; limit?: number },
-  openid: string,
-) {
-  if (!openid) throw new Error('Missing OPENID')
-
-  const authoredPosts: any[] = []
+async function queryAllAfterId(collectionName: string, query: Record<string, any>) {
+  const records: any[] = []
   let afterId: string | null = null
   const batchSize = 100
   for (let batch = 0; batch < 20; batch += 1) {
-    const rows = await db.queryAfterId('posts', { authorId: openid }, afterId, batchSize) as any[]
-    authoredPosts.push(...rows.filter((post) => post?.status !== 'deleted'))
+    const rows = await db.queryAfterId(collectionName, query, afterId, batchSize) as any[]
+    records.push(...rows)
     if (rows.length < batchSize) break
     afterId = String(rows[rows.length - 1]?._id || '')
     if (!afterId) break
   }
+  return records
+}
 
-  authoredPosts.sort((left, right) => {
+function sortPersonalPosts(posts: any[]) {
+  return posts.slice().sort((left, right) => {
     const created = String(right?.createdAt || '').localeCompare(String(left?.createdAt || ''))
     return created || String(right?._id || '').localeCompare(String(left?._id || ''))
   })
+}
 
-  const communityIds = [...new Set(authoredPosts.map((post) => String(post?.communityId || '')).filter(Boolean))]
-  const sectionIds = [...new Set(authoredPosts.map((post) => String(post?.sectionId || '')).filter(Boolean))]
-  const collaborationTemplateIds = [...new Set(authoredPosts
+async function enrichPersonalPosts(posts: any[]) {
+  const communityIds = [...new Set(posts.map((post) => String(post?.communityId || '')).filter(Boolean))]
+  const sectionIds = [...new Set(posts.map((post) => String(post?.sectionId || '')).filter(Boolean))]
+  const collaborationTemplateIds = [...new Set(posts
     .filter((post) => post?.area === 'collaboration')
     .map((post) => String(post?.collaborationTemplateId || ''))
     .filter(Boolean))]
@@ -921,7 +921,7 @@ export async function handleListMine(
     const normalized = normalizeCollaborationTemplate(template as CollaborationTemplate)
     return [String(normalized._id || ''), normalized]
   }))
-  const enriched = authoredPosts.map((post) => {
+  return posts.map((post) => {
     const isArchive = post?.area === 'archive'
     const collaborationTemplate = post?.area === 'collaboration'
       ? collaborationTemplatesById.get(String(post?.collaborationTemplateId || ''))
@@ -947,10 +947,50 @@ export async function handleListMine(
       } : null,
     }
   })
+}
+
+function paginatePersonalPosts(posts: any[], params: { skip?: number; limit?: number }) {
   const skip = Math.max(0, Math.floor(Number(params?.skip) || 0))
   const limit = Math.min(50, Math.max(1, Math.floor(Number(params?.limit) || 20)))
-  const posts = enriched.slice(skip, skip + limit)
-  return { posts, total: enriched.length, skip, limit, hasMore: skip + posts.length < enriched.length }
+  const page = posts.slice(skip, skip + limit)
+  return { posts: page, total: posts.length, skip, limit, hasMore: skip + page.length < posts.length }
+}
+
+export async function handleListMine(
+  params: { skip?: number; limit?: number },
+  openid: string,
+) {
+  if (!openid) throw new Error('Missing OPENID')
+  const authoredPosts = (await queryAllAfterId('posts', { authorId: openid }))
+    .filter((post) => post?.status !== 'deleted')
+  const enriched = await enrichPersonalPosts(sortPersonalPosts(authoredPosts))
+  return paginatePersonalPosts(enriched, params)
+}
+
+export async function handleListMyActivities(
+  params: { skip?: number; limit?: number },
+  openid: string,
+) {
+  if (!openid) throw new Error('Missing OPENID')
+
+  const [authoredRows, attendanceRows] = await Promise.all([
+    queryAllAfterId('posts', { authorId: openid }),
+    queryAllAfterId(ATTENDANCE_COLLECTION, { userId: openid }),
+  ])
+  const authoredActivities = authoredRows.filter((post) => (
+    post?.area === 'collaboration' && post?.status !== 'deleted'
+  ))
+  const attendedPostIds = attendanceRows.map((row) => String(row?.postId || '')).filter(Boolean)
+  const attendedActivities = (await getDocumentsByIdsInBatches('posts', attendedPostIds))
+    .filter((post) => post?.area === 'collaboration' && isPostVisibleToMembers(post))
+
+  const activitiesById = new Map<string, any>()
+  for (const post of attendedActivities) activitiesById.set(String(post?._id || ''), post)
+  for (const post of authoredActivities) activitiesById.set(String(post?._id || ''), post)
+  activitiesById.delete('')
+
+  const enriched = await enrichPersonalPosts(sortPersonalPosts([...activitiesById.values()]))
+  return paginatePersonalPosts(enriched, params)
 }
 
 export async function handleListArchive(params: {
@@ -1403,6 +1443,7 @@ export const main = async (event: any, context?: any) => {
   if (action === 'list') return handleList(params, openid)
   if (action === 'listCollaboration') return handleListCollaboration(params, openid)
   if (action === 'listMine') return handleListMine(params, openid)
+  if (action === 'listMyActivities') return handleListMyActivities(params, openid)
   if (action === 'listArchive') return handleListArchive(params, openid)
   if (action === 'listArchiveTabs') return handleListArchiveTabs(params, openid)
   if (action === 'home') return handleHome(params, openid)

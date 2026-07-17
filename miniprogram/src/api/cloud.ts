@@ -287,6 +287,12 @@ export const postApi = {
       'listMine',
       { skip, limit },
     ),
+  listMyActivities: (skip = 0, limit = 20) =>
+    callCloud<{ posts: any[]; total: number; skip: number; limit: number; hasMore: boolean }>(
+      'post',
+      'listMyActivities',
+      { skip, limit },
+    ),
   listArchive: (params: ArchivePostListParams) =>
     callCloud<{ posts: any[]; nextCursor: string; hasMore: boolean; topicUnavailable?: boolean }>('post', 'listArchive', params),
   listArchiveTabs: (params: { communityId: string; asGuest?: boolean }) =>

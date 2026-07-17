@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "changeId": "my-activities-participation-feed",
+  "actions": [
+    "ensure-indexes"
+  ],
+  "migrations": [],
+  "smokeSuites": [],
+  "releaseImpact": {
+    "cloudFunctions": "Deploy post with the authored-or-attended collaboration activity feed.",
+    "adminWeb": "No change.",
+    "miniprogram": "Upload the profile entry, shared post-card component, my-activities page, and warm empty state.",
+    "environmentVariables": [],
+    "databaseMigrations": [
+      "Create post_attendance_members userId + _id index through ensure-indexes."
+    ]
+  }
+}
