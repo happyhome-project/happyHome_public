@@ -168,7 +168,7 @@
       </view>
       <ArchiveWaterfall
         :columns="archiveColumns"
-        :loading="archiveLoading"
+        :loading="archiveLoading || homeLoading"
         :error="archiveError"
         :has-more="archiveHasMore"
         @post="onArchiveCardTap"
@@ -573,6 +573,8 @@ let archiveRequestEpoch = 0
 let archiveRequestPending = false
 let queuedForcedHomeRefresh = false
 let mountedAt = 0
+let homeStartupStartedAt = Date.now()
+let homeCloudSnapshotApplied = false
 let unsubscribeBackgroundFetchSnapshot: (() => void) | null = null
 let archiveSwitchScrollTimers: ReturnType<typeof setTimeout>[] = []
 let archivePreviewMeasureTimers: ReturnType<typeof setTimeout>[] = []
@@ -593,6 +595,12 @@ const GUIDE_NOTE_NAME_HINTS = ['亲子出游', '周末遛娃', '村游攻略', '
 let activeHomeRefreshPromise: Promise<void> | null = null
 let activeHomeRefreshCommunityId = ''
 const guestIntroLoginEpoch = createLatestEpoch()
+
+function markHomeStartupStage(event: string, details: Record<string, number | boolean> = {}) {
+  markClientDiagnosticStage(event, Object.assign({}, details, {
+    elapsedMs: Math.max(0, Date.now() - homeStartupStartedAt),
+  }))
+}
 
 onPageScroll((event) => {
   const nextScrollTop = Number(event?.scrollTop || 0)
@@ -1304,27 +1312,58 @@ async function loadArchiveFeed(
   archiveRequestPending = true
   archiveLoading.value = !preserveVisibleArchive
   archiveError.value = ''
+  markHomeStartupStage('home.archive.request.start', {
+    reset,
+    preserveVisible: preserveVisibleArchive,
+  })
   try {
     let nextArchiveTabs = archiveTabs.value
     let nextArchiveTopic = selectedArchiveTopic.value
+    let result
     if (reset) {
       if (!preserveVisibleArchive) {
         archiveColumns.value = [[], []]
         archiveCursor.value = ''
       }
-      const tabResult = await postApi.listArchiveTabs({ communityId, asGuest: !userStore.isLoggedIn })
+      const requestedTopic = nextArchiveTopic
+      const [tabResult, initialResult] = await Promise.all([
+        postApi.listArchiveTabs({ communityId, asGuest: !userStore.isLoggedIn }),
+        postApi.listArchive({
+          communityId,
+          topicKey: requestedTopic || undefined,
+          cursor: undefined,
+          limit: 20,
+          asGuest: !userStore.isLoggedIn,
+        }),
+      ])
+      markHomeStartupStage('home.archive.tabs.received', {
+        tabCount: Array.isArray(tabResult.tabs) ? tabResult.tabs.length : 0,
+      })
       if (requestEpoch !== archiveRequestEpoch || communityId !== communityStore.currentCommunityId) return
       nextArchiveTabs = Array.isArray(tabResult.tabs) && tabResult.tabs.length
         ? tabResult.tabs.slice(0, 8)
         : [{ topicKey: '', displayName: '全部' }]
       if (!nextArchiveTabs.some(tab => tab.topicKey === nextArchiveTopic)) nextArchiveTopic = ''
+      result = initialResult
+      if (requestedTopic && !nextArchiveTopic) {
+        result = await postApi.listArchive({
+          communityId,
+          cursor: undefined,
+          limit: 20,
+          asGuest: !userStore.isLoggedIn,
+        })
+      }
+    } else {
+      result = await postApi.listArchive({
+        communityId,
+        topicKey: nextArchiveTopic || undefined,
+        cursor: archiveCursor.value || undefined,
+        limit: 20,
+        asGuest: !userStore.isLoggedIn,
+      })
     }
-    let result = await postApi.listArchive({
-      communityId,
-      topicKey: nextArchiveTopic || undefined,
-      cursor: reset ? undefined : archiveCursor.value || undefined,
-      limit: 20,
-      asGuest: !userStore.isLoggedIn,
+    markHomeStartupStage('home.archive.firstPage.received', {
+      postCount: Array.isArray(result.posts) ? result.posts.length : 0,
     })
     if (requestEpoch !== archiveRequestEpoch || communityId !== communityStore.currentCommunityId) return
     if (result.topicUnavailable && nextArchiveTopic) {
@@ -1664,20 +1703,24 @@ function applyHomeSnapshot(rawSnapshot: HomeSnapshot | null, source: 'prefetch' 
 async function hydrateHomeFromFastPath() {
   if (!userStore.isLoggedIn || !userStore.openId) return false
   const requestedCommunityId = communityStore.currentCommunityId || ''
-  const prefetched = await getBestBackgroundFetchSnapshot({
-    openId: userStore.openId,
-    communityId: requestedCommunityId || undefined,
-  })
-  if (requestedCommunityId !== communityStore.currentCommunityId) return false
-  if (applyHomeSnapshot(prefetched, 'prefetch')) {
-    writeHomeSnapshotCache(prefetched as HomeSnapshot)
-    return true
-  }
   const cached = readHomeSnapshotCache({
     openId: userStore.openId,
-    communityId: communityStore.currentCommunityId || '',
+    communityId: requestedCommunityId,
   })
-  return applyHomeSnapshot(cached, 'cache')
+  const cacheApplied = applyHomeSnapshot(cached, 'cache')
+  markHomeStartupStage('home.fastPath.cache.read', { hit: cacheApplied })
+
+  void getBestBackgroundFetchSnapshot({
+    openId: userStore.openId,
+    communityId: requestedCommunityId || undefined,
+  }).then((prefetched) => {
+    markHomeStartupStage('home.fastPath.prefetch.read', { hit: Boolean(prefetched) })
+    if (homeCloudSnapshotApplied || requestedCommunityId !== communityStore.currentCommunityId) return
+    if (applyHomeSnapshot(prefetched, 'prefetch')) writeHomeSnapshotCache(prefetched as HomeSnapshot)
+  }).catch(() => {
+    markHomeStartupStage('home.fastPath.prefetch.read', { hit: false })
+  })
+  return cacheApplied
 }
 
 function applyLateBackgroundFetchSnapshot(snapshot: HomeSnapshot) {
@@ -1790,6 +1833,10 @@ async function runSingleHomeRefresh(force: boolean, preserveArchive: boolean) {
       sample: communityStore.currentSections.length > 0 ? 'warm' : 'cold',
       counts: { shellSectionCount: communityStore.currentSections.length },
     })
+    markHomeStartupStage('home.bootstrap.received', {
+      communityCount: Array.isArray(result.communities) ? result.communities.length : 0,
+      sectionCount: Array.isArray(result.sections) ? result.sections.length : 0,
+    })
     if (
       userStore.isLoggedIn &&
       requestedCommunityId &&
@@ -1826,6 +1873,7 @@ async function runSingleHomeRefresh(force: boolean, preserveArchive: boolean) {
       }
       return
     }
+    homeCloudSnapshotApplied = true
     communityStore.confirmCommunitySelection(result.currentCommunityId || requestedCommunityId || '')
     if (userStore.isLoggedIn && communityStore.currentCommunityId) {
       writeHomeSnapshotCache(result as HomeSnapshot)
@@ -1942,6 +1990,12 @@ function probeHomeRender(reason: string) {
 
 async function initializeHome() {
   mountedAt = Date.now()
+  homeStartupStartedAt = mountedAt
+  homeCloudSnapshotApplied = false
+  markHomeStartupStage('home.startup.begin', {
+    loggedIn: userStore.isLoggedIn,
+    hasCommunitySelection: Boolean(communityStore.currentCommunityId),
+  })
   hideNativeTabBar()
   ;(uni as any).$on?.(HOME_TAB_RETAP_EVENT, scrollHomeToTop)
   clientLog('info', 'home.mounted', {})
