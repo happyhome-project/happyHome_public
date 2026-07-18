@@ -16,8 +16,15 @@ HH_WECHAT_TEST_OPENID=<isolated-wechat-fixture-member>
 
 启动器只把前两个公开值映射为浏览器构建变量；用户名、密码和 WeChat identity 不进入 Vite 子进程环境或日志。它在 `127.0.0.1` 自动选择空闲端口，打印脱敏后的 URL、cwd、branch、HEAD，并且退出时只终止自己创建的进程树，绝不按端口杀进程。
 
+手动预览使用一个前台进程：
+
 ```powershell
 npm.cmd run h5:web
+```
+
+自动只读验证不依赖上面的常驻进程；smoke 会启动并停止自己的临时 H5 服务：
+
+```powershell
 npm.cmd run h5:test-tenant -- doctor
 npm.cmd run test:h5:web -- --mode=read
 ```

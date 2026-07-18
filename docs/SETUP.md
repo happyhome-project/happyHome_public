@@ -16,7 +16,7 @@ happyHome/
 │   │   └── manifest.json       # AppID 等配置
 │   └── dist/build/mp-weixin/   # 编译输出（微信开发者工具导入此目录）
 ├── cloud/                # 云函数源码（TypeScript）
-│   ├── functions/        # 10个云函数: user, community, member, section, post, admin, home-prefetch, http-gateway, post-rag-worker, post-video-rag-worker
+│   ├── functions/        # 受 scripts/release-component-registry.mjs 治理的 12 个云函数
 │   ├── lib/              # 共享适配层: db.ts, auth.ts, storage.ts
 │   ├── shared/types.ts   # 全项目共享的 TypeScript 类型定义
 │   ├── build.mjs         # esbuild 构建脚本
@@ -26,7 +26,7 @@ happyHome/
 │   │   ├── api/cloud.ts        # Admin API 调用封装
 │   │   ├── views/              # Login, Layout, SuperAdmin/, CommunityAdmin/
 │   │   └── router/index.ts     # 路由 + 鉴权守卫
-│   └── .env.local              # 环境变量（VITE_CLOUD_API_URL / VITE_ADMIN_*）
+│   └── .env.local              # 环境变量（VITE_CLOUD_API_URL；路由/地图变量可选）
 ├── cloudfunctions/       # 历史快照，不作为部署源
 ├── scripts/
 │   ├── deploy.mjs        # 正式发布编排（CloudBase CLI/COS + DevTools upload）
@@ -60,19 +60,24 @@ happyHome/
 npm.cmd ci                         # 根目录，按唯一 root lockfile 安装所有 workspace 依赖
 ```
 
-新 worktree 使用以下顺序：
+从公开仓库集成 main 创建新 worktree：
 
 ```bash
 npm.cmd run worktree:create -- --name=<task-name> --path=<absolute-worktree-path>  # 仅公开仓库集成 main；自动 npm ci
-npm.cmd run worktree:doctor          # 仅本地诊断
-npm.cmd run worktree:bootstrap       # 指纹相同且 node_modules 存在时跳过 npm ci
 ```
 
 公开仓库集成 main 不是一个固定磁盘路径，而是一组实时校验：当前分支必须是 `main`，`origin` 必须精确指向 `happyhome-project/happyHome_public`，工作区 clean、无进行中的 Git operation、根目录不是 reparse point，并且显式刷新后 `HEAD` 与 `origin/main` 完全相同。fetch 使用校验时捕获的 verified remote URL，不再解析可变的 `origin` 名称。私有 `angrybirddd/happyHome`、本地/未知 origin、feature 分支以及 ahead、behind 或 stale 的 main 都会被拒绝。此角色只负责公开仓库开发 worktree 的 create/retire。
 
 `worktree:create` 从刷新后的 `origin/main` 创建安全的 `codex/*` 分支，并一次完成 hooks、真实 `AGENTS.md`、Node 24/npm 11 与 bootstrap 校验，无需创建后再 doctor/bootstrap。bootstrap 的 package.json、package-lock、Node/npm、platform/arch 指纹相同且 node_modules 存在时报告 skipped/ready；指纹变化或依赖缺失才运行 `npm ci`。HEAD 单独变化不会触发重装。
 
-退役前先运行对生命周期操作只读的 inventory（命令会 fetch 并更新本地 `origin/main` remote-tracking metadata）：
+只有诊断或恢复依赖时才单独运行：
+
+```bash
+npm.cmd run worktree:doctor
+npm.cmd run worktree:bootstrap
+```
+
+退役前可先运行只读 inventory；默认不访问网络，只有 `--fresh` 才 fetch 并更新本地 `origin/main` remote-tracking metadata：
 
 ```bash
 npm.cmd run worktree:status          # 本地 inventory，不访问网络
@@ -141,85 +146,28 @@ cd cloud && node build.mjs
 
 ### 5. 部署云函数
 
-**方式一：CloudBase CLI / COS 直传（2026-06-09 本机已验证可用）**
+正式生产部署只能由 canonical main 的发布角色按 [release gate](./release-gate.md) 执行；本节不另建一套发布流程。不要从历史 `cloudfunctions/` 目录、微信开发者工具右键菜单或手写 `tcb fn deploy` 发布生产函数。
 
-推荐脚本入口：
-
-```bash
-npm.cmd run deploy:cloud:tcb -- --only=user
-```
-
-多个函数可用逗号分隔：`--only=user,post`。不传 `--only` 会按部署脚本内的云函数列表部署全部函数。
-
-该入口会构建云函数、切到 `cloud/dist/<fn>`、用 CloudBase CLI 的 COS 上传模式部署，并在每个函数部署后运行 `tcb fn detail <fn> ... --json` 做只读校验。
-
-手动等价命令，以 `user` 云函数为例：
+目标列表以 `scripts/release-component-registry.mjs` 为准，不在文档里维护第二份清单。组件诊断保持只读：
 
 ```bash
-cd cloud && node build.mjs
-cd <repository-root>\cloud\dist\user
-npx.cmd --yes --package @cloudbase/cli tcb fn deploy user --force --yes --env-id cloudbase-3gh862acb1505ff3 --deployMode cos --json
-```
+# 列出函数并确认本机只读访问可用
+npx.cmd --yes --package @cloudbase/cli cloudbase fn list --env-id cloudbase-3gh862acb1505ff3 --json
 
-成功输出应包含：
-
-```text
-[user] 部署方式: COS 上传
-[user] 云函数部署成功
-```
-
-只读校验：
-
-```bash
+# 确认单个函数的状态 / ModTime / Handler / env
 npx.cmd --yes --package @cloudbase/cli tcb fn detail user --env-id cloudbase-3gh862acb1505ff3 --json
+
+# 失败排查时读取最近日志
+npx.cmd --yes --package @cloudbase/cli tcb fn log user --limit 20 --order desc --env-id cloudbase-3gh862acb1505ff3 --json
 ```
 
 确认 `Status: Active`、`AvailableStatus: Available`，以及新的 `ModTime`。
 
 > PowerShell 下使用 `npx.cmd`，不要直接用 `npx`，否则可能被 `npx.ps1` 执行策略拦截。
 
-**旧方式：一键部署脚本 / DevTools CLI**
-
-```bash
-node scripts/deploy.mjs cloud
-```
-
-该路径默认走微信开发者工具 CLI。2026-06-09 复测：即使账号已登录、项目已打开，云函数上传阶段仍可能 `success=false` 并报 `getCloudAPISignedHeader failed` / `ret=41002`。因此这条旧路径当前不可作为云函数部署成功路径，只保留为历史/诊断说明。
-
-可选诊断命令：
-```bash
-# 查看 CloudBase CLI / CAM 登录是否仍有效
-npx.cmd --yes --package @cloudbase/cli cloudbase fn list --env-id cloudbase-3gh862acb1505ff3 --json
-
-# CloudBase CLI / COS 部署脚本入口
-node scripts/deploy.mjs cloud --use-tcb
-```
-
 Release-owned cloud smoke, log evidence, formal deployment ordering, and upload commands are maintained only in the [release gate](./release-gate.md).
 
-可继续自动化的 CloudBase CLI 命令：
-
-```bash
-# 部署后确认函数状态 / ModTime / Handler / env
-npx.cmd --yes --package @cloudbase/cli tcb fn detail user --env-id cloudbase-3gh862acb1505ff3 --json
-
-# 事件函数烟测，后续可为每个函数补不会污染业务数据的安全 fixture payload
-npx.cmd --yes --package @cloudbase/cli tcb fn invoke user -d "<safe-json-payload>" --env-id cloudbase-3gh862acb1505ff3 --json
-
-# 失败时抓最近日志
-npx.cmd --yes --package @cloudbase/cli tcb fn log user --limit 20 --order desc --env-id cloudbase-3gh862acb1505ff3 --json
-
-# CI/无人值守登录方向：使用腾讯云永久密钥或 CloudBase API Key，不把密钥写入仓库
-npx.cmd --yes --package @cloudbase/cli tcb login --apiKeyId %TCB_SECRET_ID% --apiKey %TCB_SECRET_KEY% --json
-npx.cmd --yes --package @cloudbase/cli tcb login --cloudbase-api-key %TCB_API_KEY% --env-id cloudbase-3gh862acb1505ff3 --json
-```
-
-官方 CLI 还支持 `cloudbaserc.json` + `tcb fn deploy --all --yes` 批量部署，以及 `tcb config diff/update fn` 管理函数配置。当前项目暂不启用配置文件批量覆盖，因为云函数 env 里有线上手工配置；要自动化 env，先用 `tcb config diff fn` 对齐差异，再用 `tcb config update fn --env-mode merge --yes` 做增量更新。
-
-DevTools CLI 云函数部署的 `--project` 使用 `miniprogram/dist/build/mp-weixin`，不要手动改成仓库根。
-
-**方式二：微信开发者工具手动部署**
-在 cloudfunctions 目录右键各函数 → 上传并部署（云端安装依赖）。
+生产配置、索引、触发器和环境变量同样属于发布边界，不使用 `tcb config update` 或其他原始 CLI 绕过正式编排。
 
 ### 6. 启动 Admin Web
 
@@ -227,17 +175,10 @@ DevTools CLI 云函数部署的 `--project` 使用 `miniprogram/dist/build/mp-we
 cd admin-web
 # 确保 .env.local 中环境变量正确
 # 必填：VITE_CLOUD_API_URL
-# 生产建议配置：
-#   VITE_ADMIN_USERNAME
-#   VITE_ADMIN_PASSWORD
-#   VITE_ADMIN_TOKEN（需与云函数 ADMIN_TOKEN 一致）
 npm run dev
 ```
 
-访问 `http://localhost:5173`。登录凭据必须通过本地环境提供，不在仓库文档中记录默认值或真实值。
-
-> 生产环境请在 `admin` 云函数中配置环境变量 `ADMIN_TOKEN`，并与
-> Admin Web 的 `VITE_ADMIN_TOKEN` 保持一致。
+访问 `http://localhost:5173`。管理员在运行时通过 `auth.login` 登录，浏览器只保存返回的 session token；固定账号、密码或管理 token 不写入前端构建变量。
 
 ### 7. 设置 superAdmin（首次初始化）
 
@@ -264,7 +205,7 @@ npm run set:superadmin -- o1234567890abcdef https://<env-id>-<uin>.ap-shanghai.a
 |------|------|
 | `miniprogram/src/manifest.json` | 小程序 AppID |
 | `miniprogram/src/App.vue` | 云开发环境 ID（`cloud.init`） |
-| `admin-web/.env.local` | `VITE_CLOUD_API_URL` 与 `VITE_ADMIN_*` |
+| `admin-web/.env.local` | `VITE_CLOUD_API_URL`；可选路由/地图变量见 admin-web README |
 | `project.config.json` | 微信开发者工具项目配置 |
 | `private.*.key` | 小程序上传密钥（从微信公众平台下载） |
 

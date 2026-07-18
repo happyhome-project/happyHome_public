@@ -10,12 +10,16 @@ import {
   requiresExplicitHistoricalHeader,
   requiredPublicDocumentPaths,
 } from './docs-policy.mjs'
+import { CLOUD_RELEASE_COMPONENTS } from './release-component-registry.mjs'
+import { RAG_RELEASE_FUNCTIONS } from './release-plan.mjs'
+import { REQUIRED_RELEASE_UI_MARKERS } from './mp-release-ui-policy.mjs'
 
 test('public documentation requirements use only tracked repository entry points', () => {
   assert.deepEqual(requiredPublicDocumentPaths(), [
     'README.md',
     'AGENTS.md',
     'CLAUDE.md',
+    'PRODUCT.md',
     'TASKS.md',
     'docs/README.md',
   ])
@@ -94,13 +98,17 @@ test('documentation catalog separates authority, operations, references, records
     category: 'operational',
     authority: 'canonical',
   })
+  assert.deepEqual(classifyPublicDocument({ path: 'PRODUCT.md', source: '# Product' }), {
+    category: 'current',
+    authority: 'canonical',
+  })
   assert.deepEqual(classifyPublicDocument({ path: 'docs/ui-click-regression-checklist.md', source: '# Checklist' }), {
     category: 'reference',
     authority: 'supporting',
   })
-  assert.deepEqual(classifyPublicDocument({ path: 'docs/figma-mini-0626-inventory.md', source: '# Inventory' }), {
-    category: 'reference',
-    authority: 'supporting',
+  assert.deepEqual(classifyPublicDocument({ path: 'docs/releases/example.md', source: '# Release' }), {
+    category: 'historical',
+    authority: 'record',
   })
   assert.deepEqual(classifyPublicDocument({ path: 'docs/superpowers/specs/example.md', source: '# Design' }), {
     category: 'historical',
@@ -161,6 +169,7 @@ test('every document classified as historical requires an explicit governed head
   for (const document of [
     { path: 'docs/DESIGN-TOKENS.md', source: '# Design Tokens - 已过时' },
     { path: 'docs/changes/example.md', source: '# Change record' },
+    { path: 'docs/releases/example.md', source: '# Release record' },
     { path: 'docs/superpowers/plans/example.md', source: '# Delivery plan' },
     { path: 'docs/superpowers/specs/example.md', source: '# Delivery spec' },
     { path: 'news/qingshan/2026-05-13_to_2026-05-19/README.md', source: '# Weekly news' },
@@ -561,6 +570,31 @@ test('credential documentation warns that set:superadmin still has a legacy non-
     for (const fallbackValue of fallbackValues) {
       assert.equal(source.includes(fallbackValue), false, `${path} must not repeat a fallback value`)
     }
+  }
+})
+
+test('release documentation derives its default scope and UI evidence from governed policy', () => {
+  const releaseGate = readFileSync(new URL('../../docs/release-gate.md', import.meta.url), 'utf8')
+  const defaultCloudCount = CLOUD_RELEASE_COMPONENTS.length - RAG_RELEASE_FUNCTIONS.size
+
+  assert.match(releaseGate, new RegExp(`all ${defaultCloudCount} planned cloud functions`, 'i'))
+  assert.match(releaseGate, new RegExp(`expands the cloud set to ${CLOUD_RELEASE_COMPONENTS.length}`, 'i'))
+  assert.match(releaseGate, /RAG specialist verification is delegated in both default and include-RAG releases/)
+  assert.match(releaseGate, /common `ensure:indexes` prerequisite in every release/)
+  assert.match(releaseGate, /--include-rag/)
+  for (const { marker } of REQUIRED_RELEASE_UI_MARKERS) assert.match(releaseGate, new RegExp(marker))
+  assert.match(releaseGate, new RegExp(`all ${REQUIRED_RELEASE_UI_MARKERS.length} release UI labels`, 'i'))
+  assert.doesNotMatch(releaseGate, /all five release UI labels|every one of the twelve cloud functions/i)
+  assert.doesNotMatch(releaseGate, /include-RAG[\s\S]{0,240}(?:timer|backfill|semantic)[\s\S]{0,120}release-blocking/i)
+})
+
+test('current admin documentation keeps fixed credentials out of the browser bundle', () => {
+  const setup = readFileSync(new URL('../../docs/SETUP.md', import.meta.url), 'utf8')
+  const deploy = readFileSync(new URL('../../docs/admin-web-deploy.md', import.meta.url), 'utf8')
+
+  for (const source of [setup, deploy]) {
+    assert.match(source, /auth\.login/)
+    assert.doesNotMatch(source, /VITE_ADMIN_USERNAME|VITE_ADMIN_PASSWORD|VITE_ADMIN_TOKEN/)
   }
 })
 

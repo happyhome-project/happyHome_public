@@ -1,5 +1,7 @@
 # Figma 0710 Visual QA
 
+> **Historical / point-in-time:** This document is historical: it records dated visual QA evidence and is not current implementation authority. **当前权威 / Current authority:** follow the [documentation authority map](./docs/README.md) and [interaction principles](./docs/UX-PRINCIPLES.md).
+
 ## Scope and source of truth
 
 - Figma file: `社区资源共享_小程序_0710` (`a0yB3Ht7e3LZ1FguQdft7L`).
@@ -67,9 +69,7 @@ AI affordance are not treated as visual regressions.
 
 ## 发布入口图标风格 QA（2026-07-15）
 
-- Source visual truth: `X:\Users\86136\AppData\Local\Temp\codex-clipboard-1e5d04b9-0028-431c-bc54-a1d0c1635952.png`
-- Implementation screenshot: `X:\Users\86136\AppData\Local\Temp\happyhome-publish-icon-style.png`
-- Focused implementation screenshot: `X:\Users\86136\AppData\Local\Temp\happyhome-publish-icon-style-focused.png`
+- Machine-local source and capture paths were intentionally not retained as repository evidence; use the checked-in evidence and verification references above.
 - Viewport: 390 × 844 CSS pixels (browser capture content width 360 pixels)
 - State: 首页打开发布面板，三种发布入口全部可见
 

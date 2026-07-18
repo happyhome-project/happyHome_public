@@ -1,8 +1,10 @@
 # Figma 小程序 0626/0709_v2 盘点
 
-## 2026-07-09 当前准则
+> **Historical / point-in-time:** This document is historical: it is a dated 2026-07-09 design inventory, not current implementation authority. **当前权威 / Current authority:** follow the [documentation authority map](./README.md) and [interaction principles](./UX-PRINCIPLES.md).
 
-- Figma 是 2026-07-09 起的小程序 UI/UX 当前准则；后续小程序端页面、组件、文案层级和交互优先以 `社区资源共享_小程序_0709_v2` 为准，`社区资源共享_小程序_0626` 仅作为历史基线。
+## 2026-07-09 当时准则
+
+- 在 2026-07-09 的评审中，`社区资源共享_小程序_0709_v2` 是当时的小程序 UI/UX 准则，`社区资源共享_小程序_0626` 是更早的历史基线。
 - 与 Figma 冲突的旧单栏/非瀑布流判断全部废弃，包括早期“小红书只学语感、不做双列图文流”的限制。
 - 已有组件按 Figma 重构；Figma 没覆盖的组件，先根据已确认的颜色、字号、间距、圆角和交互节奏做等效实现，保证 UI/UX 继续推进。
 - 在业务能力暂未完成的区域，可以按 Figma 版式预留或渐进渲染，但不能再用旧设计方向否定 Figma 的视觉结构。

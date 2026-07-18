@@ -1,6 +1,6 @@
 # 美好 Home · 交互规范
 
-> 本文是当前交互行为原则，不是视觉 token 或页面版式权威。当前视觉来源是 Figma `社区资源共享_小程序_0709_v2`，已确认观察见 [`figma-mini-0626-inventory.md`](./figma-mini-0626-inventory.md)，实现值以 `miniprogram/src/uni.scss` 和页面代码为准。已废弃的 [`VISUAL-TONE.md`](./VISUAL-TONE.md) 与 [`DESIGN-TOKENS.md`](./DESIGN-TOKENS.md) 仅供历史追溯。
+> 本文是当前交互行为原则，不是视觉 token 或页面版式权威。当前 Figma 是设计输入；已签入的 `miniprogram/src/uni.scss`、页面代码和测试才是已实现行为的权威。日期化的 [`figma-mini-0626-inventory.md`](./figma-mini-0626-inventory.md) 与 [`design-qa.md`](../design-qa.md) 仅是历史证据；已废弃的 [`VISUAL-TONE.md`](./VISUAL-TONE.md) 与 [`DESIGN-TOKENS.md`](./DESIGN-TOKENS.md) 仅供追溯。
 
 ---
 

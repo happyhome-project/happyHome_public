@@ -1,5 +1,7 @@
 # CloudBase HTTP 访问服务 —— 知识更新
 
+> **Historical / point-in-time:** This document is historical and its deployment/authentication commands must not be executed as current instructions. **当前权威 / Current authority:** follow [Admin Web deployment](./admin-web-deploy.md) and the [formal release gate](./release-gate.md).
+
 > 基于 https://docs.cloudbase.net/cloud-function/quick-start 和 https://docs.cloudbase.net/cli-v1/functions/deploy 学习整理
 
 ---
