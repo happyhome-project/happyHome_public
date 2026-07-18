@@ -218,7 +218,7 @@
           class="profile-tool"
           :class="{ 'profile-tool--disabled': item.disabled }"
           :aria-disabled="item.disabled ? 'true' : undefined"
-          @tap="item.disabled ? undefined : handleProfileTool(item)"
+          @tap="handleProfileTool(item)"
         >
           <view class="profile-tool-icon">
             <image
@@ -994,6 +994,10 @@ function goCreateCommunity() {
 }
 
 function handleProfileTool(item: ProfileToolItem) {
+  if (item.disabled) {
+    uni.showToast({ title: `${item.label}暂未开放`, icon: 'none' })
+    return
+  }
   if (!userStore.isLoggedIn) {
     openLoginEntry()
     return

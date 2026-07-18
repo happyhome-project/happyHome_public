@@ -29,10 +29,11 @@ describe('profile tool availability contract', () => {
     ])
   })
 
-  test('binds unavailable tools to the disabled visual and event guard', () => {
+  test('keeps unavailable tools visually muted while preserving click feedback', () => {
     expect(profileSource).toContain("'profile-tool--disabled': item.disabled")
     expect(profileSource).toContain(":aria-disabled=\"item.disabled ? 'true' : undefined\"")
-    expect(profileSource).toContain('@tap="item.disabled ? undefined : handleProfileTool(item)"')
+    expect(profileSource).toContain('@tap="handleProfileTool(item)"')
+    expect(profileSource).toMatch(/function handleProfileTool\(item: ProfileToolItem\)\s*\{\s*if \(item\.disabled\) \{\s*uni\.showToast\(\{ title: `\$\{item\.label\}暂未开放`, icon: 'none' \}\)\s*return/)
     expect(profileSource).toMatch(/\.profile-tool--disabled \.profile-tool-icon-image\s*\{[\s\S]*filter:\s*grayscale\(1\);[\s\S]*opacity:\s*0\.38;/)
     expect(profileSource).toMatch(/\.profile-tool--disabled \.profile-tool-label\s*\{[\s\S]*color:\s*#a8a8a8;/)
   })
