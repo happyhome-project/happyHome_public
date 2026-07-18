@@ -8,6 +8,9 @@ import { advanceProbeTimerEvidence } from './post-rag-timer-evidence.mjs'
 import { resolveTimerProbeTimeoutMs } from './post-rag-timer-probe-policy.mjs'
 import { createSafeAggregateError, createSafeReleaseError, releaseFailureCauses } from './release-failure-safety.mjs'
 
+const CLEANUP_TIMEOUT_MS = 5 * 60 * 1000
+const CLEANUP_POLL_MS = 5000
+
 function safeTimerError({ action = 'unknown', cleanup = false, code = 'REMOTE_CALL_FAILED', classification = 'remote-call-failed', error, phase }) {
   if (error?.result?.failureCauses) {
     return createSafeReleaseError(`post RAG timer ${phase} failed`, releaseFailureCauses(error, { branch: 'timer', phase, cleanup }))
@@ -46,11 +49,51 @@ export async function startPostRagTimerProbeSession({ env = process.env, signal,
   if (!options.adminInternalToken) throw new Error('ADMIN_INTERNAL_CALL_TOKEN is required')
   const aborted = abortError(signal)
   if (aborted) throw safeTimerError({ error: aborted, phase: 'create', code: 'ABORTED', classification: 'aborted' })
-  const invokeSafe = async (action, params, { cleanup = false, phase }) => {
+  const invokeSafe = async (action, params, { cleanup = false, invokeOptions = options, phase }) => {
     try {
-      return await runtime.invoke(action, params, options, runtime.runner)
+      return await runtime.invoke(action, params, invokeOptions, runtime.runner)
     } catch (error) {
       throw safeTimerError({ action, cleanup, error, phase })
+    }
+  }
+  const pollCleanup = async (cleanupBinding) => {
+    const cleanupDeadlineMs = runtime.now() + CLEANUP_TIMEOUT_MS
+    if (typeof runtime.beforeCleanup === 'function') await runtime.beforeCleanup('post.ragTimerProbeCleanupAdmin')
+    while (true) {
+      const remainingMs = cleanupDeadlineMs - runtime.now()
+      if (remainingMs <= 0) {
+        throw safeTimerError({ phase: 'cleanup', code: 'TIMEOUT', classification: 'timeout', cleanup: true })
+      }
+      let response
+      try {
+        response = await invokeSafe('post.ragTimerProbeCleanupAdmin', cleanupBinding, {
+          phase: 'cleanup',
+          cleanup: true,
+          invokeOptions: {
+            ...options,
+            commandTimeoutMs: Math.min(options.commandTimeoutMs, remainingMs),
+            adminInvokeRetries: 1,
+          },
+        })
+      } catch (error) {
+        if (runtime.now() >= cleanupDeadlineMs) {
+          throw safeTimerError({ phase: 'cleanup', code: 'TIMEOUT', classification: 'timeout', cleanup: true })
+        }
+        throw error
+      }
+      if (response.functionResult?.success === true && response.functionResult?.status === 'cleaned') return response
+      if (response.functionResult?.pending !== true) {
+        throw safeTimerError({ phase: 'cleanup', code: 'INVALID_RESPONSE', classification: 'invalid-response', cleanup: true })
+      }
+      const sleepMs = Math.min(CLEANUP_POLL_MS, Math.max(0, cleanupDeadlineMs - runtime.now()))
+      if (sleepMs > 0) {
+        try {
+          await runtime.sleep(sleepMs, signal)
+        } catch (error) {
+          if (signal?.aborted) throw safeTimerError({ error, phase: 'cleanup', code: 'ABORTED', classification: 'aborted', cleanup: true })
+          throw safeTimerError({ error, phase: 'cleanup', cleanup: true })
+        }
+      }
     }
   }
   let probe
@@ -58,8 +101,7 @@ export async function startPostRagTimerProbeSession({ env = process.env, signal,
     probe = (await invokeSafe('post.ragTimerProbeCreateAdmin', { runId }, { phase: 'create' })).functionResult
   } catch (createError) {
     try {
-      if (typeof runtime.beforeCleanup === 'function') await runtime.beforeCleanup('post.ragTimerProbeCleanupAdmin')
-      await invokeSafe('post.ragTimerProbeCleanupAdmin', { runId }, { phase: 'cleanup', cleanup: true })
+      await pollCleanup({ runId })
     } catch (cleanupError) {
       throw createSafeAggregateError('post RAG timer create and cleanup failed', [
         ...releaseFailureCauses(createError, { branch: 'timer', phase: 'create' }),
@@ -68,16 +110,18 @@ export async function startPostRagTimerProbeSession({ env = process.env, signal,
     }
     throw createError
   }
-  if (!probe?.runId || !probe?.communityId || !probe?.sectionId || !probe?.postId || !probe?.outboxId) {
+  if (probe?.runId !== runId || !probe?.communityId || !probe?.sectionId || !probe?.postId || !probe?.outboxId) {
     const identityError = safeTimerError({ phase: 'create', code: 'INVALID_RESPONSE', classification: 'invalid-response' })
     try {
-      if (typeof runtime.beforeCleanup === 'function') await runtime.beforeCleanup('post.ragTimerProbeCleanupAdmin')
-      await invokeSafe('post.ragTimerProbeCleanupAdmin', {
-        runId: probe?.runId || runId,
-        communityId: probe?.communityId,
-        sectionId: probe?.sectionId,
-        postId: probe?.postId,
-      }, { phase: 'cleanup', cleanup: true })
+      const hasTrustedIdentity = probe?.runId === runId && probe?.communityId && probe?.sectionId && probe?.postId
+      await pollCleanup({
+        runId,
+        ...(hasTrustedIdentity ? {
+          communityId: probe.communityId,
+          sectionId: probe.sectionId,
+          postId: probe.postId,
+        } : {}),
+      })
     } catch (cleanupError) {
       throw createSafeAggregateError('post RAG timer invalid response and cleanup failed', [
         ...releaseFailureCauses(identityError, { branch: 'timer', phase: 'create' }),
@@ -148,15 +192,12 @@ export async function startPostRagTimerProbeSession({ env = process.env, signal,
   }
 
   const cleanup = () => {
-    cleanupPromise ||= (async () => {
-      if (typeof runtime.beforeCleanup === 'function') await runtime.beforeCleanup('post.ragTimerProbeCleanupAdmin')
-      return await invokeSafe('post.ragTimerProbeCleanupAdmin', {
-        runId: probe.runId,
-        communityId: probe.communityId,
-        sectionId: probe.sectionId,
-        postId: probe.postId,
-      }, { phase: 'cleanup', cleanup: true })
-    })()
+    cleanupPromise ||= pollCleanup({
+      runId: probe.runId,
+      communityId: probe.communityId,
+      sectionId: probe.sectionId,
+      postId: probe.postId,
+    })
     return cleanupPromise
   }
 

@@ -43,19 +43,27 @@ test('bounds a stalled provider request and returns a safe error', async () => {
   expect(isPostSemanticSearchError(error)).toBe(true)
 })
 
-test('issues one bounded BM25+dense RRF request and returns a semantically related current post', async () => {
+test('issues parallel BM25 and script-score vector requests and fuses them without provider RRF', async () => {
   const f = fixture()
   const result = await f.service.search({ communityId: 'c1', query: '勤俭持家', includeMemberOnly: false })
   expect(f.embedTexts).toHaveBeenCalledWith(['勤俭持家'])
-  expect(f.requestJson).toHaveBeenCalledTimes(1)
-  expect(f.requestJson).toHaveBeenCalledWith('POST', 'rag-index/_search', expect.objectContaining({
+  expect(f.requestJson).toHaveBeenCalledTimes(2)
+  expect(f.requestJson).toHaveBeenNthCalledWith(1, 'POST', 'rag-index/_search', expect.objectContaining({
     size: 40,
     collapse: { field: 'postId' },
     _source: ['postId', 'communityId', 'sectionId', 'sourceVersion', 'chunkId', 'visibility', 'widgetId', 'fieldKey', 'title', 'text', 'preview', 'fieldLabel', 'sectionName'],
     query: { bool: { must: [{ multi_match: { query: '勤俭持家', fields: ['text^3', 'preview^2', 'title^4', 'fieldLabel', 'sectionName'], type: 'best_fields' } }], filter: [{ term: { communityId: 'c1' } }, { term: { visibility: 'public' } }] } },
-    knn: { field: 'embedding', query_vector: [0.1, 0.2], k: 40, num_candidates: 100, filter: { bool: { filter: [{ term: { communityId: 'c1' } }, { term: { visibility: 'public' } }] } } },
-    rank: { rrf: { rank_window_size: 40, rank_constant: 60 } },
   }))
+  expect(f.requestJson).toHaveBeenNthCalledWith(2, 'POST', 'rag-index/_search', expect.objectContaining({
+    size: 40,
+    collapse: { field: 'postId' },
+    query: { script_score: {
+      query: { bool: { filter: [{ term: { communityId: 'c1' } }, { term: { visibility: 'public' } }] } },
+      script: { source: "cosineSimilarity(params.query_vector, 'embedding') + 1.0", params: { query_vector: [0.1, 0.2] } },
+    } },
+  }))
+  expect(JSON.stringify(f.requestJson.mock.calls)).not.toContain('"knn"')
+  expect(JSON.stringify(f.requestJson.mock.calls)).not.toContain('"rank"')
   expect(result).toMatchObject({ protocolVersion: 2, query: '勤俭持家', total: 1, skip: 0, limit: 10, items: [{ postId: 'p1', title: '一粥一饭，当思来处不易', matchedField: '正文', sectionName: '家风' }] })
   expect(result.items[0].matchedSnippet).toContain('一粥一饭')
   expect(result.tookMs).toBeGreaterThanOrEqual(0)
@@ -80,6 +88,21 @@ test('ES postId collapse prevents forty chunks from one long post monopolizing c
   expect(result.items[1].matchedSnippet).toContain('一粥一饭')
 })
 
+test('application RRF rewards overlap and retains vector-only posts', async () => {
+  const docs: Record<string, any> = {
+    'rag_community_versions:c1': versions(), 'sections:s1': section(),
+    'posts:p1': post(), 'post_rag_index_state_v2:p1': state(),
+    'posts:p2': post({ _id: 'p2' }), 'post_rag_index_state_v2:p2': state({ _id: 'p2', postId: 'p2' }),
+  }
+  const f = fixture({ docs, hits: [] })
+  f.requestJson.mockImplementation(async (_method, _path, body) => ({ hits: { hits: body.query.script_score
+    ? [hit({ postId: 'p2', chunkId: 'vector-only', title: '语义命中' }), hit({ chunkId: 'vector-overlap' })]
+    : [hit({ chunkId: 'lexical-overlap' })] } }))
+  const result = await f.service.search({ communityId: 'c1', query: '勤俭持家', includeMemberOnly: false })
+  expect(result.items.map(item => item.postId)).toEqual(['p1', 'p2'])
+  expect(result.total).toBe(2)
+})
+
 test('adds section filter and allows member chunks only for members', async () => {
   const f = fixture({ hits: [hit({ visibility: 'member' })] })
   const result = await f.service.search({ communityId: 'c1', sectionId: 's1', query: '家风', includeMemberOnly: true, viewerId: 'member-1' })
@@ -96,7 +119,7 @@ test('candidate cache cannot preserve member access after kick or aclVersion cha
   const input = { communityId: 'c1', query: '家风', includeMemberOnly: true, viewerId: 'member-1' }
   await expect(f.service.search(input)).resolves.toMatchObject({ total: 1 })
   await expect(f.service.search(input)).resolves.toMatchObject({ total: 0, items: [] })
-  expect(f.requestJson).toHaveBeenCalledTimes(1)
+  expect(f.requestJson).toHaveBeenCalledTimes(2)
   expect(membership).toHaveBeenCalledTimes(2)
   expect(JSON.stringify(f.requestJson.mock.calls)).not.toContain('member-1')
 })
@@ -127,7 +150,7 @@ test('rechecks current widget identity and visibility even when public candidate
   await expect(f.service.search(guest)).resolves.toMatchObject({ total: 1 })
   docs['sections:s1'].widgets[0].visibility = 'member'
   await expect(f.service.search(guest)).resolves.toMatchObject({ total: 0 })
-  expect(f.requestJson).toHaveBeenCalledTimes(1)
+  expect(f.requestJson).toHaveBeenCalledTimes(2)
   await expect(f.service.search({ ...guest, includeMemberOnly: true, viewerId: 'member-1' })).resolves.toMatchObject({ total: 1 })
   docs['sections:s1'].widgets = []
   await expect(f.service.search({ ...guest, includeMemberOnly: true, viewerId: 'member-1' })).resolves.toMatchObject({ total: 0 })
@@ -170,11 +193,11 @@ test('caches embeddings for 24h and candidates for 10m but rechecks DB; version 
   const f = fixture({ now: () => time })
   const input = { communityId: 'c1', query: '勤俭', includeMemberOnly: false }
   await f.service.search(input); await f.service.search(input)
-  expect(f.embedTexts).toHaveBeenCalledTimes(1); expect(f.requestJson).toHaveBeenCalledTimes(1)
+  expect(f.embedTexts).toHaveBeenCalledTimes(1); expect(f.requestJson).toHaveBeenCalledTimes(2)
   expect(f.database.getByIds).toHaveBeenCalledTimes(6)
   ;(f.database.getById as jest.Mock).mockResolvedValueOnce(versions({ contentVersion: 4 }))
   await f.service.search(input)
-  expect(f.requestJson).toHaveBeenCalledTimes(2)
+  expect(f.requestJson).toHaveBeenCalledTimes(4)
 })
 
 test.each(['', '   ', 'x'.repeat(81)])('rejects invalid query without side effects', async query => {
@@ -190,7 +213,7 @@ test('wraps provider failures safely without keyword fallback or leaking provide
   expect(isPostSemanticSearchError(error)).toBe(true)
   if (!isPostSemanticSearchError(error)) throw new Error('expected authenticated semantic search error')
   expect(error.message).toBe('Semantic post search failed')
-  expect(f.requestJson).toHaveBeenCalledTimes(1)
+  expect(f.requestJson).toHaveBeenCalledTimes(2)
 })
 
 test('timed-out embedding cannot warm cache or proceed to ES', async () => {
@@ -204,7 +227,7 @@ test('timed-out embedding cannot warm cache or proceed to ES', async () => {
   await expectSafeFailure(service.search(input))
   release([[9, 9]]); await new Promise(resolve => setTimeout(resolve, 0))
   await expect(service.search(input)).resolves.toMatchObject({ total: 1 })
-  expect(embedTexts).toHaveBeenCalledTimes(2); expect(f.requestJson).toHaveBeenCalledTimes(1)
+  expect(embedTexts).toHaveBeenCalledTimes(2); expect(f.requestJson).toHaveBeenCalledTimes(2)
 })
 
 test('timed-out ES cannot warm candidate cache or proceed to DB recheck', async () => {
@@ -216,7 +239,7 @@ test('timed-out ES cannot warm candidate cache or proceed to DB recheck', async 
   await expectSafeFailure(service.search(input))
   release({ hits: { hits: [hit()] } }); await new Promise(resolve => setTimeout(resolve, 0))
   await expect(service.search(input)).resolves.toMatchObject({ total: 1 })
-  expect(f.requestJson).toHaveBeenCalledTimes(2)
+  expect(f.requestJson).toHaveBeenCalledTimes(4)
   expect(f.database.getByIds).toHaveBeenCalledTimes(3)
 })
 

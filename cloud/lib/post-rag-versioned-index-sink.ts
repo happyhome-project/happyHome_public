@@ -245,7 +245,7 @@ export function createVersionedTencentEsRagSink(options: {
       let response: any
       if (!await hasLease(jobId, leaseToken)) fail('LEASE_LOST')
       try {
-        response = await requestJson('POST', `${options.indexName}/_bulk?refresh=wait_for`, `${lines.join('\n')}\n`, { contentType: 'application/x-ndjson' })
+        response = await requestJson('POST', `${options.indexName}/_bulk?refresh=true`, `${lines.join('\n')}\n`, { contentType: 'application/x-ndjson' })
       } catch { await cleanupAttemptAndFail('ES_BULK_FAILED', documentIds) }
       if (!Array.isArray(response?.items) || response.items.length !== projection.chunks.length) {
         await cleanupAttemptAndFail('ES_BULK_FAILED', documentIds)
@@ -294,7 +294,9 @@ export function createVersionedTencentEsRagSink(options: {
       })
       try {
         await database.runTransaction(async (tx) => {
-          if (!leaseMatches(await tx.getById('post_rag_jobs', jobId), jobId, leaseToken)) fail('LEASE_LOST')
+          const currentLease = await tx.getById('post_rag_jobs', jobId)
+          if (!currentLease || !leaseMatches(currentLease, jobId, leaseToken)) fail('LEASE_LOST')
+          await tx.setById('post_rag_jobs', jobId, currentLease)
           for (const mirror of mirrors) {
             const existing = await tx.getById('post_rag_index_versions', mirror._id)
             if (existing) {
@@ -403,7 +405,7 @@ export function createVersionedTencentEsRagSink(options: {
       if (!accepted) return { removed: false }
       const mirrors = await listMirrors(postId)
       const removable = mirrors.filter((mirror) => comparePostRagActivationOrder(mirror.activationOrder, activationOrder) <= 0)
-      await deleteMirrorsFromEs(removable)
+      try { await deleteMirrorsFromEs(removable) } catch { /* Serverless ES may reject physical deletes; tombstone is authoritative. */ }
       if (await currentMatches(postId, sourceVersion, activationOrder, 'removed')) await removeMirrorRows(removable)
       return { removed: true }
     },
