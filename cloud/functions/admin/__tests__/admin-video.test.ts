@@ -735,3 +735,103 @@ describe('post.updateAdmin', () => {
     expect(db.updateById).not.toHaveBeenCalled()
   })
 })
+
+describe('archive post admin editing', () => {
+  const richBody = (text: string) => ({
+    format: 'markdown',
+    markdown: text,
+    html: `<p>${text}</p>`,
+    text,
+    imageFileIDs: [],
+    schemaVersion: 1,
+  })
+
+  test('post.getAdmin returns an editable image-text contract with images and topics', async () => {
+    ;(db.getById as jest.Mock)
+      .mockResolvedValueOnce({
+        _id: 'archive-image-1',
+        communityId: 'community-1',
+        area: 'archive',
+        format: 'image_text',
+        topics: ['通勤出行'],
+        authorId: 'author-1',
+        status: 'active',
+        auditStatus: 'pass',
+        content: {
+          title: '早高峰怎么走',
+          images: ['cloud://env/posts/images/commute.png'],
+          body: richBody('正文'),
+        },
+      })
+      .mockResolvedValueOnce({ nickName: '邻居甲' })
+    ;(db.query as jest.Mock).mockResolvedValue([])
+
+    const result: any = await main({
+      action: 'post.getAdmin',
+      _actAs: SUPER_CTX,
+      postId: 'archive-image-1',
+    })
+
+    expect(result.section).toEqual(expect.objectContaining({
+      name: '图文',
+      displayTemplate: 'image_note',
+      widgets: expect.arrayContaining([
+        expect.objectContaining({ widgetId: 'images', type: 'image_group' }),
+        expect.objectContaining({ widgetId: 'title', type: 'short_text' }),
+        expect.objectContaining({ widgetId: 'body', type: 'rich_note' }),
+        expect.objectContaining({ widgetId: 'topics', type: 'topic' }),
+      ]),
+    }))
+    expect(result.post.content).toEqual(expect.objectContaining({
+      images: ['cloud://env/posts/images/commute.png'],
+      topics: ['通勤出行'],
+    }))
+  })
+
+  test('post.updateAdmin keeps archive topics outside content while sending images through audit', async () => {
+    const existingPost = {
+      _id: 'archive-image-1',
+      communityId: 'community-1',
+      area: 'archive',
+      format: 'image_text',
+      topics: ['旧话题'],
+      authorId: 'author-1',
+      status: 'active',
+      auditStatus: 'pass',
+      createdAt: '2026-07-17T10:00:00.000Z',
+      content: {
+        title: '旧标题',
+        images: ['cloud://env/posts/images/old.png'],
+        body: richBody('旧正文'),
+      },
+    }
+    ;(db.getById as jest.Mock).mockResolvedValue(existingPost)
+    ;(db.query as jest.Mock).mockResolvedValue([])
+    ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+    const result: any = await main({
+      action: 'post.updateAdmin',
+      _actAs: SUPER_CTX,
+      postId: 'archive-image-1',
+      content: {
+        title: '新标题',
+        images: ['cloud://env/posts/images/new.png'],
+        body: richBody('新正文'),
+        topics: ['通勤出行', '小区日常'],
+      },
+    })
+
+    expect(result.success).toBe(true)
+    const pendingPatch = (db.updateById as jest.Mock).mock.calls
+      .map(([, , patch]) => patch)
+      .find((patch) => patch?.pendingContent)
+    expect(pendingPatch).toEqual(expect.objectContaining({
+      pendingContent: { __set: expect.objectContaining({
+        title: '新标题',
+        images: ['cloud://env/posts/images/new.png'],
+      }) },
+      pendingTopics: { __set: ['通勤出行', '小区日常'] },
+    }))
+    expect(pendingPatch.pendingContent.__set.topics).toBeUndefined()
+  })
+})
