@@ -19,6 +19,7 @@ npm.cmd run worktree:doctor
 
 - [AGENTS.md](./AGENTS.md) defines mandatory PR, CI, worktree, and production boundaries.
 - [CLAUDE.md](./CLAUDE.md) defines the repository collaboration playbook.
+- [PRODUCT.md](./PRODUCT.md) defines the current product positioning baseline.
 - [Documentation map](./docs/README.md) identifies current authorities, runbooks, references, and historical records.
 - [TASKS.md](./TASKS.md) contains only open, claimable project work.
 

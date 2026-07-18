@@ -2,7 +2,11 @@
 
 This is the single repository source for cross-component formal release orchestration, mandatory gates, evidence requirements, upload policy, and final production verification. Component guides may document component-specific build or deployment mechanics, but they do not define a formal HappyHome release. Formal production release work must run only from the clean, synchronized public canonical `main` checkout at `C:\Project\Claude\happyHome_public`, with `HEAD` exactly equal to freshly fetched `origin/main` and `origin` exactly derived from `https://github.com/happyhome-project/happyHome_public.git`. Feature branches, dirty worktrees, stale/ahead/behind main, path or origin mismatch, a missing production lock, failed UI or cloud smoke, and failed fixture cleanup all block publishing.
 
-Before any production mutation, run `npm.cmd run release:preflight` with `HH_RELEASE_HEAD_SHA` set to the intended full 40-hex commit SHA. The value must exactly equal both the canonical workspace `HEAD` and refreshed `origin/main`; a missing, abbreviated, or mismatched value blocks all fixture creation. It aggregates release control-plane and RAG collection checks, the RAG index, worker timers, full-current plan/resume identity, and a unique temporary timer probe. Failed or indeterminate findings block release, and fixture cleanup runs in `finally`. Preflight does not deploy, configure, migrate, acquire a formal release lock, or upload a mini-program.
+Before any production mutation, the release session and publish workflow run `npm.cmd run release:preflight` with `HH_RELEASE_HEAD_SHA` set to the intended full 40-hex commit SHA. The value must exactly equal both the canonical workspace `HEAD` and refreshed `origin/main`; a missing, abbreviated, or mismatched value blocks all fixture creation. Formal publish always delegates RAG specialist verification, so this preflight validates the exact SHA, release plan, and resume identity without creating RAG timer/probe fixtures. Failed or indeterminate in-scope findings block release, and fixture cleanup runs in `finally`. Preflight does not deploy, configure, migrate, acquire a formal release lock, or upload a mini-program.
+
+## RAG Release Boundary
+
+RAG specialist verification is delegated in both default and include-RAG releases. The default plan omits `post-rag-worker`, `post-video-rag-worker`, and RAG-specific manifest operations. Set `HH_RELEASE_INCLUDE_RAG=1` or pass `--include-rag` to the release planner only when the release intentionally owns the worker deployment and declared configuration/index operations. Even in that mode, timer verification, backfill, RAG smoke, semantic retrieval, and evaluation remain delegated and are not release acceptance evidence. DAG V2 still runs the common `ensure:indexes` prerequisite in every release; that generic prerequisite is not RAG specialist verification. Do not claim RAG was verified by either formal release mode.
 
 ## Full-Current Two-Stage Release
 
@@ -26,7 +30,7 @@ npm.cmd run release:session -- repair --version=1.0.260716103000 --desc=current-
 
 After the formal run exists, its actual run ID/version/description are historical facts. The same repair command records requested values as aliases instead of rewriting package bytes, upload receipts, ledgers or production state. `--repair-latest` may restore only the local latest-run pointer after the run ledger exactly matches the session security identity. Git SHA, environment, component/package digests, upload receipt and cleanup evidence are never repairable labels. Existing manual prepare/publish arguments remain temporarily compatible, but the session entrypoint is the default workflow.
 
-By default, `full-current` ensures the desired current state: every one of the twelve cloud functions plus admin-web is freshly remotely attested and matching stable component digests skip mutation, while every planned cloud function is still freshly verified and included in smoke. The mini-program is still uploaded because the platform does not expose an equivalent safe cross-run package attestation. A true all-component mutation is an exceptional operator choice: add `--force-redeploy-current` to both prepare and publish. That flag is valid only with explicit `--full-current`, is pinned in preflight, plan, ledger, and resume identity, and does not weaken any Git, lock, snapshot, verification, smoke, cleanup, or upload gate.
+By default, `full-current` ensures the desired non-RAG current state: all 10 planned cloud functions plus admin-web are freshly remotely attested and matching stable component digests skip mutation, while every planned cloud function is still freshly verified and included in smoke. Explicit include-RAG mode expands the cloud set to 12. The mini-program is still uploaded because the platform does not expose an equivalent safe cross-run package attestation. A true all-component mutation is an exceptional operator choice: add `--force-redeploy-current` to both prepare and publish. That flag is valid only with explicit `--full-current`, is pinned in preflight, plan, ledger, and resume identity, and does not weaken any Git, lock, snapshot, verification, smoke, cleanup, or upload gate.
 
 ### Immutable artifacts and same-run retry
 
@@ -42,7 +46,7 @@ Remote attestation is read-only and may run before a mutation fence. Every follo
 
 ### Release DAG V2
 
-Formal release defaults to `HH_RELEASE_DAG_V2=v2`. The run first consumes the release preflight contract and immutable artifact attestation, executes `ensure:indexes` exactly once with structured readback, deploys and freshly verifies `admin` plus `post-rag-worker`, and only then starts the authenticated 12-minute timer probe. The timer wait and its cleanup overlap only the exact remaining cloud-function partition and basic cloud smoke. Backfill and semantic gates wait for both branches; admin-web and mini-program publication remain terminal nodes and cannot run after either branch fails.
+Formal release defaults to `HH_RELEASE_DAG_V2=v2`. Every run consumes the release preflight contract, immutable artifact attestation, and the common `ensure:indexes` prerequisite. The default non-RAG run then deploys or attests and freshly verifies the 10 planned cloud functions before terminal admin-web and mini-program publication. Include-RAG mode expands the planned deployment and declared configuration/index operations, but the RAG timer, backfill, smoke, retrieval, and semantic-evaluation gates remain delegated. Terminal publication cannot run after any in-scope release branch fails.
 
 Remote Git fetch/revalidation occurs at named mutation boundaries rather than before every cloud invoke or CLI command. Every individual mutation still receives the production guard plus a local clean/exact-SHA fence, and immutable snapshots are rechecked immediately before deploy. Timer and cloud fixtures use dedicated cleanup fences: abort or Git drift cannot suppress cleanup, all cleanup promises settle before the ledger records terminal failure, and concurrent ledger stage writes are serialized.
 
@@ -88,6 +92,7 @@ Pass that same absolute file explicitly to formal prepare with `--ui-qualificati
 
 - `HH_RELEASE_HOME_COLD_START_NONEMPTY`: the cold-start home shell renders non-empty content.
 - `HH_RELEASE_HOME_IMAGES_RENDERED`: the home feed renders its required images.
+- `HH_RELEASE_HOME_ARCHIVE_TABS_STICKY`: visible archive topic tabs pin below the search surface and preserve their filtered feed.
 - `HH_RELEASE_HOME_DETAIL_NONEMPTY`: home feed tap opens a non-empty detail page.
 - `HH_RELEASE_LOGIN_VERSION`: the logged-out profile exposes and validates the build version through the non-visual `data-build-version` attribute; version text must not be visible.
 - `HH_RELEASE_PROFILE_LOGIN_CLEAN`: the logged-out profile has exactly one visible login identity entry and no visible build version or developer diagnostics.
@@ -96,7 +101,7 @@ The script writes machine-readable evidence under `.codex-local/release-evidence
 
 `auto-replay` is optional. If `HH_REQUIRE_RELEASE_REPLAY=1` or `HH_MP_REPLAY_CONFIG_PATH` is set, the gate also runs the recorded replay check. Replay is no longer the default proof because the DevTools CLI can directly expose an automator websocket with hidden `--auto-port`.
 
-Without all five release UI labels, the gate must fail and the mini-program must not be uploaded. If WeChat DevTools has no usable way to create or run the evidence, report that as a DevTools capability blocker instead of publishing.
+Without all 6 release UI labels, the gate must fail and the mini-program must not be uploaded. If WeChat DevTools has no usable way to create or run the evidence, report that as a DevTools capability blocker instead of publishing.
 
 ## Cloud Smoke And Logs
 
@@ -140,7 +145,7 @@ Deploy `wechat-audit-callback` as a dedicated HTTPS HTTP function. In the Mini P
 
 The console GET verification must return `echostr` only for a valid WeChat signature. Production acceptance creates an isolated image post through the real mini-program path, records text `pass`, image `pending -> pass`, automatic member visibility, and fixture deletion. Invalid signature, wrong AppID, unsupported/encrypted payload, callback persistence failure, or an image task that remains pending blocks production verification. Rollback disables the message-push URL and restores the previous callback configuration; it must not auto-approve pending posts. Retry old pending posts explicitly only after the repaired callback is live.
 
-RAG is excluded from the default formal release plan: its workers, configuration, indexes, timer, ES write/backfill and semantic retrieval/evaluation are delegated to the RAG development session after deployment. Default formal cloud smoke excludes `post-rag-worker` and `post-video-rag-worker`, while retaining real smoke coverage for admin, collaboration-template, community, home-prefetch, http-gateway, member, post, section, user and wechat-audit-callback. To intentionally include RAG in a release, set `HH_RELEASE_INCLUDE_RAG=1` (or pass `--include-rag` to the release planner); only that explicit mode makes RAG failures release-blocking.
+As defined in [RAG Release Boundary](#rag-release-boundary), default formal cloud smoke excludes `post-rag-worker` and `post-video-rag-worker`, while retaining real smoke coverage for admin, collaboration-template, community, home-prefetch, http-gateway, member, post, section, user, and wechat-audit-callback.
 
 `user` and `section` direct invokes intentionally record OPENID/membership guard evidence instead of forcing production `ALLOW_TEST_OPENID`. Real user OPENID flows remain covered by the mini-program release UI evidence. CloudBase `fn log` can intermittently return `GetFunctionLogDetail InternalError` for non-critical functions; those failures are stored as warnings. The `post.clientLog` runId log is the required log gate and still blocks release if missing.
 

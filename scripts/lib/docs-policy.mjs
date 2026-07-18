@@ -2,7 +2,7 @@ import { dirname, isAbsolute, normalize } from 'node:path'
 import MarkdownIt from 'markdown-it'
 
 export function requiredPublicDocumentPaths() {
-  return ['README.md', 'AGENTS.md', 'CLAUDE.md', 'TASKS.md', 'docs/README.md']
+  return ['README.md', 'AGENTS.md', 'CLAUDE.md', 'PRODUCT.md', 'TASKS.md', 'docs/README.md']
 }
 
 const ENTRYPOINTS = new Set(['README.md', 'AGENTS.md', 'CLAUDE.md', 'TASKS.md', 'docs/README.md'])
@@ -17,6 +17,7 @@ const CANONICAL_OPERATIONS = new Set([
   'wechat-ops/README.md',
 ])
 const CANONICAL_CURRENT = new Set([
+  'PRODUCT.md',
   'docs/TESTING-PRINCIPLES.md',
   'docs/UX-PRINCIPLES.md',
 ])
@@ -162,6 +163,7 @@ export function classifyPublicDocument({ path, source }) {
     || normalizedPath.startsWith('docs/superpowers/plans/')
     || normalizedPath.startsWith('docs/superpowers/specs/')
     || normalizedPath.startsWith('docs/changes/')
+    || normalizedPath.startsWith('docs/releases/')
     || normalizedPath.startsWith('news/')
     || normalizedPath.startsWith('prototype/')
   ) {

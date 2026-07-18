@@ -31,9 +31,11 @@ Run `npm.cmd run docs:catalog` for the machine-readable catalog and `npm.cmd run
 - [Repository overview](../README.md)
 - [Mandatory collaboration boundaries](../AGENTS.md)
 - [Collaboration playbook](../CLAUDE.md)
+- [Product positioning](../PRODUCT.md)
 - [Open tasks](../TASKS.md)
 - [Testing principles](TESTING-PRINCIPLES.md): how to select user, permission, cold-start, and concurrency cases.
-- [Interaction principles](UX-PRINCIPLES.md): current behavior principles; visual values come from the current Figma source and checked-in styles.
+- [Interaction principles](UX-PRINCIPLES.md): current behavior principles.
+- Visual implementation authority: checked-in styles, page code, and tests. The current Figma file is design input; dated inventories and QA reports are historical evidence.
 
 ## Operational guides
 
@@ -48,14 +50,14 @@ Run `npm.cmd run docs:catalog` for the machine-readable catalog and `npm.cmd run
 
 ## Supporting references
 
-- [Figma alignment inventory](figma-mini-0626-inventory.md): confirmed design observations, not a replacement for the current Figma file or implemented styles.
-- [CloudBase HTTP access](cloudbase-http-access.md)
 - [Mini-program pre-fetch](miniprogram-pre-fetch.md)
 - [UI click regression checklist](ui-click-regression-checklist.md)
 
 ## Historical and delivery records
 
 - [2026-07-12 full-current public-main release](releases/2026-07-12-full-current-public-main.md): verified release identity and outcome; not an operational instruction.
+- [Figma 0626/0709 inventory](figma-mini-0626-inventory.md) and [Figma 0710 visual QA](../design-qa.md): dated design evidence, not current implementation authority.
+- [CloudBase HTTP access notes](cloudbase-http-access.md): superseded deployment and fixed-token notes retained only for traceability.
 - [Adversarial testing preparation](adversarial-testing-prep.md): a point-in-time risk inventory; current commands remain in `TESTING.md` and `release-gate.md`.
 - `docs/superpowers/plans/` and `docs/superpowers/specs/`: point-in-time implementation plans and approved design specifications.
 - `docs/changes/`: change fragments describing individual branches or deliveries; status text must not be read as current branch state later.

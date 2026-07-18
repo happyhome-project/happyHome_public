@@ -176,7 +176,7 @@ npm.cmd run deploy:admin-web
 - 备用 CloudBase 入口：腾讯云 CloudBase 环境已开通静态网站托管。
 - 备用 CloudBase 入口：本机 CloudBase CLI 已登录腾讯云账号；脚本通过 `npx.cmd --yes @cloudbase/cli ...` 调用 CLI。
 - `admin` 云函数已开启 HTTP 访问服务，并且 `VITE_CLOUD_API_URL/admin` 可访问。
-- `admin` 云函数环境变量中的 `ADMIN_TOKEN` 与前端构建时的 `VITE_ADMIN_TOKEN` 一致。
+- 前端构建只需要 `VITE_CLOUD_API_URL`；路由和地图变量按 `admin-web/README.md` 选配。
 
 ## SPA 路由设置
 
@@ -190,17 +190,9 @@ index.html
 
 配置完成后，再用 `VITE_ROUTER_MODE=history` 重新部署。
 
-## 临时认证风险
+## 认证边界
 
-当前 Admin Web 仍使用前端内置账号、密码和 token：
-
-```text
-VITE_ADMIN_USERNAME
-VITE_ADMIN_PASSWORD
-VITE_ADMIN_TOKEN
-```
-
-所有 `VITE_*` 变量都会在构建时进入前端 JS 包，因此这套方式只适合临时内测。公网生产前应切换到后端登录/session 机制，避免把固定管理 token 暴露给浏览器。
+Admin Web 在运行时调用 `auth.login`，并把后端返回的 session token 保存在浏览器本地存储中。不要把固定管理员账号、密码或管理 token 放进 `VITE_*` 构建变量；所有这类变量都会进入前端 JS 包。
 
 ## 验收清单
 

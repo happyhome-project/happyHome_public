@@ -1,6 +1,6 @@
 # 2026-07-12 Full-Current Public-Main Release
 
-> **Historical release record:** This records one completed release. Follow [the current release gate](../release-gate.md) for operations.
+> **Historical / point-in-time:** This document records one completed release and is not an operational runbook. **当前权威 / Current authority:** follow the [current release gate](../release-gate.md).
 
 - Public main SHA: `965ab0a4d46078f89ecda832aaddb919a1995133`
 - Release strategy: `full-current`
