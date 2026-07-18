@@ -83,7 +83,8 @@ import {
 import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
 import { resolvePostAuthorNickname } from '../../shared/post-author'
 import { normalizeArchiveTopic } from '../../shared/archive-topics'
-import { archiveTopicId } from '../../lib/archive-topic-index'
+import { archiveTopicId, syncArchivePostTopics, updateArchivePostTopicLinks } from '../../lib/archive-topic-index'
+import { parseArchivePostCreateInput, type ArchivePostFormat } from '../../shared/archive-post'
 import {
   collaborationTemplateAsSection,
   findUnsafeCollaborationTemplateChanges,
@@ -425,6 +426,79 @@ function mergeAdminPostContent(existingContent: any, incomingContent: any, secti
   return merged
 }
 
+function resolveArchivePostFormat(format: unknown): ArchivePostFormat {
+  if (format === 'text' || format === 'video') return format
+  return 'image_text'
+}
+
+function buildAdminArchiveContentSection(communityId: string, format: unknown): Section {
+  const resolvedFormat = resolveArchivePostFormat(format)
+  const common = {
+    _id: '',
+    communityId,
+    icon: '',
+    order: 0,
+    enableComment: true,
+    enableLike: true,
+    createdAt: '',
+    type: 'evergreen' as const,
+    status: 'active' as const,
+  }
+  const topicsWidget: Widget = {
+    widgetId: 'topics', type: 'topic', label: '话题', fieldKey: 'topics',
+    required: false, order: 3, showInList: false,
+  }
+
+  if (resolvedFormat === 'text') {
+    return {
+      ...common,
+      name: '文字',
+      displayTemplate: 'text_note',
+      widgets: [
+        { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
+        { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', required: true, order: 1, showInList: false },
+        { ...topicsWidget, order: 2 },
+      ],
+    } as Section
+  }
+
+  if (resolvedFormat === 'video') {
+    return {
+      ...common,
+      name: '视频',
+      displayTemplate: 'default',
+      widgets: [
+        { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
+        { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 1, showInList: false },
+        { widgetId: 'videos', type: 'video_group', label: '视频', fieldKey: 'videos', required: true, order: 2, showInList: false },
+        topicsWidget,
+        { widgetId: 'location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 4, showInList: false },
+      ],
+    } as Section
+  }
+
+  return {
+    ...common,
+    name: '图文',
+    displayTemplate: 'image_note',
+    widgets: [
+      { widgetId: 'images', type: 'image_group', label: '图片', fieldKey: 'images', required: true, order: 0, showInList: false },
+      { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 1, showInList: true },
+      { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false },
+      topicsWidget,
+      { widgetId: 'location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 4, showInList: false },
+    ],
+  } as Section
+}
+
+function archiveContentForAdmin(post: any) {
+  if (post?.area !== 'archive') return post?.content || {}
+  return {
+    ...(post.content || {}),
+    topics: Array.isArray(post.topics) ? post.topics.map(String) : [],
+  }
+}
+
 function isTestAccountId(userId: string) {
   const normalized = String(userId || '').trim().toLowerCase()
   return (
@@ -563,6 +637,13 @@ async function resolveAdminPostContentContract(post: any): Promise<{
   section: Section | null
   collaborationTemplate: CollaborationTemplate | null
 }> {
+  if (post?.area === 'archive') {
+    return {
+      section: buildAdminArchiveContentSection(String(post.communityId || ''), post.format),
+      collaborationTemplate: null,
+    }
+  }
+
   if (post?.area === 'collaboration') {
     const templateId = String(post.collaborationTemplateId || '').trim()
     if (!templateId) return { section: null, collaborationTemplate: null }
@@ -1803,7 +1884,9 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
         : null
       const section = template
         ? collaborationTemplateAsSection(template, String(post.communityId || ''))
-        : sectionsById[post.sectionId]
+        : post.area === 'archive'
+          ? buildAdminArchiveContentSection(String(post.communityId || ''), post.format)
+          : sectionsById[post.sectionId]
       return {
         ...post,
         authorNickname: resolvePostAuthorNickname(post, author?.nickName, { audience: 'admin' }),
@@ -1842,6 +1925,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     return {
       post: {
         ...post,
+        content: archiveContentForAdmin(post),
         authorNickname: resolvePostAuthorNickname(post, (author as any)?.nickName, { audience: 'admin' }),
         authorAvatarUrl: resolveAuthorAvatarUrl((author as any)?.avatarUrl, post._id || post.authorId || ''),
         attendanceSummaryByWidget,
@@ -1990,7 +2074,19 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       throw new Error('该板块尚未配置内容模板，无法编辑')
     }
 
-    const merged = mergeAdminPostContent(post.content || {}, params.content || {}, section)
+    const mergedAdminContent = mergeAdminPostContent(archiveContentForAdmin(post), params.content || {}, section)
+    const archive = post.area === 'archive'
+      ? parseArchivePostCreateInput({
+          area: 'archive',
+          format: resolveArchivePostFormat(post.format),
+          topics: mergedAdminContent.topics,
+          content: Object.fromEntries(Object.entries(mergedAdminContent).filter(([key]) => key !== 'topics')),
+          ...(resolveArchivePostFormat(post.format) === 'text'
+            ? { presentation: post.presentation }
+            : {}),
+        })
+      : null
+    const merged = (archive ? archive.content : mergedAdminContent) as Record<string, any>
     const adminEditableIds = getAdminPostEditableWidgetIds(section)
     const adminValidationSection = {
       ...section,
@@ -2004,6 +2100,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       await db.runTransaction(async transaction => {
         await transaction.collection('posts').doc(postId).update({ data: {
           pendingContent: db.replaceValue(merged), pendingAuditStatus: 'pending', pendingAuditReason: 'content audit pending',
+          ...(archive ? { pendingTopics: db.replaceValue(archive.topics) } : {}),
           pendingSubmittedAt: updatedAt, updatedAt, adminEditedAt: updatedAt,
           adminEditedByAccountId: ctx.accountId, adminEditedByUsername: ctx.username,
         } })
@@ -2018,7 +2115,11 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
         authorId: ctx.userId,
         source: 'admin',
         contentSlot: 'pendingContent',
-        postSnapshot: { ...post, pendingContent: merged } as any,
+        postSnapshot: {
+          ...post,
+          pendingContent: merged,
+          ...(archive ? { pendingTopics: archive.topics } : {}),
+        } as any,
       })
       return { success: true, updatedAt, adminEditedAt: updatedAt, auditStatus: audit.status, auditReason: audit.reason }
     }
@@ -2042,6 +2143,18 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       contentSlot: 'content',
       postSnapshot: { ...post, content: merged } as any,
     })
+    if (archive && audit.status === 'pass') {
+      await db.updateById('posts', postId, { topics: db.replaceValue(archive.topics) })
+      await updateArchivePostTopicLinks(postId, { status: 'deleted' })
+      await syncArchivePostTopics({
+        _id: postId,
+        communityId: String(post.communityId || ''),
+        topics: archive.topics,
+        createdAt: String(post.createdAt || updatedAt),
+        status: String(post.status || 'active'),
+        auditStatus: 'pass',
+      })
+    }
     return { success: true, updatedAt, adminEditedAt: updatedAt, auditStatus: audit.status, auditReason: audit.reason }
   }
   if (action === 'post.removeAttendanceMemberAdmin') {
