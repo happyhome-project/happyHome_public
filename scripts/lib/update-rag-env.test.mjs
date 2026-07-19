@@ -15,6 +15,7 @@ test('update-rag-env configures CloudBase retrieval with Tencent atomic models a
   assert.match(source, /TENCENT_RAG_CLOUDBASE_CHUNK_PAGE_SIZE/)
   assert.match(source, /TENCENT_RAG_CLOUDBASE_MAX_CANDIDATE_CHUNKS/)
   assert.match(source, /deprecatedEsEnvKeys/)
+  assert.match(source, /TENCENT_RAG_ES_ENDPOINT/)
   assert.match(reconcileSource, /delete existing\[key\]/)
   assert.match(source, /TENCENT_RAG_ATOMIC_SECRET_ID/)
   assert.match(source, /TENCENT_RAG_ATOMIC_SECRET_KEY/)
@@ -26,6 +27,7 @@ test('update-rag-env configures CloudBase retrieval with Tencent atomic models a
   assert.match(source, /POST_RAG_SMOKE_IDENTITY_SECRET/)
   assert.match(source, /functionName === 'post'/)
   assert.doesNotMatch(source, /TENCENT_RAG_PROVIDER:\s*'es'/)
+  assert.doesNotMatch(source, /buildPostSemanticFunctionEnvironments/)
 })
 
 test('update-rag-env carries cost-controlled video ASR policy into RAG workers', () => {

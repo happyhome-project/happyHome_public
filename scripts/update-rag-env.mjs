@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { ensurePostRagSmokeIdentitySecret } from './lib/post-rag-smoke-identity.mjs'
 import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
-import { buildPostSemanticFunctionEnvironments } from './lib/post-semantic-function-env.mjs'
+import { buildRagFunctionEnvironments } from './lib/rag-function-env.mjs'
 import { reconcileRagFunctionEnvironment } from './lib/rag-env-reconcile.mjs'
 
 function loadDotEnvFile(filePath) {
@@ -68,7 +68,7 @@ const workerEnv = {
 const postSmokeIdentityEnv = {
   POST_RAG_SMOKE_IDENTITY_SECRET: ensurePostRagSmokeIdentitySecret(),
 }
-const semanticSource = {
+const ragSource = {
   ...camEnv,
   ...ragEnv,
   ...process.env,
@@ -80,7 +80,7 @@ const semanticSource = {
   TENCENT_RAG_ATOMIC_REGION: atomicEnv.TENCENT_RAG_ATOMIC_REGION,
   TENCENT_RAG_EMBEDDING_MODEL: atomicEnv.TENCENT_RAG_EMBEDDING_MODEL,
 }
-const functionEnvironments = buildPostSemanticFunctionEnvironments(semanticSource)
+const functionEnvironments = buildRagFunctionEnvironments({ ...baseEnv, ...ragSource, ...atomicEnv })
 
 function configuredEnv(values) {
   return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined && value !== ''))
@@ -116,6 +116,11 @@ const functionNames = (process.argv.find((arg) => arg.startsWith('--only='))?.sl
 
 const workerFunctions = new Set(['post-rag-worker', 'post-video-rag-worker'])
 const deprecatedEsEnvKeys = new Set([
+  'TENCENT_RAG_ES_ENDPOINT',
+  'TENCENT_RAG_ES_USERNAME',
+  'TENCENT_RAG_ES_PASSWORD',
+  'TENCENT_RAG_INDEX_NAME',
+  'TENCENT_RAG_VECTOR_FIELD',
   'TENCENT_RAG_EMBEDDING_INFERENCE_ID',
   'TENCENT_RAG_RERANK_INFERENCE_ID',
   'TENCENT_RAG_LLM_INFERENCE_ID',

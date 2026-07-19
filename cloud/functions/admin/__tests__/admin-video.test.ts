@@ -21,8 +21,12 @@ jest.mock('../../../lib/db', () => ({
     }),
   })),
 }))
+jest.mock('../../../lib/post-rag-sync', () => ({
+  schedulePostRagSync: jest.fn(),
+  schedulePostRagSyncForCurrentPosts: jest.fn(),
+  schedulePostRagSyncInTransaction: jest.fn(),
+}))
 
-jest.mock('../../../lib/post-rag-outbox', () => ({ appendPostRagOutboxEvent: jest.fn() }))
 
 jest.mock('../../../lib/storage', () => ({
   deleteFile: jest.fn(),

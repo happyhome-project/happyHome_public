@@ -47,9 +47,11 @@ jest.mock('../../../lib/post-rag', () => ({
   reconcilePostRagJobsForCommunityBatch: jest.fn(),
 }))
 
-jest.mock('../../../lib/post-rag-outbox', () => ({ appendPostRagOutboxEvent: jest.fn() }))
-jest.mock('../../../lib/post-rag-v2-health', () => ({ getPostRagV2Health: jest.fn() }))
-jest.mock('../../../lib/post-rag-release-probe',()=>({createPostRagReleaseProbe:jest.fn(),readPostRagReleaseTimerEvidence:jest.fn(),readPostRagReleaseProbeStatus:jest.fn(),cleanupPostRagReleaseProbe:jest.fn()}))
+jest.mock('../../../lib/post-rag-sync', () => ({
+  schedulePostRagSync: jest.fn(),
+  schedulePostRagSyncForCurrentPosts: jest.fn(),
+  schedulePostRagSyncInTransaction: jest.fn(),
+}))
 
 jest.mock('uuid', () => ({
   v4: jest.fn().mockReturnValue('mocked-uuid'),
@@ -61,8 +63,7 @@ import * as storage from '../../../lib/storage'
 import { searchAmapPoi } from '../../../lib/amap'
 import * as postSearch from '../../../lib/post-search'
 import * as postRag from '../../../lib/post-rag'
-import { getPostRagV2Health } from '../../../lib/post-rag-v2-health'
-import * as releaseProbe from '../../../lib/post-rag-release-probe'
+import * as postRagSync from '../../../lib/post-rag-sync'
 import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
 
 const TEST_INTERNAL_TOKEN = 'admin-unit-internal-token'
@@ -1420,19 +1421,17 @@ test('section.updateStatus: refreshes search and queues RAG jobs for existing po
   expect(result.success).toBe(true)
   expect(db.updateById).toHaveBeenCalledWith('sections', 'section-live', { status: 'dormant' })
   expect(db.query).toHaveBeenCalledWith('posts', { sectionId: 'section-live', status: 'active' })
-  expect(postRag.enqueuePostRagJob).toHaveBeenCalledTimes(2)
-  expect(postRag.enqueuePostRagJob).toHaveBeenNthCalledWith(1, {
+  expect(postRagSync.schedulePostRagSync).toHaveBeenCalledTimes(2)
+  expect(postRagSync.schedulePostRagSync).toHaveBeenNthCalledWith(1, {
     postId: 'post-a',
     communityId: 'community-a',
     sectionId: 'section-live',
-    action: 'upsert',
     reason: 'section.updateStatus',
   })
-  expect(postRag.enqueuePostRagJob).toHaveBeenNthCalledWith(2, {
+  expect(postRagSync.schedulePostRagSync).toHaveBeenNthCalledWith(2, {
     postId: 'post-b',
     communityId: 'community-b',
     sectionId: 'section-live',
-    action: 'upsert',
     reason: 'section.updateStatus',
   })
   expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledWith('section-live')
@@ -1874,13 +1873,12 @@ test('post.deleteAdmin: clears pin and featured flags', async () => {
     featuredByAccountId: '',
   })
   expect(result).toEqual({ success: true })
-  expect(postRag.enqueuePostRagJob).toHaveBeenCalledWith({
+  expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
     postId: 'post-flagged',
     communityId: 'community-1',
     sectionId: 'section-1',
-    action: 'delete',
-    reason: 'post.deleteAdmin',
-  })
+    reason: 'post.deleted',
+  }))
   expect(postSearch.removePostSearchIndex).toHaveBeenCalledWith('post-flagged')
 })
 
@@ -1980,136 +1978,6 @@ test('post.rebuildSearchIndexSectionBatchAdmin: rebuilds a bounded derived searc
     hasMore: true,
     nextSkip: 10,
   })
-})
-
-test('post.reconcileRagIndexCommunityBatchAdmin: queues missing stale and removable RAG jobs for a community batch', async () => {
-  ;(postRag.reconcilePostRagJobsForCommunityBatch as jest.Mock).mockResolvedValue({
-    communityId: 'community-1',
-    skip: 5,
-    limit: 10,
-    scannedCount: 10,
-    upsertQueuedCount: 2,
-    deleteQueuedCount: 1,
-    skippedCount: 7,
-    missingStateCount: 1,
-    staleStateCount: 1,
-    removableStateCount: 1,
-    failedCount: 0,
-    hasMore: true,
-    nextSkip: 15,
-  })
-
-  const result: any = await main({
-    action: 'post.reconcileRagIndexCommunityBatchAdmin',
-    communityId: 'community-1',
-    skip: 5,
-    limit: 10,
-    _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
-  })
-
-  expect(postRag.reconcilePostRagJobsForCommunityBatch).toHaveBeenCalledWith('community-1', {
-    skip: 5,
-    limit: 10,
-  })
-  expect(result).toEqual({
-    communityId: 'community-1',
-    skip: 5,
-    limit: 10,
-    scannedCount: 10,
-    upsertQueuedCount: 2,
-    deleteQueuedCount: 1,
-    skippedCount: 7,
-    missingStateCount: 1,
-    staleStateCount: 1,
-    removableStateCount: 1,
-    failedCount: 0,
-    hasMore: true,
-    nextSkip: 15,
-  })
-})
-
-test('post.ragIndexHealthAdmin: returns RAG index health counts for a scoped community', async () => {
-  ;(postRag.getPostRagIndexHealthForCommunity as jest.Mock).mockResolvedValue({
-    communityId: 'community-1',
-    activePostCount: 6,
-    indexedStateCount: 4,
-    removedStateCount: 1,
-    failedStateCount: 1,
-    pendingJobCount: 2,
-    failedJobCount: 1,
-    potentialMissingActiveCount: 2,
-    coverageRatio: 4 / 6,
-  })
-
-  const result: any = await main({
-    action: 'post.ragIndexHealthAdmin',
-    communityId: 'community-1',
-    _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
-  })
-
-  expect(postRag.getPostRagIndexHealthForCommunity).toHaveBeenCalledWith('community-1')
-  expect(result).toEqual({
-    communityId: 'community-1',
-    activePostCount: 6,
-    indexedStateCount: 4,
-    removedStateCount: 1,
-    failedStateCount: 1,
-    pendingJobCount: 2,
-    failedJobCount: 1,
-    potentialMissingActiveCount: 2,
-    coverageRatio: 4 / 6,
-  })
-})
-
-test('post.ragV2HealthAdmin: is superAdmin-only and returns exact v2 coverage', async () => {
-  ;(getPostRagV2Health as jest.Mock).mockResolvedValue({ communityId:'community-1', schemaVersion:2, eligibleActivePostCount:125, exactSourceVersionCount:125, missingExactSourceVersionCount:0, pendingJobCount:0, retryJobCount:0, processingJobCount:0, failedJobCount:0, coverageRatio:1 })
-  await expect(main({action:'post.ragV2HealthAdmin',communityId:'community-1'})).resolves.toMatchObject({eligibleActivePostCount:125,exactSourceVersionCount:125})
-  await expect(main({action:'post.ragV2HealthAdmin',communityId:'community-1',_actAs:{accountId:'a',role:'communityAdmin',userId:'u',username:'n'}})).rejects.toThrow('权限不足')
-  expect(getPostRagV2Health).toHaveBeenCalledWith('community-1')
-})
-
-test('release timer probe actions route only through internal superAdmin with run-bound params',async()=>{;(releaseProbe.createPostRagReleaseProbe as jest.Mock).mockResolvedValue({runId:'run-1',postId:'p1'});(releaseProbe.readPostRagReleaseTimerEvidence as jest.Mock).mockResolvedValue({evidence:null});(releaseProbe.readPostRagReleaseProbeStatus as jest.Mock).mockResolvedValue({complete:false});(releaseProbe.cleanupPostRagReleaseProbe as jest.Mock).mockResolvedValue({success:true})
-  await expect(main({action:'post.ragTimerProbeCreateAdmin',runId:'run-1'})).resolves.toMatchObject({runId:'run-1'});await main({action:'post.ragTimerEvidenceAdmin',runId:'run-1'});await main({action:'post.ragTimerProbeStatusAdmin',runId:'run-1',postId:'p1'});await main({action:'post.ragTimerProbeCleanupAdmin',runId:'run-1',postId:'p1'});expect(releaseProbe.readPostRagReleaseTimerEvidence).toHaveBeenCalledWith('run-1')
-  await expect(main({action:'post.ragTimerProbeCreateAdmin',runId:'run-1',_actAs:{accountId:'a',role:'communityAdmin',userId:'u',username:'n'}})).rejects.toThrow('权限不足')
-  const response:any=await rawMain({httpMethod:'POST',headers:{authorization:'Bearer ignored'},body:JSON.stringify({action:'post.ragTimerProbeCreateAdmin',runId:'run-1'})});expect(response.statusCode).toBe(403)
-})
-
-test('community.listAllPageAdmin: is superAdmin-only and paginates every community status', async () => {
-  const statuses = ['active', 'pending', 'rejected', 'disabled']
-  const all = Array.from({ length: 125 }, (_, index) => ({
-    _id: `community-${String(index + 1).padStart(3, '0')}`,
-    status: statuses[index % statuses.length],
-  }))
-  ;(db.queryAfterId as jest.Mock).mockImplementation(async (
-    _collection: string,
-    _where: Record<string, unknown>,
-    afterId: string | null,
-    limit: number,
-  ) => all.filter((item) => !afterId || item._id > afterId).slice(0, limit))
-
-  const first: any = await main({
-    action: 'community.listAllPageAdmin',
-    afterId: '',
-    limit: 100,
-  })
-  const second: any = await main({
-    action: 'community.listAllPageAdmin',
-    afterId: first.nextAfterId,
-    limit: 100,
-  })
-  const items = [...first.items, ...second.items]
-
-  expect(items).toHaveLength(125)
-  expect(first.hasMore).toBe(true)
-  expect(second.hasMore).toBe(false)
-  expect(new Set(items.map((item: any) => item.status))).toEqual(new Set(statuses))
-  expect(db.queryAfterId).toHaveBeenNthCalledWith(1, 'communities', {}, null, 100)
-  expect(db.queryAfterId).toHaveBeenNthCalledWith(2, 'communities', {}, 'community-100', 100)
-
-  await expect(main({
-    action: 'community.listAllPageAdmin',
-    _actAs: { accountId: 'a', role: 'communityAdmin', userId: 'u', username: 'n' },
-  })).rejects.toThrow('权限不足')
 })
 
 test('archive topics: community-scoped admins can list and add manual origin without losing legacy origin', async () => {

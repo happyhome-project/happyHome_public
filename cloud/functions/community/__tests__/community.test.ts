@@ -16,7 +16,9 @@ jest.mock('../../../lib/db', () => ({
     return response?.data || null
   }),
 }))
-jest.mock('../../../lib/post-rag-outbox', () => ({ appendPostRagOutboxEvent: jest.fn() }))
+jest.mock('../../../lib/post-rag-sync', () => ({
+  schedulePostRagSyncForCurrentPosts: jest.fn(),
+}))
 
 import {
   handleCreate,
@@ -81,6 +83,7 @@ test('创建社区：status 默认为 pending，creatorId 为 OPENID', async () 
     status: 'pending',
     creatorId: 'test-openid',
     memberCount: 0,
+    ragIndexPolicy: 'business',
   }) })
   expect(result.communityId).toBe('community-123')
 })

@@ -1,11 +1,14 @@
 import { CLOUD_RELEASE_COMPONENTS, RELEASE_ACTION_KINDS, classifyReleaseOperations, validateMigrationModulePath } from './release-component-registry.mjs'
 
 export const ALL_CLOUD_FUNCTIONS = CLOUD_RELEASE_COMPONENTS
-export const RELEASE_ACTIONS = new Set(Object.keys(RELEASE_ACTION_KINDS))
+export const RETIRED_RAG_RELEASE_ACTIONS = new Set([
+  'configure-rag-network', 'ensure-tencent-rag-index', 'backfill-post-rag-v2',
+  'verify-post-rag-timer', 'eval-post-semantic-search',
+])
+export const RELEASE_ACTIONS = new Set([...Object.keys(RELEASE_ACTION_KINDS), ...RETIRED_RAG_RELEASE_ACTIONS])
 export const RAG_RELEASE_FUNCTIONS = new Set(['post-rag-worker', 'post-video-rag-worker'])
 export const RAG_RELEASE_ACTIONS = new Set([
-  'configure-rag-network', 'configure-rag-workers', 'ensure-tencent-rag-index',
-  'update-rag-env', 'backfill-post-rag-v2', 'verify-post-rag-timer', 'eval-post-semantic-search',
+  'configure-rag-workers', 'update-rag-env',
 ])
 export const RAG_RELEASE_SMOKE_SUITES = new Set(['post-rag', 'post-semantic-search'])
 
@@ -103,12 +106,10 @@ export function selectChangeManifests(mode, manifests = [], changedPaths = []) {
 }
 
 export function filterRagReleaseManifest(manifest, includeRag = false) {
-  if (includeRag) return manifest
-  const identity = `${manifest.changeId || ''} ${manifest.source || ''}`
-  if (/rag|semantic-search/i.test(identity)) return { ...manifest, actions: [], migrations: [], smokeSuites: [] }
   return {
     ...manifest,
-    actions: (manifest.actions || []).filter((action) => !RAG_RELEASE_ACTIONS.has(action)),
+    actions: (manifest.actions || []).filter((action) => !RETIRED_RAG_RELEASE_ACTIONS.has(action)
+      && (includeRag || !RAG_RELEASE_ACTIONS.has(action))),
     smokeSuites: (manifest.smokeSuites || []).filter((suite) => !RAG_RELEASE_SMOKE_SUITES.has(suite)),
   }
 }

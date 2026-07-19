@@ -54,22 +54,18 @@ test('cloud runtime integrity includes the release wrapper as well as the busine
 })
 
 test('release operation kinds are closed and preserve replay semantics', () => {
-  assert.deepEqual(new Set(Object.values(RELEASE_ACTION_KINDS)), new Set(['desired-state', 'verification']))
-  for (const action of [
-    'ensure-indexes', 'ensure-tencent-rag-index', 'configure-rag-network',
-    'configure-rag-workers', 'update-rag-env', 'backfill-post-rag-v2',
-  ]) assert.equal(classifyReleaseActionKind(action), 'desired-state', action)
-  for (const action of ['verify-post-rag-timer', 'eval-post-semantic-search']) {
-    assert.equal(classifyReleaseActionKind(action), 'verification', action)
+  assert.deepEqual(new Set(Object.values(RELEASE_ACTION_KINDS)), new Set(['desired-state']))
+  for (const action of ['ensure-indexes', 'configure-rag-workers', 'update-rag-env']) {
+    assert.equal(classifyReleaseActionKind(action), 'desired-state', action)
   }
   assert.throws(() => classifyReleaseActionKind('shell-anything'), /unknown action/i)
   assert.deepEqual(classifyReleaseOperations([{
-    actions: ['eval-post-semantic-search', 'backfill-post-rag-v2', 'ensure-indexes'],
+    actions: ['configure-rag-workers', 'ensure-indexes'],
     migrations: [{ id: 'one-time-v1' }],
   }]), {
-    'desired-state': ['backfill-post-rag-v2', 'ensure-indexes'],
+    'desired-state': ['configure-rag-workers', 'ensure-indexes'],
     migration: ['one-time-v1'],
-    verification: ['eval-post-semantic-search'],
+    verification: [],
   })
 })
 

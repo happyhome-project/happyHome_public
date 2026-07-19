@@ -13,10 +13,9 @@ import {
   isActivityInviteInProgress,
 } from '../../shared/activity-invite'
 import { removePostSearchIndex } from '../../lib/post-search'
-import { enqueuePostRagDeleteJobInTransaction, enqueuePostRagJob } from '../../lib/post-rag'
-import { createPostSemanticSearchServiceFromEnv, type PostSemanticSearchResponse } from '../../lib/post-semantic-search'
+import { schedulePostRagSyncInTransaction } from '../../lib/post-rag-sync'
+import { searchPostsWithRag } from '../../lib/post-rag'
 import { isTextNoteSection, normalizeTextNoteSection, normalizeTextNoteTheme } from '../../shared/text-note-widgets'
-import { appendPostRagOutboxEvent } from '../../lib/post-rag-outbox'
 import type {
   AttendancePreviewUser,
   AttendanceSummary,
@@ -66,16 +65,7 @@ const ATTENDANCE_PREVIEW_LIMIT = 5
 const COMMUNITY_READ_ERROR = '需要先加入社区后查看内容'
 const HOME_POST_LIMIT_PER_SECTION = 20
 const DEFAULT_SEARCH_LIMIT = 20
-type PostSemanticSearchService = { search(input: {
-  communityId: string; query: string; sectionId?: string; skip?: number; limit?: number; includeMemberOnly: boolean; viewerId?: string
-}): Promise<PostSemanticSearchResponse> }
-let postSemanticSearchService: PostSemanticSearchService | null = null
-
-export function resetPostSemanticSearchServiceForTests() { postSemanticSearchService = null }
-function getPostSemanticSearchService() {
-  if (!postSemanticSearchService) postSemanticSearchService = createPostSemanticSearchServiceFromEnv()
-  return postSemanticSearchService
-}
+export function resetPostSemanticSearchServiceForTests() {}
 
 function resolvePostRagSmokeIdentity(event: any, action: string, communityId: string): PostRagSmokeIdentity | null {
   if (action !== 'search') return null
@@ -652,7 +642,7 @@ export async function handleCreate(
   }
   const postId = await db.runTransaction(async transaction => {
     const created = await transaction.collection('posts').add({ data: postData })
-    await appendPostRagOutboxEvent(transaction, { communityId: params.communityId, aggregateId: created._id, reasonCode: 'post.created', now })
+    await schedulePostRagSyncInTransaction(transaction, { postId: created._id, communityId: params.communityId, sectionId, reason: 'post.created', now })
     return created._id
   })
 
@@ -709,12 +699,7 @@ export async function handleCreateCollaboration(
   }
   const postId = await db.runTransaction(async transaction => {
     const created = await transaction.collection('posts').add({ data: postData })
-    await appendPostRagOutboxEvent(transaction, {
-      communityId,
-      aggregateId: created._id,
-      reasonCode: 'post.created',
-      now,
-    })
+    await schedulePostRagSyncInTransaction(transaction, { postId: created._id, communityId, sectionId: '', reason: 'post.created', now })
     return created._id
   })
   const audit = await auditAndApply({
@@ -814,7 +799,7 @@ export async function handleCreateActivityInvite(
   }
   const postId = await db.runTransaction(async transaction => {
     const created = await transaction.collection('posts').add({ data: inviteData })
-    await appendPostRagOutboxEvent(transaction, { communityId: sourcePost.communityId, aggregateId: created._id, reasonCode: 'post.created', now })
+    await schedulePostRagSyncInTransaction(transaction, { postId: created._id, communityId: sourcePost.communityId, sectionId: '', reason: 'post.created', now })
     return created._id
   })
 
@@ -1148,6 +1133,7 @@ export async function handleSearch(params: {
   skip?: number
   limit?: number
   asGuest?: boolean
+  _ragIndexScope?: 'business' | 'validation'
 }, openid?: string) {
   const communityId = String(params.communityId || '').trim()
   if (!communityId) throw new Error('communityId 不能为空')
@@ -1155,16 +1141,15 @@ export async function handleSearch(params: {
   await ensureCommunityReadable(communityId, viewerId, COMMUNITY_READ_ERROR)
   const canViewMemberOnly = await isActiveCommunityMember(communityId, viewerId)
   try {
-    const result = await getPostSemanticSearchService().search({
+    return await searchPostsWithRag({
       communityId,
       query: String(params.q ?? params.query ?? ''),
       sectionId: String(params.sectionId || '').trim() || undefined,
       skip: Number.isFinite(Number(params.skip)) ? Math.max(0, Math.floor(Number(params.skip))) : 0,
       limit: Number.isFinite(Number(params.limit)) && Number(params.limit) > 0 ? Math.floor(Number(params.limit)) : DEFAULT_SEARCH_LIMIT,
       includeMemberOnly: canViewMemberOnly,
-      ...(canViewMemberOnly ? { viewerId } : {}),
+      indexScope: params._ragIndexScope === 'validation' ? 'validation' : 'business',
     })
-    return { ...result, answer: '', citations: [], mode: result.items.length ? 'rag' as const : 'no_answer' as const }
   } catch { throw new Error('智能搜索暂不可用，请稍后重试') }
 }
 
@@ -1183,11 +1168,12 @@ export async function handleDelete(params: { postId: string }, openid: string) {
   if (post.status === 'deleted') {
     if (post.area === 'archive') await updateArchivePostTopicLinks(params.postId, { status: 'deleted' })
     await db.runTransaction(async transaction => {
-      await enqueuePostRagDeleteJobInTransaction(transaction, {
+      await schedulePostRagSyncInTransaction(transaction, {
         postId: params.postId,
-        communityId: post.communityId,
-        sectionId: post.sectionId,
+        communityId: String(post.communityId || ''),
+        sectionId: String(post.sectionId || ''),
         reason: 'post.delete.compensate',
+        now: new Date().toISOString(),
       })
     })
     await removePostSearchIndex(params.postId)
@@ -1199,12 +1185,13 @@ export async function handleDelete(params: { postId: string }, openid: string) {
       status: 'deleted', isPinned: false, pinnedAt: '', pinnedByAccountId: '',
       isFeatured: false, featuredAt: '', featuredByAccountId: '',
     } })
-    await appendPostRagOutboxEvent(transaction, { communityId: String(post.communityId || ''), aggregateId: params.postId, reasonCode: 'post.deleted', now: new Date().toISOString() })
-    await enqueuePostRagDeleteJobInTransaction(transaction, {
+    const now = new Date().toISOString()
+    await schedulePostRagSyncInTransaction(transaction, {
       postId: params.postId,
-      communityId: post.communityId,
-      sectionId: post.sectionId,
+      communityId: String(post.communityId || ''),
+      sectionId: String(post.sectionId || ''),
       reason: 'post.delete',
+      now,
     })
   })
   await removePostSearchIndex(params.postId)
@@ -1312,7 +1299,7 @@ export async function handleUpdate(
       pendingSubmittedAt: updatedAt,
       updatedAt,
       } })
-      await appendPostRagOutboxEvent(transaction, { communityId: post.communityId, aggregateId: params.postId, reasonCode: 'post.updated', now: updatedAt })
+      await schedulePostRagSyncInTransaction(transaction, { postId: params.postId, communityId: post.communityId, sectionId: post.sectionId || '', reason: 'post.updated', now: updatedAt })
     })
     const audit = await auditAndApply({
       postId: params.postId,
@@ -1336,7 +1323,7 @@ export async function handleUpdate(
     auditUpdatedAt: updatedAt,
     updatedAt,
     } })
-    await appendPostRagOutboxEvent(transaction, { communityId: post.communityId, aggregateId: params.postId, reasonCode: 'post.updated', now: updatedAt })
+    await schedulePostRagSyncInTransaction(transaction, { postId: params.postId, communityId: post.communityId, sectionId: post.sectionId || '', reason: 'post.updated', now: updatedAt })
   })
   const audit = await auditAndApply({
     postId: params.postId,
@@ -1561,7 +1548,7 @@ export const main = async (event: any, context?: any) => {
   if (action === 'home') return handleHome(params, openid)
   if (action === 'bootstrap') return handleBootstrap(params, openid)
   if (action === 'get') return handleGet(params, openid)
-  if (action === 'search') return handleSearch(params, openid)
+  if (action === 'search') return handleSearch({ ...params, _ragIndexScope: smokeIdentity ? 'validation' : 'business' }, openid)
   if (action === 'delete') return handleDelete(params, openid)
   if (action === 'update') return handleUpdate(params, openid)
   if (action === 'joinAttendance') return handleJoinAttendance(params, openid)

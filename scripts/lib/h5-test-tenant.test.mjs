@@ -50,6 +50,7 @@ test('fixed manifest contains one hidden approval community, three sections, and
   assert.equal(manifest.communities[0].joinType, 'approval')
   assert.equal(manifest.communities[0].discoverable, false)
   assert.equal(manifest.communities[0].fixtureKey, FIXTURE_KEY)
+  assert.equal(manifest.communities[0].ragIndexPolicy, 'excluded')
   assert.deepEqual(manifest.sections.map((section) => section.order), [0, 1, 2])
   assert.deepEqual(manifest.sections.map((section) => section.fixturePostCount), [30, 1, 0])
   assert.equal(manifest.posts.length, 31)
@@ -59,7 +60,7 @@ test('fixed manifest contains one hidden approval community, three sections, and
   ])
   assert.ok(manifest.posts.every((post) => !Object.hasOwn(post.content, 'hh-web-h5-v1-widget-short-image')))
   assert.equal(new Set(manifest.posts.map((post) => post._id)).size, 31)
-  assert.ok(manifest.posts.every((post) => post.auditStatus === 'pass' && post.fixtureKey === FIXTURE_KEY))
+  assert.ok(manifest.posts.every((post) => post.auditStatus === 'pass' && post.fixtureKey === FIXTURE_KEY && post.ragIndexPolicy === 'excluded'))
 })
 
 test('empty observation plans only deterministic set operations and no deletes', async () => {

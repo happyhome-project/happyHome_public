@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-
 import {
   assertRagBootstrapVerified,
   executeReleaseDagV2,
@@ -9,141 +8,46 @@ import {
   releaseDagMode,
 } from './release-dag-v2.mjs'
 
-function deferred() {
-  let resolve
-  let reject
-  const promise = new Promise((res, rej) => { resolve = res; reject = rej })
-  return { promise, reject, resolve }
-}
-
-function successfulDeps(events, overrides = {}) {
-  return {
-    preflight: async () => events.push('preflight'),
-    configureRag: async () => events.push('configure-rag'),
-    deployRag: async () => events.push('deploy-rag'),
-    startTimer: async () => { events.push('timer-fixture-ready'); return { id: 'timer' } },
-    waitTimer: async () => { events.push('timer-wait'); return { complete: true } },
-    cleanupTimer: async () => events.push('timer-cleanup'),
-    deployRemainingCloud: async () => events.push('deploy-other-cloud'),
-    runBasicCloudSmoke: async () => events.push('basic-cloud-smoke'),
-    runBackfill: async () => events.push('backfill'),
-    runSemanticGates: async () => events.push('semantic-gates'),
-    publishAdmin: async () => events.push('admin'),
-    publishMiniprogram: async () => events.push('mini'),
-    ...overrides,
-  }
-}
-
-test('DAG V2 is default-on and only explicit zero selects legacy order', () => {
+test('the deploy-only DAG cannot be downgraded to the retired live-RAG order', () => {
   assert.equal(isReleaseDagV2Enabled({}), true)
-  assert.equal(isReleaseDagV2Enabled({ HH_RELEASE_DAG_V2: '1' }), true)
-  assert.equal(isReleaseDagV2Enabled({ HH_RELEASE_DAG_V2: '0' }), false)
   assert.equal(releaseDagMode({}), 'v2')
-  assert.equal(releaseDagMode({ HH_RELEASE_DAG_V2: '0' }), 'legacy')
+  assert.equal(isReleaseDagV2Enabled({ HH_RELEASE_DAG_V2: '0' }), true)
+  assert.equal(releaseDagMode({ HH_RELEASE_DAG_V2: '0' }), 'v2')
 })
 
-test('preflight failure blocks index configuration deployment and publication nodes', async () => {
-  const events = []
-  await assert.rejects(() => executeReleaseDagV2(successfulDeps(events, {
-    preflight: async () => { events.push('preflight'); throw new Error('preflight failed after its own cleanup') },
-  })), /preflight failed/)
-  assert.deepEqual(events, ['preflight'])
+test('RAG workers form a deploy-only subset and require fresh artifact proof', () => {
+  const partition = partitionReleaseCloudFunctions(['post', 'post-rag-worker', 'post-video-rag-worker', 'admin'])
+  assert.deepEqual(partition.ragBootstrap, ['post-rag-worker', 'post-video-rag-worker'])
+  assert.deepEqual(partition.remaining, ['admin', 'post'])
+  assert.doesNotThrow(() => assertRagBootstrapVerified(partition.ragBootstrap, partition.ragBootstrap))
+  assert.throws(() => assertRagBootstrapVerified(partition.ragBootstrap, ['post-rag-worker']), /post-video-rag-worker/)
 })
 
-test('RAG bootstrap and remaining cloud subsets are an exact partition and require fresh admin plus worker proof', () => {
-  const partition = partitionReleaseCloudFunctions(['user', 'post-rag-worker', 'admin', 'post'])
-  assert.deepEqual(partition.ragBootstrap, ['admin', 'post-rag-worker'])
-  assert.deepEqual(partition.remaining, ['post', 'user'])
-  assert.deepEqual([...partition.ragBootstrap, ...partition.remaining].sort(), ['admin', 'post', 'post-rag-worker', 'user'])
-  assert.doesNotThrow(() => assertRagBootstrapVerified(partition.ragBootstrap, ['post-rag-worker', 'admin']))
-  assert.throws(() => assertRagBootstrapVerified(partition.ragBootstrap, ['post-rag-worker']), /admin.*fresh verified/i)
-})
-
-test('DAG creates the timer fixture after RAG deploy and overlaps its wait with independent cloud work', async () => {
-  const events = []
-  const timer = deferred()
-  const smoke = deferred()
-  const resultPromise = executeReleaseDagV2(successfulDeps(events, {
-    waitTimer: async () => { events.push('timer-wait:start'); await timer.promise; events.push('timer-wait:done'); return { complete: true } },
-    runBasicCloudSmoke: async () => { events.push('basic-smoke:start'); await smoke.promise; events.push('basic-smoke:done') },
-  }))
-
-  await new Promise((resolve) => setImmediate(resolve))
-  assert.deepEqual(events.slice(0, 8), [
-    'preflight', 'configure-rag', 'deploy-rag', 'timer-fixture-ready',
-    'timer-wait:start', 'deploy-other-cloud', 'basic-smoke:start',
-  ])
-  timer.resolve()
-  await new Promise((resolve) => setImmediate(resolve))
-  assert(events.includes('timer-cleanup'))
-  assert(!events.includes('backfill'))
-  smoke.resolve()
-  await resultPromise
-  assert(events.indexOf('timer-cleanup') < events.indexOf('backfill'))
-  assert(events.indexOf('basic-smoke:done') < events.indexOf('backfill'))
-  assert(events.indexOf('backfill') < events.indexOf('semantic-gates'))
-  assert(events.indexOf('semantic-gates') < events.indexOf('admin'))
-  assert(events.indexOf('admin') < events.indexOf('mini'))
-})
-
-test('a parallel cloud failure aborts timer waiting, awaits cleanup, and blocks semantic and publication nodes', async () => {
-  const events = []
-  let timerSignal
-  await assert.rejects(() => executeReleaseDagV2(successfulDeps(events, {
-    waitTimer: async (_session, { signal }) => {
-      timerSignal = signal
-      events.push('timer-wait:start')
-      await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
-      events.push('timer-wait:aborted')
-      throw new Error('timer aborted')
-    },
-    deployRemainingCloud: async () => { events.push('deploy-other-cloud'); throw new Error('cloud deploy failed') },
-  })), (error) => error instanceof AggregateError && error.result.failureCauses.some((cause) => cause.branch === 'cloud'))
-  assert.equal(timerSignal.aborted, true)
-  assert(events.indexOf('timer-wait:aborted') < events.indexOf('timer-cleanup'))
-  assert(!events.includes('backfill'))
-  assert(!events.includes('admin'))
-  assert(!events.includes('mini'))
-})
-
-test('timer cleanup failure is retained with the primary timer failure and blocks publication', async () => {
-  const events = []
-  await assert.rejects(() => executeReleaseDagV2(successfulDeps(events, {
-    waitTimer: async () => { throw new Error('sensitive-deadline-detail') },
-    cleanupTimer: async () => { events.push('timer-cleanup'); throw new Error('sensitive-cleanup-detail') },
-  })), (error) => {
-    assert(error instanceof AggregateError)
-    assert.match(String(error), /parallel phase failed/i)
-    assert.equal(error.errors.length, 2)
-    assert(error.errors.every((item) => /timer .* failed/.test(item.message)))
-    assert.doesNotMatch(error.errors.map((item) => item.message).join('\n'), /sensitive-deadline-detail|sensitive-cleanup-detail/)
-    assert.deepEqual(error.result.failureCauses, [
-      { branch: 'timer', phase: 'wait', action: 'unknown', code: 'BRANCH_FAILED', classification: 'branch-failed', cleanup: false },
-      { branch: 'timer', phase: 'cleanup', action: 'unknown', code: 'BRANCH_FAILED', classification: 'branch-failed', cleanup: true },
-    ])
-    return true
+test('release performs deployment and ordinary smoke without timer backfill or semantic gates', async () => {
+  const order = []
+  const result = await executeReleaseDagV2({
+    preflight: async () => { order.push('preflight'); return 'preflight' },
+    configureRag: async () => { order.push('configure'); return 'config' },
+    deployRag: async () => { order.push('deploy-rag'); return 'rag' },
+    deployRemainingCloud: async () => { order.push('deploy-cloud'); return 'cloud' },
+    runBasicCloudSmoke: async () => { order.push('ordinary-smoke'); return 'smoke' },
+    publishAdmin: async () => { order.push('admin'); return 'admin' },
+    publishMiniprogram: async () => { order.push('miniprogram'); return 'miniprogram' },
   })
-  assert.deepEqual(events.filter((event) => event === 'timer-cleanup'), ['timer-cleanup'])
-  assert(!events.includes('admin'))
+  assert.deepEqual(order, ['preflight', 'configure', 'deploy-rag', 'deploy-cloud', 'ordinary-smoke', 'admin', 'miniprogram'])
+  assert.equal(result.smoke, 'smoke')
 })
 
-test('timer failure aborts the cloud branch before smoke and publishes no raw child error in the aggregate message', async () => {
-  const events = []
-  const deploy = deferred()
-  const result = executeReleaseDagV2(successfulDeps(events, {
-    waitTimer: async () => { throw new Error('secret-child-detail') },
-    deployRemainingCloud: async () => { events.push('deploy:start'); await deploy.promise; events.push('deploy:done') },
-    runBasicCloudSmoke: async () => events.push('smoke:must-not-run'),
-  }))
-  await new Promise((resolve) => setImmediate(resolve))
-  deploy.resolve()
-  await assert.rejects(result, (error) => {
-    assert(error instanceof AggregateError)
-    assert.doesNotMatch(error.message, /secret-child-detail/)
-    assert.doesNotMatch(error.errors.map((item) => item.message).join('\n'), /secret-child-detail/)
-    return true
-  })
-  assert(!events.includes('smoke:must-not-run'))
-  assert(!events.includes('admin'))
-  assert(!events.includes('mini'))
+test('deployment failure blocks smoke and publication', async () => {
+  const order = []
+  await assert.rejects(() => executeReleaseDagV2({
+    preflight: async () => order.push('preflight'),
+    configureRag: async () => order.push('configure'),
+    deployRag: async () => order.push('deploy-rag'),
+    deployRemainingCloud: async () => { order.push('deploy-cloud'); throw new Error('deploy failed') },
+    runBasicCloudSmoke: async () => order.push('smoke'),
+    publishAdmin: async () => order.push('admin'),
+    publishMiniprogram: async () => order.push('miniprogram'),
+  }), /deploy failed/)
+  assert.deepEqual(order, ['preflight', 'configure', 'deploy-rag', 'deploy-cloud'])
 })

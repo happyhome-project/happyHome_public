@@ -114,20 +114,12 @@ import { selectCloudProductionBindings, selectStableProductionBinding } from './
 import { attestCloudWithCurrentOrPrior, loadPriorCloudAttestationProbe } from './lib/release-prior-cloud-attestation.mjs'
 import { executeReleaseOperations } from './lib/release-operations.mjs'
 import { CLOUD_RELEASE_COMPONENTS, verifyMigrationInputFile } from './lib/release-component-registry.mjs'
-import { executeFormalSemanticReleaseStages } from './lib/formal-semantic-release-stages.mjs'
 import {
-  applyReleaseRagVerificationPolicy,
-  selectNonRagReleaseSmokeFunctions,
-} from './lib/release-rag-verification-policy.mjs'
-import {
-  assertRagBootstrapVerified,
   executeReleaseDagV2,
   partitionReleaseCloudFunctions,
   releaseDagMode,
 } from './lib/release-dag-v2.mjs'
-import { startPostRagTimerProbeSession } from './lib/post-rag-timer-probe-runner.mjs'
 import { inspectReleaseUiQualification, writeReleaseUiQualification } from './lib/release-ui-qualification.mjs'
-import { createSafeAggregateError, releaseFailureCauses } from './lib/release-failure-safety.mjs'
 import { persistFormalReleaseFailure } from './lib/release-terminal-failure.mjs'
 import { ReleaseGovernance } from './lib/release-governance.mjs'
 import {
@@ -927,7 +919,7 @@ function resolveMiniprogramUploadMetadata(defaults = {}) {
   }
 }
 
-async function buildAndGateMiniprogramUpload({ version, desc, releaseRunId, delegateRagVerification = false, gitSha = '', devToolsVersion = '' }) {
+async function buildAndGateMiniprogramUpload({ version, desc, releaseRunId, gitSha = '', devToolsVersion = '' }) {
   writeMiniprogramBuildInfo(version, desc)
 
   console.log('\nBuilding miniprogram...')
@@ -948,7 +940,6 @@ async function buildAndGateMiniprogramUpload({ version, desc, releaseRunId, dele
       HH_RELEASE_GIT_SHA: gitSha,
       HH_RELEASE_DEVTOOLS_VERSION: devToolsVersion,
       HH_RELEASE_VERSION: version,
-      ...(delegateRagVerification ? { HH_RELEASE_DELEGATE_RAG_VERIFICATION: '1' } : {}),
       WECHAT_DEVTOOLS_PROJECT_PATH: MP_DIST,
     },
   })
@@ -972,7 +963,6 @@ async function runReleaseUiQualification() {
     version,
     desc,
     releaseRunId: `ui-qualification-${makeReleaseRunId()}`,
-    delegateRagVerification: true,
     gitSha,
     devToolsVersion,
   })
@@ -1061,7 +1051,7 @@ async function deployMiniprogram(options = {}) {
 
 async function uploadMiniprogram(options = {}) {
   const upload = resolveMiniprogramUploadMetadata()
-  await buildAndGateMiniprogramUpload({ ...upload, releaseRunId: makeReleaseRunId(), delegateRagVerification: true })
+  await buildAndGateMiniprogramUpload({ ...upload, releaseRunId: makeReleaseRunId() })
   const beforeRemoteMutation = typeof options.beforeRemoteMutation === 'function'
     ? () => assertDirectProductionDeployWorkspace({
         publishOnly: true,
@@ -1448,14 +1438,9 @@ async function invokeCloudReleaseProbe({ artifact, functionName, probeToken, sig
 }
 
 const RELEASE_ACTION_SCRIPTS = Object.freeze({
-  'configure-rag-network': 'configure:rag-network',
   'configure-rag-workers': 'configure:rag-workers',
   'ensure-indexes': 'ensure:indexes',
-  'ensure-tencent-rag-index': 'ensure:tencent-rag-index:release',
   'update-rag-env': 'update:rag-env',
-  'backfill-post-rag-v2': 'backfill:post-rag-v2',
-  'verify-post-rag-timer': 'verify:post-rag-timer',
-  'eval-post-semantic-search': 'eval:post-semantic-search',
 })
 
 function runReleaseNpmScript(script, env = {}, args = []) {
@@ -1474,12 +1459,6 @@ function runReleaseNpmScript(script, env = {}, args = []) {
       else reject(new Error(`release action npm run ${script} failed with ${signal || `exit ${code}`}`))
     })
   })
-}
-
-function readSemanticReleaseEvidence(runId, fileName) {
-  const evidencePath=resolve(ROOT,'.codex-local','release-evidence',runId,fileName)
-  if(!existsSync(evidencePath)) throw new Error(`semantic release evidence missing: ${evidencePath}`)
-  return { ...JSON.parse(readFileSync(evidencePath,'utf8')), evidencePath }
 }
 
 async function runDeclaredReleaseAction(action) {
@@ -1610,15 +1589,13 @@ async function runFormalRelease(options = {}) {
           HH_RELEASE_FULL_CURRENT_EXPLICIT: fullCurrentExplicit ? '1' : '0',
           HH_RELEASE_FORCE_REDEPLOY_CURRENT: forceRedeployCurrent ? '1' : '0',
           HH_RELEASE_PUBLISH_ONLY: publishOnly ? '1' : '0',
-          HH_RELEASE_DELEGATE_RAG_VERIFICATION: '1',
           HH_RELEASE_VERSION: releaseContext.version,
           HH_RELEASE_DESC: releaseContext.desc,
           TCB_ENV: releaseContext.envId,
         }, preflightResume ? ['--resume'] : [])
         const evidence = JSON.parse(readFileSync(evidencePath, 'utf8'))
-        const timerCheck = evidence.checks?.find((check) => check.name === 'timer-probe-document')
-        if (evidence.ok !== true || (timerCheck && (timerCheck?.status !== 'passed' || timerCheck?.cleanup !== 'passed'))) {
-          throw new Error('release preflight evidence or fixture cleanup is incomplete')
+        if (evidence.ok !== true) {
+          throw new Error('release preflight evidence is incomplete')
         }
         return { evidence: { evidencePath }, result: { status: 'passed', gitSha: releaseContext.gitSha } }
       })
@@ -1639,7 +1616,6 @@ async function runFormalRelease(options = {}) {
         : await buildAndGateMiniprogramUpload({
             ...miniprogramUpload,
             releaseRunId: releaseLedger.runId,
-            delegateRagVerification: true,
           })
       const evidence = await collectMiniprogramBuildGateEvidence(preparedEvidence)
       if (!publishOnly) oneShotBuildInfoPrepared = true
@@ -1738,33 +1714,15 @@ async function runFormalRelease(options = {}) {
     let cloudReleaseProbes = []
     let cloudOrchestration = { attestations: [], deployFunctions: [], verified: [] }
     let adminDeployed = false
-    const declaredSemanticActions = [...new Set(formalPlan.manifests.flatMap((manifest) => manifest.actions || []))]
-    const declaredSemanticSmokeSuites = [...new Set(formalPlan.manifests.flatMap((manifest) => manifest.smokeSuites || []))]
-    const ragVerificationPolicy = applyReleaseRagVerificationPolicy({
-      actions: declaredSemanticActions,
-      smokeSuites: declaredSemanticSmokeSuites,
-    })
-    const semanticActions = ragVerificationPolicy.actions
-    const semanticSmokeSuites = ragVerificationPolicy.smokeSuites
-    const semanticSkipReason = ragVerificationPolicy.delegatedActions.length || ragVerificationPolicy.delegatedSmokeSuites.length
-      ? ragVerificationPolicy.reason
-      : 'release plan has no semantic search gates'
-    const semanticRequiredCases = Math.max(30, ...formalPlan.manifests.map((manifest) => Number(manifest.semantic?.requiredCases || 0)))
-    const semanticRequired = semanticActions.some((action) => ['verify-post-rag-timer', 'backfill-post-rag-v2', 'eval-post-semantic-search'].includes(action)) || semanticSmokeSuites.includes('post-semantic-search')
-    const releaseCloudSmokeFunctions = selectNonRagReleaseSmokeFunctions(formalPlan.targets.cloud.functions || [])
+    const ragCloudFunctions = new Set(['post-rag-worker', 'post-video-rag-worker'])
+    const releaseCloudSmokeFunctions = (formalPlan.targets.cloud.functions || []).filter((name) => !ragCloudFunctions.has(name))
 
-    if (selectedDagMode === 'v2') {
+    {
       let ragCloud = { attestations: [], deployFunctions: [], verified: [] }
       let remainingCloud = { attestations: [], deployFunctions: [], verified: [] }
       let cloudSmokeSummary = null
       const plannedCloudFunctions = formalPlan.targets.cloud.functions || []
       const partition = partitionReleaseCloudFunctions(plannedCloudFunctions)
-      if (semanticRequired) {
-        for (const requiredFunction of ['admin', 'post-rag-worker']) {
-          if (!partition.ragBootstrap.includes(requiredFunction)) throw new Error(`release DAG V2 semantic timer requires planned ${requiredFunction}`)
-        }
-      }
-
       const orchestrateSubset = async (functions, boundaryName) => {
         if (!functions.length) return { attestations: [], deployFunctions: [], verified: [] }
         await revalidateFormalMutation(boundaryName)
@@ -1845,50 +1803,8 @@ async function runFormalRelease(options = {}) {
           command: 'fresh immutable attestation/deploy/verification for admin and post-rag-worker',
         }, async () => {
           ragCloud = await orchestrateSubset(partition.ragBootstrap, 'rag-cloud-deploy')
-          if (semanticRequired) assertRagBootstrapVerified(['admin', 'post-rag-worker'], ragCloud.verified)
           return { result: ragCloud }
         }),
-        startTimer: async ({ signal }) => {
-          if (!semanticRequired) return { cleanup: async () => {}, wait: async () => ({ skipped: true }) }
-          await revalidateFormalMutation('post-rag-timer-fixture')
-          const rawSession = await startPostRagTimerProbeSession({
-            env: { ...process.env, HH_RELEASE_RUN_ID: releaseLedger.runId, TCB_ENV: releaseContext.envId },
-            signal,
-            deps: {
-              beforeInvoke: async (action) => await localExactShaFence(`timer:${action}`),
-              beforeCleanup: async () => await releaseGuard.beforeRemoteMutation('post-rag-timer-cleanup'),
-            },
-          })
-          let timerSettled = false
-          return {
-            wait: async () => await runLedgerStage(releaseLedger, 'post-rag-timer-probe', {
-              command: 'wait for unique authenticated timer evidence and complete fixture cleanup',
-            }, async () => {
-              let primaryError = null
-              try {
-                const evidence = await rawSession.wait()
-                if (!evidence?.probeOutboxSeen || !evidence?.probeV2JobSeen || evidence?.complete !== true) throw new Error('timer probe evidence is incomplete')
-                await releaseGuard.recordStage('post-rag-timer-probe', { evidence })
-                return { evidence, result: evidence }
-              } catch (error) {
-                primaryError = error
-                throw error
-              } finally {
-                try { await rawSession.cleanup() }
-                catch (cleanupError) {
-                  if (primaryError) throw createSafeAggregateError('post RAG timer wait and cleanup failed', [
-                    ...releaseFailureCauses(primaryError, { branch: 'timer', phase: 'wait' }),
-                    ...releaseFailureCauses(cleanupError, { branch: 'timer', phase: 'cleanup', cleanup: true }),
-                  ])
-                  throw cleanupError
-                } finally { timerSettled = true }
-              }
-            }),
-            cleanup: async () => { if (!timerSettled) await rawSession.cleanup() },
-          }
-        },
-        waitTimer: async (session) => await session.wait(),
-        cleanupTimer: async (session) => await session.cleanup(),
         deployRemainingCloud: async () => await runLedgerStage(releaseLedger, 'cloud-deploy-remaining', {
           command: 'fresh immutable attestation/deploy/verification for the exact remaining cloud partition',
         }, async () => {
@@ -1898,7 +1814,7 @@ async function runFormalRelease(options = {}) {
         runBasicCloudSmoke: async () => {
           if (!plannedCloudFunctions.length) return null
           if (!releaseCloudSmokeFunctions.length) {
-            await releaseLedger.skipStage('cloud-smoke', { reason: ragVerificationPolicy.reason })
+            await releaseLedger.skipStage('cloud-smoke', { reason: 'release plan contains only post-release RAG workers' })
             return null
           }
           return await runLedgerStage(releaseLedger, 'cloud-smoke', {
@@ -1915,7 +1831,7 @@ async function runFormalRelease(options = {}) {
             return { evidence, result: cloudSmokeSummary }
           })
         },
-        runBackfill: async ({ timerEvidence }) => {
+        publishAdmin: async () => {
           cloudOrchestration = {
             attestations: [...ragCloud.attestations, ...remainingCloud.attestations],
             deployFunctions: [...ragCloud.deployFunctions, ...remainingCloud.deployFunctions],
@@ -1943,19 +1859,8 @@ async function runFormalRelease(options = {}) {
             await releaseLedger.skipStage('cloud-version-probes', { reason: 'release plan has no cloud function changes' })
             await releaseLedger.skipStage('cloud-smoke', { reason: 'release plan has no cloud function changes' })
           }
-          await executeFormalSemanticReleaseStages({ actions: semanticActions, smokeSuites: semanticSmokeSuites, requiredCases: semanticRequiredCases }, {
-            runStage: (name, action) => runLedgerStage(releaseLedger, name, { command: `formal semantic gate: ${name}` }, action),
-            skipStage: (name) => releaseLedger.skipStage(name, { reason: semanticSkipReason }),
-            completedTimerEvidence: timerEvidence,
-            runBackfill: async () => { await revalidateFormalMutation('post-rag-v2-backfill'); await runReleaseNpmScript('backfill:post-rag-v2', { HH_RELEASE_RUN_ID: releaseLedger.runId, TCB_ENV: releaseContext.envId }); return readSemanticReleaseEvidence(releaseLedger.runId, 'post-rag-v2-backfill.json') },
-            runSmoke: async () => { await revalidateFormalMutation('post-semantic-smoke'); await runReleaseNpmScript('verify:post-rag-smoke', { HH_RELEASE_RUN_ID: releaseLedger.runId, TCB_ENV: releaseContext.envId }); return readSemanticReleaseEvidence(releaseLedger.runId, 'post-rag-smoke.json') },
-            runEvaluation: async () => { await localExactShaFence('post-semantic-eval'); await runReleaseNpmScript('eval:post-semantic-search', { HH_RELEASE_RUN_ID: releaseLedger.runId, TCB_ENV: releaseContext.envId }); return readSemanticReleaseEvidence(releaseLedger.runId, 'post-semantic-eval.json') },
-            recordGuard: (name, evidence) => releaseGuard.recordStage(name, { evidence }),
-          })
           return { status: 'passed' }
         },
-        runSemanticGates: async () => ({ status: 'passed' }),
-        publishAdmin: async () => ({ gated: true }),
         publishMiniprogram: async () => ({ gated: true }),
       })
 
@@ -1967,120 +1872,6 @@ async function runFormalRelease(options = {}) {
           prior: priorCloudFunctions[attestation.functionName], runId: artifactManifest.runId,
         }))
       }
-    } else {
-    await runLedgerStage(releaseLedger, 'release-operations', {
-      command: 'execute allowlisted release actions and idempotent migrations declared by release/changes',
-    }, async () => {
-      const state = await releaseGuard.getProductionState()
-      const result = await executeReleaseOperations({
-        appliedMigrations: { ...(state?.appliedMigrations || {}) },
-        guard: {
-          beforeRemoteMutation: revalidateFormalMutation,
-          recordStage: async (...args) => await releaseGuard.recordStage(...args),
-          recordMigration: async (...args) => await releaseGuard.recordMigration(...args),
-        },
-        manifests: formalPlan.manifests,
-        runAction: runDeclaredReleaseAction,
-        runMigration: async (migration) => await runDeclaredReleaseMigration(migration, releaseContext),
-      })
-      return { result }
-    })
-
-    cloudDeploy = { fns: [] }
-    cloudReleaseProbes = []
-    cloudOrchestration = { attestations: [], deployFunctions: [], verified: [] }
-    if (formalPlan.targets.cloud.mode !== 'none') cloudDeploy = await runLedgerStage(releaseLedger, 'cloud-deploy', {
-      command: `fresh artifact attestation + selective CloudBase CLI/COS fn deploy (concurrency=${getCloudDeployConcurrency()})`,
-    }, async () => {
-      cloudOrchestration = await orchestrateCloudArtifactRelease({
-        root: ROOT,
-        manifest: artifactManifest,
-        forceRedeployCurrent,
-        onSecrets: (secrets) => releaseLedger.registerSecrets(secrets),
-        timeoutMs: getPositiveIntFlag('cloud-attestation-timeout-ms', 30_000, { max: 120_000 }),
-        attest: attestCloudWithPriorArtifact,
-        deploy: async ({ artifactRoot, functionName }) => {
-          const artifact = artifactManifest.artifacts.cloud[functionName]
-          const result = await deployCloud({
-            afterFunctionDeploy: async (fn, record) => await releaseGuard.recordStage(`cloud:${fn}`, { evidence: record }),
-            artifactRoot: dirname(artifactRoot),
-            beforeFunctionDeploy: createPinnedCloudDeployAttemptGuard({
-              artifactRoot,
-              expectedDigest: artifact.contentDigest,
-              functionName,
-              beforeFence: async (fn) => await revalidateFormalMutation(`cloud:${fn}`),
-            }),
-            functions: [functionName],
-            requireCloudBaseCli: true,
-            skipBuild: true,
-            sourceSha: releaseContext.gitSha,
-          })
-          if (result.path !== 'cloudbase-cli') throw new Error(`Formal release cloud deploy must use CloudBase CLI/COS; got ${result.path}`)
-        },
-        verify: verifyCloudDesiredState,
-      })
-      await releaseLedger.recordRemoteAttestations('cloud', cloudOrchestration.attestations)
-      return { result: {
-        fns: formalPlan.targets.cloud.functions,
-        currentBoundFns: cloudOrchestration.attestations.filter((item) => item.bindingSource === 'current' && item.status === 'attested').map((item) => item.functionName),
-        deployedFns: cloudOrchestration.deployFunctions,
-        path: cloudOrchestration.deployFunctions.length ? 'cloudbase-cli' : 'attested',
-        status: cloudOrchestration.deployFunctions.length ? 'deployed' : 'attested',
-      } }
-    })
-    else await releaseLedger.skipStage('cloud-deploy', { reason: 'release plan has no cloud function changes' })
-
-    if (cloudDeploy.fns.length) cloudReleaseProbes = await runLedgerStage(releaseLedger, 'cloud-version-probes', {
-      command: 'record bounded fresh verification for every planned immutable cloud artifact',
-    }, async () => {
-      cloudReleaseProbes = formalPlan.targets.cloud.functions.map((functionName) => artifactManifest.artifacts.cloud[functionName])
-      await releaseGuard.recordStage('cloud-version-probes', { evidence: { functions: cloudOrchestration.verified } })
-      return cloudReleaseProbes
-    })
-    else await releaseLedger.skipStage('cloud-version-probes', { reason: 'release plan has no cloud function changes' })
-
-    const deployedCloudFunctions = new Set(cloudDeploy.deployedFns || [])
-    for (const attestation of cloudOrchestration.attestations) {
-      const deployed = deployedCloudFunctions.has(attestation.functionName)
-      await releaseLedger.recordComponent(attestation.component, cloudComponentLedgerOutcome({
-        artifact: artifactManifest.artifacts.cloud[attestation.functionName], attestation, deployed,
-        prior: priorCloudFunctions[attestation.functionName], runId: artifactManifest.runId,
-      }))
-    }
-
-    await executeFormalSemanticReleaseStages({actions:semanticActions,smokeSuites:semanticSmokeSuites,requiredCases:semanticRequiredCases},{
-      runStage:(name,action)=>runLedgerStage(releaseLedger,name,{command:`formal semantic gate: ${name}`},action),
-      skipStage:(name)=>releaseLedger.skipStage(name,{reason:semanticSkipReason}),
-      runTimer:async()=>{await revalidateFormalMutation('post-rag-timer-probe');await runReleaseNpmScript('verify:post-rag-timer',{HH_RELEASE_RUN_ID:releaseLedger.runId,TCB_ENV:releaseContext.envId});return readSemanticReleaseEvidence(releaseLedger.runId,'post-rag-timer.json')},
-      runBackfill:async()=>{await revalidateFormalMutation('post-rag-v2-backfill');await runReleaseNpmScript('backfill:post-rag-v2',{HH_RELEASE_RUN_ID:releaseLedger.runId,TCB_ENV:releaseContext.envId});return readSemanticReleaseEvidence(releaseLedger.runId,'post-rag-v2-backfill.json')},
-      runSmoke:async()=>{await revalidateFormalMutation('post-semantic-smoke');await runReleaseNpmScript('verify:post-rag-smoke',{HH_RELEASE_RUN_ID:releaseLedger.runId,TCB_ENV:releaseContext.envId});return readSemanticReleaseEvidence(releaseLedger.runId,'post-rag-smoke.json')},
-      runEvaluation:async()=>{await runReleaseNpmScript('eval:post-semantic-search',{HH_RELEASE_RUN_ID:releaseLedger.runId,TCB_ENV:releaseContext.envId});return readSemanticReleaseEvidence(releaseLedger.runId,'post-semantic-eval.json')},
-      recordGuard:(name,evidence)=>releaseGuard.recordStage(name,{evidence}),
-    })
-
-    if (releaseCloudSmokeFunctions.length) await runLedgerStage(releaseLedger, 'cloud-smoke', {
-      resume,
-      reuseCheck,
-      command: `npm.cmd run test:cloud:release-smoke (concurrency=${getCloudSmokeConcurrency()})`,
-    }, async () => {
-      const summary = await runCloudSmoke(releaseCloudSmokeFunctions, releaseLedger.runId, {
-        beforeEnsureIndexes: async () => await revalidateFormalMutation('ensure-indexes'),
-        beforeSmokeCommand: async ({ stage }) => await revalidateFormalMutation(`cloud-smoke:${stage}`),
-        beforeFixtureCleanup: async ({ stage }) => await releaseGuard.beforeRemoteMutation(`cloud-smoke-cleanup:${stage}`),
-      })
-      await releaseGuard.recordStage('cloud-smoke', { evidence: { summaryPath: resolve(summary.evidenceDir, 'summary.json') } })
-      return {
-        evidence: { summaryPath: resolve(summary.evidenceDir, 'summary.json') },
-        result: {
-          status: summary.status,
-          evidenceDir: summary.evidenceDir,
-          concurrency: summary.concurrency,
-          labels: summary.labels,
-          missingLabels: summary.missingLabels,
-        },
-      }
-    })
-    else await releaseLedger.skipStage('cloud-smoke', { reason: cloudDeploy.fns.length ? ragVerificationPolicy.reason : 'release plan has no cloud function changes' })
     }
 
     if (formalPlan.targets.adminWeb) {

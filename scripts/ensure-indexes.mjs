@@ -490,23 +490,15 @@ const INDEXES = [
     ],
   },
   {
-    coll: 'post_rag_jobs',
-    name: 'idx_status_createdAt',
+    coll: 'post_rag_sync_state',
+    name: 'idx_status_nextAttemptAt',
     keys: [
       { Name: 'status', Direction: '1' },
-      { Name: 'createdAt', Direction: '1' },
+      { Name: 'nextAttemptAt', Direction: '1' },
     ],
   },
   {
-    coll: 'post_rag_jobs',
-    name: 'idx_postId_status',
-    keys: [
-      { Name: 'postId', Direction: '1' },
-      { Name: 'status', Direction: '1' },
-    ],
-  },
-  {
-    coll: 'post_rag_jobs',
+    coll: 'post_rag_sync_state',
     name: 'idx_communityId_status',
     keys: [
       { Name: 'communityId', Direction: '1' },
@@ -624,15 +616,9 @@ const REQUIRED_COLLECTIONS = [
   'post_search_chunks',    // RAG 证据分块（_id=chunkId）
   'post_search_vector_terms', // 本地稀疏向量词条
   'post_search_index_state',  // 每篇帖子索引状态
-  'post_rag_jobs',            // 正式 RAG 异步索引任务
+  'post_rag_sync_state',      // 每篇帖子唯一的当前 RAG 同步状态
   'post_rag_index_state',     // 正式 RAG 每篇帖子索引状态
   'post_rag_worker_state',    // 正式 RAG worker 最近运行状态
-  'rag_community_versions',   // v2 RAG 社区内容/ACL 版本游标
-  'post_rag_outbox',          // v2 RAG 事务 outbox
-  'post_rag_index_state_v2',  // v2 RAG 每篇帖子索引状态
-  'post_rag_index_versions',  // v2 RAG 版本化索引元数据
-  'post_rag_worker_timer_evidence', // 已认证 timer 调用证据
-  'post_rag_release_probes',  // 正式发布 timer probe 的 run-bound 临时绑定
   'post_rag_chunks',          // RAG chunk 元数据镜像/排障用
   'post_rag_smoke_runs',      // 短期签名 smoke 身份的服务端 run 绑定
   'post_video_rag_assets',     // 视频 OCR/ASR/关键帧摘要缓存（按 cacheKey 复用）

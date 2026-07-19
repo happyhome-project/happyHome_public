@@ -97,9 +97,11 @@ test('release cloud smoke ensures required database collections before invoking 
   assert.match(ensureIndexesScript, /content_audit_tasks/)
   assert.match(ensureIndexesScript, /admin_notification_subscriptions/)
   assert.match(ensureIndexesScript, /admin_notifications/)
-  assert.match(ensureIndexesScript, /rag_community_versions/)
-  for (const collection of ['post_rag_outbox', 'post_rag_index_state_v2', 'post_rag_index_versions', 'post_rag_worker_timer_evidence']) {
+  for (const collection of ['post_rag_sync_state', 'post_rag_index_state', 'post_rag_worker_state', 'post_rag_chunks']) {
     assert.match(ensureIndexesScript, new RegExp(collection))
+  }
+  for (const retired of ['rag_community_versions', 'post_rag_outbox', 'post_rag_index_state_v2', 'post_rag_index_versions', 'post_rag_worker_timer_evidence']) {
+    assert.doesNotMatch(ensureIndexesScript, new RegExp(retired))
   }
   assert.match(runCloudSmokeBody, /ensure:indexes/)
   assert(runCloudSmokeBody.indexOf('ensure:indexes') < runCloudSmokeBody.indexOf('runCloudReleaseSmoke'))
@@ -156,13 +158,6 @@ test('bounded fetch does not weaken the production token fence on the next local
   await assert.rejects(() => fences.localExactShaFence('cloud:second'), /token invalidated/)
   assert.equal(fetches, 1)
   assert.equal(guards, 3)
-})
-
-test('timer probe waits on a bounded deadline instead of a fixed attempt count', () => {
-  const source = readFileSync(new URL('./post-rag-timer-probe-runner.mjs', import.meta.url), 'utf8')
-  assert.match(source, /resolveTimerProbeTimeoutMs/)
-  assert.match(source, /runtime\.now\(\)\s*<\s*deadlineMs/)
-  assert.doesNotMatch(source, /attempt\s*<\s*20/)
 })
 
 const PUBLIC_CANONICAL_WORKSPACE = 'C:\\Project\\Claude\\happyHome_public'
@@ -432,7 +427,7 @@ test('formal release path records resumable ledger stages before upload', () => 
   assert.match(releaseBlock, /assertFormalReleaseCloudBasePath\(\{ prepareOnly }\)/)
   assert.match(releaseBlock, /releaseGuard\.acquire\(\)/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'release-preflight'[\s\S]*?runReleaseNpmScript\('release:preflight'/)
-  assert.match(releaseBlock, /timerCheck\?\.cleanup\s*!==\s*'passed'/)
+  assert.doesNotMatch(releaseBlock, /timerCheck|ragTimer|fixture cleanup/)
   assert.match(releaseBlock, /ensure-release-control-plane\.mjs --verify-only/)
   assert.doesNotMatch(releaseBlock, /node scripts\/ensure-release-control-plane\.mjs['\"]/)
   assert.match(deployScript, /Formal release publish requires --use-tcb/)
@@ -441,7 +436,7 @@ test('formal release path records resumable ledger stages before upload', () => 
   assert.match(deployScript, /Formal release CloudBase CLI\/COS deploy failed/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'miniprogram-build-gate'/)
   assert.match(releaseBlock, /mustReuse: publishOnly/)
-  assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-deploy'/)
+  assert.doesNotMatch(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-deploy'/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-deploy-rag-bootstrap'/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-deploy-remaining'/)
   assert.match(releaseBlock, /runLedgerStage\(releaseLedger,\s*'cloud-version-probes'/)

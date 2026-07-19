@@ -2,12 +2,16 @@ const mockDb = {
   count: jest.fn(),
   create: jest.fn(),
   getById: jest.fn(),
+  getByIdOrNull: jest.fn(),
+  getByIds: jest.fn(),
   query: jest.fn(),
   removeById: jest.fn(),
   updateById: jest.fn(),
 }
 
 jest.mock('../db', () => mockDb)
+jest.mock('../post-rag-sync', () => ({ schedulePostRagSync: jest.fn() }))
+import { schedulePostRagSync } from '../post-rag-sync'
 jest.mock('../post-search', () => ({
   ...jest.requireActual('../post-search'),
   removePostSearchIndex: jest.fn(),
@@ -783,7 +787,7 @@ test('searchPostsWithRag does not leak CloudBase fallback items when ES provider
     citations: [],
     items: [],
     total: 0,
-    fallbackReason: 'es_timeout',
+    fallbackReason: 'rag_provider_failed',
   }))
   expect(fallbackSearch).not.toHaveBeenCalled()
 })
@@ -804,6 +808,14 @@ test('searchPostsWithRag returns no_answer instead of inventing an answer withou
 })
 
 test('searchPostsWithRag drops member-only citations and generated answer for public readers', async () => {
+  mockDb.getByIdOrNull.mockResolvedValue({ _id: 'community-1', status: 'active', ragIndexPolicy: 'business' })
+  mockDb.getByIds.mockImplementation(async (collection: string, ids: string[]) => {
+    if (collection === 'posts') return ids.map((id) => ({ _id: id, communityId: 'community-1', sectionId: 'section-1', status: 'active', auditStatus: 'pass', updatedAt: '2026-06-25T00:00:00.000Z' }))
+    if (collection === 'post_rag_sync_state') return ids.map((id) => ({ _id: id, status: 'synced', appliedSourceVersion: 'source-v1', indexScope: 'business' }))
+    if (collection === POST_RAG_INDEX_STATE) return ids.map((id) => ({ _id: id, status: 'indexed', sourceVersion: 'source-v1', indexScope: 'business' }))
+    if (collection === 'sections') return [{ _id: 'section-1', communityId: 'community-1', status: 'active' }]
+    return []
+  })
   const provider = {
     name: 'fake-rag',
     isConfigured: jest.fn(() => true),
@@ -823,6 +835,9 @@ test('searchPostsWithRag drops member-only citations and generated answer for pu
           preview: '一粥一饭，当思来处不易。',
           score: 0.9,
           visibility: 'public',
+          sourceUpdatedAt: '2026-06-25T00:00:00.000Z',
+          sourceVersion: 'source-v1',
+          indexScope: 'business',
         },
         {
           postId: 'post-member',
@@ -836,6 +851,9 @@ test('searchPostsWithRag drops member-only citations and generated answer for pu
           preview: '秘密联系方式：13800000000',
           score: 0.95,
           visibility: 'member',
+          sourceUpdatedAt: '2026-06-25T00:00:00.000Z',
+          sourceVersion: 'source-v1',
+          indexScope: 'business',
         },
       ],
       items: [],
@@ -858,6 +876,35 @@ test('searchPostsWithRag drops member-only citations and generated answer for pu
   expect(result.citations).toHaveLength(1)
   expect(result.citations[0]).toMatchObject({ postId: 'post-public', visibility: 'public' })
   expect(result.items.map((item) => item.postId)).toEqual(['post-public'])
+})
+
+test.each([
+  ['pending synchronization', { syncStatus: 'pending' }],
+  ['superseded synchronization version', { appliedSourceVersion: 'source-v2' }],
+  ['stale index version', { indexSourceVersion: 'source-v2' }],
+  ['post changed after indexing', { postUpdatedAt: '2026-06-26T00:00:00.000Z' }],
+  ['inactive section', { sectionStatus: 'disabled' }],
+])('searchPostsWithRag fails closed for %s', async (_label, override: Record<string, string>) => {
+  mockDb.getByIdOrNull.mockResolvedValue({ _id: 'community-1', status: 'active', ragIndexPolicy: 'business' })
+  mockDb.getByIds.mockImplementation(async (collection: string, ids: string[]) => {
+    if (collection === 'posts') return ids.map((id) => ({ _id: id, communityId: 'community-1', sectionId: 'section-1', status: 'active', auditStatus: 'pass', updatedAt: override.postUpdatedAt || '2026-06-25T00:00:00.000Z' }))
+    if (collection === 'post_rag_sync_state') return ids.map((id) => ({ _id: id, status: override.syncStatus || 'synced', appliedSourceVersion: override.appliedSourceVersion || 'source-v1', indexScope: 'business' }))
+    if (collection === POST_RAG_INDEX_STATE) return ids.map((id) => ({ _id: id, status: 'indexed', sourceVersion: override.indexSourceVersion || 'source-v1', indexScope: 'business' }))
+    if (collection === 'sections') return [{ _id: 'section-1', communityId: 'community-1', status: override.sectionStatus || 'active' }]
+    return []
+  })
+  const provider = {
+    name: 'adversarial-provider', isConfigured: () => true,
+    search: jest.fn().mockResolvedValue({
+      total: 1, answer: '不应泄露的旧答案', mode: 'rag', items: [],
+      citations: [{ postId: 'post-1', chunkId: 'chunk-1', communityId: 'community-1', sectionId: 'section-1', title: '旧内容', sectionName: '旧板块', fieldLabel: '正文', fieldType: 'rich_note', preview: '旧内容', score: 0.9, visibility: 'public', sourceUpdatedAt: '2026-06-25T00:00:00.000Z', sourceVersion: 'source-v1', indexScope: 'business' }],
+    }),
+  }
+  const result = await searchPostsWithRag({ communityId: 'community-1', query: '旧内容', limit: 10 }, { provider })
+  expect(result.mode).toBe('no_answer')
+  expect(result.answer).not.toContain('不应泄露')
+  expect(result.citations).toEqual([])
+  expect(result.items).toEqual([])
 })
 
 test('hasRagEvidenceSignal rejects weak unrelated candidates and accepts real evidence signals', () => {
@@ -1803,13 +1850,11 @@ test('processPostVideoRagJobBatch caches analyzer output and requeues post RAG i
   expect(mockDb.updateById).toHaveBeenCalledWith(POST_VIDEO_RAG_JOBS, 'video-job-1', expect.objectContaining({
     status: 'completed',
   }))
-  expect(mockDb.create).toHaveBeenCalledWith(POST_RAG_JOBS, expect.objectContaining({
+  expect(schedulePostRagSync).toHaveBeenCalledWith(expect.objectContaining({
     postId: 'post-video',
     communityId: 'community-1',
     sectionId: 'section-1',
-    action: 'upsert',
     reason: 'rag.video.analysis.ready',
-    status: 'pending',
   }))
 })
 
@@ -1985,9 +2030,8 @@ test('processPostVideoRagJobBatch polls processing ASR jobs and indexes complete
   expect(mockDb.updateById).toHaveBeenCalledWith(POST_VIDEO_RAG_JOBS, 'video-job-1', expect.objectContaining({
     status: 'completed',
   }))
-  expect(mockDb.create).toHaveBeenCalledWith(POST_RAG_JOBS, expect.objectContaining({
+  expect(schedulePostRagSync).toHaveBeenCalledWith(expect.objectContaining({
     postId: 'post-video',
-    action: 'upsert',
     reason: 'rag.video.analysis.ready',
   }))
 })

@@ -67,6 +67,7 @@ export function buildManifest({ webUserId = null, wechatOpenid }) {
     isPinned: false,
     isFeatured: false,
     fixtureKey: FIXTURE_KEY,
+    ragIndexPolicy: 'excluded',
     createdAt: new Date(Date.parse(CREATED_AT) + index * 1000).toISOString(),
     updatedAt: new Date(Date.parse(CREATED_AT) + index * 1000).toISOString(),
   })))
@@ -82,7 +83,7 @@ export function buildManifest({ webUserId = null, wechatOpenid }) {
     fixtureKey: FIXTURE_KEY,
     users,
     memberships,
-    communities: [{ _id: COMMUNITY_ID, name: 'HappyHome H5 固定测试社区', description: 'H5 v1 deterministic test tenant', coverImage: '', location: { address: 'Test only', lat: 0, lng: 0, coordSystem: 'gcj02', source: 'manual' }, joinType: 'approval', creatorId: authorId, status: 'active', discoverable: false, memberCount: 2, fixtureKey: FIXTURE_KEY, createdAt: CREATED_AT }],
+    communities: [{ _id: COMMUNITY_ID, name: 'HappyHome H5 固定测试社区', description: 'H5 v1 deterministic test tenant', coverImage: '', location: { address: 'Test only', lat: 0, lng: 0, coordSystem: 'gcj02', source: 'manual' }, joinType: 'approval', creatorId: authorId, status: 'active', discoverable: false, memberCount: 2, fixtureKey: FIXTURE_KEY, ragIndexPolicy: 'excluded', createdAt: CREATED_AT }],
     sections,
     posts,
   }

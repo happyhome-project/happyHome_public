@@ -23,13 +23,7 @@ import {
   removePostSearchIndex,
   removePostSearchIndexesForSection,
 } from '../../lib/post-search'
-import {
-  backfillPostRagJobsForSectionBatch,
-  enqueuePostRagDeleteJobInTransaction,
-  enqueuePostRagJob,
-  getPostRagIndexHealthForCommunity,
-  reconcilePostRagJobsForCommunityBatch,
-} from '../../lib/post-rag'
+import { schedulePostRagSync, schedulePostRagSyncForCurrentPosts, schedulePostRagSyncInTransaction } from '../../lib/post-rag-sync'
 import {
   assertOwnCommunityOrSuper,
   generateSalt,
@@ -42,10 +36,6 @@ import { syncMiniProgramUserRoleForAdminAccount } from '../../lib/admin-identity
 import { handleCreate as handleCommunityCreate } from '../community'
 import { MEMBER_STATE_COLLECTION } from '../../lib/membership-state'
 import { approveMembership, kickMembership, rejectMembership } from '../../lib/membership-transitions'
-import { appendPostRagOutboxEvent } from '../../lib/post-rag-outbox'
-import { getPostRagV2Health } from '../../lib/post-rag-v2-health'
-import { listReleaseRagPage } from '../../lib/release-rag-pagination'
-import { cleanupPostRagReleaseProbe, createPostRagReleaseProbe, readPostRagReleaseProbeStatus, readPostRagReleaseTimerEvidence } from '../../lib/post-rag-release-probe'
 import type {
   AdminAccount,
   AdminCtx,
@@ -96,14 +86,13 @@ cloud.init({ env: process.env.TCB_ENV || cloud.DYNAMIC_CURRENT_ENV })
 const ADMIN_TOKEN = String(process.env.ADMIN_TOKEN || '').trim()
 const ADMIN_LEGACY_TOKEN_FALLBACK = process.env.ADMIN_LEGACY_TOKEN_FALLBACK === '1'
 
-async function enqueuePostRagJobsForSection(sectionId: string, reason: string, preloadedPosts?: any[]) {
+async function schedulePostRagSyncForSection(sectionId: string, reason: string, preloadedPosts?: any[]) {
   const posts = preloadedPosts || (await db.query('posts', { sectionId, status: 'active' }) as any[])
   const safePosts = Array.isArray(posts) ? posts : []
-  await Promise.all(safePosts.map((post: any) => enqueuePostRagJob({
+  await Promise.all(safePosts.map((post: any) => schedulePostRagSync({
     postId: String(post._id || ''),
     communityId: String(post.communityId || ''),
     sectionId: String(post.sectionId || sectionId),
-    action: 'upsert',
     reason,
   })))
 }
@@ -194,10 +183,10 @@ function resolveNonHttpAdminContext(event: any): AdminCtx {
   }
 }
 const SUPER_ADMIN_ONLY: Array<string | RegExp> = [
-  'post.ragV2HealthAdmin',
-  'community.listActivePageAdmin',
-  'community.listAllPageAdmin',
-  'post.ragTimerProbeCreateAdmin','post.ragTimerEvidenceAdmin','post.ragTimerProbeStatusAdmin','post.ragTimerProbeCleanupAdmin',
+  'post.ragCommunityPageAdmin',
+  'post.ragClassifyCommunityAdmin',
+  'post.ragReconcileCurrentAdmin',
+  'post.ragCurrentHealthAdmin',
   'community.approve',
   'community.reject',
   'community.disable',
@@ -218,7 +207,6 @@ const COMMUNITY_SCOPED_ACTIONS = new Set([
   'community.updateMeta',
   'community.updateHomeBanners',
   'section.list',
-  'section.listPageAdmin',
   'section.create',
   'member.pendingList',
   'member.list',
@@ -228,8 +216,6 @@ const COMMUNITY_SCOPED_ACTIONS = new Set([
   'post.listAdmin',
   'post.createAdmin',
   'post.rebuildSearchIndexAdmin',
-  'post.ragIndexHealthAdmin',
-  'post.reconcileRagIndexCommunityBatchAdmin',
   'archiveTopic.list',
   'archiveTopic.save',
   'archiveTopic.create',
@@ -238,7 +224,6 @@ const COMMUNITY_SCOPED_ACTIONS = new Set([
   'archiveTopic.reorder',
   'archiveTopic.delete',
 ])
-const INTERNAL_RELEASE_ONLY_ACTIONS=new Set(['post.ragTimerProbeCreateAdmin','post.ragTimerEvidenceAdmin','post.ragTimerProbeStatusAdmin','post.ragTimerProbeCleanupAdmin'])
 // 这些 action 只给了实体 id，需要先查出 communityId 再校验
 const ENTITY_TO_COMMUNITY_ACTIONS: Record<string, { collection: string; idParam: string }> = {
   'section.get': { collection: 'sections', idParam: 'sectionId' },
@@ -248,7 +233,6 @@ const ENTITY_TO_COMMUNITY_ACTIONS: Record<string, { collection: string; idParam:
   'section.delete': { collection: 'sections', idParam: 'sectionId' },
   'post.rebuildSearchIndexSectionAdmin': { collection: 'sections', idParam: 'sectionId' },
   'post.rebuildSearchIndexSectionBatchAdmin': { collection: 'sections', idParam: 'sectionId' },
-  'post.rebuildRagIndexSectionBatchAdmin': { collection: 'sections', idParam: 'sectionId' },
   'post.getAdmin': { collection: 'posts', idParam: 'postId' },
   'post.deleteAdmin': { collection: 'posts', idParam: 'postId' },
   'post.updateAdmin': { collection: 'posts', idParam: 'postId' },
@@ -671,18 +655,10 @@ async function reindexCollaborationTemplatePosts(posts: any[], reason: string) {
     const postId = String(post?._id || '').trim()
     const communityId = String(post?.communityId || '').trim()
     if (!postId || !communityId) continue
-    await db.runTransaction(async transaction => {
-      await appendPostRagOutboxEvent(transaction, {
-        communityId,
-        aggregateId: postId,
-        reasonCode: 'post.updated',
-      })
-    })
-    await enqueuePostRagJob({
+    await schedulePostRagSync({
       postId,
       communityId,
       sectionId: '',
-      action: 'upsert',
       reason,
     })
     await refreshPostSearchIndexById(postId)
@@ -1198,8 +1174,8 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (!communityId) throw new Error('communityId 不能为空')
     await db.runTransaction(async transaction => {
       await transaction.collection('communities').doc(communityId).update({ data: { status: 'active' } })
-      await appendPostRagOutboxEvent(transaction, { communityId, aggregateId: communityId, reasonCode: 'community.status_changed' })
     })
+    await schedulePostRagSyncForCurrentPosts({ communityId, reason: 'community.status_changed' })
 
     // ---- 自动给社区创建者发一个 communityAdmin 账号（按 userId=openId 去重）----
     // openId 在微信侧 per-app 永久稳定，重复"注册"不会变。同一个 creator 的多个社区
@@ -1241,8 +1217,8 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
   if (action === 'community.reject') {
     await db.runTransaction(async transaction => {
       await transaction.collection('communities').doc(params.communityId).update({ data: { status: 'rejected' } })
-      await appendPostRagOutboxEvent(transaction, { communityId: params.communityId, aggregateId: params.communityId, reasonCode: 'community.status_changed' })
     })
+    await schedulePostRagSyncForCurrentPosts({ communityId: params.communityId, reason: 'community.status_changed' })
     return { success: true }
   }
   if (action === 'community.disable') {
@@ -1251,8 +1227,8 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (community.status !== 'active') throw new Error('only active community can be disabled')
     await db.runTransaction(async transaction => {
       await transaction.collection('communities').doc(params.communityId).update({ data: { status: 'disabled' } })
-      await appendPostRagOutboxEvent(transaction, { communityId: params.communityId, aggregateId: params.communityId, reasonCode: 'community.status_changed' })
     })
+    await schedulePostRagSyncForCurrentPosts({ communityId: params.communityId, reason: 'community.status_changed' })
     return { success: true }
   }
   if (action === 'community.restore') {
@@ -1261,8 +1237,8 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (community.status !== 'disabled') throw new Error('only disabled community can be restored')
     await db.runTransaction(async transaction => {
       await transaction.collection('communities').doc(params.communityId).update({ data: { status: 'active' } })
-      await appendPostRagOutboxEvent(transaction, { communityId: params.communityId, aggregateId: params.communityId, reasonCode: 'community.status_changed' })
     })
+    await schedulePostRagSyncForCurrentPosts({ communityId: params.communityId, reason: 'community.status_changed' })
     return { success: true }
   }
   if (action === 'community.listDisabled') {
@@ -1282,7 +1258,6 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (Object.keys(updates).length === 0) throw new Error('没有可更新字段')
     await db.runTransaction(async transaction => {
       await transaction.collection('communities').doc(communityId).update({ data: updates })
-      await appendPostRagOutboxEvent(transaction, { communityId, aggregateId: communityId, reasonCode: 'community.metadata_changed' })
     })
     return { success: true }
   }
@@ -1664,16 +1639,9 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
           updates.displayTemplate !== normalizeSectionDisplayTemplate(sectionBefore.displayTemplate)) {
         throw new Error('已创建板块不允许切换展示模板')
       }
-      const effectiveStatus = Object.prototype.hasOwnProperty.call(updates, 'status')
-        ? updates.status
-        : sectionBefore.status
-      const reasonCode = effectiveStatus !== sectionBefore.status
-        ? 'section.status_changed'
-        : 'section.metadata_changed'
       await transaction.collection('sections').doc(sectionId).update({ data: updates })
-      await appendPostRagOutboxEvent(transaction, { communityId: String(sectionBefore.communityId || params.communityId || ''), aggregateId: sectionId, reasonCode })
     })
-    await enqueuePostRagJobsForSection(sectionId, 'section.updateMeta')
+    await schedulePostRagSyncForSection(sectionId, 'section.updateMeta')
     await backfillPostSearchIndexesForSection(sectionId)
     return { success: true }
   }
@@ -1690,9 +1658,8 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     }
     await db.runTransaction(async transaction => {
       await transaction.collection('sections').doc(sectionId).update({ data: { status: params.status } })
-      await appendPostRagOutboxEvent(transaction, { communityId: String((section as any).communityId || ''), aggregateId: sectionId, reasonCode: 'section.status_changed' })
     })
-    await enqueuePostRagJobsForSection(sectionId, 'section.updateStatus')
+    await schedulePostRagSyncForSection(sectionId, 'section.updateStatus')
     await backfillPostSearchIndexesForSection(sectionId)
     return { success: true }
   }
@@ -1754,10 +1721,9 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
 
     await db.runTransaction(async transaction => {
       await transaction.collection('sections').doc(sectionId).update({ data: { widgets } })
-      await appendPostRagOutboxEvent(transaction, { communityId: String(currentSection.communityId || ''), aggregateId: sectionId, reasonCode: 'section.widgets_changed' })
     })
     if (shouldReindexExistingPosts) {
-      await enqueuePostRagJobsForSection(sectionId, 'section.updateWidgets', activePosts)
+      await schedulePostRagSyncForSection(sectionId, 'section.updateWidgets', activePosts)
     }
     await backfillPostSearchIndexesForSection(sectionId)
     return { widgets, ...impact, requireConfirmation: false }
@@ -1942,11 +1908,10 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const post = await db.getById('posts', postId) as any
     if (!post) throw new Error('post not found')
     if (post.status === 'deleted') {
-      await enqueuePostRagJob({
+      await schedulePostRagSync({
         postId,
         communityId: post.communityId,
         sectionId: post.sectionId,
-        action: 'delete',
         reason: 'post.deleteAdmin.alreadyDeleted',
       })
       await removePostSearchIndex(postId)
@@ -1957,14 +1922,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
         status: 'deleted', isPinned: false, pinnedAt: '', pinnedByAccountId: '',
         isFeatured: false, featuredAt: '', featuredByAccountId: '',
       } })
-      await appendPostRagOutboxEvent(transaction, { communityId: String(post.communityId || ''), aggregateId: postId, reasonCode: 'post.deleted' })
-    })
-    await enqueuePostRagJob({
-      postId,
-      communityId: post.communityId,
-      sectionId: post.sectionId,
-      action: 'delete',
-      reason: 'post.deleteAdmin',
+      await schedulePostRagSyncInTransaction(transaction, { postId, communityId: String(post.communityId || ''), sectionId: String(post.sectionId || ''), reason: 'post.deleted', now: new Date().toISOString() })
     })
     await removePostSearchIndex(postId)
     return { success: true }
@@ -1987,42 +1945,48 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       limit: params.limit,
     })
   }
-  if (action === 'post.rebuildRagIndexSectionBatchAdmin') {
-    const sectionId = String(params.sectionId || '').trim()
-    if (!sectionId) throw new Error('sectionId 不能为空')
-    return backfillPostRagJobsForSectionBatch(sectionId, {
-      skip: params.skip,
-      limit: params.limit,
-    })
+  if (action === 'post.ragCommunityPageAdmin') {
+    const afterId = String(params.afterId || '').trim() || null
+    const limit = Math.max(1, Math.min(100, Math.floor(Number(params.limit || 100))))
+    const items = await db.queryAfterId('communities', {}, afterId, limit) as any[]
+    const sanitized = items.map((community) => ({
+      communityId: String(community._id || ''),
+      status: String(community.status || ''),
+      ragIndexPolicy: ['business', 'validation', 'excluded'].includes(community.ragIndexPolicy) ? community.ragIndexPolicy : 'unclassified',
+      fixtureOwned: Boolean(community.fixtureKey),
+    }))
+    return { items: sanitized, hasMore: items.length === limit, nextAfterId: items.length === limit ? String(items[items.length - 1]._id || '') : null }
   }
-  if (action === 'post.reconcileRagIndexCommunityBatchAdmin') {
+  if (action === 'post.ragClassifyCommunityAdmin') {
+    const communityId = String(params.communityId || '').trim()
+    const policy = String(params.policy || '')
+    if (!communityId) throw new Error('communityId 不能为空')
+    if (!['business', 'validation', 'excluded'].includes(policy)) throw new Error('invalid RAG index policy')
+    const community = await db.getById('communities', communityId) as any
+    if (!community) throw new Error('community not found')
+    if (community.fixtureKey && policy !== 'excluded') throw new Error('fixture community must remain excluded')
+    await db.updateById('communities', communityId, { ragIndexPolicy: policy })
+    const scheduled = await schedulePostRagSyncForCurrentPosts({ communityId, reason: 'community.rag_policy_changed' })
+    return { success: true, communityId, policy, ...scheduled }
+  }
+  if (action === 'post.ragReconcileCurrentAdmin') {
     const communityId = String(params.communityId || '').trim()
     if (!communityId) throw new Error('communityId 不能为空')
-    return reconcilePostRagJobsForCommunityBatch(communityId, {
-      skip: params.skip,
-      limit: params.limit,
-    })
+    return { communityId, ...(await schedulePostRagSyncForCurrentPosts({ communityId, reason: 'rag.current_state_reconcile' })) }
   }
-  if (action === 'post.ragIndexHealthAdmin') {
+  if (action === 'post.ragCurrentHealthAdmin') {
     const communityId = String(params.communityId || '').trim()
     if (!communityId) throw new Error('communityId 不能为空')
-    return getPostRagIndexHealthForCommunity(communityId)
+    const [pending, processing, retryWait, synced, deadLetter, indexed] = await Promise.all([
+      db.count('post_rag_sync_state', { communityId, status: 'pending' }),
+      db.count('post_rag_sync_state', { communityId, status: 'processing' }),
+      db.count('post_rag_sync_state', { communityId, status: 'retry_wait' }),
+      db.count('post_rag_sync_state', { communityId, status: 'synced' }),
+      db.count('post_rag_sync_state', { communityId, status: 'dead_letter' }),
+      db.count('post_rag_index_state', { communityId, status: 'indexed' }),
+    ])
+    return { communityId, pending, processing, retryWait, synced, deadLetter, indexed }
   }
-  if (action === 'community.listActivePageAdmin') return listReleaseRagPage('communities', { status: 'active' }, params.afterId, params.limit)
-  if (action === 'community.listAllPageAdmin') return listReleaseRagPage('communities', {}, params.afterId, params.limit)
-  if (action === 'section.listPageAdmin') {
-    const communityId=String(params.communityId||'').trim(); if(!communityId) throw new Error('communityId 不能为空')
-    return listReleaseRagPage('sections', { communityId }, params.afterId, params.limit)
-  }
-  if (action === 'post.ragV2HealthAdmin') {
-    const communityId = String(params.communityId || '').trim()
-    if (!communityId) throw new Error('communityId 不能为空')
-    return getPostRagV2Health(communityId)
-  }
-  if(action==='post.ragTimerProbeCreateAdmin')return createPostRagReleaseProbe(params.runId)
-  if(action==='post.ragTimerEvidenceAdmin')return readPostRagReleaseTimerEvidence(params.runId)
-  if(action==='post.ragTimerProbeStatusAdmin')return readPostRagReleaseProbeStatus(params)
-  if(action==='post.ragTimerProbeCleanupAdmin')return cleanupPostRagReleaseProbe(params)
   if (action === 'post.pinAdmin' || action === 'post.unpinAdmin' || action === 'post.featureAdmin' || action === 'post.unfeatureAdmin') {
     const postId = String(params.postId || '').trim()
     if (!postId) throw new Error('postId 不能为空')
@@ -2104,7 +2068,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
           pendingSubmittedAt: updatedAt, updatedAt, adminEditedAt: updatedAt,
           adminEditedByAccountId: ctx.accountId, adminEditedByUsername: ctx.username,
         } })
-        await appendPostRagOutboxEvent(transaction, { communityId: post.communityId, aggregateId: postId, reasonCode: 'post.updated', now: updatedAt })
+        await schedulePostRagSyncInTransaction(transaction, { postId, communityId: post.communityId, sectionId: post.sectionId || '', reason: 'post.updated', now: updatedAt })
       })
       const audit = await auditAndApply({
         postId,
@@ -2130,7 +2094,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
         auditUpdatedAt: updatedAt, updatedAt, adminEditedAt: updatedAt,
         adminEditedByAccountId: ctx.accountId, adminEditedByUsername: ctx.username,
       } })
-      await appendPostRagOutboxEvent(transaction, { communityId: post.communityId, aggregateId: postId, reasonCode: 'post.updated', now: updatedAt })
+      await schedulePostRagSyncInTransaction(transaction, { postId, communityId: post.communityId, sectionId: post.sectionId || '', reason: 'post.updated', now: updatedAt })
     })
     const audit = await auditAndApply({
       postId,
@@ -2447,7 +2411,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     }
     const postId = await db.runTransaction(async transaction => {
       const created = await transaction.collection('posts').add({ data: postData })
-      await appendPostRagOutboxEvent(transaction, { communityId, aggregateId: created._id, reasonCode: 'post.created', now })
+      await schedulePostRagSyncInTransaction(transaction, { postId: created._id, communityId, sectionId, reason: 'post.created', now })
       return created._id
     })
     const audit = await auditAndApply({
@@ -2553,12 +2517,12 @@ async function hardDeleteCommunity(communityId: string, community: Community) {
     await removePostSearchIndex(String((post as any)._id || ''))
     await db.runTransaction(async transaction => {
       await transaction.collection('posts').doc((post as any)._id).remove()
-      await appendPostRagOutboxEvent(transaction, { communityId, aggregateId: String((post as any)._id || ''), reasonCode: 'post.deleted' })
-      await enqueuePostRagDeleteJobInTransaction(transaction, {
+      await schedulePostRagSyncInTransaction(transaction, {
         postId: String((post as any)._id || ''),
         communityId,
         sectionId: String((post as any).sectionId || ''),
         reason: 'community.hardDelete',
+        now: new Date().toISOString(),
       })
     })
   })
@@ -2613,7 +2577,6 @@ export const main = async (event: any) => {
         body = {}
       }
       const { action, ...params } = body
-      if(INTERNAL_RELEASE_ONLY_ACTIONS.has(action))return{statusCode:403,headers,body:JSON.stringify({error:'Unauthorized'})}
       const authHeader = String(event.headers?.authorization || event.headers?.Authorization || '')
 
       if (PUBLIC_ACTIONS.has(action)) {

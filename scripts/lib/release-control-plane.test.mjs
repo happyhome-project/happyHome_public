@@ -7,7 +7,6 @@ import './release-preflight.test.mjs'
 import './release-preflight-checks.test.mjs'
 import './release-preflight-command.test.mjs'
 import './scf-owned-timer.test.mjs'
-import './tencent-serverless-index-control.test.mjs'
 import {
   ensureReleaseControlPlane,
   parseReleaseControlPlaneMode,
