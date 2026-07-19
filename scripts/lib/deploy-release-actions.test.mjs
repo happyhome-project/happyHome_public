@@ -110,6 +110,15 @@ test('both admin backends deploy the caller-pinned artifact root instead of muta
   assert.ok(formal.indexOf('attestAdminWebArtifact({') < formal.indexOf('await deployAdminWeb({'))
 })
 
+test('admin publication repairs required browser-upload COS CORS before publishing bytes', () => {
+  const dispatcherStart = source.indexOf('async function deployAdminWeb(')
+  const dispatcherEnd = source.indexOf('async function collectMiniprogramBuildGateEvidence', dispatcherStart)
+  const dispatcher = source.slice(dispatcherStart, dispatcherEnd)
+  assert.match(dispatcher, /ensureAdminUploadCors/)
+  assert.ok(dispatcher.indexOf('ensureAdminUploadCors') < dispatcher.indexOf('deployAdminWebTo'))
+  assert.match(source, /scripts['\\/]ensure-cos-cors\.mjs/)
+})
+
 test('admin cross-run attestation rehashes the live remote files before trusting the marker', () => {
   const inspectStart = source.indexOf('async function inspectAdminWebPublication')
   const inspectEnd = source.indexOf('async function deployAdminWebToCloudBase', inspectStart)

@@ -73,7 +73,7 @@ import {
 import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
 import { resolvePostAuthorNickname } from '../../shared/post-author'
 import { normalizeArchiveTopic } from '../../shared/archive-topics'
-import { archiveTopicId, syncArchivePostTopics, updateArchivePostTopicLinks } from '../../lib/archive-topic-index'
+import { archiveTopicId, buildArchiveSortKey, syncArchivePostTopics, updateArchivePostTopicLinks } from '../../lib/archive-topic-index'
 import { parseArchivePostCreateInput, type ArchivePostFormat } from '../../shared/archive-post'
 import {
   collaborationTemplateAsSection,
@@ -2375,30 +2375,65 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const communityId = String(params.communityId || '').trim()
     const sectionId = String(params.sectionId || '').trim()
     if (!communityId) throw new Error('communityId 不能为空')
-    if (!sectionId) throw new Error('sectionId 不能为空')
     if (!ctx.userId) {
       throw new Error('当前管理员未绑定微信身份，请先在账号管理中绑定 openId')
     }
-    const rawSection = await db.getById('sections', sectionId) as Section | null
-    const section = rawSection ? normalizeSection(rawSection) as Section : null
-    if (!section) throw new Error('板块不存在')
-    if (section.communityId !== communityId) throw new Error('板块不属于当前社区')
+    const area = String(params.area || '').trim()
+    let section: Section | null = null
+    let content: Record<string, any> = {}
+    let postIdentity: Record<string, any> = {}
+    let archive: ReturnType<typeof parseArchivePostCreateInput> | null = null
+
+    if (area === 'archive') {
+      archive = parseArchivePostCreateInput(params)
+      section = buildAdminArchiveContentSection(communityId, archive.format)
+      content = archive.content as Record<string, any>
+      postIdentity = {
+        area: 'archive',
+        origin: 'native_archive',
+        format: archive.format,
+        topics: archive.topics,
+        ...(archive.format === 'text' ? { presentation: archive.presentation } : {}),
+      }
+    } else if (area === 'collaboration') {
+      const templateId = String(params.collaborationTemplateId || '').trim()
+      if (!templateId) throw new Error('collaborationTemplateId 不能为空')
+      const rawTemplate = await db.getById('collaboration_templates', templateId).catch(() => null) as CollaborationTemplate | null
+      if (!rawTemplate) throw new Error('实时协作模板不存在')
+      const template = normalizeCollaborationTemplate(rawTemplate)
+      if (template.status !== 'active') throw new Error('实时协作模板已停用')
+      section = collaborationTemplateAsSection(template, communityId)
+      content = sanitizeContent(params.content || {}, section, { allowAdminOnly: true })
+      postIdentity = {
+        area: 'collaboration',
+        collaborationTemplateId: template._id,
+        collaborationSystemKey: template.systemKey,
+      }
+    } else {
+      if (!sectionId) throw new Error('sectionId 不能为空')
+      const rawSection = await db.getById('sections', sectionId) as Section | null
+      section = rawSection ? normalizeSection(rawSection) as Section : null
+      if (!section) throw new Error('板块不存在')
+      if (section.communityId !== communityId) throw new Error('板块不属于当前社区')
+      content = sanitizeContent(params.content || {}, section, { allowAdminOnly: true })
+      postIdentity = { sectionId }
+    }
+
     if (!Array.isArray(section.widgets) || section.widgets.length === 0) {
       throw new Error('该板块尚未配置内容模板')
     }
-    const sanitized = sanitizeContent(params.content || {}, section, { allowAdminOnly: true })
-    validateRequiredWidgets(section, sanitized, { allowAdminOnly: true })
-    validateContentValues(section, sanitized, { allowAdminOnly: true })
+    validateRequiredWidgets(section, content, { allowAdminOnly: true })
+    validateContentValues(section, content, { allowAdminOnly: true })
     const now = new Date().toISOString()
     const postData = {
       communityId,
-      sectionId,
+      ...postIdentity,
       authorId: ctx.userId,
       status: 'active',
       auditStatus: 'pending',
       auditReason: 'content audit pending',
       auditUpdatedAt: now,
-      content: sanitized,
+      content,
       commentCount: 0,
       likeCount: 0,
       isPinned: false,
@@ -2414,17 +2449,30 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       await schedulePostRagSyncInTransaction(transaction, { postId: created._id, communityId, sectionId, reason: 'post.created', now })
       return created._id
     })
+    if (archive) {
+      await db.updateById('posts', postId, { sortKey: buildArchiveSortKey(now, postId) })
+    }
     const audit = await auditAndApply({
       postId,
       communityId,
-      sectionId,
+      sectionId: area ? '' : sectionId,
       section,
-      content: sanitized,
+      content,
       authorId: ctx.userId,
       source: 'admin',
       contentSlot: 'content',
       postSnapshot: { _id: postId, ...postData } as any,
     })
+    if (archive) {
+      await syncArchivePostTopics({
+        _id: postId,
+        communityId,
+        topics: archive.topics,
+        createdAt: now,
+        status: 'active',
+        auditStatus: audit.status,
+      })
+    }
     return { postId, auditStatus: audit.status, auditReason: audit.reason }
   }
 

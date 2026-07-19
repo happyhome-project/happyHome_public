@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "changeId": "admin-publishing-flows",
+  "actions": [],
+  "cloudTargets": [
+    "admin"
+  ],
+  "migrations": [],
+  "smokeSuites": [],
+  "releaseImpact": {
+    "cloudFunctions": "Deploy admin so native archive and collaboration posts can be created through their current contracts.",
+    "adminWeb": "Publish the five admin publishing targets and repair the required COS CORS rule before browser-upload UI bytes go live.",
+    "miniprogram": "No runtime code change.",
+    "environmentVariables": [],
+    "databaseMigrations": []
+  }
+}

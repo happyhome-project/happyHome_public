@@ -59,8 +59,8 @@ assertIncludes(
 )
 assertIncludes(
   postCreate,
-  ':allow-images="!isGuideNoteTemplate"',
-  'PostCreateAdmin guide-note rich_note body must not expose inline image insertion.'
+  ':allow-images="!isFixedImageCanvasTemplate"',
+  'PostCreateAdmin fixed image-canvas rich_note body must not expose inline image insertion.'
 )
 assertIncludes(
   postEdit,
@@ -74,8 +74,8 @@ assertIncludes(
 )
 assertIncludes(
   postEdit,
-  ':allow-images="!isGuideNoteTemplate"',
-  'PostEditAdmin guide-note rich_note body must not expose inline image insertion.'
+  ':allow-images="!isFixedImageCanvasTemplate"',
+  'PostEditAdmin fixed image-canvas rich_note body must not expose inline image insertion.'
 )
 assertIncludes(
   imageGroupEditor,

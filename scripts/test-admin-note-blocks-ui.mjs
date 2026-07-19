@@ -225,6 +225,10 @@ async function main() {
       postId: created._id,
       screenshot: path.join(ARTIFACT_DIR, 'after-note-blocks.png'),
     }, null, 2))
+  } catch (error) {
+    console.error('[admin-note-blocks-ui] browser events')
+    console.error(JSON.stringify(events, null, 2))
+    throw error
   } finally {
     await browser.close()
     await cleanupFixture(fixture.communityId, token)

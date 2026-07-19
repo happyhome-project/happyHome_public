@@ -234,6 +234,10 @@ async function main() {
         path.join(ARTIFACT_DIR, 'after-publish.png'),
       ],
     }, null, 2))
+  } catch (error) {
+    console.error('[admin-video-upload-ui] browser events')
+    console.error(JSON.stringify(events, null, 2))
+    throw error
   } finally {
     await browser.close()
     await cleanupFixture(fixture.communityId, token)
