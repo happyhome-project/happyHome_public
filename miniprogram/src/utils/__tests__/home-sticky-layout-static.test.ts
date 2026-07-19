@@ -115,4 +115,21 @@ describe('home progressive sticky navigation', () => {
     expect(archiveTopicTabs).toMatch(/font-size:\s*28rpx;/)
     expect(archiveTopicTabs).toMatch(/line-height:\s*40rpx;/)
   })
+
+  test('bridges the search surface into a denser activity heading without changing sticky offsets', () => {
+    const activity = ruleBody('.group-section')
+    const title = ruleBody('.group-section-title')
+
+    expect(activity).toMatch(/margin:\s*0\s+0\s+34rpx;/)
+    expect(activity).toMatch(/padding:\s*20rpx\s+24rpx\s+0;/)
+    expect(activity).toMatch(
+      /background:\s*linear-gradient\(180deg,\s*var\(--home-sticky-surface\) 0,\s*var\(--hh-color-page\) 96rpx\);/,
+    )
+    expect(title).toMatch(/margin-bottom:\s*12rpx;/)
+    expect(title).toMatch(/font-size:\s*var\(--hh-text-heading-sm-size\);/)
+    expect(title).toMatch(/line-height:\s*var\(--hh-text-heading-sm-line\);/)
+
+    expect(page).toMatch(/\.home-search-sticky-shell\s*\{[^}]*top:\s*calc\(150rpx \+ env\(safe-area-inset-top\)\);/s)
+    expect(page).toMatch(/\.section-tabs-sticky-shell\s*\{[^}]*top:\s*calc\(150rpx \+ env\(safe-area-inset-top\) \+ 98rpx - 1px\);/s)
+  })
 })
