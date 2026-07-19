@@ -134,29 +134,30 @@ export async function schedulePostRagSyncForCurrentPosts(input: {
   const reason = requireSafeText(input.reason, 'reason', 128)
   const now = requireIsoTimestamp(input.now || new Date().toISOString(), 'now')
   const maximumPosts = requirePositiveInteger(input.maximumPosts || 5_000, 'maximumPosts', 10_000)
+  const postFilter = {
+    communityId,
+    ...(sectionId ? { sectionId } : {}),
+  }
   let afterId: string | null = null
-  let scheduledCount = 0
+  const currentPosts: Array<{ _id?: string; communityId?: string; sectionId?: string }> = []
   while (true) {
-    const posts = await db.queryAfterId('posts', {
-      communityId,
-      ...(sectionId ? { sectionId } : {}),
-    }, afterId, Math.min(100, maximumPosts - scheduledCount + 1)) as Array<{ _id?: string; communityId?: string; sectionId?: string }>
+    const posts = await db.queryAfterId('posts', postFilter, afterId, 100) as Array<{ _id?: string; communityId?: string; sectionId?: string }>
     if (!posts.length) break
-    if (scheduledCount + posts.length > maximumPosts) throw new Error('RAG synchronization fanout exceeds maximumPosts')
-    for (const post of posts) {
-      await schedulePostRagSync({
-        postId: String(post._id || ''),
-        communityId,
-        sectionId: String(post.sectionId || sectionId),
-        reason,
-        now,
-      })
-      scheduledCount += 1
-    }
+    currentPosts.push(...posts)
+    if (currentPosts.length > maximumPosts) throw new Error('RAG synchronization fanout exceeds maximumPosts')
     afterId = String(posts[posts.length - 1]._id || '')
     if (posts.length < 100) break
   }
-  return { scheduledCount }
+  for (const post of currentPosts) {
+    await schedulePostRagSync({
+      postId: String(post._id || ''),
+      communityId,
+      sectionId: String(post.sectionId || sectionId),
+      reason,
+      now,
+    })
+  }
+  return { scheduledCount: currentPosts.length }
 }
 
 function requirePositiveInteger(value: unknown, field: string, maximum: number) {

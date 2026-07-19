@@ -131,6 +131,8 @@ cloud/
 
 ## RAG 生产验收
 
+正式发布流程不运行本节测试，也不运行 RAG timer 证明、reconcile、回填或语义评测。只有发布完成后，RAG 负责人才能在隔离的 `validation` 社区中执行下列闭环。
+
 `post.search` 的正式 RAG 验收不能只靠 mock。使用下面的命令创建隔离社区、板块和帖子，定向运行 `post-rag-worker`，再以真实 `post.search` 查询验证回答、引用和帖子跳转；成功和失败路径都会删除临时数据：
 
 ```powershell

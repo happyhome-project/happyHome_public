@@ -21,7 +21,11 @@ jest.mock('../lib/db', () => ({
     return response?.data || null
   }),
 }))
-jest.mock('../lib/post-rag-outbox', () => ({ appendPostRagOutboxEvent: jest.fn() }))
+jest.mock('../lib/post-rag-sync', () => ({
+  schedulePostRagSync: jest.fn(),
+  schedulePostRagSyncForCurrentPosts: jest.fn(),
+  schedulePostRagSyncInTransaction: jest.fn(),
+}))
 jest.mock('wx-server-sdk', () => ({
   init: jest.fn(),
   getWXContext: jest.fn().mockReturnValue({ OPENID: '' }),

@@ -65,9 +65,14 @@ test('migration replay requires the exact recorded input digest and fails closed
   await assert.rejects(() => executeReleaseOperations({ ...base, appliedMigrations: { done: { inputDigest: 'b'.repeat(64) } } }), /inputDigest mismatch/i)
 })
 
-test('semantic release actions are allowlisted but deferred until after cloud probes',async()=>{const events=[];const result=await executeReleaseOperations({guard:{beforeRemoteMutation:async()=>events.push('fence'),recordStage:async()=>events.push('record'),recordMigration:async()=>{}},manifests:[{actions:['ensure-indexes','verify-post-rag-timer','backfill-post-rag-v2','eval-post-semantic-search']}],runAction:async action=>events.push(action),runMigration:async()=>{}});assert.deepEqual(events,['fence','ensure-indexes','record']);assert.deepEqual(result.deferredActions,['verify-post-rag-timer','backfill-post-rag-v2','eval-post-semantic-search']);assert.deepEqual(result.operationKinds,{'desired-state':['backfill-post-rag-v2','ensure-indexes'],migration:[],verification:['eval-post-semantic-search','verify-post-rag-timer']})})
-
-test('predeploy semantic prerequisites deterministically end with timer configuration readback',async()=>{const actions=[];await executeReleaseOperations({guard:{beforeRemoteMutation:async()=>{},recordStage:async()=>{},recordMigration:async()=>{}},manifests:[{actions:['configure-rag-workers','update-rag-env','ensure-tencent-rag-index','ensure-indexes','configure-rag-network']}],runAction:async action=>actions.push(action),runMigration:async()=>{}});assert.deepEqual(actions,['ensure-indexes','ensure-tencent-rag-index','configure-rag-network','update-rag-env','configure-rag-workers'])})
+test('retired semantic actions are rejected if they bypass historical-manifest filtering', async () => {
+  for (const action of ['verify-post-rag-timer', 'backfill-post-rag-v2', 'eval-post-semantic-search', 'ensure-tencent-rag-index', 'configure-rag-network']) {
+    await assert.rejects(() => executeReleaseOperations({
+      guard: { beforeRemoteMutation: async () => {}, recordStage: async () => {}, recordMigration: async () => {} },
+      manifests: [{ actions: [action] }], runAction: async () => {}, runMigration: async () => {},
+    }), /unknown action/i)
+  }
+})
 
 test('DAG-owned index prerequisite is not repeated as a manifest action', async () => {
   const events = []

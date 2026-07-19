@@ -10,7 +10,7 @@ const source = readFileSync(resolve(__dirname, '..', 'ensure-indexes.mjs'), 'utf
 test('ensure-indexes creates every CloudBase collection used by formal post RAG state', () => {
   assert.match(source, /post_rag_sync_state/)
   assert.match(source, /idx_status_nextAttemptAt/)
-  assert.match(source, /post_rag_jobs/)
+  assert.doesNotMatch(source, /post_rag_jobs/)
   assert.match(source, /post_rag_index_state/)
   assert.match(source, /post_rag_worker_state/)
   assert.match(source, /post_rag_smoke_runs/)

@@ -878,6 +878,35 @@ test('searchPostsWithRag drops member-only citations and generated answer for pu
   expect(result.items.map((item) => item.postId)).toEqual(['post-public'])
 })
 
+test.each([
+  ['pending synchronization', { syncStatus: 'pending' }],
+  ['superseded synchronization version', { appliedSourceVersion: 'source-v2' }],
+  ['stale index version', { indexSourceVersion: 'source-v2' }],
+  ['post changed after indexing', { postUpdatedAt: '2026-06-26T00:00:00.000Z' }],
+  ['inactive section', { sectionStatus: 'disabled' }],
+])('searchPostsWithRag fails closed for %s', async (_label, override: Record<string, string>) => {
+  mockDb.getByIdOrNull.mockResolvedValue({ _id: 'community-1', status: 'active', ragIndexPolicy: 'business' })
+  mockDb.getByIds.mockImplementation(async (collection: string, ids: string[]) => {
+    if (collection === 'posts') return ids.map((id) => ({ _id: id, communityId: 'community-1', sectionId: 'section-1', status: 'active', auditStatus: 'pass', updatedAt: override.postUpdatedAt || '2026-06-25T00:00:00.000Z' }))
+    if (collection === 'post_rag_sync_state') return ids.map((id) => ({ _id: id, status: override.syncStatus || 'synced', appliedSourceVersion: override.appliedSourceVersion || 'source-v1', indexScope: 'business' }))
+    if (collection === POST_RAG_INDEX_STATE) return ids.map((id) => ({ _id: id, status: 'indexed', sourceVersion: override.indexSourceVersion || 'source-v1', indexScope: 'business' }))
+    if (collection === 'sections') return [{ _id: 'section-1', communityId: 'community-1', status: override.sectionStatus || 'active' }]
+    return []
+  })
+  const provider = {
+    name: 'adversarial-provider', isConfigured: () => true,
+    search: jest.fn().mockResolvedValue({
+      total: 1, answer: '不应泄露的旧答案', mode: 'rag', items: [],
+      citations: [{ postId: 'post-1', chunkId: 'chunk-1', communityId: 'community-1', sectionId: 'section-1', title: '旧内容', sectionName: '旧板块', fieldLabel: '正文', fieldType: 'rich_note', preview: '旧内容', score: 0.9, visibility: 'public', sourceUpdatedAt: '2026-06-25T00:00:00.000Z', sourceVersion: 'source-v1', indexScope: 'business' }],
+    }),
+  }
+  const result = await searchPostsWithRag({ communityId: 'community-1', query: '旧内容', limit: 10 }, { provider })
+  expect(result.mode).toBe('no_answer')
+  expect(result.answer).not.toContain('不应泄露')
+  expect(result.citations).toEqual([])
+  expect(result.items).toEqual([])
+})
+
 test('hasRagEvidenceSignal rejects weak unrelated candidates and accepts real evidence signals', () => {
   expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 0, rerankScore: -3 })).toBe(false)
   expect(hasRagEvidenceSignal({ semanticScore: 0.2, lexicalScore: 1, rerankScore: -3 })).toBe(true)

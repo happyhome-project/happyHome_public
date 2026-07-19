@@ -15,8 +15,10 @@ test('declared release actions use a non-blocking child process so the productio
   assert.doesNotMatch(actionRunner, /execSync\(/)
 })
 
-test('formal Tencent RAG index gate uses the VPC worker instead of local private ES access', () => {
-  assert.match(source, /'ensure-tencent-rag-index': 'ensure:tencent-rag-index:release'/)
+test('formal release contains no retired ES, backfill, timer-probe, or semantic-evaluation actions', () => {
+  for (const retired of ['ensure-tencent-rag-index', 'configure-rag-network', 'backfill-post-rag-v2', 'verify-post-rag-timer', 'eval-post-semantic-search']) {
+    assert.doesNotMatch(source, new RegExp(retired))
+  }
 })
 
 test('formal release prepares immutable artifacts and fresh-attests cloud functions before selective deployment', () => {

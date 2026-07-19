@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "changeId": "current-state-post-rag",
+  "actions": [
+    "ensure-indexes",
+    "configure-rag-workers",
+    "update-rag-env"
+  ],
+  "cloudTargets": [
+    "admin",
+    "community",
+    "post",
+    "post-rag-worker",
+    "post-video-rag-worker"
+  ],
+  "migrations": [],
+  "smokeSuites": [],
+  "releaseImpact": {
+    "cloudFunctions": "Deploy current-state post RAG scheduling, worker, search filtering, and post-release operations. The release does not execute RAG validation.",
+    "adminWeb": "No runtime change.",
+    "miniprogram": "No RAG response contract change is required.",
+    "environmentVariables": [
+      "Reconcile CloudBase plus Tencent atomic pay-per-call RAG variables and remove retired ES variables.",
+      "Keep independent worker, timer, and signed smoke secrets."
+    ],
+    "databaseMigrations": [
+      "Create post_rag_sync_state and its current-state indexes through ensure-indexes. No backfill or production classification runs during release."
+    ]
+  }
+}

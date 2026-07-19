@@ -24,13 +24,8 @@ export const CLOUD_COMPONENT_CONFIG_INPUTS = Object.freeze([
 
 export const RELEASE_ACTION_KINDS = Object.freeze({
   'ensure-indexes': 'desired-state',
-  'ensure-tencent-rag-index': 'desired-state',
-  'configure-rag-network': 'desired-state',
   'configure-rag-workers': 'desired-state',
   'update-rag-env': 'desired-state',
-  'backfill-post-rag-v2': 'desired-state',
-  'verify-post-rag-timer': 'verification',
-  'eval-post-semantic-search': 'verification',
 })
 
 export function classifyReleaseActionKind(action) {

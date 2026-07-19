@@ -77,7 +77,7 @@ test('release plans exclude RAG workers and actions by default', () => {
   assert.deepEqual(plan.operationKinds.verification, [])
 })
 
-test('explicit includeRag keeps RAG workers and actions in the plan', () => {
+test('explicit includeRag deploys RAG workers and configuration but never live RAG smoke', () => {
   const plan = createReleasePlan({
     baseSha: '',
     headSha: 'head',
@@ -96,7 +96,7 @@ test('explicit includeRag keeps RAG workers and actions in the plan', () => {
   })
   assert.equal(plan.targets.cloud.functions.includes('post-rag-worker'), true)
   assert.deepEqual(plan.manifests[0].actions, ['configure-rag-workers'])
-  assert.deepEqual(plan.manifests[0].smokeSuites, ['post-rag'])
+  assert.deepEqual(plan.manifests[0].smokeSuites, [])
 })
 
 test('RAG-only manifests do not require a release by default', () => {
@@ -114,7 +114,7 @@ test('RAG-only manifests do not require a release by default', () => {
   assert.deepEqual(plan.manifests, [])
 })
 
-test('RAG manifests with generic index actions are removed by identity', () => {
+test('generic index actions remain deployable even when a historical change id mentions RAG', () => {
   const plan = createReleasePlan({
     baseSha: 'base',
     headSha: 'head',
@@ -124,8 +124,8 @@ test('RAG manifests with generic index actions are removed by identity', () => {
     manifests: [{ schemaVersion: 1, changeId: 'rag-community-version-collection', actions: ['ensure-indexes'], migrations: [], smokeSuites: [] }],
     mode: 'main',
   })
-  assert.equal(plan.releaseRequired, false)
-  assert.deepEqual(plan.changeIds, [])
+  assert.equal(plan.releaseRequired, true)
+  assert.deepEqual(plan.changeIds, ['rag-community-version-collection'])
 })
 
 test('change manifests reject unknown actions, duplicate ids, and missing declarations for external changes', () => {
@@ -185,10 +185,10 @@ test('full-current plans explicitly publish every current runtime target and ret
   })
   assert.equal(plan.targets.adminWeb, true)
   assert.equal(plan.targets.miniprogram, true)
-  assert.deepEqual(plan.manifests, manifests)
-  assert.deepEqual(plan.changeIds, ['indexes', 'network'])
+  assert.deepEqual(plan.manifests, [manifests[0]])
+  assert.deepEqual(plan.changeIds, ['indexes'])
   assert.deepEqual(plan.operationKinds, {
-    'desired-state': ['configure-rag-network', 'ensure-indexes'],
+    'desired-state': ['ensure-indexes'],
     migration: [],
     verification: [],
   })

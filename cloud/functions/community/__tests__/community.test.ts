@@ -16,7 +16,6 @@ jest.mock('../../../lib/db', () => ({
     return response?.data || null
   }),
 }))
-jest.mock('../../../lib/post-rag-outbox', () => ({ appendPostRagOutboxEvent: jest.fn() }))
 jest.mock('../../../lib/post-rag-sync', () => ({
   schedulePostRagSyncForCurrentPosts: jest.fn(),
 }))

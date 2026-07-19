@@ -1,6 +1,10 @@
 import type { DbTransaction } from '../db'
 
+const mockQueryAfterId = jest.fn()
+const mockRunTransaction = jest.fn()
 jest.mock('../db', () => ({
+  queryAfterId: (...args: any[]) => mockQueryAfterId(...args),
+  runTransaction: (...args: any[]) => mockRunTransaction(...args),
   transactionGetByIdOrNull: jest.fn(async (transaction, collectionName, id) => {
     const response = await transaction.collection(collectionName).doc(id).get()
     return response.data || null
@@ -9,6 +13,9 @@ jest.mock('../db', () => ({
 
 import {
   POST_RAG_SYNC_STATE,
+  claimPostRagSync,
+  completePostRagSync,
+  schedulePostRagSyncForCurrentPosts,
   schedulePostRagSyncInTransaction,
 } from '../post-rag-sync'
 
@@ -141,4 +148,40 @@ test('stores identifiers and state metadata without caller payload content', asy
     postId: 'post-1', communityId: 'community-1', sectionId: 'section-1', reason: 'post.updated', now: NOW,
   })
   expect(JSON.stringify(store.get(POST_RAG_SYNC_STATE, 'post-1'))).not.toMatch(/content|勤俭持家/)
+})
+
+test('fanout rejects an oversized community before scheduling any partial work', async () => {
+  mockQueryAfterId.mockReset()
+  mockRunTransaction.mockReset()
+  mockQueryAfterId
+    .mockResolvedValueOnce(Array.from({ length: 100 }, (_, index) => ({ _id: `post-${index + 1}`, communityId: 'community-1' })))
+    .mockResolvedValueOnce([{ _id: 'post-101', communityId: 'community-1' }])
+  await expect(schedulePostRagSyncForCurrentPosts({
+    communityId: 'community-1', reason: 'community.policy_changed', now: NOW, maximumPosts: 100,
+  })).rejects.toThrow('maximumPosts')
+  expect(mockQueryAfterId).toHaveBeenCalledTimes(2)
+  expect(mockRunTransaction).not.toHaveBeenCalled()
+})
+
+test('a late worker completion cannot overwrite a newer requested revision', async () => {
+  const store = createTransaction()
+  await schedulePostRagSyncInTransaction(store.transaction, {
+    postId: 'post-1', communityId: 'community-1', sectionId: 'section-1', reason: 'post.created', now: NOW,
+  })
+  mockRunTransaction.mockImplementation((callback) => callback(store.transaction))
+  const claimed = await claimPostRagSync('post-1', { workerId: 'worker-1', now: NOW, leaseMs: 60_000 })
+  expect(claimed).toMatchObject({ desiredRevision: 1, status: 'processing', leaseOwner: 'worker-1' })
+
+  await schedulePostRagSyncInTransaction(store.transaction, {
+    postId: 'post-1', communityId: 'community-1', sectionId: 'section-1', reason: 'post.updated', now: LATER,
+  })
+  const completion = await completePostRagSync({
+    postId: 'post-1', workerId: 'worker-1', leaseToken: claimed!.leaseToken,
+    desiredRevision: claimed!.desiredRevision, sourceVersion: 'stale-source', indexScope: 'business', now: LATER,
+  })
+
+  expect(completion).toEqual({ applied: false, reason: 'superseded' })
+  expect(store.get(POST_RAG_SYNC_STATE, 'post-1')).toMatchObject({
+    desiredRevision: 2, status: 'pending', appliedSourceVersion: null,
+  })
 })

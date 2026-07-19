@@ -1,295 +1,80 @@
-# 帖子正式 RAG 搜索服务
+# 帖子正式 RAG
 
-本文档记录 HappyHome 帖子搜索的正式 RAG 实现。当前方案不使用 ADP Agentic RAG，也不使用常驻腾讯 ES 集群；CloudBase 保存 chunk 与向量，腾讯原子 Embedding、Rerank、LLM 只在索引或查询时调用，云函数负责权限、异步同步、证据约束和返回结构。
+正式路径是按实际调用付费的 RAG：CloudBase 保存业务数据、同步状态、chunk 和向量；腾讯原子 Embedding、Rerank、LLM 只在索引或查询时调用。系统不依赖 ADP，也不依赖按小时收费的 ES 集群。
 
-## 分层
+## 数据边界
 
-源数据层：
+CloudBase 的当前业务数据是唯一事实来源。社区必须显式设置 `ragIndexPolicy`：
 
-- `posts`：帖子正文、视频名、音频名、图文笔记、地点等 widget 内容。
-- `sections`：板块名称、字段配置和字段标签。
-- CloudBase 仍是业务源数据，不把 ES 当业务主库。
+- `business`：正式业务数据，可进入普通用户检索。
+- `validation`：隔离的 RAG 验证数据，只能由签名 smoke 身份检索。
+- `excluded`：测试或非业务数据，必须清出索引。
+- 未设置策略：按 `excluded` 处理，直到发布后人工分类。
 
-异步同步层：
+任何带 `fixtureKey` 的社区或帖子都会失败关闭，即使策略被误设为 `business` 也不能进入正式索引。帖子年龄不参与资格判断；旧帖子只要属于已分类业务社区且仍是当前有效内容，就可以被 reconcile。
 
-- `post_rag_jobs`：发帖、改帖、审核、删除、板块字段变化产生的 RAG 索引任务。
-- `post_rag_index_state`：每篇帖子在正式 RAG 索引里的 indexed/removed/failed 状态。
-- `post_rag_worker_state`：`post-rag-worker` 最近一次运行状态、成功/失败计数和错误摘要。
-- `post-rag-worker` 云函数：分批处理 pending job。
-- `post_video_rag_jobs`：低文本信号视频的可选分析任务，按成本策略排队。
-- `post_video_rag_assets`：视频 ASR/OCR/关键帧摘要缓存，按 `cacheKey` 复用，避免重复付费分析。
-- `post-video-rag-worker` 云函数：分批处理视频分析 job，完成后重新排帖子 RAG upsert。
+## 当前状态同步
 
-检索层：
+每篇帖子只有一条 `post_rag_sync_state/<postId>`。发帖、改帖、审核、删除、板块变化和社区状态变化只提高 `desiredRevision`，不会追加历史任务。连续修改会合并成一条待处理状态。
 
-- `TencentRagProvider` 是 provider 接口，正式主路径是 `tencent-cloudbase-atomic`：
-  - `TENCENT_RAG_PROVIDER=cloudbase`：CloudBase `post_rag_chunks` 保存 chunk/embedding；云函数做权限过滤后的词面+余弦候选召回，腾讯原子 API 做 embedding、rerank、LLM answer。
-- index 文档粒度是 chunk，不是整篇帖子。
-- chunk metadata 固定包含：`communityId`、`sectionId`、`postId`、`chunkId`、`fieldType`、`fieldLabel`、`sourceUpdatedAt`、`visibility`。
-- 运行时不需要 ES endpoint、用户名或密码；只需要腾讯原子 API 凭据与模型名。
+`post-rag-worker` 获得短租约后重新读取当前 `posts`、`communities`、板块或协作模板；它不相信调度时的内容，也不相信历史的 upsert/delete 动作。worker 根据当前数据决定索引或清理：
 
-已退役的 ES 主路径：
+- 当前数据有效：生成带 `sourceVersion` 和 `indexScope` 的 chunk，按帖子替换 `post_rag_chunks`，写 `post_rag_index_state`。
+- 帖子缺失、删除、审核不通过、社区未分类/停用、板块停用或 fixture 数据：清理已有 chunk；从未索引过的帖子不调用供应商。
+- 外部调用结束后，只有租约、worker 和 `desiredRevision` 仍完全一致才能标记 `synced`。期间出现新修改时，旧结果不会获准成为当前状态。
+- 失败只保存有限错误码，按有界退避重试，达到上限进入 `dead_letter`；不保存原始异常或密钥。
 
-- ES 不再是 HappyHome 正式 RAG 的运行时依赖，也不应恢复或新建按小时收费的集群。
-- 历史 ES endpoint、用户名、密码和 inference id 已从 RAG 云函数环境清除；旧 ES 文档和脚本只可用于历史排障，不能作为上线步骤。
+可选视频分析仍使用 `post_video_rag_jobs` 和 `post_video_rag_assets`。默认先索引视频标题、描述和文件名；只有明确启用成本策略时才运行 ASR/OCR/视频理解，分析完成后重新调度父帖子当前状态。
 
-腾讯 ES 智能搜索原子能力：
+## 检索闸门
 
-- 2026-07-04 已开通 ES 智能搜索开发原子服务后付费。
-- `GetTextEmbedding`、`RunRerank`、`ChatCompletions` 已用真实 API 连通验证；`verify:tencent-rag -- --models-only` 可只验证这三项。
-- `ChatCompletions` 原子 API 不接受 `MaxTokens` 参数；输出长度靠 prompt 约束，不能把 OpenAI/LKEAP 参数照搬过去。
-- 正式主路径由 CloudBase 持久化 chunk/embedding，原子 API 只负责 embedding、rerank 和答案生成；没有常驻检索集群费用。
+`post.search` 调用 `tencent-cloudbase-atomic`，返回真实 `answer`、`citations` 和 `items`。候选证据返回前必须同时满足：
 
-LKEAP 旧路径：
+- 请求社区处于 active，策略与请求 scope 一致且不是 fixture；
+- 当前帖子 active、审核通过、社区一致且不是 fixture；
+- 当前板块 active；
+- chunk、`post_rag_sync_state`、`post_rag_index_state` 的 `sourceVersion` 和 `indexScope` 完全一致；
+- 同步状态为 `synced`，索引状态为 `indexed`，帖子更新时间与证据一致；
+- 当前查看者有权查看 member-only 字段。
 
-- 2026-06-25 已开通知识引擎原子能力后付费，并创建子用户 `happyhome_rag`。
-- 子用户已绑定预设策略 `QcloudLKEAPFullAccess`，本地密钥文件位于仓库外 `~/.happyhome/tencent-lkeap.env`。
-- `GetEmbedding`、`RunRerank`、`ChatCompletions` 已用真实 API 连通验证。
-- LKEAP 不属于当前正式检索链路；生产环境不应配置 LKEAP provider 或凭据来替代 `tencent-cloudbase-atomic`。
+任一条件不满足就丢弃证据。供应商不可用时返回 `mode=fallback` 且不拿普通关键词结果冒充 RAG；没有合格证据时返回 `mode=no_answer`。
 
-视频 RAG：
+## 发布与发布后启用
 
-- `post-rag-worker` 会把每个视频的标题、描述、hint、文件名、封面、时长写成免费 metadata chunk，因此“某个视频名”不需要先跑高成本视频理解。
-- 只有低文本信号、未命中缓存、COS 可访问的视频，才会在 `POST_VIDEO_RAG_ANALYSIS_ENABLED=true` 时写入 `post_video_rag_jobs`。
-- `post-video-rag-worker` 优先使用腾讯云 ASR 做音频转写：配置 `POST_VIDEO_RAG_ASR_SECRET_ID/KEY` 后，先调用 `CreateRecTask` 创建异步识别任务，把 job 置为 `processing`；后续轮询 `DescribeTaskStatus` 成功后写入 `asrTranscript`，再排 `rag.video.analysis.ready` 的帖子 RAG upsert。
-- 未配置 ASR 时，可选使用 `POST_VIDEO_RAG_TOKENHUB_API_KEY` 走 TokenHub 多模态视频理解；再未配置时可接 `POST_VIDEO_RAG_ANALYZER_URL` 外部分析器。三者都没有时明确失败，不隐式调用付费服务。
-- 成本控制靠环境变量：每帖 job 数、单视频 ASR 秒数、关键帧数、估算 cost units 都有上限。显式配置可覆盖到 60 分钟音频，例如 `POST_VIDEO_RAG_MAX_ASR_SECONDS_PER_VIDEO=3600`、`POST_VIDEO_RAG_MAX_COST_UNITS_PER_POST=120`、`POST_VIDEO_RAG_MAX_FRAMES_PER_VIDEO=0`。
+正式发布只负责上传代码、worker 配置、环境变量和通用数据库索引。发布流程禁止运行 RAG timer 证明、历史回填、RAG smoke、真实检索或语义评测。
 
-降级层：
-
-- 旧 `post_search_*` 倒排/本地稀疏向量索引只保留为旧搜索/排障/迁移辅助，不作为 `post.search` 的 RAG 主检索。
-- provider 未配置或腾讯服务失败时，`post.search` 返回 `mode=fallback`，不生成 AI 回答，也不返回普通搜索 `items/citations` 冒充 RAG 结果。
-
-## 动态更新
-
-业务写入不直接同步检索 chunk。所有动态变化先写 job，再由 worker 异步处理。
-
-已接入入口：
-
-- 用户发帖/改帖：审核后由 `auditAndApply` 排 RAG job。
-- 管理后台发帖/改帖：复用 `auditAndApply` 排 RAG job。
-- 审核通过：排 `upsert` job。
-- 审核不通过：初始内容排 `delete` job；pending 编辑被拒不删除旧内容索引。
-- 帖子删除：排 `delete` job，并清理旧搜索索引。
-- 板块名称、字段变化：按板块给 active posts 排 `upsert` job；纯新增空字段不扫描历史帖。
-- 社区硬删除：给社区下帖子排 `delete` job，并清理旧搜索索引。
-- 周期性/手动 reconcile：按社区扫描 `posts` 与 `post_rag_index_state`，只给缺失、过期、应删除的帖子排 job，避免所有历史帖反复付费重建。
-
-worker 处理 `upsert` 时会先删除该 post 在 CloudBase 中的旧 chunks，再写当前 chunks，避免旧正文、旧视频名继续被搜到。
-
-历史帖子不会自动拥有 RAG job。上线或大改字段后可以先跑只读健康检查，再优先用 reconcile 补缺失/过期索引；只有索引结构大改或需要强制重建时，才运行全量回填脚本把现有帖子全部重新排入 `post_rag_jobs`。
-
-## Search API
-
-`post.search` 返回正式 RAG 结构：
-
-```ts
-{
-  answer: string
-  citations: Array<{
-    postId: string
-    chunkId: string
-    title: string
-    fieldLabel: string
-    fieldType: string
-    preview: string
-    score: number
-  }>
-  items: Array<{ postId: string; title: string; matchedFields: Array<any> }>
-  mode: 'rag' | 'fallback' | 'no_answer'
-}
-```
-
-权限边界：
-
-- 云函数先用 `ensureCommunityReadable` 校验社区读取权限。
-- 只有通过权限校验后的 `communityId/sectionId` 会传给 provider。
-- LLM answer 只能使用 provider 返回的已过滤 citations。
-- 没有 citations 时返回 `mode=no_answer`，不能编造确定性答案。
-
-## Query Understanding
-
-`buildRagQuery` 会对“有没有讲节俭家风的帖子？”这类问题做 query expansion：
-
-- `节俭`
-- `勤俭`
-- `节约`
-- `家风`
-- `家训`
-- `朱子治家格言`
-- `一粥一饭`
-- `半丝半缕`
-- `物力维艰`
-
-这些词只用于扩大召回，最终排序以腾讯 rerank 结果为准，不靠手写关键词决定答案。
-
-## 环境变量
-
-这些值只能放在服务器安全位置或云函数环境变量，不能进 git：
-
-```text
-TENCENT_RAG_PROVIDER=cloudbase
-TENCENT_RAG_CLOUDBASE_CHUNK_PAGE_SIZE=100
-TENCENT_RAG_CLOUDBASE_MAX_CANDIDATE_CHUNKS=200
-# 腾讯原子 API：按 embedding/rerank/LLM 调用量计费
-TENCENT_RAG_ATOMIC_SECRET_ID=
-TENCENT_RAG_ATOMIC_SECRET_KEY=
-TENCENT_RAG_ATOMIC_REGION=ap-beijing
-TENCENT_RAG_EMBEDDING_MODEL=bge-base-zh-v1.5
-TENCENT_RAG_RERANK_MODEL=bge-reranker-large
-TENCENT_RAG_LLM_MODEL=deepseek-v3
-# 只部署到 post 云函数；仓库外 ~/.happyhome/post-rag-smoke.env 自动生成或显式配置
-POST_RAG_SMOKE_IDENTITY_SECRET=
-```
-
-视频音频优先分析可选配置：
-
-```text
-POST_VIDEO_RAG_ANALYSIS_ENABLED=true
-POST_VIDEO_RAG_ASR_SECRET_ID=
-POST_VIDEO_RAG_ASR_SECRET_KEY=
-POST_VIDEO_RAG_ASR_REGION=ap-guangzhou
-POST_VIDEO_RAG_ASR_ENGINE_MODEL_TYPE=16k_zh
-POST_VIDEO_RAG_MAX_JOBS_PER_POST=1
-POST_VIDEO_RAG_MAX_FRAMES_PER_VIDEO=0
-POST_VIDEO_RAG_MAX_ASR_SECONDS_PER_VIDEO=3600
-POST_VIDEO_RAG_MAX_COST_UNITS_PER_POST=120
-```
-
-多模态视频理解可选配置：
-
-```text
-POST_VIDEO_RAG_TOKENHUB_API_KEY=
-POST_VIDEO_RAG_TOKENHUB_MODEL=youtu-vita
-POST_VIDEO_RAG_TOKENHUB_BASE_URL=https://tokenhub.tencentmaas.com/v1
-```
-
-腾讯云 CAM `secret_id/secret_key`、腾讯原子 API 凭据和 `POST_RAG_SMOKE_IDENTITY_SECRET` 都不写进仓库，也不能进前端包。后者只用于发布后的临时 RAG fixture，不是普通用户身份或通用管理员 token。
-
-本地验证可放在仓库外：
-
-```text
-~/.happyhome/tencent-rag.env
-~/.happyhome/tencent-lkeap.env
-```
-
-## 运维命令
-
-补齐 CloudBase 集合和索引：
+发布完成后由 RAG 负责人分步执行，每一步单独确认：
 
 ```powershell
-npm.cmd run ensure:indexes
-```
+# 默认只读：查看所有已分类社区健康状态
+npm.cmd run rebuild:post-rag-index
 
-验证腾讯原子模型服务连通性：
+# 首次启用时显式分类；旧的、测试的社区应标为 excluded
+npm.cmd run rebuild:post-rag-index -- --classify-community <communityId> --policy business
 
-```powershell
-npm.cmd run verify:tencent-rag -- --models-only
-```
+# 为该社区所有当前帖子生成/覆盖一条同步状态
+npm.cmd run rebuild:post-rag-index -- --reconcile --community-id <communityId>
 
-验证腾讯 LKEAP 原子能力连通性：
+# 单独驱动当前状态 worker
+npm.cmd run rebuild:post-rag-index -- --process
 
-```powershell
-npm.cmd run verify:tencent-lkeap
-```
-
-回填历史帖子 RAG jobs，并默认驱动 worker 处理队列：
-
-```powershell
-npm.cmd run rebuild:post-rag-index -- --all-active
-npm.cmd run rebuild:post-rag-index -- --community-id <communityId>
-```
-
-只读检查各社区 RAG 覆盖率和 job 积压，不排队、不调用 worker：
-
-```powershell
-npm.cmd run rebuild:post-rag-index -- --all-active --health
-npm.cmd run rebuild:post-rag-index -- --community-id <communityId> --health
-```
-
-按 `post_rag_index_state` 补偿缺失、过期和应删除的索引，并默认驱动 worker 处理队列：
-
-```powershell
-npm.cmd run rebuild:post-rag-index -- --all-active --reconcile
-npm.cmd run rebuild:post-rag-index -- --community-id <communityId> --reconcile
-```
-
-只入队不处理：
-
-```powershell
-npm.cmd run rebuild:post-rag-index -- --community-id <communityId> --no-process
-```
-
-真实临时 fixture 验证核心 RAG 查询，脚本会创建临时社区/板块/帖子、定向执行 `post-rag-worker`、直接调用 `post.search`，最后 hardDelete 清理：
-
-```powershell
+# 使用 validation 社区做真实回答与引用闭环，完成后清理 fixture
 npm.cmd run verify:post-rag-smoke
 ```
 
-`verify:post-rag-smoke` 不启用生产 `ALLOW_TEST_OPENID`。它会生成 HMAC 签名身份，签名同时绑定 `post.search`、临时 `communityId`、短期 `runId`、用户和 5 分钟过期时间；验证端只允许额外 60 秒时钟偏差，云函数还会核对 `post_rag_smoke_runs` 中同一 run 的状态与过期时间，再走普通成员权限检查。脚本在成功或失败路径均清理 run 记录和临时社区；任一清理失败都使 smoke 失败。
+分类、reconcile 和 process 不能在同一次命令中混用。默认命令是只读健康检查。生产集合或历史索引的物理删除不由发布脚本自动执行；应在新路径稳定、健康检查和 smoke 全部通过后另行审计执行。
 
-手动触发一批 RAG job：
+## 正式环境变量
 
-```ts
-// 调用云函数 post-rag-worker
-{ "limit": 5 }
-```
+正式运行只需要 CloudBase 模式和腾讯原子模型配置：
 
-定向处理某篇帖子的 pending jobs：
+- `TENCENT_RAG_PROVIDER=cloudbase`
+- `TENCENT_RAG_CLOUDBASE_CHUNK_PAGE_SIZE`
+- `TENCENT_RAG_CLOUDBASE_MAX_CANDIDATE_CHUNKS`
+- `TENCENT_RAG_ATOMIC_SECRET_ID/KEY/REGION`
+- `TENCENT_RAG_EMBEDDING_MODEL`
+- `TENCENT_RAG_RERANK_MODEL`
+- `TENCENT_RAG_LLM_MODEL`
+- `POST_RAG_WORKER_TOKEN`、`POST_RAG_TIMER_TOKEN`、`POST_RAG_SMOKE_IDENTITY_SECRET`
 
-```ts
-{ "limit": 20, "postId": "<postId>" }
-```
-
-手动触发视频分析 job：
-
-```ts
-// 调用云函数 post-video-rag-worker
-{ "limit": 3 }
-```
-
-旧搜索索引回填仍保留，仅用于旧搜索排障/迁移辅助，不用于正式 `post.search` RAG 主路径：
-
-```powershell
-npm.cmd run rebuild:post-search-index -- --all-active
-```
-
-## 验收查询
-
-必须支持：
-
-- `有没有讲节俭家风的帖子？`
-- `勤俭持家`
-- `一粥一饭当思来处不易`
-- 某个视频名
-
-预期：
-
-- 有证据时返回 `mode=rag`、`answer`、`citations`、可跳转 `items`。
-- 没有足够证据时返回 `mode=no_answer`，小程序搜索页不能再用本地 `bootstrap` 快照混入非 RAG 结果。
-- 腾讯服务不可用时返回 `mode=fallback`，不显示 AI answer，也不展示普通搜索结果冒充 RAG 命中。
-
-2026-06-25 历史 smoke 结果：
-
-- 当时的 `npm.cmd run verify:post-rag-smoke` 通过，但该结果不能替代当前 pay-per-call provider 的生产验证。
-- 验收问题 `有没有讲节俭家风的帖子？` 返回 `mode=rag`，answer 包含《朱子治家格言》和“一粥一饭，当思来处不易；半丝半缕，恒念物力维艰”，`citations=2`，`items=1`。
-- 原句查询 `一粥一饭当思来处不易` 命中同一临时帖子。
-- 临时社区已 hardDelete，删除 job 已由 worker 清理。
-
-2026-06-30 本地新增验收：
-
-- `verify:post-rag-smoke` 已加入 `勤俭持家` 查询，必须命中同一临时帖子。
-- `test:mp:post-rag-search-static` 会验证小程序首页搜索入口、搜索页输入框、`postApi.search`、AI 回答、引用卡片和帖子跳转结构。
-- 视频分析 worker 支持 ASR 异步任务的 `pending -> processing -> completed` 状态流；ASR 未完成前不会提前写资产或重建帖子索引。
-
-2026-07-11 生产验证：
-
-- 正式 provider 是 `TENCENT_RAG_PROVIDER=cloudbase`，CloudBase 保存 chunk/embedding，腾讯原子 API 按调用量执行 embedding、rerank、LLM answer；ES 不在运行路径中。
-- RAG 生产验证时的发布状态为 `d13be16`；该次发布没有重复上传云函数、小程序或后台，只幂等确认索引、RAG 环境和 worker 配置。
-- `npm.cmd run verify:post-rag-smoke` 已在生产环境真实通过：临时帖子包含《朱子治家格言》、“一粥一饭，当思来处不易”、“半丝半缕，恒念物力维艰”和“勤俭持家/节俭家风”。`有没有讲节俭家风的帖子？` 返回 `mode=rag`、AI answer、2 条 citations 和 1 个可跳转 item；`勤俭持家` 与原句查询均命中同一帖子；临时社区和 run 记录已清理。
-- 新 smoke 身份不依赖也不打开 `ALLOW_TEST_OPENID`：它需要 HMAC、匹配的 `post_rag_smoke_runs` 记录、同一社区和普通成员权限。CloudBase Node SDK 创建临时 `community_members` 记录时必须直接传成员文档，不能包成 `{ data: ... }`，否则生产权限查询无法命中。
-- 上述 fixture 证明能力链路，不代表正式业务库已有同主题内容。2026-07-11 只读核对到 110 篇正式帖子和 302 个 `post_rag_chunks`，其中没有“勤俭/节俭/朱子治家/一粥一饭/家风”等证据。因此当前真实业务数据搜索该主题时，正确结果应是无足够证据；发布相关帖子并完成索引后，才应期待它出现在小程序搜索结果中。
-
-仍未纳入默认真实 smoke：
-
-- “某个视频名”字段级真实 smoke。`video_group` 的 `title/hint` 已进入 chunk，但视频字段会触发腾讯内容审核；后续需要把视频 fixture 的审核与索引回填闭环稳定下来，再将其加入正式 smoke。
+`update:rag-env` 会主动移除旧 ES endpoint、用户名、密码、inference id、索引名和向量字段配置。

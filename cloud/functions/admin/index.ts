@@ -23,11 +23,6 @@ import {
   removePostSearchIndex,
   removePostSearchIndexesForSection,
 } from '../../lib/post-search'
-import {
-  backfillPostRagJobsForSectionBatch,
-  getPostRagIndexHealthForCommunity,
-  reconcilePostRagJobsForCommunityBatch,
-} from '../../lib/post-rag'
 import { schedulePostRagSync, schedulePostRagSyncForCurrentPosts, schedulePostRagSyncInTransaction } from '../../lib/post-rag-sync'
 import {
   assertOwnCommunityOrSuper,
@@ -41,9 +36,6 @@ import { syncMiniProgramUserRoleForAdminAccount } from '../../lib/admin-identity
 import { handleCreate as handleCommunityCreate } from '../community'
 import { MEMBER_STATE_COLLECTION } from '../../lib/membership-state'
 import { approveMembership, kickMembership, rejectMembership } from '../../lib/membership-transitions'
-import { getPostRagV2Health } from '../../lib/post-rag-v2-health'
-import { listReleaseRagPage } from '../../lib/release-rag-pagination'
-import { cleanupPostRagReleaseProbe, createPostRagReleaseProbe, readPostRagReleaseProbeStatus, readPostRagReleaseTimerEvidence } from '../../lib/post-rag-release-probe'
 import type {
   AdminAccount,
   AdminCtx,
@@ -191,10 +183,10 @@ function resolveNonHttpAdminContext(event: any): AdminCtx {
   }
 }
 const SUPER_ADMIN_ONLY: Array<string | RegExp> = [
-  'post.ragV2HealthAdmin',
-  'community.listActivePageAdmin',
-  'community.listAllPageAdmin',
-  'post.ragTimerProbeCreateAdmin','post.ragTimerEvidenceAdmin','post.ragTimerProbeStatusAdmin','post.ragTimerProbeCleanupAdmin',
+  'post.ragCommunityPageAdmin',
+  'post.ragClassifyCommunityAdmin',
+  'post.ragReconcileCurrentAdmin',
+  'post.ragCurrentHealthAdmin',
   'community.approve',
   'community.reject',
   'community.disable',
@@ -215,7 +207,6 @@ const COMMUNITY_SCOPED_ACTIONS = new Set([
   'community.updateMeta',
   'community.updateHomeBanners',
   'section.list',
-  'section.listPageAdmin',
   'section.create',
   'member.pendingList',
   'member.list',
@@ -225,8 +216,6 @@ const COMMUNITY_SCOPED_ACTIONS = new Set([
   'post.listAdmin',
   'post.createAdmin',
   'post.rebuildSearchIndexAdmin',
-  'post.ragIndexHealthAdmin',
-  'post.reconcileRagIndexCommunityBatchAdmin',
   'archiveTopic.list',
   'archiveTopic.save',
   'archiveTopic.create',
@@ -235,7 +224,6 @@ const COMMUNITY_SCOPED_ACTIONS = new Set([
   'archiveTopic.reorder',
   'archiveTopic.delete',
 ])
-const INTERNAL_RELEASE_ONLY_ACTIONS=new Set(['post.ragTimerProbeCreateAdmin','post.ragTimerEvidenceAdmin','post.ragTimerProbeStatusAdmin','post.ragTimerProbeCleanupAdmin'])
 // 这些 action 只给了实体 id，需要先查出 communityId 再校验
 const ENTITY_TO_COMMUNITY_ACTIONS: Record<string, { collection: string; idParam: string }> = {
   'section.get': { collection: 'sections', idParam: 'sectionId' },
@@ -245,7 +233,6 @@ const ENTITY_TO_COMMUNITY_ACTIONS: Record<string, { collection: string; idParam:
   'section.delete': { collection: 'sections', idParam: 'sectionId' },
   'post.rebuildSearchIndexSectionAdmin': { collection: 'sections', idParam: 'sectionId' },
   'post.rebuildSearchIndexSectionBatchAdmin': { collection: 'sections', idParam: 'sectionId' },
-  'post.rebuildRagIndexSectionBatchAdmin': { collection: 'sections', idParam: 'sectionId' },
   'post.getAdmin': { collection: 'posts', idParam: 'postId' },
   'post.deleteAdmin': { collection: 'posts', idParam: 'postId' },
   'post.updateAdmin': { collection: 'posts', idParam: 'postId' },
@@ -1958,42 +1945,48 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       limit: params.limit,
     })
   }
-  if (action === 'post.rebuildRagIndexSectionBatchAdmin') {
-    const sectionId = String(params.sectionId || '').trim()
-    if (!sectionId) throw new Error('sectionId 不能为空')
-    return backfillPostRagJobsForSectionBatch(sectionId, {
-      skip: params.skip,
-      limit: params.limit,
-    })
+  if (action === 'post.ragCommunityPageAdmin') {
+    const afterId = String(params.afterId || '').trim() || null
+    const limit = Math.max(1, Math.min(100, Math.floor(Number(params.limit || 100))))
+    const items = await db.queryAfterId('communities', {}, afterId, limit) as any[]
+    const sanitized = items.map((community) => ({
+      communityId: String(community._id || ''),
+      status: String(community.status || ''),
+      ragIndexPolicy: ['business', 'validation', 'excluded'].includes(community.ragIndexPolicy) ? community.ragIndexPolicy : 'unclassified',
+      fixtureOwned: Boolean(community.fixtureKey),
+    }))
+    return { items: sanitized, hasMore: items.length === limit, nextAfterId: items.length === limit ? String(items[items.length - 1]._id || '') : null }
   }
-  if (action === 'post.reconcileRagIndexCommunityBatchAdmin') {
+  if (action === 'post.ragClassifyCommunityAdmin') {
+    const communityId = String(params.communityId || '').trim()
+    const policy = String(params.policy || '')
+    if (!communityId) throw new Error('communityId 不能为空')
+    if (!['business', 'validation', 'excluded'].includes(policy)) throw new Error('invalid RAG index policy')
+    const community = await db.getById('communities', communityId) as any
+    if (!community) throw new Error('community not found')
+    if (community.fixtureKey && policy !== 'excluded') throw new Error('fixture community must remain excluded')
+    await db.updateById('communities', communityId, { ragIndexPolicy: policy })
+    const scheduled = await schedulePostRagSyncForCurrentPosts({ communityId, reason: 'community.rag_policy_changed' })
+    return { success: true, communityId, policy, ...scheduled }
+  }
+  if (action === 'post.ragReconcileCurrentAdmin') {
     const communityId = String(params.communityId || '').trim()
     if (!communityId) throw new Error('communityId 不能为空')
-    return reconcilePostRagJobsForCommunityBatch(communityId, {
-      skip: params.skip,
-      limit: params.limit,
-    })
+    return { communityId, ...(await schedulePostRagSyncForCurrentPosts({ communityId, reason: 'rag.current_state_reconcile' })) }
   }
-  if (action === 'post.ragIndexHealthAdmin') {
+  if (action === 'post.ragCurrentHealthAdmin') {
     const communityId = String(params.communityId || '').trim()
     if (!communityId) throw new Error('communityId 不能为空')
-    return getPostRagIndexHealthForCommunity(communityId)
+    const [pending, processing, retryWait, synced, deadLetter, indexed] = await Promise.all([
+      db.count('post_rag_sync_state', { communityId, status: 'pending' }),
+      db.count('post_rag_sync_state', { communityId, status: 'processing' }),
+      db.count('post_rag_sync_state', { communityId, status: 'retry_wait' }),
+      db.count('post_rag_sync_state', { communityId, status: 'synced' }),
+      db.count('post_rag_sync_state', { communityId, status: 'dead_letter' }),
+      db.count('post_rag_index_state', { communityId, status: 'indexed' }),
+    ])
+    return { communityId, pending, processing, retryWait, synced, deadLetter, indexed }
   }
-  if (action === 'community.listActivePageAdmin') return listReleaseRagPage('communities', { status: 'active' }, params.afterId, params.limit)
-  if (action === 'community.listAllPageAdmin') return listReleaseRagPage('communities', {}, params.afterId, params.limit)
-  if (action === 'section.listPageAdmin') {
-    const communityId=String(params.communityId||'').trim(); if(!communityId) throw new Error('communityId 不能为空')
-    return listReleaseRagPage('sections', { communityId }, params.afterId, params.limit)
-  }
-  if (action === 'post.ragV2HealthAdmin') {
-    const communityId = String(params.communityId || '').trim()
-    if (!communityId) throw new Error('communityId 不能为空')
-    return getPostRagV2Health(communityId)
-  }
-  if(action==='post.ragTimerProbeCreateAdmin')return createPostRagReleaseProbe(params.runId)
-  if(action==='post.ragTimerEvidenceAdmin')return readPostRagReleaseTimerEvidence(params.runId)
-  if(action==='post.ragTimerProbeStatusAdmin')return readPostRagReleaseProbeStatus(params)
-  if(action==='post.ragTimerProbeCleanupAdmin')return cleanupPostRagReleaseProbe(params)
   if (action === 'post.pinAdmin' || action === 'post.unpinAdmin' || action === 'post.featureAdmin' || action === 'post.unfeatureAdmin') {
     const postId = String(params.postId || '').trim()
     if (!postId) throw new Error('postId 不能为空')
@@ -2584,7 +2577,6 @@ export const main = async (event: any) => {
         body = {}
       }
       const { action, ...params } = body
-      if(INTERNAL_RELEASE_ONLY_ACTIONS.has(action))return{statusCode:403,headers,body:JSON.stringify({error:'Unauthorized'})}
       const authHeader = String(event.headers?.authorization || event.headers?.Authorization || '')
 
       if (PUBLIC_ACTIONS.has(action)) {

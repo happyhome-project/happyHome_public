@@ -35,7 +35,6 @@ jest.mock('../../../lib/db', () => ({
   transactionGetByIdOrNull: jest.fn(async (_transaction, name, id) => (require('../../../lib/db').getById)(name, id)),
 }))
 
-jest.mock('../../../lib/post-rag-outbox', () => ({ appendPostRagOutboxEvent: jest.fn() }))
 jest.mock('../../../lib/post-rag-sync', () => ({
   schedulePostRagSyncInTransaction: jest.fn(),
   schedulePostRagSync: jest.fn(),
