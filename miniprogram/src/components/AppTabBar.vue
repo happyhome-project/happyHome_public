@@ -71,7 +71,7 @@ const h5MediaInput = ref<HTMLInputElement | null>(null)
 const pendingMediaIntents = new Set<string>()
 const HOME_TAB_RETAP_EVENT = 'happyhome:home-tab-retap'
 const publishOptions = computed(() => [
-  { key: 'media', label: '发图文 / 视频', icon: '/static/publish-icons/trade.svg', tone: 'image-text' },
+  { key: 'media', label: '图文/视频', icon: '/static/publish-icons/trade.svg', tone: 'image-text' },
   { key: 'text', label: '写文字', icon: '/static/publish-icons/lost.svg', tone: 'text' },
   { key: 'collaboration', label: '发起协作', icon: '/static/publish-icons/neighbor.svg', tone: 'collaboration' },
 ])
