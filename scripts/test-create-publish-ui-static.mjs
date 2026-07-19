@@ -74,6 +74,7 @@ assert(
 
 assert(
   tabbar.includes("{ key: 'media', label: '图文/视频'") &&
+    /\.publish-label\s*\{[^}]*width:\s*100%/s.test(tabbar) &&
     tabbar.includes("mediaType: ['image', 'video']") &&
     tabbar.includes('accept="image/*,video/*"') &&
     tabbar.includes('storeArchiveMediaIntent') &&

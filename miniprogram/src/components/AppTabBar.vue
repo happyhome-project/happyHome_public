@@ -319,7 +319,7 @@ void APP_TABS
 }
 
 .publish-label {
-  width: 112rpx;
+  width: 100%;
   color: var(--hh-color-text-secondary);
   font-size: var(--hh-text-body-base-size);
   line-height: var(--hh-text-body-base-line);
