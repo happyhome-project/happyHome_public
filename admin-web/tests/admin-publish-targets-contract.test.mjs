@@ -7,11 +7,16 @@ import { fileURLToPath } from 'node:url'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const read = (relative) => readFileSync(resolve(root, relative), 'utf8')
 
-test('后台新建帖子暴露三种媒体形态和两种实时协作模板', () => {
+test('后台新建帖子暴露图文、视频、写文字和两种实时协作模板', () => {
   const view = read('src/views/CommunityAdmin/PostCreateAdmin.vue')
   assert.match(view, /图文/)
-  assert.match(view, /图片/)
   assert.match(view, /视频/)
+  assert.match(view, /写文字/)
+  assert.match(view, /value="archive:text"/)
+  assert.doesNotMatch(view, /archive:image_text:image/)
+  assert.match(view, /'archive:text'\s*\?\s*'text'/)
+  assert.match(view, /textNoteTheme:\s*'paper'/)
+  assert.match(view, /:allow-images="allowsRichNoteImages"/)
   assert.match(view, /collaborationTemplateApi\.listAdmin/)
   assert.match(view, /area:\s*'archive'/)
   assert.match(view, /area:\s*'collaboration'/)
