@@ -2593,15 +2593,17 @@ onShareAppMessage(() => {
 .live-cta text { color: $hh-surface-1; }
 
 .group-section {
-  margin: 0 24rpx 34rpx;
+  margin: 0 0 34rpx;
+  padding: 20rpx 24rpx 0;
+  background: linear-gradient(180deg, var(--home-sticky-surface) 0, var(--hh-color-page) 96rpx);
 }
 
 .group-section-title {
   display: block;
-  margin-bottom: 32rpx;
+  margin-bottom: 12rpx;
   color: var(--hh-color-text-primary);
-  font-size: var(--hh-text-heading-md-size);
-  line-height: var(--hh-text-heading-md-line);
+  font-size: var(--hh-text-heading-sm-size);
+  line-height: var(--hh-text-heading-sm-line);
   font-weight: $hh-font-weight-bold;
 }
 
