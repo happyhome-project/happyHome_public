@@ -32,8 +32,8 @@
           <el-select v-model="publishTargetKey" placeholder="请选择发布类型" style="width: 360px;" @change="onPublishTargetChange">
             <el-option-group label="沉淀内容">
               <el-option label="图文（图片 + 正文）" value="archive:image_text:rich" />
-              <el-option label="图片（图片 + 标题）" value="archive:image_text:image" />
               <el-option label="视频" value="archive:video" />
+              <el-option label="写文字" value="archive:text" />
             </el-option-group>
             <el-option-group v-if="activeCollaborationTemplates.length" label="实时协作">
               <el-option
@@ -89,7 +89,7 @@
             <RichNoteAdminEditor
               v-else-if="widget.type === 'rich_note'"
               v-model="formData[widget.widgetId] as any"
-              :allow-images="!isFixedImageCanvasTemplate"
+              :allow-images="allowsRichNoteImages"
             />
             <ImageGroupAdminEditor v-else-if="widget.type === 'image_group'" v-model="formData[widget.widgetId] as any" />
             <TopicAdminEditor v-else-if="widget.type === 'topic'" v-model="formData[widget.widgetId] as any" />
@@ -188,6 +188,7 @@ const editableWidgets = computed(() => editableWidgetsFor(section.value))
 const activeCollaborationTemplates = computed(() => collaborationTemplates.value.filter((template) => template.status === 'active'))
 const isArchiveVideoTarget = computed(() => publishTargetKey.value === 'archive:video')
 const isFixedImageCanvasTemplate = computed(() => ['guide_note', 'image_note'].includes(String(section.value?.displayTemplate || '')))
+const allowsRichNoteImages = computed(() => publishTargetKey.value !== 'archive:text' && !isFixedImageCanvasTemplate.value)
 
 onMounted(async () => {
   await Promise.all([loadCommunityName(), loadPublishTargets()])
@@ -220,7 +221,8 @@ async function loadPublishTargets() {
 async function onPublishTargetChange(key: string) {
   publishTargetKey.value = key
   if (key.startsWith('archive:')) {
-    section.value = buildArchiveSection(key === 'archive:video' ? 'video' : 'image_text')
+    const format = key === 'archive:video' ? 'video' : key === 'archive:text' ? 'text' : 'image_text'
+    section.value = buildArchiveSection(format)
     hydrateAdminPostFormData(formData, editableWidgets.value)
     return
   }
@@ -250,10 +252,20 @@ async function loadSection(id: string) {
   }
 }
 
-function buildArchiveSection(format: 'image_text' | 'video') {
+function buildArchiveSection(format: 'image_text' | 'video' | 'text') {
   const body = { widgetId: 'body', type: 'rich_note', label: '正文', fieldKey: 'body', required: false, order: 2, showInList: false }
   const topics = { widgetId: 'topics', type: 'topic', label: '话题', fieldKey: 'topics', required: false, order: 3, showInList: false }
   const location = { widgetId: 'location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 4, showInList: false }
+  if (format === 'text') {
+    return {
+      name: '写文字', communityId, type: 'evergreen', displayTemplate: 'text_note',
+      widgets: [
+        { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
+        { ...body, required: true, order: 1 },
+        { ...topics, order: 2 },
+      ],
+    }
+  }
   return format === 'video'
     ? {
         name: '视频', communityId, type: 'evergreen', displayTemplate: 'default',
@@ -299,10 +311,14 @@ async function submit() {
     if (publishTargetKey.value.startsWith('archive:')) {
       const topics = Array.isArray(content.topics) ? content.topics : []
       delete content.topics
+      const format = publishTargetKey.value === 'archive:video'
+        ? 'video'
+        : publishTargetKey.value === 'archive:text' ? 'text' : 'image_text'
       payload = {
         communityId, area: 'archive',
-        format: publishTargetKey.value === 'archive:video' ? 'video' : 'image_text',
+        format,
         topics, content,
+        presentation: format === 'text' ? { textNoteTheme: 'paper' } : undefined,
       }
     } else if (publishTargetKey.value.startsWith('collaboration:')) {
       payload = {

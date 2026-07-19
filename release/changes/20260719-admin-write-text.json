@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "changeId": "admin-write-text",
+  "actions": [],
+  "cloudTargets": [],
+  "migrations": [],
+  "smokeSuites": [],
+  "releaseImpact": {
+    "cloudFunctions": "No runtime code change.",
+    "adminWeb": "Replace the mistaken image-only publishing target with Write Text and submit the native archive text contract.",
+    "miniprogram": "No runtime code change.",
+    "environmentVariables": [],
+    "databaseMigrations": []
+  }
+}
