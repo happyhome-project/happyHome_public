@@ -55,6 +55,7 @@ export async function handleCreate(
         creatorId: openid,
         status: 'pending',
         memberCount: 0,
+        ragIndexPolicy: 'business',
         createdAt: now,
       },
     })

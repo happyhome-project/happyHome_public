@@ -490,6 +490,22 @@ const INDEXES = [
     ],
   },
   {
+    coll: 'post_rag_sync_state',
+    name: 'idx_status_nextAttemptAt',
+    keys: [
+      { Name: 'status', Direction: '1' },
+      { Name: 'nextAttemptAt', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'post_rag_sync_state',
+    name: 'idx_communityId_status',
+    keys: [
+      { Name: 'communityId', Direction: '1' },
+      { Name: 'status', Direction: '1' },
+    ],
+  },
+  {
     coll: 'post_rag_jobs',
     name: 'idx_status_createdAt',
     keys: [
@@ -624,6 +640,7 @@ const REQUIRED_COLLECTIONS = [
   'post_search_chunks',    // RAG 证据分块（_id=chunkId）
   'post_search_vector_terms', // 本地稀疏向量词条
   'post_search_index_state',  // 每篇帖子索引状态
+  'post_rag_sync_state',      // 每篇帖子唯一的当前 RAG 同步状态
   'post_rag_jobs',            // 正式 RAG 异步索引任务
   'post_rag_index_state',     // 正式 RAG 每篇帖子索引状态
   'post_rag_worker_state',    // 正式 RAG worker 最近运行状态

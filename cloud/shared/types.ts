@@ -11,6 +11,7 @@ export type PostStatus = 'active' | 'deleted'
 export type PostAuditStatus = 'pending' | 'pass' | 'review' | 'rejected'
 export type AuditProvider = 'wechat' | 'tencent_ci' | 'manual'
 export type AuditTargetType = 'text' | 'image' | 'audio' | 'video'
+export type RagIndexPolicy = 'business' | 'validation' | 'excluded'
 
 export type SectionType = 'realtime' | 'evergreen'
 export type SectionStatus = 'active' | 'dormant' | 'archived'
@@ -223,6 +224,8 @@ export interface Community {
   homeBanners?: HomeBanner[]
   archiveTopicOrder?: string[]
   archiveTopicOrderRevision?: number
+  ragIndexPolicy?: RagIndexPolicy
+  fixtureKey?: string
   /** 当前查看者的最新成员状态；目录和“我的社群”接口按需补充。 */
   viewerStatus?: MemberStatus | null
   /** 仅 active 成员返回角色，避免把历史申请角色误当作当前权限。 */
@@ -330,6 +333,8 @@ export interface Post {
   likeCount: number
   createdAt: string
   updatedAt: string
+  ragIndexPolicy?: RagIndexPolicy
+  fixtureKey?: string
   isPinned?: boolean
   pinnedAt?: string
   pinnedByAccountId?: string
