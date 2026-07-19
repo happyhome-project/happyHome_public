@@ -1,7 +1,7 @@
 import { createHash, createHmac } from 'crypto'
 import http from 'http'
 import https from 'https'
-import type { Post, Section } from '../shared/types'
+import type { Post, RagIndexPolicy, Section } from '../shared/types'
 import * as db from './db'
 import {
   buildPostSearchChunks,
@@ -11,8 +11,9 @@ import {
   type PostSearchResult,
   type PostSearchResultItem,
 } from './post-search'
-import { resolvePostRagProjectionInputs } from './post-rag-indexing'
+import { buildPostRagSourceProjection, resolvePostRagProjectionInputs } from './post-rag-indexing'
 import { loadPostContentSection } from './post-content-contract'
+import { schedulePostRagSync } from './post-rag-sync'
 
 export const POST_RAG_JOBS = 'post_rag_jobs'
 export const POST_RAG_INDEX_STATE = 'post_rag_index_state'
@@ -36,6 +37,8 @@ export interface RagCitation {
   score: number
   visibility?: 'public' | 'member'
   sourceUpdatedAt?: string
+  sourceVersion?: string
+  indexScope?: RagIndexPolicy
 }
 
 export type ScoredRagCitation = RagCitation & {
@@ -66,6 +69,7 @@ export interface RagSearchParams {
   skip?: number
   limit?: number
   includeMemberOnly?: boolean
+  indexScope?: Exclude<RagIndexPolicy, 'excluded'>
 }
 
 export interface RagProviderSearchInput extends RagSearchParams {
@@ -94,6 +98,8 @@ export interface RagChunkDocument {
   preview: string
   sourceUpdatedAt: string
   visibility: 'public' | 'member'
+  sourceVersion?: string
+  indexScope?: RagIndexPolicy
   metadata?: Record<string, any>
 }
 
@@ -384,8 +390,9 @@ export async function searchPostsWithRag(
   const skip = Math.max(0, Math.floor(Number(params.skip || 0)))
   const limit = Math.max(1, Math.floor(Number(params.limit || 20)))
   const includeMemberOnly = params.includeMemberOnly !== false
+  const indexScope: 'business' | 'validation' = params.indexScope === 'validation' ? 'validation' : 'business'
   const provider = options.provider === undefined ? createTencentRagProviderFromEnv() : options.provider
-  const fallbackParams = { communityId, query, sectionId, skip, limit, includeMemberOnly }
+  const fallbackParams = { communityId, query, sectionId, skip, limit, includeMemberOnly, indexScope }
 
   if (!provider || !provider.isConfigured()) {
     logRagSearchDecision('fallback', {
@@ -407,7 +414,7 @@ export async function searchPostsWithRag(
   try {
     const ragQuery = buildRagQuery(query)
     const rawProviderResult = await provider.search({ ...fallbackParams, ragQuery })
-    const providerResult = filterProviderResultForVisibility(rawProviderResult, includeMemberOnly)
+    const providerResult = await filterProviderResultForCurrentState(rawProviderResult, { communityId, indexScope, includeMemberOnly })
     if (!providerResult.citations.length) {
       logRagSearchDecision('no_answer', {
         provider: provider.name,
@@ -438,9 +445,9 @@ export async function searchPostsWithRag(
       mode: 'rag',
       provider: provider.name,
     }
-  } catch (error: any) {
+  } catch {
     logRagSearchDecision('fallback', {
-      reason: error?.message || 'rag_provider_failed',
+      reason: 'rag_provider_failed',
       provider: provider.name,
       communityId,
       sectionId,
@@ -452,7 +459,7 @@ export async function searchPostsWithRag(
       sectionId,
       skip,
       limit,
-      reason: error?.message || 'rag_provider_failed',
+      reason: 'rag_provider_failed',
     })
   }
 }
@@ -646,6 +653,7 @@ export const requestTencentEsAtomic: TencentRagAtomicRequestJson = async <T>(
 
 function buildTencentEsFilters(input: RagProviderSearchInput) {
   const filters: any[] = [{ term: { communityId: input.communityId } }]
+  filters.push({ term: { indexScope: input.indexScope === 'validation' ? 'validation' : 'business' } })
   if (input.sectionId) filters.push({ term: { sectionId: input.sectionId } })
   if (input.includeMemberOnly === false) filters.push({ term: { visibility: 'public' } })
   return filters
@@ -768,6 +776,56 @@ function toCitation(hit: any, query?: RagQuery): RagCitation {
     score: Number(hit?._score || source.score || 0),
     visibility: normalizeRagVisibility(source.visibility),
     sourceUpdatedAt: String(source.sourceUpdatedAt || ''),
+    sourceVersion: String(source.sourceVersion || ''),
+    indexScope: source.indexScope === 'validation' ? 'validation' : source.indexScope === 'business' ? 'business' : undefined,
+  }
+}
+
+async function filterProviderResultForCurrentState(
+  providerResult: Omit<RagSearchResult, 'query' | 'communityId' | 'sectionId' | 'skip' | 'limit'>,
+  input: { communityId: string; indexScope: Exclude<RagIndexPolicy, 'excluded'>; includeMemberOnly: boolean },
+) {
+  const postIds = [...new Set((providerResult.citations || []).map((citation) => citation.postId).filter(Boolean))].slice(0, 50)
+  if (!postIds.length) return filterProviderResultForVisibility(providerResult, input.includeMemberOnly)
+  const [community, posts, syncStates, indexStates] = await Promise.all([
+    db.getByIdOrNull<any>('communities', input.communityId),
+    db.getByIds('posts', postIds),
+    db.getByIds('post_rag_sync_state', postIds),
+    db.getByIds(POST_RAG_INDEX_STATE, postIds),
+  ])
+  if (!community || community.status !== 'active' || community.ragIndexPolicy !== input.indexScope || community.fixtureKey) {
+    return { ...providerResult, total: 0, citations: [], items: [], answer: '' }
+  }
+  const postsById = new Map((posts as any[]).map((post) => [String(post._id), post]))
+  const syncById = new Map((syncStates as any[]).map((state) => [String(state._id || state.postId), state]))
+  const indexById = new Map((indexStates as any[]).map((state) => [String(state._id || state.postId), state]))
+  const sectionIds = [...new Set((posts as any[]).map((post) => String(post.sectionId || '')).filter(Boolean))]
+  const sections = sectionIds.length ? await db.getByIds('sections', sectionIds) : []
+  const sectionsById = new Map((sections as any[]).map((section) => [String(section._id), section]))
+  const citations = filterCitationsForVisibility(providerResult.citations || [], input.includeMemberOnly).filter((citation) => {
+    const post: any = postsById.get(citation.postId)
+    const sync: any = syncById.get(citation.postId)
+    const index: any = indexById.get(citation.postId)
+    const sourceVersion = String(citation.sourceVersion || '')
+    if (!post || post.communityId !== input.communityId || post.status !== 'active'
+      || (post.auditStatus && post.auditStatus !== 'pass') || post.fixtureKey || post.ragIndexPolicy === 'excluded') return false
+    if (citation.communityId !== input.communityId || citation.indexScope !== input.indexScope || !sourceVersion) return false
+    if (!sync || sync.status !== 'synced' || sync.appliedSourceVersion !== sourceVersion || sync.indexScope !== input.indexScope) return false
+    if (!index || index.status !== 'indexed' || index.sourceVersion !== sourceVersion || index.indexScope !== input.indexScope) return false
+    if (String(post.updatedAt || post.createdAt || '') !== String(citation.sourceUpdatedAt || '')) return false
+    if (post.sectionId) {
+      const section: any = sectionsById.get(String(post.sectionId))
+      if (!section || section.status !== 'active' || section.communityId !== input.communityId) return false
+    }
+    return true
+  })
+  const dropped = citations.length !== (providerResult.citations || []).length
+  return {
+    ...providerResult,
+    total: citations.length,
+    citations,
+    items: resultItemsFromCitations(citations),
+    answer: citations.length ? (dropped ? deterministicAnswer(citations) : (providerResult.answer || deterministicAnswer(citations))) : '',
   }
 }
 
@@ -1065,6 +1123,7 @@ async function loadLkeapChunks(input: RagProviderSearchInput, pageSize: number, 
     for (const chunk of page) {
       if (
         (!input.sectionId || chunk.sectionId === input.sectionId) &&
+        chunk.indexScope === (input.indexScope === 'validation' ? 'validation' : 'business') &&
         isEvidenceVisible(chunk.visibility, input.includeMemberOnly !== false) &&
         Array.isArray(chunk.embedding) &&
         chunk.embedding.length
@@ -1711,7 +1770,7 @@ async function loadVideoRagAssetsByCacheKey(cacheKeys: string[]): Promise<Map<st
   return assets
 }
 
-async function enqueueVideoRagAnalysisJobs(jobs: VideoRagAnalysisJobDocument[]) {
+export async function enqueueVideoRagAnalysisJobs(jobs: VideoRagAnalysisJobDocument[]) {
   let queuedCount = 0
   let skippedCount = 0
   for (const job of jobs) {
@@ -2261,11 +2320,10 @@ export async function processPostVideoRagJobBatch(options: {
         updatedAt: now,
         provider: analyzer.name,
       })
-      await enqueuePostRagJob({
+      await schedulePostRagSync({
         postId: job.postId,
         communityId: job.communityId,
         sectionId: job.sectionId,
-        action: 'upsert',
         reason: 'rag.video.analysis.ready',
       })
       results.push({ jobId: job._id, ok: true })
@@ -2609,7 +2667,14 @@ function toRagChunkDocuments(post: Post, section: Section): RagChunkDocument[] {
   }))
 }
 
-async function buildRagChunkDocumentsForPost(post: Post, section: Section, now: string) {
+export async function buildCurrentPostRagChunks(
+  post: Post,
+  section: Section,
+  indexScope: Exclude<RagIndexPolicy, 'excluded'>,
+  now: string,
+) {
+  const sourceProjection = buildPostRagSourceProjection(post, section)
+  if (!sourceProjection.eligible) return { sourceVersion: sourceProjection.sourceVersion, chunks: [] as RagChunkDocument[], videoRag: null }
   const baseChunks = toRagChunkDocuments(post, section)
   const cacheKeys = extractVideoEntriesForRag(post, section).map((entry) => entry.cacheKey)
   const videoAssetsByCacheKey = cacheKeys.length
@@ -2619,11 +2684,30 @@ async function buildRagChunkDocumentsForPost(post: Post, section: Section, now: 
     now,
     assetsByCacheKey: videoAssetsByCacheKey,
   })
+  const sourceVersion = videoChunks.length
+    ? createHash('sha256').update(JSON.stringify({
+      base: sourceProjection.sourceVersion,
+      video: videoChunks.map((chunk) => [chunk.chunkId, chunk.sourceUpdatedAt, chunk.text]),
+    })).digest('hex')
+    : sourceProjection.sourceVersion
   return {
-    chunks: [...baseChunks, ...videoChunks],
-    videoAssetsByCacheKey,
-    videoMetadataChunkCount: videoChunks.filter((chunk) => chunk.metadata?.evidenceSource === 'video_metadata').length,
-    videoAnalysisChunkCount: videoChunks.filter((chunk) => chunk.metadata?.evidenceSource === 'video_analysis_cache').length,
+    sourceVersion,
+    chunks: [...baseChunks, ...videoChunks].map((chunk) => ({ ...chunk, sourceVersion, indexScope })),
+    videoRag: {
+      assetsByCacheKey: videoAssetsByCacheKey,
+      metadataChunkCount: videoChunks.filter((chunk) => chunk.metadata?.evidenceSource === 'video_metadata').length,
+      analysisChunkCount: videoChunks.filter((chunk) => chunk.metadata?.evidenceSource === 'video_analysis_cache').length,
+    },
+  }
+}
+
+async function buildRagChunkDocumentsForPost(post: Post, section: Section, now: string) {
+  const built = await buildCurrentPostRagChunks(post, section, 'business', now)
+  return {
+    chunks: built.chunks,
+    videoAssetsByCacheKey: built.videoRag?.assetsByCacheKey || new Map<string, VideoRagAsset>(),
+    videoMetadataChunkCount: built.videoRag?.metadataChunkCount || 0,
+    videoAnalysisChunkCount: built.videoRag?.analysisChunkCount || 0,
   }
 }
 
@@ -2641,7 +2725,7 @@ function updateMatchedDocument(result: any): boolean {
   return Number.isFinite(updated) && updated > 0
 }
 
-async function upsertPostRagIndexState(postId: string, data: Record<string, any>) {
+export async function upsertPostRagIndexState(postId: string, data: Record<string, any>) {
   const state = { postId, ...data }
   const updateResult = await db.updateById(POST_RAG_INDEX_STATE, postId, state).catch(() => null)
   if (updateMatchedDocument(updateResult)) return

@@ -1,6 +1,5 @@
 import * as db from './db'
 import { MEMBER_STATE_COLLECTION, membershipStateId, type MembershipStateStatus } from './membership-state'
-import { appendPostRagOutboxEvent } from './post-rag-outbox'
 
 type MembershipRecord = {
   _id?: string
@@ -57,7 +56,6 @@ export async function leaveMembership(input: { communityId: string; userId: stri
       data: { memberCount: nextMemberCount(community, -1) },
     })
     await setMembershipState(transaction, member, input.memberId, 'none', now)
-    await appendPostRagOutboxEvent(transaction, { communityId: input.communityId, aggregateId: input.communityId, reasonCode: 'community.acl_changed', now })
     return { success: true, changed: true }
   })
 }
@@ -90,7 +88,6 @@ async function transitionPendingMembership(
     }
 
     await setMembershipState(transaction, member, input.memberId, status, now)
-    if (status === 'active') await appendPostRagOutboxEvent(transaction, { communityId: input.communityId, aggregateId: input.communityId, reasonCode: 'community.acl_changed', now })
     return { success: true, changed: true }
   })
 }
@@ -124,7 +121,6 @@ export async function kickMembership(input: { communityId: string; memberId: str
       })
     }
     await setMembershipState(transaction, member, input.memberId, 'none', now)
-    await appendPostRagOutboxEvent(transaction, { communityId: input.communityId, aggregateId: input.communityId, reasonCode: 'community.acl_changed', now })
     return { success: true, changed: true }
   })
 }

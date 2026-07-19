@@ -48,6 +48,11 @@ jest.mock('../../../lib/post-rag', () => ({
 }))
 
 jest.mock('../../../lib/post-rag-outbox', () => ({ appendPostRagOutboxEvent: jest.fn() }))
+jest.mock('../../../lib/post-rag-sync', () => ({
+  schedulePostRagSync: jest.fn(),
+  schedulePostRagSyncForCurrentPosts: jest.fn(),
+  schedulePostRagSyncInTransaction: jest.fn(),
+}))
 jest.mock('../../../lib/post-rag-v2-health', () => ({ getPostRagV2Health: jest.fn() }))
 jest.mock('../../../lib/post-rag-release-probe',()=>({createPostRagReleaseProbe:jest.fn(),readPostRagReleaseTimerEvidence:jest.fn(),readPostRagReleaseProbeStatus:jest.fn(),cleanupPostRagReleaseProbe:jest.fn()}))
 
@@ -61,6 +66,7 @@ import * as storage from '../../../lib/storage'
 import { searchAmapPoi } from '../../../lib/amap'
 import * as postSearch from '../../../lib/post-search'
 import * as postRag from '../../../lib/post-rag'
+import * as postRagSync from '../../../lib/post-rag-sync'
 import { getPostRagV2Health } from '../../../lib/post-rag-v2-health'
 import * as releaseProbe from '../../../lib/post-rag-release-probe'
 import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
@@ -1420,19 +1426,17 @@ test('section.updateStatus: refreshes search and queues RAG jobs for existing po
   expect(result.success).toBe(true)
   expect(db.updateById).toHaveBeenCalledWith('sections', 'section-live', { status: 'dormant' })
   expect(db.query).toHaveBeenCalledWith('posts', { sectionId: 'section-live', status: 'active' })
-  expect(postRag.enqueuePostRagJob).toHaveBeenCalledTimes(2)
-  expect(postRag.enqueuePostRagJob).toHaveBeenNthCalledWith(1, {
+  expect(postRagSync.schedulePostRagSync).toHaveBeenCalledTimes(2)
+  expect(postRagSync.schedulePostRagSync).toHaveBeenNthCalledWith(1, {
     postId: 'post-a',
     communityId: 'community-a',
     sectionId: 'section-live',
-    action: 'upsert',
     reason: 'section.updateStatus',
   })
-  expect(postRag.enqueuePostRagJob).toHaveBeenNthCalledWith(2, {
+  expect(postRagSync.schedulePostRagSync).toHaveBeenNthCalledWith(2, {
     postId: 'post-b',
     communityId: 'community-b',
     sectionId: 'section-live',
-    action: 'upsert',
     reason: 'section.updateStatus',
   })
   expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledWith('section-live')
@@ -1874,13 +1878,12 @@ test('post.deleteAdmin: clears pin and featured flags', async () => {
     featuredByAccountId: '',
   })
   expect(result).toEqual({ success: true })
-  expect(postRag.enqueuePostRagJob).toHaveBeenCalledWith({
+  expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
     postId: 'post-flagged',
     communityId: 'community-1',
     sectionId: 'section-1',
-    action: 'delete',
-    reason: 'post.deleteAdmin',
-  })
+    reason: 'post.deleted',
+  }))
   expect(postSearch.removePostSearchIndex).toHaveBeenCalledWith('post-flagged')
 })
 

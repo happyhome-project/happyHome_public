@@ -4,7 +4,7 @@ import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
 import { assertSuperAdmin } from '../../lib/auth'
 import { notifyCommunityCreatePending } from '../../lib/approval-notifications'
-import { appendPostRagOutboxEvent } from '../../lib/post-rag-outbox'
+import { schedulePostRagSyncForCurrentPosts } from '../../lib/post-rag-sync'
 import { parsePerformanceTrace, recordDatabaseStage } from '../../lib/performance-trace'
 import type { Community, CommunityMember } from '../../shared/types'
 
@@ -103,8 +103,8 @@ export async function handleApprove(params: { communityId: string }, openid: str
   await assertSuperAdmin(openid)
   await db.runTransaction(async transaction => {
     await transaction.collection('communities').doc(params.communityId).update({ data: { status: 'active' } })
-    await appendPostRagOutboxEvent(transaction, { communityId: params.communityId, aggregateId: params.communityId, reasonCode: 'community.status_changed' })
   })
+  await schedulePostRagSyncForCurrentPosts({ communityId: params.communityId, reason: 'community.status_changed' })
   return { success: true }
 }
 
@@ -113,8 +113,8 @@ export async function handleReject(params: { communityId: string }, openid: stri
   await assertSuperAdmin(openid)
   await db.runTransaction(async transaction => {
     await transaction.collection('communities').doc(params.communityId).update({ data: { status: 'rejected' } })
-    await appendPostRagOutboxEvent(transaction, { communityId: params.communityId, aggregateId: params.communityId, reasonCode: 'community.status_changed' })
   })
+  await schedulePostRagSyncForCurrentPosts({ communityId: params.communityId, reason: 'community.status_changed' })
   return { success: true }
 }
 

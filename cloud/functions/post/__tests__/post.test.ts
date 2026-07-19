@@ -36,6 +36,10 @@ jest.mock('../../../lib/db', () => ({
 }))
 
 jest.mock('../../../lib/post-rag-outbox', () => ({ appendPostRagOutboxEvent: jest.fn() }))
+jest.mock('../../../lib/post-rag-sync', () => ({
+  schedulePostRagSyncInTransaction: jest.fn(),
+  schedulePostRagSync: jest.fn(),
+}))
 
 jest.mock('../../../lib/post-search', () => ({
   refreshPostSearchIndexById: jest.fn(),
@@ -47,10 +51,6 @@ jest.mock('../../../lib/post-rag', () => ({
   enqueuePostRagJob: jest.fn(),
   enqueuePostRagDeleteJobInTransaction: jest.fn(),
   searchPostsWithRag: jest.fn(),
-}))
-
-jest.mock('../../../lib/post-semantic-search', () => ({
-  createPostSemanticSearchServiceFromEnv: jest.fn(),
 }))
 
 jest.mock('../../../lib/storage', () => ({
@@ -88,7 +88,7 @@ import {
 import * as db from '../../../lib/db'
 import * as postSearch from '../../../lib/post-search'
 import * as postRag from '../../../lib/post-rag'
-import * as postSemanticSearch from '../../../lib/post-semantic-search'
+import * as postRagSync from '../../../lib/post-rag-sync'
 import * as storage from '../../../lib/storage'
 import { deriveMemberVideoScope, MAX_MEMBER_VIDEO_BYTES } from '../../../lib/member-video-upload'
 import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
@@ -1786,19 +1786,18 @@ test('delete: clears pin and featured flags', async () => {
     featuredByAccountId: '',
   })
   expect(result).toEqual({ success: true })
-  expect(postRag.enqueuePostRagDeleteJobInTransaction).toHaveBeenCalledWith(expect.anything(), {
+  expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
     postId: 'post-flagged',
     communityId: 'community-1',
     sectionId: 'section-1',
     reason: 'post.delete',
-  })
+  }))
   expect(postSearch.removePostSearchIndex).toHaveBeenCalledWith('post-flagged')
 })
 
 function mockSemanticResult(result: Record<string, unknown>) {
-  const search = jest.fn().mockResolvedValue(result)
-  ;(postSemanticSearch.createPostSemanticSearchServiceFromEnv as jest.Mock).mockReturnValue({ search })
-  return search
+  ;(postRag.searchPostsWithRag as jest.Mock).mockResolvedValue(result)
+  return postRag.searchPostsWithRag as jest.Mock
 }
 
 test('delete: retries legacy cleanup for an authorized already-deleted post without repeating the v2 mutation', async () => {
@@ -1820,8 +1819,7 @@ test('delete: retries legacy cleanup for an authorized already-deleted post with
   await expect(handleDelete({ postId: 'post-retry' }, 'test-openid')).rejects.toThrow('legacy search unavailable')
   await expect(handleDelete({ postId: 'post-retry' }, 'test-openid')).resolves.toEqual({ success: true, alreadyDeleted: true })
 
-  const { appendPostRagOutboxEvent } = require('../../../lib/post-rag-outbox')
-  expect(appendPostRagOutboxEvent).toHaveBeenCalledTimes(1)
+  expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledTimes(2)
   expect(db.updateById).toHaveBeenCalledTimes(1)
   expect(postSearch.removePostSearchIndex).toHaveBeenCalledTimes(2)
 })
@@ -1836,6 +1834,9 @@ test('search: checks community readability and delegates to formal RAG search', 
     skip: 0,
     limit: 20,
     items: [{ postId: 'post-1', title: '视频帖' }],
+    answer: '相关帖子是视频帖。',
+    citations: [{ postId: 'post-1' }],
+    mode: 'rag',
   })
   ;(db.query as jest.Mock)
     .mockResolvedValueOnce([
@@ -1858,12 +1859,12 @@ test('search: checks community readability and delegates to formal RAG search', 
     skip: 0,
     limit: 20,
     includeMemberOnly: true,
+    indexScope: 'business',
   }))
   expect(postSearch.searchPostIndex).not.toHaveBeenCalled()
-  expect(postRag.searchPostsWithRag).not.toHaveBeenCalled()
   expect(result.mode).toBe('rag')
-  expect(result.answer).toBe('')
-  expect(result.citations).toEqual([])
+  expect(result.answer).toBe('相关帖子是视频帖。')
+  expect(result.citations).toEqual([{ postId: 'post-1' }])
   expect(result.items).toEqual([{ postId: 'post-1', title: '视频帖' }])
 })
 
@@ -1896,6 +1897,7 @@ test('search: accepts a short-lived signed RAG smoke identity only for its fixtu
   const semanticSearch = mockSemanticResult({
     items: [{ postId: 'fixture-post', title: '朱子治家格言' }],
     query: '勤俭持家', communityId: identity.communityId, total: 1, skip: 0, limit: 20,
+    answer: '有相关家训。', citations: [{ postId: 'fixture-post' }], mode: 'rag',
   })
 
   await expect(main({
@@ -1915,6 +1917,7 @@ test('search: accepts a short-lived signed RAG smoke identity only for its fixtu
     communityId: identity.communityId,
     query: '勤俭持家',
     includeMemberOnly: true,
+    indexScope: 'validation',
   }))
 })
 
@@ -1934,7 +1937,7 @@ test('search: smoke identity audit logs validation state without leaking signed 
     }
     return []
   })
-  mockSemanticResult({ query: '勤俭持家', communityId: identity.communityId, total: 0, skip: 0, limit: 20, items: [] })
+  mockSemanticResult({ query: '勤俭持家', communityId: identity.communityId, total: 0, skip: 0, limit: 20, items: [], answer: '', citations: [], mode: 'no_answer' })
 
   await main({
     action: 'search',
@@ -2007,6 +2010,7 @@ test('search: public guest readers do not receive member-only RAG evidence', asy
     skip: 0,
     limit: 20,
     items: [],
+    answer: '', citations: [], mode: 'no_answer',
   })
 
   await handleSearch({
@@ -2019,6 +2023,7 @@ test('search: public guest readers do not receive member-only RAG evidence', asy
     communityId: 'community-1',
     query: '联系方式',
     includeMemberOnly: false,
+    indexScope: 'business',
   }))
 })
 
@@ -2501,12 +2506,9 @@ test.each(['active', 'deleted'])('delete: searchable archive post with status %s
 
   const result = await handleDelete({ postId: 'archive-post' }, 'test-openid')
 
-  const { appendPostRagOutboxEvent } = require('../../../lib/post-rag-outbox')
-  expect(postRag.enqueuePostRagDeleteJobInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-    postId: 'archive-post', communityId: 'community-1', sectionId: undefined,
+  expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+    postId: 'archive-post', communityId: 'community-1', sectionId: '',
   }))
-  if (status === 'active') expect(appendPostRagOutboxEvent).toHaveBeenCalled()
-  else expect(appendPostRagOutboxEvent).not.toHaveBeenCalled()
   expect(postSearch.removePostSearchIndex).toHaveBeenCalledWith('archive-post')
   if (status === 'active') {
     expect(db.updateById).toHaveBeenCalledWith('posts', 'archive-post', expect.objectContaining({ status: 'deleted' }))
@@ -2677,11 +2679,8 @@ test('create: persists an image-text archive post without loading or storing a s
   }))
   expect((db.create as jest.Mock).mock.calls[0][1]).not.toHaveProperty('sectionId')
 
-  const { appendPostRagOutboxEvent } = require('../../../lib/post-rag-outbox')
-  expect(appendPostRagOutboxEvent).toHaveBeenCalled()
-  expect(postRag.enqueuePostRagJob).toHaveBeenCalledWith(expect.objectContaining({
+  expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
     postId: 'archive-image-1', communityId: 'community-1', sectionId: '',
-    action: result.auditStatus === 'pass' ? 'upsert' : 'delete',
   }))
   expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('archive-image-1')
   expect(db.setById).toHaveBeenCalledWith('archive_post_topics', expect.stringMatching(/^apt_/), expect.objectContaining({

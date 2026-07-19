@@ -5,8 +5,7 @@ import * as db from './db'
 import * as storage from './storage'
 import { postWxJson } from './wx-openapi'
 import { refreshPostSearchIndexById } from './post-search'
-import { enqueuePostRagJob } from './post-rag'
-import { appendPostRagOutboxEvent } from './post-rag-outbox'
+import { schedulePostRagSyncInTransaction } from './post-rag-sync'
 import { syncArchivePostTopics, updateArchivePostTopicLinks } from './archive-topic-index'
 import type { WechatMediaAuditResult } from './wechat-callback'
 import type {
@@ -492,16 +491,6 @@ export async function applyAuditSummary(
   trustedPost?: Post,
 ) {
   const now = nowIso()
-  const queueRagIndexJob = async (jobReason: string, action: 'upsert' | 'delete', postSnapshot?: Post) => {
-    const post = postSnapshot || await db.getById('posts', postId) as Post
-    await enqueuePostRagJob({
-      postId,
-      communityId: post?.communityId,
-      sectionId: post?.sectionId || '',
-      action,
-      reason: jobReason,
-    })
-  }
   const updatePostWithV2 = async (data: Record<string, any>, postSnapshot?: Post) => {
     let resolvedPost: Post | null = postSnapshot || null
     await db.runTransaction(async transaction => {
@@ -509,7 +498,7 @@ export async function applyAuditSummary(
       if (!post) throw new Error('post not found')
       resolvedPost = post
       await transaction.collection('posts').doc(postId).update({ data })
-      await appendPostRagOutboxEvent(transaction, { communityId: post.communityId, aggregateId: postId, reasonCode: 'post.audit_changed', now })
+      await schedulePostRagSyncInTransaction(transaction, { postId, communityId: post.communityId, sectionId: post.sectionId || '', reason: 'post.audit_changed', now })
     })
     if (resolvedPost?.area === 'archive' && Object.prototype.hasOwnProperty.call(data, 'auditStatus')) {
       await updateArchivePostTopicLinks(postId, { auditStatus: data.auditStatus })
@@ -525,7 +514,6 @@ export async function applyAuditSummary(
           pendingAuditReason: '',
           auditUpdatedAt: now,
         }, post)
-        await queueRagIndexJob('audit.pending.pass.no_content', 'upsert', post)
         await refreshPostSearchIndexById(postId)
         return
       }
@@ -562,7 +550,6 @@ export async function applyAuditSummary(
           auditStatus: 'pass',
         })
       }
-      await queueRagIndexJob('audit.pending.pass', 'upsert', post)
       await refreshPostSearchIndexById(postId)
       return
     }
@@ -582,7 +569,6 @@ export async function applyAuditSummary(
     auditReason: reason,
     auditUpdatedAt: now,
   }, post)
-  await queueRagIndexJob('audit.content.apply', status === 'pass' ? 'upsert' : 'delete', post)
   await refreshPostSearchIndexById(postId)
 }
 

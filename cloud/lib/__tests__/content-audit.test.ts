@@ -16,6 +16,7 @@ jest.mock('../db', () => ({
 }))
 
 jest.mock('../post-rag-outbox', () => ({ appendPostRagOutboxEvent: jest.fn() }))
+jest.mock('../post-rag-sync', () => ({ schedulePostRagSyncInTransaction: jest.fn() }))
 
 jest.mock('../storage', () => ({
   getTempUrl: jest.fn(async (fileID: string) => `https://temp.example.com/${encodeURIComponent(fileID)}`),
@@ -50,6 +51,7 @@ import {
 import * as db from '../db'
 import * as postSearch from '../post-search'
 import * as postRag from '../post-rag'
+import * as postRagSync from '../post-rag-sync'
 import { postWxJson } from '../wx-openapi'
 
 beforeEach(() => {
@@ -111,11 +113,9 @@ test('auditAndApply enqueues section-free archive posts for formal RAG search', 
   } as any)
 
   expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('archive-1')
-  expect(postRag.enqueuePostRagJob).toHaveBeenCalledWith(expect.objectContaining({
-    postId: 'archive-1', communityId: 'community-1', sectionId: '', action: 'upsert',
+  expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+    postId: 'archive-1', communityId: 'community-1', sectionId: '',
   }))
-  const { appendPostRagOutboxEvent } = require('../post-rag-outbox')
-  expect(appendPostRagOutboxEvent).toHaveBeenCalled()
   expect(db.updateWhere).toHaveBeenCalledWith('archive_post_topics', { postId: 'archive-1' }, expect.objectContaining({ auditStatus: 'pass' }))
 })
 
@@ -129,11 +129,9 @@ test('applyAuditSummary keeps later archive audit callbacks in RAG lifecycle', a
   await applyAuditSummary('archive-callback-1', 'content', 'pass', '', post as any)
 
   expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('archive-callback-1')
-  expect(postRag.enqueuePostRagJob).toHaveBeenCalledWith(expect.objectContaining({
-    postId: 'archive-callback-1', sectionId: '', action: 'upsert',
+  expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+    postId: 'archive-callback-1', sectionId: '',
   }))
-  const { appendPostRagOutboxEvent } = require('../post-rag-outbox')
-  expect(appendPostRagOutboxEvent).toHaveBeenCalled()
   expect(db.updateWhere).toHaveBeenCalledWith('archive_post_topics', { postId: 'archive-callback-1' }, expect.objectContaining({ auditStatus: 'pass' }))
 })
 
@@ -220,11 +218,7 @@ test('approvePostAudit promotes pendingContent and marks the post as passed', as
     auditStatus: 'pass',
   }))
   expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
-  expect(postRag.enqueuePostRagJob).toHaveBeenCalledWith(expect.objectContaining({
-    postId: 'post-1',
-    action: 'upsert',
-    reason: 'audit.pending.pass',
-  }))
+  expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ postId: 'post-1', reason: 'post.audit_changed' }))
 })
 
 test('approvePostAudit replaces content and removes pendingContent atomically for CloudBase nested object updates', async () => {
@@ -238,11 +232,7 @@ test('approvePostAudit replaces content and removes pendingContent atomically fo
     pendingContent: { __remove: true },
   }))
   expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-guide')
-  expect(postRag.enqueuePostRagJob).toHaveBeenCalledWith(expect.objectContaining({
-    postId: 'post-guide',
-    action: 'upsert',
-    reason: 'audit.pending.pass',
-  }))
+  expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ postId: 'post-guide', reason: 'post.audit_changed' }))
 })
 
 test('approvePostAudit promotes pending archive topics and retires removed topic links', async () => {
@@ -285,7 +275,7 @@ test('rejectPostAudit rejects pending edits without replacing current content', 
   }))
   expect((db.updateById as jest.Mock).mock.calls[0][2].content).toBeUndefined()
   expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
-  expect(postRag.enqueuePostRagJob).not.toHaveBeenCalled()
+  expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ postId: 'post-1' }))
 })
 
 test('handleAuditCallback rejects public callback when callback token is not configured', async () => {
@@ -365,5 +355,5 @@ test('applyWechatMediaAuditResult is idempotent for duplicate rejected delivery'
   expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({ auditStatus: 'rejected' }))
   expect((db.updateById as jest.Mock).mock.calls.filter(([collection]) => collection === 'posts')).toHaveLength(1)
   expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledTimes(1)
-  expect(postRag.enqueuePostRagJob).toHaveBeenCalledTimes(1)
+  expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledTimes(1)
 })
