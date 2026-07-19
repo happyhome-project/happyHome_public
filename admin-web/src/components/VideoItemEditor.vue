@@ -8,7 +8,7 @@
     </template>
 
     <el-form label-width="120px" size="small">
-      <el-form-item label="来源">
+      <el-form-item v-if="!cosOnly" label="来源">
         <el-radio-group v-model="local.source" @change="onSourceChange">
           <el-radio value="cos">自托管视频</el-radio>
           <el-radio value="channels_feed">视频号 Feed</el-radio>
@@ -114,6 +114,7 @@ import VideoUploader from './VideoUploader.vue'
 const props = defineProps<{
   modelValue: any
   index: number
+  cosOnly?: boolean
 }>()
 const emit = defineEmits<{
   (e: 'update:modelValue', v: any): void
@@ -121,9 +122,11 @@ const emit = defineEmits<{
 }>()
 
 const local = reactive<Record<string, any>>({ ...(props.modelValue || {}) })
+const cosOnly = props.cosOnly === true
 
 const COMMON_KEYS = ['itemId', 'source', 'title', 'cover', 'duration', 'description']
 
+if (cosOnly) local.source = 'cos'
 if (local.source === 'cos') {
   local.allowDownload = false
   local.allowShare = false

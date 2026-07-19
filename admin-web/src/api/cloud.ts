@@ -219,6 +219,11 @@ export const approvalApi = {
   }>,
 }
 
+export type AdminPostCreateParams =
+  | { communityId: string; sectionId: string; content: Record<string, any> }
+  | { communityId: string; area: 'archive'; format: 'image_text' | 'video' | 'text'; topics?: string[]; content: Record<string, any>; presentation?: Record<string, any> }
+  | { communityId: string; area: 'collaboration'; collaborationTemplateId: string; content: Record<string, any> }
+
 export const postAdminApi = {
   list: (params: {
     communityId: string
@@ -243,7 +248,7 @@ export const postAdminApi = {
     callAdmin('post.updateAdmin', { postId, content }),
   removeAttendanceMember: (params: { postId: string; widgetId: string; userId: string }) =>
     callAdmin('post.removeAttendanceMemberAdmin', params),
-  createAdmin: (params: { communityId: string; sectionId: string; content: Record<string, any> }) =>
+  createAdmin: (params: AdminPostCreateParams) =>
     callAdmin('post.createAdmin', params),
 }
 

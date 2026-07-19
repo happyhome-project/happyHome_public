@@ -14,9 +14,13 @@ jest.mock('../../../lib/db', () => ({
   increment: jest.fn(),
   replaceValue: jest.fn((value) => ({ __set: value })),
   removeField: jest.fn(() => ({ __remove: true })),
+  transactionGetByIdOrNull: jest.fn(async () => null),
   runTransaction: jest.fn(async callback => callback({
     collection: (name: string) => ({
-      doc: (id: string) => ({ update: async ({ data }: any) => (require('../../../lib/db').updateById)(name, id, data) }),
+      doc: (id: string) => ({
+        update: async ({ data }: any) => (require('../../../lib/db').updateById)(name, id, data),
+        set: async ({ data }: any) => (require('../../../lib/db').updateById)(name, id, data),
+      }),
       add: async ({ data }: any) => ({ _id: await (require('../../../lib/db').create)(name, data) }),
     }),
   })),
@@ -50,6 +54,7 @@ import { main as rawMain } from '../index'
 import * as db from '../../../lib/db'
 import * as storage from '../../../lib/storage'
 import * as postSearch from '../../../lib/post-search'
+import { buildInitialCollaborationTemplates } from '../../../shared/collaboration-templates'
 
 const TEST_INTERNAL_TOKEN = 'admin-video-unit-internal-token'
 process.env.ADMIN_INTERNAL_CALL_TOKEN = TEST_INTERNAL_TOKEN
@@ -162,6 +167,10 @@ describe('media.getUrls', () => {
 })
 
 describe('post.createAdmin', () => {
+  const richBody = {
+    format: 'markdown', markdown: '正文', html: '<p>正文</p>', text: '正文', imageFileIDs: [], schemaVersion: 1,
+  }
+
   test('communityId 缺失抛错', async () => {
     await expect(main({
       action: 'post.createAdmin',
@@ -178,6 +187,80 @@ describe('post.createAdmin', () => {
       communityId: 'c-1',
       content: {},
     })).rejects.toThrow('sectionId 不能为空')
+  })
+
+  test.each([
+    ['图文', { title: '图文帖子', images: ['cloud://env/posts/images/cover.jpg'], body: richBody }],
+    ['图片', { title: '图片帖子', images: ['cloud://env/posts/images/cover.jpg'] }],
+  ])('创建 archive image_text %s帖子', async (_label, content) => {
+    ;(db.create as jest.Mock).mockResolvedValueOnce('post-ARCHIVE-IMAGE')
+
+    const result: any = await main({
+      action: 'post.createAdmin',
+      _actAs: SUPER_CTX,
+      communityId: 'community-1',
+      area: 'archive',
+      format: 'image_text',
+      topics: ['邻里日常'],
+      content,
+    })
+
+    expect(result.postId).toBe('post-ARCHIVE-IMAGE')
+    const [, payload] = (db.create as jest.Mock).mock.calls[0]
+    expect(payload).toEqual(expect.objectContaining({
+      communityId: 'community-1', area: 'archive', origin: 'native_archive', format: 'image_text',
+      topics: ['邻里日常'], authorId: 'admin-openid-1',
+    }))
+    expect(payload.sectionId).toBeUndefined()
+    expect(payload.content).toEqual(content)
+  })
+
+  test('创建 archive 视频帖子', async () => {
+    ;(db.create as jest.Mock).mockResolvedValueOnce('post-ARCHIVE-VIDEO')
+    const video = { itemId: 'video-1', source: 'cos', title: '夏日晚风', fileID: 'cloud://env/posts/videos/a.mp4' }
+
+    await main({
+      action: 'post.createAdmin', _actAs: SUPER_CTX, communityId: 'community-1',
+      area: 'archive', format: 'video', topics: [],
+      content: { title: '小区晚霞', videos: [video] },
+    })
+
+    const [, payload] = (db.create as jest.Mock).mock.calls[0]
+    expect(payload).toEqual(expect.objectContaining({ area: 'archive', origin: 'native_archive', format: 'video' }))
+    expect(payload.content.videos).toEqual([video])
+    expect(payload.sectionId).toBeUndefined()
+  })
+
+  test.each([
+    ['carpool', {
+      carpool_origin: '阳光花园东门', carpool_destination: '天府机场',
+      carpool_departure_time: '2026-08-01T08:30:00', carpool_seats: '2', carpool_contact: '后台测试',
+      carpool_location: { address: '阳光花园东门', lat: 30.67, lng: 104.05 },
+      carpool_attendance: 'must be dropped',
+    }],
+    ['activity_invite', {
+      activity_invite_title: '周末公园散步', activity_invite_starts_at: '2026-08-02T09:00:00',
+      activity_invite_location: { address: '浣花溪公园', lat: 30.65, lng: 104.03 },
+      activity_invite_contact: '后台测试', activity_invite_capacity: 8,
+      activity_invite_attendance: 'must be dropped',
+    }],
+  ])('创建 collaboration %s 帖子', async (systemKey, content) => {
+    const template = buildInitialCollaborationTemplates().find((item) => item.systemKey === systemKey)!
+    ;(db.getById as jest.Mock).mockResolvedValueOnce(template)
+    ;(db.create as jest.Mock).mockResolvedValueOnce(`post-${systemKey}`)
+
+    await main({
+      action: 'post.createAdmin', _actAs: SUPER_CTX, communityId: 'community-1',
+      area: 'collaboration', collaborationTemplateId: template._id, content,
+    })
+
+    const [, payload] = (db.create as jest.Mock).mock.calls[0]
+    expect(payload).toEqual(expect.objectContaining({
+      area: 'collaboration', collaborationTemplateId: template._id,
+      collaborationSystemKey: systemKey, authorId: 'admin-openid-1',
+    }))
+    expect(payload.sectionId).toBeUndefined()
+    expect(payload.content[`${systemKey === 'carpool' ? 'carpool' : 'activity_invite'}_attendance`]).toBeUndefined()
   })
 
   test('admin 未绑定 openId 抛错', async () => {

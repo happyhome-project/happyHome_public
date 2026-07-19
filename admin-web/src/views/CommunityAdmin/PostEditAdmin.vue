@@ -55,10 +55,15 @@
               v-for="(item, index) in (formData[widget.widgetId] as any[])"
               :key="item.itemId || index"
               :index="index"
+              :cos-only="isArchiveVideoPost"
               v-model="(formData[widget.widgetId] as any[])[index]"
               @remove="removeVideoItem(widget.widgetId, index)"
             />
-            <el-button :icon="Plus" @click="addVideoItem(widget.widgetId)">添加视频条目</el-button>
+            <el-button
+              v-if="!isArchiveVideoPost || (formData[widget.widgetId] as any[]).length === 0"
+              :icon="Plus"
+              @click="addVideoItem(widget.widgetId)"
+            >添加视频条目</el-button>
           </template>
 
           <AudioGroupEditor v-else-if="widget.type === 'audio_group'" v-model="formData[widget.widgetId] as any" />
@@ -144,6 +149,7 @@ import {
   editableWidgetsFor,
   formatReadonlyContentValue,
   hydrateAdminPostFormData,
+  serializeAdminPostFormData,
   unsupportedContentWidgetsFor,
   validateAdminPostForm,
   widgetHint,
@@ -166,6 +172,7 @@ function goToPosts() {
 }
 
 const editableWidgets = computed(() => editableWidgetsFor(section.value))
+const isArchiveVideoPost = computed(() => post.value?.area === 'archive' && post.value?.format === 'video')
 const isFixedImageCanvasTemplate = computed(() => ['guide_note', 'image_note'].includes(String(section.value?.displayTemplate || '')))
 const unsupportedWidgets = computed(() =>
   unsupportedContentWidgetsFor(section.value).filter((widget) => post.value?.content?.[widget.widgetId] !== undefined)
@@ -224,7 +231,10 @@ async function submit() {
 
   submitting.value = true
   try {
-    const result = await postAdminApi.update(post.value._id, { ...formData }) as any
+    const result = await postAdminApi.update(
+      post.value._id,
+      serializeAdminPostFormData(editableWidgets.value, formData),
+    ) as any
     const auditStatus = String(result?.auditStatus || 'pass')
     if (auditStatus === 'pass') {
       ElMessage.success('保存成功')

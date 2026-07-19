@@ -85,6 +85,23 @@ export function hydrateAdminPostFormData(formData: Record<string, any>, widgets:
   }
 }
 
+export function serializeAdminPostFormData(widgets: any[], formData: Record<string, any>) {
+  const output = JSON.parse(JSON.stringify(formData || {})) as Record<string, any>
+  for (const widget of widgets) {
+    if (widget.type !== 'location' || widget.required) continue
+    const value = output[widget.widgetId]
+    if (!value || typeof value !== 'object') {
+      delete output[widget.widgetId]
+      continue
+    }
+    const hasLabel = Boolean(String(value.address || value.name || '').trim())
+    const lat = value.lat === '' || value.lat === undefined || value.lat === null ? 0 : Number(value.lat)
+    const lng = value.lng === '' || value.lng === undefined || value.lng === null ? 0 : Number(value.lng)
+    if (!hasLabel && lat === 0 && lng === 0) delete output[widget.widgetId]
+  }
+  return output
+}
+
 export function validateAdminPostForm(widgets: any[], formData: Record<string, any>) {
   for (const widget of widgets) {
     if (widget.required && isEmptyValue(formData[widget.widgetId])) {

@@ -1248,7 +1248,18 @@ readlink -f "$root/current"
   }
 }
 
+async function ensureAdminUploadCors(options = {}) {
+  const scriptPath = resolve(ROOT, 'scripts/ensure-cos-cors.mjs')
+  console.log('\nEnsuring COS CORS for admin browser uploads...')
+  const result = await runOptionalDirectRemoteMutation(
+    options,
+    async () => await runShell(`${quote(process.execPath)} ${quote(scriptPath)}`),
+  )
+  if (!result.ok) throw new Error(`Admin upload COS CORS configuration failed: ${result.reason}`)
+}
+
 async function deployAdminWeb(options = {}) {
+  await ensureAdminUploadCors(options)
   const target = (process.env.ADMIN_WEB_TARGET || 'aliyun').toLowerCase()
   if (target === 'cloudbase') return deployAdminWebToCloudBase(options)
   if (target === 'aliyun') return deployAdminWebToAliyun(options)

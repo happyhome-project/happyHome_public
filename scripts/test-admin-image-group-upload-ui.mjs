@@ -333,6 +333,10 @@ async function main() {
         path.join(ARTIFACT_DIR, 'after-detail-open.png'),
       ],
     }, null, 2))
+  } catch (error) {
+    console.error('[admin-image-group-upload-ui] browser events')
+    console.error(JSON.stringify(events, null, 2))
+    throw error
   } finally {
     await browser.close()
     await cleanupFixture(fixture.communityId, token)
