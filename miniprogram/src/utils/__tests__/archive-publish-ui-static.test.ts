@@ -28,7 +28,9 @@ describe('archive publishing entry', () => {
 
   test('offers one image/video media choice plus text and collaboration', () => {
     const source = read('components', 'AppTabBar.vue')
+    const publishLabelRule = source.match(/\.publish-label\s*\{([^}]*)\}/s)?.[1] || ''
     expect(source).toContain("{ key: 'media', label: '图文/视频', icon: '/static/publish-icons/trade.svg', tone: 'image-text' }")
+    expect(publishLabelRule).toMatch(/width:\s*100%/)
     expect(source).toContain("{ key: 'text', label: '写文字', icon: '/static/publish-icons/lost.svg', tone: 'text' }")
     expect(source).toContain("{ key: 'collaboration', label: '发起协作', icon: '/static/publish-icons/neighbor.svg', tone: 'collaboration' }")
     expect(source).toContain("mediaType: ['image', 'video']")
