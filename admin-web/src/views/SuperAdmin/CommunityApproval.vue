@@ -54,6 +54,7 @@ import { communityApi } from '../../api/cloud'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { formatAdminDateTime } from '../../utils/datetime'
 
+const emit = defineEmits<{ 'approval-changed': [] }>()
 const pendingCommunities = ref<any[]>([])
 const loading = ref(false)
 
@@ -78,6 +79,7 @@ async function approve(row: any) {
   try {
     const res = await communityApi.approve(row._id) as any
     pendingCommunities.value = pendingCommunities.value.filter(c => c._id !== row._id)
+    emit('approval-changed')
     if (res?.adminAccount?.username) {
       creds.value = {
         communityName: row.name,
@@ -98,6 +100,7 @@ async function reject(row: any) {
   try {
     await communityApi.reject(row._id)
     pendingCommunities.value = pendingCommunities.value.filter(c => c._id !== row._id)
+    emit('approval-changed')
     ElMessage.info('已拒绝')
   } catch (e: any) {
     ElMessage.error(e.message || '操作失败')

@@ -43,7 +43,9 @@
         <span class="user-info"><el-tag size="small" :type="authStore.isSuperAdmin ? 'danger' : 'primary'">{{ authStore.isSuperAdmin ? '超级管理员' : '社区管理员' }}</el-tag><span class="user-name">{{ authStore.username }}</span></span>
         <el-button size="small" data-testid="user-logout" @click="handleLogout">退出登录</el-button>
       </div>
-      <router-view v-slot="{ Component }"><component :is="Component" :key="routeViewKey" /></router-view>
+      <router-view v-slot="{ Component }">
+        <component :is="Component" :key="routeViewKey" @approval-changed="refreshNavigation" />
+      </router-view>
     </el-main>
   </el-container>
 </template>
