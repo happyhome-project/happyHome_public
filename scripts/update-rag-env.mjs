@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { ensurePostRagSmokeIdentitySecret } from './lib/post-rag-smoke-identity.mjs'
 import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
-import { buildRagFunctionEnvironments } from './lib/rag-function-env.mjs'
+import { buildFormalRagFunctionEnvironments } from './lib/rag-function-env.mjs'
 import { reconcileRagFunctionEnvironment } from './lib/rag-env-reconcile.mjs'
 
 function loadDotEnvFile(filePath) {
@@ -80,7 +80,7 @@ const ragSource = {
   TENCENT_RAG_ATOMIC_REGION: atomicEnv.TENCENT_RAG_ATOMIC_REGION,
   TENCENT_RAG_EMBEDDING_MODEL: atomicEnv.TENCENT_RAG_EMBEDDING_MODEL,
 }
-const functionEnvironments = buildRagFunctionEnvironments({ ...baseEnv, ...ragSource, ...atomicEnv })
+const functionEnvironments = buildFormalRagFunctionEnvironments({ baseEnv, ragSource, atomicEnv })
 
 function configuredEnv(values) {
   return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined && value !== ''))
