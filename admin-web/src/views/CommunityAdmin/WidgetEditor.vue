@@ -57,7 +57,7 @@
       :closable="false"
       style="margin-bottom: 16px;"
       title="纯文字笔记固定控件"
-      description="标题和正文是纯文字笔记的完整固定结构；不能新增、删除、改类型或调整顺序。"
+      description="标题、正文、话题和设置地点是纯文字笔记的完整固定结构；话题和地点为选填，固定控件不能新增、删除、改类型或调整顺序。"
     />
     <el-alert
       v-if="isImageNoteTemplate"
@@ -305,7 +305,7 @@ const GUIDE_NOTE_LOCKED_WIDGET_IDS = new Set([
   'guide_location',
   'guide_activity_invite',
 ])
-const TEXT_NOTE_LOCKED_WIDGET_IDS = new Set(['text_title', 'text_body'])
+const TEXT_NOTE_LOCKED_WIDGET_IDS = new Set(['text_title', 'text_body', 'text_topics', 'text_location'])
 const IMAGE_NOTE_LOCKED_WIDGET_IDS = new Set([
   'image_note_images',
   'image_note_title',

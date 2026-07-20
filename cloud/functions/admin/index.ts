@@ -320,7 +320,7 @@ function assertTemplateLockedWidgets(section: Section, widgets: Widget[]) {
 function assertTextNoteLockedWidgets(section: Section, widgets: Widget[]) {
   if (!isTextNoteSection(section)) return
   if (widgets.length !== TEXT_NOTE_LOCKED_WIDGETS.length || widgets.some((widget) => !TEXT_NOTE_LOCKED_WIDGETS.some((locked) => locked.widgetId === widget.widgetId))) {
-    throw new Error('纯文字笔记只能包含标题和正文固定控件')
+    throw new Error('纯文字笔记只能包含固定控件')
   }
   for (const lockedWidget of TEXT_NOTE_LOCKED_WIDGETS) {
     const incoming = widgets.find((widget) => widget.widgetId === lockedWidget.widgetId)

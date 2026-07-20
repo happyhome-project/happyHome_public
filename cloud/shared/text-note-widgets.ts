@@ -6,6 +6,8 @@ export const TEXT_NOTE_THEMES: TextNoteTheme[] = ['paper', 'mint', 'slate', 'hea
 export const TEXT_NOTE_LOCKED_WIDGETS: Widget[] = [
   { widgetId: 'text_title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 1, showInList: true, locked: true },
   { widgetId: 'text_body', type: 'rich_note', label: '正文', fieldKey: 'body', required: true, order: 2, showInList: false, locked: true },
+  { widgetId: 'text_topics', type: 'topic', label: '话题', fieldKey: 'topics', required: false, order: 3, showInList: false, locked: true },
+  { widgetId: 'text_location', type: 'location', label: '设置地点', fieldKey: 'location', required: false, order: 4, showInList: false, locked: true },
 ]
 
 export function buildDefaultTextNoteWidgets(): Widget[] {
