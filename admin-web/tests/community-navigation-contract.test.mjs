@@ -62,6 +62,20 @@ test('member approval exposes inline approve and reject actions', () => {
   assert.match(source, /member-reject-button/)
 })
 
+test('successful approvals invalidate layout badge state without a route change', () => {
+  const layout = read('src/views/Layout.vue')
+  assert.match(layout, /@approval-changed="refreshNavigation"/)
+
+  for (const file of ['CommunityAdmin/MemberApproval.vue', 'SuperAdmin/CommunityApproval.vue']) {
+    const source = read(`src/views/${file}`)
+    assert.match(source, /defineEmits/)
+    assert.ok(
+      (source.match(/emit\('approval-changed'\)/g) || []).length >= 2,
+      `${file} should refresh badges after both approve and reject`,
+    )
+  }
+})
+
 test('post management exposes existing operations inline', () => {
   const source = read('src/views/CommunityAdmin/PostManagement.vue')
   for (const label of ['详情', '置顶', '加精', '编辑', '删除']) assert.match(source, new RegExp(label))

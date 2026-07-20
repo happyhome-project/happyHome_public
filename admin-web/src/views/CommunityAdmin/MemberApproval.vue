@@ -269,6 +269,7 @@ interface MemberRow {
 
 const route = useRoute()
 const router = useRouter()
+const emit = defineEmits<{ 'approval-changed': [] }>()
 const communityId = ref(String(route.params.communityId || ''))
 const allMembers = ref<MemberRow[]>([])
 const pendingMembers = computed(() => allMembers.value.filter(m => m.status === 'pending'))
@@ -344,6 +345,7 @@ async function approve(row: MemberRow) {
     await memberApi.memberApprove(communityId.value, row._id)
     ElMessage.success('已通过')
     await loadMembers()
+    emit('approval-changed')
   } catch (e: any) {
     ElMessage.error(e.message || '操作失败')
   }
@@ -354,6 +356,7 @@ async function reject(row: MemberRow) {
     await memberApi.memberReject(communityId.value, row._id)
     ElMessage.info('已拒绝')
     await loadMembers()
+    emit('approval-changed')
   } catch (e: any) {
     ElMessage.error(e.message || '操作失败')
   }
