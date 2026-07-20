@@ -322,6 +322,32 @@ textarea:focus-visible {
 .preview-heading p { margin: 7px 0 0; color: var(--ink-3); font-size: 13px; line-height: 20px; }
 .preview-card-wrap { width: min(66vw, 286px); margin: 0 auto; }
 
+.location-section { margin-top: 24px; }
+.location-section .section-heading { margin-bottom: 10px; }
+.location-tool { display: flex; overflow: hidden; border: 1px solid var(--line); border-radius: 13px; background: var(--card); box-shadow: 0 4px 14px rgba(31, 35, 32, 0.04); }
+.location-tool.is-selected { border-color: rgba(61, 173, 125, 0.34); background: #fbfffd; }
+.location-main { min-width: 0; flex: 1; display: grid; grid-template-columns: 34px minmax(0, 1fr) 18px; align-items: center; gap: 10px; padding: 13px 14px; border: 0; background: transparent; text-align: left; }
+.location-main > span:nth-child(2), .location-option > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.location-main strong, .location-option strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 14px; }
+.location-main small, .location-option small { color: var(--ink-3); font-size: 11px; }
+.location-pin { position: relative; width: 30px; height: 30px; display: inline-block; border-radius: 50%; background: var(--green-soft); }
+.location-pin::before { content: ""; position: absolute; left: 10px; top: 7px; width: 8px; height: 10px; border: 2px solid var(--green); border-radius: 8px 8px 10px 10px; }
+.location-pin::after { content: ""; position: absolute; left: 14px; top: 11px; width: 3px; height: 3px; border-radius: 50%; background: var(--green); }
+.location-chevron { color: #aab2ae; font-size: 25px; line-height: 1; text-align: right; }
+.location-clear { width: 46px; border: 0; border-left: 1px solid var(--line-soft); background: transparent; color: var(--ink-3); font-size: 22px; }
+
+.sheet-backdrop { position: fixed; z-index: 80; inset: 0; display: flex; align-items: flex-end; justify-content: center; background: rgba(18, 27, 22, 0.42); }
+.location-sheet { width: min(100%, 430px); padding: 8px 16px calc(18px + env(safe-area-inset-bottom)); border-radius: 22px 22px 0 0; background: var(--card); box-shadow: 0 -12px 40px rgba(18, 27, 22, 0.16); }
+.sheet-handle { width: 36px; height: 4px; margin: 0 auto 15px; border-radius: 4px; background: #d9dfdc; }
+.sheet-title { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 12px; }
+.sheet-title h2 { margin: 0; font-size: 19px; }
+.sheet-title p { margin: 4px 0 0; color: var(--ink-3); font-size: 12px; }
+.sheet-title button { width: 34px; height: 34px; border: 0; border-radius: 50%; background: var(--page); color: var(--ink-2); font-size: 20px; }
+.location-list { display: flex; flex-direction: column; }
+.location-option { display: grid; grid-template-columns: 34px minmax(0, 1fr) 24px; align-items: center; gap: 10px; min-height: 64px; padding: 9px 2px; border: 0; border-bottom: 1px solid var(--line-soft); background: transparent; text-align: left; }
+.location-option:last-child { border-bottom: 0; }
+.location-option i { color: var(--green); font-size: 18px; font-style: normal; text-align: center; }
+
 .note-card {
   overflow: hidden;
   border: 1px solid var(--line);
@@ -624,6 +650,10 @@ textarea:focus-visible {
 .detail-author span { color: var(--ink-3); font-size: 11px; }
 .detail-content h1 { margin: 0 0 18px; font-size: 26px; line-height: 1.36; letter-spacing: -0.02em; }
 .detail-body { color: #313733; font-size: 16px; line-height: 1.82; overflow-wrap: anywhere; }
+.detail-location { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; margin-top: 24px; padding: 8px 12px 8px 8px; border-radius: 999px; background: var(--green-soft); color: var(--green-strong); font-size: 13px; font-weight: 650; }
+.detail-location .location-pin { width: 26px; height: 26px; background: rgba(255,255,255,.72); }
+.detail-location .location-pin::before { left: 8px; top: 5px; }
+.detail-location .location-pin::after { left: 12px; top: 9px; }
 .detail-theme-line { width: 46px; height: 5px; margin: 34px 0 18px; border-radius: 5px; }
 .detail-actions { display: flex; gap: 22px; padding-top: 16px; border-top: 1px solid var(--line-soft); color: var(--ink-2); font-size: 13px; }
 

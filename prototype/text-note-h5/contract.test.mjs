@@ -44,3 +44,23 @@ test('cover picker follows radio-group keyboard behavior', () => {
   assert.match(functionBody('bindInteractions'), /ArrowRight/)
   assert.match(functionBody('bindInteractions'), /ArrowLeft/)
 })
+
+test('location belongs to cover preview instead of writing step', () => {
+  assert.doesNotMatch(functionBody('renderCompose'), /设置地点|location-tool/)
+  assert.match(functionBody('renderPreview'), /renderLocationTool/)
+  assert.match(functionBody('renderPreview'), /renderLocationSheet/)
+})
+
+test('location picker supports selecting replacing and clearing a place', () => {
+  assert.match(functionBody('renderLocationTool'), /设置地点/)
+  assert.match(functionBody('renderLocationTool'), /data-action="clear-location"/)
+  assert.match(functionBody('renderLocationSheet'), /data-location-id=/)
+  assert.match(functionBody('bindInteractions'), /state\.draft\.location/)
+  assert.match(functionBody('handleAction'), /clear-location/)
+})
+
+test('published detail renders location while waterfall card stays unchanged', () => {
+  assert.doesNotMatch(functionBody('renderCard'), /detail-location|post\.location/)
+  assert.match(functionBody('renderDetail'), /renderDetailLocation/)
+  assert.match(functionBody('publishDraft'), /location: normalizeLocation/)
+})

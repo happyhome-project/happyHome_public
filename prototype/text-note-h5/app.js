@@ -7,6 +7,12 @@ const themes = [
   { id: 'quote', name: '邻里引语', sample: '生活有回声' },
   { id: 'notice', name: '通知公告', sample: '停水提醒' },
 ]
+const locations = [
+  { id: 'sunny-garden', name: '阳光花园社区', detail: '距你 80m' },
+  { id: 'activity-center', name: '阳光花园社区活动中心', detail: '距你 160m' },
+  { id: 'children-park', name: '社区儿童乐园', detail: '距你 230m' },
+  { id: 'east-gate', name: '阳光花园东门', detail: '距你 350m' },
+]
 
 const seedPosts = [
   {
@@ -70,6 +76,7 @@ const state = {
   draft: readDraft(),
   posts: readPosts(),
   selectedPostId: readDetailId(),
+  locationSheetOpen: false,
 }
 
 function readDraft() {
@@ -80,10 +87,11 @@ function readDraft() {
         title: String(value.title || ''),
         body: String(value.body || ''),
         theme: normalizeTheme(value.theme),
+        location: normalizeLocation(value.location),
       }
     }
   } catch {}
-  return { title: '', body: '', theme: THEME_FALLBACK }
+  return { title: '', body: '', theme: THEME_FALLBACK, location: null }
 }
 
 function readPosts() {
@@ -108,6 +116,7 @@ function normalizePost(value) {
     title,
     body,
     theme: normalizeTheme(value.theme),
+    location: normalizeLocation(value.location),
     author: String(value.author || '我'),
     when: String(value.when || '刚刚'),
     likes: Number.isFinite(Number(value.likes)) ? Math.max(0, Number(value.likes)) : 0,
@@ -124,6 +133,13 @@ function savePosts() {
 
 function normalizeTheme(value) {
   return themes.some((theme) => theme.id === value) ? value : THEME_FALLBACK
+}
+
+function normalizeLocation(value) {
+  if (!value || typeof value !== 'object') return null
+  const id = String(value.id || '')
+  const name = String(value.name || '').trim()
+  return id && name ? { id, name } : null
 }
 
 function routeFromHash() {
@@ -315,11 +331,45 @@ function renderPreview() {
           <div class="section-heading"><h2>封面样式</h2><span>左右滑动查看更多</span></div>
           ${renderThemePicker()}
         </section>
+        ${renderLocationTool()}
       </main>
       <footer class="action-dock">
         <button type="button" class="button button--secondary" data-action="compose">返回修改</button>
         <button type="button" class="button button--primary" data-action="publish" data-testid="publish-button">发布</button>
       </footer>
+      ${renderLocationSheet()}
+    </div>
+  `
+}
+
+function renderLocationTool() {
+  const selected = normalizeLocation(state.draft.location)
+  return `
+    <section class="location-section" aria-label="发布地点">
+      <div class="section-heading"><h2>发布地点</h2><span>选填</span></div>
+      <div class="location-tool ${selected ? 'is-selected' : ''}" data-testid="location-tool">
+        <button type="button" class="location-main" data-action="open-location">
+          <span class="location-pin" aria-hidden="true"></span>
+          <span><strong>${selected ? escapeHtml(selected.name) : '设置地点'}</strong><small>${selected ? '点击可更换地点' : '让邻居知道这件事发生在哪里'}</small></span>
+          <span class="location-chevron" aria-hidden="true">›</span>
+        </button>
+        ${selected ? '<button type="button" class="location-clear" data-action="clear-location" aria-label="删除地点">×</button>' : ''}
+      </div>
+    </section>
+  `
+}
+
+function renderLocationSheet() {
+  if (!state.locationSheetOpen) return ''
+  return `
+    <div class="sheet-backdrop" data-action="close-location" data-testid="location-sheet">
+      <section class="location-sheet" role="dialog" aria-modal="true" aria-labelledby="location-title" data-sheet-panel>
+        <div class="sheet-handle" aria-hidden="true"></div>
+        <div class="sheet-title"><div><h2 id="location-title">选择地点</h2><p>仅用于展示本次发布所在位置</p></div><button type="button" data-action="close-location" aria-label="关闭">×</button></div>
+        <div class="location-list">
+          ${locations.map((location) => `<button type="button" class="location-option ${state.draft.location?.id === location.id ? 'is-active' : ''}" data-location-id="${location.id}"><span class="location-pin" aria-hidden="true"></span><span><strong>${escapeHtml(location.name)}</strong><small>${escapeHtml(location.detail)}</small></span><i aria-hidden="true">${state.draft.location?.id === location.id ? '✓' : ''}</i></button>`).join('')}
+        </div>
+      </section>
     </div>
   `
 }
@@ -371,12 +421,18 @@ function renderDetail() {
         </div>
         <h1>${escapeHtml(post.title)}</h1>
         <div class="detail-body">${escapeHtml(post.body).replace(/\n/g, '<br />')}</div>
+        ${renderDetailLocation(post)}
         <div class="detail-theme-line text-theme--${normalizeTheme(post.theme)}"></div>
         <div class="detail-actions"><span>赞 ${Number(post.likes || 0)}</span><span>评论 0</span></div>
       </main>
       ${renderTabbar('')}
     </div>
   `
+}
+
+function renderDetailLocation(post) {
+  const selected = normalizeLocation(post.location)
+  return selected ? `<div class="detail-location"><span class="location-pin" aria-hidden="true"></span><span>${escapeHtml(selected.name)}</span></div>` : ''
 }
 
 function renderTabbar(current) {
@@ -428,6 +484,18 @@ function bindInteractions() {
     })
   })
 
+  document.querySelectorAll('[data-location-id]').forEach((element) => {
+    element.addEventListener('click', () => {
+      const location = locations.find((item) => item.id === element.dataset.locationId)
+      state.draft.location = normalizeLocation(location)
+      state.locationSheetOpen = false
+      saveDraft()
+      render()
+    })
+  })
+
+  document.querySelector('[data-sheet-panel]')?.addEventListener('click', (event) => event.stopPropagation())
+
   document.querySelectorAll('[data-post-id]').forEach((element) => {
     const open = () => navigate('detail', element.dataset.postId)
     element.addEventListener('click', open)
@@ -467,6 +535,19 @@ function handleAction(action) {
     showToast('草稿已保存在本次浏览中')
   }
   if (action === 'publish') publishDraft()
+  if (action === 'open-location') {
+    state.locationSheetOpen = true
+    render()
+  }
+  if (action === 'close-location') {
+    state.locationSheetOpen = false
+    render()
+  }
+  if (action === 'clear-location') {
+    state.draft.location = null
+    saveDraft()
+    render()
+  }
 }
 
 function publishDraft() {
@@ -475,13 +556,14 @@ function publishDraft() {
     title: state.draft.title.trim(),
     body: state.draft.body.trim(),
     theme: normalizeTheme(state.draft.theme),
+    location: normalizeLocation(state.draft.location),
     author: '我',
     when: '刚刚',
     likes: 0,
   }
   state.posts = [post, ...state.posts]
   savePosts()
-  state.draft = { title: '', body: '', theme: THEME_FALLBACK }
+  state.draft = { title: '', body: '', theme: THEME_FALLBACK, location: null }
   saveDraft()
   sessionStorage.setItem('hh-text-note-just-published', post.id)
   navigate('feed')
