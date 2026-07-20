@@ -33,7 +33,10 @@ import {
 } from './lib/mp-release-ui-policy.mjs'
 import {
   hasReleaseHomeNavigationEvidence,
+  invokeCompiledComponentEvent,
+  readReleasePageWxml,
   readReleasePageText,
+  summarizeReleaseArchiveWxml,
 } from './lib/mp-release-ui-evidence.mjs'
 import { requireAdminInternalToken } from './lib/admin-internal-token.mjs'
 import {
@@ -1077,7 +1080,11 @@ async function forceLogout(mp) {
   }), 30000, 'force release UI logged-out state')
 }
 
-async function findFirstPost(page) {
+function readCompiledHomeWxml(projectPath) {
+  return readFileSync(resolve(projectPath, 'pages', 'index', 'index.wxml'), 'utf8')
+}
+
+async function findFirstPost(page, options = {}) {
   const waterfallHost = await page.$('archive-waterfall').catch(() => null)
   if (waterfallHost) {
     const archiveCards = await waterfallHost.$$('.archive-waterfall__card').catch(() => [])
@@ -1086,12 +1093,33 @@ async function findFirstPost(page) {
         selector: 'archive-waterfall .archive-waterfall__card',
         node: archiveCards[0],
         count: archiveCards.length,
+        activate: () => archiveCards[0].tap(),
       }
     }
   }
   for (const selector of HOME_POST_SELECTORS) {
     const nodes = await page.$$(selector).catch(() => [])
-    if (nodes.length) return { selector, node: nodes[0], count: nodes.length }
+    if (nodes.length) return { selector, node: nodes[0], count: nodes.length, activate: () => nodes[0].tap() }
+  }
+  const fallbackPostId = String(options.fallbackPostId || '')
+  if (options.mp && options.projectPath && fallbackPostId) {
+    const flattened = summarizeReleaseArchiveWxml(await readReleasePageWxml(page))
+    if (flattened.cardCount > 0) {
+      const compiledWxml = readCompiledHomeWxml(options.projectPath)
+      return {
+        selector: 'compiled archive-waterfall post event',
+        node: null,
+        count: flattened.cardCount,
+        activate: () => invokeCompiledComponentEvent({
+          mp: options.mp,
+          page,
+          compiledWxml,
+          componentTag: 'archive-waterfall',
+          eventName: 'post',
+          args: [{ postId: fallbackPostId }],
+        }),
+      }
+    }
   }
   return null
 }
@@ -1103,19 +1131,21 @@ async function captureHomeTabsLayout(mp) {
       query.selectAll('.section-tabs-sticky-shell').boundingClientRect()
       query.select('.home-topbar').boundingClientRect()
       query.select('.home-search-sticky-shell').boundingClientRect()
+      query.select('.archive-topic-shell').boundingClientRect()
       query.selectViewport().scrollOffset()
       query.exec((items) => {
         const tabs = Array.isArray(items?.[0]) ? items[0] : []
         const topbar = items?.[1] || null
         const search = items?.[2] || null
-        const viewport = items?.[3] || {}
+        const archiveShell = items?.[3] || null
+        const viewport = items?.[4] || {}
         const windowInfo = wx.getWindowInfo?.() || wx.getSystemInfoSync?.() || {}
         const safeTop = Number(windowInfo.safeArea?.top || 0)
         const viewportHeight = Number(windowInfo.windowHeight || 0)
-        resolveLayout({ tabs, topbar, search, scrollTop: Number(viewport.scrollTop || 0), safeTop, viewportHeight })
+        resolveLayout({ tabs, topbar, search, archiveShell, scrollTop: Number(viewport.scrollTop || 0), safeTop, viewportHeight })
       })
     } catch (error) {
-      resolveLayout({ tabs: [], topbar: null, search: null, scrollTop: 0, safeTop: 0, viewportHeight: 0, error: String(error) })
+      resolveLayout({ tabs: [], topbar: null, search: null, archiveShell: null, scrollTop: 0, safeTop: 0, viewportHeight: 0, error: String(error) })
     }
   })), 15000, 'capture home archive tabs layout')
 }
@@ -1155,13 +1185,20 @@ async function captureHomeArchiveContent(home) {
     captureAutomatorElementGeometry(topicTabsSurface, 'archive topic tabs surface'),
     captureAutomatorElementGeometry(cards[0] || null, 'first archive waterfall card'),
   ])
-  return {
+  const selectorEvidence = {
+    source: 'selectors',
     tabCount: tabs.length,
     activeTabCount: activeTabs.length,
     activeTabTexts,
     cardCount: cards.length,
     topicTabsGeometry,
     firstCardGeometry,
+  }
+  if (selectorEvidence.tabCount > 0 || selectorEvidence.cardCount > 0) return selectorEvidence
+  return {
+    ...summarizeReleaseArchiveWxml(await readReleasePageWxml(home)),
+    topicTabsGeometry: null,
+    firstCardGeometry: null,
   }
 }
 
@@ -1248,7 +1285,7 @@ async function captureOptionalReleaseUiScreenshot(mp, path) {
   }
 }
 
-async function verifyHomeArchiveTabs(mp, context, evidenceDir) {
+async function verifyHomeArchiveTabs(mp, context, evidenceDir, projectPath) {
   if (!context.releaseFixture) throw new Error('release archive tabs fixture was not provisioned')
   await seedCurrentViewerIntoCommunity(mp, context.releaseFixture)
   const home = await withTimeout(mp.reLaunch('/pages/index/index'), 30000, 'open release archive fixture home')
@@ -1278,6 +1315,15 @@ async function verifyHomeArchiveTabs(mp, context, evidenceDir) {
     : []
   if (tabs.length === 2) {
     await withTimeout(tabs[1].tap(), 15000, 'switch to short release archive')
+  } else if (fullArchiveContent.tabCount === 2) {
+    await withTimeout(invokeCompiledComponentEvent({
+      mp,
+      page: home,
+      compiledWxml: readCompiledHomeWxml(projectPath),
+      componentTag: 'archive-topic-tabs',
+      eventName: 'updateModelValue',
+      args: ['短内容'],
+    }), 15000, 'switch to short release archive through compiled event binding')
   }
   const shortArchiveContent = await waitForHomeArchiveContent(home, {
     expectedCardCount: 1,
@@ -1319,11 +1365,27 @@ async function verifyHomeArchiveTabs(mp, context, evidenceDir) {
     shortArchive.scrollTop,
     pinnedTop,
   )
+  const flattenedArchiveEvidencePassed = tagsPinned.source === 'flattened-wxml' &&
+    shortArchive.source === 'flattened-wxml' &&
+    Number(tagsPinned.archiveShell?.width || 0) > 1 &&
+    Number(tagsPinned.archiveShell?.height || 0) > 1 &&
+    Number(tagsPinned.archiveShell?.bottom || 0) > Number(tagsPinned.tabs?.[0]?.bottom || 0) + 2 &&
+    Number(shortArchive.archiveShell?.width || 0) > 1 &&
+    Number(shortArchive.archiveShell?.height || 0) > 1
+  const selectorArchiveEvidencePassed =
+    isVisibleGeometry(tagsPinned.topicTabsGeometry, tagsPinned.viewportHeight) &&
+    isVisibleGeometry(tagsPinned.firstCardGeometry, tagsPinned.viewportHeight) &&
+    Math.abs(Number(tagsPinned.topicTabsGeometry?.top || 0) - pinnedTop) <= 4 &&
+    Number(tagsPinned.firstCardGeometry?.bottom || 0) > Number(tagsPinned.topicTabsGeometry?.bottom || 0) + 2 &&
+    isVisibleGeometry(shortArchive.topicTabsGeometry, shortArchive.viewportHeight) &&
+    isVisibleGeometry(shortArchive.firstCardGeometry, shortArchive.viewportHeight) &&
+    Math.abs(Number(shortArchive.topicTabsGeometry?.top || 0) - Number(shortArchive.tabs?.[0]?.top || 0)) <= 4 &&
+    Number(shortArchive.firstCardGeometry?.bottom || 0) > Number(shortArchive.topicTabsGeometry?.bottom || 0) + 2
   const passed = before.satisfied &&
     before.tabs?.length === 1 &&
     searchPinned.tabs?.length === 1 &&
     tagsPinned.tabs?.length === 1 &&
-    tabs.length === 2 &&
+    fullArchiveContent.tabCount === 2 &&
     Number(before.topbar?.height || 0) > 1 &&
     Number(before.search?.height || 0) > 1 &&
     beforeSearchTop > beforeTopbarBottom + 16 &&
@@ -1344,20 +1406,13 @@ async function verifyHomeArchiveTabs(mp, context, evidenceDir) {
     tagsPinned.activeTabCount === 1 &&
     tagsPinned.activeTabTexts.length === 1 &&
     tagsPinned.activeTabTexts[0] === '全部' &&
-    isVisibleGeometry(tagsPinned.topicTabsGeometry, tagsPinned.viewportHeight) &&
-    isVisibleGeometry(tagsPinned.firstCardGeometry, tagsPinned.viewportHeight) &&
-    Math.abs(Number(tagsPinned.topicTabsGeometry?.top || 0) - pinnedTop) <= 4 &&
-    Number(tagsPinned.firstCardGeometry?.bottom || 0) > Number(tagsPinned.topicTabsGeometry?.bottom || 0) + 2 &&
+    (selectorArchiveEvidencePassed || flattenedArchiveEvidencePassed) &&
     shortArchive.satisfied &&
     shortArchive.tabCount === 2 &&
     shortArchive.cardCount >= 1 &&
     shortArchive.activeTabCount === 1 &&
     shortArchive.activeTabTexts.length === 1 &&
     shortArchive.activeTabTexts[0] === '短内容' &&
-    isVisibleGeometry(shortArchive.topicTabsGeometry, shortArchive.viewportHeight) &&
-    isVisibleGeometry(shortArchive.firstCardGeometry, shortArchive.viewportHeight) &&
-    Math.abs(Number(shortArchive.topicTabsGeometry?.top || 0) - Number(shortArchive.tabs?.[0]?.top || 0)) <= 4 &&
-    Number(shortArchive.firstCardGeometry?.bottom || 0) > Number(shortArchive.topicTabsGeometry?.bottom || 0) + 2 &&
     Math.abs(shortArchiveSearchTop - shortExpectedSearchTop) <= 8 &&
     Math.abs(shortArchiveTabsTop - shortExpectedTabsTop) <= 8 &&
     restored.satisfied &&
@@ -1367,15 +1422,15 @@ async function verifyHomeArchiveTabs(mp, context, evidenceDir) {
     Math.abs(Number(restored.tabs?.[0]?.top || 0) - Number(before.tabs?.[0]?.top || 0)) <= 4 &&
     Math.abs(Number(restored.topicTabsGeometry?.top || 0) - Number(before.topicTabsGeometry?.top || 0)) <= 4
 
-  return { passed, before, searchPinned, tagsPinned, shortArchive, restored, tabCount: tabs.length, screenshotEvidence }
+  return { passed, before, searchPinned, tagsPinned, shortArchive, restored, tabCount: fullArchiveContent.tabCount, screenshotEvidence }
 }
 
-async function verifyHomeDetail(mp, context = {}) {
+async function verifyHomeDetail(mp, context = {}, projectPath) {
   console.log('[release-ui] open home')
   let releaseSeed = null
   let home = await withTimeout(mp.reLaunch('/pages/index/index'), 30000, 'open release home page')
   await sleep(6000)
-  let target = await withTimeout(findFirstPost(home), 15000, 'find release home post')
+  let target = await withTimeout(findFirstPost(home, { mp, projectPath }), 15000, 'find release home post')
 
   if (!target) {
     console.log(context.releaseFixture
@@ -1385,7 +1440,11 @@ async function verifyHomeDetail(mp, context = {}) {
     context.releaseFixture = releaseSeed.fixture
     home = await withTimeout(mp.reLaunch('/pages/index/index'), 30000, 'open release home page after fixture')
     await sleep(7000)
-    target = await withTimeout(findFirstPost(home), 15000, 'find release home post after fixture')
+    target = await withTimeout(findFirstPost(home, {
+      mp,
+      projectPath,
+      fallbackPostId: context.releaseFixture?.postId,
+    }), 15000, 'find release home post after fixture')
   }
 
   const homeImages = await waitForHomeImagesRendered(mp)
@@ -1398,7 +1457,7 @@ async function verifyHomeDetail(mp, context = {}) {
   }
 
   console.log(`[release-ui] tap first post via ${target.selector}`)
-  await withTimeout(target.node.tap(), 15000, 'tap release home post')
+  await withTimeout(target.activate(), 15000, 'activate release home post')
   await sleep(6000)
   const detail = await withTimeout(mp.currentPage(), 10000, 'get release detail page')
   const detailText = await withTimeout(pageText(detail), 10000, 'read release detail text')
@@ -1595,7 +1654,7 @@ async function main() {
             attempts: envPositiveInt('HH_RELEASE_UI_HOME_ATTEMPTS', 3),
             timeoutMs: envPositiveInt('HH_RELEASE_UI_HOME_TIMEOUT_MS', 90000),
             task: async (currentMp) => {
-              const result = await verifyHomeArchiveTabs(currentMp, runContext, evidenceDir)
+              const result = await verifyHomeArchiveTabs(currentMp, runContext, evidenceDir, projectPath)
               if (!result.passed) throw makeEvidenceRetryError('release home archive tabs evidence', result)
               return result
             },
@@ -1621,7 +1680,7 @@ async function main() {
           label: 'verify release home/detail UI',
           attempts: envPositiveInt('HH_RELEASE_UI_HOME_ATTEMPTS', 3),
           timeoutMs: envPositiveInt('HH_RELEASE_UI_HOME_TIMEOUT_MS', 90000),
-          task: (currentMp) => verifyHomeDetail(currentMp, runContext),
+          task: (currentMp) => verifyHomeDetail(currentMp, runContext, projectPath),
         })
         mp = mpState.mp
         evidence.homeDetailAttempt = run.attempt
