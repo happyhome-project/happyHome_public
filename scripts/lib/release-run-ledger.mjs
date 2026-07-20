@@ -9,6 +9,7 @@ import {
 } from './mp-release-ui-policy.mjs'
 import { createMiniprogramReceiptIdentity, normalizeMiniprogramUploadReceipt } from './miniprogram-receipt-identity.mjs'
 import { assertNoSymbolicLinkPath, pathsReferToSameEntry } from './filesystem-path-integrity.mjs'
+import { hasReleaseHomeNavigationEvidence } from './mp-release-ui-evidence.mjs'
 
 export const RELEASE_RUNS_DIR = '.codex-local/release-runs'
 
@@ -34,7 +35,10 @@ function hasReusableColdStartEvidence(evidence = {}) {
     String(coldStart.path || '').includes('pages/index/index') &&
     visible(coldStart.layout?.phoneInner) &&
     visible(coldStart.layout?.homeShell) &&
-    Number(coldStart.appTabBarCount || 0) > 0
+    hasReleaseHomeNavigationEvidence({
+      appTabBarCount: coldStart.appTabBarCount,
+      navigationEvidencePassed: coldStart.navigationEvidencePassed,
+    })
 }
 
 function pad(value) {
