@@ -17,3 +17,7 @@ export function buildRagFunctionEnvironments(source) {
     'post-rag-worker': { ...shared, POST_RAG_WORKER_TOKEN: workerToken, POST_RAG_TIMER_TOKEN: timerToken },
   }
 }
+
+export function buildFormalRagFunctionEnvironments({ baseEnv, ragSource, atomicEnv }) {
+  return buildRagFunctionEnvironments({ ...ragSource, ...baseEnv, ...atomicEnv })
+}
