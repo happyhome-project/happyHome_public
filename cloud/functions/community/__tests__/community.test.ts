@@ -88,6 +88,20 @@ test('创建社区：status 默认为 pending，creatorId 为 OPENID', async () 
   expect(result.communityId).toBe('community-123')
 })
 
+test('创建纯英文社区：默认排除出正式 RAG 索引', async () => {
+  await handleCreate({
+    name: 'HH RELEASE SMOKE',
+    description: 'fixture',
+    coverImage: '',
+    location: { address: '', lat: 0, lng: 0 },
+    joinType: 'open',
+  }, 'test-openid')
+
+  expect(createTransaction.communityAdd).toHaveBeenCalledWith({ data: expect.objectContaining({
+    ragIndexPolicy: 'excluded',
+  }) })
+})
+
 test('创建社区：同时为创建者创建 admin 成员记录', async () => {
   await handleCreate({
     name: '测试社区',

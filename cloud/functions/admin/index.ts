@@ -33,6 +33,7 @@ import {
   verifyPassword,
 } from '../../lib/auth'
 import { syncMiniProgramUserRoleForAdminAccount } from '../../lib/admin-identity'
+import { resolveCommunityRagIndexPolicy } from '../../shared/community-rag-policy'
 import { handleCreate as handleCommunityCreate } from '../community'
 import { MEMBER_STATE_COLLECTION } from '../../lib/membership-state'
 import { approveMembership, kickMembership, rejectMembership } from '../../lib/membership-transitions'
@@ -1249,6 +1250,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const communityId = String(params.communityId || '').trim()
     if (!communityId) throw new Error('communityId 不能为空')
     const updates: Record<string, any> = {}
+    let ragPolicyChanged = false
     if (typeof params.name === 'string') updates.name = params.name
     if (typeof params.description === 'string') updates.description = params.description
     if (typeof params.motto === 'string') updates.motto = params.motto
@@ -1257,8 +1259,24 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     else if (typeof params.joinType !== 'undefined') throw new Error('joinType must be open or approval')
     if (Object.keys(updates).length === 0) throw new Error('没有可更新字段')
     await db.runTransaction(async transaction => {
+      if (typeof params.name === 'string') {
+        const currentCommunity = await db.transactionGetByIdOrNull<any>(transaction, 'communities', communityId)
+        if (!currentCommunity) throw new Error('community not found')
+        const ragIndexPolicy = resolveCommunityRagIndexPolicy({
+          name: params.name,
+          fixtureKey: currentCommunity.fixtureKey,
+          currentPolicy: currentCommunity.ragIndexPolicy,
+        })
+        if (ragIndexPolicy !== currentCommunity.ragIndexPolicy) {
+          updates.ragIndexPolicy = ragIndexPolicy
+          ragPolicyChanged = true
+        }
+      }
       await transaction.collection('communities').doc(communityId).update({ data: updates })
     })
+    if (ragPolicyChanged) {
+      await schedulePostRagSyncForCurrentPosts({ communityId, reason: 'community.rag_policy_changed' })
+    }
     return { success: true }
   }
   if (action === 'community.updateHomeBanners') {

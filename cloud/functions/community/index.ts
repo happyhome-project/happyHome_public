@@ -6,6 +6,7 @@ import { assertSuperAdmin } from '../../lib/auth'
 import { notifyCommunityCreatePending } from '../../lib/approval-notifications'
 import { schedulePostRagSyncForCurrentPosts } from '../../lib/post-rag-sync'
 import { parsePerformanceTrace, recordDatabaseStage } from '../../lib/performance-trace'
+import { deriveCommunityRagIndexPolicy } from '../../shared/community-rag-policy'
 import type { Community, CommunityMember } from '../../shared/types'
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
@@ -55,7 +56,7 @@ export async function handleCreate(
         creatorId: openid,
         status: 'pending',
         memberCount: 0,
-        ragIndexPolicy: 'business',
+        ragIndexPolicy: deriveCommunityRagIndexPolicy(params.name),
         createdAt: now,
       },
     })

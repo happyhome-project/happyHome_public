@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "changeId": "rag-community-name-policy",
+  "actions": [],
+  "cloudTargets": [
+    "admin",
+    "community"
+  ],
+  "migrations": [],
+  "smokeSuites": [],
+  "releaseImpact": {
+    "cloudFunctions": "Classify new and renamed communities by name: names containing Chinese characters use the business RAG scope, while names without Chinese characters are excluded. Preserve validation and fixture isolation.",
+    "adminWeb": "No runtime change.",
+    "miniprogram": "No runtime change.",
+    "environmentVariables": [],
+    "databaseMigrations": []
+  }
+}
