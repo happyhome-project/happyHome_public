@@ -34,6 +34,7 @@ jest.mock('wx-server-sdk', () => ({
 jest.mock('uuid', () => ({ v4: jest.fn().mockReturnValue('mocked-uuid') }))
 
 import * as db from '../lib/db'
+import * as postRagSync from '../lib/post-rag-sync'
 import { main as _adminMain } from '../functions/admin/index'
 
 const adminMain = _adminMain as (event: any) => Promise<any>
@@ -262,5 +263,27 @@ describe('community.updateMeta joinType', () => {
       communityId: 'c1',
       joinType: 'wxid',
     }, ADMIN_CTX_SUPER)).rejects.toThrow('joinType must be open or approval')
+  })
+
+  test('中文名改成纯英文时排除 RAG 并安排现有帖子清理', async () => {
+    ;(db.getById as jest.Mock).mockResolvedValue({
+      _id: 'c1',
+      name: '青山村',
+      ragIndexPolicy: 'business',
+    })
+
+    await internalCall('community.updateMeta', {
+      communityId: 'c1',
+      name: 'HH RELEASE SMOKE',
+    }, ADMIN_CTX_SUPER)
+
+    expect(db.updateById).toHaveBeenCalledWith('communities', 'c1', {
+      name: 'HH RELEASE SMOKE',
+      ragIndexPolicy: 'excluded',
+    })
+    expect(postRagSync.schedulePostRagSyncForCurrentPosts).toHaveBeenCalledWith({
+      communityId: 'c1',
+      reason: 'community.rag_policy_changed',
+    })
   })
 })
