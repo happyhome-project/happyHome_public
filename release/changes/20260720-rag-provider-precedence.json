@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "changeId": "rag-provider-precedence",
+  "actions": [
+    "update-rag-env"
+  ],
+  "cloudTargets": [
+    "post",
+    "post-rag-worker",
+    "post-video-rag-worker"
+  ],
+  "migrations": [],
+  "smokeSuites": [],
+  "releaseImpact": {
+    "cloudFunctions": "Reconcile formal CloudBase RAG environment values without allowing retained legacy provider settings to override release-owned configuration.",
+    "adminWeb": "No runtime change.",
+    "miniprogram": "No runtime change.",
+    "environmentVariables": [
+      "Keep the formal RAG provider fixed to CloudBase while preserving existing worker, timer, smoke identity, and atomic model settings."
+    ],
+    "databaseMigrations": []
+  }
+}
