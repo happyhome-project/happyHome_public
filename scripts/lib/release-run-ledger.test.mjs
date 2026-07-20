@@ -606,7 +606,8 @@ test('miniprogram prepare evidence is reused only when build-info and UI version
         phoneInner: { width: 375, height: 700 },
         homeShell: { width: 375, height: 600 },
       },
-      appTabBarCount: 1,
+      appTabBarCount: 0,
+      navigationEvidencePassed: true,
     }
     const releaseUiResults = {
       homeColdStart: coldStartEvidence,

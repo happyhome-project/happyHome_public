@@ -31,6 +31,10 @@ import {
   buildDevToolsCloseArgs,
   buildDevToolsQuitPortArgs,
 } from './lib/mp-release-ui-policy.mjs'
+import {
+  hasReleaseHomeNavigationEvidence,
+  readReleasePageText,
+} from './lib/mp-release-ui-evidence.mjs'
 import { requireAdminInternalToken } from './lib/admin-internal-token.mjs'
 import {
   analyzeCloudInvoke,
@@ -544,9 +548,7 @@ async function connectMiniProgram(autoPort) {
 }
 
 async function pageText(page) {
-  const root = await page.$('page').catch(() => null)
-  if (!root) return ''
-  return String(await root.text().catch(() => '') || '')
+  return readReleasePageText(page)
 }
 
 async function verifyHomeColdStart(mp) {
@@ -572,17 +574,19 @@ async function verifyHomeColdStart(mp) {
     }
   })), 15000, 'capture cold-start release home layout')
   const visible = (rect) => Number(rect?.width || 0) > 1 && Number(rect?.height || 0) > 1
+  const navigationEvidencePassed = hasReleaseHomeNavigationEvidence({ appTabBarCount, text })
   const passed = (page.path || '').includes('pages/index/index') &&
     text.trim().length >= 20 &&
     visible(layout?.phoneInner) &&
     visible(layout?.homeShell) &&
-    appTabBarCount > 0
+    navigationEvidencePassed
   return {
     passed,
     path: page.path || '',
     textLength: text.length,
     textSample: text.slice(0, 300),
     appTabBarCount,
+    navigationEvidencePassed,
     layout,
   }
 }
