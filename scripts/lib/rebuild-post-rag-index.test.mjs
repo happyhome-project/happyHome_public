@@ -37,6 +37,13 @@ test('classification requires an explicit closed policy', () => {
   assert.equal(parseRagRebuildArgs(['--classify-community', 'c1', '--policy', 'excluded'], {}).mode, 'classify')
 })
 
+test('admin token falls back to the private operator credential resolver', () => {
+  const options = parseRagRebuildArgs([], {}, {
+    resolveAdminInternalToken: () => 'file-admin-token',
+  })
+  assert.equal(options.adminInternalToken, 'file-admin-token')
+})
+
 test('classification reconciliation and processing cannot be combined', () => {
   assert.throws(() => parseRagRebuildArgs(['--reconcile', '--process'], {}), /separate/)
 })

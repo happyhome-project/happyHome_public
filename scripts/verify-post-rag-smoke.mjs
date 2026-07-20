@@ -21,7 +21,7 @@ import {
   requirePostRagSmokeIdentitySecret,
 } from './lib/post-rag-smoke-identity.mjs'
 import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
-import { runSemanticSmokeScenario, runV2WorkerSequence } from './lib/post-semantic-smoke-orchestrator.mjs'
+import { runCurrentPostRagSmokeScenario } from './lib/post-rag-current-smoke-orchestrator.mjs'
 
 const DEFAULT_TIMEOUT_MS = 180000
 const DEFAULT_ADMIN_INVOKE_RETRIES = 5
@@ -167,19 +167,21 @@ export async function invokePostSemanticAdmin(action, params, options) {
   return invokeAdmin(action, params, options)
 }
 
-export async function readFixtureIndexState(postId) {
-  const db = createProductionReleaseStore({ root: process.cwd() }).db
-  const record = await db.collection('post_rag_index_state_v2').doc(postId).get()
+function recordData(record) {
   return Array.isArray(record?.data) ? record.data[0] : record?.data
 }
 
-export async function advanceV2Worker(options, postId = '') {
-  const payload = (action) => withWorkerToken({ ...(action ? { action } : {}), limit: 20, ...(postId ? { postId } : {}) }, options)
-  return runV2WorkerSequence({
-    materialize: () => invokeFunction('post-rag-worker', payload('materializeOutbox'), options),
-    indexV2: () => invokeFunction('post-rag-worker', payload('indexV2'), options),
-    worker: () => invokeFunction('post-rag-worker', payload(''), options),
-  })
+export async function readFixtureCurrentState(postId) {
+  const db = createProductionReleaseStore({ root: process.cwd() }).db
+  const [sync, index] = await Promise.all([
+    db.collection('post_rag_sync_state').doc(postId).get(),
+    db.collection('post_rag_index_state').doc(postId).get(),
+  ])
+  return { sync: recordData(sync), index: recordData(index) }
+}
+
+export async function advanceCurrentWorker(options, postId = '') {
+  return invokeFunction('post-rag-worker', withWorkerToken({ limit: 20, ...(postId ? { postId } : {}) }, options), options)
 }
 
 async function main() {
@@ -205,6 +207,7 @@ async function main() {
     }, options)
     communityId = community.functionResult?.communityId || ''
     if (!communityId) throw new Error('community.createAdmin did not return communityId')
+    await invokeAdmin('post.ragClassifyCommunityAdmin', { communityId, policy: 'validation' }, options)
 
     runId = `${options.actor}-${nowRunId()}`
     ownerOpenid = `${runId}-user`
@@ -265,18 +268,18 @@ async function main() {
       await invokeAdmin('audit.approveAdmin', { postId }, options)
     }
 
-    const evidence = await runSemanticSmokeScenario({ postId, memberIdentity: identity, guestIdentity, latencyRuns: 30 }, {
+    const evidence = await runCurrentPostRagSmokeScenario({ postId, memberIdentity: identity, guestIdentity }, {
       now: () => Date.now(), wait: (ms) => new Promise(resolve => setTimeout(resolve, ms)),
-      advanceV2: () => advanceV2Worker(options, postId), readState: () => readFixtureIndexState(postId),
+      advanceCurrent: () => advanceCurrentWorker(options, postId), readState: () => readFixtureCurrentState(postId),
       search: (query, searchIdentity) => searchPost(options, communityId, query, searchIdentity),
       updatePost: async () => { const updated = await invokePostSemanticAdmin('post.updateAdmin', { postId, content: { [titleWidget.widgetId]: `朱子治家格言 ${options.actor}`, [bodyWidget.widgetId]: '循环利用旧物，勤俭持家。', [memberWidget.widgetId]: '会员专属内容' } }, options); if (updated.functionResult?.auditStatus !== 'pass') await invokePostSemanticAdmin('audit.approveAdmin', { postId }, options) },
       deletePost: () => invokePostSemanticAdmin('post.deleteAdmin', { postId }, options),
     })
     const evidencePath=join(process.cwd(),'.codex-local','release-evidence',String(process.env.HH_RELEASE_RUN_ID||runId),'post-rag-smoke.json')
-    mkdirSync(dirname(evidencePath),{recursive:true});writeFileSync(evidencePath,JSON.stringify({schemaVersion:1,protocolVersion:2,permissionLeaks:evidence.permissionLeaks,deleteState:evidence.deleteState,p95Ms:evidence.p95Ms,errorRate:evidence.errorRate},null,2))
+    mkdirSync(dirname(evidencePath),{recursive:true});writeFileSync(evidencePath,JSON.stringify({schemaVersion:2,indexContract:'current-state',permissionLeaks:evidence.permissionLeaks,deleteState:evidence.deleteState,semanticQueryCount:evidence.semanticQueryCount},null,2))
 
     console.log(`[post-rag-smoke] PASS post=${postId} community=${communityId}`)
-    console.log(`[post-rag-smoke] protocolVersion=2 p95Ms=${evidence.p95Ms} errorRate=${evidence.errorRate}`)
+    console.log(`[post-rag-smoke] indexContract=current-state semanticQueries=${evidence.semanticQueryCount}`)
   } finally {
     let cleanupError
     try {

@@ -36,3 +36,12 @@ test('verify-post-rag-smoke binds the signed identity to a server-side temporary
   assert.match(source, /cleanupFixtureRun\(runId\)/)
   assert.doesNotMatch(source, /invokeFunction\('member', \{[\s\S]*action: 'apply'/)
 })
+
+test('verify-post-rag-smoke uses only the current-state indexing contract', () => {
+  assert.doesNotMatch(source, /post-semantic-smoke-orchestrator/)
+  assert.doesNotMatch(source, /post_rag_index_state_v2|materializeOutbox|indexV2|advanceV2/)
+  assert.match(source, /post_rag_sync_state/)
+  assert.match(source, /post_rag_index_state/)
+  assert.match(source, /post\.ragClassifyCommunityAdmin/)
+  assert.match(source, /policy:\s*'validation'/)
+})
