@@ -1,4 +1,5 @@
 const THEME_FALLBACK = 'paper'
+const MAX_TOPIC_COUNT = 5
 const themes = [
   { id: 'paper', name: '社区便签', sample: '慢一点，也很好' },
   { id: 'mint', name: '清新绿', sample: '今天的小确幸' },
@@ -77,6 +78,8 @@ const state = {
   posts: readPosts(),
   selectedPostId: readDetailId(),
   locationSheetOpen: false,
+  topicSheetOpen: false,
+  topicDraft: '',
 }
 
 function readDraft() {
@@ -88,10 +91,11 @@ function readDraft() {
         body: String(value.body || ''),
         theme: normalizeTheme(value.theme),
         location: normalizeLocation(value.location),
+        topics: normalizeTopics(value.topics),
       }
     }
   } catch {}
-  return { title: '', body: '', theme: THEME_FALLBACK, location: null }
+  return { title: '', body: '', theme: THEME_FALLBACK, location: null, topics: [] }
 }
 
 function readPosts() {
@@ -117,6 +121,7 @@ function normalizePost(value) {
     body,
     theme: normalizeTheme(value.theme),
     location: normalizeLocation(value.location),
+    topics: normalizeTopics(value.topics),
     author: String(value.author || '我'),
     when: String(value.when || '刚刚'),
     likes: Number.isFinite(Number(value.likes)) ? Math.max(0, Number(value.likes)) : 0,
@@ -140,6 +145,16 @@ function normalizeLocation(value) {
   const id = String(value.id || '')
   const name = String(value.name || '').trim()
   return id && name ? { id, name } : null
+}
+
+function normalizeTopics(value) {
+  if (!Array.isArray(value)) return []
+  const seen = new Set()
+  return value.map((topic) => String(topic || '').replace(/^#+/, '').trim()).filter((topic) => {
+    if (!topic || Array.from(topic).length > 20 || seen.has(topic)) return false
+    seen.add(topic)
+    return true
+  }).slice(0, MAX_TOPIC_COUNT)
 }
 
 function routeFromHash() {
@@ -331,13 +346,28 @@ function renderPreview() {
           <div class="section-heading"><h2>封面样式</h2><span>左右滑动查看更多</span></div>
           ${renderThemePicker()}
         </section>
-        ${renderLocationTool()}
+        ${renderPublishTools()}
       </main>
       <footer class="action-dock">
         <button type="button" class="button button--secondary" data-action="compose">返回修改</button>
         <button type="button" class="button button--primary" data-action="publish" data-testid="publish-button">发布</button>
       </footer>
       ${renderLocationSheet()}
+      ${renderTopicSheet()}
+    </div>
+  `
+}
+
+function renderPublishTools() {
+  return `<section class="publish-tools" aria-label="发布设置">${renderTopicTool()}${renderLocationTool()}</section>`
+}
+
+function renderTopicTool() {
+  const topics = normalizeTopics(state.draft.topics)
+  return `
+    <div class="publish-tool-group topic-tool" data-testid="topic-tool">
+      ${topics.length ? `<span class="topic-preview">#${escapeHtml(topics[0])}${topics.length > 1 ? ` <small>+${topics.length - 1}</small>` : ''}</span>` : ''}
+      <button type="button" class="image-note-tool-pill" data-action="open-topic"><b>#</b><span>话题</span></button>
     </div>
   `
 }
@@ -345,17 +375,26 @@ function renderPreview() {
 function renderLocationTool() {
   const selected = normalizeLocation(state.draft.location)
   return `
-    <section class="location-section" aria-label="发布地点">
-      <div class="section-heading"><h2>发布地点</h2><span>选填</span></div>
-      <div class="location-tool ${selected ? 'is-selected' : ''}" data-testid="location-tool">
-        <button type="button" class="location-main" data-action="open-location">
-          <span class="location-pin" aria-hidden="true"></span>
-          <span><strong>${selected ? escapeHtml(selected.name) : '设置地点'}</strong><small>${selected ? '点击可更换地点' : '让邻居知道这件事发生在哪里'}</small></span>
-          <span class="location-chevron" aria-hidden="true">›</span>
-        </button>
-        ${selected ? '<button type="button" class="location-clear" data-action="clear-location" aria-label="删除地点">×</button>' : ''}
-      </div>
-    </section>
+    <div class="location-tool image-note-tool-pill ${selected ? 'is-selected' : ''}" data-testid="location-tool">
+      <button type="button" class="location-main" data-action="open-location"><span class="location-pin" aria-hidden="true"></span><span>${selected ? escapeHtml(selected.name) : '设置地点'}</span></button>
+      ${selected ? '<button type="button" class="location-clear" data-action="clear-location" aria-label="删除地点">×</button>' : ''}
+    </div>
+  `
+}
+
+function renderTopicSheet() {
+  if (!state.topicSheetOpen) return ''
+  const topics = normalizeTopics(state.draft.topics)
+  return `
+    <div class="sheet-backdrop" data-action="close-topic" data-testid="topic-sheet">
+      <section class="location-sheet topic-sheet" role="dialog" aria-modal="true" aria-labelledby="topic-title" data-sheet-panel>
+        <div class="sheet-handle" aria-hidden="true"></div>
+        <div class="sheet-title"><h2 id="topic-title">添加话题</h2><button type="button" class="sheet-done" data-action="close-topic">完成</button></div>
+        ${topics.length ? `<div class="selected-topics">${topics.map((topic, index) => `<button type="button" data-topic-index="${index}">#${escapeHtml(topic)} <span>×</span></button>`).join('')}</div>` : ''}
+        <div class="topic-input-row"><b>#</b><input id="topic-input" type="text" maxlength="20" value="${escapeHtml(state.topicDraft)}" placeholder="输入话题，最多20个字" /><button type="button" data-action="add-topic" ${topics.length >= MAX_TOPIC_COUNT ? 'disabled' : ''}>添加</button></div>
+        <p class="topic-count">${topics.length}/${MAX_TOPIC_COUNT}</p>
+      </section>
+    </div>
   `
 }
 
@@ -421,6 +460,7 @@ function renderDetail() {
         </div>
         <h1>${escapeHtml(post.title)}</h1>
         <div class="detail-body">${escapeHtml(post.body).replace(/\n/g, '<br />')}</div>
+        ${renderDetailTopics(post)}
         ${renderDetailLocation(post)}
         <div class="detail-theme-line text-theme--${normalizeTheme(post.theme)}"></div>
         <div class="detail-actions"><span>赞 ${Number(post.likes || 0)}</span><span>评论 0</span></div>
@@ -428,6 +468,11 @@ function renderDetail() {
       ${renderTabbar('')}
     </div>
   `
+}
+
+function renderDetailTopics(post) {
+  const topics = normalizeTopics(post.topics)
+  return topics.length ? `<div class="detail-topics">${topics.map((topic) => `<span>#${escapeHtml(topic)}</span>`).join('')}</div>` : ''
 }
 
 function renderDetailLocation(post) {
@@ -494,6 +539,20 @@ function bindInteractions() {
     })
   })
 
+  document.querySelectorAll('[data-topic-index]').forEach((element) => {
+    element.addEventListener('click', () => {
+      state.draft.topics = normalizeTopics(state.draft.topics).filter((_topic, index) => index !== Number(element.dataset.topicIndex))
+      saveDraft()
+      render()
+    })
+  })
+
+  const topicInput = document.querySelector('#topic-input')
+  topicInput?.addEventListener('input', (event) => { state.topicDraft = String(event.target.value || '') })
+  topicInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); handleAction('add-topic') }
+  })
+
   document.querySelector('[data-sheet-panel]')?.addEventListener('click', (event) => event.stopPropagation())
 
   document.querySelectorAll('[data-post-id]').forEach((element) => {
@@ -548,6 +607,25 @@ function handleAction(action) {
     saveDraft()
     render()
   }
+  if (action === 'open-topic') {
+    state.topicSheetOpen = true
+    render()
+    document.querySelector('#topic-input')?.focus()
+  }
+  if (action === 'close-topic') {
+    state.topicSheetOpen = false
+    state.topicDraft = ''
+    render()
+  }
+  if (action === 'add-topic') {
+    const topic = Array.from(state.topicDraft.replace(/^#+/, '').trim()).slice(0, 20).join('')
+    if (!topic) return showToast('请输入话题')
+    state.draft.topics = normalizeTopics([...normalizeTopics(state.draft.topics), topic])
+    state.topicDraft = ''
+    saveDraft()
+    render()
+    document.querySelector('#topic-input')?.focus()
+  }
 }
 
 function publishDraft() {
@@ -557,13 +635,14 @@ function publishDraft() {
     body: state.draft.body.trim(),
     theme: normalizeTheme(state.draft.theme),
     location: normalizeLocation(state.draft.location),
+    topics: normalizeTopics(state.draft.topics),
     author: '我',
     when: '刚刚',
     likes: 0,
   }
   state.posts = [post, ...state.posts]
   savePosts()
-  state.draft = { title: '', body: '', theme: THEME_FALLBACK, location: null }
+  state.draft = { title: '', body: '', theme: THEME_FALLBACK, location: null, topics: [] }
   saveDraft()
   sessionStorage.setItem('hh-text-note-just-published', post.id)
   navigate('feed')

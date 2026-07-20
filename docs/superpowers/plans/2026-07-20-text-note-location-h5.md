@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a reviewable, local-only location interaction to the existing two-step text-note H5.
+**Goal:** Add reviewable, local-only topic and location interactions to the existing two-step text-note H5.
 
 **Architecture:** Extend the prototype draft/post model with a nullable normalized location. Render selection only on preview, persist it through `sessionStorage`, and render it only in detail after publishing.
 
@@ -25,10 +25,12 @@
 
 **Interfaces:**
 - Consumes: existing `state.draft`, `renderPreview()`, `publishDraft()`.
-- Produces: `normalizeLocation(value)`, `renderLocationTool()`, `renderLocationSheet()`, `renderDetailLocation(post)`.
+- Produces: `normalizeTopics(value)`, `renderPublishTools()`, `renderTopicTool()`, `renderTopicSheet()`, `normalizeLocation(value)`, `renderLocationTool()`, `renderLocationSheet()`, and detail renderers.
 
 - [x] Write contract tests asserting preview-only placement, select/replace/clear behavior, and detail-only publishing.
 - [x] Run `node --test prototype/text-note-h5/contract.test.mjs` and observe the three new tests fail because location renderers do not exist.
 - [x] Add nullable location state, preview tool, bottom sheet, selection events, persistence, and detail rendering.
-- [x] Run `node --test prototype/text-note-h5/contract.test.mjs`; expect 8 passing tests.
+- [x] Run `node --test prototype/text-note-h5/contract.test.mjs`; expect all contract tests to pass.
 - [x] Validate compose, preview, selection, publishing, and detail in the in-app browser; keep the deliverable tab on preview for review.
+- [x] Add the topic contract first, observe failures, then move topic to preview and restyle both tools to match the image-note compact row.
+- [x] Revalidate topic entry, location selection, publishing, and detail after the compact-tools update.

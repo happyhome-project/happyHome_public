@@ -46,9 +46,19 @@ test('cover picker follows radio-group keyboard behavior', () => {
 })
 
 test('location belongs to cover preview instead of writing step', () => {
-  assert.doesNotMatch(functionBody('renderCompose'), /设置地点|location-tool/)
-  assert.match(functionBody('renderPreview'), /renderLocationTool/)
+  assert.doesNotMatch(functionBody('renderCompose'), /设置地点|location-tool|添加话题|renderTopicTool/)
+  assert.match(functionBody('renderPreview'), /renderPublishTools/)
   assert.match(functionBody('renderPreview'), /renderLocationSheet/)
+})
+
+test('topic and location share the image-note compact tools row', () => {
+  const toolsRenderer = functionBody('renderPublishTools')
+  assert.match(toolsRenderer, /renderTopicTool/)
+  assert.match(toolsRenderer, /renderLocationTool/)
+  assert.match(toolsRenderer, /publish-tools/)
+  assert.match(functionBody('renderTopicTool'), /#.*话题/s)
+  assert.match(functionBody('renderTopicSheet'), /输入话题，最多20个字/)
+  assert.match(styles, /border-radius:\s*999px/)
 })
 
 test('location picker supports selecting replacing and clearing a place', () => {
@@ -63,4 +73,5 @@ test('published detail renders location while waterfall card stays unchanged', (
   assert.doesNotMatch(functionBody('renderCard'), /detail-location|post\.location/)
   assert.match(functionBody('renderDetail'), /renderDetailLocation/)
   assert.match(functionBody('publishDraft'), /location: normalizeLocation/)
+  assert.match(functionBody('publishDraft'), /topics: normalizeTopics/)
 })
