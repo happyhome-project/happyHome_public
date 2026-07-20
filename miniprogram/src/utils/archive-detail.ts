@@ -39,6 +39,8 @@ export function buildNativeArchiveDetailSection(currentPost: Record<string, any>
     widgets: [
       { widgetId: 'title', fieldKey: 'title', type: 'short_text', label: '标题', required: true, order: 0, showInList: true },
       { widgetId: 'body', fieldKey: 'body', type: 'rich_note', label: '正文', required: true, order: 1, showInList: false },
+      { widgetId: 'archive_text_topics', fieldKey: 'topics', type: 'topic', label: '话题', required: false, order: 2, showInList: false },
+      { widgetId: 'archive_text_location', fieldKey: 'location', type: 'location', label: '设置地点', required: false, order: 3, showInList: false },
     ],
   })
 }
@@ -61,6 +63,12 @@ export function normalizeNativeArchiveDetailPost(currentPost: Record<string, any
       archive_video_body: content.body,
       archive_video_videos: content.videos,
       archive_video_location: content.location,
+    }),
+  })
+  if (currentPost.format === 'text') return Object.assign({}, currentPost, {
+    content: Object.assign({}, content, {
+      archive_text_topics: currentPost.topics || [],
+      archive_text_location: content.location,
     }),
   })
   return currentPost

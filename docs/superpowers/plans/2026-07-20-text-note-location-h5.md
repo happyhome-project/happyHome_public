@@ -1,5 +1,10 @@
 # Text Note Location H5 Implementation Plan
 
+> **Historical / point-in-time:** This plan records the approved 2026-07-20 prototype implementation and does not represent current production status.
+> **Current authority:** Use the [documentation authority map](../../README.md), current prototype code, production code, and tests.
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add reviewable, local-only topic and location interactions to the existing two-step text-note H5.

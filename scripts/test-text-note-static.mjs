@@ -14,6 +14,7 @@ const homePage = read('miniprogram', 'src', 'pages', 'index', 'index.vue')
 const sectionPage = read('miniprogram', 'src', 'pages', 'section', 'index.vue')
 const detailPage = read('miniprogram', 'src', 'pages', 'detail', 'index.vue')
 const defaultDetail = read('miniprogram', 'src', 'components', 'DefaultDetailView.vue')
+const createTemplate = createPage.split('<script setup')[0]
 
 assert(createPage.includes("section.displayTemplate === 'text_note'"), 'text_note must be selected by displayTemplate.')
 assert(createPage.includes("const textNoteStep = ref<'compose' | 'cover'>('compose')"), 'text_note must use explicit compose and cover steps.')
@@ -22,7 +23,7 @@ assert(/textNoteBodyWidget[\s\S]{0,500}guide-role="body"[\s\S]{0,240}placeholder
 assert(createPage.includes('<TextNoteCover') && createPage.includes('v-for="theme in TEXT_NOTE_THEMES"'), 'cover preview and six theme choices must use TextNoteCover.')
 assert(createPage.includes('.text-note-theme-option :deep(.text-note-cover-kicker)') && createPage.includes('.text-note-theme-option :deep(.text-note-cover-signature)'), 'theme thumbnails must scale the cover kicker and signature with the preview.')
 assert(/isTextNoteCreateMode\.value[\s\S]{0,120}return false/.test(createPage), 'rich-note images must be disabled in text-note mode.')
-assert(!createPage.includes('AI帮你写') && !createPage.includes('figma-ai-write'), 'unavailable AI writing affordance must not render in any authoring mode.')
+assert(!createTemplate.includes('AI帮你写') && !createTemplate.includes('figma-ai-write'), 'unavailable AI writing affordance must not render in any authoring mode.')
 assert(createPage.includes('presentation: isTextNoteCreateMode.value') && createPage.includes('textNoteTheme: textNoteTheme.value'), 'text-note theme must be submitted as top-level presentation.')
 assert(createPage.includes("section.displayTemplate === 'guide_note'") && createPage.includes("type: 'guideMain'") && createPage.includes("type: 'widget'"), 'default and guide authoring paths must remain present.')
 assert(/\.text-note-cover-frame\s*\{[^}]*aspect-ratio:\s*4\s*\/\s*5;/s.test(cover), 'TextNoteCover must keep a fixed 4:5 ratio.')

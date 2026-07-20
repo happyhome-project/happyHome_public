@@ -1,7 +1,7 @@
 # 文字笔记定位 H5 设计规格
 
 > **Historical / point-in-time:** 本文记录 2026-07-20 的 H5 视觉确认方案，不代表生产实现已经发布。
-> **Current authority:** 以当前 `prototype/text-note-h5/` 原型代码和后续获批的生产设计为准。
+> **Current authority:** 以[文档权威索引](../../README.md)、当前 `prototype/text-note-h5/` 原型代码和后续获批的生产设计为准。
 
 ## 目标
 

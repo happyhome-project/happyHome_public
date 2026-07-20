@@ -72,7 +72,6 @@
             <view class="figma-guide-main-card text-note-editor-card">
               <WidgetEditor v-if="textNoteTitleWidget" :widget="textNoteTitleWidget" variant="figma" embedded hide-label guide-role="title" placeholder="添加标题" :allow-rich-note-images="false" v-model="formData[textNoteTitleWidget.widgetId]" />
               <WidgetEditor v-if="textNoteBodyWidget" :widget="textNoteBodyWidget" variant="figma" embedded hide-label guide-role="body" placeholder="添加正文内容" :allow-rich-note-images="false" v-model="formData[textNoteBodyWidget.widgetId]" />
-              <WidgetEditor v-if="textNoteTopicWidget" :widget="textNoteTopicWidget" variant="image-note-tool" embedded hide-label :allow-rich-note-images="false" v-model="formData[textNoteTopicWidget.widgetId]" />
             </view>
             <view class="text-note-compose-actions">
               <button v-if="!isEditMode" class="draft-btn" @tap="saveDraft">存草稿</button>
@@ -91,6 +90,10 @@
                 </view>
               </view>
             </scroll-view>
+            <view class="figma-image-note-tools text-note-publish-tools">
+              <WidgetEditor v-if="textNoteTopicWidget" :widget="textNoteTopicWidget" variant="image-note-tool" embedded hide-label :allow-rich-note-images="false" v-model="formData[textNoteTopicWidget.widgetId]" />
+              <WidgetEditor v-if="textNoteLocationWidget" :widget="textNoteLocationWidget" variant="image-note-tool" embedded hide-label :allow-rich-note-images="false" v-model="formData[textNoteLocationWidget.widgetId]" />
+            </view>
             <view class="text-note-cover-actions">
               <button class="draft-btn" @tap="textNoteStep = 'compose'">返回修改</button>
               <button class="btn-primary" data-testid="create-submit" :disabled="submitting" @tap="handleSubmit">{{ submitting ? (isEditMode ? '保存中...' : '发布中...') : (isEditMode ? '保存' : '发布') }}</button>
@@ -413,6 +416,9 @@ const textNoteBodyWidget = computed(() =>
 const textNoteTopicWidget = computed(() =>
   editableWidgets.value.find((widget: any) => String(widget?.fieldKey || '') === 'topics') || null
 )
+const textNoteLocationWidget = computed(() =>
+  editableWidgets.value.find((widget: any) => String(widget?.fieldKey || '') === 'location') || null
+)
 const textNoteContent = computed(() => extractTextNoteContent(formData))
 const isGuideCreateMode = computed(() => {
   const section = selectedSection.value
@@ -543,6 +549,7 @@ function buildArchiveEditorSection(format: 'image_text' | 'text' | 'video') {
       { widgetId: 'text_title', fieldKey: 'title', type: 'short_text', label: '标题', required: true, order: 0, showInList: true },
       { widgetId: 'text_body', fieldKey: 'body', type: 'rich_note', label: '正文', required: true, order: 1, showInList: false },
       { widgetId: 'archive_text_topics', fieldKey: 'topics', type: 'topic', label: '添加话题', required: false, order: 2, showInList: false },
+      { widgetId: 'archive_text_location', fieldKey: 'location', type: 'location', label: '设置地点', required: false, order: 3, showInList: false },
     ],
   })
   if (format === 'video') return Object.assign({}, common, {
@@ -1819,6 +1826,7 @@ async function handleSubmit() {
 .text-note-theme-option :deep(.text-note-cover-signature) { padding-top: 6rpx; font-size: 5rpx; letter-spacing: 0; }
 .text-note-theme-option :deep(.text-note-cover-decoration) { transform: scale(0.32); transform-origin: center; }
 .text-note-theme-option :deep(.text-note-cover-quote) { height: 20rpx; font-size: 28rpx; }
+.text-note-publish-tools { width: 100%; }
 
 .guard-state {
   display: flex;

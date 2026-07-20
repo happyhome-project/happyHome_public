@@ -141,6 +141,21 @@ describe('archive publishing entry', () => {
     expect(create).toContain("section?.type === 'realtime'")
   })
 
+  test('text note keeps writing focused and renders image-note topic/location tools on cover step', () => {
+    const create = read('pages', 'create', 'index.vue')
+    const composeStart = create.indexOf('v-if="textNoteStep === \'compose\'"')
+    const coverStart = create.indexOf('<view v-else class="text-note-cover-step">', composeStart)
+    const coverEnd = create.indexOf('</template>', coverStart)
+    const compose = create.slice(composeStart, coverStart)
+    const cover = create.slice(coverStart, coverEnd)
+
+    expect(compose).not.toContain('textNoteTopicWidget')
+    expect(compose).not.toContain('textNoteLocationWidget')
+    expect(cover).toContain('text-note-publish-tools')
+    expect(cover.indexOf('textNoteTopicWidget')).toBeLessThan(cover.indexOf('textNoteLocationWidget'))
+    expect(cover.match(/variant="image-note-tool"/g)).toHaveLength(2)
+  })
+
   test('enters an archive editor before the first asynchronous create-page load', () => {
     const create = read('pages', 'create', 'index.vue')
     const onLoadStart = create.indexOf('onLoad(async (options: any) => {')
