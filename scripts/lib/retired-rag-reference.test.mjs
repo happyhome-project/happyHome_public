@@ -26,8 +26,9 @@ test('business mutation and worker entrypoints reference only current-state sync
   const source = [
     'cloud/functions/post/index.ts', 'cloud/functions/admin/index.ts', 'cloud/functions/community/index.ts',
     'cloud/functions/post-rag-worker/index.ts', 'cloud/lib/content-audit.ts', 'cloud/lib/membership-transitions.ts',
+    'scripts/verify-post-rag-smoke.mjs',
   ].map(read).join('\n')
-  assert.doesNotMatch(source, /post-rag-outbox|post-rag-jobs|post-semantic-search|materializeOutbox|indexV2/)
+  assert.doesNotMatch(source, /post-rag-outbox|post-rag-jobs|post-semantic-search|post_rag_index_state_v2|materializeOutbox|indexV2/)
   assert.match(source, /post-rag-sync/)
 })
 

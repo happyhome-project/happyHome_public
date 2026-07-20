@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url'
 
 import { DEFAULT_ENV_ID, analyzeCloudInvoke, buildTcbCommand, defaultRunner, extractFunctionResult, parseFirstJson } from './cloud-release-smoke.mjs'
 import { invokeAdmin } from './rebuild-post-search-index.mjs'
+import { resolveAdminInternalToken } from './lib/admin-internal-token.mjs'
 import { resolvePostRagWorkerToken } from './lib/post-rag-worker-token.mjs'
 
 function value(argv, name, fallback = '') {
@@ -15,7 +16,8 @@ function value(argv, name, fallback = '') {
   return index >= 0 && argv[index + 1] && !argv[index + 1].startsWith('--') ? argv[index + 1] : fallback
 }
 
-export function parseRagRebuildArgs(argv = process.argv.slice(2), env = process.env) {
+export function parseRagRebuildArgs(argv = process.argv.slice(2), env = process.env, dependencies = {}) {
+  const resolveAdminToken = dependencies.resolveAdminInternalToken || resolveAdminInternalToken
   const classifyCommunityId = value(argv, 'classify-community')
   const reconcile = argv.includes('--reconcile')
   const process = argv.includes('--process')
@@ -34,7 +36,7 @@ export function parseRagRebuildArgs(argv = process.argv.slice(2), env = process.
     envId: value(argv, 'env-id', env.TCB_ENV || DEFAULT_ENV_ID),
     timeoutMs: Math.max(30_000, Number(value(argv, 'timeout-ms', env.HH_POST_RAG_REBUILD_TIMEOUT_MS || '180000')) || 180_000),
     workerToken: value(argv, 'worker-token', resolvePostRagWorkerToken(env)),
-    adminInternalToken: value(argv, 'admin-internal-token', env.ADMIN_INTERNAL_CALL_TOKEN || ''),
+    adminInternalToken: value(argv, 'admin-internal-token', resolveAdminToken(env)),
   }
 }
 
