@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "changeId": "archive-topic-consistency",
+  "actions": [],
+  "cloudTargets": [
+    "admin",
+    "post",
+    "wechat-audit-callback"
+  ],
+  "migrations": [
+    {
+      "id": "archive-topic-consistency-v1",
+      "module": "release/migrations/20260722-archive-topic-consistency-v1.mjs",
+      "inputDigest": "b329509f1346676fa48e8b3c28a98060af2c62b84b2467b5dc862e14ac8b9f68"
+    }
+  ],
+  "smokeSuites": [],
+  "releaseImpact": {
+    "cloudFunctions": "Deploy stable archive-topic identity resolution, idempotent post-topic reconciliation, and exact admin counts.",
+    "adminWeb": "No UI code change; existing topic counts now show current visible posts.",
+    "miniprogram": "No UI code change; renamed topic tabs include newly published matching posts.",
+    "environmentVariables": [],
+    "databaseMigrations": [
+      "Merge duplicate topic identities created by renames, rebuild archive_post_topics from posts, and recompute current visible counts."
+    ]
+  }
+}

@@ -14,6 +14,7 @@ jest.mock('../../../lib/db', () => ({
   softDelete: jest.fn(),
   query: jest.fn(),
   queryAfterId: jest.fn(),
+  count: jest.fn(),
   increment: jest.fn(),
   runTransaction: jest.fn(),
   transactionGetByIdOrNull: jest.fn(async (transaction, collectionName, id) => {
@@ -82,6 +83,7 @@ const main = (event: any) => rawMain({
 
 beforeEach(() => {
   jest.resetAllMocks()
+  ;(db.count as jest.Mock).mockResolvedValue(0)
   ;(db.runTransaction as jest.Mock).mockImplementation(async (callback) => callback({
     collection: (name: string) => ({
       doc: (id: string) => ({
@@ -1887,12 +1889,18 @@ test('post.deleteAdmin: clears pin and featured flags', async () => {
 })
 
 test('post.deleteAdmin: deactivates archive topic links when deleting an archive post', async () => {
-  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+  ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'archive-post-1',
     communityId: 'community-1',
     area: 'archive',
     status: 'active',
+    topics: ['教育成长'],
+    auditStatus: 'pass',
+    createdAt: '2026-07-22T00:00:00.000Z',
   })
+  ;(db.query as jest.Mock).mockImplementation(async (collectionName: string) => collectionName === 'archive_topics'
+    ? [{ topicKey: 'education', displayName: '教育成长', origins: ['admin'], enabled: true, status: 'active', createdAt: '2026-01-01T00:00:00.000Z' }]
+    : [])
 
   await main({
     action: 'post.deleteAdmin',
@@ -1900,11 +1908,10 @@ test('post.deleteAdmin: deactivates archive topic links when deleting an archive
     _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
   })
 
-  expect(db.updateWhere).toHaveBeenCalledWith(
-    'archive_post_topics',
-    { postId: 'archive-post-1' },
-    expect.objectContaining({ status: 'deleted', updatedAt: expect.any(String) }),
-  )
+  expect(db.setById).toHaveBeenCalledWith('archive_post_topics', expect.stringMatching(/^apt_/), expect.objectContaining({
+    postId: 'archive-post-1', topicKey: 'education', status: 'deleted', auditStatus: 'pass',
+  }))
+  expect(db.updateWhere).not.toHaveBeenCalledWith('archive_post_topics', expect.anything(), expect.anything())
 })
 
 test('post.deleteAdmin: repairs archive topic links when the post was already deleted', async () => {
@@ -2061,6 +2068,23 @@ test('archive topics: list uses explicit order and excludes logical deletes', as
   const listed: any = await main({ action: 'archiveTopic.list', communityId: 'community-1' })
   expect(listed.orderRevision).toBe(3)
   expect(listed.topics.map((item: any) => item.topicKey)).toEqual(['second', 'first'])
+})
+
+test('archive topics: list derives current visible post counts instead of returning historical counters', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'community-1', archiveTopicOrder: ['education'], archiveTopicOrderRevision: 3,
+  })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([
+    { topicKey: 'education', displayName: '教育成长', status: 'active', recentPostCount: 99 },
+  ])
+  ;(db.count as jest.Mock).mockResolvedValueOnce(1)
+
+  const listed: any = await main({ action: 'archiveTopic.list', communityId: 'community-1' })
+
+  expect(db.count).toHaveBeenCalledWith('archive_post_topics', {
+    communityId: 'community-1', topicKey: 'education', status: 'active', auditStatus: 'pass',
+  })
+  expect(listed.topics[0].recentPostCount).toBe(1)
 })
 
 test('archive topics: reorder rejects stale revisions and atomically increments the revision', async () => {

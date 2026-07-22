@@ -19,6 +19,8 @@ const expectedExports = [
   'replaceValue',
   'removeField',
   'query',
+  'count',
+  'queryBefore',
   'queryAfterId',
   'runTransaction',
   'transactionGetByIdOrNull',

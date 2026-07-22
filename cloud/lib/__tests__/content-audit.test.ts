@@ -17,6 +17,11 @@ jest.mock('../db', () => ({
 
 jest.mock('../post-rag-sync', () => ({ schedulePostRagSyncInTransaction: jest.fn() }))
 
+jest.mock('../archive-topic-index', () => ({
+  prepareArchivePostTopicReconciliation: jest.fn(async () => ({ references: [], existingLinks: [] })),
+  reconcileArchivePostTopicsInTransaction: jest.fn(),
+}))
+
 jest.mock('../storage', () => ({
   getTempUrl: jest.fn(async (fileID: string) => `https://temp.example.com/${encodeURIComponent(fileID)}`),
 }))
@@ -51,6 +56,7 @@ import * as db from '../db'
 import * as postSearch from '../post-search'
 import * as postRag from '../post-rag'
 import * as postRagSync from '../post-rag-sync'
+import * as archiveTopicIndex from '../archive-topic-index'
 import { postWxJson } from '../wx-openapi'
 
 beforeEach(() => {
@@ -115,7 +121,10 @@ test('auditAndApply enqueues section-free archive posts for formal RAG search', 
   expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
     postId: 'archive-1', communityId: 'community-1', sectionId: '',
   }))
-  expect(db.updateWhere).toHaveBeenCalledWith('archive_post_topics', { postId: 'archive-1' }, expect.objectContaining({ auditStatus: 'pass' }))
+  expect(archiveTopicIndex.prepareArchivePostTopicReconciliation).toHaveBeenCalledWith(expect.objectContaining({
+    _id: 'archive-1', auditStatus: 'pass', status: 'active',
+  }))
+  expect(archiveTopicIndex.reconcileArchivePostTopicsInTransaction).toHaveBeenCalled()
 })
 
 test('applyAuditSummary keeps later archive audit callbacks in RAG lifecycle', async () => {
@@ -131,7 +140,27 @@ test('applyAuditSummary keeps later archive audit callbacks in RAG lifecycle', a
   expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
     postId: 'archive-callback-1', sectionId: '',
   }))
-  expect(db.updateWhere).toHaveBeenCalledWith('archive_post_topics', { postId: 'archive-callback-1' }, expect.objectContaining({ auditStatus: 'pass' }))
+  expect(archiveTopicIndex.prepareArchivePostTopicReconciliation).toHaveBeenCalledWith(expect.objectContaining({
+    _id: 'archive-callback-1', auditStatus: 'pass', status: 'active',
+  }))
+  expect(archiveTopicIndex.reconcileArchivePostTopicsInTransaction).toHaveBeenCalled()
+})
+
+test('applyAuditSummary uses the transaction-current deleted status when an audit races with deletion', async () => {
+  const trustedPost = {
+    _id: 'archive-race-1', communityId: 'community-1', area: 'archive', topics: ['教育成长'],
+    createdAt: '2026-07-22T00:00:00.000Z', status: 'active', auditStatus: 'pending',
+  }
+  ;(db.transactionGetByIdOrNull as jest.Mock).mockResolvedValueOnce({ ...trustedPost, status: 'deleted' })
+
+  await applyAuditSummary('archive-race-1', 'content', 'pass', '', trustedPost as any)
+
+  expect(archiveTopicIndex.reconcileArchivePostTopicsInTransaction).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ _id: 'archive-race-1', status: 'deleted', auditStatus: 'pass' }),
+    expect.anything(),
+    expect.any(String),
+  )
 })
 
 test('buildCiHttpString follows Tencent CI XML signature newline format', () => {
@@ -253,9 +282,8 @@ test('approvePostAudit promotes pending archive topics and retires removed topic
     presentation: { __set: { textNoteTheme: 'mint' } },
     pendingPresentation: { __remove: true },
   }))
-  expect(db.updateWhere).toHaveBeenCalledWith('archive_post_topics', { postId: 'archive-edit-1' }, expect.objectContaining({ status: 'deleted' }))
-  expect(db.setById).toHaveBeenCalledWith('archive_post_topics', expect.any(String), expect.objectContaining({
-    postId: 'archive-edit-1', topicKey: '新话题', status: 'active', auditStatus: 'pass',
+  expect(archiveTopicIndex.prepareArchivePostTopicReconciliation).toHaveBeenLastCalledWith(expect.objectContaining({
+    _id: 'archive-edit-1', topics: ['新话题'], status: 'active', auditStatus: 'pass',
   }))
 })
 

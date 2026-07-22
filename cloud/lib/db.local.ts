@@ -321,6 +321,19 @@ export async function query(
 
   return results
 }
+export async function count(collectionName: string, where: Record<string, any>): Promise<number> {
+  return (await query(collectionName, where)).length
+}
+export async function queryBefore(
+  collectionName: string,
+  where: Record<string, any>,
+  field: string,
+  before: string | null,
+  limit: number,
+) {
+  const rows = await query(collectionName, where, { orderBy: [field, 'desc'] })
+  return rows.filter((row) => !before || row[field] < before).slice(0, limit)
+}
 export async function queryAfterId(collectionName:string,where:Record<string,any>,afterId:string|null,limit:number){const rows=await query(collectionName,where,{orderBy:['_id','asc']});return rows.filter(row=>!afterId||row._id>afterId).slice(0,limit)}
 
 // ---- 内部工具 ----
