@@ -1886,6 +1886,48 @@ test('post.deleteAdmin: clears pin and featured flags', async () => {
   expect(postSearch.removePostSearchIndex).toHaveBeenCalledWith('post-flagged')
 })
 
+test('post.deleteAdmin: deactivates archive topic links when deleting an archive post', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'archive-post-1',
+    communityId: 'community-1',
+    area: 'archive',
+    status: 'active',
+  })
+
+  await main({
+    action: 'post.deleteAdmin',
+    postId: 'archive-post-1',
+    _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
+  })
+
+  expect(db.updateWhere).toHaveBeenCalledWith(
+    'archive_post_topics',
+    { postId: 'archive-post-1' },
+    expect.objectContaining({ status: 'deleted', updatedAt: expect.any(String) }),
+  )
+})
+
+test('post.deleteAdmin: repairs archive topic links when the post was already deleted', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'archive-post-deleted',
+    communityId: 'community-1',
+    area: 'archive',
+    status: 'deleted',
+  })
+
+  await expect(main({
+    action: 'post.deleteAdmin',
+    postId: 'archive-post-deleted',
+    _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
+  })).resolves.toEqual({ success: true, alreadyDeleted: true })
+
+  expect(db.updateWhere).toHaveBeenCalledWith(
+    'archive_post_topics',
+    { postId: 'archive-post-deleted' },
+    expect.objectContaining({ status: 'deleted', updatedAt: expect.any(String) }),
+  )
+})
+
 test('post.rebuildSearchIndexAdmin: rebuilds derived search index for a scoped community', async () => {
   ;(postSearch.backfillPostSearchIndexesForCommunity as jest.Mock).mockResolvedValue({
     communityId: 'community-1',
