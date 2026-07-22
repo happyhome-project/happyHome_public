@@ -1818,14 +1818,11 @@ async function handleSubmit() {
 }
 
 .text-note-theme-option :deep(.text-note-cover-frame) { border-radius: 12rpx; }
-.text-note-theme-option :deep(.text-note-cover-content) { padding: 18rpx 14rpx; }
-.text-note-theme-option :deep(.text-note-cover-kicker) { margin-bottom: 6rpx; padding: 0; border-width: 0; font-size: 8rpx; letter-spacing: 1rpx; }
-.text-note-theme-option :deep(.text-note-cover-title) { margin-bottom: 8rpx; font-size: 15rpx; }
-.text-note-theme-option :deep(.text-note-cover-rule) { width: 24rpx; height: 2rpx; margin-bottom: 8rpx; }
-.text-note-theme-option :deep(.text-note-cover-body) { font-size: 11rpx; }
-.text-note-theme-option :deep(.text-note-cover-signature) { padding-top: 6rpx; font-size: 5rpx; letter-spacing: 0; }
-.text-note-theme-option :deep(.text-note-cover-decoration) { transform: scale(0.32); transform-origin: center; }
-.text-note-theme-option :deep(.text-note-cover-quote) { height: 20rpx; font-size: 28rpx; }
+.text-note-theme-option :deep(.text-note-cover-kicker) { padding: 0; border-width: 0; font-size: 8rpx; line-height: 12rpx; letter-spacing: 1rpx; }
+.text-note-theme-option :deep(.text-note-cover-title) { font-size: 13rpx; line-height: 16rpx; }
+.text-note-theme-option :deep(.text-note-cover-rule) { height: 1rpx; }
+.text-note-theme-option :deep(.text-note-cover-body) { font-size: 10rpx; line-height: 14rpx; }
+.text-note-theme-option :deep(.text-note-cover-quote) { height: 34rpx; font-size: 31rpx; line-height: 34rpx; }
 .text-note-publish-tools { width: 100%; }
 
 .guard-state {
