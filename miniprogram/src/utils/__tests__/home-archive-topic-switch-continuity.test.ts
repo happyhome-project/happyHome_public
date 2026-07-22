@@ -14,8 +14,12 @@ describe('home archive topic switch performance', () => {
 
   test('commits the returned cards before resolving remote cover URLs', () => {
     const source = fs.readFileSync(path.resolve(__dirname, '../../pages/index/index.vue'), 'utf8')
-    const loader = source.match(/async function loadArchiveFeed\([\s\S]*?\n\}\n\nfunction selectArchiveTopic/)?.[0] || ''
+    const loaderStart = source.indexOf('async function loadArchiveFeed(')
+    const loaderEnd = source.indexOf('function archiveViewerCacheScope()', loaderStart)
+    const loader = loaderStart >= 0 && loaderEnd > loaderStart ? source.slice(loaderStart, loaderEnd) : ''
 
+    expect(loaderStart).toBeGreaterThan(-1)
+    expect(loaderEnd).toBeGreaterThan(loaderStart)
     expect(loader).not.toContain('await resolveFeedCovers(')
     expect(loader.indexOf('archiveColumns.value = nextArchiveColumns')).toBeGreaterThan(-1)
     expect(loader.indexOf('archiveColumns.value = nextArchiveColumns')).toBeLessThan(loader.indexOf('resolveFeedCovers('))
