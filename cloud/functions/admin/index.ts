@@ -1946,14 +1946,21 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       await removePostSearchIndex(postId)
       return { success: true, alreadyDeleted: true }
     }
+    const queriedArchiveTopicLinks = post.area === 'archive'
+      ? await db.query('archive_post_topics', { postId }, { limit: 100 }) as any[]
+      : []
+    const archiveTopicLinks = Array.isArray(queriedArchiveTopicLinks) ? queriedArchiveTopicLinks : []
     await db.runTransaction(async transaction => {
       await transaction.collection('posts').doc(postId).update({ data: {
         status: 'deleted', isPinned: false, pinnedAt: '', pinnedByAccountId: '',
         isFeatured: false, featuredAt: '', featuredByAccountId: '',
       } })
-      await schedulePostRagSyncInTransaction(transaction, { postId, communityId: String(post.communityId || ''), sectionId: String(post.sectionId || ''), reason: 'post.deleted', now: new Date().toISOString() })
+      const now = new Date().toISOString()
+      for (const link of archiveTopicLinks) {
+        await transaction.collection('archive_post_topics').doc(link._id).update({ data: { status: 'deleted', updatedAt: now } })
+      }
+      await schedulePostRagSyncInTransaction(transaction, { postId, communityId: String(post.communityId || ''), sectionId: String(post.sectionId || ''), reason: 'post.deleted', now })
     })
-    if (post.area === 'archive') await updateArchivePostTopicLinks(postId, { status: 'deleted' })
     await removePostSearchIndex(postId)
     return { success: true }
   }
@@ -2492,16 +2499,6 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       contentSlot: 'content',
       postSnapshot: { _id: postId, ...postData } as any,
     })
-    if (archive) {
-      await syncArchivePostTopics({
-        _id: postId,
-        communityId,
-        topics: archive.topics,
-        createdAt: now,
-        status: 'active',
-        auditStatus: audit.status,
-      })
-    }
     return { postId, auditStatus: audit.status, auditReason: audit.reason }
   }
 

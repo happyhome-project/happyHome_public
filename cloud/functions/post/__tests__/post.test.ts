@@ -32,7 +32,34 @@ jest.mock('../../../lib/db', () => ({
       add: async ({ data }: any) => ({ _id: await (require('../../../lib/db').create)(name, data) }),
     }),
   })),
-  transactionGetByIdOrNull: jest.fn(async (_transaction, name, id) => (require('../../../lib/db').getById)(name, id)),
+  transactionGetByIdOrNull: jest.fn(async (_transaction, name, id) => {
+    const mockedDb = require('../../../lib/db')
+    let value = null
+    if (name === 'posts') {
+      const created = [...mockedDb.create.mock.calls].reverse().find(([collectionName]) => collectionName === 'posts')
+      if (created) value = { _id: id, ...created[1] }
+    }
+    if (!value) {
+      for (let index = mockedDb.getById.mock.calls.length - 1; index >= 0; index -= 1) {
+        const call = mockedDb.getById.mock.calls[index]
+        if (call[0] === name && call[1] === id) {
+          value = await mockedDb.getById.mock.results[index].value
+          break
+        }
+      }
+    }
+    if (!value) value = await mockedDb.getById(name, id)
+    if (!value) return null
+    for (const [collectionName, documentId, data] of mockedDb.updateById.mock.calls) {
+      if (collectionName !== name || documentId !== id) continue
+      for (const [key, fieldValue] of Object.entries(data)) {
+        if (fieldValue && typeof fieldValue === 'object' && '__set' in fieldValue) value[key] = fieldValue.__set
+        else if (fieldValue && typeof fieldValue === 'object' && '__remove' in fieldValue) delete value[key]
+        else value[key] = fieldValue
+      }
+    }
+    return value
+  }),
 }))
 
 jest.mock('../../../lib/post-rag-sync', () => ({
@@ -1794,6 +1821,21 @@ test('delete: clears pin and featured flags', async () => {
   expect(postSearch.removePostSearchIndex).toHaveBeenCalledWith('post-flagged')
 })
 
+test('delete: retires archive topic links inside the post deletion transaction', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'archive-atomic-delete', authorId: 'test-openid', status: 'active',
+    communityId: 'community-1', area: 'archive',
+  })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'archive-link-1', postId: 'archive-atomic-delete' }])
+
+  await handleDelete({ postId: 'archive-atomic-delete' }, 'test-openid')
+
+  expect(db.updateById).toHaveBeenCalledWith('archive_post_topics', 'archive-link-1', expect.objectContaining({
+    status: 'deleted', updatedAt: expect.any(String),
+  }))
+  expect(db.updateWhere).not.toHaveBeenCalledWith('archive_post_topics', expect.anything(), expect.anything())
+})
+
 function mockSemanticResult(result: Record<string, unknown>) {
   ;(postRag.searchPostsWithRag as jest.Mock).mockResolvedValue(result)
   return postRag.searchPostsWithRag as jest.Mock
@@ -2687,7 +2729,7 @@ test('create: persists an image-text archive post without loading or storing a s
   }))
   expect(db.setById).toHaveBeenCalledWith('archive_topics', expect.stringMatching(/^at_/), expect.objectContaining({
     recentScore: result.auditStatus === 'pass' ? 1 : 0,
-    recentPostCount: result.auditStatus === 'pass' ? 1 : 0,
+    recentPostCount: 0,
   }))
 })
 

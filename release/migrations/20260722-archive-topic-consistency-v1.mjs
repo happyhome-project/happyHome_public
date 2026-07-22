@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 
 import { planArchiveTopicConsistencyRepair } from '../../scripts/lib/archive-topic-consistency-migration.mjs'
 
-const PLANNER_SHA256 = 'ff154dd66aff6edd66ae5f729ff0f66a31c981969309b0fb640a3ccd5cf24a74'
+const PLANNER_SHA256 = '8de9f5976b7c69eed7399de0c7ec00a4257439383927045b1761602c169d7e7c'
 
 function normalizedTextDigest(url) {
   return createHash('sha256').update(readFileSync(url, 'utf8').replace(/\r\n/g, '\n')).digest('hex')
@@ -12,11 +12,16 @@ function normalizedTextDigest(url) {
 
 async function readAll(database, collectionName) {
   const rows = []
-  for (let skip = 0; ; skip += 100) {
-    const response = await database.collection(collectionName).skip(skip).limit(100).get()
+  let afterId = ''
+  for (;;) {
+    let query = database.collection(collectionName)
+    if (afterId) query = query.where({ _id: database.command.gt(afterId) })
+    const response = await query.orderBy('_id', 'asc').limit(100).get()
     const page = Array.isArray(response?.data) ? response.data : []
     rows.push(...page)
     if (page.length < 100) return rows
+    afterId = String(page[page.length - 1]._id || '')
+    if (!afterId) throw new Error(`archive-topic-consistency-v1 ${collectionName} pagination requires _id`)
   }
 }
 
@@ -55,5 +60,21 @@ export async function up({ releaseContext } = {}) {
     } })
   }
 
-  console.log(`[archive-topic-consistency-v1] ${JSON.stringify(plan.summary)}`)
+  const [afterCommunities, afterTopics, afterPosts, afterLinks] = await Promise.all([
+    readAll(database, 'communities'),
+    readAll(database, 'archive_topics'),
+    readAll(database, 'posts'),
+    readAll(database, 'archive_post_topics'),
+  ])
+  const residual = planArchiveTopicConsistencyRepair({
+    communities: afterCommunities,
+    topics: afterTopics,
+    posts: afterPosts,
+    links: afterLinks,
+    now,
+  })
+  if (Object.values(residual.summary).some((value) => Number(value) !== 0)) {
+    throw new Error(`archive-topic-consistency-v1 residual plan is not empty: ${JSON.stringify(residual.summary)}`)
+  }
+  console.log(`[archive-topic-consistency-v1] ${JSON.stringify({ ...plan.summary, residual: residual.summary })}`)
 }

@@ -594,14 +594,6 @@ export async function handleCreate(
       contentSlot: 'content',
       postSnapshot: { _id: postId, ...postData } as unknown as Post,
     })
-    await syncArchivePostTopics({
-      _id: postId,
-      communityId: params.communityId,
-      topics: archive.topics,
-      createdAt: now,
-      status: 'active',
-      auditStatus: audit.status,
-    })
     return { postId, auditStatus: audit.status, auditReason: audit.reason }
   }
 
@@ -1186,12 +1178,19 @@ export async function handleDelete(params: { postId: string }, openid: string) {
     return { success: true, alreadyDeleted: true }
   }
 
+  const queriedArchiveTopicLinks = post.area === 'archive'
+    ? await db.query('archive_post_topics', { postId: params.postId }, { limit: 100 }) as any[]
+    : []
+  const archiveTopicLinks = Array.isArray(queriedArchiveTopicLinks) ? queriedArchiveTopicLinks : []
   await db.runTransaction(async transaction => {
     await transaction.collection('posts').doc(params.postId).update({ data: {
       status: 'deleted', isPinned: false, pinnedAt: '', pinnedByAccountId: '',
       isFeatured: false, featuredAt: '', featuredByAccountId: '',
     } })
     const now = new Date().toISOString()
+    for (const link of archiveTopicLinks) {
+      await transaction.collection('archive_post_topics').doc(link._id).update({ data: { status: 'deleted', updatedAt: now } })
+    }
     await schedulePostRagSyncInTransaction(transaction, {
       postId: params.postId,
       communityId: String(post.communityId || ''),
@@ -1201,7 +1200,6 @@ export async function handleDelete(params: { postId: string }, openid: string) {
     })
   })
   await removePostSearchIndex(params.postId)
-  if (post.area === 'archive') await updateArchivePostTopicLinks(params.postId, { status: 'deleted' })
   return { success: true }
 }
 

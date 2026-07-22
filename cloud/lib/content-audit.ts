@@ -518,11 +518,27 @@ export async function applyAuditSummary(
       ? await prepareArchivePostTopicReconciliation(projectionPost)
       : null
     await db.runTransaction(async transaction => {
+      const currentPost = projectionPost
+        ? await db.transactionGetByIdOrNull<Post>(transaction, 'posts', postId)
+        : resolvedPost
+      if (!currentPost) throw new Error('post not found')
       await transaction.collection('posts').doc(postId).update({ data })
       if (projectionPost && prepared) {
-        await reconcileArchivePostTopicsInTransaction(transaction, projectionPost, prepared, now)
+        const currentTopics = projectionOverride && Array.isArray((currentPost as any).pendingTopics)
+          ? (currentPost as any).pendingTopics.map(String)
+          : (currentPost.topics || []).map(String)
+        if (JSON.stringify(currentTopics) !== JSON.stringify((projectionPost.topics || []).map(String))) {
+          throw new Error('post topics changed during audit; retry required')
+        }
+        await reconcileArchivePostTopicsInTransaction(transaction, {
+          ...projectionPost,
+          communityId: currentPost.communityId,
+          topics: currentTopics,
+          createdAt: String(currentPost.createdAt || projectionPost.createdAt || now),
+          status: String(currentPost.status || 'active'),
+        }, prepared, now)
       }
-      await schedulePostRagSyncInTransaction(transaction, { postId, communityId: resolvedPost.communityId, sectionId: resolvedPost.sectionId || '', reason: 'post.audit_changed', now })
+      await schedulePostRagSyncInTransaction(transaction, { postId, communityId: currentPost.communityId, sectionId: currentPost.sectionId || '', reason: 'post.audit_changed', now })
     })
   }
   if (slot === 'pendingContent') {

@@ -37,7 +37,9 @@ export async function prepareArchivePostTopicReconciliation(
     db.query('archive_topics', { communityId: post.communityId }, { limit: 100 }) as Promise<any[]>,
     db.query('archive_post_topics', { postId: post._id }, { limit: 100 }) as Promise<any[]>,
   ])
-  const existingTopics = Array.isArray(queriedTopics) ? queriedTopics : []
+  const existingTopics = Array.isArray(queriedTopics)
+    ? queriedTopics.filter((topic) => typeof topic?.topicKey === 'string' && typeof topic?.displayName === 'string')
+    : []
   const existingLinks = Array.isArray(queriedLinks) ? queriedLinks : []
   return {
     references: resolveArchiveTopicReferences(

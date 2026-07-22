@@ -15,7 +15,18 @@ jest.mock('../../../lib/db', () => ({
   increment: jest.fn(),
   replaceValue: jest.fn((value) => ({ __set: value })),
   removeField: jest.fn(() => ({ __remove: true })),
-  transactionGetByIdOrNull: jest.fn(async () => null),
+  transactionGetByIdOrNull: jest.fn(async (_transaction, name, id) => {
+    const mockedDb = require('../../../lib/db')
+    if (name === 'posts') {
+      const created = [...mockedDb.create.mock.calls].reverse().find(([collectionName]) => collectionName === 'posts')
+      if (created) return { _id: id, ...created[1] }
+    }
+    for (let index = mockedDb.getById.mock.calls.length - 1; index >= 0; index -= 1) {
+      const call = mockedDb.getById.mock.calls[index]
+      if (call[0] === name && call[1] === id) return mockedDb.getById.mock.results[index].value
+    }
+    return null
+  }),
   runTransaction: jest.fn(async callback => callback({
     collection: (name: string) => ({
       doc: (id: string) => ({

@@ -34,9 +34,9 @@ export function resolveArchiveTopicReferences(
   const orderIndex = new Map(explicitOrder.map((key, index) => [key, index]))
   const active = records.filter((record) => record.status !== 'deleted')
   const rank = (record: ArchiveTopicRecord) => [
-    orderIndex.get(record.topicKey) ?? Number.MAX_SAFE_INTEGER,
     record.origins.includes('admin') ? 0 : record.origins.includes('legacy') ? 1 : 2,
     record.createdAt || '',
+    orderIndex.get(record.topicKey) ?? Number.MAX_SAFE_INTEGER,
     record.topicKey,
   ] as const
   const compare = (left: ArchiveTopicRecord, right: ArchiveTopicRecord) => {

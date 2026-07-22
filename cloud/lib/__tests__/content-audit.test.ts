@@ -146,6 +146,23 @@ test('applyAuditSummary keeps later archive audit callbacks in RAG lifecycle', a
   expect(archiveTopicIndex.reconcileArchivePostTopicsInTransaction).toHaveBeenCalled()
 })
 
+test('applyAuditSummary uses the transaction-current deleted status when an audit races with deletion', async () => {
+  const trustedPost = {
+    _id: 'archive-race-1', communityId: 'community-1', area: 'archive', topics: ['教育成长'],
+    createdAt: '2026-07-22T00:00:00.000Z', status: 'active', auditStatus: 'pending',
+  }
+  ;(db.transactionGetByIdOrNull as jest.Mock).mockResolvedValueOnce({ ...trustedPost, status: 'deleted' })
+
+  await applyAuditSummary('archive-race-1', 'content', 'pass', '', trustedPost as any)
+
+  expect(archiveTopicIndex.reconcileArchivePostTopicsInTransaction).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ _id: 'archive-race-1', status: 'deleted', auditStatus: 'pass' }),
+    expect.anything(),
+    expect.any(String),
+  )
+})
+
 test('buildCiHttpString follows Tencent CI XML signature newline format', () => {
   expect(buildCiHttpString('POST', '/text/auditing', {
     host: '636c-cloudbase-3gh862acb1505ff3-1307183045.ci.ap-shanghai.myqcloud.com',

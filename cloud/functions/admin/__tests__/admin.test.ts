@@ -1895,6 +1895,7 @@ test('post.deleteAdmin: deactivates archive topic links when deleting an archive
     area: 'archive',
     status: 'active',
   })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'archive-link-1', postId: 'archive-post-1' }])
 
   await main({
     action: 'post.deleteAdmin',
@@ -1902,11 +1903,10 @@ test('post.deleteAdmin: deactivates archive topic links when deleting an archive
     _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
   })
 
-  expect(db.updateWhere).toHaveBeenCalledWith(
-    'archive_post_topics',
-    { postId: 'archive-post-1' },
-    expect.objectContaining({ status: 'deleted', updatedAt: expect.any(String) }),
-  )
+  expect(db.updateById).toHaveBeenCalledWith('archive_post_topics', 'archive-link-1', expect.objectContaining({
+    status: 'deleted', updatedAt: expect.any(String),
+  }))
+  expect(db.updateWhere).not.toHaveBeenCalledWith('archive_post_topics', expect.anything(), expect.anything())
 })
 
 test('post.deleteAdmin: repairs archive topic links when the post was already deleted', async () => {

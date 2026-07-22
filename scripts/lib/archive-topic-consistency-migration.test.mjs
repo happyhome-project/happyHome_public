@@ -7,8 +7,8 @@ test('repair merges renamed duplicate identities and rebuilds links from authori
   const plan = planArchiveTopicConsistencyRepair({
     communities: [{ _id: 'community-1', archiveTopicOrder: ['家有小孩', '社区指南'], archiveTopicOrderRevision: 4 }],
     topics: [
-      { _id: 'old', communityId: 'community-1', topicKey: '家有小孩', displayName: '教育成长', origins: ['admin'], enabled: true, status: 'active', recentPostCount: 9, createdAt: '2026-01-01', updatedAt: '2026-01-01' },
-      { _id: 'duplicate', communityId: 'community-1', topicKey: '教育成长', displayName: '教育成长', origins: ['organic'], enabled: true, status: 'active', recentPostCount: 1, createdAt: '2026-07-22', updatedAt: '2026-07-22' },
+      { _id: 'old', communityId: 'community-1', topicKey: '家有小孩', displayName: '教育成长', origins: ['admin'], enabled: true, status: 'active', recentScore: 2, recentPostCount: 9, createdAt: '2026-01-01', updatedAt: '2026-01-01' },
+      { _id: 'duplicate', communityId: 'community-1', topicKey: '教育成长', displayName: '教育成长', origins: ['organic'], enabled: true, status: 'active', recentScore: 3, recentPostCount: 1, adminOrder: 2, createdAt: '2026-07-22', updatedAt: '2026-07-22' },
       { _id: 'guide', communityId: 'community-1', topicKey: '社区指南', displayName: '社区指南', origins: ['admin'], enabled: true, status: 'active', recentPostCount: 3, createdAt: '2026-01-01', updatedAt: '2026-01-01' },
     ],
     posts: [
@@ -25,6 +25,8 @@ test('repair merges renamed duplicate identities and rebuilds links from authori
   const canonical = plan.topicUpserts.find((item) => item.data.topicKey === '家有小孩')
   const duplicate = plan.topicUpserts.find((item) => item.data.topicKey === '教育成长')
   assert.equal(canonical.data.recentPostCount, 2)
+  assert.equal(canonical.data.recentScore, 5)
+  assert.equal(canonical.data.adminOrder, 2)
   assert.deepEqual(canonical.data.origins, ['admin', 'organic'])
   assert.equal(duplicate.data.status, 'deleted')
   assert.equal(duplicate.data.enabled, false)
@@ -37,7 +39,7 @@ test('repair merges renamed duplicate identities and rebuilds links from authori
   assert.deepEqual(plan.linkDeletes.map((item) => item.id), ['wrong-link'])
 })
 
-test('repair rewrites duplicate keys in explicit order and appends a newly discovered topic once', () => {
+test('repair preserves the stable admin identity even when a duplicate key appears first in explicit order', () => {
   const plan = planArchiveTopicConsistencyRepair({
     communities: [{ _id: 'community-1', archiveTopicOrder: ['教育成长', '家有小孩'], archiveTopicOrderRevision: 7 }],
     topics: [
@@ -50,7 +52,37 @@ test('repair rewrites duplicate keys in explicit order and appends a newly disco
   })
 
   assert.deepEqual(plan.communityUpdates, [{
-    communityId: 'community-1', archiveTopicOrder: ['教育成长', '新话题'], archiveTopicOrderRevision: 8,
+    communityId: 'community-1', archiveTopicOrder: ['家有小孩', '新话题'], archiveTopicOrderRevision: 8,
   }])
   assert.ok(plan.topicUpserts.some((item) => item.data.topicKey === '新话题' && item.data.recentPostCount === 1))
+})
+
+test('an applied repair produces an empty residual plan with the same migration timestamp', () => {
+  const input = {
+    communities: [{ _id: 'community-1', archiveTopicOrder: ['家有小孩'], archiveTopicOrderRevision: 1 }],
+    topics: [
+      { _id: 'old', communityId: 'community-1', topicKey: '家有小孩', displayName: '教育成长', origins: ['admin'], enabled: true, status: 'active', recentScore: 1, recentPostCount: 8, createdAt: '2026-01-01', updatedAt: '2026-01-01' },
+      { _id: 'dup', communityId: 'community-1', topicKey: '教育成长', displayName: '教育成长', origins: ['organic'], enabled: true, status: 'active', recentScore: 2, recentPostCount: 1, createdAt: '2026-07-22', updatedAt: '2026-07-22' },
+    ],
+    posts: [{ _id: 'post-1', communityId: 'community-1', area: 'archive', topics: ['教育成长'], status: 'active', auditStatus: 'pass', createdAt: '2026-07-22T01:00:00.000Z' }],
+    links: [],
+    now: '2026-07-22T03:00:00.000Z',
+  }
+  const first = planArchiveTopicConsistencyRepair(input)
+  const topics = input.topics.map((topic) => {
+    const update = first.topicUpserts.find((item) => item.id === topic._id)
+    return update ? { _id: topic._id, ...update.data } : topic
+  })
+  for (const update of first.topicUpserts.filter((item) => !topics.some((topic) => topic._id === item.id))) {
+    topics.push({ _id: update.id, ...update.data })
+  }
+  const links = first.linkUpserts.map((item) => ({ _id: item.id, ...item.data }))
+  const communities = input.communities.map((community) => {
+    const update = first.communityUpdates.find((item) => item.communityId === community._id)
+    return update ? { ...community, ...update } : community
+  })
+
+  const residual = planArchiveTopicConsistencyRepair({ ...input, communities, topics, links })
+
+  assert.deepEqual(residual.summary, { topicUpserts: 0, linkUpserts: 0, linkDeletes: 0, communityUpdates: 0 })
 })

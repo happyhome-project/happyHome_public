@@ -19,17 +19,30 @@ function unique(values) {
   return [...new Set(values)]
 }
 
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical)
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]))
+  }
+  return value
+}
+
 function same(left, right) {
-  return JSON.stringify(left) === JSON.stringify(right)
+  return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right))
+}
+
+function minimumFinite(values) {
+  const finite = values.map(Number).filter(Number.isFinite)
+  return finite.length > 0 ? Math.min(...finite) : undefined
 }
 
 function chooseCanonical(group, order) {
   const orderIndex = new Map(order.map((key, index) => [key, index]))
   return group.slice().sort((left, right) => (
-    (orderIndex.get(left.topicKey) ?? Number.MAX_SAFE_INTEGER) - (orderIndex.get(right.topicKey) ?? Number.MAX_SAFE_INTEGER)
-      || (left.origins?.includes('admin') ? 0 : left.origins?.includes('legacy') ? 1 : 2)
+    (left.origins?.includes('admin') ? 0 : left.origins?.includes('legacy') ? 1 : 2)
         - (right.origins?.includes('admin') ? 0 : right.origins?.includes('legacy') ? 1 : 2)
       || String(left.createdAt || '').localeCompare(String(right.createdAt || ''))
+      || (orderIndex.get(left.topicKey) ?? Number.MAX_SAFE_INTEGER) - (orderIndex.get(right.topicKey) ?? Number.MAX_SAFE_INTEGER)
       || String(left.topicKey).localeCompare(String(right.topicKey))
   ))[0]
 }
@@ -40,6 +53,7 @@ export function planArchiveTopicConsistencyRepair({ communities, topics, posts, 
   const linkDeletes = []
   const communityUpdates = []
   const postsById = new Map(posts.filter((post) => post.area === 'archive').map((post) => [post._id, post]))
+  const linksById = new Map(links.map((link) => [link._id, link]))
 
   for (const community of communities) {
     const communityId = community._id
@@ -108,7 +122,7 @@ export function planArchiveTopicConsistencyRepair({ communities, topics, posts, 
         const status = String(post.status || 'active')
         const auditStatus = String(post.auditStatus || 'pass')
         const createdAt = String(post.createdAt || now)
-        linkUpserts.push({ id, data: {
+        const linkData = {
           communityId,
           topicKey: canonical.topicKey,
           postId: post._id,
@@ -117,7 +131,9 @@ export function planArchiveTopicConsistencyRepair({ communities, topics, posts, 
           status,
           auditStatus,
           updatedAt: now,
-        } })
+        }
+        const existingLink = linksById.get(id)
+        if (!existingLink || !same(withoutId(existingLink), linkData)) linkUpserts.push({ id, data: linkData })
         if (status === 'active' && auditStatus === 'pass') {
           visibleCounts.set(canonical.topicKey, Number(visibleCounts.get(canonical.topicKey) || 0) + 1)
         }
@@ -133,13 +149,25 @@ export function planArchiveTopicConsistencyRepair({ communities, topics, posts, 
     }
     for (const [canonicalKey, group] of canonicalGroups) {
       const canonical = group.find((topic) => topic.topicKey === canonicalKey) || chooseCanonical(group, order)
-      topicUpserts.push({ id: canonical._id, data: {
+      const legacyOrder = minimumFinite(group.map((topic) => topic.legacyOrder))
+      const adminOrder = minimumFinite(group.map((topic) => topic.adminOrder))
+      const topicData = {
         ...withoutId(canonical),
         origins: unique(group.flatMap((topic) => topic.origins || [])),
+        enabled: group.some((topic) => topic.enabled !== false),
         status: 'active',
+        recentScore: group.reduce((total, topic) => total + Number(topic.recentScore || 0), 0),
         recentPostCount: Number(visibleCounts.get(canonicalKey) || 0),
+        ...(legacyOrder === undefined ? {} : { legacyOrder }),
+        ...(adminOrder === undefined ? {} : { adminOrder }),
+        ...(canonical.legacySectionId ? {} : {
+          ...(group.find((topic) => topic.legacySectionId)?.legacySectionId
+            ? { legacySectionId: group.find((topic) => topic.legacySectionId).legacySectionId }
+            : {}),
+        }),
         updatedAt: now,
-      } })
+      }
+      if (!same(withoutId(canonical), topicData)) topicUpserts.push({ id: canonical._id, data: topicData })
     }
     for (const { topic } of duplicates) {
       topicUpserts.push({ id: topic._id, data: {
@@ -152,10 +180,12 @@ export function planArchiveTopicConsistencyRepair({ communities, topics, posts, 
       } })
     }
     for (const topic of syntheticTopics.values()) {
-      topicUpserts.push({ id: topic._id, data: {
+      const topicData = {
         ...withoutId(topic),
         recentPostCount: Number(visibleCounts.get(topic.topicKey) || 0),
-      } })
+      }
+      const existingTopic = topics.find((item) => item._id === topic._id)
+      if (!existingTopic || !same(withoutId(existingTopic), topicData)) topicUpserts.push({ id: topic._id, data: topicData })
     }
 
     for (const link of links.filter((link) => link.communityId === communityId)) {

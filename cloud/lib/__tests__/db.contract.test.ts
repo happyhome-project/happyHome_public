@@ -20,6 +20,7 @@ const expectedExports = [
   'removeField',
   'query',
   'count',
+  'queryBefore',
   'queryAfterId',
   'runTransaction',
   'transactionGetByIdOrNull',
