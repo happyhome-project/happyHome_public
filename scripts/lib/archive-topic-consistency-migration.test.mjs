@@ -1,7 +1,20 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 
 import { planArchiveTopicConsistencyRepair } from './archive-topic-consistency-migration.mjs'
+
+test('release migration writes through the Node SDK payload adapter', () => {
+  const source = readFileSync(new URL('../../release/migrations/20260722-archive-topic-consistency-v1.mjs', import.meta.url), 'utf8')
+  const adapter = readFileSync(new URL('./archive-migration-node-sdk.mjs', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  const pinnedAdapterDigest = source.match(/NODE_SDK_ADAPTER_SHA256 = '([a-f0-9]{64})'/)?.[1]
+
+  assert.match(source, /createArchiveMigrationNodeSdkDeps/)
+  assert.equal(pinnedAdapterDigest, createHash('sha256').update(adapter).digest('hex'))
+  assert.doesNotMatch(source, /\.set\(\{\s*data\s*:/)
+  assert.doesNotMatch(source, /\.update\(\{\s*data\s*:/)
+})
 
 test('repair merges renamed duplicate identities and rebuilds links from authoritative posts', () => {
   const plan = planArchiveTopicConsistencyRepair({

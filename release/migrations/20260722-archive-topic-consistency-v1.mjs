@@ -2,12 +2,24 @@ import CloudBase from '@cloudbase/node-sdk'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 
+import { createArchiveMigrationNodeSdkDeps } from '../../scripts/lib/archive-migration-node-sdk.mjs'
 import { planArchiveTopicConsistencyRepair } from '../../scripts/lib/archive-topic-consistency-migration.mjs'
 
 const PLANNER_SHA256 = '89b5c678340166c726396844d36f4f8adaaa8c3eac4e768291e3bab054356732'
+const NODE_SDK_ADAPTER_SHA256 = '52e3fd6d57a08fbed542b15bab8c1f7daeae5a6dd708d0370f7de5b213a6d896'
 
 function normalizedTextDigest(url) {
   return createHash('sha256').update(readFileSync(url, 'utf8').replace(/\r\n/g, '\n')).digest('hex')
+}
+
+function verifyDependencies() {
+  const dependencies = [
+    ['planner', new URL('../../scripts/lib/archive-topic-consistency-migration.mjs', import.meta.url), PLANNER_SHA256],
+    ['Node SDK adapter', new URL('../../scripts/lib/archive-migration-node-sdk.mjs', import.meta.url), NODE_SDK_ADAPTER_SHA256],
+  ]
+  for (const [label, url, expected] of dependencies) {
+    if (normalizedTextDigest(url) !== expected) throw new Error(`archive-topic-consistency-v1 ${label} digest mismatch`)
+  }
 }
 
 async function readAll(database, collectionName) {
@@ -26,8 +38,7 @@ async function readAll(database, collectionName) {
 }
 
 export async function up({ releaseContext } = {}) {
-  const plannerUrl = new URL('../../scripts/lib/archive-topic-consistency-migration.mjs', import.meta.url)
-  if (normalizedTextDigest(plannerUrl) !== PLANNER_SHA256) throw new Error('archive-topic-consistency-v1 planner digest mismatch')
+  verifyDependencies()
 
   const env = String(releaseContext?.envId || process.env.TCB_ENV || '').trim()
   const secretId = String(process.env.TENCENTCLOUD_SECRETID || '').trim()
@@ -43,21 +54,22 @@ export async function up({ releaseContext } = {}) {
   ])
   const now = new Date().toISOString()
   const plan = planArchiveTopicConsistencyRepair({ communities, topics, posts, links, now })
+  const writes = createArchiveMigrationNodeSdkDeps(database, { removeMalformedWrapper: true })
 
   for (const item of plan.topicUpserts) {
-    await database.collection('archive_topics').doc(item.id).set({ data: item.data })
+    await writes.set('archive_topics', item.id, item.data)
   }
   for (const item of plan.linkUpserts) {
-    await database.collection('archive_post_topics').doc(item.id).set({ data: item.data })
+    await writes.set('archive_post_topics', item.id, item.data)
   }
   for (const item of plan.linkDeletes) {
-    await database.collection('archive_post_topics').doc(item.id).update({ data: item.data })
+    await writes.update('archive_post_topics', item.id, item.data)
   }
   for (const item of plan.communityUpdates) {
-    await database.collection('communities').doc(item.communityId).update({ data: {
+    await writes.update('communities', item.communityId, {
       archiveTopicOrder: item.archiveTopicOrder,
       archiveTopicOrderRevision: item.archiveTopicOrderRevision,
-    } })
+    })
   }
 
   const [afterCommunities, afterTopics, afterPosts, afterLinks] = await Promise.all([

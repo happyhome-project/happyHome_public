@@ -11,7 +11,7 @@
     {
       "id": "archive-topic-consistency-v1",
       "module": "release/migrations/20260722-archive-topic-consistency-v1.mjs",
-      "inputDigest": "b329509f1346676fa48e8b3c28a98060af2c62b84b2467b5dc862e14ac8b9f68"
+      "inputDigest": "483a99854c06b274660dfc1589823f623c719ef7c912c79c33bfcdb32ae28eb2"
     }
   ],
   "smokeSuites": [],
