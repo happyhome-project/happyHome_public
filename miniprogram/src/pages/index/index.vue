@@ -1369,7 +1369,7 @@ async function loadArchiveFeed(
         sample: archiveCommunityId.value === communityId ? 'warm' : 'cold',
       })
       if (refreshTabs) {
-        const [tabResult, initialResult] = await Promise.all([
+        const archiveResults = await Promise.all([
           postApi.listArchiveTabs({ communityId, asGuest: !userStore.isLoggedIn }, {
             requestId,
             stage: 'home.archive.tabs',
@@ -1377,6 +1377,8 @@ async function loadArchiveFeed(
           }),
           feedRequest,
         ])
+        const tabResult = archiveResults[0]
+        const initialResult = archiveResults[1]
         markHomeStartupStage('home.archive.tabs.received', {
           tabCount: Array.isArray(tabResult.tabs) ? tabResult.tabs.length : 0,
         })
@@ -1462,7 +1464,7 @@ async function loadArchiveFeed(
     const coverStartedAt = Date.now()
     void resolveFeedCovers(nextArchiveColumns, resolveCloudFileUrls).then(() => {
       if (!isRequestCurrent()) return
-      archiveColumns.value = nextArchiveColumns.map(column => [...column]) as ArchiveFeedColumns
+      archiveColumns.value = nextArchiveColumns.map(column => column.slice()) as ArchiveFeedColumns
       if (reset) {
         archiveFirstPageCache.set(archiveFirstPageCacheKey(viewerCacheScope, communityId, nextArchiveTopic), {
           columns: archiveColumns.value,
