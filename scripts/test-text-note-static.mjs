@@ -23,7 +23,9 @@ assert(createPage.includes("const textNoteStep = ref<'compose' | 'cover'>('compo
 assert(createPage.includes('class="text-note-compose"') && createPage.includes('class="text-note-cover-step"'), 'both text-note steps must render.')
 assert(/textNoteBodyWidget[\s\S]{0,500}guide-role="body"[\s\S]{0,240}placeholder="添加正文内容"/.test(createPage), 'text-note body must reuse the guide-style plain writing surface.')
 assert(createPage.includes('<TextNoteCover') && createPage.includes('v-for="theme in TEXT_NOTE_THEMES"'), 'cover preview and six theme choices must use TextNoteCover.')
-assert(createPage.includes('.text-note-theme-option :deep(.text-note-cover-kicker)') && !createPage.includes('.text-note-theme-option :deep(.text-note-cover-signature)'), 'theme thumbnails must scale dynamic text without redrawing the signature embedded in the SVG background.')
+assert(/<TextNoteCover[^>]*:theme="theme"[^>]*compact/.test(createPage), 'theme choices must opt into the component-owned compact cover mode.')
+assert(cover.includes('compact?: boolean') && cover.includes('text-note-cover-frame--compact'), 'TextNoteCover must own compact typography so mini-program style isolation cannot break thumbnails.')
+assert(!createPage.includes('.text-note-theme-option :deep(.text-note-cover-title)') && !createPage.includes('.text-note-theme-option :deep(.text-note-cover-body)'), 'theme choices must not rely on cross-component deep typography overrides.')
 assert(/isTextNoteCreateMode\.value[\s\S]{0,120}return false/.test(createPage), 'rich-note images must be disabled in text-note mode.')
 assert(!createTemplate.includes('AI帮你写') && !createTemplate.includes('figma-ai-write'), 'unavailable AI writing affordance must not render in any authoring mode.')
 assert(createPage.includes('presentation: isTextNoteCreateMode.value') && createPage.includes('textNoteTheme: textNoteTheme.value'), 'text-note theme must be submitted as top-level presentation.')
@@ -45,5 +47,7 @@ assert(!/text_note[\s\S]{0,160}guide-cover/.test(homePage), 'text-note home card
 assert(detailPage.includes("displayTemplate === 'text_note'") && detailPage.includes('return false'), 'text-note detail must remain outside guide-route rendering.')
 assert(defaultDetail.includes('isTextNoteDetail') && defaultDetail.includes('<TextNoteCover') && defaultDetail.includes('class="text-note-detail-cover"'), 'text-note detail must render its body as the selected visual cover.')
 assert(defaultDetail.includes('needsTextNoteFullBody') && defaultDetail.includes('class="text-note-full-body"'), 'long text notes must keep an accessible full-text continuation after the cover.')
+assert(textNoteUtils.includes('content?.title') && textNoteUtils.includes('content?.body'), 'native archive title/body keys must feed the text-note cover.')
+assert(defaultDetail.includes("widget.fieldKey === 'body'"), 'native archive body widgets must not render again outside the text-note cover.')
 
 console.log('text note authoring static checks passed')

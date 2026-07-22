@@ -127,10 +127,16 @@ export function extractTextNoteFirstParagraph(value: unknown): string {
 }
 
 export function extractTextNoteContent(content: Record<string, unknown> | null | undefined): TextNoteContent {
+  const title = content?.text_title ?? content?.title
+  const body = getTextNoteBodyValue(content)
   return {
-    title: normalizeTextNoteTitle(content?.text_title),
-    body: extractTextNoteFirstParagraph(content?.text_body),
+    title: normalizeTextNoteTitle(title),
+    body: extractTextNoteFirstParagraph(body),
   }
+}
+
+export function getTextNoteBodyValue(content: Record<string, unknown> | null | undefined): unknown {
+  return content?.text_body ?? content?.body
 }
 
 export function getTextNoteCard(post: { content?: Record<string, unknown>; presentation?: PostPresentation } | null | undefined): TextNoteCard {

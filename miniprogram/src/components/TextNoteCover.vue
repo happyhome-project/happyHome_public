@@ -1,5 +1,8 @@
 <template>
-  <view class="text-note-cover-frame" :class="`text-note-cover--${normalizedTheme}`">
+  <view
+    class="text-note-cover-frame"
+    :class="[`text-note-cover--${normalizedTheme}`, { 'text-note-cover-frame--compact': props.compact }]"
+  >
     <image class="text-note-cover-background" :src="coverBackground" mode="scaleToFill" />
     <view class="text-note-cover-content">
       <text v-if="normalizedTheme !== 'notice'" class="text-note-cover-kicker">{{ presentation.kicker }}</text>
@@ -25,6 +28,7 @@ const props = defineProps<{
   title: string
   body: string
   theme?: TextNoteTheme | string
+  compact?: boolean
 }>()
 
 const normalizedTheme = computed(() => normalizeTextNoteTheme(props.theme))
@@ -165,4 +169,39 @@ const coverBackground = computed(() => TEXT_NOTE_COVER_BACKGROUNDS[normalizedThe
 .text-note-cover--notice .text-note-cover-body--large { font-size: 30rpx; }
 .text-note-cover--notice .text-note-cover-body--medium { font-size: 27rpx; }
 .text-note-cover--notice .text-note-cover-body--small { font-size: 24rpx; }
+
+.text-note-cover-frame--compact {
+  border-radius: 12rpx;
+}
+
+.text-note-cover-frame--compact .text-note-cover-kicker {
+  padding: 0;
+  border-width: 0;
+  font-size: 8rpx;
+  line-height: 12rpx;
+  letter-spacing: 1rpx;
+}
+
+.text-note-cover-frame--compact .text-note-cover-title {
+  font-size: 13rpx;
+  line-height: 16rpx;
+}
+
+.text-note-cover-frame--compact .text-note-cover-rule {
+  height: 1rpx;
+}
+
+.text-note-cover-frame--compact .text-note-cover-body,
+.text-note-cover-frame--compact .text-note-cover-body--large,
+.text-note-cover-frame--compact .text-note-cover-body--medium,
+.text-note-cover-frame--compact .text-note-cover-body--small {
+  font-size: 10rpx;
+  line-height: 14rpx;
+}
+
+.text-note-cover-frame--compact .text-note-cover-quote {
+  height: 34rpx;
+  font-size: 31rpx;
+  line-height: 34rpx;
+}
 </style>

@@ -86,7 +86,7 @@
             <scroll-view class="text-note-theme-scroll" scroll-x :show-scrollbar="false">
               <view class="text-note-theme-list">
                 <view v-for="theme in TEXT_NOTE_THEMES" :key="theme" class="text-note-theme-option" :class="{ 'text-note-theme-option--active': textNoteTheme === theme }" @tap="textNoteTheme = theme">
-                  <TextNoteCover :title="textNoteContent.title" :body="textNoteContent.body" :theme="theme" />
+                  <TextNoteCover :title="textNoteContent.title" :body="textNoteContent.body" :theme="theme" compact />
                 </view>
               </view>
             </scroll-view>
@@ -1817,12 +1817,6 @@ async function handleSubmit() {
   border-color: var(--hh-color-brand-primary);
 }
 
-.text-note-theme-option :deep(.text-note-cover-frame) { border-radius: 12rpx; }
-.text-note-theme-option :deep(.text-note-cover-kicker) { padding: 0; border-width: 0; font-size: 8rpx; line-height: 12rpx; letter-spacing: 1rpx; }
-.text-note-theme-option :deep(.text-note-cover-title) { font-size: 13rpx; line-height: 16rpx; }
-.text-note-theme-option :deep(.text-note-cover-rule) { height: 1rpx; }
-.text-note-theme-option :deep(.text-note-cover-body) { font-size: 10rpx; line-height: 14rpx; }
-.text-note-theme-option :deep(.text-note-cover-quote) { height: 34rpx; font-size: 31rpx; line-height: 34rpx; }
 .text-note-publish-tools { width: 100%; }
 
 .guard-state {
