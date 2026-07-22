@@ -1460,11 +1460,21 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       db.query('archive_topics', { communityId }) as Promise<any[]>,
     ])
     const activeTopics = topics.filter((topic) => topic.status !== 'deleted')
+    const currentCounts = await Promise.all(activeTopics.map((topic) => db.count('archive_post_topics', {
+      communityId,
+      topicKey: String(topic.topicKey),
+      status: 'active',
+      auditStatus: 'pass',
+    })))
+    const topicsWithCounts = activeTopics.map((topic, index) => ({
+      ...topic,
+      recentPostCount: currentCounts[index],
+    }))
     const order = Array.isArray(community?.archiveTopicOrder) ? community.archiveTopicOrder : []
-    const byKey = new Map(activeTopics.map((topic) => [String(topic.topicKey), topic]))
+    const byKey = new Map(topicsWithCounts.map((topic) => [String(topic.topicKey), topic]))
     const ordered = order.map((key) => byKey.get(key)).filter(Boolean)
     const included = new Set(ordered.map((topic: any) => String(topic.topicKey)))
-    ordered.push(...activeTopics.filter((topic) => !included.has(String(topic.topicKey))).sort((left, right) =>
+    ordered.push(...topicsWithCounts.filter((topic) => !included.has(String(topic.topicKey))).sort((left, right) =>
       Number(left.legacyOrder ?? Number.MAX_SAFE_INTEGER) - Number(right.legacyOrder ?? Number.MAX_SAFE_INTEGER)
       || Number(left.adminOrder ?? Number.MAX_SAFE_INTEGER) - Number(right.adminOrder ?? Number.MAX_SAFE_INTEGER)
       || String(left.displayName || '').localeCompare(String(right.displayName || ''), 'zh-CN')
@@ -2129,7 +2139,6 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     })
     if (archive && audit.status === 'pass') {
       await db.updateById('posts', postId, { topics: db.replaceValue(archive.topics) })
-      await updateArchivePostTopicLinks(postId, { status: 'deleted' })
       await syncArchivePostTopics({
         _id: postId,
         communityId: String(post.communityId || ''),

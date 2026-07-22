@@ -14,6 +14,7 @@ jest.mock('../../../lib/db', () => ({
   softDelete: jest.fn(),
   query: jest.fn(),
   queryAfterId: jest.fn(),
+  count: jest.fn(),
   increment: jest.fn(),
   runTransaction: jest.fn(),
   transactionGetByIdOrNull: jest.fn(async (transaction, collectionName, id) => {
@@ -82,6 +83,7 @@ const main = (event: any) => rawMain({
 
 beforeEach(() => {
   jest.resetAllMocks()
+  ;(db.count as jest.Mock).mockResolvedValue(0)
   ;(db.runTransaction as jest.Mock).mockImplementation(async (callback) => callback({
     collection: (name: string) => ({
       doc: (id: string) => ({
@@ -2061,6 +2063,23 @@ test('archive topics: list uses explicit order and excludes logical deletes', as
   const listed: any = await main({ action: 'archiveTopic.list', communityId: 'community-1' })
   expect(listed.orderRevision).toBe(3)
   expect(listed.topics.map((item: any) => item.topicKey)).toEqual(['second', 'first'])
+})
+
+test('archive topics: list derives current visible post counts instead of returning historical counters', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'community-1', archiveTopicOrder: ['education'], archiveTopicOrderRevision: 3,
+  })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([
+    { topicKey: 'education', displayName: '教育成长', status: 'active', recentPostCount: 99 },
+  ])
+  ;(db.count as jest.Mock).mockResolvedValueOnce(1)
+
+  const listed: any = await main({ action: 'archiveTopic.list', communityId: 'community-1' })
+
+  expect(db.count).toHaveBeenCalledWith('archive_post_topics', {
+    communityId: 'community-1', topicKey: 'education', status: 'active', auditStatus: 'pass',
+  })
+  expect(listed.topics[0].recentPostCount).toBe(1)
 })
 
 test('archive topics: reorder rejects stale revisions and atomically increments the revision', async () => {

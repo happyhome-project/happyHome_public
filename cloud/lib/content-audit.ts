@@ -6,7 +6,11 @@ import * as storage from './storage'
 import { postWxJson } from './wx-openapi'
 import { refreshPostSearchIndexById } from './post-search'
 import { schedulePostRagSyncInTransaction } from './post-rag-sync'
-import { syncArchivePostTopics, updateArchivePostTopicLinks } from './archive-topic-index'
+import {
+  prepareArchivePostTopicReconciliation,
+  reconcileArchivePostTopicsInTransaction,
+  type ArchivePostTopicSource,
+} from './archive-topic-index'
 import type { WechatMediaAuditResult } from './wechat-callback'
 import type {
   AuditProvider,
@@ -491,18 +495,35 @@ export async function applyAuditSummary(
   trustedPost?: Post,
 ) {
   const now = nowIso()
-  const updatePostWithV2 = async (data: Record<string, any>, postSnapshot?: Post) => {
-    let resolvedPost: Post | null = postSnapshot || null
+  const updatePostWithV2 = async (
+    data: Record<string, any>,
+    postSnapshot?: Post,
+    projectionOverride?: ArchivePostTopicSource,
+  ) => {
+    const resolvedPost = postSnapshot || await db.getById('posts', postId) as Post
+    if (!resolvedPost) throw new Error('post not found')
+    const projectionPost = projectionOverride || (
+      resolvedPost.area === 'archive' && Object.prototype.hasOwnProperty.call(data, 'auditStatus')
+        ? {
+            _id: postId,
+            communityId: resolvedPost.communityId,
+            topics: resolvedPost.topics || [],
+            createdAt: String(resolvedPost.createdAt || now),
+            status: String(resolvedPost.status || 'active'),
+            auditStatus: String(data.auditStatus),
+          }
+        : null
+    )
+    const prepared = projectionPost
+      ? await prepareArchivePostTopicReconciliation(projectionPost)
+      : null
     await db.runTransaction(async transaction => {
-      const post = postSnapshot || await db.transactionGetByIdOrNull<Post>(transaction, 'posts', postId)
-      if (!post) throw new Error('post not found')
-      resolvedPost = post
       await transaction.collection('posts').doc(postId).update({ data })
-      await schedulePostRagSyncInTransaction(transaction, { postId, communityId: post.communityId, sectionId: post.sectionId || '', reason: 'post.audit_changed', now })
+      if (projectionPost && prepared) {
+        await reconcileArchivePostTopicsInTransaction(transaction, projectionPost, prepared, now)
+      }
+      await schedulePostRagSyncInTransaction(transaction, { postId, communityId: resolvedPost.communityId, sectionId: resolvedPost.sectionId || '', reason: 'post.audit_changed', now })
     })
-    if (resolvedPost?.area === 'archive' && Object.prototype.hasOwnProperty.call(data, 'auditStatus')) {
-      await updateArchivePostTopicLinks(postId, { auditStatus: data.auditStatus })
-    }
   }
   if (slot === 'pendingContent') {
     const post = trustedPost || await db.getById('posts', postId) as Post
@@ -538,18 +559,14 @@ export async function applyAuditSummary(
         auditReason: '',
         auditUpdatedAt: now,
         updatedAt: now,
-      }, post)
-      if (post.area === 'archive' && pendingTopics) {
-        await updateArchivePostTopicLinks(postId, { status: 'deleted' })
-        await syncArchivePostTopics({
+      }, post, post.area === 'archive' && pendingTopics ? {
           _id: postId,
           communityId: post.communityId,
           topics: pendingTopics,
           createdAt: String(post.createdAt || now),
           status: String(post.status || 'active'),
           auditStatus: 'pass',
-        })
-      }
+        } : undefined)
       await refreshPostSearchIndexById(postId)
       return
     }

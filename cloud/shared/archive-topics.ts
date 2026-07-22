@@ -26,6 +26,51 @@ export function normalizeArchiveTopic(value: unknown): { topicKey: string; displ
   return { topicKey: displayName.toLowerCase(), displayName }
 }
 
+export function resolveArchiveTopicReferences(
+  values: unknown[],
+  records: ArchiveTopicRecord[],
+  explicitOrder: string[] = [],
+): Array<{ topicKey: string; displayName: string }> {
+  const orderIndex = new Map(explicitOrder.map((key, index) => [key, index]))
+  const active = records.filter((record) => record.status !== 'deleted')
+  const rank = (record: ArchiveTopicRecord) => [
+    orderIndex.get(record.topicKey) ?? Number.MAX_SAFE_INTEGER,
+    record.origins.includes('admin') ? 0 : record.origins.includes('legacy') ? 1 : 2,
+    record.createdAt || '',
+    record.topicKey,
+  ] as const
+  const compare = (left: ArchiveTopicRecord, right: ArchiveTopicRecord) => {
+    const a = rank(left)
+    const b = rank(right)
+    for (let index = 0; index < a.length; index += 1) {
+      if (a[index] < b[index]) return -1
+      if (a[index] > b[index]) return 1
+    }
+    return 0
+  }
+  const byDisplayKey = new Map<string, ArchiveTopicRecord[]>()
+  for (const record of active) {
+    const displayKey = normalizeArchiveTopic(record.displayName || record.topicKey).topicKey
+    const candidates = byDisplayKey.get(displayKey) || []
+    candidates.push(record)
+    byDisplayKey.set(displayKey, candidates)
+  }
+
+  const selected: Array<{ topicKey: string; displayName: string }> = []
+  const seen = new Set<string>()
+  for (const value of values || []) {
+    const normalized = normalizeArchiveTopic(value)
+    const existing = (byDisplayKey.get(normalized.topicKey) || []).slice().sort(compare)[0]
+    const reference = existing
+      ? { topicKey: existing.topicKey, displayName: existing.displayName }
+      : normalized
+    if (seen.has(reference.topicKey)) continue
+    seen.add(reference.topicKey)
+    selected.push(reference)
+  }
+  return selected
+}
+
 function finiteOrder(value: unknown): number {
   return Number.isFinite(Number(value)) ? Number(value) : Number.MAX_SAFE_INTEGER
 }

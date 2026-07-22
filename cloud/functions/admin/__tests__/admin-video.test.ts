@@ -5,6 +5,7 @@ jest.mock('wx-server-sdk', () => ({
 
 jest.mock('../../../lib/db', () => ({
   getById: jest.fn(),
+  getByIdOrNull: jest.fn(async () => null),
   create: jest.fn(),
   updateById: jest.fn(),
   updateWhere: jest.fn(),

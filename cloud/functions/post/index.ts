@@ -1282,7 +1282,6 @@ export async function handleUpdate(
     if (presentation) await db.updateById('posts', params.postId, { presentation })
     if (!archive) return
     await db.updateById('posts', params.postId, { topics: archive.topics })
-    await updateArchivePostTopicLinks(params.postId, { status: 'deleted' })
     await syncArchivePostTopics({
       _id: params.postId,
       communityId: post.communityId,

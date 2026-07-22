@@ -1,5 +1,8 @@
 # Archive Topic Consistency Implementation Plan
 
+> **Point-in-time:** This file records the approved 2026-07-22 implementation sequence.
+> **Current authority:** Use the [documentation authority map](../../README.md), current code, release manifests, and tests.
+
 **Goal:** Make archive topic tabs and admin counts agree with the current visible archive posts, including renamed topics.
 
 **Architecture:** Keep `posts` authoritative. Resolve displayed topic names to stable configured identities, reconcile `archive_post_topics` idempotently, derive admin counts from active/pass links, and ship a release migration that repairs duplicate identities and rebuilds the projection.
@@ -13,4 +16,3 @@
 5. Add a pure migration planner, tests, a release migration, and a release change manifest.
 6. Run focused cloud tests, type checks, documentation checks, and the repository impact suite.
 7. Commit with the required Git identity, open the PR, address review/CI, and place it in Merge Queue.
-

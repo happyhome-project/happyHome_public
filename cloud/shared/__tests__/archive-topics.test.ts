@@ -2,6 +2,7 @@ import {
   decodeArchiveCursor,
   encodeArchiveCursor,
   normalizeArchiveTopic,
+  resolveArchiveTopicReferences,
   selectArchiveTabs,
   type ArchiveTopicRecord,
 } from '../archive-topics'
@@ -25,6 +26,15 @@ test('normalizeArchiveTopic shares NFKC hash stripping and case-insensitive keys
   expect(normalizeArchiveTopic('  ## ＰＥＴ  ')).toEqual({ topicKey: 'pet', displayName: 'PET' })
   expect(() => normalizeArchiveTopic('')).toThrow('话题不能为空')
   expect(() => normalizeArchiveTopic('一'.repeat(21))).toThrow('每个话题不能超过 20 个字符')
+})
+
+test('resolves a renamed display name to its stable configured topic key', () => {
+  expect(resolveArchiveTopicReferences(['教育成长'], [
+    topic({ topicKey: '家有小孩', displayName: '教育成长', origins: ['admin'] }),
+    topic({ topicKey: '教育成长', displayName: '教育成长', origins: ['organic'] }),
+  ], ['家有小孩'])).toEqual([
+    { topicKey: '家有小孩', displayName: '教育成长' },
+  ])
 })
 
 test('selectArchiveTabs uses legacy then admin then activity and deduplicates normalized keys', () => {
