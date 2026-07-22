@@ -8,6 +8,6 @@ describe('archive topic fallback', () => {
     expect(source).toContain('result.topicUnavailable')
     expect(source).toMatch(/nextArchiveTopic\s*=\s*['"]['"]/)
     expect(source).toMatch(/result\s*=\s*await postApi\.listArchive/)
-    expect(source).toContain('if (!reset) return loadArchiveFeed(true, { preserveVisible: true })')
+    expect(source).toContain('if (!refreshTabs) return loadArchiveFeed(true, { preserveVisible: true, refreshTabs: true })')
   })
 })

@@ -307,10 +307,12 @@ export const postApi = {
       'listMyActivities',
       { skip, limit },
     ),
-  listArchive: (params: ArchivePostListParams) =>
-    callCloud<{ posts: any[]; nextCursor: string; hasMore: boolean; topicUnavailable?: boolean }>('post', 'listArchive', params),
-  listArchiveTabs: (params: { communityId: string; asGuest?: boolean }) =>
-    callCloud<{ tabs: ArchiveTab[] }>('post', 'listArchiveTabs', params),
+  listArchive: (params: ArchivePostListParams, trace?: PerformanceTrace) =>
+    callCloud<{ posts: any[]; nextCursor: string; hasMore: boolean; topicUnavailable?: boolean }>(
+      'post', 'listArchive', params, trace,
+    ),
+  listArchiveTabs: (params: { communityId: string; asGuest?: boolean }, trace?: PerformanceTrace) =>
+    callCloud<{ tabs: ArchiveTab[] }>('post', 'listArchiveTabs', params, trace),
   search: (params: {
     communityId: string
     query: string

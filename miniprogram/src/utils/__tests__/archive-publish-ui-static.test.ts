@@ -183,6 +183,8 @@ describe('archive publishing entry', () => {
   test('topic switching invalidates stale archive requests', () => {
     const home = read('pages', 'index', 'index.vue')
     expect(home).toContain('const requestEpoch = ++archiveRequestEpoch')
-    expect(home).toContain('requestEpoch !== archiveRequestEpoch')
+    expect(home).toContain('const isRequestCurrent = () => (')
+    expect(home).toContain('requestEpoch === archiveRequestEpoch')
+    expect(home).toContain('if (!isRequestCurrent()) return')
   })
 })
