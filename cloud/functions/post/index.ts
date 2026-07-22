@@ -1052,7 +1052,13 @@ export async function handleListArchive(params: {
   const pageLinks = links.slice(0, limit)
   const loaded = await db.getByIds('posts', pageLinks.map((link) => link.postId)) as any[]
   const byId = new Map(loaded.map((post) => [post._id, post]))
-  const posts = pageLinks.map((link) => byId.get(link.postId)).filter(Boolean)
+  const posts = pageLinks
+    .map((link) => byId.get(link.postId))
+    .filter((post) => post
+      && post.communityId === communityId
+      && post.area === 'archive'
+      && post.status === 'active'
+      && post.auditStatus === 'pass')
   const enrichedPosts = await enrichPostsWithAuthor(posts)
   const last = pageLinks[pageLinks.length - 1]
   return {

@@ -1926,6 +1926,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const post = await db.getById('posts', postId) as any
     if (!post) throw new Error('post not found')
     if (post.status === 'deleted') {
+      if (post.area === 'archive') await updateArchivePostTopicLinks(postId, { status: 'deleted' })
       await schedulePostRagSync({
         postId,
         communityId: post.communityId,
@@ -1942,6 +1943,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       } })
       await schedulePostRagSyncInTransaction(transaction, { postId, communityId: String(post.communityId || ''), sectionId: String(post.sectionId || ''), reason: 'post.deleted', now: new Date().toISOString() })
     })
+    if (post.area === 'archive') await updateArchivePostTopicLinks(postId, { status: 'deleted' })
     await removePostSearchIndex(postId)
     return { success: true }
   }

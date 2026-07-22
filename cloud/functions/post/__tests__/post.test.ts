@@ -2852,6 +2852,7 @@ test('listArchive: returns a cursor-paginated archive feed without section reads
 })
 
 test('listArchive: hydrates a topic page in projection order', async () => {
+  ;(db.getByIds as jest.Mock).mockReset()
   ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
   ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
   ;(db.getByIdOrNull as jest.Mock).mockResolvedValueOnce({ topicKey: '成长', status: 'active' })
@@ -2861,8 +2862,8 @@ test('listArchive: hydrates a topic page in projection order', async () => {
   ])
   ;(db.getByIds as jest.Mock)
     .mockResolvedValueOnce([
-      { _id: 'archive-1', authorId: 'author-1', status: 'active', auditStatus: 'pass' },
-      { _id: 'archive-2', authorId: 'author-2', status: 'active', auditStatus: 'pass' },
+      { _id: 'archive-1', communityId: 'community-1', area: 'archive', authorId: 'author-1', status: 'active', auditStatus: 'pass' },
+      { _id: 'archive-2', communityId: 'community-1', area: 'archive', authorId: 'author-2', status: 'active', auditStatus: 'pass' },
     ])
     .mockResolvedValueOnce([])
 
@@ -2872,6 +2873,34 @@ test('listArchive: hydrates a topic page in projection order', async () => {
   expect(db.queryBefore).toHaveBeenCalledWith('archive_post_topics', {
     communityId: 'community-1', topicKey: '成长', status: 'active', auditStatus: 'pass',
   }, 'sortKey', null, 21)
+})
+
+test('listArchive: never returns posts that violate the archive visibility invariant', async () => {
+  ;(db.getByIds as jest.Mock).mockReset()
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getByIdOrNull as jest.Mock).mockResolvedValueOnce({ topicKey: '成长', status: 'active' })
+  ;(db.queryBefore as jest.Mock).mockResolvedValueOnce([
+    { postId: 'valid', sortKey: '5_valid' },
+    { postId: 'deleted', sortKey: '4_deleted' },
+    { postId: 'rejected', sortKey: '3_rejected' },
+    { postId: 'other-community', sortKey: '2_other-community' },
+    { postId: 'other-area', sortKey: '1_other-area' },
+  ])
+  ;(db.getByIds as jest.Mock).mockImplementation(async (collectionName: string) => collectionName === 'posts'
+    ? [
+      { _id: 'other-area', communityId: 'community-1', area: 'collaboration', authorId: 'author-5', status: 'active', auditStatus: 'pass' },
+      { _id: 'deleted', communityId: 'community-1', area: 'archive', authorId: 'author-2', status: 'deleted', auditStatus: 'pass' },
+      { _id: 'valid', communityId: 'community-1', area: 'archive', authorId: 'author-1', status: 'active', auditStatus: 'pass' },
+      { _id: 'other-community', communityId: 'community-2', area: 'archive', authorId: 'author-4', status: 'active', auditStatus: 'pass' },
+      { _id: 'rejected', communityId: 'community-1', area: 'archive', authorId: 'author-3', status: 'active', auditStatus: 'reject' },
+    ]
+    : [])
+
+  const result = await handleListArchive({ communityId: 'community-1', topicKey: '成长', limit: 20 }, 'test-openid')
+
+  expect(db.getByIds).toHaveBeenCalledWith('posts', ['valid', 'deleted', 'rejected', 'other-community', 'other-area'])
+  expect(result.posts.map((post: any) => post._id)).toEqual(['valid'])
 })
 
 test('listArchive: reports topicUnavailable before reading links for a deleted topic', async () => {
