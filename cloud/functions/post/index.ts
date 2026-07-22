@@ -7,6 +7,7 @@ import { sanitizeContent, validateContentValues, validateRequiredWidgets } from 
 import { auditAndApply, isPostVisibleToMembers } from '../../lib/content-audit'
 import { buildHomeBootstrap, buildHomeFeed } from '../../lib/home-snapshot'
 import { ensureCommunityReadable } from '../../lib/public-community'
+import { parsePerformanceTrace, recordDatabaseStage } from '../../lib/performance-trace'
 import {
   ACTIVITY_INVITE_SYSTEM_KEY,
   ACTIVITY_INVITE_WIDGET_IDS,
@@ -238,15 +239,17 @@ function comparePostListOrder(a: any, b: any): number {
 }
 
 async function getUsersByIds(userIds: string[]) {
-  const usersById: Record<string, any> = {}
-  for (const userId of Array.from(new Set(userIds.filter(Boolean)))) {
-    try {
-      usersById[userId] = await db.getById('users', userId)
-    } catch {
-      usersById[userId] = null
-    }
+  const uniqueIds = Array.from(new Set(userIds.filter(Boolean)))
+  if (uniqueIds.length === 0) return {}
+  const batches: string[][] = []
+  for (let index = 0; index < uniqueIds.length; index += 100) {
+    batches.push(uniqueIds.slice(index, index + 100))
   }
-  return usersById
+  const results = await Promise.allSettled(
+    batches.map((batch) => db.getByIds('users', batch)),
+  )
+  const users = results.flatMap((result) => result.status === 'fulfilled' ? result.value : [])
+  return Object.fromEntries(users.map((user: any) => [user._id, user]))
 }
 
 /**
@@ -1014,11 +1017,16 @@ export async function handleListArchive(params: {
   cursor?: string
   limit?: number
   asGuest?: boolean
+  _trace?: unknown
 }, openid?: string) {
+  const totalStartedAt = Date.now()
+  const trace = parsePerformanceTrace(params._trace)
   const communityId = String(params.communityId || '').trim()
   if (!communityId) throw new Error('communityId 不能为空')
   const viewerId = params.asGuest ? '' : (openid || '')
+  const accessStartedAt = Date.now()
   await ensureCommunityReadable(communityId, viewerId, COMMUNITY_READ_ERROR)
+  recordDatabaseStage(trace, 'post.listArchive', 'community_access', accessStartedAt)
 
   const limit = Number.isFinite(Number(params.limit)) && Number(params.limit) > 0
     ? Math.min(50, Math.floor(Number(params.limit)))
@@ -1027,12 +1035,19 @@ export async function handleListArchive(params: {
   if (params.cursor && !cursor) throw new Error('无效的分页游标')
   const rawTopic = String(params.topicKey || '').trim()
   if (!rawTopic) {
+    const queryStartedAt = Date.now()
     const rows = await db.queryBefore('posts', {
       communityId, area: 'archive', status: 'active', auditStatus: 'pass',
     }, 'sortKey', cursor?.sortKey || null, limit + 1) as any[]
+    recordDatabaseStage(trace, 'post.listArchive', 'posts_query', queryStartedAt, { rowCount: rows.length })
     const page = rows.slice(0, limit)
+    const authorStartedAt = Date.now()
     const enrichedPosts = await enrichPostsWithAuthor(page)
+    recordDatabaseStage(trace, 'post.listArchive', 'users_by_ids', authorStartedAt, {
+      authorCount: new Set(page.map((post) => post.authorId).filter(Boolean)).size,
+    })
     const last = page[page.length - 1]
+    recordDatabaseStage(trace, 'post.listArchive', 'total', totalStartedAt, { postCount: enrichedPosts.length })
     return {
       posts: enrichedPosts,
       hasMore: rows.length > limit,
@@ -1041,15 +1056,29 @@ export async function handleListArchive(params: {
   }
 
   const { topicKey } = normalizeArchiveTopic(rawTopic)
-  const topic = await db.getByIdOrNull<any>('archive_topics', archiveTopicId(communityId, topicKey))
+  const topicAndLinksStartedAt = Date.now()
+  const topicRequest = db.getByIdOrNull<any>('archive_topics', archiveTopicId(communityId, topicKey))
+  const linksResultRequest = (db.queryBefore('archive_post_topics', {
+      communityId, topicKey, status: 'active', auditStatus: 'pass',
+    }, 'sortKey', cursor?.sortKey || null, limit + 1) as Promise<any[]>)
+    .then((rows) => ({ ok: true as const, rows }))
+    .catch((error) => ({ ok: false as const, error }))
+  const topic = await topicRequest
   if (!topic || topic.status === 'deleted') {
+    recordDatabaseStage(trace, 'post.listArchive', 'topic_validation', topicAndLinksStartedAt)
+    recordDatabaseStage(trace, 'post.listArchive', 'total', totalStartedAt, { postCount: 0 })
     return { topicUnavailable: true, posts: [], hasMore: false, nextCursor: '' }
   }
-  const links = await db.queryBefore('archive_post_topics', {
-    communityId, topicKey, status: 'active', auditStatus: 'pass',
-  }, 'sortKey', cursor?.sortKey || null, limit + 1) as any[]
+  const linksResult = await linksResultRequest
+  if (!linksResult.ok) throw linksResult.error
+  const links = linksResult.rows
+  recordDatabaseStage(trace, 'post.listArchive', 'topic_and_links', topicAndLinksStartedAt, {
+    linkCount: links.length,
+  })
   const pageLinks = links.slice(0, limit)
+  const postsStartedAt = Date.now()
   const loaded = await db.getByIds('posts', pageLinks.map((link) => link.postId)) as any[]
+  recordDatabaseStage(trace, 'post.listArchive', 'posts_by_ids', postsStartedAt, { postCount: loaded.length })
   const byId = new Map(loaded.map((post) => [post._id, post]))
   const posts = pageLinks
     .map((link) => byId.get(link.postId))
@@ -1058,8 +1087,13 @@ export async function handleListArchive(params: {
       && post.area === 'archive'
       && post.status === 'active'
       && post.auditStatus === 'pass')
+  const authorStartedAt = Date.now()
   const enrichedPosts = await enrichPostsWithAuthor(posts)
+  recordDatabaseStage(trace, 'post.listArchive', 'users_by_ids', authorStartedAt, {
+    authorCount: new Set(posts.map((post) => post.authorId).filter(Boolean)).size,
+  })
   const last = pageLinks[pageLinks.length - 1]
+  recordDatabaseStage(trace, 'post.listArchive', 'total', totalStartedAt, { postCount: enrichedPosts.length })
   return {
     posts: enrichedPosts,
     hasMore: links.length > limit,

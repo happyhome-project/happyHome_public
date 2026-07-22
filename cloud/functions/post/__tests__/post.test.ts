@@ -2918,6 +2918,102 @@ test('listArchive: hydrates a topic page in projection order', async () => {
   expect(db.queryBefore).toHaveBeenCalledWith('archive_post_topics', {
     communityId: 'community-1', topicKey: '成长', status: 'active', auditStatus: 'pass',
   }, 'sortKey', null, 21)
+  expect(db.getByIds).toHaveBeenNthCalledWith(2, 'users', ['author-2', 'author-1'])
+})
+
+test('listArchive: hydrates fifty unique authors with one batched users query', async () => {
+  const posts = Array.from({ length: 50 }, (_, index) => ({
+    _id: `archive-${index}`,
+    communityId: 'community-1',
+    area: 'archive',
+    authorId: `author-${index}`,
+    status: 'active',
+    auditStatus: 'pass',
+    sortKey: `${String(50 - index).padStart(2, '0')}_archive-${index}`,
+  }))
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.queryBefore as jest.Mock).mockResolvedValueOnce(posts)
+  ;(db.getByIds as jest.Mock).mockResolvedValueOnce(posts.map((post) => ({
+    _id: post.authorId,
+    nickName: post.authorId,
+  })))
+
+  const result = await handleListArchive({ communityId: 'community-1', limit: 50 }, 'test-openid')
+
+  expect(result.posts).toHaveLength(50)
+  expect(db.getByIds).toHaveBeenCalledTimes(1)
+  expect(db.getByIds).toHaveBeenCalledWith('users', posts.map((post) => post.authorId))
+})
+
+test('listArchive: keeps visible posts when batched author hydration fails', async () => {
+  const post = {
+    _id: 'archive-1',
+    communityId: 'community-1',
+    area: 'archive',
+    authorId: 'author-1',
+    status: 'active',
+    auditStatus: 'pass',
+    sortKey: '1_archive-1',
+  }
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.queryBefore as jest.Mock).mockResolvedValueOnce([post])
+  ;(db.getByIds as jest.Mock).mockRejectedValueOnce(new Error('transient users lookup failure'))
+
+  await expect(handleListArchive({ communityId: 'community-1' }, 'test-openid')).resolves.toEqual({
+    posts: [expect.objectContaining({
+      _id: 'archive-1',
+      authorNickname: '',
+      authorAvatarUrl: expect.any(String),
+    })],
+    hasMore: false,
+    nextCursor: expect.any(String),
+  })
+})
+
+test('listArchive: starts topic validation and indexed link lookup in parallel', async () => {
+  ;(db.getByIds as jest.Mock).mockResolvedValue([])
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  let resolveTopic!: (value: any) => void
+  let resolveLinks!: (value: any[]) => void
+  ;(db.getByIdOrNull as jest.Mock).mockReturnValueOnce(new Promise((resolve) => { resolveTopic = resolve }))
+  ;(db.queryBefore as jest.Mock).mockReturnValueOnce(new Promise((resolve) => { resolveLinks = resolve }))
+
+  const pending = handleListArchive({ communityId: 'community-1', topicKey: '成长' }, 'test-openid')
+  await new Promise((resolve) => setImmediate(resolve))
+
+  expect(db.getByIdOrNull).toHaveBeenCalledTimes(1)
+  expect(db.queryBefore).toHaveBeenCalledTimes(1)
+  resolveTopic({ topicKey: '成长', status: 'active' })
+  resolveLinks([])
+  await expect(pending).resolves.toEqual({ posts: [], hasMore: false, nextCursor: '' })
+})
+
+test('listArchive: records sanitized database stages for a traced topic switch', async () => {
+  const info = jest.spyOn(console, 'info').mockImplementation(() => {})
+  ;(db.getByIds as jest.Mock).mockResolvedValue([])
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getByIdOrNull as jest.Mock).mockResolvedValueOnce({ topicKey: '成长', status: 'active' })
+  ;(db.queryBefore as jest.Mock).mockResolvedValueOnce([])
+
+  await handleListArchive({
+    communityId: 'community-1',
+    topicKey: '成长',
+    _trace: { requestId: 'archive-switch-1', stage: 'home.archive.feed', sample: 'warm' },
+  }, 'test-openid')
+
+  const tracePayloads = info.mock.calls
+    .filter(([label]) => label === '[performance.trace]')
+    .map(([, payload]) => String(payload))
+  expect(tracePayloads.join('\n')).toContain('"dbStage":"community_access"')
+  expect(tracePayloads.join('\n')).toContain('"dbStage":"topic_and_links"')
+  expect(tracePayloads.join('\n')).toContain('"dbStage":"total"')
+  expect(tracePayloads.join('\n')).not.toContain('成长')
+  expect(tracePayloads.join('\n')).not.toContain('test-openid')
+  info.mockRestore()
 })
 
 test('listArchive: never returns posts that violate the archive visibility invariant', async () => {
@@ -2948,15 +3044,29 @@ test('listArchive: never returns posts that violate the archive visibility invar
   expect(result.posts.map((post: any) => post._id)).toEqual(['valid'])
 })
 
-test('listArchive: reports topicUnavailable before reading links for a deleted topic', async () => {
+test('listArchive: reports topicUnavailable after the parallel indexed link lookup for a deleted topic', async () => {
   ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
   ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
   ;(db.getByIdOrNull as jest.Mock).mockResolvedValueOnce({ topicKey: '成长', status: 'deleted' })
+  ;(db.queryBefore as jest.Mock).mockResolvedValueOnce([])
 
   await expect(handleListArchive({ communityId: 'community-1', topicKey: '成长' }, 'test-openid')).resolves.toEqual({
     topicUnavailable: true, posts: [], hasMore: false, nextCursor: '',
   })
-  expect(db.queryBefore).not.toHaveBeenCalled()
+  expect(db.queryBefore).toHaveBeenCalledWith('archive_post_topics', {
+    communityId: 'community-1', topicKey: '成长', status: 'active', auditStatus: 'pass',
+  }, 'sortKey', null, 21)
+})
+
+test('listArchive: keeps the unavailable fallback when the speculative deleted-topic link lookup fails', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.getByIdOrNull as jest.Mock).mockResolvedValueOnce({ topicKey: '成长', status: 'deleted' })
+  ;(db.queryBefore as jest.Mock).mockRejectedValueOnce(new Error('transient archive link lookup failure'))
+
+  await expect(handleListArchive({ communityId: 'community-1', topicKey: '成长' }, 'test-openid')).resolves.toEqual({
+    topicUnavailable: true, posts: [], hasMore: false, nextCursor: '',
+  })
 })
 
 test('get: reads an archive post without loading a section', async () => {

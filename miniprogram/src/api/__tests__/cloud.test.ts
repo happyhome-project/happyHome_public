@@ -73,6 +73,23 @@ describe('callCloud', () => {
     })
   })
 
+  test('postApi forwards a bounded performance trace for archive tab requests', async () => {
+    callWebFunction.mockResolvedValue({ posts: [], hasMore: false })
+    vi.stubGlobal('uni', {})
+    const { postApi } = await import('../cloud')
+
+    await (postApi as any).listArchive({ communityId: 'community-1', topicKey: '成长' }, {
+      requestId: 'archive-switch-1', stage: 'home.archive.feed', sample: 'warm',
+    })
+
+    expect(callWebFunction).toHaveBeenCalledWith('post', {
+      action: 'listArchive',
+      communityId: 'community-1',
+      topicKey: '成长',
+      _trace: { requestId: 'archive-switch-1', stage: 'home.archive.feed', sample: 'warm' },
+    })
+  })
+
   test('postApi requests server-owned upload paths for member videos and covers', async () => {
     callWebFunction.mockResolvedValue({ cloudPath: 'posts/member-videos/scope/video.mp4', fileId: 'cloud://env/posts/member-videos/scope/video.mp4' })
     vi.stubGlobal('uni', {})

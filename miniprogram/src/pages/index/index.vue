@@ -564,6 +564,12 @@ const archiveCursor = ref('')
 const archiveHasMore = ref(false)
 const archiveLoading = ref(false)
 const archiveError = ref('')
+type ArchiveFirstPageSnapshot = {
+  columns: ArchiveFeedColumns
+  cursor: string
+  hasMore: boolean
+}
+const archiveFirstPageCache = new Map<string, ArchiveFirstPageSnapshot>()
 const homePageScrollTop = ref(0)
 const archivePreviewMinHeightPx = ref(0)
 const showHomePullRefreshHint = ref(false)
@@ -1306,11 +1312,20 @@ function openHomeEmptyPublish() {
 
 async function loadArchiveFeed(
   reset = false,
-  options: { preserveVisible?: boolean } = {},
+  options: { preserveVisible?: boolean; refreshTabs?: boolean; cacheHit?: boolean } = {},
 ): Promise<void> {
   const communityId = communityStore.currentCommunityId || ''
   if (!communityId || (!reset && (archiveRequestPending || !archiveHasMore.value))) return
   const requestEpoch = ++archiveRequestEpoch
+  const requestId = createPerformanceRequestId('archive-feed')
+  const requestStartedAt = Date.now()
+  const viewerCacheScope = archiveViewerCacheScope()
+  const isRequestCurrent = () => (
+    requestEpoch === archiveRequestEpoch
+    && communityId === communityStore.currentCommunityId
+    && viewerCacheScope === archiveViewerCacheScope()
+  )
+  const refreshTabs = reset && options.refreshTabs !== false
   const preserveVisibleArchive = Boolean(
     reset &&
     options.preserveVisible &&
@@ -1323,6 +1338,14 @@ async function loadArchiveFeed(
   markHomeStartupStage('home.archive.request.start', {
     reset,
     preserveVisible: preserveVisibleArchive,
+    refreshTabs,
+    cacheHit: options.cacheHit === true,
+  })
+  markClientDiagnosticStage('home.archive.switch.request', {
+    requestId,
+    reset,
+    refreshTabs,
+    cacheHit: options.cacheHit === true,
   })
   try {
     let nextArchiveTabs = archiveTabs.value
@@ -1334,34 +1357,49 @@ async function loadArchiveFeed(
         archiveCursor.value = ''
       }
       const requestedTopic = nextArchiveTopic
-      const archiveResults = await Promise.all([
-        postApi.listArchiveTabs({ communityId, asGuest: !userStore.isLoggedIn }),
-        postApi.listArchive({
-          communityId,
-          topicKey: requestedTopic || undefined,
-          cursor: undefined,
-          limit: 20,
-          asGuest: !userStore.isLoggedIn,
-        }),
-      ])
-      const tabResult = archiveResults[0]
-      const initialResult = archiveResults[1]
-      markHomeStartupStage('home.archive.tabs.received', {
-        tabCount: Array.isArray(tabResult.tabs) ? tabResult.tabs.length : 0,
+      const feedRequest = postApi.listArchive({
+        communityId,
+        topicKey: requestedTopic || undefined,
+        cursor: undefined,
+        limit: 20,
+        asGuest: !userStore.isLoggedIn,
+      }, {
+        requestId,
+        stage: 'home.archive.feed',
+        sample: archiveCommunityId.value === communityId ? 'warm' : 'cold',
       })
-      if (requestEpoch !== archiveRequestEpoch || communityId !== communityStore.currentCommunityId) return
-      nextArchiveTabs = Array.isArray(tabResult.tabs) && tabResult.tabs.length
-        ? tabResult.tabs.slice(0, 8)
-        : [{ topicKey: '', displayName: '全部' }]
-      if (!nextArchiveTabs.some(tab => tab.topicKey === nextArchiveTopic)) nextArchiveTopic = ''
-      result = initialResult
-      if (requestedTopic && !nextArchiveTopic) {
-        result = await postApi.listArchive({
-          communityId,
-          cursor: undefined,
-          limit: 20,
-          asGuest: !userStore.isLoggedIn,
+      if (refreshTabs) {
+        const [tabResult, initialResult] = await Promise.all([
+          postApi.listArchiveTabs({ communityId, asGuest: !userStore.isLoggedIn }, {
+            requestId,
+            stage: 'home.archive.tabs',
+            sample: archiveCommunityId.value === communityId ? 'warm' : 'cold',
+          }),
+          feedRequest,
+        ])
+        markHomeStartupStage('home.archive.tabs.received', {
+          tabCount: Array.isArray(tabResult.tabs) ? tabResult.tabs.length : 0,
         })
+        if (!isRequestCurrent()) return
+        nextArchiveTabs = Array.isArray(tabResult.tabs) && tabResult.tabs.length
+          ? tabResult.tabs.slice(0, 8)
+          : [{ topicKey: '', displayName: '全部' }]
+        if (!nextArchiveTabs.some(tab => tab.topicKey === nextArchiveTopic)) nextArchiveTopic = ''
+        result = initialResult
+        if (requestedTopic && !nextArchiveTopic) {
+          result = await postApi.listArchive({
+            communityId,
+            cursor: undefined,
+            limit: 20,
+            asGuest: !userStore.isLoggedIn,
+          }, {
+            requestId,
+            stage: 'home.archive.feed.fallback',
+            sample: 'warm',
+          })
+        }
+      } else {
+        result = await feedRequest
       }
     } else {
       result = await postApi.listArchive({
@@ -1370,34 +1408,78 @@ async function loadArchiveFeed(
         cursor: archiveCursor.value || undefined,
         limit: 20,
         asGuest: !userStore.isLoggedIn,
+      }, {
+        requestId,
+        stage: 'home.archive.feed.more',
+        sample: 'warm',
       })
     }
+    markClientDiagnosticStage('home.archive.switch.feed.received', {
+      requestId,
+      requestDurationMs: Math.max(0, Date.now() - requestStartedAt),
+      postCount: Array.isArray(result.posts) ? result.posts.length : 0,
+    })
     markHomeStartupStage('home.archive.firstPage.received', {
       postCount: Array.isArray(result.posts) ? result.posts.length : 0,
     })
-    if (requestEpoch !== archiveRequestEpoch || communityId !== communityStore.currentCommunityId) return
+    if (!isRequestCurrent()) return
     if (result.topicUnavailable && nextArchiveTopic) {
-      if (!reset) return loadArchiveFeed(true, { preserveVisible: true })
+      if (!refreshTabs) return loadArchiveFeed(true, { preserveVisible: true, refreshTabs: true })
+      if (!reset) return loadArchiveFeed(true, { preserveVisible: true, refreshTabs: true })
       nextArchiveTopic = ''
       result = await postApi.listArchive({
         communityId,
         cursor: undefined,
         limit: 20,
         asGuest: !userStore.isLoggedIn,
+      }, {
+        requestId,
+        stage: 'home.archive.feed.fallback',
+        sample: 'warm',
       })
-      if (requestEpoch !== archiveRequestEpoch || communityId !== communityStore.currentCommunityId) return
+      if (!isRequestCurrent()) return
     }
     const nextArchiveColumns = appendArchivePage(reset ? [[], []] : archiveColumns.value, result.posts || [])
-    await resolveFeedCovers(nextArchiveColumns, resolveCloudFileUrls)
-    if (requestEpoch !== archiveRequestEpoch || communityId !== communityStore.currentCommunityId) return
     if (reset) archiveTabs.value = nextArchiveTabs
     selectedArchiveTopic.value = nextArchiveTopic
     archiveColumns.value = nextArchiveColumns
     archiveCursor.value = String(result.nextCursor || '')
     archiveHasMore.value = Boolean(result.hasMore)
     archiveCommunityId.value = communityId
+    if (reset) {
+      archiveFirstPageCache.set(archiveFirstPageCacheKey(viewerCacheScope, communityId, nextArchiveTopic), {
+        columns: nextArchiveColumns,
+        cursor: archiveCursor.value,
+        hasMore: archiveHasMore.value,
+      })
+    }
+    markClientDiagnosticStage('home.archive.switch.content.committed', {
+      requestId,
+      totalDurationMs: Math.max(0, Date.now() - requestStartedAt),
+      postCount: Array.isArray(result.posts) ? result.posts.length : 0,
+    })
+    // Card text/layout is the user-visible switch boundary. Temporary media URLs hydrate afterward.
+    const coverStartedAt = Date.now()
+    void resolveFeedCovers(nextArchiveColumns, resolveCloudFileUrls).then(() => {
+      if (!isRequestCurrent()) return
+      archiveColumns.value = nextArchiveColumns.map(column => [...column]) as ArchiveFeedColumns
+      if (reset) {
+        archiveFirstPageCache.set(archiveFirstPageCacheKey(viewerCacheScope, communityId, nextArchiveTopic), {
+          columns: archiveColumns.value,
+          cursor: archiveCursor.value,
+          hasMore: archiveHasMore.value,
+        })
+      }
+      markClientDiagnosticStage('home.archive.switch.covers.resolved', {
+        requestId,
+        coverDurationMs: Math.max(0, Date.now() - coverStartedAt),
+        totalDurationMs: Math.max(0, Date.now() - requestStartedAt),
+      })
+    }).catch((error) => {
+      clientLog('warn', 'home.archive.covers.resolve.fail', { requestId, error })
+    })
   } catch (error) {
-    if (requestEpoch !== archiveRequestEpoch) return
+    if (!isRequestCurrent()) return
     archiveError.value = '加载失败，请重试'
     clientLog('error', 'home.archive.feed.fail', { communityId, topicKey: selectedArchiveTopic.value, error })
   } finally {
@@ -1408,11 +1490,35 @@ async function loadArchiveFeed(
   }
 }
 
+function archiveViewerCacheScope() {
+  return userStore.isLoggedIn && userStore.openId ? `user:${userStore.openId}` : 'guest'
+}
+
+function archiveFirstPageCacheKey(viewerScope: string, communityId: string, topicKey: string) {
+  return `${viewerScope}:${communityId}:${topicKey || '__all__'}`
+}
+
 function selectArchiveTopic(topicKey: string) {
   if (topicKey === selectedArchiveTopic.value) return
   selectedArchiveTopic.value = topicKey
-  archiveHasMore.value = true
-  void loadArchiveFeed(true, { preserveVisible: true })
+  const cached = archiveFirstPageCache.get(archiveFirstPageCacheKey(
+    archiveViewerCacheScope(),
+    communityStore.currentCommunityId || '',
+    topicKey,
+  ))
+  if (cached) {
+    archiveColumns.value = cached.columns
+    archiveCursor.value = cached.cursor
+    archiveHasMore.value = cached.hasMore
+    archiveCommunityId.value = communityStore.currentCommunityId || ''
+  } else {
+    archiveHasMore.value = true
+  }
+  void loadArchiveFeed(true, {
+    preserveVisible: Boolean(cached),
+    refreshTabs: false,
+    cacheHit: Boolean(cached),
+  })
 }
 
 function onArchiveCardTap(card: ArchiveFeedCard) {
@@ -1761,6 +1867,7 @@ function invalidateArchiveForCommunityTransition(nextCommunityId: string) {
   archiveRequestPending = false
   archiveLoading.value = false
   archiveError.value = ''
+  archiveFirstPageCache.clear()
   archiveTabs.value = [{ topicKey: '', displayName: '全部' }]
   selectedArchiveTopic.value = ''
   archiveColumns.value = [[], []]
