@@ -45,6 +45,20 @@ describe('text note presentation', () => {
     expect(getTextNoteCard({ content: { text_title: '标题', text_body: { text: '正文' } } }).theme).toBe('paper')
   })
 
+  test('builds native archive text cards from the persisted title and body keys', () => {
+    expect(getTextNoteCard({
+      content: {
+        title: '手机端文字测试',
+        body: buildRichNoteContentFromMarkdown('正文必须进入文字封面'),
+      },
+      presentation: { textNoteTheme: 'mint' },
+    })).toEqual({
+      title: '手机端文字测试',
+      body: '正文必须进入文字封面',
+      theme: 'mint',
+    })
+  })
+
   test('extracts the fixed title and rich-note text first paragraph', () => {
     expect(extractTextNoteContent({
       text_title: '  周末邻里读书会  ',

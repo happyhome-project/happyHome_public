@@ -161,7 +161,7 @@ import VideoPlayerCard from './widgets/VideoPlayerCard.vue'
 import { formatWidgetValue, resolvePostDetailTitle } from '../utils/widget'
 import { resolveWidgetLabel } from '../utils/widget-form'
 import { isRichNoteEmpty, normalizeRichNoteContent } from '../utils/rich-note'
-import { extractTextNoteFullBody, getTextNoteCard, needsTextNoteFullBody } from '../utils/text-note'
+import { extractTextNoteFullBody, getTextNoteBodyValue, getTextNoteCard, needsTextNoteFullBody } from '../utils/text-note'
 import { useAudioStore } from '../store/audio'
 
 const props = defineProps<{
@@ -199,8 +199,9 @@ const authorAvatarUrl = computed(() => String(props.post?.authorAvatarUrl || '')
 const publishDate = computed(() => formatPostDate(props.post?.createdAt))
 const isTextNoteDetail = computed(() => props.section?.displayTemplate === 'text_note')
 const textNoteCard = computed(() => getTextNoteCard(props.post))
-const textNoteFullBody = computed(() => extractTextNoteFullBody(props.post?.content?.text_body))
-const textNoteHasFullBody = computed(() => isTextNoteDetail.value && needsTextNoteFullBody(props.post?.content?.text_body))
+const textNoteBodyValue = computed(() => getTextNoteBodyValue(props.post?.content))
+const textNoteFullBody = computed(() => extractTextNoteFullBody(textNoteBodyValue.value))
+const textNoteHasFullBody = computed(() => isTextNoteDetail.value && needsTextNoteFullBody(textNoteBodyValue.value))
 
 const titleResolution = computed(() => resolvePostDetailTitle(props.post, props.section))
 const titleWidget = computed(() => {
@@ -271,7 +272,7 @@ const detailFacts = computed(() => splitFacts(factCandidates.value).detail)
 const bodyBlocks = computed<BodyBlock[]>(() => {
   const blocks: BodyBlock[] = []
   sortedWidgets.value.forEach((widget) => {
-    if (isTextNoteDetail.value && widget.widgetId === 'text_body') return
+    if (isTextNoteDetail.value && (widget.widgetId === 'text_body' || widget.widgetId === 'body' || widget.fieldKey === 'body')) return
     if ([titleWidget.value?.widgetId, leadWidget.value?.widgetId].includes(widget.widgetId)) return
     const label = resolveWidgetLabel(widget)
     const title = bodyBlockTitle(label)
