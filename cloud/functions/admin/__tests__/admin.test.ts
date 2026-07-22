@@ -1889,13 +1889,18 @@ test('post.deleteAdmin: clears pin and featured flags', async () => {
 })
 
 test('post.deleteAdmin: deactivates archive topic links when deleting an archive post', async () => {
-  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+  ;(db.getById as jest.Mock).mockResolvedValue({
     _id: 'archive-post-1',
     communityId: 'community-1',
     area: 'archive',
     status: 'active',
+    topics: ['教育成长'],
+    auditStatus: 'pass',
+    createdAt: '2026-07-22T00:00:00.000Z',
   })
-  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'archive-link-1', postId: 'archive-post-1' }])
+  ;(db.query as jest.Mock).mockImplementation(async (collectionName: string) => collectionName === 'archive_topics'
+    ? [{ topicKey: 'education', displayName: '教育成长', origins: ['admin'], enabled: true, status: 'active', createdAt: '2026-01-01T00:00:00.000Z' }]
+    : [])
 
   await main({
     action: 'post.deleteAdmin',
@@ -1903,8 +1908,8 @@ test('post.deleteAdmin: deactivates archive topic links when deleting an archive
     _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
   })
 
-  expect(db.updateById).toHaveBeenCalledWith('archive_post_topics', 'archive-link-1', expect.objectContaining({
-    status: 'deleted', updatedAt: expect.any(String),
+  expect(db.setById).toHaveBeenCalledWith('archive_post_topics', expect.stringMatching(/^apt_/), expect.objectContaining({
+    postId: 'archive-post-1', topicKey: 'education', status: 'deleted', auditStatus: 'pass',
   }))
   expect(db.updateWhere).not.toHaveBeenCalledWith('archive_post_topics', expect.anything(), expect.anything())
 })

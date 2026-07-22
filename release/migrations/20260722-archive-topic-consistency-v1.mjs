@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 
 import { planArchiveTopicConsistencyRepair } from '../../scripts/lib/archive-topic-consistency-migration.mjs'
 
-const PLANNER_SHA256 = '8de9f5976b7c69eed7399de0c7ec00a4257439383927045b1761602c169d7e7c'
+const PLANNER_SHA256 = '89b5c678340166c726396844d36f4f8adaaa8c3eac4e768291e3bab054356732'
 
 function normalizedTextDigest(url) {
   return createHash('sha256').update(readFileSync(url, 'utf8').replace(/\r\n/g, '\n')).digest('hex')

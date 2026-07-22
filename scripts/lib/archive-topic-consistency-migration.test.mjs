@@ -86,3 +86,19 @@ test('an applied repair produces an empty residual plan with the same migration 
 
   assert.deepEqual(residual.summary, { topicUpserts: 0, linkUpserts: 0, linkDeletes: 0, communityUpdates: 0 })
 })
+
+test('a disabled stable admin topic stays disabled when merging an enabled organic duplicate', () => {
+  const plan = planArchiveTopicConsistencyRepair({
+    communities: [{ _id: 'community-1', archiveTopicOrder: ['家有小孩'], archiveTopicOrderRevision: 1 }],
+    topics: [
+      { _id: 'admin', communityId: 'community-1', topicKey: '家有小孩', displayName: '教育成长', origins: ['admin'], enabled: false, status: 'active', createdAt: '2026-01-01' },
+      { _id: 'organic', communityId: 'community-1', topicKey: '教育成长', displayName: '教育成长', origins: ['organic'], enabled: true, status: 'active', createdAt: '2026-07-22' },
+    ],
+    posts: [],
+    links: [],
+    now: '2026-07-22T03:00:00.000Z',
+  })
+
+  const canonical = plan.topicUpserts.find((item) => item.id === 'admin')
+  assert.equal(canonical.data.enabled, false)
+})

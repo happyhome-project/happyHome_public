@@ -154,7 +154,9 @@ export function planArchiveTopicConsistencyRepair({ communities, topics, posts, 
       const topicData = {
         ...withoutId(canonical),
         origins: unique(group.flatMap((topic) => topic.origins || [])),
-        enabled: group.some((topic) => topic.enabled !== false),
+        enabled: canonical.origins?.some((origin) => origin === 'admin' || origin === 'legacy')
+          ? canonical.enabled !== false
+          : group.some((topic) => topic.enabled !== false),
         status: 'active',
         recentScore: group.reduce((total, topic) => total + Number(topic.recentScore || 0), 0),
         recentPostCount: Number(visibleCounts.get(canonicalKey) || 0),

@@ -74,7 +74,14 @@ import {
 import { resolveAuthorAvatarUrl } from '../../shared/simulated-author-avatars'
 import { resolvePostAuthorNickname } from '../../shared/post-author'
 import { normalizeArchiveTopic } from '../../shared/archive-topics'
-import { archiveTopicId, buildArchiveSortKey, syncArchivePostTopics, updateArchivePostTopicLinks } from '../../lib/archive-topic-index'
+import {
+  archiveTopicId,
+  buildArchiveSortKey,
+  prepareArchivePostTopicReconciliation,
+  reconcileArchivePostTopicsInTransaction,
+  syncArchivePostTopics,
+  updateArchivePostTopicLinks,
+} from '../../lib/archive-topic-index'
 import { parseArchivePostCreateInput, type ArchivePostFormat } from '../../shared/archive-post'
 import {
   collaborationTemplateAsSection,
@@ -1946,18 +1953,35 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       await removePostSearchIndex(postId)
       return { success: true, alreadyDeleted: true }
     }
-    const queriedArchiveTopicLinks = post.area === 'archive'
-      ? await db.query('archive_post_topics', { postId }, { limit: 100 }) as any[]
-      : []
-    const archiveTopicLinks = Array.isArray(queriedArchiveTopicLinks) ? queriedArchiveTopicLinks : []
+    const deletionProjection = post.area === 'archive' ? {
+      _id: postId,
+      communityId: String(post.communityId || ''),
+      topics: Array.isArray(post.topics) ? post.topics.map(String) : [],
+      createdAt: String(post.createdAt || new Date().toISOString()),
+      status: 'deleted',
+      auditStatus: String(post.auditStatus || 'pass'),
+    } : null
+    const preparedDeletion = deletionProjection
+      ? await prepareArchivePostTopicReconciliation(deletionProjection)
+      : null
     await db.runTransaction(async transaction => {
+      const currentPost = deletionProjection
+        ? await db.transactionGetByIdOrNull<any>(transaction, 'posts', postId)
+        : post
+      if (!currentPost) throw new Error('post not found')
+      if (deletionProjection && JSON.stringify(currentPost.topics || []) !== JSON.stringify(deletionProjection.topics || [])) {
+        throw new Error('post topics changed during delete; retry required')
+      }
       await transaction.collection('posts').doc(postId).update({ data: {
         status: 'deleted', isPinned: false, pinnedAt: '', pinnedByAccountId: '',
         isFeatured: false, featuredAt: '', featuredByAccountId: '',
       } })
       const now = new Date().toISOString()
-      for (const link of archiveTopicLinks) {
-        await transaction.collection('archive_post_topics').doc(link._id).update({ data: { status: 'deleted', updatedAt: now } })
+      if (deletionProjection && preparedDeletion) {
+        await reconcileArchivePostTopicsInTransaction(transaction, {
+          ...deletionProjection,
+          auditStatus: String(currentPost.auditStatus || deletionProjection.auditStatus),
+        }, preparedDeletion, now)
       }
       await schedulePostRagSyncInTransaction(transaction, { postId, communityId: String(post.communityId || ''), sectionId: String(post.sectionId || ''), reason: 'post.deleted', now })
     })

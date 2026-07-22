@@ -1824,14 +1824,17 @@ test('delete: clears pin and featured flags', async () => {
 test('delete: retires archive topic links inside the post deletion transaction', async () => {
   ;(db.getById as jest.Mock).mockResolvedValueOnce({
     _id: 'archive-atomic-delete', authorId: 'test-openid', status: 'active',
-    communityId: 'community-1', area: 'archive',
+    communityId: 'community-1', area: 'archive', topics: ['教育成长'], auditStatus: 'pass',
+    createdAt: '2026-07-22T00:00:00.000Z',
   })
-  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'archive-link-1', postId: 'archive-atomic-delete' }])
+  ;(db.query as jest.Mock).mockImplementation(async (collectionName: string) => collectionName === 'archive_topics'
+    ? [{ topicKey: 'education', displayName: '教育成长', origins: ['admin'], enabled: true, status: 'active', createdAt: '2026-01-01T00:00:00.000Z' }]
+    : [])
 
   await handleDelete({ postId: 'archive-atomic-delete' }, 'test-openid')
 
-  expect(db.updateById).toHaveBeenCalledWith('archive_post_topics', 'archive-link-1', expect.objectContaining({
-    status: 'deleted', updatedAt: expect.any(String),
+  expect(db.setById).toHaveBeenCalledWith('archive_post_topics', expect.stringMatching(/^apt_/), expect.objectContaining({
+    postId: 'archive-atomic-delete', topicKey: 'education', status: 'deleted', auditStatus: 'pass',
   }))
   expect(db.updateWhere).not.toHaveBeenCalledWith('archive_post_topics', expect.anything(), expect.anything())
 })
