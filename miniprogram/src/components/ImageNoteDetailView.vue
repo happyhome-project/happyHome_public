@@ -1,10 +1,10 @@
 <template>
   <view class="image-note-detail">
-    <view v-if="detail.images.length" class="image-note-hero">
+    <view v-if="media.length" class="image-note-hero">
       <swiper
         class="image-note-swiper"
         :current="currentImageIndex"
-        :circular="detail.images.length > 1"
+        :circular="media.length > 1"
         :duration="260"
         @change="onImageChange"
         @touchstart="onHeroPointerStart"
@@ -16,20 +16,29 @@
         @mouseup="onHeroPointerEnd"
       >
         <swiper-item
-          v-for="(image, index) in detail.images"
-          :key="`${image}-${index}`"
+          v-for="(item, index) in media"
+          :key="`${item.source}-${index}`"
           class="image-note-slide"
         >
+          <view
+            v-if="item.state !== 'ready' || failedImageIndexes.includes(index)"
+            class="image-note-image-fallback"
+          >
+            <text>{{ item.state === 'pending' ? '图片加载中...' : '图片暂不可用' }}</text>
+          </view>
           <image
-            :src="image"
+            v-else
+            :src="item.src"
             class="image-note-image"
             mode="aspectFit"
+            @load="onImageLoad(item.source, index)"
+            @error="onImageError(item.source, index)"
             @tap="previewImage(index)"
           />
         </swiper-item>
       </swiper>
-      <view v-if="detail.images.length > 1" class="image-note-image-count">
-        <text>{{ currentImageIndex + 1 }}/{{ detail.images.length }}</text>
+      <view v-if="media.length > 1" class="image-note-image-count">
+        <text>{{ currentImageIndex + 1 }}/{{ media.length }}</text>
       </view>
     </view>
 
@@ -37,9 +46,9 @@
       <text>图片暂不可用</text>
     </view>
 
-    <view v-if="detail.images.length > 1" class="image-note-dots" aria-hidden="true">
+    <view v-if="media.length > 1" class="image-note-dots" aria-hidden="true">
       <text
-        v-for="(_image, index) in detail.images"
+        v-for="(_item, index) in media"
         :key="`image-note-dot-${index}`"
         class="image-note-dot"
         :class="{ active: index === currentImageIndex }"
@@ -95,19 +104,27 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { ImageNoteDetail, ImageNoteLocation } from '../utils/image-note'
+import type {
+  ImageNoteDetail,
+  ImageNoteLocation,
+  ImageNoteMediaItem,
+} from '../utils/image-note'
 import RichNoteRenderer from './widgets/RichNoteRenderer.vue'
 
 const props = defineProps<{
   detail: ImageNoteDetail
+  media: ImageNoteMediaItem[]
 }>()
 
 const emit = defineEmits<{
   (event: 'open-location', location: ImageNoteLocation): void
+  (event: 'media-load', source: string): void
+  (event: 'media-error', source: string): void
 }>()
 
 const HERO_SWIPE_THRESHOLD_PX = 8
 const currentImageIndex = ref(0)
+const failedImageIndexes = ref<number[]>([])
 let heroPointerStartX = 0
 let heroPointerStartY = 0
 let heroHasPointerStart = false
@@ -118,7 +135,7 @@ const authorInitial = computed(() => props.detail.authorName.slice(0, 1) || '邻
 const publishDate = computed(() => formatPostDate(props.detail.createdAt))
 
 watch(
-  () => props.detail.images.length,
+  () => props.media.length,
   (length) => {
     if (length === 0 || currentImageIndex.value >= length) currentImageIndex.value = 0
   },
@@ -163,15 +180,31 @@ function getPointerPoint(event: any) {
   return { x, y }
 }
 
+function onImageLoad(source: string, index: number) {
+  failedImageIndexes.value = failedImageIndexes.value.filter((item) => item !== index)
+  emit('media-load', source)
+}
+
+function onImageError(source: string, index: number) {
+  if (!failedImageIndexes.value.includes(index)) {
+    failedImageIndexes.value = [...failedImageIndexes.value, index]
+  }
+  emit('media-error', source)
+}
+
 function previewImage(index: number) {
-  if (!props.detail.images.length) return
   if (heroSuppressNextPreview) {
     heroSuppressNextPreview = false
     return
   }
+  const current = props.media[index]
+  if (!current || current.state !== 'ready' || !current.src) return
+  const urls = props.media
+    .filter((item) => item.state === 'ready' && item.src)
+    .map((item) => item.src)
   uni.previewImage({
-    current: props.detail.images[index],
-    urls: props.detail.images,
+    current: current.src,
+    urls,
   })
 }
 
@@ -216,6 +249,17 @@ function formatPostDate(value: string): string {
   width: 100%;
   height: 100%;
   background: var(--hh-color-card);
+}
+
+.image-note-image-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(145deg,#f3f3f3,#fafafa);
+  color: var(--hh-color-text-tertiary);
+  font-size: 25rpx;
 }
 
 .image-note-image-count {

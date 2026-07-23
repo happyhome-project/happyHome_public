@@ -27,8 +27,12 @@
         <text class="origin-action">查看原帖 ›</text>
       </view>
       <ImageNoteDetailView
+        :key="`image-note-${detailMediaRecoveryVersion}`"
         v-if="isImageNoteDetail && imageNoteDetail"
         :detail="imageNoteDetail"
+        :media="imageNoteMediaItems"
+        @media-load="onDetailMediaLoad"
+        @media-error="onDetailMediaError"
         @open-location="openImageNoteLocation"
       />
       <GuideRouteDetailView
@@ -227,11 +231,12 @@ import ImageNoteDetailView from '../../components/ImageNoteDetailView.vue'
 import DefaultDetailView from '../../components/DefaultDetailView.vue'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
-import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
+import { refreshCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { buildGuideRouteDetail } from '../../utils/guide-detail'
 import {
+  buildImageNoteMediaItems,
   buildImageNoteDetail,
   isImageNoteSectionContract,
   type ImageNoteLocation,
@@ -261,6 +266,10 @@ const rosterMeta = reactive({
 })
 const resolvedAvatarUrls = reactive<Record<string, string>>({})
 const resolvedDetailMediaUrls = reactive<Record<string, string>>({})
+const settledDetailMediaUrls = reactive<Record<string, boolean>>({})
+const detailMediaRecoveryVersion = ref(0)
+const detailMediaRecoveryPending = new Set<string>()
+const detailMediaRecoveryAttempts = new Map<string, number>()
 const cancelBusy = ref(false)
 const activityInviteState = ref<any>(null)
 const activityInviteLoading = ref(false)
@@ -318,6 +327,15 @@ const guideRouteDetail = computed(() => {
 const imageNoteDetail = computed(() => {
   if (!renderPost.value || !section.value || !isImageNoteDetail.value) return null
   return buildImageNoteDetail(renderPost.value, section.value)
+})
+const imageNoteMediaItems = computed(() => {
+  if (!post.value || !section.value || !isImageNoteDetail.value) return []
+  const canonicalDetail = buildImageNoteDetail(post.value, section.value)
+  return buildImageNoteMediaItems(
+    canonicalDetail.images,
+    resolvedDetailMediaUrls,
+    settledDetailMediaUrls,
+  )
 })
 const regularWidgets = computed(() =>
   (section.value?.widgets || []).filter((widget: any) => !['attendance', 'admin_notice', 'activity_invite'].includes(widget.type))
@@ -454,7 +472,11 @@ async function loadPost(postId: string) {
   }
   loading.value = true
   loadError.value = ''
+  detailMediaRecoveryVersion.value = 0
+  detailMediaRecoveryPending.clear()
+  detailMediaRecoveryAttempts.clear()
   clearRecord(resolvedDetailMediaUrls)
+  clearRecord(settledDetailMediaUrls)
   clientLog('info', 'detail.load.start', {
     postId,
     cachedSectionCount: communityStore.currentSections.length,
@@ -545,7 +567,7 @@ async function loadPost(postId: string) {
   }
 }
 
-function clearRecord(record: Record<string, string>) {
+function clearRecord(record: Record<string, unknown>) {
   Object.keys(record).forEach((key) => {
     delete record[key]
   })
@@ -579,13 +601,16 @@ async function resolveDetailMediaUrls() {
     urlCount: urls.length,
   })
   if (urls.length === 0) return
+  urls.forEach((url) => {
+    resolvedDetailMediaUrls[url] = ''
+    settledDetailMediaUrls[url] = false
+  })
   const primaryUrl = urls[0]
   const remainingUrls = urls.slice(1)
   let resolvedCount = 0
   try {
     const primaryResolved = await resolveCloudFileUrls([primaryUrl])
-    Object.assign(resolvedDetailMediaUrls, primaryResolved)
-    resolvedCount += Object.keys(primaryResolved).length
+    resolvedCount += applyDetailMediaResolution(primaryResolved)
   } catch (error) {
     clientLog('warn', 'detail.media.resolve.primary.fail', {
       postId: currentPostId.value,
@@ -595,8 +620,7 @@ async function resolveDetailMediaUrls() {
   if (remainingUrls.length) {
     try {
       const resolved = await resolveCloudFileUrls(remainingUrls)
-      Object.assign(resolvedDetailMediaUrls, resolved)
-      resolvedCount += Object.keys(resolved).length
+      resolvedCount += applyDetailMediaResolution(resolved)
     } catch (error) {
       clientLog('warn', 'detail.media.resolve.rest.fail', {
         postId: currentPostId.value,
@@ -609,6 +633,75 @@ async function resolveDetailMediaUrls() {
     postId: currentPostId.value,
     resolvedCount,
   })
+  urls.forEach((source) => {
+    if (!settledDetailMediaUrls[source]) settledDetailMediaUrls[source] = true
+  })
+  urls
+    .filter((source) => !resolvedDetailMediaUrls[source])
+    .forEach((source) => {
+      void onDetailMediaError(source)
+    })
+}
+
+function applyDetailMediaResolution(resolved: Record<string, string>): number {
+  let resolvedCount = 0
+  Object.entries(resolved).forEach(([source, candidate]) => {
+    const url = String(candidate || '').trim()
+    resolvedDetailMediaUrls[source] = url && !url.startsWith('cloud://') ? url : ''
+    settledDetailMediaUrls[source] = true
+    if (resolvedDetailMediaUrls[source]) resolvedCount += 1
+  })
+  return resolvedCount
+}
+
+function canonicalDetailMediaSource(value: string): string {
+  const current = String(value || '').trim()
+  if (current.startsWith('cloud://')) return current
+  return Object.entries(resolvedDetailMediaUrls)
+    .find(([, resolved]) => resolved === current)?.[0] || ''
+}
+
+function onDetailMediaLoad(value: string) {
+  const source = canonicalDetailMediaSource(value)
+  if (source) detailMediaRecoveryAttempts.delete(source)
+}
+
+async function onDetailMediaError(value: string) {
+  const source = canonicalDetailMediaSource(value)
+  if (!source || detailMediaRecoveryPending.has(source)) return
+  let attempts = detailMediaRecoveryAttempts.get(source) || 0
+  if (attempts >= 2) {
+    settledDetailMediaUrls[source] = true
+    return
+  }
+  detailMediaRecoveryPending.add(source)
+  clientLog('warn', 'detail.media.load.fail', {
+    postId: currentPostId.value,
+    attempt: attempts + 1,
+  })
+  try {
+    while (attempts < 2) {
+      attempts += 1
+      detailMediaRecoveryAttempts.set(source, attempts)
+      settledDetailMediaUrls[source] = false
+      resolvedDetailMediaUrls[source] = ''
+      const refreshed = await refreshCloudFileUrl(source)
+      if (refreshed && !refreshed.startsWith('cloud://')) {
+        resolvedDetailMediaUrls[source] = refreshed
+        break
+      }
+    }
+  } catch (error) {
+    clientLog('warn', 'detail.media.refresh.fail', {
+      postId: currentPostId.value,
+      attempt: attempts,
+      error,
+    })
+  } finally {
+    settledDetailMediaUrls[source] = true
+    detailMediaRecoveryVersion.value += 1
+    detailMediaRecoveryPending.delete(source)
+  }
 }
 
 function replaceResolvedMediaUrls(value: unknown, replacements: Record<string, string>): any {
@@ -616,7 +709,7 @@ function replaceResolvedMediaUrls(value: unknown, replacements: Record<string, s
     let next = value
     Object.keys(replacements).forEach((rawUrl) => {
       const resolvedUrl = replacements[rawUrl]
-      if (rawUrl && resolvedUrl && rawUrl !== resolvedUrl) {
+      if (rawUrl && rawUrl !== resolvedUrl) {
         next = next.split(rawUrl).join(resolvedUrl)
       }
     })
@@ -740,7 +833,8 @@ function getAttendanceSummary(widget: any) {
 function resolvedAvatarUrl(rawUrl: unknown) {
   const url = String(rawUrl || '').trim()
   if (!url) return fallbackAvatar
-  return resolvedAvatarUrls[url] || url
+  const resolved = String(resolvedAvatarUrls[url] || url).trim()
+  return resolved.startsWith('cloud://') ? fallbackAvatar : resolved
 }
 
 function attendanceAvatarSrc(user: any) {
@@ -958,7 +1052,7 @@ function formatDateTime(iso: string): string {
 <style lang="scss" scoped>
 .detail-page {
   padding: $hh-space-lg var(--hh-page-x);
-  background: var(--hh-color-page);
+  background: var(--hh-color-card);
   min-height: 100vh;
 }
 
