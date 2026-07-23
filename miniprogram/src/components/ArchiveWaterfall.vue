@@ -15,11 +15,28 @@
       <view v-for="(column, index) in columns" :key="index" class="archive-waterfall__column">
         <view v-for="card in column" :key="card.postId" class="archive-waterfall__card" @tap="$emit('post', card)">
           <view v-if="card.cover.kind === 'video'" class="archive-waterfall__video-cover">
-            <image v-if="card.cover.src" :src="card.cover.src" mode="aspectFill" class="archive-waterfall__cover" />
+            <image
+              v-if="card.cover.src"
+              :src="card.cover.src"
+              mode="aspectFill"
+              class="archive-waterfall__cover"
+              @load="$emit('cover-load', card)"
+              @error="$emit('cover-error', card)"
+            />
             <view v-else class="archive-waterfall__video-placeholder"><text>视频</text></view>
             <view class="archive-waterfall__video-play"><text>▶</text></view>
           </view>
-          <image v-else-if="card.cover.kind === 'image'" :src="card.cover.src" mode="widthFix" class="archive-waterfall__cover" />
+          <template v-else-if="card.cover.kind === 'image'">
+            <image
+              v-if="card.cover.src"
+              :src="card.cover.src"
+              mode="widthFix"
+              class="archive-waterfall__cover"
+              @load="$emit('cover-load', card)"
+              @error="$emit('cover-error', card)"
+            />
+            <view v-else class="archive-waterfall__image-placeholder" aria-label="图片暂不可用" />
+          </template>
           <TextNoteCover v-else :title="card.title" :body="String(card.post?.content?.body?.text || '')" :theme="card.cover.theme as any" />
           <view class="archive-waterfall__main">
             <text class="archive-waterfall__title">{{ card.title }}</text>
@@ -39,7 +56,10 @@ import { computed } from 'vue'
 import TextNoteCover from './TextNoteCover.vue'
 import type { ArchiveFeedCard, ArchiveFeedColumns } from '../utils/archive-feed'
 const props = defineProps<{ columns: ArchiveFeedColumns; loading: boolean; error: string; hasMore: boolean }>()
-defineEmits<{ (event: 'post', card: ArchiveFeedCard): void; (event: 'publish' | 'retry' | 'load-more'): void }>()
+defineEmits<{
+  (event: 'post' | 'cover-load' | 'cover-error', card: ArchiveFeedCard): void
+  (event: 'publish' | 'retry' | 'load-more'): void
+}>()
 const hasCards = computed(() => props.columns[0].length + props.columns[1].length > 0)
 </script>
 
@@ -49,6 +69,7 @@ const hasCards = computed(() => props.columns[0].length + props.columns[1].lengt
 .archive-waterfall__column { display: flex; flex-direction: column; gap: 14rpx; min-width: 0; }
 .archive-waterfall__card { overflow: hidden; border-radius: 16rpx; background: #fff; }
 .archive-waterfall__cover { display: block; width: 100%; min-height: 220rpx; background: #eee; }
+.archive-waterfall__image-placeholder { width: 100%; height: 300rpx; background: linear-gradient(110deg,#f1f1f1 18%,#f7f7f7 38%,#f1f1f1 58%); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
 .archive-waterfall__video-cover { position: relative; width: 100%; height: 300rpx; overflow: hidden; background: #171923; }
 .archive-waterfall__video-cover .archive-waterfall__cover { width: 100%; height: 100%; min-height: 0; }
 .archive-waterfall__video-placeholder { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; background: linear-gradient(145deg,#272b3d,#11131c); color: rgba(255,255,255,.48); font-size: 34rpx; letter-spacing: 8rpx; }

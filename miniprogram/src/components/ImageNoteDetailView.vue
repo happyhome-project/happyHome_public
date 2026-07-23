@@ -13,10 +13,19 @@
           :key="`${image}-${index}`"
           class="image-note-slide"
         >
+          <view
+            v-if="failedImageIndexes.includes(index)"
+            class="image-note-image-fallback"
+          >
+            <text>图片暂不可用</text>
+          </view>
           <image
+            v-else
             :src="image"
             class="image-note-image"
             mode="aspectFit"
+            @load="onImageLoad(image, index)"
+            @error="onImageError(image, index)"
             @tap="previewImage(index)"
           />
         </swiper-item>
@@ -97,9 +106,12 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'open-location', location: ImageNoteLocation): void
+  (event: 'media-load', source: string): void
+  (event: 'media-error', source: string): void
 }>()
 
 const currentImageIndex = ref(0)
+const failedImageIndexes = ref<number[]>([])
 
 const authorInitial = computed(() => props.detail.authorName.slice(0, 1) || '邻')
 const publishDate = computed(() => formatPostDate(props.detail.createdAt))
@@ -114,6 +126,18 @@ watch(
 function onImageChange(event: any) {
   const nextIndex = Number(event?.detail?.current || 0)
   if (Number.isFinite(nextIndex)) currentImageIndex.value = nextIndex
+}
+
+function onImageLoad(source: string, index: number) {
+  failedImageIndexes.value = failedImageIndexes.value.filter((item) => item !== index)
+  emit('media-load', source)
+}
+
+function onImageError(source: string, index: number) {
+  if (!failedImageIndexes.value.includes(index)) {
+    failedImageIndexes.value = [...failedImageIndexes.value, index]
+  }
+  emit('media-error', source)
 }
 
 function previewImage(index: number) {
@@ -161,6 +185,17 @@ function formatPostDate(value: string): string {
   width: 100%;
   height: 100%;
   background: var(--hh-color-card);
+}
+
+.image-note-image-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(145deg,#f3f3f3,#fafafa);
+  color: var(--hh-color-text-tertiary);
+  font-size: 25rpx;
 }
 
 .image-note-image-count {

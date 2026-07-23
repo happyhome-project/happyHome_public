@@ -7,7 +7,7 @@
     }"
   >
     <view
-      v-if="post && section"
+      v-if="post && section && !detailMediaResolving"
       class="content"
       data-testid="detail-ready"
       :data-post-id="post._id"
@@ -26,8 +26,11 @@
         <text class="origin-action">查看原帖 ›</text>
       </view>
       <ImageNoteDetailView
+        :key="`image-note-${detailMediaRecoveryVersion}`"
         v-if="isImageNoteDetail && imageNoteDetail"
         :detail="imageNoteDetail"
+        @media-load="onDetailMediaLoad"
+        @media-error="onDetailMediaError"
         @open-location="openImageNoteLocation"
       />
       <GuideRouteDetailView
@@ -226,7 +229,7 @@ import ImageNoteDetailView from '../../components/ImageNoteDetailView.vue'
 import DefaultDetailView from '../../components/DefaultDetailView.vue'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
-import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
+import { refreshCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { buildGuideRouteDetail } from '../../utils/guide-detail'
@@ -260,6 +263,10 @@ const rosterMeta = reactive({
 })
 const resolvedAvatarUrls = reactive<Record<string, string>>({})
 const resolvedDetailMediaUrls = reactive<Record<string, string>>({})
+const detailMediaResolving = ref(false)
+const detailMediaRecoveryVersion = ref(0)
+const detailMediaRecoveryPending = new Set<string>()
+const detailMediaRecoveryAttempts = new Map<string, number>()
 const cancelBusy = ref(false)
 const activityInviteState = ref<any>(null)
 const activityInviteLoading = ref(false)
@@ -452,6 +459,10 @@ async function loadPost(postId: string) {
   }
   loading.value = true
   loadError.value = ''
+  detailMediaResolving.value = true
+  detailMediaRecoveryVersion.value = 0
+  detailMediaRecoveryPending.clear()
+  detailMediaRecoveryAttempts.clear()
   clearRecord(resolvedDetailMediaUrls)
   clientLog('info', 'detail.load.start', {
     postId,
@@ -509,6 +520,7 @@ async function loadPost(postId: string) {
       throw new Error('板块信息加载失败，请稍后重试')
     }
     await resolveDetailMediaUrls()
+    detailMediaResolving.value = false
     await resolveAttendanceAvatarUrls()
     await loadActivityInviteState()
     clientLog('info', 'detail.load.success', {
@@ -533,6 +545,7 @@ async function loadPost(postId: string) {
     loadError.value = friendlyLoadError(error)
     uni.showToast({ title: loadError.value, icon: 'none' })
   } finally {
+    detailMediaResolving.value = false
     loading.value = false
     clientLog('debug', 'detail.load.finally', {
       postId,
@@ -577,13 +590,15 @@ async function resolveDetailMediaUrls() {
     urlCount: urls.length,
   })
   if (urls.length === 0) return
+  urls.forEach((url) => {
+    resolvedDetailMediaUrls[url] = ''
+  })
   const primaryUrl = urls[0]
   const remainingUrls = urls.slice(1)
   let resolvedCount = 0
   try {
     const primaryResolved = await resolveCloudFileUrls([primaryUrl])
-    Object.assign(resolvedDetailMediaUrls, primaryResolved)
-    resolvedCount += Object.keys(primaryResolved).length
+    resolvedCount += applyDetailMediaResolution(primaryResolved)
   } catch (error) {
     clientLog('warn', 'detail.media.resolve.primary.fail', {
       postId: currentPostId.value,
@@ -593,8 +608,7 @@ async function resolveDetailMediaUrls() {
   if (remainingUrls.length) {
     try {
       const resolved = await resolveCloudFileUrls(remainingUrls)
-      Object.assign(resolvedDetailMediaUrls, resolved)
-      resolvedCount += Object.keys(resolved).length
+      resolvedCount += applyDetailMediaResolution(resolved)
     } catch (error) {
       clientLog('warn', 'detail.media.resolve.rest.fail', {
         postId: currentPostId.value,
@@ -609,12 +623,56 @@ async function resolveDetailMediaUrls() {
   })
 }
 
+function applyDetailMediaResolution(resolved: Record<string, string>): number {
+  let resolvedCount = 0
+  Object.entries(resolved).forEach(([source, candidate]) => {
+    const url = String(candidate || '').trim()
+    resolvedDetailMediaUrls[source] = url && !url.startsWith('cloud://') ? url : ''
+    if (resolvedDetailMediaUrls[source]) resolvedCount += 1
+  })
+  return resolvedCount
+}
+
+function canonicalDetailMediaSource(value: string): string {
+  const current = String(value || '').trim()
+  if (current.startsWith('cloud://')) return current
+  return Object.entries(resolvedDetailMediaUrls)
+    .find(([, resolved]) => resolved === current)?.[0] || ''
+}
+
+function onDetailMediaLoad(value: string) {
+  const source = canonicalDetailMediaSource(value)
+  if (source) detailMediaRecoveryAttempts.delete(source)
+}
+
+async function onDetailMediaError(value: string) {
+  const source = canonicalDetailMediaSource(value)
+  if (!source || detailMediaRecoveryPending.has(source)) return
+  const attempts = detailMediaRecoveryAttempts.get(source) || 0
+  if (attempts >= 2) return
+  detailMediaRecoveryAttempts.set(source, attempts + 1)
+  detailMediaRecoveryPending.add(source)
+  clientLog('warn', 'detail.media.load.fail', {
+    postId: currentPostId.value,
+    attempt: attempts + 1,
+  })
+  try {
+    const refreshed = await refreshCloudFileUrl(source)
+    resolvedDetailMediaUrls[source] = refreshed && !refreshed.startsWith('cloud://')
+      ? refreshed
+      : ''
+    detailMediaRecoveryVersion.value += 1
+  } finally {
+    detailMediaRecoveryPending.delete(source)
+  }
+}
+
 function replaceResolvedMediaUrls(value: unknown, replacements: Record<string, string>): any {
   if (typeof value === 'string') {
     let next = value
     Object.keys(replacements).forEach((rawUrl) => {
       const resolvedUrl = replacements[rawUrl]
-      if (rawUrl && resolvedUrl && rawUrl !== resolvedUrl) {
+      if (rawUrl && rawUrl !== resolvedUrl) {
         next = next.split(rawUrl).join(resolvedUrl)
       }
     })
