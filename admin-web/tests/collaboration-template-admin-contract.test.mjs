@@ -10,7 +10,7 @@ function source(relativePath) {
   return readFileSync(path.join(adminRoot, relativePath), 'utf8')
 }
 
-test('global collaboration template management is a super-admin-only top-level page', () => {
+test('global collaboration template management is a super-admin-only system-management page', () => {
   const pagePath = path.join(adminRoot, 'src/views/SuperAdmin/CollaborationTemplateList.vue')
   assert.equal(existsSync(pagePath), true, 'global collaboration template page is missing')
 
@@ -19,7 +19,8 @@ test('global collaboration template management is a super-admin-only top-level p
   assert.match(router, /name:\s*'collaboration-templates'[\s\S]*requiresRole:\s*'superAdmin'/)
 
   const layout = source('src/views/Layout.vue')
-  assert.match(layout, /v-if="authStore\.isSuperAdmin"[\s\S]*data-testid="menu-collaboration-templates"/)
+  assert.ok(layout.indexOf('menu-collaboration-templates') > layout.indexOf('system-management-toggle'))
+  assert.match(layout, /v-if="systemManagementExpanded"[\s\S]*data-testid="menu-collaboration-templates"/)
   assert.match(layout, /index="\/collaboration-templates"/)
 })
 

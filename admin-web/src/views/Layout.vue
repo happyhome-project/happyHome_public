@@ -9,7 +9,6 @@
         <el-menu data-testid="layout-menu" router :default-active="activeMenuPath" background-color="#304156" text-color="#bfcbd9" active-text-color="#409EFF">
           <el-menu-item data-testid="menu-approval" index="/approval"><span>审批中心</span><span v-if="approvalTotal > 0" class="menu-badge">{{ approvalTotal }}</span></el-menu-item>
           <el-menu-item v-if="authStore.isSuperAdmin" data-testid="menu-content-audit" index="/content-audit">内容审核</el-menu-item>
-          <el-menu-item v-if="authStore.isSuperAdmin" data-testid="menu-collaboration-templates" index="/collaboration-templates">协作模板</el-menu-item>
 
           <li class="menu-section-label">社区管理</li>
           <el-menu-item data-testid="menu-communities" index="/communities">社区总览</el-menu-item>
@@ -30,6 +29,7 @@
             <li class="menu-section-label system-management-toggle" data-testid="system-management-toggle" @click="toggleSystemManagement">
               <span>系统管理</span><span>{{ systemManagementExpanded ? '▾' : '▸' }}</span>
             </li>
+            <el-menu-item v-if="systemManagementExpanded" data-testid="menu-collaboration-templates" index="/collaboration-templates">协作模板</el-menu-item>
             <el-menu-item v-if="systemManagementExpanded" data-testid="menu-admin-accounts" index="/admin-accounts">管理员管理</el-menu-item>
             <el-menu-item v-if="systemManagementExpanded" data-testid="menu-guest-intro-config" index="/guest-intro-config">样板社群引导</el-menu-item>
           </template>
@@ -63,6 +63,7 @@ const SYSTEM_EXPANDED_KEY = 'happyhome.admin.system.expanded.v1'
 const SIDEBAR_DEFAULT_WIDTH = 260
 const SIDEBAR_MIN_WIDTH = 232
 const SIDEBAR_MAX_WIDTH = 360
+const SYSTEM_MANAGEMENT_ROUTE_NAMES = new Set(['collaboration-templates', 'admin-accounts', 'guest-intro-config'])
 const authStore = useAuthStore()
 const navigation = useCommunityNavigationStore()
 const router = useRouter()
@@ -74,7 +75,10 @@ const sidebarWidth = ref(loadSidebarWidth())
 const sidebarCollapsed = ref(loadSidebarCollapsed())
 const resizingSidebar = ref(false)
 const suppressAutoExpandCommunityId = ref('')
-const systemManagementExpanded = ref(typeof window !== 'undefined' && window.localStorage.getItem(SYSTEM_EXPANDED_KEY) === '1')
+const systemManagementExpanded = ref(
+  isSystemManagementRoute(route.name) ||
+  (typeof window !== 'undefined' && window.localStorage.getItem(SYSTEM_EXPANDED_KEY) === '1')
+)
 const routeViewKey = computed(() => `${String(route.name || route.path)}:${String(route.params.communityId || '')}:${String(route.params.sectionId || '')}:${String(route.params.postId || '')}`)
 const activeMenuPath = computed(() => {
   const id = String(route.params.communityId || '')
@@ -89,6 +93,7 @@ onMounted(() => {
 })
 onBeforeUnmount(stopSidebarResize)
 watch(() => route.fullPath, () => {
+  if (isSystemManagementRoute(route.name)) systemManagementExpanded.value = true
   const communityId = String(route.params.communityId || '')
   if (communityId && suppressAutoExpandCommunityId.value === communityId) suppressAutoExpandCommunityId.value = ''
   else ensureCurrentCommunityExpanded()
@@ -102,6 +107,7 @@ async function loadApprovalSummary() {
   catch { pendingCommunityCount.value = 0; pendingMemberCount.value = 0 }
 }
 function ensureCurrentCommunityExpanded() { navigation.ensureExpanded(String(route.params.communityId || '')) }
+function isSystemManagementRoute(routeName: unknown) { return SYSTEM_MANAGEMENT_ROUTE_NAMES.has(String(routeName || '')) }
 function toggleCommunity(communityId: string) {
   const targetPath = `/posts/${communityId}`
   const collapsing = navigation.expandedSet.has(communityId)
