@@ -27,12 +27,11 @@
       </view>
     </view>
 
-    <view v-if="isTextNoteDetail" class="text-note-detail-cover">
-      <TextNoteCover
+    <view v-if="isTextNoteDetail" class="text-note-detail-deck">
+      <TextNoteDeck
         :title="textNoteCard.title"
         :body="textNoteFullBody"
         :theme="textNoteCard.theme"
-        variant="document"
       />
     </view>
 
@@ -155,7 +154,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import RichNoteRenderer from './widgets/RichNoteRenderer.vue'
-import TextNoteCover from './TextNoteCover.vue'
+import TextNoteDeck from './TextNoteDeck.vue'
 import NoteBlocksRenderer from './widgets/NoteBlocksRenderer.vue'
 import VideoPlayerCard from './widgets/VideoPlayerCard.vue'
 import { formatWidgetValue, resolvePostDetailTitle } from '../utils/widget'
@@ -515,8 +514,8 @@ function formatAudioDuration(value: unknown): string {
   padding: 0 0 $hh-space-md;
 }
 
-.text-note-detail-cover {
-  width: min(100%, 620rpx);
+.text-note-detail-deck {
+  width: 100%;
   margin: 16rpx auto 40rpx;
 }
 

@@ -11,7 +11,8 @@ describe('archive publishing entry', () => {
     const createPage = JSON.parse(pages).pages.find((page: any) => page.path === 'pages/create/index')
     expect(createPage?.style?.navigationStyle).toBe('custom')
     expect(create).toContain('class="create-custom-nav"')
-    expect(create).toContain('@tap="handlePageExit"')
+    expect(create).toContain('@tap="handleCreateNavBack"')
+    expect(create).toMatch(/function handleCreateNavBack\(\)[\s\S]{0,420}handlePageExit\(\)/)
     expect(create).toContain('env(safe-area-inset-top)')
     expect(create).toContain('navigateBackOrHome')
     expect(create).toContain(':style="createCustomNavStyle"')
@@ -154,6 +155,12 @@ describe('archive publishing entry', () => {
     expect(cover).toContain('text-note-publish-tools')
     expect(cover.indexOf('textNoteTopicWidget')).toBeLessThan(cover.indexOf('textNoteLocationWidget'))
     expect(cover.match(/variant="image-note-tool"/g)).toHaveLength(2)
+    expect(cover).toContain('<TextNoteDeck')
+    expect(cover).not.toContain('text-note-theme-heading')
+    expect(cover).toContain('data-testid="text-note-confirm-next"')
+    expect(cover).not.toContain('data-testid="create-submit"')
+    expect(create).toContain('class="text-note-confirm-sheet"')
+    expect(create).toContain('data-testid="create-submit"')
   })
 
   test('enters an archive editor before the first asynchronous create-page load', () => {

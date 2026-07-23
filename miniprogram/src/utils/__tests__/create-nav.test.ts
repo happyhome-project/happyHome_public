@@ -19,7 +19,7 @@ describe('create custom navigation metrics', () => {
 describe('create custom navigation title', () => {
   test('gives edit mode precedence over section and text-cover titles', () => {
     expect(resolveCreateNavTitle({ isEditMode: true, sectionName: '活动', isTextCoverStep: true })).toBe('编辑内容')
-    expect(resolveCreateNavTitle({ isEditMode: false, sectionName: '活动', isTextCoverStep: true })).toBe('选择文字封面')
+    expect(resolveCreateNavTitle({ isEditMode: false, sectionName: '活动', isTextCoverStep: true })).toBe('预览')
     expect(resolveCreateNavTitle({ isEditMode: false, sectionName: '活动', isTextCoverStep: false })).toBe('活动')
     expect(resolveCreateNavTitle({ isEditMode: false, sectionName: '', isTextCoverStep: false })).toBe('发帖')
   })

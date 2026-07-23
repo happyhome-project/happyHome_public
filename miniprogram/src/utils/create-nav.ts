@@ -39,6 +39,6 @@ export function computeCreateNavMetrics(input: CreateNavMetricInput = {}): Creat
 
 export function resolveCreateNavTitle(input: CreateNavTitleInput): string {
   if (input.isEditMode) return '编辑内容'
-  if (input.isTextCoverStep) return '选择文字封面'
+  if (input.isTextCoverStep) return '预览'
   return String(input.sectionName || '').trim() || '发帖'
 }
