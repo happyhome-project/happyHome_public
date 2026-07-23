@@ -956,7 +956,7 @@ function formatDateTime(iso: string): string {
 <style lang="scss" scoped>
 .detail-page {
   padding: $hh-space-lg var(--hh-page-x);
-  background: var(--hh-color-page);
+  background: var(--hh-color-card);
   min-height: 100vh;
 }
 
