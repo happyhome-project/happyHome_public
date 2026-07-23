@@ -1,5 +1,10 @@
 <template>
-  <view class="text-note-deck">
+  <view
+    class="text-note-deck"
+    data-testid="text-note-deck"
+    :data-page-count="resolvedDeck.pages.length"
+    :data-theme="resolvedDeck.theme"
+  >
     <scroll-view
       class="text-note-deck__viewport"
       scroll-x

@@ -14,7 +14,11 @@
         <view v-else class="create-custom-nav__spacer" />
       </view>
     </view>
-    <view v-if="textNoteLayoutPhase !== null" class="text-note-layout-overlay">
+    <view
+      v-if="textNoteLayoutPhase !== null"
+      class="text-note-layout-overlay"
+      data-testid="text-note-layout-overlay"
+    >
       <view class="text-note-layout-card">
         <view class="text-note-layout-skeleton">
           <view class="text-note-layout-skeleton__line text-note-layout-skeleton__line--short" />
