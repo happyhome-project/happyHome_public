@@ -85,7 +85,15 @@
         </view>
       </view>
 
-      <view v-else class="form" :class="{ 'form--figma': isFigmaCreateMode, 'form--image-note': isImageNoteCreateMode }">
+      <view
+        v-else
+        class="form"
+        :class="{
+          'form--figma': isFigmaCreateMode,
+          'form--image-note': isImageNoteCreateMode,
+          'form--text-note': isTextNoteCreateMode,
+        }"
+      >
         <view v-if="!isFigmaCreateMode" class="form-header">
           <text class="section-tag" @tap="handleFormBack">← {{ selectedSection.name }}</text>
           <text v-if="isActivityInviteMode" class="invite-mode-tag">从攻略发起召集</text>
@@ -102,9 +110,13 @@
               <button class="btn-primary" data-testid="text-note-next" @tap="openTextNoteCover">下一步</button>
             </view>
           </view>
-          <view v-else class="text-note-cover-step">
+          <view v-else class="text-note-preview-step">
             <view v-if="textNoteDeck" class="text-note-preview">
-              <TextNoteDeck :key="textNoteDeck.theme" :deck="textNoteDeck" />
+              <TextNoteDeck
+                :deck="textNoteDeck"
+                :current-page="textNoteCurrentPage"
+                @page-change="handleTextNotePageChange"
+              />
             </view>
             <scroll-view class="text-note-theme-scroll" scroll-x :show-scrollbar="false">
               <view class="text-note-theme-list">
@@ -120,7 +132,14 @@
             </view>
             <view class="text-note-cover-actions">
               <text class="text-note-layout-choice">选择喜欢的排版</text>
-              <button class="btn-primary" data-testid="text-note-confirm-next" @tap="openTextNotePublishConfirm">下一步</button>
+              <button
+                class="btn-primary"
+                data-testid="text-note-preview-action"
+                :disabled="submitting"
+                @tap="handleTextNotePreviewAction"
+              >
+                {{ submitting ? (isEditMode ? '保存中...' : '发布中...') : (textNoteStep === 'cover' ? '下一步' : (isEditMode ? '保存' : '发布')) }}
+              </button>
             </view>
           </view>
         </template>
@@ -311,26 +330,6 @@
         </template>
       </view>
     </template>
-    <view v-if="textNoteConfirmVisible" class="text-note-confirm-mask" @tap="closeTextNotePublishConfirm">
-      <view class="text-note-confirm-sheet" @tap.stop>
-        <view class="text-note-confirm-handle" />
-        <text class="text-note-confirm-title">{{ isEditMode ? '确认保存' : '确认发布' }}</text>
-        <text class="text-note-confirm-desc">
-          已生成 {{ textNoteDeck?.pages.length || 1 }} 页文字卡，发布后首页展示第一页，详情可左右滑动阅读全文。
-        </text>
-        <view class="text-note-confirm-summary">
-          <text>{{ getTextNoteThemePresentation(textNoteTheme).kicker }}</text>
-          <text>·</text>
-          <text>{{ textNoteConfirmMeta }}</text>
-        </view>
-        <view class="text-note-confirm-actions">
-          <button class="text-note-confirm-cancel" @tap="closeTextNotePublishConfirm">再检查一下</button>
-          <button class="btn-primary" data-testid="create-submit" :disabled="submitting" @tap="handleSubmit">
-            {{ submitting ? (isEditMode ? '保存中...' : '发布中...') : (isEditMode ? '保存' : '发布') }}
-          </button>
-        </view>
-      </view>
-    </view>
     <AppTabBar v-if="!selectedSection" current="create" @media-selected="handleInlineMediaIntent" />
   </view>
 </template>
@@ -401,11 +400,11 @@ const isActivityInviteMode = ref(false)
 const activityInviteSourcePostId = ref('')
 const activityInviteLoading = ref(false)
 const createReturnTo = ref('')
-const textNoteStep = ref<'compose' | 'cover'>('compose')
+const textNoteStep = ref<'compose' | 'cover' | 'body'>('compose')
 const textNoteTheme = ref<TextNoteTheme>('paper')
 const textNoteDeck = ref<TextNoteDeckData | null>(null)
+const textNoteCurrentPage = ref(1)
 const textNoteLayoutPhase = ref<number | null>(null)
-const textNoteConfirmVisible = ref(false)
 const TEXT_NOTE_LAYOUT_PHASES = ['正在识别段落结构', '正在为正文分页', '正在套用社区主题'] as const
 let textNoteLayoutGeneration = 0
 const archiveFormat = ref<'image_text' | 'text' | 'video' | ''>('')
@@ -480,19 +479,7 @@ const textNoteLocationWidget = computed(() =>
 )
 const textNoteContent = computed(() => extractTextNoteContent(formData))
 const textNoteFullBody = computed(() => extractTextNoteFullBody(getTextNoteBodyValue(formData)))
-const isTextNotePreview = computed(() => isTextNoteCreateMode.value && textNoteStep.value === 'cover')
-const textNoteConfirmMeta = computed(() => {
-  const topics = textNoteTopicWidget.value
-    ? formData[textNoteTopicWidget.value.widgetId]
-    : []
-  const location = textNoteLocationWidget.value
-    ? formData[textNoteLocationWidget.value.widgetId]
-    : null
-  const parts: string[] = []
-  if (Array.isArray(topics) && topics.length > 0) parts.push(`${topics.length} 个话题`)
-  if (location && typeof location === 'object') parts.push('已设置地点')
-  return parts.join(' · ') || '未添加话题和地点'
-})
+const isTextNotePreview = computed(() => isTextNoteCreateMode.value && textNoteStep.value !== 'compose')
 const isGuideCreateMode = computed(() => {
   const section = selectedSection.value
   if (!section) return false
@@ -885,7 +872,7 @@ watch(() => communityStore.currentCommunityId, async () => {
 const createNavTitle = computed(() => resolveCreateNavTitle({
   isEditMode: isEditMode.value,
   sectionName: selectedSection.value?.name,
-  isTextCoverStep: selectedSection.value?.displayTemplate === 'text_note' && textNoteStep.value === 'cover',
+  isTextCoverStep: selectedSection.value?.displayTemplate === 'text_note' && textNoteStep.value !== 'compose',
 }))
 
 watch(createNavTitle, (title) => {
@@ -962,8 +949,8 @@ function selectSection(section: any, options: { returnTo?: string; preserveForm?
   textNoteStep.value = 'compose'
   textNoteTheme.value = 'paper'
   textNoteDeck.value = null
+  textNoteCurrentPage.value = 1
   textNoteLayoutPhase.value = null
-  textNoteConfirmVisible.value = false
   textNoteLayoutGeneration += 1
   if (!options.preserveForm) {
     for (const widget of section?.widgets || []) {
@@ -980,8 +967,8 @@ function handleFormBack() {
     openHierarchyParent(createReturnTo.value)
     return
   }
-  if (isTextNoteCreateMode.value && textNoteStep.value === 'cover') {
-    returnToTextNoteCompose()
+  if (isTextNoteCreateMode.value && textNoteStep.value !== 'compose') {
+    returnToPreviousTextNoteStep()
     return
   }
   handleBackToSectionPicker()
@@ -993,7 +980,6 @@ function waitForTextNoteLayout(milliseconds: number) {
 
 async function generateTextNoteLayout(theme: TextNoteTheme, enterPreview: boolean) {
   const generation = ++textNoteLayoutGeneration
-  textNoteConfirmVisible.value = false
   try {
     textNoteLayoutPhase.value = 0
     await waitForTextNoteLayout(80)
@@ -1014,7 +1000,17 @@ async function generateTextNoteLayout(theme: TextNoteTheme, enterPreview: boolea
 
     textNoteTheme.value = theme
     textNoteDeck.value = nextDeck
-    if (enterPreview) textNoteStep.value = 'cover'
+    if (enterPreview) {
+      textNoteStep.value = 'cover'
+      textNoteCurrentPage.value = 1
+    } else if (textNoteStep.value === 'body') {
+      textNoteCurrentPage.value = Math.min(
+        nextDeck.pages.length,
+        Math.max(2, textNoteCurrentPage.value),
+      )
+    } else {
+      textNoteCurrentPage.value = 1
+    }
   } catch (_error) {
     if (generation === textNoteLayoutGeneration) {
       uni.showToast({ title: '排版生成失败，请重试', icon: 'none' })
@@ -1044,30 +1040,43 @@ async function selectTextNoteTheme(theme: TextNoteTheme) {
 function returnToTextNoteCompose() {
   textNoteLayoutGeneration += 1
   textNoteLayoutPhase.value = null
-  textNoteConfirmVisible.value = false
   textNoteStep.value = 'compose'
+  textNoteCurrentPage.value = 1
 }
 
-function openTextNotePublishConfirm() {
+function openTextNoteBodyPreview() {
   if (!textNoteDeck.value) {
     uni.showToast({ title: '请先完成排版', icon: 'none' })
     return
   }
-  textNoteConfirmVisible.value = true
+  textNoteStep.value = 'body'
+  textNoteCurrentPage.value = 2
 }
 
-function closeTextNotePublishConfirm() {
-  if (submitting.value) return
-  textNoteConfirmVisible.value = false
+function handleTextNotePageChange(page: number) {
+  textNoteCurrentPage.value = page
+}
+
+function handleTextNotePreviewAction() {
+  if (textNoteStep.value === 'cover') {
+    openTextNoteBodyPreview()
+    return
+  }
+  void handleSubmit()
+}
+
+function returnToPreviousTextNoteStep() {
+  if (textNoteStep.value === 'body') {
+    textNoteStep.value = 'cover'
+    textNoteCurrentPage.value = 1
+    return
+  }
+  returnToTextNoteCompose()
 }
 
 function handleCreateNavBack() {
-  if (textNoteConfirmVisible.value) {
-    closeTextNotePublishConfirm()
-    return
-  }
   if (isTextNotePreview.value) {
-    returnToTextNoteCompose()
+    returnToPreviousTextNoteStep()
     return
   }
   handlePageExit()
@@ -1729,6 +1738,11 @@ async function handleSubmit() {
   overflow-x: hidden;
 }
 
+.form--figma.form--text-note {
+  padding-left: 0;
+  padding-right: 0;
+}
+
 .figma-form-list {
   display: grid;
   gap: 24rpx;
@@ -1922,13 +1936,13 @@ async function handleSubmit() {
 }
 
 .text-note-compose,
-.text-note-cover-step {
+.text-note-preview-step {
   padding: 32rpx 32rpx calc(156rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
 }
 
-.text-note-cover-step {
-  padding: 24rpx 0 calc(184rpx + env(safe-area-inset-bottom));
+.text-note-preview-step {
+  padding: 24rpx 0 calc(216rpx + env(safe-area-inset-bottom));
 }
 
 .text-note-compose {
@@ -1950,23 +1964,26 @@ async function handleSubmit() {
 }
 
 .text-note-preview {
-  width: 100%;
-  margin: 0 0 24rpx;
+  width: calc(100% - 64rpx);
+  margin: 0 32rpx 20rpx;
 }
 
-.text-note-theme-scroll { width: 100%; }
+.text-note-theme-scroll {
+  width: 100%;
+  height: 240rpx;
+}
 
 .text-note-theme-list {
   display: inline-flex;
   align-items: flex-start;
   gap: 16rpx;
-  padding: 4rpx 32rpx 20rpx;
+  padding: 4rpx 32rpx 16rpx;
 }
 
 .text-note-theme-option {
-  width: 124rpx;
-  flex: 0 0 124rpx;
-  padding: 6rpx;
+  width: 148rpx;
+  flex: 0 0 148rpx;
+  padding: 4rpx;
   border: 4rpx solid transparent;
   border-radius: 20rpx;
   box-sizing: border-box;
@@ -2004,6 +2021,7 @@ async function handleSubmit() {
   right: 0;
   bottom: 0;
   z-index: $hh-z-sticky;
+  min-height: calc(192rpx + env(safe-area-inset-bottom));
   margin: 0;
   padding: 24rpx 32rpx calc(24rpx + env(safe-area-inset-bottom));
   background: rgba(255, 255, 255, 0.98);
@@ -2019,9 +2037,9 @@ async function handleSubmit() {
 }
 
 .text-note-cover-actions .btn-primary {
-  height: 88rpx;
-  flex: 0 0 300rpx;
-  line-height: 88rpx;
+  height: 96rpx;
+  flex: 0 0 360rpx;
+  line-height: 96rpx;
 }
 
 .text-note-layout-overlay {
@@ -2047,7 +2065,7 @@ async function handleSubmit() {
 }
 
 .text-note-layout-skeleton {
-  aspect-ratio: 4 / 5;
+  aspect-ratio: 370 / 498;
   margin-bottom: 28rpx;
   padding: 84rpx 48rpx;
   display: flex;
@@ -2095,92 +2113,6 @@ async function handleSubmit() {
   color: var(--hh-color-text-tertiary);
   font-size: 23rpx;
   line-height: 34rpx;
-}
-
-.text-note-confirm-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 700;
-  display: flex;
-  align-items: flex-end;
-  background: rgba(19, 24, 22, 0.48);
-}
-
-.text-note-confirm-sheet {
-  width: 100%;
-  padding: 18rpx 32rpx calc(32rpx + env(safe-area-inset-bottom));
-  border-radius: 34rpx 34rpx 0 0;
-  background: #fff;
-  box-sizing: border-box;
-}
-
-.text-note-confirm-handle {
-  width: 72rpx;
-  height: 8rpx;
-  margin: 0 auto 30rpx;
-  border-radius: 999rpx;
-  background: #d7dbd9;
-}
-
-.text-note-confirm-title,
-.text-note-confirm-desc {
-  display: block;
-}
-
-.text-note-confirm-title {
-  color: var(--hh-color-text-primary);
-  font-size: 34rpx;
-  line-height: 48rpx;
-  font-weight: $hh-font-weight-bold;
-}
-
-.text-note-confirm-desc {
-  margin-top: 14rpx;
-  color: var(--hh-color-text-secondary);
-  font-size: 26rpx;
-  line-height: 42rpx;
-}
-
-.text-note-confirm-summary {
-  margin-top: 24rpx;
-  padding: 20rpx 22rpx;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10rpx;
-  border-radius: 20rpx;
-  background: var(--hh-color-card-soft);
-  color: var(--hh-color-text-secondary);
-  font-size: 24rpx;
-  line-height: 34rpx;
-}
-
-.text-note-confirm-actions {
-  display: flex;
-  align-items: center;
-  gap: 22rpx;
-  margin-top: 28rpx;
-}
-
-.text-note-confirm-cancel {
-  flex: 0 0 190rpx;
-  height: 88rpx;
-  margin: 0;
-  padding: 0;
-  border: 1rpx solid var(--hh-color-line);
-  border-radius: 999rpx;
-  background: #fff;
-  color: var(--hh-color-text-secondary);
-  font-size: 26rpx;
-  line-height: 88rpx;
-}
-
-.text-note-confirm-cancel::after {
-  border: 0;
-}
-
-.text-note-confirm-actions .btn-primary {
-  height: 88rpx;
-  line-height: 88rpx;
 }
 
 @keyframes text-note-layout-spin {

@@ -3,40 +3,32 @@
     class="text-note-deck"
     data-testid="text-note-deck"
     :data-page-count="resolvedDeck.pages.length"
+    :data-current-page="displayPage"
     :data-theme="resolvedDeck.theme"
   >
-    <scroll-view
+    <swiper
       class="text-note-deck__viewport"
-      scroll-x
-      :show-scrollbar="false"
-      :enhanced="true"
-      @scroll="handleScroll"
+      :current="displayPage - 1"
+      :circular="false"
+      :duration="260"
+      :disable-touch="resolvedDeck.pages.length <= 1"
+      @change="handleChange"
     >
-      <view class="text-note-deck__track">
-        <view
-          v-for="page in resolvedDeck.pages"
-          :key="`${resolvedDeck.theme}-${page.pageNumber}`"
-          class="text-note-deck__slide"
-        >
-          <TextNoteCover
-            :title="page.title"
-            :body="page.body"
-            :theme="resolvedDeck.theme"
-            :page-kind="page.kind"
-            :page-number="page.pageNumber"
-            :total-pages="page.totalPages"
-          />
-        </view>
-      </view>
-    </scroll-view>
-    <view v-if="resolvedDeck.pages.length > 1" class="text-note-deck__progress" aria-hidden="true">
-      <view
+      <swiper-item
         v-for="page in resolvedDeck.pages"
-        :key="`progress-${page.pageNumber}`"
-        class="text-note-deck__progress-dot"
-        :class="{ 'text-note-deck__progress-dot--active': currentPage === page.pageNumber }"
-      />
-    </view>
+        :key="`${resolvedDeck.theme}-${page.pageNumber}`"
+        class="text-note-deck__slide"
+      >
+        <TextNoteCover
+          :title="page.title"
+          :body="page.body"
+          :theme="resolvedDeck.theme"
+          :page-kind="page.kind"
+          :page-number="page.pageNumber"
+          :total-pages="page.totalPages"
+        />
+      </swiper-item>
+    </swiper>
   </view>
 </template>
 
@@ -54,39 +46,53 @@ const props = withDefaults(defineProps<{
   title?: string
   body?: string
   theme?: TextNoteTheme | string
+  currentPage?: number
 }>(), {
   deck: null,
   title: '',
   body: '',
   theme: 'paper',
+  currentPage: 1,
 })
+
+const emit = defineEmits<{
+  (event: 'page-change', page: number): void
+}>()
 
 const resolvedDeck = computed(() => props.deck || createTextNoteDeck({
   title: props.title,
   body: props.body,
   theme: props.theme,
 }))
-const currentPage = ref(1)
+const displayPage = ref(1)
+
+const deckSignature = computed(() => {
+  const pages = resolvedDeck.value.pages
+  return `${resolvedDeck.value.theme}:${pages.length}:${pages[0]?.title || ''}:${pages[pages.length - 1]?.sourceBody.length || 0}`
+})
 
 watch(
-  () => `${resolvedDeck.value.theme}:${resolvedDeck.value.pages.length}`,
-  () => {
-    currentPage.value = 1
+  () => props.currentPage,
+  (requestedPage) => {
+    displayPage.value = clampPage(requestedPage)
   },
+  { immediate: true },
 )
 
-function handleScroll(event: any) {
-  const pageCount = resolvedDeck.value.pages.length
-  if (pageCount <= 1) {
-    currentPage.value = 1
-    return
-  }
-  const detail = event?.detail || {}
-  const scrollLeft = Math.max(0, Number(detail.scrollLeft || 0))
-  const scrollWidth = Math.max(0, Number(detail.scrollWidth || 0))
-  const fallbackStep = Number((uni as any).upx2px?.(636) || 318)
-  const step = scrollWidth > 0 ? scrollWidth / pageCount : fallbackStep
-  currentPage.value = Math.min(pageCount, Math.max(1, Math.round(scrollLeft / Math.max(1, step)) + 1))
+watch(deckSignature, () => {
+  displayPage.value = clampPage(props.currentPage)
+})
+
+function clampPage(value: unknown) {
+  const pageCount = Math.max(1, resolvedDeck.value.pages.length)
+  const requested = Math.round(Number(value || 1))
+  return Math.min(pageCount, Math.max(1, Number.isFinite(requested) ? requested : 1))
+}
+
+function handleChange(event: any) {
+  const nextPage = clampPage(Number(event?.detail?.current || 0) + 1)
+  displayPage.value = nextPage
+  emit('page-change', nextPage)
 }
 </script>
 
@@ -96,44 +102,13 @@ function handleScroll(event: any) {
 }
 
 .text-note-deck__viewport {
+  aspect-ratio: 370 / 498;
   width: 100%;
-  white-space: nowrap;
-}
-
-.text-note-deck__track {
-  display: inline-flex;
-  align-items: flex-start;
-  gap: 16rpx;
-  min-width: 100%;
-  padding-right: 56rpx;
-  box-sizing: border-box;
+  height: auto;
 }
 
 .text-note-deck__slide {
-  width: min(620rpx, calc(100vw - 112rpx));
-  flex: 0 0 min(620rpx, calc(100vw - 112rpx));
-  white-space: normal;
-}
-
-.text-note-deck__progress {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 10rpx;
-  min-height: 28rpx;
-  margin-top: 16rpx;
-}
-
-.text-note-deck__progress-dot {
-  width: 10rpx;
-  height: 10rpx;
-  border-radius: 999rpx;
-  background: rgba(24, 24, 24, 0.18);
-  transition: width 160ms ease, background-color 160ms ease;
-}
-
-.text-note-deck__progress-dot--active {
-  width: 28rpx;
-  background: var(--hh-color-brand-primary);
+  width: 100%;
+  height: 100%;
 }
 </style>

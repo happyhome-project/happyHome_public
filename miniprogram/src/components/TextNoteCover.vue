@@ -10,25 +10,24 @@
     ]"
   >
     <image class="text-note-cover-background" :src="coverBackground" mode="scaleToFill" />
-    <view v-if="isBodyPage" class="text-note-body-surface" />
-    <view class="text-note-cover-content">
-      <text v-if="normalizedTheme !== 'notice' || isBodyPage" class="text-note-cover-kicker">{{ presentation.kicker }}</text>
-      <text v-if="presentation.ornament === 'quote' && !isBodyPage" class="text-note-cover-quote">“</text>
-      <text class="text-note-cover-title">{{ normalizedTitle }}</text>
+
+    <view v-if="!isBodyPage" class="text-note-cover-content">
+      <text class="text-note-cover-kicker">{{ presentation.kicker }}</text>
+      <text v-if="normalizedTheme === 'paper'" class="text-note-cover-quote">“</text>
       <view class="text-note-cover-rule" />
-      <text class="text-note-cover-body" :class="`text-note-cover-body--${bodySize}`">{{ coverBody }}</text>
-      <text v-if="isBodyPage" class="text-note-page-footer">HAPPY HOME · 邻里共享</text>
+      <text class="text-note-cover-title">{{ normalizedTitle }}</text>
+      <text class="text-note-cover-signature">HAPPY HOME</text>
     </view>
-    <text v-if="showPageCount" class="text-note-page-count">{{ props.pageNumber }}/{{ props.totalPages }}</text>
+
+    <text v-else class="text-note-cover-body">{{ coverBody }}</text>
   </view>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import {
-  normalizeTextNoteTheme,
   getTextNoteThemePresentation,
-  resolveTextNoteBodySize,
+  normalizeTextNoteTheme,
   type TextNoteTheme,
 } from '../utils/text-note'
 
@@ -46,17 +45,15 @@ const normalizedTheme = computed(() => normalizeTextNoteTheme(props.theme))
 const presentation = computed(() => getTextNoteThemePresentation(normalizedTheme.value))
 const normalizedTitle = computed(() => String(props.title || '').trim())
 const isBodyPage = computed(() => props.pageKind === 'body')
-const coverBody = computed(() => String(props.body || '').trim())
-const bodySize = computed(() => resolveTextNoteBodySize(coverBody.value))
-const showPageCount = computed(() => !props.compact && Number(props.totalPages || 0) > 1)
+const coverBody = computed(() => String(props.body || ''))
 
 const TEXT_NOTE_COVER_BACKGROUNDS: Record<TextNoteTheme, string> = {
-  paper: '/static/text-note-covers/paper.svg',
-  mint: '/static/text-note-covers/mint.svg',
-  slate: '/static/text-note-covers/slate.svg',
-  headline: '/static/text-note-covers/headline.svg',
-  quote: '/static/text-note-covers/quote.svg',
-  notice: '/static/text-note-covers/notice.svg',
+  paper: '/static/text-note-covers/0723/paper.jpg',
+  mint: '/static/text-note-covers/0723/mint.jpg',
+  slate: '/static/text-note-covers/0723/slate.jpg',
+  headline: '/static/text-note-covers/0723/headline.jpg',
+  quote: '/static/text-note-covers/0723/quote.jpg',
+  notice: '/static/text-note-covers/0723/notice.jpg',
 }
 
 const coverBackground = computed(() => TEXT_NOTE_COVER_BACKGROUNDS[normalizedTheme.value])
@@ -65,11 +62,11 @@ const coverBackground = computed(() => TEXT_NOTE_COVER_BACKGROUNDS[normalizedThe
 <style lang="scss" scoped>
 .text-note-cover-frame {
   position: relative;
-  aspect-ratio: 4 / 5;
+  aspect-ratio: 370 / 498;
   width: 100%;
-  border-radius: 28rpx;
-  box-sizing: border-box;
   overflow: hidden;
+  border-radius: 24rpx;
+  box-sizing: border-box;
   background: #f6f0e4;
   color: #302c27;
 }
@@ -87,14 +84,15 @@ const coverBackground = computed(() => TEXT_NOTE_COVER_BACKGROUNDS[normalizedThe
   position: absolute;
   inset: 0;
   z-index: 1;
-  box-sizing: border-box;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 .text-note-cover-kicker,
 .text-note-cover-title,
-.text-note-cover-body,
-.text-note-cover-quote {
+.text-note-cover-quote,
+.text-note-cover-signature,
+.text-note-cover-body {
   position: absolute;
   display: block;
   box-sizing: border-box;
@@ -104,15 +102,17 @@ const coverBackground = computed(() => TEXT_NOTE_COVER_BACKGROUNDS[normalizedThe
 
 .text-note-cover-kicker {
   font-size: 22rpx;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 36rpx;
 }
 
 .text-note-cover-title {
   display: -webkit-box;
-  max-height: 2.6em;
-  font-weight: 700;
   overflow: hidden;
+  font-size: 48rpx;
+  font-weight: 600;
+  line-height: 54rpx;
+  text-align: center;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
@@ -120,204 +120,235 @@ const coverBackground = computed(() => TEXT_NOTE_COVER_BACKGROUNDS[normalizedThe
 .text-note-cover-rule {
   position: absolute;
   height: 4rpx;
-  border-radius: 999rpx;
   background: currentColor;
 }
 
-.text-note-cover-body {
-  max-height: 7.6em;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  white-space: pre-wrap;
-}
-
-.text-note-cover--paper { color: #302c27; }
-.text-note-cover--paper .text-note-cover-kicker { left: 7.19%; top: 7%; width: 68.75%; }
-.text-note-cover--paper .text-note-cover-title { left: 7.19%; top: 16%; width: 85.63%; font-size: 42rpx; line-height: 54rpx; transform: rotate(1deg); }
-.text-note-cover--paper .text-note-cover-rule { display: none; }
-.text-note-cover--paper .text-note-cover-body { left: 7.19%; top: 37.75%; width: 85.63%; line-height: 58rpx; }
-.text-note-cover--paper .text-note-cover-body--large { font-size: 38rpx; }
-.text-note-cover--paper .text-note-cover-body--medium { font-size: 32rpx; }
-.text-note-cover--paper .text-note-cover-body--small { font-size: 27rpx; }
-
-.text-note-cover--mint { color: #174c39; }
-.text-note-cover--mint .text-note-cover-kicker { left: 8.13%; top: 18.5%; width: 83.75%; }
-.text-note-cover--mint .text-note-cover-title { left: 8.13%; top: 28%; width: 83.75%; font-size: 44rpx; line-height: 58rpx; }
-.text-note-cover--mint .text-note-cover-rule { display: none; }
-.text-note-cover--mint .text-note-cover-body { left: 11.88%; top: 56.5%; width: 76.25%; line-height: 50rpx; }
-.text-note-cover--mint .text-note-cover-body--large { font-size: 32rpx; }
-.text-note-cover--mint .text-note-cover-body--medium { font-size: 28rpx; }
-.text-note-cover--mint .text-note-cover-body--small { font-size: 24rpx; }
-
-.text-note-cover--slate { color: #808d68; }
-.text-note-cover--slate .text-note-cover-kicker { left: 7.19%; top: 12%; width: 85.63%; letter-spacing: 4rpx; }
-.text-note-cover--slate .text-note-cover-title { left: 7.19%; top: 21%; width: 85.63%; font-size: 42rpx; line-height: 56rpx; letter-spacing: 3rpx; }
-.text-note-cover--slate .text-note-cover-rule { display: none; }
-.text-note-cover--slate .text-note-cover-body { left: 7.19%; top: 42%; width: 85.63%; line-height: 50rpx; }
-.text-note-cover--slate .text-note-cover-body--large { font-size: 32rpx; }
-.text-note-cover--slate .text-note-cover-body--medium { font-size: 28rpx; }
-.text-note-cover--slate .text-note-cover-body--small { font-size: 24rpx; }
-
-.text-note-cover--headline { color: #2f241d; }
-.text-note-cover--headline .text-note-cover-kicker { left: 5.94%; top: 7.75%; width: 88.13%; color: rgba(47, 36, 29, 0.3); font-size: 26rpx; line-height: 40rpx; letter-spacing: 6rpx; text-align: center; }
-.text-note-cover--headline .text-note-cover-title { left: 5.94%; top: 22%; width: 88.13%; font-size: 48rpx; line-height: 58rpx; text-align: center; }
-.text-note-cover--headline .text-note-cover-rule { left: 45%; top: 39.5%; width: 10%; opacity: 0.5; }
-.text-note-cover--headline .text-note-cover-body { left: 5.94%; top: 46%; width: 88.13%; line-height: 48rpx; }
-.text-note-cover--headline .text-note-cover-body--large { font-size: 30rpx; }
-.text-note-cover--headline .text-note-cover-body--medium { font-size: 27rpx; }
-.text-note-cover--headline .text-note-cover-body--small { font-size: 24rpx; }
-
-.text-note-cover--quote { color: #839889; text-align: center; }
-.text-note-cover--quote .text-note-cover-kicker { left: 9.69%; top: 20%; width: 80.63%; font-weight: 500; text-align: center; }
-.text-note-cover--quote .text-note-cover-quote { left: 9.69%; top: 27%; width: 80.63%; height: 116rpx; color: #8e9e99; font-family: Georgia, serif; font-size: 108rpx; line-height: 116rpx; opacity: 0.55; text-align: center; }
-.text-note-cover--quote .text-note-cover-title { left: 9.69%; top: 42.5%; width: 80.63%; font-size: 38rpx; line-height: 56rpx; font-weight: 500; text-align: center; }
-.text-note-cover--quote .text-note-cover-rule { left: 45%; top: 59%; width: 10%; color: #bfc7c1; }
-.text-note-cover--quote .text-note-cover-body { left: 9.69%; top: 65%; width: 80.63%; line-height: 56rpx; text-align: center; }
-.text-note-cover--quote .text-note-cover-body--large { font-size: 32rpx; }
-.text-note-cover--quote .text-note-cover-body--medium { font-size: 28rpx; }
-.text-note-cover--quote .text-note-cover-body--small { font-size: 24rpx; }
-
-.text-note-cover--notice { color: #5b3213; }
-.text-note-cover--notice .text-note-cover-title { left: 6.56%; top: 21.5%; width: 86.88%; font-size: 46rpx; line-height: 60rpx; letter-spacing: 3rpx; text-align: center; }
-.text-note-cover--notice .text-note-cover-rule { left: 6.56%; top: 41.5%; width: 86.88%; height: 2rpx; border-radius: 0; background: repeating-linear-gradient(to right, rgba(91, 50, 19, 0.45) 0 8rpx, transparent 8rpx 16rpx); }
-.text-note-cover--notice .text-note-cover-body { left: 6.56%; top: 47%; width: 86.88%; line-height: 50rpx; }
-.text-note-cover--notice .text-note-cover-body--large { font-size: 30rpx; }
-.text-note-cover--notice .text-note-cover-body--medium { font-size: 27rpx; }
-.text-note-cover--notice .text-note-cover-body--small { font-size: 24rpx; }
-
-.text-note-cover-frame--compact {
-  border-radius: 12rpx;
-}
-
-.text-note-cover-frame--compact .text-note-cover-kicker {
-  padding: 0;
-  border-width: 0;
-  font-size: 8rpx;
-  line-height: 12rpx;
+.text-note-cover-signature {
+  font-size: 18rpx;
+  font-weight: 400;
+  line-height: 28rpx;
   letter-spacing: 1rpx;
+  opacity: 0.56;
 }
 
-.text-note-cover-frame--compact .text-note-cover-title {
-  font-size: 13rpx;
-  line-height: 16rpx;
+.text-note-cover--paper {
+  color: #302c27;
 }
 
-.text-note-cover-frame--compact .text-note-cover-rule {
-  height: 1rpx;
+.text-note-cover--paper .text-note-cover-kicker {
+  left: 8.378%;
+  top: 7.028%;
 }
 
-.text-note-cover-frame--compact .text-note-cover-body,
-.text-note-cover-frame--compact .text-note-cover-body--large,
-.text-note-cover-frame--compact .text-note-cover-body--medium,
-.text-note-cover-frame--compact .text-note-cover-body--small {
-  font-size: 10rpx;
-  line-height: 14rpx;
+.text-note-cover--paper .text-note-cover-quote {
+  left: 9.73%;
+  top: 33.735%;
+  color: rgba(65, 55, 44, 0.32);
+  font-family: Georgia, serif;
+  font-size: 108rpx;
+  line-height: 108rpx;
 }
 
-.text-note-cover-frame--compact .text-note-cover-quote {
-  height: 34rpx;
-  font-size: 31rpx;
-  line-height: 34rpx;
+.text-note-cover--paper .text-note-cover-title {
+  left: 7.567%;
+  top: 46.185%;
+  width: 84.324%;
+  transform: translateY(-50%);
 }
 
-.text-note-body-surface {
-  position: absolute;
-  inset: 7%;
-  z-index: 0;
-  border-radius: 24rpx;
-  background: rgba(255, 255, 255, 0.56);
-  pointer-events: none;
+.text-note-cover--paper .text-note-cover-rule {
+  display: none;
 }
 
-.text-note-cover-frame--body.text-note-cover--paper .text-note-body-surface {
-  background: rgba(255, 250, 238, 0.56);
+.text-note-cover--paper .text-note-cover-signature {
+  left: 8.108%;
+  top: 88.353%;
 }
 
-.text-note-cover-frame--body.text-note-cover--mint .text-note-body-surface {
-  background: rgba(255, 255, 255, 0.62);
+.text-note-cover--mint {
+  color: #174c39;
 }
 
-.text-note-cover-frame--body.text-note-cover--slate .text-note-body-surface {
-  background: rgba(20, 29, 43, 0.48);
+.text-note-cover--mint .text-note-cover-kicker {
+  left: 8.378%;
+  top: 26.104%;
 }
 
-.text-note-cover-frame--body.text-note-cover--headline .text-note-body-surface {
-  background: rgba(255, 253, 246, 0.7);
+.text-note-cover--mint .text-note-cover-rule {
+  left: 8.378%;
+  top: 33.333%;
+  width: 8.649%;
+  height: 4rpx;
+  border-radius: 999rpx;
+  opacity: 0.46;
 }
 
-.text-note-cover-frame--body.text-note-cover--quote .text-note-body-surface {
-  background: rgba(255, 255, 255, 0.52);
+.text-note-cover--mint .text-note-cover-title {
+  left: 7.567%;
+  top: 51.606%;
+  width: 84.324%;
+  transform: translateY(-50%);
 }
 
-.text-note-cover-frame--body.text-note-cover--notice .text-note-body-surface {
-  background: rgba(255, 249, 238, 0.68);
+.text-note-cover--mint .text-note-cover-signature {
+  left: 7.027%;
+  top: 88.353%;
 }
 
-.text-note-cover-frame--body .text-note-cover-content {
-  display: flex;
-  flex-direction: column;
-  padding: 72rpx 56rpx 74rpx;
+.text-note-cover--slate {
+  color: #808d68;
 }
 
-.text-note-cover-frame--body .text-note-cover-kicker,
-.text-note-cover-frame--body .text-note-cover-title,
-.text-note-cover-frame--body .text-note-cover-body {
-  position: relative;
-  left: auto;
-  top: auto;
-  width: auto;
-  height: auto;
+.text-note-cover--slate .text-note-cover-kicker {
+  left: 6.216%;
+  top: 11.647%;
+  letter-spacing: 4rpx;
 }
 
-.text-note-cover-frame--body .text-note-cover-kicker {
-  flex: 0 0 auto;
-  padding-right: 92rpx;
-  font-size: 21rpx;
-  line-height: 32rpx;
+.text-note-cover--slate .text-note-cover-title {
+  left: 6.216%;
+  top: 47.189%;
+  width: 87.568%;
+  transform: translateY(-50%);
   letter-spacing: 3rpx;
   text-align: left;
 }
 
-.text-note-cover-frame--body .text-note-cover-title {
-  display: -webkit-box;
-  max-height: 80rpx;
-  margin-top: 18rpx;
-  overflow: hidden;
-  font-size: 28rpx;
-  line-height: 40rpx;
-  letter-spacing: 1rpx;
-  text-align: left;
-  transform: none;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+.text-note-cover--slate .text-note-cover-rule {
+  left: 6.216%;
+  top: 55.02%;
+  width: 16.216%;
+  height: 4rpx;
+  opacity: 0.5;
 }
 
-.text-note-cover-frame--body .text-note-cover-rule {
-  position: relative;
-  left: auto;
-  top: auto;
-  display: block;
-  width: 100%;
-  height: 2rpx;
-  margin: 28rpx 0 30rpx;
-  opacity: 0.28;
+.text-note-cover--slate .text-note-cover-signature {
+  left: 6.216%;
+  top: 88.353%;
 }
 
-.text-note-cover-frame--body .text-note-cover-body,
-.text-note-cover-frame--body .text-note-cover-body--large,
-.text-note-cover-frame--body .text-note-cover-body--medium,
-.text-note-cover-frame--body .text-note-cover-body--small {
-  position: relative;
-  left: auto;
-  top: auto;
-  width: auto;
-  flex: 1 1 auto;
-  max-height: 420rpx;
+.text-note-cover--headline {
+  color: #2f241d;
+}
+
+.text-note-cover--headline .text-note-cover-kicker {
+  left: 5.676%;
+  top: 19.478%;
+  width: 88.649%;
   font-size: 26rpx;
+  line-height: 40rpx;
+  letter-spacing: 6rpx;
+  text-align: center;
+}
+
+.text-note-cover--headline .text-note-cover-title {
+  left: 5.676%;
+  top: 47.189%;
+  width: 88.649%;
+  transform: translateY(-50%);
+}
+
+.text-note-cover--headline .text-note-cover-rule {
+  left: 43.243%;
+  top: 55.823%;
+  width: 13.514%;
+  height: 2rpx;
+  opacity: 0.5;
+}
+
+.text-note-cover--headline .text-note-cover-signature {
+  left: 5.135%;
+  top: 89.96%;
+}
+
+.text-note-cover--quote {
+  color: #839889;
+}
+
+.text-note-cover--quote .text-note-cover-kicker {
+  left: 5.676%;
+  top: 19.88%;
+  width: 88.649%;
+  font-size: 26rpx;
+  line-height: 40rpx;
+  letter-spacing: 6rpx;
+  text-align: center;
+}
+
+.text-note-cover--quote .text-note-cover-title {
+  left: 7.567%;
+  top: 47.39%;
+  width: 84.324%;
+  transform: translateY(-50%);
+  font-weight: 500;
+}
+
+.text-note-cover--quote .text-note-cover-rule {
+  display: none;
+}
+
+.text-note-cover--quote .text-note-cover-signature {
+  left: 43.243%;
+  top: 89.96%;
+  transform: translateX(-50%);
+}
+
+.text-note-cover--notice {
+  color: #5b3213;
+}
+
+.text-note-cover--notice .text-note-cover-kicker {
+  left: 5.676%;
+  top: 19.478%;
+  width: 88.649%;
+  font-size: 26rpx;
+  line-height: 40rpx;
+  letter-spacing: 6rpx;
+  text-align: center;
+}
+
+.text-note-cover--notice .text-note-cover-rule {
+  left: 5.676%;
+  top: 33.333%;
+  width: 88.108%;
+  height: 2rpx;
+  background: repeating-linear-gradient(to right, rgba(91, 50, 19, 0.42) 0 8rpx, transparent 8rpx 16rpx);
+}
+
+.text-note-cover--notice .text-note-cover-title {
+  left: 5.676%;
+  top: 47.189%;
+  width: 88.649%;
+  transform: translateY(-50%);
+}
+
+.text-note-cover--notice .text-note-cover-signature {
+  left: 5.676%;
+  top: 89.96%;
+}
+
+.text-note-cover-frame--body .text-note-cover-body {
+  left: 7.567%;
+  top: 9.839%;
+  z-index: 1;
+  width: 84.324%;
+  max-height: 72.289%;
+  overflow: hidden;
+  color: currentColor;
+  font-size: 30rpx;
+  font-weight: 400;
   line-height: 44rpx;
   text-align: left;
   white-space: pre-wrap;
+}
+
+.text-note-cover-frame--body.text-note-cover--paper,
+.text-note-cover-frame--body.text-note-cover--headline {
+  color: #34291f;
+}
+
+.text-note-cover-frame--body.text-note-cover--mint {
+  color: #174c39;
 }
 
 .text-note-cover-frame--body.text-note-cover--slate {
@@ -328,31 +359,38 @@ const coverBackground = computed(() => TEXT_NOTE_COVER_BACKGROUNDS[normalizedThe
   color: #637a6b;
 }
 
-.text-note-page-footer {
-  position: absolute;
-  left: 56rpx;
-  bottom: 36rpx;
-  z-index: 1;
-  color: currentColor;
-  font-size: 17rpx;
-  line-height: 26rpx;
-  letter-spacing: 2rpx;
-  opacity: 0.55;
+.text-note-cover-frame--body.text-note-cover--notice {
+  color: #5b3213;
 }
 
-.text-note-page-count {
-  position: absolute;
-  top: 24rpx;
-  right: 24rpx;
-  z-index: 3;
-  min-width: 62rpx;
-  padding: 8rpx 13rpx;
-  border-radius: 999rpx;
-  background: rgba(27, 31, 29, 0.62);
-  color: #fff;
-  font-size: 22rpx;
-  line-height: 30rpx;
-  text-align: center;
-  box-sizing: border-box;
+.text-note-cover-frame--compact {
+  border-radius: 12rpx;
+}
+
+.text-note-cover-frame--compact .text-note-cover-kicker {
+  font-size: 8rpx;
+  line-height: 12rpx;
+  letter-spacing: 1rpx;
+}
+
+.text-note-cover-frame--compact .text-note-cover-title {
+  font-size: 13rpx;
+  line-height: 16rpx;
+  letter-spacing: 0;
+}
+
+.text-note-cover-frame--compact .text-note-cover-rule {
+  height: 1rpx;
+}
+
+.text-note-cover-frame--compact .text-note-cover-quote {
+  font-size: 31rpx;
+  line-height: 31rpx;
+}
+
+.text-note-cover-frame--compact .text-note-cover-signature {
+  font-size: 5rpx;
+  line-height: 8rpx;
+  letter-spacing: 0;
 }
 </style>

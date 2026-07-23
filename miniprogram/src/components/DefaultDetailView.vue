@@ -2,6 +2,15 @@
   <view class="default-detail">
     <view class="detail-head">
       <text class="detail-title">{{ titleText }}</text>
+
+      <view v-if="isTextNoteDetail" class="text-note-detail-deck">
+        <TextNoteDeck
+          :title="textNoteCard.title"
+          :body="textNoteFullBody"
+          :theme="textNoteCard.theme"
+        />
+      </view>
+
       <view class="detail-author-row">
         <image
           v-if="authorAvatarUrl"
@@ -18,21 +27,13 @@
         </view>
       </view>
 
-      <view class="section-line">
+      <view v-if="!isTextNoteDetail" class="section-line">
         <text class="section-pill"><text class="section-dot"></text>{{ sectionName }}</text>
       </view>
-      <view v-if="leadText" class="lead-card">
+      <view v-if="!isTextNoteDetail && leadText" class="lead-card">
         <text v-if="leadLabel" class="lead-label">{{ leadLabel }}:</text>
         <text class="lead-value">{{ leadText }}</text>
       </view>
-    </view>
-
-    <view v-if="isTextNoteDetail" class="text-note-detail-deck">
-      <TextNoteDeck
-        :title="textNoteCard.title"
-        :body="textNoteFullBody"
-        :theme="textNoteCard.theme"
-      />
     </view>
 
     <view class="detail-body">

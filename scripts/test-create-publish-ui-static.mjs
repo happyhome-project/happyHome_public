@@ -59,9 +59,10 @@ assert(
   'publish sheet should keep the Figma 52px icon slot and 36px foreground asset.',
 )
 assert(
-  createPageManifest?.style?.navigationStyle === 'custom' &&
+    createPageManifest?.style?.navigationStyle === 'custom' &&
     createPage.includes('class="create-custom-nav"') &&
-    createPage.includes('@tap="handlePageExit"') &&
+    createPage.includes('@tap="handleCreateNavBack"') &&
+    createPage.includes('returnToPreviousTextNoteStep') &&
     createPage.includes('navigateBackOrHome') &&
     createPage.includes(':style="createCustomNavStyle"') &&
     createPage.includes('{{ createNavTitle }}') &&

@@ -4,6 +4,7 @@
     :class="{
       'detail-page--guide': isGuideNoteDetail,
       'detail-page--image-note': isImageNoteDetail,
+      'detail-page--text-note': isTextNoteDetail,
     }"
   >
     <view
@@ -305,6 +306,7 @@ const isImageNoteDetail = computed(() => isImageNoteSectionContract(section.valu
 const isGuideNoteDetail = computed(() =>
   !isImageNoteDetail.value && resolveGuideNoteDetailTemplate(section.value)
 )
+const isTextNoteDetail = computed(() => section.value?.displayTemplate === 'text_note')
 const renderPost = computed(() => {
   const currentPost = post.value
   if (!currentPost) return currentPost
@@ -1060,6 +1062,10 @@ function formatDateTime(iso: string): string {
 
 .detail-page--image-note {
   padding: 0;
+  background: var(--hh-color-card);
+}
+
+.detail-page--text-note {
   background: var(--hh-color-card);
 }
 
