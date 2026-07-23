@@ -5,6 +5,7 @@ export const TEXT_NOTE_THEMES = ['paper', 'mint', 'slate', 'headline', 'quote', 
 export type TextNoteTheme = typeof TEXT_NOTE_THEMES[number]
 export type TextNoteBodySize = 'large' | 'medium' | 'small'
 export type TextNoteLayout = 'memo' | 'fresh' | 'night' | 'newspaper' | 'quotation' | 'bulletin'
+export type TextNoteDisplayVariant = 'cover' | 'document'
 
 export interface TextNoteThemePresentation {
   kicker: string
@@ -152,6 +153,11 @@ export function truncateTextNoteBody(value: string, maxLength = 64): string {
   const characters = textNoteCharacters(value)
   if (characters.length <= maxLength) return characters.join('')
   return `${characters.slice(0, Math.max(0, maxLength - 1)).join('')}…`
+}
+
+export function resolveTextNoteDisplayBody(value: unknown, variant: TextNoteDisplayVariant = 'cover'): string {
+  const normalized = String(value || '').trim()
+  return variant === 'document' ? normalized : truncateTextNoteBody(normalized)
 }
 
 export function resolveTextNoteBodySize(value: string): TextNoteBodySize {

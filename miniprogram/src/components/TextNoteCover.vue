@@ -1,15 +1,23 @@
 <template>
   <view
     class="text-note-cover-frame"
-    :class="[`text-note-cover--${normalizedTheme}`, { 'text-note-cover-frame--compact': props.compact }]"
+    :class="[
+      `text-note-cover--${normalizedTheme}`,
+      {
+        'text-note-cover-frame--compact': props.compact,
+        'text-note-cover-frame--document': props.variant === 'document',
+      },
+    ]"
   >
     <image class="text-note-cover-background" :src="coverBackground" mode="scaleToFill" />
+    <view v-if="props.variant === 'document'" class="text-note-document-surface" />
     <view class="text-note-cover-content">
       <text v-if="normalizedTheme !== 'notice'" class="text-note-cover-kicker">{{ presentation.kicker }}</text>
       <text v-if="presentation.ornament === 'quote'" class="text-note-cover-quote">“</text>
       <text class="text-note-cover-title">{{ normalizedTitle }}</text>
       <view class="text-note-cover-rule" />
       <text class="text-note-cover-body" :class="`text-note-cover-body--${bodySize}`">{{ coverBody }}</text>
+      <text v-if="props.variant === 'document'" class="text-note-document-footer">HAPPY HOME · 邻里共享</text>
     </view>
   </view>
 </template>
@@ -19,8 +27,9 @@ import { computed } from 'vue'
 import {
   normalizeTextNoteTheme,
   getTextNoteThemePresentation,
+  resolveTextNoteDisplayBody,
   resolveTextNoteBodySize,
-  truncateTextNoteBody,
+  type TextNoteDisplayVariant,
   type TextNoteTheme,
 } from '../utils/text-note'
 
@@ -29,12 +38,13 @@ const props = defineProps<{
   body: string
   theme?: TextNoteTheme | string
   compact?: boolean
+  variant?: TextNoteDisplayVariant
 }>()
 
 const normalizedTheme = computed(() => normalizeTextNoteTheme(props.theme))
 const presentation = computed(() => getTextNoteThemePresentation(normalizedTheme.value))
 const normalizedTitle = computed(() => String(props.title || '').trim())
-const coverBody = computed(() => truncateTextNoteBody(String(props.body || '').trim()))
+const coverBody = computed(() => resolveTextNoteDisplayBody(props.body, props.variant))
 const bodySize = computed(() => resolveTextNoteBodySize(coverBody.value))
 
 const TEXT_NOTE_COVER_BACKGROUNDS: Record<TextNoteTheme, string> = {
@@ -203,5 +213,146 @@ const coverBackground = computed(() => TEXT_NOTE_COVER_BACKGROUNDS[normalizedThe
   height: 34rpx;
   font-size: 31rpx;
   line-height: 34rpx;
+}
+
+.text-note-cover-frame--document {
+  aspect-ratio: auto;
+  min-height: 775rpx;
+}
+
+.text-note-cover-frame--document.text-note-cover--paper { background: #f4e4c6; }
+.text-note-cover-frame--document.text-note-cover--mint { background: #e7f6ec; }
+.text-note-cover-frame--document.text-note-cover--slate { background: #303b4d; }
+.text-note-cover-frame--document.text-note-cover--headline { background: #f7f3e9; }
+.text-note-cover-frame--document.text-note-cover--quote { background: #f2eff8; }
+.text-note-cover-frame--document.text-note-cover--notice { background: #f7e4cb; }
+
+.text-note-cover-frame--document .text-note-cover-background {
+  bottom: auto;
+  height: 775rpx;
+}
+
+.text-note-document-surface {
+  position: absolute;
+  left: 0;
+  top: 220rpx;
+  right: 0;
+  bottom: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.text-note-cover--paper .text-note-document-surface {
+  background: linear-gradient(to bottom, rgba(244, 228, 198, 0.76), #f4e4c6 86rpx);
+}
+
+.text-note-cover--mint .text-note-document-surface {
+  background: linear-gradient(to bottom, rgba(231, 246, 236, 0.78), #e7f6ec 86rpx);
+}
+
+.text-note-cover--slate .text-note-document-surface {
+  background: linear-gradient(to bottom, rgba(48, 59, 77, 0.82), #303b4d 86rpx);
+}
+
+.text-note-cover--headline .text-note-document-surface {
+  background: linear-gradient(to bottom, rgba(247, 243, 233, 0.8), #f7f3e9 86rpx);
+}
+
+.text-note-cover--quote .text-note-document-surface {
+  background: linear-gradient(to bottom, rgba(242, 239, 248, 0.8), #f2eff8 86rpx);
+}
+
+.text-note-cover--notice .text-note-document-surface {
+  background: linear-gradient(to bottom, rgba(247, 228, 203, 0.8), #f7e4cb 86rpx);
+}
+
+.text-note-cover-frame--document .text-note-cover-content {
+  position: relative;
+  inset: auto;
+  display: flex;
+  min-height: 775rpx;
+  flex-direction: column;
+  padding: 54rpx 44rpx 112rpx;
+  overflow: visible;
+}
+
+.text-note-cover-frame--document .text-note-cover-kicker,
+.text-note-cover-frame--document .text-note-cover-title,
+.text-note-cover-frame--document .text-note-cover-body,
+.text-note-cover-frame--document .text-note-cover-quote {
+  position: relative;
+  left: auto;
+  top: auto;
+  width: auto;
+  height: auto;
+}
+
+.text-note-cover-frame--document .text-note-cover-title {
+  display: block;
+  max-height: none;
+  margin-top: 34rpx;
+  overflow: visible;
+  transform: none;
+  -webkit-line-clamp: unset;
+}
+
+.text-note-cover-frame--document .text-note-cover-rule {
+  position: relative;
+  left: auto;
+  top: auto;
+  width: 100%;
+  margin: 62rpx 0 46rpx;
+}
+
+.text-note-cover-frame--document .text-note-cover-body,
+.text-note-cover-frame--document .text-note-cover-body--large,
+.text-note-cover-frame--document .text-note-cover-body--medium,
+.text-note-cover-frame--document .text-note-cover-body--small {
+  position: relative;
+  left: auto;
+  top: auto;
+  width: auto;
+  max-height: none;
+  overflow: visible;
+  font-size: 27rpx;
+  line-height: 1.82;
+  text-align: left;
+  white-space: pre-wrap;
+}
+
+.text-note-cover-frame--document.text-note-cover--mint .text-note-cover-title,
+.text-note-cover-frame--document.text-note-cover--slate .text-note-cover-title {
+  margin-bottom: 82rpx;
+}
+
+.text-note-cover-frame--document.text-note-cover--paper .text-note-cover-rule {
+  display: block;
+  height: 2rpx;
+  opacity: 0.22;
+}
+
+.text-note-cover-frame--document.text-note-cover--mint .text-note-cover-body {
+  padding: 30rpx;
+  border-radius: 24rpx;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.text-note-cover-frame--document.text-note-cover--quote .text-note-cover-quote {
+  margin-top: 26rpx;
+  font-size: 88rpx;
+  line-height: 96rpx;
+}
+
+.text-note-document-footer {
+  position: relative;
+  z-index: 1;
+  display: block;
+  margin-top: auto;
+  padding-top: 56rpx;
+  color: currentColor;
+  font-size: 20rpx;
+  line-height: 30rpx;
+  letter-spacing: 2rpx;
+  opacity: 0.58;
 }
 </style>
