@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import type { Post, Section } from '../../../../cloud/shared/types'
 import {
+  buildImageNoteMediaItems,
   buildImageNoteDetail,
   getImageNoteCard,
   isImageNoteSectionContract,
@@ -49,6 +50,27 @@ function imageNotePost(content: Post['content'], overrides: Partial<Post> = {}):
 }
 
 describe('image-note view models', () => {
+  test('preserves every canonical image slot without exposing unresolved cloud IDs', () => {
+    const first = 'cloud://env/first.jpg'
+    const second = 'cloud://env/second.jpg'
+    const third = 'https://cdn.example/third.jpg'
+
+    expect(buildImageNoteMediaItems(
+      [first, second, third],
+      { [first]: 'https://tmp.example/first.jpg', [second]: '' },
+      { [first]: true, [second]: true },
+    )).toEqual([
+      { source: first, src: 'https://tmp.example/first.jpg', state: 'ready' },
+      { source: second, src: '', state: 'failed' },
+      { source: third, src: third, state: 'ready' },
+    ])
+
+    expect(buildImageNoteMediaItems([first, second], {}, {})).toEqual([
+      { source: first, src: '', state: 'pending' },
+      { source: second, src: '', state: 'pending' },
+    ])
+  })
+
   test('recognizes explicit templates and the fixed widget contract during rolling deployments', () => {
     expect(isImageNoteSectionContract(imageNoteSection())).toBe(true)
     expect(isImageNoteSectionContract(imageNoteSection({ displayTemplate: 'default' }))).toBe(true)

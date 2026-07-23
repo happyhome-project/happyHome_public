@@ -172,6 +172,8 @@
         :error="archiveError"
         :has-more="archiveHasMore"
         @post="onArchiveCardTap"
+        @cover-load="onArchiveCoverLoad"
+        @cover-error="onArchiveCoverError"
         @publish="openArchivePublish"
         @retry="loadArchiveFeed(true)"
         @load-more="loadArchiveFeed(false)"
@@ -484,7 +486,7 @@ import { clearHomeSnapshotCache, createHomeSnapshotShell, getBestBackgroundFetch
 import { formatHomeQuoteCite } from '../../utils/home-quote'
 import { createHomeLoadingGate } from '../../utils/home-loading-gate'
 import { resolveMenuSafeRightInset } from '../../utils/menu-safe-area'
-import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
+import { refreshCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { resolveFeedCovers } from '../../utils/feed-cover-url'
 import { communityInitial } from '../../utils/community-avatar'
 import { uploadCloudFile } from '../../api/storage'
@@ -577,6 +579,8 @@ const homeMenuSafeRightInset = ref(0)
 let refreshingHome = false
 let archiveRequestEpoch = 0
 let archiveRequestPending = false
+const archiveCoverRecoveryPending = new Set<string>()
+const archiveCoverRecoveryAttempts = new Map<string, number>()
 let queuedForcedHomeRefresh = false
 let mountedAt = 0
 let homeStartupStartedAt = Date.now()
@@ -1525,6 +1529,46 @@ function selectArchiveTopic(topicKey: string) {
 
 function onArchiveCardTap(card: ArchiveFeedCard) {
   uni.navigateTo({ url: `/pages/detail/index?postId=${encodeURIComponent(card.postId)}` })
+}
+
+function archiveCoverRecoveryKey(card: ArchiveFeedCard, source: string): string {
+  return `${card.postId}:${source}`
+}
+
+function commitArchiveCoverRender() {
+  archiveColumns.value = archiveColumns.value.map(column => column.slice()) as ArchiveFeedColumns
+}
+
+function onArchiveCoverLoad(card: ArchiveFeedCard) {
+  if (card.cover.kind === 'text') return
+  const source = String(card.cover.source || card.cover.src || '').trim()
+  if (source) archiveCoverRecoveryAttempts.delete(archiveCoverRecoveryKey(card, source))
+}
+
+async function onArchiveCoverError(card: ArchiveFeedCard) {
+  if (card.cover.kind === 'text') return
+  const source = String(card.cover.source || card.cover.src || '').trim()
+  card.cover.src = ''
+  commitArchiveCoverRender()
+  if (!source.startsWith('cloud://')) return
+
+  const key = archiveCoverRecoveryKey(card, source)
+  if (archiveCoverRecoveryPending.has(key)) return
+  const attempts = archiveCoverRecoveryAttempts.get(key) || 0
+  if (attempts >= 2) return
+  archiveCoverRecoveryAttempts.set(key, attempts + 1)
+  archiveCoverRecoveryPending.add(key)
+  clientLog('warn', 'home.archive.cover.load.fail', {
+    postId: card.postId,
+    attempt: attempts + 1,
+  })
+  try {
+    const refreshed = await refreshCloudFileUrl(source)
+    if (refreshed && !refreshed.startsWith('cloud://')) card.cover.src = refreshed
+  } finally {
+    archiveCoverRecoveryPending.delete(key)
+    commitArchiveCoverRender()
+  }
 }
 
 function openArchivePublish() {

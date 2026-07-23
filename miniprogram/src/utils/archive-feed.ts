@@ -6,9 +6,9 @@ export type ArchiveFeedCard = {
   authorName: string
   createdAt: string
   cover:
-    | { kind: 'image'; src: string }
+    | { kind: 'image'; src: string; source?: string }
     | { kind: 'text'; theme: string }
-    | { kind: 'video'; src: string }
+    | { kind: 'video'; src: string; source?: string }
   estimatedHeight: number
   post: Record<string, any>
 }

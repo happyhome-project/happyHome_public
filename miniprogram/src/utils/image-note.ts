@@ -37,6 +37,30 @@ export interface ImageNoteDetail extends ImageNoteCard {
   location: ImageNoteLocation | null
 }
 
+export interface ImageNoteMediaItem {
+  source: string
+  src: string
+  state: 'pending' | 'ready' | 'failed'
+}
+
+export function buildImageNoteMediaItems(
+  images: string[],
+  resolved: Record<string, string>,
+  settled: Record<string, boolean>,
+): ImageNoteMediaItem[] {
+  return normalizeImages(images).map((source) => {
+    const candidate = String(resolved[source] || (!source.startsWith('cloud://') ? source : '')).trim()
+    if (candidate && !candidate.startsWith('cloud://')) {
+      return { source, src: candidate, state: 'ready' as const }
+    }
+    return {
+      source,
+      src: '',
+      state: settled[source] ? 'failed' as const : 'pending' as const,
+    }
+  })
+}
+
 const IMAGE_NOTE_FIELDS: Record<ImageNoteField, ImageNoteFieldContract> = {
   images: { widgetId: 'image_note_images', fieldKey: 'images', type: 'image_group' },
   title: { widgetId: 'image_note_title', fieldKey: 'title', type: 'short_text' },
