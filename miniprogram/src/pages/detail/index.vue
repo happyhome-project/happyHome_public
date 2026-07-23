@@ -7,7 +7,7 @@
     }"
   >
     <view
-      v-if="post && section && !detailMediaResolving"
+      v-if="post && section"
       class="content"
       data-testid="detail-ready"
       :data-post-id="post._id"
@@ -29,6 +29,7 @@
         :key="`image-note-${detailMediaRecoveryVersion}`"
         v-if="isImageNoteDetail && imageNoteDetail"
         :detail="imageNoteDetail"
+        :media="imageNoteMediaItems"
         @media-load="onDetailMediaLoad"
         @media-error="onDetailMediaError"
         @open-location="openImageNoteLocation"
@@ -234,6 +235,7 @@ import { clientLog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { buildGuideRouteDetail } from '../../utils/guide-detail'
 import {
+  buildImageNoteMediaItems,
   buildImageNoteDetail,
   isImageNoteSectionContract,
   type ImageNoteLocation,
@@ -263,7 +265,7 @@ const rosterMeta = reactive({
 })
 const resolvedAvatarUrls = reactive<Record<string, string>>({})
 const resolvedDetailMediaUrls = reactive<Record<string, string>>({})
-const detailMediaResolving = ref(false)
+const settledDetailMediaUrls = reactive<Record<string, boolean>>({})
 const detailMediaRecoveryVersion = ref(0)
 const detailMediaRecoveryPending = new Set<string>()
 const detailMediaRecoveryAttempts = new Map<string, number>()
@@ -323,6 +325,15 @@ const guideRouteDetail = computed(() => {
 const imageNoteDetail = computed(() => {
   if (!renderPost.value || !section.value || !isImageNoteDetail.value) return null
   return buildImageNoteDetail(renderPost.value, section.value)
+})
+const imageNoteMediaItems = computed(() => {
+  if (!post.value || !section.value || !isImageNoteDetail.value) return []
+  const canonicalDetail = buildImageNoteDetail(post.value, section.value)
+  return buildImageNoteMediaItems(
+    canonicalDetail.images,
+    resolvedDetailMediaUrls,
+    settledDetailMediaUrls,
+  )
 })
 const regularWidgets = computed(() =>
   (section.value?.widgets || []).filter((widget: any) => !['attendance', 'admin_notice', 'activity_invite'].includes(widget.type))
@@ -459,11 +470,11 @@ async function loadPost(postId: string) {
   }
   loading.value = true
   loadError.value = ''
-  detailMediaResolving.value = true
   detailMediaRecoveryVersion.value = 0
   detailMediaRecoveryPending.clear()
   detailMediaRecoveryAttempts.clear()
   clearRecord(resolvedDetailMediaUrls)
+  clearRecord(settledDetailMediaUrls)
   clientLog('info', 'detail.load.start', {
     postId,
     cachedSectionCount: communityStore.currentSections.length,
@@ -520,7 +531,6 @@ async function loadPost(postId: string) {
       throw new Error('板块信息加载失败，请稍后重试')
     }
     await resolveDetailMediaUrls()
-    detailMediaResolving.value = false
     await resolveAttendanceAvatarUrls()
     await loadActivityInviteState()
     clientLog('info', 'detail.load.success', {
@@ -545,7 +555,6 @@ async function loadPost(postId: string) {
     loadError.value = friendlyLoadError(error)
     uni.showToast({ title: loadError.value, icon: 'none' })
   } finally {
-    detailMediaResolving.value = false
     loading.value = false
     clientLog('debug', 'detail.load.finally', {
       postId,
@@ -556,7 +565,7 @@ async function loadPost(postId: string) {
   }
 }
 
-function clearRecord(record: Record<string, string>) {
+function clearRecord(record: Record<string, unknown>) {
   Object.keys(record).forEach((key) => {
     delete record[key]
   })
@@ -592,6 +601,7 @@ async function resolveDetailMediaUrls() {
   if (urls.length === 0) return
   urls.forEach((url) => {
     resolvedDetailMediaUrls[url] = ''
+    settledDetailMediaUrls[url] = false
   })
   const primaryUrl = urls[0]
   const remainingUrls = urls.slice(1)
@@ -621,6 +631,14 @@ async function resolveDetailMediaUrls() {
     postId: currentPostId.value,
     resolvedCount,
   })
+  urls.forEach((source) => {
+    if (!settledDetailMediaUrls[source]) settledDetailMediaUrls[source] = true
+  })
+  urls
+    .filter((source) => !resolvedDetailMediaUrls[source])
+    .forEach((source) => {
+      void onDetailMediaError(source)
+    })
 }
 
 function applyDetailMediaResolution(resolved: Record<string, string>): number {
@@ -628,6 +646,7 @@ function applyDetailMediaResolution(resolved: Record<string, string>): number {
   Object.entries(resolved).forEach(([source, candidate]) => {
     const url = String(candidate || '').trim()
     resolvedDetailMediaUrls[source] = url && !url.startsWith('cloud://') ? url : ''
+    settledDetailMediaUrls[source] = true
     if (resolvedDetailMediaUrls[source]) resolvedCount += 1
   })
   return resolvedCount
@@ -648,21 +667,37 @@ function onDetailMediaLoad(value: string) {
 async function onDetailMediaError(value: string) {
   const source = canonicalDetailMediaSource(value)
   if (!source || detailMediaRecoveryPending.has(source)) return
-  const attempts = detailMediaRecoveryAttempts.get(source) || 0
-  if (attempts >= 2) return
-  detailMediaRecoveryAttempts.set(source, attempts + 1)
+  let attempts = detailMediaRecoveryAttempts.get(source) || 0
+  if (attempts >= 2) {
+    settledDetailMediaUrls[source] = true
+    return
+  }
   detailMediaRecoveryPending.add(source)
   clientLog('warn', 'detail.media.load.fail', {
     postId: currentPostId.value,
     attempt: attempts + 1,
   })
   try {
-    const refreshed = await refreshCloudFileUrl(source)
-    resolvedDetailMediaUrls[source] = refreshed && !refreshed.startsWith('cloud://')
-      ? refreshed
-      : ''
-    detailMediaRecoveryVersion.value += 1
+    while (attempts < 2) {
+      attempts += 1
+      detailMediaRecoveryAttempts.set(source, attempts)
+      settledDetailMediaUrls[source] = false
+      resolvedDetailMediaUrls[source] = ''
+      const refreshed = await refreshCloudFileUrl(source)
+      if (refreshed && !refreshed.startsWith('cloud://')) {
+        resolvedDetailMediaUrls[source] = refreshed
+        break
+      }
+    }
+  } catch (error) {
+    clientLog('warn', 'detail.media.refresh.fail', {
+      postId: currentPostId.value,
+      attempt: attempts,
+      error,
+    })
   } finally {
+    settledDetailMediaUrls[source] = true
+    detailMediaRecoveryVersion.value += 1
     detailMediaRecoveryPending.delete(source)
   }
 }
@@ -796,7 +831,8 @@ function getAttendanceSummary(widget: any) {
 function resolvedAvatarUrl(rawUrl: unknown) {
   const url = String(rawUrl || '').trim()
   if (!url) return fallbackAvatar
-  return resolvedAvatarUrls[url] || url
+  const resolved = String(resolvedAvatarUrls[url] || url).trim()
+  return resolved.startsWith('cloud://') ? fallbackAvatar : resolved
 }
 
 function attendanceAvatarSrc(user: any) {

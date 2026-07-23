@@ -16,7 +16,12 @@ describe('recoverable image rendering contract', () => {
   })
 
   test('image-note detail reports failed media and remounts after a forced refresh', () => {
-    expect(imageNote).toContain('@error="onImageError(image, index)"')
+    expect(detail).toContain('v-if="post && section"')
+    expect(detail).not.toContain('post && section && !detailMediaResolving')
+    expect(imageNote).toContain('v-for="(item, index) in media"')
+    expect(imageNote).toContain(':src="item.src"')
+    expect(imageNote).not.toContain(':src="item.source"')
+    expect(imageNote).toContain('@error="onImageError(item.source, index)"')
     expect(imageNote).toContain('image-note-image-fallback')
     expect(imageNote).toContain("(event: 'media-error', source: string): void")
     expect(detail).toContain('@media-error="onDetailMediaError"')
