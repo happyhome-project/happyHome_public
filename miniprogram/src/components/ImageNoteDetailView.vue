@@ -140,7 +140,7 @@ function onImageLoad(source: string, index: number) {
 
 function onImageError(source: string, index: number) {
   if (!failedImageIndexes.value.includes(index)) {
-    failedImageIndexes.value = [...failedImageIndexes.value, index]
+    failedImageIndexes.value.push(index)
   }
   emit('media-error', source)
 }
