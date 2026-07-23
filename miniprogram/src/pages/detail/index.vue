@@ -966,6 +966,7 @@ function formatDateTime(iso: string): string {
 
 .detail-page--image-note {
   padding: 0;
+  background: var(--hh-color-card);
 }
 
 .detail-page--guide :deep(.guide-route) {
