@@ -645,7 +645,8 @@ async function resolveDetailMediaUrls() {
 
 function applyDetailMediaResolution(resolved: Record<string, string>): number {
   let resolvedCount = 0
-  Object.entries(resolved).forEach(([source, candidate]) => {
+  Object.keys(resolved).forEach((source) => {
+    const candidate = resolved[source]
     const url = String(candidate || '').trim()
     resolvedDetailMediaUrls[source] = url && !url.startsWith('cloud://') ? url : ''
     settledDetailMediaUrls[source] = true
@@ -657,8 +658,12 @@ function applyDetailMediaResolution(resolved: Record<string, string>): number {
 function canonicalDetailMediaSource(value: string): string {
   const current = String(value || '').trim()
   if (current.startsWith('cloud://')) return current
-  return Object.entries(resolvedDetailMediaUrls)
-    .find(([, resolved]) => resolved === current)?.[0] || ''
+  const sources = Object.keys(resolvedDetailMediaUrls)
+  for (let index = 0; index < sources.length; index += 1) {
+    const source = sources[index]
+    if (resolvedDetailMediaUrls[source] === current) return source
+  }
+  return ''
 }
 
 function onDetailMediaLoad(value: string) {
