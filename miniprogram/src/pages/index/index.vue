@@ -3483,6 +3483,11 @@ onShareAppMessage(() => {
   }
 }
 
+.archive-topic-shell {
+  min-height: calc(100vh - 150rpx - env(safe-area-inset-top) - 98rpx);
+  background: var(--hh-color-card);
+}
+
 .section-tabs {
   white-space: nowrap;
   overflow-anchor: none;
