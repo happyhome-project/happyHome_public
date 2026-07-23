@@ -21,6 +21,21 @@ test('content audit follows approval and system management is collapsible', () =
   assert.match(source, /toggleSystemManagement/)
 })
 
+test('system management owns global configuration entries and expands for active routes', () => {
+  const source = read('src/views/Layout.vue')
+  const systemToggleIndex = source.indexOf('system-management-toggle')
+  const collaborationTemplatesIndex = source.indexOf('menu-collaboration-templates')
+  const adminAccountsIndex = source.indexOf('menu-admin-accounts')
+
+  assert.ok(collaborationTemplatesIndex > systemToggleIndex)
+  assert.ok(collaborationTemplatesIndex < adminAccountsIndex)
+  assert.match(source, /v-if="systemManagementExpanded"[\s\S]*data-testid="menu-collaboration-templates"/)
+  assert.match(source, /isSystemManagementRoute/)
+  for (const routeName of ['collaboration-templates', 'admin-accounts', 'guest-intro-config']) {
+    assert.match(source, new RegExp(`['"]${routeName}['"]`))
+  }
+})
+
 test('router provides stable keyed community views and settings route', () => {
   const source = read('src/router/index.ts')
   const layout = read('src/views/Layout.vue')
