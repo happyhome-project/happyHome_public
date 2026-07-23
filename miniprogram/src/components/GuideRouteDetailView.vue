@@ -10,6 +10,7 @@
         @touchstart="onHeroPointerStart"
         @touchmove="onHeroPointerMove"
         @touchend="onHeroPointerEnd"
+        @touchcancel="onHeroPointerEnd"
         @mousedown="onHeroPointerStart"
         @mousemove="onHeroPointerMove"
         @mouseup="onHeroPointerEnd"
@@ -281,6 +282,8 @@ function openLocation() {
 
 .guide-hero {
   position: relative;
+  margin: 0 40rpx;
+  width: auto;
   height: 1160rpx;
   min-height: 760rpx;
   max-height: 72vh;

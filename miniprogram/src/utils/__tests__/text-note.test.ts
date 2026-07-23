@@ -15,6 +15,8 @@ import {
   resolveTextNoteDisplayBody,
   resolveTextNoteBodySize,
   selectTextNoteCoverExcerpt,
+  TEXT_NOTE_BODY_MAX_LINES,
+  TEXT_NOTE_BODY_UNITS_PER_LINE,
   TEXT_NOTE_THEMES,
   truncateTextNoteBody,
 } from '../text-note'
@@ -176,7 +178,7 @@ describe('text note presentation', () => {
       '第三段保留手动换行。\n下一行仍然属于第三段。',
     ].join('\n\n')
     const normalized = normalizeTextNoteBody(body)
-    const pages = paginateTextNoteBody(body, { capacity: 36 })
+    const pages = paginateTextNoteBody(body, { unitsPerLine: 10, maxLines: 3 })
 
     expect(pages.length).toBeGreaterThan(2)
     expect(pages.join('')).toBe(normalized)
@@ -193,7 +195,7 @@ describe('text note presentation', () => {
   test('does not cut joined Emoji or combining marks at page boundaries', () => {
     const family = '👨‍👩‍👧‍👦'
     const accented = 'e\u0301'
-    const pages = paginateTextNoteBody(`${family}${accented}`.repeat(8), { capacity: 3 })
+    const pages = paginateTextNoteBody(`${family}${accented}`.repeat(8), { unitsPerLine: 3, maxLines: 1 })
 
     expect(pages.join('')).toBe(`${family}${accented}`.repeat(8))
     expect(pages.every((page) => !page.startsWith('\u200d') && !page.endsWith('\u200d'))).toBe(true)
@@ -202,42 +204,86 @@ describe('text note presentation', () => {
 
   test('treats manual line breaks as real vertical space instead of cheap characters', () => {
     const body = Array.from({ length: 24 }, (_, index) => `第${index + 1}行`).join('\n')
-    const pages = paginateTextNoteBody(body, { capacity: 36 })
+    const pages = paginateTextNoteBody(body, { unitsPerLine: 20, maxLines: 4 })
 
     expect(pages.length).toBeGreaterThan(4)
     expect(pages.join('')).toBe(normalizeTextNoteBody(body))
-    expect(pages.every((page) => page.split('\n').length <= 4)).toBe(true)
+    expect(pages.every((page) => page.replace(/\n$/, '').split('\n').length <= 4)).toBe(true)
   })
 
-  test('keeps short text on one cover and turns long text into fixed source-complete pages', () => {
+  test('uses the Figma 15-line body boundary and creates another page instead of shrinking text', () => {
+    const exactPage = '字'.repeat(TEXT_NOTE_BODY_UNITS_PER_LINE * TEXT_NOTE_BODY_MAX_LINES)
+    const overflow = `${exactPage}字`
+
+    expect(paginateTextNoteBody(exactPage)).toHaveLength(1)
+    expect(paginateTextNoteBody(overflow)).toHaveLength(2)
+    expect(paginateTextNoteBody(overflow).join('')).toBe(overflow)
+  })
+
+  test('budgets narrow-looking ASCII conservatively enough for long URLs and platform font variance', () => {
+    const wideAscii = 'W'.repeat(400)
+    const pages = paginateTextNoteBody(wideAscii)
+
+    expect(pages).toHaveLength(2)
+    expect(pages.join('')).toBe(wideAscii)
+  })
+
+  test('counts blank lines as layout rows and preserves them across page boundaries', () => {
+    const body = '第一行\n\n第二行'
+    const pages = paginateTextNoteBody(body, { unitsPerLine: 20, maxLines: 2 })
+
+    expect(pages).toHaveLength(2)
+    expect(pages.join('')).toBe(body)
+  })
+
+  test('always creates a title-only cover followed by source-complete body-only pages', () => {
     const shortDeck = createTextNoteDeck({
       title: '今晚记得关窗',
       body: '今晚有大风，大家睡前记得关好门窗。',
       theme: 'mint',
     })
     expect(shortDeck.theme).toBe('mint')
-    expect(shortDeck.pages).toHaveLength(1)
-    expect(shortDeck.pages[0]).toMatchObject({ kind: 'cover', pageNumber: 1, totalPages: 1 })
+    expect(shortDeck.pages).toHaveLength(2)
+    expect(shortDeck.pages[0]).toMatchObject({
+      kind: 'cover',
+      title: '今晚记得关窗',
+      body: '',
+      sourceBody: '',
+      pageNumber: 1,
+      totalPages: 2,
+    })
+    expect(shortDeck.pages[1]).toMatchObject({
+      kind: 'body',
+      title: '',
+      body: '今晚有大风，大家睡前记得关好门窗。',
+      sourceBody: '今晚有大风，大家睡前记得关好门窗。',
+      pageNumber: 2,
+      totalPages: 2,
+    })
 
     const body = Array.from({ length: 9 }, (_, index) =>
       `第${index + 1}段：这是用于验证动态分页的社区通知内容，文字应保持原始顺序并进入后续正文卡片。`,
     ).join('\n\n')
     const longDeck = createTextNoteDeck({ title: '周六社区停水通知', body, theme: 'notice' })
-    expect(longDeck.pages.length).toBeGreaterThanOrEqual(4)
+    expect(longDeck.pages.length).toBeGreaterThanOrEqual(3)
     expect(longDeck.pages[0].kind).toBe('cover')
+    expect(longDeck.pages[0].body).toBe('')
     expect(longDeck.pages.slice(1).every((page) => page.kind === 'body')).toBe(true)
+    expect(longDeck.pages.slice(1).every((page) => page.title === '')).toBe(true)
+    expect(longDeck.pages.slice(1).every((page) => page.body === page.body.trim())).toBe(true)
     expect(longDeck.pages.slice(1).map((page) => page.sourceBody).join('')).toBe(normalizeTextNoteBody(body))
     expect(longDeck.pages.every((page, index) =>
       page.pageNumber === index + 1 && page.totalPages === longDeck.pages.length,
     )).toBe(true)
   })
 
-  test('uses distinct theme capacities and falls back to paper for generated decks', () => {
+  test('uses one readable body geometry for all themes and falls back to paper', () => {
     const body = '这是一段需要根据主题安全容量重新分页的社区长文。'.repeat(45)
-    const slate = createTextNoteDeck({ title: '标题', body, theme: 'slate' })
-    const quote = createTextNoteDeck({ title: '标题', body, theme: 'quote' })
+    const pageCounts = TEXT_NOTE_THEMES.map((theme) =>
+      createTextNoteDeck({ title: '标题', body, theme }).pages.length,
+    )
 
-    expect(quote.pages.length).toBeGreaterThanOrEqual(slate.pages.length)
+    expect(new Set(pageCounts).size).toBe(1)
     expect(createTextNoteDeck({ title: '标题', body: '正文', theme: 'unknown' }).theme).toBe('paper')
   })
 })

@@ -7,6 +7,13 @@
         :circular="detail.images.length > 1"
         :duration="260"
         @change="onImageChange"
+        @touchstart="onHeroPointerStart"
+        @touchmove="onHeroPointerMove"
+        @touchend="onHeroPointerEnd"
+        @touchcancel="onHeroPointerEnd"
+        @mousedown="onHeroPointerStart"
+        @mousemove="onHeroPointerMove"
+        @mouseup="onHeroPointerEnd"
       >
         <swiper-item
           v-for="(image, index) in detail.images"
@@ -99,7 +106,13 @@ const emit = defineEmits<{
   (event: 'open-location', location: ImageNoteLocation): void
 }>()
 
+const HERO_SWIPE_THRESHOLD_PX = 8
 const currentImageIndex = ref(0)
+let heroPointerStartX = 0
+let heroPointerStartY = 0
+let heroHasPointerStart = false
+let heroSwipeIntent = false
+let heroSuppressNextPreview = false
 
 const authorInitial = computed(() => props.detail.authorName.slice(0, 1) || '邻')
 const publishDate = computed(() => formatPostDate(props.detail.createdAt))
@@ -114,10 +127,48 @@ watch(
 function onImageChange(event: any) {
   const nextIndex = Number(event?.detail?.current || 0)
   if (Number.isFinite(nextIndex)) currentImageIndex.value = nextIndex
+  if (event?.detail?.source === 'touch') heroSuppressNextPreview = true
+}
+
+function onHeroPointerStart(event: any) {
+  const point = getPointerPoint(event)
+  heroPointerStartX = point.x
+  heroPointerStartY = point.y
+  heroHasPointerStart = true
+  heroSwipeIntent = false
+  heroSuppressNextPreview = false
+}
+
+function onHeroPointerMove(event: any) {
+  if (!heroHasPointerStart) return
+  const point = getPointerPoint(event)
+  const dx = Math.abs(point.x - heroPointerStartX)
+  const dy = Math.abs(point.y - heroPointerStartY)
+  if (Math.max(dx, dy) >= HERO_SWIPE_THRESHOLD_PX) {
+    heroSwipeIntent = true
+    heroSuppressNextPreview = true
+  }
+}
+
+function onHeroPointerEnd() {
+  if (heroSwipeIntent) heroSuppressNextPreview = true
+  heroHasPointerStart = false
+  heroSwipeIntent = false
+}
+
+function getPointerPoint(event: any) {
+  const touch = event?.touches?.[0] || event?.changedTouches?.[0]
+  const x = Number(touch?.clientX ?? touch?.pageX ?? event?.clientX ?? event?.pageX ?? 0)
+  const y = Number(touch?.clientY ?? touch?.pageY ?? event?.clientY ?? event?.pageY ?? 0)
+  return { x, y }
 }
 
 function previewImage(index: number) {
   if (!props.detail.images.length) return
+  if (heroSuppressNextPreview) {
+    heroSuppressNextPreview = false
+    return
+  }
   uni.previewImage({
     current: props.detail.images[index],
     urls: props.detail.images,
@@ -141,7 +192,6 @@ function formatPostDate(value: string): string {
   background: var(--hh-color-card);
 }
 
-.image-note-hero,
 .image-note-swiper,
 .image-note-slide {
   width: 100%;
@@ -153,6 +203,11 @@ function formatPostDate(value: string): string {
 
 .image-note-hero {
   position: relative;
+  margin: 0 40rpx;
+  width: auto;
+  height: 960rpx;
+  min-height: 620rpx;
+  max-height: 72vh;
   overflow: hidden;
   background: var(--hh-color-card);
 }

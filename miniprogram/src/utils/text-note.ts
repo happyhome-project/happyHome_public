@@ -24,14 +24,11 @@ const TEXT_NOTE_THEME_PRESENTATIONS: Record<TextNoteTheme, TextNoteThemePresenta
   notice: { kicker: '通知公告', layout: 'bulletin', titleTone: 'official', ornament: 'stamp' },
 }
 
-const TEXT_NOTE_THEME_CAPACITIES: Record<TextNoteTheme, { cover: number; body: number }> = {
-  paper: { cover: 90, body: 170 },
-  mint: { cover: 82, body: 158 },
-  slate: { cover: 94, body: 176 },
-  headline: { cover: 78, body: 150 },
-  quote: { cover: 58, body: 142 },
-  notice: { cover: 78, body: 154 },
-}
+// Figma's 312 px text column fits about 19 ideographs in the design font.
+// Reserve two visual units for platform font/rendering variance so runtime text
+// never relies on the optimistic edge of that measurement.
+export const TEXT_NOTE_BODY_UNITS_PER_LINE = 17
+export const TEXT_NOTE_BODY_MAX_LINES = 15
 
 export interface PostPresentation {
   textNoteTheme?: TextNoteTheme
@@ -215,10 +212,6 @@ function textNoteVisualWeight(value: unknown): number {
   const characters = textNoteCharacters(value)
   for (const character of characters) {
     if (character === '\n') {
-      // A manual break consumes the unused remainder of a visual line.
-      // Charging one conservative CJK line prevents many short lines from
-      // passing a scalar character budget and overflowing the fixed card.
-      total += 18
       continue
     }
     if (/^\s$/.test(character)) {
@@ -226,7 +219,7 @@ function textNoteVisualWeight(value: unknown): number {
       continue
     }
     if (/^[\x00-\x7f]$/.test(character)) {
-      total += 0.55
+      total += 0.65
       continue
     }
     const first = readTextNoteCodePoint(character, 0)
@@ -236,20 +229,43 @@ function textNoteVisualWeight(value: unknown): number {
   return total
 }
 
-function splitTextNoteByCapacity(value: string, capacity: number): string[] {
+function textNoteVisualLineCount(value: string, unitsPerLine: number): number {
+  if (!value) return 0
+  const safeUnitsPerLine = Math.max(1, unitsPerLine)
+  const characters = textNoteCharacters(value)
+  let completedLines = 0
+  let currentLineUnits = 0
+
+  for (const character of characters) {
+    if (character === '\n') {
+      completedLines += 1
+      currentLineUnits = 0
+      continue
+    }
+
+    const weight = textNoteVisualWeight(character)
+    if (currentLineUnits > 0 && currentLineUnits + weight > safeUnitsPerLine) {
+      completedLines += 1
+      currentLineUnits = 0
+    }
+    currentLineUnits += weight
+  }
+
+  return completedLines + (currentLineUnits > 0 ? 1 : 0)
+}
+
+function splitTextNoteByLineBudget(value: string, unitsPerLine: number, maxLines: number): string[] {
   const chunks: string[] = []
   const characters = textNoteCharacters(value)
   let current = ''
-  let currentWeight = 0
+
   for (const character of characters) {
-    const weight = textNoteVisualWeight(character)
-    if (current && currentWeight + weight > capacity) {
+    const candidate = current + character
+    if (current && textNoteVisualLineCount(candidate, unitsPerLine) > maxLines) {
       chunks.push(current)
       current = ''
-      currentWeight = 0
     }
     current += character
-    currentWeight += weight
   }
   if (current) chunks.push(current)
   return chunks
@@ -259,49 +275,63 @@ function isTextNoteSentenceBoundary(character: string): boolean {
   return character === '\n' || '。！？!?；;'.indexOf(character) >= 0
 }
 
-function textNoteAtomicSegments(value: string, capacity: number): string[] {
+function textNoteAtomicSegments(value: string): string[] {
   const segments: string[] = []
   let current = ''
   const characters = textNoteCharacters(value)
   for (const character of characters) {
     current += character
     if (isTextNoteSentenceBoundary(character)) {
-      const parts = textNoteVisualWeight(current) > capacity
-        ? splitTextNoteByCapacity(current, capacity)
-        : [current]
-      for (const part of parts) segments.push(part)
+      segments.push(current)
       current = ''
     }
   }
-  if (current) {
-    const parts = textNoteVisualWeight(current) > capacity
-      ? splitTextNoteByCapacity(current, capacity)
-      : [current]
-    for (const part of parts) segments.push(part)
-  }
+  if (current) segments.push(current)
   return segments
 }
 
-export function paginateTextNoteBody(value: unknown, options: { capacity?: number } = {}): string[] {
+export function paginateTextNoteBody(
+  value: unknown,
+  options: { unitsPerLine?: number; maxLines?: number } = {},
+): string[] {
   const normalized = normalizeTextNoteBody(value)
   if (!normalized) return []
 
-  const requestedCapacity = Number(options.capacity)
-  const capacity = Math.max(12, Number.isFinite(requestedCapacity) && requestedCapacity > 0 ? requestedCapacity : TEXT_NOTE_THEME_CAPACITIES.paper.body)
-  const segments = textNoteAtomicSegments(normalized, capacity)
+  const requestedUnitsPerLine = Number(options.unitsPerLine)
+  const requestedMaxLines = Number(options.maxLines)
+  const unitsPerLine = Math.max(
+    1,
+    Number.isFinite(requestedUnitsPerLine) && requestedUnitsPerLine > 0
+      ? requestedUnitsPerLine
+      : TEXT_NOTE_BODY_UNITS_PER_LINE,
+  )
+  const maxLines = Math.max(
+    1,
+    Number.isFinite(requestedMaxLines) && requestedMaxLines > 0
+      ? Math.floor(requestedMaxLines)
+      : TEXT_NOTE_BODY_MAX_LINES,
+  )
+  const atomicSegments = textNoteAtomicSegments(normalized)
+  const segments: string[] = []
+  for (const segment of atomicSegments) {
+    if (textNoteVisualLineCount(segment, unitsPerLine) <= maxLines) {
+      segments.push(segment)
+      continue
+    }
+    const chunks = splitTextNoteByLineBudget(segment, unitsPerLine, maxLines)
+    for (const chunk of chunks) segments.push(chunk)
+  }
+
   const pages: string[] = []
   let current = ''
-  let currentWeight = 0
 
   for (const segment of segments) {
-    const weight = textNoteVisualWeight(segment)
-    if (current && currentWeight + weight > capacity) {
+    const candidate = current + segment
+    if (current && textNoteVisualLineCount(candidate, unitsPerLine) > maxLines) {
       pages.push(current)
       current = ''
-      currentWeight = 0
     }
     current += segment
-    currentWeight += weight
   }
   if (current) pages.push(current)
   return pages
@@ -332,29 +362,29 @@ export function selectTextNoteCoverExcerpt(value: unknown): string {
 export function createTextNoteDeck(input: { title?: unknown; body?: unknown; theme?: unknown } = {}): TextNoteDeck {
   const theme = normalizeTextNoteTheme(input.theme)
   const presentation = getTextNoteThemePresentation(theme)
-  const capacity = TEXT_NOTE_THEME_CAPACITIES[theme]
   const title = normalizeTextNoteTitle(input.title)
   const body = normalizeTextNoteBody(input.body)
-  const isShort = textNoteVisualWeight(body) <= capacity.cover
   const basePages: Array<Omit<TextNotePage, 'pageNumber' | 'totalPages'>> = [{
     kind: 'cover',
     kicker: presentation.kicker,
     title,
-    body: isShort ? body : selectTextNoteCoverExcerpt(body),
+    body: '',
     sourceBody: '',
   }]
 
-  if (!isShort) {
-    const bodyPages = paginateTextNoteBody(body, { capacity: capacity.body })
-    for (const pageBody of bodyPages) {
-      basePages.push({
-        kind: 'body',
-        kicker: presentation.kicker,
-        title,
-        body: pageBody,
-        sourceBody: pageBody,
-      })
-    }
+  const bodyPages = paginateTextNoteBody(body)
+  const sourceCompletePages = bodyPages.length ? bodyPages : ['']
+  for (const pageBody of sourceCompletePages) {
+    basePages.push({
+      kind: 'body',
+      kicker: presentation.kicker,
+      title: '',
+      // A page boundary already supplies the visual paragraph separation.
+      // Keep boundary whitespace in sourceBody for lossless reconstruction, but
+      // do not spend scarce card rows on an invisible leading/trailing break.
+      body: pageBody.trim(),
+      sourceBody: pageBody,
+    })
   }
 
   const totalPages = basePages.length
