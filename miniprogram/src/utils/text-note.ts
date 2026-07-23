@@ -360,8 +360,13 @@ export function createTextNoteDeck(input: { title?: unknown; body?: unknown; the
   const totalPages = basePages.length
   const pages: TextNotePage[] = []
   for (let index = 0; index < basePages.length; index += 1) {
+    const page = basePages[index]
     pages.push({
-      ...basePages[index],
+      kind: page.kind,
+      kicker: page.kicker,
+      title: page.title,
+      body: page.body,
+      sourceBody: page.sourceBody,
       pageNumber: index + 1,
       totalPages,
     })
