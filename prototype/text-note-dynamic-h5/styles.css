@@ -271,7 +271,7 @@ button {
 .generation-preview {
   position: relative;
   width: 176px;
-  aspect-ratio: 3 / 5;
+  aspect-ratio: 4 / 5;
   margin: 0 auto 30px;
   padding: 28px 20px;
   overflow: hidden;
@@ -426,7 +426,7 @@ button {
 .note-card {
   position: relative;
   width: 100%;
-  aspect-ratio: 3 / 5;
+  aspect-ratio: 4 / 5;
   overflow: hidden;
   border-radius: 20px;
   container-type: inline-size;
@@ -436,7 +436,6 @@ button {
 }
 
 .screen--preview .note-card {
-  aspect-ratio: 3 / 5;
   border-radius: 16px;
   box-shadow: 0 4px 18px rgba(36, 55, 46, 0.09);
 }
@@ -997,6 +996,57 @@ button {
   width: 20px;
   height: 20px;
   vertical-align: -4px;
+}
+
+.bottom-sheet--confirm {
+  padding-bottom: calc(22px + env(safe-area-inset-bottom));
+}
+
+.publish-confirm__summary {
+  margin: 2px 0 18px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.publish-confirm__meta {
+  margin: 0;
+  padding: 0 14px;
+  border-radius: 14px;
+  background: var(--page);
+}
+
+.publish-confirm__meta div {
+  display: grid;
+  min-height: 48px;
+  border-bottom: 1px solid #e7ebe9;
+  align-items: center;
+  grid-template-columns: 58px 1fr;
+}
+
+.publish-confirm__meta div:last-child {
+  border-bottom: 0;
+}
+
+.publish-confirm__meta dt {
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+.publish-confirm__meta dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.publish-confirm__actions {
+  display: grid;
+  margin-top: 20px;
+  align-items: center;
+  grid-template-columns: 74px 1fr;
+  gap: 14px;
 }
 
 .home-head {

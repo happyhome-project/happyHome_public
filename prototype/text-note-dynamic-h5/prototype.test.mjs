@@ -43,6 +43,7 @@ test('generation, tools, publish, and detail states have stable interaction cont
     'theme-rail',
     'topic-tool',
     'location-tool',
+    'next-button',
     'publish-button',
     'published-card',
     'detail-deck',
@@ -89,9 +90,12 @@ test('preview follows the reference hierarchy while keeping HappyHome actions', 
   assert.match(app, /class="app-bar__edit"[^>]*>编辑<\/button>/)
   assert.match(app, /<h1>预览<\/h1>/)
   assert.match(app, /class="preview-actions__hint">选择喜欢的排版<\/span>/)
+  assert.match(app, /data-action="next" data-testid="next-button">下一步<\/button>/)
+  assert.match(app, /state\.sheet = 'publish-confirm'/)
   assert.match(app, /data-testid="publish-button">发布<\/button>/)
-  assert.match(css, /\.generation-preview\s*\{[^}]*aspect-ratio:\s*3\s*\/\s*5/s)
-  assert.match(css, /\.screen--preview \.note-card\s*\{[^}]*aspect-ratio:\s*3\s*\/\s*5/s)
+  assert.match(css, /\.generation-preview\s*\{[^}]*aspect-ratio:\s*4\s*\/\s*5/s)
+  assert.match(css, /\.note-card\s*\{[^}]*aspect-ratio:\s*4\s*\/\s*5/s)
+  assert.doesNotMatch(css, /\.screen--preview \.note-card\s*\{[^}]*aspect-ratio:\s*3\s*\/\s*5/s)
 })
 
 test('preview carousel uses slide stride so the next page can remain visibly discoverable', async () => {

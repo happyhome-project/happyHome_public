@@ -1,5 +1,10 @@
 # Dynamic Text Note H5 Prototype Implementation Plan
 
+> **Historical / point-in-time:** This file preserves the implementation plan used for the 2026-07-23 prototype; do not execute it as current instructions.
+> **Current authority:** Use the [documentation authority index](../../README.md), current code, and current tests.
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a local interactive H5 sample that demonstrates HappyHome text editing, visible layout generation, multi-page themed cards, publishing into a two-column feed, and paged detail reading.

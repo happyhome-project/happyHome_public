@@ -324,7 +324,7 @@ function renderPreview() {
       </div>
       <footer class="preview-actions">
         <span class="preview-actions__hint">选择喜欢的排版</span>
-        <button class="primary-button" type="button" data-action="publish" data-testid="publish-button">发布</button>
+        <button class="primary-button" type="button" data-action="next" data-testid="next-button">下一步</button>
       </footer>
       ${state.sheet ? renderSheet() : ''}
       ${renderToast()}
@@ -334,6 +334,33 @@ function renderPreview() {
 }
 
 function renderSheet() {
+  if (state.sheet === 'publish-confirm') {
+    const theme = TEXT_NOTE_THEMES[state.theme]
+    return `
+      <div class="sheet-layer" data-action="close-sheet">
+        <section class="bottom-sheet bottom-sheet--confirm" role="dialog" aria-modal="true" aria-label="确认发布">
+          <div class="sheet-handle"></div>
+          <div class="sheet-head">
+            <h2>确认发布</h2>
+            <button class="icon-button" type="button" data-action="close-sheet" aria-label="关闭">${icon('close')}</button>
+          </div>
+          <div class="publish-confirm">
+            <p class="publish-confirm__summary">排版已生成，共 ${state.deck.pages.length} 页</p>
+            <dl class="publish-confirm__meta">
+              <div><dt>排版</dt><dd>${escapeHtml(theme.label)}</dd></div>
+              <div><dt>话题</dt><dd>${escapeHtml(state.topic || '未选择')}</dd></div>
+              <div><dt>地点</dt><dd>${escapeHtml(state.location || '未选择')}</dd></div>
+            </dl>
+            <div class="publish-confirm__actions">
+              <button class="text-button text-button--large" type="button" data-action="close-sheet">返回</button>
+              <button class="primary-button" type="button" data-action="publish" data-testid="publish-button">发布</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    `
+  }
+
   const isTopic = state.sheet === 'topic'
   const options = isTopic ? topicOptions : locationOptions
   const selected = isTopic ? state.topic : state.location
@@ -690,7 +717,11 @@ app.addEventListener('click', async (event) => {
     state.location = target.dataset.value
     state.sheet = ''
     render()
+  } else if (action === 'next') {
+    state.sheet = 'publish-confirm'
+    render()
   } else if (action === 'publish') {
+    state.sheet = ''
     state.published = true
     state.detailDeck = state.deck
     state.detailTitle = state.title
