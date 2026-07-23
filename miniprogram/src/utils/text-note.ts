@@ -6,6 +6,7 @@ export type TextNoteTheme = typeof TEXT_NOTE_THEMES[number]
 export type TextNoteBodySize = 'large' | 'medium' | 'small'
 export type TextNoteLayout = 'memo' | 'fresh' | 'night' | 'newspaper' | 'quotation' | 'bulletin'
 export type TextNoteDisplayVariant = 'cover' | 'document'
+export type TextNotePageKind = 'cover' | 'body'
 
 export interface TextNoteThemePresentation {
   kicker: string
@@ -23,6 +24,15 @@ const TEXT_NOTE_THEME_PRESENTATIONS: Record<TextNoteTheme, TextNoteThemePresenta
   notice: { kicker: '通知公告', layout: 'bulletin', titleTone: 'official', ornament: 'stamp' },
 }
 
+const TEXT_NOTE_THEME_CAPACITIES: Record<TextNoteTheme, { cover: number; body: number }> = {
+  paper: { cover: 90, body: 170 },
+  mint: { cover: 82, body: 158 },
+  slate: { cover: 94, body: 176 },
+  headline: { cover: 78, body: 150 },
+  quote: { cover: 58, body: 142 },
+  notice: { cover: 78, body: 154 },
+}
+
 export interface PostPresentation {
   textNoteTheme?: TextNoteTheme
 }
@@ -36,23 +46,119 @@ export interface TextNoteCard extends TextNoteContent {
   theme: TextNoteTheme
 }
 
+export interface TextNotePage {
+  kind: TextNotePageKind
+  kicker: string
+  title: string
+  body: string
+  sourceBody: string
+  pageNumber: number
+  totalPages: number
+}
+
+export interface TextNoteDeck {
+  theme: TextNoteTheme
+  label: string
+  pages: TextNotePage[]
+}
+
 function normalizeText(value: unknown): string {
   return String(value ?? '').trim()
+}
+
+interface TextNoteCodePoint {
+  character: string
+  code: number
+  length: number
+}
+
+function readTextNoteCodePoint(text: string, index: number): TextNoteCodePoint {
+  const first = text.charCodeAt(index)
+  const second = text.charCodeAt(index + 1)
+  if (first >= 0xd800 && first <= 0xdbff && second >= 0xdc00 && second <= 0xdfff) {
+    return {
+      character: text.charAt(index) + text.charAt(index + 1),
+      code: ((first - 0xd800) * 0x400) + (second - 0xdc00) + 0x10000,
+      length: 2,
+    }
+  }
+  return {
+    character: text.charAt(index),
+    code: first,
+    length: 1,
+  }
+}
+
+function isTextNoteCombiningCodePoint(code: number): boolean {
+  return (
+    (code >= 0x0300 && code <= 0x036f) ||
+    (code >= 0x1ab0 && code <= 0x1aff) ||
+    (code >= 0x1dc0 && code <= 0x1dff) ||
+    (code >= 0x20d0 && code <= 0x20ff) ||
+    (code >= 0xfe20 && code <= 0xfe2f)
+  )
+}
+
+function isTextNoteVariationSelector(code: number): boolean {
+  return (code >= 0xfe00 && code <= 0xfe0f) || (code >= 0xe0100 && code <= 0xe01ef)
+}
+
+function isTextNoteEmojiModifier(code: number): boolean {
+  return code >= 0x1f3fb && code <= 0x1f3ff
+}
+
+function isTextNoteRegionalIndicator(code: number): boolean {
+  return code >= 0x1f1e6 && code <= 0x1f1ff
+}
+
+function isTextNoteTrailingCodePoint(code: number): boolean {
+  return (
+    isTextNoteCombiningCodePoint(code) ||
+    isTextNoteVariationSelector(code) ||
+    isTextNoteEmojiModifier(code) ||
+    code === 0x20e3
+  )
 }
 
 function textNoteCharacters(value: unknown): string[] {
   const text = String(value || '')
   const characters: string[] = []
-  for (let index = 0; index < text.length; index += 1) {
-    let character = text.charAt(index)
-    const code = text.charCodeAt(index)
-    const nextCode = text.charCodeAt(index + 1)
-    if (code >= 0xd800 && code <= 0xdbff && nextCode >= 0xdc00 && nextCode <= 0xdfff) {
-      character += text.charAt(index + 1)
-      index += 1
+
+  let index = 0
+  while (index < text.length) {
+    const first = readTextNoteCodePoint(text, index)
+    let character = first.character
+    index += first.length
+
+    if (isTextNoteRegionalIndicator(first.code) && index < text.length) {
+      const regionalPair = readTextNoteCodePoint(text, index)
+      if (isTextNoteRegionalIndicator(regionalPair.code)) {
+        character += regionalPair.character
+        index += regionalPair.length
+      }
+    }
+
+    let joining = true
+    while (joining && index < text.length) {
+      const next = readTextNoteCodePoint(text, index)
+      if (isTextNoteTrailingCodePoint(next.code)) {
+        character += next.character
+        index += next.length
+        continue
+      }
+      if (next.code === 0x200d && index + next.length < text.length) {
+        character += next.character
+        index += next.length
+        const joined = readTextNoteCodePoint(text, index)
+        character += joined.character
+        index += joined.length
+        continue
+      }
+      joining = false
     }
     characters.push(character)
   }
+
   return characters
 }
 
@@ -94,6 +200,179 @@ export function getTextNoteThemePresentation(value: unknown): TextNoteThemePrese
   return TEXT_NOTE_THEME_PRESENTATIONS[normalizeTextNoteTheme(value)]
 }
 
+export function normalizeTextNoteBody(value: unknown): string {
+  return String(value ?? '')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function textNoteVisualWeight(value: unknown): number {
+  let total = 0
+  const characters = textNoteCharacters(value)
+  for (const character of characters) {
+    if (character === '\n') {
+      // A manual break consumes the unused remainder of a visual line.
+      // Charging one conservative CJK line prevents many short lines from
+      // passing a scalar character budget and overflowing the fixed card.
+      total += 18
+      continue
+    }
+    if (/^\s$/.test(character)) {
+      total += 0.3
+      continue
+    }
+    if (/^[\x00-\x7f]$/.test(character)) {
+      total += 0.55
+      continue
+    }
+    const first = readTextNoteCodePoint(character, 0)
+    const isEmoji = first.code >= 0x1f000 || character.indexOf('\u200d') >= 0 || character.indexOf('\ufe0f') >= 0
+    total += isEmoji ? 1.6 : 1
+  }
+  return total
+}
+
+function splitTextNoteByCapacity(value: string, capacity: number): string[] {
+  const chunks: string[] = []
+  const characters = textNoteCharacters(value)
+  let current = ''
+  let currentWeight = 0
+  for (const character of characters) {
+    const weight = textNoteVisualWeight(character)
+    if (current && currentWeight + weight > capacity) {
+      chunks.push(current)
+      current = ''
+      currentWeight = 0
+    }
+    current += character
+    currentWeight += weight
+  }
+  if (current) chunks.push(current)
+  return chunks
+}
+
+function isTextNoteSentenceBoundary(character: string): boolean {
+  return character === '\n' || '。！？!?；;'.indexOf(character) >= 0
+}
+
+function textNoteAtomicSegments(value: string, capacity: number): string[] {
+  const segments: string[] = []
+  let current = ''
+  const characters = textNoteCharacters(value)
+  for (const character of characters) {
+    current += character
+    if (isTextNoteSentenceBoundary(character)) {
+      const parts = textNoteVisualWeight(current) > capacity
+        ? splitTextNoteByCapacity(current, capacity)
+        : [current]
+      for (const part of parts) segments.push(part)
+      current = ''
+    }
+  }
+  if (current) {
+    const parts = textNoteVisualWeight(current) > capacity
+      ? splitTextNoteByCapacity(current, capacity)
+      : [current]
+    for (const part of parts) segments.push(part)
+  }
+  return segments
+}
+
+export function paginateTextNoteBody(value: unknown, options: { capacity?: number } = {}): string[] {
+  const normalized = normalizeTextNoteBody(value)
+  if (!normalized) return []
+
+  const requestedCapacity = Number(options.capacity)
+  const capacity = Math.max(12, Number.isFinite(requestedCapacity) && requestedCapacity > 0 ? requestedCapacity : TEXT_NOTE_THEME_CAPACITIES.paper.body)
+  const segments = textNoteAtomicSegments(normalized, capacity)
+  const pages: string[] = []
+  let current = ''
+  let currentWeight = 0
+
+  for (const segment of segments) {
+    const weight = textNoteVisualWeight(segment)
+    if (current && currentWeight + weight > capacity) {
+      pages.push(current)
+      current = ''
+      currentWeight = 0
+    }
+    current += segment
+    currentWeight += weight
+  }
+  if (current) pages.push(current)
+  return pages
+}
+
+const TEXT_NOTE_SALUTATION_PATTERN = /^(各位|大家|邻居们?|居民们?|业主们?|朋友们?|家人们?)[^。！？!?]{0,8}[：:]$/
+
+export function selectTextNoteCoverExcerpt(value: unknown): string {
+  const normalized = normalizeTextNoteBody(value)
+  if (!normalized) return ''
+  const rawParagraphs = normalized.split(/\n{2,}/)
+  const paragraphs: string[] = []
+  for (const rawParagraph of rawParagraphs) {
+    const paragraph = rawParagraph.trim()
+    if (paragraph) paragraphs.push(paragraph)
+  }
+  let selected = paragraphs[0] || ''
+  for (const paragraph of paragraphs) {
+    if (!TEXT_NOTE_SALUTATION_PATTERN.test(paragraph)) {
+      selected = paragraph
+      break
+    }
+  }
+  const coverText = selected.replace(/\s*\n\s*/g, ' ').replace(/[ \t]+/g, ' ').trim()
+  return truncateTextNoteBody(coverText, 64)
+}
+
+export function createTextNoteDeck(input: { title?: unknown; body?: unknown; theme?: unknown } = {}): TextNoteDeck {
+  const theme = normalizeTextNoteTheme(input.theme)
+  const presentation = getTextNoteThemePresentation(theme)
+  const capacity = TEXT_NOTE_THEME_CAPACITIES[theme]
+  const title = normalizeTextNoteTitle(input.title)
+  const body = normalizeTextNoteBody(input.body)
+  const isShort = textNoteVisualWeight(body) <= capacity.cover
+  const basePages: Array<Omit<TextNotePage, 'pageNumber' | 'totalPages'>> = [{
+    kind: 'cover',
+    kicker: presentation.kicker,
+    title,
+    body: isShort ? body : selectTextNoteCoverExcerpt(body),
+    sourceBody: '',
+  }]
+
+  if (!isShort) {
+    const bodyPages = paginateTextNoteBody(body, { capacity: capacity.body })
+    for (const pageBody of bodyPages) {
+      basePages.push({
+        kind: 'body',
+        kicker: presentation.kicker,
+        title,
+        body: pageBody,
+        sourceBody: pageBody,
+      })
+    }
+  }
+
+  const totalPages = basePages.length
+  const pages: TextNotePage[] = []
+  for (let index = 0; index < basePages.length; index += 1) {
+    pages.push({
+      ...basePages[index],
+      pageNumber: index + 1,
+      totalPages,
+    })
+  }
+  return {
+    theme,
+    label: presentation.kicker,
+    pages,
+  }
+}
+
 function richNotePlainTextWithBreaks(markdown: string): string {
   return String(markdown || '')
     .replace(/\r\n?/g, '\n')
@@ -132,7 +411,7 @@ export function extractTextNoteContent(content: Record<string, unknown> | null |
   const body = getTextNoteBodyValue(content)
   return {
     title: normalizeTextNoteTitle(title),
-    body: extractTextNoteFirstParagraph(body),
+    body: selectTextNoteCoverExcerpt(extractTextNoteFullBody(body)),
   }
 }
 

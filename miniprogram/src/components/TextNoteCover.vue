@@ -5,20 +5,21 @@
       `text-note-cover--${normalizedTheme}`,
       {
         'text-note-cover-frame--compact': props.compact,
-        'text-note-cover-frame--document': props.variant === 'document',
+        'text-note-cover-frame--body': isBodyPage,
       },
     ]"
   >
     <image class="text-note-cover-background" :src="coverBackground" mode="scaleToFill" />
-    <view v-if="props.variant === 'document'" class="text-note-document-surface" />
+    <view v-if="isBodyPage" class="text-note-body-surface" />
     <view class="text-note-cover-content">
-      <text v-if="normalizedTheme !== 'notice'" class="text-note-cover-kicker">{{ presentation.kicker }}</text>
-      <text v-if="presentation.ornament === 'quote'" class="text-note-cover-quote">“</text>
+      <text v-if="normalizedTheme !== 'notice' || isBodyPage" class="text-note-cover-kicker">{{ presentation.kicker }}</text>
+      <text v-if="presentation.ornament === 'quote' && !isBodyPage" class="text-note-cover-quote">“</text>
       <text class="text-note-cover-title">{{ normalizedTitle }}</text>
       <view class="text-note-cover-rule" />
       <text class="text-note-cover-body" :class="`text-note-cover-body--${bodySize}`">{{ coverBody }}</text>
-      <text v-if="props.variant === 'document'" class="text-note-document-footer">HAPPY HOME · 邻里共享</text>
+      <text v-if="isBodyPage" class="text-note-page-footer">HAPPY HOME · 邻里共享</text>
     </view>
+    <text v-if="showPageCount" class="text-note-page-count">{{ props.pageNumber }}/{{ props.totalPages }}</text>
   </view>
 </template>
 
@@ -27,9 +28,7 @@ import { computed } from 'vue'
 import {
   normalizeTextNoteTheme,
   getTextNoteThemePresentation,
-  resolveTextNoteDisplayBody,
   resolveTextNoteBodySize,
-  type TextNoteDisplayVariant,
   type TextNoteTheme,
 } from '../utils/text-note'
 
@@ -38,14 +37,18 @@ const props = defineProps<{
   body: string
   theme?: TextNoteTheme | string
   compact?: boolean
-  variant?: TextNoteDisplayVariant
+  pageKind?: 'cover' | 'body'
+  pageNumber?: number
+  totalPages?: number
 }>()
 
 const normalizedTheme = computed(() => normalizeTextNoteTheme(props.theme))
 const presentation = computed(() => getTextNoteThemePresentation(normalizedTheme.value))
 const normalizedTitle = computed(() => String(props.title || '').trim())
-const coverBody = computed(() => resolveTextNoteDisplayBody(props.body, props.variant))
+const isBodyPage = computed(() => props.pageKind === 'body')
+const coverBody = computed(() => String(props.body || '').trim())
 const bodySize = computed(() => resolveTextNoteBodySize(coverBody.value))
+const showPageCount = computed(() => !props.compact && Number(props.totalPages || 0) > 1)
 
 const TEXT_NOTE_COVER_BACKGROUNDS: Record<TextNoteTheme, string> = {
   paper: '/static/text-note-covers/paper.svg',
@@ -122,8 +125,11 @@ const coverBackground = computed(() => TEXT_NOTE_COVER_BACKGROUNDS[normalizedThe
 }
 
 .text-note-cover-body {
-  max-height: 3.5em;
+  max-height: 7.6em;
   overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: pre-wrap;
 }
 
 .text-note-cover--paper { color: #302c27; }
@@ -215,71 +221,48 @@ const coverBackground = computed(() => TEXT_NOTE_COVER_BACKGROUNDS[normalizedThe
   line-height: 34rpx;
 }
 
-.text-note-cover-frame--document {
-  aspect-ratio: auto;
-  min-height: 775rpx;
-}
-
-.text-note-cover-frame--document.text-note-cover--paper { background: #f4e4c6; }
-.text-note-cover-frame--document.text-note-cover--mint { background: #e7f6ec; }
-.text-note-cover-frame--document.text-note-cover--slate { background: #303b4d; }
-.text-note-cover-frame--document.text-note-cover--headline { background: #f7f3e9; }
-.text-note-cover-frame--document.text-note-cover--quote { background: #f2eff8; }
-.text-note-cover-frame--document.text-note-cover--notice { background: #f7e4cb; }
-
-.text-note-cover-frame--document .text-note-cover-background {
-  bottom: auto;
-  height: 775rpx;
-}
-
-.text-note-document-surface {
+.text-note-body-surface {
   position: absolute;
-  left: 0;
-  top: 220rpx;
-  right: 0;
-  bottom: 0;
+  inset: 7%;
   z-index: 0;
+  border-radius: 24rpx;
+  background: rgba(255, 255, 255, 0.56);
   pointer-events: none;
 }
 
-.text-note-cover--paper .text-note-document-surface {
-  background: linear-gradient(to bottom, rgba(244, 228, 198, 0.76), #f4e4c6 86rpx);
+.text-note-cover-frame--body.text-note-cover--paper .text-note-body-surface {
+  background: rgba(255, 250, 238, 0.56);
 }
 
-.text-note-cover--mint .text-note-document-surface {
-  background: linear-gradient(to bottom, rgba(231, 246, 236, 0.78), #e7f6ec 86rpx);
+.text-note-cover-frame--body.text-note-cover--mint .text-note-body-surface {
+  background: rgba(255, 255, 255, 0.62);
 }
 
-.text-note-cover--slate .text-note-document-surface {
-  background: linear-gradient(to bottom, rgba(48, 59, 77, 0.82), #303b4d 86rpx);
+.text-note-cover-frame--body.text-note-cover--slate .text-note-body-surface {
+  background: rgba(20, 29, 43, 0.48);
 }
 
-.text-note-cover--headline .text-note-document-surface {
-  background: linear-gradient(to bottom, rgba(247, 243, 233, 0.8), #f7f3e9 86rpx);
+.text-note-cover-frame--body.text-note-cover--headline .text-note-body-surface {
+  background: rgba(255, 253, 246, 0.7);
 }
 
-.text-note-cover--quote .text-note-document-surface {
-  background: linear-gradient(to bottom, rgba(242, 239, 248, 0.8), #f2eff8 86rpx);
+.text-note-cover-frame--body.text-note-cover--quote .text-note-body-surface {
+  background: rgba(255, 255, 255, 0.52);
 }
 
-.text-note-cover--notice .text-note-document-surface {
-  background: linear-gradient(to bottom, rgba(247, 228, 203, 0.8), #f7e4cb 86rpx);
+.text-note-cover-frame--body.text-note-cover--notice .text-note-body-surface {
+  background: rgba(255, 249, 238, 0.68);
 }
 
-.text-note-cover-frame--document .text-note-cover-content {
-  position: relative;
-  inset: auto;
+.text-note-cover-frame--body .text-note-cover-content {
   display: flex;
-  min-height: 775rpx;
   flex-direction: column;
-  padding: 54rpx 44rpx 112rpx;
-  overflow: visible;
+  padding: 72rpx 56rpx 74rpx;
 }
 
-.text-note-cover-frame--document .text-note-cover-kicker,
-.text-note-cover-frame--document .text-note-cover-title,
-.text-note-cover-frame--document .text-note-cover-body,
-.text-note-cover-frame--document .text-note-cover-quote {
+.text-note-cover-frame--body .text-note-cover-kicker,
+.text-note-cover-frame--body .text-note-cover-title,
+.text-note-cover-frame--body .text-note-cover-body {
   position: relative;
   left: auto;
   top: auto;
@@ -287,72 +270,89 @@ const coverBackground = computed(() => TEXT_NOTE_COVER_BACKGROUNDS[normalizedThe
   height: auto;
 }
 
-.text-note-cover-frame--document .text-note-cover-title {
-  display: block;
-  max-height: none;
-  margin-top: 34rpx;
-  overflow: visible;
-  transform: none;
-  -webkit-line-clamp: unset;
+.text-note-cover-frame--body .text-note-cover-kicker {
+  flex: 0 0 auto;
+  padding-right: 92rpx;
+  font-size: 21rpx;
+  line-height: 32rpx;
+  letter-spacing: 3rpx;
+  text-align: left;
 }
 
-.text-note-cover-frame--document .text-note-cover-rule {
+.text-note-cover-frame--body .text-note-cover-title {
+  display: -webkit-box;
+  max-height: 80rpx;
+  margin-top: 18rpx;
+  overflow: hidden;
+  font-size: 28rpx;
+  line-height: 40rpx;
+  letter-spacing: 1rpx;
+  text-align: left;
+  transform: none;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.text-note-cover-frame--body .text-note-cover-rule {
   position: relative;
   left: auto;
   top: auto;
+  display: block;
   width: 100%;
-  margin: 62rpx 0 46rpx;
+  height: 2rpx;
+  margin: 28rpx 0 30rpx;
+  opacity: 0.28;
 }
 
-.text-note-cover-frame--document .text-note-cover-body,
-.text-note-cover-frame--document .text-note-cover-body--large,
-.text-note-cover-frame--document .text-note-cover-body--medium,
-.text-note-cover-frame--document .text-note-cover-body--small {
+.text-note-cover-frame--body .text-note-cover-body,
+.text-note-cover-frame--body .text-note-cover-body--large,
+.text-note-cover-frame--body .text-note-cover-body--medium,
+.text-note-cover-frame--body .text-note-cover-body--small {
   position: relative;
   left: auto;
   top: auto;
   width: auto;
-  max-height: none;
-  overflow: visible;
-  font-size: 27rpx;
-  line-height: 1.82;
+  flex: 1 1 auto;
+  max-height: 420rpx;
+  font-size: 26rpx;
+  line-height: 44rpx;
   text-align: left;
   white-space: pre-wrap;
 }
 
-.text-note-cover-frame--document.text-note-cover--mint .text-note-cover-title,
-.text-note-cover-frame--document.text-note-cover--slate .text-note-cover-title {
-  margin-bottom: 82rpx;
+.text-note-cover-frame--body.text-note-cover--slate {
+  color: #edf2e6;
 }
 
-.text-note-cover-frame--document.text-note-cover--paper .text-note-cover-rule {
-  display: block;
-  height: 2rpx;
-  opacity: 0.22;
+.text-note-cover-frame--body.text-note-cover--quote {
+  color: #637a6b;
 }
 
-.text-note-cover-frame--document.text-note-cover--mint .text-note-cover-body {
-  padding: 30rpx;
-  border-radius: 24rpx;
-  background: rgba(255, 255, 255, 0.58);
-}
-
-.text-note-cover-frame--document.text-note-cover--quote .text-note-cover-quote {
-  margin-top: 26rpx;
-  font-size: 88rpx;
-  line-height: 96rpx;
-}
-
-.text-note-document-footer {
-  position: relative;
+.text-note-page-footer {
+  position: absolute;
+  left: 56rpx;
+  bottom: 36rpx;
   z-index: 1;
-  display: block;
-  margin-top: auto;
-  padding-top: 56rpx;
   color: currentColor;
-  font-size: 20rpx;
-  line-height: 30rpx;
+  font-size: 17rpx;
+  line-height: 26rpx;
   letter-spacing: 2rpx;
-  opacity: 0.58;
+  opacity: 0.55;
+}
+
+.text-note-page-count {
+  position: absolute;
+  top: 24rpx;
+  right: 24rpx;
+  z-index: 3;
+  min-width: 62rpx;
+  padding: 8rpx 13rpx;
+  border-radius: 999rpx;
+  background: rgba(27, 31, 29, 0.62);
+  color: #fff;
+  font-size: 22rpx;
+  line-height: 30rpx;
+  text-align: center;
+  box-sizing: border-box;
 }
 </style>

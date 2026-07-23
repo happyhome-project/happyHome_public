@@ -2,9 +2,33 @@
   <view class="create-page">
     <view class="create-custom-nav" :style="createCustomNavStyle">
       <view class="create-custom-nav__row">
-        <button class="create-custom-nav__back" aria-label="返回" @tap="handlePageExit">‹</button>
+        <button class="create-custom-nav__back" aria-label="返回" @tap="handleCreateNavBack">‹</button>
         <text class="create-custom-nav__title">{{ createNavTitle }}</text>
-        <view class="create-custom-nav__spacer" />
+        <button
+          v-if="isTextNotePreview"
+          class="create-custom-nav__edit"
+          @tap="returnToTextNoteCompose"
+        >
+          编辑
+        </button>
+        <view v-else class="create-custom-nav__spacer" />
+      </view>
+    </view>
+    <view
+      v-if="textNoteLayoutPhase !== null"
+      class="text-note-layout-overlay"
+      data-testid="text-note-layout-overlay"
+    >
+      <view class="text-note-layout-card">
+        <view class="text-note-layout-skeleton">
+          <view class="text-note-layout-skeleton__line text-note-layout-skeleton__line--short" />
+          <view class="text-note-layout-skeleton__line" />
+          <view class="text-note-layout-skeleton__line" />
+          <view class="text-note-layout-skeleton__line text-note-layout-skeleton__line--medium" />
+        </view>
+        <view class="text-note-layout-spinner" />
+        <text class="text-note-layout-title">{{ TEXT_NOTE_LAYOUT_PHASES[textNoteLayoutPhase] }}</text>
+        <text class="text-note-layout-desc">只调整排版，不改动你的文字</text>
       </view>
     </view>
     <view v-if="!userStore.isLoggedIn" class="guard-state">
@@ -79,14 +103,14 @@
             </view>
           </view>
           <view v-else class="text-note-cover-step">
-            <view class="text-note-preview">
-              <TextNoteCover :title="textNoteContent.title" :body="textNoteContent.body" :theme="textNoteTheme" />
+            <view v-if="textNoteDeck" class="text-note-preview">
+              <TextNoteDeck :key="textNoteDeck.theme" :deck="textNoteDeck" />
             </view>
-            <text class="text-note-theme-heading">选择封面风格</text>
             <scroll-view class="text-note-theme-scroll" scroll-x :show-scrollbar="false">
               <view class="text-note-theme-list">
-                <view v-for="theme in TEXT_NOTE_THEMES" :key="theme" class="text-note-theme-option" :class="{ 'text-note-theme-option--active': textNoteTheme === theme }" @tap="textNoteTheme = theme">
+                <view v-for="theme in TEXT_NOTE_THEMES" :key="theme" class="text-note-theme-option" :class="{ 'text-note-theme-option--active': textNoteTheme === theme }" @tap="selectTextNoteTheme(theme)">
                   <TextNoteCover :title="textNoteContent.title" :body="textNoteContent.body" :theme="theme" compact />
+                  <text class="text-note-theme-label">{{ getTextNoteThemePresentation(theme).kicker }}</text>
                 </view>
               </view>
             </scroll-view>
@@ -95,8 +119,8 @@
               <WidgetEditor v-if="textNoteLocationWidget" :widget="textNoteLocationWidget" variant="image-note-tool" embedded hide-label :allow-rich-note-images="false" v-model="formData[textNoteLocationWidget.widgetId]" />
             </view>
             <view class="text-note-cover-actions">
-              <button class="draft-btn" @tap="textNoteStep = 'compose'">返回修改</button>
-              <button class="btn-primary" data-testid="create-submit" :disabled="submitting" @tap="handleSubmit">{{ submitting ? (isEditMode ? '保存中...' : '发布中...') : (isEditMode ? '保存' : '发布') }}</button>
+              <text class="text-note-layout-choice">选择喜欢的排版</text>
+              <button class="btn-primary" data-testid="text-note-confirm-next" @tap="openTextNotePublishConfirm">下一步</button>
             </view>
           </view>
         </template>
@@ -287,6 +311,26 @@
         </template>
       </view>
     </template>
+    <view v-if="textNoteConfirmVisible" class="text-note-confirm-mask" @tap="closeTextNotePublishConfirm">
+      <view class="text-note-confirm-sheet" @tap.stop>
+        <view class="text-note-confirm-handle" />
+        <text class="text-note-confirm-title">{{ isEditMode ? '确认保存' : '确认发布' }}</text>
+        <text class="text-note-confirm-desc">
+          已生成 {{ textNoteDeck?.pages.length || 1 }} 页文字卡，发布后首页展示第一页，详情可左右滑动阅读全文。
+        </text>
+        <view class="text-note-confirm-summary">
+          <text>{{ getTextNoteThemePresentation(textNoteTheme).kicker }}</text>
+          <text>·</text>
+          <text>{{ textNoteConfirmMeta }}</text>
+        </view>
+        <view class="text-note-confirm-actions">
+          <button class="text-note-confirm-cancel" @tap="closeTextNotePublishConfirm">再检查一下</button>
+          <button class="btn-primary" data-testid="create-submit" :disabled="submitting" @tap="handleSubmit">
+            {{ submitting ? (isEditMode ? '保存中...' : '发布中...') : (isEditMode ? '保存' : '发布') }}
+          </button>
+        </view>
+      </view>
+    </view>
     <AppTabBar v-if="!selectedSection" current="create" @media-selected="handleInlineMediaIntent" />
   </view>
 </template>
@@ -302,6 +346,7 @@ import AppTabBar from '../../components/AppTabBar.vue'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
 import VideoPublishEditor from '../../components/widgets/VideoPublishEditor.vue'
 import TextNoteCover from '../../components/TextNoteCover.vue'
+import TextNoteDeck from '../../components/TextNoteDeck.vue'
 import {
   CREATE_SECTION_INTENT_KEY,
   CREATE_SECTION_INTENT_TTL_MS,
@@ -315,7 +360,16 @@ import { isImageNoteSectionContract } from '../../utils/image-note'
 import { isRichNoteEmpty, uploadRichNoteImages } from '../../utils/rich-note'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { ensureHierarchyStack, navigateBackOrHome, normalizeRouteUrl, openHierarchyParent } from '../../utils/hierarchy-nav'
-import { extractTextNoteContent, TEXT_NOTE_THEMES, type TextNoteTheme } from '../../utils/text-note'
+import {
+  createTextNoteDeck,
+  extractTextNoteContent,
+  extractTextNoteFullBody,
+  getTextNoteBodyValue,
+  getTextNoteThemePresentation,
+  TEXT_NOTE_THEMES,
+  type TextNoteDeck as TextNoteDeckData,
+  type TextNoteTheme,
+} from '../../utils/text-note'
 import { asCollaborationSection, isCollaborationSection } from '../../utils/collaboration-template'
 import {
   consumeArchiveMediaIntent,
@@ -349,6 +403,11 @@ const activityInviteLoading = ref(false)
 const createReturnTo = ref('')
 const textNoteStep = ref<'compose' | 'cover'>('compose')
 const textNoteTheme = ref<TextNoteTheme>('paper')
+const textNoteDeck = ref<TextNoteDeckData | null>(null)
+const textNoteLayoutPhase = ref<number | null>(null)
+const textNoteConfirmVisible = ref(false)
+const TEXT_NOTE_LAYOUT_PHASES = ['正在识别段落结构', '正在为正文分页', '正在套用社区主题'] as const
+let textNoteLayoutGeneration = 0
 const archiveFormat = ref<'image_text' | 'text' | 'video' | ''>('')
 const archiveInitialMedia = ref<ArchiveMediaIntentFile | null>(null)
 const archiveVideoIntentState = ref<ArchiveVideoIntentState>('idle')
@@ -420,6 +479,20 @@ const textNoteLocationWidget = computed(() =>
   editableWidgets.value.find((widget: any) => String(widget?.fieldKey || '') === 'location') || null
 )
 const textNoteContent = computed(() => extractTextNoteContent(formData))
+const textNoteFullBody = computed(() => extractTextNoteFullBody(getTextNoteBodyValue(formData)))
+const isTextNotePreview = computed(() => isTextNoteCreateMode.value && textNoteStep.value === 'cover')
+const textNoteConfirmMeta = computed(() => {
+  const topics = textNoteTopicWidget.value
+    ? formData[textNoteTopicWidget.value.widgetId]
+    : []
+  const location = textNoteLocationWidget.value
+    ? formData[textNoteLocationWidget.value.widgetId]
+    : null
+  const parts: string[] = []
+  if (Array.isArray(topics) && topics.length > 0) parts.push(`${topics.length} 个话题`)
+  if (location && typeof location === 'object') parts.push('已设置地点')
+  return parts.join(' · ') || '未添加话题和地点'
+})
 const isGuideCreateMode = computed(() => {
   const section = selectedSection.value
   if (!section) return false
@@ -888,6 +961,10 @@ function selectSection(section: any, options: { returnTo?: string; preserveForm?
   if (!options.preserveForm) Object.keys(formData).forEach((key) => delete formData[key])
   textNoteStep.value = 'compose'
   textNoteTheme.value = 'paper'
+  textNoteDeck.value = null
+  textNoteLayoutPhase.value = null
+  textNoteConfirmVisible.value = false
+  textNoteLayoutGeneration += 1
   if (!options.preserveForm) {
     for (const widget of section?.widgets || []) {
       if (widget?.type === 'topic' && widget?.widgetId) {
@@ -904,22 +981,96 @@ function handleFormBack() {
     return
   }
   if (isTextNoteCreateMode.value && textNoteStep.value === 'cover') {
-    textNoteStep.value = 'compose'
+    returnToTextNoteCompose()
     return
   }
   handleBackToSectionPicker()
 }
 
-function openTextNoteCover() {
+function waitForTextNoteLayout(milliseconds: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds))
+}
+
+async function generateTextNoteLayout(theme: TextNoteTheme, enterPreview: boolean) {
+  const generation = ++textNoteLayoutGeneration
+  textNoteConfirmVisible.value = false
+  try {
+    textNoteLayoutPhase.value = 0
+    await waitForTextNoteLayout(80)
+    if (generation !== textNoteLayoutGeneration) return
+
+    textNoteLayoutPhase.value = 1
+    const nextDeck = createTextNoteDeck({
+      title: textNoteContent.value.title,
+      body: textNoteFullBody.value,
+      theme,
+    })
+    await waitForTextNoteLayout(80)
+    if (generation !== textNoteLayoutGeneration) return
+
+    textNoteLayoutPhase.value = 2
+    await waitForTextNoteLayout(80)
+    if (generation !== textNoteLayoutGeneration) return
+
+    textNoteTheme.value = theme
+    textNoteDeck.value = nextDeck
+    if (enterPreview) textNoteStep.value = 'cover'
+  } catch (_error) {
+    if (generation === textNoteLayoutGeneration) {
+      uni.showToast({ title: '排版生成失败，请重试', icon: 'none' })
+    }
+  } finally {
+    if (generation === textNoteLayoutGeneration) textNoteLayoutPhase.value = null
+  }
+}
+
+async function openTextNoteCover() {
   if (!textNoteContent.value.title) {
     uni.showToast({ title: '请填写标题', icon: 'none' })
     return
   }
-  if (!textNoteContent.value.body) {
+  if (!textNoteFullBody.value) {
     uni.showToast({ title: '请填写正文', icon: 'none' })
     return
   }
-  textNoteStep.value = 'cover'
+  await generateTextNoteLayout(textNoteTheme.value, true)
+}
+
+async function selectTextNoteTheme(theme: TextNoteTheme) {
+  if (theme === textNoteTheme.value && textNoteDeck.value) return
+  await generateTextNoteLayout(theme, false)
+}
+
+function returnToTextNoteCompose() {
+  textNoteLayoutGeneration += 1
+  textNoteLayoutPhase.value = null
+  textNoteConfirmVisible.value = false
+  textNoteStep.value = 'compose'
+}
+
+function openTextNotePublishConfirm() {
+  if (!textNoteDeck.value) {
+    uni.showToast({ title: '请先完成排版', icon: 'none' })
+    return
+  }
+  textNoteConfirmVisible.value = true
+}
+
+function closeTextNotePublishConfirm() {
+  if (submitting.value) return
+  textNoteConfirmVisible.value = false
+}
+
+function handleCreateNavBack() {
+  if (textNoteConfirmVisible.value) {
+    closeTextNotePublishConfirm()
+    return
+  }
+  if (isTextNotePreview.value) {
+    returnToTextNoteCompose()
+    return
+  }
+  handlePageExit()
 }
 
 function handleBackToSectionPicker() {
@@ -1297,7 +1448,7 @@ function showVideoNavigationBlockedToast() {
 }
 
 onBackPress(() => {
-  handlePageExit()
+  handleCreateNavBack()
   return true
 })
 
@@ -1482,7 +1633,8 @@ async function handleSubmit() {
 }
 
 .create-custom-nav__back,
-.create-custom-nav__spacer {
+.create-custom-nav__spacer,
+.create-custom-nav__edit {
   width: 72rpx;
   height: 72rpx;
   margin: 0;
@@ -1499,6 +1651,16 @@ async function handleSubmit() {
 
 .create-custom-nav__back::after { border: 0; }
 .create-custom-nav__title { font-size: 34rpx; font-weight: 600; color: var(--hh-color-text-primary); }
+.create-custom-nav__edit {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--hh-color-brand-strong);
+  font-size: 28rpx;
+  line-height: 72rpx;
+  font-weight: $hh-font-weight-medium;
+}
+.create-custom-nav__edit::after { border: 0; }
 
 .title {
   font-size: var(--hh-text-heading-md-size);
@@ -1765,6 +1927,10 @@ async function handleSubmit() {
   box-sizing: border-box;
 }
 
+.text-note-cover-step {
+  padding: 24rpx 0 calc(184rpx + env(safe-area-inset-bottom));
+}
+
 .text-note-compose {
   display: flex;
   flex-direction: column;
@@ -1784,29 +1950,22 @@ async function handleSubmit() {
 }
 
 .text-note-preview {
-  width: min(100%, 620rpx);
-  margin: 0 auto 40rpx;
-}
-
-.text-note-theme-heading {
-  display: block;
-  margin-bottom: 20rpx;
-  font-size: 30rpx;
-  font-weight: 700;
-  color: var(--hh-color-text-primary);
+  width: 100%;
+  margin: 0 0 24rpx;
 }
 
 .text-note-theme-scroll { width: 100%; }
 
 .text-note-theme-list {
   display: inline-flex;
-  gap: 20rpx;
-  padding: 4rpx 4rpx 16rpx;
+  align-items: flex-start;
+  gap: 16rpx;
+  padding: 4rpx 32rpx 20rpx;
 }
 
 .text-note-theme-option {
-  width: 176rpx;
-  flex: 0 0 176rpx;
+  width: 124rpx;
+  flex: 0 0 124rpx;
   padding: 6rpx;
   border: 4rpx solid transparent;
   border-radius: 20rpx;
@@ -1817,7 +1976,220 @@ async function handleSubmit() {
   border-color: var(--hh-color-brand-primary);
 }
 
-.text-note-publish-tools { width: 100%; }
+.text-note-theme-label {
+  display: block;
+  margin-top: 10rpx;
+  overflow: hidden;
+  color: var(--hh-color-text-secondary);
+  font-size: 21rpx;
+  line-height: 30rpx;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-note-theme-option--active .text-note-theme-label {
+  color: var(--hh-color-brand-strong);
+  font-weight: $hh-font-weight-bold;
+}
+
+.text-note-publish-tools {
+  width: calc(100% - 64rpx);
+  margin: 4rpx 32rpx 0;
+}
+
+.text-note-cover-actions {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: $hh-z-sticky;
+  margin: 0;
+  padding: 24rpx 32rpx calc(24rpx + env(safe-area-inset-bottom));
+  background: rgba(255, 255, 255, 0.98);
+  box-sizing: border-box;
+}
+
+.text-note-layout-choice {
+  min-width: 0;
+  flex: 1 1 auto;
+  color: var(--hh-color-text-secondary);
+  font-size: 26rpx;
+  line-height: 40rpx;
+}
+
+.text-note-cover-actions .btn-primary {
+  height: 88rpx;
+  flex: 0 0 300rpx;
+  line-height: 88rpx;
+}
+
+.text-note-layout-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48rpx;
+  background: rgba(244, 245, 249, 0.94);
+  box-sizing: border-box;
+}
+
+.text-note-layout-card {
+  width: min(100%, 520rpx);
+  padding: 36rpx;
+  border-radius: 32rpx;
+  background: #fff;
+  box-shadow: 0 22rpx 70rpx rgba(34, 53, 46, 0.12);
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.text-note-layout-skeleton {
+  aspect-ratio: 4 / 5;
+  margin-bottom: 28rpx;
+  padding: 84rpx 48rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 26rpx;
+  border-radius: 24rpx;
+  background: linear-gradient(145deg, #f9edd9, #edf7f1);
+  box-sizing: border-box;
+}
+
+.text-note-layout-skeleton__line {
+  height: 18rpx;
+  border-radius: 999rpx;
+  background: rgba(48, 65, 58, 0.12);
+  animation: text-note-layout-pulse 900ms ease-in-out infinite alternate;
+}
+
+.text-note-layout-skeleton__line--short { width: 38%; }
+.text-note-layout-skeleton__line--medium { width: 72%; }
+
+.text-note-layout-spinner {
+  width: 34rpx;
+  height: 34rpx;
+  margin: 0 auto 18rpx;
+  border: 4rpx solid rgba(65, 183, 135, 0.18);
+  border-top-color: var(--hh-color-brand-primary);
+  border-radius: 999rpx;
+  animation: text-note-layout-spin 700ms linear infinite;
+}
+
+.text-note-layout-title,
+.text-note-layout-desc {
+  display: block;
+}
+
+.text-note-layout-title {
+  color: var(--hh-color-text-primary);
+  font-size: 30rpx;
+  line-height: 44rpx;
+  font-weight: $hh-font-weight-bold;
+}
+
+.text-note-layout-desc {
+  margin-top: 8rpx;
+  color: var(--hh-color-text-tertiary);
+  font-size: 23rpx;
+  line-height: 34rpx;
+}
+
+.text-note-confirm-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 700;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(19, 24, 22, 0.48);
+}
+
+.text-note-confirm-sheet {
+  width: 100%;
+  padding: 18rpx 32rpx calc(32rpx + env(safe-area-inset-bottom));
+  border-radius: 34rpx 34rpx 0 0;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.text-note-confirm-handle {
+  width: 72rpx;
+  height: 8rpx;
+  margin: 0 auto 30rpx;
+  border-radius: 999rpx;
+  background: #d7dbd9;
+}
+
+.text-note-confirm-title,
+.text-note-confirm-desc {
+  display: block;
+}
+
+.text-note-confirm-title {
+  color: var(--hh-color-text-primary);
+  font-size: 34rpx;
+  line-height: 48rpx;
+  font-weight: $hh-font-weight-bold;
+}
+
+.text-note-confirm-desc {
+  margin-top: 14rpx;
+  color: var(--hh-color-text-secondary);
+  font-size: 26rpx;
+  line-height: 42rpx;
+}
+
+.text-note-confirm-summary {
+  margin-top: 24rpx;
+  padding: 20rpx 22rpx;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  border-radius: 20rpx;
+  background: var(--hh-color-card-soft);
+  color: var(--hh-color-text-secondary);
+  font-size: 24rpx;
+  line-height: 34rpx;
+}
+
+.text-note-confirm-actions {
+  display: flex;
+  align-items: center;
+  gap: 22rpx;
+  margin-top: 28rpx;
+}
+
+.text-note-confirm-cancel {
+  flex: 0 0 190rpx;
+  height: 88rpx;
+  margin: 0;
+  padding: 0;
+  border: 1rpx solid var(--hh-color-line);
+  border-radius: 999rpx;
+  background: #fff;
+  color: var(--hh-color-text-secondary);
+  font-size: 26rpx;
+  line-height: 88rpx;
+}
+
+.text-note-confirm-cancel::after {
+  border: 0;
+}
+
+.text-note-confirm-actions .btn-primary {
+  height: 88rpx;
+  line-height: 88rpx;
+}
+
+@keyframes text-note-layout-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes text-note-layout-pulse {
+  to { opacity: 0.42; }
+}
 
 .guard-state {
   display: flex;
