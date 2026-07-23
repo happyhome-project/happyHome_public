@@ -28,12 +28,12 @@
     </view>
 
     <view v-if="isTextNoteDetail" class="text-note-detail-cover">
-      <TextNoteCover :title="textNoteCard.title" :body="textNoteCard.body" :theme="textNoteCard.theme" />
-    </view>
-
-    <view v-if="textNoteHasFullBody" class="text-note-full-body">
-      <text class="text-note-full-body-label">全文</text>
-      <text class="text-note-full-body-copy">{{ textNoteFullBody }}</text>
+      <TextNoteCover
+        :title="textNoteCard.title"
+        :body="textNoteFullBody"
+        :theme="textNoteCard.theme"
+        variant="document"
+      />
     </view>
 
     <view class="detail-body">
@@ -161,7 +161,7 @@ import VideoPlayerCard from './widgets/VideoPlayerCard.vue'
 import { formatWidgetValue, resolvePostDetailTitle } from '../utils/widget'
 import { resolveWidgetLabel } from '../utils/widget-form'
 import { isRichNoteEmpty, normalizeRichNoteContent } from '../utils/rich-note'
-import { extractTextNoteFullBody, getTextNoteBodyValue, getTextNoteCard, needsTextNoteFullBody } from '../utils/text-note'
+import { extractTextNoteFullBody, getTextNoteBodyValue, getTextNoteCard } from '../utils/text-note'
 import { useAudioStore } from '../store/audio'
 
 const props = defineProps<{
@@ -201,7 +201,6 @@ const isTextNoteDetail = computed(() => props.section?.displayTemplate === 'text
 const textNoteCard = computed(() => getTextNoteCard(props.post))
 const textNoteBodyValue = computed(() => getTextNoteBodyValue(props.post?.content))
 const textNoteFullBody = computed(() => extractTextNoteFullBody(textNoteBodyValue.value))
-const textNoteHasFullBody = computed(() => isTextNoteDetail.value && needsTextNoteFullBody(textNoteBodyValue.value))
 
 const titleResolution = computed(() => resolvePostDetailTitle(props.post, props.section))
 const titleWidget = computed(() => {
@@ -519,34 +518,6 @@ function formatAudioDuration(value: unknown): string {
 .text-note-detail-cover {
   width: min(100%, 620rpx);
   margin: 16rpx auto 40rpx;
-}
-
-.text-note-full-body {
-  margin: 0 0 $hh-space-xl;
-  padding: 28rpx 30rpx;
-  border: 1rpx solid var(--hh-color-line-soft);
-  border-radius: var(--hh-radius-card);
-  background: var(--hh-color-card);
-}
-
-.text-note-full-body-label,
-.text-note-full-body-copy {
-  display: block;
-}
-
-.text-note-full-body-label {
-  margin-bottom: 18rpx;
-  color: var(--hh-color-text-tertiary);
-  font-size: var(--hh-text-caption-lg-size);
-  font-weight: $hh-font-weight-bold;
-}
-
-.text-note-full-body-copy {
-  color: var(--hh-color-text-primary);
-  font-size: var(--hh-text-body-lg-size);
-  line-height: 1.82;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 .detail-author-row {

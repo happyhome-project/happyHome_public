@@ -9,6 +9,7 @@ import {
   needsTextNoteFullBody,
   normalizeTextNoteTitle,
   normalizeTextNoteTheme,
+  resolveTextNoteDisplayBody,
   resolveTextNoteBodySize,
   TEXT_NOTE_THEMES,
   truncateTextNoteBody,
@@ -123,6 +124,15 @@ describe('text note presentation', () => {
 
     expect(Array.from(result)).toHaveLength(64)
     expect(result).toBe(`${'邻'.repeat(62)}😀…`)
+  })
+
+  test('keeps arbitrary-length detail documents complete while covers remain bounded', () => {
+    const longBody = `${'早晚高峰通勤路线与接驳信息'.repeat(42)}\n\nVisit https://example.com/transit/very-long-path 😀`
+
+    expect(resolveTextNoteDisplayBody(longBody, 'document')).toBe(longBody)
+    expect(resolveTextNoteDisplayBody(longBody, 'document')).toContain('\n\n')
+    expect(Array.from(resolveTextNoteDisplayBody(longBody, 'cover'))).toHaveLength(64)
+    expect(resolveTextNoteDisplayBody(longBody, 'cover')).toMatch(/…$/)
   })
 
   test('keeps short text and assigns inclusive size bands', () => {
