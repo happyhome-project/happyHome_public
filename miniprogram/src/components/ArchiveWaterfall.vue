@@ -44,7 +44,7 @@ const hasCards = computed(() => props.columns[0].length + props.columns[1].lengt
 </script>
 
 <style scoped>
-.archive-waterfall { padding: 18rpx var(--hh-page-x) 44rpx; background: #f7f7f7; min-height: 520rpx; }
+.archive-waterfall { padding: 18rpx var(--hh-page-x) 44rpx; background: var(--hh-color-card); min-height: 520rpx; }
 .archive-waterfall__columns,.archive-waterfall__skeletons { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14rpx; align-items: start; }
 .archive-waterfall__column { display: flex; flex-direction: column; gap: 14rpx; min-width: 0; }
 .archive-waterfall__card { overflow: hidden; border-radius: 16rpx; background: #fff; }
