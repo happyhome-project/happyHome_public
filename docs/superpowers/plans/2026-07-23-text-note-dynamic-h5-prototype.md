@@ -13,7 +13,7 @@
 - Do not reuse or modify `prototype/text-note-h5`.
 - Do not modify Figma, production APIs, cloud data, or mini-program production behavior.
 - Do not add image upload, Markdown, or AI writing.
-- Keep every generated card at `4:5`; paginate before shrinking below the readable type floor.
+- Keep every H5 sample card at `3:5` for this reference-driven revision; paginate before shrinking below the readable type floor. Do not change production ratios in this task.
 - Keep topic and location tools on the second step.
 - Use the six existing production text-note SVG assets.
 
@@ -62,7 +62,7 @@ Expected: all tests pass.
 
 - [ ] **Step 1: Build semantic route containers and shared mobile app chrome**
 
-Create code-native controls for back navigation, title/body editing, generation status, page and theme rails, publish tools, feed cards, and detail navigation.
+Create code-native controls for back navigation, title/body editing, generation status, one main page carousel with a visible next-page sliver, one theme rail, publish tools, feed cards, and detail navigation. Do not add a second page-thumbnail rail or a redundant theme heading.
 
 - [ ] **Step 2: Implement the generation and theme-regeneration state machine**
 
@@ -127,4 +127,3 @@ Check `390×844` and desktop viewport, console health, page identity, no blank p
 - [ ] **Step 5: Compare against the accepted current-product reference**
 
 Use the latest formal compose and preview screenshots as the reference. Inspect copy, palette, typography, button geometry, spacing, SVG treatment, responsive behavior, and interaction state. Fix every material mismatch before handoff.
-

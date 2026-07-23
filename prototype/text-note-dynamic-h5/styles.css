@@ -129,6 +129,29 @@ button {
   width: 44px;
 }
 
+.app-bar--preview {
+  grid-template-columns: 44px 1fr 56px;
+}
+
+.app-bar__edit {
+  display: inline-flex;
+  min-width: 56px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  align-items: center;
+  justify-content: center;
+  color: var(--brand-dark);
+  background: transparent;
+  font-size: 16px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.app-bar__edit:active {
+  opacity: 0.7;
+}
+
 .compose-body {
   padding: 40px 30px 20px;
 }
@@ -248,7 +271,7 @@ button {
 .generation-preview {
   position: relative;
   width: 176px;
-  aspect-ratio: 4 / 5;
+  aspect-ratio: 3 / 5;
   margin: 0 auto 30px;
   padding: 28px 20px;
   overflow: hidden;
@@ -334,7 +357,7 @@ button {
 }
 
 .preview-body {
-  padding: 12px 30px 118px;
+  padding: 10px 0 118px 24px;
 }
 
 .deck-stage,
@@ -362,6 +385,22 @@ button {
   scroll-snap-align: center;
 }
 
+.screen--preview .deck-stage {
+  overflow: visible;
+}
+
+.screen--preview .deck-carousel {
+  gap: 12px;
+  border-radius: 18px 0 0 18px;
+  scroll-padding-left: 0;
+}
+
+.screen--preview .deck-slide {
+  min-width: calc(100% - 28px);
+  padding: 0;
+  scroll-snap-align: start;
+}
+
 .deck-count {
   position: absolute;
   right: 14px;
@@ -376,16 +415,30 @@ button {
   backdrop-filter: blur(6px);
 }
 
+.screen--preview .deck-count {
+  top: 14px;
+  right: 42px;
+  bottom: auto;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
 .note-card {
   position: relative;
   width: 100%;
-  aspect-ratio: 4 / 5;
+  aspect-ratio: 3 / 5;
   overflow: hidden;
   border-radius: 20px;
   container-type: inline-size;
   color: #302c27;
   background: #f4e4c6;
   box-shadow: 0 12px 28px rgba(36, 55, 46, 0.12);
+}
+
+.screen--preview .note-card {
+  aspect-ratio: 3 / 5;
+  border-radius: 16px;
+  box-shadow: 0 4px 18px rgba(36, 55, 46, 0.09);
 }
 
 .note-card__background,
@@ -518,7 +571,7 @@ button {
   position: fixed;
   top: 0;
   left: -10000px;
-  width: min(calc(100vw - 64px), 366px);
+  width: min(calc(100vw - 52px), 378px);
   visibility: hidden;
   pointer-events: none;
 }
@@ -764,54 +817,27 @@ button {
   line-height: 1.8;
 }
 
-.page-rail {
-  display: flex;
-  margin: 14px -30px 0;
-  padding: 2px 30px 5px;
-  gap: 10px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.page-rail::-webkit-scrollbar,
 .theme-rail::-webkit-scrollbar {
   display: none;
 }
 
-.page-thumb {
-  width: 56px;
-  min-width: 56px;
-  padding: 0;
-  border: 2px solid transparent;
-  border-radius: 10px;
-  background: transparent;
-  cursor: pointer;
-}
-
-.page-thumb.is-active {
-  border-color: var(--brand);
-  box-shadow: 0 0 0 2px rgba(64, 180, 134, 0.13);
-}
-
-.section-heading {
-  margin: 25px 0 14px;
-  color: var(--text);
-  font-size: 18px;
-  font-weight: 750;
-}
-
 .theme-rail {
   display: flex;
-  margin: 0 -30px;
-  padding: 2px 30px 8px;
+  margin-top: 14px;
+  padding: 2px 0 8px;
   gap: 12px;
   overflow-x: auto;
   scrollbar-width: none;
 }
 
+.theme-rail::after {
+  content: "";
+  flex: 0 0 12px;
+}
+
 .theme-option {
-  width: 72px;
-  min-width: 72px;
+  width: 58px;
+  min-width: 58px;
   padding: 0;
   border: 0;
   color: var(--text-secondary);
@@ -823,10 +849,10 @@ button {
 
 .theme-option__cover {
   display: block;
-  margin-bottom: 7px;
-  padding: 3px;
+  margin-bottom: 6px;
+  padding: 2px;
   border: 2px solid transparent;
-  border-radius: 11px;
+  border-radius: 12px;
 }
 
 .theme-option.is-active {
@@ -841,12 +867,26 @@ button {
 
 .publish-tools {
   display: flex;
-  margin-top: 14px;
+  margin: 12px 24px 0 0;
   padding: 16px 14px;
   gap: 10px;
   border-radius: 16px;
   background: #fff;
   box-shadow: 0 6px 20px rgba(34, 62, 49, 0.04);
+}
+
+.preview-actions {
+  min-height: 86px;
+  padding: 10px 24px calc(14px + env(safe-area-inset-bottom));
+  grid-template-columns: 1fr 132px;
+  gap: 18px;
+  background: linear-gradient(to top, var(--page) 82%, rgba(245, 246, 248, 0.92));
+}
+
+.preview-actions__hint {
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1.35;
 }
 
 .tool-button {
@@ -1322,20 +1362,19 @@ button {
 
 @media (max-width: 360px) {
   .note-card-measurement {
-    width: calc(100vw - 56px);
+    width: calc(100vw - 48px);
   }
 
-  .compose-body,
-  .preview-body {
+  .compose-body {
     padding-left: 20px;
     padding-right: 20px;
   }
 
-  .page-rail,
-  .theme-rail {
-    margin-left: -20px;
-    margin-right: -20px;
+  .preview-body {
     padding-left: 20px;
+  }
+
+  .theme-rail {
     padding-right: 20px;
   }
 
@@ -1347,21 +1386,42 @@ button {
 }
 
 @media (min-width: 700px) {
+  body {
+    display: grid;
+    min-height: 100vh;
+    padding: 20px;
+    place-items: center;
+  }
+
   .prototype-shell {
-    min-height: calc(100vh - 40px);
-    margin-top: 20px;
-    margin-bottom: 20px;
+    width: 390px;
+    height: min(844px, calc(100vh - 40px));
+    min-height: 0;
+    margin: 0;
     overflow: hidden;
     border-radius: 28px;
   }
 
-  #app,
+  #app {
+    height: 100%;
+    min-height: 0;
+  }
+
   .screen {
-    min-height: calc(100vh - 40px);
+    height: 100%;
+    min-height: 100%;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+
+  .screen::-webkit-scrollbar {
+    display: none;
   }
 
   .tab-bar {
-    bottom: 20px;
+    position: absolute;
+    bottom: 0;
+    width: 100%;
     border-radius: 0 0 28px 28px;
   }
 }

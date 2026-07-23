@@ -75,3 +75,46 @@ test('dynamic generation validates every page against the rendered card dimensio
   assert.match(css, /\.note-card-measurement/)
   assert.match(css, /max-height:\s*58%/)
 })
+
+test('preview uses one selection layer without duplicate page thumbnails or redundant heading', async () => {
+  const [app, css] = await Promise.all([source('app.mjs'), source('styles.css')])
+  assert.doesNotMatch(app, /page-rail|page-thumb|选择页面|<h2[^>]*>选择排版风格<\/h2>/)
+  assert.doesNotMatch(css, /\.page-rail|\.page-thumb|\.section-heading/)
+  assert.match(app, /class="theme-rail"/)
+})
+
+test('preview follows the reference hierarchy while keeping HappyHome actions', async () => {
+  const [app, css] = await Promise.all([source('app.mjs'), source('styles.css')])
+  assert.match(app, /renderPreviewAppBar/)
+  assert.match(app, /class="app-bar__edit"[^>]*>编辑<\/button>/)
+  assert.match(app, /<h1>预览<\/h1>/)
+  assert.match(app, /class="preview-actions__hint">选择喜欢的排版<\/span>/)
+  assert.match(app, /data-testid="publish-button">发布<\/button>/)
+  assert.match(css, /\.generation-preview\s*\{[^}]*aspect-ratio:\s*3\s*\/\s*5/s)
+  assert.match(css, /\.screen--preview \.note-card\s*\{[^}]*aspect-ratio:\s*3\s*\/\s*5/s)
+})
+
+test('preview carousel uses slide stride so the next page can remain visibly discoverable', async () => {
+  const app = await source('app.mjs')
+  assert.match(app, /function carouselSlideStride/)
+  assert.match(app, /getBoundingClientRect\(\)\.width/)
+  assert.match(app, /columnGap/)
+  assert.match(app, /targetIndex \* carouselSlideStride\(carousel\)/)
+})
+
+test('desktop review frame matches the 390 by 844 mobile acceptance viewport', async () => {
+  const css = await source('styles.css')
+  assert.match(css, /@media \(min-width:\s*700px\)[\s\S]*?\.prototype-shell\s*\{[^}]*width:\s*390px[^}]*height:\s*min\(844px,/)
+})
+
+test('the selected theme remains visible without hiding the leading templates', async () => {
+  const [app, css] = await Promise.all([source('app.mjs'), source('styles.css')])
+  assert.match(app, /const PREVIEW_THEME_ORDER = \['paper', 'mint', 'slate', 'notice', 'headline', 'quote'\]/)
+  assert.match(app, /PREVIEW_THEME_ORDER\.map/)
+  assert.match(app, /function syncThemeRail/)
+  assert.match(app, /selected\.offsetLeft/)
+  assert.match(app, /rail\.scrollLeft/)
+  assert.doesNotMatch(app, /rail\.clientWidth - selected\.offsetWidth\) \/ 2/)
+  assert.match(css, /\.theme-rail::after\s*\{[^}]*flex:\s*0\s+0\s+12px/s)
+  assert.match(css, /\.theme-option\s*\{[^}]*width:\s*58px[^}]*min-width:\s*58px/s)
+})

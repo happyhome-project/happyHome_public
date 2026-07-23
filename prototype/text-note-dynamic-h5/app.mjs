@@ -32,6 +32,7 @@ const generationPhases = [
 
 const topicOptions = ['社区通知', '生活提醒', '邻里互助']
 const locationOptions = ['阳光花园北门', '物业服务中心', '儿童活动区']
+const PREVIEW_THEME_ORDER = ['paper', 'mint', 'slate', 'notice', 'headline', 'quote']
 
 const state = {
   title: DEFAULT_TITLE,
@@ -96,6 +97,16 @@ function renderAppBar(title, backRoute = '') {
         : '<span class="app-bar__side"></span>'}
       <h1>${escapeHtml(title)}</h1>
       <span class="app-bar__side"></span>
+    </header>
+  `
+}
+
+function renderPreviewAppBar() {
+  return `
+    <header class="app-bar app-bar--preview">
+      <button class="icon-button" type="button" data-action="navigate" data-route="#/compose" aria-label="返回">${icon('back')}</button>
+      <h1>预览</h1>
+      <button class="app-bar__edit" type="button" data-action="navigate" data-route="#/compose">编辑</button>
     </header>
   `
 }
@@ -271,7 +282,7 @@ function renderPreview() {
   const activePage = pages[Math.min(state.pageIndex, pages.length - 1)]
   return `
     <section class="screen screen--preview" data-testid="preview-screen">
-      ${renderAppBar('选择文字封面', '#/compose')}
+      ${renderPreviewAppBar()}
       <div class="preview-body">
         <div class="deck-stage" data-testid="deck-preview">
           <div class="deck-carousel" data-carousel="preview">
@@ -282,23 +293,10 @@ function renderPreview() {
           <span class="deck-count">${state.pageIndex + 1}/${pages.length}</span>
         </div>
 
-        <div class="page-rail" aria-label="选择页面">
-          ${pages.map((page, index) => `
-            <button
-              class="page-thumb ${index === state.pageIndex ? 'is-active' : ''}"
-              type="button"
-              data-action="page"
-              data-page="${index}"
-              aria-label="第 ${index + 1} 页"
-            >
-              ${renderCard(page, state.theme, { compact: true })}
-            </button>
-          `).join('')}
-        </div>
-
-        <h2 class="section-heading">选择排版风格</h2>
-        <div class="theme-rail" data-testid="theme-rail">
-          ${Object.entries(TEXT_NOTE_THEMES).map(([theme, config]) => `
+        <div class="theme-rail" data-testid="theme-rail" aria-label="选择排版风格">
+          ${PREVIEW_THEME_ORDER.map((theme) => {
+            const config = TEXT_NOTE_THEMES[theme]
+            return `
             <button
               class="theme-option ${theme === state.theme ? 'is-active' : ''}"
               type="button"
@@ -309,7 +307,8 @@ function renderPreview() {
               <span class="theme-option__cover">${renderCard({ ...activePage, kind: 'cover', kicker: config.kicker }, theme, { compact: true })}</span>
               <span>${escapeHtml(config.label)}</span>
             </button>
-          `).join('')}
+          `
+          }).join('')}
         </div>
 
         <div class="publish-tools">
@@ -324,7 +323,7 @@ function renderPreview() {
         </div>
       </div>
       <footer class="preview-actions">
-        <button class="text-button text-button--large" type="button" data-action="navigate" data-route="#/compose">返回修改</button>
+        <span class="preview-actions__hint">选择喜欢的排版</span>
         <button class="primary-button" type="button" data-action="publish" data-testid="publish-button">发布</button>
       </footer>
       ${state.sheet ? renderSheet() : ''}
@@ -524,6 +523,7 @@ function render() {
 
   bindDynamicFields()
   syncCarousel(route)
+  syncThemeRail(route)
 }
 
 function bindDynamicFields() {
@@ -548,14 +548,14 @@ function syncCarousel(route) {
   if (!carousel) return
   const targetIndex = kind === 'detail' ? state.detailPageIndex : state.pageIndex
   requestAnimationFrame(() => {
-    carousel.scrollLeft = targetIndex * carousel.clientWidth
+    carousel.scrollLeft = targetIndex * carouselSlideStride(carousel)
   })
   let frame = 0
   carousel.addEventListener('scroll', () => {
     cancelAnimationFrame(frame)
     frame = requestAnimationFrame(() => {
       const index = Math.max(0, Math.min(
-        Math.round(carousel.scrollLeft / Math.max(1, carousel.clientWidth)),
+        Math.round(carousel.scrollLeft / carouselSlideStride(carousel)),
         carousel.children.length - 1,
       ))
       if (kind === 'detail' && index !== state.detailPageIndex) {
@@ -569,15 +569,38 @@ function syncCarousel(route) {
   }, { passive: true })
 }
 
+function syncThemeRail(route) {
+  if (route !== '#/preview') return
+  const rail = app.querySelector('.theme-rail')
+  const selected = rail?.querySelector('.theme-option.is-active')
+  if (!rail || !selected) return
+  requestAnimationFrame(() => {
+    const edge = 12
+    const selectedLeft = selected.offsetLeft
+    const selectedRight = selectedLeft + selected.offsetWidth
+    const visibleLeft = rail.scrollLeft
+    const visibleRight = visibleLeft + rail.clientWidth
+    if (selectedLeft < visibleLeft + edge) {
+      rail.scrollLeft = Math.max(0, selectedLeft - edge)
+    } else if (selectedRight > visibleRight - edge) {
+      rail.scrollLeft = selectedRight - rail.clientWidth + edge
+    }
+  })
+}
+
+function carouselSlideStride(carousel) {
+  const firstSlide = carousel.firstElementChild
+  if (!firstSlide) return Math.max(1, carousel.clientWidth)
+  const carouselStyle = getComputedStyle(carousel)
+  const gap = Number.parseFloat(carouselStyle.columnGap || carouselStyle.gap) || 0
+  return Math.max(1, firstSlide.getBoundingClientRect().width + gap)
+}
+
 function updateDeckIndicators(kind, index) {
   const count = app.querySelector('.deck-count')
   const pages = kind === 'detail' ? (state.detailDeck || state.deck).pages : state.deck.pages
   if (count) count.textContent = `${index + 1}/${pages.length}`
-  if (kind === 'preview') {
-    app.querySelectorAll('.page-thumb').forEach((element, pageIndex) => {
-      element.classList.toggle('is-active', pageIndex === index)
-    })
-  } else {
+  if (kind === 'detail') {
     app.querySelectorAll('.detail-dots span').forEach((element, pageIndex) => {
       element.classList.toggle('is-active', pageIndex === index)
     })
@@ -643,10 +666,7 @@ app.addEventListener('click', async (event) => {
   if (action === 'navigate') navigate(target.dataset.route)
   else if (action === 'generate') await generateDeck()
   else if (action === 'draft') showToast('草稿已保存在本机样板中')
-  else if (action === 'page') {
-    state.pageIndex = Number(target.dataset.page || 0)
-    render()
-  } else if (action === 'theme') {
+  else if (action === 'theme') {
     const theme = target.dataset.theme
     if (!theme || theme === state.theme) return
     state.theme = theme
