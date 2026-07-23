@@ -148,18 +148,19 @@ function formatPostDate(value: string): string {
   height: 960rpx;
   min-height: 620rpx;
   max-height: 72vh;
+  background: var(--hh-color-card);
 }
 
 .image-note-hero {
   position: relative;
   overflow: hidden;
-  background: var(--hh-color-page);
+  background: var(--hh-color-card);
 }
 
 .image-note-image {
   width: 100%;
   height: 100%;
-  background: var(--hh-color-page);
+  background: var(--hh-color-card);
 }
 
 .image-note-image-count {

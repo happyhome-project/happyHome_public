@@ -13,6 +13,8 @@ function assert(condition, message) {
 
 const home = read('miniprogram', 'src', 'pages', 'index', 'index.vue')
 const section = read('miniprogram', 'src', 'pages', 'section', 'index.vue')
+const detailPage = read('miniprogram', 'src', 'pages', 'detail', 'index.vue')
+const detailView = read('miniprogram', 'src', 'components', 'ImageNoteDetailView.vue')
 const topicPicker = read('miniprogram', 'src', 'components', 'widgets', 'TopicPicker.vue')
 
 assert(
@@ -85,6 +87,13 @@ assert(
   topicPicker.includes('topics.slice(0, 1)') &&
     topicPicker.includes('topics.length - 1'),
   'the compact topic trigger should summarize extra topics instead of clipping a bare hash.',
+)
+
+assert(
+  /\.detail-page--image-note\s*\{[^}]*background:\s*var\(--hh-color-card\)/s.test(detailPage) &&
+    /\.image-note-hero,[\s\S]*?\.image-note-slide\s*\{[^}]*background:\s*var\(--hh-color-card\)/s.test(detailView) &&
+    /\.image-note-image\s*\{[^}]*background:\s*var\(--hh-color-card\)/s.test(detailView),
+  'image-note detail media gutters and aspect-fit letterboxing must use the same white card surface as the body.',
 )
 
 console.log('[image-note-static] PASS')
