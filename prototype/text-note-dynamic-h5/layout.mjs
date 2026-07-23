@@ -130,6 +130,84 @@ export function paginateBody(value, options = {}) {
   return pages
 }
 
+export function paginateBodyToFit(value, fits) {
+  const normalized = normalizeBody(value)
+  if (!normalized) return []
+  if (typeof fits !== 'function') {
+    throw new TypeError('paginateBodyToFit requires a renderer fit function')
+  }
+
+  const characters = graphemes(normalized)
+  const pages = []
+  let cursor = 0
+
+  while (cursor < characters.length) {
+    const remainingLength = characters.length - cursor
+    let low = 1
+    let high = remainingLength
+    let bestLength = 0
+
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2)
+      const candidate = characters.slice(cursor, cursor + middle).join('')
+      if (fits(candidate)) {
+        bestLength = middle
+        low = middle + 1
+      } else {
+        high = middle - 1
+      }
+    }
+
+    if (bestLength === 0) {
+      throw new Error('The text renderer cannot fit a single grapheme')
+    }
+
+    let splitLength = bestLength
+    if (bestLength < remainingLength) {
+      const earliestNaturalBreak = Math.max(1, Math.floor(bestLength * 0.62))
+      for (let index = bestLength; index >= earliestNaturalBreak; index -= 1) {
+        if (/[。！？!?；;\n]/u.test(characters[cursor + index - 1])) {
+          splitLength = index
+          break
+        }
+      }
+    }
+
+    pages.push(characters.slice(cursor, cursor + splitLength).join(''))
+    cursor += splitLength
+  }
+
+  return pages
+}
+
+export function fitTextToRenderer(value, fits) {
+  const text = String(value ?? '').trim()
+  if (!text) return ''
+  if (typeof fits !== 'function') {
+    throw new TypeError('fitTextToRenderer requires a renderer fit function')
+  }
+  if (fits(text)) return text
+
+  const characters = graphemes(text)
+  let low = 0
+  let high = Math.max(0, characters.length - 1)
+  let fitted = fits('…') ? '…' : ''
+
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2)
+    const prefix = characters.slice(0, middle).join('').trimEnd()
+    const candidate = `${prefix}…`
+    if (fits(candidate)) {
+      fitted = candidate
+      low = middle + 1
+    } else {
+      high = middle - 1
+    }
+  }
+
+  return fitted
+}
+
 export function createTextNoteDeck({ title, body, theme = 'paper' } = {}) {
   const normalizedTheme = themeNames.includes(theme) ? theme : 'paper'
   const themeConfig = TEXT_NOTE_THEMES[normalizedTheme]

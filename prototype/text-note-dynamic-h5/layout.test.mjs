@@ -3,8 +3,10 @@ import assert from 'node:assert/strict'
 
 import {
   createTextNoteDeck,
+  fitTextToRenderer,
   normalizeBody,
   paginateBody,
+  paginateBodyToFit,
   selectCoverExcerpt,
 } from './layout.mjs'
 
@@ -83,4 +85,29 @@ test('all six production themes are accepted and unknown themes fall back to pap
     assert.equal(createTextNoteDeck({ title: '标题', body: '正文', theme }).theme, theme)
   }
   assert.equal(createTextNoteDeck({ title: '标题', body: '正文', theme: 'unknown' }).theme, 'paper')
+})
+
+test('paginateBodyToFit uses the renderer as the source of truth without losing text', () => {
+  const body = [
+    '各位邻居：',
+    '第一段包含中文、English words、Emoji 🏡 和手动换行。',
+    '第二段包含长链接 https://example.com/community/notices/water-maintenance?from=happyhome。',
+  ].join('\n\n')
+  const normalized = normalizeBody(body)
+  const fits = (candidate) => Array.from(candidate).length <= 28
+  const pages = paginateBodyToFit(body, fits)
+
+  assert.ok(pages.length > 2)
+  assert.equal(pages.join(''), normalized)
+  assert.ok(pages.every(fits))
+})
+
+test('fitTextToRenderer truncates a visual excerpt without splitting emoji', () => {
+  const text = '邻里活动🏡欢迎大家周六一起来参加'
+  const fitted = fitTextToRenderer(text, (candidate) => Array.from(candidate).length <= 9)
+
+  assert.ok(fitted.endsWith('…'))
+  assert.ok(Array.from(fitted).length <= 9)
+  const lastVisibleCodeUnit = fitted.charCodeAt(fitted.length - 2)
+  assert.ok(!(lastVisibleCodeUnit >= 0xd800 && lastVisibleCodeUnit <= 0xdbff))
 })
