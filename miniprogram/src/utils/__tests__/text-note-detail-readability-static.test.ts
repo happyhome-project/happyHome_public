@@ -28,6 +28,28 @@ function contrastRatio(first: string, second: string): number {
 }
 
 describe('text-note detail readability', () => {
+  test('renders body pages from the shared theme layout at the approved readable typography', () => {
+    const cover = read('components', 'TextNoteCover.vue')
+    const bodyRule = cover.match(/\.text-note-cover-frame--body \.text-note-cover-body\s*\{([^}]*)\}/s)?.[1] || ''
+
+    expect(cover).toContain('getTextNoteBodyLayout')
+    expect(cover).toContain('const bodyStyle = computed')
+    expect(cover).toMatch(
+      /<text\s+v-else\s+class="text-note-cover-body"\s+:style="bodyStyle">/,
+    )
+    expect(cover).toContain('layout.safeRect.x / TEXT_NOTE_CARD_WIDTH')
+    expect(cover).toContain('layout.safeRect.y / TEXT_NOTE_CARD_HEIGHT')
+    expect(cover).toContain('layout.safeRect.width / TEXT_NOTE_CARD_WIDTH')
+    expect(cover).toContain('layout.safeRect.height / TEXT_NOTE_CARD_HEIGHT')
+    expect(cover).toContain('fontFamily: layout.fontFamily')
+    expect(bodyRule).toMatch(/font-size:\s*28rpx/)
+    expect(bodyRule).toMatch(/line-height:\s*42rpx/)
+    expect(bodyRule).not.toMatch(/left:/)
+    expect(bodyRule).not.toMatch(/top:/)
+    expect(bodyRule).not.toMatch(/width:/)
+    expect(bodyRule).not.toMatch(/max-height:/)
+  })
+
   test('uses readable slate body text on the light botanical paper', () => {
     const cover = read('components', 'TextNoteCover.vue')
     const slateBodyColor = cover.match(

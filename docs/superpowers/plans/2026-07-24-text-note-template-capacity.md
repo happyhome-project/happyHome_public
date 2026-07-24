@@ -92,8 +92,15 @@ under the old global `17 × 15` and uniform ASCII weight.
 - [ ] **Step 6: Implement the page-fit predicate and calibrated ASCII weights**
 
 Make every page satisfy both visual line count and total visual-unit capacity.
-Use weight `1` for `W/M/@/#/%/&`, retain conservative category weights for
-other ASCII, and keep Emoji graphemes indivisible at weight `1.6`.
+Use weight `1` for `W/M/m/w/@/#/%/&`, retain conservative category weights for
+other ASCII, and keep Emoji graphemes indivisible at weight `1.6`. Prefer
+`Intl.Segmenter` for UAX grapheme boundaries and retain a bounded fallback for
+environments without it. Split pathological clusters longer than 16 code points
+into source-preserving fallback fragments no longer than 16 code points and
+promote fragment boundaries to hard page boundaries; normal UAX clusters remain
+indivisible. Segment the normalized body once, then incrementally accumulate
+line and visual-unit metrics instead of repeatedly segmenting every candidate
+page prefix.
 `createTextNoteDeck` must call:
 
 ```ts
@@ -110,6 +117,7 @@ source-complete pagination.
 **Files:**
 - Modify: `miniprogram/src/utils/__tests__/text-note-detail-readability-static.test.ts`
 - Modify: `miniprogram/src/components/TextNoteCover.vue`
+- Modify: `scripts/test-text-note-static.mjs`
 
 **Interfaces:**
 - Consumes: `getTextNoteBodyLayout(normalizedTheme)`.
@@ -119,9 +127,11 @@ source-complete pagination.
 - [ ] **Step 1: Write the failing renderer contract test**
 
 Require `TextNoteCover.vue` to import `getTextNoteBodyLayout`, bind
-`:style="bodyStyle"` to the body text node, use `32rpx / 48rpx`, and preserve
+`:style="bodyStyle"` to the body text node, use `28rpx / 42rpx`, and preserve
 the six readable body colors. Require the body style to derive left, top,
-width, max-height, and font-family from the shared layout.
+width, max-height, and font-family from the shared layout. Update the repository
+static gate to reject a return to one global body inset or the old
+`30rpx / 44rpx` typography.
 
 - [ ] **Step 2: Run the focused renderer tests and observe RED**
 
@@ -153,11 +163,22 @@ const bodyStyle = computed(() => {
 ```
 
 Bind it only on the body `<text>` and set the shared body typography to
-`32rpx` font size and `48rpx` line height.
+`28rpx` font size and `42rpx` line height. These values preserve the approved
+card-relative `16px / 24px` rhythm after the production page margins are
+applied; `32rpx / 48rpx` is relative to the whole viewport and overfills the
+card.
 
 - [ ] **Step 4: Run focused renderer tests and observe GREEN**
 
 Run the command from Step 2. Expected: both files pass.
+
+Then run:
+
+```powershell
+npm.cmd run test:mp:text-note-static
+```
+
+Expected: the repository-level text-note contract passes.
 
 ### Task 3: Approved prototype and repository verification
 
