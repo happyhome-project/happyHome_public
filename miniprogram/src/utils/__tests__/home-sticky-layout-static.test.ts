@@ -57,12 +57,16 @@ describe('home progressive sticky navigation', () => {
     expect(command).toContain('node scripts/test-h5-home-sticky-smoke.mjs')
   })
 
-  test('keeps the tabs surface white and the quote-colored search flat', () => {
+  test('fades the quote-colored search surface into the white archive surface', () => {
     const search = ruleBody('.home-search-sticky-shell')
     const tabs = ruleBody('.section-tabs-sticky-shell')
+    const archiveTabs = ruleBody('.section-tabs-sticky-shell--archive')
 
     expect(search).toMatch(/background:\s*var\(--home-sticky-surface\);/)
     expect(tabs).toMatch(/background:\s*var\(--home-tabs-surface\);/)
+    expect(archiveTabs).toMatch(
+      /background:\s*linear-gradient\(\s*180deg,\s*var\(--home-sticky-surface\) 0%,\s*#edf7f8 30%,\s*#f7fbfb 68%,\s*var\(--home-tabs-surface\) 100%\s*\);/,
+    )
     for (const body of [search, tabs]) {
       expect(body).not.toMatch(/box-shadow\s*:/)
       expect(body).not.toMatch(/backdrop-filter\s*:/)

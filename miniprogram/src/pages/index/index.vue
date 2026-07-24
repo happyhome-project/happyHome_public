@@ -3549,6 +3549,13 @@ onShareAppMessage(() => {
 .section-tabs-sticky-shell--archive {
   margin: 0;
   padding: calc(24rpx + 1px) 0 0;
+  background: linear-gradient(
+    180deg,
+    var(--home-sticky-surface) 0%,
+    #edf7f8 30%,
+    #f7fbfb 68%,
+    var(--home-tabs-surface) 100%
+  );
 }
 
 .section-tabs-inner {
