@@ -1,5 +1,5 @@
 <template>
-  <view class="create-page">
+  <view class="create-page" :style="createPageStyle">
     <view class="create-custom-nav" :style="createCustomNavStyle">
       <view class="create-custom-nav__row">
         <button class="create-custom-nav__back" aria-label="返回" @tap="handleCreateNavBack">‹</button>
@@ -417,6 +417,9 @@ const videoPublishReady = ref(true)
 const initialCreateNavMetrics = computeCreateNavMetrics({ isH5: typeof window !== 'undefined' && typeof document !== 'undefined' })
 const createStatusBarHeight = ref(initialCreateNavMetrics.statusBarHeight)
 const createNavRowHeight = ref(initialCreateNavMetrics.navRowHeight)
+const createPageStyle = computed(() => (
+  `--create-nav-total-height: ${createStatusBarHeight.value + createNavRowHeight.value}px;`
+))
 const createCustomNavStyle = computed(() => (
   `padding-top: ${createStatusBarHeight.value}px; --create-nav-row-height: ${createNavRowHeight.value}px;`
 ))
@@ -1739,8 +1742,10 @@ async function handleSubmit() {
 }
 
 .form--figma.form--text-note {
+  padding: 24rpx 0 0;
   padding-left: 0;
   padding-right: 0;
+  min-height: calc(100vh - var(--create-nav-total-height, 116px));
 }
 
 .figma-form-list {
@@ -1949,9 +1954,12 @@ async function handleSubmit() {
   display: flex;
   flex-direction: column;
   gap: 24rpx;
+  min-height: calc(100vh - var(--create-nav-total-height, 116px) - 24rpx);
+  padding: 32rpx 32rpx calc(32rpx + env(safe-area-inset-bottom));
 }
 
 .text-note-editor-card {
+  flex: 1;
   min-height: 620rpx;
 }
 
@@ -1961,6 +1969,10 @@ async function handleSubmit() {
   align-items: center;
   gap: 32rpx;
   margin-top: 36rpx;
+}
+
+.text-note-compose-actions {
+  margin-top: 16rpx;
 }
 
 .text-note-preview {

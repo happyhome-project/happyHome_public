@@ -7,7 +7,7 @@ import { PassThrough } from 'node:stream'
 import test from 'node:test'
 
 import { createH5WebLauncher } from '../h5-web.mjs'
-import { resolveCleanupIntent, runH5WebSmoke, sanitizeEvidence, validateReadEvidence } from '../test-h5-web-smoke.mjs'
+import { resolveCleanupIntent, runH5WebSmoke, sanitizeEvidence, validateReadEvidence, validateTextNoteComposeGeometry } from '../test-h5-web-smoke.mjs'
 
 async function machineHome(values = {}) {
   const home = await mkdtemp(join(tmpdir(), 'hh-h5-web-'))
@@ -99,6 +99,22 @@ test('read evidence combines exact stored doctor counts 30/1/0 with exact visibl
   }))
   assert.throws(() => validateReadEvidence({ doctor: { counts: { activePostsBySection: [30, 1, 0] } }, visible: { long: 21, short: 1, empty: 0 } }), /visible long count/)
   assert.throws(() => validateReadEvidence({ doctor: { counts: { activePostsBySection: [29, 1, 0] } }, visible: { long: 20, short: 1, empty: 0 } }), /stored counts/)
+})
+
+test('text-note compose geometry grows with the mobile viewport and keeps actions near the safe bottom', () => {
+  const geometry = {
+    standard: { viewportWidth: 402, viewportHeight: 874, scrollHeight: 874, editorTop: 128, editorBottom: 784, editorHeight: 656, actionsTop: 805, actionsBottom: 857 },
+    tall: { viewportWidth: 402, viewportHeight: 960, scrollHeight: 960, editorTop: 128, editorBottom: 870, editorHeight: 742, actionsTop: 891, actionsBottom: 943 },
+  }
+  assert.doesNotThrow(() => validateTextNoteComposeGeometry(geometry))
+  assert.throws(() => validateTextNoteComposeGeometry({
+    ...geometry,
+    standard: { ...geometry.standard, scrollHeight: 1200 },
+  }), /excess blank scroll/)
+  assert.throws(() => validateTextNoteComposeGeometry({
+    ...geometry,
+    tall: { ...geometry.tall, editorBottom: 784, editorHeight: 656 },
+  }), /did not grow/)
 })
 
 test('write smoke takes exactly one lease, uses a unique run id, and requires cleanup', async () => {
