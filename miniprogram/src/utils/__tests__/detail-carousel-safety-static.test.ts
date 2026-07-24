@@ -56,4 +56,21 @@ describe('detail carousel gesture safety', () => {
     expect(page).toContain("'detail-page--text-note': isTextNoteDetail")
     expect(page).toMatch(/\.detail-page--text-note\s*\{[^}]*background:\s*var\(--hh-color-card\);/s)
   })
+
+  test('reuses the image-note pagination dots and looping swipe only in text-note detail', () => {
+    const imageNote = read('components', 'ImageNoteDetailView.vue')
+    const textNoteDeck = read('components', 'TextNoteDeck.vue')
+    const detail = read('components', 'DefaultDetailView.vue')
+    const pagination = read('components', 'CarouselPaginationDots.vue')
+
+    expect(imageNote).toContain('<CarouselPaginationDots')
+    expect(textNoteDeck).toContain('<CarouselPaginationDots')
+    expect(detail).toMatch(/<TextNoteDeck[\s\S]*detail-carousel[\s\S]*\/>/)
+    expect(textNoteDeck).toContain('detailCarousel?: boolean')
+    expect(textNoteDeck).toContain(':circular="detailCarousel && resolvedDeck.pages.length > 1"')
+    expect(textNoteDeck).toContain('v-if="detailCarousel"')
+    expect(pagination).toContain('data-testid="carousel-pagination-dots"')
+    expect(pagination).toMatch(/\.carousel-pagination-dots\s*\{[^}]*height:\s*46rpx;/s)
+    expect(pagination).toMatch(/\.carousel-pagination-dot--active\s*\{[^}]*width:\s*14rpx;[^}]*background:\s*#ff2442;/s)
+  })
 })

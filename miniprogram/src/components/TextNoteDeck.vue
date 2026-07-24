@@ -9,7 +9,7 @@
     <swiper
       class="text-note-deck__viewport"
       :current="displayPage - 1"
-      :circular="false"
+      :circular="detailCarousel && resolvedDeck.pages.length > 1"
       :duration="260"
       :disable-touch="resolvedDeck.pages.length <= 1"
       @change="handleChange"
@@ -29,11 +29,17 @@
         />
       </swiper-item>
     </swiper>
+    <CarouselPaginationDots
+      v-if="detailCarousel"
+      :count="resolvedDeck.pages.length"
+      :current-index="displayPage - 1"
+    />
   </view>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import CarouselPaginationDots from './CarouselPaginationDots.vue'
 import TextNoteCover from './TextNoteCover.vue'
 import {
   createTextNoteDeck,
@@ -47,12 +53,14 @@ const props = withDefaults(defineProps<{
   body?: string
   theme?: TextNoteTheme | string
   currentPage?: number
+  detailCarousel?: boolean
 }>(), {
   deck: null,
   title: '',
   body: '',
   theme: 'paper',
   currentPage: 1,
+  detailCarousel: false,
 })
 
 const emit = defineEmits<{

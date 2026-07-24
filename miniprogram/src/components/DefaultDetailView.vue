@@ -11,6 +11,7 @@
           :title="textNoteCard.title"
           :body="textNoteFullBody"
           :theme="textNoteCard.theme"
+          detail-carousel
         />
       </view>
 

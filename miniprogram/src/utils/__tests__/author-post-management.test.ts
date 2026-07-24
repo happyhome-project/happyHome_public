@@ -12,6 +12,7 @@ const authorPostColumnsSource = readFileSync(resolve(process.cwd(), 'src/compone
 const cloudApiSource = readFileSync(resolve(process.cwd(), 'src/api/cloud.ts'), 'utf8')
 const emptyIllustrationSource = readFileSync(resolve(process.cwd(), 'src/static/profile/my-activities-empty.svg'), 'utf8')
 const imageNoteDetailSource = readFileSync(resolve(process.cwd(), 'src/components/ImageNoteDetailView.vue'), 'utf8')
+const carouselPaginationDotsSource = readFileSync(resolve(process.cwd(), 'src/components/CarouselPaginationDots.vue'), 'utf8')
 
 describe('author post management UI contract', () => {
   test('uses a quiet author entry and a horizontal Xiaohongshu-style icon sheet', () => {
@@ -75,8 +76,9 @@ describe('my activities participation contract', () => {
 
 describe('image note detail polish', () => {
   test('keeps carousel position visible and renders location as a compact text chip', () => {
-    expect(imageNoteDetailSource).toContain('class="image-note-dots"')
-    expect(imageNoteDetailSource).toContain('class="image-note-dot"')
+    expect(imageNoteDetailSource).toContain('<CarouselPaginationDots')
+    expect(carouselPaginationDotsSource).toContain('class="carousel-pagination-dots"')
+    expect(carouselPaginationDotsSource).toContain('class="carousel-pagination-dot"')
     expect(imageNoteDetailSource).toContain('class="image-note-location-text"')
     expect(imageNoteDetailSource).not.toContain('class="image-note-location-address"')
   })
