@@ -550,6 +550,20 @@ test('release session keeps operator aliases out of prepare and publish identity
   assert.doesNotMatch(sessionScript.slice(sessionScript.indexOf('export function buildReleaseSessionInvocation'), sessionScript.indexOf('function assertSessionPathInsideRoot')), /session\.aliases/)
 })
 
+test('formal release restores its generated source marker before completing production state', () => {
+  const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
+  const formalRelease = extractFunctionBlock(deployScript, 'async function runFormalRelease')
+  const cleanup = formalRelease.indexOf('restoreReleaseOwnedBuildInfo({')
+  const productionCompletion = formalRelease.indexOf('completeProductionReleaseWithRemoteConfirmation({')
+  const prepareStop = formalRelease.indexOf('if (prepareOnly) {')
+
+  assert.ok(prepareStop >= 0)
+  assert.ok(cleanup > prepareStop)
+  assert.ok(productionCompletion > cleanup)
+  assert.match(formalRelease.slice(cleanup, productionCompletion), /version:\s*miniprogramUpload\.version/)
+  assert.match(formalRelease.slice(cleanup, productionCompletion), /desc:\s*miniprogramUpload\.desc/)
+})
+
 test('explicit UI qualification builds only the miniprogram gate and writes exact evidence', () => {
   const deployScript = readFileSync(new URL('../deploy.mjs', import.meta.url), 'utf8')
   const packageJson = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))

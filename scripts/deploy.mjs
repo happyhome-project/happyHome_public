@@ -83,6 +83,7 @@ import {
 } from './lib/deploy-output.mjs'
 import { runDirectRemoteMutation } from './lib/direct-deploy-policy.mjs'
 import { parsePositiveIntOption } from './lib/release-concurrency.mjs'
+import { renderReleaseBuildInfo, restoreReleaseOwnedBuildInfo } from './lib/release-build-info-cleanup.mjs'
 import {
   assertFormalReleaseGitState,
   createFormalReleaseMutationFences,
@@ -379,15 +380,7 @@ function getLocalTimestamp() {
 
 function writeMiniprogramBuildInfo(version, desc) {
   const buildInfoPath = resolve(ROOT, 'miniprogram/src/generated/build-info.ts')
-  const buildId = `mp-${version}`
-  const content = [
-    'export const BUILD_INFO = {',
-    `  version: ${JSON.stringify(version)},`,
-    `  desc: ${JSON.stringify(desc)},`,
-    `  buildId: ${JSON.stringify(buildId)},`,
-    '}',
-    '',
-  ].join('\n')
+  const content = renderReleaseBuildInfo({ version, desc })
 
   mkdirSync(dirname(buildInfoPath), { recursive: true })
   if (existsSync(buildInfoPath) && readFileSync(buildInfoPath, 'utf8') === content) {
@@ -2034,6 +2027,15 @@ async function runFormalRelease(options = {}) {
       }
       await releaseLedger.recordRemoteAttestations('miniprogram', [miniprogramOutcome])
       await releaseLedger.recordComponent('miniprogram', miniprogramOutcome)
+    }
+
+    if (formalPlan.targets.miniprogram) {
+      const cleanup = restoreReleaseOwnedBuildInfo({
+        root: ROOT,
+        version: miniprogramUpload.version,
+        desc: miniprogramUpload.desc,
+      })
+      console.log(`[build-info] cleanup ${cleanup.status} ${cleanup.path}`)
     }
 
     if (releaseGuard) await completeProductionReleaseWithRemoteConfirmation({
