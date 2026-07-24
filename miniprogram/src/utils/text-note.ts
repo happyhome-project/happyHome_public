@@ -188,8 +188,19 @@ const TEXT_NOTE_COMBINING_MARK_RANGES: ReadonlyArray<readonly [number, number]> 
   [0x1dc0, 0x1dff], [0x20d0, 0x20ff], [0xfe20, 0xfe2f],
 ]
 
+function isTextNoteCodePointInRanges(
+  code: number,
+  ranges: ReadonlyArray<readonly [number, number]>,
+): boolean {
+  for (let index = 0; index < ranges.length; index += 1) {
+    const range = ranges[index]
+    if (code >= range[0] && code <= range[1]) return true
+  }
+  return false
+}
+
 function isTextNoteCombiningCodePoint(code: number): boolean {
-  return TEXT_NOTE_COMBINING_MARK_RANGES.some(([start, end]) => code >= start && code <= end)
+  return isTextNoteCodePointInRanges(code, TEXT_NOTE_COMBINING_MARK_RANGES)
 }
 
 type TextNoteHangulType = 'L' | 'V' | 'T' | 'LV' | 'LVT' | null
@@ -248,7 +259,7 @@ const TEXT_NOTE_PREPEND_RANGES: ReadonlyArray<readonly [number, number]> = [
 ]
 
 function isTextNotePrependCodePoint(code: number): boolean {
-  return TEXT_NOTE_PREPEND_RANGES.some(([start, end]) => code >= start && code <= end)
+  return isTextNoteCodePointInRanges(code, TEXT_NOTE_PREPEND_RANGES)
 }
 
 const TEXT_NOTE_GRAPHEME_CONTROL_RANGES: ReadonlyArray<readonly [number, number]> = [
@@ -277,9 +288,7 @@ const TEXT_NOTE_GRAPHEME_CONTROL_RANGES: ReadonlyArray<readonly [number, number]
 ]
 
 function isTextNoteGraphemeControl(code: number): boolean {
-  return TEXT_NOTE_GRAPHEME_CONTROL_RANGES.some(
-    ([start, end]) => code >= start && code <= end,
-  )
+  return isTextNoteCodePointInRanges(code, TEXT_NOTE_GRAPHEME_CONTROL_RANGES)
 }
 
 function isTextNoteTrailingCodePoint(code: number): boolean {
@@ -316,7 +325,7 @@ function isTextNoteIndicBase(code: number): boolean {
   return (
     !isTextNoteCombiningCodePoint(code) &&
     !TEXT_NOTE_INDIC_LINKERS.has(code) &&
-    TEXT_NOTE_INDIC_SCRIPT_RANGES.some(([start, end]) => code >= start && code <= end)
+    isTextNoteCodePointInRanges(code, TEXT_NOTE_INDIC_SCRIPT_RANGES)
   )
 }
 
