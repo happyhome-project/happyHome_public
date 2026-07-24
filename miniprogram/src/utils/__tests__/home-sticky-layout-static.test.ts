@@ -57,7 +57,7 @@ describe('home progressive sticky navigation', () => {
     expect(command).toContain('node scripts/test-h5-home-sticky-smoke.mjs')
   })
 
-  test('separates the Figma tabs surface from the quote-colored search without elevation', () => {
+  test('keeps the tabs surface white and the quote-colored search flat', () => {
     const search = ruleBody('.home-search-sticky-shell')
     const tabs = ruleBody('.section-tabs-sticky-shell')
 
@@ -68,7 +68,15 @@ describe('home progressive sticky navigation', () => {
       expect(body).not.toMatch(/backdrop-filter\s*:/)
     }
     expect(page).toMatch(/--home-sticky-surface:\s*#e6f4f6;/)
-    expect(page).toMatch(/--home-tabs-surface:\s*#f2f3f7;/)
+    expect(page).toMatch(/--home-tabs-surface:\s*var\(--hh-color-card\);/)
+  })
+
+  test('keeps a 16px visual gap from the search box to tabs without changing sticky offsets', () => {
+    const archiveTabsShell = ruleBody('.section-tabs-sticky-shell--archive')
+
+    expect(archiveTabsShell).toMatch(/padding:\s*calc\(24rpx \+ 1px\)\s+0\s+0;/)
+    expect(page).toMatch(/\.home-search-sticky-shell\s*\{[^}]*top:\s*calc\(150rpx \+ env\(safe-area-inset-top\)\);/s)
+    expect(page).toMatch(/\.section-tabs-sticky-shell\s*\{[^}]*top:\s*calc\(150rpx \+ env\(safe-area-inset-top\) \+ 98rpx - 1px\);/s)
   })
 
   test('uses the Figma tab text and selected green fade without changing text geometry', () => {

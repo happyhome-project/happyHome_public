@@ -3226,7 +3226,7 @@ onShareAppMessage(() => {
   --home-hero-quote: #def4f4;
   --home-hero-highlight: radial-gradient(ellipse 270rpx 244rpx at 79% 59rpx, rgba(84, 211, 160, 0.212) 0%, rgba(84, 211, 160, 0.212) 20%, rgba(84, 211, 160, 0.16) 40%, rgba(84, 211, 160, 0.056) 68%, rgba(84, 211, 160, 0) 100%);
   --home-sticky-surface: #e6f4f6;
-  --home-tabs-surface: #f2f3f7;
+  --home-tabs-surface: var(--hh-color-card);
   background: var(--hh-color-page);
   padding-top: 0;
 }
@@ -3548,7 +3548,7 @@ onShareAppMessage(() => {
 
 .section-tabs-sticky-shell--archive {
   margin: 0;
-  padding: 0;
+  padding: calc(24rpx + 1px) 0 0;
 }
 
 .section-tabs-inner {
