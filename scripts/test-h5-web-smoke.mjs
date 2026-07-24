@@ -18,7 +18,7 @@ const SAFE_KEYS = new Set(['mode', 'runId', 'cwd', 'branch', 'head', 'port', 'co
 export function sanitizeEvidence(value) {
   if (Array.isArray(value)) return value.map(sanitizeEvidence)
   if (!value || typeof value !== 'object') return value
-  return Object.fromEntries(Object.entries(value).filter(([key]) => SAFE_KEYS.has(key) || ['long', 'short', 'empty', 'posts', 'created', 'stickyTop', 'searchTop', 'viewportHeight', 'ok'].includes(key)).map(([key, item]) => [key, sanitizeEvidence(item)]))
+  return Object.fromEntries(Object.entries(value).filter(([key]) => SAFE_KEYS.has(key) || ['long', 'short', 'empty', 'posts', 'created', 'stickyTop', 'searchTop', 'viewportWidth', 'viewportHeight', 'scrollHeight', 'textNote', 'standard', 'tall', 'editorTop', 'editorBottom', 'editorHeight', 'actionsTop', 'actionsBottom', 'ok'].includes(key)).map(([key, item]) => [key, sanitizeEvidence(item)]))
 }
 
 export function validateReadEvidence({ doctor, visible }) {
@@ -27,6 +27,64 @@ export function validateReadEvidence({ doctor, visible }) {
   if (visible?.long !== EXPECTED_HOME_VISIBLE_LONG) throw new Error(`unexpected visible long count: ${visible?.long}`)
   if (visible?.short !== 1) throw new Error(`unexpected visible short count: ${visible?.short}`)
   if (visible?.empty !== 0) throw new Error(`unexpected visible empty count: ${visible?.empty}`)
+}
+
+export function validateTextNoteComposeGeometry(geometry) {
+  const standard = geometry?.standard
+  const tall = geometry?.tall
+  for (const [name, sample, expectedHeight] of [['standard', standard, 874], ['tall', tall, 960]]) {
+    if (!sample || sample.viewportWidth !== 402 || sample.viewportHeight !== expectedHeight) {
+      throw new Error(`unexpected text-note ${name} viewport geometry`)
+    }
+    if (sample.scrollHeight > sample.viewportHeight + 1) {
+      throw new Error(`text-note ${name} has excess blank scroll`)
+    }
+    if (sample.editorBottom > sample.actionsTop) {
+      throw new Error(`text-note ${name} editor overlaps its actions`)
+    }
+    const bottomGap = sample.viewportHeight - sample.actionsBottom
+    if (bottomGap < 0 || bottomGap > 40) {
+      throw new Error(`text-note ${name} actions escaped the safe bottom rhythm`)
+    }
+  }
+  const viewportGrowth = tall.viewportHeight - standard.viewportHeight
+  if (Math.abs((tall.editorHeight - standard.editorHeight) - viewportGrowth) > 2) {
+    throw new Error('text-note editor did not grow with the viewport')
+  }
+  if (Math.abs((tall.actionsTop - standard.actionsTop) - viewportGrowth) > 2) {
+    throw new Error('text-note actions did not move with the viewport')
+  }
+  if (Math.abs(tall.editorTop - standard.editorTop) > 2) {
+    throw new Error('text-note editor top shifted between mobile viewports')
+  }
+}
+
+async function readTextNoteComposeGeometry(page, running) {
+  const measure = async (height) => {
+    await page.setViewportSize({ width: 402, height })
+    await page.waitForFunction((expectedHeight) => innerWidth === 402 && innerHeight === expectedHeight, height)
+    return await page.evaluate(() => {
+      const editor = document.querySelector('.text-note-editor-card')?.getBoundingClientRect()
+      const actions = document.querySelector('.text-note-compose-actions')?.getBoundingClientRect()
+      if (!editor || !actions) throw new Error('text-note compose geometry is unavailable')
+      return {
+        viewportWidth: innerWidth,
+        viewportHeight: innerHeight,
+        scrollHeight: document.documentElement.scrollHeight,
+        editorTop: Math.round(editor.top),
+        editorBottom: Math.round(editor.bottom),
+        editorHeight: Math.round(editor.height),
+        actionsTop: Math.round(actions.top),
+        actionsBottom: Math.round(actions.bottom),
+      }
+    })
+  }
+  await page.setViewportSize({ width: 402, height: 874 })
+  await page.goto(`${running.url}/#/pages/create/index?archiveFormat=text`)
+  await page.getByTestId('text-note-next').waitFor()
+  const geometry = { standard: await measure(874), tall: await measure(960) }
+  validateTextNoteComposeGeometry(geometry)
+  return geometry
 }
 
 export async function resolveCleanupIntent({ intent, capturedPostId = async () => '', capturedFileIDs = async () => [], locate, remove, removeFiles }) {
@@ -46,12 +104,13 @@ async function realRead({ running, doctor, home = homedir() }) {
   try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
     await page.goto(`${running.url}/#/pages/profile/index`)
-    if (!(await page.getByTestId('h5-login-username').isVisible())) await page.getByText('登录', { exact: true }).first().click()
-    await page.getByTestId('h5-login-username').fill(config.username)
-    await page.getByTestId('h5-login-password').fill(config.password)
-    await page.getByTestId('h5-login-nickname').fill(`H5 smoke ${Date.now()}`)
+    if (!(await page.getByTestId('h5-login-username').isVisible())) await page.getByTestId('profile-login-entry').click()
+    await page.getByTestId('h5-login-username').locator('input').fill(config.username)
+    await page.getByTestId('h5-login-password').locator('input').fill(config.password)
+    await page.getByTestId('h5-login-nickname').locator('input').fill(`H5 smoke ${Date.now()}`)
     await page.getByTestId('h5-login-submit').click()
     await page.getByTestId('profile-page').waitFor()
+    const textNote = await readTextNoteComposeGeometry(page, running)
     await page.goto(`${running.url}/#/pages/index/index`)
     const counts = {}
     for (const [name, id] of [['long', SECTION_IDS.long], ['short', SECTION_IDS.short], ['empty', SECTION_IDS.empty]]) {
@@ -78,10 +137,10 @@ async function realRead({ running, doctor, home = homedir() }) {
     if (await page.getByTestId('section-post-card').count() !== EXPECTED_HOME_VISIBLE_LONG) throw new Error('long section did not render exactly 20 posts')
     await page.goto(`${running.url}/#/pages/profile/index`)
     await page.getByTestId('profile-page').waitFor()
-    const routes = ['home', `section:${SECTION_IDS.long}`, `detail:${postId}`, 'profile']
+    const routes = ['create:text', 'home', `section:${SECTION_IDS.long}`, `detail:${postId}`, 'profile']
     await page.goto(`${running.url}/#/pages/index/index`)
     const geometry = await page.evaluate(() => ({ viewportHeight: innerHeight, searchTop: document.querySelector('.home-search')?.getBoundingClientRect().top ?? null, stickyTop: document.querySelector('.section-tabs')?.getBoundingClientRect().top ?? null }))
-    return { routes, counts, geometry }
+    return { routes, counts, geometry: { ...geometry, textNote } }
   } finally { await browser.close() }
 }
 
@@ -135,10 +194,10 @@ async function realWrite({ running, runId, home = homedir() }) {
     browser = await chromium.launch({ headless: true })
     page = await browser.newPage({ viewport: { width: 390, height: 844 } })
     await page.goto(`${running.url}/#/pages/profile/index`)
-    if (!(await page.getByTestId('h5-login-username').isVisible())) await page.getByText('登录', { exact: true }).first().click()
-    await page.getByTestId('h5-login-username').fill(config.username)
-    await page.getByTestId('h5-login-password').fill(config.password)
-    await page.getByTestId('h5-login-nickname').fill(`H5 smoke ${runId.slice(0, 8)}`)
+    if (!(await page.getByTestId('h5-login-username').isVisible())) await page.getByTestId('profile-login-entry').click()
+    await page.getByTestId('h5-login-username').locator('input').fill(config.username)
+    await page.getByTestId('h5-login-password').locator('input').fill(config.password)
+    await page.getByTestId('h5-login-nickname').locator('input').fill(`H5 smoke ${runId.slice(0, 8)}`)
     await page.getByTestId('h5-login-submit').click()
     await page.goto(`${running.url}/#/pages/create/index`)
     await page.getByTestId(`create-section-${SECTION_IDS.short}`).click()
