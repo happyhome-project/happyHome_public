@@ -77,12 +77,15 @@ server.listen(0, '127.0.0.1', async () => {
       const topbar = document.querySelector('.home-topbar').getBoundingClientRect()
       const hero = document.querySelector('.home-shell').getBoundingClientRect()
       const searchElement = document.querySelector('.home-search-sticky-shell')
+      const searchBoxElement = document.querySelector('.home-search-sticky-shell .home-search-box')
       const tabsElement = document.querySelector('.section-tabs-sticky-shell')
       const topicTabsElement = document.querySelector('.archive-topic-tabs')
       const activeTopicTabElement = document.querySelector('.archive-topic-tab--active')
       const search = searchElement.getBoundingClientRect()
+      const searchBox = searchBoxElement.getBoundingClientRect()
       const tabs = tabsElement.getBoundingClientRect()
       const topicTabs = topicTabsElement.getBoundingClientRect()
+      const activeTopicTab = activeTopicTabElement.getBoundingClientRect()
       const surface = (element) => {
         const style = getComputedStyle(element)
         return {
@@ -96,8 +99,10 @@ server.listen(0, '127.0.0.1', async () => {
         topbar,
         hero,
         search,
+        searchBox,
         tabs,
         topicTabs,
+        activeTopicTab,
         topbarSurface: surface(document.querySelector('.home-topbar')),
         heroSurface: surface(document.querySelector('.home-shell')),
         searchSurface: surface(searchElement),
@@ -137,8 +142,8 @@ server.listen(0, '127.0.0.1', async () => {
     if (!flatSurface(before.searchSurface) || before.searchSurface.backgroundColor !== 'rgb(230, 244, 246)') {
       throw new Error(`search sticky wrapper has the wrong surface: ${JSON.stringify(before.searchSurface)}`)
     }
-    if (!flatSurface(before.tabsSurface) || before.tabsSurface.backgroundColor !== 'rgb(242, 243, 247)') {
-      throw new Error(`tags sticky wrapper does not use the Figma content surface: ${JSON.stringify(before.tabsSurface)}`)
+    if (!flatSurface(before.tabsSurface) || before.tabsSurface.backgroundColor !== 'rgb(255, 255, 255)') {
+      throw new Error(`tags sticky wrapper is not white: ${JSON.stringify(before.tabsSurface)}`)
     }
     if (!flatSurface(before.topicTabsSurface) || before.topicTabsSurface.backgroundColor !== 'rgba(0, 0, 0, 0)') {
       throw new Error(`archive topic tabs should leave its wrapper surface visible: ${JSON.stringify(before.topicTabsSurface)}`)
@@ -167,7 +172,11 @@ server.listen(0, '127.0.0.1', async () => {
     if (!(stickySeamOverlap >= 0.75 && stickySeamOverlap <= 1.25)) {
       throw new Error(`tags should cover the search compositor seam by 1px: overlap=${stickySeamOverlap}`)
     }
-    if (!close(tagsPinned.topicTabs.top, tagsPinned.tabs.top)) throw new Error('visible archive topic tabs escaped the sticky shell')
+    const stickyControlGap = tagsPinned.activeTopicTab.top - tagsPinned.searchBox.bottom
+    if (!close(stickyControlGap, 16, 1)) {
+      throw new Error(`search box and visible tabs should keep a 16px gap: gap=${stickyControlGap}`)
+    }
+    if (tagsPinned.topicTabs.top < tagsPinned.tabs.top) throw new Error('visible archive topic tabs escaped the sticky shell')
     if (!close(restored.search.top, before.search.top)) throw new Error('reverse scroll did not release search sticky state')
     if (!close(restored.tabs.top, before.tabs.top)) throw new Error('reverse scroll did not release visible topic tabs')
     console.log('[h5-home-sticky-smoke] PASS')
