@@ -225,6 +225,7 @@ function formatPostDate(value: string): string {
   background: var(--hh-color-card);
 }
 
+.image-note-hero,
 .image-note-swiper,
 .image-note-slide {
   width: 100%;
@@ -236,11 +237,6 @@ function formatPostDate(value: string): string {
 
 .image-note-hero {
   position: relative;
-  margin: 0 40rpx;
-  width: auto;
-  height: 960rpx;
-  min-height: 620rpx;
-  max-height: 72vh;
   overflow: hidden;
   background: var(--hh-color-card);
 }

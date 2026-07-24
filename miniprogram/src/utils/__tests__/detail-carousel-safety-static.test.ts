@@ -5,11 +5,15 @@ import { describe, expect, test } from 'vitest'
 const read = (...parts: string[]) => readFileSync(join(process.cwd(), 'src', ...parts), 'utf8')
 
 describe('detail carousel gesture safety', () => {
-  test('keeps image and guide swiper hitboxes away from the native back edge', () => {
+  test('keeps image notes full-bleed while guide swipers stay away from the native back edge', () => {
     const imageNote = read('components', 'ImageNoteDetailView.vue')
     const guide = read('components', 'GuideRouteDetailView.vue')
 
-    expect(imageNote).toMatch(/\.image-note-hero\s*\{[^}]*margin:\s*0 40rpx;[^}]*width:\s*auto;/s)
+    expect(imageNote).toMatch(
+      /\.image-note-hero,\s*\.image-note-swiper,\s*\.image-note-slide\s*\{[^}]*width:\s*100%;/s,
+    )
+    expect(imageNote).not.toMatch(/\.image-note-hero\s*\{[^}]*margin:/s)
+    expect(imageNote).not.toMatch(/\.image-note-hero\s*\{[^}]*width:\s*auto;/s)
     expect(guide).toMatch(/\.guide-hero\s*\{[^}]*margin:\s*0 40rpx;[^}]*width:\s*auto;/s)
     expect(imageNote).toContain('@touchstart="onHeroPointerStart"')
     expect(imageNote).toContain('@touchmove="onHeroPointerMove"')
