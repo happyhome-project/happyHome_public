@@ -135,6 +135,17 @@ describe('archive publishing entry', () => {
     expect(pillRule).not.toMatch(/box-shadow\s*:/)
   })
 
+  test('uses the shared green brand color for the image-note publish button', () => {
+    const create = read('pages', 'create', 'index.vue')
+    const publishRule = create.match(/\.form--image-note \.btn-primary\s*\{([^}]*)\}/s)?.[1] || ''
+
+    expect(publishRule).toMatch(/background:\s*var\(--hh-color-brand-primary\)/)
+    expect(publishRule).not.toContain('#ff2442')
+    expect(create).toMatch(
+      /\.form--image-note :deep\(\.widget-editor--guide-cover \.add-icon\)\s*\{[^}]*color:\s*#ff2442;/s,
+    )
+  })
+
   test('archive editors submit without a section while collaboration filters realtime sections', () => {
     const create = read('pages', 'create', 'index.vue')
     expect(create).toContain('postApi.createArchive({')

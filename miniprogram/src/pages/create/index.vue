@@ -1778,7 +1778,7 @@ async function handleSubmit() {
 }
 
 .form--image-note .btn-primary {
-  background: #ff2442;
+  background: var(--hh-color-brand-primary);
 }
 
 .figma-ai-write {
