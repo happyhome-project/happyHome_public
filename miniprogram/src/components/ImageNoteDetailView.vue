@@ -46,14 +46,10 @@
       <text>图片暂不可用</text>
     </view>
 
-    <view v-if="media.length > 1" class="image-note-dots" aria-hidden="true">
-      <text
-        v-for="(_item, index) in media"
-        :key="`image-note-dot-${index}`"
-        class="image-note-dot"
-        :class="{ active: index === currentImageIndex }"
-      />
-    </view>
+    <CarouselPaginationDots
+      :count="media.length"
+      :current-index="currentImageIndex"
+    />
 
     <view class="image-note-content">
       <view class="image-note-author">
@@ -109,6 +105,7 @@ import type {
   ImageNoteLocation,
   ImageNoteMediaItem,
 } from '../utils/image-note'
+import CarouselPaginationDots from './CarouselPaginationDots.vue'
 import RichNoteRenderer from './widgets/RichNoteRenderer.vue'
 
 const props = defineProps<{
@@ -282,28 +279,6 @@ function formatPostDate(value: string): string {
   background: var(--hh-color-page);
   color: var(--hh-color-text-tertiary);
   font-size: var(--hh-text-caption-lg-size);
-}
-
-.image-note-dots {
-  height: 46rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10rpx;
-  background: #fff;
-}
-
-.image-note-dot {
-  width: 10rpx;
-  height: 10rpx;
-  border-radius: 999rpx;
-  background: #d7d7d7;
-  transition: width 160ms ease, background-color 160ms ease;
-}
-
-.image-note-dot.active {
-  width: 14rpx;
-  background: #ff2442;
 }
 
 .image-note-content {
