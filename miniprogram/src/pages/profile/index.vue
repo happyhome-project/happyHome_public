@@ -2247,9 +2247,10 @@ onShareAppMessage(() => {
 }
 
 .name {
-  max-width: 216rpx;
-  font-size: var(--hh-text-heading-lg-size);
-  line-height: var(--hh-text-heading-lg-line);
+  flex: 1 1 0%;
+  max-width: 100%;
+  font-size: var(--hh-text-heading-md-size);
+  line-height: var(--hh-text-heading-md-line);
   color: #292116;
 }
 
