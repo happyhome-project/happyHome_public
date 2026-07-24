@@ -142,8 +142,16 @@ server.listen(0, '127.0.0.1', async () => {
     if (!flatSurface(before.searchSurface) || before.searchSurface.backgroundColor !== 'rgb(230, 244, 246)') {
       throw new Error(`search sticky wrapper has the wrong surface: ${JSON.stringify(before.searchSurface)}`)
     }
-    if (!flatSurface(before.tabsSurface) || before.tabsSurface.backgroundColor !== 'rgb(255, 255, 255)') {
-      throw new Error(`tags sticky wrapper is not white: ${JSON.stringify(before.tabsSurface)}`)
+    if (
+      before.tabsSurface.backgroundColor !== 'rgba(0, 0, 0, 0)'
+      || !before.tabsSurface.backgroundImage.includes('rgb(230, 244, 246)')
+      || !before.tabsSurface.backgroundImage.includes('rgb(237, 247, 248)')
+      || !before.tabsSurface.backgroundImage.includes('rgb(247, 251, 251)')
+      || !before.tabsSurface.backgroundImage.includes('rgb(255, 255, 255)')
+      || before.tabsSurface.boxShadow !== 'none'
+      || before.tabsSurface.backdropFilter !== 'none'
+    ) {
+      throw new Error(`tags sticky wrapper does not fade cleanly into white: ${JSON.stringify(before.tabsSurface)}`)
     }
     if (!flatSurface(before.topicTabsSurface) || before.topicTabsSurface.backgroundColor !== 'rgba(0, 0, 0, 0)') {
       throw new Error(`archive topic tabs should leave its wrapper surface visible: ${JSON.stringify(before.topicTabsSurface)}`)
