@@ -32,19 +32,23 @@ describe('detail carousel gesture safety', () => {
     expect(imageNote).toMatch(/function previewImage[\s\S]*if \(heroSuppressNextPreview\)[\s\S]*return/)
   })
 
-  test('renders text-note detail as title, visual deck, then author metadata', () => {
+  test('renders text-note title and visual deck before the single canonical page metadata row', () => {
     const detail = read('components', 'DefaultDetailView.vue')
     const detailTemplate = detail.split('<script setup')[0]
     const page = read('pages', 'detail', 'index.vue')
 
     const titleIndex = detailTemplate.indexOf('class="detail-title"')
     const deckIndex = detailTemplate.indexOf('class="text-note-detail-deck"')
-    const authorIndex = detailTemplate.indexOf('class="detail-author-row"')
 
     expect(titleIndex).toBeGreaterThanOrEqual(0)
     expect(deckIndex).toBeGreaterThan(titleIndex)
-    expect(authorIndex).toBeGreaterThan(deckIndex)
+    expect(detailTemplate).toContain('<view v-if="!isTextNoteDetail" class="detail-author-row">')
+    expect(detailTemplate).toContain("'default-detail--text-note': isTextNoteDetail")
+    expect(detail).toMatch(/\.default-detail--text-note \.detail-head\s*\{[^}]*padding-bottom:\s*0;/s)
+    expect(detail).toMatch(/\.text-note-detail-deck\s*\{[^}]*margin:\s*16rpx auto 0;/s)
     expect(detailTemplate).toContain('v-if="!isTextNoteDetail" class="section-line"')
+    expect(page).toContain('<view v-if="!isImageNoteDetail || isAuthor" class="meta">')
+    expect(page).toContain('<view v-if="!isImageNoteDetail" class="meta-main">')
     expect(page).toContain("'detail-page--text-note': isTextNoteDetail")
     expect(page).toMatch(/\.detail-page--text-note\s*\{[^}]*background:\s*var\(--hh-color-card\);/s)
   })

@@ -352,7 +352,7 @@ const coverBackground = computed(() => TEXT_NOTE_COVER_BACKGROUNDS[normalizedThe
 }
 
 .text-note-cover-frame--body.text-note-cover--slate {
-  color: #edf2e6;
+  color: #566349;
 }
 
 .text-note-cover-frame--body.text-note-cover--quote {
