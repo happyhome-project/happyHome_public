@@ -19,13 +19,14 @@
       <text class="text-note-cover-signature">HAPPY HOME</text>
     </view>
 
-    <text v-else class="text-note-cover-body">{{ coverBody }}</text>
+    <text v-else class="text-note-cover-body" :style="bodyStyle">{{ coverBody }}</text>
   </view>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import {
+  getTextNoteBodyLayout,
   getTextNoteThemePresentation,
   normalizeTextNoteTheme,
   type TextNoteTheme,
@@ -46,6 +47,19 @@ const presentation = computed(() => getTextNoteThemePresentation(normalizedTheme
 const normalizedTitle = computed(() => String(props.title || '').trim())
 const isBodyPage = computed(() => props.pageKind === 'body')
 const coverBody = computed(() => String(props.body || ''))
+const TEXT_NOTE_CARD_WIDTH = 370
+const TEXT_NOTE_CARD_HEIGHT = 498
+const bodyStyle = computed(() => {
+  if (!isBodyPage.value) return undefined
+  const layout = getTextNoteBodyLayout(normalizedTheme.value)
+  return {
+    left: `${(layout.safeRect.x / TEXT_NOTE_CARD_WIDTH) * 100}%`,
+    top: `${(layout.safeRect.y / TEXT_NOTE_CARD_HEIGHT) * 100}%`,
+    width: `${(layout.safeRect.width / TEXT_NOTE_CARD_WIDTH) * 100}%`,
+    maxHeight: `${(layout.safeRect.height / TEXT_NOTE_CARD_HEIGHT) * 100}%`,
+    fontFamily: layout.fontFamily,
+  }
+})
 
 const TEXT_NOTE_COVER_BACKGROUNDS: Record<TextNoteTheme, string> = {
   paper: '/static/text-note-covers/0723/paper.jpg',
@@ -328,16 +342,12 @@ const coverBackground = computed(() => TEXT_NOTE_COVER_BACKGROUNDS[normalizedThe
 }
 
 .text-note-cover-frame--body .text-note-cover-body {
-  left: 7.567%;
-  top: 9.839%;
   z-index: 1;
-  width: 84.324%;
-  max-height: 72.289%;
   overflow: hidden;
   color: currentColor;
-  font-size: 30rpx;
+  font-size: 28rpx;
   font-weight: 400;
-  line-height: 44rpx;
+  line-height: 42rpx;
   text-align: left;
   white-space: pre-wrap;
 }

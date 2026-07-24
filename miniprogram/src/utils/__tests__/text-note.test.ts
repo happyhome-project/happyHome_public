@@ -5,6 +5,7 @@ import {
   createTextNoteDeck,
   extractTextNoteContent,
   extractTextNoteFullBody,
+  getTextNoteBodyLayout,
   getTextNoteCard,
   getTextNoteThemePresentation,
   needsTextNoteFullBody,
@@ -15,8 +16,6 @@ import {
   resolveTextNoteDisplayBody,
   resolveTextNoteBodySize,
   selectTextNoteCoverExcerpt,
-  TEXT_NOTE_BODY_MAX_LINES,
-  TEXT_NOTE_BODY_UNITS_PER_LINE,
   TEXT_NOTE_THEMES,
   truncateTextNoteBody,
 } from '../text-note'
@@ -45,6 +44,63 @@ describe('text note presentation', () => {
     expect(new Set(presentations.map((item) => item.kicker)).size).toBe(TEXT_NOTE_THEMES.length)
     expect(new Set(presentations.map((item) => `${item.layout}:${item.titleTone}:${item.ornament}`)).size)
       .toBe(TEXT_NOTE_THEMES.length)
+  })
+
+  test('exposes the approved safe body layout and capacity for every theme', () => {
+    expect(Object.fromEntries(TEXT_NOTE_THEMES.map((theme) => {
+      const layout = getTextNoteBodyLayout(theme)
+      return [theme, {
+        safeRect: layout.safeRect,
+        unitsPerLine: layout.unitsPerLine,
+        maxLines: layout.maxLines,
+        referenceCapacity: layout.referenceCapacity,
+        safeCapacity: layout.safeCapacity,
+      }]
+    }))).toEqual({
+      paper: {
+        safeRect: { x: 32, y: 48, width: 306, height: 384 },
+        unitsPerLine: 19,
+        maxLines: 16,
+        referenceCapacity: 304,
+        safeCapacity: 303,
+      },
+      mint: {
+        safeRect: { x: 32, y: 52, width: 306, height: 384 },
+        unitsPerLine: 19,
+        maxLines: 16,
+        referenceCapacity: 304,
+        safeCapacity: 303,
+      },
+      slate: {
+        safeRect: { x: 36, y: 58, width: 298, height: 384 },
+        unitsPerLine: 18,
+        maxLines: 16,
+        referenceCapacity: 288,
+        safeCapacity: 287,
+      },
+      headline: {
+        safeRect: { x: 36, y: 94, width: 298, height: 360 },
+        unitsPerLine: 18,
+        maxLines: 15,
+        referenceCapacity: 270,
+        safeCapacity: 269,
+      },
+      quote: {
+        safeRect: { x: 40, y: 92, width: 290, height: 360 },
+        unitsPerLine: 18,
+        maxLines: 15,
+        referenceCapacity: 270,
+        safeCapacity: 269,
+      },
+      notice: {
+        safeRect: { x: 36, y: 54, width: 298, height: 384 },
+        unitsPerLine: 18,
+        maxLines: 16,
+        referenceCapacity: 288,
+        safeCapacity: 287,
+      },
+    })
+    expect(getTextNoteBodyLayout('unknown')).toEqual(getTextNoteBodyLayout('paper'))
   })
 
   test('builds a card from content and presentation with paper fallback', () => {
@@ -202,6 +258,206 @@ describe('text note presentation', () => {
     expect(pages.every((page) => !/^[\u0300-\u036f]/.test(page))).toBe(true)
   })
 
+  test('does not split complex Unicode clusters at page boundaries', () => {
+    const subdivisionFlag = `🏴${String.fromCodePoint(
+      0xe0067,
+      0xe0062,
+      0xe0065,
+      0xe006e,
+      0xe0067,
+      0xe007f,
+    )}`
+    const cases = [
+      {
+        body: 'نَ'.repeat(400),
+        theme: 'paper' as const,
+        invalidStart: (page: string) => /^[\u064b-\u065f]/.test(page),
+      },
+      {
+        body: 'क्'.repeat(400),
+        theme: 'paper' as const,
+        invalidStart: (page: string) => page.startsWith('\u094d'),
+      },
+      {
+        body: 'क्ष'.repeat(400),
+        theme: 'paper' as const,
+        invalidStart: (page: string) => page.startsWith('ष'),
+      },
+      {
+        body: 'क\u1cd0'.repeat(400),
+        theme: 'paper' as const,
+        invalidStart: (page: string) => page.startsWith('\u1cd0'),
+      },
+      {
+        body: '\u1100\u1161\u11a8'.repeat(400),
+        theme: 'headline' as const,
+        invalidStart: (page: string) => /^[\u1160-\u11ff]/.test(page),
+      },
+      {
+        body: subdivisionFlag.repeat(400),
+        theme: 'slate' as const,
+        invalidStart: (page: string) => {
+          const first = page.codePointAt(0) || 0
+          return first >= 0xe0020 && first <= 0xe007f
+        },
+      },
+    ]
+
+    for (const { body, theme, invalidStart } of cases) {
+      const pages = paginateTextNoteBody(body, { theme })
+      expect(pages.length).toBeGreaterThan(1)
+      expect(pages.join('')).toBe(body)
+      expect(pages.slice(1).every((page) => !invalidStart(page)), theme).toBe(true)
+    }
+  })
+
+  test('keeps common complex clusters intact when Intl.Segmenter is unavailable', () => {
+    const segmenterDescriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter')
+    const subdivisionFlag = `🏴${String.fromCodePoint(
+      0xe0067,
+      0xe0062,
+      0xe0065,
+      0xe006e,
+      0xe0067,
+      0xe007f,
+    )}`
+    const cases = [
+      { body: 'نَ'.repeat(20), invalidStart: (page: string) => /^[\u064b-\u065f]/.test(page) },
+      { body: 'क्'.repeat(20), invalidStart: (page: string) => page.startsWith('\u094d') },
+      { body: 'क्ष'.repeat(20), invalidStart: (page: string) => page.startsWith('ष') },
+      { body: 'क\u1cd0'.repeat(20), invalidStart: (page: string) => page.startsWith('\u1cd0') },
+      {
+        body: '\u1100\u1161\u11a8'.repeat(20),
+        invalidStart: (page: string) => /^[\u1160-\u11ff]/.test(page),
+      },
+      {
+        body: subdivisionFlag.repeat(20),
+        invalidStart: (page: string) => {
+          const first = page.codePointAt(0) || 0
+          return first >= 0xe0020 && first <= 0xe007f
+        },
+      },
+    ]
+
+    Object.defineProperty(Intl, 'Segmenter', {
+      configurable: true,
+      value: undefined,
+    })
+    try {
+      for (const { body, invalidStart } of cases) {
+        const pages = paginateTextNoteBody(body, { unitsPerLine: 5, maxLines: 2 })
+        expect(pages.length).toBeGreaterThan(1)
+        expect(pages.join('')).toBe(body)
+        expect(pages.slice(1).every((page) => !invalidStart(page))).toBe(true)
+      }
+    } finally {
+      if (segmenterDescriptor) {
+        Object.defineProperty(Intl, 'Segmenter', segmenterDescriptor)
+      } else {
+        delete (Intl as unknown as { Segmenter?: unknown }).Segmenter
+      }
+    }
+  })
+
+  test('keeps Prepend characters from swallowing line boundaries without Intl.Segmenter', () => {
+    const segmenterDescriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter')
+    const body = `${`${String.fromCodePoint(0x0600)}\n`.repeat(10)}A`
+    const normalized = normalizeTextNoteBody(body)
+    const assertLineBudget = () => {
+      const pages = paginateTextNoteBody(body, { unitsPerLine: 10, maxLines: 2 })
+      expect(pages.join('')).toBe(normalized)
+      expect(pages.length).toBeGreaterThan(5)
+      expect(pages.every((page) =>
+        page.replace(/\n$/, '').split('\n').length <= 2,
+      )).toBe(true)
+    }
+
+    assertLineBudget()
+    Object.defineProperty(Intl, 'Segmenter', {
+      configurable: true,
+      value: undefined,
+    })
+    try {
+      assertLineBudget()
+    } finally {
+      if (segmenterDescriptor) {
+        Object.defineProperty(Intl, 'Segmenter', segmenterDescriptor)
+      } else {
+        delete (Intl as unknown as { Segmenter?: unknown }).Segmenter
+      }
+    }
+  })
+
+  test('bounds pathological overlong clusters with and without Intl.Segmenter', () => {
+    const segmenterDescriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter')
+    const longZwjCluster = Array.from({ length: 21 }, () => '😀').join('\u200d')
+    const longTagCluster = String.fromCodePoint(
+      0x1f3f4,
+      ...Array.from({ length: 20 }, () => 0xe0067),
+      0xe007f,
+    )
+    const longPrependCluster = `${String.fromCodePoint(0x0600).repeat(20)}A`
+    const assertBounded = () => {
+      for (const body of [longZwjCluster, longTagCluster, longPrependCluster]) {
+        const constrainedPages = paginateTextNoteBody(body, {
+          unitsPerLine: 2,
+          maxLines: 1,
+          maxVisualUnits: 2,
+        })
+        const productionPages = paginateTextNoteBody(body, { theme: 'paper' })
+        for (const pages of [constrainedPages, productionPages]) {
+          expect(pages.length).toBeGreaterThan(1)
+          expect(pages.join('')).toBe(body)
+          expect(pages.every((page) => Array.from(page).length <= 16)).toBe(true)
+        }
+      }
+    }
+
+    assertBounded()
+    Object.defineProperty(Intl, 'Segmenter', {
+      configurable: true,
+      value: undefined,
+    })
+    try {
+      assertBounded()
+    } finally {
+      if (segmenterDescriptor) {
+        Object.defineProperty(Intl, 'Segmenter', segmenterDescriptor)
+      } else {
+        delete (Intl as unknown as { Segmenter?: unknown }).Segmenter
+      }
+    }
+  })
+
+  test('segments long bodies once before incrementally packing pages', () => {
+    const segmenterDescriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter')
+    let segmentCalls = 0
+    class CountingSegmenter {
+      segment(value: string) {
+        segmentCalls += 1
+        return Array.from(value, (segment) => ({ segment }))
+      }
+    }
+
+    Object.defineProperty(Intl, 'Segmenter', {
+      configurable: true,
+      value: CountingSegmenter,
+    })
+    try {
+      const body = '字'.repeat(10_000)
+      const pages = paginateTextNoteBody(body, { theme: 'paper' })
+      expect(pages.join('')).toBe(body)
+      expect(pages.length).toBeGreaterThan(30)
+      expect(segmentCalls).toBeLessThanOrEqual(2)
+    } finally {
+      if (segmenterDescriptor) {
+        Object.defineProperty(Intl, 'Segmenter', segmenterDescriptor)
+      } else {
+        delete (Intl as unknown as { Segmenter?: unknown }).Segmenter
+      }
+    }
+  })
+
   test('treats manual line breaks as real vertical space instead of cheap characters', () => {
     const body = Array.from({ length: 24 }, (_, index) => `第${index + 1}行`).join('\n')
     const pages = paginateTextNoteBody(body, { unitsPerLine: 20, maxLines: 4 })
@@ -211,21 +467,43 @@ describe('text note presentation', () => {
     expect(pages.every((page) => page.replace(/\n$/, '').split('\n').length <= 4)).toBe(true)
   })
 
-  test('uses the Figma 15-line body boundary and creates another page instead of shrinking text', () => {
-    const exactPage = '字'.repeat(TEXT_NOTE_BODY_UNITS_PER_LINE * TEXT_NOTE_BODY_MAX_LINES)
-    const overflow = `${exactPage}字`
+  test('uses every theme safe capacity and creates another page instead of shrinking text', () => {
+    for (const theme of TEXT_NOTE_THEMES) {
+      const layout = getTextNoteBodyLayout(theme)
+      const exactPage = '字'.repeat(layout.safeCapacity)
+      const overflow = `${exactPage}字`
 
-    expect(paginateTextNoteBody(exactPage)).toHaveLength(1)
-    expect(paginateTextNoteBody(overflow)).toHaveLength(2)
-    expect(paginateTextNoteBody(overflow).join('')).toBe(overflow)
+      expect(paginateTextNoteBody(exactPage, { theme }), theme).toHaveLength(1)
+      expect(paginateTextNoteBody(overflow, { theme }), theme).toHaveLength(2)
+      expect(paginateTextNoteBody(overflow, { theme }).join(''), theme).toBe(overflow)
+    }
   })
 
-  test('budgets narrow-looking ASCII conservatively enough for long URLs and platform font variance', () => {
-    const wideAscii = 'W'.repeat(400)
-    const pages = paginateTextNoteBody(wideAscii)
+  test('budgets wide ASCII conservatively across the six larger theme layouts', () => {
+    const wideAsciiCases = [
+      { body: 'W'.repeat(400), minimumUnitWeight: 1 },
+      { body: 'mw'.repeat(250), minimumUnitWeight: 1 },
+      {
+        body: `https://www.${'minimum-width-'.repeat(40)}example.com`,
+        minimumUnitWeight: 0.65,
+      },
+    ]
 
-    expect(pages).toHaveLength(2)
-    expect(pages.join('')).toBe(wideAscii)
+    for (const theme of TEXT_NOTE_THEMES) {
+      const layout = getTextNoteBodyLayout(theme)
+      for (const { body, minimumUnitWeight } of wideAsciiCases) {
+        const pages = paginateTextNoteBody(body, { theme })
+        expect(pages.length, theme).toBeGreaterThanOrEqual(2)
+        expect(pages.join(''), theme).toBe(body)
+        const maxCodePoints = Math.floor(layout.safeCapacity / minimumUnitWeight)
+        expect(pages.every((page) => Array.from(page).length <= maxCodePoints), theme).toBe(true)
+      }
+    }
+  })
+
+  test('preserves the legacy counterpart when only one custom layout option is supplied', () => {
+    expect(paginateTextNoteBody('字'.repeat(155), { unitsPerLine: 10 })).toHaveLength(2)
+    expect(paginateTextNoteBody('字'.repeat(55), { maxLines: 3 })).toHaveLength(2)
   })
 
   test('counts blank lines as layout rows and preserves them across page boundaries', () => {
@@ -277,13 +555,21 @@ describe('text note presentation', () => {
     )).toBe(true)
   })
 
-  test('uses one readable body geometry for all themes and falls back to paper', () => {
-    const body = '这是一段需要根据主题安全容量重新分页的社区长文。'.repeat(45)
-    const pageCounts = TEXT_NOTE_THEMES.map((theme) =>
+  test('repaginates the same body against the selected theme capacity and falls back to paper', () => {
+    const body = '字'.repeat(280)
+    const pageCounts = Object.fromEntries(TEXT_NOTE_THEMES.map((theme) => [
+      theme,
       createTextNoteDeck({ title: '标题', body, theme }).pages.length,
-    )
+    ]))
 
-    expect(new Set(pageCounts).size).toBe(1)
+    expect(pageCounts).toEqual({
+      paper: 2,
+      mint: 2,
+      slate: 2,
+      headline: 3,
+      quote: 3,
+      notice: 2,
+    })
     expect(createTextNoteDeck({ title: '标题', body: '正文', theme: 'unknown' }).theme).toBe('paper')
   })
 })
