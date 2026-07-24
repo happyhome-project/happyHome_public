@@ -1,5 +1,8 @@
 <template>
-  <view class="default-detail">
+  <view
+    class="default-detail"
+    :class="{ 'default-detail--text-note': isTextNoteDetail }"
+  >
     <view class="detail-head">
       <text class="detail-title">{{ titleText }}</text>
 
@@ -11,7 +14,7 @@
         />
       </view>
 
-      <view class="detail-author-row">
+      <view v-if="!isTextNoteDetail" class="detail-author-row">
         <image
           v-if="authorAvatarUrl"
           :src="authorAvatarUrl"
@@ -515,9 +518,13 @@ function formatAudioDuration(value: unknown): string {
   padding: 0 0 $hh-space-md;
 }
 
+.default-detail--text-note .detail-head {
+  padding-bottom: 0;
+}
+
 .text-note-detail-deck {
   width: 100%;
-  margin: 16rpx auto 40rpx;
+  margin: 16rpx auto 0;
 }
 
 .detail-author-row {
