@@ -167,6 +167,24 @@ describe('archive publishing entry', () => {
     expect(create).not.toContain('class="text-note-confirm-sheet"')
   })
 
+  test('text note compose fills the post-navigation viewport and keeps actions at the bottom rhythm', () => {
+    const create = read('pages', 'create', 'index.vue')
+    const textFormRule = create.match(/\.form--figma\.form--text-note\s*\{([^}]*)\}/s)?.[1] || ''
+    const composeRule = create.match(/\.text-note-compose\s*\{([^}]*)\}/s)?.[1] || ''
+    const editorRule = create.match(/\.text-note-editor-card\s*\{([^}]*)\}/s)?.[1] || ''
+    const actionRule = create.match(/\.text-note-compose-actions\s*\{([^}]*)\}/s)?.[1] || ''
+
+    expect(create).toContain('<view class="create-page" :style="createPageStyle">')
+    expect(create).toContain('const createPageStyle = computed')
+    expect(create).toContain('--create-nav-total-height:')
+    expect(textFormRule).toMatch(/padding:\s*24rpx 0 0/)
+    expect(textFormRule).toMatch(/min-height:\s*calc\(100vh - var\(--create-nav-total-height,\s*116px\)\)/)
+    expect(composeRule).toMatch(/min-height:\s*calc\(100vh - var\(--create-nav-total-height,\s*116px\) - 24rpx\)/)
+    expect(composeRule).toMatch(/padding:\s*32rpx 32rpx calc\(32rpx \+ env\(safe-area-inset-bottom\)\)/)
+    expect(editorRule).toMatch(/flex:\s*1/)
+    expect(actionRule).toMatch(/margin-top:\s*16rpx/)
+  })
+
   test('enters an archive editor before the first asynchronous create-page load', () => {
     const create = read('pages', 'create', 'index.vue')
     const onLoadStart = create.indexOf('onLoad(async (options: any) => {')
