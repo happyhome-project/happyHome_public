@@ -22,6 +22,8 @@ npm.cmd run release:session -- publish
 
 The session contains a machine UUID plus the exact Git SHA, environment, strategy, generated run ID, version and description. Prepare and publish read the same values; operators do not repeat them. Prepare pins the exact Git SHA, package digest and DevTools UI evidence without deploying or uploading. Publish resumes that exact ledger and strategy. The existing production lock, CloudBase deployment, UI evidence, cloud smoke/log capture, fixture cleanup, admin-web deployment, digest verification and mini-program upload rules remain mandatory.
 
+The generated source marker `miniprogram/src/generated/build-info.ts` is release-owned only while prepare or publish is active. After the mini-program upload receipt and component ledger pass, formal publication verifies that the marker exactly matches the current release version and description, then restores the tracked `HEAD` bytes before completing production state. A failed or interrupted release keeps the matching marker for safe resume. A different or additionally edited marker is never overwritten: cleanup fails closed and the release must be resumed after the ownership conflict is resolved.
+
 Before prepare, a mistaken human-readable value can be corrected locally without PR, build or deployment:
 
 ```powershell
