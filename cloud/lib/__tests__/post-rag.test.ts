@@ -878,6 +878,102 @@ test('searchPostsWithRag drops member-only citations and generated answer for pu
   expect(result.items.map((item) => item.postId)).toEqual(['post-public'])
 })
 
+test('searchPostsWithRag counts unique posts instead of repeated chunks from one post', async () => {
+  mockDb.getByIdOrNull.mockResolvedValue({ _id: 'community-1', status: 'active', ragIndexPolicy: 'business' })
+  mockDb.getByIds.mockImplementation(async (collection: string, ids: string[]) => {
+    if (collection === 'posts') {
+      return ids.map((id) => ({
+        _id: id,
+        communityId: 'community-1',
+        sectionId: 'section-1',
+        area: 'archive',
+        format: 'image_text',
+        status: 'active',
+        auditStatus: 'pass',
+        authorId: 'author-1',
+        topics: ['亲子出游'],
+        content: {
+          title: '云盖村竹林轻徒步',
+          images: ['cloud://env/posts/yungaicun-original.jpg'],
+        },
+        pendingContent: {
+          title: '尚未审核的新标题',
+          images: ['cloud://env/posts/unaudited.jpg'],
+        },
+        updatedAt: '2026-07-28T00:00:00.000Z',
+      }))
+    }
+    if (collection === 'post_rag_sync_state') {
+      return ids.map((id) => ({
+        _id: id,
+        status: 'synced',
+        appliedSourceVersion: 'source-v1',
+        indexScope: 'business',
+      }))
+    }
+    if (collection === POST_RAG_INDEX_STATE) {
+      return ids.map((id) => ({
+        _id: id,
+        status: 'indexed',
+        sourceVersion: 'source-v1',
+        indexScope: 'business',
+      }))
+    }
+    if (collection === 'sections') {
+      return [{ _id: 'section-1', communityId: 'community-1', status: 'active' }]
+    }
+    return []
+  })
+  const citation = (chunkId: string, fieldLabel: string) => ({
+    postId: 'post-1',
+    chunkId,
+    communityId: 'community-1',
+    title: '云盖村竹林轻徒步',
+    sectionId: 'section-1',
+    sectionName: '亲子出游',
+    fieldLabel,
+    fieldType: 'rich_note',
+    preview: `${fieldLabel}命中内容`,
+    score: 0.9,
+    visibility: 'public' as const,
+    sourceUpdatedAt: '2026-07-28T00:00:00.000Z',
+    sourceVersion: 'source-v1',
+    indexScope: 'business' as const,
+  })
+  const provider = {
+    name: 'cloudbase-rag',
+    isConfigured: () => true,
+    search: jest.fn().mockResolvedValue({
+      total: 2,
+      answer: '找到云盖村路线。',
+      mode: 'rag',
+      items: [],
+      citations: [
+        citation('post-1-title', '标题'),
+        citation('post-1-body', '正文'),
+      ],
+    }),
+  }
+
+  const result = await searchPostsWithRag({
+    communityId: 'community-1',
+    query: '云盖村',
+    limit: 10,
+  }, { provider })
+
+  expect(result.items).toHaveLength(1)
+  expect(result.items[0]).toEqual(expect.objectContaining({
+    _id: 'post-1',
+    postId: 'post-1',
+    format: 'image_text',
+    content: expect.objectContaining({
+      images: ['cloud://env/posts/yungaicun-original.jpg'],
+    }),
+  }))
+  expect(result.items[0]).not.toHaveProperty('pendingContent')
+  expect(result.total).toBe(1)
+})
+
 test.each([
   ['pending synchronization', { syncStatus: 'pending' }],
   ['superseded synchronization version', { appliedSourceVersion: 'source-v2' }],

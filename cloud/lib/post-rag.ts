@@ -347,6 +347,45 @@ function resultItemsFromCitations(citations: RagCitation[]): PostSearchResultIte
   return Array.from(byPost.values()).sort((left, right) => right.score - left.score)
 }
 
+function archiveSearchCardProjection(post: any) {
+  const content = post?.content && typeof post.content === 'object' ? post.content : {}
+  const title = String(content.title || '').trim()
+  const format = post?.format === 'video'
+    ? 'video'
+    : post?.format === 'image_text'
+      ? 'image_text'
+      : 'text'
+  const cardContent: Record<string, any> = { title }
+  if (format === 'image_text') {
+    cardContent.images = Array.isArray(content.images)
+      ? content.images.map((image: unknown) => String(image || '').trim()).filter(Boolean)
+      : []
+  } else if (format === 'video') {
+    cardContent.videos = Array.isArray(content.videos)
+      ? content.videos.map((video: any) => ({ cover: String(video?.cover || '').trim() }))
+      : []
+  } else {
+    cardContent.body = {
+      text: String(content?.body?.text || ''),
+    }
+  }
+
+  return {
+    _id: String(post?._id || ''),
+    area: 'archive',
+    format,
+    topics: Array.isArray(post?.topics) ? post.topics.map(String).filter(Boolean) : [],
+    content: cardContent,
+    presentation: post?.presentation?.textNoteTheme
+      ? { textNoteTheme: String(post.presentation.textNoteTheme) }
+      : undefined,
+    authorId: String(post?.authorId || ''),
+    createdAt: String(post?.createdAt || ''),
+    updatedAt: String(post?.updatedAt || post?.createdAt || ''),
+    likeCount: Math.max(0, Number(post?.likeCount || 0)),
+  }
+}
+
 function normalizeRagVisibility(value: unknown): 'public' | 'member' {
   return value === 'public' ? 'public' : 'member'
 }
@@ -366,11 +405,12 @@ function filterProviderResultForVisibility(
   const originalCitations = providerResult.citations || []
   const citations = filterCitationsForVisibility(originalCitations, includeMemberOnly)
   const droppedCitations = citations.length !== originalCitations.length
+  const items = resultItemsFromCitations(citations)
   return {
     ...providerResult,
-    total: citations.length,
+    total: items.length,
     citations,
-    items: resultItemsFromCitations(citations),
+    items,
     answer: citations.length
       ? (droppedCitations ? deterministicAnswer(citations) : (providerResult.answer || deterministicAnswer(citations)))
       : '',
@@ -436,7 +476,7 @@ export async function searchPostsWithRag(
       query,
       communityId,
       sectionId,
-      total: providerResult.total || providerResult.citations.length,
+      total: providerResult.items.length,
       skip,
       limit,
       items: providerResult.items.length ? providerResult.items : resultItemsFromCitations(providerResult.citations),
@@ -820,11 +860,21 @@ async function filterProviderResultForCurrentState(
     return true
   })
   const dropped = citations.length !== (providerResult.citations || []).length
+  const items = resultItemsFromCitations(citations).map((item) => {
+    const post: any = postsById.get(item.postId)
+    if (post?.area !== 'archive') return item
+    return {
+      ...item,
+      ...archiveSearchCardProjection(post),
+      postId: item.postId,
+      title: item.title,
+    }
+  })
   return {
     ...providerResult,
-    total: citations.length,
+    total: items.length,
     citations,
-    items: resultItemsFromCitations(citations),
+    items,
     answer: citations.length ? (dropped ? deterministicAnswer(citations) : (providerResult.answer || deterministicAnswer(citations))) : '',
   }
 }

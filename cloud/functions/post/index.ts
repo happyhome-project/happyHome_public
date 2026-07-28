@@ -1180,7 +1180,7 @@ export async function handleSearch(params: {
   await ensureCommunityReadable(communityId, viewerId, COMMUNITY_READ_ERROR)
   const canViewMemberOnly = await isActiveCommunityMember(communityId, viewerId)
   try {
-    return await searchPostsWithRag({
+    const result = await searchPostsWithRag({
       communityId,
       query: String(params.q ?? params.query ?? ''),
       sectionId: String(params.sectionId || '').trim() || undefined,
@@ -1189,6 +1189,24 @@ export async function handleSearch(params: {
       includeMemberOnly: canViewMemberOnly,
       indexScope: params._ragIndexScope === 'validation' ? 'validation' : 'business',
     })
+    const rawItems = Array.isArray(result.items) ? result.items : []
+    const authorReadyItems = rawItems.some((item: any) => String(item?.authorId || '').trim())
+      ? await enrichPostsWithAuthor(rawItems as any[])
+      : rawItems
+    const items = authorReadyItems.map((item: any) => {
+      const matched = Array.isArray(item?.matchedFields) ? item.matchedFields[0] : null
+      return {
+        ...item,
+        ...(item?.authorNickname ? { authorName: item.authorNickname } : {}),
+        ...(matched?.fieldLabel ? { matchedField: String(matched.fieldLabel) } : {}),
+        ...(matched?.preview ? { matchedSnippet: String(matched.preview) } : {}),
+      }
+    })
+    return {
+      ...result,
+      total: items.length,
+      items,
+    }
   } catch { throw new Error('智能搜索暂不可用，请稍后重试') }
 }
 

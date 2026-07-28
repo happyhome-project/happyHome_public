@@ -30,7 +30,7 @@ function stableTheme(postId: string): string {
 }
 
 export function normalizeArchiveCard(post: Record<string, any>): ArchiveFeedCard {
-  const postId = String(post?._id || '')
+  const postId = String(post?._id || post?.postId || '')
   const images = Array.isArray(post?.content?.images) ? post.content.images.filter(Boolean).map(String) : []
   const videos = Array.isArray(post?.content?.videos) ? post.content.videos : []
   const videoCover = String(videos.find((item: any) => item && typeof item === 'object')?.cover || '').trim()
@@ -49,7 +49,7 @@ export function normalizeArchiveCard(post: Record<string, any>): ArchiveFeedCard
     format,
     title: String(post?.content?.title || '邻里记录').trim() || '邻里记录',
     topics: Array.isArray(post?.topics) ? post.topics.filter(Boolean).map(String) : [],
-    authorName: String(post?.author?.nickName || post?.authorName || '邻居'),
+    authorName: String(post?.author?.nickName || post?.authorNickname || post?.authorName || '邻居'),
     createdAt: String(post?.createdAt || ''),
     cover,
     estimatedHeight: cover.kind === 'text' ? 220 : 300,
