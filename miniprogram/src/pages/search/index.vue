@@ -27,11 +27,11 @@
       <!-- #endif -->
     </view>
 
-    <view v-if="loading && items.length === 0" class="state">
+    <view v-if="loading && resultCount === 0" class="state">
       <text>搜索中...</text>
     </view>
 
-    <view v-else-if="loadError" class="state error">
+    <view v-else-if="loadError && resultCount === 0" class="state error">
       <text class="state-title">搜索失败</text>
       <text class="state-desc">{{ loadError }}</text>
       <button class="retry-btn" size="mini" @tap="submitSearch">重试</button>
@@ -42,7 +42,7 @@
       <text class="search-intro-desc">语义搜索会按相关度返回社区中的真实帖子，不生成内容，也不会替帖子下结论。</text>
     </view>
 
-    <view v-if="!loading && !loadError && searched && items.length === 0" class="empty-result">
+    <view v-if="!loading && !loadError && searched && resultCount === 0" class="empty-result">
       <view class="empty-illustration" aria-hidden="true">
         <view class="empty-paper"></view>
         <view class="empty-folder"></view>
@@ -52,59 +52,18 @@
       <text class="empty-desc">换个关键词，或试试搜索帖子正文</text>
     </view>
 
-    <view v-if="items.length" class="result-list">
-      <view
-        v-for="item in items"
-        :key="item.postId"
-        class="result-card"
-        @tap="openPost(item.postId)"
-      >
-        <view class="result-cover">
-          <image
-            v-if="resultCover(item)"
-            :src="resultCover(item)"
-            class="result-cover-image"
-            mode="aspectFill"
-          />
-          <view v-else class="result-cover-empty">
-            <text>{{ coverFallbackText(item) }}</text>
-          </view>
-        </view>
-        <text class="result-title">{{ item.title || '无标题' }}</text>
-        <view class="result-match">
-          <text class="result-match-field">{{ item.matchedField }}</text>
-          <text class="result-preview">{{ item.matchedSnippet }}</text>
-        </view>
-        <view class="result-meta">
-          <view class="result-author">
-            <image
-              v-if="hasRealAuthorAvatar(item)"
-              :src="resultAuthorAvatar(item)"
-              class="result-avatar"
-              mode="aspectFill"
-            />
-            <view
-              v-else
-              class="result-avatar result-avatar--generated"
-              :style="resultGeneratedAvatarStyle(item)"
-            >
-              <text>{{ resultAuthorInitial(item) }}</text>
-            </view>
-            <text class="result-author-name">{{ resultAuthorName(item) }}</text>
-          </view>
-          <text class="result-date">{{ formatDate(item.updatedAt || item.createdAt) }}</text>
-        </view>
-      </view>
-
-      <view
-        v-if="items.length < total"
-        class="load-more"
-        :class="{ loading }"
-        @tap="loadMore"
-      >
-        <text>{{ loading ? '加载中...' : '加载更多' }}</text>
-      </view>
-    </view>
+    <ArchiveWaterfall
+      v-if="hasSearchCards"
+      class="search-results-waterfall"
+      :columns="searchFeed.columns"
+      :loading="loading"
+      :error="loadError"
+      :has-more="searchFeed.hasMore"
+      @post="openSearchCard"
+      @load-more="loadMore"
+      @cover-load="onSearchCoverLoad"
+      @cover-error="onSearchCoverError"
+    />
   </view>
 </template>
 
@@ -112,29 +71,21 @@
 import { computed, ref, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { postApi } from '../../api/cloud'
+import ArchiveWaterfall from '../../components/ArchiveWaterfall.vue'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
-import { resolveCloudFileUrls } from '../../utils/cloud-file-url'
+import { refreshCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { clientLog } from '../../utils/client-log'
+import { resolveFeedCovers } from '../../utils/feed-cover-url'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
+import type { ArchiveFeedCard, ArchiveFeedColumns } from '../../utils/archive-feed'
+import {
+  appendSemanticSearchPage,
+  emptySemanticSearchFeed,
+  type SemanticSearchFeed,
+} from '../../utils/semantic-search-feed'
 import { createSemanticSearchSession, normalizeSemanticQuery, type SemanticSearchRequest } from '../../utils/semantic-search-session'
-
-interface SearchItem {
-  postId: string
-  communityId: string
-  sectionId: string
-  sectionName: string
-  title: string
-  coverImage?: string
-  authorName?: string
-  authorAvatarUrl?: string
-  avatarUrl?: string
-  matchedSnippet: string
-  matchedField: string
-  createdAt: string
-  updatedAt: string
-}
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -143,20 +94,12 @@ const query = ref('')
 const searched = ref(false)
 const loading = ref(false)
 const loadError = ref('')
-const items = ref<SearchItem[]>([])
-const total = ref(0)
-const resolvedResultCoverUrls = ref<Record<string, string>>({})
-const resolvedResultAvatarUrls = ref<Record<string, string>>({})
+const searchFeed = ref<SemanticSearchFeed>(emptySemanticSearchFeed())
 const PAGE_SIZE = 10
 const MAX_PAGE_SIZE = 20
-const generatedAvatarPalettes = [
-  ['#F4C7B8', '#7FB099'],
-  ['#BFD7EA', '#E5B183'],
-  ['#D9C3E6', '#85AFA5'],
-  ['#F1D08A', '#7294B8'],
-  ['#C9D6A3', '#C4867D'],
-]
 const searchSession = createSemanticSearchSession()
+const searchCoverRecoveryPending = new Set<string>()
+const searchCoverRecoveryAttempts = new Map<string, number>()
 
 const communityName = computed(() => {
   if (communityStore.currentCommunityId === communityId.value && communityStore.currentCommunity?.name) {
@@ -165,6 +108,8 @@ const communityName = computed(() => {
   return '帖子搜索'
 })
 const isInitialSearchLayout = computed(() => !searched.value && !loading.value)
+const resultCount = computed(() => searchFeed.value.columns[0].length + searchFeed.value.columns[1].length)
+const hasSearchCards = computed(() => resultCount.value > 0)
 const compactQueryChipStyle = computed(() => {
   if (isInitialSearchLayout.value || !query.value.trim()) return {}
   const queryWidth = splitUnicodeCharacters(query.value.trim()).reduce((total, char) => {
@@ -198,11 +143,8 @@ watch(query, (nextDraft) => {
   if (!edit.invalidated) return
   loading.value = false
   searched.value = false
-  items.value = []
-  total.value = 0
+  searchFeed.value = emptySemanticSearchFeed()
   loadError.value = ''
-  resolvedResultCoverUrls.value = {}
-  resolvedResultAvatarUrls.value = {}
 })
 
 function decodeParam(value: unknown): string {
@@ -229,11 +171,8 @@ function clearQuery() {
   loading.value = false
   query.value = ''
   searched.value = false
-  items.value = []
-  total.value = 0
+  searchFeed.value = emptySemanticSearchFeed()
   loadError.value = ''
-  resolvedResultCoverUrls.value = {}
-  resolvedResultAvatarUrls.value = {}
 }
 
 function goBack() {
@@ -241,8 +180,8 @@ function goBack() {
 }
 
 async function loadMore() {
-  if (loading.value || items.value.length >= total.value) return
-  const request = searchSession.nextPage(query.value, items.value.length)
+  if (loading.value || !searchFeed.value.hasMore) return
+  const request = searchSession.nextPage(query.value, searchFeed.value.nextSkip)
   if (request.kind === 'restart') {
     await runSearch({ reset: true })
     return
@@ -264,15 +203,14 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean; re
     }
     searched.value = queryLength > 0
     loading.value = false
-    items.value = []
-    total.value = 0
+    searchFeed.value = emptySemanticSearchFeed()
     loadError.value = ''
     return
   }
 
   const request = options.reset
     ? searchSession.submit(normalizedQuery)
-    : options.request || searchSession.nextPage(query.value, items.value.length)
+    : options.request || searchSession.nextPage(query.value, searchFeed.value.nextSkip)
   if (request.kind === 'restart') {
     await runSearch({ reset: true, showShortToast: options.showShortToast })
     return
@@ -296,15 +234,19 @@ async function runSearch(options: { reset: boolean; showShortToast?: boolean; re
       asGuest,
     })
     if (!searchSession.isCurrent(request.requestSeq)) return
-    const nextItems = result.items || []
-    items.value = options.reset ? nextItems : items.value.concat(nextItems)
-    total.value = Number(result.total || items.value.length)
+    const nextFeed = appendSemanticSearchPage(
+      options.reset ? emptySemanticSearchFeed() : searchFeed.value,
+      result,
+    )
+    searchFeed.value = nextFeed
     searched.value = true
-    void resolveResultCovers(items.value)
+    void resolveSearchCovers(nextFeed, request.requestSeq)
     clientLog('info', 'search.load.success', {
       communityId: communityId.value,
-      total: total.value,
-      returned: nextItems.length,
+      total: nextFeed.total,
+      returned: Array.isArray(result.items) ? result.items.length : 0,
+      displayed: nextFeed.columns[0].length + nextFeed.columns[1].length,
+      hasMore: nextFeed.hasMore,
     })
   } catch (error: any) {
     if (!searchSession.isCurrent(request.requestSeq)) return
@@ -349,70 +291,59 @@ function openPost(postId: string) {
   })
 }
 
-function resultCover(item: SearchItem): string {
-  const raw = String(item.coverImage || '').trim()
-  return resolvedResultCoverUrls.value[raw] || raw
+function openSearchCard(card: ArchiveFeedCard) {
+  openPost(card.postId)
 }
 
-function coverFallbackText(item: SearchItem): string {
-  const name = String(item.sectionName || item.title || '社区').trim()
-  return splitUnicodeCharacters(name).slice(0, 2).join('') || '社区'
-}
-
-function resultAuthorName(item: SearchItem): string {
-  return String(item.authorName || '社区邻居').trim()
-}
-
-function resultAuthorAvatar(item: SearchItem): string {
-  const raw = String(item.authorAvatarUrl || item.avatarUrl || '').trim()
-  return resolvedResultAvatarUrls.value[raw] || raw
-}
-
-function hasRealAuthorAvatar(item: SearchItem): boolean {
-  const avatar = resultAuthorAvatar(item)
-  return avatar.startsWith('http://') || avatar.startsWith('https://') || avatar.startsWith('data:')
-}
-
-function resultAuthorInitial(item: SearchItem): string {
-  const name = resultAuthorName(item)
-  return splitUnicodeCharacters(name).find((char) => char.trim()) || '邻'
-}
-
-function resultGeneratedAvatarStyle(item: SearchItem) {
-  const palette = generatedAvatarPalettes[stableHash(item.postId) % generatedAvatarPalettes.length]
-  return {
-    '--result-avatar-start': palette[0],
-    '--result-avatar-end': palette[1],
+async function resolveSearchCovers(feed: SemanticSearchFeed, requestSeq: number) {
+  await resolveFeedCovers(feed.columns, resolveCloudFileUrls)
+  if (!searchSession.isCurrent(requestSeq) || searchFeed.value !== feed) return
+  searchFeed.value = {
+    ...feed,
+    columns: feed.columns.map(column => column.slice()) as ArchiveFeedColumns,
   }
 }
 
-function stableHash(value: string): number {
-  let hash = 2166136261
-  for (const char of String(value || '')) {
-    hash ^= char.charCodeAt(0)
-    hash = Math.imul(hash, 16777619)
-  }
-  return hash >>> 0
+function searchCoverRecoveryKey(card: ArchiveFeedCard, source: string): string {
+  return `${card.postId}:${source}`
 }
 
-async function resolveResultCovers(nextItems: SearchItem[]) {
-  const covers = nextItems.map((item) => String(item.coverImage || '').trim()).filter(Boolean)
-  const avatars = nextItems.map((item) => String(item.authorAvatarUrl || item.avatarUrl || '').trim()).filter(Boolean)
-  if (covers.length === 0 && avatars.length === 0) {
-    resolvedResultCoverUrls.value = {}
-    resolvedResultAvatarUrls.value = {}
-    return
+function commitSearchCoverRender() {
+  searchFeed.value = {
+    ...searchFeed.value,
+    columns: searchFeed.value.columns.map(column => column.slice()) as ArchiveFeedColumns,
   }
+}
+
+function onSearchCoverLoad(card: ArchiveFeedCard) {
+  if (card.cover.kind === 'text') return
+  const source = String(card.cover.source || card.cover.src || '').trim()
+  if (source) searchCoverRecoveryAttempts.delete(searchCoverRecoveryKey(card, source))
+}
+
+async function onSearchCoverError(card: ArchiveFeedCard) {
+  if (card.cover.kind === 'text') return
+  const source = String(card.cover.source || card.cover.src || '').trim()
+  card.cover.src = ''
+  commitSearchCoverRender()
+  if (!source.startsWith('cloud://')) return
+
+  const key = searchCoverRecoveryKey(card, source)
+  if (searchCoverRecoveryPending.has(key)) return
+  const attempts = searchCoverRecoveryAttempts.get(key) || 0
+  if (attempts >= 2) return
+  searchCoverRecoveryAttempts.set(key, attempts + 1)
+  searchCoverRecoveryPending.add(key)
+  clientLog('warn', 'search.cover.load.fail', {
+    postId: card.postId,
+    attempt: attempts + 1,
+  })
   try {
-    const resolved = await resolveCloudFileUrls(covers.concat(avatars))
-    const resolvedCovers: Record<string, string> = {}
-    for (const cover of covers) resolvedCovers[cover] = resolved[cover] || cover
-    const resolvedAvatars: Record<string, string> = {}
-    for (const avatar of avatars) resolvedAvatars[avatar] = resolved[avatar] || avatar
-    resolvedResultCoverUrls.value = resolvedCovers
-    resolvedResultAvatarUrls.value = resolvedAvatars
-  } catch (error) {
-    clientLog('warn', 'search.cover.resolve.fail', { error })
+    const refreshed = await refreshCloudFileUrl(source)
+    if (refreshed && !refreshed.startsWith('cloud://')) card.cover.src = refreshed
+  } finally {
+    searchCoverRecoveryPending.delete(key)
+    commitSearchCoverRender()
   }
 }
 
@@ -434,17 +365,6 @@ function splitUnicodeCharacters(value: unknown): string[] {
   return chars
 }
 
-function formatDate(value: unknown): string {
-  const d = new Date(String(value || ''))
-  if (Number.isNaN(d.getTime())) return ''
-  const now = new Date()
-  const sameYear = d.getFullYear() === now.getFullYear()
-  const month = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return sameYear
-    ? `${month}-${day}`
-    : `${d.getFullYear()}-${month}-${day}`
-}
 </script>
 
 <style lang="scss" scoped>
@@ -639,6 +559,11 @@ function formatDate(value: unknown): string {
   padding: 56rpx 16rpx 0;
 }
 
+.search-results-waterfall {
+  margin-right: -24rpx;
+  margin-left: -24rpx;
+}
+
 .search-intro-title {
   color: var(--hh-color-text-primary);
   font-size: var(--hh-text-heading-sm-size);
@@ -756,191 +681,4 @@ function formatDate(value: unknown): string {
   background: var(--hh-color-card);
 }
 
-.result-list {
-  margin-top: 24rpx;
-  display: flex;
-  flex-direction: column;
-  gap: 24rpx;
-}
-
-.result-summary {
-  padding: 0 4rpx 2rpx;
-  font-size: var(--hh-text-caption-base-size);
-  line-height: var(--hh-text-caption-base-line);
-  color: var(--hh-color-text-tertiary);
-}
-
-.result-card {
-  overflow: hidden;
-  border-radius: 16rpx;
-  background: var(--hh-color-card);
-}
-
-.result-card:active {
-  transform: translateY(1rpx);
-  opacity: 0.92;
-}
-
-.result-title {
-  display: block;
-  padding: 18rpx 26rpx 0;
-  color: var(--hh-color-text-primary);
-  font-size: var(--hh-text-body-lg-size);
-  line-height: var(--hh-text-body-lg-line);
-  font-weight: $hh-font-weight-bold;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.result-match {
-  padding: 10rpx 26rpx 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6rpx;
-}
-
-.result-match-field {
-  color: var(--hh-color-brand-strong);
-  font-size: var(--hh-text-caption-base-size);
-  line-height: var(--hh-text-caption-base-line);
-}
-
-.result-cover {
-  width: 100%;
-  height: 304rpx;
-  overflow: hidden;
-  background: #cecece;
-}
-
-.result-cover-image,
-.result-cover-empty {
-  width: 100%;
-  height: 100%;
-}
-
-.result-cover-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background:
-    radial-gradient(circle at 24% 18%, rgba(255, 255, 255, 0.62), transparent 24%),
-    linear-gradient(135deg, #d4eadf 0%, #7daf8e 52%, #5a765f 100%);
-}
-
-.result-cover-empty text {
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 64rpx;
-  line-height: 1;
-  font-weight: $hh-font-weight-bold;
-}
-
-.result-preview {
-  display: -webkit-box;
-  padding: 0;
-  overflow: hidden;
-  color: var(--hh-color-text-secondary);
-  font-size: var(--hh-text-body-base-size);
-  line-height: var(--hh-text-body-base-line);
-  text-overflow: ellipsis;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-
-.result-meta {
-  padding: 16rpx 26rpx 18rpx;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18rpx;
-}
-
-.result-author {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8rpx;
-}
-
-.result-avatar {
-  width: 40rpx;
-  height: 40rpx;
-  border-radius: $hh-radius-full;
-  background: var(--hh-color-brand-soft);
-  flex: 0 0 auto;
-}
-
-.result-avatar--generated {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background:
-    radial-gradient(circle at 30% 24%, rgba(255, 255, 255, 0.72), transparent 23%),
-    linear-gradient(135deg, var(--result-avatar-start), var(--result-avatar-end));
-  color: rgba(30, 26, 22, 0.82);
-  box-shadow: inset 0 0 0 1rpx rgba(255, 255, 255, 0.7);
-}
-
-.result-avatar--generated text {
-  font-size: 21rpx;
-  line-height: 1;
-  font-weight: $hh-font-weight-bold;
-}
-
-.result-author-name {
-  min-width: 0;
-  color: var(--hh-color-text-primary);
-  font-size: var(--hh-text-caption-base-size);
-  line-height: var(--hh-text-caption-base-line);
-  font-weight: $hh-font-weight-bold;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.result-date {
-  flex-shrink: 0;
-  color: var(--hh-color-text-tertiary);
-  font-size: var(--hh-text-caption-base-size);
-  line-height: var(--hh-text-caption-base-line);
-}
-
-.field-list {
-  display: none;
-}
-
-.field-row,
-.field-label,
-.field-preview {
-  display: none;
-}
-
-.field-label {
-  color: var(--hh-color-brand-strong);
-}
-
-.field-preview {
-  color: var(--hh-color-text-secondary);
-}
-
-.load-more {
-  height: 76rpx;
-  border: 1rpx solid var(--hh-color-line);
-  border-radius: var(--hh-radius-card);
-  background: var(--hh-color-card);
-  color: var(--hh-color-text-secondary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.load-more.loading {
-  opacity: 0.72;
-}
-
-.load-more text {
-  font-size: 25rpx;
-  font-weight: $hh-font-weight-bold;
-}
 </style>

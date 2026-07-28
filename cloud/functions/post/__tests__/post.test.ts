@@ -1912,6 +1912,69 @@ test('search: checks community readability and delegates to formal RAG search', 
   expect(result.items).toEqual([{ postId: 'post-1', title: '视频帖' }])
 })
 
+test('search: returns the current post card with its original media and author', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
+  ;(db.query as jest.Mock).mockResolvedValue([
+    { _id: 'member-1', communityId: 'community-1', userId: 'member-openid', status: 'active' },
+  ])
+  ;(db.getByIds as jest.Mock).mockResolvedValueOnce([
+    { _id: 'author-1', nickName: '路线邻居', avatarUrl: 'cloud://env/avatars/author-1.jpg' },
+  ])
+  mockSemanticResult({
+    query: '云盖村',
+    communityId: 'community-1',
+    sectionId: '',
+    total: 1,
+    skip: 0,
+    limit: 10,
+    items: [{
+      _id: 'post-1',
+      postId: 'post-1',
+      communityId: 'community-1',
+      sectionId: '',
+      sectionName: '沉淀区',
+      area: 'archive',
+      format: 'image_text',
+      authorId: 'author-1',
+      topics: ['亲子出游'],
+      content: {
+        title: '村里出发半日游',
+        images: ['cloud://env/posts/yungaicun-original.jpg'],
+      },
+      title: '村里出发半日游',
+      score: 0.9,
+      matchedFields: [{ fieldLabel: '正文', fieldType: 'rich_note', preview: '竹林轻徒步与玩水' }],
+      createdAt: '2026-07-28T00:00:00.000Z',
+      updatedAt: '2026-07-28T00:00:00.000Z',
+      likeCount: 3,
+    }],
+    answer: '找到相关路线。',
+    citations: [{ postId: 'post-1' }],
+    mode: 'rag',
+  })
+
+  const result = await handleSearch({
+    communityId: 'community-1',
+    query: '云盖村',
+    limit: 10,
+  }, 'member-openid')
+
+  expect(result.items).toEqual([expect.objectContaining({
+    _id: 'post-1',
+    postId: 'post-1',
+    format: 'image_text',
+    topics: ['亲子出游'],
+    content: expect.objectContaining({
+      title: '村里出发半日游',
+      images: ['cloud://env/posts/yungaicun-original.jpg'],
+    }),
+    authorName: '路线邻居',
+    authorAvatarUrl: expect.any(String),
+    matchedField: '正文',
+    matchedSnippet: '竹林轻徒步与玩水',
+  })])
+})
+
 test('search: accepts a short-lived signed RAG smoke identity only for its fixture run and community', async () => {
   const cloud = require('wx-server-sdk')
   cloud.getWXContext.mockReturnValueOnce({ OPENID: '' })

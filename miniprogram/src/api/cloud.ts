@@ -337,18 +337,29 @@ export const postApi = {
       /** @deprecated Semantic search returns items directly; always empty when present. */
       citations?: []
       items: Array<{
+        _id?: string
         postId: string
         communityId: string
         sectionId: string
         sectionName: string
         title: string
-        coverImage?: string
+        area?: 'archive' | 'collaboration'
+        format?: 'image_text' | 'text' | 'video'
+        topics?: string[]
+        content?: {
+          title?: string
+          images?: string[]
+          videos?: Array<{ cover?: string }>
+          body?: { text?: string }
+        }
+        presentation?: { textNoteTheme?: string }
         authorName?: string
         authorAvatarUrl?: string
         matchedSnippet: string
         matchedField: string
         createdAt: string
         updatedAt: string
+        likeCount?: number
       }>
     }>('post', 'search', params),
   get: (postId: string, asGuest = false) =>

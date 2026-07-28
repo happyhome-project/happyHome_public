@@ -29,6 +29,32 @@ describe('archive feed state', () => {
     expect(normalizeArchiveCard(post('legacy')).cover.kind).toBe('text')
   })
 
+  test('accepts semantic result ids and keeps the original post image', () => {
+    const resultItem = {
+      postId: 'search-post',
+      format: 'image_text',
+      content: {
+        title: '云盖村竹林轻徒步',
+        images: ['cloud://env/posts/yungaicun-original.jpg'],
+      },
+      topics: ['亲子出游'],
+      authorName: '路线邻居',
+      createdAt: '2026-07-28T00:00:00.000Z',
+    }
+
+    const firstPage = appendArchivePage([[], []], [resultItem])
+    const secondPage = appendArchivePage(firstPage, [resultItem])
+
+    expect(firstPage.flat()).toHaveLength(1)
+    expect(firstPage.flat()[0]).toMatchObject({
+      postId: 'search-post',
+      title: '云盖村竹林轻徒步',
+      authorName: '路线邻居',
+      cover: { kind: 'image', src: 'cloud://env/posts/yungaicun-original.jpg' },
+    })
+    expect(secondPage.flat()).toHaveLength(1)
+  })
+
   test('keeps native video cards distinct and uses their explicit cover', () => {
     const card = normalizeArchiveCard(post('video-cover', {
       format: 'video',
