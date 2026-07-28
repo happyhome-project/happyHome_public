@@ -299,8 +299,10 @@ async function resolveSearchCovers(feed: SemanticSearchFeed, requestSeq: number)
   await resolveFeedCovers(feed.columns, resolveCloudFileUrls)
   if (!searchSession.isCurrent(requestSeq) || searchFeed.value !== feed) return
   searchFeed.value = {
-    ...feed,
     columns: feed.columns.map(column => column.slice()) as ArchiveFeedColumns,
+    total: feed.total,
+    nextSkip: feed.nextSkip,
+    hasMore: feed.hasMore,
   }
 }
 
@@ -310,8 +312,10 @@ function searchCoverRecoveryKey(card: ArchiveFeedCard, source: string): string {
 
 function commitSearchCoverRender() {
   searchFeed.value = {
-    ...searchFeed.value,
     columns: searchFeed.value.columns.map(column => column.slice()) as ArchiveFeedColumns,
+    total: searchFeed.value.total,
+    nextSkip: searchFeed.value.nextSkip,
+    hasMore: searchFeed.value.hasMore,
   }
 }
 
