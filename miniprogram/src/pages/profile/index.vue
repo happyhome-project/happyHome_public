@@ -87,7 +87,7 @@
               @blur="onNickBlur"
             />
           </view>
-          <text v-if="profileLoginSlow" class="profile-login-slow">登录较慢，请稍候</text>
+          <text v-if="profileLoginSlow" class="profile-login-slow">正在登录，请稍候</text>
 
           <view class="form-actions">
             <button size="mini" @tap="closeManualLoginForm">取消</button>
@@ -292,7 +292,7 @@
             {{ submitFormLock.busy.value ? '登录中...' : '确认登录' }}
           </button>
         </view>
-        <text v-if="profileLoginSlow" class="profile-login-slow">登录较慢，请稍候</text>
+        <text v-if="profileLoginSlow" class="profile-login-slow">正在登录，请稍候</text>
       </view>
     </view>
 
@@ -467,7 +467,7 @@
             @tap="saveProfile"
           >{{ submitFormLock.busy.value ? '保存中...' : '保存' }}</button>
         </view>
-        <text v-if="profileLoginSlow" class="profile-login-slow">登录较慢，请稍候</text>
+        <text v-if="profileLoginSlow" class="profile-login-slow">正在登录，请稍候</text>
       </view>
     </view>
   </view>
@@ -1311,20 +1311,20 @@ async function hydrateProfileInBackground(reason: string) {
   const epoch = profileHydrationEpoch.begin()
   profileHydrationSlow.value = false
   profileHydrationFailed.value = false
-  if (profileError.value.startsWith('加载较慢') || profileError.value.startsWith('资料加载失败')) {
+  if (profileError.value.startsWith('资料正在加载') || profileError.value.startsWith('资料加载失败')) {
     profileError.value = ''
   }
   const slowTimer = setTimeout(() => {
     if (!profileHydrationEpoch.isCurrent(epoch)) return
     profileHydrationSlow.value = true
-    profileError.value = '加载较慢，可点击重试'
+    profileError.value = '资料正在加载，也可以点击重试'
   }, PROFILE_SLOW_THRESHOLD_MS)
   try {
     await loadProfileDataAfterRoleResolved(reason, () => profileHydrationEpoch.isCurrent(epoch))
     if (!profileHydrationEpoch.isCurrent(epoch)) return
     profileHydrationSlow.value = false
     profileHydrationFailed.value = false
-    if (profileError.value.startsWith('加载较慢') || profileError.value.startsWith('资料加载失败')) {
+    if (profileError.value.startsWith('资料正在加载') || profileError.value.startsWith('资料加载失败')) {
       profileError.value = ''
     }
   } catch (error: any) {

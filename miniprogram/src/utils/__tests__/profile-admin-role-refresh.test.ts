@@ -59,7 +59,8 @@ describe('profile admin role refresh contract', () => {
 
     expect(functionBody).toContain('PROFILE_SLOW_THRESHOLD_MS')
     expect(functionBody).toContain('profileHydrationEpoch.isCurrent(epoch)')
-    expect(functionBody).toContain("profileError.value = '加载较慢，可点击重试'")
+    expect(functionBody).toContain("profileError.value = '资料正在加载，也可以点击重试'")
+    expect(functionBody).not.toContain('加载较慢')
     expect(functionBody.match(/hydrateProfileInBackground\(/g)).toHaveLength(1)
   })
 
@@ -91,7 +92,8 @@ describe('profile admin role refresh contract', () => {
     const submitBody = code.slice(submitIndex, nextFunctionIndex)
 
     expect(code).toContain("v-if=\"profileLoginSlow\"")
-    expect(code).toContain('登录较慢，请稍候')
+    expect(code).toContain('正在登录，请稍候')
+    expect(code).not.toContain('登录较慢')
     expect(code).toContain('const PROFILE_LOGIN_SLOW_THRESHOLD_MS = 5000')
     expect(submitBody).toContain('profileLoginSlow.value = true')
     expect(submitBody).toContain('clearTimeout(loginSlowTimer)')

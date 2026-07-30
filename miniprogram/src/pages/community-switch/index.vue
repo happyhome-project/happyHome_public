@@ -6,7 +6,7 @@
     </view>
 
     <view v-if="loading && !communities.length" class="state-card">
-      <text>{{ slowLoading ? '加载较慢，请稍候...' : '正在加载社区...' }}</text>
+      <text>{{ slowLoading ? '正在加载社区，请稍候...' : '正在加载社区...' }}</text>
     </view>
 
     <view v-else-if="loadError && !communities.length" class="state-card">
@@ -18,7 +18,7 @@
 
     <view v-else class="community-list">
       <view v-if="loading || loadError" class="directory-refresh-state">
-        <text v-if="loading">{{ slowLoading ? '加载较慢，已保留现有社区' : '正在更新社区列表...' }}</text>
+        <text v-if="loading">{{ slowLoading ? '正在更新社区列表，现有社区仍可使用' : '正在更新社区列表...' }}</text>
         <text v-else>{{ loadError }}</text>
         <view v-if="loadError" class="directory-refresh-action" @tap="loadCommunities">
           <text>重试</text>

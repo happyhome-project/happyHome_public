@@ -45,7 +45,9 @@ describe('Figma community directory pages', () => {
     expect(loader.indexOf('const epoch = ++directoryLoadEpoch')).toBeLessThan(
       loader.indexOf('if (!userStore.isLoggedIn)'),
     )
-    expect(code).toContain('加载较慢')
+    expect(code).toContain('正在加载社区，请稍候...')
+    expect(code).toContain('正在更新社区列表，现有社区仍可使用')
+    expect(code).not.toContain('加载较慢')
     expect(code).toContain('communityStore.selectCommunityShell(id, shell, requestId)')
     expect(code).toContain('createPerformanceRequestId')
     expect(code).toContain("stage: 'community.directory'")
@@ -73,7 +75,8 @@ describe('Figma community directory pages', () => {
     expect(refresh).toContain('directoryLoadEpoch')
     expect(refresh).toContain("community.viewerStatus === 'active'")
     expect(refresh).toContain('activeViewerCount')
-    expect(source).toContain('加载较慢')
+    expect(source).toContain('正在加载社区，请稍候')
+    expect(source).not.toContain('加载较慢')
     expect(source).toContain('@tap="retryDirectoryLoad"')
   })
 
@@ -108,6 +111,9 @@ describe('Figma community directory pages', () => {
     expect(code).toContain('createAdaptiveAvatarUploader')
     expect(code).toContain('adaptiveGuestAvatarUploader.upload(source)')
     expect(code).toContain('guestIntroLoginSlow')
+    expect(code).toContain('正在登录，请稍候...')
+    expect(code).toContain('正在加载社区内容，请稍候')
+    expect(code).not.toContain('加载较慢')
     expect(login).toContain('guestIntroLoginEpoch.isCurrent(loginEpoch)')
     expect(login).toContain('}, 5000)')
     expect(login).toContain("stage: 'home.guest.login'")
