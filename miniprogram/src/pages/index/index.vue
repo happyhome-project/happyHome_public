@@ -95,7 +95,7 @@
     </view>
 
     <view v-if="homeRefreshSlow || homeRefreshError" class="home-refresh-status">
-      <text>{{ homeRefreshError || '加载较慢，社区框架已保留' }}</text>
+      <text>{{ homeRefreshError || '正在加载社区内容，请稍候' }}</text>
       <view v-if="homeRefreshError" class="home-refresh-retry" @tap="retryHomeRefresh">
         <text>重试</text>
       </view>
@@ -440,7 +440,7 @@
             maxlength="20"
             @blur="guestIntroNicknameFocused = false"
           />
-          <text v-if="guestIntroLoginSlow" class="guest-intro-login-slow">加载较慢，请稍候...</text>
+          <text v-if="guestIntroLoginSlow" class="guest-intro-login-slow">正在登录，请稍候...</text>
           <text v-if="guestIntroLoginError" class="guest-intro-login-error">{{ guestIntroLoginError }}</text>
           <button
             class="guest-intro-primary"

@@ -11,7 +11,7 @@
         <text class="subtitle">加入后即可浏览和发帖</text>
       </view>
       <view v-if="loading && communities.length === 0" class="directory-state">正在加载社区...</view>
-      <view v-if="slowLoading" class="directory-state directory-state--slow">加载较慢，请稍候</view>
+      <view v-if="slowLoading" class="directory-state directory-state--slow">正在加载社区，请稍候</view>
       <view v-if="loadError" class="directory-state directory-state--error" @tap="retryDirectoryLoad">
         {{ loadError }}，点击重试
       </view>
