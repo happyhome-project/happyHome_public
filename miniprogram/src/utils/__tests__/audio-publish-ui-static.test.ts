@@ -11,7 +11,7 @@ describe('native archive audio publish UI contract', () => {
     expect(editor).toContain('multiple')
     expect(editor).toContain('.mp3,.m4a,.aac,.wav')
     expect(editor).toContain('chooseMessageFile')
-    expect(editor).toContain('probeAudioDuration')
+    expect(editor).toContain('createAudioDurationProbe')
     expect(editor).toContain('new Audio')
     expect(editor).toContain('createInnerAudioContext')
     expect(editor).toContain('requestMemberAudioUpload')
@@ -38,7 +38,7 @@ describe('native archive audio publish UI contract', () => {
     const editor = read('components', 'widgets', 'AudioPublishEditor.vue')
     const miniProbe = editor.slice(editor.indexOf('// #ifndef H5'), editor.indexOf('function acceptAudioFiles'))
     expect(miniProbe).toMatch(
-      /capturePositiveAudioDurationBeforeCleanup\([\s\S]*?\(\) => context\.duration,[\s\S]*?\(\) => \{ try \{ context\.destroy\(\)/,
+      /readDuration: \(\) => context\.duration,[\s\S]*?cleanup: \(\) => \{[\s\S]*?context\.destroy\(\)/,
     )
   })
 
@@ -46,6 +46,15 @@ describe('native archive audio publish UI contract', () => {
     const editor = read('components', 'widgets', 'AudioPublishEditor.vue')
     const audioUpload = editor.slice(editor.indexOf('async function uploadTrack'), editor.indexOf('async function uploadCover'))
     expect(audioUpload).toContain('if (!track || !track.source || unmounted) return')
+  })
+
+  test('actively cancels track duration probes on removal and unmount', () => {
+    const editor = read('components', 'widgets', 'AudioPublishEditor.vue')
+    expect(editor).toContain('activeDurationProbes')
+    const unmount = editor.slice(editor.indexOf('onBeforeUnmount(() =>'), editor.indexOf('function createTrackId'))
+    expect(unmount).toContain('cancelAllAudioDurationProbes()')
+    const removal = editor.slice(editor.indexOf('function removeTrack'), editor.indexOf('function moveTrack'))
+    expect(removal).toContain('cancelAudioDurationProbe(trackId)')
   })
 
   test('builds only the ordered audios and required title widgets for native audio', () => {
@@ -102,12 +111,25 @@ describe('native archive audio publish UI contract', () => {
     const create = read('pages', 'create', 'index.vue')
     const inline = create.slice(create.indexOf('async function handleInlineMediaIntent'), create.indexOf('function restoreArchiveMediaEditor'))
     const currentType = inline.indexOf('const currentType = currentPublishMediaType()')
-    const block = inline.indexOf("currentType === 'audio' && audioNavigationBlocked.value")
+    const block = inline.indexOf("currentType === 'audio' && isAudioPageNavigationBlocked()")
     const transition = inline.indexOf('transitionArchiveMediaEditorState(currentState, intent.mediaType, null)')
     expect(block).toBeGreaterThan(currentType)
     expect(block).toBeLessThan(transition)
     expect(inline.slice(block, transition)).toContain('consumeArchiveMediaIntent(token)')
     expect(inline.slice(block, transition)).toContain('showAudioNavigationBlockedToast()')
+  })
+
+  test('blocks every normal leave surface while an audio submission owns pending sources', () => {
+    const create = read('pages', 'create', 'index.vue')
+    const formBack = create.slice(create.indexOf('function handleFormBack()'), create.indexOf('function waitForTextNoteLayout'))
+    const sectionBack = create.slice(create.indexOf('function handleBackToSectionPicker()'), create.indexOf('function clearActivityInviteMode'))
+    const pageExit = create.slice(create.indexOf('function handlePageExit()'), create.indexOf('function showVideoNavigationBlockedToast'))
+    expect(formBack).toContain('isAudioPageNavigationBlocked()')
+    expect(sectionBack).toContain('isAudioPageNavigationBlocked()')
+    expect(pageExit).toContain('isAudioPageNavigationBlocked()')
+    expect(create).toContain('audioSubmissionInFlight')
+    expect(create).toContain('shouldBlockAudioPageNavigation')
+    expect(create).toMatch(/watch\(\[[^\]]*audioSubmissionInFlight[^\]]*\]/)
   })
 
   test('does not save or restore audio drafts that would outlive pending-file cleanup', () => {
@@ -124,17 +146,27 @@ describe('native archive audio publish UI contract', () => {
     expect(create).toContain('@navigation-blocked="audioNavigationBlocked = $event"')
     expect(create).toContain(':disabled="submitting || !videoPublishReady || !audioPublishReady"')
     expect(create).toContain("archiveFormat.value === 'audio' && !audioPublishReady.value")
-    expect(create).toContain("archiveFormat.value === 'audio' && audioNavigationBlocked.value")
+    expect(create).toContain("archiveFormat.value === 'audio' && isAudioPageNavigationBlocked()")
     const submit = create.slice(create.indexOf('async function handleSubmit()'), create.indexOf('</script>'))
+    const capture = submit.indexOf('requireAudioPublishEditorSubmissionHandle(audioEditorRef.value)')
+    const claim = submit.indexOf('claimPendingUploadsForSubmission()')
+    const request = submit.indexOf('const result: any =')
+    expect(capture).toBeGreaterThan(-1)
+    expect(claim).toBeGreaterThan(capture)
+    expect(claim).toBeLessThan(request)
     expect(submit).toContain('shouldCleanupPendingAudioAfterSubmit(result?.auditStatus)')
     expect(submit).toContain('audioPublishReady.value = false')
-    expect(submit.indexOf('audioPublishReady.value = false')).toBeLessThan(submit.indexOf('await audioEditorRef.value?.finalizePendingUploadsAfterSubmit()'))
-    expect(submit.indexOf('await audioEditorRef.value?.finalizePendingUploadsAfterSubmit()')).toBeGreaterThan(-1)
-    expect(submit.indexOf('finalizePendingUploadsAfterSubmit')).toBeLessThan(submit.indexOf('handleEditSubmitResult'))
+    expect(submit.indexOf('audioPublishReady.value = false')).toBeLessThan(submit.indexOf("await settleAudioSubmitEditor(audioSubmitEditor, 'accepted')"))
+    expect(submit.indexOf("await settleAudioSubmitEditor(audioSubmitEditor, 'accepted')")).toBeGreaterThan(-1)
+    expect(submit.indexOf('settleAudioSubmitEditor')).toBeLessThan(submit.indexOf('handleEditSubmitResult'))
+    expect(submit).not.toContain('audioEditorRef.value?.finalizePendingUploadsAfterSubmit()')
     const editor = read('components', 'widgets', 'AudioPublishEditor.vue')
     const finalize = editor.slice(editor.indexOf('async function finalizePendingUploadsAfterSubmit'), editor.indexOf('defineExpose'))
-    expect(finalize).toContain('await cleanupPendingUploads()')
+    expect(finalize).toContain("settleAfterSubmission('accepted')")
     expect(finalize).not.toContain('pendingUploads.clear()')
+    const settle = create.slice(create.indexOf('async function settleAudioSubmitEditor'), create.indexOf('async function handleSubmit()'))
+    expect(settle).toContain('await editor.finalizePendingUploadsAfterSubmit()')
+    expect(settle).toContain('await editor.returnPendingUploadsAfterSubmit()')
   })
 
   test('keeps the native audio editor free of unrelated post and travel controls', () => {

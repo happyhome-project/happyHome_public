@@ -83,8 +83,9 @@ import { uploadCloudFile, type StorageUploadSource } from '../../api/storage'
 import type { ArchiveMediaIntentFile } from '../../utils/archive-media-intent'
 import {
   buildAudioTrackOutput,
-  capturePositiveAudioDurationBeforeCleanup,
   cleanupOwnedPendingAudioUploads,
+  createAudioSubmissionOwnership,
+  createCancelableAudioDurationProbe,
   isAudioAsyncResultCurrent,
   moveAudioTrack,
   normalizeAudioPublishFile,
@@ -95,6 +96,7 @@ import {
   updateAudioTrackTitle,
   type AudioPublishReadiness,
   type AudioPublishTrackState,
+  type CancelableAudioDurationProbe,
   type PendingAudioUpload,
 } from '../../utils/audio-publish'
 import { validateVideoCoverFile } from '../../utils/video-publish'
@@ -135,6 +137,7 @@ const h5CoverInput = ref<HTMLInputElement | null>(null)
 const coverTargetId = ref('')
 const objectUrls = new Set<string>()
 const pendingUploads = new Map<string, PendingAudioUpload>()
+const activeDurationProbes = new Map<string, CancelableAudioDurationProbe>()
 const uploading = computed(() => tracks.value.some((track) => (
   track.audioStatus === 'pending'
   || track.audioStatus === 'uploading'
@@ -186,7 +189,8 @@ onBeforeUnmount(() => {
     track.audioGeneration = Number(track.audioGeneration || 0) + 1
     track.coverGeneration = Number(track.coverGeneration || 0) + 1
   })
-  void cleanupPendingUploads()
+  cancelAllAudioDurationProbes()
+  void submissionOwnership.handleUnmount()
   objectUrls.forEach((url) => {
     try { URL.revokeObjectURL(url) } catch {}
   })
@@ -234,14 +238,28 @@ async function cleanupPendingUploads() {
   await performPendingCleanup(Array.from(pendingUploads.values()))
 }
 
+const submissionOwnership = createAudioSubmissionOwnership(cleanupPendingUploads)
+
+function claimPendingUploadsForSubmission(): boolean {
+  return submissionOwnership.claimForSubmission()
+}
+
 async function finalizePendingUploadsAfterSubmit() {
   // The server materializes finalized copies. These source objects are no longer
   // referenced after success, so remove them before navigation. Failed cleanup
   // remains registered for the unmount retry and never changes submit success.
-  await cleanupPendingUploads()
+  await submissionOwnership.settleAfterSubmission('accepted')
 }
 
-defineExpose({ finalizePendingUploadsAfterSubmit, cleanupPendingUploads })
+async function returnPendingUploadsAfterSubmit() {
+  await submissionOwnership.settleAfterSubmission('retry')
+}
+
+defineExpose({
+  claimPendingUploadsForSubmission,
+  finalizePendingUploadsAfterSubmit,
+  returnPendingUploadsAfterSubmit,
+})
 
 function emitState() {
   const readiness = resolveAudioPublishReadiness({ postTitle: props.postTitle, tracks: tracks.value })
@@ -274,86 +292,76 @@ function releasePreview(url: string | undefined) {
   try { URL.revokeObjectURL(url) } catch {}
 }
 
-function probeAudioDuration(source: string | Blob): Promise<number> {
+function createAudioDurationProbe(source: string | Blob): CancelableAudioDurationProbe {
   // #ifdef H5
-  return new Promise((resolve, reject) => {
-    const audio = new Audio()
-    const sourceUrl = typeof source === 'string' ? source : URL.createObjectURL(source)
-    let settled = false
-    const finish = (error?: Error) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      const cleanup = () => {
+  const audio = new Audio()
+  const sourceUrl = typeof source === 'string' ? source : URL.createObjectURL(source)
+  return createCancelableAudioDurationProbe({
+    readDuration: () => audio.duration,
+    cleanup: () => {
+      audio.onloadedmetadata = null
+      audio.onerror = null
+      try {
         audio.removeAttribute('src')
         audio.load()
-        if (typeof source !== 'string') URL.revokeObjectURL(sourceUrl)
-      }
-      if (error) {
-        cleanup()
-        reject(error)
-        return
-      }
-      try {
-        resolve(capturePositiveAudioDurationBeforeCleanup(() => audio.duration, cleanup))
-      } catch (durationError) {
-        reject(durationError)
-      }
-    }
-    const timeout = setTimeout(() => finish(new Error('读取音频时长超时，请重试')), 10000)
-    audio.preload = 'metadata'
-    audio.onloadedmetadata = () => finish()
-    audio.onerror = () => finish(new Error('无法读取有效音频时长，请重试或移除该曲目'))
-    audio.src = sourceUrl
+      } catch {}
+      if (typeof source !== 'string') URL.revokeObjectURL(sourceUrl)
+    },
+    subscribe: (resolve, reject) => {
+      audio.preload = 'metadata'
+      audio.onloadedmetadata = resolve
+      audio.onerror = () => reject(new Error('无法读取有效音频时长，请重试或移除该曲目'))
+      audio.src = sourceUrl
+    },
+    timeoutMs: 10000,
   })
   // #endif
 
   // #ifndef H5
-  return new Promise((resolve, reject) => {
-    if (typeof source !== 'string') {
-      reject(new Error('无法读取有效音频时长，请重试或移除该曲目'))
-      return
-    }
-    const context = uni.createInnerAudioContext()
-    let settled = false
-    let attempts = 0
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const finish = (error?: Error) => {
-      if (settled) return
-      settled = true
-      if (timer) clearTimeout(timer)
-      if (error) {
-        try { context.destroy() } catch {}
-        reject(error)
-        return
+  if (typeof source !== 'string') {
+    return createCancelableAudioDurationProbe({
+      readDuration: () => 0,
+      cleanup: () => {},
+      subscribe: (_resolve, reject) => reject(new Error('无法读取有效音频时长，请重试或移除该曲目')),
+    })
+  }
+  const sourcePath = source as string
+  const context = uni.createInnerAudioContext()
+  let inspectTimer: ReturnType<typeof setTimeout> | null = null
+  return createCancelableAudioDurationProbe({
+    readDuration: () => context.duration,
+    cleanup: () => {
+      if (inspectTimer) clearTimeout(inspectTimer)
+      try { context.destroy() } catch {}
+    },
+    subscribe: (resolve, reject) => {
+      const inspect = () => {
+        if (Number(context.duration) > 0) {
+          resolve()
+          return
+        }
+        inspectTimer = setTimeout(inspect, 100)
       }
-      try {
-        resolve(capturePositiveAudioDurationBeforeCleanup(
-          () => context.duration,
-          () => { try { context.destroy() } catch {} },
-        ))
-      } catch (durationError) {
-        reject(durationError)
-      }
-    }
-    const inspect = () => {
-      if (settled) return
-      if (Number(context.duration) > 0) {
-        finish()
-        return
-      }
-      attempts += 1
-      if (attempts >= 30) {
-        finish(new Error('无法读取有效音频时长，请重试或移除该曲目'))
-        return
-      }
-      timer = setTimeout(inspect, 100)
-    }
-    context.onCanplay(inspect)
-    context.onError(() => finish(new Error('无法读取有效音频时长，请重试或移除该曲目')))
-    context.src = source
+      context.onCanplay(inspect)
+      context.onError(() => reject(new Error('无法读取有效音频时长，请重试或移除该曲目')))
+      context.src = sourcePath
+    },
+    timeoutMs: 10000,
   })
   // #endif
+}
+
+function cancelAudioDurationProbe(trackId: string) {
+  const probe = activeDurationProbes.get(trackId)
+  if (!probe) return
+  activeDurationProbes.delete(trackId)
+  probe.cancel()
+}
+
+function cancelAllAudioDurationProbes() {
+  for (const trackId of Array.from(activeDurationProbes.keys())) {
+    cancelAudioDurationProbe(trackId)
+  }
 }
 
 function acceptAudioFiles(files: ArchiveMediaIntentFile[]) {
@@ -403,7 +411,15 @@ async function uploadTrack(trackId: string) {
   emitState()
   try {
     if (!Number.isFinite(Number(track.duration)) || Number(track.duration) <= 0) {
-      const duration = await probeAudioDuration(track.source)
+      cancelAudioDurationProbe(track.id)
+      const probe = createAudioDurationProbe(track.source)
+      activeDurationProbes.set(track.id, probe)
+      let duration: number
+      try {
+        duration = await probe.promise
+      } finally {
+        if (activeDurationProbes.get(track.id) === probe) activeDurationProbes.delete(track.id)
+      }
       if (!isAudioAsyncResultCurrent(tracks.value, track.id, 'audio', generation, unmounted)) return
       track.duration = requirePositiveAudioDuration(duration)
     }
@@ -639,6 +655,7 @@ function removeTrack(trackId: string) {
   if (!track) return
   track.audioGeneration = Number(track.audioGeneration || 0) + 1
   track.coverGeneration = Number(track.coverGeneration || 0) + 1
+  cancelAudioDurationProbe(trackId)
   releasePreview(track.coverPreview && track.coverPreview !== track.cover ? track.coverPreview : undefined)
   tracks.value = removeAudioTrack(tracks.value, trackId)
   if (track.fileID && pendingUploads.has(track.fileID)) void cleanupPendingUpload(track.fileID)

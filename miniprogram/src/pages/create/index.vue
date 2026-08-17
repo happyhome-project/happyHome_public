@@ -302,7 +302,7 @@
               <AudioPublishEditor
                 v-else-if="archiveFormat === 'audio' && block.widget.type === 'audio_group'"
                 :key="`audio-${communityStore.currentCommunityId}`"
-                ref="audioEditorRef"
+                :ref="setAudioEditorRef"
                 :community-id="communityStore.currentCommunityId"
                 :post-title="formData.archive_audio_title"
                 :model-value="formData[block.widget.widgetId]"
@@ -395,7 +395,12 @@ import {
   type ArchiveMediaIntentFile,
 } from '../../utils/archive-media-intent'
 import { reduceArchiveVideoRetention, shouldBlockVideoNavigation, transitionArchiveMediaEditorState, type ArchiveMediaEditorState, type ArchiveVideoIntentState, type ArchiveVideoRetentionState, type PublishMediaType } from '../../utils/video-publish'
-import { shouldCleanupPendingAudioAfterSubmit } from '../../utils/audio-publish'
+import {
+  requireAudioPublishEditorSubmissionHandle,
+  shouldBlockAudioPageNavigation,
+  shouldCleanupPendingAudioAfterSubmit,
+  type AudioPublishEditorSubmissionHandle,
+} from '../../utils/audio-publish'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -439,7 +444,8 @@ const videoPublishReady = ref(true)
 const audioUploading = ref(false)
 const audioNavigationBlocked = ref(false)
 const audioPublishReady = ref(true)
-const audioEditorRef = ref<{ finalizePendingUploadsAfterSubmit: () => Promise<void> } | null>(null)
+const audioSubmissionInFlight = ref(false)
+const audioEditorRef = ref<AudioPublishEditorSubmissionHandle | null>(null)
 const initialCreateNavMetrics = computeCreateNavMetrics({ isH5: typeof window !== 'undefined' && typeof document !== 'undefined' })
 const createStatusBarHeight = ref(initialCreateNavMetrics.statusBarHeight)
 const createNavRowHeight = ref(initialCreateNavMetrics.navRowHeight)
@@ -453,6 +459,25 @@ const archiveObjectUrls = new Set<string>()
 const collaborationOnly = ref(false)
 const collaborationTemplatesError = ref('')
 const initialLoadPending = ref(true)
+
+function setAudioEditorRef(instance: unknown) {
+  if (!instance) {
+    audioEditorRef.value = null
+    return
+  }
+  try {
+    audioEditorRef.value = requireAudioPublishEditorSubmissionHandle(instance)
+  } catch {
+    audioEditorRef.value = null
+  }
+}
+
+function isAudioPageNavigationBlocked(): boolean {
+  return shouldBlockAudioPageNavigation({
+    editorBlocked: audioNavigationBlocked.value,
+    submissionInFlight: audioSubmissionInFlight.value,
+  })
+}
 let collaborationTemplatesLoad: Promise<void> | null = null
 const isEditMode = computed(() => !!editPostId.value)
 const currentMembership = computed(() =>
@@ -826,7 +851,7 @@ async function handleInlineMediaIntent(token: string) {
   }
   if (intent.mediaType === 'audio' && !deferArchiveAudioIntent(token)) return
   const currentType = currentPublishMediaType()
-  if (currentType === 'audio' && audioNavigationBlocked.value) {
+  if (currentType === 'audio' && isAudioPageNavigationBlocked()) {
     if (pendingArchiveAudioIntentToken.value === token) pendingArchiveAudioIntentToken.value = ''
     consumeArchiveMediaIntent(token)
     showAudioNavigationBlockedToast()
@@ -1059,6 +1084,10 @@ function selectSection(section: any, options: { returnTo?: string; preserveForm?
 }
 
 function handleFormBack() {
+  if (archiveFormat.value === 'audio' && isAudioPageNavigationBlocked()) {
+    showAudioNavigationBlockedToast()
+    return
+  }
   if (isEditMode.value) {
     openHierarchyParent(createReturnTo.value)
     return
@@ -1183,7 +1212,7 @@ function handleBackToSectionPicker() {
     showVideoNavigationBlockedToast()
     return
   }
-  if (archiveFormat.value === 'audio' && audioNavigationBlocked.value) {
+  if (archiveFormat.value === 'audio' && isAudioPageNavigationBlocked()) {
     showAudioNavigationBlockedToast()
     return
   }
@@ -1547,7 +1576,7 @@ function handlePageExit() {
     showVideoNavigationBlockedToast()
     return
   }
-  if (archiveFormat.value === 'audio' && audioNavigationBlocked.value) {
+  if (archiveFormat.value === 'audio' && isAudioPageNavigationBlocked()) {
     showAudioNavigationBlockedToast()
     return
   }
@@ -1568,7 +1597,9 @@ function showVideoNavigationBlockedToast() {
 
 function showAudioNavigationBlockedToast() {
   uni.showToast({
-    title: audioUploading.value ? '音频或封面正在处理，请稍候' : '请重试或移除处理失败的音轨或封面',
+    title: audioSubmissionInFlight.value
+      ? '音频帖子正在提交，请稍候'
+      : (audioUploading.value ? '音频或封面正在处理，请稍候' : '请重试或移除处理失败的音轨或封面'),
     icon: 'none',
   })
 }
@@ -1589,12 +1620,12 @@ function removeH5BeforeUnload() {
   // #endif
   h5BeforeUnloadInstalled = false
 }
-watch([archiveFormat, videoNavigationBlocked, videoUploading, audioNavigationBlocked, audioUploading], () => {
+watch([archiveFormat, videoNavigationBlocked, videoUploading, audioNavigationBlocked, audioUploading, audioSubmissionInFlight], () => {
   // #ifdef H5
   const blocked = (
     archiveFormat.value === 'video'
     && shouldBlockVideoNavigation({ navigationBlocked: videoNavigationBlocked.value, uploading: videoUploading.value })
-  ) || (archiveFormat.value === 'audio' && audioNavigationBlocked.value)
+  ) || (archiveFormat.value === 'audio' && isAudioPageNavigationBlocked())
   if (blocked && !h5BeforeUnloadInstalled) {
     window.addEventListener('beforeunload', handleH5BeforeUnload)
     h5BeforeUnloadInstalled = true
@@ -1629,6 +1660,20 @@ function clearDraft() {
   } catch (_error) {}
 }
 
+async function settleAudioSubmitEditor(
+  editor: AudioPublishEditorSubmissionHandle,
+  outcome: 'accepted' | 'retry',
+) {
+  try {
+    if (outcome === 'accepted') await editor.finalizePendingUploadsAfterSubmit()
+    else await editor.returnPendingUploadsAfterSubmit()
+  } catch {
+    // Submission has already settled on the server. Pending-source cleanup is
+    // best effort and must not turn a successful create/update into a failure.
+    console.warn('[audio-publish] submission ownership settlement failed')
+  }
+}
+
 async function handleSubmit() {
   if (!selectedSection.value || submitting.value) return
   if (archiveFormat.value === 'video' && !videoPublishReady.value) {
@@ -1642,6 +1687,8 @@ async function handleSubmit() {
     })
     return
   }
+  let audioSubmitEditor: AudioPublishEditorSubmissionHandle | null = null
+  let audioSubmissionClaimed = false
   submitting.value = true
   try {
     const sectionId = selectedSection.value._id
@@ -1701,6 +1748,14 @@ async function handleSubmit() {
       : {
           presentation: isTextNoteCreateMode.value ? { textNoteTheme: textNoteTheme.value } : undefined,
         }
+    if (archiveFormat.value === 'audio') {
+      audioSubmitEditor = requireAudioPublishEditorSubmissionHandle(audioEditorRef.value)
+      if (!audioSubmitEditor.claimPendingUploadsForSubmission()) {
+        throw new Error('音频编辑器当前无法提交，请稍后重试')
+      }
+      audioSubmissionClaimed = true
+      audioSubmissionInFlight.value = true
+    }
     const result: any = isEditMode.value
       ? await postApi.update(editPostId.value, archiveContent || content, updateOptions)
       : isActivityInviteMode.value
@@ -1728,11 +1783,17 @@ async function handleSubmit() {
             ? { textNoteTheme: textNoteTheme.value }
             : undefined,
         })
-    if (archiveFormat.value === 'audio' && shouldCleanupPendingAudioAfterSubmit(result?.auditStatus)) {
-      // The accepted post already references finalized copies. Lock this editor
-      // before deleting its pending sources so finally cannot reopen submit.
-      audioPublishReady.value = false
-      await audioEditorRef.value?.finalizePendingUploadsAfterSubmit()
+    if (audioSubmitEditor && audioSubmissionClaimed) {
+      if (shouldCleanupPendingAudioAfterSubmit(result?.auditStatus)) {
+        // The accepted post already references finalized copies. Lock this editor
+        // before deleting its pending sources so finally cannot reopen submit.
+        audioPublishReady.value = false
+        await settleAudioSubmitEditor(audioSubmitEditor, 'accepted')
+      } else {
+        await settleAudioSubmitEditor(audioSubmitEditor, 'retry')
+      }
+      audioSubmissionClaimed = false
+      audioSubmissionInFlight.value = false
     }
     // #ifdef H5
     if (import.meta.env.DEV && result?.postId) {
@@ -1747,6 +1808,11 @@ async function handleSubmit() {
     if (isEditMode.value) await handleEditSubmitResult(result)
     else await handleAuditSubmitResult(result)
   } catch (error: any) {
+    if (audioSubmitEditor && audioSubmissionClaimed) {
+      await settleAudioSubmitEditor(audioSubmitEditor, 'retry')
+      audioSubmissionClaimed = false
+      audioSubmissionInFlight.value = false
+    }
     uni.showModal({ title: isEditMode.value ? '保存失败' : '发布失败', content: error?.message ?? '请重试' })
   } finally {
     submitting.value = false

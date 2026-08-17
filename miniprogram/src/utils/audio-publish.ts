@@ -52,6 +52,24 @@ export interface AudioPublishReadiness {
   reason: AudioPublishReadinessReason
 }
 
+export interface CancelableAudioDurationProbe {
+  promise: Promise<number>
+  cancel(): void
+}
+
+export interface AudioPublishEditorSubmissionHandle {
+  claimPendingUploadsForSubmission(): boolean
+  finalizePendingUploadsAfterSubmit(): Promise<void>
+  returnPendingUploadsAfterSubmit(): Promise<void>
+}
+
+export interface AudioSubmissionOwnership {
+  claimForSubmission(): boolean
+  isSubmissionOwned(): boolean
+  handleUnmount(): Promise<void>
+  settleAfterSubmission(outcome: 'accepted' | 'retry'): Promise<void>
+}
+
 const EXTENSION_SET = new Set<string>(AUDIO_ALLOWED_EXTS)
 const AUDIO_MIME_EXTENSIONS: Record<string, AudioExt> = {
   'audio/mpeg': 'mp3',
@@ -125,6 +143,109 @@ export function capturePositiveAudioDurationBeforeCleanup(
     cleanup()
   }
   return requirePositiveAudioDuration(duration)
+}
+
+export function createCancelableAudioDurationProbe(options: {
+  readDuration: () => unknown
+  cleanup: () => void
+  subscribe: (resolve: () => void, reject: (error: Error) => void) => void
+  timeoutMs?: number
+}): CancelableAudioDurationProbe {
+  let settled = false
+  let timeout: ReturnType<typeof setTimeout> | null = null
+  let resolvePromise!: (duration: number) => void
+  let rejectPromise!: (error: Error) => void
+  const promise = new Promise<number>((resolve, reject) => {
+    resolvePromise = resolve
+    rejectPromise = reject
+  })
+  const cleanup = () => {
+    try { options.cleanup() } catch {}
+  }
+  const finish = (error?: Error) => {
+    if (settled) return
+    settled = true
+    if (timeout) clearTimeout(timeout)
+    if (error) {
+      cleanup()
+      rejectPromise(error)
+      return
+    }
+    try {
+      resolvePromise(capturePositiveAudioDurationBeforeCleanup(options.readDuration, cleanup))
+    } catch (durationError: any) {
+      rejectPromise(durationError instanceof Error ? durationError : new Error(String(durationError)))
+    }
+  }
+
+  timeout = setTimeout(
+    () => finish(new Error('读取音频时长超时，请重试')),
+    Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 10000,
+  )
+  try {
+    options.subscribe(() => finish(), (error) => finish(error))
+  } catch (error: any) {
+    finish(error instanceof Error ? error : new Error(String(error)))
+  }
+
+  return {
+    promise,
+    cancel: () => finish(new Error('音频时长读取已取消')),
+  }
+}
+
+export function createAudioSubmissionOwnership(
+  cleanupPendingUploads: () => Promise<void>,
+): AudioSubmissionOwnership {
+  let submissionOwned = false
+  let unmounted = false
+  const cleanupBestEffort = async () => {
+    try { await cleanupPendingUploads() } catch {}
+  }
+  return {
+    claimForSubmission() {
+      if (unmounted || submissionOwned) return false
+      submissionOwned = true
+      return true
+    },
+    isSubmissionOwned() {
+      return submissionOwned
+    },
+    async handleUnmount() {
+      unmounted = true
+      if (!submissionOwned) await cleanupBestEffort()
+    },
+    async settleAfterSubmission(outcome) {
+      if (!submissionOwned) return
+      try {
+        if (outcome === 'accepted' || unmounted) await cleanupBestEffort()
+      } finally {
+        submissionOwned = false
+      }
+    },
+  }
+}
+
+function isAudioPublishEditorSubmissionHandle(value: unknown): value is AudioPublishEditorSubmissionHandle {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<AudioPublishEditorSubmissionHandle>
+  return typeof candidate.claimPendingUploadsForSubmission === 'function'
+    && typeof candidate.finalizePendingUploadsAfterSubmit === 'function'
+    && typeof candidate.returnPendingUploadsAfterSubmit === 'function'
+}
+
+export function requireAudioPublishEditorSubmissionHandle(value: unknown): AudioPublishEditorSubmissionHandle {
+  const candidates = Array.isArray(value) ? value : [value]
+  const handle = candidates.find(isAudioPublishEditorSubmissionHandle)
+  if (!handle) throw new Error('音频编辑器尚未就绪，请稍后重试')
+  return handle
+}
+
+export function shouldBlockAudioPageNavigation(input: {
+  editorBlocked: boolean
+  submissionInFlight: boolean
+}): boolean {
+  return Boolean(input.editorBlocked || input.submissionInFlight)
 }
 
 export function updateAudioTrackTitle<T extends AudioPublishTrackState>(

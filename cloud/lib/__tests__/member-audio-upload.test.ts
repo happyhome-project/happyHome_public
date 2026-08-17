@@ -84,6 +84,25 @@ describe('member audio upload authorization', () => {
 })
 
 describe('member archive audio verification and finalization', () => {
+  test('accepts an H5 .m4a upload served as audio/m4a through finalized metadata verification', async () => {
+    const fileID = pending('audio', 'h5-recording.m4a')
+    const deps = dependencies({ [fileID]: { contentLength: 8192, contentType: 'audio/m4a' } })
+
+    const result = await finalizeMemberArchiveAudioContent({
+      title: 'H5 录音',
+      audios: [{ title: '浏览器录音', fileID, duration: 18, size: 1, ext: 'm4a' }],
+    }, openid, communityId, deps)
+
+    expect(result.content.audios).toEqual([{
+      title: '浏览器录音',
+      fileID: expect.stringContaining(`/posts/member-audios-finalized/${scope}/`),
+      duration: 18,
+      size: 8192,
+      ext: 'm4a',
+    }])
+    expect(deps.inspectRemoteObject).toHaveBeenCalledTimes(2)
+  })
+
   test.each([
     ['mp3', 'audio/mpeg'], ['mp3', 'audio/mp3'],
     ['m4a', 'audio/mp4'], ['m4a', 'audio/x-m4a'],

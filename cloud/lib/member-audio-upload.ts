@@ -10,7 +10,7 @@ const AUDIO_EXTENSIONS = new Set<string>(AUDIO_ALLOWED_EXTS)
 const COVER_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp'])
 const AUDIO_CONTENT_TYPES: Record<AudioExt, Set<string>> = {
   mp3: new Set(['audio/mpeg', 'audio/mp3']),
-  m4a: new Set(['audio/mp4', 'audio/x-m4a']),
+  m4a: new Set(['audio/mp4', 'audio/m4a', 'audio/x-m4a']),
   aac: new Set(['audio/aac', 'audio/x-aac']),
   wav: new Set(['audio/wav', 'audio/x-wav', 'audio/wave']),
 }
