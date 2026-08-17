@@ -3,7 +3,11 @@ import { createPinia, setActivePinia } from 'pinia'
 import { _setAudioStoreDepsForTesting, useAudioStore } from '../audio'
 import type { AudioBackend, AudioBackendEvent, AudioBackendMeta } from '../../utils/audio-manager'
 
-function makeMockBackend(options: { emitPlayEvent?: boolean } = {}) {
+function makeMockBackend(options: {
+  emitPlayEvent?: boolean
+  setSrcError?: Error
+  playError?: Error
+} = {}) {
   const handlers: Partial<Record<AudioBackendEvent, (...args: any[]) => void>> = {}
   const calls = {
     setSrc: [] as Array<{ url: string; title: string; meta?: AudioBackendMeta }>,
@@ -17,10 +21,12 @@ function makeMockBackend(options: { emitPlayEvent?: boolean } = {}) {
     setSrc(url, title, meta) {
       calls.setSrc.push({ url, title, meta })
       calls.sequence.push('setSrc')
+      if (options.setSrcError) throw options.setSrcError
     },
     play() {
       calls.play += 1
       calls.sequence.push('play')
+      if (options.playError) throw options.playError
       if (options.emitPlayEvent !== false) handlers.onPlay?.()
     },
     pause() { calls.pause += 1; handlers.onPause?.() },
@@ -245,6 +251,9 @@ describe('audio store', () => {
     mock.handlers.onPlay?.()
 
     expect(mock.calls.sequence).toEqual(['setSrc', 'play', 'seek:37'])
+
+    mock.handlers.onPlay?.()
+    expect(mock.calls.sequence).toEqual(['setSrc', 'play', 'seek:37'])
   })
 
   test('keeps only the newest generation seek when a pending playlist is replaced', async () => {
@@ -378,6 +387,179 @@ describe('audio store', () => {
     store.seek(24)
     expect(mock.calls.seek).toEqual([18, 24])
     expect(store.currentTime).toBe(24)
+  })
+
+  test('does not seek the old active source after the replacement has no playable URL', async () => {
+    const mock = makeMockBackend()
+    _setAudioStoreDepsForTesting({
+      backend: mock.backend,
+      storage: makeStorage().storage,
+      getTempFileURL: vi.fn(async () => []),
+    })
+    const store = useAudioStore()
+    await store.playPlaylist([{
+      fileID: 'https://cdn/source-a.mp3',
+      title: 'Source A',
+      duration: 60,
+    }], 0, { ...META, postId: 'source-a-post' })
+    mock.handlers.onTimeUpdate?.(14)
+
+    await store.playPlaylist([{
+      fileID: 'cloud://audio/missing-b.mp3',
+      title: 'Missing B',
+      duration: 80,
+    }], 0, { ...META, postId: 'missing-b-post' })
+    store.seek(25)
+
+    expect(store.currentTrack?.title).toBe('Missing B')
+    expect(store.playbackPending).toBe(false)
+    expect(store.isPlaying).toBe(false)
+    expect(store.currentTime).toBe(0)
+    expect(mock.calls.seek).toEqual([])
+  })
+
+  test('makes a pre-onPlay error terminal and resets optimistic pending seek time', async () => {
+    const mock = makeMockBackend({ emitPlayEvent: false })
+    _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
+    const store = useAudioStore()
+    await store.playPlaylist([{
+      fileID: 'https://cdn/error-before-play.mp3',
+      title: 'Error before play',
+      duration: 60,
+    }], 0, { ...META, postId: 'error-before-play-post' })
+    store.seek(31)
+
+    mock.handlers.onError?.(new Error('source failed before play'))
+
+    expect(store.playbackPending).toBe(false)
+    expect(store.isPlaying).toBe(false)
+    expect(store.currentTime).toBe(0)
+    expect(mock.calls.seek).toEqual([])
+
+    mock.handlers.onPlay?.()
+    expect(store.isPlaying).toBe(false)
+    expect(mock.calls.seek).toEqual([])
+  })
+
+  test('makes a synchronous setSrc failure terminal and ignores late onPlay', async () => {
+    const mock = makeMockBackend({
+      emitPlayEvent: false,
+      setSrcError: new Error('setSrc failed'),
+    })
+    _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
+    const store = useAudioStore()
+
+    const request = store.playPlaylist([{
+      fileID: 'https://cdn/set-src-throws.mp3',
+      title: 'setSrc throws',
+      duration: 60,
+    }], 0, { ...META, postId: 'set-src-throws-post' })
+    store.seek(17)
+
+    await expect(request).resolves.toBeUndefined()
+    expect(store.playbackPending).toBe(false)
+    expect(store.isPlaying).toBe(false)
+    expect(store.currentTime).toBe(0)
+    expect(mock.calls.seek).toEqual([])
+
+    mock.handlers.onPlay?.()
+    expect(store.isPlaying).toBe(false)
+    expect(mock.calls.seek).toEqual([])
+  })
+
+  test('makes a synchronous play failure terminal and ignores late onPlay', async () => {
+    const mock = makeMockBackend({
+      emitPlayEvent: false,
+      playError: new Error('play failed'),
+    })
+    _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
+    const store = useAudioStore()
+
+    const request = store.playPlaylist([{
+      fileID: 'https://cdn/play-throws.mp3',
+      title: 'play throws',
+      duration: 60,
+    }], 0, { ...META, postId: 'play-throws-post' })
+    store.seek(19)
+
+    await expect(request).resolves.toBeUndefined()
+    expect(store.playbackPending).toBe(false)
+    expect(store.isPlaying).toBe(false)
+    expect(store.currentTime).toBe(0)
+    expect(mock.calls.seek).toEqual([])
+
+    mock.handlers.onPlay?.()
+    expect(store.isPlaying).toBe(false)
+    expect(mock.calls.seek).toEqual([])
+  })
+
+  test('toggle cancellation resets optimistic time for an unactivated request', async () => {
+    const mock = makeMockBackend({ emitPlayEvent: false })
+    _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
+    const store = useAudioStore()
+    await store.playPlaylist([{
+      fileID: 'https://cdn/cancel-before-play.mp3',
+      title: 'Cancel before play',
+      duration: 60,
+    }], 0, { ...META, postId: 'cancel-before-play-post' })
+    store.seek(33)
+
+    await store.togglePlay()
+
+    expect(store.playbackPending).toBe(false)
+    expect(store.isPlaying).toBe(false)
+    expect(store.currentTime).toBe(0)
+    expect(mock.calls.seek).toEqual([])
+  })
+
+  test('retries an unready source from zero and accepts only the retry generation seek', async () => {
+    const mock = makeMockBackend({ emitPlayEvent: false })
+    const retrySigner = deferred<Array<{ fileID: string; tempFileURL: string }>>()
+    let retrying = false
+    const getTempFileURL = vi.fn(() => (
+      retrying ? retrySigner.promise : Promise.resolve([])
+    ))
+    _setAudioStoreDepsForTesting({
+      backend: mock.backend,
+      storage: makeStorage().storage,
+      getTempFileURL,
+    })
+    const store = useAudioStore()
+    const track = { fileID: 'cloud://audio/retry.mp3', title: 'Retry', duration: 70 }
+    await store.playPlaylist([track], 0, { ...META, postId: 'retry-post' })
+
+    retrying = true
+    const retryRequest = store.togglePlay()
+    expect(store.currentTime).toBe(0)
+    store.seek(22)
+    retrySigner.resolve([{ fileID: track.fileID, tempFileURL: 'https://signed/retry.mp3' }])
+    await retryRequest
+
+    expect(mock.calls.seek).toEqual([])
+    mock.handlers.onPlay?.()
+    expect(mock.calls.seek).toEqual([22])
+    expect(store.currentTime).toBe(22)
+  })
+
+  test('preserves an active position across normal pause and resume', async () => {
+    const mock = makeMockBackend()
+    _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
+    const store = useAudioStore()
+    await store.playPlaylist([{
+      fileID: 'https://cdn/pause-resume.mp3',
+      title: 'Pause resume',
+      duration: 90,
+    }], 0, { ...META, postId: 'pause-resume-post' })
+    mock.handlers.onTimeUpdate?.(27)
+
+    await store.togglePlay()
+    expect(store.currentTime).toBe(27)
+
+    await store.togglePlay()
+
+    expect(store.currentTime).toBe(27)
+    expect(mock.calls.seek).toEqual([27])
+    expect(store.isPlaying).toBe(true)
   })
 
   test('allows only the latest fast playlist switch to reach the backend', async () => {

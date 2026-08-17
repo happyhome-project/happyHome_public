@@ -37,6 +37,11 @@ interface PlaybackRequestSnapshot {
   meta: PlaylistMeta
 }
 
+interface PlaybackInvalidationOptions {
+  preserveReadySource?: boolean
+  resetCurrentTime?: boolean
+}
+
 export interface AudioStoreDeps {
   storage: {
     get(key: string): unknown
@@ -98,6 +103,7 @@ export const useAudioStore = defineStore('audio', {
     currentTime: 0,
     playbackGeneration: 0,
     playbackPending: false,
+    sourceReadyGeneration: null as number | null,
     pendingSeek: null as { generation: number; seconds: number } | null,
   }),
   getters: {
@@ -132,18 +138,25 @@ export const useAudioStore = defineStore('audio', {
       if (this.currentPlaylist.length === 0) return
       const backend = this._backend()
       if (this.playbackPending) {
-        this._invalidatePlaybackRequest()
+        this._invalidatePlaybackRequest({ resetCurrentTime: true })
         try { backend.pause() } catch (_error) {}
         return
       }
       if (this.isPlaying) {
-        this._invalidatePlaybackRequest()
+        this._invalidatePlaybackRequest({ preserveReadySource: true })
         try { backend.pause() } catch (_error) {}
         return
       }
       const snapshot = createPlaybackRequestSnapshot(this.currentPlaylist, this.currentIndex, this.currentMeta)
       if (!snapshot) return
+      const resumeSeconds = this.sourceReadyGeneration === this.playbackGeneration
+        ? this.currentTime
+        : 0
+      if (resumeSeconds === 0) this.currentTime = 0
       const generation = this._beginPlaybackRequest(false)
+      if (resumeSeconds > 0) {
+        this.pendingSeek = { generation, seconds: resumeSeconds }
+      }
       await this._playSnapshot(snapshot, generation)
     },
     async next() {
@@ -166,16 +179,22 @@ export const useAudioStore = defineStore('audio', {
     },
     seek(seconds: number) {
       if (this.currentPlaylist.length === 0) return
-      this.currentTime = seconds
       if (this.playbackPending) {
+        this.currentTime = seconds
         this.pendingSeek = { generation: this.playbackGeneration, seconds }
         return
       }
+      if (this.sourceReadyGeneration === this.playbackGeneration) {
+        this.currentTime = seconds
+        this.pendingSeek = null
+        this._backend().seek(seconds)
+        return
+      }
+      this.currentTime = 0
       this.pendingSeek = null
-      this._backend().seek(seconds)
     },
     close() {
-      this._invalidatePlaybackRequest()
+      this._invalidatePlaybackRequest({ resetCurrentTime: true })
       try { this._backend().stop() } catch (_error) {}
       this.isVisible = false
       this.currentPlaylist = []
@@ -190,6 +209,7 @@ export const useAudioStore = defineStore('audio', {
       const backend = this._backend()
       this.playbackGeneration += 1
       this.playbackPending = true
+      this.sourceReadyGeneration = null
       this.pendingSeek = null
       this.isPlaying = false
       if (shouldPause) {
@@ -197,11 +217,17 @@ export const useAudioStore = defineStore('audio', {
       }
       return this.playbackGeneration
     },
-    _invalidatePlaybackRequest() {
+    _invalidatePlaybackRequest(options: PlaybackInvalidationOptions = {}) {
+      const { preserveReadySource = false, resetCurrentTime = false } = options
+      const sourceWasReady = this.sourceReadyGeneration === this.playbackGeneration
       this.playbackGeneration += 1
       this.playbackPending = false
+      this.sourceReadyGeneration = preserveReadySource && sourceWasReady
+        ? this.playbackGeneration
+        : null
       this.pendingSeek = null
       this.isPlaying = false
+      if (resetCurrentTime) this.currentTime = 0
     },
     _isCurrentPlaybackRequest(generation: number): boolean {
       return generation === this.playbackGeneration
@@ -213,6 +239,7 @@ export const useAudioStore = defineStore('audio', {
           if (!this._isCurrentPlaybackRequest(generation)) return
           activated = true
           this.playbackPending = false
+          this.sourceReadyGeneration = generation
           this.isPlaying = true
           if (this.pendingSeek?.generation === generation) {
             const seconds = this.pendingSeek.seconds
@@ -236,10 +263,7 @@ export const useAudioStore = defineStore('audio', {
           this.currentTime = seconds
         },
         onError: () => {
-          if (!this._isCurrentPlaybackRequest(generation)) return
-          this.playbackPending = false
-          if (this.pendingSeek?.generation === generation) this.pendingSeek = null
-          this.isPlaying = false
+          this._failPlaybackRequest(generation)
         },
       } as Record<AudioBackendEvent, (...args: any[]) => void>)
     },
@@ -251,21 +275,28 @@ export const useAudioStore = defineStore('audio', {
       const url = await this._urlFor(snapshot.track.fileID)
       if (!this._isCurrentPlaybackRequest(generation)) return
       if (!url) {
-        this.playbackPending = false
-        if (this.pendingSeek?.generation === generation) this.pendingSeek = null
+        this._failPlaybackRequest(generation)
         return
       }
       const coverImgUrl = snapshot.track.cover ? await this._urlFor(snapshot.track.cover) : ''
       if (!this._isCurrentPlaybackRequest(generation)) return
       const backend = this._backend()
       this._bindPlaybackEvents(backend, generation)
-      backend.setSrc(url, snapshot.track.title, {
-        coverImgUrl,
-        epname: snapshot.meta.postTitle,
-        singer: '',
-      })
+      try {
+        backend.setSrc(url, snapshot.track.title, {
+          coverImgUrl,
+          epname: snapshot.meta.postTitle,
+          singer: '',
+        })
+        if (!this._isCurrentPlaybackRequest(generation)) return
+        backend.play()
+      } catch (_error) {
+        this._failPlaybackRequest(generation)
+      }
+    },
+    _failPlaybackRequest(generation: number) {
       if (!this._isCurrentPlaybackRequest(generation)) return
-      backend.play()
+      this._invalidatePlaybackRequest({ resetCurrentTime: true })
     },
     async _preloadUrls(fileIDs: string[]) {
       const fetchFn = deps.getTempFileURL

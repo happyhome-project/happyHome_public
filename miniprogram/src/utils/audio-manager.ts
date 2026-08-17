@@ -52,8 +52,7 @@ function createBackend(): AudioBackend {
 
 class WxBackgroundAudioBackend implements AudioBackend {
   private bgm: any
-  private bound = false
-  private handlers: Partial<Record<AudioBackendEvent, (...args: any[]) => void>> = {}
+  private listeners: Partial<Record<AudioBackendEvent | 'onStop', (...args: any[]) => void>> = {}
 
   constructor() {
     this.bgm = (wx as any).getBackgroundAudioManager()
@@ -85,30 +84,47 @@ class WxBackgroundAudioBackend implements AudioBackend {
   }
 
   destroy() {
-    this.handlers = {}
-    this.bound = false
+    this.unbind()
   }
 
   bind(handlers: Partial<Record<AudioBackendEvent, (...args: any[]) => void>>) {
-    this.handlers = handlers
-    if (this.bound) return
-    this.bound = true
-    this.bgm.onPlay?.(() => this.handlers.onPlay?.())
-    this.bgm.onPause?.(() => this.handlers.onPause?.())
-    this.bgm.onStop?.(() => this.handlers.onPause?.())
-    this.bgm.onEnded?.(() => this.handlers.onEnded?.())
-    this.bgm.onError?.((err: any) => this.handlers.onError?.(err))
-    this.bgm.onTimeUpdate?.(() => {
-      const currentTime = Number(this.bgm.currentTime || 0)
-      this.handlers.onTimeUpdate?.(currentTime)
-    })
+    this.unbind()
+    const listeners = {
+      onPlay: () => handlers.onPlay?.(),
+      onPause: () => handlers.onPause?.(),
+      onStop: () => handlers.onPause?.(),
+      onEnded: () => handlers.onEnded?.(),
+      onError: (err: any) => handlers.onError?.(err),
+      onTimeUpdate: () => {
+        const currentTime = Number(this.bgm.currentTime || 0)
+        handlers.onTimeUpdate?.(currentTime)
+      },
+    }
+    this.listeners = listeners
+    this.bgm.onPlay?.(listeners.onPlay)
+    this.bgm.onPause?.(listeners.onPause)
+    this.bgm.onStop?.(listeners.onStop)
+    this.bgm.onEnded?.(listeners.onEnded)
+    this.bgm.onError?.(listeners.onError)
+    this.bgm.onTimeUpdate?.(listeners.onTimeUpdate)
+  }
+
+  private unbind() {
+    const listeners = this.listeners
+    if (listeners.onPlay) this.bgm.offPlay?.(listeners.onPlay)
+    if (listeners.onPause) this.bgm.offPause?.(listeners.onPause)
+    if (listeners.onStop) this.bgm.offStop?.(listeners.onStop)
+    if (listeners.onEnded) this.bgm.offEnded?.(listeners.onEnded)
+    if (listeners.onError) this.bgm.offError?.(listeners.onError)
+    if (listeners.onTimeUpdate) this.bgm.offTimeUpdate?.(listeners.onTimeUpdate)
+    this.listeners = {}
   }
 }
 
 class HtmlAudioBackend implements AudioBackend {
   private audio: HTMLAudioElement | null = null
   private handlers: Partial<Record<AudioBackendEvent, (...args: any[]) => void>> = {}
-  private bound = false
+  private listeners: Partial<Record<AudioBackendEvent, (...args: any[]) => void>> = {}
 
   private getAudio(): HTMLAudioElement {
     if (!this.audio) {
@@ -127,13 +143,14 @@ class HtmlAudioBackend implements AudioBackend {
   }
 
   play() {
+    const handlers = this.handlers
     try {
       const result = this.getAudio().play()
       if (result && typeof result.then === 'function') {
-        result.catch((err) => this.handlers.onError?.(err))
+        result.catch((err) => handlers.onError?.(err))
       }
     } catch (err) {
-      this.handlers.onError?.(err)
+      handlers.onError?.(err)
     }
   }
 
@@ -158,6 +175,7 @@ class HtmlAudioBackend implements AudioBackend {
 
   destroy() {
     if (this.audio) {
+      this.unbind(this.audio)
       try {
         this.audio.pause()
         this.audio.src = ''
@@ -165,20 +183,34 @@ class HtmlAudioBackend implements AudioBackend {
     }
     this.audio = null
     this.handlers = {}
-    this.bound = false
   }
 
   bind(handlers: Partial<Record<AudioBackendEvent, (...args: any[]) => void>>) {
-    this.handlers = handlers
-    if (this.bound) return
-    this.bound = true
     const audio = this.getAudio()
-    audio.addEventListener('play', () => this.handlers.onPlay?.())
-    audio.addEventListener('pause', () => this.handlers.onPause?.())
-    audio.addEventListener('ended', () => this.handlers.onEnded?.())
-    audio.addEventListener('error', () => this.handlers.onError?.(audio.error))
-    audio.addEventListener('timeupdate', () => {
-      this.handlers.onTimeUpdate?.(audio.currentTime || 0)
-    })
+    this.unbind(audio)
+    this.handlers = handlers
+    const listeners = {
+      onPlay: () => handlers.onPlay?.(),
+      onPause: () => handlers.onPause?.(),
+      onEnded: () => handlers.onEnded?.(),
+      onError: () => handlers.onError?.(audio.error),
+      onTimeUpdate: () => handlers.onTimeUpdate?.(audio.currentTime || 0),
+    }
+    this.listeners = listeners
+    audio.addEventListener('play', listeners.onPlay)
+    audio.addEventListener('pause', listeners.onPause)
+    audio.addEventListener('ended', listeners.onEnded)
+    audio.addEventListener('error', listeners.onError)
+    audio.addEventListener('timeupdate', listeners.onTimeUpdate)
+  }
+
+  private unbind(audio: HTMLAudioElement) {
+    const listeners = this.listeners
+    if (listeners.onPlay) audio.removeEventListener('play', listeners.onPlay)
+    if (listeners.onPause) audio.removeEventListener('pause', listeners.onPause)
+    if (listeners.onEnded) audio.removeEventListener('ended', listeners.onEnded)
+    if (listeners.onError) audio.removeEventListener('error', listeners.onError)
+    if (listeners.onTimeUpdate) audio.removeEventListener('timeupdate', listeners.onTimeUpdate)
+    this.listeners = {}
   }
 }
