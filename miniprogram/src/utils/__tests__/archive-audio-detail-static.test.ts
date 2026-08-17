@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, test } from 'vitest'
 
@@ -37,14 +37,58 @@ describe('native archive audio detail presentation', () => {
     const positions = orderedMarkers.map(marker => component.indexOf(marker))
     expect(positions.every(position => position >= 0)).toBe(true)
     expect(positions).toEqual(positions.slice().sort((left, right) => left - right))
-    expect(component).toContain('<wd-slider')
-    expect(component).toContain('@dragend="handleSeek"')
+    expect(component).toContain('<slider')
+    expect(component).toContain('@change="handleSeek"')
+    expect(component).not.toContain('@changing="handleSeek"')
+    expect(component).not.toContain('<wd-slider')
+    expect(component).not.toContain('@dragend="handleSeek"')
     expect(component).not.toContain('@update:model-value="handleSeek"')
-    expect(component).not.toContain('@change="handleSeek"')
-    expect(component).toContain('const raw = event?.value')
+    expect(component).toContain('const raw = event?.detail?.value')
+    expect(component).toContain('<AudioIcon')
+    expect(component).not.toContain('<wd-icon')
     for (const icon of ['previous', 'play-circle', 'pause', 'next', 'sound']) {
       expect(component).toContain(`name="${icon}"`)
     }
+  })
+
+  test('keeps audio source and fresh mp output free of Wot runtime components and HTTP fonts', () => {
+    for (const relativePath of [
+      'src/components/ArchiveWaterfall.vue',
+      'src/components/AuthorPostColumns.vue',
+      'src/components/AudioPostDetailView.vue',
+    ]) {
+      expect(source(relativePath)).not.toMatch(/<wd-(?:icon|slider)\b/)
+    }
+
+    const compiledRoot = projectPath('dist/build/mp-weixin/node-modules')
+    if (existsSync(compiledRoot)) {
+      const compiledFiles = readdirSync(compiledRoot, { recursive: true, encoding: 'utf8' })
+      expect(compiledFiles.some(relativePath => relativePath.replaceAll('\\', '/').includes('wot-design-uni/'))).toBe(false)
+      for (const relativePath of compiledFiles.filter(relativePath => relativePath.endsWith('.wxss'))) {
+        const contents = readFileSync(resolve(compiledRoot, relativePath), 'utf8')
+        expect(contents, relativePath).not.toMatch(/@font-face\s*\{[^}]*url\(\s*['"]?https?:\/\//i)
+      }
+    }
+  })
+
+  test('avoids source constructs rejected by the mp critical-runtime scanner', () => {
+    const files = [
+      'src/components/widgets/AudioPublishEditor.vue',
+      'src/store/audio.ts',
+      'src/utils/archive-feed.ts',
+      'src/utils/audio-display.ts',
+      'src/utils/audio-publish.ts',
+      'src/utils/author-post-feed.ts',
+    ]
+    for (const relativePath of files) {
+      const contents = source(relativePath)
+      expect(contents, relativePath).not.toMatch(/Array\.from\(/)
+      expect(contents, relativePath).not.toMatch(/\{\s*\.\.\.[A-Za-z_$]/)
+      expect(contents, relativePath).not.toMatch(/\[\s*\.\.\.[A-Za-z_$]/)
+    }
+    expect(source('src/components/widgets/AudioPublishEditor.vue')).not.toMatch(
+      /watch\(\(\)\s*=>\s*\[[^\]]+\][\s\S]*?,\s*\(\s*\[/,
+    )
   })
 
   test('uses the existing audio store with canonical tracks and has no forbidden travel or activity modules', () => {

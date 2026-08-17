@@ -106,11 +106,14 @@ describe('audio publish state reducers', () => {
   })
 
   test('replaces and removes an optional per-track cover immutably', () => {
-    const track = readyTrack({ cover: 'cloud://env/existing-cover.jpg' })
+    const track = Object.assign(readyTrack({ cover: 'cloud://env/existing-cover.jpg' }), { clientToken: 'keep-me' })
     const replacement = replaceAudioTrackCover(track, 'cloud://env/new-cover.webp')
     expect(replacement.cover).toBe('cloud://env/new-cover.webp')
+    expect(replacement.clientToken).toBe('keep-me')
     expect(track.cover).toBe('cloud://env/existing-cover.jpg')
-    expect(removeAudioTrackCover(replacement).cover).toBeUndefined()
+    const removed = removeAudioTrackCover(replacement)
+    expect(removed.cover).toBeUndefined()
+    expect(removed.clientToken).toBe('keep-me')
   })
 
   test('moves failed work back to pending for retry and resolves only after success', () => {

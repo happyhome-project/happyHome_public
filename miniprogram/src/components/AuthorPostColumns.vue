@@ -17,10 +17,10 @@
             @error="fallbackFeedCoverAfterError(card.cover)"
           />
           <view class="author-post-audio-play" aria-hidden="true">
-            <wd-icon name="play-circle-filled" size="54rpx" color="#ffffff" />
+            <AudioIcon name="play-circle-filled" size="54rpx" color="#ffffff" />
           </view>
           <view class="author-post-audio-summary">
-            <wd-icon name="sound" size="22rpx" color="#ffffff" />
+            <AudioIcon name="sound" size="22rpx" color="#ffffff" />
             <text>音频 · {{ card.trackCount }}首 · {{ formatAudioDuration(card.totalDuration) }}</text>
           </view>
         </view>
@@ -63,6 +63,7 @@
 </template>
 
 <script setup lang="ts">
+import AudioIcon from './AudioIcon.vue'
 import TextNoteCover from './TextNoteCover.vue'
 import type { AuthorPostColumns } from '../utils/author-post-feed'
 import { formatAudioDuration } from '../utils/audio-display'

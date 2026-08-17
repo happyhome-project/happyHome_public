@@ -178,7 +178,9 @@ watch(() => props.modelValue, (items) => {
   emitState()
 }, { immediate: true, deep: true })
 
-watch(() => [props.initialFiles, props.initialGeneration] as const, ([files, generation]) => {
+watch(() => [props.initialFiles, props.initialGeneration] as const, (values) => {
+  const files = values[0]
+  const generation = values[1]
   const normalizedGeneration = Number(generation) || 0
   if (!Array.isArray(files) || files.length === 0 || normalizedGeneration === lastInitialGeneration) return
   lastInitialGeneration = normalizedGeneration
@@ -240,7 +242,9 @@ async function performPendingCleanup(uploads: PendingAudioUpload[]) {
 }
 
 async function cleanupPendingUploads() {
-  await performPendingCleanup(Array.from(pendingUploads.values()))
+  const uploads: PendingAudioUpload[] = []
+  pendingUploads.forEach((pending) => uploads.push(pending))
+  await performPendingCleanup(uploads)
 }
 
 const submissionOwnership = createAudioSubmissionOwnership(cleanupPendingUploads)
@@ -354,7 +358,9 @@ function cancelAudioDurationProbe(trackId: string) {
 }
 
 function cancelAllAudioDurationProbes() {
-  for (const trackId of Array.from(activeDurationProbes.keys())) {
+  const trackIds: string[] = []
+  activeDurationProbes.forEach((_probe, trackId) => trackIds.push(trackId))
+  for (const trackId of trackIds) {
     cancelAudioDurationProbe(trackId)
   }
 }
@@ -383,7 +389,7 @@ function acceptAudioFiles(files: ArchiveMediaIntentFile[]) {
         coverError: '',
       }
     })
-    tracks.value = [...tracks.value, ...additions]
+    tracks.value = tracks.value.concat(additions)
     emitState()
     additions.forEach((track) => enqueueTrackUpload(track.id))
   } catch (error: any) {
@@ -541,12 +547,20 @@ function onH5AudioChange(event: Event) {
     input.value = ''
     return
   }
-  const files = Array.from(input.files || []).map((file) => ({
-    source: file,
-    name: file.name,
-    type: file.type,
-    size: file.size,
-  }))
+  const files: ArchiveMediaIntentFile[] = []
+  const selectedFiles = input.files
+  if (selectedFiles) {
+    for (let index = 0; index < selectedFiles.length; index += 1) {
+      const file = selectedFiles.item(index)
+      if (!file) continue
+      files.push({
+        source: file,
+        name: file.name,
+        type: file.type,
+        size: file.size,
+      })
+    }
+  }
   if (files.length > 0) acceptAudioFiles(files)
   input.value = ''
 }

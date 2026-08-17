@@ -53,12 +53,13 @@ export function toAudioPlayerTracks(value: unknown): AudioPlayerTrack[] {
       const title = String(track.title || '').trim()
       const duration = Number(track.duration)
       const cover = String(track.cover || '').trim()
-      return {
+      const result: AudioPlayerTrack = {
         fileID,
         title,
         duration: Number.isFinite(duration) && duration > 0 ? duration : 0,
-        ...(cover ? { cover } : {}),
       }
+      if (cover) result.cover = cover
+      return result
     })
     .filter(track => Boolean(track.fileID))
 }

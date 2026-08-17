@@ -51,7 +51,6 @@ export function normalizeArchiveCard(post: Record<string, any>): ArchiveFeedCard
     ? {
         kind: 'audio',
         src: audio.firstCover || DEFAULT_AUDIO_COVER,
-        ...(audio.firstCover ? { source: audio.firstCover } : {}),
         fallback: DEFAULT_AUDIO_COVER,
       }
     : format === 'video'
@@ -59,6 +58,7 @@ export function normalizeArchiveCard(post: Record<string, any>): ArchiveFeedCard
     : format === 'image_text'
       ? { kind: 'image', src: images[0] }
       : { kind: 'text', theme: String(post?.presentation?.textNoteTheme || stableTheme(postId)) }
+  if (cover.kind === 'audio' && audio.firstCover) cover.source = audio.firstCover
   return {
     postId,
     format,

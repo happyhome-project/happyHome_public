@@ -27,11 +27,11 @@
         aria-label="上一首"
         @tap="playPrevious"
       >
-        <wd-icon name="previous" size="48rpx" color="#32b77a" />
+        <AudioIcon name="previous" size="48rpx" color="#32b77a" />
       </view>
       <view class="audio-post-detail__control audio-post-detail__control--primary" aria-label="播放或暂停" @tap="togglePlayback">
-        <wd-icon v-if="isPlaying" name="pause" size="46rpx" color="#ffffff" />
-        <wd-icon v-else name="play-circle" size="50rpx" color="#ffffff" />
+        <AudioIcon v-if="isPlaying" name="pause" size="46rpx" color="#ffffff" />
+        <AudioIcon v-else name="play-circle" size="50rpx" color="#ffffff" />
       </view>
       <view
         class="audio-post-detail__control"
@@ -39,22 +39,23 @@
         aria-label="下一首"
         @tap="playNext"
       >
-        <wd-icon name="next" size="48rpx" color="#32b77a" />
+        <AudioIcon name="next" size="48rpx" color="#32b77a" />
       </view>
     </view>
 
     <view class="audio-post-detail__progress">
       <text>{{ formatAudioDuration(elapsedSeconds) }}</text>
-      <wd-slider
-        :model-value="elapsedSeconds"
+      <slider
+        class="audio-post-detail__slider"
+        :value="elapsedSeconds"
         :min="0"
         :max="currentDuration || 1"
         :step="1"
-        hide-label
-        hide-min-max
-        active-color="#32b77a"
-        inactive-color="#e3e7e5"
-        @dragend="handleSeek"
+        activeColor="#32b77a"
+        backgroundColor="#e3e7e5"
+        block-color="#32b77a"
+        :block-size="14"
+        @change="handleSeek"
       />
       <text>{{ formatAudioDuration(currentDuration) }}</text>
     </view>
@@ -69,7 +70,7 @@
       >
         <text class="audio-post-detail__track-index">{{ index + 1 }}</text>
         <text class="audio-post-detail__track-title">{{ track.title }}</text>
-        <wd-icon
+        <AudioIcon
           v-if="index === activeIndex && isPlaying"
           name="sound"
           size="26rpx"
@@ -83,6 +84,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import AudioIcon from './AudioIcon.vue'
 import { useAudioStore } from '../store/audio'
 import {
   DEFAULT_AUDIO_COVER,
@@ -187,9 +189,8 @@ async function playNext() {
   await playTrack(activeIndex.value + 1)
 }
 
-async function handleSeek(event: { value?: number | number[] }) {
-  const raw = event?.value
-  if (Array.isArray(raw)) return
+async function handleSeek(event: { detail?: { value?: number } }) {
+  const raw = event?.detail?.value
   const seconds = Math.min(currentDuration.value, Math.max(0, Number(raw || 0)))
   if (!isCurrentPost.value) await playTrack(activeIndex.value)
   audioStore.seek(seconds)
@@ -220,7 +221,7 @@ function handleCoverError() {
 .audio-post-detail__control--disabled { opacity: .3; }
 .audio-post-detail__progress { display: grid; grid-template-columns: 66rpx minmax(0,1fr) 66rpx; align-items: center; gap: 10rpx; margin-top: 16rpx; color: #9ba29f; font-size: 20rpx; }
 .audio-post-detail__progress > text:last-child { text-align: right; }
-.audio-post-detail__progress :deep(.wd-slider) { width: 100%; }
+.audio-post-detail__slider { width: 100%; margin: 0; }
 .audio-post-detail__tracks { overflow: hidden; margin-top: 22rpx; border: 1rpx solid #edf0ee; border-radius: 16rpx; background: #f8f9f8; }
 .audio-post-detail__track { min-height: 76rpx; display: grid; grid-template-columns: 38rpx minmax(0,1fr) auto auto; align-items: center; gap: 10rpx; padding: 0 18rpx; border-bottom: 1rpx solid #e9ecea; box-sizing: border-box; color: #3f4743; font-size: 25rpx; }
 .audio-post-detail__track:last-child { border-bottom: 0; }

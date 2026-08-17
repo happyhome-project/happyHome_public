@@ -23,10 +23,10 @@
               @error="$emit('cover-error', card)"
             />
             <view class="archive-waterfall__audio-play" aria-hidden="true">
-              <wd-icon name="play-circle-filled" size="54rpx" color="#ffffff" />
+              <AudioIcon name="play-circle-filled" size="54rpx" color="#ffffff" />
             </view>
             <view class="archive-waterfall__audio-summary">
-              <wd-icon name="sound" size="22rpx" color="#ffffff" />
+              <AudioIcon name="sound" size="22rpx" color="#ffffff" />
               <text>音频 · {{ card.trackCount }}首 · {{ formatAudioDuration(card.totalDuration) }}</text>
             </view>
           </view>
@@ -69,6 +69,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import AudioIcon from './AudioIcon.vue'
 import TextNoteCover from './TextNoteCover.vue'
 import type { ArchiveFeedCard, ArchiveFeedColumns } from '../utils/archive-feed'
 import { formatAudioDuration } from '../utils/audio-display'

@@ -314,7 +314,9 @@ export function updateAudioTrackTitle<T extends AudioPublishTrackState>(
   trackId: string,
   title: string,
 ): T[] {
-  return tracks.map((track) => track.id === trackId ? { ...track, title } : track) as T[]
+  return tracks.map((track) => (
+    track.id === trackId ? Object.assign({}, track, { title }) as T : track
+  )) as T[]
 }
 
 export function moveAudioTrack<T extends AudioPublishTrackState>(
@@ -338,11 +340,11 @@ export function removeAudioTrack<T extends AudioPublishTrackState>(tracks: reado
 
 export function replaceAudioTrackCover<T extends AudioPublishTrackState>(track: T, cover: string): T {
   const normalized = String(cover || '').trim()
-  return { ...track, cover: normalized || undefined }
+  return Object.assign({}, track, { cover: normalized || undefined }) as T
 }
 
 export function removeAudioTrackCover<T extends AudioPublishTrackState>(track: T): T {
-  const result = { ...track }
+  const result = Object.assign({}, track) as T
   delete result.cover
   return result
 }

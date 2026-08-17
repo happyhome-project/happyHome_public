@@ -79,24 +79,25 @@ export function normalizeAuthorPostCard(post: Record<string, any>): AuthorPostCa
 
   const communityName = String(post?.communityName || '').trim()
   const sectionName = String(post?.sectionName || section?.name || '').trim()
+  const cover: AuthorPostCard['cover'] = isAudio
+    ? {
+        kind: 'audio',
+        src: coverImage || DEFAULT_AUDIO_COVER,
+        fallback: DEFAULT_AUDIO_COVER,
+      }
+    : isVideo
+      ? { kind: 'video', src: coverImage }
+      : coverImage
+        ? { kind: 'image', src: coverImage }
+        : { kind: 'text', theme }
+  if (cover.kind === 'audio' && coverImage) cover.source = coverImage
   return {
     postId,
     format: isAudio ? 'audio' : isVideo ? 'video' : coverImage ? 'image_text' : 'text',
     title: title || '无标题',
     bodyText,
     communityLabel: [communityName, sectionName].filter(Boolean).join(' · '),
-    cover: isAudio
-      ? {
-          kind: 'audio',
-          src: coverImage || DEFAULT_AUDIO_COVER,
-          ...(coverImage ? { source: coverImage } : {}),
-          fallback: DEFAULT_AUDIO_COVER,
-        }
-      : isVideo
-      ? { kind: 'video', src: coverImage }
-      : coverImage
-        ? { kind: 'image', src: coverImage }
-        : { kind: 'text', theme },
+    cover,
     likeCount: Math.max(0, Number(post?.likeCount || 0)),
     commentCount: Math.max(0, Number(post?.commentCount || 0)),
     auditStatus: String(post?.auditStatus || 'pass'),

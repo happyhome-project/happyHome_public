@@ -78,12 +78,12 @@ function createPlaybackRequestSnapshot(
 ): PlaybackRequestSnapshot | null {
   if (!Array.isArray(list) || list.length === 0 || !meta) return null
   const safeIndex = index >= 0 && index < list.length ? index : 0
-  const playlist = list.map(track => ({ ...track }))
+  const playlist = list.map(track => Object.assign({}, track))
   return {
     playlist,
     index: safeIndex,
-    track: { ...playlist[safeIndex] },
-    meta: { ...meta },
+    track: Object.assign({}, playlist[safeIndex]),
+    meta: Object.assign({}, meta),
   }
 }
 
@@ -128,8 +128,8 @@ export const useAudioStore = defineStore('audio', {
       if (!snapshot) return
       const shouldPause = this.currentPlaylist.length > 0 || this.playbackPending || this.isPlaying
       const generation = this._beginPlaybackRequest(shouldPause)
-      this.currentPlaylist = snapshot.playlist.map(track => ({ ...track }))
-      this.currentMeta = { ...snapshot.meta }
+      this.currentPlaylist = snapshot.playlist.map(track => Object.assign({}, track))
+      this.currentMeta = Object.assign({}, snapshot.meta)
       this.currentIndex = snapshot.index
       this.currentTime = 0
       this.isVisible = false
