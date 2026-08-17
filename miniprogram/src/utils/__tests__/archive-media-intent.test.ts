@@ -32,6 +32,22 @@ describe('archive media intent', () => {
     expect((module as any).consumeArchiveMediaIntent(token)).toBeNull()
   })
 
+  test('keeps every selected audio file in order while videos remain single-file intents', async () => {
+    vi.resetModules()
+    vi.stubGlobal('uni', { setStorageSync: vi.fn(), getStorageSync: vi.fn(), removeStorageSync: vi.fn() })
+    const module = await import('../archive-media-intent')
+    const audioFiles = [
+      { source: 'wxfile://first.mp3', name: 'first.mp3', type: 'audio/mpeg', size: 1 },
+      { source: 'wxfile://second.m4a', name: 'second.m4a', type: 'audio/mp4', size: 2 },
+    ]
+
+    const audioToken = module.storeArchiveMediaIntent('audio', audioFiles)
+    const videoToken = module.storeArchiveMediaIntent('video', [...audioFiles, { source: 'wxfile://third.mp4', name: 'third.mp4', type: 'video/mp4', size: 3 }])
+
+    expect(module.consumeArchiveMediaIntent(audioToken)).toMatchObject({ mediaType: 'audio', files: audioFiles })
+    expect(module.consumeArchiveMediaIntent(videoToken)?.files).toEqual([audioFiles[0]])
+  })
+
   test('expires volatile files and revokes owned preview URLs', async () => {
     vi.resetModules()
     const revokeObjectURL = vi.fn()

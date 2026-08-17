@@ -407,7 +407,7 @@ const textNoteCurrentPage = ref(1)
 const textNoteLayoutPhase = ref<number | null>(null)
 const TEXT_NOTE_LAYOUT_PHASES = ['正在识别段落结构', '正在为正文分页', '正在套用社区主题'] as const
 let textNoteLayoutGeneration = 0
-const archiveFormat = ref<'image_text' | 'text' | 'video' | ''>('')
+const archiveFormat = ref<'image_text' | 'text' | 'video' | 'audio' | ''>('')
 const archiveInitialMedia = ref<ArchiveMediaIntentFile | null>(null)
 const archiveVideoIntentState = ref<ArchiveVideoIntentState>('idle')
 const archiveVideoIntentGeneration = ref(0)
@@ -584,17 +584,17 @@ onLoad(async (options: any) => {
   try {
     if (await loadPostForEdit(String(options?.editPostId || ''))) return
     const requestedArchiveFormat = String(options?.archiveFormat || '')
-    if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text' || requestedArchiveFormat === 'video') {
+    if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text' || requestedArchiveFormat === 'video' || requestedArchiveFormat === 'audio') {
       // Resolve the product-level publishing route before the first await. Otherwise
       // membership refresh can commit the legacy section picker for one frame.
       enterArchiveEditor(requestedArchiveFormat, options?.returnTo)
-      applyArchiveMediaIntent(options?.mediaIntent)
+      if (requestedArchiveFormat !== 'audio') applyArchiveMediaIntent(options?.mediaIntent)
     }
     await Promise.all([
       ensureSectionsLoaded(),
       collaborationOnly.value ? ensureCollaborationTemplatesLoaded() : Promise.resolve(),
     ])
-    if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text' || requestedArchiveFormat === 'video') {
+    if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text' || requestedArchiveFormat === 'video' || requestedArchiveFormat === 'audio') {
       return
     }
     await consumeCreateSectionIntent(options)
@@ -637,8 +637,10 @@ function buildArchiveEditorSection(format: 'image_text' | 'text' | 'video') {
   })
 }
 
-function enterArchiveEditor(format: 'image_text' | 'text' | 'video', returnTo?: string, preserveForm = false) {
+function enterArchiveEditor(format: 'image_text' | 'text' | 'video' | 'audio', returnTo?: string, preserveForm = false) {
   archiveFormat.value = format
+  // Audio selection is intentionally routed here before Task 4 supplies its editor.
+  if (format === 'audio') return
   if (!preserveForm) {
     archiveInitialMedia.value = null
     archiveVideoIntentState.value = 'idle'
@@ -769,7 +771,7 @@ async function handleInlineMediaIntent(token: string) {
     return
   }
   if (transition?.status === 'switched') clearArchiveMediaState()
-  const nextFormat = intent.mediaType === 'video' ? 'video' : 'image_text'
+  const nextFormat = intent.mediaType === 'image' ? 'image_text' : intent.mediaType
   enterArchiveEditor(nextFormat, createReturnTo.value, transition?.status === 'replaced')
   applyArchiveMediaIntent(token)
 }

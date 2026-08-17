@@ -21,7 +21,7 @@
       </view>
     </view>
     <!-- #ifdef H5 -->
-    <input ref="h5MediaInput" class="native-media-input" type="file" accept="image/*,video/*" multiple @change="onH5MediaChange" />
+    <input ref="h5MediaInput" class="native-media-input" type="file" accept="image/*,video/*,.mp3,.m4a,.aac,.wav" multiple @change="onH5MediaChange" />
     <!-- #endif -->
 
     <view class="app-tabbar" aria-label="主导航">
@@ -60,7 +60,7 @@ import {
   getTabByKey,
   hideNativeTabBar,
 } from '../utils/app-tabbar'
-import { detectFirstMediaType, type PublishMediaType } from '../utils/video-publish'
+import { inspectSelectedMedia, type MediaSelectionFailure, type PublishMediaType } from '../utils/video-publish'
 import { discardArchiveMediaIntent, storeArchiveMediaIntent, sweepArchiveMediaIntents, type ArchiveMediaIntentFile } from '../utils/archive-media-intent'
 
 type AppTabBarCurrent = AppTabKey | 'create'
@@ -71,7 +71,7 @@ const h5MediaInput = ref<HTMLInputElement | null>(null)
 const pendingMediaIntents = new Set<string>()
 const HOME_TAB_RETAP_EVENT = 'happyhome:home-tab-retap'
 const publishOptions = computed(() => [
-  { key: 'media', label: '图文/视频', icon: '/static/publish-icons/trade.svg', tone: 'image-text' },
+  { key: 'media', label: '图文/音视频', icon: '/static/publish-icons/trade.svg', tone: 'image-text' },
   { key: 'text', label: '写文字', icon: '/static/publish-icons/lost.svg', tone: 'text' },
   { key: 'collaboration', label: '发起协作', icon: '/static/publish-icons/neighbor.svg', tone: 'collaboration' },
 ])
@@ -132,18 +132,36 @@ function choosePublishMedia() {
   // #endif
 
   // #ifndef H5
+  uni.showActionSheet({
+    itemList: ['从相册或相机选择', '从聊天文件选择'],
+    success: (result: any) => {
+      if (Number(result?.tapIndex) === 0) chooseMediaFromAlbumOrCamera()
+      if (Number(result?.tapIndex) === 1) chooseAudioFromChatFiles()
+    },
+  })
+  // #endif
+}
+
+function chooseMediaFromAlbumOrCamera() {
   wx.chooseMedia({
     count: 9,
     mediaType: ['image', 'video'],
     sourceType: ['album', 'camera'],
     success: (result: any) => routeSelectedMedia(result),
   })
-  // #endif
 }
 
-function normalizeIntentFiles(files: any[], mediaType: PublishMediaType): ArchiveMediaIntentFile[] {
-  const matching = files.filter((file) => detectFirstMediaType({ tempFiles: [file] }) === mediaType)
-  const selected = mediaType === 'video' ? matching.slice(0, 1) : matching
+function chooseAudioFromChatFiles() {
+  wx.chooseMessageFile({
+    count: 9,
+    type: 'file',
+    extension: ['mp3', 'm4a', 'aac', 'wav'],
+    success: (result: any) => routeSelectedMedia(result),
+  })
+}
+
+function normalizeIntentFiles(files: Record<string, any>[], mediaType: PublishMediaType): ArchiveMediaIntentFile[] {
+  const selected = mediaType === 'video' ? files.slice(0, 1) : files.slice()
   return selected.map((file) => ({
     source: file.source || file.tempFilePath || file.path,
     name: String(file.name || (file.tempFilePath || file.path || '').split(/[\\/]/).pop() || ''),
@@ -154,14 +172,22 @@ function normalizeIntentFiles(files: any[], mediaType: PublishMediaType): Archiv
   }))
 }
 
+function selectionToast(reason: MediaSelectionFailure): string {
+  if (reason === 'mixed') return '请一次只选择同一种素材（图片、视频或音频）'
+  if (reason === 'audio-empty') return '音频文件为空，请重新选择'
+  if (reason === 'audio-too-large') return '音频文件不能超过 50 MiB'
+  if (reason === 'empty') return '未检测到可用素材，请重新选择'
+  return '仅支持图片、视频或 MP3/M4A/AAC/WAV 音频'
+}
+
 function routeSelectedMedia(result: any) {
-  const mediaType = detectFirstMediaType(result)
-  const files = Array.isArray(result?.tempFiles) ? result.tempFiles : []
-  if (!mediaType) {
-    uni.showToast({ title: '请选择图片或视频', icon: 'none' })
+  const inspection = inspectSelectedMedia(result)
+  if (!inspection.valid) {
+    uni.showToast({ title: selectionToast(inspection.reason), icon: 'none' })
     return
   }
-  const intentFiles = normalizeIntentFiles(files, mediaType)
+  const { mediaType } = inspection
+  const intentFiles = normalizeIntentFiles(inspection.files, mediaType)
   if (intentFiles.length === 0) return
   const token = storeArchiveMediaIntent(mediaType, intentFiles)
   pendingMediaIntents.add(token)
@@ -172,7 +198,8 @@ function routeSelectedMedia(result: any) {
   }
   const returnTo = getTabByKey(props.current)?.path || ''
   closePublishSheet()
-  const params = [`archiveFormat=${mediaType === 'video' ? 'video' : 'image_text'}`, `mediaIntent=${encodeURIComponent(token)}`]
+  const archiveFormat = mediaType === 'image' ? 'image_text' : (mediaType === 'audio' ? 'audio' : 'video')
+  const params = [`archiveFormat=${archiveFormat}`, `mediaIntent=${encodeURIComponent(token)}`]
   if (returnTo) params.push(`returnTo=${encodeURIComponent(returnTo)}`)
   uni.navigateTo({
     url: `/pages/create/index?${params.join('&')}`,

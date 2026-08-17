@@ -165,7 +165,7 @@ export function peekArchiveMediaIntent(tokenValue: unknown, now = Date.now()): A
     revokeIntentUrls(intent)
     return null
   }
-  if (intent.mediaType !== 'image' && intent.mediaType !== 'video') return null
+  if (intent.mediaType !== 'image' && intent.mediaType !== 'video' && intent.mediaType !== 'audio') return null
   if (!Array.isArray(intent.files) || intent.files.length === 0) return null
   return intent
 }
