@@ -137,7 +137,7 @@ assert(
     createPage.includes('@navigation-blocked="videoNavigationBlocked = $event"') &&
     createPage.includes('请重试或移除失败封面') &&
     createPage.includes('@readiness="videoPublishReady = $event.ready"') &&
-    createPage.includes(':disabled="submitting || !videoPublishReady"'),
+    createPage.includes(':disabled="submitting || !videoPublishReady || !audioPublishReady"'),
   'archive video publishing must have its own upload editor and server-owned upload paths.',
 )
 assert(

@@ -73,20 +73,20 @@ describe('archive publishing entry', () => {
     expect(create).toMatch(/handleBackToSectionPicker[\s\S]*archiveFormat\.value === 'image_text'[\s\S]*selectedSection\.value = null[\s\S]*return/)
   })
 
-  test('defers an inline audio intent without consuming its one-shot handoff', () => {
+  test('defers inline audio ownership until format confirmation, then consumes the handoff once', () => {
     const create = read('pages', 'create', 'index.vue')
     const handlerStart = create.indexOf('async function handleInlineMediaIntent(token: string)')
     const handlerEnd = create.indexOf('function restoreArchiveMediaEditor()', handlerStart)
     const handler = create.slice(handlerStart, handlerEnd)
-    const audioBranchStart = handler.indexOf("if (intent.mediaType === 'audio')")
-    const audioBranchEnd = handler.indexOf('const currentType', audioBranchStart)
-    const audioBranch = handler.slice(audioBranchStart, audioBranchEnd)
+    const deferStart = handler.indexOf("if (intent.mediaType === 'audio' && !deferArchiveAudioIntent(token))")
+    const deferEnd = handler.indexOf('const currentType', deferStart)
+    const deferBranch = handler.slice(deferStart, deferEnd)
 
-    expect(audioBranchStart).toBeGreaterThanOrEqual(0)
-    expect(audioBranch).toContain('deferArchiveAudioIntent(token)')
-    expect(audioBranch).toContain('return')
-    expect(audioBranch).not.toContain('consumeArchiveMediaIntent(token)')
-    expect(audioBranch).not.toContain('applyArchiveMediaIntent(token)')
+    expect(deferStart).toBeGreaterThanOrEqual(0)
+    expect(deferBranch).not.toContain('consumeArchiveMediaIntent(token)')
+    expect(deferBranch).not.toContain('applyArchiveMediaIntent(token)')
+    expect(handler).toContain("transition?.status === 'cancelled'")
+    expect(handler).toContain("if (intent.mediaType === 'audio') consumeDeferredArchiveAudioIntent()")
     expect(create).toContain('const pendingArchiveAudioIntentToken = ref(\'\')')
   })
 
@@ -146,7 +146,7 @@ describe('archive publishing entry', () => {
     expect(create).toContain('@navigation-blocked="videoNavigationBlocked = $event"')
     expect(create).toContain('请重试或移除失败封面')
     expect(create).toContain('@readiness="videoPublishReady = $event.ready"')
-    expect(create).toContain(':disabled="submitting || !videoPublishReady"')
+    expect(create).toContain(':disabled="submitting || !videoPublishReady || !audioPublishReady"')
     expect(create).toContain("requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text' || requestedArchiveFormat === 'video' || requestedArchiveFormat === 'audio'")
     expect(create).toContain('onBackPress(')
     expect(create).toContain("window.addEventListener('beforeunload'")
