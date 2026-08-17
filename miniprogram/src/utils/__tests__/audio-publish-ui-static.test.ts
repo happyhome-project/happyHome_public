@@ -37,9 +37,7 @@ describe('native archive audio publish UI contract', () => {
   test('captures mini-program duration before destroying its audio context', () => {
     const editor = read('components', 'widgets', 'AudioPublishEditor.vue')
     const miniProbe = editor.slice(editor.indexOf('// #ifndef H5'), editor.indexOf('function acceptAudioFiles'))
-    expect(miniProbe).toMatch(
-      /readDuration: \(\) => context\.duration,[\s\S]*?cleanup: \(\) => \{[\s\S]*?context\.destroy\(\)/,
-    )
+    expect(miniProbe).toContain('createMiniProgramAudioDurationProbe(context, sourcePath')
   })
 
   test('does not start queued audio work after the editor has unmounted', () => {
@@ -55,6 +53,44 @@ describe('native archive audio publish UI contract', () => {
     expect(unmount).toContain('cancelAllAudioDurationProbes()')
     const removal = editor.slice(editor.indexOf('function removeTrack'), editor.indexOf('function moveTrack'))
     expect(removal).toContain('cancelAudioDurationProbe(trackId)')
+  })
+
+  test('freezes every editor mutation surface while submission owns pending sources', () => {
+    const editor = read('components', 'widgets', 'AudioPublishEditor.vue')
+    expect(editor).toContain('const submissionLocked = ref(false)')
+    expect(editor).toContain('submissionLocked.value = true')
+    expect(editor).toContain('submissionLocked.value = false')
+
+    const template = editor.slice(0, editor.indexOf('<script setup'))
+    expect(template).toMatch(/<input[\s\S]*?:disabled="submissionLocked"/)
+    for (const buttonLabel of ['上移', '下移', '添加封面', '删除封面', '重试音频', '重试封面', '取消封面', '删除曲目', '继续添加音频']) {
+      const labelIndex = template.indexOf(buttonLabel)
+      expect(labelIndex).toBeGreaterThan(-1)
+      expect(template.slice(Math.max(0, labelIndex - 220), labelIndex)).toContain('submissionLocked')
+    }
+
+    for (const [name, next] of [
+      ['acceptAudioFiles', 'enqueueTrackUpload'],
+      ['chooseAudioFiles', 'onH5AudioChange'],
+      ['onH5AudioChange', 'chooseCover'],
+      ['chooseCover', 'onH5CoverChange'],
+      ['onH5CoverChange', 'acceptCover'],
+      ['acceptCover', 'retryTrack'],
+      ['retryTrack', 'retryCover'],
+      ['retryCover', 'cancelFailedCover'],
+      ['cancelFailedCover', 'removeCover'],
+      ['removeCover', 'removeTrack'],
+      ['removeTrack', 'moveTrack'],
+      ['moveTrack', 'handleTitleInput'],
+      ['handleTitleInput', 'formatDuration'],
+    ]) {
+      const body = editor.slice(editor.indexOf(`function ${name}`), editor.indexOf(`function ${next}`))
+      expect(body, `${name} must fail closed`).toContain('submissionLocked.value')
+    }
+    const audioChooser = editor.slice(editor.indexOf('function chooseAudioFiles'), editor.indexOf('function onH5AudioChange'))
+    const coverChooser = editor.slice(editor.indexOf('function chooseCover'), editor.indexOf('function onH5CoverChange'))
+    expect(audioChooser.slice(audioChooser.indexOf('success:'))).toContain('submissionLocked.value')
+    expect(coverChooser.slice(coverChooser.indexOf('success:'))).toContain('submissionLocked.value')
   })
 
   test('builds only the ordered audios and required title widgets for native audio', () => {

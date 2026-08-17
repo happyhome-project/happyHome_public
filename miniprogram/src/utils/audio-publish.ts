@@ -66,8 +66,19 @@ export interface AudioPublishEditorSubmissionHandle {
 export interface AudioSubmissionOwnership {
   claimForSubmission(): boolean
   isSubmissionOwned(): boolean
+  isMutationLocked(): boolean
   handleUnmount(): Promise<void>
   settleAfterSubmission(outcome: 'accepted' | 'retry'): Promise<void>
+}
+
+export interface MiniProgramAudioDurationContext {
+  duration: number
+  src: string
+  onCanplay(callback: () => void): void
+  offCanplay?(callback: () => void): void
+  onError(callback: () => void): void
+  offError?(callback: () => void): void
+  destroy(): void
 }
 
 const EXTENSION_SET = new Set<string>(AUDIO_ALLOWED_EXTS)
@@ -194,6 +205,53 @@ export function createCancelableAudioDurationProbe(options: {
   }
 }
 
+export function createMiniProgramAudioDurationProbe(
+  context: MiniProgramAudioDurationContext,
+  sourcePath: string,
+  options: { timeoutMs?: number; pollIntervalMs?: number } = {},
+): CancelableAudioDurationProbe {
+  let closed = false
+  let inspectTimer: ReturnType<typeof setTimeout> | null = null
+  let resolveReady: () => void = () => {}
+  let rejectReady: (error: Error) => void = () => {}
+  const pollIntervalMs = Number(options.pollIntervalMs) > 0 ? Number(options.pollIntervalMs) : 100
+  const inspect = () => {
+    if (closed || inspectTimer !== null) return
+    if (Number(context.duration) > 0) {
+      resolveReady()
+      return
+    }
+    inspectTimer = setTimeout(() => {
+      inspectTimer = null
+      inspect()
+    }, pollIntervalMs)
+  }
+  const handleCanplay = () => inspect()
+  const handleError = () => {
+    if (!closed) rejectReady(new Error('无法读取有效音频时长，请重试或移除该曲目'))
+  }
+
+  return createCancelableAudioDurationProbe({
+    readDuration: () => context.duration,
+    cleanup: () => {
+      closed = true
+      if (inspectTimer !== null) clearTimeout(inspectTimer)
+      inspectTimer = null
+      try { context.offCanplay?.(handleCanplay) } catch {}
+      try { context.offError?.(handleError) } catch {}
+      try { context.destroy() } catch {}
+    },
+    subscribe: (resolve, reject) => {
+      resolveReady = resolve
+      rejectReady = reject
+      context.onCanplay(handleCanplay)
+      context.onError(handleError)
+      context.src = sourcePath
+    },
+    timeoutMs: options.timeoutMs,
+  })
+}
+
 export function createAudioSubmissionOwnership(
   cleanupPendingUploads: () => Promise<void>,
 ): AudioSubmissionOwnership {
@@ -209,6 +267,9 @@ export function createAudioSubmissionOwnership(
       return true
     },
     isSubmissionOwned() {
+      return submissionOwned
+    },
+    isMutationLocked() {
       return submissionOwned
     },
     async handleUnmount() {

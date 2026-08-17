@@ -11,6 +11,7 @@
         <input
           class="audio-track__title"
           :value="track.title"
+          :disabled="submissionLocked"
           maxlength="100"
           placeholder="曲目标题"
           @input="handleTitleInput(track.id, $event)"
@@ -42,18 +43,18 @@
       <text v-if="track.coverError" class="audio-error">{{ track.coverError }}</text>
 
       <view class="audio-track__actions">
-        <button size="mini" :disabled="index === 0 || trackBusy(track)" @tap="moveTrack(track.id, -1)">上移</button>
-        <button size="mini" :disabled="index === tracks.length - 1 || trackBusy(track)" @tap="moveTrack(track.id, 1)">下移</button>
-        <button size="mini" :disabled="trackBusy(track)" @tap="chooseCover(track.id)">{{ track.cover ? '替换封面' : '添加封面' }}</button>
-        <button v-if="track.cover" size="mini" :disabled="trackBusy(track)" @tap="removeCover(track.id)">删除封面</button>
-        <button v-if="track.audioStatus === 'error'" size="mini" @tap="retryTrack(track.id)">重试音频</button>
-        <button v-if="track.coverStatus === 'error'" size="mini" @tap="retryCover(track.id)">重试封面</button>
-        <button v-if="track.coverStatus === 'error'" size="mini" @tap="cancelFailedCover(track.id)">取消封面</button>
-        <button size="mini" @tap="removeTrack(track.id)">删除曲目</button>
+        <button size="mini" :disabled="submissionLocked || index === 0 || trackBusy(track)" @tap="moveTrack(track.id, -1)">上移</button>
+        <button size="mini" :disabled="submissionLocked || index === tracks.length - 1 || trackBusy(track)" @tap="moveTrack(track.id, 1)">下移</button>
+        <button size="mini" :disabled="submissionLocked || trackBusy(track)" @tap="chooseCover(track.id)">{{ track.cover ? '替换封面' : '添加封面' }}</button>
+        <button v-if="track.cover" size="mini" :disabled="submissionLocked || trackBusy(track)" @tap="removeCover(track.id)">删除封面</button>
+        <button v-if="track.audioStatus === 'error'" size="mini" :disabled="submissionLocked" @tap="retryTrack(track.id)">重试音频</button>
+        <button v-if="track.coverStatus === 'error'" size="mini" :disabled="submissionLocked" @tap="retryCover(track.id)">重试封面</button>
+        <button v-if="track.coverStatus === 'error'" size="mini" :disabled="submissionLocked" @tap="cancelFailedCover(track.id)">取消封面</button>
+        <button size="mini" :disabled="submissionLocked" @tap="removeTrack(track.id)">删除曲目</button>
       </view>
     </view>
 
-    <button class="audio-add" :disabled="uploading" @tap="chooseAudioFiles">{{ tracks.length ? '继续添加音频' : '选择音频' }}</button>
+    <button class="audio-add" :disabled="submissionLocked || uploading" @tap="chooseAudioFiles">{{ tracks.length ? '继续添加音频' : '选择音频' }}</button>
 
     <!-- #ifdef H5 -->
     <input
@@ -61,6 +62,7 @@
       class="native-file-input"
       type="file"
       accept="audio/mpeg,audio/mp4,audio/aac,audio/wav,.mp3,.m4a,.aac,.wav"
+      :disabled="submissionLocked"
       multiple
       @change="onH5AudioChange"
     />
@@ -69,6 +71,7 @@
       class="native-file-input"
       type="file"
       accept="image/jpeg,image/png,image/webp"
+      :disabled="submissionLocked"
       @change="onH5CoverChange"
     />
     <!-- #endif -->
@@ -86,6 +89,7 @@ import {
   cleanupOwnedPendingAudioUploads,
   createAudioSubmissionOwnership,
   createCancelableAudioDurationProbe,
+  createMiniProgramAudioDurationProbe,
   isAudioAsyncResultCurrent,
   moveAudioTrack,
   normalizeAudioPublishFile,
@@ -135,6 +139,7 @@ const tracks = ref<LocalAudioTrack[]>([])
 const h5AudioInput = ref<HTMLInputElement | null>(null)
 const h5CoverInput = ref<HTMLInputElement | null>(null)
 const coverTargetId = ref('')
+const submissionLocked = ref(false)
 const objectUrls = new Set<string>()
 const pendingUploads = new Map<string, PendingAudioUpload>()
 const activeDurationProbes = new Map<string, CancelableAudioDurationProbe>()
@@ -241,18 +246,28 @@ async function cleanupPendingUploads() {
 const submissionOwnership = createAudioSubmissionOwnership(cleanupPendingUploads)
 
 function claimPendingUploadsForSubmission(): boolean {
-  return submissionOwnership.claimForSubmission()
+  const claimed = submissionOwnership.claimForSubmission()
+  if (claimed) submissionLocked.value = true
+  return claimed
 }
 
 async function finalizePendingUploadsAfterSubmit() {
   // The server materializes finalized copies. These source objects are no longer
   // referenced after success, so remove them before navigation. Failed cleanup
   // remains registered for the unmount retry and never changes submit success.
-  await submissionOwnership.settleAfterSubmission('accepted')
+  try {
+    await submissionOwnership.settleAfterSubmission('accepted')
+  } finally {
+    submissionLocked.value = false
+  }
 }
 
 async function returnPendingUploadsAfterSubmit() {
-  await submissionOwnership.settleAfterSubmission('retry')
+  try {
+    await submissionOwnership.settleAfterSubmission('retry')
+  } finally {
+    submissionLocked.value = false
+  }
 }
 
 defineExpose({
@@ -327,27 +342,7 @@ function createAudioDurationProbe(source: string | Blob): CancelableAudioDuratio
   }
   const sourcePath = source as string
   const context = uni.createInnerAudioContext()
-  let inspectTimer: ReturnType<typeof setTimeout> | null = null
-  return createCancelableAudioDurationProbe({
-    readDuration: () => context.duration,
-    cleanup: () => {
-      if (inspectTimer) clearTimeout(inspectTimer)
-      try { context.destroy() } catch {}
-    },
-    subscribe: (resolve, reject) => {
-      const inspect = () => {
-        if (Number(context.duration) > 0) {
-          resolve()
-          return
-        }
-        inspectTimer = setTimeout(inspect, 100)
-      }
-      context.onCanplay(inspect)
-      context.onError(() => reject(new Error('无法读取有效音频时长，请重试或移除该曲目')))
-      context.src = sourcePath
-    },
-    timeoutMs: 10000,
-  })
+  return createMiniProgramAudioDurationProbe(context, sourcePath, { timeoutMs: 10000, pollIntervalMs: 100 })
   // #endif
 }
 
@@ -365,6 +360,7 @@ function cancelAllAudioDurationProbes() {
 }
 
 function acceptAudioFiles(files: ArchiveMediaIntentFile[]) {
+  if (submissionLocked.value) return
   try {
     const additions: LocalAudioTrack[] = files.map((file) => {
       const normalized = normalizeAudioPublishFile(file)
@@ -515,6 +511,7 @@ async function uploadCover(trackId: string) {
 }
 
 function chooseAudioFiles() {
+  if (submissionLocked.value) return
   // #ifdef H5
   h5AudioInput.value?.click()
   return
@@ -525,6 +522,7 @@ function chooseAudioFiles() {
     type: 'file',
     extension: ['mp3', 'm4a', 'aac', 'wav'],
     success: (result: any) => {
+      if (submissionLocked.value) return
       const files = (Array.isArray(result?.tempFiles) ? result.tempFiles : []).map((file: any) => ({
         source: file.path || file.tempFilePath,
         name: String(file.name || file.path?.split('/').pop() || ''),
@@ -539,6 +537,10 @@ function chooseAudioFiles() {
 
 function onH5AudioChange(event: Event) {
   const input = event.target as HTMLInputElement
+  if (submissionLocked.value) {
+    input.value = ''
+    return
+  }
   const files = Array.from(input.files || []).map((file) => ({
     source: file,
     name: file.name,
@@ -550,6 +552,7 @@ function onH5AudioChange(event: Event) {
 }
 
 function chooseCover(trackId: string) {
+  if (submissionLocked.value) return
   coverTargetId.value = trackId
   // #ifdef H5
   h5CoverInput.value?.click()
@@ -561,6 +564,7 @@ function chooseCover(trackId: string) {
     mediaType: ['image'],
     sourceType: ['album', 'camera'],
     success: (result: any) => {
+      if (submissionLocked.value) return
       const file = result?.tempFiles?.[0]
       if (!file) return
       acceptCover(trackId, {
@@ -576,6 +580,10 @@ function chooseCover(trackId: string) {
 
 function onH5CoverChange(event: Event) {
   const input = event.target as HTMLInputElement
+  if (submissionLocked.value) {
+    input.value = ''
+    return
+  }
   const file = input.files?.[0]
   if (file && coverTargetId.value) {
     acceptCover(coverTargetId.value, { source: file, name: file.name, type: file.type, size: file.size })
@@ -584,6 +592,7 @@ function onH5CoverChange(event: Event) {
 }
 
 function acceptCover(trackId: string, file: { source: string | Blob; name: string; type: string; size: number }) {
+  if (submissionLocked.value) return
   const track = tracks.value.find((item) => item.id === trackId)
   if (!track) return
   const validationError = validateVideoCoverFile(file)
@@ -600,6 +609,7 @@ function acceptCover(trackId: string, file: { source: string | Blob; name: strin
 }
 
 function retryTrack(trackId: string) {
+  if (submissionLocked.value) return
   const track = tracks.value.find((item) => item.id === trackId)
   if (!track || track.audioStatus !== 'error') return
   track.audioStatus = 'pending'
@@ -609,6 +619,7 @@ function retryTrack(trackId: string) {
 }
 
 function retryCover(trackId: string) {
+  if (submissionLocked.value) return
   const track = tracks.value.find((item) => item.id === trackId)
   if (!track || track.coverStatus !== 'error' || !track.coverSource) return
   track.coverStatus = 'pending'
@@ -618,6 +629,7 @@ function retryCover(trackId: string) {
 }
 
 function cancelFailedCover(trackId: string) {
+  if (submissionLocked.value) return
   const track = tracks.value.find((item) => item.id === trackId)
   if (!track || track.coverStatus !== 'error') return
   track.coverGeneration = Number(track.coverGeneration || 0) + 1
@@ -633,6 +645,7 @@ function cancelFailedCover(trackId: string) {
 }
 
 function removeCover(trackId: string) {
+  if (submissionLocked.value) return
   const track = tracks.value.find((item) => item.id === trackId)
   if (!track) return
   track.coverGeneration = Number(track.coverGeneration || 0) + 1
@@ -651,6 +664,7 @@ function removeCover(trackId: string) {
 }
 
 function removeTrack(trackId: string) {
+  if (submissionLocked.value) return
   const track = tracks.value.find((item) => item.id === trackId)
   if (!track) return
   track.audioGeneration = Number(track.audioGeneration || 0) + 1
@@ -664,11 +678,13 @@ function removeTrack(trackId: string) {
 }
 
 function moveTrack(trackId: string, direction: -1 | 1) {
+  if (submissionLocked.value) return
   tracks.value = moveAudioTrack(tracks.value, trackId, direction)
   publishModel()
 }
 
 function handleTitleInput(trackId: string, event: any) {
+  if (submissionLocked.value) return
   tracks.value = updateAudioTrackTitle(tracks.value, trackId, String(event?.detail?.value ?? event?.target?.value ?? ''))
   publishModel()
 }
