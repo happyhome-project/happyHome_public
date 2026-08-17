@@ -15,6 +15,7 @@ type AudioIconName =
   | 'play-circle-filled'
   | 'pause'
   | 'sound'
+  | 'chart-bar'
 
 const props = withDefaults(defineProps<{
   name: AudioIconName
@@ -52,4 +53,5 @@ const props = withDefaults(defineProps<{
 .audio-icon--play-circle-filled::before { content: "\e703"; }
 .audio-icon--pause::before { content: "\e716"; }
 .audio-icon--sound::before { content: "\e680"; }
+.audio-icon--chart-bar::before { content: "\e6b5"; }
 </style>

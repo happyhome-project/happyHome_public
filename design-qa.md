@@ -107,3 +107,42 @@ The focused comparison was required because icon scale, color density, and label
 ## Final result
 
 final result: passed
+
+---
+
+## Audio posts design QA (2026-08-17)
+
+### Scope
+
+- Reference: `X:\Users\86136\AppData\Local\Temp\codex-clipboard-48903ca1-0f1a-401e-87d1-06db1a1d5a68.png`
+- Implementation: `miniprogram/src/components/AudioPostDetailView.vue` and `miniprogram/src/components/ArchiveWaterfall.vue`
+- Comparison image: `X:\Users\86136\.codex\visualizations\2026\08\17\01a00e38-f564-7040-addc-37d57c2bc3f6\audio-posts-qa\detail-final-comparison.png`
+- Detail evidence: `X:\Users\86136\.codex\visualizations\2026\08\17\01a00e38-f564-7040-addc-37d57c2bc3f6\audio-posts-qa\detail-matched-fixed-0202-top-396x844.png`
+- Feed evidence: `X:\Users\86136\.codex\visualizations\2026\08\17\01a00e38-f564-7040-addc-37d57c2bc3f6\audio-posts-qa\search-audio-card-final-396x844.png`
+- Viewport: 396 px rendered content width, 844 px height. The component comparison removes only the host page's 48 px navigation bar so the reference and implementation begin at the same content boundary.
+- State: first track playing at 02:02 of 05:18, two-track playlist, bundled default cover.
+
+### Visual review
+
+- Typography and hierarchy: title, author/date, cover, current track, controls, progress, and ordered tracks follow the approved sequence.
+- Spacing and sizing: the full-width production page uses the existing HappyHome page gutter and keeps a square cover, centered controls, and compact track rows without clipping.
+- Color: the green action and active states, pale active-row fill, neutral metadata, and white card surface remain consistent with the approved direction and existing product tokens.
+- Image fidelity: the bundled watercolor cover has the required Jiangnan lake-and-pagoda subject, quiet palette, square crop, and sufficient contrast for overlaid feed metadata.
+- Copy and information boundary: the rendered detail contains title, author/date, playback information, and tracks only. `距离`, `海拔`, `累计爬升`, `参考用时`, `位置`, `导航`, `路线`, and `活动` are absent.
+- Reference-alignment fix: the active-track marker was changed from a speaker glyph to the local icon font's bar-chart glyph so it matches the approved equalizer treatment without adding a CDN or hand-drawn asset.
+
+### Interaction and accessibility review
+
+- Play/pause changes the central control and active-track marker through the production audio store.
+- Track selection changes the current track; natural end advances to the next track.
+- The progress UI updates from the backend time event, and the main transport controls expose descriptive `aria-label` values.
+- Feed cards display a static audio affordance, track count, and total duration. They do not start inline playback; the whole card navigates to the detail page.
+- The isolated browser run produced no runtime errors. Its only warning was the existing duplicate detail-load guard (`detail.load.skip.busy`).
+
+### Environment boundary
+
+- QA used a local H5 build with an in-page `wx.cloud.callFunction` fixture, local/data-URL audio, and blocked external requests.
+- No production deployment, mini-program upload, shared-cloud write, or real user data was used.
+- WeChat DevTools and iOS/Android background-audio timing remain runtime-release checks rather than visual blockers for this review.
+
+final result: passed

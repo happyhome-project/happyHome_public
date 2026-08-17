@@ -72,7 +72,7 @@
         <text class="audio-post-detail__track-title">{{ track.title }}</text>
         <AudioIcon
           v-if="index === activeIndex && isPlaying"
-          name="sound"
+          name="chart-bar"
           size="26rpx"
           color="#32b77a"
         />

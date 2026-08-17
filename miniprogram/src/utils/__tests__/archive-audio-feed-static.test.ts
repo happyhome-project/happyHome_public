@@ -43,6 +43,7 @@ describe('native archive audio feed presentation', () => {
       'play-circle-filled': '\\e703',
       pause: '\\e716',
       sound: '\\e680',
+      'chart-bar': '\\e6b5',
     }
     for (const [name, codepoint] of Object.entries(codepoints)) {
       expect(icon).toContain(`'${name}'`)

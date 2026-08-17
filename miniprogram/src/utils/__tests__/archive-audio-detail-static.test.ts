@@ -46,9 +46,10 @@ describe('native archive audio detail presentation', () => {
     expect(component).toContain('const raw = event?.detail?.value')
     expect(component).toContain('<AudioIcon')
     expect(component).not.toContain('<wd-icon')
-    for (const icon of ['previous', 'play-circle', 'pause', 'next', 'sound']) {
+    for (const icon of ['previous', 'play-circle', 'pause', 'next', 'chart-bar']) {
       expect(component).toContain(`name="${icon}"`)
     }
+    expect(component).not.toContain('v-if="index === activeIndex && isPlaying"\n          name="sound"')
   })
 
   test('keeps audio source and fresh mp output free of Wot runtime components and HTTP fonts', () => {
