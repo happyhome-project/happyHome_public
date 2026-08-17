@@ -156,9 +156,16 @@ describe('publish media routing', () => {
     expect(inspectSelectedMedia(result)).toMatchObject({ valid: true, mediaType: expected })
   })
 
+  test.each(['file', 'mix', 'all', ''])('falls back to an audio extension when a file declaration is non-authoritative: %s', (declaration) => {
+    expect(inspectSelectedMedia({
+      tempFiles: [{ fileType: declaration, name: 'voice.mp3', size: 1 }],
+    })).toMatchObject({ valid: true, mediaType: 'audio' })
+  })
+
   test.each([
     [{ tempFiles: [] }],
     [{ type: 'all', tempFiles: [{ type: 'audio/ogg', name: 'song.ogg', size: 1 }] }],
+    [{ type: 'file', tempFiles: [{ type: 'audio/ogg', name: 'renamed.mp3', size: 1 }] }],
     [{ type: 'mix', tempFiles: [{ type: 'image/jpeg', name: 'photo.jpg' }, { type: 'audio/mpeg', name: 'voice.mp3', size: 1 }] }],
     [{ type: 'file', tempFiles: [{ type: 'audio/mpeg', name: 'empty.mp3', size: 0 }] }],
     [{ type: 'file', tempFiles: [{ type: 'audio/mpeg', name: 'large.mp3', size: 50 * 1024 * 1024 + 1 }] }],

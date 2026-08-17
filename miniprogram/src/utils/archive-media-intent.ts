@@ -104,6 +104,14 @@ export function consumeArchiveMediaIntent(tokenValue: unknown): ArchiveMediaInte
   return intent
 }
 
+export function deferArchiveMediaIntent(
+  tokenValue: unknown,
+  mediaType: PublishMediaType,
+): ArchiveMediaIntent | null {
+  const intent = peekArchiveMediaIntent(tokenValue)
+  return intent?.mediaType === mediaType ? intent : null
+}
+
 export function discardArchiveMediaIntent(tokenValue: unknown): boolean {
   const token = String(tokenValue || '').trim()
   if (!token) return false

@@ -373,6 +373,7 @@ import { asCollaborationSection, isCollaborationSection } from '../../utils/coll
 import {
   consumeArchiveMediaIntent,
   createDraftStorageKey,
+  deferArchiveMediaIntent,
   peekArchiveMediaIntent,
   type ArchiveMediaIntentFile,
 } from '../../utils/archive-media-intent'
@@ -408,6 +409,7 @@ const textNoteLayoutPhase = ref<number | null>(null)
 const TEXT_NOTE_LAYOUT_PHASES = ['正在识别段落结构', '正在为正文分页', '正在套用社区主题'] as const
 let textNoteLayoutGeneration = 0
 const archiveFormat = ref<'image_text' | 'text' | 'video' | 'audio' | ''>('')
+const pendingArchiveAudioIntentToken = ref('')
 const archiveInitialMedia = ref<ArchiveMediaIntentFile | null>(null)
 const archiveVideoIntentState = ref<ArchiveVideoIntentState>('idle')
 const archiveVideoIntentGeneration = ref(0)
@@ -587,8 +589,13 @@ onLoad(async (options: any) => {
     if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text' || requestedArchiveFormat === 'video' || requestedArchiveFormat === 'audio') {
       // Resolve the product-level publishing route before the first await. Otherwise
       // membership refresh can commit the legacy section picker for one frame.
-      enterArchiveEditor(requestedArchiveFormat, options?.returnTo)
-      if (requestedArchiveFormat !== 'audio') applyArchiveMediaIntent(options?.mediaIntent)
+      if (requestedArchiveFormat === 'audio') {
+        archiveFormat.value = 'audio'
+        deferArchiveAudioIntent(options?.mediaIntent)
+      } else {
+        enterArchiveEditor(requestedArchiveFormat, options?.returnTo)
+        applyArchiveMediaIntent(options?.mediaIntent)
+      }
     }
     await Promise.all([
       ensureSectionsLoaded(),
@@ -679,6 +686,14 @@ function applyArchiveMediaIntent(token: unknown) {
   }
 }
 
+function deferArchiveAudioIntent(token: unknown): boolean {
+  const intent = deferArchiveMediaIntent(token, 'audio')
+  if (!intent) return false
+  pendingArchiveAudioIntentToken.value = intent.token
+  archiveFormat.value = 'audio'
+  return true
+}
+
 function hasArchiveMedia(format: PublishMediaType | null): boolean {
   if (format === 'image') return Array.isArray(formData.image_note_images) && formData.image_note_images.length > 0
   if (format === 'video') {
@@ -748,6 +763,10 @@ async function handleInlineMediaIntent(token: string) {
   const intent = peekArchiveMediaIntent(token)
   if (!intent) {
     restoreArchiveMediaEditor()
+    return
+  }
+  if (intent.mediaType === 'audio') {
+    deferArchiveAudioIntent(token)
     return
   }
   const currentType = currentPublishMediaType()

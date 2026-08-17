@@ -73,6 +73,23 @@ describe('archive publishing entry', () => {
     expect(create).toMatch(/handleBackToSectionPicker[\s\S]*archiveFormat\.value === 'image_text'[\s\S]*selectedSection\.value = null[\s\S]*return/)
   })
 
+  test('defers an inline audio intent without consuming its one-shot handoff', () => {
+    const create = read('pages', 'create', 'index.vue')
+    const handlerStart = create.indexOf('async function handleInlineMediaIntent(token: string)')
+    const handlerEnd = create.indexOf('function restoreArchiveMediaEditor()', handlerStart)
+    const handler = create.slice(handlerStart, handlerEnd)
+    const audioBranchStart = handler.indexOf("if (intent.mediaType === 'audio')")
+    const audioBranchEnd = handler.indexOf('const currentType', audioBranchStart)
+    const audioBranch = handler.slice(audioBranchStart, audioBranchEnd)
+
+    expect(audioBranchStart).toBeGreaterThanOrEqual(0)
+    expect(audioBranch).toContain('deferArchiveAudioIntent(token)')
+    expect(audioBranch).toContain('return')
+    expect(audioBranch).not.toContain('consumeArchiveMediaIntent(token)')
+    expect(audioBranch).not.toContain('applyArchiveMediaIntent(token)')
+    expect(create).toContain('const pendingArchiveAudioIntentToken = ref(\'\')')
+  })
+
   test('create page owns a video archive editor without unlocking ordinary admin media widgets', () => {
     const create = read('pages', 'create', 'index.vue')
     const widgetEditor = read('components', 'widgets', 'WidgetEditor.vue')

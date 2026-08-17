@@ -91,6 +91,12 @@ export function reduceCoverNavigationBlock(
 
 const VIDEO_EXTENSION_SET = new Set<string>(VIDEO_ALLOWED_EXTENSIONS)
 const AUDIO_EXTENSION_SET = new Set<string>(AUDIO_ALLOWED_EXTENSIONS)
+const AUDIO_MIME_EXTENSION_MAP = new Map<string, string>([
+  ['audio/mpeg', 'mp3'], ['audio/mp3', 'mp3'],
+  ['audio/mp4', 'm4a'], ['audio/m4a', 'm4a'], ['audio/x-m4a', 'm4a'],
+  ['audio/aac', 'aac'], ['audio/x-aac', 'aac'],
+  ['audio/wav', 'wav'], ['audio/x-wav', 'wav'], ['audio/wave', 'wav'],
+])
 const IMAGE_EXTENSION_SET = new Set([
   'jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'heic', 'heif',
 ])
@@ -142,7 +148,8 @@ function classifyDeclaredMediaType(type: string): PublishMediaType | null {
 }
 
 function classifyFile(file: Record<string, any>): PublishMediaType | null {
-  const declaredTypes = declaredMediaTypes(file)
+  const declarations = declaredMediaTypes(file)
+  const declaredTypes = declarations
     .map(classifyDeclaredMediaType)
     .filter((type): type is PublishMediaType => type !== null)
   const declaredType = new Set(declaredTypes)
@@ -152,7 +159,13 @@ function classifyFile(file: Record<string, any>): PublishMediaType | null {
     ? 'video'
     : (AUDIO_EXTENSION_SET.has(extension) ? 'audio' : (IMAGE_EXTENSION_SET.has(extension) ? 'image' : null))
   const typeFromDeclaration = declaredType.values().next().value || null
-  if (typeFromDeclaration === 'audio' && extensionType !== 'audio') return null
+  const declaredAudioExtensions = declarations
+    .filter((type) => type.startsWith('audio/'))
+    .map((type) => AUDIO_MIME_EXTENSION_MAP.get(type) || null)
+  if (declaredAudioExtensions.some((extension) => extension === null)) return null
+  const declaredAudioExtension = new Set(declaredAudioExtensions).values().next().value || null
+  if (new Set(declaredAudioExtensions).size > 1) return null
+  if (typeFromDeclaration === 'audio' && (extensionType !== 'audio' || (declaredAudioExtension && extension !== declaredAudioExtension))) return null
   if (typeFromDeclaration && extensionType && typeFromDeclaration !== extensionType) return null
   return extensionType || typeFromDeclaration
 }

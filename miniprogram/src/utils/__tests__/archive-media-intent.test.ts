@@ -48,6 +48,21 @@ describe('archive media intent', () => {
     expect(module.consumeArchiveMediaIntent(videoToken)?.files).toEqual([audioFiles[0]])
   })
 
+  test('defers an audio handoff until one editor consumes it', async () => {
+    vi.resetModules()
+    vi.stubGlobal('uni', { setStorageSync: vi.fn(), getStorageSync: vi.fn(), removeStorageSync: vi.fn() })
+    const module = await import('../archive-media-intent').catch(() => ({} as any))
+    const file = { source: 'wxfile://story.mp3', name: 'story.mp3', type: 'audio/mpeg', size: 1 }
+    const token = (module as any).storeArchiveMediaIntent('audio', [file])
+
+    expect(typeof (module as any).deferArchiveMediaIntent).toBe('function')
+    const deferred = (module as any).deferArchiveMediaIntent(token, 'audio')
+    expect(deferred).toMatchObject({ token, mediaType: 'audio', files: [file] })
+    expect((module as any).peekArchiveMediaIntent(token)).toMatchObject({ token, mediaType: 'audio' })
+    expect((module as any).consumeArchiveMediaIntent(token)).toMatchObject({ token, mediaType: 'audio', files: [file] })
+    expect((module as any).consumeArchiveMediaIntent(token)).toBeNull()
+  })
+
   test('expires volatile files and revokes owned preview URLs', async () => {
     vi.resetModules()
     const revokeObjectURL = vi.fn()
