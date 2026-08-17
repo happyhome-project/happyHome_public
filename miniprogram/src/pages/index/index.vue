@@ -487,7 +487,7 @@ import { formatHomeQuoteCite } from '../../utils/home-quote'
 import { createHomeLoadingGate } from '../../utils/home-loading-gate'
 import { resolveMenuSafeRightInset } from '../../utils/menu-safe-area'
 import { refreshCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
-import { resolveFeedCovers } from '../../utils/feed-cover-url'
+import { fallbackFeedCoverAfterError, resolveFeedCovers } from '../../utils/feed-cover-url'
 import { communityInitial } from '../../utils/community-avatar'
 import { uploadCloudFile } from '../../api/storage'
 import { resolveSectionIconGlyph } from '../../utils/section-icon'
@@ -1548,7 +1548,7 @@ function onArchiveCoverLoad(card: ArchiveFeedCard) {
 async function onArchiveCoverError(card: ArchiveFeedCard) {
   if (card.cover.kind === 'text') return
   const source = String(card.cover.source || card.cover.src || '').trim()
-  card.cover.src = ''
+  fallbackFeedCoverAfterError(card.cover)
   commitArchiveCoverRender()
   if (!source.startsWith('cloud://')) return
 

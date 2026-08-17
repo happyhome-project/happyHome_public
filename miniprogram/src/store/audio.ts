@@ -56,6 +56,10 @@ let deps: AudioStoreDeps = {
   getTempFileURL: getCloudTempFileURL,
 }
 
+function isResolvedMediaUrl(value: string): boolean {
+  return /^(?:https?:\/\/|blob:|data:|file:|wxfile:|\/)/i.test(value)
+}
+
 export function _setAudioStoreDepsForTesting(overrides: Partial<AudioStoreDeps>) {
   deps = Object.assign({}, deps, overrides)
 }
@@ -172,7 +176,7 @@ export const useAudioStore = defineStore('audio', {
       const fetchFn = deps.getTempFileURL
       if (!fetchFn) return
       const now = Date.now()
-      const stale = fileIDs.filter((fileID) => {
+      const stale = fileIDs.filter((fileID) => !isResolvedMediaUrl(fileID)).filter((fileID) => {
         const cached = this.httpsUrlCache[fileID]
         return !cached || cached.expiresAt - now < URL_REFRESH_BUFFER_MS
       })
@@ -191,6 +195,7 @@ export const useAudioStore = defineStore('audio', {
     },
     async _urlFor(fileID: string): Promise<string> {
       if (!fileID) return ''
+      if (isResolvedMediaUrl(fileID)) return fileID
       const now = Date.now()
       const cached = this.httpsUrlCache[fileID]
       if (cached && cached.expiresAt - now > URL_REFRESH_BUFFER_MS) return cached.url

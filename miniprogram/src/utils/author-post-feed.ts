@@ -1,10 +1,11 @@
 import { getImageNoteCard, isImageNoteSectionContract } from './image-note'
 import { getTextNoteCard, normalizeTextNoteTheme } from './text-note'
 import { getPostHomeTitle } from './widget'
+import { DEFAULT_AUDIO_COVER, summarizeAudioTracks } from './audio-display'
 
 export type AuthorPostCard = {
   postId: string
-  format: 'image_text' | 'text' | 'video'
+  format: 'image_text' | 'text' | 'video' | 'audio'
   title: string
   bodyText: string
   communityLabel: string
@@ -12,6 +13,9 @@ export type AuthorPostCard = {
     | { kind: 'image'; src: string }
     | { kind: 'text'; theme: string }
     | { kind: 'video'; src: string }
+    | { kind: 'audio'; src: string; source?: string; fallback: string }
+  trackCount: number
+  totalDuration: number
   likeCount: number
   commentCount: number
   auditStatus: string
@@ -40,12 +44,18 @@ export function normalizeAuthorPostCard(post: Record<string, any>): AuthorPostCa
   let bodyText = ''
   let coverImage = ''
   let isVideo = false
+  let isAudio = false
+  let audioSummary = summarizeAudioTracks(null)
   let theme = normalizeTextNoteTheme(post?.presentation?.textNoteTheme)
 
   if (isArchive) {
     title = String(post?.content?.title || '').trim()
     bodyText = textFromRichNote(post?.content?.body)
-    if (post?.format === 'video') {
+    if (post?.format === 'audio') {
+      isAudio = true
+      audioSummary = summarizeAudioTracks(post?.content?.audios)
+      coverImage = audioSummary.firstCover
+    } else if (post?.format === 'video') {
       isVideo = true
       const videos = Array.isArray(post?.content?.videos) ? post.content.videos : []
       coverImage = String(videos.find((item: any) => item && typeof item === 'object')?.cover || '').trim()
@@ -71,11 +81,18 @@ export function normalizeAuthorPostCard(post: Record<string, any>): AuthorPostCa
   const sectionName = String(post?.sectionName || section?.name || '').trim()
   return {
     postId,
-    format: isVideo ? 'video' : coverImage ? 'image_text' : 'text',
+    format: isAudio ? 'audio' : isVideo ? 'video' : coverImage ? 'image_text' : 'text',
     title: title || '无标题',
     bodyText,
     communityLabel: [communityName, sectionName].filter(Boolean).join(' · '),
-    cover: isVideo
+    cover: isAudio
+      ? {
+          kind: 'audio',
+          src: coverImage || DEFAULT_AUDIO_COVER,
+          ...(coverImage ? { source: coverImage } : {}),
+          fallback: DEFAULT_AUDIO_COVER,
+        }
+      : isVideo
       ? { kind: 'video', src: coverImage }
       : coverImage
         ? { kind: 'image', src: coverImage }
@@ -83,7 +100,9 @@ export function normalizeAuthorPostCard(post: Record<string, any>): AuthorPostCa
     likeCount: Math.max(0, Number(post?.likeCount || 0)),
     commentCount: Math.max(0, Number(post?.commentCount || 0)),
     auditStatus: String(post?.auditStatus || 'pass'),
-    estimatedHeight: isVideo || coverImage ? 330 : 260,
+    trackCount: isAudio ? audioSummary.trackCount : 0,
+    totalDuration: isAudio ? audioSummary.totalDuration : 0,
+    estimatedHeight: isAudio || isVideo || coverImage ? 330 : 260,
     post,
   }
 }

@@ -1,6 +1,8 @@
+import { DEFAULT_AUDIO_COVER, summarizeAudioTracks } from './audio-display'
+
 export type ArchiveFeedCard = {
   postId: string
-  format: 'image_text' | 'text' | 'video'
+  format: 'image_text' | 'text' | 'video' | 'audio'
   title: string
   topics: string[]
   authorName: string
@@ -9,6 +11,9 @@ export type ArchiveFeedCard = {
     | { kind: 'image'; src: string; source?: string }
     | { kind: 'text'; theme: string }
     | { kind: 'video'; src: string; source?: string }
+    | { kind: 'audio'; src: string; source?: string; fallback: string }
+  trackCount: number
+  totalDuration: number
   estimatedHeight: number
   post: Record<string, any>
 }
@@ -34,12 +39,22 @@ export function normalizeArchiveCard(post: Record<string, any>): ArchiveFeedCard
   const images = Array.isArray(post?.content?.images) ? post.content.images.filter(Boolean).map(String) : []
   const videos = Array.isArray(post?.content?.videos) ? post.content.videos : []
   const videoCover = String(videos.find((item: any) => item && typeof item === 'object')?.cover || '').trim()
-  const format: ArchiveFeedCard['format'] = post?.format === 'video'
+  const audio = summarizeAudioTracks(post?.content?.audios)
+  const format: ArchiveFeedCard['format'] = post?.format === 'audio'
+    ? 'audio'
+    : post?.format === 'video'
     ? 'video'
     : post?.format === 'image_text' && images.length
       ? 'image_text'
       : 'text'
-  const cover: ArchiveFeedCard['cover'] = format === 'video'
+  const cover: ArchiveFeedCard['cover'] = format === 'audio'
+    ? {
+        kind: 'audio',
+        src: audio.firstCover || DEFAULT_AUDIO_COVER,
+        ...(audio.firstCover ? { source: audio.firstCover } : {}),
+        fallback: DEFAULT_AUDIO_COVER,
+      }
+    : format === 'video'
     ? { kind: 'video', src: videoCover }
     : format === 'image_text'
       ? { kind: 'image', src: images[0] }
@@ -52,6 +67,8 @@ export function normalizeArchiveCard(post: Record<string, any>): ArchiveFeedCard
     authorName: String(post?.author?.nickName || post?.authorNickname || post?.authorName || '邻居'),
     createdAt: String(post?.createdAt || ''),
     cover,
+    trackCount: format === 'audio' ? audio.trackCount : 0,
+    totalDuration: format === 'audio' ? audio.totalDuration : 0,
     estimatedHeight: cover.kind === 'text' ? 220 : 300,
     post,
   }

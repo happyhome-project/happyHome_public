@@ -165,6 +165,37 @@ describe('audio store', () => {
     })
   })
 
+  test('passes already-resolved HTTPS, blob, and static URLs through without cloud signing', async () => {
+    const mock = makeMockBackend()
+    const getTempFileURL = vi.fn(async (fileIDs: string[]) =>
+      fileIDs.map((fileID) => ({ fileID, tempFileURL: `https://signed.example/${fileID}` })),
+    )
+    _setAudioStoreDepsForTesting({
+      backend: mock.backend,
+      storage: makeStorage().storage,
+      getTempFileURL,
+    })
+    const store = useAudioStore()
+
+    await store.playPlaylist([
+      { fileID: 'https://cdn.example/audio.mp3', title: '直连音频', duration: 45, cover: 'blob:https://app.example/cover' },
+      { fileID: '/static/audio/sample.mp3', title: '本地音频', duration: 30, cover: '/static/audio/cover.jpg' },
+    ], 0, META)
+
+    expect(getTempFileURL).not.toHaveBeenCalled()
+    expect(mock.calls.setSrc[0]).toEqual({
+      url: 'https://cdn.example/audio.mp3',
+      title: '直连音频',
+      meta: { coverImgUrl: 'blob:https://app.example/cover', epname: 'Course', singer: '' },
+    })
+    await store.next()
+    expect(mock.calls.setSrc.at(-1)).toEqual({
+      url: '/static/audio/sample.mp3',
+      title: '本地音频',
+      meta: { coverImgUrl: '/static/audio/cover.jpg', epname: 'Course', singer: '' },
+    })
+  })
+
   test('close stops backend and clears audio state', async () => {
     const mock = makeMockBackend()
     _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })

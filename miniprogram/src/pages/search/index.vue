@@ -76,7 +76,7 @@ import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { refreshCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { clientLog } from '../../utils/client-log'
-import { resolveFeedCovers } from '../../utils/feed-cover-url'
+import { fallbackFeedCoverAfterError, resolveFeedCovers } from '../../utils/feed-cover-url'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
 import type { ArchiveFeedCard, ArchiveFeedColumns } from '../../utils/archive-feed'
@@ -328,7 +328,7 @@ function onSearchCoverLoad(card: ArchiveFeedCard) {
 async function onSearchCoverError(card: ArchiveFeedCard) {
   if (card.cover.kind === 'text') return
   const source = String(card.cover.source || card.cover.src || '').trim()
-  card.cover.src = ''
+  fallbackFeedCoverAfterError(card.cover)
   commitSearchCoverRender()
   if (!source.startsWith('cloud://')) return
 
