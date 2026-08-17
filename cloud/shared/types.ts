@@ -313,7 +313,7 @@ export interface Post {
   collaborationTemplateId?: string
   collaborationSystemKey?: string
   origin?: 'native_archive' | 'legacy_section'
-  format?: 'image_text' | 'text' | 'video'
+  format?: 'image_text' | 'text' | 'video' | 'audio'
   topics?: string[]
   sortKey?: string
   authorId: string
