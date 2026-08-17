@@ -2,7 +2,7 @@
   <view class="audio-publish-editor">
     <view v-if="tracks.length === 0" class="audio-empty">
       <text class="audio-empty__title">添加音频文件</text>
-      <text class="audio-empty__hint">支持 MP3、M4A、AAC、WAV，单个不超过 50 MiB</text>
+      <text class="audio-empty__hint">支持 MP3、M4A、AAC、WAV，最多 {{ AUDIO_MAX_TRACKS }} 轨，单个不超过 50 MiB</text>
     </view>
 
     <view v-for="(track, index) in tracks" :key="track.id" class="audio-track">
@@ -54,7 +54,7 @@
       </view>
     </view>
 
-    <button class="audio-add" :disabled="submissionLocked || uploading" @tap="chooseAudioFiles">{{ tracks.length ? '继续添加音频' : '选择音频' }}</button>
+    <button class="audio-add" :disabled="submissionLocked || uploading || tracks.length >= AUDIO_MAX_TRACKS" @tap="chooseAudioFiles">{{ tracks.length >= AUDIO_MAX_TRACKS ? `已达 ${AUDIO_MAX_TRACKS} 轨上限` : (tracks.length ? '继续添加音频' : '选择音频') }}</button>
 
     <!-- #ifdef H5 -->
     <input
@@ -62,7 +62,7 @@
       class="native-file-input"
       type="file"
       accept="audio/mpeg,audio/mp4,audio/aac,audio/wav,.mp3,.m4a,.aac,.wav"
-      :disabled="submissionLocked"
+      :disabled="submissionLocked || tracks.length >= AUDIO_MAX_TRACKS"
       multiple
       @change="onH5AudioChange"
     />
@@ -80,11 +80,12 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import type { AudioTrack } from '../../../../cloud/shared/types'
+import { AUDIO_MAX_TRACKS, type AudioTrack } from '../../../../cloud/shared/types'
 import { postApi } from '../../api/cloud'
 import { uploadCloudFile, type StorageUploadSource } from '../../api/storage'
 import type { ArchiveMediaIntentFile } from '../../utils/archive-media-intent'
 import {
+  assertAudioTrackAdditionWithinLimit,
   buildAudioTrackOutput,
   cleanupOwnedPendingAudioUploads,
   createAudioSubmissionOwnership,
@@ -368,6 +369,7 @@ function cancelAllAudioDurationProbes() {
 function acceptAudioFiles(files: ArchiveMediaIntentFile[]) {
   if (submissionLocked.value) return
   try {
+    assertAudioTrackAdditionWithinLimit(tracks.value.length, files.length)
     const additions: LocalAudioTrack[] = files.map((file) => {
       const normalized = normalizeAudioPublishFile(file)
       return {
@@ -518,13 +520,18 @@ async function uploadCover(trackId: string) {
 
 function chooseAudioFiles() {
   if (submissionLocked.value) return
+  const remainingSlots = AUDIO_MAX_TRACKS - tracks.value.length
+  if (remainingSlots <= 0) {
+    uni.showToast({ title: `最多添加 ${AUDIO_MAX_TRACKS} 条音频`, icon: 'none' })
+    return
+  }
   // #ifdef H5
   h5AudioInput.value?.click()
   return
   // #endif
   // #ifndef H5
   wx.chooseMessageFile({
-    count: 100,
+    count: remainingSlots,
     type: 'file',
     extension: ['mp3', 'm4a', 'aac', 'wav'],
     success: (result: any) => {

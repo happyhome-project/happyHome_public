@@ -22,6 +22,16 @@ describe('native archive audio publish UI contract', () => {
     expect(editor).toContain('onBeforeUnmount')
   })
 
+  test('enforces the shared twenty-track cap before either H5 or mini-program uploads start', () => {
+    const editor = read('components', 'widgets', 'AudioPublishEditor.vue')
+    expect(editor).toContain('AUDIO_MAX_TRACKS')
+    expect(editor).toContain('assertAudioTrackAdditionWithinLimit(tracks.value.length, files.length)')
+    expect(editor).toContain('const remainingSlots = AUDIO_MAX_TRACKS - tracks.value.length')
+    expect(editor).toContain('count: remainingSlots')
+    expect(editor).toContain(':disabled="submissionLocked || uploading || tracks.length >= AUDIO_MAX_TRACKS"')
+    expect(editor).toContain('最多 {{ AUDIO_MAX_TRACKS }} 轨')
+  })
+
   test('registers a newly uploaded stale fileID before immediately cleaning it', () => {
     const editor = read('components', 'widgets', 'AudioPublishEditor.vue')
     const audioUpload = editor.slice(editor.indexOf('async function uploadTrack'), editor.indexOf('async function uploadCover'))

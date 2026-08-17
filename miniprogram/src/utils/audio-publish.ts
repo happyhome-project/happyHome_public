@@ -1,5 +1,6 @@
 import {
   AUDIO_ALLOWED_EXTS,
+  AUDIO_MAX_TRACKS,
   AUDIO_MAX_SIZE_BYTES,
   type AudioExt,
   type AudioTrack,
@@ -41,6 +42,7 @@ export type AudioPublishReadinessReason =
   | ''
   | 'post-title-missing'
   | 'tracks-missing'
+  | 'tracks-limit'
   | 'track-title-missing'
   | 'audio-pending'
   | 'audio-error'
@@ -135,6 +137,20 @@ export function normalizeAudioPublishFile(input: {
   const title = name.replace(/\.[^.]+$/, '').trim()
   if (!title) throw new Error('无法从文件名生成曲目标题')
   return { source: validSource, name, title, ext: ext as AudioExt, size }
+}
+
+export function assertAudioTrackAdditionWithinLimit(currentCount: unknown, incomingCount: unknown): void {
+  const current = Number(currentCount)
+  const incoming = Number(incomingCount)
+  if (
+    !Number.isSafeInteger(current)
+    || current < 0
+    || !Number.isSafeInteger(incoming)
+    || incoming < 0
+    || current + incoming > AUDIO_MAX_TRACKS
+  ) {
+    throw new Error(`最多添加 ${AUDIO_MAX_TRACKS} 条音频`)
+  }
 }
 
 export function requirePositiveAudioDuration(value: unknown): number {
@@ -374,6 +390,7 @@ export function isAudioAsyncResultCurrent(
 }
 
 export function buildAudioTrackOutput(tracks: readonly AudioPublishTrackState[]): AudioTrack[] {
+  assertAudioTrackAdditionWithinLimit(0, tracks.length)
   return tracks.map((track) => {
     const title = String(track.title || '').trim()
     if (!title) throw new Error('请填写曲目标题')
@@ -432,6 +449,7 @@ export function resolveAudioPublishReadiness(input: {
 }): AudioPublishReadiness {
   if (!String(input.postTitle || '').trim()) return { ready: false, reason: 'post-title-missing' }
   if (input.tracks.length === 0) return { ready: false, reason: 'tracks-missing' }
+  if (input.tracks.length > AUDIO_MAX_TRACKS) return { ready: false, reason: 'tracks-limit' }
   if (input.tracks.some((track) => !String(track.title || '').trim())) return { ready: false, reason: 'track-title-missing' }
   if (input.tracks.some((track) => track.audioStatus === 'error')) return { ready: false, reason: 'audio-error' }
   if (input.tracks.some((track) => isPending(track.audioStatus) || track.audioStatus !== 'ready' || !track.fileID || !Number.isFinite(Number(track.duration)) || Number(track.duration) <= 0)) {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import {
   buildAudioTrackOutput,
+  assertAudioTrackAdditionWithinLimit,
   capturePositiveAudioDurationBeforeCleanup,
   cleanupOwnedPendingAudioUploads,
   collectOwnedPendingAudioUploads,
@@ -89,6 +90,14 @@ describe('audio publish file normalization', () => {
       source: {} as Blob, name: 'story.mp3', type: 'file', size: 1,
     })).toThrow('本地文件')
   })
+
+  test('rejects a selection batch that would exceed the shared twenty-track limit', () => {
+    expect(() => assertAudioTrackAdditionWithinLimit(0, 20)).not.toThrow()
+    expect(() => assertAudioTrackAdditionWithinLimit(19, 1)).not.toThrow()
+    expect(() => assertAudioTrackAdditionWithinLimit(20, 1)).toThrow('最多添加 20 条音频')
+    expect(() => assertAudioTrackAdditionWithinLimit(19, 2)).toThrow('最多添加 20 条音频')
+    expect(() => assertAudioTrackAdditionWithinLimit(0, 21)).toThrow('最多添加 20 条音频')
+  })
 })
 
 describe('audio publish state reducers', () => {
@@ -155,6 +164,10 @@ describe('audio publish output, cleanup, and readiness', () => {
     expect(() => buildAudioTrackOutput([readyTrack({ title: ' ' })])).toThrow('曲目标题')
     expect(() => buildAudioTrackOutput([readyTrack({ duration: 0 })])).toThrow('时长')
     expect(() => buildAudioTrackOutput([readyTrack({ audioStatus: 'error' })])).toThrow('未完成')
+    expect(() => buildAudioTrackOutput(Array.from({ length: 21 }, (_, index) => readyTrack({
+      id: `track-${index}`,
+      fileID: `cloud://env/track-${index}.mp3`,
+    })))).toThrow('最多添加 20 条音频')
   })
 
   test('selects only owned new pending IDs and never existing finalized media', () => {
@@ -189,6 +202,7 @@ describe('audio publish output, cleanup, and readiness', () => {
   test('blocks submit for missing post/track titles and all unresolved audio or cover work', () => {
     expect(resolveAudioPublishReadiness({ postTitle: '', tracks: [readyTrack()] })).toEqual({ ready: false, reason: 'post-title-missing' })
     expect(resolveAudioPublishReadiness({ postTitle: '帖子', tracks: [] })).toEqual({ ready: false, reason: 'tracks-missing' })
+    expect(resolveAudioPublishReadiness({ postTitle: '帖子', tracks: Array.from({ length: 21 }, (_, index) => readyTrack({ id: `track-${index}` })) })).toEqual({ ready: false, reason: 'tracks-limit' })
     expect(resolveAudioPublishReadiness({ postTitle: '帖子', tracks: [readyTrack({ title: '' })] })).toEqual({ ready: false, reason: 'track-title-missing' })
     expect(resolveAudioPublishReadiness({ postTitle: '帖子', tracks: [readyTrack({ duration: null, audioStatus: 'pending' })] })).toEqual({ ready: false, reason: 'audio-pending' })
     expect(resolveAudioPublishReadiness({ postTitle: '帖子', tracks: [readyTrack({ coverStatus: 'error' })] })).toEqual({ ready: false, reason: 'cover-error' })
