@@ -1,4 +1,4 @@
-import type { Post, Section, Widget } from '../shared/types'
+import type { AudioTrack, Post, Section, Widget } from '../shared/types'
 import { createHash } from 'crypto'
 import { normalizeSectionTemplates } from '../shared/section-templates'
 import { loadPostContentSection } from './post-content-contract'
@@ -82,11 +82,25 @@ export interface SearchQuery {
 }
 
 export interface PostSearchResultItem {
+  _id?: string
   postId: string
   communityId: string
   sectionId: string
   sectionName: string
   title: string
+  area?: Post['area']
+  format?: Post['format']
+  topics?: string[]
+  content?: {
+    title?: string
+    images?: string[]
+    videos?: Array<{ cover?: string }>
+    audios?: AudioTrack[]
+    body?: { text?: string }
+  }
+  presentation?: Post['presentation']
+  authorId?: string
+  likeCount?: number
   score: number
   matchedFields: Array<{
     fieldLabel: string

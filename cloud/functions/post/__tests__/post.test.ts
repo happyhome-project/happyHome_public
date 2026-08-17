@@ -3024,6 +3024,57 @@ test('create: rolls back newly finalized archive audio when post persistence fai
   ])
 })
 
+test('create: atomically rolls back the post and finalized audio when sortKey persistence fails after add', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(storage.inspectRemoteObject as jest.Mock).mockResolvedValue({ contentLength: 1024, contentType: 'audio/mpeg' })
+  const audio = `cloud://env/posts/member-audios/${deriveMemberAudioScope('test-openid', 'community-1')}/story.mp3`
+  let persistedPost = false
+
+  ;(db.runTransaction as jest.Mock).mockImplementationOnce(async (callback) => {
+    let stagedPost = false
+    try {
+      const result = await callback({
+        collection: (collectionName: string) => {
+          expect(collectionName).toBe('posts')
+          return {
+            add: async () => {
+              stagedPost = true
+              return { _id: 'archive-audio-sort-fail' }
+            },
+            doc: (postId: string) => ({
+              update: async ({ data }: any) => {
+                expect(postId).toBe('archive-audio-sort-fail')
+                expect(data.sortKey).toEqual(expect.stringContaining('_archive-audio-sort-fail'))
+                throw new Error('sortKey write failed')
+              },
+            }),
+          }
+        },
+      })
+      persistedPost = stagedPost
+      return result
+    } catch (error) {
+      throw error
+    }
+  })
+  ;(db.updateById as jest.Mock).mockImplementationOnce(async (_collection, _id, data) => {
+    expect(data.sortKey).toEqual(expect.stringContaining('_archive-audio-sort-fail'))
+    throw new Error('sortKey write failed')
+  })
+
+  await expect(handleCreate({
+    communityId: 'community-1', area: 'archive', format: 'audio', topics: [],
+    content: { title: '家庭声音', audios: [{ title: '第一段', fileID: audio, duration: 12, size: 1, ext: 'mp3' }] },
+  } as any, 'test-openid')).rejects.toThrow('sortKey write failed')
+
+  expect(db.updateById).not.toHaveBeenCalled()
+  ;(db.updateById as jest.Mock).mockReset()
+  expect(persistedPost).toBe(false)
+  expect(storage.deleteFile).toHaveBeenCalledWith([
+    expect.stringContaining('/posts/member-audios-finalized/'),
+  ])
+})
+
 test('update: reuses only this archive audio post finalized files and preserves audio format', async () => {
   const scope = deriveMemberAudioScope('test-openid', 'community-1')
   const audio = `cloud://env/posts/member-audios-finalized/${scope}/existing.mp3`

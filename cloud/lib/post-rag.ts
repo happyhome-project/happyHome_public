@@ -347,7 +347,12 @@ function resultItemsFromCitations(citations: RagCitation[]): PostSearchResultIte
   return Array.from(byPost.values()).sort((left, right) => right.score - left.score)
 }
 
-function archiveSearchCardProjection(post: any) {
+type ArchiveSearchCardProjection = Pick<
+  PostSearchResultItem,
+  '_id' | 'area' | 'format' | 'topics' | 'content' | 'presentation' | 'authorId' | 'createdAt' | 'updatedAt' | 'likeCount'
+>
+
+function archiveSearchCardProjection(post: any): ArchiveSearchCardProjection {
   const content = post?.content && typeof post.content === 'object' ? post.content : {}
   const title = String(content.title || '').trim()
   const format = post?.format === 'video'
@@ -390,7 +395,7 @@ function archiveSearchCardProjection(post: any) {
     topics: Array.isArray(post?.topics) ? post.topics.map(String).filter(Boolean) : [],
     content: cardContent,
     presentation: post?.presentation?.textNoteTheme
-      ? { textNoteTheme: String(post.presentation.textNoteTheme) }
+      ? { textNoteTheme: String(post.presentation.textNoteTheme) as NonNullable<Post['presentation']>['textNoteTheme'] }
       : undefined,
     authorId: String(post?.authorId || ''),
     createdAt: String(post?.createdAt || ''),

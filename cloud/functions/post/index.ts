@@ -611,14 +611,15 @@ export async function handleCreate(
     try {
       postId = await db.runTransaction(async transaction => {
         const created = await transaction.collection('posts').add({ data: postData })
+        await transaction.collection('posts').doc(created._id).update({ data: {
+          sortKey: buildArchiveSortKey(now, created._id),
+        } })
         return created._id
       })
     } catch (error) {
       if (createdAudioFileIDs.length > 0) await Promise.resolve(deleteFile(createdAudioFileIDs)).catch(() => undefined)
       throw error
     }
-    const sortKey = buildArchiveSortKey(now, postId)
-    await db.updateById('posts', postId, { sortKey })
     const audit = await auditAndApply({
       postId,
       communityId: params.communityId,
