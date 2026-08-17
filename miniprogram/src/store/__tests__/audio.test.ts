@@ -11,16 +11,24 @@ function makeMockBackend(options: { emitPlayEvent?: boolean } = {}) {
     pause: 0,
     stop: 0,
     seek: [] as number[],
+    sequence: [] as string[],
   }
   const backend: AudioBackend = {
-    setSrc(url, title, meta) { calls.setSrc.push({ url, title, meta }) },
+    setSrc(url, title, meta) {
+      calls.setSrc.push({ url, title, meta })
+      calls.sequence.push('setSrc')
+    },
     play() {
       calls.play += 1
+      calls.sequence.push('play')
       if (options.emitPlayEvent !== false) handlers.onPlay?.()
     },
     pause() { calls.pause += 1; handlers.onPause?.() },
     stop() { calls.stop += 1 },
-    seek(seconds) { calls.seek.push(seconds) },
+    seek(seconds) {
+      calls.seek.push(seconds)
+      calls.sequence.push(`seek:${seconds}`)
+    },
     destroy() {},
     bind(nextHandlers) {
       for (const event of Object.keys(handlers) as AudioBackendEvent[]) delete handlers[event]
@@ -208,6 +216,168 @@ describe('audio store', () => {
       title: '本地音频',
       meta: { coverImgUrl: '/static/audio/cover.jpg', epname: 'Course', singer: '' },
     })
+  })
+
+  test('applies a seek requested during URL resolution when the current generation starts playing', async () => {
+    const mock = makeMockBackend({ emitPlayEvent: false })
+    const signer = deferred<Array<{ fileID: string; tempFileURL: string }>>()
+    _setAudioStoreDepsForTesting({
+      backend: mock.backend,
+      storage: makeStorage().storage,
+      getTempFileURL: vi.fn(() => signer.promise),
+    })
+    const store = useAudioStore()
+    const track = { fileID: 'cloud://audio/seek-pending.mp3', title: 'Seek pending', duration: 90 }
+
+    const request = store.playPlaylist([track], 0, { ...META, postId: 'seek-pending-post' })
+    store.seek(37)
+
+    expect(store.currentTime).toBe(37)
+    expect(mock.calls.seek).toEqual([])
+
+    signer.resolve([{ fileID: track.fileID, tempFileURL: 'https://signed/seek-pending.mp3' }])
+    await request
+
+    expect(mock.calls.setSrc[0]?.url).toBe('https://signed/seek-pending.mp3')
+    expect(mock.calls.seek).toEqual([])
+    expect(mock.calls.sequence).toEqual(['setSrc', 'play'])
+
+    mock.handlers.onPlay?.()
+
+    expect(mock.calls.sequence).toEqual(['setSrc', 'play', 'seek:37'])
+  })
+
+  test('keeps only the newest generation seek when a pending playlist is replaced', async () => {
+    const mock = makeMockBackend()
+    const slowSigner = deferred<Array<{ fileID: string; tempFileURL: string }>>()
+    _setAudioStoreDepsForTesting({
+      backend: mock.backend,
+      storage: makeStorage().storage,
+      getTempFileURL: vi.fn(() => slowSigner.promise),
+    })
+    const store = useAudioStore()
+    const slowTrack = { fileID: 'cloud://audio/seek-slow.mp3', title: 'Seek slow', duration: 80 }
+    const fastTrack = { fileID: 'https://cdn/seek-fast.mp3', title: 'Seek fast', duration: 100 }
+
+    const slowRequest = store.playPlaylist([slowTrack], 0, { ...META, postId: 'seek-slow-post' })
+    store.seek(11)
+    const fastRequest = store.playPlaylist([fastTrack], 0, { ...META, postId: 'seek-fast-post' })
+    store.seek(22)
+
+    await fastRequest
+    slowSigner.resolve([{ fileID: slowTrack.fileID, tempFileURL: 'https://signed/seek-slow.mp3' }])
+    await slowRequest
+
+    expect(mock.calls.seek).toEqual([22])
+    expect(mock.calls.sequence).toEqual(['setSrc', 'play', 'seek:22'])
+    expect(store.currentTrack?.fileID).toBe(fastTrack.fileID)
+    expect(store.currentTime).toBe(22)
+  })
+
+  test.each([
+    ['next', 0, 1],
+    ['prev', 1, 0],
+  ] as const)('does not leak a pending seek through %s', async (action, startIndex, expectedIndex) => {
+    const mock = makeMockBackend()
+    const firstSigner = deferred<Array<{ fileID: string; tempFileURL: string }>>()
+    const secondSigner = deferred<Array<{ fileID: string; tempFileURL: string }>>()
+    let signerCallCount = 0
+    _setAudioStoreDepsForTesting({
+      backend: mock.backend,
+      storage: makeStorage().storage,
+      getTempFileURL: vi.fn(() => {
+        signerCallCount += 1
+        return signerCallCount === 1 ? firstSigner.promise : secondSigner.promise
+      }),
+    })
+    const store = useAudioStore()
+
+    const initialRequest = store.playPlaylist(TRACKS, startIndex, META)
+    store.seek(15)
+    const switchRequest = action === 'next' ? store.next() : store.prev()
+    secondSigner.resolve(TRACKS.map(track => ({
+      fileID: track.fileID,
+      tempFileURL: `https://new/${track.fileID}`,
+    })))
+    await switchRequest
+    firstSigner.resolve(TRACKS.map(track => ({
+      fileID: track.fileID,
+      tempFileURL: `https://old/${track.fileID}`,
+    })))
+    await initialRequest
+
+    expect(mock.calls.seek).toEqual([])
+    expect(store.currentIndex).toBe(expectedIndex)
+    expect(mock.calls.setSrc).toHaveLength(1)
+    expect(mock.calls.setSrc[0]?.title).toBe(TRACKS[expectedIndex].title)
+  })
+
+  test('toggle cancellation discards a seek queued during URL resolution', async () => {
+    const mock = makeMockBackend()
+    const signer = deferred<Array<{ fileID: string; tempFileURL: string }>>()
+    _setAudioStoreDepsForTesting({
+      backend: mock.backend,
+      storage: makeStorage().storage,
+      getTempFileURL: vi.fn(() => signer.promise),
+    })
+    const store = useAudioStore()
+    const track = { fileID: 'cloud://audio/seek-toggle.mp3', title: 'Seek toggle', duration: 60 }
+
+    const request = store.playPlaylist([track], 0, { ...META, postId: 'seek-toggle-post' })
+    store.seek(33)
+    await store.togglePlay()
+    signer.resolve([{ fileID: track.fileID, tempFileURL: 'https://signed/seek-toggle.mp3' }])
+    await request
+
+    expect(mock.calls.seek).toEqual([])
+    expect(mock.calls.setSrc).toEqual([])
+    expect(mock.calls.play).toBe(0)
+  })
+
+  test('close discards a seek queued during URL resolution', async () => {
+    const mock = makeMockBackend()
+    const signer = deferred<Array<{ fileID: string; tempFileURL: string }>>()
+    _setAudioStoreDepsForTesting({
+      backend: mock.backend,
+      storage: makeStorage().storage,
+      getTempFileURL: vi.fn(() => signer.promise),
+    })
+    const store = useAudioStore()
+    const track = { fileID: 'cloud://audio/seek-close.mp3', title: 'Seek close', duration: 60 }
+
+    const request = store.playPlaylist([track], 0, { ...META, postId: 'seek-close-post' })
+    store.seek(44)
+    store.close()
+    signer.resolve([{ fileID: track.fileID, tempFileURL: 'https://signed/seek-close.mp3' }])
+    await request
+
+    expect(mock.calls.seek).toEqual([])
+    expect(mock.calls.setSrc).toEqual([])
+    expect(mock.calls.play).toBe(0)
+  })
+
+  test('keeps seek pending after source install until onPlay, then later seeks are immediate', async () => {
+    const mock = makeMockBackend({ emitPlayEvent: false })
+    _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
+    const store = useAudioStore()
+    await store.playPlaylist([{
+      fileID: 'https://cdn/seek-active.mp3',
+      title: 'Seek active',
+      duration: 60,
+    }], 0, { ...META, postId: 'seek-active-post' })
+
+    expect(store.playbackPending).toBe(true)
+    store.seek(18)
+
+    expect(mock.calls.seek).toEqual([])
+    expect(store.currentTime).toBe(18)
+
+    mock.handlers.onPlay?.()
+    expect(mock.calls.seek).toEqual([18])
+
+    store.seek(24)
+    expect(mock.calls.seek).toEqual([18, 24])
+    expect(store.currentTime).toBe(24)
   })
 
   test('allows only the latest fast playlist switch to reach the backend', async () => {

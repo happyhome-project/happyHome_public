@@ -98,6 +98,7 @@ export const useAudioStore = defineStore('audio', {
     currentTime: 0,
     playbackGeneration: 0,
     playbackPending: false,
+    pendingSeek: null as { generation: number; seconds: number } | null,
   }),
   getters: {
     currentTrack: (state) => state.currentPlaylist[state.currentIndex] || null,
@@ -166,6 +167,11 @@ export const useAudioStore = defineStore('audio', {
     seek(seconds: number) {
       if (this.currentPlaylist.length === 0) return
       this.currentTime = seconds
+      if (this.playbackPending) {
+        this.pendingSeek = { generation: this.playbackGeneration, seconds }
+        return
+      }
+      this.pendingSeek = null
       this._backend().seek(seconds)
     },
     close() {
@@ -184,6 +190,7 @@ export const useAudioStore = defineStore('audio', {
       const backend = this._backend()
       this.playbackGeneration += 1
       this.playbackPending = true
+      this.pendingSeek = null
       this.isPlaying = false
       if (shouldPause) {
         try { backend.pause() } catch (_error) {}
@@ -193,6 +200,7 @@ export const useAudioStore = defineStore('audio', {
     _invalidatePlaybackRequest() {
       this.playbackGeneration += 1
       this.playbackPending = false
+      this.pendingSeek = null
       this.isPlaying = false
     },
     _isCurrentPlaybackRequest(generation: number): boolean {
@@ -206,6 +214,11 @@ export const useAudioStore = defineStore('audio', {
           activated = true
           this.playbackPending = false
           this.isPlaying = true
+          if (this.pendingSeek?.generation === generation) {
+            const seconds = this.pendingSeek.seconds
+            this.pendingSeek = null
+            backend.seek(seconds)
+          }
         },
         onPause: () => {
           if (!this._isCurrentPlaybackRequest(generation) || !activated) return
@@ -225,6 +238,7 @@ export const useAudioStore = defineStore('audio', {
         onError: () => {
           if (!this._isCurrentPlaybackRequest(generation)) return
           this.playbackPending = false
+          if (this.pendingSeek?.generation === generation) this.pendingSeek = null
           this.isPlaying = false
         },
       } as Record<AudioBackendEvent, (...args: any[]) => void>)
@@ -238,6 +252,7 @@ export const useAudioStore = defineStore('audio', {
       if (!this._isCurrentPlaybackRequest(generation)) return
       if (!url) {
         this.playbackPending = false
+        if (this.pendingSeek?.generation === generation) this.pendingSeek = null
         return
       }
       const coverImgUrl = snapshot.track.cover ? await this._urlFor(snapshot.track.cover) : ''
