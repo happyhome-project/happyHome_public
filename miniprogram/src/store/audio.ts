@@ -104,6 +104,7 @@ export const useAudioStore = defineStore('audio', {
     playbackGeneration: 0,
     playbackPending: false,
     sourceReadyGeneration: null as number | null,
+    playbackEndedGeneration: null as number | null,
     pendingSeek: null as { generation: number; seconds: number } | null,
   }),
   getters: {
@@ -144,17 +145,23 @@ export const useAudioStore = defineStore('audio', {
       }
       if (this.isPlaying) {
         this._invalidatePlaybackRequest({ preserveReadySource: true })
+        if (this.sourceReadyGeneration === this.playbackGeneration) {
+          this._bindPlaybackEvents(backend, this.playbackGeneration, true)
+        }
         try { backend.pause() } catch (_error) {}
         return
       }
       const snapshot = createPlaybackRequestSnapshot(this.currentPlaylist, this.currentIndex, this.currentMeta)
       if (!snapshot) return
-      const resumeSeconds = this.sourceReadyGeneration === this.playbackGeneration
+      const sourceReady = this.sourceReadyGeneration === this.playbackGeneration
+      const replayFromNaturalEnd = sourceReady
+        && this.playbackEndedGeneration === this.playbackGeneration
+      const resumeSeconds = sourceReady && !replayFromNaturalEnd
         ? this.currentTime
         : 0
       if (resumeSeconds === 0) this.currentTime = 0
       const generation = this._beginPlaybackRequest(false)
-      if (resumeSeconds > 0) {
+      if (replayFromNaturalEnd || resumeSeconds > 0) {
         this.pendingSeek = { generation, seconds: resumeSeconds }
       }
       await this._playSnapshot(snapshot, generation)
@@ -185,7 +192,11 @@ export const useAudioStore = defineStore('audio', {
         return
       }
       if (this.sourceReadyGeneration === this.playbackGeneration) {
+        const duration = Math.max(0, Number(this.currentTrack?.duration || 0))
+        const keepsNaturalEnd = this.playbackEndedGeneration === this.playbackGeneration
+          && (duration === 0 || seconds >= duration)
         this.currentTime = seconds
+        if (!keepsNaturalEnd) this.playbackEndedGeneration = null
         this.pendingSeek = null
         this._backend().seek(seconds)
         return
@@ -210,6 +221,7 @@ export const useAudioStore = defineStore('audio', {
       this.playbackGeneration += 1
       this.playbackPending = true
       this.sourceReadyGeneration = null
+      this.playbackEndedGeneration = null
       this.pendingSeek = null
       this.isPlaying = false
       if (shouldPause) {
@@ -225,6 +237,7 @@ export const useAudioStore = defineStore('audio', {
       this.sourceReadyGeneration = preserveReadySource && sourceWasReady
         ? this.playbackGeneration
         : null
+      this.playbackEndedGeneration = null
       this.pendingSeek = null
       this.isPlaying = false
       if (resetCurrentTime) this.currentTime = 0
@@ -232,19 +245,24 @@ export const useAudioStore = defineStore('audio', {
     _isCurrentPlaybackRequest(generation: number): boolean {
       return generation === this.playbackGeneration
     },
-    _bindPlaybackEvents(backend: AudioBackend, generation: number) {
-      let activated = false
+    _bindPlaybackEvents(backend: AudioBackend, generation: number, sourceAlreadyReady = false) {
+      let activated = sourceAlreadyReady
       backend.bind({
         onPlay: () => {
           if (!this._isCurrentPlaybackRequest(generation)) return
+          const replayFromNaturalEnd = this.playbackEndedGeneration === generation
           activated = true
           this.playbackPending = false
           this.sourceReadyGeneration = generation
+          this.playbackEndedGeneration = null
           this.isPlaying = true
           if (this.pendingSeek?.generation === generation) {
             const seconds = this.pendingSeek.seconds
             this.pendingSeek = null
             backend.seek(seconds)
+          } else if (replayFromNaturalEnd) {
+            this.currentTime = 0
+            backend.seek(0)
           }
         },
         onPause: () => {
@@ -255,6 +273,7 @@ export const useAudioStore = defineStore('audio', {
         onEnded: () => {
           if (!this._isCurrentPlaybackRequest(generation) || !activated) return
           this.playbackPending = false
+          this.playbackEndedGeneration = generation
           this.isPlaying = false
           if (this.canNext) void this.next()
         },

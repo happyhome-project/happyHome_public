@@ -150,6 +150,146 @@ describe('audio store', () => {
     expect(mock.calls.play).toBe(2)
   })
 
+  test('replays a naturally ended single track from zero without seeking to its duration', async () => {
+    const mock = makeMockBackend()
+    _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
+    const store = useAudioStore()
+    await store.playPlaylist([{
+      fileID: 'https://cdn/replay-single.mp3',
+      title: 'Replay single',
+      duration: 60,
+    }], 0, { ...META, postId: 'replay-single-post' })
+    const endedGenerationHandlers = { ...mock.handlers }
+    endedGenerationHandlers.onTimeUpdate?.(60)
+    endedGenerationHandlers.onEnded?.()
+    endedGenerationHandlers.onEnded?.()
+
+    expect(store.isPlaying).toBe(false)
+    expect(store.currentTime).toBe(60)
+
+    await store.togglePlay()
+
+    expect(store.isPlaying).toBe(true)
+    expect(store.currentTime).toBe(0)
+    expect(mock.calls.seek).toEqual([0])
+    expect(mock.calls.seek).not.toContain(60)
+    expect(mock.calls.play).toBe(2)
+
+    endedGenerationHandlers.onTimeUpdate?.(59)
+    endedGenerationHandlers.onEnded?.()
+    await Promise.resolve()
+    expect(store.currentTime).toBe(0)
+    expect(store.isPlaying).toBe(true)
+    expect(mock.calls.play).toBe(2)
+  })
+
+  test('continues from an explicit middle seek after natural end', async () => {
+    const mock = makeMockBackend()
+    _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
+    const store = useAudioStore()
+    await store.playPlaylist([{
+      fileID: 'https://cdn/replay-from-selection.mp3',
+      title: 'Replay from selection',
+      duration: 60,
+    }], 0, { ...META, postId: 'replay-from-selection-post' })
+    mock.handlers.onTimeUpdate?.(60)
+    mock.handlers.onEnded?.()
+
+    store.seek(24)
+    await store.togglePlay()
+
+    expect(store.currentTime).toBe(24)
+    expect(mock.calls.seek).toEqual([24, 24])
+    expect(store.isPlaying).toBe(true)
+  })
+
+  test('restarts from zero when physical onPlay follows natural end', async () => {
+    const mock = makeMockBackend({ emitPlayEvent: false })
+    _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
+    const store = useAudioStore()
+    await store.playPlaylist([{
+      fileID: 'https://cdn/physical-replay.mp3',
+      title: 'Physical replay',
+      duration: 60,
+    }], 0, { ...META, postId: 'physical-replay-post' })
+    mock.handlers.onPlay?.()
+    mock.handlers.onTimeUpdate?.(60)
+    mock.handlers.onEnded?.()
+
+    mock.handlers.onPlay?.()
+
+    expect(store.isPlaying).toBe(true)
+    expect(store.currentTime).toBe(0)
+    expect(mock.calls.seek).toEqual([0])
+
+    mock.handlers.onPlay?.()
+    expect(mock.calls.seek).toEqual([0])
+  })
+
+  test('keeps exact-duration selection ended so toggle replays from zero', async () => {
+    const mock = makeMockBackend()
+    _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
+    const store = useAudioStore()
+    await store.playPlaylist([{
+      fileID: 'https://cdn/replay-after-duration-seek.mp3',
+      title: 'Replay after duration seek',
+      duration: 60,
+    }], 0, { ...META, postId: 'replay-after-duration-seek-post' })
+    mock.handlers.onTimeUpdate?.(60)
+    mock.handlers.onEnded?.()
+
+    store.seek(60)
+    await store.togglePlay()
+
+    expect(store.isPlaying).toBe(true)
+    expect(store.currentTime).toBe(0)
+    expect(mock.calls.seek).toEqual([60, 0])
+  })
+
+  test('late ended-generation events cannot advance or retime the automatic next track', async () => {
+    const mock = makeMockBackend()
+    _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
+    const store = useAudioStore()
+    await store.playPlaylist(TRACKS, 0, META)
+    const endedGenerationHandlers = { ...mock.handlers }
+    endedGenerationHandlers.onTimeUpdate?.(100)
+    endedGenerationHandlers.onEnded?.()
+    await vi.waitFor(() => expect(store.currentIndex).toBe(1))
+    const setSrcCount = mock.calls.setSrc.length
+    const playCount = mock.calls.play
+
+    endedGenerationHandlers.onEnded?.()
+    endedGenerationHandlers.onTimeUpdate?.(99)
+    await Promise.resolve()
+
+    expect(store.currentIndex).toBe(1)
+    expect(store.currentTime).toBe(0)
+    expect(mock.calls.setSrc).toHaveLength(setSrcCount)
+    expect(mock.calls.play).toBe(playCount)
+  })
+
+  test('keeps lockscreen callbacks current after a UI pause', async () => {
+    const mock = makeMockBackend()
+    _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
+    const store = useAudioStore()
+    await store.playPlaylist(TRACKS, 0, META)
+    mock.handlers.onTimeUpdate?.(12)
+
+    await store.togglePlay()
+    expect(store.isPlaying).toBe(false)
+    expect(store.currentTime).toBe(12)
+
+    mock.handlers.onPlay?.()
+    expect(store.isPlaying).toBe(true)
+    mock.handlers.onTimeUpdate?.(18)
+    expect(store.currentTime).toBe(18)
+
+    mock.handlers.onEnded?.()
+    await vi.waitFor(() => expect(store.currentIndex).toBe(1))
+    expect(store.currentTime).toBe(0)
+    expect(store.currentTrack?.title).toBe('Lesson 2')
+  })
+
   test('togglePlay pauses and resumes', async () => {
     const mock = makeMockBackend()
     _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
