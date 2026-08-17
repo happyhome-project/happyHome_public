@@ -112,6 +112,16 @@ export function deferArchiveMediaIntent(
   return intent?.mediaType === mediaType ? intent : null
 }
 
+export function transferArchiveMediaIntentOwnership(ownerTokens: Set<string>, tokenValue: unknown): boolean {
+  const token = String(tokenValue || '').trim()
+  return token ? ownerTokens.delete(token) : false
+}
+
+export function cleanupOwnedArchiveMediaIntents(ownerTokens: Set<string>) {
+  ownerTokens.forEach((token) => discardArchiveMediaIntent(token))
+  ownerTokens.clear()
+}
+
 export function discardArchiveMediaIntent(tokenValue: unknown): boolean {
   const token = String(tokenValue || '').trim()
   if (!token) return false

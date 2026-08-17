@@ -61,7 +61,7 @@ import {
   hideNativeTabBar,
 } from '../utils/app-tabbar'
 import { inspectSelectedMedia, type MediaSelectionFailure, type PublishMediaType } from '../utils/video-publish'
-import { discardArchiveMediaIntent, storeArchiveMediaIntent, sweepArchiveMediaIntents, type ArchiveMediaIntentFile } from '../utils/archive-media-intent'
+import { cleanupOwnedArchiveMediaIntents, discardArchiveMediaIntent, storeArchiveMediaIntent, sweepArchiveMediaIntents, transferArchiveMediaIntentOwnership, type ArchiveMediaIntentFile } from '../utils/archive-media-intent'
 
 type AppTabBarCurrent = AppTabKey | 'create'
 const props = defineProps<{ current: AppTabBarCurrent }>()
@@ -192,6 +192,7 @@ function routeSelectedMedia(result: any) {
   const token = storeArchiveMediaIntent(mediaType, intentFiles)
   pendingMediaIntents.add(token)
   if (props.current === 'create') {
+    if (mediaType === 'audio') transferArchiveMediaIntentOwnership(pendingMediaIntents, token)
     closePublishSheet()
     emit('media-selected', token)
     return
@@ -227,8 +228,7 @@ function onH5MediaChange(event: Event) {
 }
 
 onBeforeUnmount(() => {
-  pendingMediaIntents.forEach((token) => discardArchiveMediaIntent(token))
-  pendingMediaIntents.clear()
+  cleanupOwnedArchiveMediaIntents(pendingMediaIntents)
   sweepArchiveMediaIntents()
 })
 

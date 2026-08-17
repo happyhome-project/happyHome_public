@@ -90,6 +90,15 @@ describe('archive publishing entry', () => {
     expect(create).toContain('const pendingArchiveAudioIntentToken = ref(\'\')')
   })
 
+  test('transfers inline audio cleanup ownership before emitting the create-page handoff', () => {
+    const source = read('components', 'AppTabBar.vue')
+    const routeStart = source.indexOf('function routeSelectedMedia(result: any)')
+    const routeEnd = source.indexOf('function onH5MediaChange', routeStart)
+    const route = source.slice(routeStart, routeEnd)
+
+    expect(route).toMatch(/if \(props\.current === 'create'\)\s*\{[\s\S]*if \(mediaType === 'audio'\) transferArchiveMediaIntentOwnership\(pendingMediaIntents, token\)[\s\S]*emit\('media-selected', token\)/)
+  })
+
   test('create page owns a video archive editor without unlocking ordinary admin media widgets', () => {
     const create = read('pages', 'create', 'index.vue')
     const widgetEditor = read('components', 'widgets', 'WidgetEditor.vue')

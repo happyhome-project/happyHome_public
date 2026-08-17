@@ -63,6 +63,27 @@ describe('archive media intent', () => {
     expect((module as any).consumeArchiveMediaIntent(token)).toBeNull()
   })
 
+  test('preserves a deferred inline audio intent after producer cleanup transfers ownership', async () => {
+    vi.resetModules()
+    vi.stubGlobal('uni', { setStorageSync: vi.fn(), getStorageSync: vi.fn(), removeStorageSync: vi.fn() })
+    const module = await import('../archive-media-intent').catch(() => ({} as any))
+    const file = { source: 'wxfile://handoff.mp3', name: 'handoff.mp3', type: 'audio/mpeg', size: 1 }
+    const token = (module as any).storeArchiveMediaIntent('audio', [file])
+    const imageToken = (module as any).storeArchiveMediaIntent('image', [{ source: 'wxfile://image.jpg', name: 'image.jpg', type: 'image/jpeg', size: 1 }])
+    const videoToken = (module as any).storeArchiveMediaIntent('video', [{ source: 'wxfile://clip.mp4', name: 'clip.mp4', type: 'video/mp4', size: 1 }])
+    const producerOwnedTokens = new Set([token, imageToken, videoToken])
+
+    expect(typeof (module as any).transferArchiveMediaIntentOwnership).toBe('function')
+    expect(typeof (module as any).cleanupOwnedArchiveMediaIntents).toBe('function')
+    expect((module as any).transferArchiveMediaIntentOwnership(producerOwnedTokens, token)).toBe(true)
+    expect((module as any).deferArchiveMediaIntent(token, 'audio')).toMatchObject({ token, files: [file] })
+    ;(module as any).cleanupOwnedArchiveMediaIntents(producerOwnedTokens)
+    expect((module as any).consumeArchiveMediaIntent(token)).toMatchObject({ token, mediaType: 'audio', files: [file] })
+    expect((module as any).consumeArchiveMediaIntent(token)).toBeNull()
+    expect((module as any).consumeArchiveMediaIntent(imageToken)).toBeNull()
+    expect((module as any).consumeArchiveMediaIntent(videoToken)).toBeNull()
+  })
+
   test('expires volatile files and revokes owned preview URLs', async () => {
     vi.resetModules()
     const revokeObjectURL = vi.fn()
