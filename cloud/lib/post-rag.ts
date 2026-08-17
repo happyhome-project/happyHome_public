@@ -352,6 +352,8 @@ function archiveSearchCardProjection(post: any) {
   const title = String(content.title || '').trim()
   const format = post?.format === 'video'
     ? 'video'
+    : post?.format === 'audio'
+      ? 'audio'
     : post?.format === 'image_text'
       ? 'image_text'
       : 'text'
@@ -363,6 +365,17 @@ function archiveSearchCardProjection(post: any) {
   } else if (format === 'video') {
     cardContent.videos = Array.isArray(content.videos)
       ? content.videos.map((video: any) => ({ cover: String(video?.cover || '').trim() }))
+      : []
+  } else if (format === 'audio') {
+    cardContent.audios = Array.isArray(content.audios)
+      ? content.audios.map((audio: any) => ({
+          title: String(audio?.title || '').trim(),
+          fileID: String(audio?.fileID || '').trim(),
+          duration: Number(audio?.duration || 0),
+          size: Number(audio?.size || 0),
+          ext: String(audio?.ext || '').trim().toLowerCase(),
+          ...(String(audio?.cover || '').trim() ? { cover: String(audio.cover).trim() } : {}),
+        }))
       : []
   } else {
     cardContent.body = {

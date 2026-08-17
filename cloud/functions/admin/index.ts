@@ -419,7 +419,7 @@ function mergeAdminPostContent(existingContent: any, incomingContent: any, secti
 }
 
 function resolveArchivePostFormat(format: unknown): ArchivePostFormat {
-  if (format === 'text' || format === 'video') return format
+  if (format === 'text' || format === 'video' || format === 'audio') return format
   return 'image_text'
 }
 
@@ -465,6 +465,19 @@ function buildAdminArchiveContentSection(communityId: string, format: unknown): 
         { widgetId: 'videos', type: 'video_group', label: '视频', fieldKey: 'videos', required: true, order: 2, showInList: false },
         topicsWidget,
         { widgetId: 'location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 4, showInList: false },
+      ],
+    } as Section
+  }
+
+  if (resolvedFormat === 'audio') {
+    return {
+      ...common,
+      name: '音频',
+      displayTemplate: 'default',
+      widgets: [
+        { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
+        { widgetId: 'audios', type: 'audio_group', label: '音频', fieldKey: 'audios', required: true, order: 1, showInList: false },
+        { ...topicsWidget, order: 2 },
       ],
     } as Section
   }

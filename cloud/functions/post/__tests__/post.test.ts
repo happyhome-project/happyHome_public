@@ -117,6 +117,7 @@ import * as postRag from '../../../lib/post-rag'
 import * as postRagSync from '../../../lib/post-rag-sync'
 import * as storage from '../../../lib/storage'
 import { deriveMemberVideoScope, MAX_MEMBER_VIDEO_BYTES } from '../../../lib/member-video-upload'
+import { deriveMemberAudioScope } from '../../../lib/member-audio-upload'
 import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
 import { buildInitialCollaborationTemplates } from '../../../shared/collaboration-templates'
 
@@ -2891,6 +2892,165 @@ test('update: keeps the stored archive video format and audits pending video con
   ;(db.getById as jest.Mock).mockReset().mockImplementation(previousGetById)
   ;(db.query as jest.Mock).mockReset().mockImplementation(previousQuery)
   ;(db.create as jest.Mock).mockReset().mockImplementation(previousCreate)
+})
+
+test('listMine: preserves archive audio tracks and audio display metadata', async () => {
+  const audios = [{
+    title: '第一段', duration: 12, size: 1024, ext: 'mp3',
+    fileID: 'cloud://env/posts/member-audios-finalized/scope/track.mp3',
+    cover: 'cloud://env/posts/member-audio-covers-finalized/scope/cover.jpg',
+  }]
+  ;(db.queryAfterId as jest.Mock).mockImplementation(async (collectionName: string) => (
+    collectionName === 'posts' ? [{
+      _id: 'archive-audio-1', authorId: 'author-1', communityId: 'community-1', area: 'archive',
+      format: 'audio', status: 'active', auditStatus: 'pass', content: { title: '家庭声音', audios },
+      createdAt: '2026-08-01T00:00:00.000Z',
+    }] : []
+  ))
+  ;(db.getByIds as jest.Mock).mockImplementation(async (collectionName: string) => (
+    collectionName === 'communities' ? [{ _id: 'community-1', name: '青山社区' }] : []
+  ))
+
+  const result = await handleListMine({}, 'author-1')
+
+  expect(result.posts[0]).toEqual(expect.objectContaining({
+    format: 'audio', sectionName: '音频', displayTemplate: 'default',
+    content: { title: '家庭声音', audios },
+  }))
+})
+
+test.each([
+  ['requestMemberAudioUpload', 'Family.MP3', 'member-audios'],
+  ['requestMemberAudioCoverUpload', 'Cover.PNG', 'member-audio-covers'],
+])('%s issues upload metadata only after active membership', async (action, fileName, directory) => {
+  process.env.ALLOW_TEST_OPENID = 'true'
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+
+  const result = await main({ action, communityId: 'community-1', fileName, _testOpenid: 'test-openid' })
+  const scope = deriveMemberAudioScope('test-openid', 'community-1')
+
+  expect(result).toEqual(expect.objectContaining({
+    cloudPath: expect.stringMatching(new RegExp(`^posts/${directory}/${scope}/`)),
+    fileId: expect.stringMatching(new RegExp(`^cloud://env/posts/${directory}/${scope}/`)),
+  }))
+  expect(db.query).toHaveBeenCalledWith('community_members', {
+    communityId: 'community-1', userId: 'test-openid', status: 'active',
+  })
+})
+
+test('deleteMemberAudioUpload deletes only an owned unreferenced pending object in its community', async () => {
+  process.env.ALLOW_TEST_OPENID = 'true'
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.queryAfterId as jest.Mock).mockResolvedValueOnce([])
+  const fileID = `cloud://env/posts/member-audios/${deriveMemberAudioScope('test-openid', 'community-1')}/clip.mp3`
+
+  await expect(main({
+    action: 'deleteMemberAudioUpload', communityId: 'community-1', fileID, kind: 'audio', _testOpenid: 'test-openid',
+  })).resolves.toEqual({ success: true, deleted: true })
+
+  expect(db.query).toHaveBeenCalledWith('community_members', {
+    communityId: 'community-1', userId: 'test-openid', status: 'active',
+  })
+  expect(db.queryAfterId).toHaveBeenCalledWith('posts', { communityId: 'community-1' }, null, 100)
+  expect(storage.deleteFile).toHaveBeenCalledWith([fileID])
+})
+
+test('deleteMemberAudioUpload refuses cleanup while any nondeleted content slot references the exact file', async () => {
+  process.env.ALLOW_TEST_OPENID = 'true'
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  const fileID = `cloud://env/posts/member-audio-covers/${deriveMemberAudioScope('test-openid', 'community-1')}/cover.jpg`
+  ;(db.queryAfterId as jest.Mock).mockResolvedValueOnce([{
+    _id: 'post-1', status: 'active', communityId: 'community-1', authorId: 'another-author',
+    pendingContent: { audios: [{ cover: fileID }] },
+  }])
+
+  await expect(main({
+    action: 'deleteMemberAudioUpload', communityId: 'community-1', fileID, kind: 'cover', _testOpenid: 'test-openid',
+  })).resolves.toEqual({ success: true, deleted: false, reason: 'referenced' })
+  expect(storage.deleteFile).not.toHaveBeenCalled()
+})
+
+test('create: finalizes archive audio, replaces client metadata, and audits audio plus cover targets', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.create as jest.Mock).mockImplementation(async (collectionName: string) => (
+    collectionName === 'posts' ? 'archive-audio-1' : 'audit-task-1'
+  ))
+  ;(storage.inspectRemoteObject as jest.Mock)
+    .mockResolvedValueOnce({ contentLength: 4096, contentType: 'audio/mpeg' })
+    .mockResolvedValueOnce({ contentLength: 4096, contentType: 'audio/mpeg' })
+    .mockResolvedValueOnce({ contentLength: 512, contentType: 'image/jpeg' })
+    .mockResolvedValueOnce({ contentLength: 512, contentType: 'image/jpeg' })
+  const scope = deriveMemberAudioScope('test-openid', 'community-1')
+  const audio = `cloud://env/posts/member-audios/${scope}/story.mp3`
+  const cover = `cloud://env/posts/member-audio-covers/${scope}/story.jpg`
+
+  const result = await handleCreate({
+    communityId: 'community-1', area: 'archive', format: 'audio', topics: ['家声'],
+    content: { title: '家庭声音', audios: [{ title: '第一段', fileID: audio, duration: 12, size: 1, ext: 'wav', cover }] },
+  } as any, 'test-openid')
+
+  expect(result).toEqual(expect.objectContaining({ postId: 'archive-audio-1' }))
+  expect(db.create).toHaveBeenCalledWith('posts', expect.objectContaining({
+    area: 'archive', format: 'audio',
+    content: { title: '家庭声音', audios: [expect.objectContaining({
+      title: '第一段', duration: 12, size: 4096, ext: 'mp3',
+      fileID: expect.stringContaining('/posts/member-audios-finalized/'),
+      cover: expect.stringContaining('/posts/member-audio-covers-finalized/'),
+    })] },
+  }))
+  expect(db.create).toHaveBeenCalledWith('content_audit_tasks', expect.objectContaining({
+    postId: 'archive-audio-1', widgetId: 'audios', targetType: 'audio',
+    targetRef: expect.stringContaining('/posts/member-audios-finalized/'),
+  }))
+  expect(db.create).toHaveBeenCalledWith('content_audit_tasks', expect.objectContaining({
+    postId: 'archive-audio-1', widgetId: 'audios', targetType: 'image',
+    targetRef: expect.stringContaining('/posts/member-audio-covers-finalized/'),
+  }))
+})
+
+test('create: rolls back newly finalized archive audio when post persistence fails', async () => {
+  ;(db.query as jest.Mock).mockResolvedValueOnce([{ _id: 'member-1', status: 'active' }])
+  ;(db.create as jest.Mock).mockRejectedValueOnce(new Error('post write failed'))
+  ;(storage.inspectRemoteObject as jest.Mock).mockResolvedValue({ contentLength: 1024, contentType: 'audio/mpeg' })
+  const audio = `cloud://env/posts/member-audios/${deriveMemberAudioScope('test-openid', 'community-1')}/story.mp3`
+
+  await expect(handleCreate({
+    communityId: 'community-1', area: 'archive', format: 'audio', topics: [],
+    content: { title: '家庭声音', audios: [{ title: '第一段', fileID: audio, duration: 12, size: 1, ext: 'mp3' }] },
+  } as any, 'test-openid')).rejects.toThrow('post write failed')
+
+  expect(storage.deleteFile).toHaveBeenCalledWith([
+    expect.stringContaining('/posts/member-audios-finalized/'),
+  ])
+})
+
+test('update: reuses only this archive audio post finalized files and preserves audio format', async () => {
+  const scope = deriveMemberAudioScope('test-openid', 'community-1')
+  const audio = `cloud://env/posts/member-audios-finalized/${scope}/existing.mp3`
+  const cover = `cloud://env/posts/member-audio-covers-finalized/${scope}/existing.jpg`
+  const post = {
+    _id: 'archive-audio-1', communityId: 'community-1', authorId: 'test-openid',
+    status: 'active', auditStatus: 'pass', area: 'archive', format: 'audio', topics: ['旧话题'],
+    createdAt: '2026-08-01T00:00:00.000Z',
+    content: { title: '旧标题', audios: [{ title: '旧录音', fileID: audio, duration: 12, size: 1024, ext: 'mp3', cover }] },
+  }
+  ;(db.getById as jest.Mock).mockResolvedValue(post)
+  ;(db.query as jest.Mock).mockResolvedValue([{ _id: 'member-1', status: 'active' }])
+  ;(db.create as jest.Mock).mockResolvedValue('audit-task-1')
+  ;(storage.inspectRemoteObject as jest.Mock)
+    .mockResolvedValueOnce({ contentLength: 1024, contentType: 'audio/mpeg' })
+    .mockResolvedValueOnce({ contentLength: 512, contentType: 'image/jpeg' })
+
+  await handleUpdate({
+    postId: 'archive-audio-1', topics: ['新话题'],
+    content: { title: '新标题', audios: [{ title: '旧录音', fileID: audio, duration: 12, size: 1024, ext: 'mp3', cover }] },
+  } as any, 'test-openid')
+
+  expect(storage.materializeFile).not.toHaveBeenCalled()
+  expect(db.updateById).toHaveBeenCalledWith('posts', 'archive-audio-1', expect.objectContaining({
+    pendingContent: { __set: { title: '新标题', audios: [{ title: '旧录音', fileID: audio, duration: 12, size: 1024, ext: 'mp3', cover }] } },
+    pendingTopics: { __set: ['新话题'] },
+  }))
 })
 
 test('create: persists a text archive post with its normalized cover theme', async () => {

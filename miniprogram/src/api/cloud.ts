@@ -238,6 +238,15 @@ type ArchivePostCreateBase = {
   topics?: string[]
 }
 
+export type ArchiveAudioTrack = {
+  title: string
+  fileID: string
+  duration: number
+  size: number
+  ext: 'mp3' | 'm4a' | 'aac' | 'wav'
+  cover?: string
+}
+
 export type ArchivePostCreateParams = ArchivePostCreateBase & ({
   format: 'image_text'
   content: { title: string; body?: unknown; images: string[]; location?: unknown }
@@ -250,9 +259,14 @@ export type ArchivePostCreateParams = ArchivePostCreateBase & ({
   format: 'video'
   content: { title: string; body?: unknown; videos: [VideoItemCos]; location?: unknown }
   presentation?: undefined
+} | {
+  format: 'audio'
+  content: { title: string; audios: ArchiveAudioTrack[] }
+  presentation?: undefined
 })
 
 export type MemberVideoUploadMetadata = { cloudPath: string; fileId: string }
+export type MemberAudioUploadMetadata = { cloudPath: string; fileId: string }
 
 export type ArchivePostListParams = {
   communityId: string
@@ -344,12 +358,13 @@ export const postApi = {
         sectionName: string
         title: string
         area?: 'archive' | 'collaboration'
-        format?: 'image_text' | 'text' | 'video'
+        format?: 'image_text' | 'text' | 'video' | 'audio'
         topics?: string[]
         content?: {
           title?: string
           images?: string[]
           videos?: Array<{ cover?: string }>
+          audios?: ArchiveAudioTrack[]
           body?: { text?: string }
         }
         presentation?: { textNoteTheme?: string }
@@ -374,6 +389,12 @@ export const postApi = {
     callCloud<MemberVideoUploadMetadata>('post', 'requestMemberVideoCoverUpload', params),
   deleteMemberVideoUpload: (params: { communityId: string; fileID: string; kind: 'video' | 'cover' }) =>
     callCloud<{ success: true; deleted: boolean; reason?: 'referenced' }>('post', 'deleteMemberVideoUpload', params),
+  requestMemberAudioUpload: (params: { communityId: string; fileName: string }) =>
+    callCloud<MemberAudioUploadMetadata>('post', 'requestMemberAudioUpload', params),
+  requestMemberAudioCoverUpload: (params: { communityId: string; fileName: string }) =>
+    callCloud<MemberAudioUploadMetadata>('post', 'requestMemberAudioCoverUpload', params),
+  deleteMemberAudioUpload: (params: { communityId: string; fileID: string; kind: 'audio' | 'cover' }) =>
+    callCloud<{ success: true; deleted: boolean; reason?: 'referenced' }>('post', 'deleteMemberAudioUpload', params),
   createCollaboration: (params: {
     communityId: string
     collaborationTemplateId: string

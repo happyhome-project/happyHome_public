@@ -1,6 +1,6 @@
 
 import { createHash } from 'crypto'
-import type { Post, Section } from '../shared/types'
+import type { Post, Section, Widget } from '../shared/types'
 import { buildPostSearchChunks, buildPostSearchDocument } from './post-search'
 import type { PostSearchChunk } from './post-search'
 
@@ -180,6 +180,15 @@ function validateSearchableInputs(post: Post, section: Section | null | undefine
 export function resolvePostRagProjectionInputs(post: Post, section: Section | null | undefined): { post: Post; section: Section | null } {
   if (section || post.area !== 'archive' || String(post.sectionId || '').trim()) return { post, section: section || null }
   const topicText = Array.isArray(post.topics) ? post.topics.map(String).filter(Boolean).join(' ') : ''
+  const archiveContentWidgets: Widget[] = post.format === 'audio'
+    ? [
+        { widgetId: 'title', fieldKey: 'title', type: 'short_text', label: '标题', required: false, order: 0, showInList: true, visibility: 'public' },
+        { widgetId: 'audios', fieldKey: 'audios', type: 'audio_group', label: '音频', required: false, order: 1, showInList: false, visibility: 'public' },
+      ]
+    : [
+        { widgetId: 'title', fieldKey: 'title', type: 'short_text', label: '标题', required: false, order: 0, showInList: true, visibility: 'public' },
+        { widgetId: 'body', fieldKey: 'body', type: 'rich_note', label: '正文', required: false, order: 1, showInList: true, visibility: 'public' },
+      ]
   return {
     post: {
       ...post,
@@ -198,8 +207,7 @@ export function resolvePostRagProjectionInputs(post: Post, section: Section | nu
       type: 'evergreen',
       status: 'active',
       widgets: [
-        { widgetId: 'title', fieldKey: 'title', type: 'short_text', label: '标题', required: false, order: 0, showInList: true, visibility: 'public' },
-        { widgetId: 'body', fieldKey: 'body', type: 'rich_note', label: '正文', required: false, order: 1, showInList: true, visibility: 'public' },
+        ...archiveContentWidgets,
         { widgetId: '__archive_topics', fieldKey: '__archive_topics', type: 'topic', label: '话题', required: false, order: 2, showInList: true, visibility: 'public' },
       ],
     },

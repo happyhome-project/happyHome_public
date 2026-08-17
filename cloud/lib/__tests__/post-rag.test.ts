@@ -974,6 +974,47 @@ test('searchPostsWithRag counts unique posts instead of repeated chunks from one
   expect(result.total).toBe(1)
 })
 
+test('searchPostsWithRag preserves archive audio format, tracks, and covers in result cards', async () => {
+  const audios = [{
+    title: '奶奶讲故事', duration: 60, size: 1024, ext: 'mp3',
+    fileID: 'cloud://env/posts/member-audios-finalized/scope/story.mp3',
+    cover: 'cloud://env/posts/member-audio-covers-finalized/scope/story.jpg',
+  }]
+  mockDb.getByIdOrNull.mockResolvedValue({ _id: 'community-1', status: 'active', ragIndexPolicy: 'business' })
+  mockDb.getByIds.mockImplementation(async (collection: string, ids: string[]) => {
+    if (collection === 'posts') return ids.map((id) => ({
+      _id: id, communityId: 'community-1', sectionId: '', area: 'archive', format: 'audio',
+      status: 'active', auditStatus: 'pass', authorId: 'author-1', topics: ['家声'],
+      content: { title: '家庭声音', audios }, updatedAt: '2026-08-01T00:00:00.000Z',
+    }))
+    if (collection === 'post_rag_sync_state') return ids.map((id) => ({
+      _id: id, status: 'synced', appliedSourceVersion: 'source-v1', indexScope: 'business',
+    }))
+    if (collection === POST_RAG_INDEX_STATE) return ids.map((id) => ({
+      _id: id, status: 'indexed', sourceVersion: 'source-v1', indexScope: 'business',
+    }))
+    return []
+  })
+  const provider = {
+    name: 'cloudbase-rag', isConfigured: () => true,
+    search: jest.fn().mockResolvedValue({
+      total: 1, answer: '找到家庭声音。', mode: 'rag', items: [],
+      citations: [{
+        postId: 'audio-post-1', chunkId: 'audio-title', communityId: 'community-1',
+        title: '家庭声音', sectionId: '', sectionName: '沉淀区', fieldLabel: '音频',
+        fieldType: 'audio_group', preview: '奶奶讲故事', score: 0.9, visibility: 'public',
+        sourceUpdatedAt: '2026-08-01T00:00:00.000Z', sourceVersion: 'source-v1', indexScope: 'business',
+      }],
+    }),
+  }
+
+  const result = await searchPostsWithRag({ communityId: 'community-1', query: '奶奶讲故事', limit: 10 }, { provider })
+
+  expect(result.items).toEqual([expect.objectContaining({
+    postId: 'audio-post-1', format: 'audio', content: { title: '家庭声音', audios },
+  })])
+})
+
 test.each([
   ['pending synchronization', { syncStatus: 'pending' }],
   ['superseded synchronization version', { appliedSourceVersion: 'source-v2' }],

@@ -116,6 +116,35 @@ describe('video.requestUpload', () => {
   })
 })
 
+test('post.getAdmin round-trips native archive audio through an audio_group section', async () => {
+  const audios = [{
+    title: '第一段', duration: 12, size: 1024, ext: 'mp3',
+    fileID: 'cloud://env/posts/member-audios-finalized/scope/track.mp3',
+    cover: 'cloud://env/posts/member-audio-covers-finalized/scope/cover.jpg',
+  }]
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string) => {
+    if (collectionName === 'posts') return {
+      _id: 'archive-audio-1', communityId: 'community-1', authorId: 'member-1',
+      area: 'archive', origin: 'native_archive', format: 'audio', status: 'active',
+      topics: ['家声'], content: { title: '家庭声音', audios },
+    }
+    if (collectionName === 'users') return { _id: 'member-1', nickName: '成员' }
+    return null
+  })
+  ;(db.query as jest.Mock).mockResolvedValue([])
+
+  const result = await main({ action: 'post.getAdmin', _actAs: SUPER_CTX, postId: 'archive-audio-1' }) as any
+
+  expect(result.post).toEqual(expect.objectContaining({
+    format: 'audio', content: { title: '家庭声音', audios, topics: ['家声'] },
+  }))
+  expect(result.section).toEqual(expect.objectContaining({
+    name: '音频', displayTemplate: 'default',
+    widgets: expect.arrayContaining([expect.objectContaining({ widgetId: 'audios', type: 'audio_group', required: true })]),
+  }))
+  expect(result.section.widgets.map((widget: any) => widget.widgetId)).not.toContain('body')
+})
+
 describe('audio.requestUpload', () => {
   test('校验 fileName 不能为空', async () => {
     await expect(main({ action: 'audio.requestUpload', _actAs: SUPER_CTX, fileName: '' }))

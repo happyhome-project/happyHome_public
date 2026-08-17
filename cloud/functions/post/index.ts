@@ -3,6 +3,11 @@ import * as db from '../../lib/db'
 import { resolveOpenId } from '../../lib/ctx'
 import { deleteFile, getTempUrl, inspectRemoteObject, materializeFile, requestUploadMetadata } from '../../lib/storage'
 import { assertOwnedMemberVideoUpload, finalizeMemberArchiveVideoContent, requestMemberVideoUpload } from '../../lib/member-video-upload'
+import {
+  assertOwnedMemberAudioUpload,
+  finalizeMemberArchiveAudioContent,
+  requestMemberAudioUpload,
+} from '../../lib/member-audio-upload'
 import { sanitizeContent, validateContentValues, validateRequiredWidgets } from '../../lib/post-validate'
 import { auditAndApply, isPostVisibleToMembers } from '../../lib/content-audit'
 import { buildHomeBootstrap, buildHomeFeed } from '../../lib/home-snapshot'
@@ -514,6 +519,11 @@ function buildArchiveContentSection(communityId: string, format: ArchivePostForm
       { widgetId: 'videos', type: 'video_group', label: '视频', fieldKey: 'videos', required: true, order: 2, showInList: false },
       { widgetId: 'location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false },
     ]
+  } else if (format === 'audio') {
+    widgets = [
+      { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
+      { widgetId: 'audios', type: 'audio_group', label: '音频', fieldKey: 'audios', required: true, order: 1, showInList: false },
+    ]
   } else {
     widgets = [
         { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
@@ -524,13 +534,14 @@ function buildArchiveContentSection(communityId: string, format: ArchivePostForm
 }
 
 function resolveArchivePostFormat(format: unknown): ArchivePostFormat {
-  if (format === 'text' || format === 'video') return format
+  if (format === 'text' || format === 'video' || format === 'audio') return format
   return 'image_text'
 }
 
 function archiveDisplayMetadata(format: unknown): { sectionName: string; displayTemplate: string } {
   if (format === 'text') return { sectionName: '文字', displayTemplate: 'text_note' }
   if (format === 'video') return { sectionName: '视频', displayTemplate: 'video_note' }
+  if (format === 'audio') return { sectionName: '音频', displayTemplate: 'default' }
   return { sectionName: '图文', displayTemplate: 'image_note' }
 }
 
@@ -557,13 +568,22 @@ export async function handleCreate(
     let content = archive.content as unknown as PostContent
     const validationOptions = archive.format === 'video'
       ? { memberEditableVideoWidgetIds: ['videos'] }
-      : undefined
+      : archive.format === 'audio'
+        ? { memberEditableAudioWidgetIds: ['audios'] }
+        : undefined
     validateRequiredWidgets(section, content, validationOptions)
     validateContentValues(section, content, validationOptions)
+    let createdAudioFileIDs: string[] = []
     if (archive.format === 'video') {
       content = await finalizeMemberArchiveVideoContent(content, openid, params.communityId, {
         requestUploadMetadata, getTempUrl, inspectRemoteObject, materializeFile, deleteFile,
       })
+    } else if (archive.format === 'audio') {
+      const finalized = await finalizeMemberArchiveAudioContent(content, openid, params.communityId, {
+        requestUploadMetadata, getTempUrl, inspectRemoteObject, materializeFile, deleteFile,
+      })
+      content = finalized.content
+      createdAudioFileIDs = finalized.createdFileIDs
     }
 
     const now = new Date().toISOString()
@@ -587,10 +607,16 @@ export async function handleCreate(
       createdAt: now,
       updatedAt: now,
     }
-    const postId = await db.runTransaction(async transaction => {
-      const created = await transaction.collection('posts').add({ data: postData })
-      return created._id
-    })
+    let postId: string
+    try {
+      postId = await db.runTransaction(async transaction => {
+        const created = await transaction.collection('posts').add({ data: postData })
+        return created._id
+      })
+    } catch (error) {
+      if (createdAudioFileIDs.length > 0) await Promise.resolve(deleteFile(createdAudioFileIDs)).catch(() => undefined)
+      throw error
+    }
     const sortKey = buildArchiveSortKey(now, postId)
     await db.updateById('posts', postId, { sortKey })
     const audit = await auditAndApply({
@@ -1328,7 +1354,9 @@ export async function handleUpdate(
     : sanitizeContent(params.content, section)
   const validationOptions = archive?.format === 'video'
     ? { memberEditableVideoWidgetIds: ['videos'] }
-    : undefined
+    : archive?.format === 'audio'
+      ? { memberEditableAudioWidgetIds: ['audios'] }
+      : undefined
   validateRequiredWidgets(section, sanitizedContent, validationOptions)
   validateContentValues(section, sanitizedContent, validationOptions)
   if (archive?.format === 'video') {
@@ -1347,6 +1375,28 @@ export async function handleUpdate(
     sanitizedContent = await finalizeMemberArchiveVideoContent(sanitizedContent, openid, post.communityId, {
       requestUploadMetadata, getTempUrl, inspectRemoteObject, materializeFile, deleteFile, existingFinalizedFileIDs,
     })
+  }
+  let createdAudioFileIDs: string[] = []
+  if (archive?.format === 'audio') {
+    await ensureActiveCommunityMember(post.communityId, openid)
+    const existingFinalizedFileIDs = {
+      audio: new Set<string>(),
+      cover: new Set<string>(),
+    }
+    for (const existingContent of [post.content, post.pendingContent]) {
+      const existingAudios = Array.isArray((existingContent as any)?.audios)
+        ? (existingContent as any).audios
+        : []
+      for (const existingAudio of existingAudios) {
+        if (typeof existingAudio?.fileID === 'string') existingFinalizedFileIDs.audio.add(existingAudio.fileID)
+        if (typeof existingAudio?.cover === 'string') existingFinalizedFileIDs.cover.add(existingAudio.cover)
+      }
+    }
+    const finalized = await finalizeMemberArchiveAudioContent(sanitizedContent, openid, post.communityId, {
+      requestUploadMetadata, getTempUrl, inspectRemoteObject, materializeFile, deleteFile, existingFinalizedFileIDs,
+    })
+    sanitizedContent = finalized.content
+    createdAudioFileIDs = finalized.createdFileIDs
   }
   const presentation = archive?.format === 'text'
     ? archive.presentation
@@ -1371,18 +1421,23 @@ export async function handleUpdate(
 
   const updatedAt = new Date().toISOString()
   if (post.auditStatus === 'pass' || !post.auditStatus) {
-    await db.runTransaction(async transaction => {
-      await transaction.collection('posts').doc(params.postId).update({ data: {
-      pendingContent: db.replaceValue(sanitizedContent),
-      ...(archive ? { pendingTopics: db.replaceValue(archive.topics) } : {}),
-      ...(presentation ? { pendingPresentation: db.replaceValue(presentation) } : {}),
-      pendingAuditStatus: 'pending',
-      pendingAuditReason: 'content audit pending',
-      pendingSubmittedAt: updatedAt,
-      updatedAt,
-      } })
-      await schedulePostRagSyncInTransaction(transaction, { postId: params.postId, communityId: post.communityId, sectionId: post.sectionId || '', reason: 'post.updated', now: updatedAt })
-    })
+    try {
+      await db.runTransaction(async transaction => {
+        await transaction.collection('posts').doc(params.postId).update({ data: {
+        pendingContent: db.replaceValue(sanitizedContent),
+        ...(archive ? { pendingTopics: db.replaceValue(archive.topics) } : {}),
+        ...(presentation ? { pendingPresentation: db.replaceValue(presentation) } : {}),
+        pendingAuditStatus: 'pending',
+        pendingAuditReason: 'content audit pending',
+        pendingSubmittedAt: updatedAt,
+        updatedAt,
+        } })
+        await schedulePostRagSyncInTransaction(transaction, { postId: params.postId, communityId: post.communityId, sectionId: post.sectionId || '', reason: 'post.updated', now: updatedAt })
+      })
+    } catch (error) {
+      if (createdAudioFileIDs.length > 0) await Promise.resolve(deleteFile(createdAudioFileIDs)).catch(() => undefined)
+      throw error
+    }
     const audit = await auditAndApply({
       postId: params.postId,
       communityId: post.communityId,
@@ -1397,16 +1452,21 @@ export async function handleUpdate(
     return { success: true, updatedAt, auditStatus: audit.status, auditReason: audit.reason }
   }
 
-  await db.runTransaction(async transaction => {
-    await transaction.collection('posts').doc(params.postId).update({ data: {
-    content: db.replaceValue(sanitizedContent),
-    auditStatus: 'pending',
-    auditReason: 'content audit pending',
-    auditUpdatedAt: updatedAt,
-    updatedAt,
-    } })
-    await schedulePostRagSyncInTransaction(transaction, { postId: params.postId, communityId: post.communityId, sectionId: post.sectionId || '', reason: 'post.updated', now: updatedAt })
-  })
+  try {
+    await db.runTransaction(async transaction => {
+      await transaction.collection('posts').doc(params.postId).update({ data: {
+      content: db.replaceValue(sanitizedContent),
+      auditStatus: 'pending',
+      auditReason: 'content audit pending',
+      auditUpdatedAt: updatedAt,
+      updatedAt,
+      } })
+      await schedulePostRagSyncInTransaction(transaction, { postId: params.postId, communityId: post.communityId, sectionId: post.sectionId || '', reason: 'post.updated', now: updatedAt })
+    })
+  } catch (error) {
+    if (createdAudioFileIDs.length > 0) await Promise.resolve(deleteFile(createdAudioFileIDs)).catch(() => undefined)
+    throw error
+  }
   const audit = await auditAndApply({
     postId: params.postId,
     communityId: post.communityId,
@@ -1531,6 +1591,21 @@ export async function handleRequestMemberVideoUpload(
   )
 }
 
+export async function handleRequestMemberAudioUpload(
+  params: { communityId?: string; fileName?: string },
+  openid: string,
+  kind: 'audio' | 'cover',
+) {
+  const communityId = String(params?.communityId || '').trim()
+  if (!communityId) throw new Error('communityId 不能为空')
+  await ensureActiveCommunityMember(communityId, openid)
+  return requestMemberAudioUpload(
+    { kind, communityId, fileName: String(params?.fileName || '').trim() },
+    openid,
+    { requestUploadMetadata },
+  )
+}
+
 function containsExactFileID(value: unknown, fileID: string): boolean {
   if (value === fileID) return true
   if (Array.isArray(value)) return value.some(item => containsExactFileID(item, fileID))
@@ -1567,6 +1642,36 @@ export async function handleDeleteMemberVideoUpload(
   if (String(expected?.fileId || '') !== fileID) throw new Error('上传文件不属于当前应用')
   if (await isMemberUploadReferenced(openid, fileID)) {
     return { success: true as const, deleted: false as const, reason: 'referenced' as const }
+  }
+  await deleteFile([fileID])
+  return { success: true as const, deleted: true as const }
+}
+
+export async function handleDeleteMemberAudioUpload(
+  params: { communityId?: string; fileID?: string; kind?: string },
+  openid: string,
+) {
+  const communityId = String(params?.communityId || '').trim()
+  if (!communityId) throw new Error('communityId 不能为空')
+  await ensureActiveCommunityMember(communityId, openid)
+  const kind = params?.kind
+  if (kind !== 'audio' && kind !== 'cover') throw new Error('上传文件类型无效')
+  const fileID = String(params?.fileID || '').trim()
+  const { cloudPath } = assertOwnedMemberAudioUpload(fileID, openid, communityId, kind)
+  const expected = await requestUploadMetadata(cloudPath)
+  if (String(expected?.fileId || '') !== fileID) throw new Error('上传文件不属于当前应用')
+  let afterId: string | null = null
+  for (;;) {
+    const posts = await db.queryAfterId('posts', { communityId }, afterId, 100)
+    for (const post of posts) {
+      if (post?.status === 'deleted') continue
+      if (containsExactFileID(post?.content, fileID) || containsExactFileID(post?.pendingContent, fileID)) {
+        return { success: true as const, deleted: false as const, reason: 'referenced' as const }
+      }
+    }
+    if (posts.length < 100) break
+    afterId = String(posts[posts.length - 1]?._id || '')
+    if (!afterId) throw new Error('无法确认上传文件引用状态')
   }
   await deleteFile([fileID])
   return { success: true as const, deleted: true as const }
@@ -1617,6 +1722,9 @@ export const main = async (event: any, context?: any) => {
   if (action === 'requestMemberVideoUpload') return handleRequestMemberVideoUpload(params, openid, 'video')
   if (action === 'requestMemberVideoCoverUpload') return handleRequestMemberVideoUpload(params, openid, 'cover')
   if (action === 'deleteMemberVideoUpload') return handleDeleteMemberVideoUpload(params, openid)
+  if (action === 'requestMemberAudioUpload') return handleRequestMemberAudioUpload(params, openid, 'audio')
+  if (action === 'requestMemberAudioCoverUpload') return handleRequestMemberAudioUpload(params, openid, 'cover')
+  if (action === 'deleteMemberAudioUpload') return handleDeleteMemberAudioUpload(params, openid)
   if (action === 'create') return handleCreate(params, openid)
   if (action === 'createCollaboration') return handleCreateCollaboration(params, openid)
   if (action === 'getActivityInviteState') return handleGetActivityInviteState(params, openid)
