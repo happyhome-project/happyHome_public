@@ -1729,6 +1729,9 @@ async function handleSubmit() {
             : undefined,
         })
     if (archiveFormat.value === 'audio' && shouldCleanupPendingAudioAfterSubmit(result?.auditStatus)) {
+      // The accepted post already references finalized copies. Lock this editor
+      // before deleting its pending sources so finally cannot reopen submit.
+      audioPublishReady.value = false
       await audioEditorRef.value?.finalizePendingUploadsAfterSubmit()
     }
     // #ifdef H5

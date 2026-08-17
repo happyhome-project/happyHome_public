@@ -322,10 +322,18 @@ function probeAudioDuration(source: string | Blob): Promise<number> {
       if (settled) return
       settled = true
       if (timer) clearTimeout(timer)
-      try { context.destroy() } catch {}
-      if (error) reject(error)
-      else {
-        try { resolve(requirePositiveAudioDuration(context.duration)) } catch (durationError) { reject(durationError) }
+      if (error) {
+        try { context.destroy() } catch {}
+        reject(error)
+        return
+      }
+      try {
+        resolve(capturePositiveAudioDurationBeforeCleanup(
+          () => context.duration,
+          () => { try { context.destroy() } catch {} },
+        ))
+      } catch (durationError) {
+        reject(durationError)
       }
     }
     const inspect = () => {

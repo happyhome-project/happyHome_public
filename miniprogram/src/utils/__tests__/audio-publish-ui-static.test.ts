@@ -34,6 +34,14 @@ describe('native archive audio publish UI contract', () => {
     expect(cleanup).toBeGreaterThan(staleCheck)
   })
 
+  test('captures mini-program duration before destroying its audio context', () => {
+    const editor = read('components', 'widgets', 'AudioPublishEditor.vue')
+    const miniProbe = editor.slice(editor.indexOf('// #ifndef H5'), editor.indexOf('function acceptAudioFiles'))
+    expect(miniProbe).toMatch(
+      /capturePositiveAudioDurationBeforeCleanup\([\s\S]*?\(\) => context\.duration,[\s\S]*?\(\) => \{ try \{ context\.destroy\(\)/,
+    )
+  })
+
   test('does not start queued audio work after the editor has unmounted', () => {
     const editor = read('components', 'widgets', 'AudioPublishEditor.vue')
     const audioUpload = editor.slice(editor.indexOf('async function uploadTrack'), editor.indexOf('async function uploadCover'))
@@ -119,6 +127,8 @@ describe('native archive audio publish UI contract', () => {
     expect(create).toContain("archiveFormat.value === 'audio' && audioNavigationBlocked.value")
     const submit = create.slice(create.indexOf('async function handleSubmit()'), create.indexOf('</script>'))
     expect(submit).toContain('shouldCleanupPendingAudioAfterSubmit(result?.auditStatus)')
+    expect(submit).toContain('audioPublishReady.value = false')
+    expect(submit.indexOf('audioPublishReady.value = false')).toBeLessThan(submit.indexOf('await audioEditorRef.value?.finalizePendingUploadsAfterSubmit()'))
     expect(submit.indexOf('await audioEditorRef.value?.finalizePendingUploadsAfterSubmit()')).toBeGreaterThan(-1)
     expect(submit.indexOf('finalizePendingUploadsAfterSubmit')).toBeLessThan(submit.indexOf('handleEditSubmitResult'))
     const editor = read('components', 'widgets', 'AudioPublishEditor.vue')
