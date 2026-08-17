@@ -54,7 +54,7 @@
         hide-min-max
         active-color="#32b77a"
         inactive-color="#e3e7e5"
-        @update:model-value="handleSeek"
+        @dragend="handleSeek"
       />
       <text>{{ formatAudioDuration(currentDuration) }}</text>
     </view>
@@ -187,8 +187,9 @@ async function playNext() {
   await playTrack(activeIndex.value + 1)
 }
 
-async function handleSeek(event: any) {
-  const raw = typeof event === 'number' ? event : event?.value ?? event?.detail?.value
+async function handleSeek(event: { value?: number | number[] }) {
+  const raw = event?.value
+  if (Array.isArray(raw)) return
   const seconds = Math.min(currentDuration.value, Math.max(0, Number(raw || 0)))
   if (!isCurrentPost.value) await playTrack(activeIndex.value)
   audioStore.seek(seconds)

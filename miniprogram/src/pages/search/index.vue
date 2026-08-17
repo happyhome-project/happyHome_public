@@ -76,7 +76,12 @@ import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { refreshCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import { clientLog } from '../../utils/client-log'
-import { fallbackFeedCoverAfterError, resolveFeedCovers } from '../../utils/feed-cover-url'
+import {
+  claimFeedCoverRetry,
+  fallbackFeedCoverAfterError,
+  recordFeedCoverLoad,
+  resolveFeedCovers,
+} from '../../utils/feed-cover-url'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
 import type { ArchiveFeedCard, ArchiveFeedColumns } from '../../utils/archive-feed'
@@ -322,7 +327,11 @@ function commitSearchCoverRender() {
 function onSearchCoverLoad(card: ArchiveFeedCard) {
   if (card.cover.kind === 'text') return
   const source = String(card.cover.source || card.cover.src || '').trim()
-  if (source) searchCoverRecoveryAttempts.delete(searchCoverRecoveryKey(card, source))
+  if (source) recordFeedCoverLoad(
+    searchCoverRecoveryAttempts,
+    searchCoverRecoveryKey(card, source),
+    card.cover,
+  )
 }
 
 async function onSearchCoverError(card: ArchiveFeedCard) {
@@ -334,13 +343,12 @@ async function onSearchCoverError(card: ArchiveFeedCard) {
 
   const key = searchCoverRecoveryKey(card, source)
   if (searchCoverRecoveryPending.has(key)) return
-  const attempts = searchCoverRecoveryAttempts.get(key) || 0
-  if (attempts >= 2) return
-  searchCoverRecoveryAttempts.set(key, attempts + 1)
+  const attempt = claimFeedCoverRetry(searchCoverRecoveryAttempts, key)
+  if (attempt === null) return
   searchCoverRecoveryPending.add(key)
   clientLog('warn', 'search.cover.load.fail', {
     postId: card.postId,
-    attempt: attempts + 1,
+    attempt,
   })
   try {
     const refreshed = await refreshCloudFileUrl(source)

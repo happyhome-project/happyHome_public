@@ -148,4 +148,54 @@ describe('feed cover URL assembly', () => {
       fallback: '/static/audio/default-audio-cover.jpg',
     })
   })
+
+  test('keeps the two-attempt cap across fallback loads and repeated bad refreshed URLs', () => {
+    const claimFeedCoverRetry = (feedCoverUrl as any).claimFeedCoverRetry
+    const recordFeedCoverLoad = (feedCoverUrl as any).recordFeedCoverLoad
+    const fallbackFeedCoverAfterError = (feedCoverUrl as any).fallbackFeedCoverAfterError
+    expect(typeof claimFeedCoverRetry).toBe('function')
+    expect(typeof recordFeedCoverLoad).toBe('function')
+    const attempts = new Map<string, number>()
+    const key = 'audio-post:cloud://audio-cover.jpg'
+    const cover = {
+      kind: 'audio' as const,
+      source: 'cloud://audio-cover.jpg',
+      src: 'https://tmp.example/bad-1.jpg',
+      fallback: '/static/audio/default-audio-cover.jpg',
+    }
+
+    expect(claimFeedCoverRetry(attempts, key)).toBe(1)
+    fallbackFeedCoverAfterError(cover)
+    recordFeedCoverLoad(attempts, key, cover)
+    expect(attempts.get(key)).toBe(1)
+
+    cover.src = 'https://tmp.example/bad-2.jpg'
+    expect(claimFeedCoverRetry(attempts, key)).toBe(2)
+    fallbackFeedCoverAfterError(cover)
+    recordFeedCoverLoad(attempts, key, cover)
+
+    expect(attempts.get(key)).toBe(2)
+    expect(claimFeedCoverRetry(attempts, key)).toBeNull()
+  })
+
+  test('clears retry attempts after real audio, image, and video covers load', () => {
+    const recordFeedCoverLoad = (feedCoverUrl as any).recordFeedCoverLoad
+    expect(typeof recordFeedCoverLoad).toBe('function')
+    const attempts = new Map<string, number>([
+      ['audio', 2],
+      ['image', 1],
+      ['video', 1],
+    ])
+
+    recordFeedCoverLoad(attempts, 'audio', {
+      kind: 'audio',
+      source: 'cloud://audio.jpg',
+      src: 'https://tmp.example/audio.jpg',
+      fallback: '/static/audio/default-audio-cover.jpg',
+    })
+    recordFeedCoverLoad(attempts, 'image', { kind: 'image', src: 'https://tmp.example/image.jpg' })
+    recordFeedCoverLoad(attempts, 'video', { kind: 'video', src: 'https://tmp.example/video.jpg' })
+
+    expect(attempts.size).toBe(0)
+  })
 })

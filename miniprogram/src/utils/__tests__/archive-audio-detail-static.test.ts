@@ -38,8 +38,10 @@ describe('native archive audio detail presentation', () => {
     expect(positions.every(position => position >= 0)).toBe(true)
     expect(positions).toEqual(positions.slice().sort((left, right) => left - right))
     expect(component).toContain('<wd-slider')
-    expect(component).toContain('@update:model-value="handleSeek"')
+    expect(component).toContain('@dragend="handleSeek"')
+    expect(component).not.toContain('@update:model-value="handleSeek"')
     expect(component).not.toContain('@change="handleSeek"')
+    expect(component).toContain('const raw = event?.value')
     for (const icon of ['previous', 'play-circle', 'pause', 'next', 'sound']) {
       expect(component).toContain(`name="${icon}"`)
     }

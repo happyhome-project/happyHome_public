@@ -88,3 +88,27 @@ export function fallbackFeedCoverAfterError(cover: FeedCover): void {
   if (cover.kind === 'text') return
   cover.src = cover.kind === 'audio' ? cover.fallback : ''
 }
+
+export function claimFeedCoverRetry(
+  attempts: Map<string, number>,
+  key: string,
+  maxAttempts = 2,
+): number | null {
+  const current = attempts.get(key) || 0
+  if (current >= maxAttempts) return null
+  const next = current + 1
+  attempts.set(key, next)
+  return next
+}
+
+export function recordFeedCoverLoad(
+  attempts: Map<string, number>,
+  key: string,
+  cover: FeedCover,
+): void {
+  if (cover.kind === 'text') return
+  const loadedSource = String(cover.src || '').trim()
+  if (!loadedSource) return
+  if (cover.kind === 'audio' && loadedSource === cover.fallback) return
+  attempts.delete(key)
+}

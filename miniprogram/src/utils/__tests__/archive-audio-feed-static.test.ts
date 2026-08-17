@@ -29,4 +29,12 @@ describe('native archive audio feed presentation', () => {
     expect(source('src/components/ArchiveWaterfall.vue')).toContain('@tap="$emit(\'post\', card)"')
     expect(source('src/components/AuthorPostColumns.vue')).toContain('@tap="emit(\'open\', card.postId)"')
   })
+
+  test('uses fallback-aware retry accounting on both archive feed surfaces', () => {
+    for (const path of ['src/pages/index/index.vue', 'src/pages/search/index.vue']) {
+      const page = source(path)
+      expect(page).toContain('claimFeedCoverRetry')
+      expect(page).toContain('recordFeedCoverLoad')
+    }
+  })
 })
