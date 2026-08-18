@@ -31,10 +31,11 @@ describe('native archive audio feed presentation', () => {
     expect(source('src/components/AuthorPostColumns.vue')).toContain('@tap="emit(\'open\', card.postId)"')
   })
 
-  test('uses the locked local Wot icon-library font without a runtime font CDN', () => {
+  test('uses the locked local subset of the Wot icon-library font without a runtime font CDN', () => {
     const icon = source('src/components/AudioIcon.vue')
     expect(icon).toContain('@font-face')
-    expect(icon).toContain('wot-design-uni/components/wd-icon/wd-icons.ttf')
+    expect(icon).toContain("../static/audio/audio-icons.ttf")
+    expect(existsSync(resolve(process.cwd(), 'src/static/audio/audio-icons.ttf'))).toBe(true)
     expect(icon).not.toMatch(/https?:\/\//i)
     const codepoints = {
       previous: '\\e6cd',
@@ -54,9 +55,10 @@ describe('native archive audio feed presentation', () => {
     if (existsSync(compiledPath)) {
       const compiled = readFileSync(compiledPath, 'utf8')
       expect(compiled).not.toMatch(/https?:\/\//i)
-      const assetUrl = compiled.match(/url\((?:"|')?([^"')]+wd-icons[^"')]+\.ttf)(?:"|')?\)/)?.[1]
-      expect(assetUrl).toBeTruthy()
-      expect(existsSync(resolve(dirname(compiledPath), assetUrl || 'missing'))).toBe(true)
+      const embeddedFont = compiled.match(/url\((?:"|')?(data:font\/ttf;base64,[^"')]+)(?:"|')?\)/)?.[1]
+      const assetUrl = compiled.match(/url\((?:"|')?([^"')]+audio-icons[^"')]+\.ttf)(?:"|')?\)/)?.[1]
+      expect(Boolean(embeddedFont || assetUrl)).toBe(true)
+      if (assetUrl) expect(existsSync(resolve(dirname(compiledPath), assetUrl))).toBe(true)
     }
   })
 
