@@ -161,10 +161,8 @@ async function reconcileTaskFromCallbackRecord(task: ContentAuditTask): Promise<
   if (!task._id || !lookup) return task
   const recordId = callbackRecordId(lookup[0], lookup[1])
   return db.runTransaction(async transaction => {
-    const [storedTask, record] = await Promise.all([
-      db.transactionGetByIdOrNull<ContentAuditTask>(transaction, AUDIT_TASKS, task._id),
-      db.transactionGetByIdOrNull<AuditCallbackRecord>(transaction, AUDIT_TASKS, recordId),
-    ])
+    const storedTask = await db.transactionGetByIdOrNull<ContentAuditTask>(transaction, AUDIT_TASKS, task._id)
+    const record = await db.transactionGetByIdOrNull<AuditCallbackRecord>(transaction, AUDIT_TASKS, recordId)
     if (record?.recordType !== 'callback_result') return task
     const currentTask = storedTask?.postId && storedTask._id === task._id ? storedTask : task
     const patch = callbackPatch(record)

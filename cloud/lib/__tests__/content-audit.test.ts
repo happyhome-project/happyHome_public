@@ -993,6 +993,7 @@ test('an unmatched callback persisted before its task is reconciled after task c
   const tasks: any[] = []
   const documents = new Map<string, any>()
   const ordering: string[] = []
+  let activeTransactionReads = 0
   ;(postWxJson as jest.Mock).mockImplementation(async () => {
     await applyWechatMediaAuditResult({ traceId: 'callback-before-task', suggest: 'pass', label: 100 })
     return { trace_id: 'callback-before-task' }
@@ -1009,8 +1010,18 @@ test('an unmatched callback persisted before its task is reconciled after task c
   ;(db.removeById as jest.Mock).mockImplementation(async (_collection: string, id: string) => { documents.delete(id) })
   ;(db.getByIdOrNull as jest.Mock).mockImplementation(async (_collection: string, id: string) => documents.get(id) || null)
   ;(db.transactionGetByIdOrNull as jest.Mock).mockImplementation(async (_transaction, collection: string, id: string) => {
-    if (collection === 'posts') return post
-    return documents.get(id) || null
+    activeTransactionReads += 1
+    if (activeTransactionReads > 1) {
+      activeTransactionReads -= 1
+      throw new Error('[ResourceUnavailable.TransactionBusy] Transaction is busy')
+    }
+    try {
+      await new Promise((resolve) => setImmediate(resolve))
+      if (collection === 'posts') return post
+      return documents.get(id) || null
+    } finally {
+      activeTransactionReads -= 1
+    }
   })
   ;(db.query as jest.Mock).mockImplementation(async (_collection: string, where: any) => {
     if (where.traceId) {
