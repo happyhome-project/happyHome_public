@@ -8,7 +8,37 @@ import {
   buildSearchQuery,
   buildSparseVectorTerms,
   extractPostSearchFields,
+  type PostSearchResultItem,
 } from '../post-search'
+
+test('PostSearchResultItem types and preserves archive audio tracks and covers', () => {
+  const item = {
+    postId: 'audio-post-1',
+    communityId: 'community-1',
+    sectionId: '',
+    sectionName: '沉淀区',
+    title: '家庭声音',
+    score: 0.9,
+    matchedFields: [{ fieldLabel: '音频', fieldType: 'audio_group', preview: '奶奶讲故事' }],
+    createdAt: '2026-08-17T00:00:00.000Z',
+    updatedAt: '2026-08-17T00:00:00.000Z',
+    format: 'audio',
+    content: {
+      title: '家庭声音',
+      audios: [{
+        title: '奶奶讲故事',
+        fileID: 'cloud://env/posts/member-audios-finalized/scope/story.mp3',
+        duration: 60,
+        size: 1024,
+        ext: 'mp3',
+        cover: 'cloud://env/posts/member-audio-covers-finalized/scope/story.jpg',
+      }],
+    },
+  } satisfies PostSearchResultItem
+
+  expect(item.format).toBe('audio')
+  expect(item.content.audios[0].cover).toContain('/member-audio-covers-finalized/')
+})
 
 const section: Section = {
   _id: 'section-course',

@@ -96,6 +96,30 @@ describe('trusted RAG source projection', () => {
     ]))
   })
 
+  test('projects section-free archive audio titles through an audio-only virtual schema', () => {
+    const archivePost = post({
+      sectionId: '', area: 'archive', origin: 'native_archive', format: 'audio', topics: ['家声'],
+      content: {
+        title: '家庭声音',
+        audios: [{
+          title: '奶奶讲故事', duration: 60, size: 1024, ext: 'mp3',
+          fileID: 'cloud://env/posts/member-audios-finalized/scope/story.mp3',
+          cover: 'cloud://env/posts/member-audio-covers-finalized/scope/story.jpg',
+        }],
+      },
+    })
+
+    const projection = buildPostRagSourceProjection(archivePost, null)
+
+    expect(projection.eligible).toBe(true)
+    expect(projection.chunks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ widgetId: 'title', text: '家庭声音' }),
+      expect.objectContaining({ widgetId: 'audios', fieldType: 'audio_group', text: '奶奶讲故事' }),
+      expect.objectContaining({ widgetId: '__archive_topics', text: '家声' }),
+    ]))
+    expect(projection.chunks.map((chunk) => chunk.widgetId)).not.toContain('body')
+  })
+
   test('projects a section-free collaboration post through its global template schema', () => {
     const template = buildInitialCollaborationTemplates()[0]
     const collaborationPost = post({

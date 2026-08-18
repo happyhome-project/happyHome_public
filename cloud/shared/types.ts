@@ -112,6 +112,7 @@ export type VideoItem =
 export type AudioExt = 'mp3' | 'm4a' | 'aac' | 'wav'
 export const AUDIO_ALLOWED_EXTS: AudioExt[] = ['mp3', 'm4a', 'aac', 'wav']
 export const AUDIO_MAX_SIZE_BYTES = 50 * 1024 * 1024
+export const AUDIO_MAX_TRACKS = 20
 
 export interface AudioTrack {
   fileID: string
@@ -313,7 +314,7 @@ export interface Post {
   collaborationTemplateId?: string
   collaborationSystemKey?: string
   origin?: 'native_archive' | 'legacy_section'
-  format?: 'image_text' | 'text' | 'video'
+  format?: 'image_text' | 'text' | 'video' | 'audio'
   topics?: string[]
   sortKey?: string
   authorId: string
@@ -323,10 +324,18 @@ export interface Post {
   auditStatus?: PostAuditStatus
   auditReason?: string
   auditUpdatedAt?: string
+  contentRevision?: string
+  contentRevisionDigest?: string
   pendingContent?: PostContent | null
+  pendingContentRevision?: string
+  pendingContentRevisionDigest?: string
   pendingAuditStatus?: PostAuditStatus
   pendingAuditReason?: string
   pendingSubmittedAt?: string
+  pendingTopics?: string[]
+  pendingPresentation?: PostPresentation
+  contentAuditTopics?: string[]
+  contentAuditPresentation?: PostPresentation
   content: PostContent
   presentation?: PostPresentation
   commentCount: number
@@ -382,6 +391,10 @@ export interface ContentAuditTask {
   sectionId: string
   widgetId?: string
   contentSlot: 'content' | 'pendingContent'
+  contentRevision?: string
+  contentDigest?: string
+  expectedTargetCount?: number
+  targetIndex?: number
   targetType: AuditTargetType
   provider: AuditProvider
   status: PostAuditStatus

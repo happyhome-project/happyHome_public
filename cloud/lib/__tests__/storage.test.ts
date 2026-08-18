@@ -50,11 +50,35 @@ describe('uploadFile', () => {
 
 describe('deleteFile', () => {
   test('删除文件列表', async () => {
-    mockDeleteFile.mockResolvedValue({})
+    mockDeleteFile.mockResolvedValue({
+      fileList: [
+        { fileID: 'fileID-1', status: 0, errMsg: 'ok' },
+        { fileID: 'fileID-2', status: 0 },
+      ],
+    })
 
     await deleteFile(['fileID-1', 'fileID-2'])
 
     expect(mockDeleteFile).toHaveBeenCalledWith({ fileList: ['fileID-1', 'fileID-2'] })
+  })
+
+  test('任一文件返回失败状态时整体失败，调用方不能误删重试记录', async () => {
+    mockDeleteFile.mockResolvedValue({
+      fileList: [
+        { fileID: 'fileID-1', status: 0, errMsg: 'ok' },
+        { fileID: 'fileID-2', status: -1, errMsg: 'permission denied' },
+      ],
+    })
+
+    await expect(deleteFile(['fileID-1', 'fileID-2']))
+      .rejects.toThrow('fileID-2')
+  })
+
+  test('缺少逐文件回执时 fail closed', async () => {
+    mockDeleteFile.mockResolvedValue({ fileList: [{ fileID: 'fileID-1', status: 0 }] })
+
+    await expect(deleteFile(['fileID-1', 'fileID-2']))
+      .rejects.toThrow('fileID-2')
   })
 })
 

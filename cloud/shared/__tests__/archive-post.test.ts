@@ -27,7 +27,7 @@ function expectCode(input: unknown, code: string): void {
 
 describe('archive post create contract', () => {
   test('exports the supported formats and topic limit', () => {
-    expect(ARCHIVE_POST_FORMATS).toEqual(['image_text', 'text', 'video'])
+    expect(ARCHIVE_POST_FORMATS).toEqual(['image_text', 'text', 'video', 'audio'])
     expect(MAX_TOPIC_COUNT).toBe(5)
   })
 
@@ -89,7 +89,132 @@ describe('archive post create contract', () => {
   })
 
   test('rejects invalid formats', () => {
-    expectCode({ area: 'archive', format: 'audio' }, 'archive_format_invalid')
+    expectCode({ area: 'archive', format: 'podcast' }, 'archive_format_invalid')
+  })
+
+  test('parses a multi-track audio archive post and normalizes optional covers', () => {
+    expect(parseArchivePostCreateInput({
+      area: 'archive',
+      format: 'audio',
+      topics: [' 社区活动 '],
+      content: {
+        title: '  夏日电台  ',
+        audios: [
+          { title: ' 第一集 ', fileID: ' cloud://audio-1.mp3 ', duration: 120, size: 1024, ext: 'mp3', cover: ' cloud://cover-1.jpg ' },
+          { title: ' 第二集 ', fileID: ' cloud://audio-2.m4a ', duration: 180, size: 2048, ext: 'm4a' },
+        ],
+      },
+    })).toEqual({
+      area: 'archive',
+      format: 'audio',
+      topics: ['社区活动'],
+      content: {
+        title: '夏日电台',
+        audios: [
+          { title: '第一集', fileID: 'cloud://audio-1.mp3', duration: 120, size: 1024, ext: 'mp3', cover: 'cloud://cover-1.jpg' },
+          { title: '第二集', fileID: 'cloud://audio-2.m4a', duration: 180, size: 2048, ext: 'm4a' },
+        ],
+      },
+    })
+  })
+
+  test('requires one or more valid audio tracks', () => {
+    for (const audios of [undefined, []]) {
+      expectCode({
+        area: 'archive', format: 'audio', content: { title: '标题', audios },
+      }, 'archive_audios_required')
+    }
+  })
+
+  test('accepts at most 20 audio tracks', () => {
+    const track = (index: number) => ({
+      title: `音频 ${index}`,
+      fileID: `cloud://audio-${index}.mp3`,
+      duration: 120,
+      size: 1024,
+      ext: 'mp3',
+    })
+
+    expect(parseArchivePostCreateInput({
+      area: 'archive',
+      format: 'audio',
+      topics: [],
+      content: { title: '二十段录音', audios: Array.from({ length: 20 }, (_, index) => track(index)) },
+    })).toMatchObject({ content: { audios: expect.arrayContaining([expect.objectContaining({ fileID: 'cloud://audio-19.mp3' })]) } })
+
+    expectCode({
+      area: 'archive',
+      format: 'audio',
+      topics: [],
+      content: { title: '二十一段录音', audios: Array.from({ length: 21 }, (_, index) => track(index)) },
+    }, 'archive_audio_limit')
+  })
+
+  test('rejects duplicate audio file IDs after normalization while allowing a shared cover', () => {
+    const base = { title: '音频', duration: 120, size: 1024, ext: 'mp3', cover: 'cloud://shared-cover.jpg' }
+    expectCode({
+      area: 'archive',
+      format: 'audio',
+      topics: [],
+      content: {
+        title: '重复录音',
+        audios: [
+          { ...base, fileID: ' cloud://same-audio.mp3 ' },
+          { ...base, title: '重复音频', fileID: 'cloud://same-audio.mp3' },
+        ],
+      },
+    }, 'archive_audio_duplicate')
+
+    expect(parseArchivePostCreateInput({
+      area: 'archive',
+      format: 'audio',
+      topics: [],
+      content: {
+        title: '共享封面',
+        audios: [
+          { ...base, fileID: 'cloud://first.mp3' },
+          { ...base, title: '第二段', fileID: 'cloud://second.mp3' },
+        ],
+      },
+    })).toMatchObject({
+      content: { audios: [{ cover: 'cloud://shared-cover.jpg' }, { cover: 'cloud://shared-cover.jpg' }] },
+    })
+  })
+
+  test('rejects unsupported audio extensions and invalid audio duration or size', () => {
+    for (const audio of [
+      { title: '音频', fileID: 'cloud://audio.ogg', duration: 120, size: 1024, ext: 'ogg' },
+      { title: '音频', fileID: 'cloud://audio.mp3', duration: 0, size: 1024, ext: 'mp3' },
+      { title: '音频', fileID: 'cloud://audio.mp3', duration: 120, size: 0, ext: 'mp3' },
+      { title: '音频', fileID: 'cloud://audio.mp3', duration: 120, size: 50 * 1024 * 1024 + 1, ext: 'mp3' },
+    ]) {
+      expectCode({
+        area: 'archive', format: 'audio', content: { title: '标题', audios: [audio] },
+      }, 'archive_audio_invalid')
+    }
+  })
+
+  test('rejects foreign fields, presentation, and location on audio archive posts', () => {
+    const audio = { title: '音频', fileID: 'cloud://audio.mp3', duration: 120, size: 1024, ext: 'mp3' }
+    for (const forbidden of [
+      { body: richBody() },
+      { topics: ['话题'] },
+      { images: ['cloud://image'] },
+      { videos: [] },
+      { presentation: {} },
+      { location: { address: '湖畔', lat: 30, lng: 120 } },
+      { extra: true },
+    ]) {
+      expectCode({
+        area: 'archive', format: 'audio', content: { title: '标题', audios: [audio], ...forbidden },
+      }, 'invalid_input')
+    }
+    expectCode({
+      area: 'archive', format: 'audio', content: { title: '标题', audios: [audio] }, presentation: {},
+    }, 'archive_presentation_invalid')
+    expectCode({
+      area: 'archive', format: 'audio', content: { title: '标题', audios: [{ ...audio, unexpected: true }] },
+    }, 'archive_audio_invalid')
   })
 
   test('parses one COS video and normalizes its string fields', () => {

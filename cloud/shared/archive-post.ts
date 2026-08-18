@@ -1,8 +1,17 @@
-import type { GeoLocation, RichNoteContent, TextNoteTheme, VideoItemCos } from './types'
+import {
+  AUDIO_ALLOWED_EXTS,
+  AUDIO_MAX_SIZE_BYTES,
+  AUDIO_MAX_TRACKS,
+  type AudioTrack,
+  type GeoLocation,
+  type RichNoteContent,
+  type TextNoteTheme,
+  type VideoItemCos,
+} from './types'
 import { normalizeTextNoteTheme } from './text-note-widgets'
 import { normalizeTopics } from './topics'
 
-export const ARCHIVE_POST_FORMATS = ['image_text', 'text', 'video'] as const
+export const ARCHIVE_POST_FORMATS = ['image_text', 'text', 'video', 'audio'] as const
 
 export type ArchivePostFormat = typeof ARCHIVE_POST_FORMATS[number]
 
@@ -23,6 +32,11 @@ export interface ArchiveVideoContent {
   body?: RichNoteContent
   videos: [VideoItemCos]
   location?: GeoLocation
+}
+
+export interface ArchiveAudioContent {
+  title: string
+  audios: AudioTrack[]
 }
 
 export interface ArchivePostPresentation {
@@ -51,6 +65,13 @@ export type ArchivePostCreateInput =
       content: ArchiveVideoContent
       presentation?: never
     }
+  | {
+      area: 'archive'
+      format: 'audio'
+      topics: string[]
+      content: ArchiveAudioContent
+      presentation?: never
+    }
 
 export class ArchivePostContractError extends Error {
   constructor(public readonly code: string) {
@@ -72,6 +93,9 @@ const COS_VIDEO_FIELDS = new Set([
   'allowDownload',
   'allowShare',
 ])
+
+const AUDIO_FIELDS = new Set(['title', 'fileID', 'duration', 'size', 'ext', 'cover'])
+const AUDIO_EXTS = new Set<string>(AUDIO_ALLOWED_EXTS)
 
 function isPlainObject(value: unknown): value is PlainObject {
   if (value === null || typeof value !== 'object') return false
@@ -158,6 +182,39 @@ function parseCosVideo(value: unknown): VideoItemCos {
   return video
 }
 
+function parseAudioTrack(value: unknown): AudioTrack {
+  if (!isPlainObject(value) || Object.keys(value).some((field) => !AUDIO_FIELDS.has(field))) {
+    return fail('archive_audio_invalid')
+  }
+
+  const ext = typeof value.ext === 'string' ? value.ext.toLowerCase() : ''
+  if (
+    typeof value.title !== 'string'
+    || value.title.trim() === ''
+    || typeof value.fileID !== 'string'
+    || !value.fileID.trim().startsWith('cloud://')
+    || typeof value.duration !== 'number'
+    || !Number.isFinite(value.duration)
+    || value.duration <= 0
+    || typeof value.size !== 'number'
+    || !Number.isFinite(value.size)
+    || value.size <= 0
+    || value.size > AUDIO_MAX_SIZE_BYTES
+    || !AUDIO_EXTS.has(ext)
+    || (value.cover !== undefined && (typeof value.cover !== 'string' || !value.cover.trim().startsWith('cloud://')))
+  ) return fail('archive_audio_invalid')
+
+  const audio: AudioTrack = {
+    title: value.title.trim(),
+    fileID: value.fileID.trim(),
+    duration: value.duration,
+    size: value.size,
+    ext: ext as AudioTrack['ext'],
+  }
+  if (value.cover !== undefined) audio.cover = value.cover.trim()
+  return audio
+}
+
 export function parseArchivePostCreateInput(value: unknown): ArchivePostCreateInput {
   if (!isPlainObject(value) || value.area !== 'archive') return fail('invalid_input')
   if (
@@ -214,6 +271,23 @@ export function parseArchivePostCreateInput(value: unknown): ArchivePostCreateIn
     if (content.body !== undefined) parsedContent.body = content.body
     if (content.location !== undefined) parsedContent.location = content.location
     return { area: 'archive', format: 'video', topics, content: parsedContent }
+  }
+
+  if (value.format === 'audio') {
+    if (value.presentation !== undefined) return fail('archive_presentation_invalid')
+    const allowedContentFields = new Set(['title', 'audios'])
+    if (Object.keys(content).some((field) => !allowedContentFields.has(field))) return fail('invalid_input')
+    if (!Array.isArray(content.audios) || content.audios.length === 0) return fail('archive_audios_required')
+    if (content.audios.length > AUDIO_MAX_TRACKS) return fail('archive_audio_limit')
+    const audios = content.audios.map(parseAudioTrack)
+    if (new Set(audios.map((track) => track.fileID)).size !== audios.length) return fail('archive_audio_duplicate')
+
+    return {
+      area: 'archive',
+      format: 'audio',
+      topics,
+      content: { title, audios },
+    }
   }
 
   if (!isRichNoteContent(content.body) || content.body.text.trim() === '') {

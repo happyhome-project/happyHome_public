@@ -221,7 +221,7 @@ export const approvalApi = {
 
 export type AdminPostCreateParams =
   | { communityId: string; sectionId: string; content: Record<string, any> }
-  | { communityId: string; area: 'archive'; format: 'image_text' | 'video' | 'text'; topics?: string[]; content: Record<string, any>; presentation?: Record<string, any> }
+  | { communityId: string; area: 'archive'; format: 'image_text' | 'video' | 'text' | 'audio'; topics?: string[]; content: Record<string, any>; presentation?: Record<string, any> }
   | { communityId: string; area: 'collaboration'; collaborationTemplateId: string; content: Record<string, any> }
 
 export const postAdminApi = {

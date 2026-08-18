@@ -104,6 +104,24 @@ export function consumeArchiveMediaIntent(tokenValue: unknown): ArchiveMediaInte
   return intent
 }
 
+export function deferArchiveMediaIntent(
+  tokenValue: unknown,
+  mediaType: PublishMediaType,
+): ArchiveMediaIntent | null {
+  const intent = peekArchiveMediaIntent(tokenValue)
+  return intent?.mediaType === mediaType ? intent : null
+}
+
+export function transferArchiveMediaIntentOwnership(ownerTokens: Set<string>, tokenValue: unknown): boolean {
+  const token = String(tokenValue || '').trim()
+  return token ? ownerTokens.delete(token) : false
+}
+
+export function cleanupOwnedArchiveMediaIntents(ownerTokens: Set<string>) {
+  ownerTokens.forEach((token) => discardArchiveMediaIntent(token))
+  ownerTokens.clear()
+}
+
 export function discardArchiveMediaIntent(tokenValue: unknown): boolean {
   const token = String(tokenValue || '').trim()
   if (!token) return false
@@ -165,7 +183,7 @@ export function peekArchiveMediaIntent(tokenValue: unknown, now = Date.now()): A
     revokeIntentUrls(intent)
     return null
   }
-  if (intent.mediaType !== 'image' && intent.mediaType !== 'video') return null
+  if (intent.mediaType !== 'image' && intent.mediaType !== 'video' && intent.mediaType !== 'audio') return null
   if (!Array.isArray(intent.files) || intent.files.length === 0) return null
   return intent
 }

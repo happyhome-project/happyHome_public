@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { buildNativeArchiveDetailSection, normalizeNativeArchiveDetailPost } from '../archive-detail'
+import * as archiveDetail from '../archive-detail'
 
 const richBody = { format: 'markdown', markdown: '正文', html: '<p>正文</p>', text: '正文', imageFileIDs: [], schemaVersion: 1 }
 
@@ -60,5 +61,35 @@ describe('native archive detail adapter', () => {
     expect(buildNativeArchiveDetailSection(image).displayTemplate).toBe('image_note')
     expect(buildNativeArchiveDetailSection(text).displayTemplate).toBe('text_note')
     expect(buildNativeArchiveDetailSection(unknown).displayTemplate).toBe('text_note')
+  })
+
+  test('gives native audio an empty synthetic section while preserving canonical cloud file IDs', () => {
+    const audios = [
+      { fileID: 'cloud://audio/one.mp3', title: '寒山钟声', duration: 318, size: 1024, ext: 'mp3', cover: 'cloud://covers/one.jpg' },
+      { fileID: 'cloud://audio/two.m4a', title: '西湖春', duration: 311, size: 2048, ext: 'm4a' },
+    ]
+    const input = {
+      _id: 'audio-post', area: 'archive', format: 'audio', communityId: 'community-1',
+      content: { title: '寒山钟声与西湖春', audios },
+    }
+
+    const normalized = normalizeNativeArchiveDetailPost(input)
+    const section = buildNativeArchiveDetailSection(normalized)
+
+    expect(normalized).toBe(input)
+    expect(normalized.content.audios).toBe(audios)
+    expect(normalized.content.audios.map((track: any) => track.fileID)).toEqual([
+      'cloud://audio/one.mp3',
+      'cloud://audio/two.m4a',
+    ])
+    expect(section).toMatchObject({ displayTemplate: 'default', widgets: [] })
+  })
+
+  test('selects only the native archive audio discriminator and leaves legacy audio_group posts generic', () => {
+    const isNativeArchiveAudioPost = (archiveDetail as any).isNativeArchiveAudioPost
+    expect(typeof isNativeArchiveAudioPost).toBe('function')
+    expect(isNativeArchiveAudioPost({ area: 'archive', format: 'audio' })).toBe(true)
+    expect(isNativeArchiveAudioPost({ area: 'archive', sectionId: 'legacy', content: { recordings: [] } })).toBe(false)
+    expect(isNativeArchiveAudioPost({ area: 'collaboration', format: 'audio' })).toBe(false)
   })
 })

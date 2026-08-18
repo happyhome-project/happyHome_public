@@ -95,6 +95,7 @@ test('release cloud smoke ensures required database collections before invoking 
   const runCloudSmokeBody = extractFunctionBlock(deployScript, 'async function runCloudSmoke')
 
   assert.match(ensureIndexesScript, /content_audit_tasks/)
+  assert.match(ensureIndexesScript, /post_media_cleanup_retries/)
   assert.match(ensureIndexesScript, /admin_notification_subscriptions/)
   assert.match(ensureIndexesScript, /admin_notifications/)
   for (const collection of ['post_rag_sync_state', 'post_rag_index_state', 'post_rag_worker_state', 'post_rag_chunks']) {

@@ -78,4 +78,43 @@ describe('author post feed', () => {
     expect(unknown.format).toBe('text')
     expect(unknown.cover.kind).toBe('text')
   })
+
+  test('keeps native audio distinct and derives its cover, count, and duration for author columns', () => {
+    const card = normalizeAuthorPostCard({
+      _id: 'audio-1', area: 'archive', format: 'audio',
+      content: {
+        title: '社区声音',
+        audios: [
+          { fileID: 'cloud://audio/one.mp3', title: '晨鸟', duration: 20.5, size: 1024, ext: 'mp3' },
+          { fileID: 'cloud://audio/two.wav', title: '晚风', duration: 39.5, size: 2048, ext: 'wav', cover: 'cloud://covers/evening.jpg' },
+        ],
+      },
+      communityName: '阳光花园', sectionName: '音频', likeCount: 4, commentCount: 1,
+    })
+
+    expect(card).toMatchObject({
+      format: 'audio',
+      title: '社区声音',
+      cover: { kind: 'audio', src: 'cloud://covers/evening.jpg' },
+      trackCount: 2,
+      totalDuration: 60,
+      communityLabel: '阳光花园 · 音频',
+    })
+  })
+
+  test('uses the bundled fallback for an author audio card without track covers', () => {
+    const card = normalizeAuthorPostCard({
+      _id: 'audio-fallback', area: 'archive', format: 'audio',
+      content: {
+        title: '听见邻里',
+        audios: [{ fileID: 'cloud://audio/one.mp3', title: '第一轨', duration: 9, size: 1024, ext: 'mp3' }],
+      },
+    })
+
+    expect(card.cover).toEqual({
+      kind: 'audio',
+      src: '/static/audio/default-audio-cover.jpg',
+      fallback: '/static/audio/default-audio-cover.jpg',
+    })
+  })
 })

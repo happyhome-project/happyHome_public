@@ -27,16 +27,23 @@ describe('archive publishing entry', () => {
     expect(rule).not.toMatch(/(?:^|\s)background\s*:/)
   })
 
-  test('offers one image/video media choice plus text and collaboration', () => {
+  test('offers one combined image, video, and audio choice plus text and collaboration', () => {
     const source = read('components', 'AppTabBar.vue')
     const publishLabelRule = source.match(/\.publish-label\s*\{([^}]*)\}/s)?.[1] || ''
-    expect(source).toContain("{ key: 'media', label: '图文/视频', icon: '/static/publish-icons/trade.svg', tone: 'image-text' }")
+    expect(source).toContain("{ key: 'media', label: '图文/音视频', icon: '/static/publish-icons/trade.svg', tone: 'image-text' }")
     expect(publishLabelRule).toMatch(/width:\s*100%/)
     expect(source).toContain("{ key: 'text', label: '写文字', icon: '/static/publish-icons/lost.svg', tone: 'text' }")
     expect(source).toContain("{ key: 'collaboration', label: '发起协作', icon: '/static/publish-icons/neighbor.svg', tone: 'collaboration' }")
     expect(source).toContain("mediaType: ['image', 'video']")
-    expect(source).toContain('accept="image/*,video/*"')
-    expect(source).toContain('detectFirstMediaType')
+    expect(source).toContain("type: 'file'")
+    expect(source).toContain("extension: ['mp3', 'm4a', 'aac', 'wav']")
+    expect(source).toContain("itemList: ['从相册或相机选择', '从聊天文件选择']")
+    expect(source).toContain('wx.chooseMedia')
+    expect(source).toContain('wx.chooseMessageFile')
+    expect(source).toContain('accept="image/*,video/*,.mp3,.m4a,.aac,.wav"')
+    expect(source).toContain('inspectSelectedMedia')
+    expect(source).toContain("mediaType === 'audio' ? 'audio'")
+    expect(source).toContain('同一种素材')
     expect(source).toContain('storeArchiveMediaIntent')
     expect(source).toContain("if (props.current === 'create')")
     expect(source).toContain("type AppTabBarCurrent = AppTabKey | 'create'")
@@ -51,6 +58,7 @@ describe('archive publishing entry', () => {
     expect(source).not.toContain('option.glyph')
     expect(source).not.toContain('activePublishSections')
     expect(source).not.toContain('option.section')
+    expect(source).not.toContain("key: 'audio'")
   })
 
   test('confirms and clears an existing media format before an inline create-page switch', () => {
@@ -65,12 +73,38 @@ describe('archive publishing entry', () => {
     expect(create).toMatch(/handleBackToSectionPicker[\s\S]*archiveFormat\.value === 'image_text'[\s\S]*selectedSection\.value = null[\s\S]*return/)
   })
 
+  test('defers inline audio ownership until format confirmation, then consumes the handoff once', () => {
+    const create = read('pages', 'create', 'index.vue')
+    const handlerStart = create.indexOf('async function handleInlineMediaIntent(token: string)')
+    const handlerEnd = create.indexOf('function restoreArchiveMediaEditor()', handlerStart)
+    const handler = create.slice(handlerStart, handlerEnd)
+    const deferStart = handler.indexOf("if (intent.mediaType === 'audio' && !deferArchiveAudioIntent(token))")
+    const deferEnd = handler.indexOf('const currentType', deferStart)
+    const deferBranch = handler.slice(deferStart, deferEnd)
+
+    expect(deferStart).toBeGreaterThanOrEqual(0)
+    expect(deferBranch).not.toContain('consumeArchiveMediaIntent(token)')
+    expect(deferBranch).not.toContain('applyArchiveMediaIntent(token)')
+    expect(handler).toContain("transition?.status === 'cancelled'")
+    expect(handler).toContain("if (intent.mediaType === 'audio') consumeDeferredArchiveAudioIntent()")
+    expect(create).toContain('const pendingArchiveAudioIntentToken = ref(\'\')')
+  })
+
+  test('transfers inline audio cleanup ownership before emitting the create-page handoff', () => {
+    const source = read('components', 'AppTabBar.vue')
+    const routeStart = source.indexOf('function routeSelectedMedia(result: any)')
+    const routeEnd = source.indexOf('function onH5MediaChange', routeStart)
+    const route = source.slice(routeStart, routeEnd)
+
+    expect(route).toMatch(/if \(props\.current === 'create'\)\s*\{[\s\S]*if \(mediaType === 'audio'\) transferArchiveMediaIntentOwnership\(pendingMediaIntents, token\)[\s\S]*emit\('media-selected', token\)/)
+  })
+
   test('create page owns a video archive editor without unlocking ordinary admin media widgets', () => {
     const create = read('pages', 'create', 'index.vue')
     const widgetEditor = read('components', 'widgets', 'WidgetEditor.vue')
     const videoEditor = read('components', 'widgets', 'VideoPublishEditor.vue')
 
-    expect(create).toContain("const archiveFormat = ref<'image_text' | 'text' | 'video' | ''>('')")
+    expect(create).toContain("const archiveFormat = ref<'image_text' | 'text' | 'video' | 'audio' | ''>('')")
     expect(create).toContain("widgetId: 'archive_video_videos'")
     expect(create).toContain("fieldKey: 'videos'")
     expect(create).toContain("type: 'video_group'")
@@ -112,8 +146,8 @@ describe('archive publishing entry', () => {
     expect(create).toContain('@navigation-blocked="videoNavigationBlocked = $event"')
     expect(create).toContain('请重试或移除失败封面')
     expect(create).toContain('@readiness="videoPublishReady = $event.ready"')
-    expect(create).toContain(':disabled="submitting || !videoPublishReady"')
-    expect(create).toContain("requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text' || requestedArchiveFormat === 'video'")
+    expect(create).toContain(':disabled="submitting || !videoPublishReady || !audioPublishReady"')
+    expect(create).toContain("requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text' || requestedArchiveFormat === 'video' || requestedArchiveFormat === 'audio'")
     expect(create).toContain('onBackPress(')
     expect(create).toContain("window.addEventListener('beforeunload'")
     const coverUpload = videoEditor.slice(videoEditor.indexOf('async function uploadCover'), videoEditor.indexOf('function publishModel'))

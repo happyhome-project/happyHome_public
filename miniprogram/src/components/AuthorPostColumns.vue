@@ -9,7 +9,22 @@
         :data-post-id="card.postId"
         @tap="emit('open', card.postId)"
       >
-        <view v-if="card.cover.kind === 'video'" class="author-post-video-cover">
+        <view v-if="card.cover.kind === 'audio'" class="author-post-audio-cover">
+          <image
+            class="author-post-cover"
+            :src="card.cover.src"
+            mode="aspectFill"
+            @error="fallbackFeedCoverAfterError(card.cover)"
+          />
+          <view class="author-post-audio-play" aria-hidden="true">
+            <AudioIcon name="play-circle-filled" size="54rpx" color="#ffffff" />
+          </view>
+          <view class="author-post-audio-summary">
+            <AudioIcon name="sound" size="22rpx" color="#ffffff" />
+            <text>音频 · {{ card.trackCount }}首 · {{ formatAudioDuration(card.totalDuration) }}</text>
+          </view>
+        </view>
+        <view v-else-if="card.cover.kind === 'video'" class="author-post-video-cover">
           <image
             v-if="card.cover.src"
             class="author-post-cover"
@@ -48,8 +63,11 @@
 </template>
 
 <script setup lang="ts">
+import AudioIcon from './AudioIcon.vue'
 import TextNoteCover from './TextNoteCover.vue'
 import type { AuthorPostColumns } from '../utils/author-post-feed'
+import { formatAudioDuration } from '../utils/audio-display'
+import { fallbackFeedCoverAfterError } from '../utils/feed-cover-url'
 
 defineProps<{ columns: AuthorPostColumns }>()
 const emit = defineEmits<{ open: [postId: string] }>()
@@ -86,6 +104,38 @@ function auditLabel(status: string) {
   min-height: 230rpx;
   border-radius: 12rpx;
   background: #f2f2f2;
+}
+.author-post-audio-cover {
+  position: relative;
+  width: 100%;
+  height: 300rpx;
+  overflow: hidden;
+  border-radius: 12rpx;
+  background: #eef5f1;
+}
+.author-post-audio-cover .author-post-cover { width: 100%; height: 100%; min-height: 0; }
+.author-post-audio-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 4rpx 12rpx rgba(0, 0, 0, 0.28));
+}
+.author-post-audio-summary {
+  position: absolute;
+  right: 10rpx;
+  bottom: 10rpx;
+  left: 10rpx;
+  display: flex;
+  align-items: center;
+  gap: 7rpx;
+  padding: 7rpx 10rpx;
+  border-radius: 9rpx;
+  background: rgba(22, 43, 34, 0.64);
+  color: #fff;
+  font-size: 20rpx;
+  line-height: 28rpx;
 }
 .author-post-video-cover {
   position: relative;

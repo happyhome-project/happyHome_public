@@ -57,3 +57,10 @@ test('ensure-indexes provisions global collaboration templates and section-free 
 test('ensure-indexes supports reverse attendance lookup for my activities', () => {
   assert.match(source, /post_attendance_members[\s\S]*idx_userId_id[\s\S]*userId[\s\S]*_id/)
 })
+
+test('ensure-indexes provisions revision audit lookup and durable post-media cleanup', () => {
+  assert.match(source, /content_audit_tasks[\s\S]*idx_contentRevision[\s\S]*contentRevision/)
+  assert.match(source, /content_audit_tasks[\s\S]*idx_recordType_updatedAt[\s\S]*recordType[\s\S]*updatedAt/)
+  assert.match(source, /const REQUIRED_COLLECTIONS = \[[\s\S]*'post_media_cleanup_retries'/)
+  assert.match(source, /post_media_cleanup_retries[\s\S]*idx_postId_status_updatedAt[\s\S]*postId[\s\S]*status[\s\S]*updatedAt/)
+})

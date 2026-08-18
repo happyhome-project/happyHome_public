@@ -7,8 +7,14 @@ import {
   AUDIT_TASKS,
   auditAndApply,
   approvePostAudit,
+  collectMemberAudioCleanupCandidates,
+  computeContentRevisionDigest,
+  createContentRevision,
   handleAuditCallback,
   isPostVisibleToMembers,
+  processMemberAudioCleanupJobs,
+  queueMemberAudioCleanupJobsInTransaction,
+  recoverMemberAudioCleanupJobs,
   rejectPostAudit,
 } from '../../lib/content-audit'
 import { getEditableWidgetIds, sanitizeContent, validateContentValues, validateRequiredWidgets } from '../../lib/post-validate'
@@ -79,7 +85,6 @@ import {
   buildArchiveSortKey,
   prepareArchivePostTopicReconciliation,
   reconcileArchivePostTopicsInTransaction,
-  syncArchivePostTopics,
   updateArchivePostTopicLinks,
 } from '../../lib/archive-topic-index'
 import { parseArchivePostCreateInput, type ArchivePostFormat } from '../../shared/archive-post'
@@ -419,7 +424,7 @@ function mergeAdminPostContent(existingContent: any, incomingContent: any, secti
 }
 
 function resolveArchivePostFormat(format: unknown): ArchivePostFormat {
-  if (format === 'text' || format === 'video') return format
+  if (format === 'text' || format === 'video' || format === 'audio') return format
   return 'image_text'
 }
 
@@ -465,6 +470,19 @@ function buildAdminArchiveContentSection(communityId: string, format: unknown): 
         { widgetId: 'videos', type: 'video_group', label: '视频', fieldKey: 'videos', required: true, order: 2, showInList: false },
         topicsWidget,
         { widgetId: 'location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 4, showInList: false },
+      ],
+    } as Section
+  }
+
+  if (resolvedFormat === 'audio') {
+    return {
+      ...common,
+      name: '音频',
+      displayTemplate: 'default',
+      widgets: [
+        { widgetId: 'title', type: 'short_text', label: '标题', fieldKey: 'title', required: true, order: 0, showInList: true },
+        { widgetId: 'audios', type: 'audio_group', label: '音频', fieldKey: 'audios', required: true, order: 1, showInList: false },
+        { ...topicsWidget, order: 2 },
       ],
     } as Section
   }
@@ -2121,17 +2139,126 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     validateContentValues(section, merged, { allowAdminOnly: true })
 
     const updatedAt = new Date().toISOString()
+    const contentRevision = createContentRevision()
+    const contentRevisionDigest = computeContentRevisionDigest(merged)
+    const retainedAudioRefs = new Set(
+      collectMemberAudioCleanupCandidates({ ...post, _id: postId }, merged)
+        .map((candidate) => `${candidate.kind}\u0000${candidate.fileID}`),
+    )
+    const slotSnapshotMatches = (currentPost: any, slot: 'content' | 'pendingContent') => {
+      const revisionField = slot === 'pendingContent' ? 'pendingContentRevision' : 'contentRevision'
+      const digestField = slot === 'pendingContent' ? 'pendingContentRevisionDigest' : 'contentRevisionDigest'
+      const currentContent = currentPost?.[slot]
+      const snapshotContent = post?.[slot]
+      return (
+        String(currentPost?.[revisionField] || '') === String(post?.[revisionField] || '')
+        && String(currentPost?.[digestField] || '') === String(post?.[digestField] || '')
+        && Boolean(currentContent) === Boolean(snapshotContent)
+        && (!snapshotContent || computeContentRevisionDigest(currentContent) === computeContentRevisionDigest(snapshotContent))
+      )
+    }
+    const snapshotMatches = (currentPost: any) => (
+      slotSnapshotMatches(currentPost, 'content') && slotSnapshotMatches(currentPost, 'pendingContent')
+    )
+    const containsExactFileID = (value: unknown, fileID: string): boolean => {
+      if (value === fileID) return true
+      if (Array.isArray(value)) return value.some((item) => containsExactFileID(item, fileID))
+      if (!value || typeof value !== 'object') return false
+      return Object.values(value as Record<string, unknown>).some((item) => containsExactFileID(item, fileID))
+    }
+    const reusedMemberFinalizedRefs = collectMemberAudioCleanupCandidates({ ...post, _id: postId }, merged)
+      .filter((candidate) => candidate.fileID.includes(candidate.kind === 'audio'
+        ? '/posts/member-audios-finalized/'
+        : '/posts/member-audio-covers-finalized/'))
+    const assertFinalizedRefsStillCurrent = (currentPost: any) => {
+      for (const candidate of reusedMemberFinalizedRefs) {
+        if (!containsExactFileID(currentPost.content, candidate.fileID) && !containsExactFileID(currentPost.pendingContent, candidate.fileID)) {
+          throw new Error('finalized audio source changed during edit; retry required')
+        }
+      }
+    }
     if (post.auditStatus === 'pass' || !post.auditStatus) {
+      let queuedCleanupCandidates: Array<{ kind: 'audio' | 'cover'; fileID: string }> = []
       await db.runTransaction(async transaction => {
+        const currentPost = await db.transactionGetByIdOrNull<any>(transaction, 'posts', postId)
+        if (!currentPost || !snapshotMatches(currentPost)) {
+          throw new Error('post changed during edit; retry required')
+        }
+        assertFinalizedRefsStillCurrent(currentPost)
+        queuedCleanupCandidates = await queueMemberAudioCleanupJobsInTransaction(transaction, {
+          post: { ...currentPost, _id: currentPost._id || postId },
+          candidates: collectMemberAudioCleanupCandidates(currentPost, currentPost.pendingContent)
+            .filter((candidate) => !retainedAudioRefs.has(`${candidate.kind}\u0000${candidate.fileID}`)),
+          expectedRevision: contentRevision,
+          now: updatedAt,
+        })
         await transaction.collection('posts').doc(postId).update({ data: {
-          pendingContent: db.replaceValue(merged), pendingAuditStatus: 'pending', pendingAuditReason: 'content audit pending',
+          pendingContent: db.replaceValue(merged),
+          pendingContentRevision: contentRevision,
+          pendingContentRevisionDigest: contentRevisionDigest,
+          pendingAuditStatus: 'pending', pendingAuditReason: 'content audit pending',
           ...(archive ? { pendingTopics: db.replaceValue(archive.topics) } : {}),
           pendingSubmittedAt: updatedAt, updatedAt, adminEditedAt: updatedAt,
           adminEditedByAccountId: ctx.accountId, adminEditedByUsername: ctx.username,
         } })
         await schedulePostRagSyncInTransaction(transaction, { postId, communityId: post.communityId, sectionId: post.sectionId || '', reason: 'post.updated', now: updatedAt })
       })
-      const audit = await auditAndApply({
+      let audit
+      try {
+        audit = await auditAndApply({
+          postId,
+          communityId: post.communityId,
+          sectionId: post.area === 'collaboration' ? '' : post.sectionId,
+          section,
+          content: merged,
+          authorId: ctx.userId,
+          source: 'admin',
+          contentSlot: 'pendingContent',
+          contentRevision,
+          contentDigest: contentRevisionDigest,
+          postSnapshot: {
+            ...post,
+            pendingContent: merged,
+            pendingContentRevision: contentRevision,
+            pendingContentRevisionDigest: contentRevisionDigest,
+            ...(archive ? { pendingTopics: archive.topics } : {}),
+          } as any,
+        })
+      } finally {
+        await processMemberAudioCleanupJobs({ postId, candidates: queuedCleanupCandidates })
+        await recoverMemberAudioCleanupJobs({ postId, excludeCandidates: queuedCleanupCandidates })
+      }
+      return { success: true, updatedAt, adminEditedAt: updatedAt, auditStatus: audit.status, auditReason: audit.reason }
+    }
+
+    let queuedCleanupCandidates: Array<{ kind: 'audio' | 'cover'; fileID: string }> = []
+    await db.runTransaction(async transaction => {
+      const currentPost = await db.transactionGetByIdOrNull<any>(transaction, 'posts', postId)
+      if (!currentPost || !snapshotMatches(currentPost)) {
+        throw new Error('post changed during edit; retry required')
+      }
+      assertFinalizedRefsStillCurrent(currentPost)
+      queuedCleanupCandidates = await queueMemberAudioCleanupJobsInTransaction(transaction, {
+        post: { ...currentPost, _id: currentPost._id || postId },
+        candidates: collectMemberAudioCleanupCandidates(currentPost, currentPost.content)
+          .filter((candidate) => !retainedAudioRefs.has(`${candidate.kind}\u0000${candidate.fileID}`)),
+        expectedRevision: contentRevision,
+        now: updatedAt,
+      })
+      await transaction.collection('posts').doc(postId).update({ data: {
+        content: db.replaceValue(merged),
+        contentRevision,
+        contentRevisionDigest,
+        ...(archive ? { contentAuditTopics: db.replaceValue(archive.topics) } : { contentAuditTopics: db.removeField() }),
+        auditStatus: 'pending', auditReason: 'content audit pending',
+        auditUpdatedAt: updatedAt, updatedAt, adminEditedAt: updatedAt,
+        adminEditedByAccountId: ctx.accountId, adminEditedByUsername: ctx.username,
+      } })
+      await schedulePostRagSyncInTransaction(transaction, { postId, communityId: post.communityId, sectionId: post.sectionId || '', reason: 'post.updated', now: updatedAt })
+    })
+    let audit
+    try {
+      audit = await auditAndApply({
         postId,
         communityId: post.communityId,
         sectionId: post.area === 'collaboration' ? '' : post.sectionId,
@@ -2139,45 +2266,20 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
         content: merged,
         authorId: ctx.userId,
         source: 'admin',
-        contentSlot: 'pendingContent',
+        contentSlot: 'content',
+        contentRevision,
+        contentDigest: contentRevisionDigest,
         postSnapshot: {
           ...post,
-          pendingContent: merged,
-          ...(archive ? { pendingTopics: archive.topics } : {}),
+          content: merged,
+          contentRevision,
+          contentRevisionDigest,
+          ...(archive ? { contentAuditTopics: archive.topics } : {}),
         } as any,
       })
-      return { success: true, updatedAt, adminEditedAt: updatedAt, auditStatus: audit.status, auditReason: audit.reason }
-    }
-
-    await db.runTransaction(async transaction => {
-      await transaction.collection('posts').doc(postId).update({ data: {
-        content: db.replaceValue(merged), auditStatus: 'pending', auditReason: 'content audit pending',
-        auditUpdatedAt: updatedAt, updatedAt, adminEditedAt: updatedAt,
-        adminEditedByAccountId: ctx.accountId, adminEditedByUsername: ctx.username,
-      } })
-      await schedulePostRagSyncInTransaction(transaction, { postId, communityId: post.communityId, sectionId: post.sectionId || '', reason: 'post.updated', now: updatedAt })
-    })
-    const audit = await auditAndApply({
-      postId,
-      communityId: post.communityId,
-      sectionId: post.area === 'collaboration' ? '' : post.sectionId,
-      section,
-      content: merged,
-      authorId: ctx.userId,
-      source: 'admin',
-      contentSlot: 'content',
-      postSnapshot: { ...post, content: merged } as any,
-    })
-    if (archive && audit.status === 'pass') {
-      await db.updateById('posts', postId, { topics: db.replaceValue(archive.topics) })
-      await syncArchivePostTopics({
-        _id: postId,
-        communityId: String(post.communityId || ''),
-        topics: archive.topics,
-        createdAt: String(post.createdAt || updatedAt),
-        status: String(post.status || 'active'),
-        auditStatus: 'pass',
-      })
+    } finally {
+      await processMemberAudioCleanupJobs({ postId, candidates: queuedCleanupCandidates })
+      await recoverMemberAudioCleanupJobs({ postId, excludeCandidates: queuedCleanupCandidates })
     }
     return { success: true, updatedAt, adminEditedAt: updatedAt, auditStatus: audit.status, auditReason: audit.reason }
   }
@@ -2268,18 +2370,63 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (!post) throw new Error('post not found')
     const { section } = await resolveAdminPostContentContract(post)
     if (!section) throw new Error('section not found')
-    const slot = post.pendingContent ? 'pendingContent' : 'content'
-    const oldTasks = await db.query(AUDIT_TASKS, { postId, contentSlot: slot }).catch(() => []) as any[]
-    await Promise.all(oldTasks.map((task) => task._id ? db.removeById(AUDIT_TASKS, task._id).catch(() => null) : null))
+    const slot: 'content' | 'pendingContent' = post.pendingContent ? 'pendingContent' : 'content'
+    const revisionField = slot === 'pendingContent' ? 'pendingContentRevision' : 'contentRevision'
+    const digestField = slot === 'pendingContent' ? 'pendingContentRevisionDigest' : 'contentRevisionDigest'
+    const snapshotRevision = String(post[revisionField] || '').trim()
+    const snapshotStoredDigest = String(post[digestField] || '').trim()
+    const content = post[slot]
+    if (!content || typeof content !== 'object') throw new Error('post content not found')
+    const snapshotDigest = computeContentRevisionDigest(content)
+    if (snapshotStoredDigest && snapshotStoredDigest !== snapshotDigest) {
+      throw new Error('post revision digest mismatch; retry required')
+    }
+    const queriedTasks = snapshotRevision
+      ? await db.query(AUDIT_TASKS, { contentRevision: snapshotRevision }, { limit: 100 }).catch(() => []) as any[]
+      : await db.query(AUDIT_TASKS, { postId, contentSlot: slot }, { limit: 100 }).catch(() => []) as any[]
+    const snapshotTasks = queriedTasks.filter((task) => (
+      task.postId === postId
+      && task.contentSlot === slot
+      && String(task.contentRevision || '').trim() === snapshotRevision
+      && (!snapshotStoredDigest || !task.contentDigest || task.contentDigest === snapshotStoredDigest)
+    ))
+    const retryRevision = createContentRevision()
+    await db.runTransaction(async transaction => {
+      const currentPost = await db.transactionGetByIdOrNull<any>(transaction, 'posts', postId)
+      const currentContent = currentPost?.[slot]
+      if (
+        !currentPost
+        || String(currentPost[revisionField] || '').trim() !== snapshotRevision
+        || String(currentPost[digestField] || '').trim() !== snapshotStoredDigest
+        || !currentContent
+        || computeContentRevisionDigest(currentContent) !== snapshotDigest
+      ) throw new Error('post changed during audit retry; retry required')
+      await transaction.collection('posts').doc(postId).update({ data: {
+        [revisionField]: retryRevision,
+        [digestField]: snapshotDigest,
+        ...(slot === 'pendingContent'
+          ? { pendingAuditStatus: 'pending', pendingAuditReason: 'content audit pending' }
+          : { auditStatus: 'pending', auditReason: 'content audit pending' }),
+        auditUpdatedAt: new Date().toISOString(),
+      } })
+    })
+    await Promise.all(snapshotTasks.map((task) => task._id ? db.removeById(AUDIT_TASKS, task._id).catch(() => null) : null))
     const audit = await auditAndApply({
       postId,
       communityId: post.communityId,
       sectionId: post.area === 'collaboration' ? '' : post.sectionId,
       section,
-      content: slot === 'pendingContent' ? post.pendingContent : post.content,
+      content,
       authorId: post.authorId,
       source: post.adminEditedByAccountId ? 'admin' : 'user',
       contentSlot: slot,
+      contentRevision: retryRevision,
+      contentDigest: snapshotDigest,
+      postSnapshot: {
+        ...post,
+        [revisionField]: retryRevision,
+        [digestField]: snapshotDigest,
+      },
     })
     return { success: true, auditStatus: audit.status, auditReason: audit.reason }
   }
@@ -2485,6 +2632,8 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     validateRequiredWidgets(section, content, { allowAdminOnly: true })
     validateContentValues(section, content, { allowAdminOnly: true })
     const now = new Date().toISOString()
+    const contentRevision = createContentRevision()
+    const contentRevisionDigest = computeContentRevisionDigest(content)
     const postData = {
       communityId,
       ...postIdentity,
@@ -2493,6 +2642,8 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       auditStatus: 'pending',
       auditReason: 'content audit pending',
       auditUpdatedAt: now,
+      contentRevision,
+      contentRevisionDigest,
       content,
       commentCount: 0,
       likeCount: 0,
@@ -2521,6 +2672,8 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       authorId: ctx.userId,
       source: 'admin',
       contentSlot: 'content',
+      contentRevision,
+      contentDigest: contentRevisionDigest,
       postSnapshot: { _id: postId, ...postData } as any,
     })
     return { postId, auditStatus: audit.status, auditReason: audit.reason }

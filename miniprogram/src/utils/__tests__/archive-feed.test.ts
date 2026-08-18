@@ -84,4 +84,42 @@ describe('archive feed state', () => {
     expect(unknown.format).toBe('text')
     expect(unknown.cover.kind).toBe('text')
   })
+
+  test('preserves native audio cards and derives their first cover, count, and positive duration sum', () => {
+    const card = normalizeArchiveCard(post('audio-card', {
+      format: 'audio',
+      content: {
+        title: '寒山钟声与西湖春',
+        audios: [
+          { fileID: 'cloud://audio/one.mp3', title: '寒山钟声', duration: 61.2, size: 1024, ext: 'mp3', cover: '  ' },
+          { fileID: 'cloud://audio/two.m4a', title: '西湖春', duration: 30.8, size: 2048, ext: 'm4a', cover: 'cloud://covers/west-lake.jpg' },
+          { fileID: 'cloud://audio/invalid.wav', title: '待修复', duration: 0, size: 4096, ext: 'wav' },
+        ],
+      },
+    }))
+
+    expect(card).toMatchObject({
+      format: 'audio',
+      title: '寒山钟声与西湖春',
+      cover: { kind: 'audio', src: 'cloud://covers/west-lake.jpg' },
+      trackCount: 3,
+      totalDuration: 92,
+    })
+  })
+
+  test('uses the bundled audio cover when no track has a display cover', () => {
+    const card = normalizeArchiveCard(post('audio-fallback', {
+      format: 'audio',
+      content: {
+        title: '无封面音频',
+        audios: [{ fileID: 'cloud://audio/one.aac', title: '第一轨', duration: 18, size: 1024, ext: 'aac' }],
+      },
+    }))
+
+    expect(card.cover).toEqual({
+      kind: 'audio',
+      src: '/static/audio/default-audio-cover.jpg',
+      fallback: '/static/audio/default-audio-cover.jpg',
+    })
+  })
 })

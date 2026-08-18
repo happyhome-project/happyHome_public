@@ -110,6 +110,26 @@ describe('callCloud', () => {
     })
   })
 
+  test('postApi requests and cleans server-scoped member audio and cover uploads', async () => {
+    callWebFunction.mockResolvedValue({ cloudPath: 'posts/member-audios/scope/audio.mp3', fileId: 'cloud://env/posts/member-audios/scope/audio.mp3' })
+    vi.stubGlobal('uni', {})
+
+    const { postApi } = await import('../cloud')
+    await postApi.requestMemberAudioUpload({ communityId: 'community-1', fileName: 'story.mp3' })
+    await postApi.requestMemberAudioCoverUpload({ communityId: 'community-1', fileName: 'cover.jpg' })
+    await postApi.deleteMemberAudioUpload({ communityId: 'community-1', fileID: 'cloud://env/pending.mp3', kind: 'audio' })
+
+    expect(callWebFunction).toHaveBeenNthCalledWith(1, 'post', {
+      action: 'requestMemberAudioUpload', communityId: 'community-1', fileName: 'story.mp3',
+    })
+    expect(callWebFunction).toHaveBeenNthCalledWith(2, 'post', {
+      action: 'requestMemberAudioCoverUpload', communityId: 'community-1', fileName: 'cover.jpg',
+    })
+    expect(callWebFunction).toHaveBeenNthCalledWith(3, 'post', {
+      action: 'deleteMemberAudioUpload', communityId: 'community-1', fileID: 'cloud://env/pending.mp3', kind: 'audio',
+    })
+  })
+
   test('exposes global collaboration templates and section-free collaboration post actions', async () => {
     callWebFunction.mockResolvedValue({ templates: [] })
     vi.stubGlobal('uni', {})

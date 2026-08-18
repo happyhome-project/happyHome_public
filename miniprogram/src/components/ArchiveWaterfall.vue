@@ -14,7 +14,23 @@
     <view v-else class="archive-waterfall__columns">
       <view v-for="(column, index) in columns" :key="index" class="archive-waterfall__column">
         <view v-for="card in column" :key="card.postId" class="archive-waterfall__card" @tap="$emit('post', card)">
-          <view v-if="card.cover.kind === 'video'" class="archive-waterfall__video-cover">
+          <view v-if="card.cover.kind === 'audio'" class="archive-waterfall__audio-cover">
+            <image
+              :src="card.cover.src"
+              mode="aspectFill"
+              class="archive-waterfall__cover"
+              @load="$emit('cover-load', card)"
+              @error="$emit('cover-error', card)"
+            />
+            <view class="archive-waterfall__audio-play" aria-hidden="true">
+              <AudioIcon name="play-circle-filled" size="54rpx" color="#ffffff" />
+            </view>
+            <view class="archive-waterfall__audio-summary">
+              <AudioIcon name="sound" size="22rpx" color="#ffffff" />
+              <text>音频 · {{ card.trackCount }}首 · {{ formatAudioDuration(card.totalDuration) }}</text>
+            </view>
+          </view>
+          <view v-else-if="card.cover.kind === 'video'" class="archive-waterfall__video-cover">
             <image
               v-if="card.cover.src"
               :src="card.cover.src"
@@ -53,8 +69,10 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import AudioIcon from './AudioIcon.vue'
 import TextNoteCover from './TextNoteCover.vue'
 import type { ArchiveFeedCard, ArchiveFeedColumns } from '../utils/archive-feed'
+import { formatAudioDuration } from '../utils/audio-display'
 const props = defineProps<{ columns: ArchiveFeedColumns; loading: boolean; error: string; hasMore: boolean }>()
 defineEmits<{
   (event: 'post' | 'cover-load' | 'cover-error', card: ArchiveFeedCard): void
@@ -69,6 +87,10 @@ const hasCards = computed(() => props.columns[0].length + props.columns[1].lengt
 .archive-waterfall__column { display: flex; flex-direction: column; gap: 14rpx; min-width: 0; }
 .archive-waterfall__card { overflow: hidden; border-radius: 16rpx; background: #fff; }
 .archive-waterfall__cover { display: block; width: 100%; min-height: 220rpx; background: #eee; }
+.archive-waterfall__audio-cover { position: relative; width: 100%; height: 300rpx; overflow: hidden; background: #eef5f1; }
+.archive-waterfall__audio-cover .archive-waterfall__cover { width: 100%; height: 100%; min-height: 0; }
+.archive-waterfall__audio-play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; filter: drop-shadow(0 4rpx 12rpx rgba(0,0,0,.28)); }
+.archive-waterfall__audio-summary { position: absolute; right: 10rpx; bottom: 10rpx; left: 10rpx; display: flex; align-items: center; gap: 7rpx; padding: 7rpx 10rpx; border-radius: 9rpx; background: rgba(22,43,34,.64); color: #fff; font-size: 20rpx; line-height: 28rpx; }
 .archive-waterfall__image-placeholder { width: 100%; height: 300rpx; background: linear-gradient(110deg,#f1f1f1 18%,#f7f7f7 38%,#f1f1f1 58%); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
 .archive-waterfall__video-cover { position: relative; width: 100%; height: 300rpx; overflow: hidden; background: #171923; }
 .archive-waterfall__video-cover .archive-waterfall__cover { width: 100%; height: 100%; min-height: 0; }

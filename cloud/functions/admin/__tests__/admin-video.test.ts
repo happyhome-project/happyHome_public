@@ -17,15 +17,31 @@ jest.mock('../../../lib/db', () => ({
   removeField: jest.fn(() => ({ __remove: true })),
   transactionGetByIdOrNull: jest.fn(async (_transaction, name, id) => {
     const mockedDb = require('../../../lib/db')
+    let value = null
     if (name === 'posts') {
       const created = [...mockedDb.create.mock.calls].reverse().find(([collectionName]) => collectionName === 'posts')
-      if (created) return { _id: id, ...created[1] }
+      if (created) value = { _id: id, ...created[1] }
     }
-    for (let index = mockedDb.getById.mock.calls.length - 1; index >= 0; index -= 1) {
-      const call = mockedDb.getById.mock.calls[index]
-      if (call[0] === name && call[1] === id) return mockedDb.getById.mock.results[index].value
+    if (!value) {
+      for (let index = mockedDb.getById.mock.calls.length - 1; index >= 0; index -= 1) {
+        const call = mockedDb.getById.mock.calls[index]
+        if (call[0] === name && call[1] === id) {
+          value = await mockedDb.getById.mock.results[index].value
+          break
+        }
+      }
     }
-    return null
+    if (!value) return null
+    value = { ...value }
+    for (const [collectionName, documentId, data] of mockedDb.updateById.mock.calls) {
+      if (collectionName !== name || documentId !== id) continue
+      for (const [key, fieldValue] of Object.entries(data)) {
+        if (fieldValue && typeof fieldValue === 'object' && '__set' in fieldValue) value[key] = fieldValue.__set
+        else if (fieldValue && typeof fieldValue === 'object' && '__remove' in fieldValue) delete value[key]
+        else value[key] = fieldValue
+      }
+    }
+    return value
   }),
   runTransaction: jest.fn(async callback => callback({
     collection: (name: string) => ({
@@ -70,6 +86,7 @@ import { main as rawMain } from '../index'
 import * as db from '../../../lib/db'
 import * as storage from '../../../lib/storage'
 import * as postSearch from '../../../lib/post-search'
+import * as contentAudit from '../../../lib/content-audit'
 import { buildInitialCollaborationTemplates } from '../../../shared/collaboration-templates'
 
 const TEST_INTERNAL_TOKEN = 'admin-video-unit-internal-token'
@@ -77,6 +94,19 @@ process.env.ADMIN_INTERNAL_CALL_TOKEN = TEST_INTERNAL_TOKEN
 const main = (event: any) => rawMain({ ...event, _internalToken: TEST_INTERNAL_TOKEN })
 
 beforeEach(() => jest.clearAllMocks())
+
+function withRecordedUpdates(document: any, collectionName: string, documentId: string) {
+  const value = { ...document }
+  for (const [collection, id, data] of (db.updateById as jest.Mock).mock.calls) {
+    if (collection !== collectionName || id !== documentId) continue
+    for (const [key, fieldValue] of Object.entries(data)) {
+      if (fieldValue && typeof fieldValue === 'object' && '__set' in fieldValue) value[key] = (fieldValue as any).__set
+      else if (fieldValue && typeof fieldValue === 'object' && '__remove' in fieldValue) delete value[key]
+      else value[key] = fieldValue
+    }
+  }
+  return value
+}
 
 const SUPER_CTX = {
   accountId: 'admin-1',
@@ -114,6 +144,35 @@ describe('video.requestUpload', () => {
     const path = (storage.requestUploadMetadata as jest.Mock).mock.calls[0][0]
     expect(path).toMatch(/^posts\/covers\/\d+_[a-z0-9]+\.jpg$/)
   })
+})
+
+test('post.getAdmin round-trips native archive audio through an audio_group section', async () => {
+  const audios = [{
+    title: '第一段', duration: 12, size: 1024, ext: 'mp3',
+    fileID: 'cloud://env/posts/member-audios-finalized/scope/track.mp3',
+    cover: 'cloud://env/posts/member-audio-covers-finalized/scope/cover.jpg',
+  }]
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string) => {
+    if (collectionName === 'posts') return {
+      _id: 'archive-audio-1', communityId: 'community-1', authorId: 'member-1',
+      area: 'archive', origin: 'native_archive', format: 'audio', status: 'active',
+      topics: ['家声'], content: { title: '家庭声音', audios },
+    }
+    if (collectionName === 'users') return { _id: 'member-1', nickName: '成员' }
+    return null
+  })
+  ;(db.query as jest.Mock).mockResolvedValue([])
+
+  const result = await main({ action: 'post.getAdmin', _actAs: SUPER_CTX, postId: 'archive-audio-1' }) as any
+
+  expect(result.post).toEqual(expect.objectContaining({
+    format: 'audio', content: { title: '家庭声音', audios, topics: ['家声'] },
+  }))
+  expect(result.section).toEqual(expect.objectContaining({
+    name: '音频', displayTemplate: 'default',
+    widgets: expect.arrayContaining([expect.objectContaining({ widgetId: 'audios', type: 'audio_group', required: true })]),
+  }))
+  expect(result.section.widgets.map((widget: any) => widget.widgetId)).not.toContain('body')
 })
 
 describe('audio.requestUpload', () => {
@@ -320,12 +379,20 @@ describe('post.createAdmin', () => {
   })
 
   test('正常分支：authorId 落 ctx.userId，attendance 字段被过滤', async () => {
-    ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    const section = {
       _id: 's-1', communityId: 'c-1', widgets: [
         { widgetId: 'w-1', type: 'short_text', label: '标题', required: true, fieldKey: 'f1', order: 0, showInList: false },
         { widgetId: 'w-2', type: 'video_group', label: '视频', required: false, fieldKey: 'f2', order: 1, showInList: false },
         { widgetId: 'w-att', type: 'attendance', label: '报名', required: false, fieldKey: 'f3', order: 2, showInList: true },
       ],
+    }
+    ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+      if (collectionName === 'sections') return section
+      if (collectionName === 'posts') {
+        const created = [...(db.create as jest.Mock).mock.calls].reverse().find(([collection]) => collection === 'posts')
+        return created ? withRecordedUpdates({ _id: id, ...created[1] }, 'posts', id) : null
+      }
+      return null
     })
     ;(db.create as jest.Mock).mockResolvedValueOnce('post-NEW')
 
@@ -616,9 +683,11 @@ describe('post.updateAdmin', () => {
         { widgetId: 'audio', type: 'audio_group', label: 'Audio', required: false, fieldKey: 'audio', order: 2, showInList: false },
       ],
     }
-    ;(db.getById as jest.Mock)
-      .mockResolvedValueOnce(existingPost)
-      .mockResolvedValueOnce(section)
+    ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+      if (collectionName === 'posts' && id === existingPost._id) return withRecordedUpdates(existingPost, 'posts', id)
+      if (collectionName === 'sections' && id === section._id) return section
+      return null
+    })
     ;(db.updateById as jest.Mock).mockResolvedValue({})
 
     const result: any = await main({
@@ -681,9 +750,11 @@ describe('post.updateAdmin', () => {
         { widgetId: 'guide_location', type: 'location', label: '地点', fieldKey: 'location', required: false, order: 3, showInList: false, locked: true },
       ],
     }
-    ;(db.getById as jest.Mock)
-      .mockResolvedValueOnce(existingPost)
-      .mockResolvedValueOnce(oldGuideSection)
+    ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+      if (collectionName === 'posts' && id === existingPost._id) return withRecordedUpdates(existingPost, 'posts', id)
+      if (collectionName === 'sections' && id === oldGuideSection._id) return oldGuideSection
+      return null
+    })
     ;(db.updateById as jest.Mock).mockResolvedValue({})
 
     const result: any = await main({
@@ -741,9 +812,11 @@ describe('post.updateAdmin', () => {
       imageFileIDs: ['cloud://env/posts/images/new.png'],
       schemaVersion: 1,
     }
-    ;(db.getById as jest.Mock)
-      .mockResolvedValueOnce(existingPost)
-      .mockResolvedValueOnce(section)
+    ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+      if (collectionName === 'posts' && id === existingPost._id) return withRecordedUpdates(existingPost, 'posts', id)
+      if (collectionName === 'sections' && id === section._id) return section
+      return null
+    })
     ;(db.updateById as jest.Mock).mockResolvedValue({})
 
     const result: any = await main({
@@ -780,23 +853,30 @@ describe('post.updateAdmin', () => {
   })
 
   test('community admin can edit posts in owned community', async () => {
+    const editablePost = {
+      _id: 'post-1',
+      communityId: 'community-1',
+      sectionId: 'section-1',
+      authorId: 'author-openid',
+      status: 'active',
+      content: { title: 'old title' },
+    }
+    const section = {
+      _id: 'section-1',
+      communityId: 'community-1',
+      widgets: [
+        { widgetId: 'title', type: 'short_text', label: 'Title', required: true, fieldKey: 'title', order: 0, showInList: true },
+      ],
+    }
     ;(db.getById as jest.Mock)
       .mockResolvedValueOnce({ _id: 'post-1', communityId: 'community-1' })
       .mockResolvedValueOnce({ _id: 'community-1', creatorId: 'someone-else' })
-      .mockResolvedValueOnce({
-        _id: 'post-1',
-        communityId: 'community-1',
-        sectionId: 'section-1',
-        authorId: 'author-openid',
-        status: 'active',
-        content: { title: 'old title' },
-      })
-      .mockResolvedValueOnce({
-        _id: 'section-1',
-        communityId: 'community-1',
-        widgets: [
-          { widgetId: 'title', type: 'short_text', label: 'Title', required: true, fieldKey: 'title', order: 0, showInList: true },
-        ],
+      .mockResolvedValueOnce(editablePost)
+      .mockResolvedValueOnce(section)
+      .mockImplementation(async (collectionName: string, id: string) => {
+        if (collectionName === 'posts' && id === editablePost._id) return withRecordedUpdates(editablePost, 'posts', id)
+        if (collectionName === 'sections' && id === section._id) return section
+        return null
       })
     ;(db.query as jest.Mock).mockResolvedValueOnce([
       { _id: 'member-admin', communityId: 'community-1', userId: 'community-admin-openid', role: 'admin', status: 'active' },
@@ -932,5 +1012,137 @@ describe('archive post admin editing', () => {
       pendingTopics: { __set: ['通勤出行', '小区日常'] },
     }))
     expect(pendingPatch.pendingContent.__set.topics).toBeUndefined()
+  })
+
+  test('stale direct-content pass cannot overwrite newer archive topics for identical content', async () => {
+    const sharedContent = {
+      title: '相同标题',
+      images: ['cloud://env/posts/images/shared.png'],
+      body: richBody('相同正文'),
+    }
+    const currentPost: any = {
+      _id: 'archive-direct-race', communityId: 'community-1', area: 'archive', origin: 'native_archive',
+      format: 'image_text', topics: ['旧话题'], authorId: 'author-1', status: 'active', auditStatus: 'rejected',
+      createdAt: '2026-07-17T10:00:00.000Z', content: { title: '旧标题', images: ['cloud://env/posts/images/old.png'], body: richBody('旧正文') },
+    }
+    ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string) => collectionName === 'posts' ? currentPost : null)
+    ;(db.updateById as jest.Mock).mockImplementation(async (collectionName: string, id: string, data: any) => {
+      if (collectionName !== 'posts' || id !== currentPost._id) return
+      for (const [key, value] of Object.entries(data)) {
+        if (value && typeof value === 'object' && '__set' in value) currentPost[key] = (value as any).__set
+        else if (value && typeof value === 'object' && '__remove' in value) delete currentPost[key]
+        else currentPost[key] = value
+      }
+    })
+
+    let signalAStarted!: () => void
+    const aStarted = new Promise<void>((resolve) => { signalAStarted = resolve })
+    let releaseA!: () => void
+    const aGate = new Promise<void>((resolve) => { releaseA = resolve })
+    let auditCall = 0
+    const auditSpy = jest.spyOn(contentAudit, 'auditAndApply').mockImplementation(async (params: any) => {
+      auditCall += 1
+      if (auditCall === 1) {
+        signalAStarted()
+        await aGate
+        return { status: 'pass', reason: '', applied: false, stale: true, contentRevision: params.contentRevision || 'revision-a' }
+      }
+      return { status: 'rejected', reason: 'revision B rejected', applied: true, stale: false, contentRevision: params.contentRevision || 'revision-b' }
+    })
+
+    try {
+      const updateA = main({
+        action: 'post.updateAdmin', _actAs: SUPER_CTX, postId: currentPost._id,
+        content: { ...sharedContent, topics: ['话题 A'] },
+      })
+      await aStarted
+      const updateB = main({
+        action: 'post.updateAdmin', _actAs: SUPER_CTX, postId: currentPost._id,
+        content: { ...sharedContent, topics: ['话题 B'] },
+      })
+      await updateB
+      releaseA()
+      await updateA
+
+      const revisions = auditSpy.mock.calls.map(([params]) => String(params.contentRevision || ''))
+      expect(revisions).toHaveLength(2)
+      expect(revisions.every(Boolean)).toBe(true)
+      expect(new Set(revisions).size).toBe(2)
+      expect(currentPost.content).toEqual(sharedContent)
+      expect(currentPost.topics).toEqual(['旧话题'])
+    } finally {
+      auditSpy.mockRestore()
+    }
+  })
+})
+
+describe('audit.retryAdmin revision isolation', () => {
+  const retryBody = (text: string) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
+  const retryPost = {
+    _id: 'retry-post-1',
+    communityId: 'community-1',
+    area: 'archive',
+    format: 'image_text',
+    authorId: 'author-1',
+    status: 'active',
+    auditStatus: 'pending',
+    contentRevision: 'revision-a',
+    contentRevisionDigest: contentAudit.computeContentRevisionDigest({ title: 'A', images: [], body: retryBody('A') } as any),
+    content: { title: 'A', images: [], body: retryBody('A') },
+  }
+
+  test('fails closed without deleting tasks when the post changes after the retry snapshot', async () => {
+    const changedPost = {
+      ...retryPost,
+      contentRevision: 'revision-b',
+      contentRevisionDigest: contentAudit.computeContentRevisionDigest({ title: 'B', images: [], body: retryBody('B') } as any),
+      content: { title: 'B', images: [], body: retryBody('B') },
+    }
+    ;(db.getById as jest.Mock).mockResolvedValue(retryPost)
+    ;(db.query as jest.Mock).mockResolvedValue([
+      { _id: 'task-a', postId: retryPost._id, contentSlot: 'content', contentRevision: 'revision-a', contentDigest: retryPost.contentRevisionDigest },
+      { _id: 'task-b', postId: retryPost._id, contentSlot: 'content', contentRevision: 'revision-b', contentDigest: changedPost.contentRevisionDigest },
+    ])
+    ;(db.transactionGetByIdOrNull as jest.Mock).mockResolvedValueOnce(changedPost)
+    const auditSpy = jest.spyOn(contentAudit, 'auditAndApply')
+
+    try {
+      await expect(main({ action: 'audit.retryAdmin', _actAs: SUPER_CTX, postId: retryPost._id }))
+        .rejects.toThrow('post changed during audit retry')
+      expect(db.removeById).not.toHaveBeenCalled()
+      expect(auditSpy).not.toHaveBeenCalled()
+    } finally {
+      auditSpy.mockRestore()
+    }
+  })
+
+  test('legacy revisionless retry removes only its revisionless task snapshot', async () => {
+    const legacyPost = {
+      ...retryPost,
+      contentRevision: undefined,
+      contentRevisionDigest: undefined,
+    }
+    ;(db.getById as jest.Mock).mockResolvedValue(legacyPost)
+    ;(db.query as jest.Mock).mockResolvedValue([
+      { _id: 'legacy-task', postId: legacyPost._id, contentSlot: 'content' },
+      { _id: 'new-task', postId: legacyPost._id, contentSlot: 'content', contentRevision: 'new-concurrent-revision' },
+    ])
+    ;(db.removeById as jest.Mock).mockResolvedValue({})
+    ;(db.transactionGetByIdOrNull as jest.Mock).mockResolvedValueOnce(legacyPost)
+    const auditSpy = jest.spyOn(contentAudit, 'auditAndApply').mockResolvedValue({
+      status: 'pending', reason: '', applied: false, stale: false, contentRevision: 'retry-revision',
+    } as any)
+
+    try {
+      await main({ action: 'audit.retryAdmin', _actAs: SUPER_CTX, postId: legacyPost._id })
+      expect(db.removeById).toHaveBeenCalledWith(contentAudit.AUDIT_TASKS, 'legacy-task')
+      expect(db.removeById).not.toHaveBeenCalledWith(contentAudit.AUDIT_TASKS, 'new-task')
+      const params = auditSpy.mock.calls[0][0] as any
+      expect(params.contentRevision).toEqual(expect.any(String))
+      expect(params.contentRevision).not.toBe('')
+      expect(params.contentDigest).toBe(contentAudit.computeContentRevisionDigest(legacyPost.content as any))
+    } finally {
+      auditSpy.mockRestore()
+    }
   })
 })

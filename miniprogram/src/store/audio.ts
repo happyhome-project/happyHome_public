@@ -3,7 +3,6 @@ import {
   ensureAudioBackend,
   type AudioBackend,
   type AudioBackendEvent,
-  type AudioBackendMeta,
 } from '../utils/audio-manager'
 import { getCloudTempFileURL } from '../api/storage'
 
@@ -31,6 +30,18 @@ interface UrlCacheEntry {
   expiresAt: number
 }
 
+interface PlaybackRequestSnapshot {
+  playlist: AudioTrackLite[]
+  index: number
+  track: AudioTrackLite
+  meta: PlaylistMeta
+}
+
+interface PlaybackInvalidationOptions {
+  preserveReadySource?: boolean
+  resetCurrentTime?: boolean
+}
+
 export interface AudioStoreDeps {
   storage: {
     get(key: string): unknown
@@ -56,6 +67,26 @@ let deps: AudioStoreDeps = {
   getTempFileURL: getCloudTempFileURL,
 }
 
+function isResolvedMediaUrl(value: string): boolean {
+  return /^(?:https?:\/\/|blob:|data:|file:|wxfile:|\/)/i.test(value)
+}
+
+function createPlaybackRequestSnapshot(
+  list: AudioTrackLite[],
+  index: number,
+  meta: PlaylistMeta | null,
+): PlaybackRequestSnapshot | null {
+  if (!Array.isArray(list) || list.length === 0 || !meta) return null
+  const safeIndex = index >= 0 && index < list.length ? index : 0
+  const playlist = list.map(track => Object.assign({}, track))
+  return {
+    playlist,
+    index: safeIndex,
+    track: Object.assign({}, playlist[safeIndex]),
+    meta: Object.assign({}, meta),
+  }
+}
+
 export function _setAudioStoreDepsForTesting(overrides: Partial<AudioStoreDeps>) {
   deps = Object.assign({}, deps, overrides)
 }
@@ -70,6 +101,11 @@ export const useAudioStore = defineStore('audio', {
     floatPosition: { x: 20, y: 480 } as FloatPosition,
     httpsUrlCache: {} as Record<string, UrlCacheEntry>,
     currentTime: 0,
+    playbackGeneration: 0,
+    playbackPending: false,
+    sourceReadyGeneration: null as number | null,
+    playbackEndedGeneration: null as number | null,
+    pendingSeek: null as { generation: number; seconds: number } | null,
   }),
   getters: {
     currentTrack: (state) => state.currentPlaylist[state.currentIndex] || null,
@@ -88,49 +124,89 @@ export const useAudioStore = defineStore('audio', {
       deps.storage.set(STORAGE_KEY_POSITION, { x, y })
     },
     async playPlaylist(list: AudioTrackLite[], startIdx: number, meta: PlaylistMeta) {
-      if (!Array.isArray(list) || list.length === 0) return
-      const safeIdx = startIdx >= 0 && startIdx < list.length ? startIdx : 0
-      this.currentPlaylist = list.slice()
-      this.currentMeta = meta
-      this.currentIndex = safeIdx
+      const snapshot = createPlaybackRequestSnapshot(list, startIdx, meta)
+      if (!snapshot) return
+      const shouldPause = this.currentPlaylist.length > 0 || this.playbackPending || this.isPlaying
+      const generation = this._beginPlaybackRequest(shouldPause)
+      this.currentPlaylist = snapshot.playlist.map(track => Object.assign({}, track))
+      this.currentMeta = Object.assign({}, snapshot.meta)
+      this.currentIndex = snapshot.index
       this.currentTime = 0
       this.isVisible = false
-      await this._preloadUrls(list.flatMap((item) => [item.fileID, item.cover || '']).filter(Boolean))
-      await this._playCurrent()
+      await this._playSnapshot(snapshot, generation)
     },
     async togglePlay() {
       if (this.currentPlaylist.length === 0) return
       const backend = this._backend()
-      if (this.isPlaying) {
-        backend.pause()
+      if (this.playbackPending) {
+        this._invalidatePlaybackRequest({ resetCurrentTime: true })
+        try { backend.pause() } catch (_error) {}
         return
       }
-      if (!this.currentTrack) return
-      const url = await this._urlFor(this.currentTrack.fileID)
-      if (!url) return
-      backend.setSrc(url, this.currentTrack.title, await this._currentBackendMeta())
-      backend.play()
+      if (this.isPlaying) {
+        this._invalidatePlaybackRequest({ preserveReadySource: true })
+        if (this.sourceReadyGeneration === this.playbackGeneration) {
+          this._bindPlaybackEvents(backend, this.playbackGeneration, true)
+        }
+        try { backend.pause() } catch (_error) {}
+        return
+      }
+      const snapshot = createPlaybackRequestSnapshot(this.currentPlaylist, this.currentIndex, this.currentMeta)
+      if (!snapshot) return
+      const sourceReady = this.sourceReadyGeneration === this.playbackGeneration
+      const replayFromNaturalEnd = sourceReady
+        && this.playbackEndedGeneration === this.playbackGeneration
+      const resumeSeconds = sourceReady && !replayFromNaturalEnd
+        ? this.currentTime
+        : 0
+      if (resumeSeconds === 0) this.currentTime = 0
+      const generation = this._beginPlaybackRequest(false)
+      if (replayFromNaturalEnd || resumeSeconds > 0) {
+        this.pendingSeek = { generation, seconds: resumeSeconds }
+      }
+      await this._playSnapshot(snapshot, generation)
     },
     async next() {
       if (!this.canNext) return
-      this.currentIndex += 1
+      const snapshot = createPlaybackRequestSnapshot(this.currentPlaylist, this.currentIndex + 1, this.currentMeta)
+      if (!snapshot) return
+      const generation = this._beginPlaybackRequest(true)
+      this.currentIndex = snapshot.index
       this.currentTime = 0
-      await this._playCurrent()
+      await this._playSnapshot(snapshot, generation)
     },
     async prev() {
       if (!this.canPrev) return
-      this.currentIndex -= 1
+      const snapshot = createPlaybackRequestSnapshot(this.currentPlaylist, this.currentIndex - 1, this.currentMeta)
+      if (!snapshot) return
+      const generation = this._beginPlaybackRequest(true)
+      this.currentIndex = snapshot.index
       this.currentTime = 0
-      await this._playCurrent()
+      await this._playSnapshot(snapshot, generation)
     },
     seek(seconds: number) {
       if (this.currentPlaylist.length === 0) return
-      this.currentTime = seconds
-      this._backend().seek(seconds)
+      if (this.playbackPending) {
+        this.currentTime = seconds
+        this.pendingSeek = { generation: this.playbackGeneration, seconds }
+        return
+      }
+      if (this.sourceReadyGeneration === this.playbackGeneration) {
+        const duration = Math.max(0, Number(this.currentTrack?.duration || 0))
+        const keepsNaturalEnd = this.playbackEndedGeneration === this.playbackGeneration
+          && (duration === 0 || seconds >= duration)
+        this.currentTime = seconds
+        if (!keepsNaturalEnd) this.playbackEndedGeneration = null
+        this.pendingSeek = null
+        this._backend().seek(seconds)
+        return
+      }
+      this.currentTime = 0
+      this.pendingSeek = null
     },
     close() {
+      this._invalidatePlaybackRequest({ resetCurrentTime: true })
       try { this._backend().stop() } catch (_error) {}
-      this.isPlaying = false
       this.isVisible = false
       this.currentPlaylist = []
       this.currentMeta = null
@@ -138,41 +214,114 @@ export const useAudioStore = defineStore('audio', {
       this.currentTime = 0
     },
     _backend(): AudioBackend {
-      const backend = deps.backend || ensureAudioBackend()
+      return deps.backend || ensureAudioBackend()
+    },
+    _beginPlaybackRequest(shouldPause: boolean): number {
+      const backend = this._backend()
+      this.playbackGeneration += 1
+      this.playbackPending = true
+      this.sourceReadyGeneration = null
+      this.playbackEndedGeneration = null
+      this.pendingSeek = null
+      this.isPlaying = false
+      if (shouldPause) {
+        try { backend.pause() } catch (_error) {}
+      }
+      return this.playbackGeneration
+    },
+    _invalidatePlaybackRequest(options: PlaybackInvalidationOptions = {}) {
+      const { preserveReadySource = false, resetCurrentTime = false } = options
+      const sourceWasReady = this.sourceReadyGeneration === this.playbackGeneration
+      this.playbackGeneration += 1
+      this.playbackPending = false
+      this.sourceReadyGeneration = preserveReadySource && sourceWasReady
+        ? this.playbackGeneration
+        : null
+      this.playbackEndedGeneration = null
+      this.pendingSeek = null
+      this.isPlaying = false
+      if (resetCurrentTime) this.currentTime = 0
+    },
+    _isCurrentPlaybackRequest(generation: number): boolean {
+      return generation === this.playbackGeneration
+    },
+    _bindPlaybackEvents(backend: AudioBackend, generation: number, sourceAlreadyReady = false) {
+      let activated = sourceAlreadyReady
       backend.bind({
-        onPlay: () => { this.isPlaying = true },
-        onPause: () => { this.isPlaying = false },
+        onPlay: () => {
+          if (!this._isCurrentPlaybackRequest(generation)) return
+          const replayFromNaturalEnd = this.playbackEndedGeneration === generation
+          activated = true
+          this.playbackPending = false
+          this.sourceReadyGeneration = generation
+          this.playbackEndedGeneration = null
+          this.isPlaying = true
+          if (this.pendingSeek?.generation === generation) {
+            const seconds = this.pendingSeek.seconds
+            this.pendingSeek = null
+            backend.seek(seconds)
+          } else if (replayFromNaturalEnd) {
+            this.currentTime = 0
+            backend.seek(0)
+          }
+        },
+        onPause: () => {
+          if (!this._isCurrentPlaybackRequest(generation) || !activated) return
+          this.playbackPending = false
+          this.isPlaying = false
+        },
         onEnded: () => {
+          if (!this._isCurrentPlaybackRequest(generation) || !activated) return
+          this.playbackPending = false
+          this.playbackEndedGeneration = generation
           this.isPlaying = false
           if (this.canNext) void this.next()
         },
-        onTimeUpdate: (seconds: number) => { this.currentTime = seconds },
-        onError: () => { this.isPlaying = false },
+        onTimeUpdate: (seconds: number) => {
+          if (!this._isCurrentPlaybackRequest(generation) || !activated) return
+          this.currentTime = seconds
+        },
+        onError: () => {
+          this._failPlaybackRequest(generation)
+        },
       } as Record<AudioBackendEvent, (...args: any[]) => void>)
-      return backend
     },
-    async _playCurrent() {
-      if (!this.currentTrack) return
-      const url = await this._urlFor(this.currentTrack.fileID)
-      if (!url) return
-      const backend = this._backend()
-      backend.setSrc(url, this.currentTrack.title, await this._currentBackendMeta())
-      backend.play()
-    },
-    async _currentBackendMeta(): Promise<AudioBackendMeta> {
-      const track = this.currentTrack
-      const coverImgUrl = track?.cover ? await this._urlFor(track.cover) : ''
-      return {
-        coverImgUrl,
-        epname: this.currentMeta?.postTitle || '',
-        singer: '',
+    async _playSnapshot(snapshot: PlaybackRequestSnapshot, generation: number) {
+      await this._preloadUrls(
+        snapshot.playlist.flatMap(item => [item.fileID, item.cover || '']).filter(Boolean),
+      )
+      if (!this._isCurrentPlaybackRequest(generation)) return
+      const url = await this._urlFor(snapshot.track.fileID)
+      if (!this._isCurrentPlaybackRequest(generation)) return
+      if (!url) {
+        this._failPlaybackRequest(generation)
+        return
       }
+      const coverImgUrl = snapshot.track.cover ? await this._urlFor(snapshot.track.cover) : ''
+      if (!this._isCurrentPlaybackRequest(generation)) return
+      const backend = this._backend()
+      this._bindPlaybackEvents(backend, generation)
+      try {
+        backend.setSrc(url, snapshot.track.title, {
+          coverImgUrl,
+          epname: snapshot.meta.postTitle,
+          singer: '',
+        })
+        if (!this._isCurrentPlaybackRequest(generation)) return
+        backend.play()
+      } catch (_error) {
+        this._failPlaybackRequest(generation)
+      }
+    },
+    _failPlaybackRequest(generation: number) {
+      if (!this._isCurrentPlaybackRequest(generation)) return
+      this._invalidatePlaybackRequest({ resetCurrentTime: true })
     },
     async _preloadUrls(fileIDs: string[]) {
       const fetchFn = deps.getTempFileURL
       if (!fetchFn) return
       const now = Date.now()
-      const stale = fileIDs.filter((fileID) => {
+      const stale = fileIDs.filter((fileID) => !isResolvedMediaUrl(fileID)).filter((fileID) => {
         const cached = this.httpsUrlCache[fileID]
         return !cached || cached.expiresAt - now < URL_REFRESH_BUFFER_MS
       })
@@ -191,6 +340,7 @@ export const useAudioStore = defineStore('audio', {
     },
     async _urlFor(fileID: string): Promise<string> {
       if (!fileID) return ''
+      if (isResolvedMediaUrl(fileID)) return fileID
       const now = Date.now()
       const cached = this.httpsUrlCache[fileID]
       if (cached && cached.expiresAt - now > URL_REFRESH_BUFFER_MS) return cached.url

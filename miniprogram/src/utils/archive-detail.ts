@@ -13,8 +13,16 @@ function commonNativeArchiveSection(currentPost: Record<string, any>) {
   }
 }
 
+export function isNativeArchiveAudioPost(currentPost: Record<string, any> | null | undefined): boolean {
+  return currentPost?.area === 'archive' && currentPost?.format === 'audio'
+}
+
 export function buildNativeArchiveDetailSection(currentPost: Record<string, any>) {
   const common = commonNativeArchiveSection(currentPost)
+  if (currentPost.format === 'audio') return Object.assign({}, common, {
+    displayTemplate: 'default',
+    widgets: [],
+  })
   if (currentPost.format === 'image_text') return Object.assign({}, common, {
     displayTemplate: 'image_note',
     widgets: [

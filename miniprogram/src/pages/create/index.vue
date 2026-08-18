@@ -299,6 +299,21 @@
                 @initial-state="handleVideoInitialState"
                 @selected-file="handleVideoSelectedFile"
               />
+              <AudioPublishEditor
+                v-else-if="archiveFormat === 'audio' && block.widget.type === 'audio_group'"
+                :key="`audio-${communityStore.currentCommunityId}`"
+                :ref="setAudioEditorRef"
+                :community-id="communityStore.currentCommunityId"
+                :post-title="formData.archive_audio_title"
+                :model-value="formData[block.widget.widgetId]"
+                :initial-files="archiveInitialAudioFiles"
+                :initial-generation="archiveAudioIntentGeneration"
+                @update:model-value="formData[block.widget.widgetId] = $event"
+                @upload-state="audioUploading = $event"
+                @navigation-blocked="audioNavigationBlocked = $event"
+                @readiness="audioPublishReady = $event.ready"
+                @initial-consumed="handleAudioInitialConsumed"
+              />
               <WidgetEditor
                 v-else
                 :widget="block.widget"
@@ -315,7 +330,7 @@
           </view>
 
           <view class="submit-dock">
-            <button v-if="!isEditMode" class="draft-btn" @tap="saveDraft">
+            <button v-if="!isEditMode && archiveFormat !== 'audio'" class="draft-btn" @tap="saveDraft">
               <image
                 class="draft-icon"
                 src="/static/publish-icons/save-draft.svg"
@@ -323,7 +338,7 @@
               />
               <text>存草稿</text>
             </button>
-            <button class="btn-primary" data-testid="create-submit" :disabled="submitting || !videoPublishReady" @tap="handleSubmit">
+            <button class="btn-primary" data-testid="create-submit" :disabled="submitting || !videoPublishReady || !audioPublishReady" @tap="handleSubmit">
               {{ submitting ? (isEditMode ? '保存中...' : '发布中...') : (isEditMode ? '保存' : (isActivityInviteMode ? '发布邀约' : '发布')) }}
             </button>
           </view>
@@ -344,6 +359,7 @@ import { uploadCloudFile } from '../../api/storage'
 import AppTabBar from '../../components/AppTabBar.vue'
 import WidgetEditor from '../../components/widgets/WidgetEditor.vue'
 import VideoPublishEditor from '../../components/widgets/VideoPublishEditor.vue'
+import AudioPublishEditor from '../../components/widgets/AudioPublishEditor.vue'
 import TextNoteCover from '../../components/TextNoteCover.vue'
 import TextNoteDeck from '../../components/TextNoteDeck.vue'
 import {
@@ -373,10 +389,18 @@ import { asCollaborationSection, isCollaborationSection } from '../../utils/coll
 import {
   consumeArchiveMediaIntent,
   createDraftStorageKey,
+  deferArchiveMediaIntent,
+  discardArchiveMediaIntent,
   peekArchiveMediaIntent,
   type ArchiveMediaIntentFile,
 } from '../../utils/archive-media-intent'
 import { reduceArchiveVideoRetention, shouldBlockVideoNavigation, transitionArchiveMediaEditorState, type ArchiveMediaEditorState, type ArchiveVideoIntentState, type ArchiveVideoRetentionState, type PublishMediaType } from '../../utils/video-publish'
+import {
+  requireAudioPublishEditorSubmissionHandle,
+  shouldBlockAudioPageNavigation,
+  shouldCleanupPendingAudioAfterSubmit,
+  type AudioPublishEditorSubmissionHandle,
+} from '../../utils/audio-publish'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -407,13 +431,21 @@ const textNoteCurrentPage = ref(1)
 const textNoteLayoutPhase = ref<number | null>(null)
 const TEXT_NOTE_LAYOUT_PHASES = ['正在识别段落结构', '正在为正文分页', '正在套用社区主题'] as const
 let textNoteLayoutGeneration = 0
-const archiveFormat = ref<'image_text' | 'text' | 'video' | ''>('')
+const archiveFormat = ref<'image_text' | 'text' | 'video' | 'audio' | ''>('')
+const pendingArchiveAudioIntentToken = ref('')
+const archiveInitialAudioFiles = ref<ArchiveMediaIntentFile[]>([])
+const archiveAudioIntentGeneration = ref(0)
 const archiveInitialMedia = ref<ArchiveMediaIntentFile | null>(null)
 const archiveVideoIntentState = ref<ArchiveVideoIntentState>('idle')
 const archiveVideoIntentGeneration = ref(0)
 const videoUploading = ref(false)
 const videoNavigationBlocked = ref(false)
 const videoPublishReady = ref(true)
+const audioUploading = ref(false)
+const audioNavigationBlocked = ref(false)
+const audioPublishReady = ref(true)
+const audioSubmissionInFlight = ref(false)
+const audioEditorRef = ref<AudioPublishEditorSubmissionHandle | null>(null)
 const initialCreateNavMetrics = computeCreateNavMetrics({ isH5: typeof window !== 'undefined' && typeof document !== 'undefined' })
 const createStatusBarHeight = ref(initialCreateNavMetrics.statusBarHeight)
 const createNavRowHeight = ref(initialCreateNavMetrics.navRowHeight)
@@ -427,6 +459,25 @@ const archiveObjectUrls = new Set<string>()
 const collaborationOnly = ref(false)
 const collaborationTemplatesError = ref('')
 const initialLoadPending = ref(true)
+
+function setAudioEditorRef(instance: unknown) {
+  if (!instance) {
+    audioEditorRef.value = null
+    return
+  }
+  try {
+    audioEditorRef.value = requireAudioPublishEditorSubmissionHandle(instance)
+  } catch {
+    audioEditorRef.value = null
+  }
+}
+
+function isAudioPageNavigationBlocked(): boolean {
+  return shouldBlockAudioPageNavigation({
+    editorBlocked: audioNavigationBlocked.value,
+    submissionInFlight: audioSubmissionInFlight.value,
+  })
+}
 let collaborationTemplatesLoad: Promise<void> | null = null
 const isEditMode = computed(() => !!editPostId.value)
 const currentMembership = computed(() =>
@@ -584,17 +635,22 @@ onLoad(async (options: any) => {
   try {
     if (await loadPostForEdit(String(options?.editPostId || ''))) return
     const requestedArchiveFormat = String(options?.archiveFormat || '')
-    if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text' || requestedArchiveFormat === 'video') {
+    if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text' || requestedArchiveFormat === 'video' || requestedArchiveFormat === 'audio') {
       // Resolve the product-level publishing route before the first await. Otherwise
       // membership refresh can commit the legacy section picker for one frame.
       enterArchiveEditor(requestedArchiveFormat, options?.returnTo)
-      applyArchiveMediaIntent(options?.mediaIntent)
+      if (requestedArchiveFormat === 'audio') {
+        deferArchiveAudioIntent(options?.mediaIntent)
+        consumeDeferredArchiveAudioIntent()
+      } else {
+        applyArchiveMediaIntent(options?.mediaIntent)
+      }
     }
     await Promise.all([
       ensureSectionsLoaded(),
       collaborationOnly.value ? ensureCollaborationTemplatesLoaded() : Promise.resolve(),
     ])
-    if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text' || requestedArchiveFormat === 'video') {
+    if (requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text' || requestedArchiveFormat === 'video' || requestedArchiveFormat === 'audio') {
       return
     }
     await consumeCreateSectionIntent(options)
@@ -604,8 +660,8 @@ onLoad(async (options: any) => {
   }
 })
 
-function buildArchiveEditorSection(format: 'image_text' | 'text' | 'video') {
-  const common = { _id: `archive-${format}`, communityId: communityStore.currentCommunityId, name: format === 'text' ? '写文字' : (format === 'video' ? '发视频' : '发图文'), type: 'evergreen', status: 'active' }
+function buildArchiveEditorSection(format: 'image_text' | 'text' | 'video' | 'audio') {
+  const common = { _id: `archive-${format}`, communityId: communityStore.currentCommunityId, name: format === 'text' ? '写文字' : (format === 'video' ? '发视频' : (format === 'audio' ? '发音频' : '发图文')), type: 'evergreen', status: 'active' }
   if (format === 'text') return Object.assign({}, common, {
     displayTemplate: 'text_note',
     widgets: [
@@ -613,6 +669,13 @@ function buildArchiveEditorSection(format: 'image_text' | 'text' | 'video') {
       { widgetId: 'text_body', fieldKey: 'body', type: 'rich_note', label: '正文', required: true, order: 1, showInList: false },
       { widgetId: 'archive_text_topics', fieldKey: 'topics', type: 'topic', label: '添加话题', required: false, order: 2, showInList: false },
       { widgetId: 'archive_text_location', fieldKey: 'location', type: 'location', label: '设置地点', required: false, order: 3, showInList: false },
+    ],
+  })
+  if (format === 'audio') return Object.assign({}, common, {
+    displayTemplate: 'audio_note',
+    widgets: [
+      { widgetId: 'archive_audio_audios', fieldKey: 'audios', type: 'audio_group', label: '音轨', required: true, order: 0, showInList: false },
+      { widgetId: 'archive_audio_title', fieldKey: 'title', type: 'short_text', label: '帖子标题', required: true, order: 1, showInList: true },
     ],
   })
   if (format === 'video') return Object.assign({}, common, {
@@ -637,15 +700,19 @@ function buildArchiveEditorSection(format: 'image_text' | 'text' | 'video') {
   })
 }
 
-function enterArchiveEditor(format: 'image_text' | 'text' | 'video', returnTo?: string, preserveForm = false) {
+function enterArchiveEditor(format: 'image_text' | 'text' | 'video' | 'audio', returnTo?: string, preserveForm = false) {
   archiveFormat.value = format
   if (!preserveForm) {
     archiveInitialMedia.value = null
     archiveVideoIntentState.value = 'idle'
+    archiveInitialAudioFiles.value = []
   }
   videoUploading.value = false
   videoNavigationBlocked.value = false
   videoPublishReady.value = format !== 'video'
+  audioUploading.value = false
+  audioNavigationBlocked.value = false
+  audioPublishReady.value = format !== 'audio'
   collaborationOnly.value = false
   selectSection(buildArchiveEditorSection(format), { returnTo: String(returnTo || ''), preserveForm })
 }
@@ -677,10 +744,42 @@ function applyArchiveMediaIntent(token: unknown) {
   }
 }
 
+function deferArchiveAudioIntent(token: unknown): boolean {
+  const intent = deferArchiveMediaIntent(token, 'audio')
+  if (!intent) {
+    discardArchiveMediaIntent(token)
+    return false
+  }
+  if (pendingArchiveAudioIntentToken.value && pendingArchiveAudioIntentToken.value !== intent.token) {
+    discardArchiveMediaIntent(pendingArchiveAudioIntentToken.value)
+  }
+  pendingArchiveAudioIntentToken.value = intent.token
+  return true
+}
+
+function consumeDeferredArchiveAudioIntent(): boolean {
+  const token = pendingArchiveAudioIntentToken.value
+  if (!token) return false
+  pendingArchiveAudioIntentToken.value = ''
+  const intent = consumeArchiveMediaIntent(token)
+  if (!intent || intent.mediaType !== 'audio') return false
+  archiveAudioIntentGeneration.value += 1
+  archiveInitialAudioFiles.value = intent.files.slice()
+  return true
+}
+
+function handleAudioInitialConsumed(generation: number) {
+  if (Number(generation) !== archiveAudioIntentGeneration.value) return
+  archiveInitialAudioFiles.value = []
+}
+
 function hasArchiveMedia(format: PublishMediaType | null): boolean {
   if (format === 'image') return Array.isArray(formData.image_note_images) && formData.image_note_images.length > 0
   if (format === 'video') {
     return (Array.isArray(formData.archive_video_videos) && formData.archive_video_videos.length > 0) || Boolean(archiveInitialMedia.value)
+  }
+  if (format === 'audio') {
+    return (Array.isArray(formData.archive_audio_audios) && formData.archive_audio_audios.length > 0) || archiveInitialAudioFiles.value.length > 0
   }
   return false
 }
@@ -688,6 +787,7 @@ function hasArchiveMedia(format: PublishMediaType | null): boolean {
 function currentPublishMediaType(): PublishMediaType | null {
   if (archiveFormat.value === 'image_text') return 'image'
   if (archiveFormat.value === 'video') return 'video'
+  if (archiveFormat.value === 'audio') return 'audio'
   return null
 }
 
@@ -706,6 +806,7 @@ function clearArchiveMediaState() {
   releaseArchiveObjectUrls()
   Object.keys(formData).forEach((key) => delete formData[key])
   archiveInitialMedia.value = null
+  archiveInitialAudioFiles.value = []
   archiveVideoIntentState.value = 'idle'
   videoUploading.value = false
   videoNavigationBlocked.value = false
@@ -748,10 +849,18 @@ async function handleInlineMediaIntent(token: string) {
     restoreArchiveMediaEditor()
     return
   }
+  if (intent.mediaType === 'audio' && !deferArchiveAudioIntent(token)) return
   const currentType = currentPublishMediaType()
+  if (currentType === 'audio' && isAudioPageNavigationBlocked()) {
+    if (pendingArchiveAudioIntentToken.value === token) pendingArchiveAudioIntentToken.value = ''
+    consumeArchiveMediaIntent(token)
+    showAudioNavigationBlockedToast()
+    restoreArchiveMediaEditor()
+    return
+  }
   const currentState: ArchiveMediaEditorState | null = currentType
     ? {
-        format: archiveFormat.value as 'image_text' | 'video',
+        format: archiveFormat.value as 'image_text' | 'video' | 'audio',
         formData,
         initialMedia: archiveInitialMedia.value,
         hasSelectedMedia: hasArchiveMedia(currentType),
@@ -764,18 +873,20 @@ async function handleInlineMediaIntent(token: string) {
     transition = transitionArchiveMediaEditorState(currentState!, intent.mediaType, await confirmMediaFormatSwitch())
   }
   if (transition?.status === 'cancelled') {
+    pendingArchiveAudioIntentToken.value = ''
     consumeArchiveMediaIntent(token)
     restoreArchiveMediaEditor()
     return
   }
   if (transition?.status === 'switched') clearArchiveMediaState()
-  const nextFormat = intent.mediaType === 'video' ? 'video' : 'image_text'
+  const nextFormat = intent.mediaType === 'image' ? 'image_text' : intent.mediaType
   enterArchiveEditor(nextFormat, createReturnTo.value, transition?.status === 'replaced')
-  applyArchiveMediaIntent(token)
+  if (intent.mediaType === 'audio') consumeDeferredArchiveAudioIntent()
+  else applyArchiveMediaIntent(token)
 }
 
 function restoreArchiveMediaEditor() {
-  if (archiveFormat.value !== 'image_text' && archiveFormat.value !== 'video') return
+  if (archiveFormat.value !== 'image_text' && archiveFormat.value !== 'video' && archiveFormat.value !== 'audio') return
   selectedSection.value = buildArchiveEditorSection(archiveFormat.value)
 }
 
@@ -796,7 +907,9 @@ async function loadPostForEdit(postId: string) {
     }
     await ensureSectionsLoaded()
     if (currentPost.area === 'archive') {
-      const format = currentPost.format === 'text' ? 'text' : (currentPost.format === 'video' ? 'video' : 'image_text')
+      const format = currentPost.format === 'text'
+        ? 'text'
+        : (currentPost.format === 'audio' ? 'audio' : (currentPost.format === 'video' ? 'video' : 'image_text'))
       archiveFormat.value = format
       const archiveSection = buildArchiveEditorSection(format)
       selectSection(archiveSection, { returnTo: createReturnTo.value })
@@ -915,6 +1028,11 @@ onBeforeUnmount(() => {
     ;(uni as any).$off?.(CREATE_SECTION_EVENT, handleCreateSectionIntentEvent)
   } catch (_error) {}
   releaseArchiveObjectUrls()
+  if (pendingArchiveAudioIntentToken.value) {
+    discardArchiveMediaIntent(pendingArchiveAudioIntentToken.value)
+    pendingArchiveAudioIntentToken.value = ''
+  }
+  archiveInitialAudioFiles.value = []
   removeH5BeforeUnload()
 })
 
@@ -966,6 +1084,10 @@ function selectSection(section: any, options: { returnTo?: string; preserveForm?
 }
 
 function handleFormBack() {
+  if (archiveFormat.value === 'audio' && isAudioPageNavigationBlocked()) {
+    showAudioNavigationBlockedToast()
+    return
+  }
   if (isEditMode.value) {
     openHierarchyParent(createReturnTo.value)
     return
@@ -1090,7 +1212,16 @@ function handleBackToSectionPicker() {
     showVideoNavigationBlockedToast()
     return
   }
-  if (archiveFormat.value === 'image_text' || archiveFormat.value === 'video') {
+  if (archiveFormat.value === 'audio' && isAudioPageNavigationBlocked()) {
+    showAudioNavigationBlockedToast()
+    return
+  }
+  if (archiveFormat.value === 'image_text' || archiveFormat.value === 'video' || archiveFormat.value === 'audio') {
+    if (archiveFormat.value === 'audio') {
+      Object.keys(formData).forEach((key) => delete formData[key])
+      archiveInitialAudioFiles.value = []
+      audioPublishReady.value = false
+    }
     selectedSection.value = null
     return
   }
@@ -1420,6 +1551,7 @@ async function handleEditSubmitResult(result: any) {
 
 function saveDraft() {
   if (!selectedSection.value) return
+  if (archiveFormat.value === 'audio') return
   try {
     uni.setStorageSync(currentDraftStorageKey(), {
       communityId: communityStore.currentCommunityId,
@@ -1444,6 +1576,10 @@ function handlePageExit() {
     showVideoNavigationBlockedToast()
     return
   }
+  if (archiveFormat.value === 'audio' && isAudioPageNavigationBlocked()) {
+    showAudioNavigationBlockedToast()
+    return
+  }
   const returnTo = createReturnTo.value
   if (returnTo) {
     openHierarchyParent(returnTo)
@@ -1455,6 +1591,15 @@ function handlePageExit() {
 function showVideoNavigationBlockedToast() {
   uni.showToast({
     title: videoNavigationBlocked.value ? '请重试或移除失败封面' : '视频正在上传，请稍候或取消后返回',
+    icon: 'none',
+  })
+}
+
+function showAudioNavigationBlockedToast() {
+  uni.showToast({
+    title: audioSubmissionInFlight.value
+      ? '音频帖子正在提交，请稍候'
+      : (audioUploading.value ? '音频或封面正在处理，请稍候' : '请重试或移除处理失败的音轨或封面'),
     icon: 'none',
   })
 }
@@ -1475,9 +1620,12 @@ function removeH5BeforeUnload() {
   // #endif
   h5BeforeUnloadInstalled = false
 }
-watch([archiveFormat, videoNavigationBlocked, videoUploading], () => {
+watch([archiveFormat, videoNavigationBlocked, videoUploading, audioNavigationBlocked, audioUploading, audioSubmissionInFlight], () => {
   // #ifdef H5
-  const blocked = archiveFormat.value === 'video' && shouldBlockVideoNavigation({ navigationBlocked: videoNavigationBlocked.value, uploading: videoUploading.value })
+  const blocked = (
+    archiveFormat.value === 'video'
+    && shouldBlockVideoNavigation({ navigationBlocked: videoNavigationBlocked.value, uploading: videoUploading.value })
+  ) || (archiveFormat.value === 'audio' && isAudioPageNavigationBlocked())
   if (blocked && !h5BeforeUnloadInstalled) {
     window.addEventListener('beforeunload', handleH5BeforeUnload)
     h5BeforeUnloadInstalled = true
@@ -1494,6 +1642,7 @@ function currentDraftStorageKey() {
 
 function restoreDraft() {
   if (!selectedSection.value || isEditMode.value) return
+  if (archiveFormat.value === 'audio') return
   try {
     const draft = uni.getStorageSync(currentDraftStorageKey())
     if (!draft || String(draft.communityId || '') !== String(communityStore.currentCommunityId || '')) return
@@ -1511,12 +1660,35 @@ function clearDraft() {
   } catch (_error) {}
 }
 
+async function settleAudioSubmitEditor(
+  editor: AudioPublishEditorSubmissionHandle,
+  outcome: 'accepted' | 'retry',
+) {
+  try {
+    if (outcome === 'accepted') await editor.finalizePendingUploadsAfterSubmit()
+    else await editor.returnPendingUploadsAfterSubmit()
+  } catch {
+    // Submission has already settled on the server. Pending-source cleanup is
+    // best effort and must not turn a successful create/update into a failure.
+    console.warn('[audio-publish] submission ownership settlement failed')
+  }
+}
+
 async function handleSubmit() {
   if (!selectedSection.value || submitting.value) return
   if (archiveFormat.value === 'video' && !videoPublishReady.value) {
     uni.showToast({ title: videoUploading.value ? '视频仍在上传，请稍候' : '请先完成视频和封面处理', icon: 'none' })
     return
   }
+  if (archiveFormat.value === 'audio' && !audioPublishReady.value) {
+    uni.showToast({
+      title: audioUploading.value ? '音频或封面仍在处理，请稍候' : '请完成帖子标题、曲目标题、音频和封面处理',
+      icon: 'none',
+    })
+    return
+  }
+  let audioSubmitEditor: AudioPublishEditorSubmissionHandle | null = null
+  let audioSubmissionClaimed = false
   submitting.value = true
   try {
     const sectionId = selectedSection.value._id
@@ -1534,7 +1706,10 @@ async function handleSubmit() {
         return
       }
       // 媒体组由 admin 后台维护，普通用户发帖不携带该字段
-      if ((widget.type === 'video_group' && archiveFormat.value !== 'video') || widget.type === 'audio_group') {
+      if (
+        (widget.type === 'video_group' && archiveFormat.value !== 'video')
+        || (widget.type === 'audio_group' && archiveFormat.value !== 'audio')
+      ) {
         delete content[widget.widgetId]
         continue
       }
@@ -1573,6 +1748,14 @@ async function handleSubmit() {
       : {
           presentation: isTextNoteCreateMode.value ? { textNoteTheme: textNoteTheme.value } : undefined,
         }
+    if (archiveFormat.value === 'audio') {
+      audioSubmitEditor = requireAudioPublishEditorSubmissionHandle(audioEditorRef.value)
+      if (!audioSubmitEditor.claimPendingUploadsForSubmission()) {
+        throw new Error('音频编辑器当前无法提交，请稍后重试')
+      }
+      audioSubmissionClaimed = true
+      audioSubmissionInFlight.value = true
+    }
     const result: any = isEditMode.value
       ? await postApi.update(editPostId.value, archiveContent || content, updateOptions)
       : isActivityInviteMode.value
@@ -1600,6 +1783,18 @@ async function handleSubmit() {
             ? { textNoteTheme: textNoteTheme.value }
             : undefined,
         })
+    if (audioSubmitEditor && audioSubmissionClaimed) {
+      if (shouldCleanupPendingAudioAfterSubmit(result?.auditStatus)) {
+        // The accepted post already references finalized copies. Lock this editor
+        // before deleting its pending sources so finally cannot reopen submit.
+        audioPublishReady.value = false
+        await settleAudioSubmitEditor(audioSubmitEditor, 'accepted')
+      } else {
+        await settleAudioSubmitEditor(audioSubmitEditor, 'retry')
+      }
+      audioSubmissionClaimed = false
+      audioSubmissionInFlight.value = false
+    }
     // #ifdef H5
     if (import.meta.env.DEV && result?.postId) {
       sessionStorage.setItem('hh-h5-smoke-last-created-post-id', String(result.postId))
@@ -1613,6 +1808,11 @@ async function handleSubmit() {
     if (isEditMode.value) await handleEditSubmitResult(result)
     else await handleAuditSubmitResult(result)
   } catch (error: any) {
+    if (audioSubmitEditor && audioSubmissionClaimed) {
+      await settleAudioSubmitEditor(audioSubmitEditor, 'retry')
+      audioSubmissionClaimed = false
+      audioSubmissionInFlight.value = false
+    }
     uni.showModal({ title: isEditMode.value ? '保存失败' : '发布失败', content: error?.message ?? '请重试' })
   } finally {
     submitting.value = false

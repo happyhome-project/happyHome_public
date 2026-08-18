@@ -74,10 +74,19 @@ assert(
 )
 
 assert(
-  tabbar.includes("{ key: 'media', label: '图文/视频'") &&
+  tabbar.includes("{ key: 'media', label: '图文/音视频'") &&
     /\.publish-label\s*\{[^}]*width:\s*100%/s.test(tabbar) &&
     tabbar.includes("mediaType: ['image', 'video']") &&
-    tabbar.includes('accept="image/*,video/*"') &&
+    tabbar.includes("type: 'file'") &&
+    tabbar.includes("extension: ['mp3', 'm4a', 'aac', 'wav']") &&
+    tabbar.includes("itemList: ['从相册或相机选择', '从聊天文件选择']") &&
+    tabbar.includes('wx.chooseMedia') &&
+    tabbar.includes('wx.chooseMessageFile') &&
+    tabbar.includes('accept="image/*,video/*,.mp3,.m4a,.aac,.wav"') &&
+    tabbar.includes('inspectSelectedMedia') &&
+    tabbar.includes("mediaType === 'audio' ? 'audio'") &&
+    tabbar.includes('同一种素材') &&
+    !tabbar.includes("key: 'audio'") &&
     tabbar.includes('storeArchiveMediaIntent') &&
     tabbar.includes("if (props.current === 'create')") &&
     tabbar.includes("type AppTabBarCurrent = AppTabKey | 'create'") &&
@@ -95,7 +104,7 @@ assert(
 )
 
 assert(
-  createPage.includes("const archiveFormat = ref<'image_text' | 'text' | 'video' | ''>('')") &&
+  createPage.includes("const archiveFormat = ref<'image_text' | 'text' | 'video' | 'audio' | ''>('')") &&
     createPage.includes("widgetId: 'archive_video_videos'") &&
     createPage.includes('<VideoPublishEditor') &&
     videoPublishEditor.includes('requestMemberVideoUpload') &&
@@ -128,11 +137,11 @@ assert(
     createPage.includes('@navigation-blocked="videoNavigationBlocked = $event"') &&
     createPage.includes('请重试或移除失败封面') &&
     createPage.includes('@readiness="videoPublishReady = $event.ready"') &&
-    createPage.includes(':disabled="submitting || !videoPublishReady"'),
+    createPage.includes(':disabled="submitting || !videoPublishReady || !audioPublishReady"'),
   'archive video publishing must have its own upload editor and server-owned upload paths.',
 )
 assert(
-  createPage.includes("requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text' || requestedArchiveFormat === 'video'") &&
+  createPage.includes("requestedArchiveFormat === 'image_text' || requestedArchiveFormat === 'text' || requestedArchiveFormat === 'video' || requestedArchiveFormat === 'audio'") &&
     createPage.includes('onBackPress(') &&
     createPage.includes("window.addEventListener('beforeunload'") &&
     videoPublishEditor.indexOf('validateVideoCoverFile', videoPublishEditor.indexOf('async function uploadCover')) < videoPublishEditor.indexOf('requestMemberVideoCoverUpload'),

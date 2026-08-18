@@ -5,6 +5,7 @@
       'detail-page--guide': isGuideNoteDetail,
       'detail-page--image-note': isImageNoteDetail,
       'detail-page--text-note': isTextNoteDetail,
+      'detail-page--audio': isNativeArchiveAudioDetail,
     }"
   >
     <view
@@ -17,18 +18,29 @@
         'image-note-detail': isImageNoteDetail,
       }"
     >
-      <view v-if="post.isPinned || post.isFeatured" class="post-flag-row">
+      <view v-if="!isNativeArchiveAudioDetail && (post.isPinned || post.isFeatured)" class="post-flag-row">
         <text v-if="post.isPinned" class="post-flag pin">置顶</text>
         <text v-if="post.isFeatured" class="post-flag feature">精华</text>
       </view>
-      <view v-if="post.originPostId && post.originLinkType === 'activity_invite'" class="origin-card" @tap="goOriginPost">
+      <view v-if="!isNativeArchiveAudioDetail && post.originPostId && post.originLinkType === 'activity_invite'" class="origin-card" @tap="goOriginPost">
         <text class="origin-label">来自攻略</text>
         <text class="origin-title">{{ post.originTitle || '原帖' }}</text>
         <text class="origin-action">查看原帖 ›</text>
       </view>
+      <AudioPostDetailView
+        v-if="isNativeArchiveAudioDetail"
+        :post="post"
+        :resolved-covers="resolvedDetailMediaUrls"
+        :author-name="detailAuthorName"
+        :author-avatar-url="resolvedAvatarUrl(detailAuthorAvatarUrl)"
+        :date-label="formatDate(post.createdAt)"
+        :is-author="isAuthor"
+        @cover-error="onDetailMediaError"
+        @settings="openPostSettings"
+      />
       <ImageNoteDetailView
         :key="`image-note-${detailMediaRecoveryVersion}`"
-        v-if="isImageNoteDetail && imageNoteDetail"
+        v-else-if="isImageNoteDetail && imageNoteDetail"
         :detail="imageNoteDetail"
         :media="imageNoteMediaItems"
         @media-load="onDetailMediaLoad"
@@ -48,7 +60,7 @@
         :post-meta="postMeta"
       />
 
-      <template v-if="!isGuideNoteDetail">
+      <template v-if="!isGuideNoteDetail && !isNativeArchiveAudioDetail">
         <view
           v-for="widget in attendanceWidgets"
           :key="widget.widgetId"
@@ -97,7 +109,7 @@
         </view>
       </template>
 
-      <view v-if="activityInviteWidgets.length" class="activity-invite-card">
+      <view v-if="!isNativeArchiveAudioDetail && activityInviteWidgets.length" class="activity-invite-card">
         <view class="activity-invite-main">
           <text class="activity-invite-kicker">活动召集</text>
           <text class="activity-invite-title">{{ activityInviteTitle }}</text>
@@ -113,8 +125,8 @@
         </button>
       </view>
 
-      <view v-if="!isImageNoteDetail || isAuthor" class="meta">
-        <view v-if="!isImageNoteDetail" class="meta-main">
+      <view v-if="!isNativeArchiveAudioDetail && (!isImageNoteDetail || isAuthor)" class="meta">
+        <view v-if="!isImageNoteDetail && !isNativeArchiveAudioDetail" class="meta-main">
           <view class="meta-author">
             <image
               v-if="detailAuthorAvatarUrl"
@@ -229,6 +241,7 @@ import { useUserStore } from '../../store/user'
 import GuideRouteDetailView from '../../components/GuideRouteDetailView.vue'
 import ImageNoteDetailView from '../../components/ImageNoteDetailView.vue'
 import DefaultDetailView from '../../components/DefaultDetailView.vue'
+import AudioPostDetailView from '../../components/AudioPostDetailView.vue'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
 import { resolveAttendanceWidgetLabel } from '../../utils/widget-form'
 import { refreshCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
@@ -244,7 +257,8 @@ import {
 import { extractRichNoteImageSources } from '../../utils/rich-note'
 import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
 import { asCollaborationSection } from '../../utils/collaboration-template'
-import { buildNativeArchiveDetailSection, normalizeNativeArchiveDetailPost } from '../../utils/archive-detail'
+import { buildNativeArchiveDetailSection, isNativeArchiveAudioPost, normalizeNativeArchiveDetailPost } from '../../utils/archive-detail'
+import { collectAudioCoverSources } from '../../utils/audio-display'
 
 const fallbackAvatar = '/static/default-avatar.png'
 const ATTENDANCE_SLOT_DISPLAY_MAX = 6
@@ -302,6 +316,7 @@ const postMeta = computed(() => ({
   communityId: String(post.value?.communityId || section.value?.communityId || ''),
 }))
 const detailSectionTitle = computed(() => section.value?.name || '')
+const isNativeArchiveAudioDetail = computed(() => isNativeArchiveAudioPost(post.value))
 const isImageNoteDetail = computed(() => isImageNoteSectionContract(section.value))
 const isGuideNoteDetail = computed(() =>
   !isImageNoteDetail.value && resolveGuideNoteDetailTemplate(section.value)
@@ -595,7 +610,9 @@ function collectCloudMediaUrls(value: unknown, target: string[] = []): string[] 
 }
 
 async function resolveDetailMediaUrls() {
-  const urls = collectCloudMediaUrls(post.value?.content || {})
+  const urls = isNativeArchiveAudioDetail.value
+    ? collectAudioCoverSources(post.value?.content?.audios)
+    : collectCloudMediaUrls(post.value?.content || {})
   clientLog('debug', 'detail.media.resolve.start', {
     postId: currentPostId.value,
     urlCount: urls.length,

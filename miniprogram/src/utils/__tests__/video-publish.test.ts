@@ -6,6 +6,7 @@ import {
   buildPlatformThumbnailFile,
   decideMediaTypeSwitch,
   detectFirstMediaType,
+  inspectSelectedMedia,
   normalizeChosenVideo,
 } from '../video-publish'
 import * as videoPublish from '../video-publish'
@@ -140,35 +141,37 @@ describe('VideoItemCos construction', () => {
 
 describe('publish media routing', () => {
   test.each([
-    [{ tempFiles: [{ fileType: 'image', tempFilePath: 'wxfile://photo.jpg' }] }, 'image'],
-    [{ tempFiles: [{ type: 'image/png', tempFilePath: 'blob:photo' }] }, 'image'],
-    [{ tempFiles: [{ fileType: 'video', tempFilePath: 'wxfile://clip.mp4' }] }, 'video'],
-    [{ tempFiles: [{ type: 'video/webm', tempFilePath: 'blob:video' }] }, 'video'],
+    [{ type: 'file', tempFiles: [{ type: 'image/png', name: 'photo.png' }] }, 'image'],
+    [{ type: 'mix', tempFiles: [{ type: 'video/webm', name: 'clip.webm' }] }, 'video'],
+    [{ type: 'all', tempFiles: [{ type: 'application/octet-stream', name: 'voice.M4A', size: 1 }] }, 'audio'],
     [{
       type: 'mix',
       tempFiles: [
-        { fileType: 'video', tempFilePath: 'wxfile://clip.mp4' },
-        { fileType: 'image', tempFilePath: 'wxfile://photo.jpg' },
+        { type: 'audio/mpeg', name: 'first.mp3', size: 1 },
+        { type: 'audio/aac', name: 'second.aac', size: 1 },
       ],
-    }, 'video'],
-    [{
-      type: 'mix',
-      tempFiles: [
-        { fileType: 'image', tempFilePath: 'wxfile://photo.jpg' },
-        { fileType: 'video', tempFilePath: 'wxfile://clip.mp4' },
-      ],
-    }, 'image'],
-  ])('uses the first selected image/video as the publish media type', (result, expected) => {
+    }, 'audio'],
+  ])('classifies homogeneous files from their own MIME or extension, not picker container type', (result, expected) => {
     expect(detectFirstMediaType(result)).toBe(expected)
+    expect(inspectSelectedMedia(result)).toMatchObject({ valid: true, mediaType: expected })
+  })
+
+  test.each(['file', 'mix', 'all', ''])('falls back to an audio extension when a file declaration is non-authoritative: %s', (declaration) => {
+    expect(inspectSelectedMedia({
+      tempFiles: [{ fileType: declaration, name: 'voice.mp3', size: 1 }],
+    })).toMatchObject({ valid: true, mediaType: 'audio' })
   })
 
   test.each([
-    [{ tempFiles: [{ fileType: 'audio', tempFilePath: 'wxfile://song.mp3' }] }],
-    [{ tempFiles: [{ type: 'audio/mp4', tempFilePath: 'wxfile://song.m4a' }] }],
-    [{ tempFiles: [{ tempFilePath: 'wxfile://song.mp3' }] }],
     [{ tempFiles: [] }],
-  ])('never treats audio or missing media as a legal publish type', (result) => {
+    [{ type: 'all', tempFiles: [{ type: 'audio/ogg', name: 'song.ogg', size: 1 }] }],
+    [{ type: 'file', tempFiles: [{ type: 'audio/ogg', name: 'renamed.mp3', size: 1 }] }],
+    [{ type: 'mix', tempFiles: [{ type: 'image/jpeg', name: 'photo.jpg' }, { type: 'audio/mpeg', name: 'voice.mp3', size: 1 }] }],
+    [{ type: 'file', tempFiles: [{ type: 'audio/mpeg', name: 'empty.mp3', size: 0 }] }],
+    [{ type: 'file', tempFiles: [{ type: 'audio/mpeg', name: 'large.mp3', size: 50 * 1024 * 1024 + 1 }] }],
+  ])('rejects empty, unsupported, mixed, and invalid audio selections as a whole', (result) => {
     expect(detectFirstMediaType(result)).toBeNull()
+    expect(inspectSelectedMedia(result)).toMatchObject({ valid: false })
   })
 
   test('requires confirmation and clearing only when selected media changes type', () => {
@@ -254,6 +257,21 @@ describe('archive media editor transition state', () => {
     const result = transition(state, 'image', null)
     expect(result).toEqual({ status: 'replaced', state })
     expect(result.state.formData).toBe(formData)
+  })
+
+  test('uses the typed audio editor transition when a media switch is confirmed', () => {
+    const transition = (videoPublish as any).transitionArchiveMediaEditorState
+    const state = {
+      format: 'image_text',
+      formData: { image_note_images: ['old'] },
+      initialMedia: null,
+      hasSelectedMedia: true,
+    }
+
+    expect(transition(state, 'audio', true)).toEqual({
+      status: 'switched',
+      state: { format: 'audio', formData: {}, initialMedia: null, hasSelectedMedia: false },
+    })
   })
 })
 

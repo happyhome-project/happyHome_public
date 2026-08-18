@@ -215,3 +215,29 @@ test('validateContentValues: 图文_new 正文图片只能放在添加图片控�
     },
   })).toThrow('图文_new 正文不支持插入图片')
 })
+
+test('validateContentValues: only the native archive audio widget is member-editable', () => {
+  const section = {
+    ...sectionWithRequiredDestination(),
+    widgets: [
+      { widgetId: 'audios', type: 'audio_group', label: '音频', required: true, order: 1, showInList: false },
+      { widgetId: 'admin-audios', type: 'audio_group', label: '管理员音频', required: false, order: 2, showInList: false },
+    ],
+  } as Section
+  const validAudio = { title: '社区电台', fileID: 'cloud://env/audio.mp3', duration: 120, size: 1024, ext: 'mp3' }
+
+  expect(() => validateContentValues(section, {
+    audios: 'not editable without an explicit allowance',
+    'admin-audios': 'also not editable',
+  } as any)).not.toThrow()
+
+  expect(() => validateContentValues(section, {
+    audios: 'invalid native audio value',
+    'admin-audios': 'still not editable',
+  } as any, { memberEditableAudioWidgetIds: ['audios'] } as any)).toThrow('音频控件「音频」必须是音频条目数组')
+
+  expect(() => validateContentValues(section, {
+    audios: [validAudio],
+    'admin-audios': 'still not editable',
+  } as any, { memberEditableAudioWidgetIds: ['audios'] } as any)).not.toThrow()
+})

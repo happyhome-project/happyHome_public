@@ -28,13 +28,19 @@ export const ADMIN_ONLY_WIDGET_TYPES: Set<WidgetType> = new Set([
 type ContentValidationOptions = {
   allowAdminOnly?: boolean
   memberEditableVideoWidgetIds?: readonly string[]
+  memberEditableAudioWidgetIds?: readonly string[]
 }
 
 function isAdminOnlyWidgetEnabled(widget: Widget, options: ContentValidationOptions): boolean {
   if (!ADMIN_ONLY_WIDGET_TYPES.has(widget.type)) return true
   if (options.allowAdminOnly === true) return true
-  return widget.type === 'video_group'
-    && new Set(options.memberEditableVideoWidgetIds || []).has(widget.widgetId)
+  if (widget.type === 'video_group') {
+    return new Set(options.memberEditableVideoWidgetIds || []).has(widget.widgetId)
+  }
+  if (widget.type === 'audio_group') {
+    return new Set(options.memberEditableAudioWidgetIds || []).has(widget.widgetId)
+  }
+  return false
 }
 
 export function getEditableWidgetIds(section: Section, allowAdminOnly = false): Set<string> {
