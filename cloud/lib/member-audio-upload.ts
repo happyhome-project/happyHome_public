@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'crypto'
 import type { UploadMetadata } from './storage'
-import { AUDIO_ALLOWED_EXTS, AUDIO_MAX_SIZE_BYTES, type AudioExt, type AudioTrack } from '../shared/types'
+import { AUDIO_ALLOWED_EXTS, AUDIO_MAX_SIZE_BYTES, AUDIO_MAX_TRACKS, type AudioExt, type AudioTrack } from '../shared/types'
 import type { RemoteObjectMetadata } from './member-video-upload'
 
 export const MAX_MEMBER_AUDIO_BYTES = AUDIO_MAX_SIZE_BYTES
@@ -123,6 +123,17 @@ export function assertOwnedMemberAudioUpload(
   return owned
 }
 
+export function assertOwnedFinalizedMemberAudioFile(
+  fileID: string,
+  openid: string,
+  communityId: string,
+  kind: 'audio' | 'cover',
+): { cloudPath: string; extension: string } {
+  const owned = ownedObjectPath(fileID, openid, communityId, kind, true)
+  if (!owned) throw new Error(ownershipError(kind))
+  return owned
+}
+
 function normalizedContentType(value: string): string {
   return String(value || '').split(';', 1)[0].trim().toLowerCase()
 }
@@ -170,26 +181,43 @@ export async function finalizeMemberArchiveAudioContent<T extends MemberAudioCon
   dependencies: FinalizationDependencies,
 ): Promise<{ content: T; createdFileIDs: string[] }> {
   if (!Array.isArray(content?.audios) || content.audios.length === 0) throw new Error('音频内容无效')
+  if (content.audios.length > AUDIO_MAX_TRACKS) throw new Error(`音频数量不能超过 ${AUDIO_MAX_TRACKS} 条`)
+  const audioFileIDs = content.audios.map((track) => String(track?.fileID || '').trim())
+  if (new Set(audioFileIDs).size !== audioFileIDs.length) throw new Error('音频文件不能重复')
   const createdFileIDs: string[] = []
   let artifactIndex = 0
+  const materializedBySource = new Map<string, {
+    fileID: string
+    created: boolean
+    contentLength: number
+    extension: string
+  }>()
 
   const materialize = async (fileID: string, kind: 'audio' | 'cover') => {
-    const reusable = reusableFinalizedObject(fileID, openid, communityId, kind, dependencies)
+    const normalizedFileID = String(fileID || '').trim()
+    const memoKey = `${kind}\u0000${normalizedFileID}`
+    const memoized = materializedBySource.get(memoKey)
+    if (memoized) return memoized
+    const reusable = reusableFinalizedObject(normalizedFileID, openid, communityId, kind, dependencies)
     if (reusable) {
-      const verified = await verifyObjectAtPath(fileID, reusable.cloudPath, reusable.extension, kind, dependencies)
-      return { fileID, created: false, contentLength: verified.contentLength, extension: verified.extension }
+      const verified = await verifyObjectAtPath(normalizedFileID, reusable.cloudPath, reusable.extension, kind, dependencies)
+      const result = { fileID: normalizedFileID, created: false, contentLength: verified.contentLength, extension: verified.extension }
+      materializedBySource.set(memoKey, result)
+      return result
     }
-    const source = assertOwnedMemberAudioUpload(fileID, openid, communityId, kind)
-    const verified = await verifyObjectAtPath(fileID, source.cloudPath, source.extension, kind, dependencies)
+    const source = assertOwnedMemberAudioUpload(normalizedFileID, openid, communityId, kind)
+    const verified = await verifyObjectAtPath(normalizedFileID, source.cloudPath, source.extension, kind, dependencies)
     const scope = deriveMemberAudioScope(openid, communityId)
     const now = dependencies.now?.() ?? Date.now()
     const index = artifactIndex++
     const randomId = dependencies.randomId?.(kind, index) ?? randomBytes(12).toString('hex')
     const destination = `posts/${directoryFor(kind, true)}/${scope}/${now}_${randomId}.${source.extension}`
-    const finalizedFileID = await dependencies.materializeFile(fileID, destination)
+    const finalizedFileID = await dependencies.materializeFile(normalizedFileID, destination)
     createdFileIDs.push(finalizedFileID)
     const finalized = await verifyObjectAtPath(finalizedFileID, destination, source.extension, kind, dependencies)
-    return { fileID: finalizedFileID, created: true, contentLength: finalized.contentLength, extension: source.extension || verified.extension }
+    const result = { fileID: finalizedFileID, created: true, contentLength: finalized.contentLength, extension: source.extension || verified.extension }
+    materializedBySource.set(memoKey, result)
+    return result
   }
 
   try {

@@ -9,7 +9,17 @@ import {
   requestMemberAudioUpload,
 } from '../../lib/member-audio-upload'
 import { sanitizeContent, validateContentValues, validateRequiredWidgets } from '../../lib/post-validate'
-import { auditAndApply, isPostVisibleToMembers } from '../../lib/content-audit'
+import {
+  auditAndApply,
+  collectMemberAudioCleanupCandidates,
+  computeContentRevisionDigest,
+  createContentRevision,
+  isPostVisibleToMembers,
+  processMemberAudioCleanupJobs,
+  queueMemberAudioCleanupJobsInTransaction,
+  recoverMemberAudioCleanupJobs,
+  type MemberAudioCleanupCandidate,
+} from '../../lib/content-audit'
 import { buildHomeBootstrap, buildHomeFeed } from '../../lib/home-snapshot'
 import { ensureCommunityReadable } from '../../lib/public-community'
 import { parsePerformanceTrace, recordDatabaseStage } from '../../lib/performance-trace'
@@ -43,7 +53,6 @@ import {
   buildArchiveSortKey,
   prepareArchivePostTopicReconciliation,
   reconcileArchivePostTopicsInTransaction,
-  syncArchivePostTopics,
   updateArchivePostTopicLinks,
 } from '../../lib/archive-topic-index'
 import {
@@ -587,6 +596,8 @@ export async function handleCreate(
     }
 
     const now = new Date().toISOString()
+    const contentRevision = createContentRevision()
+    const contentRevisionDigest = computeContentRevisionDigest(content)
     const postData = {
       communityId: params.communityId,
       area: archive.area,
@@ -598,6 +609,8 @@ export async function handleCreate(
       auditStatus: 'pending',
       auditReason: 'content audit pending',
       auditUpdatedAt: now,
+      contentRevision,
+      contentRevisionDigest,
       content,
       ...(archive.format === 'text' ? { presentation: archive.presentation } : {}),
       commentCount: 0,
@@ -629,6 +642,8 @@ export async function handleCreate(
       authorId: openid,
       source: 'user',
       contentSlot: 'content',
+      contentRevision,
+      contentDigest: contentRevisionDigest,
       postSnapshot: { _id: postId, ...postData } as unknown as Post,
     })
     return { postId, auditStatus: audit.status, auditReason: audit.reason }
@@ -652,6 +667,8 @@ export async function handleCreate(
     : undefined
 
   const now = new Date().toISOString()
+  const contentRevision = createContentRevision()
+  const contentRevisionDigest = computeContentRevisionDigest(sanitizedContent)
   const postData = {
     communityId: params.communityId,
     sectionId,
@@ -660,6 +677,8 @@ export async function handleCreate(
     auditStatus: 'pending',
     auditReason: 'content audit pending',
     auditUpdatedAt: now,
+    contentRevision,
+    contentRevisionDigest,
     content: sanitizedContent,
     ...(presentation ? { presentation } : {}),
     commentCount: 0,
@@ -684,6 +703,8 @@ export async function handleCreate(
     authorId: openid,
     source: 'user',
     contentSlot: 'content',
+    contentRevision,
+    contentDigest: contentRevisionDigest,
   })
   return { postId, auditStatus: audit.status, auditReason: audit.reason }
 }
@@ -708,6 +729,8 @@ export async function handleCreateCollaboration(
   validateContentValues(section, sanitizedContent)
 
   const now = new Date().toISOString()
+  const contentRevision = createContentRevision()
+  const contentRevisionDigest = computeContentRevisionDigest(sanitizedContent)
   const postData = {
     communityId,
     area: 'collaboration',
@@ -718,6 +741,8 @@ export async function handleCreateCollaboration(
     auditStatus: 'pending',
     auditReason: 'content audit pending',
     auditUpdatedAt: now,
+    contentRevision,
+    contentRevisionDigest,
     content: sanitizedContent,
     commentCount: 0,
     likeCount: 0,
@@ -740,6 +765,8 @@ export async function handleCreateCollaboration(
     authorId: openid,
     source: 'user',
     contentSlot: 'content',
+    contentRevision,
+    contentDigest: contentRevisionDigest,
   })
   return { postId, auditStatus: audit.status, auditReason: audit.reason }
 }
@@ -800,6 +827,8 @@ export async function handleCreateActivityInvite(
   validateActivityInviteContent(sanitizedContent)
 
   const now = new Date().toISOString()
+  const contentRevision = createContentRevision()
+  const contentRevisionDigest = computeContentRevisionDigest(sanitizedContent)
   const originTitle = resolveSourceTitle(sourcePost, sourceSection)
   const eventStartsAt = String(sanitizedContent[ACTIVITY_INVITE_WIDGET_IDS.startsAt] || '').trim()
   const inviteData = {
@@ -812,6 +841,8 @@ export async function handleCreateActivityInvite(
     auditStatus: 'pending',
     auditReason: 'content audit pending',
     auditUpdatedAt: now,
+    contentRevision,
+    contentRevisionDigest,
     content: sanitizedContent,
     commentCount: 0,
     likeCount: 0,
@@ -841,6 +872,8 @@ export async function handleCreateActivityInvite(
     authorId: openid,
     source: 'user',
     contentSlot: 'content',
+    contentRevision,
+    contentDigest: contentRevisionDigest,
   })
 
   return {
@@ -1327,11 +1360,45 @@ export async function handleUpdate(
     presentation?: unknown
     createdAt?: string
     collaborationTemplateId?: string
+    origin?: 'native_archive' | 'legacy_section'
+    contentRevision?: string
+    contentRevisionDigest?: string
     content?: PostContent
+    pendingContentRevision?: string
+    pendingContentRevisionDigest?: string
     pendingContent?: PostContent
   }
   if (post.status === 'deleted') throw new Error('帖子已删除')
   if (post.authorId !== openid) throw new Error('无权修改')
+
+  const containsExactFileID = (value: unknown, fileID: string): boolean => {
+    if (value === fileID) return true
+    if (Array.isArray(value)) return value.some((item) => containsExactFileID(item, fileID))
+    if (!value || typeof value !== 'object') return false
+    return Object.values(value as Record<string, unknown>).some((item) => containsExactFileID(item, fileID))
+  }
+  const slotMatchesSnapshot = (currentPost: any, slot: 'content' | 'pendingContent') => {
+    const revisionField = slot === 'pendingContent' ? 'pendingContentRevision' : 'contentRevision'
+    const digestField = slot === 'pendingContent' ? 'pendingContentRevisionDigest' : 'contentRevisionDigest'
+    const currentContent = currentPost?.[slot]
+    const snapshotContent = post?.[slot]
+    return (
+      String(currentPost?.[revisionField] || '') === String(post?.[revisionField] || '')
+      && String(currentPost?.[digestField] || '') === String(post?.[digestField] || '')
+      && Boolean(currentContent) === Boolean(snapshotContent)
+      && (!snapshotContent || computeContentRevisionDigest(currentContent) === computeContentRevisionDigest(snapshotContent))
+    )
+  }
+  const assertCurrentSourceSnapshot = (currentPost: any, reused: MemberAudioCleanupCandidate[]) => {
+    if (!slotMatchesSnapshot(currentPost, 'content') || !slotMatchesSnapshot(currentPost, 'pendingContent')) {
+      throw new Error('post changed during edit; retry required')
+    }
+    for (const candidate of reused) {
+      if (!containsExactFileID(currentPost.content, candidate.fileID) && !containsExactFileID(currentPost.pendingContent, candidate.fileID)) {
+        throw new Error('finalized audio source changed during edit; retry required')
+      }
+    }
+  }
 
   const archive = post.area === 'archive'
     ? parseArchivePostCreateInput({
@@ -1378,6 +1445,7 @@ export async function handleUpdate(
     })
   }
   let createdAudioFileIDs: string[] = []
+  let reusedAudioCandidates: MemberAudioCleanupCandidate[] = []
   if (archive?.format === 'audio') {
     await ensureActiveCommunityMember(post.communityId, openid)
     const existingFinalizedFileIDs = {
@@ -1398,6 +1466,9 @@ export async function handleUpdate(
     })
     sanitizedContent = finalized.content
     createdAudioFileIDs = finalized.createdFileIDs
+    reusedAudioCandidates = collectMemberAudioCleanupCandidates(post as any, sanitizedContent).filter((candidate) => (
+      existingFinalizedFileIDs[candidate.kind].has(candidate.fileID)
+    ))
   }
   const presentation = archive?.format === 'text'
     ? archive.presentation
@@ -1405,27 +1476,27 @@ export async function handleUpdate(
         ? { textNoteTheme: normalizeTextNoteTheme((params.presentation as any)?.textNoteTheme) }
         : undefined)
 
-  const applyAcceptedMetadata = async (auditStatus: string) => {
-    if (auditStatus !== 'pass') return
-    if (presentation) await db.updateById('posts', params.postId, { presentation })
-    if (!archive) return
-    await db.updateById('posts', params.postId, { topics: archive.topics })
-    await syncArchivePostTopics({
-      _id: params.postId,
-      communityId: post.communityId,
-      topics: archive.topics,
-      createdAt: String(post.createdAt || updatedAt),
-      status: 'active',
-      auditStatus: 'pass',
-    })
-  }
-
   const updatedAt = new Date().toISOString()
+  const contentRevision = createContentRevision()
+  const contentRevisionDigest = computeContentRevisionDigest(sanitizedContent)
+
   if (post.auditStatus === 'pass' || !post.auditStatus) {
+    let queuedCleanupCandidates: MemberAudioCleanupCandidate[] = []
     try {
       await db.runTransaction(async transaction => {
+        const currentPost = await db.transactionGetByIdOrNull<Post>(transaction, 'posts', params.postId)
+        if (!currentPost) throw new Error('post not found')
+        assertCurrentSourceSnapshot(currentPost, reusedAudioCandidates)
+        queuedCleanupCandidates = await queueMemberAudioCleanupJobsInTransaction(transaction, {
+          post: { ...currentPost, _id: currentPost._id || params.postId },
+          candidates: collectMemberAudioCleanupCandidates(currentPost, currentPost.pendingContent),
+          expectedRevision: contentRevision,
+          now: updatedAt,
+        })
         await transaction.collection('posts').doc(params.postId).update({ data: {
         pendingContent: db.replaceValue(sanitizedContent),
+        pendingContentRevision: contentRevision,
+        pendingContentRevisionDigest: contentRevisionDigest,
         ...(archive ? { pendingTopics: db.replaceValue(archive.topics) } : {}),
         ...(presentation ? { pendingPresentation: db.replaceValue(presentation) } : {}),
         pendingAuditStatus: 'pending',
@@ -1439,24 +1510,45 @@ export async function handleUpdate(
       if (createdAudioFileIDs.length > 0) await Promise.resolve(deleteFile(createdAudioFileIDs)).catch(() => undefined)
       throw error
     }
-    const audit = await auditAndApply({
-      postId: params.postId,
-      communityId: post.communityId,
-      sectionId: post.sectionId || '',
-      section,
-      content: sanitizedContent,
-      authorId: openid,
-      source: 'user',
-      contentSlot: 'pendingContent',
-    })
-    await applyAcceptedMetadata(audit.status)
+    let audit
+    try {
+      audit = await auditAndApply({
+        postId: params.postId,
+        communityId: post.communityId,
+        sectionId: post.sectionId || '',
+        section,
+        content: sanitizedContent,
+        authorId: openid,
+        source: 'user',
+        contentSlot: 'pendingContent',
+        contentRevision,
+        contentDigest: contentRevisionDigest,
+      })
+    } finally {
+      await processMemberAudioCleanupJobs({ postId: params.postId, candidates: queuedCleanupCandidates })
+      await recoverMemberAudioCleanupJobs({ postId: params.postId, excludeCandidates: queuedCleanupCandidates })
+    }
     return { success: true, updatedAt, auditStatus: audit.status, auditReason: audit.reason }
   }
 
+  let queuedCleanupCandidates: MemberAudioCleanupCandidate[] = []
   try {
     await db.runTransaction(async transaction => {
+      const currentPost = await db.transactionGetByIdOrNull<Post>(transaction, 'posts', params.postId)
+      if (!currentPost) throw new Error('post not found')
+      assertCurrentSourceSnapshot(currentPost, reusedAudioCandidates)
+      queuedCleanupCandidates = await queueMemberAudioCleanupJobsInTransaction(transaction, {
+        post: { ...currentPost, _id: currentPost._id || params.postId },
+        candidates: collectMemberAudioCleanupCandidates(currentPost, currentPost.content),
+        expectedRevision: contentRevision,
+        now: updatedAt,
+      })
       await transaction.collection('posts').doc(params.postId).update({ data: {
       content: db.replaceValue(sanitizedContent),
+      contentRevision,
+      contentRevisionDigest,
+      ...(archive ? { contentAuditTopics: db.replaceValue(archive.topics) } : { contentAuditTopics: db.removeField() }),
+      ...(presentation ? { contentAuditPresentation: db.replaceValue(presentation) } : { contentAuditPresentation: db.removeField() }),
       auditStatus: 'pending',
       auditReason: 'content audit pending',
       auditUpdatedAt: updatedAt,
@@ -1468,17 +1560,24 @@ export async function handleUpdate(
     if (createdAudioFileIDs.length > 0) await Promise.resolve(deleteFile(createdAudioFileIDs)).catch(() => undefined)
     throw error
   }
-  const audit = await auditAndApply({
-    postId: params.postId,
-    communityId: post.communityId,
-    sectionId: post.sectionId || '',
-    section,
-    content: sanitizedContent,
-    authorId: openid,
-    source: 'user',
-    contentSlot: 'content',
-  })
-  await applyAcceptedMetadata(audit.status)
+  let audit
+  try {
+    audit = await auditAndApply({
+      postId: params.postId,
+      communityId: post.communityId,
+      sectionId: post.sectionId || '',
+      section,
+      content: sanitizedContent,
+      authorId: openid,
+      source: 'user',
+      contentSlot: 'content',
+      contentRevision,
+      contentDigest: contentRevisionDigest,
+    })
+  } finally {
+    await processMemberAudioCleanupJobs({ postId: params.postId, candidates: queuedCleanupCandidates })
+    await recoverMemberAudioCleanupJobs({ postId: params.postId, excludeCandidates: queuedCleanupCandidates })
+  }
   return { success: true, updatedAt, auditStatus: audit.status, auditReason: audit.reason }
 }
 

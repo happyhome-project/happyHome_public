@@ -126,6 +126,61 @@ describe('archive post create contract', () => {
     }
   })
 
+  test('accepts at most 20 audio tracks', () => {
+    const track = (index: number) => ({
+      title: `音频 ${index}`,
+      fileID: `cloud://audio-${index}.mp3`,
+      duration: 120,
+      size: 1024,
+      ext: 'mp3',
+    })
+
+    expect(parseArchivePostCreateInput({
+      area: 'archive',
+      format: 'audio',
+      topics: [],
+      content: { title: '二十段录音', audios: Array.from({ length: 20 }, (_, index) => track(index)) },
+    })).toMatchObject({ content: { audios: expect.arrayContaining([expect.objectContaining({ fileID: 'cloud://audio-19.mp3' })]) } })
+
+    expectCode({
+      area: 'archive',
+      format: 'audio',
+      topics: [],
+      content: { title: '二十一段录音', audios: Array.from({ length: 21 }, (_, index) => track(index)) },
+    }, 'archive_audio_limit')
+  })
+
+  test('rejects duplicate audio file IDs after normalization while allowing a shared cover', () => {
+    const base = { title: '音频', duration: 120, size: 1024, ext: 'mp3', cover: 'cloud://shared-cover.jpg' }
+    expectCode({
+      area: 'archive',
+      format: 'audio',
+      topics: [],
+      content: {
+        title: '重复录音',
+        audios: [
+          { ...base, fileID: ' cloud://same-audio.mp3 ' },
+          { ...base, title: '重复音频', fileID: 'cloud://same-audio.mp3' },
+        ],
+      },
+    }, 'archive_audio_duplicate')
+
+    expect(parseArchivePostCreateInput({
+      area: 'archive',
+      format: 'audio',
+      topics: [],
+      content: {
+        title: '共享封面',
+        audios: [
+          { ...base, fileID: 'cloud://first.mp3' },
+          { ...base, title: '第二段', fileID: 'cloud://second.mp3' },
+        ],
+      },
+    })).toMatchObject({
+      content: { audios: [{ cover: 'cloud://shared-cover.jpg' }, { cover: 'cloud://shared-cover.jpg' }] },
+    })
+  })
+
   test('rejects unsupported audio extensions and invalid audio duration or size', () => {
     for (const audio of [
       { title: '音频', fileID: 'cloud://audio.ogg', duration: 120, size: 1024, ext: 'ogg' },

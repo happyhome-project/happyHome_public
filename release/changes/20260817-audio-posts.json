@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "changeId": "audio-posts",
+  "actions": [
+    "ensure-indexes"
+  ],
+  "migrations": [],
+  "smokeSuites": []
+}

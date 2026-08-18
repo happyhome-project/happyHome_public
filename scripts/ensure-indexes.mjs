@@ -386,6 +386,13 @@ const INDEXES = [
   },
   {
     coll: 'content_audit_tasks',
+    name: 'idx_contentRevision',
+    keys: [
+      { Name: 'contentRevision', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'content_audit_tasks',
     name: 'idx_traceId',
     keys: [
       { Name: 'traceId', Direction: '1' },
@@ -396,6 +403,23 @@ const INDEXES = [
     name: 'idx_jobId',
     keys: [
       { Name: 'jobId', Direction: '1' },
+    ],
+  },
+  {
+    coll: 'content_audit_tasks',
+    name: 'idx_recordType_updatedAt',
+    keys: [
+      { Name: 'recordType', Direction: '1' },
+      { Name: 'updatedAt', Direction: '-1' },
+    ],
+  },
+  {
+    coll: 'post_media_cleanup_retries',
+    name: 'idx_postId_status_updatedAt',
+    keys: [
+      { Name: 'postId', Direction: '1' },
+      { Name: 'status', Direction: '1' },
+      { Name: 'updatedAt', Direction: '1' },
     ],
   },
   // post_search_terms: member-facing post search candidate lookup and cleanup
@@ -611,6 +635,7 @@ const REQUIRED_COLLECTIONS = [
   'community_member_states', // 成员申请幂等状态（communityId + userId）
   'community_create_requests', // 社区创建请求幂等记录
   'content_audit_tasks',  // 内容审核任务与回调对账
+  'post_media_cleanup_retries', // 帖子固化音频/封面删除失败的幂等重试记录
   'post_search_documents', // 帖子搜索文档（_id=postId）
   'post_search_terms',     // 帖子搜索倒排词条
   'post_search_chunks',    // RAG 证据分块（_id=chunkId）

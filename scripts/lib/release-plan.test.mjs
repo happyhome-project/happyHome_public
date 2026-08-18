@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
@@ -9,6 +10,31 @@ import {
   selectChangeManifestsForDiff,
   validateChangeManifests,
 } from './release-plan.mjs'
+
+test('audio posts manifest schedules required index provisioning', () => {
+  const source = 'release/changes/20260817-audio-posts.json'
+  const manifest = {
+    ...JSON.parse(readFileSync(new URL(`../../${source}`, import.meta.url), 'utf8')),
+    source,
+  }
+  const changedPaths = [
+    'M\tscripts/ensure-indexes.mjs',
+    `A\t${source}`,
+  ]
+  const plan = createReleasePlan({
+    baseSha: 'base',
+    headSha: 'head',
+    changedPaths,
+    allFunctions: ['post'],
+    functionInputs: {},
+    manifests: selectChangeManifests('pr', [manifest], changedPaths),
+    mode: 'pr',
+  })
+
+  assert.deepEqual(plan.changeIds, ['audio-posts'])
+  assert.deepEqual(plan.operationKinds['desired-state'], ['ensure-indexes'])
+  assert.equal(plan.releaseRequired, true)
+})
 
 test('direct cloud function changes deploy only that function', () => {
   const impact = classifyReleaseImpact({

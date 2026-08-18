@@ -19,7 +19,24 @@ export async function uploadFile(
 }
 
 export async function deleteFile(fileIDs: string[]): Promise<void> {
-  await cloud.deleteFile({ fileList: fileIDs })
+  if (fileIDs.length === 0) return
+  const response: any = await cloud.deleteFile({ fileList: fileIDs })
+  const rows = Array.isArray(response?.fileList) ? response.fileList : []
+  const receiptByFileID = new Map(rows.map((row: any) => [String(row?.fileID || row?.fileId || ''), row]))
+  const failures: string[] = []
+  for (const fileID of fileIDs) {
+    const receipt: any = receiptByFileID.get(fileID)
+    if (!receipt) {
+      failures.push(`${fileID}: missing receipt`)
+      continue
+    }
+    const status = Number(receipt.status)
+    const errMsg = String(receipt.errMsg || receipt.errmsg || '').trim()
+    if (status !== 0 || (errMsg && !/^(ok|success)$/i.test(errMsg))) {
+      failures.push(`${fileID}: status=${String(receipt.status)}${errMsg ? ` ${errMsg}` : ''}`)
+    }
+  }
+  if (failures.length > 0) throw new Error(`cloud file deletion failed: ${failures.join('; ')}`)
 }
 
 /**

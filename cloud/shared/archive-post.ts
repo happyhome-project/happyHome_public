@@ -1,6 +1,7 @@
 import {
   AUDIO_ALLOWED_EXTS,
   AUDIO_MAX_SIZE_BYTES,
+  AUDIO_MAX_TRACKS,
   type AudioTrack,
   type GeoLocation,
   type RichNoteContent,
@@ -277,12 +278,15 @@ export function parseArchivePostCreateInput(value: unknown): ArchivePostCreateIn
     const allowedContentFields = new Set(['title', 'audios'])
     if (Object.keys(content).some((field) => !allowedContentFields.has(field))) return fail('invalid_input')
     if (!Array.isArray(content.audios) || content.audios.length === 0) return fail('archive_audios_required')
+    if (content.audios.length > AUDIO_MAX_TRACKS) return fail('archive_audio_limit')
+    const audios = content.audios.map(parseAudioTrack)
+    if (new Set(audios.map((track) => track.fileID)).size !== audios.length) return fail('archive_audio_duplicate')
 
     return {
       area: 'archive',
       format: 'audio',
       topics,
-      content: { title, audios: content.audios.map(parseAudioTrack) },
+      content: { title, audios },
     }
   }
 

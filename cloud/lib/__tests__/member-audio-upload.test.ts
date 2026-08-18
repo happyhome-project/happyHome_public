@@ -84,6 +84,75 @@ describe('member audio upload authorization', () => {
 })
 
 describe('member archive audio verification and finalization', () => {
+  test('rejects more than 20 tracks before inspecting or materializing any object', async () => {
+    const deps = dependencies({})
+    await expect(finalizeMemberArchiveAudioContent({
+      title: '过多录音',
+      audios: Array.from({ length: 21 }, (_, index) => ({
+        title: `第 ${index + 1} 段`,
+        fileID: pending('audio', `track-${index}.mp3`),
+        duration: 12,
+        size: 1,
+        ext: 'mp3' as const,
+      })),
+    }, openid, communityId, deps)).rejects.toThrow('音频数量不能超过 20 条')
+    expect(deps.requestUploadMetadata).not.toHaveBeenCalled()
+    expect(deps.materializeFile).not.toHaveBeenCalled()
+  })
+
+  test('rejects duplicate audio sources before inspecting or materializing any object', async () => {
+    const fileID = pending('audio', 'same.mp3')
+    const deps = dependencies({ [fileID]: { contentLength: 1024, contentType: 'audio/mpeg' } })
+    await expect(finalizeMemberArchiveAudioContent({
+      title: '重复录音',
+      audios: [
+        { title: '第一段', fileID, duration: 12, size: 1, ext: 'mp3' },
+        { title: '第二段', fileID, duration: 15, size: 1, ext: 'mp3' },
+      ],
+    }, openid, communityId, deps)).rejects.toThrow('音频文件不能重复')
+    expect(deps.requestUploadMetadata).not.toHaveBeenCalled()
+    expect(deps.materializeFile).not.toHaveBeenCalled()
+  })
+
+  test('materializes a shared pending cover once and reuses the finalized file ID', async () => {
+    const first = pending('audio', 'first.mp3')
+    const second = pending('audio', 'second.mp3')
+    const cover = pending('cover', 'shared.jpg')
+    const deps = dependencies({
+      [first]: { contentLength: 111, contentType: 'audio/mpeg' },
+      [second]: { contentLength: 222, contentType: 'audio/mpeg' },
+      [cover]: { contentLength: 333, contentType: 'image/jpeg' },
+    })
+
+    const result = await finalizeMemberArchiveAudioContent({
+      title: '共享封面',
+      audios: [
+        { title: '第一段', fileID: first, duration: 12, size: 1, ext: 'mp3', cover },
+        { title: '第二段', fileID: second, duration: 15, size: 1, ext: 'mp3', cover },
+      ],
+    }, openid, communityId, deps)
+
+    expect(deps.materializeFile.mock.calls.map(([source]) => source)).toEqual([first, cover, second])
+    expect(result.content.audios[0].cover).toBe(result.content.audios[1].cover)
+    expect(result.createdFileIDs).toHaveLength(3)
+  })
+
+  test('keeps audio and cover memoization separate when their literal file IDs match', async () => {
+    const fileID = pending('audio', 'same.mp3')
+    const metadata = { [fileID]: { contentLength: 1024, contentType: 'audio/mpeg' } }
+    const deps = dependencies(metadata)
+
+    await expect(finalizeMemberArchiveAudioContent({
+      title: '不同媒体类型',
+      audios: [{ title: '第一段', fileID, duration: 12, size: 1, ext: 'mp3', cover: fileID }],
+    }, openid, communityId, deps)).rejects.toThrow('封面图片不属于当前用户')
+
+    expect(deps.materializeFile).toHaveBeenCalledTimes(1)
+    expect(deps.deleteFile).toHaveBeenCalledWith([
+      `cloud://test-env/posts/member-audios-finalized/${scope}/1234_audio-0.mp3`,
+    ])
+  })
+
   test('accepts an H5 .m4a upload served as audio/m4a through finalized metadata verification', async () => {
     const fileID = pending('audio', 'h5-recording.m4a')
     const deps = dependencies({ [fileID]: { contentLength: 8192, contentType: 'audio/m4a' } })

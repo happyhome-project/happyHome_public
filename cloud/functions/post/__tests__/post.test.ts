@@ -40,6 +40,11 @@ jest.mock('../../../lib/db', () => ({
       if (created) value = { _id: id, ...created[1] }
     }
     if (!value) {
+      const stored = [...mockedDb.setById.mock.calls].reverse()
+        .find(([collectionName, documentId]) => collectionName === name && documentId === id)
+      if (stored) value = { _id: id, ...stored[2] }
+    }
+    if (!value) {
       for (let index = mockedDb.getById.mock.calls.length - 1; index >= 0; index -= 1) {
         const call = mockedDb.getById.mock.calls[index]
         if (call[0] === name && call[1] === id) {
@@ -87,6 +92,10 @@ jest.mock('../../../lib/storage', () => ({
   requestUploadMetadata: jest.fn(),
 }))
 
+jest.mock('../../../lib/wx-openapi', () => ({
+  postWxJson: jest.fn(),
+}))
+
 import { createHmac } from 'crypto'
 import {
   handleBootstrap,
@@ -116,8 +125,10 @@ import * as postSearch from '../../../lib/post-search'
 import * as postRag from '../../../lib/post-rag'
 import * as postRagSync from '../../../lib/post-rag-sync'
 import * as storage from '../../../lib/storage'
+import { postWxJson } from '../../../lib/wx-openapi'
 import { deriveMemberVideoScope, MAX_MEMBER_VIDEO_BYTES } from '../../../lib/member-video-upload'
 import { deriveMemberAudioScope } from '../../../lib/member-audio-upload'
+import { processMemberAudioCleanupJobs } from '../../../lib/content-audit'
 import { DEFAULT_GUEST_INTRO_CONFIG, GUEST_INTRO_CONFIG_KEY } from '../../../shared/guest-intro-config'
 import { buildInitialCollaborationTemplates } from '../../../shared/collaboration-templates'
 
@@ -185,6 +196,7 @@ beforeEach(() => {
     fileId: `cloud://env/${cloudPath}`,
     url: '', token: '', authorization: '', cosFileId: '',
   }))
+  ;(postWxJson as jest.Mock).mockRejectedValue(new Error('WeChat audit is not configured in unit tests'))
 })
 
 test('createCollaboration writes a community-owned post without sectionId and accepts optional note images', async () => {
@@ -3102,6 +3114,311 @@ test('update: reuses only this archive audio post finalized files and preserves 
     pendingContent: { __set: { title: '新标题', audios: [{ title: '旧录音', fileID: audio, duration: 12, size: 1024, ext: 'mp3', cover }] } },
     pendingTopics: { __set: ['新话题'] },
   }))
+})
+
+test('update: a stale finalized-audio reuse cannot commit after cleanup has made the source unreferenced', async () => {
+  const scope = deriveMemberAudioScope('test-openid', 'community-1')
+  const oldAudio = `cloud://env/posts/member-audios-finalized/${scope}/old-source.mp3`
+  const replacementAudio = `cloud://env/posts/member-audios-finalized/${scope}/replacement.mp3`
+  const observedPost: any = {
+    _id: 'archive-audio-cleanup-race', communityId: 'community-1', authorId: 'test-openid',
+    status: 'active', auditStatus: 'pass', area: 'archive', origin: 'native_archive', format: 'audio', topics: [],
+    createdAt: '2026-08-01T00:00:00.000Z', contentRevision: 'source-r1',
+    content: { title: '旧内容', audios: [{ title: '旧音频', fileID: oldAudio, duration: 10, size: 1024, ext: 'mp3' }] },
+  }
+  const authoritativePost: any = {
+    ...observedPost,
+    contentRevision: 'replacement-r2',
+    content: { title: '新内容', audios: [{ title: '新音频', fileID: replacementAudio, duration: 10, size: 1024, ext: 'mp3' }] },
+  }
+  let currentPost = observedPost
+  const retryRecord = {
+    postId: observedPost._id, communityId: observedPost.communityId, authorId: observedPost.authorId,
+    kind: 'audio', fileID: oldAudio, expectedRevision: 'replacement-r2', status: 'pending',
+    attempts: 0, lastError: '', createdAt: '2026-08-17T00:00:00.000Z', updatedAt: '2026-08-17T00:00:00.000Z',
+  }
+  const baseTransactionGet = (db.transactionGetByIdOrNull as jest.Mock).getMockImplementation()
+  const baseDeleteFile = (storage.deleteFile as jest.Mock).getMockImplementation()
+  ;(db.getById as jest.Mock).mockImplementation(async (collection: string) => collection === 'posts' ? currentPost : null)
+  ;(db.transactionGetByIdOrNull as jest.Mock).mockImplementation(async (_transaction, collection: string) => {
+    if (collection === 'posts') return currentPost
+    if (collection === 'post_media_cleanup_retries') return retryRecord
+    return null
+  })
+  ;(db.query as jest.Mock).mockImplementation(async (collection: string) => (
+    collection === 'community_members' ? [{ _id: 'member-1', status: 'active' }] : []
+  ))
+  ;(db.queryAfterId as jest.Mock).mockImplementation(async (collection: string) => collection === 'posts' ? [currentPost] : [])
+  ;(storage.inspectRemoteObject as jest.Mock).mockResolvedValue({ contentLength: 1024, contentType: 'audio/mpeg' })
+
+  let signalStaleWriteReady!: () => void
+  const staleWriteReady = new Promise<void>((resolve) => { signalStaleWriteReady = resolve })
+  let releaseStaleWrite!: () => void
+  const staleWriteGate = new Promise<void>((resolve) => { releaseStaleWrite = resolve })
+  const baseRunTransaction = (db.runTransaction as jest.Mock).getMockImplementation()!
+  let transactionCall = 0
+  ;(db.runTransaction as jest.Mock).mockImplementation(async (callback: any) => {
+    transactionCall += 1
+    if (transactionCall === 1) {
+      signalStaleWriteReady()
+      await staleWriteGate
+    }
+    return baseRunTransaction(callback)
+  })
+
+  let signalDeleteReady!: () => void
+  const deleteReady = new Promise<void>((resolve) => { signalDeleteReady = resolve })
+  let releaseDelete!: () => void
+  const deleteGate = new Promise<void>((resolve) => { releaseDelete = resolve })
+  ;(storage.deleteFile as jest.Mock).mockImplementation(async () => {
+    signalDeleteReady()
+    await deleteGate
+  })
+
+  const staleUpdate = handleUpdate({
+    postId: observedPost._id,
+    content: observedPost.content,
+  } as any, 'test-openid')
+  await staleWriteReady
+  currentPost = authoritativePost
+  const cleanup = processMemberAudioCleanupJobs({
+    postId: observedPost._id,
+    candidates: [{ kind: 'audio', fileID: oldAudio }],
+  })
+  await deleteReady
+  releaseStaleWrite()
+  const staleOutcome = await staleUpdate.then(
+    () => ({ error: null as Error | null }),
+    (error: Error) => ({ error }),
+  )
+  releaseDelete()
+  await cleanup
+
+  expect(staleOutcome.error?.message).toContain('post changed during edit')
+  expect(storage.deleteFile).toHaveBeenCalledWith([oldAudio])
+  expect(authoritativePost.content).toEqual(expect.objectContaining({
+    audios: [expect.objectContaining({ fileID: replacementAudio })],
+  }))
+  expect(JSON.stringify(authoritativePost)).not.toContain(oldAudio)
+  if (baseTransactionGet) (db.transactionGetByIdOrNull as jest.Mock).mockImplementation(baseTransactionGet)
+  else (db.transactionGetByIdOrNull as jest.Mock).mockReset()
+  ;(db.runTransaction as jest.Mock).mockImplementation(baseRunTransaction)
+  if (baseDeleteFile) (storage.deleteFile as jest.Mock).mockImplementation(baseDeleteFile)
+  else (storage.deleteFile as jest.Mock).mockReset()
+})
+
+test('update: removes a displaced finalized pending audio only after the replacement audit succeeds', async () => {
+  const scope = deriveMemberAudioScope('test-openid', 'community-1')
+  const published = `cloud://env/posts/member-audios-finalized/${scope}/published.mp3`
+  const displacedPending = `cloud://env/posts/member-audios-finalized/${scope}/displaced.mp3`
+  const replacement = `cloud://env/posts/member-audios/${scope}/replacement.mp3`
+  const currentPost: any = {
+    _id: 'archive-audio-replace-pending', communityId: 'community-1', authorId: 'test-openid',
+    status: 'active', auditStatus: 'pass', area: 'archive', origin: 'native_archive', format: 'audio', topics: [],
+    createdAt: '2026-08-01T00:00:00.000Z', contentRevision: 'published-r1', pendingContentRevision: 'pending-r1',
+    content: { title: '已发布', audios: [{ title: '已发布', fileID: published, duration: 10, size: 1024, ext: 'mp3' }] },
+    pendingContent: { title: '旧待审', audios: [{ title: '旧待审', fileID: displacedPending, duration: 10, size: 1024, ext: 'mp3' }] },
+  }
+  ;(db.getById as jest.Mock).mockImplementation(async (collection: string) => collection === 'posts' ? currentPost : null)
+  ;(db.query as jest.Mock).mockResolvedValue([{ _id: 'member-1', status: 'active' }])
+  ;(db.queryAfterId as jest.Mock).mockImplementation(async (collection: string) => collection === 'posts' ? [currentPost] : [])
+  ;(db.create as jest.Mock).mockResolvedValue('audit-task-1')
+  ;(db.updateById as jest.Mock).mockImplementation(async (collection: string, id: string, data: any) => {
+    if (collection !== 'posts' || id !== currentPost._id) return
+    for (const [key, value] of Object.entries(data)) {
+      if (value && typeof value === 'object' && '__set' in value) currentPost[key] = (value as any).__set
+      else if (value && typeof value === 'object' && '__remove' in value) delete currentPost[key]
+      else currentPost[key] = value
+    }
+  })
+  ;(storage.inspectRemoteObject as jest.Mock).mockResolvedValue({ contentLength: 2048, contentType: 'audio/mpeg' })
+
+  await handleUpdate({
+    postId: currentPost._id,
+    content: { title: '新待审', audios: [{ title: '新待审', fileID: replacement, duration: 12, size: 1, ext: 'mp3' }] },
+  } as any, 'test-openid')
+
+  expect(storage.deleteFile).toHaveBeenCalledWith([displacedPending])
+  expect(storage.deleteFile).not.toHaveBeenCalledWith([published])
+})
+
+test('update: replacing rejected content deletes only the displaced finalized audio', async () => {
+  const scope = deriveMemberAudioScope('test-openid', 'community-1')
+  const displaced = `cloud://env/posts/member-audios-finalized/${scope}/rejected.mp3`
+  const replacement = `cloud://env/posts/member-audios/${scope}/replacement-rejected.mp3`
+  const currentPost: any = {
+    _id: 'archive-audio-replace-rejected', communityId: 'community-1', authorId: 'test-openid',
+    status: 'active', auditStatus: 'rejected', area: 'archive', origin: 'native_archive', format: 'audio', topics: [],
+    createdAt: '2026-08-01T00:00:00.000Z', contentRevision: 'rejected-r1',
+    content: { title: '旧驳回', audios: [{ title: '旧驳回', fileID: displaced, duration: 10, size: 1024, ext: 'mp3' }] },
+  }
+  ;(db.getById as jest.Mock).mockImplementation(async (collection: string) => collection === 'posts' ? currentPost : null)
+  ;(db.query as jest.Mock).mockResolvedValue([{ _id: 'member-1', status: 'active' }])
+  ;(db.queryAfterId as jest.Mock).mockImplementation(async (collection: string) => collection === 'posts' ? [currentPost] : [])
+  ;(db.create as jest.Mock).mockResolvedValue('audit-task-rejected-replacement')
+  ;(db.updateById as jest.Mock).mockImplementation(async (collection: string, id: string, data: any) => {
+    if (collection !== 'posts' || id !== currentPost._id) return
+    for (const [key, value] of Object.entries(data)) {
+      if (value && typeof value === 'object' && '__set' in value) currentPost[key] = (value as any).__set
+      else if (value && typeof value === 'object' && '__remove' in value) delete currentPost[key]
+      else currentPost[key] = value
+    }
+  })
+  ;(storage.inspectRemoteObject as jest.Mock).mockResolvedValue({ contentLength: 2048, contentType: 'audio/mpeg' })
+
+  await handleUpdate({
+    postId: currentPost._id,
+    content: { title: '重新提交', audios: [{ title: '重新提交', fileID: replacement, duration: 12, size: 1, ext: 'mp3' }] },
+  } as any, 'test-openid')
+
+  expect(storage.deleteFile).toHaveBeenCalledWith([displaced])
+  expect(storage.deleteFile).not.toHaveBeenCalledWith([currentPost.content.audios[0].fileID])
+})
+
+test('update: still processes durable displaced-pending cleanup when audit task persistence fails', async () => {
+  const scope = deriveMemberAudioScope('test-openid', 'community-1')
+  const displacedPending = `cloud://env/posts/member-audios-finalized/${scope}/displaced.mp3`
+  const oldRecovery = `cloud://env/posts/member-audios-finalized/${scope}/old-recovery.mp3`
+  const replacement = `cloud://env/posts/member-audios/${scope}/replacement.mp3`
+  const currentPost: any = {
+    _id: 'archive-audio-audit-fail', communityId: 'community-1', authorId: 'test-openid',
+    status: 'active', auditStatus: 'pass', area: 'archive', origin: 'native_archive', format: 'audio', topics: [],
+    createdAt: '2026-08-01T00:00:00.000Z', contentRevision: 'published-r1', pendingContentRevision: 'pending-r1',
+    content: { title: '已发布', audios: [] },
+    pendingContent: { title: '旧待审', audios: [{ title: '旧待审', fileID: displacedPending, duration: 10, size: 1024, ext: 'mp3' }] },
+  }
+  const oldJob = {
+    _id: 'old-recovery-job', postId: currentPost._id, communityId: currentPost.communityId,
+    authorId: currentPost.authorId, kind: 'audio', fileID: oldRecovery, status: 'pending',
+    attempts: 1, createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-08-01T00:00:00.000Z',
+  }
+  ;(db.getById as jest.Mock).mockImplementation(async (collection: string) => {
+    if (collection === 'posts') return currentPost
+    if (collection === 'post_media_cleanup_retries') return oldJob
+    return null
+  })
+  ;(db.query as jest.Mock).mockImplementation(async (collection: string) => {
+    if (collection === 'post_media_cleanup_retries') return [oldJob]
+    return [{ _id: 'member-1', status: 'active' }]
+  })
+  ;(db.queryAfterId as jest.Mock).mockImplementation(async (collection: string) => collection === 'posts' ? [currentPost] : [])
+  ;(db.create as jest.Mock).mockRejectedValue(new Error('audit task write failed'))
+  ;(db.updateById as jest.Mock).mockImplementation(async (collection: string, id: string, data: any) => {
+    if (collection !== 'posts' || id !== currentPost._id) return
+    for (const [key, value] of Object.entries(data)) {
+      if (value && typeof value === 'object' && '__set' in value) currentPost[key] = (value as any).__set
+      else if (value && typeof value === 'object' && '__remove' in value) delete currentPost[key]
+      else currentPost[key] = value
+    }
+  })
+  ;(storage.inspectRemoteObject as jest.Mock).mockResolvedValue({ contentLength: 2048, contentType: 'audio/mpeg' })
+
+  await expect(handleUpdate({
+    postId: currentPost._id,
+    content: { title: '新待审', audios: [{ title: '新待审', fileID: replacement, duration: 12, size: 1, ext: 'mp3' }] },
+  } as any, 'test-openid')).rejects.toThrow('audit task write failed')
+
+  expect(storage.deleteFile).toHaveBeenCalledWith([displacedPending])
+  expect(storage.deleteFile).toHaveBeenCalledWith([oldRecovery])
+  expect(db.query).toHaveBeenCalledWith(
+    'post_media_cleanup_retries',
+    { postId: currentPost._id, status: 'pending' },
+    { orderBy: ['updatedAt', 'asc'], limit: 20 },
+  )
+})
+
+test('update: delayed revision A cannot publish B when only topics and presentation differ', async () => {
+  const richBody = (text: string) => ({
+    format: 'markdown', markdown: text, html: `<p>${text}</p>`, text, imageFileIDs: [], schemaVersion: 1,
+  })
+  const currentPost: any = {
+    _id: 'archive-text-race', communityId: 'community-1', authorId: 'test-openid',
+    status: 'active', auditStatus: 'pass', area: 'archive', origin: 'native_archive', format: 'text',
+    topics: ['旧话题'], presentation: { textNoteTheme: 'paper' }, createdAt: '2026-08-01T00:00:00.000Z',
+    contentRevision: 'published-r0', content: { title: '已发布', body: richBody('已发布正文') },
+  }
+  ;(db.getById as jest.Mock).mockImplementation(async (collection: string) => collection === 'posts' ? currentPost : null)
+  ;(db.transactionGetByIdOrNull as jest.Mock).mockImplementation(async (_transaction, collection: string) => collection === 'posts' ? currentPost : null)
+  ;(db.query as jest.Mock).mockImplementation(async (collection: string) => (
+    collection === 'community_members' ? [{ _id: 'member-1', status: 'active' }] : []
+  ))
+  ;(db.queryAfterId as jest.Mock).mockResolvedValue([])
+  ;(db.create as jest.Mock).mockImplementation(async (_collection: string, data: any) => `task-${data.contentRevision || 'legacy'}-${data.targetLabel}`)
+  ;(db.updateById as jest.Mock).mockImplementation(async (collection: string, id: string, data: any) => {
+    if (collection !== 'posts' || id !== currentPost._id) return
+    for (const [key, value] of Object.entries(data)) {
+      if (value && typeof value === 'object' && '__set' in value) currentPost[key] = (value as any).__set
+      else if (value && typeof value === 'object' && '__remove' in value) delete currentPost[key]
+      else currentPost[key] = value
+    }
+  })
+
+  let signalAStarted!: () => void
+  const aStarted = new Promise<void>((resolve) => { signalAStarted = resolve })
+  let releaseA!: () => void
+  const aGate = new Promise<void>((resolve) => { releaseA = resolve })
+  let didSignalA = false
+  let servingB = false
+  ;(postWxJson as jest.Mock).mockImplementation(async (_path: string, payload: any) => {
+    const text = String(payload?.content || '')
+    if (!servingB) {
+      if (!didSignalA) {
+        didSignalA = true
+        signalAStarted()
+      }
+      await aGate
+      return { result: { suggest: 'pass', label: 'normal' }, trace_id: `trace-a-${text}` }
+    }
+    return { result: { suggest: 'rejected', label: 'risky' }, trace_id: `trace-b-${text}` }
+  })
+
+  let signalBWritten!: () => void
+  const bWritten = new Promise<void>((resolve) => { signalBWritten = resolve })
+  let releaseBTransaction!: () => void
+  const bTransactionGate = new Promise<void>((resolve) => { releaseBTransaction = resolve })
+  let didBlockBWrite = false
+  const runTransaction = (db.runTransaction as jest.Mock).getMockImplementation()!
+  ;(db.runTransaction as jest.Mock).mockImplementation(async (callback: any) => {
+    const result = await runTransaction(callback)
+    if (
+      servingB
+      && !didBlockBWrite
+      && currentPost.pendingAuditStatus === 'pending'
+      && currentPost.pendingTopics?.[0] === '话题 B'
+    ) {
+      didBlockBWrite = true
+      signalBWritten()
+      await bTransactionGate
+    }
+    return result
+  })
+
+  const sharedDraft = { title: '相同标题', body: richBody('相同正文') }
+  const updateA = handleUpdate({
+    postId: currentPost._id, topics: ['话题 A'], presentation: { textNoteTheme: 'mint' },
+    content: sharedDraft,
+  } as any, 'test-openid')
+  await aStarted
+
+  servingB = true
+  const updateB = handleUpdate({
+    postId: currentPost._id, topics: ['话题 B'], presentation: { textNoteTheme: 'quote' },
+    content: sharedDraft,
+  } as any, 'test-openid')
+  await bWritten
+  releaseA()
+  await updateA
+  releaseBTransaction()
+  await updateB
+
+  expect(currentPost.content).toEqual({ title: '已发布', body: richBody('已发布正文') })
+  expect(currentPost.contentRevision).toBe('published-r0')
+  expect(currentPost.topics).toEqual(['旧话题'])
+  expect(currentPost.presentation).toEqual({ textNoteTheme: 'paper' })
+  expect(currentPost.pendingContent).toEqual(sharedDraft)
+  expect(currentPost.pendingTopics).toEqual(['话题 B'])
+  expect(currentPost.pendingPresentation).toEqual({ textNoteTheme: 'quote' })
+  expect(currentPost.pendingAuditStatus).toBe('rejected')
 })
 
 test('create: persists a text archive post with its normalized cover theme', async () => {
