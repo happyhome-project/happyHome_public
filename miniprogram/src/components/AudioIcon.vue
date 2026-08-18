@@ -30,7 +30,7 @@ const props = withDefaults(defineProps<{
 <style scoped>
 @font-face {
   font-family: 'happyhome-audio-icons';
-  src: url('../../node_modules/wot-design-uni/components/wd-icon/wd-icons.ttf') format('truetype');
+  src: url('../static/audio/audio-icons.ttf') format('truetype');
   font-style: normal;
   font-weight: normal;
   font-display: block;
