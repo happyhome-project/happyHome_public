@@ -20,13 +20,19 @@ function accessEntries(payload) {
     } catch (error) {
       if (/HTTP 访问服务为空|HTTP access services? (?:are )?empty/i.test(payload)) return []
       const lines = payload.split(/\r?\n/)
-      for (let index = 1; index < lines.length; index += 1) {
-        const progressLines = lines.slice(index).filter((line) => line.trim())
-        if (!progressLines.length || !progressLines.every((line) => /^\s*-\s+.+\.\.\.\s*$/u.test(line))) continue
-        try {
-          data = JSON.parse(lines.slice(0, index).join('\n'))
-          break
-        } catch {}
+      const isProgressLine = (line) => /^\s*-\s+.+\.\.\.\s*$/u.test(line)
+      for (let start = 0; start < lines.length; start += 1) {
+        const leading = lines.slice(0, start).filter((line) => line.trim())
+        if (leading.length && !leading.every(isProgressLine)) continue
+        for (let end = lines.length; end > start; end -= 1) {
+          const trailing = lines.slice(end).filter((line) => line.trim())
+          if (trailing.length && !trailing.every(isProgressLine)) continue
+          try {
+            data = JSON.parse(lines.slice(start, end).join('\n'))
+            break
+          } catch {}
+        }
+        if (data !== payload) break
       }
       if (data === payload) throw error
     }
