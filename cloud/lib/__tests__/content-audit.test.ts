@@ -595,6 +595,99 @@ test('handleAuditCallback rejects public callback when callback token is not con
   expect(db.updateById).not.toHaveBeenCalled()
 })
 
+test('handleAuditCallback replaces XML task raw atomically and does not persist callback credentials', async () => {
+  process.env.AUDIT_CALLBACK_TOKEN = 'callback-secret'
+  const content = { title: 'audited audio' }
+  const digest = computeContentRevisionDigest(content as any)
+  const post: any = {
+    _id: 'tencent-audio-post', communityId: 'community-1', sectionId: 'section-1', status: 'active',
+    content, contentRevision: 'tencent-audio-r1', contentRevisionDigest: digest,
+    auditStatus: 'pending', auditReason: 'media audit is pending',
+  }
+  const task: any = {
+    _id: 'tencent-audio-task', postId: post._id, contentSlot: 'content', contentRevision: post.contentRevision,
+    contentDigest: digest, expectedTargetCount: 1, targetIndex: 0, targetType: 'audio',
+    provider: 'tencent_ci', status: 'pending', jobId: 'tencent-audio-job',
+    raw: '<Response><JobId>tencent-audio-job</JobId></Response>',
+  }
+  const callbackRecords = new Map<string, any>()
+  const persistedCallbackPayloads: any[] = []
+  let persistedCallbackId = ''
+  ;(db.transactionGetByIdOrNull as jest.Mock).mockImplementation(async (_transaction, collection: string, id: string) => {
+    if (collection === 'posts') return post
+    if (id === task._id) return task
+    return callbackRecords.get(id) || null
+  })
+  ;(db.setById as jest.Mock).mockImplementation(async (_collection: string, id: string, data: any) => {
+    persistedCallbackId = id
+    persistedCallbackPayloads.push(data)
+    callbackRecords.set(id, { _id: id, ...data })
+  })
+  ;(db.removeById as jest.Mock).mockImplementation(async (_collection: string, id: string) => { callbackRecords.delete(id) })
+  ;(db.query as jest.Mock).mockImplementation(async (_collection: string, where: any) => {
+    if (where.jobId === task.jobId) return [task]
+    if (where.contentRevision === task.contentRevision) return [task]
+    return []
+  })
+  ;(db.getById as jest.Mock).mockResolvedValue(post)
+  ;(db.updateById as jest.Mock).mockImplementation(async (collection: string, id: string, data: any) => {
+    const target = collection === 'posts' && id === post._id
+      ? post
+      : collection === 'content_audit_tasks' && id === task._id
+        ? task
+        : null
+    if (!target) return
+    for (const [key, value] of Object.entries(data)) {
+      if (key === 'raw' && typeof target.raw === 'string' && value && typeof value === 'object' && !('__set' in value)) {
+        throw new Error('PathNotViable: cannot create field in string raw')
+      }
+      if (value && typeof value === 'object' && '__set' in value) target[key] = (value as any).__set
+      else if (value && typeof value === 'object' && '__remove' in value) delete target[key]
+      else target[key] = value
+    }
+  })
+
+  await expect(handleAuditCallback({
+    callbackToken: 'callback-secret',
+    token: 'legacy-callback-secret',
+    jobId: task.jobId,
+    Result: '0',
+    Label: 'Normal',
+  })).resolves.toEqual({ success: true, matched: 1, status: 'pass' })
+
+  expect(task.status).toBe('pass')
+  expect(post.auditStatus).toBe('pass')
+  expect(task.raw).toEqual({ jobId: task.jobId, Result: '0', Label: 'Normal' })
+  expect(persistedCallbackPayloads).toHaveLength(1)
+  expect(persistedCallbackPayloads[0].raw).toEqual({ jobId: task.jobId, Result: '0', Label: 'Normal' })
+
+  task.status = 'pending'
+  task.raw = '<Response><JobId>tencent-audio-job</JobId></Response>'
+  post.auditStatus = 'pending'
+  post.auditReason = 'media audit is pending'
+  callbackRecords.set(persistedCallbackId, {
+    _id: persistedCallbackId,
+    ...persistedCallbackPayloads[0],
+    raw: {
+      callbackToken: 'previously-stored-secret',
+      token: 'previously-stored-legacy-secret',
+      jobId: task.jobId,
+      Result: '0',
+      Label: 'Normal',
+    },
+  })
+
+  await expect(handleAuditCallback({
+    callbackToken: 'callback-secret',
+    jobId: task.jobId,
+    Result: '0',
+    Label: 'Normal',
+  })).resolves.toEqual({ success: true, matched: 1, status: 'pass' })
+
+  expect(task.raw).toEqual({ jobId: task.jobId, Result: '0', Label: 'Normal' })
+  expect(persistedCallbackPayloads).toHaveLength(1)
+})
+
 test('applyWechatMediaAuditResult updates exact trace tasks and refreshes each post slot once', async () => {
   const post1Digest = computeContentRevisionDigest({ title: 'existing' } as any)
   const post2Digest = computeContentRevisionDigest({ title: 'pending' } as any)

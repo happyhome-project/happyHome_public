@@ -141,9 +141,16 @@ function callbackPatch(record: AuditCallbackRecord) {
     suggest: record.suggest,
     label: record.label,
     reason: record.reason,
-    raw: record.raw,
+    raw: db.replaceValue(sanitizeAuditCallbackRaw(record.raw)),
     updatedAt: record.updatedAt,
   }
+}
+
+function sanitizeAuditCallbackRaw(params: any) {
+  const raw = params && typeof params === 'object' ? { ...params } : {}
+  delete raw.callbackToken
+  delete raw.token
+  return raw
 }
 
 function callbackLookupForTask(task: Partial<ContentAuditTask>) {
@@ -1386,7 +1393,7 @@ export async function handleAuditCallback(params: any) {
     suggest,
     label,
     reason,
-    raw: params,
+    raw: sanitizeAuditCallbackRaw(params),
   })
 
   let tasks: ContentAuditTask[] = []
