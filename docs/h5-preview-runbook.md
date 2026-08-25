@@ -11,10 +11,9 @@ HH_CLOUDBASE_ENV_ID=<public-environment-id>
 HH_CLOUDBASE_ACCESS_KEY=<publishable-web-access-key>
 HH_H5_WEB_USERNAME=<dedicated-low-privilege-user>
 HH_H5_WEB_PASSWORD=<machine-local-password>
-HH_WECHAT_TEST_OPENID=<isolated-wechat-fixture-member>
 ```
 
-启动器只把前两个公开值映射为浏览器构建变量；用户名、密码和 WeChat identity 不进入 Vite 子进程环境或日志。它在 `127.0.0.1` 自动选择空闲端口，打印脱敏后的 URL、cwd、branch、HEAD，并且退出时只终止自己创建的进程树，绝不按端口杀进程。
+启动器只把前两个公开值映射为浏览器构建变量；用户名和密码不进入 Vite 子进程环境或日志。固定测试社区只给这个 Web 账号建立成员关系，不依赖或绑定任何微信身份，因此不会出现在小程序账号的“我的社区”或切换列表中。它在 `127.0.0.1` 自动选择空闲端口，打印脱敏后的 URL、cwd、branch、HEAD，并且退出时只终止自己创建的进程树，绝不按端口杀进程。
 
 手动预览使用一个前台进程：
 
@@ -41,6 +40,8 @@ npm.cmd run h5:test-tenant -- apply --manifest=.codex-local/h5-test-tenant/prepa
 
 apply、`--mode=write` 以及 WeChat DevTools 自动化会获取同一台机器的 validation lease。固定 short section 含一个 deterministic、optional 的图片控件，31 条 baseline posts 保持该字段为空。write smoke 使用唯一 run ID，通过真实 H5 file chooser 上传脚本生成的 1×1 PNG 并只创建自己的临时记录，进入 exact detail 后验证该内容图片已解析为 HTTPS storage URL；随后用作者删除控件清理，再重新读取该 detail 验证记录已不存在。创建后的任意失败也会按唯一内容重新定位 exact post 并清理；无法定位或清理时非零退出。
 
+从旧版本升级时，`prepare` 会把历史 `hh-web-h5-v1-member-wechat` 记录列为一个精确删除项；`apply` 仅在该记录仍由 `HH_WEB_H5_V1` fixture 所有且内容哈希未变化时删除，拒绝删除外部或并发变更的数据。
+
 故障诊断：缺少配置时按报错补齐 machine file；doctor drift 时先重新 prepare 比对，禁止自动修复；端口启动失败时检查报错所列随机端口和当前 child PID，不要终止其他 worktree 服务；lease active/stale 时先运行 `npm.cmd run validation:lease:status`，未经原 owner 退出确认不得恢复。
 
 核心原则：如果 H5 没显示出预期 UI，不要停在“代码和单测通过”。这通常是一个调试信号，需要继续追到 API 数据、页面运行态、或者 dev server 进程层。
@@ -60,14 +61,14 @@ npm.cmd run h5:web
 
 ## 3. 登录态和社区态
 
-H5 调云函数走 `http-gateway`。如果页面是未登录态，先走小程序内的 DEV 登录：
+H5 通过 CloudBase Web SDK 调用云函数。固定测试社区只接受专用 Web 账号，不使用小程序 DEV openid 登录：
 
 1. 打开 `#/pages/profile/index`
-2. 点击 `DEV 登录`
-3. 输入一个已有目标社区成员身份的 openid 和昵称
+2. 点击 `登录`
+3. 输入 `~/.happyhome/h5-web.env` 中对应的 `HH_H5_WEB_USERNAME` 和 `HH_H5_WEB_PASSWORD`
 4. 回到 `#/pages/index/index`
 
-通用测试 openid 可能没有目标社区数据。若要验证目标社区，使用隔离测试身份，或者通过后台/API 创建临时 fixture 并清理。
+该 Web 账号只属于固定 H5 测试社区，不得加入真实社区。若要验证其他社区，使用独立的隔离 Web 身份，或者通过后台/API 创建临时 fixture 并清理。
 
 ## 4. 验证真实 API 数据
 
