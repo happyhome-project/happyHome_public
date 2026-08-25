@@ -2,6 +2,17 @@ export function buildPinnedArchiveSortKey(pinnedAt, postId) {
   return `PINNED_${pinnedAt}_${postId}`
 }
 
+export function hasAccidentalPinnedSortData(post, expectedSortKey) {
+  const data = post?.data
+  return Boolean(
+    data
+    && typeof data === 'object'
+    && !Array.isArray(data)
+    && Object.keys(data).length === 1
+    && data.sortKey === expectedSortKey,
+  )
+}
+
 export function planArchivePinnedSortRepair({ posts }) {
   const rows = Array.isArray(posts) ? posts : []
   const updates = []
@@ -21,7 +32,10 @@ export function planArchivePinnedSortRepair({ posts }) {
     }
 
     const sortKey = buildPinnedArchiveSortKey(pinnedAt, postId)
-    if (post.sortKey !== sortKey) updates.push({ postId, expectedPinnedAt: pinnedAt, sortKey })
+    const removeNestedData = hasAccidentalPinnedSortData(post, sortKey)
+    if (post.sortKey !== sortKey || removeNestedData) {
+      updates.push({ postId, expectedPinnedAt: pinnedAt, sortKey, removeNestedData })
+    }
   }
 
   return {
