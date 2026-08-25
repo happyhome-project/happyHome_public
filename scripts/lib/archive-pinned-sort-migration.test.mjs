@@ -218,6 +218,54 @@ test('release migration repairs the exact nested sortKey artifact left by the ol
   assert.equal(result.residual.updates, 0)
 })
 
+test('release migration preserves non-accidental data objects while repairing the top-level sortKey', async () => {
+  const expectedSortKey = 'PINNED_2026-08-25T14:44:06.283Z_post-1'
+  for (const data of [
+    { sortKey: expectedSortKey, note: 'keep' },
+    { sortKey: 'different-value' },
+  ]) {
+    const posts = [{
+      _id: 'post-1',
+      area: 'archive',
+      status: 'active',
+      isPinned: true,
+      pinnedAt: '2026-08-25T14:44:06.283Z',
+      createdAt: '2026-07-23T02:03:56.501Z',
+      sortKey: '2026-07-23T02:03:56.501Z_post-1',
+      data: structuredClone(data),
+    }]
+
+    await applyArchivePinnedSortRepair(createDatabase(posts))
+
+    assert.equal(posts[0].sortKey, expectedSortKey)
+    assert.deepEqual(posts[0].data, data)
+  }
+})
+
+test('release migration preserves data changed after scan before the transaction snapshot', async () => {
+  const expectedSortKey = 'PINNED_2026-08-25T14:44:06.283Z_post-1'
+  const concurrentData = { sortKey: expectedSortKey, note: 'concurrent' }
+  const posts = [{
+    _id: 'post-1',
+    area: 'archive',
+    status: 'active',
+    isPinned: true,
+    pinnedAt: '2026-08-25T14:44:06.283Z',
+    createdAt: '2026-07-23T02:03:56.501Z',
+    sortKey: '2026-07-23T02:03:56.501Z_post-1',
+    data: { sortKey: expectedSortKey },
+  }]
+  const database = createDatabase(posts, {
+    beforeTransaction: (rows) => { rows[0].data = structuredClone(concurrentData) },
+  })
+
+  const result = await applyArchivePinnedSortRepair(database)
+
+  assert.equal(posts[0].sortKey, expectedSortKey)
+  assert.deepEqual(posts[0].data, concurrentData)
+  assert.equal(result.residual.updates, 0)
+})
+
 test('release migration does not restore a pinned key after a concurrent unpin', async () => {
   const posts = [{
     _id: 'post-1',
