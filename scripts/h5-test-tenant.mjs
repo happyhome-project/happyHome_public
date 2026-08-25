@@ -11,7 +11,7 @@ import { COMMUNITY_ID, FIXTURE_KEY, applyTenant, buildManifest, canonicalFingerp
 import { withValidationLease } from './lib/validation-lease.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const REQUIRED_CONFIG = ['HH_CLOUDBASE_ENV_ID', 'HH_CLOUDBASE_ACCESS_KEY', 'HH_H5_WEB_USERNAME', 'HH_H5_WEB_PASSWORD', 'HH_WECHAT_TEST_OPENID']
+const REQUIRED_CONFIG = ['HH_CLOUDBASE_ENV_ID', 'HH_CLOUDBASE_ACCESS_KEY', 'HH_H5_WEB_USERNAME', 'HH_H5_WEB_PASSWORD']
 
 export function parseEnvFile(path) {
   if (!existsSync(path)) throw new Error(`missing machine config: ${path}`)
@@ -37,7 +37,6 @@ export function loadTenantConfig({ env = process.env, home = homedir() } = {}) {
     accessKey: values.HH_CLOUDBASE_ACCESS_KEY.trim(),
     username: values.HH_H5_WEB_USERNAME.trim(),
     password: values.HH_H5_WEB_PASSWORD,
-    wechatOpenid: values.HH_WECHAT_TEST_OPENID.trim(),
   }
 }
 
@@ -105,9 +104,9 @@ export async function createCloudBaseTenantStore({ config, root = ROOT, env = pr
       if (!exact.length) throw new Error('deleteFiles requires at least one exact fileID')
       await manager.storage.deleteFile(exact)
     },
-    async inspect({ username, wechatOpenid }) {
+    async inspect({ username }) {
       const account = await findAccount(username)
-      const manifest = buildManifest({ webUserId: account ? `web:${account.uuid}` : null, wechatOpenid })
+      const manifest = buildManifest({ webUserId: account ? `web:${account.uuid}` : null })
       const entries = [
         ...manifest.users.map((doc) => ['users', doc._id]),
         ...manifest.memberships.map((doc) => ['community_members', doc._id]),
@@ -155,6 +154,22 @@ export async function createCloudBaseTenantStore({ config, root = ROOT, env = pr
         if (current && current.fixtureKey !== FIXTURE_KEY) throw new Error(`fixture ownership changed before write: ${collection}/${id}`)
         if (canonicalFingerprint(current) !== expectedCurrentHash) throw new Error(`current document changed before write: ${collection}/${id}`)
         await reference.set(data)
+      })
+    },
+    async deleteDocument(collection, id, { expectedCurrentHash } = {}) {
+      if (typeof expectedCurrentHash !== 'string') throw new Error('deleteDocument requires expectedCurrentHash')
+      await db.runTransaction(async (transaction) => {
+        const reference = transaction.collection(collection).doc(id)
+        let current = null
+        try {
+          const response = await reference.get()
+          current = Array.isArray(response?.data) ? response.data[0] : response?.data
+        } catch (error) {
+          if (!isMissing(error)) throw error
+        }
+        if (!current || current.fixtureKey !== FIXTURE_KEY) throw new Error(`fixture ownership changed before delete: ${collection}/${id}`)
+        if (canonicalFingerprint(current) !== expectedCurrentHash) throw new Error(`current document changed before delete: ${collection}/${id}`)
+        await reference.remove()
       })
     },
   }

@@ -15,20 +15,24 @@ function managerWithPages(pages) {
   }
 }
 
-function fakeDb({ collision = false, sameOwnerRace = false, queryResults = () => [] } = {}) {
+function fakeDb({ collision = false, sameOwnerRace = false, transactionDocument = null, queryResults = () => [] } = {}) {
   const queries = []
   const transactionSets = []
+  const transactionRemoves = []
   const document = (collection, id, inTransaction = false) => ({
     async get() {
       if (inTransaction && collision) return { data: [{ _id: id, fixtureKey: 'FOREIGN' }] }
       if (inTransaction && sameOwnerRace) return { data: [{ _id: id, fixtureKey: 'HH_WEB_H5_V1', value: 'replacement' }] }
+      if (inTransaction && transactionDocument) return { data: [transactionDocument] }
       throw Object.assign(new Error('document.get:fail document not found'), { errCode: -1 })
     },
     async set(data) { transactionSets.push({ collection, id, data, inTransaction }) },
+    async remove() { transactionRemoves.push({ collection, id, inTransaction }) },
   })
   const client = {
     queries,
     transactionSets,
+    transactionRemoves,
     collection(collection) {
       return {
         doc: (id) => document(collection, id),
@@ -89,6 +93,44 @@ test('store rejects a same-owner content race using the expected canonical hash'
   const previouslyObserved = { _id: 'hh-web-h5-v1-post-0-01', fixtureKey: 'HH_WEB_H5_V1', value: 'old' }
   await assert.rejects(store.setDocument('posts', previouslyObserved._id, { fixtureKey: 'HH_WEB_H5_V1', value: 'desired' }, { expectedCurrentHash: canonicalFingerprint(previouslyObserved) }), /current document changed/)
   assert.deepEqual(db.transactionSets, [])
+})
+
+test('store atomically deletes only the exact fixture-owned document observed during prepare', async () => {
+  const observed = {
+    _id: 'hh-web-h5-v1-member-wechat',
+    communityId: 'hh-web-h5-v1-community',
+    userId: 'wx',
+    fixtureKey: 'HH_WEB_H5_V1',
+  }
+  const db = fakeDb({ transactionDocument: observed })
+  const store = await createCloudBaseTenantStore({ config: { envId: 'env-test' }, manager: managerWithPages([]), db })
+
+  await store.deleteDocument('community_members', observed._id, { expectedCurrentHash: canonicalFingerprint(observed) })
+
+  assert.deepEqual(db.transactionRemoves, [{ collection: 'community_members', id: observed._id, inTransaction: true }])
+})
+
+test('store refuses to delete a document whose fixture ownership changed after prepare', async () => {
+  const db = fakeDb({ collision: true })
+  const store = await createCloudBaseTenantStore({ config: { envId: 'env-test' }, manager: managerWithPages([]), db })
+
+  await assert.rejects(
+    store.deleteDocument('community_members', 'hh-web-h5-v1-member-wechat', { expectedCurrentHash: canonicalFingerprint(null) }),
+    /ownership changed/,
+  )
+  assert.deepEqual(db.transactionRemoves, [])
+})
+
+test('store refuses to delete fixture data changed after prepare', async () => {
+  const db = fakeDb({ sameOwnerRace: true })
+  const store = await createCloudBaseTenantStore({ config: { envId: 'env-test' }, manager: managerWithPages([]), db })
+  const observed = { _id: 'hh-web-h5-v1-member-wechat', fixtureKey: 'HH_WEB_H5_V1', value: 'old' }
+
+  await assert.rejects(
+    store.deleteDocument('community_members', observed._id, { expectedCurrentHash: canonicalFingerprint(observed) }),
+    /current document changed/,
+  )
+  assert.deepEqual(db.transactionRemoves, [])
 })
 
 test('store converts captured CloudBase file IDs back to manager cloud paths before cleanup', async () => {

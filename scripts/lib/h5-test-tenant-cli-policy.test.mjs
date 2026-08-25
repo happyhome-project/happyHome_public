@@ -28,7 +28,7 @@ async function cliFixture() {
   await mkdir(join(home, '.happyhome'), { recursive: true })
   await writeFile(join(home, '.happyhome', 'h5-web.env'), [
     'HH_CLOUDBASE_ENV_ID=env-test', 'HH_CLOUDBASE_ACCESS_KEY=public-key',
-    'HH_H5_WEB_USERNAME=user', 'HH_H5_WEB_PASSWORD=password', 'HH_WECHAT_TEST_OPENID=openid',
+    'HH_H5_WEB_USERNAME=user', 'HH_H5_WEB_PASSWORD=password',
   ].join('\n'))
   return { root, home }
 }

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 export const FIXTURE_KEY = 'HH_WEB_H5_V1'
 export const COMMUNITY_ID = 'hh-web-h5-v1-community'
 export const SECTION_IDS = Object.freeze({ long: 'hh-web-h5-v1-section-long', short: 'hh-web-h5-v1-section-short', empty: 'hh-web-h5-v1-section-empty' })
+const LEGACY_WECHAT_MEMBERSHIP_ID = 'hh-web-h5-v1-member-wechat'
 const CREATED_AT = '2026-01-01T00:00:00.000Z'
 
 function stable(value) {
@@ -27,7 +28,7 @@ function documentEntries(manifest) {
   ]
 }
 
-export function buildManifest({ webUserId = null, wechatOpenid }) {
+export function buildManifest({ webUserId = null }) {
   const sectionSpecs = [
     ['long', '完整资料', '📚', 30],
     ['short', '简短动态', '✏️', 1],
@@ -76,14 +77,13 @@ export function buildManifest({ webUserId = null, wechatOpenid }) {
   ]
   const memberships = [
     ...(webUserId ? [{ _id: 'hh-web-h5-v1-member-web', communityId: COMMUNITY_ID, userId: webUserId, role: 'member', status: 'active', appliedAt: CREATED_AT, joinedAt: CREATED_AT, fixtureKey: FIXTURE_KEY }] : []),
-    { _id: 'hh-web-h5-v1-member-wechat', communityId: COMMUNITY_ID, userId: wechatOpenid, role: 'member', status: 'active', appliedAt: CREATED_AT, joinedAt: CREATED_AT, fixtureKey: FIXTURE_KEY },
   ]
   return {
     version: 1,
     fixtureKey: FIXTURE_KEY,
     users,
     memberships,
-    communities: [{ _id: COMMUNITY_ID, name: 'HappyHome H5 固定测试社区', description: 'H5 v1 deterministic test tenant', coverImage: '', location: { address: 'Test only', lat: 0, lng: 0, coordSystem: 'gcj02', source: 'manual' }, joinType: 'approval', creatorId: authorId, status: 'active', discoverable: false, memberCount: 2, fixtureKey: FIXTURE_KEY, ragIndexPolicy: 'excluded', createdAt: CREATED_AT }],
+    communities: [{ _id: COMMUNITY_ID, name: 'HappyHome H5 固定测试社区', description: 'H5 v1 deterministic test tenant', coverImage: '', location: { address: 'Test only', lat: 0, lng: 0, coordSystem: 'gcj02', source: 'manual' }, joinType: 'approval', creatorId: authorId, status: 'active', discoverable: false, memberCount: 1, fixtureKey: FIXTURE_KEY, ragIndexPolicy: 'excluded', createdAt: CREATED_AT }],
     sections,
     posts,
   }
@@ -112,19 +112,26 @@ function validateObservation(observation, manifest) {
 }
 
 export async function planTenant({ store, config }) {
-  const observation = await store.inspect({ username: config.username, wechatOpenid: config.wechatOpenid, fixtureKey: FIXTURE_KEY })
-  const manifest = buildManifest({ webUserId: accountUserId(observation.account), wechatOpenid: config.wechatOpenid })
+  const observation = await store.inspect({ username: config.username, fixtureKey: FIXTURE_KEY })
+  const manifest = buildManifest({ webUserId: accountUserId(observation.account) })
   validateObservation(observation, manifest)
+  const legacyWechatMembership = (observation.memberships || []).find((membership) => membership?._id === LEGACY_WECHAT_MEMBERSHIP_ID)
+  if (legacyWechatMembership && legacyWechatMembership.fixtureKey !== FIXTURE_KEY) {
+    throw new Error(`foreign deterministic document collision: community_members/${LEGACY_WECHAT_MEMBERSHIP_ID}`)
+  }
   const sets = documentEntries(manifest).filter(({ collection, id, document }) => JSON.stringify(stable(observation.documents?.[`${collection}/${id}`] ?? null)) !== JSON.stringify(stable(document))).map((operation) => ({
     ...operation,
     expectedCurrentHash: fingerprint(observation.documents?.[`${operation.collection}/${operation.id}`] ?? null),
   }))
+  const deletes = legacyWechatMembership
+    ? [{ collection: 'community_members', id: LEGACY_WECHAT_MEMBERSHIP_ID, expectedCurrentHash: fingerprint(legacyWechatMembership) }]
+    : []
   return {
     envId: config.envId,
     observation,
     observationFingerprint: fingerprint(observation),
     manifestFingerprint: fingerprint(manifest),
-    plan: { createAccount: !observation.account, sets, deletes: [] },
+    plan: { createAccount: !observation.account, sets, deletes },
   }
 }
 
@@ -139,7 +146,7 @@ export function createPrepareRecord(result) {
       observedMembershipCount: (result.observation.memberships || []).length,
       observationFingerprint: result.observationFingerprint,
     },
-    diff: { createAccount: result.plan.createAccount, setCount: result.plan.sets.length, deleteCount: 0 },
+    diff: { createAccount: result.plan.createAccount, setCount: result.plan.sets.length, deleteCount: result.plan.deletes.length },
     manifestFingerprint: result.manifestFingerprint,
     planFingerprint: fingerprint(result.plan),
   }
@@ -168,14 +175,15 @@ export async function applyTenant({ store, config, prepare, env = process.env })
     planned = await planTenant({ store, config })
   }
   for (const { collection, id, document, expectedCurrentHash } of planned.plan.sets) await store.setDocument(collection, id, document, { expectedCurrentHash })
+  for (const { collection, id, expectedCurrentHash } of planned.plan.deletes) await store.deleteDocument(collection, id, { expectedCurrentHash })
   return await doctorTenant({ store, config })
 }
 
 export async function doctorTenant({ store, config }) {
-  const observation = await store.inspect({ username: config.username, wechatOpenid: config.wechatOpenid, fixtureKey: FIXTURE_KEY })
+  const observation = await store.inspect({ username: config.username, fixtureKey: FIXTURE_KEY })
   if (!observation.account) throw new Error('Web auth account is missing')
   if (observation.account.disabled) throw new Error('Web auth account is disabled')
-  const manifest = buildManifest({ webUserId: accountUserId(observation.account), wechatOpenid: config.wechatOpenid })
+  const manifest = buildManifest({ webUserId: accountUserId(observation.account) })
   validateObservation(observation, manifest)
   const expectedMemberships = manifest.memberships.map((member) => member._id).sort()
   const observedMemberships = (observation.memberships || []).map((member) => member._id).sort()
@@ -197,5 +205,5 @@ export async function doctorTenant({ store, config }) {
   for (const { collection, id, document } of expected) {
     if (JSON.stringify(stable(observation.documents?.[`${collection}/${id}`] ?? null)) !== JSON.stringify(stable(document))) throw new Error(`fixture document mismatch: ${collection}/${id}`)
   }
-  return { ok: true, envId: config.envId, fixtureKey: FIXTURE_KEY, account: 'present', status: 'hidden/active/approval', counts: { communities: 1, sections: 3, posts: 31, memberships: 2, activePostsBySection: counts } }
+  return { ok: true, envId: config.envId, fixtureKey: FIXTURE_KEY, account: 'present', status: 'hidden/active/approval', counts: { communities: 1, sections: 3, posts: 31, memberships: 1, activePostsBySection: counts } }
 }

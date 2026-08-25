@@ -5,6 +5,7 @@ import {
   FIXTURE_KEY,
   applyTenant,
   buildManifest,
+  canonicalFingerprint,
   createPrepareRecord,
   doctorTenant,
   planTenant,
@@ -35,6 +36,10 @@ class FakeStore {
     this.documents.set(`${collection}/${id}`, clone(document))
     if (collection === 'community_members') this.memberships.push(clone(document))
   }
+  async deleteDocument(collection, id) {
+    this.documents.delete(`${collection}/${id}`)
+    if (collection === 'community_members') this.memberships = this.memberships.filter((membership) => membership._id !== id)
+  }
 }
 
 const config = {
@@ -51,6 +56,8 @@ test('fixed manifest contains one hidden approval community, three sections, and
   assert.equal(manifest.communities[0].discoverable, false)
   assert.equal(manifest.communities[0].fixtureKey, FIXTURE_KEY)
   assert.equal(manifest.communities[0].ragIndexPolicy, 'excluded')
+  assert.equal(manifest.communities[0].memberCount, 1)
+  assert.deepEqual(manifest.memberships.map((membership) => membership.userId), ['web:web-uuid-1'])
   assert.deepEqual(manifest.sections.map((section) => section.order), [0, 1, 2])
   assert.deepEqual(manifest.sections.map((section) => section.fixturePostCount), [30, 1, 0])
   assert.equal(manifest.posts.length, 31)
@@ -70,6 +77,58 @@ test('empty observation plans only deterministic set operations and no deletes',
   assert.ok(result.plan.sets.length > 31)
   assert.ok(result.plan.sets.every((operation) => typeof operation.expectedCurrentHash === 'string'))
   assert.deepEqual(result.plan.deletes, [])
+})
+
+test('existing fixture-owned WeChat membership is planned for exact deletion', async () => {
+  const legacyMembership = {
+    _id: 'hh-web-h5-v1-member-wechat',
+    communityId: 'hh-web-h5-v1-community',
+    userId: config.wechatOpenid,
+    role: 'member',
+    status: 'active',
+    appliedAt: '2026-01-01T00:00:00.000Z',
+    joinedAt: '2026-01-01T00:00:00.000Z',
+    fixtureKey: FIXTURE_KEY,
+  }
+  const store = new FakeStore({
+    documents: { [`community_members/${legacyMembership._id}`]: legacyMembership },
+    memberships: [legacyMembership],
+  })
+
+  const result = await planTenant({ store, config })
+
+  assert.deepEqual(result.plan.deletes, [{
+    collection: 'community_members',
+    id: legacyMembership._id,
+    expectedCurrentHash: canonicalFingerprint(legacyMembership),
+  }])
+  assert.equal(createPrepareRecord(result).diff.deleteCount, 1)
+})
+
+test('apply removes the legacy WeChat membership while preserving H5 Web membership', async () => {
+  const legacyMembership = {
+    _id: 'hh-web-h5-v1-member-wechat',
+    communityId: 'hh-web-h5-v1-community',
+    userId: config.wechatOpenid,
+    role: 'member',
+    status: 'active',
+    appliedAt: '2026-01-01T00:00:00.000Z',
+    joinedAt: '2026-01-01T00:00:00.000Z',
+    fixtureKey: FIXTURE_KEY,
+  }
+  const store = new FakeStore({
+    documents: { [`community_members/${legacyMembership._id}`]: legacyMembership },
+    memberships: [legacyMembership],
+  })
+
+  await applyTenant({
+    store,
+    config,
+    prepare: createPrepareRecord(await planTenant({ store, config })),
+    env: { HAPPYHOME_FIXTURE_PREFIX: FIXTURE_KEY },
+  })
+
+  assert.deepEqual(store.memberships.map((membership) => membership.userId), ['web:web-uuid-1'])
 })
 
 test('existing real WeChat user stays outside fixture ownership', async () => {
@@ -187,7 +246,7 @@ test('doctor reports sanitized counts and rejects wrong section post counts', as
   const prepare = createPrepareRecord(await planTenant({ store, config }))
   await applyTenant({ store, config, prepare, env: { HAPPYHOME_FIXTURE_PREFIX: FIXTURE_KEY } })
   const healthy = await doctorTenant({ store, config })
-  assert.deepEqual(healthy.counts, { communities: 1, sections: 3, posts: 31, memberships: 2, activePostsBySection: [30, 1, 0] })
+  assert.deepEqual(healthy.counts, { communities: 1, sections: 3, posts: 31, memberships: 1, activePostsBySection: [30, 1, 0] })
   assert.equal(JSON.stringify(healthy).includes(config.wechatOpenid), false)
   const post = [...store.documents.entries()].find(([key]) => key.startsWith('posts/'))
   store.documents.delete(post[0])
