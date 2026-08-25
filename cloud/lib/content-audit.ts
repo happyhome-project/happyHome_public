@@ -704,10 +704,13 @@ function detectTypeForTencentCi(type: AuditTargetType): string | null {
 
 export function buildTencentCiAuditRequestBody(type: AuditTargetType, inputXml: string): string {
   const imageBizType = String(process.env.TENCENT_CI_IMAGE_BIZ_TYPE || '').trim()
+  const normalizedInputXml = type === 'image'
+    ? `${inputXml}<LargeImageDetect>1</LargeImageDetect>`
+    : inputXml
   const confXml = type === 'image' && imageBizType
     ? `<BizType>${xmlEscape(imageBizType)}</BizType>`
     : (detectTypeForTencentCi(type) ? `<DetectType>${detectTypeForTencentCi(type)}</DetectType>` : '')
-  return `<Request><Input>${inputXml}</Input><Conf>${confXml}</Conf></Request>`
+  return `<Request><Input>${normalizedInputXml}</Input><Conf>${confXml}</Conf></Request>`
 }
 
 function ciAuthorization(method: 'POST', pathname: string, host: string, secretId: string, secretKey: string): string {
