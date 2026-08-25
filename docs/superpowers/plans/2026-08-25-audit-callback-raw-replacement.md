@@ -1,5 +1,10 @@
 # Audit Callback Raw Replacement Implementation Plan
 
+> **Historical / point-in-time:** This file preserves the implementation plan used for the 2026-08-25 audit callback recovery fix; do not execute it as current instructions.
+> **Current authority:** Use the [documentation authority index](../../README.md), current code, tests, and repository PR/release rules.
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let a verified audit callback reconcile a Tencent CI task whose submission payload is stored as an XML string, without persisting callback credentials.
