@@ -15,7 +15,7 @@ export type RagIndexPolicy = 'business' | 'validation' | 'excluded'
 
 export type SectionType = 'realtime' | 'evergreen'
 export type SectionStatus = 'active' | 'dormant' | 'archived'
-export type SectionDisplayTemplate = 'default' | 'guide_note' | 'text_note' | 'image_note'
+export type SectionDisplayTemplate = 'default' | 'guide_note' | 'text_note' | 'image_note' | 'video_note'
 export type TextNoteTheme = 'paper' | 'mint' | 'slate' | 'headline' | 'quote' | 'notice'
 export type CollaborationTemplateStatus = 'active' | 'disabled'
 

@@ -51,7 +51,7 @@ describe('detail carousel gesture safety', () => {
     expect(detail).toMatch(/\.default-detail--text-note \.detail-head\s*\{[^}]*padding-bottom:\s*0;/s)
     expect(detail).toMatch(/\.text-note-detail-deck\s*\{[^}]*margin:\s*16rpx auto 0;/s)
     expect(detailTemplate).toContain('v-if="!isTextNoteDetail" class="section-line"')
-    expect(page).toContain('<view v-if="!isNativeArchiveAudioDetail && (!isImageNoteDetail || isAuthor)" class="meta">')
+    expect(page).toContain('<view v-if="!isNativeArchiveAudioDetail && !isNativeArchiveVideoDetail && (!isImageNoteDetail || isAuthor)" class="meta">')
     expect(page).toContain('<view v-if="!isImageNoteDetail && !isNativeArchiveAudioDetail" class="meta-main">')
     expect(page).toContain("'detail-page--text-note': isTextNoteDetail")
     expect(page).toMatch(/\.detail-page--text-note\s*\{[^}]*background:\s*var\(--hh-color-card\);/s)

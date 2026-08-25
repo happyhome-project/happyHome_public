@@ -1,9 +1,10 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'vitest'
 
 function source(relativePath: string) {
-  return readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), 'utf8')
+  const path = fileURLToPath(new URL(relativePath, import.meta.url))
+  return existsSync(path) ? readFileSync(path, 'utf8') : ''
 }
 
 describe('archive video card rendering', () => {
@@ -19,15 +20,16 @@ describe('archive video card rendering', () => {
     expect(component).toContain('▶')
   })
 
-  test('detail routes native archive normalization through the tested adapter and existing default renderer', () => {
+  test('detail routes native archive video posts through the dedicated video-note renderer', () => {
     const component = source('../../pages/detail/index.vue')
-    const defaultDetail = source('../../components/DefaultDetailView.vue')
+    const videoDetail = source('../../components/VideoNoteDetailView.vue')
     expect(component).toContain("from '../../utils/archive-detail'")
     expect(component).toContain('normalizeNativeArchiveDetailPost(res.post)')
     expect(component).toContain('buildNativeArchiveDetailSection(post.value)')
-    expect(component).toContain('<DefaultDetailView')
-    expect(defaultDetail).toContain('<VideoPlayerCard')
-    expect(defaultDetail).toContain("widget.type === 'video_group'")
+    expect(component).toContain('<VideoNoteDetailView')
+    expect(component).toContain('isNativeArchiveVideoDetail')
+    expect(videoDetail).toContain('class="video-note-hero"')
+    expect(videoDetail).toContain('<RichNoteRenderer')
   })
 
   test('home archive and my-posts resolve image and video covers through the shared assembler', () => {
