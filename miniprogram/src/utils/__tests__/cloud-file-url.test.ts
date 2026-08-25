@@ -107,20 +107,27 @@ describe('cloud file url resolver', () => {
     expect(getTempFileURL).toHaveBeenNthCalledWith(2, fileIDs.slice(50))
   })
 
-  test('never falls back to a cached URL after the provider-reported maxAge expires', async () => {
+  test('treats the provider-reported maxAge as seconds and expires before the signed URL', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-23T00:00:00.000Z'))
     const fileID = 'cloud://env/posts/expiring.jpg'
     let available = true
     const getTempFileURL = vi.fn(async () => available
-      ? [{ fileID, status: 0, maxAge: 120_000, tempFileURL: 'https://tmp.example/expiring.jpg' }]
+      ? [{ fileID, status: 0, maxAge: 120, tempFileURL: 'https://tmp.example/expiring.jpg' }]
       : [])
 
     await expect(resolveCloudFileUrls([fileID], { getTempFileURL })).resolves.toEqual({
       [fileID]: 'https://tmp.example/expiring.jpg',
     })
     available = false
-    vi.advanceTimersByTime(60_001)
+    vi.advanceTimersByTime(59_999)
+
+    await expect(resolveCloudFileUrls([fileID], { getTempFileURL })).resolves.toEqual({
+      [fileID]: 'https://tmp.example/expiring.jpg',
+    })
+    expect(getTempFileURL).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(2)
 
     await expect(resolveCloudFileUrls([fileID], { getTempFileURL })).resolves.toEqual({
       [fileID]: fileID,

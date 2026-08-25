@@ -55,11 +55,14 @@ function entrySucceeded(entry: TempUrlEntry | undefined): entry is TempUrlEntry 
 }
 
 function cacheTtl(entry: TempUrlEntry): number {
-  const advertisedMaxAge = Number(entry.maxAge || 0)
-  if (!Number.isFinite(advertisedMaxAge) || advertisedMaxAge <= 0) return TEMP_URL_TTL_MS
+  const advertisedMaxAgeSeconds = Number(entry.maxAge || 0)
+  if (!Number.isFinite(advertisedMaxAgeSeconds) || advertisedMaxAgeSeconds <= 0) {
+    return TEMP_URL_TTL_MS
+  }
+  const advertisedMaxAgeMs = advertisedMaxAgeSeconds * 1000
   return Math.max(
     1000,
-    Math.min(TEMP_URL_TTL_MS, advertisedMaxAge - TEMP_URL_EXPIRY_SAFETY_MS),
+    Math.min(TEMP_URL_TTL_MS, advertisedMaxAgeMs - TEMP_URL_EXPIRY_SAFETY_MS),
   )
 }
 
