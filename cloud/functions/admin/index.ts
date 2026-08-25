@@ -83,6 +83,7 @@ import { normalizeArchiveTopic } from '../../shared/archive-topics'
 import {
   archiveTopicId,
   buildArchiveSortKey,
+  buildPinnedArchiveSortKey,
   prepareArchivePostTopicReconciliation,
   reconcileArchivePostTopicsInTransaction,
   updateArchivePostTopicLinks,
@@ -2073,12 +2074,17 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     if (!post) throw new Error('post not found')
     if (post.status === 'deleted') throw new Error('已删除帖子不能置顶或加精')
 
+    const archiveCreatedAt = post.area === 'archive' ? String(post.createdAt || '').trim() : ''
+    if ((action === 'post.pinAdmin' || action === 'post.unpinAdmin') && post.area === 'archive' && !archiveCreatedAt) {
+      throw new Error('归档帖子缺少创建时间，无法安全变更置顶状态')
+    }
     const now = new Date().toISOString()
     if (action === 'post.pinAdmin') {
       await db.updateById('posts', postId, {
         isPinned: true,
         pinnedAt: now,
         pinnedByAccountId: ctx.accountId,
+        ...(post.area === 'archive' ? { sortKey: buildPinnedArchiveSortKey(now, postId) } : {}),
       })
       return { success: true, isPinned: true, pinnedAt: now }
     }
@@ -2087,6 +2093,7 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
         isPinned: false,
         pinnedAt: '',
         pinnedByAccountId: '',
+        ...(archiveCreatedAt ? { sortKey: buildArchiveSortKey(archiveCreatedAt, postId) } : {}),
       })
       return { success: true, isPinned: false }
     }

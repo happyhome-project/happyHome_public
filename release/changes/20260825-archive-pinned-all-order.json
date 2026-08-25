@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "changeId": "archive-pinned-all-order",
+  "actions": [],
+  "cloudTargets": [
+    "admin",
+    "post"
+  ],
+  "migrations": [
+    {
+      "id": "archive-pinned-sort-v1",
+      "module": "release/migrations/20260825-archive-pinned-sort-v1.mjs",
+      "inputDigest": "fe0669f76a140cd720cab1d6cabac3a760f6f944eedc8307ba3700df1064964c"
+    }
+  ],
+  "smokeSuites": [],
+  "releaseImpact": {
+    "cloudFunctions": "Archive pin and unpin operations now update the indexed all-tab ordering projection.",
+    "adminWeb": "No UI code change; existing pin controls now affect archive all-tab ordering.",
+    "miniprogram": "No UI code change; pinned archive posts appear first in the All tab after refresh.",
+    "environmentVariables": [],
+    "databaseMigrations": [
+      "Backfill pinned archive post sort keys without changing topic-tab ordering."
+    ]
+  }
+}

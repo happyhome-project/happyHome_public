@@ -1711,28 +1711,104 @@ test('admin.deleteAccount: 不能删除自己的账号', async () => {
   })).rejects.toThrow('不能删除自己的账号')
 })
 
-test('post.pinAdmin: active 帖子可置顶并记录操作人', async () => {
+test('post.pinAdmin: archive 帖子置顶时同时提升“全部”列表排序键', async () => {
   ;(db.getById as jest.Mock).mockReset()
   ;(db.updateById as jest.Mock).mockReset()
   ;(db.getById as jest.Mock).mockResolvedValueOnce({
     _id: 'post-1',
     communityId: 'community-1',
+    area: 'archive',
+    createdAt: '2026-07-23T02:03:56.501Z',
     status: 'active',
   })
   ;(db.updateById as jest.Mock).mockResolvedValue({})
 
-  const result: any = await main({
-    action: 'post.pinAdmin',
-    postId: 'post-1',
-    _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
+  const toISOString = jest.spyOn(Date.prototype, 'toISOString').mockReturnValue('2026-08-25T14:44:06.283Z')
+
+  try {
+    const result: any = await main({
+      action: 'post.pinAdmin',
+      postId: 'post-1',
+      _actAs: { accountId: 'admin-1', role: 'superAdmin', userId: 'ops-openid', username: 'ops' },
+    })
+
+    expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', {
+      isPinned: true,
+      pinnedAt: '2026-08-25T14:44:06.283Z',
+      pinnedByAccountId: 'admin-1',
+      sortKey: 'PINNED_2026-08-25T14:44:06.283Z_post-1',
+    })
+    expect(result.success).toBe(true)
+  } finally {
+    toISOString.mockRestore()
+  }
+})
+
+test('post.unpinAdmin: archive 帖子取消置顶时恢复发布时间排序键', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'post-1',
+    communityId: 'community-1',
+    area: 'archive',
+    createdAt: '2026-07-23T02:03:56.501Z',
+    status: 'active',
+    isPinned: true,
+    sortKey: 'PINNED_2026-08-25T14:44:06.283Z_post-1',
+  })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  await main({ action: 'post.unpinAdmin', postId: 'post-1' })
+
+  expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', {
+    isPinned: false,
+    pinnedAt: '',
+    pinnedByAccountId: '',
+    sortKey: '2026-07-23T02:03:56.501Z_post-1',
+  })
+})
+
+test('post.unpinAdmin: archive 帖子缺少创建时间时拒绝留下置顶排序键', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'post-invalid',
+    communityId: 'community-1',
+    area: 'archive',
+    status: 'active',
+    isPinned: true,
+    sortKey: 'PINNED_2026-08-25T14:44:06.283Z_post-invalid',
   })
 
-  expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({
-    isPinned: true,
-    pinnedAt: expect.any(String),
-    pinnedByAccountId: 'admin-1',
+  await expect(main({ action: 'post.unpinAdmin', postId: 'post-invalid' }))
+    .rejects.toThrow('归档帖子缺少创建时间')
+  expect(db.updateById).not.toHaveBeenCalled()
+})
+
+test('post.pinAdmin: archive 帖子缺少创建时间时拒绝进入不可恢复的置顶状态', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'post-invalid',
+    communityId: 'community-1',
+    area: 'archive',
+    status: 'active',
+  })
+
+  await expect(main({ action: 'post.pinAdmin', postId: 'post-invalid' }))
+    .rejects.toThrow('归档帖子缺少创建时间')
+  expect(db.updateById).not.toHaveBeenCalled()
+})
+
+test('post.pinAdmin: 非 archive 帖子不写入 archive 排序键', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({
+    _id: 'post-section',
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    createdAt: '2026-07-23T02:03:56.501Z',
+    status: 'active',
+  })
+  ;(db.updateById as jest.Mock).mockResolvedValue({})
+
+  await main({ action: 'post.pinAdmin', postId: 'post-section' })
+
+  expect(db.updateById).toHaveBeenCalledWith('posts', 'post-section', expect.not.objectContaining({
+    sortKey: expect.anything(),
   }))
-  expect(result.success).toBe(true)
 })
 
 test('post.featureAdmin: active 帖子可加精并记录操作人', async () => {

@@ -11,6 +11,10 @@ export function buildArchiveSortKey(createdAt: string, postId: string): string {
   return `${createdAt}_${postId}`
 }
 
+export function buildPinnedArchiveSortKey(pinnedAt: string, postId: string): string {
+  return `PINNED_${pinnedAt}_${postId}`
+}
+
 export function archiveTopicId(communityId: string, topicKey: string): string {
   return `at_${createHash('sha1').update(`${communityId}\u0000${topicKey}`).digest('hex')}`
 }
