@@ -217,6 +217,14 @@ test('buildTencentCiAuditRequestBody lets image audits use the default policy', 
   expect(body).not.toContain('Terrorism')
 })
 
+test('buildTencentCiAuditRequestBody enables large-image handling for image URLs', () => {
+  const body = buildTencentCiAuditRequestBody('image', '<Url>https://example.com/large.jpg</Url>')
+
+  expect(body).toContain(
+    '<Input><Url>https://example.com/large.jpg</Url><LargeImageDetect>1</LargeImageDetect></Input>',
+  )
+})
+
 test('parseTencentCiAuditResponse keeps Tencent job errors visible', () => {
   const result = parseTencentCiAuditResponse('image', `<?xml version="1.0" encoding="utf-8"?>
 <Response>
