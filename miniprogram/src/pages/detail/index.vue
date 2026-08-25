@@ -4,6 +4,7 @@
     :class="{
       'detail-page--guide': isGuideNoteDetail,
       'detail-page--image-note': isImageNoteDetail,
+      'detail-page--video-note': isNativeArchiveVideoDetail,
       'detail-page--text-note': isTextNoteDetail,
       'detail-page--audio': isNativeArchiveAudioDetail,
     }"
@@ -16,13 +17,14 @@
       :class="{
         'guide-note-detail': isGuideNoteDetail,
         'image-note-detail': isImageNoteDetail,
+        'video-note-detail': isNativeArchiveVideoDetail,
       }"
     >
-      <view v-if="!isNativeArchiveAudioDetail && (post.isPinned || post.isFeatured)" class="post-flag-row">
+      <view v-if="!isNativeArchiveAudioDetail && !isNativeArchiveVideoDetail && (post.isPinned || post.isFeatured)" class="post-flag-row">
         <text v-if="post.isPinned" class="post-flag pin">置顶</text>
         <text v-if="post.isFeatured" class="post-flag feature">精华</text>
       </view>
-      <view v-if="!isNativeArchiveAudioDetail && post.originPostId && post.originLinkType === 'activity_invite'" class="origin-card" @tap="goOriginPost">
+      <view v-if="!isNativeArchiveAudioDetail && !isNativeArchiveVideoDetail && post.originPostId && post.originLinkType === 'activity_invite'" class="origin-card" @tap="goOriginPost">
         <text class="origin-label">来自攻略</text>
         <text class="origin-title">{{ post.originTitle || '原帖' }}</text>
         <text class="origin-action">查看原帖 ›</text>
@@ -36,6 +38,16 @@
         :date-label="formatDate(post.createdAt)"
         :is-author="isAuthor"
         @cover-error="onDetailMediaError"
+        @settings="openPostSettings"
+      />
+      <VideoNoteDetailView
+        v-else-if="isNativeArchiveVideoDetail && videoNoteDetail"
+        :detail="videoNoteDetail"
+        :community-name="videoNoteCommunityName"
+        :is-author="isAuthor"
+        @media-load="onDetailMediaLoad"
+        @media-error="onDetailMediaError"
+        @open-location="openVideoNoteLocation"
         @settings="openPostSettings"
       />
       <ImageNoteDetailView
@@ -60,7 +72,7 @@
         :post-meta="postMeta"
       />
 
-      <template v-if="!isGuideNoteDetail && !isNativeArchiveAudioDetail">
+      <template v-if="!isGuideNoteDetail && !isNativeArchiveAudioDetail && !isNativeArchiveVideoDetail">
         <view
           v-for="widget in attendanceWidgets"
           :key="widget.widgetId"
@@ -109,7 +121,7 @@
         </view>
       </template>
 
-      <view v-if="!isNativeArchiveAudioDetail && activityInviteWidgets.length" class="activity-invite-card">
+      <view v-if="!isNativeArchiveAudioDetail && !isNativeArchiveVideoDetail && activityInviteWidgets.length" class="activity-invite-card">
         <view class="activity-invite-main">
           <text class="activity-invite-kicker">活动召集</text>
           <text class="activity-invite-title">{{ activityInviteTitle }}</text>
@@ -125,7 +137,7 @@
         </button>
       </view>
 
-      <view v-if="!isNativeArchiveAudioDetail && (!isImageNoteDetail || isAuthor)" class="meta">
+      <view v-if="!isNativeArchiveAudioDetail && !isNativeArchiveVideoDetail && (!isImageNoteDetail || isAuthor)" class="meta">
         <view v-if="!isImageNoteDetail && !isNativeArchiveAudioDetail" class="meta-main">
           <view class="meta-author">
             <image
@@ -235,11 +247,12 @@
 <script setup lang="ts">
 import { computed, onErrorCaptured, reactive, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
-import { collaborationTemplateApi, postApi, sectionApi } from '../../api/cloud'
+import { collaborationTemplateApi, communityApi, postApi, sectionApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import GuideRouteDetailView from '../../components/GuideRouteDetailView.vue'
 import ImageNoteDetailView from '../../components/ImageNoteDetailView.vue'
+import VideoNoteDetailView from '../../components/VideoNoteDetailView.vue'
 import DefaultDetailView from '../../components/DefaultDetailView.vue'
 import AudioPostDetailView from '../../components/AudioPostDetailView.vue'
 import { useBusyLock, useKeyedBusyLock } from '../../utils/useBusyLock'
@@ -257,7 +270,14 @@ import {
 import { extractRichNoteImageSources } from '../../utils/rich-note'
 import { ensureHierarchyStack, navigateBackOrHome } from '../../utils/hierarchy-nav'
 import { asCollaborationSection } from '../../utils/collaboration-template'
-import { buildNativeArchiveDetailSection, isNativeArchiveAudioPost, normalizeNativeArchiveDetailPost } from '../../utils/archive-detail'
+import {
+  buildNativeArchiveDetailSection,
+  buildNativeArchiveVideoDetail,
+  isNativeArchiveAudioPost,
+  isNativeArchiveVideoPost,
+  normalizeNativeArchiveDetailPost,
+  type NativeArchiveVideoLocation,
+} from '../../utils/archive-detail'
 import { collectAudioCoverSources } from '../../utils/audio-display'
 
 const fallbackAvatar = '/static/default-avatar.png'
@@ -282,6 +302,7 @@ const resolvedAvatarUrls = reactive<Record<string, string>>({})
 const resolvedDetailMediaUrls = reactive<Record<string, string>>({})
 const settledDetailMediaUrls = reactive<Record<string, boolean>>({})
 const detailMediaRecoveryVersion = ref(0)
+const detailCommunityName = ref('')
 const detailMediaRecoveryPending = new Set<string>()
 const detailMediaRecoveryAttempts = new Map<string, number>()
 const cancelBusy = ref(false)
@@ -317,6 +338,7 @@ const postMeta = computed(() => ({
 }))
 const detailSectionTitle = computed(() => section.value?.name || '')
 const isNativeArchiveAudioDetail = computed(() => isNativeArchiveAudioPost(post.value))
+const isNativeArchiveVideoDetail = computed(() => isNativeArchiveVideoPost(post.value))
 const isImageNoteDetail = computed(() => isImageNoteSectionContract(section.value))
 const isGuideNoteDetail = computed(() =>
   !isImageNoteDetail.value && resolveGuideNoteDetailTemplate(section.value)
@@ -342,6 +364,16 @@ const guideRouteDetail = computed(() => {
 const imageNoteDetail = computed(() => {
   if (!renderPost.value || !section.value || !isImageNoteDetail.value) return null
   return buildImageNoteDetail(renderPost.value, section.value)
+})
+const videoNoteDetail = computed(() => {
+  if (!renderPost.value || !isNativeArchiveVideoDetail.value) return null
+  return buildNativeArchiveVideoDetail(renderPost.value)
+})
+const videoNoteCommunityName = computed(() => {
+  const communityId = String(post.value?.communityId || '')
+  const community = communityStore.myCommunities.find((item) => item._id === communityId) ||
+    (communityStore.browsingCommunity?._id === communityId ? communityStore.browsingCommunity : null)
+  return String(community?.name || detailCommunityName.value || '').trim()
 })
 const imageNoteMediaItems = computed(() => {
   if (!post.value || !section.value || !isImageNoteDetail.value) return []
@@ -391,6 +423,10 @@ function openImageNoteLocation(location: ImageNoteLocation) {
     name: location.name || location.address || '设置地点',
     scale: 16,
   })
+}
+
+function openVideoNoteLocation(location: NativeArchiveVideoLocation) {
+  openImageNoteLocation(location)
 }
 
 function openPostSettings() {
@@ -488,6 +524,7 @@ async function loadPost(postId: string) {
   loading.value = true
   loadError.value = ''
   detailMediaRecoveryVersion.value = 0
+  detailCommunityName.value = ''
   detailMediaRecoveryPending.clear()
   detailMediaRecoveryAttempts.clear()
   clearRecord(resolvedDetailMediaUrls)
@@ -547,8 +584,11 @@ async function loadPost(postId: string) {
     if (!section.value) {
       throw new Error('板块信息加载失败，请稍后重试')
     }
-    await resolveDetailMediaUrls()
-    await resolveAttendanceAvatarUrls()
+    await Promise.all([
+      resolveDetailMediaUrls(),
+      resolveAttendanceAvatarUrls(),
+      resolveVideoNoteCommunityName(),
+    ])
     await loadActivityInviteState()
     clientLog('info', 'detail.load.success', {
       postId,
@@ -578,6 +618,22 @@ async function loadPost(postId: string) {
       hasPost: !!post.value,
       hasSection: !!section.value,
       loadError: loadError.value,
+    })
+  }
+}
+
+async function resolveVideoNoteCommunityName() {
+  if (!isNativeArchiveVideoDetail.value) return
+  const communityId = String(post.value?.communityId || '').trim()
+  if (!communityId || videoNoteCommunityName.value) return
+  try {
+    const response = await communityApi.get(communityId)
+    detailCommunityName.value = String(response?.community?.name || '').trim()
+  } catch (error) {
+    clientLog('warn', 'detail.videoNote.community.resolve.fail', {
+      postId: currentPostId.value,
+      communityId,
+      error,
     })
   }
 }
@@ -1083,6 +1139,11 @@ function formatDateTime(iso: string): string {
 }
 
 .detail-page--image-note {
+  padding: 0;
+  background: var(--hh-color-card);
+}
+
+.detail-page--video-note {
   padding: 0;
   background: var(--hh-color-card);
 }

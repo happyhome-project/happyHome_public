@@ -5,7 +5,7 @@ import {
   normalizeTextNoteWidgets,
 } from '../text-note-widgets'
 
-test.each(['default', 'guide_note', 'text_note'] as const)(
+test.each(['default', 'guide_note', 'text_note', 'image_note', 'video_note'] as const)(
   'normalizeSectionDisplayTemplate preserves %s',
   (template) => expect(normalizeSectionDisplayTemplate(template)).toBe(template),
 )

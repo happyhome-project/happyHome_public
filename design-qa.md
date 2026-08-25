@@ -110,6 +110,56 @@ final result: passed
 
 ---
 
+## Video note detail design QA (2026-08-26)
+
+### Evidence and normalization
+
+- Source visual truth: `X:\Users\86136\.codex\visualizations\2026\07\14\019f5f60-1e10-7a11-9332-fd699c500d42\video-note-mockup\video-note-detail.png`.
+- Browser-rendered implementation: `X:\Users\86136\.codex\visualizations\2026\07\14\019f5f60-1e10-7a11-9332-fd699c500d42\video-note-mockup\video-note-detail-implementation-390x844.png`.
+- Side-by-side comparison input: `X:\Users\86136\.codex\visualizations\2026\07\14\019f5f60-1e10-7a11-9332-fd699c500d42\video-note-mockup\video-note-comparison-final.png`.
+- Viewport: 390 x 844 CSS pixels; device pixel ratio 1.
+- Source pixels: 390 x 844. Implementation pixels: 390 x 844. No density resampling was used in the final comparison.
+- State: paused native archive video note, author-owned post, cover visible, author/date/community/title/body/topic/footer visible.
+- Host normalization: the source includes the WeChat status bar and capsule while the H5 implementation capture begins at the native page navigation bar. The content regions were aligned by their navigation and hero boundaries; this host-chrome difference is not application UI drift.
+
+### Full-view comparison evidence
+
+- The production renderer preserves the approved sequence and proportions: native navigation, full-width 16:9 cover, centered play affordance, author/community row, title, body, topics, and a quiet footer.
+- The hero crop uses the exact approved `鲲鹏` cover and preserves its sharpness, subject, contrast, and aspect-fill treatment.
+- The page remains intentionally free of comment, like, and favorite controls because those interaction loops do not exist in the product yet.
+
+### Focused region comparison evidence
+
+- A separate crop was not needed: both 390 x 844 images are readable at 1:1 in the combined comparison, including the author row, title wrapping, topic pill, divider, and settings affordance.
+
+### Required fidelity surfaces
+
+- Fonts and typography: the existing mini-program font stack, bold title hierarchy, medium author weight, muted date/footer labels, line height, and wrapping follow the approved mock. The H5 host rasterizes Chinese text slightly heavier than the static mock, with no clipping or hierarchy change.
+- Spacing and layout rhythm: the 16:9 hero, author-row spacing, content gutter, title/body gaps, pill spacing, divider, and footer rhythm match the approved composition. No horizontal overflow or hidden control was observed.
+- Colors and visual tokens: the implementation uses existing HappyHome brand tokens for pale mint surfaces, green labels, neutral text, white canvas, and subtle dividers.
+- Image quality and asset fidelity: the approved cover and author asset were used for QA. The play control uses the repository's existing icon font instead of a text glyph, emoji, CSS drawing, or handcrafted SVG.
+- Copy and content: `内容沉淀 · 视频笔记`, author/date, community name, title, body, topic, and author-only `编辑和设置` match the approved information architecture.
+
+### Findings
+
+- No actionable P0, P1, or P2 visual mismatch remains.
+- P3 acceptable host difference: the H5 QA capture omits the WeChat status bar and capsule that are supplied by the real mini-program host.
+
+### Comparison history
+
+1. Pass 1 found a P2 state-dependent omission: the community pill could disappear when a video detail was opened from a route whose community was not already in the current store.
+2. Fix: the detail page now resolves the post's community name from the exact cached community when present and otherwise performs a read-only `community.get` fallback.
+3. Pass 2: the final 390 x 844 comparison shows the `明士班` pill and no remaining P0/P1/P2 difference.
+
+### Interaction and console evidence
+
+- Author-only `编辑和设置` opened the existing post settings sheet and exposed the `编辑` and `删除` actions.
+- The final isolated render produced no new console error. Earlier retained log entries came from deliberately visiting the real private post without an H5 member session and from an intermediate hot-reload syntax error that was corrected before the final capture.
+
+final result: passed
+
+---
+
 ## Audio posts design QA (2026-08-17)
 
 ### Scope

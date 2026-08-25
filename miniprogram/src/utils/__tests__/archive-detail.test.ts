@@ -5,7 +5,7 @@ import * as archiveDetail from '../archive-detail'
 const richBody = { format: 'markdown', markdown: '正文', html: '<p>正文</p>', text: '正文', imageFileIDs: [], schemaVersion: 1 }
 
 describe('native archive detail adapter', () => {
-  test('maps a native video post into the default detail widget contract', () => {
+  test('routes a native video post into the dedicated video-note detail contract', () => {
     const video = { source: 'cos', itemId: 'clip-1', title: '晚霞', fileID: 'cloud://video.mp4', cover: 'cloud://cover.jpg' }
     const input = {
       _id: 'video-post', area: 'archive', format: 'video', communityId: 'community-1',
@@ -14,7 +14,7 @@ describe('native archive detail adapter', () => {
     const normalized = normalizeNativeArchiveDetailPost(input)
     const section = buildNativeArchiveDetailSection(normalized)
 
-    expect(section.displayTemplate).toBe('default')
+    expect(section.displayTemplate).toBe('video_note')
     expect(section.widgets.map((widget: any) => [widget.widgetId, widget.type])).toEqual([
       ['archive_video_title', 'short_text'],
       ['archive_video_body', 'rich_note'],
@@ -26,6 +26,34 @@ describe('native archive detail adapter', () => {
       archive_video_body: richBody,
       archive_video_videos: [video],
       archive_video_location: { name: '河畔', address: '滨河路', lat: 31, lng: 121 },
+    })
+  })
+
+  test('builds the video-note view model from canonical native archive fields', () => {
+    const video = {
+      source: 'cos', itemId: 'clip-1', title: '鲲鹏', fileID: 'https://cdn.example/video.mp4',
+      cover: 'https://cdn.example/cover.jpg', allowDownload: false, allowShare: false,
+    }
+    const input = {
+      _id: 'video-post', area: 'archive', format: 'video', communityId: 'community-1', topics: ['明士课堂'],
+      authorNickname: '明士班资料员', authorAvatarUrl: 'https://cdn.example/avatar.jpg',
+      createdAt: '2026-08-17T05:58:47.065Z',
+      content: {
+        title: '第50次明士课程资料｜视频：鲲鹏', body: richBody, videos: [video],
+        location: { name: '明士课堂', address: '教室', lat: 30, lng: 104 },
+      },
+    }
+    const buildVideoNoteDetail = (archiveDetail as any).buildNativeArchiveVideoDetail
+
+    expect(buildVideoNoteDetail?.(input)).toEqual({
+      video,
+      title: '第50次明士课程资料｜视频：鲲鹏',
+      body: richBody,
+      topics: ['明士课堂'],
+      location: { name: '明士课堂', address: '教室', lat: 30, lng: 104 },
+      authorName: '明士班资料员',
+      authorAvatarUrl: 'https://cdn.example/avatar.jpg',
+      createdAt: '2026-08-17T05:58:47.065Z',
     })
   })
 
@@ -91,5 +119,12 @@ describe('native archive detail adapter', () => {
     expect(isNativeArchiveAudioPost({ area: 'archive', format: 'audio' })).toBe(true)
     expect(isNativeArchiveAudioPost({ area: 'archive', sectionId: 'legacy', content: { recordings: [] } })).toBe(false)
     expect(isNativeArchiveAudioPost({ area: 'collaboration', format: 'audio' })).toBe(false)
+  })
+
+  test('selects only native archive video posts for the video-note view', () => {
+    const isNativeArchiveVideoPost = (archiveDetail as any).isNativeArchiveVideoPost
+    expect(isNativeArchiveVideoPost?.({ area: 'archive', format: 'video' })).toBe(true)
+    expect(isNativeArchiveVideoPost?.({ area: 'archive', sectionId: 'legacy', format: 'video' })).toBe(false)
+    expect(isNativeArchiveVideoPost?.({ area: 'collaboration', format: 'video' })).toBe(false)
   })
 })
