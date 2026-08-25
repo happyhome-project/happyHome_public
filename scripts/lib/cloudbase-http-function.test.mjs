@@ -47,12 +47,28 @@ test('HTTP access verification accepts CloudBase JSON followed by progress lines
   assert.equal(assertWechatAuditHttpAccess(output).type, '云函数')
 })
 
+test('HTTP access verification accepts CloudBase progress lines before JSON', () => {
+  const output = `- Querying HTTP access service...\n${JSON.stringify({
+    data: [{ name: 'wechat-audit-callback', path: '/wechat-audit-callback', type: '云函数' }],
+  }, null, 2)}`
+
+  assert.equal(assertWechatAuditHttpAccess(output).type, '云函数')
+})
+
 test('HTTP access verification still rejects arbitrary trailing output', () => {
   const output = `${JSON.stringify({
     data: [{ name: 'wechat-audit-callback', path: '/wechat-audit-callback' }],
   })}\nunexpected trailing output`
 
   assert.throws(() => assertWechatAuditHttpAccess(output), /Unexpected non-whitespace character after JSON/)
+})
+
+test('HTTP access verification still rejects arbitrary leading output', () => {
+  const output = `unexpected leading output\n${JSON.stringify({
+    data: [{ name: 'wechat-audit-callback', path: '/wechat-audit-callback' }],
+  })}`
+
+  assert.throws(() => assertWechatAuditHttpAccess(output), /Unexpected token/)
 })
 
 test('existing exact callback access is attested without mutation', async () => {
