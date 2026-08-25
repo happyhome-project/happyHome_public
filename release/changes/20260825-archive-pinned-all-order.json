@@ -10,7 +10,7 @@
     {
       "id": "archive-pinned-sort-v1",
       "module": "release/migrations/20260825-archive-pinned-sort-v1.mjs",
-      "inputDigest": "fe0669f76a140cd720cab1d6cabac3a760f6f944eedc8307ba3700df1064964c"
+      "inputDigest": "282b62440da984ad82cbfde3c2b2472ed40c71de6c9b0ce1da3e74810f3a87a4"
     }
   ],
   "smokeSuites": [],

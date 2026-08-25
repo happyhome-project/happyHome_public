@@ -2,9 +2,12 @@ import CloudBase from '@cloudbase/node-sdk'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 
-import { planArchivePinnedSortRepair } from '../../scripts/lib/archive-pinned-sort-migration.mjs'
+import {
+  hasAccidentalPinnedSortData,
+  planArchivePinnedSortRepair,
+} from '../../scripts/lib/archive-pinned-sort-migration.mjs'
 
-const PLANNER_SHA256 = '1f3ce0382da1d6cdce111667e7eff889e3477ecb97e237c1f020fb3d0f782d45'
+const PLANNER_SHA256 = '7561d77af841ce2322cfcd25e1ee16fdd202f98a683f81c42acdf30214c4f2b8'
 
 function normalizedTextDigest(url) {
   return createHash('sha256').update(readFileSync(url, 'utf8').replace(/\r\n/g, '\n')).digest('hex')
@@ -42,6 +45,9 @@ export async function applyArchivePinnedSortRepair(database) {
   if (plan.summary.skippedInvalid > 0) {
     throw new Error(`archive-pinned-sort-v1 found ${plan.summary.skippedInvalid} invalid pinned archive posts`)
   }
+  if (plan.updates.some((update) => update.removeNestedData) && typeof database.command?.remove !== 'function') {
+    throw new Error('archive-pinned-sort-v1 requires command.remove to repair the accidental nested sortKey')
+  }
 
   let applied = 0
   for (const update of plan.updates) {
@@ -54,7 +60,11 @@ export async function applyArchivePinnedSortRepair(database) {
         || current.status !== 'active'
         || current.isPinned !== true
         || String(current.pinnedAt || '').trim() !== update.expectedPinnedAt) return false
-      await document.update({ data: { sortKey: update.sortKey } })
+      const patch = { sortKey: update.sortKey }
+      if (update.removeNestedData && hasAccidentalPinnedSortData(current, update.sortKey)) {
+        patch.data = database.command.remove()
+      }
+      await document.update(patch)
       return true
     })
     if (changed) applied += 1

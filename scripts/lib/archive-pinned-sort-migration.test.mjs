@@ -57,6 +57,7 @@ test('planner repairs only stale active pinned archive posts', () => {
     postId: 'stale-pinned',
     expectedPinnedAt: '2026-08-25T14:44:06.283Z',
     sortKey: 'PINNED_2026-08-25T14:44:06.283Z_stale-pinned',
+    removeNestedData: false,
   }])
   assert.deepEqual(plan.summary, { scanned: 5, eligible: 2, updates: 1, skippedInvalid: 0 })
 })
@@ -92,7 +93,31 @@ test('planner reports malformed pinned archive rows without inventing an orderin
   assert.deepEqual(plan.summary, { scanned: 2, eligible: 2, updates: 0, skippedInvalid: 2 })
 })
 
+test('planner treats the exact accidental nested sortKey as repair work even when the top-level key is correct', () => {
+  const sortKey = 'PINNED_2026-08-25T14:44:06.283Z_post-1'
+  const plan = planArchivePinnedSortRepair({
+    posts: [{
+      _id: 'post-1',
+      area: 'archive',
+      status: 'active',
+      isPinned: true,
+      pinnedAt: '2026-08-25T14:44:06.283Z',
+      createdAt: '2026-07-23T02:03:56.501Z',
+      sortKey,
+      data: { sortKey },
+    }],
+  })
+
+  assert.deepEqual(plan.updates, [{
+    postId: 'post-1',
+    expectedPinnedAt: '2026-08-25T14:44:06.283Z',
+    sortKey,
+    removeNestedData: true,
+  }])
+})
+
 function createDatabase(posts, { beforeTransaction } = {}) {
+  const removeSentinel = Symbol('remove')
   const collection = (name) => {
     assert.equal(name, 'posts')
     let afterId = ''
@@ -123,7 +148,10 @@ function createDatabase(posts, { beforeTransaction } = {}) {
           async update(payload) {
             const post = posts.find((item) => item._id === id)
             assert.ok(post)
-            Object.assign(post, payload?.data || payload)
+            for (const [key, value] of Object.entries(payload || {})) {
+              if (value === removeSentinel) delete post[key]
+              else post[key] = value
+            }
           },
         }
       },
@@ -131,7 +159,10 @@ function createDatabase(posts, { beforeTransaction } = {}) {
     return query
   }
   return {
-    command: { gt: (value) => ({ $gt: value }) },
+    command: {
+      gt: (value) => ({ $gt: value }),
+      remove: () => removeSentinel,
+    },
     collection,
     async runTransaction(callback) {
       await beforeTransaction?.(posts)
@@ -163,6 +194,28 @@ test('release migration applies the repair and verifies an empty residual plan',
     applied: 1,
     residual: { scanned: 1, eligible: 1, updates: 0, skippedInvalid: 0 },
   })
+})
+
+test('release migration repairs the exact nested sortKey artifact left by the old Node SDK payload', async () => {
+  const expectedSortKey = 'PINNED_2026-08-25T14:44:06.283Z_post-1'
+  const posts = [{
+    _id: 'post-1',
+    area: 'archive',
+    status: 'active',
+    isPinned: true,
+    pinnedAt: '2026-08-25T14:44:06.283Z',
+    createdAt: '2026-07-23T02:03:56.501Z',
+    sortKey: '2026-07-23T02:03:56.501Z_post-1',
+    data: { sortKey: expectedSortKey },
+  }]
+  const database = createDatabase(posts)
+
+  const result = await applyArchivePinnedSortRepair(database)
+
+  assert.equal(posts[0].sortKey, expectedSortKey)
+  assert.equal(Object.hasOwn(posts[0], 'data'), false)
+  assert.equal(result.applied, 1)
+  assert.equal(result.residual.updates, 0)
 })
 
 test('release migration does not restore a pinned key after a concurrent unpin', async () => {
