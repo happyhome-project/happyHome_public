@@ -103,7 +103,7 @@ export async function processClaimedPostRagSync(
   const now = options.now || (() => new Date().toISOString())
   try {
     const current = await resolveCurrentSource(claim)
-    await refreshPostSearchIndexById(claim.postId)
+    await refreshPostSearchIndexById(claim.postId, { workerDesiredRevision: claim.desiredRevision })
     const indexState = await readOptional<Record<string, any>>(POST_RAG_INDEX_STATE, claim.postId)
     if (!current.eligible || !current.searchablePost || !current.section || !current.scope) {
       const sourceVersion = removalVersion({

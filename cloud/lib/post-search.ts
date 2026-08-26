@@ -71,7 +71,12 @@ export interface PostSearchIndexState {
   chunkCount: number
   termCount: number
   vectorTermCount: number
+  workerLexicalDesiredRevision?: number
   errorMessage?: string
+}
+
+export interface RefreshPostSearchIndexOptions {
+  workerDesiredRevision?: number
 }
 
 export interface SearchQuery {
@@ -651,35 +656,57 @@ export async function indexPostForSearch(post: Post, section: Section, now = new
   return { indexed: true, postId, termCount, chunkCount: chunks.length, vectorTermCount }
 }
 
-export async function refreshPostSearchIndexById(postId: string) {
+function normalizeWorkerDesiredRevision(options: RefreshPostSearchIndexOptions): number | null {
+  const revision = options.workerDesiredRevision
+  return typeof revision === 'number' && Number.isSafeInteger(revision) && revision >= 0 ? revision : null
+}
+
+async function markWorkerLexicalRevision(postId: string, workerDesiredRevision: number | null) {
+  if (workerDesiredRevision === null) return
+  await getDb().updateById(POST_SEARCH_INDEX_STATE, postId, { workerLexicalDesiredRevision: workerDesiredRevision })
+}
+
+export async function refreshPostSearchIndexById(
+  postId: string,
+  options: RefreshPostSearchIndexOptions = {},
+) {
   const db = getDb()
   const normalizedPostId = String(postId || '').trim()
   if (!normalizedPostId) return { indexed: false, postId: '', termCount: 0, reason: 'empty_post_id' }
-
-  let post: Post | null = null
-  try {
-    post = await db.getById('posts', normalizedPostId) as Post
-  } catch {
-    post = null
+  const workerDesiredRevision = normalizeWorkerDesiredRevision(options)
+  if (workerDesiredRevision !== null) {
+    const existingState = await db.getByIdOrNull<PostSearchIndexState>(POST_SEARCH_INDEX_STATE, normalizedPostId)
+    if (existingState && existingState.workerLexicalDesiredRevision === workerDesiredRevision) {
+      return {
+        indexed: existingState.status === 'indexed',
+        postId: normalizedPostId,
+        termCount: existingState.termCount,
+        chunkCount: existingState.chunkCount,
+        vectorTermCount: existingState.vectorTermCount,
+        reason: 'worker_revision_already_refreshed',
+      }
+    }
   }
+
+  const post = await db.getByIdOrNull<Post>('posts', normalizedPostId)
   if (!post) {
     await removePostSearchIndex(normalizedPostId)
+    await markWorkerLexicalRevision(normalizedPostId, workerDesiredRevision)
     return { indexed: false, postId: normalizedPostId, termCount: 0, reason: 'post_missing' }
   }
 
-  const section = await loadPostContentSection(post, async (collectionName, id) => {
-    try {
-      return await db.getById(collectionName, id)
-    } catch {
-      return null
-    }
-  })
+  const section = await loadPostContentSection(post, (collectionName, id) => (
+    db.getByIdOrNull(collectionName, id)
+  ))
   if (!section) {
     await removePostSearchIndex(normalizedPostId)
+    await markWorkerLexicalRevision(normalizedPostId, workerDesiredRevision)
     return { indexed: false, postId: normalizedPostId, termCount: 0, reason: 'section_missing' }
   }
 
-  return indexPostForSearch(post, section)
+  const result = await indexPostForSearch(post, section)
+  await markWorkerLexicalRevision(normalizedPostId, workerDesiredRevision)
+  return result
 }
 
 export async function backfillPostSearchIndexesForCommunity(communityId: string) {
