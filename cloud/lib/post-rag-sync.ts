@@ -77,6 +77,14 @@ function readIndexScope(value: unknown): RagIndexPolicy | null {
   return value === 'business' || value === 'validation' || value === 'excluded' ? value : null
 }
 
+function hasActiveLease(current: Partial<PostRagSyncDocument> | null, now: string) {
+  if (current?.status !== 'processing') return false
+  const leaseOwner = readNullableString(current.leaseOwner)
+  const leaseToken = readNullableString(current.leaseToken)
+  const leaseExpiresAt = readNullableString(current.leaseExpiresAt)
+  return Boolean(leaseOwner && leaseToken && leaseExpiresAt && leaseExpiresAt > now)
+}
+
 export async function schedulePostRagSyncInTransaction(
   transaction: DbTransaction,
   input: SchedulePostRagSyncInput,
@@ -94,20 +102,21 @@ export async function schedulePostRagSyncInTransaction(
   )
   const desiredRevision = readCurrentRevision(current) + 1
   const createdAt = current ? requireIsoTimestamp(current.createdAt, 'createdAt') : now
+  const preserveActiveLease = hasActiveLease(current, now)
   const document: Omit<PostRagSyncDocument, '_id'> = {
     schemaVersion: 1,
     postId,
     communityId,
     sectionId,
     desiredRevision,
-    status: 'pending',
+    status: preserveActiveLease ? 'processing' : 'pending',
     attempts: 0,
     reason,
     requestedAt: now,
     nextAttemptAt: now,
-    leaseOwner: null,
-    leaseToken: null,
-    leaseExpiresAt: null,
+    leaseOwner: preserveActiveLease ? readNullableString(current?.leaseOwner) : null,
+    leaseToken: preserveActiveLease ? readNullableString(current?.leaseToken) : null,
+    leaseExpiresAt: preserveActiveLease ? readNullableString(current?.leaseExpiresAt) : null,
     appliedSourceVersion: readNullableString(current?.appliedSourceVersion),
     indexScope: readIndexScope(current?.indexScope),
     lastErrorCode: null,
@@ -234,6 +243,34 @@ function ownsClaim(current: PostRagSyncDocument | null, input: { workerId: strin
     && current.desiredRevision === input.desiredRevision)
 }
 
+function ownsLease(current: PostRagSyncDocument | null, input: { workerId: string; leaseToken: string }) {
+  return Boolean(current
+    && current.status === 'processing'
+    && current.leaseOwner === input.workerId
+    && current.leaseToken === input.leaseToken)
+}
+
+async function releaseSupersededLease(
+  transaction: DbTransaction,
+  current: PostRagSyncDocument | null,
+  input: { postId: string; workerId: string; leaseToken: string },
+  now: string,
+) {
+  if (!ownsLease(current, input)) return false
+  const pending: PostRagSyncDocument = {
+    ...current!,
+    status: 'pending',
+    leaseOwner: null,
+    leaseToken: null,
+    leaseExpiresAt: null,
+    nextAttemptAt: now,
+    updatedAt: now,
+  }
+  const { _id, ...data } = pending
+  await transaction.collection(POST_RAG_SYNC_STATE).doc(input.postId).set({ data })
+  return true
+}
+
 export async function completePostRagSync(input: {
   postId: string
   workerId: string
@@ -247,7 +284,10 @@ export async function completePostRagSync(input: {
   const now = requireIsoTimestamp(input.now || new Date().toISOString(), 'now')
   return db.runTransaction(async (transaction) => {
     const current = await db.transactionGetByIdOrNull<PostRagSyncDocument>(transaction, POST_RAG_SYNC_STATE, postId)
-    if (!ownsClaim(current, input)) return { applied: false, reason: 'superseded' as const }
+    if (!ownsClaim(current, input)) {
+      await releaseSupersededLease(transaction, current, { ...input, postId }, now)
+      return { applied: false, reason: 'superseded' as const }
+    }
     const completed: PostRagSyncDocument = {
       ...current!,
       status: 'synced',
@@ -282,7 +322,10 @@ export async function failPostRagSync(input: {
   const maxAttempts = requirePositiveInteger(input.maxAttempts || 5, 'maxAttempts', 20)
   return db.runTransaction(async (transaction) => {
     const current = await db.transactionGetByIdOrNull<PostRagSyncDocument>(transaction, POST_RAG_SYNC_STATE, postId)
-    if (!ownsClaim(current, input)) return { applied: false, reason: 'superseded' as const }
+    if (!ownsClaim(current, input)) {
+      await releaseSupersededLease(transaction, current, { ...input, postId }, now)
+      return { applied: false, reason: 'superseded' as const }
+    }
     const attempts = current!.attempts + 1
     const deadLetter = !input.retryable || attempts >= maxAttempts
     const delaySeconds = Math.min(600, 5 * (2 ** Math.max(0, attempts - 1)))
