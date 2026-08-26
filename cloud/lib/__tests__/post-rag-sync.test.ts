@@ -51,6 +51,7 @@ function createTransaction(initial: Record<string, Record<string, StoredDocument
 }
 
 const NOW = '2026-07-19T01:00:00.000Z'
+const BEFORE_LEASE_EXPIRY = '2026-07-19T01:00:30.000Z'
 const LATER = '2026-07-19T01:01:00.000Z'
 
 test('a newer schedule replaces the same post state instead of appending history', async () => {
@@ -86,7 +87,7 @@ test('a newer schedule replaces the same post state instead of appending history
   expect(store.writes()).toBe(2)
 })
 
-test('rescheduling a processing record clears stale lease retry and error state', async () => {
+test('rescheduling keeps an active lease so two revisions cannot index the same post concurrently', async () => {
   const store = createTransaction({
     [POST_RAG_SYNC_STATE]: {
       'post-1': {
@@ -107,11 +108,11 @@ test('rescheduling a processing record clears stale lease retry and error state'
   expect(store.get(POST_RAG_SYNC_STATE, 'post-1')).toMatchObject({
     desiredRevision: 8,
     sectionId: '',
-    status: 'pending',
+    status: 'processing',
     attempts: 0,
-    leaseOwner: null,
-    leaseToken: null,
-    leaseExpiresAt: null,
+    leaseOwner: 'worker-1',
+    leaseToken: 'lease-1',
+    leaseExpiresAt: '2026-07-19T01:05:00.000Z',
     lastErrorCode: null,
     createdAt: NOW,
   })
@@ -173,7 +174,13 @@ test('a late worker completion cannot overwrite a newer requested revision', asy
   expect(claimed).toMatchObject({ desiredRevision: 1, status: 'processing', leaseOwner: 'worker-1' })
 
   await schedulePostRagSyncInTransaction(store.transaction, {
-    postId: 'post-1', communityId: 'community-1', sectionId: 'section-1', reason: 'post.updated', now: LATER,
+    postId: 'post-1', communityId: 'community-1', sectionId: 'section-1', reason: 'post.updated', now: BEFORE_LEASE_EXPIRY,
+  })
+  expect(store.get(POST_RAG_SYNC_STATE, 'post-1')).toMatchObject({
+    desiredRevision: 2,
+    status: 'processing',
+    leaseOwner: 'worker-1',
+    leaseToken: claimed!.leaseToken,
   })
   const completion = await completePostRagSync({
     postId: 'post-1', workerId: 'worker-1', leaseToken: claimed!.leaseToken,
@@ -182,6 +189,11 @@ test('a late worker completion cannot overwrite a newer requested revision', asy
 
   expect(completion).toEqual({ applied: false, reason: 'superseded' })
   expect(store.get(POST_RAG_SYNC_STATE, 'post-1')).toMatchObject({
-    desiredRevision: 2, status: 'pending', appliedSourceVersion: null,
+    desiredRevision: 2,
+    status: 'pending',
+    leaseOwner: null,
+    leaseToken: null,
+    leaseExpiresAt: null,
+    appliedSourceVersion: null,
   })
 })

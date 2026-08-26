@@ -129,7 +129,7 @@ test('isPostVisibleToMembers only exposes active posts that passed audit', () =>
   expect(isPostVisibleToMembers({ status: 'deleted', auditStatus: 'pass' })).toBe(false)
 })
 
-test('auditAndApply enqueues section-free archive posts for formal RAG search', async () => {
+test('auditAndApply schedules section-free archive posts for durable RAG search without synchronous lexical refresh', async () => {
   const content = { title: '标题' }
   const contentDigest = computeContentRevisionDigest(content as any)
   const post = {
@@ -148,7 +148,7 @@ test('auditAndApply enqueues section-free archive posts for formal RAG search', 
     postSnapshot: post as any,
   } as any)
 
-  expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('archive-1')
+  expect(postSearch.refreshPostSearchIndexById).not.toHaveBeenCalled()
   expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
     postId: 'archive-1', communityId: 'community-1', sectionId: '',
   }))
@@ -168,7 +168,7 @@ test('applyAuditSummary keeps later archive audit callbacks in RAG lifecycle', a
 
   await applyAuditSummary('archive-callback-1', 'content', 'pass', '', post as any)
 
-  expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('archive-callback-1')
+  expect(postSearch.refreshPostSearchIndexById).not.toHaveBeenCalled()
   expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
     postId: 'archive-callback-1', sectionId: '',
   }))
@@ -291,7 +291,7 @@ test('auditPostContent stores the immutable content revision on every target tas
   }))
 })
 
-test('approvePostAudit promotes pendingContent and marks the post as passed', async () => {
+test('approvePostAudit commits and schedules durable sync when legacy lexical refresh rejects', async () => {
   const legacyPost: any = { _id: 'post-1', pendingContent: { title: 'new title' } }
   ;(db.getById as jest.Mock).mockResolvedValue(legacyPost)
   ;(db.transactionGetByIdOrNull as jest.Mock).mockImplementation(async (_transaction, collection: string) => (
@@ -305,8 +305,9 @@ test('approvePostAudit promotes pendingContent and marks the post as passed', as
       else legacyPost[key] = value
     }
   })
+  ;(postSearch.refreshPostSearchIndexById as jest.Mock).mockRejectedValue(new Error('legacy search unavailable'))
 
-  await approvePostAudit('post-1')
+  await expect(approvePostAudit('post-1')).resolves.toEqual({ success: true })
 
   expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({
     content: { __set: { title: 'new title' } },
@@ -314,7 +315,7 @@ test('approvePostAudit promotes pendingContent and marks the post as passed', as
     pendingAuditStatus: 'pass',
     auditStatus: 'pass',
   }))
-  expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
+  expect(postSearch.refreshPostSearchIndexById).not.toHaveBeenCalled()
   expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ postId: 'post-1', reason: 'post.audit_changed' }))
   expect(db.query).toHaveBeenCalledWith(
     'post_media_cleanup_retries',
@@ -544,7 +545,7 @@ test('approvePostAudit replaces content and removes pendingContent atomically fo
     content: { __set: { guide_age: '8岁以上' } },
     pendingContent: { __remove: true },
   }))
-  expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-guide')
+  expect(postSearch.refreshPostSearchIndexById).not.toHaveBeenCalled()
   expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ postId: 'post-guide', reason: 'post.audit_changed' }))
 })
 
@@ -588,7 +589,7 @@ test('rejectPostAudit rejects pending edits without replacing current content', 
     pendingAuditReason: 'manual reject',
   }))
   expect((db.updateById as jest.Mock).mock.calls[0][2].content).toBeUndefined()
-  expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
+  expect(postSearch.refreshPostSearchIndexById).not.toHaveBeenCalled()
   expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ postId: 'post-1' }))
 })
 
@@ -908,7 +909,7 @@ test('applyWechatMediaAuditResult is idempotent for duplicate rejected delivery'
   expect(db.create).not.toHaveBeenCalled()
   expect(db.updateById).toHaveBeenCalledWith('posts', 'post-1', expect.objectContaining({ auditStatus: 'rejected' }))
   expect((db.updateById as jest.Mock).mock.calls.filter(([collection]) => collection === 'posts')).toHaveLength(1)
-  expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledTimes(1)
+  expect(postSearch.refreshPostSearchIndexById).not.toHaveBeenCalled()
   expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledTimes(1)
 })
 

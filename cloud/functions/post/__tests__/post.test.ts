@@ -589,7 +589,10 @@ test('create: attendance、公告和音频控件不会参与普通用户发帖',
   expect(db.create).toHaveBeenCalledWith('posts', expect.objectContaining({
     content: { 'title-widget': '周六爬山' },
   }))
-  expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
+  expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+    postId: 'post-1', communityId: 'community-1', sectionId: 'section-1', reason: 'post.created',
+  }))
+  expect(postSearch.refreshPostSearchIndexById).not.toHaveBeenCalled()
 })
 
 test('create: rejects sections that do not belong to the requested community', async () => {
@@ -793,7 +796,10 @@ test('update: 保存时会清理无效字段、attendance、公告和音频字�
     pendingContent: { __set: { 'title-widget': '更新后的标题' } },
     pendingAuditStatus: 'pending',
   }))
-  expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
+  expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+    postId: 'post-1', sectionId: 'section-1', reason: 'post.updated',
+  }))
+  expect(postSearch.refreshPostSearchIndexById).not.toHaveBeenCalled()
 })
 
 test('update: archive image note updates content and normalized topics without loading a section', async () => {
@@ -2802,7 +2808,7 @@ test('create: persists an image-text archive post without loading or storing a s
   expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
     postId: 'archive-image-1', communityId: 'community-1', sectionId: '',
   }))
-  expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('archive-image-1')
+  expect(postSearch.refreshPostSearchIndexById).not.toHaveBeenCalled()
   expect(db.setById).toHaveBeenCalledWith('archive_post_topics', expect.stringMatching(/^apt_/), expect.objectContaining({
     communityId: 'community-1', postId: 'archive-image-1', topicKey: '亲子出游', auditStatus: result.auditStatus,
   }))

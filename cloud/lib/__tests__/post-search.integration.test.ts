@@ -307,6 +307,74 @@ test('refreshPostSearchIndexById removes stale index when post is deleted', asyn
   })
 })
 
+test('refreshPostSearchIndexById propagates a transient post read without removing the current index', async () => {
+  await indexPostForSearch(post(), section)
+  const getByIdOrNull = jest.spyOn(db, 'getByIdOrNull').mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'posts' && id === 'post-1') throw new Error('temporary post read failure')
+    return null
+  })
+
+  await expect(refreshPostSearchIndexById('post-1')).rejects.toThrow('temporary post read failure')
+
+  expect(_dump('post_search_documents')).toHaveLength(1)
+  expect(_dump('post_search_index_state')[0]).toMatchObject({ postId: 'post-1', status: 'indexed' })
+  getByIdOrNull.mockRestore()
+})
+
+test('refreshPostSearchIndexById propagates a transient section read without removing the current index', async () => {
+  await db.create('sections', section)
+  await db.create('posts', post())
+  await refreshPostSearchIndexById('post-1')
+  const originalGetByIdOrNull = db.getByIdOrNull
+  const getByIdOrNull = jest.spyOn(db, 'getByIdOrNull').mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'sections' && id === 'section-course') throw new Error('temporary section read failure')
+    return originalGetByIdOrNull(collectionName, id)
+  })
+
+  await expect(refreshPostSearchIndexById('post-1')).rejects.toThrow('temporary section read failure')
+
+  expect(_dump('post_search_documents')).toHaveLength(1)
+  expect(_dump('post_search_index_state')[0]).toMatchObject({ postId: 'post-1', status: 'indexed' })
+  getByIdOrNull.mockRestore()
+})
+
+test('refreshPostSearchIndexById propagates a transient collaboration template read without removing the current index', async () => {
+  const template = buildInitialCollaborationTemplates()[0]
+  await db.create('collaboration_templates', template)
+  await db.create('posts', post({
+    sectionId: '', area: 'collaboration', collaborationTemplateId: template._id, collaborationSystemKey: template.systemKey,
+    content: { carpool_origin: '青山村东门', carpool_destination: '成都软件园', carpool_departure_time: '2026-07-16T08:30:00.000Z' },
+  }))
+  await refreshPostSearchIndexById('post-1')
+  const originalGetByIdOrNull = db.getByIdOrNull
+  const getByIdOrNull = jest.spyOn(db, 'getByIdOrNull').mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'collaboration_templates' && id === template._id) throw new Error('temporary template read failure')
+    return originalGetByIdOrNull(collectionName, id)
+  })
+
+  await expect(refreshPostSearchIndexById('post-1')).rejects.toThrow('temporary template read failure')
+
+  expect(_dump('post_search_documents')).toHaveLength(1)
+  expect(_dump('post_search_index_state')[0]).toMatchObject({ postId: 'post-1', status: 'indexed' })
+  getByIdOrNull.mockRestore()
+})
+
+test('worker lexical revision skips an unchanged retry and refreshes a newer desired revision', async () => {
+  await db.create('sections', section)
+  await db.create('posts', post({ content: { title: 'revision one title' } }))
+
+  await refreshPostSearchIndexById('post-1', { workerDesiredRevision: 1 })
+  await db.updateById('posts', 'post-1', { content: { title: 'revision two title' } })
+
+  const retry = await refreshPostSearchIndexById('post-1', { workerDesiredRevision: 1 })
+  expect(retry).toMatchObject({ indexed: true, reason: 'worker_revision_already_refreshed' })
+  expect(_dump('post_search_documents')[0]).toMatchObject({ title: 'revision one title' })
+
+  await refreshPostSearchIndexById('post-1', { workerDesiredRevision: 2 })
+  expect(_dump('post_search_documents')[0]).toMatchObject({ title: 'revision two title' })
+  expect(_dump('post_search_index_state')[0]).toMatchObject({ workerLexicalDesiredRevision: 2 })
+})
+
 test('backfillPostSearchIndexesForCommunity rebuilds visible posts and clears invisible posts', async () => {
   await db.create('sections', section)
   await db.create('posts', post())
