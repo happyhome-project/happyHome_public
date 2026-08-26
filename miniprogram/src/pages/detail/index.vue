@@ -246,9 +246,10 @@
 
 <script setup lang="ts">
 import { computed, onErrorCaptured, reactive, ref, watch } from 'vue'
-import { onLoad, onShow } from '@dcloudio/uni-app'
+import { onHide, onLoad, onShow } from '@dcloudio/uni-app'
 import { collaborationTemplateApi, communityApi, postApi, sectionApi } from '../../api/cloud'
 import { useCommunityStore } from '../../store/community'
+import { useAudioStore } from '../../store/audio'
 import { useUserStore } from '../../store/user'
 import GuideRouteDetailView from '../../components/GuideRouteDetailView.vue'
 import ImageNoteDetailView from '../../components/ImageNoteDetailView.vue'
@@ -310,6 +311,7 @@ const activityInviteState = ref<any>(null)
 const activityInviteLoading = ref(false)
 const showPostSettings = ref(false)
 const communityStore = useCommunityStore()
+const audioStore = useAudioStore()
 const userStore = useUserStore()
 const GUIDE_NOTE_NAME_HINTS = ['亲子出游', '周末遛娃', '村游攻略', '路线攻略', '出游攻略']
 clientLog('info', 'detail.setup', {})
@@ -491,6 +493,10 @@ onShow(() => {
     hasSection: !!section.value,
   })
   void ensurePostLoaded()
+})
+
+onHide(() => {
+  audioStore.cancelPendingPlaybackForPost(currentPostId.value)
 })
 
 watch(

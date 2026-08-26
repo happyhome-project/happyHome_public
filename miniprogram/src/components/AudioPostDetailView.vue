@@ -29,8 +29,14 @@
       >
         <AudioIcon name="previous" size="48rpx" color="#32b77a" />
       </view>
-      <view class="audio-post-detail__control audio-post-detail__control--primary" aria-label="播放或暂停" @tap="togglePlayback">
-        <AudioIcon v-if="isPlaying" name="pause" size="46rpx" color="#ffffff" />
+      <view
+        class="audio-post-detail__control audio-post-detail__control--primary"
+        :class="{ 'audio-post-detail__control--pending': playbackFeedback.loading }"
+        :aria-label="playbackFeedback.loading ? '正在缓冲' : '播放或暂停'"
+        @tap="togglePlayback"
+      >
+        <view v-if="playbackFeedback.loading" class="audio-post-detail__spinner" />
+        <AudioIcon v-else-if="isPlaying" name="pause" size="46rpx" color="#ffffff" />
         <AudioIcon v-else name="play-circle" size="50rpx" color="#ffffff" />
       </view>
       <view
@@ -42,6 +48,10 @@
         <AudioIcon name="next" size="48rpx" color="#32b77a" />
       </view>
     </view>
+    <text
+      class="audio-post-detail__playback-status"
+      :class="{ 'audio-post-detail__playback-status--error': playbackFeedback.message && !playbackFeedback.loading }"
+    >{{ playbackFeedback.message }}</text>
 
     <view class="audio-post-detail__progress">
       <text>{{ formatAudioDuration(elapsedSeconds) }}</text>
@@ -89,6 +99,7 @@ import { useAudioStore } from '../store/audio'
 import {
   DEFAULT_AUDIO_COVER,
   formatAudioDuration,
+  resolveAudioPlaybackFeedback,
   resolveAudioDisplayCover,
   toAudioPlayerTracks,
   type AudioPlayerTrack,
@@ -142,6 +153,11 @@ const elapsedSeconds = computed(() => {
   return Math.min(currentDuration.value, Math.max(0, Number(audioStore.currentTime || 0)))
 })
 const isPlaying = computed(() => isCurrentPost.value && audioStore.isPlaying)
+const playbackFeedback = computed(() => resolveAudioPlaybackFeedback({
+  isCurrentPost: isCurrentPost.value,
+  playbackPending: audioStore.playbackPending,
+  playbackError: audioStore.playbackError,
+}))
 const canPrevious = computed(() => activeIndex.value > 0)
 const canNext = computed(() => activeIndex.value < audioTracks.value.length - 1)
 const playlistMeta = computed(() => ({
@@ -218,8 +234,12 @@ function handleCoverError() {
 .audio-post-detail__controls { display: flex; align-items: center; justify-content: center; gap: 64rpx; margin-top: 18rpx; }
 .audio-post-detail__control { width: 64rpx; height: 64rpx; display: flex; align-items: center; justify-content: center; }
 .audio-post-detail__control--primary { width: 88rpx; height: 88rpx; border-radius: 50%; background: #32b77a; box-shadow: 0 8rpx 22rpx rgba(50,183,122,.22); }
+.audio-post-detail__control--pending { box-shadow: 0 8rpx 22rpx rgba(50,183,122,.3); }
 .audio-post-detail__control--disabled { opacity: .3; }
-.audio-post-detail__progress { display: grid; grid-template-columns: 66rpx minmax(0,1fr) 66rpx; align-items: center; gap: 10rpx; margin-top: 16rpx; color: #9ba29f; font-size: 20rpx; }
+.audio-post-detail__spinner { width: 34rpx; height: 34rpx; border: 4rpx solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; box-sizing: border-box; animation: audio-post-detail-spin .8s linear infinite; }
+.audio-post-detail__playback-status { display: block; min-height: 30rpx; margin-top: 6rpx; color: #6f7b75; font-size: 20rpx; line-height: 30rpx; text-align: center; }
+.audio-post-detail__playback-status--error { color: #a85c4d; }
+.audio-post-detail__progress { display: grid; grid-template-columns: 66rpx minmax(0,1fr) 66rpx; align-items: center; gap: 10rpx; margin-top: 2rpx; color: #9ba29f; font-size: 20rpx; }
 .audio-post-detail__progress > text:last-child { text-align: right; }
 .audio-post-detail__slider { width: 100%; margin: 0; }
 .audio-post-detail__tracks { overflow: hidden; margin-top: 22rpx; border: 1rpx solid #edf0ee; border-radius: 16rpx; background: #f8f9f8; }
@@ -229,4 +249,6 @@ function handleCoverError() {
 .audio-post-detail__track-index { color: inherit; font-variant-numeric: tabular-nums; }
 .audio-post-detail__track-title { overflow: hidden; color: inherit; text-overflow: ellipsis; white-space: nowrap; }
 .audio-post-detail__track-duration { color: #747d79; font-size: 22rpx; font-variant-numeric: tabular-nums; }
+
+@keyframes audio-post-detail-spin { to { transform: rotate(360deg); } }
 </style>

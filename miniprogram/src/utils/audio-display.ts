@@ -16,6 +16,27 @@ export type AudioPlayerTrack = {
   cover?: string
 }
 
+export type AudioPlaybackFeedbackInput = {
+  isCurrentPost: boolean
+  playbackPending: boolean
+  playbackError: string
+}
+
+export type AudioPlaybackFeedback = {
+  loading: boolean
+  message: string
+}
+
+export function resolveAudioPlaybackFeedback({
+  isCurrentPost,
+  playbackPending,
+  playbackError,
+}: AudioPlaybackFeedbackInput): AudioPlaybackFeedback {
+  if (!isCurrentPost) return { loading: false, message: '' }
+  if (playbackPending) return { loading: true, message: '正在缓冲…' }
+  return { loading: false, message: String(playbackError || '').trim() }
+}
+
 export function summarizeAudioTracks(value: unknown): AudioTrackDisplaySummary {
   const tracks = Array.isArray(value)
     ? value.filter((item): item is AudioTrack => Boolean(item && typeof item === 'object'))

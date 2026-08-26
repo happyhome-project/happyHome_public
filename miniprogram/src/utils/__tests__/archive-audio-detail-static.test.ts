@@ -21,6 +21,13 @@ describe('native archive audio detail presentation', () => {
     expect(detailPage).toContain('!isNativeArchiveAudioDetail')
   })
 
+  test('cancels only pending playback for the current audio post when the detail page hides', () => {
+    const detailPage = source('src/pages/detail/index.vue')
+    expect(detailPage).toContain("import { onHide, onLoad, onShow } from '@dcloudio/uni-app'")
+    expect(detailPage).toContain("import { useAudioStore } from '../../store/audio'")
+    expect(detailPage).toMatch(/onHide\(\(\) => \{[\s\S]*?audioStore\.cancelPendingPlaybackForPost\(currentPostId\.value\)[\s\S]*?\}\)/)
+  })
+
   test('renders the approved order through the track list and nothing below it', () => {
     const path = projectPath('src/components/AudioPostDetailView.vue')
     expect(existsSync(path)).toBe(true)
