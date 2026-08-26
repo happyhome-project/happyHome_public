@@ -37,6 +37,7 @@ import { normalizeMiniprogramUploadReceipt } from './miniprogram-receipt-identit
 import { computeDirectoryDigest } from './release-run-ledger.mjs'
 import { createRuntimeFileManifest } from './release-component-digest.mjs'
 import { abortableDelay, runAbortableShellCapture } from './abortable-process.mjs'
+import { resolveCloudAttestationTimeoutMs } from './release-attestation-timeout.mjs'
 
 async function fixtureRoot() {
   const root = join(tmpdir(), `happyhome-artifacts-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`)
@@ -45,6 +46,12 @@ async function fixtureRoot() {
 }
 
 const execFileAsync = promisify(execFile)
+
+test('formal cloud attestation keeps enough aggregate time for all three CLI attempts', () => {
+  assert.equal(resolveCloudAttestationTimeoutMs(undefined), 120_000)
+  assert.equal(resolveCloudAttestationTimeoutMs('45000'), 45_000)
+  assert.equal(resolveCloudAttestationTimeoutMs('999999'), 120_000)
+})
 
 async function windowsShortPath(path) {
   if (process.platform !== 'win32') return ''

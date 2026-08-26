@@ -76,6 +76,7 @@ import {
 } from './lib/cloudbase-http-function.mjs'
 import { abortableDelay, runAbortableShellCapture } from './lib/abortable-process.mjs'
 import { createProductionReleaseStore } from './lib/cloudbase-release-store.mjs'
+import { resolveCloudAttestationTimeoutMs } from './lib/release-attestation-timeout.mjs'
 import {
   analyzeDevtoolsCloudDeployOutput,
   analyzeDevtoolsUploadInfo,
@@ -260,6 +261,12 @@ function getCloudDeployConcurrency() {
 
 function getCloudSmokeConcurrency() {
   return getPositiveIntFlag('cloud-smoke-concurrency', 3, { min: 1, max: 5 })
+}
+
+function getCloudAttestationTimeoutMs() {
+  return resolveCloudAttestationTimeoutMs(
+    getFlagValue('cloud-attestation-timeout-ms') || process.env.HH_CLOUD_ATTESTATION_TIMEOUT_MS,
+  )
 }
 
 function getCloudEnvId() {
@@ -1743,7 +1750,7 @@ async function runFormalRelease(options = {}) {
           manifest: subsetManifest,
           forceRedeployCurrent,
           onSecrets: (secrets) => releaseLedger.registerSecrets(secrets),
-          timeoutMs: getPositiveIntFlag('cloud-attestation-timeout-ms', 30_000, { max: 120_000 }),
+          timeoutMs: getCloudAttestationTimeoutMs(),
           attest: async (input) => { await localExactShaFence(`attest:${input.functionName}`); return await attestCloudWithPriorArtifact(input) },
           deploy: async ({ artifactRoot, functionName }) => {
             const artifact = artifactManifest.artifacts.cloud[functionName]
