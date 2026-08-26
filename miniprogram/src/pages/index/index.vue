@@ -393,22 +393,29 @@
             </view>
           </view>
         </view>
-        <!-- #ifdef H5 -->
         <button
           class="guest-intro-primary"
+          data-testid="guest-intro-browse-trigger"
+          @tap="handleGuestIntroBrowse"
+        >
+          <text>{{ guestIntroConfig.primaryActionText }}</text>
+        </button>
+        <!-- #ifdef H5 -->
+        <button
+          class="guest-intro-secondary guest-intro-secondary--login"
           data-testid="guest-intro-login-trigger"
-          @tap="handleGuestIntroPrimary"
+          @tap="handleGuestIntroLogin"
         >
           <view class="guest-intro-wechat-icon">
             <view class="guest-intro-wechat-bubble guest-intro-wechat-bubble--main"></view>
             <view class="guest-intro-wechat-bubble guest-intro-wechat-bubble--mini"></view>
           </view>
-          <text>{{ guestIntroConfig.primaryActionText }}</text>
+          <text>{{ guestIntroConfig.secondaryActionText }}</text>
         </button>
         <!-- #endif -->
         <!-- #ifndef H5 -->
         <button
-          class="guest-intro-primary"
+          class="guest-intro-secondary guest-intro-secondary--login"
           data-testid="guest-intro-login-trigger"
           open-type="chooseAvatar"
           @chooseavatar="handleGuestIntroChooseAvatar"
@@ -417,12 +424,9 @@
             <view class="guest-intro-wechat-bubble guest-intro-wechat-bubble--main"></view>
             <view class="guest-intro-wechat-bubble guest-intro-wechat-bubble--mini"></view>
           </view>
-          <text>{{ guestIntroConfig.primaryActionText }}</text>
+          <text>{{ guestIntroConfig.secondaryActionText }}</text>
         </button>
         <!-- #endif -->
-        <view class="guest-intro-secondary" @tap="handleGuestIntroSecondary">
-          <text>{{ guestIntroConfig.secondaryActionText }}</text>
-        </view>
         </template>
 
         <view v-else class="guest-intro-login-form">
@@ -1685,7 +1689,7 @@ function markCurrentGuestIntroSeen() {
   showGuestIntro.value = false
 }
 
-function handleGuestIntroPrimary() {
+function handleGuestIntroLogin() {
   guestIntroLoginError.value = ''
   guestIntroLoginMode.value = 'web'
 }
@@ -1820,7 +1824,7 @@ async function submitGuestIntroLogin() {
   }
 }
 
-function handleGuestIntroSecondary() {
+function handleGuestIntroBrowse() {
   markCurrentGuestIntroSeen()
 }
 
@@ -4356,12 +4360,23 @@ onShareAppMessage(() => {
   gap: 16rpx;
   min-height: 44rpx;
   margin-top: 20rpx;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
+.guest-intro-secondary::after { border: 0; }
 .guest-intro-secondary text {
   font-size: 32rpx;
   font-weight: 400;
   line-height: 48rpx;
   color: #181818;
+}
+.guest-intro-secondary--login .guest-intro-wechat-bubble {
+  background: #07c160;
+}
+.guest-intro-secondary--login .guest-intro-wechat-bubble::before,
+.guest-intro-secondary--login .guest-intro-wechat-bubble::after {
+  background: #ffffff;
 }
 .guest-intro-login-form {
   display: flex;
