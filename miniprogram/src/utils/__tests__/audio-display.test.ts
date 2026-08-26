@@ -2,6 +2,39 @@ import { describe, expect, test } from 'vitest'
 import * as audioDisplay from '../audio-display'
 
 describe('audio display formatting', () => {
+  test('describes immediate buffering feedback only for the current post', () => {
+    const resolveAudioPlaybackFeedback = (audioDisplay as any).resolveAudioPlaybackFeedback
+    expect(typeof resolveAudioPlaybackFeedback).toBe('function')
+
+    expect(resolveAudioPlaybackFeedback({
+      isCurrentPost: true,
+      playbackPending: true,
+      playbackError: '',
+    })).toEqual({ loading: true, message: '正在缓冲…' })
+
+    expect(resolveAudioPlaybackFeedback({
+      isCurrentPost: false,
+      playbackPending: true,
+      playbackError: '',
+    })).toEqual({ loading: false, message: '' })
+  })
+
+  test('describes retryable failure feedback only for the current post', () => {
+    const resolveAudioPlaybackFeedback = (audioDisplay as any).resolveAudioPlaybackFeedback
+
+    expect(resolveAudioPlaybackFeedback({
+      isCurrentPost: true,
+      playbackPending: false,
+      playbackError: '音频加载失败，请重试',
+    })).toEqual({ loading: false, message: '音频加载失败，请重试' })
+
+    expect(resolveAudioPlaybackFeedback({
+      isCurrentPost: false,
+      playbackPending: false,
+      playbackError: '音频加载失败，请重试',
+    })).toEqual({ loading: false, message: '' })
+  })
+
   test('formats feed and player durations without inventing invalid time', () => {
     const formatAudioDuration = (audioDisplay as any).formatAudioDuration
     expect(typeof formatAudioDuration).toBe('function')

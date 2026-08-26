@@ -115,6 +115,51 @@ describe('audio store', () => {
     expect(mock.calls.play).toBe(1)
   })
 
+  test('starts the selected track before warming the rest of the playlist', async () => {
+    const mock = makeMockBackend()
+    const selectedSigner = deferred<Array<{ fileID: string; tempFileURL: string }>>()
+    const backgroundSigner = deferred<Array<{ fileID: string; tempFileURL: string }>>()
+    const getTempFileURL = vi.fn((fileIDs: string[]) => (
+      fileIDs.includes(TRACKS[0].fileID) ? selectedSigner.promise : backgroundSigner.promise
+    ))
+    _setAudioStoreDepsForTesting({
+      backend: mock.backend,
+      storage: makeStorage().storage,
+      getTempFileURL,
+    })
+    const store = useAudioStore()
+
+    const playRequest = store.playPlaylist(TRACKS, 0, META)
+
+    expect(getTempFileURL).toHaveBeenCalledTimes(1)
+    expect(getTempFileURL).toHaveBeenNthCalledWith(1, [TRACKS[0].fileID, TRACKS[0].cover])
+    expect(mock.calls.play).toBe(0)
+
+    selectedSigner.resolve([
+      { fileID: TRACKS[0].fileID, tempFileURL: 'https://signed/one.mp3' },
+      { fileID: TRACKS[0].cover, tempFileURL: 'https://signed/one.png' },
+    ])
+    await playRequest
+
+    expect(mock.calls.setSrc).toEqual([{
+      url: 'https://signed/one.mp3',
+      title: 'Lesson 1',
+      meta: {
+        coverImgUrl: 'https://signed/one.png',
+        epname: 'Course',
+        singer: '',
+      },
+    }])
+    expect(mock.calls.play).toBe(1)
+    expect(store.isPlaying).toBe(true)
+    expect(getTempFileURL).toHaveBeenCalledTimes(2)
+    expect(getTempFileURL).toHaveBeenNthCalledWith(2, [TRACKS[1].fileID])
+
+    backgroundSigner.resolve([
+      { fileID: TRACKS[1].fileID, tempFileURL: 'https://signed/two.mp3' },
+    ])
+  })
+
   test('next and prev switch tracks', async () => {
     const mock = makeMockBackend()
     _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
@@ -317,11 +362,12 @@ describe('audio store', () => {
     })
     const store = useAudioStore()
     await store.playPlaylist(TRACKS, 0, META)
+    const signingCallCount = getTempFileURL.mock.calls.length
 
     await store.togglePlay()
     await store.togglePlay()
 
-    expect(getTempFileURL).toHaveBeenCalledTimes(1)
+    expect(getTempFileURL).toHaveBeenCalledTimes(signingCallCount)
     expect(mock.calls.setSrc.at(-1)).toEqual({
       url: 'https://cdn/cloud://audio/1.mp3',
       title: 'Lesson 1',
@@ -461,7 +507,7 @@ describe('audio store', () => {
     expect(mock.calls.setSrc[0]?.title).toBe(TRACKS[expectedIndex].title)
   })
 
-  test('toggle cancellation discards a seek queued during URL resolution', async () => {
+  test('repeated toggle preserves a seek queued during URL resolution', async () => {
     const mock = makeMockBackend()
     const signer = deferred<Array<{ fileID: string; tempFileURL: string }>>()
     _setAudioStoreDepsForTesting({
@@ -478,9 +524,14 @@ describe('audio store', () => {
     signer.resolve([{ fileID: track.fileID, tempFileURL: 'https://signed/seek-toggle.mp3' }])
     await request
 
-    expect(mock.calls.seek).toEqual([])
-    expect(mock.calls.setSrc).toEqual([])
-    expect(mock.calls.play).toBe(0)
+    expect(mock.calls.seek).toEqual([33])
+    expect(mock.calls.setSrc).toEqual([{
+      url: 'https://signed/seek-toggle.mp3',
+      title: 'Seek toggle',
+      meta: { coverImgUrl: '', epname: 'Course', singer: '' },
+    }])
+    expect(mock.calls.play).toBe(1)
+    expect(store.currentTime).toBe(33)
   })
 
   test('close discards a seek queued during URL resolution', async () => {
@@ -581,6 +632,31 @@ describe('audio store', () => {
     expect(mock.calls.seek).toEqual([])
   })
 
+  test('exposes a retryable playback error and clears it when retry starts', async () => {
+    const mock = makeMockBackend({ emitPlayEvent: false })
+    _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
+    const store = useAudioStore()
+    const track = {
+      fileID: 'https://cdn/retry-after-error.mp3',
+      title: 'Retry after error',
+      duration: 60,
+    }
+
+    await store.playPlaylist([track], 0, { ...META, postId: 'retry-after-error-post' })
+    mock.handlers.onError?.(new Error('network failed'))
+
+    expect(store.playbackPending).toBe(false)
+    expect(store.isPlaying).toBe(false)
+    expect(store.playbackError).toBe('音频加载失败，请重试')
+
+    await store.togglePlay()
+
+    expect(store.playbackError).toBe('')
+    expect(store.playbackPending).toBe(true)
+    mock.handlers.onPlay?.()
+    expect(store.isPlaying).toBe(true)
+  })
+
   test('makes a synchronous setSrc failure terminal and ignores late onPlay', async () => {
     const mock = makeMockBackend({
       emitPlayEvent: false,
@@ -633,7 +709,7 @@ describe('audio store', () => {
     expect(mock.calls.seek).toEqual([])
   })
 
-  test('toggle cancellation resets optimistic time for an unactivated request', async () => {
+  test('repeated toggle preserves optimistic time for an unactivated request', async () => {
     const mock = makeMockBackend({ emitPlayEvent: false })
     _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
     const store = useAudioStore()
@@ -646,9 +722,9 @@ describe('audio store', () => {
 
     await store.togglePlay()
 
-    expect(store.playbackPending).toBe(false)
+    expect(store.playbackPending).toBe(true)
     expect(store.isPlaying).toBe(false)
-    expect(store.currentTime).toBe(0)
+    expect(store.currentTime).toBe(33)
     expect(mock.calls.seek).toEqual([])
   })
 
@@ -804,7 +880,7 @@ describe('audio store', () => {
     expect(store.currentTime).toBe(6)
   })
 
-  test('lets toggle cancel autoplay after setSrc while the backend is still waiting to play', async () => {
+  test('keeps the pending play intent when toggle is tapped again before onPlay', async () => {
     const mock = makeMockBackend({ emitPlayEvent: false })
     _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
     const store = useAudioStore()
@@ -819,11 +895,11 @@ describe('audio store', () => {
 
     expect(mock.calls.setSrc).toHaveLength(setSrcCount)
     expect(mock.calls.play).toBe(playCount)
-    expect(mock.calls.pause).toBe(1)
-    expect(store.isPlaying).toBe(false)
+    expect(mock.calls.pause).toBe(0)
+    expect(store.isPlaying).toBe(true)
   })
 
-  test('treats toggle during URL resolution as cancellation of pending autoplay', async () => {
+  test('keeps the pending play intent when toggle is tapped again during URL resolution', async () => {
     const mock = makeMockBackend()
     const signer = deferred<Array<{ fileID: string; tempFileURL: string }>>()
     const getTempFileURL = vi.fn(() => signer.promise)
@@ -836,14 +912,50 @@ describe('audio store', () => {
     const track = { fileID: 'cloud://audio/pending.mp3', title: 'Pending', duration: 40 }
 
     const playRequest = store.playPlaylist([track], 0, { ...META, postId: 'pending-post' })
-    const cancelRequest = store.togglePlay()
+    const duplicateRequest = store.togglePlay()
     signer.resolve([{ fileID: track.fileID, tempFileURL: 'https://signed/pending.mp3' }])
-    await Promise.all([playRequest, cancelRequest])
+    await Promise.all([playRequest, duplicateRequest])
 
-    expect(mock.calls.setSrc).toEqual([])
-    expect(mock.calls.play).toBe(0)
-    expect(store.isPlaying).toBe(false)
+    expect(mock.calls.setSrc).toEqual([{
+      url: 'https://signed/pending.mp3',
+      title: 'Pending',
+      meta: { coverImgUrl: '', epname: 'Course', singer: '' },
+    }])
+    expect(mock.calls.play).toBe(1)
+    expect(mock.calls.pause).toBe(0)
+    expect(store.isPlaying).toBe(true)
     expect(store.currentTrack?.fileID).toBe(track.fileID)
+  })
+
+  test('keeps a repeated request for the same pending track idempotent', async () => {
+    const mock = makeMockBackend()
+    const signer = deferred<Array<{ fileID: string; tempFileURL: string }>>()
+    const getTempFileURL = vi.fn(() => signer.promise)
+    _setAudioStoreDepsForTesting({
+      backend: mock.backend,
+      storage: makeStorage().storage,
+      getTempFileURL,
+    })
+    const store = useAudioStore()
+
+    const firstRequest = store.playPlaylist(TRACKS, 1, META)
+    const duplicateRequest = store.playPlaylist(TRACKS, 1, META)
+
+    expect(getTempFileURL).toHaveBeenCalledTimes(1)
+    expect(mock.calls.pause).toBe(0)
+
+    signer.resolve([
+      { fileID: TRACKS[1].fileID, tempFileURL: 'https://signed/two.mp3' },
+    ])
+    await Promise.all([firstRequest, duplicateRequest])
+
+    expect(mock.calls.setSrc).toEqual([{
+      url: 'https://signed/two.mp3',
+      title: 'Lesson 2',
+      meta: { coverImgUrl: '', epname: 'Course', singer: '' },
+    }])
+    expect(mock.calls.play).toBe(1)
+    expect(store.isPlaying).toBe(true)
   })
 
   test('keeps URL, title, cover, and post metadata from one immutable request snapshot', async () => {
@@ -926,6 +1038,47 @@ describe('audio store', () => {
     expect(mock.calls.play).toBe(0)
     expect(store.currentPlaylist).toEqual([])
     expect(store.currentMeta).toBeNull()
+  })
+
+  test('detail leave cancels only a matching pending playback request', async () => {
+    const mock = makeMockBackend()
+    const signer = deferred<Array<{ fileID: string; tempFileURL: string }>>()
+    _setAudioStoreDepsForTesting({
+      backend: mock.backend,
+      storage: makeStorage().storage,
+      getTempFileURL: vi.fn(() => signer.promise),
+    })
+    const store = useAudioStore()
+    const track = { fileID: 'cloud://audio/leaving.mp3', title: 'Leaving', duration: 60 }
+    const request = store.playPlaylist([track], 0, { ...META, postId: 'leaving-post' })
+
+    store.cancelPendingPlaybackForPost('another-post')
+    expect(store.playbackPending).toBe(true)
+    expect(mock.calls.stop).toBe(0)
+
+    store.cancelPendingPlaybackForPost('leaving-post')
+    signer.resolve([{ fileID: track.fileID, tempFileURL: 'https://signed/leaving.mp3' }])
+    await request
+
+    expect(mock.calls.stop).toBe(1)
+    expect(mock.calls.setSrc).toEqual([])
+    expect(mock.calls.play).toBe(0)
+    expect(store.currentPlaylist).toEqual([])
+    expect(store.currentMeta).toBeNull()
+  })
+
+  test('detail leave keeps established background playback running', async () => {
+    const mock = makeMockBackend()
+    _setAudioStoreDepsForTesting({ backend: mock.backend, storage: makeStorage().storage })
+    const store = useAudioStore()
+    await store.playPlaylist(TRACKS, 0, META)
+
+    store.cancelPendingPlaybackForPost(META.postId)
+
+    expect(mock.calls.stop).toBe(0)
+    expect(store.isPlaying).toBe(true)
+    expect(store.currentPlaylist).toEqual(TRACKS)
+    expect(store.currentMeta).toEqual(META)
   })
 
   test('close stops backend and clears audio state', async () => {
