@@ -5,20 +5,19 @@ import {
 } from '../guest-intro-config'
 
 describe('guest intro config', () => {
-  test('normalizes an empty config to the Figma welcome default copy', () => {
+  test('normalizes an empty config to a browse-first welcome experience', () => {
     const config = normalizeGuestIntroConfig(null)
 
     expect(config.enabled).toBe(true)
     expect(config.title).toBe('「专属社群空间」')
-    expect(config.body).toContain('志同道合的邻居')
-    expect(config.body).toContain('更美好的社区')
+    expect(config.body).toBe('在这里，与志同道合的人一起建设美好社群。')
     expect(config.features).toEqual([
       { key: 'recent', label: '看最近', text: '通知、活动、课程安排' },
-      { key: 'materials', label: '找资料', text: '就医、出行、电话和地点' },
+      { key: 'materials', label: '找资料', text: '课件、出行、电话和地点' },
       { key: 'history', label: '翻历史', text: '以前整理过的有用内容' },
     ])
-    expect(config.primaryActionText).toBe('微信一键登录')
-    expect(config.secondaryActionText).toBe('先随便看看')
+    expect(config.primaryActionText).toBe('先随便看看')
+    expect(config.secondaryActionText).toBe('微信一键登录')
   })
 
   test('trims editable fields and fills missing feature rows from defaults', () => {
@@ -61,6 +60,24 @@ describe('guest intro config', () => {
       enabled: false,
       updatedAt: '2026-06-01T00:00:00.000Z',
     })
+  })
+
+  test('migrates the previous default version to the browse-first welcome copy', () => {
+    const config = normalizeGuestIntroConfig({
+      enabled: true,
+      version: 'guest-intro-default-v2',
+      title: '「专属社群空间」',
+      body: '在这里，与志同道合的邻居一起探索绿色生活方式，建设更美好的社区。',
+      features: [
+        { key: 'recent', label: '看最近', text: '通知、活动、课程安排' },
+        { key: 'materials', label: '找资料', text: '就医、出行、电话和地点' },
+        { key: 'history', label: '翻历史', text: '以前整理过的有用内容' },
+      ],
+      primaryActionText: '微信一键登录',
+      secondaryActionText: '先随便看看',
+    })
+
+    expect(config).toEqual(DEFAULT_GUEST_INTRO_CONFIG)
   })
 
   test('saving copy keeps the current version unless publishNewVersion is requested', () => {

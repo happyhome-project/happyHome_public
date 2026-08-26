@@ -104,7 +104,7 @@ describe('Figma community directory pages', () => {
 
   test('home applies cached snapshots as shell-only data and hydrates guest login in the background', () => {
     const code = readPage('index')
-    const login = code.match(/async function submitGuestIntroLogin[\s\S]*?(?=\nfunction handleGuestIntroSecondary)/)?.[0] ?? ''
+    const login = code.match(/async function submitGuestIntroLogin[\s\S]*?(?=\nfunction handleGuestIntroBrowse)/)?.[0] ?? ''
     const cancel = code.match(/function cancelGuestIntroLogin[\s\S]*?(?=\nfunction getGuestAvatarFileSize)/)?.[0] ?? ''
 
     expect(code).toContain('createHomeSnapshotShell')

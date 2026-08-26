@@ -73,20 +73,22 @@ describe('guest intro popup visibility', () => {
     })).toBe(false)
   })
 
-  test('starts login on home and lets guests browse without opening onboarding', () => {
+  test('makes guest browsing the primary action and keeps login as a secondary action', () => {
     const homeSource = fs.readFileSync(path.resolve(process.cwd(), 'src/pages/index/index.vue'), 'utf8')
-    const primaryStart = homeSource.indexOf('function handleGuestIntroPrimary')
-    const secondaryStart = homeSource.indexOf('function handleGuestIntroSecondary')
-    const primaryHandler = homeSource.slice(primaryStart, secondaryStart)
-    const secondaryHandler = homeSource.slice(
-      secondaryStart,
-      homeSource.indexOf('\nfunction ', secondaryStart + 1),
+    const loginStart = homeSource.indexOf('function handleGuestIntroLogin')
+    const browseStart = homeSource.indexOf('function handleGuestIntroBrowse')
+    const loginHandler = homeSource.slice(loginStart, browseStart)
+    const browseHandler = homeSource.slice(
+      browseStart,
+      homeSource.indexOf('\nfunction ', browseStart + 1),
     )
 
-    expect(primaryStart).toBeGreaterThan(-1)
-    expect(primaryHandler).not.toContain('/pages/profile/index')
-    expect(primaryHandler).not.toContain('switchTab')
-    expect(primaryHandler).not.toContain('reLaunch')
+    expect(loginStart).toBeGreaterThan(-1)
+    expect(browseStart).toBeGreaterThan(-1)
+    expect(loginHandler).not.toContain('/pages/profile/index')
+    expect(loginHandler).not.toContain('switchTab')
+    expect(loginHandler).not.toContain('reLaunch')
+    expect(homeSource).toContain('data-testid="guest-intro-browse-trigger"')
     expect(homeSource).toContain('data-testid="guest-intro-login-trigger"')
     expect(homeSource).toContain('open-type="chooseAvatar"')
     expect(homeSource).toContain('data-testid="guest-intro-login-submit"')
@@ -94,20 +96,21 @@ describe('guest intro popup visibility', () => {
     expect(homeSource).toMatch(/handleGuestIntroChooseAvatar[\s\S]*guestIntroLoginMode\.value = 'nickname'[\s\S]*nextTick[\s\S]*guestIntroNicknameFocused\.value = true/)
     expect(homeSource).not.toContain('showKeyboard')
     expect(homeSource).not.toContain('guest-intro-secondary-plus')
-    expect(secondaryHandler).toContain('markCurrentGuestIntroSeen()')
-    expect(secondaryHandler).not.toContain('openOnboardingPreservingStack')
-    expect(DEFAULT_GUEST_INTRO_CONFIG.secondaryActionText).toBe('先随便看看')
+    expect(browseHandler).toContain('markCurrentGuestIntroSeen()')
+    expect(browseHandler).not.toContain('openOnboardingPreservingStack')
+    expect(DEFAULT_GUEST_INTRO_CONFIG.primaryActionText).toBe('先随便看看')
+    expect(DEFAULT_GUEST_INTRO_CONFIG.secondaryActionText).toBe('微信一键登录')
   })
 
   test('upgrades previous default creation copy without overwriting custom copy', () => {
     expect(normalizeGuestIntroConfig({
       ...DEFAULT_GUEST_INTRO_CONFIG,
       secondaryActionText: '免费创建我的社群',
-    }).secondaryActionText).toBe('先随便看看')
+    }).secondaryActionText).toBe('微信一键登录')
     expect(normalizeGuestIntroConfig({
       ...DEFAULT_GUEST_INTRO_CONFIG,
       secondaryActionText: '创建我自己的社群',
-    }).secondaryActionText).toBe('先随便看看')
+    }).secondaryActionText).toBe('微信一键登录')
     expect(normalizeGuestIntroConfig({
       ...DEFAULT_GUEST_INTRO_CONFIG,
       secondaryActionText: '加入社区',

@@ -26,20 +26,21 @@ export const GUEST_INTRO_CONFIG_KEY = 'guest_sample_intro'
 
 export const DEFAULT_GUEST_INTRO_CONFIG: GuestIntroConfig = {
   enabled: true,
-  version: 'guest-intro-default-v2',
+  version: 'guest-intro-default-v3',
   title: '「专属社群空间」',
-  body: '在这里，与志同道合的邻居一起探索绿色生活方式，建设更美好的社区。',
+  body: '在这里，与志同道合的人一起建设美好社群。',
   features: [
     { key: 'recent', label: '看最近', text: '通知、活动、课程安排' },
-    { key: 'materials', label: '找资料', text: '就医、出行、电话和地点' },
+    { key: 'materials', label: '找资料', text: '课件、出行、电话和地点' },
     { key: 'history', label: '翻历史', text: '以前整理过的有用内容' },
   ],
-  primaryActionText: '微信一键登录',
-  secondaryActionText: '先随便看看',
+  primaryActionText: '先随便看看',
+  secondaryActionText: '微信一键登录',
 }
 
 const LEGACY_DEFAULT_GUEST_INTRO_VERSIONS = new Set([
   'guest-intro-default-v1',
+  'guest-intro-default-v2',
 ])
 const LEGACY_DEFAULT_SECONDARY_ACTION_TEXTS = new Set([
   '免费创建我的社群',
