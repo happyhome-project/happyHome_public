@@ -86,6 +86,7 @@ import { main as rawMain } from '../index'
 import * as db from '../../../lib/db'
 import * as storage from '../../../lib/storage'
 import * as postSearch from '../../../lib/post-search'
+import * as postRagSync from '../../../lib/post-rag-sync'
 import * as contentAudit from '../../../lib/content-audit'
 import { buildInitialCollaborationTemplates } from '../../../shared/collaboration-templates'
 
@@ -420,7 +421,10 @@ describe('post.createAdmin', () => {
     expect(payload.content['w-1']).toBe('Hello')
     expect(payload.content['w-2']).toHaveLength(1)
     expect(payload.content['w-att']).toBeUndefined()
-    expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-NEW')
+    expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      postId: 'post-NEW', communityId: 'c-1', sectionId: 's-1', reason: 'post.created',
+    }))
+    expect(postSearch.refreshPostSearchIndexById).not.toHaveBeenCalled()
   })
 
   test('normalizes old guide_note sections before admin-created posts are saved', async () => {
@@ -722,7 +726,10 @@ describe('post.updateAdmin', () => {
     expect(patch.commentCount).toBeUndefined()
     expect(patch.likeCount).toBeUndefined()
     expect(patch.pendingContent.__set.legacyRemovedWidget).toBeUndefined()
-    expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
+    expect(postRagSync.schedulePostRagSyncInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      postId: 'post-1', communityId: 'community-1', sectionId: 'section-1', reason: 'post.updated',
+    }))
+    expect(postSearch.refreshPostSearchIndexById).not.toHaveBeenCalled()
   })
 
   test('normalizes old guide_note sections before saving admin edits', async () => {

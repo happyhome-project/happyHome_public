@@ -5,7 +5,6 @@ import { isDeepStrictEqual } from 'util'
 import * as db from './db'
 import * as storage from './storage'
 import { postWxJson } from './wx-openapi'
-import { refreshPostSearchIndexById } from './post-search'
 import { schedulePostRagSyncInTransaction } from './post-rag-sync'
 import {
   prepareArchivePostTopicReconciliation,
@@ -1208,7 +1207,6 @@ export async function applyAuditSummary(
   if (!transition.applied) return { applied: false, stale: true, contentRevision: revision }
   await processMemberAudioCleanupJobs({ postId, candidates: transition.candidates })
   await recoverMemberAudioCleanupJobs({ postId, excludeCandidates: transition.candidates })
-  await refreshPostSearchIndexById(postId)
   return { applied: true, stale: false, contentRevision: terminalRevision || revision }
 }
 

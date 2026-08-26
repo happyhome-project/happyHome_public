@@ -5,6 +5,11 @@ const mockDb = {
 }
 jest.mock('../db', () => mockDb)
 
+const mockRefreshPostSearchIndexById = jest.fn()
+jest.mock('../post-search', () => ({
+  refreshPostSearchIndexById: (...args: any[]) => mockRefreshPostSearchIndexById(...args),
+}))
+
 const mockComplete = jest.fn()
 const mockFail = jest.fn()
 jest.mock('../post-rag-sync', () => ({
@@ -47,6 +52,7 @@ function provider() {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockRefreshPostSearchIndexById.mockResolvedValue(undefined)
   mockDb.updateById.mockResolvedValue({ stats: { updated: 1 } })
   mockComplete.mockResolvedValue({ applied: true })
   mockFail.mockResolvedValue({ applied: true })
@@ -59,6 +65,8 @@ test('a missing never-indexed post converges without any provider call', async (
   expect(result).toMatchObject({ outcome: 'removed', providerCalled: false })
   expect(recording.deletePostChunks).not.toHaveBeenCalled()
   expect(recording.upsertChunks).not.toHaveBeenCalled()
+  expect(mockRefreshPostSearchIndexById).toHaveBeenCalledTimes(1)
+  expect(mockRefreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
   expect(mockComplete).toHaveBeenCalledWith(expect.objectContaining({ desiredRevision: 1, indexScope: null }))
 })
 
@@ -77,6 +85,8 @@ test.each([
   const recording = provider()
   await expect(processClaimedPostRagSync(claim, { provider: recording })).resolves.toMatchObject({ outcome: 'removed' })
   expect(recording.upsertChunks).not.toHaveBeenCalled()
+  expect(mockRefreshPostSearchIndexById).toHaveBeenCalledTimes(1)
+  expect(mockRefreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
 })
 
 test('indexes current approved source with the policy scope and exact source version', async () => {
@@ -96,7 +106,31 @@ test('indexes current approved source with the policy scope and exact source ver
   expect(recording.deletePostChunks).toHaveBeenCalledWith('post-1')
   expect(recording.upsertChunks).toHaveBeenCalledWith([expect.objectContaining({ sourceVersion: 'source-v1', indexScope: 'validation' })])
   expect(mockUpsertState).toHaveBeenCalledWith('post-1', expect.objectContaining({ sourceVersion: 'source-v1', indexScope: 'validation' }))
+  expect(mockRefreshPostSearchIndexById).toHaveBeenCalledTimes(1)
+  expect(mockRefreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
   expect(mockComplete).toHaveBeenCalledWith(expect.objectContaining({ sourceVersion: 'source-v1', indexScope: 'validation' }))
+})
+
+test('a lexical refresh failure prevents completion and records a bounded retryable failure', async () => {
+  const post = { _id: 'post-1', communityId: 'community-1', sectionId: 'section-1', status: 'active', auditStatus: 'pass', content: {}, createdAt: '2026-07-19T00:00:00.000Z', updatedAt: '2026-07-19T00:00:00.000Z' }
+  const section = { _id: 'section-1', communityId: 'community-1', status: 'active', widgets: [] }
+  mockDb.getByIdOrNull.mockImplementation(async (collection: string) => {
+    if (collection === 'posts') return post
+    if (collection === 'communities') return { _id: 'community-1', status: 'active', ragIndexPolicy: 'business' }
+    if (collection === 'sections') return section
+    return null
+  })
+  mockBuild.mockResolvedValue({ sourceVersion: 'source-v1', chunks: [], videoRag: null })
+  mockRefreshPostSearchIndexById.mockRejectedValue(new Error('search backend unavailable'))
+
+  await expect(processClaimedPostRagSync(claim, { provider: provider() })).resolves.toEqual({
+    postId: 'post-1', outcome: 'failed', errorCode: 'PROVIDER_FAILED',
+  })
+
+  expect(mockRefreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
+  expect(mockComplete).not.toHaveBeenCalled()
+  expect(mockFail).toHaveBeenCalledWith(expect.objectContaining({ errorCode: 'PROVIDER_FAILED', retryable: true }))
+  expect(JSON.stringify(mockFail.mock.calls)).not.toContain('search backend unavailable')
 })
 
 test('provider failures are reduced to a bounded code without storing its secret message', async () => {
