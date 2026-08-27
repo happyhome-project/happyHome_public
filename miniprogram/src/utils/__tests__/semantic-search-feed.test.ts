@@ -46,4 +46,41 @@ describe('semantic search waterfall paging', () => {
     expect(repeated.nextSkip).toBe(20)
     expect(repeated.hasMore).toBe(false)
   })
+
+  test('uses explicit backend paging facts when total only describes the current page', () => {
+    const first = appendSemanticSearchPage(emptySemanticSearchFeed(), {
+      items: Array.from({ length: 10 }, (_, index) => item(`post-${index}`)),
+      total: 10,
+      skip: 0,
+      limit: 10,
+      hasMore: true,
+      nextSkip: 10,
+    })
+
+    expect(first.nextSkip).toBe(10)
+    expect(first.hasMore).toBe(true)
+  })
+
+  test('keeps following an advancing explicit cursor when a provider page only repeats visible posts', () => {
+    const first = appendSemanticSearchPage(emptySemanticSearchFeed(), {
+      items: [item('post-1')],
+      total: 1,
+      skip: 0,
+      limit: 1,
+      hasMore: true,
+      nextSkip: 1,
+    })
+    const duplicateChunkPage = appendSemanticSearchPage(first, {
+      items: [item('post-1')],
+      total: 1,
+      skip: 1,
+      limit: 1,
+      hasMore: true,
+      nextSkip: 2,
+    })
+
+    expect(duplicateChunkPage.columns.flat()).toHaveLength(1)
+    expect(duplicateChunkPage.nextSkip).toBe(2)
+    expect(duplicateChunkPage.hasMore).toBe(true)
+  })
 })

@@ -21,10 +21,12 @@ import {
   backfillPostRagJobsForSectionBatch,
   buildNoEvidenceRagResult,
   buildRagQuery,
+  buildTencentEsHybridSearchBody,
   buildVideoRagCacheKey,
   buildVideoRagChunksForPost,
   planVideoRagAnalysisJobsForPost,
   createTencentLkeapCloudBaseProvider,
+  createTencentCloudBaseAtomicProvider,
   createTencentRagProvider,
   createTencentRagProviderFromEnv,
   createVideoRagAnalyzerFromEnv,
@@ -813,7 +815,12 @@ test('searchPostsWithRag drops member-only citations and generated answer for pu
     if (collection === 'posts') return ids.map((id) => ({ _id: id, communityId: 'community-1', sectionId: 'section-1', status: 'active', auditStatus: 'pass', updatedAt: '2026-06-25T00:00:00.000Z' }))
     if (collection === 'post_rag_sync_state') return ids.map((id) => ({ _id: id, status: 'synced', appliedSourceVersion: 'source-v1', indexScope: 'business' }))
     if (collection === POST_RAG_INDEX_STATE) return ids.map((id) => ({ _id: id, status: 'indexed', sourceVersion: 'source-v1', indexScope: 'business' }))
-    if (collection === 'sections') return [{ _id: 'section-1', communityId: 'community-1', status: 'active' }]
+    if (collection === 'sections') return [{
+      _id: 'section-1', communityId: 'community-1', status: 'active', widgets: [
+        { widgetId: 'title', fieldKey: 'title', type: 'rich_note', label: '正文', order: 0, visibility: 'public' },
+        { widgetId: 'contact', fieldKey: 'contact', type: 'rich_note', label: '联系方式', order: 1, visibility: 'member' },
+      ],
+    }]
     return []
   })
   const provider = {
@@ -974,6 +981,146 @@ test('searchPostsWithRag counts unique posts instead of repeated chunks from one
   expect(result.total).toBe(1)
 })
 
+test('searchPostsWithRag projects a collaboration result into a truthful waterfall card', async () => {
+  mockDb.getByIdOrNull.mockResolvedValue({ _id: 'community-1', status: 'active', ragIndexPolicy: 'business' })
+  mockDb.getByIds.mockImplementation(async (collection: string, ids: string[]) => {
+    if (collection === 'posts') return ids.map((id) => ({
+      _id: id,
+      communityId: 'community-1',
+      sectionId: '',
+      area: 'collaboration',
+      collaborationTemplateId: 'collaboration-template-carpool',
+      status: 'active',
+      auditStatus: 'pass',
+      authorId: 'author-1',
+      content: { destination: '省博物馆', departure: '周六上午九点' },
+      updatedAt: '2026-08-27T00:00:00.000Z',
+    }))
+    if (collection === 'post_rag_sync_state') return ids.map((id) => ({
+      _id: id, status: 'synced', appliedSourceVersion: 'source-v1', indexScope: 'business',
+    }))
+    if (collection === POST_RAG_INDEX_STATE) return ids.map((id) => ({
+      _id: id, status: 'indexed', sourceVersion: 'source-v1', indexScope: 'business',
+    }))
+    if (collection === 'collaboration_templates') return [{
+      _id: 'collaboration-template-carpool', status: 'active', widgets: [
+        { widgetId: 'destination', fieldKey: 'destination', type: 'short_text', label: '目的地', order: 0 },
+      ],
+    }]
+    return []
+  })
+  const provider = {
+    name: 'cloudbase-rag', isConfigured: () => true,
+    search: jest.fn().mockResolvedValue({
+      total: 1, answer: '找到拼车帖。', mode: 'rag', items: [], hasMore: false, nextSkip: null,
+      citations: [{
+        postId: 'collaboration-post-1', chunkId: 'destination', communityId: 'community-1',
+        title: '周六拼车去省博物馆', sectionId: '', sectionName: '拼车出行', fieldLabel: '目的地',
+        fieldType: 'short_text', preview: '省博物馆，周六上午九点出发', score: 0.9, visibility: 'public',
+        sourceUpdatedAt: '2026-08-27T00:00:00.000Z', sourceVersion: 'source-v1', indexScope: 'business',
+      }],
+    }),
+  }
+
+  const result = await searchPostsWithRag({ communityId: 'community-1', query: '省博物馆', limit: 10 }, { provider })
+
+  expect(result.items).toEqual([expect.objectContaining({
+    _id: 'collaboration-post-1',
+    postId: 'collaboration-post-1',
+    area: 'collaboration',
+    format: 'text',
+    content: {
+      title: '周六拼车去省博物馆',
+      body: { text: '省博物馆，周六上午九点出发' },
+    },
+  })])
+})
+
+test('searchPostsWithRag preserves a legacy section image widget as a real waterfall cover', async () => {
+  mockDb.getByIdOrNull.mockResolvedValue({ _id: 'community-1', status: 'active', ragIndexPolicy: 'business' })
+  mockDb.getByIds.mockImplementation(async (collection: string, ids: string[]) => {
+    if (collection === 'posts') return ids.map((id) => ({
+      _id: id, communityId: 'community-1', sectionId: 'section-1', status: 'active', auditStatus: 'pass',
+      authorId: 'author-1', content: { photos: ['cloud://env/posts/real-cover.jpg'] },
+      updatedAt: '2026-08-27T01:00:00.000Z',
+    }))
+    if (collection === 'post_rag_sync_state') return ids.map((id) => ({
+      _id: id, status: 'synced', appliedSourceVersion: 'source-v1', indexScope: 'business',
+    }))
+    if (collection === POST_RAG_INDEX_STATE) return ids.map((id) => ({
+      _id: id, status: 'indexed', sourceVersion: 'source-v1', indexScope: 'business',
+    }))
+    if (collection === 'sections') return [{
+      _id: 'section-1', communityId: 'community-1', status: 'active',
+      widgets: [{ widgetId: 'photos', type: 'image_group', label: '图片', order: 1 }],
+    }]
+    return []
+  })
+  const provider = {
+    name: 'cloudbase-rag', isConfigured: () => true,
+    search: jest.fn().mockResolvedValue({
+      total: 1, answer: '', mode: 'rag', items: [], hasMore: false, nextSkip: null,
+      citations: [{
+        postId: 'legacy-image-post', chunkId: 'title', communityId: 'community-1',
+        title: '巧手造趣，邻里相伴', sectionId: 'section-1', sectionName: '教育成长', fieldLabel: '标题',
+        fieldType: 'short_text', preview: '凯德风尚亲子手工活动', score: 0.9, visibility: 'public',
+        sourceUpdatedAt: '2026-08-27T01:00:00.000Z', sourceVersion: 'source-v1', indexScope: 'business',
+      }],
+    }),
+  }
+
+  const result = await searchPostsWithRag({ communityId: 'community-1', query: '亲子', limit: 10 }, { provider })
+
+  expect(result.items).toEqual([expect.objectContaining({
+    postId: 'legacy-image-post',
+    format: 'image_text',
+    content: { title: '巧手造趣，邻里相伴', images: ['cloud://env/posts/real-cover.jpg'] },
+  })])
+})
+
+test('searchPostsWithRag does not project member-only media for a public reader', async () => {
+  mockDb.getByIdOrNull.mockResolvedValue({ _id: 'community-1', status: 'active', ragIndexPolicy: 'business' })
+  mockDb.getByIds.mockImplementation(async (collection: string, ids: string[]) => {
+    if (collection === 'posts') return ids.map((id) => ({
+      _id: id, communityId: 'community-1', sectionId: 'section-1', status: 'active', auditStatus: 'pass',
+      content: { privatePhotos: ['cloud://env/posts/member-only.jpg'] }, updatedAt: '2026-08-27T02:00:00.000Z',
+    }))
+    if (collection === 'post_rag_sync_state') return ids.map((id) => ({
+      _id: id, status: 'synced', appliedSourceVersion: 'source-v1', indexScope: 'business',
+    }))
+    if (collection === POST_RAG_INDEX_STATE) return ids.map((id) => ({
+      _id: id, status: 'indexed', sourceVersion: 'source-v1', indexScope: 'business',
+    }))
+    if (collection === 'sections') return [{
+      _id: 'section-1', communityId: 'community-1', status: 'active',
+      widgets: [
+        { widgetId: 'title', fieldKey: 'title', type: 'short_text', label: '标题', visibility: 'public', order: 0 },
+        { widgetId: 'privatePhotos', fieldKey: 'privatePhotos', type: 'image_group', label: '图片', visibility: 'member', order: 1 },
+      ],
+    }]
+    return []
+  })
+  const provider = {
+    name: 'cloudbase-rag', isConfigured: () => true,
+    search: jest.fn().mockResolvedValue({
+      total: 1, answer: '', mode: 'rag', items: [], hasMore: false, nextSkip: null,
+      citations: [{
+        postId: 'public-title-private-image', chunkId: 'public-title', communityId: 'community-1',
+        title: '公开活动标题', sectionId: 'section-1', sectionName: '社区活动', fieldLabel: '标题',
+        fieldType: 'short_text', preview: '公开活动内容', score: 0.9, visibility: 'public',
+        sourceUpdatedAt: '2026-08-27T02:00:00.000Z', sourceVersion: 'source-v1', indexScope: 'business',
+      }],
+    }),
+  }
+
+  const result = await searchPostsWithRag({
+    communityId: 'community-1', query: '公开活动', limit: 10, includeMemberOnly: false,
+  }, { provider })
+
+  expect(result.items[0]).toEqual(expect.objectContaining({ format: 'text' }))
+  expect(result.items[0]?.content).not.toHaveProperty('images')
+})
+
 test('searchPostsWithRag preserves archive audio format, tracks, and covers in result cards', async () => {
   const audios = [{
     title: '奶奶讲故事', duration: 60, size: 1024, ext: 'mp3',
@@ -1086,6 +1233,187 @@ test('selectLkeapCandidateCitations keeps lexical evidence even when semantic ca
   expect(selected.some((citation) => citation.chunkId === 'thrift-chunk')).toBe(true)
 })
 
+test('selectLkeapCandidateCitations does not let many chunks from one post hide later posts', () => {
+  const repeatedPostChunks = Array.from({ length: 40 }, (_, index) => ({
+    postId: 'repeated-post',
+    chunkId: `repeated-chunk-${index}`,
+    communityId: 'community-1',
+    title: '长文帖子',
+    fieldLabel: `段落 ${index}`,
+    fieldType: 'rich_note',
+    preview: `高分段落 ${index}`,
+    score: 1 - index * 0.001,
+    semanticScore: 1 - index * 0.001,
+    lexicalScore: 0,
+  }))
+  const laterPosts = Array.from({ length: 12 }, (_, index) => ({
+    postId: `later-post-${index}`,
+    chunkId: `later-chunk-${index}`,
+    communityId: 'community-1',
+    title: `后续帖子 ${index}`,
+    fieldLabel: '正文',
+    fieldType: 'rich_note',
+    preview: `后续内容 ${index}`,
+    score: 0.5 - index * 0.001,
+    semanticScore: 0.5 - index * 0.001,
+    lexicalScore: 0,
+  }))
+
+  const selected = selectLkeapCandidateCitations([...repeatedPostChunks, ...laterPosts], 10)
+
+  expect(new Set(selected.map((citation) => citation.postId)).size).toBe(10)
+})
+
+test('searchPostsWithRag scans beyond eleven stale provider pages to reach a current result', async () => {
+  mockDb.getByIdOrNull.mockResolvedValue({ _id: 'community-1', status: 'active', ragIndexPolicy: 'business' })
+  mockDb.getByIds.mockImplementation(async (collection: string, ids: string[]) => {
+    if (collection === 'posts') return ids.map((id) => ({
+      _id: id, communityId: 'community-1', sectionId: 'section-1', status: 'active', auditStatus: 'pass',
+      updatedAt: id.startsWith('stale-post-') ? '2026-08-27T01:00:00.000Z' : '2026-08-27T00:00:00.000Z',
+    }))
+    if (collection === 'post_rag_sync_state') return ids.map((id) => ({
+      _id: id, status: 'synced', appliedSourceVersion: 'source-v1', indexScope: 'business',
+    }))
+    if (collection === POST_RAG_INDEX_STATE) return ids.map((id) => ({
+      _id: id, status: 'indexed', sourceVersion: 'source-v1', indexScope: 'business',
+    }))
+    if (collection === 'sections') return [{
+      _id: 'section-1', communityId: 'community-1', status: 'active',
+      widgets: [{ widgetId: 'body', fieldKey: 'body', type: 'rich_note', label: '正文', order: 0 }],
+    }]
+    return []
+  })
+  const citation = (postId: string) => ({
+    postId, chunkId: `${postId}-body`, widgetId: 'body', fieldKey: 'body', communityId: 'community-1',
+    sectionId: 'section-1', title: postId, sectionName: '课程', fieldLabel: '正文', fieldType: 'rich_note',
+    preview: postId, score: 0.9, visibility: 'public' as const,
+    sourceUpdatedAt: '2026-08-27T00:00:00.000Z', sourceVersion: 'source-v1', indexScope: 'business' as const,
+  })
+  const provider = {
+    name: 'paged-provider', isConfigured: () => true,
+    search: jest.fn().mockImplementation(async (input: any) => {
+      const cursor = Number(input.skip || 0)
+      return cursor < 11
+        ? { total: 12, answer: '', mode: 'rag', items: [], citations: [citation(`stale-post-${cursor}`)], hasMore: true, nextSkip: cursor + 1 }
+        : { total: 12, answer: '', mode: 'rag', items: [], citations: [citation('current-post')], hasMore: false, nextSkip: null }
+    }),
+  }
+
+  const result = await searchPostsWithRag({ communityId: 'community-1', query: '课程', limit: 1 }, { provider })
+
+  expect(provider.search).toHaveBeenCalledTimes(12)
+  expect(provider.search.mock.calls.map((call) => call[0].skip)).toEqual(Array.from({ length: 12 }, (_, index) => index))
+  expect(result.mode).toBe('rag')
+  expect(result.items.map((entry) => entry.postId)).toEqual(['current-post'])
+  expect(result.hasMore).toBe(false)
+  expect(result.nextSkip).toBeNull()
+})
+
+test('searchPostsWithRag applies the current widget visibility to old public citations', async () => {
+  mockDb.getByIdOrNull.mockResolvedValue({ _id: 'community-1', status: 'active', ragIndexPolicy: 'business' })
+  mockDb.getByIds.mockImplementation(async (collection: string, ids: string[]) => {
+    if (collection === 'posts') return ids.map((id) => ({
+      _id: id, communityId: 'community-1', sectionId: 'section-1', status: 'active', auditStatus: 'pass',
+      updatedAt: '2026-08-27T00:00:00.000Z',
+    }))
+    if (collection === 'post_rag_sync_state') return ids.map((id) => ({ _id: id, status: 'synced', appliedSourceVersion: 'source-v1', indexScope: 'business' }))
+    if (collection === POST_RAG_INDEX_STATE) return ids.map((id) => ({ _id: id, status: 'indexed', sourceVersion: 'source-v1', indexScope: 'business' }))
+    if (collection === 'sections') return [{
+      _id: 'section-1', communityId: 'community-1', status: 'active',
+      widgets: [{ widgetId: 'private-note', fieldKey: 'privateNote', type: 'rich_note', label: '私密正文', visibility: 'member', order: 0 }],
+    }]
+    return []
+  })
+  const provider = {
+    name: 'old-index-provider', isConfigured: () => true,
+    search: jest.fn().mockResolvedValue({
+      total: 1, answer: '旧公开摘要', mode: 'rag', items: [], citations: [{
+        postId: 'post-1', chunkId: 'chunk-1', widgetId: 'private-note', fieldKey: 'privateNote',
+        communityId: 'community-1', sectionId: 'section-1', title: '私密帖子', sectionName: '课程',
+        fieldLabel: '私密正文', fieldType: 'rich_note', preview: '不应泄露', score: 0.9, visibility: 'public',
+        sourceUpdatedAt: '2026-08-27T00:00:00.000Z', sourceVersion: 'source-v1', indexScope: 'business',
+      }], hasMore: false, nextSkip: null,
+    }),
+  }
+
+  const result = await searchPostsWithRag({
+    communityId: 'community-1', query: '私密', limit: 10, includeMemberOnly: false,
+  }, { provider })
+
+  expect(result.mode).toBe('no_answer')
+  expect(result.answer).not.toContain('不应泄露')
+  expect(result.items).toEqual([])
+})
+
+test('searchPostsWithRag recomputes a public card title after the old title field becomes member-only', async () => {
+  mockDb.getByIdOrNull.mockResolvedValue({ _id: 'community-1', status: 'active', ragIndexPolicy: 'business' })
+  mockDb.getByIds.mockImplementation(async (collection: string, ids: string[]) => {
+    if (collection === 'posts') return ids.map((id) => ({
+      _id: id, communityId: 'community-1', sectionId: 'section-1', status: 'active', auditStatus: 'pass',
+      content: { title: '成员专属标题', body: '公开正文' }, updatedAt: '2026-08-27T00:00:00.000Z',
+    }))
+    if (collection === 'post_rag_sync_state') return ids.map((id) => ({ _id: id, status: 'synced', appliedSourceVersion: 'source-v1', indexScope: 'business' }))
+    if (collection === POST_RAG_INDEX_STATE) return ids.map((id) => ({ _id: id, status: 'indexed', sourceVersion: 'source-v1', indexScope: 'business' }))
+    if (collection === 'sections') return [{
+      _id: 'section-1', communityId: 'community-1', name: '课程', type: 'evergreen', status: 'active',
+      widgets: [
+        { widgetId: 'title', fieldKey: 'title', type: 'short_text', label: '标题', visibility: 'member', order: 0 },
+        { widgetId: 'body', fieldKey: 'body', type: 'rich_text', label: '正文', visibility: 'public', order: 1 },
+      ],
+    }]
+    return []
+  })
+  const provider = {
+    name: 'old-index-provider', isConfigured: () => true,
+    search: jest.fn().mockResolvedValue({
+      total: 1, answer: '', mode: 'rag', items: [], citations: [{
+        postId: 'post-1', chunkId: 'chunk-1', widgetId: 'body', fieldKey: 'body',
+        communityId: 'community-1', sectionId: 'section-1', title: '成员专属标题', sectionName: '课程',
+        fieldLabel: '正文', fieldType: 'rich_text', preview: '公开正文', score: 0.9, visibility: 'public',
+        sourceUpdatedAt: '2026-08-27T00:00:00.000Z', sourceVersion: 'source-v1', indexScope: 'business',
+      }], hasMore: false, nextSkip: null,
+    }),
+  }
+
+  const result = await searchPostsWithRag({
+    communityId: 'community-1', query: '公开正文', limit: 10, includeMemberOnly: false,
+  }, { provider })
+
+  expect(result.mode).toBe('rag')
+  expect(result.items[0]).toEqual(expect.objectContaining({ title: '公开正文' }))
+  expect(result.items[0]?.content?.title).toBe('公开正文')
+  expect(JSON.stringify(result)).not.toContain('成员专属标题')
+})
+
+test('searchPostsWithRag rejects posts whose collaboration template is disabled', async () => {
+  mockDb.getByIdOrNull.mockResolvedValue({ _id: 'community-1', status: 'active', ragIndexPolicy: 'business' })
+  mockDb.getByIds.mockImplementation(async (collection: string, ids: string[]) => {
+    if (collection === 'posts') return ids.map((id) => ({
+      _id: id, communityId: 'community-1', area: 'collaboration', collaborationTemplateId: 'template-1',
+      status: 'active', auditStatus: 'pass', updatedAt: '2026-08-27T00:00:00.000Z',
+    }))
+    if (collection === 'post_rag_sync_state') return ids.map((id) => ({ _id: id, status: 'synced', appliedSourceVersion: 'source-v1', indexScope: 'business' }))
+    if (collection === POST_RAG_INDEX_STATE) return ids.map((id) => ({ _id: id, status: 'indexed', sourceVersion: 'source-v1', indexScope: 'business' }))
+    if (collection === 'collaboration_templates') return [{ _id: 'template-1', status: 'disabled', widgets: [] }]
+    return []
+  })
+  const provider = {
+    name: 'old-index-provider', isConfigured: () => true,
+    search: jest.fn().mockResolvedValue({
+      total: 1, answer: '旧答案', mode: 'rag', items: [], citations: [{
+        postId: 'post-1', chunkId: 'chunk-1', communityId: 'community-1', title: '已停用模板帖子',
+        fieldLabel: '正文', fieldType: 'rich_note', preview: '旧内容', score: 0.9, visibility: 'public',
+        sourceUpdatedAt: '2026-08-27T00:00:00.000Z', sourceVersion: 'source-v1', indexScope: 'business',
+      }], hasMore: false, nextSkip: null,
+    }),
+  }
+
+  const result = await searchPostsWithRag({ communityId: 'community-1', query: '旧内容', limit: 10 }, { provider })
+
+  expect(result.mode).toBe('no_answer')
+  expect(result.items).toEqual([])
+})
+
 test('rankLkeapEvidenceCitations drops negative rerank noise and keeps lexical evidence first', () => {
   const ranked = rankLkeapEvidenceCitations([
     {
@@ -1159,6 +1487,55 @@ test('createTencentRagProviderFromEnv defaults to CloudBase retrieval without an
   } finally {
     process.env = previousEnv
   }
+})
+
+test('CloudBase atomic provider paginates ranked unique posts beyond the first page', async () => {
+  const chunks = Array.from({ length: 12 }, (_, index) => ({
+    _id: `chunk-${index}`,
+    chunkId: `chunk-${index}`,
+    postId: `post-${index}`,
+    communityId: 'community-1',
+    sectionId: 'section-1',
+    sectionName: '亲子活动',
+    title: `亲子帖子${index}`,
+    fieldLabel: '正文',
+    fieldType: 'rich_note',
+    text: `亲子活动内容${index}`,
+    preview: `亲子活动内容${index}`,
+    visibility: 'public',
+    sourceUpdatedAt: '2026-08-27T00:00:00.000Z',
+    sourceVersion: 'source-v1',
+    indexScope: 'business',
+    embedding: [1, 0],
+  }))
+  mockDb.query.mockResolvedValue(chunks)
+  const requestAtomicJson = jest.fn(async (_config: any, action: string) => {
+    if (action === 'GetTextEmbedding') return { Response: { Data: [{ Embedding: [1, 0] }] } }
+    if (action === 'RunRerank') return {
+      Response: { Data: chunks.map((_, index) => ({ Index: index, RelevanceScore: 1 - index / 100 })) },
+    }
+    if (action === 'ChatCompletions') return { Response: { Choices: [{ Message: { Content: '找到亲子活动。' } }] } }
+    throw new Error(`unexpected atomic action: ${action}`)
+  })
+  const provider = createTencentCloudBaseAtomicProvider({
+    atomicSecretId: 'sid', atomicSecretKey: 'secret', atomicRegion: 'ap-shanghai',
+    embeddingModel: 'embedding', rerankModel: 'rerank', llmModel: 'llm',
+    chunkPageSize: 100, maxCandidateChunks: 100,
+  } as any, { requestAtomicJson: requestAtomicJson as any })
+
+  const first = await provider.search({
+    communityId: 'community-1', query: '亲子', skip: 0, limit: 10,
+    includeMemberOnly: true, indexScope: 'business', ragQuery: buildRagQuery('亲子'),
+  })
+  const second = await provider.search({
+    communityId: 'community-1', query: '亲子', skip: 10, limit: 10,
+    includeMemberOnly: true, indexScope: 'business', ragQuery: buildRagQuery('亲子'),
+  })
+
+  expect(first).toEqual(expect.objectContaining({ total: 12, hasMore: true, nextSkip: 10 }))
+  expect(first.items).toHaveLength(10)
+  expect(second).toEqual(expect.objectContaining({ total: 12, hasMore: false, nextSkip: null }))
+  expect(second.items.map((item) => item.postId)).toEqual(['post-10', 'post-11'])
 })
 
 test('Tencent ES provider uses rank_fusion hybrid retrieval and filters weak evidence before LLM answer', async () => {
@@ -1242,7 +1619,7 @@ test('Tencent ES provider uses rank_fusion hybrid retrieval and filters weak evi
     sectionId: '',
     query: '勤俭持家',
     skip: 0,
-    limit: 10,
+    limit: 2,
     includeMemberOnly: false,
     ragQuery: buildRagQuery('勤俭持家'),
   })
@@ -1258,8 +1635,12 @@ test('Tencent ES provider uses rank_fusion hybrid retrieval and filters weak evi
     { term: { communityId: 'community-1' } },
     { term: { visibility: 'public' } },
   ]))
+  expect(searchCall?.body._source).toEqual(expect.arrayContaining([
+    'widgetId', 'fieldKey', 'sourceVersion', 'indexScope',
+  ]))
   expect(result.citations.map((citation) => citation.chunkId)).toEqual(['thrift-chunk'])
   expect(result.items.map((item) => item.postId)).toEqual(['thrift-post'])
+  expect(result).toEqual(expect.objectContaining({ hasMore: false, nextSkip: null }))
   expect(result.answer).toContain('第50次明士课程资料')
   expect(requestJson).toHaveBeenCalledWith(
     expect.any(Object),
@@ -1267,6 +1648,22 @@ test('Tencent ES provider uses rank_fusion hybrid retrieval and filters weak evi
     expect.stringContaining('_inference/completion/'),
     expect.any(Object),
   )
+})
+
+test('Tencent ES hybrid retrieval window covers a deep requested page', () => {
+  const body = buildTencentEsHybridSearchBody({
+    communityId: 'community-1', query: '亲子', skip: 50, limit: 10,
+    includeMemberOnly: true, indexScope: 'business', ragQuery: buildRagQuery('亲子'),
+  }, {
+    endpoint: 'https://es.example.com', username: 'elastic', password: 'secret',
+    indexName: 'happyhome_post_rag_chunks', vectorField: 'embedding',
+    embeddingInferenceId: 'embedding', rerankInferenceId: 'rerank', llmInferenceId: 'llm',
+  }, [1, 0]) as any
+
+  expect(body.retriever.rank_fusion.rank_window_size).toBeGreaterThanOrEqual(60)
+  const knn = body.retriever.rank_fusion.retrievers.find((retriever: any) => retriever.knn)?.knn
+  expect(knn.k).toBeGreaterThanOrEqual(60)
+  expect(knn.num_candidates).toBeGreaterThanOrEqual(knn.k)
 })
 
 test('Tencent ES provider builds citation evidence from the full chunk text, not the stale preview', async () => {

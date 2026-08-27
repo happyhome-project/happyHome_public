@@ -33,6 +33,8 @@ export interface RagCitation {
   sectionName?: string
   fieldLabel: string
   fieldType: string
+  widgetId?: string
+  fieldKey?: string
   preview: string
   score: number
   visibility?: 'public' | 'member'
@@ -51,6 +53,8 @@ export interface RagSearchResult extends PostSearchResult {
   answer: string
   citations: RagCitation[]
   mode: RagSearchMode
+  hasMore?: boolean
+  nextSkip?: number | null
   provider?: string
   fallbackReason?: string
 }
@@ -94,6 +98,8 @@ export interface RagChunkDocument {
   title: string
   fieldLabel: string
   fieldType: string
+  widgetId?: string
+  fieldKey?: string
   text: string
   preview: string
   sourceUpdatedAt: string
@@ -287,6 +293,8 @@ export function buildNoEvidenceRagResult(params: {
     answer: '没有找到足够相关的帖子，暂时不能给出确定回答。',
     citations: [],
     mode: 'no_answer',
+    hasMore: false,
+    nextSkip: null,
   }
 }
 
@@ -309,6 +317,8 @@ function buildUnavailableFallbackRagResult(params: {
     answer: '',
     citations: [],
     mode: 'fallback',
+    hasMore: false,
+    nextSkip: null,
     ...(params.reason ? { fallbackReason: params.reason } : {}),
   }
 }
@@ -404,6 +414,57 @@ function archiveSearchCardProjection(post: any): ArchiveSearchCardProjection {
   }
 }
 
+function searchCardProjection(
+  post: any,
+  item: PostSearchResultItem,
+  section?: any,
+  includeMemberOnly = true,
+): ArchiveSearchCardProjection {
+  if (post?.area === 'archive') return archiveSearchCardProjection(post)
+  const content = post?.content && typeof post.content === 'object' ? post.content : {}
+  const widgets = Array.isArray(section?.widgets) ? section.widgets : []
+  const valuesForType = (type: string) => widgets
+    .filter((widget: any) => widget?.type === type && (includeMemberOnly || widget?.visibility !== 'member'))
+    .map((widget: any) => content[widget.widgetId])
+  const images = [...new Set([
+    ...valuesForType('image_group').flatMap((value: unknown) => Array.isArray(value) ? value : []),
+    ...valuesForType('rich_note').flatMap((value: any) => Array.isArray(value?.imageFileIDs) ? value.imageFileIDs : []),
+  ].map((value) => String(value || '').trim()).filter(Boolean))]
+  const videos = valuesForType('video_group')
+    .flatMap((value: unknown) => Array.isArray(value) ? value : [])
+    .map((video: any) => ({ cover: String(video?.cover || '').trim() }))
+  const audios = valuesForType('audio_group')
+    .flatMap((value: unknown) => Array.isArray(value) ? value : [])
+    .map((audio: any) => ({
+      title: String(audio?.title || '').trim(),
+      fileID: String(audio?.fileID || '').trim(),
+      duration: Number(audio?.duration || 0),
+      size: Number(audio?.size || 0),
+      ext: String(audio?.ext || '').trim().toLowerCase(),
+      ...(String(audio?.cover || '').trim() ? { cover: String(audio.cover).trim() } : {}),
+    }))
+  const format = audios.length ? 'audio' : videos.length ? 'video' : images.length ? 'image_text' : 'text'
+  const cardContent: Record<string, any> = { title: String(item.title || '').trim() }
+  if (format === 'audio') cardContent.audios = audios
+  else if (format === 'video') cardContent.videos = videos
+  else if (format === 'image_text') cardContent.images = images
+  else cardContent.body = { text: String(item.matchedFields?.[0]?.preview || '').trim() }
+  return {
+    _id: String(post?._id || item.postId || ''),
+    area: post?.area === 'collaboration' ? 'collaboration' : post?.area,
+    format,
+    topics: Array.isArray(post?.topics) ? post.topics.map(String).filter(Boolean) : [],
+    content: cardContent,
+    presentation: post?.presentation?.textNoteTheme
+      ? { textNoteTheme: String(post.presentation.textNoteTheme) as NonNullable<Post['presentation']>['textNoteTheme'] }
+      : undefined,
+    authorId: String(post?.authorId || ''),
+    createdAt: String(post?.createdAt || item.createdAt || ''),
+    updatedAt: String(post?.updatedAt || post?.createdAt || item.updatedAt || item.createdAt || ''),
+    likeCount: Math.max(0, Number(post?.likeCount || 0)),
+  }
+}
+
 function normalizeRagVisibility(value: unknown): 'public' | 'member' {
   return value === 'public' ? 'public' : 'member'
 }
@@ -471,9 +532,60 @@ export async function searchPostsWithRag(
 
   try {
     const ragQuery = buildRagQuery(query)
-    const rawProviderResult = await provider.search({ ...fallbackParams, ragQuery })
-    const providerResult = await filterProviderResultForCurrentState(rawProviderResult, { communityId, indexScope, includeMemberOnly })
-    if (!providerResult.citations.length) {
+    const collectedCitations = new Map<string, RagCitation>()
+    const collectedItems = new Map<string, PostSearchResultItem>()
+    let providerSkip = skip
+    let hasMore: boolean | undefined
+    let nextSkip: number | null = null
+    let safeAnswer = ''
+    const seenSkips = new Set<number>()
+
+    // Current-state validation happens after retrieval because providers can contain old
+    // chunks while an asynchronous delete/reindex is in flight. Fetch forward so one
+    // stale-only provider page cannot hide a valid later page.
+    // Both production providers expose a finite ranked window and an advancing cursor.
+    // Do not add an arbitrary page-count cutoff: a run of stale chunks must not make
+    // later current posts unreachable. seenSkips still terminates a stalled/cyclic provider.
+    while (collectedItems.size < limit) {
+      if (seenSkips.has(providerSkip)) break
+      seenSkips.add(providerSkip)
+      const rawProviderResult = await provider.search({
+        ...fallbackParams,
+        skip: providerSkip,
+        limit: Math.max(1, limit - collectedItems.size),
+        ragQuery,
+      })
+      const providerResult = await filterProviderResultForCurrentState(rawProviderResult, {
+        communityId,
+        indexScope,
+        includeMemberOnly,
+      })
+      for (const item of providerResult.items) {
+        if (!collectedItems.has(item.postId) && collectedItems.size < limit) {
+          collectedItems.set(item.postId, item)
+        }
+      }
+      const acceptedPostIds = new Set(collectedItems.keys())
+      for (const citation of providerResult.citations) {
+        if (!acceptedPostIds.has(citation.postId)) continue
+        const key = citation.chunkId || `${citation.postId}:${citation.fieldKey || citation.fieldLabel}:${citation.preview}`
+        if (!collectedCitations.has(key)) collectedCitations.set(key, citation)
+      }
+      if (!safeAnswer && providerResult.answer) safeAnswer = providerResult.answer
+
+      hasMore = typeof providerResult.hasMore === 'boolean' ? providerResult.hasMore : undefined
+      const rawNextSkip = Number(providerResult.nextSkip)
+      nextSkip = Number.isFinite(rawNextSkip) && rawNextSkip > providerSkip
+        ? Math.floor(rawNextSkip)
+        : null
+      if (hasMore === true && nextSkip === null) hasMore = false
+      if (hasMore !== true || nextSkip === null || collectedItems.size >= limit) break
+      providerSkip = nextSkip
+    }
+
+    const citations = Array.from(collectedCitations.values())
+    const items = Array.from(collectedItems.values())
+    if (!citations.length) {
       logRagSearchDecision('no_answer', {
         provider: provider.name,
         communityId,
@@ -486,22 +598,24 @@ export async function searchPostsWithRag(
       provider: provider.name,
       communityId,
       sectionId,
-      citationCount: providerResult.citations.length,
-      itemCount: providerResult.items.length,
+      citationCount: citations.length,
+      itemCount: items.length,
       queryLength: query.length,
     })
     return {
       query,
       communityId,
       sectionId,
-      total: providerResult.items.length,
+      total: items.length,
       skip,
       limit,
-      items: providerResult.items.length ? providerResult.items : resultItemsFromCitations(providerResult.citations),
-      answer: providerResult.answer || deterministicAnswer(providerResult.citations),
-      citations: providerResult.citations,
+      items,
+      answer: safeAnswer || deterministicAnswer(citations),
+      citations,
       mode: 'rag',
       provider: provider.name,
+      ...(typeof hasMore === 'boolean' ? { hasMore } : {}),
+      ...(typeof hasMore === 'boolean' ? { nextSkip: hasMore ? nextSkip : null } : {}),
     }
   } catch {
     logRagSearchDecision('fallback', {
@@ -725,6 +839,7 @@ export function buildTencentEsHybridSearchBody(
   const filters = buildTencentEsFilters(input)
   const size = Math.max(1, Math.min(50, Number(input.limit || 20)))
   const from = Math.max(0, Math.floor(Number(input.skip || 0)))
+  const retrievalDepth = from + size
   const textQuery = {
     bool: {
       must: [{
@@ -746,8 +861,8 @@ export function buildTencentEsHybridSearchBody(
       knn: {
         field: config.vectorField,
         query_vector: queryVector,
-        k: Math.max(size, 20),
-        num_candidates: Math.max(100, size * 8),
+        k: Math.max(retrievalDepth, 20),
+        num_candidates: Math.max(100, retrievalDepth * 8),
         filter: { bool: { filter: filters } },
       },
     })
@@ -764,15 +879,19 @@ export function buildTencentEsHybridSearchBody(
       'title',
       'fieldLabel',
       'fieldType',
+      'widgetId',
+      'fieldKey',
       'preview',
       'text',
       'visibility',
       'sourceUpdatedAt',
+      'sourceVersion',
+      'indexScope',
     ],
     retriever: {
       rank_fusion: {
         retrievers,
-        rank_window_size: Math.max(50, size * 5),
+        rank_window_size: Math.max(50, retrievalDepth, size * 5),
         rank_constant: 60,
       },
     },
@@ -830,6 +949,8 @@ function toCitation(hit: any, query?: RagQuery): RagCitation {
     sectionName: String(source.sectionName || ''),
     fieldLabel: String(source.fieldLabel || ''),
     fieldType: String(source.fieldType || ''),
+    widgetId: String(source.widgetId || source.metadata?.widgetId || ''),
+    fieldKey: String(source.fieldKey || source.metadata?.fieldKey || ''),
     preview: evidenceSnippetFromText(sourceText, sourcePreview, query).slice(0, 200),
     score: Number(hit?._score || source.score || 0),
     visibility: normalizeRagVisibility(source.visibility),
@@ -858,9 +979,21 @@ async function filterProviderResultForCurrentState(
   const syncById = new Map((syncStates as any[]).map((state) => [String(state._id || state.postId), state]))
   const indexById = new Map((indexStates as any[]).map((state) => [String(state._id || state.postId), state]))
   const sectionIds = [...new Set((posts as any[]).map((post) => String(post.sectionId || '')).filter(Boolean))]
-  const sections = sectionIds.length ? await db.getByIds('sections', sectionIds) : []
+  const templateIds = [...new Set((posts as any[])
+    .filter((post) => post?.area === 'collaboration')
+    .map((post) => String(post.collaborationTemplateId || ''))
+    .filter(Boolean))]
+  const [sections, templates] = await Promise.all([
+    sectionIds.length ? db.getByIds('sections', sectionIds) : [],
+    templateIds.length ? db.getByIds('collaboration_templates', templateIds) : [],
+  ])
   const sectionsById = new Map((sections as any[]).map((section) => [String(section._id), section]))
-  const citations = filterCitationsForVisibility(providerResult.citations || [], input.includeMemberOnly).filter((citation) => {
+  const templatesById = new Map((templates as any[]).map((template) => [String(template._id), template]))
+  const contentContractsById = new Map([
+    ...(sections as any[]).map((section) => [String(section._id), section] as const),
+    ...(templates as any[]).map((template) => [String(template._id), template] as const),
+  ])
+  const filteredCitations = filterCitationsForVisibility(providerResult.citations || [], input.includeMemberOnly).filter((citation) => {
     const post: any = postsById.get(citation.postId)
     const sync: any = syncById.get(citation.postId)
     const index: any = indexById.get(citation.postId)
@@ -871,21 +1004,76 @@ async function filterProviderResultForCurrentState(
     if (!sync || sync.status !== 'synced' || sync.appliedSourceVersion !== sourceVersion || sync.indexScope !== input.indexScope) return false
     if (!index || index.status !== 'indexed' || index.sourceVersion !== sourceVersion || index.indexScope !== input.indexScope) return false
     if (String(post.updatedAt || post.createdAt || '') !== String(citation.sourceUpdatedAt || '')) return false
+    let currentContract: any = null
+    if (post.area === 'collaboration') {
+      const template: any = templatesById.get(String(post.collaborationTemplateId || ''))
+      if (!template || template.status !== 'active') return false
+      currentContract = template
+    }
     if (post.sectionId) {
       const section: any = sectionsById.get(String(post.sectionId))
       if (!section || section.status !== 'active' || section.communityId !== input.communityId) return false
+      currentContract = section
+    }
+    if (!input.includeMemberOnly && currentContract) {
+      const widgets = Array.isArray(currentContract.widgets) ? currentContract.widgets : []
+      const byWidgetId = citation.widgetId
+        ? widgets.find((widget: any) => String(widget.widgetId || '') === citation.widgetId)
+        : null
+      const byFieldKey = !byWidgetId && citation.fieldKey
+        ? widgets.find((widget: any) => String(widget.fieldKey || '') === citation.fieldKey)
+        : null
+      const legacyMatches = !byWidgetId && !byFieldKey
+        ? widgets.filter((widget: any) => (
+            String(widget.label || '') === citation.fieldLabel
+            && String(widget.type || '') === citation.fieldType
+          ))
+        : []
+      const currentWidget: any = byWidgetId || byFieldKey || (legacyMatches.length === 1 ? legacyMatches[0] : null)
+      if (!currentWidget || currentWidget.visibility === 'member') return false
     }
     return true
   })
+  const publicTitlesByPost = new Map<string, string>()
+  if (!input.includeMemberOnly) {
+    for (const postId of new Set(filteredCitations.map((citation) => citation.postId))) {
+      const post: any = postsById.get(postId)
+      const contentContract: any = contentContractsById.get(String(
+        post?.area === 'collaboration' ? post?.collaborationTemplateId : post?.sectionId || '',
+      ))
+      if (!post || !contentContract) continue
+      publicTitlesByPost.set(postId, buildPostSearchDocument(post, {
+        ...contentContract,
+        communityId: input.communityId,
+        name: String(contentContract.name || ''),
+        type: contentContract.type || 'evergreen',
+        status: 'active',
+      }).title)
+    }
+  }
+  const citations = filteredCitations.map((citation) => ({
+    ...citation,
+    title: publicTitlesByPost.get(citation.postId) || citation.title,
+  }))
   const dropped = citations.length !== (providerResult.citations || []).length
+  const rewrotePublicTitle = citations.some((citation, index) => citation.title !== filteredCitations[index]?.title)
   const items = resultItemsFromCitations(citations).map((item) => {
     const post: any = postsById.get(item.postId)
-    if (post?.area !== 'archive') return item
+    const contentContract: any = contentContractsById.get(String(
+      post?.area === 'collaboration' ? post?.collaborationTemplateId : post?.sectionId || '',
+    ))
+    const currentTitle = publicTitlesByPost.get(item.postId) || item.title
+    const currentItem = { ...item, title: currentTitle }
     return {
-      ...item,
-      ...archiveSearchCardProjection(post),
+      ...currentItem,
+      ...searchCardProjection(
+        post,
+        currentItem,
+        contentContract,
+        input.includeMemberOnly,
+      ),
       postId: item.postId,
-      title: item.title,
+      title: currentTitle,
     }
   })
   return {
@@ -893,7 +1081,9 @@ async function filterProviderResultForCurrentState(
     total: items.length,
     citations,
     items,
-    answer: citations.length ? (dropped ? deterministicAnswer(citations) : (providerResult.answer || deterministicAnswer(citations))) : '',
+    answer: citations.length
+      ? (dropped || rewrotePublicTitle ? deterministicAnswer(citations) : (providerResult.answer || deterministicAnswer(citations)))
+      : '',
   }
 }
 
@@ -966,9 +1156,13 @@ function buildTencentEsIndexMapping(config: TencentRagConfig, dims: number) {
         title: { type: 'text' },
         fieldLabel: { type: 'text' },
         fieldType: { type: 'keyword' },
+        widgetId: { type: 'keyword' },
+        fieldKey: { type: 'keyword' },
         text: { type: 'text' },
         preview: { type: 'text' },
         sourceUpdatedAt: { type: 'date' },
+        sourceVersion: { type: 'keyword' },
+        indexScope: { type: 'keyword' },
         visibility: { type: 'keyword' },
         [vectorField]: {
           type: 'dense_vector',
@@ -1130,7 +1324,7 @@ export function hasRagEvidenceSignal(citation: {
 }
 
 export function selectLkeapCandidateCitations(citations: ScoredRagCitation[], limit?: number): ScoredRagCitation[] {
-  const candidateLimit = Math.max(10, Math.min(30, Number(limit || 20) * 3))
+  const candidateLimit = Math.max(10, Math.min(50, Number(limit || 50)))
   const lexicalCandidates = citations
     .filter((citation) => Number(citation.lexicalScore || 0) > 0)
     .sort((left, right) => (
@@ -1144,7 +1338,7 @@ export function selectLkeapCandidateCitations(citations: ScoredRagCitation[], li
 
   const selected = new Map<string, ScoredRagCitation>()
   const add = (citation: ScoredRagCitation) => {
-    const key = citation.chunkId || `${citation.postId}:${citation.fieldLabel}:${citation.preview}`
+    const key = citation.postId || citation.chunkId || `${citation.fieldLabel}:${citation.preview}`
     if (!selected.has(key)) selected.set(key, citation)
   }
   lexicalCandidates.forEach(add)
@@ -1159,7 +1353,7 @@ export function selectLkeapCandidateCitations(citations: ScoredRagCitation[], li
 }
 
 export function rankLkeapEvidenceCitations(citations: ScoredRagCitation[], limit?: number): ScoredRagCitation[] {
-  const evidenceLimit = Math.max(5, Math.min(20, Number(limit || 20)))
+  const evidenceLimit = Math.max(5, Math.min(50, Number(limit || 20)))
   return citations
     .filter(hasRagEvidenceSignal)
     .sort((left, right) => {
@@ -1176,6 +1370,20 @@ export function rankLkeapEvidenceCitations(citations: ScoredRagCitation[], limit
       return Number(right.score || 0) - Number(left.score || 0)
     })
     .slice(0, evidenceLimit)
+}
+
+function paginateRankedCitationsByPost(citations: ScoredRagCitation[], skip: number, limit: number) {
+  const orderedPostIds = [...new Set(citations.map((citation) => citation.postId).filter(Boolean))]
+  const pagePostIds = orderedPostIds.slice(skip, skip + limit)
+  const includedPostIds = new Set(pagePostIds)
+  const pageCitations = citations.filter((citation) => includedPostIds.has(citation.postId))
+  const hasMore = skip + pagePostIds.length < orderedPostIds.length
+  return {
+    citations: pageCitations,
+    total: orderedPostIds.length,
+    hasMore,
+    nextSkip: hasMore ? skip + pagePostIds.length : null,
+  }
 }
 
 async function loadLkeapChunks(input: RagProviderSearchInput, pageSize: number, maxChunks: number) {
@@ -1289,13 +1497,17 @@ export function createTencentLkeapCloudBaseProvider(config: TencentLkeapRagConfi
           }
         })
         .filter((citation) => citation.postId && citation.chunkId)
-      citations = selectLkeapCandidateCitations(citations, input.limit)
+      citations = selectLkeapCandidateCitations(citations, 50)
 
       citations = await rerank(input.ragQuery.raw, citations)
-      citations = rankLkeapEvidenceCitations(citations, input.limit)
+      citations = rankLkeapEvidenceCitations(citations, 50)
+      const page = paginateRankedCitationsByPost(citations, Number(input.skip || 0), Number(input.limit || 20))
+      citations = page.citations
       const generatedAnswer = citations.length ? await answer(input.query, citations).catch(() => '') : ''
       return {
-        total: citations.length,
+        total: page.total,
+        hasMore: page.hasMore,
+        nextSkip: page.nextSkip,
         answer: generatedAnswer || (citations.length ? deterministicAnswer(citations) : ''),
         citations,
         items: resultItemsFromCitations(citations),
@@ -1351,8 +1563,13 @@ export function createTencentCloudBaseAtomicProvider(
         const lexicalScore = lexicalEvidenceScore(input.ragQuery, chunk)
         return { ...toCitation({ _id: chunk.chunkId, _source: chunk }, input.ragQuery), score: semanticScore + lexicalScore * 0.08, semanticScore, lexicalScore }
       }).filter((citation) => citation.postId && citation.chunkId)
-      citations = selectLkeapCandidateCitations(citations, input.limit)
-      citations = rankLkeapEvidenceCitations(await rerank(input.ragQuery.raw, citations), input.limit)
+      citations = selectLkeapCandidateCitations(citations, 50)
+      citations = rankLkeapEvidenceCitations(
+        await rerank(input.ragQuery.raw, citations),
+        50,
+      )
+      const page = paginateRankedCitationsByPost(citations, Number(input.skip || 0), Number(input.limit || 20))
+      citations = page.citations
       const answerResponse = citations.length ? await sendAtomicJson<any>(config, 'ChatCompletions', {
         ModelName: config.llmModel,
         Messages: [{ Role: 'user', Content: buildAnswerPrompt(input.query, citations) }],
@@ -1360,7 +1577,9 @@ export function createTencentCloudBaseAtomicProvider(
         Temperature: 0.1,
       }) : null
       return {
-        total: citations.length,
+        total: page.total,
+        hasMore: page.hasMore,
+        nextSkip: page.nextSkip,
         answer: extractCompletionText(answerResponse) || (citations.length ? deterministicAnswer(citations) : ''),
         citations,
         items: resultItemsFromCitations(citations),
@@ -1418,7 +1637,8 @@ export function createTencentRagProvider(
       const queryVector = await embedText(input.ragQuery.expandedText)
       const searchBody = buildTencentEsHybridSearchBody(input, config, queryVector)
       const response = await sendJson<any>(config, 'POST', `${config.indexName}/_search`, searchBody)
-      let citations: ScoredRagCitation[] = (response?.hits?.hits || [])
+      const rawHits = Array.isArray(response?.hits?.hits) ? response.hits.hits : []
+      let citations: ScoredRagCitation[] = rawHits
         .map((hit: any) => {
           const citation = toCitation(hit, input.ragQuery)
           const source = hit?._source || hit || {}
@@ -1473,8 +1693,16 @@ export function createTencentRagProvider(
           }))
         : null
       const answer = extractCompletionText(answerResponse) || (citations.length ? deterministicAnswer(citations) : '')
+      const rawTotalValue = Number(response?.hits?.total?.value ?? response?.hits?.total)
+      const rawTotalExact = Number.isFinite(rawTotalValue) && response?.hits?.total?.relation !== 'gte'
+      const rawNextSkip = Math.max(0, Number(input.skip || 0)) + rawHits.length
+      const hasMore = rawTotalExact
+        ? rawNextSkip < rawTotalValue
+        : rawHits.length >= Math.max(1, Number(input.limit || 20))
       return {
-        total: citations.length,
+        total: rawTotalExact ? rawTotalValue : citations.length,
+        hasMore,
+        nextSkip: hasMore ? rawNextSkip : null,
         answer,
         citations,
         items: resultItemsFromCitations(citations),
@@ -2728,6 +2956,8 @@ function toRagChunkDocuments(post: Post, section: Section): RagChunkDocument[] {
     title: chunk.title,
     fieldLabel: chunk.fieldLabel,
     fieldType: chunk.fieldType,
+    widgetId: chunk.widgetId,
+    fieldKey: chunk.fieldKey,
     text: chunk.text,
     preview: chunk.preview,
     sourceUpdatedAt: chunk.sourceUpdatedAt,

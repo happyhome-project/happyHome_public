@@ -1453,11 +1453,19 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
     const template = await db.getById('collaboration_templates', templateId).catch(() => null) as CollaborationTemplate | null
     if (!template) throw new Error('协作模板不存在')
     const status = params.disabled === false ? 'active' : 'disabled'
+    const activePosts = await db.query('posts', {
+      area: 'collaboration',
+      collaborationTemplateId: templateId,
+      status: 'active',
+    }) as any[]
     await db.updateById('collaboration_templates', templateId, {
       status,
       updatedAt: new Date().toISOString(),
       updatedByAccountId: ctx.accountId,
     })
+    if (activePosts.length > 0) {
+      await reindexCollaborationTemplatePosts(activePosts, 'collaborationTemplate.disableAdmin')
+    }
     return { success: true, status }
   }
   if (action === 'collaborationTemplate.deleteAdmin') {
@@ -1746,7 +1754,8 @@ async function route(action: string, params: Record<string, any>, ctx: AdminCtx)
       return current && (
         current.label !== widget.label ||
         current.fieldKey !== widget.fieldKey ||
-        current.order !== widget.order
+        current.order !== widget.order ||
+        (current.visibility === 'member' ? 'member' : 'public') !== (widget.visibility === 'member' ? 'member' : 'public')
       )
     })
     const hasStructuralChanges =
