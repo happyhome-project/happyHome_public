@@ -102,38 +102,24 @@ describe('Figma community directory pages', () => {
     expect(profileOnShow).not.toContain('showToast')
   })
 
-  test('home applies cached snapshots as shell-only data and hydrates guest login in the background', () => {
+  test('home applies cached snapshots as shell-only data without loading the guest intro flow', () => {
     const code = readPage('index')
-    const login = code.match(/async function submitGuestIntroLogin[\s\S]*?(?=\nfunction handleGuestIntroBrowse)/)?.[0] ?? ''
-    const cancel = code.match(/function cancelGuestIntroLogin[\s\S]*?(?=\nfunction getGuestAvatarFileSize)/)?.[0] ?? ''
 
     expect(code).toContain('createHomeSnapshotShell')
-    expect(code).toContain('createAdaptiveAvatarUploader')
-    expect(code).toContain('adaptiveGuestAvatarUploader.upload(source)')
-    expect(code).toContain('guestIntroLoginSlow')
-    expect(code).toContain('正在登录，请稍候...')
     expect(code).toContain('正在加载社区内容，请稍候')
     expect(code).not.toContain('加载较慢')
-    expect(login).toContain('guestIntroLoginEpoch.isCurrent(loginEpoch)')
-    expect(login).toContain('}, 5000)')
-    expect(login).toContain("stage: 'home.guest.login'")
-    expect(login).toContain('shouldApply: () => guestIntroLoginEpoch.isCurrent(loginEpoch)')
-    expect(cancel).toContain('guestIntroLoginEpoch.invalidate()')
-    expect(cancel).not.toContain('if (guestIntroLoginBusy.value) return')
-    expect(code).toMatch(/onHide\(\(\) => \{[\s\S]*guestIntroLoginEpoch\.invalidate\(\)/)
-    expect(login).toContain('void refreshHomeData({ force: true })')
-    expect(login).not.toContain('await refreshHomeData()')
+    expect(code).not.toContain('guestIntroConfig')
+    expect(code).not.toContain('guestIntroLoginMode')
     expect(code).toContain("stage: 'post.bootstrap'")
   })
 
-  test('home renders the signed-out intro on first paint while bootstrap runs independently', () => {
+  test('home starts bootstrap without rendering a signed-out intro on first paint', () => {
     const code = readPage('index')
     const initializeHome = code.match(/async function initializeHome[\s\S]*?(?=\nonMounted)/)?.[0] ?? ''
 
-    expect(code).toContain('DEFAULT_GUEST_INTRO_CONFIG')
-    expect(code).toContain('shouldShowGuestIntroOnFirstPaint')
-    expect(code).toMatch(/const guestIntroConfig = ref<GuestIntroConfig \| null>\(\s*userStore\.isLoggedIn \? null : DEFAULT_GUEST_INTRO_CONFIG/)
-    expect(code).toMatch(/const showGuestIntro = ref\(shouldShowGuestIntroOnFirstPaint\(/)
+    expect(code).not.toContain('DEFAULT_GUEST_INTRO_CONFIG')
+    expect(code).not.toContain('shouldShowGuestIntroOnFirstPaint')
+    expect(code).not.toContain('showGuestIntro')
     expect(initializeHome).toContain('await refreshHomeData()')
     expect(initializeHome.indexOf('await refreshHomeData()')).toBeGreaterThan(-1)
   })
@@ -144,7 +130,7 @@ describe('Figma community directory pages', () => {
     expect(code).toContain('class="home-entry-loading"')
     expect(code).toContain('正在进入社区')
     expect(code).toMatch(/showHomeEntryLoading[\s\S]*userStore\.isLoggedIn[\s\S]*homeSnapshotViewerOpenId\.value !== userStore\.openId/)
-    expect(code).toMatch(/showHomeEntryLoading[\s\S]*!userStore\.isLoggedIn[\s\S]*!showGuestIntro\.value[\s\S]*homeLoading\.value[\s\S]*!communityStore\.currentCommunityId/)
+    expect(code).toMatch(/showHomeEntryLoading[\s\S]*!userStore\.isLoggedIn[\s\S]*homeLoading\.value[\s\S]*!communityStore\.currentCommunityId/)
     expect(code).toMatch(/applyHomeSnapshot[\s\S]*homeSnapshotViewerOpenId\.value = expectedViewer/)
     expect(code).toContain('@tap="retryHomeRefresh"')
   })

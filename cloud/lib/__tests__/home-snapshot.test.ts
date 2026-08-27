@@ -20,6 +20,7 @@ jest.mock('../public-community', () => ({
 }))
 
 import * as db from '../db'
+import { getActivePublicCommunity, getDefaultPublicCommunityId } from '../public-community'
 import { buildHomeFeed, buildHomeSnapshot } from '../home-snapshot'
 import { buildInitialCollaborationTemplates } from '../../shared/collaboration-templates'
 
@@ -28,6 +29,23 @@ beforeEach(() => {
   ;(db.getById as jest.Mock).mockResolvedValue(null)
   ;(db.getByIds as jest.Mock).mockResolvedValue([])
   ;(db.query as jest.Mock).mockResolvedValue([])
+})
+
+test('a first-time logged-in user with no memberships lands on 阳光花园', async () => {
+  ;(getDefaultPublicCommunityId as jest.Mock).mockReturnValue('sunshine-garden')
+  ;(getActivePublicCommunity as jest.Mock).mockResolvedValue({
+    _id: 'sunshine-garden',
+    name: '阳光花园社区',
+    status: 'active',
+  })
+
+  const result = await buildHomeSnapshot('new-user', {
+    user: { _id: 'new-user' } as any,
+  })
+
+  expect(result.currentCommunityId).toBe('sunshine-garden')
+  expect(result.currentCommunity?.name).toBe('阳光花园社区')
+  expect(result.communities).toEqual([])
 })
 
 test('buildHomeSnapshot 批量读取社区并复用已经确认的 membership', async () => {

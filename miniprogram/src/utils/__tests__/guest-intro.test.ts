@@ -73,31 +73,12 @@ describe('guest intro popup visibility', () => {
     })).toBe(false)
   })
 
-  test('makes guest browsing the primary action and keeps login as a secondary action', () => {
+  test('keeps the guest intro utility available without loading it on home', () => {
     const homeSource = fs.readFileSync(path.resolve(process.cwd(), 'src/pages/index/index.vue'), 'utf8')
-    const loginStart = homeSource.indexOf('function handleGuestIntroLogin')
-    const browseStart = homeSource.indexOf('function handleGuestIntroBrowse')
-    const loginHandler = homeSource.slice(loginStart, browseStart)
-    const browseHandler = homeSource.slice(
-      browseStart,
-      homeSource.indexOf('\nfunction ', browseStart + 1),
-    )
-
-    expect(loginStart).toBeGreaterThan(-1)
-    expect(browseStart).toBeGreaterThan(-1)
-    expect(loginHandler).not.toContain('/pages/profile/index')
-    expect(loginHandler).not.toContain('switchTab')
-    expect(loginHandler).not.toContain('reLaunch')
-    expect(homeSource).toContain('data-testid="guest-intro-browse-trigger"')
-    expect(homeSource).toContain('data-testid="guest-intro-login-trigger"')
-    expect(homeSource).toContain('open-type="chooseAvatar"')
-    expect(homeSource).toContain('data-testid="guest-intro-login-submit"')
-    expect(homeSource).toContain(':focus="guestIntroNicknameFocused"')
-    expect(homeSource).toMatch(/handleGuestIntroChooseAvatar[\s\S]*guestIntroLoginMode\.value = 'nickname'[\s\S]*nextTick[\s\S]*guestIntroNicknameFocused\.value = true/)
-    expect(homeSource).not.toContain('showKeyboard')
-    expect(homeSource).not.toContain('guest-intro-secondary-plus')
-    expect(browseHandler).toContain('markCurrentGuestIntroSeen()')
-    expect(browseHandler).not.toContain('openOnboardingPreservingStack')
+    const homeTemplate = homeSource.slice(0, homeSource.indexOf('<script setup'))
+    expect(homeTemplate).not.toContain('guest-intro-mask')
+    expect(homeSource).not.toContain('guestIntroConfig')
+    expect(homeSource).not.toContain("from '../../utils/guest-intro'")
     expect(DEFAULT_GUEST_INTRO_CONFIG.primaryActionText).toBe('先随便看看')
     expect(DEFAULT_GUEST_INTRO_CONFIG.secondaryActionText).toBe('微信一键登录')
   })
