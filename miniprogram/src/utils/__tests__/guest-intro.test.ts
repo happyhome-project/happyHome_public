@@ -86,11 +86,15 @@ describe('guest intro popup visibility', () => {
   test('uses a lightweight routing shell as the default entry without restoring the retired guest intro', () => {
     const pages = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'src/pages.json'), 'utf8'))
     const startupSource = fs.readFileSync(path.resolve(process.cwd(), 'src/pages/startup/index.vue'), 'utf8')
+    const homeSource = fs.readFileSync(path.resolve(process.cwd(), 'src/pages/index/index.vue'), 'utf8')
+    const startupReady = startupSource.match(/onReady\(\(\) => \{[\s\S]*?\n\}\)/)?.[0] ?? ''
 
     expect(pages.entryPagePath).toBe('pages/startup/index')
     expect(startupSource).toContain('onReady(() => {')
     expect(startupSource).toContain('uni.switchTab({')
     expect(startupSource).toContain('url: HOME_TAB_URL')
+    expect(startupReady).not.toContain('flushStartupPerformanceCapture')
+    expect(homeSource).toMatch(/onReady\(\(\) => \{[\s\S]*flushStartupPerformanceCapture/)
     expect(startupSource).not.toContain('DEFAULT_GUEST_INTRO_CONFIG')
     expect(startupSource).not.toContain('guest-intro')
     expect(startupSource).not.toContain('useUserStore')

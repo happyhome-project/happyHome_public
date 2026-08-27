@@ -35,7 +35,7 @@ HappyHome 首页支持微信官方“数据预拉取”和“周期性更新”�
 
 ## 备用配置：开发者服务器
 
-如果必须走开发者服务器模式，则配置 CloudBase HTTP 访问地址，指向 `home-prefetch` 云函数。
+如果必须走开发者服务器模式，则配置 CloudBase HTTP 访问地址，指向 `home-prefetch` 云函数。该备用模式仅支持已登录用户携带后台 token 的预拉取；无 token 的首次游客请求返回空快照，避免公开 HTTP 调用者伪造 `code` 反复触发数据库快照查询。
 
 当前环境基准域名：
 
@@ -49,8 +49,8 @@ HappyHome 首页支持微信官方“数据预拉取”和“周期性更新”�
 
 ## Token 规则
 
-- 首次打开且尚未登录时没有 token；微信会给预拉取请求附带一次性生成的 `code`。
-- `home-prefetch` 仅在“token 缺失且 `code` 非空”时返回配置中的 active 公共社区及游客可读首页，帮助无缓存的新用户在进入首页前并行准备数据。
+- 首次打开且尚未登录时没有 token；微信云开发预拉取会给函数直调事件附带一次性生成的 `code`。
+- `home-prefetch` 仅在“云开发函数直调、token 缺失且 `code` 非空”时返回配置中的 active 公共社区及游客可读首页，帮助无缓存的新用户在进入首页前并行准备数据。公开 HTTP 请求不能凭 `code` 进入该分支。
 - 小程序登录后，后端生成 `backgroundFetchToken`。
 - 客户端调用 `wx.setBackgroundFetchToken({ token })`。
 - 微信预拉取和周期性更新请求都会带上 `token`。

@@ -20,13 +20,13 @@ function openHome() {
     url: HOME_TAB_URL,
     fail: (error) => {
       routing = false
+      flushStartupPerformanceCapture((event, details) => clientLog('debug', event, details))
       clientLog('warn', 'startup.home.route.fail', { error })
     },
   })
 }
 
 onReady(() => {
-  flushStartupPerformanceCapture((event, details) => clientLog('debug', event, details))
   openHome()
 })
 </script>

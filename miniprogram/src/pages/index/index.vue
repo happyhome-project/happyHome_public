@@ -403,6 +403,11 @@ import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
 import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, normalizeHomeSnapshotShape, prepareHomeSnapshotForFastPath, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
 import { formatHomeQuoteCite } from '../../utils/home-quote'
 import { createHomeLoadingGate } from '../../utils/home-loading-gate'
+import {
+  captureHomeRefreshViewer,
+  isSameHomeRefreshViewer,
+  type HomeRefreshViewer,
+} from '../../utils/home-refresh-viewer'
 import { flushStartupPerformanceCapture } from '../../utils/startup-performance'
 import { resolveMenuSafeRightInset } from '../../utils/menu-safe-area'
 import { refreshCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
@@ -1732,14 +1737,27 @@ function waitForHomeRefreshHint(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms))
 }
 
+function queueRefreshWhenViewerChanged(requestedViewer: HomeRefreshViewer): boolean {
+  const currentViewer = captureHomeRefreshViewer(userStore.isLoggedIn, userStore.openId)
+  if (isSameHomeRefreshViewer(requestedViewer, currentViewer)) return false
+
+  queuedForcedHomeRefresh = true
+  clientLog('debug', 'home.refresh.ignore.staleViewer', {
+    requestedMode: requestedViewer.loggedIn ? 'authenticated' : 'guest',
+    currentMode: currentViewer.loggedIn ? 'authenticated' : 'guest',
+  })
+  return true
+}
+
 async function runSingleHomeRefresh(force: boolean, preserveArchive: boolean) {
+  const requestedViewer = captureHomeRefreshViewer(userStore.isLoggedIn, userStore.openId)
   clientLog('info', 'home.refresh.start', {
     force,
-    loggedIn: userStore.isLoggedIn,
+    loggedIn: requestedViewer.loggedIn,
     currentCommunityId: communityStore.currentCommunityId || '',
   })
   refreshingHome = true
-  const requestedCommunityId = userStore.isLoggedIn
+  const requestedCommunityId = requestedViewer.loggedIn
     ? communityStore.currentCommunityId || undefined
     : undefined
   try {
@@ -1747,7 +1765,7 @@ async function runSingleHomeRefresh(force: boolean, preserveArchive: boolean) {
     const pendingTraceRequestId = pendingSelection?.targetCommunityId === requestedCommunityId
       ? String(pendingSelection?.traceRequestId || '')
       : ''
-    const result = await postApi.bootstrap(requestedCommunityId, 20, !userStore.isLoggedIn, {
+    const result = await postApi.bootstrap(requestedCommunityId, 20, !requestedViewer.loggedIn, {
       requestId: pendingTraceRequestId
         ? pendingTraceRequestId
         : createPerformanceRequestId('home-bootstrap'),
@@ -1755,6 +1773,7 @@ async function runSingleHomeRefresh(force: boolean, preserveArchive: boolean) {
       sample: communityStore.currentSections.length > 0 ? 'warm' : 'cold',
       counts: { shellSectionCount: communityStore.currentSections.length },
     })
+    if (queueRefreshWhenViewerChanged(requestedViewer)) return
     markHomeStartupStage('home.bootstrap.received', {
       communityCount: Array.isArray(result.communities) ? result.communities.length : 0,
       sectionCount: Array.isArray(result.sections) ? result.sections.length : 0,
@@ -1818,6 +1837,7 @@ async function runSingleHomeRefresh(force: boolean, preserveArchive: boolean) {
       currentCommunityId: communityStore.currentCommunityId || '',
     })
   } catch (error) {
+    if (queueRefreshWhenViewerChanged(requestedViewer)) return
     clientLog('error', 'home.refresh.fail', { force, error })
     const message = String((error as any)?.message || error || '')
     if (message.includes('需要先加入社区后查看内容')) {

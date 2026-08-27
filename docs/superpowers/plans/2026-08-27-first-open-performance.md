@@ -45,7 +45,7 @@
 
 - [ ] **Step 3: Implement the minimal routing shell**
 
-  Paint the local shell, flush startup performance after readiness, route Home, and keep tap as the failure retry path.
+  Paint the local shell, route Home after readiness, and keep tap as the failure retry path. Home owns normal trace finalization; the shell finalizes only when routing fails.
 
 - [ ] **Step 4: Run the focused test and verify GREEN**
 
@@ -104,7 +104,7 @@
 - Modify: `docs/miniprogram-pre-fetch.md`
 
 **Interfaces:**
-- A missing token plus non-empty `code` produces `buildHomeSnapshot('')`.
+- A Cloud Development direct invocation with a missing token plus non-empty `code` produces `buildHomeSnapshot('')`; public HTTP requests without a valid token remain empty.
 - A present invalid token produces `emptyHomeSnapshot('')`.
 - Signed-out Home calls `getBestBackgroundFetchSnapshot({ openId: '' })` and may apply its public posts.
 

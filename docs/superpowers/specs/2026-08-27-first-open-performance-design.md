@@ -29,7 +29,7 @@ Add `pages/startup/index` and make it the mini-program `entryPagePath`. It rende
 
 ### Guest data pre-fetch
 
-When the official pre-fetch request has no token but does have the WeChat-generated `code`, `home-prefetch` returns `buildHomeSnapshot('')`, which contains only the configured active public community and its guest-readable feed. A present but invalid token remains a safe empty response and must never downgrade to guest behavior.
+When the recommended Cloud Development direct pre-fetch invocation has no token but does have the WeChat-generated `code`, `home-prefetch` returns `buildHomeSnapshot('')`, which contains only the configured active public community and its guest-readable feed. Public HTTP requests cannot use `code` to enter this database-backed branch. A present but invalid token remains a safe empty response and must never downgrade to guest behavior.
 
 Home starts `getBestBackgroundFetchSnapshot({ openId: '' })` for signed-out users. A valid guest snapshot may expose its public posts immediately; authenticated cache and pre-fetch snapshots remain shell-only until `post.bootstrap` revalidates membership.
 
@@ -43,12 +43,13 @@ Use `wx.getPerformance()` to collect `appLaunch`, `downloadPackage`, `evaluateSc
 
 - No performance event is uploaded or written synchronously before first paint.
 - Startup events are buffered in memory.
-- The startup or Home page flushes them into the existing diagnostic store after `onReady`, then existing explicit diagnostic upload controls apply.
+- Home flushes them into the existing diagnostic store after its `onReady`, so Home paint entries are included; the startup shell flushes only if routing fails. Existing explicit diagnostic upload controls then apply.
 - Remove the unconditional `app.launch.start` cloud upload; warnings, errors, verbose logging, and explicit diagnostic capture retain their existing behavior.
 
 ## Security and compatibility
 
 - Guest pre-fetch responses have `viewerOpenId: ''` and only use the existing public-community read path.
+- Public HTTP requests without a valid token always receive an empty snapshot, even if they provide `code`.
 - A malformed or invalid explicit token returns an empty snapshot.
 - The 256 KB serializer guard remains unchanged.
 - No nickname, avatar, token, openid, credentials, or location enters performance details.

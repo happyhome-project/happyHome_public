@@ -182,7 +182,7 @@ test('invalid or expired token returns a safe empty snapshot without member cont
   expect(snapshot.postsBySection).toEqual({})
 })
 
-test('first-open guest pre-fetch with a generated code returns the public home snapshot', async () => {
+test('first-open cloud development pre-fetch with a generated code returns the public home snapshot', async () => {
   ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
     if (collectionName === 'communities' && id === TEST_PUBLIC_COMMUNITY_ID) {
       return {
@@ -199,7 +199,14 @@ test('first-open guest pre-fetch with a generated code returns the public home s
     return []
   })
 
-  const res = await main(getEvent({ code: 'wechat-generated-prefetch-code' }))
+  const res = await main({
+    code: 'wechat-generated-prefetch-code',
+    appid: 'wx-test',
+    timestamp: '1710000000000',
+    path: 'pages/index/index',
+    query: '',
+    scene: 1001,
+  })
   const snapshot = JSON.parse(res.body)
 
   expect(res.statusCode).toBe(200)
@@ -214,4 +221,18 @@ test('first-open guest pre-fetch with a generated code returns the public home s
     expect.anything(),
     expect.anything(),
   )
+})
+
+test('public HTTP requests cannot turn an arbitrary code into a database-backed guest snapshot', async () => {
+  const res = await main(getEvent({ code: 'caller-controlled-code' }))
+  const snapshot = JSON.parse(res.body)
+
+  expect(res.statusCode).toBe(200)
+  expect(snapshot.viewerOpenId).toBe('')
+  expect(snapshot.currentCommunityId).toBe('')
+  expect(snapshot.communities).toEqual([])
+  expect(snapshot.sections).toEqual([])
+  expect(snapshot.postsBySection).toEqual({})
+  expect(db.getById).not.toHaveBeenCalled()
+  expect(db.query).not.toHaveBeenCalled()
 })

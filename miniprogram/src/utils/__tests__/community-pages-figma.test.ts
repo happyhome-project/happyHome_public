@@ -162,6 +162,7 @@ describe('Figma community directory pages', () => {
 
   test('home fences stale switch responses and keeps a manual retry path for network failures', () => {
     const code = readPage('index')
+    const singleRefresh = code.match(/async function runSingleHomeRefresh[\s\S]*?(?=\nasync function refreshHomeData)/)?.[0] ?? ''
     const onShowIndex = code.lastIndexOf('onShow(() => {')
     const pullRefreshIndex = code.indexOf('onPullDownRefresh(', onShowIndex)
     const onShowBlock = code.slice(onShowIndex, pullRefreshIndex)
@@ -172,6 +173,12 @@ describe('Figma community directory pages', () => {
     expect(code).toContain("String(result.currentCommunityId || '') !== requestedCommunityId")
     expect(code).toContain('communityStore.handleCommunityAccessLost')
     expect(code).toContain('communityStore.confirmCommunitySelection')
+    expect(singleRefresh).toContain('captureHomeRefreshViewer(')
+    expect(singleRefresh).toContain('queueRefreshWhenViewerChanged(requestedViewer)')
+    expect(singleRefresh.indexOf('queueRefreshWhenViewerChanged(requestedViewer)')).toBeLessThan(
+      singleRefresh.indexOf('handleExplicitCommunityAccessLoss('),
+    )
+    expect(singleRefresh.match(/queueRefreshWhenViewerChanged\(requestedViewer\)/g)).toHaveLength(2)
     expect(onShowBlock).toContain('applySelectedCommunityShellFromCache()')
     expect(onShowBlock).toContain('void refreshHomeData')
     expect(onShowBlock).toContain('!communityStore.pendingCommunitySelection')
