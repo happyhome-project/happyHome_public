@@ -1,5 +1,10 @@
 # HappyHome First-Open Performance Implementation Plan
 
+> **Historical / point-in-time:** This plan records the implementation sequence completed for the 2026-08-27 first-open performance delivery. It does not override later product, implementation, validation, or release decisions.
+> **Current authority:** Use the [documentation authority map](../../README.md), current code, tests, and formal release policy.
+
+## Original historical instructions (do not execute)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Render a lightweight local routing shell before Home, pre-fetch public Home data during startup, and collect startup timings without adding work before first paint.

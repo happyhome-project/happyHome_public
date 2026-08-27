@@ -1,5 +1,8 @@
 # HappyHome First-Open Performance Design
 
+> **Historical / point-in-time:** This specification records the first-open performance design accepted for the 2026-08-27 delivery. It does not override later product, implementation, validation, or release decisions.
+> **Current authority:** Use the [documentation authority map](../../README.md), current mini-program and cloud code, tests, and formal release policy.
+
 ## Goal
 
 Make a first meaningful branded screen appear without waiting for Home feed code or cloud data, while preparing the public Home snapshot in parallel and preserving all authenticated visibility checks.
