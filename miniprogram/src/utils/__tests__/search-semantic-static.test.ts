@@ -7,6 +7,17 @@ const page = readFileSync(resolve(root, 'pages/search/index.vue'), 'utf8')
 const api = readFileSync(resolve(root, 'api/cloud.ts'), 'utf8')
 
 describe('public semantic post search page', () => {
+  test('keeps one compact search bar and submits the visible default query', () => {
+    expect(page).toContain("const DEFAULT_SEARCH_QUERY = '亲子'")
+    expect(page).toContain(':placeholder="DEFAULT_SEARCH_QUERY"')
+    expect(page).toContain('resolveSubmittedSearchQuery(query.value, DEFAULT_SEARCH_QUERY)')
+    expect(page).toContain('<button class="search-submit" @tap="submitSearch">搜索</button>')
+    expect(page).not.toContain('isInitialSearchLayout')
+    expect(page).not.toContain('search-nav--initial')
+    expect(page).not.toContain('search-box--initial')
+    expect(page).not.toContain('search-query-field--compact')
+  })
+
   test('renders truthful post matches through the shared archive waterfall', () => {
     expect(page).toContain('语义搜索会按相关度返回社区中的真实帖子')
     expect(page).toContain('<ArchiveWaterfall')

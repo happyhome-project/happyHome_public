@@ -370,92 +370,6 @@
     <view class="s1-foot-wrap">
       <text class="s1-foot">— {{ kind }} · 记忆在这里 —</text>
     </view>
-    <view v-if="showGuestIntro && guestIntroConfig" class="guest-intro-mask" @touchmove.stop.prevent>
-      <view class="guest-intro-panel" @tap.stop>
-        <view class="guest-intro-heading">
-          <text class="guest-intro-kicker">欢迎体验</text>
-          <text class="guest-intro-title">{{ guestIntroConfig.title }}</text>
-        </view>
-        <template v-if="guestIntroLoginMode === 'intro'">
-        <text class="guest-intro-body">{{ guestIntroConfig.body }}</text>
-        <view class="guest-intro-list">
-          <view
-            v-for="item in guestIntroConfig.features"
-            :key="item.key"
-            class="guest-intro-row"
-          >
-            <view class="guest-intro-row-icon" :class="`guest-intro-row-icon--${item.key}`">
-              <view class="guest-intro-icon-shape"></view>
-            </view>
-            <view class="guest-intro-row-copy">
-              <text class="guest-intro-row-label">{{ item.label }}</text>
-              <text class="guest-intro-row-text">{{ item.text }}</text>
-            </view>
-          </view>
-        </view>
-        <button
-          class="guest-intro-primary"
-          data-testid="guest-intro-browse-trigger"
-          @tap="handleGuestIntroBrowse"
-        >
-          <text>{{ guestIntroConfig.primaryActionText }}</text>
-        </button>
-        <!-- #ifdef H5 -->
-        <button
-          class="guest-intro-secondary guest-intro-secondary--login"
-          data-testid="guest-intro-login-trigger"
-          @tap="handleGuestIntroLogin"
-        >
-          <view class="guest-intro-wechat-icon">
-            <view class="guest-intro-wechat-bubble guest-intro-wechat-bubble--main"></view>
-            <view class="guest-intro-wechat-bubble guest-intro-wechat-bubble--mini"></view>
-          </view>
-          <text>{{ guestIntroConfig.secondaryActionText }}</text>
-        </button>
-        <!-- #endif -->
-        <!-- #ifndef H5 -->
-        <button
-          class="guest-intro-secondary guest-intro-secondary--login"
-          data-testid="guest-intro-login-trigger"
-          open-type="chooseAvatar"
-          @chooseavatar="handleGuestIntroChooseAvatar"
-        >
-          <view class="guest-intro-wechat-icon">
-            <view class="guest-intro-wechat-bubble guest-intro-wechat-bubble--main"></view>
-            <view class="guest-intro-wechat-bubble guest-intro-wechat-bubble--mini"></view>
-          </view>
-          <text>{{ guestIntroConfig.secondaryActionText }}</text>
-        </button>
-        <!-- #endif -->
-        </template>
-
-        <view v-else class="guest-intro-login-form">
-          <text class="guest-intro-login-title">登录</text>
-          <!-- #ifdef H5 -->
-          <input v-model="guestIntroWebUsername" autocomplete="username" class="guest-intro-login-input" placeholder="用户名" />
-          <input v-model="guestIntroWebPassword" password autocomplete="current-password" class="guest-intro-login-input" placeholder="密码" />
-          <!-- #endif -->
-          <input
-            v-model="guestIntroNickName"
-            type="nickname"
-            :focus="guestIntroNicknameFocused"
-            class="guest-intro-login-input"
-            placeholder="请输入昵称"
-            maxlength="20"
-            @blur="guestIntroNicknameFocused = false"
-          />
-          <text v-if="guestIntroLoginSlow" class="guest-intro-login-slow">正在登录，请稍候...</text>
-          <text v-if="guestIntroLoginError" class="guest-intro-login-error">{{ guestIntroLoginError }}</text>
-          <button
-            class="guest-intro-primary"
-            data-testid="guest-intro-login-submit"
-            :disabled="!canSubmitGuestIntroLogin || guestIntroLoginBusy"
-            @tap="submitGuestIntroLogin"
-          >{{ guestIntroLoginBusy ? '登录中...' : '确认登录' }}</button>
-          <view class="guest-intro-secondary" @tap="cancelGuestIntroLogin"><text>取消</text></view>
-        </view>
-      </view>
-    </view>
     <CommunityShareImageCanvas
       :community-id="currentShareCommunityId"
       :community-name="communityName"
@@ -469,7 +383,7 @@
 <script setup lang="ts">
 import '../../utils/home-entry-probe'
 import { computed, ref, nextTick, onMounted, onUnmounted, watch } from 'vue'
-import { onHide, onLoad, onPageScroll, onPullDownRefresh, onReady, onShareAppMessage, onShow } from '@dcloudio/uni-app'
+import { onLoad, onPageScroll, onPullDownRefresh, onReady, onShareAppMessage, onShow } from '@dcloudio/uni-app'
 import { useCommunityStore } from '../../store/community'
 import { useUserStore } from '../../store/user'
 import { memberApi, postApi } from '../../api/cloud'
@@ -499,7 +413,6 @@ import {
   resolveFeedCovers,
 } from '../../utils/feed-cover-url'
 import { communityInitial } from '../../utils/community-avatar'
-import { uploadCloudFile } from '../../api/storage'
 import { resolveSectionIconGlyph } from '../../utils/section-icon'
 import { asCollaborationSection } from '../../utils/collaboration-template'
 import {
@@ -518,10 +431,8 @@ import {
   normalizeCommunityShareId,
   savePendingShareCommunity,
 } from '../../utils/community-share'
-import { markGuestIntroSeen, shouldShowGuestIntro, shouldShowGuestIntroOnFirstPaint } from '../../utils/guest-intro'
-import { createAdaptiveAvatarUploader, createLatestEpoch, createPerformanceRequestId } from '../../utils/performance-trace'
+import { createPerformanceRequestId } from '../../utils/performance-trace'
 import type { HomeSnapshot } from '../../../../cloud/shared/types'
-import { DEFAULT_GUEST_INTRO_CONFIG, normalizeGuestIntroConfig, type GuestIntroConfig } from '../../../../cloud/shared/guest-intro-config'
 
 markClientDiagnosticStage('home.module.dependencies.ready')
 markClientDiagnosticStage('home.setup.enter')
@@ -531,28 +442,6 @@ const userStore = useUserStore()
 markClientDiagnosticStage('home.stores.ready', {
   loggedIn: userStore.isLoggedIn,
   currentCommunityId: userStore.isLoggedIn ? communityStore.currentCommunityId || '' : '',
-})
-const guestIntroConfig = ref<GuestIntroConfig | null>(
-  userStore.isLoggedIn ? null : DEFAULT_GUEST_INTRO_CONFIG,
-)
-const showGuestIntro = ref(shouldShowGuestIntroOnFirstPaint(guestIntroConfig.value, {
-  isLoggedIn: userStore.isLoggedIn,
-}))
-const guestIntroLoginMode = ref<'intro' | 'nickname' | 'web'>('intro')
-const guestIntroAvatarTempPath = ref('')
-const guestIntroNickName = ref('')
-const guestIntroNicknameFocused = ref(false)
-const guestIntroWebUsername = ref('')
-const guestIntroWebPassword = ref('')
-const guestIntroLoginBusy = ref(false)
-const guestIntroLoginSlow = ref(false)
-const guestIntroLoginError = ref('')
-const canSubmitGuestIntroLogin = computed(() => {
-  if (!guestIntroNickName.value.trim()) return false
-  if (guestIntroLoginMode.value === 'web') {
-    return Boolean(guestIntroWebUsername.value.trim() && guestIntroWebPassword.value)
-  }
-  return Boolean(guestIntroAvatarTempPath.value)
 })
 const homeLoading = ref(true)
 const homeLoadingGate = createHomeLoadingGate(homeLoading)
@@ -614,7 +503,6 @@ const GUIDE_AUTHOR_AVATAR_PALETTE = [
 const GUIDE_NOTE_NAME_HINTS = ['亲子出游', '周末遛娃', '村游攻略', '路线攻略', '出游攻略']
 let activeHomeRefreshPromise: Promise<void> | null = null
 let activeHomeRefreshCommunityId = ''
-const guestIntroLoginEpoch = createLatestEpoch()
 
 function markHomeStartupStage(event: string, details: Record<string, number | boolean> = {}) {
   markClientDiagnosticStage(event, Object.assign({}, details, {
@@ -649,7 +537,6 @@ const showHomeEntryLoading = computed(() => (
   )
   || (
     !userStore.isLoggedIn
-    && !showGuestIntro.value
     && homeLoading.value
     && !communityStore.currentCommunityId
   )
@@ -1676,159 +1563,6 @@ async function handleInitialShareLanding(): Promise<boolean> {
   }
 }
 
-function refreshGuestIntroVisibility() {
-  showGuestIntro.value = shouldShowGuestIntro(guestIntroConfig.value, {
-    isLoggedIn: userStore.isLoggedIn,
-    hasPublicCommunity: Boolean(communityStore.currentCommunityId),
-  })
-}
-
-function markCurrentGuestIntroSeen() {
-  if (guestIntroConfig.value?.version) {
-    markGuestIntroSeen(guestIntroConfig.value.version)
-  }
-  showGuestIntro.value = false
-}
-
-function handleGuestIntroLogin() {
-  guestIntroLoginError.value = ''
-  guestIntroLoginMode.value = 'web'
-}
-
-function handleGuestIntroChooseAvatar(event: any) {
-  const avatarUrl = String(event?.detail?.avatarUrl || '').trim()
-  if (!avatarUrl) return
-  guestIntroNicknameFocused.value = false
-  guestIntroAvatarTempPath.value = avatarUrl
-  guestIntroNickName.value = ''
-  guestIntroLoginError.value = ''
-  guestIntroLoginMode.value = 'nickname'
-  void nextTick(() => {
-    if (guestIntroLoginMode.value === 'nickname' && guestIntroAvatarTempPath.value) {
-      guestIntroNicknameFocused.value = true
-    }
-  })
-}
-
-function cancelGuestIntroLogin() {
-  guestIntroLoginEpoch.invalidate()
-  guestIntroLoginBusy.value = false
-  guestIntroLoginSlow.value = false
-  guestIntroNicknameFocused.value = false
-  guestIntroLoginMode.value = 'intro'
-  guestIntroAvatarTempPath.value = ''
-  guestIntroNickName.value = ''
-  guestIntroWebPassword.value = ''
-  guestIntroLoginError.value = ''
-}
-
-function getGuestAvatarFileSize(source: string): Promise<number> {
-  // #ifdef MP-WEIXIN
-  return new Promise((resolve, reject) => {
-    try {
-      wx.getFileInfo({ filePath: source, success: (result: any) => resolve(Number(result?.size || 0)), fail: reject })
-    } catch (error) {
-      reject(error)
-    }
-  })
-  // #endif
-  // #ifndef MP-WEIXIN
-  return Promise.resolve(0)
-  // #endif
-}
-
-function compressGuestAvatar(source: string, quality: number): Promise<string> {
-  // #ifdef MP-WEIXIN
-  return new Promise((resolve, reject) => {
-    try {
-      wx.compressImage({ src: source, quality, success: (result: any) => resolve(String(result?.tempFilePath || source)), fail: reject })
-    } catch (error) {
-      reject(error)
-    }
-  })
-  // #endif
-  // #ifndef MP-WEIXIN
-  return Promise.resolve(source)
-  // #endif
-}
-
-const adaptiveGuestAvatarUploader = createAdaptiveAvatarUploader({
-  getSize: getGuestAvatarFileSize,
-  compress: compressGuestAvatar,
-  upload: async (source) => {
-    const ext = source.startsWith('blob:') ? 'jpg' : (source.split('.').pop()?.split('?')[0] || 'jpg')
-    return uploadCloudFile({
-      cloudPath: `avatars/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`,
-      source,
-      trace: {
-        requestId: createPerformanceRequestId('home-guest-avatar'),
-        stage: 'home.guest.avatar.upload',
-        sample: 'cold',
-      },
-    })
-  },
-})
-
-async function submitGuestIntroLogin() {
-  if (!canSubmitGuestIntroLogin.value || guestIntroLoginBusy.value) return
-  guestIntroNicknameFocused.value = false
-  const loginEpoch = guestIntroLoginEpoch.begin()
-  const requestId = createPerformanceRequestId('home-guest-login')
-  guestIntroLoginBusy.value = true
-  guestIntroLoginSlow.value = false
-  guestIntroLoginError.value = ''
-  const slowTimer = setTimeout(() => {
-    if (guestIntroLoginEpoch.isCurrent(loginEpoch)) guestIntroLoginSlow.value = true
-  }, 5000)
-  try {
-    if (guestIntroLoginMode.value === 'web') {
-      await userStore.webLogin({
-        username: guestIntroWebUsername.value,
-        password: guestIntroWebPassword.value,
-        nickName: guestIntroNickName.value,
-      }, { requestId, stage: 'home.guest.login', sample: 'cold' }, {
-        shouldApply: () => guestIntroLoginEpoch.isCurrent(loginEpoch),
-      })
-    } else {
-      const source = guestIntroAvatarTempPath.value
-      const uploadedAvatar = await adaptiveGuestAvatarUploader.upload(source)
-      if (!guestIntroLoginEpoch.isCurrent(loginEpoch)) return
-      await userStore.login(
-        { nickName: guestIntroNickName.value, avatarUrl: uploadedAvatar.fileID },
-        { requestId, stage: 'home.guest.login', sample: 'cold' },
-        { shouldApply: () => guestIntroLoginEpoch.isCurrent(loginEpoch) },
-      )
-    }
-    if (!guestIntroLoginEpoch.isCurrent(loginEpoch)) return
-    guestIntroWebPassword.value = ''
-    guestIntroAvatarTempPath.value = ''
-    guestIntroNickName.value = ''
-    guestIntroLoginMode.value = 'intro'
-    markCurrentGuestIntroSeen()
-    uni.showToast({ title: '登录成功', icon: 'success' })
-    // A guest bootstrap may still be in flight. Force queues an authenticated
-    // bootstrap behind it instead of reusing the guest request.
-    void refreshHomeData({ force: true }).catch((refreshError) => {
-      clientLog('warn', 'guestIntro.login.refresh.fail', { error: refreshError })
-    })
-  } catch (error: any) {
-    if (!guestIntroLoginEpoch.isCurrent(loginEpoch)) return
-    guestIntroLoginError.value = String(error?.message || '登录失败，请重试')
-    guestIntroWebPassword.value = ''
-    clientLog('warn', 'guestIntro.login.fail', { error })
-  } finally {
-    clearTimeout(slowTimer)
-    if (guestIntroLoginEpoch.isCurrent(loginEpoch)) {
-      guestIntroLoginSlow.value = false
-      guestIntroLoginBusy.value = false
-    }
-  }
-}
-
-function handleGuestIntroBrowse() {
-  markCurrentGuestIntroSeen()
-}
-
 function applyHomeSnapshot(rawSnapshot: HomeSnapshot | null, source: 'prefetch' | 'cache' | 'cloud') {
   const snapshot = normalizeHomeSnapshotShape(rawSnapshot)
   if (!snapshot) {
@@ -1858,10 +1592,6 @@ function applyHomeSnapshot(rawSnapshot: HomeSnapshot | null, source: 'prefetch' 
   collaborationTemplates.value = safeSnapshot.collaborationTemplates || []
   communityStore.setCollaborationTemplates(safeSnapshot.collaborationTemplates || [])
   collaborationPostsByTemplate.value = safeSnapshot.collaborationPostsByTemplate || {}
-  guestIntroConfig.value = userStore.isLoggedIn
-    ? null
-    : normalizeGuestIntroConfig(safeSnapshot.guestIntroConfig || null)
-  refreshGuestIntroVisibility()
   if (userStore.isLoggedIn) communityStore.saveToStorage()
   clientLog('info', 'home.snapshot.apply', {
     source,
@@ -2246,17 +1976,7 @@ onReady(() => {
   probeHomeRender('ready')
 })
 
-onHide(() => {
-  guestIntroNicknameFocused.value = false
-  if (!guestIntroLoginBusy.value) return
-  guestIntroLoginEpoch.invalidate()
-  guestIntroLoginBusy.value = false
-  guestIntroLoginSlow.value = false
-})
-
 onUnmounted(() => {
-  guestIntroNicknameFocused.value = false
-  guestIntroLoginEpoch.invalidate()
   ;(uni as any).$off?.(HOME_TAB_RETAP_EVENT, scrollHomeToTop)
   clearArchiveSwitchScrollTimers()
   clearArchivePreviewMeasureTimers()

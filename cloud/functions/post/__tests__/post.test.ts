@@ -1280,11 +1280,8 @@ test('bootstrap: unauthenticated viewer lands on the configured public community
     authorNickname: '作者一',
   }))
   expect(result.backgroundFetchToken).toBe('')
-  expect((result as any).guestIntroConfig).toEqual(expect.objectContaining({
-    title: '样板弹窗标题',
-    primaryActionText: '先随便看看',
-    secondaryActionText: '微信一键登录',
-  }))
+  expect(result).not.toHaveProperty('guestIntroConfig')
+  expect((db.query as jest.Mock).mock.calls.some(([collection]) => collection === 'app_configs')).toBe(false)
   expect((db.query as jest.Mock).mock.calls.some(([collection]) => collection === 'community_members')).toBe(false)
 })
 

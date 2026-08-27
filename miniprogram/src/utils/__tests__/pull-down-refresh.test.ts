@@ -54,10 +54,10 @@ describe('mini-program pull-down refresh contract', () => {
     expect(code).toContain('line-height: 45rpx;')
   })
 
-  test('home page normalizes server guest intro config before rendering', () => {
+  test('home page does not load server guest intro config', () => {
     const code = readProjectFile('pages/index/index.vue')
 
-    expect(code).toContain('normalizeGuestIntroConfig')
-    expect(code).toMatch(/guestIntroConfig\.value = userStore\.isLoggedIn[\s\S]*normalizeGuestIntroConfig\(safeSnapshot\.guestIntroConfig \|\| null\)/)
+    expect(code).not.toContain('normalizeGuestIntroConfig')
+    expect(code).not.toContain('guestIntroConfig')
   })
 })

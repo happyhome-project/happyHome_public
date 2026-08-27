@@ -1,26 +1,22 @@
 <template>
-  <view class="search-page" :class="{ 'search-page--initial': isInitialSearchLayout, 'search-page--searched': !isInitialSearchLayout }">
-    <view class="search-nav" :class="{ 'search-nav--initial': isInitialSearchLayout }">
+  <view class="search-page">
+    <view class="search-nav">
       <button class="search-back" aria-label="返回" @tap="goBack">
         <text>‹</text>
       </button>
-      <view class="search-box" :class="{ 'search-box--initial': isInitialSearchLayout }">
-        <view
-          class="search-query-field"
-          :class="{ 'search-query-field--compact': !isInitialSearchLayout && query }"
-          :style="compactQueryChipStyle"
-        >
+      <view class="search-box">
+        <view class="search-query-field">
           <input
             v-model="query"
             class="search-input"
             confirm-type="search"
-            placeholder="亲子游路线"
+            :placeholder="DEFAULT_SEARCH_QUERY"
             placeholder-class="search-placeholder"
             @confirm="submitSearch"
           />
           <text v-if="query" class="clear-icon" @tap="clearQuery">×</text>
         </view>
-        <button v-if="isInitialSearchLayout" class="search-submit" @tap="submitSearch">搜索</button>
+        <button class="search-submit" @tap="submitSearch">搜索</button>
       </view>
       <!-- #ifdef MP-WEIXIN -->
       <view class="search-native-menu-spacer" aria-hidden="true"></view>
@@ -90,7 +86,11 @@ import {
   emptySemanticSearchFeed,
   type SemanticSearchFeed,
 } from '../../utils/semantic-search-feed'
-import { createSemanticSearchSession, normalizeSemanticQuery, type SemanticSearchRequest } from '../../utils/semantic-search-session'
+import {
+  createSemanticSearchSession,
+  resolveSubmittedSearchQuery,
+  type SemanticSearchRequest,
+} from '../../utils/semantic-search-session'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -102,6 +102,7 @@ const loadError = ref('')
 const searchFeed = ref<SemanticSearchFeed>(emptySemanticSearchFeed())
 const PAGE_SIZE = 10
 const MAX_PAGE_SIZE = 20
+const DEFAULT_SEARCH_QUERY = '亲子'
 const searchSession = createSemanticSearchSession()
 const searchCoverRecoveryPending = new Set<string>()
 const searchCoverRecoveryAttempts = new Map<string, number>()
@@ -112,16 +113,8 @@ const communityName = computed(() => {
   }
   return '帖子搜索'
 })
-const isInitialSearchLayout = computed(() => !searched.value && !loading.value)
 const resultCount = computed(() => searchFeed.value.columns[0].length + searchFeed.value.columns[1].length)
 const hasSearchCards = computed(() => resultCount.value > 0)
-const compactQueryChipStyle = computed(() => {
-  if (isInitialSearchLayout.value || !query.value.trim()) return {}
-  const queryWidth = splitUnicodeCharacters(query.value.trim()).reduce((total, char) => {
-    return total + (/[\u4e00-\u9fff]/.test(char) ? 16 : 8)
-  }, 0)
-  return { width: `${Math.min(203, Math.max(64, queryWidth + 49))}px` }
-})
 
 onLoad((options: any) => {
   if (ensureHierarchyStack('/pages/search/index', options || {})) return
@@ -195,7 +188,8 @@ async function loadMore() {
 }
 
 async function runSearch(options: { reset: boolean; showShortToast?: boolean; request?: SemanticSearchRequest }) {
-  const normalizedQuery = normalizeSemanticQuery(query.value)
+  const normalizedQuery = resolveSubmittedSearchQuery(query.value, DEFAULT_SEARCH_QUERY)
+  if (query.value !== normalizedQuery) query.value = normalizedQuery
   if (!communityId.value) {
     uni.showToast({ title: '请先选择社区', icon: 'none' })
     openOnboardingPreservingStack()
@@ -400,12 +394,6 @@ function splitUnicodeCharacters(value: unknown): string[] {
   background: #fefefe;
 }
 
-.search-nav--initial {
-  height: 163px;
-  padding: 0;
-  display: block;
-}
-
 .search-back {
   flex: 0 0 24px;
   width: 24px;
@@ -431,79 +419,36 @@ function splitUnicodeCharacters(value: unknown): string[] {
 }
 
 .search-box {
-  flex: 0 1 227px;
+  flex: 1 1 auto;
   min-width: 0;
   max-width: 227px;
   height: 36px;
   box-sizing: border-box;
-  padding: 0 12px 0 16px;
+  padding: 0 4px 0 14px;
   border: 3rpx solid var(--hh-color-brand-primary);
   border-radius: 18px;
   background: var(--hh-color-card);
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-.search-box--initial {
-  position: absolute;
-  left: 12px;
-  top: 67px;
-  width: calc(100vw - 124px);
-  max-width: 278px;
-  min-width: 250px;
-  height: 88px;
-  margin-left: 0;
-  padding: 9.5px 13.5px;
-  align-items: stretch;
-  flex-direction: column;
-  border-radius: 16px;
-  box-shadow: 0 8rpx 48rpx rgba(0, 0, 0, 0.05);
+  gap: 6px;
 }
 
 .search-query-field {
   flex: 1;
   min-width: 0;
-  height: 36px;
+  height: 32px;
   display: flex;
   align-items: center;
   box-sizing: border-box;
 }
 
-.search-box--initial .search-query-field {
-  flex: 0 0 48rpx;
-  width: 100%;
-  height: 48rpx;
-}
-
-.search-query-field--compact {
-  flex: 0 1 auto;
-  max-width: 203px;
-  height: 30px;
-  padding: 0 6px 0 13px;
-  border-radius: $hh-radius-full;
-  background: #f7f7f7;
-  gap: 4px;
-}
-
 .search-input {
   flex: 1;
   min-width: 0;
-  height: 36px;
+  height: 32px;
   color: var(--hh-color-text-primary);
-  font-size: var(--hh-text-body-lg-size);
-}
-
-.search-box--initial .search-input {
-  flex: 0 0 48rpx;
-  height: 48rpx;
-  padding-left: 32px;
-}
-
-.search-query-field--compact .search-input {
-  height: 24px;
   font-size: 15px;
-  line-height: 24px;
+  line-height: 32px;
 }
 
 .search-placeholder {
@@ -525,17 +470,17 @@ function splitUnicodeCharacters(value: unknown): string[] {
 }
 
 .search-submit {
-  align-self: flex-end;
-  width: 120rpx;
-  height: 60rpx;
-  margin: 20rpx 0 0;
+  flex: 0 0 52px;
+  width: 52px;
+  height: 28px;
+  margin: 0;
   padding: 0;
   border: 0;
   border-radius: $hh-radius-full;
   background: var(--hh-color-brand-primary);
   color: #fff;
-  font-size: var(--hh-text-body-base-size);
-  line-height: 60rpx;
+  font-size: 14px;
+  line-height: 28px;
 }
 
 .search-submit::after {
@@ -547,21 +492,6 @@ function splitUnicodeCharacters(value: unknown): string[] {
   height: 32px;
   visibility: hidden;
   pointer-events: none;
-}
-
-.search-nav--initial .search-native-menu-spacer {
-  position: absolute;
-  right: 13px;
-  top: 73px;
-  width: 87px;
-  height: 32px;
-}
-
-.search-nav--initial .search-back {
-  position: absolute;
-  left: 16px;
-  top: 77px;
-  z-index: 2;
 }
 
 .search-intro {

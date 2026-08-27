@@ -1,7 +1,6 @@
 import * as db from './db'
 import { ensureBackgroundFetchToken } from './background-fetch-token'
 import { isPostVisibleToMembers } from './content-audit'
-import { getGuestIntroConfig } from './guest-intro-config'
 import { getActivePublicCommunity, getDefaultPublicCommunityId, getPublicReadCommunityIds } from './public-community'
 import { normalizeSectionTemplates } from '../shared/section-templates'
 import { resolveAuthorAvatarUrl } from '../shared/simulated-author-avatars'
@@ -547,7 +546,6 @@ export async function buildHomeBootstrap(
     const snapshot = await buildHomeSnapshot('', options)
     return {
       ...snapshot,
-      ...(snapshot.currentCommunityId ? { guestIntroConfig: await getGuestIntroConfig() } : {}),
       backgroundFetchToken: '',
       backgroundFetchTokenExpiresAt: '',
     }

@@ -9,6 +9,10 @@ export function normalizeSemanticQuery(value: unknown): string {
   return String(value || '').normalize('NFKC').trim()
 }
 
+export function resolveSubmittedSearchQuery(value: unknown, defaultValue: unknown): string {
+  return normalizeSemanticQuery(value) || normalizeSemanticQuery(defaultValue)
+}
+
 export function createSemanticSearchSession() {
   let requestSeq = 0
   let submittedQuery = ''

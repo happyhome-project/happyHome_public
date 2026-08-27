@@ -1,5 +1,16 @@
 import { describe, expect, test } from 'vitest'
-import { createSemanticSearchSession } from '../semantic-search-session'
+import { createSemanticSearchSession, resolveSubmittedSearchQuery } from '../semantic-search-session'
+
+describe('semantic search submitted query', () => {
+  test('uses the visible default query when the draft is empty', () => {
+    expect(resolveSubmittedSearchQuery('', '亲子')).toBe('亲子')
+    expect(resolveSubmittedSearchQuery('   ', '亲子')).toBe('亲子')
+  })
+
+  test('keeps the normalized user query instead of replacing it with the default', () => {
+    expect(resolveSubmittedSearchQuery('  勤俭持家  ', '亲子')).toBe('勤俭持家')
+  })
+})
 
 describe('semantic search submitted-query session', () => {
   test('editing B invalidates an inflight A response', () => {

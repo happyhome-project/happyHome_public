@@ -234,20 +234,40 @@
     </view>
 
     <button
-      v-if="!showManualLoginForm"
+      v-if="userStore.isLoggedIn && !showManualLoginForm"
       class="profile-primary-action"
+      data-testid="profile-invite-action"
       open-type="share"
       @tap="handleInviteTap"
     >邀请好友加入社区</button>
 
     <button
-      v-if="!showManualLoginForm"
+      v-if="userStore.isLoggedIn && !showManualLoginForm"
       class="profile-secondary-action"
+      data-testid="profile-leave-community-action"
       :disabled="leaveCurrentCommunityLock.isBusy"
       @tap="handleLeaveCurrentCommunity"
     >
       {{ leaveCurrentCommunityLock.isBusy ? '退出中...' : '退出当前社区' }}
     </button>
+
+    <!-- #ifdef H5 -->
+    <button
+      v-else-if="!showManualLoginForm"
+      class="profile-primary-action"
+      data-testid="profile-logged-out-login-action"
+      @tap="openLoginEntry"
+    >登录</button>
+    <!-- #endif -->
+    <!-- #ifndef H5 -->
+    <button
+      v-else-if="!showManualLoginForm"
+      class="profile-primary-action"
+      data-testid="profile-logged-out-login-action"
+      open-type="chooseAvatar"
+      @chooseavatar="onLoginChooseAvatar"
+    >登录</button>
+    <!-- #endif -->
 
     <!-- #ifdef H5 -->
     <button

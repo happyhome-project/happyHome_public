@@ -30,4 +30,11 @@ describe('profile H5 Web auth UI', () => {
     expect(source).toContain('data-testid="h5-logout"')
     expect(source).toMatch(/退出当前社区[\s\S]*#ifdef H5[\s\S]*class="profile-secondary-action profile-secondary-action--logout"[\s\S]*webLogoutLock\.run\(\)/)
   })
+
+  test('shows login as the only community action while signed out', () => {
+    expect(source).toMatch(/v-if="userStore\.isLoggedIn && !showManualLoginForm"[\s\S]*data-testid="profile-invite-action"/)
+    expect(source).toMatch(/v-if="userStore\.isLoggedIn && !showManualLoginForm"[\s\S]*data-testid="profile-leave-community-action"/)
+    expect(source).toMatch(/#ifdef H5[\s\S]*v-else-if="!showManualLoginForm"[\s\S]*data-testid="profile-logged-out-login-action"[\s\S]*@tap="openLoginEntry"[\s\S]*>登录<\/button>[\s\S]*#endif/)
+    expect(source).toMatch(/#ifndef H5[\s\S]*v-else-if="!showManualLoginForm"[\s\S]*data-testid="profile-logged-out-login-action"[\s\S]*open-type="chooseAvatar"[\s\S]*@chooseavatar="onLoginChooseAvatar"[\s\S]*>登录<\/button>[\s\S]*#endif/)
+  })
 })
