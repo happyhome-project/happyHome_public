@@ -60,7 +60,6 @@ function isVerboseCloudLoggingEnabled() {
 
 function shouldUploadToCloud(level: LogLevel, event: string, diagnosticCapture: boolean) {
   if (level === 'warn' || level === 'error') return true
-  if (event === 'app.launch.start') return true
   if (diagnosticCapture) return true
   return isVerboseCloudLoggingEnabled()
 }
@@ -103,6 +102,7 @@ export function clientLog(level: LogLevel, event: string, details: Record<string
   const diagnosticCapture = isClientDiagnosticsEnabled('home') && (
     route === 'pages/index/index' ||
     event.startsWith('home.') ||
+    event.startsWith('startup.') ||
     event.startsWith('runtime.')
   )
   const payload = {

@@ -147,6 +147,27 @@ describe('home snapshot cache', () => {
     }))
   })
 
+  test('keeps public guest posts on the fast path but strips authenticated posts until access is revalidated', async () => {
+    const { prepareHomeSnapshotForFastPath } = await import('../home-snapshot-cache')
+    const snapshot = {
+      schemaVersion: 1,
+      generatedAt: '2026-06-12T00:00:00.000Z',
+      viewerOpenId: '',
+      currentCommunityId: 'public-community',
+      currentCommunity: { _id: 'public-community', status: 'active' },
+      communities: [],
+      sections: [{ _id: 'public-section', communityId: 'public-community', widgets: [] }],
+      postsBySection: { 'public-section': [{ _id: 'public-post' }] },
+      collaborationTemplates: [],
+      collaborationPostsByTemplate: {},
+    }
+
+    expect(prepareHomeSnapshotForFastPath(snapshot as any, false)?.postsBySection).toEqual({
+      'public-section': [{ _id: 'public-post' }],
+    })
+    expect(prepareHomeSnapshotForFastPath(snapshot as any, true)?.postsBySection).toEqual({})
+  })
+
   test('listens for late wx pre-fetch data and supports unsubscribe', async () => {
     let callback: ((res: any) => void) | null = null
     vi.stubGlobal('wx', {

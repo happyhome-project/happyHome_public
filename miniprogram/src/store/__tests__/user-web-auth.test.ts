@@ -117,6 +117,33 @@ describe('user store Web auth', () => {
     })
   })
 
+  test('direct login resolves after identity commit while membership hydration is still pending', async () => {
+    myCommunities.mockReturnValueOnce(new Promise(() => {}))
+    const { useUserStore } = await import('../user')
+    const store = useUserStore()
+    let settled = false
+
+    void store.login({ nickName: '青山用户', avatarUrl: '' }).then(() => { settled = true })
+
+    await vi.waitFor(() => expect(store.isLoggedIn).toBe(true))
+    await vi.waitFor(() => expect(settled).toBe(true), { timeout: 100 })
+    expect(store.openId).toBe('web-user-1')
+  })
+
+  test('web login resolves after identity commit while membership hydration is still pending', async () => {
+    myCommunities.mockReturnValueOnce(new Promise(() => {}))
+    const { useUserStore } = await import('../user')
+    const store = useUserStore()
+    let settled = false
+
+    void store.webLogin({ username: 'alice', password: 'secret', nickName: '青山用户' })
+      .then(() => { settled = true })
+
+    await vi.waitFor(() => expect(store.isLoggedIn).toBe(true))
+    await vi.waitFor(() => expect(settled).toBe(true), { timeout: 100 })
+    expect(store.openId).toBe('web-user-1')
+  })
+
   test('restoreWebSession clears stale user and community state without an SDK session', async () => {
     const { useUserStore } = await import('../user')
     const { useCommunityStore } = await import('../community')

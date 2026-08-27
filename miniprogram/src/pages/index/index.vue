@@ -400,9 +400,15 @@ import { getTextNoteCard, type TextNoteTheme } from '../../utils/text-note'
 import { getImageNoteCard, isImageNoteSectionContract } from '../../utils/image-note'
 import { clientLog, markClientDiagnosticStage, startHomeDiagnosticWatchdog } from '../../utils/client-log'
 import { openOnboardingPreservingStack } from '../../utils/onboarding-nav'
-import { clearHomeSnapshotCache, createHomeSnapshotShell, getBestBackgroundFetchSnapshot, normalizeHomeSnapshotShape, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
+import { clearHomeSnapshotCache, getBestBackgroundFetchSnapshot, normalizeHomeSnapshotShape, prepareHomeSnapshotForFastPath, readHomeSnapshotCache, subscribeBackgroundFetchSnapshot, writeHomeSnapshotCache } from '../../utils/home-snapshot-cache'
 import { formatHomeQuoteCite } from '../../utils/home-quote'
 import { createHomeLoadingGate } from '../../utils/home-loading-gate'
+import {
+  captureHomeRefreshViewer,
+  isSameHomeRefreshViewer,
+  type HomeRefreshViewer,
+} from '../../utils/home-refresh-viewer'
+import { flushStartupPerformanceCapture } from '../../utils/startup-performance'
 import { resolveMenuSafeRightInset } from '../../utils/menu-safe-area'
 import { refreshCloudFileUrl, resolveCloudFileUrls } from '../../utils/cloud-file-url'
 import {
@@ -1568,7 +1574,9 @@ function applyHomeSnapshot(rawSnapshot: HomeSnapshot | null, source: 'prefetch' 
     clientLog('warn', 'home.snapshot.invalidShape', { source })
     return false
   }
-  const safeSnapshot = source === 'cloud' ? snapshot : createHomeSnapshotShell(snapshot)
+  const safeSnapshot = source === 'cloud'
+    ? snapshot
+    : prepareHomeSnapshotForFastPath(snapshot, userStore.isLoggedIn)
   if (!safeSnapshot) return false
   const expectedViewer = userStore.isLoggedIn ? userStore.openId : ''
   if (safeSnapshot.viewerOpenId !== expectedViewer) return false
@@ -1607,21 +1615,30 @@ function applyHomeSnapshot(rawSnapshot: HomeSnapshot | null, source: 'prefetch' 
 }
 
 async function hydrateHomeFromFastPath() {
-  if (!userStore.isLoggedIn || !userStore.openId) return false
-  const requestedCommunityId = communityStore.currentCommunityId || ''
-  const cached = readHomeSnapshotCache({
-    openId: userStore.openId,
-    communityId: requestedCommunityId,
-  })
-  const cacheApplied = applyHomeSnapshot(cached, 'cache')
+  const requestedOpenId = userStore.isLoggedIn ? userStore.openId : ''
+  const requestedCommunityId = userStore.isLoggedIn ? communityStore.currentCommunityId || '' : ''
+  const cached = requestedOpenId && requestedCommunityId
+    ? readHomeSnapshotCache({
+        openId: requestedOpenId,
+        communityId: requestedCommunityId,
+      })
+    : null
+  const cacheApplied = cached ? applyHomeSnapshot(cached, 'cache') : false
   markHomeStartupStage('home.fastPath.cache.read', { hit: cacheApplied })
 
   void getBestBackgroundFetchSnapshot({
-    openId: userStore.openId,
+    openId: requestedOpenId,
     communityId: requestedCommunityId || undefined,
   }).then((prefetched) => {
     markHomeStartupStage('home.fastPath.prefetch.read', { hit: Boolean(prefetched) })
-    if (homeCloudSnapshotApplied || requestedCommunityId !== communityStore.currentCommunityId) return
+    const currentOpenId = userStore.isLoggedIn ? userStore.openId : ''
+    if (homeCloudSnapshotApplied || requestedOpenId !== currentOpenId) return
+    if (requestedCommunityId && requestedCommunityId !== communityStore.currentCommunityId) return
+    if (
+      !requestedCommunityId
+      && communityStore.currentCommunityId
+      && prefetched?.currentCommunityId !== communityStore.currentCommunityId
+    ) return
     if (applyHomeSnapshot(prefetched, 'prefetch')) writeHomeSnapshotCache(prefetched as HomeSnapshot)
   }).catch(() => {
     markHomeStartupStage('home.fastPath.prefetch.read', { hit: false })
@@ -1630,7 +1647,10 @@ async function hydrateHomeFromFastPath() {
 }
 
 function applyLateBackgroundFetchSnapshot(snapshot: HomeSnapshot) {
-  if (snapshot.currentCommunityId !== communityStore.currentCommunityId) return
+  if (homeCloudSnapshotApplied) return
+  const expectedViewer = userStore.isLoggedIn ? userStore.openId : ''
+  if (snapshot.viewerOpenId !== expectedViewer) return
+  if (communityStore.currentCommunityId && snapshot.currentCommunityId !== communityStore.currentCommunityId) return
   if (applyHomeSnapshot(snapshot, 'prefetch')) {
     writeHomeSnapshotCache(snapshot)
   }
@@ -1717,14 +1737,27 @@ function waitForHomeRefreshHint(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms))
 }
 
+function queueRefreshWhenViewerChanged(requestedViewer: HomeRefreshViewer): boolean {
+  const currentViewer = captureHomeRefreshViewer(userStore.isLoggedIn, userStore.openId)
+  if (isSameHomeRefreshViewer(requestedViewer, currentViewer)) return false
+
+  queuedForcedHomeRefresh = true
+  clientLog('debug', 'home.refresh.ignore.staleViewer', {
+    requestedMode: requestedViewer.loggedIn ? 'authenticated' : 'guest',
+    currentMode: currentViewer.loggedIn ? 'authenticated' : 'guest',
+  })
+  return true
+}
+
 async function runSingleHomeRefresh(force: boolean, preserveArchive: boolean) {
+  const requestedViewer = captureHomeRefreshViewer(userStore.isLoggedIn, userStore.openId)
   clientLog('info', 'home.refresh.start', {
     force,
-    loggedIn: userStore.isLoggedIn,
+    loggedIn: requestedViewer.loggedIn,
     currentCommunityId: communityStore.currentCommunityId || '',
   })
   refreshingHome = true
-  const requestedCommunityId = userStore.isLoggedIn
+  const requestedCommunityId = requestedViewer.loggedIn
     ? communityStore.currentCommunityId || undefined
     : undefined
   try {
@@ -1732,7 +1765,7 @@ async function runSingleHomeRefresh(force: boolean, preserveArchive: boolean) {
     const pendingTraceRequestId = pendingSelection?.targetCommunityId === requestedCommunityId
       ? String(pendingSelection?.traceRequestId || '')
       : ''
-    const result = await postApi.bootstrap(requestedCommunityId, 20, !userStore.isLoggedIn, {
+    const result = await postApi.bootstrap(requestedCommunityId, 20, !requestedViewer.loggedIn, {
       requestId: pendingTraceRequestId
         ? pendingTraceRequestId
         : createPerformanceRequestId('home-bootstrap'),
@@ -1740,6 +1773,7 @@ async function runSingleHomeRefresh(force: boolean, preserveArchive: boolean) {
       sample: communityStore.currentSections.length > 0 ? 'warm' : 'cold',
       counts: { shellSectionCount: communityStore.currentSections.length },
     })
+    if (queueRefreshWhenViewerChanged(requestedViewer)) return
     markHomeStartupStage('home.bootstrap.received', {
       communityCount: Array.isArray(result.communities) ? result.communities.length : 0,
       sectionCount: Array.isArray(result.sections) ? result.sections.length : 0,
@@ -1803,6 +1837,7 @@ async function runSingleHomeRefresh(force: boolean, preserveArchive: boolean) {
       currentCommunityId: communityStore.currentCommunityId || '',
     })
   } catch (error) {
+    if (queueRefreshWhenViewerChanged(requestedViewer)) return
     clientLog('error', 'home.refresh.fail', { force, error })
     const message = String((error as any)?.message || error || '')
     if (message.includes('需要先加入社区后查看内容')) {
@@ -1957,6 +1992,7 @@ onMounted(() => {
 
 onReady(() => {
   markClientDiagnosticStage('home.onReady')
+  flushStartupPerformanceCapture((event, details) => clientLog('debug', event, details))
   probeHomeRender('ready')
 })
 

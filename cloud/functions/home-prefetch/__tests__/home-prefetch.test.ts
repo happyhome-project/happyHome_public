@@ -18,6 +18,9 @@ jest.mock('wx-server-sdk', () => ({
 import { main } from '../index'
 import * as db from '../../../lib/db'
 
+const TEST_PUBLIC_COMMUNITY_ID = 'community-public-test'
+const ORIGINAL_PUBLIC_COMMUNITY_ID = process.env.DEFAULT_PUBLIC_COMMUNITY_ID
+
 function getEvent(queryStringParameters: Record<string, string> = {}) {
   return {
     httpMethod: 'GET',
@@ -30,7 +33,15 @@ function getEvent(queryStringParameters: Record<string, string> = {}) {
   }
 }
 
-beforeEach(() => jest.clearAllMocks())
+beforeEach(() => {
+  jest.clearAllMocks()
+  process.env.DEFAULT_PUBLIC_COMMUNITY_ID = TEST_PUBLIC_COMMUNITY_ID
+})
+
+afterAll(() => {
+  if (ORIGINAL_PUBLIC_COMMUNITY_ID === undefined) delete process.env.DEFAULT_PUBLIC_COMMUNITY_ID
+  else process.env.DEFAULT_PUBLIC_COMMUNITY_ID = ORIGINAL_PUBLIC_COMMUNITY_ID
+})
 
 test('valid token returns a JSON string home snapshot for that user', async () => {
   ;(db.query as jest.Mock).mockImplementation(async (collectionName: string, where: any) => {
@@ -169,4 +180,59 @@ test('invalid or expired token returns a safe empty snapshot without member cont
   expect(snapshot.communities).toEqual([])
   expect(snapshot.sections).toEqual([])
   expect(snapshot.postsBySection).toEqual({})
+})
+
+test('first-open cloud development pre-fetch with a generated code returns the public home snapshot', async () => {
+  ;(db.getById as jest.Mock).mockImplementation(async (collectionName: string, id: string) => {
+    if (collectionName === 'communities' && id === TEST_PUBLIC_COMMUNITY_ID) {
+      return {
+        _id: id,
+        name: '阳光花园社区',
+        status: 'active',
+      }
+    }
+    return null
+  })
+  ;(db.query as jest.Mock).mockImplementation(async (collectionName: string) => {
+    if (collectionName === 'sections') return []
+    if (collectionName === 'collaboration_templates') return []
+    return []
+  })
+
+  const res = await main({
+    code: 'wechat-generated-prefetch-code',
+    appid: 'wx-test',
+    timestamp: '1710000000000',
+    path: 'pages/index/index',
+    query: '',
+    scene: 1001,
+  })
+  const snapshot = JSON.parse(res.body)
+
+  expect(res.statusCode).toBe(200)
+  expect(snapshot.viewerOpenId).toBe('')
+  expect(snapshot.currentCommunityId).toBe(TEST_PUBLIC_COMMUNITY_ID)
+  expect(snapshot.currentCommunity).toEqual(expect.objectContaining({
+    _id: TEST_PUBLIC_COMMUNITY_ID,
+    status: 'active',
+  }))
+  expect(db.query).not.toHaveBeenCalledWith(
+    'community_members',
+    expect.anything(),
+    expect.anything(),
+  )
+})
+
+test('public HTTP requests cannot turn an arbitrary code into a database-backed guest snapshot', async () => {
+  const res = await main(getEvent({ code: 'caller-controlled-code' }))
+  const snapshot = JSON.parse(res.body)
+
+  expect(res.statusCode).toBe(200)
+  expect(snapshot.viewerOpenId).toBe('')
+  expect(snapshot.currentCommunityId).toBe('')
+  expect(snapshot.communities).toEqual([])
+  expect(snapshot.sections).toEqual([])
+  expect(snapshot.postsBySection).toEqual({})
+  expect(db.getById).not.toHaveBeenCalled()
+  expect(db.query).not.toHaveBeenCalled()
 })

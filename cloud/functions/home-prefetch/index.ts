@@ -26,6 +26,10 @@ function getQuery(event: any): Record<string, any> {
   return {}
 }
 
+function isHttpInvocation(event: any): boolean {
+  return Boolean(event?.httpMethod) || Boolean(event?.queryStringParameters)
+}
+
 function response(body: string) {
   return {
     statusCode: 200,
@@ -54,6 +58,14 @@ export const main = async (event: any) => {
   try {
     const query = getQuery(event)
     const token = String(query.token || '').trim()
+    if (!token) {
+      const code = String(query.code || event?.code || '').trim()
+      if (!code || isHttpInvocation(event)) {
+        return response(serializeHomeSnapshotForPrefetch(emptyHomeSnapshot('')))
+      }
+      const snapshot = await buildHomeSnapshot('')
+      return response(serializeHomeSnapshotForPrefetch(snapshot))
+    }
     const openid = await resolveOpenIdByBackgroundFetchToken(token)
     if (!openid) {
       return response(serializeHomeSnapshotForPrefetch(emptyHomeSnapshot('')))

@@ -105,7 +105,8 @@ describe('Figma community directory pages', () => {
   test('home applies cached snapshots as shell-only data without loading the guest intro flow', () => {
     const code = readPage('index')
 
-    expect(code).toContain('createHomeSnapshotShell')
+    expect(code).toContain('prepareHomeSnapshotForFastPath')
+    expect(code).not.toContain('createAdaptiveAvatarUploader')
     expect(code).toContain('正在加载社区内容，请稍候')
     expect(code).not.toContain('加载较慢')
     expect(code).not.toContain('guestIntroConfig')
@@ -145,6 +146,8 @@ describe('Figma community directory pages', () => {
     expect(hydrateFastPath.indexOf('readHomeSnapshotCache(')).toBeLessThan(
       hydrateFastPath.indexOf('getBestBackgroundFetchSnapshot('),
     )
+    expect(hydrateFastPath).not.toContain('if (!userStore.isLoggedIn || !userStore.openId) return false')
+    expect(hydrateFastPath).toContain("const requestedOpenId = userStore.isLoggedIn ? userStore.openId : ''")
     expect(hydrateFastPath).not.toContain('await getBestBackgroundFetchSnapshot(')
     expect(hydrateFastPath).toContain('void getBestBackgroundFetchSnapshot(')
     expect(code).toContain("markHomeStartupStage('home.fastPath.cache.read'")
@@ -159,6 +162,7 @@ describe('Figma community directory pages', () => {
 
   test('home fences stale switch responses and keeps a manual retry path for network failures', () => {
     const code = readPage('index')
+    const singleRefresh = code.match(/async function runSingleHomeRefresh[\s\S]*?(?=\nasync function refreshHomeData)/)?.[0] ?? ''
     const onShowIndex = code.lastIndexOf('onShow(() => {')
     const pullRefreshIndex = code.indexOf('onPullDownRefresh(', onShowIndex)
     const onShowBlock = code.slice(onShowIndex, pullRefreshIndex)
@@ -169,6 +173,12 @@ describe('Figma community directory pages', () => {
     expect(code).toContain("String(result.currentCommunityId || '') !== requestedCommunityId")
     expect(code).toContain('communityStore.handleCommunityAccessLost')
     expect(code).toContain('communityStore.confirmCommunitySelection')
+    expect(singleRefresh).toContain('captureHomeRefreshViewer(')
+    expect(singleRefresh).toContain('queueRefreshWhenViewerChanged(requestedViewer)')
+    expect(singleRefresh.indexOf('queueRefreshWhenViewerChanged(requestedViewer)')).toBeLessThan(
+      singleRefresh.indexOf('handleExplicitCommunityAccessLoss('),
+    )
+    expect(singleRefresh.match(/queueRefreshWhenViewerChanged\(requestedViewer\)/g)).toHaveLength(2)
     expect(onShowBlock).toContain('applySelectedCommunityShellFromCache()')
     expect(onShowBlock).toContain('void refreshHomeData')
     expect(onShowBlock).toContain('!communityStore.pendingCommunitySelection')

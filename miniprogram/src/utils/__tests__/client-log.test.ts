@@ -36,7 +36,7 @@ describe('clientLog cloud upload policy', () => {
     expect(callFunction).toHaveBeenCalledTimes(2)
   })
 
-  test('uploads the app launch canary without enabling verbose logging', async () => {
+  test('does not add an unconditional cloud call to the first-open launch path', async () => {
     const callFunction = vi.fn()
     vi.stubGlobal('wx', {
       cloud: { callFunction },
@@ -47,7 +47,7 @@ describe('clientLog cloud upload policy', () => {
 
     clientLog('info', 'app.launch.start', { SDKVersion: '3.15.1', platform: 'android' })
 
-    expect(callFunction).toHaveBeenCalledTimes(1)
+    expect(callFunction).not.toHaveBeenCalled()
   })
 
   test('uploads debug/info logs when verbose client logging is enabled', async () => {
@@ -85,6 +85,32 @@ describe('clientLog cloud upload policy', () => {
     expect(diagnostics.readClientDiagnosticEvents()[0]).toMatchObject({
       event: 'home.module.enter',
       details: { token: '[redacted]' },
+    })
+  })
+
+  test('captures startup-page performance only when the existing Home diagnostic trace is active', async () => {
+    const storage = new Map<string, any>()
+    const callFunction = vi.fn((options: any) => options.success?.({ result: { success: true } }))
+    vi.stubGlobal('wx', {
+      cloud: { callFunction },
+      getStorageSync: vi.fn((key: string) => storage.get(key)),
+      setStorageSync: vi.fn((key: string, value: any) => storage.set(key, value)),
+      removeStorageSync: vi.fn((key: string) => storage.delete(key)),
+    })
+    vi.stubGlobal('getCurrentPages', vi.fn(() => [{ route: 'pages/startup/index' }]))
+    const diagnostics = await import('../client-diagnostics')
+    const { clientLog } = await import('../client-log')
+    diagnostics.enableClientDiagnostics({ scope: 'home' })
+
+    clientLog('debug', 'startup.performance', {
+      count: 1,
+      entries: [{ name: 'firstRender', entryType: 'render', startTime: 12, duration: 34 }],
+    })
+
+    expect(callFunction).toHaveBeenCalledTimes(1)
+    expect(diagnostics.readClientDiagnosticEvents()[0]).toMatchObject({
+      event: 'startup.performance',
+      details: { count: 1 },
     })
   })
 
