@@ -1929,6 +1929,23 @@ test('search: checks community readability and delegates to formal RAG search', 
   expect(result.items).toEqual([{ postId: 'post-1', title: '视频帖' }])
 })
 
+test('search: preserves provider paging facts instead of replacing total with the current page size', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
+  ;(db.query as jest.Mock).mockResolvedValue([
+    { _id: 'member-1', communityId: 'community-1', userId: 'member-openid', status: 'active' },
+  ])
+  mockSemanticResult({
+    query: '亲子', communityId: 'community-1', sectionId: '', total: 27, skip: 0, limit: 10,
+    items: Array.from({ length: 10 }, (_, index) => ({ postId: `post-${index}`, title: `帖子${index}` })),
+    answer: '', citations: [], mode: 'rag', hasMore: true, nextSkip: 10,
+  })
+
+  const result = await handleSearch({ communityId: 'community-1', query: '亲子', limit: 10 }, 'member-openid')
+
+  expect(result).toEqual(expect.objectContaining({ total: 27, hasMore: true, nextSkip: 10 }))
+  expect(result.items).toHaveLength(10)
+})
+
 test('search: returns the current post card with its original media and author', async () => {
   ;(db.getById as jest.Mock).mockResolvedValueOnce({ _id: 'community-1', status: 'active' })
   ;(db.query as jest.Mock).mockResolvedValue([

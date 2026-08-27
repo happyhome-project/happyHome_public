@@ -1,6 +1,6 @@
 <template>
   <view class="search-page">
-    <view class="search-nav">
+    <view class="search-nav" :style="searchNavStyle">
       <button class="search-back" aria-label="返回" @tap="goBack">
         <text>‹</text>
       </button>
@@ -19,7 +19,7 @@
         <button class="search-submit" @tap="submitSearch">搜索</button>
       </view>
       <!-- #ifdef MP-WEIXIN -->
-      <view class="search-native-menu-spacer" aria-hidden="true"></view>
+      <view class="search-native-menu-spacer" :style="searchNativeMenuSpacerStyle" aria-hidden="true"></view>
       <!-- #endif -->
     </view>
 
@@ -65,7 +65,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import { postApi } from '../../api/cloud'
 import ArchiveWaterfall from '../../components/ArchiveWaterfall.vue'
 import { useCommunityStore } from '../../store/community'
@@ -91,6 +91,7 @@ import {
   resolveSubmittedSearchQuery,
   type SemanticSearchRequest,
 } from '../../utils/semantic-search-session'
+import { computeSearchNavMetrics } from '../../utils/search-nav'
 
 const communityStore = useCommunityStore()
 const userStore = useUserStore()
@@ -106,6 +107,10 @@ const DEFAULT_SEARCH_QUERY = '亲子'
 const searchSession = createSemanticSearchSession()
 const searchCoverRecoveryPending = new Set<string>()
 const searchCoverRecoveryAttempts = new Map<string, number>()
+const initialSearchNavMetrics = computeSearchNavMetrics({ isH5: typeof window !== 'undefined' && typeof document !== 'undefined' })
+const searchStatusBarHeight = ref(initialSearchNavMetrics.statusBarHeight)
+const searchNavRowHeight = ref(initialSearchNavMetrics.navRowHeight)
+const searchMenuSpacerWidth = ref(initialSearchNavMetrics.menuSpacerWidth)
 
 const communityName = computed(() => {
   if (communityStore.currentCommunityId === communityId.value && communityStore.currentCommunity?.name) {
@@ -115,8 +120,39 @@ const communityName = computed(() => {
 })
 const resultCount = computed(() => searchFeed.value.columns[0].length + searchFeed.value.columns[1].length)
 const hasSearchCards = computed(() => resultCount.value > 0)
+const searchNavStyle = computed(() => ({
+  height: `${searchStatusBarHeight.value + searchNavRowHeight.value}px`,
+  paddingTop: `${searchStatusBarHeight.value}px`,
+}))
+const searchNativeMenuSpacerStyle = computed(() => ({
+  flexBasis: `${searchMenuSpacerWidth.value}px`,
+}))
+
+function updateSearchNavMetrics() {
+  let systemInfo: any = null
+  let menuRect: any = null
+  try { systemInfo = uni.getSystemInfoSync?.() || null } catch (_error) {}
+  try {
+    if (typeof wx !== 'undefined' && typeof wx.getMenuButtonBoundingClientRect === 'function') {
+      menuRect = wx.getMenuButtonBoundingClientRect()
+    }
+  } catch (_error) {}
+  const metrics = computeSearchNavMetrics({
+    isH5: typeof window !== 'undefined' && typeof document !== 'undefined',
+    windowWidth: Number(systemInfo?.windowWidth || 0),
+    statusBarHeight: Number(systemInfo?.statusBarHeight || 0),
+    safeAreaTop: Number(systemInfo?.safeArea?.top || 0),
+    menuTop: Number(menuRect?.top || 0),
+    menuHeight: Number(menuRect?.height || 0),
+    menuLeft: Number(menuRect?.left || 0),
+  })
+  searchStatusBarHeight.value = metrics.statusBarHeight
+  searchNavRowHeight.value = metrics.navRowHeight
+  searchMenuSpacerWidth.value = metrics.menuSpacerWidth
+}
 
 onLoad((options: any) => {
+  updateSearchNavMetrics()
   if (ensureHierarchyStack('/pages/search/index', options || {})) return
   communityId.value = decodeParam(options?.communityId) || communityStore.currentCommunityId || ''
   query.value = decodeParam(options?.q || options?.query)
@@ -128,6 +164,8 @@ onLoad((options: any) => {
     void runSearch({ reset: true })
   }
 })
+
+onShow(updateSearchNavMetrics)
 
 watch(
   () => userStore.isLoggedIn,
@@ -384,9 +422,9 @@ function splitUnicodeCharacters(value: unknown): string[] {
 
 .search-nav {
   position: relative;
-  height: 116px;
   margin: 0 -24rpx;
-  padding: 62px 16px 0;
+  padding-right: 16px;
+  padding-left: 16px;
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -488,7 +526,7 @@ function splitUnicodeCharacters(value: unknown): string[] {
 }
 
 .search-native-menu-spacer {
-  flex: 0 0 87px;
+  flex: 0 0 auto;
   height: 32px;
   visibility: hidden;
   pointer-events: none;

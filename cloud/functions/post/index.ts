@@ -1264,7 +1264,6 @@ export async function handleSearch(params: {
     })
     return {
       ...result,
-      total: items.length,
       items,
     }
   } catch { throw new Error('智能搜索暂不可用，请稍后重试') }

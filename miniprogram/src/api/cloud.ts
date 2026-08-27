@@ -343,6 +343,8 @@ export const postApi = {
       total: number
       skip: number
       limit: number
+      hasMore?: boolean
+      nextSkip?: number | null
       tookMs: number
       /** @deprecated Semantic search never generates an answer; always empty when present. */
       answer?: ''

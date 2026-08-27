@@ -16,6 +16,13 @@ describe('public semantic post search page', () => {
     expect(page).not.toContain('search-nav--initial')
     expect(page).not.toContain('search-box--initial')
     expect(page).not.toContain('search-query-field--compact')
+    expect(page).toContain('computeSearchNavMetrics')
+    expect(page).toContain('updateSearchNavMetrics')
+    expect(page).toContain(':style="searchNavStyle"')
+    expect(page).toContain(':style="searchNativeMenuSpacerStyle"')
+    expect(page).not.toContain('height: 116px')
+    expect(page).not.toContain('padding: 62px 16px 0')
+    expect(page).not.toContain('flex: 0 0 87px')
   })
 
   test('renders truthful post matches through the shared archive waterfall', () => {

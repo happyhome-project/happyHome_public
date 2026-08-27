@@ -223,6 +223,24 @@ describe('global collaboration template administration', () => {
       templateId: 'template-custom',
     })).rejects.toThrow(/已有帖子/)
   })
+
+  test('disableAdmin resynchronizes existing collaboration posts', async () => {
+    ;(db.getById as jest.Mock).mockResolvedValueOnce({
+      _id: 'template-1', systemKey: 'carpool', name: '拼车出行', status: 'active', widgets: [],
+    })
+    ;(db.query as jest.Mock).mockResolvedValueOnce([{
+      _id: 'post-1', communityId: 'community-1', area: 'collaboration',
+      collaborationTemplateId: 'template-1', status: 'active',
+    }])
+
+    await main({ action: 'collaborationTemplate.disableAdmin', templateId: 'template-1' })
+
+    expect(postRagSync.schedulePostRagSync).toHaveBeenCalledWith(expect.objectContaining({
+      postId: 'post-1', communityId: 'community-1', sectionId: '',
+      reason: 'collaborationTemplate.disableAdmin',
+    }))
+    expect(postSearch.refreshPostSearchIndexById).toHaveBeenCalledWith('post-1')
+  })
 })
 
 describe('admin collaboration post management', () => {
@@ -869,6 +887,32 @@ test('section.updateWidgets: 新增控件不查询历史帖子影响', async () 
 
   expect(db.query).not.toHaveBeenCalledWith('posts', { sectionId: 'section-1', status: 'active' })
   expect(postSearch.backfillPostSearchIndexesForSection).toHaveBeenCalledWith('section-1')
+})
+
+test('section.updateWidgets: visibility 变化会重建已有帖子的 RAG 索引', async () => {
+  ;(db.getById as jest.Mock).mockResolvedValue({
+    _id: 'section-1', communityId: 'community-1', type: 'realtime',
+    widgets: [{
+      widgetId: 'body-1', type: 'rich_note', label: '正文', fieldKey: 'body',
+      required: false, order: 0, showInList: false, visibility: 'public',
+    }],
+  })
+  ;(db.query as jest.Mock).mockResolvedValue([{
+    _id: 'post-1', communityId: 'community-1', sectionId: 'section-1', status: 'active',
+  }])
+
+  await main({
+    action: 'section.updateWidgets',
+    sectionId: 'section-1',
+    widgets: [{
+      widgetId: 'body-1', type: 'rich_note', label: '正文', fieldKey: 'body',
+      required: false, order: 0, showInList: false, visibility: 'member',
+    }],
+  })
+
+  expect(postRagSync.schedulePostRagSync).toHaveBeenCalledWith(expect.objectContaining({
+    postId: 'post-1', communityId: 'community-1', sectionId: 'section-1', reason: 'section.updateWidgets',
+  }))
 })
 
 test('section.updateWidgets: 公告控件由管理员维护且不进入帖子列表展示', async () => {
