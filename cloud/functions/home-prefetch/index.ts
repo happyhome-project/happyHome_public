@@ -54,6 +54,14 @@ export const main = async (event: any) => {
   try {
     const query = getQuery(event)
     const token = String(query.token || '').trim()
+    if (!token) {
+      const code = String(query.code || event?.code || '').trim()
+      if (!code) {
+        return response(serializeHomeSnapshotForPrefetch(emptyHomeSnapshot('')))
+      }
+      const snapshot = await buildHomeSnapshot('')
+      return response(serializeHomeSnapshotForPrefetch(snapshot))
+    }
     const openid = await resolveOpenIdByBackgroundFetchToken(token)
     if (!openid) {
       return response(serializeHomeSnapshotForPrefetch(emptyHomeSnapshot('')))

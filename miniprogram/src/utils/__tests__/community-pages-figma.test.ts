@@ -107,7 +107,7 @@ describe('Figma community directory pages', () => {
     const login = code.match(/async function submitGuestIntroLogin[\s\S]*?(?=\nfunction handleGuestIntroBrowse)/)?.[0] ?? ''
     const cancel = code.match(/function cancelGuestIntroLogin[\s\S]*?(?=\nfunction getGuestAvatarFileSize)/)?.[0] ?? ''
 
-    expect(code).toContain('createHomeSnapshotShell')
+    expect(code).toContain('prepareHomeSnapshotForFastPath')
     expect(code).toContain('createAdaptiveAvatarUploader')
     expect(code).toContain('adaptiveGuestAvatarUploader.upload(source)')
     expect(code).toContain('guestIntroLoginSlow')
@@ -159,6 +159,8 @@ describe('Figma community directory pages', () => {
     expect(hydrateFastPath.indexOf('readHomeSnapshotCache(')).toBeLessThan(
       hydrateFastPath.indexOf('getBestBackgroundFetchSnapshot('),
     )
+    expect(hydrateFastPath).not.toContain('if (!userStore.isLoggedIn || !userStore.openId) return false')
+    expect(hydrateFastPath).toContain("const requestedOpenId = userStore.isLoggedIn ? userStore.openId : ''")
     expect(hydrateFastPath).not.toContain('await getBestBackgroundFetchSnapshot(')
     expect(hydrateFastPath).toContain('void getBestBackgroundFetchSnapshot(')
     expect(code).toContain("markHomeStartupStage('home.fastPath.cache.read'")

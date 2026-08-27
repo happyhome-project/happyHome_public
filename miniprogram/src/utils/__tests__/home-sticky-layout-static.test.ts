@@ -44,6 +44,7 @@ describe('home progressive sticky navigation', () => {
     expect(h5Smoke).toMatch(/import \{ spawnSync \} from 'node:child_process'/)
     expect(h5Smoke).toContain("['--workspace', 'miniprogram', 'run', 'build:h5']")
     expect(h5Smoke).toMatch(/const build = spawnSync\(buildCommand, buildArgs,/)
+    expect(h5Smoke).toContain('/#/pages/index/index')
     expect(h5Smoke.indexOf('const build = spawnSync(buildCommand, buildArgs,')).toBeLessThan(
       h5Smoke.indexOf("const root = join(process.cwd(), 'miniprogram', 'dist', 'build', 'h5')"),
     )

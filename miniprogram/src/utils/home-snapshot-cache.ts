@@ -93,6 +93,13 @@ export function createHomeSnapshotShell(raw: HomeSnapshot | null): HomeSnapshot 
   return Object.assign({}, snapshot, { postsBySection: {}, collaborationPostsByTemplate: {} })
 }
 
+export function prepareHomeSnapshotForFastPath(
+  raw: HomeSnapshot | null,
+  authenticated: boolean,
+): HomeSnapshot | null {
+  return authenticated ? createHomeSnapshotShell(raw) : normalizeHomeSnapshotShape(raw)
+}
+
 function normalizeSnapshot(raw: any, options: SnapshotReadOptions): HomeSnapshot | null {
   if (!raw || typeof raw !== 'object') return null
   if (raw.schemaVersion !== HOME_SNAPSHOT_SCHEMA_VERSION) return null

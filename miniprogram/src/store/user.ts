@@ -174,7 +174,7 @@ export const useUserStore = defineStore('user', {
       this.saveToStorage()
       this.syncBackgroundFetchToken()
       primeDirectoryAfterLogin(this.openId)
-      await hydrateMembershipsAfterLogin(options.shouldApply)
+      void hydrateMembershipsAfterLogin(options.shouldApply)
     },
     async webLogin(
       { username, password, nickName }: { username: string; password: string; nickName: string },
@@ -218,7 +218,7 @@ export const useUserStore = defineStore('user', {
         this.saveToStorage()
         this.syncBackgroundFetchToken()
         primeDirectoryAfterLogin(this.openId)
-        await hydrateMembershipsAfterLogin(() => generation === webSessionGeneration && !canceled())
+        void hydrateMembershipsAfterLogin(() => generation === webSessionGeneration && !canceled())
         if (generation !== webSessionGeneration) throw supersededError()
         if (canceled()) {
           await rollbackCanceledLogin()

@@ -51,7 +51,7 @@ server.listen(0, '127.0.0.1', async () => {
   const browser = await launchSmokeBrowser()
   try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
-    await page.goto(`http://127.0.0.1:${port}/#/`, { waitUntil: 'networkidle' })
+    await page.goto(`http://127.0.0.1:${port}/#/pages/index/index`, { waitUntil: 'networkidle' })
     await page.waitForSelector('.home-search-sticky-shell')
     await page.evaluate(() => {
       document.querySelectorAll('.guest-intro-mask').forEach((node) => node.remove())
