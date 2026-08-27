@@ -31,6 +31,13 @@ function loadDotEnvFile(filePath) {
   return out
 }
 
+export function loadConfigureRagWorkersLocalEnv(home = os.homedir()) {
+  return {
+    ...loadDotEnvFile(path.join(home, '.happyhome', 'cam.env')),
+    ...loadDotEnvFile(path.join(home, '.happyhome', 'tencent-rag.env')),
+  }
+}
+
 function getFlagValue(argv, name, fallback = '') {
   const equalsArg = argv.find((arg) => arg.startsWith(`--${name}=`))
   if (equalsArg) return equalsArg.slice(name.length + 3)
@@ -120,15 +127,15 @@ export async function applyRagWorkerConfig(app, configs) {
 
 export function parseConfigureRagWorkersArgs(argv = process.argv.slice(2), env = process.env) {
   const home = os.homedir()
-  const camEnv = loadDotEnvFile(path.join(home, '.happyhome', 'cam.env'))
+  const localEnv = loadConfigureRagWorkersLocalEnv(home)
   return {
     help: argv.includes('--help') || argv.includes('-h'),
     dryRun: argv.includes('--dry-run'),
-    envId: getFlagValue(argv, 'env-id', env.TCB_ENV || camEnv.TCB_ENV || 'cloudbase-3gh862acb1505ff3'),
-    secretId: env.TENCENTCLOUD_SECRETID || camEnv.TENCENTCLOUD_SECRETID,
-    secretKey: env.TENCENTCLOUD_SECRETKEY || camEnv.TENCENTCLOUD_SECRETKEY,
+    envId: getFlagValue(argv, 'env-id', env.TCB_ENV || localEnv.TCB_ENV || 'cloudbase-3gh862acb1505ff3'),
+    secretId: env.TENCENTCLOUD_SECRETID || localEnv.TENCENTCLOUD_SECRETID,
+    secretKey: env.TENCENTCLOUD_SECRETKEY || localEnv.TENCENTCLOUD_SECRETKEY,
     workerToken: getFlagValue(argv, 'worker-token', resolvePostRagWorkerToken(env)),
-    timerToken: getFlagValue(argv, 'timer-token', env.POST_RAG_TIMER_TOKEN || ''),
+    timerToken: getFlagValue(argv, 'timer-token', env.POST_RAG_TIMER_TOKEN || localEnv.POST_RAG_TIMER_TOKEN || ''),
     timeoutSeconds: positiveInt(getFlagValue(argv, 'timeout-seconds', env.HH_RAG_WORKER_TIMEOUT_SECONDS || ''), DEFAULT_RAG_WORKER_TIMEOUT_SECONDS),
     memorySizeMb: positiveInt(getFlagValue(argv, 'memory-mb', env.HH_RAG_WORKER_MEMORY_MB || ''), DEFAULT_RAG_WORKER_MEMORY_MB),
     ragCron: getFlagValue(argv, 'rag-cron', env.HH_POST_RAG_WORKER_CRON || DEFAULT_POST_RAG_CRON),

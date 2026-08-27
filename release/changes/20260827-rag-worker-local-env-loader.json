@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "changeId": "rag-worker-local-env-loader",
+  "actions": [
+    "configure-rag-workers"
+  ],
+  "cloudTargets": [
+    "post-rag-worker",
+    "post-video-rag-worker"
+  ],
+  "migrations": [],
+  "smokeSuites": [],
+  "releaseImpact": {
+    "cloudFunctions": "Reconcile the existing RAG worker and timer desired state using the operator-local timer credential already maintained for formal Tencent RAG releases.",
+    "adminWeb": "No runtime change.",
+    "miniprogram": "No runtime change.",
+    "environmentVariables": [
+      "Discover the existing POST_RAG_TIMER_TOKEN from ~/.happyhome/tencent-rag.env when it is not supplied explicitly; no new credential or value is introduced."
+    ],
+    "databaseMigrations": []
+  }
+}

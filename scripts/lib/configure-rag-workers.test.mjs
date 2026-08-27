@@ -1,11 +1,31 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import test from 'node:test'
 
 import {
   DEFAULT_RAG_WORKER_TIMEOUT_SECONDS,
   applyRagWorkerConfig,
   buildRagWorkerFunctionConfigs,
+  loadConfigureRagWorkersLocalEnv,
 } from '../configure-rag-workers.mjs'
+
+test('local RAG worker config loads the timer token from tencent-rag.env', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'happyhome-rag-worker-env-'))
+  try {
+    fs.mkdirSync(path.join(home, '.happyhome'))
+    fs.writeFileSync(path.join(home, '.happyhome', 'cam.env'), 'TCB_ENV=env-from-cam\n')
+    fs.writeFileSync(path.join(home, '.happyhome', 'tencent-rag.env'), 'POST_RAG_TIMER_TOKEN=timer-from-rag\n')
+
+    assert.deepEqual(loadConfigureRagWorkersLocalEnv(home), {
+      TCB_ENV: 'env-from-cam',
+      POST_RAG_TIMER_TOKEN: 'timer-from-rag',
+    })
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
 
 test('buildRagWorkerFunctionConfigs gives RAG workers enough time and scheduled triggers', () => {
   const configs = buildRagWorkerFunctionConfigs({
