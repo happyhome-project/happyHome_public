@@ -55,7 +55,8 @@ server.listen(0, '127.0.0.1', async () => {
           window.__HH_TEST_CHOOSE_AVATAR__ = true
         })
       },
-      expectedTexts: ['登录', '退出当前社区'],
+      expectedTexts: ['登录'],
+      unexpectedTexts: ['邀请好友加入社区', '退出当前社区'],
     })
     console.log('H5 profile smoke passed')
   } finally {
@@ -114,6 +115,11 @@ async function runProfileCase(browser, port, options) {
     for (const expectedText of options.expectedTexts) {
       if (!text.includes(expectedText)) {
         throw new Error(`${options.label}: expected text missing: ${expectedText}`)
+      }
+    }
+    for (const unexpectedText of options.unexpectedTexts || []) {
+      if (text.includes(unexpectedText)) {
+        throw new Error(`${options.label}: unexpected text present: ${unexpectedText}`)
       }
     }
     if (text.length < 40) {
