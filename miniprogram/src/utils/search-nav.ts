@@ -23,5 +23,9 @@ export function computeSearchNavMetrics(input: SearchNavMetricInput = {}): Searc
   const menuSpacerWidth = input.isH5 || !Number.isFinite(windowWidth) || !Number.isFinite(menuLeft)
     ? 0
     : Math.max(0, Math.round(windowWidth - menuLeft))
-  return { ...base, menuSpacerWidth }
+  return {
+    statusBarHeight: base.statusBarHeight,
+    navRowHeight: base.navRowHeight,
+    menuSpacerWidth,
+  }
 }
