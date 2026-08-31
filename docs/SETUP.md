@@ -16,11 +16,11 @@ happyHome/
 │   │   └── manifest.json       # AppID 等配置
 │   └── dist/build/mp-weixin/   # 编译输出（微信开发者工具导入此目录）
 ├── cloud/                # 云函数源码（TypeScript）
-│   ├── functions/        # 受 scripts/release-component-registry.mjs 治理的 12 个云函数
+│   ├── functions/        # 受 scripts/lib/release-component-registry.mjs 治理的 12 个云函数
 │   ├── lib/              # 共享适配层: db.ts, auth.ts, storage.ts
 │   ├── shared/types.ts   # 全项目共享的 TypeScript 类型定义
 │   ├── build.mjs         # esbuild 构建脚本
-│   └── dist/             # 构建输出（部署此目录下的内容）
+│   └── dist/             # 可变构建输出（不是正式发布的直接部署源）
 ├── admin-web/            # 管理后台 Web（Vue 3 + Vite + Element Plus）
 │   ├── src/
 │   │   ├── api/cloud.ts        # Admin API 调用封装
@@ -38,7 +38,7 @@ happyHome/
 └── package.json          # 根 workspace 配置
 ```
 
-正式及手工云函数部署都必须使用 `cloud/dist/`。先运行 `npm.cmd --workspace cloud run build`，不要从历史 `cloudfunctions/` 目录部署。
+`npm.cmd --workspace cloud run build` 生成可变的 `cloud/dist/`，供本地构建检查及已授权的组件级部署参考；不要从历史 `cloudfunctions/` 目录部署。正式发布由 prepare 将构建产物固化为 run-scoped immutable snapshot，publish 只部署经过摘要校验的 snapshot，不能直接部署可变 `dist`。组件命令也不授予生产权限；角色和完整证据要求见 [release gate](./release-gate.md)。
 
 `miniprogram-ci` 只用于显式请求的 `--use-ci` 小程序上传 fallback，不是正式发布的默认路径。跨组件正式发布必须遵循 [release gate](./release-gate.md)。
 
@@ -102,6 +102,8 @@ Test-Path -LiteralPath $featureWorktree  # 必须为 False
 退役只移除 worktree，始终保留它原来的本地功能分支，便于对应 branch owner 自行核对并推送。`--delete-merged-local-branch` 已禁用并会直接拒绝；工具中不存在触碰私有仓库路径的 branch deletion 路径。
 
 ### 功能 PR 与 Merge Queue 协作
+
+本节给出日常操作，强制边界以 [AGENTS.md](../AGENTS.md) 为准。关于为什么拆分 PR head 与队列组合验证、哪些门禁由 GitHub 强制，以及其他项目如何借鉴，见 [PR 机制设计说明](./github-pr-mechanism.md)。
 
 GitHub 上 PR 的 exact HEAD 是 push、CI、review 和合并状态的权威事实源。Webhook 只可加速通知，不是继续流程的前置门禁；不得等待 webhook，也不得因为 PR-control paused 或 `record-push` 尚未登记而重复空轮询。正常流程不需要集中轮询或 orphan watchdog，原功能 AI 负责自己的 PR 到终态。
 
