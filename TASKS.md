@@ -19,6 +19,18 @@ This is the single repository backlog for open, claimable work. Each item must s
 
 These remaining design questions are unassigned and unscheduled. Investigate when reproducing a semantic integration conflict or a local port collision; do not add a second DevTools lock without evidence that the existing lease is insufficient.
 
+## P1 - Make trusted workflow validation fail closed per command
+
+**Current evidence:** the 2026-08-31 review of `24f7f293241337487ed2b712cdde53f1a6f92be6` found that `.github/workflows/trusted-workflow-validator.yml` runs several native commands without checking each exit code and writes fixed `passed` values into its attestation. An early native-command failure can be masked by a later success; this is a source/exit-propagation finding, not evidence that a specific historical GitHub run falsely passed. See [PR mechanism review](./docs/github-pr-mechanism.md#8-本次复核发现的边界和待修项).
+
+**Claimable outcome:** under the independent trust-root review required by AGENTS, make every selected gate propagate failure and derive attestation outcomes from completed checks; test an injected failure at each command position and prove no successful attestation or apply is accepted. Do not let the candidate validator approve its own change, weaken required checks, or treat the current attestation alone as proof of all constituent tests. This item is unassigned; the documentation review does not authorize workflow or Ruleset changes.
+
+## P2 - Align legacy post-checkout preflight with public worktree roles
+
+**Current evidence:** `scripts/lib/worktree-policy.mjs` still defaults to the private `C:\Project\Claude\happyHome` path, and `scripts/worktree-preflight.mjs` uses it for post-checkout validation; public create/retire use the newer public operator checks. The old `integrate:pr` also imports that constant and remains prohibited by AGENTS for public collaboration.
+
+**Claimable outcome:** scope a public-worktree preflight fix with tests for public main, feature worktrees, private/unknown origins and operation failures; preserve the stronger production boundary and do not revive the private integration path. A post-checkout error must not be described as rolling back the Git checkout. Handle any integration trust-root changes through the separate authorized review path. No unrelated worktree or branch cleanup.
+
 ## P2 - Implement comments and likes
 
 **Current evidence:** the data model reserves space for comments and likes, but no end-to-end product flow is implemented.

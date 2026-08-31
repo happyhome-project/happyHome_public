@@ -2,15 +2,19 @@
 
 This is the canonical map for repository documentation. A document's category describes how it may be used; links do not promote a historical or supporting document into an authority.
 
-## Authority order
+## Authority by question
 
-When documents disagree, use this order:
+Facts and permission are different questions; do not put them on one precedence ladder.
 
-1. Executable code, tests, and checked-in configuration for implemented behavior.
-2. [AGENTS.md](../AGENTS.md) for mandatory PR, CI, worktree, and production boundaries.
-3. The canonical current or operational document named below for its subject.
-4. Supporting references.
-5. Historical records, including plans, specifications, change fragments, news snapshots, design drops, and documents explicitly marked deprecated or archived.
+| Question | Source of truth | Limit |
+|---|---|---|
+| What may this task do? | Applicable instructions and [AGENTS.md](../AGENTS.md), with the canonical runbook for the subject | An executable command or available credential does not grant permission. |
+| What is implemented? | Active code, tests, and checked-in configuration | Code can contain defects; test success proves only the selected assertions and inputs. |
+| What does GitHub enforce now? | Effective branch rules, Ruleset configuration, and exact-commit checks/reviews from GitHub | Workflow YAML alone does not make a check required; local hooks are not server enforcement. |
+| What is deployed and verified? | Production state, the identified release ledger, artifact identity, and dated runtime evidence described in [release gate](release-gate.md) | A merged PR, local build, or old smoke result is not fresh production verification. |
+| How should an operator proceed? | The canonical current or operational document below, within the permission boundary | If code and the runbook disagree, report the drift; do not silently relax a gate to match the code. |
+
+Supporting references explain mechanisms but do not override those authorities. Historical records (plans, specifications, change fragments, news snapshots, and design drops) preserve context, not current instructions. When facts conflict, revalidate the relevant source and correct its descriptive documentation; changing the policy itself requires the appropriate authorization.
 
 `README.md` is the project landing page, `CLAUDE.md` is the stable collaboration playbook, this file owns documentation classification, and `TASKS.md` is the only repository backlog. None of them should duplicate cross-component formal release orchestration, gates, or evidence.
 
@@ -24,7 +28,7 @@ When documents disagree, use this order:
 | `historical` | Point-in-time record. Never use as current instructions without revalidation. |
 | `generated` | Tool output. Non-authoritative and normally untracked. |
 
-Run `npm.cmd run docs:catalog` for the machine-readable catalog and `npm.cmd run docs:check` for required-entry and repository-relative link checks. The catalog forces explicit deprecated or archived headers to `historical` even if their path would otherwise be current.
+Run `npm.cmd run docs:catalog` for the machine-readable catalog and `npm.cmd run docs:check` for required-entry, historical-header, and repository-relative Markdown-target checks. These are structural checks, not a semantic review: they do not validate commands, non-Markdown code paths, URL availability, link anchors, authorization, or live production claims. The catalog forces explicit deprecated or archived headers to `historical` even if their path would otherwise be current.
 
 ## Current authorities
 
@@ -50,6 +54,7 @@ Run `npm.cmd run docs:catalog` for the machine-readable catalog and `npm.cmd run
 
 ## Supporting references
 
+- [GitHub PR mechanism: design and transferable lessons](github-pr-mechanism.md): first-principles model, enforcement boundaries, dated GitHub configuration, failure handling, and an adoption checklist; not a second operating policy.
 - [Mini-program pre-fetch](miniprogram-pre-fetch.md)
 - [UI click regression checklist](ui-click-regression-checklist.md)
 

@@ -202,7 +202,7 @@ Admin Web 在运行时调用 `auth.login`，并把后端返回的 session token 
 部署后至少检查：
 
 - 打开静态托管访问地址，浏览器页签显示 `社区后台`。
-- `/#/login` 可访问并可登录。
-- `/#/communities`、`/#/members/:communityId` 刷新不白屏。
+- 正式 Aliyun history 路由：`/login` 可访问并可登录；`/communities`、`/members/:communityId` 刷新不白屏。
+- CloudBase 备用部署若使用 `VITE_ROUTER_MODE=hash`：对应检查 `/#/login`、`/#/communities`、`/#/members/:communityId`。按实际构建的路由模式验收，不混用两组地址。
 - 社区列表、成员管理、板块管理、帖子管理都能打开并调用云端 `admin` HTTP 函数。
 - 退出登录或 token 失效时能回到登录页。
