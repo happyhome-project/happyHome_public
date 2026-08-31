@@ -1,6 +1,6 @@
 # Admin Web 云端部署
 
-> **职责边界：**本文只记录 Admin Web 组件自身的构建、主机和部署参考。跨组件正式发布的编排、强制门禁、证据和最终生产验证必须回到 [`release-gate.md`](./release-gate.md)；不能仅凭本文完成正式发布。
+> **职责边界：**本文只记录 Admin Web 组件自身的构建、主机和部署参考。跨组件正式发布的编排、强制门禁、证据和最终生产验证必须回到 [`release-gate.md`](./release-gate.md)；不能仅凭本文完成正式发布。任何 `deploy:admin-web` 调用都是生产变更，只能由 clean、已同步 canonical main 上的正式发布角色执行，功能 worktree 不得直接运行。
 
 Admin 控制台是 Vite + Vue 纯静态前端，构建产物位于 `admin-web/dist`。当前正式入口 `admin.tinghai.xin` 由阿里云香港服务器上的 Nginx 提供静态文件；腾讯云 CloudBase 静态网站托管只保留为备用入口。
 
@@ -93,6 +93,8 @@ curl -x http://127.0.0.1:7890 -I https://github.com
 
 ## 当前上线方式（正式入口）
 
+以下组件命令仅供正式发布角色使用；运行时校验 canonical-main 发布身份，不能作为功能开发中的手工部署捷径，也不能替代跨组件正式发布流程。
+
 ```powershell
 npm.cmd run deploy:admin-web
 ```
@@ -124,7 +126,7 @@ npm.cmd run deploy:admin-web
 
 ## CloudBase 静态托管备用入口
 
-如需部署备用 CloudBase 静态托管入口，必须显式指定：
+如需由正式发布角色部署备用 CloudBase 静态托管入口，必须显式指定：
 
 ```powershell
 $env:ADMIN_WEB_TARGET="cloudbase"
@@ -172,6 +174,7 @@ npm.cmd run deploy:admin-web
 
 ## 前置条件
 
+- 已满足 [`release-gate.md`](./release-gate.md) 的 canonical-main、正式发布和证据门禁。
 - 正式入口：本机 SSH 可登录 `ADMIN_WEB_SSH_HOST`，且该用户可 `sudo mkdir/tar/ln/nginx/systemctl`。
 - 备用 CloudBase 入口：腾讯云 CloudBase 环境已开通静态网站托管。
 - 备用 CloudBase 入口：本机 CloudBase CLI 已登录腾讯云账号；脚本通过 `npx.cmd --yes @cloudbase/cli ...` 调用 CLI。

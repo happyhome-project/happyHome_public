@@ -10,23 +10,24 @@ HappyHome 第一版审批提醒采用“Admin Web 待办中心 + 小程序订阅
 
 在微信公众平台进入：小程序后台 -> 功能 -> 订阅消息。
 
-也可以走 API 自动化。先发现当前小程序类目和可用模板标题：
+也可以走 API 自动化。`discover` 会读取 CloudBase 函数配置和微信平台；`add` 会创建模板并立刻写入 `member`、`community` 云函数环境变量。创建模板和写入函数环境变量都是生产配置变更，只能由获明确授权的 canonical-main 正式发布角色执行；不得在功能 worktree 用原始脚本绕过发布流程。
 
-```bash
-npm run configure:approval-templates -- discover
+先发现当前小程序类目和可用模板标题：
+
+```powershell
+npm.cmd run configure:approval-templates -- discover
 ```
 
 查看某个模板标题的关键词：
 
-```bash
-npm run configure:approval-templates -- discover --keywords-tid=模板标题ID
+```powershell
+npm.cmd run configure:approval-templates -- discover --keywords-tid=模板标题ID
 ```
 
 确认 `tid` 和 `kid` 后，可以直接添加到个人模板库并同步云函数 env：
 
-```bash
-npm run configure:approval-templates -- add ^
-  --member-tid=成员模板标题ID --member-kids=1,2,3 --member-map=communityName,action,time ^
+```powershell
+npm.cmd run configure:approval-templates -- add --member-tid=成员模板标题ID --member-kids=1,2,3 --member-map=communityName,action,time `
   --community-tid=社区模板标题ID --community-kids=1,2,3,4 --community-map=communityName,action,time,status
 ```
 
@@ -74,32 +75,21 @@ APPROVAL_MEMBER_JOIN_TEMPLATE_FIELDS={"communityName":"thing1","action":"thing2"
 APPROVAL_COMMUNITY_CREATE_TEMPLATE_FIELDS={"communityName":"thing1","action":"thing2","time":"time3","status":"phrase4"}
 ```
 
-同步到 CloudBase：
+只在已批准的正式发布操作中同步到 CloudBase：
 
-```bash
-npm run update:approval-env
+```powershell
+npm.cmd run update:approval-env
 ```
 
-同步后重新部署相关云函数：
+该命令仅更新现有函数的环境变量，不部署函数源码。若本次发布还含云函数代码，部署必须由正式发布流程编排；不要为了写入模板配置而运行原始 `deploy:cloud`。
 
-```bash
-npm run deploy:cloud -- --only=member,community
-```
+## 3. 小程序读取方式
 
-## 3. 小程序构建环境变量
+小程序不使用 `VITE_APPROVAL_*` 构建变量。它在运行时通过 `member.notificationConfig` 和 `member.notificationStatus` 读取云函数中已配置的模板，再调用 `wx.requestSubscribeMessage`。功能分支可以只做本地组件验证：
 
-小程序前端需要同样的模板 ID，才能调用 `wx.requestSubscribeMessage` 弹出授权面板：
-
-```env
-VITE_APPROVAL_MEMBER_JOIN_TEMPLATE_ID=成员加入申请模板ID
-VITE_APPROVAL_COMMUNITY_CREATE_TEMPLATE_ID=社区创建申请模板ID
-```
-
-配置后可在当前功能分支做组件级开发验证：
-
-```bash
-npm --workspace miniprogram run type-check
-npm --workspace miniprogram run build:mp-weixin
+```powershell
+npm.cmd --workspace miniprogram run type-check
+npm.cmd --workspace miniprogram run build:mp-weixin
 ```
 
 跨组件正式发布、上传、体验版选择和证据要求统一见 [`release-gate.md`](./release-gate.md)；本文只维护审批提醒配置与功能验收。
@@ -124,9 +114,8 @@ npm --workspace miniprogram run build:mp-weixin
 
 推荐第一版统一使用 `任务接收通知`，把两类审批都表达成“后台待办任务”：
 
-```bash
-npm run configure:approval-templates -- add ^
-  --member-tid=802 --member-kids=3,4,2,12 --member-map=communityName,action,time,status ^
+```powershell
+npm.cmd run configure:approval-templates -- add --member-tid=802 --member-kids=3,4,2,12 --member-map=communityName,action,time,status `
   --community-tid=802 --community-kids=3,4,2,12 --community-map=communityName,action,time,status
 ```
 

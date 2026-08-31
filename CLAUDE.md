@@ -5,7 +5,7 @@ This file describes stable day-to-day engineering habits. It does not override [
 ## Start a task
 
 1. Read [README.md](./README.md) and [AGENTS.md](./AGENTS.md).
-2. Run `npm.cmd run worktree:doctor` and report the repository root, branch, HEAD, and worktree status.
+2. Report the repository root, branch, HEAD, and worktree status. Run `npm.cmd run worktree:doctor` for an existing checkout when local diagnostics are needed; a successful `worktree:create` already performs doctor/bootstrap checks and does not need them repeated.
 3. Read only the task-relevant documents from the [documentation map](./docs/README.md).
 4. Check [TASKS.md](./TASKS.md) only when claiming or updating backlog work.
 5. Confirm scope and side effects before changing shared cloud state, deployment state, or user data.

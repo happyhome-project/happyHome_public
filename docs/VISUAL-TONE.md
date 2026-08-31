@@ -1,12 +1,10 @@
 # 美好 Home · 视觉调性锚点 ⚠️ 已废弃
 
 > ⚠️ **本文档描述 v1 木色橙方向，已于 2026-04-20 废弃。**
-> 2026-07-09 起，小程序 UI/UX 当前准则以 Figma 文件 `社区资源共享_小程序_0709_v2` 为准；`0626` 仅作为历史基线。
-> **Current authority:** 文档状态见 [`docs/README.md`](./README.md)，当前交互原则见 [`UX-PRINCIPLES.md`](./UX-PRINCIPLES.md)，实现值以 checked-in styles 和代码为准。
-> **Supporting reference:** 当前设计观察见 [`figma-mini-0626-inventory.md`](./figma-mini-0626-inventory.md)。
-> 执行参考：[docs/figma-mini-0626-inventory.md](./figma-mini-0626-inventory.md)
+> **Current authority:** 文档状态见 [`docs/README.md`](./README.md)，当前交互原则见 [`UX-PRINCIPLES.md`](./UX-PRINCIPLES.md)，实现值以 checked-in styles、页面代码和测试为准。
+> **Historical reference:** [`figma-mini-0626-inventory.md`](./figma-mini-0626-inventory.md) 是日期化的设计盘点，不是当前设计权威。若要使用命名的 Figma 文件，先重新核验其版本与访问上下文。
 > 下文关于“单栏卡片流”“不做双列瀑布流”“小红书只学语感”的判断均为历史判断，不再约束当前小程序 UI。
-> 代码里 `miniprogram/src/uni.scss` 的 `$hh-*` tokens 已更新为 v2。
+> 代码里 `miniprogram/src/uni.scss` 的 `$hh-*` tokens 以当前定义为准。
 > **不要按这里说的做。** 下文保留仅作历史参考。
 
 ---

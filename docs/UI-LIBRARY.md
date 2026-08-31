@@ -6,9 +6,9 @@
 > 回退原因：wot-design-uni 真机小程序兼容性差（wd-button/wd-cell click 不响应、styleIsolation:shared 污染其他页面）。
 > 回退记录：参考 commit `c6cefe / 4750ff` 系列及相关 Git 历史。
 >
-> **当前真相**：所有页面都用 `<button class="btn-primary">` / `<view class="card">` 等原生标签 + `miniprogram/src/uni.scss` 的 `$hh-*` tokens。
-> **代码权威源**：直接搜代码 `class="btn-` / `class="card"` 等，无 `wd-*` 残留。
-> **当前主色**：墨绿 `#3A6A45`（v2 Classical Dossier，**不是**下文提到的 v1 "木色橙"），见 [docs/DESIGN-TOKENS.md](./DESIGN-TOKENS.md) 顶部说明。
+> **当前真相**：当前页面模板使用 `<button class="btn-primary">` / `<view class="card">` 等原生标签 + `miniprogram/src/uni.scss` 的 `$hh-*` tokens；`wot-design-uni` 的依赖与 easycom 映射仍保留作兼容配置。
+> **代码权威源**：直接查看当前页面代码和 `miniprogram/src/uni.scss`。
+> **当前主色**：Figma 绿 `#3DAD7D`（**不是**下文提到的 v1 "木色橙"），见 [docs/DESIGN-TOKENS.md](./DESIGN-TOKENS.md) 顶部说明。
 
 ---
 
