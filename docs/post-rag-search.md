@@ -4,12 +4,13 @@
 
 ## 数据边界
 
-CloudBase 的当前业务数据是唯一事实来源。社区必须显式设置 `ragIndexPolicy`：
+CloudBase 的当前业务数据是唯一事实来源。社区的 `ragIndexPolicy` 决定检索范围：
 
 - `business`：正式业务数据，可进入普通用户检索。
 - `validation`：隔离的 RAG 验证数据，只能由签名 smoke 身份检索。
 - `excluded`：测试或非业务数据，必须清出索引。
-- 未设置策略：按 `excluded` 处理，直到发布后人工分类。
+- 新建社区以及普通改名会按名称自动分类：名称含汉字时为 `business`，否则为 `excluded`；`validation` 必须由管理员显式设置，且改名不会覆盖它。
+- 历史上未设置策略的数据视为未分类；在受控分类或更新流程写入有效策略前，不能进入检索。
 
 任何带 `fixtureKey` 的社区或帖子都会失败关闭，即使策略被误设为 `business` 也不能进入正式索引。帖子年龄不参与资格判断；旧帖子只要属于已分类业务社区且仍是当前有效内容，就可以被 reconcile。
 
@@ -49,7 +50,7 @@ CloudBase 的当前业务数据是唯一事实来源。社区必须显式设置 
 # 默认只读：查看所有已分类社区健康状态
 npm.cmd run rebuild:post-rag-index
 
-# 首次启用时显式分类；旧的、测试的社区应标为 excluded
+# 为历史数据或调整默认结果时显式分类；测试数据应标为 excluded
 npm.cmd run rebuild:post-rag-index -- --classify-community <communityId> --policy business
 
 # 为该社区所有当前帖子生成/覆盖一条同步状态

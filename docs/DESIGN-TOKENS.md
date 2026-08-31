@@ -1,11 +1,9 @@
 # 美好 Home · Design Tokens ⚠️ 已过时（描述 v1 木色橙）
 
 > ⚠️ **本文档描述 v1 木色橙 tokens，已于 2026-04-20 废弃。**
-> 当前 tokens 已升级为 **v2 Classical Dossier**（墨绿 + 三字体栈 + 暖灰白纸底）。
+> 当前 tokens 以 [`miniprogram/src/uni.scss`](../miniprogram/src/uni.scss) 为准；当前主色是 Figma 绿 `#3DAD7D`。
 > **Current authority:** 文档状态见 [`docs/README.md`](./README.md)，实现 token 以 [`miniprogram/src/uni.scss`](../miniprogram/src/uni.scss) 和当前代码为准。
-> 代码权威源：[miniprogram/src/uni.scss](../miniprogram/src/uni.scss)（已是 v2）
-> 设计与代码权威源：[miniprogram/src/uni.scss](../miniprogram/src/uni.scss)
-> **迁移状态**：$hh-color-* 等旧名保留为别名指向 v2 值，保证未重构页面不崩。具体对应见 uni.scss 第 130-150 行。
+> **迁移状态**：$hh-color-* 等旧名保留为别名指向当前值，保证未重构页面不崩；具体对应以 `uni.scss` 中的兼容别名定义为准。
 
 ---
 

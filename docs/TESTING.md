@@ -12,9 +12,9 @@
 `lib/db.local.ts` 内存数据库适配器方案，与云端真测是互补关系，不是二选一：
 
 1. 本地内存适配器：快，适合高频验证业务流正确性。
-2. 云端测试环境：慢但真实，适合发布前验收与回归。
+2. 云端测试环境：慢但真实，适合获授权的验收与回归；它不是正式发布门禁的替代品。
 
-推荐组合：日常开发先跑本地层，合并前再跑云端层。
+推荐组合：日常开发先跑本地层；需要共享环境证据时，再按本节权限和 fixture 约束运行云端层。
 
 ## 分层测试模型
 
@@ -38,14 +38,18 @@
 
 ### L3：云端验收测试
 
-- 方式：通过 HTTP 调用部署在 CloudBase 上的 admin 云函数
+- 方式：通过 HTTP 调用已部署在 CloudBase 上的 admin 云函数
 - 覆盖：
-  - Admin HTTP 鉴权（Bearer token）
+  - Admin HTTP session 鉴权（测试会以 `auth.login` 获取 session token）
   - action 路由正确性
   - 板块 CRUD（创建、查询、更新 widgets、删除）
   - 成员审批查询
-- 运行：`cd cloud && CLOUD_API_URL=https://xxx.app.tcloudbase.com ADMIN_TOKEN=xxx npm run test:cloud`
-- 可选：`TEST_COMMUNITY_ID=xxx` 启用板块/成员 CRUD 测试
+- 凭据：优先 `TEST_ADMIN_USERNAME` + `TEST_ADMIN_PASSWORD`，也可传入 `TEST_ADMIN_SESSION_TOKEN`。`ADMIN_TOKEN` 仅在云函数显式开启 `ADMIN_LEGACY_TOKEN_FALLBACK=1` 时兼容。
+- 可选：`TEST_COMMUNITY_ID=xxx` 启用板块/成员 CRUD 测试；必须是获授权的隔离 fixture 社区，不得指向真实业务社区。
+
+### 共享环境写入边界
+
+L3 或其他 fixture-write 测试可以由获授权的验证操作者执行，不要求一律由发布角色接管；但必须先取得 validation lease，使用唯一 fixture 标识，并在结束时独立确认清理成功。云函数部署、生产环境变量/索引/触发器修改、小程序上传和正式发布仍只属于 canonical-main 正式发布角色。缺少 `CLOUD_API_URL` 时 L3 会跳过，不能报告为云端验收通过。
 
 ## 为什么必须 L2 + L3 组合
 
@@ -61,24 +65,30 @@
 
 ## 命令速查
 
-```bash
-cd cloud
+从仓库根目录运行：
+
+```powershell
 
 # L1 单元测试（mock 一切，最快）
-npm run test:unit
+npm.cmd --workspace cloud run test:unit
 
 # L2 本地集成测试（内存 db，真实业务流）
-npm run test:integration
+npm.cmd --workspace cloud run test:integration
 
 # L1 + L2 一起跑（默认 npm test）
-npm test
+npm.cmd --workspace cloud test
 
-# L3 云端验收（需要配置环境变量）
-CLOUD_API_URL=https://<env>.ap-shanghai.app.tcloudbase.com \
-ADMIN_TOKEN=your_token \
-TEST_COMMUNITY_ID=xxx \
-npm run test:cloud
+# L3 云端验收：仅在已获授权且 fixture 已隔离时执行
+$env:CLOUD_API_URL = 'https://<env>.ap-shanghai.app.tcloudbase.com'
+$env:TEST_ADMIN_USERNAME = '...'
+$env:TEST_ADMIN_PASSWORD = '...'
+$env:TEST_COMMUNITY_ID = '<isolated-fixture-community-id>'
+$env:HAPPYHOME_FIXTURE_PREFIX = '<unique-run-prefix>'
+npm.cmd run validation:lease:status
+npm.cmd run env:run -- --profile=fixture-write -- cmd.exe /d /c npm.cmd --workspace cloud run test:cloud
 ```
+
+该包装命令持有 validation lease；`HAPPYHOME_FIXTURE_PREFIX` 是操作者的隔离声明，并不会替测试自动建立社区或清理数据。测试结束后仍须核对 fixture 社区内的遗留数据，不能只以 Jest 退出码推断清理成功。
 
 ## 文件结构
 
@@ -111,7 +121,7 @@ cloud/
 
 1. 开发中：`L1 + L2`
 2. 提交前：至少跑一次 `L2`
-3. 合并前/发布前：跑 `L3`
+3. 需要共享环境证据时：按本节 lease、fixture 与清理要求跑 `L3`；正式发布仍以 `release-gate.md` 为准
 4. 线上事故复盘：先补 `L1/L2` 用例，再补 `L3` 回归场景
 
 ## 验收标准
@@ -125,13 +135,13 @@ cloud/
 
 ## L3 云端测试前置条件
 
-1. admin 函数已部署为 HTTP 类型（参考 `docs/cloudbase-http-access.md`）
-2. 函数环境变量 `ADMIN_TOKEN` 已设置
-3. 至少有一个 active 状态的社区（用于 `TEST_COMMUNITY_ID`）
+1. admin 函数已经提供 HTTP 访问；本测试不会部署或改变函数配置
+2. 已提供有效的测试管理员凭据或 session；`ADMIN_TOKEN` 仅适用于显式启用的 legacy fallback
+3. validation lease 已取得，且 `TEST_COMMUNITY_ID` 是获授权的 active fixture 社区；写入后须确认清理
 
 ## RAG 生产验收
 
-正式发布流程不运行本节测试，也不运行 RAG timer 证明、reconcile、回填或语义评测。只有发布完成后，RAG 负责人才能在隔离的 `validation` 社区中执行下列闭环。
+正式发布流程不运行本节测试，也不运行 RAG timer 证明、reconcile、回填或语义评测。只有发布完成后，RAG 负责人才能在隔离的 `validation` 社区中执行下列闭环；该 fixture-write 也必须先取得 validation lease 并确认清理。
 
 `post.search` 的正式 RAG 验收不能只靠 mock。使用下面的命令创建隔离社区、板块和帖子，定向运行 `post-rag-worker`，再以真实 `post.search` 查询验证回答、引用和帖子跳转；成功和失败路径都会删除临时数据：
 

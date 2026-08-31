@@ -134,6 +134,7 @@ Hard release labels:
 - `HH_CLOUD_INVOKE_SMOKE_COLLABORATION_TEMPLATE`
 - `HH_CLOUD_INVOKE_SMOKE_POST`
 - `HH_CLOUD_INVOKE_SMOKE_HTTP_GATEWAY`
+- `HH_CLOUD_INVOKE_SMOKE_HOME_PREFETCH`
 - `HH_CLOUD_INVOKE_SMOKE_WECHAT_AUDIT_CALLBACK`
 - `HH_CLOUD_INVOKE_SMOKE_ADMIN_FIXTURE`
 - `HH_CLOUD_LOG_CAPTURE_POST`
@@ -162,12 +163,12 @@ As defined in [RAG Release Boundary](#rag-release-boundary), default formal clou
 
 ## Version Visibility
 
-- Login page must show the build version so testers can identify the opened build immediately.
-- Profile/detail version text is optional. It can be added during debug and removed later for visual quality.
+- The logged-out profile must expose the compiled build version through `data-build-version`, without visible version text or developer diagnostics. It must have exactly one visible login identity entry, as required by the six-label release UI gate above.
+- Identify the tested/uploaded build from the compiled package identity, pinned UI evidence, release ledger, and upload receipt. A visible debug label or the source marker alone is not package identity proof.
 
 ## After Upload
 
-- Verify `miniprogram/src/generated/build-info.ts` and `mp-upload-info.json`.
+- Verify the uploaded package identity and `mp-upload-info.json` against the pinned run's version, description, package digest, and receipt. Formal success restores `miniprogram/src/generated/build-info.ts` to tracked `HEAD` bytes after ownership verification; that restored source file is not expected to retain the uploaded version.
 - Verify the completed release from the canonical main workspace:
 
 ```powershell
@@ -181,6 +182,8 @@ The remote production state shown by the lock status must match the exact run ID
 ```powershell
 npm.cmd run release:reconcile -- --run-id=$runId
 ```
+
+Read stage status in the context of the run's DAG mode. DAG V2 records cloud work in `cloud-deploy-rag-bootstrap` and `cloud-deploy-remaining`; the legacy umbrella `cloud-deploy` entry may remain `pending` in a completed V2 run. This is not a reason to redeploy by itself. Confirm the active DAG stages, per-component evidence, overall ledger result, and remote production state; a failed or incomplete active stage still blocks success.
 
 The one-time `global-collaboration-templates` production data transition is complete. Its repository migration command and executor were retired after verification; future releases have no global-collaboration data migration step. Historical design and implementation records remain under `docs/superpowers/` and Git history.
 

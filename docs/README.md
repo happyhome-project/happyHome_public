@@ -55,6 +55,7 @@ Run `npm.cmd run docs:catalog` for the machine-readable catalog and `npm.cmd run
 
 ## Historical and delivery records
 
+- [2026-08-31 project reconciliation](changes/2026-08-31-project-reconciliation.md): product/engineering inventory, verified release snapshot, open work, and documentation review scope; not a live status dashboard.
 - [2026-07-12 full-current public-main release](releases/2026-07-12-full-current-public-main.md): verified release identity and outcome; not an operational instruction.
 - [Figma 0626/0709 inventory](figma-mini-0626-inventory.md) and [Figma 0710 visual QA](../design-qa.md): dated design evidence, not current implementation authority.
 - [CloudBase HTTP access notes](cloudbase-http-access.md): superseded deployment and fixed-token notes retained only for traceability.

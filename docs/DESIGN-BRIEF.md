@@ -1,12 +1,10 @@
 # 美好 Home · 设计交接简报 ⚠️ 已过时
 
 > ⚠️ **本文档是 v1 木色橙方向的简报，已于 2026-04-20 废弃。**
-> 2026-07-09 起，小程序 UI/UX 当前准则以 Figma 文件 `社区资源共享_小程序_0709_v2` 为准；`0626` 仅作为历史基线。
-> **Current authority:** 文档状态见 [`docs/README.md`](./README.md)，当前交互原则见 [`UX-PRINCIPLES.md`](./UX-PRINCIPLES.md)，实现值以 checked-in styles 和代码为准。
-> **Supporting reference:** 当前设计观察见 [`figma-mini-0626-inventory.md`](./figma-mini-0626-inventory.md)。
-> 执行参考：[docs/figma-mini-0626-inventory.md](./figma-mini-0626-inventory.md)
+> **Current authority:** 文档状态见 [`docs/README.md`](./README.md)，当前交互原则见 [`UX-PRINCIPLES.md`](./UX-PRINCIPLES.md)，实现值以 checked-in styles、页面代码和测试为准。
+> **Historical reference:** [`figma-mini-0626-inventory.md`](./figma-mini-0626-inventory.md) 是日期化的设计盘点，不是当前设计权威。若要使用命名的 Figma 文件，先重新核验其版本与访问上下文。
 > 下文关于“单列卡片流”“不做双列瀑布流”等结论均为历史判断，不再作为当前小程序实现依据。
-> 当前实现状态以代码、关联 PR 和 [figma-mini-0626-inventory.md](./figma-mini-0626-inventory.md) 为准。
+> 当前实现状态以代码和测试为准。
 
 ---
 

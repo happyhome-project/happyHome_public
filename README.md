@@ -4,10 +4,13 @@ HappyHome is a WeChat mini-program community product with a Vue admin site and C
 
 ## Components
 
-- `miniprogram/`: uni-app / Vue 3 mini-program client.
-- `admin-web/`: Vue 3 management site.
-- `cloud/`: CloudBase functions and shared business libraries.
+- `miniprogram/`: uni-app / Vue 3 client for community browsing, topic/archive feeds, search, media/text posts, collaboration, and member/profile flows.
+- `admin-web/`: Vue 3 management site with separate super-admin and community-admin routes for communities, content, members, moderation, and configuration.
+- `cloud/`: CloudBase functions and shared business libraries for those flows, approval notifications, WeChat media-audit callbacks, and formal-post RAG.
 - `scripts/`: verification, worktree, integration, and release tooling.
+- `wechat-ops/`: separate official analytics/customer-service utilities; not a mini-program publishing path.
+
+These are implemented surfaces, not a claim that every journey has current production acceptance evidence. Comments/likes remain open work in `TASKS.md`; formal publication does not certify RAG retrieval quality or select the uploaded development build as the WeChat trial version.
 
 ## Start here
 
