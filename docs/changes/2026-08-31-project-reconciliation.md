@@ -54,9 +54,9 @@ HappyHome 是面向社区的微信小程序产品，包含管理站点、CloudBa
 |---|---|
 | 就地更新现行入口 | `README.md` 补模块与验收边界；`CLAUDE.md` 不再要求成功创建 worktree 后重复 doctor/bootstrap；`TASKS.md` 移除已落地锁的讨论并列出依赖分流目标 |
 | 就地更新运维 | `docs/release-gate.md` 对齐非视觉版本身份、源码 marker 恢复、HOME_PREFETCH smoke 标签、V2 stage 解读；`post-rag-search.md` 对齐社区自动策略；`approval-notifications.md` 对齐模板来源与生产配置权限；`TESTING.md` 对齐真实认证和共享云测试边界；`admin-web-deploy.md` 补部署角色边界 |
-| 就地更新前端说明 | `docs/UX-PRINCIPLES.md` 对齐主色、发布导航、前后端防重复职责；`admin-web/README.md` 补角色能力 |
+| 就地更新前端说明 | `docs/UX-PRINCIPLES.md` 对齐主色、发布导航、前后端防重复职责；管理端角色能力概览放在根 README 和本文，不重复扩写组件 README |
 | 历史正文保留，仅纠正页首指路 | `docs/DESIGN-BRIEF.md`、`DESIGN-TOKENS.md`、`UI-LIBRARY.md`、`VISUAL-TONE.md` 不再把过时设计断言包装成当前权威 |
-| 核对后不改 | `AGENTS.md`、`PRODUCT.md`、`design-qa.md`；`docs/SETUP.md`、`TESTING-PRINCIPLES.md`、`h5-preview-runbook.md`、`miniprogram-pre-fetch.md`、`ui-click-regression-checklist.md`、`figma-mini-0626-inventory.md`、`adversarial-testing-prep.md`、`cloudbase-http-access.md`、`NOTES.md`；`wechat-ops/README.md`、`scripts/h5-test/README.md` |
+| 核对后不改 | `AGENTS.md`、`PRODUCT.md`、`design-qa.md`；`docs/SETUP.md`、`TESTING-PRINCIPLES.md`、`h5-preview-runbook.md`、`miniprogram-pre-fetch.md`、`ui-click-regression-checklist.md`、`figma-mini-0626-inventory.md`、`adversarial-testing-prep.md`、`cloudbase-http-access.md`、`NOTES.md`；`admin-web/README.md`、`wechat-ops/README.md`、`scripts/h5-test/README.md` |
 | 索引 | `docs/README.md` 加本次历史快照入口；不增设第二份 backlog 或发布规范 |
 
 规则核对：本仓库要求 `AGENTS.md` 是实体文件，`CLAUDE.md` 明确从属且承担不同职责，因此保持两者，不套用通用软链接模板。Git 身份、共享 hooks、必需文档、敏感文件 ignore 与现有链接检查已核对；未修改全局配置。Codex 机器生成记忆库不是可手改的项目文档，本次未重写；没有创建新的 memory/skill 副本来重复上述事实。
@@ -66,3 +66,5 @@ HappyHome 是面向社区的微信小程序产品，包含管理站点、CloudBa
 文档结构/链接检查与文档策略测试用于这次纯文档变更；PR 的 exact-HEAD CI 和 Merge Queue 仍独立负责集成门禁。既有 smoke/上传证据只说明上面的指定 run；本次整理不改变业务代码、workflow、生产配置、数据库、部署产物或 release watcher 状态。
 
 本地 `docs:check` 无缺失、断链或历史头问题；`node --test scripts/lib/docs-policy.test.mjs` 为 26/26 通过。新版 L3 命令只用 `profile=read` 与 `--listTests --runInBand` 验证测试发现路径，未执行云端测试。依赖审计返回非零漏洞结果，未把它报告为安全检查通过。
+
+现有发布规划器把 `admin-web/README.md` 也计入组件变更，因此没有保留该文件的可选扩写；本文不借文档整理修改发布分类代码。

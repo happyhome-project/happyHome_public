@@ -1,6 +1,6 @@
 # HappyHome Admin Web
 
-The Admin Web workspace is the Vue 3 and Element Plus management UI. Super-admin screens cover approvals, disabled communities, administrator accounts, content audit, guest onboarding configuration, and collaboration templates. Community-admin screens cover communities, sections, archive topics, widgets, members, posts, and community settings.
+The Admin Web workspace is the Vue 3 and Element Plus management UI for community approval, configuration, moderation, members, sections, widgets, and posts.
 
 ## Local development
 
@@ -21,6 +21,5 @@ Do not commit credentials or environment-specific values. See [project setup](..
 - `src/main.ts`: application bootstrap.
 - `src/router/index.ts`: routes and role guards.
 - `src/api/cloud.ts`: CloudBase HTTP client.
-- `src/views/SuperAdmin/`: system-wide approval, moderation, account, onboarding, and collaboration-template screens.
-- `src/views/CommunityAdmin/`: community, section, topic, member, post, and settings screens.
-- `src/components/`: shared media, rich-note, topic, location, and widget editors.
+- `src/views/`: super-admin and community-admin screens.
+- `src/components/`: shared editors and management UI.
